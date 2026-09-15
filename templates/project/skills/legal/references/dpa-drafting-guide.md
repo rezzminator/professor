@@ -1,6 +1,6 @@
 # DPA Drafting Guide (Art. 28)
 
-> {PROJECT_NAME} house guide for writing a controller–processor Data Processing Agreement (GDPR Art. 28 / {JURISDICTION} equivalent term) that survives counsel review and a regulator. Load before drafting or revising any DPA. Assists legal workflow — not legal advice; verify every cited provision against the primary source per the pre-delivery self-check. The worked example that follows every rule here is `docs/business/compliance/documents/clients/{example-client}/dpa-processor-agreement.md`.
+> {PROJECT_NAME} house guide for writing a controller–processor Data Processing Agreement (GDPR Art. 28 / {JURISDICTION} equivalent term) that survives counsel review and a regulator. Load before drafting or revising any DPA. Assists legal workflow — not legal advice; verify every cited provision against the primary source per the pre-delivery self-check. The worked example that follows every rule here is `docs/epics/legal/instruments/dpa-processor-agreement.md`.
 
 ---
 
@@ -115,7 +115,7 @@ Plus the standalone duty (Art. 28(3) final sub-paragraph): the processor **immed
 - **Irish DPC** — _A Practical Guide to Controller-Processor Contracts_ (downloadable PDF).
 - **EDPB Guidelines 07/2020** — the controller/processor concepts + the "don't restate the GDPR" rule.
 - **Public real-world DPAs** for tone/structure: HubSpot DPA; activeMind.legal and Juro free templates.
-- **Internal worked example:** `docs/business/compliance/documents/clients/{example-client}/dpa-processor-agreement.md` (Art. 28 + NZ IPP-12, honesty rule applied, processor-not-storage retention, s 11 agency model).
+- **Internal worked example:** `docs/epics/legal/instruments/dpa-processor-agreement.md` (Art. 28 + NZ IPP-12, honesty rule applied, processor-not-storage retention, s 11 agency model).
 
 ---
 

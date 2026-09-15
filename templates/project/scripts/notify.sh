@@ -34,9 +34,8 @@ case "${1:-stop}" in
     [ -f "$STAMP" ] || date +%s > "$STAMP"
     ;;
   stop)
-    # Stop — close the /km and /pfm edit gates (km-guard.sh, pfm-guard.sh) at turn end
+    # Stop — close the /pfm edit gate (pfm-guard.sh) at turn end
     ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
-    rm -f "${ROOT:-.}/tmp/professor_km_active"
     rm -f "${ROOT:-.}/tmp/professor_pfm_active"
     # Hook JSON arrives on stdin (session_id, transcript_path, cwd, ...).
     # Tolerate it missing — manual invocations have no stdin payload.

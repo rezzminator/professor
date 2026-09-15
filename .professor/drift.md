@@ -392,6 +392,11 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   `codex/skills/wave-builder/SKILL.md`, and the three reference docs with no successor (`gitter-history.md`,
   `debug-discipline.md`, `build-reference.md`).
 
+  (2026-09-15): `role-wrapper.md` and `qa-wrapper.md` — the two agent templates this REMAP renamed keys for — are
+  removed from the shipped templates entirely, along with `mono-architect.md`, `mono-documenter.md`, `mono-
+  planner.md`, `rndier.md`, `km.md`, `pm.md`, `documenter/archive.md`, `audit/ai-output.md`, and `km-guard.sh`. Their
+  `templates/refresh-map.json` entries are dropped in the same pass.
+
 - Local: `.codex/skills/deep-rr` untracked (`git rm --cached`) and ignored in `.gitignore` beside the `.claude/skills/` rule it mirrors. It was a tracked symlink into `.claude/skills/deep-rr`, a tree `.gitignore` has always ignored by design (source-fetched skills are never vendored — each carries its own upstream LICENSE the leak gate refuses), so the link resolved in this working copy and in no clone. `compileRepoSkills` (`pfm/internal/codexgen/compiler.go`) recreates it from whatever `.claude/skills/` holds on every `pfm codex build`, so nothing needs it in the index; the repo's own `.gitignore` comment already stated the law — "skill symlinks stay untracked like `.codex/skills/`" — while the index contradicted it. It had broken three gates in three different voices; the new tracked-symlink reconcile in `check-codex-markers.mjs` (release queue) names the next one on sight. Verified: the gate reported `UNTRACKED-TARGET .codex/skills/deep-rr` before the untrack and `1 tracked symlink(s) resolve to tracked targets` after — the survivor being `engines/wave-walker/engine/dist/active-workflow.js -> workflow.js`, whose target IS tracked.
 
 - **KEEP-LOCAL: output styles are retired, and their absence is asserted rather than assumed (user-ordered).**
@@ -465,3 +470,11 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
 - Local: the repository's GitHub owner is `rezzminator` (renamed from `mreza0100`, which GitHub redirects): `/pfm:release` Constants and Pre-flight name `rezzminator/professor`, `.professor/manifest.json` records it as `installed_from.repo`, and `scripts/leak-check.sh` keeps `mreza0100` as a benign token only because historical release notes still quote it.
 - Local: `.claude/scripts/dev.sh verify pfm` runs CI's gofmt check between `go vet` and the architecture ratchet (`gofmt_clean`: exit 1 names each unformatted file, exit 2 says gofmt could not run and nothing was checked). gofmt's output differs across Go releases, and a host Go newer than `go.mod`'s pin called `pfm/internal/ask/ask_test.go` clean three times while CI's pinned Go refused it; through `iso` the fence gives CI's verdict. The adopter `dev.sh` has no pinned-toolchain fence, so no template twin.
 - Local: `.claude/scripts/build-opencode.mjs` mirrors the root `LICENSE` and `SECURITY.md` as byte copies into `.opencode/` (claimable by name, no marker; `check` reports them STALE/MISSING; a missing root source is a note); `scripts/leak-check.sh` excludes the LICENSE copy exactly as it excludes the root file. The HOL AI Plugin Scanner scores `.opencode/` as a package of its own and reads LICENSE without following symlinks, so the mirror lost 6 points for files one directory up. Repo-only: the compiler ships to no adopter, so no template twin.
+- Local (2026-09-15): the adopter's framework change manager ships as `/pcm` (`templates/project/commands/pcm.md`,
+  audit scopes inline) and `/pfm` ships as the CLI guide; the machine-global commands (`quality/prompt`,
+  `context-meter`, `md-forlint`, `wave/ccc`) now point at `/pcm`. THIS repo's own manager is still
+  `.claude/commands/pcm.md` too (renamed the same day); `/pfm:release` stays this repo's local publish
+  subcommand under `docs/commands/pfm/references/`, and `docs/commands/pcm/references/` carries the manager's cards.
+- Local (2026-09-15): `.claude/agents/{tracer,scheduler}.md` and `.claude/commands/{quality,wave}/*.md` are rewired
+  local variants of their machine-global originals (this repo's anchors: `templates/**` in trace scope, placeholder
+  hops, the dev/qa/gitter cast) — kept as files, not symlinks; root `CLAUDE.md` § Repo structure names the exception.

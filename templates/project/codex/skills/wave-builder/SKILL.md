@@ -1,6 +1,6 @@
 ---
 name: wave-builder
-description: ORCHESTRATOR-ONLY — the {PROJECT_NAME} builder lane for Codex; acts only on an injected turn naming a wave BRIEF ("/wave:builder {path}", a "Use the wave-builder skill" turn carrying BRIEF {path}, or an orchestrator dispatch). Maps Codex mechanics onto the binding /wave:builder protocol; predecessor /wave:orchestrator, gate qa-{project} PRE-MERGE.
+description: ORCHESTRATOR-ONLY — the {PROJECT_NAME} builder lane for Codex; acts only on an injected turn naming a wave BRIEF ("/wave:builder {path}", a "Use the wave-builder skill" turn carrying BRIEF {path}, or an orchestrator dispatch). Maps Codex mechanics onto the binding /wave:builder protocol; predecessor /wave:orchestrator, gate {project}-qa PRE-MERGE.
 ---
 
 <!--
@@ -16,7 +16,7 @@ belongs in `.claude/`, not here.
 
 # Codex Wave Builder — lane dialect card
 
-**Binding protocol:** read `$HOME/.claude/commands/wave/builder.md` § Orchestrated mode FIRST — `pfm install` links that machine-global original, and every rule there binds you. This card ONLY maps Claude-harness mechanics onto the Codex harness. The compiled root `AGENTS.md` carries the project's MANDATORY rules in full, including: never edit code on `main`, only gitter runs git, never swallow exceptions, surgical changes, and the guarded paths (`.claude/**`, any `CLAUDE.md`, `{AI_PROJECT}/knowledge/**`) are stop-and-ping, never an edit.
+**Binding protocol:** read `$HOME/.claude/commands/wave/builder.md` § Orchestrated mode FIRST — `pfm install` links that machine-global original, and every rule there binds you. This card ONLY maps Claude-harness mechanics onto the Codex harness. The compiled root `AGENTS.md` carries the project's MANDATORY rules in full, including: never edit code on `main`, only gitter runs git, never swallow exceptions, surgical changes, and the guarded paths (`.claude/**`, any `CLAUDE.md`) are stop-and-ping, never an edit.
 
 ## Toolset (read at its source)
 
@@ -46,9 +46,9 @@ Repo law is enforced at two layers — the kernel sandbox (workspace-write, the 
 
 5. **Compact** — the orchestrator may send `/compact`; it is native in your TUI. After any compact, re-read this card and the current BRIEF before acting.
 
-6. **End-of-wave GATE-1** — dispatch the registered `qa-{project}` role in PRE-MERGE mode (full suite, zero tolerance, filtered + timed per Toolset). It writes `$WAVES/{wave}/gate1.md` and stamps the verdict `Executor: codex-subagent/qa_{project}`. A missing registered QA role is a gate failure, never an inline substitute.
+6. **End-of-wave GATE-1** — dispatch the registered `{project}-qa` role in PRE-MERGE mode (full suite, zero tolerance, filtered + timed per Toolset). It writes `$WAVES/{wave}/gate1.md` and stamps the verdict `Executor: codex-subagent/qa_{project}`. A missing registered QA role is a gate failure, never an inline substitute.
 
-7. **Boundary mode** — GATE-2 suites + teardown are shell and therefore yours, exactly per builder.md § Boundary duties. The walker launch is NOT yours (no Workflow tool): ping `walker-launch request {report path}` and the orchestrator launches it. You never commit — that stays with registered gitter.
+7. **Boundary mode** — GATE-2 suites + teardown are shell and therefore yours, exactly per builder.md § Boundary duties. The wave walk is NOT yours: the orchestrator runs `/wave:walker` where its census needs it. You never commit — that stays with registered gitter.
 
 8. **Report cards** — identical, no adaptation: `$TASKS/task-{n}-report.md` per the BRIEF's env card, fixed headers, ≤1KB, `Expected:` / `Got:` deviations.
 

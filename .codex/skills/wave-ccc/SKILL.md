@@ -17,7 +17,7 @@ On arrival run the full audit (below) and report it. A train still running: hold
 
 1. **Verify** — accept a claim (DONE, green, fixed) only after the artifact checks out against the tree: the diff, the gate log, the fence proof line. A seat's assertion is evidence, never truth.
 2. **Rule** — an escalation that is scope-allocation inside the approved train is ruled here and logged as one ledger line. A user-only decision — publication, scope beyond the train, spend — goes to the user, opening with why it is theirs.
-3. **Dispatch** — instructions travel through the orchestrating seat, never to the builder directly; git writes only via `gitter`; guarded files (`.claude/**`, any `CLAUDE.md`, `templates/**`) via `$pfm`.
+3. **Dispatch** — instructions travel through the orchestrating seat, never to the builder directly; git writes only via `gitter`; guarded files (`.claude/**`, any `CLAUDE.md`, `templates/**`) via `/pfm`.
 4. **Re-audit** — re-run any audit piece when evidence smells; findings are defects to route, never fixes to make by hand.
 
 ## The audit, piece by piece

@@ -6,12 +6,6 @@ node_modules/
 .env.*
 !.env.example
 /tmp/
-engines/wave-walker/engine/tmp/
-# Reproducible cross-runtime candidates are rebuilt locally. The immutable
-# legacy bundle and the explicit active pointer remain tracked release inputs.
-engines/wave-walker/engine/dist/cross-workflow/
-engines/wave-walker/engine/headless-equivalence-input.json
-engines/wave-walker/engine/runtime-smoke-input.json
 .worktrees/
 # Source-fetched skills are cloned at install from their own public repos
 # (templates/skills/sources.json) and are NEVER vendored here: a

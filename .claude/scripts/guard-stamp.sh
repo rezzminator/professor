@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Session-keyed guard-marker maintenance (pfm/km gates).
+# Session-keyed guard-marker maintenance (pfm gate).
 #   read (default) — PostToolUse(Read): stamps this session's quality marker when
 #                    .claude/commands/quality/prompt.md is read, making the
 #                    mandatory /quality:prompt load deterministic, not advisory.
@@ -18,7 +18,7 @@ SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 reap() {
   local root="$1" now
   now=$(date +%s)
-  for m in "$root"/tmp/professor_pfm_active* "$root"/tmp/professor_km_active* "$root"/tmp/professor_quality_loaded*; do
+  for m in "$root"/tmp/professor_pfm_active* "$root"/tmp/professor_quality_loaded*; do
     [[ -f "$m" ]] || continue
     local age=$(( now - $(cat "$m" 2>/dev/null || echo 0) ))
     (( age > 3600 )) && rm -f "$m"

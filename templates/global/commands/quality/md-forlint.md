@@ -102,4 +102,4 @@ Step 3 is the one that matters. A merged sentinel fails loudly; a dissolved untr
 
 ## Changing the policy
 
-`.rumdl.toml` is a prompt-adjacent framework file: it routes through `/pfm`, and its twin ships as `templates/project/rumdl-policy.toml` (scaffolded to an adopter's `.rumdl.toml`; the shipped copy must NOT be named `rumdl.toml`, a name rumdl discovers as the governing config for everything beneath it). Every added or removed rule arrives with the three numbers from `audit` — bytes, lines, word-damage — and the control file that proves the new rule fires.
+`.rumdl.toml` is a prompt-adjacent framework file: it routes through `/pcm`, and its twin ships as `templates/project/rumdl-policy.toml` (scaffolded to an adopter's `.rumdl.toml`; the shipped copy must NOT be named `rumdl.toml`, a name rumdl discovers as the governing config for everything beneath it). Every added or removed rule arrives with the three numbers from `audit` — bytes, lines, word-damage — and the control file that proves the new rule fires.

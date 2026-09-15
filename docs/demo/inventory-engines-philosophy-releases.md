@@ -2,6 +2,8 @@
 
 Tracer report, 2026-09-13, HEAD `00da35b5`. Raw map, no verdicts. Telemetry: 4 tracer threads dispatched → 4 received.
 
+Since this pass: `engines/` is `workflows/`, and the `wave-walker` engine (§ (1) below) is retired — `/wave:walker` now dispatches the `tracer` and `reviewer` agents and folds their reports; only `workflows/deep-rr/` remains. § (1)'s wave-walker map describes the retired engine as it was at this HEAD.
+
 ## (1) Engines
 
 ### `engines/wave-walker/` — no README at this path; source of truth is `engines/wave-walker/engine/design.md`
@@ -93,10 +95,8 @@ CLAUDE.md:1-7 — "RR ("Research and Report") — a standalone Claude Code skill
 - `:54` "architecture-design" — codebase layout designed for agent maintainers.
 - `:62` "The optional cast (Tier B — opt-in at install)".
 - `:64` "/officer" — compliance enforcer with selectable regulations.
-- `:65` "/km" — knowledge curator for a chosen domain.
-- `:66` "/pm" — user/product hybrid, selectable persona.
-- `:67` "/mentor" — business advisor for chosen market/jurisdiction.
-- `:68` "/marketer" — visibility strategist for chosen channels/language.
+- `:65` "/mentor" — business advisor for chosen market/jurisdiction.
+- `:66` "/marketer" — visibility strategist for chosen channels/language.
 - `:70` "The plumbing (Tier C — invisible)" — infrastructure agents/mechanics, no character.
 - `:81` "The five load-bearing walls".
 - `:85` "Only `gitter` touches git" — single git operator.
@@ -105,7 +105,7 @@ CLAUDE.md:1-7 — "RR ("Research and Report") — a standalone Claude Code skill
 - `:117` "Worktree isolation per pipeline".
 - `:128` "Self-improvement at the source" — `/pfm` edits agent definitions directly to fix bug classes.
 - `:134` "The non-negotiable rules" — ten enforceable rules (no cowboy coding, QA-first, single git operator, no hardcodes, no force-push, no mocking internal deps, fail-loud, …).
-- `:151` "Pipeline architecture" — planner → architect → developer → QA → merge → post-QA → audit → documenter.
+- `:151` "Pipeline architecture" — planner → architect → developer → QA → merge → post-QA → audit → main-loop docs merge → gitter DOCS-COMMIT.
 - `:220` "Meta path: `/pfm`".
 - `:224` "File layout".
 - `:274` "What you get out of the box".

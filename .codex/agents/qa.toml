@@ -31,7 +31,7 @@ Read the project's own `CLAUDE.md` before writing a test — it carries the suit
 
 - Tests only. When a test exposes a product defect, report it — the dev agent fixes it.
 - Git is gitter's alone. Read-only git is open to you.
-- `.claude/**` and every `CLAUDE.md` are guarded and route through `$pfm`.
+- `.claude/**` and every `CLAUDE.md` are guarded and route through `$pcm`.
 - A test never touches live state: in `pfm`, every test sets `TMUX_TMPDIR` to a temp dir and no test may reach a live `cc-*` / `cx-*` socket or the real `/tmp/cc-sid`.
 
 ## Report format

@@ -13,7 +13,7 @@ A roster entry that is the wire-contract/schema hub carries one more clause on i
 
 Each project with its own `.claude/` carries a `CLAUDE.md`, agents, and skills. A single-project install (roster of one) is the repo root itself — no per-project subdirectories, no cross-project boundaries.
 
-**Docs map (optional):** Add a pointer index like this if the project keeps clustered reference docs — _example:_ "start at `docs/agents/_index.md` — the hub linking every architecture, API, system-map, feature, and child-project doc. Reference docs are **clusters**: read the cluster `_index.md`, then `grep` it for the exact code/DB symbol and open the matching topic file. Doc identifiers match code verbatim, so a code symbol greps straight to its doc. The whole database — every table, column, and FK under its real {DATABASE} name — is one diagram: `docs/agents/graph/db/postgres.mmd`." _Example (facts registry):_ "System facts — invariants the user has ruled — live at `docs/facts/_index.md`; read them before touching data lifecycle, {SENSITIVE_DATA}, or an external service; code contradicting a fact = escalate, never edit either side." _Example (truth hierarchy + doc trees):_ "Code truth: grep the code. Schema truth: introspect the live DB. How-to: `docs/runbooks/{project}/`. Feature registry: `docs/features/`; runtime reference cards: `docs/references/`; business/marketing/compliance: `docs/business/` (`marketing/`, `compliance/`)." Delete the block if the project has no such registry.
+**Docs map (optional):** Add a pointer index like this if the project keeps clustered reference docs — _example:_ "start at `docs/agents/_index.md` — the hub linking every architecture, API, system-map, feature, and child-project doc. Reference docs are **clusters**: read the cluster `_index.md`, then `grep` it for the exact code/DB symbol and open the matching topic file. Doc identifiers match code verbatim, so a code symbol greps straight to its doc. The whole database — every table, column, and FK under its real {DATABASE} name — is one diagram: `docs/agents/graph/db/postgres.mmd`." _Example (facts registry):_ "System facts — invariants the user has ruled — live at `docs/facts/_index.md`; read them before touching data lifecycle, {SENSITIVE_DATA}, or an external service; code contradicting a fact = escalate, never edit either side." _Example (truth hierarchy + doc trees):_ "Code truth: grep the code. Schema truth: introspect the live DB. How-to: `docs/runbooks/{project}/`. Feature registry: `docs/features/`; runtime reference cards: `docs/references/`; business/marketing: `docs/business/` (`marketing/`); legal & compliance: `docs/epics/legal/`." Delete the block if the project has no such registry.
 
 <!-- DELETE THIS SECTION if you are NOT using Codex (OpenAI). If you ARE using Codex, fill in the details and remove this comment. -->
 
@@ -23,7 +23,7 @@ Each project with its own `.claude/` carries a `CLAUDE.md`, agents, and skills. 
 
 > **Skip this entire section if you don't use OpenAI Codex.** Everything works with Claude Code alone. This section is for projects that want a second runtime for cheaper implementation.
 
-This project runs two AI runtimes as a team. Full protocol: `docs/commands/pfm/references/codex-protocol.md`
+This project runs two AI runtimes as a team. Full protocol: `.codex/README.md`
 
 **Quick ID:** `CLAUDE.md` and `AGENTS.md` are the same shared contract. Claude and Codex both carry the persona and rules; runtime-specific wrappers only translate mechanics (slash commands, agents, git execution), never identity or protocol.
 
@@ -68,25 +68,18 @@ Voice and delivery law live in Professor's harness prompts: `templates/prompts/p
 - NEVER edit code on `main`: worktree branches only, gitter-merged after QA, unless with explicit command which QA will always come afterwards to cover the tests
 - Only gitter WRITES git — commit/merge/checkout/branch/stash/reset/push and any other state-changing git are gitter-only for every agent; read-only git (status/diff/log/show/rev-parse) is open to all.
 - NEVER commit broken code or merge before QA passes
-
-<!-- KEEP the "`{AI_PROJECT}/knowledge/` (route: `/km`)" clause only if the KM Tier-B opt-in is installed for this roster; otherwise drop it. -->
-
-- Only /documenter writes permanent docs: `docs/business/` belongs to `/officer` (`compliance/`), `/mentor`, `/marketer` (`marketing/`); `/km` → `{AI_PROJECT}/knowledge/`; `docs/facts/` — main loop only, solely on the user's explicit ruling
+- Only the main-loop session writes permanent docs (`docs/agents/`, each project's `docs/`), under the `/quality:doc` Approval gate; `docs/epics/legal/` belongs to `/officer`; `docs/business/` to `/mentor` and `/marketer` (`marketing/`); `docs/facts/` — main loop only, solely on the user's explicit ruling
 - Never install unvalidated libraries
 
-<!-- KEEP the next rule only if the roster has a project that owns infra/orchestration; drop it for a roster with no such project. -->
+<!-- KEEP the next rule only if the roster has a project that owns infra/orchestration (its directory is `{PROJECT}`); drop it for a roster with no such project. -->
 
-- All infra ops via `make -C {INFRA_PROJECT}`: never direct `{CONTAINER_RUNTIME} exec` / `{DB_CLI}` / `{CLOUD_CLI} {QUEUE}`
-
-<!-- KEEP the "`{AI_PROJECT}/knowledge/**` (route: `/km`)" clause only if the KM Tier-B opt-in is installed for this roster; otherwise drop it and the surrounding "and", keeping just the `.claude/`+`CLAUDE.md` clause. -->
-
-- Guarded files: PreToolUse hooks gate `.claude/**` + every `CLAUDE.md` (route: `/pfm`) and `{AI_PROJECT}/knowledge/**` (route: `/km`); the deny message carries the unlock steps
+- Infra ops go through the owning project's `Makefile` (`make -C {PROJECT}`) — never direct `{CONTAINER_RUNTIME} exec` / `{DB_CLI}` / `{CLOUD_CLI} {QUEUE}` calls
+- Guarded files: PreToolUse hooks gate `.claude/**` + every `CLAUDE.md` (route: `/pcm`); the deny message carries the unlock steps
 - Worktrees are costly: batch a session's related changes into one, and ask before creating one.
 
 ### Testing & Environment
 
-- MANDATORY: load `/test` before running ANY test — it carries the whole testing law.
-- CI verifies, never debugs: reproduce and fix locally under `/test`, then trigger CI.
+- CI verifies, never debugs: reproduce and fix locally, then trigger CI.
 
 ### Meta
 

@@ -24,8 +24,6 @@ services:
       - pfm-dev-gocache:/root/.cache/go-build
       - pfm-dev-gomod:/root/go/pkg/mod
       - pfm-dev-npm-cache:/root/.npm
-      - pfm-dev-walker-modules:/worktree/engines/wave-walker/engine/node_modules
-      - pfm-dev-walker-candidates:/worktree/engines/wave-walker/engine/dist/cross-workflow
     working_dir: /worktree
     environment:
       PFM_DEV_FENCE: "1"
@@ -38,5 +36,3 @@ volumes:
   pfm-dev-gocache:
   pfm-dev-gomod:
   pfm-dev-npm-cache:
-  pfm-dev-walker-modules:
-  pfm-dev-walker-candidates:

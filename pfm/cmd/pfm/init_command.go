@@ -28,7 +28,7 @@ var initTemplatePaths = []struct {
 	{source: "project/agents", target: ".claude/agents", skip: "per-project"},
 	{source: "project/scripts", target: ".claude/scripts"},
 	{source: "project/skills", target: ".claude/skills"},
-	{source: "project/workflows", target: ".claude/workflows"},
+	{source: "project/epics", target: "docs/epics"},
 	{source: "project/codex", target: ".codex"},
 	{source: "project/docs-commands", target: "docs/commands"},
 	{source: "project/docs-agents", target: "docs/agents"},

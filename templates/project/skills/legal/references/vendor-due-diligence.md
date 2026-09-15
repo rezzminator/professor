@@ -32,4 +32,4 @@ Financial — parent guarantee, higher insurance, performance bond. Security —
 
 ## {PROJECT_NAME} application
 
-Run this before adding any new sub-processor to the data path (transcription, AI analysis, cloud, email). The DPA and current-SCC status are non-negotiable gating items for any vendor touching {SESSION_NOUN} data; "plan for exit" means confirming data portability and deletion before signing. Feed the outcome into the officer's `sub-processor-compliance.md`.
+Run this before adding any new sub-processor to the data path (transcription, AI analysis, cloud, email). The DPA and current-SCC status are non-negotiable gating items for any vendor touching {SESSION_NOUN} data; "plan for exit" means confirming data portability and deletion before signing. Feed the outcome into the officer's `docs/epics/legal/registers/sub-processor-compliance.md`.

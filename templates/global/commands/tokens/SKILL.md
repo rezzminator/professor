@@ -1,12 +1,12 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: tokens
 description: Attributes runtime token spend, heaviest first — Claude Code sub-agents and Workflow runs, or Codex CLI threads with `--codex`. Flags `--all`, `--by-workflow`, `--filter <substr>`, `--detail <id>`, `--by-day`, `--since <date>`, `--top N`, `--session <id>`; `--help` lists all. Triggers "token ledger", "which agent burned the most", "what did the wave cost". Static context size → /context-meter.
 ---
 
 # Token Ledger
 
-Run from the monorepo root (the project slug derives from cwd); read-only over transcripts, no network:
+Run from the repo root (the project slug derives from cwd); read-only over transcripts, no network:
 
 ```bash
 node ~/.claude/commands/tokens/token-ledger.mjs [flags]
@@ -24,7 +24,7 @@ node ~/.claude/commands/tokens/token-ledger.mjs [flags]
 
 ## What gets a `wf_*` row
 
-Only a Workflow-engine run — a script under `.claude/workflows/` or a skill-embedded engine (`/deep-rr`). An orchestrated wave is not one: `/wave:orchestrator` and `/wave:builder` run in their chats' main sessions and spawn session-level sub-agents, which land in `(non-workflow agents)`; total a wave with `--filter <wave-label>` instead. The wave's walker pass runs the `wave-walker` script, so its cost sits in a separate `wf_*` row, outside that filter. A dual-chat wave spans two chats — sum default scope in the orchestrator chat with `--session {builder-session}` for the builder.
+Only a Workflow-engine run — a script under the repo's `workflows/` or a skill-embedded engine (`/deep-rr`). An orchestrated wave is not one: `/wave:orchestrator` and `/wave:builder` run in their chats' main sessions and spawn session-level sub-agents, which land in `(non-workflow agents)`; total a wave with `--filter <wave-label>` instead. `/wave:walker` spawns session-level agents too, so it lands under the same filter. A dual-chat wave spans two chats — sum default scope in the orchestrator chat with `--session {builder-session}` for the builder.
 
 ## Codex sessions — `--codex`
 

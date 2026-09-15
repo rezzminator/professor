@@ -2360,7 +2360,7 @@ func (installer *engine) retireLegacyCommand(path string) error {
 // cleaned up on its own). frr -> rr (3976b53, "/ptm→/pfm, frr→rr, /rr→/deep-rr")
 // is the only rename `git log -- templates/global/agents` holds; a future
 // rename adds its OLD name here rather than inventing a second mechanism.
-var retiredGlobalAgents = []string{"frr"}
+var retiredGlobalAgents = []string{"frr", "rr-super"}
 
 // retireRenamedGlobalAgents deletes a stale pre-rename identity from the
 // global Claude agent registry — but only when the file is unambiguously

@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# PreToolUse(Edit|Write) — guards /pfm territory.
-# Edits to .claude/** and any CLAUDE.md (root or child) are /pfm-exclusive: these
+# PreToolUse(Edit|Write) — guards /pcm territory.
+# Edits to .claude/** and any CLAUDE.md (root or child) are /pcm-exclusive: these
 # files ARE the framework — agent graph, routing, hooks, conventions — loaded by
 # the harness at runtime, so a careless edit breaks the pipeline. Allowed only
 # when BOTH of THIS session's markers are fresh (session-keyed — concurrent
 # sessions on one repo never share or clear each other's gate):
-#   tmp/professor_pfm_active.<sid>      — /pfm is active (stamped per the deny message)
+#   tmp/professor_pfm_active.<sid>      — /pcm is active (stamped per the deny message)
 #   tmp/professor_quality_loaded.<sid>  — quality/prompt.md was READ this session
 #                                         (stamped automatically by guard-stamp.sh)
 # Sliding expiry: every ALLOWED edit re-touches both markers, so an active session
 # never expires mid-batch; the TTL reaps only abandoned sessions (guard-stamp.sh's
 # Stop pass reaps >1h leftovers; markers SURVIVE turn ends — stamp once per session).
-# Silent no-op for every other path. Knowledge files belong to km-guard.sh.
+# Silent no-op for every other path.
 
 INPUT=$(cat)
 FILE_PATH=$(printf '%s' "$INPUT" | jq -r '.tool_input.file_path // empty')
@@ -27,7 +27,6 @@ REL_PATH="${FILE_PATH#"$REPO_ROOT"/}"
 case "$REL_PATH" in
   CLAUDE.md|.claude/*) ;;              # root infrastructure
   */CLAUDE.md|*/.claude/*) ;;          # child-project infrastructure (any nesting)
-  docs/commands/pfm/references/*) ;;   # pfm runtime-loaded reference cards (audit law)
   *) exit 0 ;;
 esac
 
@@ -50,14 +49,14 @@ if fresh "$ACTIVE" && fresh "$QUALITY"; then
   exit 0
 fi
 
-REASON="This file is framework INFRASTRUCTURE — a .claude/ prompt or a CLAUDE.md that the harness loads at runtime; a careless edit ships straight into the agent pipeline. You ARE authorized as the infra owner via /pfm."
+REASON="This file is framework INFRASTRUCTURE — a .claude/ prompt or a CLAUDE.md that the harness loads at runtime; a careless edit ships straight into the agent pipeline. You ARE authorized as the infra owner via /pcm."
 if ! fresh "$QUALITY"; then
   REASON+=" DENIED — prompt-file edits require /quality:prompt loaded this session: Read ~/.claude/commands/quality/prompt.md (the machine-global law; the Read auto-stamps your session), then retry."
 fi
 if ! fresh "$ACTIVE"; then
-  REASON+=" DENIED — infra edits route through /pfm: open this session's gate from the repo root: date +%s > \"tmp/professor_pfm_active${SID:+.$SID}\" — run the stamp UNSANDBOXED (a sandboxed write never lands on the filesystem this hook reads; a denied retry after stamping means the stamp ran sandboxed), then retry."
+  REASON+=" DENIED — infra edits route through /pcm: open this session's gate from the repo root: date +%s > \"tmp/professor_pfm_active${SID:+.$SID}\" — run the stamp UNSANDBOXED (a sandboxed write never lands on the filesystem this hook reads; a denied retry after stamping means the stamp ran sandboxed), then retry."
 fi
-REASON+=" Markers slide on every allowed edit and expire by TTL only — no turn-end clearing; stamp once per session. Do NOT route around this by disabling the hook or editing infra outside /pfm."
+REASON+=" Markers slide on every allowed edit and expire by TTL only — no turn-end clearing; stamp once per session. Do NOT route around this by disabling the hook or editing infra outside /pcm."
 
 jq -cn --arg r "$REASON" '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$r}}'
 exit 2

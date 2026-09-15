@@ -1051,7 +1051,7 @@ func (h *e2eHarness) assertInit(project, source string) {
 		{"agents", ".claude/agents", "per-project"},
 		{"scripts", ".claude/scripts", ""},
 		{"skills", ".claude/skills", ""},
-		{"workflows", ".claude/workflows", ""},
+		{"epics", "docs/epics", ""},
 		{"codex", ".codex", ""},
 		{"docs-commands", "docs/commands", ""},
 		{"docs-agents", "docs/agents", ""},

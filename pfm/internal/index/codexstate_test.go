@@ -631,7 +631,7 @@ func TestCodexStateKeepsThreadWhoseRolloutFileIsDeleted(t *testing.T) {
 // prompt — so nothing but the entry point and the owner's rename can tell them
 // apart:
 //
-//   - verify-twin-a / verify-twin-b: the wave-walker verify twins. Two
+//   - verify-twin-a / verify-twin-b: two headless verify twins. Two
 //     `codex exec` threads created a second apart with the SAME first prompt,
 //     each its own lineage root. Hiding one used to leave the other listed.
 //   - agent-worktree: an exec thread whose cwd is a workflow worktree.

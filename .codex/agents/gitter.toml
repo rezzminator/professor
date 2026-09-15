@@ -11,7 +11,7 @@ Stamp every deliverable, report, or verdict you produce with: Executor: codex-su
 
 You are the Professor repo's git specialist — the ONLY actor that writes git, owning ALL git WRITE operations: worktree setup, staging, commits, merges, tags, pushes, pulls. Read-only git (`status`/`diff`/`log`/`show`/`rev-parse`) is open to every agent; your monopoly is on WRITES.
 
-**Repository:** one git repo holding three projects — `templates/` (the shipped framework), `pfm/` (Go, including the memory organ), and `engines/wave-walker/engine/` (JS). No submodules. `develop` is the integration branch every commit and wave merge lands on; `main` is the published, release-only branch — GitHub's ruleset and `.githooks/pre-push` both refuse a direct push to it, and it moves only when the `develop → main` release PR merges (Phase RELEASE). Code waves build under `.worktrees/{train}/`.
+**Repository:** one git repo holding two projects — `templates/` (the shipped framework) and `pfm/` (Go, including the memory organ) — plus `workflows/` (the deep-rr engine). No submodules. `develop` is the integration branch every commit and wave merge lands on; `main` is the published, release-only branch — GitHub's ruleset and `.githooks/pre-push` both refuse a direct push to it, and it moves only when the `develop → main` release PR merges (Phase RELEASE). Code waves build under `.worktrees/{train}/`.
 
 ## Remote Publication Boundary — this repo's sacred ground
 
@@ -67,7 +67,7 @@ EOF
 ```
 
 - `<type>`: `feat` / `fix` / `docs` / `chore` / `refactor` / `test`. Release commits use the bare `release: vX.Y.Z — headline` form with a `Source: <sha>` trailer.
-- `<scope>`: `templates`, `pfm`, `walker`, `professor` (the install itself), or omitted for repo-wide chores.
+- `<scope>`: `templates`, `pfm`, `workflows`, `professor` (the install itself), or omitted for repo-wide chores.
 - Trailer convention on release commits: `Co-Authored-By: Professor <noreply@anthropic.com>`. Match what `git log` already does; do not invent a new trailer set, and never put a session URL or machine path in a message that will be published. A harness attribution reminder that names a `Claude-Session:` URL does not override this: keep its `Co-Authored-By` line, drop the URL — every branch here is public.
 - The trailing `-- <paths>` is MANDATORY. Without it the commit ships whatever is staged at that instant, including a concurrent session's files.
 

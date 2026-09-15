@@ -1,6 +1,6 @@
 ---
 name: dev
-description: Implements ONE scoped task in a roster project from a brief naming the change and its files — delegate for bounded build work with a spec; qa writes the tests. Returns files touched plus the verification command and verdict. Not for .claude/**, CLAUDE.md or templates/** → /pfm.
+description: Implements ONE scoped task in a roster project from a brief naming the change and its files — delegate for bounded build work with a spec; qa writes the tests. Returns files touched plus the verification command and verdict. Not for .claude/**, CLAUDE.md or templates/** → /pcm.
 tools: Read, Write, Edit, Bash, Glob, Grep
 model: sonnet
 ---
@@ -21,7 +21,7 @@ Read the project's own `CLAUDE.md` before the first edit — it carries the stac
 
 - Code only. The qa agent writes tests for this change; write a test yourself when the brief asks for one by name.
 - Git is gitter's alone. Read-only git (`status`, `diff`, `log`, `show`, `rev-parse`) is open to you.
-- `.claude/**` and every `CLAUDE.md` are guarded and route through `/pfm`. A task that needs one of them stops and reports.
+- `.claude/**` and every `CLAUDE.md` are guarded and route through `/pcm`. A task that needs one of them stops and reports.
 - `templates/**` is shipped source an adopter clones. Nothing identifying enters it: no personal name, no machine-absolute path, no client content.
 
 ## Report format

@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# drain-wait.sh — blocking barrier: waits until a background worker/queue finishes ALL
-# outstanding work, then RETURNS a result line and exits. Launch it backgrounded; the
-# harness wakes the caller when it exits. A runtime without background execution blocks
-# on it. Typical use: after seeding/enqueueing work, wait for the queue to fully drain
-# before running the next step (tests, an assertion, a downstream stage).
+# drain-wait.sh — blocking barrier: drain the queue of project {project}. Waits until
+# that roster project's background queue consumer finishes ALL outstanding work, then
+# RETURNS a result line and exits. Launch it backgrounded; the harness wakes the caller
+# when it exits. A runtime without background execution blocks on it. Typical use:
+# after seeding/enqueueing work, wait for the queue to fully drain before running the
+# next step (tests, an assertion, a downstream stage).
+#
+# OPTIONAL — only for a roster with an asynchronous queue consumer (an LLM worker, a
+# job runner) whose progress a health endpoint reports. A roster with no such project
+# ships without this script; /dev FRESH skips the drain step.
 #
 # ── ADAPT PER PROJECT ─────────────────────────────────────────────────────────────
 # This barrier polls a health endpoint that reports queue progress as JSON. Wire the
@@ -13,13 +18,17 @@ set -euo pipefail
 #   .progress.status   → "complete" when drained | "in_progress" while working
 #   .progress.done / .progress.total / .progress.remaining → integer counters
 #   .services.worker.status / .services.db.status → "ok" when healthy
-# {AI_SERVICE_NAME} below names the background worker whose queue is draining.
+# HEALTH_URL below targets the project that serves that endpoint — its port is the
+# project's `{PROJECT}_PORT` (the name alloc-ports.sh / dev.sh use), defaulting to
+# its {PROJECT_PORT}.
 # ──────────────────────────────────────────────────────────────────────────────────
 #
 # RESULT (printed to stdout — the caller reads it directly; launch backgrounded and
 # the harness delivers stdout on exit):
 #   DRAIN_RESULT=clean   exit 0  — progress.status == complete (all work done)
-#   DRAIN_RESULT=error   exit 1  — a core service stayed down, or work stalled
+#   DRAIN_RESULT=error   exit 1  — a core service stayed down, work stalled, the health
+#                                  endpoint stayed unreachable past boot grace, or jq
+#                                  is missing (reason= names which)
 #   DRAIN_RESULT=timeout exit 2  — MAX_WAIT elapsed without completing
 #
 # Every poll prints a heartbeat line to stdout, so the running process's captured
@@ -33,7 +42,7 @@ set -euo pipefail
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 LOG="${WORKER_LOG:-$REPO_ROOT/tmp/dev/worker.log}"
-HEALTH_URL="http://localhost:${BACKEND_PORT:-{BACKEND_PORT}}/health"
+HEALTH_URL="http://localhost:${A_PORT:-{PROJECT_PORT}}/health"   # A_PORT → the health-serving project's {PROJECT}_PORT
 
 POLL_INTERVAL="${POLL_INTERVAL:-15}"   # seconds between polls
 MAX_WAIT="${MAX_WAIT:-5400}"           # 90 min hard cap — long sequential batches run long

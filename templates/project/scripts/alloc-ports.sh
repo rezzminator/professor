@@ -2,23 +2,31 @@
 # alloc-ports.sh — Allocate unique ports for a worktree pipeline
 #
 # Usage:
-#   ./.claude/scripts/alloc-ports.sh alloc <worktree-id>   → prints BE_PORT=N FE_PORT=M TEST_PG_PORT=P TEST_LS_PORT=Q PULSE_PORT=R WEB_PORT=S AI_PORT=T
-#   Registry column 6 (emitted as PULSE_PORT for positional compatibility) is the
-#   metrics {DATABASE} port — the {INFRA_PROJECT} Makefile reads it as METRICS_PG_PORT.
-#   The Pulse analytics service is retired.
+#   ./.claude/scripts/alloc-ports.sh alloc <worktree-id>   → prints one {NAME}_PORT=N line per port name
 #   ./.claude/scripts/alloc-ports.sh free  <worktree-id>   → releases the allocation
 #   ./.claude/scripts/alloc-ports.sh list                   → shows all allocations
 #
-# Port ranges:
-#   Backend:        3001–3099  (main uses {BACKEND_PORT})
-#   Frontend:       5174–5272  (main uses 5173)
-#   Test {DATABASE}: 5434–5532  (shared test uses {DB_PORT_TEST})
-#   Test {QUEUE}: 4568–4666  (shared test uses {QUEUE_PORT_TEST})
-#   Pulse (analytics):  3302–3400  (main uses 3300, shared test uses 3301)
-#   {WEB_PROJECT}:  4001–4099  (main uses {WEB_PORT})
-#   {AI_SERVICE_NAME} HTTP:    3501–3599  (main uses 3500)
+# Port names — one port per roster project, plus any service port the adopter declares:
+#   PROJECTS=(a b c)             the roster, in order (SETUP fills it; one entry is a valid roster)
+#   EXTRA_PORTS=(TEST_DB …)      optional service ports beyond the roster (a test database,
+#                                a queue emulator …) — declared here, never assumed
+# Emitted contract: for every name — roster first, then extras — uppercased and
+# shell-var-safe, one line `{NAME}_PORT=N`, e.g.
+#   A_PORT=3001
+#   B_PORT=3101
+#   TEST_DB_PORT=3201
 #
-# Registry: .worktrees/.ports (one line per allocation: id be_port fe_port test_pg_port test_ls_port pulse_port web_port ai_port)
+# Port scheme: name i (0-based) at slot s binds  PORT_BASE + i*PORT_STRIDE + s
+# (slots 0..MAX_SLOTS-1, MAX_SLOTS <= PORT_STRIDE), so every name owns a disjoint
+# range of PORT_STRIDE ports. SETUP pins PORT_BASE / PORT_STRIDE to a free region of
+# the dev machine; main's own dev ports ({PORT_DEFAULTS} in dev.sh) stay outside it.
+#
+# Registry: .worktrees/.ports — one line per allocation: `id` then one port per name, in order.
+#
+# Broken states this script reports (stderr, exit 1): an empty PROJECTS roster; two
+# names that collide once uppercased; MAX_SLOTS wider than PORT_STRIDE; a registry
+# line whose port count no longer matches the declared names; no free slot; a port
+# whose host occupancy could not be inspected (neither ss nor lsof usable).
 
 set -euo pipefail
 
@@ -37,14 +45,50 @@ ROOT="$(dirname "$GIT_COMMON_DIR")"
 REGISTRY="${ROOT}/.worktrees/.ports"
 LOCKFILE="${REGISTRY}.lock"
 
-BE_BASE=3001
-FE_BASE=5174
-TEST_PG_BASE=5434
-TEST_LS_BASE=4568
-PULSE_BASE=3302
-WEB_BASE=4001
-AI_BASE=3501
+# ─── Port names ───────────────────────────────────────────────────
+PROJECTS=(
+  # {PROJECT_ROSTER} — SETUP expands one name per roster entry, in order, e.g.:
+  # a b c
+)
+EXTRA_PORTS=(
+  # Adopter-declared service ports beyond the roster, e.g.:
+  # TEST_DB TEST_QUEUE
+)
+PORT_BASE=3001
+PORT_STRIDE=100
 MAX_SLOTS=99
+
+# Shell-var-safe uppercase form of a name: a → A, my-svc → MY_SVC.
+var_name() {
+  printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | sed 's/[^A-Z0-9_]/_/g'
+}
+
+# Resolve PROJECTS + EXTRA_PORTS into PORT_NAMES / NAME_COUNT / NCOLS; every broken
+# declaration exits 1 here, before any registry read or write.
+PORT_NAMES=()
+NAME_COUNT=0
+NCOLS=1
+load_names() {
+  local name dupes
+  if [ "${#PROJECTS[@]}" -eq 0 ]; then
+    echo "Error: PROJECTS roster is empty — SETUP fills it with one name per roster project" >&2
+    exit 1
+  fi
+  if [ "$MAX_SLOTS" -gt "$PORT_STRIDE" ]; then
+    echo "Error: MAX_SLOTS ($MAX_SLOTS) exceeds PORT_STRIDE ($PORT_STRIDE) — adjacent names would overlap" >&2
+    exit 1
+  fi
+  for name in "${PROJECTS[@]}" ${EXTRA_PORTS[@]+"${EXTRA_PORTS[@]}"}; do
+    PORT_NAMES+=("$(var_name "$name")")
+  done
+  NAME_COUNT="${#PORT_NAMES[@]}"
+  NCOLS=$((NAME_COUNT + 1))
+  dupes=$(printf '%s\n' "${PORT_NAMES[@]}" | sort | uniq -d | tr '\n' ' ')
+  if [ -n "$dupes" ]; then
+    echo "Error: port names collide once uppercased: ${dupes}" >&2
+    exit 1
+  fi
+}
 
 mkdir -p "$(dirname "$REGISTRY")"
 touch "$REGISTRY"
@@ -62,29 +106,32 @@ acquire_lock() {
   trap 'rmdir "$LOCKFILE" 2>/dev/null' EXIT
 }
 
+# emit_ports p1 p2 … → one {NAME}_PORT=N line per name, in order.
+emit_ports() {
+  local i=0
+  for port in "$@"; do
+    echo "${PORT_NAMES[$i]}_PORT=${port}"
+    i=$((i + 1))
+  done
+}
+
 cmd_alloc() {
   local id="$1"
+  load_names
   acquire_lock
 
-  # Already allocated? (registry is always 8-col — this script is the sole writer)
+  # Already allocated? (this script is the sole registry writer)
   local existing
   existing=$(awk -v id="$id" '$1 == id { print $0 }' "$REGISTRY")
   if [ -n "$existing" ]; then
-    local be_port fe_port test_pg_port test_ls_port pulse_port web_port ai_port
-    be_port=$(echo "$existing" | awk '{print $2}')
-    fe_port=$(echo "$existing" | awk '{print $3}')
-    test_pg_port=$(echo "$existing" | awk '{print $4}')
-    test_ls_port=$(echo "$existing" | awk '{print $5}')
-    pulse_port=$(echo "$existing" | awk '{print $6}')
-    web_port=$(echo "$existing" | awk '{print $7}')
-    ai_port=$(echo "$existing" | awk '{print $8}')
-    echo "BE_PORT=${be_port}"
-    echo "FE_PORT=${fe_port}"
-    echo "TEST_PG_PORT=${test_pg_port}"
-    echo "TEST_LS_PORT=${test_ls_port}"
-    echo "PULSE_PORT=${pulse_port}"
-    echo "WEB_PORT=${web_port}"
-    echo "AI_PORT=${ai_port}"
+    local existing_cols
+    existing_cols=$(echo "$existing" | awk '{print NF}')
+    if [ "$existing_cols" -ne "$NCOLS" ]; then
+      echo "Error: registry line for '${id}' carries $((existing_cols - 1)) ports but ${NAME_COUNT} names are declared — the roster changed after allocation; run '$0 free ${id}' and re-allocate" >&2
+      exit 1
+    fi
+    # shellcheck disable=SC2046
+    emit_ports $(echo "$existing" | cut -d' ' -f2-)
     return 0
   fi
 
@@ -140,11 +187,11 @@ cmd_alloc() {
     done
   }
 
+  # A candidate tuple is reserved if ANY of its ports appears in ANY registry column.
   tuple_is_unreserved() {
-    awk -v be="$1" -v fe="$2" -v test_pg="$3" -v test_ls="$4" \
-      -v pulse="$5" -v web="$6" -v ai="$7" '
-      $2 == be || $3 == fe || $4 == test_pg || $5 == test_ls ||
-      $6 == pulse || $7 == web || $8 == ai { found = 1 }
+    awk -v ports="$*" '
+      BEGIN { n = split(ports, P, " ") }
+      { for (c = 2; c <= NF; c++) for (k = 1; k <= n; k++) if ($c == P[k]) found = 1 }
       END { exit found }
     ' "$REGISTRY"
   }
@@ -152,25 +199,18 @@ cmd_alloc() {
   # Pin: an adversarial test starts an unregistered host listener and proves its tuple is
   # rejected. This remains a TOCTOU snapshot: the registry lock serializes allocators, not
   # later OS binds.
-  local slot=0 inspection_state
+  local slot=0 inspection_state i
   while [ "$slot" -lt "$MAX_SLOTS" ]; do
-    local be_port=$((BE_BASE + slot))
-    local fe_port=$((FE_BASE + slot))
-    local test_pg_port=$((TEST_PG_BASE + slot))
-    local test_ls_port=$((TEST_LS_BASE + slot))
-    local pulse_port=$((PULSE_BASE + slot))
-    local web_port=$((WEB_BASE + slot))
-    local ai_port=$((AI_BASE + slot))
-    if tuple_is_unreserved "$be_port" "$fe_port" "$test_pg_port" "$test_ls_port" "$pulse_port" "$web_port" "$ai_port"; then
-      if tuple_is_host_free "$be_port" "$fe_port" "$test_pg_port" "$test_ls_port" "$pulse_port" "$web_port" "$ai_port"; then
-        echo "${id} ${be_port} ${fe_port} ${test_pg_port} ${test_ls_port} ${pulse_port} ${web_port} ${ai_port}" >> "$REGISTRY"
-        echo "BE_PORT=${be_port}"
-        echo "FE_PORT=${fe_port}"
-        echo "TEST_PG_PORT=${test_pg_port}"
-        echo "TEST_LS_PORT=${test_ls_port}"
-        echo "PULSE_PORT=${pulse_port}"
-        echo "WEB_PORT=${web_port}"
-        echo "AI_PORT=${ai_port}"
+    local tuple=()
+    i=0
+    while [ "$i" -lt "$NAME_COUNT" ]; do
+      tuple+=($((PORT_BASE + i * PORT_STRIDE + slot)))
+      i=$((i + 1))
+    done
+    if tuple_is_unreserved "${tuple[@]}"; then
+      if tuple_is_host_free "${tuple[@]}"; then
+        echo "${id} ${tuple[*]}" >> "$REGISTRY"
+        emit_ports "${tuple[@]}"
         return 0
       else
         inspection_state=$?
@@ -190,29 +230,36 @@ cmd_free() {
   local id="$1"
   acquire_lock
 
+  if ! grep -q "^${id} " "$REGISTRY"; then
+    echo "No allocation for: $id"
+    return 0
+  fi
   # Use grep -v instead of sed to avoid delimiter issues with / in ids
-  grep -v "^${id} " "$REGISTRY" > "${REGISTRY}.tmp" 2>/dev/null || true
+  grep -v "^${id} " "$REGISTRY" > "${REGISTRY}.tmp" || true
   mv "${REGISTRY}.tmp" "$REGISTRY"
   echo "Freed ports for: $id"
 }
 
 cmd_list() {
+  load_names
   if [ ! -s "$REGISTRY" ]; then
     echo "No port allocations."
     return 0
   fi
-  printf "%-40s %-10s %-10s %-10s %-10s %-10s %-10s %-12s\n" "WORKTREE" "BE_PORT" "FE_PORT" "TEST_PG" "TEST_LS" "METRICS_PG" "WEB" "AI_HTTP"
+  local name
+  printf "%-40s" "WORKTREE"
+  for name in "${PORT_NAMES[@]}"; do printf " %-12s" "${name}_PORT"; done
+  printf "\n"
   while IFS= read -r line; do
-    local id be fe tpg tls pulse web ai
-    id=$(echo "$line" | awk '{print $1}')
-    be=$(echo "$line" | awk '{print $2}')
-    fe=$(echo "$line" | awk '{print $3}')
-    tpg=$(echo "$line" | awk '{print $4}')
-    tls=$(echo "$line" | awk '{print $5}')
-    pulse=$(echo "$line" | awk '{print $6}')
-    web=$(echo "$line" | awk '{print $7}')
-    ai=$(echo "$line" | awk '{print $8}')
-    printf "%-40s %-10s %-10s %-10s %-10s %-10s %-10s %-12s\n" "$id" "$be" "$fe" "$tpg" "$tls" "$pulse" "$web" "$ai"
+    local cols
+    cols=$(echo "$line" | awk '{print NF}')
+    if [ "$cols" -ne "$NCOLS" ]; then
+      printf "%-40s %s\n" "$(echo "$line" | awk '{print $1}')" "MISMATCH: $((cols - 1)) ports recorded, ${NAME_COUNT} names declared"
+      continue
+    fi
+    printf "%-40s" "$(echo "$line" | awk '{print $1}')"
+    for port in $(echo "$line" | cut -d' ' -f2-); do printf " %-12s" "$port"; done
+    printf "\n"
   done < "$REGISTRY"
 }
 
@@ -221,7 +268,7 @@ case "${1:-help}" in
   free)  cmd_free  "${2:?worktree-id required}" ;;
   list)  cmd_list ;;
   *)
-    echo "Usage: $0 {alloc|free|list} [worktree-id]"
+    echo "Usage: $0 {alloc|free|list} [worktree-id]" >&2
     exit 1
     ;;
 esac

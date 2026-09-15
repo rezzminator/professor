@@ -1068,9 +1068,9 @@ function printByWorkflow(rows) {
   renderGrid(H, data, new Set([0, 1, 2]), new Set([data.length - 1]));
   console.log(
     "\nFRESH = in+out+cache-write (the harness's subagent_tokens definition); GRAND TOTAL adds cache-read." +
-      "\nA wf_* row exists only for a Workflow-engine run — a script under .claude/workflows/ or a skill-embedded" +
-      "\nengine (/deep-rr); a wave's walker pass (wave-walker) is one too. /wave:orchestrator and /wave:builder run" +
-      "\nin their chats' main sessions and land in (non-workflow agents) instead. The TOTAL row sums both —" +
+      "\nA wf_* row exists only for a Workflow-engine run — a script under the repo's workflows/ or a skill-embedded" +
+      "\nengine (/deep-rr). /wave:orchestrator, /wave:builder and /wave:walker run in their chats' main" +
+      "\nsessions and land in (non-workflow agents) instead. The TOTAL row sums both —" +
       "\na wave's end-to-end chat cost. Total a wave with --filter <wave-label>."
   );
 }
@@ -1103,10 +1103,10 @@ Usage: node token-ledger.mjs [options]
   --detail <id|substr>   list one agent's individual API calls in order
   --by-workflow          group by workflow run (wf_*) instead of by agent — one row
                          per run + a "(non-workflow agents)" summary row + TOTAL.
-                         wf_* = a Workflow-engine run (.claude/workflows/* or /deep-rr); a
-                         wave's walker pass (wave-walker) is one too. /wave:orchestrator
-                         and /wave:builder land in (non-workflow agents) instead — total
-                         a wave with --filter <wave-label>.
+                         wf_* = a Workflow-engine run (workflows/* or /deep-rr).
+                         /wave:orchestrator, /wave:builder and /wave:walker land in
+                         (non-workflow agents) instead — total a wave with
+                         --filter <wave-label>.
   --filter <substr>      restrict the per-agent table + totals to rows whose label or
                          model id contains <substr> (case-insensitive); prints match
                          count. Composes with --all / --session / --json.

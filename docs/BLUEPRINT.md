@@ -15,7 +15,7 @@ The discipline + character of the pipeline. Read this before installing it.
 - [Staying current — the update mechanism](#staying-current--the-update-mechanism)
 - [The smell test](#the-smell-test)
 
-> **Personality is load-bearing.** Strip the Professor's voice and you have a Confluence wiki. Strip Professor's cross-disciplinary depth and the analysis becomes generic. The blueprint is a transplantable nervous system — characters, polymath Professor and all — refitted to your domain at install time. It drops into **any Claude Code project at any repo size**: structure is captured at install as a **roster** of 1..N projects, so a single-project repo (roster of one — first-class) and a multi-project monorepo get correctly-sized files from the same templates.
+> **Personality is load-bearing.** Strip the Professor's voice and you have a Confluence wiki. Strip Professor's cross-disciplinary depth and the analysis becomes generic. The blueprint is a transplantable nervous system — characters, polymath Professor and all — refitted to your domain at install time. It drops into **any Claude Code project at any repo size**: structure is captured at install as a **roster** of 1..N projects, so a single-project repo (roster of one — first-class) and a multi-project repo get correctly-sized files from the same templates.
 
 ---
 
@@ -32,8 +32,8 @@ Every command, agent, and rule sorts into one of three tiers:
 ### The cast (Tier A — universal)
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator voice and root persona. Lives in `templates/prompts/professor.md`, selected by the Claude launch policy.
-- **/pfm** — meta-engineer that edits the pipeline at the source. Surgery, not journaling. `pfm audit [scope]` (`agents`, `commands`, `skills`, `pipeline`, `scripts`, `structure`, `cross-refs`, or `all`) walks the pipeline's own files against a checklist per scope; `/context-meter` audits the framework's own context budget.
-- **/wave:{orchestrator,builder,refine,walker,live,ccc}, /dev, /git, /documenter** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the opt-in chat MCP server the same binary registers.
+- **/pcm** — Professor Change Manager: edits the pipeline at the source. Surgery, not journaling. `/pcm audit [scope]` (`agents`, `commands`, `skills`, `pipeline`, `scripts`, `structure`, `cross-refs`, or `all`) walks the pipeline's own files against a checklist per scope; `/context-meter` audits the framework's own context budget.
+- **/wave:{orchestrator,builder,refine,walker,live,ccc}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the opt-in chat MCP server the same binary registers.
 
 > The Tier A persona ships as ONE version: `professor.md` (the harness replacement) — lean voice plus the behavioral contract (concise delivery, the Verdict, the Analysis Protocol).
 
@@ -43,14 +43,14 @@ Every command, agent, and rule sorts into one of three tiers:
 - **/wave:refine** — wave task refinement into a zero-gap spec.
 - **/wave:walker** — end-to-end functional and hygiene walk. The reviewer report gates the merge; a walker is an additional audit when the train protocol requests it.
 - **/wave:ccc** — the Control & Command Center: the standing command seat over a running train. Full audit from ground truth on arrival, then holds command until the train closes — verifies claims against the tree, rules scope-allocation escalations, dispatches through the orchestrator.
-- **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, spawning the `rndier` agent to execute one run.
+- **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, executing the run itself.
 - **/tokens** — per-agent/per-workflow token spend attribution parsed from local transcripts, ranked by estimated cost.
 - **/quality:doc** / **/quality:prompt** / **/quality:description** / **/quality:md-forlint** — the quality gates: reference-doc shape, prompt prose, the `description:` routing field, and markdown lint/format mechanics.
-- **/audit:code-hygiene** / **/audit:security** / **/audit:ai-output** — code-hygiene, security, and AI-output audit scopes. Code-hygiene additionally has a Sweep Mode (`code-hygiene sweep`) that promotes a report-only run to actively removing confirmed-dead code and unused dependencies, end-to-end behind QA.
+- **/audit:code-hygiene** / **/audit:security** — code-hygiene and security audit scopes. Code-hygiene additionally has a Sweep Mode (`code-hygiene sweep`) that promotes a report-only run to actively removing confirmed-dead code and unused dependencies, end-to-end behind QA.
 
 **Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones and the in-tree links):**
 
-- **deep-rr** — in-tree research protocol under `engines/deep-rr/`, linked by host installation.
+- **deep-rr** — in-tree research protocol under `workflows/deep-rr/`, linked by host installation.
 - **architecture-design** — codebase layout designed for agent maintainers: one directory per unit of change, a fixed file anatomy, grep-true names, façades for the cross-cutting calls, and the brief anchors a build hand reads; greenfield designs a tree, brownfield measures the existing one and writes the migration. Ships in-tree under `templates/global/skills/architecture-design/`, linked by host installation.
 - **ghostwriter** — captures a writer's mechanical fingerprint and generates in that voice.
 - **vision-factory** — forge, validate, and stress-test a startup vision.
@@ -62,14 +62,12 @@ Every command, agent, and rule sorts into one of three tiers:
 ### The optional cast (Tier B — opt-in at install)
 
 - **/officer** — compliance enforcer. Pick your regulation(s). (GDPR, HIPAA, FDA, SOC2, ISO 27001, MiFID, none.)
-- **/km** — knowledge curator. Pick your knowledge domain.
-- **/pm** — user+product hybrid. Pick your user persona.
 - **/mentor** — business advisor. Pick your market + jurisdiction.
 - **/marketer** — visibility strategist. Pick your channels + language.
 
 ### The plumbing (Tier C — invisible)
 
-- `mono-planner`, `mono-architect`, `mono-documenter`, `gitter`, `rndier`, and one `{role}-{project}` wrapper per roster entry per role (the `qa-{project}` gates among them) — root agents; `tracer`, `scheduler`, `architect`, `reviewer`, `rr`, and `rr-super` are machine-global originals under `templates/global/agents/`, linked by `pfm install`. Role-defined, not character-defined.
+- `gitter` — root agent; `tracer`, `scheduler`, `architect`, `reviewer`, and `rr` are machine-global originals under `templates/global/agents/`, linked by `pfm install`. Role-defined, not character-defined.
 - `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh` — scripts.
 - `pfm statusline` — native status bar with model, fleet counts, context, git, cost, spend, and rate limits. Wired in the host settings by `pfm install`.
 - `.rumdl.toml` — the markdown policy: one config whose `[per-file-ignores]` table decides which rules each path category obeys (prompt, doc, public; generated and record paths excluded). Read by `/quality:md-forlint` and by the `format-md.sh` hook.
@@ -127,7 +125,7 @@ This means you can run **multiple pipelines in parallel on the same machine** wi
 
 ### 5. Self-improvement at the source
 
-When something goes wrong in the pipeline, you don't write a "lesson" file. You invoke `/pfm` (the meta-agent that owns the pipeline itself). It edits the actual agent definition or command instructions to prevent the bug class going forward. **Surgery at the source.** Pipeline files are meant to evolve.
+When something goes wrong in the pipeline, you don't write a "lesson" file. You invoke `/pcm` (the change manager that owns the pipeline itself). It edits the actual agent definition or command instructions to prevent the bug class going forward. **Surgery at the source.** Pipeline files are meant to evolve.
 
 ---
 
@@ -161,7 +159,7 @@ These rules appear in `CLAUDE.md` and are referenced by every agent. They are th
                           └──────────┬──────────┘
                                      ▼
                           ┌─────────────────────┐
-                          │  mono-planner       │ → docs/dev/tasks/{name}/1-plan.md
+                          │  main-loop session  │ → docs/dev/tasks/{name}/1-plan.md
                           │  consolidates plan  │
                           └──────────┬──────────┘
                                      ▼
@@ -170,7 +168,7 @@ These rules appear in `CLAUDE.md` and are referenced by every agent. They are th
                           └──────────┬──────────┘
                                      ▼
                           ┌─────────────────────┐
-                          │  mono-architect     │ → 3-architecture.md
+                          │  main-loop session  │ → 3-architecture.md
                           │  cross-project      │   (contracts, shared types, inline research)
                           └──────────┬──────────┘
                                      ▼
@@ -208,7 +206,7 @@ These rules appear in `CLAUDE.md` and are referenced by every agent. They are th
                           └──────────┬──────────┘
                                      ▼
                           ┌─────────────────────┐
-                          │  mono-documenter    │ → updates permanent docs
+                          │  main-loop session  │ → updates permanent docs
                           │                     │   archives pipeline dir
                           └──────────┬──────────┘
                                      ▼
@@ -217,7 +215,7 @@ These rules appear in `CLAUDE.md` and are referenced by every agent. They are th
                           └─────────────────────┘
 ```
 
-Meta path: `/pfm {request}` → edits the agent definitions at the source.
+Meta path: `/pcm {request}` → edits the agent definitions at the source.
 
 ---
 
@@ -234,10 +232,9 @@ your-project/
 │   ├── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
 │   └── drift.md                       ← local customization notes (human-readable)
 ├── .claude/
-│   ├── agents/                        ← root agents (mono-planner, mono-architect, mono-documenter, gitter, rndier, {role}-{project} wrappers; tracer/scheduler/architect are machine-global)
-│   ├── commands/                      ← /wave:{orchestrator,builder,refine,walker,live,ccc}, /pfm and framework release tools, /context-meter, /dev, /git, /documenter, /audit:{code-hygiene,security,ai-output}, /quality:{prompt,doc}, /rnd, /tokens + opt-in Tier B (`/reload` is NOT here — `pfm install` installs it host-level)
+│   ├── agents/                        ← root agents (gitter; tracer/scheduler/architect are machine-global)
+│   ├── commands/                      ← /wave:{orchestrator,builder,refine,walker,live,ccc}, /pcm, /pfm (the CLI guide), /context-meter, /dev, /audit:{code-hygiene,security}, /quality:{prompt,doc}, /rnd, /tokens + opt-in Tier B (`/reload` is NOT here — `pfm install` installs it host-level)
 │   ├── scripts/                       ← worktree.sh, alloc-ports.sh, dev.sh, notify.sh, format-md.sh, filter-test-output.sh, checkpoint.sh, git-lock.sh, guard-stamp.sh, drain-wait.sh
-│   ├── workflows/                     ← project-local Workflow scripts such as documenter-fanout and audit-ai-output-sessions; Wave Walker runs from the permanent Professor clone
 │   ├── skills/                        ← bundled legal shelf + project source registry; machine-global skills live under templates/global/skills/ (its sources.json declares the fetched ones)
 │   └── settings.json                  ← permissions, env vars, hooks (notify, formatter, statusline)
 ├── .codex/                            ← (OPTIONAL) pointer layer over .claude/ — never a restatement of it
@@ -278,10 +275,10 @@ A `.claude/` infrastructure — a **transplantable nervous system** — that tur
 - **A pipeline that refuses cowboy coding** — `planner → architect → developer → QA → merge`. QA gates block bad code from reaching `main`.
 - **One agent owns git** — only `gitter` runs `git add` / `commit` / `merge`. Centralized, auditable, safe.
 - **Cross-disciplinary analysis** — the Professor brings 15+ PhDs to bear on architecture, design, and safety/correctness questions. The Analysis Protocol lives in the fleet prompt (`templates/prompts/professor.md`), injected via `pfm` `claude.systemPrompt = "professor"`.
-- **Self-improvement** — `/pfm` is the meta-agent that edits its own pipeline rules at the source.
+- **Self-improvement** — `/pcm` is the change manager that edits its own pipeline rules at the source.
 - **Optional dual-runtime** — Codex (OpenAI) can mirror the Claude pipeline as a cheaper implementation layer. Same manuals, different runtime. Everything works without it.
 - **Path conventions that scale** — `$DOCS`, `$WORKTREE`, `$CDOCS` so agents never hardcode paths.
-- **Documentation discipline** — pipeline docs are temporary and archived; only one agent (`mono-documenter`) writes to permanent project docs.
+- **Documentation discipline** — pipeline docs are temporary and archived; only the main-loop session writes to permanent project docs (a command-owned surface such as `docs/business/**` is written by its owning command), every write under the `/quality:doc` Approval gate.
 - **Memory backup (opt-in)** — a `SessionEnd` hook auto-syncs Claude's persistent project memory to a private repo, so a machine wipe doesn't lose what Claude learned. Plain git, zero tokens. See `references/memory-backup.md`.
 
 ---

@@ -1,7 +1,7 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: wave:live
-description: Batches a task list on `main` — no worktree; parallel builds, qa-{project} tests per touched project, one /documenter + gitter commit, then /wave:walker with inline remediation. Trigger /wave:live [file|tasks] (empty → root wave.md). Successor /wave:walker (merge-SHA mode).
+description: Batches a task list on `main` — no worktree; parallel builds, {project}-qa tests per touched project, one docs pass + gitter commit, then /wave:walker with inline remediation. Trigger /wave:live [file|tasks] (empty → root wave.md). Successor /wave:walker (merge-SHA mode).
 argument-hint: [task file | inline tasks]
 ---
 
@@ -40,14 +40,14 @@ The full suites run on the single-tenant canonical test stack: take the boundary
 ## W5 — Cleanup → docs → commit
 
 1. **Cleanup** — the fix-core card § Step 5 format + lint gate on every modified project.
-2. **Docs** — invoke `/documenter` ONCE (the fix-core card § Step 6, Mode FIX-UPDATE) describing the whole batch and every affected project. If `{epic-name}` is not `none`, then invoke `/documenter epic {epic-name}` to consolidate the wave per its Epic consolidation contract.
+2. **Docs** — run the fix-core card § Step 6 ONCE over the whole batch and every affected project. If `{epic-name}` is not `none`, consolidate the wave into `docs/epics/{epic-name}/` per `docs/epics/TEMPLATE.md` § Consolidation contract.
 3. **Commit** — invoke `gitter` (the fix-core card § Step 7, Phase COMMIT): one code commit per task or logical group, plus one doc commit.
 
 ## W6 — Review & remediate
 
-Write a lightweight review input to `docs/dev/waves/{wave-name}/review.md` — the manifest's task list plus the W5 commit SHAs (the walk's scout runs `git show {sha}` for these commits). Invoke the walker workflow: `Workflow({ scriptPath, args: { reportPath: 'docs/dev/waves/{wave-name}/review.md', invariants, project } })` — scriptPath and `args.project` read from `.claude/commands/wave/walker-invariants.md` § Engine Config, the same file this step already opens for `invariants`, and passed verbatim; never `{name}`: name-lookup serves a stale session-start snapshot. `invariants` is transcribed per `walker.md` § Entry points (mechanical transcription; an empty registry match → omit). It returns `{ verdict, actionItems, review }` plus the `ledger`.
+Write a lightweight review input to `docs/dev/waves/{wave-name}/review.md` — the manifest's task list plus the W5 commit SHAs (the walk diffs `{sha}^..{sha}` for each). Run `/wave:walker docs/dev/waves/{wave-name}/review.md` (merge-SHA mode): it dispatches `tracer` and `reviewer`, folds both, and writes `## Professor's Wave Review` — verdict, findings, `### Action Items` — into that file.
 
-Group every code finding in `### Action Items` by its file or project (a finding with no single owner file groups by its named project). Run ONE remediation lane per group — diagnose → fix every finding in the group → re-test that group's affected suites once → cleanup (the fix-core card §§ 2–5) — then `gitter` `Phase: COMMIT` for the group: one commit per group, or one commit total when every group lands together. Re-run `/documenter` if a fix changed documented behavior. Surface the review's owner-tagged deferrals (`/pm`, `/officer`, the user); never park a fixable defect. Present the verdict.
+Group every code finding in `### Action Items` by its file or project (a finding with no single owner file groups by its named project). Run ONE remediation lane per group — diagnose → fix every finding in the group → re-test that group's affected suites once → cleanup (the fix-core card §§ 2–5) — then `gitter` `Phase: COMMIT` for the group: one commit per group, or one commit total when every group lands together. Re-run the fix-core card § Step 6 if a fix changed documented behavior. Surface the review's owner-tagged deferrals (`/officer`, the user); never park a fixable defect. Present the verdict.
 
 ## W7 — Report
 

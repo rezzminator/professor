@@ -1,7 +1,6 @@
 ---
 name: audit:security
-version: "1.0.0"
-description: Scans every attack surface by section — info-leak, injection, auth, {API_PROTOCOL}, LLM/prompt, {SENSITIVE_DATA}, health, crypto, secrets, transport, supply-chain, CI/CD, concurrency/SoD; bare `security` runs all, a scope names a section by letter (`8C`) or topic (`injection`, `auth`, `llm`, `secrets`, …). Returns SECURITY findings by severity.
+description: Scans for security defects — info-leak, injection, auth, {API_PROTOCOL}, LLM/prompt, {SENSITIVE_DATA}, health endpoints, crypto/secrets, transport, supply-chain, CI/CD, concurrency (8A–8K). Scope — bare runs all; a letter (8C) or topic (auth, {SENSITIVE_DATA}, health) runs one section. Report-only.
 argument-hint: [scope]
 ---
 
@@ -9,35 +8,18 @@ argument-hint: [scope]
 
 > {PROJECT_NAME} handles {SESSION_NOUN} records, {SUBJECT_NOUN} data, and {DOMAIN_ADJ} observations — among the most sensitive data categories in this domain. A security breach here doesn't just leak emails; it exposes someone's most private information to whoever should never see it. This is not a checkbox — it's a fortress inspection. {SACRED_GROUND}
 
-**Trigger:** `security`, `security <scope>`.
-
 **Scopes:** bare `security` runs every section; a scope names a section by letter (`8C`) or a topic (`injection`, `auth`, `{API_PROTOCOL}`, `llm`, `prompt`, `{SENSITIVE_DATA}`, `health`, `crypto`, `secrets`, `transport`, `supply-chain`, `ci-cd`, `concurrency`) and runs only the section(s) covering it. Sections are independent.
 
-**Report format (used across all sub-categories):**
-
-```
-SECURITY: {sub-category}/{issue_type}
-  Where: {file:line}
-  What: {description — what's vulnerable and how}
-  Severity: {CRITICAL | HIGH | MEDIUM | LOW}
-  Risk: {what an attacker could exploit, especially in a {DOMAIN_ADJ}/{SENSITIVE_DATA} context}
-  Fix: {specific remediation with code pattern}
-```
+**Every finding reports:** `SECURITY: {sub-category}/{issue_type}` — Where (`file:line`) · What (what is vulnerable and how) · Severity · Risk (what an attacker could exploit, in a {DOMAIN_ADJ}/{SENSITIVE_DATA} context) · Fix (remediation with the code pattern).
 
 **Severity guide:**
 
-- **CRITICAL:** {SUBJECT_NOUN} data exposure, missing auth on mutations, hardcoded real credentials, direct prompt injection allowing data exfiltration, unvalidated LLM output executed as code
-- **HIGH:** Exception internals reaching users, technology stack disclosure, missing input validation on external boundaries, indirect prompt injection vectors, {SENSITIVE_DATA} sent to external APIs without safeguards, JWT algorithm confusion
-- **MEDIUM:** Hardcoded enum lists, inconsistent auth patterns, verbose error messages, missing rate limiting, overly permissive CORS, missing security headers
-- **LOW:** `X-Powered-By` header, internal IDs in non-sensitive responses, minor naming leaks in non-production code paths
-
----
+- CRITICAL: {SUBJECT_NOUN} data exposure, missing auth on mutations, hardcoded real credentials, direct prompt injection allowing data exfiltration, unvalidated LLM output executed as code
+- HIGH: exception internals reaching users, technology stack disclosure, missing input validation on external boundaries, indirect prompt injection vectors, {SENSITIVE_DATA} sent to external APIs without safeguards, JWT algorithm confusion
+- MEDIUM: hardcoded enum lists, inconsistent auth patterns, verbose error messages, missing rate limiting, overly permissive CORS, missing security headers
+- LOW: `X-Powered-By` header, internal IDs in non-sensitive responses, minor naming leaks in non-production code paths
 
 ## 8A — Information Leakage & Error Exposure
-
-Internal system details leaking to end users through error messages, headers, or responses.
-
-**How to detect:**
 
 1. **Internal error details exposed to users:** Grep for `type(e).__name__` or `str(e)` stored in user-visible fields, `e.message` or raw exception strings in {API_PROTOCOL} error responses, Python/Node exception class names in any client-visible field, `stack`/`stackTrace` in API responses.
 
@@ -51,11 +33,7 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** {API_FRAMEWORK} error middleware, {API_FRAMEWORK} config, all catch blocks in resolvers/services, AI/pipeline-project exception handlers (if the roster has one), health/status route handlers.
 
----
-
 ## 8B — Injection Attacks
-
-**How to detect:**
 
 1. **SQL injection:** `sql.raw(` with user values, template literals with variables in {ORM}, Python `text(` or `execute(` with f-strings/.format() (e.g. in the AI/pipeline project).
 
@@ -71,11 +49,7 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** Resolver input handling, AI/pipeline-project DB query code, shell command construction, UI components rendering AI content.
 
----
-
 ## 8C — Authentication & Authorization
-
-**How to detect:**
 
 1. **Missing auth on {API_PROTOCOL} operations:** Every mutation/sensitive query must have auth middleware. Mutations without auth (except login/register/health) are CRITICAL.
 
@@ -87,7 +61,7 @@ Internal system details leaking to end users through error messages, headers, or
 
 5. **Session/token management:** Missing refresh token rotation, no invalidation on password change, tokens in URLs/query params.
 
-6. **Feature-flag login bypass:** any magic/demo login path must be gated behind an explicit feature flag that is off in dev/prod env files (enabled only in a dedicated demo env).
+6. **Feature-flag login bypass:** any magic/demo login path must be gated behind an explicit feature flag that is off in dev/prod env files (enabled only in a dedicated demo env); a bypass the project has removed end to end stays removed — grep for its identifiers outside the tests, and pin the absence with a test.
 
 7. **Header-trust (CWE-290):** authorization/identity/rate-limit decisions read the verified JWT context (`ctx.user`), never a raw header (`X-Forwarded-For`, `X-Real-IP`, `req.headers[...]`). Pin {API_FRAMEWORK} `trust proxy` to the exact proxy hop count.
 
@@ -97,11 +71,7 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** JWT middleware, resolver auth patterns, auth service, feature flag config, token storage in UI/client projects, env files.
 
----
-
 ## 8D — {API_PROTOCOL} Attack Surface
-
-**How to detect:**
 
 1. **Introspection enabled in production:** Must be disabled. Check for environment-based toggling.
 
@@ -125,11 +95,7 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** {API_FRAMEWORK} config, schema type definitions, input types, {REALTIME_PROTOCOL} setup, subscription resolvers.
 
----
-
 ## 8E — LLM & Prompt Injection
-
-**How to detect:**
 
 1. **Direct prompt injection:** f-strings/`.format()` in prompt construction with user data, `HumanMessage(content=` with raw user/source text.
 
@@ -155,13 +121,9 @@ Internal system details leaking to end users through error messages, headers, or
 
 12. **Semantic injection scan:** alongside structural source-text sanitize, a phrase-level jailbreak scan (log + metric) over source-derived text feeding any chain.
 
-**Files to check:** Chain definitions, prompt templates, {AI_FRAMEWORK} agent/tool definitions, LLM response processing, {QUEUE} consumer, UI rendering of AI content, the AI project's manifest for the {AI_FRAMEWORK} version.
-
----
+**Files to check:** Chain definitions, prompt templates, {AI_FRAMEWORK} agent/tool definitions, LLM response processing, {QUEUE} consumer, UI rendering of AI content, the {AI_SERVICE_NAME} manifest for the {AI_FRAMEWORK} version.
 
 ## 8F — {SENSITIVE_DATA} & {DOMAIN_ADJ} Data Protection
-
-**How to detect:**
 
 1. **{SUBJECT_NOUN} data in logs:** read EVERY log call in scope and judge each field it carries — a grep for known {SENSITIVE_DATA} field names is a regression check only, structurally blind to a new field shape. NEVER log {SENSITIVE_DATA} — only anonymized IDs. Report log calls read / log calls in scope; an unread call is a named hole, not silence.
 
@@ -189,11 +151,7 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** All log statements, error handlers, {TRANSCRIPTION_SERVICE} integration, LLM prompt construction, UI/client storage, media handling, URL construction, package manifests for analytics SDKs, marketing site for tracking pixels, notes resolver access control, consent flag checks.
 
----
-
 ## 8G — Cryptographic Failures & Secrets Management
-
-**How to detect:**
 
 1. **Hardcoded secrets & committed key material:** Grep for `sk-`, `{LLM_KEY_PREFIX}`, `pk_live_`, `AKIA`, `Bearer `, `password = "`, base64-encoded credentials, raw PEM private-key block headers, and connection strings with inline `user:password`.
 
@@ -213,11 +171,7 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** All `.env*` files, auth/JWT config, password hashing, token generation, DB connection config.
 
----
-
 ## 8H — Server & Transport Security
-
-**How to detect:**
 
 1. **CORS misconfiguration:** `origin: '*'` or `origin: true` allows any website. Check credential + wildcard combination.
 
@@ -239,11 +193,7 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** {API_FRAMEWORK} middleware stack, CORS config, HTTP client usage, {REALTIME_PROTOCOL} config, rate limiting, environment config branching.
 
----
-
 ## 8I — Supply Chain & Dependency Security
-
-**How to detect:**
 
 1. **Lock file integrity:** every project ships a committed lock file for its package manager — enumerate the roster and each project's package manager from root `CLAUDE.md` § Architecture (never assume a fixed list), then confirm each project's lock file exists and is tracked.
 
@@ -261,25 +211,17 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** `package.json` files, lock files, `.npmrc`, CI config for audit steps.
 
----
-
 ## 8J — CI/CD & Framework Supply Chain
-
-**How to detect:**
 
 1. **Actions script injection:** every `${{ ... }}` expression inside a workflow `run:` block is a shell-injection sink — the value belongs in `env:`/`with:`, referenced as `$VAR`.
 
 2. **Unpinned actions:** third-party CI actions are pinned to a full commit SHA, not a floating tag (`@v4`).
 
-3. **Framework-file trust:** any new or changed file under `.claude/**` or the AI project's prompt/knowledge dir gets a static injection/code-exec scan before merge — a marketplace skill or knowledge file is untrusted input injected verbatim into an agent or the runtime LLM. The `pfm-guard.sh` / `km-guard.sh` gates own this boundary.
+3. **Framework-file trust:** any new or changed file under `.claude/**` or the {AI_SERVICE_NAME} prompt dir gets a static injection/code-exec scan before merge — a marketplace skill or prompt file is untrusted input injected verbatim into an agent or the runtime LLM. The `pfm-guard.sh` gate owns this boundary.
 
-**Files to check:** CI workflow files, `.claude/**`, the AI project's prompt/knowledge dir.
-
----
+**Files to check:** CI workflow files, `.claude/**`, the {AI_SERVICE_NAME} prompt/knowledge dir.
 
 ## 8K — Concurrency & Segregation of Duties
-
-**How to detect:**
 
 1. **TOCTOU fence:** an ownership/{ORG_UNIT}/role fence is re-checked at the point of use, not evaluated once at the top of an `await`-spanning multi-step handler whose state can change mid-flight.
 
@@ -289,12 +231,10 @@ Internal system details leaking to end users through error messages, headers, or
 
 **Files to check:** resolvers/services with multi-step reads-then-writes, {QUEUE} consumers, audit-log write path, consent/erasure services.
 
----
-
 ## Method & Severity
 
 - **Adversarial verification:** confirm each finding through distinct hostile lenses — a Saboteur (concurrency/state/error-swallow), a New Hire (misused API), a Security Auditor (authz/secret/injection) — surfacing at least one finding per lens. A finding two lenses raise independently is promoted a severity level.
 - **State the contract first:** before reading a resolver body, state its authorization contract in one line (who may call, whose data) — then verify the code meets it.
 - **CVSS on confirmed findings:** attach a vector as a reproducible severity input — horizontal read ≈ 6.5, horizontal write ≈ 8.1, vertical-to-admin ≈ 8.8, unauthenticated-admin ≈ 9.8.
 - **Verification gate:** a scan is done when a re-run after the fix lands clean, not when the report is written.
-- **Control mapping (ISO 27001:2022 Annex A):** A.5.15 (access control), A.5.18 (access rights), A.8.3 (info access restriction), A.5.16 (identity management), A.8.4 (source-code access), A.8.16 (monitoring), A.5.34 (PII/privacy). The 2013 labels A.9/A.12/A.18 are retired.
+- **Control mapping (ISO 27001:2022 Annex A):** A.5.15 (access control), A.5.18 (access rights), A.8.3 (info access restriction), A.5.16 (identity management), A.8.4 (source-code access), A.8.16 (monitoring), A.5.34 (PII/privacy).

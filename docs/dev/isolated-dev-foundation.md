@@ -29,7 +29,7 @@ gitter merges worktree → develop only after in-fence verification (project gat
 
 ## Mechanics
 
-- `dev.sh` provides `iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]` through Docker Compose. The active checkout is read-only; Go caches plus walker dependencies and generated cross-runtime candidates use container volumes, while its tracked legacy bundle and active pointer stay visible. Walker `all` builds before verifying the generated targets. Every invocation builds the current Dockerfile before running. Docker absent → loud `TOOLCHAIN-MISSING`, never a silent host fallback.
+- `dev.sh` provides `iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]` through Docker Compose. The active checkout is read-only; Go and npm caches use container volumes. Every invocation builds the current Dockerfile before running. Docker absent → loud `TOOLCHAIN-MISSING`, never a silent host fallback.
 - **Broken-state report:** every `iso` run prints the container id and the in-container `$HOME` as its first line — a run that cannot prove it is inside the fence did not run inside the fence. A host-toolchain fallback is impossible by construction (the verb IS the docker invocation).
 - Builder briefs change one clause: all build/test through `dev.sh iso`; never build to the host's `~/.local/bin`; never run `pfm install` on the host.
 - The CLAUDE.md § Process "no worktree pipeline — deliberate scope choice" clause is reversed for code waves (a /ptm change, ordered by the user 2026-08-20). Blueprint/docs-only waves are markdown and cannot destabilize the box — see decision (a).

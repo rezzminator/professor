@@ -13,7 +13,7 @@ Run a batch of tasks live on `develop`: $ARGUMENTS
 
 A task list runs here. This command lands every task on `develop` under `$dev` verification and a gitter commit — the isolated worktree fence is for code-wave trains, not `$wave-live`.
 
-The fix loop the steps below cite is this repo's own: the `dev` agent implements, `.claude/scripts/dev.sh` verifies, the `qa` agent writes the tests, `gitter` commits. A change touching `.claude/**`, any `CLAUDE.md`, or `templates/**` routes through `$pfm` instead of a `dev` agent — those files are guarded and a dev agent is denied by the hook.
+The fix loop the steps below cite is this repo's own: the `dev` agent implements, `.claude/scripts/dev.sh` verifies, the `qa` agent writes the tests, `gitter` commits. A change touching `.claude/**`, any `CLAUDE.md`, or `templates/**` routes through `$pcm` instead of a `dev` agent — those files are guarded and a dev agent is denied by the hook.
 
 ## W1 — Resolve, stage & pre-flight
 
@@ -46,12 +46,12 @@ Every failure is blocking, pre-existing included. A regression test counts only 
 ## W5 — Cleanup → commit
 
 1. **Cleanup** — remove scratch output from tracked directories; generated artifacts belong in `tmp/`. Run each modified project's formatter and lint row through `.claude/scripts/dev.sh verify {project}`.
-2. **Docs** — update the docs the change makes wrong, in the same pass: a project `README`, a reference card under `docs/commands/`. A change to `CLAUDE.md`, `.claude/**`, or a `templates/**` template routes through `$pfm`.
+2. **Docs** — update the docs the change makes wrong, in the same pass: a project `README`, a reference card under `docs/commands/`. A change to `CLAUDE.md`, `.claude/**`, or a `templates/**` template routes through `$pcm`.
 3. **Commit** — invoke `gitter` (COMMIT phase): one commit per task or logical group. Never commit with a failing suite.
 
 ## W6 — Review & remediate
 
-Write a lightweight review input to `docs/dev/waves/{wave-name}/review.md` — the manifest's task list plus the W5 commit SHAs (the walk's scout runs `git show {sha}` for these commits). Invoke the walker workflow: `Workflow({ scriptPath, args: { reportPath: 'docs/dev/waves/{wave-name}/review.md', invariants, project } })` — scriptPath and `args.project` read from `.claude/commands/wave/walker-invariants.md` § Engine Config, the same file this step already opens for `invariants`, and passed verbatim; never `{name}`: name-lookup serves a stale session-start snapshot. `invariants` is transcribed per `walker.md` § Entry points (mechanical transcription; an empty registry match → omit). It returns `{ verdict, actionItems, review }` plus the `ledger`.
+Write a lightweight review input to `docs/dev/waves/{wave-name}/review.md` — the manifest's task list plus the W5 commit SHAs (the walk diffs `{sha}^..{sha}` for each). Run `$wave-walker docs/dev/waves/{wave-name}/review.md` (merge-SHA mode): it dispatches `tracer` and `reviewer`, folds both, and writes `## Professor's Wave Review` — verdict, findings, `### Action Items` — into that file.
 
 Group every code finding in `### Action Items` by its file or project (a finding with no single owner file groups by its named project). Run ONE remediation lane per group: a `dev` agent diagnoses and fixes every finding in the group, `qa` re-runs that project's suite once, then `gitter` commits the group — one commit per group, or one commit total when every group lands together. Surface the review's user-owned deferrals; never park a fixable defect. Present the verdict.
 

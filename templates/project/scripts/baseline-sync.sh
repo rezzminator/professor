@@ -6,8 +6,8 @@ set -euo pipefail
 # SELF ROUND-TRIPS (releases whose content this repo already contains: every gap tag
 # reachable from the local blueprint clone's main, zero commits on origin/main the
 # clone lacks) is synced mechanically — VERSION + manifest version/updated_at + one
-# drift.md update-history row. Anything else is genuine peer content: exit 10 — port
-# it from the blueprint clone by hand. Keeps the tag-collision guarantee: after a sync, VERSION equals the
+# drift.md update-history row. Anything else is genuine peer content: exit 10, resync
+# this install from the Professor framework repo. Keeps the tag-collision guarantee: after a sync, VERSION equals the
 # highest published tag, so the next computed release version exceeds every
 # published tag.
 
@@ -108,7 +108,7 @@ fi
 # LOCAL < LATEST: gap analysis
 behind="$(git -C "$CLONE" rev-list --count main..origin/main)"
 if (( behind > 0 )); then
-  echo "baseline-sync: PEER-CONTENT — ${behind} commit(s) on origin/main not in the local clone; update from the blueprint clone" >&2
+  echo "baseline-sync: PEER-CONTENT — ${behind} commit(s) on origin/main not in the local clone; resync this install from the Professor framework repo" >&2
   exit 10
 fi
 
@@ -121,13 +121,13 @@ for t in "${ALL_TAGS[@]}"; do
 done
 
 if [[ ${#GAP_TAGS[@]} -eq 0 ]]; then
-  echo "baseline-sync: PEER-CONTENT — no gap tags found above v${LOCAL_VER} though LOCAL < LATEST; update from the blueprint clone" >&2
+  echo "baseline-sync: PEER-CONTENT — no gap tags found above v${LOCAL_VER} though LOCAL < LATEST; resync this install from the Professor framework repo" >&2
   exit 10
 fi
 
 for t in "${GAP_TAGS[@]}"; do
   if ! git -C "$CLONE" merge-base --is-ancestor "v${t}" main; then
-    echo "baseline-sync: PEER-CONTENT — tag v${t} not contained in the local clone; update from the blueprint clone" >&2
+    echo "baseline-sync: PEER-CONTENT — tag v${t} not contained in the local clone; resync this install from the Professor framework repo" >&2
     exit 10
   fi
 done
@@ -233,3 +233,4 @@ if (( archived_count > 0 )); then
 else
   echo "baseline-sync: SYNCED — VERSION v${LOCAL_VER} → v${LATEST_VER}; manifest updated; drift.md row appended"
 fi
+

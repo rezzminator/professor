@@ -2,7 +2,7 @@
 
 Gitter phase card — every core `gitter.md` rule (Remote Publication Boundary, Scoped-commit discipline, BANNED commands, commit convention) binds here.
 
-Invoked **after the documenter fan-out** (scout → per-scope workers) finishes merging. The orchestrator passes `Archive:` — pipeline/wave dirs to archive after committing, or `none`.
+Invoked **after the main-loop session finishes merging permanent docs** (the fix-core card § Step 6) or at wave archive (`/wave:live` W8). The caller passes `Archive:` — pipeline/wave dirs to archive after committing, or `none`.
 
 `{ROSTER_DOC_PATHS}` below is one `{project}/docs/` per roster project. At roster size 1 the repo-root `docs/` already covers it, so the per-project list may be empty.
 
@@ -29,7 +29,7 @@ fi
 
 ## 3. Move archived dirs to tmp cold storage
 
-Skip if `Archive: none`. `Archive:` entries may be dirs or single files. Per entry: `docs/dev/builds/*` → `tmp/dev/archive/builds/`, `docs/dev/waves/*` → `tmp/dev/archive/waves/`, `docs/dev/trains/*` → `tmp/dev/archive/trains/`, consumed queue specs `docs/dev/waves/queue/*.md` → `tmp/dev/archive/waves/queue/`. `tmp/` is gitignored — entries stay browseable while git history keeps the committed record; no archive remains under `docs/`.
+Skip if `Archive: none`. `Archive:` entries may be dirs or single files. Per entry: `docs/dev/builds/*` → `tmp/dev/archive/builds/`, `docs/dev/waves/*` → `tmp/dev/archive/waves/`, `docs/dev/trains/*` → `tmp/dev/archive/trains/`, consumed queue specs `docs/dev/trains/queue/*.md` → `tmp/dev/archive/waves/queue/`. `tmp/` is gitignored — entries stay browseable while git history keeps the committed record; no archive remains under `docs/`.
 
 ```bash
 mkdir -p tmp/dev/archive/builds tmp/dev/archive/waves tmp/dev/archive/trains tmp/dev/archive/waves/queue

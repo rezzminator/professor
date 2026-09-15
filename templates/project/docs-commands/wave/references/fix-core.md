@@ -47,7 +47,7 @@ Build multi-part work with sub-agents, not inline — decompose into parts and s
 
 ### Server management during fixes
 
-Restart a changed service with `/dev restart {project}` (a hot-reloading dev server usually needs no restart). After DB schema changes, run migrations first. If the fix came from by `/dev` auto-heal, restart with `DEV_NO_AUTOHEAL=1` so `/dev` → `/wave:live` doesn't loop.
+Restart a changed service with `/dev restart {project}` (a hot-reloading dev server usually needs no restart). After DB schema changes, run migrations first. If the fix came from `/dev` auto-heal, restart with `DEV_NO_AUTOHEAL=1` so the `/dev` loop cannot repeat.
 
 ---
 
@@ -65,12 +65,9 @@ After the restart settles, check for new errors via `/dev log` (or tail `$ROOT/t
 
 ### 4c. Test the fix
 
-- Hit the relevant endpoints to confirm the issue is resolved
+- Hit the relevant endpoints to confirm the issue is resolved.
 - **Affected-first:** run only the tests you touched or added (plus directly affected ones) first as a fast confirm — they must fail without the fix and pass with it. Only once they pass, run the **full** suite (unit + integration) once per modified roster project, as the gate. Derive each project's suite commands from its child `CLAUDE.md` and its qa-reference doc — a project's integration tier can be a separate set of scripts from its unit tier, so the top-level test command alone may not be the full gate.
-
-**ZERO TOLERANCE — fix ALL failing tests.** If tests fail, you fix them — period. It does not matter whether the failure was caused by your hotfix or was pre-existing. The fix loop leaves `main` cleaner than it found it. "Pre-existing" is not an excuse — it's a second bug you just discovered. Diagnose it, fix it, and include it in your commit. If you walked past a broken test and committed anyway, you blessed broken code — and that is not what this loop does.
-
-The ONLY acceptable exception: a test that requires external services you genuinely cannot reach (e.g., a paid API key that isn't configured locally). In that case, document the skip explicitly in your report. Everything else gets fixed.
+- **ZERO TOLERANCE — fix ALL failing tests,** whether your fix caused them or they were already broken; a pre-existing failure is a second bug you just found — diagnose it, fix it, ship it in this commit. The ONLY exception: a test requiring an external service you genuinely cannot reach (an unconfigured paid API key) — document that skip explicitly in your report.
 
 ### 4d. Run typecheck
 
@@ -83,7 +80,7 @@ Only run checks for projects that were modified. Skip projects whose language ha
 
 ### 4e. If the fix didn't work
 
-Go back to Step 2 — re-diagnose with the new information. Repeat until the issue is resolved. Do NOT give up after one attempt. Use logs, breakpoints, endpoint testing, and database inspection to iteratively narrow down the root cause.
+Return to Step 2 and re-diagnose with the new information; iterate (logs, breakpoints, endpoint tests, DB inspection) until the issue is resolved.
 
 ### 4f. Prevent recurrence
 
@@ -98,7 +95,7 @@ Every fix carries at least ONE prevention measure, committed alongside it in the
 
 ### 4g. QA regression test
 
-Always invoke `Agent(qa-{project})` — the modified project's registered QA subagent, one per modified project — to add two layers of coverage: a regression test that reproduces the failure end-to-end (fails without the fix, passes with it), and unit tests for the specific functions, components, or sections that broke. QA judges feasibility — when no reliable test is possible (e.g. an external-service-only failure), it reports why instead of forcing one. Both ship in the same commit.
+Always invoke `Agent({project}-qa)` — the modified project's registered QA subagent, one per modified project — to add two layers of coverage: a regression test that reproduces the failure end-to-end (fails without the fix, passes with it), and unit tests for the specific functions, components, or sections that broke. QA judges feasibility — when no reliable test is possible (e.g. an external-service-only failure), it reports why instead of forcing one. Both ship in the same commit.
 
 ---
 
@@ -106,9 +103,9 @@ Always invoke `Agent(qa-{project})` — the modified project's registered QA sub
 
 Before committing, ensure the codebase is clean:
 
-1. **Remove debug artifacts** — any temporary `console.log`, `print()`, hardcoded values, or test hacks that were added during investigation (keep intentional logging additions)
-2. **Verify servers are healthy** — run `/dev status`
-3. **Stop dev servers** — run `/dev kill` to ensure clean state
+1. **Remove debug artifacts** — any temporary `console.log`, `print()`, hardcoded values, or test hacks added during investigation (keep intentional logging additions).
+2. **Verify servers are healthy** — run `/dev status`.
+3. **Stop dev servers** — run `/dev kill` to ensure clean state.
 4. **Format + lint gate** — zero lint errors on every modified project, fixed before committing:
 
 ```bash
@@ -118,19 +115,19 @@ cd {project} && {PROJECT_FORMAT} && {PROJECT_LINT} && cd ..
 
 ---
 
-## Step 6 — Update docs via documenter
+## Step 6 — Update permanent docs
 
-`/documenter` runs BEFORE committing — Step 7 ships code + docs in one gitter call. First spawn a collector-tier doc-relevance classifier briefed with the diff's file list + a one-line change summary, schema-forced to return exactly `{docsAffected: true|false, scopes: [affected doc clusters]}` — it classifies only, never concludes. `docsAffected: true`, or ANY uncertainty, → invoke `/documenter` in FIX-UPDATE mode: `/documenter A fix landed on `main` via `/wave:live`: {what changed}. Projects affected: {list}. Doc scopes: {scopes}.`
+Docs update BEFORE committing — Step 7 ships code + docs in one gitter call. First spawn a collector-tier doc-relevance classifier briefed with the diff's file list + a one-line change summary, schema-forced to return exactly `{docsAffected: true|false, scopes: [affected doc clusters]}` — it classifies only, never concludes. `docsAffected: true`, or ANY uncertainty, → the main-loop session merges the change into the permanent docs it owns (root clusters under `docs/agents/`, each roster project's `docs/`); a command-owned surface (`docs/business/**`, `docs/commands/{cmd}/`) is updated only by its owning command, and `docs/facts/` only on the user's explicit ruling.
 
-It reads the changed files, updates only the relevant permanent docs, skips unaffected ones, and does NOT commit — that happens in Step 7.
+Merge rules: load `/quality:doc` first; verify every operation/table/component name against the changed source, never the dev report; edit only the docs the diff reaches, current-state (superseded text is replaced, git history keeps it); run the `/quality:doc` Approval gate over every doc touched — fix-and-recheck until `APPROVED: {path}`; then `npx prettier --write --prose-wrap preserve` on each edited `.md`. Docs are not committed here — that happens in Step 7.
 
-`docsAffected: false` is legal only for zero-doc-surface changes (comment typo, log-message string, cosmetic-only); report "Documenter skipped — no doc surface (classifier + {reason})". Any change that adds/removes/renames a function, changes a config constant, modifies a data flow, or alters test patterns HAS doc surface — a classifier verdict to the contrary is wrong; run the documenter.
+`docsAffected: false` is legal only for zero-doc-surface changes (comment typo, log-message string, cosmetic-only); report "Docs skipped — no doc surface (classifier + {reason})". Any change that adds/removes/renames a function, changes a config constant, modifies a data flow, or alters test patterns HAS doc surface — a classifier verdict to the contrary is wrong; update the docs.
 
 ---
 
 ## Step 7 — Commit all changes via gitter
 
-Invoke the `gitter` agent ONCE with `Phase: COMMIT`, `Pipeline: {wave-name}` (or the caller's pipeline name), the project keys held, the exact code files changed, and the exact doc files changed (or "none — documenter skipped"). Gitter stages only the files you name, lands one code commit plus a separate doc commit when docs changed, and reports the hashes. Name every file — an unnamed file does not ship.
+Invoke the `gitter` agent ONCE with `Phase: COMMIT`, `Pipeline: {wave-name}` (or the caller's pipeline name), the project keys held, the exact code files changed, and the exact doc files changed (or "none — docs skipped"). Gitter stages only the files you name, lands one code commit plus a separate doc commit when docs changed, and reports the hashes. Name every file — an unnamed file does not ship.
 
 ---
 

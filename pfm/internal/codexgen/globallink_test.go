@@ -128,7 +128,7 @@ func TestClassifyGlobalLinkStates(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(target, "nested"), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		dirSource := filepath.Join(sourceRepo, "engines", "deep-rr")
+		dirSource := filepath.Join(sourceRepo, "workflows", "deep-rr")
 		state, _, err := ClassifyGlobalLink(target, dirSource, sourceRepo, GlobalLinkDir)
 		if err != nil {
 			t.Fatal(err)

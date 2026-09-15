@@ -5,7 +5,7 @@ set -euo pipefail
 # repo's three projects. /dev drives it; agents call it directly.
 #
 # WHAT THIS SCRIPT REPORTS WHEN IT IS ITSELF BROKEN:
-#   - a missing toolchain (go/node/npm) is TOOLCHAIN-MISSING and exits non-zero.
+#   - a missing toolchain (go/node) is TOOLCHAIN-MISSING and exits non-zero.
 #     It is NEVER reported as a pass or a skip: "we could not look" and "there is
 #     nothing wrong" must not print the same word.
 #   - a project with no dependencies installed is NOT-INSTALLED, not "clean".
@@ -16,26 +16,24 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-PROJECTS=(templates pfm walker)
+PROJECTS=(templates pfm)
 
 # project -> directory
 proj_dir() {
   case "$1" in
     templates) echo "templates" ;;
     pfm)  echo "pfm" ;;
-    walker)    echo "engines/wave-walker/engine" ;;
     *) return 1 ;;
   esac
 }
 
 # project -> the toolchain binaries that project's checks actually need. A tool
 # absent from the SCOPE being reported is a warn, not a failure: `status pfm`
-# must not fail on a missing npm, and must still fail on a missing go.
+# must not fail on a missing node, and must still fail on a missing go.
 proj_tools() {
   case "$1" in
     templates) echo "node" ;;
     pfm)       echo "go" ;;
-    walker)    echo "node npm" ;;
     *) return 1 ;;
   esac
 }
@@ -63,35 +61,6 @@ need_tool() { # need_tool <bin> <project>
     fail_step "$2: TOOLCHAIN-MISSING — '$1' not on PATH; this project could not be checked"
     return 1
   fi
-}
-
-node_installed() { # node_installed <dir> <project>
-  [[ -f "$1/node_modules/.package-lock.json" ]] && return 0
-  # A clean checkout with no node_modules is the common case, not a broken
-  # one — try an install before failing, but ONLY offline: `npm ci --offline`
-  # refuses instantly if the local cache cannot satisfy the lockfile, so this
-  # never becomes the silent mid-run network call the repo's other install
-  # hooks are deliberately kept out of. A cold cache falls straight through
-  # to the honest NOT-INSTALLED below.
-  if [[ -f "$1/package-lock.json" ]]; then
-    info "$2: no node_modules — trying an offline install from the local npm cache before failing"
-    if npm --prefix "$1" ci --offline >/dev/null 2>&1; then
-      ok "$2: installed from the local npm cache (offline, no network)"
-      return 0
-    fi
-  fi
-  local msg="$2: NOT-INSTALLED — no node_modules; run '$(basename "$0") install $2'"
-  # SWEEP_ALL is set only for the all-projects aggregate (`dev.sh test`, no
-  # project arg): there, a project the sweep never reached is a coverage
-  # gap the report must name AS a gap, not fold into the FAIL scroll a
-  # single broken project also produces. A targeted `dev.sh test walker`
-  # keeps the plain FAIL — the project named is the only one in scope.
-  if [[ "${SWEEP_ALL:-0}" == 1 ]]; then
-    gap_step "$msg"
-  else
-    fail_step "$msg"
-  fi
-  return 1
 }
 
 run() { # run <label> -- <cmd...>
@@ -128,7 +97,7 @@ cmd_status() { # cmd_status [project|all]
   for p in "${scope[@]}"; do required+="$(proj_tools "$p") "; done
 
   head_ "toolchain — scope: $target"
-  for t in go node npm git jq; do
+  for t in go node git jq; do
     if command -v "$t" >/dev/null 2>&1; then
       ok "$t — $(command -v "$t")"
     elif [[ "$required" == *" $t "* ]]; then
@@ -147,12 +116,6 @@ cmd_status() { # cmd_status [project|all]
         ok "$p — $d/ ($(find "$d" -type f -not -name refresh-map.json | wc -l | tr -d ' ') shipped files, no build)" ;;
       pfm)
         ok "$p — $d/ (go $(sed -n 's/^go //p' "$d/go.mod" | head -1))" ;;
-      walker)
-        if [[ -d "$d/node_modules" ]]; then
-          ok "$p — $d/ (npm, deps installed)"
-        else
-          warn "$p — $d/ (npm, NOT-INSTALLED — 'dev.sh install $p')"
-        fi ;;
     esac
   done
 
@@ -300,15 +263,8 @@ act_templates() { # the shipped product: mechanical gates, no build
         fail_step "opencode mirror FAILED — run: node .claude/scripts/build-opencode.mjs generate"
       fi
 
-      head_ "templates — isolated-fence mount preflight"
-      if bash infra/fence-preflight-test.sh; then
-        ok "Docker Desktop mount targets are prepared before the read-only worktree bind"
-      else
-        fail_step "isolated-fence mount preflight FAILED — nested volume targets are not safely prepared"
-      fi
-
       head_ "templates — self-hosted manifest"
-      if bash infra/check-self-hosted-manifest.sh "$REPO_ROOT" templates pfm engines/wave-walker/engine; then
+      if bash infra/check-self-hosted-manifest.sh "$REPO_ROOT" templates pfm; then
         ok "self-hosted manifest version, roster, and hashes match the repository"
       else
         fail_step "self-hosted manifest FAILED — its install ledger is stale or unreadable"
@@ -353,45 +309,10 @@ act_pfm() {
   esac
 }
 
-act_npm() { # act_npm <project> <action> [extra script...]
-  local p="$1" action="$2" d; d="$(proj_dir "$p")"
-  need_tool npm "$p" || return 0
-  case "$action" in
-    install)
-      if [[ -f "$d/package-lock.json" ]]; then
-        run "$p: npm ci" -- npm --prefix "$d" ci
-      else
-        run "$p: npm install" -- npm --prefix "$d" install
-      fi ;;
-    *)
-      node_installed "$d" "$p" || return 0
-      case "$action" in
-        build)     run "$p: npm run build" -- npm --prefix "$d" run build ;;
-        typecheck) run "$p: npm run typecheck" -- npm --prefix "$d" run typecheck ;;
-        verify)
-          if npm --prefix "$d" run 2>/dev/null | grep -q '^  verify'; then
-            run "$p: npm run verify" -- npm --prefix "$d" run verify
-          else
-            info "$p: no verify script"
-          fi ;;
-        test)      run "$p: npm test" -- npm --prefix "$d" test ;;
-      esac ;;
-  esac
-}
-
-act_walker() {
-  local action="$1"
-  case "$action" in
-    all) act_npm walker build; act_npm walker verify; act_npm walker typecheck; act_npm walker test ;;
-    *) act_npm walker "$action" ;;
-  esac
-}
-
 dispatch() { # dispatch <project> <action>
   case "$1" in
     templates) act_templates "$2" ;;
     pfm)  act_pfm "$2" ;;
-    walker)    act_walker "$2" ;;
   esac
 }
 
@@ -418,9 +339,6 @@ cmd_iso() { # cmd_iso <action> [project]
   local compose="$REPO_ROOT/infra/docker-compose.yml"
   if [[ ! -f "$compose" ]]; then
     fail_step "iso: TOOLCHAIN-MISSING — $compose not found"; exit 1
-  fi
-  if ! bash "$REPO_ROOT/infra/prepare-fence-mounts.sh" "$REPO_ROOT"; then
-    fail_step "iso: prepare nested Docker volume targets under $REPO_ROOT"; exit 1
   fi
 
   local git_common git_dir git_dir_relative
@@ -466,7 +384,7 @@ commands:
   install                fetch dependencies
   build                  compile
   typecheck              vet / tsc --noEmit
-  verify                 pre-test gates (go vet + pfm's architecture ratchet, walker's verify, templates's leak + token gates)
+  verify                 pre-test gates (go vet + pfm's architecture ratchet, templates's leak + token gates)
   test                   run the test suite
   all                    verify + build + test for the project
   iso <cmd> [project]    run any command above — plus e2e | shell — inside the

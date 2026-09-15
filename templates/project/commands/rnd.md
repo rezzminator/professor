@@ -1,6 +1,6 @@
 ---
 name: rnd
-description: 'Runs research on {AI_SERVICE_NAME} LLM calls — under .professor/RND/<call>/<N>-<slug>/, one rndier spawn per run; `new <call> <slug> <goal>` (or a bare `<goal>`), `continue <call> [<goal>]`, `verify <call>/<run>`, `land <call>/<run>` (user-ratified only). Triggers "RND <goal>", "research and develop", "iterate until", "find the best prompt for".'
+description: 'Runs research on {AI_SERVICE_NAME} LLM calls — under .professor/RND/<call>/<N>-<slug>/, one `general-purpose` spawn per run (inline when small); `new <call> <slug> <goal>` (or a bare `<goal>`), `continue <call> [<goal>]`, `verify <call>/<run>`, `land <call>/<run>` (user-ratified only). Triggers "RND <goal>", "research and develop", "iterate until", "find the best prompt for".'
 argument-hint: "[new <call> <slug> <goal> | continue <call> [<goal>] | verify <call>/<run> | land <call>/<run> | <goal>]"
 ---
 
@@ -8,12 +8,12 @@ argument-hint: "[new <call> <slug> <goal> | continue <call> [<goal>] | verify <c
 
 Request: $ARGUMENTS
 
-An RND takes a measurable goal against ONE {AI_SERVICE_NAME} call and reaches it by rounds: arms → real calls → sealed judging → verdict. This command owns the lifecycle; `rndier` (the RND scientist agent) executes one run per spawn. Read `.professor/RND/README.md` (the layout law) before acting.
+An RND takes a measurable goal against ONE {AI_SERVICE_NAME} call and reaches it by rounds: arms → real calls → sealed judging → verdict. This command owns the lifecycle; each run executes in one `general-purpose` spawn briefed from its `BRIEF.md` (§ Run protocol), or inline in this session when the run is small — one arm, one input class, under an hour of calls. § Layout is the layout law; read it before acting.
 
 ## Boundaries (inviolable)
 
 - Sandbox only: every artifact lives in the run dir. An RND never edits a project file; its deliverable is `PROPOSED_DIFF.md`, landed by hand or via `/wave:builder` only after the user ratifies the completed result. An authorization to research ("RND this", "fix it via RND") never authorizes landing.
-- Independent of {AI_SERVICE_NAME}: the run imports or points at nothing under `{AI_PROJECT}`; production enters twice, as a black box — the baseline (invoked whole) and the final in-process monkey-patch validation of `PROPOSED_DIFF.md`.
+- Independent of {AI_SERVICE_NAME}: the run imports or points at nothing under the {AI_SERVICE_NAME} source tree (`{PROJECT}/src/{ai_module}/**`); production enters twice, as a black box — the baseline (invoked whole) and the final in-process monkey-patch validation of `PROPOSED_DIFF.md`.
 - Sensitive-data discipline: reports, ledgers, logs, agent messages carry ids, counts, enums — never transcript text. Corpus transcripts are synthetic seeds; the rule holds anyway. {SECONDARY_LANG} evidence surfaced to the user is translated.
 - Money: hard caps for the model under test and for judges, frozen in `STATE.md` before the first paid call; provider keys come from the environment.
 - Git: no RND agent runs a git write; gitter commits run dirs at milestones on the Professor's dispatch.
@@ -33,10 +33,10 @@ Dispatch by the first word of `$ARGUMENTS`.
 
 ### `new <call> <slug> <goal>` — and a bare `<goal>`
 
-1. Resolve the call: the {AI_SERVICE_NAME} module dir under `{AI_PROJECT}/src/{ai_module}/**` that owns the prompt under study. A bare goal names its call by inference; ambiguity → one question.
+1. Resolve the call: the {AI_SERVICE_NAME} module dir under `{PROJECT}/src/{ai_module}/**` that owns the prompt under study. A bare goal names its call by inference; ambiguity → one question.
 2. `lab new <call> <slug>` creates the run dir (the copy's `COPIED_FROM.md` names its source).
 3. Write `BRIEF.md` in the run dir: goal verbatim · call + prompt anchors · the cited defect and the input that reproduces it · bar (metric, threshold, denominator, minimum class size, who ruled it) · arms (≤5, most promising first, each with hypothesis, prediction and what falsifies it) · corpus (which `_corpus` sessions and traps; another call's output → `<call>/_corpus/`; the whole-session stress inputs marked) · draws (5 per prompt × transcript, parallel, drawn once) and concurrency · budgets · judge engines (lab defaults unless ruled) · gates G1..Gn, each with the exact number that passes · the stop rule · deliverables (§ `verify`) · every standing ruling that binds this run, quoted.
-4. Spawn `rndier` (subagent_type: `rndier`) with the run dir and `BRIEF.md` as absolute paths. One run per spawn; another round is another spawn on a new N — never a duplicate of a live one (check the roster first).
+4. Execute the run — a `general-purpose` spawn (Opus, xhigh) whose brief carries the five briefing fields, each read from `BRIEF.md`: the goal and the artifacts it returns (`REPORT.md` + `PROPOSED_DIFF.md` + `STATE.md` in the run dir); the boundary (§ Boundaries verbatim — sandbox only, no project-file edits, no git writes, ids/counts/enums only); the anchors (the run dir and `BRIEF.md` as absolute paths, `<call>/WINNER.md`, the previous run's `REPORT.md`/`STATE.md` when `COPIED_FROM.md` names one); the budgets as hard caps; and its failure shape (a cap reached, an unreproducible baseline, an instrument that will not fire → stop, hold, report the gate that blocked — never route around it). Every standing ruling that binds the run is quoted in the brief, never summarized. One run per spawn; another round is another spawn on a new N — never a duplicate of a live one (check the roster first). A small run executes inline under the same § Run protocol.
 
 ### `continue <call> [<goal>]`
 
@@ -55,6 +55,15 @@ Performed on disk, never asserted:
 ### `land <call>/<run>`
 
 Only on the user's explicit ratification of that run's `PROPOSED_DIFF.md` in the current turn. Land the change by hand or route it to `/wave:builder` (cross-project) with the monkey-patch validation evidence and the report's numbers; after merge, `WINNER.md` status → shipped, with the SHA.
+
+## Run protocol (binds every run, spawned or inline)
+
+0. Instrument, zero network: before the first paid call prove the sandbox render is byte-identical to production's on every corpus item; the ledger and receipt paths round-trip (an unparseable cost prints `UNKNOWN`, never $0); every detector, scorer and key fires and does not over-fire on hand-read specimens; the trap key is audited against its own files; the model string is pinned and the harness exits on mismatch. The brief's claims about the corpus are hypotheses — verify them here.
+1. Freeze `STATE.md` § Gates before the first paid call — gates with passing numbers, arms with one falsifiable prediction each, draws and concurrency, corpus md5, production's call spec verbatim, budgets, judge engines, the stop rule (gate pass · three consecutive non-improving arms · the cap). `STATE.md` is the resume file: append every round and every mid-run constraint change verbatim; never rewrite the frozen section.
+2. Baseline (gate 0): the shipped prompt runs as arm `prod`, byte-identical, copied into the run with its md5; reproduce the brief's cited defect on it before measuring any fix.
+3. Arms move one lever each, every untouched section byte-identical; the prompt is the first cure — a mechanical guard or schema change is an arm only after a prompt arm is measured and loses. A red gate sends you to the scorer first: fix a broken detector once and rescore every arm from stored outputs before drawing a comparison. A dead-end arm is recorded with its numbers and reason so it is never re-derived.
+4. Deliver in the run dir per § `verify`; the final message carries goal · winner · one line per gate · cost · residuals · the numbered rulings queue · every deliverable's path — no transcript text. Hand up, never decide: {DOMAIN_ADJ} taxonomy, definition widening, the user's ruled wording, spend beyond the cap, any change to what the model receives that the brief did not name.
+5. Long work runs detached through the harness's own mechanism with an explicit timeout and a monitor; every parallel worker gets uniquely named output and log files; liveness is judged from the process table and disk artifacts, never from a monitor's timeout message or a sub-agent's recap.
 
 ## Judging law (binds every run)
 

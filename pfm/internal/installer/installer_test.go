@@ -1039,10 +1039,10 @@ func TestWireGlobalCommandsSkipsAnAbsentOrEmptySource(t *testing.T) {
 
 // TestWireGlobalSkillsLinksDeepRR pins the third registry: a whole-directory
 // symlink at {Home}/.claude/skills/deep-rr resolving to the in-tree
-// engines/deep-rr skill.
+// workflows/deep-rr skill.
 func TestWireGlobalSkillsLinksDeepRR(t *testing.T) {
 	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".professor", "engines", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
+	writeFixture(t, filepath.Join(home, ".professor", "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
 
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
@@ -1051,11 +1051,11 @@ func TestWireGlobalSkillsLinksDeepRR(t *testing.T) {
 	}
 	assertLink(t,
 		filepath.Join(home, ".claude", "skills", "deep-rr"),
-		filepath.Join(home, ".professor", "engines", "deep-rr"))
+		filepath.Join(home, ".professor", "workflows", "deep-rr"))
 }
 
 // TestWireGlobalSkillsReportsMissingSkillSource pins the exact
-// SKILL-SOURCE-MISSING wording bullet 3 requires when engines/deep-rr/
+// SKILL-SOURCE-MISSING wording bullet 3 requires when workflows/deep-rr/
 // SKILL.md is absent at link time — reported, no link ever created.
 func TestWireGlobalSkillsReportsMissingSkillSource(t *testing.T) {
 	home := t.TempDir()
@@ -1225,8 +1225,8 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 func TestGlobalSourceRepoRootPrefersExplicitOptionOverDefault(t *testing.T) {
 	home := t.TempDir()
 	elsewhere := t.TempDir()
-	writeFixture(t, filepath.Join(elsewhere, "engines", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
-	writeFixture(t, filepath.Join(home, ".professor", "engines", "deep-rr", "SKILL.md"), "# wrong deep-rr skill\n")
+	writeFixture(t, filepath.Join(elsewhere, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
+	writeFixture(t, filepath.Join(home, ".professor", "workflows", "deep-rr", "SKILL.md"), "# wrong deep-rr skill\n")
 
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, SourceRepo: elsewhere, Runner: &fakeRunner{},
@@ -1235,7 +1235,7 @@ func TestGlobalSourceRepoRootPrefersExplicitOptionOverDefault(t *testing.T) {
 	}
 	assertLink(t,
 		filepath.Join(home, ".claude", "skills", "deep-rr"),
-		filepath.Join(elsewhere, "engines", "deep-rr"))
+		filepath.Join(elsewhere, "workflows", "deep-rr"))
 }
 
 // TestGlobalSourceRepoRootFallsBackToTheRecordedMarker pins the second rung:
@@ -1245,7 +1245,7 @@ func TestGlobalSourceRepoRootPrefersExplicitOptionOverDefault(t *testing.T) {
 func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 	home := t.TempDir()
 	elsewhere := t.TempDir()
-	writeFixture(t, filepath.Join(elsewhere, "engines", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
+	writeFixture(t, filepath.Join(elsewhere, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
 
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, SourceRepo: elsewhere, Runner: &fakeRunner{},
@@ -1263,7 +1263,7 @@ func TestGlobalSourceRepoRootFallsBackToTheRecordedMarker(t *testing.T) {
 	}
 	assertLink(t,
 		filepath.Join(home, ".claude", "skills", "deep-rr"),
-		filepath.Join(elsewhere, "engines", "deep-rr"))
+		filepath.Join(elsewhere, "workflows", "deep-rr"))
 }
 
 func TestApplyRetiresInstalledBBCardsAndHook(t *testing.T) {

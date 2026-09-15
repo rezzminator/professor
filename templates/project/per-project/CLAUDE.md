@@ -2,7 +2,7 @@
      SETUP expands this block once per roster entry (a roster of one has NO child CLAUDE.md — its
      conventions live in the root CLAUDE.md). Substitute the entry's name, role, stack, package
      manager, test runner, and ports. Delete sections a given project does not need (a project with
-     no database drops § Data Conventions; a pure-infra project drops the two-tier test block).
+     no database drops § Data Conventions; a project that only owns infra drops the two-tier test block).
      Keep ONLY the project-specific delta — NEVER re-declare a workspace rule already in root
      CLAUDE.md (anti-pattern #11). Delete this comment at install. -->
 
@@ -98,7 +98,7 @@
 #### Integration ({INTEGRATION_TEST_DIR})
 
 - {INTEGRATION_RUNNER}; mock only external deps, everything within 1 hop runs real
-- Setup: `make -C {INFRA_PROJECT} up-test && make -C {INFRA_PROJECT} db-setup-test`; each test seeds its own rows inline
+- Setup: `make -C {PROJECT} up-test && make -C {PROJECT} db-setup-test` (`{PROJECT}` = the roster entry whose Makefile owns the infra targets); each test seeds its own rows inline
 - Runs `{PARALLEL_FLAG}` always — a test that fails at parallel-N is made parallel-safe, never pinned serial
 - QA reports `BUG-WRONG-ENV` if any integration test loads `.env.local` as the primary env
 
@@ -109,8 +109,8 @@
 
 | File | Purpose | Infrastructure |
 | ------------ | ----------------- | ----------------------------------------------------- |
-| `.env.local` | Local development | {INFRA_PROJECT} local — {DB_PORT} |
-| `.env.test` | Integration tests | {INFRA_PROJECT} test — {DB_PORT_TEST}, fully isolated |
+| `.env.local` | Local development | {PROJECT} local — {DB_PORT} |
+| `.env.test` | Integration tests | {PROJECT} test — {DB_PORT_TEST}, fully isolated |
 
 ### Access Control
 

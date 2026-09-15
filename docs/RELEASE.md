@@ -41,7 +41,7 @@ Maintainer command: `/pfm:release {patch|minor|major} "{summary}" [--from {live-
 
 1. **Pre-flight** — owner auth, the `main-release-only` ruleset intact (pull request, green checks, no force-push, no deletion), `develop` fast-forwarded and containing `origin/main`.
 2. **Two worktrees** — `.worktrees/release/main` detached at `origin/main` (stable) and `.worktrees/release/develop` on `release/v{X.Y.Z}` (candidate). All release work lands in the candidate; the live checkout is never swept.
-3. **Scope** — the release's scope is `develop`'s diff and commit log against `main`; reviewers write the notes and adopter instructions from it; with `--from`, the refresh pass re-derives `templates/**` from the live source per `docs/commands/pfm/references/refresh.md`.
+3. **Scope** — the release's scope is `develop`'s diff and commit log against `main`; reviewers write the notes and adopter instructions from it; with `--from`, the refresh pass re-derives `templates/**` from the live source per `docs/commands/pcm/references/refresh.md`.
 4. **Review** — reviewers read `origin/main...HEAD` per area and return defects plus bullets for un-ledgered changes; every defect is verified against the code, then fixed and committed on the candidate.
 5. **Notes** — `releases/v{X.Y.Z}.md` from the ledger bullets (verbatim) and the reviewers' bullets, the `CHANGELOG.md` index line, `VERSION`, the self-hosted install ledger.
 6. **Gates** — both worktrees run `dev.sh iso all` per project and `dev.sh iso e2e`; a stable red is inherited, a candidate red is fixed.

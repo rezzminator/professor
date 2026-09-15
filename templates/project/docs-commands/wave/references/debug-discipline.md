@@ -16,7 +16,7 @@ Five steps, in order:
 
 **E — Query the layer below** (the trace says WHICH await; this says WHY):
 
-- DB, while hung: `make -C {INFRA_PROJECT} db-exec-test SQL="SELECT pid, state, wait_event, wait_event_type, query FROM pg_stat_activity WHERE state != 'idle';"` — `wait_event` reads: `ClientRead` = DB answered, client never read → protocol-level deadlock (classic: tz-aware datetime into `timestamp without time zone`) · `Lock`/`transactionid` = row lock, find the holder PID · `IO` = disk-bound · `null`+`active` = genuinely running, slow not dead.
+- DB, while hung: `make -C {PROJECT} db-exec-test SQL="SELECT pid, state, wait_event, wait_event_type, query FROM pg_stat_activity WHERE state != 'idle';"` — `wait_event` reads: `ClientRead` = DB answered, client never read → protocol-level deadlock (classic: tz-aware datetime into `timestamp without time zone`) · `Lock`/`transactionid` = row lock, find the holder PID · `IO` = disk-bound · `null`+`active` = genuinely running, slow not dead.
 - asyncio: `for task in asyncio.all_tasks(): task.print_stack()` (wire to SIGUSR1 to dump from outside).
 - HTTP: `curl -v --max-time 10 <endpoint>` — curl hangs too = server; curl fast = client (query/fetch layer).
-- Silent crash: grep swallowed exceptions — `grep -rn "except.*:\s*$\|except.*:\s*pass" {AI_PROJECT}/src/ | grep -v test_` (the no-swallowed-exceptions law lives in root CLAUDE.md).
+- Silent crash: grep swallowed exceptions — `grep -rn "except.*:\s*$\|except.*:\s*pass" {project}/src/ | grep -v test_` (the no-swallowed-exceptions law lives in root CLAUDE.md).

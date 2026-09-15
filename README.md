@@ -19,7 +19,7 @@
   <a href="#install">Install</a> ·
   <a href="#the-discipline-layer-templates">Discipline layer</a> ·
   <a href="#the-fleet-cli-pfm">Fleet CLI</a> ·
-  <a href="#engines-engines">Engines</a> ·
+  <a href="#workflows-workflows">Workflows</a> ·
   <a href="docs/BLUEPRINT.md">Blueprint</a>
 </p>
 
@@ -117,8 +117,8 @@ Two panes, two harnesses. You type one line into the Claude chat on the left; th
 A subagent tries to `Edit` a file under `.claude/`. The PreToolUse guard answers:
 
 ```text
-DENIED — infra edits route through /pfm: open this session's gate from the repo root …
-Do NOT route around this by disabling the hook or editing infra outside /pfm.
+DENIED — infra edits route through /pcm: open this session's gate from the repo root …
+Do NOT route around this by disabling the hook or editing infra outside /pcm.
 ```
 
 The refusal carries its own unlock steps. That is one of 26 mandatory rules every install ships with: only `gitter` writes git; fix loops cap at three attempts, then `BLOCKED-DEFERRED`; read-only mappers (`tracer`) are separated from judges (`reviewer`); and **every check names what its own broken state reports** — a gate that says "fine" when healthy and when broken is a coincidence detector.
@@ -211,15 +211,15 @@ Clone it into a repo and you get the complete agent, command, hook, script, and 
 
 The single idea underneath it is the **honest-looking absence** — an instrument that answers "nothing found" both when nothing is there and when the instrument itself is broken. The wave walker says it out loud:
 
-> SCOUT FAILURE… An empty enumeration is never a verdict.
+> An empty enumeration is never a verdict.
 
 - **One agent writes git.** `gitter` runs six named phases (SETUP, COMMIT, MERGE, PUSH, PULL, TAG). No other agent commits.
-- **Guarded files.** `.claude/**` and every `CLAUDE.md` sit behind `/pfm` plus a session that has read the quality-prompt contract.
+- **Guarded files.** `.claude/**` and every `CLAUDE.md` sit behind `/pcm` plus a session that has read the quality-prompt contract.
 - **The judge is never the thing being judged.** Verdicts are read from disk, never from a brief that asserts green.
-- **The wave pipeline.** refine → scheduler → orchestrator → builder → walker: the walker is a 19-seat verification engine (scout, thread walkers, slice sensor, gate sweep, security auditor, invariant hunter, anomaly judge, coverage critic, second opinion, final judge) whose failure states are named.
+- **The wave pipeline.** refine → scheduler → orchestrator → builder → walker: the walker dispatches the `tracer` and `reviewer` agents over the landed diff and folds their two reports into one verdict, every unmapped target and unreached hunk named.
 - **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.
 
-Optional roles ship for teams that want them — `/officer`, `/km`, `/pm`, `/mentor`, `/marketer` — along with a legal skill shelf. **The philosophy lives in [docs/BLUEPRINT.md](docs/BLUEPRINT.md).**
+Optional roles ship for teams that want them — `/officer`, `/mentor`, `/marketer` — along with a legal skill shelf. **The philosophy lives in [docs/BLUEPRINT.md](docs/BLUEPRINT.md).**
 
 ---
 
@@ -242,10 +242,9 @@ From `pfm doctor`'s own registry: Linux or macOS, `amd64` or `arm64`, plus `tmux
 
 ---
 
-## Engines (`engines/`)
+## Workflows (`workflows/`)
 
-- **deep-rr** (`engines/deep-rr/`) — background research that returns a cited report: a scout swarm, a brainer steering the crawl, quote-pinned claims audited mechanically, lineage clustering so corroboration counts independent sources. Compiled for the Claude Workflow runtime. Start at [engines/deep-rr/README.md](engines/deep-rr/README.md).
-- **wave-walker** (`engines/wave-walker/engine/`) — post-merge wiring verification: a scout, parallel walkers, a rule engine and a final judge. One TypeScript source compiled by `cross-workflow` for both the Claude Workflow runtime and the Codex SDK. Node ≥ 22.13. Design: [engines/wave-walker/engine/design.md](engines/wave-walker/engine/design.md).
+- **deep-rr** (`workflows/deep-rr/`) — background research that returns a cited report: a scout swarm, a brainer steering the crawl, quote-pinned claims audited mechanically, lineage clustering so corroboration counts independent sources. Compiled for the Claude Workflow runtime. Start at [workflows/deep-rr/README.md](workflows/deep-rr/README.md).
 
 ---
 

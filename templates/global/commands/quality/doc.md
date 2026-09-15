@@ -7,9 +7,8 @@ description: MANDATORY — load before writing or restructuring any reference do
 
 Reference docs under `docs/` are read by LLM agents (whole-file `Read`, `grep`), not by humans in a rendered viewer. Shape them for that reader, at write-time.
 
-**When to load:** `/documenter` loads this before writing any permanent reference doc. Load it yourself before hand-editing or restructuring `docs/agents/*`, child `*/docs/*`, or any large reference doc.
+**When to load:** the main-loop session loads this before writing any permanent reference doc (the fix-core card § Step 6). Load it yourself before hand-editing or restructuring `docs/agents/*`, child `*/docs/*`, or any large reference doc.
 
-Fan-out documenter workers read the extract card `docs/commands/documenter/references/doc-approval.md` — a declared copy of the write rules + § Approval below. This file is canonical; edit both together.
 
 ## The deciding principle
 
@@ -41,7 +40,7 @@ A change to one record touches only that record's lines — zero reflow of its n
 
 A reference doc describes what IS, now. When a record is removed, delete it — no `~~strikethrough~~`, no "Removed {date}" / "Deprecated" / "Added in wave-N" note, and no grouping of records by the build that added them. Stale annotations poison retrieval: the agent reads a dead endpoint as real and builds on it. Rationale prose ("Background", "Why we chose X in 2024") goes the same way — encode the current rule, drop the story. History lives in `git log` and epic manifests.
 
-Authorship follows the same law: no `> Author:` / `> Last updated:` / `> Wave:` byline. Git owns authorship and last-edited date; the path owns ownership (`documenter.md` § Document Registry).
+Authorship follows the same law: no `> Author:` / `> Last updated:` / `> Wave:` byline. Git owns authorship and last-edited date; the path owns ownership (root `docs/agents/` and each project's `docs/` → the main-loop session; `docs/business/**` → its owning command).
 
 ## Name fidelity — docs are grep-true
 

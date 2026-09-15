@@ -6,7 +6,7 @@ This is the "WHICH agent / WHICH operation burned the tokens" view that Claude C
 
 ## Usage
 
-Run from the monorepo root (the project slug is derived from the cwd):
+Run from the repo root (the project slug is derived from the cwd):
 
 ```bash
 # Most recent session for the current project (cwd-derived):

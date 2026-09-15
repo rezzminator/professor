@@ -73,7 +73,7 @@ fi
 # facts, and only one of them is safe to leave unsaid.
 repo_git ls-files | while IFS= read -r path; do
   case "$path" in
-    .claude/*|.codex/*|.opencode/*|.gitignore|AGENTS.md|CLAUDE.md|pfm/AGENTS.md|pfm/CLAUDE.md|docs/commands/pfm/references/*)
+    .claude/*|.codex/*|.opencode/*|.gitignore|AGENTS.md|CLAUDE.md|pfm/AGENTS.md|pfm/CLAUDE.md|docs/commands/pfm/references/*|docs/commands/pcm/references/*)
       if [[ -f "$ROOT/$path" ]]; then
         printf '%s\n' "$path"
       elif [[ ! -e "$ROOT/$path" ]]; then

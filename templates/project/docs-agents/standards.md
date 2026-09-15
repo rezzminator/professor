@@ -2,7 +2,7 @@
 
 Source of truth for cross-project architecture decisions. These rules **override** other docs. A design that conflicts with one of them is wrong — flag it back, do not design around it. Distilled from the root `CLAUDE.md` Non-Negotiable Rules and the child project `CLAUDE.md` placement conventions; this file is what those rules mean for _architecture_.
 
-> **Ownership:** owned by `/pfm`. New standards land here through `/pfm`, never through a pipeline. A pipeline that discovers a missing standard reports it; the user invokes `/pfm` to add it. Every architect — `mono-architect` and child architects — reads this in full before designing.
+> **Ownership:** owned by `/pfm`. New standards land here through `/pfm`, never through a pipeline. A pipeline that discovers a missing standard reports it; the user invokes `/pfm` to add it. The main-loop session reads this in full before designing architecture; the global `architect` agent reads it too when reviewing a design already drafted.
 
 <!-- INSTALL: replace the example sections below with this project's real invariants.
      Each section is one standard: a declarative heading + the rules that make it

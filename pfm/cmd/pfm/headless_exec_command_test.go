@@ -195,7 +195,6 @@ func TestHeadlessConsumersUseSharedRunner(t *testing.T) {
 		{filepath.Join(root, "../../internal/ask/ask.go"), []string{"headlessrun.Run("}, []string{"exec.Command", "exec.CommandContext"}},
 		{filepath.Join(root, "../../internal/stats/limits.go"), []string{"headlessrun.Run("}, []string{"exec.Command", "exec.CommandContext"}},
 		{filepath.Join(root, "harness_prompt_doctor.go"), []string{"headlessrun.Run("}, nil},
-		{filepath.Join(root, "../../../engines/wave-walker/engine/headless-equivalence.js"), []string{"'pfm'", "'headless'", "'exec'", "'--engine'"}, nil},
 	}
 	for _, testCase := range cases {
 		body, err := os.ReadFile(testCase.path)

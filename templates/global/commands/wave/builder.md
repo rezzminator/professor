@@ -1,7 +1,7 @@
 ---
-# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pfm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
+# professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: wave:builder
-description: ORCHESTRATOR-ONLY — implements one wave from the /goal /wave:orchestrator sends (train, spec, worktree, ports), task-by-task per the spec, never re-deciding it; reports BUILD-GREEN then DONE to the orchestrator, which hands the merged wave to /wave:walker.
+description: ORCHESTRATOR-ONLY — implements one wave from the /goal /wave:orchestrator sends (train, spec, worktree, ports), task-by-task per the spec, never re-deciding it; reports BUILD-GREEN then DONE to the orchestrator, which gates the merge on the reviewer, /wave:walker supplementing.
 ---
 
 # Builder — implement the wave

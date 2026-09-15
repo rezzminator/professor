@@ -14,7 +14,22 @@ docs/epics/{name}/
 
 **Load protocol:** read `manifest.md` + `update.md`, then open topic files from `## Files` (fall back to `ls`) only as the task requires. Never read `archive/`.
 
-**Ownership:** the Professor owns the lifecycle and narrative (`## Vision & Scope`, `status:`, topic files, epic creation/deletion). `/documenter` (standalone builds + `/documenter epic`) and `/wave` (waves) consolidate shipped/session work into `update.md` + the manifest's working sections per the Epic consolidation contract in `documenter.md`.
+**Ownership:** the Professor owns the lifecycle and narrative (`## Vision & Scope`, `status:`, topic files, epic creation/deletion). The main-loop session consolidates shipped work (`/wave:live` W5, `/wave:orchestrator` O3) and session work (on "save the epic" / at a milestone) into `update.md` + the manifest's working sections per § Consolidation contract.
+
+## Consolidation contract
+
+Governs every epic write. Sections named here are created on first write, so older epics converge on their next update. Epic files are working context, not reference clusters — skip the `/quality:doc` load.
+
+1. **Resolve the epic:** the name given; else the `docs/epics/*/manifest.md` with `status: IN_PROGRESS` whose scope matches the work; no unambiguous match → list candidates and ask the user.
+2. **Consolidate** — for a session save, walk the ENTIRE conversation, not just recent turns; for a wave, the merged diff + report:
+   - Work state — done (with evidence: paths, SHAs, test results), in-flight position, ordered next steps → `update.md` (`## State of work` rewritten, `## Delivered` merged per subsection; a later ship that supersedes earlier work rewrites the subsection — replaced designs vanish, git history keeps them).
+   - Decisions with rationale, user rulings included → manifest `## Key Decisions` (deduped).
+   - Gotchas, failed attempts, surprises → `## Discoveries` (deduped); items awaiting the user → `## Open Questions`.
+   - One `## Progress Log` milestone line; new epic files registered in `## Files`; add to `pipelines:`/`waves:` as applicable; bump `updated:`.
+3. **Completeness pass:** the bar is a fresh session given only "Load epic {name}" continues seamlessly — no re-reading the old chat, no re-asking the user, no re-discovering gotchas.
+4. **Report** which epic was saved into and the continuation line: `Load epic {name}`.
+
+Bulky superseded artifacts move to `archive/` — loads never read it.
 
 ---
 

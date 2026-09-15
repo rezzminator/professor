@@ -6,7 +6,7 @@ First pipeline stage — creates the worktree before planning and architecture r
 
 ## 1. Validate preconditions
 
-- Confirm `$DOCS/0-task.md` exists (the pre-placed task spec).
+- Confirm the brief names the wave spec (exists on disk) and the residue dir (the wave dir `docs/dev/trains/{train}/waves/{N}-{slug}/`).
 - Confirm no leftover worktree: `./.claude/scripts/worktree.sh list $PIPELINE`. If it exists, warn and stop — never overwrite.
 - **Uncommitted changes on main** — handle per the orchestrator's `CarryWIP` directive (`commit` | `leave`, default `leave`). Run only when `git status --porcelain` is non-empty:
   - `commit` — commit main's WIP (untracked included) so the branch inherits it as a shared ancestor:
@@ -32,6 +32,6 @@ bash .claude/scripts/checkpoint.sh init "$WORKTREE" "$PIPELINE"
 
 ## 3. Record port assignments
 
-Read `$WORKTREE/.env.ports` and write `$DOCS/ports.md` from the template in `gitter-history.md` § ports.md Template (`> Author: gitter` byline, per-roster-project + test-infra port table, proxy + port-less notes).
+Read `$WORKTREE/.env.ports` and write `ports.md` into the brief-named residue dir from the template in `gitter-history.md` § ports.md Template (`> Author: gitter` byline, per-roster-project + test-infra port table, proxy + port-less notes).
 
 Confirm per template.

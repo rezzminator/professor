@@ -4,7 +4,7 @@ Tracer report, 2026-09-13, HEAD `00da35b5`, working tree clean. Raw map, no verd
 
 Kind note: the brief's enum was `agent|command|skill|hook|script|workflow|settings`. Reference/scope docs and included text fragments are marked `doc`, `reference doc`, `text fragment`, or `data` rather than force-fitted.
 
-## templates/global/** (26 files)
+## templates/global/** (27 files)
 
 | tier | kind | name | purpose (verbatim) | path |
 |---|---|---|---|---|
@@ -12,7 +12,7 @@ Kind note: the brief's enum was `agent|command|skill|hook|script|workflow|settin
 | global | agent | architect | Codex twin of architect | templates/global/agents/architect.toml |
 | global | agent | reviewer | Reviews a diff range or code lane, every hunk ledgered, tests run — returns ONE line, the report path. Delegate for "review this branch/range/merge", "is this correct", or after a tracer map; the default where /code-review would be used. Modes pre-merge, post-merge; a wave dir in → REVIEW.md ledger gitter reads before merge. Read-only. | templates/global/agents/reviewer.md |
 | global | agent | reviewer | Codex twin of reviewer | templates/global/agents/reviewer.toml |
-| global | agent | rr | Answers one research query inline, sources cited — delegate for "rr", "quick research", "fast answer with sources" when one web search will not do and deep-rr is overkill; standalone, no deep-rr install assumed. Returns the saved .professor/RR/{slug}-{date}.md path first, then the cited answer and open questions. | templates/global/agents/rr.md |
+| global | agent | rr | Answers one research query inline, sources cited — delegate for "rr", "quick research", "fast answer with sources" when one web search will not do and deep-rr is overkill; low effort by default, "super rr" → the caller passes effort: medium at spawn. Returns the saved .professor/RR/{slug}-{date}.md path first, then the cited answer and open questions. | templates/global/agents/rr.md |
 | global | agent | rr | Codex twin of rr | templates/global/agents/rr.toml |
 | global | agent | scheduler | ORCHESTRATOR-ONLY — turns queued /wave:refine specs plus a builder count N into the train at docs/dev/trains/{train}/, merging overlapping specs into one wave and flagging stale ones RE-REFINE; the orchestrator's user gate follows. Returns the train path, wave table, merge log, RE-REFINE flags, open questions. | templates/global/agents/scheduler.md |
 | global | agent | scheduler | Codex twin of scheduler | templates/global/agents/scheduler.toml |
@@ -20,16 +20,16 @@ Kind note: the brief's enum was `agent|command|skill|hook|script|workflow|settin
 | global | agent | tracer | Codex twin of tracer | templates/global/agents/tracer.toml |
 | global | settings | config | Professor global Codex defaults. Existing settings win on pfm install. | templates/global/codex/config.toml |
 | global | command | context-meter | Audits context cost per surface — CLAUDE.md chain, agents, commands, skills, MCP, machine-global roster included; ranks over-limit files and savings by tokens reclaimed, `--verbose` per file. Triggers "context budget", "what's eating my context". Report-only, trims → /pfm; runtime spend → /tokens. | templates/global/commands/context-meter.md |
-| global | command | git | Gateway to gitter, the only git WRITER — `push [msg]` → Phase PUSH, `pull` → Phase PULL, anything else forwards verbatim as freeform. Route every git WRITE here; read-only git (status/diff/log/show/rev-parse) runs directly. | templates/global/commands/git.md |
-| global | command | h:gh | Host-local `gh` CLI, installed and authenticated on this machine — use for any GitHub operation (PRs, issues, releases, repo API), the /pfm:release publish included. | templates/global/commands/h/gh.md |
+| global | command | h:gh | GitHub CLI, installed and authenticated on this host — use for any GitHub operation (PRs, issues, releases, repo API). | templates/global/commands/h/gh.md |
+| global | command | pfm | Operates the fleet CLI — `pfm` verb map, the adopter update flow, `pfm codex build|check`, MCP-vs-shell routing. | templates/global/commands/pfm.md |
 | global | command | quality:description | MANDATORY — load before writing or certifying any `description:` (command, skill, agent, MCP tool or server); the four components and their order, the caps, the cut order, naming, family-chain and invocation-class law, the MCP self-containment rules, and the Approval gate. General prompt law → /quality:prompt. | templates/global/commands/quality/description.md |
 | global | command | quality:doc | MANDATORY — load before writing or restructuring any reference doc under docs/ (root or child project), and to certify one via the Approval gate (APPROVED/REJECTED); owns doc SHAPE — cluster + _index.md, ≤500-line topic files, table-vs-sections, grep-true headings, current-state only. Prose → /quality:prompt; a `description:` → /quality:description; markdown mechanics → /quality:md-forlint. | templates/global/commands/quality/doc.md |
 | global | command | quality:md-forlint | Lint/format markdown — `check [path]` reports, `fmt [path]` rewrites, `prompt-safe <file>` keeps machine-read markers intact, `audit` prices the policy, `profile <path>` names a path's category. Route every markdown lint/format/style ask here; load before changing `.rumdl.toml`. Prose quality lives in /quality:prompt and /quality:doc. | templates/global/commands/quality/md-forlint.md |
-| global | command | quality:prompt | MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills, /km knowledge files); leanness plus correctness law for any prompt. `cut <file>` rewrites the target leaner in place. Harness file rules → /pfm; a `description:` → /quality:description; doc shape → /quality:doc; markdown mechanics → /quality:md-forlint. | templates/global/commands/quality/prompt.md |
+| global | command | quality:prompt | MANDATORY — load before editing any LLM-consumed prompt (CLAUDE.md, agents, commands, skills); leanness plus correctness law for any prompt. `cut <file>` rewrites the target leaner in place. Harness file rules → /pfm; a `description:` → /quality:description; doc shape → /quality:doc; markdown mechanics → /quality:md-forlint. | templates/global/commands/quality/prompt.md |
 | global | doc | tokens/README | Token attribution for both local agent harnesses — per-agent / per-operation for Claude Code sessions, per-session-thread for the Codex CLI (`--codex`) — parsed straight from the JSONL each harness writes locally. Zero dependencies (node: builtins only), READ-ONLY over transcripts, no network. Node 20+. | templates/global/commands/tokens/README.md |
 | global | skill | tokens | Attributes runtime token spend, heaviest first — Claude Code sub-agents and Workflow runs, or Codex CLI threads with `--codex`. Flags `--all`, `--by-workflow`, `--filter <substr>`, `--detail <id>`, `--by-day`, `--since <date>`, `--top N`, `--session <id>`; `--help` lists all. Triggers "token ledger", "which agent burned the most", "what did the wave cost". Static context size → /context-meter. | templates/global/commands/tokens/SKILL.md |
 | global | script | token-ledger | per-agent / per-operation token attribution for Claude Code sessions, and per-session attribution for Codex CLI sessions (--codex). Zero dependencies. READ-ONLY over transcripts. No network. | templates/global/commands/tokens/token-ledger.mjs |
-| global | command | wave:builder | ORCHESTRATOR-ONLY — implements one wave from the /goal /wave:orchestrator sends (train, spec, worktree, ports), task-by-task per the spec, never re-deciding it; reports BUILD-GREEN then DONE to the orchestrator, which hands the merged wave to /wave:walker. | templates/global/commands/wave/builder.md |
+| global | command | wave:builder | ORCHESTRATOR-ONLY — implements one wave from the /goal /wave:orchestrator sends (train, spec, worktree, ports), task-by-task per the spec, never re-deciding it; reports BUILD-GREEN then DONE to the orchestrator, which gates the merge on the reviewer, /wave:walker supplementing. | templates/global/commands/wave/builder.md |
 | global | command | wave:ccc | USER-ONLY — /wave:ccc {train?}, default the newest under docs/dev/trains/. The standing Control & Command seat over a running /wave:orchestrator train — verifies every DONE or green claim against the tree, rules in-train escalations, dispatches only through the orchestrator. | templates/global/commands/wave/ccc.md |
 | global | command | wave:refine | Writes ONE zero-gap wave spec — to docs/dev/trains/queue/{date}-{slug}.md, asking only what the code cannot answer. Chain head — refine → /wave:orchestrator → /wave:builder → /wave:walker. `poc <goal>` refines AND builds under .professor/RND/POC/{name}/; merge mode (scheduler-invoked, non-interactive) unifies two+ specs into one. Triggers "refine", "refine this/tasks/poc". | templates/global/commands/wave/refine.md |
 | global | skill | architecture-design | Lays out a codebase for agent maintainers — one directory per unit of change, grep-true names, no parallel registries. Use for `$architecture-design <feature|LLM call|project|path>`, "where should X live", before /wave:refine on a feature touching 3+ directories, and every new LLM call; greenfield designs a tree, brownfield measures then migrates. Returns a design document; edits no code. | templates/global/skills/architecture-design/SKILL.md |
@@ -37,43 +37,28 @@ Kind note: the brief's enum was `agent|command|skill|hook|script|workflow|settin
 
 Global counts: agent=10, settings=1, command=10, doc=1, skill=2, script=1, data=1 → 26.
 
-## templates/project/agents/** + commands/** (29 files)
+## templates/project/agents/** + commands/** (15 files)
 
 | tier | kind | name | purpose (verbatim) | path |
 |---|---|---|---|---|
 | project | agent | gitter | The ONLY agent that writes git. Phases SETUP, COMMIT, MERGE, DOCS-COMMIT, PUSH, PULL, WORKTREE-CHECKPOINT, SYNC; no phase named = freeform git ask. Returns the phase confirmation. Pushes only on the user's explicit ask. | templates/project/agents/gitter.md |
-| project | agent | mono-architect | Designs cross-project contracts — API schemas, shared types and integration points between roster projects; code-level decisions and TODO stubs go to child architects. Spawn AFTER mono-planner + gitter SETUP, BEFORE child architects. Returns $DOCS/3-architecture.md. | templates/project/agents/mono-architect.md |
-| project | agent | mono-documenter | Scouts a doc-consolidation blast radius — ARCHIVE after a pipeline ships, FIX-UPDATE after a fix lands on main — into DISJOINT scopes; read-only, never writes docs. Returns the scope manifest. | templates/project/agents/mono-documenter.md |
-| project | agent | mono-planner | Consolidates the child planners' analysis reports into one cross-project plan and decides routing — one `{ROLE}-ONLY` key per roster project, or CROSS. Returns $DOCS/1-plan.md. | templates/project/agents/mono-planner.md |
 | project | agent | developer | Implements code for the {project} project ({PROJECT_ROLE}) from the brief-carried task spec — worktree with allocated ports, self-QA before finishing. Spawn AFTER architect; OPEN bugs in the brief-named 6-bugs.md make it a fix loop. Returns 5-dev-report-{project}.md. | templates/project/agents/per-project/developer.md |
 | project | agent | qa | Breaks the {project} project ({PROJECT_ROLE}) via unhappy paths — writes adversarial integration + compliance tests, then fixes what they expose; a fresh qa-{project} verifies, never the fixer. Scopes TARGETED, FULL (GATE-1 pre-merge), POST-MERGE (GATE-2 on main). | templates/project/agents/per-project/qa.md |
-| project | agent | qa-{project} | WAVE-ONLY — the QA gate for {project}, spawned PRE-MERGE (GATE-1) and POST-MERGE (GATE-2) by /wave:builder, /wave:orchestrator and /wave:live. Returns the gate verdict with test evidence. | templates/project/agents/qa-wrapper.md |
-| project | agent | rndier | RND-ONLY — spawned by /rnd, one run per spawn. Executes ONE research run under .professor/RND/<call>/<N>-<slug>/ from its BRIEF.md — real {LLM_PROVIDER} calls, sealed judges, frozen gates. Sandbox only. Returns REPORT.md + PROPOSED_DIFF.md + STATE.md. | templates/project/agents/rndier.md |
-| project | agent | {ROLE}-{project} | Spawn as the {role-noun} for any {project} task span. Works in a worktree with allocated ports, self-QA before finishing; full protocol in {project}/.claude/agents/{ROLE}.md. | templates/project/agents/role-wrapper.md |
-| project | command | audit:ai-output | Audits AI pipeline output for faithfulness — the LLM-generated data read from its store, checked against the source input and the pipeline code + prompts. Returns a report under .professor/AUDIT/ai-output/, never inline. | templates/project/commands/audit/ai-output.md |
 | project | command | audit:code-hygiene | Scans AI-authored code for duplication, ghost fields, dead code, deps, architecture, types, naming, quality, magic numbers — scopes `all`, `dup`, `ghosts`, `dead`, `deps`, `arch`, `types`, `naming`, `quality`, `magic`, `{project}`, `diff`, `sweep` (the one scope that removes dead code, gated by approval). | templates/project/commands/audit/code-hygiene.md |
 | project | command | audit:security | Scans every attack surface by section — info-leak, injection, auth, {API_PROTOCOL}, LLM/prompt, {SENSITIVE_DATA}, health, crypto, secrets, transport, supply-chain, CI/CD, concurrency/SoD. Returns SECURITY findings by severity. | templates/project/commands/audit/security.md |
 | project | command | dev | Runs the {PROJECT_NAME} local dev stack — up/start, kill/stop/down, restart, status, logs, drop, fresh, clear-logs, export, credentials, `iso init|pull|merge|destroy|list|{cmd} {profile}`. | templates/project/commands/dev.md |
-| project | command | documenter | Source of truth for permanent docs — merges shipped decisions into the docs/agents/ hub and clusters (ARCHIVE after a pipeline, FIX-UPDATE after a fix); `audit`, `registry`, `graphs`, `epic {name?}`. | templates/project/commands/documenter.md |
-| project | text fragment | _base | Shared base for /documenter:* subcommands, injected verbatim via a bang-cat span. | templates/project/commands/documenter/_base.txt |
-| project | text fragment | _epic-consolidation-contract | Epic consolidation contract | templates/project/commands/documenter/_epic-consolidation-contract.txt |
-| project | command | documenter:archive | PIPELINE-ONLY — merges a shipped pipeline's decisions into permanent docs, cleans the backlog, consolidates the active epic, leaves $DOCS for gitter DOCS-COMMIT. | templates/project/commands/documenter/archive.md |
-| project | command | km | Curates {PROJECT_NAME}'s {AI_SERVICE_NAME} prompt registry under `{AI_PROJECT}/knowledge/` — prompt templates and full-injection note formats. Modes write, edit, clean, sharpen, review, status. | templates/project/commands/km.md |
 | project | command | marketer | The CMO for {MARKET_SEGMENT} — scopes seo, copy, content, landing, compete, social, pitch/sales, email, conference, channel, persona, brand, funnel; `audit`; `wave` hands tasks to /wave:refine. | templates/project/commands/marketer.md |
 | project | command | mentor | Blunt, numbers-driven startup consulting for {MARKET_SEGMENT} — formation, tax, funding, gtm, competition, hiring, regulation, insurance, exit, mvp, plan/roadmap, expansion, ip, finance, pitch; vision/stress-test. | templates/project/commands/mentor.md |
 | project | command | officer | Privacy and compliance counsel — {REGULATION}, {AI_REGULATION}; `audit [data-flow|codebase|architecture|infrastructure|documentation|all]`, advisory, drafting (DPIA/DPA/ROPA/ToS/privacy policy), incident, certification. Writes law, never code. | templates/project/commands/officer.md |
-| project | command | pfm | MANDATORY — route every framework or process-file change here; owns CLAUDE.md, .claude/ and the .codex/ mirror. `audit [scope]` runs the read-only pipeline audit; `retro` folds the steering-conscience inbox. | templates/project/commands/pfm.md |
-| project | reference doc | audit-scopes | PTM audit — per-scope deep checks | templates/project/commands/pfm/references/audit-scopes.md |
-| project | command | pm | Product calls from a {USER_PERSONA}-product hybrid — review/refine, prioritize/backlog, ux/workflow/friction, persona, compete, pitch, kill-list, onboarding, session-flow, post-session, dashboard; wave-consult/wave-post-review. | templates/project/commands/pm.md |
-| project | command | rnd | Runs research on {AI_SERVICE_NAME} LLM calls under .professor/RND/<call>/<N>-<slug>/, one rndier spawn per run; new, continue, verify, land (user-ratified only). | templates/project/commands/rnd.md |
-| project | command | wave:live | Batches a task list on `main` — no worktree; parallel builds, qa-{project} tests per touched project, one /documenter + gitter commit, then /wave:walker with inline remediation. | templates/project/commands/wave/live.md |
+| project | command | pcm | MANDATORY — route every framework or process-file change here; owns CLAUDE.md, .claude/** and the .codex/ mirror. `audit [scope]` runs the read-only pipeline audit; `retro` folds the steering-conscience inbox. | templates/project/commands/pfm.md |
+| project | command | rnd | Runs research on {AI_SERVICE_NAME} LLM calls under .professor/RND/<call>/<N>-<slug>/, executing its own run; new, continue, verify, land (user-ratified only). | templates/project/commands/rnd.md |
+| project | command | wave:live | Batches a task list on `main` — no worktree; parallel builds, qa-{project} tests per touched project, one docs pass + gitter commit, then /wave:walker with inline remediation. | templates/project/commands/wave/live.md |
 | project | command | wave:orchestrator | Runs a wave train end to end — after /wave:refine, the scheduler agent writes docs/dev/trains/{train}/ and the user approves the table; each wave goes to /wave:builder and lands through a reviewer-gated gitter MERGE. `resume {train}`. | templates/project/commands/wave/orchestrator.md |
-| project | command | wave:walker-invariants | Read by every /wave:walker caller, never run directly — the engine's script path, `args.project` profile, and the registry of cross-cutting invariants a diff-scoped walk misses. | templates/project/commands/wave/walker-invariants.md |
-| project | command | wave:walker | Verifies a wave's changed set works — read-only, one verdict + a written review; supplements the reviewer gate. `args.goal` investigates; `args.claims`/`args.manifestPath` run claim panels; `walker fast` → tracer. | templates/project/commands/wave/walker.md |
+| project | command | wave:walker | Verifies a landed wave end-to-end — every changed flow, seam and field walked to its terminal; supplements the reviewer gate, never replaces it. Auto after /wave:live W6; `/wave:walker {report-path}` by hand, `branch` for a pre-merge worktree diff; `walker fast <mission>` / "fast walk" → the tracer agent. Returns the verdict written into the wave report. | templates/project/commands/wave/walker.md |
 
-Counts: agent=9, command=17, text fragment=2, reference doc=1 → 29.
+Counts: agent=3, command=12 → 15.
 
-## templates/project/skills/** + workflows/** + codex/** (20 files)
+## templates/project/skills/** + codex/** (18 files)
 
 | tier | kind | name | purpose | path |
 |---|---|---|---|---|
@@ -90,15 +75,13 @@ Counts: agent=9, command=17, text fragment=2, reference doc=1 → 29.
 | project | skill reference doc | Statutory Interpretation — Reading a New Statute Correctly | | templates/project/skills/legal/references/statute-analysis.md |
 | project | skill reference doc | Vendor / Sub-Processor Due Diligence | | templates/project/skills/legal/references/vendor-due-diligence.md |
 | project | data | sources | Project-scope source-fetched skills; SETUP fetches each from its canonical public repo at install. | templates/project/skills/sources.json |
-| project | workflow | audit-ai-output-sessions | Per-unit AI-output faithfulness audit — one auditor per unit, then a synthesizer that quantifies failure rates and writes .professor/AUDIT/ai-output/{date}-{channel}.md. | templates/project/workflows/audit-ai-output-sessions.js |
-| project | workflow | documenter-fanout | Documentation consolidation engine — scouts a blast radius into DISJOINT doc scopes, drops zero-hit scopes, fans out one documenter per scope in parallel. | templates/project/workflows/documenter-fanout.js |
 | project | doc | Codex Integration Layer | | templates/project/codex/README.md |
 | project | settings | config | Repo-level Codex config — loads only when this project is trusted in ~/.codex/config.toml. | templates/project/codex/config.toml |
 | project | settings/rule file | repo-law | {PROJECT_NAME} repo law at the execpolicy layer — loads for EVERY trusted Codex session in this repo. | templates/project/codex/rules/repo-law.rules |
 | project | skill (Codex twin) | chat | Messages the tmux agent chats through `pfm chat` — inject, whoami, self-compact. | templates/project/codex/skills/chat/SKILL.md |
 | project | skill (Codex twin) | wave-builder | ORCHESTRATOR-ONLY — the {PROJECT_NAME} builder lane for Codex; maps Codex mechanics onto the binding /wave:builder protocol. | templates/project/codex/skills/wave-builder/SKILL.md |
 
-## templates/project/docs-agents/** + docs-commands/** + epics/** + per-project/** + rumdl-policy.toml (24 files)
+## templates/project/docs-agents/** + docs-commands/** + epics/** + per-project/** + rumdl-policy.toml (15 files)
 
 | kind | name | heading | path |
 |---|---|---|---|
@@ -106,9 +89,6 @@ Counts: agent=9, command=17, text fragment=2, reference doc=1 → 29.
 | doc | standards | Architectural Standards | templates/project/docs-agents/standards.md |
 | doc | build-reference | /wave:builder Reference | templates/project/docs-commands/build/references/build-reference.md |
 | doc | qa-commons | QA Commons — shared rules for the pipeline QA gates | templates/project/docs-commands/build/references/qa-commons.md |
-| doc | doc-approval | Doc Consolidation Contract — worker card | templates/project/docs-commands/documenter/references/doc-approval.md |
-| doc | scope cards | epic, root-api, root-arch, root-db, root-features, root-map, {project} | templates/project/docs-commands/documenter/references/scopes/*.md |
-| doc | sync-rules | Documentation Sync Rules | templates/project/docs-commands/documenter/references/sync-rules.md |
 | doc | gitter-history | Gitter — History & Large-File Registry | templates/project/docs-commands/git/references/gitter-history.md |
 | doc | gitter phase cards | DOCS-COMMIT, MERGE, PUSH, SETUP, WORKTREE-CHECKPOINT + SYNC | templates/project/docs-commands/git/references/gitter-phase-*.md |
 | doc | debug-discipline | Debug Discipline — hangs, deadlocks, mystery failures | templates/project/docs-commands/wave/references/debug-discipline.md |
@@ -117,7 +97,7 @@ Counts: agent=9, command=17, text fragment=2, reference doc=1 → 29.
 | doc | CLAUDE (per-project addendum) | {PROJECT_NAME} {PROJECT_ROLE} | templates/project/per-project/CLAUDE.md |
 | settings | rumdl-policy | Markdown policy for this repo — read by `rumdl`. | templates/project/rumdl-policy.toml |
 
-## templates/project/scripts/** (18 files, all scripts)
+## templates/project/scripts/** (17 files, all scripts)
 
 | name | purpose (first line) | path |
 |---|---|---|
@@ -131,13 +111,12 @@ Counts: agent=9, command=17, text fragment=2, reference doc=1 → 29.
 | filter-test-output | Failure-biased filter for test-runner output | templates/project/scripts/filter-test-output.sh |
 | format-md | PostToolUse hook — formats the one Professor-owned .md file just written | templates/project/scripts/format-md.sh |
 | git-lock | advisory lock guarding the trunk against two gitter operations | templates/project/scripts/git-lock.sh |
-| guard-stamp | Session-keyed guard-marker maintenance (pfm/km gates) | templates/project/scripts/guard-stamp.sh |
-| km-guard | PreToolUse(Edit|Write|Bash) — guards /km territory | templates/project/scripts/km-guard.sh |
+| guard-stamp | Session-keyed guard-marker maintenance (pfm gate) | templates/project/scripts/guard-stamp.sh |
 | memory-consolidate | one-time consolidation of ~/work/<project> memory | templates/project/scripts/memory-consolidate.sh |
 | memory-sync | SessionEnd hook. Syncs the WHOLE memory vault | templates/project/scripts/memory-sync.sh |
 | memory-wire | SessionStart hook | templates/project/scripts/memory-wire.sh |
 | notify | NO-DESCRIPTION — no header comment block | templates/project/scripts/notify.sh |
-| pfm-guard | PreToolUse(Edit|Write) — guards /pfm territory | templates/project/scripts/pfm-guard.sh |
+| pfm-guard | PreToolUse(Edit|Write) — guards /pcm territory | templates/project/scripts/pfm-guard.sh |
 | worktree | Create and manage git worktrees for parallel pipeline work | templates/project/scripts/worktree.sh |
 
 ## Settings + hooks
@@ -147,14 +126,12 @@ Counts: agent=9, command=17, text fragment=2, reference doc=1 → 29.
 | settings | settings | env, MCP allow-list, tool permissions, PreToolUse/PostToolUse/Stop hook wiring | templates/project/settings.json |
 | settings | settings-global | `{"cleanupPeriodDays": 36500}` only | templates/project/settings-global.json |
 
-Hooks wired in `templates/project/settings.json` — 11 bindings across 7 groups:
+Hooks wired in `templates/project/settings.json` — 9 bindings across 6 groups:
 
 | event | matcher | script |
 |---|---|---|
 | PreToolUse | (all) | `notify.sh start` |
-| PreToolUse | `Edit|Write` | `km-guard.sh` |
 | PreToolUse | `Edit|Write` | `pfm-guard.sh` |
-| PreToolUse | `Bash` | `km-guard.sh` |
 | PostToolUse | `Read` | `guard-stamp.sh` |
 | PostToolUse | `Edit|Write` | `format-md.sh` |
 | PostToolUse | `Edit|Write` | `codex-sync.sh mark` |
@@ -166,7 +143,7 @@ Hooks wired in `templates/project/settings.json` — 11 bindings across 7 groups
 ## CLAUDE.md, reference cards, placeholders
 
 - `templates/project/CLAUDE.md` — `# {PROJECT_NAME} — {PROJECT_TAGLINE}`; carries § MANDATORY Rules below.
-- `docs/commands/**` reference cards: 2 — `docs/commands/pfm/references/audit-scopes.md`, `docs/commands/pfm/references/refresh.md`.
+- `docs/commands/**` reference cards: 1 — `docs/commands/pcm/references/refresh.md`.
 - `docs/PLACEHOLDERS.md`: 178 unique `{TOKEN}` tokens (251 lines); single-brace syntax throughout, 0 double-brace hits.
 
 ## MANDATORY rules in `templates/project/CLAUDE.md` (verbatim first clause)
@@ -190,10 +167,10 @@ Process:
 14. NEVER edit code on `main`: worktree branches only, gitter-merged after QA
 15. Only gitter WRITES git
 16. NEVER commit broken code or merge before QA passes
-17. Only /documenter writes permanent docs (conditional /km clause)
+17. Only the main-loop session writes permanent docs (the owning command writes its own `docs/business/` surface)
 18. Never install unvalidated libraries
 19. All infra ops via `make -C {INFRA_PROJECT}` (conditional)
-20. Guarded files: PreToolUse hooks gate `.claude/**` + every `CLAUDE.md` (route: `/pfm`) and `{AI_PROJECT}/knowledge/**` (route: `/km`)
+20. Guarded files: PreToolUse hooks gate `.claude/**` + every `CLAUDE.md` (route: `/pcm`)
 21. Worktrees are costly: batch a session's related changes into one, and ask before creating one
 
 Testing & Environment:
@@ -211,24 +188,21 @@ Meta:
 |---|---|---|
 | global | agent | 10 |
 | global | settings | 1 |
-| global | command | 10 |
+| global | command | 11 |
 | global | doc | 1 |
 | global | skill | 2 |
 | global | script | 1 |
 | global | data | 1 |
-| project | agent | 9 |
-| project | command | 17 |
-| project | text fragment | 2 |
-| project | reference doc | 1 |
+| project | agent | 3 |
+| project | command | 12 |
 | project | skill | 1 |
 | project | skill reference doc | 11 |
 | project | data | 1 |
-| project | workflow | 2 |
-| project | doc | 24 |
+| project | doc | 15 |
 | project | settings | 4 |
 | project | settings/rule file | 1 |
 | project | skill (Codex twin) | 2 |
-| project | script | 18 |
-| project | hook (bindings) | 11 |
+| project | script | 17 |
+| project | hook (bindings) | 9 |
 
-Files read: 122. Every file in the `find` sweep of `templates/global` and `templates/project` has a row. Out of scope, untouched: `templates/prompts/`, `pfm/`, `engines/`, this repo's `.claude/`, tests. Note: `notify.sh` has no header comment — `NO-DESCRIPTION` stands; `NO duplicatation` typo is verbatim in CLAUDE.md.
+Files read: 122 at the time of this tracer pass; 23 have since been removed as dead: `wave/walker-invariants.md` (the wave-walker Workflow engine is retired; `/wave:walker` dispatches `tracer` + `reviewer`), `mono-architect.md`, `mono-documenter.md`, `mono-planner.md`, `qa-wrapper.md`, `rndier.md`, `role-wrapper.md`, `audit/ai-output.md`, `documenter/archive.md`, `km.md`, `pm.md`, `km-guard.sh`, `workflows/audit-ai-output-sessions.js` (orphaned once its only caller shipped), and the `/documenter` family — `commands/documenter.md` plus the nine `docs-commands/documenter/references/**` cards (doc consolidation is the main-loop session's step, the fix-core card § Step 6). Every file in the `find` sweep of `templates/global` and `templates/project` has a row. Out of scope, untouched: `templates/prompts/`, `pfm/`, `workflows/` (then `engines/`), this repo's `.claude/`, tests. Note: `notify.sh` has no header comment — `NO-DESCRIPTION` stands; `NO duplicatation` typo is verbatim in CLAUDE.md.

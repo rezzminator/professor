@@ -57,4 +57,4 @@ A compliant DPA must define all of:
 
 ## {PROJECT_NAME} application
 
-{PROJECT_NAME} is a processor for its {USER_NOUN}-clients on {SESSION_NOUN} data and a controller for account data — confirm which hat applies before drafting. The **controller named in a processor-side DPA is the client {USER_NOUN}**, not the user. Sub-processors to cover: the transcription service, the AI analysis service's cloud provider, and the cloud infrastructure provider — each needs its own DPA and a transfer mechanism. Cross-reference the officer's `sub-processor-compliance.md` for current status.
+{PROJECT_NAME} is a processor for its {USER_NOUN}-clients on {SESSION_NOUN} data and a controller for account data — confirm which hat applies before drafting. The **controller named in a processor-side DPA is the client {USER_NOUN}**, not the user. Sub-processors to cover: the transcription service, the AI analysis service's cloud provider, and the cloud infrastructure provider — each needs its own DPA and a transfer mechanism. Cross-reference the officer's `docs/epics/legal/registers/sub-processor-compliance.md` for current status.

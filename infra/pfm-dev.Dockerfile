@@ -11,7 +11,7 @@ ARG GO_VERSION=1.24.13
 ARG TARGETARCH
 RUN case "${TARGETARCH}" in amd64|arm64) ;; *) echo "unsupported build architecture: ${TARGETARCH}" >&2; exit 1 ;; esac \
  && curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" | tar -C /usr/local -xz
-# Node pinned to the walker's minimum supported release. Verify the selected
+# Node pinned to the mirror compilers' minimum supported release. Verify the selected
 # architecture's tarball against the release checksum before extracting it.
 ARG NODE_VERSION=22.13.1
 RUN case "${TARGETARCH}" in amd64) node_arch=x64 ;; arm64) node_arch=arm64 ;; esac \

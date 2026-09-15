@@ -103,7 +103,7 @@ Pick the branch by WHERE the blocking defect lives — the Root cause above name
 
 **Both branches converge:**
 
-4. If QA passes → gitter MERGE → post-merge QA → documenter (normal pipeline tail).
+4. If QA passes → gitter MERGE → post-merge QA → docs merge (normal pipeline tail).
 5. If QA still fails → ONE more fix-loop iteration max, then re-defer.
 ```
 
@@ -111,25 +111,25 @@ Pick the branch by WHERE the blocking defect lives — the Root cause above name
 
 What each `/wave:builder` step produces and where. Each step in `wave/builder.md` is authoritative for its own Produces/Location; this is the at-a-glance index.
 
-**Two-gate test discipline:** developer self-QA (Step 6) and the Step 7 fix-loop rounds are TARGETED (unit + typecheck + lint + only the failing/affected profiles + the pipeline's adversarial tests, NEVER the full suite). The full suite runs at exactly two zero-tolerance gates — **GATE-1** (pre-merge full, on the worktree branches, between Code review and Merge) and **GATE-2** (post-merge full, on `main` after merge). Both gates run on the per-pipeline isolated test stack (`up-test-pipeline` / `db-setup-test-pipeline` / `nuke-test-pipeline` `PIPELINE={name}` on the worktree's allocated `TEST_PG_PORT`/`TEST_LS_PORT` from `.env.ports`); GATE-2 runs from the project dirs on `main`.
+**Two-gate test discipline:** developer self-QA (Step 6) and the Step 7 fix-loop rounds are TARGETED (unit + typecheck + lint + only the failing/affected profiles + the pipeline's adversarial tests, NEVER the full suite). The full suite runs at exactly two zero-tolerance gates — **GATE-1** (pre-merge full, on the worktree branches, between Code review and Merge) and **GATE-2** (post-merge full, on `main` after merge). Both gates run on the per-pipeline isolated test stack (`up-test-pipeline` / `db-setup-test-pipeline` / `nuke-test-pipeline` `PIPELINE={name}` on the worktree's allocated per-project ports from `.env.ports`); GATE-2 runs from the project dirs on `main`.
 
-<!-- Install-time: replace `{project}` placeholders with your roster's project suffixes (e.g. `be,fe,cortex,web,infra` or your own names). -->
+<!-- Install-time: replace `{project}` placeholders with your roster's project directories — one row set per entry, whatever their names. -->
 
 | # | Step | Who | Produces | Location |
 | --- | ------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------- | -------------------------------- |
 | 1 | Git setup | gitter (SETUP) | Worktrees, ports, `$DOCS/ports.md` | root |
 | 2a | Parallel analysis | child planners (routing-gated) | `$DOCS/1-analysis-{project}.md` | root |
-| 2b | Consolidate plan | mono-planner | `$DOCS/1-plan.md` | root |
-| 3 | Cross-project arch + research | mono-architect | `$DOCS/3-architecture.md` (integration contracts + research notes) | root |
+| 2b | Consolidate plan | main-loop session | `$DOCS/1-plan.md` | root |
+| 3 | Cross-project arch + research | main-loop session (global `architect` agent for gap-filling review) | `$DOCS/3-architecture.md` (integration contracts + research notes) | root |
 | 4 | Child arch + research | child architects | `$DOCS/3-architecture-{project}.md` (docs only, no code stubs, inline research) | root |
 | 5a | UI/UX _(conditional)_ | ui-ux | `$DOCS/4-ui-ux-spec.md` | root |
 | 5b | DB Architecture _(conditional)_ | db-admin | `$DOCS/4-db-architecture.md` + schema/migration changes in worktrees | root (docs) + worktrees (schema) |
 | 6 | Develop | developers (per-project role) | Working code in worktrees + `$DOCS/5-dev-report-{project}.md` | worktrees (code) + root (docs) |
-| 7 | Targeted QA _(pre-merge)_ | child QA (qa-{project} wrapper) | TARGETED pre-merge QA feeding the fix loop — unit + affected/failing profiles + adversarial, NOT the full suite. Adversarial tests in worktrees + consolidated `$DOCS/6-bugs.md` (one `## {PROJECT}` section each) | worktrees (tests) + root (docs) |
+| 7 | Targeted QA _(pre-merge)_ | child QA ({project}-qa wrapper) | TARGETED pre-merge QA feeding the fix loop — unit + affected/failing profiles + adversarial, NOT the full suite. Adversarial tests in worktrees + consolidated `$DOCS/6-bugs.md` (one `## {PROJECT}` section each) | worktrees (tests) + root (docs) |
 | - | Fix loop | developers → targeted QA | TARGETED re-run, cap 3. Repeat until `$DOCS/6-bugs.md` = NONE | |
 | - | Code review _(pre-merge gate)_ | audit:code-hygiene → architects → devs | `$DOCS/6-code-review.md` (loops until CLEAN, cap 2) | worktrees (code) + root (docs) |
-| - | **GATE-1 — pre-merge full** | child QA (FULL, qa-{project} wrapper) | Full suite (unit + integration/e2e), zero-tolerance all-green on the worktree branches; one bounded fix pass + re-run, still failing → BLOCKED-DEFERRED. Writes `## {PROJECT}` sections of `$DOCS/6-bugs.md` | worktrees (tests) + root (docs) |
+| - | **GATE-1 — pre-merge full** | child QA (FULL, {project}-qa wrapper) | Full suite (unit + integration/e2e), zero-tolerance all-green on the worktree branches; one bounded fix pass + re-run, still failing → BLOCKED-DEFERRED. Writes `## {PROJECT}` sections of `$DOCS/6-bugs.md` | worktrees (tests) + root (docs) |
 | 8 | Merge | gitter (MERGE) | Commits + merges to main | |
-| 9 | **GATE-2 — post-merge full** | child QA (POST-MERGE, qa-{project} wrapper) | Full suite from project dirs on `main`, zero-tolerance all-green. `$DOCS/7-post-merge-qa.md` (single consolidated file from inline results) | root |
-| 10 | Document | mono-documenter | Merges into permanent docs; `$DOCS/` stays in place | root |
+| 9 | **GATE-2 — post-merge full** | child QA (POST-MERGE, {project}-qa wrapper) | Full suite from project dirs on `main`, zero-tolerance all-green. `$DOCS/7-post-merge-qa.md` (single consolidated file from inline results) | root |
+| 10 | Document | main-loop session | Merges into permanent docs; `$DOCS/` stays in place | root |
 | 11 | Commit docs + archive | gitter (DOCS-COMMIT) | Commits docs incl. `$DOCS/`, moves it to `tmp/dev/archive/builds/`, commits removal (standalone) | root |

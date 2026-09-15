@@ -1,5 +1,5 @@
 {
-  "_comment": "Machine-scope (host-global) skill registry — shared once across every project on the machine, installed at the host level, never per-repo. source_fetched entries: SETUP fetches each from its canonical public repo at install (always latest); single source of truth — the blueprint never holds a copy of these registry skills that can silently drift; refresh/export MUST NOT re-vendor them, it only maintains this list. Moved here from templates/project/skills/sources.json (ghostwriter, vision-factory) — that file keeps only project-scope entries. in_tree entries are registry pointers, NOT source-fetched: deep-rr's original lives in-tree at engines/deep-rr/ and ships with the blueprint clone itself, no separate fetch — the entry exists only so machine-scope tooling can resolve it by name.",
+  "_comment": "Machine-scope (host-global) skill registry — shared once across every project on the machine, installed at the host level, never per-repo. source_fetched entries: SETUP fetches each from its canonical public repo at install (always latest); single source of truth — the blueprint never holds a copy of these registry skills that can silently drift; refresh/export MUST NOT re-vendor them, it only maintains this list. Moved here from templates/project/skills/sources.json (ghostwriter, vision-factory) — that file keeps only project-scope entries. in_tree entries are registry pointers, NOT source-fetched: deep-rr's original lives in-tree at workflows/deep-rr/ and ships with the blueprint clone itself, no separate fetch — the entry exists only so machine-scope tooling can resolve it by name.",
   "source_fetched": {
     "ghostwriter": {
       "repo": "https://github.com/{GH_USER}/ghost-writer",
@@ -12,7 +12,7 @@
   },
   "in_tree": {
     "deep-rr": {
-      "path": "engines/deep-rr/",
+      "path": "workflows/deep-rr/",
       "note": "ships with the blueprint clone — no fetch, no vendoring; registry pointer only"
     }
   }

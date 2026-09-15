@@ -23,24 +23,24 @@ Runs before UP and bare RESTART only; every other mode goes straight to its scri
 For every roster entry (`dev.sh` holds the `PROJECTS=(…)` array; iterate it):
 
 - Each runnable project's manifest (`{project}/package.json` scripts section, `{project}/pyproject.toml` entry point, etc.)
-- An infra/config project's `Makefile`, if the roster has one — target names
-- Each project's `docs/runbook.md` (or `docs/runbook-local.md` for infra) — ports, env vars, startup commands, health check endpoints
+- The infra-owning project's `Makefile`, if a roster entry owns the shared infra — target names
+- Each project's `docs/runbook.md` (or `docs/runbook-local.md` for the infra-owning project) — ports, env vars, startup commands, health check endpoints
 - `.claude/scripts/dev.sh` itself
 
 ### 0b. Compare and detect drift
 
 Check each against its source of truth:
 
-- Ports — one `*_PORT` variable per runnable roster entry (a non-HTTP {ai} consumer may serve an HTTP endpoint alongside its queue consumer, sharing the one port) against the runbooks + `.env.local` files
+- Ports — one `*_PORT` variable per runnable roster entry (a non-HTTP queue-consumer project may serve an HTTP endpoint alongside its consumer, sharing the one port) against the runbooks + `.env.local` files
 - Dependency install in `cmd_up()` — each roster entry's own `{PROJECT_PKG_MGR}`
 - Database step in `cmd_up()` — a bare `db-create-local` is not the whole story if a project boots its own migrator: read whichever project's persistence layer owns migrations (its `migrate.ts`/`migrate.py`/equivalent) — if it is the single migration authority and seeds on boot, a second migration path here that applies the schema without writing that authority's own migration ledger causes it to re-run every migration from scratch on its own boot
 - Server start commands in `cmd_up()` — each project's dev entry point, with the port forced from the script's port variable so isolated envs work
 - Health-check URLs in `cmd_up()` — the runbook health endpoints on those port variables
 - `check_prereqs()` — the tools the start commands invoke
-- Infra calls — the live infra project's `Makefile` target names; `grep -E '^[a-z0-9-]+:' {infra}/Makefile` before trusting any name
+- Infra calls — the infra-owning project's live `Makefile` target names; `grep -E '^[a-z0-9-]+:' {project}/Makefile` before trusting any name
 - `clean_ports()` and `cmd_kill()` patterns — must match what UP launches
 - Service count — add any project or service the script doesn't yet handle
-- Env file bootstrap — `cmd_up()` seeds a roster entry's missing `.env.local` from that project's own `.env.local.example` and fills required secrets from the infra project's secrets file; the example must carry every key the project's env/config module requires
+- Env file bootstrap — `cmd_up()` seeds a roster entry's missing `.env.local` from that project's own `.env.local.example` and fills required secrets from the infra-owning project's secrets file; the example must carry every key the project's env/config module requires
 
 ### 0c. Update the script if drift detected
 
@@ -55,8 +55,8 @@ A new service needs all six: a start entry in `cmd_up()`, its `*_PORT` variable 
 All modes assemble from these blocks; `{COMMAND FOOTER}` is always last.
 
 - HEADER: the mode's one-liner, defined per mode below.
-- INFRA BLOCK (DROP/FRESH, when the roster has an infra project): `Infrastructure: Docker containers: nuked + recreated | {DATABASE} ({DB_PORT}): {ready/failed} | {QUEUE} ({QUEUE_PORT}): {ready/failed} | Database: created (the migration authority migrates + seeds on boot)`
-- SERVICE TABLE (UP/RESTART/DROP-with-restart/FRESH): `| Service | Status | URL |` — one row per runnable roster entry at its port/URL (`{PROJECT_ROLE}` at `:{PROJECT_PORT}`; a non-HTTP {ai} consumer shows "{QUEUE} consumer"; add a Health row for whichever project exposes `/health`). Status: GREEN=running, RED=down, YELLOW=bundling/compiling.
+- INFRA BLOCK (DROP/FRESH, when a roster entry owns the shared infra): `Infrastructure: Docker containers: nuked + recreated | {DATABASE} ({DB_PORT}): {ready/failed} | {QUEUE} ({QUEUE_PORT}): {ready/failed} | Database: created (the migration authority migrates + seeds on boot)`
+- SERVICE TABLE (UP/RESTART/DROP-with-restart/FRESH): `| Service | Status | URL |` — one row per runnable roster entry at its port/URL (`{PROJECT_ROLE}` at `:{PROJECT_PORT}`; a non-HTTP queue-consumer project shows "{QUEUE} consumer"; add a Health row for whichever project exposes `/health`). Status: GREEN=running, RED=down, YELLOW=bundling/compiling.
 - STATUS TABLE (STATUS only): the same rows as `| Service | PID | Port | Status |` plus a row for any API endpoint a project exposes, then `Seed progress: {SEED_INSERTED}/{SEED_EXPECTED} ({SEED_STATUS}) — {SEED_DETAIL}`, omitted when `SEED_STATUS=unknown` or absent.
 - CREDENTIALS: shown when the project seeds login credentials. Read the file named by `CREDENTIALS_FILE` unless it is `MISSING` — a flat `{ "email": "password" }` map. Derive the role from the email local-part suffix (the install's seeding convention defines the suffix→role map, e.g. `+god`→Admin, `+manager`→Manager, and per-role suffixes for {USER_NOUN}/{SUBJECT_NOUN}) and render `| Role | Email | Password |`. `MISSING` → warn "Credentials file missing — seeded on boot in LOCAL env. Check the seeding project's logs." Omit this block entirely for projects with no auth/seeding.
 - COMMAND FOOTER: a `Commands:` block listing every mode named in this file's `description:` frontmatter with a one-line gloss each.
@@ -67,14 +67,17 @@ An `ERRORS` value other than `none` adds an "Errors detected" section carrying t
 
 ## Auto-Heal Escalation
 
-Applies to UP, RESTART, DROP-with-restart and FRESH, after the report is shown. Skip it when `DEV_NO_AUTOHEAL=1` is set.
+Applies to UP, RESTART, DROP-with-restart and FRESH, after the report is shown. Skip it when `DEV_NO_AUTOHEAL=1` is set — that flag breaks the `/dev` → fix → `/dev` loop.
 
 Escalate when a service is RED, `ERRORS` is not `none`, or `RESTART_RESULT=fail`:
 
-1. Read the last 30 lines of each failing service's log (`tmp/dev/{project}.log`).
-2. Report the RED service list, the `ERRORS` value, and the log details.
+1. Tell the user: "One or more services came up unhealthy — diagnosing now. ☕"
+2. Read the last 30 lines of each failing service's log (`tmp/dev/{project}.log`).
+3. Report the RED service list, the `ERRORS` value and the log details; routing the fix is the user's call. A retry runs with `DEV_NO_AUTOHEAL=1` set so the loop cannot repeat.
 
 Healthy, not failures: a bundling/compiling project YELLOW, `ALREADY_RUNNING=true`, all-GREEN with `CREDENTIALS_FILE=MISSING`.
+
+After a fix lands on a service, `/dev restart {project}` bounces just that one.
 
 ---
 
@@ -89,7 +92,7 @@ Healthy, not failures: a bundling/compiling project YELLOW, `ALREADY_RUNNING=tru
 
 ## Mode: KILL — `kill`, `stop`, `down`
 
-Run `./.claude/scripts/dev.sh kill 2>&1`, then report each service killed on its port variable — one line per roster entry (a non-HTTP {ai} consumer shows "({QUEUE} consumer)") — plus orphan processes cleaned and registry cleared, then `{COMMAND FOOTER}`.
+Run `./.claude/scripts/dev.sh kill 2>&1`, then report each service killed on its port variable — one line per roster entry (a non-HTTP queue-consumer project shows "({QUEUE} consumer)") — plus orphan processes cleaned and registry cleared, then `{COMMAND FOOTER}`.
 
 ---
 
@@ -108,7 +111,7 @@ Both nuke the Docker containers _and their volumes_ — the local database is wi
 1. Run `./.claude/scripts/dev.sh drop 2>&1` or `./.claude/scripts/dev.sh fresh 2>&1` (timeout 180s).
 2. Markers: `NUKE_RESULT` and `INFRA_RESULT` (success|fail); DROP adds `WERE_RUNNING=true|false` and `SERVERS_SKIPPED=true` when servers were not restarted; the UP server markers appear whenever servers were (re)started.
 3. Report with the infrastructure block. DROP header: "Dev environment dropped and rebuilt from scratch."; FRESH header: "Dev environment rebuilt from scratch." A DROP without restart adds "Servers were not running before drop — infrastructure is ready, use `/dev` to start servers."
-4. FRESH only, when the roster has an async {ai} consumer that processes seed data — after the report, launch its drain-wait helper (e.g. `./.claude/scripts/{ai}-drain-wait.sh`) in the background: FRESH re-seeds from an empty DB, so the environment is ready only once the {ai} consumer has processed every seeded {SESSION_NOUN}. The harness wakes you on the script's exit with `DRAIN_RESULT=clean|error|timeout` — report that result when it lands. Skip for a roster with no such consumer.
+4. FRESH only, when the roster has an async queue consumer that processes seed data — after the report, launch `./.claude/scripts/drain-wait.sh` in the background: FRESH re-seeds from an empty DB, so the environment is ready only once that consumer has processed every seeded {SESSION_NOUN}. The harness wakes you on the script's exit with `DRAIN_RESULT=clean|error|timeout` — report that result when it lands. Skip for a roster with no such consumer.
 
 ---
 
@@ -161,7 +164,7 @@ Routing for the arguments after `iso`:
 
 1. Create the worktree and allocate ports via gitter SETUP, using `{profile}` as the pipeline name.
 2. Write `.dev-ports` at the worktree root — dev.sh sources it and switches to ISO mode. It carries a `# Profile: {profile}` comment line (dev.sh greps that comment for the profile, not a variable) plus every variable dev.sh reads from it: read the port-discovery block at the top of `dev.sh` for the exact names, since `set -u` aborts the script on any variable it references and the file omits. Add the container names and any analytics/object-store port the steps below use.
-3. Create `docker-compose.{profile}.yml` mirroring the infra project's local compose (same services + images), with per-profile ports.
+3. Create `docker-compose.{profile}.yml` mirroring the infra-owning project's local compose (same services + images), with per-profile ports.
 4. Start Docker and wait for the health checks.
 5. Apply the DB schema (extensions + migrations) and create any auxiliary databases the infra needs.
 6. Symlink `schema/` at the worktree root → the schema-owning project's `schema/` dir, if the project uses one.

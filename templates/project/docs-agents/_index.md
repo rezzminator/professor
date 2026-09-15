@@ -4,9 +4,9 @@ Entry point for {PROJECT_NAME}'s documentation. This **Reference tier** records 
 
 Cross-project docs live under `docs/agents/`; single-project internals live under each `{project}/docs/`.
 
-<!-- INSTALL: the cluster rows below are the standard set. /documenter bootstrap creates each
+<!-- INSTALL: the cluster rows below are the standard set. SETUP Phase 2.7 creates each
      cluster directory + its _index.md from the codebase. If a cluster is deferred (Phase 2.7,
-     project too new), mark its row "(deferred — run /documenter bootstrap)" instead of linking
+     project too new), mark its row "(deferred — bootstrap when the code exists)" instead of linking
      a file that does not exist. A single-project install keeps this same hub; "cross-project"
      simply collapses to the one project. -->
 

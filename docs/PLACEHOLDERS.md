@@ -29,21 +29,22 @@ Each roster entry has: directory, role label, tech stack, package manager, test 
 | ---------------------------------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------- |
 | the project roster (the list) | `{PROJECT_ROSTER}` | 1..N entries; SETUP fills from the interview |
 | one entry's directory | `{project}` | generic — used inside per-project PATTERN blocks |
-| one entry's directory, uppercase/shell-var-safe form | `{PROJECT}` | e.g. `{PROJECT}_STATUS`; sibling of `{project}` for contexts needing an env-var-safe display form |
-| one entry's role label | `{PROJECT_ROLE}` | the adopter's own labels, not `backend/frontend/ai/infra/web` |
+| one entry's directory, uppercase/shell-var-safe form | `{PROJECT}` | e.g. `{PROJECT}_STATUS`; sibling of `{project}`. In a rule that names ONE specific entry — `make -C {PROJECT}` infra ops, the `{AI_SERVICE_NAME}` source tree, the public-site paths — it is that entry, and the install-time KEEP/INSTALL-NOTE comment beside the rule says which |
+| one entry's role label | `{PROJECT_ROLE}` | the adopter's own one-line description of what the entry is; the blueprint carries no role names of its own |
 | one entry's stack | `{PROJECT_STACK}` | lang / framework / ORM / UI etc. for that entry |
 | one entry's package manager | `{PROJECT_PKG_MGR}` | |
 | one entry's test runner | `{PROJECT_TEST_RUNNER}` | |
 | one entry's dev port(s) | `{PROJECT_PORT}` | |
-| routing key for an entry | `{ROLE}-ONLY` | per-roster; keep `CROSS` for multi-project changes |
+
+A roster carries no fixed roles. The only per-entry attributes beyond the fields above are ownership facts SETUP asks for — which entry owns the shared infra/orchestration (`Makefile`, containers, DB, queue), which owns the migrations dir, which holds the `{AI_SERVICE_NAME}` LLM-calling code, which serves the public site — and a rule conditioned on one of them names the entry through `{PROJECT}` plus its KEEP comment. Role-shaped tokens — a `ROLE_PROJECT` marker (infra / ai / backend / frontend / web) or a per-role `ROLE_STACK` / `ROLE_PKG_MGR` / `ROLE_TEST_RUNNER` / `ROLE_PORT` — are retired and deliberately unregistered, so the token gate fails any template that re-introduces one.
 
 ### Materialization (how SETUP expands the roster)
 
-Templates carry per-project **PATTERN blocks** written once with the generic `{project}` tokens. At install SETUP **expands each pattern block once per roster entry**, substituting that entry's fields — so a 1-project and a 7-project adopter get correctly-sized files from the same template. Pattern sites: `build.md`/`wave.md` per-project pipeline stages, `agents/per-project/{planner,architect,developer,qa}.md` (instantiated per entry), and `worktree.sh`/`dev.sh` (which hold a `PROJECTS=(…)` array SETUP fills and iterate it).
+Templates carry per-project **PATTERN blocks** written once with the generic `{project}` tokens. At install SETUP **expands each pattern block once per roster entry**, substituting that entry's fields — so a 1-project and a 7-project adopter get correctly-sized files from the same template. Pattern sites: the `wave/builder.md`/`wave/live.md` per-project pipeline stages, `agents/per-project/{developer,qa}.md` (instantiated per entry), and `worktree.sh`/`dev.sh` (which hold a `PROJECTS=(…)` array SETUP fills and iterate it).
 
 ### Single-project collapse
 
-When the roster has one entry: the worktree is the repo root (no per-project subdir), cross-project/integration steps are skipped, routing is trivially that one project, and "monorepo" framing drops to "the project." A template must read correctly at roster size 1 — never assume more than one.
+When the roster has one entry: the worktree is the repo root (no per-project subdir), cross-project/integration steps are skipped, routing is trivially that one project, and the multi-project framing drops to "the project." A template must read correctly at roster size 1 — never assume more than one.
 
 ### Materialization-expansion tokens (SETUP renders these per roster entry)
 
@@ -76,13 +77,8 @@ These are **NOT hand-filled.** SETUP renders them by expanding the per-project P
 | `{DEV_PROCESS_PATTERN}` | per-roster dev-process pattern block |
 | `{DEV_PREREQS}` | per-roster dev prerequisites |
 | `{PORT_DEFAULTS}` | per-roster port-default assignments |
-| `{SEED_PROJECT}` | optional-role marker — seed project (`"-"` sentinel when absent) |
-| `{INFRA_PROJECT}` | optional-role marker — infra project (`"-"` sentinel when absent) |
-| `{AI_PROJECT}` | optional-role marker — AI project (`"-"` sentinel when absent) |
-| `{BACKEND_PROJECT}` | optional-role marker — backend project (`"-"` sentinel when absent) |
-| `{FRONTEND_PROJECT}` | optional-role marker — frontend project (`"-"` sentinel when absent) |
-| `{WEB_PROJECT}` | optional-role marker — web project (`"-"` sentinel when absent) |
-| `{MIGRATIONS_DIR}` | optional-role marker — migrations dir (`"-"` sentinel when absent) |
+| `{SEED_PROJECT}` | ownership marker — the entry that owns seeding (`"-"` sentinel when absent); scripts only |
+| `{MIGRATIONS_DIR}` | ownership marker — the migrations dir (`"-"` sentinel when absent) |
 
 ### Per-project `CLAUDE.md` decomposition (templates/project/per-project/CLAUDE.md)
 
@@ -105,17 +101,16 @@ This file decomposes the aggregate roster tokens above into individual bullets/h
 | `{ETHICS_RULE_1}` / `{ETHICS_RULE_2}` | domain ethics-rule bullets | `{SACRED_GROUND}` |
 | `{PROJECT_TREE}` | file-structure diagram slot | — |
 
-## Tech stack (per role — keep the mechanics, swap the names)
+## Tech stack (keep the mechanics, swap the names)
+
+A roster entry's whole stack, package manager and test runner are the per-entry `{PROJECT_STACK}` / `{PROJECT_PKG_MGR}` / `{PROJECT_TEST_RUNNER}` above. The inline tokens below name one component wherever a sentence needs just that component:
 
 | Source tech | Placeholder |
-| --------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Express, GraphQL Yoga, Drizzle ORM, postgres.js | `{BACKEND_STACK}` (in CLAUDE.md headers); inline: `{ORM}`, `{API_FRAMEWORK}` |
-| Expo SDK 52, React Native 0.76, Expo Router, Apollo, NativeWind | `{FRONTEND_STACK}`; inline `{UI_FRAMEWORK}` |
-| Python 3.12+, LangChain, LangGraph, SQLAlchemy | `{AI_STACK}`; inline `{AI_FRAMEWORK}` |
-| Next.js 15, Tailwind | `{WEB_STACK}` |
-| Docker Compose, LocalStack, PostgreSQL | `{INFRA_STACK}` |
-| package mgrs `pnpm` / `npm` / `uv` | `{BE_PKG_MGR}` / `{FE_PKG_MGR}` / `{AI_PKG_MGR}` |
-| test runners Vitest / Jest / pytest | `{BE_TEST_RUNNER}` / `{FE_TEST_RUNNER}` / `{AI_TEST_RUNNER}` |
+| ------------------------------------------------------------ | ------------------------------------------------------ |
+| the ORM (e.g. Drizzle, SQLAlchemy) | `{ORM}` |
+| the API framework (e.g. Express, GraphQL Yoga) | `{API_FRAMEWORK}` |
+| the UI framework (e.g. React Native, Next.js) | `{UI_FRAMEWORK}` |
+| the LLM-orchestration framework (e.g. LangChain, LangGraph) | `{AI_FRAMEWORK}` |
 | `Postgres` / `postgres.mmd` | `{DATABASE}` / keep `postgres.mmd` filename (generic) |
 | cross-cutting `GraphQL`, `WebSocket`, `SQS` | `{API_PROTOCOL}`, `{REALTIME_PROTOCOL}`, `{QUEUE}` |
 
@@ -131,12 +126,10 @@ This file decomposes the aggregate roster tokens above into individual bullets/h
 ## Ports
 
 | Source value | Placeholder |
-| ----------------------------------------------------------------------------------- | ------------------------------------ |
-| 3000 (BE), 4000 (web) | `{BACKEND_PORT}`, `{WEB_PORT}` |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| a roster entry's dev server port | `{PROJECT_PORT}` (per entry); the whole set is `{PORT_DEFAULTS}` |
 | 5432 / 5433 (db local/test) | `{DB_PORT}` / `{DB_PORT_TEST}` |
-| 4566 / 4567 (localstack) | `{QUEUE_PORT}` / `{QUEUE_PORT_TEST}` |
-| {BACKEND_PORT} sibling — frontend dev port | `{FRONTEND_PORT}` |
-| generic port-pair fallback (LLM-judgment territory, per placeholder-map.tsv header) | `{PORT_A}` / `{PORT_B}` |
+| 4566 / 4567 (queue emulator local/test) | `{QUEUE_PORT}` / `{QUEUE_PORT_TEST}` |
 
 ## Domain nouns (the `{DOMAIN_NOUN}` family)
 
@@ -175,16 +168,15 @@ The opt-in Tier B commands ship as archetype skeletons whose domain content is o
 | Command | Slots |
 | ----------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `/officer` | `{REGULATION}`, `{REGULATION_FRAMEWORK_DOCS}`, `{ENFORCEMENT_AUTHORITY}`, `{DATA_SUBJECT_RIGHTS}`, `{INCIDENT_NOTIFICATION_TIMELINE}` |
-| `/pm` | `{USER_PERSONA}`, `{PRODUCT_DOMAIN}`, `{USER_DAILY_WORKFLOW}`, `{USER_PAIN_POINTS}` |
 | `/mentor` | `{MARKET_SEGMENT}`, `{JURISDICTION}`, `{LEGAL_ENTITY_TYPE}`, `{FUNDING_LANDSCAPE}`, `{REGULATORY_BODIES}` |
-| `/marketer` | `{CHANNEL_LANDSCAPE}`, `{TARGET_LANGUAGE}`, `{COMPETITIVE_LANDSCAPE}`, `{INDUSTRY_CONFERENCES}`, `{AUDIENCE_VOCABULARY}` |
-| `/km` | `{KNOWLEDGE_DOMAIN}`, `{KNOWLEDGE_TAXONOMY}`, `{KNOWLEDGE_CONSUMERS}`, `{SOURCE_AUTHORITIES}`, `{SECONDARY_LANG}` |
+| `/marketer` | `{CHANNEL_LANDSCAPE}`, `{TARGET_LANGUAGE}`, `{COMPETITIVE_LANDSCAPE}`, `{INDUSTRY_CONFERENCES}`, `{AUDIENCE_VOCABULARY}`, `{USER_PERSONA}` |
+| `/rnd` | `{SECONDARY_LANG}` |
 
 A named regulator, competitor, conference, or association surviving in one of these templates is a leak, not a default — the archetype keeps the SHAPE of the answer, never the answer.
 
 ## Paths (mostly generic pipeline paths — KEEP unchanged)
 
-Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,waves,backlog.md}`, `.worktrees/`, `tmp/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: the AI project's `knowledge/` dir → `{AI_PROJECT}/knowledge/`, its Python package `src/<pkg>/` → `{AI_PROJECT}/src/...`, machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
+Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,waves,backlog.md}`, `.worktrees/`, `tmp/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
 
 ## Model pins
 
@@ -202,11 +194,11 @@ This makes the codex-touched files a 3-way merge — read all three:
 2. **Current blueprint template** (re-inject the Codex sections/lines/refs that live deleted).
 3. **This map** (apply placeholders).
 
-Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), the wave command dir `commands/wave/{builder,orchestrator}.md` (keep the dual-runtime paragraph), the codex mirror's own wave wrappers under `codex/` (`skills/wave/SKILL.md`, `skills/wave-build/SKILL.md`, `agents/{wave,wave-build}.toml` — keep the dual Skill/Agent runtime block, and keep their read-target pointers aimed at `commands/wave/orchestrator.md` and `commands/wave/builder.md`), `commands/documenter.md` (keep `.codex/` in ownership), `commands/pfm.md` (keep ALL Codex-management: invariants stay at 10, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` in the allow-list; its body is curated upstream on `rumdl` + the repo-root `.rumdl.toml` — a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
+Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), the wave command dir `commands/wave/{builder,orchestrator}.md` (keep the dual-runtime paragraph), the codex mirror's own wave wrappers under `codex/` (`skills/wave/SKILL.md`, `skills/wave-build/SKILL.md`, `agents/{wave,wave-build}.toml` — keep the dual Skill/Agent runtime block, and keep their read-target pointers aimed at `commands/wave/orchestrator.md` and `commands/wave/builder.md`), `commands/pcm.md` (keep ALL Codex-management: invariants stay at 10, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` in the allow-list; its body is curated upstream on `rumdl` + the repo-root `.rumdl.toml` — a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
 
 ## Ignored artifacts (do NOT ship, drop references)
 
-`audit:cortex`, `cortex-drain-wait.sh` and the No-inline-LLM-prompts rules that reference them are **out of scope**. When a shipped template (root `CLAUDE.md`, `/km`, `/documenter`, `dev`, `wave`, `pfm`, `settings.json`) references them, drop that row/rule/line — exactly as `council`/`reddit` are dropped — so the blueprint has no dangling pointers. `km-guard.sh` ships — generalized to a config-driven protected-paths guard (`PROTECTED_PATHS` glob array + `PROTECTED_PATH_GREP`), wired in `settings.json` (Edit|Write + Bash matchers); the Knowledge-guard rule ships with it.
+A live-source command, script or rule the blueprint does not ship (`ignore_sources` in `templates/refresh-map.json`) is **out of scope**. When a shipped template (root `CLAUDE.md`, `dev`, `wave`, `pcm`, `settings.json`) references one, drop that row/rule/line so the blueprint has no dangling pointers.
 
 ## Tokens (additional canonical entries)
 
@@ -239,12 +231,10 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 
 | Token | Owner template | Filled at runtime with |
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `{FORMAT}` | `commands/km.md` | the knowledge format's short code |
-| `{SHA}` | `epics/TEMPLATE.md`, `commands/documenter.md` | a commit sha |
+| `{SHA}` | `epics/TEMPLATE.md` | a commit sha |
 | `{MB}` | `docs-commands/git/references/gitter-history.md` | a file size in megabytes |
 | `{PID}` | `commands/wave/live.md` | the lock holder's process id |
-| `{PIPELINE}` | `commands/documenter/archive.md`, `docs-commands/documenter/references/scopes/*.md` | the pipeline's name |
-| `{SCOPE}` | `commands/pfm.md` | the audit scope being run |
+| `{SCOPE}` | `commands/pcm.md` | the audit scope being run |
 | `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
 | `{SESSION_ID}` | `codex/skills/wave-builder/SKILL.md` | the Codex session id to resume |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |

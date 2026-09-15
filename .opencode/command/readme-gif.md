@@ -25,4 +25,4 @@ Each file's header states its contract; change the take there, never by hand in 
    - limits: four account cards with bars and "provider confirmed". A card reading `refreshing limits…` is the half-second cold start — if the still caught it, extract one ~2s later from the GIF before judging.
    - cosmos: edges between chats and the ledger ticker, with no `events carry no sender identity` line.
 2. Every name, path, and number on screen is invented; a real chat name, project, account, or host path in any still means the fence leaked — stop and report it.
-3. Report the GIF path, size, duration, and each still's verdict. Committing goes through `/git`, only on request.
+3. Report the GIF path, size, duration, and each still's verdict. Committing is a `gitter` Phase COMMIT dispatch, only on request.

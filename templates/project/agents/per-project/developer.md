@@ -47,7 +47,7 @@ Work through architecture doc's file list. Write complete code — no placeholde
 
 Exercise real internal collaborators end-to-end. Mock external services only. Real data/state layer, real entrypoints, real auth.
 
-- Setup: provision the test data/state layer via the per-pipeline infra target (`make -C <worktree>/{INFRA_PROJECT} db-setup-test-pipeline PIPELINE=$PIPELINE`) — NEVER hardcode table/resource names; the per-pipeline target keeps parallel pipelines off each other's shared stack
+- Setup: provision the test data/state layer via the per-pipeline infra target (`make -C <worktree>/{PROJECT} db-setup-test-pipeline PIPELINE=$PIPELINE` — `{PROJECT}` here and in Step 6 is the roster entry whose Makefile owns the infra targets) — NEVER hardcode table/resource names; the per-pipeline target keeps parallel pipelines off each other's shared stack
 - Steps: real requests against a live instance
 - Teardown: stop the instance, reset the test data/state layer
 - Load `.env.test` first, then `.env.local` with `override: false` (API keys only)
@@ -79,8 +79,8 @@ Your self-QA is TARGETED, never the full suite: unit (coverage >= 70%) + typeche
 Self-QA runs against the SAME per-pipeline isolated stack as the QA agent's PRE-MERGE scope (the `*-pipeline` make targets + the ports from `<worktree>/.env.ports`), so parallel pipelines never collide on the shared default-port stack:
 
 ```bash
-make -C <worktree>/{INFRA_PROJECT} up-test-pipeline PIPELINE=$PIPELINE && sleep 5
-make -C <worktree>/{INFRA_PROJECT} db-setup-test-pipeline PIPELINE=$PIPELINE
+make -C <worktree>/{PROJECT} up-test-pipeline PIPELINE=$PIPELINE && sleep 5
+make -C <worktree>/{PROJECT} db-setup-test-pipeline PIPELINE=$PIPELINE
 {PROJECT_TEST_RUNNER} <unit-with-coverage>                       # unit — coverage >= 70%
 {PROJECT_TYPECHECK}                                              # type-safe
 {PROJECT_LINT} && {PROJECT_FORMAT}                               # clean
@@ -88,7 +88,7 @@ make -C <worktree>/{INFRA_PROJECT} db-setup-test-pipeline PIPELINE=$PIPELINE
 sleep 2 && {HEALTH_PROBE}
 {PROJECT_TEST_RUNNER} <the-profile-you-added-or-touched>         # targeted only — NOT the full suite
 # stop the booted instance
-make -C <worktree>/{INFRA_PROJECT} nuke-test-pipeline PIPELINE=$PIPELINE
+make -C <worktree>/{PROJECT} nuke-test-pipeline PIPELINE=$PIPELINE
 ```
 
 Run only the integration/e2e profile(s) for the feature you implemented or modified. Repeat until all pass. **Do NOT hand off to QA with lint errors.**
@@ -103,7 +103,7 @@ Report: `{PROJECT_ROLE} implementation complete. Coverage: X%. Branch: <name> Wo
 
 - **Nuke dead code** — trace ALL references, remove completely
 - NEVER write git — gitter only; read-only git (status/diff/log/show) is allowed
-- NEVER write to permanent docs — mono-documenter only
+- NEVER write to permanent docs — the main-loop session only
 - SCOPED: only {project} project files
 - No `> Author:` lines in pipeline docs
 - Never modify pipeline docs (plan, architecture)

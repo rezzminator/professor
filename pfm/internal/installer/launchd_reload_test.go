@@ -44,15 +44,29 @@ func TestReloadLaunchAgentLoadedUnchangedRestartsNothing(t *testing.T) {
 	for _, label := range []string{mcpLaunchdLabel, launchdLabel} {
 		t.Run(label, func(t *testing.T) {
 			runner := &loadedRunner{}
-			installer := engine{options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}}, apply: true}
-			if err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", label, false); err != nil {
+			installer := engine{
+				options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
+				apply:   true,
+			}
+			if err := installer.reloadLaunchAgentWithLabel(
+				context.Background(),
+				"/fixture/agent.plist",
+				label,
+				false,
+			); err != nil {
 				t.Fatalf("reload of a loaded, unchanged agent returned %v, want nil", err)
 			}
 			if callKind(runner.calls, "bootout") {
-				t.Fatalf("calls=%q, want no bootout — a healthy daemon with no new plist must not be stopped", runner.calls)
+				t.Fatalf(
+					"calls=%q, want no bootout — a healthy daemon with no new plist must not be stopped",
+					runner.calls,
+				)
 			}
 			if callKind(runner.calls, "bootstrap") {
-				t.Fatalf("calls=%q, want no bootstrap — a healthy daemon with no new plist must not be restarted", runner.calls)
+				t.Fatalf(
+					"calls=%q, want no bootstrap — a healthy daemon with no new plist must not be restarted",
+					runner.calls,
+				)
 			}
 		})
 	}
@@ -63,8 +77,16 @@ func TestReloadLaunchAgentLoadedUnchangedRestartsNothing(t *testing.T) {
 // re-registered, so the new file actually takes effect.
 func TestReloadLaunchAgentLoadedChangedReloads(t *testing.T) {
 	runner := &loadedRunner{}
-	installer := engine{options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}}, apply: true}
-	if err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, true); err != nil {
+	installer := engine{
+		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
+		apply:   true,
+	}
+	if err := installer.reloadLaunchAgentWithLabel(
+		context.Background(),
+		"/fixture/agent.plist",
+		mcpLaunchdLabel,
+		true,
+	); err != nil {
 		t.Fatalf("reload of a loaded, changed agent returned %v, want nil", err)
 	}
 	if !callKind(runner.calls, "bootout") {
@@ -108,8 +130,16 @@ func (r *notLoadedRunner) Run(_ context.Context, name string, args ...string) er
 // issue a bootout against a job that was never running.
 func TestReloadLaunchAgentNotLoadedBootstrapsWithoutBootout(t *testing.T) {
 	runner := &notLoadedRunner{}
-	installer := engine{options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}}, apply: true}
-	if err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, false); err != nil {
+	installer := engine{
+		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
+		apply:   true,
+	}
+	if err := installer.reloadLaunchAgentWithLabel(
+		context.Background(),
+		"/fixture/agent.plist",
+		mcpLaunchdLabel,
+		false,
+	); err != nil {
 		t.Fatalf("reload of a not-loaded agent returned %v, want nil", err)
 	}
 	if !callKind(runner.calls, "bootstrap") {
@@ -163,8 +193,16 @@ func (r *flakyBootstrapRunner) Run(_ context.Context, name string, args ...strin
 // that out rather than surface the first failure.
 func TestReloadLaunchAgentRetriesBootstrapThroughATeardownInFlight(t *testing.T) {
 	runner := &flakyBootstrapRunner{failCount: 2, loaded: true}
-	installer := engine{options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}}, apply: true}
-	if err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, true); err != nil {
+	installer := engine{
+		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
+		apply:   true,
+	}
+	if err := installer.reloadLaunchAgentWithLabel(
+		context.Background(),
+		"/fixture/agent.plist",
+		mcpLaunchdLabel,
+		true,
+	); err != nil {
 		t.Fatalf("reload returned %v, want nil — the retry should have ridden out the in-flight teardown", err)
 	}
 	if runner.bootstrapCalls <= 1 {
@@ -199,7 +237,10 @@ func (r *alwaysFailsBootstrapRunner) Run(_ context.Context, name string, args ..
 // reserved for a job the installer itself stopped.
 func TestReloadLaunchAgentNeverLoadedBootstrapFailureStaysPlain(t *testing.T) {
 	runner := &alwaysFailsBootstrapRunner{}
-	installer := engine{options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}}, apply: true}
+	installer := engine{
+		options: Options{Runner: runner, Stdout: io.Discard, Sleep: func(time.Duration) {}},
+		apply:   true,
+	}
 	err := installer.reloadLaunchAgentWithLabel(context.Background(), "/fixture/agent.plist", mcpLaunchdLabel, false)
 	if err == nil {
 		t.Fatal("want an error, got nil")

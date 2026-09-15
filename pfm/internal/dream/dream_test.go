@@ -166,7 +166,9 @@ func TestNightRunsGatesBetweenSeatsAndHoldsWithoutApplying(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Night() error = %v", err)
 	}
-	if result.Empty || !result.ApplyEligible || result.Applied || result.HoldState != artifact.HoldReady || result.Survivors != 1 || result.Yield != 1 {
+	if result.Empty || !result.ApplyEligible || result.Applied || result.HoldState != artifact.HoldReady ||
+		result.Survivors != 1 ||
+		result.Yield != 1 {
 		t.Fatalf("Night() result = %+v, want one READY unapplied survivor", result)
 	}
 	wantOrder := []string{"runner", "prepare", "distill", "refiner"}
@@ -231,7 +233,13 @@ func TestNightZeroYieldIsDistinctAndStillNeverAutoApplies(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(result.Stage.Root, "APPLIED")); !os.IsNotExist(err) {
 		t.Fatalf("ZERO-YIELD night wrote APPLIED: %v", err)
 	}
-	if line := readNightTest(t, filepath.Join(result.Stage.Root, "READY-FOR-APPLY")); !strings.HasPrefix(line, "ZERO-YIELD\t") {
+	if line := readNightTest(
+		t,
+		filepath.Join(result.Stage.Root, "READY-FOR-APPLY"),
+	); !strings.HasPrefix(
+		line,
+		"ZERO-YIELD\t",
+	) {
 		t.Fatalf("READY marker = %q", line)
 	}
 }
@@ -249,20 +257,34 @@ func TestNightZeroSurvivorsIsLoudAndOffersNoApply(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Night() error = %v", err)
 	}
-	if result.HoldState != artifact.HoldZeroSurvivors || result.ApplyEligible || result.Applied || result.Survivors != 0 || result.Yield != 0 {
+	if result.HoldState != artifact.HoldZeroSurvivors || result.ApplyEligible || result.Applied ||
+		result.Survivors != 0 ||
+		result.Yield != 0 {
 		t.Fatalf("Night() result = %+v, want ZERO-SURVIVORS without apply", result)
 	}
 	if prepared.refinerCalls != 0 {
 		t.Fatalf("refiner calls = %d, want zero", prepared.refinerCalls)
 	}
 	if got := stdout.String(); !strings.Contains(got, "HOLD-BEFORE-APPLY ZERO-SURVIVORS") ||
-		!strings.Contains(got, "no signed apply command") || containsLinePrefix(got, "dreamer-night: signed apply command:") {
+		!strings.Contains(
+			got,
+			"no signed apply command",
+		) || containsLinePrefix(got, "dreamer-night: signed apply command:") {
 		t.Fatalf("zero-survivor output = %q", got)
 	}
-	if line := readNightTest(t, filepath.Join(result.Stage.Root, "READY-FOR-APPLY")); !strings.HasPrefix(line, "ZERO-SURVIVORS\t") {
+	if line := readNightTest(
+		t,
+		filepath.Join(result.Stage.Root, "READY-FOR-APPLY"),
+	); !strings.HasPrefix(
+		line,
+		"ZERO-SURVIVORS\t",
+	) {
 		t.Fatalf("READY marker = %q", line)
 	}
-	if body := readNightTest(t, filepath.Join(result.Stage.Root, "refiner-seat.log")); body != "VERIFY SKIP zero anchor-valid staged maps\n" {
+	if body := readNightTest(
+		t,
+		filepath.Join(result.Stage.Root, "refiner-seat.log"),
+	); body != "VERIFY SKIP zero anchor-valid staged maps\n" {
 		t.Fatalf("refiner skip log = %q", body)
 	}
 }
@@ -290,7 +312,10 @@ func TestNightWiresOrganLockAndProfileAndFailsOnRefinerMapSetChange(t *testing.T
 	if lockCalls != 1 || releases != 1 {
 		t.Fatalf("lock calls/releases = %d/%d, want 1/1", lockCalls, releases)
 	}
-	if !strings.Contains(readNightTest(t, filepath.Join(result.Stage.Root, "distill-brief.md")), "Lane `tracer` fixture.") {
+	if !strings.Contains(
+		readNightTest(t, filepath.Join(result.Stage.Root, "distill-brief.md")),
+		"Lane `tracer` fixture.",
+	) {
 		t.Fatal("organ-resolved lane profile did not reach distill brief")
 	}
 	if _, err := os.Stat(filepath.Join(result.Stage.Root, "FAILED")); err != nil {
@@ -571,7 +596,11 @@ type fakeNightRunner struct {
 	prepared *fakePreparedNight
 }
 
-func (runner *fakeNightRunner) PrepareNight(_ context.Context, law seat.SeatLaw, stage string) (NightPreparedSeats, error) {
+func (runner *fakeNightRunner) PrepareNight(
+	_ context.Context,
+	law seat.SeatLaw,
+	stage string,
+) (NightPreparedSeats, error) {
 	if law != seat.RequiredSeatLaw() {
 		return nil, fmt.Errorf("wrong seat law: %+v", law)
 	}
@@ -617,13 +646,29 @@ func (night *fakePreparedNight) RunDistill(_ context.Context, input seat.SeatInp
 		writeNightTest(night.fixture.t, filepath.Join(night.stage, "paths.sha256"), hex.EncodeToString(digest[:])+"\n")
 	}
 	if night.noMaps {
-		return seat.SeatResult{Name: input.Name, ExitReason: "idle", LastAssistant: "no maps", SessionID: "d", RolloutPath: "/rollout/d"}, nil
+		return seat.SeatResult{
+			Name:          input.Name,
+			ExitReason:    "idle",
+			LastAssistant: "no maps",
+			SessionID:     "d",
+			RolloutPath:   "/rollout/d",
+		}, nil
 	}
 	hashA := strings.TrimSpace(runNightGit(night.fixture.t, night.fixture.repo, "rev-parse", night.fixture.tree+":a.txt"))[:12]
 	hashB := strings.TrimSpace(runNightGit(night.fixture.t, night.fixture.repo, "rev-parse", night.fixture.tree+":b.txt"))[:12]
-	mapBody := fmt.Sprintf("# Fixture map\n\n## Question\n\nWhat is the fixture?\n\n## Answer\n\nIt is pinned.\n\n## Derivation trail\n\nRead both files.\n\nProvenance: 2026-08-13 · sid abcdef12\n\n## Anchors\n\n- `a.txt` — blob `%s`\n- `b.txt` — blob `%s`\n", hashA, hashB)
+	mapBody := fmt.Sprintf(
+		"# Fixture map\n\n## Question\n\nWhat is the fixture?\n\n## Answer\n\nIt is pinned.\n\n## Derivation trail\n\nRead both files.\n\nProvenance: 2026-08-13 · sid abcdef12\n\n## Anchors\n\n- `a.txt` — blob `%s`\n- `b.txt` — blob `%s`\n",
+		hashA,
+		hashB,
+	)
 	writeNightTest(night.fixture.t, filepath.Join(night.stage, "maps", "fixture-map.md"), mapBody)
-	return seat.SeatResult{Name: input.Name, ExitReason: "idle", LastAssistant: "distilled", SessionID: "d", RolloutPath: "/rollout/d"}, nil
+	return seat.SeatResult{
+		Name:          input.Name,
+		ExitReason:    "idle",
+		LastAssistant: "distilled",
+		SessionID:     "d",
+		RolloutPath:   "/rollout/d",
+	}, nil
 }
 
 func (night *fakePreparedNight) RunRefiner(_ context.Context, input seat.SeatInput) (seat.SeatResult, error) {
@@ -638,11 +683,25 @@ func (night *fakePreparedNight) RunRefiner(_ context.Context, input seat.SeatInp
 	if verdict == "" {
 		verdict = "CONFIRM"
 	}
-	writeNightTest(night.fixture.t, filepath.Join(night.stage, "verdicts.md"), verdict+"\tmaps/fixture-map.md\tfixture evidence\n")
+	writeNightTest(
+		night.fixture.t,
+		filepath.Join(night.stage, "verdicts.md"),
+		verdict+"\tmaps/fixture-map.md\tfixture evidence\n",
+	)
 	if night.addMapDuringRefine {
-		writeNightTest(night.fixture.t, filepath.Join(night.stage, "maps", "injected-map.md"), readNightTest(night.fixture.t, filepath.Join(night.stage, "maps", "fixture-map.md")))
+		writeNightTest(
+			night.fixture.t,
+			filepath.Join(night.stage, "maps", "injected-map.md"),
+			readNightTest(night.fixture.t, filepath.Join(night.stage, "maps", "fixture-map.md")),
+		)
 	}
-	return seat.SeatResult{Name: input.Name, ExitReason: "idle", LastAssistant: "verified", SessionID: "r", RolloutPath: "/rollout/r"}, nil
+	return seat.SeatResult{
+		Name:          input.Name,
+		ExitReason:    "idle",
+		LastAssistant: "verified",
+		SessionID:     "r",
+		RolloutPath:   "/rollout/r",
+	}, nil
 }
 
 func writeNightTest(t *testing.T, path, body string) {

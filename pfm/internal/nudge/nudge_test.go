@@ -9,9 +9,21 @@ import (
 
 func TestBandStartsAtTheConfiguredPercentAndStepsFromThere(t *testing.T) {
 	for _, test := range []struct{ percent, start, step, band int }{
-		{0, 35, 10, 0}, {34, 35, 10, 0}, {35, 35, 10, 35}, {44, 35, 10, 35}, {45, 35, 10, 45},
-		{94, 35, 10, 85}, {95, 35, 10, 95}, {100, 35, 10, 95}, {140, 35, 10, 95},
-		{49, 50, 20, 0}, {50, 50, 20, 50}, {69, 50, 20, 50}, {70, 50, 20, 70}, {90, 50, 20, 90}, {100, 50, 20, 90},
+		{0, 35, 10, 0},
+		{34, 35, 10, 0},
+		{35, 35, 10, 35},
+		{44, 35, 10, 35},
+		{45, 35, 10, 45},
+		{94, 35, 10, 85},
+		{95, 35, 10, 95},
+		{100, 35, 10, 95},
+		{140, 35, 10, 95},
+		{49, 50, 20, 0},
+		{50, 50, 20, 50},
+		{69, 50, 20, 50},
+		{70, 50, 20, 70},
+		{90, 50, 20, 90},
+		{100, 50, 20, 90},
 	} {
 		if got := Band(test.percent, test.start, test.step); got != test.band {
 			t.Fatalf("Band(%d, start %d, step %d)=%d, want %d", test.percent, test.start, test.step, got, test.band)
@@ -44,7 +56,15 @@ func TestDecideRemindsOncePerBandAndRearmsAfterACompact(t *testing.T) {
 			t.Fatalf("step %d: %v", index, err)
 		}
 		if band != step.band || nudge != step.nudge {
-			t.Fatalf("step %d (%d%%): band=%d nudge=%t, want band=%d nudge=%t", index, step.percent, band, nudge, step.band, step.nudge)
+			t.Fatalf(
+				"step %d (%d%%): band=%d nudge=%t, want band=%d nudge=%t",
+				index,
+				step.percent,
+				band,
+				nudge,
+				step.band,
+				step.nudge,
+			)
 		}
 	}
 }

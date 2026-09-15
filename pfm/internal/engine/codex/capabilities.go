@@ -21,7 +21,14 @@ func (Source) Sync(ctx context.Context, database *store.Store, roots []string, c
 type Launcher struct{}
 
 func (Launcher) ComposerReady(capture string) bool { return spawn.CodexComposerReady(capture) }
-func (Launcher) Rename(ctx context.Context, tmux spawn.Tmux, socket, target, name string, timings spawn.Timings, trace spawn.Trace) (string, error) {
+
+func (Launcher) Rename(
+	ctx context.Context,
+	tmux spawn.Tmux,
+	socket, target, name string,
+	timings spawn.Timings,
+	trace spawn.Trace,
+) (string, error) {
 	return spawn.RenameCodex(ctx, tmux, socket, target, name, timings, trace)
 }
 

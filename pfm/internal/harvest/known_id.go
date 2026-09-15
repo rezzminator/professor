@@ -13,7 +13,10 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		canonical = strings.TrimSpace(source)
 	}
 	if !options.Refresh {
-		if body, cachedKind, meta, path, ok := h.cache.loadAny(canonical, []string{"pdf", "docx", "xlsx", "pptx", "csv", "json", "txt", "html"}); ok {
+		if body, cachedKind, meta, path, ok := h.cache.loadAny(
+			canonical,
+			[]string{"pdf", "docx", "xlsx", "pptx", "csv", "json", "txt", "html"},
+		); ok {
 			return h.resultFromCache(source, cachedKind, body, meta, path)
 		}
 	}
@@ -103,8 +106,14 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		if result, ok := tryDOIMirror(); ok {
 			return result
 		} else if doiMirrorFailure != nil {
-			return Result{Source: source, Error: withRungs(doiMirrorFailure.Error, doiMirrorFailure.Rungs), ErrorKind: doiMirrorFailure.ErrorKind,
-				Challenge: doiMirrorFailure.Challenge, HTTPStatus: doiMirrorFailure.HTTPStatus, Rungs: doiMirrorFailure.Rungs}
+			return Result{
+				Source:     source,
+				Error:      withRungs(doiMirrorFailure.Error, doiMirrorFailure.Rungs),
+				ErrorKind:  doiMirrorFailure.ErrorKind,
+				Challenge:  doiMirrorFailure.Challenge,
+				HTTPStatus: doiMirrorFailure.HTTPStatus,
+				Rungs:      doiMirrorFailure.Rungs,
+			}
 		}
 		return Result{Source: source, Error: "no legal open-access copy found"}
 	}
@@ -182,22 +191,58 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 			skipped = ""
 		}
 		if doiMirrorFailure != nil {
-			message := fmt.Sprintf("Found DOI %s, but retrieval exhausted the configured open-access and fallback sources (checked %s).%s %s", canonical, checked, skipped, doiMirrorFailure.Error)
-			return Result{Source: source, Error: withRungs(message, trace), ErrorKind: doiMirrorFailureKind(doiMirrorFailure),
-				Challenge: doiMirrorFailureChallenge(doiMirrorFailure), HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure), Rungs: trace}
+			message := fmt.Sprintf(
+				"Found DOI %s, but retrieval exhausted the configured open-access and fallback sources (checked %s).%s %s",
+				canonical,
+				checked,
+				skipped,
+				doiMirrorFailure.Error,
+			)
+			return Result{
+				Source:    source,
+				Error:     withRungs(message, trace),
+				ErrorKind: doiMirrorFailureKind(doiMirrorFailure),
+				Challenge: doiMirrorFailureChallenge(
+					doiMirrorFailure,
+				),
+				HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure),
+				Rungs:      trace,
+			}
 		}
-		message := fmt.Sprintf("Found DOI %s, but no free, legal full text exists in the configured open-access sources (checked %s).%s The paper is likely paywalled — %s", canonical, checked, skipped, SearchHint(h.settings.searchAvailable,
-			"use `search` to find an author preprint or the publisher's page directly.",
-			"find an author preprint or the publisher's page directly, or try findWorks again with different terms.",
-		))
-		return Result{Source: source, Error: withRungs(message, trace), ErrorKind: doiMirrorFailureKind(doiMirrorFailure),
-			Challenge: doiMirrorFailureChallenge(doiMirrorFailure), HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure), Rungs: trace}
+		message := fmt.Sprintf(
+			"Found DOI %s, but no free, legal full text exists in the configured open-access sources (checked %s).%s The paper is likely paywalled — %s",
+			canonical,
+			checked,
+			skipped,
+			SearchHint(
+				h.settings.searchAvailable,
+				"use `search` to find an author preprint or the publisher's page directly.",
+				"find an author preprint or the publisher's page directly, or try findWorks again with different terms.",
+			),
+		)
+		return Result{
+			Source:    source,
+			Error:     withRungs(message, trace),
+			ErrorKind: doiMirrorFailureKind(doiMirrorFailure),
+			Challenge: doiMirrorFailureChallenge(
+				doiMirrorFailure,
+			),
+			HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure),
+			Rungs:      trace,
+		}
 	}
 	message := "all legal open-access candidates failed"
 	if doiMirrorFailure != nil {
 		message += " " + doiMirrorFailure.Error
 	}
-	return Result{Source: source, Error: withRungs(message, trace), Rungs: trace, ErrorKind: doiMirrorFailureKind(doiMirrorFailure), Challenge: doiMirrorFailureChallenge(doiMirrorFailure), HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure)}
+	return Result{
+		Source:     source,
+		Error:      withRungs(message, trace),
+		Rungs:      trace,
+		ErrorKind:  doiMirrorFailureKind(doiMirrorFailure),
+		Challenge:  doiMirrorFailureChallenge(doiMirrorFailure),
+		HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure),
+	}
 }
 
 func doiMirrorFailureKind(result *Result) string {
@@ -250,7 +295,10 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 			}
 			last = scholar
 		}
-		return mergeResolverFailure(Result{Source: doi, Error: err.Error(), ErrorKind: metadataFailureKind, Rungs: trace}, last)
+		return mergeResolverFailure(
+			Result{Source: doi, Error: err.Error(), ErrorKind: metadataFailureKind, Rungs: trace},
+			last,
+		)
 	}
 	trace := append([]string(nil), rungs...)
 	for _, c := range cands {
@@ -286,8 +334,14 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 				lastProvider = scholar
 			}
 		}
-		return Result{Source: doi, Error: withRungs("OA chain exhausted: "+lastProvider.Error, trace), ErrorKind: lastProvider.ErrorKind,
-			Challenge: lastProvider.Challenge, HTTPStatus: lastProvider.HTTPStatus, Rungs: trace}
+		return Result{
+			Source:     doi,
+			Error:      withRungs("OA chain exhausted: "+lastProvider.Error, trace),
+			ErrorKind:  lastProvider.ErrorKind,
+			Challenge:  lastProvider.Challenge,
+			HTTPStatus: lastProvider.HTTPStatus,
+			Rungs:      trace,
+		}
 	}
 	if mirrored, attempted := h.fetchDOIMirrors(ctx, DOIFrom(doi), options); attempted {
 		if mirrored.Error == "" {
@@ -296,7 +350,14 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 		}
 		trace = append(trace, mirrored.Rungs...)
 		if h.settings.googleScholarURL == "" {
-			return Result{Source: doi, Error: withRungs("OA chain exhausted: "+mirrored.Error, trace), ErrorKind: mirrored.ErrorKind, Challenge: mirrored.Challenge, HTTPStatus: mirrored.HTTPStatus, Rungs: trace}
+			return Result{
+				Source:     doi,
+				Error:      withRungs("OA chain exhausted: "+mirrored.Error, trace),
+				ErrorKind:  mirrored.ErrorKind,
+				Challenge:  mirrored.Challenge,
+				HTTPStatus: mirrored.HTTPStatus,
+				Rungs:      trace,
+			}
 		}
 	}
 	if h.settings.googleScholarURL != "" {
@@ -305,7 +366,14 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 			return scholar
 		} else {
 			trace = append(trace, scholar.Rungs...)
-			return Result{Source: doi, Error: withRungs("OA chain exhausted: "+scholar.Error, trace), ErrorKind: scholar.ErrorKind, Challenge: scholar.Challenge, HTTPStatus: scholar.HTTPStatus, Rungs: trace}
+			return Result{
+				Source:     doi,
+				Error:      withRungs("OA chain exhausted: "+scholar.Error, trace),
+				ErrorKind:  scholar.ErrorKind,
+				Challenge:  scholar.Challenge,
+				HTTPStatus: scholar.HTTPStatus,
+				Rungs:      trace,
+			}
 		}
 	}
 	return Result{Source: doi, Error: withRungs("OA chain exhausted", trace), Rungs: trace}

@@ -100,7 +100,8 @@ func TestInstallReportsAnArmedGateAsOK(t *testing.T) {
 	home := t.TempDir()
 	clone := buildSourceCloneWithPrePushHook(t)
 	// Pre-arm the clone's git config directly, bypassing the step under test.
-	if out, err := exec.Command("git", "-C", clone, "config", "core.hooksPath", ".githooks").CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", "-C", clone, "config", "core.hooksPath", ".githooks").
+		CombinedOutput(); err != nil {
 		t.Fatalf("pre-arm clone: %v: %s", err, out)
 	}
 	// Pre-settle the other two writeUpdateMetadata steps (marker + binary
@@ -207,13 +208,20 @@ func TestInstallReportsAnAbsoluteHooksPathAsArmed(t *testing.T) {
 		t.Fatalf("writeUpdateMetadata() error = %v", err)
 	}
 	if got := gitConfigValue(t, clone, "core.hooksPath"); got != absolute {
-		t.Fatalf("core.hooksPath = %q, want unchanged absolute path %q (an equivalent value must never be rewritten)", got, absolute)
+		t.Fatalf(
+			"core.hooksPath = %q, want unchanged absolute path %q (an equivalent value must never be rewritten)",
+			got,
+			absolute,
+		)
 	}
 	want := "pre-push gate armed core.hooksPath=" + absolute + " in " + clone
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("stdout = %q, want the ok line %q", stdout.String(), want)
 	}
 	if installer.report.Changed != 0 {
-		t.Fatalf("report.Changed = %d, want 0 — an already-armed absolute-path gate is ok, never a change", installer.report.Changed)
+		t.Fatalf(
+			"report.Changed = %d, want 0 — an already-armed absolute-path gate is ok, never a change",
+			installer.report.Changed,
+		)
 	}
 }

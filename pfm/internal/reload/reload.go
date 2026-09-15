@@ -176,7 +176,14 @@ func InFlight(sidDir, socketName, pane string) (bool, error) {
 // Run performs the graceful in-place reboot. The caller has already resolved
 // the target identity and account/cache birth values; this package owns every
 // tmux mutation and the pane lock.
-func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc Process, stderr io.Writer) (Result, error) {
+func Run(
+	ctx context.Context,
+	request Request,
+	options Options,
+	tmux Tmux,
+	proc Process,
+	stderr io.Writer,
+) (Result, error) {
 	options.defaults()
 	if request.SocketPath == "" || request.Pane == "" {
 		return Result{}, errors.New("reload requires a socket and pane")
@@ -260,7 +267,12 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 	}
 	if selectorOpen(cap) {
 		cause := errors.New("open selector menu on the pane — refusing to /exit")
-		if displayErr := tmux.Display(ctx, request.SocketPath, request.Pane, "reload ABORTED — answer the open menu first, then reload again"); displayErr != nil {
+		if displayErr := tmux.Display(
+			ctx,
+			request.SocketPath,
+			request.Pane,
+			"reload ABORTED — answer the open menu first, then reload again",
+		); displayErr != nil {
 			return Result{}, errors.Join(cause, fmt.Errorf("display selector refusal: %w", displayErr))
 		}
 		return Result{}, cause
@@ -314,7 +326,10 @@ func Run(ctx context.Context, request Request, options Options, tmux Tmux, proc 
 			// IS the answer: everything in-flight dies with the pane anyway.
 			if !dialogSeen {
 				dialogSeen = true
-				fmt.Fprintln(stderr, "pfm chat reload: confirming the exit dialog — background work stops with the chat")
+				fmt.Fprintln(
+					stderr,
+					"pfm chat reload: confirming the exit dialog — background work stops with the chat",
+				)
 			}
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("confirm exit dialog: %w", err)
@@ -391,7 +406,13 @@ func waitExitRendered(ctx context.Context, request Request, tmux Tmux, stderr io
 // caller was given is "one short line, then end the turn", and this is the
 // worker keeping its half of it. Two quiet captures in a row are the idle
 // proof; a chat still busy at the bound is left untouched and told so.
-func waitCallerIdle(ctx context.Context, request Request, options Options, tmux Tmux, stderr io.Writer) (string, error) {
+func waitCallerIdle(
+	ctx context.Context,
+	request Request,
+	options Options,
+	tmux Tmux,
+	stderr io.Writer,
+) (string, error) {
 	stable := 0
 	announced := false
 	for attempt := 0; attempt < options.IdleTries; attempt++ {
@@ -426,29 +447,58 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 	cause := fmt.Errorf("/exit did not complete after %d tries; chat left running", options.ExitTries)
 	capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 	if err != nil {
-		return errors.Join(cause, fmt.Errorf("could not read what the pane shows now — an exit dialog or the typed /exit may still be there, clear it by hand: %w", err))
+		return errors.Join(
+			cause,
+			fmt.Errorf(
+				"could not read what the pane shows now — an exit dialog or the typed /exit may still be there, clear it by hand: %w",
+				err,
+			),
+		)
 	}
 	switch {
 	case exitDialogOpen(capture):
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Escape"); err != nil {
-			return errors.Join(cause, fmt.Errorf("the exit dialog would not confirm and could NOT be dismissed — press Esc in the pane by hand: %w", err))
+			return errors.Join(
+				cause,
+				fmt.Errorf(
+					"the exit dialog would not confirm and could NOT be dismissed — press Esc in the pane by hand: %w",
+					err,
+				),
+			)
 		}
 		if capture, err = tmux.Capture(ctx, request.SocketPath, request.Pane); err != nil {
-			return errors.Join(cause, fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err))
+			return errors.Join(
+				cause,
+				fmt.Errorf("sent Esc to the exit dialog but could not confirm it closed: %w", err),
+			)
 		} else if exitDialogOpen(capture) {
-			return errors.Join(cause, errors.New("the exit dialog would not confirm and did not close on Esc — press Esc in the pane by hand"))
+			return errors.Join(
+				cause,
+				errors.New(
+					"the exit dialog would not confirm and did not close on Esc — press Esc in the pane by hand",
+				),
+			)
 		}
 		return errors.Join(cause, errors.New("the exit dialog would not confirm; dismissed it (Esc)"))
 	case composerShowsExit(capture):
 		for range len("/exit") {
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "BSpace"); err != nil {
-				return errors.Join(cause, fmt.Errorf("the typed /exit could NOT be cleared from the composer — clear it by hand: %w", err))
+				return errors.Join(
+					cause,
+					fmt.Errorf("the typed /exit could NOT be cleared from the composer — clear it by hand: %w", err),
+				)
 			}
 		}
 		if capture, err = tmux.Capture(ctx, request.SocketPath, request.Pane); err != nil {
-			return errors.Join(cause, fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err))
+			return errors.Join(
+				cause,
+				fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err),
+			)
 		} else if composerShowsExit(capture) {
-			return errors.Join(cause, errors.New("the typed /exit could NOT be cleared from the composer — clear it by hand"))
+			return errors.Join(
+				cause,
+				errors.New("the typed /exit could NOT be cleared from the composer — clear it by hand"),
+			)
 		}
 		return errors.Join(cause, errors.New("cleared the typed /exit from the composer"))
 	}
@@ -582,7 +632,14 @@ func codexRun(request Request) (string, error) {
 	return strings.Join(parts, " "), nil
 }
 
-func deliverThen(ctx context.Context, request Request, options Options, tmux Tmux, proc Process, stderr io.Writer) error {
+func deliverThen(
+	ctx context.Context,
+	request Request,
+	options Options,
+	tmux Tmux,
+	proc Process,
+	stderr io.Writer,
+) error {
 	for i := 0; i < options.ThenTries; i++ {
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
@@ -692,7 +749,9 @@ ready:
 		time.Sleep(200 * time.Millisecond)
 	}
 	if !typed {
-		return errors.New("reload --then: typed text never rendered in the composer — looked for the prompt's tail text and, when a pre-send baseline was captured, a paste placeholder there too, but neither appeared — refusing blind Enter")
+		return errors.New(
+			"reload --then: typed text never rendered in the composer — looked for the prompt's tail text and, when a pre-send baseline was captured, a paste placeholder there too, but neither appeared — refusing blind Enter",
+		)
 	}
 	// The submit proof reuses the SAME tail needle the typed proof just saw
 	// present. Evidence seen present and then seen absent is a real transition;
@@ -723,7 +782,12 @@ ready:
 			return nil
 		}
 	}
-	if err := tmux.Display(ctx, request.SocketPath, request.Pane, "reload --then typed but submit unconfirmed — press Enter"); err != nil {
+	if err := tmux.Display(
+		ctx,
+		request.SocketPath,
+		request.Pane,
+		"reload --then typed but submit unconfirmed — press Enter",
+	); err != nil {
 		return fmt.Errorf("reload --then: display unconfirmed submit: %w", err)
 	}
 	// Neither "submitted" nor "never typed" is true here: the prompt was
@@ -899,7 +963,12 @@ func failThen(ctx context.Context, request Request, sidDir string, tmux Tmux, re
 		if err := os.WriteFile(path, []byte(request.Then+"\n"), 0o600); err != nil {
 			failures = append(failures, fmt.Errorf("write reload --then sentinel %q: %w", path, err))
 		}
-		if err := tmux.Display(ctx, request.SocketPath, request.Pane, "reload --then NOT delivered ("+reason+") — prompt saved"); err != nil {
+		if err := tmux.Display(
+			ctx,
+			request.SocketPath,
+			request.Pane,
+			"reload --then NOT delivered ("+reason+") — prompt saved",
+		); err != nil {
 			failures = append(failures, fmt.Errorf("display reload --then failure: %w", err))
 		}
 	}

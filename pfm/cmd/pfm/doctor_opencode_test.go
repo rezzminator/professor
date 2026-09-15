@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	_ "modernc.org/sqlite"
+
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
-
-	_ "modernc.org/sqlite"
 )
 
 func TestDoctorRejectsAnUnreadableOpenCodeSchema(t *testing.T) {

@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
-
 	_ "modernc.org/sqlite"
 )
 

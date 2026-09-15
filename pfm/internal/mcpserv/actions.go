@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/chat"
 	pfmengine "hostops/pfm/internal/engine"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func (service *Service) chatLast(
@@ -75,7 +75,11 @@ func (service *Service) chatStatus(
 	return nil, StatusOutput(status), nil
 }
 
-func (service *Service) chatNew(ctx context.Context, request *mcp.CallToolRequest, input NewInput) (*mcp.CallToolResult, ActionOutput, error) {
+func (service *Service) chatNew(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	input NewInput,
+) (*mcp.CallToolResult, ActionOutput, error) {
 	if strings.TrimSpace(input.Name) == "" {
 		return nil, ActionOutput{}, fmt.Errorf("name is required")
 	}
@@ -133,7 +137,11 @@ func (service *Service) chatNew(ctx context.Context, request *mcp.CallToolReques
 	return service.cliAction(ctx, args...)
 }
 
-func (service *Service) chatOpen(ctx context.Context, request *mcp.CallToolRequest, input TargetInput) (*mcp.CallToolResult, ActionOutput, error) {
+func (service *Service) chatOpen(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	input TargetInput,
+) (*mcp.CallToolResult, ActionOutput, error) {
 	target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, ActionOutput{}, err
@@ -141,7 +149,11 @@ func (service *Service) chatOpen(ctx context.Context, request *mcp.CallToolReque
 	return service.cliTargetAction(ctx, "open", target)
 }
 
-func (service *Service) chatName(ctx context.Context, request *mcp.CallToolRequest, input NameInput) (*mcp.CallToolResult, ActionOutput, error) {
+func (service *Service) chatName(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	input NameInput,
+) (*mcp.CallToolResult, ActionOutput, error) {
 	if strings.TrimSpace(input.Name) == "" || strings.ContainsAny(input.Name, "\r\n\x00") {
 		return nil, ActionOutput{}, fmt.Errorf("name must be one non-empty line")
 	}
@@ -152,7 +164,11 @@ func (service *Service) chatName(ctx context.Context, request *mcp.CallToolReque
 	return service.cliAction(ctx, "chat", "name", target, input.Name)
 }
 
-func (service *Service) chatKill(ctx context.Context, request *mcp.CallToolRequest, input KillInput) (*mcp.CallToolResult, ActionOutput, error) {
+func (service *Service) chatKill(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	input KillInput,
+) (*mcp.CallToolResult, ActionOutput, error) {
 	target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, ActionOutput{}, err
@@ -164,7 +180,11 @@ func (service *Service) chatKill(ctx context.Context, request *mcp.CallToolReque
 	return service.cliAction(ctx, args...)
 }
 
-func (service *Service) chatUnkill(ctx context.Context, request *mcp.CallToolRequest, input TargetInput) (*mcp.CallToolResult, ActionOutput, error) {
+func (service *Service) chatUnkill(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	input TargetInput,
+) (*mcp.CallToolResult, ActionOutput, error) {
 	target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, ActionOutput{}, err
@@ -172,7 +192,11 @@ func (service *Service) chatUnkill(ctx context.Context, request *mcp.CallToolReq
 	return service.cliTargetAction(ctx, "unkill", target)
 }
 
-func (service *Service) chatSave(ctx context.Context, request *mcp.CallToolRequest, input SaveInput) (*mcp.CallToolResult, ActionOutput, error) {
+func (service *Service) chatSave(
+	ctx context.Context,
+	request *mcp.CallToolRequest,
+	input SaveInput,
+) (*mcp.CallToolResult, ActionOutput, error) {
 	// A bare word here is almost always a chat name reached for by habit, and
 	// obeying it writes a transcript into a file of that name beside whatever
 	// directory the server happens to sit in. Demand a path shape instead.
@@ -222,7 +246,10 @@ func (service *Service) cliTargetForRequest(
 	return caller.identity.ID, nil
 }
 
-func (service *Service) cliTargetAction(ctx context.Context, verb, target string) (*mcp.CallToolResult, ActionOutput, error) {
+func (service *Service) cliTargetAction(
+	ctx context.Context,
+	verb, target string,
+) (*mcp.CallToolResult, ActionOutput, error) {
 	if strings.TrimSpace(target) == "" {
 		return nil, ActionOutput{}, fmt.Errorf("target is required")
 	}
@@ -231,7 +258,12 @@ func (service *Service) cliTargetAction(ctx context.Context, verb, target string
 
 func (service *Service) cliAction(ctx context.Context, args ...string) (*mcp.CallToolResult, ActionOutput, error) {
 	if service.backend.dispatch == nil {
-		return nil, ActionOutput{Status: "error", Code: 1}, fmt.Errorf("chat action in-process CLI dispatcher is not configured")
+		return nil, ActionOutput{
+			Status: "error",
+			Code:   1,
+		}, fmt.Errorf(
+			"chat action in-process CLI dispatcher is not configured",
+		)
 	}
 	var stdout, stderr strings.Builder
 	code := service.backend.dispatch(ctx, args, &stdout, &stderr)
@@ -240,7 +272,16 @@ func (service *Service) cliAction(ctx context.Context, args ...string) (*mcp.Cal
 		if message == "" {
 			message = strings.TrimSpace(stdout.String())
 		}
-		return nil, ActionOutput{Status: "error", Code: code, Message: message}, fmt.Errorf("pfm %s exited %d: %s", strings.Join(args, " "), code, message)
+		return nil, ActionOutput{
+			Status:  "error",
+			Code:    code,
+			Message: message,
+		}, fmt.Errorf(
+			"pfm %s exited %d: %s",
+			strings.Join(args, " "),
+			code,
+			message,
+		)
 	}
 	return nil, ActionOutput{Status: "ok", Code: 0, Message: strings.TrimSpace(stdout.String())}, nil
 }

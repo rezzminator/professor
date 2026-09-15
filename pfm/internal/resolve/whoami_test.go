@@ -4,13 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // fakeProcTree is a jailed process chain: no test ever reads live /proc.

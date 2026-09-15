@@ -47,7 +47,14 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			if got := launchPassThrough(test.arguments, test.tmux, test.forced); got != test.want {
-				t.Fatalf("launchPassThrough(%q, %q, %t) = %t, want %t", test.arguments, test.tmux, test.forced, got, test.want)
+				t.Fatalf(
+					"launchPassThrough(%q, %q, %t) = %t, want %t",
+					test.arguments,
+					test.tmux,
+					test.forced,
+					got,
+					test.want,
+				)
 			}
 		})
 	}
@@ -184,7 +191,12 @@ exit 3
 	select {
 	case code := <-done:
 		if code != 3 {
-			t.Fatalf("internal launch code=%d, want fake Claude status 3; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			t.Fatalf(
+				"internal launch code=%d, want fake Claude status 3; stdout=%q stderr=%q",
+				code,
+				stdout.String(),
+				stderr.String(),
+			)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("internal launch did not return after its pane exited")
@@ -241,7 +253,11 @@ func TestInternalLaunchPrintHelper(t *testing.T) {
 	if os.Getenv("PFM_TEST_LAUNCH_PRINT_HELPER") != "1" {
 		return
 	}
-	code := run([]string{"internal", "launch", "--real", os.Getenv("PFM_TEST_LAUNCH_REAL"), "--", "-p", "hello"}, os.Stdout, os.Stderr)
+	code := run(
+		[]string{"internal", "launch", "--real", os.Getenv("PFM_TEST_LAUNCH_REAL"), "--", "-p", "hello"},
+		os.Stdout,
+		os.Stderr,
+	)
 	os.Exit(code)
 }
 
@@ -260,7 +276,8 @@ func TestInternalLaunchTmuxStartFailureIsLoudAndNeverFallsBack(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"internal", "launch", "--real", real, "--", "--resume", "fixture"}, &stdout, &stderr)
-	if code != 1 || !strings.Contains(stderr.String(), "create chat server") || !strings.Contains(stderr.String(), "fixture tmux refused") {
+	if code != 1 || !strings.Contains(stderr.String(), "create chat server") ||
+		!strings.Contains(stderr.String(), "fixture tmux refused") {
 		t.Fatalf("tmux failure code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {

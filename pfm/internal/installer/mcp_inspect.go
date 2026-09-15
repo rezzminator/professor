@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
 	pfmengine "hostops/pfm/internal/engine"
 )
 
@@ -124,7 +125,12 @@ func inspectClaudeServers(path string, port int, names ...string) []MCPClientCut
 		if present {
 			var registration mcpClientRegistration
 			if err := json.Unmarshal(encoded, &registration); err != nil {
-				report.State, report.Error = MCPClientUnreadable, fmt.Errorf("parse %s %s registration: %w", path, name, err)
+				report.State, report.Error = MCPClientUnreadable, fmt.Errorf(
+					"parse %s %s registration: %w",
+					path,
+					name,
+					err,
+				)
 			} else {
 				report.State = classifyRegistration(name, registration, port)
 			}
@@ -135,7 +141,11 @@ func inspectClaudeServers(path string, port int, names ...string) []MCPClientCut
 }
 
 func inspectCodexHarvester(path string, port int) MCPClientCutover {
-	report := MCPClientCutover{Client: pfmengine.MustLookup(pfmengine.Codex).LongName, State: MCPClientAbsent, Path: path}
+	report := MCPClientCutover{
+		Client: pfmengine.MustLookup(pfmengine.Codex).LongName,
+		State:  MCPClientAbsent,
+		Path:   path,
+	}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return report
@@ -173,10 +183,13 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 	}
 	command = strings.ToLower(command)
 	noExtras := len(registration.Headers) == 0 && len(registration.Env) == 0
-	if registration.URL == wantedURL && (typeName == "" || typeName == "http") && command == "" && len(registration.Args) == 0 && noExtras {
+	if registration.URL == wantedURL && (typeName == "" || typeName == "http") && command == "" &&
+		len(registration.Args) == 0 &&
+		noExtras {
 		return MCPClientPFM
 	}
-	if command == "pfm" && registration.URL == "" && noExtras && containsArgumentSequence(registration.Args, "mcp", name, "serve") {
+	if command == "pfm" && registration.URL == "" && noExtras &&
+		containsArgumentSequence(registration.Args, "mcp", name, "serve") {
 		return MCPClientPFM
 	}
 	if name != "harvester" {

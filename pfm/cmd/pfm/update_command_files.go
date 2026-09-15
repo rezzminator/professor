@@ -72,7 +72,10 @@ func snapshotUpdateOwnedFiles(runtime commandRuntime) ([]updateFileSnapshot, err
 		if err != nil {
 			return nil, err
 		}
-		snapshots = append(snapshots, updateFileSnapshot{path: physical, before: content, beforeExisted: existed, beforeMode: mode})
+		snapshots = append(
+			snapshots,
+			updateFileSnapshot{path: physical, before: content, beforeExisted: existed, beforeMode: mode},
+		)
 	}
 	sort.Slice(snapshots, func(left, right int) bool { return snapshots[left].path < snapshots[right].path })
 	return snapshots, nil
@@ -109,11 +112,15 @@ func restoreUpdateHookFiles(snapshots []updateFileSnapshot, home string, stderr 
 			continue
 		}
 		if snapshot.afterErr != nil || existed != snapshot.afterExisted || !bytes.Equal(current, snapshot.after) {
-			message := fmt.Sprintf("hook file %s changed after the update's install wrote it; left as is — reconcile it by hand", snapshot.path)
+			message := fmt.Sprintf(
+				"hook file %s changed after the update's install wrote it; left as is — reconcile it by hand",
+				snapshot.path,
+			)
 			if stranded := installer.UnknownPFMHookCommands(current, home); len(stranded) > 0 {
 				message = fmt.Sprintf(
 					"hook file %s changed after the update's install wrote it; left as is — it still carries %s; reconcile by hand or run pfm install --yes",
-					snapshot.path, strings.Join(stranded, ", "),
+					snapshot.path,
+					strings.Join(stranded, ", "),
 				)
 			}
 			residue = errors.Join(residue, errors.New(message))
@@ -159,7 +166,7 @@ func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {
 // readUpdateHookFile: it is never folded into the "gone/migrated" notes,
 // which would misreport a stat failure as an absent file. The caller treats
 // a returned error as a failed update step.
-func updateConfigPathAfterInstall(runtime commandRuntime) (path string, note string, err error) {
+func updateConfigPathAfterInstall(runtime commandRuntime) (path, note string, err error) {
 	original := runtime.Config.Path
 	if original == "" {
 		return "", "", nil

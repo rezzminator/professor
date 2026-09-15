@@ -39,7 +39,19 @@ func TestCodexHookAPIFixture(t *testing.T) {
 	for _, group := range doc.Hooks["SessionStart"] {
 		for _, hook := range group.Hooks {
 			sum := sha256.Sum256([]byte(hook.Command))
-			hooks = append(hooks, map[string]any{"key": "fixture-hook", "command": hook.Command, "sourcePath": source, "source": "user", "currentHash": hex.EncodeToString(sum[:]), "eventName": "sessionStart", "enabled": true, "trustStatus": "untrusted"})
+			hooks = append(
+				hooks,
+				map[string]any{
+					"key":         "fixture-hook",
+					"command":     hook.Command,
+					"sourcePath":  source,
+					"source":      "user",
+					"currentHash": hex.EncodeToString(sum[:]),
+					"eventName":   "sessionStart",
+					"enabled":     true,
+					"trustStatus": "untrusted",
+				},
+			)
 		}
 	}
 	decoder, encoder := json.NewDecoder(os.Stdin), json.NewEncoder(os.Stdout)
@@ -73,10 +85,15 @@ func TestCodexHookAPIFixture(t *testing.T) {
 			if err := json.Unmarshal(request.Params, &params); err != nil {
 				t.Fatal(err)
 			}
-			if len(hooks) != 1 || params.KeyPath != `hooks.state."fixture-hook"` || !params.Value.Enabled || params.Value.Hash != hooks[0]["currentHash"] {
+			if len(hooks) != 1 || params.KeyPath != `hooks.state."fixture-hook"` || !params.Value.Enabled ||
+				params.Value.Hash != hooks[0]["currentHash"] {
 				t.Fatalf("unexpected trust request: %s", request.Params)
 			}
-			if err := os.WriteFile(filepath.Join(account, "fixture-hook-trust.json"), request.Params, 0600); err != nil {
+			if err := os.WriteFile(
+				filepath.Join(account, "fixture-hook-trust.json"),
+				request.Params,
+				0o600,
+			); err != nil {
 				t.Fatal(err)
 			}
 		default:

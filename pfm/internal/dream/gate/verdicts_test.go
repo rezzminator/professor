@@ -15,7 +15,9 @@ func TestVerdictsPreserveRulesAndMarkOmissionsUnruled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := artifact.RenderNormalizedVerdicts(result.Normalized); got != "CONFIRM\tmaps/a.md\tchecked\nUNRULED\tmaps/b.md\tno verifier verdict; not applied\n" {
+	if got := artifact.RenderNormalizedVerdicts(
+		result.Normalized,
+	); got != "CONFIRM\tmaps/a.md\tchecked\nUNRULED\tmaps/b.md\tno verifier verdict; not applied\n" {
 		t.Fatalf("normalization = %q", got)
 	}
 }

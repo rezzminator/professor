@@ -487,13 +487,22 @@ func TestEveryFreshServerRouteIsBornThroughTheOneChatServerCreator(t *testing.T)
 			t.Fatalf("route %c plans no chat server; line = %s", plan.Route, plan.Line)
 		}
 		if server.Socket != request.FreshSocket || server.CWD != request.Row.CWD || server.Run != plan.Run {
-			t.Fatalf("route %c server = %#v, want the fresh socket, the row's cwd and the plan's run", plan.Route, server)
+			t.Fatalf(
+				"route %c server = %#v, want the fresh socket, the row's cwd and the plan's run",
+				plan.Route,
+				server,
+			)
 		}
 		if want := pfmengine.MustLookup(engine).Short; server.Window != want {
 			t.Fatalf("route %c window = %q, want %q", plan.Route, server.Window, want)
 		}
 		if server.Titles == nil || *server.Titles != request.Config.Tmux.Titles {
-			t.Fatalf("route %c titles = %v, want the machine's %v", plan.Route, server.Titles, request.Config.Tmux.Titles)
+			t.Fatalf(
+				"route %c titles = %v, want the machine's %v",
+				plan.Route,
+				server.Titles,
+				request.Config.Tmux.Titles,
+			)
 		}
 		prefix := "TMUX= "
 		if request.Bunker {

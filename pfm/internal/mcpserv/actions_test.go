@@ -51,9 +51,17 @@ func (fake *fakeChatVerbs) Find(_ context.Context, request chat.FindRequest) ([]
 	return fake.found, fake.err
 }
 
-func (fake *fakeChatVerbs) Read(_ context.Context, target string, tail int) (headless.Chat, []transcript.Entry, bool, error) {
+func (fake *fakeChatVerbs) Read(
+	_ context.Context,
+	target string,
+	tail int,
+) (headless.Chat, []transcript.Entry, bool, error) {
 	fake.reads = append(fake.reads, fmt.Sprintf("%s/%d", target, tail))
-	return headless.Chat{ID: target, Engine: pfmengine.Claude, Path: "/transcripts/" + target + ".jsonl"}, fake.read, false, fake.err
+	return headless.Chat{
+		ID:     target,
+		Engine: pfmengine.Claude,
+		Path:   "/transcripts/" + target + ".jsonl",
+	}, fake.read, false, fake.err
 }
 
 // TestChatLastAndStatusReachTheTypedVerbs pins the seam: chat_last and

@@ -506,7 +506,10 @@ func runInternal(
 		// TestInternalSubcommandsReachTheirHandler is the runtime half of
 		// the same guarantee: every internalSubcommands name reaches a real
 		// branch in runInternal's if-chain below.
-		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|then|update-check [options]")
+		fmt.Fprintln(
+			stderr,
+			"usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|then|update-check [options]",
+		)
 		return 2
 	}
 	if args[0] != "kill-exit" {
@@ -515,7 +518,12 @@ func runInternal(
 		// registered (a rollback, a stale binary on PATH) would erase every
 		// prompt or deny every tool call. An unknown name is a non-blocking
 		// error that says what happened and how to converge.
-		fmt.Fprintf(stderr, "pfm internal: unknown subcommand %q — registered by a different pfm version than this binary (%s); run `pfm install --yes` with the binary you intend to keep\n", args[0], displayVersion())
+		fmt.Fprintf(
+			stderr,
+			"pfm internal: unknown subcommand %q — registered by a different pfm version than this binary (%s); run `pfm install --yes` with the binary you intend to keep\n",
+			args[0],
+			displayVersion(),
+		)
 		return 1
 	}
 	flags := newFlagSet(

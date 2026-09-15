@@ -34,8 +34,15 @@ func TestLiveBrowserWorkerFetch(t *testing.T) {
 	if _, err := os.Stat(live.Python); err != nil {
 		// The gate is ON, so provisioning here is exactly what production's
 		// lazy first-use would do (no Chromium download either way).
-		if _, provisionErr := ProvisionBrowser(context.Background(), ProvisionOptions{Root: root}); provisionErr != nil {
-			t.Skipf("named gap: browser environment not provisioned at %s and lazy provisioning failed (%v)", live.Python, provisionErr)
+		if _, provisionErr := ProvisionBrowser(
+			context.Background(),
+			ProvisionOptions{Root: root},
+		); provisionErr != nil {
+			t.Skipf(
+				"named gap: browser environment not provisioned at %s and lazy provisioning failed (%v)",
+				live.Python,
+				provisionErr,
+			)
 		}
 	}
 	interpreter, script := live.Python, live.Script

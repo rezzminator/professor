@@ -261,7 +261,11 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 		if external.Host != nil {
 			host := strings.TrimSpace(*external.Host)
 			if host == "" || strings.ContainsAny(host, " /\x00") {
-				return fmt.Errorf("harvester config %s: external.host must be a bare host or IP, got %q", path, *external.Host)
+				return fmt.Errorf(
+					"harvester config %s: external.host must be a bare host or IP, got %q",
+					path,
+					*external.Host,
+				)
 			}
 			harvester.External.Host = host
 			file("external.host")
@@ -381,7 +385,11 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 			if value != "" {
 				parsed, err := url.Parse(value)
 				if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-					return fmt.Errorf("harvester config %s: fetch.proxyURL must be an absolute proxy URL, got %q", path, value)
+					return fmt.Errorf(
+						"harvester config %s: fetch.proxyURL must be an absolute proxy URL, got %q",
+						path,
+						value,
+					)
 				}
 			}
 			harvester.Fetch.ProxyURL = value
@@ -419,7 +427,12 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 				continue
 			}
 			if *pair.raw < 0 {
-				return fmt.Errorf("harvester config %s: cache.%s must be 0 or more (0 = never expire / never cache failures), got %d", path, key, *pair.raw)
+				return fmt.Errorf(
+					"harvester config %s: cache.%s must be 0 or more (0 = never expire / never cache failures), got %d",
+					path,
+					key,
+					*pair.raw,
+				)
 			}
 			*pair.target = time.Duration(*pair.raw) * time.Second
 			file("cache." + key)
@@ -427,7 +440,11 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 	}
 	if raw.Output != nil && raw.Output.MaxInlineChars != nil {
 		if *raw.Output.MaxInlineChars < 1 {
-			return fmt.Errorf("harvester config %s: output.maxInlineChars must be at least 1, got %d", path, *raw.Output.MaxInlineChars)
+			return fmt.Errorf(
+				"harvester config %s: output.maxInlineChars must be at least 1, got %d",
+				path,
+				*raw.Output.MaxInlineChars,
+			)
 		}
 		harvester.Output.MaxInlineChars = *raw.Output.MaxInlineChars
 		file("output.maxInlineChars")
@@ -435,14 +452,25 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 
 	if harvester.External.Enabled {
 		if harvester.External.PublicURL == "" {
-			return fmt.Errorf("harvester config %s: external.enabled requires external.publicURL (the URL clients reach the gateway at)", path)
+			return fmt.Errorf(
+				"harvester config %s: external.enabled requires external.publicURL (the URL clients reach the gateway at)",
+				path,
+			)
 		}
 		if harvester.External.Passphrase == "" && harvester.External.StaticToken == "" {
-			return fmt.Errorf("harvester config %s: external.enabled requires external.auth.passphrase and/or external.auth.staticToken — the external gateway is never unauthenticated", path)
+			return fmt.Errorf(
+				"harvester config %s: external.enabled requires external.auth.passphrase and/or external.auth.staticToken — the external gateway is never unauthenticated",
+				path,
+			)
 		}
 	}
 	if harvester.holdsSecret() && info.Mode().Perm()&0o077 != 0 {
-		return fmt.Errorf("harvester config %s holds secrets but is readable by others (mode %04o); run: chmod 600 %s", path, info.Mode().Perm(), path)
+		return fmt.Errorf(
+			"harvester config %s holds secrets but is readable by others (mode %04o); run: chmod 600 %s",
+			path,
+			info.Mode().Perm(),
+			path,
+		)
 	}
 	return nil
 }
@@ -531,7 +559,10 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 			"enabled": harvester.External.Enabled, "host": harvester.External.Host, "port": harvester.External.Port,
 			"publicURL": harvester.External.PublicURL, "stateDir": harvester.External.StateDir,
 			"auth": map[string]any{
-				"passphrase": secret(harvester.External.Passphrase), "staticToken": secret(harvester.External.StaticToken),
+				"passphrase": secret(
+					harvester.External.Passphrase,
+				),
+				"staticToken": secret(harvester.External.StaticToken),
 			},
 		},
 		"search": map[string]any{
@@ -595,7 +626,11 @@ func scholarlyBaseURL(path, key, raw string) (string, error) {
 		return "", fmt.Errorf("harvester config %s: scholarly.%s: %w", path, key, err)
 	}
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return "", fmt.Errorf("harvester config %s: scholarly.%s must be a base URL without credentials, query, or fragment", path, key)
+		return "", fmt.Errorf(
+			"harvester config %s: scholarly.%s must be a base URL without credentials, query, or fragment",
+			path,
+			key,
+		)
 	}
 	return value, nil
 }

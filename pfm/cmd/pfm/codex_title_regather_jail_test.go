@@ -47,7 +47,9 @@ func codexJailPanePID(t *testing.T, tmuxTmpDir, socket string) int {
 // streamFleetRefreshesWith — neither takes a runtime override) finds this
 // real tmux server, registers both rollouts in pfm's own store, and advances
 // the pane's binding to oldID before returning.
-func codexRegatherJailFixture(t *testing.T) (database *store.Store, manager *kill.Manager, socket, oldID, newID string) {
+func codexRegatherJailFixture(
+	t *testing.T,
+) (database *store.Store, manager *kill.Manager, socket, oldID, newID string) {
 	t.Helper()
 	root := jailTest(t)
 	tmuxTmpDir := filepath.Join(root, "tmuxtmp")

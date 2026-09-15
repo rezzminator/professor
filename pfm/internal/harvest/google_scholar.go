@@ -97,7 +97,15 @@ func (h *Harvester) fetchScholarDOI(ctx context.Context, doi string, options Fet
 	defer cancel()
 	candidates, err := h.resolver().googleScholarDOI(providerCtx, doi, providerCandidateMax)
 	if err != nil {
-		return providerResult(doi, "google-scholar", err.Error(), errorKind(err), 0, strings.Contains(strings.ToLower(err.Error()), "challenge"), []string{"google-scholar"})
+		return providerResult(
+			doi,
+			"google-scholar",
+			err.Error(),
+			errorKind(err),
+			0,
+			strings.Contains(strings.ToLower(err.Error()), "challenge"),
+			[]string{"google-scholar"},
+		)
 	}
 	var last Result
 	for _, candidate := range candidates {
@@ -110,12 +118,28 @@ func (h *Harvester) fetchScholarDOI(ctx context.Context, doi string, options Fet
 			result.Rungs = append([]string{"google-scholar"}, result.Rungs...)
 			return result
 		}
-		last = providerResult(doi, "google-scholar", result.Error, result.ErrorKind, result.HTTPStatus, result.Challenge, append([]string{"google-scholar"}, result.Rungs...))
+		last = providerResult(
+			doi,
+			"google-scholar",
+			result.Error,
+			result.ErrorKind,
+			result.HTTPStatus,
+			result.Challenge,
+			append([]string{"google-scholar"}, result.Rungs...),
+		)
 	}
 	if last.Error != "" {
 		return last
 	}
-	return providerResult(doi, "google-scholar", "no exact DOI candidate could be fetched", "missing", 0, false, []string{"google-scholar"})
+	return providerResult(
+		doi,
+		"google-scholar",
+		"no exact DOI candidate could be fetched",
+		"missing",
+		0,
+		false,
+		[]string{"google-scholar"},
+	)
 }
 
 type scholarRow struct {
@@ -200,7 +224,8 @@ func parseGoogleScholarRows(body []byte, limit int, wantedDOI string) []scholarR
 			if pdfAnchor := firstElement(pdf, "a"); pdfAnchor != nil {
 				pdfLink := nodeAttr(pdfAnchor, "href")
 				label := strings.ToLower(nodeText(pdfAnchor))
-				if strings.TrimSpace(pdfLink) != "" && (strings.Contains(label, "[pdf]") || strings.Contains(strings.ToLower(pdfLink), ".pdf")) {
+				if strings.TrimSpace(pdfLink) != "" &&
+					(strings.Contains(label, "[pdf]") || strings.Contains(strings.ToLower(pdfLink), ".pdf")) {
 					directPDF = pdfLink
 				}
 			}
@@ -225,7 +250,24 @@ func parseGoogleScholarRows(body []byte, limit int, wantedDOI string) []scholarR
 		if titleLink == "" && directPDF == "" && versionsURL == "" {
 			continue
 		}
-		out = append(out, scholarRow{candidate: Candidate{URL: titleLink, Source: "google-scholar", Priority: 70, Kind: "paper", Title: title, Authors: authors, Year: year, Match: .7}, citationURL: titleLink, directPDF: directPDF, versionsURL: versionsURL})
+		out = append(
+			out,
+			scholarRow{
+				candidate: Candidate{
+					URL:      titleLink,
+					Source:   "google-scholar",
+					Priority: 70,
+					Kind:     "paper",
+					Title:    title,
+					Authors:  authors,
+					Year:     year,
+					Match:    .7,
+				},
+				citationURL: titleLink,
+				directPDF:   directPDF,
+				versionsURL: versionsURL,
+			},
+		)
 		if len(out) >= limit {
 			break
 		}
@@ -243,7 +285,8 @@ func scholarVersionURL(baseRaw, raw string) (string, bool) {
 		return "", false
 	}
 	resolved := base.ResolveReference(ref)
-	if !strings.EqualFold(resolved.Host, base.Host) || strings.TrimSuffix(resolved.Path, "/") != "/scholar" || resolved.Query().Get("cluster") == "" {
+	if !strings.EqualFold(resolved.Host, base.Host) || strings.TrimSuffix(resolved.Path, "/") != "/scholar" ||
+		resolved.Query().Get("cluster") == "" {
 		return "", false
 	}
 	resolved.Fragment = ""
@@ -273,7 +316,14 @@ func scholarResourceURL(baseRaw, raw string) string {
 	return resolved.String()
 }
 
-func scholarRowsWithVersions(ctx context.Context, h *Harvester, baseURL string, rows []scholarRow, limit int, wantedDOI string) []Candidate {
+func scholarRowsWithVersions(
+	ctx context.Context,
+	h *Harvester,
+	baseURL string,
+	rows []scholarRow,
+	limit int,
+	wantedDOI string,
+) []Candidate {
 	if limit <= 0 || limit > providerCandidateMax {
 		limit = providerCandidateMax
 	}
@@ -295,7 +345,8 @@ func scholarRowsWithVersions(ctx context.Context, h *Harvester, baseURL string, 
 				response, err := h.providerGet(ctx, versionURL, nil, providerHTMLMaxBody)
 				if err == nil && response.status < 400 && !providerChallenge(response.body, response.status) {
 					for _, version := range parseGoogleScholarRows(response.body, providerCandidateMax, wantedDOI) {
-						if version.directPDF == "" || titleSimilarity(version.candidate.Title, row.candidate.Title) < .45 {
+						if version.directPDF == "" ||
+							titleSimilarity(version.candidate.Title, row.candidate.Title) < .45 {
 							continue
 						}
 						if pdfURL := scholarResourceURL(response.finalURL, version.directPDF); pdfURL != "" {

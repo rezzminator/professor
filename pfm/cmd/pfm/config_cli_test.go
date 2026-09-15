@@ -37,10 +37,23 @@ func TestConfigCLIRejectsGlobalConfigSyntaxAndLoadErrors(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			if code := run(test.args, &stdout, &stderr); code != 2 {
-				t.Fatalf("run(%q) code=%d stdout=%q stderr=%q, want usage error", test.args, code, stdout.String(), stderr.String())
+				t.Fatalf(
+					"run(%q) code=%d stdout=%q stderr=%q, want usage error",
+					test.args,
+					code,
+					stdout.String(),
+					stderr.String(),
+				)
 			}
-			if stdout.Len() != 0 || !strings.Contains(stderr.String(), test.want) || !strings.Contains(stderr.String(), "usage:") {
-				t.Fatalf("run(%q) stdout=%q stderr=%q, want %q and usage", test.args, stdout.String(), stderr.String(), test.want)
+			if stdout.Len() != 0 || !strings.Contains(stderr.String(), test.want) ||
+				!strings.Contains(stderr.String(), "usage:") {
+				t.Fatalf(
+					"run(%q) stdout=%q stderr=%q, want %q and usage",
+					test.args,
+					stdout.String(),
+					stderr.String(),
+					test.want,
+				)
 			}
 		})
 	}
@@ -51,10 +64,20 @@ func TestConfigCLIRejectsGlobalConfigSyntaxAndLoadErrors(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--config", path, "mcp", "ls"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("run(malformed config) code=%d stdout=%q stderr=%q, want config failure", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"run(malformed config) code=%d stdout=%q stderr=%q, want config failure",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
-	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "pfm: config: parse config "+path) || !strings.Contains(stderr.String(), "byte ") {
-		t.Fatalf("run(malformed config) stdout=%q stderr=%q, want path and byte offset", stdout.String(), stderr.String())
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "pfm: config: parse config "+path) ||
+		!strings.Contains(stderr.String(), "byte ") {
+		t.Fatalf(
+			"run(malformed config) stdout=%q stderr=%q, want path and byte offset",
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }
 
@@ -90,7 +113,12 @@ func TestConfigCLIDisabledMCPServeExplainsEnablePath(t *testing.T) {
 	}
 	want := "pfm mcp chat: disabled by config " + path + "; enable it with: pfm --config " + path + " mcp chat enable"
 	if stdout.Len() != 0 || strings.TrimSpace(stderr.String()) != want {
-		t.Fatalf("run(disabled mcp serve) stdout=%q stderr=%q, want actionable message %q", stdout.String(), stderr.String(), want)
+		t.Fatalf(
+			"run(disabled mcp serve) stdout=%q stderr=%q, want actionable message %q",
+			stdout.String(),
+			stderr.String(),
+			want,
+		)
 	}
 }
 
@@ -103,7 +131,12 @@ func TestConfigCLIDisabledHarvesterMCPServeExplainsEnablePath(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"--config", path, "mcp", "harvester", "serve"}, &stdout, &stderr); code != 1 {
-		t.Fatalf("run(disabled harvester serve) code=%d stdout=%q stderr=%q, want config refusal", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"run(disabled harvester serve) code=%d stdout=%q stderr=%q, want config refusal",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	want := "pfm mcp harvester: disabled by config " + path + "; enable it with: pfm --config " + path + " mcp harvester enable"
 	if stdout.Len() != 0 || strings.TrimSpace(stderr.String()) != want {
@@ -144,10 +177,18 @@ func TestConfigCLIEnabledHarvesterMCPServeReachesServerStart(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := run([]string{"--config", path, "mcp", "harvester", "serve", "--transport", "stdio"}, &stdout, &stderr)
 	if code == 2 {
-		t.Fatalf("run(mcp harvester serve --transport stdio) code=%d stdout=%q stderr=%q, want it to reach the server start rather than print usage for a leftover \"serve\" arg", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"run(mcp harvester serve --transport stdio) code=%d stdout=%q stderr=%q, want it to reach the server start rather than print usage for a leftover \"serve\" arg",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	if strings.Contains(stderr.String(), "usage: pfm mcp harvester serve") {
-		t.Fatalf("run(mcp harvester serve --transport stdio) stderr=%q, want no usage line — the enabled server and its flags must be reachable", stderr.String())
+		t.Fatalf(
+			"run(mcp harvester serve --transport stdio) stderr=%q, want no usage line — the enabled server and its flags must be reachable",
+			stderr.String(),
+		)
 	}
 }
 
@@ -166,7 +207,13 @@ func TestConfigCLIMCPEnableDisableAreIdempotentWithoutStartingStdio(t *testing.T
 		}
 		want := "chat\t" + action + "d\t" + wantState + "\n"
 		if stdout.String() != want || stderr.Len() != 0 {
-			t.Fatalf("run(mcp chat %s) stdout=%q stderr=%q, want stdout %q and empty stderr", action, stdout.String(), stderr.String(), want)
+			t.Fatalf(
+				"run(mcp chat %s) stdout=%q stderr=%q, want stdout %q and empty stderr",
+				action,
+				stdout.String(),
+				stderr.String(),
+				want,
+			)
 		}
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -230,12 +277,22 @@ func TestConfigCLIInitShowValidateAndBrokenDiagnostics(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"--config", path, "config", "validate"}, &stdout, &stderr); code != 0 || !strings.Contains(stdout.String(), "config valid:") {
+	if code := run(
+		[]string{"--config", path, "config", "validate"},
+		&stdout,
+		&stderr,
+	); code != 0 ||
+		!strings.Contains(stdout.String(), "config valid:") {
 		t.Fatalf("config validate code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 || strings.Contains(stdout.String(), "authToken") {
+	if code := run(
+		[]string{"--config", path, "config", "show"},
+		&stdout,
+		&stderr,
+	); code != 0 ||
+		strings.Contains(stdout.String(), "authToken") {
 		t.Fatalf("config show code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 
@@ -244,17 +301,32 @@ func TestConfigCLIInitShowValidateAndBrokenDiagnostics(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"--config", path, "config", "show"}, &stdout, &stderr); code != 0 || !strings.Contains(stderr.String(), "configuration error: parse config "+path) {
+	if code := run(
+		[]string{"--config", path, "config", "show"},
+		&stdout,
+		&stderr,
+	); code != 0 ||
+		!strings.Contains(stderr.String(), "configuration error: parse config "+path) {
 		t.Fatalf("broken config show code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"--config", path, "config", "validate"}, &stdout, &stderr); code != 1 || !strings.Contains(stderr.String(), "parse config "+path) {
+	if code := run(
+		[]string{"--config", path, "config", "validate"},
+		&stdout,
+		&stderr,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), "parse config "+path) {
 		t.Fatalf("broken config validate code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"--config", path, "doctor"}, &stdout, &stderr); code == 0 || !strings.Contains(stdout.String(), "doctor: config error=") {
+	if code := run(
+		[]string{"--config", path, "doctor"},
+		&stdout,
+		&stderr,
+	); code == 0 ||
+		!strings.Contains(stdout.String(), "doctor: config error=") {
 		t.Fatalf("broken doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

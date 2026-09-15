@@ -147,7 +147,11 @@ func printArchiveReport(
 		}
 	}
 	for _, id := range report.Unsupported {
-		fmt.Fprintf(stdout, "  kept   %s killed — OpenCode stores all sessions in one shared database; single-session file archive is unsupported\n", id)
+		fmt.Fprintf(
+			stdout,
+			"  kept   %s killed — OpenCode stores all sessions in one shared database; single-session file archive is unsupported\n",
+			id,
+		)
 	}
 	fmt.Fprintln(stdout)
 	fmt.Fprintf(

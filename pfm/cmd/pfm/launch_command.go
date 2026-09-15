@@ -108,7 +108,13 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 			configDir = account.ConfigDir
 		}
 	}
-	realRun, err := action.LauncherRun(*real, arguments, configDir, runtime.Paths.Home, runtime.Config.EffectiveClaude(primary))
+	realRun, err := action.LauncherRun(
+		*real,
+		arguments,
+		configDir,
+		runtime.Paths.Home,
+		runtime.Config.EffectiveClaude(primary),
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
 		return 1
@@ -172,7 +178,18 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 
 	if interactive {
 		failed = false
-		arguments := []string{"tmux", "-S", socketPath, "wait-for", "-S", startChannel, ";", "attach-session", "-t", session}
+		arguments := []string{
+			"tmux",
+			"-S",
+			socketPath,
+			"wait-for",
+			"-S",
+			startChannel,
+			";",
+			"attach-session",
+			"-t",
+			session,
+		}
 		if err := launchExec(tmuxBinary, arguments, environmentWith("TMUX", "")); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: attach tmux session: %v\n", err)
 			return 1
@@ -192,9 +209,21 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		fmt.Fprintf(stderr, "pfm internal launch: print socket: %v\n", err)
 		return 1
 	}
-	if output, err := launchTmuxCommand(ctx, tmuxBinary, socketPath, "wait-for", "-S", startChannel).CombinedOutput(); err != nil {
+	if output, err := launchTmuxCommand(
+		ctx,
+		tmuxBinary,
+		socketPath,
+		"wait-for",
+		"-S",
+		startChannel,
+	).CombinedOutput(); err != nil {
 		_ = waiter.Process.Kill()
-		fmt.Fprintf(stderr, "pfm internal launch: release Claude pane: %v: %s\n", err, strings.TrimSpace(string(output)))
+		fmt.Fprintf(
+			stderr,
+			"pfm internal launch: release Claude pane: %v: %s\n",
+			err,
+			strings.TrimSpace(string(output)),
+		)
 		return 1
 	}
 	waitErr := waiter.Wait()

@@ -40,7 +40,9 @@ var vscodeExtensionManifest = sync.OnceValues(func() (vscodeExtensionManifestInf
 		return vscodeExtensionManifestInfo{}, fmt.Errorf("decode embedded VS Code extension package.json: %w", err)
 	}
 	if manifest.Publisher == "" || manifest.Name == "" || manifest.Version == "" {
-		return vscodeExtensionManifestInfo{}, fmt.Errorf("embedded VS Code extension package.json missing publisher/name/version")
+		return vscodeExtensionManifestInfo{}, fmt.Errorf(
+			"embedded VS Code extension package.json missing publisher/name/version",
+		)
 	}
 	return vscodeExtensionManifestInfo{ID: manifest.Publisher + "." + manifest.Name, Version: manifest.Version}, nil
 })
@@ -126,13 +128,19 @@ func (installer *engine) registerVSCodeExtension(extensionsDir string) (bool, er
 	indexPath := filepath.Join(extensionsDir, vscodeExtensionIndexName)
 	entries, err := readVSCodeExtensionIndex(indexPath)
 	if err != nil {
-		installer.skip("VS Code extension index " + indexPath + " unreadable: " + err.Error() + " — the product will not load the link until the index is repaired")
+		installer.skip(
+			"VS Code extension index " + indexPath + " unreadable: " + err.Error() + " — the product will not load the link until the index is repaired",
+		)
 		return false, nil
 	}
 
 	existing, found := vscodeIndexFind(entries, manifest.ID)
 	if found && !vscodeIndexEntryOwned(existing, target) {
-		installer.skip("VS Code extension index " + indexPath + " already registers " + manifest.ID + " from " + vscodeIndexEntryOtherLocation(existing))
+		installer.skip(
+			"VS Code extension index " + indexPath + " already registers " + manifest.ID + " from " + vscodeIndexEntryOtherLocation(
+				existing,
+			),
+		)
 		return false, nil
 	}
 	if found {

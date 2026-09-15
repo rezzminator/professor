@@ -43,20 +43,32 @@ func ParseCoverage(text string, transcriptCount int) (Coverage, error) {
 		fields := strings.Split(row, "\t")
 		if fields[0] == "CONDUCT" {
 			if len(fields) != 4 {
-				problems = append(problems, fmt.Sprintf("line %d: expected CONDUCT<TAB>kind<TAB>slug|NONE<TAB>reason", lineNumber))
+				problems = append(
+					problems,
+					fmt.Sprintf("line %d: expected CONDUCT<TAB>kind<TAB>slug|NONE<TAB>reason", lineNumber),
+				)
 				continue
 			}
 			kind, ok := parseConductKind(fields[1])
 			if !ok {
-				problems = append(problems, fmt.Sprintf("line %d: conduct kind is not technique, prior, or baseline", lineNumber))
+				problems = append(
+					problems,
+					fmt.Sprintf("line %d: conduct kind is not technique, prior, or baseline", lineNumber),
+				)
 				continue
 			}
 			if fields[2] == "" || fields[3] == "" {
-				problems = append(problems, fmt.Sprintf("line %d: conduct slug and reason are both required", lineNumber))
+				problems = append(
+					problems,
+					fmt.Sprintf("line %d: conduct slug and reason are both required", lineNumber),
+				)
 				continue
 			}
 			if fields[2] != "NONE" && !laneSlugPattern.MatchString(fields[2]) {
-				problems = append(problems, fmt.Sprintf("line %d: conduct slug is not lowercase kebab or NONE", lineNumber))
+				problems = append(
+					problems,
+					fmt.Sprintf("line %d: conduct slug is not lowercase kebab or NONE", lineNumber),
+				)
 				continue
 			}
 			artifact.Conduct = append(artifact.Conduct, ConductLine{Kind: kind, Slug: fields[2], Reason: fields[3]})
@@ -77,7 +89,15 @@ func ParseCoverage(text string, transcriptCount int) (Coverage, error) {
 			continue
 		}
 		if index > transcriptCount {
-			problems = append(problems, fmt.Sprintf("line %d: index %d exceeds the %d supplied transcripts", lineNumber, index, transcriptCount))
+			problems = append(
+				problems,
+				fmt.Sprintf(
+					"line %d: index %d exceeds the %d supplied transcripts",
+					lineNumber,
+					index,
+					transcriptCount,
+				),
+			)
 			continue
 		}
 		status, ok := parseCoverageStatus(fields[1])

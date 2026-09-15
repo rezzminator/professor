@@ -36,6 +36,7 @@ func (c *fakeCommands) QueryAgents(_ context.Context, config string) ([]byte, er
 	}
 	return []byte("[]"), nil
 }
+
 func (c *fakeCommands) Resume(_ context.Context, config, cwd, id string, _ bool) error {
 	c.mu.Lock()
 	c.resumes = append(c.resumes, config+"|"+cwd+"|"+id)
@@ -53,6 +54,7 @@ func (c *fakeCommands) Resume(_ context.Context, config, cwd, id string, _ bool)
 	}
 	return err
 }
+
 func (c *fakeCommands) View(_ context.Context, config, cwd string) error {
 	c.mu.Lock()
 	c.views = append(c.views, config+"|"+cwd)
@@ -73,11 +75,13 @@ func (p *fakeProcesses) Processes(context.Context) ([]Process, error) {
 	defer p.mu.Unlock()
 	return append([]Process(nil), p.rows...), nil
 }
+
 func (p *fakeProcesses) Alive(pid int) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return !p.dead[pid]
 }
+
 func (p *fakeProcesses) Terminate(pid int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -85,6 +89,7 @@ func (p *fakeProcesses) Terminate(pid int) error {
 	p.dead[pid] = true
 	return nil
 }
+
 func (p *fakeProcesses) Kill(pid int) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -129,8 +134,13 @@ func TestNewDoesNotInventAnAccountRoster(t *testing.T) {
 
 func TestOpenStaleIdleRegistryRowResumesCurrentPrimary(t *testing.T) {
 	id := "11111111-1111-4111-8111-111111111111"
-	commands := &fakeCommands{rows: map[string][]byte{"": []byte(`[{"sessionId":"` + id + `","name":"worker","pid":42,"status":"idle"}]`)}}
-	processes := &fakeProcesses{rows: []Process{{PID: 42, Argv: []string{"claude", "--resume", id}}}, dead: map[int]bool{42: true}}
+	commands := &fakeCommands{
+		rows: map[string][]byte{"": []byte(`[{"sessionId":"` + id + `","name":"worker","pid":42,"status":"idle"}]`)},
+	}
+	processes := &fakeProcesses{
+		rows: []Process{{PID: 42, Argv: []string{"claude", "--resume", id}}},
+		dead: map[int]bool{42: true},
+	}
 	opener := newTestOpener(t, commands, processes, fakeTmux{})
 	if err := opener.Open(context.Background(), Request{ID: id, CWD: "/jail/project", PrimaryAccount: 2}); err != nil {
 		t.Fatal(err)
@@ -145,8 +155,13 @@ func TestOpenStaleIdleRegistryRowResumesCurrentPrimary(t *testing.T) {
 
 func TestOpenStaleBusyRegistryRowOpensAgentViewWithoutResume(t *testing.T) {
 	id := "22222222-2222-4222-8222-222222222222"
-	commands := &fakeCommands{rows: map[string][]byte{"": []byte(`[{"sessionId":"` + id + `","name":"busy","pid":43,"status":"busy"}]`)}}
-	processes := &fakeProcesses{rows: []Process{{PID: 43, Argv: []string{"claude", "--resume", id}}}, dead: map[int]bool{43: true}}
+	commands := &fakeCommands{
+		rows: map[string][]byte{"": []byte(`[{"sessionId":"` + id + `","name":"busy","pid":43,"status":"busy"}]`)},
+	}
+	processes := &fakeProcesses{
+		rows: []Process{{PID: 43, Argv: []string{"claude", "--resume", id}}},
+		dead: map[int]bool{43: true},
+	}
 	tmux := fakeTmux{}
 	opener := newTestOpener(t, commands, processes, tmux)
 	if err := opener.Open(context.Background(), Request{ID: id, CWD: "/jail"}); err != nil {
@@ -159,8 +174,13 @@ func TestOpenStaleBusyRegistryRowOpensAgentViewWithoutResume(t *testing.T) {
 
 func TestOpenTmuxResidentAgentAttaches(t *testing.T) {
 	id := "44444444-4444-4444-8444-444444444444"
-	commands := &fakeCommands{rows: map[string][]byte{"": []byte(`[{"sessionId":"` + id + `","name":"resident","pid":45,"status":"idle"}]`)}}
-	processes := &fakeProcesses{rows: []Process{{PID: 45, Argv: []string{"claude", "--resume", id}}}, dead: map[int]bool{}}
+	commands := &fakeCommands{
+		rows: map[string][]byte{"": []byte(`[{"sessionId":"` + id + `","name":"resident","pid":45,"status":"idle"}]`)},
+	}
+	processes := &fakeProcesses{
+		rows: []Process{{PID: 45, Argv: []string{"claude", "--resume", id}}},
+		dead: map[int]bool{},
+	}
 	opener := newTestOpener(t, commands, processes, fakeTmux{socket: "cc-probe-1"})
 	if err := opener.Open(context.Background(), Request{ID: id, CWD: "/jail"}); err != nil {
 		t.Fatal(err)
@@ -172,7 +192,11 @@ func TestOpenTmuxResidentAgentAttaches(t *testing.T) {
 
 func TestOpenLiveAgentOutsidePFMReturnsOneActionableLine(t *testing.T) {
 	id := "66666666-6666-4666-8666-666666666666"
-	commands := &fakeCommands{rows: map[string][]byte{"": []byte(`[{"sessionId":"` + id + `","name":"rough-seas","pid":46,"status":"busy"}]`)}}
+	commands := &fakeCommands{
+		rows: map[string][]byte{
+			"": []byte(`[{"sessionId":"` + id + `","name":"rough-seas","pid":46,"status":"busy"}]`),
+		},
+	}
 	processes := &fakeProcesses{
 		rows: []Process{{PID: 46, Argv: []string{"claude", "--resume", id}}},
 		dead: map[int]bool{}, parent: "codex-app-server",
@@ -193,7 +217,12 @@ func TestOpenLiveAgentOutsidePFMReturnsOneActionableLine(t *testing.T) {
 		t.Fatalf("outside-pfm path emitted extra lines: %q", stderr.String())
 	}
 	if len(commands.views) != 0 || len(commands.resumes) != 0 || len(processes.term) != 0 {
-		t.Fatalf("outside-pfm path mutated process: views=%v resumes=%v term=%v", commands.views, commands.resumes, processes.term)
+		t.Fatalf(
+			"outside-pfm path mutated process: views=%v resumes=%v term=%v",
+			commands.views,
+			commands.resumes,
+			processes.term,
+		)
 	}
 }
 
@@ -225,7 +254,16 @@ func TestOpenPerUUIDMutexHasOneWinner(t *testing.T) {
 	commands := &fakeCommands{rows: map[string][]byte{}, entered: entered, continueRun: make(chan struct{})}
 	processes := &fakeProcesses{dead: map[int]bool{}}
 	first := newTestOpener(t, commands, processes, fakeTmux{})
-	second := &Opener{sidDir: first.sidDir, home: first.home, commands: commands, processes: processes, tmux: fakeTmux{}, stderr: &bytes.Buffer{}, gracePeriod: time.Millisecond, pollInterval: time.Millisecond}
+	second := &Opener{
+		sidDir:       first.sidDir,
+		home:         first.home,
+		commands:     commands,
+		processes:    processes,
+		tmux:         fakeTmux{},
+		stderr:       &bytes.Buffer{},
+		gracePeriod:  time.Millisecond,
+		pollInterval: time.Millisecond,
+	}
 	results := make(chan error, 2)
 	go func() { results <- first.Open(context.Background(), Request{ID: id}) }()
 	<-entered

@@ -76,7 +76,11 @@ func SniffKind(contentType string, head []byte) string {
 		return "7z"
 	case ct == "application/x-rar-compressed", ct == "application/vnd.rar":
 		return "rar"
-	case ct == "application/x-tar", ct == "application/gzip", ct == "application/x-gzip", ct == "application/x-bzip2", ct == "application/x-xz":
+	case ct == "application/x-tar",
+		ct == "application/gzip",
+		ct == "application/x-gzip",
+		ct == "application/x-bzip2",
+		ct == "application/x-xz":
 		return "tar"
 	case strings.Contains(ct, "openxmlformats-officedocument"):
 		switch {
@@ -95,7 +99,12 @@ func SniffKind(contentType string, head []byte) string {
 		return "json"
 	case ct == "text/csv", ct == "application/csv":
 		return "csv"
-	case ct == "text/html", ct == "text/plain", ct == "application/xhtml+xml", ct == "application/xml", ct == "text/xml", ct == "text/markdown":
+	case ct == "text/html",
+		ct == "text/plain",
+		ct == "application/xhtml+xml",
+		ct == "application/xml",
+		ct == "text/xml",
+		ct == "text/markdown":
 		return ""
 	default:
 		return SniffMagic(head)
@@ -115,9 +124,14 @@ func SniffMagic(head []byte) string {
 		return "7z"
 	case bytes.HasPrefix(head, []byte("Rar!\x1a\x07")):
 		return "rar"
-	case bytes.HasPrefix(head, []byte("\x1f\x8b")), bytes.HasPrefix(head, []byte("BZh")), bytes.HasPrefix(head, []byte("\xfd7zXZ\x00")):
+	case bytes.HasPrefix(head, []byte("\x1f\x8b")),
+		bytes.HasPrefix(head, []byte("BZh")),
+		bytes.HasPrefix(head, []byte("\xfd7zXZ\x00")):
 		return "tar"
-	case bytes.HasPrefix(head, []byte("\xff\xd8\xff")), bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n")), bytes.HasPrefix(head, []byte("GIF87a")), bytes.HasPrefix(head, []byte("GIF89a")):
+	case bytes.HasPrefix(head, []byte("\xff\xd8\xff")),
+		bytes.HasPrefix(head, []byte("\x89PNG\r\n\x1a\n")),
+		bytes.HasPrefix(head, []byte("GIF87a")),
+		bytes.HasPrefix(head, []byte("GIF89a")):
 		return "image"
 	case len(head) >= 12 && bytes.Equal(head[:4], []byte("RIFF")) && bytes.Equal(head[8:12], []byte("WEBP")):
 		return "image"

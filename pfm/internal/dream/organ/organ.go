@@ -158,7 +158,10 @@ func Validate(context artifact.RepoContext) (Shape, error) {
 		return "", err
 	}
 	for _, name := range []string{"maps", "dreamer", "archive"} {
-		if err := validateCanonicalDirectory(filepath.Join(context.Organ, name), "organ "+name+" directory"); err != nil {
+		if err := validateCanonicalDirectory(
+			filepath.Join(context.Organ, name),
+			"organ "+name+" directory",
+		); err != nil {
 			return "", err
 		}
 	}
@@ -180,7 +183,10 @@ func Validate(context artifact.RepoContext) (Shape, error) {
 	case context.RepoRoot:
 		return ShapeTrackedRoot, nil
 	case context.Organ:
-		if err := validateCanonicalDirectory(filepath.Join(context.Organ, ".git"), "nested organ Git ledger"); err != nil {
+		if err := validateCanonicalDirectory(
+			filepath.Join(context.Organ, ".git"),
+			"nested organ Git ledger",
+		); err != nil {
 			return "", fmt.Errorf("organ does not own its nested Git ledger: %w", err)
 		}
 		if _, err := gitRevParse(context.Organ, "--verify", "HEAD"); err != nil {
@@ -188,7 +194,11 @@ func Validate(context artifact.RepoContext) (Shape, error) {
 		}
 		return ShapeNestedLedger, nil
 	default:
-		return "", fmt.Errorf("unsupported organ Git shape: organ %s resolves to intermediate Git top %s", context.Organ, organTop)
+		return "", fmt.Errorf(
+			"unsupported organ Git shape: organ %s resolves to intermediate Git top %s",
+			context.Organ,
+			organTop,
+		)
 	}
 }
 
@@ -277,7 +287,11 @@ func validateRootAssertion(organ, repoRoot string) error {
 	}
 	value := string(raw)
 	if value != repoRoot && value != repoRoot+"\n" {
-		return fmt.Errorf("organ ROOT does not exactly match canonical repository root: got %q, want %q", value, repoRoot)
+		return fmt.Errorf(
+			"organ ROOT does not exactly match canonical repository root: got %q, want %q",
+			value,
+			repoRoot,
+		)
 	}
 	return nil
 }

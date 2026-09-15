@@ -46,7 +46,8 @@ func TestChatStatusSummaryIsOptInCachedAndStructured(t *testing.T) {
 	if code := run([]string{"chat", "status", "--summary", id}, &stdout, &stderr); code != codeDeadChat {
 		t.Fatalf("summary code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if statusLineWithoutIdle(stdout.String()) != baselineStable || !strings.Contains(stdout.String(), "summary: cache now keys the last exchange\n") {
+	if statusLineWithoutIdle(stdout.String()) != baselineStable ||
+		!strings.Contains(stdout.String(), "summary: cache now keys the last exchange\n") {
 		t.Fatalf("summary stdout=%q baseline=%q", stdout.String(), baseline)
 	}
 
@@ -64,7 +65,12 @@ func TestChatStatusSummaryIsOptInCachedAndStructured(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"chat", "status", id}, &stdout, &stderr); code != codeDeadChat || statusLineWithoutIdle(stdout.String()) != baselineStable {
+	if code := run(
+		[]string{"chat", "status", id},
+		&stdout,
+		&stderr,
+	); code != codeDeadChat ||
+		statusLineWithoutIdle(stdout.String()) != baselineStable {
 		t.Fatalf("post-cache no-flag code=%d stdout=%q want=%q", code, stdout.String(), baseline)
 	}
 
@@ -74,7 +80,11 @@ func TestChatStatusSummaryIsOptInCachedAndStructured(t *testing.T) {
 		t.Fatalf("json code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var status map[string]any
-	if err := json.Unmarshal(stdout.Bytes(), &status); err != nil || status["summary"] != "cache now keys the last exchange" || status["summary_cached"] != true {
+	if err := json.Unmarshal(
+		stdout.Bytes(),
+		&status,
+	); err != nil || status["summary"] != "cache now keys the last exchange" ||
+		status["summary_cached"] != true {
 		t.Fatalf("json status=%v err=%v", status, err)
 	}
 }

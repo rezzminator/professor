@@ -215,7 +215,7 @@ func parseDarwinVMStat(value string) (uint64, map[string]uint64, error) {
 	return pageSize, pages, nil
 }
 
-func parseDarwinSwap(value []byte) (total uint64, used uint64, err error) {
+func parseDarwinSwap(value []byte) (total, used uint64, err error) {
 	// Darwin's vm.swapusage sysctl is xsw_usage: total, available, used,
 	// page-size, encrypted. The first three fields are uint64 byte counts.
 	if len(value) < 24 {

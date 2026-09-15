@@ -158,7 +158,13 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Prompt != "" {
 			arguments = append(arguments, request.Prompt)
 		}
-		run, err := claudeCommand(PurposeInteractive, request.Home, request.PrimaryAccount, request.Cache1H, machine, arguments...)
+		run, err := claudeCommand(
+			PurposeInteractive,
+			request.Home,
+			request.PrimaryAccount,
+			request.Cache1H,
+			machine,
+			arguments...)
 		if err != nil {
 			return Plan{}, err
 		}

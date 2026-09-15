@@ -66,7 +66,14 @@ func TestInstallRetiresAPFMHookThisBinaryDoesNotImplement(t *testing.T) {
 	// under (TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale) is the
 	// name this call returns.
 	if name, ok := unknownPFMHookCommand(unknown, pfm); !ok || name != "hook-from-a-newer-pfm" {
-		t.Fatalf("unknownPFMHookCommand(%q, %q) = (%q, %v), want (%q, true)", unknown, pfm, name, ok, "hook-from-a-newer-pfm")
+		t.Fatalf(
+			"unknownPFMHookCommand(%q, %q) = (%q, %v), want (%q, true)",
+			unknown,
+			pfm,
+			name,
+			ok,
+			"hook-from-a-newer-pfm",
+		)
 	}
 }
 
@@ -134,10 +141,20 @@ func TestInstallKeepsAnOperatorHookNamingASubcommandThisBinaryImplements(t *test
 		t.Fatalf("operator hook %q survived count=%d, want 1:\n%s", operatorClaudeVersion, got, updated)
 	}
 	if name, ok := unknownPFMHookCommand(operatorDoctor, pfm); ok {
-		t.Fatalf("unknownPFMHookCommand(%q, %q) = (%q, true), want false — this binary implements doctor", operatorDoctor, pfm, name)
+		t.Fatalf(
+			"unknownPFMHookCommand(%q, %q) = (%q, true), want false — this binary implements doctor",
+			operatorDoctor,
+			pfm,
+			name,
+		)
 	}
 	if name, ok := unknownPFMHookCommand(operatorClaudeVersion, pfm); ok {
-		t.Fatalf("unknownPFMHookCommand(%q, %q) = (%q, true), want false — this binary implements internal claude-version", operatorClaudeVersion, pfm, name)
+		t.Fatalf(
+			"unknownPFMHookCommand(%q, %q) = (%q, true), want false — this binary implements internal claude-version",
+			operatorClaudeVersion,
+			pfm,
+			name,
+		)
 	}
 }
 
@@ -190,7 +207,12 @@ func TestUnknownPFMHookCommandNeverReportsUnknownWithAnUnsetRegistry(t *testing.
 		pfm + " internal hook-from-a-newer-pfm",
 	} {
 		if name, ok := unknownPFMHookCommand(command, pfm); ok {
-			t.Fatalf("unknownPFMHookCommand(%q, %q) = (%q, true) with an unset registry, want false (fail closed toward keeping the hook)", command, pfm, name)
+			t.Fatalf(
+				"unknownPFMHookCommand(%q, %q) = (%q, true) with an unset registry, want false (fail closed toward keeping the hook)",
+				command,
+				pfm,
+				name,
+			)
 		}
 	}
 }

@@ -18,9 +18,23 @@ func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
 	secondary := filepath.Join(home, "account-two")
 	paths := []string{filepath.Join(home, ".claude.json"), filepath.Join(secondary, ".claude.json")}
 	for _, path := range paths {
-		writeFixture(t, path, `{"oauthAccount":{"accountUuid":"private"},"mcpServers":{"foreign":{"command":"custom"}}}`)
+		writeFixture(
+			t,
+			path,
+			`{"oauthAccount":{"accountUuid":"private"},"mcpServers":{"foreign":{"command":"custom"}}}`,
+		)
 	}
-	options := Options{Home: home, ConfigDir: primary, ConfigDirs: []string{primary, secondary}, CodexHomes: []string{}, Mode: ModeApply, Runner: &fakeRunner{}, Stdout: io.Discard, MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377}
+	options := Options{
+		Home:       home,
+		ConfigDir:  primary,
+		ConfigDirs: []string{primary, secondary},
+		CodexHomes: []string{},
+		Mode:       ModeApply,
+		Runner:     &fakeRunner{},
+		Stdout:     io.Discard,
+		MCPEnabled: map[string]bool{"chat": true},
+		MCPPort:    8377,
+	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}

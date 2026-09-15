@@ -55,7 +55,8 @@ func TestLoadRuntimePointsTheEngineRootsAtTheRoster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRuntime() = %v", err)
 	}
-	if got, want := runtime.Paths.Roots[pfmengine.Codex], runtime.Config.CodexHomes(); len(got) != len(want) || (len(got) != 0 && got[0] != want[0]) {
+	if got, want := runtime.Paths.Roots[pfmengine.Codex], runtime.Config.CodexHomes(); len(got) != len(want) ||
+		(len(got) != 0 && got[0] != want[0]) {
 		t.Fatalf("codex roots = %v, want the roster's homes %v", got, want)
 	}
 	if runtime.ConfigError != nil {

@@ -1,4 +1,4 @@
-cmd/pfm/commands.go 6
+cmd/pfm/commands.go 7
 cmd/pfm/doctor.go 5
 cmd/pfm/doctor_engine_roster_test.go 2
 cmd/pfm/doctor_opencode_test.go 3

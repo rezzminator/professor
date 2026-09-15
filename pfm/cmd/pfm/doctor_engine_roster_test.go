@@ -69,7 +69,13 @@ func TestDoctorEngineRosterMatrix(t *testing.T) {
 			var stdout bytes.Buffer
 			warnings := printEngineDoctor(&stdout, test.machine)
 			if stdout.String() != test.want || warnings != test.wantWarning {
-				t.Fatalf("printEngineDoctor() output=%q warnings=%d, want %q warnings=%d", stdout.String(), warnings, test.want, test.wantWarning)
+				t.Fatalf(
+					"printEngineDoctor() output=%q warnings=%d, want %q warnings=%d",
+					stdout.String(),
+					warnings,
+					test.want,
+					test.wantWarning,
+				)
 			}
 			if test.wantWarning != 0 && !strings.Contains(stdout.String(), "error=") {
 				t.Fatalf("zero-engine row hid its error: %q", stdout.String())

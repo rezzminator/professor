@@ -108,7 +108,9 @@ func (installer *engine) installThemes(ctx context.Context) {
 		record, owned := ownership[name]
 		if owned {
 			if filepath.Clean(record.Path) != filepath.Clean(target) {
-				installer.skip(fmt.Sprintf("theme %s ownership target drift: ledger=%s manifest=%s", name, record.Path, target))
+				installer.skip(
+					fmt.Sprintf("theme %s ownership target drift: ledger=%s manifest=%s", name, record.Path, target),
+				)
 				continue
 			}
 			if exists && contentSHA256(existing) != record.SHA256 {
@@ -208,7 +210,9 @@ func (installer *engine) uninstallThemes() {
 			continue
 		}
 		if exists && contentSHA256(content) != record.SHA256 {
-			installer.skip("theme " + name + " locally modified; left in place and retained recovery ownership at " + record.Path)
+			installer.skip(
+				"theme " + name + " locally modified; left in place and retained recovery ownership at " + record.Path,
+			)
 			continue
 		}
 		if !installer.apply {
@@ -245,7 +249,10 @@ func (installer *engine) uninstallThemes() {
 	}
 	if installer.apply {
 		themesDir := filepath.Join(installer.options.Home, ".claude", "themes")
-		if removeErr := os.Remove(themesDir); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) && !errors.Is(removeErr, fs.ErrExist) {
+		if removeErr := os.Remove(
+			themesDir,
+		); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) &&
+			!errors.Is(removeErr, fs.ErrExist) {
 			installer.skip("leave theme directory " + themesDir + ": " + removeErr.Error())
 		}
 	}
@@ -346,11 +353,19 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 				return nil, fmt.Errorf("read local manifest: %w; no release manifest URL is configured", localErr)
 			}
 			if releaseManifestUnpublishedAlpha(origin) {
-				return nil, fmt.Errorf("local theme manifest unavailable: %v; release manifest for an unpublished -alpha build; run pfm install from the source clone", localErr)
+				return nil, fmt.Errorf(
+					"local theme manifest unavailable: %v; release manifest for an unpublished -alpha build; run pfm install from the source clone",
+					localErr,
+				)
 			}
 			content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 			if err != nil {
-				return nil, fmt.Errorf("local theme manifest unavailable: %v; fetch release manifest %s: %w", localErr, origin, err)
+				return nil, fmt.Errorf(
+					"local theme manifest unavailable: %v; fetch release manifest %s: %w",
+					localErr,
+					origin,
+					err,
+				)
 			}
 		}
 	} else {
@@ -359,7 +374,9 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 			return nil, errors.New("no source repository or release manifest URL is configured")
 		}
 		if releaseManifestUnpublishedAlpha(origin) {
-			return nil, errors.New("release manifest for an unpublished -alpha build; run pfm install from the source clone")
+			return nil, errors.New(
+				"release manifest for an unpublished -alpha build; run pfm install from the source clone",
+			)
 		}
 		content, err = fetchTheme(ctx, options.ThemeHTTPClient, origin)
 		if err != nil {
@@ -391,7 +408,8 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 	}
 	sources := make(map[string]themeSource, len(manifest.SourceFetched)+len(manifest.Bundled))
 	for name, source := range manifest.SourceFetched {
-		if strings.TrimSpace(name) == "" || strings.TrimSpace(source.Raw) == "" || strings.TrimSpace(source.Target) == "" {
+		if strings.TrimSpace(name) == "" || strings.TrimSpace(source.Raw) == "" ||
+			strings.TrimSpace(source.Target) == "" {
 			return nil, fmt.Errorf("manifest %s theme %q is missing name, raw, or target", origin, name)
 		}
 		if err := validateThemeURL(source.Raw); err != nil {
@@ -405,7 +423,12 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 			return nil, fmt.Errorf("manifest %s bundled theme %q is missing name, file, or target", origin, name)
 		}
 		if file != path.Base(file) || file == "." || file == ".." {
-			return nil, fmt.Errorf("manifest %s bundled theme %q file %q must be a bare file name beside the manifest", origin, name, file)
+			return nil, fmt.Errorf(
+				"manifest %s bundled theme %q file %q must be a bare file name beside the manifest",
+				origin,
+				name,
+				file,
+			)
 		}
 		if _, clash := sources[name]; clash {
 			return nil, fmt.Errorf("manifest %s names theme %q as both source_fetched and bundled", origin, name)
@@ -413,10 +436,20 @@ func loadThemeSources(ctx context.Context, options Options) (map[string]themeSou
 		base := strings.TrimSpace(bundled.Base)
 		if base != "" {
 			if _, known := manifest.SourceFetched[base]; !known {
-				return nil, fmt.Errorf("manifest %s bundled theme %q base %q is not a source_fetched theme", origin, name, base)
+				return nil, fmt.Errorf(
+					"manifest %s bundled theme %q base %q is not a source_fetched theme",
+					origin,
+					name,
+					base,
+				)
 			}
 		}
-		source := themeSource{Target: bundled.Target, Activate: bundled.Activate, Requires: bundled.Requires, base: base}
+		source := themeSource{
+			Target:   bundled.Target,
+			Activate: bundled.Activate,
+			Requires: bundled.Requires,
+			base:     base,
+		}
 		if localThemes != "" {
 			source.local = filepath.Join(localThemes, file)
 		} else {
@@ -508,7 +541,10 @@ func fetchTheme(ctx context.Context, client *http.Client, raw string) ([]byte, e
 		_, drainErr := io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 		closeErr := response.Body.Close()
 		if drainErr != nil {
-			return nil, errors.Join(fmt.Errorf("GET %s: HTTP %s; drain response: %w", raw, response.Status, drainErr), closeErr)
+			return nil, errors.Join(
+				fmt.Errorf("GET %s: HTTP %s; drain response: %w", raw, response.Status, drainErr),
+				closeErr,
+			)
 		}
 		if closeErr != nil {
 			return nil, fmt.Errorf("GET %s: HTTP %s; close response: %w", raw, response.Status, closeErr)
@@ -537,7 +573,8 @@ func themeTarget(home, target string) (string, error) {
 	resolved := filepath.Clean(filepath.Join(home, filepath.FromSlash(strings.TrimPrefix(target, "~/"))))
 	root := filepath.Join(filepath.Clean(home), ".claude", "themes")
 	relative, err := filepath.Rel(root, resolved)
-	if err != nil || relative == "." || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+	if err != nil || relative == "." || relative == ".." ||
+		strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", fmt.Errorf("target %q must name a file beneath ~/.claude/themes", target)
 	}
 	return resolved, nil

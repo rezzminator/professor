@@ -16,17 +16,32 @@ func TestFindWorksIncludesConfiguredProvidersAndPublicHandleFetchesSelectedPDF(t
 		case "ipfs-catalog.test":
 			return response(r, http.StatusOK, "text/html", `<a href="/md5/`+md5+`">Anna result</a>`), nil
 		case "md5-catalog.test":
-			return response(r, http.StatusOK, "text/html", `<table><tr><td><a href="/edition.php?id=4">MD5Catalog result</a></td><td>Author</td><td>Publisher</td><td>2020</td><td><a href="/ads.php?md5=`+md5+`&key=x">GET</a></td></tr></table>`), nil
+			return response(
+				r,
+				http.StatusOK,
+				"text/html",
+				`<table><tr><td><a href="/edition.php?id=4">MD5Catalog result</a></td><td>Author</td><td>Publisher</td><td>2020</td><td><a href="/ads.php?md5=`+md5+`&key=x">GET</a></td></tr></table>`,
+			), nil
 		case "scholar.test":
 			if r.URL.Path == "/selected.pdf" {
 				return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nselected\n%%EOF"), nil
 			}
-			return response(r, http.StatusOK, "text/html", `<div class="gs_ri"><h3 class="gs_rt"><a href="https://doi.org/10.1234/provider.fixture">Scholar result</a></h3><div class="gs_a">A Author - Journal, 2020 - repository.example</div><div class="gs_or_ggsm"><a href="https://scholar.test/selected.pdf">[PDF]</a></div></div>`), nil
+			return response(
+				r,
+				http.StatusOK,
+				"text/html",
+				`<div class="gs_ri"><h3 class="gs_rt"><a href="https://doi.org/10.1234/provider.fixture">Scholar result</a></h3><div class="gs_a">A Author - Journal, 2020 - repository.example</div><div class="gs_or_ggsm"><a href="https://scholar.test/selected.pdf">[PDF]</a></div></div>`,
+			), nil
 		default:
 			return response(r, http.StatusOK, "application/json", `{}`), nil
 		}
 	})}
-	resolver := &Resolver{Client: client, IPFSCatalogURL: "https://ipfs-catalog.test", MD5CatalogURL: "https://md5-catalog.test", GoogleScholarURL: "https://scholar.test"}
+	resolver := &Resolver{
+		Client:           client,
+		IPFSCatalogURL:   "https://ipfs-catalog.test",
+		MD5CatalogURL:    "https://md5-catalog.test",
+		GoogleScholarURL: "https://scholar.test",
+	}
 	candidates, err := resolver.FindWorks(context.Background(), "fixture query", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +65,7 @@ func TestFindWorksIncludesConfiguredProvidersAndPublicHandleFetchesSelectedPDF(t
 
 	h := mustNew(t, Options{
 		CacheDir: t.TempDir(), Client: client,
-		Converter: legacyConverterFunc(func(_ context.Context, _ string, _ string, _ []byte) (string, error) {
+		Converter: legacyConverterFunc(func(_ context.Context, _, _ string, _ []byte) (string, error) {
 			return "selected provider bytes", nil
 		}),
 	})

@@ -411,7 +411,10 @@ func nameCodexThread(
 // nothing on screen and its ledger could not be read. That is "could not
 // verify", never "unnamed" — the rename may well have landed.
 func unverifiedRename(err error) string {
-	return fmt.Sprintf("could not verify the Codex rename — nothing on screen confirms it and its session index could not be read (%v); the chat may be named, check it with pfm ls", err)
+	return fmt.Sprintf(
+		"could not verify the Codex rename — nothing on screen confirms it and its session index could not be read (%v); the chat may be named, check it with pfm ls",
+		err,
+	)
 }
 
 // renameCodexThread drives Codex's own rename UI and verifies each step before

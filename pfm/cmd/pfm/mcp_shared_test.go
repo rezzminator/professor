@@ -30,6 +30,8 @@ func TestMCPRuntimeBindsTheVerbLayerToTheCommandsRuntime(t *testing.T) {
 		t.Fatalf("Dispatch(ls) = %d %q, want the non-chat argv refused", code, stderr.String())
 	}
 	if bridged.AllowAmbientIdentity || !mcpRuntime(commandRuntime{}, true).AllowAmbientIdentity {
-		t.Fatal("AllowAmbientIdentity must follow ambient: the shared daemon fails closed, stdio runs inside its caller")
+		t.Fatal(
+			"AllowAmbientIdentity must follow ambient: the shared daemon fails closed, stdio runs inside its caller",
+		)
 	}
 }

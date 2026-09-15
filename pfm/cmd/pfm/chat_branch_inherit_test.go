@@ -119,7 +119,13 @@ func registerParentTranscript(t *testing.T, accountDir, id string) {
 // "cc-<digits>-<digits>-<digits>") — freshClaudeSocketName builds one. An
 // arbitrary "probe-..." socket silently fails ParseCrumbName and the crumb is
 // dropped, which reads as "no live parent" rather than an error.
-func registerLiveParent(t *testing.T, jail *branchInheritJail, socket, accountDir, id string, pid int, environ map[string]string) {
+func registerLiveParent(
+	t *testing.T,
+	jail *branchInheritJail,
+	socket, accountDir, id string,
+	pid int,
+	environ map[string]string,
+) {
 	t.Helper()
 	panePID := startBootingPane(t, socket)
 	paneID := strings.TrimSpace(runTmuxOutput(t, socket, "list-panes", "-F", "#{pane_id}"))
@@ -216,7 +222,9 @@ func TestChatBranchInheritsParentAccountWhenNoFlagGiven(t *testing.T) {
 	if got := environment["CLAUDE_CONFIG_DIR"]; got != jail.parentDir {
 		t.Fatalf(
 			"CLAUDE_CONFIG_DIR=%q, want the parent's own account dir %q (machine primary is %q) — the fork did not inherit the parent's account",
-			got, jail.parentDir, jail.primaryDir,
+			got,
+			jail.parentDir,
+			jail.primaryDir,
 		)
 	}
 }
@@ -356,7 +364,8 @@ func TestChatBranchNonLiveParentTakesConfiguredDefaultNotFalse(t *testing.T) {
 	// row — can produce 1h here.
 	config := fmt.Sprintf(
 		`{"version":1,"claude":{"cache1h":false},"accounts":[{"id":1,"configDir":%q},{"id":7,"configDir":%q,"claude":{"cache1h":true}}]}`,
-		jail.primaryDir, jail.parentDir,
+		jail.primaryDir,
+		jail.parentDir,
 	)
 	if err := os.WriteFile(jail.configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
@@ -385,7 +394,10 @@ func TestChatBranchNonLiveParentTakesConfiguredDefaultNotFalse(t *testing.T) {
 		)
 	}
 	if got, present := environment["FORCE_PROMPT_CACHING_5M"]; present {
-		t.Fatalf("FORCE_PROMPT_CACHING_5M=%q present, want absent — the dead parent's zero-value C1H was read as 5m", got)
+		t.Fatalf(
+			"FORCE_PROMPT_CACHING_5M=%q present, want absent — the dead parent's zero-value C1H was read as 5m",
+			got,
+		)
 	}
 }
 
@@ -421,7 +433,11 @@ func TestChatBranchUnresolvableParentAccountWarnsAndUsesPrimary(t *testing.T) {
 	}
 	environment := forkedEnvironment(t, jail)
 	if got := environment["CLAUDE_CONFIG_DIR"]; got != jail.primaryDir {
-		t.Fatalf("CLAUDE_CONFIG_DIR=%q, want the primary account dir %q — the warned fallback did not actually land there", got, jail.primaryDir)
+		t.Fatalf(
+			"CLAUDE_CONFIG_DIR=%q, want the primary account dir %q — the warned fallback did not actually land there",
+			got,
+			jail.primaryDir,
+		)
 	}
 }
 
@@ -445,7 +461,12 @@ func TestChatBranchReportsAFailedParentScanInsteadOfForkingBlind(t *testing.T) {
 		"--cwd", jail.root, "--name", "scan-failure-branch",
 	)
 	if code != 1 {
-		t.Fatalf("chat branch rc=%d, want 1 (a scan failure must be reported, not silently forked): stdout=%q stderr=%q", code, stdout, stderr)
+		t.Fatalf(
+			"chat branch rc=%d, want 1 (a scan failure must be reported, not silently forked): stdout=%q stderr=%q",
+			code,
+			stdout,
+			stderr,
+		)
 	}
 	if !strings.Contains(stderr, "resolve parent session:") {
 		t.Fatalf("stderr=%q, want it to name the failed parent-session resolve, not silence", stderr)

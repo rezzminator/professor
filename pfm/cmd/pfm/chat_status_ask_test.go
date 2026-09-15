@@ -36,8 +36,16 @@ func TestChatStatusEngineModelGuardCoversAskAndSummary(t *testing.T) {
 		args        []string
 		wantGuarded bool
 	}{
-		{"ask alone with engine and model", []string{"chat", "status", "--engine", "claude", "--model", "m", "--ask", id}, false},
-		{"summary alone with engine and model", []string{"chat", "status", "--engine", "claude", "--model", "m", "--summary", id}, false},
+		{
+			"ask alone with engine and model",
+			[]string{"chat", "status", "--engine", "claude", "--model", "m", "--ask", id},
+			false,
+		},
+		{
+			"summary alone with engine and model",
+			[]string{"chat", "status", "--engine", "claude", "--model", "m", "--summary", id},
+			false,
+		},
 		{"neither verb with engine", []string{"chat", "status", "--engine", "claude", id}, true},
 		{"neither verb with model", []string{"chat", "status", "--model", "m", id}, true},
 	}
@@ -55,7 +63,12 @@ func TestChatStatusEngineModelGuardCoversAskAndSummary(t *testing.T) {
 				t.Fatalf("code=%d stderr=%q, --engine/--model wrongly guarded", code, stderr.String())
 			}
 			if code != codeDeadChat {
-				t.Fatalf("code=%d stdout=%q stderr=%q, want the dead-chat verdict past the guard", code, stdout.String(), stderr.String())
+				t.Fatalf(
+					"code=%d stdout=%q stderr=%q, want the dead-chat verdict past the guard",
+					code,
+					stdout.String(),
+					stderr.String(),
+				)
 			}
 		})
 	}

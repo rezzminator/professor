@@ -155,7 +155,8 @@ func TestLastExchangeIsEngineAgnosticAndKeepsTools(t *testing.T) {
 			if !ok || len(prompt) != 1 || Condensed(prompt[0]) != "U latest question" {
 				t.Fatalf("prompt=%#v ok=%t", prompt, ok)
 			}
-			if len(response) != 2 || !strings.HasPrefix(Condensed(response[0]), "T ") || Condensed(response[1]) != "A latest answer" {
+			if len(response) != 2 || !strings.HasPrefix(Condensed(response[0]), "T ") ||
+				Condensed(response[1]) != "A latest answer" {
 				t.Fatalf("response=%#v", response)
 			}
 		})
@@ -171,7 +172,10 @@ func TestLastExchangeNamesPartialAndMissingShapesWithoutGuessing(t *testing.T) {
 	if !ok || len(prompt) != 1 || len(response) != 1 || response[0].Role != RoleTool {
 		t.Fatalf("partial prompt=%#v response=%#v ok=%t", prompt, response, ok)
 	}
-	if prompt, response, ok := LastExchange([]Entry{{Role: RoleAssistant, Text: "orphan"}}); ok || prompt != nil || response != nil {
+	if prompt, response, ok := LastExchange(
+		[]Entry{{Role: RoleAssistant, Text: "orphan"}},
+	); ok || prompt != nil ||
+		response != nil {
 		t.Fatalf("missing prompt=%#v response=%#v ok=%t", prompt, response, ok)
 	}
 }
@@ -189,10 +193,13 @@ func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {
 		t.Fatalf("context percent = %f, want ~8.64", percent)
 	}
 
-	claude := writeTranscript(t, "claude.jsonl",
+	claude := writeTranscript(
+		t,
+		"claude.jsonl",
 		`{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"cache_read_input_tokens":400,"cache_creation_input_tokens":98,"output_tokens":500}}}
 {"type":"assistant","message":{"model":"<synthetic>","usage":{}}}
-`)
+`,
+	)
 	meta, err = ReadMeta(claude, "cc")
 	if err != nil {
 		t.Fatalf("ReadMeta() error = %v", err)
@@ -211,7 +218,9 @@ func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {
 }
 
 func TestCodexContextPercentUsesLastWindowNotLifetimeTotal(t *testing.T) {
-	path := writeTranscript(t, "rollout.jsonl",
+	path := writeTranscript(
+		t,
+		"rollout.jsonl",
 		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":155000},"total_token_usage":{"total_tokens":155000000},"model_context_window":272000}}}`+"\n",
 	)
 	meta, err := ReadMeta(path, "cx")

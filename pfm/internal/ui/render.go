@@ -79,11 +79,17 @@ var (
 
 func configureStyles(palette theme.Palette) {
 	configuredCosmosPalette = palette
-	headerStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Header)).Background(lipgloss.Color(palette.HeaderBg))
+	headerStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(palette.Header)).
+		Background(lipgloss.Color(palette.HeaderBg))
 	groupStyleA = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.GroupA))
 	groupStyleB = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.GroupB))
 	borderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Border))
-	selectedStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.Header)).Background(lipgloss.Color(palette.Selected))
+	selectedStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color(palette.Header)).
+		Background(lipgloss.Color(palette.Selected))
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dim))
 	codexStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Codex]))
 	opencodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Opencode]))
@@ -260,9 +266,13 @@ func (model Model) renderQuery(width int) string {
 		// the ledger's own state.
 		switch {
 		case model.cosmosStatus != "":
-			return warnStyle.Render(fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosStatus, maxInt(0, width-9)), width))
+			return warnStyle.Render(
+				fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosStatus, maxInt(0, width-9)), width),
+			)
 		case model.cosmosSelected != "":
-			return dimStyle.Render(fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosSelectionHUD(), maxInt(0, width-9)), width))
+			return dimStyle.Render(
+				fillLine(" cosmos  "+ansiTruncateRunes(model.cosmosSelectionHUD(), maxInt(0, width-9)), width),
+			)
 		}
 		status := "live comms ledger"
 		if model.cosmosLoading {

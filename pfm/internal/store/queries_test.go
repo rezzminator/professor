@@ -470,7 +470,10 @@ func TestFreshStoreEnsuresAssistantCountAtSchema8(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got != 8 {
-		t.Fatalf("UserVersion() = %d, want the hardcoded 8 — a schema bump for one additive column strands every older pfm on this machine", got)
+		t.Fatalf(
+			"UserVersion() = %d, want the hardcoded 8 — a schema bump for one additive column strands every older pfm on this machine",
+			got,
+		)
 	}
 	if !hasOcSessionsAssistantCount(t, fresh.db) {
 		t.Fatal("fresh store has no oc_sessions.assistant_count column")
@@ -512,7 +515,10 @@ func TestEnsureOcSessionsAssistantCountAddsColumnIdempotently(t *testing.T) {
 	if !hasOcSessionsAssistantCount(t, opened.db) {
 		t.Fatal("opening a pre-assistant_count schema-8 database did not add the column")
 	}
-	if err := opened.ReplaceOcSessions(ctx, []OcSession{{ID: "ses-1", Title: "fixture", AssistantCount: 3}}); err != nil {
+	if err := opened.ReplaceOcSessions(
+		ctx,
+		[]OcSession{{ID: "ses-1", Title: "fixture", AssistantCount: 3}},
+	); err != nil {
 		t.Fatal(err)
 	}
 	sessions, err := opened.OcSessions(ctx)

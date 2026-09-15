@@ -47,7 +47,10 @@ func TestReportRootsSkipsClaudeRootsWhenClaudeAbsentButLeavesCodexUnchanged(t *t
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1 (only the Codex root)\n%s", warnings, output.String())
 	}
-	want := "doctor: roots claude root=" + filepath.Join(home, "claude-gone") + " skipped (no Claude Code binary installed)"
+	want := "doctor: roots claude root=" + filepath.Join(
+		home,
+		"claude-gone",
+	) + " skipped (no Claude Code binary installed)"
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("missing skip line %q:\n%s", want, output.String())
 	}

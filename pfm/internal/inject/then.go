@@ -406,7 +406,7 @@ func senderEnvironment(sender Sender) []string {
 
 // withoutNames drops every definition of the names the given NAME=value pairs
 // set, so the caller's own definitions are the only ones in the child.
-func withoutNames(environment []string, pairs []string) []string {
+func withoutNames(environment, pairs []string) []string {
 	names := make(map[string]bool, len(pairs))
 	for _, pair := range pairs {
 		if name, _, ok := strings.Cut(pair, "="); ok {

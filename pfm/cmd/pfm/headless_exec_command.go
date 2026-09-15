@@ -53,8 +53,16 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	settings := flags.String("setting-sources", "", "inherited settings sources (empty disables them)")
 	strictMCP := flags.Bool("strict-mcp-config", false, "ignore inherited MCP servers")
 	noPersistence := flags.Bool("no-session-persistence", false, "discard session persistence")
-	sealed := flags.Bool("sealed", false, "scratch working directory, replacement system, no inherited settings/tools/MCP or session persistence")
-	allowUnsupported := flags.Bool("allow-unsupported", false, "continue without unsupported common controls and report them")
+	sealed := flags.Bool(
+		"sealed",
+		false,
+		"scratch working directory, replacement system, no inherited settings/tools/MCP or session persistence",
+	)
+	allowUnsupported := flags.Bool(
+		"allow-unsupported",
+		false,
+		"continue without unsupported common controls and report them",
+	)
 	cwd := flags.String("cwd", "", "working directory")
 	timeout := flags.Float64("timeout", 600, "wall-clock timeout in seconds; 0 unlimited")
 	format := flags.String("output-format", "text", "text, json (common result envelope), or native (engine stream)")
@@ -74,7 +82,8 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
-	if flags.NArg() != 0 || *account < 0 || math.IsNaN(*timeout) || math.IsInf(*timeout, 0) || *timeout < 0 || *timeout >= float64(math.MaxInt64)/float64(time.Second) {
+	if flags.NArg() != 0 || *account < 0 || math.IsNaN(*timeout) || math.IsInf(*timeout, 0) || *timeout < 0 ||
+		*timeout >= float64(math.MaxInt64)/float64(time.Second) {
 		flags.Usage()
 		return 2
 	}
@@ -92,8 +101,13 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			promptSources++
 		}
 	}
-	if promptSources > 1 || (hasSystem && (present["system-file"] || present["system-prompt-file"])) || (present["schema"] && present["json-schema"]) || (*format == "native" && *out != "") {
-		fmt.Fprintln(stderr, "pfm headless: choose one source per prompt/system/schema; --out requires normalized output")
+	if promptSources > 1 || (hasSystem && (present["system-file"] || present["system-prompt-file"])) ||
+		(present["schema"] && present["json-schema"]) ||
+		(*format == "native" && *out != "") {
+		fmt.Fprintln(
+			stderr,
+			"pfm headless: choose one source per prompt/system/schema; --out requires normalized output",
+		)
 		return 2
 	}
 	if len(labels) != 0 && len(labels) != len(files) {
@@ -153,7 +167,10 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			if len(labels) != 0 {
 				label = labels[index]
 			}
-			parts = append(parts, fmt.Sprintf("===== FILE %d: %s =====\n%s\n===== END FILE %d =====", index+1, label, body, index+1))
+			parts = append(
+				parts,
+				fmt.Sprintf("===== FILE %d: %s =====\n%s\n===== END FILE %d =====", index+1, label, body, index+1),
+			)
 		}
 		parts = append(parts, "TASK: "+request.Prompt)
 		request.Prompt = strings.Join(parts, "\n\n") + "\n"

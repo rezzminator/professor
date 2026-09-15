@@ -134,8 +134,16 @@ func TestDreamNightRejectsInvalidSurfaceBeforeCallingRoot(t *testing.T) {
 			}
 			var stdout, stderr bytes.Buffer
 			code := runDreamWith(context.Background(), args, strings.NewReader(""), &stdout, &stderr, runtime)
-			if code != 2 || called || stdout.Len() != 0 || !strings.Contains(stderr.String(), "usage: pfm dream night") {
-				t.Fatalf("args=%q code=%d called=%v stdout=%q stderr=%q", args, code, called, stdout.String(), stderr.String())
+			if code != 2 || called || stdout.Len() != 0 ||
+				!strings.Contains(stderr.String(), "usage: pfm dream night") {
+				t.Fatalf(
+					"args=%q code=%d called=%v stdout=%q stderr=%q",
+					args,
+					code,
+					called,
+					stdout.String(),
+					stderr.String(),
+				)
 			}
 		})
 	}
@@ -341,7 +349,14 @@ func TestDreamNonNightArityIsExact(t *testing.T) {
 	} {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			code := runDreamWith(context.Background(), args, strings.NewReader(""), &stdout, &stderr, rejectingDreamRuntime(t))
+			code := runDreamWith(
+				context.Background(),
+				args,
+				strings.NewReader(""),
+				&stdout,
+				&stderr,
+				rejectingDreamRuntime(t),
+			)
 			if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "usage: pfm dream "+args[0]) {
 				t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 			}
@@ -393,7 +408,14 @@ func TestDreamHookReadsNativeContractAndWritesBytesUnchanged(t *testing.T) {
 func TestDreamHookRejectsUnknownKindAndReportsInputFailure(t *testing.T) {
 	for _, args := range [][]string{{"hook"}, {"hook", "gate-pin"}, {"hook", "nudge", "extra"}} {
 		var stdout, stderr bytes.Buffer
-		code := runDreamWith(context.Background(), args, strings.NewReader(""), &stdout, &stderr, rejectingDreamRuntime(t))
+		code := runDreamWith(
+			context.Background(),
+			args,
+			strings.NewReader(""),
+			&stdout,
+			&stderr,
+			rejectingDreamRuntime(t),
+		)
 		if code != 2 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "usage: pfm dream hook") {
 			t.Fatalf("args=%q code=%d stdout=%q stderr=%q", args, code, stdout.String(), stderr.String())
 		}
@@ -407,7 +429,14 @@ func TestDreamHookRejectsUnknownKindAndReportsInputFailure(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	// agent-inject, not nudge: the nudge no longer reads stdin, so only a
 	// payload-consuming kind still exercises the read-failure path.
-	code := runDreamWith(context.Background(), []string{"hook", "agent-inject"}, failingReader{}, &stdout, &stderr, runtime)
+	code := runDreamWith(
+		context.Background(),
+		[]string{"hook", "agent-inject"},
+		failingReader{},
+		&stdout,
+		&stderr,
+		runtime,
+	)
 	if code != 1 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "read stdin: injected read failure") {
 		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -415,7 +444,14 @@ func TestDreamHookRejectsUnknownKindAndReportsInputFailure(t *testing.T) {
 
 func TestDreamHelpListsOnlySpecifiedSurfaceAndRootHelpListsDream(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	code := runDreamWith(context.Background(), []string{"help"}, strings.NewReader(""), &stdout, &stderr, rejectingDreamRuntime(t))
+	code := runDreamWith(
+		context.Background(),
+		[]string{"help"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		rejectingDreamRuntime(t),
+	)
 	if code != 0 || stderr.Len() != 0 {
 		t.Fatalf("dream help code=%d stderr=%q", code, stderr.String())
 	}
@@ -432,7 +468,12 @@ func TestDreamHelpListsOnlySpecifiedSurfaceAndRootHelpListsDream(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"help"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 || !strings.Contains(stdout.String(), "  dream ") {
+	if code := run(
+		[]string{"help"},
+		&stdout,
+		&stderr,
+	); code != 0 || stderr.Len() != 0 ||
+		!strings.Contains(stdout.String(), "  dream ") {
 		t.Fatalf("root help code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

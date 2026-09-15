@@ -344,7 +344,8 @@ func (lister CommandPaneOwners) PaneOwners(
 	ctx context.Context,
 	socketPath string,
 ) ([]PaneOwner, error) {
-	output, err := pfmtmux.Command(ctx, lister.Binary, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").Output()
+	output, err := pfmtmux.Command(ctx, lister.Binary, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
+		Output()
 	if err != nil {
 		return nil, err
 	}

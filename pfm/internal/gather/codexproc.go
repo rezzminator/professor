@@ -26,7 +26,7 @@ type CodexThreadResolver func(
 	birth int64,
 	socket string,
 	paneID string,
-) (id string, rolloutPath string)
+) (id, rolloutPath string)
 
 // DetectCodex maps live codex processes to panes using pid ancestry. It sees
 // only sessions that hold a rollout file descriptor or state the thread they
@@ -90,7 +90,16 @@ func detectCodexThreadsInRootsFrom(
 		}
 		links, err := proc.FDLinks(pid)
 		if err != nil {
-			live = append(live, LiveCodex{PID: pid, PanePID: pane.PID, Socket: pane.Socket, PaneID: pane.PaneID, IdentityError: fmt.Sprintf("read Codex descriptors: %v", err)})
+			live = append(
+				live,
+				LiveCodex{
+					PID:           pid,
+					PanePID:       pane.PID,
+					Socket:        pane.Socket,
+					PaneID:        pane.PaneID,
+					IdentityError: fmt.Sprintf("read Codex descriptors: %v", err),
+				},
+			)
 			continue
 		}
 		rolloutPath, _, identityErr := heldCodexRoot(links, codexRoots)
@@ -98,7 +107,16 @@ func detectCodexThreadsInRootsFrom(
 			continue
 		}
 		if identityErr != nil {
-			live = append(live, LiveCodex{PID: pid, PanePID: pane.PID, Socket: pane.Socket, PaneID: pane.PaneID, IdentityError: identityErr.Error()})
+			live = append(
+				live,
+				LiveCodex{
+					PID:           pid,
+					PanePID:       pane.PID,
+					Socket:        pane.Socket,
+					PaneID:        pane.PaneID,
+					IdentityError: identityErr.Error(),
+				},
+			)
 			continue
 		}
 		// True only when the loop above actually found the rollout among

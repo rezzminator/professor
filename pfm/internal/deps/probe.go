@@ -128,10 +128,16 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 	path, err := options.LookPath(entry.Command)
 	if err != nil {
 		result.State = StateMissing
-		if info, statErr := os.Stat(entry.Command); (statErr == nil && !info.IsDir()) || (statErr != nil && !errors.Is(statErr, os.ErrNotExist)) {
+		if info, statErr := os.Stat(
+			entry.Command,
+		); (statErr == nil && !info.IsDir()) ||
+			(statErr != nil && !errors.Is(statErr, os.ErrNotExist)) {
 			result.State = StateBroken
 			result.Error = err.Error()
-		} else if !errors.Is(err, exec.ErrNotFound) {
+		} else if !errors.Is(
+			err,
+			exec.ErrNotFound,
+		) {
 			result.State = StateBroken
 			result.Error = err.Error()
 		}
@@ -181,7 +187,13 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 	result.State = StateOK
 	if len(entry.SelfDoctorArgs) != 0 {
 		var selfDoctorRaw string
-		result.SelfDoctor, selfDoctorRaw, err = probeSelfDoctor(ctx, path, entry, options.VerboseDir, selfDoctorTimeout(options))
+		result.SelfDoctor, selfDoctorRaw, err = probeSelfDoctor(
+			ctx,
+			path,
+			entry,
+			options.VerboseDir,
+			selfDoctorTimeout(options),
+		)
 		if err != nil {
 			result.VerboseErr = err.Error()
 		}
@@ -214,7 +226,13 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 // call itself (entry.SelfDoctorArgs) distinguishes a timeout from a real
 // failure, because that is the call the regression this guards against
 // actually outruns.
-func probeSelfDoctor(ctx context.Context, path string, entry Entry, verboseDir string, timeout time.Duration) (string, string, error) {
+func probeSelfDoctor(
+	ctx context.Context,
+	path string,
+	entry Entry,
+	verboseDir string,
+	timeout time.Duration,
+) (string, string, error) {
 	helpArgs := []string{entry.SelfDoctorArgs[0], "--help"}
 	help, helpErr := boundedOutputWithEnvironment(ctx, timeout, terminalEnvironment(), path, helpArgs...)
 	if err := writeVerbose(verboseDir, entry.Name+"-self-doctor-help", help); err != nil {
@@ -244,7 +262,8 @@ func probeSelfDoctor(ctx context.Context, path string, entry Entry, verboseDir s
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Sprintf("timeout (%s)", timeout), "", nil
 		}
-		if strings.Contains(strings.ToLower(string(output)), "tty") || strings.Contains(strings.ToLower(string(output)), "interactive") {
+		if strings.Contains(strings.ToLower(string(output)), "tty") ||
+			strings.Contains(strings.ToLower(string(output)), "interactive") {
 			return "unavailable (interactive-only)", "", nil
 		}
 		return "broken", selfDoctorFailureLine(string(output)), nil
@@ -289,7 +308,13 @@ func boundedOutput(parent context.Context, timeout time.Duration, path string, a
 	return boundedOutputWithEnvironment(parent, timeout, nil, path, args...)
 }
 
-func boundedOutputWithEnvironment(parent context.Context, timeout time.Duration, environment []string, path string, args ...string) ([]byte, error) {
+func boundedOutputWithEnvironment(
+	parent context.Context,
+	timeout time.Duration,
+	environment []string,
+	path string,
+	args ...string,
+) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, effectiveTimeout(timeout))
 	defer cancel()
 	command := exec.CommandContext(ctx, path, args...)

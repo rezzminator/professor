@@ -30,6 +30,7 @@ func (fake fakeVersionsProcFS) PIDs() ([]int, error) {
 	}
 	return pids, nil
 }
+
 func (fake fakeVersionsProcFS) Cmdline(pid int) ([]string, error) {
 	argv, ok := fake.cmdlines[pid]
 	if !ok {

@@ -35,10 +35,17 @@ func TestAskProtocolRoundTrip(t *testing.T) {
 
 	worker := NewBrowserWorker(Runtime{Python: "unused", Script: "unused"})
 	var consulted []string
-	html, status, err := worker.Fetch(context.Background(), "https://publisher.example.test/walled", "", true, 45000, func(url string) error {
-		consulted = append(consulted, url)
-		return harvest.AssertFetchable(url)
-	})
+	html, status, err := worker.Fetch(
+		context.Background(),
+		"https://publisher.example.test/walled",
+		"",
+		true,
+		45000,
+		func(url string) error {
+			consulted = append(consulted, url)
+			return harvest.AssertFetchable(url)
+		},
+	)
 	if err != nil {
 		t.Fatalf("interactive fetch failed: %v", err)
 	}
@@ -82,8 +89,13 @@ func fakeBrowserWorker() {
 	reply1 := askAndRead(reader, "https://publisher.example.test/walled")
 	reply2 := askAndRead(reader, "http://169.254.169.254/latest/meta-data/")
 	final := map[string]any{
-		"ok":     true,
-		"html":   fmt.Sprintf("<html>rendered %s %s headless=%s</html>", reply1, reply2, headlessField(request.Headless)),
+		"ok": true,
+		"html": fmt.Sprintf(
+			"<html>rendered %s %s headless=%s</html>",
+			reply1,
+			reply2,
+			headlessField(request.Headless),
+		),
 		"status": 200,
 	}
 	body, _ := json.Marshal(final)
@@ -152,7 +164,9 @@ func fakeBrowserWorkerDenyingNothing() {
 	}
 	var reply AskReply
 	_ = json.Unmarshal([]byte(line), &reply)
-	body, _ := json.Marshal(map[string]any{"ok": false, "error": fmt.Sprintf("handler said allow=%t reason=%s", reply.Allow, reply.Reason)})
+	body, _ := json.Marshal(
+		map[string]any{"ok": false, "error": fmt.Sprintf("handler said allow=%t reason=%s", reply.Allow, reply.Reason)},
+	)
 	fmt.Println(string(body))
 }
 

@@ -26,7 +26,12 @@ type fixture struct {
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	root := t.TempDir()
-	fixture := &fixture{t: t, root: filepath.Join(root, "proc"), binary: filepath.Join(root, "bin", "pfm"), old: filepath.Join(root, "bin", "pfm.replaced")}
+	fixture := &fixture{
+		t:      t,
+		root:   filepath.Join(root, "proc"),
+		binary: filepath.Join(root, "bin", "pfm"),
+		old:    filepath.Join(root, "bin", "pfm.replaced"),
+	}
 	for _, path := range []string{fixture.binary, fixture.old} {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
@@ -46,7 +51,11 @@ func (fixture *fixture) process(pid int, image string, argv ...string) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		fixture.t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(directory, "cmdline"), []byte(strings.Join(argv, "\x00")+"\x00"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(directory, "cmdline"),
+		[]byte(strings.Join(argv, "\x00")+"\x00"),
+		0o600,
+	); err != nil {
 		fixture.t.Fatal(err)
 	}
 	if image != "" {
@@ -133,7 +142,13 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 	fixture.process(303, fixture.binary, fixture.binary, "mcp", "serve")
 	var sent []string
 	var stdout bytes.Buffer
-	err := Sweep(gather.NewProcFS(fixture.root), fixture.binary, fixture.signaler(map[int]bool{302: true}, nil, &sent), &stdout, 10*time.Millisecond)
+	err := Sweep(
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.signaler(map[int]bool{302: true}, nil, &sent),
+		&stdout,
+		10*time.Millisecond,
+	)
 	if err != nil {
 		t.Fatalf("sweep: %v\n%s", err, stdout.String())
 	}
@@ -155,7 +170,13 @@ func TestSweepFailsLoudOnASurvivor(t *testing.T) {
 	fixture.process(401, fixture.old, fixture.binary, "ls")
 	var sent []string
 	var stdout bytes.Buffer
-	err := Sweep(gather.NewProcFS(fixture.root), fixture.binary, fixture.signaler(map[int]bool{401: true}, map[int]bool{401: true}, &sent), &stdout, 10*time.Millisecond)
+	err := Sweep(
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.signaler(map[int]bool{401: true}, map[int]bool{401: true}, &sent),
+		&stdout,
+		10*time.Millisecond,
+	)
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("err = %v, want the survivor named", err)
 	}
@@ -167,7 +188,15 @@ func TestRunReportsNoneAndStaleDistinctly(t *testing.T) {
 	var sent []string
 	var stdout, stderr bytes.Buffer
 	signal := fixture.signaler(nil, nil, &sent)
-	if code := run(nil, &stdout, &stderr, gather.NewProcFS(fixture.root), fixture.binary, signal); code != 0 || !strings.Contains(stdout.String(), "stale: none") {
+	if code := run(
+		nil,
+		&stdout,
+		&stderr,
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		signal,
+	); code != 0 ||
+		!strings.Contains(stdout.String(), "stale: none") {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want none", code, stdout.String(), stderr.String())
 	}
 	fixture.process(502, fixture.old, fixture.binary, "ls")
@@ -176,7 +205,14 @@ func TestRunReportsNoneAndStaleDistinctly(t *testing.T) {
 		!strings.Contains(stdout.String(), "STALE pid=502") || !strings.Contains(stdout.String(), "make sweep-stale") {
 		t.Fatalf("code=%d stdout=%q, want pid 502 listed with the sweep named", code, stdout.String())
 	}
-	if code := run([]string{"--bogus"}, &stdout, &stderr, gather.NewProcFS(fixture.root), fixture.binary, signal); code != 2 {
+	if code := run(
+		[]string{"--bogus"},
+		&stdout,
+		&stderr,
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		signal,
+	); code != 2 {
 		t.Fatalf("code=%d, want a usage refusal", code)
 	}
 }

@@ -26,7 +26,10 @@ func TestInternalClaudeVersionCommandNeverConstructsAProcessTable(t *testing.T) 
 		t.Fatalf("read claude_version_command.go: %v", err)
 	}
 	if strings.Contains(string(source), "gather.") {
-		t.Fatalf("claude_version_command.go references the process table (gather.*) — every `claude` launch would pay for a probe it never uses:\n%s", source)
+		t.Fatalf(
+			"claude_version_command.go references the process table (gather.*) — every `claude` launch would pay for a probe it never uses:\n%s",
+			source,
+		)
 	}
 }
 

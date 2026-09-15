@@ -127,7 +127,13 @@ func TestChatInjectRefusesCompactBeforeAnyResolveOrEngine(t *testing.T) {
 		"no-such-target", "/compact", "hold:", "state",
 	}, &stdout, &stderr)
 	if code != codeUndelivered {
-		t.Fatalf("exit=%d stdout=%q stderr=%q, want codeUndelivered (%d)", code, stdout.String(), stderr.String(), codeUndelivered)
+		t.Fatalf(
+			"exit=%d stdout=%q stderr=%q, want codeUndelivered (%d)",
+			code,
+			stdout.String(),
+			stderr.String(),
+			codeUndelivered,
+		)
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("a banned /compact primary printed to stdout as if delivered: %q", stdout.String())

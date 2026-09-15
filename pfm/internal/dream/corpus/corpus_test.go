@@ -52,14 +52,24 @@ func TestLatestAppliedSweepFailsClosedOnMalformedCandidates(t *testing.T) {
 		{
 			name: "malformed lane",
 			make: func(t *testing.T, organ string) {
-				writeFile(t, filepath.Join(organ, "dreamer", "2026-08-10.md"), "lane\texplorer\textra\nEND-OF-SWEEP\n", 0o600)
+				writeFile(
+					t,
+					filepath.Join(organ, "dreamer", "2026-08-10.md"),
+					"lane\texplorer\textra\nEND-OF-SWEEP\n",
+					0o600,
+				)
 			},
 			want: "invalid lane row",
 		},
 		{
 			name: "duplicate lane",
 			make: func(t *testing.T, organ string) {
-				writeFile(t, filepath.Join(organ, "dreamer", "2026-08-10.md"), "lane\texplorer\nlane\texplorer\nEND-OF-SWEEP\n", 0o600)
+				writeFile(
+					t,
+					filepath.Join(organ, "dreamer", "2026-08-10.md"),
+					"lane\texplorer\nlane\texplorer\nEND-OF-SWEEP\n",
+					0o600,
+				)
 			},
 			want: "duplicate lane row",
 		},
@@ -103,10 +113,11 @@ func TestCutoffPrecedenceAndBootstrapFallback(t *testing.T) {
 			wantTime: time.Date(2026, 8, 10, 12, 34, 56, 0, location),
 		},
 		{
-			name:       "invalid last enumerated falls back to applied",
-			body:       "enumerated-at\t2026-08-10T11:00:00+02:00\nenumerated-at\tnot-a-date\nApplied: 2026-08-10T13:00:00+02:00\nEND-OF-SWEEP\n",
-			wantSource: CutoffApplied, wantDisplay: "2026-08-10T13:00:00+02:00",
-			wantTime: time.Date(2026, 8, 10, 13, 0, 0, 0, location),
+			name:        "invalid last enumerated falls back to applied",
+			body:        "enumerated-at\t2026-08-10T11:00:00+02:00\nenumerated-at\tnot-a-date\nApplied: 2026-08-10T13:00:00+02:00\nEND-OF-SWEEP\n",
+			wantSource:  CutoffApplied,
+			wantDisplay: "2026-08-10T13:00:00+02:00",
+			wantTime:    time.Date(2026, 8, 10, 13, 0, 0, 0, location),
 		},
 		{
 			name:       "filename midnight",
@@ -123,8 +134,15 @@ func TestCutoffPrecedenceAndBootstrapFallback(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Cutoff() error = %v", err)
 			}
-			if window.CutoffSource != test.wantSource || window.CutoffExclusive != test.wantDisplay || !window.CutoffTime.Equal(test.wantTime) {
-				t.Fatalf("Cutoff() = %#v, want source=%s display=%s time=%s", window, test.wantSource, test.wantDisplay, test.wantTime)
+			if window.CutoffSource != test.wantSource || window.CutoffExclusive != test.wantDisplay ||
+				!window.CutoffTime.Equal(test.wantTime) {
+				t.Fatalf(
+					"Cutoff() = %#v, want source=%s display=%s time=%s",
+					window,
+					test.wantSource,
+					test.wantDisplay,
+					test.wantTime,
+				)
 			}
 		})
 	}
@@ -145,15 +163,41 @@ func TestEnumerateBootstrapMatchesBatteryCensusAndTieBreak(t *testing.T) {
 	location := time.FixedZone("fixture", 2*60*60)
 	now := time.Date(2026, 8, 13, 8, 0, 0, 0, location)
 	tie := time.Date(2026, 8, 12, 7, 0, 0, 500_000_000, location)
-	newest := makeMeta(t, ctx.Registry, "newest", `{"agentType":"Explore"}`, true, time.Date(2026, 8, 12, 8, 0, 0, 900_000_000, location))
+	newest := makeMeta(
+		t,
+		ctx.Registry,
+		"newest",
+		`{"agentType":"Explore"}`,
+		true,
+		time.Date(2026, 8, 12, 8, 0, 0, 900_000_000, location),
+	)
 	tieB := makeMeta(t, ctx.Registry, "tie-b", `{"agentType":"Explore"}`, true, tie)
 	tieA := makeMeta(t, ctx.Registry, "tie-a", `{"agentType":"Explore"}`, true, tie)
 	makeMeta(t, ctx.Registry, "older", `{"agentType":"Explore"}`, true, time.Date(2026, 8, 11, 23, 0, 0, 0, location))
-	missing := makeMeta(t, ctx.Registry, "missing", `{"agentType":"Explore"}`, false, time.Date(2026, 8, 12, 9, 0, 0, 0, location))
-	makeMeta(t, ctx.Registry, "worker", `{"agentType":"general-purpose"}`, true, time.Date(2026, 8, 12, 10, 0, 0, 0, location))
+	missing := makeMeta(
+		t,
+		ctx.Registry,
+		"missing",
+		`{"agentType":"Explore"}`,
+		false,
+		time.Date(2026, 8, 12, 9, 0, 0, 0, location),
+	)
+	makeMeta(
+		t,
+		ctx.Registry,
+		"worker",
+		`{"agentType":"general-purpose"}`,
+		true,
+		time.Date(2026, 8, 12, 10, 0, 0, 0, location),
+	)
 	makeMeta(t, ctx.Registry, "invalid", `{}`, true, time.Date(2026, 8, 12, 11, 0, 0, 0, location))
 
-	result, err := Enumerate(ctx, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{BootstrapCount: 3}, now)
+	result, err := Enumerate(
+		ctx,
+		artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+		Selection{BootstrapCount: 3},
+		now,
+	)
 	if err != nil {
 		t.Fatalf("Enumerate() error = %v", err)
 	}
@@ -169,13 +213,15 @@ func TestEnumerateBootstrapMatchesBatteryCensusAndTieBreak(t *testing.T) {
 	if result.Census != wantCensus {
 		t.Fatalf("census = %#v, want %#v", result.Census, wantCensus)
 	}
-	if len(result.Selected) != 3 || result.Selected[0].Meta != newest.meta || result.Selected[1].Meta != tieA.meta || result.Selected[2].Meta != tieB.meta {
+	if len(result.Selected) != 3 || result.Selected[0].Meta != newest.meta || result.Selected[1].Meta != tieA.meta ||
+		result.Selected[2].Meta != tieB.meta {
 		t.Fatalf("bootstrap ranking = %#v", result.Selected)
 	}
 	if len(result.Gaps) != 1 || result.Gaps[0].Meta != missing.meta || result.Gaps[0].Kind != GapMissingTranscript {
 		t.Fatalf("gaps = %#v", result.Gaps)
 	}
-	if result.Window.Mode != WindowBootstrap || result.Window.BootstrapCount != 3 || result.CutoffDescription != "bootstrap-count 3" {
+	if result.Window.Mode != WindowBootstrap || result.Window.BootstrapCount != 3 ||
+		result.CutoffDescription != "bootstrap-count 3" {
 		t.Fatalf("window/result = %#v / %#v", result.Window, result)
 	}
 
@@ -185,7 +231,11 @@ func TestEnumerateBootstrapMatchesBatteryCensusAndTieBreak(t *testing.T) {
 	}
 	assertStageArtifacts(t, stage, result)
 	selection := readFile(t, filepath.Join(stage.Meta, "bootstrap-selection.tsv"))
-	if rows := strings.Split(strings.TrimSuffix(selection, "\n"), "\n"); len(rows) != 3 || !strings.Contains(rows[0], newest.meta) || !strings.Contains(rows[1], tieA.meta) || !strings.Contains(rows[2], tieB.meta) {
+	if rows := strings.Split(
+		strings.TrimSuffix(selection, "\n"),
+		"\n",
+	); len(rows) != 3 || !strings.Contains(rows[0], newest.meta) || !strings.Contains(rows[1], tieA.meta) ||
+		!strings.Contains(rows[2], tieB.meta) {
 		t.Fatalf("bootstrap-selection.tsv = %q", selection)
 	}
 }
@@ -195,7 +245,12 @@ func TestEnumerateRollingWindowIsStrictlyExclusiveAndLaneScoped(t *testing.T) {
 	location := time.FixedZone("fixture", 2*60*60)
 	cutoff := time.Date(2026, 8, 10, 12, 34, 56, 0, location)
 	now := cutoff.Add(72 * time.Hour)
-	writeFile(t, filepath.Join(ctx.Organ, "dreamer", "2026-08-10.md"), "lane\texplorer\nenumerated-at\t2026-08-10T12:34:56+02:00\nEND-OF-SWEEP\n", 0o600)
+	writeFile(
+		t,
+		filepath.Join(ctx.Organ, "dreamer", "2026-08-10.md"),
+		"lane\texplorer\nenumerated-at\t2026-08-10T12:34:56+02:00\nEND-OF-SWEEP\n",
+		0o600,
+	)
 	makeMeta(t, ctx.Registry, "before", `{"agentType":"Explore"}`, true, cutoff.Add(-time.Nanosecond))
 	makeMeta(t, ctx.Registry, "equal", `{"agentType":"Explore"}`, true, cutoff)
 	after := makeMeta(t, ctx.Registry, "after", `{"agentType":"Explore"}`, true, cutoff.Add(time.Nanosecond))
@@ -221,11 +276,17 @@ func TestEnumerateRollingWindowIsStrictlyExclusiveAndLaneScoped(t *testing.T) {
 	if len(result.Gaps) != 1 || result.Gaps[0].Meta != missing.meta {
 		t.Fatalf("rolling gaps = %#v", result.Gaps)
 	}
-	if result.Window.CutoffSource != CutoffEnumeratedAt || result.Window.CutoffExclusive != "2026-08-10T12:34:56+02:00" {
+	if result.Window.CutoffSource != CutoffEnumeratedAt ||
+		result.Window.CutoffExclusive != "2026-08-10T12:34:56+02:00" {
 		t.Fatalf("rolling window = %#v", result.Window)
 	}
 
-	qa, err := Enumerate(ctx, artifact.LaneContext{AgentType: "qa-orion-cortex", Lane: "qa-orion-cortex"}, Selection{}, now)
+	qa, err := Enumerate(
+		ctx,
+		artifact.LaneContext{AgentType: "qa-orion-cortex", Lane: "qa-orion-cortex"},
+		Selection{},
+		now,
+	)
 	if err != nil {
 		t.Fatalf("Enumerate(QA) error = %v", err)
 	}
@@ -244,7 +305,12 @@ func TestExplicitCorpusReadsOnceCopiesExactBytesAndDeduplicates(t *testing.T) {
 	original := "# exact provenance\n" + b + "\n\n#literal comment\n" + a + "\n" + b
 	writeFile(t, corpusFile, original, 0o600)
 	now := time.Date(2026, 8, 13, 8, 0, 0, 0, time.UTC)
-	result, err := Enumerate(artifact.RepoContext{}, artifact.LaneContext{AgentType: "qa-orion-cortex", Lane: "qa-orion-cortex"}, Selection{CorpusFile: corpusFile}, now)
+	result, err := Enumerate(
+		artifact.RepoContext{},
+		artifact.LaneContext{AgentType: "qa-orion-cortex", Lane: "qa-orion-cortex"},
+		Selection{CorpusFile: corpusFile},
+		now,
+	)
 	if err != nil {
 		t.Fatalf("Enumerate(corpus file) error = %v", err)
 	}
@@ -294,7 +360,12 @@ func TestExplicitCorpusRejectsGhostRelativeControlAndNonregularPaths(t *testing.
 		t.Run(test.name, func(t *testing.T) {
 			corpusFile := filepath.Join(root, strings.ReplaceAll(test.name, " ", "-")+".txt")
 			writeFile(t, corpusFile, test.line+"\n", 0o600)
-			_, err := Enumerate(artifact.RepoContext{}, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{CorpusFile: corpusFile}, time.Now())
+			_, err := Enumerate(
+				artifact.RepoContext{},
+				artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+				Selection{CorpusFile: corpusFile},
+				time.Now(),
+			)
 			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("Enumerate() error = %v, want %q", err, test.want)
 			}
@@ -302,7 +373,12 @@ func TestExplicitCorpusRejectsGhostRelativeControlAndNonregularPaths(t *testing.
 	}
 
 	missingCorpus := filepath.Join(root, "missing-corpus.txt")
-	_, err := Enumerate(artifact.RepoContext{}, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{CorpusFile: missingCorpus}, time.Now())
+	_, err := Enumerate(
+		artifact.RepoContext{},
+		artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+		Selection{CorpusFile: missingCorpus},
+		time.Now(),
+	)
 	if err == nil || !strings.Contains(err.Error(), "read corpus file") {
 		t.Fatalf("missing corpus file error = %v", err)
 	}
@@ -313,7 +389,12 @@ func TestEmptyExplicitCorpusIsAValidSelectionArtifact(t *testing.T) {
 	corpusFile := filepath.Join(root, "empty.txt")
 	original := "# only provenance\n\n# another comment\n"
 	writeFile(t, corpusFile, original, 0o600)
-	result, err := Enumerate(artifact.RepoContext{}, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{CorpusFile: corpusFile}, time.Now())
+	result, err := Enumerate(
+		artifact.RepoContext{},
+		artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+		Selection{CorpusFile: corpusFile},
+		time.Now(),
+	)
 	if err != nil {
 		t.Fatalf("Enumerate(empty corpus) error = %v", err)
 	}
@@ -346,7 +427,12 @@ func TestMetadataShapeAccountingDistinguishesInvalidFromOtherAgent(t *testing.T)
 	makeMeta(t, ctx.Registry, "other", `{"agentType":"general-purpose"}`, true, mtime)
 	match := makeMeta(t, ctx.Registry, "match", `{"agentType":"Explore"}`, true, mtime)
 
-	result, err := Enumerate(ctx, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{BootstrapCount: 20}, time.Now())
+	result, err := Enumerate(
+		ctx,
+		artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+		Selection{BootstrapCount: 20},
+		time.Now(),
+	)
 	if err != nil {
 		t.Fatalf("Enumerate() error = %v", err)
 	}
@@ -365,13 +451,23 @@ func TestEnumerationProbeFailuresAreErrorsNotEmptyResults(t *testing.T) {
 	mustMkdir(t, organ)
 	lane := artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}
 
-	_, err := Enumerate(artifact.RepoContext{Organ: organ, Registry: filepath.Join(root, "missing-registry")}, lane, Selection{BootstrapCount: 1}, time.Now())
+	_, err := Enumerate(
+		artifact.RepoContext{Organ: organ, Registry: filepath.Join(root, "missing-registry")},
+		lane,
+		Selection{BootstrapCount: 1},
+		time.Now(),
+	)
 	if err == nil || !strings.Contains(err.Error(), "stat registry") {
 		t.Fatalf("missing registry error = %v", err)
 	}
 	registryFile := filepath.Join(root, "registry-file")
 	writeFile(t, registryFile, "not a directory", 0o600)
-	_, err = Enumerate(artifact.RepoContext{Organ: organ, Registry: registryFile}, lane, Selection{BootstrapCount: 1}, time.Now())
+	_, err = Enumerate(
+		artifact.RepoContext{Organ: organ, Registry: registryFile},
+		lane,
+		Selection{BootstrapCount: 1},
+		time.Now(),
+	)
 	if err == nil || !strings.Contains(err.Error(), "not a directory") {
 		t.Fatalf("file registry error = %v", err)
 	}
@@ -392,7 +488,12 @@ func TestOnlyClaudeAgentMetadataEntersEnumeration(t *testing.T) {
 	writeFile(t, filepath.Join(ctx.Registry, "rollout-2026.jsonl"), "codex seat rollout\n", 0o600)
 	writeFile(t, filepath.Join(ctx.Registry, "rollout.meta.json"), `{"agentType":"Explore"}`, 0o600)
 	writeFile(t, filepath.Join(ctx.Registry, "worker.meta.json"), `{"agentType":"Explore"}`, 0o600)
-	result, err := Enumerate(ctx, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{BootstrapCount: 10}, time.Now())
+	result, err := Enumerate(
+		ctx,
+		artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+		Selection{BootstrapCount: 10},
+		time.Now(),
+	)
 	if err != nil {
 		t.Fatalf("Enumerate() error = %v", err)
 	}
@@ -412,7 +513,10 @@ func TestRenderersFailClosedAndRemainByteStable(t *testing.T) {
 	}
 	gapA := Gap{Kind: GapMissingTranscript, Meta: "/a.meta.json", Transcript: "/a.jsonl"}
 	gapB := Gap{Kind: GapMissingTranscript, Meta: "/b.meta.json", Transcript: "/b.jsonl"}
-	if got, err := RenderGaps([]Gap{gapA, gapB}); err != nil || got != "META-PRESENT-TRANSCRIPT-MISSING\t/a.meta.json\t/a.jsonl\nMETA-PRESENT-TRANSCRIPT-MISSING\t/b.meta.json\t/b.jsonl\n" {
+	if got, err := RenderGaps(
+		[]Gap{gapA, gapB},
+	); err != nil ||
+		got != "META-PRESENT-TRANSCRIPT-MISSING\t/a.meta.json\t/a.jsonl\nMETA-PRESENT-TRANSCRIPT-MISSING\t/b.meta.json\t/b.jsonl\n" {
 		t.Fatalf("RenderGaps() = %q, %v", got, err)
 	}
 	if _, err := RenderGaps([]Gap{gapB, gapA}); err == nil {
@@ -420,7 +524,14 @@ func TestRenderersFailClosedAndRemainByteStable(t *testing.T) {
 	}
 
 	now := time.Date(2026, 8, 13, 8, 0, 0, 0, time.UTC)
-	window := Window{Mode: WindowBootstrap, BootstrapCount: 3, AgentType: "Explore", Lane: "explorer", CutoffExclusive: "NONE", EnumeratedAt: now}
+	window := Window{
+		Mode:            WindowBootstrap,
+		BootstrapCount:  3,
+		AgentType:       "Explore",
+		Lane:            "explorer",
+		CutoffExclusive: "NONE",
+		EnumeratedAt:    now,
+	}
 	want := "window-mode\tbootstrap-count\nbootstrap-count\t3\nagent-type\tExplore\nlane\texplorer\ncutoff-exclusive\tNONE\nenumerated-at\t2026-08-13T08:00:00Z\n"
 	if got, err := RenderWindow(window); err != nil || got != want {
 		t.Fatalf("RenderWindow() = %q, %v; want %q", got, err, want)
@@ -429,7 +540,15 @@ func TestRenderersFailClosedAndRemainByteStable(t *testing.T) {
 	if _, err := RenderWindow(window); err == nil {
 		t.Fatal("RenderWindow accepted zero bootstrap count")
 	}
-	window = Window{Mode: WindowExplicitCorpus, CorpusFile: "/corpus", CorpusFileSHA256: strings.Repeat("A", 64), AgentType: "Explore", Lane: "explorer", CutoffExclusive: "NONE", EnumeratedAt: now}
+	window = Window{
+		Mode:             WindowExplicitCorpus,
+		CorpusFile:       "/corpus",
+		CorpusFileSHA256: strings.Repeat("A", 64),
+		AgentType:        "Explore",
+		Lane:             "explorer",
+		CutoffExclusive:  "NONE",
+		EnumeratedAt:     now,
+	}
 	if _, err := RenderWindow(window); err == nil {
 		t.Fatal("RenderWindow accepted non-lowercase digest")
 	}
@@ -441,7 +560,12 @@ func TestWriteRejectsMutatedEvidenceAndEscapedLayout(t *testing.T) {
 	writeFile(t, transcript, "{}\n", 0o600)
 	corpusFile := filepath.Join(root, "corpus.txt")
 	writeFile(t, corpusFile, transcript+"\n", 0o600)
-	result, err := Enumerate(artifact.RepoContext{}, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{CorpusFile: corpusFile}, time.Now())
+	result, err := Enumerate(
+		artifact.RepoContext{},
+		artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+		Selection{CorpusFile: corpusFile},
+		time.Now(),
+	)
 	if err != nil {
 		t.Fatalf("Enumerate() error = %v", err)
 	}
@@ -456,7 +580,11 @@ func TestWriteRejectsMutatedEvidenceAndEscapedLayout(t *testing.T) {
 	t.Run("source digest", func(t *testing.T) {
 		mutated := result
 		mutated.CorpusFileBytes = []byte("mutated")
-		if err := Write(newStage(t), mutated); err == nil || !strings.Contains(err.Error(), "corpus file digest mismatch") {
+		if err := Write(
+			newStage(t),
+			mutated,
+		); err == nil ||
+			!strings.Contains(err.Error(), "corpus file digest mismatch") {
 			t.Fatalf("Write() error = %v", err)
 		}
 	})
@@ -482,11 +610,21 @@ func TestEnumerateIsDeterministicForFrozenInputs(t *testing.T) {
 	makeMeta(t, ctx.Registry, "b", `{"agentType":"Explore"}`, true, mtime)
 	makeMeta(t, ctx.Registry, "a", `{"agentType":"Explore"}`, true, mtime)
 	now := time.Date(2026, 8, 13, 8, 0, 0, 0, time.UTC)
-	first, err := Enumerate(ctx, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{BootstrapCount: 2}, now)
+	first, err := Enumerate(
+		ctx,
+		artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+		Selection{BootstrapCount: 2},
+		now,
+	)
 	if err != nil {
 		t.Fatalf("first Enumerate() error = %v", err)
 	}
-	second, err := Enumerate(ctx, artifact.LaneContext{AgentType: "Explore", Lane: "explorer"}, Selection{BootstrapCount: 2}, now)
+	second, err := Enumerate(
+		ctx,
+		artifact.LaneContext{AgentType: "Explore", Lane: "explorer"},
+		Selection{BootstrapCount: 2},
+		now,
+	)
 	if err != nil {
 		t.Fatalf("second Enumerate() error = %v", err)
 	}

@@ -16,7 +16,10 @@ func TestLimitAccountsKeepCodexIndependentFromClaudeRoster(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
 	runtime := commandRuntime{
-		Paths: paths.Values{Home: home, Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}}},
+		Paths: paths.Values{
+			Home:  home,
+			Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}},
+		},
 		Config: pfmconfig.Config{
 			Claude: pfmconfig.Claude{Binary: "claude"},
 			Accounts: []pfmconfig.Account{
@@ -34,7 +37,10 @@ func TestLimitAccountsKeepCodexIndependentFromClaudeRoster(t *testing.T) {
 	}
 	accounts := limitAccounts(runtime)
 	if len(accounts) != 6 {
-		t.Fatalf("limitAccounts()=%#v, want two Claude rows, one skip, two Codex rows, and named OpenCode absence", accounts)
+		t.Fatalf(
+			"limitAccounts()=%#v, want two Claude rows, one skip, two Codex rows, and named OpenCode absence",
+			accounts,
+		)
 	}
 	if accounts[0].ID != 1 || accounts[1].ID != 2 || accounts[2].SkipReason != "no valid credentials" {
 		t.Fatalf("Claude accounts/skips=%#v", accounts[:3])
@@ -47,11 +53,22 @@ func TestLimitAccountsKeepCodexIndependentFromClaudeRoster(t *testing.T) {
 		{id: 2, offset: 4, label: "Codex 2", emoji: "🔷", auth: filepath.Join(home, ".codex-2", "auth.json")},
 	} {
 		codex := accounts[want.offset]
-		if codex.ID != want.id || codex.Engine != pfmengine.Codex || codex.Label != want.label || codex.Emoji != want.emoji || codex.CodexAuthPath != want.auth {
-			t.Fatalf("Codex account %d=%#v, want id=%d label=%q emoji=%q auth=%q", index, codex, want.id, want.label, want.emoji, want.auth)
+		if codex.ID != want.id || codex.Engine != pfmengine.Codex || codex.Label != want.label ||
+			codex.Emoji != want.emoji ||
+			codex.CodexAuthPath != want.auth {
+			t.Fatalf(
+				"Codex account %d=%#v, want id=%d label=%q emoji=%q auth=%q",
+				index,
+				codex,
+				want.id,
+				want.label,
+				want.emoji,
+				want.auth,
+			)
 		}
 	}
-	if account := accounts[5]; account.Engine != pfmengine.Opencode || !account.Absent || account.Label != "no OpenCode accounts configured" {
+	if account := accounts[5]; account.Engine != pfmengine.Opencode || !account.Absent ||
+		account.Label != "no OpenCode accounts configured" {
 		t.Fatalf("OpenCode absence=%#v, want named absent row", account)
 	}
 }

@@ -28,7 +28,7 @@ func TestNativeHookDelivery(t *testing.T) {
 	account := filepath.Join(home, ".codex")
 	project := filepath.Join(home, "project")
 	for _, dir := range []string{account, filepath.Join(home, ".local", "bin"), filepath.Dir(PromptPath(home)), filepath.Join(project, ".codex"), filepath.Join(project, ".git")} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -37,12 +37,24 @@ func TestNativeHookDelivery(t *testing.T) {
 	}
 	write := func(path, body string) {
 		t.Helper()
-		if err := os.WriteFile(path, []byte(body), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
 	write(PromptPath(home), "NATIVE_APPENDIX_PROOF")
-	definition := map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{"matcher": Matcher, "hooks": []any{map[string]any{"type": "command", "command": Command(home), "timeout": 10}, map[string]any{"type": "command", "command": "printf PERSONAL_UNTRUSTED"}}}}}}
+	definition := map[string]any{
+		"hooks": map[string]any{
+			"SessionStart": []any{
+				map[string]any{
+					"matcher": Matcher,
+					"hooks": []any{
+						map[string]any{"type": "command", "command": Command(home), "timeout": 10},
+						map[string]any{"type": "command", "command": "printf PERSONAL_UNTRUSTED"},
+					},
+				},
+			},
+		},
+	}
 	encoded, _ := json.Marshal(definition)
 	write(filepath.Join(account, "hooks.json"), string(encoded))
 	requests := make(chan map[string]any, 8)
@@ -60,7 +72,11 @@ func TestNativeHookDelivery(t *testing.T) {
 		_, _ = w.Write([]byte(`{"error":{"message":"intentional request capture","type":"invalid_request_error"}}`))
 	}))
 	defer server.Close()
-	config := fmt.Sprintf("model='gpt-6-astra'\nmodel_provider='capture'\ndeveloper_instructions='PERSONAL_NATIVE'\n[model_providers.capture]\nname='capture'\nbase_url=%q\nwire_api='responses'\nrequires_openai_auth=false\n[projects.%q]\ntrust_level='trusted'\n", server.URL, project)
+	config := fmt.Sprintf(
+		"model='gpt-6-astra'\nmodel_provider='capture'\ndeveloper_instructions='PERSONAL_NATIVE'\n[model_providers.capture]\nname='capture'\nbase_url=%q\nwire_api='responses'\nrequires_openai_auth=false\n[projects.%q]\ntrust_level='trusted'\n",
+		server.URL,
+		project,
+	)
 	write(filepath.Join(account, "config.toml"), config)
 	write(filepath.Join(project, ".codex", "config.toml"), "developer_instructions='PROJECT_NATIVE'\n")
 	t.Setenv("HOME", home)
@@ -73,7 +89,8 @@ func TestNativeHookDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(raw), `"trustStatus":"trusted"`) || !strings.Contains(string(raw), `"trustStatus":"untrusted"`) {
+	if !strings.Contains(string(raw), `"trustStatus":"trusted"`) ||
+		!strings.Contains(string(raw), `"trustStatus":"untrusted"`) {
 		t.Fatalf("individual trust failed: %s", raw)
 	}
 
@@ -92,7 +109,8 @@ func TestNativeHookDelivery(t *testing.T) {
 		select {
 		case request := <-requests:
 			raw, _ := json.Marshal(request)
-			if !strings.Contains(string(raw), "PROJECT_NATIVE") || strings.Count(string(raw), "NATIVE_APPENDIX_PROOF") != 1 {
+			if !strings.Contains(string(raw), "PROJECT_NATIVE") ||
+				strings.Count(string(raw), "NATIVE_APPENDIX_PROOF") != 1 {
 				t.Fatalf("missing/duplicated developer contexts: %s\n%s", raw, output)
 			}
 			if !strings.Contains(string(raw), "You are Codex") {
@@ -118,7 +136,16 @@ func TestNativeHookDelivery(t *testing.T) {
 		t.Fatalf("native thread ID absent: %s", output)
 	}
 	capture("-C", project, "exec", "resume", "--skip-git-repo-check", "--json", threadID, "Resume capture.")
-	capture("-C", project, "--model", "gpt-5.6-luna", "exec", "--skip-git-repo-check", "--json", "Second model capture.")
+	capture(
+		"-C",
+		project,
+		"--model",
+		"gpt-5.6-luna",
+		"exec",
+		"--skip-git-repo-check",
+		"--json",
+		"Second model capture.",
+	)
 	if err := Register(context.Background(), native, home, account, true); err != nil {
 		t.Fatal(err)
 	}

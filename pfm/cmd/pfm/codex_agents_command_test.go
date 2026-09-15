@@ -16,9 +16,12 @@ import (
 func TestCodexAgentsCommandCompilesAndInstalls(t *testing.T) {
 	jailTest(t)
 	home := os.Getenv("PFM_HOME")
-	writeCodexCLIFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.md"),
+	writeCodexCLIFile(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.md"),
 		"---\nname: quirky\ndescription: Uses \"walker fast\" and \"map it now\" verbatim.\ntools: Read\nmodel: sonnet\n---\n\n"+
-			"Body has a literal triple quote \"\"\" and a backslash \\ standalone.\n")
+			"Body has a literal triple quote \"\"\" and a backslash \\ standalone.\n",
+	)
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"codex", "agents"}, &stdout, &stderr); code != 0 {

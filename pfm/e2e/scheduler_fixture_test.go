@@ -46,7 +46,7 @@ esac
 `,
 	}
 	for name, body := range scripts {
-		if err := os.WriteFile(filepath.Join(home, ".local", "bin", name), []byte(body), 0700); err != nil {
+		if err := os.WriteFile(filepath.Join(home, ".local", "bin", name), []byte(body), 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}

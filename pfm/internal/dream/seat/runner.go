@@ -284,7 +284,10 @@ func (runner *Runner) prepareConfig(
 		At:     now,
 		Config: &configCopy,
 	}); eventErr != nil {
-		return config, verification, errors.Join(configErr, fmt.Errorf("record pinned seat configuration: %w", eventErr))
+		return config, verification, errors.Join(
+			configErr,
+			fmt.Errorf("record pinned seat configuration: %w", eventErr),
+		)
 	}
 	verificationCopy := cloneVerification(verification)
 	verificationEvent := Event{
@@ -296,7 +299,10 @@ func (runner *Runner) prepareConfig(
 		verificationEvent.Error = configErr.Error()
 	}
 	if eventErr := runner.dependencies.Events.Record(verificationEvent); eventErr != nil {
-		return config, verification, errors.Join(configErr, fmt.Errorf("record seat configuration verification: %w", eventErr))
+		return config, verification, errors.Join(
+			configErr,
+			fmt.Errorf("record seat configuration verification: %w", eventErr),
+		)
 	}
 	if configErr != nil {
 		return config, verification, configErr

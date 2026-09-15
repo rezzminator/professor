@@ -92,7 +92,13 @@ func legacyTarBytes(t *testing.T, members ...legacyTarMember) []byte {
 	var out bytes.Buffer
 	tw := tar.NewWriter(&out)
 	for _, member := range members {
-		h := &tar.Header{Name: member.name, Mode: 0o600, Typeflag: member.typeflag, Linkname: member.linkname, Size: int64(len(member.body))}
+		h := &tar.Header{
+			Name:     member.name,
+			Mode:     0o600,
+			Typeflag: member.typeflag,
+			Linkname: member.linkname,
+			Size:     int64(len(member.body)),
+		}
 		if member.typeflag == 0 {
 			h.Typeflag = tar.TypeReg
 		}
@@ -124,7 +130,13 @@ func writeLegacyGzipTar(t *testing.T, path string, members ...legacyTarMember) {
 	gz := gzip.NewWriter(&out)
 	tw := tar.NewWriter(gz)
 	for _, member := range members {
-		h := &tar.Header{Name: member.name, Mode: 0o600, Typeflag: member.typeflag, Linkname: member.linkname, Size: int64(len(member.body))}
+		h := &tar.Header{
+			Name:     member.name,
+			Mode:     0o600,
+			Typeflag: member.typeflag,
+			Linkname: member.linkname,
+			Size:     int64(len(member.body)),
+		}
 		if member.typeflag == 0 {
 			h.Typeflag = tar.TypeReg
 		}
@@ -157,7 +169,13 @@ func writeLegacyXZTar(t *testing.T, path string, members ...legacyTarMember) {
 	}
 	tw := tar.NewWriter(xzw)
 	for _, member := range members {
-		h := &tar.Header{Name: member.name, Mode: 0o600, Typeflag: member.typeflag, Linkname: member.linkname, Size: int64(len(member.body))}
+		h := &tar.Header{
+			Name:     member.name,
+			Mode:     0o600,
+			Typeflag: member.typeflag,
+			Linkname: member.linkname,
+			Size:     int64(len(member.body)),
+		}
 		if member.typeflag == 0 {
 			h.Typeflag = tar.TypeReg
 		}
@@ -277,7 +295,11 @@ func legacyErrorContains(t *testing.T, err error, want string) {
 
 func TestLegacyParityNormalZipListingAndMemberReads(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "normal.zip")
-	writeLegacyZip(t, path, map[string][]byte{"hello.txt": []byte("hello world"), "sub/foo.txt": []byte("foo content"), "empty.dat": nil})
+	writeLegacyZip(
+		t,
+		path,
+		map[string][]byte{"hello.txt": []byte("hello world"), "sub/foo.txt": []byte("foo content"), "empty.dat": nil},
+	)
 	members, err := ListArchive(path)
 	if err != nil {
 		t.Fatal(err)
@@ -543,7 +565,13 @@ func TestLegacyParityNameValidation(t *testing.T) {
 
 func legacyArchiveClient(status int, contentType string, body []byte) *http.Client {
 	return &http.Client{Transport: legacyRoundTrip(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: status, Status: http.StatusText(status), Header: http.Header{"Content-Type": []string{contentType}}, Body: io.NopCloser(bytes.NewReader(body)), Request: r}, nil
+		return &http.Response{
+			StatusCode: status,
+			Status:     http.StatusText(status),
+			Header:     http.Header{"Content-Type": []string{contentType}},
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Request:    r,
+		}, nil
 	})}
 }
 
@@ -553,7 +581,7 @@ func (f legacyRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { re
 
 type legacyArchiveConverter struct{}
 
-func (legacyArchiveConverter) Convert(_ context.Context, _ string, _ string, body []byte) (string, error) {
+func (legacyArchiveConverter) Convert(_ context.Context, _, _ string, body []byte) (string, error) {
 	return string(body), nil
 }
 
@@ -577,7 +605,14 @@ func walkLegacyExt(t *testing.T, root, ext string) []string {
 func TestLegacyParityArchiveLocalAndRemoteSources(t *testing.T) {
 	zipPath := filepath.Join(t.TempDir(), "local.zip")
 	writeLegacyZip(t, zipPath, map[string][]byte{"hello.txt": []byte("local")})
-	h := mustNew(t, Options{CacheDir: t.TempDir(), LocalRoots: []string{filepath.Dir(zipPath)}, Converter: legacyArchiveConverter{}})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir:   t.TempDir(),
+			LocalRoots: []string{filepath.Dir(zipPath)},
+			Converter:  legacyArchiveConverter{},
+		},
+	)
 	for _, source := range []string{zipPath, "file://" + zipPath} {
 		got, err := h.Archive(context.Background(), source, "hello.txt")
 		if err != nil || got.Error != "" || got.Kind != "archive_member" || got.Content == "" {
@@ -601,7 +636,15 @@ func TestLegacyParityArchiveLocalAndRemoteSources(t *testing.T) {
 		return out.Bytes()
 	}()
 	remoteClient := legacyArchiveClient(http.StatusOK, "application/zip", body)
-	h = mustNew(t, Options{CacheDir: t.TempDir(), Client: remoteClient, Chrome: legacyArchiveClient(http.StatusOK, "application/zip", body), Converter: legacyArchiveConverter{}})
+	h = mustNew(
+		t,
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    remoteClient,
+			Chrome:    legacyArchiveClient(http.StatusOK, "application/zip", body),
+			Converter: legacyArchiveConverter{},
+		},
+	)
 	listing, err := h.Archive(context.Background(), remotePath, "")
 	if err != nil || listing.Error != "" || len(listing.Members) != 1 || listing.Method != "archive:listing" {
 		t.Fatalf("remote archive listing = %#v, err=%v", listing, err)
@@ -615,7 +658,14 @@ func TestLegacyParityArchiveLocalAndRemoteSources(t *testing.T) {
 func TestLegacyParityArchive4xxBodyNeverCached(t *testing.T) {
 	cacheDir := t.TempDir()
 	body := []byte("<html><body>Forbidden</body></html>")
-	h := mustNew(t, Options{CacheDir: cacheDir, Client: legacyArchiveClient(http.StatusForbidden, "text/html", body), Chrome: legacyArchiveClient(http.StatusForbidden, "text/html", body)})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir: cacheDir,
+			Client:   legacyArchiveClient(http.StatusForbidden, "text/html", body),
+			Chrome:   legacyArchiveClient(http.StatusForbidden, "text/html", body),
+		},
+	)
 	got, err := h.Archive(context.Background(), "https://gone.example/data.zip", "")
 	if err == nil || got.Error == "" {
 		t.Fatalf("Archive 403 = %#v, err=%v; want explicit failure", got, err)
@@ -639,7 +689,14 @@ func TestLegacyParityBinaryArchiveIsNotCachedAsText(t *testing.T) {
 		t.Fatal(err)
 	}
 	cacheDir := t.TempDir()
-	h := mustNew(t, Options{CacheDir: cacheDir, Client: legacyArchiveClient(http.StatusOK, "application/epub+zip", zipBytes.Bytes()), Chrome: legacyArchiveClient(http.StatusOK, "application/epub+zip", zipBytes.Bytes())})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir: cacheDir,
+			Client:   legacyArchiveClient(http.StatusOK, "application/epub+zip", zipBytes.Bytes()),
+			Chrome:   legacyArchiveClient(http.StatusOK, "application/epub+zip", zipBytes.Bytes()),
+		},
+	)
 	// epub is not an archive API input in the Go seam; fetchURL is the closest
 	// boundary to the OA-candidate path and must never turn ZIP bytes into .md.
 	got := h.fetchURL(context.Background(), "https://web.archive.org/book.epub", FetchOptions{})

@@ -170,13 +170,36 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 		{name: "managed profile", environ: []string{"PFM_AUTO_OPEN=pfm"}, want: []string{"picker"}},
 		{name: "legacy managed profile", environ: []string{"CC_AUTO_OPEN=pfm"}, want: []string{"picker"}},
 		{name: "legacy truthy", environ: []string{"CC_AUTO_OPEN=1"}, want: []string{"picker"}},
-		{name: "retired cc", environ: []string{"CC_AUTO_OPEN=cc"}, want: []string{"picker"}, absent: []string{"launch "}},
-		{name: "retired cc2", environ: []string{"CC_AUTO_OPEN=cc2"}, want: []string{"picker"}, absent: []string{"launch "}},
+		{
+			name:    "retired cc",
+			environ: []string{"CC_AUTO_OPEN=cc"},
+			want:    []string{"picker"},
+			absent:  []string{"launch "},
+		},
+		{
+			name:    "retired cc2",
+			environ: []string{"CC_AUTO_OPEN=cc2"},
+			want:    []string{"picker"},
+			absent:  []string{"launch "},
+		},
 		{name: "retired VS Code spelling", environ: []string{"VSCODE_AUTO_CC=1"}, want: []string{"picker"}},
-		{name: "Codex survives", environ: []string{"PFM_AUTO_OPEN=cx"}, want: []string{"create cx-", "codex", "launch "}},
-		{name: "unknown is never evaluated", environ: []string{"PFM_AUTO_OPEN=rm -rf /"}, want: []string{"picker"}, absent: []string{"EVALUATED"}},
+		{
+			name:    "Codex survives",
+			environ: []string{"PFM_AUTO_OPEN=cx"},
+			want:    []string{"create cx-", "codex", "launch "},
+		},
+		{
+			name:    "unknown is never evaluated",
+			environ: []string{"PFM_AUTO_OPEN=rm -rf /"},
+			want:    []string{"picker"},
+			absent:  []string{"EVALUATED"},
+		},
 		{name: "unset", absent: []string{"picker", "create ", "launch "}},
-		{name: "app launched from a chat", environ: []string{"PFM_AUTO_OPEN=pfm", "CLAUDECODE=1", "TMUX=/private/tmp/chat,1,0"}, want: []string{"picker"}},
+		{
+			name:    "app launched from a chat",
+			environ: []string{"PFM_AUTO_OPEN=pfm", "CLAUDECODE=1", "TMUX=/private/tmp/chat,1,0"},
+			want:    []string{"picker"},
+		},
 	}
 
 	for _, testCase := range cases {
@@ -195,7 +218,14 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 					t.Fatalf("auto-open log %q contains %q", got, unwanted)
 				}
 			}
-			if pickers, launches := strings.Count(got, "picker\n"), strings.Count(got, "create "); pickers > 1 || launches > 1 {
+			if pickers, launches := strings.Count(
+				got,
+				"picker\n",
+			), strings.Count(
+				got,
+				"create ",
+			); pickers > 1 ||
+				launches > 1 {
 				t.Fatalf("auto-open fired more than once (pickers=%d launches=%d): %q", pickers, launches, got)
 			}
 		})
@@ -214,9 +244,23 @@ printf 'EVALUATED %s\n' "$*" >> "$SHIM_AUTO_LOG"
 	// clears exactly the keys the VS Code profile nulls, so the picker never sees a chat's tmux.
 	log = filepath.Join(home, "chat-env-log")
 	writeShimFile(t, log, "")
-	cleared := runAutoOpenShell(t, zsh, shimPath, home, fakeBin, log,
-		[]string{"PFM_AUTO_OPEN=pfm", "CLAUDECODE=1", "CLAUDE_CODE_SESSION_ID=s", "CLAUDE_CODE_CHILD_SESSION=1", "TMUX=/private/tmp/chat,1,0", "TMUX_PANE=%0"},
-		`print -r -- "chat=${CLAUDECODE-no}${CLAUDE_CODE_SESSION_ID-no}${CLAUDE_CODE_CHILD_SESSION-no}${TMUX-no}${TMUX_PANE-no}" >> "$SHIM_AUTO_LOG"`+"\n")
+	cleared := runAutoOpenShell(
+		t,
+		zsh,
+		shimPath,
+		home,
+		fakeBin,
+		log,
+		[]string{
+			"PFM_AUTO_OPEN=pfm",
+			"CLAUDECODE=1",
+			"CLAUDE_CODE_SESSION_ID=s",
+			"CLAUDE_CODE_CHILD_SESSION=1",
+			"TMUX=/private/tmp/chat,1,0",
+			"TMUX_PANE=%0",
+		},
+		`print -r -- "chat=${CLAUDECODE-no}${CLAUDE_CODE_SESSION_ID-no}${CLAUDE_CODE_CHILD_SESSION-no}${TMUX-no}${TMUX_PANE-no}" >> "$SHIM_AUTO_LOG"`+"\n",
+	)
 	if !strings.Contains(cleared, "chat=nonononono") {
 		t.Fatalf("auto-open kept the chat environment its app inherited: %q", cleared)
 	}

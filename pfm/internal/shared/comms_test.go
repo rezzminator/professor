@@ -80,10 +80,19 @@ func TestDegradedStoreRejectsCommsWritesAndReads(t *testing.T) {
 	state := Open(context.Background(), paths.Values{SharedDB: filepath.Join(blocker, "fleet.db")})
 	t.Cleanup(func() { _ = state.Close() })
 
-	if err := state.RecordComms(context.Background(), CommsEvent{Kind: KindInject, Message: "x"}); err == nil || !strings.Contains(err.Error(), "record comms event") {
+	if err := state.RecordComms(
+		context.Background(),
+		CommsEvent{Kind: KindInject, Message: "x"},
+	); err == nil ||
+		!strings.Contains(err.Error(), "record comms event") {
 		t.Fatalf("degraded RecordComms() error = %v", err)
 	}
-	if events, err := state.CommsSince(context.Background(), 0, 5); err == nil || events != nil || !strings.Contains(err.Error(), "query comms events") {
+	if events, err := state.CommsSince(
+		context.Background(),
+		0,
+		5,
+	); err == nil || events != nil ||
+		!strings.Contains(err.Error(), "query comms events") {
 		t.Fatalf("degraded CommsSince() = %#v, %v", events, err)
 	}
 }

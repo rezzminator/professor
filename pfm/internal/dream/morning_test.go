@@ -29,10 +29,18 @@ func TestMorningContinuesAfterFailureAndDiscoversLanesWithoutDuplicateExplorer(t
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(resources, "repos.list"), []byte(first+"\n"+second+" qa\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(resources, "repos.list"),
+		[]byte(first+"\n"+second+" qa\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(first, ".professor", "stm", "lanes", "tracer.md"), []byte("Serves: Explore\n\nprofile\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(first, ".professor", "stm", "lanes", "tracer.md"),
+		[]byte("Serves: Explore\n\nprofile\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range []string{
@@ -181,7 +189,11 @@ func TestMorningRecordsMissingListedOrganAndContinuesToLaterRepository(t *testin
 	if err := os.MkdirAll(filepath.Join(healthy, ".professor", "stm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(resources, "repos.list"), []byte(missing+"\n"+healthy+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(resources, "repos.list"),
+		[]byte(missing+"\n"+healthy+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 

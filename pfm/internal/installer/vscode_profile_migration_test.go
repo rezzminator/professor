@@ -88,7 +88,11 @@ func TestVSCodeCustomizedLegacyAutoOpenProfileIsPreserved(t *testing.T) {
 func TestVSCodeUninstallRemovesOwnedLegacyProfile(t *testing.T) {
 	home := t.TempDir()
 	settings := filepath.Join(home, "settings.json")
-	writeFixture(t, settings, `{"terminal.integrated.profiles.linux":{"zsh":{"path":"/bin/zsh"},"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}}}`)
+	writeFixture(
+		t,
+		settings,
+		`{"terminal.integrated.profiles.linux":{"zsh":{"path":"/bin/zsh"},"PFM":{"path":"/bin/zsh","args":["-l"],"env":{"CC_AUTO_OPEN":"pfm"}}}}`,
+	)
 	writeVSCodeOwnershipFixture(t, home, vscodeOwnershipRecord{
 		Path: settings, Platform: "linux", ProfileOwned: true,
 	})

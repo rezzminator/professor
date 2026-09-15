@@ -76,17 +76,27 @@ func TestHostOverlayDoctorDisplacedSymlinkIsAFailure(t *testing.T) {
 	if err := os.MkdirAll(canonical, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(canonical, "pfm-statusline"), []byte("stale copy, never a link\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(canonical, "pfm-statusline"),
+		[]byte("stale copy, never a link\n"),
+		0o755,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(filepath.Join(managed, "tmux-title-renudge"), filepath.Join(canonical, "tmux-title-renudge")); err != nil {
+	if err := os.Symlink(
+		filepath.Join(managed, "tmux-title-renudge"),
+		filepath.Join(canonical, "tmux-title-renudge"),
+	); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
 	if warnings, failures := printHostOverlayDoctor(&output, home, pfmconfig.Config{}); warnings != 0 || failures != 1 {
 		t.Fatalf("warnings=%d failures=%d, want 0/1\n%s", warnings, failures, output.String())
 	}
-	if !strings.Contains(output.String(), "doctor: host_overlay pfm-statusline DISPLACED by "+filepath.Join(canonical, "pfm-statusline")) {
+	if !strings.Contains(
+		output.String(),
+		"doctor: host_overlay pfm-statusline DISPLACED by "+filepath.Join(canonical, "pfm-statusline"),
+	) {
 		t.Fatalf("output missing displaced pfm-statusline:\n%s", output.String())
 	}
 	if !strings.Contains(output.String(), "doctor: host_overlay tmux-title-renudge ok") {

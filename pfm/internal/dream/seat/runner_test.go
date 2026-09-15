@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/spawn"
 )
@@ -281,7 +281,9 @@ func (log *eventLog) Record(event Event) error {
 	return log.err
 }
 
-func successfulRunner(t *testing.T) (*Runner, *fakeHost, *fakeRollouts, *scriptedCommands, *eventLog, testNightRequest) {
+func successfulRunner(
+	t *testing.T,
+) (*Runner, *fakeHost, *fakeRollouts, *scriptedCommands, *eventLog, testNightRequest) {
 	t.Helper()
 	stage := t.TempDir()
 	distillTranscript := filepath.Join(t.TempDir(), "distill.jsonl")
@@ -354,7 +356,12 @@ func TestSeatLawRunsBeforeEveryEffect(t *testing.T) {
 	commands := &scriptedCommands{}
 	events := &eventLog{}
 	runner := NewRunner(Dependencies{
-		Commands: commands, Host: host, Processes: cleanFakeProcessTree(), Jailer: &fakeProcessJailer{}, Rollouts: rollouts, Events: events,
+		Commands:  commands,
+		Host:      host,
+		Processes: cleanFakeProcessTree(),
+		Jailer:    &fakeProcessJailer{},
+		Rollouts:  rollouts,
+		Events:    events,
 	})
 	_, err := runner.PrepareNight(context.Background(), SeatLaw{
 		Distill: SeatPolicy{Model: "wrong", Effort: SeatEffort},
@@ -611,7 +618,16 @@ func TestPreparedNightLawStillPrecedesEveryEffect(t *testing.T) {
 	commands := &scriptedCommands{}
 	rollouts := &fakeRollouts{}
 	events := &eventLog{}
-	runner := NewRunner(Dependencies{Commands: commands, Host: host, Processes: cleanFakeProcessTree(), Jailer: &fakeProcessJailer{}, Rollouts: rollouts, Events: events})
+	runner := NewRunner(
+		Dependencies{
+			Commands:  commands,
+			Host:      host,
+			Processes: cleanFakeProcessTree(),
+			Jailer:    &fakeProcessJailer{},
+			Rollouts:  rollouts,
+			Events:    events,
+		},
+	)
 	_, err := runner.PrepareNight(context.Background(), SeatLaw{}, "/does/not/exist")
 	if err == nil || !strings.Contains(err.Error(), "luna law") {
 		t.Fatalf("PrepareNight() error = %v", err)
@@ -950,7 +966,7 @@ func lastEvent(events []Event) Event {
 	return events[len(events)-1]
 }
 
-func writeCodexTranscript(t *testing.T, path string, lastLine string) {
+func writeCodexTranscript(t *testing.T, path, lastLine string) {
 	t.Helper()
 	writeCodexTranscriptWithConfig(t, path, lastLine, SeatModel, SeatEffort)
 }

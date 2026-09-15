@@ -76,7 +76,12 @@ func ResolveProfile(agentType, slug string, resourceSet resources.Resources) (ar
 		return artifact.LaneProfile{}, err
 	}
 	if normalized != slug {
-		return artifact.LaneProfile{}, fmt.Errorf("agent type %s resolves to lane %s, not %s", agentType, normalized, slug)
+		return artifact.LaneProfile{}, fmt.Errorf(
+			"agent type %s resolves to lane %s, not %s",
+			agentType,
+			normalized,
+			slug,
+		)
 	}
 	name := "lanes/" + slug + ".md"
 	body, source, err := resourceSet.ReadFileWithSource(name)

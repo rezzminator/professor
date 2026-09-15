@@ -38,7 +38,12 @@ func TestDoctorMCPClientRowNamesEachRegistryAndItsReason(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
-		t.Fatalf("doctor code=%d stdout=%q stderr=%q, want a warning for the absent ambient registry", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"doctor code=%d stdout=%q stderr=%q, want a warning for the absent ambient registry",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	out := stdout.String()
 	implicitRow := "doctor: mcp client=claude registry=" + filepath.Join(home, ".claude.json") +

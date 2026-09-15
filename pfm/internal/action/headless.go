@@ -3,10 +3,10 @@ package action
 import (
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"strings"
 
 	pfmconfig "hostops/pfm/internal/config"
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // HeadlessWidth and HeadlessHeight are the geometry a detached chat is born
@@ -141,14 +141,24 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 	switch request.Engine {
 	case pfmengine.Claude:
 		if _, found := machine.Account(request.PrimaryAccount); !found {
-			return HeadlessPlan{}, fmt.Errorf("Claude account %d is not in the configured roster", request.PrimaryAccount)
+			return HeadlessPlan{}, fmt.Errorf(
+				"Claude account %d is not in the configured roster",
+				request.PrimaryAccount,
+			)
 		}
 		arguments := []string{"--resume", request.SessionID, "--fork-session"}
 		if request.Model != "" {
 			arguments = append(arguments, "--model", request.Model)
 		}
 		arguments = append(arguments, "--name", request.Name)
-		run, err := claudeCommandWith(PurposeResume, headlessHygieneNames, request.Home, request.PrimaryAccount, request.Cache1H, machine, arguments...)
+		run, err := claudeCommandWith(
+			PurposeResume,
+			headlessHygieneNames,
+			request.Home,
+			request.PrimaryAccount,
+			request.Cache1H,
+			machine,
+			arguments...)
 		if err != nil {
 			return HeadlessPlan{}, err
 		}
@@ -159,7 +169,10 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 		}, nil
 	case pfmengine.Codex:
 		if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
-			return HeadlessPlan{}, fmt.Errorf("Codex account %d is not in the configured roster", request.PrimaryAccount)
+			return HeadlessPlan{}, fmt.Errorf(
+				"Codex account %d is not in the configured roster",
+				request.PrimaryAccount,
+			)
 		}
 		arguments := make([]string, 0, 3)
 		if request.Model != "" {
@@ -167,7 +180,11 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 		}
 		arguments = append(arguments, "fork", request.SessionID)
 		return HeadlessPlan{
-			Run:                 codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),
+			Run: codexCommandWithAccount(
+				headlessHygiene,
+				machine,
+				request.PrimaryAccount,
+				arguments...),
 			Binary:              codexBinaryWord(machine, request.PrimaryAccount),
 			PromptOnCommandLine: true,
 		}, nil
@@ -225,7 +242,14 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 	if request.Prompt != "" {
 		arguments = append(arguments, request.Prompt)
 	}
-	run, err := claudeCommandWith(PurposeInteractive, headlessHygieneNames, request.Home, request.PrimaryAccount, request.Cache1H, machine, arguments...)
+	run, err := claudeCommandWith(
+		PurposeInteractive,
+		headlessHygieneNames,
+		request.Home,
+		request.PrimaryAccount,
+		request.Cache1H,
+		machine,
+		arguments...)
 	if err != nil {
 		return HeadlessPlan{}, err
 	}

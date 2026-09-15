@@ -8,14 +8,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/harvest"
 	"hostops/pfm/internal/paths"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
-	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	service, err := NewConfigured(
+		"test",
+		Runtime{
+			Home:       t.TempDir(),
+			CacheDir:   filepath.Join(t.TempDir(), "cache"),
+			SearXNGURL: "http://searxng.example.test",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +110,14 @@ func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 // TestSearchToolListedWithSearXNGConfigured is TestSearchToolHiddenWithoutABackend's
 // positive twin: a configured backend must still register the tool.
 func TestSearchToolListedWithSearXNGConfigured(t *testing.T) {
-	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	service, err := NewConfigured(
+		"test",
+		Runtime{
+			Home:       t.TempDir(),
+			CacheDir:   filepath.Join(t.TempDir(), "cache"),
+			SearXNGURL: "http://searxng.example.test",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +191,14 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	result := harvest.Result{HTTPStatus: 200}
 
-	searchOn, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	searchOn, err := NewConfigured(
+		"test",
+		Runtime{
+			Home:       t.TempDir(),
+			CacheDir:   filepath.Join(t.TempDir(), "cache"),
+			SearXNGURL: "http://searxng.example.test",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +290,14 @@ func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
 		t.Fatalf("searchCache miss text %q names `search` with no backend configured", offText)
 	}
 
-	on, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), SearXNGURL: "http://searxng.example.test"})
+	on, err := NewConfigured(
+		"test",
+		Runtime{
+			Home:       t.TempDir(),
+			CacheDir:   filepath.Join(t.TempDir(), "cache"),
+			SearXNGURL: "http://searxng.example.test",
+		},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

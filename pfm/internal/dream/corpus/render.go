@@ -63,7 +63,8 @@ func RenderWindow(window Window) (string, error) {
 	var rendered strings.Builder
 	switch window.Mode {
 	case WindowExplicitCorpus:
-		if !filepath.IsAbs(window.CorpusFile) || hasControl(window.CorpusFile) || !isSHA256(window.CorpusFileSHA256) || window.CutoffExclusive != "NONE" {
+		if !filepath.IsAbs(window.CorpusFile) || hasControl(window.CorpusFile) || !isSHA256(window.CorpusFileSHA256) ||
+			window.CutoffExclusive != "NONE" {
 			return "", fmt.Errorf("invalid explicit corpus window")
 		}
 		fmt.Fprintf(&rendered, "window-mode\t%s\n", window.Mode)
@@ -76,10 +77,12 @@ func RenderWindow(window Window) (string, error) {
 		fmt.Fprintf(&rendered, "window-mode\t%s\n", window.Mode)
 		fmt.Fprintf(&rendered, "bootstrap-count\t%d\n", window.BootstrapCount)
 	case WindowSweepCutoff:
-		if window.NewestAppliedSweep == "" || window.CutoffSource == "" || window.CutoffExclusive == "" || window.CutoffTime.IsZero() {
+		if window.NewestAppliedSweep == "" || window.CutoffSource == "" || window.CutoffExclusive == "" ||
+			window.CutoffTime.IsZero() {
 			return "", fmt.Errorf("sweep window is incomplete")
 		}
-		if hasControl(window.NewestAppliedSweep) || hasControl(string(window.CutoffSource)) || hasControl(window.CutoffExclusive) {
+		if hasControl(window.NewestAppliedSweep) || hasControl(string(window.CutoffSource)) ||
+			hasControl(window.CutoffExclusive) {
 			return "", fmt.Errorf("sweep window contains a control character")
 		}
 		switch window.CutoffSource {
@@ -130,7 +133,14 @@ func renderCandidates(candidates []Candidate) (string, error) {
 			}
 		}
 		seconds := candidate.MTime.Unix()
-		fmt.Fprintf(&rendered, "%d.%09d\t%s\t%s\n", seconds, candidate.MTime.Nanosecond(), candidate.Meta, candidate.Transcript)
+		fmt.Fprintf(
+			&rendered,
+			"%d.%09d\t%s\t%s\n",
+			seconds,
+			candidate.MTime.Nanosecond(),
+			candidate.Meta,
+			candidate.Transcript,
+		)
 	}
 	return rendered.String(), nil
 }

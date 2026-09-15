@@ -83,7 +83,13 @@ func TestInitialCache1HEnvOverridesConfig(t *testing.T) {
 			}
 			config := pfmconfig.Config{Claude: pfmconfig.Claude{Cache1H: testCase.configTrue}}
 			if got := initialCache1H(config, 0); got != testCase.want {
-				t.Fatalf("initialCache1H() = %v, want %v (env=%v, config.Cache1H=%v)", got, testCase.want, testCase.env, testCase.configTrue)
+				t.Fatalf(
+					"initialCache1H() = %v, want %v (env=%v, config.Cache1H=%v)",
+					got,
+					testCase.want,
+					testCase.env,
+					testCase.configTrue,
+				)
 			}
 		})
 	}
@@ -110,6 +116,8 @@ func TestInitialCache1HHonorsPerAccountOverrideNoEnv(t *testing.T) {
 		t.Fatal("top-level config.Claude.Cache1H must stay true; only the account's effective value changes")
 	}
 	if got := initialCache1H(config, 0); !got {
-		t.Fatal("initialCache1H(config, 0) = false, want true: account 0 (no chat chosen yet) must fall back to the top-level posture")
+		t.Fatal(
+			"initialCache1H(config, 0) = false, want true: account 0 (no chat chosen yet) must fall back to the top-level posture",
+		)
 	}
 }

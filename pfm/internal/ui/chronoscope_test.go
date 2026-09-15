@@ -33,12 +33,23 @@ func TestChronoscopeScrubCutsThePastFromTheSameEvents(t *testing.T) {
 	}
 	cut := past.viewGraph()
 	if len(cut.Nodes) != 2 || len(cut.Edges) != 1 {
-		t.Fatalf("5-minute-back cut = %d nodes, %d edges, want 2 and 1 (the 10m-old spawn present, the 300ms-old inject absent)\n%#v", len(cut.Nodes), len(cut.Edges), cut)
+		t.Fatalf(
+			"5-minute-back cut = %d nodes, %d edges, want 2 and 1 (the 10m-old spawn present, the 300ms-old inject absent)\n%#v",
+			len(cut.Nodes),
+			len(cut.Edges),
+			cut,
+		)
 	}
 	// The live graph model.cosmos must never be mutated by a scrub — only
 	// model.cosmosPast is a new graph.
 	if len(past.cosmos.Nodes) != liveNodes || len(past.cosmos.Edges) != liveEdges {
-		t.Fatalf("scrub mutated the LIVE graph: nodes=%d edges=%d, want %d and %d", len(past.cosmos.Nodes), len(past.cosmos.Edges), liveNodes, liveEdges)
+		t.Fatalf(
+			"scrub mutated the LIVE graph: nodes=%d edges=%d, want %d and %d",
+			len(past.cosmos.Nodes),
+			len(past.cosmos.Edges),
+			liveNodes,
+			liveEdges,
+		)
 	}
 
 	live, _ := applyKey(t, past, printableKey(']'))
@@ -135,7 +146,11 @@ func TestChronoscopePlayAdvancesAtSixtyTimesAndSnapsToLive(t *testing.T) {
 		model = updated.(Model)
 	}
 	if model.cosmosPast != nil || model.cosmosPlaying {
-		t.Fatalf("playback did not snap back to live after crossing now: past=%#v playing=%v", model.cosmosPast, model.cosmosPlaying)
+		t.Fatalf(
+			"playback did not snap back to live after crossing now: past=%#v playing=%v",
+			model.cosmosPast,
+			model.cosmosPlaying,
+		)
 	}
 
 	noSky := cosmosGoldenModel(80) // NoSky (skyEnabled=false)
@@ -179,7 +194,10 @@ func TestChronoscopeReplayRendersADeadChatAsAGhostNotAnAlarm(t *testing.T) {
 
 	for _, node := range model.cosmos.Nodes {
 		if node.Key == deadKey {
-			t.Fatalf("the live graph kept the killed row's node — BuildCosmos(live=true) should have dropped it: %#v", node)
+			t.Fatalf(
+				"the live graph kept the killed row's node — BuildCosmos(live=true) should have dropped it: %#v",
+				node,
+			)
 		}
 	}
 
@@ -218,7 +236,16 @@ func TestChronoscopeReplayRendersADeadChatAsAGhostNotAnAlarm(t *testing.T) {
 	graph := replay.viewGraph()
 	replay.drawCosmosUniverse(canvas, graph, now, view)
 	nodes := cosmosNodeMap(graph.Nodes)
-	frame := cosmosLayout(canvas, replay.cosmosSeats, nodes, graph.Edges, now, replay.skyEnabled, replay.classicSky, replay.cosmosFocus)
+	frame := cosmosLayout(
+		canvas,
+		replay.cosmosSeats,
+		nodes,
+		graph.Edges,
+		now,
+		replay.skyEnabled,
+		replay.classicSky,
+		replay.cosmosFocus,
+	)
 	point, ok := frame.points[deadKey]
 	if !ok {
 		t.Fatal("the layout seated no point for the dead node")
@@ -339,7 +366,10 @@ func TestNavigatorSelectionCyclesAndReconciles(t *testing.T) {
 	updated, _ := down1.Update(RefreshMsg{Snapshot: newSnapshot})
 	refreshed := updated.(Model)
 	if refreshed.cosmosSelected != "" {
-		t.Fatalf("a refresh that dropped the selected node left cosmosSelected = %q, want it cleared", refreshed.cosmosSelected)
+		t.Fatalf(
+			"a refresh that dropped the selected node left cosmosSelected = %q, want it cleared",
+			refreshed.cosmosSelected,
+		)
 	}
 	stillThere := false
 	for _, node := range refreshed.cosmos.Nodes {
@@ -548,7 +578,16 @@ func TestSystemFocusCyclesAndPushesOtherStarsOffFrame(t *testing.T) {
 	now := time.Unix(0, focused.cosmosNowNS)
 	graph := focused.viewGraph()
 	nodes := cosmosNodeMap(graph.Nodes)
-	frame := cosmosLayout(canvas, focused.cosmosSeats, nodes, graph.Edges, now, focused.skyEnabled, focused.classicSky, focused.cosmosFocus)
+	frame := cosmosLayout(
+		canvas,
+		focused.cosmosSeats,
+		nodes,
+		graph.Edges,
+		now,
+		focused.skyEnabled,
+		focused.classicSky,
+		focused.cosmosFocus,
+	)
 	if frame.starPoints["alpha"] != (cosmosPoint{x: frame.cx, y: frame.cy}) {
 		t.Fatalf("focused star = %#v, want the galactic centre (%v,%v)", frame.starPoints["alpha"], frame.cx, frame.cy)
 	}
@@ -616,7 +655,11 @@ func TestKeplerRingsSplitACrowdedSystemByActivity(t *testing.T) {
 		}
 	}
 	if cosmosRingSpeed(innerFactor) <= cosmosRingSpeed(outerFactor) {
-		t.Fatalf("inner ring speed %v should exceed outer ring speed %v (Kepler III)", cosmosRingSpeed(innerFactor), cosmosRingSpeed(outerFactor))
+		t.Fatalf(
+			"inner ring speed %v should exceed outer ring speed %v (Kepler III)",
+			cosmosRingSpeed(innerFactor),
+			cosmosRingSpeed(outerFactor),
+		)
 	}
 
 	canvas := NewCanvas(114, 22)
@@ -652,11 +695,19 @@ func TestKeplerRingsSplitACrowdedSystemByActivity(t *testing.T) {
 		t.Fatalf("setup: demoted node RingTarget = %v, want %v", reseated.RingTarget, outerFactor)
 	}
 	if reseated.Ring == reseated.RingTarget {
-		t.Fatalf("a ring change snapped instantly instead of easing: Ring already equals RingTarget (%v)", reseated.Ring)
+		t.Fatalf(
+			"a ring change snapped instantly instead of easing: Ring already equals RingTarget (%v)",
+			reseated.Ring,
+		)
 	}
 	model.advanceCosmos(model.cosmosNowNS + int64(200*time.Millisecond))
 	if reseated.Ring == innerFactor || reseated.Ring == outerFactor {
-		t.Fatalf("after a small tick the seat already reached an endpoint (%v) instead of easing partway between %v and %v", reseated.Ring, innerFactor, outerFactor)
+		t.Fatalf(
+			"after a small tick the seat already reached an endpoint (%v) instead of easing partway between %v and %v",
+			reseated.Ring,
+			innerFactor,
+			outerFactor,
+		)
 	}
 }
 
@@ -719,7 +770,12 @@ func TestLabelNudgeStepsAroundTextAndNeverLeavesTheCanvas(t *testing.T) {
 		}
 		rowA, rowB := lineOf("AAAA"), lineOf("BBBB")
 		if rowA < 0 || rowB < 0 {
-			t.Fatalf("one of the colliding labels never rendered at all: rowA=%d rowB=%d\n%s", rowA, rowB, strings.Join(lines, "\n"))
+			t.Fatalf(
+				"one of the colliding labels never rendered at all: rowA=%d rowB=%d\n%s",
+				rowA,
+				rowB,
+				strings.Join(lines, "\n"),
+			)
 		}
 		if rowA == rowB {
 			t.Fatalf("colliding labels landed on the SAME row %d instead of nudging apart", rowA)
@@ -747,7 +803,10 @@ func TestLabelNudgeStepsAroundTextAndNeverLeavesTheCanvas(t *testing.T) {
 		point := frame.points["chat:name:AAAA"]
 		colY := int(point.y) / 4
 		if colY != 0 {
-			t.Skipf("setup: forced point landed on row %d, not row 0 — geometry drifted, adjust the canvas height", colY)
+			t.Skipf(
+				"setup: forced point landed on row %d, not row 0 — geometry drifted, adjust the canvas height",
+				colY,
+			)
 		}
 		lines := strings.Split(ansi.Strip(canvas.render()), "\n")
 		found := false
@@ -757,7 +816,10 @@ func TestLabelNudgeStepsAroundTextAndNeverLeavesTheCanvas(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Fatalf("the third colliding label at row 0 vanished instead of accepting the overlap:\n%s", strings.Join(lines, "\n"))
+			t.Fatalf(
+				"the third colliding label at row 0 vanished instead of accepting the overlap:\n%s",
+				strings.Join(lines, "\n"),
+			)
 		}
 	})
 }
@@ -864,7 +926,11 @@ func TestNavigatorEnterOpensALiveSplitRowWithNoPaneID(t *testing.T) {
 	}
 	wantRowKey := compose.RowKey(splitRow)
 	if splitNode.RowKey == "" || splitNode.RowKey != wantRowKey {
-		t.Fatalf("split node RowKey = %q, want the row's own join key %q — a live row must never carry an empty RowKey", splitNode.RowKey, wantRowKey)
+		t.Fatalf(
+			"split node RowKey = %q, want the row's own join key %q — a live row must never carry an empty RowKey",
+			splitNode.RowKey,
+			wantRowKey,
+		)
 	}
 
 	model.cosmosSelected = splitNode.Key
@@ -896,8 +962,21 @@ func TestCosmosSelectionHUDNamesAllFourLifecycleStates(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	rows := snapshot.Rows
 	events := []shared.CommsEvent{
-		{AtNS: fixtureNowNS, Kind: shared.KindInject, SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket, Message: "live and running"},
-		{AtNS: fixtureNowNS, Kind: shared.KindInject, SenderUUID: rows[4].ID, Target: "resumable reply", Message: "from a resumable row"},
+		{
+			AtNS:           fixtureNowNS,
+			Kind:           shared.KindInject,
+			SenderUUID:     rows[0].ID,
+			Target:         rows[1].Name,
+			ReceiverSocket: rows[1].Socket,
+			Message:        "live and running",
+		},
+		{
+			AtNS:       fixtureNowNS,
+			Kind:       shared.KindInject,
+			SenderUUID: rows[4].ID,
+			Target:     "resumable reply",
+			Message:    "from a resumable row",
+		},
 	}
 	snapshot.Cosmos = compose.BuildCosmos(rows, events, fixtureNowNS, false)
 	model := NewModel(snapshot)
@@ -931,8 +1010,18 @@ func TestCosmosSelectionHUDNamesAllFourLifecycleStates(t *testing.T) {
 	}{
 		{"ghost", "chat:name:ghost", "· ghost", []string{"· killed", "· not running"}},
 		{"killed", "chat:id:" + rows[3].ID, "· killed", []string{"· ghost", "· not running"}},
-		{"not running: resolved, not killed, no live socket", "chat:id:" + rows[4].ID, "· not running", []string{"· ghost", "· killed"}},
-		{"live and running: no suffix at all", "chat:id:" + rows[1].ID, "", []string{"· ghost", "· killed", "· not running"}},
+		{
+			"not running: resolved, not killed, no live socket",
+			"chat:id:" + rows[4].ID,
+			"· not running",
+			[]string{"· ghost", "· killed"},
+		},
+		{
+			"live and running: no suffix at all",
+			"chat:id:" + rows[1].ID,
+			"",
+			[]string{"· ghost", "· killed", "· not running"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -990,7 +1079,11 @@ func TestNoSkyChronoscopeClockTracksTheRefreshSnapshot(t *testing.T) {
 		scrubbed, _ := applyKey(t, refreshed, printableKey('['))
 		want := newNowNS - int64(cosmosScrubFine)
 		if scrubbed.cosmosViewNS != want {
-			t.Fatalf("cosmosViewNS after [ = %d, want %d (5m back from the FRESH now, not the launch-time now)", scrubbed.cosmosViewNS, want)
+			t.Fatalf(
+				"cosmosViewNS after [ = %d, want %d (5m back from the FRESH now, not the launch-time now)",
+				scrubbed.cosmosViewNS,
+				want,
+			)
 		}
 	})
 
@@ -1003,7 +1096,12 @@ func TestNoSkyChronoscopeClockTracksTheRefreshSnapshot(t *testing.T) {
 		rewound, _ := refreshed.Update(RefreshMsg{Snapshot: refreshAt(older)})
 		result := rewound.(Model)
 		if result.cosmosNowNS != advanced {
-			t.Fatalf("cosmosNowNS = %d, an OLDER snapshot clock (%d) rewound it from %d", result.cosmosNowNS, older, advanced)
+			t.Fatalf(
+				"cosmosNowNS = %d, an OLDER snapshot clock (%d) rewound it from %d",
+				result.cosmosNowNS,
+				older,
+				advanced,
+			)
 		}
 	})
 
@@ -1018,10 +1116,18 @@ func TestNoSkyChronoscopeClockTracksTheRefreshSnapshot(t *testing.T) {
 		updated, _ := replaying.Update(RefreshMsg{Snapshot: refreshAt(newNowNS)})
 		refreshed := updated.(Model)
 		if refreshed.cosmosNowNS != newNowNS {
-			t.Fatalf("cosmosNowNS = %d, want the fresher snapshot clock %d even while replaying", refreshed.cosmosNowNS, newNowNS)
+			t.Fatalf(
+				"cosmosNowNS = %d, want the fresher snapshot clock %d even while replaying",
+				refreshed.cosmosNowNS,
+				newNowNS,
+			)
 		}
 		if refreshed.cosmosViewNS != viewBefore {
-			t.Fatalf("cosmosViewNS = %d, a refresh mid-replay must leave the playhead exactly where it was (%d)", refreshed.cosmosViewNS, viewBefore)
+			t.Fatalf(
+				"cosmosViewNS = %d, a refresh mid-replay must leave the playhead exactly where it was (%d)",
+				refreshed.cosmosViewNS,
+				viewBefore,
+			)
 		}
 	})
 }
@@ -1042,8 +1148,22 @@ func TestRenderCompactCosmosFocusFiltersEdgesToTheSystem(t *testing.T) {
 			{Key: "chat:name:Btwo", Label: resolve.Named("Btwo"), Home: "beta"},
 		},
 		Edges: []compose.CosmosEdge{
-			{From: "chat:name:Aone", To: "chat:name:Atwo", Kind: shared.KindInject, Count: 1, LastNS: fixtureNowNS, LastMessage: "alpha chatter"},
-			{From: "chat:name:Bone", To: "chat:name:Btwo", Kind: shared.KindInject, Count: 1, LastNS: fixtureNowNS, LastMessage: "beta chatter"},
+			{
+				From:        "chat:name:Aone",
+				To:          "chat:name:Atwo",
+				Kind:        shared.KindInject,
+				Count:       1,
+				LastNS:      fixtureNowNS,
+				LastMessage: "alpha chatter",
+			},
+			{
+				From:        "chat:name:Bone",
+				To:          "chat:name:Btwo",
+				Kind:        shared.KindInject,
+				Count:       1,
+				LastNS:      fixtureNowNS,
+				LastMessage: "beta chatter",
+			},
 		},
 	}
 	model.cosmosFocus = "alpha"
@@ -1078,7 +1198,12 @@ func TestNavigatorSpotlightDimsTheCometBurstAndShockwaveRing(t *testing.T) {
 		SenderUUID: rows[4].ID, Target: rows[5].Name,
 		Message: "mid-comet, does not touch the selection",
 	}
-	snapshot.Cosmos = compose.BuildCosmos(rows, []shared.CommsEvent{givesSelectionItsOwnNode, unrelated}, fixtureNowNS, false)
+	snapshot.Cosmos = compose.BuildCosmos(
+		rows,
+		[]shared.CommsEvent{givesSelectionItsOwnNode, unrelated},
+		fixtureNowNS,
+		false,
+	)
 	model := NewModel(snapshot)
 	model.tab = TabCosmos
 	selectedKey := "chat:id:" + rows[0].ID
@@ -1151,10 +1276,19 @@ func TestNavigatorSpotlightDimsTheCometBurstAndShockwaveRing(t *testing.T) {
 		baseSum := sumLuma(baseline, col, row, 3)
 		spotSum := sumLuma(spotlighted, col, row, 3)
 		if baseSum <= 0 {
-			t.Fatalf("setup: no light landed near the shockwave ring at col=%d row=%d: baseline sum=%v", col, row, baseSum)
+			t.Fatalf(
+				"setup: no light landed near the shockwave ring at col=%d row=%d: baseline sum=%v",
+				col,
+				row,
+				baseSum,
+			)
 		}
 		if spotSum >= baseSum {
-			t.Fatalf("the arrival shockwave ring was not dimmed by the spotlight: baseline=%v spotlighted=%v", baseSum, spotSum)
+			t.Fatalf(
+				"the arrival shockwave ring was not dimmed by the spotlight: baseline=%v spotlighted=%v",
+				baseSum,
+				spotSum,
+			)
 		}
 	})
 }
@@ -1217,7 +1351,11 @@ func TestRenderCompactCosmosEmptyStatesAndHeightBound(t *testing.T) {
 		text := model.renderCosmosPanel(19, 7) // innerHeight = 5
 		lines := strings.Split(text, "\n")
 		if len(lines) != 7 { // top border + 5 body lines + bottom border
-			t.Fatalf("panel produced %d lines for a height-7 request, want exactly 7 (frame + innerHeight): %#v", len(lines), lines)
+			t.Fatalf(
+				"panel produced %d lines for a height-7 request, want exactly 7 (frame + innerHeight): %#v",
+				len(lines),
+				lines,
+			)
 		}
 	})
 }
@@ -1253,8 +1391,13 @@ func TestCosmosMoonOfMoonSeedsFromParentRegardlessOfNodeOrder(t *testing.T) {
 		t.Fatalf("setup: expected seats for both moons: B=%#v C=%#v", seatB, seatC)
 	}
 	if seatC.Target != seatB.Target || seatC.RingTarget != seatB.RingTarget {
-		t.Fatalf("moon-of-moon seat = {Target:%v RingTarget:%v}, want its parent B's own seat {Target:%v RingTarget:%v}",
-			seatC.Target, seatC.RingTarget, seatB.Target, seatB.RingTarget)
+		t.Fatalf(
+			"moon-of-moon seat = {Target:%v RingTarget:%v}, want its parent B's own seat {Target:%v RingTarget:%v}",
+			seatC.Target,
+			seatC.RingTarget,
+			seatB.Target,
+			seatB.RingTarget,
+		)
 	}
 }
 
@@ -1277,8 +1420,18 @@ func TestCosmosStarTemperatureCoolsFromLastMessageNotJustTrafficCount(t *testing
 		{"no traffic, no last message: stone cold", compose.CosmosStar{}, now, 0},
 		{"traffic at the hot ceiling: full white-hot", compose.CosmosStar{TrafficHour: cosmosHotTraffic}, now, 1},
 		{"idle but just talked: the ember floor", compose.CosmosStar{TrafficHour: 0, LastNS: now}, now, cosmosEmber},
-		{"idle for one cooling interval: ember decayed by 1/e", compose.CosmosStar{TrafficHour: 0, LastNS: now - int64(cosmosCooling)}, now, cosmosEmber / math.E},
-		{"viewed before the star ever spoke: traffic only, no future ember", compose.CosmosStar{TrafficHour: 0, LastNS: now + int64(time.Hour)}, now, 0},
+		{
+			"idle for one cooling interval: ember decayed by 1/e",
+			compose.CosmosStar{TrafficHour: 0, LastNS: now - int64(cosmosCooling)},
+			now,
+			cosmosEmber / math.E,
+		},
+		{
+			"viewed before the star ever spoke: traffic only, no future ember",
+			compose.CosmosStar{TrafficHour: 0, LastNS: now + int64(time.Hour)},
+			now,
+			0,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

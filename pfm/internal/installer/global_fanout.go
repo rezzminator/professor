@@ -142,7 +142,10 @@ func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent
 	if claudeAbsent {
 		statuses := make([]GlobalAgentsStatus, 0, len(accounts))
 		for _, account := range accounts {
-			statuses = append(statuses, GlobalAgentsStatus{Account: account.ID, Dir: account.ConfigDir, State: GlobalAgentsNoClaude})
+			statuses = append(
+				statuses,
+				GlobalAgentsStatus{Account: account.ID, Dir: account.ConfigDir, State: GlobalAgentsNoClaude},
+			)
 		}
 		return statuses
 	}
@@ -196,7 +199,12 @@ func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent
 // Conflict, NoSources and Unresolved are advisory and stay warnings. The
 // classification and its wording live in InspectGlobalAgents / Describe, so
 // the checker can never drift from the installer it checks.
-func ReportGlobalAgents(w io.Writer, home string, accounts []pfmconfig.Account, claudeAbsent bool) (warnings, failures int) {
+func ReportGlobalAgents(
+	w io.Writer,
+	home string,
+	accounts []pfmconfig.Account,
+	claudeAbsent bool,
+) (warnings, failures int) {
 	for _, status := range InspectGlobalAgents(home, accounts, claudeAbsent) {
 		fmt.Fprintf(w, "doctor: global-agents %s\n", status.Describe())
 		switch status.State {
@@ -258,7 +266,11 @@ func (installer *engine) wireGlobalSkills() error {
 	if err != nil {
 		return fmt.Errorf("resolve global skills source repository: %w", err)
 	}
-	if err := installer.wireGlobalSkill(sourceRepo, filepath.Join(sourceRepo, "workflows", "deep-rr"), "deep-rr"); err != nil {
+	if err := installer.wireGlobalSkill(
+		sourceRepo,
+		filepath.Join(sourceRepo, "workflows", "deep-rr"),
+		"deep-rr",
+	); err != nil {
 		return err
 	}
 	return installer.wireTemplateSkills(sourceRepo)
@@ -317,7 +329,12 @@ func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error 
 		return fmt.Errorf("inspect %s skill source: %w", name, err)
 	}
 	for _, config := range installer.claudeConfigDirs() {
-		if err := installer.wireGlobalLink(source, filepath.Join(config, "skills", name), sourceRepo, true); err != nil {
+		if err := installer.wireGlobalLink(
+			source,
+			filepath.Join(config, "skills", name),
+			sourceRepo,
+			true,
+		); err != nil {
 			return err
 		}
 	}

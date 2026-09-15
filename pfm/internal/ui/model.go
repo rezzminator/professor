@@ -261,10 +261,24 @@ func NewModel(snapshot Snapshot) Model {
 		skyEnabled:          !snapshot.NoSky,
 		cosmosSafe:          snapshot.CosmosSafe,
 		activity:            snapshot.Activity,
-		skyCadence:          newTickCadence(snapshot.Activity, skyTickBaseInterval, skyTickGrowth, skyTickParkThreshold),
-		statsCadence:        newTickCadence(snapshot.Activity, statsRefreshInterval, statsRefreshGrowth, statsRefreshMaxInterval),
-		mergeNewChat:        snapshot.MergeNewChat,
-		newChatEngine:       defaultNewChatEngine(snapshot.AccountIDs, snapshot.CodexAccountIDs, snapshot.OpencodeAccountIDs),
+		skyCadence: newTickCadence(
+			snapshot.Activity,
+			skyTickBaseInterval,
+			skyTickGrowth,
+			skyTickParkThreshold,
+		),
+		statsCadence: newTickCadence(
+			snapshot.Activity,
+			statsRefreshInterval,
+			statsRefreshGrowth,
+			statsRefreshMaxInterval,
+		),
+		mergeNewChat: snapshot.MergeNewChat,
+		newChatEngine: defaultNewChatEngine(
+			snapshot.AccountIDs,
+			snapshot.CodexAccountIDs,
+			snapshot.OpencodeAccountIDs,
+		),
 	}
 	if model.samplingContext == nil {
 		model.samplingContext = context.Background()
@@ -280,11 +294,14 @@ func NewModel(snapshot Snapshot) Model {
 	return model
 }
 
-var configuredAccountEmojis map[int]string
-var configuredCodexAccountEmojis map[int]string
+var (
+	configuredAccountEmojis      map[int]string
+	configuredCodexAccountEmojis map[int]string
+)
 
 func defaultNewChatEngine(claude, codex, opencode []int) pfmengine.ID {
-	if len(normalizedAccountIDs(claude)) != 0 || (len(normalizedAccountIDs(codex)) == 0 && len(normalizedAccountIDs(opencode)) == 0) {
+	if len(normalizedAccountIDs(claude)) != 0 ||
+		(len(normalizedAccountIDs(codex)) == 0 && len(normalizedAccountIDs(opencode)) == 0) {
 		return pfmengine.Claude
 	}
 	if len(normalizedAccountIDs(codex)) != 0 {
@@ -524,7 +541,9 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 					row.Kind = compose.NewOpencode
 					row.Name = "New " + pfmengine.MustLookup(pfmengine.Opencode).Short + " chat"
 				default:
-					model.killStatus = "new chat is not available for " + pfmengine.MustLookup(model.newChatEngine).Short
+					model.killStatus = "new chat is not available for " + pfmengine.MustLookup(
+						model.newChatEngine,
+					).Short
 					return model, nil
 				}
 				row.Account = model.accountForKind(row.Kind)
@@ -618,7 +637,9 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (model Model) navigateHorizontal(direction int) (tea.Model, tea.Cmd) {
 	if model.tab == TabStats && model.statsFocus == StatsFocusSubtab {
-		model.statsSubtab = StatsSubtab((int(model.statsSubtab) + int(statsSubtabCount) + direction) % int(statsSubtabCount))
+		model.statsSubtab = StatsSubtab(
+			(int(model.statsSubtab) + int(statsSubtabCount) + direction) % int(statsSubtabCount),
+		)
 		return model, nil
 	}
 	if model.tab == TabStats && model.statsFocus == StatsFocusContent {

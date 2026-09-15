@@ -99,16 +99,24 @@ func (installer *engine) migrateMemoryHelpers() error {
 	}
 	for _, rewrite := range settings {
 		rewrite := rewrite
-		if err := installer.change("rewrite memory helper hook path in "+rewrite.path+" (backup preserved)", func() error {
-			backup := availableBackup(rewrite.path, installer.stamp)
-			if err := copyBackup(rewrite.path, backup); err != nil {
-				return fmt.Errorf("backup settings before memory helper hook migration %s to %s: %w", rewrite.path, backup, err)
-			}
-			if err := atomicfile.Write(rewrite.path, rewrite.content, rewrite.mode); err != nil {
-				return fmt.Errorf("rewrite memory helper hook path in %s: %w", rewrite.path, err)
-			}
-			return nil
-		}); err != nil {
+		if err := installer.change(
+			"rewrite memory helper hook path in "+rewrite.path+" (backup preserved)",
+			func() error {
+				backup := availableBackup(rewrite.path, installer.stamp)
+				if err := copyBackup(rewrite.path, backup); err != nil {
+					return fmt.Errorf(
+						"backup settings before memory helper hook migration %s to %s: %w",
+						rewrite.path,
+						backup,
+						err,
+					)
+				}
+				if err := atomicfile.Write(rewrite.path, rewrite.content, rewrite.mode); err != nil {
+					return fmt.Errorf("rewrite memory helper hook path in %s: %w", rewrite.path, err)
+				}
+				return nil
+			},
+		); err != nil {
 			return err
 		}
 	}
@@ -140,7 +148,11 @@ func (installer *engine) planMemoryHelperMigrations() ([]memoryHelperMigration, 
 				return nil, fmt.Errorf("inspect retired memory helper %s: %w", oldPath, err)
 			}
 			if !info.Mode().IsRegular() {
-				return nil, fmt.Errorf("refuse to migrate unowned memory helper %s: expected a regular file, found mode %s", oldPath, info.Mode())
+				return nil, fmt.Errorf(
+					"refuse to migrate unowned memory helper %s: expected a regular file, found mode %s",
+					oldPath,
+					info.Mode(),
+				)
 			}
 			resolved, err := filepath.EvalSymlinks(oldPath)
 			if err != nil {
@@ -159,7 +171,10 @@ func (installer *engine) planMemoryHelperMigrations() ([]memoryHelperMigration, 
 				return nil, fmt.Errorf("refuse to migrate unowned memory helper %s: %w", oldPath, err)
 			}
 			if fingerprint != helper.normalizedSHA256 {
-				return nil, fmt.Errorf("refuse to migrate unowned memory helper %s: content differs from the canonical Professor helper", oldPath)
+				return nil, fmt.Errorf(
+					"refuse to migrate unowned memory helper %s: content differs from the canonical Professor helper",
+					oldPath,
+				)
 			}
 
 			newPath := filepath.Join(configDir, "scripts", helper.newName)
@@ -171,17 +186,31 @@ func (installer *engine) planMemoryHelperMigrations() ([]memoryHelperMigration, 
 			case err != nil:
 				return nil, fmt.Errorf("inspect memory helper destination %s: %w", newPath, err)
 			case !destinationInfo.Mode().IsRegular():
-				return nil, fmt.Errorf("refuse to overwrite memory helper destination %s: expected a regular file, found mode %s", newPath, destinationInfo.Mode())
+				return nil, fmt.Errorf(
+					"refuse to overwrite memory helper destination %s: expected a regular file, found mode %s",
+					newPath,
+					destinationInfo.Mode(),
+				)
 			default:
 				destination, readErr := os.ReadFile(newPath)
 				if readErr != nil {
 					return nil, fmt.Errorf("read memory helper destination %s: %w", newPath, readErr)
 				}
 				if !bytes.Equal(destination, content) {
-					return nil, fmt.Errorf("refuse to overwrite memory helper destination %s: content conflicts with owned source %s", newPath, oldPath)
+					return nil, fmt.Errorf(
+						"refuse to overwrite memory helper destination %s: content conflicts with owned source %s",
+						newPath,
+						oldPath,
+					)
 				}
 				if destinationInfo.Mode().Perm() != info.Mode().Perm() {
-					return nil, fmt.Errorf("refuse to overwrite memory helper destination %s: mode %o conflicts with owned source %s mode %o", newPath, destinationInfo.Mode().Perm(), oldPath, info.Mode().Perm())
+					return nil, fmt.Errorf(
+						"refuse to overwrite memory helper destination %s: mode %o conflicts with owned source %s mode %o",
+						newPath,
+						destinationInfo.Mode().Perm(),
+						oldPath,
+						info.Mode().Perm(),
+					)
 				}
 			}
 			physical[resolved] = len(migrations)
@@ -194,7 +223,9 @@ func (installer *engine) planMemoryHelperMigrations() ([]memoryHelperMigration, 
 	return migrations, nil
 }
 
-func (installer *engine) planMemoryHelperSettingsRewrites(hookPaths map[string]string) ([]memoryHelperSettingsRewrite, error) {
+func (installer *engine) planMemoryHelperSettingsRewrites(
+	hookPaths map[string]string,
+) ([]memoryHelperSettingsRewrite, error) {
 	if len(hookPaths) == 0 {
 		return nil, nil
 	}
@@ -230,7 +261,10 @@ func (installer *engine) planMemoryHelperSettingsRewrites(hookPaths map[string]s
 				return nil, fmt.Errorf("parse settings for memory helper hook migration %s: %w", path, err)
 			}
 			if changed {
-				rewrites = append(rewrites, memoryHelperSettingsRewrite{path: path, content: updated, mode: info.Mode().Perm()})
+				rewrites = append(
+					rewrites,
+					memoryHelperSettingsRewrite{path: path, content: updated, mode: info.Mode().Perm()},
+				)
 			}
 		}
 	}

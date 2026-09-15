@@ -53,7 +53,9 @@ type Signaler func(pid int, signal syscall.Signal) error
 func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
 	images, ok := table.(gather.ProcImage)
 	if !ok {
-		return Scan{}, errors.New("this process table cannot read which file a process executes, so stale processes cannot be told from fresh ones")
+		return Scan{}, errors.New(
+			"this process table cannot read which file a process executes, so stale processes cannot be told from fresh ones",
+		)
 	}
 	current, err := gather.FileIDOf(binary)
 	if err != nil {
@@ -82,7 +84,10 @@ func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
 			continue
 		}
 		if image != current {
-			scan.Stale = append(scan.Stale, Process{PID: pid, Command: clip(command), MCP: slices.Contains(argv, "mcp")})
+			scan.Stale = append(
+				scan.Stale,
+				Process{PID: pid, Command: clip(command), MCP: slices.Contains(argv, "mcp")},
+			)
 		}
 	}
 	return scan, nil
@@ -98,7 +103,11 @@ func Sweep(table gather.ProcFS, binary string, signal Signaler, stdout io.Writer
 		return err
 	}
 	if len(scan.Unreadable) != 0 {
-		return fmt.Errorf("could not read the executable of %d pfm process(es), so the sweep cannot vouch for them: %s", len(scan.Unreadable), strings.Join(scan.Unreadable, "; "))
+		return fmt.Errorf(
+			"could not read the executable of %d pfm process(es), so the sweep cannot vouch for them: %s",
+			len(scan.Unreadable),
+			strings.Join(scan.Unreadable, "; "),
+		)
 	}
 	if len(scan.Stale) == 0 {
 		fmt.Fprintln(stdout, "sweep: none — every running pfm process uses the binary now on disk")
@@ -223,7 +232,10 @@ func run(args []string, stdout, stderr io.Writer, table gather.ProcFS, installed
 		fmt.Fprintln(stdout, "stale: none — every running pfm process uses the binary now on disk")
 	case len(scan.Stale) != 0:
 		fmt.Fprintf(stdout, "stale: %d process(es) above are running a REPLACED binary.\n", len(scan.Stale))
-		fmt.Fprintln(stdout, "       They keep behaving like the old build and can write stale state over new fixes. Close them, or run: make sweep-stale")
+		fmt.Fprintln(
+			stdout,
+			"       They keep behaving like the old build and can write stale state over new fixes. Close them, or run: make sweep-stale",
+		)
 	}
 	if len(scan.Unreadable) != 0 {
 		return 1

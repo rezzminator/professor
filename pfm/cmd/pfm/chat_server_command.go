@@ -23,12 +23,20 @@ func runInternalChatServer(args []string, stderr io.Writer, runtime commandRunti
 	}
 	engine, known := pfmengine.FromSocket(args[0])
 	if _, err := runtime.Paths.SocketUnder(args[0]); err != nil || !known {
-		fmt.Fprintf(stderr, "pfm internal chat-server: %q is not one bare socket name carrying an engine prefix\n", args[0])
+		fmt.Fprintf(
+			stderr,
+			"pfm internal chat-server: %q is not one bare socket name carrying an engine prefix\n",
+			args[0],
+		)
 		return 2
 	}
 	titles := runtime.Config.Tmux.Titles
 	if runtime.ConfigError != nil {
-		fmt.Fprintf(stderr, "pfm internal chat-server: config unreadable, leaving the terminal title to the host: %v\n", runtime.ConfigError)
+		fmt.Fprintf(
+			stderr,
+			"pfm internal chat-server: config unreadable, leaving the terminal title to the host: %v\n",
+			runtime.ConfigError,
+		)
 		titles = pfmconfig.TmuxTitles{Enabled: false}
 	}
 	creator := spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir, Titles: &titles}

@@ -53,7 +53,8 @@ func preflightBinary(binary string) error {
 	if _, err := deps.Resolve(binary); err != nil {
 		return fmt.Errorf(
 			"engine binary %q is not reachable from this process's PATH: %w — a systemd user service starts with systemd's default PATH; pin an absolute <engine>.binary in the machine config or extend the unit's Environment=PATH",
-			binary, err,
+			binary,
+			err,
 		)
 	}
 	return nil
@@ -110,7 +111,9 @@ func (tmux CommandTmux) NewSession(
 			// where the death almost always started.
 			return fmt.Errorf(
 				"configure chat server: %w: %s — the server died before it could be configured; its pane command likely exited at launch (%s)",
-				err, output, spec.Run,
+				err,
+				output,
+				spec.Run,
 			)
 		}
 	}
@@ -122,7 +125,10 @@ func (tmux CommandTmux) newSessionCommand(
 	socket string,
 	arguments ...string,
 ) (*exec.Cmd, error) {
-	binary, commandArguments, environment := pfmtmux.Invocation(tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
+	binary, commandArguments, environment := pfmtmux.Invocation(
+		tmux.Binary,
+		filepath.Join(tmux.TmuxDir, socket),
+		arguments...)
 	return serviceScopeCommand(ctx, binary, commandArguments, environment)
 }
 

@@ -27,7 +27,11 @@ func TestNewHTTPHandlerServesStreamableMCP(t *testing.T) {
 	}
 	defer service.Close()
 
-	request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`))
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"http://127.0.0.1/mcp",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`),
+	)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Accept", "application/json, text/event-stream")
 	recorder := httptest.NewRecorder()
@@ -38,7 +42,11 @@ func TestNewHTTPHandlerServesStreamableMCP(t *testing.T) {
 	if !strings.Contains(recorder.Body.String(), `"serverInfo"`) {
 		t.Fatalf("initialize response = %s", recorder.Body.String())
 	}
-	foreign := httptest.NewRequest(http.MethodPost, "http://attacker.example/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}`))
+	foreign := httptest.NewRequest(
+		http.MethodPost,
+		"http://attacker.example/mcp",
+		strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}`),
+	)
 	foreign.Header.Set("Content-Type", "application/json")
 	foreign.Header.Set("Accept", "application/json, text/event-stream")
 	foreign = foreign.WithContext(context.WithValue(
@@ -49,6 +57,10 @@ func TestNewHTTPHandlerServesStreamableMCP(t *testing.T) {
 	recorder = httptest.NewRecorder()
 	service.NewHTTPHandler().ServeHTTP(recorder, foreign)
 	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("foreign Host status=%d, want localhost protection refusal; body=%s", recorder.Code, recorder.Body.String())
+		t.Fatalf(
+			"foreign Host status=%d, want localhost protection refusal; body=%s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
 	}
 }

@@ -32,7 +32,12 @@ func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 				if scenario == "future" {
 					confirmed = now.Add(time.Minute)
 				}
-				account := LimitAccount{ID: 21, Engine: engine, Label: "fixture account", ConfigDir: filepath.Join(home, "claude")}
+				account := LimitAccount{
+					ID:        21,
+					Engine:    engine,
+					Label:     "fixture account",
+					ConfigDir: filepath.Join(home, "claude"),
+				}
 				writeFixtureCredentials(t, account.ConfigDir)
 				account.CodexAuthPath = writeCodexAuth(t, home, "fixture-access", "fixture-account")
 				claudeUsage := liveClaudeUsage(now, 54)
@@ -42,14 +47,20 @@ func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 				}
 				var err error
 				if engine == pfmengine.Claude {
-					err = usagehook.WriteCacheRecord(usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID), usagehook.CacheRecord{
-						Usage: claudeUsage, ConfigDir: account.ConfigDir, FetchedAt: &confirmed,
-					})
+					err = usagehook.WriteCacheRecord(
+						usagehook.CachePath(usagehook.DefaultCacheDir(), account.ID),
+						usagehook.CacheRecord{
+							Usage: claudeUsage, ConfigDir: account.ConfigDir, FetchedAt: &confirmed,
+						},
+					)
 				} else {
-					err = writeCodexCacheRecord(codexCachePath(usagehook.DefaultCacheDir(), account.ID), codexCacheRecord{
-						codexUsage: codexPayload, SourceVersion: codexUsageSourceVersion,
-						CodexAuthPath: account.CodexAuthPath, FetchedAt: &confirmed,
-					})
+					err = writeCodexCacheRecord(
+						codexCachePath(usagehook.DefaultCacheDir(), account.ID),
+						codexCacheRecord{
+							codexUsage: codexPayload, SourceVersion: codexUsageSourceVersion,
+							CodexAuthPath: account.CodexAuthPath, FetchedAt: &confirmed,
+						},
+					)
 				}
 				if err != nil {
 					t.Fatal(err)
@@ -78,8 +89,14 @@ func TestLimitsSharedCacheRefreshBoundaries(t *testing.T) {
 					now = now.Add(6 * time.Second)
 					limits, warnings = sampler.Sample(context.Background())
 				}
-				if hits.Load() != 1 || len(warnings) != 0 || len(limits[0].Windows) == 0 || limits[0].Windows[0].UsedPct != 46 {
-					t.Fatalf("cache prevented required refresh: hits=%d limits=%#v warnings=%v", hits.Load(), limits, warnings)
+				if hits.Load() != 1 || len(warnings) != 0 || len(limits[0].Windows) == 0 ||
+					limits[0].Windows[0].UsedPct != 46 {
+					t.Fatalf(
+						"cache prevented required refresh: hits=%d limits=%#v warnings=%v",
+						hits.Load(),
+						limits,
+						warnings,
+					)
 				}
 			})
 		}
@@ -92,7 +109,12 @@ func TestLimitsCanceledHTTPDoesNotPoisonSharedCache(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv(paths.EnvHome, home)
 			now := time.Unix(1_800_000_000, 0)
-			account := LimitAccount{ID: 22, Engine: engine, Label: "fixture account", ConfigDir: filepath.Join(home, "claude")}
+			account := LimitAccount{
+				ID:        22,
+				Engine:    engine,
+				Label:     "fixture account",
+				ConfigDir: filepath.Join(home, "claude"),
+			}
 			writeFixtureCredentials(t, account.ConfigDir)
 			account.CodexAuthPath = writeCodexAuth(t, home, "fixture-access", "fixture-account")
 			started := make(chan struct{}, 1)

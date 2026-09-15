@@ -19,12 +19,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var originalTestHome = os.Getenv("HOME")
@@ -117,7 +117,7 @@ func (fake resolveGateInjector) Resolve(context.Context, string) (inject.Target,
 	return fake.target, 0, "", nil
 }
 
-func (fake resolveGateInjector) ResolveEngine(_ context.Context, _ string, engine string) (inject.Target, int, string, error) {
+func (fake resolveGateInjector) ResolveEngine(_ context.Context, _, engine string) (inject.Target, int, string, error) {
 	if engine != string(pfmengine.Codex) {
 		return inject.Target{}, inject.CodeUnknown, "", nil
 	}
@@ -1004,7 +1004,11 @@ func TestMCPMalformedFrameReturnsJSONRPCError(t *testing.T) {
 func writeEnabledMCPConfig(t *testing.T, root string) string {
 	t.Helper()
 	path := filepath.Join(root, "mcp-enabled.json")
-	if err := os.WriteFile(path, []byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true}}}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"version":1,"mcp":{"servers":{"chat":{"enabled":true}}}}`+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	return path

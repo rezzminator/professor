@@ -45,7 +45,10 @@ func TestResolveRosterSeatNamesTheSeatByIDThenBySeat(t *testing.T) {
 	if !found || byID != "LUNA:ORCHESTRATOR" {
 		t.Fatalf("by id = (%q,%t), want the live row's name", byID, found)
 	}
-	bySeat, found := ResolveRosterSeat(roster, Identity{SocketPath: "/tmp/tmux-1000/cc-1788256324-1866070-42739", Pane: "%0"})
+	bySeat, found := ResolveRosterSeat(
+		roster,
+		Identity{SocketPath: "/tmp/tmux-1000/cc-1788256324-1866070-42739", Pane: "%0"},
+	)
 	if !found || bySeat != "LUNA:ORCHESTRATOR" {
 		t.Fatalf("by seat = (%q,%t), want the seat's name", bySeat, found)
 	}
@@ -56,7 +59,11 @@ func TestResolveRosterSeatNamesTheSeatByIDThenBySeat(t *testing.T) {
 	if name, found := ResolveRosterSeat(roster, Identity{ID: "nobody"}); found || name != "" {
 		t.Fatalf("unknown id = (%q,%t), want not found", name, found)
 	}
-	if name, found := ResolveRosterSeat(roster, Identity{SocketName: "cc-1788256324-1866070-42739", Pane: "%7"}); found || name != "" {
+	if name, found := ResolveRosterSeat(
+		roster,
+		Identity{SocketName: "cc-1788256324-1866070-42739", Pane: "%7"},
+	); found ||
+		name != "" {
 		t.Fatalf("wrong pane on a known socket = (%q,%t), want not found", name, found)
 	}
 	if name, found := ResolveRosterSeat(nil, Identity{ID: "5a3bb7cb-258d"}); found || name != "" {

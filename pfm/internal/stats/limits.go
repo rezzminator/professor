@@ -219,7 +219,10 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("stat statusline quota %s: %w", entry.Name(), err)
 		}
 		if !info.Mode().IsRegular() {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("statusline quota %s is not a regular file", entry.Name())
+			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
+				"statusline quota %s is not a regular file",
+				entry.Name(),
+			)
 		}
 		body, err := os.ReadFile(filepath.Join(directory, entry.Name()))
 		if err != nil {
@@ -227,7 +230,11 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 		}
 		var snapshot statuslineClaudeLimits
 		if err := json.Unmarshal(body, &snapshot); err != nil {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("decode statusline quota %s: %w", entry.Name(), err)
+			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
+				"decode statusline quota %s: %w",
+				entry.Name(),
+				err,
+			)
 		}
 		if snapshot.Account != account.ID {
 			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
@@ -239,7 +246,10 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 		}
 		confirmedAt := time.Unix(snapshot.ConfirmedAt, 0)
 		if snapshot.ConfirmedAt <= 0 || confirmedAt.After(sampler.now()) {
-			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf("statusline quota %s has invalid confirmation time", entry.Name())
+			return usagehook.Usage{}, time.Time{}, false, fmt.Errorf(
+				"statusline quota %s has invalid confirmation time",
+				entry.Name(),
+			)
 		}
 		if sampler.now().Sub(confirmedAt) > maxStaleLimitsAge {
 			continue
@@ -471,7 +481,10 @@ func backoffFor(err error, now time.Time) (message string, retryAfter time.Time)
 			wait = 10 * time.Minute
 		}
 		retryAfter = now.Add(wait)
-		return fmt.Sprintf("limits unavailable: 429 Too Many Requests — retry at %s", retryAfter.Format("15:04")), retryAfter
+		return fmt.Sprintf(
+			"limits unavailable: 429 Too Many Requests — retry at %s",
+			retryAfter.Format("15:04"),
+		), retryAfter
 	}
 	return err.Error(), now.Add(time.Minute)
 }
@@ -570,7 +583,12 @@ func (sampler *LimitsSampler) ttlFor(engine pfmengine.ID) time.Duration {
 	return sampler.ttl()
 }
 
-func (sampler *LimitsSampler) refresh(ctx context.Context, account LimitAccount, key string, now time.Time) cachedLimits {
+func (sampler *LimitsSampler) refresh(
+	ctx context.Context,
+	account LimitAccount,
+	key string,
+	now time.Time,
+) cachedLimits {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -660,7 +678,8 @@ func (sampler *LimitsSampler) beginFlight(key string, engine pfmengine.ID) bool 
 	sampler.mu.Lock()
 	defer sampler.mu.Unlock()
 	now := sampler.now()
-	if entry, found := sampler.cache[key]; found && !entry.when.After(now) && now.Sub(entry.when) < sampler.ttlFor(engine) {
+	if entry, found := sampler.cache[key]; found && !entry.when.After(now) &&
+		now.Sub(entry.when) < sampler.ttlFor(engine) {
 		return false
 	}
 	if sampler.flights == nil {
@@ -744,7 +763,8 @@ func staleEligible(err error) bool {
 
 func staleStatus(err error) string {
 	message := strings.ToLower(err.Error())
-	if strings.HasPrefix(message, "write claude limits cache:") || strings.HasPrefix(message, "write codex limits cache:") {
+	if strings.HasPrefix(message, "write claude limits cache:") ||
+		strings.HasPrefix(message, "write codex limits cache:") {
 		return err.Error()
 	}
 	if strings.Contains(message, "429") || strings.Contains(message, "too many requests") {
@@ -852,7 +872,12 @@ func defaultAck(ctx context.Context, account LimitAccount) error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("refresh account %d OAuth token: %w (%s)", account.ID, err, strings.TrimSpace(result.Stdout+result.Stderr))
+		return fmt.Errorf(
+			"refresh account %d OAuth token: %w (%s)",
+			account.ID,
+			err,
+			strings.TrimSpace(result.Stdout+result.Stderr),
+		)
 	}
 	return nil
 }
@@ -1026,7 +1051,11 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 	}
 
 	var usage codexUsage
-	if err := json.Unmarshal(body, &usage); err != nil || usage.RateLimit == nil || usage.RateLimit.PrimaryWindow == nil {
+	if err := json.Unmarshal(
+		body,
+		&usage,
+	); err != nil || usage.RateLimit == nil ||
+		usage.RateLimit.PrimaryWindow == nil {
 		return codexUsage{}, fmt.Errorf("Codex payload unreadable")
 	}
 	return usage, nil
@@ -1062,7 +1091,11 @@ func (sampler *LimitsSampler) fetchCodexAppServer(ctx context.Context, account L
 			RateLimitsByLimitID map[string]codexAppBucket `json:"rateLimitsByLimitId"`
 		} `json:"result"`
 	}
-	if err := json.Unmarshal(body, &message); err != nil || string(message.ID) != "1" || message.Result.RateLimits == nil {
+	if err := json.Unmarshal(
+		body,
+		&message,
+	); err != nil || string(message.ID) != "1" ||
+		message.Result.RateLimits == nil {
 		return codexUsage{}, fmt.Errorf("Codex App Server payload unreadable")
 	}
 	usage := codexUsage{
@@ -1162,7 +1195,8 @@ func (sampler *LimitsSampler) fetchCodexCached(
 	now := sampler.now()
 	path := codexCachePath(usagehook.DefaultCacheDir(), account.ID)
 	record, readErr := readCodexCacheRecord(path)
-	matches := readErr == nil && record.SourceVersion == codexUsageSourceVersion && record.CodexAuthPath == account.CodexAuthPath
+	matches := readErr == nil && record.SourceVersion == codexUsageSourceVersion &&
+		record.CodexAuthPath == account.CodexAuthPath
 	confirmedAt, confirmed := cacheConfirmedAt(record.FetchedAt, path)
 	confirmed = confirmed && !confirmedAt.After(now)
 	staleUsable := matches && confirmed && len(codexWindows(record.codexUsage)) > 0 &&

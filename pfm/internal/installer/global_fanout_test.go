@@ -18,7 +18,11 @@ func stageGlobalFanoutSource(t *testing.T, home string) string {
 	t.Helper()
 	repo := filepath.Join(home, "blueprint")
 	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "alpha.md"), "a global command\n")
-	writeFixture(t, filepath.Join(repo, "templates", "global", "skills", "beta", "SKILL.md"), "---\nname: beta\n---\n\nbody\n")
+	writeFixture(
+		t,
+		filepath.Join(repo, "templates", "global", "skills", "beta", "SKILL.md"),
+		"---\nname: beta\n---\n\nbody\n",
+	)
 	writeFixture(t, filepath.Join(repo, "templates", "global", "agents", "gamma.md"),
 		"---\nname: gamma\ndescription: Gamma role for testing.\n---\n\nbody\n")
 	return repo
@@ -201,9 +205,17 @@ func TestGlobalAgentsDoctorNamesTheAccountThatHasNoAgents(t *testing.T) {
 	var output bytes.Buffer
 	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if warnings != 0 || failures != 1 {
-		t.Fatalf("warnings=%d failures=%d, want 0/1 (account 2 has no global agents)\n%s", warnings, failures, output.String())
+		t.Fatalf(
+			"warnings=%d failures=%d, want 0/1 (account 2 has no global agents)\n%s",
+			warnings,
+			failures,
+			output.String(),
+		)
 	}
-	if !strings.Contains(output.String(), "doctor: global-agents account=1 dir="+filepath.Join(home, ".claude")+" state=linked") {
+	if !strings.Contains(
+		output.String(),
+		"doctor: global-agents account=1 dir="+filepath.Join(home, ".claude")+" state=linked",
+	) {
 		t.Fatalf("account 1 was not reported linked:\n%s", output.String())
 	}
 	want := "doctor: global-agents account=2 dir=" + filepath.Join(home, ".cc", "2") + " state=MISSING names=rr,walker"
@@ -358,7 +370,9 @@ func TestGlobalAgentsDoctorNoCloneIsNamedNotWarned(t *testing.T) {
 // would misreport a failed look as an absent clone.
 func TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("running as root — chmod 000 never blocks root's own Lstat, so the unreadable-marker fixture cannot be produced")
+		t.Skip(
+			"running as root — chmod 000 never blocks root's own Lstat, so the unreadable-marker fixture cannot be produced",
+		)
 	}
 	home := t.TempDir()
 	markerDir := filepath.Join(home, ".local", "share", "pfm", "install")

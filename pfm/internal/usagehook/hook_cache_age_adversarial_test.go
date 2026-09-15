@@ -46,8 +46,14 @@ func TestEvaluateFallsBackToMtimeWhenFetchedAtIsAbsent(t *testing.T) {
 			cachePath := CachePath(cacheDir, 2)
 			if err := WriteCacheRecord(cachePath, CacheRecord{
 				Usage: Usage{
-					FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339)},
-					SevenDay: Window{Utilization: usageFloatPtr(97), ResetsAt: now.Add(5 * 24 * time.Hour).Format(time.RFC3339)},
+					FiveHour: Window{
+						Utilization: usageFloatPtr(97),
+						ResetsAt:    now.Add(3 * time.Hour).Format(time.RFC3339),
+					},
+					SevenDay: Window{
+						Utilization: usageFloatPtr(97),
+						ResetsAt:    now.Add(5 * 24 * time.Hour).Format(time.RFC3339),
+					},
 				},
 				ConfigDir: configDir,
 			}); err != nil {
@@ -95,8 +101,14 @@ func TestEvaluateRejectsAFutureFetchedAt(t *testing.T) {
 	cachePath := CachePath(cacheDir, 4)
 	if err := WriteCacheRecord(cachePath, CacheRecord{
 		Usage: Usage{
-			FiveHour: Window{Utilization: usageFloatPtr(99), ResetsAt: now.Add(200 * 24 * time.Hour).Format(time.RFC3339)},
-			SevenDay: Window{Utilization: usageFloatPtr(99), ResetsAt: now.Add(200 * 24 * time.Hour).Format(time.RFC3339)},
+			FiveHour: Window{
+				Utilization: usageFloatPtr(99),
+				ResetsAt:    now.Add(200 * 24 * time.Hour).Format(time.RFC3339),
+			},
+			SevenDay: Window{
+				Utilization: usageFloatPtr(99),
+				ResetsAt:    now.Add(200 * 24 * time.Hour).Format(time.RFC3339),
+			},
 		},
 		ConfigDir: configDir, FetchedAt: &future,
 	}); err != nil {
@@ -140,7 +152,10 @@ func TestEvaluateStillWarnsOnTheLiveSevenDayWhenFiveHourExpired(t *testing.T) {
 	if err := WriteCacheRecord(CachePath(cacheDir, 5), CacheRecord{
 		Usage: Usage{
 			FiveHour: Window{Utilization: usageFloatPtr(99), ResetsAt: now.Add(-time.Minute).Format(time.RFC3339)},
-			SevenDay: Window{Utilization: usageFloatPtr(91), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+			SevenDay: Window{
+				Utilization: usageFloatPtr(91),
+				ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
+			},
 		},
 		ConfigDir: configDir, FetchedAt: &now,
 	}); err != nil {
@@ -172,7 +187,10 @@ func TestEvaluateTreatsUnparsableResetsAtAsUnknownNotExpired(t *testing.T) {
 			if err := WriteCacheRecord(CachePath(cacheDir, 6), CacheRecord{
 				Usage: Usage{
 					FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: resets},
-					SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+					SevenDay: Window{
+						Utilization: usageFloatPtr(12),
+						ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
+					},
 				},
 				ConfigDir: configDir, FetchedAt: &now,
 			}); err != nil {
@@ -209,8 +227,10 @@ func TestCachedFableWindowAgesLegacyRecordsByMtime(t *testing.T) {
 			configDir := filepath.Join(base, ".cc", "7")
 			now := time.Now().Truncate(time.Second)
 			percent := 44.0
-			scoped := ScopedLimit{Kind: "weekly_scoped", Percent: &percent,
-				ResetsAt: now.Add(72 * time.Hour).Format(time.RFC3339), IsActive: true}
+			scoped := ScopedLimit{
+				Kind: "weekly_scoped", Percent: &percent,
+				ResetsAt: now.Add(72 * time.Hour).Format(time.RFC3339), IsActive: true,
+			}
 			scoped.Scope.Model.DisplayName = "Fable"
 			path := CachePath(UsageCacheDir(base, os.Getuid()), 7)
 			if err := WriteCacheRecord(path, CacheRecord{

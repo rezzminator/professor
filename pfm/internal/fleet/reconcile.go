@@ -106,7 +106,14 @@ func ReconcileCodexPanes(
 	runtime pfmconfig.Runtime,
 	warn Warn,
 ) bool {
-	return ReconcileCodexPanesWith(ctx, database, live, runtime, spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir}, warn)
+	return ReconcileCodexPanesWith(
+		ctx,
+		database,
+		live,
+		runtime,
+		spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir},
+		warn,
+	)
 }
 
 // ReconcileCodexPanesWith is ReconcileCodexPanes re-applying names through
@@ -178,11 +185,25 @@ func ReconcileCodexPanesWith(
 			var recorded bool
 			target, recorded, err = manager.KillClearedCodex(ctx, action.ClearKill)
 			if err != nil {
-				warn(fmt.Sprintf("codex pane %s %s: record clear kill (binding retained for retry): %v", action.Socket, action.PaneID, err))
+				warn(
+					fmt.Sprintf(
+						"codex pane %s %s: record clear kill (binding retained for retry): %v",
+						action.Socket,
+						action.PaneID,
+						err,
+					),
+				)
 				continue
 			}
 			if !recorded {
-				warn(fmt.Sprintf("codex pane %s %s: clear lineage %s unavailable; binding retained for retry", action.Socket, action.PaneID, action.ClearKill))
+				warn(
+					fmt.Sprintf(
+						"codex pane %s %s: clear lineage %s unavailable; binding retained for retry",
+						action.Socket,
+						action.PaneID,
+						action.ClearKill,
+					),
+				)
 				continue
 			}
 			changed = true
@@ -215,11 +236,25 @@ func ReconcileCodexPanesWith(
 			ctx, renamer, action.Socket, action.PaneID, name, spawn.Defaults(), spawn.Trace{},
 		)
 		if renameErr != nil {
-			warn(fmt.Sprintf("codex pane %s %s: re-apply chat name after clear: %v", action.Socket, action.PaneID, renameErr))
+			warn(
+				fmt.Sprintf(
+					"codex pane %s %s: re-apply chat name after clear: %v",
+					action.Socket,
+					action.PaneID,
+					renameErr,
+				),
+			)
 			continue
 		}
 		if warning != "" {
-			warn(fmt.Sprintf("codex pane %s %s: chat name was not re-applied after clear: %s", action.Socket, action.PaneID, warning))
+			warn(
+				fmt.Sprintf(
+					"codex pane %s %s: chat name was not re-applied after clear: %s",
+					action.Socket,
+					action.PaneID,
+					warning,
+				),
+			)
 			continue
 		}
 		// Record the rename pfm just performed, rather than waiting for it to
@@ -273,7 +308,14 @@ func ObserveCodexPanes(
 	for _, process := range live.Codex {
 		if process.IdentityError != "" {
 			processConflicts[process.Socket+"\x00"+process.PaneID] = true
-			warn(fmt.Sprintf("codex pane %s %s: %s; binding not guessed", process.Socket, process.PaneID, process.IdentityError))
+			warn(
+				fmt.Sprintf(
+					"codex pane %s %s: %s; binding not guessed",
+					process.Socket,
+					process.PaneID,
+					process.IdentityError,
+				),
+			)
 			continue
 		}
 

@@ -7,7 +7,13 @@ import (
 	"strings"
 )
 
-func (h *Harvester) storeResult(source, kind, method, content string, bytes int64, statusCode int, rungs []string, options FetchOptions) Result {
+func (h *Harvester) storeResult(
+	source, kind, method, content string,
+	bytes int64,
+	statusCode int,
+	rungs []string,
+	options FetchOptions,
+) Result {
 	path, err := h.cache.save(source, kind, method, content, rungs)
 	if err != nil {
 		return Result{Source: source, Kind: kind, Error: err.Error(), Rungs: rungs}
@@ -23,23 +29,49 @@ func (h *Harvester) storeResult(source, kind, method, content string, bytes int6
 		bytes = info.Size()
 	}
 	chars := contentChars(content)
-	return Result{Source: source, Kind: kind, Content: truncateInline(content, h.options.MaxInlineChars), Path: path, Method: method,
-		CacheStatus: status, Bytes: bytes, Chars: chars, ContentChars: chars, Tokens: estimateTokens(content), HTTPStatus: statusCode, Rungs: rungs}
+	return Result{
+		Source:       source,
+		Kind:         kind,
+		Content:      truncateInline(content, h.options.MaxInlineChars),
+		Path:         path,
+		Method:       method,
+		CacheStatus:  status,
+		Bytes:        bytes,
+		Chars:        chars,
+		ContentChars: chars,
+		Tokens:       estimateTokens(content),
+		HTTPStatus:   statusCode,
+		Rungs:        rungs,
+	}
 }
 
-func (h *Harvester) storeResultAlias(source, canonicalSource string, result Result, rungs []string, options FetchOptions) Result {
+func (h *Harvester) storeResultAlias(
+	source, canonicalSource string,
+	result Result,
+	rungs []string,
+	options FetchOptions,
+) Result {
 	content := result.Content
 	if result.Path != "" {
 		if raw, err := os.ReadFile(result.Path); err == nil {
 			_, content = parseFrontmatter(string(raw))
 		}
 	}
-	stored := h.storeResult(canonicalSource, result.Kind, result.Method, content, result.Bytes, result.HTTPStatus, rungs, options)
+	stored := h.storeResult(
+		canonicalSource,
+		result.Kind,
+		result.Method,
+		content,
+		result.Bytes,
+		result.HTTPStatus,
+		rungs,
+		options,
+	)
 	stored.Source = source
 	return stored
 }
 
-func (h *Harvester) resultFromCache(source, kind string, content string, meta map[string]string, path string) Result {
+func (h *Harvester) resultFromCache(source, kind, content string, meta map[string]string, path string) Result {
 	rungs := []string{}
 	if raw := meta["rungs"]; raw != "" {
 		for _, rung := range strings.Split(raw, ",") {
@@ -59,8 +91,19 @@ func (h *Harvester) resultFromCache(source, kind string, content string, meta ma
 		tokens = stored
 	}
 	chars := contentChars(content)
-	return Result{Source: source, Kind: kind, Content: truncateInline(content, h.options.MaxInlineChars), Path: path, Method: meta["method"], CacheStatus: "hit",
-		Bytes: bytes, Chars: chars, ContentChars: chars, Tokens: tokens, Rungs: rungs}
+	return Result{
+		Source:       source,
+		Kind:         kind,
+		Content:      truncateInline(content, h.options.MaxInlineChars),
+		Path:         path,
+		Method:       meta["method"],
+		CacheStatus:  "hit",
+		Bytes:        bytes,
+		Chars:        chars,
+		ContentChars: chars,
+		Tokens:       tokens,
+		Rungs:        rungs,
+	}
 }
 
 func rungsSummary(rungs []string) string { return strings.Join(rungs, ", ") }

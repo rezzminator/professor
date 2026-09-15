@@ -69,10 +69,12 @@ func TestFetchPublicSelectedURLsWithSameDOIKeepTheirOwnArtifact(t *testing.T) {
 		return response(r, http.StatusOK, "application/pdf", body), nil
 	})}
 	h := mustNew(t, Options{
-		CacheDir:  t.TempDir(),
-		Client:    client,
-		Chrome:    client,
-		Converter: legacyConverterFunc(func(_ context.Context, _ string, _ string, body []byte) (string, error) { return string(body), nil }),
+		CacheDir: t.TempDir(),
+		Client:   client,
+		Chrome:   client,
+		Converter: legacyConverterFunc(
+			func(_ context.Context, _, _ string, body []byte) (string, error) { return string(body), nil },
+		),
 	})
 	for _, tc := range []struct {
 		url, marker string
@@ -89,7 +91,8 @@ func TestFetchPublicSelectedURLsWithSameDOIKeepTheirOwnArtifact(t *testing.T) {
 			t.Fatalf("FetchPublic(%q) = %#v; want %q", handle, got, tc.marker)
 		}
 	}
-	if len(seen) != 2 || seen[0] != "https://repository.test/repository-a/10.1234/public.boundary.pdf" || seen[1] != "https://repository.test/repository-b/10.1234/public.boundary.pdf" {
+	if len(seen) != 2 || seen[0] != "https://repository.test/repository-a/10.1234/public.boundary.pdf" ||
+		seen[1] != "https://repository.test/repository-b/10.1234/public.boundary.pdf" {
 		t.Fatalf("selected URL requests = %#v; want each exact repository URL", seen)
 	}
 }
@@ -102,19 +105,28 @@ func TestPublicResultKeepsCompleteArtifactAndFetchedAtWithoutProvenance(t *testi
 	if err := os.MkdirAll(filepath.Dir(privatePath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	body := "**Source:** https://mirror.secret.example/private\n---\n\n" + strings.Repeat("article body ", 20) + "TAIL_SENTINEL"
+	body := "**Source:** https://mirror.secret.example/private\n---\n\n" + strings.Repeat(
+		"article body ",
+		20,
+	) + "TAIL_SENTINEL"
 	raw := "---\nurl: https://mirror.secret.example/private\nfetched_at: 2025-01-02T03:04:05Z\nsource: harvester\nmethod: doi-mirror\nrungs: direct, mirror\n---\n\n" + body
 	if err := os.WriteFile(privatePath, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	got := h.PublicResult("10.1234/private", Result{
-		Source: "10.1234/private", Kind: "html", Path: privatePath, Method: "doi-mirror", Rungs: []string{"direct", "mirror"}, CacheStatus: "hit",
+		Source:      "10.1234/private",
+		Kind:        "html",
+		Path:        privatePath,
+		Method:      "doi-mirror",
+		Rungs:       []string{"direct", "mirror"},
+		CacheStatus: "hit",
 	}, false)
 	if got.Error != "" {
 		t.Fatalf("PublicResult() error = %q", got.Error)
 	}
-	if got.Method != "" || len(got.Rungs) != 0 || strings.Contains(got.Content, "mirror.secret.example") || strings.Contains(got.Content, cacheDir) {
+	if got.Method != "" || len(got.Rungs) != 0 || strings.Contains(got.Content, "mirror.secret.example") ||
+		strings.Contains(got.Content, cacheDir) {
 		t.Fatalf("public result leaked private fields: %#v", got)
 	}
 	if len(got.Content) >= len(body) || strings.Contains(got.Content, "TAIL_SENTINEL") {
@@ -125,11 +137,16 @@ func TestPublicResultKeepsCompleteArtifactAndFetchedAtWithoutProvenance(t *testi
 		t.Fatal(err)
 	}
 	completeText := string(complete)
-	if !strings.Contains(completeText, "TAIL_SENTINEL") || strings.Contains(completeText, "mirror.secret.example") || !strings.Contains(completeText, "fetched_at: 2025-01-02T03:04:05Z") {
+	if !strings.Contains(completeText, "TAIL_SENTINEL") || strings.Contains(completeText, "mirror.secret.example") ||
+		!strings.Contains(completeText, "fetched_at: 2025-01-02T03:04:05Z") {
 		t.Fatalf("public artifact was incomplete or rewrote metadata: %q", completeText)
 	}
 
-	sizeOnly := h.PublicResult("10.1234/private", Result{Source: "10.1234/private", Kind: "html", Path: privatePath}, true)
+	sizeOnly := h.PublicResult(
+		"10.1234/private",
+		Result{Source: "10.1234/private", Kind: "html", Path: privatePath},
+		true,
+	)
 	if sizeOnly.Error != "" || sizeOnly.Content != "" || sizeOnly.Bytes == 0 || sizeOnly.Path == "" {
 		t.Fatalf("size-only public result = %#v", sizeOnly)
 	}
@@ -146,9 +163,13 @@ func TestPublicFailuresDistinguishOutageFromMissingWithoutRawProviderDetails(t *
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := PublicFailure("10.1234/public.boundary", Result{
-				Source: "https://mirror.secret.example/private", Error: "GET https://mirror.secret.example/private: provider internals", ErrorKind: tc.kind,
+				Source:    "https://mirror.secret.example/private",
+				Error:     "GET https://mirror.secret.example/private: provider internals",
+				ErrorKind: tc.kind,
 			})
-			if !strings.Contains(strings.ToLower(got.Error), tc.want) || strings.Contains(got.Error, "mirror.secret.example") || strings.Contains(got.Error, "provider internals") {
+			if !strings.Contains(strings.ToLower(got.Error), tc.want) ||
+				strings.Contains(got.Error, "mirror.secret.example") ||
+				strings.Contains(got.Error, "provider internals") {
 				t.Fatalf("public failure = %#v; want safe %q", got, tc.want)
 			}
 		})
@@ -162,11 +183,16 @@ func TestPublicResultDoesNotAcceptNonHarvesterProvenanceArtifact(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("---\nurl: https://mirror.secret.example/private\nmethod: foreign\n---\n\nbody"), 0o600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte("---\nurl: https://mirror.secret.example/private\nmethod: foreign\n---\n\nbody"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	got := h.PublicResult("10.1234/public.boundary", Result{Kind: "html", Path: path}, false)
-	if got.Error == "" || !strings.Contains(strings.ToLower(got.Error), "stored") || strings.Contains(got.Error, "mirror.secret.example") {
+	if got.Error == "" || !strings.Contains(strings.ToLower(got.Error), "stored") ||
+		strings.Contains(got.Error, "mirror.secret.example") {
 		t.Fatalf("foreign artifact result = %#v; want safe refusal", got)
 	}
 	if strings.Contains(strings.ToLower(got.Error), "not found") {

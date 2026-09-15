@@ -78,7 +78,13 @@ func TestCodexServerLeavesTheHostsTitleAloneWhenTitlesAreDisabled(t *testing.T) 
 	if got := showCodexOption(t, socketPath, "show-options", "-g", "set-titles"); got != "set-titles off" {
 		t.Fatalf("set-titles = %q, want tmux's own default off", got)
 	}
-	if got := showCodexOption(t, socketPath, "show-window-options", "-g", "automatic-rename"); got != "automatic-rename off" {
+	if got := showCodexOption(
+		t,
+		socketPath,
+		"show-window-options",
+		"-g",
+		"automatic-rename",
+	); got != "automatic-rename off" {
 		t.Fatalf("automatic-rename = %q, want off regardless of the title policy", got)
 	}
 }
@@ -117,10 +123,24 @@ func TestSynthesizeCarriesTheConfiguredTitlePolicyIntoTheCodexPlan(t *testing.T)
 // addressable by name from its first frame, and no pane command renames it.
 func TestChatServerIsBornWithThePlannedWindowName(t *testing.T) {
 	socketPath := newCodexTitlesProbeServer(t, "probe-ox-1800000023-1-1", "OpenCode", nil)
-	if got := showCodexOption(t, socketPath, "display-message", "-p", "-t", "probe-ox-1800000023-1-1", "#{window_name}"); got != "OpenCode" {
+	if got := showCodexOption(
+		t,
+		socketPath,
+		"display-message",
+		"-p",
+		"-t",
+		"probe-ox-1800000023-1-1",
+		"#{window_name}",
+	); got != "OpenCode" {
 		t.Fatalf("window name = %q, want the planned OpenCode", got)
 	}
-	if got := showCodexOption(t, socketPath, "show-window-options", "-g", "automatic-rename"); got != "automatic-rename off" {
+	if got := showCodexOption(
+		t,
+		socketPath,
+		"show-window-options",
+		"-g",
+		"automatic-rename",
+	); got != "automatic-rename off" {
 		t.Fatalf("automatic-rename = %q, want off", got)
 	}
 }

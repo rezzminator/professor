@@ -12,12 +12,12 @@ import (
 	"strings"
 	"sync"
 
+	"golang.org/x/sync/errgroup"
+
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
 	pfmtmux "hostops/pfm/internal/tmux"
-
-	"golang.org/x/sync/errgroup"
 )
 
 // Kind is one public resolution namespace.

@@ -25,15 +25,15 @@ type fakeTranscriptAdapter struct{}
 
 func (fakeTranscriptAdapter) Prepare() (AskInput, Evidence) {
 	return AskInput{
-			ContentFiles: []string{"prepared-transcript.md"},
-			SourceLabels: []string{"session fixture#turns 1-14"},
-			Prompt:       "find the visible answer",
-		}, Evidence{
-			File:  "prepared-transcript.md",
-			Label: "session fixture#turns 1-14",
-			Span:  SourceSpan{Kind: "turns", Start: 1, End: 14},
-			Quote: "visible answer",
-		}
+		ContentFiles: []string{"prepared-transcript.md"},
+		SourceLabels: []string{"session fixture#turns 1-14"},
+		Prompt:       "find the visible answer",
+	}, Evidence{
+		File:  "prepared-transcript.md",
+		Label: "session fixture#turns 1-14",
+		Span:  SourceSpan{Kind: "turns", Start: 1, End: 14},
+		Quote: "visible answer",
+	}
 }
 
 func (fakeTranscriptAdapter) WantSpanKind() string { return "turns" }
@@ -42,15 +42,15 @@ type fakeHarvesterAdapter struct{}
 
 func (fakeHarvesterAdapter) Prepare() (AskInput, Evidence) {
 	return AskInput{
-			ContentFiles: []string{"prepared-source.md"},
-			SourceLabels: []string{"https://fixture.invalid/source"},
-			Prompt:       "find the source claim",
-		}, Evidence{
-			File:  "prepared-source.md",
-			Label: "https://fixture.invalid/source",
-			Span:  SourceSpan{Kind: "lines", Start: 4, End: 9},
-			Quote: "source claim",
-		}
+		ContentFiles: []string{"prepared-source.md"},
+		SourceLabels: []string{"https://fixture.invalid/source"},
+		Prompt:       "find the source claim",
+	}, Evidence{
+		File:  "prepared-source.md",
+		Label: "https://fixture.invalid/source",
+		Span:  SourceSpan{Kind: "lines", Start: 4, End: 9},
+		Quote: "source claim",
+	}
 }
 
 func (fakeHarvesterAdapter) WantSpanKind() string { return "lines" }
@@ -138,14 +138,27 @@ printf 'claude answer\n'`)
 		wantUsage  TokenUsage
 	}{
 		{
-			name: "codex", input: AskInput{Engine: pfmengine.Codex, Model: "cx-model", Effort: "high"},
-			wantHome: "/fixture/codex-4", wantArgs: []string{"exec", "--model cx-model", `model_reasoning_effort="high"`, "--ephemeral", "--skip-git-repo-check", "-"},
-			wantAnswer: "codex answer", wantUsage: TokenUsage{Input: 11, CachedInput: 3, Output: 5},
+			name:     "codex",
+			input:    AskInput{Engine: pfmengine.Codex, Model: "cx-model", Effort: "high"},
+			wantHome: "/fixture/codex-4",
+			wantArgs: []string{
+				"exec",
+				"--model cx-model",
+				`model_reasoning_effort="high"`,
+				"--ephemeral",
+				"--skip-git-repo-check",
+				"-",
+			},
+			wantAnswer: "codex answer",
+			wantUsage:  TokenUsage{Input: 11, CachedInput: 3, Output: 5},
 		},
 		{
-			name: "claude", input: AskInput{Engine: pfmengine.Claude, Model: "cc-model", Effort: "medium"},
-			wantHome: "/fixture/claude-2", wantArgs: []string{"-p", "--model cc-model", "--effort medium", "--output-format text"},
-			wantAnswer: "claude answer", wantUsage: TokenUsage{Input: 7, CachedInput: 2, Output: 4},
+			name:       "claude",
+			input:      AskInput{Engine: pfmengine.Claude, Model: "cc-model", Effort: "medium"},
+			wantHome:   "/fixture/claude-2",
+			wantArgs:   []string{"-p", "--model cc-model", "--effort medium", "--output-format text"},
+			wantAnswer: "claude answer",
+			wantUsage:  TokenUsage{Input: 7, CachedInput: 2, Output: 4},
 		},
 	}
 	for _, test := range tests {
@@ -215,7 +228,8 @@ func TestProcessEngineDistinguishesMissingCrashAndTimeout(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = engine.Run(context.Background(), validAskInput("codex"))
-	if err == nil || !strings.Contains(err.Error(), "exit status 7") || !strings.Contains(err.Error(), `"first error\nfatal tail"`) {
+	if err == nil || !strings.Contains(err.Error(), "exit status 7") ||
+		!strings.Contains(err.Error(), `"first error\nfatal tail"`) {
 		t.Fatalf("crash error = %v", err)
 	}
 

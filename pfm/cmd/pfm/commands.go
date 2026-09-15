@@ -6,8 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,6 +15,8 @@ import (
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
+	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/heal"
 	fleetindex "hostops/pfm/internal/index"
@@ -47,7 +47,11 @@ func runLS(
 	plain := flags.Bool("plain", false, "render a noninteractive list")
 	tsv := flags.Bool("tsv", false, "render stable tab-separated rows")
 	noSky := flags.Bool("no-sky", false, "disable the interactive sky widget")
-	safe := flags.String("safe", "auto", "vscode-safe cosmos rendering: auto|on|off (auto arms when TERM_PROGRAM=vscode)")
+	safe := flags.String(
+		"safe",
+		"auto",
+		"vscode-safe cosmos rendering: auto|on|off (auto arms when TERM_PROGRAM=vscode)",
+	)
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
@@ -253,18 +257,35 @@ func runLS(
 }
 
 func limitAccounts(runtime commandRuntime) []pfmstats.LimitAccount {
-	accounts := make([]pfmstats.LimitAccount, 0, len(runtime.Config.Accounts)+len(runtime.Config.AccountSkips)+len(runtime.Config.CodexAccounts)+len(runtime.Config.OpencodeAccounts)+3)
+	accounts := make(
+		[]pfmstats.LimitAccount,
+		0,
+		len(
+			runtime.Config.Accounts,
+		)+len(
+			runtime.Config.AccountSkips,
+		)+len(
+			runtime.Config.CodexAccounts,
+		)+len(
+			runtime.Config.OpencodeAccounts,
+		)+3,
+	)
 	if len(runtime.Config.Accounts) == 0 {
 		accounts = append(accounts, pfmstats.LimitAccount{
-			Engine: pfmengine.Claude, Label: "no " + pfmengine.MustLookup(pfmengine.Claude).Short + " accounts configured", Absent: true,
+			Engine: pfmengine.Claude,
+			Label:  "no " + pfmengine.MustLookup(pfmengine.Claude).Short + " accounts configured",
+			Absent: true,
 		})
 	}
 	for _, account := range runtime.Config.Accounts {
 		claude := runtime.Config.EffectiveClaude(account.ID)
 		accounts = append(accounts, pfmstats.LimitAccount{
-			ID: account.ID, Emoji: runtime.Config.EmojiFor(account.ID),
-			Engine: pfmengine.Claude, Label: pfmconfig.DisplayAccountDir(runtime.Paths.Home, account.ID, account.ConfigDir),
-			ConfigDir: account.ConfigDir, ClaudeBinary: claude.Binary,
+			ID:           account.ID,
+			Emoji:        runtime.Config.EmojiFor(account.ID),
+			Engine:       pfmengine.Claude,
+			Label:        pfmconfig.DisplayAccountDir(runtime.Paths.Home, account.ID, account.ConfigDir),
+			ConfigDir:    account.ConfigDir,
+			ClaudeBinary: claude.Binary,
 		})
 	}
 	for _, skip := range runtime.Config.AccountSkips {
@@ -276,20 +297,27 @@ func limitAccounts(runtime commandRuntime) []pfmstats.LimitAccount {
 	}
 	if len(runtime.Config.CodexAccounts) == 0 {
 		accounts = append(accounts, pfmstats.LimitAccount{
-			Engine: pfmengine.Codex, Label: "no " + pfmengine.MustLookup(pfmengine.Codex).Short + " accounts configured", Absent: true,
+			Engine: pfmengine.Codex,
+			Label:  "no " + pfmengine.MustLookup(pfmengine.Codex).Short + " accounts configured",
+			Absent: true,
 		})
 	}
 	for _, account := range runtime.Config.CodexAccounts {
 		accounts = append(accounts, pfmstats.LimitAccount{
-			ID: account.ID, Emoji: runtime.Config.CodexEmojiFor(account.ID),
-			Engine: pfmengine.Codex, Label: fmt.Sprintf("%s %d", pfmengine.MustLookup(pfmengine.Codex).Short, account.ID),
-			CodexBinary: runtime.Config.Codex.Binary, CodexHome: account.Home,
+			ID:            account.ID,
+			Emoji:         runtime.Config.CodexEmojiFor(account.ID),
+			Engine:        pfmengine.Codex,
+			Label:         fmt.Sprintf("%s %d", pfmengine.MustLookup(pfmengine.Codex).Short, account.ID),
+			CodexBinary:   runtime.Config.Codex.Binary,
+			CodexHome:     account.Home,
 			CodexAuthPath: filepath.Join(account.Home, "auth.json"),
 		})
 	}
 	if len(runtime.Config.OpencodeAccounts) == 0 {
 		accounts = append(accounts, pfmstats.LimitAccount{
-			Engine: pfmengine.Opencode, Label: "no " + pfmengine.MustLookup(pfmengine.Opencode).Short + " accounts configured", Absent: true,
+			Engine: pfmengine.Opencode,
+			Label:  "no " + pfmengine.MustLookup(pfmengine.Opencode).Short + " accounts configured",
+			Absent: true,
 		})
 	}
 	for _, account := range runtime.Config.OpencodeAccounts {

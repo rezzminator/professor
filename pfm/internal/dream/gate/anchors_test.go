@@ -38,11 +38,16 @@ func TestFlippedAnchorHashIsRejected(t *testing.T) {
 	if aHash[0] == '0' {
 		bad = "1" + aHash[1:12]
 	}
-	result, err := Anchors(pinned, []MapInput{{Name: "flipped-hash.md", Text: canonicalGateMap(bad, bHash[:12], "a.txt")}}, CommandGitReader{Repo: repo})
+	result, err := Anchors(
+		pinned,
+		[]MapInput{{Name: "flipped-hash.md", Text: canonicalGateMap(bad, bHash[:12], "a.txt")}},
+		CommandGitReader{Repo: repo},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Accepted) != 0 || len(result.Rejected) != 1 || !strings.HasPrefix(result.Rejected[0].Reason, "anchor hash mismatch: a.txt") {
+	if len(result.Accepted) != 0 || len(result.Rejected) != 1 ||
+		!strings.HasPrefix(result.Rejected[0].Reason, "anchor hash mismatch: a.txt") {
 		t.Fatalf("Anchors() = %#v", result)
 	}
 }
@@ -62,15 +67,22 @@ func TestAnchorRejectionsAreMapLocalAndDeterministic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Rejected) != 3 || result.Rejected[0].MapPath != "maps/legacy.md" || result.Rejected[0].Reason != "anchor row grammar mismatch" ||
-		result.Rejected[1].MapPath != "maps/range.md" || result.Rejected[1].Reason != "anchor row grammar mismatch" ||
+	if len(result.Rejected) != 3 || result.Rejected[0].MapPath != "maps/legacy.md" ||
+		result.Rejected[0].Reason != "anchor row grammar mismatch" ||
+		result.Rejected[1].MapPath != "maps/range.md" ||
+		result.Rejected[1].Reason != "anchor row grammar mismatch" ||
 		result.Rejected[2].Reason != "invalid map filename" {
 		t.Fatalf("Anchors() = %#v", result)
 	}
 }
 
 func canonicalGateMap(firstHash, secondHash, firstPath string) string {
-	return fmt.Sprintf("# Gate fixture\n\n## Question\n\nDoes the anchor gate hold?\n\n## Answer\n\nYes.\n\n## Derivation trail\n\nA deterministic repository proves it.\n\nProvenance: 2026-08-13 · sid 0123abcd\n\n## Anchors\n\n- `%s` — blob `%s`\n- `b.txt` — blob `%s`\n", firstPath, firstHash, secondHash)
+	return fmt.Sprintf(
+		"# Gate fixture\n\n## Question\n\nDoes the anchor gate hold?\n\n## Answer\n\nYes.\n\n## Derivation trail\n\nA deterministic repository proves it.\n\nProvenance: 2026-08-13 · sid 0123abcd\n\n## Anchors\n\n- `%s` — blob `%s`\n- `b.txt` — blob `%s`\n",
+		firstPath,
+		firstHash,
+		secondHash,
+	)
 }
 
 func newGitFixture(t *testing.T) string {

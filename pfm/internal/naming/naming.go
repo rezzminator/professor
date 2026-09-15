@@ -47,7 +47,7 @@ type CodexThread struct {
 func CodexNameIndex(
 	threads []CodexThread,
 	cxNames map[string]string,
-) (byPath map[string]string, byID map[string]string) {
+) (byPath, byID map[string]string) {
 	byPath = make(map[string]string, len(threads))
 	byID = make(map[string]string, len(threads)+len(cxNames))
 	for _, thread := range threads {

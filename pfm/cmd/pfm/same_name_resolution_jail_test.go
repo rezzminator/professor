@@ -112,7 +112,14 @@ func TestInjectAndResolvePreferUniqueRosterNameOverDuplicateRawWindows(t *testin
 	if code != 0 {
 		t.Fatalf("inject exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if got := jail.await(t, strings.TrimPrefix(live.prompt, jail.root+string(filepath.Separator)), "named incarnation"); !strings.Contains(got, "deliver to the named incarnation") {
+	if got := jail.await(
+		t,
+		strings.TrimPrefix(live.prompt, jail.root+string(filepath.Separator)),
+		"named incarnation",
+	); !strings.Contains(
+		got,
+		"deliver to the named incarnation",
+	) {
 		t.Fatalf("named target prompt=%q, want delivered message", got)
 	}
 }

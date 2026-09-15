@@ -29,7 +29,20 @@ func TestDiscoverSourceRepoMapsALinkedWorktreeToItsMainCheckout(t *testing.T) {
 	}
 	git := func(args ...string) {
 		t.Helper()
-		command := exec.Command("git", append([]string{"-C", clone, "-c", "user.name=probe", "-c", "user.email=probe@example.invalid", "-c", "commit.gpgsign=false"}, args...)...)
+		command := exec.Command(
+			"git",
+			append(
+				[]string{
+					"-C",
+					clone,
+					"-c",
+					"user.name=probe",
+					"-c",
+					"user.email=probe@example.invalid",
+					"-c",
+					"commit.gpgsign=false",
+				},
+				args...)...)
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, output)
 		}

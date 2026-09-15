@@ -21,7 +21,10 @@ func newNativeProcFS(root string) ProcFS {
 }
 
 func (darwinProcFS) Environ(pid int) (map[string]string, error) {
-	return nil, fmt.Errorf("process environment for %d is not implemented on darwin; KERN_PROCARGS2 is the reachable route", pid)
+	return nil, fmt.Errorf(
+		"process environment for %d is not implemented on darwin; KERN_PROCARGS2 is the reachable route",
+		pid,
+	)
 }
 
 func (darwinProcFS) Stat(pid int) (ProcStat, error) {

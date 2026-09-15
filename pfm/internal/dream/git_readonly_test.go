@@ -131,7 +131,12 @@ func scanGitInvocations(t *testing.T, path string, writeVerbs map[string]struct{
 			}
 			if _, forbidden := writeVerbs[value]; forbidden {
 				position := fset.Position(literal.Pos())
-				t.Errorf("%s:%d contains forbidden Git write verb %q in a Git invocation function", path, position.Line, value)
+				t.Errorf(
+					"%s:%d contains forbidden Git write verb %q in a Git invocation function",
+					path,
+					position.Line,
+					value,
+				)
 			}
 			return true
 		})

@@ -34,7 +34,10 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 	}
 	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, runtime)
 	if !reflect.DeepEqual(options.ConfigDirs, []string{runtime.Config.Accounts[0].ConfigDir}) ||
-		!reflect.DeepEqual(options.CodexHomes, []string{runtime.Config.CodexAccounts[0].Home, runtime.Config.CodexAccounts[1].Home}) {
+		!reflect.DeepEqual(
+			options.CodexHomes,
+			[]string{runtime.Config.CodexAccounts[0].Home, runtime.Config.CodexAccounts[1].Home},
+		) {
 		t.Fatalf("installer rosters ConfigDirs=%q CodexHomes=%q", options.ConfigDirs, options.CodexHomes)
 	}
 	if _, found := options.CodexYolo[4]; found {
@@ -78,7 +81,10 @@ func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
 func TestInstallerAndDoctorUseImplicitClaudeRegistry(t *testing.T) {
 	home := t.TempDir()
 	runtime := commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{
-		Accounts:      []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1"), Implicit: true}, {ID: 2, ConfigDir: filepath.Join(home, ".cc", "2")}},
+		Accounts: []pfmconfig.Account{
+			{ID: 1, ConfigDir: filepath.Join(home, ".cc", "1"), Implicit: true},
+			{ID: 2, ConfigDir: filepath.Join(home, ".cc", "2")},
+		},
 		CodexAccounts: []pfmconfig.CodexAccount{},
 	}}
 	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, runtime)
@@ -86,11 +92,15 @@ func TestInstallerAndDoctorUseImplicitClaudeRegistry(t *testing.T) {
 	if !reflect.DeepEqual(options.ClaudeRegistries, want) {
 		t.Fatalf("registries=%q want=%q", options.ClaudeRegistries, want)
 	}
-	if err := os.WriteFile(want[0], []byte(`{"mcpServers":{"harvester":{"command":"manual"}}}`), 0600); err != nil {
+	if err := os.WriteFile(want[0], []byte(`{"mcpServers":{"harvester":{"command":"manual"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if warnings := printMCPClientCutover(&output, runtime); warnings != 1 || !strings.Contains(output.String(), want[0]) {
+	if warnings := printMCPClientCutover(
+		&output,
+		runtime,
+	); warnings != 1 ||
+		!strings.Contains(output.String(), want[0]) {
 		t.Fatalf("warnings=%d output=%s", warnings, &output)
 	}
 }
@@ -219,9 +229,18 @@ func TestInstallUsesOnlyTheNewSurface(t *testing.T) {
 			t.Setenv("HOME", home)
 			var stdout, stderr bytes.Buffer
 			if code := runInstall([]string{retired}, &stdout, &stderr); code != 2 {
-				t.Fatalf("runInstall(%q) code=%d stdout=%q stderr=%q, want unknown-flag usage", retired, code, stdout.String(), stderr.String())
+				t.Fatalf(
+					"runInstall(%q) code=%d stdout=%q stderr=%q, want unknown-flag usage",
+					retired,
+					code,
+					stdout.String(),
+					stderr.String(),
+				)
 			}
-			if !strings.Contains(stderr.String(), "usage: pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]") {
+			if !strings.Contains(
+				stderr.String(),
+				"usage: pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
+			) {
 				t.Fatalf("runInstall(%q) stderr=%q, want new usage", retired, stderr.String())
 			}
 		})
@@ -232,7 +251,12 @@ func TestInstallRejectsRetiredForceFlag(t *testing.T) {
 	runtime := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
 	var stdout, stderr bytes.Buffer
 	if code := runInstall([]string{"--force", "--skip-harvest"}, &stdout, &stderr, runtime); code != 2 {
-		t.Fatalf("retired --force code=%d stdout=%q stderr=%q, want unknown-flag usage", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"retired --force code=%d stdout=%q stderr=%q, want unknown-flag usage",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	if strings.Contains(stderr.String(), "[--force]") {
 		t.Fatalf("install usage still advertises retired --force: %q", stderr.String())
@@ -380,7 +404,10 @@ func TestInstallSkipEngineCodexReachesProbeInstallerAndConfirmation(t *testing.T
 		t.Fatalf("CodexHomes=%q, want an explicit empty roster", captured.CodexHomes)
 	}
 	if !strings.Contains(stdout.String(), "skipped (--skip-engine codex)") ||
-		!strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --skip-harvest --skip-engine codex\n") {
+		!strings.HasSuffix(
+			stdout.String(),
+			"if you agree, run again: pfm install --yes --skip-harvest --skip-engine codex\n",
+		) {
 		t.Fatalf("skip-engine output=%q", stdout.String())
 	}
 }
@@ -401,7 +428,10 @@ func TestInstallSkipThemesDisablesFetchAndPreservesConfirmation(t *testing.T) {
 	if captured.InstallThemes {
 		t.Fatal("--skip-themes left theme installation enabled")
 	}
-	if !strings.HasSuffix(stdout.String(), "if you agree, run again: pfm install --yes --skip-harvest --skip-themes\n") {
+	if !strings.HasSuffix(
+		stdout.String(),
+		"if you agree, run again: pfm install --yes --skip-harvest --skip-themes\n",
+	) {
 		t.Fatalf("skip-themes confirmation=%q", stdout.String())
 	}
 }
@@ -436,7 +466,12 @@ func TestInstallApplyContinuesPastAnIdenticalPreSplitBackup(t *testing.T) {
 	runtime := commandRuntime{Paths: paths.Values{Home: home}, Config: loaded}
 	var stdout, stderr bytes.Buffer
 	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf("runInstall() code=%d stdout=%q stderr=%q, want 0 for an identical pre-split backup", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"runInstall() code=%d stdout=%q stderr=%q, want 0 for an identical pre-split backup",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	if strings.Contains(stderr.String(), "apply config migration") {
 		t.Fatalf("stderr=%q, want no apply config migration failure", stderr.String())
@@ -469,7 +504,12 @@ func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
 
 	var applyStdout, applyStderr bytes.Buffer
 	if code := runInstall([]string{"--yes", "--skip-harvest"}, &applyStdout, &applyStderr, explicitRuntime); code != 1 {
-		t.Fatalf("runInstall(apply, missing --config) code=%d stdout=%q stderr=%q, want refusal", code, applyStdout.String(), applyStderr.String())
+		t.Fatalf(
+			"runInstall(apply, missing --config) code=%d stdout=%q stderr=%q, want refusal",
+			code,
+			applyStdout.String(),
+			applyStderr.String(),
+		)
 	}
 	if !strings.Contains(applyStderr.String(), absent+" does not exist; refusing to converge host wiring on defaults") {
 		t.Fatalf("runInstall(apply) stderr=%q, want the refusal naming the missing path", applyStderr.String())
@@ -480,9 +520,15 @@ func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
 
 	var previewStdout, previewStderr bytes.Buffer
 	if code := runInstall([]string{"--skip-harvest"}, &previewStdout, &previewStderr, explicitRuntime); code != 0 {
-		t.Fatalf("runInstall(preview, missing --config) code=%d stdout=%q stderr=%q, want 0", code, previewStdout.String(), previewStderr.String())
+		t.Fatalf(
+			"runInstall(preview, missing --config) code=%d stdout=%q stderr=%q, want 0",
+			code,
+			previewStdout.String(),
+			previewStderr.String(),
+		)
 	}
-	if !strings.Contains(previewStdout.String(), "skip") || !strings.Contains(previewStdout.String(), absent+" does not exist") {
+	if !strings.Contains(previewStdout.String(), "skip") ||
+		!strings.Contains(previewStdout.String(), absent+" does not exist") {
 		t.Fatalf("runInstall(preview) stdout=%q, want a skip line naming the missing path", previewStdout.String())
 	}
 }

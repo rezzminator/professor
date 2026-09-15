@@ -27,7 +27,10 @@ func TestSearchReachesOperatorConfiguredLoopbackSearXNG(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"results":[{"title":"Q","url":"https://example.org/q","content":"snippet","engine":"duckduckgo"}]}`)
+		fmt.Fprint(
+			w,
+			`{"results":[{"title":"Q","url":"https://example.org/q","content":"snippet","engine":"duckduckgo"}]}`,
+		)
 	}))
 	defer server.Close()
 
@@ -53,7 +56,11 @@ func TestSearchRefusesRedirectOffConfiguredSearXNG(t *testing.T) {
 
 	_, backend, err := Search(context.Background(), "q", SearchOptions{SearXNGURL: searx.URL})
 	if err == nil || backend != "error" || !strings.Contains(err.Error(), "redirect") {
-		t.Fatalf("Search(redirecting SearXNG) backend=%q err=%v; want an error naming the refused redirect", backend, err)
+		t.Fatalf(
+			"Search(redirecting SearXNG) backend=%q err=%v; want an error naming the refused redirect",
+			backend,
+			err,
+		)
 	}
 	if internalHits.Load() != 0 {
 		t.Fatalf("redirect target was contacted %d time(s)", internalHits.Load())
@@ -68,10 +75,19 @@ func TestSearchFailureCarriesEachBackendError(t *testing.T) {
 	}))
 	defer searx.Close()
 	brave := &http.Client{Transport: searchRoundTrip(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusUnauthorized, Body: io.NopCloser(strings.NewReader("{}")), Header: http.Header{}, Request: r}, nil
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Body:       io.NopCloser(strings.NewReader("{}")),
+			Header:     http.Header{},
+			Request:    r,
+		}, nil
 	})}
 
-	_, backend, err := Search(context.Background(), "q", SearchOptions{SearXNGURL: searx.URL, BraveAPIKey: "k", Brave: brave})
+	_, backend, err := Search(
+		context.Background(),
+		"q",
+		SearchOptions{SearXNGURL: searx.URL, BraveAPIKey: "k", Brave: brave},
+	)
 	if err == nil || backend != "error" {
 		t.Fatalf("Search(both failing) backend=%q err=%v; want backend error", backend, err)
 	}
@@ -87,7 +103,12 @@ func TestDisabledSearchNeverContactsABackend(t *testing.T) {
 	var hits atomic.Int32
 	counting := &http.Client{Transport: searchRoundTrip(func(r *http.Request) (*http.Response, error) {
 		hits.Add(1)
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"results":[]}`)), Header: http.Header{}, Request: r}, nil
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"results":[]}`)),
+			Header:     http.Header{},
+			Request:    r,
+		}, nil
 	})}
 	_, _, err := Search(context.Background(), "q", SearchOptions{
 		SearXNGURL: "https://search.example.test", SearXNG: counting, DisableSearch: true,
@@ -115,6 +136,10 @@ func TestTrustedSearXNGOriginDoesNotOpenFetch(t *testing.T) {
 	}
 	result := h.Fetch(context.Background(), server.URL+"/admin")
 	if result.Error == "" || hits.Load() != 0 {
-		t.Fatalf("fetch of the SearXNG origin: error=%q hits=%d; want a policy refusal before any request", result.Error, hits.Load())
+		t.Fatalf(
+			"fetch of the SearXNG origin: error=%q hits=%d; want a policy refusal before any request",
+			result.Error,
+			hits.Load(),
+		)
 	}
 }

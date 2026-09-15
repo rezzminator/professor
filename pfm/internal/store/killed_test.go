@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
 )
 
@@ -78,7 +78,11 @@ func (row killedRowFixture) Scan(dest ...any) error {
 
 func TestDatabaseEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
 	_, err := scanKilled(killedRowFixture{id: "row-7", engine: "bogus"})
-	if err == nil || !strings.Contains(err.Error(), `fleet.db row row-7: unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`) {
+	if err == nil ||
+		!strings.Contains(
+			err.Error(),
+			`fleet.db row row-7: unknown engine "bogus" (want cc/claude, cx/codex, ox/opencode)`,
+		) {
 		t.Fatalf("scanKilled(bogus) error = %v", err)
 	}
 }

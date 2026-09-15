@@ -8,6 +8,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/chat"
 	"hostops/pfm/internal/chatkeys"
 	pfmconfig "hostops/pfm/internal/config"
@@ -17,8 +19,6 @@ import (
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/transcript"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const (
@@ -182,28 +182,44 @@ func (service *Service) register() {
 		Annotations: readOnly,
 	}, service.chatRead)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_last", Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure). For screen text, chat_capture; for older turns, chat_read.", Annotations: readOnly,
+		Name:        "chat_last",
+		Description: "Returns the newest assistant answer of a chat — \"what did chat X just say\", \"read its last reply\". Call chat_last{target:\"my-chat\"}. Returns text; a chat that has not answered yet and an unknown target are both tool errors whose message names which (\"returned no answer\" versus a resolve failure). For screen text, chat_capture; for older turns, chat_read.",
+		Annotations: readOnly,
 	}, service.chatLast)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_status", Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds, context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.", Annotations: readOnly,
+		Name:        "chat_status",
+		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds, context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
+		Annotations: readOnly,
 	}, service.chatStatus)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_new", Description: "Spawns a new detached, named chat — \"spawn / start a new chat\", \"open a fresh chat for X\". Call chat_new{name:\"my-chat\", prompt:\"first message\"}; born in the caller's project directory unless cwd is given. Returns status ok with the launch message; a tool error = the launch failed, message carries its stderr. A new chat is an independent peer — a helper inside THIS chat is a harness sub-agent, not a chat.", Annotations: mutating,
+		Name:        "chat_new",
+		Description: "Spawns a new detached, named chat — \"spawn / start a new chat\", \"open a fresh chat for X\". Call chat_new{name:\"my-chat\", prompt:\"first message\"}; born in the caller's project directory unless cwd is given. Returns status ok with the launch message; a tool error = the launch failed, message carries its stderr. A new chat is an independent peer — a helper inside THIS chat is a harness sub-agent, not a chat.",
+		Annotations: mutating,
 	}, service.chatNew)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_open", Description: "Reopens a resumable (not live) chat in a pane — \"resume / reopen chat X\". Call chat_open{target:\"my-chat\"}. Returns status ok with the open message; a tool error = no such resumable chat or the open failed, message carries its stderr. A live chat needs no opening — address it with chat_inject.", Annotations: mutating,
+		Name:        "chat_open",
+		Description: "Reopens a resumable (not live) chat in a pane — \"resume / reopen chat X\". Call chat_open{target:\"my-chat\"}. Returns status ok with the open message; a tool error = no such resumable chat or the open failed, message carries its stderr. A live chat needs no opening — address it with chat_inject.",
+		Annotations: mutating,
 	}, service.chatOpen)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_name", Description: "Names or renames a live chat — \"call this chat X\", \"rename chat A to B\". Call chat_name{target:\"self\", name:\"my-chat\"}. Returns status ok; a tool error = the name was empty or multi-line, the target did not resolve, or the rename failed, message says which.", Annotations: mutating,
+		Name:        "chat_name",
+		Description: "Names or renames a live chat — \"call this chat X\", \"rename chat A to B\". Call chat_name{target:\"self\", name:\"my-chat\"}. Returns status ok; a tool error = the name was empty or multi-line, the target did not resolve, or the rename failed, message says which.",
+		Annotations: mutating,
 	}, service.chatName)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_kill", Description: "Hides a chat from the fleet — \"kill / hide / close chat X\". A live target is also ended (its pane and socket close); a resumable-only target is only hidden. Call chat_kill{target:\"my-chat\"}. Returns status ok; a tool error = the target did not resolve or the kill failed, message says which. Reverse with chat_unkill.", Annotations: mutating,
+		Name:        "chat_kill",
+		Description: "Hides a chat from the fleet — \"kill / hide / close chat X\". A live target is also ended (its pane and socket close); a resumable-only target is only hidden. Call chat_kill{target:\"my-chat\"}. Returns status ok; a tool error = the target did not resolve or the kill failed, message says which. Reverse with chat_unkill.",
+		Annotations: mutating,
 	}, service.chatKill)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_unkill", Description: "Restores a killed chat to the fleet listing — \"unkill / unhide chat X\", the reverse of chat_kill. Call chat_unkill{target:\"my-chat\"}. Returns status ok; a tool error = no killed chat by that name or the restore failed. It does not relaunch a pane — chat_open does that.", Annotations: mutating,
+		Name:        "chat_unkill",
+		Description: "Restores a killed chat to the fleet listing — \"unkill / unhide chat X\", the reverse of chat_kill. Call chat_unkill{target:\"my-chat\"}. Returns status ok; a tool error = no killed chat by that name or the restore failed. It does not relaunch a pane — chat_open does that.",
+		Annotations: mutating,
 	}, service.chatUnkill)
 	mcp.AddTool(service.server, &mcp.Tool{
-		Name: "chat_save", Description: "Appends a transcript snapshot plus environment snapshot to a FILE — \"save / dump this conversation to notes.md\". Call chat_save{target:\"./notes/session.md\"}; the calling chat's own transcript by default. target is a file path, never a chat — a bare word is refused. Returns status ok with the write message; a tool error = the path had no directory separator, the transcript was not found, or the write failed.", Annotations: mutating,
+		Name:        "chat_save",
+		Description: "Appends a transcript snapshot plus environment snapshot to a FILE — \"save / dump this conversation to notes.md\". Call chat_save{target:\"./notes/session.md\"}; the calling chat's own transcript by default. target is a file path, never a chat — a bare word is refused. Returns status ok with the write message; a tool error = the path had no directory separator, the transcript was not found, or the write failed.",
+		Annotations: mutating,
 	}, service.chatSave)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "issue_servicedesk",
@@ -330,14 +346,26 @@ func (service *Service) chatKeys(
 		return nil, KeysOutput{}, err
 	}
 	if refused, _ := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
-		return nil, KeysOutput{Status: "not_found", Code: inject.CodeUnknown, Keys: append([]string(nil), input.Keys...)}, nil
+		return nil, KeysOutput{
+			Status: "not_found",
+			Code:   inject.CodeUnknown,
+			Keys:   append([]string(nil), input.Keys...),
+		}, nil
 	}
 	target, code, detail, err := injector.Resolve(ctx, input.Target)
 	if err != nil {
 		return nil, KeysOutput{}, err
 	}
 	if code != 0 {
-		return nil, KeysOutput{Status: "not_found", Code: code, Keys: append([]string(nil), input.Keys...)}, fmt.Errorf("resolve %q: %s", input.Target, detail)
+		return nil, KeysOutput{
+			Status: "not_found",
+			Code:   code,
+			Keys:   append([]string(nil), input.Keys...),
+		}, fmt.Errorf(
+			"resolve %q: %s",
+			input.Target,
+			detail,
+		)
 	}
 	tmux := inject.CommandTmux{}
 	for index, key := range input.Keys {

@@ -277,7 +277,14 @@ func (sampler *Sampler) readTokenUsageLocked(path string) (tokenMeasure, []strin
 	openedInfo, statErr := file.Stat()
 	if statErr != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			return tokenMeasure{}, []string{fmt.Sprintf("stat chat token transcript %s before read: %v; close after stat failure: %v", path, statErr, closeErr)}
+			return tokenMeasure{}, []string{
+				fmt.Sprintf(
+					"stat chat token transcript %s before read: %v; close after stat failure: %v",
+					path,
+					statErr,
+					closeErr,
+				),
+			}
 		}
 		return tokenMeasure{}, []string{fmt.Sprintf("stat chat token transcript %s before read: %v", path, statErr)}
 	}
@@ -286,15 +293,26 @@ func (sampler *Sampler) readTokenUsageLocked(path string) (tokenMeasure, []strin
 	}
 	if matches, guardErr := tokenRewriteGuardMatches(file, entry); guardErr != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			return tokenMeasure{}, []string{fmt.Sprintf("verify chat token transcript %s rewrite guard: %v; close after guard failure: %v", path, guardErr, closeErr)}
+			return tokenMeasure{}, []string{
+				fmt.Sprintf(
+					"verify chat token transcript %s rewrite guard: %v; close after guard failure: %v",
+					path,
+					guardErr,
+					closeErr,
+				),
+			}
 		}
-		return tokenMeasure{}, []string{fmt.Sprintf("verify chat token transcript %s rewrite guard: %v", path, guardErr)}
+		return tokenMeasure{}, []string{
+			fmt.Sprintf("verify chat token transcript %s rewrite guard: %v", path, guardErr),
+		}
 	} else if !matches {
 		entry = sampler.newTokenCacheEntryLocked(path, openedInfo)
 	}
 	if _, err := file.Seek(entry.offset, io.SeekStart); err != nil {
 		if closeErr := file.Close(); closeErr != nil {
-			return tokenMeasure{}, []string{fmt.Sprintf("seek chat token transcript %s: %v; close after seek failure: %v", path, err, closeErr)}
+			return tokenMeasure{}, []string{
+				fmt.Sprintf("seek chat token transcript %s: %v; close after seek failure: %v", path, err, closeErr),
+			}
 		}
 		return tokenMeasure{}, []string{fmt.Sprintf("seek chat token transcript %s: %v", path, err)}
 	}

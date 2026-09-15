@@ -14,7 +14,9 @@ import (
 	"time"
 )
 
-var plistEnvironmentPath = regexp.MustCompile(`<key>EnvironmentVariables</key>\s*<dict>\s*<key>PATH</key>\s*<string>([^<]*)</string>`)
+var plistEnvironmentPath = regexp.MustCompile(
+	`<key>EnvironmentVariables</key>\s*<dict>\s*<key>PATH</key>\s*<string>([^<]*)</string>`,
+)
 
 // TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux is the regression for
 // the deaf shared daemon: the plist carried no EnvironmentVariables, so launchd
@@ -47,7 +49,10 @@ func TestMCPLaunchAgentGivesTheDaemonAPathThatFindsTmux(t *testing.T) {
 	}
 	match := plistEnvironmentPath.FindSubmatch(written)
 	if match == nil {
-		t.Fatalf("installed MCP launch agent declares no EnvironmentVariables PATH; launchd will run the daemon on its bare default PATH:\n%s", written)
+		t.Fatalf(
+			"installed MCP launch agent declares no EnvironmentVariables PATH; launchd will run the daemon on its bare default PATH:\n%s",
+			written,
+		)
 	}
 	daemonPath := strings.Split(string(match[1]), ":")
 	for _, want := range []string{
@@ -79,7 +84,8 @@ func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 			return err
 		}
 		relative := strings.TrimPrefix(name, "assets/")
-		if !strings.HasPrefix(relative, "launchd/") && !(strings.HasPrefix(relative, "systemd/") && strings.HasSuffix(relative, ".service")) {
+		if !strings.HasPrefix(relative, "launchd/") &&
+			!(strings.HasPrefix(relative, "systemd/") && strings.HasSuffix(relative, ".service")) {
 			return nil
 		}
 		content, err := readAsset(relative)
@@ -135,7 +141,10 @@ func TestNameSyncLaunchAgentGivesTheJobAPathThatFindsTmux(t *testing.T) {
 	}
 	match := plistEnvironmentPath.FindSubmatch(written)
 	if match == nil {
-		t.Fatalf("installed name-sync launch agent declares no EnvironmentVariables PATH; launchd will run it on its bare default PATH:\n%s", written)
+		t.Fatalf(
+			"installed name-sync launch agent declares no EnvironmentVariables PATH; launchd will run it on its bare default PATH:\n%s",
+			written,
+		)
 	}
 	if want := servicePath(home); string(match[1]) != want {
 		t.Fatalf("name-sync PATH = %q, want the one service path %q", match[1], want)
@@ -160,7 +169,12 @@ func TestLaunchAgentPlistsCarryLogPaths(t *testing.T) {
 		}
 		want := "<string>__PFM_HOME__/Library/Logs/pfm/" + tc.logFile + "</string>"
 		if got := strings.Count(string(content), want); got != 2 {
-			t.Errorf("%s: StandardOutPath/StandardErrorPath = %d occurrence(s) of %q, want 2 (one each)", tc.asset, got, want)
+			t.Errorf(
+				"%s: StandardOutPath/StandardErrorPath = %d occurrence(s) of %q, want 2 (one each)",
+				tc.asset,
+				got,
+				want,
+			)
 		}
 		for _, key := range []string{"<key>StandardOutPath</key>", "<key>StandardErrorPath</key>"} {
 			if !strings.Contains(string(content), key) {

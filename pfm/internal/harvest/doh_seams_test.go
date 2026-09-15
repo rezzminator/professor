@@ -41,8 +41,14 @@ func TestAssertFetchableConsultsTheDoHResolver(t *testing.T) {
 	sharedDOHResolver = sync.OnceValue(func() *dohResolver {
 		return newTestDOHResolver(sinkhole.URL, refusingFallback(t))
 	})
-	if err := AssertFetchable("https://sinkhole.doh-seam.net/"); err == nil || !strings.Contains(err.Error(), "private") {
-		t.Fatalf("AssertFetchable(sinkhole.doh-seam.net) = %v, want a refusal naming the DoH-answered private address 10.0.0.1", err)
+	if err := AssertFetchable(
+		"https://sinkhole.doh-seam.net/",
+	); err == nil ||
+		!strings.Contains(err.Error(), "private") {
+		t.Fatalf(
+			"AssertFetchable(sinkhole.doh-seam.net) = %v, want a refusal naming the DoH-answered private address 10.0.0.1",
+			err,
+		)
 	}
 
 	public := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

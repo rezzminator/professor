@@ -19,13 +19,27 @@ func TestResolveDOIAndFallbackPreserveMetadataOutage(t *testing.T) {
 	if candidates, err := resolver.ResolveDOI(context.Background(), providerFixtureDOI); err == nil {
 		t.Errorf("ResolveDOI outage = candidates=%#v err=nil; want visible outage with no candidates", candidates)
 	} else if len(candidates) != 0 {
-		t.Errorf("ResolveDOI outage = candidates=%#v err=%v; want no candidates with visible lookup failure", candidates, err)
+		t.Errorf(
+			"ResolveDOI outage = candidates=%#v err=%v; want no candidates with visible lookup failure",
+			candidates,
+			err,
+		)
 	}
 	chromeFailing := &http.Client{Transport: failing.Transport}
 	oaFailing := &http.Client{Transport: failing.Transport}
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: failing, Chrome: chromeFailing, OA: oaFailing, Converter: &fakeConverter{}})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    failing,
+			Chrome:    chromeFailing,
+			OA:        oaFailing,
+			Converter: &fakeConverter{},
+		},
+	)
 	got := h.fetchKnownID(context.Background(), providerFixtureDOI, IdentifierDOI, FetchOptions{})
-	if got.Error == "" || got.ErrorKind != "connect" || strings.Contains(strings.ToLower(got.Error), "likely paywalled") {
+	if got.Error == "" || got.ErrorKind != "connect" ||
+		strings.Contains(strings.ToLower(got.Error), "likely paywalled") {
 		t.Fatalf("DOI fallback outage = %#v; want visible connect outage", got)
 	}
 }

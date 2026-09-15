@@ -72,18 +72,33 @@ func Anchors(recordedTree string, maps []MapInput, git GitObjectReader) (AnchorR
 		for _, anchor := range parsed.Anchors {
 			object, found, err := git.Resolve(recordedTree, anchor.LookupPath)
 			if err != nil {
-				return AnchorResult{}, fmt.Errorf("verify anchor %s at recorded tree %s: %w", anchor.LookupPath, recordedTree, err)
+				return AnchorResult{}, fmt.Errorf(
+					"verify anchor %s at recorded tree %s: %w",
+					anchor.LookupPath,
+					recordedTree,
+					err,
+				)
 			}
 			if !found {
 				reason = "anchor path absent at recorded tree: " + anchor.LookupPath
 				break
 			}
 			if !strings.HasPrefix(object.Hash, anchor.Hash) {
-				reason = fmt.Sprintf("anchor hash mismatch: %s expected=%s actual=%s", anchor.LookupPath, anchor.Hash, object.Hash)
+				reason = fmt.Sprintf(
+					"anchor hash mismatch: %s expected=%s actual=%s",
+					anchor.LookupPath,
+					anchor.Hash,
+					object.Hash,
+				)
 				break
 			}
 			if object.Type != anchor.ObjectType {
-				reason = fmt.Sprintf("anchor object type mismatch: %s expected=%s actual=%s", anchor.LookupPath, anchor.ObjectType, object.Type)
+				reason = fmt.Sprintf(
+					"anchor object type mismatch: %s expected=%s actual=%s",
+					anchor.LookupPath,
+					anchor.ObjectType,
+					object.Type,
+				)
 				break
 			}
 		}

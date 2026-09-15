@@ -150,7 +150,10 @@ func TestAskDistinguishesNotLiveFromCaptureFailure(t *testing.T) {
 		t.Fatalf("capture-failed ask=%+v", captureFailed)
 	}
 	if strings.Contains(captureFailed.Text, "executable file not found") {
-		t.Fatalf("capture-failed for the wrong reason (tmux itself missing, not a refused connection): %q", captureFailed.Text)
+		t.Fatalf(
+			"capture-failed for the wrong reason (tmux itself missing, not a refused connection): %q",
+			captureFailed.Text,
+		)
 	}
 	if strings.Contains(captureFailed.Text, "chat is not live") {
 		t.Fatalf("capture-failed text bled into not-live wording: %q", captureFailed.Text)

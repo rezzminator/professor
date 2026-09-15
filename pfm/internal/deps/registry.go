@@ -44,28 +44,135 @@ var fixedCommands = []Entry{
 	// tmux 1.8 introduced wait-for, the newest primitive used by the managed
 	// Claude launcher. Reference: upstream CHANGES, "CHANGES FROM 1.7 TO 1.8":
 	// https://github.com/tmux/tmux/blob/master/CHANGES
-	{Name: "tmux", Purpose: "fleet panes and chat transport", Required: true, VersionArgs: []string{"-V"}, MinVersion: "1.8", Parse: prefixedVersion("tmux"), InstallHint: "install tmux 1.8 or newer"},
-	{Name: "git", Purpose: "repository inspection and updates", Required: true, VersionArgs: []string{"--version"}, Parse: prefixedVersion("git version"), InstallHint: "install git"},
+	{
+		Name:        "tmux",
+		Purpose:     "fleet panes and chat transport",
+		Required:    true,
+		VersionArgs: []string{"-V"},
+		MinVersion:  "1.8",
+		Parse:       prefixedVersion("tmux"),
+		InstallHint: "install tmux 1.8 or newer",
+	},
+	{
+		Name:        "git",
+		Purpose:     "repository inspection and updates",
+		Required:    true,
+		VersionArgs: []string{"--version"},
+		Parse:       prefixedVersion("git version"),
+		InstallHint: "install git",
+	},
 	{Name: "sh", Purpose: "portable shell command execution", Required: true, InstallHint: "install a POSIX shell"},
-	{Name: "bash", Purpose: "installed compatibility scripts", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install bash"},
-	{Name: "zsh", Purpose: "interactive generated action execution", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install zsh"},
-	{Name: "ps", Purpose: "Darwin process-table inspection", Required: true, Platforms: []string{"darwin"}, InstallHint: "restore the system ps command"},
-	{Name: "lsof", Purpose: "Darwin open-file inspection", Required: true, Platforms: []string{"darwin"}, VersionArgs: []string{"-v"}, Parse: lsofVersion, InstallHint: "install lsof"},
-	{Name: "script", Purpose: "terminal-backed command execution", InstallHint: "install util-linux or the BSD script command"},
-	{Name: "setsid", Purpose: "detached Linux helper processes", Required: true, Platforms: []string{"linux"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install util-linux (setsid)"},
-	{Name: "nohup", Purpose: "detached helper fallback where setsid is absent", Platforms: []string{"linux", "darwin"}, InstallHint: "install coreutils (nohup)"},
-	{Name: "sleep", Purpose: "bounded shell-side polling", Required: true, InstallHint: "restore the system sleep command"},
-	{Name: "go", Purpose: "building a staged pfm update", VersionArgs: []string{"version"}, Parse: firstVersion, InstallHint: "install Go 1.24 or newer to use pfm update"},
-	{Name: "systemctl", Purpose: "Linux user-service wiring", Platforms: []string{"linux"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install systemd to enable user units"},
-	{Name: "systemd-run", Purpose: "durable chat scopes spawned from Linux user services", Platforms: []string{"linux"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "install systemd to spawn chats from the MCP service"},
-	{Name: "launchctl", Purpose: "Darwin launch-agent wiring", Required: true, Platforms: []string{"darwin"}, InstallHint: "restore the system launchctl command"},
+	{
+		Name:        "bash",
+		Purpose:     "installed compatibility scripts",
+		Required:    true,
+		VersionArgs: []string{"--version"},
+		Parse:       firstVersion,
+		InstallHint: "install bash",
+	},
+	{
+		Name:        "zsh",
+		Purpose:     "interactive generated action execution",
+		Required:    true,
+		VersionArgs: []string{"--version"},
+		Parse:       firstVersion,
+		InstallHint: "install zsh",
+	},
+	{
+		Name:        "ps",
+		Purpose:     "Darwin process-table inspection",
+		Required:    true,
+		Platforms:   []string{"darwin"},
+		InstallHint: "restore the system ps command",
+	},
+	{
+		Name:        "lsof",
+		Purpose:     "Darwin open-file inspection",
+		Required:    true,
+		Platforms:   []string{"darwin"},
+		VersionArgs: []string{"-v"},
+		Parse:       lsofVersion,
+		InstallHint: "install lsof",
+	},
+	{
+		Name:        "script",
+		Purpose:     "terminal-backed command execution",
+		InstallHint: "install util-linux or the BSD script command",
+	},
+	{
+		Name:        "setsid",
+		Purpose:     "detached Linux helper processes",
+		Required:    true,
+		Platforms:   []string{"linux"},
+		VersionArgs: []string{"--version"},
+		Parse:       firstVersion,
+		InstallHint: "install util-linux (setsid)",
+	},
+	{
+		Name:        "nohup",
+		Purpose:     "detached helper fallback where setsid is absent",
+		Platforms:   []string{"linux", "darwin"},
+		InstallHint: "install coreutils (nohup)",
+	},
+	{
+		Name:        "sleep",
+		Purpose:     "bounded shell-side polling",
+		Required:    true,
+		InstallHint: "restore the system sleep command",
+	},
+	{
+		Name:        "go",
+		Purpose:     "building a staged pfm update",
+		VersionArgs: []string{"version"},
+		Parse:       firstVersion,
+		InstallHint: "install Go 1.24 or newer to use pfm update",
+	},
+	{
+		Name:        "systemctl",
+		Purpose:     "Linux user-service wiring",
+		Platforms:   []string{"linux"},
+		VersionArgs: []string{"--version"},
+		Parse:       firstVersion,
+		InstallHint: "install systemd to enable user units",
+	},
+	{
+		Name:        "systemd-run",
+		Purpose:     "durable chat scopes spawned from Linux user services",
+		Platforms:   []string{"linux"},
+		VersionArgs: []string{"--version"},
+		Parse:       firstVersion,
+		InstallHint: "install systemd to spawn chats from the MCP service",
+	},
+	{
+		Name:        "launchctl",
+		Purpose:     "Darwin launch-agent wiring",
+		Required:    true,
+		Platforms:   []string{"darwin"},
+		InstallHint: "restore the system launchctl command",
+	},
 	// Absolute path: this is the door to the login keychain, where Claude Code
 	// keeps every account's OAuth credential on macOS, so it must never
 	// resolve to something a $PATH entry shadowed.
-	{Name: "security", Command: "/usr/bin/security", Purpose: "Darwin login-keychain OAuth credential reads", Required: true, Platforms: []string{"darwin"}, InstallHint: "restore the system security command"},
+	{
+		Name:        "security",
+		Command:     "/usr/bin/security",
+		Purpose:     "Darwin login-keychain OAuth credential reads",
+		Required:    true,
+		Platforms:   []string{"darwin"},
+		InstallHint: "restore the system security command",
+	},
 	// MinVersion 0.2.73 is the release the shipped .rumdl.toml policy (MD060
 	// compact style, per-file-ignores) was validated against.
-	{Name: "rumdl", Purpose: "markdown lint and format for prompts and docs", Required: false, Platforms: []string{"linux", "darwin"}, VersionArgs: []string{"--version"}, Parse: prefixedVersion("rumdl"), MinVersion: "0.2.73", InstallHint: "run pfm install to provision rumdl, or: uv tool install rumdl"},
+	{
+		Name:        "rumdl",
+		Purpose:     "markdown lint and format for prompts and docs",
+		Required:    false,
+		Platforms:   []string{"linux", "darwin"},
+		VersionArgs: []string{"--version"},
+		Parse:       prefixedVersion("rumdl"),
+		MinVersion:  "0.2.73",
+		InstallHint: "run pfm install to provision rumdl, or: uv tool install rumdl",
+	},
 }
 
 // Registry is the one complete dependency table. Configured engine names and
@@ -106,9 +213,30 @@ func Registry(options ...Options) []Entry {
 	}
 	harvestRoot := filepath.Join(resolved.Home, ".local", "state", "pfm", "harvest-python")
 	current := filepath.Join(harvestRoot, "env", resolved.GOOS+"-"+resolved.GOARCH, "current")
-	entries = append(entries,
-		Entry{Name: "uv", Command: filepath.Join(current, "uv"), Purpose: "provisioned harvestpy package verifier", Required: true, Platforms: []string{"linux", "darwin"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "run pfm install to provision harvestpy", Harvest: true},
-		Entry{Name: "harvestpy", Command: filepath.Join(current, "project", ".venv", "bin", "python"), Purpose: "provisioned harvestpy interpreter", Required: true, Platforms: []string{"linux", "darwin"}, VersionArgs: []string{"--version"}, Parse: firstVersion, InstallHint: "run pfm install to provision harvestpy", Harvest: true},
+	entries = append(
+		entries,
+		Entry{
+			Name:        "uv",
+			Command:     filepath.Join(current, "uv"),
+			Purpose:     "provisioned harvestpy package verifier",
+			Required:    true,
+			Platforms:   []string{"linux", "darwin"},
+			VersionArgs: []string{"--version"},
+			Parse:       firstVersion,
+			InstallHint: "run pfm install to provision harvestpy",
+			Harvest:     true,
+		},
+		Entry{
+			Name:        "harvestpy",
+			Command:     filepath.Join(current, "project", ".venv", "bin", "python"),
+			Purpose:     "provisioned harvestpy interpreter",
+			Required:    true,
+			Platforms:   []string{"linux", "darwin"},
+			VersionArgs: []string{"--version"},
+			Parse:       firstVersion,
+			InstallHint: "run pfm install to provision harvestpy",
+			Harvest:     true,
+		},
 	)
 	for index := range entries {
 		if entries[index].Command == "" {

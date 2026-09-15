@@ -9,10 +9,38 @@ import (
 func ocFixture() []store.OcSession {
 	return []store.OcSession{
 		{ID: "ses_live", Title: "live one", Directory: "/work/a", ProjectDir: "/work/a", TimeUpdatedMS: 9_000},
-		{ID: "ses_titled", Title: "titled", Directory: "/work/b", ProjectDir: "/work/b", FirstPrompt: "fallback text", TimeUpdatedMS: 8_000},
-		{ID: "ses_untitled", Title: "", Directory: "/work/c", ProjectDir: "/work/c", FirstPrompt: "untitled prompt body", TimeUpdatedMS: 7_000},
-		{ID: "ses_child", ParentID: "ses_titled", Title: "child", Directory: "/work/b", ProjectDir: "/work/b", TimeUpdatedMS: 6_000},
-		{ID: "ses_archived", Title: "archived", Directory: "/work/d", ProjectDir: "/work/d", TimeUpdatedMS: 5_000, TimeArchivedMS: 4_000},
+		{
+			ID:            "ses_titled",
+			Title:         "titled",
+			Directory:     "/work/b",
+			ProjectDir:    "/work/b",
+			FirstPrompt:   "fallback text",
+			TimeUpdatedMS: 8_000,
+		},
+		{
+			ID:            "ses_untitled",
+			Title:         "",
+			Directory:     "/work/c",
+			ProjectDir:    "/work/c",
+			FirstPrompt:   "untitled prompt body",
+			TimeUpdatedMS: 7_000,
+		},
+		{
+			ID:            "ses_child",
+			ParentID:      "ses_titled",
+			Title:         "child",
+			Directory:     "/work/b",
+			ProjectDir:    "/work/b",
+			TimeUpdatedMS: 6_000,
+		},
+		{
+			ID:             "ses_archived",
+			Title:          "archived",
+			Directory:      "/work/d",
+			ProjectDir:     "/work/d",
+			TimeUpdatedMS:  5_000,
+			TimeArchivedMS: 4_000,
+		},
 	}
 }
 

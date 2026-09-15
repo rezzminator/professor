@@ -27,8 +27,10 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 		{
 			name: "professor prompt file in argv",
 			observation: spawnObservation{
-				Argv: []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md",
-					"--settings", `{"outputStyle":"default"}`},
+				Argv: []string{
+					"claude", "--resume", "abc", "--system-prompt-file", "/p.md",
+					"--settings", `{"outputStyle":"default"}`,
+				},
 				Environ:     map[string]string{},
 				StartedUnix: layer + 60,
 			},
@@ -94,8 +96,10 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 			// violation.
 			name: "professor prompt file with the settings flag, seat older than the layer",
 			observation: spawnObservation{
-				Argv: []string{"claude", "--resume", "abc", "--system-prompt-file", "/p.md",
-					"--settings", `{"outputStyle":"default"}`},
+				Argv: []string{
+					"claude", "--resume", "abc", "--system-prompt-file", "/p.md",
+					"--settings", `{"outputStyle":"default"}`,
+				},
 				Environ:     map[string]string{},
 				StartedUnix: layer - 3600,
 			},
@@ -322,7 +326,11 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 	}
 	// Launched by an older pfm between the prompt and the binary: prompt
 	// carried, --settings not. History, not a broken door.
-	seat := spawnObservation{Argv: []string{"claude", "--system-prompt-file", prompt}, Environ: map[string]string{}, StartedUnix: promptAt.Unix() + 3600}
+	seat := spawnObservation{
+		Argv:        []string{"claude", "--system-prompt-file", prompt},
+		Environ:     map[string]string{},
+		StartedUnix: promptAt.Unix() + 3600,
+	}
 	if verdict, reason := classifySpawn(seat, stamp); verdict != spawnPredatesLayer {
 		t.Fatalf("older seat = %s (%s), want %s", verdict, reason, spawnPredatesLayer)
 	}
@@ -333,7 +341,15 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 	}
 	// The binary unreadable: the prompt still stands and the signal says why.
 	spawnDoorExecutable = func() (string, error) { return "", errors.New("no executable path") }
-	if stamp, signal := spawnDoorStamp(home); stamp != promptAt.Unix() || !strings.Contains(signal, "no executable path") {
-		t.Fatalf("unreadable binary: spawnDoorStamp = %d %q; want the prompt's %d and the reason", stamp, signal, promptAt.Unix())
+	if stamp, signal := spawnDoorStamp(
+		home,
+	); stamp != promptAt.Unix() ||
+		!strings.Contains(signal, "no executable path") {
+		t.Fatalf(
+			"unreadable binary: spawnDoorStamp = %d %q; want the prompt's %d and the reason",
+			stamp,
+			signal,
+			promptAt.Unix(),
+		)
 	}
 }

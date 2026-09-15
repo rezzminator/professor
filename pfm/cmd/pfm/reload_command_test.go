@@ -30,6 +30,7 @@ func (reloadTargetTmux) SendKey(context.Context, string, string, string) error {
 func (reloadTargetTmux) SendLiteral(context.Context, string, string, string) error {
 	return nil
 }
+
 func (reloadTargetTmux) Respawn(context.Context, string, string, string, string) error {
 	return nil
 }
@@ -136,7 +137,11 @@ func TestReloadTargetWithSockOnlyKeepsTheSinglePaneRule(t *testing.T) {
 		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr,
 	)
 	if code == 0 || !strings.Contains(stderr.String(), "multiple panes") {
-		t.Fatalf("reload target with --sock only and multiple panes code=%d stderr=%q, want the multi-pane refusal", code, stderr.String())
+		t.Fatalf(
+			"reload target with --sock only and multiple panes code=%d stderr=%q, want the multi-pane refusal",
+			code,
+			stderr.String(),
+		)
 	}
 
 	single := []reload.Pane{{ID: "%7", PID: 77, CurrentPath: "/solo"}}

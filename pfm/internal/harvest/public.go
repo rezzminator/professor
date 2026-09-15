@@ -51,7 +51,11 @@ func (h *Harvester) FetchPublic(ctx context.Context, source string, options Fetc
 		case strings.Contains(err.Error(), "cache directory"), strings.Contains(err.Error(), "handle is unavailable"):
 			kind = "internal"
 		}
-		return h.PublicResult(source, Result{Source: source, Error: "public source resolution failed", ErrorKind: kind}, options.SizeOnly)
+		return h.PublicResult(
+			source,
+			Result{Source: source, Error: "public source resolution failed", ErrorKind: kind},
+			options.SizeOnly,
+		)
 	}
 	return h.PublicResult(source, h.FetchWithOptions(ctx, resolved, options), options.SizeOnly)
 }
@@ -60,7 +64,14 @@ func (h *Harvester) FetchPublic(ctx context.Context, source string, options Fetc
 // rung traces, cache metadata, or private filesystem paths.
 func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Result {
 	if result.Error != "" {
-		log.Printf("harvest: public result failure for %q: kind=%q status=%d challenge=%t error=%v", source, result.ErrorKind, result.HTTPStatus, result.Challenge, result.Error)
+		log.Printf(
+			"harvest: public result failure for %q: kind=%q status=%d challenge=%t error=%v",
+			source,
+			result.ErrorKind,
+			result.HTTPStatus,
+			result.Challenge,
+			result.Error,
+		)
 		return PublicFailure(source, result)
 	}
 
@@ -88,7 +99,12 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 		if publicBinaryResult(result.Kind, result.Path, raw) {
 			ext, ok := publicBinaryExtension(result.Kind, result.Path, raw)
 			if !ok {
-				return h.publicExportFailure(source, result, "validate binary artifact", errors.New("unrecognized binary kind"))
+				return h.publicExportFailure(
+					source,
+					result,
+					"validate binary artifact",
+					errors.New("unrecognized binary kind"),
+				)
 			}
 			publicPath, err := h.publicArtifactPath(source, result.Kind, result.Path, ext)
 			if err != nil {
@@ -117,8 +133,14 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 			fetchedAt := ""
 			body = string(raw)
 			meta, parsed := parseFrontmatter(string(raw))
-			if strings.HasPrefix(string(raw), "---\n") && meta["source"] != "harvester" && (meta["url"] != "" || meta["method"] != "" || meta["rungs"] != "") {
-				return h.publicExportFailure(source, result, "validate cached artifact metadata", errors.New("artifact provenance is not a harvester document"))
+			if strings.HasPrefix(string(raw), "---\n") && meta["source"] != "harvester" &&
+				(meta["url"] != "" || meta["method"] != "" || meta["rungs"] != "") {
+				return h.publicExportFailure(
+					source,
+					result,
+					"validate cached artifact metadata",
+					errors.New("artifact provenance is not a harvester document"),
+				)
 			}
 			if meta["source"] == "harvester" {
 				body = parsed
@@ -140,11 +162,21 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 		}
 	} else {
 		if result.Kind != "archive_member" && result.Kind != "archive" {
-			return h.publicExportFailure(source, result, "publish result without complete artifact", errors.New("result has no complete artifact path"))
+			return h.publicExportFailure(
+				source,
+				result,
+				"publish result without complete artifact",
+				errors.New("result has no complete artifact path"),
+			)
 		}
 		body = result.Content
 		if strings.TrimSpace(body) == "" {
-			return h.publicExportFailure(source, result, "publish empty artifact", errors.New("successful result has no artifact"))
+			return h.publicExportFailure(
+				source,
+				result,
+				"publish empty artifact",
+				errors.New("successful result has no artifact"),
+			)
 		}
 		if strings.EqualFold(result.Kind, "archive") {
 			body = h.rewriteArchiveSource(source, result.Source, body)
@@ -196,13 +228,15 @@ func (h *Harvester) publicArchiveListing(source string, members []Member) string
 
 func (h *Harvester) publicArchiveDisplay(source string) string {
 	display := strings.TrimSpace(source)
-	if strings.HasPrefix(strings.ToLower(display), "http://") || strings.HasPrefix(strings.ToLower(display), "https://") {
+	if strings.HasPrefix(strings.ToLower(display), "http://") ||
+		strings.HasPrefix(strings.ToLower(display), "https://") {
 		if handle, err := h.PublicHandle(display); err == nil {
 			display = handle
 		} else {
 			display = "requested archive"
 		}
-	} else if strings.HasPrefix(display, "/") || strings.HasPrefix(strings.ToLower(display), "file://") {
+	} else if strings.HasPrefix(display, "/") ||
+		strings.HasPrefix(strings.ToLower(display), "file://") {
 		display = "requested archive"
 	}
 	return display
@@ -277,7 +311,30 @@ func publicCacheStatus(status string) string {
 
 func publicKind(kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "pdf", "docx", "xlsx", "pptx", "csv", "json", "epub", "html", "txt", "md", "jpg", "png", "gif", "webp", "bmp", "tiff", "svg", "image", "zip", "tar", "7z", "rar", "archive", "archive_member":
+	case "pdf",
+		"docx",
+		"xlsx",
+		"pptx",
+		"csv",
+		"json",
+		"epub",
+		"html",
+		"txt",
+		"md",
+		"jpg",
+		"png",
+		"gif",
+		"webp",
+		"bmp",
+		"tiff",
+		"svg",
+		"image",
+		"zip",
+		"tar",
+		"7z",
+		"rar",
+		"archive",
+		"archive_member":
 		return strings.ToLower(strings.TrimSpace(kind))
 	default:
 		return ""
@@ -335,7 +392,8 @@ func publicBinaryExtension(kind, path string, body []byte) (string, bool) {
 				return ".bmp", true
 			case bytes.HasPrefix(body, []byte("II*\x00")), bytes.HasPrefix(body, []byte("MM\x00*")):
 				return ".tiff", true
-			case bytes.HasPrefix(bytes.TrimSpace(body), []byte("<svg")), bytes.HasPrefix(bytes.TrimSpace(body), []byte("<?xml")) && bytes.Contains(body, []byte("<svg")):
+			case bytes.HasPrefix(bytes.TrimSpace(body), []byte("<svg")),
+				bytes.HasPrefix(bytes.TrimSpace(body), []byte("<?xml")) && bytes.Contains(body, []byte("<svg")):
 				return ".svg", true
 			}
 		}
@@ -350,7 +408,12 @@ func publicBinaryExtension(kind, path string, body []byte) (string, bool) {
 
 func (h *Harvester) publicExportFailure(source string, result Result, operation string, err error) Result {
 	log.Printf("harvest: public export %s failed for %q (path=%q): %v", operation, source, result.Path, err)
-	failure := Result{Source: source, Kind: publicKind(result.Kind), ErrorKind: "internal", Error: "public export failed"}
+	failure := Result{
+		Source:    source,
+		Kind:      publicKind(result.Kind),
+		ErrorKind: "internal",
+		Error:     "public export failed",
+	}
 	return PublicFailure(source, failure)
 }
 
@@ -417,7 +480,9 @@ func publicErrorKind(result Result) string {
 		return "dns"
 	case strings.Contains(err, "timed out"), strings.Contains(err, "timeout"):
 		return "timeout"
-	case strings.Contains(err, "connection refused"), strings.Contains(err, "connection reset"), strings.Contains(err, "connect:"):
+	case strings.Contains(err, "connection refused"),
+		strings.Contains(err, "connection reset"),
+		strings.Contains(err, "connect:"):
 		return "connect"
 	case strings.Contains(err, "too large"), strings.Contains(err, "exceeds"), strings.Contains(err, "maximum"):
 		return "oversized"
@@ -425,11 +490,16 @@ func publicErrorKind(result Result) string {
 		return "conversion"
 	case strings.Contains(err, "not found"), strings.Contains(err, "missing"):
 		return "missing"
-	case strings.Contains(err, "invalid url"), strings.Contains(err, "unsupported url"), strings.Contains(err, "source is empty"):
+	case strings.Contains(err, "invalid url"),
+		strings.Contains(err, "unsupported url"),
+		strings.Contains(err, "source is empty"):
 		return "invalid"
 	case strings.Contains(err, "findworks"), strings.Contains(err, "find works"), strings.Contains(err, "title — use"):
 		return "ambiguous"
-	case strings.Contains(err, "fetchimage"), strings.Contains(err, "fetch image"), strings.Contains(err, "archive tool"), strings.Contains(err, "use the `archive`"):
+	case strings.Contains(err, "fetchimage"),
+		strings.Contains(err, "fetch image"),
+		strings.Contains(err, "archive tool"),
+		strings.Contains(err, "use the `archive`"):
 		return "wrong_kind"
 	case strings.Contains(err, "cache"), strings.Contains(err, "storage"), strings.Contains(err, "read local file"):
 		return "internal"

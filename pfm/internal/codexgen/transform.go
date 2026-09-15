@@ -15,8 +15,10 @@ type TransformOptions struct {
 	ReplaceClaudeFile bool
 }
 
-var frontmatterScalar = regexp.MustCompile(`^([A-Za-z-]+):\s*([>|])[-+]?\s*$`)
-var frontmatterField = regexp.MustCompile(`^([A-Za-z-]+):\s*(.*)$`)
+var (
+	frontmatterScalar = regexp.MustCompile(`^([A-Za-z-]+):\s*([>|])[-+]?\s*$`)
+	frontmatterField  = regexp.MustCompile(`^([A-Za-z-]+):\s*(.*)$`)
+)
 
 // parseFrontmatter reads the two-fence YAML subset used by command files. It
 // deliberately rejects malformed fences: silently treating a malformed

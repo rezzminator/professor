@@ -3,8 +3,9 @@ package installer
 import (
 	"encoding/json"
 	"fmt"
-	"hostops/pfm/internal/codexappendix"
 	"strings"
+
+	"hostops/pfm/internal/codexappendix"
 )
 
 // codexClearMatcher is the matcher the retired Codex SessionStart clear-kill
@@ -13,7 +14,12 @@ import (
 const codexClearMatcher = "startup|resume|clear"
 
 // updateCodexHooks preserves personal handlers, retires clear-kill, and owns the appendix.
-func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHookCounts) ([]byte, bool, settingsHookCounts, error) {
+func updateCodexHooks(
+	raw []byte,
+	home string,
+	uninstall bool,
+	owned settingsHookCounts,
+) ([]byte, bool, settingsHookCounts, error) {
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
 		return nil, false, nil, err
@@ -67,7 +73,12 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 		}
 	}
 
-	if !uninstall && !hasHookCommandWithMatcher(hookEntries(document, "SessionStart", false), codexappendix.Command(home), codexappendix.Matcher) {
+	if !uninstall &&
+		!hasHookCommandWithMatcher(
+			hookEntries(document, "SessionStart", false),
+			codexappendix.Command(home),
+			codexappendix.Matcher,
+		) {
 		appendHookWithMatcher(document, "SessionStart", codexappendix.Matcher, codexappendix.Command(home))
 		changed = true
 	}
@@ -89,7 +100,14 @@ func updateCodexHooks(raw []byte, home string, uninstall bool, owned settingsHoo
 			}
 		}
 	}
-	nextOwned := nextSettingsHookOwnership(before, countSettingsHookCommands(document), owned, pfmBinary, uninstall, settingsDocumentHasMixedOwnershipEntry(document, pfmBinary))
+	nextOwned := nextSettingsHookOwnership(
+		before,
+		countSettingsHookCommands(document),
+		owned,
+		pfmBinary,
+		uninstall,
+		settingsDocumentHasMixedOwnershipEntry(document, pfmBinary),
+	)
 	if !changed {
 		return raw, false, nextOwned, nil
 	}

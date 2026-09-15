@@ -10,7 +10,11 @@ import (
 // or a project .mcp.json would report this machine migrated when it is not.
 func TestInspectHarvesterClientCutoverFlagsAStandaloneEntryInTheClaudeUserRegistry(t *testing.T) {
 	home := t.TempDir()
-	writeFixture(t, filepath.Join(home, ".claude.json"), `{"mcpServers":{"harvester":{"type":"stdio","command":"uv","args":["run","harvester"]}}}`)
+	writeFixture(
+		t,
+		filepath.Join(home, ".claude.json"),
+		`{"mcpServers":{"harvester":{"type":"stdio","command":"uv","args":["run","harvester"]}}}`,
+	)
 	registries := []string{filepath.Join(home, ".claude.json")}
 	for _, report := range InspectHarvesterClientCutover(home, 8377, registries, nil) {
 		if report.State == MCPClientLegacyStandalone {

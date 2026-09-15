@@ -40,11 +40,18 @@ func (pinnedHarvestProvisioner) Plan(platform harvestpy.Platform) (harvestpy.Ins
 	return harvestpy.Plan(platform)
 }
 
-func (pinnedHarvestProvisioner) Provision(ctx context.Context, options harvestpy.ProvisionOptions) (harvestpy.ProvisionResult, error) {
+func (pinnedHarvestProvisioner) Provision(
+	ctx context.Context,
+	options harvestpy.ProvisionOptions,
+) (harvestpy.ProvisionResult, error) {
 	return harvestpy.Provision(ctx, options)
 }
 
-func (pinnedHarvestProvisioner) Check(ctx context.Context, root string, platform harvestpy.Platform) (harvestpy.CheckReport, error) {
+func (pinnedHarvestProvisioner) Check(
+	ctx context.Context,
+	root string,
+	platform harvestpy.Platform,
+) (harvestpy.CheckReport, error) {
 	return harvestpy.Check(ctx, root, platform)
 }
 
@@ -139,7 +146,7 @@ func Run(ctx context.Context, options Options) (Report, error) {
 // systemctl started, ran to completion, and reported a status — inactive is
 // proceed-safe, as before. Anything else means the probe never got an
 // answer, and the caller must not read that silence as safety.
-func nameSyncServiceRunning(ctx context.Context, runner CommandRunner) (running bool, probed bool) {
+func nameSyncServiceRunning(ctx context.Context, runner CommandRunner) (running, probed bool) {
 	err := runner.Run(ctx, "systemctl", "--user", "is-active", "--quiet", "pfm-name-sync.service")
 	if err == nil {
 		return true, true
@@ -287,7 +294,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if schedulerIsLaunchd {
 		if installer.apply {
 			if installer.options.launchGateUnprobed {
-				installer.skip("launch-agent gate NOT probed (runner cannot read output); an apply during a name-sync run is not refused")
+				installer.skip(
+					"launch-agent gate NOT probed (runner cannot read output); an apply during a name-sync run is not refused",
+				)
 			} else {
 				installer.ok("launch-agent gate: name-sync is not mid-execution")
 			}
@@ -303,7 +312,9 @@ func (installer *engine) install(ctx context.Context) error {
 		}
 	} else {
 		if installer.apply && installer.options.nameSyncGateUnprobed {
-			installer.skip("name-sync gate NOT probed (systemctl is-active could not run); an apply during a name-sync run is not refused")
+			installer.skip(
+				"name-sync gate NOT probed (systemctl is-active could not run); an apply during a name-sync run is not refused",
+			)
 		}
 		unitChanged, err := installer.wireUnits(ctx)
 		if err != nil {
@@ -635,7 +646,8 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 func codexPlanBlockers(problems []string) []string {
 	blockers := make([]string, 0)
 	for _, problem := range problems {
-		if strings.HasPrefix(problem, "MISSING ") || strings.HasPrefix(problem, "STALE ") || strings.HasPrefix(problem, "ORPHAN ") {
+		if strings.HasPrefix(problem, "MISSING ") || strings.HasPrefix(problem, "STALE ") ||
+			strings.HasPrefix(problem, "ORPHAN ") {
 			continue
 		}
 		blockers = append(blockers, problem)
@@ -646,7 +658,13 @@ func codexPlanBlockers(problems []string) []string {
 func (installer *engine) planCodexCommands(assets []assetFile, future bool) (result codexgen.Result, returnErr error) {
 	sourceHome := ""
 	cleanup := func() error { return nil }
-	if future && filepath.Clean(installer.options.ConfigDir) == filepath.Join(filepath.Clean(installer.options.Home), ".claude") {
+	if future &&
+		filepath.Clean(
+			installer.options.ConfigDir,
+		) == filepath.Join(
+			filepath.Clean(installer.options.Home),
+			".claude",
+		) {
 		var err error
 		sourceHome, cleanup, err = installer.futureCommandSource(assets)
 		if err != nil {
@@ -763,7 +781,10 @@ func copyPlanTree(source, target string) error {
 			return err
 		}
 		for _, entry := range entries {
-			if err := copyPlanTree(filepath.Join(source, entry.Name()), filepath.Join(target, entry.Name())); err != nil {
+			if err := copyPlanTree(
+				filepath.Join(source, entry.Name()),
+				filepath.Join(target, entry.Name()),
+			); err != nil {
 				return err
 			}
 		}
@@ -838,7 +859,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		}
 	}
 	for _, name := range append(append([]string(nil), unitNames...), mcpUnitName) {
-		if err := installer.unlinkOne(filepath.Join(installer.options.Home, ".config", "systemd", "user", name)); err != nil {
+		if err := installer.unlinkOne(
+			filepath.Join(installer.options.Home, ".config", "systemd", "user", name),
+		); err != nil {
 			return err
 		}
 	}
@@ -989,7 +1012,10 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 		return fmt.Errorf("harvestpy target %s is blocked-exact-lock", platform)
 	}
 	if !installer.apply {
-		installer.say("harvestpy dry-run: Plan only; writes=0 network=0 offline=%t (apply requires valid cached pins or network)", installer.options.HarvestOffline)
+		installer.say(
+			"harvestpy dry-run: Plan only; writes=0 network=0 offline=%t (apply requires valid cached pins or network)",
+			installer.options.HarvestOffline,
+		)
 		return nil
 	}
 	root := harvestPythonRoot(installer.options.Home)
@@ -1011,8 +1037,13 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 	})
 	if provisionErr != nil {
 		if errors.Is(provisionErr, harvestpy.ErrOfflineUnavailable) {
-			installer.say("harvestpy offline: required pinned input is not in the verified cached inputs; prewarm the cache or rerun with network")
-			return fmt.Errorf("harvestpy provisioning offline; verified cached inputs are unavailable: %w", provisionErr)
+			installer.say(
+				"harvestpy offline: required pinned input is not in the verified cached inputs; prewarm the cache or rerun with network",
+			)
+			return fmt.Errorf(
+				"harvestpy provisioning offline; verified cached inputs are unavailable: %w",
+				provisionErr,
+			)
 		}
 		return fmt.Errorf("harvestpy provision %s: %w", platform, provisionErr)
 	}
@@ -1149,7 +1180,11 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		for _, relative := range []string{"systemd/pfm-mcp.service", "launchd/com.professor.pfm.mcp.plist"} {
 			mcpAsset := filepath.Join(installer.managedRoot, filepath.FromSlash(relative))
 			if _, err := os.Lstat(mcpAsset); err == nil {
-				message := fmt.Sprintf("remove %s (no MCP server is enabled in %s)", mcpAsset, installer.options.MCPConfigPath)
+				message := fmt.Sprintf(
+					"remove %s (no MCP server is enabled in %s)",
+					mcpAsset,
+					installer.options.MCPConfigPath,
+				)
 				if err := installer.change(message, func() error { return os.Remove(mcpAsset) }); err != nil {
 					return false, err
 				}
@@ -1195,7 +1230,10 @@ func (installer *engine) removeManagedAssets(assets []assetFile) error {
 				strings.Count(ordered[right], string(filepath.Separator))
 		})
 		for _, directory := range ordered {
-			if err := os.Remove(directory); err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, fs.ErrInvalid) {
+			if err := os.Remove(
+				directory,
+			); err != nil && !errors.Is(err, fs.ErrNotExist) &&
+				!errors.Is(err, fs.ErrInvalid) {
 				if !errors.Is(err, fs.ErrExist) {
 					installer.skip("leave non-empty managed directory " + directory + ": " + err.Error())
 				}
@@ -1511,7 +1549,10 @@ func (installer *engine) skillTarget(configDir, asset string) (string, bool) {
 func (installer *engine) retireLegacySwapCommand() error {
 	for _, configDir := range installer.claudeConfigDirs() {
 		path := filepath.Join(configDir, "commands", "swap.md")
-		if target, linked := resolvedLink(path); !linked || target != filepath.Join(installer.managedRoot, "swap.command.md") {
+		if target, linked := resolvedLink(
+			path,
+		); !linked ||
+			target != filepath.Join(installer.managedRoot, "swap.command.md") {
 			continue
 		}
 		if err := installer.unlinkOne(path); err != nil {
@@ -1565,12 +1606,17 @@ func (installer *engine) retireBBInstall() error {
 		"codex-skills/bb/SKILL.md",
 		"codex-skills/bb/agents/openai.yaml",
 	} {
-		if err := installer.retire(filepath.Join(installer.managedRoot, filepath.FromSlash(relative)), "retired /bb surface"); err != nil {
+		if err := installer.retire(
+			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
+			"retired /bb surface",
+		); err != nil {
 			return err
 		}
 	}
 	for _, relative := range []string{"codex-skills/bb/agents", "codex-skills/bb", "codex-skills"} {
-		if err := installer.retireEmptyDirectory(filepath.Join(installer.managedRoot, filepath.FromSlash(relative))); err != nil {
+		if err := installer.retireEmptyDirectory(
+			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
+		); err != nil {
 			return err
 		}
 	}
@@ -1631,12 +1677,17 @@ func (installer *engine) retireChatCommands() error {
 		"chat/group/read.command.md", "chat/group/send.command.md", "chat/group/subscribe.command.md",
 		"chat/self/compact.command.md", "chat/chat.sh", "chat/history.sh",
 	} {
-		if err := installer.retire(filepath.Join(installer.managedRoot, filepath.FromSlash(relative)), "retired /chat: slash command — superseded by the chat MCP tools"); err != nil {
+		if err := installer.retire(
+			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
+			"retired /chat: slash command — superseded by the chat MCP tools",
+		); err != nil {
 			return err
 		}
 	}
 	for _, relative := range []string{"chat/group", "chat/self", "chat"} {
-		if err := installer.retireEmptyDirectory(filepath.Join(installer.managedRoot, filepath.FromSlash(relative))); err != nil {
+		if err := installer.retireEmptyDirectory(
+			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
+		); err != nil {
 			return err
 		}
 	}
@@ -1647,7 +1698,9 @@ func (installer *engine) retireChatCommands() error {
 	// would wrongly abort every future install for an operator with one
 	// leftover file, so the host cleanup is best-effort instead.
 	for _, relative := range []string{"chat/group", "chat/self", "chat"} {
-		if err := installer.retireEmptyDirectoryTolerant(filepath.Join(commands, filepath.FromSlash(relative))); err != nil {
+		if err := installer.retireEmptyDirectoryTolerant(
+			filepath.Join(commands, filepath.FromSlash(relative)),
+		); err != nil {
 			return err
 		}
 	}
@@ -1954,7 +2007,11 @@ func (installer *engine) wireSettings() error {
 			installer.skip("invalid settings JSON at " + candidate + ": " + err.Error())
 			continue
 		}
-		if installer.options.Mode != ModeUninstall && hasPreservedMixedExploreDenyMatcher(updated, filepath.Join(installer.options.Home, ".local", "bin", "pfm")) {
+		if installer.options.Mode != ModeUninstall &&
+			hasPreservedMixedExploreDenyMatcher(
+				updated,
+				filepath.Join(installer.options.Home, ".local", "bin", "pfm"),
+			) {
 			installer.skip("mixed PreToolUse hook entry preserved with its existing matcher at " + candidate)
 		}
 		if len(nextOwned) == 0 {
@@ -2106,12 +2163,21 @@ func (installer *engine) wireCodexHooks() error {
 		}
 		seenAccounts[physical] = true
 		if installer.options.Mode == ModeUninstall {
-			if err := installer.change("remove appendix hook trust "+account, func() error { return codexappendix.Unregister(account) }); err != nil {
+			if err := installer.change(
+				"remove appendix hook trust "+account,
+				func() error { return codexappendix.Unregister(account) },
+			); err != nil {
 				return err
 			}
 		} else if installer.options.CodexBinary != "" {
 			if err := installer.change("trust Professor appendix hook "+account, func() error {
-				return codexappendix.Register(context.Background(), installer.options.CodexBinary, installer.options.Home, account, false)
+				return codexappendix.Register(
+					context.Background(),
+					installer.options.CodexBinary,
+					installer.options.Home,
+					account,
+					false,
+				)
 			}); err != nil {
 				return err
 			}
@@ -2227,30 +2293,33 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) error {
 		return fmt.Errorf("scan retired kill carrier: %w", err)
 	}
 	sort.Strings(ids)
-	return installer.change(fmt.Sprintf("merge %d retired carrier kill(s) into SQLite without overwriting existing rows", len(ids)), func() error {
-		values := paths.Values{
-			Home:     installer.options.Home,
-			SharedDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
-		}
-		state := shared.Open(ctx, values)
-		defer state.Close()
-		if err := state.Degraded(); err != nil {
-			return fmt.Errorf("open shared store before carrier retirement: %w", err)
-		}
-		existing, err := state.KilledAt(ctx)
-		if err != nil {
-			return fmt.Errorf("read shared kills before carrier retirement: %w", err)
-		}
-		for _, id := range ids {
-			if _, found := existing[id]; found {
-				continue
+	return installer.change(
+		fmt.Sprintf("merge %d retired carrier kill(s) into SQLite without overwriting existing rows", len(ids)),
+		func() error {
+			values := paths.Values{
+				Home:     installer.options.Home,
+				SharedDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
 			}
-			if err := state.Kill(ctx, id, 0); err != nil {
-				return fmt.Errorf("import retired carrier kill %q: %w", id, err)
+			state := shared.Open(ctx, values)
+			defer state.Close()
+			if err := state.Degraded(); err != nil {
+				return fmt.Errorf("open shared store before carrier retirement: %w", err)
 			}
-		}
-		return nil
-	})
+			existing, err := state.KilledAt(ctx)
+			if err != nil {
+				return fmt.Errorf("read shared kills before carrier retirement: %w", err)
+			}
+			for _, id := range ids {
+				if _, found := existing[id]; found {
+					continue
+				}
+				if err := state.Kill(ctx, id, 0); err != nil {
+					return fmt.Errorf("import retired carrier kill %q: %w", id, err)
+				}
+			}
+			return nil
+		},
+	)
 }
 
 func (installer *engine) retirePredecessors() error {
@@ -2265,7 +2334,10 @@ func (installer *engine) retirePredecessors() error {
 				return err
 			}
 		}
-		if err := installer.retireGlob(filepath.Join(config, "bin", "cx-recover.sh.pre-professor-*"), "retired recovery artifact"); err != nil {
+		if err := installer.retireGlob(
+			filepath.Join(config, "bin", "cx-recover.sh.pre-professor-*"),
+			"retired recovery artifact",
+		); err != nil {
 			return err
 		}
 		for _, name := range []string{
@@ -2276,12 +2348,18 @@ func (installer *engine) retirePredecessors() error {
 			"statusline/gpt-usage.py",
 			"statusline/vertex_daily_tokens.py",
 		} {
-			if err := installer.retire(filepath.Join(config, filepath.FromSlash(name)), "native pfm statusline"); err != nil {
+			if err := installer.retire(
+				filepath.Join(config, filepath.FromSlash(name)),
+				"native pfm statusline",
+			); err != nil {
 				return err
 			}
 		}
 		for _, name := range []string{"dump.md", "chat-ops.sh", "group.sh"} {
-			if err := installer.retire(filepath.Join(config, "commands", "chat", name), "native pfm chat command"); err != nil {
+			if err := installer.retire(
+				filepath.Join(config, "commands", "chat", name),
+				"native pfm chat command",
+			); err != nil {
 				return err
 			}
 		}
@@ -2299,7 +2377,9 @@ func (installer *engine) retirePredecessors() error {
 // leaving account credentials, transcript directories, and live sockets alone.
 func (installer *engine) retireLegacyCommands() error {
 	for _, name := range []string{"cc-fleet", "cc-ls", "cc-open", "cc-swap", "cc-revive", "cc-clean"} {
-		if err := installer.retireLegacyCommand(filepath.Join(installer.options.Home, ".local", "bin", name)); err != nil {
+		if err := installer.retireLegacyCommand(
+			filepath.Join(installer.options.Home, ".local", "bin", name),
+		); err != nil {
 			return err
 		}
 	}
@@ -2341,7 +2421,10 @@ func (installer *engine) retireLegacyCommand(path string) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("refuse to retire non-regular command %s", path)
 	}
-	backup := availableBackup(filepath.Join(installer.options.Home, ".local", "state", "pfm", "retired-commands", filepath.Base(path)), installer.stamp)
+	backup := availableBackup(
+		filepath.Join(installer.options.Home, ".local", "state", "pfm", "retired-commands", filepath.Base(path)),
+		installer.stamp,
+	)
 	return installer.change("retire "+path+" (backup: "+backup+")", func() error {
 		if err := copyBackup(path, backup); err != nil {
 			return fmt.Errorf("backup retired command %s: %w", path, err)
@@ -2413,7 +2496,9 @@ func (installer *engine) retireRenamedGlobalAgents() error {
 					return fmt.Errorf("read retired global agent %s: %w", path, readErr)
 				}
 				if frontmatterName != retired {
-					installer.skip(path + " is not the retired " + retired + " agent (frontmatter name=" + frontmatterName + ") — left alone")
+					installer.skip(
+						path + " is not the retired " + retired + " agent (frontmatter name=" + frontmatterName + ") — left alone",
+					)
 					continue
 				}
 			}

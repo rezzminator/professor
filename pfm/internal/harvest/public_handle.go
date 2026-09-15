@@ -65,8 +65,12 @@ func publicIdentityHandle(source string) bool {
 		return NormalizeISBN(value) != ""
 	}
 	parsed, err := url.Parse(s)
-	if err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.User == nil && parsed.Port() == "" &&
-		(strings.EqualFold(parsed.Hostname(), "doi.org") || strings.EqualFold(parsed.Hostname(), "dx.doi.org")) && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Opaque == "" {
+	if err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.User == nil &&
+		parsed.Port() == "" &&
+		(strings.EqualFold(parsed.Hostname(), "doi.org") || strings.EqualFold(parsed.Hostname(), "dx.doi.org")) &&
+		parsed.RawQuery == "" &&
+		parsed.Fragment == "" &&
+		parsed.Opaque == "" {
 		return publicBareDOI.MatchString(strings.TrimPrefix(parsed.Path, "/"))
 	}
 	return false

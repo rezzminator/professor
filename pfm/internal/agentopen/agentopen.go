@@ -28,7 +28,10 @@ type OutsidePFMError struct {
 func (failure *OutsidePFMError) Error() string {
 	return fmt.Sprintf(
 		"⚙ %s: running outside pfm (pid %d, parent %s) — no pane to attach; kill %d and open the row to resume it in a pane",
-		failure.Name, failure.PID, failure.Parent, failure.PID,
+		failure.Name,
+		failure.PID,
+		failure.Parent,
+		failure.PID,
 	)
 }
 
@@ -67,7 +70,14 @@ func (agent *Agent) UnmarshalJSON(content []byte) error {
 		}
 		pid = parsed
 	}
-	*agent = Agent{SessionID: wire.SessionID, ShortID: wire.ShortID, Name: wire.Name, PID: pid, Status: wire.Status, State: wire.State}
+	*agent = Agent{
+		SessionID: wire.SessionID,
+		ShortID:   wire.ShortID,
+		Name:      wire.Name,
+		PID:       pid,
+		Status:    wire.Status,
+		State:     wire.State,
+	}
 	return nil
 }
 
@@ -183,13 +193,15 @@ func New(dependencies Dependencies) *Opener {
 	if claudeBinary == "" {
 		claudeBinary = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	return &Opener{sidDir: dependencies.SIDDir, home: dependencies.Home,
+	return &Opener{
+		sidDir: dependencies.SIDDir, home: dependencies.Home,
 		accounts:     accounts,
 		claudeBinary: claudeBinary,
 		commands:     dependencies.Commands, processes: dependencies.Processes,
 		tmux: dependencies.Tmux, stderr: stderr,
 		gracePeriod: grace, pollInterval: poll,
-		configurationError: configurationError}
+		configurationError: configurationError,
+	}
 }
 
 func (opener *Opener) Open(ctx context.Context, request Request) error {
@@ -211,7 +223,11 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 	if err := os.MkdirAll(opener.sidDir, 0o700); err != nil {
 		return fmt.Errorf("create agent takeover lock directory: %w", err)
 	}
-	lock, err := os.OpenFile(filepath.Join(opener.sidDir, ".takeover-"+request.ID+".lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(
+		filepath.Join(opener.sidDir, ".takeover-"+request.ID+".lock"),
+		os.O_CREATE|os.O_RDWR,
+		0o600,
+	)
 	if err != nil {
 		return fmt.Errorf("open agent takeover lock: %w", err)
 	}
@@ -222,7 +238,11 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 	}()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
-			fmt.Fprintf(opener.stderr, "pfm internal agent-open: another open/takeover of %s is already in flight — let it settle, then retry (or attach its window).\n", request.ID)
+			fmt.Fprintf(
+				opener.stderr,
+				"pfm internal agent-open: another open/takeover of %s is already in flight — let it settle, then retry (or attach its window).\n",
+				request.ID,
+			)
 			return ErrBusy
 		}
 		return fmt.Errorf("lock agent takeover: %w", err)
@@ -237,17 +257,28 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 	hit, hitConfig, found, registryComplete := opener.lookup(ctx, request.ID, configs)
 	if !found {
 		if !registryComplete {
-			return fmt.Errorf("no agent registry answered completely for %s — refusing to treat an error as absence", request.ID)
+			return fmt.Errorf(
+				"no agent registry answered completely for %s — refusing to treat an error as absence",
+				request.ID,
+			)
 		}
 		held, err := opener.holdsSession(ctx, request.ID)
 		if err != nil {
 			return fmt.Errorf("prove no live claude holds %s: %w", request.ID, err)
 		}
 		if held {
-			return fmt.Errorf("no registry row for %s, but a live claude holds it — refusing the double-resume", request.ID)
+			return fmt.Errorf(
+				"no registry row for %s, but a live claude holds it — refusing the double-resume",
+				request.ID,
+			)
 		}
 		primary := opener.configForAccount(request.PrimaryAccount)
-		fmt.Fprintf(opener.stderr, "no live agent found for %s — resuming fresh (account %d)\n", request.ID, accountNumber(request.PrimaryAccount))
+		fmt.Fprintf(
+			opener.stderr,
+			"no live agent found for %s — resuming fresh (account %d)\n",
+			request.ID,
+			accountNumber(request.PrimaryAccount),
+		)
 		return opener.resumeFresh(ctx, request, primary, primary)
 	}
 
@@ -258,7 +289,12 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 			return fmt.Errorf("locate tmux socket for agent %d: %w", hit.PID, err)
 		}
 		if id, ok := pfmengine.FromSocket(socket); ok && id == pfmengine.Claude {
-			fmt.Fprintf(opener.stderr, "⚙ %s is a tmux-resident chat on %s — attaching its window\n", displayName(hit), socket)
+			fmt.Fprintf(
+				opener.stderr,
+				"⚙ %s is a tmux-resident chat on %s — attaching its window\n",
+				displayName(hit),
+				socket,
+			)
 			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
 				return fmt.Errorf("release attach lock: %w", err)
 			}
@@ -274,7 +310,13 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 	}
 
 	if hit.activity() == "busy" {
-		fmt.Fprintf(opener.stderr, "⚙ %s (account %d) is BUSY — attaching. Pick '%s' in the view; ⌃C detaches.\n", displayName(hit), account, displayName(hit))
+		fmt.Fprintf(
+			opener.stderr,
+			"⚙ %s (account %d) is BUSY — attaching. Pick '%s' in the view; ⌃C detaches.\n",
+			displayName(hit),
+			account,
+			displayName(hit),
+		)
 		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
 			return fmt.Errorf("release attach lock: %w", err)
 		}
@@ -282,7 +324,14 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 	}
 
 	primary := opener.configForAccount(request.PrimaryAccount)
-	fmt.Fprintf(opener.stderr, "⚙ %s (account %d, state: %s) — taking over → fresh resume under account %d\n", displayName(hit), account, hit.activity(), accountNumber(request.PrimaryAccount))
+	fmt.Fprintf(
+		opener.stderr,
+		"⚙ %s (account %d, state: %s) — taking over → fresh resume under account %d\n",
+		displayName(hit),
+		account,
+		hit.activity(),
+		accountNumber(request.PrimaryAccount),
+	)
 	if hit.PID > 0 && opener.processes.Alive(hit.PID) {
 		if err := opener.processes.Terminate(hit.PID); err != nil {
 			return fmt.Errorf("stop agent %d: %w", hit.PID, err)
@@ -321,12 +370,24 @@ func (opener *Opener) lookup(ctx context.Context, id string, configs []string) (
 			content, err := opener.commands.QueryAgents(queryCtx, config)
 			cancel()
 			if err != nil {
-				fmt.Fprintf(opener.stderr, "pfm internal agent-open: query agent registry config %q (pass %d): %v\n", config, pass+1, err)
+				fmt.Fprintf(
+					opener.stderr,
+					"pfm internal agent-open: query agent registry config %q (pass %d): %v\n",
+					config,
+					pass+1,
+					err,
+				)
 				continue
 			}
 			agents, err := ParseAgents(content)
 			if err != nil {
-				fmt.Fprintf(opener.stderr, "pfm internal agent-open: parse agent registry config %q (pass %d): %v\n", config, pass+1, err)
+				fmt.Fprintf(
+					opener.stderr,
+					"pfm internal agent-open: parse agent registry config %q (pass %d): %v\n",
+					config,
+					pass+1,
+					err,
+				)
 				continue
 			}
 			answered[config] = true
@@ -342,12 +403,26 @@ func (opener *Opener) resumeFresh(ctx context.Context, request Request, config, 
 	if err := opener.commands.Resume(ctx, config, request.CWD, request.ID, request.Cache1H); err == nil {
 		return nil
 	} else {
-		fmt.Fprintf(opener.stderr, "pfm internal agent-open: resume %s under config %q failed: %v\n", request.ID, config, err)
-		fmt.Fprintf(opener.stderr, "\nresume still refused — falling back to the agent view (pick the session to attach):\n")
+		fmt.Fprintf(
+			opener.stderr,
+			"pfm internal agent-open: resume %s under config %q failed: %v\n",
+			request.ID,
+			config,
+			err,
+		)
+		fmt.Fprintf(
+			opener.stderr,
+			"\nresume still refused — falling back to the agent view (pick the session to attach):\n",
+		)
 		if viewErr := opener.commands.View(ctx, fallback, request.CWD); viewErr == nil {
 			return nil
 		} else {
-			fmt.Fprintf(opener.stderr, "pfm internal agent-open: fallback agent view under config %q failed: %v\n", fallback, viewErr)
+			fmt.Fprintf(
+				opener.stderr,
+				"pfm internal agent-open: fallback agent view under config %q failed: %v\n",
+				fallback,
+				viewErr,
+			)
 			return errors.Join(err, viewErr)
 		}
 	}
@@ -402,9 +477,11 @@ func (opener *Opener) accountForConfig(config string) int {
 	}
 	return 1
 }
+
 func accountNumber(account int) int {
 	return account
 }
+
 func displayName(agent Agent) string {
 	if agent.Name != "" {
 		return agent.Name

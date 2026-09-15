@@ -11,7 +11,9 @@ import (
 
 func TestLoadEmbeddedPalettes(t *testing.T) {
 	defaultPalette := Load("default")
-	if defaultPalette.EngineRow[pfmengine.Codex] != "#38bdf8" || defaultPalette.AgentRow != "#fb923c" || defaultPalette.StatsEngine[pfmengine.Claude] != "#ff9e64" || defaultPalette.StatsCPU != "#4ade80" {
+	if defaultPalette.EngineRow[pfmengine.Codex] != "#38bdf8" || defaultPalette.AgentRow != "#fb923c" ||
+		defaultPalette.StatsEngine[pfmengine.Claude] != "#ff9e64" ||
+		defaultPalette.StatsCPU != "#4ade80" {
 		t.Fatalf("default palette = %#v", defaultPalette)
 	}
 	if tokyo := Load("tokyo-night"); reflect.DeepEqual(tokyo, defaultPalette) {

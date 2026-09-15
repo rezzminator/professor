@@ -197,7 +197,7 @@ func NewCodexThreadResolver(
 	ctx context.Context,
 	codexRoot string,
 	bound CodexPaneBound,
-) func(exported, cwd string, birth int64, socket, paneID string) (id string, rolloutPath string) {
+) func(exported, cwd string, birth int64, socket, paneID string) (id, rolloutPath string) {
 	return NewCodexThreadResolverRoots(ctx, []string{codexRoot}, bound)
 }
 
@@ -207,7 +207,7 @@ func NewCodexThreadResolverRoots(
 	ctx context.Context,
 	codexRoots []string,
 	bound CodexPaneBound,
-) func(exported, cwd string, birth int64, socket, paneID string) (id string, rolloutPath string) {
+) func(exported, cwd string, birth int64, socket, paneID string) (id, rolloutPath string) {
 	candidates := sync.OnceValue(func() []resolve.CodexThread {
 		files := make([]string, 0)
 		for _, codexRoot := range codexRoots {

@@ -10,7 +10,13 @@ import (
 
 type Launcher interface {
 	ComposerReady(capture string) bool
-	Rename(ctx context.Context, tmux Tmux, socket, target, name string, timings Timings, trace Trace) (warning string, err error)
+	Rename(
+		ctx context.Context,
+		tmux Tmux,
+		socket, target, name string,
+		timings Timings,
+		trace Trace,
+	) (warning string, err error)
 }
 
 var launchers = map[pfmengine.ID]Launcher{}
@@ -41,7 +47,13 @@ func RegisteredLaunchers() []pfmengine.ID {
 
 func CodexComposerReady(capture string) bool { return composerReady(capture) }
 
-func RenameCodex(ctx context.Context, tmux Tmux, socket, target, name string, timings Timings, trace Trace) (string, error) {
+func RenameCodex(
+	ctx context.Context,
+	tmux Tmux,
+	socket, target, name string,
+	timings Timings,
+	trace Trace,
+) (string, error) {
 	named, warning, blocked := nameCodexThread(ctx, tmux, socket, target, name, timings, trace, codexRenameProof())
 	if blocked && warning == "" {
 		warning = "composer unavailable; thread was not renamed"

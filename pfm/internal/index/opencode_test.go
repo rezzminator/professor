@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	_ "modernc.org/sqlite"
+
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
-
-	_ "modernc.org/sqlite"
 )
 
 // seedOpencodeStore builds the OpenCode v1.14.30 store shape from its published
@@ -85,7 +85,9 @@ CREATE INDEX part_session_idx ON part (session_id);`
 	if _, err := db.Exec(script); err != nil {
 		t.Fatalf("seed schema: %v", err)
 	}
-	if _, err := db.Exec("INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('p1', '/work/nuts', 1, 1, '[]')"); err != nil {
+	if _, err := db.Exec(
+		"INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('p1', '/work/nuts', 1, 1, '[]')",
+	); err != nil {
 		t.Fatalf("seed project: %v", err)
 	}
 	sessions := []struct {
@@ -101,7 +103,11 @@ CREATE INDEX part_session_idx ON part (session_id);`
 	for _, session := range sessions {
 		if _, err := db.Exec(
 			"INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived) VALUES (?, 'p1', ?, ?, '/work/nuts/03-ramsey', ?, '1.14.30', 10, 20, ?)",
-			session.id, session.parent, session.id, session.title, session.arch,
+			session.id,
+			session.parent,
+			session.id,
+			session.title,
+			session.arch,
 		); err != nil {
 			t.Fatalf("seed session %s: %v", session.id, err)
 		}

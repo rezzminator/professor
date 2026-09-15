@@ -89,7 +89,10 @@ func Check(ctx context.Context, root string, platform Platform) (CheckReport, er
 		set("project_metadata", compareFile(filepath.Join(current, "project", "pyproject.toml"), ProjectMetadata()))
 		set("digest_integrity", verifyDigestIntegrity(digest))
 		set("current_target", verifyCurrentTarget(current, digest))
-		set("interpreter", checkInterpreter(ctx, filepath.Join(current, "project", ".venv", "bin", "python"), digest.Python))
+		set(
+			"interpreter",
+			checkInterpreter(ctx, filepath.Join(current, "project", ".venv", "bin", "python"), digest.Python),
+		)
 		set("interpreter_build", checkPythonBuild(filepath.Join(current, "python", "BUILD"), digest.Python))
 		set("environment_shape", checkEnvironmentShape(current))
 		set("dependency_check", checkDependencies(ctx, current))
@@ -228,7 +231,12 @@ func checkEnvironmentShape(root string) error {
 func checkDependencies(ctx context.Context, root string) error {
 	uv := filepath.Join(root, "uv")
 	python := filepath.Join(root, "project", ".venv", "bin", "python")
-	if _, err := runCommand(ctx, uv, []string{"pip", "check", "--python", python}, filepath.Join(root, "project")); err != nil {
+	if _, err := runCommand(
+		ctx,
+		uv,
+		[]string{"pip", "check", "--python", python},
+		filepath.Join(root, "project"),
+	); err != nil {
 		return fmt.Errorf("uv pip check failed: %w", err)
 	}
 	return nil
@@ -237,7 +245,12 @@ func checkDependencies(ctx context.Context, root string) error {
 func checkInventory(ctx context.Context, root string, expected EnvironmentDigest) error {
 	uv := filepath.Join(root, "uv")
 	python := filepath.Join(root, "project", ".venv", "bin", "python")
-	output, err := runCommand(ctx, uv, []string{"pip", "list", "--format", "freeze", "--python", python}, filepath.Join(root, "project"))
+	output, err := runCommand(
+		ctx,
+		uv,
+		[]string{"pip", "list", "--format", "freeze", "--python", python},
+		filepath.Join(root, "project"),
+	)
 	if err != nil {
 		return fmt.Errorf("read installed distribution inventory: %w", err)
 	}
@@ -246,7 +259,13 @@ func checkInventory(ctx context.Context, root string, expected EnvironmentDigest
 		return fmt.Errorf("decode installed distribution inventory: %w", err)
 	}
 	if expected.InventorySHA256 == "" || got != expected.InventorySHA256 || count != expected.InventoryCount {
-		return fmt.Errorf("installed inventory differs from provisioned lock: got %s/%d want %s/%d", got, count, expected.InventorySHA256, expected.InventoryCount)
+		return fmt.Errorf(
+			"installed inventory differs from provisioned lock: got %s/%d want %s/%d",
+			got,
+			count,
+			expected.InventorySHA256,
+			expected.InventoryCount,
+		)
 	}
 	return nil
 }

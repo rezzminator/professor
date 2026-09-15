@@ -234,7 +234,11 @@ func (jail *injectTmuxJail) startBusyPane(
 			if err != nil {
 				t.Fatalf("jailed pane capture kept failing for %s; last error: %v: %q", waited, err, capture)
 			}
-			t.Fatalf("jailed pane never became busy within %s; capture succeeded throughout and the fixture never rendered a spinner: %q", waited, capture)
+			t.Fatalf(
+				"jailed pane never became busy within %s; capture succeeded throughout and the fixture never rendered a spinner: %q",
+				waited,
+				capture,
+			)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -300,9 +304,18 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 			// be read at all looked identical to a pane that stayed blank.
 			waited := time.Since(started)
 			if captureErr != nil {
-				t.Fatalf("compact transcript pane capture kept failing for %s; last error: %v: %q", waited, captureErr, capture)
+				t.Fatalf(
+					"compact transcript pane capture kept failing for %s; last error: %v: %q",
+					waited,
+					captureErr,
+					capture,
+				)
 			}
-			t.Fatalf("compact transcript pane never became ready within %s; capture succeeded throughout and the fixture never rendered its working line: %q", waited, capture)
+			t.Fatalf(
+				"compact transcript pane never became ready within %s; capture succeeded throughout and the fixture never rendered its working line: %q",
+				waited,
+				capture,
+			)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -615,7 +628,11 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 	}
 	wantRecord := "FIRED-BEGIN\n" + want + "\nFIRED-END\n"
 	if string(recorded) != wantRecord {
-		t.Fatalf("compact transcript changed or interleaved command: got %d bytes, want %d", len(recorded), len(wantRecord))
+		t.Fatalf(
+			"compact transcript changed or interleaved command: got %d bytes, want %d",
+			len(recorded),
+			len(wantRecord),
+		)
 	}
 	if !strings.Contains(result.Proof, "FIRED") {
 		t.Fatalf("delivery proof did not show the fired command: %q", result.Proof)
@@ -722,6 +739,9 @@ func TestJailedClientActivityReportsUnattendedAndDeadSocket(t *testing.T) {
 	deadSocket := filepath.Join(jail.tmuxDir, "probe-pfm-client-activity-dead")
 	_, deadOK, deadErr := tmux.ClientActivity(context.Background(), deadSocket, session)
 	if deadErr == nil {
-		t.Fatalf("ClientActivity() against a dead socket returned no error (ok=%v) — a failure to look must never read as \"nobody typing\"", deadOK)
+		t.Fatalf(
+			"ClientActivity() against a dead socket returned no error (ok=%v) — a failure to look must never read as \"nobody typing\"",
+			deadOK,
+		)
 	}
 }

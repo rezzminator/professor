@@ -45,7 +45,12 @@ func restampMap(raw []byte, today, recordedTree string, git GitReader) ([]byte, 
 		}
 		object, found, resolveErr := git.Resolve(recordedTree, anchor.LookupPath)
 		if resolveErr != nil {
-			return nil, fmt.Errorf("resolve anchor %s at recorded tree %s: %w", anchor.LookupPath, recordedTree, resolveErr)
+			return nil, fmt.Errorf(
+				"resolve anchor %s at recorded tree %s: %w",
+				anchor.LookupPath,
+				recordedTree,
+				resolveErr,
+			)
 		}
 		if !found {
 			return nil, fmt.Errorf("anchor path absent at recorded tree: %s", anchor.LookupPath)
@@ -234,7 +239,12 @@ type restorePoint struct {
 	mode    os.FileMode
 }
 
-func commit(repo artifact.RepoContext, layout artifact.StageLayout, before organState, prepared preparation) (err error) {
+func commit(
+	repo artifact.RepoContext,
+	layout artifact.StageLayout,
+	before organState,
+	prepared preparation,
+) (err error) {
 	agentsRoot := filepath.Join(repo.Organ, "agents")
 	createdAgents := false
 	if !before.agents {
@@ -298,7 +308,10 @@ func commit(repo artifact.RepoContext, layout artifact.StageLayout, before organ
 		}
 		for index := len(created) - 1; index >= 0; index-- {
 			if restoreErr := os.Remove(created[index]); restoreErr != nil && !errors.Is(restoreErr, os.ErrNotExist) {
-				failures = append(failures, fmt.Errorf("remove partial apply target %s: %w", created[index], restoreErr))
+				failures = append(
+					failures,
+					fmt.Errorf("remove partial apply target %s: %w", created[index], restoreErr),
+				)
 			}
 		}
 		if createdAgents {

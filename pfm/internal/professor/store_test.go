@@ -27,7 +27,8 @@ func TestHashTemplateNamesUnreadableFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := HashTemplate(path)
-	if err == nil || !strings.Contains(err.Error(), "UNREADABLE") || !strings.Contains(err.Error(), "permission denied") {
+	if err == nil || !strings.Contains(err.Error(), "UNREADABLE") ||
+		!strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("HashTemplate() error = %v, want UNREADABLE with OS error", err)
 	}
 }

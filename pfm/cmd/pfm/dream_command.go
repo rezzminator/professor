@@ -19,9 +19,7 @@ import (
 
 const defaultDreamAgent = "Explore"
 
-var (
-	defaultDreamRegistry = filepath.Join(defaultDreamHome(), ".claude", "projects")
-)
+var defaultDreamRegistry = filepath.Join(defaultDreamHome(), ".claude", "projects")
 
 func defaultDreamHome() string {
 	home, err := os.UserHomeDir()

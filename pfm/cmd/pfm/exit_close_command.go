@@ -77,7 +77,10 @@ func runExitClose(stdin io.Reader, stderr io.Writer) int {
 	// leaves them alone too (fail-open is "tab stays").
 	pane := exitCloseEnv("TMUX_PANE")
 	if pane == "" {
-		fmt.Fprintln(stderr, "pfm internal exit-close: left open — TMUX_PANE unset, cannot tell a reload's /exit from a human's")
+		fmt.Fprintln(
+			stderr,
+			"pfm internal exit-close: left open — TMUX_PANE unset, cannot tell a reload's /exit from a human's",
+		)
 		return 0
 	}
 	resolved, err := paths.Resolve()
@@ -90,7 +93,12 @@ func runExitClose(stdin io.Reader, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal exit-close: left open — probe reload lock (fail-open): %v\n", err)
 		return 0
 	} else if inFlight {
-		fmt.Fprintf(stderr, "pfm internal exit-close: left open — reload in flight for %s %s: the pane is being rebooted, not closed\n", socketName, pane)
+		fmt.Fprintf(
+			stderr,
+			"pfm internal exit-close: left open — reload in flight for %s %s: the pane is being rebooted, not closed\n",
+			socketName,
+			pane,
+		)
 		return 0
 	}
 

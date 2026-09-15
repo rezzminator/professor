@@ -108,7 +108,9 @@ func (h *Harvester) writePublicMarkdown(path, body string, fetchedAt ...string) 
 			stamp = candidate
 		}
 	}
-	meta := "---\nfetched_at: " + stamp + "\ntoken_count: " + fmt.Sprint(estimateTokens(body)) + "\nsource: harvester\n---\n\n"
+	meta := "---\nfetched_at: " + stamp + "\ntoken_count: " + fmt.Sprint(
+		estimateTokens(body),
+	) + "\nsource: harvester\n---\n\n"
 	return h.writePublicFile(path, []byte(meta+body))
 }
 

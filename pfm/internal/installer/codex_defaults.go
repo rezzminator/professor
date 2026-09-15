@@ -11,12 +11,15 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
 	"hostops/pfm/internal/atomicfile"
 	pfmengine "hostops/pfm/internal/engine"
 )
 
-const codexPolicyBegin = "<!-- BEGIN Professor subagent coordination -->"
-const codexPolicyEnd = "<!-- END Professor subagent coordination -->"
+const (
+	codexPolicyBegin = "<!-- BEGIN Professor subagent coordination -->"
+	codexPolicyEnd   = "<!-- END Professor subagent coordination -->"
+)
 
 // wireCodexDefaults keeps mutable trust/model/MCP configuration local. Only
 // missing settings come from the template; the retired global prompt block is removed.
@@ -25,7 +28,13 @@ func (installer *engine) wireCodexDefaults() error {
 	if err != nil {
 		return err
 	}
-	source := filepath.Join(sourceRepo, "templates", "global", pfmengine.MustLookup(pfmengine.Codex).LongName, "config.toml")
+	source := filepath.Join(
+		sourceRepo,
+		"templates",
+		"global",
+		pfmengine.MustLookup(pfmengine.Codex).LongName,
+		"config.toml",
+	)
 	defaults, err := os.ReadFile(source)
 	if errors.Is(err, fs.ErrNotExist) {
 		installer.skip("Codex defaults source absent at " + source)
@@ -58,7 +67,8 @@ func (installer *engine) wireCodexDefaults() error {
 		}
 		if err := installer.change("merge Professor defaults into "+path, func() error {
 			latest, readErr := os.ReadFile(path)
-			if (existed && (readErr != nil || !bytes.Equal(latest, raw))) || (!existed && !errors.Is(readErr, fs.ErrNotExist)) {
+			if (existed && (readErr != nil || !bytes.Equal(latest, raw))) ||
+				(!existed && !errors.Is(readErr, fs.ErrNotExist)) {
 				return fmt.Errorf("Codex config changed while planning install: %s", path)
 			}
 			if existed {
@@ -178,7 +188,11 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 		lower, hasLower := limits[pair[0]]
 		upper, hasUpper := limits[pair[1]]
 		if hasLower && hasUpper && lower > upper {
-			return "", fmt.Errorf("Codex wait defaults conflict with existing settings: %s exceeds %s; set a consistent minimum/default/maximum", pair[0], pair[1])
+			return "", fmt.Errorf(
+				"Codex wait defaults conflict with existing settings: %s exceeds %s; set a consistent minimum/default/maximum",
+				pair[0],
+				pair[1],
+			)
 		}
 	}
 	missing := map[string]any{}
@@ -204,7 +218,10 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 	}
 	var checked map[string]any
 	if _, err := toml.Decode(updated, &checked); err != nil {
-		return "", fmt.Errorf("defaults cannot be merged into this TOML layout without rewriting existing tables: %w", err)
+		return "", fmt.Errorf(
+			"defaults cannot be merged into this TOML layout without rewriting existing tables: %w",
+			err,
+		)
 	}
 	return updated, nil
 }

@@ -339,13 +339,22 @@ func rewriteMemoryHelperHookPaths(raw []byte, paths map[string]string, home stri
 					unquoted := strings.NewReplacer(`"`, "", "'", "").Replace(command)
 					for oldPath := range paths {
 						referencesOld := strings.Contains(unquoted, oldPath)
-						if relative, err := filepath.Rel(home, oldPath); err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+						if relative, err := filepath.Rel(
+							home,
+							oldPath,
+						); err == nil && relative != ".." &&
+							!strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 							for _, prefix := range []string{"$HOME/", "${HOME}/", "~/"} {
-								referencesOld = referencesOld || strings.Contains(unquoted, prefix+filepath.ToSlash(relative))
+								referencesOld = referencesOld ||
+									strings.Contains(unquoted, prefix+filepath.ToSlash(relative))
 							}
 						}
 						if referencesOld {
-							return nil, false, fmt.Errorf("memory helper hook requires manual migration before retiring %s: %q", oldPath, command)
+							return nil, false, fmt.Errorf(
+								"memory helper hook requires manual migration before retiring %s: %q",
+								oldPath,
+								command,
+							)
 						}
 					}
 				}

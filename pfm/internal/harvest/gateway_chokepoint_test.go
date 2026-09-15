@@ -58,8 +58,17 @@ type gatewayEgressFinding struct {
 // http.Header.Get and url.Values.Get share the method name "Get" with
 // http.Client.Get but resolve to a different receiver type entirely, and only
 // go/types can tell them apart from the syntax alone.
-var gatewayEgressClientMethods = map[string]bool{"Do": true, "Get": true, "Post": true, "Head": true, "PostForm": true}
-var gatewayEgressPackageFuncs = map[string]bool{"Get": true, "Post": true, "Head": true, "PostForm": true, "NewRequest": true, "NewRequestWithContext": true}
+var (
+	gatewayEgressClientMethods = map[string]bool{"Do": true, "Get": true, "Post": true, "Head": true, "PostForm": true}
+	gatewayEgressPackageFuncs  = map[string]bool{
+		"Get":                   true,
+		"Post":                  true,
+		"Head":                  true,
+		"PostForm":              true,
+		"NewRequest":            true,
+		"NewRequestWithContext": true,
+	}
+)
 
 // scanGatewayEgress type-checks files as one synthetic package and returns
 // every call that issues, or could issue, outbound HTTP: a method
@@ -210,8 +219,11 @@ func TestEveryEgressGoesThroughTheGateway(t *testing.T) {
 	}
 	sort.Strings(offenders)
 	if len(offenders) > 0 {
-		t.Fatalf("HTTP egress outside the fetch gateway (%d site(s)); route these through gatewayFetch/gatewayAttempt, or justify an entry in gatewayExemptFiles:\n  %s",
-			len(offenders), strings.Join(offenders, "\n  "))
+		t.Fatalf(
+			"HTTP egress outside the fetch gateway (%d site(s)); route these through gatewayFetch/gatewayAttempt, or justify an entry in gatewayExemptFiles:\n  %s",
+			len(offenders),
+			strings.Join(offenders, "\n  "),
+		)
 	}
 	t.Logf("egress chokepoint holds: %d source file(s) scanned, %d exempt", scanned, len(gatewayExemptFiles))
 }

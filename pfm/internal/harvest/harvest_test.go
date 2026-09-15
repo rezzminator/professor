@@ -90,7 +90,16 @@ func TestFetchLadderDirectChromeJinaAndPrivateSkip(t *testing.T) {
 	private := &recordingTransport{respond: func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "text/plain", strings.Repeat("private page ", 60)), nil
 	}}
-	h = mustNew(t, Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: private}, Chrome: &http.Client{Transport: private}, Jina: &http.Client{Transport: private}, Converter: converter})
+	h = mustNew(
+		t,
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    &http.Client{Transport: private},
+			Chrome:    &http.Client{Transport: private},
+			Jina:      &http.Client{Transport: private},
+			Converter: converter,
+		},
+	)
 	got = h.Fetch(context.Background(), "http://127.0.0.1/private")
 	if got.Error == "" || !strings.Contains(strings.ToLower(got.Error), "private") {
 		t.Fatalf("private fetch error = %q, want explicit local/private refusal", got.Error)
@@ -110,7 +119,16 @@ func TestCacheTypePartitionTTLAndRefresh(t *testing.T) {
 		return response(r, http.StatusOK, "text/html", strings.Repeat("body ", 150)), nil
 	})
 	cacheDir := t.TempDir()
-	h := mustNew(t, Options{CacheDir: cacheDir, Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}, CacheTTL: time.Hour, Converter: &fakeConverter{}})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir:  cacheDir,
+			Client:    &http.Client{Transport: tr},
+			Chrome:    &http.Client{Transport: tr},
+			CacheTTL:  time.Hour,
+			Converter: &fakeConverter{},
+		},
+	)
 	first := h.Fetch(context.Background(), "https://example.test/a")
 	if first.Error != "" || first.CacheStatus != "miss" {
 		t.Fatalf("first fetch = %#v", first)
@@ -154,9 +172,21 @@ func TestSearchSearxThenBraveFallback(t *testing.T) {
 		return response(r, http.StatusServiceUnavailable, "application/json", `{}`), nil
 	}}
 	brave := &recordingTransport{respond: func(r *http.Request) (*http.Response, error) {
-		return jsonResponse(r, `{"web":{"results":[{"title":"Result","url":"https://example.test/r","description":"snippet"}]}}`), nil
+		return jsonResponse(
+			r,
+			`{"web":{"results":[{"title":"Result","url":"https://example.test/r","description":"snippet"}]}}`,
+		), nil
 	}}
-	got, backend, err := Search(context.Background(), "query", SearchOptions{SearXNGURL: "https://search.test", BraveAPIKey: "key", SearXNG: &http.Client{Transport: searx}, Brave: &http.Client{Transport: brave}})
+	got, backend, err := Search(
+		context.Background(),
+		"query",
+		SearchOptions{
+			SearXNGURL:  "https://search.test",
+			BraveAPIKey: "key",
+			SearXNG:     &http.Client{Transport: searx},
+			Brave:       &http.Client{Transport: brave},
+		},
+	)
 	if err != nil || backend != "brave" || len(got) != 1 || got[0].URL != "https://example.test/r" {
 		t.Fatalf("Search() = %#v backend=%q err=%v", got, backend, err)
 	}
@@ -170,7 +200,10 @@ func TestSearchLegacySingularEngineAndBraveLanguage(t *testing.T) {
 		if got := request.URL.Query().Get("engines"); got != "baidu" {
 			t.Errorf("SearXNG engines=%q, want baidu", got)
 		}
-		return jsonResponse(request, `{"results":[{"title":"B","url":"https://b.example","content":"snippet b","engine":"ddg"}]}`), nil
+		return jsonResponse(
+			request,
+			`{"results":[{"title":"B","url":"https://b.example","content":"snippet b","engine":"ddg"}]}`,
+		), nil
 	})}
 	results, backend, err := searchConfigured(context.Background(), "fixture", SearchOptions{
 		SearXNGURL: "https://search.example", Lang: "zh", Engines: "baidu", SearXNG: searx,
@@ -186,7 +219,10 @@ func TestSearchLegacySingularEngineAndBraveLanguage(t *testing.T) {
 		if got := request.URL.Query().Get("search_lang"); got != "zh" {
 			t.Errorf("Brave search_lang=%q, want zh", got)
 		}
-		return jsonResponse(request, `{"web":{"results":[{"title":"C","url":"https://c.example","description":"desc c"}]}}`), nil
+		return jsonResponse(
+			request,
+			`{"web":{"results":[{"title":"C","url":"https://c.example","description":"desc c"}]}}`,
+		), nil
 	})}
 	results, backend, err = searchConfigured(context.Background(), "fixture", SearchOptions{
 		BraveAPIKey: "example-fixture-key", Lang: "zh", Brave: brave,
@@ -297,7 +333,15 @@ func TestExtensionlessSniffedKindCachesAndJinaEnvelopeIsStripped(t *testing.T) {
 		calls++
 		return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nbody"), nil
 	})
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: pdfTransport}, Chrome: &http.Client{Transport: pdfTransport}, Converter: &fakeConverter{}})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    &http.Client{Transport: pdfTransport},
+			Chrome:    &http.Client{Transport: pdfTransport},
+			Converter: &fakeConverter{},
+		},
+	)
 	first := h.Fetch(context.Background(), "https://example.test/download")
 	if first.Error != "" || first.Kind != "pdf" {
 		t.Fatalf("extensionless PDF = %#v", first)
@@ -313,7 +357,15 @@ func TestExtensionlessSniffedKindCachesAndJinaEnvelopeIsStripped(t *testing.T) {
 	jina := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "text/plain", "Title: T\nMarkdown Content:\n# Body\ntext"), nil
 	})
-	h = mustNew(t, Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: direct}, Chrome: &http.Client{Transport: direct}, Jina: &http.Client{Transport: jina}})
+	h = mustNew(
+		t,
+		Options{
+			CacheDir: t.TempDir(),
+			Client:   &http.Client{Transport: direct},
+			Chrome:   &http.Client{Transport: direct},
+			Jina:     &http.Client{Transport: jina},
+		},
+	)
 	got := h.Fetch(context.Background(), "https://example.test/page")
 	if got.Error != "" || got.Kind != "html" || got.Content != "# Body\ntext" {
 		t.Fatalf("Jina envelope = %#v", got)
@@ -329,7 +381,12 @@ func TestGoogleDriveFileViewFetchesCompleteDownloadInsteadOfPreviewHTML(t *testi
 			}
 			return response(request, http.StatusOK, "application/pdf", "%PDF-1.7\npage 1\npage 18\n%%EOF"), nil
 		}
-		return response(request, http.StatusOK, "text/html", strings.Repeat("<p>Drive preview page 1 through page 4 only</p>", 20)), nil
+		return response(
+			request,
+			http.StatusOK,
+			"text/html",
+			strings.Repeat("<p>Drive preview page 1 through page 4 only</p>", 20),
+		), nil
 	}}
 	h := mustNew(t, Options{
 		CacheDir:  t.TempDir(),
@@ -337,7 +394,13 @@ func TestGoogleDriveFileViewFetchesCompleteDownloadInsteadOfPreviewHTML(t *testi
 		Chrome:    &http.Client{Transport: transport},
 		Converter: &fakeConverter{},
 	})
-	if _, err := h.cache.save(source, "html", "jina", strings.Repeat("Drive preview page 1 through page 4 only\n", 20), []string{"direct", "chrome-impersonation", "jina"}); err != nil {
+	if _, err := h.cache.save(
+		source,
+		"html",
+		"jina",
+		strings.Repeat("Drive preview page 1 through page 4 only\n", 20),
+		[]string{"direct", "chrome-impersonation", "jina"},
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -361,7 +424,10 @@ func TestGoogleDriveDownloadURLRecognizesOnlyOwnedFileLinks(t *testing.T) {
 		source string
 		wantID string
 	}{
-		{"https://drive.google.com/file/d/1UEfsp7vKFqBb8C7Th8CuM2k0CxyKe2fy/view?usp=sharing", "1UEfsp7vKFqBb8C7Th8CuM2k0CxyKe2fy"},
+		{
+			"https://drive.google.com/file/d/1UEfsp7vKFqBb8C7Th8CuM2k0CxyKe2fy/view?usp=sharing",
+			"1UEfsp7vKFqBb8C7Th8CuM2k0CxyKe2fy",
+		},
 		{"https://drive.google.com/open?id=1UEfsp7vKFqBb8C7Th8CuM2k0CxyKe2fy", "1UEfsp7vKFqBb8C7Th8CuM2k0CxyKe2fy"},
 		{"https://drive.google.com.evil.test/file/d/1UEfsp7vKFqBb8C7Th8CuM2k0CxyKe2fy/view", ""},
 		{"https://drive.google.com/file/d/short/view", ""},
@@ -383,7 +449,8 @@ func TestGoogleDriveDownloadURLRecognizesOnlyOwnedFileLinks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if parsed.Scheme != "https" || parsed.Hostname() != "drive.usercontent.google.com" || parsed.Query().Get("id") != test.wantID {
+			if parsed.Scheme != "https" || parsed.Hostname() != "drive.usercontent.google.com" ||
+				parsed.Query().Get("id") != test.wantID {
 				t.Fatalf("download target = %q", target)
 			}
 		})
@@ -494,9 +561,23 @@ func TestArchiveGzipAndCacheSearch(t *testing.T) {
 
 func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": []string{"http://127.0.0.1/secret"}}, Body: io.NopCloser(strings.NewReader("")), Request: r}, nil
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": []string{"http://127.0.0.1/secret"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    r,
+		}, nil
 	})
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}, Jina: &http.Client{Transport: tr}, Converter: &fakeConverter{}})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    &http.Client{Transport: tr},
+			Chrome:    &http.Client{Transport: tr},
+			Jina:      &http.Client{Transport: tr},
+			Converter: &fakeConverter{},
+		},
+	)
 	result := h.Fetch(context.Background(), "https://example.test/redirect")
 	if result.Error == "" || !strings.Contains(strings.ToLower(result.Error), "private") {
 		t.Fatalf("redirect result=%#v", result)
@@ -505,7 +586,9 @@ func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 	if _, err := h.cache.save("https://example.test/a\nmethod: injected", "txt", "direct", "body", nil); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(filepath.Join(h.options.CacheDir, CacheKey("https://example.test/a\nmethod: injected", "txt")))
+	raw, err := os.ReadFile(
+		filepath.Join(h.options.CacheDir, CacheKey("https://example.test/a\nmethod: injected", "txt")),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -555,12 +638,21 @@ func TestGetBodyCapsAtMaxWithoutFailure(t *testing.T) {
 
 func TestDetectTablesMatchOracle(t *testing.T) {
 	for _, tc := range []struct{ source, want string }{
-		{"https://x.test/a.tar.gz", "tar"}, {"https://x.test/a.tgz", "tar"},
-		{"https://x.test/a.tar.bz2", "tar"}, {"https://x.test/a.tbz2", "tar"},
-		{"https://x.test/a.tar.xz", "tar"}, {"https://x.test/a.txz", "tar"},
-		{"https://x.test/a.gz", "tar"}, {"https://x.test/a.bz2", "tar"}, {"https://x.test/a.xz", "tar"},
-		{"https://x.test/a.docx", "docx"}, {"https://x.test/a.xlsx", "xlsx"}, {"https://x.test/a.pptx", "pptx"},
-		{"https://x.test/a.csv", "csv"}, {"https://x.test/a.json", "json"}, {"https://x.test/a.png", "image"},
+		{"https://x.test/a.tar.gz", "tar"},
+		{"https://x.test/a.tgz", "tar"},
+		{"https://x.test/a.tar.bz2", "tar"},
+		{"https://x.test/a.tbz2", "tar"},
+		{"https://x.test/a.tar.xz", "tar"},
+		{"https://x.test/a.txz", "tar"},
+		{"https://x.test/a.gz", "tar"},
+		{"https://x.test/a.bz2", "tar"},
+		{"https://x.test/a.xz", "tar"},
+		{"https://x.test/a.docx", "docx"},
+		{"https://x.test/a.xlsx", "xlsx"},
+		{"https://x.test/a.pptx", "pptx"},
+		{"https://x.test/a.csv", "csv"},
+		{"https://x.test/a.json", "json"},
+		{"https://x.test/a.png", "image"},
 		{"https://x.test/a.unknown", "html"},
 	} {
 		if got := DetectKind(tc.source); got != tc.want {
@@ -573,11 +665,16 @@ func TestDetectTablesMatchOracle(t *testing.T) {
 		{"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "PK\x03\x04", "docx"},
 		{"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "PK\x03\x04", "xlsx"},
 		{"application/vnd.openxmlformats-officedocument.presentationml.presentation", "PK\x03\x04", "pptx"},
-		{"application/json", "{}", "json"}, {"text/csv", "a,b", "csv"},
-		{"application/octet-stream", "%PDF-1.7", "pdf"}, {"application/octet-stream", "Rar!\x1a\x07", "rar"},
-		{"application/octet-stream", "\x1f\x8b\x08", "tar"}, {"application/octet-stream", "BZh91", "tar"},
-		{"application/octet-stream", "\xfd7zXZ\x00", "tar"}, {"text/html", "PK\x03\x04", ""},
-		{"text/plain", "hello", ""}, {"", "\x89PNG\r\n\x1a\n", "image"},
+		{"application/json", "{}", "json"},
+		{"text/csv", "a,b", "csv"},
+		{"application/octet-stream", "%PDF-1.7", "pdf"},
+		{"application/octet-stream", "Rar!\x1a\x07", "rar"},
+		{"application/octet-stream", "\x1f\x8b\x08", "tar"},
+		{"application/octet-stream", "BZh91", "tar"},
+		{"application/octet-stream", "\xfd7zXZ\x00", "tar"},
+		{"text/html", "PK\x03\x04", ""},
+		{"text/plain", "hello", ""},
+		{"", "\x89PNG\r\n\x1a\n", "image"},
 	} {
 		if got := SniffKind(tc.ct, []byte(tc.head)); got != tc.want {
 			t.Errorf("SniffKind(%q,%q) = %q, want %q", tc.ct, tc.head, got, tc.want)
@@ -587,10 +684,14 @@ func TestDetectTablesMatchOracle(t *testing.T) {
 		name, ct, sample string
 		want             bool
 	}{
-		{"book.text", "", "plain prose", true}, {"README.rst", "", "plain prose", true},
-		{"notes.log", "", "plain prose", true}, {"doc.tex", "", "plain prose", true},
-		{"doc.org", "", "plain prose", true}, {"x", "text/x-markdown", "# heading", true},
-		{"x", "text/x-rst", "heading\n=======", true}, {"x.html", "", "prose", false},
+		{"book.text", "", "plain prose", true},
+		{"README.rst", "", "plain prose", true},
+		{"notes.log", "", "plain prose", true},
+		{"doc.tex", "", "plain prose", true},
+		{"doc.org", "", "plain prose", true},
+		{"x", "text/x-markdown", "# heading", true},
+		{"x", "text/x-rst", "heading\n=======", true},
+		{"x.html", "", "prose", false},
 		{"x", "text/plain", "<p class=\"x\">html</p>", false},
 	} {
 		if got := IsPlainText(tc.name, tc.ct, tc.sample); got != tc.want {
@@ -630,7 +731,13 @@ func TestClassifyKindOOXMLExtensionBeatsZipMagic(t *testing.T) {
 		{"report.zip", "zip"},
 	} {
 		if got := classifyKind(tc.name, "", body); got != tc.want {
-			t.Errorf("classifyKind(%q, ct=%q, body=OOXML-zip-magic) = %q, want %q — the zip magic-byte sniff must not shadow the file extension", tc.name, "", got, tc.want)
+			t.Errorf(
+				"classifyKind(%q, ct=%q, body=OOXML-zip-magic) = %q, want %q — the zip magic-byte sniff must not shadow the file extension",
+				tc.name,
+				"",
+				got,
+				tc.want,
+			)
 		}
 	}
 }
@@ -649,10 +756,16 @@ func TestArchiveNameLimitCountsUnicodeRunesAfterNFC(t *testing.T) {
 }
 
 func TestFetchBareTitleRefusesToGuess(t *testing.T) {
-	h := mustNew(t, Options{CacheDir: t.TempDir(), OA: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		t.Fatal("bare title must not query OA providers")
-		return nil, nil
-	})}})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir: t.TempDir(),
+			OA: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				t.Fatal("bare title must not query OA providers")
+				return nil, nil
+			})},
+		},
+	)
 	got := h.Fetch(context.Background(), "A Mathematical Theory of Communication")
 	if got.Error == "" || !strings.Contains(got.Error, "findWorks") {
 		t.Fatalf("bare title result = %#v", got)
@@ -663,8 +776,15 @@ func TestLocalizeImagesSkipsOverLimitResponse(t *testing.T) {
 	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return response(r, http.StatusOK, "image/png", strings.Repeat("x", maxImageBytes+1)), nil
 	})
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}})
-	markdown, err := h.LocalizeImages(context.Background(), "![figure](https://example.test/too-large.png)", "https://example.test/article")
+	h := mustNew(
+		t,
+		Options{CacheDir: t.TempDir(), Client: &http.Client{Transport: tr}, Chrome: &http.Client{Transport: tr}},
+	)
+	markdown, err := h.LocalizeImages(
+		context.Background(),
+		"![figure](https://example.test/too-large.png)",
+		"https://example.test/article",
+	)
 	if err != nil || !strings.Contains(markdown, "too-large.png") {
 		t.Fatalf("localized over-limit image = %q err=%v", markdown, err)
 	}

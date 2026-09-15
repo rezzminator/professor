@@ -217,8 +217,7 @@ func Compose(input Input) Output {
 }
 
 func (current *composer) buildIndexes() {
-	current.codexLineages, current.lineageRootByID =
-		store.ResolveCodexLineages(current.input.Rollouts)
+	current.codexLineages, current.lineageRootByID = store.ResolveCodexLineages(current.input.Rollouts)
 	current.lineageByRoot = make(
 		map[string]store.CodexLineage,
 		len(current.codexLineages),

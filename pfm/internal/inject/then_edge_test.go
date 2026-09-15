@@ -3,7 +3,6 @@ package inject
 import (
 	"context"
 	"errors"
-	pfmengine "hostops/pfm/internal/engine"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/resolve"
 )
 
@@ -436,7 +436,10 @@ func TestDeliverThenHoldsForTypistThenDelivers(t *testing.T) {
 		t.Fatalf("DeliverThen() = %+v, want a confirmed delivery once the typist went quiet", result)
 	}
 	if calls < 3 {
-		t.Fatalf("delivered before the typist actually went quiet: waitForQuietTypist's clock only advanced %d time(s), want at least 3 (TypistQuiet=3s at 1s/poll)", calls)
+		t.Fatalf(
+			"delivered before the typist actually went quiet: waitForQuietTypist's clock only advanced %d time(s), want at least 3 (TypistQuiet=3s at 1s/poll)",
+			calls,
+		)
 	}
 	enters := 0
 	for _, key := range fake.keys {
@@ -513,7 +516,11 @@ func TestScheduleSelfCompactComposesPerEngineAndForwardsThen(t *testing.T) {
 				Pane:       "%1",
 				Engine:     test.engine,
 			}}
-			result, err := engine.ScheduleSelfCompact(context.Background(), "hold the wave state", []string{"resume the wave"})
+			result, err := engine.ScheduleSelfCompact(
+				context.Background(),
+				"hold the wave state",
+				[]string{"resume the wave"},
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -600,17 +607,31 @@ func TestDeliverThenReportsUndeliveredWhenTmuxUnreadable(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Code != CodeUndelivered || result.Status != "undelivered" {
-		t.Fatalf("DeliverThen() = %+v, want a Code 6 undelivered result when tmux could not be read for the whole wait window (not Code 7 \"typing\" — an error is never evidence of a typist)", result)
+		t.Fatalf(
+			"DeliverThen() = %+v, want a Code 6 undelivered result when tmux could not be read for the whole wait window (not Code 7 \"typing\" — an error is never evidence of a typist)",
+			result,
+		)
 	}
 	if !strings.Contains(result.Message, "then steer NOT delivered") ||
 		!strings.Contains(result.Message, "could not read who is at") ||
 		!strings.Contains(result.Message, readErr.Error()) {
-		t.Fatalf("undelivered message %q lacks the \"could not read\" shape naming the tmux error %v", result.Message, readErr)
+		t.Fatalf(
+			"undelivered message %q lacks the \"could not read\" shape naming the tmux error %v",
+			result.Message,
+			readErr,
+		)
 	}
 	if strings.Contains(result.Message, "a human kept typing") {
-		t.Fatalf("undelivered message %q falsely renders a tmux read failure as \"a human kept typing\"", result.Message)
+		t.Fatalf(
+			"undelivered message %q falsely renders a tmux read failure as \"a human kept typing\"",
+			result.Message,
+		)
 	}
 	if len(fake.keys) != 0 || len(fake.literals) != 0 {
-		t.Fatalf("typed despite tmux being unreadable the whole wait window: keys=%q literals=%q", fake.keys, fake.literals)
+		t.Fatalf(
+			"typed despite tmux being unreadable the whole wait window: keys=%q literals=%q",
+			fake.keys,
+			fake.literals,
+		)
 	}
 }

@@ -31,8 +31,14 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 		t.Fatalf("drift outcome = (%q, %v), want a DRIFT warning", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.257.md", "", errors.New("no API request reached the capture sink"))
-	if !warn || !strings.Contains(line, "CHECK FAILED") || strings.Contains(line, "DRIFT") || strings.Contains(line, "matches") {
+	line, warn = harnessPromptVerdict(
+		matching,
+		"harness-original-v2.1.257.md",
+		"",
+		errors.New("no API request reached the capture sink"),
+	)
+	if !warn || !strings.Contains(line, "CHECK FAILED") || strings.Contains(line, "DRIFT") ||
+		strings.Contains(line, "matches") {
 		t.Fatalf("capture-failure outcome = (%q, %v), want a distinct CHECK FAILED warning", line, warn)
 	}
 
@@ -48,7 +54,13 @@ func TestHarnessPromptVerdictMasksBuildStamp(t *testing.T) {
 	pin := hex.EncodeToString(sum[:])
 
 	released := "x-anthropic-billing-header: cc_version=2.1.257.9c3; cc_entrypoint=sdk-cli;\n\n=== SYSTEM BLOCK ===\n\nprose\n"
-	if line, warn := harnessPromptVerdict(pin, "b.md", released, nil); warn || !strings.Contains(line, "matches baseline") {
+	if line, warn := harnessPromptVerdict(
+		pin,
+		"b.md",
+		released,
+		nil,
+	); warn ||
+		!strings.Contains(line, "matches baseline") {
 		t.Fatalf("a new build stamp alone = (%q, %v), want a match", line, warn)
 	}
 
@@ -176,7 +188,11 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
 				harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-					return harnessCapture{Prompt: "captured-fixture\n", ResolvedModel: "claude-sonnet-5", CLIVersion: "fixture"}, nil
+					return harnessCapture{
+						Prompt:        "captured-fixture\n",
+						ResolvedModel: "claude-sonnet-5",
+						CLIVersion:    "fixture",
+					}, nil
 				}
 			},
 			wantWarn: false,
@@ -187,7 +203,11 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
 				harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-					return harnessCapture{Prompt: "a different live prompt\n", ResolvedModel: "claude-sonnet-5", CLIVersion: "fixture"}, nil
+					return harnessCapture{
+						Prompt:        "a different live prompt\n",
+						ResolvedModel: "claude-sonnet-5",
+						CLIVersion:    "fixture",
+					}, nil
 				}
 			},
 			wantWarn: true,
@@ -222,9 +242,22 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			home := t.TempDir()
 			testCase.setup(t, home)
 			var stdout bytes.Buffer
-			code := printModelHarnessPromptDoctor(context.Background(), &stdout, home, config.Config{}, harnessPromptModels[0], "")
+			code := printModelHarnessPromptDoctor(
+				context.Background(),
+				&stdout,
+				home,
+				config.Config{},
+				harnessPromptModels[0],
+				"",
+			)
 			if warned := code != 0; warned != testCase.wantWarn {
-				t.Fatalf("code=%d warned=%v, want warned=%v\noutput=%s", code, warned, testCase.wantWarn, stdout.String())
+				t.Fatalf(
+					"code=%d warned=%v, want warned=%v\noutput=%s",
+					code,
+					warned,
+					testCase.wantWarn,
+					stdout.String(),
+				)
 			}
 			if !strings.Contains(stdout.String(), testCase.want) {
 				t.Fatalf("output=%q, want substring %q", stdout.String(), testCase.want)
@@ -243,8 +276,19 @@ func TestHarnessPromptVerdictIgnoresOptionalEnvironmentMetadata(t *testing.T) {
 		if line, warn := harnessPromptVerdict(pin, "fixture.md", captured, nil); warn {
 			t.Fatalf("optional metadata produced a warning: %s", line)
 		}
-		changed := strings.Replace(captured, "Keep this behavioral instruction.", "Change this behavioral instruction.", 1)
-		if line, warn := harnessPromptVerdict(pin, "fixture.md", changed, nil); !warn || !strings.Contains(line, "DRIFT") {
+		changed := strings.Replace(
+			captured,
+			"Keep this behavioral instruction.",
+			"Change this behavioral instruction.",
+			1,
+		)
+		if line, warn := harnessPromptVerdict(
+			pin,
+			"fixture.md",
+			changed,
+			nil,
+		); !warn ||
+			!strings.Contains(line, "DRIFT") {
 			t.Fatalf("behavioral change was hidden: %s", line)
 		}
 	}

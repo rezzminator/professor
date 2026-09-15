@@ -17,7 +17,8 @@ import (
 // not — never a routing guide that recommends a tool the server refuses.
 func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
 	on := serverInstructions(true)
-	if !strings.Contains(on, `"search the web for X" is search`) || !strings.Contains(on, "for a topic — search, then fetch the URL") {
+	if !strings.Contains(on, `"search the web for X" is search`) ||
+		!strings.Contains(on, "for a topic — search, then fetch the URL") {
 		t.Fatalf("search-enabled instructions dropped their search routing: %q", on)
 	}
 	off := serverInstructions(false)
@@ -26,14 +27,17 @@ func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
 			t.Fatalf("search-disabled instructions still name search (%q):\n%s", absent, off)
 		}
 	}
-	if !strings.Contains(off, "Web search is not configured on this server") || !strings.Contains(off, "search.searxngURL or search.braveApiKey in harvester.config.json") {
+	if !strings.Contains(off, "Web search is not configured on this server") ||
+		!strings.Contains(off, "search.searxngURL or search.braveApiKey in harvester.config.json") {
 		t.Fatalf("search-disabled instructions lack the configuration hint:\n%s", off)
 	}
 }
 
 // A failed search renders every backend's own error, one per line.
 func TestSearchFailureRendersEachBackend(t *testing.T) {
-	text := renderSearchFailure(errors.Join(errors.New("searxng http://127.0.0.1:8888: HTTP 502"), errors.New("brave: HTTP 401")))
+	text := renderSearchFailure(
+		errors.Join(errors.New("searxng http://127.0.0.1:8888: HTTP 502"), errors.New("brave: HTTP 401")),
+	)
 	if !strings.Contains(text, "Web search failed") || !strings.Contains(text, "Retrieval failed") {
 		t.Fatalf("search failure lost safe public message: %q", text)
 	}
@@ -53,10 +57,18 @@ func TestSearchFailureRendersEachBackend(t *testing.T) {
 // them rather than through the generic backend/outage wording.
 func TestRenderSearchFailureRendersConfigurationStatesVerbatim(t *testing.T) {
 	if got := renderSearchFailure(harvest.ErrSearchNotConfigured); got != harvest.ErrSearchNotConfigured.Error() {
-		t.Fatalf("renderSearchFailure(not configured) = %q, want the sentinel verbatim %q", got, harvest.ErrSearchNotConfigured.Error())
+		t.Fatalf(
+			"renderSearchFailure(not configured) = %q, want the sentinel verbatim %q",
+			got,
+			harvest.ErrSearchNotConfigured.Error(),
+		)
 	}
 	if got := renderSearchFailure(harvest.ErrSearchDisabled); got != harvest.ErrSearchDisabled.Error() {
-		t.Fatalf("renderSearchFailure(disabled) = %q, want the sentinel verbatim %q", got, harvest.ErrSearchDisabled.Error())
+		t.Fatalf(
+			"renderSearchFailure(disabled) = %q, want the sentinel verbatim %q",
+			got,
+			harvest.ErrSearchDisabled.Error(),
+		)
 	}
 }
 

@@ -56,7 +56,10 @@ func headlessCLIRuntimeFor(t *testing.T, binary string, engine pfmengine.ID) com
 
 func TestHeadlessExecNormalizedJSONAndReceiptPreserveNullCost(t *testing.T) {
 	headlessCLIJail(t)
-	binary := writeHeadlessCLIStub(t, `printf '%s\n' '{"result":"hello","usage":{"input_tokens":2,"output_tokens":1},"total_cost_usd":null}'`)
+	binary := writeHeadlessCLIStub(
+		t,
+		`printf '%s\n' '{"result":"hello","usage":{"input_tokens":2,"output_tokens":1},"total_cost_usd":null}'`,
+	)
 	runtime := headlessCLIRuntime(t, binary)
 	receipt := filepath.Join(t.TempDir(), "receipt.jsonl")
 	var stdout, stderr bytes.Buffer
@@ -121,7 +124,13 @@ func TestHeadlessExecRejectsInvalidSchemaBeforeLaunch(t *testing.T) {
 
 func TestHeadlessExecHelpNamesSharedInterface(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	if code := runHeadlessExec([]string{"--help"}, strings.NewReader(""), &stdout, &stderr, commandRuntime{}); code != 0 {
+	if code := runHeadlessExec(
+		[]string{"--help"},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		commandRuntime{},
+	); code != 0 {
 		t.Fatalf("help exit = %d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, phrase := range []string{
@@ -137,7 +146,10 @@ func TestHeadlessExecHelpNamesSharedInterface(t *testing.T) {
 func TestHeadlessExecCodexUnsupportedControlsRequireOptIn(t *testing.T) {
 	headlessCLIJail(t)
 	marker := filepath.Join(t.TempDir(), "started")
-	binary := writeHeadlessCLIStub(t, "printf started > \""+marker+"\"\nif [ -n \"${CAPTURE_DIR:-}\" ]; then printf '%s\\n' \"$@\" > \"$CAPTURE_DIR/args\"; fi\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}' '{\"type\":\"turn.completed\"}'")
+	binary := writeHeadlessCLIStub(
+		t,
+		"printf started > \""+marker+"\"\nif [ -n \"${CAPTURE_DIR:-}\" ]; then printf '%s\\n' \"$@\" > \"$CAPTURE_DIR/args\"; fi\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}' '{\"type\":\"turn.completed\"}'",
+	)
 	runtime := headlessCLIRuntimeFor(t, binary, pfmengine.Codex)
 	baseArgs := []string{
 		"--engine", "codex", "--prompt", "hello", "--output-format", "json",
@@ -192,8 +204,16 @@ func TestHeadlessConsumersUseSharedRunner(t *testing.T) {
 		mustHave   []string
 		mustAbsent []string
 	}{
-		{filepath.Join(root, "../../internal/ask/ask.go"), []string{"headlessrun.Run("}, []string{"exec.Command", "exec.CommandContext"}},
-		{filepath.Join(root, "../../internal/stats/limits.go"), []string{"headlessrun.Run("}, []string{"exec.Command", "exec.CommandContext"}},
+		{
+			filepath.Join(root, "../../internal/ask/ask.go"),
+			[]string{"headlessrun.Run("},
+			[]string{"exec.Command", "exec.CommandContext"},
+		},
+		{
+			filepath.Join(root, "../../internal/stats/limits.go"),
+			[]string{"headlessrun.Run("},
+			[]string{"exec.Command", "exec.CommandContext"},
+		},
 		{filepath.Join(root, "harness_prompt_doctor.go"), []string{"headlessrun.Run("}, nil},
 	}
 	for _, testCase := range cases {
@@ -251,7 +271,11 @@ func TestHeadlessExecLabInvocationBothEngines(t *testing.T) {
 			if err := os.WriteFile(system, []byte("system replacement"), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(schema, []byte("{\"type\":\"object\",\"required\":[\"ok\"],\"properties\":{\"ok\":{\"type\":\"boolean\"}}}"), 0o600); err != nil {
+			if err := os.WriteFile(
+				schema,
+				[]byte("{\"type\":\"object\",\"required\":[\"ok\"],\"properties\":{\"ok\":{\"type\":\"boolean\"}}}"),
+				0o600,
+			); err != nil {
 				t.Fatal(err)
 			}
 			args := []string{
@@ -322,7 +346,10 @@ func TestHeadlessExecLabInvocationBothEngines(t *testing.T) {
 func TestHeadlessExecTaskFileTrimsAndPromptStaysRaw(t *testing.T) {
 	headlessCLIJail(t)
 	capture := t.TempDir()
-	binary := writeHeadlessCLIStub(t, "cat > \"$CAPTURE_DIR/prompt\"\nprintf '%s\\n' '{\"result\":\"ok\",\"total_cost_usd\":null}'")
+	binary := writeHeadlessCLIStub(
+		t,
+		"cat > \"$CAPTURE_DIR/prompt\"\nprintf '%s\\n' '{\"result\":\"ok\",\"total_cost_usd\":null}'",
+	)
 	runtime := headlessCLIRuntime(t, binary)
 	source := filepath.Join(t.TempDir(), "source.md")
 	task := filepath.Join(t.TempDir(), "task.txt")
@@ -346,7 +373,10 @@ func TestHeadlessExecTaskFileTrimsAndPromptStaysRaw(t *testing.T) {
 	}
 
 	rawCapture := t.TempDir()
-	rawBinary := writeHeadlessCLIStub(t, "cat > \"$CAPTURE_DIR/prompt\"\nprintf '%s\\n' '{\"result\":\"ok\",\"total_cost_usd\":null}'")
+	rawBinary := writeHeadlessCLIStub(
+		t,
+		"cat > \"$CAPTURE_DIR/prompt\"\nprintf '%s\\n' '{\"result\":\"ok\",\"total_cost_usd\":null}'",
+	)
 	rawRuntime := headlessCLIRuntime(t, rawBinary)
 	stdout.Reset()
 	stderr.Reset()
@@ -373,7 +403,13 @@ func TestHeadlessExecFilesValidationNeverLaunches(t *testing.T) {
 			binary := writeHeadlessCLIStub(t, "printf started > \""+marker+"\"\nprintf '%s\\n' '{\"result\":\"ok\"}'")
 			runtime := headlessCLIRuntime(t, binary)
 			var stdout, stderr bytes.Buffer
-			code := runHeadlessExec(append([]string{"--engine", "claude"}, args...), strings.NewReader(""), &stdout, &stderr, runtime)
+			code := runHeadlessExec(
+				append([]string{"--engine", "claude"}, args...),
+				strings.NewReader(""),
+				&stdout,
+				&stderr,
+				runtime,
+			)
 			if code != 2 {
 				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
@@ -442,7 +478,10 @@ func TestHeadlessExecFailureAndTimeoutDoNotWriteOut(t *testing.T) {
 
 func TestHeadlessExecConcurrentCallsKeepInputsIndependent(t *testing.T) {
 	headlessCLIJail(t)
-	binary := writeHeadlessCLIStub(t, "cat > \"$CAPTURE_DIR/prompt\"\nprintf '%s\\n' '{\"result\":\"ok\",\"total_cost_usd\":null}'")
+	binary := writeHeadlessCLIStub(
+		t,
+		"cat > \"$CAPTURE_DIR/prompt\"\nprintf '%s\\n' '{\"result\":\"ok\",\"total_cost_usd\":null}'",
+	)
 	var calls sync.WaitGroup
 	errs := make(chan error, 2)
 	for _, prompt := range []string{"first independent prompt", "second independent prompt"} {

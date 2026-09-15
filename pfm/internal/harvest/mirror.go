@@ -13,6 +13,7 @@ import (
 func DOIToPMCID(ctx context.Context, client *http.Client, doi string) (string, error) {
 	return idToPMCID(ctx, client, doi, nil)
 }
+
 func PMIDToPMCID(ctx context.Context, client *http.Client, pmid string) (string, error) {
 	return idToPMCID(ctx, client, pmid, nil)
 }
@@ -23,7 +24,12 @@ func idToPMCID(ctx context.Context, client *http.Client, id string, r *Resolver)
 	if client == nil {
 		client = safeHTTPClientTimeout(false, 15*time.Second)
 	}
-	raw := r.withContact("https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids="+url.QueryEscape(id)+"&format=json&tool=harvester-mcp", "email")
+	raw := r.withContact(
+		"https://pmc.ncbi.nlm.nih.gov/tools/idconv/api/v1/articles/?ids="+url.QueryEscape(
+			id,
+		)+"&format=json&tool=harvester-mcp",
+		"email",
+	)
 	var data struct {
 		Records []struct {
 			PMCID string `json:"pmcid"`
@@ -52,11 +58,18 @@ func EuropePMCPDF(ctx context.Context, client *http.Client, pmcid string) ([]byt
 	}
 	return nil, fmt.Errorf("Europe PMC returned no PDF for %s", pmcid)
 }
+
 func EuropePMCFulltextXML(ctx context.Context, client *http.Client, pmcid string) (string, error) {
 	if client == nil {
 		client = safeHTTPClientTimeout(false, 30*time.Second)
 	}
-	body, status, _, err := getBody(ctx, client, "https://www.ebi.ac.uk/europepmc/webservices/rest/"+url.PathEscape(pmcid)+"/fullTextXML", defaultUA, 50*1024*1024)
+	body, status, _, err := getBody(
+		ctx,
+		client,
+		"https://www.ebi.ac.uk/europepmc/webservices/rest/"+url.PathEscape(pmcid)+"/fullTextXML",
+		defaultUA,
+		50*1024*1024,
+	)
 	if err != nil {
 		return "", err
 	}
@@ -65,9 +78,11 @@ func EuropePMCFulltextXML(ctx context.Context, client *http.Client, pmcid string
 	}
 	return string(body), nil
 }
+
 func EuropePMCFiguresURL(pmcid string) string {
 	return "https://www.ebi.ac.uk/europepmc/webservices/rest/" + pmcid + "/supplementaryFiles"
 }
+
 func PMCArticleURL(pmcid string) string {
 	return "https://pmc.ncbi.nlm.nih.gov/articles/" + pmcid + "/"
 }
@@ -80,7 +95,13 @@ var pmcOAPDFLinkRe = regexp.MustCompile(`<link[^>]+format="pdf"[^>]+href="([^"]+
 // files live under `deprecated/`, and the rewritten https path serves the real
 // PDF. Returns "" when no pdf-format link exists.
 func PMCOAPDFURL(ctx context.Context, client *http.Client, pmcid string) (string, error) {
-	body, status, _, err := getBody(ctx, client, "https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id="+url.QueryEscape(pmcid), defaultUA, 10<<20)
+	body, status, _, err := getBody(
+		ctx,
+		client,
+		"https://www.ncbi.nlm.nih.gov/pmc/utils/oa/oa.fcgi?id="+url.QueryEscape(pmcid),
+		defaultUA,
+		10<<20,
+	)
 	if err != nil || status >= 400 {
 		return "", fmt.Errorf("pmc oa.fcgi lookup failed for %s (status %d): %w", pmcid, status, err)
 	}
@@ -113,7 +134,15 @@ func WaybackRawURL(ctx context.Context, client *http.Client, source string) (str
 	}
 	// getJSONBody, not getBody: a JSON-decoding path refuses an over-ceiling
 	// body by name rather than truncating it into a decode failure.
-	if err := getJSONBody(ctx, client, "https://archive.org/wayback/available?url="+url.QueryEscape(source), defaultUA, nil, 1<<20, &data); err != nil {
+	if err := getJSONBody(
+		ctx,
+		client,
+		"https://archive.org/wayback/available?url="+url.QueryEscape(source),
+		defaultUA,
+		nil,
+		1<<20,
+		&data,
+	); err != nil {
 		return "", err
 	}
 	if !data.Snapshots.Closest.Available || data.Snapshots.Closest.Timestamp == "" {

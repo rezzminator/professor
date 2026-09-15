@@ -121,7 +121,9 @@ func Resolve(request Request) (Request, error) {
 	}
 	if request.WithoutAccount {
 		if request.Account != 0 || request.ConfigDir != "" || request.Env == nil {
-			return Request{}, fmt.Errorf("without-account headless runs require Account=0, no ConfigDir, and a complete Env")
+			return Request{}, fmt.Errorf(
+				"without-account headless runs require Account=0, no ConfigDir, and a complete Env",
+			)
 		}
 	}
 	if request.Engine == "" {
@@ -199,7 +201,13 @@ func Resolve(request Request) (Request, error) {
 		}
 	}
 	if request.ConfigDir != "" && rosterDir != "" && filepath.Clean(request.ConfigDir) != filepath.Clean(rosterDir) {
-		return Request{}, fmt.Errorf("%s config dir %q does not match account %d roster dir %q", request.Engine, request.ConfigDir, request.Account, rosterDir)
+		return Request{}, fmt.Errorf(
+			"%s config dir %q does not match account %d roster dir %q",
+			request.Engine,
+			request.ConfigDir,
+			request.Account,
+			rosterDir,
+		)
 	}
 	if request.ConfigDir == "" {
 		request.ConfigDir = rosterDir
@@ -217,7 +225,11 @@ func Resolve(request Request) (Request, error) {
 	}
 	if _, err := deps.Resolve(binary); err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return Request{}, &BinaryMissingError{Engine: pfmengine.MustLookup(request.Engine).LongName, Binary: binary, Err: err}
+			return Request{}, &BinaryMissingError{
+				Engine: pfmengine.MustLookup(request.Engine).LongName,
+				Binary: binary,
+				Err:    err,
+			}
 		}
 		return Request{}, fmt.Errorf("resolve %s binary %q: %w", request.Engine, binary, err)
 	}
@@ -272,7 +284,10 @@ func Resolve(request Request) (Request, error) {
 		}
 		if len(unsupported) != 0 {
 			if !request.AllowUnsupported {
-				return Request{}, fmt.Errorf("Codex headless runs cannot guarantee tools or settings isolation: unsupported %s; use --allow-unsupported to continue without these controls", strings.Join(unsupported, ", "))
+				return Request{}, fmt.Errorf(
+					"Codex headless runs cannot guarantee tools or settings isolation: unsupported %s; use --allow-unsupported to continue without these controls",
+					strings.Join(unsupported, ", "),
+				)
 			}
 			request.Tools, request.SettingsSources, request.StrictMCP = nil, nil, false
 			request.unsupportedOptions = unsupported
@@ -505,7 +520,12 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		result.Answer = result.Stdout
 		if runErr != nil {
 			result.IsError = true
-			return result, fmt.Errorf("%s headless run failed: %w; stderr tail %q", request.Engine, runErr, boundedTail(result.Stderr, 1024))
+			return result, fmt.Errorf(
+				"%s headless run failed: %w; stderr tail %q",
+				request.Engine,
+				runErr,
+				boundedTail(result.Stderr, 1024),
+			)
 		}
 		return result, nil
 	}
@@ -518,7 +538,13 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		// (Claude's JSON envelope carries `is_error` + a result line); without both tails the
 		// failure reads as absence — 60 s, exit 1, nothing.
 		result.Diagnostics = append(result.Diagnostics, failureDiagnostics(result)...)
-		return result, fmt.Errorf("%s headless run failed: %w; stderr tail %q; stdout tail %q", request.Engine, runErr, boundedTail(result.Stderr, 1024), boundedTail(result.Stdout, 1024))
+		return result, fmt.Errorf(
+			"%s headless run failed: %w; stderr tail %q; stdout tail %q",
+			request.Engine,
+			runErr,
+			boundedTail(result.Stderr, 1024),
+			boundedTail(result.Stdout, 1024),
+		)
 	}
 	if err := parseOutput(&result, request); err != nil {
 		result.IsError = true
@@ -639,11 +665,13 @@ func setEnvironment(environment []string, id pfmengine.ID, configDir string, exp
 		"CLAUDE_CONFIG_DIR": {}, "CODEX_THREAD_ID": {}, "TMUX": {}, "TMUX_PANE": {},
 	}
 	if !explicit {
-		for _, name := range []string{"ENABLE_PROMPT_CACHING_1H", "FORCE_PROMPT_CACHING_5M",
+		for _, name := range []string{
+			"ENABLE_PROMPT_CACHING_1H", "FORCE_PROMPT_CACHING_5M",
 			"ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_SMALL_FAST_MODEL",
 			"OPENAI_API_KEY", "OPENAI_BASE_URL", "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT",
 			"CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-			"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"} {
+			"CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK", "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+		} {
 			dropped[name] = struct{}{}
 		}
 	}
@@ -687,7 +715,8 @@ func (buffer *boundedBuffer) Write(value []byte) (int, error) {
 	}
 	return buffer.Buffer.Write(value)
 }
-func writerFor(stream io.Writer, capture io.Writer) io.Writer {
+
+func writerFor(stream, capture io.Writer) io.Writer {
 	if stream == nil {
 		return capture
 	}

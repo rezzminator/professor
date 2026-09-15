@@ -4,10 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	pfmchat "hostops/pfm/internal/chat"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
-	pfmtmux "hostops/pfm/internal/tmux"
 	"io"
 	"io/fs"
 	"os"
@@ -18,7 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	pfmchat "hostops/pfm/internal/chat"
 	pfmconfig "hostops/pfm/internal/config"
+	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
@@ -26,6 +25,7 @@ import (
 	"hostops/pfm/internal/reload"
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/store"
+	pfmtmux "hostops/pfm/internal/tmux"
 	"hostops/pfm/internal/tmuxfmt"
 )
 
@@ -43,7 +43,10 @@ func (reloadCommandTmux) command(ctx context.Context, socket string, args ...str
 }
 
 func (tmux reloadCommandTmux) ListPanes(ctx context.Context, socket string) ([]reload.Pane, error) {
-	format := strings.Join([]string{"#{pane_id}", "#{pane_dead}", "#{pane_current_path}", "#{pane_tty}", "#{pane_pid}"}, "\x1f")
+	format := strings.Join(
+		[]string{"#{pane_id}", "#{pane_dead}", "#{pane_current_path}", "#{pane_tty}", "#{pane_pid}"},
+		"\x1f",
+	)
 	output, err := tmux.command(ctx, socket, "list-panes", "-a", "-F", format).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list panes: %w", err)
@@ -62,7 +65,16 @@ func (tmux reloadCommandTmux) ListPanes(ctx context.Context, socket string) ([]r
 		if err != nil {
 			return nil, fmt.Errorf("parse pane pid %q: %w", fields[4], err)
 		}
-		rows = append(rows, reload.Pane{ID: fields[0], Dead: fields[1] == "1", CurrentPath: fields[2], TTY: strings.TrimPrefix(fields[3], "/dev/"), PID: pid})
+		rows = append(
+			rows,
+			reload.Pane{
+				ID:          fields[0],
+				Dead:        fields[1] == "1",
+				CurrentPath: fields[2],
+				TTY:         strings.TrimPrefix(fields[3], "/dev/"),
+				PID:         pid,
+			},
+		)
 	}
 	return rows, nil
 }
@@ -73,28 +85,35 @@ func (tmux reloadCommandTmux) SetRemain(ctx context.Context, socket, pane string
 	}
 	return tmux.command(ctx, socket, "set-option", "-p", "-t", pane, "-u", "remain-on-exit").Run()
 }
+
 func (tmux reloadCommandTmux) PaneInMode(ctx context.Context, socket, pane string) (bool, error) {
 	out, err := tmux.command(ctx, socket, "display-message", "-p", "-t", pane, "#{pane_in_mode}").Output()
 	return strings.TrimSpace(string(out)) == "1", err
 }
+
 func (tmux reloadCommandTmux) CancelMode(ctx context.Context, socket, pane string) error {
 	return tmux.command(ctx, socket, "send-keys", "-t", pane, "-X", "cancel").Run()
 }
+
 func (tmux reloadCommandTmux) Capture(ctx context.Context, socket, pane string) (string, error) {
 	// Reload decisions concern the active TUI only. Including scrollback lets an
 	// old composer or selector masquerade as current state.
 	out, err := tmux.command(ctx, socket, "capture-pane", "-t", pane, "-p", "-J").Output()
 	return string(out), err
 }
+
 func (tmux reloadCommandTmux) SendKey(ctx context.Context, socket, pane, key string) error {
 	return tmux.command(ctx, socket, "send-keys", "-t", pane, key).Run()
 }
+
 func (tmux reloadCommandTmux) SendLiteral(ctx context.Context, socket, pane, text string) error {
 	return tmux.command(ctx, socket, "send-keys", "-t", pane, "-l", "--", text).Run()
 }
+
 func (tmux reloadCommandTmux) Respawn(ctx context.Context, socket, pane, cwd, command string) error {
 	return tmux.command(ctx, socket, "respawn-pane", "-k", "-t", pane, "-c", cwd, command).Run()
 }
+
 func (tmux reloadCommandTmux) Display(ctx context.Context, socket, pane, message string) error {
 	return tmux.command(ctx, socket, "display-message", "-t", pane, message).Run()
 }
@@ -262,7 +281,8 @@ func runChatReloadWorkerWithRuntime(
 			index++
 			requestedPane = args[index]
 		case "--1h":
-			if index+1 >= len(args) || (args[index+1] != "on" && args[index+1] != "off" && args[index+1] != "1" && args[index+1] != "0") {
+			if index+1 >= len(args) ||
+				(args[index+1] != "on" && args[index+1] != "off" && args[index+1] != "1" && args[index+1] != "0") {
 				fmt.Fprintln(stderr, "pfm chat reload: --1h needs on|off")
 				return 2
 			}
@@ -297,7 +317,15 @@ func runChatReloadWorkerWithRuntime(
 	}
 	resolved := runtime.Paths
 	tmux := reloadCommandTmux{}
-	socketPath, pane, paneState, code := reloadTarget(context.Background(), sock, requestedPane, resolved, runtime, tmux, stderr)
+	socketPath, pane, paneState, code := reloadTarget(
+		context.Background(),
+		sock,
+		requestedPane,
+		resolved,
+		runtime,
+		tmux,
+		stderr,
+	)
 	if code != 0 {
 		return code
 	}
@@ -326,7 +354,11 @@ func runChatReloadWorkerWithRuntime(
 		} else {
 			then = then + " " + pointer
 		}
-		fmt.Fprintf(stdout, "pfm chat reload: role %q remembered — re-arm pointer appended to the reborn chat's follow-up\n", roleCrumb.Role)
+		fmt.Fprintf(
+			stdout,
+			"pfm chat reload: role %q remembered — re-arm pointer appended to the reborn chat's follow-up\n",
+			roleCrumb.Role,
+		)
 	}
 	engine := reloadEngine(socketPath)
 	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "")
@@ -343,9 +375,15 @@ func runChatReloadWorkerWithRuntime(
 		// --resume/resume and Result.New (SessionID == "") reports true.
 		id = ""
 		if hide {
-			fmt.Fprintln(stdout, "pfm chat reload: --new --hide — the reborn chat starts a NEW conversation in this pane; the one left behind is hidden from the picker once the reboot completes")
+			fmt.Fprintln(
+				stdout,
+				"pfm chat reload: --new --hide — the reborn chat starts a NEW conversation in this pane; the one left behind is hidden from the picker once the reboot completes",
+			)
 		} else {
-			fmt.Fprintln(stdout, "pfm chat reload: --new — the reborn chat starts a NEW conversation in this pane (the old one stays resumable)")
+			fmt.Fprintln(
+				stdout,
+				"pfm chat reload: --new — the reborn chat starts a NEW conversation in this pane (the old one stays resumable)",
+			)
 		}
 	}
 	cwd, err := reload.TranscriptCWD(transcript)
@@ -380,19 +418,66 @@ func runChatReloadWorkerWithRuntime(
 	if cacheOverride != "" {
 		cache = cacheOverride == "on" || cacheOverride == "1"
 	}
-	fmt.Fprintf(stdout, "pfm chat reload: reloading this chat to account %d IN PLACE — it reboots right here under the new account\n", acct)
+	fmt.Fprintf(
+		stdout,
+		"pfm chat reload: reloading this chat to account %d IN PLACE — it reboots right here under the new account\n",
+		acct,
+	)
 	if then != "" {
-		fmt.Fprintln(stdout, "pfm chat reload: --then queued — the follow-up is typed into the reborn chat once it reaches its prompt")
+		fmt.Fprintln(
+			stdout,
+			"pfm chat reload: --then queued — the follow-up is typed into the reborn chat once it reaches its prompt",
+		)
 	}
-	options := reload.Options{Home: resolved.Home, SIDDir: resolved.SIDDir, ClaudeRoots: resolved.Roots[pfmengine.Claude], Delay: reloadDurationEnv("PFM_RELOAD_DELAY_MS", 1500), Poll: reloadDurationEnv("PFM_RELOAD_POLL_MS", 1000), ExitTries: reload.ParseIntEnv("PFM_RELOAD_EXIT_TRIES", 20), IdleTries: reload.ParseIntEnv("PFM_RELOAD_IDLE_TRIES", 120), ThenTries: reload.ParseIntEnv("PFM_RELOAD_THEN_TRIES", 900)}
-	result, err := reload.Run(context.Background(), reload.Request{Engine: engine, SocketPath: socketPath, Pane: pane, PanePID: paneState.PID, SessionID: id, Transcript: transcript, CWD: cwd, Account: acct, AccountIDs: selected.IDs, AccountHome: selected.CodexHome, CodexBinary: selected.CodexBinary, CodexYolo: selected.CodexYolo, Cache1H: cache, Then: then, Model: model, Effort: effort, Home: resolved.Home, Machine: runtime.Config}, options, tmux, reloadProc{procfs: gather.NewProcFS(resolved.ProcRoot)}, stderr)
+	options := reload.Options{
+		Home:        resolved.Home,
+		SIDDir:      resolved.SIDDir,
+		ClaudeRoots: resolved.Roots[pfmengine.Claude],
+		Delay:       reloadDurationEnv("PFM_RELOAD_DELAY_MS", 1500),
+		Poll:        reloadDurationEnv("PFM_RELOAD_POLL_MS", 1000),
+		ExitTries:   reload.ParseIntEnv("PFM_RELOAD_EXIT_TRIES", 20),
+		IdleTries:   reload.ParseIntEnv("PFM_RELOAD_IDLE_TRIES", 120),
+		ThenTries:   reload.ParseIntEnv("PFM_RELOAD_THEN_TRIES", 900),
+	}
+	result, err := reload.Run(
+		context.Background(),
+		reload.Request{
+			Engine:      engine,
+			SocketPath:  socketPath,
+			Pane:        pane,
+			PanePID:     paneState.PID,
+			SessionID:   id,
+			Transcript:  transcript,
+			CWD:         cwd,
+			Account:     acct,
+			AccountIDs:  selected.IDs,
+			AccountHome: selected.CodexHome,
+			CodexBinary: selected.CodexBinary,
+			CodexYolo:   selected.CodexYolo,
+			Cache1H:     cache,
+			Then:        then,
+			Model:       model,
+			Effort:      effort,
+			Home:        resolved.Home,
+			Machine:     runtime.Config,
+		},
+		options,
+		tmux,
+		reloadProc{procfs: gather.NewProcFS(resolved.ProcRoot)},
+		stderr,
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
 	if result.New {
 		if newSeat {
-			fmt.Fprintf(stdout, "pfm chat reload: rebooted FRESH as requested: %s %s\n", filepath.Base(socketPath), pane)
+			fmt.Fprintf(
+				stdout,
+				"pfm chat reload: rebooted FRESH as requested: %s %s\n",
+				filepath.Base(socketPath),
+				pane,
+			)
 		} else {
 			fmt.Fprintln(stdout, "pfm chat reload: no transcript yet — rebooted FRESH")
 		}
@@ -404,15 +489,28 @@ func runChatReloadWorkerWithRuntime(
 		// pane. A reload that failed returned above, so a live chat is never
 		// hidden by the command that failed to replace it.
 		if leftBehind == "" {
-			fmt.Fprintln(stdout, "pfm chat reload: --hide — nothing to hide, the conversation left behind had no transcript yet")
+			fmt.Fprintln(
+				stdout,
+				"pfm chat reload: --hide — nothing to hide, the conversation left behind had no transcript yet",
+			)
 			return 0
 		}
 		hidden, err := hideReloadedConversation(context.Background(), runtime, engine, leftBehind, transcript, stderr)
 		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: rebooted fresh, but the conversation left behind is NOT hidden: %v — run: pfm chat kill %s\n", err, leftBehind)
+			fmt.Fprintf(
+				stderr,
+				"pfm chat reload: rebooted fresh, but the conversation left behind is NOT hidden: %v — run: pfm chat kill %s\n",
+				err,
+				leftBehind,
+			)
 			return 1
 		}
-		fmt.Fprintf(stdout, "pfm chat reload: hid the conversation left behind (%s) — pfm chat unkill %s brings it back\n", hidden, hidden)
+		fmt.Fprintf(
+			stdout,
+			"pfm chat reload: hid the conversation left behind (%s) — pfm chat unkill %s brings it back\n",
+			hidden,
+			hidden,
+		)
 	}
 	return 0
 }
@@ -484,7 +582,8 @@ func validateReloadArgs(args []string) error {
 			account = true
 			index++
 		case "--1h":
-			if index+1 >= len(args) || (args[index+1] != "on" && args[index+1] != "off" && args[index+1] != "1" && args[index+1] != "0") {
+			if index+1 >= len(args) ||
+				(args[index+1] != "on" && args[index+1] != "off" && args[index+1] != "1" && args[index+1] != "0") {
 				return errors.New("--1h needs on|off")
 			}
 			index++
@@ -600,7 +699,14 @@ func reloadDurationEnv(name string, fallbackMS int) time.Duration {
 // itself) and for the ambient-identity branch beneath this one, which never
 // takes --pane at all — only an explicit --sock server can carry more than
 // one live pane.
-func reloadTarget(ctx context.Context, sock, pane string, resolved paths.Values, runtime commandRuntime, tmux reload.Tmux, stderr io.Writer) (string, string, reload.Pane, int) {
+func reloadTarget(
+	ctx context.Context,
+	sock, pane string,
+	resolved paths.Values,
+	runtime commandRuntime,
+	tmux reload.Tmux,
+	stderr io.Writer,
+) (string, string, reload.Pane, int) {
 	if sock != "" {
 		path := sock
 		if !filepath.IsAbs(path) {
@@ -647,7 +753,12 @@ func reloadTarget(ctx context.Context, sock, pane string, resolved paths.Values,
 	return reloadTargetFromIdentity(ctx, identity, tmux, stderr)
 }
 
-func reloadTargetFromIdentity(ctx context.Context, identity resolve.Identity, tmux reload.Tmux, stderr io.Writer) (string, string, reload.Pane, int) {
+func reloadTargetFromIdentity(
+	ctx context.Context,
+	identity resolve.Identity,
+	tmux reload.Tmux,
+	stderr io.Writer,
+) (string, string, reload.Pane, int) {
 	path := identity.SocketPath
 	pane := identity.Pane
 	if pane == "" {
@@ -662,7 +773,12 @@ func reloadTargetFromIdentity(ctx context.Context, identity resolve.Identity, tm
 		if len(panes) == 1 {
 			return path, panes[0].ID, panes[0], 0
 		}
-		fmt.Fprintf(stderr, "pfm chat reload: recovered %s but found %d panes — target is ambiguous\n", identity.Session, len(panes))
+		fmt.Fprintf(
+			stderr,
+			"pfm chat reload: recovered %s but found %d panes — target is ambiguous\n",
+			identity.Session,
+			len(panes),
+		)
 		return "", "", reload.Pane{}, 1
 	}
 	for _, item := range panes {
@@ -683,9 +799,11 @@ func (proc reloadProc) PIDs() ([]int, error) { return proc.procfs.PIDs() }
 func (proc reloadProc) Cmdline(pid int) ([]string, error) {
 	return proc.procfs.Cmdline(pid)
 }
+
 func (proc reloadProc) Environ(pid int) (map[string]string, error) {
 	return proc.procfs.Environ(pid)
 }
+
 func (proc reloadProc) Stat(pid int) (gather.ProcStat, error) {
 	return proc.procfs.Stat(pid)
 }
@@ -721,7 +839,12 @@ func reloadBirth(
 	}
 	pids, err := proc.PIDs()
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: inspect birth processes for %s: %v; using safe defaults\n", filepath.Base(socketPath), err)
+		fmt.Fprintf(
+			stderr,
+			"pfm chat reload: inspect birth processes for %s: %v; using safe defaults\n",
+			filepath.Base(socketPath),
+			err,
+		)
 		return account, cache, nil
 	}
 	for _, pid := range pids {
@@ -857,6 +980,7 @@ func validateReloadAccount(machine pfmconfig.Config, engine pfmengine.ID, accoun
 	}
 	return reloadAccountSelection{IDs: machine.AccountIDs()}, nil
 }
+
 func reloadProcessInPane(proc reloadProc, pid, panePID int) (bool, error) {
 	current := pid
 	for depth := 0; depth <= 4; depth++ {
@@ -1026,7 +1150,12 @@ func hideReloadedConversation(
 	return target.ID, nil
 }
 
-func findEngineTranscript(resolved paths.Values, machine pfmconfig.Config, engine pfmengine.ID, id string) (string, error) {
+func findEngineTranscript(
+	resolved paths.Values,
+	machine pfmconfig.Config,
+	engine pfmengine.ID,
+	id string,
+) (string, error) {
 	switch engine {
 	case pfmengine.Opencode:
 		return "", errors.New("OpenCode does not support in-place reload")
@@ -1039,16 +1168,20 @@ func findEngineTranscript(resolved paths.Values, machine pfmconfig.Config, engin
 	}
 	for _, account := range machine.CodexAccounts {
 		found := ""
-		err := filepath.WalkDir(filepath.Join(account.Home, "sessions"), func(path string, entry os.DirEntry, walkErr error) error {
-			if walkErr != nil {
-				return walkErr
-			}
-			if entry != nil && !entry.IsDir() && strings.Contains(filepath.Base(path), id) && filepath.Ext(path) == ".jsonl" {
-				found = path
-				return filepath.SkipAll
-			}
-			return nil
-		})
+		err := filepath.WalkDir(
+			filepath.Join(account.Home, "sessions"),
+			func(path string, entry os.DirEntry, walkErr error) error {
+				if walkErr != nil {
+					return walkErr
+				}
+				if entry != nil && !entry.IsDir() && strings.Contains(filepath.Base(path), id) &&
+					filepath.Ext(path) == ".jsonl" {
+					found = path
+					return filepath.SkipAll
+				}
+				return nil
+			},
+		)
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return "", fmt.Errorf("search Codex rollouts under %q: %w", account.Home, err)
 		}

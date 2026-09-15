@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/rearm"
@@ -546,7 +546,12 @@ func (engine *Engine) ScheduleAfterCurrentTurn(
 			fmt.Sprintf("could not schedule command after the current turn: %v", err),
 		), nil
 	}
-	message := fmt.Sprintf("scheduled COMMAND into %q after the current turn settles — %d post-command steer(s) armed (log: %s)", target.Pane, len(then), logPath)
+	message := fmt.Sprintf(
+		"scheduled COMMAND into %q after the current turn settles — %d post-command steer(s) armed (log: %s)",
+		target.Pane,
+		len(then),
+		logPath,
+	)
 	if isSelfCompactRequest(request) {
 		message += SelfCompactStopNotice
 	}
@@ -1376,7 +1381,10 @@ func (engine *Engine) pasteRescue(target Target, request Request, prepared Prepa
 	}
 	stored, warnings, err := engine.persistBody(request.Message, name)
 	if err != nil {
-		return "", fmt.Sprintf("AUTO-FILE RESCUE FAILED: could not preserve the unproven body to a rescue file: %v", err)
+		return "", fmt.Sprintf(
+			"AUTO-FILE RESCUE FAILED: could not preserve the unproven body to a rescue file: %v",
+			err,
+		)
 	}
 	note = fmt.Sprintf("AUTO-FILE RESCUE: the full body was preserved at %s — read it fully", stored)
 	for _, warning := range warnings {

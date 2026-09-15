@@ -151,7 +151,10 @@ func (c *Cache) load(source, kind string) (body string, meta map[string]string, 
 	return body, meta, path, true
 }
 
-func (c *Cache) loadAny(source string, kinds []string) (body, kind string, meta map[string]string, path string, ok bool) {
+func (c *Cache) loadAny(
+	source string,
+	kinds []string,
+) (body, kind string, meta map[string]string, path string, ok bool) {
 	for _, candidate := range kinds {
 		body, meta, path, ok = c.load(source, candidate)
 		if ok {
@@ -248,11 +251,37 @@ func estimateTokens(text string) int {
 	cjk := 0
 	symbols := 0
 	for _, r := range runes {
-		if (r >= 0x3040 && r <= 0x30ff) || (r >= 0x3400 && r <= 0x9fff) || (r >= 0xf900 && r <= 0xfaff) || (r >= 0xac00 && r <= 0xd7af) || (r >= 0xff00 && r <= 0xffef) {
+		if (r >= 0x3040 && r <= 0x30ff) || (r >= 0x3400 && r <= 0x9fff) || (r >= 0xf900 && r <= 0xfaff) ||
+			(r >= 0xac00 && r <= 0xd7af) ||
+			(r >= 0xff00 && r <= 0xffef) {
 			cjk++
 		}
 		switch r {
-		case '{', '}', '[', ']', '(', ')', '<', '>', ';', '=', '+', '-', '*', '/', '\\', '|', '&', '^', '%', '$', '#', '@', '~', '`', '_':
+		case '{',
+			'}',
+			'[',
+			']',
+			'(',
+			')',
+			'<',
+			'>',
+			';',
+			'=',
+			'+',
+			'-',
+			'*',
+			'/',
+			'\\',
+			'|',
+			'&',
+			'^',
+			'%',
+			'$',
+			'#',
+			'@',
+			'~',
+			'`',
+			'_':
 			symbols++
 		}
 	}
@@ -278,8 +307,10 @@ func truncateInline(body string, limit int) string {
 	return string(runes[:limit]) + "\n\n[content truncated; read the cached path for the complete artifact]"
 }
 
-var volatileKinds = map[string]bool{"html": true, "pdf": true, "docx": true, "xlsx": true,
-	"pptx": true, "csv": true, "json": true, "txt": true}
+var volatileKinds = map[string]bool{
+	"html": true, "pdf": true, "docx": true, "xlsx": true,
+	"pptx": true, "csv": true, "json": true, "txt": true,
+}
 
 type negativeCache struct {
 	mu        sync.Mutex
@@ -296,6 +327,7 @@ type negativeEntry struct {
 func newNegativeCache(ttl, transient time.Duration) *negativeCache {
 	return &negativeCache{ttl: ttl, transient: transient, entries: map[string]negativeEntry{}}
 }
+
 func (c *negativeCache) get(key string) (Result, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -320,10 +352,13 @@ func (c *negativeCache) get(key string) (Result, bool) {
 	}
 	return result, true
 }
+
 func (c *negativeCache) put(key string, result Result) {
 	c.mu.Lock()
 	ttl := c.ttl
-	if result.HTTPStatus == http.StatusTooManyRequests || result.ErrorKind == "timeout" || result.ErrorKind == "connect" || result.ErrorKind == "dns" {
+	if result.HTTPStatus == http.StatusTooManyRequests || result.ErrorKind == "timeout" ||
+		result.ErrorKind == "connect" ||
+		result.ErrorKind == "dns" {
 		ttl = c.transient
 	}
 	c.entries[key] = negativeEntry{at: time.Now(), ttl: ttl, result: result}

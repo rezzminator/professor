@@ -56,7 +56,8 @@ func errorKind(err error) string {
 			return "connect"
 		}
 	}
-	if strings.Contains(low, "unsupported protocol") || strings.Contains(low, "unsupported scheme") || strings.Contains(low, "invalid url") {
+	if strings.Contains(low, "unsupported protocol") || strings.Contains(low, "unsupported scheme") ||
+		strings.Contains(low, "invalid url") {
 		return "invalid"
 	}
 	if strings.Contains(low, "private") || strings.Contains(low, "internal") || strings.Contains(low, "not allowed") {
@@ -65,7 +66,7 @@ func errorKind(err error) string {
 	return "connect"
 }
 
-func failureMessage(item string, status int, kind string, challenge bool, searchAvailable bool) string {
+func failureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
 	if kind == "invalid" {
 		return fmt.Sprintf("Invalid URL: %s — %s", item, SearchHint(searchAvailable,
 			"check it for typos, or use `search` to find the source.",
@@ -73,31 +74,50 @@ func failureMessage(item string, status int, kind string, challenge bool, search
 		))
 	}
 	if kind == "blocked" {
-		return fmt.Sprintf("refusing to fetch a private or internal host: %s — harvester only fetches public internet resources; use the resource's public URL instead.", item)
+		return fmt.Sprintf(
+			"refusing to fetch a private or internal host: %s — harvester only fetches public internet resources; use the resource's public URL instead.",
+			item,
+		)
 	}
 	if kind == "timeout" {
-		return fmt.Sprintf("Could not reach %s: the server did not respond in time (connection timed out). %s", item, SearchHint(searchAvailable,
-			"Retry later, or use `search` to find an alternative copy.",
-			"Retry later, or find an alternative copy with findWorks or another URL.",
-		))
+		return fmt.Sprintf(
+			"Could not reach %s: the server did not respond in time (connection timed out). %s",
+			item,
+			SearchHint(searchAvailable,
+				"Retry later, or use `search` to find an alternative copy.",
+				"Retry later, or find an alternative copy with findWorks or another URL.",
+			),
+		)
 	}
 	if kind == "dns" {
-		return fmt.Sprintf("Could not reach %s: DNS resolution failed (host not found). %s", item, SearchHint(searchAvailable,
-			"Retry later, or use `search` to find an alternative copy.",
-			"Retry later, or find an alternative copy with findWorks or another URL.",
-		))
+		return fmt.Sprintf(
+			"Could not reach %s: DNS resolution failed (host not found). %s",
+			item,
+			SearchHint(searchAvailable,
+				"Retry later, or use `search` to find an alternative copy.",
+				"Retry later, or find an alternative copy with findWorks or another URL.",
+			),
+		)
 	}
 	if kind == "connect" {
-		return fmt.Sprintf("Could not reach %s: the connection failed (refused or host unreachable). %s", item, SearchHint(searchAvailable,
-			"Retry later, or use `search` to find an alternative copy.",
-			"Retry later, or find an alternative copy with findWorks or another URL.",
-		))
+		return fmt.Sprintf(
+			"Could not reach %s: the connection failed (refused or host unreachable). %s",
+			item,
+			SearchHint(searchAvailable,
+				"Retry later, or use `search` to find an alternative copy.",
+				"Retry later, or find an alternative copy with findWorks or another URL.",
+			),
+		)
 	}
 	if challenge {
-		return fmt.Sprintf("%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s", item, SearchHint(searchAvailable,
-			"Use `search` to find a mirror or alternative copy.",
-			"Find a mirror or alternative copy with findWorks or another URL.",
-		))
+		return fmt.Sprintf(
+			"%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s",
+			item,
+			SearchHint(searchAvailable,
+				"Use `search` to find a mirror or alternative copy.",
+				"Find a mirror or alternative copy with findWorks or another URL.",
+			),
+		)
 	}
 	if status >= 400 {
 		meaning := map[int]string{400: "bad request", 401: "unauthorized", 403: "forbidden", 404: "page not found", 405: "method not allowed", 408: "request timeout", 410: "gone", 429: "too many requests", 500: "internal server error", 502: "bad gateway", 503: "service unavailable", 504: "gateway timeout"}[status]
@@ -122,7 +142,7 @@ func failureMessage(item string, status int, kind string, challenge bool, search
 // FailureMessage exposes the transport core's canonical terminal diagnostic
 // to protocol adapters. Keeping one renderer prevents MCP receipts from
 // drifting away from negative-cache and direct-fetch errors.
-func FailureMessage(item string, status int, kind string, challenge bool, searchAvailable bool) string {
+func FailureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
 	return failureMessage(item, status, kind, challenge, searchAvailable)
 }
 
@@ -138,7 +158,11 @@ func safeHTTPClient(chrome bool, resolve ...func(context.Context, string) ([]net
 	return safeHTTPClientTimeoutWithResolver(chrome, timeout, resolver)
 }
 
-func safeHTTPClientTimeout(chrome bool, timeout time.Duration, resolve ...func(context.Context, string) ([]net.IP, error)) *http.Client {
+func safeHTTPClientTimeout(
+	chrome bool,
+	timeout time.Duration,
+	resolve ...func(context.Context, string) ([]net.IP, error),
+) *http.Client {
 	var resolver func(context.Context, string) ([]net.IP, error)
 	if len(resolve) > 0 {
 		resolver = resolve[0]
@@ -146,9 +170,15 @@ func safeHTTPClientTimeout(chrome bool, timeout time.Duration, resolve ...func(c
 	return safeHTTPClientTimeoutWithResolver(chrome, timeout, resolver)
 }
 
-func safeHTTPClientTimeoutWithResolver(chrome bool, timeout time.Duration, resolver func(context.Context, string) ([]net.IP, error)) *http.Client {
-	var transport http.RoundTripper = &http.Transport{Proxy: http.ProxyFromEnvironment,
-		ForceAttemptHTTP2: !chrome, MaxIdleConns: 32, IdleConnTimeout: 30 * time.Second}
+func safeHTTPClientTimeoutWithResolver(
+	chrome bool,
+	timeout time.Duration,
+	resolver func(context.Context, string) ([]net.IP, error),
+) *http.Client {
+	var transport http.RoundTripper = &http.Transport{
+		Proxy:             http.ProxyFromEnvironment,
+		ForceAttemptHTTP2: !chrome, MaxIdleConns: 32, IdleConnTimeout: 30 * time.Second,
+	}
 	if chrome {
 		transport = newChromeTransport(resolver)
 	} else {
@@ -165,7 +195,9 @@ func safeHTTPClientTimeoutWithResolver(chrome bool, timeout time.Duration, resol
 
 // PinnedDialContext resolves once and dials only the validated public address;
 // the original hostname is retained for TLS SNI by the caller.
-func pinnedDialContext(resolve func(context.Context, string) ([]net.IP, error)) func(context.Context, string, string) (net.Conn, error) {
+func pinnedDialContext(
+	resolve func(context.Context, string) ([]net.IP, error),
+) func(context.Context, string, string) (net.Conn, error) {
 	return func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
@@ -191,7 +223,11 @@ func pinnedDialContext(resolve func(context.Context, string) ([]net.IP, error)) 
 	}
 }
 
-func publicIPs(ctx context.Context, host string, resolve func(context.Context, string) ([]net.IP, error)) ([]net.IP, error) {
+func publicIPs(
+	ctx context.Context,
+	host string,
+	resolve func(context.Context, string) ([]net.IP, error),
+) ([]net.IP, error) {
 	if ip := literalIP(host); ip != nil {
 		if privateIP(ip) {
 			return nil, fmt.Errorf("refusing private/internal host %s", host)
@@ -298,8 +334,11 @@ func assertFetchable(raw string, strictDNS bool) error {
 		}
 		return nil
 	}
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" || strings.HasSuffix(host, ".local") || host == "metadata.google.internal" ||
-		strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".ts.net") {
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" ||
+		strings.HasSuffix(host, ".local") ||
+		host == "metadata.google.internal" ||
+		strings.HasSuffix(host, ".internal") ||
+		strings.HasSuffix(host, ".ts.net") {
 		return fmt.Errorf("refusing private/internal host %s", host)
 	}
 	// DNS rebind defense. Strict mode FAILS CLOSED: Chrome performs its own
@@ -367,7 +406,10 @@ func IsPrivateHost(raw string) bool {
 	if ip := literalIP(host); ip != nil {
 		return privateIP(ip)
 	}
-	return host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".ts.net")
+	return host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" ||
+		strings.HasSuffix(host, ".local") ||
+		strings.HasSuffix(host, ".internal") ||
+		strings.HasSuffix(host, ".ts.net")
 }
 
 // RobotsURL is retained for callers that display the source's policy URL.
@@ -385,7 +427,9 @@ func RobotsURL(raw string) string {
 }
 
 func privateIP(ip net.IP) bool {
-	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
+	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
+		ip.IsUnspecified() ||
+		ip.IsMulticast() {
 		return true
 	}
 	if v4 := ip.To4(); v4 != nil {
@@ -442,7 +486,13 @@ func getBody(ctx context.Context, client *http.Client, rawURL, ua string, max in
 // it was asked for and leave the sequencing to the caller. Oversize truncates
 // here — the oracle's streaming cap keeps the permitted prefix and lets the
 // converter judge whether it is usable.
-func getBodyWithHeaders(ctx context.Context, client *http.Client, rawURL, ua string, headers map[string]string, max int64) ([]byte, int, string, error) {
+func getBodyWithHeaders(
+	ctx context.Context,
+	client *http.Client,
+	rawURL, ua string,
+	headers map[string]string,
+	max int64,
+) ([]byte, int, string, error) {
 	header := make(http.Header, len(headers))
 	for key, value := range headers {
 		header.Set(key, value)
@@ -490,7 +540,10 @@ func decodedResponseBody(resp *http.Response) (io.Reader, func() error, error) {
 			decoder, err = zstd.NewReader(current)
 			next, closer = decoder, noErrorCloser{closeFn: decoder.Close}
 		default:
-			return nil, func() error { return resp.Body.Close() }, fmt.Errorf("unsupported content encoding %q", encoding)
+			return nil, func() error { return resp.Body.Close() }, fmt.Errorf(
+				"unsupported content encoding %q",
+				encoding,
+			)
 		}
 		if err != nil {
 			for j := len(closers) - 1; j >= 0; j-- {
@@ -629,7 +682,8 @@ func classifyKind(source, contentType string, body []byte) string {
 	if len(body) >= 4 && (string(body[:4]) == "II*\x00" || string(body[:4]) == "MM\x00*") {
 		return "tiff"
 	}
-	if strings.HasPrefix(strings.TrimSpace(string(body)), "<svg") || strings.Contains(strings.ToLower(string(body[:minInt(len(body), 512)])), "<svg") {
+	if strings.HasPrefix(strings.TrimSpace(string(body)), "<svg") ||
+		strings.Contains(strings.ToLower(string(body[:minInt(len(body), 512)])), "<svg") {
 		return "svg"
 	}
 	if strings.HasSuffix(strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0]), ".pdf") {

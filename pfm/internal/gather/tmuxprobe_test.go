@@ -39,8 +39,11 @@ func TestProbeTmuxFailsWholeWhenTmuxCannotRun(t *testing.T) {
 
 			result, err := probe.run(context.Background(), tmuxDir, client, now)
 			if err == nil {
-				t.Fatalf("probe with an unstartable tmux returned no error: panes=%d warnings=%q — an empty fleet that means \"could not look\"",
-					len(result.Panes), result.ProbeWarnings)
+				t.Fatalf(
+					"probe with an unstartable tmux returned no error: panes=%d warnings=%q — an empty fleet that means \"could not look\"",
+					len(result.Panes),
+					result.ProbeWarnings,
+				)
 			}
 			if !pfmtmux.CouldNotRun(err) {
 				t.Fatalf("probe error %v does not carry the could-not-run cause", err)
@@ -109,7 +112,12 @@ func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
 	if strings.Join(transitions, "; ") != `automatic-rename "on" -> "off"` {
 		t.Fatalf("first pass transitions = %q, want only automatic-rename changed", transitions)
 	}
-	if again, err := client.ConvergeGlobalOptions(context.Background(), socket, options); err != nil || len(again) != 0 {
+	if again, err := client.ConvergeGlobalOptions(
+		context.Background(),
+		socket,
+		options,
+	); err != nil ||
+		len(again) != 0 {
 		t.Fatalf("second pass = %q (%v), want a converged server left alone", again, err)
 	}
 	_, err = client.ConvergeGlobalOptions(context.Background(), "cc-missing", options)

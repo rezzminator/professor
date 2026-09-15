@@ -2,12 +2,12 @@ package kill
 
 import (
 	"context"
-	pfmengine "hostops/pfm/internal/engine"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/store"
 )
 

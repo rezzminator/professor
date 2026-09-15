@@ -60,24 +60,31 @@ func TestPointerThresholdSplit(t *testing.T) {
 		}
 	})
 
-	t.Run("a TOML artifact's pointer names the developer_instructions key, never a hardcoded literal", func(t *testing.T) {
-		dir := t.TempDir()
-		path := filepath.Join(dir, "reviewer.toml")
-		body := strings.Repeat("x", 80)
-		mustWriteFile(t, path, "name = \"reviewer\"\ndeveloper_instructions = \"\"\"\n"+body+"\n\"\"\"\n")
-		crumb := Crumb{Role: "reviewer", ArtifactPath: path, TOMLKey: true}
+	t.Run(
+		"a TOML artifact's pointer names the developer_instructions key, never a hardcoded literal",
+		func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "reviewer.toml")
+			body := strings.Repeat("x", 80)
+			mustWriteFile(t, path, "name = \"reviewer\"\ndeveloper_instructions = \"\"\"\n"+body+"\n\"\"\"\n")
+			crumb := Crumb{Role: "reviewer", ArtifactPath: path, TOMLKey: true}
 
-		// A threshold well under the body's own length forces the short
-		// pointer branch without depending on TOML's exact leading/trailing
-		// newline trimming rules.
-		got := Pointer(crumb, 10)
-		if !strings.Contains(got, agentrole.DeveloperInstructionsKey) {
-			t.Fatalf("Pointer() = %q, want it to name agentrole.DeveloperInstructionsKey (%q)", got, agentrole.DeveloperInstructionsKey)
-		}
-		if !strings.Contains(got, path) {
-			t.Fatalf("Pointer() = %q, want it to also name the artifact path %q", got, path)
-		}
-	})
+			// A threshold well under the body's own length forces the short
+			// pointer branch without depending on TOML's exact leading/trailing
+			// newline trimming rules.
+			got := Pointer(crumb, 10)
+			if !strings.Contains(got, agentrole.DeveloperInstructionsKey) {
+				t.Fatalf(
+					"Pointer() = %q, want it to name agentrole.DeveloperInstructionsKey (%q)",
+					got,
+					agentrole.DeveloperInstructionsKey,
+				)
+			}
+			if !strings.Contains(got, path) {
+				t.Fatalf("Pointer() = %q, want it to also name the artifact path %q", got, path)
+			}
+		},
+	)
 }
 
 // TestPointerVanishedArtifactFailsVisibly pins behaviour 4: an artifact that
@@ -124,26 +131,29 @@ func TestReadCrumbThreeStatesNeverCollapse(t *testing.T) {
 		}
 	})
 
-	t.Run("a crumb file that exists but cannot be parsed is a real error, never folded into absence", func(t *testing.T) {
-		sidDir := t.TempDir()
-		socket := "cc-1800000000-1-2"
-		path := filepath.Join(sidDir, "role-"+socket)
-		mustWriteFile(t, path, "{ this is not valid json")
+	t.Run(
+		"a crumb file that exists but cannot be parsed is a real error, never folded into absence",
+		func(t *testing.T) {
+			sidDir := t.TempDir()
+			socket := "cc-1800000000-1-2"
+			path := filepath.Join(sidDir, "role-"+socket)
+			mustWriteFile(t, path, "{ this is not valid json")
 
-		crumb, ok, err := ReadCrumb(sidDir, socket, "")
-		if err == nil {
-			t.Fatal("ReadCrumb() error = nil, want a parse error for a corrupt crumb file")
-		}
-		if !strings.Contains(err.Error(), path) {
-			t.Fatalf("ReadCrumb() error = %q, want it to name the path %q", err.Error(), path)
-		}
-		if ok {
-			t.Fatal("ReadCrumb() ok = true alongside a parse error")
-		}
-		if crumb != (Crumb{}) {
-			t.Fatalf("ReadCrumb() crumb = %#v, want the zero value alongside an error", crumb)
-		}
-	})
+			crumb, ok, err := ReadCrumb(sidDir, socket, "")
+			if err == nil {
+				t.Fatal("ReadCrumb() error = nil, want a parse error for a corrupt crumb file")
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Fatalf("ReadCrumb() error = %q, want it to name the path %q", err.Error(), path)
+			}
+			if ok {
+				t.Fatal("ReadCrumb() ok = true alongside a parse error")
+			}
+			if crumb != (Crumb{}) {
+				t.Fatalf("ReadCrumb() crumb = %#v, want the zero value alongside an error", crumb)
+			}
+		},
+	)
 
 	t.Run("a live crumb returns it, true, nil", func(t *testing.T) {
 		sidDir := t.TempDir()

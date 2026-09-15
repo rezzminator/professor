@@ -335,7 +335,11 @@ func TestRealProcFSBirthIsBootTimePlusStartTicksNotTheProcDirMtime(t *testing.T)
 	if err := os.MkdirAll(pidDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "stat"), []byte("cpu  1 2 3 4\nbtime 1700000000\nprocesses 9\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(root, "stat"),
+		[]byte("cpu  1 2 3 4\nbtime 1700000000\nprocesses 9\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	// A comm holding ") " pins the last-paren parse; field 22 (starttime) is 12345 ticks.
@@ -349,7 +353,13 @@ func TestRealProcFSBirthIsBootTimePlusStartTicksNotTheProcDirMtime(t *testing.T)
 	}
 	got, err := RealProcFS{Root: root}.Birth(4242)
 	if want := int64(1_700_000_000 + 12345/100); err != nil || got != want {
-		t.Fatalf("Birth = %d, %v; want %d (btime + starttime/USER_HZ), not the pid dir mtime %d", got, err, want, lazy.Unix())
+		t.Fatalf(
+			"Birth = %d, %v; want %d (btime + starttime/USER_HZ), not the pid dir mtime %d",
+			got,
+			err,
+			want,
+			lazy.Unix(),
+		)
 	}
 
 	// No btime to count from: an error, never a zero that reads as "unknown

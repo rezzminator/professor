@@ -293,12 +293,19 @@ func TestCodexPaneDoctorUsesHeldRootDespiteModelFirstStatus(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(ctx, socket, "%0", id); err != nil {
 		t.Fatal(err)
 	}
-	runtime := commandRuntime{Paths: resolved, Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 1, Home: filepath.Join(root, "codex")}}}}
+	runtime := commandRuntime{
+		Paths:  resolved,
+		Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 1, Home: filepath.Join(root, "codex")}}},
+	}
 	panes, err := liveCodexPanes(ctx, runtime)
 	if err != nil || len(panes) != 1 {
 		t.Fatalf("panes=%#v err=%v", panes, err)
 	}
-	writeFakeProcess(t, resolved.ProcRoot, fakeProcessSpec{pid: 900001, parentPID: panes[0].PID, comm: "codex", cmdline: []string{"codex"}, withFD: true})
+	writeFakeProcess(
+		t,
+		resolved.ProcRoot,
+		fakeProcessSpec{pid: 900001, parentPID: panes[0].PID, comm: "codex", cmdline: []string{"codex"}, withFD: true},
+	)
 	if err := os.Symlink(path, filepath.Join(resolved.ProcRoot, "900001", "fd", "3")); err != nil {
 		t.Fatal(err)
 	}

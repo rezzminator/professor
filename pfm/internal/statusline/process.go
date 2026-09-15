@@ -10,12 +10,11 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-
-	pfmengine "hostops/pfm/internal/engine"
 	"syscall"
 	"time"
 
 	"hostops/pfm/internal/deps"
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // SpawnDetached starts one refresher as a new session and releases the child.

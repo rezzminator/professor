@@ -249,7 +249,11 @@ func (installer *engine) linkVSCodeExtension(recorded []string) ([]string, error
 	return kept, nil
 }
 
-func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnershipRecord, alreadyOwned bool) ([]byte, vscodeOwnershipRecord, bool, error) {
+func (installer *engine) mergeVSCodeSettings(
+	path string,
+	record vscodeOwnershipRecord,
+	alreadyOwned bool,
+) ([]byte, vscodeOwnershipRecord, bool, error) {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		raw = []byte("{}\n")
@@ -261,7 +265,12 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	}
 	document, err := decodeJSONCObject(raw)
 	if err != nil {
-		return nil, record, false, fmt.Errorf("%w: decode VS Code settings %s: %v", errMalformedVSCodeSettings, path, err)
+		return nil, record, false, fmt.Errorf(
+			"%w: decode VS Code settings %s: %v",
+			errMalformedVSCodeSettings,
+			path,
+			err,
+		)
 	}
 	profileKey, defaultKey := vscodeSettingKeys(record.Platform)
 	canonical := vscodeProfile()
@@ -272,7 +281,12 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 		var ok bool
 		profiles, ok = profilesValue.(map[string]any)
 		if !ok {
-			return nil, record, false, fmt.Errorf("%w: VS Code settings %s: %s must be an object", errMalformedVSCodeSettings, path, profileKey)
+			return nil, record, false, fmt.Errorf(
+				"%w: VS Code settings %s: %s must be an object",
+				errMalformedVSCodeSettings,
+				path,
+				profileKey,
+			)
 		}
 	} else {
 		profiles = map[string]any{}
@@ -287,7 +301,8 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	// canonical match gets below, never as a conflicting operator profile.
 	upgradingProfile := isLegacyVSCodeProfile(existingProfile)
 	profileRelinquished := false
-	if alreadyOwned && record.ProfileOwned && hasProfile && !reflect.DeepEqual(existingProfile, canonical) && !upgradingProfile {
+	if alreadyOwned && record.ProfileOwned && hasProfile && !reflect.DeepEqual(existingProfile, canonical) &&
+		!upgradingProfile {
 		// A user edit after installation wins. Relinquish this field instead of
 		// rewriting it during an unrelated update.
 		record.ProfileOwned = false
@@ -297,7 +312,11 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	if installer.options.VSCode || record.ProfileOwned {
 		if hasProfile && !reflect.DeepEqual(existingProfile, canonical) && !upgradingProfile {
 			if !profileRelinquished {
-				return nil, record, false, fmt.Errorf("VS Code settings %s: profile %q already exists and is not PFM-owned", path, vscodeProfileName)
+				return nil, record, false, fmt.Errorf(
+					"VS Code settings %s: profile %q already exists and is not PFM-owned",
+					path,
+					vscodeProfileName,
+				)
 			}
 		}
 		if !hasProfile {
@@ -307,7 +326,8 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	}
 
 	existingDefault, hasDefault := document[defaultKey]
-	if alreadyOwned && record.DefaultOwned && (!hasDefault || (existingDefault != vscodeProfileName && existingDefault != vscodeExtensionProfileTitle)) {
+	if alreadyOwned && record.DefaultOwned &&
+		(!hasDefault || (existingDefault != vscodeProfileName && existingDefault != vscodeExtensionProfileTitle)) {
 		// An owned default holding the extension's title is pfm's own earlier
 		// value, moved back — not an operator override. Only a THIRD value
 		// (something the operator picked after installation) relinquishes.
@@ -414,7 +434,12 @@ func (installer *engine) mergeVSCodeSettings(path string, record vscodeOwnership
 	return updated, record, changed, nil
 }
 
-func (installer *engine) unwireVSCode(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string, indexRegistrations []string) error {
+func (installer *engine) unwireVSCode(
+	path string,
+	existing []byte,
+	ownership map[string]vscodeOwnershipRecord,
+	extensions, indexRegistrations []string,
+) error {
 	ordered := make([]string, 0, len(ownership))
 	for settings := range ownership {
 		ordered = append(ordered, settings)
@@ -432,13 +457,17 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 		}
 		document, err := decodeJSONCObject(raw)
 		if err != nil {
-			installer.skip("VS Code settings skipped " + settings + ": " + fmt.Errorf("%w: decode VS Code settings: %v", errMalformedVSCodeSettings, err).Error())
+			installer.skip(
+				"VS Code settings skipped " + settings + ": " + fmt.Errorf("%w: decode VS Code settings: %v", errMalformedVSCodeSettings, err).
+					Error(),
+			)
 			continue
 		}
 		profileKey, defaultKey := vscodeSettingKeys(record.Platform)
 		updated := append([]byte(nil), raw...)
 		changed := false
-		if record.DefaultOwned && (document[defaultKey] == vscodeProfileName || document[defaultKey] == vscodeExtensionProfileTitle) {
+		if record.DefaultOwned &&
+			(document[defaultKey] == vscodeProfileName || document[defaultKey] == vscodeExtensionProfileTitle) {
 			if record.HadDefault {
 				updated, err = setJSONCProperty(updated, 0, defaultKey, record.PreviousDefault)
 			} else {
@@ -505,7 +534,8 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 				if decodeErr != nil {
 					return decodeErr
 				}
-				removeEmptyFile = len(current) == 0 && !bytes.Contains(updated, []byte("//")) && !bytes.Contains(updated, []byte("/*"))
+				removeEmptyFile = len(current) == 0 && !bytes.Contains(updated, []byte("//")) &&
+					!bytes.Contains(updated, []byte("/*"))
 			}
 			if err := installer.change("remove VS Code PFM terminal profile "+settings, func() error {
 				if removeEmptyFile {
@@ -520,7 +550,9 @@ func (installer *engine) unwireVSCode(path string, existing []byte, ownership ma
 		}
 		if profileRetained {
 			ownership[settings] = record
-			installer.skip("VS Code PFM terminal profile was edited; left it in place and retained recovery ownership at " + settings)
+			installer.skip(
+				"VS Code PFM terminal profile was edited; left it in place and retained recovery ownership at " + settings,
+			)
 		} else {
 			delete(ownership, settings)
 		}
@@ -576,7 +608,12 @@ func (installer *engine) writeVSCodeSettings(path string, content []byte) error 
 	return atomicfile.Write(physical, content, mode)
 }
 
-func (installer *engine) writeVSCodeOwnership(path string, existing []byte, ownership map[string]vscodeOwnershipRecord, extensions []string, indexRegistrations []string) error {
+func (installer *engine) writeVSCodeOwnership(
+	path string,
+	existing []byte,
+	ownership map[string]vscodeOwnershipRecord,
+	extensions, indexRegistrations []string,
+) error {
 	if len(ownership) == 0 && len(extensions) == 0 && len(indexRegistrations) == 0 {
 		if len(existing) == 0 {
 			return nil

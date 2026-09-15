@@ -139,7 +139,10 @@ func (converter *Converter) Convert(ctx context.Context, request Request) (Resul
 		return Result{}, errors.New("harvestpy conversion path is empty")
 	}
 	if isArchiveKind(request.Kind) {
-		return Result{}, fmt.Errorf("harvestpy rejects archive kind %q; Go must extract one bounded member first", request.Kind)
+		return Result{}, fmt.Errorf(
+			"harvestpy rejects archive kind %q; Go must extract one bounded member first",
+			request.Kind,
+		)
 	}
 	return converter.run(ctx, request)
 }

@@ -1,13 +1,13 @@
 package compose
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/store"
 )

@@ -137,7 +137,10 @@ func scanGoLiterals(t *testing.T, root, path string) []string {
 		for _, r := range value {
 			if name := webglCustomGlyphRange(r); name != "" {
 				rel, _ := filepath.Rel(root, path)
-				findings = append(findings, fmt.Sprintf("%s:%d %q %U (%s)", rel, fset.Position(lit.Pos()).Line, r, r, name))
+				findings = append(
+					findings,
+					fmt.Sprintf("%s:%d %q %U (%s)", rel, fset.Position(lit.Pos()).Line, r, r, name),
+				)
 			}
 		}
 		return true

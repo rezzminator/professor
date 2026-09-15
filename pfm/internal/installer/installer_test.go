@@ -48,7 +48,8 @@ func (runner *fakeRunner) Run(_ context.Context, name string, args ...string) er
 	if call == "systemctl --user show-environment" && runner.manager {
 		return nil
 	}
-	if strings.Contains(call, "is-active") || strings.Contains(call, "is-enabled") || strings.Contains(call, "is-failed") {
+	if strings.Contains(call, "is-active") || strings.Contains(call, "is-enabled") ||
+		strings.Contains(call, "is-failed") {
 		return errors.New("not loaded")
 	}
 	if runner.manager || name == "launchctl" {
@@ -124,7 +125,8 @@ func TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem(t *testing.T
 	}
 	// issue #24 F7: only the actual newest build is labelled "newest" — the
 	// second-newest kept build carries a distinct, honest label.
-	if !strings.Contains(previewOutput, "keep "+newest+" (newest)") || !strings.Contains(previewOutput, "keep "+second+" (within keep window)") {
+	if !strings.Contains(previewOutput, "keep "+newest+" (newest)") ||
+		!strings.Contains(previewOutput, "keep "+second+" (within keep window)") {
 		t.Fatalf("preview did not name the two newest versions kept, one honestly labelled second:\n%s", previewOutput)
 	}
 	for _, path := range []string{newest, second, live, prunable} {
@@ -207,14 +209,23 @@ func TestReachableIdleUserManagerAllowsMutatingModes(t *testing.T) {
 			home := t.TempDir()
 			var output bytes.Buffer
 			_, err := Run(context.Background(), Options{
-				Mode: mode, Home: home, Stdout: &output,
-				Runner: &outputRunner{fakeRunner: fakeRunner{manager: true, nameSyncIdle: true}, printOutput: "state = not running\n"},
+				Mode:   mode,
+				Home:   home,
+				Stdout: &output,
+				Runner: &outputRunner{
+					fakeRunner:  fakeRunner{manager: true, nameSyncIdle: true},
+					printOutput: "state = not running\n",
+				},
 			})
 			if err != nil {
 				t.Fatalf("mode %d refused an idle reachable manager: %v\n%s", mode, err, output.String())
 			}
 			if strings.Contains(output.String(), "gate NOT probed") {
-				t.Fatalf("mode %d claimed the gate was unprobed for a genuinely idle service:\n%s", mode, output.String())
+				t.Fatalf(
+					"mode %d claimed the gate was unprobed for a genuinely idle service:\n%s",
+					mode,
+					output.String(),
+				)
 			}
 		})
 	}
@@ -335,7 +346,11 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
   }
 }`)
 	secondarySettings := filepath.Join(home, ".cc", "2", "settings.json")
-	writeFixture(t, secondarySettings, `{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"pfm chat bb"},{"type":"command","command":"secondary-keep"}]}]}}`)
+	writeFixture(
+		t,
+		secondarySettings,
+		`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[{"type":"command","command":"pfm chat bb"},{"type":"command","command":"secondary-keep"}]}]}}`,
+	)
 	writeFixture(t, filepath.Join(config, ".cc-ls-hidden"), "killed-b\nkilled-a\n")
 	writeFixture(t, filepath.Join(config, "bin", "cc-kill.sh"), "retired\n")
 	writeFixture(t, filepath.Join(home, ".zshrc"), "alias keep=yes\nsource /old/cc-fleet.zsh\n")
@@ -417,7 +432,11 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	wantDescription := "USER-ONLY — the user types /reload; never run this without the user's permission. " +
 		foldReloadUsage(reload.Usage)
 	if gotDescription != wantDescription {
-		t.Fatalf("reload description = %q, want the USER-ONLY law plus the folded usage line %q", gotDescription, wantDescription)
+		t.Fatalf(
+			"reload description = %q, want the USER-ONLY law plus the folded usage line %q",
+			gotDescription,
+			wantDescription,
+		)
 	}
 	// T4: /handoff is a global skill, linked the same way /reload is a
 	// global command.
@@ -449,9 +468,21 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			t.Fatalf("systemd units were staged on a launchd host: %v", err)
 		}
 	} else {
-		assertLink(t, filepath.Join(home, ".config", "systemd", "user", "pfm-name-sync.service"), filepath.Join(managed, "systemd", "pfm-name-sync.service"))
-		assertLink(t, filepath.Join(unitDirectory, "default.target.wants", "pfm-name-sync.path"), filepath.Join(unitDirectory, "pfm-name-sync.path"))
-		assertLink(t, filepath.Join(unitDirectory, "timers.target.wants", "pfm-name-sync.timer"), filepath.Join(unitDirectory, "pfm-name-sync.timer"))
+		assertLink(
+			t,
+			filepath.Join(home, ".config", "systemd", "user", "pfm-name-sync.service"),
+			filepath.Join(managed, "systemd", "pfm-name-sync.service"),
+		)
+		assertLink(
+			t,
+			filepath.Join(unitDirectory, "default.target.wants", "pfm-name-sync.path"),
+			filepath.Join(unitDirectory, "pfm-name-sync.path"),
+		)
+		assertLink(
+			t,
+			filepath.Join(unitDirectory, "timers.target.wants", "pfm-name-sync.timer"),
+			filepath.Join(unitDirectory, "pfm-name-sync.timer"),
+		)
 	}
 	// The predecessor's enablement links are a systemd concept; a launchd host
 	// never wires systemd at all, so it has none to retire.
@@ -477,9 +508,20 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	// installer-owned end to end — materialized under the managed root and
 	// symlinked at their contracted ~/.local/bin names, same as every other
 	// embedded asset and the Claude launcher.
-	assertLink(t, filepath.Join(home, ".local", "bin", "pfm-statusline"), filepath.Join(managed, "bin", "pfm-statusline"))
-	assertLink(t, filepath.Join(home, ".local", "bin", "tmux-title-renudge"), filepath.Join(managed, "bin", "tmux-title-renudge"))
-	if info, err := os.Stat(filepath.Join(managed, "bin", "pfm-statusline")); err != nil || info.Mode().Perm() != 0o755 {
+	assertLink(
+		t,
+		filepath.Join(home, ".local", "bin", "pfm-statusline"),
+		filepath.Join(managed, "bin", "pfm-statusline"),
+	)
+	assertLink(
+		t,
+		filepath.Join(home, ".local", "bin", "tmux-title-renudge"),
+		filepath.Join(managed, "bin", "tmux-title-renudge"),
+	)
+	if info, err := os.Stat(
+		filepath.Join(managed, "bin", "pfm-statusline"),
+	); err != nil ||
+		info.Mode().Perm() != 0o755 {
 		t.Fatalf("managed pfm-statusline mode=%v err=%v, want 0755", info, err)
 	}
 	settings := readFixture(t, filepath.Join(config, "settings.json"))
@@ -527,7 +569,13 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		!strings.Contains(secondary, "secondary-keep") {
 		t.Fatalf("secondary settings did not receive the complete hook wiring:\n%s", secondary)
 	}
-	if zshrc := readFixture(t, filepath.Join(home, ".zshrc")); !strings.Contains(zshrc, sourceLine(filepath.Join(managed, "shim", "pfm.zsh"))) ||
+	if zshrc := readFixture(
+		t,
+		filepath.Join(home, ".zshrc"),
+	); !strings.Contains(
+		zshrc,
+		sourceLine(filepath.Join(managed, "shim", "pfm.zsh")),
+	) ||
 		strings.Contains(zshrc, "cc-fleet.zsh") {
 		t.Fatalf("zshrc was not converged:\n%s", zshrc)
 	}
@@ -560,10 +608,22 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	if content := readFixture(t, bbTarget); content != "operator copy\n" {
 		t.Fatalf("uninstall changed operator bb.md = %q", content)
 	}
-	if settings := readFixture(t, filepath.Join(config, "settings.json")); strings.Contains(settings, "internal clear-kill") {
+	if settings := readFixture(
+		t,
+		filepath.Join(config, "settings.json"),
+	); strings.Contains(
+		settings,
+		"internal clear-kill",
+	) {
 		t.Fatalf("uninstall retained clear-kill hook:\n%s", settings)
 	}
-	if codexHooks := readFixture(t, filepath.Join(home, ".codex", "hooks.json")); strings.Contains(codexHooks, "internal clear-kill") ||
+	if codexHooks := readFixture(
+		t,
+		filepath.Join(home, ".codex", "hooks.json"),
+	); strings.Contains(
+		codexHooks,
+		"internal clear-kill",
+	) ||
 		!strings.Contains(codexHooks, "fixture-codex-keep") ||
 		strings.Contains(codexHooks, "dream hook codex-subagent-inject") {
 		t.Fatalf("uninstall did not remove only the owned Codex clear hook:\n%s", codexHooks)
@@ -682,7 +742,11 @@ func TestThemeFetchFailureIsLoudAndNonFatal(t *testing.T) {
 		http.Error(response, "blocked by fixture", http.StatusServiceUnavailable)
 	}))
 	t.Cleanup(server.Close)
-	manifest := fmt.Sprintf(`{"source_fetched":{"tokyo-night":{"repo":%q,"raw":%q,"target":"~/.claude/themes/tokyo-night.json","activate":"/theme","requires":"fixture"}}}`, server.URL, server.URL+"/tokyo-night.json")
+	manifest := fmt.Sprintf(
+		`{"source_fetched":{"tokyo-night":{"repo":%q,"raw":%q,"target":"~/.claude/themes/tokyo-night.json","activate":"/theme","requires":"fixture"}}}`,
+		server.URL,
+		server.URL+"/tokyo-night.json",
+	)
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
@@ -692,7 +756,8 @@ func TestThemeFetchFailureIsLoudAndNonFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cosmetic theme fetch aborted host install: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "theme tokyo-night fetch failed") || !strings.Contains(output.String(), "503") {
+	if !strings.Contains(output.String(), "theme tokyo-night fetch failed") ||
+		!strings.Contains(output.String(), "503") {
 		t.Fatalf("theme fetch failure was silent or vague:\n%s", output.String())
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".zshrc")); statErr != nil {
@@ -738,7 +803,11 @@ description: fixture agent
 
 func TestThemeManifestResolvesRegisteredOwnerPlaceholder(t *testing.T) {
 	sourceRepo := t.TempDir()
-	writeFixture(t, filepath.Join(sourceRepo, ".professor", "manifest.json"), `{"installed_from":{"repo":"fixture-owner/professor"}}`)
+	writeFixture(
+		t,
+		filepath.Join(sourceRepo, ".professor", "manifest.json"),
+		`{"installed_from":{"repo":"fixture-owner/professor"}}`,
+	)
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), `{
   "source_fetched": {
     "tokyo-night": {
@@ -762,7 +831,10 @@ func TestThemeManifestResolvesRegisteredOwnerPlaceholder(t *testing.T) {
 func TestThemeManifestFallsBackToReleaseWhenDiscoveredSourceLacksManifest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
 		response.Header().Set("Content-Type", "application/json")
-		if _, err := io.WriteString(response, `{"source_fetched":{"tokyo-night":{"repo":"https://example.test/theme","raw":"https://example.test/theme.json","target":"~/.claude/themes/tokyo-night.json","activate":"/theme","requires":"fixture"}}}`); err != nil {
+		if _, err := io.WriteString(
+			response,
+			`{"source_fetched":{"tokyo-night":{"repo":"https://example.test/theme","raw":"https://example.test/theme.json","target":"~/.claude/themes/tokyo-night.json","activate":"/theme","requires":"fixture"}}}`,
+		); err != nil {
 			t.Errorf("write release manifest fixture: %v", err)
 		}
 	}))
@@ -1011,7 +1083,10 @@ func TestWireGlobalCommandsSkipsAnAbsentOrEmptySource(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			home := t.TempDir()
 			if name == "empty" {
-				if err := os.MkdirAll(filepath.Join(home, ".professor", "templates", "global", "commands"), 0o700); err != nil {
+				if err := os.MkdirAll(
+					filepath.Join(home, ".professor", "templates", "global", "commands"),
+					0o700,
+				); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -1163,10 +1238,16 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		if err := os.MkdirAll(filepath.Dir(link), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(filepath.Join(home, ".professor", "templates", "global", "agents", "frr.md"), link); err != nil {
+		if err := os.Symlink(
+			filepath.Join(home, ".professor", "templates", "global", "agents", "frr.md"),
+			link,
+		); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}}); err != nil {
+		if _, err := Run(
+			context.Background(),
+			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+		); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Lstat(link); !os.IsNotExist(err) {
@@ -1178,7 +1259,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		home := t.TempDir()
 		frr := filepath.Join(home, ".claude", "agents", "frr.md")
 		writeFixture(t, frr, "---\nname: frr\ndescription: pre-rename research agent\n---\nbody\n")
-		if _, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}}); err != nil {
+		if _, err := Run(
+			context.Background(),
+			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+		); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := os.Lstat(frr); !os.IsNotExist(err) {
@@ -1189,8 +1273,15 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 	t.Run("a same-named user-authored agent with different frontmatter survives", func(t *testing.T) {
 		home := t.TempDir()
 		frr := filepath.Join(home, ".claude", "agents", "frr.md")
-		writeFixture(t, frr, "---\nname: my-own-frr\ndescription: unrelated agent I happen to have named frr\n---\nbody\n")
-		if _, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}}); err != nil {
+		writeFixture(
+			t,
+			frr,
+			"---\nname: my-own-frr\ndescription: unrelated agent I happen to have named frr\n---\nbody\n",
+		)
+		if _, err := Run(
+			context.Background(),
+			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+		); err != nil {
 			t.Fatal(err)
 		}
 		if got := readFixture(t, frr); !strings.Contains(got, "my-own-frr") {
@@ -1202,7 +1293,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 		home := t.TempDir()
 		frr := filepath.Join(home, ".claude", "agents", "frr.md")
 		writeFixture(t, frr, "just prose, no frontmatter\n")
-		if _, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}}); err != nil {
+		if _, err := Run(
+			context.Background(),
+			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+		); err != nil {
 			t.Fatal(err)
 		}
 		if got := readFixture(t, frr); got != "just prose, no frontmatter\n" {
@@ -1212,7 +1306,10 @@ func TestRetireRenamedGlobalAgentsDeletesOnlyTheInstallersOwnFrrLeftover(t *test
 
 	t.Run("absent frr.md is a silent no-op", func(t *testing.T) {
 		home := t.TempDir()
-		if _, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}}); err != nil {
+		if _, err := Run(
+			context.Background(),
+			Options{Mode: ModeApply, Home: home, Runner: &fakeRunner{}},
+		); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -1419,7 +1516,8 @@ Read only.
 			t.Errorf("dry-run omitted planned path %s:\n%s", path, output.String())
 		}
 	}
-	if strings.Contains(output.String(), "would reconcile") || strings.Contains(output.String(), "would run pfm codex agents") {
+	if strings.Contains(output.String(), "would reconcile") ||
+		strings.Contains(output.String(), "would run pfm codex agents") {
 		t.Fatalf("dry-run retained vague placeholders:\n%s", output.String())
 	}
 	if got := readFixture(t, conflict); got != "operator-owned\n" {

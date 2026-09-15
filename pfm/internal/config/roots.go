@@ -18,7 +18,11 @@ func ReportRoots(w io.Writer, accounts []Account, codexAccounts []CodexAccount, 
 	total, reachable := 0, 0
 	for _, account := range accounts {
 		if claudeAbsent {
-			fmt.Fprintf(w, "doctor: roots claude root=%s skipped (no Claude Code binary installed)\n", account.ProjectDir)
+			fmt.Fprintf(
+				w,
+				"doctor: roots claude root=%s skipped (no Claude Code binary installed)\n",
+				account.ProjectDir,
+			)
 			continue
 		}
 		total++

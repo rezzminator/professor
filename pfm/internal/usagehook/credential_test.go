@@ -64,7 +64,11 @@ func TestLoadCredentialReadsTheKeychainWhenNoCredentialsFileExists(t *testing.T)
 // so the keychain is consulted only as the fallback it is.
 func TestLoadCredentialPrefersTheCredentialsFileOverTheKeychain(t *testing.T) {
 	configDir := t.TempDir()
-	if err := os.WriteFile(CredentialPath(configDir), []byte(`{"claudeAiOauth":{"accessToken":"file-token"}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		CredentialPath(configDir),
+		[]byte(`{"claudeAiOauth":{"accessToken":"file-token"}}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	stubKeychain(t, func(string) ([]byte, error) {

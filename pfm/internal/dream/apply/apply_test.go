@@ -74,14 +74,18 @@ func TestRunAppliesEveryVerdictRouteAtRecordedTreeAndRendersDeterministically(t 
 			t.Fatalf("restamped %s = %q", name, raw)
 		}
 	}
-	if existsTest(filepath.Join(f.repo.Organ, "maps", "refute.md")) || existsTest(filepath.Join(f.repo.Organ, "maps", "unruled.md")) {
+	if existsTest(filepath.Join(f.repo.Organ, "maps", "refute.md")) ||
+		existsTest(filepath.Join(f.repo.Organ, "maps", "unruled.md")) {
 		t.Fatal("REFUTE or UNRULED map entered the live map pool")
 	}
 	wantRefute := f.mapRaw["refute.md"] + "\nVerdict: REFUTE — refuted evidence\n"
 	if got := readTest(t, filepath.Join(f.repo.Organ, "archive", "2026-08-12-refute.md")); got != wantRefute {
 		t.Fatalf("refuted archive = %q, want exact source plus note %q", got, wantRefute)
 	}
-	if got := readTest(t, filepath.Join(f.repo.Organ, "archive", "2026-08-12-explorer-index.md")); got != "LEGACY SURFACE\n" {
+	if got := readTest(
+		t,
+		filepath.Join(f.repo.Organ, "archive", "2026-08-12-explorer-index.md"),
+	); got != "LEGACY SURFACE\n" {
 		t.Fatalf("legacy explorer archive = %q", got)
 	}
 	if existsTest(filepath.Join(f.repo.Organ, "explorer-index.md")) {
@@ -132,7 +136,13 @@ func TestRunSkipsEligibleVerdictAfterPostRefineAnchorRejection(t *testing.T) {
 	if existsTest(filepath.Join(f.repo.Organ, "maps", "rejected.md")) {
 		t.Fatal("post-refine rejected CONFIRM map was applied")
 	}
-	if got := readTest(t, filepath.Join(f.stage.Root, "apply", "ops.tsv")); !strings.Contains(got, "NOT-APPLIED\tmaps/rejected.md\tpost-refine anchor rejection\n") {
+	if got := readTest(
+		t,
+		filepath.Join(f.stage.Root, "apply", "ops.tsv"),
+	); !strings.Contains(
+		got,
+		"NOT-APPLIED\tmaps/rejected.md\tpost-refine anchor rejection\n",
+	) {
 		t.Fatalf("ops.tsv = %q", got)
 	}
 }
@@ -146,10 +156,34 @@ func TestDeriveHoldDistinguishesThreeStatesIncludingAllUnruled(t *testing.T) {
 		wantState artifact.HoldState
 		wantYield int
 	}{
-		{"zero survivors", nil, []artifact.NormalizedVerdict{{Kind: artifact.NormalizedConfirm, MapPath: paths[0]}}, artifact.HoldZeroSurvivors, 0},
-		{"all refuted", paths, []artifact.NormalizedVerdict{{Kind: artifact.NormalizedRefute, MapPath: paths[0]}}, artifact.HoldZeroYield, 0},
-		{"all unruled", paths, []artifact.NormalizedVerdict{{Kind: artifact.NormalizedUnruled, MapPath: paths[0]}}, artifact.HoldZeroYield, 0},
-		{"ready", paths, []artifact.NormalizedVerdict{{Kind: artifact.NormalizedAmend, MapPath: paths[0]}}, artifact.HoldReady, 1},
+		{
+			"zero survivors",
+			nil,
+			[]artifact.NormalizedVerdict{{Kind: artifact.NormalizedConfirm, MapPath: paths[0]}},
+			artifact.HoldZeroSurvivors,
+			0,
+		},
+		{
+			"all refuted",
+			paths,
+			[]artifact.NormalizedVerdict{{Kind: artifact.NormalizedRefute, MapPath: paths[0]}},
+			artifact.HoldZeroYield,
+			0,
+		},
+		{
+			"all unruled",
+			paths,
+			[]artifact.NormalizedVerdict{{Kind: artifact.NormalizedUnruled, MapPath: paths[0]}},
+			artifact.HoldZeroYield,
+			0,
+		},
+		{
+			"ready",
+			paths,
+			[]artifact.NormalizedVerdict{{Kind: artifact.NormalizedAmend, MapPath: paths[0]}},
+			artifact.HoldReady,
+			1,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -167,24 +201,44 @@ func TestRunFailsClosedBeforeOrganMutationForEveryMechanicalGate(t *testing.T) {
 		mutate func(t *testing.T, f *fixture)
 		want   string
 	}{
-		{"pin", func(t *testing.T, f *fixture) { writePrivateTest(t, f.stage.Pin, []byte(strings.Repeat("0", 64)+"\n")) }, "PIN gate"},
+		{
+			"pin",
+			func(t *testing.T, f *fixture) { writePrivateTest(t, f.stage.Pin, []byte(strings.Repeat("0", 64)+"\n")) },
+			"PIN gate",
+		},
 		{"coverage conduct", func(t *testing.T, f *fixture) {
-			writePrivateTest(t, f.stage.Coverage, []byte("1\tREAD\tread\nCONDUCT\ttechnique\tNONE\tx\nCONDUCT\tprior\tNONE\tx\nEND-OF-RUN\n"))
+			writePrivateTest(
+				t,
+				f.stage.Coverage,
+				[]byte("1\tREAD\tread\nCONDUCT\ttechnique\tNONE\tx\nCONDUCT\tprior\tNONE\tx\nEND-OF-RUN\n"),
+			)
 		}, "missing CONDUCT accounting for: baseline"},
 		{"raw verdict", func(t *testing.T, f *fixture) {
 			writePrivateTest(t, f.stage.Verdicts, []byte("CONFIRM\tmaps/map.md\n"))
 		}, "VERDICTS gate"},
 		{"ready mismatch", func(t *testing.T, f *fixture) {
-			writePrivateTest(t, filepath.Join(f.stage.Root, "READY-FOR-APPLY"), []byte("ZERO-YIELD\t2026-08-13T08:00:00+02:00\n"))
+			writePrivateTest(
+				t,
+				filepath.Join(f.stage.Root, "READY-FOR-APPLY"),
+				[]byte("ZERO-YIELD\t2026-08-13T08:00:00+02:00\n"),
+			)
 		}, "state mismatch"},
 		{"anchor mechanism unavailable", func(t *testing.T, f *fixture) {}, "verify staged recorded tree"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			f := newFixture(t, map[string]string{"map.md": "Map"}, []string{"CONFIRM\tmaps/map.md\tevidence"}, artifact.HoldReady)
+			f := newFixture(
+				t,
+				map[string]string{"map.md": "Map"},
+				[]string{"CONFIRM\tmaps/map.md\tevidence"},
+				artifact.HoldReady,
+			)
 			test.mutate(t, &f)
 			before := snapshotOrgan(t, f.repo.Organ)
-			deps := Dependencies{Git: CommandGitReader{Repo: f.repo.RepoRoot}, Clock: func() time.Time { return applyNow }}
+			deps := Dependencies{
+				Git:   CommandGitReader{Repo: f.repo.RepoRoot},
+				Clock: func() time.Time { return applyNow },
+			}
 			if test.name == "anchor mechanism unavailable" {
 				deps.Git = failingGitReader{}
 			}
@@ -206,7 +260,11 @@ func TestRunRejectsIdentitySafetyFingerprintCollisionPreparationAndReplay(t *tes
 		{"identity mismatch", func(t *testing.T, f *fixture) {
 			writePrivateTest(t, filepath.Join(f.stage.Meta, "lane.txt"), []byte("qa\n"))
 		}, "staged lane.txt mismatch"},
-		{"private mode", func(t *testing.T, f *fixture) { mustTest(t, os.Chmod(f.stage.Coverage, 0o644)) }, "mode is not 0600"},
+		{
+			"private mode",
+			func(t *testing.T, f *fixture) { mustTest(t, os.Chmod(f.stage.Coverage, 0o644)) },
+			"mode is not 0600",
+		},
 		{"private symlink", func(t *testing.T, f *fixture) {
 			mustTest(t, os.Remove(f.stage.Verdicts))
 			mustTest(t, os.Symlink(filepath.Join(f.repo.Organ, "stm.md"), f.stage.Verdicts))
@@ -219,18 +277,31 @@ func TestRunRejectsIdentitySafetyFingerprintCollisionPreparationAndReplay(t *tes
 			mustTest(t, os.Rename(filepath.Join(f.stage.Maps, "map.md"), filepath.Join(f.stage.Maps, "old-map.md")))
 			f.mapRaw = map[string]string{"old-map.md": raw}
 			writePrivateTest(t, filepath.Join(f.stage.Root, "anchor-survivors.txt"), []byte("maps/old-map.md\n"))
-			writePrivateTest(t, filepath.Join(f.stage.Root, "anchor-results.tsv"), []byte("ACCEPT\tmaps/old-map.md\tcanonical map and recorded-tree anchors\n"))
+			writePrivateTest(
+				t,
+				filepath.Join(f.stage.Root, "anchor-results.tsv"),
+				[]byte("ACCEPT\tmaps/old-map.md\tcanonical map and recorded-tree anchors\n"),
+			)
 			writePrivateTest(t, f.stage.Verdicts, []byte("CONFIRM\tmaps/old-map.md\tevidence\n"))
 			rewriteReadyFromCurrent(t, f)
 		}, "map target collision"},
-		{"preparation collision", func(t *testing.T, f *fixture) { mustTest(t, os.Mkdir(filepath.Join(f.stage.Root, "apply"), 0o700)) }, "apply preparation already exists"},
+		{
+			"preparation collision",
+			func(t *testing.T, f *fixture) { mustTest(t, os.Mkdir(filepath.Join(f.stage.Root, "apply"), 0o700)) },
+			"apply preparation already exists",
+		},
 		{"replay", func(t *testing.T, f *fixture) {
 			writePrivateTest(t, filepath.Join(f.stage.Root, "APPLIED"), []byte("APPLIED\t2026-08-13T08:00:00+02:00\n"))
 		}, "already applied"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			f := newFixture(t, map[string]string{"map.md": "Map"}, []string{"CONFIRM\tmaps/map.md\tevidence"}, artifact.HoldReady)
+			f := newFixture(
+				t,
+				map[string]string{"map.md": "Map"},
+				[]string{"CONFIRM\tmaps/map.md\tevidence"},
+				artifact.HoldReady,
+			)
 			test.mutate(t, &f)
 			before := snapshotOrgan(t, f.repo.Organ)
 			_, err := runFixture(f)
@@ -243,14 +314,20 @@ func TestRunRejectsIdentitySafetyFingerprintCollisionPreparationAndReplay(t *tes
 }
 
 func TestArchiveAndSweepNamesDatePrefixFirstThenIncrement(t *testing.T) {
-	f := newFixture(t, map[string]string{"map.md": "Map"}, []string{"REFUTE\tmaps/map.md\tevidence"}, artifact.HoldZeroYield)
+	f := newFixture(
+		t,
+		map[string]string{"map.md": "Map"},
+		[]string{"REFUTE\tmaps/map.md\tevidence"},
+		artifact.HoldZeroYield,
+	)
 	writePrivateTest(t, filepath.Join(f.repo.Organ, "archive", "2026-08-12-map.md"), []byte("occupied\n"))
 	writePrivateTest(t, filepath.Join(f.repo.Organ, "dreamer", "2026-08-12.md"), []byte("occupied\n"))
 	result, err := runFixture(f)
 	if err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if result.Sweep != "2026-08-12-2.md" || !reflect.DeepEqual(result.ArchivedMaps, []string{"archive/2026-08-12-2-map.md"}) {
+	if result.Sweep != "2026-08-12-2.md" ||
+		!reflect.DeepEqual(result.ArchivedMaps, []string{"archive/2026-08-12-2-map.md"}) {
 		t.Fatalf("collision names = %#v", result)
 	}
 	if readTest(t, filepath.Join(f.repo.Organ, "archive", "2026-08-12-map.md")) != "occupied\n" ||
@@ -334,7 +411,12 @@ func TestCommitRollsBackAFailureAfterInstallingANewMap(t *testing.T) {
 		},
 		sweepRaw: []byte("sweep\n"), appliedRaw: []byte("APPLIED\tnow\n"),
 	}
-	err := commit(artifact.RepoContext{Organ: organRoot}, artifact.StageLayout{Root: stageRoot}, organState{agents: true}, prepared)
+	err := commit(
+		artifact.RepoContext{Organ: organRoot},
+		artifact.StageLayout{Root: stageRoot},
+		organState{agents: true},
+		prepared,
+	)
 	assertErrorContains(t, err, "atomic replace directory is not a real directory")
 	if after := snapshotOrgan(t, organRoot); !reflect.DeepEqual(after, before) {
 		t.Fatalf("commit rollback left partial organ mutation\nbefore=%#v\nafter=%#v", before, after)
@@ -356,7 +438,8 @@ func TestCommandGitReaderSourceAdmitsNoGitWriteVerb(t *testing.T) {
 			t.Fatalf("Git adapter source contains write verb %s", forbidden)
 		}
 	}
-	if !strings.Contains(source, `"rev-parse"`) || !strings.Contains(source, `"cat-file"`) || !strings.Contains(source, `"GIT_OPTIONAL_LOCKS=0"`) {
+	if !strings.Contains(source, `"rev-parse"`) || !strings.Contains(source, `"cat-file"`) ||
+		!strings.Contains(source, `"GIT_OPTIONAL_LOCKS=0"`) {
 		t.Fatal("Git adapter lost its read-only verbs or optional-lock pin")
 	}
 }
@@ -387,7 +470,11 @@ func newFixture(t *testing.T, maps map[string]string, verdictRows []string, requ
 	}
 	oldMap := canonicalMap("Old", aHash[:12], docsHash[:12])
 	writePrivateTest(t, filepath.Join(organRoot, "maps", "old-map.md"), []byte(oldMap))
-	writePrivateTest(t, filepath.Join(organRoot, "stm.md"), []byte("# old index\n- Old -> maps/old-map.md\n- retained keeper\n"))
+	writePrivateTest(
+		t,
+		filepath.Join(organRoot, "stm.md"),
+		[]byte("# old index\n- Old -> maps/old-map.md\n- retained keeper\n"),
+	)
 	registry := filepath.Join(root, "registry")
 	mustTest(t, os.Mkdir(registry, 0o700))
 	repo := artifact.RepoContext{RepoRoot: repoRoot, Organ: organRoot, Registry: registry}
@@ -396,7 +483,15 @@ func newFixture(t *testing.T, maps map[string]string, verdictRows []string, requ
 	if err != nil {
 		t.Fatalf("organ.NewStage() error = %v", err)
 	}
-	f := fixture{repo: repo, lane: laneContext, stage: stage, recordedTree: recorded, aHash: aHash, docsHash: docsHash, mapRaw: map[string]string{}}
+	f := fixture{
+		repo:         repo,
+		lane:         laneContext,
+		stage:        stage,
+		recordedTree: recorded,
+		aHash:        aHash,
+		docsHash:     docsHash,
+		mapRaw:       map[string]string{},
+	}
 
 	fingerprint, err := MapFingerprint(filepath.Join(organRoot, "maps"))
 	if err != nil {
@@ -427,7 +522,12 @@ func newFixture(t *testing.T, maps map[string]string, verdictRows []string, requ
 		"agent-type\tExplore\nlane\texplorer\ncutoff-exclusive\tNONE\n" +
 		"enumerated-at\t2026-08-12T03:04:05Z\n"
 	writePrivateTest(t, filepath.Join(stage.Meta, "window.tsv"), []byte(window))
-	census := artifact.Census{WindowMetaCount: 1, AgentMetaCount: 1, PairedTranscriptCount: 1, SelectedPairedTranscriptCount: 1}
+	census := artifact.Census{
+		WindowMetaCount:               1,
+		AgentMetaCount:                1,
+		PairedTranscriptCount:         1,
+		SelectedPairedTranscriptCount: 1,
+	}
 	writePrivateTest(t, filepath.Join(stage.Root, "census.tsv"), []byte(artifact.RenderCensus(census)))
 	writePrivateTest(t, filepath.Join(stage.Root, "gaps.tsv"), nil)
 
@@ -483,7 +583,11 @@ func rewriteReadyFromCurrent(t *testing.T, f *fixture) {
 		t.Fatal(err)
 	}
 	writePrivateTest(t, filepath.Join(f.stage.Meta, "apply-yield.txt"), []byte(fmt.Sprintf("%d\n", yield)))
-	writePrivateTest(t, filepath.Join(f.stage.Root, "READY-FOR-APPLY"), []byte(string(state)+"\t2026-08-13T08:00:00+02:00\n"))
+	writePrivateTest(
+		t,
+		filepath.Join(f.stage.Root, "READY-FOR-APPLY"),
+		[]byte(string(state)+"\t2026-08-13T08:00:00+02:00\n"),
+	)
 }
 
 func canonicalMap(title, aHash, docsHash string) string {
@@ -541,7 +645,7 @@ func (failingGitReader) Resolve(string, string) (gate.GitObject, bool, error) {
 
 type fixedGitReader struct{ objects map[string]gate.GitObject }
 
-func (reader fixedGitReader) Resolve(_ string, path string) (gate.GitObject, bool, error) {
+func (reader fixedGitReader) Resolve(_, path string) (gate.GitObject, bool, error) {
 	object, ok := reader.objects[path]
 	return object, ok, nil
 }

@@ -34,7 +34,12 @@ func TestSeatTargetKeepsACodexScopedLookupOnCodex(t *testing.T) {
 		target.SocketPath != filepath.Join(resolved.TmuxDir, "cx-1-2-3") || target.Pane != "%2" {
 		t.Fatalf("seatTarget(codex)=(%+v,%d,%q,%v), want the Codex seat", target, code, detail, err)
 	}
-	if _, code, detail, err := seatTarget(resolvedPaths(t), liveSeats(rows, ""), name); err != nil || code != inject.CodeAmbiguous || detail == "" {
+	if _, code, detail, err := seatTarget(
+		resolvedPaths(t),
+		liveSeats(rows, ""),
+		name,
+	); err != nil || code != inject.CodeAmbiguous ||
+		detail == "" {
 		t.Fatalf("seatTarget(any engine)=(%d,%q,%v), want the collision refused as ambiguous", code, detail, err)
 	}
 }
@@ -45,18 +50,40 @@ func TestSeatTargetKeepsACodexScopedLookupOnCodex(t *testing.T) {
 // took its name — and a resumable row has no seat to answer from.
 func TestLiveSeatsNeverAnswerForAKilledOrResumableRow(t *testing.T) {
 	rows := []compose.Row{
-		{ID: "5a3bb7cb-258d", Name: "LUNA:ORCHESTRATOR", Kind: compose.LiveClaude, Socket: "cc-1788256324-1866070-42739", PaneID: "%0"},
-		{ID: "5a3bb7cb-258d", Name: "LUNA:ORCHESTRATOR (old)", Kind: compose.LiveClaude, Socket: "cc-dead", PaneID: "%0", Killed: true},
+		{
+			ID:     "5a3bb7cb-258d",
+			Name:   "LUNA:ORCHESTRATOR",
+			Kind:   compose.LiveClaude,
+			Socket: "cc-1788256324-1866070-42739",
+			PaneID: "%0",
+		},
+		{
+			ID:     "5a3bb7cb-258d",
+			Name:   "LUNA:ORCHESTRATOR (old)",
+			Kind:   compose.LiveClaude,
+			Socket: "cc-dead",
+			PaneID: "%0",
+			Killed: true,
+		},
 		{ID: "resume-only", Name: "Resume", Kind: compose.ResumeClaude, Socket: "cc-2"},
 	}
 	seats := RosterCandidates(liveSeats(rows, ""))
-	if name, found := resolve.ResolveRosterSeat(seats, resolve.Identity{ID: "5a3bb7cb-258d"}); !found || name != "LUNA:ORCHESTRATOR" {
+	if name, found := resolve.ResolveRosterSeat(
+		seats,
+		resolve.Identity{ID: "5a3bb7cb-258d"},
+	); !found ||
+		name != "LUNA:ORCHESTRATOR" {
 		t.Fatalf("sender name = (%q,%t), want the live seat's name", name, found)
 	}
 	if name, found := resolve.ResolveRosterSeat(seats, resolve.Identity{ID: "resume-only"}); found || name != "" {
 		t.Fatalf("sender name (resumable) = (%q,%t), want not found", name, found)
 	}
-	if _, code, _, err := seatTarget(resolvedPaths(t), liveSeats(rows, ""), "LUNA:ORCHESTRATOR (old)"); err != nil || code != inject.CodeUnknown {
+	if _, code, _, err := seatTarget(
+		resolvedPaths(t),
+		liveSeats(rows, ""),
+		"LUNA:ORCHESTRATOR (old)",
+	); err != nil ||
+		code != inject.CodeUnknown {
 		t.Fatalf("killed seat by name = code %d err %v, want a roster miss", code, err)
 	}
 }
@@ -72,10 +99,19 @@ func TestNameResolverReportsAScanFailureNotAMiss(t *testing.T) {
 	}
 	t.Setenv(paths.EnvDB, filepath.Join(blocker, "index.db"))
 	resolver := NameResolver{}
-	if _, code, _, err := resolver.ResolveName(context.Background(), "anyone", ""); err == nil || code != inject.CodeUndelivered {
+	if _, code, _, err := resolver.ResolveName(
+		context.Background(),
+		"anyone",
+		"",
+	); err == nil ||
+		code != inject.CodeUndelivered {
 		t.Fatalf("ResolveName over an unreadable fleet = code %d err %v, want CodeUndelivered and the error", code, err)
 	}
-	if _, found, err := resolver.SenderName(context.Background(), resolve.Identity{ID: "x", Session: "cc-x"}); err == nil || found {
+	if _, found, err := resolver.SenderName(
+		context.Background(),
+		resolve.Identity{ID: "x", Session: "cc-x"},
+	); err == nil ||
+		found {
 		t.Fatalf("SenderName over an unreadable fleet = found %t err %v, want the error", found, err)
 	}
 }

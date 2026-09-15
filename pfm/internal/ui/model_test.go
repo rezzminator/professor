@@ -155,7 +155,8 @@ func TestNewChatCarouselAndChatActionCarousel(t *testing.T) {
 		t.Fatalf("second right new-chat engine=%q command=%v", model.NewChatEngine(), command)
 	}
 	model, command = applyKey(t, model, specialKey(tea.KeyEnter))
-	if command == nil || model.Result().Kind != OutcomeSelected || model.Result().Row.Kind != compose.NewOpencode || model.Result().PrimaryAccount != 5 {
+	if command == nil || model.Result().Kind != OutcomeSelected || model.Result().Row.Kind != compose.NewOpencode ||
+		model.Result().PrimaryAccount != 5 {
 		t.Fatalf("new-chat Enter result=%#v command=%v", model.Result(), command)
 	}
 
@@ -227,7 +228,12 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 	}
 	model, command := applyKey(t, model, controlKey('x'))
 	if command != nil || len(model.Result().KillChanges) != 0 || !strings.Contains(model.killStatus, "not a chat") {
-		t.Fatalf("update banner accepted hide: status=%q result=%#v command=%v", model.killStatus, model.Result(), command)
+		t.Fatalf(
+			"update banner accepted hide: status=%q result=%#v command=%v",
+			model.killStatus,
+			model.Result(),
+			command,
+		)
 	}
 
 	refresh := snapshot
@@ -275,7 +281,11 @@ func TestProfessorUpdateCtrlSCyclesVisibleClaudeAccountEvenWhenCodexChosen(t *te
 	}
 	model, command = applyKey(t, model, controlKey('s'))
 	if command != nil || model.PrimaryAccount() != 1 {
-		t.Fatalf("Ctrl+S on update selected for Codex left visible Claude account=%d command=%v, want 1", model.PrimaryAccount(), command)
+		t.Fatalf(
+			"Ctrl+S on update selected for Codex left visible Claude account=%d command=%v, want 1",
+			model.PrimaryAccount(),
+			command,
+		)
 	}
 }
 
@@ -303,14 +313,21 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 		t.Fatalf("update banner width=%d raw=%q, want full width and ANSI blink", ansi.StringWidth(line), line)
 	}
 	model.nowNS += int64(500 * time.Millisecond)
-	if next := ansi.Strip(model.renderRow(snapshot.Rows[0], false, 118)); !strings.Contains(next, "✧ PROFESSOR UPDATE ✧") {
+	if next := ansi.Strip(
+		model.renderRow(snapshot.Rows[0], false, 118),
+	); !strings.Contains(
+		next,
+		"✧ PROFESSOR UPDATE ✧",
+	) {
 		t.Fatalf("animated update banner = %q, want alternate sparkle phase", next)
 	}
 }
 
 func TestNewChatUsesOnlyPresentEnginesAndCyclesTheirOwnRoster(t *testing.T) {
 	codexOnly := Snapshot{
-		Rows:                []compose.Row{{Kind: compose.NewCodex, Name: "New Codex chat", CWD: "/work/new", Account: 7}},
+		Rows: []compose.Row{
+			{Kind: compose.NewCodex, Name: "New Codex chat", CWD: "/work/new", Account: 7},
+		},
 		CodexPrimaryAccount: 7,
 		CodexAccountIDs:     []int{7, 9},
 		MergeNewChat:        true,
@@ -376,7 +393,13 @@ func TestLiveSelectionKeepsBirthAccountSeparateFromSelectedAccount(t *testing.T)
 			selected, command := applyKey(t, model, specialKey(tea.KeyEnter))
 			result := selected.Result()
 			if command == nil || result.Row.Account != test.row.Account || result.PrimaryAccount != test.chosen {
-				t.Fatalf("live handoff row account=%d selected=%d, want birth=%d selected=%d", result.Row.Account, result.PrimaryAccount, test.row.Account, test.chosen)
+				t.Fatalf(
+					"live handoff row account=%d selected=%d, want birth=%d selected=%d",
+					result.Row.Account,
+					result.PrimaryAccount,
+					test.row.Account,
+					test.chosen,
+				)
 			}
 		})
 	}

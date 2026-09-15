@@ -42,7 +42,8 @@ func TestCodexDefaultsInstall(t *testing.T) {
 	if feature["default_wait_timeout_ms"] != int64(900000) || feature["wait_agent_enabled"] != true {
 		t.Fatalf("incorrect defaults: %#v", feature)
 	}
-	if !strings.Contains(first, "# local preference\nmodel = 'custom'") || !strings.Contains(first, "# BEGIN pfm mcp\n[mcp_servers.chat]\nurl = 'http://localhost:1234'\n# END pfm mcp") {
+	if !strings.Contains(first, "# local preference\nmodel = 'custom'") ||
+		!strings.Contains(first, "# BEGIN pfm mcp\n[mcp_servers.chat]\nurl = 'http://localhost:1234'\n# END pfm mcp") {
 		t.Fatal("unrelated config or ownership fence changed")
 	}
 	if _, err := Run(context.Background(), options); err != nil {
@@ -62,12 +63,16 @@ func TestCodexDefaultsFreshHomes(t *testing.T) {
 	source := filepath.Join(home, ".professor", "templates", "global", "codex", "config.toml")
 	writeFixture(t, source, "[features.multi_agent_v2]\nwait_agent_enabled = true\n")
 	homes := []string{filepath.Join(home, "account-one"), filepath.Join(home, "account-two")}
-	if _, err := Run(context.Background(), Options{Mode: ModeApply, Home: home, CodexHomes: homes, Runner: &fakeRunner{}}); err != nil {
+	if _, err := Run(
+		context.Background(),
+		Options{Mode: ModeApply, Home: home, CodexHomes: homes, Runner: &fakeRunner{}},
+	); err != nil {
 		t.Fatal(err)
 	}
 	for _, dir := range homes {
 		raw, err := os.ReadFile(filepath.Join(dir, "config.toml"))
-		if err != nil || !strings.Contains(string(raw), "wait_agent_enabled = true") || strings.Contains(string(raw), "developer_instructions") {
+		if err != nil || !strings.Contains(string(raw), "wait_agent_enabled = true") ||
+			strings.Contains(string(raw), "developer_instructions") {
 			t.Fatalf("home %s: %s %v", dir, raw, err)
 		}
 	}
@@ -145,7 +150,10 @@ func TestCodexDefaultsPreservesConfigSymlink(t *testing.T) {
 func TestCodexDefaultsRejectsInconsistentTimeouts(t *testing.T) {
 	defaults := "[features.multi_agent_v2]\nmin_wait_timeout_ms = 150000\ndefault_wait_timeout_ms = 750000\nmax_wait_timeout_ms = 1500000\n"
 	for _, value := range []string{"30000", "-1", "3600001", "'wrong type'"} {
-		if _, err := mergeCodexDefaults("[features.multi_agent_v2]\nmax_wait_timeout_ms = "+value+"\n", defaults); err == nil {
+		if _, err := mergeCodexDefaults(
+			"[features.multi_agent_v2]\nmax_wait_timeout_ms = "+value+"\n",
+			defaults,
+		); err == nil {
 			t.Fatalf("accepted incompatible maximum %s", value)
 		}
 	}

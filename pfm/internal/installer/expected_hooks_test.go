@@ -47,7 +47,6 @@ func TestProbeExpectedHooksStatesAndOwnership(t *testing.T) {
 		}
 		assertHookState(t, ProbeExpectedHooks(home, machine), hook, "broken")
 	})
-
 }
 
 // TestProbeExpectedHooksFlagsRetiredHookCommandsAsStale pins the deep-doctor
@@ -153,10 +152,18 @@ func TestProbeExpectedHooksReportsAnUnknownPFMHookAsStale(t *testing.T) {
 		t.Fatalf("unknown pfm hook result state=%q, want stale: %#v", unknownResult.State, unknownResult)
 	}
 	if unknownResult.Hook.Name != "unknown:hook-from-a-newer-pfm" {
-		t.Fatalf("unknown pfm hook result name=%q, want %q: %#v", unknownResult.Hook.Name, "unknown:hook-from-a-newer-pfm", unknownResult)
+		t.Fatalf(
+			"unknown pfm hook result name=%q, want %q: %#v",
+			unknownResult.Hook.Name,
+			"unknown:hook-from-a-newer-pfm",
+			unknownResult,
+		)
 	}
 	if !strings.Contains(unknownResult.Error, "does not implement") {
-		t.Fatalf("unknown pfm hook result error=%q, want it to say this pfm does not implement the subcommand", unknownResult.Error)
+		t.Fatalf(
+			"unknown pfm hook result error=%q, want it to say this pfm does not implement the subcommand",
+			unknownResult.Error,
+		)
 	}
 }
 
@@ -188,7 +195,12 @@ func TestClaudeHookTemplatesIncludesReloadIntercept(t *testing.T) {
 
 func TestExpectedHooksIncludesCodexAppendixAcrossAccounts(t *testing.T) {
 	home := t.TempDir()
-	machine := pfmconfig.Config{CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}, {ID: 2, Home: filepath.Join(home, ".codex-2")}}}
+	machine := pfmconfig.Config{
+		CodexAccounts: []pfmconfig.CodexAccount{
+			{ID: 1, Home: filepath.Join(home, ".codex")},
+			{ID: 2, Home: filepath.Join(home, ".codex-2")},
+		},
+	}
 	hooks := ExpectedHooks(home, machine)
 	if len(hooks) != 2 {
 		t.Fatalf("hooks=%#v", hooks)
@@ -272,7 +284,11 @@ func stageExpectedHookFixtures(t *testing.T) (string, pfmconfig.Config) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"), string(encoded))
+	writeFixture(
+		t,
+		filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
+		string(encoded),
+	)
 	return home, machine
 }
 
@@ -313,7 +329,8 @@ func removeHookFixture(t *testing.T, hook ExpectedHook) {
 func assertHookState(t *testing.T, results []HookProbeResult, hook ExpectedHook, state string) {
 	t.Helper()
 	for _, result := range results {
-		if result.Hook.File == hook.File && result.Hook.Event == hook.Event && result.Hook.Name == hook.Name && result.State == state {
+		if result.Hook.File == hook.File && result.Hook.Event == hook.Event && result.Hook.Name == hook.Name &&
+			result.State == state {
 			return
 		}
 	}
@@ -388,7 +405,10 @@ func TestReportHooksClaudeAbsentSkipsPerAccountNotPerHook(t *testing.T) {
 	if warnings != 0 || failures != 0 {
 		t.Fatalf("warnings=%d failures=%d, want 0/0\n%s", warnings, failures, output.String())
 	}
-	if got := strings.Count(output.String(), "doctor: hook claude[2] skipped (no Claude Code binary installed)"); got != 1 {
+	if got := strings.Count(
+		output.String(),
+		"doctor: hook claude[2] skipped (no Claude Code binary installed)",
+	); got != 1 {
 		t.Fatalf("want exactly one skip line for claude[2], got %d:\n%s", got, output.String())
 	}
 	if strings.Contains(output.String(), "MISSING") {
@@ -408,7 +428,10 @@ func TestReportHooksClaudePresentStillFailsOnAMissingHook(t *testing.T) {
 	if failures == 0 {
 		t.Fatalf("a genuinely missing hook must still fail with Claude present:\n%s", output.String())
 	}
-	if !strings.Contains(output.String(), "doctor: hook claude[2] settings.json UserPromptSubmit usage MISSING — run pfm install") {
+	if !strings.Contains(
+		output.String(),
+		"doctor: hook claude[2] settings.json UserPromptSubmit usage MISSING — run pfm install",
+	) {
 		t.Fatalf("missing the expected MISSING row:\n%s", output.String())
 	}
 }
@@ -422,11 +445,53 @@ func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
 	home := t.TempDir()
 	HookProbeOverride = func(string, pfmconfig.Config) []HookProbeResult {
 		return []HookProbeResult{
-			{Hook: ExpectedHook{Target: "claude[1]", File: filepath.Join(home, ".claude", "settings.json"), Event: "SessionEnd", Name: "clear-kill"}, State: "ok"},
-			{Hook: ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "SessionStart", Name: "clear-kill"}, State: "missing"},
-			{Hook: ExpectedHook{Target: "claude[2]", File: filepath.Join(home, ".cc", "2", "settings.json"), Event: "UserPromptSubmit", Name: "usage"}, State: "broken", Error: "parse error"},
-			{Hook: ExpectedHook{Target: "ownership", File: filepath.Join(home, "ledger.json"), Event: "SessionEnd", Name: "unexpected"}, State: "drift", Error: "ledger owns 1 hook absent from expectations"},
-			{Hook: ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "Stop", Name: "usage"}, State: "stale"},
+			{
+				Hook: ExpectedHook{
+					Target: "claude[1]",
+					File:   filepath.Join(home, ".claude", "settings.json"),
+					Event:  "SessionEnd",
+					Name:   "clear-kill",
+				},
+				State: "ok",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "codex",
+					File:   filepath.Join(home, ".codex", "hooks.json"),
+					Event:  "SessionStart",
+					Name:   "clear-kill",
+				},
+				State: "missing",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "claude[2]",
+					File:   filepath.Join(home, ".cc", "2", "settings.json"),
+					Event:  "UserPromptSubmit",
+					Name:   "usage",
+				},
+				State: "broken",
+				Error: "parse error",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "ownership",
+					File:   filepath.Join(home, "ledger.json"),
+					Event:  "SessionEnd",
+					Name:   "unexpected",
+				},
+				State: "drift",
+				Error: "ledger owns 1 hook absent from expectations",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "codex",
+					File:   filepath.Join(home, ".codex", "hooks.json"),
+					Event:  "Stop",
+					Name:   "usage",
+				},
+				State: "stale",
+			},
 		}
 	}
 	var output bytes.Buffer
@@ -459,8 +524,25 @@ func TestReportHooksCountsMissingAsFailureAndDriftAsWarning(t *testing.T) {
 	home := t.TempDir()
 	HookProbeOverride = func(string, pfmconfig.Config) []HookProbeResult {
 		return []HookProbeResult{
-			{Hook: ExpectedHook{Target: "codex", File: filepath.Join(home, ".codex", "hooks.json"), Event: "SessionStart", Name: "clear-kill"}, State: "missing"},
-			{Hook: ExpectedHook{Target: "ownership", File: filepath.Join(home, "ledger.json"), Event: "SessionEnd", Name: "unexpected"}, State: "drift", Error: "ledger owns 1 hook absent from expectations"},
+			{
+				Hook: ExpectedHook{
+					Target: "codex",
+					File:   filepath.Join(home, ".codex", "hooks.json"),
+					Event:  "SessionStart",
+					Name:   "clear-kill",
+				},
+				State: "missing",
+			},
+			{
+				Hook: ExpectedHook{
+					Target: "ownership",
+					File:   filepath.Join(home, "ledger.json"),
+					Event:  "SessionEnd",
+					Name:   "unexpected",
+				},
+				State: "drift",
+				Error: "ledger owns 1 hook absent from expectations",
+			},
 		}
 	}
 	var output bytes.Buffer

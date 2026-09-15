@@ -294,10 +294,20 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	)
 
 	if _, found, err := database.Killed(context.Background(), clearingOldID); err != nil || !found {
-		t.Fatalf("clearing pane's previous thread was not killed: found=%v error=%v stderr=%q", found, err, stderr.String())
+		t.Fatalf(
+			"clearing pane's previous thread was not killed: found=%v error=%v stderr=%q",
+			found,
+			err,
+			stderr.String(),
+		)
 	}
 	if _, found, err := database.Killed(context.Background(), steadyID); err != nil || found {
-		t.Fatalf("the steady pane's own thread was killed too: found=%v error=%v stderr=%q", found, err, stderr.String())
+		t.Fatalf(
+			"the steady pane's own thread was killed too: found=%v error=%v stderr=%q",
+			found,
+			err,
+			stderr.String(),
+		)
 	}
 	bound, found, err := manager.CodexPaneBinding(context.Background(), steadySocket, "%0")
 	if err != nil || !found || bound != steadyID {

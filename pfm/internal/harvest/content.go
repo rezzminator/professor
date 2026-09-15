@@ -46,7 +46,8 @@ func isBibliographicLanding(content string) bool {
 	if !hasTextHeading(content, "abstract") {
 		return false
 	}
-	metadata := hasTextHeading(content, "fingerprint") || hasTextHeading(content, "cite this") || strings.Contains(strings.ToLower(content), "research output")
+	metadata := hasTextHeading(content, "fingerprint") || hasTextHeading(content, "cite this") ||
+		strings.Contains(strings.ToLower(content), "research output")
 	if !metadata {
 		return false
 	}
@@ -93,14 +94,21 @@ func bibliographicDocumentURL(body []byte, baseRaw string) string {
 				if parseErr == nil {
 					path := strings.ToLower(parsed.Path)
 					extension := filepath.Ext(path)
-					isDocument := strings.Contains(class, "document-link") || strings.Contains(path, "/files/") || strings.Contains(label, "full text") || strings.Contains(label, "manuscript")
-					supported := extension == ".pdf" || extension == ".doc" || extension == ".docx" || extension == ".epub" || extension == ".odt" || extension == ".rtf" || extension == ".txt"
+					isDocument := strings.Contains(class, "document-link") || strings.Contains(path, "/files/") ||
+						strings.Contains(label, "full text") ||
+						strings.Contains(label, "manuscript")
+					supported := extension == ".pdf" || extension == ".doc" || extension == ".docx" ||
+						extension == ".epub" ||
+						extension == ".odt" ||
+						extension == ".rtf" ||
+						extension == ".txt"
 					if isDocument && (supported || strings.Contains(class, "document-link")) {
 						base, baseErr := url.Parse(baseRaw)
 						if baseErr == nil {
 							resolved := base.ResolveReference(parsed)
 							resolved.Fragment = ""
-							if (resolved.Scheme == "http" || resolved.Scheme == "https") && assertFetchable(resolved.String(), false) == nil {
+							if (resolved.Scheme == "http" || resolved.Scheme == "https") &&
+								assertFetchable(resolved.String(), false) == nil {
 								found = resolved.String()
 							}
 						}

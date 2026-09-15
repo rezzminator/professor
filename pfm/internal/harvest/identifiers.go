@@ -17,12 +17,22 @@ const (
 	IdentifierTitle IdentifierKind = "title"
 )
 
-var doiPattern = regexp.MustCompile(`(?i)10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
-var doiHTTPStatusPattern = regexp.MustCompile(`(?i)\bHTTP\s+(\d{3})\b`)
-var citationPDFPattern = regexp.MustCompile(`(?is)<meta[^>]+name=["']citation_pdf_url["'][^>]+content=["']([^"']+)["']`)
-var citationPDFPatternReversed = regexp.MustCompile(`(?is)<meta[^>]+content=["']([^"']+)["'][^>]+name=["']citation_pdf_url["']`)
-var citationDOIPattern = regexp.MustCompile(`(?is)<meta[^>]+name=["'](?:citation_doi|dc\.identifier|DC\.Identifier)["'][^>]+content=["']([^"']+)["']`)
-var citationTitlePattern = regexp.MustCompile(`(?is)<meta[^>]+name=["']citation_title["'][^>]+content=["']([^"']+)["']`)
+var (
+	doiPattern           = regexp.MustCompile(`(?i)10\.\d{4,9}/[-._;()/:A-Z0-9]+`)
+	doiHTTPStatusPattern = regexp.MustCompile(`(?i)\bHTTP\s+(\d{3})\b`)
+	citationPDFPattern   = regexp.MustCompile(
+		`(?is)<meta[^>]+name=["']citation_pdf_url["'][^>]+content=["']([^"']+)["']`,
+	)
+	citationPDFPatternReversed = regexp.MustCompile(
+		`(?is)<meta[^>]+content=["']([^"']+)["'][^>]+name=["']citation_pdf_url["']`,
+	)
+	citationDOIPattern = regexp.MustCompile(
+		`(?is)<meta[^>]+name=["'](?:citation_doi|dc\.identifier|DC\.Identifier)["'][^>]+content=["']([^"']+)["']`,
+	)
+	citationTitlePattern = regexp.MustCompile(
+		`(?is)<meta[^>]+name=["']citation_title["'][^>]+content=["']([^"']+)["']`,
+	)
+)
 
 func DOIFrom(text string) string {
 	m := doiPattern.FindString(text)
@@ -83,6 +93,7 @@ func isbn13Valid(s string) bool {
 	}
 	return sum%10 == 0
 }
+
 func isbn10Valid(s string) bool {
 	sum := 0
 	for i, r := range s {
@@ -125,7 +136,10 @@ func NormalizeIdentifier(input string) string {
 func ClassifyIdentifier(input string) IdentifierKind {
 	trim := strings.TrimSpace(input)
 	lowInput := strings.ToLower(trim)
-	if parsed, err := url.Parse(trim); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" {
+	if parsed, err := url.Parse(
+		trim,
+	); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+		parsed.Host != "" {
 		host := strings.ToLower(parsed.Hostname())
 		if host != "doi.org" && host != "dx.doi.org" {
 			return IdentifierNone

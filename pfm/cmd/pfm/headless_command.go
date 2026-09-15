@@ -545,7 +545,11 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 				fmt.Fprintln(stderr, "pfm chat inject: --force-now ignored for a dormant RESUME target")
 			}
 			if len(steers) > 0 {
-				fmt.Fprintf(stderr, "pfm chat inject: --then ignored for a dormant RESUME target (%d steer(s))\n", len(steers))
+				fmt.Fprintf(
+					stderr,
+					"pfm chat inject: --then ignored for a dormant RESUME target (%d steer(s))\n",
+					len(steers),
+				)
 			}
 			prepared, prepareErr := engine.PrepareForResume(
 				ctx,
@@ -642,7 +646,11 @@ func runHeadlessSelfCompact(args []string, stdout, stderr io.Writer, runtimes ..
 		stderr,
 	)
 	var steer singleSteer
-	flags.Var(&steer, "then", "the one mandatory post-compact steer, typed into the reborn chat once compaction settles")
+	flags.Var(
+		&steer,
+		"then",
+		"the one mandatory post-compact steer, typed into the reborn chat once compaction settles",
+	)
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}

@@ -44,7 +44,10 @@ func (sampler *Sampler) resolveDockerIdentities(containers []Container) []string
 		identity, found := sampler.dockerIdentities[containers[index].ID]
 		if !found {
 			name, image, err := sampler.DockerInspect(containers[index].ID)
-			identity = dockerIdentity{name: strings.TrimPrefix(strings.TrimSpace(name), "/"), image: strings.TrimSpace(image)}
+			identity = dockerIdentity{
+				name:  strings.TrimPrefix(strings.TrimSpace(name), "/"),
+				image: strings.TrimSpace(image),
+			}
 			if err != nil {
 				identity.err = err.Error()
 			} else if identity.name == "" || identity.image == "" {
@@ -94,9 +97,17 @@ func newDockerInspector(socketPath string) func(string) (string, string, error) 
 				return "", "", fmt.Errorf("query Docker identity: HTTP %s; read response: %w", response.Status, readErr)
 			}
 			if closeErr != nil {
-				return "", "", fmt.Errorf("query Docker identity: HTTP %s; close response: %w", response.Status, closeErr)
+				return "", "", fmt.Errorf(
+					"query Docker identity: HTTP %s; close response: %w",
+					response.Status,
+					closeErr,
+				)
 			}
-			return "", "", fmt.Errorf("query Docker identity: HTTP %s: %s", response.Status, strings.TrimSpace(string(body)))
+			return "", "", fmt.Errorf(
+				"query Docker identity: HTTP %s: %s",
+				response.Status,
+				strings.TrimSpace(string(body)),
+			)
 		}
 		var payload struct {
 			Name   string `json:"Name"`

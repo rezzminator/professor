@@ -23,7 +23,7 @@ func withPublicDNSForProviderTest(t *testing.T) {
 	t.Cleanup(func() { lookupIP = previous })
 }
 
-func doiMirrorFixtureTransport(t *testing.T, pdfReferer *string, postIdentifier *string) *http.Client {
+func doiMirrorFixtureTransport(t *testing.T, pdfReferer, postIdentifier *string) *http.Client {
 	t.Helper()
 	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch {
@@ -39,7 +39,12 @@ func doiMirrorFixtureTransport(t *testing.T, pdfReferer *string, postIdentifier 
 			*postIdentifier = values.Get("request")
 			finalRequest := r.Clone(r.Context())
 			finalRequest.URL, _ = url.Parse("https://doi-mirror.test/article/fixture")
-			return response(finalRequest, http.StatusOK, "text/html", `<html><body><div id="article"><iframe id="pdf" src="//pdf.mirror.test/pdf/fixture.pdf#view=FitH"></iframe></div></body></html>`), nil
+			return response(
+				finalRequest,
+				http.StatusOK,
+				"text/html",
+				`<html><body><div id="article"><iframe id="pdf" src="//pdf.mirror.test/pdf/fixture.pdf#view=FitH"></iframe></div></body></html>`,
+			), nil
 		case r.Method == http.MethodGet && r.URL.Host == "pdf.mirror.test":
 			*pdfReferer = r.Header.Get("Referer")
 			return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nfixture\n%%EOF"), nil
@@ -108,7 +113,12 @@ func TestDOIMirrorPOSTRedirectsToDOIPageAndUsesFinalPageAsPDFReferer(t *testing.
 				Request:    r,
 			}, nil
 		case r.Method == http.MethodGet && r.URL.Host == "doi-mirror.test" && r.URL.Path == "/"+doiMirrorFixtureDOI:
-			return response(r, http.StatusOK, "text/html", `<div id="article"><iframe id="pdf" src="//pdf.mirror.test/pdf/redirect.pdf#view=FitH"></iframe></div>`), nil
+			return response(
+				r,
+				http.StatusOK,
+				"text/html",
+				`<div id="article"><iframe id="pdf" src="//pdf.mirror.test/pdf/redirect.pdf#view=FitH"></iframe></div>`,
+			), nil
 		case r.Method == http.MethodGet && r.URL.Host == "pdf.mirror.test":
 			pdfReferer = r.Header.Get("Referer")
 			return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nredirect fixture\n%%EOF"), nil
@@ -175,7 +185,12 @@ func TestDOIMirrorBinaryPDFWithChallengeWordsIsAccepted(t *testing.T) {
 		if r.Method != http.MethodPost || r.URL.Host != "doi-mirror.test" {
 			return nil, errors.New("unexpected binary DOIMirror request: " + r.Method + " " + r.URL.String())
 		}
-		return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nCAPTCHA Cloudflare words inside a valid PDF\n%%EOF"), nil
+		return response(
+			r,
+			http.StatusOK,
+			"application/pdf",
+			"%PDF-1.7\nCAPTCHA Cloudflare words inside a valid PDF\n%%EOF",
+		), nil
 	})}
 	h := mustNew(t, Options{
 		CacheDir:     t.TempDir(),
@@ -201,10 +216,26 @@ func TestDOIMirrorPDFLinkResolvesSupportedFormsAndRejectsPrivateTargets(t *testi
 		body string
 		want string
 	}{
-		{name: "iframe under article", body: `<div id="article"><iframe src="/pdf/paper.pdf"></iframe></div>`, want: "https://doi-mirror.test/pdf/paper.pdf"},
-		{name: "pdf iframe id", body: `<iframe id="pdf" src="//pdf.mirror.test/pdf/paper.pdf#view=FitH"></iframe>`, want: "https://pdf.mirror.test/pdf/paper.pdf"},
-		{name: "embed under article", body: `<div id="article"><embed src="https://pdf.mirror.test/pdf/paper.pdf"></div>`, want: "https://pdf.mirror.test/pdf/paper.pdf"},
-		{name: "object", body: `<object type="application/pdf" data="/pdf/paper.pdf"></object>`, want: "https://doi-mirror.test/pdf/paper.pdf"},
+		{
+			name: "iframe under article",
+			body: `<div id="article"><iframe src="/pdf/paper.pdf"></iframe></div>`,
+			want: "https://doi-mirror.test/pdf/paper.pdf",
+		},
+		{
+			name: "pdf iframe id",
+			body: `<iframe id="pdf" src="//pdf.mirror.test/pdf/paper.pdf#view=FitH"></iframe>`,
+			want: "https://pdf.mirror.test/pdf/paper.pdf",
+		},
+		{
+			name: "embed under article",
+			body: `<div id="article"><embed src="https://pdf.mirror.test/pdf/paper.pdf"></div>`,
+			want: "https://pdf.mirror.test/pdf/paper.pdf",
+		},
+		{
+			name: "object",
+			body: `<object type="application/pdf" data="/pdf/paper.pdf"></object>`,
+			want: "https://doi-mirror.test/pdf/paper.pdf",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -214,11 +245,18 @@ func TestDOIMirrorPDFLinkResolvesSupportedFormsAndRejectsPrivateTargets(t *testi
 			}
 		})
 	}
-	if _, err := doiMirrorPDFLink([]byte(`<iframe id="pdf" src="http://127.0.0.1:8080/secret.pdf"></iframe>`), "https://doi-mirror.test/article/fixture"); err == nil || !strings.Contains(err.Error(), "private") {
+	if _, err := doiMirrorPDFLink(
+		[]byte(`<iframe id="pdf" src="http://127.0.0.1:8080/secret.pdf"></iframe>`),
+		"https://doi-mirror.test/article/fixture",
+	); err == nil ||
+		!strings.Contains(err.Error(), "private") {
 		t.Fatalf("private PDF target error = %v, want explicit private-host refusal", err)
 	}
 	for _, href := range []string{"http://[::1", "://malformed"} {
-		if _, err := doiMirrorPDFLink([]byte(`<iframe id="pdf" src="`+href+`"></iframe>`), "https://doi-mirror.test/article/fixture"); err == nil {
+		if _, err := doiMirrorPDFLink(
+			[]byte(`<iframe id="pdf" src="`+href+`"></iframe>`),
+			"https://doi-mirror.test/article/fixture",
+		); err == nil {
 			t.Fatalf("malformed PDF href %q was accepted", href)
 		}
 	}
@@ -262,7 +300,10 @@ func TestSuccessfulOpenAccessSkipsDOIMirrorFallback(t *testing.T) {
 	})}
 	oaClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		if strings.Contains(r.URL.Host, "api.unpaywall.org") {
-			return jsonResponse(r, `{"is_oa":true,"oa_status":"gold","best_oa_location":{"url_for_pdf":"`+oaPDF+`","version":"publishedVersion"}}`), nil
+			return jsonResponse(
+				r,
+				`{"is_oa":true,"oa_status":"gold","best_oa_location":{"url_for_pdf":"`+oaPDF+`","version":"publishedVersion"}}`,
+			), nil
 		}
 		return response(r, http.StatusNotFound, "application/json", `{}`), nil
 	})}
@@ -326,7 +367,16 @@ func TestDOIMirrorLookupSplitsRequestFailureFromResponseFailure(t *testing.T) {
 		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, errors.New("dial tcp: connection refused")
 		})}
-		h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, Converter: &fakeConverter{}, DOIMirrorURL: "https://doi-mirror.test/"})
+		h := mustNew(
+			t,
+			Options{
+				CacheDir:     t.TempDir(),
+				Client:       client,
+				Chrome:       client,
+				Converter:    &fakeConverter{},
+				DOIMirrorURL: "https://doi-mirror.test/",
+			},
+		)
 		got := h.fetchDOIMirror(context.Background(), doiMirrorFixtureDOI, FetchOptions{})
 		if !strings.Contains(got.Error, "lookup request failed") {
 			t.Fatalf("error = %q, want it to name the request failure", got.Error)
@@ -341,13 +391,25 @@ func TestDOIMirrorLookupSplitsRequestFailureFromResponseFailure(t *testing.T) {
 		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			return response(r, http.StatusOK, "text/html", oversize), nil
 		})}
-		h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, Converter: &fakeConverter{}, DOIMirrorURL: "https://doi-mirror.test/"})
+		h := mustNew(
+			t,
+			Options{
+				CacheDir:     t.TempDir(),
+				Client:       client,
+				Chrome:       client,
+				Converter:    &fakeConverter{},
+				DOIMirrorURL: "https://doi-mirror.test/",
+			},
+		)
 		got := h.fetchDOIMirror(context.Background(), doiMirrorFixtureDOI, FetchOptions{})
 		if !strings.Contains(got.Error, "lookup response failed") {
 			t.Fatalf("error = %q, want it to name the response failure", got.Error)
 		}
 		if strings.Contains(got.Error, "lookup request failed") {
-			t.Fatalf("error = %q, a received-but-oversize response must not be reported as a request failure", got.Error)
+			t.Fatalf(
+				"error = %q, a received-but-oversize response must not be reported as a request failure",
+				got.Error,
+			)
 		}
 	})
 }

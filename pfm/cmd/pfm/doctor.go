@@ -65,7 +65,11 @@ func (pinnedHarvestDoctor) Inspect(root string, platform harvestpy.Platform) (ha
 	return harvestpy.Inspect(root, platform)
 }
 
-func (pinnedHarvestDoctor) Check(ctx context.Context, root string, platform harvestpy.Platform) (harvestpy.CheckReport, error) {
+func (pinnedHarvestDoctor) Check(
+	ctx context.Context,
+	root string,
+	platform harvestpy.Platform,
+) (harvestpy.CheckReport, error) {
 	return harvestpy.Check(ctx, root, platform)
 }
 
@@ -74,7 +78,11 @@ func runDoctor(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) int {
-	flags := newFlagSet("doctor", "usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures", stderr)
+	flags := newFlagSet(
+		"doctor",
+		"usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures",
+		stderr,
+	)
 	verbose := flags.Bool("verbose", false, "write raw dependency probe output under tmp/")
 	skipHarvest := flags.Bool("skip-harvest", false, "exclude the optional harvestpy runtime from health")
 	if code, ok := parseFlags(flags, args); !ok {
@@ -102,7 +110,13 @@ func runDoctor(
 			tally.warn()
 			fmt.Fprintf(stdout, "doctor: mcp daemon=unreachable error=%v\n", daemonErr)
 		} else {
-			fmt.Fprintf(stdout, "doctor: mcp daemon=running pid=%d since=%s endpoint=%s\n", status.PID, status.StartTime, status.Endpoint)
+			fmt.Fprintf(
+				stdout,
+				"doctor: mcp daemon=running pid=%d since=%s endpoint=%s\n",
+				status.PID,
+				status.StartTime,
+				status.Endpoint,
+			)
 			tally.warnings += printHarvesterExternalDoctor(stdout, runtime.Config.Harvester, status.HarvesterExternal)
 			if status.PFMVersion != version {
 				tally.warn()
@@ -121,7 +135,11 @@ func runDoctor(
 	for _, warning := range pathWarnings {
 		fmt.Fprintf(stdout, "doctor: warning %s\n", warning)
 		if strings.HasPrefix(warning, "pfm_path_resolves=") || strings.HasPrefix(warning, "pfm_hash_mismatch=") {
-			fmt.Fprintf(stdout, "doctor: remediation: put %s first on PATH and remove or rebuild stale pfm copies\n", filepath.Join(resolved.Home, ".local", "bin"))
+			fmt.Fprintf(
+				stdout,
+				"doctor: remediation: put %s first on PATH and remove or rebuild stale pfm copies\n",
+				filepath.Join(resolved.Home, ".local", "bin"),
+			)
 		}
 	}
 	tally.warnings += len(pathWarnings)
@@ -163,18 +181,34 @@ func runDoctor(
 		}
 	}
 	tally.warnings += printVSCodeDoctor(stdout, resolved.Home, runtime.Config)
-	claudeVersionsWarnings, claudeVersionsFailures := printClaudeVersionsDoctor(stdout, resolved.Home, runtime.Config.Claude.Binary, gather.NewProcFS(resolved.ProcRoot))
+	claudeVersionsWarnings, claudeVersionsFailures := printClaudeVersionsDoctor(
+		stdout,
+		resolved.Home,
+		runtime.Config.Claude.Binary,
+		gather.NewProcFS(resolved.ProcRoot),
+	)
 	tally.warnings += claudeVersionsWarnings
 	tally.failures += claudeVersionsFailures
-	depWarnings, depFailures, claudeAbsent := printDependencyDoctor(ctx, stdout, resolved.Home, deps.Registry(deps.Options{
-		Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
-	}), deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest})
+	depWarnings, depFailures, claudeAbsent := printDependencyDoctor(
+		ctx,
+		stdout,
+		resolved.Home,
+		deps.Registry(deps.Options{
+			Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
+		}),
+		deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest},
+	)
 	tally.warnings += depWarnings
 	tally.failures += depFailures
 	overlayWarnings, overlayFailures := printHostOverlayDoctor(stdout, resolved.Home, runtime.Config)
 	tally.warnings += overlayWarnings
 	tally.failures += overlayFailures
-	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalAgents(stdout, resolved.Home, runtime.Config.Accounts, claudeAbsent)
+	globalAgentsWarnings, globalAgentsFailures := installer.ReportGlobalAgents(
+		stdout,
+		resolved.Home,
+		runtime.Config.Accounts,
+		claudeAbsent,
+	)
 	tally.warnings += globalAgentsWarnings
 	tally.failures += globalAgentsFailures
 	hookWarnings, hookFailures := installer.ReportHooks(stdout, resolved.Home, runtime.Config, claudeAbsent)
@@ -297,7 +331,14 @@ func runDoctor(
 	if *skipHarvest {
 		fmt.Fprintln(stdout, "doctor: harvestpy skipped (--skip-harvest)")
 	} else {
-		tally.warnings += printHarvestPythonDoctor(ctx, stdout, resolved.Home, harvestpy.Platform{}, configuredHarvestDoctor(), runtime.Config.Harvester.Fetch.Browser)
+		tally.warnings += printHarvestPythonDoctor(
+			ctx,
+			stdout,
+			resolved.Home,
+			harvestpy.Platform{},
+			configuredHarvestDoctor(),
+			runtime.Config.Harvester.Fetch.Browser,
+		)
 	}
 	tally.warnings += printHarvestCacheDoctor(stdout, runtime.Config.Harvester)
 	tally.warnings += printHarvestSearchDoctor(ctx, stdout, runtime.Config.Harvester)
@@ -667,7 +708,13 @@ func configuredDependencyProbe(ctx context.Context, entries []deps.Entry, option
 	return deps.Probe(ctx, entries, options)
 }
 
-func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, entries []deps.Entry, options deps.ProbeOptions) (warnings, failures int, claudeAbsent bool) {
+func printDependencyDoctor(
+	ctx context.Context,
+	stdout io.Writer,
+	home string,
+	entries []deps.Entry,
+	options deps.ProbeOptions,
+) (warnings, failures int, claudeAbsent bool) {
 	for _, result := range configuredDependencyProbe(ctx, entries, options) {
 		entry := result.Entry
 		// A dependency the fleet engine itself cannot run without (Required,
@@ -694,11 +741,22 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 					warnings++
 				}
 			}
-			fmt.Fprintf(stdout, "doctor: dep %s path=(none) MISSING %s — install: %s\n", entry.Name, requirement, entry.InstallHint)
+			fmt.Fprintf(
+				stdout,
+				"doctor: dep %s path=(none) MISSING %s — install: %s\n",
+				entry.Name,
+				requirement,
+				entry.InstallHint,
+			)
 		case deps.StateBroken:
 			if entry.Engine == pfmengine.Claude && installer.ClaudeAbsent(home, result.Path, result.ExitCode) {
 				claudeAbsent = true
-				fmt.Fprintf(stdout, "doctor: dep %s path=%s MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n", entry.Name, result.Path)
+				fmt.Fprintf(
+					stdout,
+					"doctor: dep %s path=%s MISSING optional — install: install Claude Code (the pfm launcher has no real binary to run)\n",
+					entry.Name,
+					result.Path,
+				)
 				continue
 			} else if entry.Required {
 				if gatesEngine {
@@ -709,7 +767,14 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 			}
 			raw := deps.FirstLine(result.Raw)
 			if raw != "" && !strings.Contains(result.Error, "raw=") {
-				fmt.Fprintf(stdout, "doctor: dep %s path=%s broken error=%s raw=%q\n", entry.Name, result.Path, result.Error, raw)
+				fmt.Fprintf(
+					stdout,
+					"doctor: dep %s path=%s broken error=%s raw=%q\n",
+					entry.Name,
+					result.Path,
+					result.Error,
+					raw,
+				)
 			} else {
 				fmt.Fprintf(stdout, "doctor: dep %s path=%s broken error=%s\n", entry.Name, result.Path, result.Error)
 			}
@@ -728,7 +793,13 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 					warnings++
 				}
 			}
-			fmt.Fprintf(stdout, "doctor: dep %s path=%s timeout error=%s — the binary resolved and was executed but answered nothing within the bound; unverified, no fault established\n", entry.Name, result.Path, result.Error)
+			fmt.Fprintf(
+				stdout,
+				"doctor: dep %s path=%s timeout error=%s — the binary resolved and was executed but answered nothing within the bound; unverified, no fault established\n",
+				entry.Name,
+				result.Path,
+				result.Error,
+			)
 		case deps.StateCancelled:
 			// The caller stopped the probe before it answered. Keep the required
 			// dependency failure arithmetic unchanged, but name the parent context
@@ -740,7 +811,13 @@ func printDependencyDoctor(ctx context.Context, stdout io.Writer, home string, e
 					warnings++
 				}
 			}
-			fmt.Fprintf(stdout, "doctor: dep %s path=%s cancelled error=%s — probe stopped by its caller; unverified, no fault established\n", entry.Name, result.Path, result.Error)
+			fmt.Fprintf(
+				stdout,
+				"doctor: dep %s path=%s cancelled error=%s — probe stopped by its caller; unverified, no fault established\n",
+				entry.Name,
+				result.Path,
+				result.Error,
+			)
 		case deps.StateOK:
 			fmt.Fprintf(stdout, "doctor: dep %s path=%s", entry.Name, result.Path)
 			if result.Version != "" {
@@ -790,10 +867,20 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 			fmt.Fprintf(stdout, "doctor: host_overlay %s missing — run pfm install --yes\n", overlay.Name)
 		case installer.HostOverlayDisplaced:
 			failures++
-			fmt.Fprintf(stdout, "doctor: host_overlay %s DISPLACED by %s — run pfm install --yes\n", overlay.Name, overlay.Target)
+			fmt.Fprintf(
+				stdout,
+				"doctor: host_overlay %s DISPLACED by %s — run pfm install --yes\n",
+				overlay.Name,
+				overlay.Target,
+			)
 		default:
 			failures++
-			fmt.Fprintf(stdout, "doctor: host_overlay %s unknown state=%s — run pfm install --yes\n", overlay.Name, overlay.State)
+			fmt.Fprintf(
+				stdout,
+				"doctor: host_overlay %s unknown state=%s — run pfm install --yes\n",
+				overlay.Name,
+				overlay.State,
+			)
 		}
 	}
 	overlayCommand := installer.StatusLineOverlayCommand(home)
@@ -814,7 +901,12 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 			continue
 		}
 		failures++
-		fmt.Fprintf(stdout, "doctor: host_overlay statusline claude[%d] command=%q, want the overlay — run pfm install --yes\n", account.ID, command)
+		fmt.Fprintf(
+			stdout,
+			"doctor: host_overlay statusline claude[%d] command=%q, want the overlay — run pfm install --yes\n",
+			account.ID,
+			command,
+		)
 	}
 	return warnings, failures
 }
@@ -825,7 +917,11 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 // live process is executing, and how much a prune would free. Absence — no
 // native Claude installer ever ran here — is never a warning; a probe
 // failure is, because retention then reads as unknown rather than clean.
-func printClaudeVersionsDoctor(stdout io.Writer, home, configuredBinary string, procs gather.ProcFS) (warnings, failures int) {
+func printClaudeVersionsDoctor(
+	stdout io.Writer,
+	home, configuredBinary string,
+	procs gather.ProcFS,
+) (warnings, failures int) {
 	report, err := installer.InspectClaudeVersions(home, configuredBinary)
 	if err != nil {
 		failures++
@@ -902,7 +998,14 @@ func printHarvestCacheDoctor(stdout io.Writer, harvester config.HarvesterConfig)
 		ttlText = "never"
 	}
 	if walkErr != nil {
-		fmt.Fprintf(stdout, "doctor: harvester_cache dir=%s entries=%d ttl=%s error=%v\n", root, entries, ttlText, walkErr)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvester_cache dir=%s entries=%d ttl=%s error=%v\n",
+			root,
+			entries,
+			ttlText,
+			walkErr,
+		)
 		return 1
 	}
 	fmt.Fprintf(stdout, "doctor: harvester_cache dir=%s entries=%d ttl=%s\n", root, entries, ttlText)
@@ -914,9 +1017,17 @@ func printHarvestCacheDoctor(stdout io.Writer, harvester config.HarvesterConfig)
 // harvest.ProbeSearch, never here — cmd/pfm is dispatch, not policy (C3).
 func printHarvestSearchDoctor(ctx context.Context, stdout io.Writer, harvester config.HarvesterConfig) int {
 	probe := harvest.ProbeSearch(ctx, harvest.SearchOptions{
-		SearXNGURL: harvester.Search.SearXNGURL, BraveAPIKey: harvester.Search.BraveAPIKey, DisableSearch: !harvester.Search.Enabled,
+		SearXNGURL:    harvester.Search.SearXNGURL,
+		BraveAPIKey:   harvester.Search.BraveAPIKey,
+		DisableSearch: !harvester.Search.Enabled,
 	}, nil)
-	fmt.Fprintf(stdout, "doctor: harvester search state=%s backend=%s detail=%s\n", probe.State, probe.Backend, probe.Detail)
+	fmt.Fprintf(
+		stdout,
+		"doctor: harvester search state=%s backend=%s detail=%s\n",
+		probe.State,
+		probe.Backend,
+		probe.Detail,
+	)
 	if probe.Warning {
 		return 1
 	}
@@ -939,7 +1050,14 @@ func configuredHarvestDoctor() harvestDoctor {
 	return pinnedHarvestDoctor{}
 }
 
-func printHarvestPythonDoctor(ctx context.Context, stdout io.Writer, home string, platform harvestpy.Platform, doctor harvestDoctor, browserGate bool) int {
+func printHarvestPythonDoctor(
+	ctx context.Context,
+	stdout io.Writer,
+	home string,
+	platform harvestpy.Platform,
+	doctor harvestDoctor,
+	browserGate bool,
+) int {
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = goRuntime.GOOS, goRuntime.GOARCH
 	}
@@ -1011,7 +1129,12 @@ func printHarvestPythonDoctor(ctx context.Context, stdout io.Writer, home string
 
 	inventoryOK, inventoryErr := harvestDoctorCheck(report, "lock_completeness", checkErr)
 	if inventoryOK && digest.InventorySHA256 != "" && digest.InventoryCount > 0 {
-		fmt.Fprintf(stdout, "doctor: harvestpy inventory=(file) complete count=%d digest=%s\n", digest.InventoryCount, digest.InventorySHA256)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvestpy inventory=(file) complete count=%d digest=%s\n",
+			digest.InventoryCount,
+			digest.InventorySHA256,
+		)
 	} else {
 		warnings++
 		if inventoryErr == "" {
@@ -1087,7 +1210,14 @@ func browserEnvFingerprint(digest harvestpy.EnvironmentDigest) string {
 
 // gateOn is harvester.config.json fetch.browser — the same value the core's
 // ladder receives, so doctor and the harvester can never disagree.
-func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root string, platform harvestpy.Platform, warnings int, gateOn bool) int {
+func appendHarvestBrowserDoctorRow(
+	ctx context.Context,
+	stdout io.Writer,
+	root string,
+	platform harvestpy.Platform,
+	warnings int,
+	gateOn bool,
+) int {
 	digest, inspectErr := harvestpy.InspectBrowser(root, platform)
 	envDir := harvestpy.BrowserRuntimeRoot(root, platform)
 	interpreter := filepath.Join(envDir, "project", ".venv", "bin", "python")
@@ -1106,37 +1236,69 @@ func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root s
 		case errors.Is(inspectErr, os.ErrNotExist):
 			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=NOT_PROVISIONED disabled gate=fetch.browser\n")
 		case inspectErr != nil:
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=CORRUPT_RECORD disabled gate=fetch.browser error=%v\n", inspectErr)
+			fmt.Fprintf(
+				stdout,
+				"doctor: harvestpy_browser env=CORRUPT_RECORD disabled gate=fetch.browser error=%v\n",
+				inspectErr,
+			)
 		default:
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s disabled gate=fetch.browser error=provision record state %q is not ready\n", fingerprint, digest.State)
+			fmt.Fprintf(
+				stdout,
+				"doctor: harvestpy_browser %s disabled gate=fetch.browser error=provision record state %q is not ready\n",
+				fingerprint,
+				digest.State,
+			)
 		}
 		return warnings
 	}
 	if inspectErr != nil {
 		if errors.Is(inspectErr, os.ErrNotExist) {
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=NOT_PROVISIONED interpreter=%s error=browser environment was never provisioned; it provisions on the first browser fetch (check uv and network access)\n", interpreter)
+			fmt.Fprintf(
+				stdout,
+				"doctor: harvestpy_browser env=NOT_PROVISIONED interpreter=%s error=browser environment was never provisioned; it provisions on the first browser fetch (check uv and network access)\n",
+				interpreter,
+			)
 		} else {
 			fmt.Fprintf(stdout, "doctor: harvestpy_browser env=PROBE_FAILED error=%v\n", inspectErr)
 		}
 		return warnings + 1
 	}
 	if digest.State != "ready" {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser env=PROBE_FAILED state=%s error=browser environment record is not ready\n", digest.State)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvestpy_browser env=PROBE_FAILED state=%s error=browser environment record is not ready\n",
+			digest.State,
+		)
 		return warnings + 1
 	}
 	if _, statErr := os.Stat(interpreter); statErr != nil {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s interpreter=%s PROBE_FAILED error=%v\n", fingerprint, interpreter, statErr)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvestpy_browser %s interpreter=%s PROBE_FAILED error=%v\n",
+			fingerprint,
+			interpreter,
+			statErr,
+		)
 		return warnings + 1
 	}
 	// S2: verify the on-disk WORKER against the provision record before
 	// anything else — browser.py carries the SSRF route guard, and a file
 	// that does not match the pinned source invalidates every verdict below.
 	if strings.TrimSpace(digest.SourceSHA256) == "" {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s SOURCE_UNPINNED error=provision record predates source pinning; remove the browser environment so the next browser fetch re-provisions it\n", fingerprint)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvestpy_browser %s SOURCE_UNPINNED error=provision record predates source pinning; remove the browser environment so the next browser fetch re-provisions it\n",
+			fingerprint,
+		)
 		return warnings + 1
 	}
 	if err := harvestpy.VerifySHA256(script, digest.SourceSHA256); err != nil {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s SOURCE_MISMATCH error=on-disk browser.py does not match the pinned provision source (the SSRF route guard cannot be trusted): %v\n", fingerprint, err)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvestpy_browser %s SOURCE_MISMATCH error=on-disk browser.py does not match the pinned provision source (the SSRF route guard cannot be trusted): %v\n",
+			fingerprint,
+			err,
+		)
 		return warnings + 1
 	}
 	// S2: LIVE smoke — patchright importability and Chrome resolution are
@@ -1144,12 +1306,21 @@ func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root s
 	// record alone is a snapshot, and snapshots go stale silently.
 	smoke, smokeErr := doctorBrowserSmoke(ctx, interpreter, script)
 	if smokeErr != nil {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s BROKEN_SMOKE error=live worker smoke failed: %v\n", fingerprint, smokeErr)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvestpy_browser %s BROKEN_SMOKE error=live worker smoke failed: %v\n",
+			fingerprint,
+			smokeErr,
+		)
 		return warnings + 1
 	}
 	patchrightLive, _ := smoke["patchright"].(bool)
 	if ok, _ := smoke["ok"].(bool); !ok || !patchrightLive {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=MISSING BROKEN_SMOKE error=live smoke reports patchright did not import\n", fingerprint)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvestpy_browser %s patchright=MISSING BROKEN_SMOKE error=live smoke reports patchright did not import\n",
+			fingerprint,
+		)
 		return warnings + 1
 	}
 	liveChrome, _ := smoke["chrome_path"].(string)
@@ -1159,21 +1330,43 @@ func appendHarvestBrowserDoctorRow(ctx context.Context, stdout io.Writer, root s
 	for _, candidate := range []string{strings.TrimSpace(liveChrome), strings.TrimSpace(chromePath)} {
 		if candidate == "" || strings.ContainsRune(candidate, filepath.Separator) {
 			if info, statErr := os.Stat(candidate); candidate != "" && statErr == nil && info.Mode().IsRegular() {
-				fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, candidate, harvestpy.BrowserSourceState(digest))
+				fmt.Fprintf(
+					stdout,
+					"doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n",
+					fingerprint,
+					candidate,
+					harvestpy.BrowserSourceState(digest),
+				)
 				return warnings
 			}
 			continue
 		}
 		if _, lookErr := exec.LookPath(candidate); lookErr == nil {
-			fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, candidate, harvestpy.BrowserSourceState(digest))
+			fmt.Fprintf(
+				stdout,
+				"doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n",
+				fingerprint,
+				candidate,
+				harvestpy.BrowserSourceState(digest),
+			)
 			return warnings
 		}
 	}
 	if fallback := doctorChromeResolver(); fallback != "" {
-		fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n", fingerprint, fallback, harvestpy.BrowserSourceState(digest))
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n",
+			fingerprint,
+			fallback,
+			harvestpy.BrowserSourceState(digest),
+		)
 		return warnings
 	}
-	fmt.Fprintf(stdout, "doctor: harvestpy_browser %s patchright=present(live smoke) chrome=MISSING error=environment provisioned but no system Chrome binary resolves\n", fingerprint)
+	fmt.Fprintf(
+		stdout,
+		"doctor: harvestpy_browser %s patchright=present(live smoke) chrome=MISSING error=environment provisioned but no system Chrome binary resolves\n",
+		fingerprint,
+	)
 	return warnings + 1
 }
 
@@ -1197,22 +1390,69 @@ func printDoctorConfig(stdout io.Writer, runtime commandRuntime) {
 		runtime.Config.Path,
 		runtime.Config.Exists,
 	)
-	fmt.Fprintf(stdout, "doctor: config version=%d effective (input=%d %s)\n", runtime.Config.Version, runtime.Config.InputVersion, runtime.Config.Source("version"))
+	fmt.Fprintf(
+		stdout,
+		"doctor: config version=%d effective (input=%d %s)\n",
+		runtime.Config.Version,
+		runtime.Config.InputVersion,
+		runtime.Config.Source("version"),
+	)
 	fmt.Fprintf(stdout, "doctor: config theme=%s (%s)\n", runtime.Config.Theme, runtime.Config.Source("theme"))
 	accounts := make([]string, 0, len(runtime.Config.Accounts))
 	for _, account := range runtime.Config.Accounts {
 		accounts = append(accounts, fmt.Sprintf("%d:%s", account.ID, account.ConfigDir))
 	}
-	fmt.Fprintf(stdout, "doctor: config accounts=%s (%s)\n", strings.Join(accounts, ","), runtime.Config.Source("accounts"))
-	fmt.Fprintf(stdout, "doctor: config claude.permissionMode=%s (%s)\n", runtime.Config.Claude.PermissionMode, runtime.Config.Source("claude.permissionMode"))
-	fmt.Fprintf(stdout, "doctor: config claude.binary=%s (%s)\n", runtime.Config.Claude.Binary, runtime.Config.Source("claude.binary"))
-	fmt.Fprintf(stdout, "doctor: config codex.yolo=%t (%s)\n", runtime.Config.Codex.Yolo, runtime.Config.Source("codex.yolo"))
-	fmt.Fprintf(stdout, "doctor: config codex.binary=%s (%s)\n", runtime.Config.Codex.Binary, runtime.Config.Source("codex.binary"))
+	fmt.Fprintf(
+		stdout,
+		"doctor: config accounts=%s (%s)\n",
+		strings.Join(accounts, ","),
+		runtime.Config.Source("accounts"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"doctor: config claude.permissionMode=%s (%s)\n",
+		runtime.Config.Claude.PermissionMode,
+		runtime.Config.Source("claude.permissionMode"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"doctor: config claude.binary=%s (%s)\n",
+		runtime.Config.Claude.Binary,
+		runtime.Config.Source("claude.binary"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"doctor: config codex.yolo=%t (%s)\n",
+		runtime.Config.Codex.Yolo,
+		runtime.Config.Source("codex.yolo"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"doctor: config codex.binary=%s (%s)\n",
+		runtime.Config.Codex.Binary,
+		runtime.Config.Source("codex.binary"),
+	)
 	for _, name := range config.RegisteredMCPServers() {
-		fmt.Fprintf(stdout, "doctor: config %s=%t (%s)\n", mcpServerKey(name), runtime.Config.MCPServers[name].Enabled, runtime.Config.MCPServerSource(name))
+		fmt.Fprintf(
+			stdout,
+			"doctor: config %s=%t (%s)\n",
+			mcpServerKey(name),
+			runtime.Config.MCPServers[name].Enabled,
+			runtime.Config.MCPServerSource(name),
+		)
 	}
-	fmt.Fprintf(stdout, "doctor: config mcp.http.port=%d (%s)\n", runtime.Config.MCP.HTTP.Port, runtime.Config.Source("mcp.http.port"))
-	fmt.Fprintf(stdout, "doctor: config harvester path=%s exists=%t\n", runtime.Config.Harvester.Path, runtime.Config.Harvester.Exists)
+	fmt.Fprintf(
+		stdout,
+		"doctor: config mcp.http.port=%d (%s)\n",
+		runtime.Config.MCP.HTTP.Port,
+		runtime.Config.Source("mcp.http.port"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"doctor: config harvester path=%s exists=%t\n",
+		runtime.Config.Harvester.Path,
+		runtime.Config.Harvester.Exists,
+	)
 }
 
 // mcpServerKey names where a registered server's enabled flag is configured.
@@ -1291,10 +1531,20 @@ func printHarvesterConfigDoctor(stdout io.Writer, runtime commandRuntime) int {
 		}
 		warnings++
 		if retired.now == "" {
-			fmt.Fprintf(stdout, "doctor: harvester retired_env=%s is set but ignored (removed; pfm never honored it)\n", retired.name)
+			fmt.Fprintf(
+				stdout,
+				"doctor: harvester retired_env=%s is set but ignored (removed; pfm never honored it)\n",
+				retired.name,
+			)
 			continue
 		}
-		fmt.Fprintf(stdout, "doctor: harvester retired_env=%s is set but ignored — move it to %s in %s\n", retired.name, retired.now, runtime.Config.Harvester.Path)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harvester retired_env=%s is set but ignored — move it to %s in %s\n",
+			retired.name,
+			retired.now,
+			runtime.Config.Harvester.Path,
+		)
 	}
 	return warnings
 }
@@ -1492,6 +1742,12 @@ func liveCodexSnapshot(ctx context.Context, runtime commandRuntime, manager *kil
 	}
 	roots := runtime.Config.CodexHomes()
 	resolver := store.NewCodexThreadResolverRoots(ctx, roots, manager.CodexPaneBound(ctx))
-	snapshot.Codex, err = gather.DetectCodexThreadsInRoots(gather.NewProcFS(runtime.Paths.ProcRoot), roots, panes, resolver, runtime.Config.Codex.Binary)
+	snapshot.Codex, err = gather.DetectCodexThreadsInRoots(
+		gather.NewProcFS(runtime.Paths.ProcRoot),
+		roots,
+		panes,
+		resolver,
+		runtime.Config.Codex.Binary,
+	)
 	return snapshot, err
 }

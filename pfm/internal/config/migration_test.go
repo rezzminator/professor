@@ -12,7 +12,12 @@ func TestMigrationSplitsRenamesAndMovesPort(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	dir := filepath.Join(home, ".config", "pfm")
 	legacy := filepath.Join(dir, LegacyFileName)
-	writeFile(t, legacy, `{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`, 0o600)
+	writeFile(
+		t,
+		legacy,
+		`{"version":2,"theme":"tokyo-night","mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`,
+		0o600,
+	)
 	before, err := Load("", home, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -40,10 +45,20 @@ func TestMigrationSplitsRenamesAndMovesPort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Path != filepath.Join(dir, FileName) || after.Theme != "tokyo-night" || after.MCP.HTTP.Port != DefaultMCPPort ||
-		!after.MCPServers["chat"].Enabled || !after.Harvester.Enabled || after.MCPServerSource("harvester") != SourceFile {
-		t.Fatalf("after migration: path=%q theme=%q port=%d chat=%t harvester=%t source=%q", after.Path, after.Theme,
-			after.MCP.HTTP.Port, after.MCPServers["chat"].Enabled, after.Harvester.Enabled, after.MCPServerSource("harvester"))
+	if after.Path != filepath.Join(dir, FileName) || after.Theme != "tokyo-night" ||
+		after.MCP.HTTP.Port != DefaultMCPPort ||
+		!after.MCPServers["chat"].Enabled ||
+		!after.Harvester.Enabled ||
+		after.MCPServerSource("harvester") != SourceFile {
+		t.Fatalf(
+			"after migration: path=%q theme=%q port=%d chat=%t harvester=%t source=%q",
+			after.Path,
+			after.Theme,
+			after.MCP.HTTP.Port,
+			after.MCPServers["chat"].Enabled,
+			after.Harvester.Enabled,
+			after.MCPServerSource("harvester"),
+		)
 	}
 	content, err := os.ReadFile(after.Path)
 	if err != nil {
@@ -65,7 +80,12 @@ func TestMigrationKeepsCustomPortAndExistingHarvesterFlag(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, FileName)
 	writeFile(t, path, `{"version":2,"mcp":{"http":{"port":9999},"servers":{"harvester":{"enabled":true}}}}`, 0o600)
-	writeFile(t, filepath.Join(dir, HarvesterFileName), `{"enabled":false,"search":{"searxngURL":"http://127.0.0.1:8888"}}`, 0o600)
+	writeFile(
+		t,
+		filepath.Join(dir, HarvesterFileName),
+		`{"enabled":false,"search":{"searxngURL":"http://127.0.0.1:8888"}}`,
+		0o600,
+	)
 	before, err := Load(path, filepath.Join(dir, "home"), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -84,8 +104,14 @@ func TestMigrationKeepsCustomPortAndExistingHarvesterFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.MCP.HTTP.Port != 9999 || after.Harvester.Enabled || after.Harvester.Search.SearXNGURL != "http://127.0.0.1:8888" {
-		t.Fatalf("after: port=%d enabled=%t searxng=%q", after.MCP.HTTP.Port, after.Harvester.Enabled, after.Harvester.Search.SearXNGURL)
+	if after.MCP.HTTP.Port != 9999 || after.Harvester.Enabled ||
+		after.Harvester.Search.SearXNGURL != "http://127.0.0.1:8888" {
+		t.Fatalf(
+			"after: port=%d enabled=%t searxng=%q",
+			after.MCP.HTTP.Port,
+			after.Harvester.Enabled,
+			after.Harvester.Search.SearXNGURL,
+		)
 	}
 }
 
@@ -239,8 +265,12 @@ func TestMigrationKeepsPortWhenExternalGatewayHoldsTheTarget(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	dir := filepath.Join(home, ".config", "pfm")
 	writeFile(t, filepath.Join(dir, LegacyFileName), `{"version":2,"mcp":{"http":{"port":8377}}}`, 0o600)
-	writeFile(t, filepath.Join(dir, HarvesterFileName),
-		`{"enabled":true,"external":{"enabled":true,"port":18377,"publicURL":"https://h.example.test","auth":{"staticToken":"t"}}}`, 0o600)
+	writeFile(
+		t,
+		filepath.Join(dir, HarvesterFileName),
+		`{"enabled":true,"external":{"enabled":true,"port":18377,"publicURL":"https://h.example.test","auth":{"staticToken":"t"}}}`,
+		0o600,
+	)
 	before, err := Load("", home, nil)
 	if err != nil {
 		t.Fatal(err)

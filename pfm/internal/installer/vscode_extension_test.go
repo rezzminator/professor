@@ -120,7 +120,11 @@ func TestVSCodeExtensionReinstallIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if second.report.Changed != 0 {
-		t.Fatalf("second apply reported %d changes, want 0:\n%s", second.report.Changed, second.options.Stdout.(*bytes.Buffer).String())
+		t.Fatalf(
+			"second apply reported %d changes, want 0:\n%s",
+			second.report.Changed,
+			second.options.Stdout.(*bytes.Buffer).String(),
+		)
 	}
 	after, err := os.ReadFile(ledgerPath)
 	if err != nil {
@@ -170,7 +174,10 @@ func TestVSCodeExtensionBacksUpAndRestoresARealNonLinkTarget(t *testing.T) {
 	if len(backups) != 1 {
 		t.Fatalf("expected exactly one backup of the real directory, got %v", backups)
 	}
-	if got, err := os.ReadFile(filepath.Join(backups[0], "marker.txt")); err != nil || string(got) != "operator content\n" {
+	if got, err := os.ReadFile(
+		filepath.Join(backups[0], "marker.txt"),
+	); err != nil ||
+		string(got) != "operator content\n" {
 		t.Fatalf("backup lost the marker file: err=%v content=%q", err, got)
 	}
 
@@ -232,7 +239,8 @@ func TestVSCodeExtensionUninstallSkipsAForeignRelinkedTargetButStillDeletesTheLe
 	if !linked || resolved != filepath.Clean(foreign) {
 		t.Fatalf("uninstall touched the foreign-relinked target: resolved=%q linked=%v", resolved, linked)
 	}
-	if !strings.Contains(output.String(), target) || !strings.Contains(output.String(), "no longer points at pfm's Professor extension") {
+	if !strings.Contains(output.String(), target) ||
+		!strings.Contains(output.String(), "no longer points at pfm's Professor extension") {
 		t.Fatalf("uninstall did not name the skipped foreign link:\n%s", output.String())
 	}
 	if _, err := os.Stat(filepath.Join(installer.managedRoot, vscodeOwnershipName)); !os.IsNotExist(err) {
@@ -248,7 +256,12 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 	home := t.TempDir()
 	managed := filepath.Join(home, ".local", "share", "pfm", "install")
 	path := filepath.Join(managed, vscodeOwnershipName)
-	installer := &engine{options: Options{Home: home, Stdout: &bytes.Buffer{}}, apply: true, managedRoot: managed, stamp: "fixture"}
+	installer := &engine{
+		options:     Options{Home: home, Stdout: &bytes.Buffer{}},
+		apply:       true,
+		managedRoot: managed,
+		stamp:       "fixture",
+	}
 
 	unsorted := []string{
 		filepath.Join(home, "z-product", "extensions", "professor"),
@@ -271,7 +284,10 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 	if err := os.WriteFile(path, []byte(relativeDoc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "invalid extension link path") {
+	if _, _, _, _, err := readVSCodeOwnership(
+		path,
+	); err == nil ||
+		!strings.Contains(err.Error(), "invalid extension link path") {
 		t.Fatalf("a relative extension path was accepted: err=%v", err)
 	}
 
@@ -280,7 +296,10 @@ func TestVSCodeExtensionLedgerRoundTripsSortedAndValidates(t *testing.T) {
 	if err := os.WriteFile(path, []byte(duplicateDoc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, _, err := readVSCodeOwnership(path); err == nil || !strings.Contains(err.Error(), "duplicate extension link") {
+	if _, _, _, _, err := readVSCodeOwnership(
+		path,
+	); err == nil ||
+		!strings.Contains(err.Error(), "duplicate extension link") {
 		t.Fatalf("a duplicate extension path was accepted: err=%v", err)
 	}
 }
@@ -357,7 +376,12 @@ func TestVSCodeExtensionUninstallRestoresPreviousDefaultForBothCurrentAndLegacyV
 			if !strings.Contains(got, `"terminal.integrated.defaultProfile.linux": "PFM"`) {
 				t.Fatalf("install did not claim the default:\n%s", got)
 			}
-			overridden, err := setJSONCProperty([]byte(got), 0, "terminal.integrated.defaultProfile.linux", []byte(`"`+current+`"`))
+			overridden, err := setJSONCProperty(
+				[]byte(got),
+				0,
+				"terminal.integrated.defaultProfile.linux",
+				[]byte(`"`+current+`"`),
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -498,7 +522,11 @@ func TestVSCodeExtensionPackageJSONContractMatchesTheInstalledConstantsAndStages
 	}
 	profile := manifest.Contributes.Terminal.Profiles[0]
 	if profile.Title != vscodeExtensionProfileTitle {
-		t.Fatalf("contributed profile title = %q, want vscodeExtensionProfileTitle %q", profile.Title, vscodeExtensionProfileTitle)
+		t.Fatalf(
+			"contributed profile title = %q, want vscodeExtensionProfileTitle %q",
+			profile.Title,
+			vscodeExtensionProfileTitle,
+		)
 	}
 	wantEvent := "onTerminalProfile:" + profile.ID
 	found := false
@@ -552,10 +580,16 @@ func TestVSCodeExtensionCommandNeverCallsCreateTerminalWithItsOwnOptions(t *test
 	}
 	body := source[idx:]
 	if strings.Contains(body, "createTerminal(") {
-		t.Fatalf("professor.newChatTerminal still calls createTerminal(...) with its own options instead of delegating to the contributed profile route: %s", body)
+		t.Fatalf(
+			"professor.newChatTerminal still calls createTerminal(...) with its own options instead of delegating to the contributed profile route: %s",
+			body,
+		)
 	}
 	if !strings.Contains(body, "workbench.action.terminal.newWithProfile") {
-		t.Fatalf("professor.newChatTerminal does not delegate through workbench.action.terminal.newWithProfile: %s", body)
+		t.Fatalf(
+			"professor.newChatTerminal does not delegate through workbench.action.terminal.newWithProfile: %s",
+			body,
+		)
 	}
 	if !strings.Contains(body, "id: 'professor.terminal'") && !strings.Contains(body, `id: "professor.terminal"`) {
 		t.Fatalf("professor.newChatTerminal's newWithProfile call does not address id professor.terminal: %s", body)
@@ -621,7 +655,11 @@ func TestVSCodeExtensionPreviewCreatesNoLinkAndNoLedger(t *testing.T) {
 	if _, err := os.Lstat(target); !os.IsNotExist(err) {
 		t.Fatalf("preview created an extension link: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName)); !os.IsNotExist(err) {
+	if _, err := os.Stat(
+		filepath.Join(home, ".local", "share", "pfm", "install", vscodeOwnershipName),
+	); !os.IsNotExist(
+		err,
+	) {
 		t.Fatalf("preview wrote the VS Code ownership ledger: %v", err)
 	}
 	if !strings.Contains(preview.String(), "link "+target) {
@@ -645,7 +683,11 @@ func TestVSCodeSettingsMergeAndRestoreWriteThroughASymlinkedSettingsFile(t *test
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(dotfiles, []byte("{\n  // kept by the dotfile repo\n  \"editor.tabSize\": 2\n}\n"), 0o644); err != nil {
+	if err := os.WriteFile(
+		dotfiles,
+		[]byte("{\n  // kept by the dotfile repo\n  \"editor.tabSize\": 2\n}\n"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(dotfiles, link); err != nil {
@@ -669,7 +711,8 @@ func TestVSCodeSettingsMergeAndRestoreWriteThroughASymlinkedSettingsFile(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(merged, []byte(`"terminal.integrated.defaultProfile.linux": "`+vscodeProfileName+`"`)) || !bytes.Contains(merged, []byte("kept by the dotfile repo")) {
+	if !bytes.Contains(merged, []byte(`"terminal.integrated.defaultProfile.linux": "`+vscodeProfileName+`"`)) ||
+		!bytes.Contains(merged, []byte("kept by the dotfile repo")) {
 		t.Fatalf("the link's target did not receive the merge:\n%s", merged)
 	}
 	if backups, _ := filepath.Glob(dotfiles + ".pre-professor-*"); len(backups) != 1 {
@@ -681,7 +724,8 @@ func TestVSCodeSettingsMergeAndRestoreWriteThroughASymlinkedSettingsFile(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(restored, []byte("terminal.integrated.defaultProfile")) || bytes.Contains(restored, []byte("PFM_AUTO_OPEN")) ||
+	if bytes.Contains(restored, []byte("terminal.integrated.defaultProfile")) ||
+		bytes.Contains(restored, []byte("PFM_AUTO_OPEN")) ||
 		!bytes.Contains(restored, []byte("kept by the dotfile repo")) {
 		t.Fatalf("uninstall did not restore through the link:\n%s", restored)
 	}
@@ -747,7 +791,13 @@ func TestVSCodeDefaultTerminalIsASettingsProfileNeverAnExtensionContributedOne(t
 	assertSettingsProfileDefault := func(stage, value string, profiles map[string]any) {
 		t.Helper()
 		if _, isSettingsProfile := profiles[value]; !isSettingsProfile || contributed[value] {
-			t.Fatalf("%s: default terminal %q is not a settings profile pfm writes (settings profiles %v; the extension contributes %v) — a window reload would hand every restored terminal to the extension", stage, value, profiles, contributed)
+			t.Fatalf(
+				"%s: default terminal %q is not a settings profile pfm writes (settings profiles %v; the extension contributes %v) — a window reload would hand every restored terminal to the extension",
+				stage,
+				value,
+				profiles,
+				contributed,
+			)
 		}
 	}
 

@@ -21,7 +21,9 @@ func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	home := filepath.Join(root, "home")
 	if err := os.WriteFile(
 		filepath.Join(home, ".mcp.json"),
-		[]byte(`{"mcpServers":{"harvester":{"type":"stdio","command":"uv","args":["--directory","/fixture/legacy-harvester","run","harvester"]}}}`),
+		[]byte(
+			`{"mcpServers":{"harvester":{"type":"stdio","command":"uv","args":["--directory","/fixture/legacy-harvester","run","harvester"]}}}`,
+		),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -31,7 +33,9 @@ func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(home, ".codex", "config.toml"),
-		[]byte("[mcp_servers.harvester]\ncommand = \"uv\"\nargs = [\"--directory\", \"/fixture/legacy-harvester\", \"run\", \"harvester\"]\n"),
+		[]byte(
+			"[mcp_servers.harvester]\ncommand = \"uv\"\nargs = [\"--directory\", \"/fixture/legacy-harvester\", \"run\", \"harvester\"]\n",
+		),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -85,7 +89,10 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	}
 
 	t.Run("modern no-auth loopback routes are complete", func(t *testing.T) {
-		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`)
+		write(
+			filepath.Join(home, ".mcp.json"),
+			`{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`,
+		)
 		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n")
 		output := run(t)
 		if !strings.Contains(output, "doctor: mcp client-cutover=complete") {
@@ -94,8 +101,14 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	})
 
 	t.Run("loopback routes with retired authentication are incomplete", func(t *testing.T) {
-		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester","headers":{"Authorization":"Bearer retired"}}}}`)
-		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n[mcp_servers.harvester.headers]\nAuthorization = \"Bearer retired\"\n")
+		write(
+			filepath.Join(home, ".mcp.json"),
+			`{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester","headers":{"Authorization":"Bearer retired"}}}}`,
+		)
+		write(
+			codexPath,
+			"[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n[mcp_servers.harvester.headers]\nAuthorization = \"Bearer retired\"\n",
+		)
 		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
 			t.Fatal(err)
@@ -103,7 +116,12 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
 		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
-			t.Fatalf("doctor code=%d stdout=%q stderr=%q, want retired-auth warnings", code, stdout.String(), stderr.String())
+			t.Fatalf(
+				"doctor code=%d stdout=%q stderr=%q, want retired-auth warnings",
+				code,
+				stdout.String(),
+				stderr.String(),
+			)
 		}
 		for _, client := range []string{"claude", "codex"} {
 			want := "doctor: mcp client=" + client + " harvester=foreign-registration warning=consumer cutover incomplete"
@@ -114,7 +132,10 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	})
 
 	t.Run("foreign routes are warnings for both clients", func(t *testing.T) {
-		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"https://foreign.invalid/mcp"}}}`)
+		write(
+			filepath.Join(home, ".mcp.json"),
+			`{"mcpServers":{"harvester":{"type":"http","url":"https://foreign.invalid/mcp"}}}`,
+		)
 		write(codexPath, "[mcp_servers.harvester]\nurl = \"https://foreign.invalid/mcp\"\n")
 		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
@@ -123,7 +144,12 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
 		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
-			t.Fatalf("doctor code=%d stdout=%q stderr=%q, want foreign-route warnings", code, stdout.String(), stderr.String())
+			t.Fatalf(
+				"doctor code=%d stdout=%q stderr=%q, want foreign-route warnings",
+				code,
+				stdout.String(),
+				stderr.String(),
+			)
 		}
 		for _, client := range []string{"claude", "codex"} {
 			want := "doctor: mcp client=" + client + " harvester=foreign-registration warning=consumer cutover incomplete"
@@ -143,7 +169,12 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
 		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
-			t.Fatalf("doctor code=%d stdout=%q stderr=%q, want unreadable warning", code, stdout.String(), stderr.String())
+			t.Fatalf(
+				"doctor code=%d stdout=%q stderr=%q, want unreadable warning",
+				code,
+				stdout.String(),
+				stderr.String(),
+			)
 		}
 		if !strings.Contains(stdout.String(), "doctor: mcp client=claude harvester=unreadable error=") {
 			t.Fatalf("malformed Claude JSON was not distinguished from absence:\n%s", stdout.String())
@@ -151,7 +182,10 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	})
 
 	t.Run("malformed Codex TOML is unreadable", func(t *testing.T) {
-		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`)
+		write(
+			filepath.Join(home, ".mcp.json"),
+			`{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`,
+		)
 		write(codexPath, "[mcp_servers.harvester\n")
 		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
@@ -160,7 +194,12 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
 		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
-			t.Fatalf("doctor code=%d stdout=%q stderr=%q, want unreadable warning", code, stdout.String(), stderr.String())
+			t.Fatalf(
+				"doctor code=%d stdout=%q stderr=%q, want unreadable warning",
+				code,
+				stdout.String(),
+				stderr.String(),
+			)
 		}
 		if !strings.Contains(stdout.String(), "doctor: mcp client=codex harvester=unreadable error=") {
 			t.Fatalf("malformed Codex TOML was not distinguished from absence:\n%s", stdout.String())
@@ -177,7 +216,12 @@ func TestDoctorEnumeratesExternalDependenciesAndInstalledHooks(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf("doctor code=%d, want clean injected probes\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"doctor code=%d, want clean injected probes\nstdout=%s\nstderr=%s",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	for _, wanted := range []string{
 		"doctor: dep tmux ",
@@ -206,11 +250,23 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 			{Entry: entries[0], State: deps.StateOK, Path: "/fixture/tmux", Version: "3.4"},
 			{Entry: entries[1], State: deps.StateSkipped, Error: "not this platform"},
 			{Entry: entries[2], State: deps.StateMissing},
-			{Entry: entries[3], State: deps.StateBroken, Path: "/fixture/claude", Error: "exit status 1", Raw: "damaged install\nmore"},
+			{
+				Entry: entries[3],
+				State: deps.StateBroken,
+				Path:  "/fixture/claude",
+				Error: "exit status 1",
+				Raw:   "damaged install\nmore",
+			},
 		}
 	}
 	var output bytes.Buffer
-	if _, failures, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{}); failures != 2 {
+	if _, failures, _ := printDependencyDoctor(
+		context.Background(),
+		&output,
+		"",
+		entries,
+		deps.ProbeOptions{},
+	); failures != 2 {
 		t.Fatalf("failures=%d, want 2\n%s", failures, output.String())
 	}
 	want := strings.Join([]string{
@@ -262,7 +318,13 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 				}}
 			}
 			var output bytes.Buffer
-			_, failures, claudeAbsent := printDependencyDoctor(context.Background(), &output, home, []deps.Entry{entry}, deps.ProbeOptions{})
+			_, failures, claudeAbsent := printDependencyDoctor(
+				context.Background(),
+				&output,
+				home,
+				[]deps.Entry{entry},
+				deps.ProbeOptions{},
+			)
 			if claudeAbsent != testCase.wantMissed {
 				t.Fatalf("claudeAbsent=%v, want %v", claudeAbsent, testCase.wantMissed)
 			}
@@ -300,7 +362,11 @@ func TestDependencyDoctorTimeoutRowNamesTimeoutNotBroken(t *testing.T) {
 	var output bytes.Buffer
 	_, failures, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{})
 	if failures != 1 {
-		t.Fatalf("failures=%d, want 1 — a required timed-out dep still contributes its failure\n%s", failures, output.String())
+		t.Fatalf(
+			"failures=%d, want 1 — a required timed-out dep still contributes its failure\n%s",
+			failures,
+			output.String(),
+		)
 	}
 	if !strings.Contains(output.String(), "timeout") {
 		t.Fatalf("dependency row missing %q:\n%s", "timeout", output.String())
@@ -325,7 +391,10 @@ func TestDependencyDoctorCancellationRowNamesCallerStopNotBroken(t *testing.T) {
 	if failures != 1 {
 		t.Fatalf("failures=%d, want 1 for a required unanswered probe\n%s", failures, output.String())
 	}
-	if want := "doctor: dep tmux path=/fixture/tmux cancelled error=cancelled by parent context — probe stopped by its caller; unverified, no fault established"; !strings.Contains(output.String(), want) {
+	if want := "doctor: dep tmux path=/fixture/tmux cancelled error=cancelled by parent context — probe stopped by its caller; unverified, no fault established"; !strings.Contains(
+		output.String(),
+		want,
+	) {
 		t.Fatalf("output=%q, want caller cancellation row %q", output.String(), want)
 	}
 	if strings.Contains(output.String(), "broken") {
@@ -356,13 +425,17 @@ func TestInstallPreflightRefusesRequiredDependencyBeforeInstallerRuns(t *testing
 	home := t.TempDir()
 	runtime := commandRuntime{
 		Config: pfmconfig.Config{Claude: pfmconfig.Claude{Binary: "claude"}, Codex: pfmconfig.Codex{Binary: "codex"}},
-		Paths:  paths.Values{Home: home, Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}}},
+		Paths: paths.Values{
+			Home:  home,
+			Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}},
+		},
 	}
 	var stdout, stderr bytes.Buffer
 	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 1 {
 		t.Fatalf("install code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
-	if called || !strings.Contains(stdout.String(), "doctor: dep tmux path=(none) MISSING required") || !strings.Contains(stderr.String(), "required dependency preflight failed") {
+	if called || !strings.Contains(stdout.String(), "doctor: dep tmux path=(none) MISSING required") ||
+		!strings.Contains(stderr.String(), "required dependency preflight failed") {
 		t.Fatalf("called=%t stdout=%s stderr=%s", called, stdout.String(), stderr.String())
 	}
 }
@@ -376,7 +449,14 @@ func TestInstallPreflightDoesNotRefuseBrokenOptionalEngine(t *testing.T) {
 	dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
 		for _, entry := range entries {
 			if entry.Name == "codex" {
-				return []deps.Result{{Entry: entry, State: deps.StateBroken, Path: "/fixture/codex", Error: "self-doctor failed: auth missing"}}
+				return []deps.Result{
+					{
+						Entry: entry,
+						State: deps.StateBroken,
+						Path:  "/fixture/codex",
+						Error: "self-doctor failed: auth missing",
+					},
+				}
 			}
 		}
 		t.Fatal("codex registry entry missing")
@@ -397,10 +477,21 @@ func TestInstallPreflightDoesNotRefuseBrokenOptionalEngine(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf("install code=%d stdout=%s stderr=%s, want optional Codex failure to remain non-blocking", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"install code=%d stdout=%s stderr=%s, want optional Codex failure to remain non-blocking",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
-	if !called || !strings.Contains(stdout.String(), "dep codex") || !strings.Contains(stdout.String(), "auth missing") {
-		t.Fatalf("called=%t stdout=%s stderr=%s, want a visible optional failure followed by install", called, stdout.String(), stderr.String())
+	if !called || !strings.Contains(stdout.String(), "dep codex") ||
+		!strings.Contains(stdout.String(), "auth missing") {
+		t.Fatalf(
+			"called=%t stdout=%s stderr=%s, want a visible optional failure followed by install",
+			called,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }
 
@@ -430,7 +521,10 @@ func TestInstallPreflightFailureStillPreviewsInDryRun(t *testing.T) {
 	home := t.TempDir()
 	runtime := commandRuntime{
 		Config: pfmconfig.Config{Claude: pfmconfig.Claude{Binary: "claude"}, Codex: pfmconfig.Codex{Binary: "codex"}},
-		Paths:  paths.Values{Home: home, Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}}},
+		Paths: paths.Values{
+			Home:  home,
+			Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}},
+		},
 	}
 	var stdout, stderr bytes.Buffer
 	if code := runInstall([]string{"--skip-harvest"}, &stdout, &stderr, runtime); code != 1 {
@@ -439,7 +533,8 @@ func TestInstallPreflightFailureStillPreviewsInDryRun(t *testing.T) {
 	if !called {
 		t.Fatal("read-only preview never ran — a fresh machine gets no plan at all")
 	}
-	if !strings.Contains(stdout.String(), "doctor: dep tmux path=(none) MISSING required") || !strings.Contains(stderr.String(), "required dependency preflight failed") {
+	if !strings.Contains(stdout.String(), "doctor: dep tmux path=(none) MISSING required") ||
+		!strings.Contains(stderr.String(), "required dependency preflight failed") {
 		t.Fatalf("missing preflight report:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
 	}
 	if strings.Contains(stdout.String(), "if you agree, run again") {

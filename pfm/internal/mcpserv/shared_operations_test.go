@@ -23,7 +23,14 @@ func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
 	verbs := &fakeChatVerbs{
 		listed: chat.ListResult{
 			Rows: []compose.Row{
-				{ID: "thread-a", Kind: compose.LiveCodex, SessionName: "cx-a", Socket: "cx-a", PaneID: "%1", Accounts: []int{2}},
+				{
+					ID:          "thread-a",
+					Kind:        compose.LiveCodex,
+					SessionName: "cx-a",
+					Socket:      "cx-a",
+					PaneID:      "%1",
+					Accounts:    []int{2},
+				},
 				{ID: "claude-b", Kind: compose.ResumeClaude, Killed: true},
 			},
 			Matched: 5, Truncated: true, KilledCount: 1,
@@ -45,7 +52,12 @@ func TestChatLSFindReadAdaptTheTypedVerbs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []chat.ListRequest{{View: compose.AllView, Project: "alpha", Limit: defaultChatLSLimit}}; !reflect.DeepEqual(verbs.lists, want) {
+	if want := []chat.ListRequest{
+		{View: compose.AllView, Project: "alpha", Limit: defaultChatLSLimit},
+	}; !reflect.DeepEqual(
+		verbs.lists,
+		want,
+	) {
 		t.Fatalf("List calls = %+v, want %+v", verbs.lists, want)
 	}
 	if ls.Count != 2 || ls.Matched != 5 || !ls.Truncated || ls.KilledCount != 1 || ls.Filter != "alpha" {
@@ -131,7 +143,7 @@ func TestChatMCPDispatchesStatefulActionsInProcess(t *testing.T) {
 	var got []string
 	service, err := NewConfigured("test", nil, Runtime{
 		Paths: resolved,
-		Dispatch: func(_ context.Context, args []string, _ io.Writer, _ io.Writer) int {
+		Dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
 			got = append(got, filepath.Join(args...))
 			return 0
 		},

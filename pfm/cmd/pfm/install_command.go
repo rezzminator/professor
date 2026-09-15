@@ -18,8 +18,10 @@ import (
 // installHarvestProvisioner is nil in production and resolves to the real
 // pinned adapter. The command-package TestMain replaces it with a no-network
 // fake so existing CLI wiring tests never download the conversion lock.
-var installHarvestProvisionerOverride installer.HarvestProvisioner
-var installThemeHTTPClientOverride *http.Client
+var (
+	installHarvestProvisionerOverride installer.HarvestProvisioner
+	installThemeHTTPClientOverride    *http.Client
+)
 
 var runInstaller = installer.Run
 
@@ -37,7 +39,11 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		stderr,
 	)
 	yes := flags.Bool("yes", false, "apply the installation")
-	vscode := flags.Bool("vscode", false, "install the Professor VS Code extension and make the PFM terminal the default")
+	vscode := flags.Bool(
+		"vscode",
+		false,
+		"install the Professor VS Code extension and make the PFM terminal the default",
+	)
 	skipHarvest := flags.Bool("skip-harvest", false, "skip harvestpy provisioning")
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
 	skipThemes := flags.Bool("skip-themes", false, "skip Claude Code themes, source-fetched and bundled")
@@ -72,7 +78,10 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	// and delete every MCP service the missing file actually enabled (issue
 	// #24 finding 3/4). Apply refuses; a preview names the skip and continues.
 	if runtime.ConfigExplicit && !runtime.Config.Exists {
-		refusal := fmt.Sprintf("--config %s does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)", runtime.Config.Path)
+		refusal := fmt.Sprintf(
+			"--config %s does not exist; refusing to converge host wiring on defaults (a missing explicit config would disable every MCP service it names)",
+			runtime.Config.Path,
+		)
 		if mode == installer.ModeApply {
 			fmt.Fprintf(stderr, "pfm install: %s\n", refusal)
 			return 1
@@ -87,9 +96,17 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	entries := deps.Registry(deps.Options{
 		Home: runtime.Paths.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	})
-	_, preflight, _ := printDependencyDoctor(context.Background(), stdout, runtime.Paths.Home, entries, deps.ProbeOptions{
-		SkipHarvest: *skipHarvest, SkipEngines: map[pfmengine.ID]bool{pfmengine.Codex: skipCodex}, Provisioning: true,
-	})
+	_, preflight, _ := printDependencyDoctor(
+		context.Background(),
+		stdout,
+		runtime.Paths.Home,
+		entries,
+		deps.ProbeOptions{
+			SkipHarvest:  *skipHarvest,
+			SkipEngines:  map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
+			Provisioning: true,
+		},
+	)
 	if preflight != 0 && mode == installer.ModeApply {
 		fmt.Fprintln(stderr, "pfm install: required dependency preflight failed")
 		return 1
@@ -106,7 +123,10 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	code := runInstallerCommand("install", options, stderr)
 	if code == 0 && mode == installer.ModeDryRun {
 		if preflight != 0 {
-			fmt.Fprintln(stderr, "pfm install: required dependency preflight failed — the preview above is read-only; fix the dependencies it names before applying")
+			fmt.Fprintln(
+				stderr,
+				"pfm install: required dependency preflight failed — the preview above is read-only; fix the dependencies it names before applying",
+			)
 			return 1
 		}
 		confirmation := "if you agree, run again: pfm install --yes"
@@ -209,7 +229,11 @@ func newInstallerOptions(
 			for _, account := range runtime.Config.Accounts {
 				options.ConfigDirs = append(options.ConfigDirs, account.ConfigDir)
 			}
-			registries := installer.ClaudeUserRegistries(runtime.Paths.Home, runtime.Config.Accounts, pfmconfig.AmbientClaudeConfigDir())
+			registries := installer.ClaudeUserRegistries(
+				runtime.Paths.Home,
+				runtime.Config.Accounts,
+				pfmconfig.AmbientClaudeConfigDir(),
+			)
 			options.ClaudeRegistries = make([]string, 0, len(registries))
 			options.ClaudeRegistryReasons = make(map[string]string, len(registries))
 			for _, registry := range registries {
@@ -246,11 +270,19 @@ func resolveInstallSourceRepo(home string) string {
 func runInstallerCommand(command string, options installer.Options, stderr io.Writer) int {
 	_, err := runInstaller(context.Background(), options)
 	if errors.Is(err, installer.ErrNameSyncRunning) {
-		fmt.Fprintf(stderr, "pfm %s: the pfm name-sync service is running; wait for it to finish or run `systemctl --user stop pfm-name-sync.service`, then retry\n", command)
+		fmt.Fprintf(
+			stderr,
+			"pfm %s: the pfm name-sync service is running; wait for it to finish or run `systemctl --user stop pfm-name-sync.service`, then retry\n",
+			command,
+		)
 		return 97
 	}
 	if errors.Is(err, installer.ErrLaunchAgentRunning) {
-		fmt.Fprintf(stderr, "pfm %s: the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first\n", command)
+		fmt.Fprintf(
+			stderr,
+			"pfm %s: the pfm name-sync launch agent is running; wait for it to finish or `launchctl bootout gui/$(id -u)/com.professor.pfm.name-sync` first\n",
+			command,
+		)
 		return 97
 	}
 	if err != nil {

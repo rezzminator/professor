@@ -9,8 +9,10 @@ import (
 	"strings"
 )
 
-const historyLimit = 16 << 20
-const recordLimit = 32768
+const (
+	historyLimit = 16 << 20
+	recordLimit  = 32768
+)
 
 type record struct {
 	Type    string          `json:"type"`

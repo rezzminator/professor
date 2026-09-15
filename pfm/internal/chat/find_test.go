@@ -47,7 +47,14 @@ func TestExcerptNeedlesStripsDecorationAndKeepsTheFiveLongest(t *testing.T) {
 func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 	root := testjail.Fleet(t)
 	ctx := context.Background()
-	if _, err := Find(ctx, nil, FindRequest{Excerpt: "the verb layer answers every surface"}); !errors.Is(err, ErrNoTranscriptRegistry) {
+	if _, err := Find(
+		ctx,
+		nil,
+		FindRequest{Excerpt: "the verb layer answers every surface"},
+	); !errors.Is(
+		err,
+		ErrNoTranscriptRegistry,
+	) {
 		t.Fatalf("Find over an empty registry = %v, want ErrNoTranscriptRegistry", err)
 	}
 	const first, second = "the verb layer answers every surface", "one implementation behind each tool"
@@ -77,7 +84,14 @@ func TestFindRanksByHitsAndNamesEachEmptyAnswer(t *testing.T) {
 		len(matches) != 1 || matches[0].ID != "one" {
 		t.Fatalf("Find(Self: both) = %+v, %v; want the asking session's transcript left out", matches, err)
 	}
-	if _, err := Find(ctx, nil, FindRequest{Excerpt: "a sentence no transcript here holds"}); !errors.Is(err, ErrNoExcerptMatch) {
+	if _, err := Find(
+		ctx,
+		nil,
+		FindRequest{Excerpt: "a sentence no transcript here holds"},
+	); !errors.Is(
+		err,
+		ErrNoExcerptMatch,
+	) {
 		t.Fatalf("Find(absent) = %v, want ErrNoExcerptMatch", err)
 	}
 	if _, err := Find(ctx, nil, FindRequest{Excerpt: "  "}); !errors.Is(err, ErrNoExcerpt) {

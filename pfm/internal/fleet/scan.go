@@ -208,7 +208,11 @@ func ResolveEnv(request Request) (Env, error) {
 		if err != nil {
 			return Env{}, err
 		}
-		machine = pfmconfig.Defaults(resolved.Home, resolved.Roots[pfmengine.Claude], resolved.FirstRoot(pfmengine.Codex))
+		machine = pfmconfig.Defaults(
+			resolved.Home,
+			resolved.Roots[pfmengine.Claude],
+			resolved.FirstRoot(pfmengine.Codex),
+		)
 	}
 	currentDir, err := os.Getwd()
 	if err != nil {

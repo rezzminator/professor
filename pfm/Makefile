@@ -77,29 +77,41 @@ define need-tool
 	@test -x "$($(1))" || { echo "$(1): TOOLCHAIN-MISSING — run 'make tools' (infra/tools.env)" >&2; exit 1; }
 endef
 
-fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt)
+fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt), both kernels
 	$(call need-tool,LINT)
-	$(LINT) fmt ./...
+	@# Build-tagged files load only for the current GOOS, so each supported
+	@# kernel is formatted in turn; golines splits a long line and gofumpt
+	@# regroups the result, so a pass can leave a file the next pass still
+	@# changes: run until a pass is a no-op.
+	@for pass in 1 2 3; do \
+	  for goos in linux darwin; do GOOS=$$goos $(LINT) fmt ./... 2>&1 | grep -v '^level=' || true; done; \
+	  if [ -z "$$(GOOS=linux $(LINT) fmt --diff ./... 2>/dev/null)$$(GOOS=darwin $(LINT) fmt --diff ./... 2>/dev/null)" ]; then echo "fmt: stable after $$pass pass(es)"; exit 0; fi; \
+	done; echo "fmt: did not converge in 3 passes — a formatter fight; run 'make fmt-check' to see the files" >&2; exit 1
 
-fmt-check: ## Fail if anything is unformatted, naming the files
+fmt-check: ## Fail if anything is unformatted on either kernel, naming the files
 	$(call need-tool,LINT)
-	@diff="$$($(LINT) fmt --diff ./... 2>&1 || true)"; \
-	files="$$(echo "$$diff" | grep '^diff ' | awk '{print $$NF}' | sed 's|^b/||')"; \
+	@diff="$$(for goos in linux darwin; do GOOS=$$goos $(LINT) fmt --diff ./... 2>&1 || true; done)"; \
+	files="$$(echo "$$diff" | grep '^diff ' | awk '{print $$NF}' | sed 's|^b/||' | sort -u || true)"; \
 	if [ -n "$$files" ]; then \
 	  echo "UNFORMATTED — $$(echo "$$files" | wc -l | tr -d ' ') file(s), run 'make fmt' (first 20):"; \
-	  echo "$$files" | head -20; exit 1; \
+	  echo "$$files" | head -20; echo "--- first hunks:"; echo "$$diff" | grep -E '^(diff|[-+][^-+])' | head -30; exit 1; \
 	elif [ -n "$$diff" ]; then \
 	  echo "fmt-check: golangci-lint fmt did not run cleanly — NO file was checked:"; echo "$$diff" | tail -5; exit 2; \
 	fi; \
-	echo "fmt: clean"
+	echo "fmt: clean (linux + darwin)"
 
 lint: ## Every finding in the module — the burn-down view
 	$(call need-tool,LINT)
 	$(LINT) run ./...
 
+# Inside the fence a linked worktree's .git names a host path; dev.sh iso hands
+# the mounted git dir over as PFM_DEV_REPO_GIT_DIR, and golangci-lint's own
+# `git diff` gets it through GIT_DIR — scoped to THIS command only: exported
+# fence-wide it hijacks every `git init` the test suite runs.
+FENCE_GIT := $(if $(PFM_DEV_REPO_GIT_DIR),GIT_DIR=$(PFM_DEV_REPO_GIT_DIR) GIT_WORK_TREE=$(PFM_DEV_REPO_WORK_TREE) GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=*,)
 lint-new: ## Findings on lines changed since LINT_BASE (origin/develop) — the gate view
 	$(call need-tool,LINT)
-	$(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
+	$(FENCE_GIT) $(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 
 vet: ## go vet the whole module
 	go vet ./...

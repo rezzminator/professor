@@ -189,7 +189,10 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 		setExternal("disabled")
 	case !harvesterEnabled:
 		setExternal("off: external.enabled is true but harvester.enabled is false")
-		fmt.Fprintln(stderr, "pfm mcp serve: harvester external gateway NOT serving: external.enabled is true but harvester.enabled is false")
+		fmt.Fprintln(
+			stderr,
+			"pfm mcp serve: harvester external gateway NOT serving: external.enabled is true but harvester.enabled is false",
+		)
 	default:
 		stopExternal, err := startHarvesterExternal(runtime, stderr, setExternal)
 		if err != nil {

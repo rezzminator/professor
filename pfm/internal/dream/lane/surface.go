@@ -41,7 +41,7 @@ type surfaceRow struct {
 
 // RenderSurfaces creates the global STM index and each lane-only agent index.
 // oldSTM is content, not a path, so callers retain control of all writes.
-func RenderSurfaces(mapsDirectory string, oldSTM string, membership artifact.LaneMembership) (RenderedSurfaces, error) {
+func RenderSurfaces(mapsDirectory, oldSTM string, membership artifact.LaneMembership) (RenderedSurfaces, error) {
 	if err := validateMembership(membership); err != nil {
 		return RenderedSurfaces{}, err
 	}
@@ -71,7 +71,11 @@ func RenderSurfaces(mapsDirectory string, oldSTM string, membership artifact.Lan
 			return RenderedSurfaces{}, fmt.Errorf("map carries no lane row: %s", mapFile)
 		}
 		if previous, duplicate := titles[title]; duplicate {
-			return RenderedSurfaces{}, fmt.Errorf("duplicate map titles prevent deterministic surface generation: %s and %s", previous, mapFile)
+			return RenderedSurfaces{}, fmt.Errorf(
+				"duplicate map titles prevent deterministic surface generation: %s and %s",
+				previous,
+				mapFile,
+			)
 		}
 		titles[title] = mapFile
 		// The lesson is what an agent reads in context; the title is only a

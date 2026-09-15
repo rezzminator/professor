@@ -18,7 +18,9 @@ import (
 // it — the shape a host has right before the candidate's own `install --yes`
 // runs the v0.74.0 migration (config.json -> pfm.config.json) inside the
 // candidate process only.
-func updateConfigMigrationTestRuntime(t *testing.T) (runtime commandRuntime, repo, legacyPath, migratedPath string, originalContent []byte) {
+func updateConfigMigrationTestRuntime(
+	t *testing.T,
+) (runtime commandRuntime, repo, legacyPath, migratedPath string, originalContent []byte) {
 	t.Helper()
 	runtime, repo = updateRollbackTestRuntime(t)
 	configDir := filepath.Join(runtime.Paths.Home, ".config", "pfm")
@@ -49,7 +51,7 @@ func TestUpdateCandidateDoctorReceivesTheMigratedConfigPath(t *testing.T) {
 	t.Cleanup(func() {
 		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
 	})
-	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
@@ -57,7 +59,7 @@ func TestUpdateCandidateDoctorReceivesTheMigratedConfigPath(t *testing.T) {
 		return os.Rename(legacyPath, migratedPath)
 	}
 	var capturedConfigPath string
-	updateRunDoctor = func(_ context.Context, _ string, _ commandRuntime, configPath string, _ bool, _ io.Writer, _ io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(_ context.Context, _ string, _ commandRuntime, configPath string, _ bool, _, _ io.Writer) (doctorOutcome, error) {
 		capturedConfigPath = configPath
 		return doctorOutcome{}, nil
 	}
@@ -74,7 +76,12 @@ func TestUpdateCandidateDoctorReceivesTheMigratedConfigPath(t *testing.T) {
 		t.Fatalf("stdout=%q, want the config-migrated note", stdout.String())
 	}
 	if got, err := os.ReadFile(migratedPath); err != nil || !bytes.Equal(got, originalContent) {
-		t.Fatalf("migrated config=%q err=%v, want the original bytes %q untouched by this test", got, err, originalContent)
+		t.Fatalf(
+			"migrated config=%q err=%v, want the original bytes %q untouched by this test",
+			got,
+			err,
+			originalContent,
+		)
 	}
 }
 
@@ -95,7 +102,7 @@ func TestUpdateRollbackRestoresTheConfigFilesTheMigrationRenamed(t *testing.T) {
 		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
-	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
@@ -143,7 +150,7 @@ func TestUpdateRollbackInstallSeesAnExistingConfigPath(t *testing.T) {
 		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
 		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
 	})
-	updateBuildCandidate = func(_ context.Context, _ string, _ string, output string) error {
+	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
 	}
 	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
@@ -154,7 +161,7 @@ func TestUpdateRollbackInstallSeesAnExistingConfigPath(t *testing.T) {
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
 	rollbackInstallSawConfig := false
-	updateRollbackInstall = func(_ context.Context, _, _, _ string, rollbackRuntime commandRuntime, _ bool, _ io.Writer, _ io.Writer) error {
+	updateRollbackInstall = func(_ context.Context, _, _, _ string, rollbackRuntime commandRuntime, _ bool, _, _ io.Writer) error {
 		if _, err := os.Stat(rollbackRuntime.Config.Path); err == nil {
 			rollbackInstallSawConfig = true
 		}
@@ -203,7 +210,11 @@ func TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError(t *testing.T) {
 
 	path, note, err := updateConfigPathAfterInstall(runtime)
 	if err == nil {
-		t.Fatalf("updateConfigPathAfterInstall(...) = (%q, %q, nil), want a non-nil error for a non-ENOENT stat failure", path, note)
+		t.Fatalf(
+			"updateConfigPathAfterInstall(...) = (%q, %q, nil), want a non-nil error for a non-ENOENT stat failure",
+			path,
+			note,
+		)
 	}
 	if !strings.Contains(err.Error(), original) {
 		t.Fatalf("error=%v, want it to name the path %q", err, original)

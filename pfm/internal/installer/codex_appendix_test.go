@@ -21,14 +21,18 @@ func TestCodexAppendixPreservesSharedHookSymlinks(t *testing.T) {
 	writeFixture(t, shared, `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`)
 	homes := []string{filepath.Join(home, "account-a"), filepath.Join(home, "account-b")}
 	for _, account := range homes {
-		if err := os.MkdirAll(account, 0700); err != nil {
+		if err := os.MkdirAll(account, 0o700); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.Symlink(shared, filepath.Join(account, "hooks.json")); err != nil {
 			t.Fatal(err)
 		}
 	}
-	installer := engine{options: Options{Mode: ModeApply, Home: home, CodexHomes: homes, Stdout: io.Discard}, apply: true, managedRoot: filepath.Join(home, "install")}
+	installer := engine{
+		options:     Options{Mode: ModeApply, Home: home, CodexHomes: homes, Stdout: io.Discard},
+		apply:       true,
+		managedRoot: filepath.Join(home, "install"),
+	}
 	if err := installer.wireCodexHooks(); err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +42,12 @@ func TestCodexAppendixPreservesSharedHookSymlinks(t *testing.T) {
 		if err != nil || info.Mode()&os.ModeSymlink == 0 {
 			t.Fatalf("symlink replaced: %s", path)
 		}
-		if count := hookCommandCount(t, readFixture(t, path), "SessionStart", codexHookTemplate(home).Command); count != 1 {
+		if count := hookCommandCount(
+			t,
+			readFixture(t, path),
+			"SessionStart",
+			codexHookTemplate(home).Command,
+		); count != 1 {
 			t.Fatalf("account appendix count=%d", count)
 		}
 	}
@@ -58,14 +67,18 @@ func TestCodexAppendixPreservesSharedHookSymlinks(t *testing.T) {
 func TestCodexAppendixRefusesDanglingHookSymlink(t *testing.T) {
 	home := t.TempDir()
 	account := filepath.Join(home, "account")
-	if err := os.MkdirAll(account, 0700); err != nil {
+	if err := os.MkdirAll(account, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(account, "hooks.json")
 	if err := os.Symlink(filepath.Join(home, "missing"), path); err != nil {
 		t.Fatal(err)
 	}
-	installer := engine{options: Options{Mode: ModeApply, Home: home, CodexHomes: []string{account}, Stdout: io.Discard}, apply: true, managedRoot: filepath.Join(home, "install")}
+	installer := engine{
+		options:     Options{Mode: ModeApply, Home: home, CodexHomes: []string{account}, Stdout: io.Discard},
+		apply:       true,
+		managedRoot: filepath.Join(home, "install"),
+	}
 	if err := installer.wireCodexHooks(); err == nil {
 		t.Fatal("dangling link accepted")
 	}

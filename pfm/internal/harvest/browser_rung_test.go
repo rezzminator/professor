@@ -129,7 +129,8 @@ func TestDisabledBrowserRungNamesEnablePath(t *testing.T) {
 	spy := &browserSpyConverter{err: errors.New("must never run")}
 	h := wallHarvester(t, spy, nil)
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if !strings.Contains(result.Error, "DISABLED") || !strings.Contains(result.Error, "fetch.browser=true in harvester.config.json") {
+	if !strings.Contains(result.Error, "DISABLED") ||
+		!strings.Contains(result.Error, "fetch.browser=true in harvester.config.json") {
 		t.Fatalf("disabled state not named with enable path: %q", result.Error)
 	}
 }
@@ -140,12 +141,15 @@ func TestDisabledBrowserRungNamesEnablePath(t *testing.T) {
 func TestBrowserChallengePageIsNeverLaunderedIntoContent(t *testing.T) {
 	blockPage := cloudflareBlockPageFixture()
 	if len(blockPage) <= 4000 {
-		t.Fatalf("fixture must reproduce the live page's bulk (its h1 is a STRONG marker matched at any length; the length is what proves a longer-than-earlier-rungs challenge cannot slip through as content), got %d bytes", len(blockPage))
+		t.Fatalf(
+			"fixture must reproduce the live page's bulk (its h1 is a STRONG marker matched at any length; the length is what proves a longer-than-earlier-rungs challenge cannot slip through as content), got %d bytes",
+			len(blockPage),
+		)
 	}
 	spy := &browserSpyConverter{
 		html:   blockPage,
 		status: http.StatusForbidden,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "Sorry, you have been blocked") {
 				return strings.Repeat("laundered text ", 2000), nil
 			}
@@ -173,11 +177,14 @@ func TestBrowserChallengePageIsNeverLaunderedIntoContent(t *testing.T) {
 // rendered HTML that converts longer than everything before it wins at the
 // browser rung and is cached under method browser-chrome.
 func TestBrowserSuccessStoresAcceptedContent(t *testing.T) {
-	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat("real rendered evidence ", 100) + "</body></html>"
+	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat(
+		"real rendered evidence ",
+		100,
+	) + "</body></html>"
 	spy := &browserSpyConverter{
 		html:   rendered,
 		status: http.StatusOK,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "Recovered article") {
 				return "# Recovered article\n\n" + strings.Repeat("real rendered evidence ", 100), nil
 			}
@@ -231,7 +238,7 @@ func TestBrowserDetectedChallengeIsReported(t *testing.T) {
 	spy := &browserSpyConverter{
 		html:   cloudflareBlockPageFixture(),
 		status: http.StatusForbidden,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "Sorry, you have been blocked") {
 				return strings.Repeat("laundered text ", 2000), nil
 			}
@@ -288,11 +295,14 @@ func TestBrowserPolicyDenialIsNotAnOutage(t *testing.T) {
 // wall and rendered the article, then the conversion step failed. The user
 // must hear "tool outage", never the definitive verdict that the wall won.
 func TestBrowserConverterOutageIsNamed(t *testing.T) {
-	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat("real rendered evidence ", 100) + "</body></html>"
+	rendered := "<html><body><h1>Recovered article</h1>" + strings.Repeat(
+		"real rendered evidence ",
+		100,
+	) + "</body></html>"
 	spy := &browserSpyConverter{
 		html:   rendered,
 		status: http.StatusOK,
-		convertFn: func(_ context.Context, _ string, _ string, _ []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, _ []byte) (string, error) {
 			return "", errors.New("conversion worker not provisioned")
 		},
 	}
@@ -315,7 +325,7 @@ func TestBrowserThinRenderIsNeverStored(t *testing.T) {
 	spy := &browserSpyConverter{
 		html:   rendered,
 		status: http.StatusOK,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "paywall") {
 				return strings.Repeat("subscribe ", 30), nil // ~300 chars: above zero, below the 500 floor
 			}
@@ -342,12 +352,14 @@ func TestJinaTransportFailureKeepsTheEarlierStatus(t *testing.T) {
 		return nil, fmt.Errorf("fixture connection reset")
 	})
 	h := mustNew(t, Options{
-		CacheDir:    t.TempDir(),
-		Client:      &http.Client{Transport: wall},
-		Chrome:      &http.Client{Transport: wall},
-		Jina:        &http.Client{Transport: dead},
-		OA:          nonChallengeTransport(),
-		Converter:   legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) { return "", nil }),
+		CacheDir: t.TempDir(),
+		Client:   &http.Client{Transport: wall},
+		Chrome:   &http.Client{Transport: wall},
+		Jina:     &http.Client{Transport: dead},
+		OA:       nonChallengeTransport(),
+		Converter: legacyConverterFunc(
+			func(context.Context, string, string, []byte) (string, error) { return "", nil },
+		),
 		BrowserRung: browserOff(),
 	})
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -361,7 +373,7 @@ func TestJinaTransportFailureKeepsTheEarlierStatus(t *testing.T) {
 func recoveredArticleSpy(render func(headless bool) (string, int, error)) *browserSpyConverter {
 	return &browserSpyConverter{
 		render: render,
-		convertFn: func(_ context.Context, _ string, _ string, body []byte) (string, error) {
+		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
 			if strings.Contains(string(body), "Recovered article") {
 				return "# Recovered article\n\n" + strings.Repeat("real rendered evidence ", 100), nil
 			}
@@ -418,7 +430,11 @@ func TestBrowserHeadedRetryFailureKeepsTheWallVerdict(t *testing.T) {
 	h := browserHarvester(t, spy)
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
 	if !result.Challenge || !strings.Contains(result.Error, "DID run against this wall") {
-		t.Fatalf("headed-launch failure erased the headless wall verdict: challenge=%v err=%q", result.Challenge, result.Error)
+		t.Fatalf(
+			"headed-launch failure erased the headless wall verdict: challenge=%v err=%q",
+			result.Challenge,
+			result.Error,
+		)
 	}
 	if strings.Contains(result.Error, "could NOT RUN") {
 		t.Fatalf("a completed headless attempt was misreported as an outage: %q", result.Error)

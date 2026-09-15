@@ -64,19 +64,33 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer faultDB.Close()
-				if _, err := faultDB.Exec(`CREATE TRIGGER reject_clear BEFORE INSERT ON hidden BEGIN SELECT RAISE(FAIL, 'clear write fault'); END`); err != nil {
+				if _, err := faultDB.Exec(
+					`CREATE TRIGGER reject_clear BEFORE INSERT ON hidden BEGIN SELECT RAISE(FAIL, 'clear write fault'); END`,
+				); err != nil {
 					t.Fatal(err)
 				}
 			}
 			var stderr bytes.Buffer
 			reconcile := func() {
-				fleet.ReconcileCodexPanes(ctx, database, gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}}, commandRuntime{Paths: resolved}, fleet.PrintWarn(&stderr))
+				fleet.ReconcileCodexPanes(
+					ctx,
+					database,
+					gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+					commandRuntime{Paths: resolved},
+					fleet.PrintWarn(&stderr),
+				)
 			}
 			reconcile()
 			if scenario != "stale-baseline" {
 				bound, found, err := manager.CodexPaneBinding(ctx, socket, "%0")
 				if err != nil || !found || bound != oldID {
-					t.Fatalf("failed retirement lost retry: binding=%q found=%v err=%v warnings=%s", bound, found, err, stderr.String())
+					t.Fatalf(
+						"failed retirement lost retry: binding=%q found=%v err=%v warnings=%s",
+						bound,
+						found,
+						err,
+						stderr.String(),
+					)
 				}
 				if stderr.Len() == 0 {
 					t.Fatal("failed retirement was silent")
@@ -102,7 +116,14 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 			}
 			killed, found, err := database.Killed(ctx, oldID)
 			if err != nil || !found || killed.BaselinePrompts == nil || *killed.BaselinePrompts != lineage.PromptCount {
-				t.Fatalf("index catch-up undid clear: kill=%#v prompts=%d found=%v err=%v warnings=%s", killed, lineage.PromptCount, found, err, stderr.String())
+				t.Fatalf(
+					"index catch-up undid clear: kill=%#v prompts=%d found=%v err=%v warnings=%s",
+					killed,
+					lineage.PromptCount,
+					found,
+					err,
+					stderr.String(),
+				)
 			}
 			bound, found, err := manager.CodexPaneBinding(ctx, socket, "%0")
 			if err != nil || !found || bound != newID {
@@ -201,7 +222,9 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 		t.Fatal(err)
 	}
 	defer faultDB.Close()
-	if _, err := faultDB.Exec(`CREATE TRIGGER reject_clear_retry BEFORE INSERT ON hidden BEGIN SELECT RAISE(FAIL, 'clear retry fault'); END`); err != nil {
+	if _, err := faultDB.Exec(
+		`CREATE TRIGGER reject_clear_retry BEFORE INSERT ON hidden BEGIN SELECT RAISE(FAIL, 'clear retry fault'); END`,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -216,7 +239,11 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 				t.Fatalf("stream closed before the second binding warning: %s", stderr.String())
 			}
 		case <-deadline:
-			t.Fatalf("parked probe retried binding failure fewer than twice within %s: warnings=%q", bound, stderr.String())
+			t.Fatalf(
+				"parked probe retried binding failure fewer than twice within %s: warnings=%q",
+				bound,
+				stderr.String(),
+			)
 		}
 	}
 }
@@ -272,7 +299,16 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	appendCodexClearPrompt(t, current.Path)
 	// Use the fixture's other indexed thread as the new bare identity. This
 	// exercises real tmux capture without touching the picker's activity clock.
-	command := exec.Command("tmux", "-L", socket, "send-keys", "-t", "%0", "-l", "\n  "+oldID+" · /work/example · Full Access")
+	command := exec.Command(
+		"tmux",
+		"-L",
+		socket,
+		"send-keys",
+		"-t",
+		"%0",
+		"-l",
+		"\n  "+oldID+" · /work/example · Full Access",
+	)
 	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+filepath.Dir(resolved.TmuxDir))
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("change fixture identity: %v: %s", err, output)
@@ -310,7 +346,9 @@ func appendCodexClearPrompt(t *testing.T, path string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, writeErr := file.WriteString(`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}}` + "\n")
+	_, writeErr := file.WriteString(
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"next"}]}}` + "\n",
+	)
 	closeErr := file.Close()
 	if writeErr != nil {
 		t.Fatal(writeErr)

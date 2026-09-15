@@ -149,7 +149,11 @@ func TestValidateStageRejectsOutsideSymlinkWrongModeAndBadLeaves(t *testing.T) {
 
 func TestPrivateDirectoryOwnerCheckFailsClosed(t *testing.T) {
 	directory := t.TempDir()
-	if err := validatePrivateDirectory(directory, os.Getuid()+1); err == nil || !strings.Contains(err.Error(), "owner") {
+	if err := validatePrivateDirectory(
+		directory,
+		os.Getuid()+1,
+	); err == nil ||
+		!strings.Contains(err.Error(), "owner") {
 		t.Fatalf("validatePrivateDirectory(wrong uid) error = %v", err)
 	}
 }

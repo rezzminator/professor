@@ -16,8 +16,10 @@ var namedKeys = map[string]bool{
 	"NPage": true, "PgUp": true, "PgDn": true,
 }
 
-var functionKey = regexp.MustCompile(`^F([1-9]|1[0-2])$`)
-var modifier = regexp.MustCompile(`^([CMS]-)+`)
+var (
+	functionKey = regexp.MustCompile(`^F([1-9]|1[0-2])$`)
+	modifier    = regexp.MustCompile(`^([CMS]-)+`)
+)
 
 // Valid reports whether tmux resolves key as a keypress rather than literal
 // text. Unknown names must be rejected by callers before SendKey is invoked.

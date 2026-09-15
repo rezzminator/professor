@@ -84,13 +84,18 @@ func TestInstallClaudeSettingsLeafSymlinkSurvivesLifecycle(t *testing.T) {
 	target := filepath.Join(home, "personal-settings.json")
 	link := filepath.Join(config, "settings.json")
 	writeFixture(t, target, `{"private":"keep"}`)
-	if err := os.MkdirAll(config, 0700); err != nil {
+	if err := os.MkdirAll(config, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	e := engine{options: Options{Home: home, ConfigDirs: []string{config}, CodexHomes: []string{}, Stdout: io.Discard}, managedRoot: filepath.Join(home, "managed"), apply: true, stamp: "fixture"}
+	e := engine{
+		options:     Options{Home: home, ConfigDirs: []string{config}, CodexHomes: []string{}, Stdout: io.Discard},
+		managedRoot: filepath.Join(home, "managed"),
+		apply:       true,
+		stamp:       "fixture",
+	}
 	for _, mode := range []Mode{ModeApply, ModeUninstall} {
 		e.options.Mode = mode
 		if err := e.wireSettings(); err != nil {

@@ -25,7 +25,9 @@ func TestClaudeHookPreservesOrderedToolInputAndAnnotatesDrift(t *testing.T) {
 	hookGit(t, repository, "add", "anchor.txt")
 	hookGit(t, repository, "commit", "-m", "move anchor")
 
-	input := []byte(`{"tool_input":{"z_unknown":{"nested":true},"subagent_type":"Explore","prompt":"original","a_unknown":7}}`)
+	input := []byte(
+		`{"tool_input":{"z_unknown":{"nested":true},"subagent_type":"Explore","prompt":"original","a_unknown":7}}`,
+	)
 	got, err := Hook(HookRequest{Kind: HookAgentInject, Input: input, ProjectDirectory: repository})
 	if err != nil {
 		t.Fatalf("Hook() error = %v", err)
@@ -34,7 +36,8 @@ func TestClaudeHookPreservesOrderedToolInputAndAnnotatesDrift(t *testing.T) {
 	if !strings.HasPrefix(string(got), wantPrefix) || !strings.Contains(string(got), `,"a_unknown":7}}}`) {
 		t.Fatalf("ordered hook output = %s", got)
 	}
-	if !strings.Contains(string(got), `⚠ DRIFTED (1/2 anchors moved: anchor.txt)`) || !strings.HasSuffix(string(got), "\n") {
+	if !strings.Contains(string(got), `⚠ DRIFTED (1/2 anchors moved: anchor.txt)`) ||
+		!strings.HasSuffix(string(got), "\n") {
 		t.Fatalf("Claude hook lacks drift/newline: %s", got)
 	}
 	var decoded map[string]any
@@ -81,7 +84,9 @@ func TestHookNativeWireBytesArePinned(t *testing.T) {
 	claude, err := Hook(HookRequest{
 		Kind:             HookAgentInject,
 		ProjectDirectory: repository,
-		Input:            []byte(`{"session_id":"ignored","tool_input":{"subagent_type":"qa","prompt":"do it","description":"kept"}}`),
+		Input: []byte(
+			`{"session_id":"ignored","tool_input":{"subagent_type":"qa","prompt":"do it","description":"kept"}}`,
+		),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -110,8 +115,18 @@ func TestClaudeHookFallsBackToLegacyExplorerIndex(t *testing.T) {
 	writeHookFile(t, filepath.Join(organRoot, "explorer-index.md"), "- Legacy -> maps/legacy.md\n")
 	firstHash := hookGit(t, repository, "rev-parse", "HEAD:anchor.txt")[:12]
 	secondHash := hookGit(t, repository, "rev-parse", "HEAD:stable.txt")[:12]
-	writeHookFile(t, filepath.Join(organRoot, "maps", "legacy.md"), strings.Replace(hookMap(firstHash, secondHash), "# Subject", "# Legacy", 1))
-	got, err := Hook(HookRequest{Kind: HookAgentInject, ProjectDirectory: repository, Input: []byte(`{"tool_input":{"subagent_type":"Explore","prompt":"go"}}`)})
+	writeHookFile(
+		t,
+		filepath.Join(organRoot, "maps", "legacy.md"),
+		strings.Replace(hookMap(firstHash, secondHash), "# Subject", "# Legacy", 1),
+	)
+	got, err := Hook(
+		HookRequest{
+			Kind:             HookAgentInject,
+			ProjectDirectory: repository,
+			Input:            []byte(`{"tool_input":{"subagent_type":"Explore","prompt":"go"}}`),
+		},
+	)
 	if err != nil || !strings.Contains(string(got), "Legacy -> maps/legacy.md") {
 		t.Fatalf("legacy fallback = %s, %v", got, err)
 	}
@@ -124,10 +139,25 @@ func TestClaudeHookPrefersGeneratedExplorerSurfaceOverLegacyFallback(t *testing.
 	writeHookFile(t, filepath.Join(organRoot, "explorer-index.md"), "- Legacy -> maps/legacy.md\n")
 	firstHash := hookGit(t, repository, "rev-parse", "HEAD:anchor.txt")[:12]
 	secondHash := hookGit(t, repository, "rev-parse", "HEAD:stable.txt")[:12]
-	writeHookFile(t, filepath.Join(organRoot, "maps", "current.md"), strings.Replace(hookMap(firstHash, secondHash), "# Subject", "# Current", 1))
-	writeHookFile(t, filepath.Join(organRoot, "maps", "legacy.md"), strings.Replace(hookMap(firstHash, secondHash), "# Subject", "# Legacy", 1))
-	got, err := Hook(HookRequest{Kind: HookAgentInject, ProjectDirectory: repository, Input: []byte(`{"tool_input":{"subagent_type":"Explore","prompt":"go"}}`)})
-	if err != nil || !strings.Contains(string(got), "Current -> maps/current.md") || strings.Contains(string(got), "Legacy ->") {
+	writeHookFile(
+		t,
+		filepath.Join(organRoot, "maps", "current.md"),
+		strings.Replace(hookMap(firstHash, secondHash), "# Subject", "# Current", 1),
+	)
+	writeHookFile(
+		t,
+		filepath.Join(organRoot, "maps", "legacy.md"),
+		strings.Replace(hookMap(firstHash, secondHash), "# Subject", "# Legacy", 1),
+	)
+	got, err := Hook(
+		HookRequest{
+			Kind:             HookAgentInject,
+			ProjectDirectory: repository,
+			Input:            []byte(`{"tool_input":{"subagent_type":"Explore","prompt":"go"}}`),
+		},
+	)
+	if err != nil || !strings.Contains(string(got), "Current -> maps/current.md") ||
+		strings.Contains(string(got), "Legacy ->") {
 		t.Fatalf("generated surface preference = %s, %v", got, err)
 	}
 }
@@ -135,7 +165,9 @@ func TestClaudeHookPrefersGeneratedExplorerSurfaceOverLegacyFallback(t *testing.
 func TestMalformedNonemptySurfaceFailsLoudly(t *testing.T) {
 	repository := hookRepository(t)
 	writeHookFile(t, filepath.Join(repository, ".professor", "stm", "agents", "qa.md"), "not a surface\n")
-	_, err := Hook(HookRequest{Kind: HookCodexSubagentInject, Input: []byte(`{"agent_type":"qa","cwd":"` + repository + `"}`)})
+	_, err := Hook(
+		HookRequest{Kind: HookCodexSubagentInject, Input: []byte(`{"agent_type":"qa","cwd":"` + repository + `"}`)},
+	)
 	if err == nil || !strings.Contains(err.Error(), "validate lane surface") {
 		t.Fatalf("malformed surface error = %v", err)
 	}
@@ -373,7 +405,9 @@ func TestHooksStayRepositoryHermeticAndStripWorktree(t *testing.T) {
 	worktree := filepath.Join(second, ".worktrees", "topic")
 	os.MkdirAll(filepath.Dir(worktree), 0o700)
 	hookGit(t, second, "worktree", "add", "-q", "-b", "hook-topic", worktree)
-	got, err := Hook(HookRequest{Kind: HookCodexSubagentInject, Input: []byte(`{"agent_type":"qa","cwd":"` + worktree + `"}`)})
+	got, err := Hook(
+		HookRequest{Kind: HookCodexSubagentInject, Input: []byte(`{"agent_type":"qa","cwd":"` + worktree + `"}`)},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,8 +467,14 @@ func TestNudgePrefersOrganLocalFailureAndEmitsAtMostOneLine(t *testing.T) {
 	organRoot := filepath.Join(repository, ".professor", "stm")
 	marker := nightFailurePath(organRoot)
 	writeHookFile(t, marker, "Phase: PREFLIGHT-FAILED\nReason: fixture\nPath: /fixture\n")
-	writeHookFile(t, filepath.Join(organRoot, "dreamer", "2026-08-01.md"), "END-OF-SWEEP\nApplied: 2026-08-01T00:00:00Z\n")
-	got, err := Hook(HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)})
+	writeHookFile(
+		t,
+		filepath.Join(organRoot, "dreamer", "2026-08-01.md"),
+		"END-OF-SWEEP\nApplied: 2026-08-01T00:00:00Z\n",
+	)
+	got, err := Hook(
+		HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -519,9 +559,19 @@ func TestMalformedNightFailureSurfacesPersistedNudgeFailureOnNextPrompt(t *testi
 func TestNudgeStaleLineUsesNewestCompletedSweep(t *testing.T) {
 	repository := hookRepository(t)
 	organRoot := filepath.Join(repository, ".professor", "stm")
-	writeHookFile(t, filepath.Join(organRoot, "dreamer", "2026-08-10.md"), "END-OF-SWEEP\nApplied: 2026-08-10T00:00:00Z\n")
-	writeHookFile(t, filepath.Join(organRoot, "dreamer", "2026-08-10-2.md"), "END-OF-SWEEP\nApplied: 2026-08-10T12:00:00Z\n")
-	got, err := Hook(HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: time.Date(2026, 8, 13, 12, 0, 1, 0, time.UTC)})
+	writeHookFile(
+		t,
+		filepath.Join(organRoot, "dreamer", "2026-08-10.md"),
+		"END-OF-SWEEP\nApplied: 2026-08-10T00:00:00Z\n",
+	)
+	writeHookFile(
+		t,
+		filepath.Join(organRoot, "dreamer", "2026-08-10-2.md"),
+		"END-OF-SWEEP\nApplied: 2026-08-10T12:00:00Z\n",
+	)
+	got, err := Hook(
+		HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: time.Date(2026, 8, 13, 12, 0, 1, 0, time.UTC)},
+	)
 	if err != nil || string(got) != "🌙 dreamer-night stale — newest applied sweep is 3d old; run /dreamer\n" {
 		t.Fatalf("stale nudge = %q, %v", got, err)
 	}
@@ -537,8 +587,14 @@ func TestNudgeIsSilentWithoutOrganAndForRecentHealthySweep(t *testing.T) {
 		t.Fatalf("nudge without organ = %q, %v", got, err)
 	}
 	repository := hookRepository(t)
-	writeHookFile(t, filepath.Join(repository, ".professor", "stm", "dreamer", "2026-08-13.md"), "END-OF-SWEEP\nApplied: 2026-08-13T00:00:00Z\n")
-	got, err = Hook(HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)})
+	writeHookFile(
+		t,
+		filepath.Join(repository, ".professor", "stm", "dreamer", "2026-08-13.md"),
+		"END-OF-SWEEP\nApplied: 2026-08-13T00:00:00Z\n",
+	)
+	got, err = Hook(
+		HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)},
+	)
 	if err != nil || len(got) != 0 {
 		t.Fatalf("recent healthy nudge = %q, %v", got, err)
 	}
@@ -547,11 +603,17 @@ func TestNudgeIsSilentWithoutOrganAndForRecentHealthySweep(t *testing.T) {
 func TestNudgeDoesNotDependOnGitBeingHealthy(t *testing.T) {
 	repository := hookRepository(t)
 	organRoot := filepath.Join(repository, ".professor", "stm")
-	writeHookFile(t, filepath.Join(organRoot, "dreamer", "2026-08-01.md"), "END-OF-SWEEP\nApplied: 2026-08-01T00:00:00Z\n")
+	writeHookFile(
+		t,
+		filepath.Join(organRoot, "dreamer", "2026-08-01.md"),
+		"END-OF-SWEEP\nApplied: 2026-08-01T00:00:00Z\n",
+	)
 	if err := os.Rename(filepath.Join(repository, ".git"), filepath.Join(repository, ".git.disabled")); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Hook(HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)})
+	got, err := Hook(
+		HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)},
+	)
 	if err != nil || string(got) != "🌙 dreamer-night stale — newest applied sweep is 12d old; run /dreamer\n" {
 		t.Fatalf("nudge with broken Git = %q, %v", got, err)
 	}
@@ -571,7 +633,11 @@ func hookRepository(t *testing.T) string {
 	}
 	writeHookFile(t, filepath.Join(repository, ".professor", "stm", "stm.md"), "# fixture\n")
 	// The lane declares the agent types it serves; Explore reads the tracer lane.
-	writeHookFile(t, filepath.Join(repository, ".professor", "stm", "lanes", "tracer.md"), "Serves: tracer, Explore\n\nfixture profile\n")
+	writeHookFile(
+		t,
+		filepath.Join(repository, ".professor", "stm", "lanes", "tracer.md"),
+		"Serves: tracer, Explore\n\nfixture profile\n",
+	)
 	hookGit(t, repository, "add", ".")
 	hookGit(t, repository, "commit", "-q", "-m", "fixture")
 	return repository
@@ -636,7 +702,7 @@ func hookMapSnapshot(t *testing.T, directory string) string {
 	return snapshot.String()
 }
 
-func legacyHookMap(title, lesson, anchor string, blob string) string {
+func legacyHookMap(title, lesson, anchor, blob string) string {
 	return "# " + title + "\n\n## Lesson\n\n" + lesson +
 		"\n\n## Anchors\n\n- `" + anchor + "` — blob `" + blob + "`\n"
 }

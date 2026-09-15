@@ -13,7 +13,7 @@ func readCompleteLines(
 	path string,
 	start int64,
 	handle func([]byte),
-) (parsedOffset int64, bytesRead int64, err error) {
+) (parsedOffset, bytesRead int64, err error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return start, 0, fmt.Errorf("open %q: %w", path, err)

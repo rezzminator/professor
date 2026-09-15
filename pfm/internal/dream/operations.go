@@ -131,7 +131,9 @@ func RenderMigrationOutcomes(result MigrationResult) string {
 	return output.String()
 }
 
-var legacyAnchorPattern = regexp.MustCompile("^[-] `([^`]+)` — `git log -1`: `[0-9a-f]{12}` \\([0-9]{4}-[0-9]{2}-[0-9]{2}\\); (blob|tree) `([0-9a-f]{12})`$")
+var legacyAnchorPattern = regexp.MustCompile(
+	"^[-] `([^`]+)` — `git log -1`: `[0-9a-f]{12}` \\([0-9]{4}-[0-9]{2}-[0-9]{2}\\); (blob|tree) `([0-9a-f]{12})`$",
+)
 
 // MigrateAnchors performs the legacy anchor translation textually. It keeps
 // the recorded object type and hash, so migration cannot erase existing drift
@@ -188,7 +190,10 @@ func MigrateAnchors(organRoot string) (result MigrationResult, returnErr error) 
 				Outcome: MigrationRejected,
 				Reason:  "inspect map: " + err.Error(),
 			})
-			preflightErrors = append(preflightErrors, fmt.Errorf("migration outcome REJECTED for %s: inspect map: %w", mapPath, err))
+			preflightErrors = append(
+				preflightErrors,
+				fmt.Errorf("migration outcome REJECTED for %s: inspect map: %w", mapPath, err),
+			)
 			continue
 		}
 		if fileInfo.Mode()&os.ModeSymlink != 0 || !fileInfo.Mode().IsRegular() {
@@ -197,7 +202,10 @@ func MigrateAnchors(organRoot string) (result MigrationResult, returnErr error) 
 				Outcome: MigrationRejected,
 				Reason:  "map is not a regular non-symlink file",
 			})
-			preflightErrors = append(preflightErrors, fmt.Errorf("migration outcome REJECTED for %s: map is not a regular non-symlink file", mapPath))
+			preflightErrors = append(
+				preflightErrors,
+				fmt.Errorf("migration outcome REJECTED for %s: map is not a regular non-symlink file", mapPath),
+			)
 			continue
 		}
 		raw, err := os.ReadFile(path)
@@ -207,7 +215,10 @@ func MigrateAnchors(organRoot string) (result MigrationResult, returnErr error) 
 				Outcome: MigrationRejected,
 				Reason:  "read map: " + err.Error(),
 			})
-			preflightErrors = append(preflightErrors, fmt.Errorf("migration outcome REJECTED for %s: read map: %w", mapPath, err))
+			preflightErrors = append(
+				preflightErrors,
+				fmt.Errorf("migration outcome REJECTED for %s: read map: %w", mapPath, err),
+			)
 			continue
 		}
 		rows := strings.Split(string(raw), "\n")
@@ -227,7 +238,10 @@ func MigrateAnchors(organRoot string) (result MigrationResult, returnErr error) 
 				Outcome: MigrationRejected,
 				Reason:  err.Error(),
 			})
-			preflightErrors = append(preflightErrors, fmt.Errorf("migration outcome REJECTED for %s: migrated map does not parse: %w", mapPath, err))
+			preflightErrors = append(
+				preflightErrors,
+				fmt.Errorf("migration outcome REJECTED for %s: migrated map does not parse: %w", mapPath, err),
+			)
 			continue
 		}
 		if translated > 0 {
@@ -261,7 +275,16 @@ func MigrateAnchors(organRoot string) (result MigrationResult, returnErr error) 
 			result.Files[candidate.outcome].Outcome = MigrationRejected
 			result.Files[candidate.outcome].Reason = "atomic replacement failed"
 			markMigrationNotWritten(&result, "migration aborted during atomic replacement")
-			return result, errors.Join(append([]error{fmt.Errorf("migration outcome REJECTED for %s: replace migrated map: %w", result.Files[candidate.outcome].MapPath, err)}, rollbackErrors...)...)
+			return result, errors.Join(
+				append(
+					[]error{
+						fmt.Errorf(
+							"migration outcome REJECTED for %s: replace migrated map: %w",
+							result.Files[candidate.outcome].MapPath,
+							err,
+						),
+					},
+					rollbackErrors...)...)
 		}
 		result.Files[candidate.outcome].Outcome = MigrationRewritten
 		result.Files[candidate.outcome].Reason = ""

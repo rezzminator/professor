@@ -32,9 +32,33 @@ func TestBuildCosmosResolvesParticipantsAndAggregatesEdges(t *testing.T) {
 		{Kind: LiveClaude, ID: "quiet-id", Name: "Quiet", Socket: "cc-quiet", PaneID: "%4", ActivityNS: 45},
 	}
 	events := []shared.CommsEvent{
-		{AtNS: 10, Kind: shared.KindInject, SenderUUID: "alpha-id", SenderLabel: "stale alpha", Target: "Beta", ReceiverSocket: "cx-beta", ReceiverPane: "%2", Message: "first"},
-		{AtNS: 20, Kind: shared.KindInject, SenderSession: "alpha-id", Target: "Beta", ReceiverSocket: "cx-beta", ReceiverPane: "%2", Message: "second"},
-		{AtNS: 40, Kind: shared.KindSpawn, SenderSession: "beta-id", Target: "Child", ReceiverSocket: "cc-child", Message: "initial prompt"},
+		{
+			AtNS:           10,
+			Kind:           shared.KindInject,
+			SenderUUID:     "alpha-id",
+			SenderLabel:    "stale alpha",
+			Target:         "Beta",
+			ReceiverSocket: "cx-beta",
+			ReceiverPane:   "%2",
+			Message:        "first",
+		},
+		{
+			AtNS:           20,
+			Kind:           shared.KindInject,
+			SenderSession:  "alpha-id",
+			Target:         "Beta",
+			ReceiverSocket: "cx-beta",
+			ReceiverPane:   "%2",
+			Message:        "second",
+		},
+		{
+			AtNS:           40,
+			Kind:           shared.KindSpawn,
+			SenderSession:  "beta-id",
+			Target:         "Child",
+			ReceiverSocket: "cc-child",
+			Message:        "initial prompt",
+		},
 	}
 
 	graph := BuildCosmos(rows, events, 100, true)
@@ -42,17 +66,52 @@ func TestBuildCosmosResolvesParticipantsAndAggregatesEdges(t *testing.T) {
 		t.Fatalf("BuildCosmos() state = err %q warnings %v", graph.Err, graph.Warnings)
 	}
 	wantNodes := []CosmosNode{
-		{Key: "chat:id:alpha-id", Label: resolve.Named("Alpha"), Engine: "cc", RowKey: "alpha-id", Live: true, LastNS: 20},
+		{
+			Key:    "chat:id:alpha-id",
+			Label:  resolve.Named("Alpha"),
+			Engine: "cc",
+			RowKey: "alpha-id",
+			Live:   true,
+			LastNS: 20,
+		},
 		{Key: "chat:id:beta-id", Label: resolve.Named("Beta"), Engine: "cx", RowKey: "beta-id", Live: true, LastNS: 40},
-		{Key: "chat:id:child-id", Label: resolve.Named("Child"), Engine: "cc", RowKey: "child-id", Live: true, LastNS: 40},
-		{Key: "chat:id:quiet-id", Label: resolve.Named("Quiet"), Engine: "cc", RowKey: "quiet-id", Live: true, LastNS: 45},
+		{
+			Key:    "chat:id:child-id",
+			Label:  resolve.Named("Child"),
+			Engine: "cc",
+			RowKey: "child-id",
+			Live:   true,
+			LastNS: 40,
+		},
+		{
+			Key:    "chat:id:quiet-id",
+			Label:  resolve.Named("Quiet"),
+			Engine: "cc",
+			RowKey: "quiet-id",
+			Live:   true,
+			LastNS: 45,
+		},
 	}
 	if !reflect.DeepEqual(graph.Nodes, wantNodes) {
 		t.Fatalf("nodes = %#v, want %#v", graph.Nodes, wantNodes)
 	}
 	wantEdges := []CosmosEdge{
-		{From: "chat:id:beta-id", To: "chat:id:child-id", Kind: shared.KindSpawn, Count: 1, LastNS: 40, LastMessage: "initial prompt"},
-		{From: "chat:id:alpha-id", To: "chat:id:beta-id", Kind: shared.KindInject, Count: 2, LastNS: 20, LastMessage: "second"},
+		{
+			From:        "chat:id:beta-id",
+			To:          "chat:id:child-id",
+			Kind:        shared.KindSpawn,
+			Count:       1,
+			LastNS:      40,
+			LastMessage: "initial prompt",
+		},
+		{
+			From:        "chat:id:alpha-id",
+			To:          "chat:id:beta-id",
+			Kind:        shared.KindInject,
+			Count:       2,
+			LastNS:      20,
+			LastMessage: "second",
+		},
 	}
 	if !reflect.DeepEqual(graph.Edges, wantEdges) {
 		t.Fatalf("edges = %#v, want %#v", graph.Edges, wantEdges)
@@ -69,12 +128,23 @@ func TestBuildCosmosResolvesParticipantsAndAggregatesEdges(t *testing.T) {
 func TestBuildCosmosSeedLiveSkipsNonLiveKilledAndBGRows(t *testing.T) {
 	rows := []Row{
 		{Kind: ResumeClaude, ID: "resumable-id", Name: "Resumable", ActivityNS: 5},
-		{Kind: LiveClaude, ID: "killed-id", Name: "KilledLive", Socket: "cc-killed", PaneID: "%1", Killed: true, ActivityNS: 5},
+		{
+			Kind:       LiveClaude,
+			ID:         "killed-id",
+			Name:       "KilledLive",
+			Socket:     "cc-killed",
+			PaneID:     "%1",
+			Killed:     true,
+			ActivityNS: 5,
+		},
 		{Kind: LiveClaude, ID: "bg-id", Name: "BGLive", Socket: "cc-bg", PaneID: "%2", BG: true, ActivityNS: 5},
 	}
 	graph := BuildCosmos(rows, nil, 100, true)
 	if len(graph.Nodes) != 0 {
-		t.Fatalf("nodes = %#v, want none: a resumable row, a killed live row, and a BG live row must none of them seed", graph.Nodes)
+		t.Fatalf(
+			"nodes = %#v, want none: a resumable row, a killed live row, and a BG live row must none of them seed",
+			graph.Nodes,
+		)
 	}
 }
 
@@ -104,7 +174,9 @@ func TestBuildCosmosSeedLiveFalseSeedsNothing(t *testing.T) {
 func TestBuildCosmosSeededRowMergesWithLaterEventOnSameRowKey(t *testing.T) {
 	t.Run("event newer than the seed wins", func(t *testing.T) {
 		rows := []Row{{Kind: LiveClaude, ID: "dual-id", Name: "Dual", Socket: "cc-dual", PaneID: "%1", ActivityNS: 10}}
-		events := []shared.CommsEvent{{AtNS: 50, Kind: shared.KindInject, SenderUUID: "dual-id", Target: "Someone", Message: "hi"}}
+		events := []shared.CommsEvent{
+			{AtNS: 50, Kind: shared.KindInject, SenderUUID: "dual-id", Target: "Someone", Message: "hi"},
+		}
 		graph := BuildCosmos(rows, events, 100, true)
 		matches := 0
 		for _, node := range graph.Nodes {
@@ -122,7 +194,9 @@ func TestBuildCosmosSeededRowMergesWithLaterEventOnSameRowKey(t *testing.T) {
 	})
 	t.Run("seed newer than the event wins", func(t *testing.T) {
 		rows := []Row{{Kind: LiveClaude, ID: "dual-id", Name: "Dual", Socket: "cc-dual", PaneID: "%1", ActivityNS: 80}}
-		events := []shared.CommsEvent{{AtNS: 30, Kind: shared.KindInject, SenderUUID: "dual-id", Target: "Someone", Message: "hi"}}
+		events := []shared.CommsEvent{
+			{AtNS: 30, Kind: shared.KindInject, SenderUUID: "dual-id", Target: "Someone", Message: "hi"},
+		}
 		graph := BuildCosmos(rows, events, 100, true)
 		matches := 0
 		for _, node := range graph.Nodes {
@@ -131,7 +205,10 @@ func TestBuildCosmosSeededRowMergesWithLaterEventOnSameRowKey(t *testing.T) {
 			}
 			matches++
 			if node.LastNS != 80 {
-				t.Fatalf("LastNS = %d, want the seed's ActivityNS 80 (newer than the event's AtNS 30 — touch never moves backward)", node.LastNS)
+				t.Fatalf(
+					"LastNS = %d, want the seed's ActivityNS 80 (newer than the event's AtNS 30 — touch never moves backward)",
+					node.LastNS,
+				)
 			}
 		}
 		if matches != 1 {
@@ -149,7 +226,17 @@ func TestBuildCosmosSeededRowMergesWithLaterEventOnSameRowKey(t *testing.T) {
 // builder.warm — the only thing that increments TrafficHour — is never
 // called by the seeding loop; only the event walk warms.
 func TestBuildCosmosSeedLiveStarsQuietProjectWithZeroTraffic(t *testing.T) {
-	rows := []Row{{Kind: LiveClaude, ID: "solo-id", Name: "Solo", Socket: "cc-solo", PaneID: "%1", Project: "solohome", ActivityNS: 10}}
+	rows := []Row{
+		{
+			Kind:       LiveClaude,
+			ID:         "solo-id",
+			Name:       "Solo",
+			Socket:     "cc-solo",
+			PaneID:     "%1",
+			Project:    "solohome",
+			ActivityNS: 10,
+		},
+	}
 	graph := BuildCosmos(rows, nil, 100, true)
 	star, ok := graph.Stars["solohome"]
 	if !ok {
@@ -281,7 +368,13 @@ func TestBuildCosmosDeadChatConvergesSpawnAndInjectOnOneGhostNode(t *testing.T) 
 // fallback fix above cannot be mistaken for a change to the live path.
 func TestBuildCosmosLiveChatStillYieldsOneNodeAcrossSpawnAndInject(t *testing.T) {
 	rows := []Row{
-		{Kind: LiveClaude, ID: "ghost-id", Name: "ghost", Socket: "/tmp/tmux-1000/cc-1787827285-1466858-781", PaneID: "%0"},
+		{
+			Kind:   LiveClaude,
+			ID:     "ghost-id",
+			Name:   "ghost",
+			Socket: "/tmp/tmux-1000/cc-1787827285-1466858-781",
+			PaneID: "%0",
+		},
 	}
 	events := []shared.CommsEvent{
 		{
@@ -333,7 +426,11 @@ func TestBuildCosmosDoesNotPruneDeadNodesByTime(t *testing.T) {
 	// changes nothing for replay here now.
 	replay := BuildCosmos(nil, events, int64(10*time.Hour), false)
 	if len(replay.Nodes) != 2 || len(replay.Edges) != 1 {
-		t.Fatalf("BuildCosmos(live=false) dropped a dead node or its edge by age: nodes=%#v edges=%#v", replay.Nodes, replay.Edges)
+		t.Fatalf(
+			"BuildCosmos(live=false) dropped a dead node or its edge by age: nodes=%#v edges=%#v",
+			replay.Nodes,
+			replay.Edges,
+		)
 	}
 	for _, node := range replay.Nodes {
 		if !node.Dead {
@@ -346,7 +443,11 @@ func TestBuildCosmosDoesNotPruneDeadNodesByTime(t *testing.T) {
 
 	live := BuildCosmos(nil, events, int64(10*time.Hour), true)
 	if len(live.Nodes) != 0 || len(live.Edges) != 0 {
-		t.Fatalf("BuildCosmos(live=true) kept a dead node or its edge from the SAME events: nodes=%#v edges=%#v", live.Nodes, live.Edges)
+		t.Fatalf(
+			"BuildCosmos(live=true) kept a dead node or its edge from the SAME events: nodes=%#v edges=%#v",
+			live.Nodes,
+			live.Edges,
+		)
 	}
 }
 
@@ -407,7 +508,9 @@ func TestBuildCosmosNoRowMatchIsPendingWithinGraceThenDead(t *testing.T) {
 			pending := BuildCosmos(nil, events, grace, mode.live)
 			node, found := nodeWithKey(pending, "chat:name:Newborn")
 			if !found {
-				t.Fatal("pending node missing from the graph entirely: both modes must show a node still inside its grace window")
+				t.Fatal(
+					"pending node missing from the graph entirely: both modes must show a node still inside its grace window",
+				)
 			}
 			if node.Dead {
 				t.Fatalf("node exactly at the grace boundary should still be PENDING: %#v", node)
@@ -442,8 +545,24 @@ func TestBuildCosmosNoRowMatchIsPendingWithinGraceThenDead(t *testing.T) {
 // the survivor's own home keeps its.
 func TestBuildCosmosLiveEdgeFilterDropsOnlyTheDeadEndAndItsStar(t *testing.T) {
 	rows := []Row{
-		{Kind: LiveClaude, ID: "alive-id", Name: "Alive", Socket: "cc-alive", PaneID: "%1", Project: "home", ActivityNS: 5},
-		{Kind: LiveClaude, ID: "dead-id", Name: "Dead", Socket: "cc-dead", PaneID: "%2", Project: "lonely", Killed: true},
+		{
+			Kind:       LiveClaude,
+			ID:         "alive-id",
+			Name:       "Alive",
+			Socket:     "cc-alive",
+			PaneID:     "%1",
+			Project:    "home",
+			ActivityNS: 5,
+		},
+		{
+			Kind:    LiveClaude,
+			ID:      "dead-id",
+			Name:    "Dead",
+			Socket:  "cc-dead",
+			PaneID:  "%2",
+			Project: "lonely",
+			Killed:  true,
+		},
 	}
 	events := []shared.CommsEvent{{
 		AtNS: 40, Kind: shared.KindInject, SenderUUID: "dead-id",
@@ -459,7 +578,10 @@ func TestBuildCosmosLiveEdgeFilterDropsOnlyTheDeadEndAndItsStar(t *testing.T) {
 		t.Fatalf("the surviving node was dropped along with the dead one: %#v", live.Nodes)
 	}
 	if alive.LastNS != 40 {
-		t.Fatalf("surviving node LastNS = %d, want 40: the event walk touches it before the drop pass runs, and the drop must not roll that touch back", alive.LastNS)
+		t.Fatalf(
+			"surviving node LastNS = %d, want 40: the event walk touches it before the drop pass runs, and the drop must not roll that touch back",
+			alive.LastNS,
+		)
 	}
 	if _, ok := live.Stars["lonely"]; ok {
 		t.Fatalf("a home whose only node was dropped still earned a star: %#v", live.Stars)
@@ -513,7 +635,11 @@ func TestBuildCosmosResolvesReceiverAddressedByARawSessionID(t *testing.T) {
 
 	graph := BuildCosmos(rows, events, 100, false)
 	if len(graph.Nodes) != 2 {
-		t.Fatalf("a message between two known chats minted a node: got %d nodes, want 2\nnodes = %#v", len(graph.Nodes), graph.Nodes)
+		t.Fatalf(
+			"a message between two known chats minted a node: got %d nodes, want 2\nnodes = %#v",
+			len(graph.Nodes),
+			graph.Nodes,
+		)
 	}
 	node, found := nodeWithKey(graph, "chat:id:p-do-id")
 	if !found {
@@ -571,7 +697,11 @@ func TestBuildCosmosResolvesSpawnReceiverRecordedWithNoPane(t *testing.T) {
 
 	graph := BuildCosmos(rows, events, 100, false)
 	if len(graph.Nodes) != 2 {
-		t.Fatalf("spawn between two known chats minted a node: got %d, want 2\nnodes = %#v", len(graph.Nodes), graph.Nodes)
+		t.Fatalf(
+			"spawn between two known chats minted a node: got %d, want 2\nnodes = %#v",
+			len(graph.Nodes),
+			graph.Nodes,
+		)
 	}
 	child, found := nodeWithKey(graph, "chat:id:child-id")
 	if !found {
@@ -711,7 +841,10 @@ func TestBuildCosmosStarsCountTrafficOncePerHomeInsideTheHour(t *testing.T) {
 		t.Fatalf("gamma LastNS = %d, want %d: an old touch still raises LastNS", got, oldGamma.AtNS)
 	}
 	if len(all.Stars) != 3 {
-		t.Fatalf("Stars = %#v, want exactly one entry per distinct Home (alpha, beta, gamma) — a zero-traffic home included", all.Stars)
+		t.Fatalf(
+			"Stars = %#v, want exactly one entry per distinct Home (alpha, beta, gamma) — a zero-traffic home included",
+			all.Stars,
+		)
 	}
 	for _, home := range []string{"alpha", "beta", "gamma"} {
 		if _, ok := all.Stars[home]; !ok {
@@ -822,7 +955,10 @@ func TestBuildCosmosSplitRowResolvesToARowKeyNotAGhost(t *testing.T) {
 	// The pre-fix formula, for comparison: exactly what chatNode used to
 	// assign — the row's own bare ID, which is always empty for a split row.
 	if preFixRowKey := rows[0].ID; node.RowKey == preFixRowKey {
-		t.Fatalf("node.RowKey = %q (the pre-fix formula's answer for every split row) — a live row is reading as a ghost again", node.RowKey)
+		t.Fatalf(
+			"node.RowKey = %q (the pre-fix formula's answer for every split row) — a live row is reading as a ghost again",
+			node.RowKey,
+		)
 	}
 	if want := RowKey(rows[0]); node.RowKey != want {
 		t.Fatalf("node.RowKey = %q, want compose.RowKey(row) = %q — the ONE join key (K3)", node.RowKey, want)
@@ -854,6 +990,9 @@ func TestBuildCosmosUnsignedSpawnWarmsOnlyTheChildsHome(t *testing.T) {
 		t.Fatalf("childhome traffic = %d, want exactly 1", got)
 	}
 	if len(graph.Stars) != 1 {
-		t.Fatalf("Stars = %#v, want exactly ONE entry (the child's home) — an unsigned spawn resolves no parent to warm", graph.Stars)
+		t.Fatalf(
+			"Stars = %#v, want exactly ONE entry (the child's home) — an unsigned spawn resolves no parent to warm",
+			graph.Stars,
+		)
 	}
 }

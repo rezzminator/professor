@@ -41,7 +41,7 @@ func TestChatSaveRefusesATargetWithNoPathSeparator(t *testing.T) {
 func TestChatSaveDispatchesAPathShapedTarget(t *testing.T) {
 	var calls [][]string
 	service := &Service{backend: &backend{
-		dispatch: func(_ context.Context, args []string, _ io.Writer, _ io.Writer) int {
+		dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
 			calls = append(calls, append([]string(nil), args...))
 			return 0
 		},

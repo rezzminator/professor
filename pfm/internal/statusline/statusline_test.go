@@ -58,7 +58,12 @@ func TestDefaultRuntimeUsesTheCodexSeatsOwnHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	if runtime.Engine != pfmengine.Codex || runtime.ConfigDir != codexHome {
-		t.Fatalf("DefaultRuntime() engine=%q account home=%q, want codex/%q", runtime.Engine, runtime.ConfigDir, codexHome)
+		t.Fatalf(
+			"DefaultRuntime() engine=%q account home=%q, want codex/%q",
+			runtime.Engine,
+			runtime.ConfigDir,
+			codexHome,
+		)
 	}
 }
 
@@ -230,12 +235,18 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 				}
 			}
 			if sample.account == 4 {
-				writeGoldenCache(t, filepath.Join(cacheDir, "cc-gpt-usage-1000.json"),
+				writeGoldenCache(
+					t,
+					filepath.Join(cacheDir, "cc-gpt-usage-1000.json"),
 					`{"primary":{"usedPercent":32,"windowDurationMins":300,"resetsAt":1786845600},"secondary":{"usedPercent":71,"windowDurationMins":10080,"resetsAt":1787443200},"planType":"plus"}`,
 					now,
 				)
 				writeGoldenCache(t, filepath.Join(cacheDir, "cc-sl-gptreq"), "7 0\n", now)
-				if err := os.WriteFile(filepath.Join(procRoot, "net", "tcp"), []byte(" 00000000:494D "), 0o600); err != nil {
+				if err := os.WriteFile(
+					filepath.Join(procRoot, "net", "tcp"),
+					[]byte(" 00000000:494D "),
+					0o600,
+				); err != nil {
 					t.Fatal(err)
 				}
 			}

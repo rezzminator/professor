@@ -54,7 +54,12 @@ var errClaudeAbsent = errors.New("no Claude Code binary installed")
 // FAILED, because a real request answered and may have been billed.
 var errHarnessBypassedSink = errors.New("the CLI answered from the real endpoint and ignored ANTHROPIC_BASE_URL")
 
-func configuredHarnessCapture(ctx context.Context, home string, machine config.Config, model, verboseDir string) (harnessCapture, error) {
+func configuredHarnessCapture(
+	ctx context.Context,
+	home string,
+	machine config.Config,
+	model, verboseDir string,
+) (harnessCapture, error) {
 	if harnessCaptureOverride != nil {
 		return harnessCaptureOverride(ctx, home, machine, model, verboseDir)
 	}
@@ -69,8 +74,12 @@ var harnessBuildStamp = regexp.MustCompile(`cc_version=[^; ]*;`)
 // Only complete, known metadata lines are excluded. Trailing instructions and
 // metadata-like prose elsewhere remain visible to the comparison. Code fences
 // never establish metadata sections or carry removable metadata.
-var harnessModelIdentity = regexp.MustCompile(`^ - You are powered by the model named [A-Za-z0-9 _-]+(?:\.[0-9]+[A-Za-z0-9 _-]*)*\. The exact model ID is [A-Za-z0-9._:-]+\.$`)
-var harnessKnowledgeCutoff = regexp.MustCompile(`^ - Assistant knowledge cutoff is [A-Za-z]+ [0-9]{4}\.$`)
+var (
+	harnessModelIdentity = regexp.MustCompile(
+		`^ - You are powered by the model named [A-Za-z0-9 _-]+(?:\.[0-9]+[A-Za-z0-9 _-]*)*\. The exact model ID is [A-Za-z0-9._:-]+\.$`,
+	)
+	harnessKnowledgeCutoff = regexp.MustCompile(`^ - Assistant knowledge cutoff is [A-Za-z]+ [0-9]{4}\.$`)
+)
 
 // normalizeHarnessPrompt excludes only CLI identity metadata. Claude may omit
 // these two Environment lines even with dynamic sections excluded. Instructions
@@ -102,7 +111,8 @@ func normalizeHarnessPrompt(prompt string) string {
 			kept = append(kept, line)
 			continue
 		}
-		if index == 0 && len(lines) > 2 && lines[1] == "" && lines[2] == "=== SYSTEM BLOCK ===" && strings.HasPrefix(line, "x-anthropic-billing-header: ") {
+		if index == 0 && len(lines) > 2 && lines[1] == "" && lines[2] == "=== SYSTEM BLOCK ===" &&
+			strings.HasPrefix(line, "x-anthropic-billing-header: ") {
 			line = harnessBuildStamp.ReplaceAllLiteralString(line, "cc_version=*;")
 		}
 		if strings.HasPrefix(line, "#") || line == "=== SYSTEM BLOCK ===" {
@@ -133,7 +143,12 @@ func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr
 	if live == baselineSHA {
 		return "doctor: harness-prompt: matches baseline " + baselineName, false
 	}
-	return fmt.Sprintf("doctor: harness-prompt: DRIFT live=%s baseline=%s (%s) — harness instructions changed; review before re-pinning", live[:16], baselineSHA[:16], baselineName), true
+	return fmt.Sprintf(
+		"doctor: harness-prompt: DRIFT live=%s baseline=%s (%s) — harness instructions changed; review before re-pinning",
+		live[:16],
+		baselineSHA[:16],
+		baselineName,
+	), true
 }
 
 // captureHarnessPrompt uses the shared headless runner with the unmodified
@@ -144,7 +159,12 @@ func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr
 // removed before return (change B): the documented Keychain scoping means
 // that directory is always logged out, so the dummy ANTHROPIC_API_KEY is the
 // only credential the CLI can find.
-func captureHarnessPrompt(ctx context.Context, home string, machine config.Config, model, verboseDir string) (harnessCapture, error) {
+func captureHarnessPrompt(
+	ctx context.Context,
+	home string,
+	machine config.Config,
+	model, verboseDir string,
+) (harnessCapture, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return harnessCapture{}, fmt.Errorf("open capture sink: %w", err)
@@ -205,16 +225,26 @@ func captureHarnessPrompt(ctx context.Context, home string, machine config.Confi
 		// exactly. Stdin is pinned to /dev/null so the CLI never waits on a
 		// stream that carries nothing (issue #24 finding 6 observed a "no
 		// stdin data received in 3s" warning when stdin was left ambiguous).
-		Args: []string{"x", "--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
-			"--max-turns", "1", "--exclude-dynamic-system-prompt-sections"},
+		Args: []string{
+			"x", "--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+			"--max-turns", "1", "--exclude-dynamic-system-prompt-sections",
+		},
 		Env:   harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
 		Stdin: devNull,
 	})
 	if verboseDir != "" {
-		if writeErr := deps.WriteVerboseFile(verboseDir, "harness-prompt.stdout", []byte(result.Stdout)); writeErr != nil {
+		if writeErr := deps.WriteVerboseFile(
+			verboseDir,
+			"harness-prompt.stdout",
+			[]byte(result.Stdout),
+		); writeErr != nil {
 			return harnessCapture{}, fmt.Errorf("write harness capture stdout evidence: %w", writeErr)
 		}
-		if writeErr := deps.WriteVerboseFile(verboseDir, "harness-prompt.stderr", []byte(result.Stderr)); writeErr != nil {
+		if writeErr := deps.WriteVerboseFile(
+			verboseDir,
+			"harness-prompt.stderr",
+			[]byte(result.Stderr),
+		); writeErr != nil {
 			return harnessCapture{}, fmt.Errorf("write harness capture stderr evidence: %w", writeErr)
 		}
 	}
@@ -236,7 +266,13 @@ func captureHarnessPrompt(ctx context.Context, home string, machine config.Confi
 			_ = writeHarnessSinkHits(verboseDir, hits)
 		}
 		if hits.count() == 0 && runErr == nil && claudeAnsweredWithoutSink(result.Stdout) {
-			return harnessCapture{CLIVersion: version}, fmt.Errorf("%w (OAuth-only routing on cli=%s) — one minimal request may have been billed", errHarnessBypassedSink, version)
+			return harnessCapture{
+				CLIVersion: version,
+			}, fmt.Errorf(
+				"%w (OAuth-only routing on cli=%s) — one minimal request may have been billed",
+				errHarnessBypassedSink,
+				version,
+			)
 		}
 		message := errors.New("no API request reached the capture sink")
 		if verboseDir != "" {
@@ -310,7 +346,9 @@ func harnessSinkHandler(bodies chan<- []byte) http.HandlerFunc {
 		}
 		writer.Header().Set("Content-Type", "application/json")
 		writer.WriteHeader(http.StatusBadRequest)
-		_, _ = writer.Write([]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"captured by pfm doctor"}}`))
+		_, _ = writer.Write(
+			[]byte(`{"type":"error","error":{"type":"invalid_request_error","message":"captured by pfm doctor"}}`),
+		)
 	}
 }
 

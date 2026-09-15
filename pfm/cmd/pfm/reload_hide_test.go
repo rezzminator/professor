@@ -3,11 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
-	pfmengine "hostops/pfm/internal/engine"
 	"os"
 	"path/filepath"
 	"testing"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
 )
@@ -31,7 +31,11 @@ func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehi
 	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(transcriptPath, []byte(`{"type":"user","cwd":"/work/example","message":{"content":"first"}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"user","cwd":"/work/example","message":{"content":"first"}}`+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	database, err := store.Open()
@@ -57,8 +61,21 @@ func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehi
 	}
 
 	unindexed := "33333333-3333-4333-8333-333333333333"
-	if got, err := hideReloadedConversation(ctx, runtime, pfmengine.Claude, unindexed, "", &stderr); err != nil || got != unindexed {
-		t.Fatalf("hide unindexed conversation: id=%q err=%v — the pane's engine vouches for an id the index has not seen\nstderr=%s", got, err, stderr.String())
+	if got, err := hideReloadedConversation(
+		ctx,
+		runtime,
+		pfmengine.Claude,
+		unindexed,
+		"",
+		&stderr,
+	); err != nil ||
+		got != unindexed {
+		t.Fatalf(
+			"hide unindexed conversation: id=%q err=%v — the pane's engine vouches for an id the index has not seen\nstderr=%s",
+			got,
+			err,
+			stderr.String(),
+		)
 	}
 
 	if _, err := hideReloadedConversation(ctx, runtime, pfmengine.Claude, "", "", &stderr); err == nil {
@@ -79,7 +96,11 @@ func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehi
 			t.Fatalf("no kill recorded for %s — the conversation left behind would still be listed as resumable", id)
 		}
 		if killed.BaselinePrompts != nil {
-			t.Fatalf("kill for %s carries prompt baseline %d — a hide is permanent, not a /clear baseline the reborn pane's first prompt undoes", id, *killed.BaselinePrompts)
+			t.Fatalf(
+				"kill for %s carries prompt baseline %d — a hide is permanent, not a /clear baseline the reborn pane's first prompt undoes",
+				id,
+				*killed.BaselinePrompts,
+			)
 		}
 	}
 }

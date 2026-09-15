@@ -147,7 +147,7 @@ func TestSkyTickMsgParksThenWakes(t *testing.T) {
 	clock := NewActivityClock(time.Now())
 	model := NewModel(Snapshot{Activity: clock, NowNS: 1})
 
-	var parkedAt = -1
+	parkedAt := -1
 	for step := 0; step < 20; step++ {
 		updated, cmd := model.Update(skyTickMsg{nowNS: model.nowNS + 1})
 		var ok bool
@@ -223,7 +223,13 @@ func TestNoSkyModelNeverSchedulesSkyTick(t *testing.T) {
 	updated, cmd := model.Update(clockTickMsg{nowNS: future})
 	model = updated.(Model)
 	if cmd == nil || model.nowNS != future || model.cosmosNowNS != future {
-		t.Fatalf("wall clock under --no-sky: command=%v now=%d cosmosNow=%d want=%d", cmd, model.nowNS, model.cosmosNowNS, future)
+		t.Fatalf(
+			"wall clock under --no-sky: command=%v now=%d cosmosNow=%d want=%d",
+			cmd,
+			model.nowNS,
+			model.cosmosNowNS,
+			future,
+		)
 	}
 
 	updated, cmd = model.Update(skyTickMsg{nowNS: future + 1})

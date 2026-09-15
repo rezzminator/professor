@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/mcpserv"
 	"hostops/pfm/internal/paths"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // callChatTool drives one tool of the production MCP surface — mcpRuntime over
@@ -107,7 +107,11 @@ func TestMCPFindIncludesTheAskingSessionOnlyWhenAsked(t *testing.T) {
 	if excluded.Count != 1 || excluded.Candidates[0].ID != ids[1] {
 		t.Fatalf("chat_find default = %+v; want only the other session", excluded)
 	}
-	included := callChatTool[mcpserv.FindOutput](t, "chat_find", mcpserv.FindInput{Excerpt: findDriftNeedle, IncludeSelf: true})
+	included := callChatTool[mcpserv.FindOutput](
+		t,
+		"chat_find",
+		mcpserv.FindInput{Excerpt: findDriftNeedle, IncludeSelf: true},
+	)
 	if included.Count != 2 {
 		t.Fatalf("chat_find include_self = %+v; want both sessions", included)
 	}
@@ -123,7 +127,11 @@ func TestMCPFindNamesTheSessionItLeftOut(t *testing.T) {
 	if excluded.SelfID != ids[0] {
 		t.Fatalf("chat_find default self_id = %q; want the excluded %q", excluded.SelfID, ids[0])
 	}
-	included := callChatTool[mcpserv.FindOutput](t, "chat_find", mcpserv.FindInput{Excerpt: findDriftNeedle, IncludeSelf: true})
+	included := callChatTool[mcpserv.FindOutput](
+		t,
+		"chat_find",
+		mcpserv.FindInput{Excerpt: findDriftNeedle, IncludeSelf: true},
+	)
 	if included.SelfID != "" {
 		t.Fatalf("chat_find include_self self_id = %q; want none", included.SelfID)
 	}

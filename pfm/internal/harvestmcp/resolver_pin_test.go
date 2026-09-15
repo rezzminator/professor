@@ -28,6 +28,8 @@ func TestResolverClientIsPinned(t *testing.T) {
 	}
 	inner := &http.Client{Transport: outer.base}
 	if !harvest.IsPinnedClient(inner) {
-		t.Fatal("newHTTPClient's base transport is not harvest's pinned (DoH-resolved) client; want it built via harvest.NewDirectClient")
+		t.Fatal(
+			"newHTTPClient's base transport is not harvest's pinned (DoH-resolved) client; want it built via harvest.NewDirectClient",
+		)
 	}
 }

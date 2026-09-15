@@ -17,7 +17,11 @@ import (
 // and the project-scope .mcp.json (unaffected by CLAUDE_CONFIG_DIR).
 func printMCPClientCutover(stdout io.Writer, runtime commandRuntime) int {
 	warnings := 0
-	registries := installer.ClaudeUserRegistries(runtime.Paths.Home, runtime.Config.Accounts, config.AmbientClaudeConfigDir())
+	registries := installer.ClaudeUserRegistries(
+		runtime.Paths.Home,
+		runtime.Config.Accounts,
+		config.AmbientClaudeConfigDir(),
+	)
 	warnings += printClaudeRegistryRows(stdout, registries, runtime.Config.MCP.HTTP.Port)
 
 	codexHomes := make([]string, 0, len(runtime.Config.CodexAccounts))
@@ -30,14 +34,21 @@ func printMCPClientCutover(stdout io.Writer, runtime commandRuntime) int {
 			continue
 		case installer.MCPClientUnreadable:
 			warnings++
-			fmt.Fprintf(stdout, "doctor: mcp client=%s harvester=unreadable error=%v path=%s\n", report.Client, report.Error, report.Path)
+			fmt.Fprintf(
+				stdout,
+				"doctor: mcp client=%s harvester=unreadable error=%v path=%s\n",
+				report.Client,
+				report.Error,
+				report.Path,
+			)
 		default:
 			warnings++
 			fmt.Fprintf(
 				stdout,
 				"doctor: mcp client=%s harvester=%s warning=consumer cutover incomplete remediation=repoint to PFM, verify it, then remove the foreign registration path=%s\n",
 				report.Client,
-				report.State, report.Path,
+				report.State,
+				report.Path,
 			)
 		}
 	}
@@ -93,7 +104,11 @@ func printClaudeRegistryRows(stdout io.Writer, registries []installer.ClaudeRegi
 			fmt.Fprintln(stdout, base)
 		default:
 			warnings++
-			fmt.Fprintf(stdout, "%s remediation=run pfm install --yes (registers every registry a pfm-launched Claude reads)\n", base)
+			fmt.Fprintf(
+				stdout,
+				"%s remediation=run pfm install --yes (registers every registry a pfm-launched Claude reads)\n",
+				base,
+			)
 		}
 	}
 	return warnings

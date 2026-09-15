@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
+	_ "modernc.org/sqlite"
+
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
-
-	_ "modernc.org/sqlite"
 )
 
 // seedOpencodeStress builds a large, hostile session store: thousands of
@@ -108,11 +108,13 @@ CREATE INDEX part_session_idx ON part (session_id);`
 		}
 		if _, err := tx.Exec(
 			"INSERT INTO session (id, project_id, parent_id, slug, directory, title, version, time_created, time_updated, time_archived) VALUES (?, 'p1', ?, ?, ?, ?, '1.14.30', ?, ?, ?)",
-			fmt.Sprintf("ses_%d", i), parent,
+			fmt.Sprintf("ses_%d", i),
+			parent,
 			fmt.Sprintf("session-%d", i),
 			[]any{"/stress/repo", "", "/stress/repo/"}[i%3],
 			hostileTitles[i%len(hostileTitles)],
-			int64(i), int64(i), // duplicate timestamps on purpose
+			int64(i),
+			int64(i), // duplicate timestamps on purpose
 			archived,
 		); err != nil {
 			t.Fatalf("seed session %d: %v", i, err)

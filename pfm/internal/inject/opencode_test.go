@@ -1,8 +1,9 @@
 package inject
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
 	"testing"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 func TestPaneCommandEngineRecognizesOpencode(t *testing.T) {

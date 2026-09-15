@@ -57,7 +57,14 @@ func TestNewRowsFollowEngineRosterMatrix(t *testing.T) {
 			}
 			for index, row := range output.Rows {
 				if row.Kind != test.wantKinds[index] || row.Account != test.wantAccounts[index] {
-					t.Fatalf("row %d = kind %s account %d, want %s/%d", index, row.Kind, row.Account, test.wantKinds[index], test.wantAccounts[index])
+					t.Fatalf(
+						"row %d = kind %s account %d, want %s/%d",
+						index,
+						row.Kind,
+						row.Account,
+						test.wantKinds[index],
+						test.wantAccounts[index],
+					)
 				}
 			}
 		})

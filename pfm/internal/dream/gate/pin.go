@@ -52,7 +52,11 @@ func Pin(pathsRaw, pinRaw []byte) (PinnedPaths, error) {
 	if digest != pinLines[0] {
 		return PinnedPaths{}, fmt.Errorf("path pin mismatch: expected %s, got %s", pinLines[0], digest)
 	}
-	return PinnedPaths{Paths: append([]string(nil), paths...), Raw: append([]byte(nil), pathsRaw...), Digest: digest}, nil
+	return PinnedPaths{
+		Paths:  append([]string(nil), paths...),
+		Raw:    append([]byte(nil), pathsRaw...),
+		Digest: digest,
+	}, nil
 }
 
 func splitLines(raw []byte) []string {

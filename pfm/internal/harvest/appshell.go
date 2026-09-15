@@ -76,7 +76,11 @@ func appShellProbeURL(source string) (string, bool) {
 		log.Printf("harvest: app-shell probe token for %s: %v", source, err)
 		return "", false
 	}
-	probe := &url.URL{Scheme: parsed.Scheme, Host: parsed.Host, Path: dir + appShellProbePrefix + hex.EncodeToString(token)}
+	probe := &url.URL{
+		Scheme: parsed.Scheme,
+		Host:   parsed.Host,
+		Path:   dir + appShellProbePrefix + hex.EncodeToString(token),
+	}
 	return probe.String(), true
 }
 
@@ -111,7 +115,13 @@ func (h *Harvester) probeAppShell(ctx context.Context, client *http.Client, ua, 
 		return false
 	}
 	if len(probeBody) == 0 || isChallenge(probeBody, status) {
-		log.Printf("harvest: app-shell probe %s for %s returned no comparable page (HTTP %d, %d bytes)", probe, source, status, len(probeBody))
+		log.Printf(
+			"harvest: app-shell probe %s for %s returned no comparable page (HTTP %d, %d bytes)",
+			probe,
+			source,
+			status,
+			len(probeBody),
+		)
 		return false
 	}
 	return shellFingerprint(probeBody) == want

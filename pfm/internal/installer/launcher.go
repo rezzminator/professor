@@ -29,7 +29,15 @@ type ClaudeLauncherStatus struct {
 }
 
 func managedClaudeLauncher(home string) string {
-	return filepath.Join(home, ".local", "share", "pfm", "install", "bin", pfmengine.MustLookup(pfmengine.Claude).Binary)
+	return filepath.Join(
+		home,
+		".local",
+		"share",
+		"pfm",
+		"install",
+		"bin",
+		pfmengine.MustLookup(pfmengine.Claude).Binary,
+	)
 }
 
 func canonicalClaudeLauncher(home string) string {
@@ -135,7 +143,11 @@ func (installer *engine) wireClaudeLauncher() error {
 		installer.ok(canonicalClaudeLauncher(installer.options.Home))
 		return nil
 	}
-	description := "link " + canonicalClaudeLauncher(installer.options.Home) + " -> " + managedClaudeLauncher(installer.options.Home)
+	description := "link " + canonicalClaudeLauncher(
+		installer.options.Home,
+	) + " -> " + managedClaudeLauncher(
+		installer.options.Home,
+	)
 	return installer.change(description, func() error {
 		_, err := RepairClaudeLauncher(installer.options.Home)
 		return err
@@ -166,7 +178,12 @@ func (installer *engine) pruneClaudeVersions() error {
 	}
 	remove, kept := PlanClaudeVersionPrune(report, ClaudeVersionKeepCount)
 	for _, version := range remove {
-		description := fmt.Sprintf("remove %s (%s, %s)", version.Path, filepath.Base(version.Path), FormatClaudeVersionBytes(version.Bytes))
+		description := fmt.Sprintf(
+			"remove %s (%s, %s)",
+			version.Path,
+			filepath.Base(version.Path),
+			FormatClaudeVersionBytes(version.Bytes),
+		)
 		if err := installer.change(description, func() error {
 			return os.Remove(version.Path)
 		}); err != nil {

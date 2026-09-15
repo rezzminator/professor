@@ -155,7 +155,12 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := runHarvest([]string{"ask", "-p", "Answer without hiding missing evidence", good, missing}, &stdout, &stderr, runtime); code != 0 {
+	if code := runHarvest(
+		[]string{"ask", "-p", "Answer without hiding missing evidence", good, missing},
+		&stdout,
+		&stderr,
+		runtime,
+	); code != 0 {
 		t.Fatalf("harvest ask code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	prepared, err := os.ReadFile(fileCapture)
@@ -211,7 +216,15 @@ func TestHarvestAskValidatesBoundsBeforeEngineOrFetch(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := runHarvest(testCase.args, &stdout, &stderr, commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Harvester: askHarvester(home)}}); code != 2 {
+			if code := runHarvest(
+				testCase.args,
+				&stdout,
+				&stderr,
+				commandRuntime{
+					Paths:  paths.Values{Home: home},
+					Config: pfmconfig.Config{Harvester: askHarvester(home)},
+				},
+			); code != 2 {
 				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
 			if !strings.Contains(stderr.String(), "usage: pfm harvest ask") {
@@ -260,7 +273,8 @@ func TestHarvestAskAcceptsFiftySourcesAndFlagsAfterPositionals(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(prompt), "\n50. ") || !strings.Contains(string(prompt), " — source: "+source+"\nTASK:") {
+	if !strings.Contains(string(prompt), "\n50. ") ||
+		!strings.Contains(string(prompt), " — source: "+source+"\nTASK:") {
 		t.Fatalf("upper-bound source missing from prompt:\n%s", prompt)
 	}
 }
@@ -272,7 +286,11 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := filepath.Join(home, "codex-fixture")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\ncat >/dev/null\nprintf 'fixture failure\\n' >&2\nexit 7\n"), 0o700); err != nil {
+	if err := os.WriteFile(
+		binary,
+		[]byte("#!/bin/sh\ncat >/dev/null\nprintf 'fixture failure\\n' >&2\nexit 7\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	runtime := commandRuntime{
@@ -286,7 +304,12 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 	}
 	missing := filepath.Join(home, "missing.txt")
 	var stdout, stderr bytes.Buffer
-	if code := runHarvest([]string{"ask", "-p", "Fail after preparation", missing}, &stdout, &stderr, runtime); code != 1 {
+	if code := runHarvest(
+		[]string{"ask", "-p", "Fail after preparation", missing},
+		&stdout,
+		&stderr,
+		runtime,
+	); code != 1 {
 		t.Fatalf("harvest ask code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "codex ask failed") || !strings.Contains(stderr.String(), "fixture failure") {
@@ -325,7 +348,11 @@ func TestHarvestAskReceiptDoesNotExposePrivateHarvestDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, `"input": "10.1234/public.boundary"`) || strings.Contains(text, "mirror.secret.example") || strings.Contains(text, "/private/cache/") || strings.Contains(text, `"method"`) || strings.Contains(text, `"rungs"`) {
+	if !strings.Contains(text, `"input": "10.1234/public.boundary"`) ||
+		strings.Contains(text, "mirror.secret.example") ||
+		strings.Contains(text, "/private/cache/") ||
+		strings.Contains(text, `"method"`) ||
+		strings.Contains(text, `"rungs"`) {
 		t.Fatalf("ask receipt leaked private harvest details: %s", text)
 	}
 }
@@ -338,7 +365,12 @@ func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runHarvest([]string{source, "--json"}, &stdout, &stderr, commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Harvester: askHarvester(home)}}); code != 0 {
+	if code := runHarvest(
+		[]string{source, "--json"},
+		&stdout,
+		&stderr,
+		commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Harvester: askHarvester(home)}},
+	); code != 0 {
 		t.Fatalf("plain harvest code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{`"source": "` + source + `"`, "\"content\": \"plain harvest remains plain\\n\""} {

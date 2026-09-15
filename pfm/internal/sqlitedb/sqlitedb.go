@@ -45,7 +45,10 @@ func OpenStore(ctx context.Context, path string) (*sql.DB, error) {
 }
 
 func storePragmas(ctx context.Context, database *sql.DB) error {
-	if _, err := database.ExecContext(ctx, fmt.Sprintf("PRAGMA busy_timeout=%d", StoreBusyTimeout.Milliseconds())); err != nil {
+	if _, err := database.ExecContext(
+		ctx,
+		fmt.Sprintf("PRAGMA busy_timeout=%d", StoreBusyTimeout.Milliseconds()),
+	); err != nil {
 		return fmt.Errorf("set busy_timeout: %w", err)
 	}
 	if _, err := database.ExecContext(ctx, "PRAGMA foreign_keys=ON"); err != nil {
@@ -80,7 +83,10 @@ func OpenReadWrite(path string, busy time.Duration) (*sql.DB, error) {
 }
 
 func openForeign(path, mode string, busy time.Duration) (*sql.DB, error) {
-	database, err := sql.Open(driverName, fileURI(path, fmt.Sprintf("%s_pragma=busy_timeout(%d)", mode, busy.Milliseconds())))
+	database, err := sql.Open(
+		driverName,
+		fileURI(path, fmt.Sprintf("%s_pragma=busy_timeout(%d)", mode, busy.Milliseconds())),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite database %s: %w", path, err)
 	}

@@ -159,7 +159,9 @@ func TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing(t *testing.T) {
 	source := filepath.Join(root, "repo", "templates", "global", "agents", "alpha.md")
 	_, _, err := ClassifyGlobalLink(target, source, filepath.Join(root, "repo"), GlobalLinkFile)
 	if err == nil {
-		t.Fatal("ClassifyGlobalLink reported no error for an unreadable target — an unreadable probe must never read as absence")
+		t.Fatal(
+			"ClassifyGlobalLink reported no error for an unreadable target — an unreadable probe must never read as absence",
+		)
 	}
 }
 
@@ -187,7 +189,12 @@ func TestApplyGlobalLinkIsANoOpForCorrectAndConflict(t *testing.T) {
 }
 
 func TestDescribeGlobalLinkStateNamesConflictExactly(t *testing.T) {
-	got := DescribeGlobalLinkState(GlobalLinkConflict, "/home/x/.claude/agents/alpha.md", "/repo/templates/global/agents/alpha.md", "/home/x/elsewhere.md")
+	got := DescribeGlobalLinkState(
+		GlobalLinkConflict,
+		"/home/x/.claude/agents/alpha.md",
+		"/repo/templates/global/agents/alpha.md",
+		"/home/x/elsewhere.md",
+	)
 	want := "CONFLICT /home/x/.claude/agents/alpha.md: not ours (points to /home/x/elsewhere.md)"
 	if got != want {
 		t.Fatalf("DescribeGlobalLinkState = %q, want %q", got, want)

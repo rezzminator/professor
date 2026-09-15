@@ -98,16 +98,25 @@ func TestReloadNewFlag(t *testing.T) {
 	if err := validateReloadArgs([]string{"--new"}); err != nil {
 		t.Fatalf("--new rejected: %v", err)
 	}
-	if err := validateReloadArgs([]string{"--new", "--new"}); err == nil || !strings.Contains(err.Error(), "new specified twice") {
+	if err := validateReloadArgs(
+		[]string{"--new", "--new"},
+	); err == nil ||
+		!strings.Contains(err.Error(), "new specified twice") {
 		t.Fatalf("--new --new error=%v, want it to say \"new specified twice\"", err)
 	}
 	if got := reloadRequestedAccount([]string{"--new", "--account", "2"}); got != 2 {
 		t.Fatalf("account=%d, want 2 — --new must not swallow the account flag that follows it", got)
 	}
-	if err := validateReloadArgs([]string{"fresh"}); err == nil || !strings.Contains(err.Error(), "did you mean --new?") {
+	if err := validateReloadArgs(
+		[]string{"fresh"},
+	); err == nil ||
+		!strings.Contains(err.Error(), "did you mean --new?") {
 		t.Fatalf("bare word \"fresh\" error=%v, want the --new hint", err)
 	}
-	if err := validateReloadArgs([]string{"--fresh"}); err == nil || !strings.Contains(err.Error(), "did you mean --new?") {
+	if err := validateReloadArgs(
+		[]string{"--fresh"},
+	); err == nil ||
+		!strings.Contains(err.Error(), "did you mean --new?") {
 		t.Fatalf("retired --fresh error=%v, want it refused by name and pointed at --new", err)
 	}
 }
@@ -125,16 +134,25 @@ func TestReloadHideFlag(t *testing.T) {
 	if err := validateReloadArgs([]string{"--hide", "--new"}); err != nil {
 		t.Fatalf("--hide --new rejected: %v — the two flags must be order-free", err)
 	}
-	if err := validateReloadArgs([]string{"--hide"}); err == nil || !strings.Contains(err.Error(), "--hide needs --new") {
+	if err := validateReloadArgs(
+		[]string{"--hide"},
+	); err == nil ||
+		!strings.Contains(err.Error(), "--hide needs --new") {
 		t.Fatalf("--hide alone error=%v, want it to say \"--hide needs --new\"", err)
 	}
-	if err := validateReloadArgs([]string{"--new", "--hide", "--hide"}); err == nil || !strings.Contains(err.Error(), "hide specified twice") {
+	if err := validateReloadArgs(
+		[]string{"--new", "--hide", "--hide"},
+	); err == nil ||
+		!strings.Contains(err.Error(), "hide specified twice") {
 		t.Fatalf("--hide --hide error=%v, want it to say \"hide specified twice\"", err)
 	}
 	if got := reloadRequestedAccount([]string{"--new", "--hide", "--account", "2"}); got != 2 {
 		t.Fatalf("account=%d, want 2 — --hide must not swallow the account flag that follows it", got)
 	}
-	if err := validateReloadArgs([]string{"--new", "hide"}); err == nil || !strings.Contains(err.Error(), "did you mean --hide?") {
+	if err := validateReloadArgs(
+		[]string{"--new", "hide"},
+	); err == nil ||
+		!strings.Contains(err.Error(), "did you mean --hide?") {
 		t.Fatalf("bare word \"hide\" error=%v, want the --hide hint", err)
 	}
 }

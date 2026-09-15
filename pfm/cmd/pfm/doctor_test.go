@@ -16,11 +16,16 @@ func TestDoctorCrumbHealthAcceptsNudgeMetadataAndRejectsAnEmptyIdentity(t *testi
 	if _, _, err := nudge.Decide(dir, "session-a", 45, 35, 10); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "nudge-ctx-"), []byte("45\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "nudge-ctx-"), []byte("45\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	entries, invalid, err := crumbHealth(dir)
 	if err != nil || entries != 3 || invalid != 1 {
-		t.Fatalf("entries=%d invalid=%d err=%v; legitimate sample/band must pass, empty identity must fail", entries, invalid, err)
+		t.Fatalf(
+			"entries=%d invalid=%d err=%v; legitimate sample/band must pass, empty identity must fail",
+			entries,
+			invalid,
+			err,
+		)
 	}
 }

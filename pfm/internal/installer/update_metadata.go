@@ -94,7 +94,9 @@ func (installer *engine) reportSourceRepoMarker() error {
 		installer.ok(SourceRepoPath(installer.options.Home) + " (kept: " + recorded + ")")
 		return nil
 	case errors.Is(err, fs.ErrNotExist):
-		installer.skip("source repository not found — run pfm install from inside your Professor clone or set PFM_SOURCE_REPO; pfm init and pfm update read it")
+		installer.skip(
+			"source repository not found — run pfm install from inside your Professor clone or set PFM_SOURCE_REPO; pfm init and pfm update read it",
+		)
 		return nil
 	default:
 		return fmt.Errorf("check source repository marker: %w", err)

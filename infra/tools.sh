@@ -23,12 +23,18 @@ while [[ $# -gt 0 ]]; do
 done
 mkdir -p "$BIN"
 command -v go >/dev/null || { echo "tools: TOOLCHAIN-MISSING — go not on PATH" >&2; exit 1; }
+# Build every tool with ONE explicit Go (tools.env TOOLS_GO): the formatters
+# embed that Go's go/printer, and alignment differs across releases — with
+# GOTOOLCHAIN=auto the host and the fence would each pick their own.
+[[ -n "${TOOLS_GO:-}" ]] || { echo "tools: BROKEN — TOOLS_GO unset in tools.env" >&2; exit 2; }
+export GOTOOLCHAIN="$TOOLS_GO"
 
 # install <name> <module path> <version variable name>
 install() {
   local name=$1 module=$2 var=$3 version="${!3:-}" state=INSTALLED
   [[ -n "$version" ]] || { echo "tools: BROKEN — $var unset in tools.env" >&2; exit 2; }
-  if [[ -x "$BIN/$name" ]] && "$BIN/$name" --version 2>/dev/null | grep -q -- "${version#v}"; then
+  if [[ -x "$BIN/$name" ]] && "$BIN/$name" --version 2>/dev/null | grep -q -- "${version#v}" \
+     && go version -m "$BIN/$name" 2>/dev/null | head -1 | grep -q -- "$GOTOOLCHAIN"; then
     state=PRESENT
   else
     GOBIN="$BIN" GOFLAGS=-mod=mod go install "${module}@${version}" \
@@ -36,7 +42,7 @@ install() {
   fi
   "$BIN/$name" --version >/dev/null 2>&1 \
     || { echo "tools: BROKEN — $BIN/$name does not answer --version" >&2; exit 1; }
-  printf 'TOOL %-18s %-9s %-9s %s\n' "$name" "$version" "$state" "$BIN/$name"
+  printf 'TOOL %-18s %-9s %-9s %s (built with %s)\n' "$name" "$version" "$state" "$BIN/$name" "$GOTOOLCHAIN"
 }
 
 install golangci-lint    github.com/golangci/golangci-lint/v2/cmd/golangci-lint GOLANGCI_LINT_VERSION

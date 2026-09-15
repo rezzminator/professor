@@ -49,7 +49,11 @@ func TestResolveRejectsNonCanonicalAndNonRootRepositories(t *testing.T) {
 	repo := newRepository(t)
 	registryBase := t.TempDir()
 
-	if _, err := Resolve(repo+string(filepath.Separator)+".", registryBase); err == nil || !strings.Contains(err.Error(), "canonical") {
+	if _, err := Resolve(
+		repo+string(filepath.Separator)+".",
+		registryBase,
+	); err == nil ||
+		!strings.Contains(err.Error(), "canonical") {
 		t.Fatalf("Resolve(non-canonical) error = %v, want canonical failure", err)
 	}
 
@@ -67,7 +71,11 @@ func TestResolveRejectsNonCanonicalAndNonRootRepositories(t *testing.T) {
 		t.Fatalf("Resolve(subdirectory) error = %v, want Git-top failure", err)
 	}
 
-	if _, err := Resolve("relative/repository", registryBase); err == nil || !strings.Contains(err.Error(), "absolute") {
+	if _, err := Resolve(
+		"relative/repository",
+		registryBase,
+	); err == nil ||
+		!strings.Contains(err.Error(), "absolute") {
 		t.Fatalf("Resolve(relative) error = %v, want absolute failure", err)
 	}
 }

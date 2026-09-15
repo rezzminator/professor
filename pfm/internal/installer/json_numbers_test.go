@@ -43,8 +43,22 @@ func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 	home := t.TempDir()
 	primary := filepath.Join(home, ".claude")
 	registry := filepath.Join(home, ".claude.json")
-	writeFixture(t, registry, `{"counter":`+beyondFloat64+`,"mcpServers":{"foreign":{"type":"stdio","command":"foreign"}}}`)
-	options := Options{Home: home, ConfigDir: primary, ConfigDirs: []string{primary}, CodexHomes: []string{}, Mode: ModeApply, Runner: &fakeRunner{}, Stdout: io.Discard, MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377}
+	writeFixture(
+		t,
+		registry,
+		`{"counter":`+beyondFloat64+`,"mcpServers":{"foreign":{"type":"stdio","command":"foreign"}}}`,
+	)
+	options := Options{
+		Home:       home,
+		ConfigDir:  primary,
+		ConfigDirs: []string{primary},
+		CodexHomes: []string{},
+		Mode:       ModeApply,
+		Runner:     &fakeRunner{},
+		Stdout:     io.Discard,
+		MCPEnabled: map[string]bool{"chat": true},
+		MCPPort:    8377,
+	}
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +98,11 @@ func TestMemoryHelperHookRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 	home := t.TempDir()
 	oldPath := filepath.Join(home, ".claude", "scripts", "cc-memory-wire.sh")
 	newPath := filepath.Join(home, ".claude", "scripts", "memory-wire.sh")
-	raw := fmt.Sprintf(`{"counter":%s,"hooks":{"Stop":[{"hooks":[{"type":"command","command":%q}]}]}}`, beyondFloat64, oldPath)
+	raw := fmt.Sprintf(
+		`{"counter":%s,"hooks":{"Stop":[{"hooks":[{"type":"command","command":%q}]}]}}`,
+		beyondFloat64,
+		oldPath,
+	)
 	updated, changed, err := rewriteMemoryHelperHookPaths([]byte(raw), map[string]string{oldPath: newPath}, home)
 	if err != nil || !changed {
 		t.Fatalf("rewriteMemoryHelperHookPaths changed=%v err=%v; want a rewrite", changed, err)

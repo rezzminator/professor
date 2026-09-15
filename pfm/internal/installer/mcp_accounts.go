@@ -48,12 +48,25 @@ func ClaudeUserRegistries(home string, accounts []pfmconfig.Account, ambientConf
 				fmt.Sprintf("account %d (pfm spawns it without CLAUDE_CONFIG_DIR)", account.ID), account.ID)
 			continue
 		}
-		add(filepath.Join(account.ConfigDir, ".claude.json"),
-			fmt.Sprintf("account %d (CLAUDE_CONFIG_DIR=%s when pfm spawns it)", account.ID, account.ConfigDir), account.ID)
+		add(
+			filepath.Join(account.ConfigDir, ".claude.json"),
+			fmt.Sprintf(
+				"account %d (CLAUDE_CONFIG_DIR=%s when pfm spawns it)",
+				account.ID,
+				account.ConfigDir,
+			),
+			account.ID,
+		)
 	}
 	if ambient := strings.TrimSpace(ambientConfigDir); ambient != "" {
-		add(filepath.Join(ambient, ".claude.json"),
-			fmt.Sprintf("ambient CLAUDE_CONFIG_DIR=%s (the claude launcher passes it through — launch_command.go)", ambient), 0)
+		add(
+			filepath.Join(ambient, ".claude.json"),
+			fmt.Sprintf(
+				"ambient CLAUDE_CONFIG_DIR=%s (the claude launcher passes it through — launch_command.go)",
+				ambient,
+			),
+			0,
+		)
 	}
 	return registries
 }
@@ -283,8 +296,8 @@ func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
 		return err
 	}
 	encoded = append(encoded, '\n')
-	if sameFile(path, encoded, 0600) {
+	if sameFile(path, encoded, 0o600) {
 		return nil
 	}
-	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0600) })
+	return installer.change("write "+path, func() error { return atomicfile.Write(path, encoded, 0o600) })
 }

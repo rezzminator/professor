@@ -106,7 +106,11 @@ func TestSearchConfigurationErrorsAreSentinels(t *testing.T) {
 // without ever being probed (a probe would spend the operator's quota).
 func TestProbeSearchReportsEveryState(t *testing.T) {
 	t.Run("off disabled", func(t *testing.T) {
-		probe := ProbeSearch(context.Background(), SearchOptions{SearXNGURL: "https://search.example.test", DisableSearch: true}, nil)
+		probe := ProbeSearch(
+			context.Background(),
+			SearchOptions{SearXNGURL: "https://search.example.test", DisableSearch: true},
+			nil,
+		)
 		if probe.State != SearchProbeOff || probe.Warning {
 			t.Fatalf("ProbeSearch(disabled) = %+v, want OFF and no warning", probe)
 		}
@@ -145,11 +149,15 @@ func TestProbeSearchReportsEveryState(t *testing.T) {
 	})
 	t.Run("brave configured not probed", func(t *testing.T) {
 		var hit bool
-		probe := ProbeSearch(context.Background(), SearchOptions{BraveAPIKey: "example-fixture-key"}, &http.Client{Transport: searchRoundTrip(func(*http.Request) (*http.Response, error) {
-			hit = true
-			t.Fatal("ProbeSearch dialed Brave — a doctor probe must never spend the operator's quota")
-			return nil, nil
-		})})
+		probe := ProbeSearch(
+			context.Background(),
+			SearchOptions{BraveAPIKey: "example-fixture-key"},
+			&http.Client{Transport: searchRoundTrip(func(*http.Request) (*http.Response, error) {
+				hit = true
+				t.Fatal("ProbeSearch dialed Brave — a doctor probe must never spend the operator's quota")
+				return nil, nil
+			})},
+		)
 		if probe.State != SearchProbeConfigured || probe.Warning || probe.Backend != "brave" {
 			t.Fatalf("ProbeSearch(brave key) = %+v, want configured/brave, no warning", probe)
 		}
@@ -170,8 +178,22 @@ func TestSearchBackendErrorNamesBackendAndSafeCause(t *testing.T) {
 	}{
 		{"timeout retryable", "searxng", 0, context.DeadlineExceeded, []string{"searxng", "timed out"}, nil},
 		{"5xx retryable", "searxng", 503, errors.New("HTTP 503"), []string{"searxng", "503"}, nil},
-		{"403 searxng json hint", "searxng", 403, errors.New("HTTP 403"), []string{"searxng", "403", "settings.yml", "json format"}, []string{"retry"}},
-		{"other status no retry wording", "brave", 401, errors.New("HTTP 401"), []string{"brave", "401"}, []string{"retry"}},
+		{
+			"403 searxng json hint",
+			"searxng",
+			403,
+			errors.New("HTTP 403"),
+			[]string{"searxng", "403", "settings.yml", "json format"},
+			[]string{"retry"},
+		},
+		{
+			"other status no retry wording",
+			"brave",
+			401,
+			errors.New("HTTP 401"),
+			[]string{"brave", "401"},
+			[]string{"retry"},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -199,7 +221,12 @@ func TestSearchBraveRefusesOversizeBodyByName(t *testing.T) {
 	withPublicDNSForProviderTest(t)
 	oversize := strings.Repeat("a", 10*1024*1024+1<<20)
 	brave := &http.Client{Transport: searchRoundTrip(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"web":{"results":[{"URL":"` + oversize + `"}]}}`)), Header: http.Header{"Content-Type": {"application/json"}}, Request: r}, nil
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"web":{"results":[{"URL":"` + oversize + `"}]}}`)),
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Request:    r,
+		}, nil
 	})}
 	_, status, err := searchBrave(context.Background(), "q", SearchOptions{BraveAPIKey: "k", Brave: brave, Count: 1})
 	if err == nil {

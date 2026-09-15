@@ -38,7 +38,11 @@ var railColumns = []int{
 // frame and the code that draws it can never disagree about a dot again.
 func TestBezierAtPinsTheStraightRailPixelColumns(t *testing.T) {
 	if len(railColumns) != railSteps+1 {
-		t.Fatalf("railColumns has %d entries, want %d — the fixture no longer covers the rail", len(railColumns), railSteps+1)
+		t.Fatalf(
+			"railColumns has %d entries, want %d — the fixture no longer covers the rail",
+			len(railColumns),
+			railSteps+1,
+		)
 	}
 	for sample, want := range railColumns {
 		at := float64(sample) / float64(railSteps)
@@ -106,7 +110,9 @@ func TestBezierAtRoundsEveryProductExplicitly(t *testing.T) {
 		}
 	}
 	if body == nil {
-		t.Fatalf("cosmoscanvas.go has no bezierAt returning one expression — the quadratic Bezier must stay in ONE canonical form")
+		t.Fatalf(
+			"cosmoscanvas.go has no bezierAt returning one expression — the quadratic Bezier must stay in ONE canonical form",
+		)
 	}
 	var terms []ast.Expr
 	var flatten func(ast.Expr)
@@ -131,7 +137,10 @@ func TestBezierAtRoundsEveryProductExplicitly(t *testing.T) {
 		}
 		name, ok := call.Fun.(*ast.Ident)
 		if !ok || name.Name != "float64" {
-			t.Errorf("bezierAt term %d is not wrapped in float64(); without it an FMA architecture may fuse the product into the sum and move a dot one cell", index)
+			t.Errorf(
+				"bezierAt term %d is not wrapped in float64(); without it an FMA architecture may fuse the product into the sum and move a dot one cell",
+				index,
+			)
 		}
 	}
 }

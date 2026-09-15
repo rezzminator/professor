@@ -181,7 +181,7 @@ func stressTranscriptPass(
 	t *testing.T,
 	store *Store,
 	update bool,
-) (elapsed time.Duration, maxBatch time.Duration) {
+) (elapsed, maxBatch time.Duration) {
 	t.Helper()
 
 	ctx := context.Background()

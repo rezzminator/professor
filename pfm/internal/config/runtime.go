@@ -66,7 +66,12 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
 	}
-	effective, configErr := Load(configPath, resolved.Home, resolved.Roots[pfmengine.Claude], resolved.FirstRoot(pfmengine.Codex))
+	effective, configErr := Load(
+		configPath,
+		resolved.Home,
+		resolved.Roots[pfmengine.Claude],
+		resolved.FirstRoot(pfmengine.Codex),
+	)
 	if configErr == nil {
 		resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 		resolved.Roots[pfmengine.Codex] = effective.CodexHomes()

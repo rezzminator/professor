@@ -121,7 +121,11 @@ func TestLegacyCacheFreshnessAllKindsAndFrontmatterWins(t *testing.T) {
 		}
 	}
 	frontmatterOld := write("frontmatter-wins", now.Add(-48*time.Hour).Format(time.RFC3339), now)
-	if !cache.stale(frontmatterOld, "html", map[string]string{"fetched_at": now.Add(-48 * time.Hour).Format(time.RFC3339)}) {
+	if !cache.stale(
+		frontmatterOld,
+		"html",
+		map[string]string{"fetched_at": now.Add(-48 * time.Hour).Format(time.RFC3339)},
+	) {
 		t.Fatal("fresh mtime incorrectly overrode old fetched_at")
 	}
 	if cache.stale(filepath.Join(root, "unstatable"), "html", map[string]string{"fetched_at": "broken"}) {
@@ -139,7 +143,17 @@ func TestLegacyRefreshBypassesNegativeCache(t *testing.T) {
 		return nil, fmt.Errorf("fixture connection failure")
 	})
 	client := func() *http.Client { return &http.Client{Transport: transport} }
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client(), Chrome: client(), Jina: client(), OA: client(), Converter: &fakeConverter{}})
+	h := mustNew(
+		t,
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    client(),
+			Chrome:    client(),
+			Jina:      client(),
+			OA:        client(),
+			Converter: &fakeConverter{},
+		},
+	)
 	source := "https://failure.example.test/page"
 	first := h.Fetch(context.Background(), source)
 	if first.Error == "" {
@@ -147,7 +161,8 @@ func TestLegacyRefreshBypassesNegativeCache(t *testing.T) {
 	}
 	firstCalls := calls
 	second := h.Fetch(context.Background(), source)
-	if !strings.Contains(second.Error, first.Error) || !strings.Contains(second.Error, "recently failed; cached") || calls != firstCalls {
+	if !strings.Contains(second.Error, first.Error) || !strings.Contains(second.Error, "recently failed; cached") ||
+		calls != firstCalls {
 		t.Fatalf("negative cache miss: second=%#v calls=%d want %d", second, calls, firstCalls)
 	}
 	third := h.FetchWithOptions(context.Background(), source, FetchOptions{Refresh: true})
@@ -205,7 +220,9 @@ func TestLegacyDOIISBNMetaAndMirrorPureCases(t *testing.T) {
 	if got := PMCArticleURL("PMC1"); got != "https://pmc.ncbi.nlm.nih.gov/articles/PMC1/" {
 		t.Fatalf("PMC URL=%q", got)
 	}
-	if got := EuropePMCFiguresURL("PMC42"); got != "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC42/supplementaryFiles" {
+	if got := EuropePMCFiguresURL(
+		"PMC42",
+	); got != "https://www.ebi.ac.uk/europepmc/webservices/rest/PMC42/supplementaryFiles" {
 		t.Fatalf("Europe PMC figures URL=%q", got)
 	}
 }
@@ -214,7 +231,10 @@ func TestLegacyWaybackAndPMCIDResponses(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Host {
 		case "archive.org":
-			return jsonResponse(request, `{"archived_snapshots":{"closest":{"available":true,"timestamp":"20230601123456"}}}`), nil
+			return jsonResponse(
+				request,
+				`{"archived_snapshots":{"closest":{"available":true,"timestamp":"20230601123456"}}}`,
+			), nil
 		case "pmc.ncbi.nlm.nih.gov":
 			return jsonResponse(request, `{"records":[{"pmcid":"PMC10450651"}]}`), nil
 		default:
@@ -243,7 +263,13 @@ func TestSearchEnabledNeedsABackendAndNotDisabled(t *testing.T) {
 	if !SearchEnabled(SearchOptions{BraveAPIKey: "example-fixture-key"}) {
 		t.Fatal("Brave did not enable search")
 	}
-	if SearchEnabled(SearchOptions{SearXNGURL: "https://search.example.test", BraveAPIKey: "example-fixture-key", DisableSearch: true}) {
+	if SearchEnabled(
+		SearchOptions{
+			SearXNGURL:    "https://search.example.test",
+			BraveAPIKey:   "example-fixture-key",
+			DisableSearch: true,
+		},
+	) {
 		t.Fatal("disabled search reported enabled")
 	}
 }

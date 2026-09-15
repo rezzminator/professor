@@ -216,13 +216,25 @@ func textOf(payload map[string]any) string {
 }
 
 func writeBundle(out, threadID, rollout string, turns, carried []turn) error {
-	if err := atomicfile.Write(filepath.Join(out, "transcript.md"), []byte(transcript(threadID, rollout, turns)), 0o600); err != nil {
+	if err := atomicfile.Write(
+		filepath.Join(out, "transcript.md"),
+		[]byte(transcript(threadID, rollout, turns)),
+		0o600,
+	); err != nil {
 		return err
 	}
-	if err := atomicfile.Write(filepath.Join(out, "compaction-memory.md"), []byte(memory(threadID, carried)), 0o600); err != nil {
+	if err := atomicfile.Write(
+		filepath.Join(out, "compaction-memory.md"),
+		[]byte(memory(threadID, carried)),
+		0o600,
+	); err != nil {
 		return err
 	}
-	if err := atomicfile.Write(filepath.Join(out, "brief.md"), []byte(brief(out, threadID, rollout, turns, carried)), 0o600); err != nil {
+	if err := atomicfile.Write(
+		filepath.Join(out, "brief.md"),
+		[]byte(brief(out, threadID, rollout, turns, carried)),
+		0o600,
+	); err != nil {
 		return err
 	}
 	return nil
@@ -230,7 +242,13 @@ func writeBundle(out, threadID, rollout string, turns, carried []turn) error {
 
 func transcript(threadID, rollout string, turns []turn) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Recovered conversation — thread %s\n\n%d user/assistant messages, parsed from %s\n\n", threadID, len(turns), rollout)
+	fmt.Fprintf(
+		&b,
+		"# Recovered conversation — thread %s\n\n%d user/assistant messages, parsed from %s\n\n",
+		threadID,
+		len(turns),
+		rollout,
+	)
 	for _, item := range turns {
 		fmt.Fprintf(&b, "## %s · %s\n\n%s\n\n", item.role, item.stamp, item.body)
 	}
@@ -239,7 +257,12 @@ func transcript(threadID, rollout string, turns []turn) string {
 
 func memory(threadID string, carried []turn) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# What survived compaction — thread %s\n\n%d messages carried through this thread's compactions.\n\n", threadID, len(carried))
+	fmt.Fprintf(
+		&b,
+		"# What survived compaction — thread %s\n\n%d messages carried through this thread's compactions.\n\n",
+		threadID,
+		len(carried),
+	)
 	for _, item := range carried {
 		fmt.Fprintf(&b, "## %s · %s\n\n%s\n\n", item.role, item.stamp, item.body)
 	}
@@ -253,10 +276,26 @@ func brief(out, threadID, rollout string, turns, carried []turn) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "# Recovery brief — thread %s\n\n", threadID)
-	fmt.Fprintf(&b, "You are the seat for thread `%s`. Codex brought you up with no memory: this thread's\nhistory store could not supply it, so `codex resume` opened an empty session. Nothing was lost —\nyour rollout is complete and your conversation is reconstructed below.\n\n", threadID)
-	fmt.Fprintf(&b, "| File | Holds |\n|------|-------|\n| `%s/compaction-memory.md` | %d messages carried through your compactions — your condensed long-term state |\n| `%s/transcript.md` | all %d user/assistant messages, in order |\n| `%s` | the raw rollout this was parsed from |\n\n", out, len(carried), out, len(turns), rollout)
-	b.WriteString("Read `compaction-memory.md` first, then the tail of `transcript.md` for the immediate position.\n\nA pane's emptiness is not evidence: the status line's context/token counts are what decide\nwhether a seat is warm.\n\n---\n\n")
-	b.WriteString("Came up empty? Run `pfm chat recover " + threadID + "` again to rebuild this bundle from the rollout.\n\n")
+	fmt.Fprintf(
+		&b,
+		"You are the seat for thread `%s`. Codex brought you up with no memory: this thread's\nhistory store could not supply it, so `codex resume` opened an empty session. Nothing was lost —\nyour rollout is complete and your conversation is reconstructed below.\n\n",
+		threadID,
+	)
+	fmt.Fprintf(
+		&b,
+		"| File | Holds |\n|------|-------|\n| `%s/compaction-memory.md` | %d messages carried through your compactions — your condensed long-term state |\n| `%s/transcript.md` | all %d user/assistant messages, in order |\n| `%s` | the raw rollout this was parsed from |\n\n",
+		out,
+		len(carried),
+		out,
+		len(turns),
+		rollout,
+	)
+	b.WriteString(
+		"Read `compaction-memory.md` first, then the tail of `transcript.md` for the immediate position.\n\nA pane's emptiness is not evidence: the status line's context/token counts are what decide\nwhether a seat is warm.\n\n---\n\n",
+	)
+	b.WriteString(
+		"Came up empty? Run `pfm chat recover " + threadID + "` again to rebuild this bundle from the rollout.\n\n",
+	)
 	fmt.Fprintf(&b, "## The last %d exchanges before the thread went dark\n\n", len(tail))
 	for _, item := range tail {
 		fmt.Fprintf(&b, "### %s · %s\n\n%s\n\n", item.role, item.stamp, item.body)

@@ -19,7 +19,13 @@ type harnessPromptModel struct{ alias, stem string }
 
 var harnessPromptModels = []harnessPromptModel{{"sonnet", "harness-original"}, {"opus", "harness-opus"}}
 
-func printHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home string, machine config.Config, verboseDir string) int {
+func printHarnessPromptDoctor(
+	ctx context.Context,
+	stdout io.Writer,
+	home string,
+	machine config.Config,
+	verboseDir string,
+) int {
 	warnings := 0
 	for _, model := range harnessPromptModels {
 		warnings += printModelHarnessPromptDoctor(ctx, stdout, home, machine, model, verboseDir)
@@ -32,7 +38,14 @@ func printHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home string
 // tokens are spent and nothing leaves the machine — and compares its sha256
 // to the staged baseline. Match, instruction drift, unavailable baseline, and
 // failed capture are distinct outcomes. Failed capture is never reported as drift.
-func printModelHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home string, machine config.Config, model harnessPromptModel, verboseDir string) int {
+func printModelHarnessPromptDoctor(
+	ctx context.Context,
+	stdout io.Writer,
+	home string,
+	machine config.Config,
+	model harnessPromptModel,
+	verboseDir string,
+) int {
 	fmt.Fprintf(stdout, "doctor: harness-prompt requested=%s\n", model.alias)
 	baselinePath := filepath.Join(home, ".local", "share", "pfm", "install", "prompts", model.stem+".sha256")
 	raw, err := os.ReadFile(baselinePath)
@@ -55,7 +68,12 @@ func printModelHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home s
 	baseline, baselineErr := os.ReadFile(filepath.Join(filepath.Dir(baselinePath), fields[1]))
 	baselineSum := sha256.Sum256(baseline)
 	if modelErr != nil || baselineModel == "" || baselineErr != nil || hex.EncodeToString(baselineSum[:]) != fields[0] {
-		fmt.Fprintf(stdout, "doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q — missing, unreadable or inconsistent baseline; run pfm install\n", fields[1], baselineModel)
+		fmt.Fprintf(
+			stdout,
+			"doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q — missing, unreadable or inconsistent baseline; run pfm install\n",
+			fields[1],
+			baselineModel,
+		)
 		return 1
 	}
 	captured, captureErr := configuredHarnessCapture(ctx, home, machine, model.alias, verboseDir)
@@ -66,7 +84,15 @@ func printModelHarnessPromptDoctor(ctx context.Context, stdout io.Writer, home s
 	if version == "" {
 		version = "unknown"
 	}
-	fmt.Fprintf(stdout, "doctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=%s resolved=%s cli=%q baseline=%s baseline_model=%s unchecked=active-chat,fable,codex\n", model.alias, resolved, version, fields[1], baselineModel)
+	fmt.Fprintf(
+		stdout,
+		"doctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=%s resolved=%s cli=%q baseline=%s baseline_model=%s unchecked=active-chat,fable,codex\n",
+		model.alias,
+		resolved,
+		version,
+		fields[1],
+		baselineModel,
+	)
 	canonicalBaseline := sha256.Sum256([]byte(normalizeHarnessPrompt(string(baseline))))
 	line, warn := harnessPromptVerdict(hex.EncodeToString(canonicalBaseline[:]), fields[1], captured.Prompt, captureErr)
 	fmt.Fprintln(stdout, line)

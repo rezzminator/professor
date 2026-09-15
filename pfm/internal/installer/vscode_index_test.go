@@ -29,7 +29,11 @@ func TestVSCodeExtensionIsRegisteredInEachProductsIndexNotOnlyLinked(t *testing.
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(rootEmptyArray, "extensions", "extensions.json"), []byte("[]"), 0o644); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(rootEmptyArray, "extensions", "extensions.json"),
+		[]byte("[]"),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	foreignEntry := `[{"identifier":{"id":"foo.bar"},"version":"1.2.3","relativeLocation":"foo.bar-1.2.3","location":{"$mid":1,"path":"/opt/foo/extensions/foo.bar-1.2.3","scheme":"file"}}]`
@@ -187,7 +191,11 @@ func TestVSCodeExtensionUninstallRemovesOnlyItsOwnIndexEntry(t *testing.T) {
 		"identifier":       map[string]any{"id": "foo.bar"},
 		"version":          "1.2.3",
 		"relativeLocation": "foo.bar-1.2.3",
-		"location":         map[string]any{"$mid": float64(1), "path": "/opt/foo/extensions/foo.bar-1.2.3", "scheme": "file"},
+		"location": map[string]any{
+			"$mid":   float64(1),
+			"path":   "/opt/foo/extensions/foo.bar-1.2.3",
+			"scheme": "file",
+		},
 	})
 	encoded, err := json.Marshal(entries)
 	if err != nil {
@@ -242,7 +250,11 @@ func TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow(t
 		}
 		// Each file carries the owned profile: the readable row must classify
 		// as "owned", so the assertion tests survival, not a missing profile.
-		if err := os.WriteFile(path, []byte(`{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh"}}}`), 0o644); err != nil {
+		if err := os.WriteFile(
+			path,
+			[]byte(`{"terminal.integrated.profiles.linux":{"PFM":{"path":"/bin/zsh"}}}`),
+			0o644,
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -266,7 +278,11 @@ func TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow(t
 		t.Fatalf("InspectVSCode(%q) returned an error instead of a per-row unreadable status: %v", home, err)
 	}
 	if len(report.Settings) != 2 {
-		t.Fatalf("report.Settings has %d rows, want 2 (the readable row must survive the unreadable one): %+v", len(report.Settings), report.Settings)
+		t.Fatalf(
+			"report.Settings has %d rows, want 2 (the readable row must survive the unreadable one): %+v",
+			len(report.Settings),
+			report.Settings,
+		)
 	}
 	var sawReadable, sawUnreadable bool
 	for _, status := range report.Settings {
@@ -282,11 +298,18 @@ func TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow(t
 				t.Fatalf("unreadable settings row Profile=%q, want %q", status.Profile, "unreadable")
 			}
 			if status.Error == "" {
-				t.Fatal("unreadable settings row carries no Error text — a read error must never render as bare absence")
+				t.Fatal(
+					"unreadable settings row carries no Error text — a read error must never render as bare absence",
+				)
 			}
 		}
 	}
 	if !sawReadable || !sawUnreadable {
-		t.Fatalf("report.Settings missing a row: sawReadable=%v sawUnreadable=%v: %+v", sawReadable, sawUnreadable, report.Settings)
+		t.Fatalf(
+			"report.Settings missing a row: sawReadable=%v sawUnreadable=%v: %+v",
+			sawReadable,
+			sawUnreadable,
+			report.Settings,
+		)
 	}
 }

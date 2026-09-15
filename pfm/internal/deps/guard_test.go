@@ -20,7 +20,8 @@ func TestProductionExecLiteralsAreRegisteredAndResolved(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.Contains(path, string(filepath.Separator)+"deps"+string(filepath.Separator)) {
+			if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") ||
+				strings.Contains(path, string(filepath.Separator)+"deps"+string(filepath.Separator)) {
 				return nil
 			}
 			filesScanned++
@@ -35,7 +36,8 @@ func TestProductionExecLiteralsAreRegisteredAndResolved(t *testing.T) {
 					return true
 				}
 				selector, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || (selector.Sel.Name != "Command" && selector.Sel.Name != "CommandContext" && selector.Sel.Name != "LookPath") {
+				if !ok ||
+					(selector.Sel.Name != "Command" && selector.Sel.Name != "CommandContext" && selector.Sel.Name != "LookPath") {
 					return true
 				}
 				pkg, ok := selector.X.(*ast.Ident)

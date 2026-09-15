@@ -102,7 +102,12 @@ func loadConfig(root string, cli CLIOverrides) (Config, error) {
 			return Config{}, fmt.Errorf("Codex compiler config %s: version is required", path)
 		}
 		if *file.Version != configVersion {
-			return Config{}, fmt.Errorf("Codex compiler config %s: unsupported version %d (want %d)", path, *file.Version, configVersion)
+			return Config{}, fmt.Errorf(
+				"Codex compiler config %s: unsupported version %d (want %d)",
+				path,
+				*file.Version,
+				configVersion,
+			)
 		}
 		if file.GlobalCommands != nil {
 			cfg.GlobalCommands = *file.GlobalCommands
@@ -232,12 +237,18 @@ func validateConfig(cfg Config) error {
 		}
 	}
 	for _, project := range cfg.Projects {
-		if strings.TrimSpace(project) == "" || filepath.IsAbs(project) || filepath.Clean(project) != project || project == "." || project == ".." || strings.ContainsAny(project, `/\\`) {
+		if strings.TrimSpace(project) == "" || filepath.IsAbs(project) || filepath.Clean(project) != project ||
+			project == "." ||
+			project == ".." ||
+			strings.ContainsAny(project, `/\\`) {
 			return fmt.Errorf("invalid projects entry %q", project)
 		}
 	}
 	for _, project := range cfg.ExcludeProjects {
-		if strings.TrimSpace(project) == "" || filepath.IsAbs(project) || filepath.Clean(project) != project || project == "." || project == ".." || strings.ContainsAny(project, `/\\`) {
+		if strings.TrimSpace(project) == "" || filepath.IsAbs(project) || filepath.Clean(project) != project ||
+			project == "." ||
+			project == ".." ||
+			strings.ContainsAny(project, `/\\`) {
 			return fmt.Errorf("invalid excludeProjects entry %q", project)
 		}
 	}

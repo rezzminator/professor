@@ -27,7 +27,10 @@ func (noNetworkHarvestProvisioner) Check(context.Context, string, harvestpy.Plat
 	return harvestpy.CheckReport{Healthy: true}, nil
 }
 
-func (noNetworkHarvestProvisioner) Provision(context.Context, harvestpy.ProvisionOptions) (harvestpy.ProvisionResult, error) {
+func (noNetworkHarvestProvisioner) Provision(
+	context.Context,
+	harvestpy.ProvisionOptions,
+) (harvestpy.ProvisionResult, error) {
 	return harvestpy.ProvisionResult{}, errors.New("test fake must not provision the pinned runtime")
 }
 
@@ -90,10 +93,21 @@ func TestMain(m *testing.M) {
 		results := make([]deps.Result, 0, len(entries))
 		for _, entry := range entries {
 			if !entry.AppliesTo(runtime.GOOS) {
-				results = append(results, deps.Result{Entry: entry, State: deps.StateSkipped, Error: "not this platform"})
+				results = append(
+					results,
+					deps.Result{Entry: entry, State: deps.StateSkipped, Error: "not this platform"},
+				)
 				continue
 			}
-			results = append(results, deps.Result{Entry: entry, State: deps.StateOK, Path: "/test/bin/" + entry.Name, Version: entry.MinVersion})
+			results = append(
+				results,
+				deps.Result{
+					Entry:   entry,
+					State:   deps.StateOK,
+					Path:    "/test/bin/" + entry.Name,
+					Version: entry.MinVersion,
+				},
+			)
 		}
 		return results
 	}
@@ -111,7 +125,11 @@ func TestMain(m *testing.M) {
 	// depends only on what baseline (if any) the fixture stages, via
 	// stageHarnessPromptBaseline in main_test.go.
 	harnessCaptureOverride = func(_ context.Context, _ string, _ pfmconfig.Config, alias, _ string) (harnessCapture, error) {
-		return harnessCapture{Prompt: harnessPromptFixtureCaptured, ResolvedModel: "claude-" + alias + "-5", CLIVersion: "fixture"}, nil
+		return harnessCapture{
+			Prompt:        harnessPromptFixtureCaptured,
+			ResolvedModel: "claude-" + alias + "-5",
+			CLIVersion:    "fixture",
+		}, nil
 	}
 	os.Exit(testjail.Run(m))
 }

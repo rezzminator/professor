@@ -81,7 +81,12 @@ func TestDreamPackagesRespectDirectImportBoundary(t *testing.T) {
 				continue
 			}
 			if pkg.ImportPath != dreamSeatPackage {
-				t.Errorf("%s directly imports host package %s; only %s may cross the host boundary", pkg.ImportPath, imported, dreamSeatPackage)
+				t.Errorf(
+					"%s directly imports host package %s; only %s may cross the host boundary",
+					pkg.ImportPath,
+					imported,
+					dreamSeatPackage,
+				)
 				continue
 			}
 			if _, allowed := allowedSeatImports[imported]; !allowed {
@@ -116,7 +121,11 @@ func TestDreamImportArrowIsOneWay(t *testing.T) {
 					if err != nil {
 						rel = filename
 					}
-					t.Errorf("%s imports %s; only cmd/pfm/dream_command.go may import internal/dream", filepath.ToSlash(rel), imported)
+					t.Errorf(
+						"%s imports %s; only cmd/pfm/dream_command.go may import internal/dream",
+						filepath.ToSlash(rel),
+						imported,
+					)
 				}
 			}
 		}

@@ -219,7 +219,10 @@ func TestInspectClaudeLauncherRejectsBrokenManagedTarget(t *testing.T) {
 	if err := os.Symlink(managedClaudeLauncher(home), canonical); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := InspectClaudeLauncher(home); err == nil || !strings.Contains(err.Error(), "inspect managed Claude launcher") {
+	if _, err := InspectClaudeLauncher(
+		home,
+	); err == nil ||
+		!strings.Contains(err.Error(), "inspect managed Claude launcher") {
 		t.Fatalf("InspectClaudeLauncher broken target error=%v", err)
 	}
 }

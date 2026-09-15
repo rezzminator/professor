@@ -210,14 +210,25 @@ func TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone(t *te
 			results := make([]deps.Result, 0, len(entries))
 			for _, entry := range entries {
 				if !entry.AppliesTo(goRuntime.GOOS) {
-					results = append(results, deps.Result{Entry: entry, State: deps.StateSkipped, Error: "not this platform"})
+					results = append(
+						results,
+						deps.Result{Entry: entry, State: deps.StateSkipped, Error: "not this platform"},
+					)
 					continue
 				}
 				if entry.Name == "tmux" {
 					results = append(results, deps.Result{Entry: entry, State: deps.StateMissing})
 					continue
 				}
-				results = append(results, deps.Result{Entry: entry, State: deps.StateOK, Path: "/test/bin/" + entry.Name, Version: entry.MinVersion})
+				results = append(
+					results,
+					deps.Result{
+						Entry:   entry,
+						State:   deps.StateOK,
+						Path:    "/test/bin/" + entry.Name,
+						Version: entry.MinVersion,
+					},
+				)
 			}
 			return results
 		}

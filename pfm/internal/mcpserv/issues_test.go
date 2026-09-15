@@ -112,7 +112,10 @@ func TestIssueServicedeskRecordsUnidentifiedSenderWhenNoCallerIdentity(t *testin
 		t.Fatalf("filed issue id %d not found in %+v", output.ID, stored)
 	}
 	if row.ReporterSession == "" {
-		t.Fatalf("reporter_session is empty, want the %q sentinel — an empty column is indistinguishable from a capture-path bug", shared.UnidentifiedSender)
+		t.Fatalf(
+			"reporter_session is empty, want the %q sentinel — an empty column is indistinguishable from a capture-path bug",
+			shared.UnidentifiedSender,
+		)
 	}
 	if row.ReporterSession != shared.UnidentifiedSender {
 		t.Fatalf("reporter_session = %q, want the literal sentinel %q", row.ReporterSession, shared.UnidentifiedSender)
@@ -141,7 +144,8 @@ func TestIssueInputCarriesNoReporterIdentityField(t *testing.T) {
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf(
 			"IssueInput json fields = %v, want exactly %v — reporter identity (session/label/uuid/cwd/engine) must come only from the capture path, never from caller input",
-			names, want,
+			names,
+			want,
 		)
 	}
 }

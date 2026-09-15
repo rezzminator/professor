@@ -89,7 +89,13 @@ func TestSpawnLeavesTheHostsTitleAloneWhenTitlesAreDisabled(t *testing.T) {
 	}
 	// The window name is the fleet's DNS record either way: automatic-rename
 	// is never gated by the title policy.
-	if got := showOption(t, socketPath, "show-window-options", "-g", "automatic-rename"); got != "automatic-rename off" {
+	if got := showOption(
+		t,
+		socketPath,
+		"show-window-options",
+		"-g",
+		"automatic-rename",
+	); got != "automatic-rename off" {
 		t.Fatalf("automatic-rename = %q, want off regardless of the title policy", got)
 	}
 }

@@ -55,7 +55,8 @@ func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *
 	if err != nil {
 		t.Fatalf("missing bundled file aborted host install: %v\n%s", err, missingOutput)
 	}
-	if !strings.Contains(missingOutput, "theme sonar-gold read failed") || !strings.Contains(missingOutput, "sonar-gold.json") {
+	if !strings.Contains(missingOutput, "theme sonar-gold read failed") ||
+		!strings.Contains(missingOutput, "sonar-gold.json") {
 		t.Fatalf("missing bundled file was silent or vague:\n%s", missingOutput)
 	}
 
@@ -76,7 +77,12 @@ func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *
 	if err != nil {
 		t.Fatalf("release-fallback bundled install: %v\n%s", err, releaseOutput)
 	}
-	if got := []byte(readFixture(t, filepath.Join(releaseHome, ".claude", "themes", "sonar-gold.json"))); !bytes.Equal(got, themeBody) {
+	if got := []byte(
+		readFixture(t, filepath.Join(releaseHome, ".claude", "themes", "sonar-gold.json")),
+	); !bytes.Equal(
+		got,
+		themeBody,
+	) {
 		t.Fatalf("release-fallback bundled theme=%q, want %q\n%s", got, themeBody, releaseOutput)
 	}
 }
@@ -101,7 +107,11 @@ func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing
 
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), `{"bundled":{"x":{"file":"x.json","target":"~/.claude/themes/x.json"}}}`)
+	writeFixture(
+		t,
+		filepath.Join(sourceRepo, "templates", "themes", "sources.json"),
+		`{"bundled":{"x":{"file":"x.json","target":"~/.claude/themes/x.json"}}}`,
+	)
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "x.json"), "not json\n")
 	var output bytes.Buffer
 	_, err := Run(context.Background(), Options{
@@ -111,13 +121,15 @@ func TestBundledThemeManifestValidationAndNonJSONFileFailClosedByName(t *testing
 	if err != nil {
 		t.Fatalf("non-JSON bundled file aborted host install: %v\n%s", err, output.String())
 	}
-	if !strings.Contains(output.String(), "theme x read failed") || !strings.Contains(output.String(), "is not valid JSON") {
+	if !strings.Contains(output.String(), "theme x read failed") ||
+		!strings.Contains(output.String(), "is not valid JSON") {
 		t.Fatalf("non-JSON bundled file was silent or vague:\n%s", output.String())
 	}
 	if _, statErr := os.Stat(filepath.Join(home, ".claude", "themes", "x.json")); !os.IsNotExist(statErr) {
 		t.Fatalf("non-JSON bundled file was installed anyway: %v", statErr)
 	}
 }
+
 func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 	baseBody := `{"name":"Tokyo Night","base":"dark","overrides":{"claude":"#c95cff","promptBorder":"#7c4dff","promptBorderShimmer":"#aa8bff"}}`
 	overlay := `{"name":"Professor Gold","overrides":{"promptBorder":"#ffd60a","promptBorderShimmer":"#fff7c2"}}`
@@ -161,7 +173,10 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 		Base      string            `json:"base"`
 		Overrides map[string]string `json:"overrides"`
 	}
-	if err := json.Unmarshal([]byte(readFixture(t, filepath.Join(home, ".claude", "themes", "professor-gold.json"))), &merged); err != nil {
+	if err := json.Unmarshal(
+		[]byte(readFixture(t, filepath.Join(home, ".claude", "themes", "professor-gold.json"))),
+		&merged,
+	); err != nil {
 		t.Fatalf("merged overlay is not JSON: %v", err)
 	}
 	if merged.Name != "Professor Gold" || merged.Base != "dark" || merged.Overrides["claude"] != "#c95cff" ||
@@ -174,7 +189,8 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("base fetch failure aborted host install: %v\n%s", err, failedOutput)
 	}
-	if !strings.Contains(failedOutput, "theme professor-gold base tokyo-night fetch failed") || !strings.Contains(failedOutput, "503") {
+	if !strings.Contains(failedOutput, "theme professor-gold base tokyo-night fetch failed") ||
+		!strings.Contains(failedOutput, "503") {
 		t.Fatalf("base fetch failure was silent or vague:\n%s", failedOutput)
 	}
 
@@ -183,13 +199,25 @@ func TestOverlayThemeMergesOntoFetchedBaseAndNamesABaseFailure(t *testing.T) {
 		{"blank overlay", baseBody, `{"name":"Professor Gold"}`, "overlay carries no overrides"},
 		{"non-JSON base", `{"name":`, overlay, "decode base palette"},
 	} {
-		if _, err := mergeThemeOverlay([]byte(tc.base), []byte(tc.overlay)); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if _, err := mergeThemeOverlay(
+			[]byte(tc.base),
+			[]byte(tc.overlay),
+		); err == nil ||
+			!strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err=%v, want it to contain %q", tc.name, err, tc.want)
 		}
 	}
 
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), `{"bundled":{"professor-gold":{"file":"professor-gold.json","base":"nope","target":"~/.claude/themes/professor-gold.json"}}}`)
-	if _, err := loadThemeSources(context.Background(), Options{SourceRepo: sourceRepo}); err == nil || !strings.Contains(err.Error(), `bundled theme "professor-gold" base "nope" is not a source_fetched theme`) {
+	writeFixture(
+		t,
+		filepath.Join(sourceRepo, "templates", "themes", "sources.json"),
+		`{"bundled":{"professor-gold":{"file":"professor-gold.json","base":"nope","target":"~/.claude/themes/professor-gold.json"}}}`,
+	)
+	if _, err := loadThemeSources(
+		context.Background(),
+		Options{SourceRepo: sourceRepo},
+	); err == nil ||
+		!strings.Contains(err.Error(), `bundled theme "professor-gold" base "nope" is not a source_fetched theme`) {
 		t.Fatalf("unknown base err=%v, want a named manifest refusal", err)
 	}
 }
@@ -226,7 +254,11 @@ func TestThemeManifestUnpublishedAlphaReleaseReturnsNamedRefusal(t *testing.T) {
 func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
 	home := t.TempDir()
 	sourceRepo := t.TempDir()
-	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json"), `{"name":"Sonar Gold","overrides":{"accent":"#fff"}}`+"\n")
+	writeFixture(
+		t,
+		filepath.Join(sourceRepo, "templates", "themes", "sonar-gold.json"),
+		`{"name":"Sonar Gold","overrides":{"accent":"#fff"}}`+"\n",
+	)
 	manifest := `{"bundled":{"sonar-gold":{"file":"sonar-gold.json","target":"~/.claude/themes/sonar-gold.json","activate":"/theme","requires":"fixture"}}}`
 	writeFixture(t, filepath.Join(sourceRepo, "templates", "themes", "sources.json"), manifest)
 	var output bytes.Buffer

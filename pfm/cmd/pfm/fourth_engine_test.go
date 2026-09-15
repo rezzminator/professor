@@ -110,7 +110,11 @@ func TestFourthEngineNeedsOnlyItsOwnPackage(t *testing.T) {
 	}
 	palette := theme.Load("default")
 	if palette.EngineRow[id] == "" || palette.StatsEngine[id] == "" {
-		t.Fatalf("fourth engine has no theme fallback: rows=%q stats=%q", palette.EngineRow[id], palette.StatsEngine[id])
+		t.Fatalf(
+			"fourth engine has no theme fallback: rows=%q stats=%q",
+			palette.EngineRow[id],
+			palette.StatsEngine[id],
+		)
 	}
 }
 
@@ -121,7 +125,16 @@ func (fourthSource) Sync(context.Context, *store.Store, []string, *index.Counter
 type fourthLauncher struct{}
 
 func (fourthLauncher) ComposerReady(string) bool { return true }
-func (fourthLauncher) Rename(context.Context, spawn.Tmux, string, string, string, spawn.Timings, spawn.Trace) (string, error) {
+
+func (fourthLauncher) Rename(
+	context.Context,
+	spawn.Tmux,
+	string,
+	string,
+	string,
+	spawn.Timings,
+	spawn.Trace,
+) (string, error) {
 	return "", nil
 }
 

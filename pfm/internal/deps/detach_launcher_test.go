@@ -113,7 +113,12 @@ func TestDetachLauncherBareNameLookupTakesTheBranchTheRegistryAllows(t *testing.
 		return
 	}
 	if path != fakeNohup || len(prefixArgs) != 0 {
-		t.Fatalf("path=%q prefixArgs=%q, want the staged nohup branch (%q) — a real setsid on $PATH must not win on darwin", path, prefixArgs, fakeNohup)
+		t.Fatalf(
+			"path=%q prefixArgs=%q, want the staged nohup branch (%q) — a real setsid on $PATH must not win on darwin",
+			path,
+			prefixArgs,
+			fakeNohup,
+		)
 	}
 }
 
@@ -137,13 +142,18 @@ func TestDetachLauncherOnDarwinIsRefusedByThePlatformGateNotAbsence(t *testing.T
 
 	_, err := Resolve("setsid")
 	if err == nil {
-		t.Fatal("Resolve(\"setsid\") succeeded on darwin though setsid is registered Linux-only — the staged binary should never be reached")
+		t.Fatal(
+			"Resolve(\"setsid\") succeeded on darwin though setsid is registered Linux-only — the staged binary should never be reached",
+		)
 	}
 	if !strings.Contains(err.Error(), "not supported on darwin") {
 		t.Fatalf("Resolve(\"setsid\") error = %q, want the platform-gate refusal, not an absence error", err)
 	}
 	if strings.Contains(err.Error(), "executable file not found") {
-		t.Fatalf("Resolve(\"setsid\") error = %q reads as absence, not the platform gate — the staged binary was on $PATH the whole time", err)
+		t.Fatalf(
+			"Resolve(\"setsid\") error = %q reads as absence, not the platform gate — the staged binary was on $PATH the whole time",
+			err,
+		)
 	}
 }
 

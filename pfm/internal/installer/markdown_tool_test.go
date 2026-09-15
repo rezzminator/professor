@@ -33,7 +33,12 @@ func writeScript(t *testing.T, dir, name, content string) string {
 // undetected.
 func poisonScript(t *testing.T, dir, marker, name string) {
 	t.Helper()
-	writeScript(t, dir, name, "#!/bin/sh\ntouch \"$POISON_MARKER_DIR/"+name+".ran\"\necho poisoned-"+name+" invoked >&2\nexit 1\n")
+	writeScript(
+		t,
+		dir,
+		name,
+		"#!/bin/sh\ntouch \"$POISON_MARKER_DIR/"+name+".ran\"\necho poisoned-"+name+" invoked >&2\nexit 1\n",
+	)
 	t.Setenv("POISON_MARKER_DIR", marker)
 }
 
@@ -98,7 +103,11 @@ func TestInstallMarkdownToolStaleVersionFallsThroughPastAlreadyPresent(t *testin
 	}
 	want := "rumdl: offline, will not attempt uv tool install rumdl==0.2.73"
 	if !strings.Contains(output.String(), want) {
-		t.Fatalf("output=%q, want to contain %q (a stale rumdl must not short-circuit as already-present)", output.String(), want)
+		t.Fatalf(
+			"output=%q, want to contain %q (a stale rumdl must not short-circuit as already-present)",
+			output.String(),
+			want,
+		)
 	}
 	if eng.report.OK != 0 || eng.report.Skipped != 1 {
 		t.Fatalf("report=%+v, want OK=0 Skipped=1", eng.report)

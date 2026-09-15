@@ -99,7 +99,11 @@ func renderClaudeLauncherAsset(content []byte, options Options) ([]byte, error) 
 	if strings.HasPrefix(options.ClaudeBinary, "/") {
 		configured = options.ClaudeBinary
 	}
-	rendered, err := replaceSingleAssetMarker(string(content), "__PFM_CONFIGURED_CLAUDE__", shellSingleQuoted(configured))
+	rendered, err := replaceSingleAssetMarker(
+		string(content),
+		"__PFM_CONFIGURED_CLAUDE__",
+		shellSingleQuoted(configured),
+	)
 	return []byte(rendered), err
 }
 

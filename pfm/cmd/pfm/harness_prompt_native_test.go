@@ -49,20 +49,28 @@ func TestHarnessPromptNativeRepeatedCapture(t *testing.T) {
 			if captured.ResolvedModel == "" || captured.CLIVersion == "" {
 				t.Fatalf("capture lacks identity: %+v", captured)
 			}
-			if attempt > 0 && (captured.ResolvedModel != previous.ResolvedModel || normalizeHarnessPrompt(captured.Prompt) != normalizeHarnessPrompt(previous.Prompt)) {
+			if attempt > 0 &&
+				(captured.ResolvedModel != previous.ResolvedModel || normalizeHarnessPrompt(captured.Prompt) != normalizeHarnessPrompt(previous.Prompt)) {
 				t.Fatal("repeated native captures changed beyond normalized metadata")
 			}
 			sum := sha256.Sum256([]byte(normalizeHarnessPrompt(captured.Prompt)))
-			t.Logf("capture=%d requested=%s resolved=%s cli=%s normalized_sha256=%s", attempt+1, model.alias, captured.ResolvedModel, captured.CLIVersion, hex.EncodeToString(sum[:]))
+			t.Logf(
+				"capture=%d requested=%s resolved=%s cli=%s normalized_sha256=%s",
+				attempt+1,
+				model.alias,
+				captured.ResolvedModel,
+				captured.CLIVersion,
+				hex.EncodeToString(sum[:]),
+			)
 			if dir := os.Getenv("PFM_HARNESS_CAPTURE_DIR"); dir != "" {
-				if err := os.MkdirAll(dir, 0700); err != nil {
+				if err := os.MkdirAll(dir, 0o700); err != nil {
 					t.Fatal(err)
 				}
 				raw, err := json.Marshal(captured)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(dir, model.alias+"-capture.json"), raw, 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, model.alias+"-capture.json"), raw, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}

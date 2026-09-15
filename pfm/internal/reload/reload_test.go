@@ -38,21 +38,25 @@ func (tmux *fakeReloadTmux) Capture(context.Context, string, string) (string, er
 	}
 	return "Claude\n❯ ", nil
 }
+
 func (tmux *fakeReloadTmux) SendKey(_ context.Context, _, _, key string) error {
 	if key == "Enter" && tmux.literal == "/exit" {
 		tmux.dead = true
 	}
 	return nil
 }
+
 func (tmux *fakeReloadTmux) SendLiteral(_ context.Context, _, _, value string) error {
 	tmux.literal = value
 	return nil
 }
+
 func (tmux *fakeReloadTmux) Respawn(_ context.Context, _, _, _, command string) error {
 	tmux.respawn = command
 	tmux.dead = false
 	return nil
 }
+
 func (tmux *fakeReloadTmux) Display(_ context.Context, _, _, message string) error {
 	tmux.displays = append(tmux.displays, message)
 	return nil
@@ -228,6 +232,7 @@ func (respawnPromptProc) Cmdline(int) ([]string, error) { return []string{"claud
 func (respawnPromptProc) Environ(int) (map[string]string, error) {
 	return map[string]string{}, nil
 }
+
 func (proc respawnPromptProc) Stat(pid int) (gather.ProcStat, error) {
 	if pid == 801 {
 		return gather.ProcStat{ParentPID: proc.tmux.newPID}, nil
@@ -238,6 +243,7 @@ func (promptReadyProc) Cmdline(int) ([]string, error) { return []string{"claude"
 func (promptReadyProc) Environ(int) (map[string]string, error) {
 	return map[string]string{}, nil
 }
+
 func (promptReadyProc) Stat(pid int) (gather.ProcStat, error) {
 	if pid == 801 {
 		return gather.ProcStat{ParentPID: 700}, nil
@@ -291,7 +297,14 @@ func TestRunRefusesAnOverlappingPaneReload(t *testing.T) {
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
-	_, err = Run(context.Background(), Request{Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7", Account: 2, AccountIDs: []int{2}}, Options{SIDDir: dir, Delay: -1}, nil, nil, nil)
+	_, err = Run(
+		context.Background(),
+		Request{Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7", Account: 2, AccountIDs: []int{2}},
+		Options{SIDDir: dir, Delay: -1},
+		nil,
+		nil,
+		nil,
+	)
 	if err == nil || !strings.Contains(err.Error(), "already in flight") {
 		t.Fatalf("overlap error = %v", err)
 	}
@@ -831,7 +844,12 @@ func TestRunRefusesToTypeExitIntoAChatThatStaysBusy(t *testing.T) {
 		t.Fatalf("always-busy chat error=%v, want a 'still busy' refusal", err)
 	}
 	if tmux.literal != "" || tmux.typedAfter != -1 || tmux.respawn != "" {
-		t.Fatalf("a busy chat was touched: literal=%q typedAfter=%d respawn=%q", tmux.literal, tmux.typedAfter, tmux.respawn)
+		t.Fatalf(
+			"a busy chat was touched: literal=%q typedAfter=%d respawn=%q",
+			tmux.literal,
+			tmux.typedAfter,
+			tmux.respawn,
+		)
 	}
 }
 
@@ -927,7 +945,11 @@ func TestRunConfirmsTheBackgroundWorkExitDialog(t *testing.T) {
 		t.Fatalf("exit dialog was not confirmed: %v (keys %v)", err, tmux.keys)
 	}
 	if countKey(tmux.keys, "Enter") != 2 || tmux.respawn == "" {
-		t.Fatalf("want exactly one submit Enter plus one confirm Enter, got keys %v respawn=%q", tmux.keys, tmux.respawn)
+		t.Fatalf(
+			"want exactly one submit Enter plus one confirm Enter, got keys %v respawn=%q",
+			tmux.keys,
+			tmux.respawn,
+		)
 	}
 }
 

@@ -70,7 +70,10 @@ func TestLiveExplorerSurfaceRegeneratesByteIdentically(t *testing.T) {
 	var organRoot string
 	for _, repository := range liveContractRepositories(t) {
 		candidate := filepath.Join(repository.RepoRoot, ".professor", "stm")
-		if info, err := os.Stat(filepath.Join(candidate, "agents", "tracer.md")); err == nil && info.Mode().IsRegular() {
+		if info, err := os.Stat(
+			filepath.Join(candidate, "agents", "tracer.md"),
+		); err == nil &&
+			info.Mode().IsRegular() {
 			organRoot = candidate
 			break
 		}

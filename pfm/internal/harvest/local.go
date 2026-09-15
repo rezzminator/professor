@@ -24,10 +24,46 @@ func fileURLPath(raw string) (string, error) {
 	return path, nil
 }
 
-var systemRoots = []string{"/proc", "/sys", "/dev", "/etc"}
-var denyDirs = map[string]bool{".ssh": true, ".gnupg": true, ".aws": true, ".password-store": true, ".docker": true, ".config": true, ".kube": true}
-var denyNames = map[string]bool{"id_rsa": true, "id_ed25519": true, "id_dsa": true, "id_ecdsa": true, "credentials": true, ".netrc": true, ".pgpass": true, ".htpasswd": true, "shadow": true, "master.key": true, "passwd": true, ".git-credentials": true, ".bash_history": true}
-var denySuffixes = []string{".pem", ".key", ".p12", ".pfx", ".keystore", ".jks", ".asc", ".gpg", ".kdbx", ".ppk", ".env"}
+var (
+	systemRoots = []string{"/proc", "/sys", "/dev", "/etc"}
+	denyDirs    = map[string]bool{
+		".ssh":            true,
+		".gnupg":          true,
+		".aws":            true,
+		".password-store": true,
+		".docker":         true,
+		".config":         true,
+		".kube":           true,
+	}
+	denyNames = map[string]bool{
+		"id_rsa":           true,
+		"id_ed25519":       true,
+		"id_dsa":           true,
+		"id_ecdsa":         true,
+		"credentials":      true,
+		".netrc":           true,
+		".pgpass":          true,
+		".htpasswd":        true,
+		"shadow":           true,
+		"master.key":       true,
+		"passwd":           true,
+		".git-credentials": true,
+		".bash_history":    true,
+	}
+	denySuffixes = []string{
+		".pem",
+		".key",
+		".p12",
+		".pfx",
+		".keystore",
+		".jks",
+		".asc",
+		".gpg",
+		".kdbx",
+		".ppk",
+		".env",
+	}
+)
 
 // DenyLocalPath returns a human-readable refusal reason, or an empty string
 // when the canonical path is safe. roots is a confinement list; an empty list
@@ -92,6 +128,7 @@ func DenyLocalPath(path string, roots []string) string {
 	}
 	return ""
 }
+
 func insideAny(path string, roots []string) bool {
 	for _, root := range roots {
 		if path == root || strings.HasPrefix(path, root+string(os.PathSeparator)) {

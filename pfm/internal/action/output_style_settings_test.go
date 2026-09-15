@@ -36,7 +36,12 @@ func TestClaudeSpawnCarriesOutputStyleDefaultSettings(t *testing.T) {
 			t.Fatalf("%s command spawn: %v", purpose, err)
 		}
 		if !containsFlagPair(command.Args, "--settings", pfmengine.OutputStyleDefaultSettings) {
-			t.Fatalf("%s command argv %#v lacks --settings %s", purpose, command.Args, pfmengine.OutputStyleDefaultSettings)
+			t.Fatalf(
+				"%s command argv %#v lacks --settings %s",
+				purpose,
+				command.Args,
+				pfmengine.OutputStyleDefaultSettings,
+			)
 		}
 	}
 }

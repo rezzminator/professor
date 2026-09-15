@@ -83,7 +83,16 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 		return 1
 	}
 
-	overrides, err := codexCLIOverrides(models, *rootAdapter, *agentPreamble, excludeDirs, excludeProjects, neverRegister, *suffixMode, *suffixPrefix)
+	overrides, err := codexCLIOverrides(
+		models,
+		*rootAdapter,
+		*agentPreamble,
+		excludeDirs,
+		excludeProjects,
+		neverRegister,
+		*suffixMode,
+		*suffixPrefix,
+	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm codex %s: %v\n", args[0], err)
 		return 2
@@ -161,7 +170,12 @@ func runCodexAgents(args []string, stdout, stderr io.Writer, runtime commandRunt
 		fmt.Fprintf(stdout, "%s: %d B, parses clean\n", compiled.Path, compiled.Size)
 	}
 	for _, installed := range result.Installed {
-		fmt.Fprintf(stdout, "%s %s\n", installed.State, codexgen.DescribeGlobalLinkState(installed.State, installed.Path, installed.Source, installed.Found))
+		fmt.Fprintf(
+			stdout,
+			"%s %s\n",
+			installed.State,
+			codexgen.DescribeGlobalLinkState(installed.State, installed.Path, installed.Source, installed.Found),
+		)
 	}
 	for _, problem := range result.Problems {
 		fmt.Fprintf(stderr, "pfm codex agents: %s\n", problem)
@@ -207,7 +221,12 @@ func (list *repeatString) Set(value string) error {
 	return nil
 }
 
-func codexCLIOverrides(models repeatString, adapter, preamble string, dirs, projects, agents repeatString, suffixMode, suffixPrefix string) (codexgen.CLIOverrides, error) {
+func codexCLIOverrides(
+	models repeatString,
+	adapter, preamble string,
+	dirs, projects, agents repeatString,
+	suffixMode, suffixPrefix string,
+) (codexgen.CLIOverrides, error) {
 	result := codexgen.CLIOverrides{
 		RootAdapter:     adapter,
 		AgentPreamble:   preamble,

@@ -41,7 +41,14 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 				return harnessCapture{Prompt: tc.prompt, ResolvedModel: tc.model, CLIVersion: "2.1.fixture"}, tc.err
 			}
 			var output bytes.Buffer
-			code := printModelHarnessPromptDoctor(context.Background(), &output, home, config.Config{}, harnessPromptModels[0], "")
+			code := printModelHarnessPromptDoctor(
+				context.Background(),
+				&output,
+				home,
+				config.Config{},
+				harnessPromptModels[0],
+				"",
+			)
 			if (code != 0) != tc.warning || !strings.Contains(output.String(), tc.want) {
 				t.Fatalf("code=%d output=%s", code, &output)
 			}
@@ -60,7 +67,9 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 }
 
 func TestHarnessCaptureRetainsRequestModel(t *testing.T) {
-	got, err := decodeHarnessCapture([]byte(`{"model":"claude-fable-5-1","system":[{"text":"model-specific instructions"}]}`))
+	got, err := decodeHarnessCapture(
+		[]byte(`{"model":"claude-fable-5-1","system":[{"text":"model-specific instructions"}]}`),
+	)
 	if err != nil || got.ResolvedModel != "claude-fable-5-1" || got.Prompt != "model-specific instructions\n" {
 		t.Fatalf("capture=%+v err=%v", got, err)
 	}

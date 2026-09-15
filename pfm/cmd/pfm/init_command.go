@@ -82,7 +82,11 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 	}
 	fmt.Fprintf(stdout, "initialized %s from %s\n", target, source)
 	fmt.Fprintf(stdout, "deployed %d project files; baseline: %s\n", deployed, professor.BaselinePath(target))
-	fmt.Fprintf(stdout, "open Claude here and follow %s § Install interview — it fills tokens and deploys per-project agents\n", filepath.Join(source, "docs", "SETUP.md"))
+	fmt.Fprintf(
+		stdout,
+		"open Claude here and follow %s § Install interview — it fills tokens and deploys per-project agents\n",
+		filepath.Join(source, "docs", "SETUP.md"),
+	)
 	return 0
 }
 
@@ -168,7 +172,8 @@ func planInitCopies(store professor.Store) ([]initCopy, error) {
 			if relative == "." {
 				return nil
 			}
-			if mapping.skip != "" && (relative == mapping.skip || strings.HasPrefix(relative, mapping.skip+string(filepath.Separator))) {
+			if mapping.skip != "" &&
+				(relative == mapping.skip || strings.HasPrefix(relative, mapping.skip+string(filepath.Separator))) {
 				if entry.IsDir() {
 					return filepath.SkipDir
 				}
@@ -201,8 +206,13 @@ func planInitCopies(store professor.Store) ([]initCopy, error) {
 }
 
 func addScaffoldMarker(local, template, sha string, raw []byte) []byte {
-	marker := fmt.Sprintf("# pfm-scaffold: %s@%s — this file is YOURS; upstream deltas arrive via pfm update, reviewed and hand-applied\n", template, sha)
-	if local != "CLAUDE.md" && local != "AGENTS.md" && strings.HasSuffix(local, ".md") && strings.HasPrefix(string(raw), "---\n") {
+	marker := fmt.Sprintf(
+		"# pfm-scaffold: %s@%s — this file is YOURS; upstream deltas arrive via pfm update, reviewed and hand-applied\n",
+		template,
+		sha,
+	)
+	if local != "CLAUDE.md" && local != "AGENTS.md" && strings.HasSuffix(local, ".md") &&
+		strings.HasPrefix(string(raw), "---\n") {
 		return append(append([]byte("---\n"), []byte(marker)...), raw[len("---\n"):]...)
 	}
 	if strings.HasSuffix(local, ".sh") {

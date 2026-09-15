@@ -121,7 +121,11 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 	sourceRepo, err = filepath.Abs(sourceRepo)
 	if err != nil {
-		return GlobalAgentsResult{}, fmt.Errorf("resolve global agents source repository %q: %w", options.SourceRepo, err)
+		return GlobalAgentsResult{}, fmt.Errorf(
+			"resolve global agents source repository %q: %w",
+			options.SourceRepo,
+			err,
+		)
 	}
 	sourceRepo = filepath.Clean(sourceRepo)
 	agentsDir := filepath.Join(sourceRepo, "templates", "global", "agents")
@@ -154,7 +158,10 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		if _, err := os.Stat(src); err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("inspect %s: %w", src, err)
 		}
-		compiledAgents = append(compiledAgents, compiledAgent{mdSource: src, tomlOutput: out, tomlContent: []byte(content)})
+		compiledAgents = append(
+			compiledAgents,
+			compiledAgent{mdSource: src, tomlOutput: out, tomlContent: []byte(content)},
+		)
 	}
 
 	// One Claude agents/ registry per configured account; an installer that
@@ -171,7 +178,10 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	result := GlobalAgentsResult{}
 	links := make([]desiredLink, 0, len(compiledAgents)*2)
 	for _, agent := range compiledAgents {
-		result.Compiled = append(result.Compiled, GlobalAgentCompiled{Path: agent.tomlOutput, Size: int64(len(agent.tomlContent))})
+		result.Compiled = append(
+			result.Compiled,
+			GlobalAgentCompiled{Path: agent.tomlOutput, Size: int64(len(agent.tomlContent))},
+		)
 		same, err := sameGlobalAgentFile(agent.tomlOutput, agent.tomlContent)
 		if err != nil {
 			return GlobalAgentsResult{}, err
@@ -180,10 +190,20 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 			result.Actions = append(result.Actions, GlobalAgentAction{Kind: "write", Path: agent.tomlOutput})
 		}
 		for _, config := range claudeConfigDirs {
-			links = append(links, desiredLink{target: filepath.Join(config, "agents", filepath.Base(agent.mdSource)), source: agent.mdSource})
+			links = append(
+				links,
+				desiredLink{
+					target: filepath.Join(config, "agents", filepath.Base(agent.mdSource)),
+					source: agent.mdSource,
+				},
+			)
 		}
-		links = append(links,
-			desiredLink{target: filepath.Join(home, ".codex", "agents", filepath.Base(agent.tomlOutput)), source: agent.tomlOutput},
+		links = append(
+			links,
+			desiredLink{
+				target: filepath.Join(home, ".codex", "agents", filepath.Base(agent.tomlOutput)),
+				source: agent.tomlOutput,
+			},
 		)
 	}
 
@@ -195,7 +215,10 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		if err != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("inspect global agent artifact %s: %w", link.target, err)
 		}
-		result.Installed = append(result.Installed, GlobalAgentInstalled{Path: link.target, Source: link.source, State: state, Found: found})
+		result.Installed = append(
+			result.Installed,
+			GlobalAgentInstalled{Path: link.target, Source: link.source, State: state, Found: found},
+		)
 		switch state {
 		case GlobalLinkConflict:
 			result.Problems = append(result.Problems, DescribeGlobalLinkState(state, link.target, link.source, found))

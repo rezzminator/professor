@@ -2,8 +2,9 @@ package main
 
 import (
 	"fmt"
-	"hostops/pfm/internal/codexappendix"
 	"io"
+
+	"hostops/pfm/internal/codexappendix"
 )
 
 func runCodexAppendix(input io.Reader, output, stderr io.Writer, runtime commandRuntime) int {

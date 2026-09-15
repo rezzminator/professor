@@ -84,12 +84,15 @@ func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVer
 			if age, older := predatesLayer(observation, layerStampUnix); older {
 				return spawnPredatesLayer, fmt.Sprintf(
 					"%s but argv is missing --settings %s, and the process started %s before this host's current spawn door was installed — reload to carry it",
-					promptReason, pfmengine.OutputStyleDefaultSettings, age,
+					promptReason,
+					pfmengine.OutputStyleDefaultSettings,
+					age,
 				)
 			}
 			return spawnViolation, fmt.Sprintf(
 				"%s but argv is missing --settings %s — Claude Code's own output style can still double-apply on top of it",
-				promptReason, pfmengine.OutputStyleDefaultSettings,
+				promptReason,
+				pfmengine.OutputStyleDefaultSettings,
 			)
 		}
 		return spawnInjected, promptReason
@@ -141,7 +144,11 @@ func argvCarriesOutputStyleDefault(argv []string) bool {
 			}
 			continue
 		}
-		if value, found := strings.CutPrefix(argument, "--settings="); found && value == pfmengine.OutputStyleDefaultSettings {
+		if value, found := strings.CutPrefix(
+			argument,
+			"--settings=",
+		); found &&
+			value == pfmengine.OutputStyleDefaultSettings {
 			return true
 		}
 	}
@@ -167,7 +174,11 @@ func printSpawnAuditDoctor(
 		// classify as a violation. Saying "clean" here would be a coincidence
 		// detector: it would print the same word whether the door worked or
 		// not.
-		fmt.Fprintf(stdout, "doctor: spawn-audit: policy=%s — no prompt material is expected, nothing to audit\n", promptPolicyName(prefs.SystemPrompt))
+		fmt.Fprintf(
+			stdout,
+			"doctor: spawn-audit: policy=%s — no prompt material is expected, nothing to audit\n",
+			promptPolicyName(prefs.SystemPrompt),
+		)
 		return 0
 	}
 
@@ -179,7 +190,11 @@ func printSpawnAuditDoctor(
 
 	stamp, stampSignal := spawnDoorStamp(resolved.Home)
 	if len(observations) == 0 {
-		fmt.Fprintf(stdout, "doctor: spawn-audit: policy=%s — no live Claude chats found\n", promptPolicyName(prefs.SystemPrompt))
+		fmt.Fprintf(
+			stdout,
+			"doctor: spawn-audit: policy=%s — no live Claude chats found\n",
+			promptPolicyName(prefs.SystemPrompt),
+		)
 		return spawnAuditUnreadWarnings(stdout, unread)
 	}
 
@@ -277,7 +292,11 @@ func spawnDoorStamp(home string) (int64, string) {
 	if stamp == 0 {
 		return 0, fmt.Sprintf("unavailable (%s) — age never decided a verdict", strings.Join(failures, "; "))
 	}
-	signal := fmt.Sprintf("%s, the later of %s", time.Unix(stamp, 0).Format(time.RFC3339), strings.Join(sources, " and "))
+	signal := fmt.Sprintf(
+		"%s, the later of %s",
+		time.Unix(stamp, 0).Format(time.RFC3339),
+		strings.Join(sources, " and "),
+	)
 	if len(failures) != 0 {
 		signal += " (unreadable: " + strings.Join(failures, "; ") + ")"
 	}

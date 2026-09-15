@@ -75,18 +75,41 @@ func (worker *BrowserWorker) Close() error {
 // protocol. Every URL Chrome touches arrives as an ask; onAsk is the SSRF
 // authority (harvest.AssertFetchable at the adapter layer). A nil onAsk
 // refuses every ask fail-closed.
-func (worker *BrowserWorker) Fetch(ctx context.Context, source, proxy string, headless bool, timeoutMS int, onAsk func(url string) error) (string, int, error) {
+func (worker *BrowserWorker) Fetch(
+	ctx context.Context,
+	source, proxy string,
+	headless bool,
+	timeoutMS int,
+	onAsk func(url string) error,
+) (string, int, error) {
 	return worker.FetchPinned(ctx, source, proxy, "", headless, timeoutMS, onAsk)
 }
 
 // FetchPinned is Fetch with Chrome's resolver pinned to an already-validated
 // address (see BrowserFetchRequest.HostResolverRules). An empty rule behaves
 // exactly like Fetch.
-func (worker *BrowserWorker) FetchPinned(ctx context.Context, source, proxy, hostResolverRules string, headless bool, timeoutMS int, onAsk func(url string) error) (string, int, error) {
+func (worker *BrowserWorker) FetchPinned(
+	ctx context.Context,
+	source, proxy, hostResolverRules string,
+	headless bool,
+	timeoutMS int,
+	onAsk func(url string) error,
+) (string, int, error) {
 	if strings.TrimSpace(source) == "" {
 		return "", 0, errors.New("browser fetch url is empty")
 	}
-	body, err := json.Marshal(browserWorkerRequest{Op: "fetch", BrowserFetchRequest: BrowserFetchRequest{URL: source, Proxy: proxy, Headless: headless, HostResolverRules: hostResolverRules, TimeoutMS: timeoutMS}})
+	body, err := json.Marshal(
+		browserWorkerRequest{
+			Op: "fetch",
+			BrowserFetchRequest: BrowserFetchRequest{
+				URL:               source,
+				Proxy:             proxy,
+				Headless:          headless,
+				HostResolverRules: hostResolverRules,
+				TimeoutMS:         timeoutMS,
+			},
+		},
+	)
 	if err != nil {
 		return "", 0, fmt.Errorf("marshal browser fetch request: %w", err)
 	}
@@ -149,7 +172,11 @@ func stderrTail(stderr string) string {
 	return "… " + stderr[len(stderr)-max:]
 }
 
-func (worker *BrowserWorker) requestInteractive(ctx context.Context, body []byte, onAsk func(url string) error) ([]byte, string, error) {
+func (worker *BrowserWorker) requestInteractive(
+	ctx context.Context,
+	body []byte,
+	onAsk func(url string) error,
+) ([]byte, string, error) {
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
 	browser, err := worker.ensureWorkerLocked()
@@ -222,7 +249,9 @@ func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
 		return worker.worker, nil
 	}
 	if strings.TrimSpace(worker.runtime.Python) == "" {
-		return nil, errors.New("browser interpreter path is empty; the browser environment is NOT provisioned (it provisions on the first browser fetch once fetch.browser is true in harvester.config.json)")
+		return nil, errors.New(
+			"browser interpreter path is empty; the browser environment is NOT provisioned (it provisions on the first browser fetch once fetch.browser is true in harvester.config.json)",
+		)
 	}
 	command, err := browserWorkerCommand(worker.runtime.Python, worker.runtime.Script)
 	if err != nil {

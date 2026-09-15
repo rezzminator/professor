@@ -27,7 +27,11 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		"usage: pfm reap [--apply] [--horizon 48h] [--busy-recent SECONDS] [--json]",
 		stderr,
 	)
-	apply := flags.Bool("apply", false, "kill idle-past-horizon and unattached orphan chats, and remove dead socket files")
+	apply := flags.Bool(
+		"apply",
+		false,
+		"kill idle-past-horizon and unattached orphan chats, and remove dead socket files",
+	)
 	horizon := flags.Duration(
 		"horizon",
 		48*time.Hour,

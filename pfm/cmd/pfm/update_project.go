@@ -186,7 +186,10 @@ func buildProjectReport(root, home string) (projectReport, error) {
 		}
 		report.Counts[status]++
 		if status != projectCurrent {
-			report.Items = append(report.Items, projectReportItem{Status: status, Local: local, Template: template, Pin: pin})
+			report.Items = append(
+				report.Items,
+				projectReportItem{Status: status, Local: local, Template: template, Pin: pin},
+			)
 		}
 	}
 	projectTemplates := filepath.Join(store.Templates, "project")
@@ -243,7 +246,13 @@ func statusIndex(status projectStatus) int {
 }
 
 func writeProjectHuman(stdout io.Writer, report projectReport) {
-	fmt.Fprintf(stdout, "professor: %s  blueprint %s → %s\n", report.Root, report.Baseline.Blueprint.SHA, report.Store.SHA)
+	fmt.Fprintf(
+		stdout,
+		"professor: %s  blueprint %s → %s\n",
+		report.Root,
+		report.Baseline.Blueprint.SHA,
+		report.Store.SHA,
+	)
 	for _, status := range projectStatusOrder {
 		fmt.Fprintf(stdout, "  %-13s %d\n", status, report.Counts[status])
 		for _, item := range report.Items {
@@ -253,14 +262,38 @@ func writeProjectHuman(stdout io.Writer, report projectReport) {
 			switch status {
 			case projectUpdated:
 				fmt.Fprintf(stdout, "    %s   %s  pinned @%s\n", item.Local, item.Template, item.Pin.PinnedSHA)
-				fmt.Fprintf(stdout, "      review: git -C %s diff %s..%s -- templates/%s\n", report.Store.Root, item.Pin.PinnedSHA, report.Store.SHA, item.Template)
+				fmt.Fprintf(
+					stdout,
+					"      review: git -C %s diff %s..%s -- templates/%s\n",
+					report.Store.Root,
+					item.Pin.PinnedSHA,
+					report.Store.SHA,
+					item.Template,
+				)
 				fmt.Fprintf(stdout, "      then apply by hand and: pfm update pin %s\n", item.Local)
 			case projectNew:
-				fmt.Fprintf(stdout, "    %s — adopt: copy/adapt it locally, then pfm update pin --template %s <local> — or ignore\n", item.Template, item.Template)
+				fmt.Fprintf(
+					stdout,
+					"    %s — adopt: copy/adapt it locally, then pfm update pin --template %s <local> — or ignore\n",
+					item.Template,
+					item.Template,
+				)
 			case projectGoneUpstream:
-				fmt.Fprintf(stdout, "    %s   %s — local file is YOURS now — keep it and pfm update drop %s, or delete both\n", item.Local, item.Template, item.Local)
+				fmt.Fprintf(
+					stdout,
+					"    %s   %s — local file is YOURS now — keep it and pfm update drop %s, or delete both\n",
+					item.Local,
+					item.Template,
+					item.Local,
+				)
 			case projectLocalDeleted:
-				fmt.Fprintf(stdout, "    %s   %s — pfm update drop %s to forget, or restore the file\n", item.Local, item.Template, item.Local)
+				fmt.Fprintf(
+					stdout,
+					"    %s   %s — pfm update drop %s to forget, or restore the file\n",
+					item.Local,
+					item.Template,
+					item.Local,
+				)
 			}
 		}
 	}
@@ -308,7 +341,8 @@ func writeProjectJSON(stdout io.Writer, report projectReport) error {
 func writeProjectFailure(stdout io.Writer, jsonOutput bool, err error) {
 	terminal := "FAILED — " + err.Error()
 	if jsonOutput {
-		if encodeErr := json.NewEncoder(stdout).Encode(map[string]any{"error": err.Error(), "terminal": terminal}); encodeErr != nil {
+		if encodeErr := json.NewEncoder(stdout).
+			Encode(map[string]any{"error": err.Error(), "terminal": terminal}); encodeErr != nil {
 			fmt.Fprintf(stdout, "FAILED — encode project error: %v\n", encodeErr)
 		}
 		return
@@ -337,7 +371,11 @@ func writeProjectUnmanaged(stdout io.Writer, jsonOutput bool) {
 }
 
 func runProjectPin(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("update pin", "usage: pfm update pin <local>... | --all [--template TEMPLATE] [--root DIR]", stderr)
+	flags := newFlagSet(
+		"update pin",
+		"usage: pfm update pin <local>... | --all [--template TEMPLATE] [--root DIR]",
+		stderr,
+	)
 	rootFlag := flags.String("root", "", "project root")
 	pinAll := flags.Bool("all", false, "pin every UPDATED file")
 	templateFlag := flags.String("template", "", "template path for a newly adopted local file")
@@ -345,7 +383,8 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime commandRunti
 	if !ok {
 		return code
 	}
-	if (*pinAll && (len(locals) != 0 || *templateFlag != "")) || (*templateFlag != "" && len(locals) != 1) || (!*pinAll && *templateFlag == "" && len(locals) == 0) {
+	if (*pinAll && (len(locals) != 0 || *templateFlag != "")) || (*templateFlag != "" && len(locals) != 1) ||
+		(!*pinAll && *templateFlag == "" && len(locals) == 0) {
 		flags.Usage()
 		return 2
 	}
@@ -395,7 +434,12 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime commandRunti
 			fmt.Fprintf(stderr, "pfm update pin: %v\n", err)
 			return 1
 		}
-		report.Baseline.Files[local] = professor.FilePin{Template: template, TemplateHash: hash, PinnedSHA: report.Store.SHA, PinnedAt: time.Now().Format(time.DateOnly)}
+		report.Baseline.Files[local] = professor.FilePin{
+			Template:     template,
+			TemplateHash: hash,
+			PinnedSHA:    report.Store.SHA,
+			PinnedAt:     time.Now().Format(time.DateOnly),
+		}
 		report.Baseline.Ignored = removeIgnored(report.Baseline.Ignored, template)
 		selected[0] = local
 	} else {
@@ -554,7 +598,15 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime commandRun
 		sha = strings.TrimSpace(shaOut)
 		versionOut, versionErrText, gitErr := adoptGit(store.Root, "show", ref+":VERSION")
 		if gitErr != nil {
-			fmt.Fprintf(stderr, "pfm update adopt: %v\n", adoptGitFailure("resolve --at "+ref+": a blueprint ref without VERSION is not a blueprint", gitErr, versionErrText))
+			fmt.Fprintf(
+				stderr,
+				"pfm update adopt: %v\n",
+				adoptGitFailure(
+					"resolve --at "+ref+": a blueprint ref without VERSION is not a blueprint",
+					gitErr,
+					versionErrText,
+				),
+			)
 			return 1
 		}
 		version = strings.TrimSpace(versionOut)
@@ -629,7 +681,13 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime commandRun
 	fmt.Fprintf(stdout, "  %-13s %-3d (%s)\n", "kept", kept, "already pinned, untouched")
 	fmt.Fprintf(stdout, "  %-13s %-3d (%s)\n", "absent", absent, "mapped template, no local file — check reports NEW")
 	if usingAt {
-		fmt.Fprintf(stdout, "  %-13s %-3d (template did not exist at %s; check reports NEW)\n", "absent-at-ref", absentAtRef, ref)
+		fmt.Fprintf(
+			stdout,
+			"  %-13s %-3d (template did not exist at %s; check reports NEW)\n",
+			"absent-at-ref",
+			absentAtRef,
+			ref,
+		)
 	}
 	fmt.Fprintln(stdout, "next: pfm update check")
 	return 0
@@ -748,7 +806,13 @@ func runProjectIgnore(args []string, stdout, stderr io.Writer, runtime commandRu
 			}
 			if locals := findPinsByTemplate(baseline, template); len(locals) != 0 {
 				joined := strings.Join(locals, ", ")
-				fmt.Fprintf(stderr, "pfm update ignore: %s is pinned by %s; pfm update drop %s first\n", template, joined, joined)
+				fmt.Fprintf(
+					stderr,
+					"pfm update ignore: %s is pinned by %s; pfm update drop %s first\n",
+					template,
+					joined,
+					joined,
+				)
 				return 1
 			}
 		}
@@ -829,7 +893,12 @@ func printProfessorDoctor(stdout io.Writer, start, home string) int {
 		fmt.Fprintf(stdout, "professor: UNREADABLE %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "professor: current %d · review-required %d\n", report.Counts[projectCurrent], report.reviewRequired())
+	fmt.Fprintf(
+		stdout,
+		"professor: current %d · review-required %d\n",
+		report.Counts[projectCurrent],
+		report.reviewRequired(),
+	)
 	return 0
 }
 
@@ -872,7 +941,8 @@ func safeTemplateRelative(value string) (string, error) {
 func safeRelative(value, label, prefix string) (string, error) {
 	value = filepath.ToSlash(strings.TrimSpace(value))
 	clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(value)))
-	if value == "" || clean == "." || filepath.IsAbs(filepath.FromSlash(value)) || clean == ".." || strings.HasPrefix(clean, "../") {
+	if value == "" || clean == "." || filepath.IsAbs(filepath.FromSlash(value)) || clean == ".." ||
+		strings.HasPrefix(clean, "../") {
 		return "", fmt.Errorf("invalid %s %q", label, value)
 	}
 	if prefix != "" && !strings.HasPrefix(clean, prefix) {

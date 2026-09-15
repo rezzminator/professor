@@ -74,9 +74,14 @@ func validateMemberName(name string) error {
 func normalizedMemberName(name string) string {
 	return norm.NFC.String(filepath.ToSlash(name))
 }
+
 func archiveFormat(path string) string {
 	low := strings.ToLower(path)
-	if strings.HasSuffix(low, ".tar.gz") || strings.HasSuffix(low, ".tgz") || strings.HasSuffix(low, ".tar.bz2") || strings.HasSuffix(low, ".tbz2") || strings.HasSuffix(low, ".tar.xz") || strings.HasSuffix(low, ".txz") || strings.HasSuffix(low, ".tar") {
+	if strings.HasSuffix(low, ".tar.gz") || strings.HasSuffix(low, ".tgz") || strings.HasSuffix(low, ".tar.bz2") ||
+		strings.HasSuffix(low, ".tbz2") ||
+		strings.HasSuffix(low, ".tar.xz") ||
+		strings.HasSuffix(low, ".txz") ||
+		strings.HasSuffix(low, ".tar") {
 		return "tar"
 	}
 	if strings.HasSuffix(low, ".zip") {
@@ -128,6 +133,7 @@ func ListArchive(path string) ([]Member, error) {
 		return nil, fmt.Errorf("unsupported or unrecognized archive format: %s", path)
 	}
 }
+
 func listZip(path string) ([]Member, error) {
 	f, e := zip.OpenReader(path)
 	if e != nil {
@@ -142,10 +148,21 @@ func listZip(path string) ([]Member, error) {
 			return nil, e
 		}
 		symlink := entry.Mode()&os.ModeSymlink != 0
-		m := Member{Name: name, CompressedSize: int64(entry.CompressedSize64), UncompressedSize: int64(entry.UncompressedSize64), IsDir: entry.FileInfo().IsDir(), IsSymlink: symlink}
+		m := Member{
+			Name:             name,
+			CompressedSize:   int64(entry.CompressedSize64),
+			UncompressedSize: int64(entry.UncompressedSize64),
+			IsDir:            entry.FileInfo().IsDir(),
+			IsSymlink:        symlink,
+		}
 		if m.CompressedSize > 0 && float64(m.UncompressedSize)/float64(m.CompressedSize) > float64(MaxArchiveRatio) {
 			ratio := float64(m.UncompressedSize) / float64(m.CompressedSize)
-			return nil, fmt.Errorf("Member %q: compression ratio %.1fx exceeds %dx (zip-bomb?)", m.Name, ratio, MaxArchiveRatio)
+			return nil, fmt.Errorf(
+				"Member %q: compression ratio %.1fx exceeds %dx (zip-bomb?)",
+				m.Name,
+				ratio,
+				MaxArchiveRatio,
+			)
 		}
 		if !m.IsDir {
 			total += m.UncompressedSize
@@ -160,6 +177,7 @@ func listZip(path string) ([]Member, error) {
 	}
 	return out, nil
 }
+
 func openTar(path string) (io.Reader, func() error, error) {
 	f, e := os.Open(path)
 	if e != nil {
@@ -212,7 +230,12 @@ func listTar(path string) ([]Member, error) {
 		if e := validateMemberName(name); e != nil {
 			return nil, e
 		}
-		m := Member{Name: name, UncompressedSize: h.Size, IsDir: h.FileInfo().IsDir(), IsSymlink: h.Typeflag == tar.TypeSymlink || h.Typeflag == tar.TypeLink}
+		m := Member{
+			Name:             name,
+			UncompressedSize: h.Size,
+			IsDir:            h.FileInfo().IsDir(),
+			IsSymlink:        h.Typeflag == tar.TypeSymlink || h.Typeflag == tar.TypeLink,
+		}
 		if !m.IsDir {
 			if m.UncompressedSize > MaxArchiveTotalBytes-total {
 				return nil, fmt.Errorf("Archive total uncompressed size exceeds limit %d", MaxArchiveTotalBytes)
@@ -246,7 +269,12 @@ func list7z(path string) ([]Member, error) {
 		if entry.UncompressedSize > uint64(^uint64(0)>>1) {
 			return nil, fmt.Errorf("member %q size exceeds platform limit", entry.Name)
 		}
-		m := Member{Name: name, UncompressedSize: int64(entry.UncompressedSize), IsDir: entry.FileInfo().IsDir(), IsSymlink: entry.Mode()&fs.ModeSymlink != 0}
+		m := Member{
+			Name:             name,
+			UncompressedSize: int64(entry.UncompressedSize),
+			IsDir:            entry.FileInfo().IsDir(),
+			IsSymlink:        entry.Mode()&fs.ModeSymlink != 0,
+		}
 		if !m.IsDir {
 			if m.UncompressedSize > MaxArchiveTotalBytes-total {
 				return nil, fmt.Errorf("archive exceeds total uncompressed limit")
@@ -319,7 +347,13 @@ func listRAR(path string) ([]Member, error) {
 		if entry.UnPackedSize < 0 {
 			return nil, fmt.Errorf("Member %q has invalid size", entry.Name)
 		}
-		m := Member{Name: name, CompressedSize: entry.PackedSize, UncompressedSize: entry.UnPackedSize, IsDir: entry.IsDir, IsSymlink: entry.Mode()&fs.ModeSymlink != 0}
+		m := Member{
+			Name:             name,
+			CompressedSize:   entry.PackedSize,
+			UncompressedSize: entry.UnPackedSize,
+			IsDir:            entry.IsDir,
+			IsSymlink:        entry.Mode()&fs.ModeSymlink != 0,
+		}
 		if !m.IsDir {
 			if m.UncompressedSize > MaxArchiveTotalBytes-total {
 				return nil, fmt.Errorf("Archive total uncompressed size exceeds limit %d", MaxArchiveTotalBytes)
@@ -334,7 +368,12 @@ func listRAR(path string) ([]Member, error) {
 	for _, m := range out {
 		if m.CompressedSize > 0 && float64(m.UncompressedSize)/float64(m.CompressedSize) > float64(MaxArchiveRatio) {
 			ratio := float64(m.UncompressedSize) / float64(m.CompressedSize)
-			return nil, fmt.Errorf("Member %q: compression ratio %.1fx exceeds %dx (zip-bomb?)", m.Name, ratio, MaxArchiveRatio)
+			return nil, fmt.Errorf(
+				"Member %q: compression ratio %.1fx exceeds %dx (zip-bomb?)",
+				m.Name,
+				ratio,
+				MaxArchiveRatio,
+			)
 		}
 	}
 	return out, nil
@@ -399,6 +438,7 @@ func ReadArchiveMember(path, name string) ([]byte, error) {
 		return nil, fmt.Errorf("unsupported or unrecognized archive format: %s", path)
 	}
 }
+
 func readZip(path, name string) ([]byte, error) {
 	f, e := zip.OpenReader(path)
 	if e != nil {
@@ -422,7 +462,8 @@ func readZip(path, name string) ([]byte, error) {
 		if int64(entry.UncompressedSize64) > MaxArchiveFileBytes {
 			return nil, fmt.Errorf("member exceeds file limit")
 		}
-		if entry.CompressedSize64 > 0 && float64(entry.UncompressedSize64)/float64(entry.CompressedSize64) > float64(MaxArchiveRatio) {
+		if entry.CompressedSize64 > 0 &&
+			float64(entry.UncompressedSize64)/float64(entry.CompressedSize64) > float64(MaxArchiveRatio) {
 			return nil, fmt.Errorf("compression ratio exceeds limit")
 		}
 		r, e := entry.Open()
@@ -441,6 +482,7 @@ func readZip(path, name string) ([]byte, error) {
 	}
 	return nil, fmt.Errorf("member not found: %s", name)
 }
+
 func readTar(path, name string) ([]byte, error) {
 	r, closeFn, e := openTar(path)
 	if e != nil {
@@ -506,7 +548,12 @@ func (h *Harvester) Archive(ctx context.Context, source, member string) (Result,
 			if stored.Error != "" {
 				return stored, errors.New(stored.Error)
 			}
-			content := fmt.Sprintf("![%s](%s)\n\n*Image extracted from the archive at `%s` — read it directly.*\n", parts[1], stored.Path, stored.Path)
+			content := fmt.Sprintf(
+				"![%s](%s)\n\n*Image extracted from the archive at `%s` — read it directly.*\n",
+				parts[1],
+				stored.Path,
+				stored.Path,
+			)
 			stored.Source = source
 			stored.Kind = "archive_member"
 			stored.Content = content
@@ -527,10 +574,19 @@ func (h *Harvester) Archive(ctx context.Context, source, member string) (Result,
 			}
 		}
 		chars := contentChars(converted)
-		return Result{Source: source, Kind: "archive_member", Content: converted, Bytes: int64(len(data)), Chars: chars, ContentChars: chars, Tokens: estimateTokens(converted)}, nil
+		return Result{
+			Source:       source,
+			Kind:         "archive_member",
+			Content:      converted,
+			Bytes:        int64(len(data)),
+			Chars:        chars,
+			ContentChars: chars,
+			Tokens:       estimateTokens(converted),
+		}, nil
 	}
 	return h.archiveList(ctx, source)
 }
+
 func (h *Harvester) archiveList(ctx context.Context, source string) (Result, error) {
 	path, download := h.fetchArchiveBytes(ctx, source, false)
 	if download.Error != "" {
@@ -542,13 +598,29 @@ func (h *Harvester) archiveList(ctx context.Context, source string) (Result, err
 	}
 	content := formatArchiveListing(source, members)
 	chars := contentChars(content)
-	return Result{Source: source, Kind: "archive", Content: content, Members: members, Path: download.Path,
-		Method: "archive:listing", CacheStatus: download.CacheStatus, Chars: chars, ContentChars: chars, Tokens: estimateTokens(content)}, nil
+	return Result{
+		Source:       source,
+		Kind:         "archive",
+		Content:      content,
+		Members:      members,
+		Path:         download.Path,
+		Method:       "archive:listing",
+		CacheStatus:  download.CacheStatus,
+		Chars:        chars,
+		ContentChars: chars,
+		Tokens:       estimateTokens(content),
+	}, nil
 }
 
 func formatArchiveListing(source string, members []Member) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Archive: %s\n\n%d member(s). Fetch one with `archive(source=%q, member=\"<name>\")`.\n\n", source, len(members), source)
+	fmt.Fprintf(
+		&b,
+		"# Archive: %s\n\n%d member(s). Fetch one with `archive(source=%q, member=\"<name>\")`.\n\n",
+		source,
+		len(members),
+		source,
+	)
 	b.WriteString("| name | size (bytes) | type |\n| --- | ---: | --- |\n")
 	for _, member := range members {
 		name := strings.ReplaceAll(member.Name, "|", "\\|")

@@ -16,9 +16,8 @@ import (
 	"sync"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-
 	"hostops/pfm/internal/compose"
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 type Header struct {
@@ -429,7 +428,14 @@ type chatTree struct {
 	roots []int
 }
 
-func chatTrees(rows []compose.Row, current map[int]processSample, previous *rawSample, systemTotal uint64, cpuCount int, memoryTotal uint64) []Chat {
+func chatTrees(
+	rows []compose.Row,
+	current map[int]processSample,
+	previous *rawSample,
+	systemTotal uint64,
+	cpuCount int,
+	memoryTotal uint64,
+) []Chat {
 	bySocket := make(map[string]*chatTree)
 	for _, row := range rows {
 		if row.Socket == "" || !liveKind(row.Kind) {
@@ -498,7 +504,12 @@ func chatTrees(rows []compose.Row, current map[int]processSample, previous *rawS
 			tree.chat.RAMPercent = percent(tree.chat.RSSBytes, memoryTotal)
 		}
 		if previous != nil && systemTotal > previous.systemTotal && currentTicks >= priorTicks {
-			tree.chat.CPUPercent = percent(currentTicks-priorTicks, systemTotal-previous.systemTotal) * float64(cpuCount)
+			tree.chat.CPUPercent = percent(
+				currentTicks-priorTicks,
+				systemTotal-previous.systemTotal,
+			) * float64(
+				cpuCount,
+			)
 			tree.chat.CPUValid = true
 		}
 		chats = append(chats, tree.chat)

@@ -154,7 +154,8 @@ func TestCosmosSamplerIsLazyAndRetainsGraphOnFailure(t *testing.T) {
 		err:        errors.New("read failed"),
 	})
 	model = updated.(Model)
-	if model.cosmos.Err != "read failed" || len(model.cosmos.Nodes) != len(before.Nodes) || len(model.cosmos.Edges) != len(before.Edges) {
+	if model.cosmos.Err != "read failed" || len(model.cosmos.Nodes) != len(before.Nodes) ||
+		len(model.cosmos.Edges) != len(before.Edges) {
 		t.Fatalf("failed sample did not preserve last graph: before=%#v after=%#v", before, model.cosmos)
 	}
 }
@@ -204,7 +205,12 @@ func TestCosmosRapidAwayAndBackDropsTheOldAnimationChain(t *testing.T) {
 	returned, command := model.switchTab(-1)
 	model = returned.(Model)
 	if model.tab != TabCosmos || command == nil || model.cosmosTickGeneration == staleGeneration {
-		t.Fatalf("rapid return did not start a fresh cosmos chain: tab=%d generation=%d command=%v", model.tab, model.cosmosTickGeneration, command)
+		t.Fatalf(
+			"rapid return did not start a fresh cosmos chain: tab=%d generation=%d command=%v",
+			model.tab,
+			model.cosmosTickGeneration,
+			command,
+		)
 	}
 
 	before := model.cosmosNowNS
@@ -279,23 +285,52 @@ func TestCosmosMoonsShareOneEvenlySpacedOrbit(t *testing.T) {
 	midX := (points[moonA.Key].x + points[moonB.Key].x) / 2
 	midY := (points[moonA.Key].y + points[moonB.Key].y) / 2
 	if math.Abs(midX-anchor.x) > 0.001 || math.Abs(midY-anchor.y) > 0.001 {
-		t.Fatalf("moons are not evenly spaced around the parent: mid=(%v,%v) parent=(%v,%v)", midX, midY, anchor.x, anchor.y)
+		t.Fatalf(
+			"moons are not evenly spaced around the parent: mid=(%v,%v) parent=(%v,%v)",
+			midX,
+			midY,
+			anchor.x,
+			anchor.y,
+		)
 	}
 
 	// --no-sky is a still frame: a later clock renders the identical system.
-	later := cosmosLayout(canvas, model.cosmosSeats, nodes, model.cosmos.Edges, now.Add(5*time.Second), false, false, "").points
+	later := cosmosLayout(
+		canvas,
+		model.cosmosSeats,
+		nodes,
+		model.cosmos.Edges,
+		now.Add(5*time.Second),
+		false,
+		false,
+		"",
+	).points
 	if later[moonA.Key] != points[moonA.Key] {
 		t.Fatalf("no-sky moon moved: %#v vs %#v", later[moonA.Key], points[moonA.Key])
 	}
 
 	// The sky orbits the moon around its parent — position changes, the
 	// orbit distance does not.
-	skyLater := cosmosLayout(canvas, model.cosmosSeats, nodes, model.cosmos.Edges, now.Add(5*time.Second), true, false, "").points
+	skyLater := cosmosLayout(
+		canvas,
+		model.cosmosSeats,
+		nodes,
+		model.cosmos.Edges,
+		now.Add(5*time.Second),
+		true,
+		false,
+		"",
+	).points
 	if skyLater[moonA.Key] == points[moonA.Key] {
 		t.Fatalf("sky moon did not orbit")
 	}
 	skyAnchor := skyLater[parent]
-	if got := math.Hypot(skyLater[moonA.Key].x-skyAnchor.x, skyLater[moonA.Key].y-skyAnchor.y); math.Abs(got-wantOrbit) > 0.001 {
+	if got := math.Hypot(
+		skyLater[moonA.Key].x-skyAnchor.x,
+		skyLater[moonA.Key].y-skyAnchor.y,
+	); math.Abs(
+		got-wantOrbit,
+	) > 0.001 {
 		t.Fatalf("orbiting moon left its orbit: %v, want %v", got, wantOrbit)
 	}
 }
@@ -360,10 +395,38 @@ func TestClipCosmosLabelTruncatesVisiblyWithinAvailableSpace(t *testing.T) {
 		want      string
 	}{
 		{name: "fits rightward, unchanged", label: "RR", rightward: true, colX: 5, cols: 80, want: "RR"},
-		{name: "clips rightward with a visible ellipsis", label: "123456789", rightward: true, colX: 73, cols: 80, want: "1234…"},
-		{name: "clips leftward with a visible ellipsis", label: "123456789", rightward: false, colX: 6, cols: 80, want: "1234…"},
-		{name: "no space left produces empty, not the raw label", label: "cc-1787827912-1607460-33758", rightward: true, colX: 79, cols: 80, want: ""},
-		{name: "ample canvas still caps at fourteen runes", label: "COSMOS:EXISTENTIALIST", rightward: true, colX: 5, cols: 120, want: "COSMOS:EXISTE…"},
+		{
+			name:      "clips rightward with a visible ellipsis",
+			label:     "123456789",
+			rightward: true,
+			colX:      73,
+			cols:      80,
+			want:      "1234…",
+		},
+		{
+			name:      "clips leftward with a visible ellipsis",
+			label:     "123456789",
+			rightward: false,
+			colX:      6,
+			cols:      80,
+			want:      "1234…",
+		},
+		{
+			name:      "no space left produces empty, not the raw label",
+			label:     "cc-1787827912-1607460-33758",
+			rightward: true,
+			colX:      79,
+			cols:      80,
+			want:      "",
+		},
+		{
+			name:      "ample canvas still caps at fourteen runes",
+			label:     "COSMOS:EXISTENTIALIST",
+			rightward: true,
+			colX:      5,
+			cols:      120,
+			want:      "COSMOS:EXISTE…",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -495,7 +558,11 @@ func TestApplyCosmosGraphNeverCarriesADeadNodeLiveButReplayRendersItDimmed(t *te
 	got := canvas.cells[colY*canvas.Cols+colX].fg
 	want := scaleRGB(cosmosNodeColor(node), 0.35)
 	if got != want {
-		t.Fatalf("replayed dead glyph color = %#v, want the static ghost color %#v (not the removed alarm blink)", got, want)
+		t.Fatalf(
+			"replayed dead glyph color = %#v, want the static ghost color %#v (not the removed alarm blink)",
+			got,
+			want,
+		)
 	}
 }
 

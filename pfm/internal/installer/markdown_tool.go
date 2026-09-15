@@ -35,14 +35,22 @@ func (installer *engine) installMarkdownTool(ctx context.Context) error {
 	provisionedUV := filepath.Join(harvestpy.RuntimeRoot(harvestPythonRoot(installer.options.Home), platform), "uv")
 
 	if path, err := deps.Resolve("rumdl"); err == nil {
-		if version, versionErr := rumdlVersion(ctx, path); versionErr == nil && deps.AtLeast(version, rumdlPinnedVersion) {
+		if version, versionErr := rumdlVersion(
+			ctx,
+			path,
+		); versionErr == nil &&
+			deps.AtLeast(version, rumdlPinnedVersion) {
 			installer.ok(fmt.Sprintf("rumdl already present (%s)", version))
 			return nil
 		}
 	}
 
 	if !installer.apply {
-		installer.say("rumdl dry-run: would install rumdl==%s via uv tool install (uv=%s)", rumdlPinnedVersion, provisionedUV)
+		installer.say(
+			"rumdl dry-run: would install rumdl==%s via uv tool install (uv=%s)",
+			rumdlPinnedVersion,
+			provisionedUV,
+		)
 		return nil
 	}
 

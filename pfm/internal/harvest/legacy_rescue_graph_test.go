@@ -25,11 +25,14 @@ func TestLegacyUnresolvedBotChallengeIsNeverCached(t *testing.T) {
 		Chrome:       &http.Client{Transport: wallTransport},
 		Jina:         &http.Client{Transport: missingTransport},
 		OA:           &http.Client{Transport: missingTransport},
-		Converter:    legacyConverterFunc(func(_ context.Context, _ string, _ string, raw []byte) (string, error) { return string(raw), nil }),
-		BrowserRung:  browserOff(),
+		Converter: legacyConverterFunc(
+			func(_ context.Context, _, _ string, raw []byte) (string, error) { return string(raw), nil },
+		),
+		BrowserRung: browserOff(),
 	})
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if result.Error == "" || !strings.Contains(strings.ToLower(result.Error), "challenge") || !strings.Contains(result.Error, "Rungs tried: direct, chrome-impersonation, jina, defuddle, wayback") {
+	if result.Error == "" || !strings.Contains(strings.ToLower(result.Error), "challenge") ||
+		!strings.Contains(result.Error, "Rungs tried: direct, chrome-impersonation, jina, defuddle, wayback") {
 		t.Fatalf("unresolved challenge receipt=%#v", result)
 	}
 	var artifacts []string
@@ -66,7 +69,10 @@ func TestLegacyUnresolvedBotChallengeIsNeverCached(t *testing.T) {
 func TestCloudflare403BlockPageEscalatesInsteadOfCachingSuccess(t *testing.T) {
 	blockPage := cloudflareBlockPageFixture()
 	if len(blockPage) <= 4000 {
-		t.Fatalf("fixture must exceed the 4000-byte weak-marker gate to reproduce the live page, got %d bytes", len(blockPage))
+		t.Fatalf(
+			"fixture must exceed the 4000-byte weak-marker gate to reproduce the live page, got %d bytes",
+			len(blockPage),
+		)
 	}
 	wallTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html", blockPage), nil
@@ -75,12 +81,14 @@ func TestCloudflare403BlockPageEscalatesInsteadOfCachingSuccess(t *testing.T) {
 		return response(request, http.StatusNotFound, "application/json", `{}`), nil
 	})
 	h := mustNew(t, Options{
-		CacheDir:    t.TempDir(),
-		Client:      &http.Client{Transport: wallTransport},
-		Chrome:      &http.Client{Transport: wallTransport},
-		Jina:        &http.Client{Transport: missingTransport},
-		OA:          &http.Client{Transport: missingTransport},
-		Converter:   legacyConverterFunc(func(_ context.Context, _ string, _ string, raw []byte) (string, error) { return string(raw), nil }),
+		CacheDir: t.TempDir(),
+		Client:   &http.Client{Transport: wallTransport},
+		Chrome:   &http.Client{Transport: wallTransport},
+		Jina:     &http.Client{Transport: missingTransport},
+		OA:       &http.Client{Transport: missingTransport},
+		Converter: legacyConverterFunc(
+			func(_ context.Context, _, _ string, raw []byte) (string, error) { return string(raw), nil },
+		),
 		BrowserRung: browserOff(),
 	})
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
@@ -117,14 +125,25 @@ func cloudflareBlockPageFixture() string {
 	b.WriteString("<!DOCTYPE html><html lang=\"en-US\"><head><title>Attention Required! | Cloudflare</title>")
 	b.WriteString("<meta charset=\"UTF-8\" /><meta name=\"robots\" content=\"noindex, nofollow\" />")
 	b.WriteString("<style type=\"text/css\">")
-	b.WriteString(strings.Repeat(".cf-error-details{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:0;color:#494949} ", 60))
+	b.WriteString(
+		strings.Repeat(
+			".cf-error-details{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;margin:0;padding:0;color:#494949} ",
+			60,
+		),
+	)
 	b.WriteString("</style></head><body><div class=\"cf-wrapper\"><div class=\"cf-error-details\">")
 	b.WriteString("<h1>Sorry, you have been blocked</h1>")
 	b.WriteString("<p>You are unable to access blocked.example.test</p>")
-	b.WriteString("<p>This website is using a security service to protect itself from online attacks. The action you just performed triggered the security solution. There are several actions that could trigger this block including submitting a certain word or phrase, a SQL command or malformed data.</p>")
+	b.WriteString(
+		"<p>This website is using a security service to protect itself from online attacks. The action you just performed triggered the security solution. There are several actions that could trigger this block including submitting a certain word or phrase, a SQL command or malformed data.</p>",
+	)
 	b.WriteString("<h2>Why have I been blocked?</h2>")
-	b.WriteString("<p>What can I do to resolve this? You can email the site owner to let them know you were blocked. Please include what you were doing when this page came up and the Cloudflare Ray ID found at the bottom of this page.</p>")
-	b.WriteString("<div class=\"cf-error-footer\">Cloudflare Ray ID: <strong>00000000000000</strong> &bull; Your IP: <strong>203.0.113.1</strong> &bull; Performance &amp; security by <a href=\"https://www.cloudflare.com\">Cloudflare</a></div>")
+	b.WriteString(
+		"<p>What can I do to resolve this? You can email the site owner to let them know you were blocked. Please include what you were doing when this page came up and the Cloudflare Ray ID found at the bottom of this page.</p>",
+	)
+	b.WriteString(
+		"<div class=\"cf-error-footer\">Cloudflare Ray ID: <strong>00000000000000</strong> &bull; Your IP: <strong>203.0.113.1</strong> &bull; Performance &amp; security by <a href=\"https://www.cloudflare.com\">Cloudflare</a></div>",
+	)
 	b.WriteString("</div></div></body></html>")
 	return b.String()
 }
@@ -138,13 +157,16 @@ func TestLegacyChallengeCanRecoverAtChromeAndPersistsTrace(t *testing.T) {
 		return response(request, http.StatusOK, "text/html", rich), nil
 	})
 	h := mustNew(t, Options{
-		CacheDir:  t.TempDir(),
-		Client:    &http.Client{Transport: direct},
-		Chrome:    &http.Client{Transport: chrome},
-		Converter: legacyConverterFunc(func(_ context.Context, _ string, _ string, raw []byte) (string, error) { return string(raw), nil }),
+		CacheDir: t.TempDir(),
+		Client:   &http.Client{Transport: direct},
+		Chrome:   &http.Client{Transport: chrome},
+		Converter: legacyConverterFunc(
+			func(_ context.Context, _, _ string, raw []byte) (string, error) { return string(raw), nil },
+		),
 	})
 	result := h.Fetch(context.Background(), "https://blocked.example.test/recovered")
-	if result.Error != "" || result.Method != "chrome-impersonation" || strings.Join(result.Rungs, ",") != "direct,chrome-impersonation" {
+	if result.Error != "" || result.Method != "chrome-impersonation" ||
+		strings.Join(result.Rungs, ",") != "direct,chrome-impersonation" {
 		t.Fatalf("Chrome recovery=%#v", result)
 	}
 	raw, err := os.ReadFile(result.Path)
@@ -195,8 +217,16 @@ func TestLegacyCitationPDFMetaRescueCachesThePublisherSource(t *testing.T) {
 	}
 	firstPublisherCalls, firstMirrorCalls := publisherCalls.Load(), mirrorCalls.Load()
 	second := h.Fetch(context.Background(), publisher)
-	if second.Error != "" || second.CacheStatus != "hit" || publisherCalls.Load() != firstPublisherCalls || mirrorCalls.Load() != firstMirrorCalls {
-		t.Fatalf("citation PDF publisher cache=%#v publisher=%d->%d mirror=%d->%d", second, firstPublisherCalls, publisherCalls.Load(), firstMirrorCalls, mirrorCalls.Load())
+	if second.Error != "" || second.CacheStatus != "hit" || publisherCalls.Load() != firstPublisherCalls ||
+		mirrorCalls.Load() != firstMirrorCalls {
+		t.Fatalf(
+			"citation PDF publisher cache=%#v publisher=%d->%d mirror=%d->%d",
+			second,
+			firstPublisherCalls,
+			publisherCalls.Load(),
+			firstMirrorCalls,
+			mirrorCalls.Load(),
+		)
 	}
 }
 
@@ -207,7 +237,10 @@ func TestLegacySelfReferentialOACandidateCannotRecurse(t *testing.T) {
 	oaTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		if strings.Contains(request.URL.Host, "unpaywall") {
 			providerCalls.Add(1)
-			return jsonResponse(request, `{"is_oa":true,"oa_status":"green","best_oa_location":{"url_for_pdf":"`+candidate+`","version":"publishedVersion"}}`), nil
+			return jsonResponse(
+				request,
+				`{"is_oa":true,"oa_status":"green","best_oa_location":{"url_for_pdf":"`+candidate+`","version":"publishedVersion"}}`,
+			), nil
 		}
 		return jsonResponse(request, `{}`), nil
 	})
@@ -224,14 +257,17 @@ func TestLegacySelfReferentialOACandidateCannotRecurse(t *testing.T) {
 		Chrome:       &http.Client{Transport: wallTransport},
 		Jina:         &http.Client{Transport: missingTransport},
 		OA:           &http.Client{Transport: oaTransport},
-		Converter:    legacyConverterFunc(func(_ context.Context, _ string, _ string, raw []byte) (string, error) { return string(raw), nil }),
-		BrowserRung:  browserOff(),
+		Converter: legacyConverterFunc(
+			func(_ context.Context, _, _ string, raw []byte) (string, error) { return string(raw), nil },
+		),
+		BrowserRung: browserOff(),
 	})
 	result := h.Fetch(context.Background(), source)
 	if result.Error == "" || providerCalls.Load() != 1 {
 		t.Fatalf("recursive OA result=%#v unpaywall calls=%d", result, providerCalls.Load())
 	}
-	if !strings.Contains(strings.Join(result.Rungs, ","), "oa:unpaywall") || result.Rungs[len(result.Rungs)-1] != "wayback" {
+	if !strings.Contains(strings.Join(result.Rungs, ","), "oa:unpaywall") ||
+		result.Rungs[len(result.Rungs)-1] != "wayback" {
 		t.Fatalf("recursive OA trace=%#v", result.Rungs)
 	}
 }

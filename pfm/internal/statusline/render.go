@@ -144,7 +144,13 @@ func (limits rateLimits) windowsAt(now time.Time, runtime Runtime, account int) 
 	// present-but-empty array), not a second opinion on a payload that DID
 	// report and simply carries no Fable entry for this account.
 	if limits.Scoped == nil && account > 0 {
-		if fable, ok := usagehook.CachedFableWindow(runtime.CacheDir, runtime.UID, account, runtime.ConfigDir, now); ok {
+		if fable, ok := usagehook.CachedFableWindow(
+			runtime.CacheDir,
+			runtime.UID,
+			account,
+			runtime.ConfigDir,
+			now,
+		); ok {
 			if resetAt, err := time.Parse(time.RFC3339, fable.ResetsAt); err == nil {
 				windows["seven_day_fable"] = rateWindow{
 					UsedPercentage: *fable.Utilization,

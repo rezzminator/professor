@@ -10,14 +10,15 @@ func TestParseAnchorRowCanonicalGrammar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseAnchorRow() error = %v", err)
 	}
-	if row.DisplayPath != "internal/dream/artifact/map.go:10-20" || row.LookupPath != "internal/dream/artifact/map.go" ||
-		row.ObjectType != GitBlob || row.Hash != "0123456789ab" {
+	if row.DisplayPath != "internal/dream/artifact/map.go:10-20" ||
+		row.LookupPath != "internal/dream/artifact/map.go" ||
+		row.ObjectType != GitBlob ||
+		row.Hash != "0123456789ab" {
 		t.Fatalf("ParseAnchorRow() = %#v", row)
 	}
 	if got := RenderAnchorRow(row); got != "- `internal/dream/artifact/map.go:10-20` — blob `0123456789ab`" {
 		t.Fatalf("RenderAnchorRow() = %q", got)
 	}
-
 }
 
 func TestParseAnchorRowRejectsRetiredAndUnsafeForms(t *testing.T) {
@@ -26,8 +27,16 @@ func TestParseAnchorRowRejectsRetiredAndUnsafeForms(t *testing.T) {
 		row  string
 		want string
 	}{
-		{"40 character hash", "- `map.go` — blob `0123456789abcdef0123456789abcdef01234567`", "anchor row grammar mismatch"},
-		{"commit row", "- `map.go` — `git log -1`: `0123456789ab` (2026-08-13); blob `0123456789ab`", "anchor row grammar mismatch"},
+		{
+			"40 character hash",
+			"- `map.go` — blob `0123456789abcdef0123456789abcdef01234567`",
+			"anchor row grammar mismatch",
+		},
+		{
+			"commit row",
+			"- `map.go` — `git log -1`: `0123456789ab` (2026-08-13); blob `0123456789ab`",
+			"anchor row grammar mismatch",
+		},
 		{"uppercase hash", "- `map.go` — blob `0123456789AB`", "anchor row grammar mismatch"},
 		{"absolute path", "- `/etc/passwd` — blob `0123456789ab`", "unsafe anchor path: /etc/passwd"},
 		{"parent traversal", "- `a/../secret` — blob `0123456789ab`", "unsafe anchor path: a/../secret"},
@@ -66,12 +75,32 @@ func TestParseMapEnforcesCanonicalShape(t *testing.T) {
 		text string
 		want string
 	}{
-		{"legacy title", strings.Replace(canonicalMap, "# Artifact boundary", "# MAP: Artifact boundary", 1), "legacy title prefix"},
-		{"unexpected heading", strings.Replace(canonicalMap, "## Answer", "## Notes\n\nnotes\n\n## Answer", 1), "unexpected section heading"},
-		{"empty question", strings.Replace(canonicalMap, "What does the parser guarantee?", "", 1), "Question, Answer, or Derivation trail is empty"},
+		{
+			"legacy title",
+			strings.Replace(canonicalMap, "# Artifact boundary", "# MAP: Artifact boundary", 1),
+			"legacy title prefix",
+		},
+		{
+			"unexpected heading",
+			strings.Replace(canonicalMap, "## Answer", "## Notes\n\nnotes\n\n## Answer", 1),
+			"unexpected section heading",
+		},
+		{
+			"empty question",
+			strings.Replace(canonicalMap, "What does the parser guarantee?", "", 1),
+			"Question, Answer, or Derivation trail is empty",
+		},
 		{"bad provenance", strings.Replace(canonicalMap, "sid 0123abcd", "sid ABCD", 1), "Provenance grammar mismatch"},
-		{"one anchor", strings.Replace(canonicalMap, "\n- `internal/dream/artifact/types.go` — blob `fedcba987654`", "", 1), "anchor count outside 2-8: 1"},
-		{"nine anchors", canonicalMap + strings.Repeat("- `extra.go` — blob `0123456789ab`\n", 7), "anchor count outside 2-8: 9"},
+		{
+			"one anchor",
+			strings.Replace(canonicalMap, "\n- `internal/dream/artifact/types.go` — blob `fedcba987654`", "", 1),
+			"anchor count outside 2-8: 1",
+		},
+		{
+			"nine anchors",
+			canonicalMap + strings.Repeat("- `extra.go` — blob `0123456789ab`\n", 7),
+			"anchor count outside 2-8: 9",
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

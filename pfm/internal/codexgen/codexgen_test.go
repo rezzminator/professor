@@ -39,7 +39,11 @@ func TestGlobalCommandsCanBeDisabledWithoutTouchingGlobalOutputs(t *testing.T) {
 	beforeSkill := string(mustReadTestFile(t, globalSkill))
 
 	writeTestFile(t, filepath.Join(root, ".claude", "codex-build.json"), `{"version":1,"globalCommands":false}`)
-	writeTestFile(t, filepath.Join(home, ".claude", "commands", "global.md"), "---\ndescription: changed\n---\nchanged\n")
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "global.md"),
+		"---\ndescription: changed\n---\nchanged\n",
+	)
 	result, err := Run(Options{Root: root, Home: home, Mode: ModeBuild})
 	if err != nil || !result.OK {
 		t.Fatalf("opt-out build: result=%#v err=%v", result, err)
@@ -149,8 +153,16 @@ func TestFullCheckAgreesWithInstallerGlobalReconciliation(t *testing.T) {
 	home := t.TempDir()
 	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
 	writeTestFile(t, filepath.Join(root, ".claude", "commands", "dev.md"), "---\ndescription: dev\n---\nRun /dev.\n")
-	writeTestFile(t, filepath.Join(home, ".claude", "commands", "chat", "inject.md"), "---\ndescription: inject\n---\nInject.\n")
-	writeTestFile(t, filepath.Join(home, ".claude", "commands", "chat", "new.md"), "---\ndescription: new\n---\nContinue with /chat:inject.\n")
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "chat", "inject.md"),
+		"---\ndescription: inject\n---\nInject.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "chat", "new.md"),
+		"---\ndescription: new\n---\nContinue with /chat:inject.\n",
+	)
 
 	initial, err := Build(Options{Root: root, Home: home})
 	if err != nil || !initial.OK {
@@ -176,7 +188,11 @@ func TestMCPBackedChatCommandsRetireGlobalSkillsButKeepInterrogate(t *testing.T)
 		"chat/interrogate.md": true,
 		"reload.md":           true,
 	} {
-		writeTestFile(t, filepath.Join(home, ".claude", "commands", relative), "---\ndescription: fixture\n---\nfixture\n")
+		writeTestFile(
+			t,
+			filepath.Join(home, ".claude", "commands", relative),
+			"---\ndescription: fixture\n---\nfixture\n",
+		)
 	}
 	managedInject := filepath.Join(home, ".codex", "skills", "chat-inject", "SKILL.md")
 	writeTestFile(t, managedInject, generatedHeader("old-chat-inject")+"\n")
@@ -209,7 +225,11 @@ func TestCommandSwapNeverRewritesASlashContinuedPath(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	writeTestFile(t, filepath.Join(root, ".claude", "commands", "dev.md"), "---\ndescription: dev\n---\ndev\n")
-	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n\nTUI renders on /dev/tty. Use `/dev build pfm` for anything the pipeline reads.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, "CLAUDE.md"),
+		"# Fixture\n\nTUI renders on /dev/tty. Use `/dev build pfm` for anything the pipeline reads.\n",
+	)
 	result, err := Run(Options{Root: root, Home: home, Mode: ModeBuild})
 	if err != nil || !result.OK {
 		t.Fatalf("build: result=%#v err=%v", result, err)
@@ -296,16 +316,36 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Root\n\nUse /wave:go with sonnet. Read CLAUDE.md.\n")
 	writeTestFile(t, filepath.Join(root, "sample-api", "CLAUDE.md"), "# API\n")
 	writeTestFile(t, filepath.Join(root, "template", "CLAUDE.md"), "# Must stay excluded\n")
-	writeTestFile(t, filepath.Join(root, ".claude", "commands", "wave", "go.md"), "---\ndescription: >-\n  Run sonnet cards\n  safely\n---\nBody keeps CLAUDE.md and /wave:go with sonnet.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "commands", "wave", "go.md"),
+		"---\ndescription: >-\n  Run sonnet cards\n  safely\n---\nBody keeps CLAUDE.md and /wave:go with sonnet.\n",
+	)
 	writeTestFile(t, filepath.Join(root, ".claude", "commands", "references", "killed.md"), "killed\n")
-	writeTestFile(t, filepath.Join(root, ".claude", "agents", "reviewer.md"), "---\ndescription: >-\n  Review \\\"quoted\\\" output\nmodel: sonnet\ntools: Read, Grep\n---\nFollow /wave:go.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "reviewer.md"),
+		"---\ndescription: >-\n  Review \\\"quoted\\\" output\nmodel: sonnet\ntools: Read, Grep\n---\nFollow /wave:go.\n",
+	)
 	writeTestFile(t, filepath.Join(root, ".claude", "agents", "private.md"), "---\ndescription: private\n---\nno\n")
-	writeTestFile(t, filepath.Join(root, "sample-api", ".claude", "agents", "worker.md"), "---\ndescription: child\n---\nchild\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, "sample-api", ".claude", "agents", "worker.md"),
+		"---\ndescription: child\n---\nchild\n",
+	)
 	writeTestFile(t, filepath.Join(root, ".claude", "skills", "native", "SKILL.md"), "# Native\n")
 	writeTestFile(t, filepath.Join(home, ".claude", "commands", "global.md"), "---\ndescription: global\n---\nglobal\n")
-	writeTestFile(t, filepath.Join(home, ".claude", "commands", "side.md"), "---\ndescription: side\ndisable-model-invocation: true\n---\nside\n")
+	writeTestFile(
+		t,
+		filepath.Join(home, ".claude", "commands", "side.md"),
+		"---\ndescription: side\ndisable-model-invocation: true\n---\nside\n",
+	)
 	writeTestFile(t, filepath.Join(root, ".codex", "config.toml"), "model = \"fixture\"\n")
-	writeTestFile(t, filepath.Join(root, ".mcp.json"), `{"mcpServers":{"fixture":{"command":"pfm","args":["mcp"],"future":true}}}`)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".mcp.json"),
+		`{"mcpServers":{"fixture":{"command":"pfm","args":["mcp"],"future":true}}}`,
+	)
 
 	build, err := Run(Options{Root: root, Home: home, Mode: ModeBuild})
 	if err != nil || !build.OK {
@@ -314,21 +354,49 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	if !containsFinding(build.Warnings, "fields not mapped") {
 		t.Fatalf("MCP warning missing: %#v", build.Warnings)
 	}
-	assertTestFileContains(t, filepath.Join(root, "AGENTS.md"), "Generated by pfm codex build", "$wave-go", "gpt-fixture", "AGENTS.md", "## Fixture adapter")
+	assertTestFileContains(
+		t,
+		filepath.Join(root, "AGENTS.md"),
+		"Generated by pfm codex build",
+		"$wave-go",
+		"gpt-fixture",
+		"AGENTS.md",
+		"## Fixture adapter",
+	)
 	if _, err := os.Stat(filepath.Join(root, "template", "AGENTS.md")); !os.IsNotExist(err) {
 		t.Fatalf("excluded template AGENTS.md exists: %v", err)
 	}
-	assertTestFileContains(t, filepath.Join(root, ".codex", "agents", "reviewer.toml"), `description = "Review \\\"quoted\\\" output"`, `sandbox_mode = "read-only"`, "Role reviewer starts here.", "$wave-go")
+	assertTestFileContains(
+		t,
+		filepath.Join(root, ".codex", "agents", "reviewer.toml"),
+		`description = "Review \\\"quoted\\\" output"`,
+		`sandbox_mode = "read-only"`,
+		"Role reviewer starts here.",
+		"$wave-go",
+	)
 	assertTestFileContains(t, filepath.Join(root, ".codex", "agents", "worker-api.toml"), `name = "worker_api"`)
 	if _, err := os.Stat(filepath.Join(root, ".codex", "agents", "private.toml")); !os.IsNotExist(err) {
 		t.Fatalf("never-register agent exists: %v", err)
 	}
 	commandSkill := filepath.Join(root, ".codex", "skills", "wave-go", "SKILL.md")
-	assertTestFileContains(t, commandSkill, "name: wave-go", "Run sonnet cards", "safely", "Body keeps CLAUDE.md", "$wave-go", "gpt-fixture")
+	assertTestFileContains(
+		t,
+		commandSkill,
+		"name: wave-go",
+		"Run sonnet cards",
+		"safely",
+		"Body keeps CLAUDE.md",
+		"$wave-go",
+		"gpt-fixture",
+	)
 	if strings.Contains(string(mustReadTestFile(t, commandSkill)), "Run gpt-fixture cards") {
 		t.Fatal("command frontmatter model alias was rewritten")
 	}
-	if _, err := os.Stat(filepath.Join(root, ".codex", "skills", "references-killed", "SKILL.md")); !os.IsNotExist(err) {
+	if _, err := os.Stat(
+		filepath.Join(root, ".codex", "skills", "references-killed", "SKILL.md"),
+	); !os.IsNotExist(
+		err,
+	) {
 		t.Fatalf("excluded command exists: %v", err)
 	}
 	if target, err := os.Readlink(filepath.Join(root, ".codex", "skills", "native")); err != nil || target == "" {
@@ -338,7 +406,13 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(home, ".codex", "skills", "side", "SKILL.md")); !os.IsNotExist(err) {
 		t.Fatalf("non-model-invocable global skill exists: %v", err)
 	}
-	assertTestFileContains(t, filepath.Join(root, ".codex", "config.toml"), `model = "fixture"`, "generated by pfm codex build", "[mcp_servers.fixture]")
+	assertTestFileContains(
+		t,
+		filepath.Join(root, ".codex", "config.toml"),
+		`model = "fixture"`,
+		"generated by pfm codex build",
+		"[mcp_servers.fixture]",
+	)
 
 	before := snapshotTestTree(t, root, home)
 	check, err := Run(Options{Root: root, Home: home, Mode: ModeCheck})
@@ -374,7 +448,11 @@ func TestReconcileFindingsAreNamedAndNonDestructive(t *testing.T) {
 			t.Fatalf("seed build: result=%#v err=%v", result, err)
 		}
 		writeTestFile(t, filepath.Join(root, "AGENTS.md"), "stale generated content\n")
-		writeTestFile(t, filepath.Join(root, ".codex", "agents", "orphan.toml"), generatedMarker+"\nname = \"orphan\"\n")
+		writeTestFile(
+			t,
+			filepath.Join(root, ".codex", "agents", "orphan.toml"),
+			generatedMarker+"\nname = \"orphan\"\n",
+		)
 		before := snapshotTestTree(t, root, home)
 
 		result, err := Run(Options{Root: root, Home: home, Mode: ModeCheck})
@@ -393,7 +471,11 @@ func TestReconcileFindingsAreNamedAndNonDestructive(t *testing.T) {
 		root := t.TempDir()
 		home := t.TempDir()
 		writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
-		writeTestFile(t, filepath.Join(root, ".claude", "agents", "reviewer.md"), "---\ndescription: reviewer\n---\nReview.\n")
+		writeTestFile(
+			t,
+			filepath.Join(root, ".claude", "agents", "reviewer.md"),
+			"---\ndescription: reviewer\n---\nReview.\n",
+		)
 		if result, err := Run(Options{Root: root, Home: home, Mode: ModeBuild}); err != nil || !result.OK {
 			t.Fatalf("seed build: result=%#v err=%v", result, err)
 		}

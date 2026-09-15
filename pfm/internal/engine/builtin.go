@@ -43,13 +43,17 @@ func init() {
 		DefaultRoots: func(home string) []string { return []string{filepath.Join(home, ".codex")} },
 	})
 	Register(Descriptor{
-		ID: Opencode, Name: "OpenCode", Short: "OpenCode", LongName: "opencode",
-		Binary: "opencode", BinaryPathHints: nil,
-		SocketPrefix: "ox-",
-		SessionEnv:   "", // OpenCode exports no session variable; whoami uses SocketPrefix
-		HomeEnv:      "", // none today
-		RootEnv:      "PFM_OPENCODE_ROOT",
-		DefaultRoots: func(home string) []string { return []string{filepath.Join(home, ".local", "share", "opencode")} },
+		ID:              Opencode,
+		Name:            "OpenCode",
+		Short:           "OpenCode",
+		LongName:        "opencode",
+		Binary:          "opencode",
+		BinaryPathHints: nil,
+		SocketPrefix:    "ox-",
+		SessionEnv:      "", // OpenCode exports no session variable; whoami uses SocketPrefix
+		HomeEnv:         "", // none today
+		RootEnv:         "PFM_OPENCODE_ROOT",
+		DefaultRoots:    func(home string) []string { return []string{filepath.Join(home, ".local", "share", "opencode")} },
 	})
 }
 

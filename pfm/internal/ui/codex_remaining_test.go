@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/x/ansi"
+
 	pfmengine "hostops/pfm/internal/engine"
 	pfmstats "hostops/pfm/internal/stats"
 )
@@ -20,13 +21,23 @@ func TestCodexLimitsShareTheClaudeScale(t *testing.T) {
 			t.Run(fmt.Sprintf("width%d_used%.0f", width, used), func(t *testing.T) {
 				model := NewModel(fixtureSnapshot(120))
 				model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
-					{Account: 1, Engine: pfmengine.Claude, Label: "account 1", Windows: []pfmstats.Window{{Name: "7d", UsedPct: used}}},
-					{Engine: pfmengine.Codex, Label: "Codex 1", Windows: []pfmstats.Window{{Name: "7d", UsedPct: used}}},
+					{
+						Account: 1,
+						Engine:  pfmengine.Claude,
+						Label:   "account 1",
+						Windows: []pfmstats.Window{{Name: "7d", UsedPct: used}},
+					},
+					{
+						Engine:  pfmengine.Codex,
+						Label:   "Codex 1",
+						Windows: []pfmstats.Window{{Name: "7d", UsedPct: used}},
+					},
 				}}
 				lines := model.renderLimitCards(width)
 				plain := ansi.Strip(strings.Join(lines, "\n"))
 				want := fmt.Sprintf("%.0f%% used", used)
-				if strings.Count(plain, want) != 2 || strings.Contains(plain, "% left") || strings.Contains(plain, "5h") {
+				if strings.Count(plain, want) != 2 || strings.Contains(plain, "% left") ||
+					strings.Contains(plain, "5h") {
 					t.Fatalf("Codex and Claude rows must both read %q on one scale:\n%s", want, plain)
 				}
 				var bars []string

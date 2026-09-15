@@ -116,7 +116,12 @@ func Run(options Options) (Result, error) {
 			content += cfg.RootAdapter
 		}
 		rel, _ := filepath.Rel(root, src)
-		add(generatedFile{Path: filepath.Join(root, project, "AGENTS.md"), Content: generatedHeader(filepath.ToSlash(rel)) + "\n" + content})
+		add(
+			generatedFile{
+				Path:    filepath.Join(root, project, "AGENTS.md"),
+				Content: generatedHeader(filepath.ToSlash(rel)) + "\n" + content,
+			},
+		)
 	}
 
 	compileAgents(root, projects, cfg, transform, add, problem, warn, &result)
@@ -132,7 +137,13 @@ func Run(options Options) (Result, error) {
 	} else {
 		if len(mcp.Problems) == 0 {
 			if _, statErr := os.Stat(filepath.Join(root, ".mcp.json")); statErr == nil || mcp.Content != "" {
-				add(generatedFile{Path: filepath.Join(root, ".codex", "config.toml"), Content: mcp.Content, ManagedFence: true})
+				add(
+					generatedFile{
+						Path:         filepath.Join(root, ".codex", "config.toml"),
+						Content:      mcp.Content,
+						ManagedFence: true,
+					},
+				)
 			}
 		}
 		result.Warnings = append(result.Warnings, mcp.Notes...)
@@ -140,7 +151,10 @@ func Run(options Options) (Result, error) {
 	}
 	if options.Mode == ModeCheck {
 		for _, entry := range result.Dangling {
-			result.Problems = append(result.Problems, entry+" — retire the stale link; `pfm install` prunes an orphaned global-command link automatically")
+			result.Problems = append(
+				result.Problems,
+				entry+" — retire the stale link; `pfm install` prunes an orphaned global-command link automatically",
+			)
 		}
 	}
 
@@ -209,7 +223,10 @@ func RunGlobalCommands(options GlobalCommandsOptions) (Result, error) {
 
 	if options.Mode == ModeCheck {
 		for _, entry := range result.Dangling {
-			result.Problems = append(result.Problems, entry+" — retire the stale link; `pfm install` prunes an orphaned global-command link automatically")
+			result.Problems = append(
+				result.Problems,
+				entry+" — retire the stale link; `pfm install` prunes an orphaned global-command link automatically",
+			)
 		}
 	}
 	if options.Mode == ModeBuild && len(result.Problems) != 0 {
@@ -293,7 +310,8 @@ func discoverProjects(root string, cfg Config, result *Result) []string {
 		}
 	} else if entries, err := os.ReadDir(root); err == nil {
 		for _, entry := range entries {
-			if !entry.IsDir() || excluded(cfg.ExcludeProjects, entry.Name()) || entry.Name() == ".claude" || entry.Name() == ".codex" {
+			if !entry.IsDir() || excluded(cfg.ExcludeProjects, entry.Name()) || entry.Name() == ".claude" ||
+				entry.Name() == ".codex" {
 				continue
 			}
 			if hasClaude(filepath.Join(root, entry.Name())) {
@@ -434,7 +452,15 @@ func compileSourceMarkdown(source string, options TransformOptions, problem func
 	return transformMarkdown(string(raw), options), true
 }
 
-func compileAgents(root string, projects []string, cfg Config, options TransformOptions, add func(generatedFile), problem func(string), warn func(string), result *Result) {
+func compileAgents(
+	root string,
+	projects []string,
+	cfg Config,
+	options TransformOptions,
+	add func(generatedFile),
+	problem, warn func(string),
+	result *Result,
+) {
 	seen := map[string]bool{}
 	for _, project := range projects {
 		dir := filepath.Join(root, project, ".claude", "agents")
@@ -452,14 +478,17 @@ func compileAgents(root string, projects []string, cfg Config, options Transform
 					suffix = strings.TrimPrefix(project, cfg.SuffixPrefix)
 				}
 				if suffix == "" && cfg.SuffixMode != "none" {
-					problem(fmt.Sprintf("project %s has an empty agent suffix under %s policy", project, cfg.SuffixMode))
+					problem(
+						fmt.Sprintf("project %s has an empty agent suffix under %s policy", project, cfg.SuffixMode),
+					)
 					continue
 				}
 				if suffix != "" {
 					name += "-" + suffix
 				}
 			}
-			if contains(cfg.NeverRegister, strings.TrimSuffix(filepath.Base(entry.path), ".md")) || contains(cfg.NeverRegister, name) {
+			if contains(cfg.NeverRegister, strings.TrimSuffix(filepath.Base(entry.path), ".md")) ||
+				contains(cfg.NeverRegister, name) {
 				warn("skip agent " + entry.path + " — never-register policy")
 				continue
 			}
@@ -515,7 +544,15 @@ func compileAgents(root string, projects []string, cfg Config, options Transform
 	}
 }
 
-func compileRepoCommands(root string, cfg Config, options TransformOptions, roster map[string]string, add func(generatedFile), problem func(string), warn func(string), result *Result) {
+func compileRepoCommands(
+	root string,
+	cfg Config,
+	options TransformOptions,
+	roster map[string]string,
+	add func(generatedFile),
+	problem, warn func(string),
+	result *Result,
+) {
 	sourceRoot := filepath.Join(root, ".claude", "commands")
 	for _, entry := range discoverMarkdown(sourceRoot, cfg.ExcludeDirs, result) {
 		if entry.skillDir {
@@ -523,11 +560,30 @@ func compileRepoCommands(root string, cfg Config, options TransformOptions, rost
 			add(generatedFile{Path: dst, Link: relativeLink(dst, entry.path)})
 			continue
 		}
-		compileCommandFile(root, sourceRoot, entry, ".claude/commands", filepath.Join(root, ".codex", "skills"), options, add, problem, warn, result, false)
+		compileCommandFile(
+			root,
+			sourceRoot,
+			entry,
+			".claude/commands",
+			filepath.Join(root, ".codex", "skills"),
+			options,
+			add,
+			problem,
+			warn,
+			result,
+			false,
+		)
 	}
 }
 
-func compileGlobalCommands(root, sourceHome, outputHome string, cfg Config, options TransformOptions, add func(generatedFile), problem func(string), warn func(string), result *Result) {
+func compileGlobalCommands(
+	root, sourceHome, outputHome string,
+	cfg Config,
+	options TransformOptions,
+	add func(generatedFile),
+	problem, warn func(string),
+	result *Result,
+) {
 	sourceRoot := filepath.Join(sourceHome, ".claude", "commands")
 	for _, entry := range discoverMarkdown(sourceRoot, nil, result) {
 		if entry.skillDir {
@@ -539,7 +595,19 @@ func compileGlobalCommands(root, sourceHome, outputHome string, cfg Config, opti
 			add(generatedFile{Path: dst, Link: link})
 			continue
 		}
-		compileCommandFile(outputHome, sourceRoot, entry, "$HOME/.claude/commands", "", options, add, problem, warn, result, true)
+		compileCommandFile(
+			outputHome,
+			sourceRoot,
+			entry,
+			"$HOME/.claude/commands",
+			"",
+			options,
+			add,
+			problem,
+			warn,
+			result,
+			true,
+		)
 	}
 }
 
@@ -547,7 +615,12 @@ func compileGlobalCommands(root, sourceHome, outputHome string, cfg Config, opti
 // host commands. Full repository build/check and install reconciliation must
 // use the same source roster and defaults or they can disagree about the
 // bytes under $HOME/.codex immediately after a successful install.
-func compileInstalledGlobalCommands(sourceHome, outputHome string, add func(generatedFile), problem func(string), warn func(string), result *Result) {
+func compileInstalledGlobalCommands(
+	sourceHome, outputHome string,
+	add func(generatedFile),
+	problem, warn func(string),
+	result *Result,
+) {
 	cfg := defaultConfig()
 	sourceRoot := filepath.Join(sourceHome, ".claude", "commands")
 	roster := discoverCommandRosterIn(sourceRoot, nil, result)
@@ -555,7 +628,16 @@ func compileInstalledGlobalCommands(sourceHome, outputHome string, add func(gene
 	compileGlobalCommands(outputHome, sourceHome, outputHome, cfg, transform, add, problem, warn, result)
 }
 
-func compileCommandFile(outputBase, sourceRoot string, entry sourceEntry, label, outputRoot string, options TransformOptions, add func(generatedFile), problem func(string), warn func(string), result *Result, global bool) {
+func compileCommandFile(
+	outputBase, sourceRoot string,
+	entry sourceEntry,
+	label, outputRoot string,
+	options TransformOptions,
+	add func(generatedFile),
+	problem, warn func(string),
+	result *Result,
+	global bool,
+) {
 	raw, err := os.ReadFile(entry.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -580,7 +662,15 @@ func compileCommandFile(outputBase, sourceRoot string, entry sourceEntry, label,
 	// The incumbent compilers only rewrite command references in command
 	// frontmatter. Model names there are descriptive metadata, not executable
 	// model selections; rewriting them changes user-facing skill descriptions.
-	generated := "---\n# " + generatedLine(relSource) + "\nname: " + flat + "\n" + swapCommands(strings.Join(fm, "\n"), options.Commands) + "\n---\n" + transformMarkdown(body, options)
+	generated := "---\n# " + generatedLine(
+		relSource,
+	) + "\nname: " + flat + "\n" + swapCommands(
+		strings.Join(fm, "\n"),
+		options.Commands,
+	) + "\n---\n" + transformMarkdown(
+		body,
+		options,
+	)
 	dst := filepath.Join(outputRoot, flat, "SKILL.md")
 	if global {
 		add(generatedFile{Path: filepath.Join(outputBase, ".codex", "prompts", flat+".md"), Content: generated})
@@ -693,6 +783,7 @@ func flatName(rel string) string {
 	rel = strings.TrimSuffix(filepath.ToSlash(rel), ".md")
 	return strings.ReplaceAll(rel, "/", "-")
 }
+
 func colonName(rel string) string {
 	rel = strings.TrimSuffix(filepath.ToSlash(rel), ".md")
 	return strings.ReplaceAll(rel, "/", ":")

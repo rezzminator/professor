@@ -20,11 +20,11 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/harvest"
-	"hostops/pfm/internal/harvestpy"
-
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"hostops/pfm/internal/harvest"
+	"hostops/pfm/internal/harvestpy"
 )
 
 const (
@@ -166,7 +166,14 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 			runtime.Script = filepath.Join(current, "project", "converter.py")
 		}
 	}
-	worker := harvestpy.NewConverter(harvestpy.Runtime{Python: runtime.Python, Script: runtime.Script, PDFOCR: runtime.PDFOCR, PDFLayout: runtime.PDFLayout})
+	worker := harvestpy.NewConverter(
+		harvestpy.Runtime{
+			Python:    runtime.Python,
+			Script:    runtime.Script,
+			PDFOCR:    runtime.PDFOCR,
+			PDFLayout: runtime.PDFLayout,
+		},
+	)
 	browserRoot, rootErr := harvestStateRoot(runtime)
 	if rootErr != nil {
 		return nil, nil, rootErr
@@ -330,7 +337,15 @@ func (converter pythonConverter) FetchBrowser(ctx context.Context, source string
 	// would reach the real host while the browser rung alone landed on a block
 	// page, and the wall would look like the source's own.
 	hostResolverRules := harvest.BrowserHostResolverRule(fetchCtx, source)
-	html, status, fetchErr := browser.FetchPinned(fetchCtx, source, converter.proxyURL, hostResolverRules, headless, 45000, onAsk)
+	html, status, fetchErr := browser.FetchPinned(
+		fetchCtx,
+		source,
+		converter.proxyURL,
+		hostResolverRules,
+		headless,
+		45000,
+		onAsk,
+	)
 	if fetchErr != nil && policyDenied {
 		return "", 0, fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, fetchErr)
 	}
@@ -343,7 +358,11 @@ func (converter pythonConverter) browserRuntime(ctx context.Context) (harvestpy.
 	return harvestpy.EnsureBrowser(ctx, harvestpy.ProvisionOptions{Root: converter.browserRoot})
 }
 
-func (converter pythonConverter) Convert(ctx context.Context, kind, source string, body []byte) (markdown string, returnErr error) {
+func (converter pythonConverter) Convert(
+	ctx context.Context,
+	kind, source string,
+	body []byte,
+) (markdown string, returnErr error) {
 	directory, err := os.MkdirTemp("", "pfm-harvest-input-")
 	if err != nil {
 		return "", fmt.Errorf("create conversion scratch: %w", err)
@@ -370,7 +389,11 @@ func (converter pythonConverter) Convert(ctx context.Context, kind, source strin
 
 // ConvertOCR forces ONE Tesseract pass for this document only — the dispatch's
 // last-resort rung for scanned PDFs whose text layer converts empty.
-func (converter pythonConverter) ConvertOCR(ctx context.Context, kind, source string, body []byte) (markdown string, returnErr error) {
+func (converter pythonConverter) ConvertOCR(
+	ctx context.Context,
+	kind, source string,
+	body []byte,
+) (markdown string, returnErr error) {
 	directory, err := os.MkdirTemp("", "pfm-harvest-ocr-")
 	if err != nil {
 		return "", fmt.Errorf("create OCR scratch: %w", err)
@@ -384,7 +407,10 @@ func (converter pythonConverter) ConvertOCR(ctx context.Context, kind, source st
 	if err := os.WriteFile(path, body, 0o600); err != nil {
 		return "", fmt.Errorf("write OCR scratch: %w", err)
 	}
-	result, convertErr := converter.worker.Convert(ctx, harvestpy.Request{Path: path, Kind: kind, Source: source, OCR: true})
+	result, convertErr := converter.worker.Convert(
+		ctx,
+		harvestpy.Request{Path: path, Kind: kind, Source: source, OCR: true},
+	)
 	if convertErr != nil {
 		return "", convertErr
 	}
@@ -405,7 +431,10 @@ func (service *Service) Close() error {
 
 // RunStdio serves the stable service over newline-delimited MCP JSON.
 func (service *Service) RunStdio(ctx context.Context, input io.Reader, output io.Writer) error {
-	return service.server.Run(ctx, &mcp.IOTransport{Reader: nopReaderCloser{Reader: input}, Writer: nopWriterCloser{Writer: output}})
+	return service.server.Run(
+		ctx,
+		&mcp.IOTransport{Reader: nopReaderCloser{Reader: input}, Writer: nopWriterCloser{Writer: output}},
+	)
 }
 
 // NewHTTPHandler exposes the same tool surface as stdio through streamable
@@ -434,42 +463,100 @@ func (nopWriterCloser) Close() error { return nil }
 
 func (service *Service) register() {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
-	mcp.AddTool(service.server, &mcp.Tool{Name: "fetch", Description: fetchDescription, InputSchema: fetchInputSchema(), Annotations: readOnly}, func(ctx context.Context, request *mcp.CallToolRequest, input FetchInput) (*mcp.CallToolResult, any, error) {
-		result, _, err := service.fetch(ctx, request, input)
-		return result, nil, err
-	})
-	mcp.AddTool(service.server, &mcp.Tool{Name: "findWorks", Description: findDescription, InputSchema: findInputSchema(), Annotations: readOnly}, func(ctx context.Context, request *mcp.CallToolRequest, input FindInput) (*mcp.CallToolResult, any, error) {
-		result, _, err := service.findWorks(ctx, request, input)
-		return result, nil, err
-	})
-	if searchEnabled(service.runtime) {
-		mcp.AddTool(service.server, &mcp.Tool{Name: "search", Description: searchDescription, InputSchema: searchInputSchema(), Annotations: readOnly}, func(ctx context.Context, request *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, any, error) {
-			result, _, err := service.search(ctx, request, input)
+	mcp.AddTool(
+		service.server,
+		&mcp.Tool{Name: "fetch", Description: fetchDescription, InputSchema: fetchInputSchema(), Annotations: readOnly},
+		func(ctx context.Context, request *mcp.CallToolRequest, input FetchInput) (*mcp.CallToolResult, any, error) {
+			result, _, err := service.fetch(ctx, request, input)
 			return result, nil, err
-		})
+		},
+	)
+	mcp.AddTool(
+		service.server,
+		&mcp.Tool{
+			Name:        "findWorks",
+			Description: findDescription,
+			InputSchema: findInputSchema(),
+			Annotations: readOnly,
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, input FindInput) (*mcp.CallToolResult, any, error) {
+			result, _, err := service.findWorks(ctx, request, input)
+			return result, nil, err
+		},
+	)
+	if searchEnabled(service.runtime) {
+		mcp.AddTool(
+			service.server,
+			&mcp.Tool{
+				Name:        "search",
+				Description: searchDescription,
+				InputSchema: searchInputSchema(),
+				Annotations: readOnly,
+			},
+			func(ctx context.Context, request *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, any, error) {
+				result, _, err := service.search(ctx, request, input)
+				return result, nil, err
+			},
+		)
 	}
-	mcp.AddTool(service.server, &mcp.Tool{Name: "fetchImage", Description: imageDescription, InputSchema: imageInputSchema(), Annotations: readOnly}, func(ctx context.Context, request *mcp.CallToolRequest, input ImageInput) (*mcp.CallToolResult, any, error) {
-		result, _, err := service.fetchImage(ctx, request, input)
-		return result, nil, err
-	})
-	mcp.AddTool(service.server, &mcp.Tool{Name: "archive", Description: archiveDescription, InputSchema: archiveInputSchema(), Annotations: readOnly}, func(ctx context.Context, request *mcp.CallToolRequest, input ArchiveInput) (*mcp.CallToolResult, any, error) {
-		result, _, err := service.archive(ctx, request, input)
-		return result, nil, err
-	})
-	mcp.AddTool(service.server, &mcp.Tool{Name: "searchCache", Description: cacheDescription, InputSchema: cacheInputSchema(), Annotations: readOnly}, func(ctx context.Context, request *mcp.CallToolRequest, input CacheInput) (*mcp.CallToolResult, any, error) {
-		result, _, err := service.searchCache(ctx, request, input)
-		return result, nil, err
-	})
-	service.server.AddPrompt(&mcp.Prompt{Name: "fetch", Description: "Fetch a URL or local path and convert its contents to markdown", Arguments: []*mcp.PromptArgument{{Name: "url", Description: "URL or path to fetch", Required: true}}}, service.fetchPrompt)
+	mcp.AddTool(
+		service.server,
+		&mcp.Tool{
+			Name:        "fetchImage",
+			Description: imageDescription,
+			InputSchema: imageInputSchema(),
+			Annotations: readOnly,
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, input ImageInput) (*mcp.CallToolResult, any, error) {
+			result, _, err := service.fetchImage(ctx, request, input)
+			return result, nil, err
+		},
+	)
+	mcp.AddTool(
+		service.server,
+		&mcp.Tool{
+			Name:        "archive",
+			Description: archiveDescription,
+			InputSchema: archiveInputSchema(),
+			Annotations: readOnly,
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, input ArchiveInput) (*mcp.CallToolResult, any, error) {
+			result, _, err := service.archive(ctx, request, input)
+			return result, nil, err
+		},
+	)
+	mcp.AddTool(
+		service.server,
+		&mcp.Tool{
+			Name:        "searchCache",
+			Description: cacheDescription,
+			InputSchema: cacheInputSchema(),
+			Annotations: readOnly,
+		},
+		func(ctx context.Context, request *mcp.CallToolRequest, input CacheInput) (*mcp.CallToolResult, any, error) {
+			result, _, err := service.searchCache(ctx, request, input)
+			return result, nil, err
+		},
+	)
+	service.server.AddPrompt(
+		&mcp.Prompt{
+			Name:        "fetch",
+			Description: "Fetch a URL or local path and convert its contents to markdown",
+			Arguments:   []*mcp.PromptArgument{{Name: "url", Description: "URL or path to fetch", Required: true}},
+		},
+		service.fetchPrompt,
+	)
 }
 
-const codeTick = "`"
-const fetchDescription = `Retrieves 1–50 documents as Markdown, input order kept. Call fetch{sources:["https://…","doi:10.…","harvest:…"]} — a URL/path, DOI, ISBN, PMID/PMCID, or a handle from findWorks/searchCache; a title → findWorks first. Each item returns content (may be truncated), size, cache status, and the path to the COMPLETE artifact — read the path for the rest. A failing item carries its own error and the others still return; an empty extraction is reported as that item's error, never as a blank body.`
-const findDescription = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call findWorks{query:"Attention Is All You Need"}. Returns ranked candidates (title, authors, year, kind, access) each with a fetch handle — pass that value unchanged to fetch. Empty candidates = nothing matched (give the exact title); a tool error = discovery itself failed, retry or fetch an exact identifier. For a general web query use search.`
-const searchDescription = `Searches the web — "search for X", "find pages about X" — ranked titles, URLs, and snippets, never the page itself. Call search{query:"…"}; search{query:"…", lang:"ja"} reaches a non-English literature. Pass a result URL to fetch for the document. Empty results = nothing matched (broaden the query); an error result = the search backend failed, retry later. For a paper or book by title use findWorks; for what is already held, searchCache.`
-const imageDescription = `Fetches images as local files for vision — "get this figure / photo / scanned page". Call fetchImage{sources:["https://…/fig1.png"]}, 1–50 URLs, local paths, or harvest handles, results in input order. Returns each item's path and bytes — open the path with vision; images are never OCR'd or converted. A failing item carries its own error and the rest still return. For a document, PDF, or web page use fetch.`
-const archiveDescription = `Browses a compressed archive — "open / list / what is in this .zip, .tar.gz, .7z, .rar", then "extract member X from it". Not a web page fetcher — a URL to a page goes to fetch. Call archive{source:"https://…/data.zip"} for the member listing (names and sizes, nothing extracted); then archive{source:"…", member:"docs/readme.md"} converts that one member to Markdown. 0 members = an empty archive; an ERROR item = the archive could not be fetched or opened, or the member was refused (traversal, symlink, size).`
-const cacheDescription = `Greps the local cache of already-fetched documents — "did we already fetch X", "which cached pages mention Y". Call searchCache{pattern:"transformer attention"}. Returns WHICH cached pages match (url, md_path, match count, sample line), not their text — read md_path or fetch the url for content. Empty matches = nothing held matches (the web is not searched; search or fetch first); a tool error = the pattern was invalid or the cache could not be read.`
+const (
+	codeTick           = "`"
+	fetchDescription   = `Retrieves 1–50 documents as Markdown, input order kept. Call fetch{sources:["https://…","doi:10.…","harvest:…"]} — a URL/path, DOI, ISBN, PMID/PMCID, or a handle from findWorks/searchCache; a title → findWorks first. Each item returns content (may be truncated), size, cache status, and the path to the COMPLETE artifact — read the path for the rest. A failing item carries its own error and the others still return; an empty extraction is reported as that item's error, never as a blank body.`
+	findDescription    = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call findWorks{query:"Attention Is All You Need"}. Returns ranked candidates (title, authors, year, kind, access) each with a fetch handle — pass that value unchanged to fetch. Empty candidates = nothing matched (give the exact title); a tool error = discovery itself failed, retry or fetch an exact identifier. For a general web query use search.`
+	searchDescription  = `Searches the web — "search for X", "find pages about X" — ranked titles, URLs, and snippets, never the page itself. Call search{query:"…"}; search{query:"…", lang:"ja"} reaches a non-English literature. Pass a result URL to fetch for the document. Empty results = nothing matched (broaden the query); an error result = the search backend failed, retry later. For a paper or book by title use findWorks; for what is already held, searchCache.`
+	imageDescription   = `Fetches images as local files for vision — "get this figure / photo / scanned page". Call fetchImage{sources:["https://…/fig1.png"]}, 1–50 URLs, local paths, or harvest handles, results in input order. Returns each item's path and bytes — open the path with vision; images are never OCR'd or converted. A failing item carries its own error and the rest still return. For a document, PDF, or web page use fetch.`
+	archiveDescription = `Browses a compressed archive — "open / list / what is in this .zip, .tar.gz, .7z, .rar", then "extract member X from it". Not a web page fetcher — a URL to a page goes to fetch. Call archive{source:"https://…/data.zip"} for the member listing (names and sizes, nothing extracted); then archive{source:"…", member:"docs/readme.md"} converts that one member to Markdown. 0 members = an empty archive; an ERROR item = the archive could not be fetched or opened, or the member was refused (traversal, symlink, size).`
+	cacheDescription   = `Greps the local cache of already-fetched documents — "did we already fetch X", "which cached pages mention Y". Call searchCache{pattern:"transformer attention"}. Returns WHICH cached pages match (url, md_path, match count, sample line), not their text — read md_path or fetch the url for content. Empty matches = nothing held matches (the web is not searched; search or fetch first); a tool error = the pattern was invalid or the cache could not be read.`
+)
 
 func defaultJSON(value string) json.RawMessage { return json.RawMessage(value) }
 
@@ -497,45 +584,79 @@ func fetchInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type: "object", Required: []string{"sources"},
 		Properties: map[string]*jsonschema.Schema{
-			"sources":   arraySchema("1–50 things to fetch, each returned as clean Markdown in the SAME order. Each is a LOCATION or an UNAMBIGUOUS identifier of a DOCUMENT: URL / local path / file://; DOI; ISBN; PMID / PMCID; harvest: handle. Use a DIFFERENT tool for a TITLE (findWorks), an IMAGE (fetchImage), or an archive (archive). A failing item returns a descriptive per-item error and the rest still return.", 1, 50),
-			"refresh":   {Type: "boolean", Description: "Force a fresh fetch: bypass the cache entirely, re-download, overwrite the cached artifact, and return the NEW content.", Default: defaultJSON("false")},
-			"size_only": {Type: "boolean", Description: "When true, fetch and cache the full content but return NO body—just {size, chars, path}; full content remains cached at path.", Default: defaultJSON("false")},
+			"sources": arraySchema(
+				"1–50 things to fetch, each returned as clean Markdown in the SAME order. Each is a LOCATION or an UNAMBIGUOUS identifier of a DOCUMENT: URL / local path / file://; DOI; ISBN; PMID / PMCID; harvest: handle. Use a DIFFERENT tool for a TITLE (findWorks), an IMAGE (fetchImage), or an archive (archive). A failing item returns a descriptive per-item error and the rest still return.",
+				1,
+				50,
+			),
+			"refresh": {
+				Type:        "boolean",
+				Description: "Force a fresh fetch: bypass the cache entirely, re-download, overwrite the cached artifact, and return the NEW content.",
+				Default:     defaultJSON("false"),
+			},
+			"size_only": {
+				Type:        "boolean",
+				Description: "When true, fetch and cache the full content but return NO body—just {size, chars, path}; full content remains cached at path.",
+				Default:     defaultJSON("false"),
+			},
 		},
 	}
 }
 
 func findInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "object", Required: []string{"query"}, Properties: map[string]*jsonschema.Schema{
-		"query": {Type: "string", Description: "A paper or book TITLE, or a free-text bibliographic query. Returns a ranked list of candidate works with a fetch handle; pick one and pass it to fetch."},
+		"query": {
+			Type:        "string",
+			Description: "A paper or book TITLE, or a free-text bibliographic query. Returns a ranked list of candidate works with a fetch handle; pick one and pass it to fetch.",
+		},
 		"limit": numberSchema("Maximum number of candidate works to return.", 1, 25, 8),
 	}}
 }
 
 func searchInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "object", Required: []string{"query"}, Properties: map[string]*jsonschema.Schema{
-		"query":   {Type: "string", Description: "The web search query."},
-		"count":   numberSchema("Maximum number of results to return.", 1, 20, 8),
-		"lang":    {Type: "string", Description: "Optional language/locale to bias the search (e.g. 'zh', 'ja', 'pt-BR'). Set it to reach a NON-English literature."},
-		"engines": {Type: "string", Description: "Optional comma-separated SearXNG engines to restrict to (e.g. 'google,brave' or 'naver,yahoo'). Omit for the default aggregated set."},
+		"query": {Type: "string", Description: "The web search query."},
+		"count": numberSchema("Maximum number of results to return.", 1, 20, 8),
+		"lang": {
+			Type:        "string",
+			Description: "Optional language/locale to bias the search (e.g. 'zh', 'ja', 'pt-BR'). Set it to reach a NON-English literature.",
+		},
+		"engines": {
+			Type:        "string",
+			Description: "Optional comma-separated SearXNG engines to restrict to (e.g. 'google,brave' or 'naver,yahoo'). Omit for the default aggregated set.",
+		},
 	}}
 }
 
 func imageInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "object", Required: []string{"sources"}, Properties: map[string]*jsonschema.Schema{
-		"sources": arraySchema("1–50 image URLs or local image paths. Each is downloaded into the type-partitioned cache and its LOCAL FILE PATH is returned in order — images are NOT OCR'd.", 1, 50),
+		"sources": arraySchema(
+			"1–50 image URLs or local image paths. Each is downloaded into the type-partitioned cache and its LOCAL FILE PATH is returned in order — images are NOT OCR'd.",
+			1,
+			50,
+		),
 	}}
 }
 
 func archiveInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "object", Required: []string{"source"}, Properties: map[string]*jsonschema.Schema{
-		"source": {Type: "string", Description: "URL or local path of a .zip / .tar(.gz/.bz2/.xz) / .7z / .rar archive."},
-		"member": {Types: []string{"string", "null"}, Description: "Omit to get the SAFE member listing (names + sizes; nothing is extracted). Give one member name from that listing to fetch just that member, converted to Markdown."},
+		"source": {
+			Type:        "string",
+			Description: "URL or local path of a .zip / .tar(.gz/.bz2/.xz) / .7z / .rar archive.",
+		},
+		"member": {
+			Types:       []string{"string", "null"},
+			Description: "Omit to get the SAFE member listing (names + sizes; nothing is extracted). Give one member name from that listing to fetch just that member, converted to Markdown.",
+		},
 	}}
 }
 
 func cacheInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{Type: "object", Required: []string{"pattern"}, Properties: map[string]*jsonschema.Schema{
-		"pattern":     {Type: "string", Description: "Regex pattern to search across every cached markdown body in the cache."},
+		"pattern": {
+			Type:        "string",
+			Description: "Regex pattern to search across every cached markdown body in the cache.",
+		},
 		"max_results": numberSchema("Maximum number of matching cached pages to return.", 1, 1000, 50),
 		"ignore_case": {Type: "boolean", Description: "Case-insensitive search.", Default: defaultJSON("true")},
 	}}
@@ -614,7 +735,11 @@ type CacheOutput struct {
 	Matches []CacheHit `json:"matches"`
 }
 
-func (service *Service) fetch(ctx context.Context, _ *mcp.CallToolRequest, input FetchInput) (*mcp.CallToolResult, FetchOutput, error) {
+func (service *Service) fetch(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	input FetchInput,
+) (*mcp.CallToolResult, FetchOutput, error) {
 	if len(input.Sources) < 1 || len(input.Sources) > maxFetchSources {
 		return nil, FetchOutput{}, fmt.Errorf("sources must contain 1-%d items", maxFetchSources)
 	}
@@ -629,12 +754,20 @@ func (service *Service) fetch(ctx context.Context, _ *mcp.CallToolRequest, input
 			select {
 			case semaphore <- struct{}{}:
 			case <-ctx.Done():
-				contents[index] = service.describeFetch(source, harvest.Result{Source: source, Error: "fetch cancelled: " + ctx.Err().Error()}, input.SizeOnly)
+				contents[index] = service.describeFetch(
+					source,
+					harvest.Result{Source: source, Error: "fetch cancelled: " + ctx.Err().Error()},
+					input.SizeOnly,
+				)
 				items[index] = FetchItem{Source: source, Error: "fetch cancelled: " + ctx.Err().Error()}
 				return
 			}
 			defer func() { <-semaphore }()
-			fetched := service.harvester.FetchPublic(ctx, source, harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly})
+			fetched := service.harvester.FetchPublic(
+				ctx,
+				source,
+				harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly},
+			)
 			items[index] = fetchItem(fetched)
 			contents[index] = service.describeFetch(source, fetched, input.SizeOnly)
 		}(index, source)
@@ -647,7 +780,11 @@ func (service *Service) fetch(ctx context.Context, _ *mcp.CallToolRequest, input
 	return result, FetchOutput{Items: items}, nil
 }
 
-func (service *Service) findWorks(ctx context.Context, _ *mcp.CallToolRequest, input FindInput) (*mcp.CallToolResult, FindOutput, error) {
+func (service *Service) findWorks(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	input FindInput,
+) (*mcp.CallToolResult, FindOutput, error) {
 	if strings.TrimSpace(input.Query) == "" {
 		return nil, FindOutput{}, errors.New("query must not be empty")
 	}
@@ -668,10 +805,18 @@ func (service *Service) findWorks(ctx context.Context, _ *mcp.CallToolRequest, i
 		return nil, FindOutput{}, errors.New("Could not prepare the discovered works for retrieval. Retry later.")
 	}
 	lines := renderFind(input.Query, candidates)
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: lines}}}, FindOutput{Candidates: candidates}, nil
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: lines}},
+	}, FindOutput{
+		Candidates: candidates,
+	}, nil
 }
 
-func (service *Service) search(ctx context.Context, _ *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, SearchOutput, error) {
+func (service *Service) search(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	input SearchInput,
+) (*mcp.CallToolResult, SearchOutput, error) {
 	if strings.TrimSpace(input.Query) == "" {
 		return nil, SearchOutput{}, errors.New("query must not be empty")
 	}
@@ -682,20 +827,35 @@ func (service *Service) search(ctx context.Context, _ *mcp.CallToolRequest, inpu
 		return nil, SearchOutput{}, fmt.Errorf("count must be between 1 and %d", maxSearchResults)
 	}
 	results, _, err := harvest.Search(ctx, input.Query, harvest.SearchOptions{
-		SearXNGURL: service.runtime.SearXNGURL, BraveAPIKey: service.runtime.BraveAPIKey, DisableSearch: service.runtime.DisableSearch,
-		Lang: input.Lang, Engines: input.Engines, Count: input.Count,
+		SearXNGURL:    service.runtime.SearXNGURL,
+		BraveAPIKey:   service.runtime.BraveAPIKey,
+		DisableSearch: service.runtime.DisableSearch,
+		Lang:          input.Lang,
+		Engines:       input.Engines,
+		Count:         input.Count,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "harvester search: %v\n", err)
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearchFailure(err)}}, IsError: true}, SearchOutput{}, nil
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: renderSearchFailure(err)}},
+			IsError: true,
+		}, SearchOutput{}, nil
 	}
 	for index := range results {
 		results[index].Engine = ""
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, "")}}}, SearchOutput{Results: results}, nil
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, "")}},
+	}, SearchOutput{
+		Results: results,
+	}, nil
 }
 
-func (service *Service) fetchImage(ctx context.Context, _ *mcp.CallToolRequest, input ImageInput) (*mcp.CallToolResult, ImageOutput, error) {
+func (service *Service) fetchImage(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	input ImageInput,
+) (*mcp.CallToolResult, ImageOutput, error) {
 	if len(input.Sources) < 1 || len(input.Sources) > maxImageSources {
 		return nil, ImageOutput{}, fmt.Errorf("sources must contain 1-%d items", maxImageSources)
 	}
@@ -733,7 +893,11 @@ func (service *Service) fetchImage(ctx context.Context, _ *mcp.CallToolRequest, 
 	return result, ImageOutput{Items: items}, nil
 }
 
-func (service *Service) archive(ctx context.Context, _ *mcp.CallToolRequest, input ArchiveInput) (*mcp.CallToolResult, ArchiveOutput, error) {
+func (service *Service) archive(
+	ctx context.Context,
+	_ *mcp.CallToolRequest,
+	input ArchiveInput,
+) (*mcp.CallToolResult, ArchiveOutput, error) {
 	if strings.TrimSpace(input.Source) == "" {
 		return nil, ArchiveOutput{}, errors.New("source must not be empty")
 	}
@@ -748,15 +912,31 @@ func (service *Service) archive(ctx context.Context, _ *mcp.CallToolRequest, inp
 	}
 	result = service.harvester.PublicResult(input.Source, result, false)
 	if err != nil || result.Error != "" {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}}}, ArchiveOutput{Result: result}, nil
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}},
+		}, ArchiveOutput{
+			Result: result,
+		}, nil
 	}
 	if input.Member == "" {
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: renderArchiveListing(input.Source, result.Members)}}}, ArchiveOutput{Result: result}, nil
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: renderArchiveListing(input.Source, result.Members)}},
+		}, ArchiveOutput{
+			Result: result,
+		}, nil
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}}}, ArchiveOutput{Result: result}, nil
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}},
+	}, ArchiveOutput{
+		Result: result,
+	}, nil
 }
 
-func (service *Service) searchCache(_ context.Context, _ *mcp.CallToolRequest, input CacheInput) (*mcp.CallToolResult, CacheOutput, error) {
+func (service *Service) searchCache(
+	_ context.Context,
+	_ *mcp.CallToolRequest,
+	input CacheInput,
+) (*mcp.CallToolResult, CacheOutput, error) {
 	if strings.TrimSpace(input.Pattern) == "" {
 		return nil, CacheOutput{}, errors.New("pattern must not be empty")
 	}
@@ -782,24 +962,45 @@ func (service *Service) searchCache(_ context.Context, _ *mcp.CallToolRequest, i
 	}
 	lines := make([]string, 0, len(hits)+2)
 	if len(hits) == 0 {
-		text := fmt.Sprintf("No cached pages match /%s/. This only searches pages already fetched — it does not search the web; %s", input.Pattern, harvest.SearchHint(searchEnabled(service.runtime),
-			"use `search` or `fetch` a source first.",
-			"fetch a source first.",
-		))
-		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}, CacheOutput{Matches: hits}, nil
+		text := fmt.Sprintf(
+			"No cached pages match /%s/. This only searches pages already fetched — it does not search the web; %s",
+			input.Pattern,
+			harvest.SearchHint(searchEnabled(service.runtime),
+				"use `search` or `fetch` a source first.",
+				"fetch a source first.",
+			),
+		)
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+		}, CacheOutput{
+			Matches: hits,
+		}, nil
 	}
-	lines = append(lines, fmt.Sprintf("%d cached page(s) match /%s/ — this lists WHICH pages match, it does not return their text; `fetch` the source or read `md_path` directly for content:", len(hits), input.Pattern), "")
+	lines = append(
+		lines,
+		fmt.Sprintf(
+			"%d cached page(s) match /%s/ — this lists WHICH pages match, it does not return their text; `fetch` the source or read `md_path` directly for content:",
+			len(hits),
+			input.Pattern,
+		),
+		"",
+	)
 	for _, hit := range hits {
 		lines = append(lines, fmt.Sprintf("- %s  (%d matches)  md_path: %s", hit.URL, hit.Matches, hit.Path))
 		if hit.Sample != "" {
 			lines = append(lines, "    "+hit.Sample)
 		}
 	}
-	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: strings.Join(lines, "\n")}}}, CacheOutput{Matches: hits}, nil
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: strings.Join(lines, "\n")}},
+	}, CacheOutput{
+		Matches: hits,
+	}, nil
 }
 
 func (service *Service) fetchPrompt(ctx context.Context, request *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
-	if request == nil || request.Params == nil || request.Params.Arguments == nil || strings.TrimSpace(request.Params.Arguments["url"]) == "" {
+	if request == nil || request.Params == nil || request.Params.Arguments == nil ||
+		strings.TrimSpace(request.Params.Arguments["url"]) == "" {
 		return nil, errors.New("URL is required")
 	}
 	source := request.Params.Arguments["url"]
@@ -813,7 +1014,16 @@ func (service *Service) fetchPrompt(ctx context.Context, request *mcp.GetPromptR
 }
 
 func fetchItem(result harvest.Result) FetchItem {
-	return FetchItem{Source: result.Source, Content: result.Content, CacheStatus: result.CacheStatus, Bytes: result.Bytes, Tokens: result.Tokens, Chars: result.Chars, Path: result.Path, Error: result.Error}
+	return FetchItem{
+		Source:      result.Source,
+		Content:     result.Content,
+		CacheStatus: result.CacheStatus,
+		Bytes:       result.Bytes,
+		Tokens:      result.Tokens,
+		Chars:       result.Chars,
+		Path:        result.Path,
+		Error:       result.Error,
+	}
 }
 
 func (service *Service) describeFetch(source string, result harvest.Result, sizeOnly bool) string {
@@ -824,12 +1034,27 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 	// this wording is part of the Python scheduler contract.
 	if sizeOnly {
 		if strings.TrimSpace(result.Content) == "" && result.Chars == 0 && result.Bytes == 0 {
-			return fmt.Sprintf("# %s\nERROR: Fetched %s but it yielded no readable content (empty after extraction) — nothing to size. %s", source, source, harvest.SearchHint(searchEnabled(service.runtime),
-				"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
-				"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
-			))
+			return fmt.Sprintf(
+				"# %s\nERROR: Fetched %s but it yielded no readable content (empty after extraction) — nothing to size. %s",
+				source,
+				source,
+				harvest.SearchHint(searchEnabled(service.runtime),
+					"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+					"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
+				),
+			)
 		}
-		body, err := json.Marshal(map[string]any{"source": source, "size": result.Tokens, "tokens": result.Tokens, "token_count": result.Tokens, "chars": result.Chars, "path": result.Path, "cache_status": result.CacheStatus})
+		body, err := json.Marshal(
+			map[string]any{
+				"source":       source,
+				"size":         result.Tokens,
+				"tokens":       result.Tokens,
+				"token_count":  result.Tokens,
+				"chars":        result.Chars,
+				"path":         result.Path,
+				"cache_status": result.CacheStatus,
+			},
+		)
 		if err != nil {
 			return fmt.Sprintf("# %s\nERROR: encode size receipt: %v", source, err)
 		}
@@ -845,18 +1070,25 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 			message = harvest.PublicFailureMessage(result)
 		}
 		if message == "" {
-			message = fmt.Sprintf("Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). %s", source, harvest.SearchHint(searchEnabled(service.runtime),
-				"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
-				"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
-			))
+			message = fmt.Sprintf(
+				"Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). %s",
+				source,
+				harvest.SearchHint(searchEnabled(service.runtime),
+					"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+					"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
+				),
+			)
 		}
 		return "# " + source + "\nERROR: " + message
 	}
 	// A thin HTTP error/challenge page is a failure, not a successful body.
 	lowerBody := strings.ToLower(stripped)
-	challenge := strings.Contains(lowerBody, "cloudflare") || strings.Contains(lowerBody, "captcha") || strings.Contains(lowerBody, "verify you are human")
+	challenge := strings.Contains(lowerBody, "cloudflare") || strings.Contains(lowerBody, "captcha") ||
+		strings.Contains(lowerBody, "verify you are human")
 	if len([]rune(stripped)) < 500 && (status >= 400 || challenge) {
-		return "# " + source + "\nERROR: " + harvest.PublicFailureMessage(harvest.Result{HTTPStatus: status, ErrorKind: result.ErrorKind, Challenge: challenge})
+		return "# " + source + "\nERROR: " + harvest.PublicFailureMessage(
+			harvest.Result{HTTPStatus: status, ErrorKind: result.ErrorKind, Challenge: challenge},
+		)
 	}
 	fetchedAt := "unknown"
 	if value := meta["fetched_at"]; value != "" {
@@ -866,12 +1098,28 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 	if value, err := strconv.Atoi(meta["token_count"]); err == nil {
 		tokens = value
 	}
-	header := fmt.Sprintf("# %s\ncache_status: %s / bytes: %d / tokens: %d / fetched_at: %s / path: %s", source, result.CacheStatus, result.Bytes, tokens, fetchedAt, result.Path)
+	header := fmt.Sprintf(
+		"# %s\ncache_status: %s / bytes: %d / tokens: %d / fetched_at: %s / path: %s",
+		source,
+		result.CacheStatus,
+		result.Bytes,
+		tokens,
+		fetchedAt,
+		result.Path,
+	)
 
 	cap := service.inlineCap()
 	if cap > 0 && len([]rune(body)) > cap {
 		runes := []rune(body)
-		body = string(runes[:cap]) + fmt.Sprintf("\n\n— [truncated: first %d of %d chars. COMPLETE text is at %s — read that file from char %d for the rest. `searchCache` locates WHICH cached pages match a pattern; it does not return text.]", cap, max(result.Chars, len(runes)), result.Path, cap)
+		body = string(
+			runes[:cap],
+		) + fmt.Sprintf(
+			"\n\n— [truncated: first %d of %d chars. COMPLETE text is at %s — read that file from char %d for the rest. `searchCache` locates WHICH cached pages match a pattern; it does not return text.]",
+			cap,
+			max(result.Chars, len(runes)),
+			result.Path,
+			cap,
+		)
 	}
 	return header + "\n\n" + body
 }
@@ -913,9 +1161,19 @@ func frontmatter(path string) map[string]string {
 
 func renderFind(query string, candidates []harvest.Candidate) string {
 	if len(candidates) == 0 {
-		return fmt.Sprintf("No candidate works found for %q. Try a plain WebSearch, or rephrase — a more exact title helps.", query)
+		return fmt.Sprintf(
+			"No candidate works found for %q. Try a plain WebSearch, or rephrase — a more exact title helps.",
+			query,
+		)
 	}
-	lines := []string{fmt.Sprintf("%d candidate work(s) for %q — pick one and call `fetch` with its `fetch:` value:", len(candidates), query), ""}
+	lines := []string{
+		fmt.Sprintf(
+			"%d candidate work(s) for %q — pick one and call `fetch` with its `fetch:` value:",
+			len(candidates),
+			query,
+		),
+		"",
+	}
 	for index, candidate := range candidates {
 		values := []string{candidate.Kind}
 		if candidate.Authors != "" {
@@ -929,7 +1187,12 @@ func renderFind(query string, candidates []harvest.Candidate) string {
 		}
 		values = append(values, fmt.Sprintf("match %v", candidate.Match))
 		meta := strings.Trim(strings.Join(values, " · "), " ·")
-		lines = append(lines, fmt.Sprintf("%d. %s", index+1, valueOr(candidate.Title, "(untitled)")), "   fetch: "+candidate.URL, "   "+meta)
+		lines = append(
+			lines,
+			fmt.Sprintf("%d. %s", index+1, valueOr(candidate.Title, "(untitled)")),
+			"   fetch: "+candidate.URL,
+			"   "+meta,
+		)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -938,7 +1201,11 @@ func renderArchiveListing(source string, members []harvest.Member) string {
 	lines := []string{
 		"# Archive: " + source,
 		"",
-		fmt.Sprintf("%d member(s). Fetch one with `archive(source=%q, member=\"<name>\")` — pick a name from the table below.", len(members), source),
+		fmt.Sprintf(
+			"%d member(s). Fetch one with `archive(source=%q, member=\"<name>\")` — pick a name from the table below.",
+			len(members),
+			source,
+		),
 		"",
 		"| name | size (bytes) | type |",
 		"| --- | --- | --- |",

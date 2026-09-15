@@ -54,7 +54,11 @@ func compactNudge(stdin io.Reader, stdout, stderr io.Writer, sidDir string, pref
 		return 0
 	}
 	if !found {
-		fmt.Fprintf(stderr, "pfm internal compact-nudge: no context sample for %s yet — the statusline records one after the first rendered turn\n", sessionID)
+		fmt.Fprintf(
+			stderr,
+			"pfm internal compact-nudge: no context sample for %s yet — the statusline records one after the first rendered turn\n",
+			sessionID,
+		)
 		return 0
 	}
 	band, speak, err := nudge.Decide(sidDir, sessionID, percent, prefs.Start, prefs.Step)

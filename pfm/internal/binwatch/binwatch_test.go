@@ -119,7 +119,12 @@ func TestWatchExecutableNeverRestartsOntoAMissingBinary(t *testing.T) {
 }
 
 func TestWatchExecutableRefusesAnUnreadableStart(t *testing.T) {
-	if _, err := watch(context.Background(), filepath.Join(t.TempDir(), "absent"), watchTick, &bytes.Buffer{}); err == nil {
+	if _, err := watch(
+		context.Background(),
+		filepath.Join(t.TempDir(), "absent"),
+		watchTick,
+		&bytes.Buffer{},
+	); err == nil {
 		t.Fatal("watching an absent executable returned no error")
 	}
 }

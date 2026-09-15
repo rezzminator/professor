@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/chat"
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
@@ -20,8 +22,6 @@ import (
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // callToolWithMeta is the protocol-level counterpart of callTool. The
@@ -151,7 +151,13 @@ func TestMetadataIdentityNormalizesSelfBeforeTheChatVerbs(t *testing.T) {
 	if last.Target != "self" || last.Text != "self answer" {
 		t.Fatalf("chat_last(self) = %+v", last)
 	}
-	status := callToolWithMeta[StatusOutput](t, protocol.clientSession, "chat_status", meta, StatusInput{Target: "self"})
+	status := callToolWithMeta[StatusOutput](
+		t,
+		protocol.clientSession,
+		"chat_status",
+		meta,
+		StatusInput{Target: "self"},
+	)
 	if status.Name != "Codex A" || status.SessionID != "thread-a" {
 		t.Fatalf("chat_status(self) = %+v", status)
 	}
@@ -221,11 +227,19 @@ func (recorder *recordingCompactInjector) Resolve(context.Context, string) (inje
 	return inject.Target{}, 0, "", nil
 }
 
-func (recorder *recordingCompactInjector) ResolveEngine(context.Context, string, string) (inject.Target, int, string, error) {
+func (recorder *recordingCompactInjector) ResolveEngine(
+	context.Context,
+	string,
+	string,
+) (inject.Target, int, string, error) {
 	return inject.Target{}, 0, "", nil
 }
 
-func (recorder *recordingCompactInjector) Capture(context.Context, string, int) (inject.Target, string, int, string, error) {
+func (recorder *recordingCompactInjector) Capture(
+	context.Context,
+	string,
+	int,
+) (inject.Target, string, int, string, error) {
 	return inject.Target{}, "", 0, "", nil
 }
 
@@ -233,12 +247,19 @@ func (recorder *recordingCompactInjector) Inject(context.Context, inject.Request
 	return inject.Result{}, nil
 }
 
-func (recorder *recordingCompactInjector) ScheduleAfterCurrentTurn(_ context.Context, request inject.Request) (inject.Result, error) {
+func (recorder *recordingCompactInjector) ScheduleAfterCurrentTurn(
+	_ context.Context,
+	request inject.Request,
+) (inject.Result, error) {
 	recorder.scheduled = request
 	return inject.Result{Status: "scheduled", Code: 0}, nil
 }
 
-func (recorder *recordingCompactInjector) ScheduleSelfCompact(_ context.Context, focus string, then []string) (inject.Result, error) {
+func (recorder *recordingCompactInjector) ScheduleSelfCompact(
+	_ context.Context,
+	focus string,
+	then []string,
+) (inject.Result, error) {
 	recorder.scheduledFocus = focus
 	recorder.scheduledThen = then
 	return inject.Result{Status: "scheduled", Code: 0}, nil
@@ -267,7 +288,13 @@ func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
 		)
 		if whoami.Status != "ok" || whoami.ID != metas[index]["threadId"] ||
 			whoami.Session != wantSessions[index] || whoami.Engine != string(pfmengine.Codex) {
-			t.Errorf("whoami[%d] = %+v, want thread %q on %s", index, whoami, metas[index]["threadId"], wantSessions[index])
+			t.Errorf(
+				"whoami[%d] = %+v, want thread %q on %s",
+				index,
+				whoami,
+				metas[index]["threadId"],
+				wantSessions[index],
+			)
 		}
 
 		captured := callToolWithMeta[CaptureOutput](
@@ -300,7 +327,12 @@ func TestMCPMetadataThreadIdentityRoutesDistinctCodexSeats(t *testing.T) {
 			`to reply: chat_inject "Codex ` + string(rune('A'+index)) + `" <message>`,
 		} {
 			if !strings.Contains(injected.Proof, signaturePart) {
-				t.Errorf("inject[%d] proof %q lacks request-scoped signature part %q", index, injected.Proof, signaturePart)
+				t.Errorf(
+					"inject[%d] proof %q lacks request-scoped signature part %q",
+					index,
+					injected.Proof,
+					signaturePart,
+				)
 			}
 		}
 	}

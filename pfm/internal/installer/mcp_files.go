@@ -40,5 +40,5 @@ func (installer *engine) writeMCPFile(path string, original, wanted []byte, exis
 			return err
 		}
 	}
-	return atomicfile.Write(path, wanted, 0600)
+	return atomicfile.Write(path, wanted, 0o600)
 }

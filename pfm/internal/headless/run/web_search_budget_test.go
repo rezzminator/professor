@@ -17,7 +17,14 @@ func TestSetEnvironmentCarriesClaudeWebSearchBudget(t *testing.T) {
 		var claude []string
 		setEnvironment([]string{name + "=5", "PATH=/usr/bin"}, pfmengine.Claude, "/cfg", explicit, &claude)
 		if got := lastEnvironmentValue(claude, name); got != value {
-			t.Fatalf("claude headless environment (explicit=%t) %q resolves %s=%q, want %q", explicit, claude, name, got, value)
+			t.Fatalf(
+				"claude headless environment (explicit=%t) %q resolves %s=%q, want %q",
+				explicit,
+				claude,
+				name,
+				got,
+				value,
+			)
 		}
 		var codex []string
 		setEnvironment([]string{"PATH=/usr/bin"}, pfmengine.Codex, "/cfg", explicit, &codex)

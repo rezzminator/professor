@@ -25,7 +25,11 @@ func TestAssertPublicURLIsTheHarvestChokepoint(t *testing.T) {
 			t.Fatalf("assertPublicURL(%q) = nil, want a refusal", raw)
 		}
 		if !strings.Contains(refusal.Error(), "private") && !strings.Contains(refusal.Error(), "internal") {
-			t.Fatalf("assertPublicURL(%q) = %v, want the private/internal refusal, not a different reason", raw, refusal)
+			t.Fatalf(
+				"assertPublicURL(%q) = %v, want the private/internal refusal, not a different reason",
+				raw,
+				refusal,
+			)
 		}
 	}
 }

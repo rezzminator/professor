@@ -20,7 +20,9 @@ func TestDockerInspectorReadsIdentityFromJailedSocket(t *testing.T) {
 			return
 		}
 		writer.Header().Set("Content-Type", "application/json")
-		if _, err := writer.Write([]byte(`{"Name":"/professor-web","Config":{"Image":"registry.example/professor:web"}}`)); err != nil {
+		if _, err := writer.Write(
+			[]byte(`{"Name":"/professor-web","Config":{"Image":"registry.example/professor:web"}}`),
+		); err != nil {
 			t.Errorf("write jailed Docker response: %v", err)
 		}
 	})}

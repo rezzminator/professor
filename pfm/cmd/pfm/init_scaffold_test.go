@@ -74,7 +74,8 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(string(commandRaw), "---\n# pfm-scaffold: project/commands/dev.md@") || !strings.Contains(string(commandRaw), "{TOKEN}") {
+	if !strings.HasPrefix(string(commandRaw), "---\n# pfm-scaffold: project/commands/dev.md@") ||
+		!strings.Contains(string(commandRaw), "{TOKEN}") {
 		t.Fatalf("frontmatter marker/token placement=%q", commandRaw)
 	}
 	scriptPath := filepath.Join(target, ".claude", "scripts", "dev.sh")
@@ -88,7 +89,11 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	if info, err := os.Stat(scriptPath); err != nil || info.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("script executable mode=%v err=%v", info, err)
 	}
-	handoff := "open Claude here and follow " + filepath.Join(source, "docs", "SETUP.md") + " § Install interview — it fills tokens and deploys per-project agents"
+	handoff := "open Claude here and follow " + filepath.Join(
+		source,
+		"docs",
+		"SETUP.md",
+	) + " § Install interview — it fills tokens and deploys per-project agents"
 	if !strings.Contains(stdout.String(), "deployed 11 project files") || !strings.Contains(stdout.String(), handoff) {
 		t.Fatalf("init output=%q", stdout.String())
 	}
@@ -151,15 +156,33 @@ func newScaffoldStoreFixture(t *testing.T) string {
 		content string
 		mode    os.FileMode
 	}{
-		"VERSION":                                                     {content: "0.65.0\n", mode: 0o600},
-		"templates/project/CLAUDE.md":                                 {content: "# {TOKEN} contract\n", mode: 0o600},
-		"templates/project/settings.json":                             {content: "{}\n", mode: 0o600},
-		"templates/project/rumdl-policy.toml":                         {content: "# fixture rumdl policy\n[global]\n", mode: 0o600},
-		"templates/project/commands/dev.md":                           {content: "---\nname: dev\n---\n{TOKEN}\n", mode: 0o600},
-		"templates/project/agents/gitter.md":                          {content: "---\nname: gitter\n---\nbody\n", mode: 0o600},
-		"templates/project/agents/per-project/developer.md":           {content: "---\nname: developer\n---\nbody\n", mode: 0o600},
-		"templates/project/scripts/dev.sh":                            {content: "#!/usr/bin/env bash\nset -euo pipefail\n", mode: 0o755},
-		"templates/project/skills/legal/SKILL.md":                     {content: "---\nname: legal\n---\nbody\n", mode: 0o600},
+		"VERSION":                         {content: "0.65.0\n", mode: 0o600},
+		"templates/project/CLAUDE.md":     {content: "# {TOKEN} contract\n", mode: 0o600},
+		"templates/project/settings.json": {content: "{}\n", mode: 0o600},
+		"templates/project/rumdl-policy.toml": {
+			content: "# fixture rumdl policy\n[global]\n",
+			mode:    0o600,
+		},
+		"templates/project/commands/dev.md": {
+			content: "---\nname: dev\n---\n{TOKEN}\n",
+			mode:    0o600,
+		},
+		"templates/project/agents/gitter.md": {
+			content: "---\nname: gitter\n---\nbody\n",
+			mode:    0o600,
+		},
+		"templates/project/agents/per-project/developer.md": {
+			content: "---\nname: developer\n---\nbody\n",
+			mode:    0o600,
+		},
+		"templates/project/scripts/dev.sh": {
+			content: "#!/usr/bin/env bash\nset -euo pipefail\n",
+			mode:    0o755,
+		},
+		"templates/project/skills/legal/SKILL.md": {
+			content: "---\nname: legal\n---\nbody\n",
+			mode:    0o600,
+		},
 		"templates/project/epics/TEMPLATE.md":                         {content: "# Epic\n", mode: 0o600},
 		"templates/project/codex/config.toml":                         {content: "model = \"{TOKEN}\"\n", mode: 0o600},
 		"templates/project/docs-commands/wave/references/fix-core.md": {content: "# Fix Core\n", mode: 0o600},

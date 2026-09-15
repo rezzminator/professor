@@ -45,13 +45,15 @@ func extractDOIViewerPDF(body []byte) (string, bool) {
 			if found != "" {
 				return
 			}
-			article := inArticle || (node.Type == html.ElementNode && strings.EqualFold(nodeAttr(node, "id"), "article"))
+			article := inArticle ||
+				(node.Type == html.ElementNode && strings.EqualFold(nodeAttr(node, "id"), "article"))
 			if node.Type == html.ElementNode {
 				switch node.Data {
 				case "embed", "iframe":
 					candidate := nodeAttr(node, "src")
 					id := strings.ToLower(nodeAttr(node, "id"))
-					if candidate != "" && (id == "pdf" || article || strings.Contains(strings.ToLower(candidate), ".pdf")) {
+					if candidate != "" &&
+						(id == "pdf" || article || strings.Contains(strings.ToLower(candidate), ".pdf")) {
 						found = candidate
 					}
 				case "object":
@@ -101,7 +103,15 @@ func (h *Harvester) fetchDOIViewerDOI(ctx context.Context, doi string, options F
 	defer cancel()
 	response, err := h.providerGet(providerCtx, pageURL, nil, providerHTMLMaxBody)
 	if err != nil {
-		return providerResult(doi, "doi-viewer", "page request failed: "+err.Error(), errorKind(err), 0, false, []string{"doi-viewer"})
+		return providerResult(
+			doi,
+			"doi-viewer",
+			"page request failed: "+err.Error(),
+			errorKind(err),
+			0,
+			false,
+			[]string{"doi-viewer"},
+		)
 	}
 	if response.status >= 400 {
 		challenge := providerChallenge(response.body, response.status)
@@ -109,14 +119,38 @@ func (h *Harvester) fetchDOIViewerDOI(ctx context.Context, doi string, options F
 		if challenge {
 			kind = "challenge"
 		}
-		return providerResult(doi, "doi-viewer", fmt.Sprintf("page returned HTTP %d", response.status), kind, response.status, challenge, []string{"doi-viewer"})
+		return providerResult(
+			doi,
+			"doi-viewer",
+			fmt.Sprintf("page returned HTTP %d", response.status),
+			kind,
+			response.status,
+			challenge,
+			[]string{"doi-viewer"},
+		)
 	}
 	if providerChallenge(response.body, response.status) && !bytes.HasPrefix(response.body, []byte("%PDF-")) {
-		return providerResult(doi, "doi-viewer", "page returned a challenge page", "challenge", response.status, true, []string{"doi-viewer"})
+		return providerResult(
+			doi,
+			"doi-viewer",
+			"page returned a challenge page",
+			"challenge",
+			response.status,
+			true,
+			[]string{"doi-viewer"},
+		)
 	}
 	pdfURL, ok := extractDOIViewerPDF(response.body)
 	if !ok {
-		return providerResult(doi, "doi-viewer", "page contained no PDF link", "missing", response.status, false, []string{"doi-viewer"})
+		return providerResult(
+			doi,
+			"doi-viewer",
+			"page contained no PDF link",
+			"missing",
+			response.status,
+			false,
+			[]string{"doi-viewer"},
+		)
 	}
 	basePageURL := response.finalURL
 	if basePageURL == "" {
@@ -124,9 +158,27 @@ func (h *Harvester) fetchDOIViewerDOI(ctx context.Context, doi string, options F
 	}
 	resolvedPDF, err := resolveProviderURL(basePageURL, pdfURL)
 	if err != nil {
-		return providerResult(doi, "doi-viewer", "PDF URL refused: "+err.Error(), errorKind(err), response.status, false, []string{"doi-viewer"})
+		return providerResult(
+			doi,
+			"doi-viewer",
+			"PDF URL refused: "+err.Error(),
+			errorKind(err),
+			response.status,
+			false,
+			[]string{"doi-viewer"},
+		)
 	}
-	return h.fetchProviderArtifactWithPolicy(providerCtx, doi, "doi-viewer", resolvedPDF, response.finalURL, "", options, []string{"doi-viewer"}, true)
+	return h.fetchProviderArtifactWithPolicy(
+		providerCtx,
+		doi,
+		"doi-viewer",
+		resolvedPDF,
+		response.finalURL,
+		"",
+		options,
+		[]string{"doi-viewer"},
+		true,
+	)
 }
 
 func (h *Harvester) fetchDOIMirrors(ctx context.Context, doi string, options FetchOptions) (Result, bool) {
@@ -225,28 +277,50 @@ func (h *Harvester) md5CatalogRecord(ctx context.Context, md5 string) (string, s
 		if challenge {
 			kind = "challenge"
 		}
-		return "", response.finalURL, &providerLookupError{message: fmt.Sprintf("md5-catalog ads page returned HTTP %d", response.status), kind: kind, status: response.status, challenge: challenge}
+		return "", response.finalURL, &providerLookupError{
+			message:   fmt.Sprintf("md5-catalog ads page returned HTTP %d", response.status),
+			kind:      kind,
+			status:    response.status,
+			challenge: challenge,
+		}
 	}
 	if providerChallenge(response.body, response.status) {
-		return "", response.finalURL, &providerLookupError{message: "md5-catalog ads page returned a challenge page", kind: "challenge", status: response.status, challenge: true}
+		return "", response.finalURL, &providerLookupError{
+			message:   "md5-catalog ads page returned a challenge page",
+			kind:      "challenge",
+			status:    response.status,
+			challenge: true,
+		}
 	}
 	match := md5CatalogGetRe.FindSubmatch(response.body)
 	if len(match) >= 3 {
 		getURL := string(match[0])
 		parsed, err := url.Parse(getURL)
 		if err != nil {
-			return "", response.finalURL, &providerLookupError{message: fmt.Sprintf("md5-catalog download link invalid: %v", err), kind: "malformed", status: response.status}
+			return "", response.finalURL, &providerLookupError{
+				message: fmt.Sprintf("md5-catalog download link invalid: %v", err),
+				kind:    "malformed",
+				status:  response.status,
+			}
 		}
 		if !parsed.IsAbs() {
 			baseURL, parseErr := url.Parse(response.finalURL)
 			if parseErr != nil {
-				return "", response.finalURL, &providerLookupError{message: fmt.Sprintf("md5-catalog download link base invalid: %v", parseErr), kind: "malformed", status: response.status}
+				return "", response.finalURL, &providerLookupError{
+					message: fmt.Sprintf("md5-catalog download link base invalid: %v", parseErr),
+					kind:    "malformed",
+					status:  response.status,
+				}
 			}
 			parsed = baseURL.ResolveReference(parsed)
 		}
 		parsed.Fragment = ""
 		if err := assertFetchable(parsed.String(), false); err != nil {
-			return "", response.finalURL, &providerLookupError{message: err.Error(), kind: errorKind(err), status: response.status}
+			return "", response.finalURL, &providerLookupError{
+				message: err.Error(),
+				kind:    errorKind(err),
+				status:  response.status,
+			}
 		}
 		return parsed.String(), response.finalURL, nil
 	}
@@ -254,19 +328,33 @@ func (h *Harvester) md5CatalogRecord(ctx context.Context, md5 string) (string, s
 	// the ads page. Probe it once as a bounded fallback; an HTML/empty response
 	// is still a provider failure and is never accepted as a file.
 	directURL := base + "/get.php?md5=" + url.QueryEscape(md5)
-	direct, directErr := h.providerDownload(providerCtx, directURL, http.Header{"Referer": {response.finalURL}}, doiMirrorMaxBytes(h))
+	direct, directErr := h.providerDownload(
+		providerCtx,
+		directURL,
+		http.Header{"Referer": {response.finalURL}},
+		doiMirrorMaxBytes(h),
+	)
 	if directErr == nil && direct.status < 400 && bytes.HasPrefix(direct.body, []byte("%PDF-")) {
 		return direct.finalURL, response.finalURL, nil
 	}
 	if directErr != nil {
-		return "", response.finalURL, &providerLookupError{message: "md5-catalog ads page contained no download link; direct get.php failed: " + directErr.Error(), kind: errorKind(directErr), status: response.status}
+		return "", response.finalURL, &providerLookupError{
+			message: "md5-catalog ads page contained no download link; direct get.php failed: " + directErr.Error(),
+			kind:    errorKind(directErr),
+			status:  response.status,
+		}
 	}
 	challenge := providerChallenge(direct.body, direct.status)
 	kind := "missing"
 	if challenge {
 		kind = "challenge"
 	}
-	return "", response.finalURL, &providerLookupError{message: "md5-catalog ads page contained no download link", kind: kind, status: direct.status, challenge: challenge}
+	return "", response.finalURL, &providerLookupError{
+		message:   "md5-catalog ads page contained no download link",
+		kind:      kind,
+		status:    direct.status,
+		challenge: challenge,
+	}
 }
 
 func (h *Harvester) fetchMD5CatalogMD5(ctx context.Context, source, md5 string, options FetchOptions) Result {
@@ -279,7 +367,16 @@ func (h *Harvester) fetchMD5CatalogMD5(ctx context.Context, source, md5 string, 
 	if err != nil {
 		return providerLookupFailure(source, "md5-catalog", err, []string{"md5-catalog"})
 	}
-	return h.fetchProviderArtifact(providerCtx, source, "md5-catalog", fileURL, referer, md5, options, []string{"md5-catalog"})
+	return h.fetchProviderArtifact(
+		providerCtx,
+		source,
+		"md5-catalog",
+		fileURL,
+		referer,
+		md5,
+		options,
+		[]string{"md5-catalog"},
+	)
 }
 
 func (h *Harvester) fetchMD5CatalogDOI(ctx context.Context, doi string, options FetchOptions) Result {
@@ -288,10 +385,23 @@ func (h *Harvester) fetchMD5CatalogDOI(ctx context.Context, doi string, options 
 	}
 	providerCtx, cancel := providerContext(ctx)
 	defer cancel()
-	endpoint := strings.TrimRight(h.settings.md5CatalogURL, "/") + "/json.php?object=e&doi=" + url.QueryEscape(doi) + "&addkeys=*"
+	endpoint := strings.TrimRight(
+		h.settings.md5CatalogURL,
+		"/",
+	) + "/json.php?object=e&doi=" + url.QueryEscape(
+		doi,
+	) + "&addkeys=*"
 	response, err := h.providerGet(providerCtx, endpoint, nil, providerHTMLMaxBody)
 	if err != nil {
-		return providerResult(doi, "md5-catalog", "DOI lookup failed: "+err.Error(), errorKind(err), 0, false, []string{"md5-catalog"})
+		return providerResult(
+			doi,
+			"md5-catalog",
+			"DOI lookup failed: "+err.Error(),
+			errorKind(err),
+			0,
+			false,
+			[]string{"md5-catalog"},
+		)
 	}
 	if response.status >= 400 {
 		challenge := providerChallenge(response.body, response.status)
@@ -299,14 +409,38 @@ func (h *Harvester) fetchMD5CatalogDOI(ctx context.Context, doi string, options 
 		if challenge {
 			kind = "challenge"
 		}
-		return providerResult(doi, "md5-catalog", fmt.Sprintf("DOI lookup returned HTTP %d", response.status), kind, response.status, challenge, []string{"md5-catalog"})
+		return providerResult(
+			doi,
+			"md5-catalog",
+			fmt.Sprintf("DOI lookup returned HTTP %d", response.status),
+			kind,
+			response.status,
+			challenge,
+			[]string{"md5-catalog"},
+		)
 	}
 	if providerChallenge(response.body, response.status) {
-		return providerResult(doi, "md5-catalog", "DOI lookup returned a challenge page", "challenge", response.status, true, []string{"md5-catalog"})
+		return providerResult(
+			doi,
+			"md5-catalog",
+			"DOI lookup returned a challenge page",
+			"challenge",
+			response.status,
+			true,
+			[]string{"md5-catalog"},
+		)
 	}
 	objects, err := decodeProviderObjects(response.body)
 	if err != nil {
-		return providerResult(doi, "md5-catalog", "DOI lookup failed: "+err.Error(), "malformed", response.status, false, []string{"md5-catalog"})
+		return providerResult(
+			doi,
+			"md5-catalog",
+			"DOI lookup failed: "+err.Error(),
+			"malformed",
+			response.status,
+			false,
+			[]string{"md5-catalog"},
+		)
 	}
 	keys := make([]string, 0, len(objects))
 	for key := range objects {
@@ -335,7 +469,15 @@ func (h *Harvester) fetchMD5CatalogDOI(ctx context.Context, doi string, options 
 	if last.Error != "" {
 		return last
 	}
-	return providerResult(doi, "md5-catalog", "catalog has no exact DOI record", "missing", response.status, false, []string{"md5-catalog"})
+	return providerResult(
+		doi,
+		"md5-catalog",
+		"catalog has no exact DOI record",
+		"missing",
+		response.status,
+		false,
+		[]string{"md5-catalog"},
+	)
 }
 
 func (h *Harvester) fetchIPFSCatalogMD5(ctx context.Context, source, md5 string, options FetchOptions) Result {
@@ -351,7 +493,15 @@ func (h *Harvester) fetchIPFSCatalogMD5(ctx context.Context, source, md5 string,
 	recordURL := base + "/md5/" + strings.ToLower(md5)
 	response, err := h.providerGet(providerCtx, recordURL, nil, providerHTMLMaxBody)
 	if err != nil {
-		return providerResult(source, "ipfs-catalog", "record lookup failed: "+err.Error(), errorKind(err), 0, false, []string{"ipfs-catalog"})
+		return providerResult(
+			source,
+			"ipfs-catalog",
+			"record lookup failed: "+err.Error(),
+			errorKind(err),
+			0,
+			false,
+			[]string{"ipfs-catalog"},
+		)
 	}
 	if response.status >= 400 {
 		challenge := providerChallenge(response.body, response.status)
@@ -359,19 +509,53 @@ func (h *Harvester) fetchIPFSCatalogMD5(ctx context.Context, source, md5 string,
 		if challenge {
 			kind = "challenge"
 		}
-		return providerResult(source, "ipfs-catalog", fmt.Sprintf("record lookup returned HTTP %d", response.status), kind, response.status, challenge, []string{"ipfs-catalog"})
+		return providerResult(
+			source,
+			"ipfs-catalog",
+			fmt.Sprintf("record lookup returned HTTP %d", response.status),
+			kind,
+			response.status,
+			challenge,
+			[]string{"ipfs-catalog"},
+		)
 	}
 	if providerChallenge(response.body, response.status) {
-		return providerResult(source, "ipfs-catalog", "record lookup returned a challenge page", "challenge", response.status, true, []string{"ipfs-catalog"})
+		return providerResult(
+			source,
+			"ipfs-catalog",
+			"record lookup returned a challenge page",
+			"challenge",
+			response.status,
+			true,
+			[]string{"ipfs-catalog"},
+		)
 	}
 	cid, ok := extractIPFSCatalogCID(response.body)
 	if !ok {
-		return providerResult(source, "ipfs-catalog", "record contained no keyless IPFS CID", "missing", response.status, false, []string{"ipfs-catalog"})
+		return providerResult(
+			source,
+			"ipfs-catalog",
+			"record contained no keyless IPFS CID",
+			"missing",
+			response.status,
+			false,
+			[]string{"ipfs-catalog"},
+		)
 	}
 	var last Result
 	for _, gateway := range []string{"https://dweb.link/ipfs/", "https://ipfs.io/ipfs/"} {
 		fileURL := gateway + cid
-		result := h.fetchProviderArtifactWithPolicy(providerCtx, source, "ipfs-catalog", fileURL, response.finalURL, md5, options, []string{"ipfs-catalog"}, false)
+		result := h.fetchProviderArtifactWithPolicy(
+			providerCtx,
+			source,
+			"ipfs-catalog",
+			fileURL,
+			response.finalURL,
+			md5,
+			options,
+			[]string{"ipfs-catalog"},
+			false,
+		)
 		if result.Error == "" {
 			return result
 		}
@@ -380,7 +564,15 @@ func (h *Harvester) fetchIPFSCatalogMD5(ctx context.Context, source, md5 string,
 	if last.Error != "" {
 		return last
 	}
-	return providerResult(source, "ipfs-catalog", "no IPFS gateway served the record", "missing", response.status, false, []string{"ipfs-catalog"})
+	return providerResult(
+		source,
+		"ipfs-catalog",
+		"no IPFS gateway served the record",
+		"missing",
+		response.status,
+		false,
+		[]string{"ipfs-catalog"},
+	)
 }
 
 func extractIPFSCatalogCID(body []byte) (string, bool) {
@@ -522,7 +714,19 @@ func providerRecordCandidates(body []byte, pageURL, source, query string, limit 
 		u.Path = "/md5/" + md5
 		u.RawQuery = ""
 		u.Fragment = ""
-		out = append(out, Candidate{URL: u.String(), Source: source, Priority: 90, Kind: "book", Title: strings.TrimSpace(title), Authors: strings.TrimSpace(authors), Year: year, Match: .5})
+		out = append(
+			out,
+			Candidate{
+				URL:      u.String(),
+				Source:   source,
+				Priority: 90,
+				Kind:     "book",
+				Title:    strings.TrimSpace(title),
+				Authors:  strings.TrimSpace(authors),
+				Year:     year,
+				Match:    .5,
+			},
+		)
 	}
 
 	// MD5Catalog renders records as table rows. Associate the md5 download link with
@@ -543,7 +747,8 @@ func providerRecordCandidates(body []byte, pageURL, source, query string, limit 
 			if len(cells) > 0 {
 				title := ""
 				for _, anchor := range descendantsByTag(cells[0], "a") {
-					if strings.Contains(nodeAttr(anchor, "href"), "edition.php") && strings.TrimSpace(nodeText(anchor)) != "" {
+					if strings.Contains(nodeAttr(anchor, "href"), "edition.php") &&
+						strings.TrimSpace(nodeText(anchor)) != "" {
 						title = nodeText(anchor)
 						break
 					}
@@ -611,7 +816,9 @@ func providerMD5FromHref(raw, source string) string {
 	if source != "md5-catalog" {
 		return ""
 	}
-	if !strings.Contains(strings.ToLower(u.Path), "ads.php") && !strings.Contains(strings.ToLower(u.Path), "get.php") && !strings.Contains(strings.ToLower(u.Path), "file.php") && !strings.Contains(strings.ToLower(u.Path), "index.php") {
+	if !strings.Contains(strings.ToLower(u.Path), "ads.php") && !strings.Contains(strings.ToLower(u.Path), "get.php") &&
+		!strings.Contains(strings.ToLower(u.Path), "file.php") &&
+		!strings.Contains(strings.ToLower(u.Path), "index.php") {
 		return ""
 	}
 	md5 := u.Query().Get("md5")

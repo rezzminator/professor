@@ -168,8 +168,10 @@ func (usage Usage) fableWindow(now time.Time) (Window, bool) {
 	return Window{Utilization: fallback.Percent, ResetsAt: fallback.ResetsAt}, true
 }
 
-type usage = Usage
-type usageWindow = Window
+type (
+	usage       = Usage
+	usageWindow = Window
+)
 
 type credentials struct {
 	OAuth struct {

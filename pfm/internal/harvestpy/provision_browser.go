@@ -32,7 +32,11 @@ func ProvisionBrowser(ctx context.Context, options ProvisionOptions) (ProvisionR
 	return provisionBrowser(ctx, options, immutableTargets)
 }
 
-func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map[Platform]Target) (ProvisionResult, error) {
+func provisionBrowser(
+	ctx context.Context,
+	options ProvisionOptions,
+	targets map[Platform]Target,
+) (ProvisionResult, error) {
 	if options.Root == "" {
 		return ProvisionResult{}, errors.New("harvestpy provision root is empty")
 	}
@@ -66,8 +70,14 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 	base.Digest = desired
 	current := BrowserRuntimeRoot(options.Root, platform)
 	envRoot := filepath.Join(options.Root, "env-browser", platform.String())
-	if existing, err := ReadEnvironmentDigest(filepath.Join(current, "environment.json")); err == nil && existing.Digest == desired && existing.State == "ready" {
-		runtime := Runtime{Python: filepath.Join(current, "project", ".venv", "bin", "python"), Script: filepath.Join(current, "project", "browser.py")}
+	if existing, err := ReadEnvironmentDigest(
+		filepath.Join(current, "environment.json"),
+	); err == nil && existing.Digest == desired &&
+		existing.State == "ready" {
+		runtime := Runtime{
+			Python: filepath.Join(current, "project", ".venv", "bin", "python"),
+			Script: filepath.Join(current, "project", "browser.py"),
+		}
 		if _, smokeErr := options.Smoke(ctx, runtime); smokeErr == nil {
 			return ProvisionResult{Digest: desired, Environment: existing, Runtime: runtime}, nil
 		}
@@ -142,7 +152,12 @@ func provisionBrowser(ctx context.Context, options ProvisionOptions, targets map
 	if _, err := os.Stat(venvPython); err != nil {
 		return ProvisionResult{}, fmt.Errorf("browser uv sync did not create Python environment: %w", err)
 	}
-	inventoryOutput, err := options.Run(ctx, uvPath, []string{"pip", "list", "--format", "freeze", "--python", venvPython}, project)
+	inventoryOutput, err := options.Run(
+		ctx,
+		uvPath,
+		[]string{"pip", "list", "--format", "freeze", "--python", venvPython},
+		project,
+	)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("browser installed inventory failed: %w", err)
 	}
@@ -219,7 +234,10 @@ func EnsureBrowser(ctx context.Context, options ProvisionOptions) (Runtime, erro
 		options.Platform = Platform{GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}
 	}
 	current := BrowserRuntimeRoot(options.Root, options.Platform)
-	resolved := Runtime{Python: filepath.Join(current, "project", ".venv", "bin", "python"), Script: filepath.Join(current, "project", "browser.py")}
+	resolved := Runtime{
+		Python: filepath.Join(current, "project", ".venv", "bin", "python"),
+		Script: filepath.Join(current, "project", "browser.py"),
+	}
 	reason := ""
 	if _, statErr := os.Stat(resolved.Python); errors.Is(statErr, os.ErrNotExist) {
 		reason = "NOT provisioned"
@@ -235,7 +253,11 @@ func EnsureBrowser(ctx context.Context, options ProvisionOptions) (Runtime, erro
 	}
 	log.Printf("harvestpy: browser environment is %s — provisioning before this fetch", reason)
 	if _, err := ensureProvision(ctx, options); err != nil {
-		return Runtime{}, fmt.Errorf("browser environment is %s and provisioning failed (%v) — it provisions on the first browser fetch once fetch.browser is true in harvester.config.json; check uv and network access, then retry", reason, err)
+		return Runtime{}, fmt.Errorf(
+			"browser environment is %s and provisioning failed (%v) — it provisions on the first browser fetch once fetch.browser is true in harvester.config.json; check uv and network access, then retry",
+			reason,
+			err,
+		)
 	}
 	return resolved, nil
 }

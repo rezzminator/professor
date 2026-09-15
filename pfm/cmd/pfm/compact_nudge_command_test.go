@@ -69,17 +69,40 @@ func TestCompactNudgeHonoursTheConfigAndSkipsSubAgents(t *testing.T) {
 		t.Fatal(err)
 	}
 	main := nudgePayload(t, map[string]string{"session_id": "sess-b"})
-	if out, _ := callCompactNudge(t, main, sidDir, pfmconfig.CompactNudge{Enabled: false, Start: 35, Step: 10}); out != "" {
+	if out, _ := callCompactNudge(
+		t,
+		main,
+		sidDir,
+		pfmconfig.CompactNudge{Enabled: false, Start: 35, Step: 10},
+	); out != "" {
 		t.Fatalf("disabled in config must stay silent, got %q", out)
 	}
 	sub := nudgePayload(t, map[string]string{"session_id": "sess-b", "agent_id": "agent-7", "agent_type": "dev"})
-	if out, _ := callCompactNudge(t, sub, sidDir, pfmconfig.CompactNudge{Enabled: true, Start: 35, Step: 10}); out != "" {
+	if out, _ := callCompactNudge(
+		t,
+		sub,
+		sidDir,
+		pfmconfig.CompactNudge{Enabled: true, Start: 35, Step: 10},
+	); out != "" {
 		t.Fatalf("a sub-agent prompt must never be nudged, got %q", out)
 	}
-	if out, _ := callCompactNudge(t, main, sidDir, pfmconfig.CompactNudge{Enabled: true, Start: 70, Step: 10}); out != "" {
+	if out, _ := callCompactNudge(
+		t,
+		main,
+		sidDir,
+		pfmconfig.CompactNudge{Enabled: true, Start: 70, Step: 10},
+	); out != "" {
 		t.Fatalf("60%% is below a configured start of 70, got %q", out)
 	}
-	if out, _ := callCompactNudge(t, main, sidDir, pfmconfig.CompactNudge{Enabled: true, Start: 35, Step: 10}); !strings.Contains(out, "60%") {
+	if out, _ := callCompactNudge(
+		t,
+		main,
+		sidDir,
+		pfmconfig.CompactNudge{Enabled: true, Start: 35, Step: 10},
+	); !strings.Contains(
+		out,
+		"60%",
+	) {
 		t.Fatalf("the main chat at 60%% must be nudged, got %q", out)
 	}
 }
@@ -92,7 +115,14 @@ func TestCompactNudgeNamesAMissingSampleAndABadPayload(t *testing.T) {
 		t.Fatalf("missing sample: stdout=%q stderr=%q, want silence on stdout and the cause on stderr", out, errText)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := compactNudge(strings.NewReader("{not json"), &stdout, &stderr, sidDir, prefs); code != 0 || stdout.Len() != 0 || !strings.Contains(stderr.String(), "decode hook payload") {
+	if code := compactNudge(
+		strings.NewReader("{not json"),
+		&stdout,
+		&stderr,
+		sidDir,
+		prefs,
+	); code != 0 || stdout.Len() != 0 ||
+		!strings.Contains(stderr.String(), "decode hook payload") {
 		t.Fatalf("bad payload: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }

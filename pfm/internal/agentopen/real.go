@@ -128,6 +128,7 @@ func (RealProcesses) Terminate(pid int) error {
 	}
 	return err
 }
+
 func (RealProcesses) Kill(pid int) error {
 	err := syscall.Kill(pid, syscall.SIGKILL)
 	if errors.Is(err, syscall.ESRCH) {
@@ -158,6 +159,7 @@ type RealTmux struct {
 func (tmux RealTmux) command(ctx context.Context, socket string, args ...string) *exec.Cmd {
 	return pfmtmux.Command(ctx, tmux.Binary, filepath.Join(tmux.Dir, socket), args...)
 }
+
 func (tmux RealTmux) SocketForPID(ctx context.Context, pid int) (string, error) {
 	entries, err := os.ReadDir(tmux.Dir)
 	if err != nil {
@@ -179,6 +181,7 @@ func (tmux RealTmux) SocketForPID(ctx context.Context, pid int) (string, error) 
 	}
 	return "", nil
 }
+
 func (tmux RealTmux) Attach(ctx context.Context, socket string) error {
 	if err := tmux.command(ctx, socket, "set-option", "-g", "window-size", "latest").Run(); err != nil {
 		return fmt.Errorf("set tmux window size: %w", err)

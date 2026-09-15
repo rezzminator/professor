@@ -202,7 +202,11 @@ func DiscoverAndVerifyConfig(
 		return PinnedConfig{}, Verification{}, err
 	}
 
-	result, invokeErr := runner.Run(ctx, projectRoot, pfmengine.MustLookup(pfmengine.Codex).Binary, mcpListArguments(config.Overrides)...)
+	result, invokeErr := runner.Run(
+		ctx,
+		projectRoot,
+		pfmengine.MustLookup(pfmengine.Codex).Binary,
+		mcpListArguments(config.Overrides)...)
 	verification := Verification{
 		ExitCode:   result.ExitCode,
 		Overrides:  append([]string(nil), config.Overrides...),
@@ -301,7 +305,11 @@ func runMCPList(
 	directory string,
 	overrides []string,
 ) (MCPRoster, error) {
-	result, err := runner.Run(ctx, directory, pfmengine.MustLookup(pfmengine.Codex).Binary, mcpListArguments(overrides)...)
+	result, err := runner.Run(
+		ctx,
+		directory,
+		pfmengine.MustLookup(pfmengine.Codex).Binary,
+		mcpListArguments(overrides)...)
 	if err != nil {
 		return MCPRoster{}, err
 	}

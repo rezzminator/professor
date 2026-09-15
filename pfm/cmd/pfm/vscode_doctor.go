@@ -35,22 +35,46 @@ func printVSCodeDoctor(stdout io.Writer, home string, machine config.Config) int
 		case "ok":
 			switch product.IndexState {
 			case "registered":
-				fmt.Fprintf(stdout, "doctor: vscode product=%s link=ok index=registered version=%s\n", product.Root, product.Version)
+				fmt.Fprintf(
+					stdout,
+					"doctor: vscode product=%s link=ok index=registered version=%s\n",
+					product.Root,
+					product.Version,
+				)
 			case "missing":
 				warnings++
-				fmt.Fprintf(stdout, "doctor: vscode product=%s link=ok index=MISSING — run pfm install --yes\n", product.Root)
+				fmt.Fprintf(
+					stdout,
+					"doctor: vscode product=%s link=ok index=MISSING — run pfm install --yes\n",
+					product.Root,
+				)
 			case "unreadable":
 				warnings++
-				fmt.Fprintf(stdout, "doctor: vscode product=%s link=ok index=UNREADABLE error=%s\n", product.Root, product.IndexError)
+				fmt.Fprintf(
+					stdout,
+					"doctor: vscode product=%s link=ok index=UNREADABLE error=%s\n",
+					product.Root,
+					product.IndexError,
+				)
 			default:
 				// A state InspectVSCode did not derive is "we failed to
 				// look", never a silent clean row.
 				warnings++
-				fmt.Fprintf(stdout, "doctor: vscode product=%s link=ok index=UNKNOWN(%s)\n", product.Root, product.IndexState)
+				fmt.Fprintf(
+					stdout,
+					"doctor: vscode product=%s link=ok index=UNKNOWN(%s)\n",
+					product.Root,
+					product.IndexState,
+				)
 			}
 		case "broken":
 			warnings++
-			fmt.Fprintf(stdout, "doctor: vscode product=%s link=BROKEN(%s) — run pfm install --yes\n", product.Root, product.LinkTarget)
+			fmt.Fprintf(
+				stdout,
+				"doctor: vscode product=%s link=BROKEN(%s) — run pfm install --yes\n",
+				product.Root,
+				product.LinkTarget,
+			)
 		case "missing":
 			warnings++
 			fmt.Fprintf(stdout, "doctor: vscode product=%s link=MISSING — run pfm install --yes\n", product.Root)
@@ -60,7 +84,13 @@ func printVSCodeDoctor(stdout io.Writer, home string, machine config.Config) int
 		}
 	}
 	for _, settings := range report.Settings {
-		fmt.Fprintf(stdout, "doctor: vscode settings=%s profile=PFM(%s) default=%s\n", settings.Path, settings.Profile, settings.Default)
+		fmt.Fprintf(
+			stdout,
+			"doctor: vscode settings=%s profile=PFM(%s) default=%s\n",
+			settings.Path,
+			settings.Profile,
+			settings.Default,
+		)
 		if settings.Error != "" {
 			fmt.Fprintf(stdout, "doctor: vscode settings=%s error=%s\n", settings.Path, settings.Error)
 		}

@@ -152,7 +152,10 @@ func TestProcessTreeSanitizesSecretsBeforeVerification(t *testing.T) {
 		}
 	}
 	if verification.Root.Command != "node:codex" ||
-		!reflect.DeepEqual([]string{verification.Descendants[0].Command, verification.Descendants[1].Command}, []string{"codex", "npm"}) {
+		!reflect.DeepEqual(
+			[]string{verification.Descendants[0].Command, verification.Descendants[1].Command},
+			[]string{"codex", "npm"},
+		) {
 		t.Fatalf("sanitized command shapes = %#v", verification)
 	}
 }

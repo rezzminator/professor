@@ -128,17 +128,21 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 		sessions,
 		"rollout-2026-01-01T00-00-00-file-thread.jsonl",
 	)
-	writeLines(t, fileRollout,
+	writeLines(
+		t,
+		fileRollout,
 		`{"type":"session_meta","payload":{"id":"file-thread","thread_source":"user","cwd":"/work/kept"}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"kept first prompt"}]}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"kept second prompt"}]}}`,
 	)
 	// The rollout file alone looks like a top-level chat; only the state store
 	// knows Codex spawned it as a subagent.
-	writeLines(t, filepath.Join(
-		sessions,
-		"rollout-2026-01-01T00-00-02-killed-subagent.jsonl",
-	),
+	writeLines(
+		t,
+		filepath.Join(
+			sessions,
+			"rollout-2026-01-01T00-00-02-killed-subagent.jsonl",
+		),
 		`{"type":"session_meta","payload":{"id":"killed-subagent","cwd":"/work/kept"}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"delegated work"}]}}`,
 	)
@@ -566,7 +570,9 @@ func TestCodexStateRowYieldsToTheRolloutFileWhenItArrives(t *testing.T) {
 		t.Fatalf("store-only Rollout() found = %v, error = %v", found, err)
 	}
 
-	writeLines(t, declared.Path,
+	writeLines(
+		t,
+		declared.Path,
 		`{"type":"session_meta","payload":{"id":"store-only","thread_source":"user","cwd":"/work/paginated"}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"paginated first prompt"}]}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"paginated second prompt"}]}}`,

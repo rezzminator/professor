@@ -82,7 +82,7 @@ formatters:
     golines:
       max-len: 120
       tab-len: 4
-      reformat-tags: true
+      reformat-tags: false   # column-aligned struct tags are padding, not information
       shorten-comments: false
 
 issues:

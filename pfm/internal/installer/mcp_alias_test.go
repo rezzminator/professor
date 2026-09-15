@@ -12,11 +12,16 @@ func TestMCPReconcilesOwnershipAfterRegistryMovesToSymlinkTarget(t *testing.T) {
 	home := t.TempDir()
 	logical := filepath.Join(home, ".claude.json")
 	physical := filepath.Join(home, ".0-private", "claude.json")
-	e := engine{options: Options{Home: home, ConfigDir: filepath.Join(home, ".claude"), Stdout: io.Discard}, managedRoot: filepath.Join(home, "managed"), apply: true, stamp: "fixture"}
+	e := engine{
+		options:     Options{Home: home, ConfigDir: filepath.Join(home, ".claude"), Stdout: io.Discard},
+		managedRoot: filepath.Join(home, "managed"),
+		apply:       true,
+		stamp:       "fixture",
+	}
 	if _, err := e.writeMCPClientJSON([]string{"chat"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Dir(physical), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(physical), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Rename(logical, physical); err != nil {
@@ -41,7 +46,12 @@ func TestMCPLegacyLedgerFollowsRegistrySymlink(t *testing.T) {
 	home := t.TempDir()
 	logical := filepath.Join(home, ".mcp.json")
 	physical := filepath.Join(home, ".claude.json")
-	e := engine{options: Options{Home: home, ConfigDir: filepath.Join(home, ".claude"), MCPPort: 8377, Stdout: io.Discard}, managedRoot: filepath.Join(home, "managed"), apply: true, stamp: "fixture"}
+	e := engine{
+		options:     Options{Home: home, ConfigDir: filepath.Join(home, ".claude"), MCPPort: 8377, Stdout: io.Discard},
+		managedRoot: filepath.Join(home, "managed"),
+		apply:       true,
+		stamp:       "fixture",
+	}
 	raw, err := json.Marshal(map[string]any{"mcpServers": map[string]any{"chat": e.mcpClientRegistration("chat")}})
 	if err != nil {
 		t.Fatal(err)

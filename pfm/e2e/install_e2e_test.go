@@ -111,7 +111,11 @@ func TestE2EFenceIsRequiredEvenWithoutHome(t *testing.T) {
 		return commandResult{stdout: stdout.String(), stderr: stderr.String(), err: err}
 	}
 	for _, home := range []string{realHome, ""} {
-		if result := run(home, false); result.err == nil || !strings.Contains(result.stdout+result.stderr, "e2e harness refuses") {
+		if result := run(
+			home,
+			false,
+		); result.err == nil ||
+			!strings.Contains(result.stdout+result.stderr, "e2e harness refuses") {
 			t.Fatalf("unfenced HOME=%q helper result=%+v, want refusal", home, result)
 		}
 	}
@@ -186,7 +190,10 @@ func TestCopySourceTreePreservesInternalSymlinks(t *testing.T) {
 	if gotTarget != linkTarget {
 		t.Fatalf("copied symlink target = %q, want %q", gotTarget, linkTarget)
 	}
-	if contents, err := os.ReadFile(filepath.Join(copiedLink, "SKILL.md")); err != nil || string(contents) != "fixture\n" {
+	if contents, err := os.ReadFile(
+		filepath.Join(copiedLink, "SKILL.md"),
+	); err != nil ||
+		string(contents) != "fixture\n" {
 		t.Fatalf("read through copied symlink: contents=%q err=%v", contents, err)
 	}
 }
@@ -217,7 +224,11 @@ func TestCopySourceTreeEnumeratesLinkedWorktreeWithFenceGitDir(t *testing.T) {
 	}
 	// Simulate the fenced mount: the linked worktree's .git file points at
 	// the host path, while the fence supplies its mounted git dir explicitly.
-	if err := os.WriteFile(filepath.Join(source, ".git"), []byte("gitdir: /fixture/host-only/worktree\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(source, ".git"),
+		[]byte("gitdir: /fixture/host-only/worktree\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_DEV_REPO_WORK_TREE", source)
@@ -313,8 +324,14 @@ func runInstallE2E(t *testing.T) {
 		result := harness.pfm(freshHome, "init", project)
 		harness.requireSuccess("init", result)
 		harness.assertInit(project, repo)
-		harness.requireSuccess("init Codex build", harness.pfm(freshHome, "codex", "build", "--home", freshHome, project))
-		harness.requireSuccess("init Codex check", harness.pfm(freshHome, "codex", "check", "--home", freshHome, project))
+		harness.requireSuccess(
+			"init Codex build",
+			harness.pfm(freshHome, "codex", "build", "--home", freshHome, project),
+		)
+		harness.requireSuccess(
+			"init Codex check",
+			harness.pfm(freshHome, "codex", "check", "--home", freshHome, project),
+		)
 		harness.assertInitPath(filepath.Join(project, "AGENTS.md"), "AGENTS.md")
 	})
 
@@ -334,7 +351,10 @@ func runInstallE2E(t *testing.T) {
 			t.Fatal(err)
 		}
 		defaultKey := "terminal.integrated.defaultProfile." + platform
-		original := fmt.Sprintf("{\n  // e2e operator setting\n  \"editor.fontSize\": 16,\n  %q: \"zsh\",\n}\n", defaultKey)
+		original := fmt.Sprintf(
+			"{\n  // e2e operator setting\n  \"editor.fontSize\": 16,\n  %q: \"zsh\",\n}\n",
+			defaultKey,
+		)
 		if err := os.WriteFile(settings, []byte(original), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -537,7 +557,17 @@ func copySourceTreeWithGit(source, target, workTree, gitDir string) error {
 	if err := os.MkdirAll(target, 0o700); err != nil {
 		return err
 	}
-	gitArgs := []string{"-c", "safe.directory=" + source, "-C", source, "ls-files", "--cached", "--others", "--exclude-standard", "-z"}
+	gitArgs := []string{
+		"-c",
+		"safe.directory=" + source,
+		"-C",
+		source,
+		"ls-files",
+		"--cached",
+		"--others",
+		"--exclude-standard",
+		"-z",
+	}
 	gitContext := "repository discovery"
 	if workTree != "" && gitDir != "" {
 		gitArgs = append([]string{"--git-dir=" + gitDir, "--work-tree=" + workTree}, gitArgs...)
@@ -556,7 +586,8 @@ func copySourceTreeWithGit(source, target, workTree, gitDir string) error {
 			continue
 		}
 		relative := filepath.Clean(filepath.FromSlash(string(rawRelative)))
-		if relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		if relative == "." || filepath.IsAbs(relative) || relative == ".." ||
+			strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 			return fmt.Errorf("source fixture enumerated unsafe path %q", string(rawRelative))
 		}
 		path := filepath.Join(source, relative)
@@ -580,7 +611,8 @@ func copySourceTreeWithGit(source, target, workTree, gitDir string) error {
 			if err != nil {
 				return fmt.Errorf("resolve source fixture symlink %s: %w", relative, err)
 			}
-			if filepath.IsAbs(linkTarget) || withinSource == ".." || strings.HasPrefix(withinSource, ".."+string(filepath.Separator)) {
+			if filepath.IsAbs(linkTarget) || withinSource == ".." ||
+				strings.HasPrefix(withinSource, ".."+string(filepath.Separator)) {
 				return fmt.Errorf("source fixture symlink %s points outside source fixture: %s", relative, linkTarget)
 			}
 			if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
@@ -608,7 +640,12 @@ func runGitFixture(t *testing.T, directory string, args ...string) {
 	t.Helper()
 	result := runGit(directory, args...)
 	if result.err != nil {
-		t.Fatalf("source fixture git %s: %v\n%s", strings.Join(args, " "), result.err, strings.TrimSpace(result.stdout+result.stderr))
+		t.Fatalf(
+			"source fixture git %s: %v\n%s",
+			strings.Join(args, " "),
+			result.err,
+			strings.TrimSpace(result.stdout+result.stderr),
+		)
 	}
 }
 
@@ -704,7 +741,11 @@ exit 2
 		h.t.Fatal(err)
 	}
 	auth := filepath.Join(home, ".codex", "auth.json")
-	if err := os.WriteFile(auth, []byte(`{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		auth,
+		[]byte(`{"tokens":{"access_token":"fixture-token","account_id":"fixture-account"}}`+"\n"),
+		0o600,
+	); err != nil {
 		h.t.Fatal(err)
 	}
 	stageSchedulerFixtures(h.t, home)
@@ -829,7 +870,12 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 		"doctor: warnings=2",
 	} {
 		if !strings.Contains(output, want) {
-			h.t.Fatalf("doctor after --skip-harvest omitted %q; stdout=%q stderr=%q", want, result.stdout, result.stderr)
+			h.t.Fatalf(
+				"doctor after --skip-harvest omitted %q; stdout=%q stderr=%q",
+				want,
+				result.stdout,
+				result.stderr,
+			)
 		}
 	}
 	// M2 (issue #24 finding 1): the unprovisioned harvestpy sidecar deps
@@ -837,7 +883,11 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 	// runs without them, and `--skip-harvest` is pfm's own decision not to
 	// provision them. `doctor: failures=` must never appear here.
 	if strings.Contains(output, "doctor: failures=") {
-		h.t.Fatalf("doctor after --skip-harvest printed a failures= line for warnings-only rows; stdout=%q stderr=%q", result.stdout, result.stderr)
+		h.t.Fatalf(
+			"doctor after --skip-harvest printed a failures= line for warnings-only rows; stdout=%q stderr=%q",
+			result.stdout,
+			result.stderr,
+		)
 	}
 }
 
@@ -849,12 +899,20 @@ func (h *e2eHarness) assertInstalled(home string) {
 	}
 	for _, relative := range managedAssets {
 		if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
-			h.t.Fatalf("install surface failed; differing paths: %s; status: %v", filepath.Join(e2eManagedRoot, relative), err)
+			h.t.Fatalf(
+				"install surface failed; differing paths: %s; status: %v",
+				filepath.Join(e2eManagedRoot, relative),
+				err,
+			)
 		}
 	}
 	for _, relative := range []string{"source-repo", "binary-ownership.json", "settings-hook-ownership.json"} {
 		if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
-			h.t.Fatalf("install surface failed; differing paths: %s; status: %v", filepath.Join(e2eManagedRoot, relative), err)
+			h.t.Fatalf(
+				"install surface failed; differing paths: %s; status: %v",
+				filepath.Join(e2eManagedRoot, relative),
+				err,
+			)
 		}
 	}
 	canonicalClaude := filepath.Join(home, e2eCanonicalClaude)
@@ -877,7 +935,11 @@ func (h *e2eHarness) assertInstalled(home string) {
 			"systemd/pfm-name-sync.path", "systemd/pfm-name-sync.service", "systemd/pfm-name-sync.timer",
 		} {
 			if _, err := os.Stat(filepath.Join(managed, relative)); err != nil {
-				h.t.Fatalf("install surface failed; differing paths: %s; status: %v", filepath.Join(e2eManagedRoot, relative), err)
+				h.t.Fatalf(
+					"install surface failed; differing paths: %s; status: %v",
+					filepath.Join(e2eManagedRoot, relative),
+					err,
+				)
 			}
 		}
 	}
@@ -947,7 +1009,12 @@ func (h *e2eHarness) assertLauncherRuntime(home string) {
 	}
 	version := h.tool(home, filepath.Join(home, e2eCanonicalClaude), "--version")
 	if version.err != nil || version.stdout != "2.1.238 (Claude Code)\n" {
-		h.t.Fatalf("launcher version pass-through failed: output=%q stderr=%q status=%v", version.stdout, version.stderr, version.err)
+		h.t.Fatalf(
+			"launcher version pass-through failed: output=%q stderr=%q status=%v",
+			version.stdout,
+			version.stderr,
+			version.err,
+		)
 	}
 	tmuxAfter, err := os.ReadDir(filepath.Join(home, "tmux"))
 	if err != nil {
@@ -958,7 +1025,12 @@ func (h *e2eHarness) assertLauncherRuntime(home string) {
 	}
 	interactive := h.tool(home, filepath.Join(home, e2eCanonicalClaude), "--resume", "fixture-session")
 	if interactive.err != nil {
-		h.t.Fatalf("interactive no-TTY launcher failed: stdout=%q stderr=%q status=%v", interactive.stdout, interactive.stderr, interactive.err)
+		h.t.Fatalf(
+			"interactive no-TTY launcher failed: stdout=%q stderr=%q status=%v",
+			interactive.stdout,
+			interactive.stderr,
+			interactive.err,
+		)
 	}
 	if !strings.HasPrefix(interactive.stdout, "pfm launch: cc-") {
 		h.t.Fatalf("interactive no-TTY launcher omitted socket line: %q", interactive.stdout)
@@ -1095,9 +1167,16 @@ func (h *e2eHarness) assertInitFile(source, target, local, template, sha string)
 	if err != nil {
 		h.t.Fatalf("init scaffold failed; differing paths: %s; status: %v", local, err)
 	}
-	marker := []byte(fmt.Sprintf("# pfm-scaffold: %s@%s — this file is YOURS; upstream deltas arrive via pfm update, reviewed and hand-applied\n", template, sha))
+	marker := []byte(
+		fmt.Sprintf(
+			"# pfm-scaffold: %s@%s — this file is YOURS; upstream deltas arrive via pfm update, reviewed and hand-applied\n",
+			template,
+			sha,
+		),
+	)
 	marked := false
-	if local != "CLAUDE.md" && local != "AGENTS.md" && strings.HasSuffix(local, ".md") && bytes.HasPrefix(want, []byte("---\n")) {
+	if local != "CLAUDE.md" && local != "AGENTS.md" && strings.HasSuffix(local, ".md") &&
+		bytes.HasPrefix(want, []byte("---\n")) {
 		prefix := append([]byte("---\n"), marker...)
 		if !bytes.HasPrefix(got, prefix) {
 			h.t.Fatalf("init scaffold failed; differing paths: %s; exact frontmatter marker absent", local)

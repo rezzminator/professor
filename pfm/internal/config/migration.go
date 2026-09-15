@@ -32,7 +32,8 @@ type Migration struct {
 
 // Empty reports whether the machine already has the current layout.
 func (migration Migration) Empty() bool {
-	return migration.LegacyPath == "" && migration.StrayLegacyPath == "" && migration.HarvesterEnabled == nil && !migration.MovePort
+	return migration.LegacyPath == "" && migration.StrayLegacyPath == "" && migration.HarvesterEnabled == nil &&
+		!migration.MovePort
 }
 
 func (migration Migration) rewrites() bool {
@@ -43,19 +44,49 @@ func (migration Migration) rewrites() bool {
 func (migration Migration) Steps() []string {
 	var steps []string
 	if migration.LegacyPath != "" {
-		steps = append(steps, fmt.Sprintf("rename %s → %s (pre-split copy kept as %s)", migration.LegacyPath, migration.Path, LegacyBackupName))
+		steps = append(
+			steps,
+			fmt.Sprintf(
+				"rename %s → %s (pre-split copy kept as %s)",
+				migration.LegacyPath,
+				migration.Path,
+				LegacyBackupName,
+			),
+		)
 	}
 	if migration.HarvesterEnabled != nil {
-		steps = append(steps, fmt.Sprintf("move mcp.servers.harvester.enabled=%t → %s", *migration.HarvesterEnabled, migration.harvesterPath))
+		steps = append(
+			steps,
+			fmt.Sprintf(
+				"move mcp.servers.harvester.enabled=%t → %s",
+				*migration.HarvesterEnabled,
+				migration.harvesterPath,
+			),
+		)
 	}
 	if migration.MovePort {
-		steps = append(steps, fmt.Sprintf("move mcp.http.port %d → %d (client registrations re-wire in this same install)", legacyDefaultMCPPort, DefaultMCPPort))
+		steps = append(
+			steps,
+			fmt.Sprintf(
+				"move mcp.http.port %d → %d (client registrations re-wire in this same install)",
+				legacyDefaultMCPPort,
+				DefaultMCPPort,
+			),
+		)
 	}
 	if migration.PortKept != "" {
 		steps = append(steps, migration.PortKept)
 	}
 	if migration.StrayLegacyPath != "" {
-		steps = append(steps, fmt.Sprintf("park leftover pre-split %s as %s (%s already holds the migrated config)", migration.StrayLegacyPath, LegacyBackupName, migration.Path))
+		steps = append(
+			steps,
+			fmt.Sprintf(
+				"park leftover pre-split %s as %s (%s already holds the migrated config)",
+				migration.StrayLegacyPath,
+				LegacyBackupName,
+				migration.Path,
+			),
+		)
 	}
 	return steps
 }
@@ -121,11 +152,17 @@ func PlanMigration(config Config) (Migration, error) {
 		}
 		migration.MovePort = httpValue.Port == legacyDefaultMCPPort
 	}
-	if external := config.Harvester.External; migration.MovePort && external.Enabled && external.Port == DefaultMCPPort {
+	if external := config.Harvester.External; migration.MovePort && external.Enabled &&
+		external.Port == DefaultMCPPort {
 		// Moving the loopback port onto the external gateway's port would turn
 		// a working machine into one whose config refuses to load.
 		migration.MovePort = false
-		migration.PortKept = fmt.Sprintf("keep mcp.http.port %d: external.port in %s already uses %d", legacyDefaultMCPPort, migration.harvesterPath, DefaultMCPPort)
+		migration.PortKept = fmt.Sprintf(
+			"keep mcp.http.port %d: external.port in %s already uses %d",
+			legacyDefaultMCPPort,
+			migration.harvesterPath,
+			DefaultMCPPort,
+		)
 	}
 	if _, err := os.Stat(migration.harvesterPath); err == nil {
 		migration.harvesterExists = true
@@ -173,8 +210,13 @@ func ApplyMigration(migration Migration) error {
 		if err != nil {
 			return err
 		}
-		return fmt.Errorf("park pre-split config %s: %s already exists with different content (%d vs %d bytes); compare the two, remove the one you no longer need, and rerun",
-			park, backup, parkSize, backupSize)
+		return fmt.Errorf(
+			"park pre-split config %s: %s already exists with different content (%d vs %d bytes); compare the two, remove the one you no longer need, and rerun",
+			park,
+			backup,
+			parkSize,
+			backupSize,
+		)
 	}
 	if err := os.Rename(park, backup); err != nil {
 		return fmt.Errorf("park pre-split config %s as %s: %w", park, backup, err)

@@ -34,7 +34,11 @@ func TestResolveRefusesTheOperatorsRealHomeInsideATest(t *testing.T) {
 	}
 	for _, mustName := range []string{EnvHome, EnvRealHome} {
 		if !strings.Contains(err.Error(), mustName) {
-			t.Errorf("Resolve() error %q does not name %s; the message is the only place the fix appears", err, mustName)
+			t.Errorf(
+				"Resolve() error %q does not name %s; the message is the only place the fix appears",
+				err,
+				mustName,
+			)
 		}
 	}
 }

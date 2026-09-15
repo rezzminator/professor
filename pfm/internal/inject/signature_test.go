@@ -3,13 +3,13 @@ package inject
 import (
 	"context"
 	"errors"
-	pfmengine "hostops/pfm/internal/engine"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/resolve"
 )
@@ -534,7 +534,11 @@ func TestSignatureLabelIsReadPerDeliveryFromTheRosterFirst(t *testing.T) {
 	fourth := deliver("fourth, roster unavailable")
 	if !strings.Contains(fourth, "to reply: chat_inject LUNA:ORCHESTRATOR <message>") ||
 		!strings.Contains(warnings.String(), "pfm: sender label: fleet database busy") {
-		t.Fatalf("footer with the roster down %q (warnings %q), want the screen's label and the failure reported", fourth, warnings.String())
+		t.Fatalf(
+			"footer with the roster down %q (warnings %q), want the screen's label and the failure reported",
+			fourth,
+			warnings.String(),
+		)
 	}
 }
 

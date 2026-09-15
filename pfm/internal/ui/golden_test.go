@@ -280,23 +280,45 @@ func limitsGoldenModel(width int) Model {
 	now := time.Unix(0, fixtureNowNS)
 	model.stats = pfmstats.Snapshot{Ready: true, Limits: []pfmstats.AccountLimits{
 		{
-			Account: 1, Emoji: "🥇", Engine: pfmengine.Claude, Label: "account 1", Plan: "Max 20x", ConfirmedAt: now.Add(-12 * time.Second),
+			Account:     1,
+			Emoji:       "🥇",
+			Engine:      pfmengine.Claude,
+			Label:       "account 1",
+			Plan:        "Max 20x",
+			ConfirmedAt: now.Add(-12 * time.Second),
 			Windows: []pfmstats.Window{
 				{Name: "5h", UsedPct: 52.4, ResetAt: now.Add(2*time.Hour + 14*time.Minute)},
 				{Name: "7d-fable", UsedPct: 95, ResetAt: now.Add(14 * time.Minute)},
 			},
 		},
 		{
-			Account: 2, Emoji: "🥈", Engine: pfmengine.Claude, Label: "account 2", Plan: "Pro", ConfirmedAt: now.Add(-40 * time.Second),
+			Account:     2,
+			Emoji:       "🥈",
+			Engine:      pfmengine.Claude,
+			Label:       "account 2",
+			Plan:        "Pro",
+			ConfirmedAt: now.Add(-40 * time.Second),
 			Windows: []pfmstats.Window{
 				{Name: "5h", UsedPct: 55, ResetAt: now.Add(4 * time.Hour)},
 				{Name: "7d", UsedPct: 100, ResetAt: now.Add(-time.Minute)},
 			},
 		},
-		{Engine: pfmengine.Codex, Label: "Codex", Plan: "pro", ConfirmedAt: now.Add(-2 * time.Minute), Windows: []pfmstats.Window{
-			{Name: "7d", UsedPct: 31, ResetAt: now.Add(6*24*time.Hour + 20*time.Hour)},
-		}},
-		{Account: 4, Emoji: "🍀", Engine: pfmengine.Claude, Label: "account 4", Status: "Claude credential rejected (HTTP 403)"},
+		{
+			Engine:      pfmengine.Codex,
+			Label:       "Codex",
+			Plan:        "pro",
+			ConfirmedAt: now.Add(-2 * time.Minute),
+			Windows: []pfmstats.Window{
+				{Name: "7d", UsedPct: 31, ResetAt: now.Add(6*24*time.Hour + 20*time.Hour)},
+			},
+		},
+		{
+			Account: 4,
+			Emoji:   "🍀",
+			Engine:  pfmengine.Claude,
+			Label:   "account 4",
+			Status:  "Claude credential rejected (HTTP 403)",
+		},
 		{Account: 3, Engine: pfmengine.Claude, Label: "account 3", Status: "skipped account 3: no valid credentials"},
 	}}
 	return model
@@ -327,7 +349,12 @@ func cosmosGoldenSnapshot(width int, noSky bool) Snapshot {
 			snapshot.Rows[index].ActivityNS += clockShift
 		}
 	}
-	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, cosmosGoldenEvents(cosmosNowNS, snapshot.Rows), snapshot.NowNS, false)
+	snapshot.Cosmos = compose.BuildCosmos(
+		snapshot.Rows,
+		cosmosGoldenEvents(cosmosNowNS, snapshot.Rows),
+		snapshot.NowNS,
+		false,
+	)
 	return snapshot
 }
 
@@ -351,7 +378,12 @@ func cosmosGoldenSnapshotSeeded(width int) Snapshot {
 			snapshot.Rows[index].ActivityNS += clockShift
 		}
 	}
-	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, cosmosGoldenEvents(cosmosNowNS, snapshot.Rows), snapshot.NowNS, true)
+	snapshot.Cosmos = compose.BuildCosmos(
+		snapshot.Rows,
+		cosmosGoldenEvents(cosmosNowNS, snapshot.Rows),
+		snapshot.NowNS,
+		true,
+	)
 	return snapshot
 }
 

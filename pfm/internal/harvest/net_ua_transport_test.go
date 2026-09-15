@@ -35,7 +35,10 @@ func TestUserAgentTransportSetsUAAndForwardsToBase(t *testing.T) {
 		t.Fatalf("base transport saw User-Agent = %q, want the wrapper's own %q", seenUA, "harvester-test/1.0")
 	}
 	if req.Header.Get("User-Agent") != "caller-supplied/0.0" {
-		t.Fatalf("RoundTrip mutated the caller's own request; User-Agent = %q, want the original untouched", req.Header.Get("User-Agent"))
+		t.Fatalf(
+			"RoundTrip mutated the caller's own request; User-Agent = %q, want the original untouched",
+			req.Header.Get("User-Agent"),
+		)
 	}
 	sameRequest = req.Header.Get("User-Agent") == "caller-supplied/0.0"
 	if !sameRequest {

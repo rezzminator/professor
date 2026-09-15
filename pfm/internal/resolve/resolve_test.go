@@ -312,7 +312,11 @@ func TestResolveFailsLoudWhenTmuxCannotRun(t *testing.T) {
 	for _, kind := range []Kind{Session, Label, CxWindow} {
 		outcome, err := resolver.Resolve(context.Background(), kind, "any-chat")
 		if err == nil {
-			t.Fatalf("Resolve(%s) with an unstartable tmux = %+v, nil — a miss that means \"could not look\"", kind, outcome)
+			t.Fatalf(
+				"Resolve(%s) with an unstartable tmux = %+v, nil — a miss that means \"could not look\"",
+				kind,
+				outcome,
+			)
 		}
 		if !pfmtmux.CouldNotRun(err) {
 			t.Fatalf("Resolve(%s) error %v does not carry the could-not-run cause", kind, err)

@@ -56,7 +56,12 @@ func TestVSCodeCanonicalProfileCarriesIconAndColourAndUpgradesTheIconlessShape(t
 
 	// An operator edit after this upgrade still relinquishes, same as every
 	// other profile field.
-	edited := strings.Replace(readFixture(t, settings), `"color": "terminal.ansiMagenta"`, `"color": "terminal.ansiGreen"`, 1)
+	edited := strings.Replace(
+		readFixture(t, settings),
+		`"color": "terminal.ansiMagenta"`,
+		`"color": "terminal.ansiGreen"`,
+		1,
+	)
 	if err := os.WriteFile(settings, []byte(edited), 0o600); err != nil {
 		t.Fatal(err)
 	}

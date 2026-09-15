@@ -65,7 +65,12 @@ func TestReadOffersReleaseToItsOwnPrerelease(t *testing.T) {
 	}
 	notice, found, err := Read(cache, current)
 	if err != nil || !found || notice.Latest != "v0.78.0" {
-		t.Fatalf("Read(prerelease current vs its own release) notice=%#v found=%t err=%v, want offered", notice, found, err)
+		t.Fatalf(
+			"Read(prerelease current vs its own release) notice=%#v found=%t err=%v, want offered",
+			notice,
+			found,
+			err,
+		)
 	}
 }
 
@@ -99,7 +104,12 @@ func TestReadDoesNotOfferAReleaseToItsOwnBuildMetadata(t *testing.T) {
 		t.Fatalf("Check(build metadata current) error = %v", err)
 	}
 	if notice, found, err := Read(cache, current); err != nil || found {
-		t.Fatalf("Read(build metadata current vs same-core release) notice=%#v found=%t err=%v, want no update row (build metadata is not a pre-release)", notice, found, err)
+		t.Fatalf(
+			"Read(build metadata current vs same-core release) notice=%#v found=%t err=%v, want no update row (build metadata is not a pre-release)",
+			notice,
+			found,
+			err,
+		)
 	}
 }
 

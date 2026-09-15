@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"io"
 	"io/fs"
 	"os"
@@ -14,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/paths"
 )

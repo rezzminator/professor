@@ -78,24 +78,32 @@ func TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks(t *testing.T) {
 		}
 		target, linked := resolvedLink(foreign)
 		if !linked || target != filepath.Clean(operatorSource) {
-			t.Fatalf("preservation rule broke a foreign dangling link: target=%q linked=%v, want %q", target, linked, operatorSource)
+			t.Fatalf(
+				"preservation rule broke a foreign dangling link: target=%q linked=%v, want %q",
+				target,
+				linked,
+				operatorSource,
+			)
 		}
 	})
 
-	t.Run("regular file survives: a non-symlink entry in the registry is never a retirement candidate", func(t *testing.T) {
-		home := t.TempDir()
-		regular := filepath.Join(home, ".claude", "commands", "p.md")
-		writeFixture(t, regular, "an operator's own plain command file\n")
+	t.Run(
+		"regular file survives: a non-symlink entry in the registry is never a retirement candidate",
+		func(t *testing.T) {
+			home := t.TempDir()
+			regular := filepath.Join(home, ".claude", "commands", "p.md")
+			writeFixture(t, regular, "an operator's own plain command file\n")
 
-		if _, err := Run(context.Background(), Options{
-			Mode: ModeApply, Home: home, Runner: &fakeRunner{},
-		}); err != nil {
-			t.Fatal(err)
-		}
-		if got := readFixture(t, regular); got != "an operator's own plain command file\n" {
-			t.Fatalf("installer touched a regular file in the command registry: %q", got)
-		}
-	})
+			if _, err := Run(context.Background(), Options{
+				Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if got := readFixture(t, regular); got != "an operator's own plain command file\n" {
+				t.Fatalf("installer touched a regular file in the command registry: %q", got)
+			}
+		},
+	)
 }
 
 // TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess pins the doc
@@ -111,7 +119,9 @@ func TestRetireOrphanGlobalCommandsPrunesOnlyItsOwnDanglingLinks(t *testing.T) {
 // different function's error, not retireOrphanGlobalCommands' own.
 func TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess(t *testing.T) {
 	if os.Geteuid() == 0 {
-		t.Skip("running as root: chmod-denied directory reads are a no-op for root, so this failure cannot be forced genuinely here")
+		t.Skip(
+			"running as root: chmod-denied directory reads are a no-op for root, so this failure cannot be forced genuinely here",
+		)
 	}
 	home := t.TempDir()
 	config := filepath.Join(home, ".claude")
@@ -131,7 +141,9 @@ func TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess(t *testing.T
 	}
 	err := installer.retireOrphanGlobalCommands()
 	if err == nil {
-		t.Fatal("expected an error surfacing the unreadable registry, got nil — a broken look must never render as a clean sweep")
+		t.Fatal(
+			"expected an error surfacing the unreadable registry, got nil — a broken look must never render as a clean sweep",
+		)
 	}
 	if !strings.Contains(err.Error(), unreadable) {
 		t.Fatalf("error did not name the unreadable registry path %s: %v", unreadable, err)

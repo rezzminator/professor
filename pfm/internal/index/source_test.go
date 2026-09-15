@@ -16,7 +16,12 @@ const missingSourceHelper = "PFM_INDEX_MISSING_SOURCE_HELPER"
 
 type builtinTestSource struct{ id pfmengine.ID }
 
-func (source builtinTestSource) Sync(ctx context.Context, database *store.Store, roots []string, counters *Counters) error {
+func (source builtinTestSource) Sync(
+	ctx context.Context,
+	database *store.Store,
+	roots []string,
+	counters *Counters,
+) error {
 	switch source.id {
 	case pfmengine.Claude:
 		return SyncClaude(ctx, database, roots, counters)

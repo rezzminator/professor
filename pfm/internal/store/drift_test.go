@@ -2,9 +2,10 @@ package store
 
 import (
 	"context"
-	pfmengine "hostops/pfm/internal/engine"
 	"os/exec"
 	"testing"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // TestSharedKillsNeedNoBridgeInEitherDirection pins the shared-state boundary:

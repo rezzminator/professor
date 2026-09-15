@@ -294,7 +294,9 @@ func validRedirectURI(raw string) bool {
 func ResourceMatches(candidate, expected string) bool {
 	a, errA := url.Parse(candidate)
 	b, errB := url.Parse(expected)
-	if errA != nil || errB != nil || a.Scheme == "" || a.Hostname() == "" || b.Scheme == "" || b.Hostname() == "" || a.Fragment != "" || b.Fragment != "" {
+	if errA != nil || errB != nil || a.Scheme == "" || a.Hostname() == "" || b.Scheme == "" || b.Hostname() == "" ||
+		a.Fragment != "" ||
+		b.Fragment != "" {
 		return false
 	}
 	userA, userB := "", ""
@@ -310,7 +312,11 @@ func ResourceMatches(candidate, expected string) bool {
 		a.EscapedPath() == b.EscapedPath() && a.RawQuery == b.RawQuery
 }
 
-func (s *authStore) begin(c oauthClient, redirect, state, challenge, method, resource string, scope []string) (string, error) {
+func (s *authStore) begin(
+	c oauthClient,
+	redirect, state, challenge, method, resource string,
+	scope []string,
+) (string, error) {
 	if resource == "" {
 		resource = s.resource
 	}
@@ -328,7 +334,16 @@ func (s *authStore) begin(c oauthClient, redirect, state, challenge, method, res
 		return "", err
 	}
 	s.mu.Lock()
-	s.pending[txn] = pendingConsent{ClientID: c.ClientID, RedirectURI: redirect, State: state, Scope: scope, Challenge: challenge, Method: method, Resource: resource, Created: time.Now()}
+	s.pending[txn] = pendingConsent{
+		ClientID:    c.ClientID,
+		RedirectURI: redirect,
+		State:       state,
+		Scope:       scope,
+		Challenge:   challenge,
+		Method:      method,
+		Resource:    resource,
+		Created:     time.Now(),
+	}
 	s.mu.Unlock()
 	return txn, nil
 }
@@ -355,7 +370,16 @@ func (s *authStore) consent(txn, supplied string) (string, bool, bool) {
 	if err != nil {
 		return "", false, false
 	}
-	s.codes[code] = authorizationCode{Code: code, ClientID: p.ClientID, RedirectURI: p.RedirectURI, State: p.State, Scope: p.Scope, Challenge: p.Challenge, Resource: p.Resource, Expires: time.Now().Add(authCodeTTL)}
+	s.codes[code] = authorizationCode{
+		Code:        code,
+		ClientID:    p.ClientID,
+		RedirectURI: p.RedirectURI,
+		State:       p.State,
+		Scope:       p.Scope,
+		Challenge:   p.Challenge,
+		Resource:    p.Resource,
+		Expires:     time.Now().Add(authCodeTTL),
+	}
 	return code, true, true
 }
 
@@ -408,11 +432,23 @@ func (s *authStore) issueLocked(clientID string, scope []string) (tokenResponse,
 	if len(scope) == 0 {
 		scope = []string{HarvesterScope}
 	}
-	s.access[digest(access)] = accessToken{Raw: access, ClientID: clientID, Scope: append([]string(nil), scope...), Resource: s.resource, Expires: time.Now().Add(accessTokenTTL)}
+	s.access[digest(access)] = accessToken{
+		Raw:      access,
+		ClientID: clientID,
+		Scope:    append([]string(nil), scope...),
+		Resource: s.resource,
+		Expires:  time.Now().Add(accessTokenTTL),
+	}
 	hash := digest(refresh)
 	s.refresh[hash] = refreshToken{Hash: hash, ClientID: clientID, Scope: append([]string(nil), scope...)}
 	s.saveLocked()
-	return tokenResponse{AccessToken: access, TokenType: "Bearer", ExpiresIn: defaultTokenExpiry, Scope: strings.Join(scope, " "), RefreshToken: refresh}, nil
+	return tokenResponse{
+		AccessToken:  access,
+		TokenType:    "Bearer",
+		ExpiresIn:    defaultTokenExpiry,
+		Scope:        strings.Join(scope, " "),
+		RefreshToken: refresh,
+	}, nil
 }
 
 func (s *authStore) refreshExchange(raw, clientID, resource string) (tokenResponse, string) {

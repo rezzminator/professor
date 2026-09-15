@@ -81,8 +81,12 @@ func morningWith(
 	if err := validateResourcesRoot(request.ResourcesRoot); err != nil {
 		return MorningResult{}, err
 	}
-	if request.RegistryBase == "" || !filepath.IsAbs(request.RegistryBase) || filepath.Clean(request.RegistryBase) != request.RegistryBase {
-		return MorningResult{}, fmt.Errorf("dream registry base must be absolute and canonical: %s", request.RegistryBase)
+	if request.RegistryBase == "" || !filepath.IsAbs(request.RegistryBase) ||
+		filepath.Clean(request.RegistryBase) != request.RegistryBase {
+		return MorningResult{}, fmt.Errorf(
+			"dream registry base must be absolute and canonical: %s",
+			request.RegistryBase,
+		)
 	}
 	if request.RepositoriesFile == "" || !filepath.IsAbs(request.RepositoriesFile) ||
 		filepath.Clean(request.RepositoriesFile) != request.RepositoriesFile {
@@ -197,7 +201,12 @@ func morningWith(
 			result.Failed = true
 			repositoryRun.Outcome = MorningNightFailed
 			repositoryRun.Reason = oneLine(err.Error())
-			fmt.Fprintf(&stderr, "dreamer-morning: FAIL repo=%s lane-discovery: %s\n", configured.RepoRoot, oneLine(err.Error()))
+			fmt.Fprintf(
+				&stderr,
+				"dreamer-morning: FAIL repo=%s lane-discovery: %s\n",
+				configured.RepoRoot,
+				oneLine(err.Error()),
+			)
 			result.Repositories = append(result.Repositories, repositoryRun)
 			continue
 		}
@@ -233,7 +242,11 @@ func morningOrganResolvable(repoRoot, registryBase string) error {
 		return fmt.Errorf("organ unresolved for listed repository %s at %s: %w", repoRoot, repository.Organ, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return fmt.Errorf("organ unresolved for listed repository %s at %s: not a real directory", repoRoot, repository.Organ)
+		return fmt.Errorf(
+			"organ unresolved for listed repository %s at %s: not a real directory",
+			repoRoot,
+			repository.Organ,
+		)
 	}
 	return nil
 }

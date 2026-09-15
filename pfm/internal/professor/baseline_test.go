@@ -28,7 +28,8 @@ func TestBaselineRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if got.Version != want.Version || got.Blueprint != want.Blueprint || len(got.Files) != 1 || got.Files[".claude/commands/dev.md"] != want.Files[".claude/commands/dev.md"] {
+	if got.Version != want.Version || got.Blueprint != want.Blueprint || len(got.Files) != 1 ||
+		got.Files[".claude/commands/dev.md"] != want.Files[".claude/commands/dev.md"] {
 		t.Fatalf("Load() = %#v, want %#v", got, want)
 	}
 }

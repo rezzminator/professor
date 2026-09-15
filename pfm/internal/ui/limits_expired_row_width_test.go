@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/x/ansi"
+
 	pfmengine "hostops/pfm/internal/engine"
 	pfmstats "hostops/pfm/internal/stats"
 )

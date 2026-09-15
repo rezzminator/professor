@@ -100,18 +100,34 @@ type providerResponse struct {
 // as the last resort. Before the gateway existed this path ran a single plain
 // client, so a provider record page behind a JS wall failed with a bare 403
 // that was indistinguishable from the source refusing the request.
-func (h *Harvester) providerGet(ctx context.Context, rawURL string, headers http.Header, max int64) (providerResponse, error) {
+func (h *Harvester) providerGet(
+	ctx context.Context,
+	rawURL string,
+	headers http.Header,
+	max int64,
+) (providerResponse, error) {
 	return h.providerFetch(ctx, rawURL, headers, max, false)
 }
 
 // providerDownload fetches a provider ARTIFACT (the PDF/EPUB bytes). It climbs
 // the same ladder except the browser rungs, which render HTML and therefore
 // can never return a document's bytes.
-func (h *Harvester) providerDownload(ctx context.Context, rawURL string, headers http.Header, max int64) (providerResponse, error) {
+func (h *Harvester) providerDownload(
+	ctx context.Context,
+	rawURL string,
+	headers http.Header,
+	max int64,
+) (providerResponse, error) {
 	return h.providerFetch(ctx, rawURL, headers, max, true)
 }
 
-func (h *Harvester) providerFetch(ctx context.Context, rawURL string, headers http.Header, max int64, binary bool) (providerResponse, error) {
+func (h *Harvester) providerFetch(
+	ctx context.Context,
+	rawURL string,
+	headers http.Header,
+	max int64,
+	binary bool,
+) (providerResponse, error) {
 	jar, _ := ctx.Value(providerCookieJarKey{}).(http.CookieJar)
 	if jar == nil {
 		var err error
@@ -137,11 +153,23 @@ func (h *Harvester) providerFetch(ctx context.Context, rawURL string, headers ht
 	if finalURL == "" {
 		finalURL = rawURL
 	}
-	return providerResponse{body: response.body, status: response.status, contentType: response.contentType, finalURL: finalURL}, nil
+	return providerResponse{
+		body:        response.body,
+		status:      response.status,
+		contentType: response.contentType,
+		finalURL:    finalURL,
+	}, nil
 }
 
 func providerResult(source, provider, message, kind string, status int, challenge bool, rungs []string) Result {
-	return Result{Source: source, Error: provider + ": " + message, ErrorKind: kind, HTTPStatus: status, Challenge: challenge, Rungs: append([]string(nil), rungs...)}
+	return Result{
+		Source:     source,
+		Error:      provider + ": " + message,
+		ErrorKind:  kind,
+		HTTPStatus: status,
+		Challenge:  challenge,
+		Rungs:      append([]string(nil), rungs...),
+	}
 }
 
 func providerContext(ctx context.Context) (context.Context, context.CancelFunc) {
@@ -159,17 +187,38 @@ func providerContext(ctx context.Context) (context.Context, context.CancelFunc) 
 	return context.WithDeadline(ctx, providerDeadline)
 }
 
-func (h *Harvester) fetchProviderArtifact(ctx context.Context, source, provider, fileURL, referer, expectedMD5 string, options FetchOptions, rungs []string) Result {
+func (h *Harvester) fetchProviderArtifact(
+	ctx context.Context,
+	source, provider, fileURL, referer, expectedMD5 string,
+	options FetchOptions,
+	rungs []string,
+) Result {
 	providerCtx := ctx
 	var cancel context.CancelFunc
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 		providerCtx, cancel = providerContext(ctx)
 		defer cancel()
 	}
-	return h.fetchProviderArtifactWithPolicy(providerCtx, source, provider, fileURL, referer, expectedMD5, options, rungs, false)
+	return h.fetchProviderArtifactWithPolicy(
+		providerCtx,
+		source,
+		provider,
+		fileURL,
+		referer,
+		expectedMD5,
+		options,
+		rungs,
+		false,
+	)
 }
 
-func (h *Harvester) fetchProviderArtifactWithPolicy(ctx context.Context, source, provider, fileURL, referer, expectedMD5 string, options FetchOptions, rungs []string, requirePDF bool) Result {
+func (h *Harvester) fetchProviderArtifactWithPolicy(
+	ctx context.Context,
+	source, provider, fileURL, referer, expectedMD5 string,
+	options FetchOptions,
+	rungs []string,
+	requirePDF bool,
+) Result {
 	headers := http.Header{"Accept": {"application/pdf,application/epub+zip,application/octet-stream;q=0.9,*/*;q=0.5"}}
 	if referer != "" {
 		headers.Set("Referer", referer)
@@ -184,20 +233,52 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(ctx context.Context, source,
 		if challenge {
 			kind = "challenge"
 		}
-		return providerResult(source, provider, fmt.Sprintf("download returned HTTP %d", response.status), kind, response.status, challenge, rungs)
+		return providerResult(
+			source,
+			provider,
+			fmt.Sprintf("download returned HTTP %d", response.status),
+			kind,
+			response.status,
+			challenge,
+			rungs,
+		)
 	}
 	isPDF := bytes.HasPrefix(response.body, []byte("%PDF-"))
 	if doiMirrorChallenge(response.body, response.status) && !isPDF {
-		return providerResult(source, provider, "download returned a challenge page", "challenge", response.status, true, rungs)
+		return providerResult(
+			source,
+			provider,
+			"download returned a challenge page",
+			"challenge",
+			response.status,
+			true,
+			rungs,
+		)
 	}
 	if requirePDF && !isPDF {
-		return providerResult(source, provider, "download did not return PDF bytes", "wrong_kind", response.status, false, rungs)
+		return providerResult(
+			source,
+			provider,
+			"download did not return PDF bytes",
+			"wrong_kind",
+			response.status,
+			false,
+			rungs,
+		)
 	}
 	if expectedMD5 != "" {
 		digest := cryptomd5.Sum(response.body) // MD5 is the catalog's content key, not a security primitive.
 		got := hex.EncodeToString(digest[:])
 		if !strings.EqualFold(got, expectedMD5) {
-			return providerResult(source, provider, fmt.Sprintf("download failed MD5 verification (got %s, want %s)", got, strings.ToLower(expectedMD5)), "integrity", response.status, false, rungs)
+			return providerResult(
+				source,
+				provider,
+				fmt.Sprintf("download failed MD5 verification (got %s, want %s)", got, strings.ToLower(expectedMD5)),
+				"integrity",
+				response.status,
+				false,
+				rungs,
+			)
 		}
 	}
 	kind := classifyFetchedKind(fileURL, response.contentType, response.body)
@@ -205,19 +286,43 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(ctx context.Context, source,
 		kind = "epub"
 	}
 	if !supportedProviderKind(kind, response.body) {
-		return providerResult(source, provider, "download returned an unsupported or non-document format", "wrong_kind", response.status, false, rungs)
+		return providerResult(
+			source,
+			provider,
+			"download returned an unsupported or non-document format",
+			"wrong_kind",
+			response.status,
+			false,
+			rungs,
+		)
 	}
 	converted, err := h.convert(ctx, kind, fileURL, response.body)
 	if err != nil {
 		if kind != "pdf" || !emptyPDFConversionError(err) {
-			return providerResult(source, provider, "conversion failed: "+err.Error(), "convert", response.status, false, rungs)
+			return providerResult(
+				source,
+				provider,
+				"conversion failed: "+err.Error(),
+				"convert",
+				response.status,
+				false,
+				rungs,
+			)
 		}
 		converted = ""
 	}
 	if kind == "pdf" && strings.TrimSpace(converted) == "" {
 		ocr, ok := h.options.Converter.(OCRConverter)
 		if !ok {
-			return providerResult(source, provider, "conversion produced empty text and OCR is unavailable", "convert", response.status, false, append(rungs, "ocr"))
+			return providerResult(
+				source,
+				provider,
+				"conversion produced empty text and OCR is unavailable",
+				"convert",
+				response.status,
+				false,
+				append(rungs, "ocr"),
+			)
 		}
 		rungs = append(rungs, "ocr")
 		converted, err = ocr.ConvertOCR(ctx, kind, fileURL, response.body)
@@ -225,10 +330,27 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(ctx context.Context, source,
 			if err == nil {
 				err = errors.New("OCR produced empty text")
 			}
-			return providerResult(source, provider, "conversion OCR failed: "+err.Error(), "convert", response.status, false, rungs)
+			return providerResult(
+				source,
+				provider,
+				"conversion OCR failed: "+err.Error(),
+				"convert",
+				response.status,
+				false,
+				rungs,
+			)
 		}
 	}
-	stored := h.storeResult(fileURL, kind, provider, converted, int64(len(response.body)), response.status, rungs, options)
+	stored := h.storeResult(
+		fileURL,
+		kind,
+		provider,
+		converted,
+		int64(len(response.body)),
+		response.status,
+		rungs,
+		options,
+	)
 	if stored.Error != "" {
 		stored.Source = source
 		return stored
@@ -274,7 +396,12 @@ func (r *Resolver) configuredProviderBase(provider string) string {
 
 func (r *Resolver) providerHarvester() *Harvester {
 	client := r.client()
-	return &Harvester{client: client, binaryDirect: client, userAgent: defaultUA, options: Options{MaxBytes: providerHTMLMaxBody}}
+	return &Harvester{
+		client:       client,
+		binaryDirect: client,
+		userAgent:    defaultUA,
+		options:      Options{MaxBytes: providerHTMLMaxBody},
+	}
 }
 
 func escapeDOIPath(doi string) string {

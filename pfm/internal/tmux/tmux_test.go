@@ -67,7 +67,11 @@ func TestCouldNotRunSeparatesAnUnstartableTmuxFromAFailingServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	exitsNonZero := filepath.Join(directory, "tmux-exits-1")
-	if err := os.WriteFile(exitsNonZero, []byte("#!/bin/sh\necho 'no server running' >&2\nexit 1\n"), 0o700); err != nil {
+	if err := os.WriteFile(
+		exitsNonZero,
+		[]byte("#!/bin/sh\necho 'no server running' >&2\nexit 1\n"),
+		0o700,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", directory)

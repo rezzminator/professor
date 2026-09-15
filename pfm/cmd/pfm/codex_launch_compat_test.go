@@ -21,13 +21,19 @@ func TestCodexLaunchCompatibilityForAlreadyLoadedShells(t *testing.T) {
 	called := false
 	launchExec = func(path string, args, env []string) error {
 		called = true
-		if path != binary || !reflect.DeepEqual(args, []string{binary, "-c", "printf untouched", "--", "literal prompt"}) || !reflect.DeepEqual(env, os.Environ()) {
+		if path != binary ||
+			!reflect.DeepEqual(args, []string{binary, "-c", "printf untouched", "--", "literal prompt"}) ||
+			!reflect.DeepEqual(env, os.Environ()) {
 			t.Fatalf("legacy launch changed argv/environment: %q %q", path, args)
 		}
 		return sentinel
 	}
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"internal", "codex-launch", binary, "-c", "printf untouched", "--", "literal prompt"}, &stdout, &stderr)
+	code := run(
+		[]string{"internal", "codex-launch", binary, "-c", "printf untouched", "--", "literal prompt"},
+		&stdout,
+		&stderr,
+	)
 	if !called || code != 1 {
 		t.Fatalf("legacy entrypoint missing: called=%v code=%d stderr=%s", called, code, stderr.String())
 	}

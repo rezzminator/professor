@@ -171,7 +171,14 @@ func parseJSONCObject(raw []byte, start int) (jsoncObject, error) {
 		if err != nil {
 			return jsoncObject{}, err
 		}
-		property := jsoncProperty{name: name, keyStart: keyStart, valueStart: valueStart, valueEnd: valueEnd, commaStart: -1, commaEnd: -1}
+		property := jsoncProperty{
+			name:       name,
+			keyStart:   keyStart,
+			valueStart: valueStart,
+			valueEnd:   valueEnd,
+			commaStart: -1,
+			commaEnd:   -1,
+		}
 		if after < len(raw) && raw[after] == ',' {
 			property.commaStart, property.commaEnd = after, after+1
 			index = after + 1
@@ -208,7 +215,9 @@ func setJSONCProperty(raw []byte, objectStart int, name string, value []byte) ([
 	// is valid strict JSON there, not merely JSONC. A LATER insertion into
 	// the same object still lands correctly — it is the "last property has
 	// no comma" case the prefix check above already exists to handle.
-	insertion := []byte(prefix + "\n" + childIndent + string(mustJSON(name)) + ": " + string(formatted) + "\n" + closingIndent)
+	insertion := []byte(
+		prefix + "\n" + childIndent + string(mustJSON(name)) + ": " + string(formatted) + "\n" + closingIndent,
+	)
 	return spliceBytes(raw, object.close, object.close, insertion), nil
 }
 

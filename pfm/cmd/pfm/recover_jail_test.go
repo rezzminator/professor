@@ -10,7 +10,7 @@ import (
 
 // Recovery fixtures stay below a temporary PFM home and Codex root. They never
 // inspect or modify the operator's real Codex state.
-func recoveryJail(t *testing.T, content string, id string) (string, string) {
+func recoveryJail(t *testing.T, content, id string) (string, string) {
 	t.Helper()
 	root := t.TempDir()
 	codexRoot := filepath.Join(root, ".codex")

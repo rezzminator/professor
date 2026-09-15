@@ -124,7 +124,11 @@ func TestDeadChatTranscriptReadFailureIsNotRenderedAsAbsence(t *testing.T) {
 	if err := os.Symlink(filepath.Join(directory, "does-not-exist.jsonl"), path); err != nil {
 		t.Fatal(err)
 	}
-	status, err := Inspect(context.Background(), Chat{Name: "broken", Engine: "cc", Path: path, Live: false}, time.Now())
+	status, err := Inspect(
+		context.Background(),
+		Chat{Name: "broken", Engine: "cc", Path: path, Live: false},
+		time.Now(),
+	)
 	if err == nil {
 		t.Fatalf("unreadable transcript returned nil error and state %q", status.State)
 	}

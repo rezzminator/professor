@@ -124,12 +124,20 @@ func physicalSettingsPath(path string) string {
 // command path, then cross-checks the same ownership ledger uninstall reads.
 func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult {
 	expected := ExpectedHooks(home, config)
-	ownership, _, ownershipErr := readSettingsHookOwnership(filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"))
+	ownership, _, ownershipErr := readSettingsHookOwnership(
+		filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
+	)
 	if ownershipErr != nil {
-		return []HookProbeResult{{
-			Hook:  ExpectedHook{Target: "ownership", File: filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json")},
-			State: "broken", Error: ownershipErr.Error(),
-		}}
+		return []HookProbeResult{
+			{
+				Hook: ExpectedHook{
+					Target: "ownership",
+					File:   filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
+				},
+				State: "broken",
+				Error: ownershipErr.Error(),
+			},
+		}
 	}
 	type fileProbe struct {
 		counts      settingsHookCounts
@@ -234,7 +242,8 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 						Target: fileTargets[physical], File: fileDisplayPaths[physical],
 						Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: "unknown:" + name,
 					},
-					State: "stale", Error: "hook names a pfm subcommand this pfm does not implement (left by a newer or rolled-back pfm) — run pfm install --yes",
+					State: "stale",
+					Error: "hook names a pfm subcommand this pfm does not implement (left by a newer or rolled-back pfm) — run pfm install --yes",
 				})
 			}
 		}
@@ -246,8 +255,16 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 				continue
 			}
 			results = append(results, HookProbeResult{
-				Hook:  ExpectedHook{Target: "ownership", File: path, Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: "unexpected"},
-				State: "drift", Error: fmt.Sprintf("ledger owns %d hook(s) absent from installer expectations", count),
+				Hook: ExpectedHook{
+					Target:  "ownership",
+					File:    path,
+					Event:   key.Event,
+					Matcher: key.Matcher,
+					Command: key.Command,
+					Name:    "unexpected",
+				},
+				State: "drift",
+				Error: fmt.Sprintf("ledger owns %d hook(s) absent from installer expectations", count),
 			})
 		}
 	}
@@ -284,7 +301,9 @@ func missingOrStaleHook(counts settingsHookCounts, hook ExpectedHook) (string, s
 // installer's ownership counter intentionally remains tolerant because it must
 // also remove historical entries; doctor is stricter and only counts typed
 // command hooks as healthy.
-func inspectExpectedHookDocument(document map[string]any) (settingsHookCounts, settingsHookCounts, string, map[string]string) {
+func inspectExpectedHookDocument(
+	document map[string]any,
+) (settingsHookCounts, settingsHookCounts, string, map[string]string) {
 	typed := settingsHookCounts{}
 	all := settingsHookCounts{}
 	issues := map[string]string{}
@@ -325,12 +344,22 @@ func inspectExpectedHookDocument(document map[string]any) (settingsHookCounts, s
 			for hookIndex, hookValue := range hookValues {
 				hook, ok := hookValue.(map[string]any)
 				if !ok {
-					issues[event] = fmt.Sprintf("event %s entry %d hook %d is not an object", event, entryIndex, hookIndex)
+					issues[event] = fmt.Sprintf(
+						"event %s entry %d hook %d is not an object",
+						event,
+						entryIndex,
+						hookIndex,
+					)
 					continue
 				}
 				command, ok := hook["command"].(string)
 				if !ok || strings.TrimSpace(command) == "" {
-					issues[event] = fmt.Sprintf("event %s entry %d hook %d command is not a non-empty string", event, entryIndex, hookIndex)
+					issues[event] = fmt.Sprintf(
+						"event %s entry %d hook %d command is not a non-empty string",
+						event,
+						entryIndex,
+						hookIndex,
+					)
 					continue
 				}
 				key := settingsHookKey{Event: event, Matcher: matcher, Command: command}
@@ -345,7 +374,12 @@ func inspectExpectedHookDocument(document map[string]any) (settingsHookCounts, s
 }
 
 func codexHookTemplate(home string) ExpectedHook {
-	return ExpectedHook{Event: "SessionStart", Matcher: codexappendix.Matcher, Command: codexappendix.Command(home), Name: "codex-appendix"}
+	return ExpectedHook{
+		Event:   "SessionStart",
+		Matcher: codexappendix.Matcher,
+		Command: codexappendix.Command(home),
+		Name:    "codex-appendix",
+	}
 }
 
 // HookProbeOverride is nil in production; a fleet test main may swap it for

@@ -181,7 +181,10 @@ func readMarkdownConstitution(path string) (string, error) {
 	}
 	body := stripFrontmatter(string(raw))
 	if strings.TrimSpace(body) == "" {
-		return "", fmt.Errorf("agent role: %s is empty after its frontmatter — no constitution to launch a seat with", path)
+		return "", fmt.Errorf(
+			"agent role: %s is empty after its frontmatter — no constitution to launch a seat with",
+			path,
+		)
 	}
 	return body, nil
 }
@@ -302,12 +305,17 @@ func crossEngineHint(engineID, other pfmengine.ID, kind artifactKind, role, repo
 		if engineID == pfmengine.Codex {
 			return fmt.Errorf(
 				"agent role %q: found %s but no compiled %s — this seat is cx (codex) and reads the compiled artifact, never the .claude source; run: pfm codex build %s",
-				role, path, want, repo,
+				role,
+				path,
+				want,
+				repo,
 			)
 		}
 		return fmt.Errorf(
 			"agent role %q: found %s but no %s — this seat is cc (claude) and reads the .claude/agents source directly; this role only exists as a compiled Codex agent",
-			role, path, want,
+			role,
+			path,
+			want,
 		)
 	}
 	return nil

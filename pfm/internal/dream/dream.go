@@ -259,7 +259,10 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 	if err != nil {
 		return result, fmt.Errorf("build cached map questions: %w", err)
 	}
-	if err := writePrivateExclusive(filepath.Join(stage.Root, "cached-titles.txt"), []byte(renderLines(titles))); err != nil {
+	if err := writePrivateExclusive(
+		filepath.Join(stage.Root, "cached-titles.txt"),
+		[]byte(renderLines(titles)),
+	); err != nil {
 		return result, err
 	}
 
@@ -289,10 +292,16 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 	if err := organ.CreateLogs(repo, stage.Root); err != nil {
 		return result, fmt.Errorf("create night logs: %w", err)
 	}
-	if err := writePrivateExclusive(filepath.Join(stage.Meta, "human-log.txt"), []byte(stage.HumanLog+"\n")); err != nil {
+	if err := writePrivateExclusive(
+		filepath.Join(stage.Meta, "human-log.txt"),
+		[]byte(stage.HumanLog+"\n"),
+	); err != nil {
 		return result, err
 	}
-	if err := writePrivateExclusive(filepath.Join(stage.Meta, "structured-log.txt"), []byte(stage.StructuredLog+"\n")); err != nil {
+	if err := writePrivateExclusive(
+		filepath.Join(stage.Meta, "structured-log.txt"),
+		[]byte(stage.StructuredLog+"\n"),
+	); err != nil {
 		return result, err
 	}
 	logger = &nightLogger{
@@ -372,11 +381,29 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 		return result, err
 	}
 	_ = coverage
-	distillAnchors, maps, err := runAnchorGate(stage, recordedTree, git, "anchor-results.tsv", "anchor-survivors.txt", "gate-anchors.log", logger, "distill")
+	distillAnchors, maps, err := runAnchorGate(
+		stage,
+		recordedTree,
+		git,
+		"anchor-results.tsv",
+		"anchor-survivors.txt",
+		"gate-anchors.log",
+		logger,
+		"distill",
+	)
 	if err != nil {
 		return result, err
 	}
-	refinerBrief := buildRefinerBrief(refinerTemplate, profile, repo, laneContext, stage, recordedTree, titles, distillAnchors.Accepted)
+	refinerBrief := buildRefinerBrief(
+		refinerTemplate,
+		profile,
+		repo,
+		laneContext,
+		stage,
+		recordedTree,
+		titles,
+		distillAnchors.Accepted,
+	)
 	if err := writePrivateExclusive(filepath.Join(stage.Root, "refiner-brief.md"), []byte(refinerBrief)); err != nil {
 		return result, err
 	}
@@ -405,7 +432,10 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 		if err := writePrivateReplace(stage.Verdicts, nil); err != nil {
 			return result, err
 		}
-		if err := writePrivateReplace(filepath.Join(stage.Root, "refiner-seat.log"), []byte("VERIFY SKIP zero anchor-valid staged maps\n")); err != nil {
+		if err := writePrivateReplace(
+			filepath.Join(stage.Root, "refiner-seat.log"),
+			[]byte("VERIFY SKIP zero anchor-valid staged maps\n"),
+		); err != nil {
 			return result, err
 		}
 		if err := logger.event(nightLogEvent{
@@ -423,7 +453,16 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 	if err != nil {
 		return result, err
 	}
-	postAnchors, _, err := runAnchorGate(stage, recordedTree, git, "anchor-postrefine.tsv", "anchor-postrefine-survivors.txt", "gate-anchors-postrefine.log", logger, "refiner")
+	postAnchors, _, err := runAnchorGate(
+		stage,
+		recordedTree,
+		git,
+		"anchor-postrefine.tsv",
+		"anchor-postrefine-survivors.txt",
+		"gate-anchors-postrefine.log",
+		logger,
+		"refiner",
+	)
 	if err != nil {
 		return result, err
 	}
@@ -445,10 +484,16 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 	if readyAt.IsZero() {
 		return result, errors.New("dream clock returned zero time at HOLD")
 	}
-	if err := writePrivateReplace(filepath.Join(stage.Meta, "apply-yield.txt"), []byte(fmt.Sprintf("%d\n", yield))); err != nil {
+	if err := writePrivateReplace(
+		filepath.Join(stage.Meta, "apply-yield.txt"),
+		[]byte(fmt.Sprintf("%d\n", yield)),
+	); err != nil {
 		return result, err
 	}
-	if err := writePrivateReplace(filepath.Join(stage.Root, "READY-FOR-APPLY"), []byte(fmt.Sprintf("%s\t%s\n", hold, readyAt.Format(time.RFC3339)))); err != nil {
+	if err := writePrivateReplace(
+		filepath.Join(stage.Root, "READY-FOR-APPLY"),
+		[]byte(fmt.Sprintf("%s\t%s\n", hold, readyAt.Format(time.RFC3339))),
+	); err != nil {
 		return result, err
 	}
 	if err := logger.event(nightLogEvent{
@@ -468,7 +513,9 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 			return result, err
 		}
 	}
-	if err := logger.event(nightLogEvent{Phase: "exit", At: dependencies.Clock(), ExitReason: string(hold)}); err != nil {
+	if err := logger.event(
+		nightLogEvent{Phase: "exit", At: dependencies.Clock(), ExitReason: string(hold)},
+	); err != nil {
 		return result, err
 	}
 
@@ -750,7 +797,9 @@ func runPinGate(
 			return gate.PinnedPaths{}, err
 		}
 	}
-	if err := logger.event(nightLogEvent{Phase: "gate", At: logger.now(), Gate: "PIN", Verdict: "PASS", PhaseAfter: phaseAfter}); err != nil {
+	if err := logger.event(
+		nightLogEvent{Phase: "gate", At: logger.now(), Gate: "PIN", Verdict: "PASS", PhaseAfter: phaseAfter},
+	); err != nil {
 		return gate.PinnedPaths{}, err
 	}
 	return pinned, nil
@@ -768,7 +817,11 @@ func bytesEqual(left, right []byte) bool {
 	return true
 }
 
-func runCoverageGate(stage artifact.StageLayout, pinned gate.PinnedPaths, logger *nightLogger) (gate.CoverageResult, error) {
+func runCoverageGate(
+	stage artifact.StageLayout,
+	pinned gate.PinnedPaths,
+	logger *nightLogger,
+) (gate.CoverageResult, error) {
 	raw, err := readRegular(stage.Coverage)
 	if err != nil {
 		return gate.CoverageResult{}, err
@@ -781,7 +834,10 @@ func runCoverageGate(stage artifact.StageLayout, pinned gate.PinnedPaths, logger
 	if err != nil {
 		return gate.CoverageResult{}, fmt.Errorf("COVERAGE gate: %w", err)
 	}
-	if err := writePrivateReplace(stage.Coverage+".expanded", []byte(artifact.RenderExpandedCoverage(parsed, pinned.Paths))); err != nil {
+	if err := writePrivateReplace(
+		stage.Coverage+".expanded",
+		[]byte(artifact.RenderExpandedCoverage(parsed, pinned.Paths)),
+	); err != nil {
 		return gate.CoverageResult{}, err
 	}
 	line := fmt.Sprintf("COVERAGE PASS %d paths", len(pinned.Paths))
@@ -791,7 +847,9 @@ func runCoverageGate(stage artifact.StageLayout, pinned gate.PinnedPaths, logger
 	if err := logger.human(line); err != nil {
 		return gate.CoverageResult{}, err
 	}
-	if err := logger.event(nightLogEvent{Phase: "gate", At: logger.now(), Gate: "COVERAGE+CONDUCT", Verdict: "PASS"}); err != nil {
+	if err := logger.event(
+		nightLogEvent{Phase: "gate", At: logger.now(), Gate: "COVERAGE+CONDUCT", Verdict: "PASS"},
+	); err != nil {
 		return gate.CoverageResult{}, err
 	}
 	return result, nil
@@ -813,10 +871,16 @@ func runAnchorGate(
 	if err != nil {
 		return gate.AnchorResult{}, nil, fmt.Errorf("ANCHORS gate after %s: %w", phaseAfter, err)
 	}
-	if err := writePrivateReplace(filepath.Join(stage.Root, resultsName), []byte(renderAnchorResults(maps, result))); err != nil {
+	if err := writePrivateReplace(
+		filepath.Join(stage.Root, resultsName),
+		[]byte(renderAnchorResults(maps, result)),
+	); err != nil {
 		return gate.AnchorResult{}, nil, err
 	}
-	if err := writePrivateReplace(filepath.Join(stage.Root, survivorsName), []byte(renderLines(result.Accepted))); err != nil {
+	if err := writePrivateReplace(
+		filepath.Join(stage.Root, survivorsName),
+		[]byte(renderLines(result.Accepted)),
+	); err != nil {
 		return gate.AnchorResult{}, nil, err
 	}
 	line := fmt.Sprintf("ANCHORS PASS accepted=%d rejected=%d", len(result.Accepted), len(result.Rejected))
@@ -826,13 +890,19 @@ func runAnchorGate(
 	if err := logger.human(line); err != nil {
 		return gate.AnchorResult{}, nil, err
 	}
-	if err := logger.event(nightLogEvent{Phase: "gate", At: logger.now(), Gate: "ANCHORS", Verdict: "PASS", PhaseAfter: phaseAfter}); err != nil {
+	if err := logger.event(
+		nightLogEvent{Phase: "gate", At: logger.now(), Gate: "ANCHORS", Verdict: "PASS", PhaseAfter: phaseAfter},
+	); err != nil {
 		return gate.AnchorResult{}, nil, err
 	}
 	return result, maps, nil
 }
 
-func runVerdictGate(stage artifact.StageLayout, survivors []string, logger *nightLogger) ([]artifact.NormalizedVerdict, error) {
+func runVerdictGate(
+	stage artifact.StageLayout,
+	survivors []string,
+	logger *nightLogger,
+) ([]artifact.NormalizedVerdict, error) {
 	raw, err := readRegular(stage.Verdicts)
 	if err != nil {
 		return nil, err
@@ -845,7 +915,10 @@ func runVerdictGate(stage artifact.StageLayout, survivors []string, logger *nigh
 	if err != nil {
 		return nil, fmt.Errorf("VERDICTS gate: %w", err)
 	}
-	if err := writePrivateReplace(stage.NormalizedVerdicts, []byte(artifact.RenderNormalizedVerdicts(result.Normalized))); err != nil {
+	if err := writePrivateReplace(
+		stage.NormalizedVerdicts,
+		[]byte(artifact.RenderNormalizedVerdicts(result.Normalized)),
+	); err != nil {
 		return nil, err
 	}
 	ruled := 0
@@ -861,7 +934,9 @@ func runVerdictGate(stage artifact.StageLayout, survivors []string, logger *nigh
 	if err := logger.human(line); err != nil {
 		return nil, err
 	}
-	if err := logger.event(nightLogEvent{Phase: "gate", At: logger.now(), Gate: "VERDICTS", Verdict: "PASS"}); err != nil {
+	if err := logger.event(
+		nightLogEvent{Phase: "gate", At: logger.now(), Gate: "VERDICTS", Verdict: "PASS"},
+	); err != nil {
 		return nil, err
 	}
 	return result.Normalized, nil
@@ -959,7 +1034,12 @@ func buildDistillBrief(
 	for index, path := range corpusResult.Paths {
 		fmt.Fprintf(&out, "%d. %s\n", index+1, path)
 	}
-	fmt.Fprintf(&out, "\nWrite only `%s/*.md` and `%s`; finish coverage with `END-OF-RUN`.\n", stage.Maps, stage.Coverage)
+	fmt.Fprintf(
+		&out,
+		"\nWrite only `%s/*.md` and `%s`; finish coverage with `END-OF-RUN`.\n",
+		stage.Maps,
+		stage.Coverage,
+	)
 	return out.String()
 }
 
@@ -995,7 +1075,11 @@ func buildRefinerBrief(
 			fmt.Fprintf(&out, "- %s\n", filepath.Join(stage.Root, path))
 		}
 	}
-	fmt.Fprintf(&out, "\nWrite only `%s` and AMEND edits to the listed staged maps. Rule every listed map or leave it mechanically UNRULED.\n", stage.Verdicts)
+	fmt.Fprintf(
+		&out,
+		"\nWrite only `%s` and AMEND edits to the listed staged maps. Rule every listed map or leave it mechanically UNRULED.\n",
+		stage.Verdicts,
+	)
 	return out.String()
 }
 

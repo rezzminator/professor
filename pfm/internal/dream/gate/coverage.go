@@ -26,7 +26,11 @@ func Coverage(paths PinnedPaths, coverage artifact.Coverage) (CoverageResult, er
 	expanded := make([]ExpandedCoverageLine, 0, len(coverage.Lines))
 	for _, line := range rows {
 		if line.Index < 1 || line.Index > len(paths.Paths) {
-			return CoverageResult{}, fmt.Errorf("coverage index %d exceeds %d pinned paths", line.Index, len(paths.Paths))
+			return CoverageResult{}, fmt.Errorf(
+				"coverage index %d exceeds %d pinned paths",
+				line.Index,
+				len(paths.Paths),
+			)
 		}
 		expanded = append(expanded, ExpandedCoverageLine{
 			Path: paths.Paths[line.Index-1], Status: line.Status, Reason: line.Reason,

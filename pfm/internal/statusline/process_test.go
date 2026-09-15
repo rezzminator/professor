@@ -120,7 +120,10 @@ func TestGPTAppServerFixture(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 	_, _ = io.WriteString(os.Stdout, `{"jsonrpc":"2.0","method":"configWarning","params":{}}`+"\n")
-	_, _ = io.WriteString(os.Stdout, `{"jsonrpc":"2.0","id":1,"result":{"rateLimits":{"primary":{"usedPercent":10},"planType":"plus"}}}`+"\n")
+	_, _ = io.WriteString(
+		os.Stdout,
+		`{"jsonrpc":"2.0","id":1,"result":{"rateLimits":{"primary":{"usedPercent":10},"planType":"plus"}}}`+"\n",
+	)
 	time.Sleep(10 * time.Second)
 	os.Exit(0)
 }

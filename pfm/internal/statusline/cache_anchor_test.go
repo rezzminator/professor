@@ -24,7 +24,8 @@ func writeTranscript(t *testing.T, lines ...string) string {
 // been cold for twelve hours. The anchor is the newest record that WAS a
 // request: an assistant record, or a user record that is not a local command.
 func TestCacheAnchorIgnoresLocalCommandRecords(t *testing.T) {
-	path := writeTranscript(t,
+	path := writeTranscript(
+		t,
 		`{"type":"user","timestamp":"2026-09-01T23:48:00.000Z","message":{"role":"user","content":"go"}}`,
 		`{"type":"assistant","timestamp":"2026-09-01T23:50:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"done"}]}}`,
 		`{"type":"assistant","isSidechain":true,"timestamp":"2026-09-02T03:00:00.000Z","message":{"role":"assistant","content":[]}}`,
@@ -34,12 +35,17 @@ func TestCacheAnchorIgnoresLocalCommandRecords(t *testing.T) {
 	)
 	want := time.Date(2026, 9, 1, 23, 50, 0, 0, time.UTC)
 	if got := cacheAnchor(path); !got.Equal(want) {
-		t.Fatalf("cacheAnchor = %s, want the last assistant record %s (local-command user records must not anchor the TTL)", got, want)
+		t.Fatalf(
+			"cacheAnchor = %s, want the last assistant record %s (local-command user records must not anchor the TTL)",
+			got,
+			want,
+		)
 	}
 }
 
 func TestCacheAnchorFollowsTheNewestRequestInAnOpenTurn(t *testing.T) {
-	path := writeTranscript(t,
+	path := writeTranscript(
+		t,
 		`{"type":"assistant","timestamp":"2026-09-02T10:00:00.000Z","message":{"role":"assistant","content":[]}}`,
 		`{"type":"user","timestamp":"2026-09-02T10:07:00.000Z","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}`,
 	)

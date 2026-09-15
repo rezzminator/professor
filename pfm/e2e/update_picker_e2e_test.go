@@ -252,7 +252,10 @@ func TestOlderPFMDiscoversUpdateThenPickerLaunchesGuidedEngine(t *testing.T) {
 			t.Fatalf("launched Codex proof %q lacks %q", launch, want)
 		}
 	}
-	t.Logf("UPDATE_PICKER first-run-nonblocking=true next-run-banner=true selected=Codex cwd=%s approval-first=true", professor)
+	t.Logf(
+		"UPDATE_PICKER first-run-nonblocking=true next-run-banner=true selected=Codex cwd=%s approval-first=true",
+		professor,
+	)
 }
 
 func startUpdatePickerE2E(t *testing.T, socket, pfm string, environment []string) {

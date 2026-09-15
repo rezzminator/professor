@@ -241,7 +241,7 @@ func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
 // argv entries may legitimately be EMPTY strings, so the argc count is what
 // separates argv from the environment — skipping empty fields to find the
 // boundary would silently promote an environment variable into argv.
-func procArgs(pid int) (argv []string, env []string, err error) {
+func procArgs(pid int) (argv, env []string, err error) {
 	buffer, err := unix.SysctlRaw("kern.procargs2", pid)
 	if err != nil {
 		return nil, nil, fmt.Errorf("read kern.procargs2 for %d: %w", pid, err)

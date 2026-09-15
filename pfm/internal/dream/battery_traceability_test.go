@@ -19,30 +19,124 @@ var legacyBatteryChecks = []struct {
 	goTests []string
 }{
 	{"coverage mismatch fails closed", []string{"TestCoverageMismatchFailsClosed", "TestPinFailsClosed"}},
-	{"coverage is keyed by index and the engine expands it back to paths", []string{"TestCoverageIsIndexKeyedAndExpandsPaths", "TestCoverageExpandsIndicesBackToPinnedPaths"}},
+	{
+		"coverage is keyed by index and the engine expands it back to paths",
+		[]string{"TestCoverageIsIndexKeyedAndExpandsPaths", "TestCoverageExpandsIndicesBackToPinnedPaths"},
+	},
 	{"flipped anchor hash is rejected", []string{"TestFlippedAnchorHashIsRejected"}},
-	{"canonical live anchors pass", []string{"TestParseAnchorRowCanonicalGrammar", "TestAnchorsUseRecordedTreeEvenAfterHeadMoves"}},
+	{
+		"canonical live anchors pass",
+		[]string{"TestParseAnchorRowCanonicalGrammar", "TestAnchorsUseRecordedTreeEvenAfterHeadMoves"},
+	},
 	{"legacy 40-character anchors reject", []string{"TestParseAnchorRowRejectsRetiredAndUnsafeForms"}},
-	{"the retired commit-row grammar rejects, no organ retains it, and both seats carry the trigger law", []string{"TestParseAnchorRowRejectsRetiredAndUnsafeForms", "TestRuntimePromptsCarryTheMechanicalArtifactLaws", "TestLiveOrgansCarryNoRetiredAnchorRows"}},
-	{"comma-separated anchor ranges reject and the distill prompt teaches the canonical form", []string{"TestParseAnchorRowRejectsRetiredAndUnsafeForms", "TestRuntimePromptsCarryTheMechanicalArtifactLaws"}},
-	{"verdict gate rules valid lines and marks omissions UNRULED", []string{"TestVerdictsPreserveRulesAndMarkOmissionsUnruled", "TestMissingVerdictBecomesUnruled"}},
+	{
+		"the retired commit-row grammar rejects, no organ retains it, and both seats carry the trigger law",
+		[]string{
+			"TestParseAnchorRowRejectsRetiredAndUnsafeForms",
+			"TestRuntimePromptsCarryTheMechanicalArtifactLaws",
+			"TestLiveOrgansCarryNoRetiredAnchorRows",
+		},
+	},
+	{
+		"comma-separated anchor ranges reject and the distill prompt teaches the canonical form",
+		[]string{"TestParseAnchorRowRejectsRetiredAndUnsafeForms", "TestRuntimePromptsCarryTheMechanicalArtifactLaws"},
+	},
+	{
+		"verdict gate rules valid lines and marks omissions UNRULED",
+		[]string{"TestVerdictsPreserveRulesAndMarkOmissionsUnruled", "TestMissingVerdictBecomesUnruled"},
+	},
 	{"surfaces regenerate byte-stable", []string{"TestRenderSurfacesSortsGloballyAndPerLaneAndPreservesNonMapBullets"}},
-	{"repo parameterization resolves both registries and rejects wrong or missing organs", []string{"TestResolveDerivesOrganAndEncodedRegistry", "TestResolveRejectsNonCanonicalAndNonRootRepositories", "TestValidateRejectsIntermediateLedgerAndBadSkeleton"}},
-	{"cutoff precedence and empty window skip the seat, log, ledger, and staging retention", []string{"TestCutoffPrecedenceAndBootstrapFallback", "TestNightEmptyCorpusSucceedsBeforeLogsSeatsAndGates"}},
-	{"a lane profile that exists only globally still runs", []string{"TestResolveProfileIsOrganFirstAndNamesBothMissingPaths", "TestNightWiresOrganLockAndProfileAndFailsOnRefinerMapSetChange"}},
-	{"bootstrap-count selects newest paired metas with deterministic ties, honest full census, and loud zero-survivor HOLD", []string{"TestEnumerateBootstrapMatchesBatteryCensusAndTieBreak", "TestNightZeroSurvivorsIsLoudAndOffersNoApply"}},
-	{"nudge is silent when healthy and emits at most one failure-or-stale line", []string{"TestNudgePrefersOrganLocalFailureAndEmitsAtMostOneLine", "TestNudgeIsSilentWithoutOrganAndForRecentHealthySweep", "TestNudgeStaleLineUsesNewestCompletedSweep"}},
-	{"hook prefers agents/explorer.md and a moved anchor renders DRIFTED", []string{"TestClaudeHookPrefersGeneratedExplorerSurfaceOverLegacyFallback", "TestClaudeHookPreservesOrderedToolInputAndAnnotatesDrift"}},
-	{"both hooks resolve any repository organ, hermetically", []string{"TestHooksStayRepositoryHermeticAndStripWorktree"}},
-	{"morning wrapper runs sequentially, names each lane, and continues after failure", []string{"TestMorningContinuesAfterFailureAndDiscoversLanesWithoutDuplicateExplorer"}},
-	{"morning wrapper discovers organ lanes once and never duplicates explorer.md", []string{"TestMorningContinuesAfterFailureAndDiscoversLanesWithoutDuplicateExplorer"}},
-	{"explorer surface stays byte-identical to the live organ under lanes", []string{"TestLiveExplorerSurfaceRegeneratesByteIdentically"}},
-	{"lane membership backfills a pre-lane pool and fails closed on a killed map", []string{"TestBuildMembershipBackfillsLegacyAndAssignsNewMaps", "TestBuildMembershipPreservesLedgerAndFailsClosedOnOldHole"}},
-	{"each lane is injected only its own surface, and a lane-less type gets nothing", []string{"TestHooksAreLaneIsolatedAndUnsafeOrMissingLanesStaySilent"}},
-	{"an organ-local lane profile takes precedence over the same global lane", []string{"TestResolveProfileIsOrganFirstAndNamesBothMissingPaths"}},
-	{"corpus-file pins an explicit corpus, records its digest and lane, and fails closed on a ghost path", []string{"TestExplicitCorpusReadsOnceCopiesExactBytesAndDeduplicates", "TestExplicitCorpusRejectsGhostRelativeControlAndNonregularPaths", "TestNightGhostCorpusPathNamesExactTranscriptInDurableMarker"}},
-	{"lane windows are independent and a lane without a profile cannot run", []string{"TestEnumerateRollingWindowIsStrictlyExclusiveAndLaneScoped", "TestResolveProfileIsOrganFirstAndNamesBothMissingPaths"}},
-	{"the dreamer distills on luna and refuses any other model", []string{"TestNightLunaLawIsTheFirstEffectBarrier", "TestSeatLawRunsBeforeEveryEffect"}},
+	{
+		"repo parameterization resolves both registries and rejects wrong or missing organs",
+		[]string{
+			"TestResolveDerivesOrganAndEncodedRegistry",
+			"TestResolveRejectsNonCanonicalAndNonRootRepositories",
+			"TestValidateRejectsIntermediateLedgerAndBadSkeleton",
+		},
+	},
+	{
+		"cutoff precedence and empty window skip the seat, log, ledger, and staging retention",
+		[]string{"TestCutoffPrecedenceAndBootstrapFallback", "TestNightEmptyCorpusSucceedsBeforeLogsSeatsAndGates"},
+	},
+	{
+		"a lane profile that exists only globally still runs",
+		[]string{
+			"TestResolveProfileIsOrganFirstAndNamesBothMissingPaths",
+			"TestNightWiresOrganLockAndProfileAndFailsOnRefinerMapSetChange",
+		},
+	},
+	{
+		"bootstrap-count selects newest paired metas with deterministic ties, honest full census, and loud zero-survivor HOLD",
+		[]string{
+			"TestEnumerateBootstrapMatchesBatteryCensusAndTieBreak",
+			"TestNightZeroSurvivorsIsLoudAndOffersNoApply",
+		},
+	},
+	{
+		"nudge is silent when healthy and emits at most one failure-or-stale line",
+		[]string{
+			"TestNudgePrefersOrganLocalFailureAndEmitsAtMostOneLine",
+			"TestNudgeIsSilentWithoutOrganAndForRecentHealthySweep",
+			"TestNudgeStaleLineUsesNewestCompletedSweep",
+		},
+	},
+	{
+		"hook prefers agents/explorer.md and a moved anchor renders DRIFTED",
+		[]string{
+			"TestClaudeHookPrefersGeneratedExplorerSurfaceOverLegacyFallback",
+			"TestClaudeHookPreservesOrderedToolInputAndAnnotatesDrift",
+		},
+	},
+	{
+		"both hooks resolve any repository organ, hermetically",
+		[]string{"TestHooksStayRepositoryHermeticAndStripWorktree"},
+	},
+	{
+		"morning wrapper runs sequentially, names each lane, and continues after failure",
+		[]string{"TestMorningContinuesAfterFailureAndDiscoversLanesWithoutDuplicateExplorer"},
+	},
+	{
+		"morning wrapper discovers organ lanes once and never duplicates explorer.md",
+		[]string{"TestMorningContinuesAfterFailureAndDiscoversLanesWithoutDuplicateExplorer"},
+	},
+	{
+		"explorer surface stays byte-identical to the live organ under lanes",
+		[]string{"TestLiveExplorerSurfaceRegeneratesByteIdentically"},
+	},
+	{
+		"lane membership backfills a pre-lane pool and fails closed on a killed map",
+		[]string{
+			"TestBuildMembershipBackfillsLegacyAndAssignsNewMaps",
+			"TestBuildMembershipPreservesLedgerAndFailsClosedOnOldHole",
+		},
+	},
+	{
+		"each lane is injected only its own surface, and a lane-less type gets nothing",
+		[]string{"TestHooksAreLaneIsolatedAndUnsafeOrMissingLanesStaySilent"},
+	},
+	{
+		"an organ-local lane profile takes precedence over the same global lane",
+		[]string{"TestResolveProfileIsOrganFirstAndNamesBothMissingPaths"},
+	},
+	{
+		"corpus-file pins an explicit corpus, records its digest and lane, and fails closed on a ghost path",
+		[]string{
+			"TestExplicitCorpusReadsOnceCopiesExactBytesAndDeduplicates",
+			"TestExplicitCorpusRejectsGhostRelativeControlAndNonregularPaths",
+			"TestNightGhostCorpusPathNamesExactTranscriptInDurableMarker",
+		},
+	},
+	{
+		"lane windows are independent and a lane without a profile cannot run",
+		[]string{
+			"TestEnumerateRollingWindowIsStrictlyExclusiveAndLaneScoped",
+			"TestResolveProfileIsOrganFirstAndNamesBothMissingPaths",
+		},
+	},
+	{
+		"the dreamer distills on luna and refuses any other model",
+		[]string{"TestNightLunaLawIsTheFirstEffectBarrier", "TestSeatLawRunsBeforeEveryEffect"},
+	},
 }
 
 func TestLegacyBatteryNamesMapToRealGoTests(t *testing.T) {

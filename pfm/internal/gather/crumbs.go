@@ -15,7 +15,7 @@ import (
 const maxCrumbNameLength = 128
 
 // ParseCrumbName validates the strict crumb filename grammar.
-func ParseCrumbName(name string) (socket string, paneID string, ok bool) {
+func ParseCrumbName(name string) (socket, paneID string, ok bool) {
 	if name == "" || len(name) > maxCrumbNameLength ||
 		strings.ContainsAny(name, "/\x00\n\r\t") {
 		return "", "", false

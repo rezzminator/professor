@@ -22,8 +22,22 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	t.Setenv("PATH", directory)
 
 	entries := []Entry{
-		{Name: "ok", Command: "tmux-ok", Required: true, VersionArgs: []string{"-V"}, MinVersion: "1.8", Parse: prefixedVersion("tmux")},
-		{Name: "old", Command: "tmux-old", Required: true, VersionArgs: []string{"-V"}, MinVersion: "1.8", Parse: prefixedVersion("tmux")},
+		{
+			Name:        "ok",
+			Command:     "tmux-ok",
+			Required:    true,
+			VersionArgs: []string{"-V"},
+			MinVersion:  "1.8",
+			Parse:       prefixedVersion("tmux"),
+		},
+		{
+			Name:        "old",
+			Command:     "tmux-old",
+			Required:    true,
+			VersionArgs: []string{"-V"},
+			MinVersion:  "1.8",
+			Parse:       prefixedVersion("tmux"),
+		},
 		{Name: "garbage", Command: "garbage", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
 		{Name: "missing", Command: "absent", Required: true},
 		{Name: "timeout", Command: "timeout", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion},
@@ -35,14 +49,25 @@ func TestProbeDistinguishesOKMinimumGarbageMissingAndTimeout(t *testing.T) {
 	want := []State{StateOK, StateBroken, StateBroken, StateMissing, StateTimeout, StateBroken}
 	for index := range want {
 		if results[index].State != want[index] {
-			t.Errorf("%s state=%s error=%q raw=%q, want %s", entries[index].Name, results[index].State, results[index].Error, results[index].Raw, want[index])
+			t.Errorf(
+				"%s state=%s error=%q raw=%q, want %s",
+				entries[index].Name,
+				results[index].State,
+				results[index].Error,
+				results[index].Raw,
+				want[index],
+			)
 		}
 	}
 	if results[0].Version != "3.4" || results[1].Version != "1.7" {
 		t.Fatalf("parsed versions ok=%q old=%q", results[0].Version, results[1].Version)
 	}
 	if !strings.HasPrefix(results[4].Error, "timeout (") || !strings.Contains(results[4].Error, ProbeTimeout.String()) {
-		t.Fatalf("timeout error=%q, want it to name the enforced bound %q rather than a bare sentinel", results[4].Error, ProbeTimeout)
+		t.Fatalf(
+			"timeout error=%q, want it to name the enforced bound %q rather than a bare sentinel",
+			results[4].Error,
+			ProbeTimeout,
+		)
 	}
 }
 
@@ -65,13 +90,21 @@ func TestVersionProbeTimeoutIsNotConflatedWithBroken(t *testing.T) {
 	results := Probe(context.Background(), entries, ProbeOptions{GOOS: "linux", Timeout: ProbeTimeout})
 
 	if results[0].State != StateTimeout {
-		t.Fatalf("hung state=%s error=%q, want StateTimeout — an outran bound must not read as broken", results[0].State, results[0].Error)
+		t.Fatalf(
+			"hung state=%s error=%q, want StateTimeout — an outran bound must not read as broken",
+			results[0].State,
+			results[0].Error,
+		)
 	}
 	if !strings.HasPrefix(results[0].Error, "timeout (") || !strings.Contains(results[0].Error, ProbeTimeout.String()) {
 		t.Fatalf("hung error=%q, want the enforced bound named", results[0].Error)
 	}
 	if results[1].State != StateBroken {
-		t.Fatalf("broken state=%s error=%q, want StateBroken — a genuinely broken tool must not be relabelled as a timeout", results[1].State, results[1].Error)
+		t.Fatalf(
+			"broken state=%s error=%q, want StateBroken — a genuinely broken tool must not be relabelled as a timeout",
+			results[1].State,
+			results[1].Error,
+		)
 	}
 }
 
@@ -79,7 +112,13 @@ func TestVersionProbePreservesParentCancellationAndDeadline(t *testing.T) {
 	directory := t.TempDir()
 	writeProbeStub(t, directory, "hung", "exec /bin/sleep 30")
 	t.Setenv("PATH", directory)
-	entry := Entry{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion}
+	entry := Entry{
+		Name:        "hung",
+		Command:     "hung",
+		Required:    true,
+		VersionArgs: []string{"--version"},
+		Parse:       firstVersion,
+	}
 
 	t.Run("cancelled", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -173,7 +212,13 @@ exit 2`)
 			cancel()
 			result := <-resultCh
 			if result.Version != "1.2.3" {
-				t.Fatalf("version=%q state=%s error=%q, want version probe to pass before %s stop", result.Version, result.State, result.Error, test.phase)
+				t.Fatalf(
+					"version=%q state=%s error=%q, want version probe to pass before %s stop",
+					result.Version,
+					result.State,
+					result.Error,
+					test.phase,
+				)
 			}
 			if result.State != StateCancelled || result.SelfDoctor != "cancelled" {
 				t.Fatalf("result=%#v, want StateCancelled/SelfDoctor=cancelled", result)
@@ -289,7 +334,8 @@ func TestProbePlatformAndHarvestFiltering(t *testing.T) {
 		{Name: "uv", Command: "/managed/uv", Required: true, Harvest: true},
 	}
 	linux := Probe(context.Background(), entries, ProbeOptions{GOOS: "linux", SkipHarvest: true})
-	if linux[0].State != StateSkipped || linux[0].Error != "not this platform" || linux[1].State != StateSkipped || linux[1].Error != "--skip-harvest" {
+	if linux[0].State != StateSkipped || linux[0].Error != "not this platform" || linux[1].State != StateSkipped ||
+		linux[1].Error != "--skip-harvest" {
 		t.Fatalf("linux filters=%#v", linux)
 	}
 	darwin := Probe(context.Background(), entries[:1], ProbeOptions{
@@ -354,7 +400,8 @@ exit 2`)
 		SelfDoctorArgs: []string{"doctor", "--summary", "--ascii", "--no-color"},
 	}
 	result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux"})[0]
-	if result.State != StateBroken || !strings.Contains(result.Error, "auth") || strings.Contains(result.Error, "Codex Doctor v0.149.1") {
+	if result.State != StateBroken || !strings.Contains(result.Error, "auth") ||
+		strings.Contains(result.Error, "Codex Doctor v0.149.1") {
 		t.Fatalf("self-doctor result=%#v, want the auth failure rather than the banner", result)
 	}
 }
@@ -394,7 +441,14 @@ if [ "$1" = "doctor" ] && [ "$2" = "--help" ]; then printf 'usage: claude doctor
 if [ "$1" = "doctor" ]; then printf 'healthy\n'; exit 0; fi
 exit 2`)
 	t.Setenv("PATH", directory)
-	entry := Entry{Name: "claude", Command: "claude", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor"}}
+	entry := Entry{
+		Name:           "claude",
+		Command:        "claude",
+		Required:       true,
+		VersionArgs:    []string{"--version"},
+		Parse:          firstVersion,
+		SelfDoctorArgs: []string{"doctor"},
+	}
 	result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux"})[0]
 	if result.State != StateOK || result.Version != "2.1.238" || result.SelfDoctor != "ok" {
 		t.Fatalf("self doctor result=%#v", result)
@@ -430,8 +484,22 @@ if [ "$1" = "--version" ]; then printf '1.0\n'; exit 0; fi
 exec /bin/sleep 30`)
 	t.Setenv("PATH", directory)
 	entries := []Entry{
-		{Name: "unsupported", Command: "unsupported", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor"}},
-		{Name: "hung", Command: "hung", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor"}},
+		{
+			Name:           "unsupported",
+			Command:        "unsupported",
+			Required:       true,
+			VersionArgs:    []string{"--version"},
+			Parse:          firstVersion,
+			SelfDoctorArgs: []string{"doctor"},
+		},
+		{
+			Name:           "hung",
+			Command:        "hung",
+			Required:       true,
+			VersionArgs:    []string{"--version"},
+			Parse:          firstVersion,
+			SelfDoctorArgs: []string{"doctor"},
+		},
 	}
 	// The separation that matters is between the bound and the hung command's
 	// 30s sleep, never between the bound and a healthy stub's startup. A 250ms
@@ -480,7 +548,13 @@ func TestFirstVersionParsesRealCommandVersionStrings(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			entry := Entry{Name: test.name, Command: test.name, Required: true, VersionArgs: test.versionArgs, Parse: test.parse}
+			entry := Entry{
+				Name:        test.name,
+				Command:     test.name,
+				Required:    true,
+				VersionArgs: test.versionArgs,
+				Parse:       test.parse,
+			}
 			result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux"})[0]
 			if result.State != StateOK {
 				t.Fatalf("%s state=%s error=%q raw=%q, want ok", test.name, result.State, result.Error, result.Raw)
@@ -520,17 +594,32 @@ if [ "$1" = "doctor" ] && [ "$2" = "--help" ]; then printf 'usage: codex doctor\
 if [ "$1" = "doctor" ] && [ "$2" = "--summary" ]; then exec /bin/sleep 30; fi
 exit 2`)
 		t.Setenv("PATH", directory)
-		entry := Entry{Name: "codex", Command: "codex", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor", "--summary", "--ascii", "--no-color"}}
+		entry := Entry{
+			Name:           "codex",
+			Command:        "codex",
+			Required:       true,
+			VersionArgs:    []string{"--version"},
+			Parse:          firstVersion,
+			SelfDoctorArgs: []string{"doctor", "--summary", "--ascii", "--no-color"},
+		}
 		result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: timeout})[0]
 		if result.State != StateOK {
-			t.Fatalf("state=%s error=%q, want ok — a self-doctor that outran the probe timeout must not read as a broken engine", result.State, result.Error)
+			t.Fatalf(
+				"state=%s error=%q, want ok — a self-doctor that outran the probe timeout must not read as a broken engine",
+				result.State,
+				result.Error,
+			)
 		}
 		if !strings.HasPrefix(result.SelfDoctor, "timeout") {
 			t.Fatalf("self_doctor=%q, want it to start with %q", result.SelfDoctor, "timeout")
 		}
 		combined := result.SelfDoctor + " " + result.Error
 		if !durationPattern.MatchString(combined) {
-			t.Fatalf("self_doctor=%q error=%q, want the timeout duration named in one of them", result.SelfDoctor, result.Error)
+			t.Fatalf(
+				"self_doctor=%q error=%q, want the timeout duration named in one of them",
+				result.SelfDoctor,
+				result.Error,
+			)
 		}
 	})
 
@@ -542,7 +631,14 @@ if [ "$1" = "doctor" ] && [ "$2" = "--help" ]; then printf 'usage: codex doctor\
 if [ "$1" = "doctor" ] && [ "$2" = "--summary" ]; then printf 'boom\n'; exit 3; fi
 exit 2`)
 		t.Setenv("PATH", directory)
-		entry := Entry{Name: "codex", Command: "codex", Required: true, VersionArgs: []string{"--version"}, Parse: firstVersion, SelfDoctorArgs: []string{"doctor", "--summary", "--ascii", "--no-color"}}
+		entry := Entry{
+			Name:           "codex",
+			Command:        "codex",
+			Required:       true,
+			VersionArgs:    []string{"--version"},
+			Parse:          firstVersion,
+			SelfDoctorArgs: []string{"doctor", "--summary", "--ascii", "--no-color"},
+		}
 		result := Probe(context.Background(), []Entry{entry}, ProbeOptions{GOOS: "linux", Timeout: timeout})[0]
 		if result.State != StateBroken || result.SelfDoctor != "broken" {
 			t.Fatalf("result=%#v, want StateBroken with self_doctor=broken", result)

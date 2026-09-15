@@ -10,7 +10,12 @@ import (
 
 type gatherIndexSource struct{ id pfmengine.ID }
 
-func (source gatherIndexSource) Sync(ctx context.Context, database *store.Store, roots []string, counters *index.Counters) error {
+func (source gatherIndexSource) Sync(
+	ctx context.Context,
+	database *store.Store,
+	roots []string,
+	counters *index.Counters,
+) error {
 	switch source.id {
 	case pfmengine.Claude:
 		return index.SyncClaude(ctx, database, roots, counters)

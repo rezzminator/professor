@@ -62,7 +62,15 @@ func TestPublicImagePathResolvesLocalRefsAndRefusesBareNames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			gotPath, gotOK := publicImagePath(tc.raw, tc.basePath)
 			if gotOK != tc.wantOK || gotPath != tc.wantPath {
-				t.Fatalf("publicImagePath(%q, %q) = (%q, %v), want (%q, %v)", tc.raw, tc.basePath, gotPath, gotOK, tc.wantPath, tc.wantOK)
+				t.Fatalf(
+					"publicImagePath(%q, %q) = (%q, %v), want (%q, %v)",
+					tc.raw,
+					tc.basePath,
+					gotPath,
+					gotOK,
+					tc.wantPath,
+					tc.wantOK,
+				)
 			}
 		})
 	}

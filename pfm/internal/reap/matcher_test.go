@@ -1,10 +1,11 @@
 package reap
 
 import (
+	"testing"
+
 	pfmengine "hostops/pfm/internal/engine"
 	opencodeengine "hostops/pfm/internal/engine/opencode"
 	"hostops/pfm/internal/gather"
-	"testing"
 )
 
 type reapTestMatcher struct{ id pfmengine.ID }

@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/chat"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // TestChatWhoamiReportsIdentityOrStatesItsAbsence covers chat.sh:482-484 over
@@ -275,13 +275,22 @@ func TestChatFindOnTheSharedDaemonExcludesNoAmbientSelf(t *testing.T) {
 func TestChatFindReportsNoMatchAsAnEmptyAnswer(t *testing.T) {
 	root := setupBackendFixture(t)
 	writeJSONL(t, filepath.Join(root, "claude", "project-alpha", "other.jsonl"), []any{
-		map[string]any{"type": "user", "cwd": "/work/alpha", "message": map[string]any{"content": "an unrelated conversation entirely"}},
+		map[string]any{
+			"type":    "user",
+			"cwd":     "/work/alpha",
+			"message": map[string]any{"content": "an unrelated conversation entirely"},
+		},
 	})
 	t.Setenv(resolve.ClaudeSessionEnv, "")
 	service := newFixtureService(t)
 	defer service.Close()
 	client := connectInMemory(t, service.Server())
-	output := callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{Excerpt: "a sentence no transcript here holds"})
+	output := callTool[FindOutput](
+		t,
+		client.clientSession,
+		"chat_find",
+		FindInput{Excerpt: "a sentence no transcript here holds"},
+	)
 	if output.Count != 0 || len(output.Candidates) != 0 || len(output.Needles) != 1 {
 		t.Fatalf("chat_find with no match = %+v; want count 0 with the needle it searched", output)
 	}

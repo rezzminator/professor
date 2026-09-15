@@ -29,13 +29,22 @@ func TestChatSaveUsesConfiguredImplicitAccountRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(transcriptPath, []byte(`{"type":"user","message":{"content":"configured transcript"}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"user","message":{"content":"configured transcript"}}`+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", id)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	target := filepath.Join(root, "saved.md")
-	runtime := commandRuntime{Paths: paths.Values{Home: filepath.Join(root, "home"), Roots: map[pfmengine.ID][]string{pfmengine.Claude: {projects}}}}
+	runtime := commandRuntime{
+		Paths: paths.Values{
+			Home:  filepath.Join(root, "home"),
+			Roots: map[pfmengine.ID][]string{pfmengine.Claude: {projects}},
+		},
+	}
 	var stdout, stderr bytes.Buffer
 	if code := runChatSave([]string{target}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("save code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -62,7 +71,11 @@ func TestCurrentClaudeModelUsesConfiguredAccountRoot(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(transcriptPath, []byte(`{"type":"assistant","message":{"model":"claude-opus-5"}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"assistant","message":{"model":"claude-opus-5"}}`+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
@@ -108,7 +121,14 @@ func TestChatLSUsesConfiguredAccountRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !found || row.Path != transcriptPath {
-		t.Fatalf("indexed transcript found=%t path=%q, want found at %q; stdout=%q stderr=%q", found, row.Path, transcriptPath, stdout.String(), stderr.String())
+		t.Fatalf(
+			"indexed transcript found=%t path=%q, want found at %q; stdout=%q stderr=%q",
+			found,
+			row.Path,
+			transcriptPath,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }
 
@@ -135,11 +155,22 @@ func TestChatHistoryUsesConfiguredRootsToResolveTheTranscript(t *testing.T) {
 	t.Setenv("PFM_HOME", filepath.Join(root, "unused-home"))
 	runtime := commandRuntime{Paths: paths.Values{Roots: map[pfmengine.ID][]string{pfmengine.Claude: {projects}}}}
 	var stdout, stderr bytes.Buffer
-	if code := runChatSatellite("history", []string{id, "5", slug}, strings.NewReader(""), &stdout, &stderr, runtime); code != 0 {
+	if code := runChatSatellite(
+		"history",
+		[]string{id, "5", slug},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		runtime,
+	); code != 0 {
 		t.Fatalf("history code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), transcriptPath) {
-		t.Fatalf("history did not resolve through the configured root: stdout=%q stderr=%q", stdout.String(), stderr.String())
+		t.Fatalf(
+			"history did not resolve through the configured root: stdout=%q stderr=%q",
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	if !strings.Contains(stdout.String(), "configured roots transcript") {
 		t.Fatalf("history did not render the transcript message: %q", stdout.String())
@@ -160,7 +191,11 @@ func TestChatFindSearchesEveryConfiguredTranscriptRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	excerpt := filepath.Join(root, "excerpt.txt")
-	if err := os.WriteFile(excerpt, []byte("a long distinctive sentence carried across the registry\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		excerpt,
+		[]byte("a long distinctive sentence carried across the registry\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_HOME", home)
@@ -290,12 +325,25 @@ func TestChatLSPrintsNameBeforeSessionAtAndOverTruncationBoundary(t *testing.T) 
 		}
 		sessionStart := nameStart + nameWidth + 1
 		if got := line[sessionStart : sessionStart+len(socket)]; got != socket {
-			t.Fatalf("row for %q session id at column %d = %q, want %q — name column pushed it out of alignment: %q", socket, sessionStart, got, socket, line)
+			t.Fatalf(
+				"row for %q session id at column %d = %q, want %q — name column pushed it out of alignment: %q",
+				socket,
+				sessionStart,
+				got,
+				socket,
+				line,
+			)
 		}
 		nameIdx := strings.Index(line, wantTruncated)
 		sessionIdx := strings.Index(line, socket)
 		if nameIdx < 0 || sessionIdx < 0 || nameIdx >= sessionIdx {
-			t.Fatalf("row for %q: name must appear before session id — name@%d session@%d line=%q", socket, nameIdx, sessionIdx, line)
+			t.Fatalf(
+				"row for %q: name must appear before session id — name@%d session@%d line=%q",
+				socket,
+				nameIdx,
+				sessionIdx,
+				line,
+			)
 		}
 		if len(fullName) > nameWidth && strings.Contains(stdout.String(), fullName) {
 			t.Fatalf("full untruncated name %q leaked into stdout — truncation did not run", fullName)

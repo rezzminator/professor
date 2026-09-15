@@ -156,7 +156,8 @@ func ParseMap(text string) (Map, error) {
 			return Map{}, parseFailure("legacy preamble before Question")
 		}
 	}
-	if !hasBody(rows, questionIndex, answerIndex) || !hasBody(rows, answerIndex, trailIndex) || !hasBody(rows, trailIndex, provenanceIndex) {
+	if !hasBody(rows, questionIndex, answerIndex) || !hasBody(rows, answerIndex, trailIndex) ||
+		!hasBody(rows, trailIndex, provenanceIndex) {
 		return Map{}, parseFailure("Question, Answer, or Derivation trail is empty")
 	}
 

@@ -88,7 +88,13 @@ func loadTargets() map[Platform]Target {
 				panic(fmt.Sprintf("harvestpy target %s has invalid %s sha256: %v", name, label, err))
 			}
 		}
-		result[platform] = Target{Platform: platform, UV: entry.UV, Python: entry.Python, UVVersion: manifest.UVVersion, PythonVersion: manifest.PythonVersion}
+		result[platform] = Target{
+			Platform:      platform,
+			UV:            entry.UV,
+			Python:        entry.Python,
+			UVVersion:     manifest.UVVersion,
+			PythonVersion: manifest.PythonVersion,
+		}
 	}
 	return result
 }

@@ -2,13 +2,14 @@ package main
 
 import (
 	"bytes"
-	"hostops/pfm/internal/testjail"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/testjail"
 )
 
 // TestKillCLIVouchesEngineForUnindexedButVisibleRows reproduces the CLI kill

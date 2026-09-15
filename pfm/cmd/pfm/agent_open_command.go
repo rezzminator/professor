@@ -18,7 +18,11 @@ func runInternalAgentOpen(
 	stderr io.Writer,
 	runtime commandRuntime,
 ) int {
-	flags := newFlagSet("internal agent-open", "usage: pfm internal agent-open --id id --cwd path [--config path]", stderr)
+	flags := newFlagSet(
+		"internal agent-open",
+		"usage: pfm internal agent-open --id id --cwd path [--config path]",
+		stderr,
+	)
 	id := flags.String("id", "", "session id")
 	cwd := flags.String("cwd", "", "project directory")
 	configDir := flags.String("config", "", "owning Claude config directory")
@@ -57,7 +61,16 @@ func runInternalAgentOpen(
 		Tmux:      agentopen.RealTmux{Dir: resolved.TmuxDir, Stderr: stderr},
 		Stderr:    stderr,
 	})
-	if err := opener.Open(context.Background(), agentopen.Request{ID: *id, CWD: *cwd, OwningConfig: *configDir, PrimaryAccount: primary, Cache1H: initialCache1H(runtime.Config, primary)}); err != nil {
+	if err := opener.Open(
+		context.Background(),
+		agentopen.Request{
+			ID:             *id,
+			CWD:            *cwd,
+			OwningConfig:   *configDir,
+			PrimaryAccount: primary,
+			Cache1H:        initialCache1H(runtime.Config, primary),
+		},
+	); err != nil {
 		var outside *agentopen.OutsidePFMError
 		if errors.As(err, &outside) {
 			fmt.Fprintln(stderr, outside.Error())

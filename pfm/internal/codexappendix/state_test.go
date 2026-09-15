@@ -11,7 +11,7 @@ func TestOfflineUnregisterPreservesPersonalConfigAndSymlink(t *testing.T) {
 	account := t.TempDir()
 	physical := filepath.Join(account, "personal.toml")
 	raw := "# keep this comment\nmodel='personal-model'\n[features]\nhooks=false\n[hooks.state.\"owned.path:key\"]\nenabled=true\ntrusted_hash='sha256:owned'\n[hooks.state.personal]\nenabled=false\ntrusted_hash='sha256:personal'\n"
-	if err := os.WriteFile(physical, []byte(raw), 0600); err != nil {
+	if err := os.WriteFile(physical, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(account, "config.toml")
@@ -28,7 +28,8 @@ func TestOfflineUnregisterPreservesPersonalConfigAndSymlink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(got), "sha256:owned") || !strings.Contains(string(got), "sha256:personal") || !strings.HasPrefix(string(got), "# keep this comment\nmodel='personal-model'\n") {
+	if strings.Contains(string(got), "sha256:owned") || !strings.Contains(string(got), "sha256:personal") ||
+		!strings.HasPrefix(string(got), "# keep this comment\nmodel='personal-model'\n") {
 		t.Fatalf("cleanup changed personal settings: %s", got)
 	}
 	if info, err := os.Lstat(path); err != nil || info.Mode()&os.ModeSymlink == 0 {
@@ -48,7 +49,7 @@ func TestTrustCleanupRejectsUnsafeInlineLayout(t *testing.T) {
 
 func TestNullReceiptFailsWithoutPanic(t *testing.T) {
 	account := t.TempDir()
-	if err := os.WriteFile(receiptPath(account), []byte("null"), 0600); err != nil {
+	if err := os.WriteFile(receiptPath(account), []byte("null"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := saveReceipt(account, hook{Key: "key", CurrentHash: "hash"}); err == nil {

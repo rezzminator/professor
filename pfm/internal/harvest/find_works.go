@@ -87,7 +87,15 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 	for _, handle := range order {
 		out = append(out, best[handle])
 	}
-	free := map[string]bool{"pd": true, "gold": true, "green": true, "diamond": true, "hybrid": true, "bronze": true, "public": true}
+	free := map[string]bool{
+		"pd":      true,
+		"gold":    true,
+		"green":   true,
+		"diamond": true,
+		"hybrid":  true,
+		"bronze":  true,
+		"public":  true,
+	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Match != out[j].Match {
 			return out[i].Match > out[j].Match
@@ -123,7 +131,10 @@ func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query st
 			} `json:"authorships"`
 		} `json:"results"`
 	}
-	raw := r.withContact("https://api.openalex.org/works?filter=title.search:"+url.QueryEscape(query)+"&per_page="+fmt.Sprint(limit), "mailto")
+	raw := r.withContact(
+		"https://api.openalex.org/works?filter=title.search:"+url.QueryEscape(query)+"&per_page="+fmt.Sprint(limit),
+		"mailto",
+	)
 	if err := getJSON(ctx, client, raw, &data); err != nil {
 		return nil
 	}
@@ -134,7 +145,9 @@ func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query st
 			handle = work.OA.URL
 		}
 		if handle == "" {
-			handle = bestScholarlyLocationHandle(append([]scholarlyLocation{work.Best, work.Primary}, work.Locations...))
+			handle = bestScholarlyLocationHandle(
+				append([]scholarlyLocation{work.Best, work.Primary}, work.Locations...),
+			)
 		}
 		if handle == "" {
 			continue
@@ -145,7 +158,19 @@ func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query st
 				authors = append(authors, authorship.Author.Name)
 			}
 		}
-		out = append(out, Candidate{URL: handle, Source: "openalex", Kind: "paper", Title: work.Name, Authors: formatAuthors(authors), Year: work.Year, Free: work.OA.Status, Match: roundMatch(titleMatch(query, work.Name))})
+		out = append(
+			out,
+			Candidate{
+				URL:     handle,
+				Source:  "openalex",
+				Kind:    "paper",
+				Title:   work.Name,
+				Authors: formatAuthors(authors),
+				Year:    work.Year,
+				Free:    work.OA.Status,
+				Match:   roundMatch(titleMatch(query, work.Name)),
+			},
+		)
 	}
 	return out
 }
@@ -252,8 +277,10 @@ func (r *Resolver) findCrossref(ctx context.Context, client *http.Client, query 
 		if len(item.Issued.DateParts) > 0 && len(item.Issued.DateParts[0]) > 0 {
 			year = item.Issued.DateParts[0][0]
 		}
-		out = append(out, Candidate{URL: doi, Source: "crossref", Kind: "paper", Title: title,
-			Year: year, Match: match})
+		out = append(out, Candidate{
+			URL: doi, Source: "crossref", Kind: "paper", Title: title,
+			Year: year, Match: match,
+		})
 	}
 	return out
 }
@@ -310,9 +337,11 @@ func (r *Resolver) findSemanticScholar(ctx context.Context, client *http.Client,
 		for _, a := range paper.Authors {
 			names = append(names, a.Name)
 		}
-		out = append(out, Candidate{URL: handle, Source: "semanticscholar", Kind: "paper",
+		out = append(out, Candidate{
+			URL: handle, Source: "semanticscholar", Kind: "paper",
 			Title: paper.Title, Year: paper.Year, Free: free, Match: match,
-			Authors: strings.Join(names, ", ")})
+			Authors: strings.Join(names, ", "),
+		})
 	}
 	return out
 }

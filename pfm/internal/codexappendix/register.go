@@ -63,13 +63,17 @@ func Register(ctx context.Context, binary, home, account string, uninstall bool)
 	for _, group := range listed.Data {
 		for _, h := range group.Hooks {
 			source, _ := filepath.EvalSymlinks(h.SourcePath)
-			if h.Command == Command(home) && source == expectedSource && h.EventName == "sessionStart" && h.Source == "user" {
+			if h.Command == Command(home) && source == expectedSource && h.EventName == "sessionStart" &&
+				h.Source == "user" {
 				found = append(found, h)
 			}
 		}
 	}
 	if len(found) != 1 || found[0].Key == "" || found[0].CurrentHash == "" {
-		return fmt.Errorf("Professor appendix hook unavailable (found %d): check hooks feature, managed policy and hooks.json", len(found))
+		return fmt.Errorf(
+			"Professor appendix hook unavailable (found %d): check hooks feature, managed policy and hooks.json",
+			len(found),
+		)
 	}
 	h := found[0]
 	if err := saveReceipt(account, h); err != nil {
@@ -77,7 +81,13 @@ func Register(ctx context.Context, binary, home, account string, uninstall bool)
 	}
 	value := map[string]any{"enabled": true, "trusted_hash": h.CurrentHash}
 	key, _ := json.Marshal(h.Key)
-	_, err = rpc(ctx, binary, account, "config/value/write", map[string]any{"keyPath": "hooks.state." + string(key), "value": value, "mergeStrategy": "replace"})
+	_, err = rpc(
+		ctx,
+		binary,
+		account,
+		"config/value/write",
+		map[string]any{"keyPath": "hooks.state." + string(key), "value": value, "mergeStrategy": "replace"},
+	)
 	if err != nil {
 		return fmt.Errorf("write appendix hook trust: %w", err)
 	}
@@ -120,7 +130,11 @@ func rpc(parent context.Context, binary, account, method string, params any) (js
 	go func() {
 		encoder := json.NewEncoder(stdin)
 		requests := []any{
-			map[string]any{"id": 0, "method": "initialize", "params": map[string]any{"clientInfo": map[string]string{"name": "professor", "version": "1"}}},
+			map[string]any{
+				"id":     0,
+				"method": "initialize",
+				"params": map[string]any{"clientInfo": map[string]string{"name": "professor", "version": "1"}},
+			},
 			map[string]any{"method": "initialized", "params": nil},
 			map[string]any{"id": 1, "method": method, "params": params},
 		}

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/shared"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // issueServicedesk files one agent complaint into the shared operator ledger.

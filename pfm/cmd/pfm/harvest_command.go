@@ -45,7 +45,11 @@ func runHarvesterMCP(args []string, stdout, stderr io.Writer, runtime commandRun
 		}
 	}
 	flags := newFlagSet("mcp harvester serve", "usage: pfm mcp harvester serve [--transport stdio]", stderr)
-	transport := flags.String("transport", "stdio", "MCP transport (stdio only; HTTP gateways are served by `pfm mcp serve`)")
+	transport := flags.String(
+		"transport",
+		"stdio",
+		"MCP transport (stdio only; HTTP gateways are served by `pfm mcp serve`)",
+	)
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
@@ -54,7 +58,11 @@ func runHarvesterMCP(args []string, stdout, stderr io.Writer, runtime commandRun
 		return 2
 	}
 	if *transport != "stdio" {
-		fmt.Fprintf(stderr, "pfm mcp harvester: --transport %q is retired; the loopback and authenticated external HTTP gateways are served by `pfm mcp serve` (harvester.config.json external.*)\n", *transport)
+		fmt.Fprintf(
+			stderr,
+			"pfm mcp harvester: --transport %q is retired; the loopback and authenticated external HTTP gateways are served by `pfm mcp serve` (harvester.config.json external.*)\n",
+			*transport,
+		)
 		return 2
 	}
 	service, err := harvestmcp.NewConfigured(version, harvestRuntime(runtime))
@@ -103,7 +111,11 @@ func runHarvest(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	}
 	results := make([]harvest.Result, 0, len(sources))
 	for _, source := range sources {
-		result := harvester.FetchPublic(context.Background(), source, harvest.FetchOptions{Refresh: *refresh, SizeOnly: *sizeOnly})
+		result := harvester.FetchPublic(
+			context.Background(),
+			source,
+			harvest.FetchOptions{Refresh: *refresh, SizeOnly: *sizeOnly},
+		)
 		results = append(results, result)
 		if !*jsonOutput {
 			fmt.Fprintln(stdout, renderHarvestCLI(result, *sizeOnly))
@@ -188,7 +200,11 @@ func runHarvestAsk(args []string, stdout, stderr io.Writer, runtime commandRunti
 	labels := make([]string, 0, len(sources))
 	receiptDir := ""
 	for index, source := range sources {
-		result := harvester.FetchPublic(context.Background(), source, harvest.FetchOptions{Refresh: *refresh, SizeOnly: true})
+		result := harvester.FetchPublic(
+			context.Background(),
+			source,
+			harvest.FetchOptions{Refresh: *refresh, SizeOnly: true},
+		)
 		path := result.Path
 		if result.Error == "" && path != "" {
 			path, err = filepath.Abs(path)
@@ -262,7 +278,12 @@ func runHarvestAsk(args []string, stdout, stderr io.Writer, runtime commandRunti
 	return 0
 }
 
-func writeHarvestAskReceipt(home, receiptDir string, index int, source string, result harvest.Result) (string, string, error) {
+func writeHarvestAskReceipt(
+	home, receiptDir string,
+	index int,
+	source string,
+	result harvest.Result,
+) (string, string, error) {
 	if receiptDir == "" {
 		root := filepath.Join(home, ".local", "state", "pfm", "harvest-ask")
 		if err := os.MkdirAll(root, 0o700); err != nil {
@@ -328,7 +349,22 @@ func renderHarvestCLI(result harvest.Result, sizeOnly bool) string {
 		return fmt.Sprintf("# %s\nERROR: %s", result.Source, result.Error)
 	}
 	if sizeOnly {
-		return fmt.Sprintf("source: %s\nsize: %d tokens / chars: %d / path: %s / cache_status: %s", result.Source, result.Tokens, result.Chars, result.Path, result.CacheStatus)
+		return fmt.Sprintf(
+			"source: %s\nsize: %d tokens / chars: %d / path: %s / cache_status: %s",
+			result.Source,
+			result.Tokens,
+			result.Chars,
+			result.Path,
+			result.CacheStatus,
+		)
 	}
-	return fmt.Sprintf("# %s\ncache_status: %s / bytes: %d / tokens: %d / path: %s\n\n%s", result.Source, result.CacheStatus, result.Bytes, result.Tokens, result.Path, strings.TrimSpace(result.Content))
+	return fmt.Sprintf(
+		"# %s\ncache_status: %s / bytes: %d / tokens: %d / path: %s\n\n%s",
+		result.Source,
+		result.CacheStatus,
+		result.Bytes,
+		result.Tokens,
+		result.Path,
+		strings.TrimSpace(result.Content),
+	)
 }

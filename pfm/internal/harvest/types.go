@@ -26,7 +26,7 @@ var ErrBrowserPolicyDenied = errors.New("fetch refused by policy (private or int
 // mutate body. kind is the detected content kind and source is the original
 // source URL/path.
 type Converter interface {
-	Convert(ctx context.Context, kind string, source string, body []byte) (string, error)
+	Convert(ctx context.Context, kind, source string, body []byte) (string, error)
 }
 
 // OCRConverter is implemented by converters that can force one OCR pass for a
@@ -323,8 +323,20 @@ func New(options Options) (*Harvester, error) {
 	setUserAgent(client, userAgent)
 	setUserAgent(binaryDirect, userAgent)
 	setUserAgent(jina, userAgent)
-	return &Harvester{options: options, client: client, chrome: chrome, binaryDirect: binaryDirect, binaryChrome: binaryChrome, jina: jina, oa: oa,
-		userAgent: userAgent, cache: newCache(options.CacheDir, options.CacheTTL), neg: newNegativeCache(options.NegativeTTL, options.NegativeTransientTTL), flights: make(map[string]*fetchFlight), settings: resolved}, nil
+	return &Harvester{
+		options:      options,
+		client:       client,
+		chrome:       chrome,
+		binaryDirect: binaryDirect,
+		binaryChrome: binaryChrome,
+		jina:         jina,
+		oa:           oa,
+		userAgent:    userAgent,
+		cache:        newCache(options.CacheDir, options.CacheTTL),
+		neg:          newNegativeCache(options.NegativeTTL, options.NegativeTransientTTL),
+		flights:      make(map[string]*fetchFlight),
+		settings:     resolved,
+	}, nil
 }
 
 // Fetch executes one request with default options.
@@ -345,7 +357,12 @@ func NewChromeClient(resolve func(context.Context, string) ([]net.IP, error)) *h
 // the transport's own wrapper stamps it on every request, so an adapter's
 // outer wrapper cannot lose to it. A nil resolve installs the
 // DNS-over-HTTPS resolver (ResolvePublicHost).
-func NewDirectClient(timeout time.Duration, proxy *url.URL, ua string, resolve func(context.Context, string) ([]net.IP, error)) *http.Client {
+func NewDirectClient(
+	timeout time.Duration,
+	proxy *url.URL,
+	ua string,
+	resolve func(context.Context, string) ([]net.IP, error),
+) *http.Client {
 	if resolve == nil {
 		resolve = ResolvePublicHost
 	}

@@ -45,7 +45,11 @@ func runRun(
 		stderr,
 	)
 	name := flags.String("name", "", "chat name (a _KILL… name stays out of the list)")
-	engine := flags.String("engine", "", "engine: cc|claude or cx|codex (default: the calling chat's engine, else config)")
+	engine := flags.String(
+		"engine",
+		"",
+		"engine: cc|claude or cx|codex (default: the calling chat's engine, else config)",
+	)
 	cwd := flags.String("cwd", "", "project directory (default: the current one)")
 	account := flags.Int("account", 0, "Claude account (default: the primary one)")
 	cache1H := flags.Bool("1h", false, "arm 1h prompt caching")
@@ -168,7 +172,11 @@ func runRun(
 	state := shared.Open(context.Background(), resolved)
 	if parent != "" {
 		if err := registerDetachedChild(state, parent, result.Socket, spawnedAt.Unix()); err != nil {
-			fmt.Fprintf(stderr, "pfm chat new: WARNING: chat is live but could not be registered for parent-close cleanup: %v\n", err)
+			fmt.Fprintf(
+				stderr,
+				"pfm chat new: WARNING: chat is live but could not be registered for parent-close cleanup: %v\n",
+				err,
+			)
 		}
 	}
 	// T1 re-arm: remember this seat's role, and the exact artifact birth
@@ -179,13 +187,23 @@ func runRun(
 	// this one seat cannot re-arm later.
 	if *role != "" {
 		if err := os.MkdirAll(resolved.SIDDir, 0o700); err != nil {
-			fmt.Fprintf(stderr, "pfm chat new: WARNING: chat is live but could not remember its role %q for re-arm: %v\n", *role, err)
+			fmt.Fprintf(
+				stderr,
+				"pfm chat new: WARNING: chat is live but could not remember its role %q for re-arm: %v\n",
+				*role,
+				err,
+			)
 		} else if err := rearm.WriteCrumb(resolved.SIDDir, result.Socket, rearm.Crumb{
 			Role:         *role,
 			ArtifactPath: roleArtifact.Path,
 			TOMLKey:      roleArtifact.TOMLKey,
 		}); err != nil {
-			fmt.Fprintf(stderr, "pfm chat new: WARNING: chat is live but could not remember its role %q for re-arm: %v\n", *role, err)
+			fmt.Fprintf(
+				stderr,
+				"pfm chat new: WARNING: chat is live but could not remember its role %q for re-arm: %v\n",
+				*role,
+				err,
+			)
 		}
 	}
 	// result.Socket is the bare session name spawn.Run was asked to create
@@ -264,7 +282,6 @@ func resolveRunEngineIDAccount(
 	machine pfmconfig.Config,
 	primaryClaude int,
 ) (pfmengine.ID, int, error) {
-
 	account := requestedAccount
 	switch id {
 	case pfmengine.Claude:

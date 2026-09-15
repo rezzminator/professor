@@ -6,10 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	pfmchat "hostops/pfm/internal/chat"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
-	pfmtmux "hostops/pfm/internal/tmux"
 	"io"
 	"io/fs"
 	"os"
@@ -22,9 +18,12 @@ import (
 	"unicode"
 
 	"hostops/pfm/internal/action"
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
+	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
@@ -32,6 +31,7 @@ import (
 	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/store"
+	pfmtmux "hostops/pfm/internal/tmux"
 	"hostops/pfm/internal/transcript"
 )
 
@@ -65,12 +65,19 @@ func runChatFind(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 
 // findTranscript is chat.Find over an excerpt file, in the CLI's display
 // contract: the best match and at most four runners-up.
-func findTranscript(excerptPath string, runtimes ...commandRuntime) (pfmchat.TranscriptMatch, []pfmchat.TranscriptMatch, error) {
+func findTranscript(
+	excerptPath string,
+	runtimes ...commandRuntime,
+) (pfmchat.TranscriptMatch, []pfmchat.TranscriptMatch, error) {
 	content, err := os.ReadFile(excerptPath)
 	if err != nil {
 		return pfmchat.TranscriptMatch{}, nil, err
 	}
-	matches, err := pfmchat.Find(context.Background(), firstRuntime(runtimes), pfmchat.FindRequest{Excerpt: string(content), Self: pfmchat.AskingSession()})
+	matches, err := pfmchat.Find(
+		context.Background(),
+		firstRuntime(runtimes),
+		pfmchat.FindRequest{Excerpt: string(content), Self: pfmchat.AskingSession()},
+	)
 	if err != nil {
 		return pfmchat.TranscriptMatch{}, nil, err
 	}
@@ -115,7 +122,14 @@ func runChatReadExcerpt(args []string, stdout, stderr io.Writer, runtimes ...com
 	}
 	out := filepath.Join("tmp", "chat-loads", match.ID+".md")
 	var document strings.Builder
-	fmt.Fprintf(&document, "# Loaded chat — session %s\n\nSource: %s\nRange: %s -> %s\nVisible chat text only — thinking and tool outputs are not recorded here.\n", match.ID, match.Path, match.First, match.Last)
+	fmt.Fprintf(
+		&document,
+		"# Loaded chat — session %s\n\nSource: %s\nRange: %s -> %s\nVisible chat text only — thinking and tool outputs are not recorded here.\n",
+		match.ID,
+		match.Path,
+		match.First,
+		match.Last,
+	)
 	if limit > 0 {
 		fmt.Fprintf(&document, "(last %d lines)\n", limit)
 	}
@@ -195,7 +209,12 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		return 1
 	}
 	defer file.Close()
-	if _, err := fmt.Fprintf(file, "\n---\n\n# FULL TRANSCRIPT (script-dumped, verbatim)\n\nVisible chat text only — thinking and tool outputs are not recorded here.\nSource: %s\n\n%s---\n\n# ENVIRONMENT SNAPSHOT (script-dumped)\n\n", transcriptPath, renderTranscript(entries)); err != nil {
+	if _, err := fmt.Fprintf(
+		file,
+		"\n---\n\n# FULL TRANSCRIPT (script-dumped, verbatim)\n\nVisible chat text only — thinking and tool outputs are not recorded here.\nSource: %s\n\n%s---\n\n# ENVIRONMENT SNAPSHOT (script-dumped)\n\n",
+		transcriptPath,
+		renderTranscript(entries),
+	); err != nil {
 		fmt.Fprintf(stderr, "pfm chat save: write transcript: %v\n", err)
 		return 1
 	}
@@ -215,7 +234,13 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 			users++
 		}
 	}
-	fmt.Fprintf(stdout, "Appended transcript (%d user records) + env snapshot -> %s (%d bytes total)\n", users, target, info.Size())
+	fmt.Fprintf(
+		stdout,
+		"Appended transcript (%d user records) + env snapshot -> %s (%d bytes total)\n",
+		users,
+		target,
+		info.Size(),
+	)
 	return 0
 }
 
@@ -229,10 +254,22 @@ func writeRepositorySnapshot(writer io.Writer) {
 	status, statusErr := exec.Command(deps.Executable("git"), "status", "--short").Output()
 	worktrees, worktreeErr := exec.Command(deps.Executable("git"), "worktree", "list").Output()
 	if branchErr != nil || statusErr != nil || worktreeErr != nil {
-		fmt.Fprintf(writer, "(repository snapshot failed: branch=%v status=%v worktrees=%v)\n", branchErr, statusErr, worktreeErr)
+		fmt.Fprintf(
+			writer,
+			"(repository snapshot failed: branch=%v status=%v worktrees=%v)\n",
+			branchErr,
+			statusErr,
+			worktreeErr,
+		)
 		return
 	}
-	fmt.Fprintf(writer, "Branch: %s\n\n```\n%s```\n\nWorktrees:\n```\n%s```\n", strings.TrimSpace(string(branch)), status, worktrees)
+	fmt.Fprintf(
+		writer,
+		"Branch: %s\n\n```\n%s```\n\nWorktrees:\n```\n%s```\n",
+		strings.TrimSpace(string(branch)),
+		status,
+		worktrees,
+	)
 }
 
 func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -356,7 +393,11 @@ func withinDirectory(path, root string) bool {
 }
 
 func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat branch", "usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] [--account N] [--name NAME] [name]", stderr)
+	flags := newFlagSet(
+		"chat branch",
+		"usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] [--account N] [--name NAME] [name]",
+		stderr,
+	)
 	requestedEngine := flags.String("engine", "", "engine of the session to fork")
 	id := flags.String("session-id", "", "session id to fork")
 	requestedCWD := flags.String("cwd", "", "project directory for the detached fork")
@@ -690,7 +731,11 @@ type historyMessage struct {
 // script: read a chat's on-disk transcript as deep as its tail carries, not
 // bounded to a live pane's visible scrollback.
 func runChatHistory(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat history", "usage: pfm chat history <sid-prefix|jsonl-path> [messages] [project-slug]", stderr)
+	flags := newFlagSet(
+		"chat history",
+		"usage: pfm chat history <sid-prefix|jsonl-path> [messages] [project-slug]",
+		stderr,
+	)
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
@@ -930,13 +975,15 @@ func runChatModal(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	for index := 0; index < count; index++ {
-		if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Down").CombinedOutput(); err != nil {
+		if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Down").
+			CombinedOutput(); err != nil {
 			fmt.Fprintf(stderr, "pfm chat modal: send Down: %v: %s\n", err, strings.TrimSpace(string(output)))
 			return 1
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Enter").CombinedOutput(); err != nil {
+	if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Enter").
+		CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat modal: send Enter: %v: %s\n", err, strings.TrimSpace(string(output)))
 		return 1
 	}

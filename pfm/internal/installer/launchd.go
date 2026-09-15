@@ -143,7 +143,10 @@ func (installer *engine) wireMCPLaunchAgent(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read embedded MCP launch agent: %w", err)
 	}
-	wanted, err := renderServicePath([]byte(strings.ReplaceAll(string(template), "__PFM_HOME__", installer.options.Home)), installer.options.Home)
+	wanted, err := renderServicePath(
+		[]byte(strings.ReplaceAll(string(template), "__PFM_HOME__", installer.options.Home)),
+		installer.options.Home,
+	)
 	if err != nil {
 		return fmt.Errorf("render MCP launch agent: %w", err)
 	}
@@ -205,13 +208,24 @@ func (installer *engine) reloadLaunchAgentWithLabel(ctx context.Context, path, l
 		if loaded {
 			return fmt.Errorf(
 				"launchctl bootstrap %s failed AFTER its running job was stopped to load the new plist; the agent file is installed and the service is now DOWN — restart it with `launchctl bootstrap %s %s`: %w",
-				label, domain, path, err,
+				label,
+				domain,
+				path,
+				err,
 			)
 		}
-		return fmt.Errorf("launchctl bootstrap %s failed; agent file is installed but service is not loaded: %w", label, err)
+		return fmt.Errorf(
+			"launchctl bootstrap %s failed; agent file is installed but service is not loaded: %w",
+			label,
+			err,
+		)
 	}
 	if err := installer.options.Runner.Run(ctx, "launchctl", "print", domain+"/"+label); err != nil {
-		return fmt.Errorf("launchctl bootstrap %s returned success but loaded-agent verification failed: %w", label, err)
+		return fmt.Errorf(
+			"launchctl bootstrap %s returned success but loaded-agent verification failed: %w",
+			label,
+			err,
+		)
 	}
 	installer.ok("launchctl bootstrap " + label)
 	installer.say("")
@@ -288,7 +302,7 @@ func (installer *engine) unwireMCPLaunchAgent(ctx context.Context) error {
 // "state = not running" contains "running", so the state line is compared whole
 // rather than searched — a substring match here would refuse every install on a
 // perfectly idle agent.
-func launchAgentRunning(ctx context.Context, runner CommandRunner) (running bool, probed bool) {
+func launchAgentRunning(ctx context.Context, runner CommandRunner) (running, probed bool) {
 	reader, ok := runner.(OutputRunner)
 	if !ok {
 		return false, false

@@ -54,7 +54,12 @@ func TestChromeHeaderCaptureOracle(t *testing.T) {
 func TestChromeHTTP2CaptureOracle(t *testing.T) {
 	p := profiles.Chrome_146
 	settings := p.GetSettings()
-	want := map[http2.SettingID]uint32{http2.SettingHeaderTableSize: 65536, http2.SettingEnablePush: 0, http2.SettingInitialWindowSize: 6291456, http2.SettingMaxHeaderListSize: 262144}
+	want := map[http2.SettingID]uint32{
+		http2.SettingHeaderTableSize:   65536,
+		http2.SettingEnablePush:        0,
+		http2.SettingInitialWindowSize: 6291456,
+		http2.SettingMaxHeaderListSize: 262144,
+	}
 	for id, value := range want {
 		if got := settings[id]; got != value {
 			t.Fatalf("HTTP/2 setting %d=%d want %d", id, got, value)
@@ -71,7 +76,14 @@ func TestChromeHTTP2CaptureOracle(t *testing.T) {
 func TestChromeAkamaiCaptureOracle(t *testing.T) {
 	p := profiles.Chrome_146
 	settings := p.GetSettings()
-	akamai := fmt.Sprintf("1:%d;2:%d;4:%d;6:%d|%d|0|m,a,s,p", settings[http2.SettingHeaderTableSize], settings[http2.SettingEnablePush], settings[http2.SettingInitialWindowSize], settings[http2.SettingMaxHeaderListSize], p.GetConnectionFlow())
+	akamai := fmt.Sprintf(
+		"1:%d;2:%d;4:%d;6:%d|%d|0|m,a,s,p",
+		settings[http2.SettingHeaderTableSize],
+		settings[http2.SettingEnablePush],
+		settings[http2.SettingInitialWindowSize],
+		settings[http2.SettingMaxHeaderListSize],
+		p.GetConnectionFlow(),
+	)
 	if got := fmt.Sprintf("%x", md5Bytes([]byte(akamai))); got != "52d84b11737d980aef856699f885ca86" {
 		t.Fatalf("Akamai hash=%s text=%s", got, akamai)
 	}
@@ -121,14 +133,19 @@ func TestChromeClientHelloCaptureOracle(t *testing.T) {
 }
 
 func TestChromeTransportUsesPinnedResolver(t *testing.T) {
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok") }))
+	target := httptest.NewServer(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok") }),
+	)
 	defer target.Close()
 	port := target.Listener.Addr().(*net.TCPAddr).Port
 	host := fmt.Sprintf("public.example.test:%d", port)
 	transport := newChromeTransport(func(context.Context, string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("127.0.0.1")}, nil
 	})
-	if _, err := transport.RoundTrip(mustRequest("http://" + host)); err == nil || !strings.Contains(strings.ToLower(err.Error()), "private") {
+	if _, err := transport.RoundTrip(
+		mustRequest("http://" + host),
+	); err == nil ||
+		!strings.Contains(strings.ToLower(err.Error()), "private") {
 		t.Fatalf("private resolver answer accepted: %v", err)
 	}
 }
@@ -228,7 +245,14 @@ func clientHelloJA3(record []byte) (string, error) {
 			}
 		}
 	}
-	return fmt.Sprintf("%d,%s,%s,%s,%s", version, strings.Join(ciphers, "-"), strings.Join(exts, "-"), strings.Join(curves, "-"), strings.Join(points, "-")), nil
+	return fmt.Sprintf(
+		"%d,%s,%s,%s,%s",
+		version,
+		strings.Join(ciphers, "-"),
+		strings.Join(exts, "-"),
+		strings.Join(curves, "-"),
+		strings.Join(points, "-"),
+	), nil
 }
 
 func isGREASE(v uint16) bool { return v&0x0f0f == 0x0a0a }

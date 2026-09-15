@@ -180,7 +180,11 @@ func writeProcessStatFixture(t *testing.T, root string, pid, parent, group, sess
 	fields[17] = strconv.Itoa(threads)
 	fields[19] = strconv.FormatUint(start, 10)
 	path := filepath.Join(root, strconv.Itoa(pid), "stat")
-	if err := os.WriteFile(path, []byte(strconv.Itoa(pid)+" (fixture process) "+strings.Join(fields, " ")+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte(strconv.Itoa(pid)+" (fixture process) "+strings.Join(fields, " ")+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 }

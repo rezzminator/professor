@@ -137,7 +137,8 @@ func Run(ctx context.Context, request Request, dependencies Dependencies) (Resul
 	if layout != request.Stage {
 		return Result{}, errors.New("supplied stage layout does not match its repository and root")
 	}
-	if !laneNamePattern.MatchString(request.Lane.Lane) || request.Lane.AgentType == "" || hasControl(request.Lane.AgentType) {
+	if !laneNamePattern.MatchString(request.Lane.Lane) || request.Lane.AgentType == "" ||
+		hasControl(request.Lane.AgentType) {
 		return Result{}, errors.New("invalid apply lane context")
 	}
 	if err := rejectReplayOrPreparation(layout); err != nil {
@@ -153,7 +154,11 @@ func Run(ctx context.Context, request Request, dependencies Dependencies) (Resul
 		return Result{}, err
 	}
 	if state.fingerprint != input.recordedFingerprint {
-		return Result{}, fmt.Errorf("organ maps changed since preflight; recorded %s, current %s", input.recordedFingerprint, state.fingerprint)
+		return Result{}, fmt.Errorf(
+			"organ maps changed since preflight; recorded %s, current %s",
+			input.recordedFingerprint,
+			state.fingerprint,
+		)
 	}
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("apply canceled before preparation: %w", err)
@@ -168,10 +173,16 @@ func Run(ctx context.Context, request Request, dependencies Dependencies) (Resul
 	if err := privateAtomicReplace(layout.NormalizedVerdicts, []byte(input.normalizedRaw)); err != nil {
 		return Result{}, fmt.Errorf("replace normalized verdicts from raw: %w", err)
 	}
-	if err := privateAtomicReplace(filepath.Join(layout.Root, "anchor-postrefine.tsv"), []byte(input.postAnchorsRaw)); err != nil {
+	if err := privateAtomicReplace(
+		filepath.Join(layout.Root, "anchor-postrefine.tsv"),
+		[]byte(input.postAnchorsRaw),
+	); err != nil {
 		return Result{}, fmt.Errorf("replace post-refine anchor results: %w", err)
 	}
-	if err := privateAtomicReplace(filepath.Join(layout.Root, "anchor-postrefine-survivors.txt"), []byte(input.postSurvivorsRaw)); err != nil {
+	if err := privateAtomicReplace(
+		filepath.Join(layout.Root, "anchor-postrefine-survivors.txt"),
+		[]byte(input.postSurvivorsRaw),
+	); err != nil {
 		return Result{}, fmt.Errorf("replace post-refine anchor survivors: %w", err)
 	}
 
@@ -386,7 +397,14 @@ func DeriveHold(postSurvivors []string, normalized []artifact.NormalizedVerdict)
 	return artifact.HoldReady, yield, nil
 }
 
-func prepare(request Request, layout artifact.StageLayout, input stagedInput, state organState, now time.Time, git GitReader) (preparation, error) {
+func prepare(
+	request Request,
+	layout artifact.StageLayout,
+	input stagedInput,
+	state organState,
+	now time.Time,
+	git GitReader,
+) (preparation, error) {
 	root := filepath.Join(layout.Root, "apply")
 	if err := os.Mkdir(root, 0o700); err != nil {
 		return preparation{}, fmt.Errorf("create apply preparation %s: %w", root, err)
@@ -397,7 +415,10 @@ func prepare(request Request, layout artifact.StageLayout, input stagedInput, st
 		}
 	}
 	for _, name := range state.previousMaps {
-		if err := copyPrivateExclusive(filepath.Join(request.Repo.Organ, "maps", name), filepath.Join(root, "maps", name)); err != nil {
+		if err := copyPrivateExclusive(
+			filepath.Join(request.Repo.Organ, "maps", name),
+			filepath.Join(root, "maps", name),
+		); err != nil {
 			return preparation{}, fmt.Errorf("copy existing map into preparation: %w", err)
 		}
 	}
@@ -434,7 +455,11 @@ func prepare(request Request, layout artifact.StageLayout, input stagedInput, st
 			if err := writePrivateExclusive(candidate, restamped); err != nil {
 				return preparation{}, err
 			}
-			finalGate, err := gate.Anchors(input.recordedTree, []gate.MapInput{{Name: base, Text: string(restamped)}}, git)
+			finalGate, err := gate.Anchors(
+				input.recordedTree,
+				[]gate.MapInput{{Name: base, Text: string(restamped)}},
+				git,
+			)
 			if err != nil {
 				return preparation{}, fmt.Errorf("final ANCHORS gate for %s: %w", row.MapPath, err)
 			}
@@ -516,7 +541,10 @@ func prepare(request Request, layout artifact.StageLayout, input stagedInput, st
 		if err := writePrivateExclusive(filepath.Join(root, "surfaces", "agents", mapLane+".md"), body); err != nil {
 			return preparation{}, err
 		}
-		if err := writePrivateExclusive(filepath.Join(root, "surfaces-second", "agents", mapLane+".md"), []byte(second.Agents[mapLane])); err != nil {
+		if err := writePrivateExclusive(
+			filepath.Join(root, "surfaces-second", "agents", mapLane+".md"),
+			[]byte(second.Agents[mapLane]),
+		); err != nil {
 			return preparation{}, err
 		}
 		derived[filepath.Join(request.Repo.Organ, "agents", mapLane+".md")] = body

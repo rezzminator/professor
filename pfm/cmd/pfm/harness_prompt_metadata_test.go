@@ -18,7 +18,11 @@ func TestHarnessDoctorModelVersionAloneDoesNotWarn(t *testing.T) {
 	saved := harnessCaptureOverride
 	t.Cleanup(func() { harnessCaptureOverride = saved })
 	harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-		return harnessCapture{Prompt: harnessPromptFixtureCaptured, ResolvedModel: "claude-sonnet-5-1-20260906", CLIVersion: "2.2.0"}, nil
+		return harnessCapture{
+			Prompt:        harnessPromptFixtureCaptured,
+			ResolvedModel: "claude-sonnet-5-1-20260906",
+			CLIVersion:    "2.2.0",
+		}, nil
 	}
 	var out bytes.Buffer
 	if warnings := printHarnessPromptDoctor(context.Background(), &out, home, config.Config{}, ""); warnings != 0 {
@@ -61,7 +65,10 @@ func TestHarnessDoctorChecksEachModelAndKeepsFailuresSeparate(t *testing.T) {
 	} {
 		t.Run(scenario.name, func(t *testing.T) {
 			home := t.TempDir()
-			prompts := map[string]string{"sonnet": "Sonnet instructions.\n", "opus": "Opus instructions.\n# Delegation\nAsk before delegating.\n"}
+			prompts := map[string]string{
+				"sonnet": "Sonnet instructions.\n",
+				"opus":   "Opus instructions.\n# Delegation\nAsk before delegating.\n",
+			}
 			for _, model := range harnessPromptModels {
 				stageModelHarnessPromptBaseline(t, home, model, prompts[model.alias], model.alias+"-fixture.md")
 			}
@@ -75,7 +82,11 @@ func TestHarnessDoctorChecksEachModelAndKeepsFailuresSeparate(t *testing.T) {
 				if alias == scenario.changed {
 					prompt += "Delegate without asking.\n"
 				}
-				return harnessCapture{Prompt: prompt, ResolvedModel: "claude-" + alias + "-6-1", CLIVersion: "3.0.0"}, nil
+				return harnessCapture{
+					Prompt:        prompt,
+					ResolvedModel: "claude-" + alias + "-6-1",
+					CLIVersion:    "3.0.0",
+				}, nil
 			}
 			var out bytes.Buffer
 			warnings := printHarnessPromptDoctor(context.Background(), &out, home, config.Config{}, "")

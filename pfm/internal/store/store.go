@@ -225,7 +225,10 @@ func ensureOcSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) error 
 	if present {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, "ALTER TABLE oc_sessions ADD COLUMN assistant_count INTEGER NOT NULL DEFAULT 0"); err != nil {
+	if _, err := tx.ExecContext(
+		ctx,
+		"ALTER TABLE oc_sessions ADD COLUMN assistant_count INTEGER NOT NULL DEFAULT 0",
+	); err != nil {
 		return fmt.Errorf("ensure oc_sessions.assistant_count: %w", err)
 	}
 	return nil

@@ -270,7 +270,14 @@ func updateRepository(
 	defer func() {
 		var cleanupErr error
 		if worktreeAdded {
-			if removeErr := updateGitRun(ctx, repo, "worktree", "remove", "--force", filepath.Join(stage, "source")); removeErr != nil {
+			if removeErr := updateGitRun(
+				ctx,
+				repo,
+				"worktree",
+				"remove",
+				"--force",
+				filepath.Join(stage, "source"),
+			); removeErr != nil {
 				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("cleanup staged source worktree: %w", removeErr))
 			}
 		}
@@ -347,10 +354,17 @@ func updateRepository(
 	baselineOutcome, baselineErr := updateBaselineDoctor(ctx, runtime, skipHarvest, stdout, stderr)
 	switch {
 	case baselineErr != nil:
-		fmt.Fprintf(stderr, "pfm update: baseline doctor did not run: %v (no pre-update warning count to compare against)\n", baselineErr)
+		fmt.Fprintf(
+			stderr,
+			"pfm update: baseline doctor did not run: %v (no pre-update warning count to compare against)\n",
+			baselineErr,
+		)
 		baselineOutcome = doctorOutcome{}
 	case baselineOutcome.Exit == 2:
-		fmt.Fprintln(stderr, "pfm update: baseline doctor exited 2 (usage) — no pre-update warning count to compare against")
+		fmt.Fprintln(
+			stderr,
+			"pfm update: baseline doctor exited 2 (usage) — no pre-update warning count to compare against",
+		)
 		baselineOutcome = doctorOutcome{}
 	}
 	sourceAdvanced := false
@@ -363,9 +377,22 @@ func updateRepository(
 	for index := range replacements {
 		if err := replaceUpdateFile(candidateA, replacements[index].target); err != nil {
 			rollbackErr := rollbackUpdateState(
-				ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, nil, runtime, skipHarvest, stdout, stderr,
+				ctx,
+				repo,
+				installSourceRepo,
+				previousRef,
+				sourceAdvanced,
+				replacements,
+				nil,
+				runtime,
+				skipHarvest,
+				stdout,
+				stderr,
 			)
-			return updateFailure(fmt.Errorf("replace owned binary %s: %w", replacements[index].target, err), rollbackErr)
+			return updateFailure(
+				fmt.Errorf("replace owned binary %s: %w", replacements[index].target, err),
+				rollbackErr,
+			)
 		}
 		replacements[index].replaced = true
 	}
@@ -375,34 +402,95 @@ func updateRepository(
 	if installErr != nil {
 		return updateFailure(
 			fmt.Errorf("install --yes after staging: %w", installErr),
-			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
+			rollbackUpdateState(
+				ctx,
+				repo,
+				installSourceRepo,
+				previousRef,
+				sourceAdvanced,
+				replacements,
+				hookSnapshots,
+				runtime,
+				skipHarvest,
+				stdout,
+				stderr,
+			),
 		)
 	}
 	candidateConfigPath, candidateConfigNote, configPathErr := updateConfigPathAfterInstall(runtime)
 	if configPathErr != nil {
 		return updateFailure(
 			fmt.Errorf("locate config after update: %w", configPathErr),
-			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
+			rollbackUpdateState(
+				ctx,
+				repo,
+				installSourceRepo,
+				previousRef,
+				sourceAdvanced,
+				replacements,
+				hookSnapshots,
+				runtime,
+				skipHarvest,
+				stdout,
+				stderr,
+			),
 		)
 	}
 	if candidateConfigNote != "" {
 		fmt.Fprintln(stdout, candidateConfigNote)
 	}
-	candidateOutcome, doctorErr := updateRunDoctor(ctx, candidateA, runtime, candidateConfigPath, skipHarvest, stdout, stderr)
+	candidateOutcome, doctorErr := updateRunDoctor(
+		ctx,
+		candidateA,
+		runtime,
+		candidateConfigPath,
+		skipHarvest,
+		stdout,
+		stderr,
+	)
 	if doctorErr != nil {
 		return updateFailure(
 			fmt.Errorf("doctor after update: %w", doctorErr),
-			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
+			rollbackUpdateState(
+				ctx,
+				repo,
+				installSourceRepo,
+				previousRef,
+				sourceAdvanced,
+				replacements,
+				hookSnapshots,
+				runtime,
+				skipHarvest,
+				stdout,
+				stderr,
+			),
 		)
 	}
 	switch candidateOutcome.Exit {
 	case 3:
 		return updateFailure(
 			fmt.Errorf("doctor after update: %d failure(s) — see the doctor rows above", candidateOutcome.Failures),
-			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
+			rollbackUpdateState(
+				ctx,
+				repo,
+				installSourceRepo,
+				previousRef,
+				sourceAdvanced,
+				replacements,
+				hookSnapshots,
+				runtime,
+				skipHarvest,
+				stdout,
+				stderr,
+			),
 		)
 	case 0, 1:
-		fmt.Fprintf(stdout, "doctor after update: warnings=%d (before update: %d)\n", candidateOutcome.Warnings, baselineOutcome.Warnings)
+		fmt.Fprintf(
+			stdout,
+			"doctor after update: warnings=%d (before update: %d)\n",
+			candidateOutcome.Warnings,
+			baselineOutcome.Warnings,
+		)
 		if candidateOutcome.Warnings > baselineOutcome.Warnings {
 			newRows := diffNewDoctorWarningRows(baselineOutcome.Output, candidateOutcome.Output)
 			if len(newRows) != 0 {
@@ -417,8 +505,23 @@ func updateRepository(
 		// usage-error 2, or anything a future release adds) answered nothing
 		// this gate can trust — never treated as a clean verdict.
 		return updateFailure(
-			fmt.Errorf("doctor after update: exited %d — a doctor that cannot run is not a verdict", candidateOutcome.Exit),
-			rollbackUpdateState(ctx, repo, installSourceRepo, previousRef, sourceAdvanced, replacements, hookSnapshots, runtime, skipHarvest, stdout, stderr),
+			fmt.Errorf(
+				"doctor after update: exited %d — a doctor that cannot run is not a verdict",
+				candidateOutcome.Exit,
+			),
+			rollbackUpdateState(
+				ctx,
+				repo,
+				installSourceRepo,
+				previousRef,
+				sourceAdvanced,
+				replacements,
+				hookSnapshots,
+				runtime,
+				skipHarvest,
+				stdout,
+				stderr,
+			),
 		)
 	}
 	fmt.Fprintf(stdout, "updated %s from %s\n", target, repo)
@@ -426,11 +529,22 @@ func updateRepository(
 		previousTag, notePaths, notesErr := releaseNotesForUpdate(ctx, repo, previousRef, target)
 		switch {
 		case notesErr != nil:
-			fmt.Fprintf(stdout, "release notes: cannot list (%v) — read every releases/v*.md in %s newer than your previous install\n", notesErr, repo)
+			fmt.Fprintf(
+				stdout,
+				"release notes: cannot list (%v) — read every releases/v*.md in %s newer than your previous install\n",
+				notesErr,
+				repo,
+			)
 		case len(notePaths) == 0:
 			fmt.Fprintf(stdout, "release notes: none between %s and %s\n", previousTag, target)
 		default:
-			fmt.Fprintf(stdout, "release notes to read (%s → %s, %d release(s)):\n", previousTag, target, len(notePaths))
+			fmt.Fprintf(
+				stdout,
+				"release notes to read (%s → %s, %d release(s)):\n",
+				previousTag,
+				target,
+				len(notePaths),
+			)
 			for _, path := range notePaths {
 				fmt.Fprintf(stdout, "  %s\n", filepath.Join(repo, path))
 			}
@@ -442,7 +556,10 @@ func updateRepository(
 // releaseNotesForUpdate resolves the two git calls the release-notes report
 // needs — the tag previousRef was installed from, and the releases/ listing
 // at target — then hands the pure filtering off to update.ReleaseNotes.
-func releaseNotesForUpdate(ctx context.Context, repo, previousRef, target string) (previous string, paths []string, err error) {
+func releaseNotesForUpdate(
+	ctx context.Context,
+	repo, previousRef, target string,
+) (previous string, paths []string, err error) {
 	previousTag, err := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
 	if err != nil {
 		return "", nil, fmt.Errorf("describe previous release: %w", err)
@@ -464,7 +581,11 @@ type updateReplacement struct {
 
 func updateFailure(primary, rollbackErr error) error {
 	if rollbackErr != nil {
-		return fmt.Errorf("%w; rollback residue: %v; manually repair the reported update-owned state", primary, rollbackErr)
+		return fmt.Errorf(
+			"%w; rollback residue: %v; manually repair the reported update-owned state",
+			primary,
+			rollbackErr,
+		)
 	}
 	return fmt.Errorf("%w; rolled back update-owned changes", primary)
 }
@@ -514,10 +635,27 @@ func rollbackUpdateState(
 		return errors.Join(rollbackErr, errors.New("no previous binary is available to restore installer state"))
 	}
 	previousBinary := replacements[0].backup
-	if err := updateRollbackInstall(ctx, previousBinary, repo, installSourceRepo, runtime, skipHarvest, stdout, stderr); err != nil {
+	if err := updateRollbackInstall(
+		ctx,
+		previousBinary,
+		repo,
+		installSourceRepo,
+		runtime,
+		skipHarvest,
+		stdout,
+		stderr,
+	); err != nil {
 		return errors.Join(rollbackErr, fmt.Errorf("reapply previous installer state: %w", err))
 	}
-	rollbackOutcome, doctorErr := updateRollbackDoctor(ctx, previousBinary, runtime, runtime.Config.Path, skipHarvest, stdout, stderr)
+	rollbackOutcome, doctorErr := updateRollbackDoctor(
+		ctx,
+		previousBinary,
+		runtime,
+		runtime.Config.Path,
+		skipHarvest,
+		stdout,
+		stderr,
+	)
 	if doctorErr != nil {
 		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: %w", doctorErr))
 	}
@@ -530,10 +668,18 @@ func rollbackUpdateState(
 		// binary that predates M2's failure tiers ALSO exits 1 on warnings
 		// alone, so that case is named rather than misreported as residue.
 		if rollbackDoctorPredatesFailureTiers(rollbackOutcome.Output) {
-			return errors.Join(rollbackErr, errors.New("doctor after rollback exited 1 (an older pfm exits 1 on warnings alone; read the rows above before repairing anything)"))
+			return errors.Join(
+				rollbackErr,
+				errors.New(
+					"doctor after rollback exited 1 (an older pfm exits 1 on warnings alone; read the rows above before repairing anything)",
+				),
+			)
 		}
 	default:
-		return errors.Join(rollbackErr, fmt.Errorf("doctor after rollback: exited %d — see the doctor rows above", rollbackOutcome.Exit))
+		return errors.Join(
+			rollbackErr,
+			fmt.Errorf("doctor after rollback: exited %d — see the doctor rows above", rollbackOutcome.Exit),
+		)
 	}
 	return rollbackErr
 }
@@ -659,7 +805,13 @@ func replaceUpdateFile(source, target string) error {
 // defaults-only host (nothing to migrate or restore) must not have that
 // forwarded path read as operator-explicit and trip install_command.go's B
 // refusal; a real file is still forwarded so migration/restore keep working.
-func applyUpdateInstall(ctx context.Context, candidate, repo, sourceRepo string, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) error {
+func applyUpdateInstall(
+	ctx context.Context,
+	candidate, repo, sourceRepo string,
+	runtime commandRuntime,
+	skipHarvest bool,
+	stdout, stderr io.Writer,
+) error {
 	args := []string{"--yes"}
 	if skipHarvest {
 		args = append(args, "--skip-harvest")
@@ -679,7 +831,14 @@ func applyUpdateInstall(ctx context.Context, candidate, repo, sourceRepo string,
 // configPath is the caller's explicit choice (updateConfigPathAfterInstall's
 // re-resolved path for the post-install candidate doctor, runtime.Config.Path
 // otherwise) — never derived from runtime here.
-func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRuntime, configPath string, skipHarvest bool, stdout, stderr io.Writer) (doctorOutcome, error) {
+func runUpdateDoctor(
+	ctx context.Context,
+	candidate string,
+	runtime commandRuntime,
+	configPath string,
+	skipHarvest bool,
+	stdout, stderr io.Writer,
+) (doctorOutcome, error) {
 	var args []string
 	if skipHarvest {
 		args = []string{"--skip-harvest"}
@@ -698,7 +857,16 @@ func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRunti
 			fmt.Fprintf(stderr, "pfm update: cleanup isolated doctor directory %s: %v\n", doctorDirectory, cleanupErr)
 		}
 	}()
-	runErr := runUpdateCandidateCommand(ctx, candidate, configPath, doctorDirectory, "", stdout, stderr, "doctor", args...)
+	runErr := runUpdateCandidateCommand(
+		ctx,
+		candidate,
+		configPath,
+		doctorDirectory,
+		"",
+		stdout,
+		stderr,
+		"doctor",
+		args...)
 	var exitErr *doctorExitError
 	switch {
 	case runErr == nil:
@@ -719,7 +887,12 @@ func runUpdateDoctor(ctx context.Context, candidate string, runtime commandRunti
 // baseline that cannot run is never fatal to the update: the caller treats a
 // non-nil error, or an exit code doctor never returns a verdict on, as "no
 // baseline to compare against."
-func runUpdateBaselineDoctor(ctx context.Context, runtime commandRuntime, skipHarvest bool, stdout, stderr io.Writer) (doctorOutcome, error) {
+func runUpdateBaselineDoctor(
+	ctx context.Context,
+	runtime commandRuntime,
+	skipHarvest bool,
+	stdout, stderr io.Writer,
+) (doctorOutcome, error) {
 	self, err := os.Executable()
 	if err != nil {
 		return doctorOutcome{}, fmt.Errorf("resolve current binary for baseline doctor: %w", err)

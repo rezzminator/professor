@@ -24,7 +24,10 @@ func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 	clone := req.Clone(req.Context())
 	clone.Header.Set("User-Agent", t.ua)
 	if t.chrome {
-		clone.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7")
+		clone.Header.Set(
+			"Accept",
+			"text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+		)
 		clone.Header.Set("Accept-Encoding", "gzip, deflate, br, zstd")
 		clone.Header.Set("Accept-Language", "en-US,en;q=0.9")
 		clone.Header.Set("Priority", "u=0, i")

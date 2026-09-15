@@ -18,10 +18,20 @@ func TestBibliographicLandingCycleStopsAfterOneHop(t *testing.T) {
 		switch r.URL.String() {
 		case sourceA:
 			aRequests++
-			return response(r, http.StatusOK, "text/html", `<html><a class="document-link" href="/b">Full text</a></html>`), nil
+			return response(
+				r,
+				http.StatusOK,
+				"text/html",
+				`<html><a class="document-link" href="/b">Full text</a></html>`,
+			), nil
 		case sourceB:
 			bRequests++
-			return response(r, http.StatusOK, "text/html", `<html><a class="document-link" href="/a">Full text</a></html>`), nil
+			return response(
+				r,
+				http.StatusOK,
+				"text/html",
+				`<html><a class="document-link" href="/a">Full text</a></html>`,
+			), nil
 		default:
 			return response(r, http.StatusNotFound, "text/plain", "missing"), nil
 		}
@@ -34,7 +44,10 @@ func TestBibliographicLandingCycleStopsAfterOneHop(t *testing.T) {
 	})
 	direct := &http.Client{Transport: transport}
 	chrome := &http.Client{Transport: transport}
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: direct, Chrome: chrome, Jina: direct, OA: direct, Converter: convert})
+	h := mustNew(
+		t,
+		Options{CacheDir: t.TempDir(), Client: direct, Chrome: chrome, Jina: direct, OA: direct, Converter: convert},
+	)
 	got := h.Fetch(context.Background(), sourceA)
 	if got.Error == "" {
 		t.Fatalf("landing cycle unexpectedly fetched content: %#v", got)
@@ -53,7 +66,12 @@ func TestBibliographicLandingFollowsFullTextDocumentLink(t *testing.T) {
 	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.String() {
 		case landingURL:
-			return response(r, http.StatusOK, "text/html", `<html><body><h1>Title</h1><a class="document-link" href="/files/fulltext.pdf">Full text</a></body></html>`), nil
+			return response(
+				r,
+				http.StatusOK,
+				"text/html",
+				`<html><body><h1>Title</h1><a class="document-link" href="/files/fulltext.pdf">Full text</a></body></html>`,
+			), nil
 		case documentURL:
 			documentRequests++
 			return response(r, http.StatusOK, "application/pdf", "%PDF-1.7\nfull text\n%%EOF"), nil
@@ -69,7 +87,10 @@ func TestBibliographicLandingFollowsFullTextDocumentLink(t *testing.T) {
 	})
 	direct := &http.Client{Transport: transport}
 	chrome := &http.Client{Transport: transport}
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: direct, Chrome: chrome, Jina: direct, OA: direct, Converter: convert})
+	h := mustNew(
+		t,
+		Options{CacheDir: t.TempDir(), Client: direct, Chrome: chrome, Jina: direct, OA: direct, Converter: convert},
+	)
 	got := h.Fetch(context.Background(), landingURL)
 	if got.Error != "" || got.Kind != "pdf" || !strings.Contains(got.Content, "A Sequential Analysis") {
 		t.Fatalf("bibliographic landing fetch = %#v; want linked full text", got)

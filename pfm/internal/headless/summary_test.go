@@ -51,7 +51,9 @@ printf 'one two three four five six seven eight nine ten eleven twelve thirteen 
 func TestSummarizeMarksPartialAndNeverCachesIt(t *testing.T) {
 	root, database := summaryTestStore(t)
 	transcriptPath := filepath.Join(root, "working.jsonl")
-	writeSummaryTranscript(t, transcriptPath,
+	writeSummaryTranscript(
+		t,
+		transcriptPath,
 		`{"type":"user","message":{"role":"user","content":"run the checks"}}`,
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"go test ./..."}}]}}`,
 	)

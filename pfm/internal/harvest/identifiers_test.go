@@ -30,7 +30,10 @@ func TestIdentifiersAndOAOrdering(t *testing.T) {
 		u := r.URL.String()
 		switch {
 		case strings.Contains(u, "api.unpaywall.org"):
-			return jsonResponse(r, `{"is_oa":true,"oa_status":"gold","best_oa_location":{"url_for_pdf":"https://repo.test/paper.pdf","version":"publishedVersion"}}`), nil
+			return jsonResponse(
+				r,
+				`{"is_oa":true,"oa_status":"gold","best_oa_location":{"url_for_pdf":"https://repo.test/paper.pdf","version":"publishedVersion"}}`,
+			), nil
 		case strings.Contains(u, "openalex.org"):
 			return jsonResponse(r, `{"open_access":{"is_oa":true,"oa_status":"green"},"locations":[]}`), nil
 		default:

@@ -39,7 +39,14 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 	if !refreshValue(refresh) {
 		if path, kind := h.binaryCachePath(source); path != "" {
 			if body, err := os.ReadFile(path); err == nil {
-				return Result{Source: source, Kind: kind, Path: path, Method: "cache", CacheStatus: "hit", Bytes: int64(len(body))}
+				return Result{
+					Source:      source,
+					Kind:        kind,
+					Path:        path,
+					Method:      "cache",
+					CacheStatus: "hit",
+					Bytes:       int64(len(body)),
+				}
 			}
 		}
 	}

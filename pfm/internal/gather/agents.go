@@ -22,7 +22,13 @@ func DetectAgents(proc ProcFS, home string, panes []Pane, binaries ...string) ([
 
 // detectAgentsFrom is DetectAgents over an already-fetched pid->cmdline
 // snapshot — see processCmdlines.
-func detectAgentsFrom(cmdlines map[int][]string, proc ProcFS, home string, panes []Pane, binaries ...string) ([]Agent, error) {
+func detectAgentsFrom(
+	cmdlines map[int][]string,
+	proc ProcFS,
+	home string,
+	panes []Pane,
+	binaries ...string,
+) ([]Agent, error) {
 	pids := sortedPIDs(cmdlines)
 	paneByPID := panesByPID(panes)
 	primaryRoot := filepath.Clean(filepath.Join(home, ".claude"))

@@ -16,11 +16,18 @@ func TestRunInternalUnknownSubcommandIsANonBlockingHookError(t *testing.T) {
 	if code := runInternal([]string{"hook-from-a-newer-pfm"}, &stdout, &stderr, commandRuntime{}); code != 1 {
 		t.Fatalf("unknown internal subcommand exit = %d, want 1 (non-blocking); stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), `unknown subcommand "hook-from-a-newer-pfm"`) || !strings.Contains(stderr.String(), "pfm install --yes") {
+	if !strings.Contains(stderr.String(), `unknown subcommand "hook-from-a-newer-pfm"`) ||
+		!strings.Contains(stderr.String(), "pfm install --yes") {
 		t.Fatalf("stderr does not name the unknown subcommand and the fix: %q", stderr.String())
 	}
 	stderr.Reset()
-	if code := runInternal(nil, &stdout, &stderr, commandRuntime{}); code != 2 || !strings.Contains(stderr.String(), "usage: pfm internal") {
+	if code := runInternal(
+		nil,
+		&stdout,
+		&stderr,
+		commandRuntime{},
+	); code != 2 ||
+		!strings.Contains(stderr.String(), "usage: pfm internal") {
 		t.Fatalf("bare `pfm internal` = %d, stderr=%q; want the usage and 2", code, stderr.String())
 	}
 }

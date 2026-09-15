@@ -65,7 +65,11 @@ func TestRunExitIntercept(t *testing.T) {
 					t.Fatalf("front args = %#v, want [--self --exit]", calls[0])
 				}
 				if stdout.String() != quietPromptBlock || stderr.Len() != 0 {
-					t.Fatalf("a successful close must be swallowed quietly: stdout=%q stderr=%q", stdout.String(), stderr.String())
+					t.Fatalf(
+						"a successful close must be swallowed quietly: stdout=%q stderr=%q",
+						stdout.String(),
+						stderr.String(),
+					)
 				}
 			} else if stderr.Len() != 0 {
 				t.Fatalf("stderr=%q, want empty for a non-matching prompt", stderr.String())
@@ -105,6 +109,11 @@ func TestRunExitInterceptFailureStaysLoud(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runExitIntercept(strings.NewReader(`{"prompt":"e"}`), &stdout, &stderr, commandRuntime{})
 	if code != 2 || stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "exit: pfm chat kill: no live pane") {
-		t.Fatalf("exit=%d stdout=%q stderr=%q, want 2 / empty / the front's error behind the banner", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"exit=%d stdout=%q stderr=%q, want 2 / empty / the front's error behind the banner",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }

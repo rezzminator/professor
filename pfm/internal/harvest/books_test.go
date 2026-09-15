@@ -15,8 +15,11 @@ func TestPreferredTextFormatPrefersHTMLOverPlainAndSortsMIMEKeys(t *testing.T) {
 		wantKind string
 	}{
 		{
-			name:     "html beats plain text when both present",
-			formats:  map[string]string{"text/plain; charset=utf-8": "https://g.example/book.txt", "text/html; charset=utf-8": "https://g.example/book.html"},
+			name: "html beats plain text when both present",
+			formats: map[string]string{
+				"text/plain; charset=utf-8": "https://g.example/book.txt",
+				"text/html; charset=utf-8":  "https://g.example/book.html",
+			},
 			wantURL:  "https://g.example/book.html",
 			wantKind: "html",
 		},
@@ -27,8 +30,11 @@ func TestPreferredTextFormatPrefersHTMLOverPlainAndSortsMIMEKeys(t *testing.T) {
 			wantKind: "txt",
 		},
 		{
-			name:     "lexicographically first matching html MIME wins",
-			formats:  map[string]string{"text/html; charset=us-ascii": "https://g.example/ascii.html", "text/html; charset=utf-8": "https://g.example/utf8.html"},
+			name: "lexicographically first matching html MIME wins",
+			formats: map[string]string{
+				"text/html; charset=us-ascii": "https://g.example/ascii.html",
+				"text/html; charset=utf-8":    "https://g.example/utf8.html",
+			},
 			wantURL:  "https://g.example/ascii.html",
 			wantKind: "html",
 		},
@@ -49,7 +55,14 @@ func TestPreferredTextFormatPrefersHTMLOverPlainAndSortsMIMEKeys(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			gotURL, gotKind := preferredTextFormat(tc.formats)
 			if gotURL != tc.wantURL || gotKind != tc.wantKind {
-				t.Fatalf("preferredTextFormat(%#v) = (%q, %q), want (%q, %q)", tc.formats, gotURL, gotKind, tc.wantURL, tc.wantKind)
+				t.Fatalf(
+					"preferredTextFormat(%#v) = (%q, %q), want (%q, %q)",
+					tc.formats,
+					gotURL,
+					gotKind,
+					tc.wantURL,
+					tc.wantKind,
+				)
 			}
 		})
 	}
@@ -70,11 +83,17 @@ func TestResolveBookOrdersISBNCandidatesByPriorityAndDedupes(t *testing.T) {
 		case strings.Contains(u, "openlibrary.org/isbn/"):
 			return jsonResponse(r, `{"ocaid":"testocaid"}`), nil
 		case strings.Contains(u, "archive.org/metadata/testocaid"):
-			return jsonResponse(r, `{"metadata":{"access-restricted-item":"false"},"files":[{"name":"book.pdf"},{"name":"book_djvu.txt"}]}`), nil
+			return jsonResponse(
+				r,
+				`{"metadata":{"access-restricted-item":"false"},"files":[{"name":"book.pdf"},{"name":"book_djvu.txt"}]}`,
+			), nil
 		case strings.Contains(u, "directory.doabooks.org"):
 			return jsonResponse(r, `[]`), nil
 		case strings.Contains(u, "catalog.hathitrust.org/api/volumes/brief/isbn/"):
-			return jsonResponse(r, `{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=test.vol1"}]}`), nil
+			return jsonResponse(
+				r,
+				`{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=test.vol1"}]}`,
+			), nil
 		default:
 			t.Fatalf("unexpected request to %s", u)
 			return nil, nil
@@ -139,7 +158,13 @@ func TestResolverHathitrustKeepsOnlyFullViewVolumes(t *testing.T) {
 // distinguishing "no full-view volume exists" from "the lookup failed".
 func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return &http.Response{StatusCode: 500, Status: "500 Internal Server Error", Body: http.NoBody, Request: r, Header: http.Header{}}, nil
+		return &http.Response{
+			StatusCode: 500,
+			Status:     "500 Internal Server Error",
+			Body:       http.NoBody,
+			Request:    r,
+			Header:     http.Header{},
+		}, nil
 	})}
 	resolver := &Resolver{}
 	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
@@ -157,7 +182,10 @@ func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
 	oversize := strings.Repeat("a", 10<<20+1<<20)
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		return jsonResponse(r, `{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=`+oversize+`"}]}`), nil
+		return jsonResponse(
+			r,
+			`{"items":[{"usRightsString":"Full view","itemURL":"https://babel.hathitrust.org/cgi/pt?id=`+oversize+`"}]}`,
+		), nil
 	})}
 	resolver := &Resolver{}
 	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
@@ -174,12 +202,24 @@ func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
 		t.Fatalf("hathitrust(oversize) error = %v, want nil (outage semantics)", err)
 	}
 	var data any
-	getErr := getJSONBody(context.Background(), client, "https://catalog.hathitrust.org/api/volumes/brief/isbn/9780306406157.json", defaultUA, nil, 10<<20, &data)
+	getErr := getJSONBody(
+		context.Background(),
+		client,
+		"https://catalog.hathitrust.org/api/volumes/brief/isbn/9780306406157.json",
+		defaultUA,
+		nil,
+		10<<20,
+		&data,
+	)
 	if getErr == nil {
 		t.Fatal("getJSONBody(oversize) error = nil, want an oversize refusal")
 	}
-	if strings.Contains(getErr.Error(), "unexpected end of JSON input") || strings.Contains(getErr.Error(), "decode JSON") {
-		t.Fatalf("getJSONBody(oversize) error = %q, want it to name the byte ceiling rather than a decode failure", getErr)
+	if strings.Contains(getErr.Error(), "unexpected end of JSON input") ||
+		strings.Contains(getErr.Error(), "decode JSON") {
+		t.Fatalf(
+			"getJSONBody(oversize) error = %q, want it to name the byte ceiling rather than a decode failure",
+			getErr,
+		)
 	}
 	if !strings.Contains(getErr.Error(), "exceeds") {
 		t.Fatalf("getJSONBody(oversize) error = %q, want it to name the byte ceiling", getErr)

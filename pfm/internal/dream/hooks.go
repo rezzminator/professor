@@ -233,7 +233,9 @@ func codexHook(input []byte) ([]byte, error) {
 	}
 	annotated, driftDown := annotateSurfaceDrift(hookContext.GitRoot, hookContext.Organ, surface)
 	contextJSON := encodeJSONString(surfacePreamble(hookContext.Organ) + "\n" + annotated + driftDown)
-	return append(append([]byte(`{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":`), contextJSON...), []byte("}}\n")...), nil
+	return append(
+		append([]byte(`{"hookSpecificOutput":{"hookEventName":"SubagentStart","additionalContext":`), contextJSON...),
+		[]byte("}}\n")...), nil
 }
 
 // surfacePreamble is the one instruction block both hook paths inject above
@@ -409,7 +411,10 @@ func checkNudge(organRoot string, now time.Time) (string, error) {
 	if age <= 48*time.Hour {
 		return "", nil
 	}
-	return fmt.Sprintf("🌙 dreamer-night stale — newest applied sweep is %dd old; run /dreamer\n", int64(age/(24*time.Hour))), nil
+	return fmt.Sprintf(
+		"🌙 dreamer-night stale — newest applied sweep is %dd old; run /dreamer\n",
+		int64(age/(24*time.Hour)),
+	), nil
 }
 
 func writeNudgeFailure(path string, cause error, now time.Time) error {

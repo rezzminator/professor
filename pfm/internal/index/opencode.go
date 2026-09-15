@@ -325,7 +325,7 @@ func nonEmpty(value sql.NullString) string {
 
 // compactModel flattens OpenCode's validated user-message model fields to the
 // provider/model word used by the picker.
-func compactModel(providerID string, modelID string) string {
+func compactModel(providerID, modelID string) string {
 	if modelID == "" {
 		return ""
 	}

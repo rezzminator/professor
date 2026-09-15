@@ -209,7 +209,11 @@ func TestKillKilledUnkillCLI(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(transcriptPath, []byte(`{"type":"user","cwd":"/work/example","message":{"content":"kill fixture"}}`+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"user","cwd":"/work/example","message":{"content":"kill fixture"}}`+"\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	database, err := store.Open()
@@ -800,11 +804,11 @@ func stageModelHarnessPromptBaseline(t *testing.T, home string, model harnessPro
 	sum := sha256.Sum256([]byte(captured))
 	pin := hex.EncodeToString(sum[:]) + "  " + name + "\n"
 	dir := filepath.Join(home, ".local", "share", "pfm", "install", "prompts")
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for filename, data := range map[string]string{model.stem + ".sha256": pin, name: captured, model.stem + ".model": "claude-" + model.alias + "-5\n"} {
-		if err := os.WriteFile(filepath.Join(dir, filename), []byte(data), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, filename), []byte(data), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -945,7 +949,7 @@ func argsZeroStringLiterals(body *ast.BlockStmt) map[string]bool {
 // "codex" case matches on pfmengine.MustLookup(pfmengine.Codex).LongName,
 // not a bare "codex" literal, so a caller that needs that one name checks
 // the printed-text set with pfmengine's own known selector text instead.
-func switchCaseStringLiterals(fset *token.FileSet, body *ast.BlockStmt) (literals map[string]bool, printedExprs map[string]bool) {
+func switchCaseStringLiterals(fset *token.FileSet, body *ast.BlockStmt) (literals, printedExprs map[string]bool) {
 	literals = map[string]bool{}
 	printedExprs = map[string]bool{}
 	ast.Inspect(body, func(n ast.Node) bool {
@@ -1011,7 +1015,10 @@ func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
 		if name == pfmengine.MustLookup(pfmengine.Codex).LongName && printedExprs[codexSelector] {
 			continue
 		}
-		t.Fatalf("topLevelSubcommands names %q, but run's switch has no matching case — it falls through to the default \"unknown command\" arm", name)
+		t.Fatalf(
+			"topLevelSubcommands names %q, but run's switch has no matching case — it falls through to the default \"unknown command\" arm",
+			name,
+		)
 	}
 }
 
@@ -1024,7 +1031,10 @@ func TestInternalSubcommandsReachTheirHandler(t *testing.T) {
 	comparisons := argsZeroStringLiterals(body)
 	for _, name := range internalSubcommands {
 		if !comparisons[name] {
-			t.Fatalf("internalSubcommands names %q, but runInternal's if-chain never compares args[0] against it — it falls through to \"pfm internal: unknown subcommand\"", name)
+			t.Fatalf(
+				"internalSubcommands names %q, but runInternal's if-chain never compares args[0] against it — it falls through to \"pfm internal: unknown subcommand\"",
+				name,
+			)
 		}
 	}
 }

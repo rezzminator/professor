@@ -97,8 +97,14 @@ func TestRolePointerChoosesShortPointerUnderChannelBudget(t *testing.T) {
 	// body, on reload's unmodified DefaultThresholdBytes budget, re-arms
 	// FULL TEXT — the two channels genuinely disagree on this body, not just
 	// on paper.
-	reloadWouldBe := rearm.Pointer(rearm.Crumb{Role: "dev", ArtifactPath: artifactPath, TOMLKey: false}, rearm.DefaultThresholdBytes)
+	reloadWouldBe := rearm.Pointer(
+		rearm.Crumb{Role: "dev", ArtifactPath: artifactPath, TOMLKey: false},
+		rearm.DefaultThresholdBytes,
+	)
 	if !strings.Contains(reloadWouldBe, strings.Repeat("x", 100)) {
-		t.Fatalf("sanity: reload's own budget did not re-arm this body full text (%q) — the fixture is not sized to prove the asymmetry", reloadWouldBe)
+		t.Fatalf(
+			"sanity: reload's own budget did not re-arm this body full text (%q) — the fixture is not sized to prove the asymmetry",
+			reloadWouldBe,
+		)
 	}
 }

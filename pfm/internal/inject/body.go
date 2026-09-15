@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	pfmengine "hostops/pfm/internal/engine"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +11,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 const (

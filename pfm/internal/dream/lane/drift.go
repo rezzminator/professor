@@ -13,8 +13,10 @@ import (
 	"hostops/pfm/internal/deps"
 )
 
-var gitObjectIDPattern = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
-var driftAnchorRowPattern = regexp.MustCompile("^- `([^`]+)` — (?:blob|tree) `([0-9a-f]{12})`$")
+var (
+	gitObjectIDPattern    = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+	driftAnchorRowPattern = regexp.MustCompile("^- `([^`]+)` — (?:blob|tree) `([0-9a-f]{12})`$")
+)
 
 type DriftResult struct {
 	Surface     string
@@ -119,7 +121,13 @@ func AnnotateDrift(worktreeRoot, mapsDirectory, surface string) (DriftResult, er
 			return fallback(fmt.Errorf("surface points to missing map: maps/%s.md", slug))
 		}
 		if count.moved > 0 {
-			rows[index] = fmt.Sprintf("%s ⚠ DRIFTED (%d/%d anchors moved: %s)", row, count.moved, count.total, count.movedList())
+			rows[index] = fmt.Sprintf(
+				"%s ⚠ DRIFTED (%d/%d anchors moved: %s)",
+				row,
+				count.moved,
+				count.total,
+				count.movedList(),
+			)
 			drifted++
 		}
 	}

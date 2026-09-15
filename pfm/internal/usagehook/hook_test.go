@@ -35,7 +35,8 @@ func TestUsageParsesScopedFableAndDropsUnknownWindows(t *testing.T) {
 		t.Fatalf("NamedWindows()=%#v, want exactly 5h, 7d, and scoped Fable", windows)
 	}
 	for index, expected := range want {
-		if windows[index].Label != expected.label || windows[index].Window.Utilization == nil || int(*windows[index].Window.Utilization) != expected.used {
+		if windows[index].Label != expected.label || windows[index].Window.Utilization == nil ||
+			int(*windows[index].Window.Utilization) != expected.used {
 			t.Fatalf("NamedWindows()[%d]=%#v, want %#v", index, windows[index], expected)
 		}
 	}
@@ -66,7 +67,8 @@ func TestNamedWindowsUsesOneCanonicalMappingAndDropsUnknownKeys(t *testing.T) {
 		t.Fatalf("NamedWindows() = %#v, want %d windows", windows, len(want))
 	}
 	for index, expected := range want {
-		if windows[index].Key != expected.key || windows[index].Label != expected.label || windows[index].Known != expected.known {
+		if windows[index].Key != expected.key || windows[index].Label != expected.label ||
+			windows[index].Known != expected.known {
 			t.Fatalf("NamedWindows()[%d] = %#v, want %#v", index, windows[index], expected)
 		}
 	}
@@ -252,7 +254,11 @@ func TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(configDir, ".credentials.json"),
+		[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().Truncate(time.Second)
@@ -269,7 +275,10 @@ func TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero(t *testing.T) {
 	if err := WriteCacheRecord(CachePath(cacheDir, 9), CacheRecord{
 		Usage: Usage{
 			FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: passed.Format(time.RFC3339)},
-			SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+			SevenDay: Window{
+				Utilization: usageFloatPtr(12),
+				ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
+			},
 		},
 		ConfigDir: configDir, FetchedAt: &now,
 	}); err != nil {
@@ -302,7 +311,10 @@ func TestRecoveredWindowSaysResetPassedInsteadOfAStaleZero(t *testing.T) {
 	if err := WriteCacheRecord(CachePath(cacheDir, 9), CacheRecord{
 		Usage: Usage{
 			FiveHour: Window{Utilization: usageFloatPtr(5), ResetsAt: now.Add(2 * time.Hour).Format(time.RFC3339)},
-			SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+			SevenDay: Window{
+				Utilization: usageFloatPtr(12),
+				ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
+			},
 		},
 		ConfigDir: configDir, FetchedAt: &now,
 	}); err != nil {
@@ -345,7 +357,11 @@ func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
 				if err := os.MkdirAll(configDir, 0o700); err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+				if err := os.WriteFile(
+					filepath.Join(configDir, ".credentials.json"),
+					[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
+					0o600,
+				); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -358,13 +374,23 @@ func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
 			fetchedAt := now.Add(-testcase.age)
 			record := CacheRecord{
 				Usage: Usage{
-					FiveHour: Window{Utilization: usageFloatPtr(96), ResetsAt: now.Add(4 * time.Hour).Format(time.RFC3339)},
-					SevenDay: Window{Utilization: usageFloatPtr(96), ResetsAt: now.Add(6 * 24 * time.Hour).Format(time.RFC3339)},
+					FiveHour: Window{
+						Utilization: usageFloatPtr(96),
+						ResetsAt:    now.Add(4 * time.Hour).Format(time.RFC3339),
+					},
+					SevenDay: Window{
+						Utilization: usageFloatPtr(96),
+						ResetsAt:    now.Add(6 * 24 * time.Hour).Format(time.RFC3339),
+					},
 				},
 				ConfigDir: cacheConfig, FetchedAt: &fetchedAt,
 			}
 			if testcase.backoff {
-				record.Backoff = &CacheBackoff{Message: "429 Too Many Requests", RetryAfter: now.Add(time.Hour), RecordedAt: now}
+				record.Backoff = &CacheBackoff{
+					Message:    "429 Too Many Requests",
+					RetryAfter: now.Add(time.Hour),
+					RecordedAt: now,
+				}
 			}
 			cachePath := CachePath(cacheDir, 2)
 			if err := WriteCacheRecord(cachePath, record); err != nil {
@@ -383,7 +409,10 @@ func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
 					writer.WriteHeader(http.StatusServiceUnavailable)
 					return
 				}
-				_, _ = io.WriteString(writer, `{"five_hour":{"utilization":12,"resets_at":"2030-01-01T10:00:00Z"},"seven_day":{"utilization":3,"resets_at":"2030-01-03T08:00:00Z"}}`)
+				_, _ = io.WriteString(
+					writer,
+					`{"five_hour":{"utilization":12,"resets_at":"2030-01-01T10:00:00Z"},"seven_day":{"utilization":3,"resets_at":"2030-01-03T08:00:00Z"}}`,
+				)
 			}))
 			defer server.Close()
 			message, err := Evaluate(context.Background(), Options{
@@ -393,7 +422,12 @@ func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
 			})
 			if testcase.serverFail {
 				if err != nil || message != "" || hits != 1 {
-					t.Fatalf("foreign stale cache was used after refresh failure: message=%q err=%v hits=%d", message, err, hits)
+					t.Fatalf(
+						"foreign stale cache was used after refresh failure: message=%q err=%v hits=%d",
+						message,
+						err,
+						hits,
+					)
 				}
 				return
 			}
@@ -412,7 +446,11 @@ func TestEvaluateWarningRecoveryRequiresTheSameConfigDirectory(t *testing.T) {
 		if err := os.MkdirAll(configDir, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+		if err := os.WriteFile(
+			filepath.Join(configDir, ".credentials.json"),
+			[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
+			0o600,
+		); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -421,7 +459,10 @@ func TestEvaluateWarningRecoveryRequiresTheSameConfigDirectory(t *testing.T) {
 	if err := WriteCacheRecord(CachePath(cacheDir, 2), CacheRecord{
 		Usage: Usage{
 			FiveHour: Window{Utilization: usageFloatPtr(10), ResetsAt: now.Add(4 * time.Hour).Format(time.RFC3339)},
-			SevenDay: Window{Utilization: usageFloatPtr(10), ResetsAt: now.Add(6 * 24 * time.Hour).Format(time.RFC3339)},
+			SevenDay: Window{
+				Utilization: usageFloatPtr(10),
+				ResetsAt:    now.Add(6 * 24 * time.Hour).Format(time.RFC3339),
+			},
 		},
 		ConfigDir: configB, FetchedAt: &now,
 	}); err != nil {
@@ -505,7 +546,11 @@ func TestMissingCredentialsAndPoisonPayloadFailOpen(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture"}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(configDir, ".credentials.json"),
+		[]byte(`{"claudeAiOauth":{"accessToken":"fixture"}}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
@@ -562,7 +607,11 @@ func TestEvaluateAgesTheCacheByFetchedAtNotFileMtime(t *testing.T) {
 			if err := os.MkdirAll(configDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+			if err := os.WriteFile(
+				filepath.Join(configDir, ".credentials.json"),
+				[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
+				0o600,
+			); err != nil {
 				t.Fatal(err)
 			}
 			now := time.Now().Truncate(time.Second)
@@ -571,13 +620,23 @@ func TestEvaluateAgesTheCacheByFetchedAtNotFileMtime(t *testing.T) {
 			cachePath := CachePath(cacheDir, 2)
 			record := CacheRecord{
 				Usage: Usage{
-					FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: now.Add(3 * time.Hour).Format(time.RFC3339)},
-					SevenDay: Window{Utilization: usageFloatPtr(97), ResetsAt: now.Add(5 * 24 * time.Hour).Format(time.RFC3339)},
+					FiveHour: Window{
+						Utilization: usageFloatPtr(97),
+						ResetsAt:    now.Add(3 * time.Hour).Format(time.RFC3339),
+					},
+					SevenDay: Window{
+						Utilization: usageFloatPtr(97),
+						ResetsAt:    now.Add(5 * 24 * time.Hour).Format(time.RFC3339),
+					},
 				},
 				ConfigDir: configDir, FetchedAt: &fetchedAt,
 			}
 			if testcase.backoff {
-				record.Backoff = &CacheBackoff{Message: "429 Too Many Requests", RetryAfter: now.Add(time.Hour), RecordedAt: now}
+				record.Backoff = &CacheBackoff{
+					Message:    "429 Too Many Requests",
+					RetryAfter: now.Add(time.Hour),
+					RecordedAt: now,
+				}
 			}
 			// WriteCacheRecord leaves mtime at "now" — exactly the state a
 			// backoff-only write produces.
@@ -634,15 +693,25 @@ func TestEvaluateIgnoresWindowsPastTheirReset(t *testing.T) {
 			if err := os.MkdirAll(configDir, 0o700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+			if err := os.WriteFile(
+				filepath.Join(configDir, ".credentials.json"),
+				[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
+				0o600,
+			); err != nil {
 				t.Fatal(err)
 			}
 			now := time.Now().Truncate(time.Second)
 			cacheDir := filepath.Join(root, "cache")
 			if err := WriteCacheRecord(CachePath(cacheDir, 3), CacheRecord{
 				Usage: Usage{
-					FiveHour: Window{Utilization: usageFloatPtr(98), ResetsAt: now.Add(testcase.fiveResetsAt).Format(time.RFC3339)},
-					SevenDay: Window{Utilization: usageFloatPtr(12), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+					FiveHour: Window{
+						Utilization: usageFloatPtr(98),
+						ResetsAt:    now.Add(testcase.fiveResetsAt).Format(time.RFC3339),
+					},
+					SevenDay: Window{
+						Utilization: usageFloatPtr(12),
+						ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
+					},
 				},
 				ConfigDir: configDir, FetchedAt: &now,
 			}); err != nil {
@@ -673,7 +742,11 @@ func TestWarnLineSaysResetPassedInsteadOfAStalePercentage(t *testing.T) {
 	if err := os.MkdirAll(configDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(configDir, ".credentials.json"),
+		[]byte(`{"claudeAiOauth":{"accessToken":"fixture-token"}}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().Truncate(time.Second)
@@ -682,7 +755,10 @@ func TestWarnLineSaysResetPassedInsteadOfAStalePercentage(t *testing.T) {
 	if err := WriteCacheRecord(CachePath(cacheDir, 8), CacheRecord{
 		Usage: Usage{
 			FiveHour: Window{Utilization: usageFloatPtr(97), ResetsAt: passed.Format(time.RFC3339)},
-			SevenDay: Window{Utilization: usageFloatPtr(88), ResetsAt: now.Add(4 * 24 * time.Hour).Format(time.RFC3339)},
+			SevenDay: Window{
+				Utilization: usageFloatPtr(88),
+				ResetsAt:    now.Add(4 * 24 * time.Hour).Format(time.RFC3339),
+			},
 		},
 		ConfigDir: configDir, FetchedAt: &now,
 	}); err != nil {

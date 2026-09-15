@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	pfmchat "hostops/pfm/internal/chat"
 	"io"
 	"os"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"

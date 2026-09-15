@@ -319,8 +319,18 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 	}
 	fmt.Fprintf(stdout, "messages=%d carried=%d malformed=%d\n", result.Messages, result.Carried, result.Malformed)
 	fmt.Fprintf(stdout, "recovered thread %s\n", result.ThreadID)
-	fmt.Fprintf(stdout, "  %s\n  %s\n  %s\n", filepath.Join(codexRoot, "recovered-"+result.ThreadID, "brief.md"), filepath.Join(codexRoot, "recovered-"+result.ThreadID, "compaction-memory.md"), filepath.Join(codexRoot, "recovered-"+result.ThreadID, "transcript.md"))
-	fmt.Fprintf(stdout, "\nBrief a replacement seat with:\n  pfm chat inject <socket> 'RECOVERY: read %s, then compaction-memory.md, then the end of transcript.md.'\n", filepath.Join(codexRoot, "recovered-"+result.ThreadID, "brief.md"))
+	fmt.Fprintf(
+		stdout,
+		"  %s\n  %s\n  %s\n",
+		filepath.Join(codexRoot, "recovered-"+result.ThreadID, "brief.md"),
+		filepath.Join(codexRoot, "recovered-"+result.ThreadID, "compaction-memory.md"),
+		filepath.Join(codexRoot, "recovered-"+result.ThreadID, "transcript.md"),
+	)
+	fmt.Fprintf(
+		stdout,
+		"\nBrief a replacement seat with:\n  pfm chat inject <socket> 'RECOVERY: read %s, then compaction-memory.md, then the end of transcript.md.'\n",
+		filepath.Join(codexRoot, "recovered-"+result.ThreadID, "brief.md"),
+	)
 	return 0
 }
 

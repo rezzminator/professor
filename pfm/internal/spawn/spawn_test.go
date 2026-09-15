@@ -560,7 +560,11 @@ func (fake *fakeCodex) recordRename() {
 	if fake.ledger == "" {
 		return
 	}
-	file, err := os.OpenFile(filepath.Join(fake.ledger, "session_index.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(
+		filepath.Join(fake.ledger, "session_index.jsonl"),
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY,
+		0o600,
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -611,7 +615,12 @@ func TestCodexSilentRenameIsProvenFromTheIndex(t *testing.T) {
 		t.Fatalf("thread name = %q, want %q", fake.name, request.Name)
 	}
 	if got := countKey(fake.keys, "literal:"+codexRenameCommand); got != 1 {
-		t.Fatalf("%s typed %d times, want once — a proven rename is never retried: %v", codexRenameCommand, got, fake.keys)
+		t.Fatalf(
+			"%s typed %d times, want once — a proven rename is never retried: %v",
+			codexRenameCommand,
+			got,
+			fake.keys,
+		)
 	}
 }
 
@@ -657,7 +666,8 @@ func TestCodexRenameThatCannotBeVerifiedSaysSo(t *testing.T) {
 		t.Fatalf("an unverifiable rename was reported as proven: %#v", result)
 	}
 	joined := strings.Join(result.Warnings, " | ")
-	if !strings.Contains(joined, "could not verify") || !strings.Contains(joined, "session_index.jsonl") || strings.Contains(joined, "unnamed") {
+	if !strings.Contains(joined, "could not verify") || !strings.Contains(joined, "session_index.jsonl") ||
+		strings.Contains(joined, "unnamed") {
 		t.Fatalf("warnings = %q, want the unverifiable rename named with its cause", result.Warnings)
 	}
 	if got := countKey(fake.keys, "literal:"+codexRenameCommand); got != 1 {

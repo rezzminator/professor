@@ -7,7 +7,10 @@ import (
 )
 
 func TestCoverageExpandsIndicesBackToPinnedPaths(t *testing.T) {
-	parsed, err := artifact.ParseCoverage("2\tSKIP\ttwo\n1\tREAD\tone\nCONDUCT\ttechnique\tNONE\tnone\nCONDUCT\tprior\tNONE\tnone\nCONDUCT\tbaseline\tNONE\tnone\nEND-OF-RUN\n", 2)
+	parsed, err := artifact.ParseCoverage(
+		"2\tSKIP\ttwo\n1\tREAD\tone\nCONDUCT\ttechnique\tNONE\tnone\nCONDUCT\tprior\tNONE\tnone\nCONDUCT\tbaseline\tNONE\tnone\nEND-OF-RUN\n",
+		2,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -15,7 +18,8 @@ func TestCoverageExpandsIndicesBackToPinnedPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Expanded) != 2 || result.Expanded[0].Path != "/a" || result.Expanded[1].Path != "/b" || len(result.Conduct) != 3 {
+	if len(result.Expanded) != 2 || result.Expanded[0].Path != "/a" || result.Expanded[1].Path != "/b" ||
+		len(result.Conduct) != 3 {
 		t.Fatalf("Coverage() = %#v", result)
 	}
 }

@@ -60,8 +60,10 @@ type doiMirrorFailure struct {
 }
 
 func (f doiMirrorFailure) result(identifier string, rungs []string) Result {
-	return Result{Source: identifier, Error: "doi-mirror: " + f.message, ErrorKind: f.kind,
-		Challenge: f.challenge, HTTPStatus: f.status, Rungs: append([]string(nil), rungs...)}
+	return Result{
+		Source: identifier, Error: "doi-mirror: " + f.message, ErrorKind: f.kind,
+		Challenge: f.challenge, HTTPStatus: f.status, Rungs: append([]string(nil), rungs...),
+	}
 }
 
 // gatewayClient clones base for ONE gateway request: it attaches the request's
@@ -130,7 +132,11 @@ func readDOIMirrorResponse(resp *http.Response, max int64) ([]byte, int, string,
 	return body, status, contentType, nil
 }
 
-func (h *Harvester) doiMirrorLookup(ctx context.Context, identifier string, jar http.CookieJar) (doiMirrorLookup, doiMirrorFailure) {
+func (h *Harvester) doiMirrorLookup(
+	ctx context.Context,
+	identifier string,
+	jar http.CookieJar,
+) (doiMirrorLookup, doiMirrorFailure) {
 	base := h.settings.doiMirrorURL
 	if base == "" {
 		return doiMirrorLookup{}, doiMirrorFailure{message: "provider is disabled", kind: "disabled"}
@@ -174,18 +180,35 @@ func (h *Harvester) doiMirrorLookup(ctx context.Context, identifier string, jar 
 		// itself then failed to read/decode/fit the ceiling. Collapsing the
 		// two into one message hides which side of the wire broke.
 		if status == 0 {
-			return doiMirrorLookup{}, doiMirrorFailure{message: "lookup request failed: " + err.Error(), kind: kind, status: status}
+			return doiMirrorLookup{}, doiMirrorFailure{
+				message: "lookup request failed: " + err.Error(),
+				kind:    kind,
+				status:  status,
+			}
 		}
-		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup response failed: " + err.Error(), kind: kind, status: status}
+		return doiMirrorLookup{}, doiMirrorFailure{
+			message: "lookup response failed: " + err.Error(),
+			kind:    kind,
+			status:  status,
+		}
 	}
 	if status < 400 && bytes.HasPrefix(body, []byte("%PDF-")) {
 		return doiMirrorLookup{body: body, pageURL: pageURL, status: status, directPDF: true}, doiMirrorFailure{}
 	}
 	if doiMirrorChallenge(body, status) {
-		return doiMirrorLookup{}, doiMirrorFailure{message: fmt.Sprintf("lookup returned a CAPTCHA or bot challenge (HTTP %d)", status), kind: "challenge", challenge: true, status: status}
+		return doiMirrorLookup{}, doiMirrorFailure{
+			message:   fmt.Sprintf("lookup returned a CAPTCHA or bot challenge (HTTP %d)", status),
+			kind:      "challenge",
+			challenge: true,
+			status:    status,
+		}
 	}
 	if status >= 400 {
-		return doiMirrorLookup{}, doiMirrorFailure{message: fmt.Sprintf("lookup returned HTTP %d", status), kind: "http", status: status}
+		return doiMirrorLookup{}, doiMirrorFailure{
+			message: fmt.Sprintf("lookup returned HTTP %d", status),
+			kind:    "http",
+			status:  status,
+		}
 	}
 	pdfURL, err := doiMirrorPDFLink(body, pageURL)
 	if err != nil {
@@ -194,9 +217,18 @@ func (h *Harvester) doiMirrorLookup(ctx context.Context, identifier string, jar 
 	return doiMirrorLookup{pdfURL: pdfURL, pageURL: pageURL, status: status}, doiMirrorFailure{}
 }
 
-func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLookup, jar http.CookieJar, rungs *[]string) ([]byte, int, doiMirrorFailure) {
+func (h *Harvester) doiMirrorDownload(
+	ctx context.Context,
+	lookup doiMirrorLookup,
+	jar http.CookieJar,
+	rungs *[]string,
+) ([]byte, int, doiMirrorFailure) {
 	if lookup.pdfURL == "" {
-		return nil, lookup.status, doiMirrorFailure{message: "lookup contained no supported PDF URL", kind: "missing_pdf", status: lookup.status}
+		return nil, lookup.status, doiMirrorFailure{
+			message: "lookup contained no supported PDF URL",
+			kind:    "missing_pdf",
+			status:  lookup.status,
+		}
 	}
 	var first *doiMirrorFailure
 	for attempt, base := range []*http.Client{h.binaryDirectOrClient(), h.binaryChromeOrChrome()} {
@@ -240,7 +272,11 @@ func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLooku
 			readErr = err
 		}
 		if readErr != nil {
-			failure := doiMirrorFailure{message: "PDF response failed: " + readErr.Error(), kind: errorKind(readErr), status: status}
+			failure := doiMirrorFailure{
+				message: "PDF response failed: " + readErr.Error(),
+				kind:    errorKind(readErr),
+				status:  status,
+			}
 			if strings.Contains(readErr.Error(), "exceeds") {
 				failure.kind = "too_large"
 				return nil, status, failure
@@ -255,7 +291,12 @@ func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLooku
 			return body, status, doiMirrorFailure{}
 		}
 		if doiMirrorChallenge(body, status) {
-			failure := doiMirrorFailure{message: fmt.Sprintf("PDF request returned a CAPTCHA or bot challenge (HTTP %d)", status), kind: "challenge", challenge: true, status: status}
+			failure := doiMirrorFailure{
+				message:   fmt.Sprintf("PDF request returned a CAPTCHA or bot challenge (HTTP %d)", status),
+				kind:      "challenge",
+				challenge: true,
+				status:    status,
+			}
 			if attempt == 0 {
 				first = &failure
 				continue
@@ -263,7 +304,11 @@ func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLooku
 			return nil, status, mergeDOIMirrorFailures(first, failure)
 		}
 		if status >= 400 {
-			failure := doiMirrorFailure{message: fmt.Sprintf("PDF request returned HTTP %d", status), kind: "http", status: status}
+			failure := doiMirrorFailure{
+				message: fmt.Sprintf("PDF request returned HTTP %d", status),
+				kind:    "http",
+				status:  status,
+			}
 			if attempt == 0 {
 				first = &failure
 				continue
@@ -271,7 +316,11 @@ func (h *Harvester) doiMirrorDownload(ctx context.Context, lookup doiMirrorLooku
 			return nil, status, mergeDOIMirrorFailures(first, failure)
 		}
 		if !bytes.HasPrefix(body, []byte("%PDF-")) {
-			failure := doiMirrorFailure{message: "PDF URL returned non-PDF content", kind: "missing_pdf", status: status}
+			failure := doiMirrorFailure{
+				message: "PDF URL returned non-PDF content",
+				kind:    "missing_pdf",
+				status:  status,
+			}
 			if first != nil {
 				failure = mergeDOIMirrorFailures(first, failure)
 			}
@@ -302,7 +351,13 @@ func (h *Harvester) fetchDOIMirror(ctx context.Context, identifier string, optio
 	defer cancel()
 	jar, err := cookiejar.New(nil)
 	if err != nil {
-		return doiMirrorFailure{message: "could not create cookie jar: " + err.Error(), kind: "connect"}.result(identifier, []string{"doi-mirror"})
+		return doiMirrorFailure{
+			message: "could not create cookie jar: " + err.Error(),
+			kind:    "connect",
+		}.result(
+			identifier,
+			[]string{"doi-mirror"},
+		)
 	}
 	rungs := []string{"doi-mirror"}
 	lookup, failure := h.doiMirrorLookup(attemptCtx, identifier, jar)
@@ -320,24 +375,59 @@ func (h *Harvester) fetchDOIMirror(ctx context.Context, identifier string, optio
 		pdfSource = lookup.pdfURL
 	}
 	if !bytes.HasPrefix(pdfBody, []byte("%PDF-")) {
-		return doiMirrorFailure{message: "provider returned non-PDF content", kind: "missing_pdf", status: pdfStatus}.result(identifier, rungs)
+		return doiMirrorFailure{
+			message: "provider returned non-PDF content",
+			kind:    "missing_pdf",
+			status:  pdfStatus,
+		}.result(
+			identifier,
+			rungs,
+		)
 	}
 	converted, err := h.convert(attemptCtx, "pdf", pdfSource, pdfBody)
 	if err != nil {
-		return doiMirrorFailure{message: "PDF conversion failed: " + err.Error(), kind: "convert", status: pdfStatus}.result(identifier, rungs)
+		return doiMirrorFailure{
+			message: "PDF conversion failed: " + err.Error(),
+			kind:    "convert",
+			status:  pdfStatus,
+		}.result(
+			identifier,
+			rungs,
+		)
 	}
 	if strings.TrimSpace(converted) == "" {
 		ocrConverter, ok := h.options.Converter.(OCRConverter)
 		if !ok {
-			return doiMirrorFailure{message: "PDF conversion produced empty text and OCR is unavailable", kind: "convert", status: pdfStatus}.result(identifier, rungs)
+			return doiMirrorFailure{
+				message: "PDF conversion produced empty text and OCR is unavailable",
+				kind:    "convert",
+				status:  pdfStatus,
+			}.result(
+				identifier,
+				rungs,
+			)
 		}
 		rungs = append(rungs, "ocr")
 		converted, err = ocrConverter.ConvertOCR(attemptCtx, "pdf", pdfSource, pdfBody)
 		if err != nil {
-			return doiMirrorFailure{message: "PDF conversion produced empty text and OCR failed: " + err.Error(), kind: "convert", status: pdfStatus}.result(identifier, rungs)
+			return doiMirrorFailure{
+				message: "PDF conversion produced empty text and OCR failed: " + err.Error(),
+				kind:    "convert",
+				status:  pdfStatus,
+			}.result(
+				identifier,
+				rungs,
+			)
 		}
 		if !usableContent(converted, "pdf") {
-			return doiMirrorFailure{message: "PDF conversion and OCR produced empty text", kind: "convert", status: pdfStatus}.result(identifier, rungs)
+			return doiMirrorFailure{
+				message: "PDF conversion and OCR produced empty text",
+				kind:    "convert",
+				status:  pdfStatus,
+			}.result(
+				identifier,
+				rungs,
+			)
 		}
 	}
 	stored := h.storeResult(pdfSource, "pdf", "doi-mirror", converted, int64(len(pdfBody)), pdfStatus, rungs, options)

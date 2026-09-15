@@ -53,7 +53,13 @@ func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
 		if actual == "" {
 			actual = "(unset)"
 		}
-		fmt.Fprintf(stdout, "doctor: pre-push gate=UNWIRED expected=%s actual=%s — run git config core.hooksPath %s\n", expectedHooksPath, actual, expectedHooksPath)
+		fmt.Fprintf(
+			stdout,
+			"doctor: pre-push gate=UNWIRED expected=%s actual=%s — run git config core.hooksPath %s\n",
+			expectedHooksPath,
+			actual,
+			expectedHooksPath,
+		)
 		return 1
 	case "broken":
 		fmt.Fprintf(stdout, "doctor: pre-push gate=BROKEN core.hooksPath=%s error=%v\n", gate.Actual, gate.Error)
@@ -85,12 +91,17 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 	hook := filepath.Join(repository, expectedHooksPath, "pre-push")
 	hookInfo, hookErr := os.Stat(hook)
 
-	actualBytes, configErr := exec.CommandContext(ctx, git, "-C", repository, "config", "--get", "core.hooksPath").CombinedOutput()
+	actualBytes, configErr := exec.CommandContext(ctx, git, "-C", repository, "config", "--get", "core.hooksPath").
+		CombinedOutput()
 	actual := strings.TrimSpace(string(actualBytes))
 	if configErr != nil {
 		var exitErr *exec.ExitError
 		if !(errors.As(configErr, &exitErr) && exitErr.ExitCode() == 1 && actual == "") {
-			return prePushGate{Repository: repository, State: "unreadable", Error: fmt.Errorf("read core.hooksPath: %w: %s", configErr, actual)}
+			return prePushGate{
+				Repository: repository,
+				State:      "unreadable",
+				Error:      fmt.Errorf("read core.hooksPath: %w: %s", configErr, actual),
+			}
 		}
 	}
 
@@ -98,10 +109,20 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 		return prePushGate{Repository: repository, State: "not-configured"}
 	}
 	if hookErr != nil {
-		return prePushGate{Repository: repository, Actual: actual, State: "broken", Error: fmt.Errorf("inspect %s: %w", hook, hookErr)}
+		return prePushGate{
+			Repository: repository,
+			Actual:     actual,
+			State:      "broken",
+			Error:      fmt.Errorf("inspect %s: %w", hook, hookErr),
+		}
 	}
 	if !hookInfo.Mode().IsRegular() || hookInfo.Mode().Perm()&0o111 == 0 {
-		return prePushGate{Repository: repository, Actual: actual, State: "broken", Error: fmt.Errorf("%s is not an executable regular file", hook)}
+		return prePushGate{
+			Repository: repository,
+			Actual:     actual,
+			State:      "broken",
+			Error:      fmt.Errorf("%s is not an executable regular file", hook),
+		}
 	}
 
 	if !installer.PrePushGateArmed(repository, actual) {

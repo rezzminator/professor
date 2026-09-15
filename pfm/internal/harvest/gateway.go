@@ -213,7 +213,12 @@ func (h *Harvester) chromeForGateway(req gatewayRequest) *http.Client {
 
 // gatewayRung performs exactly one HTTP attempt with the given client, naming
 // the rung for the receipt.
-func (h *Harvester) gatewayRung(ctx context.Context, req gatewayRequest, client *http.Client, name, ua string) (gatewayResponse, error) {
+func (h *Harvester) gatewayRung(
+	ctx context.Context,
+	req gatewayRequest,
+	client *http.Client,
+	name, ua string,
+) (gatewayResponse, error) {
 	req.client, req.ua = client, ua
 	out, err := gatewayAttempt(ctx, req)
 	out.rungs = []string{name}
@@ -332,7 +337,11 @@ func gatewayReadBody(resp *http.Response, max int64, truncate bool) ([]byte, int
 // gatewayBrowser runs the browser rungs: HEADLESS first, and a HEADED window
 // only as the final resort after headless met a wall. It reports ok only when a
 // render produced content that is not itself a wall.
-func (h *Harvester) gatewayBrowser(ctx context.Context, req gatewayRequest, attempted *[]string) (gatewayResponse, bool) {
+func (h *Harvester) gatewayBrowser(
+	ctx context.Context,
+	req gatewayRequest,
+	attempted *[]string,
+) (gatewayResponse, bool) {
 	if req.binary {
 		return gatewayResponse{}, false // the rung renders HTML; it has no bytes to give.
 	}
@@ -344,7 +353,10 @@ func (h *Harvester) gatewayBrowser(ctx context.Context, req gatewayRequest, atte
 	}
 	fetcher, ok := h.options.Converter.(BrowserFetcher)
 	if !ok {
-		log.Printf("harvest: gateway could not escalate %s to the browser rung: no BrowserFetcher adapter is wired into this Harvester", req.url)
+		log.Printf(
+			"harvest: gateway could not escalate %s to the browser rung: no BrowserFetcher adapter is wired into this Harvester",
+			req.url,
+		)
 		return gatewayResponse{}, false
 	}
 
@@ -366,7 +378,11 @@ func (h *Harvester) gatewayBrowser(ctx context.Context, req gatewayRequest, atte
 	if outcome.html != "" && !outcome.wall {
 		return browserGatewayResponse(req.url, outcome.html, outcome.status), true
 	}
-	log.Printf("harvest: gateway browser rungs met a wall for %s (HTTP %d) — this wall is not passable unattended from this network", req.url, outcome.status)
+	log.Printf(
+		"harvest: gateway browser rungs met a wall for %s (HTTP %d) — this wall is not passable unattended from this network",
+		req.url,
+		outcome.status,
+	)
 	return gatewayResponse{}, false
 }
 
@@ -411,5 +427,10 @@ func renderHeadlessFirst(ctx context.Context, fetcher BrowserFetcher, source str
 }
 
 func browserGatewayResponse(source, html string, status int) gatewayResponse {
-	return gatewayResponse{body: []byte(html), status: status, contentType: "text/html; charset=utf-8", finalURL: source}
+	return gatewayResponse{
+		body:        []byte(html),
+		status:      status,
+		contentType: "text/html; charset=utf-8",
+		finalURL:    source,
+	}
 }

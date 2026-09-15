@@ -55,7 +55,9 @@ func TestDetachedRefreshCLIPathWritesGPTCacheInTwinHome(t *testing.T) {
 		return statusline.GPTOptions{
 			Now: func() time.Time { return time.Unix(1_786_838_400, 0) },
 			ReadRateLimits: func(context.Context) ([]byte, error) {
-				return os.ReadFile(filepath.Join("..", "..", "internal", "statusline", "testdata", "gpt-app-server.jsonl"))
+				return os.ReadFile(
+					filepath.Join("..", "..", "internal", "statusline", "testdata", "gpt-app-server.jsonl"),
+				)
 			},
 		}
 	}
@@ -77,7 +79,12 @@ func TestStatuslineRejectsRetiredVertexRefreshFlag(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	if code := runStatusline([]string{"--refresh-vertex"}, strings.NewReader(""), &stdout, &stderr); code != 2 {
-		t.Fatalf("--refresh-vertex code=%d stdout=%q stderr=%q, want usage error", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"--refresh-vertex code=%d stdout=%q stderr=%q, want usage error",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }
 
@@ -98,7 +105,11 @@ func TestStatuslineAndUsageHookCommandsFailOpen(t *testing.T) {
 	if err := os.MkdirAll(target, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configDir, ".credentials.json"), []byte(`{"claudeAiOauth":{"accessToken":"fixture"}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(configDir, ".credentials.json"),
+		[]byte(`{"claudeAiOauth":{"accessToken":"fixture"}}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	cacheLink := filepath.Join(root, "tmp", "cc-usage-"+strconv.Itoa(os.Getuid()))
@@ -132,8 +143,19 @@ func TestCodexSeatUsageHookNeverTouchesClaudeCredentials(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", claudeConfig)
 	var stdout, stderr bytes.Buffer
-	if code := runUsageHookWithRuntime(nil, &stdout, &stderr, commandRuntime{}); code != 0 || stdout.Len() != 0 || stderr.Len() != 0 {
-		t.Fatalf("Codex usage hook touched Claude state: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := runUsageHookWithRuntime(
+		nil,
+		&stdout,
+		&stderr,
+		commandRuntime{},
+	); code != 0 || stdout.Len() != 0 ||
+		stderr.Len() != 0 {
+		t.Fatalf(
+			"Codex usage hook touched Claude state: code=%d stdout=%q stderr=%q",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }
 
@@ -154,7 +176,9 @@ func TestStatuslineRecordsTheContextSampleForTheNudge(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code := runStatusline(
 		nil,
-		strings.NewReader(`{"session_id":"sess-nudge","model":{"display_name":"Opus 4"},"context_window":{"used_percentage":47.6}}`),
+		strings.NewReader(
+			`{"session_id":"sess-nudge","model":{"display_name":"Opus 4"},"context_window":{"used_percentage":47.6}}`,
+		),
 		&stdout,
 		&stderr,
 	)

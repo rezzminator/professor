@@ -51,7 +51,10 @@ func latestAppliedSweep(organ, lane string) (string, []byte, error) {
 			return "", nil, fmt.Errorf("stat sweep candidate %s: %w", filepath.Join(dreamerDir, entry.Name()), err)
 		}
 		if !info.Mode().IsRegular() {
-			return "", nil, fmt.Errorf("sweep candidate is not a regular file: %s", filepath.Join(dreamerDir, entry.Name()))
+			return "", nil, fmt.Errorf(
+				"sweep candidate is not a regular file: %s",
+				filepath.Join(dreamerDir, entry.Name()),
+			)
 		}
 		sequence := 1
 		if match[2] != "" {

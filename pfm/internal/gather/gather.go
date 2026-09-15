@@ -8,10 +8,10 @@ import (
 	"sort"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
-
-	"golang.org/x/sync/errgroup"
 )
 
 // CodexNameResolver resolves the indexed display name for a rollout path.

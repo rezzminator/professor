@@ -26,7 +26,14 @@ func TestExploreDenyFailsOpenAndSteersExploreToTracer(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := runExploreDeny(strings.NewReader(test.payload), &stdout, &stderr)
 			if code != test.code || !strings.Contains(stdout.String(), test.want) {
-				t.Fatalf("code=%d stdout=%q stderr=%q, want code=%d and %q", code, stdout.String(), stderr.String(), test.code, test.want)
+				t.Fatalf(
+					"code=%d stdout=%q stderr=%q, want code=%d and %q",
+					code,
+					stdout.String(),
+					stderr.String(),
+					test.code,
+					test.want,
+				)
 			}
 		})
 	}

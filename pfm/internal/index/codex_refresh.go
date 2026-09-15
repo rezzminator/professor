@@ -40,7 +40,12 @@ func RefreshCodexLineage(ctx context.Context, database *store.Store, id string) 
 		}
 		start := int64(0)
 		// Parent metadata can also come from the Codex state store.
-		base := store.Rollout{ParentThread: previous.ParentThread, SessionID: previous.SessionID, CWD: previous.CWD, UserThread: previous.UserThread}
+		base := store.Rollout{
+			ParentThread: previous.ParentThread,
+			SessionID:    previous.SessionID,
+			CWD:          previous.CWD,
+			UserThread:   previous.UserThread,
+		}
 		if shouldDelta(file, true, previous.Size, previous.ParsedOffset, full) {
 			start, base = previous.ParsedOffset, previous
 		}

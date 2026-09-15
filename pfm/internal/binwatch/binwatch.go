@@ -52,7 +52,11 @@ func ownReplacement(ctx context.Context, stderr io.Writer) <-chan struct{} {
 			return replaced
 		}
 	}
-	fmt.Fprintf(stderr, "pfm mcp serve: cannot watch own executable (%v); a new install will NOT restart this daemon — restart it by hand after every install\n", err)
+	fmt.Fprintf(
+		stderr,
+		"pfm mcp serve: cannot watch own executable (%v); a new install will NOT restart this daemon — restart it by hand after every install\n",
+		err,
+	)
 	// A nil channel never fires: the server serves the build it started on.
 	return nil
 }
@@ -84,13 +88,19 @@ func watch(ctx context.Context, path string, interval time.Duration, stderr io.W
 			current, err := os.Stat(path)
 			if err != nil {
 				if !unreadable {
-					fmt.Fprintf(stderr, "pfm mcp serve: cannot stat own executable %s (%v); still serving the build it started on\n", path, err)
+					fmt.Fprintf(
+						stderr,
+						"pfm mcp serve: cannot stat own executable %s (%v); still serving the build it started on\n",
+						path,
+						err,
+					)
 				}
 				unreadable = true
 				continue
 			}
 			unreadable = false
-			if !os.SameFile(started, current) || current.Size() != started.Size() || !current.ModTime().Equal(started.ModTime()) {
+			if !os.SameFile(started, current) || current.Size() != started.Size() ||
+				!current.ModTime().Equal(started.ModTime()) {
 				close(replaced)
 				return
 			}
@@ -114,7 +124,10 @@ func serve(server *http.Server, listener net.Listener, replaced <-chan struct{},
 		case <-replaced:
 		}
 		close(restarting)
-		fmt.Fprintln(stderr, "pfm mcp serve: own executable was replaced by a new build; exiting so the service manager restarts the daemon on it")
+		fmt.Fprintln(
+			stderr,
+			"pfm mcp serve: own executable was replaced by a new build; exiting so the service manager restarts the daemon on it",
+		)
 		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {

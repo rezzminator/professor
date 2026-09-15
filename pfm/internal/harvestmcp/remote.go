@@ -15,9 +15,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/harvest"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"hostops/pfm/internal/harvest"
 )
 
 const mcpPath = "/mcp"
@@ -55,7 +55,9 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 		return nil, fmt.Errorf("public_url must include a hostname, got %q", publicURL)
 	}
 	if options.Passphrase == "" && options.StaticToken == "" {
-		return nil, errors.New("the external harvester gateway requires external.auth.passphrase and/or external.auth.staticToken; it is never unauthenticated")
+		return nil, errors.New(
+			"the external harvester gateway requires external.auth.passphrase and/or external.auth.staticToken; it is never unauthenticated",
+		)
 	}
 	runtime := options.Runtime
 	cache, err := harvest.CacheRoot(runtime.CacheDir)
@@ -78,7 +80,10 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 		statePath = defaultAuthStatePath(service.runtime.CacheDir)
 	}
 	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath)
-	r.mcp = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return service.Server() }, &mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true})
+	r.mcp = mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return service.Server() },
+		&mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true},
+	)
 	return r, nil
 }
 
@@ -118,8 +123,19 @@ func (r *RemoteServer) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			http.NotFound(w, req)
 			return
 		}
-		r.metadata(w, map[string]any{"resource": r.resource, "authorization_servers": []string{r.publicURL + "/"}, "scopes_supported": []string{HarvesterScope}, "resource_name": "harvester"})
-	case "/.well-known/oauth-authorization-server", "/.well-known/oauth-authorization-server/mcp", "/.well-known/openid-configuration", "/.well-known/openid-configuration/mcp":
+		r.metadata(
+			w,
+			map[string]any{
+				"resource":              r.resource,
+				"authorization_servers": []string{r.publicURL + "/"},
+				"scopes_supported":      []string{HarvesterScope},
+				"resource_name":         "harvester",
+			},
+		)
+	case "/.well-known/oauth-authorization-server",
+		"/.well-known/oauth-authorization-server/mcp",
+		"/.well-known/openid-configuration",
+		"/.well-known/openid-configuration/mcp":
 		if r.store == nil || r.store.passphrase == "" {
 			http.NotFound(w, req)
 			return
@@ -169,7 +185,9 @@ func (r *RemoteServer) allowedHost(host string) bool {
 	if err != nil || requested.Hostname() == "" {
 		return false
 	}
-	return strings.EqualFold(requested.Host, r.parsed.Host) || strings.EqualFold(requested.Hostname(), r.parsed.Hostname()) || isLoopback(requested.Hostname())
+	return strings.EqualFold(requested.Host, r.parsed.Host) ||
+		strings.EqualFold(requested.Hostname(), r.parsed.Hostname()) ||
+		isLoopback(requested.Hostname())
 }
 
 func isLoopback(host string) bool {
@@ -182,7 +200,8 @@ func (r *RemoteServer) bearerOK(req *http.Request) bool {
 }
 
 func (r *RemoteServer) unauthorized(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource/mcp", scope="%s"`, r.publicURL, HarvesterScope))
+	w.Header().
+		Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource/mcp", scope="%s"`, r.publicURL, HarvesterScope))
 	r.oauthError(w, http.StatusUnauthorized, "invalid_token", "missing or invalid bearer token")
 }
 
@@ -194,7 +213,17 @@ func (r *RemoteServer) metadata(w http.ResponseWriter, value map[string]any) {
 func (r *RemoteServer) authMetadata() map[string]any {
 	issuer := r.publicURL + "/"
 	return map[string]any{
-		"issuer": issuer, "authorization_endpoint": r.publicURL + "/authorize", "token_endpoint": r.publicURL + "/token", "registration_endpoint": r.publicURL + "/register", "revocation_endpoint": r.publicURL + "/revoke", "scopes_supported": []string{HarvesterScope}, "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code", "refresh_token"}, "code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"none", "client_secret_post", "client_secret_basic"}, "revocation_endpoint_auth_methods_supported": []string{"none", "client_secret_post", "client_secret_basic"},
+		"issuer":                                     issuer,
+		"authorization_endpoint":                     r.publicURL + "/authorize",
+		"token_endpoint":                             r.publicURL + "/token",
+		"registration_endpoint":                      r.publicURL + "/register",
+		"revocation_endpoint":                        r.publicURL + "/revoke",
+		"scopes_supported":                           []string{HarvesterScope},
+		"response_types_supported":                   []string{"code"},
+		"grant_types_supported":                      []string{"authorization_code", "refresh_token"},
+		"code_challenge_methods_supported":           []string{"S256"},
+		"token_endpoint_auth_methods_supported":      []string{"none", "client_secret_post", "client_secret_basic"},
+		"revocation_endpoint_auth_methods_supported": []string{"none", "client_secret_post", "client_secret_basic"},
 	}
 }
 
@@ -219,7 +248,12 @@ func (r *RemoteServer) oauthError(w http.ResponseWriter, status int, code, descr
 
 func (r *RemoteServer) register(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost || !contentType(req, "application/json") {
-		r.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "registration requests must use application/json")
+		r.oauthError(
+			w,
+			http.StatusBadRequest,
+			"invalid_client_metadata",
+			"registration requests must use application/json",
+		)
 		return
 	}
 	var input persistedClient
@@ -232,7 +266,16 @@ func (r *RemoteServer) register(w http.ResponseWriter, req *http.Request) {
 		r.oauthError(w, http.StatusBadRequest, code, "client metadata is not supported")
 		return
 	}
-	response := map[string]any{"client_id": client.ClientID, "client_id_issued_at": client.ClientIDIssuedAt, "token_endpoint_auth_method": client.TokenEndpointAuthMethod, "redirect_uris": client.RedirectURIs, "grant_types": client.GrantTypes, "response_types": client.ResponseTypes, "scope": client.Scope, "client_secret_expires_at": client.ClientSecretExpiresAt}
+	response := map[string]any{
+		"client_id":                  client.ClientID,
+		"client_id_issued_at":        client.ClientIDIssuedAt,
+		"token_endpoint_auth_method": client.TokenEndpointAuthMethod,
+		"redirect_uris":              client.RedirectURIs,
+		"grant_types":                client.GrantTypes,
+		"response_types":             client.ResponseTypes,
+		"scope":                      client.Scope,
+		"client_secret_expires_at":   client.ClientSecretExpiresAt,
+	}
 	if secret != "" {
 		response["client_secret"] = secret
 	}
@@ -269,7 +312,15 @@ func (r *RemoteServer) authorize(w http.ResponseWriter, req *http.Request) {
 	if len(scope) == 0 {
 		scope = []string{HarvesterScope}
 	}
-	txn, err := r.store.begin(client, redirect, q.Get("state"), q.Get("code_challenge"), q.Get("code_challenge_method"), resource, scope)
+	txn, err := r.store.begin(
+		client,
+		redirect,
+		q.Get("state"),
+		q.Get("code_challenge"),
+		q.Get("code_challenge_method"),
+		resource,
+		scope,
+	)
 	if err != nil {
 		r.redirectError(w, redirect, q.Get("state"), "invalid_request", err.Error())
 		return
@@ -340,7 +391,13 @@ func expiredConsent(w http.ResponseWriter) {
 	_, _ = io.WriteString(w, "<p>This authorization link has expired. Start again from Claude.</p>")
 }
 
-func (r *RemoteServer) redirectErrorOrCode(w http.ResponseWriter, redirect string, req *http.Request, code string, ac authorizationCode) {
+func (r *RemoteServer) redirectErrorOrCode(
+	w http.ResponseWriter,
+	redirect string,
+	req *http.Request,
+	code string,
+	ac authorizationCode,
+) {
 	u, err := url.Parse(redirect)
 	if err != nil {
 		http.Error(w, "invalid redirect", http.StatusBadRequest)
@@ -395,7 +452,12 @@ func consentPage(txn, message string) string {
 
 func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost || !contentType(req, "application/x-www-form-urlencoded") {
-		r.oauthError(w, http.StatusBadRequest, "invalid_request", "token requests must use application/x-www-form-urlencoded")
+		r.oauthError(
+			w,
+			http.StatusBadRequest,
+			"invalid_request",
+			"token requests must use application/x-www-form-urlencoded",
+		)
 		return
 	}
 	if err := req.ParseForm(); err != nil {
@@ -409,7 +471,11 @@ func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 	if secret == "" {
 		secret = req.Form.Get("client_secret")
 	}
-	if !r.authenticateClient(clientID, secret, req.Form.Get("client_secret") != "" || req.Header.Get("Authorization") != "") {
+	if !r.authenticateClient(
+		clientID,
+		secret,
+		req.Form.Get("client_secret") != "" || req.Header.Get("Authorization") != "",
+	) {
 		r.oauthError(w, http.StatusBadRequest, "invalid_client", "client authentication failed")
 		return
 	}
@@ -423,7 +489,13 @@ func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 	var code string
 	switch grant {
 	case "authorization_code":
-		response, code = r.store.exchange(req.Form.Get("code"), clientID, req.Form.Get("redirect_uri"), req.Form.Get("code_verifier"), resource)
+		response, code = r.store.exchange(
+			req.Form.Get("code"),
+			clientID,
+			req.Form.Get("redirect_uri"),
+			req.Form.Get("code_verifier"),
+			resource,
+		)
 	case "refresh_token":
 		response, code = r.store.refreshExchange(req.Form.Get("refresh_token"), clientID, resource)
 	default:
@@ -482,7 +554,12 @@ func tokenErrorDescription(code string) string {
 
 func (r *RemoteServer) revoke(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost || !contentType(req, "application/x-www-form-urlencoded") {
-		r.oauthError(w, http.StatusBadRequest, "invalid_request", "revocation requests must use application/x-www-form-urlencoded")
+		r.oauthError(
+			w,
+			http.StatusBadRequest,
+			"invalid_request",
+			"revocation requests must use application/x-www-form-urlencoded",
+		)
 		return
 	}
 	if err := req.ParseForm(); err != nil {

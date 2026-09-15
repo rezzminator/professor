@@ -23,7 +23,9 @@ func (h *Harvester) rewritePublicImages(source, body, basePath string) (string, 
 			continue
 		}
 		raw := body[match[2]:match[3]]
-		if raw == "" || strings.HasPrefix(strings.ToLower(raw), "data:") || strings.HasPrefix(strings.ToLower(raw), "http://") || strings.HasPrefix(strings.ToLower(raw), "https://") {
+		if raw == "" || strings.HasPrefix(strings.ToLower(raw), "data:") ||
+			strings.HasPrefix(strings.ToLower(raw), "http://") ||
+			strings.HasPrefix(strings.ToLower(raw), "https://") {
 			continue
 		}
 		path, local := publicImagePath(raw, basePath)

@@ -23,7 +23,9 @@ var (
 	oscPattern        = regexp.MustCompile("\x1b\\][^\x07]*(\x07|\x1b\\\\)")
 	claudeAgentRow    = regexp.MustCompile(`^❯[[:space:]]+●[[:space:]]+[^[:space:]]+[[:space:]]{2,}[^[:space:]]`)
 	compactPattern    = regexp.MustCompile(`^[[:space:]]*/compact([[:space:]]|$)`)
-	queueProofPattern = regexp.MustCompile(`(?i)press up to edit queued messages|queued messages?|pending messages?|message (will be|was) (queued|submitted)|submitted after (the )?next tool call`)
+	queueProofPattern = regexp.MustCompile(
+		`(?i)press up to edit queued messages|queued messages?|pending messages?|message (will be|was) (queued|submitted)|submitted after (the )?next tool call`,
+	)
 )
 
 // isCompactCommand mirrors chat.sh's `grep -qE '^[[:space:]]*/compact([[:space:]]|$)'`

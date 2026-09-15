@@ -47,7 +47,9 @@ func TestRenderSkipsListPanelBuildOnLimitsStatsAndCosmos(t *testing.T) {
 	func() {
 		defer func() {
 			if r := recover(); r == nil {
-				t.Fatal("TabChats render() did not panic on a poisoned filtered index — fixture no longer exercises renderListPanel")
+				t.Fatal(
+					"TabChats render() did not panic on a poisoned filtered index — fixture no longer exercises renderListPanel",
+				)
 			}
 		}()
 		_ = model.render()

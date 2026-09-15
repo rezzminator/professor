@@ -703,10 +703,20 @@ func TestInjectBodyAboveFormerAbsoluteCapUsesPaste(t *testing.T) {
 		strings.Contains(result.Message, "AUTO-FILE") ||
 		!strings.Contains(result.Message, "PASTE") ||
 		!fake.pasted || len(fake.literals) != 1 {
-		t.Fatalf("former absolute cap result=%+v pasted=%v literals=%d err=%v", result, fake.pasted, len(fake.literals), err)
+		t.Fatalf(
+			"former absolute cap result=%+v pasted=%v literals=%d err=%v",
+			result,
+			fake.pasted,
+			len(fake.literals),
+			err,
+		)
 	}
 	if !strings.HasPrefix(fake.literals[0], body) {
-		t.Fatalf("paste transport did not carry the megabyte body byte-exact: got %d bytes, want prefix of %d bytes", len(fake.literals[0]), len(body))
+		t.Fatalf(
+			"paste transport did not carry the megabyte body byte-exact: got %d bytes, want prefix of %d bytes",
+			len(fake.literals[0]),
+			len(body),
+		)
 	}
 }
 
@@ -744,7 +754,13 @@ func TestInjectPasteBoundaryAndKillerBody(t *testing.T) {
 				underFake.pasted ||
 				strings.Contains(underResult.Message, "AUTO-FILE") ||
 				strings.Contains(underResult.Message, "PASTE") {
-				t.Fatalf("one-under delivery result=%+v literals=%q pasted=%v err=%v", underResult, underFake.literals, underFake.pasted, err)
+				t.Fatalf(
+					"one-under delivery result=%+v literals=%q pasted=%v err=%v",
+					underResult,
+					underFake.literals,
+					underFake.pasted,
+					err,
+				)
 			}
 
 			overFake := &fakeTmux{capture: underFake.capture, submitOnEnter: true}
@@ -783,7 +799,12 @@ func TestInjectPasteBoundaryAndKillerBody(t *testing.T) {
 				killerFake.literals[0] != killerBody ||
 				!killerFake.pasted ||
 				strings.Contains(killerResult.Message, "AUTO-FILE") {
-				t.Fatalf("killer body was not delivered byte-exact via paste: result=%+v literal len=%d err=%v", killerResult, len(killerFake.literals[0]), err)
+				t.Fatalf(
+					"killer body was not delivered byte-exact via paste: result=%+v literal len=%d err=%v",
+					killerResult,
+					len(killerFake.literals[0]),
+					err,
+				)
 			}
 		})
 	}
@@ -969,7 +990,12 @@ func TestLongProseAutoFilePreservesBodySignatureAndProof(t *testing.T) {
 	if delivered != expectedSigned ||
 		!strings.HasPrefix(delivered, body) ||
 		!strings.Contains(delivered, "to reply: chat_inject Operator <message>") {
-		t.Fatalf("paste transport changed body/signature semantics: got %d bytes, want %d bytes matching engine.signedMessage; delivered=%q", len(delivered), len(expectedSigned), delivered)
+		t.Fatalf(
+			"paste transport changed body/signature semantics: got %d bytes, want %d bytes matching engine.signedMessage; delivered=%q",
+			len(delivered),
+			len(expectedSigned),
+			delivered,
+		)
 	}
 	if strings.Contains(result.Message, "AUTO-FILE") ||
 		!strings.Contains(result.Message, "PASTE") ||
@@ -1383,7 +1409,10 @@ func TestEnterConfirmsWhenPostSubmitComposerRowIsNotVisible(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Code != 0 || result.Status == "typed_unconfirmed" {
-		t.Fatalf("result = %+v, want a confirmed delivery even though the post-submit capture carries no visible composer row", result)
+		t.Fatalf(
+			"result = %+v, want a confirmed delivery even though the post-submit capture carries no visible composer row",
+			result,
+		)
 	}
 	enters := 0
 	for _, key := range fake.keys {
@@ -1392,7 +1421,10 @@ func TestEnterConfirmsWhenPostSubmitComposerRowIsNotVisible(t *testing.T) {
 		}
 	}
 	if enters != 1 {
-		t.Fatalf("keys=%q, want exactly one Enter — confirmation must not loop when there is no positive evidence the composer still holds the message", fake.keys)
+		t.Fatalf(
+			"keys=%q, want exactly one Enter — confirmation must not loop when there is no positive evidence the composer still holds the message",
+			fake.keys,
+		)
 	}
 }
 
@@ -1620,7 +1652,12 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 				t.Fatalf("Inject() = %+v, want code=%d status=%q", result, test.wantCode, test.wantStatus)
 			}
 			if len(fake.keys) != 0 || len(fake.literals) != 0 || fake.literal != "" {
-				t.Fatalf("guard typed despite refusing: keys=%q literals=%q literal=%q", fake.keys, fake.literals, fake.literal)
+				t.Fatalf(
+					"guard typed despite refusing: keys=%q literals=%q literal=%q",
+					fake.keys,
+					fake.literals,
+					fake.literal,
+				)
 			}
 			for _, substr := range test.wantSubstr {
 				if !strings.Contains(result.Message, substr) {
@@ -1628,7 +1665,11 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 				}
 			}
 			if test.refuseNever != "" && strings.Contains(result.Message, test.refuseNever) {
-				t.Fatalf("a tmux error rendered as %q, an answer rather than a failure to look: %q", test.refuseNever, result.Message)
+				t.Fatalf(
+					"a tmux error rendered as %q, an answer rather than a failure to look: %q",
+					test.refuseNever,
+					result.Message,
+				)
 			}
 		})
 	}
@@ -1673,7 +1714,12 @@ func TestInjectRefusesCompactPrimaryPointingToSelfCompact(t *testing.T) {
 		})
 	}
 	if len(fake.keys) != 0 || len(fake.literals) != 0 || fake.literal != "" {
-		t.Fatalf("a banned /compact primary was typed: keys=%q literals=%q literal=%q", fake.keys, fake.literals, fake.literal)
+		t.Fatalf(
+			"a banned /compact primary was typed: keys=%q literals=%q literal=%q",
+			fake.keys,
+			fake.literals,
+			fake.literal,
+		)
 	}
 	// The internal chain path is the one production route left to a /compact
 	// primary (DeliverThen -> engine.inject with Chain: true) — it must
@@ -1728,8 +1774,10 @@ func TestSteerLogPathScopedBySocketAsWellAsPane(t *testing.T) {
 		t.Fatalf(
 			"two distinct (socket, pane) pairs whose hyphen boundary fell differently collided on one log path: %q (pairs: (%q,%q) and (%q,%q))",
 			hyphenA,
-			"/tmp/tmux-jail/cc-1787705979-3980493", "30867",
-			"/tmp/tmux-jail/cc-1787705979", "3980493-30867",
+			"/tmp/tmux-jail/cc-1787705979-3980493",
+			"30867",
+			"/tmp/tmux-jail/cc-1787705979",
+			"3980493-30867",
 		)
 	}
 }

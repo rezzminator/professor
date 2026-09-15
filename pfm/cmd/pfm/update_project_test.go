@@ -51,14 +51,20 @@ func TestUpdateCheckReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
 func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"pin", ".claude/updated-one.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"pin", ".claude/updated-one.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("pin one code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	baseline, err := professor.Load(fixture.project)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if baseline.Blueprint.SHA != fixture.headSHA || baseline.Files[".claude/updated-one.md"].PinnedSHA != fixture.headSHA {
+	if baseline.Blueprint.SHA != fixture.headSHA ||
+		baseline.Files[".claude/updated-one.md"].PinnedSHA != fixture.headSHA {
 		t.Fatalf("pin did not advance selected file: %#v", baseline)
 	}
 	if baseline.Files[".claude/updated-two.md"].PinnedSHA != fixture.oldSHA {
@@ -66,7 +72,13 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 3 || !strings.Contains(stdout.String(), "UPDATED       1") || !strings.Contains(stdout.String(), ".claude/updated-two.md") {
+	if code := runUpdate(
+		[]string{"check", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 3 || !strings.Contains(stdout.String(), "UPDATED       1") ||
+		!strings.Contains(stdout.String(), ".claude/updated-two.md") {
 		t.Fatalf("deferred check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 
@@ -76,28 +88,54 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"pin", "--template", "project/new.md", ".claude/new.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"pin", "--template", "project/new.md", ".claude/new.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("pin new code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"pin", "--all", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"pin", "--all", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("pin all code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"drop", ".claude/gone.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"drop", ".claude/gone.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("drop code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	writeProjectFixtureFile(t, fixture.project, ".claude/deleted.md", "restored locally\n")
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"pin", ".claude/deleted.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"pin", ".claude/deleted.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("pin restored code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 || !strings.HasSuffix(stdout.String(), "clean\n") {
+	if code := runUpdate(
+		[]string{"check", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 ||
+		!strings.HasSuffix(stdout.String(), "clean\n") {
 		t.Fatalf("clean check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -105,7 +143,12 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 func TestUpdateCheckJSONIsOneObjectAndUnreadableBaselineFails(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"check", "--json", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 3 {
+	if code := runUpdate(
+		[]string{"check", "--json", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 3 {
 		t.Fatalf("json check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var object map[string]any
@@ -121,7 +164,13 @@ func TestUpdateCheckJSONIsOneObjectAndUnreadableBaselineFails(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 1 || !strings.Contains(stdout.String(), "FAILED — BASELINE-MALFORMED") {
+	if code := runUpdate(
+		[]string{"check", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 1 ||
+		!strings.Contains(stdout.String(), "FAILED — BASELINE-MALFORMED") {
 		t.Fatalf("malformed check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 }
@@ -196,7 +245,8 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	if code := runUpdate([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("second adopt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "adopted 0 file(s)") || !strings.Contains(stdout.String(), "kept          2") {
+	if !strings.Contains(stdout.String(), "adopted 0 file(s)") ||
+		!strings.Contains(stdout.String(), "kept          2") {
 		t.Fatalf("second adopt stdout=%q", stdout.String())
 	}
 
@@ -296,18 +346,34 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	noGitManifest := fmt.Sprintf("{\"interview\":{\"blueprint_clone_path\":%q}}\n", noGitStore)
-	if err := os.WriteFile(filepath.Join(noGitProject, ".professor", "manifest.json"), []byte(noGitManifest), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(noGitProject, ".professor", "manifest.json"),
+		[]byte(noGitManifest),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"adopt", "--root", noGitProject, "--at", "HEAD"}, &stdout, &stderr, runtime); code != 1 || !strings.Contains(stderr.String(), "--at requires a git blueprint clone") {
+	if code := runUpdate(
+		[]string{"adopt", "--root", noGitProject, "--at", "HEAD"},
+		&stdout,
+		&stderr,
+		runtime,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), "--at requires a git blueprint clone") {
 		t.Fatalf("no-.git adopt --at code=%d stderr=%q", code, stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"adopt", "--root", project, "--at", "nosuchref"}, &stdout, &stderr, runtime); code != 1 || !strings.Contains(stderr.String(), "resolve --at nosuchref") {
+	if code := runUpdate(
+		[]string{"adopt", "--root", project, "--at", "nosuchref"},
+		&stdout,
+		&stderr,
+		runtime,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), "resolve --at nosuchref") {
 		t.Fatalf("bad --at ref code=%d stderr=%q", code, stderr.String())
 	}
 }
@@ -319,7 +385,12 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"ignore", "project/new.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"ignore", "project/new.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("ignore new.md code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "ignored 1 template(s)") {
@@ -339,7 +410,12 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"check", "--json", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 3 {
+	if code := runUpdate(
+		[]string{"check", "--json", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 3 {
 		t.Fatalf("check --json after ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var object map[string]any
@@ -353,36 +429,70 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"ignore", "project/current.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 1 || !strings.Contains(stderr.String(), "is pinned by .claude/current.md") {
+	if code := runUpdate(
+		[]string{"ignore", "project/current.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), "is pinned by .claude/current.md") {
 		t.Fatalf("ignore pinned template code=%d stderr=%q", code, stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"ignore", "project/nope.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 1 || !strings.Contains(stderr.String(), "does not exist upstream") {
+	if code := runUpdate(
+		[]string{"ignore", "project/nope.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), "does not exist upstream") {
 		t.Fatalf("ignore missing template code=%d stderr=%q", code, stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"ignore", "--undo", "project/new.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 || !strings.Contains(stdout.String(), "un-ignored 1 template(s)") {
+	if code := runUpdate(
+		[]string{"ignore", "--undo", "project/new.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 ||
+		!strings.Contains(stdout.String(), "un-ignored 1 template(s)") {
 		t.Fatalf("undo ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 3 || !strings.Contains(stdout.String(), "NEW           1") {
+	if code := runUpdate(
+		[]string{"check", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 3 ||
+		!strings.Contains(stdout.String(), "NEW           1") {
 		t.Fatalf("check after undo code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"ignore", "project/new.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"ignore", "project/new.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("re-ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	writeProjectFixtureFile(t, fixture.project, ".claude/new.md", "adapted locally\n")
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"pin", "--template", "project/new.md", ".claude/new.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"pin", "--template", "project/new.md", ".claude/new.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("pin adopted ignored template code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	baseline, err := professor.Load(fixture.project)
@@ -472,7 +582,10 @@ func TestUpdateIgnoreRefusesDirectoryTemplate(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(project, ".professor", "manifest.json"), []byte(manifest), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := professor.Save(project, professor.Baseline{Version: professor.BaselineVersion, Files: map[string]professor.FilePin{}}); err != nil {
+	if err := professor.Save(
+		project,
+		professor.Baseline{Version: professor.BaselineVersion, Files: map[string]professor.FilePin{}},
+	); err != nil {
 		t.Fatal(err)
 	}
 	before, err := os.ReadFile(professor.BaselinePath(project))
@@ -542,7 +655,11 @@ func TestUpdateAdoptNothingToPinReportsBlueprintPinUnchanged(t *testing.T) {
 			t.Fatal(err)
 		}
 		manifest := fmt.Sprintf("{\"interview\":{\"blueprint_clone_path\":%q}}\n", store)
-		if err := os.WriteFile(filepath.Join(project, ".professor", "manifest.json"), []byte(manifest), 0o600); err != nil {
+		if err := os.WriteFile(
+			filepath.Join(project, ".professor", "manifest.json"),
+			[]byte(manifest),
+			0o600,
+		); err != nil {
 			t.Fatal(err)
 		}
 		var stdout, stderr bytes.Buffer
@@ -567,11 +684,22 @@ func TestUpdateAdoptNothingToPinReportsBlueprintPinUnchanged(t *testing.T) {
 			t.Fatal(err)
 		}
 		manifest := fmt.Sprintf("{\"interview\":{\"blueprint_clone_path\":%q}}\n", store)
-		if err := os.WriteFile(filepath.Join(project, ".professor", "manifest.json"), []byte(manifest), 0o600); err != nil {
+		if err := os.WriteFile(
+			filepath.Join(project, ".professor", "manifest.json"),
+			[]byte(manifest),
+			0o600,
+		); err != nil {
 			t.Fatal(err)
 		}
 		want := professor.BlueprintPin{Version: "0.60.0", SHA: "abc1234"}
-		if err := professor.Save(project, professor.Baseline{Version: professor.BaselineVersion, Blueprint: want, Files: map[string]professor.FilePin{}}); err != nil {
+		if err := professor.Save(
+			project,
+			professor.Baseline{
+				Version:   professor.BaselineVersion,
+				Blueprint: want,
+				Files:     map[string]professor.FilePin{},
+			},
+		); err != nil {
 			t.Fatal(err)
 		}
 		var stdout, stderr bytes.Buffer
@@ -613,8 +741,18 @@ func TestUpdateIgnoreRefusalNamesEveryPinningLocal(t *testing.T) {
 	baseline := professor.Baseline{
 		Version: professor.BaselineVersion,
 		Files: map[string]professor.FilePin{
-			".claude/b-copy.md": {Template: "project/commands/dev.md", TemplateHash: hash, PinnedSHA: "abc1234", PinnedAt: "2026-08-31"},
-			".claude/a-copy.md": {Template: "project/commands/dev.md", TemplateHash: hash, PinnedSHA: "abc1234", PinnedAt: "2026-08-31"},
+			".claude/b-copy.md": {
+				Template:     "project/commands/dev.md",
+				TemplateHash: hash,
+				PinnedSHA:    "abc1234",
+				PinnedAt:     "2026-08-31",
+			},
+			".claude/a-copy.md": {
+				Template:     "project/commands/dev.md",
+				TemplateHash: hash,
+				PinnedSHA:    "abc1234",
+				PinnedAt:     "2026-08-31",
+			},
 		},
 	}
 	if err := professor.Save(project, baseline); err != nil {
@@ -644,7 +782,12 @@ func TestUpdateIgnoreCountsAlreadyIgnoredSeparately(t *testing.T) {
 	writeProjectFixtureFile(t, fixture.store, "templates/project/extra.md", "extra\n")
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"ignore", "project/new.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"ignore", "project/new.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("first ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if got := strings.TrimRight(stdout.String(), "\n"); got != "ignored 1 template(s)" {
@@ -653,7 +796,12 @@ func TestUpdateIgnoreCountsAlreadyIgnoredSeparately(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"ignore", "project/new.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"ignore", "project/new.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("repeat ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if got := strings.TrimRight(stdout.String(), "\n"); got != "ignored 0 template(s) (1 already ignored)" {
@@ -662,7 +810,12 @@ func TestUpdateIgnoreCountsAlreadyIgnoredSeparately(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"ignore", "project/extra.md", "project/new.md", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 0 {
+	if code := runUpdate(
+		[]string{"ignore", "project/extra.md", "project/new.md", "--root", fixture.project},
+		&stdout,
+		&stderr,
+		fixture.runtime,
+	); code != 0 {
 		t.Fatalf("mixed ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if got := strings.TrimRight(stdout.String(), "\n"); got != "ignored 1 template(s) (1 already ignored)" {
@@ -770,18 +923,49 @@ func newProjectUpdateFixture(t *testing.T) projectUpdateFixture {
 		Version:   professor.BaselineVersion,
 		Blueprint: professor.BlueprintPin{Version: "0.64.0", SHA: oldSHA},
 		Files: map[string]professor.FilePin{
-			".claude/current.md":     {Template: "project/current.md", TemplateHash: hash("project/current.md"), PinnedSHA: oldSHA, PinnedAt: "2026-08-31"},
-			".claude/updated-one.md": {Template: "project/updated-one.md", TemplateHash: oldHash("old one\n"), PinnedSHA: oldSHA, PinnedAt: "2026-08-31"},
-			".claude/updated-two.md": {Template: "project/updated-two.md", TemplateHash: oldHash("old two\n"), PinnedSHA: oldSHA, PinnedAt: "2026-08-31"},
-			".claude/deleted.md":     {Template: "project/deleted.md", TemplateHash: hash("project/deleted.md"), PinnedSHA: oldSHA, PinnedAt: "2026-08-31"},
-			".claude/gone.md":        {Template: "project/gone.md", TemplateHash: oldHash("gone\n"), PinnedSHA: oldSHA, PinnedAt: "2026-08-31"},
+			".claude/current.md": {
+				Template:     "project/current.md",
+				TemplateHash: hash("project/current.md"),
+				PinnedSHA:    oldSHA,
+				PinnedAt:     "2026-08-31",
+			},
+			".claude/updated-one.md": {
+				Template:     "project/updated-one.md",
+				TemplateHash: oldHash("old one\n"),
+				PinnedSHA:    oldSHA,
+				PinnedAt:     "2026-08-31",
+			},
+			".claude/updated-two.md": {
+				Template:     "project/updated-two.md",
+				TemplateHash: oldHash("old two\n"),
+				PinnedSHA:    oldSHA,
+				PinnedAt:     "2026-08-31",
+			},
+			".claude/deleted.md": {
+				Template:     "project/deleted.md",
+				TemplateHash: hash("project/deleted.md"),
+				PinnedSHA:    oldSHA,
+				PinnedAt:     "2026-08-31",
+			},
+			".claude/gone.md": {
+				Template:     "project/gone.md",
+				TemplateHash: oldHash("gone\n"),
+				PinnedSHA:    oldSHA,
+				PinnedAt:     "2026-08-31",
+			},
 		},
 	}
 	if err := professor.Save(project, baseline); err != nil {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	return projectUpdateFixture{project: project, store: storeRoot, oldSHA: oldSHA, headSHA: headSHA, runtime: commandRuntime{Paths: paths.Values{Home: home}}}
+	return projectUpdateFixture{
+		project: project,
+		store:   storeRoot,
+		oldSHA:  oldSHA,
+		headSHA: headSHA,
+		runtime: commandRuntime{Paths: paths.Values{Home: home}},
+	}
 }
 
 func writeProjectFixtureFile(t *testing.T, root, relative, content string) {

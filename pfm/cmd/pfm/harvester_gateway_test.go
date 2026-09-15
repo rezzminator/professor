@@ -92,8 +92,17 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 		t.Fatalf("authenticated /mcp = %d %s", response.StatusCode, body)
 	}
 	for _, path := range []string{"/mcp/chat", "/mcp/harvester", "/status"} {
-		if response := do(http.MethodPost, path, "example-gateway-token", initialize); response.StatusCode != http.StatusNotFound {
-			t.Errorf("external %s = %d, want 404 — the external port serves the harvester only", path, response.StatusCode)
+		if response := do(
+			http.MethodPost,
+			path,
+			"example-gateway-token",
+			initialize,
+		); response.StatusCode != http.StatusNotFound {
+			t.Errorf(
+				"external %s = %d, want 404 — the external port serves the harvester only",
+				path,
+				response.StatusCode,
+			)
 		}
 	}
 }
@@ -149,12 +158,24 @@ func TestHarvesterServeRetiredFlagsNameTheirConfigKey(t *testing.T) {
 	}
 	for flag, want := range cases {
 		var stdout, stderr bytes.Buffer
-		if code := runHarvesterMCP([]string{flag}, &stdout, &stderr, commandRuntime{}); code != 2 || !strings.Contains(stderr.String(), want) {
+		if code := runHarvesterMCP(
+			[]string{flag},
+			&stdout,
+			&stderr,
+			commandRuntime{},
+		); code != 2 ||
+			!strings.Contains(stderr.String(), want) {
 			t.Errorf("serve %s: code=%d stderr=%q, want 2 naming %q", flag, code, stderr.String(), want)
 		}
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runHarvesterMCP([]string{"--transport", "http"}, &stdout, &stderr, commandRuntime{}); code != 2 || !strings.Contains(stderr.String(), "pfm mcp serve") {
+	if code := runHarvesterMCP(
+		[]string{"--transport", "http"},
+		&stdout,
+		&stderr,
+		commandRuntime{},
+	); code != 2 ||
+		!strings.Contains(stderr.String(), "pfm mcp serve") {
 		t.Fatalf("--transport http: code=%d stderr=%q", code, stderr.String())
 	}
 }
@@ -171,7 +192,13 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 		t.Fatal(err)
 	}
 	legacy := filepath.Join(dir, config.LegacyFileName)
-	if err := os.WriteFile(legacy, []byte(`{"version":2,"mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		legacy,
+		[]byte(
+			`{"version":2,"mcp":{"http":{"port":8377},"servers":{"chat":{"enabled":true},"harvester":{"enabled":true}}}}`,
+		),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	runtime, err := config.LoadRuntime("")
@@ -180,8 +207,15 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	preview, code := migrateMachineConfig(installer.ModeDryRun, &stdout, &stderr, runtime)
-	if code != 0 || preview.Config.MCP.HTTP.Port != config.DefaultMCPPort || !strings.Contains(stdout.String(), "change  rename") {
-		t.Fatalf("preview code=%d port=%d stdout=%q stderr=%q", code, preview.Config.MCP.HTTP.Port, stdout.String(), stderr.String())
+	if code != 0 || preview.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
+		!strings.Contains(stdout.String(), "change  rename") {
+		t.Fatalf(
+			"preview code=%d port=%d stdout=%q stderr=%q",
+			code,
+			preview.Config.MCP.HTTP.Port,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 	if _, err := os.Stat(legacy); err != nil {
 		t.Fatalf("preview touched the pre-split file: %v", err)
@@ -190,12 +224,20 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("apply code=%d stderr=%q", code, stderr.String())
 	}
-	if applied.Config.Path != filepath.Join(dir, config.FileName) || applied.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
-		!applied.Config.Harvester.Enabled || applied.Config.MCPServerSource("harvester") != config.SourceFile {
+	if applied.Config.Path != filepath.Join(dir, config.FileName) ||
+		applied.Config.MCP.HTTP.Port != config.DefaultMCPPort ||
+		!applied.Config.Harvester.Enabled ||
+		applied.Config.MCPServerSource("harvester") != config.SourceFile {
 		t.Fatalf("applied path=%q port=%d harvester=%t source=%q", applied.Config.Path, applied.Config.MCP.HTTP.Port,
 			applied.Config.Harvester.Enabled, applied.Config.MCPServerSource("harvester"))
 	}
-	if options := newInstallerOptions(installer.ModeApply, "", true, io.Discard, applied); options.MCPPort != config.DefaultMCPPort {
+	if options := newInstallerOptions(
+		installer.ModeApply,
+		"",
+		true,
+		io.Discard,
+		applied,
+	); options.MCPPort != config.DefaultMCPPort {
 		t.Fatalf("installer would wire port %d, want %d", options.MCPPort, config.DefaultMCPPort)
 	}
 }
@@ -232,10 +274,31 @@ func TestDoctorExternalGatewayNeverRendersAsAbsence(t *testing.T) {
 		enabled, external, warnings int
 	}{
 		{name: "off", enabled: 1, external: 0, warnings: 0, want: ""},
-		{name: "harvester disabled", enabled: 0, external: 1, reported: "disabled", warnings: 1, want: "harvester.enabled is false"},
+		{
+			name:     "harvester disabled",
+			enabled:  0,
+			external: 1,
+			reported: "disabled",
+			warnings: 1,
+			want:     "harvester.enabled is false",
+		},
 		{name: "old daemon", enabled: 1, external: 1, warnings: 1, want: "not reported"},
-		{name: "failed", enabled: 1, external: 1, reported: "failed: listen tcp 127.0.0.1:18378: bind", warnings: 1, want: "failed: listen"},
-		{name: "listening", enabled: 1, external: 1, reported: "listening on 127.0.0.1:18378", warnings: 0, want: "listening on"},
+		{
+			name:     "failed",
+			enabled:  1,
+			external: 1,
+			reported: "failed: listen tcp 127.0.0.1:18378: bind",
+			warnings: 1,
+			want:     "failed: listen",
+		},
+		{
+			name:     "listening",
+			enabled:  1,
+			external: 1,
+			reported: "listening on 127.0.0.1:18378",
+			warnings: 0,
+			want:     "listening on",
+		},
 	}
 	for _, tc := range cases {
 		harvester := config.DefaultHarvester()
@@ -264,7 +327,13 @@ func TestConfigInitRefusesBeforeWritingEitherFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runConfigInit(nil, &stdout, &stderr, runtime); code != 1 || !strings.Contains(stderr.String(), harvesterPath) {
+	if code := runConfigInit(
+		nil,
+		&stdout,
+		&stderr,
+		runtime,
+	); code != 1 ||
+		!strings.Contains(stderr.String(), harvesterPath) {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
 	}
 	if _, err := os.Stat(runtime.Config.Path); !os.IsNotExist(err) {

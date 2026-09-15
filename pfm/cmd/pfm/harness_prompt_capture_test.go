@@ -33,7 +33,10 @@ func writeFakeHarnessClaude(t *testing.T, body string) string {
 // CHECK FAILED — the doctor row that reports this never gets to guess whether
 // the OAuth-only routing spent real money.
 func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *testing.T) {
-	binary := writeFakeHarnessClaude(t, "printf '{\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":12,\"output_tokens\":4},\"result\":\"hi\"}\\n'\nexit 0\n")
+	binary := writeFakeHarnessClaude(
+		t,
+		"printf '{\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":12,\"output_tokens\":4},\"result\":\"hi\"}\\n'\nexit 0\n",
+	)
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 
@@ -57,7 +60,10 @@ func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *te
 func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 	record := filepath.Join(t.TempDir(), "config-dir-seen.txt")
 	t.Setenv("PFM_TEST_HARNESS_CONFIGDIR_RECORD", record)
-	binary := writeFakeHarnessClaude(t, "printf '%s' \"$CLAUDE_CONFIG_DIR\" > \"$PFM_TEST_HARNESS_CONFIGDIR_RECORD\"\nexit 1\n")
+	binary := writeFakeHarnessClaude(
+		t,
+		"printf '%s' \"$CLAUDE_CONFIG_DIR\" > \"$PFM_TEST_HARNESS_CONFIGDIR_RECORD\"\nexit 1\n",
+	)
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 
@@ -78,7 +84,11 @@ func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want a fresh temp dir, not the real home config", seen)
 	}
 	if info, statErr := os.Stat(seen); statErr == nil {
-		t.Fatalf("throwaway CLAUDE_CONFIG_DIR %q still exists after capture (mode %s) — it must be removed", seen, info.Mode())
+		t.Fatalf(
+			"throwaway CLAUDE_CONFIG_DIR %q still exists after capture (mode %s) — it must be removed",
+			seen,
+			info.Mode(),
+		)
 	} else if !os.IsNotExist(statErr) {
 		t.Fatalf("stat throwaway CLAUDE_CONFIG_DIR %q: %v", seen, statErr)
 	}

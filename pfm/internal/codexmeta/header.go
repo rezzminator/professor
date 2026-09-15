@@ -46,9 +46,15 @@ func Decode(line []byte) (Header, error) {
 		return Header{}, errors.New("record is not session_meta")
 	}
 	fields := Fields{
-		ID: first(record.ID, record.Payload.ID), SessionID: first(record.SessionID, record.Payload.SessionID),
-		ParentThread: first(record.ParentThread, record.Payload.ParentThread), ParentThreadID: first(record.ParentThreadID, record.Payload.ParentThreadID),
-		ThreadSource: first(record.ThreadSource, record.Payload.ThreadSource), Source: record.Source,
+		ID:        first(record.ID, record.Payload.ID),
+		SessionID: first(record.SessionID, record.Payload.SessionID),
+		ParentThread: first(
+			record.ParentThread,
+			record.Payload.ParentThread,
+		),
+		ParentThreadID: first(record.ParentThreadID, record.Payload.ParentThreadID),
+		ThreadSource:   first(record.ThreadSource, record.Payload.ThreadSource),
+		Source:         record.Source,
 	}
 	if len(fields.Source) == 0 {
 		fields.Source = record.Payload.Source
@@ -77,7 +83,19 @@ func Decode(line []byte) (Header, error) {
 	case fields.ThreadSource == "" && fields.ParentThread == "" && fields.ParentThreadID == "" && (source == "cli" || source == "vscode" || source == "exec" || source == "mcp"):
 		kind = User
 	}
-	return Header{Fields: fields, Kind: kind, LineageParent: first(record.SessionID, record.Payload.SessionID, record.ParentThread, record.ParentThreadID, record.Payload.ParentThread, record.Payload.ParentThreadID, fields.ParentThreadID)}, nil
+	return Header{
+		Fields: fields,
+		Kind:   kind,
+		LineageParent: first(
+			record.SessionID,
+			record.Payload.SessionID,
+			record.ParentThread,
+			record.ParentThreadID,
+			record.Payload.ParentThread,
+			record.Payload.ParentThreadID,
+			fields.ParentThreadID,
+		),
+	}, nil
 }
 
 func Read(path string) (Header, error) {

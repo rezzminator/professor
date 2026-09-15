@@ -57,7 +57,9 @@ func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := json.Marshal(map[string]any{"model": strings.TrimSpace(string(model)), "system": strings.TrimSuffix(string(prompt), "\n")})
+	body, err := json.Marshal(
+		map[string]any{"model": strings.TrimSpace(string(model)), "system": strings.TrimSuffix(string(prompt), "\n")},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

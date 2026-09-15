@@ -68,8 +68,10 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
 	if !h.Enabled || !got.MCPServers["harvester"].Enabled {
 		t.Fatalf("enabled not mirrored: harvester=%t server=%t", h.Enabled, got.MCPServers["harvester"].Enabled)
 	}
-	want := HarvesterExternal{Enabled: true, Host: "0.0.0.0", Port: 19000, PublicURL: "https://harvester.example.com",
-		Passphrase: "open sesame", StaticToken: "tok", StateDir: filepath.Join(home, "state")}
+	want := HarvesterExternal{
+		Enabled: true, Host: "0.0.0.0", Port: 19000, PublicURL: "https://harvester.example.com",
+		Passphrase: "open sesame", StaticToken: "tok", StateDir: filepath.Join(home, "state"),
+	}
 	if h.External != want {
 		t.Fatalf("external = %+v, want %+v", h.External, want)
 	}
@@ -82,7 +84,9 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
 	if !h.Fetch.Browser || h.Fetch.UserAgent != "UA/1" || h.Fetch.ProxyURL != "http://proxy.example:3128" {
 		t.Fatalf("fetch = %+v", h.Fetch)
 	}
-	if h.Cache.Dir != filepath.Join(home, "cache") || h.Cache.TTL != time.Minute || h.Cache.NegativeTTL != 5*time.Second || h.Cache.NegativeTransientTTL != 2*time.Second {
+	if h.Cache.Dir != filepath.Join(home, "cache") || h.Cache.TTL != time.Minute ||
+		h.Cache.NegativeTTL != 5*time.Second ||
+		h.Cache.NegativeTransientTTL != 2*time.Second {
 		t.Fatalf("cache = %+v", h.Cache)
 	}
 	if !h.Convert.PDFOCR || !h.Convert.PDFLayout {
@@ -157,23 +161,55 @@ func TestHarvesterFileRefusesUnsafeOrInvalidSettings(t *testing.T) {
 		mode    os.FileMode
 		want    string
 	}{
-		"external without auth": {`{"external":{"enabled":true,"publicURL":"https://h.example.com"}}`, 0o600, "never unauthenticated"},
-		"external without url":  {`{"external":{"enabled":true,"auth":{"staticToken":"t"}}}`, 0o600, "requires external.publicURL"},
-		"external url path":     {`{"external":{"publicURL":"https://h.example.com/mcp"}}`, 0o600, "without a path"},
-		"searxng query":         {`{"search":{"searxngURL":"http://127.0.0.1:8888/?x=1"}}`, 0o600, "query or fragment"},
-		"searxng scheme":        {`{"search":{"searxngURL":"ftp://127.0.0.1"}}`, 0o600, "http or https"},
-		"doi-mirror scheme":     {`{"scholarly":{"mirrors":{"doi-mirror":"ftp://mirror.example"}}}`, 0o600, "http or https"},
-		"doi-mirror relative":   {`{"scholarly":{"mirrors":{"doi-mirror":"mirror.example/path"}}}`, 0o600, "http or https"},
-		"doi-mirror userinfo":   {`{"scholarly":{"mirrors":{"doi-mirror":"https://user:pass@mirror.example"}}}`, 0o600, "must not carry userinfo"},
-		"doi-mirror query":      {`{"scholarly":{"mirrors":{"doi-mirror":"https://mirror.example/?token=x"}}}`, 0o600, "query or fragment"},
-		"doi-mirror fragment":   {`{"scholarly":{"mirrors":{"doi-mirror":"https://mirror.example/#pdf"}}}`, 0o600, "query or fragment"},
+		"external without auth": {
+			`{"external":{"enabled":true,"publicURL":"https://h.example.com"}}`,
+			0o600,
+			"never unauthenticated",
+		},
+		"external without url": {
+			`{"external":{"enabled":true,"auth":{"staticToken":"t"}}}`,
+			0o600,
+			"requires external.publicURL",
+		},
+		"external url path": {`{"external":{"publicURL":"https://h.example.com/mcp"}}`, 0o600, "without a path"},
+		"searxng query":     {`{"search":{"searxngURL":"http://127.0.0.1:8888/?x=1"}}`, 0o600, "query or fragment"},
+		"searxng scheme":    {`{"search":{"searxngURL":"ftp://127.0.0.1"}}`, 0o600, "http or https"},
+		"doi-mirror scheme": {
+			`{"scholarly":{"mirrors":{"doi-mirror":"ftp://mirror.example"}}}`,
+			0o600,
+			"http or https",
+		},
+		"doi-mirror relative": {
+			`{"scholarly":{"mirrors":{"doi-mirror":"mirror.example/path"}}}`,
+			0o600,
+			"http or https",
+		},
+		"doi-mirror userinfo": {
+			`{"scholarly":{"mirrors":{"doi-mirror":"https://user:pass@mirror.example"}}}`,
+			0o600,
+			"must not carry userinfo",
+		},
+		"doi-mirror query": {
+			`{"scholarly":{"mirrors":{"doi-mirror":"https://mirror.example/?token=x"}}}`,
+			0o600,
+			"query or fragment",
+		},
+		"doi-mirror fragment": {
+			`{"scholarly":{"mirrors":{"doi-mirror":"https://mirror.example/#pdf"}}}`,
+			0o600,
+			"query or fragment",
+		},
 		"negative ttl":          {`{"cache":{"ttlSeconds":-1}}`, 0o600, "0 or more"},
 		"zero inline":           {`{"output":{"maxInlineChars":0}}`, 0o600, "at least 1"},
 		"relative cache dir":    {`{"cache":{"dir":"cache"}}`, 0o600, "must be absolute"},
 		"unknown key":           {`{"search":{"searxng":"http://x"}}`, 0o600, "unknown field"},
 		"retired env name":      {`{"SEARXNG_URL":"http://x"}`, 0o600, "unknown field"},
 		"world-readable secret": {`{"search":{"braveApiKey":"k"}}`, 0o644, "chmod 600"},
-		"port collision":        {`{"external":{"enabled":true,"port":18377,"publicURL":"https://h.example.com","auth":{"staticToken":"t"}}}`, 0o600, "collides with mcp.http.port"},
+		"port collision": {
+			`{"external":{"enabled":true,"port":18377,"publicURL":"https://h.example.com","auth":{"staticToken":"t"}}}`,
+			0o600,
+			"collides with mcp.http.port",
+		},
 	}
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {

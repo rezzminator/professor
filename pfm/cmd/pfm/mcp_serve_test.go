@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/harvestmcp"
 	"hostops/pfm/internal/mcpserv"
 	"hostops/pfm/internal/paths"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
@@ -25,8 +25,12 @@ func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 		Version:   "test-version",
 		StartedAt: time.Unix(123, 0).UTC(),
 		Endpoint:  "http://127.0.0.1:8377",
-		Chat:      http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
-		Harvester: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+		Chat: http.HandlerFunc(
+			func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
+		),
+		Harvester: http.HandlerFunc(
+			func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
+		),
 	})
 
 	response := httptest.NewRecorder()
@@ -158,7 +162,11 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 	enabled := httptest.NewRecorder()
 	handler.ServeHTTP(enabled, httptest.NewRequest(http.MethodPost, "/mcp/chat", nil))
 	if enabled.Code != http.StatusNoContent {
-		t.Fatalf("enabled route status = %d, want %d — disabling harvester must not dark chat", enabled.Code, http.StatusNoContent)
+		t.Fatalf(
+			"enabled route status = %d, want %d — disabling harvester must not dark chat",
+			enabled.Code,
+			http.StatusNoContent,
+		)
 	}
 
 	unknown := httptest.NewRecorder()
@@ -167,7 +175,10 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 		t.Fatalf("unregistered path status = %d, want %d", unknown.Code, http.StatusNotFound)
 	}
 	if unknown.Code == disabled.Code {
-		t.Fatalf("unregistered path and disabled server both report %d; a disabled server must read as disabled, not as an absent route", unknown.Code)
+		t.Fatalf(
+			"unregistered path and disabled server both report %d; a disabled server must read as disabled, not as an absent route",
+			unknown.Code,
+		)
 	}
 }
 
@@ -234,7 +245,10 @@ func TestMCPServeBothDisabledRefusesBeforeBindingPort(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "every registered server is disabled by config") ||
 		!strings.Contains(stderr.String(), "pfm mcp <server> enable") {
-		t.Fatalf("both-disabled serve stderr = %q, want the disabled-config refusal and its enable hint", stderr.String())
+		t.Fatalf(
+			"both-disabled serve stderr = %q, want the disabled-config refusal and its enable hint",
+			stderr.String(),
+		)
 	}
 
 	listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
@@ -271,7 +285,12 @@ func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
 	}
 }
 
-func connectHTTPMCP(t *testing.T, ctx context.Context, endpoint string, client *http.Client) (*mcp.ClientSession, error) {
+func connectHTTPMCP(
+	t *testing.T,
+	ctx context.Context,
+	endpoint string,
+	client *http.Client,
+) (*mcp.ClientSession, error) {
 	t.Helper()
 	protocolClient := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
 	return protocolClient.Connect(ctx, &mcp.StreamableClientTransport{

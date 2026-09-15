@@ -25,7 +25,10 @@ func TestCoverageIsIndexKeyedAndExpandsPaths(t *testing.T) {
 	}
 	want := "/corpus/agent-one.jsonl\tREAD\tcondensed and checked\n" +
 		"/corpus/agent-two.jsonl\tSKIP\tno durable investigation\n"
-	if got := RenderExpandedCoverage(coverage, []string{"/corpus/agent-one.jsonl", "/corpus/agent-two.jsonl"}); got != want {
+	if got := RenderExpandedCoverage(
+		coverage,
+		[]string{"/corpus/agent-one.jsonl", "/corpus/agent-two.jsonl"},
+	); got != want {
 		t.Fatalf("RenderExpandedCoverage() = %q, want %q", got, want)
 	}
 }

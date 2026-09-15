@@ -13,7 +13,10 @@ import (
 func TestLastReadsTheNewestAnswerPastLaterToolCalls(t *testing.T) {
 	root := testjail.Fleet(t)
 	const id = "a1111111-1111-4111-8111-111111111111"
-	seedClaudeChat(t, root, id,
+	seedClaudeChat(
+		t,
+		root,
+		id,
 		assistantSaid("first answer"),
 		assistantSaid("tests are green"),
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}`,

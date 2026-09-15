@@ -91,7 +91,11 @@ func TestStatsSampleMsgStretchesOnlyTheLimitsTab(t *testing.T) {
 		previous = model.statsCadence.interval
 	}
 	if previous <= statsRefreshInterval {
-		t.Fatalf("statsCadence interval after 4 untouched Limits passes = %s, want > %s", previous, statsRefreshInterval)
+		t.Fatalf(
+			"statsCadence interval after 4 untouched Limits passes = %s, want > %s",
+			previous,
+			statsRefreshInterval,
+		)
 	}
 
 	// A keystroke resets the cadence for the NEXT sample.

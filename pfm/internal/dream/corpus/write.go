@@ -37,13 +37,25 @@ func Write(stage artifact.StageLayout, result Result) error {
 	}
 	actualDigest := digest([]byte(pathsRaw))
 	if result.PathsSHA256 != actualDigest {
-		return fmt.Errorf("paths digest mismatch: result has %s, rendered paths have %s", result.PathsSHA256, actualDigest)
+		return fmt.Errorf(
+			"paths digest mismatch: result has %s, rendered paths have %s",
+			result.PathsSHA256,
+			actualDigest,
+		)
 	}
 	if result.Census.SelectedPairedTranscriptCount != len(result.Paths) {
-		return fmt.Errorf("census selected count %d does not match %d paths", result.Census.SelectedPairedTranscriptCount, len(result.Paths))
+		return fmt.Errorf(
+			"census selected count %d does not match %d paths",
+			result.Census.SelectedPairedTranscriptCount,
+			len(result.Paths),
+		)
 	}
 	if result.Census.CoverageGapCount != len(result.Gaps) {
-		return fmt.Errorf("census gap count %d does not match %d gaps", result.Census.CoverageGapCount, len(result.Gaps))
+		return fmt.Errorf(
+			"census gap count %d does not match %d gaps",
+			result.Census.CoverageGapCount,
+			len(result.Gaps),
+		)
 	}
 	if result.Census.PairedTranscriptCount != result.Census.SelectedPairedTranscriptCount+result.Census.OmittedPairedTranscriptCount {
 		return fmt.Errorf("census paired count is inconsistent with selected and omitted counts")
@@ -65,7 +77,11 @@ func Write(stage artifact.StageLayout, result Result) error {
 	candidateRaw := ""
 	if result.Window.Mode == WindowBootstrap {
 		if len(result.Selected) != len(result.Paths) {
-			return fmt.Errorf("bootstrap candidate count %d does not match %d paths", len(result.Selected), len(result.Paths))
+			return fmt.Errorf(
+				"bootstrap candidate count %d does not match %d paths",
+				len(result.Selected),
+				len(result.Paths),
+			)
 		}
 		candidateRaw, err = renderCandidates(result.Selected)
 		if err != nil {

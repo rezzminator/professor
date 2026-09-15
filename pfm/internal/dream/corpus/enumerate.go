@@ -22,7 +22,12 @@ import (
 // RULING-02 guard: if Codex rollouts are ever added at this boundary, dreamer
 // seat rollouts must be excluded by construction so the organ cannot ingest its
 // own distill/refiner output. Today only Claude agent-*.meta.json pairs enter.
-func Enumerate(ctx artifact.RepoContext, lane artifact.LaneContext, selection Selection, now time.Time) (Result, error) {
+func Enumerate(
+	ctx artifact.RepoContext,
+	lane artifact.LaneContext,
+	selection Selection,
+	now time.Time,
+) (Result, error) {
 	if now.IsZero() {
 		return Result{}, fmt.Errorf("enumeration time is missing")
 	}
@@ -47,7 +52,10 @@ func validateInputs(ctx artifact.RepoContext, lane artifact.LaneContext, selecti
 	}
 	if selection.CorpusFile != "" {
 		if !filepath.IsAbs(selection.CorpusFile) || hasControl(selection.CorpusFile) {
-			return artifact.ErrorAt(selection.CorpusFile, fmt.Errorf("corpus file requires an absolute control-free path: %s", selection.CorpusFile))
+			return artifact.ErrorAt(
+				selection.CorpusFile,
+				fmt.Errorf("corpus file requires an absolute control-free path: %s", selection.CorpusFile),
+			)
 		}
 		return nil
 	}
@@ -119,7 +127,12 @@ func enumerateCorpusFile(lane artifact.LaneContext, path string, now time.Time) 
 	}, nil
 }
 
-func enumerateRegistry(ctx artifact.RepoContext, lane artifact.LaneContext, bootstrapCount int, now time.Time) (Result, error) {
+func enumerateRegistry(
+	ctx artifact.RepoContext,
+	lane artifact.LaneContext,
+	bootstrapCount int,
+	now time.Time,
+) (Result, error) {
 	bootstrap := bootstrapCount > 0
 	window := Window{
 		AgentType:    lane.AgentType,

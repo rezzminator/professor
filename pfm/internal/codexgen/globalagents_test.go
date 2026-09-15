@@ -18,8 +18,11 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\ntools: Read\nmodel: sonnet\n---\n\n"+
 			"Delegate to children are Explore+haiku (never\nyour own type) for search fan-out.\n")
-	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "beta.md"),
-		"---\nname: beta\ndescription: Beta role for testing.\ntools: Read\nmodel: haiku\n---\n\nBeta body, unrelated.\n")
+	writeTestFile(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "agents", "beta.md"),
+		"---\nname: beta\ndescription: Beta role for testing.\ntools: Read\nmodel: haiku\n---\n\nBeta body, unrelated.\n",
+	)
 
 	result, err := RunGlobalAgents(GlobalAgentsOptions{Home: home})
 	if err != nil {
@@ -40,7 +43,9 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 		t.Fatalf("problems = %#v, want none for a fresh install", result.Problems)
 	}
 
-	alphaTOML := string(mustReadTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")))
+	alphaTOML := string(
+		mustReadTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")),
+	)
 	if strings.Contains(alphaTOML, "children are Explore+haiku") {
 		t.Fatalf("alpha.toml: substitution did not fire:\n%s", alphaTOML)
 	}
@@ -99,9 +104,12 @@ func assertGlobalSymlink(t *testing.T, target, source string) {
 // parses as TOML (via BurntSushi/toml, not our own escaping logic).
 func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimiterCollision(t *testing.T) {
 	home := t.TempDir()
-	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.md"),
+	writeTestFile(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.md"),
 		"---\nname: quirky\ndescription: Uses \"walker fast\" and \"map it now\" verbatim.\ntools: Read\nmodel: sonnet\n---\n\n"+
-			"Body has a literal triple quote \"\"\" and a backslash \\ standalone.\n")
+			"Body has a literal triple quote \"\"\" and a backslash \\ standalone.\n",
+	)
 
 	result, err := RunGlobalAgents(GlobalAgentsOptions{Home: home})
 	if err != nil {
@@ -111,7 +119,9 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		t.Fatalf("compiled = %#v, want 1 entry", result.Compiled)
 	}
 
-	got := string(mustReadTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.toml")))
+	got := string(
+		mustReadTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.toml")),
+	)
 	want := "name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
 		"developer_instructions = \"\"\"\n" +
@@ -121,7 +131,11 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		t.Fatalf("quirky.toml =\n%q\nwant\n%q", got, want)
 	}
 	if err := validateTOML(got); err != nil {
-		t.Fatalf("emitted TOML does not parse (the exact startup failure this escaping exists to prevent): %v\n%s", err, got)
+		t.Fatalf(
+			"emitted TOML does not parse (the exact startup failure this escaping exists to prevent): %v\n%s",
+			err,
+			got,
+		)
 	}
 }
 

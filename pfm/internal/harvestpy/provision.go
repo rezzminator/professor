@@ -123,7 +123,11 @@ func packagePlan(platform Platform) (int64, string, []string) {
 	case Platform{GOOS: "darwin", GOARCH: "arm64"}:
 		return 389353114, "pinned-lock-artifact-sum", nil
 	case Platform{GOOS: "darwin", GOARCH: "amd64"}:
-		return -1, "blocked-exact-lock", []string{"torch==2.12.1 has no compatible darwin-amd64 wheel or source", "torchvision==0.27.1 has no compatible darwin-amd64 wheel or source", "onnxruntime==1.27.0 has no compatible darwin-amd64 wheel or source"}
+		return -1, "blocked-exact-lock", []string{
+			"torch==2.12.1 has no compatible darwin-amd64 wheel or source",
+			"torchvision==0.27.1 has no compatible darwin-amd64 wheel or source",
+			"onnxruntime==1.27.0 has no compatible darwin-amd64 wheel or source",
+		}
 	default:
 		return -1, "unmeasured-target", nil
 	}
@@ -174,11 +178,18 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	desired := digestID(base)
 	base.Digest = desired
 	current := RuntimeRoot(options.Root, platform)
-	if existing, err := ReadEnvironmentDigest(filepath.Join(current, "environment.json")); err == nil && existing.Digest == desired && existing.State == "ready" {
+	if existing, err := ReadEnvironmentDigest(
+		filepath.Join(current, "environment.json"),
+	); err == nil && existing.Digest == desired &&
+		existing.State == "ready" {
 		if _, checkErr := Check(ctx, options.Root, platform); checkErr == nil {
 			return ProvisionResult{
-				Digest: desired, Environment: existing,
-				Runtime: Runtime{Python: filepath.Join(current, "project", ".venv", "bin", "python"), Script: filepath.Join(current, "project", "converter.py")},
+				Digest:      desired,
+				Environment: existing,
+				Runtime: Runtime{
+					Python: filepath.Join(current, "project", ".venv", "bin", "python"),
+					Script: filepath.Join(current, "project", "converter.py"),
+				},
 			}, nil
 		}
 	}
@@ -220,7 +231,10 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err := os.Mkdir(staging, 0o700); err != nil {
 		return ProvisionResult{}, fmt.Errorf("create harvestpy versioned environment: %w", err)
 	}
-	if err := writePrivate(filepath.Join(staging, incompleteMarkerName), []byte(errProvisioningIncomplete.Error()+"\n")); err != nil {
+	if err := writePrivate(
+		filepath.Join(staging, incompleteMarkerName),
+		[]byte(errProvisioningIncomplete.Error()+"\n"),
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("mark harvestpy environment incomplete: %w", err)
 	}
 	project := filepath.Join(staging, "project")
@@ -267,7 +281,12 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if _, err := options.Run(ctx, uvPath, []string{"pip", "check", "--python", venvPython}, project); err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy locked dependency check failed: %w", err)
 	}
-	inventoryOutput, err := options.Run(ctx, uvPath, []string{"pip", "list", "--format", "freeze", "--python", venvPython}, project)
+	inventoryOutput, err := options.Run(
+		ctx,
+		uvPath,
+		[]string{"pip", "list", "--format", "freeze", "--python", venvPython},
+		project,
+	)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy installed inventory failed: %w", err)
 	}
@@ -359,7 +378,10 @@ func findIncompleteEnvironment(root string, platform Platform) (EnvironmentDiges
 		return EnvironmentDigest{}, false, nil
 	}
 	if err != nil {
-		return EnvironmentDigest{}, false, fmt.Errorf("inspect harvestpy environment root for incomplete provisioning: %w", err)
+		return EnvironmentDigest{}, false, fmt.Errorf(
+			"inspect harvestpy environment root for incomplete provisioning: %w",
+			err,
+		)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.Contains(entry.Name(), ".repair-") {
@@ -375,7 +397,10 @@ func findIncompleteEnvironment(root string, platform Platform) (EnvironmentDiges
 			return EnvironmentDigest{}, false, fmt.Errorf("inspect harvestpy incomplete marker %s: %w", marker, err)
 		}
 		if !info.Mode().IsRegular() {
-			return EnvironmentDigest{}, false, fmt.Errorf("harvestpy incomplete marker is not a regular file: %s", marker)
+			return EnvironmentDigest{}, false, fmt.Errorf(
+				"harvestpy incomplete marker is not a regular file: %s",
+				marker,
+			)
 		}
 		return EnvironmentDigest{
 			Target: platform.String(), Environment: environment,
@@ -576,7 +601,9 @@ func extractPython(path, destination string) (string, error) {
 			return "", err
 		}
 		destinationPath := filepath.Join(destination, filepath.FromSlash(name))
-		if header.Typeflag == tar.TypeXGlobalHeader || header.Typeflag == tar.TypeXHeader || header.Typeflag == tar.TypeGNULongName || header.Typeflag == tar.TypeGNULongLink {
+		if header.Typeflag == tar.TypeXGlobalHeader || header.Typeflag == tar.TypeXHeader ||
+			header.Typeflag == tar.TypeGNULongName ||
+			header.Typeflag == tar.TypeGNULongLink {
 			continue
 		}
 		switch header.Typeflag {
@@ -651,7 +678,8 @@ func safeArchiveName(name string) (string, error) {
 		return "", fmt.Errorf("unsafe archive path %q", name)
 	}
 	clean := filepath.ToSlash(filepath.Clean(name))
-	if clean == "." || clean != strings.TrimSuffix(name, "/") || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+	if clean == "." || clean != strings.TrimSuffix(name, "/") || strings.HasPrefix(clean, "../") ||
+		strings.Contains(clean, "/../") {
 		return "", fmt.Errorf("unsafe archive path %q", name)
 	}
 	return strings.TrimSuffix(clean, "/"), nil
@@ -733,7 +761,13 @@ func runCommand(ctx context.Context, executable string, arguments []string, dire
 	command.Stderr = &stderr
 	err := command.Run()
 	if err != nil {
-		return stdout.Bytes(), fmt.Errorf("%s %s: %w (stderr: %s)", executable, strings.Join(arguments, " "), err, strings.TrimSpace(stderr.String()))
+		return stdout.Bytes(), fmt.Errorf(
+			"%s %s: %w (stderr: %s)",
+			executable,
+			strings.Join(arguments, " "),
+			err,
+			strings.TrimSpace(stderr.String()),
+		)
 	}
 	return stdout.Bytes(), nil
 }

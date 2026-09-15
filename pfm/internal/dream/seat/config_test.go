@@ -16,13 +16,28 @@ var (
 func mcpOutput(status string) string {
 	var output strings.Builder
 	fmt.Fprintf(&output, "%-22s%-10s%-34s%-10s%s\n", "Name", "Command", "Args", "Status", "Auth")
-	fmt.Fprintf(&output, "%-22s%-10s%-34s%-10s%s\n", "chrome-devtools", "npx", "-y package --browser url", status, "Unsupported")
+	fmt.Fprintf(
+		&output,
+		"%-22s%-10s%-34s%-10s%s\n",
+		"chrome-devtools",
+		"npx",
+		"-y package --browser url",
+		status,
+		"Unsupported",
+	)
 	fmt.Fprintf(&output, "%-22s%-10s%-34s%-10s%s\n", "harvester", "uv", "--directory repo run", status, "Unsupported")
 	output.WriteByte('\n')
 	fmt.Fprintf(&output, "%-22s%-34s%-10s%s\n", "Name", "Url", "Status", "Auth")
 	fmt.Fprintf(&output, "%-22s%-34s%-10s%s\n", "atlassiancf", "https://example.invalid/a", status, "OAuth")
 	fmt.Fprintf(&output, "%-22s%-34s%-10s%s\n", "notion", "https://example.invalid/n", status, "OAuth")
-	fmt.Fprintf(&output, "%-22s%-34s%-10s%s\n", "openaiDeveloperDocs", "https://example.invalid/o", status, "Unsupported")
+	fmt.Fprintf(
+		&output,
+		"%-22s%-34s%-10s%s\n",
+		"openaiDeveloperDocs",
+		"https://example.invalid/o",
+		status,
+		"Unsupported",
+	)
 	return output.String()
 }
 
@@ -162,7 +177,11 @@ func TestDiscoverAndVerifyConfigDerivesRosterAndUsesExactPinSet(t *testing.T) {
 		t.Fatalf("discovery directory = %q, want target repository", got)
 	}
 	if got := commands.calls[1].args; !reflect.DeepEqual(got, mcpListArguments(config.Overrides)) {
-		t.Fatalf("verification args differ from exact seat pin set:\n got %q\nwant %q", got, mcpListArguments(config.Overrides))
+		t.Fatalf(
+			"verification args differ from exact seat pin set:\n got %q\nwant %q",
+			got,
+			mcpListArguments(config.Overrides),
+		)
 	}
 	if got := commands.calls[1].directory; got != "/repo" {
 		t.Fatalf("verification directory = %q, want same target repository as discovery", got)
@@ -180,7 +199,11 @@ func TestDiscoverAndVerifyConfigDerivesRosterAndUsesExactPinSet(t *testing.T) {
 func TestVerificationRequiresExitZeroAsWellAsNoEnabledRows(t *testing.T) {
 	commands := &scriptedCommands{results: []CommandResult{
 		{Stdout: discoveryMCPOutput, ExitCode: 0},
-		{Stdout: "No MCP servers configured yet. Try `codex mcp add my-tool -- my-command`.\n", Stderr: "failed to load bootstrap configuration", ExitCode: 1},
+		{
+			Stdout:   "No MCP servers configured yet. Try `codex mcp add my-tool -- my-command`.\n",
+			Stderr:   "failed to load bootstrap configuration",
+			ExitCode: 1,
+		},
 	}}
 	_, verification, err := DiscoverAndVerifyConfig(context.Background(), commands, "/repo")
 	if err == nil {

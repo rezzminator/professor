@@ -84,7 +84,11 @@ func BrowserHostResolverRule(ctx context.Context, rawURL string) string {
 	if err != nil {
 		// Not fatal: Chrome falls back to its own resolution. Say so, because a
 		// silent miss here is exactly how the rewritten answer would creep back.
-		log.Printf("harvest: could not pin %s for the browser rung (%v) — Chrome will resolve it itself, which this network may rewrite", host, err)
+		log.Printf(
+			"harvest: could not pin %s for the browser rung (%v) — Chrome will resolve it itself, which this network may rewrite",
+			host,
+			err,
+		)
 		return ""
 	}
 	return browserHostResolverRuleFrom(rawURL, ips)
@@ -110,7 +114,11 @@ func browserHostResolverRuleFrom(rawURL string, ips []net.IP) string {
 	// refuse, so the rule is withheld rather than narrowed.
 	for _, ip := range ips {
 		if privateIP(ip) {
-			log.Printf("harvest: refusing to pin %s for the browser rung: the resolver returned the private address %s", host, ip)
+			log.Printf(
+				"harvest: refusing to pin %s for the browser rung: the resolver returned the private address %s",
+				host,
+				ip,
+			)
 			return ""
 		}
 	}
@@ -240,7 +248,12 @@ func (r *dohResolver) LookupIP(ctx context.Context, host string) ([]net.IP, erro
 	if fallbackErr != nil {
 		// Report BOTH failures. One of them alone reads as "the host does not
 		// exist" when the real story may be "our resolver was unreachable".
-		return nil, fmt.Errorf("DoH lookup failed for %s (%v) and the system resolver also failed: %w", host, err, fallbackErr)
+		return nil, fmt.Errorf(
+			"DoH lookup failed for %s (%v) and the system resolver also failed: %w",
+			host,
+			err,
+			fallbackErr,
+		)
 	}
 	return fallbackIPs, nil
 }
@@ -264,7 +277,11 @@ func (r *dohResolver) warnOnce(host string, err error) {
 	r.warned[host] = true
 	r.mu.Unlock()
 	if !already {
-		log.Printf("harvest: DNS-over-HTTPS could not resolve %s (%v) — falling back to the system resolver, whose answers this network may rewrite", host, err)
+		log.Printf(
+			"harvest: DNS-over-HTTPS could not resolve %s (%v) — falling back to the system resolver, whose answers this network may rewrite",
+			host,
+			err,
+		)
 	}
 }
 

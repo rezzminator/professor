@@ -53,7 +53,8 @@ func TestLoadEngineRosterMatrixAndDefaultEngine(t *testing.T) {
 			}
 			engine, defaultErr := machine.DefaultEngine()
 			if testCase.wantError != "" {
-				if defaultErr == nil || !strings.Contains(defaultErr.Error(), testCase.wantError) || !strings.Contains(defaultErr.Error(), "Codex roster empty") {
+				if defaultErr == nil || !strings.Contains(defaultErr.Error(), testCase.wantError) ||
+					!strings.Contains(defaultErr.Error(), "Codex roster empty") {
 					t.Fatalf("DefaultEngine()=(%q,%v), want error naming both empty rosters", engine, defaultErr)
 				}
 				return
@@ -92,7 +93,8 @@ func TestLoadRejectsExplicitAskEngineWithEmptyRoster(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err := Load(path, home, nil)
-			if err == nil || !strings.Contains(err.Error(), testCase.want) || !strings.Contains(err.Error(), testCase.fix) {
+			if err == nil || !strings.Contains(err.Error(), testCase.want) ||
+				!strings.Contains(err.Error(), testCase.fix) {
 				t.Fatalf("Load() error=%v, want %q and fix %q", err, testCase.want, testCase.fix)
 			}
 		})
@@ -219,7 +221,10 @@ func TestConfiguredCodexHomeRehomesAutoDiscoveredAccount(t *testing.T) {
 			writeCodexAuthFixture(t, replacement)
 
 			path := filepath.Join(t.TempDir(), "config.json")
-			content := fmt.Sprintf(`{"version":2,"accounts":[],"codex":{"homes":[{"id":1,"home":"~/codex-replacement"%s}]}}`, testCase.metadata)
+			content := fmt.Sprintf(
+				`{"version":2,"accounts":[],"codex":{"homes":[{"id":1,"home":"~/codex-replacement"%s}]}}`,
+				testCase.metadata,
+			)
 			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -233,7 +238,12 @@ func TestConfiguredCodexHomeRehomesAutoDiscoveredAccount(t *testing.T) {
 			}
 			got := machine.CodexAccounts[0]
 			if got.ID != 1 || got.Home != replacement || got.Home == oldHome {
-				t.Fatalf("CodexAccounts=%#v, want id 1 at replacement %q and not old home %q", machine.CodexAccounts, replacement, oldHome)
+				t.Fatalf(
+					"CodexAccounts=%#v, want id 1 at replacement %q and not old home %q",
+					machine.CodexAccounts,
+					replacement,
+					oldHome,
+				)
 			}
 			if got.Emoji != testCase.wantEmoji {
 				t.Fatalf("Codex emoji=%q, want %q", got.Emoji, testCase.wantEmoji)
@@ -248,11 +258,16 @@ func TestConfiguredCodexHomeRehomesAutoDiscoveredAccount(t *testing.T) {
 func TestConfiguredCodexHomeWithoutCredentialsIsAConfigError(t *testing.T) {
 	home := t.TempDir()
 	path := filepath.Join(t.TempDir(), "config.json")
-	if err := os.WriteFile(path, []byte(`{"version":2,"accounts":[],"codex":{"homes":[{"id":2,"home":"~/missing"}]}}`), 0o600); err != nil {
+	if err := os.WriteFile(
+		path,
+		[]byte(`{"version":2,"accounts":[],"codex":{"homes":[{"id":2,"home":"~/missing"}]}}`),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(path, home, nil)
-	if err == nil || !strings.Contains(err.Error(), "codex.homes[0]") || !strings.Contains(err.Error(), "valid auth.json") {
+	if err == nil || !strings.Contains(err.Error(), "codex.homes[0]") ||
+		!strings.Contains(err.Error(), "valid auth.json") {
 		t.Fatalf("Load() error=%v", err)
 	}
 }
@@ -297,7 +312,10 @@ func TestCodexAuthAccountIDNestedUnderTokensIsDiscovered(t *testing.T) {
 
 	machine, err := Load(path, home, nil)
 	if err != nil {
-		t.Fatalf("Load() error=%v, want nil — a Codex auth.json with account_id nested under tokens (the real CLI shape) must be discovered", err)
+		t.Fatalf(
+			"Load() error=%v, want nil — a Codex auth.json with account_id nested under tokens (the real CLI shape) must be discovered",
+			err,
+		)
 	}
 	if got := machine.Engines(); !reflect.DeepEqual(got, EngineCounts{pfmengine.Codex: 1}) {
 		t.Fatalf("Engines()=%#v, want {Codex: 1} — the .codex account with a real-shape auth.json was not counted", got)

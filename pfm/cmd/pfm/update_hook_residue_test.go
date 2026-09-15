@@ -14,7 +14,9 @@ import (
 // message names the stranded entry instead of only saying "reconcile it by
 // hand" — the operator's repair instruction must be concrete.
 func TestUpdateRollbackResidueNamesTheStrandedHookCommands(t *testing.T) {
-	stranded := []byte("{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal exit-intercept-vnext\"}]}]}\n}\n")
+	stranded := []byte(
+		"{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal exit-intercept-vnext\"}]}]}\n}\n",
+	)
 	settings, _, stderr := updateHookRollbackFixture(t, func(settings string) {
 		if err := os.WriteFile(settings, stranded, 0o600); err != nil {
 			t.Fatal(err)

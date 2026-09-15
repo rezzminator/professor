@@ -63,7 +63,12 @@ func TestChatSwapAliasIsRetired(t *testing.T) {
 		&stderr,
 	)
 	if code != 2 || !strings.Contains(stderr.String(), `unknown command "swap"`) {
-		t.Fatalf("retired swap alias still dispatches: rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf(
+			"retired swap alias still dispatches: rc=%d stdout=%q stderr=%q",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
 	}
 }
 
@@ -110,7 +115,9 @@ func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 	if code == 0 || !strings.Contains(stderr.String(), "open selector menu") {
 		t.Fatalf("reload selector gate rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if output, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_current_command}").Output(); err != nil || strings.TrimSpace(string(output)) == "" {
+	if output, err := exec.Command("tmux", "-S", socket, "list-panes", "-F", "#{pane_current_command}").
+		Output(); err != nil ||
+		strings.TrimSpace(string(output)) == "" {
 		t.Fatalf("selector gate lost the pane: err=%v output=%q", err, output)
 	}
 }
@@ -148,7 +155,11 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 		return nil
 	}
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"--config", configPath, "chat", "reload", "2", "--sock", socket, "--1h", "on"}, &stdout, &stderr); code != 0 {
+	if code := run(
+		[]string{"--config", configPath, "chat", "reload", "2", "--sock", socket, "--1h", "on"},
+		&stdout,
+		&stderr,
+	); code != 0 {
 		t.Fatalf("schedule rc=%d stderr=%q", code, stderr.String())
 	}
 	joined := strings.Join(workerArgs, "\x00")
@@ -438,7 +449,12 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("fixture claude never ran within the timeout: err=%v stdout=%q stderr=%q", readErr, stdout.String(), stderr.String())
+			t.Fatalf(
+				"fixture claude never ran within the timeout: err=%v stdout=%q stderr=%q",
+				readErr,
+				stdout.String(),
+				stderr.String(),
+			)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

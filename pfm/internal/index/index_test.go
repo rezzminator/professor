@@ -77,7 +77,11 @@ func TestIndexerIteratesEveryConfiguredCodexRoot(t *testing.T) {
 	}
 	for index := range codexRoots {
 		id := fmt.Sprintf("codex-account-%d", index+1)
-		if rollout, found, err := database.Rollout(context.Background(), id); err != nil || !found || rollout.FirstPrompt != id {
+		if rollout, found, err := database.Rollout(
+			context.Background(),
+			id,
+		); err != nil || !found ||
+			rollout.FirstPrompt != id {
 			t.Fatalf("Rollout(%q)=%#v found=%t err=%v", id, rollout, found, err)
 		}
 	}
@@ -85,7 +89,9 @@ func TestIndexerIteratesEveryConfiguredCodexRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if warm.FilesSeen != 2 || warm.FilesSkipped != 2 || warm.FullParsed != 0 || warm.RowsTouched != 0 || warm.BytesRead != 0 || warm.CxNamesReloaded {
+	if warm.FilesSeen != 2 || warm.FilesSkipped != 2 || warm.FullParsed != 0 || warm.RowsTouched != 0 ||
+		warm.BytesRead != 0 ||
+		warm.CxNamesReloaded {
 		t.Fatalf("warm multi-root counters=%+v, want two skips and no work", warm)
 	}
 }

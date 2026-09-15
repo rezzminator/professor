@@ -261,6 +261,13 @@ const PERMISSION_POLICY = {
   // LAST matching rule wins (insertion order matters): broad allow first, the
   // narrow denies after. OpenCode keeps the guarded-file and publication pins
   // at its harness layer; the active main Codex fallback does not apply here.
+  // Every permission OpenCode ships defaults to allow except `external_directory`
+  // and `doom_loop`, which default to ask — an unattended chat then stalls on
+  // the first read outside the worktree (an audit under the live checkout's
+  // tmp/, the host pfm binary). Pin both to allow; the denies below still win.
+  '*': 'allow',
+  external_directory: 'allow',
+  doom_loop: 'allow',
   edit: {
     '**': 'allow',
     '**/.claude/**': 'deny',

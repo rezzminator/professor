@@ -482,3 +482,7 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   + `make lint-new` (pinned golangci-lint, `infra/tools.env`) before the C1–C21 ratchet, a `cover` action runs
   `make cover` (the fence exports `COVER_DIR=/root/cover`), and `verify templates` runs `scripts/clone-check.sh`
   (jscpd). The adopter twin `templates/project/scripts/dev.sh` carries no pfm project, so none of it ships.
+- Local (2026-09-16): `.claude/scripts/build-opencode.mjs` `PERMISSION_POLICY` pins `"*"`, `external_directory` and
+  `doom_loop` to `allow` (OpenCode defaults the last two to `ask`, which stalls an unattended chat on its first read
+  outside the worktree); the guarded-file and Git-write denies still win as the last matching rules. No adopter twin
+  ships this compiler.

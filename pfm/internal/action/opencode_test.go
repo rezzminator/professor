@@ -30,6 +30,9 @@ func TestSynthesizeNewOpencodeLaunchesFreshConfiguredSeat(t *testing.T) {
 	if !strings.Contains(plan.Run, Quote(machine.OpenCode.Binary)) || strings.Contains(plan.Run, "--session") {
 		t.Fatalf("fresh OpenCode run = %q", plan.Run)
 	}
+	if !strings.HasPrefix(plan.Run, opencodeHygiene+" ") || !strings.Contains(plan.Run, " -u CLAUDE_CODE_SSE_PORT ") {
+		t.Fatalf("fresh OpenCode run = %q, want the OpenCode hygiene prefix", plan.Run)
+	}
 	if plan.Line != "TMUX= tmux -L 'ox-1-2-4' attach -t 'ox-1-2-4'" ||
 		plan.ChatServer == nil || plan.ChatServer.CWD != "/work/nuts" || plan.ChatServer.Window != "OpenCode" {
 		t.Fatalf("fresh OpenCode line = %q server = %#v", plan.Line, plan.ChatServer)

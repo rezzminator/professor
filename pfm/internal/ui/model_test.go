@@ -526,7 +526,7 @@ func TestToggleKilledCarriesTheRowsPaneOnlyWhenItIsLive(t *testing.T) {
 			}
 			model := NewModel(snapshot)
 
-			model, _ = applyKey(t, model, controlKey('x'))
+			_, _ = applyKey(t, model, controlKey('x'))
 			if len(applied) != 1 {
 				t.Fatalf("⌃X did not apply on the keypress: %#v", applied)
 			}

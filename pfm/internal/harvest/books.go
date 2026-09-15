@@ -19,7 +19,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	client := r.client()
 	var out []Candidate
 	// OAPEN exposes direct ORIGINAL bitstreams for open academic books.
-	search := query
+	var search string
 	if isbn := normalizeISBN(query); isbn != "" {
 		search = "isbn:" + isbn
 	} else {
@@ -225,9 +225,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		}
 	}
 	// HathiTrust full-view volumes (public domain) — rights-gated like IA.
-	if cands, err := r.hathitrust(ctx, client, query); err == nil {
-		out = append(out, cands...)
-	}
+	out = append(out, r.hathitrust(ctx, client, query)...)
 	if key := strings.TrimSpace(r.GoogleBooksAPIKey); key != "" {
 		var data struct {
 			Items []struct {
@@ -364,10 +362,10 @@ func preferredTextFormat(formats map[string]string) (string, string) {
 // search-only/lending items are skipped (legality gate, mirrors
 // internetarchive's). Endpoint verified live 2026-08-22 — note the working form
 // is `/brief/isbn/{id}.json`, NOT `/brief/json/{isbn}` (that 400s).
-func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query string) ([]Candidate, error) {
+func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query string) []Candidate {
 	isbn := normalizeISBN(query)
 	if isbn == "" {
-		return nil, nil
+		return nil
 	}
 	var data struct {
 		Items []struct {
@@ -386,7 +384,7 @@ func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query st
 			isbn,
 			err,
 		)
-		return nil, nil
+		return nil
 	}
 	out := []Candidate{}
 	for _, item := range data.Items {
@@ -404,5 +402,5 @@ func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query st
 			},
 		)
 	}
-	return out, nil
+	return out
 }

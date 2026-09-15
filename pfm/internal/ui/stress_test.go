@@ -167,7 +167,7 @@ func stressRefreshStorm(t *testing.T) {
 	snapshot := largeSnapshot(1_000)
 	snapshot.InitialCursorID = snapshot.Rows[500].ID
 	model := NewModel(snapshot)
-	follow := model.SelectedKey()
+	var follow string
 	before := runtime.NumGoroutine()
 	const refreshes = 100
 	for refresh := 0; refresh < refreshes; refresh++ {

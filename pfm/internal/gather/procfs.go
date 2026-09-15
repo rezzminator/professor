@@ -73,7 +73,7 @@ func FileIDOf(path string) (FileID, error) {
 	if !ok {
 		return FileID{}, fmt.Errorf("stat %s: no device and inode on this platform", path)
 	}
-	return FileID{Device: uint64(stat.Dev), Inode: uint64(stat.Ino)}, nil
+	return FileID{Device: uint64(stat.Dev), Inode: stat.Ino}, nil
 }
 
 // NewProcFS returns the process-table reader for a given proc root.

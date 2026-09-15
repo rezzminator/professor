@@ -124,10 +124,7 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 		if current == "" {
 			value = ""
 		}
-		start, end, found, err := codexDeclaration(raw, []string{"developer_instructions"}, false)
-		if err != nil {
-			return "", err
-		}
+		start, end, found := codexDeclaration(raw, []string{"developer_instructions"}, false)
 		if found {
 			// Preserve an inline comment only after the old value parses fully;
 			// hashes inside quoted or multiline strings remain string content.
@@ -206,10 +203,7 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		_, end, found, err := codexDeclaration(updated, []string{"features", "multi_agent_v2"}, true)
-		if err != nil {
-			return "", err
-		}
+		_, end, found := codexDeclaration(updated, []string{"features", "multi_agent_v2"}, true)
 		if found {
 			updated = updated[:end] + "\n" + values + updated[end:]
 		} else {
@@ -236,7 +230,7 @@ func encodeCodexValues(values map[string]any) (string, error) {
 
 // codexDeclaration uses successfully parsed prefixes as declaration boundaries.
 // A bracket-looking line inside a multiline string is therefore never a table.
-func codexDeclaration(raw string, key []string, table bool) (int, int, bool, error) {
+func codexDeclaration(raw string, key []string, table bool) (int, int, bool) {
 	offset, start, previousKeys := 0, 0, 0
 	for _, line := range strings.SplitAfter(raw, "\n") {
 		offset += len(line)
@@ -250,11 +244,11 @@ func codexDeclaration(raw string, key []string, table bool) (int, int, bool, err
 		if len(keys) > previousKeys {
 			isTable := strings.HasPrefix(declaration, "[")
 			if reflect.DeepEqual([]string(keys[previousKeys]), key) && isTable == table {
-				return start, offset, true, nil
+				return start, offset, true
 			}
 		}
 		previousKeys = len(keys)
 		start = offset
 	}
-	return 0, 0, false, nil
+	return 0, 0, false
 }

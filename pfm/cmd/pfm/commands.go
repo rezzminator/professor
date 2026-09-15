@@ -137,9 +137,9 @@ func runLS(
 		if hasUpdate {
 			scan.Snapshot.Rows = append([]compose.Row{updateRow}, scan.Snapshot.Rows...)
 		}
-		applier, err := killApplier(ctx, database, runtime)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
+		applier, applierErr := killApplier(ctx, database, runtime)
+		if applierErr != nil {
+			fmt.Fprintf(stderr, "pfm ls: %v\n", applierErr)
 			return 1
 		}
 		scan.Snapshot.ApplyKill = applier

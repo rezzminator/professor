@@ -280,7 +280,7 @@ func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = off.Close() }()
-	result, _, err := off.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
+	result, err := off.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
 	if err != nil {
 		t.Fatalf("searchCache(no backend) error: %v", err)
 	}
@@ -301,7 +301,7 @@ func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = on.Close() }()
-	result, _, err = on.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
+	result, err = on.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
 	if err != nil {
 		t.Fatalf("searchCache(with backend) error: %v", err)
 	}

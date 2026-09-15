@@ -266,7 +266,7 @@ func list7z(path string) ([]Member, error) {
 		if err := validateMemberName(name); err != nil {
 			return nil, err
 		}
-		if entry.UncompressedSize > uint64(^uint64(0)>>1) {
+		if entry.UncompressedSize > ^uint64(0)>>1 {
 			return nil, fmt.Errorf("member %q size exceeds platform limit", entry.Name)
 		}
 		m := Member{

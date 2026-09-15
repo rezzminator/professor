@@ -27,7 +27,7 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 		printCodexUsage(stdout)
 		return 0
 	}
-	mode := codexgen.ModeBuild
+	var mode codexgen.Mode
 	switch args[0] {
 	case "build":
 		mode = codexgen.ModeBuild

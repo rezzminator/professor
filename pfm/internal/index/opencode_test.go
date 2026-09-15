@@ -413,11 +413,6 @@ func TestSyncOpencodeMirrorReplacesAndDeletes(t *testing.T) {
 	if counters.OcSessions != 3 {
 		t.Fatalf("OcSessions = %d, want 3", counters.OcSessions)
 	}
-	stored, err := database.OcSessions(ctx)
-	if err != nil {
-		t.Fatalf("read mirror: %v", err)
-	}
-
 	// The source loses ses_child entirely; the next pass must drop it.
 	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
 	if err != nil {
@@ -433,7 +428,7 @@ func TestSyncOpencodeMirrorReplacesAndDeletes(t *testing.T) {
 	if err := syncOpencodeMirror(ctx, database, root, &counters); err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
-	stored, err = database.OcSessions(ctx)
+	stored, err := database.OcSessions(ctx)
 	if err != nil {
 		t.Fatalf("reread mirror: %v", err)
 	}

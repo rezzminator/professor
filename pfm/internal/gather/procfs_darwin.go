@@ -100,7 +100,7 @@ func (proc *DarwinProcFS) Birth(pid int) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("read kern.proc.pid for %d: %w", pid, err)
 	}
-	return int64(process.Proc.P_starttime.Sec), nil
+	return process.Proc.P_starttime.Sec, nil
 }
 
 // RSSKB returns a process's resident set size in kilobytes.

@@ -612,8 +612,6 @@ func TestCheckRejectsAChangedInstalledInventory(t *testing.T) {
 	}
 	project = filepath.Join(final, "project")
 	venv = filepath.Join(project, ".venv")
-	uv = filepath.Join(final, "uv")
-	python = filepath.Join(venv, "bin", "python")
 	marker := canonical
 	marker.Digest, marker.State, marker.Environment = digest, "ready", final
 	marker.InventorySHA256, marker.InventoryCount = markerInventory, markerCount

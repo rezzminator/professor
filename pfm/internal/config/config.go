@@ -1610,7 +1610,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	for _, account := range config.Accounts {
 		value := map[string]any{
 			"id":        account.ID,
-			"configDir": displayPath(account.ConfigDir, configHome(config)),
+			"configDir": account.ConfigDir,
 			"emoji":     account.Emoji,
 		}
 		if account.Claude != nil {
@@ -1631,7 +1631,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	codexHomes := make([]map[string]any, 0, len(config.CodexAccounts))
 	for _, account := range config.CodexAccounts {
 		value := map[string]any{
-			"id": account.ID, "home": displayPath(account.Home, configHome(config)), "emoji": account.Emoji,
+			"id": account.ID, "home": account.Home, "emoji": account.Emoji,
 		}
 		if account.Prefs != nil {
 			value["prefs"] = map[string]any{"yolo": account.Prefs.Yolo, "binary": account.Prefs.Binary}
@@ -1698,23 +1698,6 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		return RedactSecrets(append(content, '\n')), nil
 	}
 	return append(content, '\n'), nil
-}
-
-func configHome(config Config) string {
-	if len(config.Accounts) == 0 {
-		return ""
-	}
-	// Config paths are already expanded at load time. The serialized default
-	// uses absolute paths; this helper exists to keep the conversion explicit
-	// and avoid guessing a user's home from an arbitrary account roster.
-	return ""
-}
-
-func displayPath(value, home string) string {
-	if home != "" && (value == home || strings.HasPrefix(value, home+string(filepath.Separator))) {
-		return "~" + strings.TrimPrefix(value, home)
-	}
-	return value
 }
 
 // RedactSecrets preserves JSON shape while replacing secret-looking object

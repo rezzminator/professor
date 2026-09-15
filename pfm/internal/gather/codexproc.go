@@ -102,7 +102,7 @@ func detectCodexThreadsInRootsFrom(
 			)
 			continue
 		}
-		rolloutPath, _, identityErr := heldCodexRoot(links, codexRoots)
+		rolloutPath, identityErr := heldCodexRoot(links, codexRoots)
 		if errors.Is(identityErr, errHeldSubagents) && hasCodexAncestor(proc, pid, pane.PID, cmdlines, binaries) {
 			continue
 		}
@@ -262,7 +262,7 @@ func RefreshCodexHeldRollouts(proc ProcFS, previous []LiveCodex, roots []string)
 			live = append(live, process)
 			continue
 		}
-		path, _, identityErr := heldCodexRoot(links, roots)
+		path, identityErr := heldCodexRoot(links, roots)
 		process.RolloutPath, process.ThreadID, process.RolloutHeld = path, CodexRolloutID(path), path != ""
 		process.IdentityError = ""
 		if identityErr != nil {

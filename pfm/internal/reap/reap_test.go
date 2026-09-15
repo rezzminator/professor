@@ -930,9 +930,7 @@ func TestProbeIdleSignalsNeverTranslatesAnUnansweredProbeIntoFreshness(t *testin
 		t.Run(testCase.name, func(t *testing.T) {
 			runner := &Runner{tmux: testCase.tmux, now: time.Now}
 			sockets := []Socket{{Name: "cc-100-1-1", Attached: true}}
-			if err := runner.probeIdleSignals(context.Background(), sockets); err != nil {
-				t.Fatalf("probeIdleSignals: %v", err)
-			}
+			runner.probeIdleSignals(context.Background(), sockets)
 			if sockets[0].ClientIdleOK {
 				t.Fatalf("ClientIdleOK = true, want false for %s", testCase.name)
 			}
@@ -966,9 +964,7 @@ func TestProbeIdleSignalsCarriesAGenuineClientIdleThrough(t *testing.T) {
 		now:  time.Now,
 	}
 	sockets := []Socket{{Name: "cc-100-1-1", Attached: true}}
-	if err := runner.probeIdleSignals(context.Background(), sockets); err != nil {
-		t.Fatalf("probeIdleSignals: %v", err)
-	}
+	runner.probeIdleSignals(context.Background(), sockets)
 	if !sockets[0].ClientIdleOK {
 		t.Fatal("ClientIdleOK = false for a probe that genuinely answered")
 	}

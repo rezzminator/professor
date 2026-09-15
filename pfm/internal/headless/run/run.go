@@ -213,7 +213,6 @@ func Resolve(request Request) (Request, error) {
 		request.ConfigDir = rosterDir
 	}
 	if request.WithoutAccount {
-		rosterPresent = true
 		name := pfmengine.MustLookup(request.Engine).HomeEnv
 		for _, entry := range request.Env {
 			if value, ok := strings.CutPrefix(entry, name+"="); ok {

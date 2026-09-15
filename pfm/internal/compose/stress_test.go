@@ -52,7 +52,7 @@ func TestComposeStress(t *testing.T) {
 	runtime.GC()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
-	minHeap := uint64(^uint64(0))
+	minHeap := ^uint64(0)
 	maxHeap := uint64(0)
 	iterationsStarted := time.Now()
 	rowChecksum := 0

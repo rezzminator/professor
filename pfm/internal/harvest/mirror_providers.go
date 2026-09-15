@@ -811,7 +811,7 @@ func providerMD5FromHref(raw, source string) string {
 		return ""
 	}
 	if match := providerMD5Re.FindStringSubmatch(u.Path); len(match) > 1 {
-		return string(match[1])
+		return match[1]
 	}
 	if source != "md5-catalog" {
 		return ""

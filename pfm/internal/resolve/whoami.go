@@ -111,7 +111,7 @@ func NewWhoami(dependencies WhoamiDependencies) (*Whoami, error) {
 	if procRoot == "" {
 		procRoot = resolved.ProcRoot
 	}
-	environment := WhoamiEnvironment{}
+	var environment WhoamiEnvironment
 	if dependencies.Environment != nil {
 		environment = *dependencies.Environment
 	} else {
@@ -179,7 +179,8 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 		identity.Source = "env-codex"
 	}
 
-	socketPath, pane := socketFromTMUX(identifier.environment.TMUX)
+	socketPath := socketFromTMUX(identifier.environment.TMUX)
+	pane := ""
 	if pane == "" {
 		pane = identifier.environment.TMUXPane
 	}
@@ -222,7 +223,8 @@ func (identifier *Whoami) recoverFromAncestry(
 		if err != nil {
 			continue
 		}
-		socketPath, pane := socketFromTMUX(environment["TMUX"])
+		socketPath := socketFromTMUX(environment["TMUX"])
+		pane := ""
 		if socketPath == "" {
 			continue
 		}
@@ -280,16 +282,16 @@ func (identifier *Whoami) paneOwners(ctx context.Context) []PaneOwner {
 // socketFromTMUX splits a $TMUX value into its socket path. Only the socket
 // component is ever read back; the session and pane fields of that string name
 // a server-local index, not a stable identity.
-func socketFromTMUX(value string) (string, string) {
+func socketFromTMUX(value string) string {
 	if value == "" {
-		return "", ""
+		return ""
 	}
 	fields := strings.Split(value, ",")
 	socketPath := fields[0]
 	if socketPath == "" {
-		return "", ""
+		return ""
 	}
-	return socketPath, ""
+	return socketPath
 }
 
 func engineForSocket(socketName string) string {

@@ -224,9 +224,7 @@ func (runner *Runner) Run(
 	for index := range sockets {
 		_, sockets[index].DetachedFork = branchSeats[sockets[index].Name]
 	}
-	if err := runner.probeIdleSignals(ctx, sockets); err != nil {
-		return Report{}, err
-	}
+	runner.probeIdleSignals(ctx, sockets)
 	input.Sockets = sockets
 	input.RecentIDs = runner.recentSessions(sockets, input.BusyRecent)
 
@@ -453,7 +451,7 @@ func (runner *Runner) recentSessions(
 // moved. It only asks tmux for client activity on ATTACHED sockets — the
 // only ones planAttached ever reads it for — so a fleet of mostly-detached
 // sockets costs no extra probe calls.
-func (runner *Runner) probeIdleSignals(ctx context.Context, sockets []Socket) error {
+func (runner *Runner) probeIdleSignals(ctx context.Context, sockets []Socket) {
 	now := runner.now()
 	for index := range sockets {
 		if stamp, ok := socketActivity(sockets[index].ActivityPaths); ok {
@@ -486,7 +484,6 @@ func (runner *Runner) probeIdleSignals(ctx context.Context, sockets []Socket) er
 			sockets[index].ClientIdle = idle
 		}
 	}
-	return nil
 }
 
 // apply performs the plan. Every kill re-verifies the socket at kill time:

@@ -534,7 +534,7 @@ func (service *Service) register() {
 			Annotations: readOnly,
 		},
 		func(ctx context.Context, request *mcp.CallToolRequest, input CacheInput) (*mcp.CallToolResult, any, error) {
-			result, _, err := service.searchCache(ctx, request, input)
+			result, err := service.searchCache(ctx, request, input)
 			return result, nil, err
 		},
 	)
@@ -936,16 +936,16 @@ func (service *Service) searchCache(
 	_ context.Context,
 	_ *mcp.CallToolRequest,
 	input CacheInput,
-) (*mcp.CallToolResult, CacheOutput, error) {
+) (*mcp.CallToolResult, error) {
 	if strings.TrimSpace(input.Pattern) == "" {
-		return nil, CacheOutput{}, errors.New("pattern must not be empty")
+		return nil, errors.New("pattern must not be empty")
 	}
 	limit := input.MaxResults
 	if limit == 0 {
 		limit = 50
 	}
 	if limit < 1 || limit > maxCacheResults {
-		return nil, CacheOutput{}, fmt.Errorf("max_results must be between 1 and %d", maxCacheResults)
+		return nil, fmt.Errorf("max_results must be between 1 and %d", maxCacheResults)
 	}
 	ignore := true
 	if input.IgnoreCase != nil {
@@ -954,7 +954,7 @@ func (service *Service) searchCache(
 	cacheHits, err := service.harvester.SearchCachePublic(input.Pattern, limit, ignore)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "harvester searchCache: %v\n", err)
-		return nil, CacheOutput{}, errors.New("Cache search failed. Check the expression or retry later.")
+		return nil, errors.New("Cache search failed. Check the expression or retry later.")
 	}
 	hits := make([]CacheHit, 0, len(cacheHits))
 	for _, hit := range cacheHits {
@@ -972,8 +972,6 @@ func (service *Service) searchCache(
 		)
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: text}},
-		}, CacheOutput{
-			Matches: hits,
 		}, nil
 	}
 	lines = append(
@@ -993,8 +991,6 @@ func (service *Service) searchCache(
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: strings.Join(lines, "\n")}},
-	}, CacheOutput{
-		Matches: hits,
 	}, nil
 }
 

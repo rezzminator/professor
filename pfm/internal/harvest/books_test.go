@@ -143,10 +143,7 @@ func TestResolverHathitrustKeepsOnlyFullViewVolumes(t *testing.T) {
 		]}`), nil
 	})}
 	resolver := &Resolver{}
-	got, err := resolver.hathitrust(context.Background(), client, "978-0-306-40615-7")
-	if err != nil {
-		t.Fatalf("hathitrust error: %v", err)
-	}
+	got := resolver.hathitrust(context.Background(), client, "978-0-306-40615-7")
 	if len(got) != 1 || got[0].URL != "https://babel.hathitrust.org/cgi/pt?id=open.vol2" {
 		t.Fatalf("hathitrust candidates=%#v, want exactly the Full view volume", got)
 	}
@@ -167,9 +164,9 @@ func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 		}, nil
 	})}
 	resolver := &Resolver{}
-	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
-	if err != nil || got != nil {
-		t.Fatalf("hathitrust(failed lookup) = (%#v, %v), want (nil, nil)", got, err)
+	got := resolver.hathitrust(context.Background(), client, "9780306406157")
+	if got != nil {
+		t.Fatalf("hathitrust(failed lookup) = %#v, want nil", got)
 	}
 }
 
@@ -188,7 +185,7 @@ func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
 		), nil
 	})}
 	resolver := &Resolver{}
-	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
+	got := resolver.hathitrust(context.Background(), client, "9780306406157")
 	if got != nil {
 		t.Fatalf("hathitrust(oversize) candidates = %#v, want nil", got)
 	}
@@ -198,9 +195,6 @@ func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
 	// proof therefore lives at the shared helper directly: it fails outright,
 	// and its error must name the ceiling rather than describe a decode
 	// failure, whichever caller reaches it.
-	if err != nil {
-		t.Fatalf("hathitrust(oversize) error = %v, want nil (outage semantics)", err)
-	}
 	var data any
 	getErr := getJSONBody(
 		context.Background(),
@@ -232,8 +226,8 @@ func TestResolverHathitrustSkipsNonISBNQueries(t *testing.T) {
 		return nil, nil
 	})}
 	resolver := &Resolver{}
-	got, err := resolver.hathitrust(context.Background(), client, "not an isbn at all")
-	if err != nil || got != nil {
-		t.Fatalf("hathitrust(non-ISBN) = (%#v, %v), want (nil, nil)", got, err)
+	got := resolver.hathitrust(context.Background(), client, "not an isbn at all")
+	if got != nil {
+		t.Fatalf("hathitrust(non-ISBN) = %#v, want nil", got)
 	}
 }

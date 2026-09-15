@@ -197,7 +197,7 @@ func TestStatsTabSamplesResourcesWithoutWaitingForLimits(t *testing.T) {
 	snapshot.StatsSampler = sampler
 	model := NewModel(snapshot)
 
-	model, command := applyKey(t, model, specialKey(tea.KeyTab))
+	_, command := applyKey(t, model, specialKey(tea.KeyTab))
 	if command == nil {
 		t.Fatal("entering Stats returned no sampling command")
 	}
@@ -222,7 +222,7 @@ func TestLimitsTabSamplesLimitsWithoutReadingResources(t *testing.T) {
 	model := NewModel(snapshot)
 
 	model, _ = applyKey(t, model, specialKey(tea.KeyTab))
-	model, command := applyKey(t, model, specialKey(tea.KeyTab))
+	_, command := applyKey(t, model, specialKey(tea.KeyTab))
 	if command == nil {
 		t.Fatal("entering Limits returned no sampling command")
 	}

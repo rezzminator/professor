@@ -273,7 +273,7 @@ func TestWhoamiProcTreeReadsAJailedProcRoot(t *testing.T) {
 	if err != nil || parent != 4200 {
 		t.Fatalf("Parent() = %d, %v, want 4200", parent, err)
 	}
-	if socketPath, _ := socketFromTMUX(environment["TMUX"]); socketPath !=
+	if socketPath := socketFromTMUX(environment["TMUX"]); socketPath !=
 		"/tmp/tmux-1000/cc-1-2-3" {
 		t.Fatalf("socketFromTMUX() = %q", socketPath)
 	}

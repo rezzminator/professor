@@ -223,7 +223,7 @@ func TestRunFailsClosedBeforeOrganMutationForEveryMechanicalGate(t *testing.T) {
 				[]byte("ZERO-YIELD\t2026-08-13T08:00:00+02:00\n"),
 			)
 		}, "state mismatch"},
-		{"anchor mechanism unavailable", func(t *testing.T, f *fixture) {}, "verify staged recorded tree"},
+		{"anchor mechanism unavailable", func(_ *testing.T, _ *fixture) {}, "verify staged recorded tree"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

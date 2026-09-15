@@ -268,11 +268,11 @@ func Run(
 			return Result{}, fmt.Errorf("cancel pane mode: %w", err)
 		}
 	}
-	cap, err := waitCallerIdle(ctx, request, options, tmux, stderr)
+	capture, err := waitCallerIdle(ctx, request, options, tmux, stderr)
 	if err != nil {
 		return Result{}, err
 	}
-	if selectorOpen(cap) {
+	if selectorOpen(capture) {
 		cause := errors.New("open selector menu on the pane — refusing to /exit")
 		if displayErr := tmux.Display(
 			ctx,

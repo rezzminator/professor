@@ -47,7 +47,7 @@ func RefreshGPT(ctx context.Context, options GPTOptions) error {
 	primary, primaryOK := rateLimits["primary"]
 	secondary, secondaryOK := rateLimits["secondary"]
 	if !primaryOK && !secondaryOK {
-		return fmt.Errorf("App Server response carried no primary or secondary rate limit")
+		return fmt.Errorf("response from App Server carried no primary or secondary rate limit")
 	}
 	output := map[string]any{
 		"primary":   primary,
@@ -79,14 +79,14 @@ func parseGPTRateLimits(body []byte) (map[string]any, error) {
 			continue
 		}
 		if len(message.Result.RateLimits) == 0 {
-			return nil, fmt.Errorf("App Server id=1 response omitted rateLimits")
+			return nil, fmt.Errorf("response id=1 from App Server omitted rateLimits")
 		}
 		return message.Result.RateLimits, nil
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("App Server returned no id=1 rate-limit response")
+	return nil, fmt.Errorf("response from App Server omitted id=1 rate limits")
 }
 
 func removeRefreshLock(cachePath string) {

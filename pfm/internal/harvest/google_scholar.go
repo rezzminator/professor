@@ -40,10 +40,10 @@ func (r *Resolver) googleScholar(ctx context.Context, query string, limit int) (
 		return nil, err
 	}
 	if response.status >= 400 {
-		return nil, fmt.Errorf("Google Scholar returned HTTP %d", response.status)
+		return nil, fmt.Errorf("request to Google Scholar returned HTTP %d", response.status)
 	}
 	if doiMirrorChallenge(response.body, response.status) {
-		return nil, errors.New("Google Scholar returned a challenge page")
+		return nil, errors.New("response from Google Scholar was a challenge page")
 	}
 	rows := parseGoogleScholarRows(response.body, limit, "")
 	candidates := scholarRowsWithVersions(providerCtx, r.providerHarvester(), response.finalURL, rows, limit, "")
@@ -54,7 +54,7 @@ func (r *Resolver) googleScholar(ctx context.Context, query string, limit int) (
 				return nil, nil
 			}
 		}
-		return nil, errors.New("Google Scholar page contained no recognizable results")
+		return nil, errors.New("page from Google Scholar contained no recognizable results")
 	}
 	return candidates, nil
 }
@@ -77,15 +77,15 @@ func (r *Resolver) googleScholarDOI(ctx context.Context, doi string, limit int) 
 		return nil, err
 	}
 	if response.status >= 400 {
-		return nil, fmt.Errorf("Google Scholar returned HTTP %d", response.status)
+		return nil, fmt.Errorf("request to Google Scholar returned HTTP %d", response.status)
 	}
 	if providerChallenge(response.body, response.status) {
-		return nil, errors.New("Google Scholar returned a challenge page")
+		return nil, errors.New("response from Google Scholar was a challenge page")
 	}
 	rows := parseGoogleScholarRows(response.body, limit, doi)
 	candidates := scholarRowsWithVersions(providerCtx, h, response.finalURL, rows, limit, doi)
 	if len(candidates) == 0 {
-		return nil, errors.New("Google Scholar had no exact DOI result")
+		return nil, errors.New("response from Google Scholar had no exact DOI result")
 	}
 	return candidates, nil
 }

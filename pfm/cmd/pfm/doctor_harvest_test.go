@@ -60,14 +60,14 @@ type harvestDoctorFake struct {
 	checkErr error
 }
 
-func (fake harvestDoctorFake) Inspect(root string, platform harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
+func (fake harvestDoctorFake) Inspect(_ string, _ harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
 	return fake.digest, fake.inspect
 }
 
 func (fake harvestDoctorFake) Check(
-	ctx context.Context,
-	root string,
-	platform harvestpy.Platform,
+	_ context.Context,
+	_ string,
+	_ harvestpy.Platform,
 ) (harvestpy.CheckReport, error) {
 	return fake.check, fake.checkErr
 }

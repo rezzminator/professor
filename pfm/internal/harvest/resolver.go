@@ -437,7 +437,7 @@ func (r *Resolver) osf(ctx context.Context, client *http.Client, doi string) ([]
 	return nil, nil
 }
 
-func (r *Resolver) ResolvePMCID(ctx context.Context, pmcid string) ([]Candidate, error) {
+func (r *Resolver) ResolvePMCID(_ context.Context, pmcid string) ([]Candidate, error) {
 	pmcid = strings.ToUpper(strings.TrimSpace(strings.TrimPrefix(strings.ToLower(strings.TrimSpace(pmcid)), "pmcid:")))
 	if !strings.HasPrefix(pmcid, "PMC") {
 		pmcid = "PMC" + pmcid
@@ -548,7 +548,7 @@ func getJSONBody(
 	client *http.Client,
 	raw, ua string,
 	headers map[string]string,
-	max int64,
+	maxBytes int64,
 	dst any,
 ) error {
 	header := make(http.Header, len(headers))
@@ -560,7 +560,7 @@ func getJSONBody(
 		client:           client,
 		ua:               ua,
 		headers:          header,
-		max:              max,
+		max:              maxBytes,
 		oversizeTruncate: false,
 	})
 	if err != nil {

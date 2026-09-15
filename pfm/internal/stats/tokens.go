@@ -438,7 +438,7 @@ func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
 	if record.Payload.Type == "token_count" {
 		total := record.Payload.Info.TotalTokenUsage.TotalTokens
 		if total < 0 {
-			return fmt.Errorf("Codex lifetime usage contains a negative token count")
+			return fmt.Errorf("lifetime usage for Codex contains a negative token count")
 		}
 		if total > 0 {
 			entry.codexTokens = total

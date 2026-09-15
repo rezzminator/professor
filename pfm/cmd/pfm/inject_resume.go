@@ -164,9 +164,9 @@ func uuidSessionID(id string) bool {
 	}
 	for _, part := range parts {
 		for _, character := range part {
-			if !((character >= '0' && character <= '9') ||
-				(character >= 'a' && character <= 'f') ||
-				(character >= 'A' && character <= 'F')) {
+			if (character < '0' || character > '9') &&
+				(character < 'a' || character > 'f') &&
+				(character < 'A' || character > 'F') {
 				return false
 			}
 		}

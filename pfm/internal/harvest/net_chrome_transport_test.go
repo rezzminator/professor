@@ -139,7 +139,7 @@ func TestChromeClientHelloCaptureOracle(t *testing.T) {
 
 func TestChromeTransportUsesPinnedResolver(t *testing.T) {
 	target := httptest.NewServer(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = io.WriteString(w, "ok") }),
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }),
 	)
 	defer target.Close()
 	port := target.Listener.Addr().(*net.TCPAddr).Port

@@ -2096,7 +2096,7 @@ func (installer *engine) wireCodexHooks() error {
 		existed := true
 		if errors.Is(readErr, fs.ErrNotExist) {
 			if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("Codex hooks file is a dangling symlink: %s", path)
+				return fmt.Errorf("hooks file for Codex is a dangling symlink: %s", path)
 			} else if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
 				return fmt.Errorf("inspect Codex hooks %s: %w", path, statErr)
 			}

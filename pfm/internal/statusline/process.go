@@ -141,7 +141,7 @@ func readGPTRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
 	}
 	waitErr := command.Wait()
 	return nil, fmt.Errorf(
-		"App Server returned no id=1 response: wait=%v stderr=%s",
+		"command from App Server returned no id=1 response: wait=%v stderr=%s",
 		waitErr,
 		strings.TrimSpace(stderr.String()),
 	)

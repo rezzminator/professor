@@ -455,8 +455,8 @@ func (current *composer) liveClaudeRows() ([]Row, []Row) {
 		if crumb.PaneID == "" {
 			if socketCrumbs.socket == nil ||
 				crumb.Filename < socketCrumbs.socket.Filename {
-				copy := crumb
-				socketCrumbs.socket = &copy
+				crumbCopy := crumb
+				socketCrumbs.socket = &crumbCopy
 			}
 			continue
 		}

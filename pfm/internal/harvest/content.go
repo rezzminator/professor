@@ -139,8 +139,8 @@ var (
 	htmlTagRe = regexp.MustCompile(`(?s)<[^>]*>`)
 )
 
-func blankRenderPage(html string) bool {
-	text := scriptRe.ReplaceAllString(html, " ")
+func blankRenderPage(markup string) bool {
+	text := scriptRe.ReplaceAllString(markup, " ")
 	text = styleRe.ReplaceAllString(text, " ")
 	text = htmlTagRe.ReplaceAllString(text, " ")
 	return contentChars(text) < 10

@@ -245,11 +245,11 @@ func claimable(path string) bool {
 }
 
 func generatedBytes(bytes []byte) bool {
-	prefix := string(bytes[:min(len(bytes), 600)])
+	prefix := string(bytes[:minInt(len(bytes), 600)])
 	return strings.Contains(prefix, generatedMarker) || strings.Contains(prefix, legacyGeneratedMarker)
 }
 
-func min(a, b int) int {
+func minInt(a, b int) int {
 	if a < b {
 		return a
 	}

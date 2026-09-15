@@ -342,12 +342,12 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 	return out, status, nil
 }
 
-func truncateRunes(value string, max int) string {
+func truncateRunes(value string, maxRunes int) string {
 	r := []rune(value)
-	if len(r) <= max {
+	if len(r) <= maxRunes {
 		return value
 	}
-	return string(r[:max])
+	return string(r[:maxRunes])
 }
 
 // SearchProbeState is the fixed set of health classes doctor may print — a

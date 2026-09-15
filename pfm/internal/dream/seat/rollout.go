@@ -81,7 +81,7 @@ func inspectRolloutTurnEvidence(
 				switch event.Payload.Type {
 				case "task_started":
 					if event.Payload.TurnID == "" {
-						return evidence, errors.New("Codex task_started event has no turn_id")
+						return evidence, errors.New("task_started event from Codex has no turn_id")
 					}
 					activeTurn = event.Payload.TurnID
 					evidence.Started = true
@@ -91,7 +91,7 @@ func inspectRolloutTurnEvidence(
 				case "task_complete":
 					if activeTurn != "" && event.Payload.TurnID == activeTurn {
 						if strings.TrimSpace(event.Payload.LastAgentMessage) == "" {
-							return evidence, errors.New("Codex task_complete event has no final assistant message")
+							return evidence, errors.New("task_complete event from Codex has no final assistant message")
 						}
 						evidence.State = rolloutTurnComplete
 					}

@@ -545,22 +545,22 @@ func (h *Harvester) fetchURLWithPolicy(
 			}
 		}
 		if allowOAPivot && metaDOI != "" && !strings.EqualFold(metaDOI, DOIFrom(source)) {
-			if result := h.fetchOA(ctx, metaDOI, rungs, options); result.Error == "" {
+			result := h.fetchOA(ctx, metaDOI, rungs, options)
+			if result.Error == "" {
 				if isMirrorProviderMethod(result.Method) {
 					return h.storeResultAlias(source, source, result, result.Rungs, options)
 				}
 				return result
-			} else {
-				if len(result.Rungs) > len(rungs) {
-					rungs = result.Rungs
-				}
-				if hasProviderDiagnostic(result.Error) {
-					copy := result
-					providerFailure = &copy
-					lastStatus = result.HTTPStatus
-					lastErrorKind = result.ErrorKind
-					lastChallenge = result.Challenge
-				}
+			}
+			if len(result.Rungs) > len(rungs) {
+				rungs = result.Rungs
+			}
+			if hasProviderDiagnostic(result.Error) {
+				resultCopy := result
+				providerFailure = &resultCopy
+				lastStatus = result.HTTPStatus
+				lastErrorKind = result.ErrorKind
+				lastChallenge = result.Challenge
 			}
 		}
 	}
@@ -568,22 +568,22 @@ func (h *Harvester) fetchURLWithPolicy(
 	// intentionally opt-in by recognizable DOI; arbitrary URLs must not trigger
 	// broad discovery traffic.
 	if doi := DOIFrom(source); allowOAPivot && doi != "" {
-		if result := h.fetchOA(ctx, doi, rungs, options); result.Error == "" {
+		result := h.fetchOA(ctx, doi, rungs, options)
+		if result.Error == "" {
 			if isMirrorProviderMethod(result.Method) {
 				return h.storeResultAlias(source, source, result, result.Rungs, options)
 			}
 			return result
-		} else {
-			if len(result.Rungs) > len(rungs) {
-				rungs = result.Rungs
-			}
-			if hasProviderDiagnostic(result.Error) {
-				copy := result
-				providerFailure = &copy
-				lastStatus = result.HTTPStatus
-				lastErrorKind = result.ErrorKind
-				lastChallenge = result.Challenge
-			}
+		}
+		if len(result.Rungs) > len(rungs) {
+			rungs = result.Rungs
+		}
+		if hasProviderDiagnostic(result.Error) {
+			resultCopy := result
+			providerFailure = &resultCopy
+			lastStatus = result.HTTPStatus
+			lastErrorKind = result.ErrorKind
+			lastChallenge = result.Challenge
 		}
 	}
 	// Any public source may have a legal Wayback snapshot, not only a DOI

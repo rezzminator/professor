@@ -99,13 +99,13 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		return 0
 	}
 	time.Sleep(chatKeysSettle)
-	pane_, err := tmux.Capture(ctx, socketPath, pane, false, 0)
+	captureText, err := tmux.Capture(ctx, socketPath, pane, false, 0)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat keys: capture: %v\n", err)
 		return codeDeadChat
 	}
-	fmt.Fprint(stdout, pane_)
-	if !strings.HasSuffix(pane_, "\n") {
+	fmt.Fprint(stdout, captureText)
+	if !strings.HasSuffix(captureText, "\n") {
 		fmt.Fprintln(stdout)
 	}
 	return 0

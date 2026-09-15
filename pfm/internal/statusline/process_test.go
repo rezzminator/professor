@@ -85,7 +85,7 @@ done
 	}
 }
 
-func TestGPTAppServerFixture(t *testing.T) {
+func TestGPTAppServerFixture(_ *testing.T) {
 	if os.Getenv("PFM_GPT_APP_SERVER_FIXTURE") != "1" {
 		return
 	}

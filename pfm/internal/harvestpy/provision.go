@@ -342,8 +342,8 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	}}, nil
 }
 
-func smokeRuntime(ctx context.Context, runtime Runtime) (map[string]any, error) {
-	converter := NewConverter(runtime)
+func smokeRuntime(ctx context.Context, converterRuntime Runtime) (map[string]any, error) {
+	converter := NewConverter(converterRuntime)
 	result, err := converter.Smoke(ctx)
 	_ = converter.Close()
 	return result, err
@@ -648,9 +648,9 @@ func extractPython(path, destination string) (pythonPath string, returnErr error
 			if err := os.MkdirAll(destinationPath, header.FileInfo().Mode().Perm()); err != nil {
 				return "", fmt.Errorf("create Python directory %s: %w", name, err)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if header.Size < 0 || header.Size > 512<<20 || total > 2<<30-header.Size {
-				return "", fmt.Errorf("Python archive is too large at %d bytes", total+header.Size)
+				return "", fmt.Errorf("python archive is too large at %d bytes", total+header.Size)
 			}
 			if err := ensureArchiveParentSafe(destination, destinationPath); err != nil {
 				return "", err
@@ -703,7 +703,7 @@ func extractPython(path, destination string) (pythonPath string, returnErr error
 			return candidate, nil
 		}
 	}
-	return "", errors.New("Python executable not found in extracted archive")
+	return "", errors.New("python executable not found in extracted archive")
 }
 
 func safeArchiveName(name string) (string, error) {
@@ -808,7 +808,7 @@ func runCommand(ctx context.Context, executable string, arguments []string, dire
 
 func measureTree(root string) SizeReport {
 	var report SizeReport
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+	_ = filepath.Walk(root, func(_ string, info os.FileInfo, err error) error {
 		if err != nil || info == nil {
 			return nil
 		}
@@ -824,7 +824,7 @@ func measureTree(root string) SizeReport {
 func stampPythonBuild(path, version string) error {
 	parts := strings.SplitN(version, "+", 2)
 	if len(parts) != 2 || parts[1] == "" {
-		return fmt.Errorf("Python pin has no standalone build stamp: %q", version)
+		return fmt.Errorf("python pin has no standalone build stamp: %q", version)
 	}
 	want := []byte(parts[1] + "\n")
 	if body, err := os.ReadFile(path); err == nil {

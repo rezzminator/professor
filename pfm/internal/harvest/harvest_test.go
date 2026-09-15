@@ -760,7 +760,7 @@ func TestFetchBareTitleRefusesToGuess(t *testing.T) {
 		t,
 		Options{
 			CacheDir: t.TempDir(),
-			OA: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			OA: &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 				t.Fatal("bare title must not query OA providers")
 				return nil, nil
 			})},

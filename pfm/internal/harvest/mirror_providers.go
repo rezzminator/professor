@@ -688,7 +688,7 @@ func (r *Resolver) md5CatalogSearch(ctx context.Context, query string, limit int
 	return nil, nil
 }
 
-func providerRecordCandidates(body []byte, pageURL, source, query string, limit int) ([]Candidate, error) {
+func providerRecordCandidates(body []byte, pageURL, source, _ string, limit int) ([]Candidate, error) {
 	if limit <= 0 || limit > providerCandidateMax {
 		limit = providerCandidateMax
 	}

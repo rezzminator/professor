@@ -208,16 +208,16 @@ func ReconcileCodexPanesWith(
 			}
 			changed = true
 		}
-		if _, moved, err := manager.AdvanceCodexPane(
+		_, moved, err := manager.AdvanceCodexPane(
 			ctx, action.Socket, action.PaneID, action.Bind,
-		); err != nil {
+		)
+		if err != nil {
 			warn(fmt.Sprintf(
 				"codex pane %s %s: advance binding: %v", action.Socket, action.PaneID, err,
 			))
 			continue
-		} else {
-			changed = changed || moved
 		}
+		changed = changed || moved
 		if action.ClearKill == "" {
 			continue
 		}

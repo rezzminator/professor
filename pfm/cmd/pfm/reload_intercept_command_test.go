@@ -86,7 +86,7 @@ func TestRunReloadIntercept(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			var calls [][]string
-			reloadInterceptRun = func(args []string, stdout, stderr io.Writer, _ commandRuntime) int {
+			reloadInterceptRun = func(args []string, stdout, _ io.Writer, _ commandRuntime) int {
 				if !test.frontWanted {
 					t.Fatalf("front called unexpectedly with %v", args)
 				}

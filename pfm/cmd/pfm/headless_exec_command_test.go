@@ -60,12 +60,12 @@ func TestHeadlessExecNormalizedJSONAndReceiptPreserveNullCost(t *testing.T) {
 		t,
 		`printf '%s\n' '{"result":"hello","usage":{"input_tokens":2,"output_tokens":1},"total_cost_usd":null}'`,
 	)
-	runtime := headlessCLIRuntime(t, binary)
+	commandEnv := headlessCLIRuntime(t, binary)
 	receipt := filepath.Join(t.TempDir(), "receipt.jsonl")
 	var stdout, stderr bytes.Buffer
 	code := runHeadlessExec([]string{
 		"--engine", "claude", "--prompt", "hello", "--output-format", "json", "--receipt", receipt,
-	}, strings.NewReader("unused"), &stdout, &stderr, runtime)
+	}, strings.NewReader("unused"), &stdout, &stderr, commandEnv)
 	if code != 0 {
 		t.Fatalf("exit = %d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -95,11 +95,11 @@ func TestHeadlessExecNormalizedJSONAndReceiptPreserveNullCost(t *testing.T) {
 func TestHeadlessExecNativeStreamsStdinAndTailArgs(t *testing.T) {
 	headlessCLIJail(t)
 	binary := writeHeadlessCLIStub(t, `cat`)
-	runtime := headlessCLIRuntime(t, binary)
+	commandEnv := headlessCLIRuntime(t, binary)
 	var stdout, stderr bytes.Buffer
 	code := runHeadlessExec([]string{
 		"--engine", "claude", "--output-format", "native", "--timeout", "2", "--", "--future-flag", "value with spaces",
-	}, strings.NewReader("stream me\n"), &stdout, &stderr, runtime)
+	}, strings.NewReader("stream me\n"), &stdout, &stderr, commandEnv)
 	if code != 0 || stdout.String() != "stream me\n" || stderr.Len() != 0 {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -109,11 +109,11 @@ func TestHeadlessExecRejectsInvalidSchemaBeforeLaunch(t *testing.T) {
 	headlessCLIJail(t)
 	marker := filepath.Join(t.TempDir(), "started")
 	binary := writeHeadlessCLIStub(t, `printf started > "`+marker+`"`)
-	runtime := headlessCLIRuntime(t, binary)
+	commandEnv := headlessCLIRuntime(t, binary)
 	var stdout, stderr bytes.Buffer
 	code := runHeadlessExec([]string{
 		"--engine", "claude", "--prompt", "hello", "--json-schema", "not-json",
-	}, strings.NewReader(""), &stdout, &stderr, runtime)
+	}, strings.NewReader(""), &stdout, &stderr, commandEnv)
 	if code != 2 || !strings.Contains(stderr.String(), "schema is not valid JSON") {
 		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -150,13 +150,13 @@ func TestHeadlessExecCodexUnsupportedControlsRequireOptIn(t *testing.T) {
 		t,
 		"printf started > \""+marker+"\"\nif [ -n \"${CAPTURE_DIR:-}\" ]; then printf '%s\\n' \"$@\" > \"$CAPTURE_DIR/args\"; fi\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}' '{\"type\":\"turn.completed\"}'",
 	)
-	runtime := headlessCLIRuntimeFor(t, binary, pfmengine.Codex)
+	commandEnv := headlessCLIRuntimeFor(t, binary, pfmengine.Codex)
 	baseArgs := []string{
 		"--engine", "codex", "--prompt", "hello", "--output-format", "json",
 		"--tools", "none", "--setting-sources", "", "--strict-mcp-config",
 	}
 	var stdout, stderr bytes.Buffer
-	code := runHeadlessExec(baseArgs, strings.NewReader(""), &stdout, &stderr, runtime)
+	code := runHeadlessExec(baseArgs, strings.NewReader(""), &stdout, &stderr, commandEnv)
 	if code != 4 || !strings.Contains(stderr.String(), "--allow-unsupported") {
 		t.Fatalf("default refusal exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -165,11 +165,11 @@ func TestHeadlessExecCodexUnsupportedControlsRequireOptIn(t *testing.T) {
 	}
 
 	capture := t.TempDir()
-	runtime = headlessCLIRuntimeFor(t, binary, pfmengine.Codex)
+	commandEnv = headlessCLIRuntimeFor(t, binary, pfmengine.Codex)
 	stdout.Reset()
 	stderr.Reset()
 	args := append(append([]string(nil), baseArgs...), "--allow-unsupported", "--env", "CAPTURE_DIR="+capture)
-	code = runHeadlessExec(args, strings.NewReader(""), &stdout, &stderr, runtime)
+	code = runHeadlessExec(args, strings.NewReader(""), &stdout, &stderr, commandEnv)
 	if code != 0 {
 		t.Fatalf("opted-in run exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -255,7 +255,7 @@ func TestHeadlessExecLabInvocationBothEngines(t *testing.T) {
 				"  printf '%s\n' '{\"result\":\"ok\",\"structured_output\":{\"ok\":true},\"total_cost_usd\":null}'",
 				"fi",
 			}, "\n"))
-			runtime := headlessCLIRuntimeFor(t, binary, engine.id)
+			commandEnv := headlessCLIRuntimeFor(t, binary, engine.id)
 			first := filepath.Join(t.TempDir(), "prompt.md")
 			second := filepath.Join(t.TempDir(), "input.md")
 			system := filepath.Join(t.TempDir(), "system.md")
@@ -289,7 +289,7 @@ func TestHeadlessExecLabInvocationBothEngines(t *testing.T) {
 				"--model", "model-x",
 				"--effort", "high",
 				"--timeout", "5",
-				"--config-dir", cliConfigDir(runtime, engine.id),
+				"--config-dir", cliConfigDir(commandEnv, engine.id),
 				"--system-file", system,
 				"--receipt", receipt,
 				"--env", "CAPTURE_DIR=" + capture,
@@ -299,7 +299,7 @@ func TestHeadlessExecLabInvocationBothEngines(t *testing.T) {
 				args = append(args, "--sealed")
 			}
 			var stdout, stderr bytes.Buffer
-			code := runHeadlessExec(args, strings.NewReader("ignored"), &stdout, &stderr, runtime)
+			code := runHeadlessExec(args, strings.NewReader("ignored"), &stdout, &stderr, commandEnv)
 			if code != 0 {
 				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
@@ -350,7 +350,7 @@ func TestHeadlessExecTaskFileTrimsAndPromptStaysRaw(t *testing.T) {
 		t,
 		"cat > \"$CAPTURE_DIR/prompt\"\nprintf '%s\\n' '{\"result\":\"ok\",\"total_cost_usd\":null}'",
 	)
-	runtime := headlessCLIRuntime(t, binary)
+	commandEnv := headlessCLIRuntime(t, binary)
 	source := filepath.Join(t.TempDir(), "source.md")
 	task := filepath.Join(t.TempDir(), "task.txt")
 	if err := os.WriteFile(source, []byte("source"), 0o600); err != nil {
@@ -363,7 +363,7 @@ func TestHeadlessExecTaskFileTrimsAndPromptStaysRaw(t *testing.T) {
 	code := runHeadlessExec([]string{
 		"--engine", "claude", "--files", source, "--task-file", task,
 		"--env", "CAPTURE_DIR=" + capture,
-	}, strings.NewReader("ignored"), &stdout, &stderr, runtime)
+	}, strings.NewReader("ignored"), &stdout, &stderr, commandEnv)
 	if code != 0 {
 		t.Fatalf("task-file exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -401,14 +401,14 @@ func TestHeadlessExecFilesValidationNeverLaunches(t *testing.T) {
 		t.Run(strings.Join(args, "_"), func(t *testing.T) {
 			marker := filepath.Join(t.TempDir(), "started")
 			binary := writeHeadlessCLIStub(t, "printf started > \""+marker+"\"\nprintf '%s\\n' '{\"result\":\"ok\"}'")
-			runtime := headlessCLIRuntime(t, binary)
+			commandEnv := headlessCLIRuntime(t, binary)
 			var stdout, stderr bytes.Buffer
 			code := runHeadlessExec(
 				append([]string{"--engine", "claude"}, args...),
 				strings.NewReader(""),
 				&stdout,
 				&stderr,
-				runtime,
+				commandEnv,
 			)
 			if code != 2 {
 				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -425,14 +425,14 @@ func TestHeadlessExecFailureAndTimeoutDoNotWriteOut(t *testing.T) {
 	t.Run("failure", func(t *testing.T) {
 		capture := t.TempDir()
 		binary := writeHeadlessCLIStub(t, "printf failure >&2\nexit 7")
-		runtime := headlessCLIRuntime(t, binary)
+		commandEnv := headlessCLIRuntime(t, binary)
 		out := filepath.Join(t.TempDir(), "out.json")
 		receipt := filepath.Join(t.TempDir(), "receipt.jsonl")
 		var stdout, stderr bytes.Buffer
 		code := runHeadlessExec([]string{
 			"--engine", "claude", "--prompt", "failure", "--output-format", "json",
 			"--out", out, "--receipt", receipt, "--env", "CAPTURE_DIR=" + capture,
-		}, strings.NewReader(""), &stdout, &stderr, runtime)
+		}, strings.NewReader(""), &stdout, &stderr, commandEnv)
 		if code != 4 || !strings.Contains(stderr.String(), "headless run failed") {
 			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
@@ -449,14 +449,14 @@ func TestHeadlessExecFailureAndTimeoutDoNotWriteOut(t *testing.T) {
 	})
 	t.Run("timeout", func(t *testing.T) {
 		binary := writeHeadlessCLIStub(t, "sleep 2\nprintf '%s\\n' '{\"result\":\"late\"}'")
-		runtime := headlessCLIRuntime(t, binary)
+		commandEnv := headlessCLIRuntime(t, binary)
 		out := filepath.Join(t.TempDir(), "out.json")
 		receipt := filepath.Join(t.TempDir(), "receipt.jsonl")
 		var stdout, stderr bytes.Buffer
 		code := runHeadlessExec([]string{
 			"--engine", "claude", "--prompt", "timeout", "--output-format", "json",
 			"--timeout", "0.05", "--out", out, "--receipt", receipt,
-		}, strings.NewReader(""), &stdout, &stderr, runtime)
+		}, strings.NewReader(""), &stdout, &stderr, commandEnv)
 		if code != 3 || !strings.Contains(stderr.String(), "timed out") {
 			t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
@@ -490,12 +490,12 @@ func TestHeadlessExecConcurrentCallsKeepInputsIndependent(t *testing.T) {
 		go func() {
 			defer calls.Done()
 			capture := t.TempDir()
-			runtime := headlessCLIRuntime(t, binary)
+			commandEnv := headlessCLIRuntime(t, binary)
 			var stdout, stderr bytes.Buffer
 			code := runHeadlessExec([]string{
 				"--engine", "claude", "--prompt", prompt,
 				"--env", "CAPTURE_DIR=" + capture,
-			}, strings.NewReader(""), &stdout, &stderr, runtime)
+			}, strings.NewReader(""), &stdout, &stderr, commandEnv)
 			if code != 0 {
 				errs <- fmt.Errorf("prompt %q exit=%d stdout=%q stderr=%q", prompt, code, stdout.String(), stderr.String())
 				return
@@ -519,11 +519,11 @@ func TestHeadlessExecConcurrentCallsKeepInputsIndependent(t *testing.T) {
 	}
 }
 
-func cliConfigDir(runtime commandRuntime, engine pfmengine.ID) string {
+func cliConfigDir(commandEnv commandRuntime, engine pfmengine.ID) string {
 	if engine == pfmengine.Codex {
-		return runtime.Config.CodexAccounts[0].Home
+		return commandEnv.Config.CodexAccounts[0].Home
 	}
-	return runtime.Config.Accounts[0].ConfigDir
+	return commandEnv.Config.Accounts[0].ConfigDir
 }
 
 func cliLines(t *testing.T, path string) []string {

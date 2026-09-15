@@ -931,21 +931,21 @@ func TestHeaderOnlyRolloutIsEnrichedFromTheStateStore(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	real, found, err := database.Rollout(ctx, "real-paginated")
+	realRollout, found, err := database.Rollout(ctx, "real-paginated")
 	if err != nil || !found {
 		t.Fatalf("real-paginated Rollout() found = %v, error = %v", found, err)
 	}
-	if real.Size <= 0 {
+	if realRollout.Size <= 0 {
 		t.Fatalf(
 			"real-paginated row = %#v, want a header-only file's nonzero size",
-			real,
+			realRollout,
 		)
 	}
-	if real.PromptCount == 0 {
+	if realRollout.PromptCount == 0 {
 		t.Fatalf(
 			"real-paginated row = %#v, want the state store's content evidence "+
 				"(tokens_used=500) to fill prompt_count",
-			real,
+			realRollout,
 		)
 	}
 

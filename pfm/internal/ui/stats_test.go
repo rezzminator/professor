@@ -713,7 +713,7 @@ func TestStatsTablesRenderLabeledColumnsAndUsage(t *testing.T) {
 	model.statsSubtab = StatsDocker
 	dockerPanel := ansi.Strip(model.renderStatsPanel(140, 8))
 	header := strings.Split(dockerPanel, "\n")[1]
-	if strings.Index(header, "NAME") < 0 || strings.Index(header, "IMAGE") <= strings.Index(header, "NAME") {
+	if !strings.Contains(header, "NAME") || strings.Index(header, "IMAGE") <= strings.Index(header, "NAME") {
 		t.Fatalf("Docker header does not begin NAME then IMAGE: %q", header)
 	}
 	for _, want := range []string{"CPU", "MEMORY", "LIMIT", "MEM", "professor-web", "registry.example/professor:web"} {

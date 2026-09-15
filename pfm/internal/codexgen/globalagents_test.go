@@ -176,7 +176,7 @@ func TestGlobalAgentsMissingFrontmatterFieldIsAHardError(t *testing.T) {
 		"---\nname: broken\n---\n\nno description field.\n")
 
 	_, err := RunGlobalAgents(GlobalAgentsOptions{Home: home})
-	if err == nil || !strings.Contains(err.Error(), "needs both name: and description:") {
+	if err == nil || !strings.Contains(err.Error(), "needs both name: and description") {
 		t.Fatalf("RunGlobalAgents: got %v, want a frontmatter error", err)
 	}
 }

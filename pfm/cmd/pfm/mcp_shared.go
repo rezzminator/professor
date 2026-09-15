@@ -27,7 +27,7 @@ func mcpRuntime(runtime commandRuntime, ambient bool) mcpserv.Runtime {
 		Chat:                 pfmchat.Verbs{Runtime: &runtime, Warnings: os.Stderr},
 		Names:                pfmchat.NameResolver{Runtime: &runtime},
 		AllowAmbientIdentity: ambient,
-		Dispatch: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+		Dispatch: func(_ context.Context, args []string, stdout, stderr io.Writer) int {
 			if len(args) == 0 || args[0] != "chat" {
 				fmt.Fprintln(stderr, "pfm: MCP dispatch requires chat argv")
 				return 2

@@ -252,7 +252,7 @@ func (installer *engine) pause(d time.Duration) {
 // nothing to restart it. Retrying the bootstrap closes the window without
 // asking anyone to predict how long a teardown takes, and it costs a healthy
 // host nothing: the first attempt succeeds and no wait is ever taken.
-func (installer *engine) bootstrapWithRetry(ctx context.Context, domain, path, label string) error {
+func (installer *engine) bootstrapWithRetry(ctx context.Context, domain, path, _ string) error {
 	var err error
 	for attempt := 0; attempt < launchdBootstrapAttempts; attempt++ {
 		if attempt > 0 {

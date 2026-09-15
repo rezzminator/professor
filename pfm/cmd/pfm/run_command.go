@@ -292,14 +292,14 @@ func resolveRunEngineIDAccount(
 			}
 		}
 		if _, found := machine.Account(account); !found {
-			return "", 0, fmt.Errorf("Claude account %d is not in the configured roster", account)
+			return "", 0, fmt.Errorf("requested Claude account %d is not in the configured roster", account)
 		}
 	case pfmengine.Codex:
 		if account == 0 && len(machine.CodexAccounts) != 0 {
 			account = machine.CodexAccounts[0].ID
 		}
 		if _, found := machine.CodexAccountByID(account); !found {
-			return "", 0, fmt.Errorf("Codex account %d is not in the configured roster", account)
+			return "", 0, fmt.Errorf("requested Codex account %d is not in the configured roster", account)
 		}
 	case pfmengine.Opencode:
 		if account == 0 && len(machine.OpencodeAccounts) != 0 {
@@ -453,7 +453,7 @@ func rescueProofOptions(options headless.AwaitOptions) headless.AwaitOptions {
 func rescueLaunchPrompt(
 	ctx context.Context,
 	handle string,
-	stderr io.Writer,
+	_ io.Writer,
 	runtimes ...commandRuntime,
 ) bool {
 	chat, found, err := pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))

@@ -44,7 +44,7 @@ func TestSearchReachesOperatorConfiguredLoopbackSearXNG(t *testing.T) {
 // answering with a 3xx to an internal address must not walk the request off.
 func TestSearchRefusesRedirectOffConfiguredSearXNG(t *testing.T) {
 	var internalHits atomic.Int32
-	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		internalHits.Add(1)
 		fmt.Fprint(w, `{"results":[]}`)
 	}))
@@ -70,7 +70,7 @@ func TestSearchRefusesRedirectOffConfiguredSearXNG(t *testing.T) {
 // A failed search reports WHAT failed for each backend — never a generic
 // "unreachable or failing" that sends the operator to debug the wrong system.
 func TestSearchFailureCarriesEachBackendError(t *testing.T) {
-	searx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	searx := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "upstream down", http.StatusBadGateway)
 	}))
 	defer searx.Close()
@@ -125,7 +125,7 @@ func TestDisabledSearchNeverContactsABackend(t *testing.T) {
 // it: fetch URLs arrive from untrusted content and keep the full guard.
 func TestTrustedSearXNGOriginDoesNotOpenFetch(t *testing.T) {
 	var hits atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hits.Add(1)
 		fmt.Fprint(w, "<html><body>internal</body></html>")
 	}))

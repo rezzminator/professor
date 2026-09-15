@@ -164,12 +164,12 @@ func (worker *BrowserWorker) Smoke(ctx context.Context) (map[string]any, error) 
 // could carry internal hostnames or credentialed URLs into the tool response
 // an agent reads.
 func stderrTail(stderr string) string {
-	const max = 500
+	const maxTailBytes = 500
 	stderr = strings.TrimSpace(stderr)
-	if len(stderr) <= max {
+	if len(stderr) <= maxTailBytes {
 		return stderr
 	}
-	return "… " + stderr[len(stderr)-max:]
+	return "… " + stderr[len(stderr)-maxTailBytes:]
 }
 
 func (worker *BrowserWorker) requestInteractive(

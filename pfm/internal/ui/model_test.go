@@ -927,7 +927,7 @@ func TestControlXAlwaysLeavesAReceipt(t *testing.T) {
 		},
 		{
 			name:    "landed kill prints its receipt",
-			mutate:  func(snapshot *Snapshot) {},
+			mutate:  func(_ *Snapshot) {},
 			receipt: "hidden — ",
 		},
 	}

@@ -580,26 +580,26 @@ func themeTarget(home, target string) (string, error) {
 	return resolved, nil
 }
 
-func readOptionalRegularFile(path string) ([]byte, bool, error) {
-	info, err := os.Lstat(path)
+func readOptionalRegularFile(filePath string) ([]byte, bool, error) {
+	info, err := os.Lstat(filePath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("inspect %s: %w", path, err)
+		return nil, false, fmt.Errorf("inspect %s: %w", filePath, err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, true, fmt.Errorf("%s is not a regular file", path)
+		return nil, true, fmt.Errorf("%s is not a regular file", filePath)
 	}
-	content, err := os.ReadFile(path)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
-		return nil, true, fmt.Errorf("read %s: %w", path, err)
+		return nil, true, fmt.Errorf("read %s: %w", filePath, err)
 	}
 	return content, true, nil
 }
 
-func readThemeOwnership(path string) (map[string]themeOwnershipRecord, error) {
-	content, err := os.ReadFile(path)
+func readThemeOwnership(filePath string) (map[string]themeOwnershipRecord, error) {
+	content, err := os.ReadFile(filePath)
 	if errors.Is(err, fs.ErrNotExist) {
 		return map[string]themeOwnershipRecord{}, nil
 	}
@@ -621,10 +621,10 @@ func readThemeOwnership(path string) (map[string]themeOwnershipRecord, error) {
 	return records, nil
 }
 
-func writeThemeOwnership(path string, records map[string]themeOwnershipRecord) error {
+func writeThemeOwnership(filePath string, records map[string]themeOwnershipRecord) error {
 	if len(records) == 0 {
-		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("remove empty ownership ledger %s: %w", path, err)
+		if err := os.Remove(filePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("remove empty ownership ledger %s: %w", filePath, err)
 		}
 		return nil
 	}
@@ -633,17 +633,17 @@ func writeThemeOwnership(path string, records map[string]themeOwnershipRecord) e
 		return fmt.Errorf("encode ownership: %w", err)
 	}
 	content = append(content, '\n')
-	if err := atomicfile.Write(path, content, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
+	if err := atomicfile.Write(filePath, content, 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", filePath, err)
 	}
 	return nil
 }
 
-func rollbackTheme(path string, previous []byte, existed bool) error {
+func rollbackTheme(filePath string, previous []byte, existed bool) error {
 	if existed {
-		return atomicfile.Write(path, previous, 0o644)
+		return atomicfile.Write(filePath, previous, 0o644)
 	}
-	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := os.Remove(filePath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return nil

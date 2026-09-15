@@ -18,7 +18,7 @@ import (
 // plus one row per owned settings file. installer.InspectVSCode is the same
 // reader `pfm install --vscode` itself uses, so doctor can never assert a
 // state the installer did not derive the same way.
-func printVSCodeDoctor(stdout io.Writer, home string, machine config.Config) int {
+func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
 	report, err := installer.InspectVSCode(home)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: vscode unreadable error=%v — run pfm install --yes\n", err)

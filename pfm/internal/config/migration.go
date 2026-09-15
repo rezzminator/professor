@@ -297,13 +297,14 @@ func rewriteMigratedConfig(migration Migration) error {
 }
 
 func pathExists(path string) (bool, error) {
-	if _, err := os.Lstat(path); err == nil {
+	_, err := os.Lstat(path)
+	if err == nil {
 		return true, nil
-	} else if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	} else {
-		return false, fmt.Errorf("inspect %s: %w", path, err)
 	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return false, fmt.Errorf("inspect %s: %w", path, err)
 }
 
 // moveHarvesterEnabled writes the legacy flag into harvester.config.json. An

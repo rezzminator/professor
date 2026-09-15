@@ -103,8 +103,8 @@ func TestInternalLaunchNoTTYCreatesListedSessionAndPropagatesExit(t *testing.T) 
 	release := filepath.Join(root, "release")
 	evidence := filepath.Join(root, "evidence")
 	transcript := filepath.Join(root, "claude", "project", "11111111-1111-4111-8111-111111111111.jsonl")
-	real := filepath.Join(root, "bin", "claude")
-	writeExecutable(t, real, `#!/bin/sh
+	realBinary := filepath.Join(root, "bin", "claude")
+	writeExecutable(t, realBinary, `#!/bin/sh
 set -eu
 /bin/bash -c 'exec -a claude /bin/sleep 30' &
 claude_child=$!
@@ -136,7 +136,7 @@ exit 3
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		done <- run([]string{"internal", "launch", "--real", real, "--cwd", filepath.Join(root, "work"), "--", "--resume", "fixture-id", "--dangerously-skip-permissions"}, &stdout, &stderr)
+		done <- run([]string{"internal", "launch", "--real", realBinary, "--cwd", filepath.Join(root, "work"), "--", "--resume", "fixture-id", "--dangerously-skip-permissions"}, &stdout, &stderr)
 	}()
 	// A failed assertion must not strand the seven-day launcher wait or its
 	// fixture process. The original test leaked both when ls or readiness
@@ -225,12 +225,12 @@ exit 3
 
 func TestInternalLaunchPrintExecsDirectlyWithoutTmux(t *testing.T) {
 	root := jailTest(t)
-	real := filepath.Join(root, "bin", "claude")
-	writeExecutable(t, real, "#!/bin/sh\nprintf 'direct:%s\\n' \"$*\"\nexit 7\n")
+	realBinary := filepath.Join(root, "bin", "claude")
+	writeExecutable(t, realBinary, "#!/bin/sh\nprintf 'direct:%s\\n' \"$*\"\nexit 7\n")
 	command := exec.Command(os.Args[0], "-test.run=^TestInternalLaunchPrintHelper$")
 	command.Env = append(os.Environ(),
 		"PFM_TEST_LAUNCH_PRINT_HELPER=1",
-		"PFM_TEST_LAUNCH_REAL="+real,
+		"PFM_TEST_LAUNCH_REAL="+realBinary,
 	)
 	output, err := command.CombinedOutput()
 	var exitErr *exec.ExitError
@@ -249,7 +249,7 @@ func TestInternalLaunchPrintExecsDirectlyWithoutTmux(t *testing.T) {
 	}
 }
 
-func TestInternalLaunchPrintHelper(t *testing.T) {
+func TestInternalLaunchPrintHelper(_ *testing.T) {
 	if os.Getenv("PFM_TEST_LAUNCH_PRINT_HELPER") != "1" {
 		return
 	}
@@ -269,13 +269,13 @@ func TestInternalLaunchTmuxStartFailureIsLoudAndNeverFallsBack(t *testing.T) {
 	}
 	marker := filepath.Join(root, "bare-claude-ran")
 	writeExecutable(t, filepath.Join(bin, "tmux"), "#!/bin/sh\nprintf 'fixture tmux refused' >&2\nexit 9\n")
-	real := filepath.Join(bin, "claude")
-	writeExecutable(t, real, "#!/bin/sh\n: > \"$CC_BARE_MARKER\"\n")
+	realBinary := filepath.Join(bin, "claude")
+	writeExecutable(t, realBinary, "#!/bin/sh\n: > \"$CC_BARE_MARKER\"\n")
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CC_BARE_MARKER", marker)
 
 	var stdout, stderr bytes.Buffer
-	code := run([]string{"internal", "launch", "--real", real, "--", "--resume", "fixture"}, &stdout, &stderr)
+	code := run([]string{"internal", "launch", "--real", realBinary, "--", "--resume", "fixture"}, &stdout, &stderr)
 	if code != 1 || !strings.Contains(stderr.String(), "create chat server") ||
 		!strings.Contains(stderr.String(), "fixture tmux refused") {
 		t.Fatalf("tmux failure code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -369,7 +369,7 @@ func waitForPath(t *testing.T, path string) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal(fmt.Sprintf("timed out waiting for %s", path))
+	t.Fatalf("timed out waiting for %s", path)
 }
 
 func runWithTestTimeout(t *testing.T, timeout time.Duration, name string, run func() int) int {

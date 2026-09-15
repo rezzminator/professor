@@ -45,7 +45,7 @@ func (spy *browserSpyConverter) Convert(ctx context.Context, kind, source string
 	return "", errors.New("spy converter refuses every conversion")
 }
 
-func (spy *browserSpyConverter) FetchBrowser(ctx context.Context, source string, headless bool) (string, int, error) {
+func (spy *browserSpyConverter) FetchBrowser(_ context.Context, _ string, headless bool) (string, int, error) {
 	spy.browserCalls++
 	spy.modes = append(spy.modes, headless)
 	if spy.render != nil {
@@ -348,7 +348,7 @@ func TestJinaTransportFailureKeepsTheEarlierStatus(t *testing.T) {
 	wall := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html", "<html>checking your browser</html>"), nil
 	})
-	dead := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+	dead := roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("fixture connection reset")
 	})
 	h := mustNew(t, Options{

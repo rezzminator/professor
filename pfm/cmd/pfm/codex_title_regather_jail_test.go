@@ -101,7 +101,7 @@ func codexRegatherJailFixture(
 // assertNoStaleCodexRow fails the test if the clear-killed predecessor still
 // renders LIVE, or the successor does not, and returns the successor row's
 // pointer (nil if it never appeared) for a caller that wants to inspect more.
-func assertNoStaleCodexRow(t *testing.T, rows []compose.Row, oldID, newID, context string) *compose.Row {
+func assertNoStaleCodexRow(t *testing.T, rows []compose.Row, oldID, newID, contextLabel string) *compose.Row {
 	t.Helper()
 	var successorRow *compose.Row
 	for index := range rows {
@@ -109,7 +109,7 @@ func assertNoStaleCodexRow(t *testing.T, rows []compose.Row, oldID, newID, conte
 		if row.ID == oldID && row.Kind == compose.LiveCodex {
 			t.Fatalf(
 				"%s: the clear-killed predecessor %s still rendered LIVE from a stale gather: %#v",
-				context, oldID, row,
+				contextLabel, oldID, row,
 			)
 		}
 		if row.ID == newID {
@@ -119,7 +119,7 @@ func assertNoStaleCodexRow(t *testing.T, rows []compose.Row, oldID, newID, conte
 	if successorRow == nil || successorRow.Kind != compose.LiveCodex {
 		t.Fatalf(
 			"%s: successor %s did not render LIVE after the moved binding (rendered %#v instead): rows=%#v",
-			context, newID, successorRow, rows,
+			contextLabel, newID, successorRow, rows,
 		)
 	}
 	return successorRow

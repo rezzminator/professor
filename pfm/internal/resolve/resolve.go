@@ -486,9 +486,9 @@ func targetLine(socketPath, target string) string {
 	return socketPath + "\t" + target + "\n"
 }
 
-func readFirst(paths ...string) string {
-	for _, path := range paths {
-		content, err := os.ReadFile(path)
+func readFirst(candidates ...string) string {
+	for _, candidate := range candidates {
+		content, err := os.ReadFile(candidate)
 		if err == nil {
 			return strings.TrimRight(string(content), "\r\n")
 		}

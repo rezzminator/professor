@@ -869,7 +869,7 @@ func (model Model) renderGroupedRow(
 	left := pointer + marker + " " + name + " " + badges + " " +
 		fmt.Sprintf("%4s %6s", prompts, size)
 	age := formatAge(row, model.nowNS)
-	if selected && !(model.mergeNewChat && (isNewChatKind(row.Kind) || row.Kind == compose.ProfessorUpdate)) {
+	if selected && (!model.mergeNewChat || (!isNewChatKind(row.Kind) && row.Kind != compose.ProfessorUpdate)) {
 		age += "  " + carouselBoxes(model.actionIndex)
 	}
 	leftWidth := maxInt(1, width-lipgloss.Width(age)-1)

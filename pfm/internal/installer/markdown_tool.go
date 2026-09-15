@@ -103,10 +103,10 @@ func rumdlVersion(ctx context.Context, path string) (string, error) {
 }
 
 // truncateOutput bounds command output before it reaches an install log line.
-func truncateOutput(output []byte, max int) string {
+func truncateOutput(output []byte, maxBytes int) string {
 	trimmed := strings.TrimSpace(string(output))
-	if len(trimmed) <= max {
+	if len(trimmed) <= maxBytes {
 		return trimmed
 	}
-	return trimmed[:max] + "...(truncated)"
+	return trimmed[:maxBytes] + "...(truncated)"
 }

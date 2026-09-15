@@ -269,7 +269,7 @@ func readCodexState(ctx context.Context, file string) (threads []CodexThread, re
 	for _, required := range []string{"id", "cwd", "created_at", "thread_source"} {
 		if _, found := columns[required]; !found {
 			return nil, fmt.Errorf(
-				"Codex state store %q has no threads.%s column",
+				"state store for Codex %q has no threads.%s column",
 				file,
 				required,
 			)

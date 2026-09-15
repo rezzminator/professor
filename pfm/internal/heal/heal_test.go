@@ -103,11 +103,11 @@ func (jail *codexJail) addThread(t *testing.T, id string, records int) []int64 {
 	offsets := make([]int64, 0, records)
 	for index := 0; index < records; index++ {
 		offsets = append(offsets, int64(content.Len()))
-		content.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&content,
 			`{"ordinal":%d,"type":"event_msg","payload":{"n":%d}}`+"\n",
 			index,
 			index,
-		))
+		)
 	}
 	if err := os.WriteFile(path, []byte(content.String()), 0o600); err != nil {
 		t.Fatal(err)
@@ -166,12 +166,12 @@ func (jail *codexJail) addThreadWithRecords(t *testing.T, id string, records []j
 		if record.Ordinal != nil {
 			ordinalField = strconv.FormatInt(*record.Ordinal, 10)
 		}
-		content.WriteString(fmt.Sprintf(
+		fmt.Fprintf(&content,
 			`{"ordinal":%s,"type":%q,"payload":{"type":%q}}`+"\n",
 			ordinalField,
 			recordType,
 			payloadType,
-		))
+		)
 	}
 	if err := os.WriteFile(path, []byte(content.String()), 0o600); err != nil {
 		t.Fatal(err)
@@ -754,7 +754,7 @@ func TestUnreadableRolloutIsUnscanned(t *testing.T) {
 
 	original := openRollout
 	t.Cleanup(func() { openRollout = original })
-	openRollout = func(path string) (io.ReadCloser, error) {
+	openRollout = func(_ string) (io.ReadCloser, error) {
 		return io.NopCloser(iotest.ErrReader(errors.New("disk fell off"))), nil
 	}
 

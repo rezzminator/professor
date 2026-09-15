@@ -23,21 +23,21 @@ import (
 func (h *Harvester) PublicCandidates(candidates []Candidate) ([]Candidate, error) {
 	out := make([]Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		copy := candidate
-		copy.Source = ""
-		copy.Priority = 0
+		publicCandidate := candidate
+		publicCandidate.Source = ""
+		publicCandidate.Priority = 0
 		if strings.TrimSpace(candidate.URL) != "" {
 			if publicIdentityHandle(candidate.URL) {
-				copy.URL = strings.TrimSpace(candidate.URL)
+				publicCandidate.URL = strings.TrimSpace(candidate.URL)
 			} else {
 				handle, err := h.PublicHandle(candidate.URL)
 				if err != nil {
 					return nil, err
 				}
-				copy.URL = handle
+				publicCandidate.URL = handle
 			}
 		}
-		out = append(out, copy)
+		out = append(out, publicCandidate)
 	}
 	return out, nil
 }

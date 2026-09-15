@@ -437,7 +437,7 @@ func TestLimitsSamplerKeepsCodexAuthAndPayloadFailuresVisible(t *testing.T) {
 		if err := os.WriteFile(path, []byte(`{"tokens":{"access_token":"fixture-access"}}`), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		assertCodexStatus(t, path, "", nil, "Codex session incomplete")
+		assertCodexStatus(t, path, "", nil, "session for Codex is incomplete")
 	})
 	for _, code := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		t.Run(fmt.Sprintf("HTTP %d", code), func(t *testing.T) {
@@ -452,7 +452,7 @@ func TestLimitsSamplerKeepsCodexAuthAndPayloadFailuresVisible(t *testing.T) {
 				path,
 				server.URL,
 				server.Client(),
-				fmt.Sprintf("Codex credential rejected (HTTP %d)", code),
+				fmt.Sprintf("credential for Codex rejected (HTTP %d)", code),
 			)
 		})
 	}
@@ -463,7 +463,7 @@ func TestLimitsSamplerKeepsCodexAuthAndPayloadFailuresVisible(t *testing.T) {
 			fmt.Fprint(w, `{"rate_limit":`)
 		}))
 		defer server.Close()
-		assertCodexStatus(t, path, server.URL, server.Client(), "Codex payload unreadable")
+		assertCodexStatus(t, path, server.URL, server.Client(), "usage payload from Codex is unreadable")
 	})
 	t.Run("network failure", func(t *testing.T) {
 		root := t.TempDir()
@@ -472,7 +472,7 @@ func TestLimitsSamplerKeepsCodexAuthAndPayloadFailuresVisible(t *testing.T) {
 		endpoint := server.URL
 		client := server.Client()
 		server.Close()
-		assertCodexStatusPrefix(t, path, endpoint, client, "Codex fetch failed: ")
+		assertCodexStatusPrefix(t, path, endpoint, client, "fetch Codex usage failed: ")
 	})
 }
 

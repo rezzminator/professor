@@ -264,8 +264,8 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 
 	const count = 10
 	args := make([]ExitArgs, 0, count)
-	for index := 0; index < count; index++ {
-		id := fmt.Sprintf("kill-exit-%02d", index)
+	for position := 0; position < count; position++ {
+		id := fmt.Sprintf("kill-exit-%02d", position)
 		path := filepath.Join(jail.claudeRoot, id+".jsonl")
 		if err := database.UpsertTranscript(ctx, store.Transcript{
 			UUID:        id,
@@ -277,15 +277,15 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		if err := database.Kill(ctx, store.Killed{
 			ID:       id,
 			Engine:   pfmengine.Claude,
-			KilledAt: int64(index + 1),
+			KilledAt: int64(position + 1),
 		}); err != nil {
 			t.Fatal(err)
 		}
-		socketName := fmt.Sprintf("cc-%d-1-1", 900+index)
+		socketName := fmt.Sprintf("cc-%d-1-1", 900+position)
 		paneID := jail.startReader(
 			t,
 			socketName,
-			fmt.Sprintf("kill-%02d", index),
+			fmt.Sprintf("kill-%02d", position),
 			path,
 			false,
 		)
@@ -317,32 +317,32 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 	started := time.Now()
 	var group sync.WaitGroup
 	errorsByIndex := make([]error, len(args))
-	for index := range args {
-		index := index
+	for position := range args {
+		position := position
 		group.Add(1)
 		go func() {
 			defer group.Done()
-			errorsByIndex[index] = finisher.Run(ctx, args[index])
+			errorsByIndex[position] = finisher.Run(ctx, args[position])
 		}()
 	}
 	group.Wait()
 	elapsed := time.Since(started)
-	for index, runErr := range errorsByIndex {
+	for position, runErr := range errorsByIndex {
 		if runErr != nil {
-			t.Fatalf("finisher %d: %v", index, runErr)
+			t.Fatalf("finisher %d: %v", position, runErr)
 		}
 		if (CommandTmux{}).PaneExists(
 			context.Background(),
-			args[index].SocketPath,
-			args[index].PaneID,
+			args[position].SocketPath,
+			args[position].PaneID,
 		) {
-			t.Fatalf("pane %d survived", index)
+			t.Fatalf("pane %d survived", position)
 		}
 		for _, crumb := range []string{
-			filepath.Join(jail.sidDir, args[index].SocketName),
+			filepath.Join(jail.sidDir, args[position].SocketName),
 			filepath.Join(
 				jail.sidDir,
-				args[index].SocketName+"."+args[index].PaneID,
+				args[position].SocketName+"."+args[position].PaneID,
 			),
 		} {
 			if _, statErr := os.Stat(crumb); !errors.Is(statErr, os.ErrNotExist) {

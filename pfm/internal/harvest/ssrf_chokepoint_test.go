@@ -17,7 +17,7 @@ func TestAssertFetchableStrictFailsClosedOnDNSFailure(t *testing.T) {
 	previous := lookupIP
 	t.Cleanup(func() { lookupIP = previous })
 
-	lookupIP = func(host string) ([]net.IP, error) {
+	lookupIP = func(_ string) ([]net.IP, error) {
 		return nil, errors.New("read udp 10.0.0.2:53: i/o timeout")
 	}
 	err := AssertFetchableStrict("https://rebind.attacker.test/page")
@@ -36,7 +36,7 @@ func TestAssertFetchableStrictRefusesAnEmptyAnswer(t *testing.T) {
 	previous := lookupIP
 	t.Cleanup(func() { lookupIP = previous })
 
-	lookupIP = func(host string) ([]net.IP, error) { return nil, nil }
+	lookupIP = func(_ string) ([]net.IP, error) { return nil, nil }
 	if err := AssertFetchableStrict("https://empty.attacker.test/"); err == nil {
 		t.Fatal("an empty DNS answer was ALLOWED")
 	}
@@ -46,7 +46,7 @@ func TestAssertFetchableStrictRechecksDNSImmediatelyBeforeBrowserApproval(t *tes
 	previous := lookupIP
 	t.Cleanup(func() { lookupIP = previous })
 	calls := 0
-	lookupIP = func(host string) ([]net.IP, error) {
+	lookupIP = func(_ string) ([]net.IP, error) {
 		calls++
 		if calls == 1 {
 			return []net.IP{net.ParseIP("93.184.216.34")}, nil
@@ -85,7 +85,7 @@ func TestAssertFetchableAllowsPublicResolution(t *testing.T) {
 	previous := lookupIP
 	t.Cleanup(func() { lookupIP = previous })
 
-	lookupIP = func(host string) ([]net.IP, error) {
+	lookupIP = func(_ string) ([]net.IP, error) {
 		return []net.IP{net.ParseIP("93.184.216.34")}, nil
 	}
 	for _, guard := range []func(string) error{AssertFetchable, AssertFetchableStrict} {
@@ -105,7 +105,7 @@ func TestAssertFetchableStaysLenientOnResolverFailure(t *testing.T) {
 	previous := lookupIP
 	t.Cleanup(func() { lookupIP = previous })
 
-	lookupIP = func(host string) ([]net.IP, error) {
+	lookupIP = func(_ string) ([]net.IP, error) {
 		return nil, errors.New("resolver down")
 	}
 	if err := AssertFetchable("https://fixture.example.test/"); err != nil {

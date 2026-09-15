@@ -966,16 +966,16 @@ func loadCodexCredentials(path string) (accessToken, accountID string, err error
 		if os.IsNotExist(err) {
 			return "", "", fmt.Errorf("no local Codex sign-in")
 		}
-		return "", "", fmt.Errorf("Codex fetch failed: read local sign-in: %w", err)
+		return "", "", fmt.Errorf("fetch Codex usage failed: read local sign-in: %w", err)
 	}
 	var envelope codexCredentialEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
-		return "", "", fmt.Errorf("Codex session incomplete")
+		return "", "", fmt.Errorf("session for Codex is incomplete")
 	}
 	accessToken = strings.TrimSpace(envelope.Tokens.AccessToken)
 	accountID = strings.TrimSpace(envelope.Tokens.AccountID)
 	if accessToken == "" || accountID == "" {
-		return "", "", fmt.Errorf("Codex session incomplete")
+		return "", "", fmt.Errorf("session for Codex is incomplete")
 	}
 	return accessToken, accountID, nil
 }
@@ -1002,7 +1002,11 @@ func (sampler *LimitsSampler) fetchCodex(ctx context.Context, account LimitAccou
 			usage.Warning = "Codex App Server limits unavailable; showing direct usage only: " + appErr.Error()
 			return usage, nil
 		}
-		return codexUsage{}, fmt.Errorf("Codex App Server failed: %v; direct usage failed: %w", appErr, directErr)
+		return codexUsage{}, fmt.Errorf(
+			"request to Codex App Server failed: %v; direct usage failed: %w",
+			appErr,
+			directErr,
+		)
 	}
 	return sampler.fetchCodexHTTP(ctx, account)
 }
@@ -1018,7 +1022,7 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: %v", err)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", err)
 	}
 	request.Header.Set("Authorization", "Bearer "+accessToken)
 	request.Header.Set("ChatGPT-Account-ID", accountID)
@@ -1028,15 +1032,15 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 
 	response, err := sampler.codexClient().Do(request)
 	if err != nil {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: %v", err)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", err)
 	}
 	body, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
 	closeErr := response.Body.Close()
 	if readErr != nil {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: %v", readErr)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", readErr)
 	}
 	if closeErr != nil {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: %v", closeErr)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", closeErr)
 	}
 	if response.StatusCode == http.StatusTooManyRequests {
 		return codexUsage{}, &usagehook.RateLimitError{
@@ -1044,10 +1048,10 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 		}
 	}
 	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		return codexUsage{}, fmt.Errorf("Codex credential rejected (HTTP %d)", response.StatusCode)
+		return codexUsage{}, fmt.Errorf("credential for Codex rejected (HTTP %d)", response.StatusCode)
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return codexUsage{}, fmt.Errorf("Codex fetch failed: HTTP %d", response.StatusCode)
+		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: HTTP %d", response.StatusCode)
 	}
 
 	var usage codexUsage
@@ -1056,7 +1060,7 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 		&usage,
 	); err != nil || usage.RateLimit == nil ||
 		usage.RateLimit.PrimaryWindow == nil {
-		return codexUsage{}, fmt.Errorf("Codex payload unreadable")
+		return codexUsage{}, fmt.Errorf("usage payload from Codex is unreadable")
 	}
 	return usage, nil
 }
@@ -1096,7 +1100,7 @@ func (sampler *LimitsSampler) fetchCodexAppServer(ctx context.Context, account L
 		&message,
 	); err != nil || string(message.ID) != "1" ||
 		message.Result.RateLimits == nil {
-		return codexUsage{}, fmt.Errorf("Codex App Server payload unreadable")
+		return codexUsage{}, fmt.Errorf("payload from Codex App Server is unreadable")
 	}
 	usage := codexUsage{
 		PlanType:            message.Result.RateLimits.PlanType,
@@ -1107,7 +1111,7 @@ func (sampler *LimitsSampler) fetchCodexAppServer(ctx context.Context, account L
 		usage.RateLimitsByLimitID[id] = *codexBucketFromApp(bucket)
 	}
 	if len(codexWindows(usage)) == 0 {
-		return codexUsage{}, fmt.Errorf("Codex App Server response carried no rate-limit windows")
+		return codexUsage{}, fmt.Errorf("response from Codex App Server carried no rate-limit windows")
 	}
 	return usage, nil
 }

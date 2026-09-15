@@ -85,7 +85,7 @@ func TestEveryServiceUnitTakesTheOneServicePath(t *testing.T) {
 		}
 		relative := strings.TrimPrefix(name, "assets/")
 		if !strings.HasPrefix(relative, "launchd/") &&
-			!(strings.HasPrefix(relative, "systemd/") && strings.HasSuffix(relative, ".service")) {
+			(!strings.HasPrefix(relative, "systemd/") || !strings.HasSuffix(relative, ".service")) {
 			return nil
 		}
 		content, err := readAsset(relative)

@@ -578,7 +578,7 @@ func TestSDKSpawnedSessionsIndexAsBackgroundAndReparseOnVersionBump(t *testing.T
 	// on disk is byte-identical, so only a parser version bump reparses it.
 	stale := spawned
 	stale.IsBG = false
-	if err := database.Batch(ctx, 1, func(tx *store.ImmediateTx, start, end int) error {
+	if err := database.Batch(ctx, 1, func(tx *store.ImmediateTx, _, _ int) error {
 		return tx.UpsertTranscript(ctx, stale)
 	}); err != nil {
 		t.Fatal(err)

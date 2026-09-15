@@ -89,12 +89,12 @@ func TestCurrentSocketReadsTheCallersOwnTmuxServer(t *testing.T) {
 // TestAccountRootsCanonicalizeProjectDirs pins that a symlinked project dir is
 // matched by its target — compose compares transcript paths against these.
 func TestAccountRootsCanonicalizeProjectDirs(t *testing.T) {
-	real := t.TempDir()
+	realHome := t.TempDir()
 	link := filepath.Join(t.TempDir(), "projects")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(realHome, link); err != nil {
 		t.Fatal(err)
 	}
-	canonical, err := filepath.EvalSymlinks(real)
+	canonical, err := filepath.EvalSymlinks(realHome)
 	if err != nil {
 		t.Fatal(err)
 	}

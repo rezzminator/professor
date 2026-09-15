@@ -144,7 +144,7 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 	actual := strings.TrimSpace(string(actualBytes))
 	if configErr != nil {
 		var exitErr *exec.ExitError
-		if !(errors.As(configErr, &exitErr) && exitErr.ExitCode() == 1 && actual == "") {
+		if !errors.As(configErr, &exitErr) || exitErr.ExitCode() != 1 || actual != "" {
 			return fmt.Errorf("read core.hooksPath in %s: %w: %s", repo, configErr, actual)
 		}
 		actual = ""

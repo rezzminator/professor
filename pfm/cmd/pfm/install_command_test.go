@@ -442,7 +442,7 @@ func TestInstallSkipThemesDisablesFetchAndPreservesConfirmation(t *testing.T) {
 func TestInstallApplyContinuesPastAnIdenticalPreSplitBackup(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })
-	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {
 		return installer.Report{}, nil
 	}
 	home := t.TempDir()
@@ -490,7 +490,7 @@ func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })
 	installerRan := false
-	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
+	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {
 		installerRan = true
 		return installer.Report{}, nil
 	}

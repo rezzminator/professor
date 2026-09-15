@@ -142,7 +142,7 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 	case pfmengine.Claude:
 		if _, found := machine.Account(request.PrimaryAccount); !found {
 			return HeadlessPlan{}, fmt.Errorf(
-				"Claude account %d is not in the configured roster",
+				"requested Claude account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
@@ -170,7 +170,7 @@ func HeadlessFork(request HeadlessForkRequest) (HeadlessPlan, error) {
 	case pfmengine.Codex:
 		if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
 			return HeadlessPlan{}, fmt.Errorf(
-				"Codex account %d is not in the configured roster",
+				"requested Codex account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
@@ -267,7 +267,10 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 	}
 	machine := normalizedMachineConfig(request.Config, request.Home)
 	if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
-		return HeadlessPlan{}, fmt.Errorf("Codex account %d is not in the configured roster", request.PrimaryAccount)
+		return HeadlessPlan{}, fmt.Errorf(
+			"requested Codex account %d is not in the configured roster",
+			request.PrimaryAccount,
+		)
 	}
 	effort, err := CodexEffort(request.Effort)
 	if err != nil {

@@ -33,7 +33,7 @@ var retiredHarvesterServeFlags = map[string]string{
 // runHarvesterMCP serves the harvester over stdio for a client that launches
 // it as a command. Both HTTP gateways — loopback and the authenticated
 // external one — belong to the one daemon process, `pfm mcp serve`.
-func runHarvesterMCP(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+func runHarvesterMCP(args []string, _, stderr io.Writer, runtime commandRuntime) int {
 	for _, arg := range args {
 		if !strings.HasPrefix(arg, "-") {
 			continue

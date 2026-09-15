@@ -102,7 +102,7 @@ func TestRenderSearchFailureNamesTheBackendConnectionCause(t *testing.T) {
 // settings.yml turns on the json format, and the default HTTP-403 wording
 // ("forbidden") never says so.
 func TestRenderSearchFailureHintsSearXNGJSONFormatOn403(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 	}))
 	defer server.Close()

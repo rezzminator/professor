@@ -344,7 +344,7 @@ func (d *chromeDialer) dialSOCKS(ctx context.Context, network, address string) (
 	return dialer.Dial(network, address)
 }
 
-func (d *chromeDialer) dialCONNECT(ctx context.Context, network, address string) (net.Conn, error) {
+func (d *chromeDialer) dialCONNECT(ctx context.Context, _, address string) (net.Conn, error) {
 	proxyDialer := &net.Dialer{Timeout: d.timeout}
 	raw, err := proxyDialer.DialContext(ctx, "tcp", d.proxyURL.Host)
 	if err != nil {
@@ -401,7 +401,7 @@ func encodeBase64(value string) string {
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 	var out strings.Builder
 	for i := 0; i < len(value); i += 3 {
-		var n uint32 = uint32(value[i]) << 16
+		n := uint32(value[i]) << 16
 		if i+1 < len(value) {
 			n |= uint32(value[i+1]) << 8
 		}

@@ -71,7 +71,7 @@ func Register(ctx context.Context, binary, home, account string, uninstall bool)
 	}
 	if len(found) != 1 || found[0].Key == "" || found[0].CurrentHash == "" {
 		return fmt.Errorf(
-			"Professor appendix hook unavailable (found %d): check hooks feature, managed policy and hooks.json",
+			"professor appendix hook unavailable (found %d): check hooks feature, managed policy and hooks.json",
 			len(found),
 		)
 	}

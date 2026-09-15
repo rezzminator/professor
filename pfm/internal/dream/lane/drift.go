@@ -151,7 +151,7 @@ func parseDriftAnchors(body string) ([]driftAnchor, error) {
 	for _, line := range lines {
 		if line == "## Anchors" {
 			if found {
-				return nil, errors.New("Anchors heading count is not one")
+				return nil, errors.New("anchors heading count is not one")
 			}
 			found = true
 			inAnchors = true

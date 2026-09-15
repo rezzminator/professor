@@ -111,7 +111,7 @@ func TestDOHResolverReportsBothFailures(t *testing.T) {
 func TestDOHResolverSkipsSpecialUseNames(t *testing.T) {
 	resolver := newTestDOHResolver(
 		"http://doh.invalid/should-never-be-called",
-		func(_ context.Context, host string) ([]net.IP, error) {
+		func(_ context.Context, _ string) ([]net.IP, error) {
 			return []net.IP{net.ParseIP("127.0.0.1")}, nil
 		},
 	)

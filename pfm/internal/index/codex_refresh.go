@@ -18,7 +18,7 @@ func RefreshCodexLineage(ctx context.Context, database *store.Store, id string) 
 		return fmt.Errorf("read Codex clear lineage %q: %w", id, err)
 	}
 	if len(family) == 0 {
-		return fmt.Errorf("Codex clear lineage %q is not indexed yet", id)
+		return fmt.Errorf("clear lineage for Codex %q is not indexed yet", id)
 	}
 	version, found, err := database.Meta(ctx, codexParserVersionKey)
 	if err != nil {

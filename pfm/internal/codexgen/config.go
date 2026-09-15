@@ -99,11 +99,11 @@ func loadConfig(root string, cli CLIOverrides) (Config, error) {
 			return Config{}, err
 		}
 		if file.Version == nil {
-			return Config{}, fmt.Errorf("Codex compiler config %s: version is required", path)
+			return Config{}, fmt.Errorf("config for Codex compiler %s: version is required", path)
 		}
 		if *file.Version != configVersion {
 			return Config{}, fmt.Errorf(
-				"Codex compiler config %s: unsupported version %d (want %d)",
+				"config for Codex compiler %s: unsupported version %d (want %d)",
 				path,
 				*file.Version,
 				configVersion,
@@ -145,7 +145,7 @@ func loadConfig(root string, cli CLIOverrides) (Config, error) {
 
 	applyCLIOverrides(&cfg, cli)
 	if err := validateConfig(cfg); err != nil {
-		return Config{}, fmt.Errorf("Codex compiler config: %w", err)
+		return Config{}, fmt.Errorf("config for Codex compiler: %w", err)
 	}
 	return cfg, nil
 }

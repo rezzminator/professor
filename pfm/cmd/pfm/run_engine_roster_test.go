@@ -40,7 +40,7 @@ func TestResolveRunEngineAccountUsesTheChosenRoster(t *testing.T) {
 		t.Fatalf("explicit = %q/%d error=%v, want cx/8", engine, account, err)
 	}
 	_, _, err = resolveRunEngineAccount("claude", 1, machine, 0)
-	if err == nil || !strings.Contains(err.Error(), "Claude account 1") {
+	if err == nil || !strings.Contains(err.Error(), "requested Claude account 1") {
 		t.Fatalf("empty Claude roster error = %v", err)
 	}
 }

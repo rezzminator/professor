@@ -316,7 +316,7 @@ func renderGlobalAgentTOML(mdPath string) (string, string, error) {
 	nameMatch := globalAgentNameField.FindStringSubmatch(frontmatter)
 	descMatch := globalAgentDescField.FindStringSubmatch(frontmatter)
 	if nameMatch == nil || descMatch == nil {
-		return "", "", fmt.Errorf("%s: frontmatter needs both name: and description:", mdPath)
+		return "", "", fmt.Errorf("%s: frontmatter needs both name: and description", mdPath)
 	}
 	name := strings.TrimSpace(nameMatch[1])
 	description := strings.TrimSpace(descMatch[1])

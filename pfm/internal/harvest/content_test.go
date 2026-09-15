@@ -36,7 +36,7 @@ func TestBibliographicLandingCycleStopsAfterOneHop(t *testing.T) {
 			return response(r, http.StatusNotFound, "text/plain", "missing"), nil
 		}
 	})
-	convert := legacyConverterFunc(func(_ context.Context, kind, source string, _ []byte) (string, error) {
+	convert := legacyConverterFunc(func(_ context.Context, kind, _ string, _ []byte) (string, error) {
 		if kind != "html" {
 			return "", errors.New("unexpected kind")
 		}

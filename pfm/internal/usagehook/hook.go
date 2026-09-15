@@ -231,7 +231,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 			break
 		}
 	}
-	maximum := max(five, seven, opus, fable)
+	maximum := maximumInt(five, seven, opus, fable)
 	flagPath := filepath.Join(options.CacheDir, fmt.Sprintf("warned-%d", account))
 	if maximum < options.Warn {
 		flag, err := os.ReadFile(flagPath)
@@ -457,7 +457,7 @@ func CachedFableWindow(base string, uid, account int, configDir string, now time
 	if cacheAge(record, path, now) > time.Hour {
 		return Window{}, false
 	}
-	return record.Usage.fableWindow(now)
+	return record.fableWindow(now)
 }
 
 // CacheBackoff records a rate-limited or otherwise failed fetch so every
@@ -768,7 +768,7 @@ func envInt(name string, fallback int) int {
 	return value
 }
 
-func max(values ...int) int {
+func maximumInt(values ...int) int {
 	maximum := values[0]
 	for _, value := range values[1:] {
 		if value > maximum {

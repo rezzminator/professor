@@ -290,7 +290,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	return reset + l1 + "\n" + reset + l2 + "\n", nil
 }
 
-func effortSegment(runtime Runtime, data input) string {
+func effortSegment(_ Runtime, data input) string {
 	if data.Effort.Level == "" {
 		return ""
 	}

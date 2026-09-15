@@ -951,7 +951,10 @@ func validateReloadAccount(machine pfmconfig.Config, engine pfmengine.ID, accoun
 		}
 		selected, found := machine.CodexAccountByID(account)
 		if !found {
-			return reloadAccountSelection{}, fmt.Errorf("Codex account %d is not in the configured roster", account)
+			return reloadAccountSelection{}, fmt.Errorf(
+				"requested Codex account %d is not in the configured roster",
+				account,
+			)
 		}
 		policy := machine.EffectiveCodex(account)
 		return reloadAccountSelection{
@@ -967,7 +970,10 @@ func validateReloadAccount(machine pfmconfig.Config, engine pfmengine.ID, accoun
 		return reloadAccountSelection{}, errors.New("no Claude accounts configured")
 	}
 	if _, found := machine.Account(account); !found {
-		return reloadAccountSelection{}, fmt.Errorf("Claude account %d is not in the configured roster", account)
+		return reloadAccountSelection{}, fmt.Errorf(
+			"requested Claude account %d is not in the configured roster",
+			account,
+		)
 	}
 	return reloadAccountSelection{IDs: machine.AccountIDs()}, nil
 }
@@ -1094,7 +1100,11 @@ func resolveReloadCodexPaneBinding(
 		return "", nil
 	}
 	if !fleet.ChatIDPattern.MatchString(id) {
-		return "", fmt.Errorf("Codex pane binding for %s %s is not a valid thread id", filepath.Base(socketPath), pane)
+		return "", fmt.Errorf(
+			"pane binding for Codex at %s %s is not a valid thread id",
+			filepath.Base(socketPath),
+			pane,
+		)
 	}
 	return id, nil
 }

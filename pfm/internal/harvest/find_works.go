@@ -295,7 +295,7 @@ func (r *Resolver) findSemanticScholar(ctx context.Context, client *http.Client,
 			Authors []struct {
 				Name string `json:"name"`
 			} `json:"authors"`
-			ExternalIds struct {
+			ExternalIDs struct {
 				DOI   string `json:"DOI"`
 				ArXiv string `json:"ArXiv"`
 			} `json:"externalIds"`
@@ -321,16 +321,16 @@ func (r *Resolver) findSemanticScholar(ctx context.Context, client *http.Client,
 		}
 		handle := ""
 		free := ""
-		if doi := DOIFrom(paper.ExternalIds.DOI); doi != "" {
+		if doi := DOIFrom(paper.ExternalIDs.DOI); doi != "" {
 			handle = doi
-		} else if paper.ExternalIds.ArXiv != "" {
-			handle = "https://arxiv.org/pdf/" + paper.ExternalIds.ArXiv
+		} else if paper.ExternalIDs.ArXiv != "" {
+			handle = "https://arxiv.org/pdf/" + paper.ExternalIDs.ArXiv
 		} else if paper.OpenAccessPDF.URL != "" {
 			handle = paper.OpenAccessPDF.URL
 		} else {
 			continue // no fetchable handle → useless as a candidate
 		}
-		if paper.OpenAccessPDF.URL != "" || paper.ExternalIds.ArXiv != "" {
+		if paper.OpenAccessPDF.URL != "" || paper.ExternalIDs.ArXiv != "" {
 			free = "green"
 		}
 		names := make([]string, 0, len(paper.Authors))

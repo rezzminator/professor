@@ -282,7 +282,7 @@ func configureProxy(client *http.Client, raw string) {
 	if err != nil || proxyURL.Scheme == "" || proxyURL.Host == "" {
 		return
 	}
-	var base http.RoundTripper = client.Transport
+	base := client.Transport
 	if wrapped, ok := base.(*userAgentTransport); ok {
 		base = wrapped.base
 	}
@@ -475,8 +475,8 @@ func literalIP(host string) net.IP {
 	return nil
 }
 
-func getBody(ctx context.Context, client *http.Client, rawURL, ua string, max int64) ([]byte, int, string, error) {
-	return getBodyWithHeaders(ctx, client, rawURL, ua, nil, max)
+func getBody(ctx context.Context, client *http.Client, rawURL, ua string, maxBytes int64) ([]byte, int, string, error) {
+	return getBodyWithHeaders(ctx, client, rawURL, ua, nil, maxBytes)
 }
 
 // getBodyWithHeaders is the generic web ladder's egress. It runs through the
@@ -491,7 +491,7 @@ func getBodyWithHeaders(
 	client *http.Client,
 	rawURL, ua string,
 	headers map[string]string,
-	max int64,
+	maxBytes int64,
 ) ([]byte, int, string, error) {
 	header := make(http.Header, len(headers))
 	for key, value := range headers {
@@ -502,7 +502,7 @@ func getBodyWithHeaders(
 		client:           client,
 		ua:               ua,
 		headers:          header,
-		max:              max,
+		max:              maxBytes,
 		oversizeTruncate: true,
 	})
 	return response.body, response.status, response.contentType, err

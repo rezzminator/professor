@@ -74,8 +74,8 @@ func gatewayClient(base *http.Client, jar http.CookieJar) *http.Client {
 	clone := &http.Client{Jar: jar}
 	var existingRedirect func(*http.Request, []*http.Request) error
 	if base != nil {
-		copy := *base
-		clone = &copy
+		baseCopy := *base
+		clone = &baseCopy
 		if jar != nil {
 			clone.Jar = jar
 		}
@@ -110,7 +110,7 @@ func doiMirrorMaxBytes(h *Harvester) int64 {
 // one caller ("doi-mirror") this function happened to be written for first.
 func readDOIMirrorResponse(
 	resp *http.Response,
-	max int64,
+	maxBytes int64,
 ) (body []byte, status int, contentType string, returnErr error) {
 	if resp == nil {
 		return nil, 0, "", errors.New("gateway received no HTTP response")
@@ -129,12 +129,12 @@ func readDOIMirrorResponse(
 			returnErr = errors.Join(returnErr, fmt.Errorf("close response: %w", err))
 		}
 	}()
-	body, err = io.ReadAll(io.LimitReader(decoded, max+1))
+	body, err = io.ReadAll(io.LimitReader(decoded, maxBytes+1))
 	if err != nil {
 		return nil, status, contentType, fmt.Errorf("read response: %w", err)
 	}
-	if int64(len(body)) > max {
-		return nil, status, contentType, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, max)
+	if int64(len(body)) > maxBytes {
+		return nil, status, contentType, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, maxBytes)
 	}
 	return body, status, contentType, nil
 }

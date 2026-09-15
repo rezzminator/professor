@@ -119,7 +119,7 @@ type CommandGitReader struct {
 
 func (reader CommandGitReader) Resolve(tree, path string) (GitObject, bool, error) {
 	if reader.Repo == "" {
-		return GitObject{}, false, errors.New("Git reader requires a repository")
+		return GitObject{}, false, errors.New("git reader requires a repository")
 	}
 	resolve := exec.Command(deps.Executable("git"), "-C", reader.Repo, "rev-parse", "--verify", "-q", tree+":"+path)
 	resolve.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")

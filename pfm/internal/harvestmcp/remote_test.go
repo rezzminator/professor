@@ -259,7 +259,7 @@ func TestRemoteMetadataAliasesAndRegistrationRules(t *testing.T) {
 	}
 	bare := remoteRequest(t, server, http.MethodGet, paths[0], "", "")
 	suffixed := remoteRequest(t, server, http.MethodGet, paths[1], "", "")
-	if string(bare.Body.Bytes()) != string(suffixed.Body.Bytes()) {
+	if bare.Body.String() != suffixed.Body.String() {
 		t.Fatal("protected-resource metadata aliases drifted")
 	}
 	badType := remoteRequest(

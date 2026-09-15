@@ -594,7 +594,7 @@ func TestCodexIsolationCapabilityErrorsHappenBeforeLaunch(t *testing.T) {
 			}
 			testCase.mutate(&request)
 			_, err := Run(context.Background(), request)
-			if err == nil || !strings.Contains(err.Error(), "Codex headless") {
+			if err == nil || !strings.Contains(err.Error(), "headless runs with Codex") {
 				t.Fatalf("error = %v, want an explicit Codex capability error", err)
 			}
 			if _, statErr := os.Stat(filepath.Join(capture, "started")); !errors.Is(statErr, os.ErrNotExist) {

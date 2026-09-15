@@ -303,9 +303,9 @@ func gatewayRequestClient(req gatewayRequest) *http.Client {
 // gatewayReadBody decodes the response and applies the byte ceiling under the
 // caller's oversize rule. truncate keeps the permitted prefix; otherwise an
 // over-ceiling body is an error and no partial artifact is returned.
-func gatewayReadBody(resp *http.Response, max int64, truncate bool) ([]byte, int, string, error) {
+func gatewayReadBody(resp *http.Response, maxBytes int64, truncate bool) ([]byte, int, string, error) {
 	if !truncate {
-		return readDOIMirrorResponse(resp, max)
+		return readDOIMirrorResponse(resp, maxBytes)
 	}
 	if resp == nil {
 		return nil, 0, "", errors.New("gateway received no HTTP response")
@@ -324,12 +324,12 @@ func gatewayReadBody(resp *http.Response, max int64, truncate bool) ([]byte, int
 			log.Printf("harvest: closing gateway response body: %v", closeErr)
 		}
 	}()
-	body, err := io.ReadAll(io.LimitReader(decoded, max+1))
+	body, err := io.ReadAll(io.LimitReader(decoded, maxBytes+1))
 	if err != nil {
 		return nil, status, contentType, fmt.Errorf("read response: %w", err)
 	}
-	if int64(len(body)) > max {
-		body = body[:max]
+	if int64(len(body)) > maxBytes {
+		body = body[:maxBytes]
 	}
 	return body, status, contentType, nil
 }

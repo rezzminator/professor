@@ -208,7 +208,7 @@ func (c *Canvas) render() string {
 		styleValid := false
 		for x := 0; x < c.Cols; x++ {
 			idx := y*c.Cols + x
-			var ch rune = ' '
+			ch := ' '
 			fg := RGB{}
 			bold := false
 			switch {

@@ -27,7 +27,7 @@ func DecodeSessionIndexLine(line []byte) (SessionIndexEntry, error) {
 		return SessionIndexEntry{}, fmt.Errorf("decode Codex session index line: %w", err)
 	}
 	if entry.ID == "" {
-		return SessionIndexEntry{}, fmt.Errorf("Codex session index line has no thread id")
+		return SessionIndexEntry{}, fmt.Errorf("session index line for Codex has no thread id")
 	}
 	return entry, nil
 }

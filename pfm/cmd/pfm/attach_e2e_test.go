@@ -20,7 +20,7 @@ const attachHelperEnv = "PFM_ATTACH_HELPER"
 // TestPFMAttachHelper turns the package test binary into the real CLI for
 // subprocess integration tests. The shell wrapper below still exercises main's
 // run dispatcher, real indexing/gather/compose/action code, and /dev/tty TUI.
-func TestPFMAttachHelper(t *testing.T) {
+func TestPFMAttachHelper(_ *testing.T) {
 	if os.Getenv(attachHelperEnv) != "1" {
 		return
 	}
@@ -217,9 +217,10 @@ func (jail *attachJail) proveAttach(
 
 	marker := filepath.Join(jail.root, suffix+".done")
 	commandText := `pfm chat open ` + shellQuote(jail.id)
-	if flow == "picker" {
+	switch flow {
+	case "picker":
 		commandText = `pfm ls`
-	} else if flow == "bare" {
+	case "bare":
 		commandText = `pfm`
 	}
 	if protocol == "eval" {

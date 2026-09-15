@@ -56,7 +56,7 @@ func EuropePMCPDF(ctx context.Context, client *http.Client, pmcid string) ([]byt
 			return body, nil
 		}
 	}
-	return nil, fmt.Errorf("Europe PMC returned no PDF for %s", pmcid)
+	return nil, fmt.Errorf("no PDF returned by Europe PMC for %s", pmcid)
 }
 
 func EuropePMCFulltextXML(ctx context.Context, client *http.Client, pmcid string) (string, error) {

@@ -639,7 +639,7 @@ func containsString(values []string, wanted string) bool {
 func snapshotMemoryMigrationTree(t *testing.T, root string) map[string]string {
 	t.Helper()
 	snapshot := make(map[string]string)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+	err := filepath.WalkDir(root, func(path string, _ os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}

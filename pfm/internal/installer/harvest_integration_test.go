@@ -34,7 +34,7 @@ func (fake *harvestProvisionerFake) Plan(_ harvestpy.Platform) (harvestpy.Instal
 }
 
 func (fake *harvestProvisionerFake) Check(
-	ctx context.Context,
+	_ context.Context,
 	root string,
 	platform harvestpy.Platform,
 ) (harvestpy.CheckReport, error) {
@@ -45,7 +45,7 @@ func (fake *harvestProvisionerFake) Check(
 }
 
 func (fake *harvestProvisionerFake) Provision(
-	ctx context.Context,
+	_ context.Context,
 	options harvestpy.ProvisionOptions,
 ) (harvestpy.ProvisionResult, error) {
 	fake.provisionCalls++

@@ -142,7 +142,7 @@ func TestSynthesizeRejectsAccountsOffTheRoster(t *testing.T) {
 			Home:           "/home/test",
 			FreshSocket:    "cc-roster-test",
 		})
-		if err == nil || !strings.Contains(err.Error(), "Claude account") {
+		if err == nil || !strings.Contains(err.Error(), "requested Claude account") {
 			t.Fatalf("account %d error = %v, want a roster rejection", account, err)
 		}
 	}

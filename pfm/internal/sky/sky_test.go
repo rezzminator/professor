@@ -78,7 +78,7 @@ func TestCountsScaleVisualWeight(t *testing.T) {
 	empty := inked(plain(0, 0, tm, nil))
 	small := inked(plain(2, 2, tm, nil))
 	big := inked(plain(8, 8, tm, nil))
-	if !(empty < small && small < big) {
+	if empty >= small || small >= big {
 		t.Errorf("inked cells must grow with counts: 0/0=%d, 2/2=%d, 8/8=%d", empty, small, big)
 	}
 	if got := joined(plain(0, 0, tm, nil)); strings.ContainsAny(got, "✦+*") {

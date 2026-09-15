@@ -130,14 +130,7 @@ func (manager *Manager) Kill(
 	}
 
 	if request.Exit || live {
-		if err := manager.spawner.Spawn(ctx, ExitArgs{
-			Engine:     target.Engine,
-			ID:         target.ID,
-			DataPath:   target.DataPath,
-			SocketPath: target.SocketPath,
-			SocketName: target.SocketName,
-			PaneID:     target.PaneID,
-		}); err != nil {
+		if err := manager.spawner.Spawn(ctx, ExitArgs(target)); err != nil {
 			return Target{}, err
 		}
 	}

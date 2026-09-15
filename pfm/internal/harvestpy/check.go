@@ -154,7 +154,7 @@ func checkInterpreter(ctx context.Context, path, wanted string) error {
 	// merely because --version omits the packaging suffix.
 	semantic := strings.SplitN(wanted, "+", 2)[0]
 	if !strings.Contains(string(output), semantic) {
-		return fmt.Errorf("Python version %q does not contain pinned %q", strings.TrimSpace(string(output)), wanted)
+		return fmt.Errorf("python version %q does not contain pinned %q", strings.TrimSpace(string(output)), wanted)
 	}
 	return nil
 }

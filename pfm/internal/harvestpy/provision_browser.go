@@ -74,12 +74,12 @@ func provisionBrowser(
 		filepath.Join(current, "environment.json"),
 	); err == nil && existing.Digest == desired &&
 		existing.State == "ready" {
-		runtime := Runtime{
+		browserRuntime := Runtime{
 			Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 			Script: filepath.Join(current, "project", "browser.py"),
 		}
-		if _, smokeErr := options.Smoke(ctx, runtime); smokeErr == nil {
-			return ProvisionResult{Digest: desired, Environment: existing, Runtime: runtime}, nil
+		if _, smokeErr := options.Smoke(ctx, browserRuntime); smokeErr == nil {
+			return ProvisionResult{Digest: desired, Environment: existing, Runtime: browserRuntime}, nil
 		}
 	}
 	uvArchive := filepath.Join(options.Cache, "uv-"+platform.String()+".tar.gz")
@@ -203,8 +203,8 @@ func provisionBrowser(
 	}}, nil
 }
 
-func smokeBrowserRuntime(ctx context.Context, runtime Runtime) (map[string]any, error) {
-	worker := NewBrowserWorker(runtime)
+func smokeBrowserRuntime(ctx context.Context, browserRuntime Runtime) (map[string]any, error) {
+	worker := NewBrowserWorker(browserRuntime)
 	result, err := worker.Smoke(ctx)
 	_ = worker.Close()
 	return result, err

@@ -43,7 +43,7 @@ func (host *processGateHost) NewSession(
 		return err
 	}
 	host.sessionMade = true
-	pid, err := host.Host.PaneRootPID(ctx, spec.Socket, spec.Session)
+	pid, err := host.PaneRootPID(ctx, spec.Socket, spec.Session)
 	if err != nil {
 		return host.recordEarlyFailure(
 			ProcessTreeVerification{},
@@ -102,7 +102,7 @@ func (host *processGateHost) verify(
 	socket, target string,
 ) (ProcessTreeVerification, error) {
 	verification := ProcessTreeVerification{}
-	pid, gateErr := host.Host.PaneRootPID(ctx, socket, target)
+	pid, gateErr := host.PaneRootPID(ctx, socket, target)
 	if gateErr == nil {
 		verification.PaneRootResolved = true
 		verification.PaneRootPID = pid

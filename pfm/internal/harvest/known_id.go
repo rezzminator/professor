@@ -49,8 +49,8 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		}
 		result := h.fetchDOIMirror(ctx, identifier, options)
 		if result.Error != "" {
-			copy := result
-			doiMirrorFailure = &copy
+			resultCopy := result
+			doiMirrorFailure = &resultCopy
 			trace = append(trace, result.Rungs...)
 			return result, false
 		}
@@ -67,8 +67,8 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		}
 		trace = append(trace, result.Rungs...)
 		if result.Error != "" {
-			copy := result
-			doiMirrorFailure = &copy // shared terminal diagnostic slot for all mirror providers
+			resultCopy := result
+			doiMirrorFailure = &resultCopy // shared terminal diagnostic slot for all mirror providers
 			return result, false
 		}
 		return h.storeResultAlias(source, canonical, result, trace, options), true
@@ -80,8 +80,8 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		result := h.fetchScholarDOI(ctx, canonical, options)
 		trace = append(trace, result.Rungs...)
 		if result.Error != "" {
-			copy := result
-			doiMirrorFailure = &copy
+			resultCopy := result
+			doiMirrorFailure = &resultCopy
 			return result, false
 		}
 		return h.storeResultAlias(source, canonical, result, trace, options), true
@@ -326,13 +326,13 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 			lastProvider = mirrored
 		}
 		if h.settings.googleScholarURL != "" {
-			if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
+			scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options)
+			if scholar.Error == "" {
 				scholar.Rungs = append(trace, scholar.Rungs...)
 				return scholar
-			} else {
-				trace = append(trace, scholar.Rungs...)
-				lastProvider = scholar
 			}
+			trace = append(trace, scholar.Rungs...)
+			lastProvider = scholar
 		}
 		return Result{
 			Source:     doi,
@@ -361,19 +361,19 @@ func (h *Harvester) fetchOA(ctx context.Context, doi string, rungs []string, opt
 		}
 	}
 	if h.settings.googleScholarURL != "" {
-		if scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options); scholar.Error == "" {
+		scholar := h.fetchScholarDOI(ctx, DOIFrom(doi), options)
+		if scholar.Error == "" {
 			scholar.Rungs = append(trace, scholar.Rungs...)
 			return scholar
-		} else {
-			trace = append(trace, scholar.Rungs...)
-			return Result{
-				Source:     doi,
-				Error:      withRungs("OA chain exhausted: "+scholar.Error, trace),
-				ErrorKind:  scholar.ErrorKind,
-				Challenge:  scholar.Challenge,
-				HTTPStatus: scholar.HTTPStatus,
-				Rungs:      trace,
-			}
+		}
+		trace = append(trace, scholar.Rungs...)
+		return Result{
+			Source:     doi,
+			Error:      withRungs("OA chain exhausted: "+scholar.Error, trace),
+			ErrorKind:  scholar.ErrorKind,
+			Challenge:  scholar.Challenge,
+			HTTPStatus: scholar.HTTPStatus,
+			Rungs:      trace,
 		}
 	}
 	return Result{Source: doi, Error: withRungs("OA chain exhausted", trace), Rungs: trace}

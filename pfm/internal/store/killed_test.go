@@ -472,14 +472,14 @@ func TestKilledWriteHelperProcess(t *testing.T) {
 	}
 }
 
-func waitForPaths(ctx context.Context, paths ...string) error {
+func waitForPaths(ctx context.Context, filePaths ...string) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		allPresent := true
-		for _, path := range paths {
-			if _, err := os.Stat(path); err != nil {
+		for _, filePath := range filePaths {
+			if _, err := os.Stat(filePath); err != nil {
 				if !os.IsNotExist(err) {
 					return err
 				}

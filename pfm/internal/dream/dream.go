@@ -152,12 +152,12 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 	durableFailure := nightFailurePath(repo.Organ)
 	defer func() {
 		if returnErr == nil {
-			if clearErr := clearNightFailure(durableFailure); clearErr == nil {
+			clearErr := clearNightFailure(durableFailure)
+			if clearErr == nil {
 				return
-			} else {
-				returnErr = clearErr
-				failureKind = "CLEANUP-FAILED"
 			}
+			returnErr = clearErr
+			failureKind = "CLEANUP-FAILED"
 		}
 		markerErr := writeNightFailure(
 			durableFailure,

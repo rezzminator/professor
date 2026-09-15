@@ -11,11 +11,11 @@ type projectDirectory struct {
 }
 
 func cloneStringMap(values map[string]string) map[string]string {
-	copy := make(map[string]string, len(values))
+	cloned := make(map[string]string, len(values))
 	for key, value := range values {
-		copy[key] = value
+		cloned[key] = value
 	}
-	return copy
+	return cloned
 }
 
 func withNewRows(output Output) Output {

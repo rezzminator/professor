@@ -316,12 +316,12 @@ func (converter pythonConverter) FetchBrowser(ctx context.Context, source string
 	defer func() { _ = browser.Close() }()
 
 	policyDenied := false
-	onAsk := func(url string) error {
-		if askErr := harvest.AssertFetchableStrict(url); askErr != nil {
+	onAsk := func(requestURL string) error {
+		if askErr := harvest.AssertFetchableStrict(requestURL); askErr != nil {
 			// Only a refusal of the INITIAL address labels the whole fetch
 			// as POLICY. A denied tracker/subresource followed by an
 			// unrelated failure must stay an outage — retrying can help.
-			if url == source {
+			if requestURL == source {
 				policyDenied = true
 			}
 			return askErr
@@ -797,12 +797,12 @@ func (service *Service) findWorks(
 	candidates, err := service.resolver.FindWorks(ctx, input.Query, input.Limit)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "harvester findWorks: %v\n", err)
-		return nil, FindOutput{}, errors.New("Work discovery failed. Retry later or fetch an exact identifier.")
+		return nil, FindOutput{}, errors.New("work discovery failed; retry later or fetch an exact identifier")
 	}
 	candidates, err = service.harvester.PublicCandidates(candidates)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "harvester export candidates: %v\n", err)
-		return nil, FindOutput{}, errors.New("Could not prepare the discovered works for retrieval. Retry later.")
+		return nil, FindOutput{}, errors.New("could not prepare the discovered works for retrieval; retry later")
 	}
 	lines := renderFind(input.Query, candidates)
 	return &mcp.CallToolResult{
@@ -954,7 +954,7 @@ func (service *Service) searchCache(
 	cacheHits, err := service.harvester.SearchCachePublic(input.Pattern, limit, ignore)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "harvester searchCache: %v\n", err)
-		return nil, errors.New("Cache search failed. Check the expression or retry later.")
+		return nil, errors.New("cache search failed; check the expression or retry later")
 	}
 	hits := make([]CacheHit, 0, len(cacheHits))
 	for _, hit := range cacheHits {
@@ -1104,17 +1104,17 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 		result.Path,
 	)
 
-	cap := service.inlineCap()
-	if cap > 0 && len([]rune(body)) > cap {
+	inlineCap := service.inlineCap()
+	if inlineCap > 0 && len([]rune(body)) > inlineCap {
 		runes := []rune(body)
 		body = string(
-			runes[:cap],
+			runes[:inlineCap],
 		) + fmt.Sprintf(
 			"\n\n— [truncated: first %d of %d chars. COMPLETE text is at %s — read that file from char %d for the rest. `searchCache` locates WHICH cached pages match a pattern; it does not return text.]",
-			cap,
+			inlineCap,
 			max(result.Chars, len(runes)),
 			result.Path,
-			cap,
+			inlineCap,
 		)
 	}
 	return header + "\n\n" + body

@@ -433,7 +433,7 @@ func TestInspectGlobalAgentsSourceDirectoryStates(t *testing.T) {
 	}{
 		{
 			name:  "no agents directory at all",
-			stage: func(t *testing.T, home string) {},
+			stage: func(_ *testing.T, _ string) {},
 			want:  GlobalAgentsNoClone,
 		},
 		{

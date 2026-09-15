@@ -22,7 +22,7 @@ import (
 	pfmtmux "hostops/pfm/internal/tmux"
 )
 
-func runChatRead(args []string, stdin io.Reader, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatRead(args []string, _ io.Reader, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	if len(args) > 0 {
 		if info, err := os.Stat(args[0]); err == nil && info.Mode().IsRegular() &&
 			filepath.Ext(args[0]) != ".jsonl" {
@@ -505,7 +505,7 @@ func chatSocketPath(socket string) (string, error) {
 func runChatSatellite(
 	verb string,
 	args []string,
-	stdin io.Reader,
+	_ io.Reader,
 	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
 ) int {

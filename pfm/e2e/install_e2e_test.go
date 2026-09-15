@@ -307,7 +307,7 @@ func runInstallE2E(t *testing.T) {
 
 	var fresh surfaceSnapshot
 	var freshHome string
-	t.Run("install", func(t *testing.T) {
+	t.Run("install", func(_ *testing.T) {
 		home := harness.newHome(harness.headBinary)
 		freshHome = home
 		result := harness.pfm(home, "install", "--yes", "--skip-harvest")
@@ -335,7 +335,7 @@ func runInstallE2E(t *testing.T) {
 		harness.assertInitPath(filepath.Join(project, "AGENTS.md"), "AGENTS.md")
 	})
 
-	t.Run("launcher", func(t *testing.T) {
+	t.Run("launcher", func(_ *testing.T) {
 		harness.assertLauncherRuntime(freshHome)
 	})
 
@@ -407,7 +407,7 @@ func runInstallE2E(t *testing.T) {
 		}
 	})
 
-	t.Run("uninstall", func(t *testing.T) {
+	t.Run("uninstall", func(_ *testing.T) {
 		harness.plantManualState(freshHome)
 		result := harness.pfm(freshHome, "uninstall")
 		harness.requireSuccess("uninstall", result)

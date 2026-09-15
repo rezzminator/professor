@@ -250,7 +250,7 @@ func codexCLIOverrides(
 	return result, nil
 }
 
-func printCodexResult(stdout, stderr io.Writer, result codexgen.Result) {
+func printCodexResult(_, stderr io.Writer, result codexgen.Result) {
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(stderr, "pfm codex: warning: %s\n", warning)
 	}

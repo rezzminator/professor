@@ -214,12 +214,12 @@ func titleAndQuestion(body string) (string, string, error) {
 		switch row {
 		case "## Question":
 			if question >= 0 {
-				return "", "", fmt.Errorf("Question heading count is not one")
+				return "", "", fmt.Errorf("question heading count is not one")
 			}
 			question = index
 		case "## Answer":
 			if answer != len(rows) {
-				return "", "", fmt.Errorf("Answer heading count is not one")
+				return "", "", fmt.Errorf("answer heading count is not one")
 			}
 			answer = index
 		}
@@ -228,7 +228,7 @@ func titleAndQuestion(body string) (string, string, error) {
 		return "", "", fmt.Errorf("map lacks Question")
 	}
 	if answer <= question {
-		return "", "", fmt.Errorf("Question section order mismatch")
+		return "", "", fmt.Errorf("question section order mismatch")
 	}
 	for _, row := range rows[question+1 : answer] {
 		candidate := strings.TrimSpace(strings.ReplaceAll(row, "\t", " "))

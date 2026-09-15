@@ -129,7 +129,8 @@ func ParseMap(text string) (Map, error) {
 	answerIndex := indexExact(rows, "## Answer")
 	trailIndex := indexExact(rows, "## Derivation trail")
 	anchorsIndex := indexExact(rows, "## Anchors")
-	if !(questionIndex < answerIndex && answerIndex < trailIndex && trailIndex < provenanceIndex && provenanceIndex < anchorsIndex) {
+	if questionIndex >= answerIndex || answerIndex >= trailIndex || trailIndex >= provenanceIndex ||
+		provenanceIndex >= anchorsIndex {
 		return Map{}, parseFailure("section order mismatch")
 	}
 	firstSection := questionIndex

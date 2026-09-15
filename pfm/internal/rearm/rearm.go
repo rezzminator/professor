@@ -108,11 +108,7 @@ func WriteCrumb(sidDir, socket string, crumb Crumb) error {
 	if !filepath.IsAbs(crumb.ArtifactPath) {
 		return fmt.Errorf("role re-arm: crumb artifact path %q is not absolute", crumb.ArtifactPath)
 	}
-	raw, err := json.Marshal(crumbFile{
-		Role:         crumb.Role,
-		ArtifactPath: crumb.ArtifactPath,
-		TOMLKey:      crumb.TOMLKey,
-	})
+	raw, err := json.Marshal(crumbFile(crumb))
 	if err != nil {
 		return fmt.Errorf("role re-arm: encode crumb: %w", err)
 	}
@@ -155,11 +151,7 @@ func ReadCrumb(sidDir, socket, paneID string) (Crumb, bool, error) {
 		if strings.TrimSpace(decoded.Role) == "" || strings.TrimSpace(decoded.ArtifactPath) == "" {
 			return Crumb{}, false, fmt.Errorf("role re-arm: crumb %s is missing its role or artifact path", path)
 		}
-		return Crumb{
-			Role:         decoded.Role,
-			ArtifactPath: decoded.ArtifactPath,
-			TOMLKey:      decoded.TOMLKey,
-		}, true, nil
+		return Crumb(decoded), true, nil
 	}
 	return Crumb{}, false, nil
 }

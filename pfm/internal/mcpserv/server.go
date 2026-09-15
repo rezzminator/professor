@@ -457,9 +457,10 @@ func (service *Service) chatResolve(
 		return nil, ResolveOutput{}, err
 	}
 	status := "ok"
-	if namespace.Code == 1 {
+	switch namespace.Code {
+	case 1:
 		status = "not_found"
-	} else if namespace.Code == 2 {
+	case 2:
 		status = "ambiguous"
 	}
 	socket, pane := parseResolved(namespace.Stdout)

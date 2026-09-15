@@ -49,7 +49,7 @@ func (installer *engine) wireCodexDefaults() error {
 		existed := err == nil
 		if errors.Is(err, fs.ErrNotExist) {
 			if info, statErr := os.Lstat(path); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-				return fmt.Errorf("Codex config is a dangling symlink: %s", path)
+				return fmt.Errorf("config for Codex is a dangling symlink: %s", path)
 			} else if statErr != nil && !errors.Is(statErr, fs.ErrNotExist) {
 				return fmt.Errorf("inspect Codex config %s: %w", path, statErr)
 			}
@@ -69,7 +69,7 @@ func (installer *engine) wireCodexDefaults() error {
 			latest, readErr := os.ReadFile(path)
 			if (existed && (readErr != nil || !bytes.Equal(latest, raw))) ||
 				(!existed && !errors.Is(readErr, fs.ErrNotExist)) {
-				return fmt.Errorf("Codex config changed while planning install: %s", path)
+				return fmt.Errorf("config for Codex changed while planning install: %s", path)
 			}
 			if existed {
 				// Atomic rename must not replace a user's config symlink.
@@ -186,7 +186,7 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 		upper, hasUpper := limits[pair[1]]
 		if hasLower && hasUpper && lower > upper {
 			return "", fmt.Errorf(
-				"Codex wait defaults conflict with existing settings: %s exceeds %s; set a consistent minimum/default/maximum",
+				"wait defaults for Codex conflict with existing settings: %s exceeds %s; set a consistent minimum/default/maximum",
 				pair[0],
 				pair[1],
 			)

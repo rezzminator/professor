@@ -96,7 +96,7 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 	actual := strings.TrimSpace(string(actualBytes))
 	if configErr != nil {
 		var exitErr *exec.ExitError
-		if !(errors.As(configErr, &exitErr) && exitErr.ExitCode() == 1 && actual == "") {
+		if !errors.As(configErr, &exitErr) || exitErr.ExitCode() != 1 || actual != "" {
 			return prePushGate{
 				Repository: repository,
 				State:      "unreadable",

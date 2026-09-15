@@ -242,10 +242,10 @@ func (model *Model) mergeCosmosSeats() {
 				target += 2 * math.Pi * float64(index) / float64(len(nodes))
 			}
 			if old := previous[node.Key]; old != nil {
-				copy := *old
-				copy.Target = target
-				copy.RingTarget = ring
-				next[node.Key] = &copy
+				seatCopy := *old
+				seatCopy.Target = target
+				seatCopy.RingTarget = ring
+				next[node.Key] = &seatCopy
 				continue
 			}
 			next[node.Key] = &cosmosSeat{Angle: target, Target: target, Ring: ring, RingTarget: ring}
@@ -322,10 +322,10 @@ func (model *Model) mergeCosmosSeats() {
 				target, ring = parent.Target, parent.RingTarget
 			}
 			if old := previous[node.Key]; old != nil {
-				copy := *old
-				copy.Target = target
-				copy.RingTarget = ring
-				next[node.Key] = &copy
+				seatCopy := *old
+				seatCopy.Target = target
+				seatCopy.RingTarget = ring
+				next[node.Key] = &seatCopy
 				continue
 			}
 			next[node.Key] = &cosmosSeat{Angle: target, Target: target, Ring: ring, RingTarget: ring}

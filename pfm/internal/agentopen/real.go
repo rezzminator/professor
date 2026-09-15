@@ -75,8 +75,8 @@ func (commands ExecCommands) command(
 	return command, nil
 }
 
-func (commands ExecCommands) QueryAgents(ctx context.Context, config string) ([]byte, error) {
-	command, err := commands.command(ctx, action.PurposeQuery, config, false, "agents", "--json")
+func (commands ExecCommands) QueryAgents(ctx context.Context, configName string) ([]byte, error) {
+	command, err := commands.command(ctx, action.PurposeQuery, configName, false, "agents", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("query agents: %w", err)
 	}
@@ -90,8 +90,8 @@ func (commands ExecCommands) QueryAgents(ctx context.Context, config string) ([]
 	return output, nil
 }
 
-func (commands ExecCommands) Resume(ctx context.Context, config, cwd, id string, cache1H bool) error {
-	command, err := commands.command(ctx, action.PurposeResume, config, cache1H, "--resume", id)
+func (commands ExecCommands) Resume(ctx context.Context, configName, cwd, id string, cache1H bool) error {
+	command, err := commands.command(ctx, action.PurposeResume, configName, cache1H, "--resume", id)
 	if err != nil {
 		return fmt.Errorf("resume agent session: %w", err)
 	}
@@ -99,8 +99,8 @@ func (commands ExecCommands) Resume(ctx context.Context, config, cwd, id string,
 	return command.Run()
 }
 
-func (commands ExecCommands) View(ctx context.Context, config, cwd string) error {
-	command, err := commands.command(ctx, action.PurposeQuery, config, false, "agents", "--cwd", cwd)
+func (commands ExecCommands) View(ctx context.Context, configName, cwd string) error {
+	command, err := commands.command(ctx, action.PurposeQuery, configName, false, "agents", "--cwd", cwd)
 	if err != nil {
 		return fmt.Errorf("open agent view: %w", err)
 	}

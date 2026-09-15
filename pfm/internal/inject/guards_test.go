@@ -147,7 +147,7 @@ func FuzzSelectorLine(f *testing.F) {
 	} {
 		f.Add(seed)
 	}
-	f.Fuzz(func(t *testing.T, capture string) {
+	f.Fuzz(func(_ *testing.T, capture string) {
 		_ = SelectorLine(capture)
 	})
 }

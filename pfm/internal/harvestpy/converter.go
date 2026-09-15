@@ -122,16 +122,17 @@ func (converter *Converter) scriptPath() (string, error) {
 	if path == "" {
 		return "", errors.New("harvestpy converter script path is empty; use the provisioned managed script")
 	}
-	if info, err := os.Stat(path); err == nil {
+	info, err := os.Stat(path)
+	if err == nil {
 		if info.IsDir() || !info.Mode().IsRegular() {
 			return "", fmt.Errorf("harvestpy converter script is not a regular file: %s", path)
 		}
 		return path, nil
-	} else if errors.Is(err, os.ErrNotExist) {
-		return "", fmt.Errorf("harvestpy converter script is not provisioned: %s", path)
-	} else {
-		return "", fmt.Errorf("stat harvestpy converter script %s: %w", path, err)
 	}
+	if errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("harvestpy converter script is not provisioned: %s", path)
+	}
+	return "", fmt.Errorf("stat harvestpy converter script %s: %w", path, err)
 }
 
 func (converter *Converter) Convert(ctx context.Context, request Request) (Result, error) {

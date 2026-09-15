@@ -117,16 +117,16 @@ func (locator FilesystemRolloutLocator) Locate(
 		return headless.Chat{}, false, nil
 	}
 	if len(candidates) != 1 {
-		paths := make([]string, 0, len(candidates))
+		candidatePaths := make([]string, 0, len(candidates))
 		for _, candidate := range candidates {
-			paths = append(paths, candidate.path)
+			candidatePaths = append(candidatePaths, candidate.path)
 		}
-		sort.Strings(paths)
+		sort.Strings(candidatePaths)
 		return headless.Chat{}, false, fmt.Errorf(
 			"ambiguous rollout for seat %q in %s: %s",
 			match.Name,
 			match.CWD,
-			strings.Join(paths, ", "),
+			strings.Join(candidatePaths, ", "),
 		)
 	}
 	selected := candidates[0]
@@ -143,7 +143,7 @@ func (locator FilesystemRolloutLocator) Locate(
 
 func (locator FilesystemRolloutLocator) rollouts(ctx context.Context) ([]string, error) {
 	if locator.CodexRoot == "" {
-		return nil, errors.New("Codex root is empty")
+		return nil, errors.New("root for Codex is empty")
 	}
 	root := filepath.Join(locator.CodexRoot, "sessions")
 	var result []string
@@ -260,7 +260,7 @@ func (locator FilesystemRolloutLocator) sessionNames(
 			return nil, fmt.Errorf("decode Codex session name index line %d: %w", lineNumber, err)
 		}
 		if row.ID == "" || row.Name == "" {
-			return nil, fmt.Errorf("Codex session name index line %d lacks id or thread_name", lineNumber)
+			return nil, fmt.Errorf("session-name index line %d for Codex lacks id or thread_name", lineNumber)
 		}
 		names[row.ID] = row.Name
 	}

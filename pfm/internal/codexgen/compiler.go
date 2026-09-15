@@ -378,16 +378,16 @@ func discoverMarkdown(dir string, excludes []string, result *Result) []sourceEnt
 	visited := map[string]bool{}
 	var walk func(string, string)
 	walk = func(current, relative string) {
-		real, evalErr := filepath.EvalSymlinks(current)
+		resolved, evalErr := filepath.EvalSymlinks(current)
 		if evalErr != nil {
 			result.danglingSource(current, evalErr)
 			return
 		}
-		if visited[real] {
+		if visited[resolved] {
 			result.Warnings = append(result.Warnings, "skip cyclic command directory "+current)
 			return
 		}
-		visited[real] = true
+		visited[resolved] = true
 		read, err := os.ReadDir(current)
 		if err != nil {
 			result.Problems = append(result.Problems, fmt.Sprintf("read %s: %v", current, err))
@@ -548,7 +548,7 @@ func compileRepoCommands(
 	root string,
 	cfg Config,
 	options TransformOptions,
-	roster map[string]string,
+	_ map[string]string,
 	add func(generatedFile),
 	problem, warn func(string),
 	result *Result,
@@ -577,8 +577,8 @@ func compileRepoCommands(
 }
 
 func compileGlobalCommands(
-	root, sourceHome, outputHome string,
-	cfg Config,
+	_, sourceHome, outputHome string,
+	_ Config,
 	options TransformOptions,
 	add func(generatedFile),
 	problem, warn func(string),
@@ -634,7 +634,7 @@ func compileCommandFile(
 	label, outputRoot string,
 	options TransformOptions,
 	add func(generatedFile),
-	problem, warn func(string),
+	problem, _ func(string),
 	result *Result,
 	global bool,
 ) {

@@ -43,11 +43,11 @@ func validCrumbSocket(socket string) bool {
 			return false
 		}
 		for _, character := range name {
-			if !((character >= 'a' && character <= 'z') ||
-				(character >= 'A' && character <= 'Z') ||
-				(character >= '0' && character <= '9') ||
-				character == '_' ||
-				character == '-') {
+			if (character < 'a' || character > 'z') &&
+				(character < 'A' || character > 'Z') &&
+				(character < '0' || character > '9') &&
+				character != '_' &&
+				character != '-' {
 				return false
 			}
 		}

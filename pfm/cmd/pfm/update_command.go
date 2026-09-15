@@ -834,7 +834,7 @@ func applyUpdateInstall(
 func runUpdateDoctor(
 	ctx context.Context,
 	candidate string,
-	runtime commandRuntime,
+	_ commandRuntime,
 	configPath string,
 	skipHarvest bool,
 	stdout, stderr io.Writer,

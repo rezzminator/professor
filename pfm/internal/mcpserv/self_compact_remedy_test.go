@@ -49,7 +49,7 @@ func TestSelfCompactAmbientRefusalNamesAWorkingRemedy(t *testing.T) {
 	if thenIndex == -1 || focusIndex == -1 {
 		t.Fatalf("refusal is missing an expected token: %q", refused.Message)
 	}
-	if !(thenIndex < focusIndex) {
+	if thenIndex >= focusIndex {
 		t.Fatalf("refusal places --then after the positional focus, breaking stdlib flag parsing: %q", refused.Message)
 	}
 }

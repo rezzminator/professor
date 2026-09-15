@@ -178,7 +178,7 @@ func runMCP(
 		}
 		return 0
 	}
-	if len(args) < 2 || (len(args) > 2 && !(args[0] == "harvester" && args[1] == "serve")) {
+	if len(args) < 2 || (len(args) > 2 && (args[0] != "harvester" || args[1] != "serve")) {
 		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp serve | pfm mcp <server> enable|disable|serve")
 		return 2
 	}

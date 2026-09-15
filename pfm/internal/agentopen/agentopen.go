@@ -400,32 +400,32 @@ func (opener *Opener) lookup(ctx context.Context, id string, configs []string) (
 }
 
 func (opener *Opener) resumeFresh(ctx context.Context, request Request, config, fallback string) error {
-	if err := opener.commands.Resume(ctx, config, request.CWD, request.ID, request.Cache1H); err == nil {
+	err := opener.commands.Resume(ctx, config, request.CWD, request.ID, request.Cache1H)
+	if err == nil {
 		return nil
-	} else {
-		fmt.Fprintf(
-			opener.stderr,
-			"pfm internal agent-open: resume %s under config %q failed: %v\n",
-			request.ID,
-			config,
-			err,
-		)
-		fmt.Fprintf(
-			opener.stderr,
-			"\nresume still refused — falling back to the agent view (pick the session to attach):\n",
-		)
-		if viewErr := opener.commands.View(ctx, fallback, request.CWD); viewErr == nil {
-			return nil
-		} else {
-			fmt.Fprintf(
-				opener.stderr,
-				"pfm internal agent-open: fallback agent view under config %q failed: %v\n",
-				fallback,
-				viewErr,
-			)
-			return errors.Join(err, viewErr)
-		}
 	}
+	fmt.Fprintf(
+		opener.stderr,
+		"pfm internal agent-open: resume %s under config %q failed: %v\n",
+		request.ID,
+		config,
+		err,
+	)
+	fmt.Fprintf(
+		opener.stderr,
+		"\nresume still refused — falling back to the agent view (pick the session to attach):\n",
+	)
+	viewErr := opener.commands.View(ctx, fallback, request.CWD)
+	if viewErr == nil {
+		return nil
+	}
+	fmt.Fprintf(
+		opener.stderr,
+		"pfm internal agent-open: fallback agent view under config %q failed: %v\n",
+		fallback,
+		viewErr,
+	)
+	return errors.Join(err, viewErr)
 }
 
 func (opener *Opener) holdsSession(ctx context.Context, id string) (bool, error) {

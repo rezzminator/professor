@@ -72,7 +72,7 @@ func shellSite(t *testing.T, jina http.RoundTripper, browser *browserSpyConverte
 	if jina == nil {
 		jina = missing
 	}
-	var converter Converter = tagStripConverter()
+	converter := tagStripConverter()
 	rung := browserOff()
 	if browser != nil {
 		browser.convertFn = tagStripConverter().Convert

@@ -60,12 +60,17 @@ func envStripWords(names []string) string {
 // launches, but intentionally adds no autonomy or resume flags of its own.
 // home and claude carry the systemPrompt choice; the launcher re-decides it
 // every spawn (hygiene strips any inherited CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT).
-func LauncherRun(real string, args []string, configDir, home string, claude pfmconfig.ClaudePrefs) (string, error) {
-	values := append([]string{real, configDir}, args...)
+func LauncherRun(
+	realBinary string,
+	args []string,
+	configDir, home string,
+	claude pfmconfig.ClaudePrefs,
+) (string, error) {
+	values := append([]string{realBinary, configDir}, args...)
 	if hasNUL(values...) {
 		return "", errors.New("launcher values cannot contain NUL")
 	}
-	if real == "" {
+	if realBinary == "" {
 		return "", errors.New("real Claude binary is empty")
 	}
 	// The launcher states its own binary and config dir — it has already
@@ -80,7 +85,7 @@ func LauncherRun(real string, args []string, configDir, home string, claude pfmc
 		Args:              args,
 		Machine:           pfmconfig.Config{Claude: claude},
 		explicitConfigDir: configDir,
-		binary:            real,
+		binary:            realBinary,
 		quoteBinary:       true,
 		noAutonomy:        true,
 	}.ShellCommand()
@@ -114,21 +119,21 @@ func Synthesize(request Request) (Plan, error) {
 	case NewOpencode:
 		if _, found := machine.OpencodeAccountByID(request.PrimaryAccount); !found {
 			return Plan{}, fmt.Errorf(
-				"OpenCode account %d is not in the configured roster",
+				"requested OpenCode account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
 	case NewClaude, Agent, ResumeClaude:
 		if _, found := machine.Account(request.PrimaryAccount); !found {
 			return Plan{}, fmt.Errorf(
-				"Claude account %d is not in the configured roster",
+				"requested Claude account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
 	case NewCodex, ResumeCodex:
 		if _, found := machine.CodexAccountByID(request.PrimaryAccount); !found {
 			return Plan{}, fmt.Errorf(
-				"Codex account %d is not in the configured roster",
+				"requested Codex account %d is not in the configured roster",
 				request.PrimaryAccount,
 			)
 		}
@@ -270,7 +275,7 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
 			return Plan{}, errors.New(
-				"Claude resume requires id, cwd, and fresh socket",
+				"resuming Claude requires id, cwd, and fresh socket",
 			)
 		}
 		resume, err := claudeCommand(
@@ -300,7 +305,7 @@ func Synthesize(request Request) (Plan, error) {
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
 			return Plan{}, errors.New(
-				"Codex resume requires id, cwd, and fresh socket",
+				"resuming Codex requires id, cwd, and fresh socket",
 			)
 		}
 		plan.Run = continuityBanner(request.Row) +

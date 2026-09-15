@@ -45,7 +45,7 @@ func RepositoryRoot(directory string) (string, error) {
 		return "", fmt.Errorf("working directory is not inside a Git repository: %s: %w", directory, err)
 	}
 	if !filepath.IsAbs(root) || filepath.Clean(root) != root {
-		return "", fmt.Errorf("Git top level is not absolute and canonical: %s", root)
+		return "", fmt.Errorf("git top level is not absolute and canonical: %s", root)
 	}
 	return root, nil
 }

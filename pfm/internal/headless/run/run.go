@@ -169,7 +169,7 @@ func Resolve(request Request) (Request, error) {
 				binary = strings.TrimSpace(prefs.Binary)
 			}
 		} else if !request.WithoutAccount && (request.Account != 0 || len(request.Config.Accounts) > 0) {
-			return Request{}, fmt.Errorf("Claude account %d is not in the configured roster", request.Account)
+			return Request{}, fmt.Errorf("requested Claude account %d is not in the configured roster", request.Account)
 		}
 	case pfmengine.Codex:
 		binary = strings.TrimSpace(request.Config.Codex.Binary)
@@ -197,7 +197,7 @@ func Resolve(request Request) (Request, error) {
 				binary = strings.TrimSpace(prefs.Binary)
 			}
 		} else if !request.WithoutAccount && (request.Account != 0 || len(request.Config.CodexAccounts) > 0) {
-			return Request{}, fmt.Errorf("Codex account %d is not in the configured roster", request.Account)
+			return Request{}, fmt.Errorf("requested Codex account %d is not in the configured roster", request.Account)
 		}
 	}
 	if request.ConfigDir != "" && rosterDir != "" && filepath.Clean(request.ConfigDir) != filepath.Clean(rosterDir) {
@@ -263,7 +263,7 @@ func Resolve(request Request) (Request, error) {
 		request.SettingsSources = &empty
 		request.StrictMCP = true
 		request.NoSessionPersistence = true
-		if len(request.Args) != 0 && !(request.Engine == pfmengine.Codex && request.AllowUnsupported) {
+		if len(request.Args) != 0 && (request.Engine != pfmengine.Codex || !request.AllowUnsupported) {
 			return Request{}, fmt.Errorf("sealed headless run does not accept native args")
 		}
 	}
@@ -284,7 +284,7 @@ func Resolve(request Request) (Request, error) {
 		if len(unsupported) != 0 {
 			if !request.AllowUnsupported {
 				return Request{}, fmt.Errorf(
-					"Codex headless runs cannot guarantee tools or settings isolation: unsupported %s; use --allow-unsupported to continue without these controls",
+					"headless runs with Codex cannot guarantee tools or settings isolation: unsupported %s; use --allow-unsupported to continue without these controls",
 					strings.Join(unsupported, ", "),
 				)
 			}
@@ -804,7 +804,7 @@ func parseOutput(result *Result, request Request) error {
 			return fmt.Errorf("parse Claude cost: %w", err)
 		}
 		if result.IsError {
-			return fmt.Errorf("Claude headless envelope reported an error")
+			return fmt.Errorf("headless envelope reported an error for Claude")
 		}
 	case pfmengine.Codex:
 		if err := parseCodexJSONL(result, request); err != nil {
@@ -846,7 +846,7 @@ func parseCodexJSONL(result *Result, request Request) error {
 			return fmt.Errorf("parse Codex JSONL event %d: %w", lineNo+1, err)
 		}
 		if event.Type == "" {
-			return fmt.Errorf("Codex event %d has no type", lineNo+1)
+			return fmt.Errorf("event %d from Codex has no type", lineNo+1)
 		}
 		switch event.Type {
 		case "error":
@@ -862,13 +862,13 @@ func parseCodexJSONL(result *Result, request Request) error {
 			}
 			result.Diagnostics = append(result.Diagnostics, message)
 		case "turn.failed", "thread.failed":
-			return fmt.Errorf("Codex headless event %s: %s", event.Type, event.Error)
+			return fmt.Errorf("headless event %s from Codex: %s", event.Type, event.Error)
 		case "turn.started":
 			terminal = false
 			result.Answer = ""
 		case "turn.completed":
 			if len(event.Error) != 0 && string(event.Error) != "null" {
-				return fmt.Errorf("Codex turn.completed contains an error")
+				return fmt.Errorf("turn.completed event from Codex contains an error")
 			}
 			terminal = true
 			var err error
@@ -893,10 +893,10 @@ func parseCodexJSONL(result *Result, request Request) error {
 		}
 	}
 	if !terminal {
-		return fmt.Errorf("Codex headless output missing terminal success event")
+		return fmt.Errorf("missing terminal success event in headless output from Codex")
 	}
 	if strings.TrimSpace(result.Answer) == "" {
-		return fmt.Errorf("Codex headless output contains no completed answer")
+		return fmt.Errorf("headless output from Codex contains no completed answer")
 	}
 	if request.Schema != nil {
 		result.StructuredOutput = json.RawMessage(result.Answer)

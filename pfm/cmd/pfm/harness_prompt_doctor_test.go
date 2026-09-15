@@ -162,7 +162,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 	}{
 		{
 			name: "missing baseline never reaches the capture step",
-			setup: func(t *testing.T, home string) {
+			setup: func(t *testing.T, _ string) {
 				harnessCaptureOverride = refuseCapture(t)
 			},
 			wantWarn: true,

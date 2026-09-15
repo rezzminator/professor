@@ -138,7 +138,7 @@ func TestLegacyCacheFreshnessAllKindsAndFrontmatterWins(t *testing.T) {
 
 func TestLegacyRefreshBypassesNegativeCache(t *testing.T) {
 	var calls int
-	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+	transport := roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		calls++
 		return nil, fmt.Errorf("fixture connection failure")
 	})

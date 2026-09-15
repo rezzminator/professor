@@ -544,8 +544,8 @@ func printCodexPaneFollowDoctor(
 
 	unfollowable := 0
 	warnings := 0
-	for _, action := range actions {
-		switch action.Skip {
+	for _, observedAction := range actions {
+		switch observedAction.Skip {
 		case "", fleet.CodexPaneSameLineage:
 			continue
 		}
@@ -554,7 +554,7 @@ func printCodexPaneFollowDoctor(
 		fmt.Fprintf(
 			stdout,
 			"doctor: warning codex_pane=unfollowable socket=%s pane=%s reason=%q\n",
-			action.Socket, action.PaneID, action.Skip,
+			observedAction.Socket, observedAction.PaneID, observedAction.Skip,
 		)
 	}
 	fmt.Fprintf(
@@ -981,7 +981,7 @@ func printHarvestCacheDoctor(stdout io.Writer, harvester config.HarvesterConfig)
 		return 1
 	}
 	entries := 0
-	walkErr := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+	walkErr := filepath.WalkDir(root, func(_ string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

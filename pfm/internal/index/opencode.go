@@ -338,9 +338,9 @@ func compactModel(providerID, modelID string) string {
 // clip bounds a first prompt to what a picker row can show.
 func clip(prompt string) string {
 	runes := []rune(prompt)
-	const max = 200
-	if len(runes) > max {
-		return string(runes[:max])
+	const maxPromptRunes = 200
+	if len(runes) > maxPromptRunes {
+		return string(runes[:maxPromptRunes])
 	}
 	return prompt
 }

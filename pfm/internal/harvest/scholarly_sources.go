@@ -104,9 +104,9 @@ func (h *Harvester) providerGet(
 	ctx context.Context,
 	rawURL string,
 	headers http.Header,
-	max int64,
+	maxBytes int64,
 ) (providerResponse, error) {
-	return h.providerFetch(ctx, rawURL, headers, max, false)
+	return h.providerFetch(ctx, rawURL, headers, maxBytes, false)
 }
 
 // providerDownload fetches a provider ARTIFACT (the PDF/EPUB bytes). It climbs
@@ -116,16 +116,16 @@ func (h *Harvester) providerDownload(
 	ctx context.Context,
 	rawURL string,
 	headers http.Header,
-	max int64,
+	maxBytes int64,
 ) (providerResponse, error) {
-	return h.providerFetch(ctx, rawURL, headers, max, true)
+	return h.providerFetch(ctx, rawURL, headers, maxBytes, true)
 }
 
 func (h *Harvester) providerFetch(
 	ctx context.Context,
 	rawURL string,
 	headers http.Header,
-	max int64,
+	maxBytes int64,
 	binary bool,
 ) (providerResponse, error) {
 	jar, _ := ctx.Value(providerCookieJarKey{}).(http.CookieJar)
@@ -141,7 +141,7 @@ func (h *Harvester) providerFetch(
 		client:  h.binaryDirectOrClient(),
 		ua:      h.userAgent,
 		headers: headers,
-		max:     max,
+		max:     maxBytes,
 		jar:     jar,
 		policy:  gatewayEscalate,
 		binary:  binary,

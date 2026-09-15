@@ -46,7 +46,7 @@ type fakeCloseSignaller struct {
 	signaled []int
 }
 
-func (signaller *fakeCloseSignaller) Signal(pid int, signal syscall.Signal) error {
+func (signaller *fakeCloseSignaller) Signal(pid int, _ syscall.Signal) error {
 	signaller.signaled = append(signaller.signaled, pid)
 	if err, bad := signaller.errByPID[pid]; bad {
 		return err

@@ -77,8 +77,8 @@ type tickCadence struct {
 
 // newTickCadence starts a cadence already at base, matching
 // NewActivityClock's "first frame is not a backoff climb" rule.
-func newTickCadence(activity *ActivityClock, base time.Duration, growth float64, max time.Duration) tickCadence {
-	cadence := tickCadence{activity: activity, base: base, growth: growth, max: max, interval: base}
+func newTickCadence(activity *ActivityClock, base time.Duration, growth float64, maximum time.Duration) tickCadence {
+	cadence := tickCadence{activity: activity, base: base, growth: growth, max: maximum, interval: base}
 	if activity != nil {
 		cadence.lastStamp = activity.StampNS()
 	}

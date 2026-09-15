@@ -72,18 +72,18 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		"usage: pfm internal launch --real /absolute/path [--cwd DIR] -- [claude arguments]",
 		stderr,
 	)
-	real := flags.String("real", "", "absolute path to the real Claude binary")
+	realBinary := flags.String("real", "", "absolute path to the real Claude binary")
 	cwd := flags.String("cwd", "", "working directory for the Claude pane")
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
 	arguments := append([]string(nil), flags.Args()...)
-	if !filepath.IsAbs(*real) || strings.ContainsRune(*real, '\x00') {
+	if !filepath.IsAbs(*realBinary) || strings.ContainsRune(*realBinary, '\x00') {
 		flags.Usage()
 		return 2
 	}
 	if launchPassThrough(arguments, os.Getenv("TMUX"), os.Getenv("PFM_LAUNCH_PASSTHROUGH") == "1") {
-		if err := launchExec(*real, append([]string{*real}, arguments...), os.Environ()); err != nil {
+		if err := launchExec(*realBinary, append([]string{*realBinary}, arguments...), os.Environ()); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", err)
 			return 1
 		}
@@ -111,7 +111,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		}
 	}
 	realRun, err := action.LauncherRun(
-		*real,
+		*realBinary,
 		arguments,
 		configDir,
 		runtime.Paths.Home,

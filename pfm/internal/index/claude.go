@@ -68,7 +68,7 @@ func parseClaude(
 			}
 		case "ai-title":
 			transcript.AITitle = record.AITitle
-		case "user":
+		case messageRoleUser:
 			if record.IsCompactSummary {
 				return
 			}
@@ -112,7 +112,7 @@ func parseClaude(
 // are machine work, so they belong with the background rows rather than the
 // picker's real chats.
 func sdkSpawned(record claudeRecord) bool {
-	if record.Type != "user" {
+	if record.Type != messageRoleUser {
 		return false
 	}
 	return record.PromptSource == "sdk" ||

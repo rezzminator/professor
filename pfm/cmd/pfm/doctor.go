@@ -34,6 +34,8 @@ import (
 	"hostops/pfm/internal/store"
 )
 
+const emptySummary = "none"
+
 // doctorTally is the two-tier count `runDoctor` threads through every row it
 // prints: warnings are advisory, failures are a state `pfm install --yes` is
 // responsible for and did not produce, or a required dependency the engine
@@ -79,7 +81,7 @@ func runDoctor(
 	runtime commandRuntime,
 ) (exitCode int) {
 	flags := newFlagSet(
-		"doctor",
+		doctorCommand,
 		"usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures",
 		stderr,
 	)
@@ -642,12 +644,12 @@ func printEngineCapabilities(stdout io.Writer) int {
 		name string
 		ids  []pfmengine.ID
 	}{
-		{name: "index", ids: index.RegisteredSources()},
+		{name: indexCommand, ids: index.RegisteredSources()},
 		{name: "launcher", ids: spawn.RegisteredLaunchers()},
 		{name: "matcher", ids: gather.RegisteredMatchers()},
 		{name: "usage", ids: stats.RegisteredUsageSources()},
-		{name: "headless", ids: action.RegisteredPlanners()},
-		{name: "ask", ids: ask.RegisteredRunners()},
+		{name: headlessCommand, ids: action.RegisteredPlanners()},
+		{name: askAction, ids: ask.RegisteredRunners()},
 	}
 	parts := make([]string, 0, len(pfmengine.All()))
 	warnings := 0
@@ -951,11 +953,11 @@ func printClaudeVersionsDoctor(
 	for _, version := range remove {
 		prunableBytes += version.Bytes
 	}
-	newest := "none"
+	newest := emptySummary
 	if report.Newest != nil {
 		newest = filepath.Base(report.Newest.Path)
 	}
-	liveText := "none"
+	liveText := emptySummary
 	if len(report.Live) > 0 {
 		parts := make([]string, 0, len(report.Live))
 		for path, pids := range report.Live {
@@ -1115,7 +1117,7 @@ func printHarvestPythonDoctor(
 	// failure is a live check failure against a provision that DID finish —
 	// a decode error, a stale lock, a dependency drift — and that is
 	// "broken", never "incomplete".
-	harvestFailureWord := "broken"
+	harvestFailureWord := brokenState
 	if digest.State == "incomplete" {
 		harvestFailureWord = "incomplete"
 	}
@@ -1209,7 +1211,7 @@ func browserEnvFingerprint(digest harvestpy.EnvironmentDigest) string {
 	if len(digest.Digest) >= 8 {
 		return digest.Digest[:8]
 	}
-	return "unknown"
+	return unknownState
 }
 
 // gateOn is harvester.config.json fetch.browser — the same value the core's
@@ -1399,7 +1401,7 @@ func printDoctorConfig(stdout io.Writer, runtime commandRuntime) {
 		"doctor: config version=%d effective (input=%d %s)\n",
 		runtime.Config.Version,
 		runtime.Config.InputVersion,
-		runtime.Config.Source("version"),
+		runtime.Config.Source(versionCommand),
 	)
 	fmt.Fprintf(stdout, "doctor: config theme=%s (%s)\n", runtime.Config.Theme, runtime.Config.Source("theme"))
 	accounts := make([]string, 0, len(runtime.Config.Accounts))
@@ -1461,7 +1463,7 @@ func printDoctorConfig(stdout io.Writer, runtime commandRuntime) {
 
 // mcpServerKey names where a registered server's enabled flag is configured.
 func mcpServerKey(name string) string {
-	if name == "harvester" {
+	if name == harvesterServer {
 		return "harvester.enabled"
 	}
 	return "mcp.servers." + name + ".enabled"

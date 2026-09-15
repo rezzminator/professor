@@ -56,7 +56,7 @@ func InspectHarvesterClientCutover(home string, port int, registries, codexHomes
 	if registries == nil {
 		return []MCPClientCutover{{
 			Client: pfmengine.MustLookup(pfmengine.Claude).LongName,
-			Name:   "harvester",
+			Name:   mcpServerHarvester,
 			State:  MCPClientUnreadable,
 			Error:  errors.New("no Claude registries supplied"),
 		}}
@@ -68,7 +68,7 @@ func InspectHarvesterClientCutover(home string, port int, registries, codexHomes
 	seen := map[string]bool{}
 	for _, path := range registries {
 		if !seen[path] {
-			reports = append(reports, inspectClaudeServers(path, port, "harvester")...)
+			reports = append(reports, inspectClaudeServers(path, port, mcpServerHarvester)...)
 			seen[path] = true
 		}
 	}
@@ -76,7 +76,7 @@ func InspectHarvesterClientCutover(home string, port int, registries, codexHomes
 		reports = append(reports, inspectCodexHarvester(filepath.Join(dir, "config.toml"), port))
 	}
 	// Root .mcp.json is historical/project-scope evidence, not Claude user scope.
-	reports = append(reports, inspectClaudeServers(filepath.Join(home, ".mcp.json"), port, "harvester")...)
+	reports = append(reports, inspectClaudeServers(filepath.Join(home, ".mcp.json"), port, mcpServerHarvester)...)
 	return reports
 }
 
@@ -161,11 +161,11 @@ func inspectCodexHarvester(path string, port int) MCPClientCutover {
 		report.State, report.Error = MCPClientUnreadable, fmt.Errorf("parse %s: %w", path, err)
 		return report
 	}
-	registration, present := document.Servers["harvester"]
+	registration, present := document.Servers[mcpServerHarvester]
 	if !present {
 		return report
 	}
-	report.State = classifyRegistration("harvester", registration, port)
+	report.State = classifyRegistration(mcpServerHarvester, registration, port)
 	return report
 }
 
@@ -183,16 +183,16 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 	}
 	command = strings.ToLower(command)
 	noExtras := len(registration.Headers) == 0 && len(registration.Env) == 0
-	if registration.URL == wantedURL && (typeName == "" || typeName == "http") && command == "" &&
+	if registration.URL == wantedURL && (typeName == "" || typeName == httpProtocol) && command == "" &&
 		len(registration.Args) == 0 &&
 		noExtras {
 		return MCPClientPFM
 	}
-	if command == "pfm" && registration.URL == "" && noExtras &&
+	if command == MCPClientPFM && registration.URL == "" && noExtras &&
 		containsArgumentSequence(registration.Args, "mcp", name, "serve") {
 		return MCPClientPFM
 	}
-	if name != "harvester" {
+	if name != mcpServerHarvester {
 		return MCPClientForeignRegistration
 	}
 	joined := strings.ToLower(strings.Join(registration.Args, " "))

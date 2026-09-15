@@ -35,7 +35,10 @@ func (failure *OutsidePFMError) Error() string {
 	)
 }
 
-const agentQueryTimeout = 40 * time.Second
+const (
+	agentQueryTimeout = 40 * time.Second
+	unknownState      = "unknown"
+)
 
 type Agent struct {
 	SessionID string `json:"sessionId"`
@@ -88,7 +91,7 @@ func (agent Agent) activity() string {
 	if agent.State != "" {
 		return agent.State
 	}
-	return "unknown"
+	return unknownState
 }
 
 // ParseAgents validates the complete JSON response. A malformed response is
@@ -300,7 +303,7 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 			}
 			return opener.tmux.Attach(ctx, socket)
 		}
-		parent := "unknown"
+		parent := unknownState
 		if processes, ok := opener.processes.(interface{ ParentComm(int) string }); ok {
 			if comm := strings.TrimSpace(processes.ParentComm(hit.PID)); comm != "" {
 				parent = comm

@@ -14,7 +14,11 @@ import (
 	"time"
 )
 
-const Matcher = "startup|resume|clear|compact"
+const (
+	Matcher      = "startup|resume|clear|compact"
+	rpcMethodKey = "method"
+	rpcParamsKey = "params"
+)
 
 // Command identifies only Professor's handler, including homes containing shell metacharacters.
 func Command(home string) string {
@@ -131,12 +135,12 @@ func rpc(parent context.Context, binary, account, method string, params any) (js
 		encoder := json.NewEncoder(stdin)
 		requests := []any{
 			map[string]any{
-				"id":     0,
-				"method": "initialize",
-				"params": map[string]any{"clientInfo": map[string]string{"name": "professor", "version": "1"}},
+				"id":         0,
+				rpcMethodKey: "initialize",
+				rpcParamsKey: map[string]any{"clientInfo": map[string]string{"name": "professor", "version": "1"}},
 			},
-			map[string]any{"method": "initialized", "params": nil},
-			map[string]any{"id": 1, "method": method, "params": params},
+			map[string]any{rpcMethodKey: "initialized", rpcParamsKey: nil},
+			map[string]any{"id": 1, rpcMethodKey: method, rpcParamsKey: params},
 		}
 		for _, r := range requests {
 			if err := encoder.Encode(r); err != nil {

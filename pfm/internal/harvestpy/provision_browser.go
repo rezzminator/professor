@@ -64,7 +64,7 @@ func provisionBrowser(
 		Schema: 1, Target: platform.String(), Python: target.PythonVersion, UV: target.UVVersion,
 		PythonSHA256: target.Python.SHA256, UVSHA256: target.UV.SHA256,
 		LockSHA256: browserLockSHA256(), SourceSHA256: browserSourceSHA256(),
-		Features: FeatureStatus{OCR: "disabled", Layout: "disabled", Models: "not-requested"},
+		Features: FeatureStatus{OCR: featureStateDisabled, Layout: featureStateDisabled, Models: "not-requested"},
 	}
 	desired := digestID(base)
 	base.Digest = desired
@@ -73,7 +73,7 @@ func provisionBrowser(
 	if existing, err := ReadEnvironmentDigest(
 		filepath.Join(current, "environment.json"),
 	); err == nil && existing.Digest == desired &&
-		existing.State == "ready" {
+		existing.State == provisionStateReady {
 		browserRuntime := Runtime{
 			Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 			Script: filepath.Join(current, "project", "browser.py"),
@@ -138,7 +138,7 @@ func provisionBrowser(
 	if err := stampPythonBuild(filepath.Join(final, "python", "BUILD"), target.PythonVersion); err != nil {
 		return ProvisionResult{}, fmt.Errorf("stamp browser Python build: %w", err)
 	}
-	args := []string{"sync", "--frozen", "--no-install-project", "--project", project, "--python", pythonPath}
+	args := []string{"sync", "--frozen", "--no-install-project", "--project", project, uvFlagPython, pythonPath}
 	if options.Offline {
 		args = append(args, "--offline")
 	}
@@ -155,7 +155,7 @@ func provisionBrowser(
 	inventoryOutput, err := options.Run(
 		ctx,
 		uvPath,
-		[]string{"pip", "list", "--format", "freeze", "--python", venvPython},
+		[]string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, venvPython},
 		project,
 	)
 	if err != nil {
@@ -175,7 +175,7 @@ func provisionBrowser(
 		"patchright":  smoke["patchright"],
 		"chrome_path": smoke["chrome_path"],
 	}
-	base.State = "ready"
+	base.State = provisionStateReady
 	base.Environment = final
 	finalRuntime := Runtime{
 		Python: filepath.Join(final, "project", ".venv", "bin", "python"),

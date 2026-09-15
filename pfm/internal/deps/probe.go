@@ -199,10 +199,10 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 			result.VerboseErr = err.Error()
 		}
 		switch {
-		case result.SelfDoctor == "cancelled":
+		case result.SelfDoctor == string(StateCancelled):
 			result.State = StateCancelled
 			result.Error = selfDoctorRaw
-		case result.SelfDoctor == "broken":
+		case result.SelfDoctor == string(StateBroken):
 			result.State = StateBroken
 			if selfDoctorRaw != "" {
 				result.Error = fmt.Sprintf("self-doctor failed raw=%q", selfDoctorRaw)
@@ -241,16 +241,16 @@ func probeSelfDoctor(
 	}
 	if helpErr != nil {
 		if termination, ok := helpErr.(probeContextError); ok && !termination.ownTimeout {
-			return "cancelled", parentContextError(termination.err), nil
+			return string(StateCancelled), parentContextError(termination.err), nil
 		}
 		if errors.Is(helpErr, context.DeadlineExceeded) {
-			return "broken", "", nil
+			return string(StateBroken), "", nil
 		}
 		var exitErr *exec.ExitError
 		if errors.As(helpErr, &exitErr) {
 			return "unavailable", "", nil
 		}
-		return "broken", "", nil
+		return string(StateBroken), "", nil
 	}
 	output, err := boundedOutputWithEnvironment(ctx, timeout, terminalEnvironment(), path, entry.SelfDoctorArgs...)
 	if writeErr := writeVerbose(verboseDir, entry.Name+"-self-doctor", output); writeErr != nil {
@@ -258,7 +258,7 @@ func probeSelfDoctor(
 	}
 	if err != nil {
 		if termination, ok := err.(probeContextError); ok && !termination.ownTimeout {
-			return "cancelled", parentContextError(termination.err), nil
+			return string(StateCancelled), parentContextError(termination.err), nil
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Sprintf("timeout (%s)", timeout), "", nil
@@ -267,7 +267,7 @@ func probeSelfDoctor(
 			strings.Contains(strings.ToLower(string(output)), "interactive") {
 			return "unavailable (interactive-only)", "", nil
 		}
-		return "broken", selfDoctorFailureLine(string(output)), nil
+		return string(StateBroken), selfDoctorFailureLine(string(output)), nil
 	}
 	return "ok", "", nil
 }

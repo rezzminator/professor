@@ -14,6 +14,12 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 )
 
+const (
+	versionFlag    = "--version"
+	platformDarwin = "darwin"
+	platformLinux  = "linux"
+)
+
 // Entry describes one external command pfm may execute. Command is the
 // configured name or absolute path; Name is the stable doctor-row key.
 type Entry struct {
@@ -57,7 +63,7 @@ var fixedCommands = []Entry{
 		Name:        "git",
 		Purpose:     "repository inspection and updates",
 		Required:    true,
-		VersionArgs: []string{"--version"},
+		VersionArgs: []string{versionFlag},
 		Parse:       prefixedVersion("git version"),
 		InstallHint: "install git",
 	},
@@ -66,7 +72,7 @@ var fixedCommands = []Entry{
 		Name:        "bash",
 		Purpose:     "installed compatibility scripts",
 		Required:    true,
-		VersionArgs: []string{"--version"},
+		VersionArgs: []string{versionFlag},
 		Parse:       firstVersion,
 		InstallHint: "install bash",
 	},
@@ -74,7 +80,7 @@ var fixedCommands = []Entry{
 		Name:        "zsh",
 		Purpose:     "interactive generated action execution",
 		Required:    true,
-		VersionArgs: []string{"--version"},
+		VersionArgs: []string{versionFlag},
 		Parse:       firstVersion,
 		InstallHint: "install zsh",
 	},
@@ -82,14 +88,14 @@ var fixedCommands = []Entry{
 		Name:        "ps",
 		Purpose:     "Darwin process-table inspection",
 		Required:    true,
-		Platforms:   []string{"darwin"},
+		Platforms:   []string{platformDarwin},
 		InstallHint: "restore the system ps command",
 	},
 	{
 		Name:        "lsof",
 		Purpose:     "Darwin open-file inspection",
 		Required:    true,
-		Platforms:   []string{"darwin"},
+		Platforms:   []string{platformDarwin},
 		VersionArgs: []string{"-v"},
 		Parse:       lsofVersion,
 		InstallHint: "install lsof",
@@ -103,15 +109,15 @@ var fixedCommands = []Entry{
 		Name:        "setsid",
 		Purpose:     "detached Linux helper processes",
 		Required:    true,
-		Platforms:   []string{"linux"},
-		VersionArgs: []string{"--version"},
+		Platforms:   []string{platformLinux},
+		VersionArgs: []string{versionFlag},
 		Parse:       firstVersion,
 		InstallHint: "install util-linux (setsid)",
 	},
 	{
 		Name:        "nohup",
 		Purpose:     "detached helper fallback where setsid is absent",
-		Platforms:   []string{"linux", "darwin"},
+		Platforms:   []string{platformLinux, platformDarwin},
 		InstallHint: "install coreutils (nohup)",
 	},
 	{
@@ -130,16 +136,16 @@ var fixedCommands = []Entry{
 	{
 		Name:        "systemctl",
 		Purpose:     "Linux user-service wiring",
-		Platforms:   []string{"linux"},
-		VersionArgs: []string{"--version"},
+		Platforms:   []string{platformLinux},
+		VersionArgs: []string{versionFlag},
 		Parse:       firstVersion,
 		InstallHint: "install systemd to enable user units",
 	},
 	{
 		Name:        "systemd-run",
 		Purpose:     "durable chat scopes spawned from Linux user services",
-		Platforms:   []string{"linux"},
-		VersionArgs: []string{"--version"},
+		Platforms:   []string{platformLinux},
+		VersionArgs: []string{versionFlag},
 		Parse:       firstVersion,
 		InstallHint: "install systemd to spawn chats from the MCP service",
 	},
@@ -147,7 +153,7 @@ var fixedCommands = []Entry{
 		Name:        "launchctl",
 		Purpose:     "Darwin launch-agent wiring",
 		Required:    true,
-		Platforms:   []string{"darwin"},
+		Platforms:   []string{platformDarwin},
 		InstallHint: "restore the system launchctl command",
 	},
 	// Absolute path: this is the door to the login keychain, where Claude Code
@@ -158,7 +164,7 @@ var fixedCommands = []Entry{
 		Command:     "/usr/bin/security",
 		Purpose:     "Darwin login-keychain OAuth credential reads",
 		Required:    true,
-		Platforms:   []string{"darwin"},
+		Platforms:   []string{platformDarwin},
 		InstallHint: "restore the system security command",
 	},
 	// MinVersion 0.2.73 is the release the shipped .rumdl.toml policy (MD060
@@ -167,8 +173,8 @@ var fixedCommands = []Entry{
 		Name:        "rumdl",
 		Purpose:     "markdown lint and format for prompts and docs",
 		Required:    false,
-		Platforms:   []string{"linux", "darwin"},
-		VersionArgs: []string{"--version"},
+		Platforms:   []string{platformLinux, platformDarwin},
+		VersionArgs: []string{versionFlag},
 		Parse:       prefixedVersion("rumdl"),
 		MinVersion:  "0.2.73",
 		InstallHint: "run pfm install to provision rumdl, or: uv tool install rumdl",
@@ -207,7 +213,7 @@ func Registry(options ...Options) []Entry {
 		entries = append(entries, Entry{
 			Name: descriptor.LongName, Command: binary, Engine: id,
 			Purpose:     "configured " + descriptor.Short + " engine",
-			VersionArgs: []string{"--version"}, Parse: firstVersion,
+			VersionArgs: []string{versionFlag}, Parse: firstVersion,
 			InstallHint: "install the configured " + descriptor.Short + " CLI", SelfDoctorArgs: doctorArgs,
 		})
 	}
@@ -220,8 +226,8 @@ func Registry(options ...Options) []Entry {
 			Command:     filepath.Join(current, "uv"),
 			Purpose:     "provisioned harvestpy package verifier",
 			Required:    true,
-			Platforms:   []string{"linux", "darwin"},
-			VersionArgs: []string{"--version"},
+			Platforms:   []string{platformLinux, platformDarwin},
+			VersionArgs: []string{versionFlag},
 			Parse:       firstVersion,
 			InstallHint: "run pfm install to provision harvestpy",
 			Harvest:     true,
@@ -231,8 +237,8 @@ func Registry(options ...Options) []Entry {
 			Command:     filepath.Join(current, "project", ".venv", "bin", "python"),
 			Purpose:     "provisioned harvestpy interpreter",
 			Required:    true,
-			Platforms:   []string{"linux", "darwin"},
-			VersionArgs: []string{"--version"},
+			Platforms:   []string{platformLinux, platformDarwin},
+			VersionArgs: []string{versionFlag},
 			Parse:       firstVersion,
 			InstallHint: "run pfm install to provision harvestpy",
 			Harvest:     true,

@@ -33,7 +33,7 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 		if len(body) > maxImageBytes {
 			return Result{Source: source, Error: "image exceeds 10 MiB limit"}
 		}
-		return h.storeBinary(source, classifyKind(path, "", body), "local", body, refreshValue(refresh))
+		return h.storeBinary(source, classifyKind(path, "", body), localLabel, body, refreshValue(refresh))
 	}
 	if err := assertFetchable(source, false); err != nil {
 		return Result{Source: source, Error: err.Error()}
@@ -45,8 +45,8 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 					Source:      source,
 					Kind:        kind,
 					Path:        path,
-					Method:      "cache",
-					CacheStatus: "hit",
+					Method:      cacheLabel,
+					CacheStatus: cacheStatusHit,
 					Bytes:       int64(len(body)),
 				}
 			}
@@ -57,7 +57,7 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 		client *http.Client
 		ua     string
 	}{
-		{"direct", h.binaryDirectOrClient(), h.userAgent}, {"chrome-impersonation", h.binaryChromeOrChrome(), chromeUA},
+		{rungDirect, h.binaryDirectOrClient(), h.userAgent}, {rungChromeImpersonation, h.binaryChromeOrChrome(), chromeUA},
 	} {
 		body, status, contentType, err := getBody(ctx, rung.client, source, rung.ua, maxImageBytes+1)
 		if err != nil || status >= 400 || len(body) > maxImageBytes {
@@ -88,7 +88,7 @@ func (h *Harvester) binaryChromeOrChrome() *http.Client {
 
 func isImageKind(kind string) bool {
 	switch kind {
-	case "jpg", "png", "gif", "webp", "bmp", "tiff", "svg", "image":
+	case kindJPG, kindPNG, kindGIF, kindWebP, kindBMP, kindTIFF, kindSVG, kindImage:
 		return true
 	}
 	return false
@@ -97,11 +97,11 @@ func isImageKind(kind string) bool {
 func refreshValue(v []bool) bool { return len(v) > 0 && v[0] }
 
 func (h *Harvester) binaryCachePath(source string) (string, string) {
-	for _, kind := range []string{"jpg", "png", "gif", "webp", "bmp", "tiff", "svg", "image", "zip", "tar", "7z", "rar"} {
+	for _, kind := range []string{kindJPG, kindPNG, kindGIF, kindWebP, kindBMP, kindTIFF, kindSVG, kindImage, kindZIP, kindTAR, "7z", kindRAR} {
 		path := filepath.Join(h.options.CacheDir, CacheKey(source, kind))
 		ext := filepath.Ext(path)
 		bin := strings.TrimSuffix(path, ext)
-		for _, candidateExt := range []string{".jpg", ".png", ".gif", ".webp", ".bmp", ".tiff", ".svg", ".zip", ".tar", ".7z", ".rar"} {
+		for _, candidateExt := range []string{extensionJPG, extensionPNG, extensionGIF, extensionWebP, extensionBMP, extensionTIFF, extensionSVG, extensionZIP, extensionTAR, extension7Z, extensionRAR} {
 			candidate := bin + candidateExt
 			if _, err := os.Stat(candidate); err == nil {
 				return candidate, kind
@@ -114,7 +114,7 @@ func (h *Harvester) binaryCachePath(source string) (string, string) {
 func (h *Harvester) storeBinary(source, kind, method string, body []byte, refresh bool) (result Result) {
 	ext := filepath.Ext(strings.Split(strings.Split(source, "?")[0], "#")[0])
 	if ext == "" || len(ext) > 5 {
-		ext = map[string]string{"jpg": ".jpg", "png": ".png", "gif": ".gif", "webp": ".webp", "bmp": ".bmp", "tiff": ".tiff", "svg": ".svg", "image": ".png", "zip": ".zip", "tar": ".tar", "7z": ".7z", "rar": ".rar"}[kind]
+		ext = map[string]string{kindJPG: extensionJPG, kindPNG: extensionPNG, kindGIF: extensionGIF, kindWebP: extensionWebP, kindBMP: extensionBMP, kindTIFF: extensionTIFF, kindSVG: extensionSVG, kindImage: extensionPNG, kindZIP: extensionZIP, kindTAR: extensionTAR, kind7Z: extension7Z, kindRAR: extensionRAR}[kind]
 	}
 	if ext == "" {
 		ext = ".bin"
@@ -150,9 +150,9 @@ func (h *Harvester) storeBinary(source, kind, method string, body []byte, refres
 	if e != nil {
 		return Result{Source: source, Kind: kind, Error: fmt.Sprintf("cache binary: %v", e)}
 	}
-	status := "miss"
+	status := cacheStatusMiss
 	if refresh {
-		status = "refresh"
+		status = cacheStatusRefresh
 	}
 	return Result{Source: source, Kind: kind, Path: path, Method: method, CacheStatus: status, Bytes: int64(len(body))}
 }
@@ -177,7 +177,7 @@ func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refres
 	}
 	if !refresh {
 		if path, kind := h.binaryCachePath(source); path != "" {
-			return path, Result{Source: source, Kind: kind, Path: path, Method: "cache", CacheStatus: "hit"}
+			return path, Result{Source: source, Kind: kind, Path: path, Method: cacheLabel, CacheStatus: cacheStatusHit}
 		}
 	}
 	for _, rung := range []struct {
@@ -185,14 +185,14 @@ func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refres
 		client *http.Client
 		ua     string
 	}{
-		{"direct", h.binaryDirectOrClient(), h.userAgent}, {"chrome-impersonation", h.binaryChromeOrChrome(), chromeUA},
+		{rungDirect, h.binaryDirectOrClient(), h.userAgent}, {rungChromeImpersonation, h.binaryChromeOrChrome(), chromeUA},
 	} {
 		body, status, contentType, err := getBody(ctx, rung.client, source, rung.ua, h.options.MaxBytes)
 		if err != nil || status >= 400 {
 			continue
 		}
 		kind := classifyKind(source, contentType, body)
-		if kind != "zip" && kind != "tar" && kind != "7z" && kind != "rar" {
+		if kind != kindZIP && kind != kindTAR && kind != "7z" && kind != kindRAR {
 			continue
 		}
 		result := h.storeBinary(source, kind, rung.name, body, refresh)

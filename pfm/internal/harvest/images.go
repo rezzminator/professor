@@ -47,7 +47,7 @@ func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource str
 		seen[remote] = true
 		count++
 		u, err := base.Parse(remote)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		if err != nil || (u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS) {
 			continue
 		}
 		targets = append(targets, remote+"\x00"+u.String())

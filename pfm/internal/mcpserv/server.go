@@ -26,6 +26,8 @@ const (
 	// caller; maxCaptureBytes is the ceiling an explicit max_bytes may ask for.
 	defaultCaptureBytes = 256 << 10
 	maxCaptureBytes     = 4 << 20
+	statusNotFound      = "not_found"
+	statusAmbiguous     = "ambiguous"
 )
 
 // selfCompactDescription is a named const so the registered text and the test
@@ -347,7 +349,7 @@ func (service *Service) chatKeys(
 	}
 	if refused, _ := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
 		return nil, KeysOutput{
-			Status: "not_found",
+			Status: statusNotFound,
 			Code:   inject.CodeUnknown,
 			Keys:   append([]string(nil), input.Keys...),
 		}, nil
@@ -357,15 +359,12 @@ func (service *Service) chatKeys(
 		return nil, KeysOutput{}, err
 	}
 	if code != 0 {
-		return nil, KeysOutput{
-			Status: "not_found",
+		output := KeysOutput{
+			Status: statusNotFound,
 			Code:   code,
 			Keys:   append([]string(nil), input.Keys...),
-		}, fmt.Errorf(
-			"resolve %q: %s",
-			input.Target,
-			detail,
-		)
+		}
+		return nil, output, fmt.Errorf("resolve %q: %s", input.Target, detail)
 	}
 	tmux := inject.CommandTmux{}
 	for index, key := range input.Keys {
@@ -439,9 +438,9 @@ func (service *Service) chatResolve(
 		switch code {
 		case 0:
 		case inject.CodeUnknown:
-			status, code = "not_found", 1
+			status, code = statusNotFound, 1
 		case inject.CodeAmbiguous:
-			status, code = "ambiguous", 2
+			status, code = statusAmbiguous, 2
 		default:
 			return nil, ResolveOutput{}, fmt.Errorf(
 				"resolve target %q failed with code %d: %s", input.Name, code, detail,
@@ -459,9 +458,9 @@ func (service *Service) chatResolve(
 	status := "ok"
 	switch namespace.Code {
 	case 1:
-		status = "not_found"
+		status = statusNotFound
 	case 2:
-		status = "ambiguous"
+		status = statusAmbiguous
 	}
 	socket, pane := parseResolved(namespace.Stdout)
 	return nil, ResolveOutput{
@@ -484,7 +483,7 @@ func (service *Service) chatInject(
 	}
 	if refused, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
 		return nil, InjectOutput{
-			Status: "not_found", Code: inject.CodeUnknown, Message: detail,
+			Status: statusNotFound, Code: inject.CodeUnknown, Message: detail,
 		}, nil
 	}
 	result, err := injector.Inject(ctx, inject.Request{
@@ -514,7 +513,7 @@ func (service *Service) chatSelfCompact(
 			detail = selfCompactNoAmbientRemedy
 		}
 		return nil, InjectOutput{
-			Status: "not_found", Code: inject.CodeUnknown, Message: detail,
+			Status: statusNotFound, Code: inject.CodeUnknown, Message: detail,
 		}, nil
 	}
 	// One steer, by the operator's rule. The engine's own guards still run on
@@ -590,7 +589,7 @@ func (service *Service) chatWhoami(
 	}
 	if caller.present {
 		if !caller.valid {
-			return nil, WhoamiOutput{Status: "not_found", Message: caller.detail}, nil
+			return nil, WhoamiOutput{Status: statusNotFound, Message: caller.detail}, nil
 		}
 		identity := caller.identity
 		return nil, WhoamiOutput{
@@ -607,7 +606,7 @@ func (service *Service) chatWhoami(
 	}
 	if !service.backend.allowAmbientIdentity {
 		return nil, WhoamiOutput{
-			Status:  "not_found",
+			Status:  statusNotFound,
 			Message: noAmbientCallerRemedy,
 		}, nil
 	}
@@ -618,7 +617,7 @@ func (service *Service) chatWhoami(
 	identity, err := identifier.Identify(ctx)
 	if err != nil {
 		return nil, WhoamiOutput{
-			Status:  "not_found",
+			Status:  statusNotFound,
 			Engine:  identity.Engine,
 			ID:      identity.ID,
 			Source:  identity.Source,
@@ -667,7 +666,7 @@ func (service *Service) chatCapture(
 		return nil, CaptureOutput{}, err
 	}
 	if refused, detail := service.selfCallerRefusal(caller); selfTarget(input.Target) && refused {
-		return nil, CaptureOutput{Status: "not_found", Code: inject.CodeUnknown, Message: detail}, nil
+		return nil, CaptureOutput{Status: statusNotFound, Code: inject.CodeUnknown, Message: detail}, nil
 	}
 	target, text, code, detail, err := injector.Capture(
 		ctx,
@@ -676,9 +675,9 @@ func (service *Service) chatCapture(
 	)
 	status := "ok"
 	if code == inject.CodeAmbiguous {
-		status = "ambiguous"
+		status = statusAmbiguous
 	} else if code != 0 {
-		status = "not_found"
+		status = statusNotFound
 	}
 	// The engine captures the WHOLE scrollback; the byte bound is applied here,
 	// after the capture, keeping the most recent screen when it has to cut.

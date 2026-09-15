@@ -12,6 +12,8 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 )
 
+const chatCommand = "chat"
+
 func (service *Service) chatLast(
 	ctx context.Context,
 	request *mcp.CallToolRequest,
@@ -83,7 +85,7 @@ func (service *Service) chatNew(
 	if strings.TrimSpace(input.Name) == "" {
 		return nil, ActionOutput{}, fmt.Errorf("name is required")
 	}
-	args := []string{"chat", "new", "--name", input.Name}
+	args := []string{chatCommand, "new", "--name", input.Name}
 	if input.Engine != "" {
 		args = append(args, "--engine", input.Engine)
 	}
@@ -161,7 +163,7 @@ func (service *Service) chatName(
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
-	return service.cliAction(ctx, "chat", "name", target, input.Name)
+	return service.cliAction(ctx, chatCommand, "name", target, input.Name)
 }
 
 func (service *Service) chatKill(
@@ -173,7 +175,7 @@ func (service *Service) chatKill(
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
-	args := []string{"chat", "kill", target}
+	args := []string{chatCommand, "kill", target}
 	if input.Exit {
 		args = append(args, "--exit")
 	}
@@ -211,7 +213,7 @@ func (service *Service) chatSave(
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
-	args := []string{"chat", "save", target}
+	args := []string{chatCommand, "save", target}
 	if input.Transcript != "" {
 		args = append(args, input.Transcript)
 	}
@@ -253,17 +255,13 @@ func (service *Service) cliTargetAction(
 	if strings.TrimSpace(target) == "" {
 		return nil, ActionOutput{}, fmt.Errorf("target is required")
 	}
-	return service.cliAction(ctx, "chat", verb, target)
+	return service.cliAction(ctx, chatCommand, verb, target)
 }
 
 func (service *Service) cliAction(ctx context.Context, args ...string) (*mcp.CallToolResult, ActionOutput, error) {
 	if service.backend.dispatch == nil {
-		return nil, ActionOutput{
-			Status: "error",
-			Code:   1,
-		}, fmt.Errorf(
-			"chat action in-process CLI dispatcher is not configured",
-		)
+		output := ActionOutput{Status: "error", Code: 1}
+		return nil, output, fmt.Errorf("chat action in-process CLI dispatcher is not configured")
 	}
 	var stdout, stderr strings.Builder
 	code := service.backend.dispatch(ctx, args, &stdout, &stderr)
@@ -272,16 +270,8 @@ func (service *Service) cliAction(ctx context.Context, args ...string) (*mcp.Cal
 		if message == "" {
 			message = strings.TrimSpace(stdout.String())
 		}
-		return nil, ActionOutput{
-			Status:  "error",
-			Code:    code,
-			Message: message,
-		}, fmt.Errorf(
-			"pfm %s exited %d: %s",
-			strings.Join(args, " "),
-			code,
-			message,
-		)
+		output := ActionOutput{Status: "error", Code: code, Message: message}
+		return nil, output, fmt.Errorf("pfm %s exited %d: %s", strings.Join(args, " "), code, message)
 	}
 	return nil, ActionOutput{Status: "ok", Code: 0, Message: strings.TrimSpace(stdout.String())}, nil
 }

@@ -207,7 +207,7 @@ func chromeFRequest(req *http.Request) *fhttp.Request {
 	// clients. Reapply them here so a direct adapter use cannot accidentally
 	// lose the Chrome surface.
 	header.Set("User-Agent", chromeUA)
-	header.Set("Accept", chromeAccept)
+	header.Set(headerAccept, chromeAccept)
 	header.Set("Accept-Encoding", chromeAcceptEncoding)
 	header.Set("Accept-Language", chromeAcceptLanguage)
 	header.Set("Priority", chromePriority)
@@ -283,7 +283,7 @@ func newChromeDialer(
 		return nil, fmt.Errorf("invalid proxy URL %q", raw)
 	}
 	switch strings.ToLower(u.Scheme) {
-	case "http", "https", "socks5", "socks5h":
+	case schemeHTTP, schemeHTTPS, "socks5", "socks5h":
 		return &chromeDialer{proxyURL: u, timeout: timeout, resolve: resolve}, nil
 	default:
 		return nil, fmt.Errorf("unsupported proxy scheme %q", u.Scheme)

@@ -67,10 +67,10 @@ func (report projectReport) reviewRequired() int {
 
 func runProjectUpdate(action string, args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
 	switch action {
-	case "check":
+	case checkAction:
 		flags := newFlagSet("update check", "usage: pfm update check [--root DIR] [--json]", stderr)
 		rootFlag := flags.String("root", "", "project root")
-		jsonOutput := flags.Bool("json", false, "write one JSON object")
+		jsonOutput := flags.Bool(jsonFormat, false, "write one JSON object")
 		positional, code, ok := parseFlagsAnywhere(flags, args)
 		if !ok {
 			return code
@@ -674,7 +674,7 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime commandRun
 	} else {
 		unchanged := baseline.Blueprint.SHA
 		if unchanged == "" {
-			unchanged = "none"
+			unchanged = emptySummary
 		}
 		fmt.Fprintf(stdout, "adopted 0 file(s); blueprint pin unchanged (%s)\n", unchanged)
 	}

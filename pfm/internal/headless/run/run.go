@@ -26,7 +26,10 @@ import (
 	"hostops/pfm/internal/paths"
 )
 
-const maxCapturedOutput = 8 << 20
+const (
+	maxCapturedOutput = 8 << 20
+	jsonNull          = "null"
+)
 
 // ErrStructuredOutput means that a requested schema was not satisfied by the
 // engine envelope. It is deliberately separate from a process failure so CLI
@@ -750,7 +753,7 @@ type claudeEnvelope struct {
 // seat that took a second turn (a structured-output retry, a tool call) reported ~2k input tokens
 // against a cost that says 60k. Nil when the block is absent or empty.
 func parseModelUsage(raw json.RawMessage) (*TokenUsage, error) {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 || string(raw) == jsonNull {
 		return nil, nil
 	}
 	var models map[string]struct {
@@ -786,7 +789,7 @@ func parseOutput(result *Result, request Request) error {
 			return fmt.Errorf("parse Claude JSON envelope: %w", err)
 		}
 		result.IsError = envelope.IsError
-		if len(envelope.Result) > 0 && string(envelope.Result) != "null" {
+		if len(envelope.Result) > 0 && string(envelope.Result) != jsonNull {
 			if err := json.Unmarshal(envelope.Result, &result.Answer); err != nil {
 				return fmt.Errorf("parse Claude result: %w", err)
 			}
@@ -870,7 +873,7 @@ func parseCodexJSONL(result *Result, request Request) error {
 			terminal = false
 			result.Answer = ""
 		case "turn.completed":
-			if len(event.Error) != 0 && string(event.Error) != "null" {
+			if len(event.Error) != 0 && string(event.Error) != jsonNull {
 				return fmt.Errorf("turn.completed event from Codex contains an error")
 			}
 			terminal = true
@@ -908,7 +911,7 @@ func parseCodexJSONL(result *Result, request Request) error {
 }
 
 func parseUsage(raw json.RawMessage) (*TokenUsage, error) {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 || string(raw) == jsonNull {
 		return nil, nil
 	}
 	var values map[string]json.RawMessage
@@ -928,7 +931,7 @@ func parseUsage(raw json.RawMessage) (*TokenUsage, error) {
 	} {
 		for _, name := range field.names {
 			value, present := values[name]
-			if !present || string(value) == "null" {
+			if !present || string(value) == jsonNull {
 				continue
 			}
 			if err := json.Unmarshal(value, field.target); err != nil {
@@ -948,7 +951,7 @@ func parseUsage(raw json.RawMessage) (*TokenUsage, error) {
 }
 
 func parseCost(raw json.RawMessage) (*float64, error) {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 || string(raw) == jsonNull {
 		return nil, nil
 	}
 	var cost float64
@@ -962,7 +965,7 @@ func parseCost(raw json.RawMessage) (*float64, error) {
 }
 
 func validateSchema(raw json.RawMessage) error {
-	if strings.TrimSpace(string(raw)) == "null" {
+	if strings.TrimSpace(string(raw)) == jsonNull {
 		return fmt.Errorf("invalid output schema: null is not a JSON Schema")
 	}
 	var schema jsonschema.Schema

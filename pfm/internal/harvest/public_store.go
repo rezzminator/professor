@@ -41,7 +41,7 @@ func (h *Harvester) publicRoot() (string, error) {
 // but never permits the public namespace to be one. Otherwise public/ could
 // silently point at .private/ and turn private cache files into public files.
 func publicNamespace(root string, create bool) (string, error) {
-	path := filepath.Join(root, "public")
+	path := filepath.Join(root, publicDirName)
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if !create {
@@ -98,7 +98,7 @@ func (h *Harvester) publicArtifactPath(source, kind, oldPath, ext string) (strin
 		}
 	}
 	key := sha256.Sum256([]byte("harvester-public\x00" + source + "\x00" + kind + "\x00" + canonical))
-	return filepath.Join(root, "public", hex.EncodeToString(key[:])+ext), nil
+	return filepath.Join(root, publicDirName, hex.EncodeToString(key[:])+ext), nil
 }
 
 func (h *Harvester) writePublicMarkdown(path, body string, fetchedAt ...string) error {
@@ -123,7 +123,7 @@ func (h *Harvester) writePublicFile(path string, data []byte) error {
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return fmt.Errorf("create cache directory: %w", err)
 	}
-	publicRoot := filepath.Join(root, "public")
+	publicRoot := filepath.Join(root, publicDirName)
 	if _, err := publicNamespace(root, true); err != nil {
 		return fmt.Errorf("create public directory: %w", err)
 	}
@@ -208,7 +208,7 @@ func (h *Harvester) readPublicArtifact(path string) ([]byte, error) {
 	if isPrivateMetadataPath(lexicalPath, root) {
 		return nil, errors.New("internal metadata is not a document artifact")
 	}
-	lexicalPublicRoot := filepath.Join(root, "public")
+	lexicalPublicRoot := filepath.Join(root, publicDirName)
 	if isPathInside(lexicalPath, lexicalPublicRoot) {
 		if symlinked, symlinkErr := symlinkBelow(lexicalPath, lexicalPublicRoot); symlinkErr != nil || symlinked {
 			return nil, errors.New("public artifact path is not a safe namespace")

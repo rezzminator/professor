@@ -25,6 +25,9 @@ import (
 const (
 	defaultWidth  = 120
 	defaultHeight = 28
+	keyDown       = "down"
+	keyCtrlP      = "ctrl+p"
+	keyCtrlN      = "ctrl+n"
 	// statsRefreshInterval is the Limits/Stats tab sample cadence while
 	// somebody is watching. The Stats tab (resourcesOnly — live CPU/memory
 	// bars) keeps this flat; the Limits tab decays via statsCadence instead
@@ -35,13 +38,12 @@ const (
 	// 09-08 measurement, devbox: one thread at 70%, `codex app-server`
 	// spawned every ~10s — see stats.CodexLiveLimitsTTL).
 	statsRefreshInterval = 2 * time.Second
-	// statsRefreshGrowth/statsRefreshMaxInterval are the Limits tab's
+	// defaultTickCadenceGrowth/statsRefreshMaxInterval are the Limits tab's
 	// tickCadence arithmetic — the same law as the sky tick (see
 	// skyTickGrowth above), just gentler: 2s stretching to 30s over a
 	// leisurely climb rather than parking outright, because a Limits sample
 	// remains cheap to at least glance at (SampleLive always returns the
 	// last-good cached card immediately; it never blocks on the network).
-	statsRefreshGrowth      = 1.35
 	statsRefreshMaxInterval = 30 * time.Second
 	cosmosRefreshInterval   = 2 * time.Second
 	clockRefreshInterval    = 5 * time.Second
@@ -54,7 +56,7 @@ const (
 	// tab-revival storm, 2026-09-03) rendered a full frame eight times a
 	// second for as long as the pane stayed open.
 	//
-	// skyTickGrowth decays it via the same tickCadence arithmetic that backs
+	// defaultTickCadenceGrowth decays it via the same tickCadence arithmetic that backs
 	// off the fleet scan (see activity.go), but steeper: at 8fps a gentle
 	// 1.1x ramp still takes minutes to matter, so skyTickParkThreshold marks
 	// the point — reached within a few seconds of continuous idle — where
@@ -62,7 +64,6 @@ const (
 	// slower forever. A keystroke (see wakeSky) restarts it instantly rather
 	// than waiting for a stale, already-scheduled tick to fire.
 	skyTickBaseInterval  = 125 * time.Millisecond
-	skyTickGrowth        = 1.35
 	skyTickParkThreshold = 1 * time.Second
 )
 
@@ -264,13 +265,11 @@ func NewModel(snapshot Snapshot) Model {
 		skyCadence: newTickCadence(
 			snapshot.Activity,
 			skyTickBaseInterval,
-			skyTickGrowth,
 			skyTickParkThreshold,
 		),
 		statsCadence: newTickCadence(
 			snapshot.Activity,
 			statsRefreshInterval,
-			statsRefreshGrowth,
 			statsRefreshMaxInterval,
 		),
 		mergeNewChat: snapshot.MergeNewChat,
@@ -588,13 +587,13 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return model, nil
-	case "up", "ctrl+p":
+	case "up", keyCtrlP:
 		if count := len(model.filtered); count > 0 {
 			model.cursor = (model.cursor - 1 + count) % count
 		}
 		model.actionIndex = 0
 		return model, nil
-	case "down", "ctrl+n":
+	case keyDown, keyCtrlN:
 		if count := len(model.filtered); count > 0 {
 			model.cursor = (model.cursor + 1) % count
 		}
@@ -856,7 +855,7 @@ func (model Model) accountForKind(kind compose.Kind) int {
 
 func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
-	case "down", "ctrl+n":
+	case keyDown, keyCtrlN:
 		switch model.statsFocus {
 		case StatsFocusTop:
 			model.statsFocus = StatsFocusSubtab
@@ -870,7 +869,7 @@ func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {
 				model.statsDockerCursor++
 			}
 		}
-	case "up", "ctrl+p":
+	case "up", keyCtrlP:
 		switch model.statsFocus {
 		case StatsFocusSubtab:
 			model.statsFocus = StatsFocusTop
@@ -898,9 +897,9 @@ func (model Model) updateLimitsKey(key string) (tea.Model, tea.Cmd) {
 	innerWidth, innerHeight := model.limitViewportDimensions()
 	maximum := maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight)
 	switch key {
-	case "down", "ctrl+n":
+	case keyDown, keyCtrlN:
 		model.limitsOffset = minInt(maximum, model.limitsOffset+1)
-	case "up", "ctrl+p":
+	case "up", keyCtrlP:
 		model.limitsOffset = maxInt(0, model.limitsOffset-1)
 	case "pgdown":
 		model.limitsOffset = minInt(maximum, model.limitsOffset+innerHeight)
@@ -969,7 +968,7 @@ func (model *Model) wakeSky() tea.Cmd {
 		return nil
 	}
 	model.skyParked = false
-	model.skyCadence = newTickCadence(model.activity, skyTickBaseInterval, skyTickGrowth, skyTickParkThreshold)
+	model.skyCadence = newTickCadence(model.activity, skyTickBaseInterval, skyTickParkThreshold)
 	return skyTickCmd(skyTickBaseInterval)
 }
 

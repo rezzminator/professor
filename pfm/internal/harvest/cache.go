@@ -52,7 +52,7 @@ func (c *Cache) Search(pattern string, maxResults int, ignoreCase bool) ([]Cache
 		if e != nil {
 			return e
 		}
-		if entry.IsDir() || filepath.Ext(path) != ".md" || len(out) >= maxResults {
+		if entry.IsDir() || filepath.Ext(path) != extensionMD || len(out) >= maxResults {
 			return nil
 		}
 		raw, e := os.ReadFile(path)
@@ -145,7 +145,7 @@ func (c *Cache) load(source, kind string) (body string, meta map[string]string, 
 	if c.stale(path, kind, meta) {
 		return "", meta, path, false
 	}
-	if kind == "html" && contentChars(body) < 200 {
+	if kind == kindHTML && contentChars(body) < 200 {
 		return "", meta, path, false
 	}
 	return body, meta, path, true
@@ -312,8 +312,8 @@ func truncateInline(body string, limit int) string {
 }
 
 var volatileKinds = map[string]bool{
-	"html": true, "pdf": true, "docx": true, "xlsx": true,
-	"pptx": true, "csv": true, "json": true, "txt": true,
+	kindHTML: true, kindPDF: true, kindDOCX: true, kindXLSX: true,
+	kindPPTX: true, kindCSV: true, kindJSON: true, kindTXT: true,
 }
 
 type negativeCache struct {
@@ -360,9 +360,9 @@ func (c *negativeCache) get(key string) (Result, bool) {
 func (c *negativeCache) put(key string, result Result) {
 	c.mu.Lock()
 	ttl := c.ttl
-	if result.HTTPStatus == http.StatusTooManyRequests || result.ErrorKind == "timeout" ||
-		result.ErrorKind == "connect" ||
-		result.ErrorKind == "dns" {
+	if result.HTTPStatus == http.StatusTooManyRequests || result.ErrorKind == errorKindTimeout ||
+		result.ErrorKind == errorKindConnect ||
+		result.ErrorKind == errorKindDNS {
 		ttl = c.transient
 	}
 	c.entries[key] = negativeEntry{at: time.Now(), ttl: ttl, result: result}

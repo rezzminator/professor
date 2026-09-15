@@ -38,7 +38,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...command
 	timeout := flags.Int("timeout", askTimeoutSeconds, "seconds to wait for the answer (0 waits forever)")
 	settle := flags.Int("settle", askSettleSeconds, "seconds of quiet before an answer is finished")
 	force := flags.Bool("now", false, "interrupt a working chat instead of waiting for it")
-	asJSON := flags.Bool("json", false, "emit one JSON object")
+	asJSON := flags.Bool(jsonFormat, false, "emit one JSON object")
 	progress := flags.Bool("progress", false, "print the chat's turns to stderr while waiting")
 	// Only the flags BEFORE the name are parsed, exactly as `inject` does it:
 	// a message may legitimately start with a dash, and an order silently
@@ -124,7 +124,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...command
 	}
 	return awaitAnswer(
 		ctx,
-		"ask",
+		askAction,
 		chat.Name,
 		chatHandle(chat.Socket, chat.Name),
 		headless.AwaitOptions{

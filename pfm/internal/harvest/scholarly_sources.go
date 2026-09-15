@@ -42,7 +42,7 @@ func (e *providerLookupError) Error() string { return e.message }
 
 func providerLookupFailure(source, provider string, err error, rungs []string) Result {
 	if err == nil {
-		return providerResult(source, provider, "lookup failed", "missing", 0, false, rungs)
+		return providerResult(source, provider, "lookup failed", errorKindMissing, 0, false, rungs)
 	}
 	var pe *providerLookupError
 	if errors.As(err, &pe) {
@@ -59,7 +59,7 @@ type providerCookieJarKey struct{}
 
 func isMirrorProviderMethod(method string) bool {
 	switch method {
-	case "doi-mirror", "doi-viewer", "md5-catalog", "ipfs-catalog", "google-scholar":
+	case sourceDOIMirror, sourceDOIViewer, sourceMD5Catalog, sourceIPFSCatalog, sourceGoogleScholar:
 		return true
 	default:
 		return false
@@ -104,9 +104,8 @@ func (h *Harvester) providerGet(
 	ctx context.Context,
 	rawURL string,
 	headers http.Header,
-	maxBytes int64,
 ) (providerResponse, error) {
-	return h.providerFetch(ctx, rawURL, headers, maxBytes, false)
+	return h.providerFetch(ctx, rawURL, headers, providerHTMLMaxBody, false)
 }
 
 // providerDownload fetches a provider ARTIFACT (the PDF/EPUB bytes). It climbs
@@ -219,9 +218,11 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 	rungs []string,
 	requirePDF bool,
 ) Result {
-	headers := http.Header{"Accept": {"application/pdf,application/epub+zip,application/octet-stream;q=0.9,*/*;q=0.5"}}
+	headers := http.Header{
+		headerAccept: {"application/pdf,application/epub+zip,application/octet-stream;q=0.9,*/*;q=0.5"},
+	}
 	if referer != "" {
-		headers.Set("Referer", referer)
+		headers.Set(headerReferer, referer)
 	}
 	response, err := h.providerDownload(ctx, fileURL, headers, doiMirrorMaxBytes(h))
 	if err != nil {
@@ -229,9 +230,9 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 	}
 	if response.status >= 400 {
 		challenge := doiMirrorChallenge(response.body, response.status)
-		kind := "http"
+		kind := schemeHTTP
 		if challenge {
-			kind = "challenge"
+			kind = errorKindChallenge
 		}
 		return providerResult(
 			source,
@@ -249,7 +250,7 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 			source,
 			provider,
 			"download returned a challenge page",
-			"challenge",
+			errorKindChallenge,
 			response.status,
 			true,
 			rungs,
@@ -260,7 +261,7 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 			source,
 			provider,
 			"download did not return PDF bytes",
-			"wrong_kind",
+			errorKindWrongKind,
 			response.status,
 			false,
 			rungs,
@@ -282,15 +283,15 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 		}
 	}
 	kind := classifyFetchedKind(fileURL, response.contentType, response.body)
-	if kind == "zip" && LooksLikeEpub(response.body) {
-		kind = "epub"
+	if kind == kindZIP && LooksLikeEpub(response.body) {
+		kind = kindEPUB
 	}
 	if !supportedProviderKind(kind, response.body) {
 		return providerResult(
 			source,
 			provider,
 			"download returned an unsupported or non-document format",
-			"wrong_kind",
+			errorKindWrongKind,
 			response.status,
 			false,
 			rungs,
@@ -298,12 +299,12 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 	}
 	converted, err := h.convert(ctx, kind, fileURL, response.body)
 	if err != nil {
-		if kind != "pdf" || !emptyPDFConversionError(err) {
+		if kind != kindPDF || !emptyPDFConversionError(err) {
 			return providerResult(
 				source,
 				provider,
 				"conversion failed: "+err.Error(),
-				"convert",
+				errorKindConvert,
 				response.status,
 				false,
 				rungs,
@@ -311,14 +312,14 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 		}
 		converted = ""
 	}
-	if kind == "pdf" && strings.TrimSpace(converted) == "" {
+	if kind == kindPDF && strings.TrimSpace(converted) == "" {
 		ocr, ok := h.options.Converter.(OCRConverter)
 		if !ok {
 			return providerResult(
 				source,
 				provider,
 				"conversion produced empty text and OCR is unavailable",
-				"convert",
+				errorKindConvert,
 				response.status,
 				false,
 				append(rungs, "ocr"),
@@ -334,7 +335,7 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 				source,
 				provider,
 				"conversion OCR failed: "+err.Error(),
-				"convert",
+				errorKindConvert,
 				response.status,
 				false,
 				rungs,
@@ -368,11 +369,11 @@ func emptyPDFConversionError(err error) bool {
 }
 
 func supportedProviderKind(kind string, body []byte) bool {
-	if kind == "zip" && LooksLikeEpub(body) {
+	if kind == kindZIP && LooksLikeEpub(body) {
 		return true
 	}
 	switch kind {
-	case "pdf", "epub", "docx", "xlsx", "pptx", "csv", "txt", "html":
+	case kindPDF, kindEPUB, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindTXT, kindHTML:
 		return true
 	default:
 		return false
@@ -384,11 +385,11 @@ func (r *Resolver) configuredProviderBase(provider string) string {
 		return ""
 	}
 	switch provider {
-	case "ipfs-catalog":
+	case sourceIPFSCatalog:
 		return strings.TrimRight(strings.TrimSpace(r.IPFSCatalogURL), "/")
-	case "doi-viewer":
+	case sourceDOIViewer:
 		return strings.TrimRight(strings.TrimSpace(r.DOIViewerURL), "/")
-	case "md5-catalog":
+	case sourceMD5Catalog:
 		return strings.TrimRight(strings.TrimSpace(r.MD5CatalogURL), "/")
 	}
 	return ""

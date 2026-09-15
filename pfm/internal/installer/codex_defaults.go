@@ -17,8 +17,11 @@ import (
 )
 
 const (
-	codexPolicyBegin = "<!-- BEGIN Professor subagent coordination -->"
-	codexPolicyEnd   = "<!-- END Professor subagent coordination -->"
+	codexPolicyBegin        = "<!-- BEGIN Professor subagent coordination -->"
+	codexPolicyEnd          = "<!-- END Professor subagent coordination -->"
+	codexMinWaitTimeout     = "min_wait_timeout_ms"
+	codexDefaultWaitTimeout = "default_wait_timeout_ms"
+	codexMaxWaitTimeout     = "max_wait_timeout_ms"
 )
 
 // wireCodexDefaults keeps mutable trust/model/MCP configuration local. Only
@@ -167,7 +170,7 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 	// Existing preferences win, but a partial override must not produce a
 	// configuration Codex rejects at startup.
 	limits := map[string]int64{}
-	for _, key := range []string{"min_wait_timeout_ms", "default_wait_timeout_ms", "max_wait_timeout_ms"} {
+	for _, key := range []string{codexMinWaitTimeout, codexDefaultWaitTimeout, codexMaxWaitTimeout} {
 		value, present := existing[key]
 		if !present {
 			value, present = wanted[key]
@@ -181,7 +184,7 @@ func mergeCodexDefaults(raw, defaults string) (string, error) {
 		}
 		limits[key] = number
 	}
-	for _, pair := range [][2]string{{"min_wait_timeout_ms", "default_wait_timeout_ms"}, {"default_wait_timeout_ms", "max_wait_timeout_ms"}, {"min_wait_timeout_ms", "max_wait_timeout_ms"}} {
+	for _, pair := range [][2]string{{codexMinWaitTimeout, codexDefaultWaitTimeout}, {codexDefaultWaitTimeout, codexMaxWaitTimeout}, {codexMinWaitTimeout, codexMaxWaitTimeout}} {
 		lower, hasLower := limits[pair[0]]
 		upper, hasUpper := limits[pair[1]]
 		if hasLower && hasUpper && lower > upper {

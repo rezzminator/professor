@@ -40,7 +40,7 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 	}
 	wait.Wait()
 	providerFailures := []string{}
-	if r.configuredProviderBase("ipfs-catalog") != "" {
+	if r.configuredProviderBase(sourceIPFSCatalog) != "" {
 		candidates, err := r.ipfsCatalogSearch(ctx, query, limit)
 		if err != nil {
 			log.Printf("harvest: ipfs-catalog book discovery failed for %s: %v", query, err)
@@ -49,7 +49,7 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 			parts = append(parts, candidates)
 		}
 	}
-	if r.configuredProviderBase("md5-catalog") != "" {
+	if r.configuredProviderBase(sourceMD5Catalog) != "" {
 		candidates, err := r.md5CatalogSearch(ctx, query, limit)
 		if err != nil {
 			log.Printf("harvest: md5-catalog book discovery failed for %s: %v", query, err)
@@ -88,13 +88,13 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 		out = append(out, best[handle])
 	}
 	free := map[string]bool{
-		"pd":      true,
-		"gold":    true,
-		"green":   true,
-		"diamond": true,
-		"hybrid":  true,
-		"bronze":  true,
-		"public":  true,
+		"pd":         true,
+		accessGold:   true,
+		accessGreen:  true,
+		"diamond":    true,
+		"hybrid":     true,
+		"bronze":     true,
+		accessPublic: true,
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Match != out[j].Match {
@@ -163,8 +163,8 @@ func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query st
 			out,
 			Candidate{
 				URL:     handle,
-				Source:  "openalex",
-				Kind:    "paper",
+				Source:  sourceOpenAlex,
+				Kind:    kindPaper,
 				Title:   work.Name,
 				Authors: formatAuthors(authors),
 				Year:    work.Year,
@@ -205,9 +205,9 @@ func (r *Resolver) findArxiv(ctx context.Context, client *http.Client, query str
 	candidates := r.arxivByTitle(ctx, client, query)
 	out := make([]Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		candidate.Kind = "paper"
+		candidate.Kind = kindPaper
 		candidate.Title = query
-		candidate.Free = "green"
+		candidate.Free = accessGreen
 		candidate.Match = .9
 		out = append(out, candidate)
 	}
@@ -279,7 +279,7 @@ func (r *Resolver) findCrossref(ctx context.Context, client *http.Client, query 
 			year = item.Issued.DateParts[0][0]
 		}
 		out = append(out, Candidate{
-			URL: doi, Source: "crossref", Kind: "paper", Title: title,
+			URL: doi, Source: sourceCrossref, Kind: kindPaper, Title: title,
 			Year: year, Match: match,
 		})
 	}
@@ -333,14 +333,14 @@ func (r *Resolver) findSemanticScholar(ctx context.Context, client *http.Client,
 			continue // no fetchable handle → useless as a candidate
 		}
 		if paper.OpenAccessPDF.URL != "" || paper.ExternalIDs.ArXiv != "" {
-			free = "green"
+			free = accessGreen
 		}
 		names := make([]string, 0, len(paper.Authors))
 		for _, a := range paper.Authors {
 			names = append(names, a.Name)
 		}
 		out = append(out, Candidate{
-			URL: handle, Source: "semanticscholar", Kind: "paper",
+			URL: handle, Source: sourceSemanticScholar, Kind: kindPaper,
 			Title: paper.Title, Year: paper.Year, Free: free, Match: match,
 			Authors: strings.Join(names, ", "),
 		})

@@ -213,17 +213,25 @@ func (r *RemoteServer) metadata(w http.ResponseWriter, value map[string]any) {
 func (r *RemoteServer) authMetadata() map[string]any {
 	issuer := r.publicURL + "/"
 	return map[string]any{
-		"issuer":                                     issuer,
-		"authorization_endpoint":                     r.publicURL + "/authorize",
-		"token_endpoint":                             r.publicURL + "/token",
-		"registration_endpoint":                      r.publicURL + "/register",
-		"revocation_endpoint":                        r.publicURL + "/revoke",
-		"scopes_supported":                           []string{HarvesterScope},
-		"response_types_supported":                   []string{"code"},
-		"grant_types_supported":                      []string{"authorization_code", "refresh_token"},
-		"code_challenge_methods_supported":           []string{"S256"},
-		"token_endpoint_auth_methods_supported":      []string{"none", "client_secret_post", "client_secret_basic"},
-		"revocation_endpoint_auth_methods_supported": []string{"none", "client_secret_post", "client_secret_basic"},
+		"issuer":                           issuer,
+		"authorization_endpoint":           r.publicURL + "/authorize",
+		"token_endpoint":                   r.publicURL + "/token",
+		"registration_endpoint":            r.publicURL + "/register",
+		"revocation_endpoint":              r.publicURL + "/revoke",
+		"scopes_supported":                 []string{HarvesterScope},
+		"response_types_supported":         []string{"code"},
+		"grant_types_supported":            []string{grantAuthorizationCode, grantRefreshToken},
+		"code_challenge_methods_supported": []string{pkceMethodS256},
+		"token_endpoint_auth_methods_supported": []string{
+			tokenAuthNone,
+			tokenAuthClientSecretPost,
+			tokenAuthClientSecretBasic,
+		},
+		"revocation_endpoint_auth_methods_supported": []string{
+			tokenAuthNone,
+			tokenAuthClientSecretPost,
+			tokenAuthClientSecretBasic,
+		},
 	}
 }
 
@@ -305,7 +313,13 @@ func (r *RemoteServer) authorize(w http.ResponseWriter, req *http.Request) {
 	}
 	resource := q.Get("resource")
 	if resource != "" && !ResourceMatches(resource, r.resource) {
-		r.redirectError(w, redirect, q.Get("state"), "invalid_target", "resource does not identify this MCP server")
+		r.redirectError(
+			w,
+			redirect,
+			q.Get("state"),
+			oauthErrorInvalidTarget,
+			"resource does not identify this MCP server",
+		)
 		return
 	}
 	scope := strings.Fields(q.Get("scope"))
@@ -481,14 +495,14 @@ func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 	}
 	resource := req.Form.Get("resource")
 	if resource != "" && !ResourceMatches(resource, r.resource) {
-		r.oauthError(w, http.StatusBadRequest, "invalid_target", "resource does not identify this MCP server")
+		r.oauthError(w, http.StatusBadRequest, oauthErrorInvalidTarget, "resource does not identify this MCP server")
 		return
 	}
 	grant := req.Form.Get("grant_type")
 	var response tokenResponse
 	var code string
 	switch grant {
-	case "authorization_code":
+	case grantAuthorizationCode:
 		response, code = r.store.exchange(
 			req.Form.Get("code"),
 			clientID,
@@ -496,8 +510,8 @@ func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 			req.Form.Get("code_verifier"),
 			resource,
 		)
-	case "refresh_token":
-		response, code = r.store.refreshExchange(req.Form.Get("refresh_token"), clientID, resource)
+	case grantRefreshToken:
+		response, code = r.store.refreshExchange(req.Form.Get(grantRefreshToken), clientID, resource)
 	default:
 		r.oauthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type is not supported")
 		return
@@ -536,9 +550,9 @@ func (r *RemoteServer) authenticateClient(id, secret string, presented bool) boo
 		return false
 	}
 	switch c.TokenEndpointAuthMethod {
-	case "none":
+	case tokenAuthNone:
 		return true
-	case "client_secret_post", "client_secret_basic":
+	case tokenAuthClientSecretPost, tokenAuthClientSecretBasic:
 		return presented && subtle.ConstantTimeCompare([]byte(c.ClientSecret), []byte(secret)) == 1
 	default:
 		return false
@@ -546,7 +560,7 @@ func (r *RemoteServer) authenticateClient(id, secret string, presented bool) boo
 }
 
 func tokenErrorDescription(code string) string {
-	if code == "invalid_target" {
+	if code == oauthErrorInvalidTarget {
 		return "resource does not identify this MCP server"
 	}
 	return "authorization grant is invalid"

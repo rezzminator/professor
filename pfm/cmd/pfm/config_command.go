@@ -19,7 +19,7 @@ func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		return 2
 	}
 	switch args[0] {
-	case "init":
+	case initCommand:
 		return runConfigInit(args[1:], stdout, stderr, runtime)
 	case "show":
 		if len(args) != 1 {
@@ -142,7 +142,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		"config version=%d effective (input=%d %s)\n",
 		config.Version,
 		config.InputVersion,
-		config.Source("version"),
+		config.Source(versionCommand),
 	)
 	fmt.Fprintf(stdout, "config theme=%s (%s)\n", config.Theme, config.Source("theme"))
 	accounts := make([]string, 0, len(config.Accounts))
@@ -229,7 +229,7 @@ func printResolvedHarvesterConfig(stdout io.Writer, config pfmconfig.Config) {
 		return
 	}
 	values := map[string]string{}
-	flattenHarvesterConfig("harvester", tree, values)
+	flattenHarvesterConfig(harvesterServer, tree, values)
 	for _, key := range pfmconfig.HarvesterSourceKeys() {
 		fmt.Fprintf(stdout, "config %s=%s (%s)\n", key, values[key], config.Source(key))
 	}

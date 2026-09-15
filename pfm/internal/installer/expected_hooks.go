@@ -14,6 +14,14 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 )
 
+const (
+	hookEventUserPromptSubmit = "UserPromptSubmit"
+	hookExploreMatcher        = "Agent|Task"
+	stateBroken               = "broken"
+	stateDrift                = "drift"
+	stateStale                = "stale"
+)
+
 // ExpectedHook is one hook the installer converges and owns.
 type ExpectedHook struct {
 	Target  string
@@ -80,14 +88,19 @@ func claudeHookTemplates(home string) []ExpectedHook {
 	binary := filepath.Join(home, ".local", "bin", "pfm")
 	return []ExpectedHook{
 		{Event: "SessionStart", Command: binary + " internal launcher-repair", Name: "launcher-repair"},
-		{Event: "UserPromptSubmit", Command: binary + " usage-hook", Name: "usage"},
+		{Event: hookEventUserPromptSubmit, Command: binary + " usage-hook", Name: "usage"},
 		{Event: "SessionEnd", Command: binary + " internal clear-kill", Name: "clear-kill"},
 		{Event: "SessionEnd", Command: binary + " internal exit-close", Name: "exit-close"},
-		{Event: "PreToolUse", Matcher: "Agent|Task", Command: binary + " internal explore-deny", Name: "explore-deny"},
-		{Event: "UserPromptSubmit", Command: binary + " internal epic-inject", Name: "epic-inject"},
-		{Event: "UserPromptSubmit", Command: binary + " internal reload-intercept", Name: "reload-intercept"},
-		{Event: "UserPromptSubmit", Command: binary + " internal exit-intercept", Name: "exit-intercept"},
-		{Event: "UserPromptSubmit", Command: binary + " internal compact-nudge", Name: "compact-nudge"},
+		{
+			Event:   "PreToolUse",
+			Matcher: hookExploreMatcher,
+			Command: binary + " internal explore-deny",
+			Name:    "explore-deny",
+		},
+		{Event: hookEventUserPromptSubmit, Command: binary + " internal epic-inject", Name: "epic-inject"},
+		{Event: hookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},
+		{Event: hookEventUserPromptSubmit, Command: binary + " internal exit-intercept", Name: "exit-intercept"},
+		{Event: hookEventUserPromptSubmit, Command: binary + " internal compact-nudge", Name: "compact-nudge"},
 	}
 }
 
@@ -134,7 +147,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 					Target: "ownership",
 					File:   filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
 				},
-				State: "broken",
+				State: stateBroken,
 				Error: ownershipErr.Error(),
 			},
 		}
@@ -181,21 +194,21 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		expectedKeys[physical+"\x00"+hook.Event+"\x00"+hook.Matcher+"\x00"+hook.Command] = true
 		file := files[physical]
 		if file.err != nil {
-			state := "broken"
+			state := stateBroken
 			if errors.Is(file.err, os.ErrNotExist) {
-				state = "missing"
+				state = string(HostOverlayMissing)
 			}
 			results = append(results, HookProbeResult{Hook: hook, State: state, Error: file.err.Error()})
 			if ownership[physical][key] != 0 {
 				results = append(results, HookProbeResult{
-					Hook: hook, State: "drift",
+					Hook: hook, State: stateDrift,
 					Error: fmt.Sprintf("ownership=%d file=unreadable", ownership[physical][key]),
 				})
 			}
 		} else if file.globalIssue != "" {
-			results = append(results, HookProbeResult{Hook: hook, State: "broken", Error: file.globalIssue})
+			results = append(results, HookProbeResult{Hook: hook, State: stateBroken, Error: file.globalIssue})
 		} else if issue := file.eventIssues[hook.Event]; issue != "" {
-			results = append(results, HookProbeResult{Hook: hook, State: "broken", Error: issue})
+			results = append(results, HookProbeResult{Hook: hook, State: stateBroken, Error: issue})
 		} else if file.counts[key] == 0 {
 			state, detail := missingOrStaleHook(file.allCounts, hook)
 			results = append(results, HookProbeResult{Hook: hook, State: state, Error: detail})
@@ -204,7 +217,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		}
 		if file.err == nil && ownership[physical][key] != file.counts[key] {
 			results = append(results, HookProbeResult{
-				Hook: hook, State: "drift",
+				Hook: hook, State: stateDrift,
 				Error: fmt.Sprintf("ownership=%d file=%d", ownership[physical][key], file.counts[key]),
 			})
 		}
@@ -232,7 +245,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 						Target: fileTargets[physical], File: fileDisplayPaths[physical],
 						Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: name,
 					},
-					State: "stale", Error: "retired hook command is still present",
+					State: stateStale, Error: "retired hook command is still present",
 				})
 				continue
 			}
@@ -242,7 +255,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 						Target: fileTargets[physical], File: fileDisplayPaths[physical],
 						Event: key.Event, Matcher: key.Matcher, Command: key.Command, Name: "unknown:" + name,
 					},
-					State: "stale",
+					State: stateStale,
 					Error: "hook names a pfm subcommand this pfm does not implement (left by a newer or rolled-back pfm) — run pfm install --yes",
 				})
 			}
@@ -263,7 +276,7 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 					Command: key.Command,
 					Name:    "unexpected",
 				},
-				State: "drift",
+				State: stateDrift,
 				Error: fmt.Sprintf("ledger owns %d hook(s) absent from installer expectations", count),
 			})
 		}
@@ -278,11 +291,11 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 
 func missingOrStaleHook(counts settingsHookCounts, hook ExpectedHook) (string, string) {
 	if counts[settingsHookKey{Event: hook.Event, Matcher: hook.Matcher, Command: hook.Command}] > 0 {
-		return "broken", "hook type is not command"
+		return stateBroken, "hook type is not command"
 	}
 	_, arguments, foundArguments := strings.Cut(hook.Command, " ")
 	if !foundArguments {
-		return "missing", "expected command absent"
+		return string(HostOverlayMissing), "expected command absent"
 	}
 	wantedSuffix := " " + arguments
 	for key, count := range counts {
@@ -291,10 +304,10 @@ func missingOrStaleHook(counts settingsHookCounts, hook ExpectedHook) (string, s
 		}
 		fields := strings.Fields(key.Command)
 		if len(fields) > 0 && strings.HasSuffix(key.Command, wantedSuffix) {
-			return "broken", fmt.Sprintf("command points at %s", fields[0])
+			return stateBroken, fmt.Sprintf("command points at %s", fields[0])
 		}
 	}
-	return "missing", "expected command absent"
+	return string(HostOverlayMissing), "expected command absent"
 }
 
 // inspectExpectedHookDocument validates the JSON shape doctor relies on. The
@@ -352,7 +365,7 @@ func inspectExpectedHookDocument(
 					)
 					continue
 				}
-				command, ok := hook["command"].(string)
+				command, ok := hook[configCommandKey].(string)
 				if !ok || strings.TrimSpace(command) == "" {
 					issues[event] = fmt.Sprintf(
 						"event %s entry %d hook %d command is not a non-empty string",
@@ -364,7 +377,7 @@ func inspectExpectedHookDocument(
 				}
 				key := settingsHookKey{Event: event, Matcher: matcher, Command: command}
 				all[key]++
-				if hookType, ok := hook["type"].(string); ok && hookType == "command" {
+				if hookType, ok := hook[configTypeKey].(string); ok && hookType == commandType {
 					typed[key]++
 				}
 			}
@@ -424,16 +437,16 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claude
 		switch result.State {
 		case "ok":
 			fmt.Fprintln(stdout, prefix+" ok")
-		case "missing":
+		case string(HostOverlayMissing):
 			failures++
 			fmt.Fprintln(stdout, prefix+" MISSING — run pfm install")
-		case "broken":
+		case stateBroken:
 			failures++
 			fmt.Fprintf(stdout, "%s broken error=%s\n", prefix, result.Error)
-		case "drift":
+		case stateDrift:
 			warnings++
 			fmt.Fprintf(stdout, "%s drift error=%s\n", prefix, result.Error)
-		case "stale":
+		case stateStale:
 			failures++
 			fmt.Fprintln(stdout, prefix+" stale — run pfm install")
 		default:

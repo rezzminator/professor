@@ -188,7 +188,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 			return GlobalAgentsResult{}, err
 		}
 		if !same {
-			result.Actions = append(result.Actions, GlobalAgentAction{Kind: "write", Path: agent.tomlOutput})
+			result.Actions = append(result.Actions, GlobalAgentAction{Kind: actionWrite, Path: agent.tomlOutput})
 		}
 		for _, config := range claudeConfigDirs {
 			links = append(
@@ -227,7 +227,10 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		case GlobalLinkCorrect:
 			continue
 		}
-		result.Actions = append(result.Actions, GlobalAgentAction{Kind: "link", Path: link.target, Target: link.source})
+		result.Actions = append(
+			result.Actions,
+			GlobalAgentAction{Kind: actionLink, Path: link.target, Target: link.source},
+		)
 	}
 
 	if options.Mode == ModeCheck {

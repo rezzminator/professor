@@ -2,6 +2,14 @@ package installer
 
 import "reflect"
 
+const (
+	vscodePathKey        = "path"
+	vscodeProfileArgsKey = "args"
+	vscodeProfileEnvKey  = "env"
+	vscodeShellPath      = "/bin/zsh"
+	vscodeAutoOpenEnv    = "PFM_AUTO_OPEN"
+)
+
 // vscodeLegacyProfiles lists every FULL profile shape pfm has EVER written as
 // the canonical "PFM" profile, oldest first. A profile that matches one of
 // these exactly is pfm's own earlier install caught up by an upgrade, not an
@@ -12,10 +20,18 @@ import "reflect"
 // the third is the shape vscodeProfile() itself wrote before M8 added
 // icon/color.
 var vscodeLegacyProfiles = []map[string]any{
-	{"path": "/bin/zsh", "args": []any{"-l"}, "env": map[string]any{"CC_AUTO_OPEN": "pfm"}},
-	{"path": "/bin/zsh", "args": []any{"-l"}, "env": map[string]any{"PFM_AUTO_OPEN": "pfm"}},
-	{"path": "/bin/zsh", "args": []any{"-l"}, "env": map[string]any{
-		"PFM_AUTO_OPEN":             "pfm",
+	{
+		vscodePathKey:        vscodeShellPath,
+		vscodeProfileArgsKey: []any{"-l"},
+		vscodeProfileEnvKey:  map[string]any{"CC_AUTO_OPEN": MCPClientPFM},
+	},
+	{
+		vscodePathKey:        vscodeShellPath,
+		vscodeProfileArgsKey: []any{"-l"},
+		vscodeProfileEnvKey:  map[string]any{vscodeAutoOpenEnv: MCPClientPFM},
+	},
+	{vscodePathKey: vscodeShellPath, vscodeProfileArgsKey: []any{"-l"}, vscodeProfileEnvKey: map[string]any{
+		vscodeAutoOpenEnv:           MCPClientPFM,
 		"CLAUDECODE":                nil,
 		"CLAUDE_CODE_SESSION_ID":    nil,
 		"CLAUDE_CODE_CHILD_SESSION": nil,
@@ -35,8 +51,8 @@ func isLegacyVSCodeProfile(profile any) bool {
 
 func vscodeProfile() map[string]any {
 	return map[string]any{
-		"path": "/bin/zsh",
-		"args": []any{"-l"},
+		vscodePathKey:        vscodeShellPath,
+		vscodeProfileArgsKey: []any{"-l"},
 		// A terminal opened straight from this profile is a shell the operator
 		// typed into, never a nested chat — but it inherits VS Code's own
 		// process env, which (when VS Code was itself launched from inside a
@@ -46,8 +62,8 @@ func vscodeProfile() map[string]any {
 		// extension's terminal (extension.js nextTerminal) — see
 		// CC_SESSION_UNSET in pfm.zsh (~line 56) for why each one lies in a
 		// different way, plus the TMUX pair that names its tmux server.
-		"env": map[string]any{
-			"PFM_AUTO_OPEN":             "pfm",
+		vscodeProfileEnvKey: map[string]any{
+			vscodeAutoOpenEnv:           MCPClientPFM,
 			"CLAUDECODE":                nil,
 			"CLAUDE_CODE_SESSION_ID":    nil,
 			"CLAUDE_CODE_CHILD_SESSION": nil,

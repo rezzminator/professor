@@ -18,6 +18,8 @@ import (
 const (
 	vscodeOwnershipName    = "vscode-ownership.json"
 	vscodeOwnershipVersion = 1
+	vscodePlatformLinux    = "linux"
+	vscodePlatformOSX      = "osx"
 	// vscodeProfileName is the settings profile pfm writes AND the default
 	// terminal it selects. The default must stay a SETTINGS profile: a window
 	// reload rebuilds every restored terminal through createTerminal, and VS
@@ -662,7 +664,8 @@ func readVSCodeOwnership(path string) (map[string]vscodeOwnershipRecord, []strin
 	}
 	records := make(map[string]vscodeOwnershipRecord, len(document.Files))
 	for _, record := range document.Files {
-		if !filepath.IsAbs(record.Path) || (record.Platform != "linux" && record.Platform != "osx") {
+		if !filepath.IsAbs(record.Path) ||
+			(record.Platform != vscodePlatformLinux && record.Platform != vscodePlatformOSX) {
 			return nil, nil, nil, nil, fmt.Errorf("invalid record path/platform %q/%q", record.Path, record.Platform)
 		}
 		if _, duplicate := records[record.Path]; duplicate {
@@ -703,9 +706,9 @@ func (installer *engine) vscodePlatform() (string, error) {
 		platform = runtime.GOOS
 	}
 	switch platform {
-	case "darwin", "osx":
-		return "osx", nil
-	case "linux":
+	case "darwin", vscodePlatformOSX:
+		return vscodePlatformOSX, nil
+	case vscodePlatformLinux:
 		return "linux", nil
 	default:
 		return "", fmt.Errorf("VS Code PFM terminal profile is unsupported on %s", platform)
@@ -720,7 +723,7 @@ func (installer *engine) vscodeSettingsPaths() []string {
 	platform, _ := installer.vscodePlatform()
 	var canonical string
 	var candidates []string
-	if platform == "osx" {
+	if platform == vscodePlatformOSX {
 		canonical = filepath.Join(home, "Library", "Application Support", "Code", "User", "settings.json")
 		candidates = []string{
 			canonical,

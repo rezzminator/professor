@@ -8,6 +8,8 @@ import (
 	"hostops/pfm/internal/installer"
 )
 
+const missingState = "missing"
+
 // printVSCodeDoctor answers issue #24 9b: no doctor row covered any of the VS
 // Code wiring, so a link that a product's own index never registered
 // (9a) read as a clean install with nothing to grep for. It runs only when
@@ -41,14 +43,14 @@ func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
 					product.Root,
 					product.Version,
 				)
-			case "missing":
+			case missingState:
 				warnings++
 				fmt.Fprintf(
 					stdout,
 					"doctor: vscode product=%s link=ok index=MISSING — run pfm install --yes\n",
 					product.Root,
 				)
-			case "unreadable":
+			case unreadableState:
 				warnings++
 				fmt.Fprintf(
 					stdout,
@@ -67,7 +69,7 @@ func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
 					product.IndexState,
 				)
 			}
-		case "broken":
+		case brokenState:
 			warnings++
 			fmt.Fprintf(
 				stdout,
@@ -75,7 +77,7 @@ func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
 				product.Root,
 				product.LinkTarget,
 			)
-		case "missing":
+		case missingState:
 			warnings++
 			fmt.Fprintf(stdout, "doctor: vscode product=%s link=MISSING — run pfm install --yes\n", product.Root)
 		default:
@@ -94,7 +96,7 @@ func printVSCodeDoctor(stdout io.Writer, home string, _ config.Config) int {
 		if settings.Error != "" {
 			fmt.Fprintf(stdout, "doctor: vscode settings=%s error=%s\n", settings.Path, settings.Error)
 		}
-		if settings.Profile == "missing" || settings.Profile == "unreadable" {
+		if settings.Profile == missingState || settings.Profile == unreadableState {
 			warnings++
 		}
 	}

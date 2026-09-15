@@ -60,7 +60,7 @@ func runLS(
 		flags.Usage()
 		return 2
 	}
-	if *safe != "auto" && *safe != "on" && *safe != "off" {
+	if *safe != "auto" && *safe != "on" && *safe != toggleOffFlag {
 		fmt.Fprintf(stderr, "pfm ls: --safe must be auto, on, or off (got %q)\n", *safe)
 		return 2
 	}
@@ -649,7 +649,7 @@ func rebootRow(
 
 func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	flags := newFlagSet(
-		"index",
+		indexCommand,
 		"usage: pfm index [--full] [--progress]",
 		stderr,
 	)

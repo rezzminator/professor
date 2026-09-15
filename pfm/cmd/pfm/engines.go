@@ -41,7 +41,7 @@ func init() { registerEngines() }
 var engineCapabilityExceptions = map[pfmengine.ID]map[string]bool{
 	// OpenCode has a session index and a process matcher. It has no usage API,
 	// headless planner, ask runner, or managed launcher in this tree.
-	pfmengine.Opencode: {"index": true, "matcher": true},
+	pfmengine.Opencode: {indexCommand: true, "matcher": true},
 }
 
 func expectedEngineCapabilities(id pfmengine.ID, all []string) map[string]bool {

@@ -13,6 +13,8 @@ var (
 	laneSlugPattern        = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
 
+const coverageEndMarker = "END-OF-RUN"
+
 // ParseCoverage validates the complete seat-produced coverage artifact. Every
 // supplied transcript index and each CONDUCT kind must occur exactly once.
 func ParseCoverage(text string, transcriptCount int) (Coverage, error) {
@@ -21,12 +23,12 @@ func ParseCoverage(text string, transcriptCount int) (Coverage, error) {
 	if transcriptCount <= 0 {
 		problems = append(problems, "coverage requires at least one supplied transcript")
 	}
-	if len(rows) == 0 || rows[len(rows)-1] != "END-OF-RUN" {
+	if len(rows) == 0 || rows[len(rows)-1] != coverageEndMarker {
 		problems = append(problems, "missing final END-OF-RUN")
 	}
 	endCount := 0
 	for _, row := range rows {
-		if row == "END-OF-RUN" {
+		if row == coverageEndMarker {
 			endCount++
 		}
 	}
@@ -36,7 +38,7 @@ func ParseCoverage(text string, transcriptCount int) (Coverage, error) {
 
 	artifact := Coverage{}
 	for offset, row := range rows {
-		if row == "END-OF-RUN" {
+		if row == coverageEndMarker {
 			continue
 		}
 		lineNumber := offset + 1

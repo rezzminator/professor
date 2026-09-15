@@ -81,7 +81,7 @@ func (h *Harvester) rewritePublicImages(source, body, basePath string) (string, 
 		if !ok {
 			return "", errors.New("embedded image type is unsupported")
 		}
-		publicPath, err := h.publicArtifactPath(source, "image", canonical, ext)
+		publicPath, err := h.publicArtifactPath(source, kindImage, canonical, ext)
 		if err != nil {
 			return "", err
 		}

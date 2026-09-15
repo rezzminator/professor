@@ -40,10 +40,10 @@ func (r *Resolver) unpaywall(ctx context.Context, client *http.Client, doi strin
 		return nil, err
 	}
 	link := data.Best.PDF
-	kind := "pdf"
+	kind := kindPDF
 	if link == "" {
 		link = data.Best.URL
-		kind = "html"
+		kind = kindHTML
 	}
 	if link == "" {
 		return nil, nil
@@ -51,8 +51,8 @@ func (r *Resolver) unpaywall(ctx context.Context, client *http.Client, doi strin
 	out := []Candidate{
 		{
 			URL:      link,
-			Source:   "unpaywall",
-			Priority: candidatePriority("unpaywall", data.Status, data.Best.Version, kind),
+			Source:   sourceUnpaywall,
+			Priority: candidatePriority(sourceUnpaywall, data.Status, data.Best.Version, kind),
 			Kind:     kind,
 			Free:     data.Status,
 		},
@@ -63,9 +63,9 @@ func (r *Resolver) unpaywall(ctx context.Context, client *http.Client, doi strin
 				out,
 				Candidate{
 					URL:      location.PDF,
-					Source:   "unpaywall",
-					Priority: candidatePriority("unpaywall", data.Status, location.Version, "pdf") + 5,
-					Kind:     "pdf",
+					Source:   sourceUnpaywall,
+					Priority: candidatePriority(sourceUnpaywall, data.Status, location.Version, kindPDF) + 5,
+					Kind:     kindPDF,
 					Free:     data.Status,
 				},
 			)
@@ -100,9 +100,9 @@ func (r *Resolver) openAlexDOI(ctx context.Context, client *http.Client, doi str
 			out,
 			Candidate{
 				URL:      data.OA.URL,
-				Source:   "openalex",
-				Priority: candidatePriority("openalex", data.OA.Status, "", "pdf"),
-				Kind:     "pdf",
+				Source:   sourceOpenAlex,
+				Priority: candidatePriority(sourceOpenAlex, data.OA.Status, "", kindPDF),
+				Kind:     kindPDF,
 				Free:     data.OA.Status,
 			},
 		)
@@ -113,9 +113,9 @@ func (r *Resolver) openAlexDOI(ctx context.Context, client *http.Client, doi str
 				out,
 				Candidate{
 					URL:      l.PDF,
-					Source:   "openalex",
-					Priority: candidatePriority("openalex", data.OA.Status, l.Version, "pdf") + 4,
-					Kind:     "pdf",
+					Source:   sourceOpenAlex,
+					Priority: candidatePriority(sourceOpenAlex, data.OA.Status, l.Version, kindPDF) + 4,
+					Kind:     kindPDF,
 					Free:     data.OA.Status,
 				},
 			)
@@ -143,8 +143,8 @@ func (r *Resolver) crossref(ctx context.Context, client *http.Client, doi string
 	}
 	out := []Candidate{}
 	for _, l := range data.Message.Links {
-		if l.URL != "" && strings.Contains(l.Type, "pdf") {
-			out = append(out, Candidate{URL: l.URL, Source: "crossref", Priority: 30, Kind: "pdf"})
+		if l.URL != "" && strings.Contains(l.Type, kindPDF) {
+			out = append(out, Candidate{URL: l.URL, Source: sourceCrossref, Priority: 30, Kind: kindPDF})
 		}
 	}
 	return out, nil
@@ -177,15 +177,18 @@ func (r *Resolver) semanticScholar(ctx context.Context, client *http.Client, doi
 			out,
 			Candidate{
 				URL:      data.PDF.URL,
-				Source:   "semanticscholar",
-				Priority: candidatePriority("semanticscholar", data.PDF.Status, "", "pdf"),
-				Kind:     "pdf",
+				Source:   sourceSemanticScholar,
+				Priority: candidatePriority(sourceSemanticScholar, data.PDF.Status, "", kindPDF),
+				Kind:     kindPDF,
 				Free:     data.PDF.Status,
 			},
 		)
 	}
 	if arxiv := data.External["ArXiv"]; arxiv != "" {
-		out = append(out, Candidate{URL: "https://arxiv.org/pdf/" + arxiv, Source: "arxiv", Priority: 0, Kind: "pdf"})
+		out = append(
+			out,
+			Candidate{URL: "https://arxiv.org/pdf/" + arxiv, Source: sourceArXiv, Priority: 0, Kind: kindPDF},
+		)
 	}
 	if pmc := data.External["PubMedCentral"]; pmc != "" {
 		if !strings.HasPrefix(strings.ToUpper(pmc), "PMC") {
@@ -195,9 +198,9 @@ func (r *Resolver) semanticScholar(ctx context.Context, client *http.Client, doi
 			out,
 			Candidate{
 				URL:      "https://europepmc.org/articles/" + pmc + "?pdf=render",
-				Source:   "europepmc",
+				Source:   sourceEuropePMC,
 				Priority: 16,
-				Kind:     "pdf",
+				Kind:     kindPDF,
 			},
 		)
 	}
@@ -226,11 +229,11 @@ func (r *Resolver) core(ctx context.Context, client *http.Client, doi string) ([
 	}
 	out := []Candidate{}
 	if data.Download != "" {
-		out = append(out, Candidate{URL: data.Download, Source: "core", Priority: 40, Kind: "pdf"})
+		out = append(out, Candidate{URL: data.Download, Source: sourceCORE, Priority: 40, Kind: kindPDF})
 	}
 	for _, s := range data.Sources {
 		if s != "" {
-			out = append(out, Candidate{URL: s, Source: "core", Priority: 41, Kind: "pdf"})
+			out = append(out, Candidate{URL: s, Source: sourceCORE, Priority: 41, Kind: kindPDF})
 		}
 	}
 	return out, nil
@@ -258,9 +261,9 @@ func (r *Resolver) doaj(ctx context.Context, client *http.Client, doi string) ([
 					out,
 					Candidate{
 						URL:      link.URL,
-						Source:   "doaj",
-						Priority: candidatePriority("doaj", "", "", "html"),
-						Kind:     "html",
+						Source:   sourceDOAJ,
+						Priority: candidatePriority(sourceDOAJ, "", "", kindHTML),
+						Kind:     kindHTML,
 					},
 				)
 			}
@@ -277,10 +280,10 @@ func (r *Resolver) europePMCDOI(ctx context.Context, client *http.Client, doi st
 	return []Candidate{
 		{
 			URL:      "https://europepmc.org/articles/" + pmcid + "?pdf=render",
-			Source:   "europepmc",
-			Priority: candidatePriority("europepmc", "green", "", "pdf"),
-			Kind:     "pdf",
-			Free:     "green",
+			Source:   sourceEuropePMC,
+			Priority: candidatePriority(sourceEuropePMC, accessGreen, "", kindPDF),
+			Kind:     kindPDF,
+			Free:     accessGreen,
 		},
 	}, nil
 }
@@ -353,22 +356,22 @@ func appendOpenAireResources(out []Candidate, seen map[string]bool, wr interface
 				link = s
 			}
 		}
-		if link == "" || !strings.HasPrefix(link, "http") || seen[link] {
+		if link == "" || !strings.HasPrefix(link, schemeHTTP) || seen[link] {
 			continue
 		}
 		seen[link] = true
-		kind := "html"
+		kind := kindHTML
 		if strings.HasSuffix(strings.ToLower(link), ".pdf") {
-			kind = "pdf"
+			kind = kindPDF
 		}
 		out = append(
 			out,
 			Candidate{
 				URL:      link,
-				Source:   "openaire",
-				Priority: candidatePriority("openaire", "", "", kind),
+				Source:   sourceOpenAIRE,
+				Priority: candidatePriority(sourceOpenAIRE, "", "", kind),
 				Kind:     kind,
-				Free:     "green",
+				Free:     accessGreen,
 			},
 		)
 	}
@@ -412,18 +415,18 @@ func (r *Resolver) zenodo(ctx context.Context, client *http.Client, doi string) 
 				(!strings.HasSuffix(low, ".pdf") && !strings.HasSuffix(low, ".epub") && !strings.HasSuffix(url2, ".pdf") && !strings.HasSuffix(url2, ".epub")) {
 				continue
 			}
-			kind := "pdf"
+			kind := kindPDF
 			if strings.HasSuffix(low, ".epub") {
-				kind = "epub"
+				kind = kindEPUB
 			}
 			out = append(
 				out,
 				Candidate{
 					URL:      file.Links.Self,
-					Source:   "zenodo",
-					Priority: candidatePriority("zenodo", "", "", kind),
+					Source:   sourceZenodo,
+					Priority: candidatePriority(sourceZenodo, "", "", kind),
 					Kind:     kind,
-					Free:     "green",
+					Free:     accessGreen,
 				},
 			)
 		}
@@ -456,10 +459,10 @@ func (r *Resolver) eLife(ctx context.Context, client *http.Client, doi string) (
 	return []Candidate{
 		{
 			URL:      data.Items[0].PDF,
-			Source:   "elife",
-			Priority: candidatePriority("elife", "", "", "pdf"),
-			Kind:     "pdf",
-			Free:     "gold",
+			Source:   sourceELife,
+			Priority: candidatePriority(sourceELife, "", "", kindPDF),
+			Kind:     kindPDF,
+			Free:     accessGold,
 		},
 	}, nil
 }
@@ -478,7 +481,13 @@ func plosCandidates(doi string) []Candidate {
 		doi,
 	) + "&type=printable"
 	return []Candidate{
-		{URL: target, Source: "plos", Priority: candidatePriority("plos", "", "", "pdf"), Kind: "pdf", Free: "gold"},
+		{
+			URL:      target,
+			Source:   sourcePLOS,
+			Priority: candidatePriority(sourcePLOS, "", "", kindPDF),
+			Kind:     kindPDF,
+			Free:     accessGold,
+		},
 	}
 }
 
@@ -494,6 +503,12 @@ func nberCandidates(doi string) []Candidate {
 	}
 	target := "https://www.nber.org/system/files/working_papers/" + wp + "/" + wp + ".pdf"
 	return []Candidate{
-		{URL: target, Source: "nber", Priority: candidatePriority("nber", "", "", "pdf"), Kind: "pdf", Free: "green"},
+		{
+			URL:      target,
+			Source:   sourceNBER,
+			Priority: candidatePriority(sourceNBER, "", "", kindPDF),
+			Kind:     kindPDF,
+			Free:     accessGreen,
+		},
 	}
 }

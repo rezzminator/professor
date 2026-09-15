@@ -12,6 +12,8 @@ import (
 	"hostops/pfm/internal/codexgen"
 )
 
+const agentsCommand = "agents"
+
 // runCodex is the deliberately small command adapter around the pure compiler.
 // The compiler owns discovery and reconciliation; this layer owns argv, exit
 // status, and the operator-visible report.
@@ -21,9 +23,9 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 		return 2
 	}
 	switch args[0] {
-	case "agents":
+	case agentsCommand:
 		return runCodexAgents(args[1:], stdout, stderr, runtime)
-	case "help", "-h", "--help":
+	case helpCommand, "-h", helpFlag:
 		printCodexUsage(stdout)
 		return 0
 	}
@@ -31,7 +33,7 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 	switch args[0] {
 	case "build":
 		mode = codexgen.ModeBuild
-	case "check":
+	case checkAction:
 		mode = codexgen.ModeCheck
 	default:
 		fmt.Fprintf(stderr, "pfm codex: unknown action %q\n", args[0])
@@ -195,7 +197,10 @@ func codexRepoRoot() (string, error) {
 			return dir, nil
 		}
 		if fallback == "" {
-			if info, statErr := os.Stat(filepath.Join(dir, "CLAUDE.md")); statErr == nil && info.Mode().IsRegular() {
+			if info, statErr := os.Stat(
+				filepath.Join(dir, claudeInstructionsFile),
+			); statErr == nil &&
+				info.Mode().IsRegular() {
 				fallback = dir
 			}
 		}

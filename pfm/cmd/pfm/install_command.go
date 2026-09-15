@@ -34,7 +34,7 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := newFlagSet(
-		"install",
+		installCommand,
 		"usage: pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 		stderr,
 	)
@@ -120,7 +120,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		options.CodexHomes = []string{}
 		options.CodexYolo = map[int]bool{}
 	}
-	code := runInstallerCommand("install", options, stderr)
+	code := runInstallerCommand(installCommand, options, stderr)
 	if code == 0 && mode == installer.ModeDryRun {
 		if preflight != 0 {
 			fmt.Fprintln(
@@ -183,7 +183,7 @@ func migrateMachineConfig(mode installer.Mode, stdout, stderr io.Writer, runtime
 
 func professorThemeManifestURL(currentVersion string) string {
 	reference := strings.TrimSpace(currentVersion)
-	if reference == "" || reference == "dev" {
+	if reference == "" || reference == developmentVersion {
 		reference = "main"
 	}
 	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"

@@ -61,7 +61,7 @@ func TestGatewayEscalatesProviderChallengeToBrowser(t *testing.T) {
 		Converter:   browser,
 		BrowserRung: enabled(),
 	})
-	got, err := h.providerGet(context.Background(), "https://ipfs-catalog.test/md5/abc", nil, providerHTMLMaxBody)
+	got, err := h.providerGet(context.Background(), "https://ipfs-catalog.test/md5/abc", nil)
 	if err != nil {
 		t.Fatalf("providerGet through the gateway error = %v, want the browser rung to pass the wall", err)
 	}
@@ -97,7 +97,7 @@ func TestGatewayBrowserTriesHeadlessBeforeHeaded(t *testing.T) {
 		Converter:   browser,
 		BrowserRung: enabled(),
 	})
-	got, err := h.providerGet(context.Background(), "https://doi-viewer.test/record/1", nil, providerHTMLMaxBody)
+	got, err := h.providerGet(context.Background(), "https://doi-viewer.test/record/1", nil)
 	if err != nil {
 		t.Fatalf("providerGet error = %v", err)
 	}
@@ -126,7 +126,7 @@ func TestGatewayLaterRungErrorKeepsTheChallengeAnswer(t *testing.T) {
 		return nil, errors.New("dial tcp: no such host")
 	})}
 	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: direct, Chrome: chrome, Converter: &fakeConverter{}})
-	got, err := h.providerGet(context.Background(), "https://ipfs-catalog.test/md5/abc", nil, providerHTMLMaxBody)
+	got, err := h.providerGet(context.Background(), "https://ipfs-catalog.test/md5/abc", nil)
 	if err != nil {
 		t.Fatalf("providerGet error = %v, want the challenge ANSWER to survive the later rung's transport failure", err)
 	}
@@ -249,7 +249,7 @@ func TestGatewayBothRungsFailingReportsBothErrors(t *testing.T) {
 		return nil, errors.New("chrome rung exploded")
 	})}
 	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: direct, Chrome: chrome, Converter: &fakeConverter{}})
-	_, err := h.providerGet(context.Background(), "https://ipfs-catalog.test/md5/abc", nil, providerHTMLMaxBody)
+	_, err := h.providerGet(context.Background(), "https://ipfs-catalog.test/md5/abc", nil)
 	if err == nil {
 		t.Fatal("providerGet error = nil, want both rungs' failures reported")
 	}

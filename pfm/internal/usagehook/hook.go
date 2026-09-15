@@ -20,7 +20,12 @@ import (
 	"hostops/pfm/internal/paths"
 )
 
-const defaultEndpoint = "https://api.anthropic.com/api/oauth/usage"
+const (
+	defaultEndpoint  = "https://api.anthropic.com/api/oauth/usage"
+	fiveHourKey      = "five_hour"
+	sevenDayKey      = "seven_day"
+	sevenDayFableKey = "seven_day_fable"
+)
 
 // Options is the complete, jail-replaceable hook environment.
 type Options struct {
@@ -83,9 +88,9 @@ type NamedWindow struct {
 }
 
 var knownWindowDescriptors = []WindowDescriptor{
-	{Key: "five_hour", Label: "5h", Known: true},
-	{Key: "seven_day", Label: "7d", Known: true},
-	{Key: "seven_day_fable", Label: "7d-fable", Known: true},
+	{Key: fiveHourKey, Label: "5h", Known: true},
+	{Key: sevenDayKey, Label: "7d", Known: true},
+	{Key: sevenDayFableKey, Label: "7d-fable", Known: true},
 }
 
 // AllWindows returns every window this build knows how to render, in canonical
@@ -123,11 +128,11 @@ func (usage Usage) NamedWindows() []NamedWindow {
 // already own a clock.
 func (usage Usage) NamedWindowsAt(now time.Time) []NamedWindow {
 	windows := map[string]Window{
-		"five_hour": usage.FiveHour,
-		"seven_day": usage.SevenDay,
+		fiveHourKey: usage.FiveHour,
+		sevenDayKey: usage.SevenDay,
 	}
 	if fable, ok := usage.fableWindow(now); ok {
-		windows["seven_day_fable"] = fable
+		windows[sevenDayFableKey] = fable
 	}
 	keys := make([]string, 0, len(windows))
 	for key, window := range windows {
@@ -226,7 +231,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 	opus := currentUtilization(cached.SevenOpus, now, -1)
 	fable := -1
 	for _, named := range cached.NamedWindowsAt(now) {
-		if named.Key == "seven_day_fable" {
+		if named.Key == sevenDayFableKey {
 			fable = utilization(named.Window, -1)
 			break
 		}
@@ -596,7 +601,7 @@ func refresh(ctx context.Context, options Options, cachePath string) (returnErr 
 	}
 	logUnknownUsageKeys(fresh, options.Log)
 	if decoded.FiveHour.Utilization == nil {
-		return fmt.Errorf("usage response omitted five_hour utilization")
+		return fmt.Errorf("usage response omitted %s utilization", fiveHourKey)
 	}
 	fetchedAt := options.Now()
 	return WriteCacheRecord(cachePath, CacheRecord{
@@ -643,7 +648,7 @@ func Fetch(ctx context.Context, options Options) (usageResult Usage, returnErr e
 	}
 	logUnknownUsageKeys(fresh, options.Log)
 	if decoded.FiveHour.Utilization == nil {
-		return Usage{}, fmt.Errorf("usage response omitted five_hour utilization")
+		return Usage{}, fmt.Errorf("usage response omitted %s utilization", fiveHourKey)
 	}
 	return decoded, nil
 }
@@ -658,7 +663,7 @@ func logUnknownUsageKeys(body []byte, logger io.Writer) {
 		return
 	}
 	known := map[string]bool{
-		"five_hour": true, "seven_day": true, "seven_day_opus": true, "limits": true,
+		fiveHourKey: true, sevenDayKey: true, "seven_day_opus": true, "limits": true,
 	}
 	unknown := make([]string, 0, len(fields))
 	for key := range fields {

@@ -27,6 +27,7 @@ const (
 	Label    Kind = "label"
 	Session  Kind = "session"
 	CxWindow Kind = "cxwin"
+	tmuxName      = "tmux"
 )
 
 // Outcome is the exact stdout/stderr/return-code contract consumed by chat.sh.
@@ -199,7 +200,7 @@ func (resolver *Resolver) resolveLabel(
 	for order, pane := range panes {
 		order := order
 		pane := pane
-		if pane.PaneID == "" || pane.CurrentCommand == "tmux" {
+		if pane.PaneID == "" || pane.CurrentCommand == tmuxName {
 			continue
 		}
 		group.Go(func() error {

@@ -70,7 +70,7 @@ func Check(ctx context.Context, root string, platform Platform) (CheckReport, er
 	} else {
 		set("marker", nil)
 		set("marker_state", func() error {
-			if digest.State != "ready" {
+			if digest.State != provisionStateReady {
 				return fmt.Errorf("environment state is %q, want ready", digest.State)
 			}
 			if digest.Target != platform.String() {
@@ -235,7 +235,7 @@ func checkDependencies(ctx context.Context, root string) error {
 	if _, err := runCommand(
 		ctx,
 		uv,
-		[]string{"pip", "check", "--python", python},
+		[]string{uvCommandPip, "check", uvFlagPython, python},
 		filepath.Join(root, "project"),
 	); err != nil {
 		return fmt.Errorf("uv pip check failed: %w", err)
@@ -249,7 +249,7 @@ func checkInventory(ctx context.Context, root string, expected EnvironmentDigest
 	output, err := runCommand(
 		ctx,
 		uv,
-		[]string{"pip", "list", "--format", "freeze", "--python", python},
+		[]string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, python},
 		filepath.Join(root, "project"),
 	)
 	if err != nil {

@@ -226,7 +226,7 @@ func captureHarnessPrompt(
 		// stream that carries nothing (issue #24 finding 6 observed a "no
 		// stdin data received in 3s" warning when stdin was left ambiguous).
 		Args: []string{
-			"x", "--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+			"x", "--output-format", jsonFormat, "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 			"--max-turns", "1", "--exclude-dynamic-system-prompt-sections",
 		},
 		Env:   harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
@@ -266,9 +266,7 @@ func captureHarnessPrompt(
 			_ = writeHarnessSinkHits(verboseDir, hits)
 		}
 		if hits.count() == 0 && runErr == nil && claudeAnsweredWithoutSink(result.Stdout) {
-			return harnessCapture{
-				CLIVersion: version,
-			}, fmt.Errorf(
+			return harnessCapture{CLIVersion: version}, fmt.Errorf(
 				"%w (OAuth-only routing on cli=%s) — one minimal request may have been billed",
 				errHarnessBypassedSink,
 				version,

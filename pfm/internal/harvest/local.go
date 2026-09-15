@@ -14,7 +14,7 @@ func fileURLPath(raw string) (string, error) {
 	if err != nil || !strings.EqualFold(u.Scheme, "file") {
 		return "", fmt.Errorf("invalid file URL")
 	}
-	if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+	if u.Host != "" && !strings.EqualFold(u.Host, localhostName) {
 		return "", fmt.Errorf("file URL host %q is not local", u.Host)
 	}
 	path, err := url.PathUnescape(u.EscapedPath())

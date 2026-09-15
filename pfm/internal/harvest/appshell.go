@@ -58,7 +58,7 @@ func looksLikeClientApp(body []byte) bool {
 // query or fragment.
 func appShellProbeURL(source string) (string, bool) {
 	parsed, err := url.Parse(source)
-	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+	if err != nil || parsed.Host == "" || (parsed.Scheme != schemeHTTP && parsed.Scheme != schemeHTTPS) {
 		return "", false
 	}
 	dir := parsed.Path

@@ -154,15 +154,15 @@ func (installer *engine) registerVSCodeExtension(extensionsDir string) (bool, er
 		"identifier": map[string]any{"id": manifest.ID},
 		"version":    manifest.Version,
 		"location": map[string]any{
-			"$mid":   1,
-			"path":   target,
-			"scheme": "file",
+			"$mid":        1,
+			vscodePathKey: target,
+			"scheme":      "file",
 		},
 		"relativeLocation": vscodeExtensionLinkName,
 		"metadata": map[string]any{
 			"installedTimestamp": time.Now().UnixMilli(),
 			"pinned":             false,
-			"source":             "pfm",
+			"source":             MCPClientPFM,
 		},
 	}
 	updated := make([]map[string]any, len(entries))
@@ -309,25 +309,25 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 		status := VSCodeProductStatus{Root: root, IndexPath: filepath.Join(extensionsDir, vscodeExtensionIndexName)}
 
 		if _, statErr := os.Lstat(target); errors.Is(statErr, fs.ErrNotExist) {
-			status.LinkState = "missing"
+			status.LinkState = string(HostOverlayMissing)
 		} else if current, linked := resolvedLink(target); linked && current == filepath.Clean(source) {
 			status.LinkState = "ok"
 		} else {
-			status.LinkState = "broken"
+			status.LinkState = stateBroken
 			status.LinkTarget = current
 		}
 
 		if manifestErr != nil {
-			status.IndexState = "unreadable"
+			status.IndexState = MCPClientUnreadable
 			status.IndexError = manifestErr.Error()
 		} else if entries, indexErr := readVSCodeExtensionIndex(status.IndexPath); indexErr != nil {
-			status.IndexState = "unreadable"
+			status.IndexState = MCPClientUnreadable
 			status.IndexError = indexErr.Error()
 		} else if entry, found := vscodeIndexFind(entries, manifest.ID); found && vscodeIndexEntryOwned(entry, target) {
 			status.IndexState = "registered"
 			status.Version, _ = entry["version"].(string)
 		} else {
-			status.IndexState = "missing"
+			status.IndexState = string(HostOverlayMissing)
 		}
 		report.Products = append(report.Products, status)
 	}
@@ -344,7 +344,7 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 		switch {
 		case errors.Is(readErr, fs.ErrNotExist):
 			if record.ProfileOwned {
-				status.Profile = "missing"
+				status.Profile = string(HostOverlayMissing)
 			} else {
 				status.Profile = "relinquished"
 			}
@@ -353,12 +353,12 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 			// is this row's own state, never a reason to abort the whole
 			// report and drop every other row's already-classified state
 			// (issue #24 F6).
-			status.Profile = "unreadable"
+			status.Profile = MCPClientUnreadable
 			status.Error = readErr.Error()
 		default:
 			document, decodeErr := decodeJSONCObject(raw)
 			if decodeErr != nil {
-				status.Profile = "unreadable"
+				status.Profile = MCPClientUnreadable
 				status.Error = decodeErr.Error()
 				break
 			}
@@ -369,7 +369,7 @@ func InspectVSCode(home string) (VSCodeReport, error) {
 			case record.ProfileOwned && hasProfile:
 				status.Profile = "owned"
 			case record.ProfileOwned && !hasProfile:
-				status.Profile = "missing"
+				status.Profile = string(HostOverlayMissing)
 			default:
 				status.Profile = "relinquished"
 			}

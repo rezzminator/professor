@@ -25,6 +25,12 @@ import (
 // these, so they are a contract: 0 only ever means the chat was found and the
 // verb did what it says.
 const (
+	helpFlag        = "--help"
+	helpCommand     = "help"
+	askAction       = "ask"
+	jsonFormat      = "json"
+	newAction       = "new"
+	thenAction      = "then"
 	codeUnknownChat = 4
 	codeDeadChat    = 3
 	// codeAwaitTimeout says the message was delivered and the chat is still
@@ -41,8 +47,8 @@ func runHeadless(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) int {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
-		return runHeadlessExec([]string{"--help"}, os.Stdin, stdout, stderr, runtime)
+	if len(args) == 0 || args[0] == helpCommand || args[0] == helpFlag || args[0] == "-h" {
+		return runHeadlessExec([]string{helpFlag}, os.Stdin, stdout, stderr, runtime)
 	}
 	if args[0] == "exec" {
 		return runHeadlessExec(args[1:], os.Stdin, stdout, stderr, runtime)
@@ -53,7 +59,7 @@ func runHeadless(
 	if len(args) > 0 {
 		switch args[0] {
 		case "run":
-			args[0] = "new"
+			args[0] = newAction
 		case "transcript":
 			args[0] = "read"
 		}
@@ -82,7 +88,7 @@ func runChatWithRuntime(
 	}
 	verb, rest := args[0], args[1:]
 	switch verb {
-	case "new":
+	case newAction:
 		return runRun(rest, stdout, stderr, runtime)
 	case "open":
 		return runChatOpen(rest, stdout, stderr, runtime)
@@ -98,7 +104,7 @@ func runChatWithRuntime(
 		return runHeadlessInject(rest, stdout, stderr, runtime)
 	case "self-compact":
 		return runHeadlessSelfCompact(rest, stdout, stderr, runtime)
-	case "ask":
+	case askAction:
 		return runHeadlessAsk(rest, stdout, stderr, runtime)
 	case "watch":
 		return runHeadlessWatch(rest, stdout, stderr, runtime)
@@ -118,18 +124,18 @@ func runChatWithRuntime(
 		return runChatEnd(rest, stdout, stderr, runtime)
 	case "reload":
 		return runChatReloadWithRuntime(rest, stdout, stderr, runtime)
-	case "whoami":
+	case whoamiCommand:
 		// The settled public command is `pfm whoami`; `pfm chat whoami`
 		// remains a compatibility alias for callers already spelling it
 		// this way.
 		return runWhoami(rest, stdout, stderr, runtime)
-	case "find", "save", "branch", "history", "ls":
+	case "find", "save", branchAction, "history", "ls":
 		return runChatSatellite(verb, rest, stdin, stdout, stderr, runtime)
 	case "modal":
 		return runChatModal(rest, stdout, stderr)
 	case "resolve":
 		return runChatResolve(rest, stdout, stderr, runtime)
-	case "help", "-h", "--help":
+	case helpCommand, "-h", helpFlag:
 		printChatUsage(stdout)
 		return 0
 	default:
@@ -206,9 +212,13 @@ func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...comm
 		"usage: pfm chat status <target> [--json] [--summary] [--ask] [--engine claude|codex] [--model MODEL]",
 		stderr,
 	)
-	asJSON := flags.Bool("json", false, "emit one JSON object")
+	asJSON := flags.Bool(jsonFormat, false, "emit one JSON object")
 	withSummary := flags.Bool("summary", false, "summarize the last exchange")
-	withAsk := flags.Bool("ask", false, "answer the chat's current status from its live pane capture and last exchange")
+	withAsk := flags.Bool(
+		askAction,
+		false,
+		"answer the chat's current status from its live pane capture and last exchange",
+	)
 	summaryEngine := flags.String("engine", "", "override the configured ask engine")
 	summaryModel := flags.String("model", "", "override the configured ask model")
 	names, code, ok := parseFlagsAnywhere(flags, args)
@@ -269,7 +279,7 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 	)
 	tail := flags.Int("tail", 1, "how many entries to read, newest last")
 	condensed := flags.Bool("condensed", false, "one T/A/U line per entry")
-	asJSON := flags.Bool("json", false, "emit a JSON array of entries")
+	asJSON := flags.Bool(jsonFormat, false, "emit a JSON array of entries")
 	names, code, ok := parseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
@@ -423,7 +433,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 	flags.BoolVar(&allowUnsigned, "allow-unsigned", false, "send even when no sender identity can be derived")
 	messageFile := flags.String("file", "", "read the message from a file")
 	var steers steerList
-	flags.Var(&steers, "then", "follow-up steer; repeat for a chain")
+	flags.Var(&steers, thenAction, "follow-up steer; repeat for a chain")
 	// Only the flags BEFORE the name are parsed: everything after it is the
 	// message, verbatim. A message may legitimately start with a dash, and an
 	// order silently eaten as a flag is an order never delivered.
@@ -648,7 +658,7 @@ func runHeadlessSelfCompact(args []string, stdout, stderr io.Writer, runtimes ..
 	var steer singleSteer
 	flags.Var(
 		&steer,
-		"then",
+		thenAction,
 		"the one mandatory post-compact steer, typed into the reborn chat once compaction settles",
 	)
 	if code, ok := parseFlags(flags, args); !ok {

@@ -24,12 +24,21 @@ import (
 )
 
 const (
-	HarvesterScope     = "harvest"
-	authCodeTTL        = 5 * time.Minute
-	accessTokenTTL     = time.Hour
-	consentTTL         = 10 * time.Minute
-	maxConsentAttempts = 5
-	defaultTokenExpiry = 3600
+	HarvesterScope             = "harvest"
+	grantAuthorizationCode     = "authorization_code"
+	pkceMethodS256             = "S256"
+	tokenAuthClientSecretBasic = "client_secret_basic"
+	tokenAuthClientSecretPost  = "client_secret_post"
+	tokenAuthNone              = "none"
+	grantRefreshToken          = "refresh_token"
+	oauthErrorInvalidGrant     = "invalid_grant"
+	oauthErrorInvalidTarget    = "invalid_target"
+	oauthErrorServer           = "server_error"
+	authCodeTTL                = 5 * time.Minute
+	accessTokenTTL             = time.Hour
+	consentTTL                 = 10 * time.Minute
+	maxConsentAttempts         = 5
+	defaultTokenExpiry         = 3600
 )
 
 var pkceChallenge = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
@@ -229,10 +238,10 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	c.ClientID = ""
 	c.ClientSecret = ""
 	if c.TokenEndpointAuthMethod == "" {
-		c.TokenEndpointAuthMethod = "client_secret_basic"
+		c.TokenEndpointAuthMethod = tokenAuthClientSecretBasic
 	}
 	switch c.TokenEndpointAuthMethod {
-	case "none", "client_secret_post", "client_secret_basic":
+	case tokenAuthNone, tokenAuthClientSecretPost, tokenAuthClientSecretBasic:
 	default:
 		return persistedClient{}, "", "invalid_client_metadata"
 	}
@@ -243,21 +252,21 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	}
 	id, err := tokenURLSafe(18)
 	if err != nil {
-		return persistedClient{}, "", "server_error"
+		return persistedClient{}, "", oauthErrorServer
 	}
 	c.ClientID = id
 	c.ClientIDIssuedAt = time.Now().Unix()
 	var secret string
-	if c.TokenEndpointAuthMethod != "none" {
+	if c.TokenEndpointAuthMethod != tokenAuthNone {
 		secret, err = tokenURLSafe(24)
 		if err != nil {
-			return persistedClient{}, "", "server_error"
+			return persistedClient{}, "", oauthErrorServer
 		}
 		c.ClientSecret = secret
 	}
 	c.ClientSecretExpiresAt = 0
 	if len(c.GrantTypes) == 0 {
-		c.GrantTypes = []string{"authorization_code", "refresh_token"}
+		c.GrantTypes = []string{grantAuthorizationCode, grantRefreshToken}
 	}
 	if len(c.ResponseTypes) == 0 {
 		c.ResponseTypes = []string{"code"}
@@ -326,9 +335,9 @@ func (s *authStore) begin(
 		return "", errors.New("resource does not identify this MCP server")
 	}
 	if method == "" {
-		method = "S256"
+		method = pkceMethodS256
 	}
-	if method != "S256" || !pkceChallenge.MatchString(challenge) {
+	if method != pkceMethodS256 || !pkceChallenge.MatchString(challenge) {
 		return "", errors.New("code_challenge is not valid PKCE")
 	}
 	txn, err := tokenURLSafe(18)
@@ -390,18 +399,18 @@ func (s *authStore) exchange(code, clientID, redirect, verifier, resource string
 	defer s.mu.Unlock()
 	c, ok := s.codes[code]
 	if !ok || time.Now().After(c.Expires) || c.ClientID != clientID || c.RedirectURI != redirect {
-		return tokenResponse{}, "invalid_grant"
+		return tokenResponse{}, oauthErrorInvalidGrant
 	}
 	if resource != "" && !ResourceMatches(resource, s.resource) {
-		return tokenResponse{}, "invalid_target"
+		return tokenResponse{}, oauthErrorInvalidTarget
 	}
 	if !verifyPKCE(c.Challenge, verifier) {
-		return tokenResponse{}, "invalid_grant"
+		return tokenResponse{}, oauthErrorInvalidGrant
 	}
 	delete(s.codes, code)
 	issued, err := s.issueLocked(c.ClientID, c.Scope)
 	if err != nil {
-		return tokenResponse{}, "server_error"
+		return tokenResponse{}, oauthErrorServer
 	}
 	return issued, ""
 }
@@ -457,17 +466,17 @@ func (s *authStore) refreshExchange(raw, clientID, resource string) (tokenRespon
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if resource != "" && !ResourceMatches(resource, s.resource) {
-		return tokenResponse{}, "invalid_target"
+		return tokenResponse{}, oauthErrorInvalidTarget
 	}
 	hash := digest(raw)
 	r, ok := s.refresh[hash]
 	if !ok || r.ClientID != clientID {
-		return tokenResponse{}, "invalid_grant"
+		return tokenResponse{}, oauthErrorInvalidGrant
 	}
 	delete(s.refresh, hash)
 	issued, err := s.issueLocked(clientID, r.Scope)
 	if err != nil {
-		return tokenResponse{}, "server_error"
+		return tokenResponse{}, oauthErrorServer
 	}
 	return issued, ""
 }

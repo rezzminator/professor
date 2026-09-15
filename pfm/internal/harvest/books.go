@@ -53,12 +53,15 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 				continue
 			}
 			for _, bs := range detail.Bitstreams {
-				if bs.Bundle == "ORIGINAL" && bs.Mime == "application/pdf" && bs.Link != "" {
+				if bs.Bundle == "ORIGINAL" && bs.Mime == mediaTypePDF && bs.Link != "" {
 					link := bs.Link
-					if !strings.HasPrefix(link, "http") {
+					if !strings.HasPrefix(link, schemeHTTP) {
 						link = "https://library.oapen.org" + link
 					}
-					out = append(out, Candidate{URL: link, Source: "oapen", Priority: 8, Kind: "pdf", Title: item.Name})
+					out = append(
+						out,
+						Candidate{URL: link, Source: "oapen", Priority: 8, Kind: kindPDF, Title: item.Name},
+					)
 					break
 				}
 			}
@@ -84,8 +87,8 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 						out,
 						Candidate{
 							URL:      link,
-							Source:   "gutenberg",
-							Priority: candidatePriority("gutenberg", "", "", kind),
+							Source:   sourceGutenberg,
+							Priority: candidatePriority(sourceGutenberg, "", "", kind),
 							Kind:     kind,
 							Title:    book.Title,
 						},
@@ -117,7 +120,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		) + "&fields=ia,ebook_access,title&limit=5"
 		if err := getJSON(ctx, client, searchURL, &searchData); err == nil {
 			for _, doc := range searchData.Docs {
-				if doc.Access == "public" && len(doc.IA) > 0 {
+				if doc.Access == accessPublic && len(doc.IA) > 0 {
 					ocaid = doc.IA[0]
 					break
 				}
@@ -147,9 +150,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 						out,
 						Candidate{
 							URL:      "https://archive.org/download/" + ocaid + "/" + url.PathEscape(file.Name),
-							Source:   "internetarchive",
+							Source:   sourceInternetArchive,
 							Priority: 18,
-							Kind:     "pdf",
+							Kind:     kindPDF,
 						},
 					)
 				}
@@ -158,9 +161,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 						out,
 						Candidate{
 							URL:      "https://archive.org/download/" + ocaid + "/" + url.PathEscape(file.Name),
-							Source:   "internetarchive",
+							Source:   sourceInternetArchive,
 							Priority: 18,
-							Kind:     "txt",
+							Kind:     kindTXT,
 						},
 					)
 				}
@@ -221,7 +224,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 					continue
 				}
 			}
-			out = append(out, Candidate{URL: m.Value, Source: "doab", Priority: 22, Kind: "pdf", Title: detail.Name})
+			out = append(out, Candidate{URL: m.Value, Source: "doab", Priority: 22, Kind: kindPDF, Title: detail.Name})
 		}
 	}
 	// HathiTrust full-view volumes (public domain) — rights-gated like IA.
@@ -251,7 +254,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 				if item.Access.Public && item.Access.PDF.Link != "" {
 					out = append(
 						out,
-						Candidate{URL: item.Access.PDF.Link, Source: "googlebooks", Priority: 50, Kind: "pdf"},
+						Candidate{URL: item.Access.PDF.Link, Source: "googlebooks", Priority: 50, Kind: kindPDF},
 					)
 				}
 			}
@@ -286,7 +289,7 @@ func (r *Resolver) findBooks(ctx context.Context, client *http.Client, query str
 				Candidate{
 					URL:     "isbn:" + book.ISBN[0],
 					Source:  "openlibrary",
-					Kind:    "book",
+					Kind:    kindBook,
 					Title:   book.Title,
 					Authors: formatAuthors(book.Authors),
 					Year:    book.Year,
@@ -323,8 +326,8 @@ func (r *Resolver) findBooks(ctx context.Context, client *http.Client, query str
 				out,
 				Candidate{
 					URL:     handle,
-					Source:  "gutenberg",
-					Kind:    "book",
+					Source:  sourceGutenberg,
+					Kind:    kindBook,
 					Title:   book.Title,
 					Authors: formatAuthors(authors),
 					Free:    "pd",
@@ -337,7 +340,7 @@ func (r *Resolver) findBooks(ctx context.Context, client *http.Client, query str
 }
 
 func preferredTextFormat(formats map[string]string) (string, string) {
-	for _, prefix := range []string{"text/html", "text/plain"} {
+	for _, prefix := range []string{mediaTypeHTML, mediaTypePlain} {
 		keys := make([]string, 0)
 		for mime := range formats {
 			if strings.HasPrefix(mime, prefix) {
@@ -347,9 +350,9 @@ func preferredTextFormat(formats map[string]string) (string, string) {
 		sort.Strings(keys)
 		for _, mime := range keys {
 			if formats[mime] != "" {
-				kind := "html"
-				if prefix == "text/plain" {
-					kind = "txt"
+				kind := kindHTML
+				if prefix == mediaTypePlain {
+					kind = kindTXT
 				}
 				return formats[mime], kind
 			}
@@ -396,8 +399,8 @@ func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query st
 			Candidate{
 				URL:      item.URL,
 				Source:   "hathitrust",
-				Priority: candidatePriority("hathitrust", "", "", "html"),
-				Kind:     "html",
+				Priority: candidatePriority("hathitrust", "", "", kindHTML),
+				Kind:     kindHTML,
 				Free:     "pd",
 			},
 		)

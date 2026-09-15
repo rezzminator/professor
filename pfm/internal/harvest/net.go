@@ -32,54 +32,54 @@ func errorKind(err error) string {
 		return ""
 	}
 	if errors.Is(err, errResponseTooLarge) {
-		return "too_large"
+		return errorKindTooLarge
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return "timeout"
+		return errorKindTimeout
 	}
 	var dnsErr *net.DNSError
 	if errors.As(err, &dnsErr) {
-		return "dns"
+		return errorKindDNS
 	}
 	var netErr net.Error
 	if errors.As(err, &netErr) && netErr.Timeout() {
-		return "timeout"
+		return errorKindTimeout
 	}
 	low := strings.ToLower(err.Error())
 	for _, marker := range []string{"no such host", "name or service not known", "temporary failure in name resolution", "nodename nor servname", "no address associated"} {
 		if strings.Contains(low, marker) {
-			return "dns"
+			return errorKindDNS
 		}
 	}
 	for _, marker := range []string{"connection refused", "connection reset", "connect:", "host is down", "network is unreachable"} {
 		if strings.Contains(low, marker) {
-			return "connect"
+			return errorKindConnect
 		}
 	}
 	if strings.Contains(low, "unsupported protocol") || strings.Contains(low, "unsupported scheme") ||
 		strings.Contains(low, "invalid url") {
-		return "invalid"
+		return errorKindInvalid
 	}
 	if strings.Contains(low, "private") || strings.Contains(low, "internal") || strings.Contains(low, "not allowed") {
-		return "blocked"
+		return errorKindBlocked
 	}
-	return "connect"
+	return errorKindConnect
 }
 
 func failureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
-	if kind == "invalid" {
+	if kind == errorKindInvalid {
 		return fmt.Sprintf("Invalid URL: %s — %s", item, SearchHint(searchAvailable,
 			"check it for typos, or use `search` to find the source.",
 			"check it for typos, or find the source via another URL.",
 		))
 	}
-	if kind == "blocked" {
+	if kind == errorKindBlocked {
 		return fmt.Sprintf(
 			"refusing to fetch a private or internal host: %s — harvester only fetches public internet resources; use the resource's public URL instead.",
 			item,
 		)
 	}
-	if kind == "timeout" {
+	if kind == errorKindTimeout {
 		return fmt.Sprintf(
 			"Could not reach %s: the server did not respond in time (connection timed out). %s",
 			item,
@@ -89,7 +89,7 @@ func failureMessage(item string, status int, kind string, challenge, searchAvail
 			),
 		)
 	}
-	if kind == "dns" {
+	if kind == errorKindDNS {
 		return fmt.Sprintf(
 			"Could not reach %s: DNS resolution failed (host not found). %s",
 			item,
@@ -99,7 +99,7 @@ func failureMessage(item string, status int, kind string, challenge, searchAvail
 			),
 		)
 	}
-	if kind == "connect" {
+	if kind == errorKindConnect {
 		return fmt.Sprintf(
 			"Could not reach %s: the connection failed (refused or host unreachable). %s",
 			item,
@@ -234,7 +234,7 @@ func publicIPs(
 		}
 		return []net.IP{ip}, nil
 	}
-	if host == "localhost" || strings.HasSuffix(strings.ToLower(host), ".localhost") {
+	if host == localhostName || strings.HasSuffix(strings.ToLower(host), ".localhost") {
 		return nil, fmt.Errorf("refusing private/internal host %s", host)
 	}
 	var ips []net.IP
@@ -318,7 +318,7 @@ func assertFetchable(raw string, strictDNS bool) error {
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return fmt.Errorf("invalid URL: %s", raw)
 	}
-	if u.Scheme != "http" && u.Scheme != "https" {
+	if u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS {
 		return fmt.Errorf("unsupported URL scheme %q", u.Scheme)
 	}
 	if u.User != nil {
@@ -334,7 +334,7 @@ func assertFetchable(raw string, strictDNS bool) error {
 		}
 		return nil
 	}
-	if host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" ||
+	if host == localhostName || strings.HasSuffix(host, ".localhost") || host == localLabel ||
 		strings.HasSuffix(host, ".local") ||
 		host == "metadata.google.internal" ||
 		strings.HasSuffix(host, ".internal") ||
@@ -406,7 +406,7 @@ func IsPrivateHost(raw string) bool {
 	if ip := literalIP(host); ip != nil {
 		return privateIP(ip)
 	}
-	return host == "localhost" || strings.HasSuffix(host, ".localhost") || host == "local" ||
+	return host == localhostName || strings.HasSuffix(host, ".localhost") || host == localLabel ||
 		strings.HasSuffix(host, ".local") ||
 		strings.HasSuffix(host, ".internal") ||
 		strings.HasSuffix(host, ".ts.net")
@@ -578,61 +578,61 @@ func (c noErrorCloser) Close() error {
 func classifyKind(source, contentType string, body []byte) string {
 	ct := baseContentType(contentType)
 	switch ct {
-	case "application/pdf":
-		return "pdf"
+	case mediaTypePDF:
+		return kindPDF
 	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-		return "docx"
+		return kindDOCX
 	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-		return "xlsx"
+		return kindXLSX
 	case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
-		return "pptx"
+		return kindPPTX
 	case "application/zip", "application/x-zip-compressed":
-		return "zip"
+		return kindZIP
 	case "application/x-zip":
-		return "zip"
+		return kindZIP
 	case "application/x-7z-compressed":
 		return "7z"
 	case "application/x-rar-compressed", "application/vnd.rar":
-		return "rar"
+		return kindRAR
 	case "application/x-tar", "application/gzip", "application/x-gzip", "application/x-bzip2", "application/x-xz":
-		return "tar"
-	case "application/json", "text/json", "application/ld+json":
-		return "json"
+		return kindTAR
+	case mediaTypeJSON, "text/json", "application/ld+json":
+		return kindJSON
 	case "text/csv", "application/csv":
-		return "csv"
+		return kindCSV
 	case "image/jpeg":
-		return "jpg"
+		return kindJPG
 	case "image/png":
-		return "png"
+		return kindPNG
 	case "image/gif":
-		return "gif"
+		return kindGIF
 	case "image/webp":
-		return "webp"
+		return kindWebP
 	case "image/bmp":
-		return "bmp"
+		return kindBMP
 	case "image/tiff":
-		return "tiff"
+		return kindTIFF
 	case "image/svg+xml":
-		return "svg"
-	case "text/plain", "text/markdown":
-		return "txt"
-	case "text/html", "application/xhtml+xml", "application/xml", "text/xml":
-		return "html"
+		return kindSVG
+	case mediaTypePlain, mediaTypeMarkdown:
+		return kindTXT
+	case mediaTypeHTML, mediaTypeXHTML, mediaTypeXML, mediaTypeTextXML:
+		return kindHTML
 	}
 	if strings.Contains(ct, "openxmlformats-officedocument") {
 		switch {
 		case strings.Contains(ct, "wordprocessingml"):
-			return "docx"
+			return kindDOCX
 		case strings.Contains(ct, "spreadsheetml"):
-			return "xlsx"
+			return kindXLSX
 		case strings.Contains(ct, "presentationml"):
-			return "pptx"
+			return kindPPTX
 		default:
-			return "zip"
+			return kindZIP
 		}
 	}
 	if strings.HasPrefix(ct, "image/") {
-		return "image"
+		return kindImage
 	}
 	// Every OOXML document (.docx/.xlsx/.pptx) IS a zip container, so its body
 	// always matches the "PK\x03\x04" magic sniff below. The extension must
@@ -644,56 +644,56 @@ func classifyKind(source, contentType string, body []byte) string {
 		return kind
 	}
 	if strings.HasPrefix(string(body), "%PDF-") {
-		return "pdf"
+		return kindPDF
 	}
 	if len(body) >= 4 && string(body[:4]) == "PK\x03\x04" {
-		return "zip"
+		return kindZIP
 	}
 	if len(body) >= 6 && string(body[:6]) == "7z\xbc\xaf\x27\x1c" {
 		return "7z"
 	}
 	if len(body) >= 7 && string(body[:7]) == "Rar!\x1a\x07" {
-		return "rar"
+		return kindRAR
 	}
 	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {
-		return "tar"
+		return kindTAR
 	}
 	if len(body) >= 3 && string(body[:3]) == "BZh" {
-		return "tar"
+		return kindTAR
 	}
 	if len(body) >= 6 && string(body[:6]) == "\xfd7zXZ\x00" {
-		return "tar"
+		return kindTAR
 	}
 	if len(body) >= 8 && string(body[:8]) == "\x89PNG\r\n\x1a\n" {
-		return "png"
+		return kindPNG
 	}
 	if len(body) >= 3 && body[0] == 0xff && body[1] == 0xd8 && body[2] == 0xff {
-		return "jpg"
+		return kindJPG
 	}
 	if len(body) >= 6 && (string(body[:6]) == "GIF87a" || string(body[:6]) == "GIF89a") {
-		return "gif"
+		return kindGIF
 	}
 	if len(body) >= 12 && string(body[:4]) == "RIFF" && string(body[8:12]) == "WEBP" {
-		return "webp"
+		return kindWebP
 	}
 	if len(body) >= 2 && string(body[:2]) == "BM" {
-		return "bmp"
+		return kindBMP
 	}
 	if len(body) >= 4 && (string(body[:4]) == "II*\x00" || string(body[:4]) == "MM\x00*") {
-		return "tiff"
+		return kindTIFF
 	}
 	if strings.HasPrefix(strings.TrimSpace(string(body)), "<svg") ||
 		strings.Contains(strings.ToLower(string(body[:minInt(len(body), 512)])), "<svg") {
-		return "svg"
+		return kindSVG
 	}
 	if strings.HasSuffix(strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0]), ".pdf") {
-		return "pdf"
+		return kindPDF
 	}
 	lowSource := strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0])
 	for ext, kind := range map[string]string{
-		".jpg": "jpg", ".jpeg": "jpg", ".png": "png", ".gif": "gif", ".webp": "webp", ".bmp": "bmp", ".tif": "tiff", ".tiff": "tiff", ".svg": "svg",
-		".zip": "zip", ".tar": "tar", ".tar.gz": "tar", ".tgz": "tar", ".tar.bz2": "tar", ".tbz2": "tar", ".tar.xz": "tar", ".txz": "tar", ".gz": "tar", ".bz2": "tar", ".xz": "tar",
-		".7z": "7z", ".rar": "rar", ".pdf": "pdf", ".csv": "csv",
+		extensionJPG: kindJPG, extensionJPEG: kindJPG, extensionPNG: kindPNG, extensionGIF: kindGIF, extensionWebP: kindWebP, extensionBMP: kindBMP, extensionTIF: kindTIFF, extensionTIFF: kindTIFF, extensionSVG: kindSVG,
+		extensionZIP: kindZIP, extensionTAR: kindTAR, ".tar.gz": kindTAR, ".tgz": kindTAR, ".tar.bz2": kindTAR, ".tbz2": kindTAR, ".tar.xz": kindTAR, ".txz": kindTAR, ".gz": kindTAR, ".bz2": kindTAR, ".xz": kindTAR,
+		extension7Z: kind7Z, extensionRAR: kindRAR, extensionPDF: kindPDF, ".csv": kindCSV,
 		// .docx/.xlsx/.pptx are handled by ooxmlExtensionKind above, before the
 		// zip magic sniff — listing them again here would never be reached.
 	} {
@@ -702,21 +702,21 @@ func classifyKind(source, contentType string, body []byte) string {
 		}
 	}
 	if strings.HasSuffix(strings.ToLower(source), ".json") {
-		return "json"
+		return kindJSON
 	}
 	if strings.HasSuffix(strings.ToLower(source), ".csv") {
-		return "csv"
+		return kindCSV
 	}
 	lowSource = strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0])
-	for _, ext := range []string{".txt", ".text", ".md", ".markdown", ".rst", ".log", ".tex", ".org"} {
+	for _, ext := range []string{extensionTXT, ".text", extensionMD, ".markdown", ".rst", ".log", ".tex", ".org"} {
 		if strings.HasSuffix(lowSource, ext) {
-			return "txt"
+			return kindTXT
 		}
 	}
 	if strings.HasSuffix(strings.ToLower(source), ".txt") || strings.HasSuffix(strings.ToLower(source), ".md") {
-		return "txt"
+		return kindTXT
 	}
-	return "html"
+	return kindHTML
 }
 
 // ooxmlExtensionKind reports the OOXML kind implied by source's file
@@ -728,11 +728,11 @@ func ooxmlExtensionKind(source string) (string, bool) {
 	name := strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0])
 	switch {
 	case strings.HasSuffix(name, ".docx"):
-		return "docx", true
+		return kindDOCX, true
 	case strings.HasSuffix(name, ".xlsx"):
-		return "xlsx", true
+		return kindXLSX, true
 	case strings.HasSuffix(name, ".pptx"):
-		return "pptx", true
+		return kindPPTX, true
 	}
 	return "", false
 }
@@ -748,7 +748,7 @@ func isChallenge(body []byte, status int) bool {
 			return true
 		}
 	}
-	weakMarkers := []string{"captcha", "cloudflare", "turnstile", "attention required"}
+	weakMarkers := []string{challengeMarkerCaptcha, challengeMarkerCloudflare, "turnstile", "attention required"}
 	if contentChars(string(body)) <= 4000 {
 		for _, marker := range weakMarkers {
 			if strings.Contains(low, marker) {

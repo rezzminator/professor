@@ -29,6 +29,19 @@ import (
 	"hostops/pfm/internal/tmuxfmt"
 )
 
+const (
+	toggleOffFlag     = "off"
+	reloadNewFlag     = "--new"
+	reloadHideFlag    = "--hide"
+	reloadThenFlag    = "--then"
+	reloadSocketFlag  = "--sock"
+	reloadModelFlag   = "--model"
+	reloadEffortFlag  = "--effort"
+	reloadPaneFlag    = "--pane"
+	reloadOneHourFlag = "--1h"
+	reloadAccountFlag = "--account"
+)
+
 type reloadCommandTmux struct{}
 
 var startReloadWorker = func(command *exec.Cmd) error {
@@ -123,7 +136,7 @@ func runChatReloadWithRuntime(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) int {
-	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+	if len(args) == 1 && (args[0] == helpFlag || args[0] == "-h") {
 		fmt.Fprintln(stdout, reload.Usage)
 		return 0
 	}
@@ -174,13 +187,13 @@ func runChatReloadWithRuntime(
 			fmt.Fprintf(stderr, "pfm chat reload: close null input: %v\n", err)
 		}
 	}()
-	workerArgs := []string{"--config", runtime.Config.Path, "internal", "reload-run"}
+	workerArgs := []string{"--config", runtime.Config.Path, internalCommand, reloadRunCommand}
 	workerArgs = append(workerArgs, args...)
 	if callerSock == "" {
 		// The caller identified itself ambiently (no --sock of its own); hand
 		// the worker the absolute socket this scheduler just resolved, so the
 		// detached worker never has to re-run identity resolution to find it.
-		workerArgs = append(workerArgs, "--sock", socketPath)
+		workerArgs = append(workerArgs, reloadSocketFlag, socketPath)
 	}
 	if callerPane == "" {
 		// --pane travels with the worker whether or not the caller passed
@@ -190,7 +203,7 @@ func runChatReloadWithRuntime(
 		// pane itself already has one in `args`; appending a second would
 		// leave the worker's parser taking whichever came last, with no
 		// "specified twice" complaint of the kind --account makes.
-		workerArgs = append(workerArgs, "--pane", pane)
+		workerArgs = append(workerArgs, reloadPaneFlag, pane)
 	}
 	command := exec.Command(os.Args[0], workerArgs...)
 	command.Stdin = null
@@ -228,39 +241,39 @@ func runChatReloadWorkerWithRuntime(
 	hide := false
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--new":
+		case reloadNewFlag:
 			newSeat = true
-		case "--hide":
+		case reloadHideFlag:
 			hide = true
-		case "--then":
+		case reloadThenFlag:
 			if index+1 >= len(args) {
 				fmt.Fprintln(stderr, "pfm chat reload: --then needs a prompt")
 				return 2
 			}
 			index++
 			then = flattenThenLine(args[index])
-		case "--sock":
+		case reloadSocketFlag:
 			if index+1 >= len(args) {
 				fmt.Fprintln(stderr, "pfm chat reload: --sock needs a socket")
 				return 2
 			}
 			index++
 			sock = args[index]
-		case "--model":
+		case reloadModelFlag:
 			if index+1 >= len(args) {
 				fmt.Fprintln(stderr, "pfm chat reload: --model needs a model name")
 				return 2
 			}
 			index++
 			model = args[index]
-		case "--effort":
+		case reloadEffortFlag:
 			if index+1 >= len(args) {
 				fmt.Fprintln(stderr, "pfm chat reload: --effort needs a level, as in --effort high")
 				return 2
 			}
 			index++
 			effort = args[index]
-		case "--pane":
+		case reloadPaneFlag:
 			// Internal: only the scheduler in runChatReloadWithRuntime ever
 			// appends this. It is not in reload.Usage and never documented to
 			// an operator — see reloadTarget for why the worker cannot afford
@@ -271,15 +284,15 @@ func runChatReloadWorkerWithRuntime(
 			}
 			index++
 			requestedPane = args[index]
-		case "--1h":
+		case reloadOneHourFlag:
 			if index+1 >= len(args) ||
-				(args[index+1] != "on" && args[index+1] != "off" && args[index+1] != "1" && args[index+1] != "0") {
+				(args[index+1] != "on" && args[index+1] != toggleOffFlag && args[index+1] != "1" && args[index+1] != "0") {
 				fmt.Fprintln(stderr, "pfm chat reload: --1h needs on|off")
 				return 2
 			}
 			index++
 			cacheOverride = args[index]
-		case "--account":
+		case reloadAccountFlag:
 			if index+1 >= len(args) {
 				fmt.Fprintln(stderr, "pfm chat reload: --account needs an account number, as in --account 2")
 				return 2
@@ -508,7 +521,7 @@ func runChatReloadWorkerWithRuntime(
 
 func reloadSocketArgument(args []string) string {
 	for index := 0; index+1 < len(args); index++ {
-		if args[index] == "--sock" {
+		if args[index] == reloadSocketFlag {
 			return args[index+1]
 		}
 	}
@@ -524,7 +537,7 @@ func reloadSocketArgument(args []string) string {
 // validator used to give.
 func reloadPaneArgument(args []string) string {
 	for index := 0; index+1 < len(args); index++ {
-		if args[index] == "--pane" {
+		if args[index] == reloadPaneFlag {
 			return args[index+1]
 		}
 	}
@@ -537,17 +550,17 @@ func validateReloadArgs(args []string) error {
 	hide := false
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--new":
+		case reloadNewFlag:
 			if newSeat {
 				return errors.New("new specified twice")
 			}
 			newSeat = true
-		case "--hide":
+		case reloadHideFlag:
 			if hide {
 				return errors.New("hide specified twice")
 			}
 			hide = true
-		case "--then", "--sock", "--pane", "--model", "--effort":
+		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadModelFlag, reloadEffortFlag:
 			// --pane is worker-only plumbing (see reloadTarget): accepted here
 			// because this same validator runs on the worker's expanded argv,
 			// but it is deliberately absent from reload.Usage and
@@ -557,7 +570,7 @@ func validateReloadArgs(args []string) error {
 				return fmt.Errorf("%s needs a value", args[index])
 			}
 			index++
-		case "--account":
+		case reloadAccountFlag:
 			if index+1 >= len(args) {
 				return errors.New("--account needs an account number, as in --account 2")
 			}
@@ -572,9 +585,9 @@ func validateReloadArgs(args []string) error {
 			}
 			account = true
 			index++
-		case "--1h":
+		case reloadOneHourFlag:
 			if index+1 >= len(args) ||
-				(args[index+1] != "on" && args[index+1] != "off" && args[index+1] != "1" && args[index+1] != "0") {
+				(args[index+1] != "on" && args[index+1] != toggleOffFlag && args[index+1] != "1" && args[index+1] != "0") {
 				return errors.New("--1h needs on|off")
 			}
 			index++
@@ -619,13 +632,13 @@ func reloadArgumentHint(argument string) string {
 		suggestion = "did you mean --1h on|off?"
 	case "account", "acct", "seat", "profile":
 		suggestion = "did you mean --account N?"
-	case "fresh", "new", "restart", "reset":
+	case "fresh", newAction, "restart", "reset":
 		suggestion = "did you mean --new?"
 	case "hide", "kill", "close", "forget":
 		suggestion = "did you mean --hide? (beside --new: hides the conversation left behind)"
-	case "then", "prompt", "continue":
+	case thenAction, "prompt", "continue":
 		suggestion = "did you mean --then \"prompt\"?"
-	case "sock", "socket", "chat", "target":
+	case "sock", "socket", chatCommand, "target":
 		suggestion = "did you mean --sock socket? (omit it and the calling chat is detected automatically)"
 	case "model":
 		suggestion = "did you mean --model NAME?"
@@ -646,12 +659,12 @@ func positiveAccount(value string) (int, bool) {
 func reloadRequestedAccount(args []string) int {
 	for index := 0; index < len(args); index++ {
 		switch args[index] {
-		case "--new", "--hide":
+		case reloadNewFlag, reloadHideFlag:
 			continue
-		case "--then", "--sock", "--pane", "--1h", "--model", "--effort":
+		case reloadThenFlag, reloadSocketFlag, reloadPaneFlag, reloadOneHourFlag, reloadModelFlag, reloadEffortFlag:
 			index++
 			continue
-		case "--account":
+		case reloadAccountFlag:
 			if index+1 < len(args) {
 				if account, valid := positiveAccount(args[index+1]); valid {
 					return account

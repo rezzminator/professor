@@ -85,7 +85,7 @@ func runHarvesterMCP(args []string, _, stderr io.Writer, runtime commandRuntime)
 // runHarvest is the command-line face of the same Harvester core served over
 // MCP. Sources remain ordered: each result is printed in the order supplied.
 func runHarvest(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	if len(args) != 0 && args[0] == "ask" {
+	if len(args) != 0 && args[0] == askAction {
 		return runHarvestAsk(args[1:], stdout, stderr, runtime)
 	}
 	if askArgs, ok := harvestAskAlias(args); ok {
@@ -94,7 +94,7 @@ func runHarvest(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	flags := newFlagSet("harvest", "usage: pfm harvest [--refresh] [--size-only] [--json] <url|doi|path>...", stderr)
 	refresh := flags.Bool("refresh", false, "bypass the cache and fetch fresh content")
 	sizeOnly := flags.Bool("size-only", false, "fetch and cache content but print only size and cache path")
-	jsonOutput := flags.Bool("json", false, "print machine-readable result objects")
+	jsonOutput := flags.Bool(jsonFormat, false, "print machine-readable result objects")
 	sources, code, ok := parseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
@@ -300,7 +300,7 @@ func writeHarvestAskReceipt(
 		Status string         `json:"status"`
 		Input  string         `json:"input"`
 		Result harvest.Result `json:"result"`
-	}{Status: "unavailable", Input: source, Result: harvest.PublicFailure(source, result)}, "", "  ")
+	}{Status: unavailableState, Input: source, Result: harvest.PublicFailure(source, result)}, "", "  ")
 	if err != nil {
 		return "", receiptDir, fmt.Errorf("encode receipt: %w", err)
 	}

@@ -97,7 +97,7 @@ func (h *Harvester) searchPrivateCache(pattern string, _ int, ignoreCase bool) (
 	} else if err != nil {
 		return nil, fmt.Errorf("search cache: %w", err)
 	}
-	publicRoot := filepath.Join(root, "public")
+	publicRoot := filepath.Join(root, publicDirName)
 	privateRoot := filepath.Join(root, ".private")
 	out := make([]CacheSearchResult, 0)
 	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
@@ -120,7 +120,7 @@ func (h *Harvester) searchPrivateCache(pattern string, _ int, ignoreCase bool) (
 		if isPathInside(path, publicRoot) || isPathInside(path, privateRoot) {
 			return nil
 		}
-		if filepath.Ext(path) != ".md" {
+		if filepath.Ext(path) != extensionMD {
 			return nil
 		}
 		raw, readErr := readBoundedFile(path, h.publicLimit())
@@ -129,7 +129,7 @@ func (h *Harvester) searchPrivateCache(pattern string, _ int, ignoreCase bool) (
 			return errors.New("private cache search could not read an artifact")
 		}
 		meta, body := parseFrontmatter(string(raw))
-		if meta["source"] == "harvester" {
+		if meta["source"] == frontmatterSourceHarvester {
 			body = stripGeneratedSourceMetadata(body)
 		}
 		hits := rx.FindAllString(body, -1)
@@ -176,7 +176,7 @@ func (h *Harvester) readPublicBody(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if meta, body := parseFrontmatter(string(raw)); meta["source"] == "harvester" {
+	if meta, body := parseFrontmatter(string(raw)); meta["source"] == frontmatterSourceHarvester {
 		return body, nil
 	}
 	return string(raw), nil

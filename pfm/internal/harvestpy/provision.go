@@ -24,7 +24,20 @@ import (
 
 var ErrOfflineUnavailable = errors.New("harvestpy input is unavailable offline")
 
-const incompleteMarkerName = "INCOMPLETE"
+const (
+	incompleteMarkerName = "INCOMPLETE"
+	uvFlagFormat         = "--format"
+	uvFlagPython         = "--python"
+	uvCommandPip         = "pip"
+	uvCommandList        = "list"
+	uvListFormatFreeze   = "freeze"
+	provisionStateReady  = "ready"
+	featureStateDisabled = "disabled"
+	goosDarwin           = "darwin"
+	goosLinux            = "linux"
+	goarchAMD64          = "amd64"
+	goarchARM64          = "arm64"
+)
 
 var errProvisioningIncomplete = errors.New("harvestpy provisioning did not finish")
 
@@ -100,7 +113,7 @@ func Plan(platform Platform) (InstallPlan, error) {
 }
 
 func environmentBytes(platform Platform) int64 {
-	if platform == (Platform{GOOS: "linux", GOARCH: "amd64"}) {
+	if platform == (Platform{GOOS: goosLinux, GOARCH: goarchAMD64}) {
 		return 5786939761
 	}
 	return -1
@@ -108,13 +121,13 @@ func environmentBytes(platform Platform) int64 {
 
 func packagePlan(platform Platform) (int64, string, []string) {
 	switch platform {
-	case Platform{GOOS: "linux", GOARCH: "amd64"}:
+	case Platform{GOOS: goosLinux, GOARCH: goarchAMD64}:
 		return 3106174573, "cold-cache-download", nil
-	case Platform{GOOS: "linux", GOARCH: "arm64"}:
+	case Platform{GOOS: goosLinux, GOARCH: goarchARM64}:
 		return 3179527419, "pinned-lock-artifact-sum", nil
-	case Platform{GOOS: "darwin", GOARCH: "arm64"}:
+	case Platform{GOOS: goosDarwin, GOARCH: goarchARM64}:
 		return 389353114, "pinned-lock-artifact-sum", nil
-	case Platform{GOOS: "darwin", GOARCH: "amd64"}:
+	case Platform{GOOS: goosDarwin, GOARCH: goarchAMD64}:
 		return -1, "blocked-exact-lock", []string{
 			"torch==2.12.1 has no compatible darwin-amd64 wheel or source",
 			"torchvision==0.27.1 has no compatible darwin-amd64 wheel or source",
@@ -165,7 +178,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 		Schema: 1, Target: platform.String(), Python: target.PythonVersion, UV: target.UVVersion,
 		PythonSHA256: target.Python.SHA256, UVSHA256: target.UV.SHA256,
 		LockSHA256: lockSHA256(), SourceSHA256: sourceSHA256(),
-		Features: FeatureStatus{OCR: "disabled", Layout: "disabled", Models: "not-requested"},
+		Features: FeatureStatus{OCR: featureStateDisabled, Layout: featureStateDisabled, Models: "not-requested"},
 	}
 	desired := digestID(base)
 	base.Digest = desired
@@ -173,7 +186,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if existing, err := ReadEnvironmentDigest(
 		filepath.Join(current, "environment.json"),
 	); err == nil && existing.Digest == desired &&
-		existing.State == "ready" {
+		existing.State == provisionStateReady {
 		if _, checkErr := Check(ctx, options.Root, platform); checkErr == nil {
 			return ProvisionResult{
 				Digest:      desired,
@@ -259,7 +272,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err := checkPythonBuild(filepath.Join(staging, "python", "BUILD"), target.PythonVersion); err != nil {
 		return ProvisionResult{}, fmt.Errorf("verify harvestpy Python build: %w", err)
 	}
-	args := []string{"sync", "--frozen", "--no-install-project", "--project", project, "--python", pythonPath}
+	args := []string{"sync", "--frozen", "--no-install-project", "--project", project, uvFlagPython, pythonPath}
 	if options.Offline {
 		args = append(args, "--offline")
 	}
@@ -270,13 +283,18 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if _, err := os.Stat(venvPython); err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy uv sync did not create Python environment: %w", err)
 	}
-	if _, err := options.Run(ctx, uvPath, []string{"pip", "check", "--python", venvPython}, project); err != nil {
+	if _, err := options.Run(
+		ctx,
+		uvPath,
+		[]string{uvCommandPip, "check", uvFlagPython, venvPython},
+		project,
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy locked dependency check failed: %w", err)
 	}
 	inventoryOutput, err := options.Run(
 		ctx,
 		uvPath,
-		[]string{"pip", "list", "--format", "freeze", "--python", venvPython},
+		[]string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, venvPython},
 		project,
 	)
 	if err != nil {
@@ -304,7 +322,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 		return ProvisionResult{}, fmt.Errorf("harvestpy smoke live conversion failed: %#v", conversion)
 	}
 	base.Imports = imports
-	base.State = "ready"
+	base.State = provisionStateReady
 	base.Environment = final
 	// The environment is never renamed after uv sync; both smokes judge the
 	// same final runtime path.

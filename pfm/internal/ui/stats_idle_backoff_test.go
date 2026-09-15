@@ -14,7 +14,7 @@ import (
 // and this package's own TestSkyTickCadenceGrowsWhileUntouched.
 func TestStatsCadenceGrowsAndCapsWhileUntouched(t *testing.T) {
 	clock := NewActivityClock(time.Now())
-	cadence := newTickCadence(clock, statsRefreshInterval, statsRefreshGrowth, statsRefreshMaxInterval)
+	cadence := newTickCadence(clock, statsRefreshInterval, statsRefreshMaxInterval)
 
 	if cadence.interval != statsRefreshInterval {
 		t.Fatalf("opening interval = %s, want %s", cadence.interval, statsRefreshInterval)
@@ -40,7 +40,7 @@ func TestStatsCadenceGrowsAndCapsWhileUntouched(t *testing.T) {
 // watched picker stuck at whatever an earlier idle stretch grew it to.
 func TestStatsCadenceResetsOnInteraction(t *testing.T) {
 	clock := NewActivityClock(time.Now())
-	cadence := newTickCadence(clock, statsRefreshInterval, statsRefreshGrowth, statsRefreshMaxInterval)
+	cadence := newTickCadence(clock, statsRefreshInterval, statsRefreshMaxInterval)
 	for range 10 {
 		cadence.next()
 	}

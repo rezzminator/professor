@@ -64,14 +64,14 @@ func RenderWindow(window Window) (string, error) {
 	switch window.Mode {
 	case WindowExplicitCorpus:
 		if !filepath.IsAbs(window.CorpusFile) || hasControl(window.CorpusFile) || !isSHA256(window.CorpusFileSHA256) ||
-			window.CutoffExclusive != "NONE" {
+			window.CutoffExclusive != windowNone {
 			return "", fmt.Errorf("invalid explicit corpus window")
 		}
 		fmt.Fprintf(&rendered, "window-mode\t%s\n", window.Mode)
 		fmt.Fprintf(&rendered, "corpus-file\t%s\n", window.CorpusFile)
 		fmt.Fprintf(&rendered, "corpus-file-sha256\t%s\n", window.CorpusFileSHA256)
 	case WindowBootstrap:
-		if window.BootstrapCount <= 0 || window.CutoffExclusive != "NONE" {
+		if window.BootstrapCount <= 0 || window.CutoffExclusive != windowNone {
 			return "", fmt.Errorf("bootstrap window requires a positive count")
 		}
 		fmt.Fprintf(&rendered, "window-mode\t%s\n", window.Mode)
@@ -87,11 +87,11 @@ func RenderWindow(window Window) (string, error) {
 		}
 		switch window.CutoffSource {
 		case CutoffEnumeratedAt, CutoffApplied, CutoffFilenameDate:
-			if window.NewestAppliedSweep == "NONE" {
+			if window.NewestAppliedSweep == windowNone {
 				return "", fmt.Errorf("sweep cutoff source requires a completed sweep")
 			}
 		case CutoffBootstrap:
-			if window.NewestAppliedSweep != "NONE" || window.CutoffExclusive != "7 days ago" {
+			if window.NewestAppliedSweep != windowNone || window.CutoffExclusive != "7 days ago" {
 				return "", fmt.Errorf("bootstrap cutoff has inconsistent sweep metadata")
 			}
 		default:

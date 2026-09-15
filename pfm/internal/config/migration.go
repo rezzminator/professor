@@ -134,7 +134,7 @@ func PlanMigration(config Config) (Migration, error) {
 	if err != nil {
 		return Migration{}, err
 	}
-	if content, found := servers["harvester"]; found {
+	if content, found := servers[mcpServerHarvester]; found {
 		var server rawMCPServer
 		if err := decodeStrict(content, &server); err != nil {
 			return Migration{}, fmt.Errorf("decode config %s mcp.servers.harvester: %w", config.Path, err)
@@ -274,7 +274,7 @@ func rewriteMigratedConfig(migration Migration) error {
 		if err != nil {
 			return err
 		}
-		delete(servers, "harvester")
+		delete(servers, mcpServerHarvester)
 		if len(servers) == 0 {
 			delete(mcpObject, "servers")
 		} else {
@@ -282,7 +282,7 @@ func rewriteMigratedConfig(migration Migration) error {
 		}
 	}
 	if migration.MovePort {
-		mcpObject["http"], _ = json.Marshal(map[string]int{"port": DefaultMCPPort})
+		mcpObject["http"], _ = json.Marshal(map[string]int{jsonKeyPort: DefaultMCPPort})
 	}
 	if len(mcpObject) == 0 {
 		delete(top, "mcp")
@@ -319,8 +319,8 @@ func moveHarvesterEnabled(migration Migration) error {
 		}
 		top = existing
 	}
-	if _, set := top["enabled"]; !set {
-		top["enabled"], _ = json.Marshal(*migration.HarvesterEnabled)
+	if _, set := top[jsonKeyEnabled]; !set {
+		top[jsonKeyEnabled], _ = json.Marshal(*migration.HarvesterEnabled)
 	}
 	content, err := json.MarshalIndent(top, "", "  ")
 	if err != nil {

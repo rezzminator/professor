@@ -22,7 +22,25 @@ import (
 	"hostops/pfm/internal/store"
 )
 
-var version = "dev"
+const (
+	chatCommand        = "chat"
+	initCommand        = "init"
+	indexCommand       = "index"
+	headlessCommand    = "headless"
+	whoamiCommand      = "whoami"
+	versionCommand     = "version"
+	developmentVersion = "dev"
+	configCommand      = "config"
+	archiveCommand     = "archive"
+	internalCommand    = "internal"
+	reloadRunCommand   = "reload-run"
+	serveCommand       = "serve"
+	installCommand     = "install"
+	mcpCommand         = "mcp"
+	updateCommand      = "update"
+)
+
+var version = developmentVersion
 
 // topLevelSubcommands names every case the switch in run dispatches by
 // argv[0] — the single source both TestTopLevelSubcommandsReachTheirHandler
@@ -30,10 +48,10 @@ var version = "dev"
 // unknown-pfm-hook predicate (issue #24 F1) can never drift from what this
 // binary actually implements.
 var topLevelSubcommands = []string{
-	"version", "ls", "chat", "harvest", "headless", "index", "doctor",
-	"config", "dream", "reap", "archive", "heal", "name-sync", "statusline",
-	"usage-hook", "install", "uninstall", "update", "init", "whoami",
-	"issues", "mcp", pfmengine.MustLookup(pfmengine.Codex).LongName, "internal",
+	versionCommand, "ls", chatCommand, "harvest", headlessCommand, indexCommand, doctorCommand,
+	configCommand, "dream", "reap", archiveCommand, "heal", "name-sync", "statusline",
+	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
+	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand,
 }
 
 // internalSubcommands names every case runInternal dispatches by args[0] —
@@ -44,7 +62,7 @@ var internalSubcommands = []string{
 	"codex-appendix", "codex-launch", "compact-nudge", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
 	"launcher-repair", "primary-get", "primary-set", "reload-intercept",
-	"reload-run", "stale", "then", "update-check",
+	reloadRunCommand, "stale", thenAction, "update-check",
 }
 
 func main() {
@@ -146,10 +164,10 @@ func diagnosticCommand(args []string) bool {
 	if len(args) == 0 {
 		return false
 	}
-	if args[0] == "doctor" {
+	if args[0] == doctorCommand {
 		return true
 	}
-	return args[0] == "config" && len(args) > 1 && (args[1] == "show" || args[1] == "validate")
+	return args[0] == configCommand && len(args) > 1 && (args[1] == "show" || args[1] == "validate")
 }
 
 func runMCP(
@@ -160,9 +178,9 @@ func runMCP(
 	// The installed wiring historically invokes bare `pfm mcp`; preserve that
 	// argv as the chat server's serve action while making every new form named.
 	if len(args) == 0 {
-		args = []string{"chat", "serve"}
+		args = []string{chatCommand, serveCommand}
 	}
-	if len(args) == 1 && args[0] == "serve" {
+	if len(args) == 1 && args[0] == serveCommand {
 		return runMCPServe(stdout, stderr, runtime)
 	}
 	if len(args) == 1 && args[0] == "ls" {
@@ -178,7 +196,7 @@ func runMCP(
 		}
 		return 0
 	}
-	if len(args) < 2 || (len(args) > 2 && (args[0] != "harvester" || args[1] != "serve")) {
+	if len(args) < 2 || (len(args) > 2 && (args[0] != harvesterServer || args[1] != serveCommand)) {
 		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp serve | pfm mcp <server> enable|disable|serve")
 		return 2
 	}
@@ -202,7 +220,7 @@ func runMCP(
 		fmt.Fprintf(stdout, "%s\t%s\t%s\n", name, action+"d", state)
 		return 0
 	}
-	if action != "serve" {
+	if action != serveCommand {
 		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp <server> enable|disable|serve")
 		return 2
 	}
@@ -217,10 +235,10 @@ func runMCP(
 		)
 		return 1
 	}
-	if name == "harvester" {
+	if name == harvesterServer {
 		return runHarvesterMCP(args[2:], stdout, stderr, runtime)
 	}
-	if name != "chat" {
+	if name != chatCommand {
 		fmt.Fprintf(stderr, "pfm mcp %s: registered server has no implementation\n", name)
 		return 1
 	}
@@ -242,7 +260,7 @@ func runMCP(
 }
 
 func runVersion(args []string, stdout, stderr io.Writer) int {
-	flags := newFlagSet("version", "usage: pfm version", stderr)
+	flags := newFlagSet(versionCommand, "usage: pfm version", stderr)
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
@@ -262,7 +280,7 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 // build's own binary, ldflags or not, so falling back to it turns an
 // unstamped "dev" into a build the operator can still identify.
 func displayVersion() string {
-	if version != "dev" {
+	if version != developmentVersion {
 		return version
 	}
 	info, ok := debug.ReadBuildInfo()
@@ -287,7 +305,7 @@ func resolveDevVersion(settings []debug.BuildSetting) string {
 		}
 	}
 	if revision == "" {
-		return "dev"
+		return developmentVersion
 	}
 	if len(revision) > 12 {
 		revision = revision[:12]

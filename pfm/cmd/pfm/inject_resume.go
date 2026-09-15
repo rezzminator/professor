@@ -28,6 +28,8 @@ import (
 	"hostops/pfm/internal/paths"
 )
 
+const transcriptRoleUser = "user"
+
 type resumeTarget struct {
 	ID   string
 	Path string
@@ -274,7 +276,7 @@ func registeredDaemonSession(
 		command, buildErr := action.ClaudeSpawn{
 			Purpose: action.PurposeQuery,
 			Account: 1,
-			Args:    []string{"agents", "--json"},
+			Args:    []string{agentsCommand, "--json"},
 			Machine: pfmconfig.Config{
 				Claude:   pfmconfig.ClaudePrefs{Binary: binary},
 				Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: config}},
@@ -361,7 +363,7 @@ func appendResumeInjection(
 		return resumeReceipt{}, fmt.Errorf("create injected prompt id: %w", err)
 	}
 	event := map[string]any{
-		"type":        "user",
+		"type":        transcriptRoleUser,
 		"userType":    "external",
 		"entrypoint":  "cli",
 		"sessionId":   sessionID,
@@ -372,11 +374,11 @@ func appendResumeInjection(
 		"isSidechain": false,
 		"isMeta":      false,
 		"message": map[string]any{
-			"role":    "user",
+			"role":    transcriptRoleUser,
 			"content": message,
 		},
 	}
-	for _, key := range []string{"cwd", "version", "gitBranch"} {
+	for _, key := range []string{"cwd", versionCommand, "gitBranch"} {
 		if value, exists := tail[key]; exists {
 			event[key] = value
 		}

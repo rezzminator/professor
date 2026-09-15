@@ -14,6 +14,7 @@ type Mode uint8
 const (
 	ModeBuild Mode = iota
 	ModeCheck
+	frontmatterFence = "---"
 )
 
 // Options is deliberately filesystem-only: the compiler has no process,
@@ -472,12 +473,12 @@ func compileAgents(
 			if project != "." {
 				suffix := project
 				switch cfg.SuffixMode {
-				case "none":
+				case suffixModeNone:
 					suffix = ""
-				case "strip-prefix":
+				case suffixModeStripPrefix:
 					suffix = strings.TrimPrefix(project, cfg.SuffixPrefix)
 				}
-				if suffix == "" && cfg.SuffixMode != "none" {
+				if suffix == "" && cfg.SuffixMode != suffixModeNone {
 					problem(
 						fmt.Sprintf("project %s has an empty agent suffix under %s policy", project, cfg.SuffixMode),
 					)
@@ -691,11 +692,11 @@ func mcpBackedGlobalChatSkill(name string) bool {
 
 func frontmatterLines(text string) []string {
 	lines := strings.Split(text, "\n")
-	if len(lines) == 0 || lines[0] != "---" {
+	if len(lines) == 0 || lines[0] != frontmatterFence {
 		return nil
 	}
 	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
+		if lines[i] == frontmatterFence {
 			out := make([]string, 0, i-1)
 			for _, line := range lines[1:i] {
 				if !strings.HasPrefix(line, "name:") {

@@ -141,11 +141,11 @@ func (processes RealProcesses) ParentComm(pid int) string {
 	proc := gather.NewProcFS(processes.Root)
 	stat, err := proc.Stat(pid)
 	if err != nil || stat.ParentPID <= 0 {
-		return "unknown"
+		return unknownState
 	}
 	argv, err := proc.Cmdline(stat.ParentPID)
 	if err != nil || len(argv) == 0 {
-		return "unknown"
+		return unknownState
 	}
 	return filepath.Base(argv[0])
 }

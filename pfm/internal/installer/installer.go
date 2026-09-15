@@ -1068,7 +1068,7 @@ func (installer *engine) uninstallHarvest() error {
 		return fmt.Errorf("refuse to remove managed harvestpy root that is not a directory: %s", root)
 	}
 	hasManaged := false
-	for _, name := range []string{"env", "cache"} {
+	for _, name := range []string{harvestEnvDirName, harvestCacheDirName} {
 		if _, statErr := os.Lstat(filepath.Join(root, name)); statErr == nil {
 			hasManaged = true
 		} else if !errors.Is(statErr, fs.ErrNotExist) {
@@ -1080,7 +1080,7 @@ func (installer *engine) uninstallHarvest() error {
 		return nil
 	}
 	return installer.change("remove managed harvestpy runtime and cache", func() error {
-		for _, name := range []string{"env", "cache"} {
+		for _, name := range []string{harvestEnvDirName, harvestCacheDirName} {
 			if err := os.RemoveAll(filepath.Join(root, name)); err != nil {
 				return fmt.Errorf("remove managed harvestpy %s: %w", name, err)
 			}
@@ -1683,7 +1683,7 @@ func (installer *engine) retireChatCommands() error {
 			return err
 		}
 	}
-	for _, relative := range []string{"chat/group", "chat/self", "chat"} {
+	for _, relative := range []string{"chat/group", "chat/self", chatName} {
 		if err := installer.retireEmptyDirectory(
 			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
 		); err != nil {
@@ -1696,7 +1696,7 @@ func (installer *engine) retireChatCommands() error {
 	// non-empty directory is right for managedRoot's fully pfm-owned tree; it
 	// would wrongly abort every future install for an operator with one
 	// leftover file, so the host cleanup is best-effort instead.
-	for _, relative := range []string{"chat/group", "chat/self", "chat"} {
+	for _, relative := range []string{"chat/group", "chat/self", chatName} {
 		if err := installer.retireEmptyDirectoryTolerant(
 			filepath.Join(commands, filepath.FromSlash(relative)),
 		); err != nil {
@@ -1782,7 +1782,12 @@ var unitNames = []string{
 	"pfm-name-sync.timer",
 }
 
-const mcpUnitName = "pfm-mcp.service"
+const (
+	mcpUnitName         = "pfm-mcp.service"
+	harvestEnvDirName   = "env"
+	harvestCacheDirName = "cache"
+	systemdDefaultWants = "default.target.wants"
+)
 
 var retiredUnitNames = []string{
 	"cc-fleet-name-sync.path", "cc-fleet-name-sync.service", "cc-fleet-name-sync.timer",
@@ -1793,9 +1798,9 @@ var unitEnablements = []struct {
 	unit  string
 	wants string
 }{
-	{unit: "pfm-name-sync.path", wants: "default.target.wants"},
+	{unit: "pfm-name-sync.path", wants: systemdDefaultWants},
 	{unit: "pfm-name-sync.timer", wants: "timers.target.wants"},
-	{unit: mcpUnitName, wants: "default.target.wants"},
+	{unit: mcpUnitName, wants: systemdDefaultWants},
 }
 
 func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
@@ -1894,7 +1899,7 @@ func (installer *engine) wireUnits(ctx context.Context) (bool, error) {
 
 func (installer *engine) retireUnitEnablements(directory string, names []string) (bool, error) {
 	changed := false
-	for _, wants := range []string{"default.target.wants", "timers.target.wants"} {
+	for _, wants := range []string{systemdDefaultWants, "timers.target.wants"} {
 		for _, name := range names {
 			target := filepath.Join(directory, wants, name)
 			info, err := os.Lstat(target)
@@ -2250,7 +2255,7 @@ func (installer *engine) reportEarlyFleetCalls(content string) {
 }
 
 func (installer *engine) migrateOldState() error {
-	oldState := filepath.Join(installer.options.Home, ".local", "state", "cc-fleet")
+	oldState := filepath.Join(installer.options.Home, ".local", "state", legacyFleetBinary)
 	state := filepath.Join(installer.options.Home, ".local", "state", "pfm")
 	oldInfo, oldErr := os.Stat(oldState)
 	_, stateErr := os.Stat(state)
@@ -2386,7 +2391,7 @@ func (installer *engine) retirePredecessors() error {
 // Retire executable predecessors across the configured account roster while
 // leaving account credentials, transcript directories, and live sockets alone.
 func (installer *engine) retireLegacyCommands() error {
-	for _, name := range []string{"cc-fleet", "cc-ls", "cc-open", "cc-swap", "cc-revive", "cc-clean"} {
+	for _, name := range []string{legacyFleetBinary, "cc-ls", "cc-open", "cc-swap", "cc-revive", "cc-clean"} {
 		if err := installer.retireLegacyCommand(
 			filepath.Join(installer.options.Home, ".local", "bin", name),
 		); err != nil {

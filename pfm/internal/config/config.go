@@ -20,6 +20,14 @@ import (
 
 const Version = 2
 
+const (
+	mcpServerHarvester = "harvester"
+	jsonKeyEnabled     = "enabled"
+	engineKeyBinary    = "binary"
+	engineKeyYolo      = "yolo"
+	jsonKeyPort        = "port"
+)
+
 type Source string
 
 const (
@@ -264,8 +272,8 @@ type Config struct {
 
 func productionMCPServers() map[string]MCPServer {
 	return map[string]MCPServer{
-		"chat":      {Enabled: false},
-		"harvester": {Enabled: false},
+		"chat":             {Enabled: false},
+		mcpServerHarvester: {Enabled: false},
 	}
 }
 
@@ -468,13 +476,13 @@ func defaultsWithMCPServers(
 		"version":  SourceDefault,
 		"theme":    SourceDefault,
 		"accounts": SourceDefault,
-		engineConfigKey(pfmengine.Claude, "permissionMode"): SourceDefault,
-		engineConfigKey(pfmengine.Claude, "binary"):         SourceDefault,
-		engineConfigKey(pfmengine.Claude, "cache1h"):        SourceDefault,
-		engineConfigKey(pfmengine.Codex, "yolo"):            SourceDefault,
-		engineConfigKey(pfmengine.Codex, "binary"):          SourceDefault,
-		engineConfigKey(pfmengine.Codex, "homes"):           SourceDefault,
-		engineConfigKey(pfmengine.Opencode, "binary"):       SourceDefault,
+		engineConfigKey(pfmengine.Claude, "permissionMode"):  SourceDefault,
+		engineConfigKey(pfmengine.Claude, engineKeyBinary):   SourceDefault,
+		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
+		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
+		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
+		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
+		engineConfigKey(pfmengine.Opencode, engineKeyBinary): SourceDefault,
 		"mcp.http.port":       SourceDefault,
 		"ask.engine":          SourceDefault,
 		"tmux.titles.enabled": SourceDefault,
@@ -488,12 +496,12 @@ func defaultsWithMCPServers(
 	servers := make(map[string]MCPServer, len(registered))
 	for name, server := range registered {
 		servers[name] = server
-		if name != "harvester" {
+		if name != mcpServerHarvester {
 			sources["mcp.servers."+name+".enabled"] = SourceDefault
 		}
 	}
 	harvester := DefaultHarvester()
-	if server, found := registered["harvester"]; found {
+	if server, found := registered[mcpServerHarvester]; found {
 		harvester.Enabled = server.Enabled
 	}
 	for _, key := range harvesterSourceKeys {
@@ -746,7 +754,7 @@ func loadWithMCPServers(
 			result.Sources[engineConfigKey(pfmengine.Claude, "permissionMode")] = SourceFile
 		}
 		if raw.Claude.Binary != nil {
-			result.Sources[engineConfigKey(pfmengine.Claude, "binary")] = SourceFile
+			result.Sources[engineConfigKey(pfmengine.Claude, engineKeyBinary)] = SourceFile
 		}
 		if raw.Claude.Cache1H != nil {
 			result.Sources[engineConfigKey(pfmengine.Claude, "cache1h")] = SourceFile
@@ -849,11 +857,11 @@ func loadWithMCPServers(
 		}
 		if raw.Codex.Yolo != nil {
 			result.Codex.Yolo = prefs.Yolo
-			result.Sources[engineConfigKey(pfmengine.Codex, "yolo")] = SourceFile
+			result.Sources[engineConfigKey(pfmengine.Codex, engineKeyYolo)] = SourceFile
 		}
 		if raw.Codex.Binary != nil {
 			result.Codex.Binary = prefs.Binary
-			result.Sources[engineConfigKey(pfmengine.Codex, "binary")] = SourceFile
+			result.Sources[engineConfigKey(pfmengine.Codex, engineKeyBinary)] = SourceFile
 		}
 		if raw.Codex.Homes != nil {
 			accounts, err := validateCodexHomes(*raw.Codex.Homes, home, result.CodexAccounts, result.Path)
@@ -871,7 +879,7 @@ func loadWithMCPServers(
 				return Config{}, fmt.Errorf("config %s: opencode.binary must be a non-empty command", result.Path)
 			}
 			result.OpenCode.Binary = binary
-			result.Sources[engineConfigKey(pfmengine.Opencode, "binary")] = SourceFile
+			result.Sources[engineConfigKey(pfmengine.Opencode, engineKeyBinary)] = SourceFile
 		}
 	}
 
@@ -901,7 +909,7 @@ func loadWithMCPServers(
 					"mcp.servers."+name+".enabled",
 				)
 			}
-			if name == "harvester" {
+			if name == mcpServerHarvester {
 				// Pre-split layout: the flag now lives in harvester.config.json.
 				// Honored until `pfm install` migrates it (PlanMigration).
 				enabled := *server.Enabled
@@ -989,8 +997,8 @@ func finishHarvester(result *Config, home string, registered map[string]MCPServe
 	if err := loadHarvester(result, home, legacyEnabled); err != nil {
 		return err
 	}
-	if _, found := registered["harvester"]; found {
-		result.MCP.Servers["harvester"] = MCPServer{Enabled: result.Harvester.Enabled}
+	if _, found := registered[mcpServerHarvester]; found {
+		result.MCP.Servers[mcpServerHarvester] = MCPServer{Enabled: result.Harvester.Enabled}
 	}
 	result.MCPServers = cloneMCPServers(result.MCP.Servers)
 	if result.Harvester.External.Enabled && result.Harvester.External.Port == result.MCP.HTTP.Port {
@@ -1469,7 +1477,7 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 	if !registered {
 		return false, fmt.Errorf("unknown MCP server %q", name)
 	}
-	if name == "harvester" {
+	if name == mcpServerHarvester {
 		return SetHarvesterEnabled(config, enabled)
 	}
 	if server.Enabled == enabled {
@@ -1501,7 +1509,7 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 			return false, fmt.Errorf("decode config %s mcp.servers for update: %w", config.Path, err)
 		}
 	}
-	serverObject := map[string]bool{"enabled": enabled}
+	serverObject := map[string]bool{jsonKeyEnabled: enabled}
 	serverContent, _ := json.Marshal(serverObject)
 	servers[name] = serverContent
 	serversContent, _ := json.Marshal(servers)
@@ -1616,14 +1624,14 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		if account.Claude != nil {
 			value[claudeName] = map[string]any{
 				"permissionMode": account.Claude.PermissionMode,
-				"binary":         account.Claude.Binary,
+				engineKeyBinary:  account.Claude.Binary,
 				"cache1h":        account.Claude.Cache1H,
 			}
 		}
 		if account.Codex != nil {
 			value[codexName] = map[string]any{
-				"yolo":   account.Codex.Yolo,
-				"binary": account.Codex.Binary,
+				engineKeyYolo:   account.Codex.Yolo,
+				engineKeyBinary: account.Codex.Binary,
 			}
 		}
 		accounts = append(accounts, value)
@@ -1634,20 +1642,20 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			"id": account.ID, "home": account.Home, "emoji": account.Emoji,
 		}
 		if account.Prefs != nil {
-			value["prefs"] = map[string]any{"yolo": account.Prefs.Yolo, "binary": account.Prefs.Binary}
+			value["prefs"] = map[string]any{engineKeyYolo: account.Prefs.Yolo, engineKeyBinary: account.Prefs.Binary}
 		}
 		codexHomes = append(codexHomes, value)
 	}
 	servers := make(map[string]any, len(config.MCP.Servers))
 	for name, server := range config.MCP.Servers {
-		if name == "harvester" {
+		if name == mcpServerHarvester {
 			continue // lives in harvester.config.json (MarshalHarvester)
 		}
-		servers[name] = map[string]any{"enabled": server.Enabled}
+		servers[name] = map[string]any{jsonKeyEnabled: server.Enabled}
 	}
 	codexValue := map[string]any{
-		"yolo":   config.Codex.Yolo,
-		"binary": config.Codex.Binary,
+		engineKeyYolo:   config.Codex.Yolo,
+		engineKeyBinary: config.Codex.Binary,
 	}
 	if len(codexHomes) != 0 || config.Source(engineConfigKey(pfmengine.Codex, "homes")) == SourceFile {
 		codexValue["homes"] = codexHomes
@@ -1671,22 +1679,22 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		"accounts": accounts,
 		claudeName: map[string]any{
 			"permissionMode": config.Claude.PermissionMode,
-			"binary":         config.Claude.Binary,
+			engineKeyBinary:  config.Claude.Binary,
 			"cache1h":        config.Claude.Cache1H,
 			"compactNudge": map[string]any{
-				"enabled": config.Claude.CompactNudge.Enabled,
-				"start":   config.Claude.CompactNudge.Start,
-				"step":    config.Claude.CompactNudge.Step,
+				jsonKeyEnabled: config.Claude.CompactNudge.Enabled,
+				"start":        config.Claude.CompactNudge.Start,
+				"step":         config.Claude.CompactNudge.Step,
 			},
 		},
 		codexName: codexValue,
 		"tmux": map[string]any{
-			"titles": map[string]any{"enabled": config.Tmux.Titles.Enabled},
+			"titles": map[string]any{jsonKeyEnabled: config.Tmux.Titles.Enabled},
 		},
 		"nameSync": map[string]any{"interval": config.NameSync.Interval.String()},
 		"mcp": map[string]any{
 			"servers": servers,
-			"http":    map[string]any{"port": config.MCP.HTTP.Port},
+			"http":    map[string]any{jsonKeyPort: config.MCP.HTTP.Port},
 		},
 		"ask": askValue,
 	}

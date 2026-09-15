@@ -35,6 +35,8 @@ import (
 	"hostops/pfm/internal/transcript"
 )
 
+const branchAction = "branch"
+
 func runChatFind(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := newFlagSet("chat find", "usage: pfm chat find <excerpt-file>", stderr)
 	if code, ok := parseFlags(flags, args); !ok {
@@ -256,7 +258,7 @@ func writeRepositorySnapshot(writer io.Writer) {
 		fmt.Fprintln(writer, "(not a git repository)")
 		return
 	}
-	branch, branchErr := exec.Command(deps.Executable("git"), "branch", "--show-current").Output()
+	branch, branchErr := exec.Command(deps.Executable("git"), branchAction, "--show-current").Output()
 	status, statusErr := exec.Command(deps.Executable("git"), "status", "--short").Output()
 	worktrees, worktreeErr := exec.Command(deps.Executable("git"), "worktree", "list").Output()
 	if branchErr != nil || statusErr != nil || worktreeErr != nil {
@@ -330,7 +332,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		}
 		chat := pfmchat.FromRow(*row)
 		status, inspectErr := headless.Inspect(context.Background(), chat, time.Now())
-		state := "unknown"
+		state := unknownState
 		if inspectErr != nil {
 			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", chat.Name, inspectErr)
 		} else {
@@ -481,7 +483,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		fmt.Fprintf(stderr, "pfm chat branch: configured %s binary %q is not executable: %v\n", engine, binary, err)
 		return 1
 	}
-	if _, err := deps.Resolve("tmux"); err != nil {
+	if _, err := deps.Resolve(tmuxExecutable); err != nil {
 		fmt.Fprintln(stderr, "pfm chat branch: tmux is not on PATH")
 		return 1
 	}
@@ -666,7 +668,7 @@ func defaultBranchName(id string) string {
 	}
 	name := strings.TrimSpace(sanitizeBranchName(parent + "-branch"))
 	if name == "" {
-		return "branch"
+		return branchAction
 	}
 	return name
 }
@@ -900,7 +902,7 @@ func readHistoryMessages(path string, count int) (messages []historyMessage, ret
 			// whole read over one bad record.
 			continue
 		}
-		if record.Type != "user" && record.Type != "assistant" {
+		if record.Type != transcriptRoleUser && record.Type != "assistant" {
 			continue
 		}
 		text := historyMessageText(record.Message.Content)
@@ -938,7 +940,7 @@ func historyMessageText(raw json.RawMessage) string {
 	if err := json.Unmarshal(raw, &parts); err == nil {
 		texts := make([]string, 0, len(parts))
 		for _, part := range parts {
-			if part.Type == "text" {
+			if part.Type == textFormat {
 				texts = append(texts, part.Text)
 			}
 		}

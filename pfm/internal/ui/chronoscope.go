@@ -94,7 +94,7 @@ func (model Model) updateCosmosKey(key string) (tea.Model, tea.Cmd) {
 		model.toggleClassicSky()
 	case "up", "k":
 		model.moveCosmosSelection(-1)
-	case "down", "j":
+	case keyDown, "j":
 		model.moveCosmosSelection(1)
 	case "enter":
 		return model.openCosmosSelection()

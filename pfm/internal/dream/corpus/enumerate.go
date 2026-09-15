@@ -17,6 +17,8 @@ import (
 	"hostops/pfm/internal/dream/artifact"
 )
 
+const windowNone = "NONE"
+
 // Enumerate builds a deterministic transcript selection and census. It does
 // not write the stage; Write persists the returned typed result.
 //
@@ -106,7 +108,7 @@ func enumerateCorpusFile(lane artifact.LaneContext, path string, now time.Time) 
 		CorpusFileSHA256: sourceDigest,
 		AgentType:        lane.AgentType,
 		Lane:             lane.Lane,
-		CutoffExclusive:  "NONE",
+		CutoffExclusive:  windowNone,
 		EnumeratedAt:     now,
 	}
 	return Result{
@@ -143,7 +145,7 @@ func enumerateRegistry(
 	if bootstrap {
 		window.Mode = WindowBootstrap
 		window.BootstrapCount = bootstrapCount
-		window.CutoffExclusive = "NONE"
+		window.CutoffExclusive = windowNone
 	} else {
 		cutoff, err := Cutoff(ctx.Organ, lane.Lane, now)
 		if err != nil {

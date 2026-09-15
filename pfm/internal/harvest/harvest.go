@@ -145,7 +145,7 @@ func isLocalSource(source string) bool {
 	// Recognized file extensions remain local-path syntax even when the file is
 	// missing; callers then receive a useful missing-path diagnostic instead of
 	// an ambiguous scholarly-title hint.
-	if DetectKind(source) != "html" {
+	if DetectKind(source) != kindHTML {
 		return true
 	}
 	return filepath.IsAbs(source) || strings.HasPrefix(source, ".") || strings.ContainsAny(source, `/\\`)
@@ -204,7 +204,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			// produced by the download rung can satisfy a Drive file request now.
 			if body, kind, meta, path, ok := h.cache.loadAny(
 				source,
-				[]string{"pdf", "docx", "xlsx", "pptx", "csv", "json", "txt", "epub", "html"},
+				[]string{kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindJSON, kindTXT, kindEPUB, kindHTML},
 			); ok &&
 				strings.HasPrefix(meta["method"], "google-drive-download") {
 				return h.resultFromCache(source, kind, body, meta, path)
@@ -218,7 +218,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			// so the sniffed kind remains cacheable without a sidecar index.
 			if body, kind, meta, path, ok := h.cache.loadAny(
 				source,
-				[]string{"pdf", "docx", "xlsx", "pptx", "csv", "json", "txt", "epub", "html"},
+				[]string{kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindJSON, kindTXT, kindEPUB, kindHTML},
 			); ok {
 				return h.resultFromCache(source, kind, body, meta, path)
 			}
@@ -249,10 +249,10 @@ func (h *Harvester) fetchURLWithPolicy(
 	browserShellRender := false
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
-	case "pdf", "docx", "xlsx", "pptx", "csv", "zip", "tar", "7z", "rar":
+	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, "7z", kindRAR:
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
 	}
-	directRung, chromeRung := "direct", "chrome-impersonation"
+	directRung, chromeRung := rungDirect, rungChromeImpersonation
 	if googleDriveFile {
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
 		directRung, chromeRung = "google-drive-download", "google-drive-download-chrome"
@@ -280,48 +280,48 @@ func (h *Harvester) fetchURLWithPolicy(
 		}
 		lastStatus = status
 		if status >= 400 && lastErrorKind == "" {
-			lastErrorKind = "http"
+			lastErrorKind = schemeHTTP
 		}
 		if isChallenge(body, status) {
 			lastChallenge = true
 		}
 		kind := classifyFetchedKind(source, contentType, body)
-		if guess == "pdf" {
+		if guess == kindPDF {
 			if strings.HasPrefix(string(body), "%PDF-") {
-				kind = "pdf"
+				kind = kindPDF
 			} else {
 				wrongPDF = true
-				if (kind == "html" || kind == "txt") && len(body) > 0 {
+				if (kind == kindHTML || kind == kindTXT) && len(body) > 0 {
 					lastPage = append(lastPage[:0], body...)
 				}
 				continue
 			}
 		}
-		if (kind == "html" || kind == "txt") && len(body) > 0 {
+		if (kind == kindHTML || kind == kindTXT) && len(body) > 0 {
 			lastPage = append(lastPage[:0], body...)
 		}
-		if kind == "image" || isImageKind(kind) {
+		if kind == kindImage || isImageKind(kind) {
 			return Result{
 				Source:     source,
-				Kind:       "image",
+				Kind:       kindImage,
 				Error:      fmt.Sprintf("%s is an image — use the `fetchImage` tool, not `fetch`.", source),
 				HTTPStatus: status,
-				ErrorKind:  "wrong_kind",
+				ErrorKind:  errorKindWrongKind,
 			}
 		}
-		if kind == "zip" || kind == "tar" || kind == "7z" || kind == "rar" {
+		if kind == kindZIP || kind == kindTAR || kind == "7z" || kind == kindRAR {
 			// An EPUB is zip-SHAPED but is a book; OA book sources (OAPEN/DOAB/
 			// Gutenberg/Zenodo) serve EPUB constantly. Detect it by its uncompressed
 			// `mimetype` member and convert it instead of throwing the found book away.
-			if kind == "zip" && LooksLikeEpub(body) {
-				kind = "epub"
+			if kind == kindZIP && LooksLikeEpub(body) {
+				kind = kindEPUB
 			} else {
 				return Result{
 					Source:     source,
-					Kind:       "archive",
+					Kind:       kindArchive,
 					Error:      fmt.Sprintf("%s is a %s archive — use the `archive` tool, not `fetch`.", source, kind),
 					HTTPStatus: status,
-					ErrorKind:  "wrong_kind",
+					ErrorKind:  errorKindWrongKind,
 				}
 			}
 		}
@@ -329,22 +329,22 @@ func (h *Harvester) fetchURLWithPolicy(
 		if err != nil {
 			continue
 		}
-		if kind == "pdf" && strings.TrimSpace(converted) == "" {
+		if kind == kindPDF && strings.TrimSpace(converted) == "" {
 			emptyPDFConvert = true
 			if len(emptyPDFBody) == 0 {
 				emptyPDFBody = append([]byte(nil), body...)
 			}
 		}
 		lastContentChars = contentChars(converted)
-		binary4xxOK := status >= 400 && kind == "pdf" && strings.HasPrefix(string(body), "%PDF-")
+		binary4xxOK := status >= 400 && kind == kindPDF && strings.HasPrefix(string(body), "%PDF-")
 		if len(body) == 0 || isChallenge(body, status) ||
-			(status >= 400 && kind != "html" && kind != "txt" && !binary4xxOK) {
+			(status >= 400 && kind != kindHTML && kind != kindTXT && !binary4xxOK) {
 			continue
 		}
 		if !usableContent(converted, kind) {
 			continue
 		}
-		if kind == "html" && isBibliographicLanding(converted) {
+		if kind == kindHTML && isBibliographicLanding(converted) {
 			if !landingFollowed && landingHops < 1 {
 				landingFollowed = true
 				if linked := bibliographicDocumentURL(body, source); linked != "" && linked != source {
@@ -360,10 +360,10 @@ func (h *Harvester) fetchURLWithPolicy(
 		// commonly a JS shell or bot wall even when the HTTP status is 200;
 		// plain text and converted binary documents are not subject to this
 		// threshold because their bytes are already the requested artifact.
-		if kind == "html" && contentChars(converted) < 500 {
+		if kind == kindHTML && contentChars(converted) < 500 {
 			continue
 		}
-		if kind == "html" && !googleDriveFile {
+		if kind == kindHTML && !googleDriveFile {
 			if appShellText != "" {
 				if sameAsShell(appShellText, converted) {
 					continue
@@ -373,13 +373,13 @@ func (h *Harvester) fetchURLWithPolicy(
 				continue
 			}
 		}
-		if kind == "html" {
+		if kind == kindHTML {
 			if localized, localizeErr := h.LocalizeImages(ctx, converted, source); localizeErr == nil {
 				converted = localized
 			}
 		}
 		method := rung.name
-		if kind == "txt" {
+		if kind == kindTXT {
 			method = "plain-text"
 		}
 		return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
@@ -405,7 +405,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			Rungs:      rungs,
 		}
 	}
-	if !isPrivateURL(source) && guess != "pdf" {
+	if !isPrivateURL(source) && guess != kindPDF {
 		rungs = append(rungs, "jina")
 		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
 		body, status, _, err := getBody(ctx, h.jina, target, h.userAgent, h.options.MaxBytes)
@@ -422,7 +422,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			// Jina Reader already returns clean Markdown. Feeding it back into an
 			// HTML converter loses headings and code blocks, so preserve it as the
 			// original HTML-source kind for cache/type semantics.
-			kind := "html"
+			kind := kindHTML
 			converted, convErr := stripJinaEnvelope(string(body)), error(nil)
 			if convErr == nil && usableContent(converted, kind) && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) {
@@ -432,18 +432,18 @@ func (h *Harvester) fetchURLWithPolicy(
 	}
 	// defuddle.md — a second keyless reader beside Jina (different infra,
 	// different blocks), tried before the legal mirror pivot.
-	if !isPrivateURL(source) && guess != "pdf" {
+	if !isPrivateURL(source) && guess != kindPDF {
 		rungs = append(rungs, "defuddle")
 		target := "https://defuddle.md/" + source
 		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
 		if err == nil && status < 400 && !isChallenge(body, status) {
 			converted := stripDefuddleEnvelope(string(body))
 			longer := contentChars(converted) > lastContentChars || appShellText != ""
-			if usableContent(converted, "html") && longer && !isBibliographicLanding(converted) &&
+			if usableContent(converted, kindHTML) && longer && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) {
 				return h.storeResult(
 					source,
-					"html",
+					kindHTML,
 					"defuddle-reader",
 					converted,
 					int64(len(body)),
@@ -465,7 +465,7 @@ func (h *Harvester) fetchURLWithPolicy(
 	browserUnavailable := ""
 	browserPolicyRefused := false
 	converterOutage := false
-	if h.settings.browser && !isPrivateURL(source) && guess != "pdf" {
+	if h.settings.browser && !isPrivateURL(source) && guess != kindPDF {
 		rungs = append(rungs, "browser")
 		if browserFetcher, ok := h.options.Converter.(BrowserFetcher); !ok {
 			browserUnavailable = "no BrowserFetcher adapter is wired into this Harvester"
@@ -501,7 +501,7 @@ func (h *Harvester) fetchURLWithPolicy(
 					lastChallenge = true
 					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", source, status)
 				} else {
-					converted, convErr := h.convert(ctx, "html", source, []byte(html))
+					converted, convErr := h.convert(ctx, kindHTML, source, []byte(html))
 					switch {
 					case convErr != nil:
 						// The render SUCCEEDED; the conversion step failing is
@@ -514,14 +514,14 @@ func (h *Harvester) fetchURLWithPolicy(
 						// browser either — the render is still the shell.
 						browserShellRender = true
 						log.Printf("harvest: browser rung rendered only the app shell for %s", source)
-					case usableContent(converted, "html") && !isBibliographicLanding(converted) &&
+					case usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
 						(contentChars(converted) > lastContentChars || appShellText != "") && contentChars(converted) >= 500:
 						// Same thin-page floor as the HTML ladder above: a JS
 						// paywall overlay converting to a few hundred chars is
 						// a shell, not the article.
 						return h.storeResult(
 							source,
-							"html",
+							kindHTML,
 							"browser-chrome",
 							converted,
 							int64(len(html)),
@@ -614,15 +614,15 @@ func (h *Harvester) fetchURLWithPolicy(
 		if ocrConverter, ok := h.options.Converter.(OCRConverter); ok {
 			rungs = append(rungs, "ocr")
 			ocrRan = true
-			ocrConverted, ocrErr := ocrConverter.ConvertOCR(ctx, "pdf", source, emptyPDFBody)
+			ocrConverted, ocrErr := ocrConverter.ConvertOCR(ctx, kindPDF, source, emptyPDFBody)
 			switch {
 			case ocrErr != nil:
 				ocrBackendFailed = true
 				log.Printf("harvest: OCR escalation backend failed for %s: %v", source, ocrErr)
-			case usableContent(ocrConverted, "pdf"):
+			case usableContent(ocrConverted, kindPDF):
 				return h.storeResult(
 					source,
-					"pdf",
+					kindPDF,
 					"pdf:ocr",
 					ocrConverted,
 					int64(len(emptyPDFBody)),
@@ -699,7 +699,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			source,
 		)
 	}
-	if appShellFailure || (guess != "pdf" && (lastChallenge || browserRan || browserPolicyRefused)) {
+	if appShellFailure || (guess != kindPDF && (lastChallenge || browserRan || browserPolicyRefused)) {
 		switch {
 		case !h.settings.browser:
 			message += " No real-browser bypass was attempted: this server's Patchright + system-Chrome rung is DISABLED (opt-in) — set fetch.browser=true in harvester.config.json to enable it."
@@ -766,7 +766,7 @@ func googleDriveDownloadURL(raw string) (string, bool) {
 	if !googleDriveFileIDPattern.MatchString(id) {
 		return "", false
 	}
-	target := &url.URL{Scheme: "https", Host: "drive.usercontent.google.com", Path: "/download"}
+	target := &url.URL{Scheme: schemeHTTPS, Host: "drive.usercontent.google.com", Path: "/download"}
 	query := target.Query()
 	query.Set("id", id)
 	query.Set("export", "download")
@@ -801,10 +801,10 @@ func (h *Harvester) fetchLocal(ctx context.Context, source string, options Fetch
 		return Result{Source: source, Error: fmt.Sprintf("read local file %s: %v", path, err)}
 	}
 	kind := classifyFetchedKind(path, "", body)
-	if kindFromName(path) == "pdf" && !strings.HasPrefix(string(body), "%PDF-") {
+	if kindFromName(path) == kindPDF && !strings.HasPrefix(string(body), "%PDF-") {
 		return Result{
 			Source: source,
-			Kind:   "pdf",
+			Kind:   kindPDF,
 			Error: fmt.Sprintf(
 				"%s has a .pdf extension but is not a PDF file — check its actual contents before fetching it again.",
 				source,
@@ -823,7 +823,7 @@ func (h *Harvester) fetchLocal(ctx context.Context, source string, options Fetch
 	if !usableContent(converted, kind) {
 		return Result{Source: source, Kind: kind, Error: "conversion produced no usable content"}
 	}
-	return h.storeResult(source, kind, "local", converted, int64(len(body)), 0, []string{"local"}, options)
+	return h.storeResult(source, kind, localLabel, converted, int64(len(body)), 0, []string{localLabel}, options)
 }
 
 func isPrivateURL(source string) bool {

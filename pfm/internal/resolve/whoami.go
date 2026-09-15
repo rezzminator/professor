@@ -159,7 +159,7 @@ func CallerEnvironment() WhoamiEnvironment {
 // $TMUX is sometimes deliberate, and re-exporting it would point every probe
 // at the sender's own session.
 func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
-	identity := Identity{Source: "tmux"}
+	identity := Identity{Source: tmuxName}
 	if identifier.environment.ClaudeSessionID != "" {
 		identity.Engine = string(pfmengine.Claude)
 		identity.ID = identifier.environment.ClaudeSessionID
@@ -192,7 +192,7 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 		socketPath = recoveredSocket
 		pane = recoveredPane
 		identity.Recovered = true
-		if identity.Source == "tmux" {
+		if identity.Source == tmuxName {
 			identity.Source = "ancestry"
 		}
 	}

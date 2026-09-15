@@ -28,12 +28,18 @@ import (
 )
 
 const (
-	defaultInlineChars = 50000
-	maxFetchSources    = 50
-	maxImageSources    = 50
-	maxSearchResults   = 20
-	maxFindResults     = 25
-	maxCacheResults    = 1000
+	defaultInlineChars  = 50000
+	jsonSchemaBoolean   = "boolean"
+	jsonSchemaObject    = "object"
+	jsonSchemaString    = "string"
+	jsonPropertyQuery   = "query"
+	jsonPropertySource  = "source"
+	jsonPropertySources = "sources"
+	maxFetchSources     = 50
+	maxImageSources     = 50
+	maxSearchResults    = 20
+	maxFindResults      = 25
+	maxCacheResults     = 1000
 )
 
 // Runtime is the resolved harvester.config.json plus machine-local paths. The
@@ -574,7 +580,7 @@ func arraySchema(description string, minimum, maximum int) *jsonschema.Schema {
 	return &jsonschema.Schema{
 		Type:        "array",
 		Description: description,
-		Items:       &jsonschema.Schema{Type: "string"},
+		Items:       &jsonschema.Schema{Type: jsonSchemaString},
 		MinItems:    &minimum,
 		MaxItems:    &maximum,
 	}
@@ -582,20 +588,20 @@ func arraySchema(description string, minimum, maximum int) *jsonschema.Schema {
 
 func fetchInputSchema() *jsonschema.Schema {
 	return &jsonschema.Schema{
-		Type: "object", Required: []string{"sources"},
+		Type: jsonSchemaObject, Required: []string{jsonPropertySources},
 		Properties: map[string]*jsonschema.Schema{
-			"sources": arraySchema(
+			jsonPropertySources: arraySchema(
 				"1–50 things to fetch, each returned as clean Markdown in the SAME order. Each is a LOCATION or an UNAMBIGUOUS identifier of a DOCUMENT: URL / local path / file://; DOI; ISBN; PMID / PMCID; harvest: handle. Use a DIFFERENT tool for a TITLE (findWorks), an IMAGE (fetchImage), or an archive (archive). A failing item returns a descriptive per-item error and the rest still return.",
 				1,
 				50,
 			),
 			"refresh": {
-				Type:        "boolean",
+				Type:        jsonSchemaBoolean,
 				Description: "Force a fresh fetch: bypass the cache entirely, re-download, overwrite the cached artifact, and return the NEW content.",
 				Default:     defaultJSON("false"),
 			},
 			"size_only": {
-				Type:        "boolean",
+				Type:        jsonSchemaBoolean,
 				Description: "When true, fetch and cache the full content but return NO body—just {size, chars, path}; full content remains cached at path.",
 				Default:     defaultJSON("false"),
 			},
@@ -604,62 +610,86 @@ func fetchInputSchema() *jsonschema.Schema {
 }
 
 func findInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "object", Required: []string{"query"}, Properties: map[string]*jsonschema.Schema{
-		"query": {
-			Type:        "string",
-			Description: "A paper or book TITLE, or a free-text bibliographic query. Returns a ranked list of candidate works with a fetch handle; pick one and pass it to fetch.",
+	return &jsonschema.Schema{
+		Type:     jsonSchemaObject,
+		Required: []string{jsonPropertyQuery},
+		Properties: map[string]*jsonschema.Schema{
+			jsonPropertyQuery: {
+				Type:        jsonSchemaString,
+				Description: "A paper or book TITLE, or a free-text bibliographic query. Returns a ranked list of candidate works with a fetch handle; pick one and pass it to fetch.",
+			},
+			"limit": numberSchema("Maximum number of candidate works to return.", 1, 25, 8),
 		},
-		"limit": numberSchema("Maximum number of candidate works to return.", 1, 25, 8),
-	}}
+	}
 }
 
 func searchInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "object", Required: []string{"query"}, Properties: map[string]*jsonschema.Schema{
-		"query": {Type: "string", Description: "The web search query."},
-		"count": numberSchema("Maximum number of results to return.", 1, 20, 8),
-		"lang": {
-			Type:        "string",
-			Description: "Optional language/locale to bias the search (e.g. 'zh', 'ja', 'pt-BR'). Set it to reach a NON-English literature.",
+	return &jsonschema.Schema{
+		Type:     jsonSchemaObject,
+		Required: []string{jsonPropertyQuery},
+		Properties: map[string]*jsonschema.Schema{
+			jsonPropertyQuery: {Type: jsonSchemaString, Description: "The web search query."},
+			"count":           numberSchema("Maximum number of results to return.", 1, 20, 8),
+			"lang": {
+				Type:        jsonSchemaString,
+				Description: "Optional language/locale to bias the search (e.g. 'zh', 'ja', 'pt-BR'). Set it to reach a NON-English literature.",
+			},
+			"engines": {
+				Type:        jsonSchemaString,
+				Description: "Optional comma-separated SearXNG engines to restrict to (e.g. 'google,brave' or 'naver,yahoo'). Omit for the default aggregated set.",
+			},
 		},
-		"engines": {
-			Type:        "string",
-			Description: "Optional comma-separated SearXNG engines to restrict to (e.g. 'google,brave' or 'naver,yahoo'). Omit for the default aggregated set.",
-		},
-	}}
+	}
 }
 
 func imageInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "object", Required: []string{"sources"}, Properties: map[string]*jsonschema.Schema{
-		"sources": arraySchema(
-			"1–50 image URLs or local image paths. Each is downloaded into the type-partitioned cache and its LOCAL FILE PATH is returned in order — images are NOT OCR'd.",
-			1,
-			50,
-		),
-	}}
+	return &jsonschema.Schema{
+		Type:     jsonSchemaObject,
+		Required: []string{jsonPropertySources},
+		Properties: map[string]*jsonschema.Schema{
+			jsonPropertySources: arraySchema(
+				"1–50 image URLs or local image paths. Each is downloaded into the type-partitioned cache and its LOCAL FILE PATH is returned in order — images are NOT OCR'd.",
+				1,
+				50,
+			),
+		},
+	}
 }
 
 func archiveInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "object", Required: []string{"source"}, Properties: map[string]*jsonschema.Schema{
-		"source": {
-			Type:        "string",
-			Description: "URL or local path of a .zip / .tar(.gz/.bz2/.xz) / .7z / .rar archive.",
+	return &jsonschema.Schema{
+		Type:     jsonSchemaObject,
+		Required: []string{jsonPropertySource},
+		Properties: map[string]*jsonschema.Schema{
+			jsonPropertySource: {
+				Type:        jsonSchemaString,
+				Description: "URL or local path of a .zip / .tar(.gz/.bz2/.xz) / .7z / .rar archive.",
+			},
+			"member": {
+				Types:       []string{jsonSchemaString, "null"},
+				Description: "Omit to get the SAFE member listing (names + sizes; nothing is extracted). Give one member name from that listing to fetch just that member, converted to Markdown.",
+			},
 		},
-		"member": {
-			Types:       []string{"string", "null"},
-			Description: "Omit to get the SAFE member listing (names + sizes; nothing is extracted). Give one member name from that listing to fetch just that member, converted to Markdown.",
-		},
-	}}
+	}
 }
 
 func cacheInputSchema() *jsonschema.Schema {
-	return &jsonschema.Schema{Type: "object", Required: []string{"pattern"}, Properties: map[string]*jsonschema.Schema{
-		"pattern": {
-			Type:        "string",
-			Description: "Regex pattern to search across every cached markdown body in the cache.",
+	return &jsonschema.Schema{
+		Type:     jsonSchemaObject,
+		Required: []string{"pattern"},
+		Properties: map[string]*jsonschema.Schema{
+			"pattern": {
+				Type:        jsonSchemaString,
+				Description: "Regex pattern to search across every cached markdown body in the cache.",
+			},
+			"max_results": numberSchema("Maximum number of matching cached pages to return.", 1, 1000, 50),
+			"ignore_case": {
+				Type:        jsonSchemaBoolean,
+				Description: "Case-insensitive search.",
+				Default:     defaultJSON("true"),
+			},
 		},
-		"max_results": numberSchema("Maximum number of matching cached pages to return.", 1, 1000, 50),
-		"ignore_case": {Type: "boolean", Description: "Case-insensitive search.", Default: defaultJSON("true")},
-	}}
+	}
 }
 
 type FetchInput struct {
@@ -805,11 +835,8 @@ func (service *Service) findWorks(
 		return nil, FindOutput{}, errors.New("could not prepare the discovered works for retrieval; retry later")
 	}
 	lines := renderFind(input.Query, candidates)
-	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: lines}},
-	}, FindOutput{
-		Candidates: candidates,
-	}, nil
+	result := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: lines}}}
+	return result, FindOutput{Candidates: candidates}, nil
 }
 
 func (service *Service) search(
@@ -844,11 +871,13 @@ func (service *Service) search(
 	for index := range results {
 		results[index].Engine = ""
 	}
-	return &mcp.CallToolResult{
+	result := &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, "")}},
-	}, SearchOutput{
+	}
+	output := SearchOutput{
 		Results: results,
-	}, nil
+	}
+	return result, output, nil
 }
 
 func (service *Service) fetchImage(
@@ -912,24 +941,30 @@ func (service *Service) archive(
 	}
 	result = service.harvester.PublicResult(input.Source, result, false)
 	if err != nil || result.Error != "" {
-		return &mcp.CallToolResult{
+		toolResult := &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}},
-		}, ArchiveOutput{
+		}
+		output := ArchiveOutput{
 			Result: result,
-		}, nil
+		}
+		return toolResult, output, nil
 	}
 	if input.Member == "" {
-		return &mcp.CallToolResult{
+		toolResult := &mcp.CallToolResult{
 			Content: []mcp.Content{&mcp.TextContent{Text: renderArchiveListing(input.Source, result.Members)}},
-		}, ArchiveOutput{
+		}
+		output := ArchiveOutput{
 			Result: result,
-		}, nil
+		}
+		return toolResult, output, nil
 	}
-	return &mcp.CallToolResult{
+	toolResult := &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}},
-	}, ArchiveOutput{
+	}
+	output := ArchiveOutput{
 		Result: result,
-	}, nil
+	}
+	return toolResult, output, nil
 }
 
 func (service *Service) searchCache(
@@ -1042,13 +1077,13 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 		}
 		body, err := json.Marshal(
 			map[string]any{
-				"source":       source,
-				"size":         result.Tokens,
-				"tokens":       result.Tokens,
-				"token_count":  result.Tokens,
-				"chars":        result.Chars,
-				"path":         result.Path,
-				"cache_status": result.CacheStatus,
+				jsonPropertySource: source,
+				"size":             result.Tokens,
+				"tokens":           result.Tokens,
+				"token_count":      result.Tokens,
+				"chars":            result.Chars,
+				"path":             result.Path,
+				"cache_status":     result.CacheStatus,
 			},
 		)
 		if err != nil {

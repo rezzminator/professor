@@ -14,6 +14,8 @@ import (
 	"hostops/pfm/internal/deps"
 )
 
+const tmuxExecutable = "tmux"
+
 var (
 	actionOutputIsTerminal = func(writer io.Writer) bool {
 		file, ok := writer.(interface{ Fd() uintptr })
@@ -39,13 +41,13 @@ func executeAction(line string) error {
 		return err
 	}
 	if tmuxAction {
-		path, err := actionLookPath("tmux")
+		path, err := actionLookPath(tmuxExecutable)
 		if err != nil {
 			return fmt.Errorf("find tmux: %w", err)
 		}
 		return actionExec(
 			path,
-			append([]string{"tmux"}, arguments...),
+			append([]string{tmuxExecutable}, arguments...),
 			environmentWith("TMUX", ""),
 		)
 	}
@@ -69,7 +71,7 @@ func directTmuxArguments(line string) ([]string, bool, error) {
 	if index < len(words) && words[index] == "exec" {
 		index++
 	}
-	if index >= len(words) || words[index] != "tmux" {
+	if index >= len(words) || words[index] != tmuxExecutable {
 		return nil, false, errors.New("generated TMUX action is not a tmux command")
 	}
 	if index+1 >= len(words) {

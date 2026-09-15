@@ -127,7 +127,7 @@ func Cutoff(organ, lane string, now time.Time) (Window, error) {
 	if latest == "" {
 		return Window{
 			Mode:               WindowSweepCutoff,
-			NewestAppliedSweep: "NONE",
+			NewestAppliedSweep: windowNone,
 			CutoffSource:       CutoffBootstrap,
 			CutoffExclusive:    "7 days ago",
 			CutoffTime:         now.Add(-7 * 24 * time.Hour),

@@ -20,6 +20,11 @@ import (
 	"hostops/pfm/internal/update"
 )
 
+const (
+	checkAction   = "check"
+	doctorCommand = "doctor"
+)
+
 // These seams keep update tests entirely inside their throwaway repositories;
 // production uses the real build/install/doctor functions below.
 var (
@@ -146,7 +151,7 @@ func rollbackDoctorPredatesFailureTiers(output string) bool {
 func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	if len(args) > 0 {
 		switch args[0] {
-		case "check", "adopt", "pin", "ignore", "drop":
+		case checkAction, "adopt", "pin", "ignore", "drop":
 			runtime, err := optionalCommandRuntime(runtimes)
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
@@ -156,7 +161,7 @@ func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		}
 	}
 	flags := newFlagSet(
-		"update",
+		updateCommand,
 		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {check|adopt|pin|ignore|drop} [options]",
 		stderr,
 	)
@@ -164,7 +169,7 @@ func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	repoFlag := flags.String("repo", "", "source clone to update")
 	skipHarvest := flags.Bool("skip-harvest", false, "leave the optional harvestpy runtime unmanaged")
 	projectRoot := flags.String("root", "", "project root used for the post-update template report")
-	jsonOutput := flags.Bool("json", false, "write the project report as one JSON object")
+	jsonOutput := flags.Bool(jsonFormat, false, "write the project report as one JSON object")
 	positional, code, ok := parseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
@@ -820,7 +825,16 @@ func applyUpdateInstall(
 	if runtime.Config.Exists {
 		configPath = runtime.Config.Path
 	}
-	return runUpdateCandidateCommand(ctx, candidate, configPath, repo, sourceRepo, stdout, stderr, "install", args...)
+	return runUpdateCandidateCommand(
+		ctx,
+		candidate,
+		configPath,
+		repo,
+		sourceRepo,
+		stdout,
+		stderr,
+		installCommand,
+		args...)
 }
 
 // runUpdateDoctor runs candidate's `doctor` and turns its exit code and
@@ -865,7 +879,7 @@ func runUpdateDoctor(
 		"",
 		stdout,
 		stderr,
-		"doctor",
+		doctorCommand,
 		args...)
 	var exitErr *doctorExitError
 	switch {
@@ -923,7 +937,7 @@ func runUpdateCandidateCommand(
 	}
 	command.Stderr = stderr
 	var captured *bytes.Buffer
-	if commandName == "doctor" {
+	if commandName == doctorCommand {
 		// Captured AND still shown live: the operator reads the rows as they
 		// print, and runUpdateDoctor reads them back afterward to classify the
 		// exit and diff against the baseline.
@@ -933,7 +947,7 @@ func runUpdateCandidateCommand(
 		command.Stdout = stdout
 	}
 	if err := command.Run(); err != nil {
-		if commandName == "doctor" {
+		if commandName == doctorCommand {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				return &doctorExitError{code: exitErr.ExitCode(), output: captured.String()}

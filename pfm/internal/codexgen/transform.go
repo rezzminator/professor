@@ -26,12 +26,12 @@ var (
 func parseFrontmatter(text string) (map[string]string, string, error) {
 	lines := strings.Split(text, "\n")
 	fields := make(map[string]string)
-	if len(lines) == 0 || lines[0] != "---" {
+	if len(lines) == 0 || lines[0] != frontmatterFence {
 		return fields, text, nil
 	}
 	end := -1
 	for i := 1; i < len(lines); i++ {
-		if lines[i] == "---" {
+		if lines[i] == frontmatterFence {
 			end = i
 			break
 		}

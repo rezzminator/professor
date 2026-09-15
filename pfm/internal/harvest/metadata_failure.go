@@ -56,20 +56,20 @@ func doiMetadataFailureKind(err error) string {
 		return ""
 	}
 	if errors.Is(err, context.Canceled) {
-		return "cancelled"
+		return errorKindCancelled
 	}
 	status := doiMetadataHTTPStatus(err)
 	switch {
 	case status == http.StatusRequestTimeout || status == http.StatusGatewayTimeout:
-		return "timeout"
+		return errorKindTimeout
 	case status == http.StatusTooManyRequests:
-		return "connect"
+		return errorKindConnect
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
-		return "blocked"
+		return errorKindBlocked
 	case status >= 400 && status < 500:
-		return "invalid"
+		return errorKindInvalid
 	case status >= 500:
-		return "connect"
+		return errorKindConnect
 	default:
 		return errorKind(err)
 	}
@@ -98,7 +98,7 @@ func mergeResolverFailure(failure, fallback Result) Result {
 	failure.Error += "; " + fallback.Error
 	// A missing fallback cannot establish absence while metadata lookup failed.
 	// Keep this precedence identical for direct identifiers and publisher pivots.
-	missing := fallback.ErrorKind == "missing" || fallback.ErrorKind == "missing_pdf" ||
+	missing := fallback.ErrorKind == errorKindMissing || fallback.ErrorKind == errorKindMissingPDF ||
 		fallback.HTTPStatus == http.StatusNotFound || fallback.HTTPStatus == http.StatusGone
 	if fallback.ErrorKind != "" && !missing {
 		failure.ErrorKind = fallback.ErrorKind

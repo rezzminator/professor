@@ -514,7 +514,7 @@ func runChatSatellite(
 		return runChatFind(args, stdout, stderr, runtimes...)
 	case "save":
 		return runChatSave(args, stdout, stderr, runtimes...)
-	case "branch":
+	case branchAction:
 		return runChatBranch(args, stdout, stderr, runtimes...)
 	case "ls":
 		return runChatLS(args, stdout, stderr, runtimes...)

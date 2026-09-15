@@ -145,7 +145,7 @@ func resolveCosmosSafe(flagValue, termProgram string) bool {
 	switch flagValue {
 	case "on":
 		return true
-	case "off":
+	case toggleOffFlag:
 		return false
 	default:
 		return termProgram == "vscode"

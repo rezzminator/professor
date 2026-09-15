@@ -14,7 +14,12 @@ import (
 	"hostops/pfm/internal/installer"
 )
 
-const expectedHooksPath = ".githooks"
+const (
+	expectedHooksPath = ".githooks"
+	brokenState       = "broken"
+	unavailableState  = "unavailable"
+	unreadableState   = "unreadable"
+)
 
 type prePushGate struct {
 	Repository string
@@ -42,7 +47,7 @@ func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
 	case "not-configured":
 		fmt.Fprintln(stdout, "doctor: pre-push gate=not-configured hook=.githooks/pre-push ABSENT")
 		return 0
-	case "unavailable":
+	case unavailableState:
 		fmt.Fprintf(stdout, "doctor: pre-push gate=unavailable dependency=git error=%v\n", gate.Error)
 		return 0
 	case "armed":
@@ -61,7 +66,7 @@ func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
 			expectedHooksPath,
 		)
 		return 1
-	case "broken":
+	case brokenState:
 		fmt.Fprintf(stdout, "doctor: pre-push gate=BROKEN core.hooksPath=%s error=%v\n", gate.Actual, gate.Error)
 		return 1
 	default:
@@ -73,25 +78,25 @@ func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
 func inspectPrePushGate(ctx context.Context) prePushGate {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return prePushGate{State: "unreadable", Error: fmt.Errorf("resolve working directory: %w", err)}
+		return prePushGate{State: unreadableState, Error: fmt.Errorf("resolve working directory: %w", err)}
 	}
 	git := deps.Executable("git")
 	repositoryBytes, err := exec.CommandContext(ctx, git, "-C", cwd, "rev-parse", "--show-toplevel").CombinedOutput()
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return prePushGate{State: "unavailable", Error: err}
+			return prePushGate{State: unavailableState, Error: err}
 		}
 		message := strings.TrimSpace(string(repositoryBytes))
 		if strings.Contains(strings.ToLower(message), "not a git repository") {
 			return prePushGate{State: "outside-repository"}
 		}
-		return prePushGate{State: "unreadable", Error: fmt.Errorf("resolve repository: %w: %s", err, message)}
+		return prePushGate{State: unreadableState, Error: fmt.Errorf("resolve repository: %w: %s", err, message)}
 	}
 	repository := filepath.Clean(strings.TrimSpace(string(repositoryBytes)))
 	hook := filepath.Join(repository, expectedHooksPath, "pre-push")
 	hookInfo, hookErr := os.Stat(hook)
 
-	actualBytes, configErr := exec.CommandContext(ctx, git, "-C", repository, "config", "--get", "core.hooksPath").
+	actualBytes, configErr := exec.CommandContext(ctx, git, "-C", repository, configCommand, "--get", "core.hooksPath").
 		CombinedOutput()
 	actual := strings.TrimSpace(string(actualBytes))
 	if configErr != nil {
@@ -99,7 +104,7 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 		if !errors.As(configErr, &exitErr) || exitErr.ExitCode() != 1 || actual != "" {
 			return prePushGate{
 				Repository: repository,
-				State:      "unreadable",
+				State:      unreadableState,
 				Error:      fmt.Errorf("read core.hooksPath: %w: %s", configErr, actual),
 			}
 		}
@@ -112,7 +117,7 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 		return prePushGate{
 			Repository: repository,
 			Actual:     actual,
-			State:      "broken",
+			State:      brokenState,
 			Error:      fmt.Errorf("inspect %s: %w", hook, hookErr),
 		}
 	}
@@ -120,7 +125,7 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 		return prePushGate{
 			Repository: repository,
 			Actual:     actual,
-			State:      "broken",
+			State:      brokenState,
 			Error:      fmt.Errorf("%s is not an executable regular file", hook),
 		}
 	}

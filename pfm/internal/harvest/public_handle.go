@@ -65,7 +65,7 @@ func publicIdentityHandle(source string) bool {
 		return NormalizeISBN(value) != ""
 	}
 	parsed, err := url.Parse(s)
-	if err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.User == nil &&
+	if err == nil && (parsed.Scheme == schemeHTTP || parsed.Scheme == schemeHTTPS) && parsed.User == nil &&
 		parsed.Port() == "" &&
 		(strings.EqualFold(parsed.Hostname(), "doi.org") || strings.EqualFold(parsed.Hostname(), "dx.doi.org")) &&
 		parsed.RawQuery == "" &&
@@ -161,7 +161,7 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 	if lexicalErr != nil {
 		return "", errors.New("cache directory cannot be resolved")
 	}
-	lexicalPublicRoot := filepath.Join(lexicalCacheRoot, "public")
+	lexicalPublicRoot := filepath.Join(lexicalCacheRoot, publicDirName)
 	if isPathInside(lexicalPath, lexicalCacheRoot) && !isPathInside(lexicalPath, lexicalPublicRoot) {
 		return "", errors.New("internal retrieval metadata is not available")
 	}
@@ -229,7 +229,7 @@ func (h *Harvester) readPublicHandle(source string) (string, error) {
 	}
 	target := strings.TrimSpace(record.Target)
 	u, err := url.Parse(target)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+	if err != nil || (u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS) || u.Host == "" || u.User != nil {
 		return "", errors.New("public source handle is invalid")
 	}
 	return target, nil

@@ -42,7 +42,7 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		60,
 		"seconds of transcript writes that count as a working chat",
 	)
-	asJSON := flags.Bool("json", false, "emit one JSON report instead of the text table")
+	asJSON := flags.Bool(jsonFormat, false, "emit one JSON report instead of the text table")
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}

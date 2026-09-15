@@ -33,7 +33,7 @@ func professorUpdateCachePath(runtime commandRuntime) string {
 }
 
 func cachedProfessorUpdateRow(runtime commandRuntime) (compose.Row, bool) {
-	if strings.TrimSpace(version) == "" || version == "dev" {
+	if strings.TrimSpace(version) == "" || version == developmentVersion {
 		return compose.Row{}, false
 	}
 	notice, found, err := updatecheck.Read(professorUpdateCachePath(runtime), version)
@@ -57,7 +57,7 @@ func cachedProfessorUpdateRow(runtime commandRuntime) (compose.Row, bool) {
 // The child owns every network and cache error; the picker neither waits for
 // it nor emits a warning that could corrupt the active alternate-screen frame.
 func triggerProfessorUpdateCheck(runtime commandRuntime) {
-	if strings.TrimSpace(version) == "" || version == "dev" {
+	if strings.TrimSpace(version) == "" || version == developmentVersion {
 		return
 	}
 	executable, err := os.Executable()
@@ -79,7 +79,7 @@ func triggerProfessorUpdateCheck(runtime commandRuntime) {
 	}
 	command := exec.Command(
 		executable,
-		"internal", "update-check",
+		internalCommand, "update-check",
 		"--cache", professorUpdateCachePath(runtime),
 		"--current", version,
 		"--url", latestURL,

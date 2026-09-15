@@ -337,7 +337,7 @@ func commit(
 		}
 		created = append(created, target)
 	}
-	if prepared.explorerArchive != "NONE" {
+	if prepared.explorerArchive != noExplorerArchive {
 		source := filepath.Join(repo.Organ, "explorer-index.md")
 		target := filepath.Join(repo.Organ, "archive", prepared.explorerArchive)
 		if err := os.Rename(source, target); err != nil {

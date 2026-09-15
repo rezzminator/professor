@@ -31,8 +31,8 @@ var launchExec = syscall.Exec
 const launcherWaitTimeout = 7 * 24 * time.Hour
 
 var nonInteractiveClaudeSubcommands = map[string]bool{
-	"agents": true, "mcp": true, "update": true, "install": true,
-	"doctor": true, "setup-token": true, "plugin": true, "config": true,
+	agentsCommand: true, mcpCommand: true, updateCommand: true, installCommand: true,
+	doctorCommand: true, "setup-token": true, "plugin": true, configCommand: true,
 }
 
 // launchPassThrough is the pure policy boundary for the managed Claude
@@ -50,7 +50,7 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 	}
 	for _, argument := range arguments {
 		switch argument {
-		case "-p", "--print", "--output-format", "-h", "--help", "--version", "-v":
+		case "-p", "--print", "--output-format", "-h", helpFlag, "--version", "-v":
 			return true
 		}
 		if strings.HasPrefix(argument, "--output-format=") {
@@ -121,7 +121,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
 		return 1
 	}
-	tmuxBinary, err := deps.Resolve("tmux")
+	tmuxBinary, err := deps.Resolve(tmuxExecutable)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: find tmux: %v\n", err)
 		return 1
@@ -185,7 +185,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 	if interactive {
 		failed = false
 		arguments := []string{
-			"tmux",
+			tmuxExecutable,
 			"-S",
 			socketPath,
 			"wait-for",

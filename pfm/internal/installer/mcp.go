@@ -18,10 +18,13 @@ import (
 )
 
 const (
-	mcpCredentialName = "mcp-auth-token"
-	mcpOwnershipName  = "mcp-ownership.json"
-	mcpFenceBegin     = "# BEGIN pfm mcp_servers — installer-owned"
-	mcpFenceEnd       = "# END pfm mcp_servers — installer-owned"
+	mcpCredentialName  = "mcp-auth-token"
+	mcpOwnershipName   = "mcp-ownership.json"
+	mcpFenceBegin      = "# BEGIN pfm mcp_servers — installer-owned"
+	mcpFenceEnd        = "# END pfm mcp_servers — installer-owned"
+	chatName           = "chat"
+	mcpServerHarvester = "harvester"
+	httpProtocol       = "http"
 )
 
 type mcpOwnership struct {
@@ -74,7 +77,7 @@ func (installer *engine) wireMCP() error {
 func enabledMCPNames(servers map[string]bool) []string {
 	names := make([]string, 0, len(servers))
 	for name, enabled := range servers {
-		if enabled && (name == "chat" || name == "harvester") {
+		if enabled && (name == chatName || name == mcpServerHarvester) {
 			names = append(names, name)
 		}
 	}
@@ -110,16 +113,16 @@ func isHex(value string) bool {
 // (main.go sets AllowAmbientIdentity for that path only) — the only
 // transport that can ever answer a self-addressed chat_* call correctly.
 func (installer *engine) mcpClientRegistration(name string) map[string]any {
-	if name == "chat" {
+	if name == chatName {
 		return map[string]any{
-			"type":    "stdio",
-			"command": installer.mcpChatCommand(),
-			"args":    []string{"mcp", "chat", "serve"},
+			configTypeKey:    "stdio",
+			configCommandKey: installer.mcpChatCommand(),
+			configArgsKey:    []string{"mcp", chatName, "serve"},
 		}
 	}
 	return map[string]any{
-		"type": "http",
-		"url":  installer.mcpURL(name),
+		configTypeKey: httpProtocol,
+		"url":         installer.mcpURL(name),
 	}
 }
 
@@ -149,17 +152,17 @@ func (installer *engine) isPFMClient(name string, registration map[string]any) b
 // exact shape and is correctly left as a manual conflict — recognizing only
 // what this installer itself would write is the whole point.
 func (installer *engine) isPFMStdioClient(name string, registration map[string]any) bool {
-	if name != "chat" || len(registration) != 3 {
+	if name != chatName || len(registration) != 3 {
 		return false
 	}
-	if registration["type"] != "stdio" || registration["command"] != installer.mcpChatCommand() {
+	if registration[configTypeKey] != "stdio" || registration[configCommandKey] != installer.mcpChatCommand() {
 		return false
 	}
-	args, ok := registration["args"].([]any)
+	args, ok := registration[configArgsKey].([]any)
 	if !ok || len(args) != 3 {
 		return false
 	}
-	for index, want := range []string{"mcp", "chat", "serve"} {
+	for index, want := range []string{"mcp", chatName, "serve"} {
 		if got, ok := args[index].(string); !ok || got != want {
 			return false
 		}
@@ -168,7 +171,7 @@ func (installer *engine) isPFMStdioClient(name string, registration map[string]a
 }
 
 func (installer *engine) isPFMHTTPClient(name string, registration map[string]any) bool {
-	if registration["type"] != "http" || registration["url"] != installer.mcpURL(name) {
+	if registration[configTypeKey] != httpProtocol || registration["url"] != installer.mcpURL(name) {
 		return false
 	}
 	if len(registration) == 2 {

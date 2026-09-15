@@ -12,7 +12,7 @@ import (
 )
 
 func (h *Harvester) convert(ctx context.Context, kind, source string, body []byte) (string, error) {
-	if kind == "txt" {
+	if kind == kindTXT {
 		return string(body), nil
 	}
 	if h.options.Converter == nil {
@@ -23,20 +23,20 @@ func (h *Harvester) convert(ctx context.Context, kind, source string, body []byt
 
 func classifyFetchedKind(source, contentType string, body []byte) string {
 	kind := classifyKind(source, contentType, body)
-	if kind != "html" && kind != "txt" {
+	if kind != kindHTML && kind != kindTXT {
 		return kind
 	}
 	if IsPlainText(source, contentType, string(body)) {
-		return "txt"
+		return kindTXT
 	}
-	return "html"
+	return kindHTML
 }
 
 func usableContent(content, kind string) bool {
 	if content == "" {
 		return false
 	}
-	if kind == "html" || kind == "txt" {
+	if kind == kindHTML || kind == kindTXT {
 		return len(strings.TrimSpace(content)) >= 1
 	}
 	return true
@@ -97,17 +97,17 @@ func bibliographicDocumentURL(body []byte, baseRaw string) string {
 					isDocument := strings.Contains(class, "document-link") || strings.Contains(path, "/files/") ||
 						strings.Contains(label, "full text") ||
 						strings.Contains(label, "manuscript")
-					supported := extension == ".pdf" || extension == ".doc" || extension == ".docx" ||
+					supported := extension == extensionPDF || extension == ".doc" || extension == ".docx" ||
 						extension == ".epub" ||
 						extension == ".odt" ||
 						extension == ".rtf" ||
-						extension == ".txt"
+						extension == extensionTXT
 					if isDocument && (supported || strings.Contains(class, "document-link")) {
 						base, baseErr := url.Parse(baseRaw)
 						if baseErr == nil {
 							resolved := base.ResolveReference(parsed)
 							resolved.Fragment = ""
-							if (resolved.Scheme == "http" || resolved.Scheme == "https") &&
+							if (resolved.Scheme == schemeHTTP || resolved.Scheme == schemeHTTPS) &&
 								assertFetchable(resolved.String(), false) == nil {
 								found = resolved.String()
 							}

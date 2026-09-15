@@ -35,7 +35,7 @@ func (r *Resolver) googleScholar(ctx context.Context, query string, limit int) (
 	providerCtx, cancel := providerContext(ctx)
 	defer cancel()
 	endpoint := base + "/scholar?hl=en&q=" + url.QueryEscape(`"`+query+`"`)
-	response, err := r.providerHarvester().providerGet(providerCtx, endpoint, nil, providerHTMLMaxBody)
+	response, err := r.providerHarvester().providerGet(providerCtx, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (r *Resolver) googleScholarDOI(ctx context.Context, doi string, limit int) 
 	defer cancel()
 	endpoint := base + "/scholar?hl=en&q=" + url.QueryEscape(`"`+doi+`"`)
 	h := r.providerHarvester()
-	response, err := h.providerGet(providerCtx, endpoint, nil, providerHTMLMaxBody)
+	response, err := h.providerGet(providerCtx, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +92,7 @@ func (r *Resolver) googleScholarDOI(ctx context.Context, doi string, limit int) 
 
 func (h *Harvester) fetchScholarDOI(ctx context.Context, doi string, options FetchOptions) Result {
 	if strings.TrimSpace(h.settings.googleScholarURL) == "" {
-		return Result{Source: doi, Error: "Google Scholar is disabled", ErrorKind: "disabled"}
+		return Result{Source: doi, Error: "Google Scholar is disabled", ErrorKind: errorKindDisabled}
 	}
 	providerCtx, cancel := providerContext(ctx)
 	defer cancel()
@@ -100,12 +100,12 @@ func (h *Harvester) fetchScholarDOI(ctx context.Context, doi string, options Fet
 	if err != nil {
 		return providerResult(
 			doi,
-			"google-scholar",
+			sourceGoogleScholar,
 			err.Error(),
 			errorKind(err),
 			0,
-			strings.Contains(strings.ToLower(err.Error()), "challenge"),
-			[]string{"google-scholar"},
+			strings.Contains(strings.ToLower(err.Error()), errorKindChallenge),
+			[]string{sourceGoogleScholar},
 		)
 	}
 	var last Result
@@ -115,18 +115,18 @@ func (h *Harvester) fetchScholarDOI(ctx context.Context, doi string, options Fet
 		}
 		result := h.fetchURLWithPolicy(providerCtx, candidate.URL, options, false)
 		if result.Error == "" {
-			result.Method = "google-scholar"
-			result.Rungs = append([]string{"google-scholar"}, result.Rungs...)
+			result.Method = sourceGoogleScholar
+			result.Rungs = append([]string{sourceGoogleScholar}, result.Rungs...)
 			return result
 		}
 		last = providerResult(
 			doi,
-			"google-scholar",
+			sourceGoogleScholar,
 			result.Error,
 			result.ErrorKind,
 			result.HTTPStatus,
 			result.Challenge,
-			append([]string{"google-scholar"}, result.Rungs...),
+			append([]string{sourceGoogleScholar}, result.Rungs...),
 		)
 	}
 	if last.Error != "" {
@@ -134,12 +134,12 @@ func (h *Harvester) fetchScholarDOI(ctx context.Context, doi string, options Fet
 	}
 	return providerResult(
 		doi,
-		"google-scholar",
+		sourceGoogleScholar,
 		"no exact DOI candidate could be fetched",
-		"missing",
+		errorKindMissing,
 		0,
 		false,
-		[]string{"google-scholar"},
+		[]string{sourceGoogleScholar},
 	)
 }
 
@@ -259,9 +259,9 @@ func parseGoogleScholarRows(body []byte, limit int, wantedDOI string) []scholarR
 			scholarRow{
 				candidate: Candidate{
 					URL:      titleLink,
-					Source:   "google-scholar",
+					Source:   sourceGoogleScholar,
 					Priority: 70,
-					Kind:     "paper",
+					Kind:     kindPaper,
 					Title:    title,
 					Authors:  authors,
 					Year:     year,
@@ -310,7 +310,7 @@ func scholarResourceURL(baseRaw, raw string) string {
 		return ""
 	}
 	resolved := base.ResolveReference(ref)
-	if resolved.Host == "" || (resolved.Scheme != "http" && resolved.Scheme != "https") {
+	if resolved.Host == "" || (resolved.Scheme != schemeHTTP && resolved.Scheme != schemeHTTPS) {
 		return ""
 	}
 	resolved.Fragment = ""
@@ -347,7 +347,7 @@ func scholarRowsWithVersions(
 		} else if row.versionsURL != "" && versionAttempts < providerCandidateMax {
 			versionAttempts++
 			if versionURL, ok := scholarVersionURL(baseURL, row.versionsURL); ok {
-				response, err := h.providerGet(ctx, versionURL, nil, providerHTMLMaxBody)
+				response, err := h.providerGet(ctx, versionURL, nil)
 				if err == nil && response.status < 400 && !providerChallenge(response.body, response.status) {
 					versions := parseGoogleScholarRows(response.body, providerCandidateMax, wantedDOI)
 					for i := range versions {

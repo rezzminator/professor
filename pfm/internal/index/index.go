@@ -18,6 +18,7 @@ const (
 
 	claudeParserVersionKey = "claude_parser_version"
 	claudeParserVersion    = "3"
+	messageRoleUser        = "user"
 )
 
 // Options controls one indexing pass.

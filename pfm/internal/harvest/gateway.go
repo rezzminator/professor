@@ -128,7 +128,7 @@ func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatew
 		req.ua = h.userAgent
 	}
 
-	response, err := h.gatewayRung(ctx, req, req.client, "direct", req.ua)
+	response, err := h.gatewayRung(ctx, req, req.client, rungDirect, req.ua)
 	if req.policy == gatewayNoEscalate {
 		return response, err
 	}
@@ -169,8 +169,8 @@ func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatew
 	// the Chrome client: repeating an identical fingerprint against the same
 	// wall is a wasted round trip, not a second chance.
 	if chrome := h.chromeForGateway(req); chrome != nil {
-		attempted = append(attempted, "chrome-impersonation")
-		chromeResponse, chromeErr := h.gatewayRung(ctx, req, chrome, "chrome-impersonation", chromeUA)
+		attempted = append(attempted, rungChromeImpersonation)
+		chromeResponse, chromeErr := h.gatewayRung(ctx, req, chrome, rungChromeImpersonation, chromeUA)
 		if chromeErr == nil && !chromeResponse.challenge {
 			chromeResponse.rungs = attempted
 			return chromeResponse, nil

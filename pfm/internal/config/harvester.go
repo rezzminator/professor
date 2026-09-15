@@ -251,7 +251,7 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 	file := func(key string) { result.Sources["harvester."+key] = SourceFile }
 	if raw.Enabled != nil {
 		harvester.Enabled = *raw.Enabled
-		file("enabled")
+		file(jsonKeyEnabled)
 	}
 	if external := raw.External; external != nil {
 		if external.Enabled != nil {
@@ -509,7 +509,7 @@ func validateHTTPURL(value string, allowPath bool) error {
 // MCPServerSource reports where a registered server's enabled flag came from.
 // The harvester's lives in harvester.config.json.
 func (config Config) MCPServerSource(name string) Source {
-	if name == "harvester" {
+	if name == mcpServerHarvester {
 		return config.Source("harvester.enabled")
 	}
 	return config.Source("mcp.servers." + name + ".enabled")
@@ -533,7 +533,7 @@ func SetHarvesterEnabled(config Config, enabled bool) (bool, error) {
 		}
 		top = existing
 	}
-	top["enabled"], _ = json.Marshal(enabled)
+	top[jsonKeyEnabled], _ = json.Marshal(enabled)
 	content, err := json.MarshalIndent(top, "", "  ")
 	if err != nil {
 		return false, fmt.Errorf("encode harvester config %s: %w", path, err)
@@ -554,10 +554,13 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 		return value
 	}
 	value := map[string]any{
-		"enabled": harvester.Enabled,
+		jsonKeyEnabled: harvester.Enabled,
 		"external": map[string]any{
-			"enabled": harvester.External.Enabled, "host": harvester.External.Host, "port": harvester.External.Port,
-			"publicURL": harvester.External.PublicURL, "stateDir": harvester.External.StateDir,
+			jsonKeyEnabled: harvester.External.Enabled,
+			"host":         harvester.External.Host,
+			jsonKeyPort:    harvester.External.Port,
+			"publicURL":    harvester.External.PublicURL,
+			"stateDir":     harvester.External.StateDir,
 			"auth": map[string]any{
 				"passphrase": secret(
 					harvester.External.Passphrase,
@@ -566,7 +569,7 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 			},
 		},
 		"search": map[string]any{
-			"enabled": harvester.Search.Enabled, "searxngURL": harvester.Search.SearXNGURL,
+			jsonKeyEnabled: harvester.Search.Enabled, "searxngURL": harvester.Search.SearXNGURL,
 			"braveApiKey": secret(harvester.Search.BraveAPIKey),
 		},
 		"scholarly": map[string]any{

@@ -25,7 +25,7 @@ import (
 func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	flags := newFlagSet("issues", "usage: pfm issues [--all] [--json]", stderr)
 	all := flags.Bool("all", false, "include closed issues, not only open ones")
-	asJSON := flags.Bool("json", false, "print issues as a JSON array")
+	asJSON := flags.Bool(jsonFormat, false, "print issues as a JSON array")
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}

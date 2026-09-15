@@ -276,7 +276,7 @@ func runDreamWith(
 		return runDreamRestamp(args[1:], stdout, stderr, runtime)
 	case "hook":
 		return runDreamHook(args[1:], stdin, stdout, stderr, runtime)
-	case "help", "-h", "--help":
+	case helpCommand, "-h", helpFlag:
 		printDreamUsage(stdout)
 		return 0
 	default:

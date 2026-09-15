@@ -59,33 +59,33 @@ func resolverContext(ctx context.Context, r *Resolver) context.Context {
 
 func candidatePriority(source, status, version, kind string) int {
 	bases := map[string]int{
-		"arxiv":            0,
-		"osf":              2,
-		"citation_pdf_url": 4,
-		"unpaywall":        10,
-		"openalex":         12,
-		"semanticscholar":  14,
-		"europepmc":        16,
-		"openaire":         20,
-		"zenodo":           26,
-		"elife":            21,
-		"plos":             23,
-		"nber":             24,
-		"crossref":         30,
-		"core":             40,
-		"doaj":             45,
-		"gutenberg":        5,
-		"oapen":            8,
-		"internetarchive":  18,
-		"doab":             22,
-		"hathitrust":       24,
-		"googlebooks":      50,
+		sourceArXiv:           0,
+		sourceOSF:             2,
+		"citation_pdf_url":    4,
+		sourceUnpaywall:       10,
+		sourceOpenAlex:        12,
+		sourceSemanticScholar: 14,
+		sourceEuropePMC:       16,
+		sourceOpenAIRE:        20,
+		sourceZenodo:          26,
+		sourceELife:           21,
+		sourcePLOS:            23,
+		sourceNBER:            24,
+		sourceCrossref:        30,
+		sourceCORE:            40,
+		sourceDOAJ:            45,
+		sourceGutenberg:       5,
+		"oapen":               8,
+		sourceInternetArchive: 18,
+		"doab":                22,
+		"hathitrust":          24,
+		"googlebooks":         50,
 	}
 	base, known := bases[source]
 	if !known {
 		base = 50
 	}
-	if kind != "pdf" {
+	if kind != kindPDF {
 		base += 8
 	}
 	if status == "bronze" {
@@ -162,17 +162,17 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 		return []Candidate{
 			{
 				URL:      "https://arxiv.org/pdf/" + id,
-				Source:   "arxiv",
-				Priority: candidatePriority("arxiv", "", "", "pdf"),
-				Kind:     "pdf",
+				Source:   sourceArXiv,
+				Priority: candidatePriority(sourceArXiv, "", "", kindPDF),
+				Kind:     kindPDF,
 			},
 			// ar5iv's HTML rendering (verified live 2026-08-22) is the insurance copy
 			// for when the PDF endpoint rate-limits or a wall appears on the CDN.
 			{
 				URL:      "https://ar5iv.labs.arxiv.org/html/" + id,
 				Source:   "ar5iv",
-				Priority: candidatePriority("arxiv", "", "", "html"),
-				Kind:     "html",
+				Priority: candidatePriority(sourceArXiv, "", "", kindHTML),
+				Kind:     kindHTML,
 			},
 		}, nil
 	}
@@ -186,25 +186,25 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 			return candidates, nil
 		}
 		if err != nil && !doiMetadataAbsence(err) {
-			specialFailure = &doiMetadataFailure{provider: "osf", err: err}
+			specialFailure = &doiMetadataFailure{provider: sourceOSF, err: err}
 		}
 	}
 	// Providers are independent and the Python resolver fans them out. Gather
 	// concurrently, then apply the explicit priority sort/dedupe so completion
 	// order never changes the public candidate order.
 	sources := []string{
-		"unpaywall",
-		"openalex",
-		"semanticscholar",
-		"europepmc",
-		"openaire",
-		"zenodo",
-		"elife",
-		"plos",
-		"nber",
-		"crossref",
-		"core",
-		"doaj",
+		sourceUnpaywall,
+		sourceOpenAlex,
+		sourceSemanticScholar,
+		sourceEuropePMC,
+		sourceOpenAIRE,
+		sourceZenodo,
+		sourceELife,
+		sourcePLOS,
+		sourceNBER,
+		sourceCrossref,
+		sourceCORE,
+		sourceDOAJ,
 	}
 	results := make([][]Candidate, len(sources))
 	errorsBySource := make([]error, len(sources))
@@ -216,29 +216,29 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 			var candidates []Candidate
 			var err error
 			switch source {
-			case "unpaywall":
+			case sourceUnpaywall:
 				candidates, err = r.unpaywall(ctx, client, doi)
-			case "openalex":
+			case sourceOpenAlex:
 				candidates, err = r.openAlexDOI(ctx, client, doi)
-			case "semanticscholar":
+			case sourceSemanticScholar:
 				candidates, err = r.semanticScholar(ctx, client, doi)
-			case "europepmc":
+			case sourceEuropePMC:
 				candidates, err = r.europePMCDOI(ctx, client, doi)
-			case "openaire":
+			case sourceOpenAIRE:
 				candidates, err = r.openAIRE(ctx, client, doi)
-			case "zenodo":
+			case sourceZenodo:
 				candidates, err = r.zenodo(ctx, client, doi)
-			case "elife":
+			case sourceELife:
 				candidates, err = r.eLife(ctx, client, doi)
-			case "plos":
+			case sourcePLOS:
 				candidates = plosCandidates(doi)
-			case "nber":
+			case sourceNBER:
 				candidates = nberCandidates(doi)
-			case "crossref":
+			case sourceCrossref:
 				candidates, err = r.crossref(ctx, client, doi)
-			case "core":
+			case sourceCORE:
 				candidates, err = r.core(ctx, client, doi)
-			case "doaj":
+			case sourceDOAJ:
 				candidates, err = r.doaj(ctx, client, doi)
 			}
 			errorsBySource[i] = err
@@ -265,7 +265,7 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 		failures = append(failures, doiMetadataFailure{provider: sources[i], err: providerErr})
 	}
 	if len(out) == 0 && len(failures) > 0 {
-		kind := "connect"
+		kind := errorKindConnect
 		for _, failure := range failures {
 			if candidateKind := doiMetadataFailureKind(failure.err); candidateKind != "" {
 				kind = candidateKind
@@ -383,10 +383,10 @@ func (r *Resolver) arxivByTitle(ctx context.Context, client *http.Client, title 
 				return []Candidate{
 					{
 						URL:      "https://arxiv.org/pdf/" + strings.TrimSpace(idMatch[1]),
-						Source:   "arxiv",
+						Source:   sourceArXiv,
 						Priority: 0,
-						Kind:     "pdf",
-						Free:     "green",
+						Kind:     kindPDF,
+						Free:     accessGreen,
 						Title:    name,
 					},
 				}
@@ -424,14 +424,14 @@ func (r *Resolver) osf(ctx context.Context, client *http.Client, doi string) ([]
 		ctx,
 		client,
 		"https://api.osf.io/v2/preprints/"+url.PathEscape(guid)+"/",
-		map[string]string{"Accept": "application/json"},
+		map[string]string{headerAccept: mediaTypeJSON},
 		&data,
 	); err != nil {
 		return nil, err
 	}
 	if id := data.Data.Relationships.PrimaryFile.Data.ID; id != "" {
 		return []Candidate{
-			{URL: "https://osf.io/download/" + url.PathEscape(id) + "/", Source: "osf", Priority: 2, Kind: "pdf"},
+			{URL: "https://osf.io/download/" + url.PathEscape(id) + "/", Source: sourceOSF, Priority: 2, Kind: kindPDF},
 		}, nil
 	}
 	return nil, nil
@@ -443,7 +443,12 @@ func (r *Resolver) ResolvePMCID(_ context.Context, pmcid string) ([]Candidate, e
 		pmcid = "PMC" + pmcid
 	}
 	return []Candidate{
-		{URL: "https://europepmc.org/articles/" + pmcid + "?pdf=render", Source: "europepmc", Priority: 0, Kind: "pdf"},
+		{
+			URL:      "https://europepmc.org/articles/" + pmcid + "?pdf=render",
+			Source:   sourceEuropePMC,
+			Priority: 0,
+			Kind:     kindPDF,
+		},
 	}, nil
 }
 
@@ -504,8 +509,8 @@ func postJSON(ctx context.Context, client *http.Client, raw string, payload, dst
 		client: client,
 		ua:     contextualUA(ctx),
 		headers: http.Header{
-			"Accept":       {"application/json"},
-			"Content-Type": {"application/json"},
+			headerAccept:   {mediaTypeJSON},
+			"Content-Type": {mediaTypeJSON},
 		},
 		max:              resolverJSONMaxBody,
 		policy:           gatewayNoEscalate,

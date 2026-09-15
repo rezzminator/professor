@@ -139,7 +139,7 @@ func ClassifyIdentifier(input string) IdentifierKind {
 	lowInput := strings.ToLower(trim)
 	if parsed, err := url.Parse(
 		trim,
-	); err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
+	); err == nil && (parsed.Scheme == schemeHTTP || parsed.Scheme == schemeHTTPS) &&
 		parsed.Host != "" {
 		host := strings.ToLower(parsed.Hostname())
 		if host != "doi.org" && host != "dx.doi.org" {

@@ -19,6 +19,11 @@ import (
 	headlessrun "hostops/pfm/internal/headless/run"
 )
 
+const (
+	textFormat   = "text"
+	nativeFormat = "native"
+)
+
 func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
 	flags := newFlagSet("headless exec", "usage: pfm headless exec [options] [-- ENGINE_ARGS...]\n"+
 		"  --engine claude|codex --model MODEL --effort EFFORT --account ID\n"+
@@ -65,7 +70,11 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	)
 	cwd := flags.String("cwd", "", "working directory")
 	timeout := flags.Float64("timeout", 600, "wall-clock timeout in seconds; 0 unlimited")
-	format := flags.String("output-format", "text", "text, json (common result envelope), or native (engine stream)")
+	format := flags.String(
+		"output-format",
+		textFormat,
+		"text, json (common result envelope), or native (engine stream)",
+	)
 	out := flags.String("out", "", "write structured output, or the text answer, to this file")
 	receipt := flags.String("receipt", "", "append a content-free JSON execution receipt")
 	var engineArgs, environment repeatString
@@ -87,7 +96,7 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		flags.Usage()
 		return 2
 	}
-	if *format != "text" && *format != "json" && *format != "native" {
+	if *format != textFormat && *format != jsonFormat && *format != nativeFormat {
 		fmt.Fprintln(stderr, "pfm headless: --output-format must be text, json, or native")
 		return 2
 	}
@@ -103,7 +112,7 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	}
 	if promptSources > 1 || (hasSystem && (present["system-file"] || present["system-prompt-file"])) ||
 		(present["schema"] && present["json-schema"]) ||
-		(*format == "native" && *out != "") {
+		(*format == nativeFormat && *out != "") {
 		fmt.Fprintln(
 			stderr,
 			"pfm headless: choose one source per prompt/system/schema; --out requires normalized output",
@@ -118,7 +127,7 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		Config: runtime.Config, Account: *account, ConfigDir: *configDir,
 		Model: *model, Effort: *effort, Prompt: *prompt, CWD: *cwd, TempDir: runtime.Paths.SIDDir,
 		Timeout: time.Duration(*timeout * float64(time.Second)), StrictMCP: *strictMCP,
-		NoSessionPersistence: *noPersistence, Sealed: *sealed, Native: *format == "native",
+		NoSessionPersistence: *noPersistence, Sealed: *sealed, Native: *format == nativeFormat,
 		AllowUnsupported: *allowUnsupported,
 		Args:             append([]string(engineArgs), tail...),
 	}
@@ -240,12 +249,12 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		}
 		fmt.Fprintf(stderr, "pfm headless: %v\n", runErr)
 	}
-	if *format == "json" {
+	if *format == jsonFormat {
 		if err := json.NewEncoder(stdout).Encode(result); err != nil {
 			fmt.Fprintf(stderr, "pfm headless: write result: %v\n", err)
 			code = 4
 		}
-	} else if *format == "text" && runErr == nil {
+	} else if *format == textFormat && runErr == nil {
 		if _, err := fmt.Fprintln(stdout, result.Answer); err != nil {
 			fmt.Fprintf(stderr, "pfm headless: write answer: %v\n", err)
 			code = 4

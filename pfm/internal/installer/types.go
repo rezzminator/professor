@@ -34,6 +34,14 @@ const (
 	ModeUninstall
 )
 
+const (
+	configTypeKey     = "type"
+	configCommandKey  = "command"
+	configArgsKey     = "args"
+	commandType       = "command"
+	legacyFleetBinary = "cc-fleet"
+)
+
 type CommandRunner interface {
 	Run(context.Context, string, ...string) error
 }

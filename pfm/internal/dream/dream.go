@@ -30,6 +30,9 @@ import (
 const (
 	distillPromptFile = "dreamer-distill.prompt.md"
 	refinerPromptFile = "dreamer-refiner.prompt.md"
+	refinerSeat       = "refiner"
+	gatePhase         = "gate"
+	gateVerdictPass   = "PASS"
 )
 
 // NightRequest contains values selected by the caller. Night does not read
@@ -422,7 +425,7 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 			return result, fmt.Errorf("verify seat failed once; artifacts preserved at %s: %w", stage.Root, err)
 		}
 		failureKind = "POST-REFINER-GATES-FAILED"
-		if err := persistSeatResult(stage, "refiner", refiner); err != nil {
+		if err := persistSeatResult(stage, refinerSeat, refiner); err != nil {
 			return result, err
 		}
 		if err := secureStage(stage.Root); err != nil {
@@ -439,14 +442,14 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 			return result, err
 		}
 		if err := logger.event(nightLogEvent{
-			Phase: "seat.skip", At: dependencies.Clock(), Seat: "refiner",
+			Phase: "seat.skip", At: dependencies.Clock(), Seat: refinerSeat,
 			ExitReason: "zero anchor-valid staged maps",
 		}); err != nil {
 			return result, err
 		}
 	}
 
-	if _, err := runPinGate(stage, "gate-pin-post-refine.log", logger, "refiner", &pinned); err != nil {
+	if _, err := runPinGate(stage, "gate-pin-post-refine.log", logger, refinerSeat, &pinned); err != nil {
 		return result, err
 	}
 	normalized, err := runVerdictGate(stage, distillAnchors.Accepted, logger)
@@ -461,7 +464,7 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 		"anchor-postrefine-survivors.txt",
 		"gate-anchors-postrefine.log",
 		logger,
-		"refiner",
+		refinerSeat,
 	)
 	if err != nil {
 		return result, err
@@ -536,7 +539,7 @@ func requireNightSeatLaw(law seat.SeatLaw) error {
 		want seat.SeatPolicy
 	}{
 		{name: "distill", got: law.Distill, want: required.Distill},
-		{name: "refiner", got: law.Refiner, want: required.Refiner},
+		{name: refinerSeat, got: law.Refiner, want: required.Refiner},
 	} {
 		if row.got != row.want {
 			return fmt.Errorf(
@@ -798,7 +801,13 @@ func runPinGate(
 		}
 	}
 	if err := logger.event(
-		nightLogEvent{Phase: "gate", At: logger.now(), Gate: "PIN", Verdict: "PASS", PhaseAfter: phaseAfter},
+		nightLogEvent{
+			Phase:      gatePhase,
+			At:         logger.now(),
+			Gate:       "PIN",
+			Verdict:    gateVerdictPass,
+			PhaseAfter: phaseAfter,
+		},
 	); err != nil {
 		return gate.PinnedPaths{}, err
 	}
@@ -848,7 +857,7 @@ func runCoverageGate(
 		return gate.CoverageResult{}, err
 	}
 	if err := logger.event(
-		nightLogEvent{Phase: "gate", At: logger.now(), Gate: "COVERAGE+CONDUCT", Verdict: "PASS"},
+		nightLogEvent{Phase: gatePhase, At: logger.now(), Gate: "COVERAGE+CONDUCT", Verdict: gateVerdictPass},
 	); err != nil {
 		return gate.CoverageResult{}, err
 	}
@@ -891,7 +900,13 @@ func runAnchorGate(
 		return gate.AnchorResult{}, nil, err
 	}
 	if err := logger.event(
-		nightLogEvent{Phase: "gate", At: logger.now(), Gate: "ANCHORS", Verdict: "PASS", PhaseAfter: phaseAfter},
+		nightLogEvent{
+			Phase:      gatePhase,
+			At:         logger.now(),
+			Gate:       "ANCHORS",
+			Verdict:    gateVerdictPass,
+			PhaseAfter: phaseAfter,
+		},
 	); err != nil {
 		return gate.AnchorResult{}, nil, err
 	}
@@ -935,7 +950,7 @@ func runVerdictGate(
 		return nil, err
 	}
 	if err := logger.event(
-		nightLogEvent{Phase: "gate", At: logger.now(), Gate: "VERDICTS", Verdict: "PASS"},
+		nightLogEvent{Phase: gatePhase, At: logger.now(), Gate: "VERDICTS", Verdict: gateVerdictPass},
 	); err != nil {
 		return nil, err
 	}
@@ -1109,7 +1124,7 @@ func corpusComments(raw []byte) []string {
 func persistSeatResult(stage artifact.StageLayout, role string, result seat.SeatResult) error {
 	prefix := role
 	lastName := role + "-last-message.txt"
-	if role == "refiner" {
+	if role == refinerSeat {
 		lastName = "verify-last-message.txt"
 	}
 	summary := fmt.Sprintf(

@@ -82,16 +82,16 @@ func archiveFormat(path string) string {
 		strings.HasSuffix(low, ".tar.xz") ||
 		strings.HasSuffix(low, ".txz") ||
 		strings.HasSuffix(low, ".tar") {
-		return "tar"
+		return kindTAR
 	}
 	if strings.HasSuffix(low, ".zip") {
-		return "zip"
+		return kindZIP
 	}
 	if strings.HasSuffix(low, ".7z") {
 		return "7z"
 	}
 	if strings.HasSuffix(low, ".rar") {
-		return "rar"
+		return kindRAR
 	}
 	f, e := os.Open(path)
 	if e != nil {
@@ -106,17 +106,17 @@ func archiveFormat(path string) string {
 	_, _ = io.ReadFull(f, head)
 	switch {
 	case head[0] == 'P' && head[1] == 'K':
-		return "zip"
+		return kindZIP
 	case head[0] == '7' && head[1] == 'z' && head[2] == 0xbc && head[3] == 0xaf:
 		return "7z"
 	case strings.HasPrefix(string(head), "Rar!"):
-		return "rar"
+		return kindRAR
 	case head[0] == 0x1f && head[1] == 0x8b:
-		return "tar"
+		return kindTAR
 	case head[0] == 'B' && head[1] == 'Z':
-		return "tar"
+		return kindTAR
 	case head[0] == 0xfd && head[1] == '7' && head[2] == 'z' && head[3] == 'X':
-		return "tar"
+		return kindTAR
 	}
 	return ""
 }
@@ -125,13 +125,13 @@ func archiveFormat(path string) string {
 // expansion limits before any member is read.
 func ListArchive(path string) ([]Member, error) {
 	switch archiveFormat(path) {
-	case "zip":
+	case kindZIP:
 		return listZip(path)
-	case "tar":
+	case kindTAR:
 		return listTar(path)
 	case "7z":
 		return list7z(path)
-	case "rar":
+	case kindRAR:
 		return listRAR(path)
 	default:
 		return nil, fmt.Errorf("unsupported or unrecognized archive format: %s", path)
@@ -446,13 +446,13 @@ func ReadArchiveMember(path, name string) ([]byte, error) {
 		return nil, e
 	}
 	switch archiveFormat(path) {
-	case "zip":
+	case kindZIP:
 		return readZip(path, name)
-	case "tar":
+	case kindTAR:
 		return readTar(path, name)
 	case "7z":
 		return read7z(path, name)
-	case "rar":
+	case kindRAR:
 		return readRAR(path, name)
 	default:
 		return nil, fmt.Errorf("unsupported or unrecognized archive format: %s", path)
@@ -591,7 +591,7 @@ func (h *Harvester) Archive(ctx context.Context, source, member string) (Result,
 				stored.Path,
 			)
 			stored.Source = source
-			stored.Kind = "archive_member"
+			stored.Kind = kindArchiveMember
 			stored.Content = content
 			stored.Chars = len(content)
 			stored.ContentChars = len(content)
@@ -603,16 +603,16 @@ func (h *Harvester) Archive(ctx context.Context, source, member string) (Result,
 			// A nil converter is useful for archive browsing tests and raw text
 			// members. Preserve bytes verbatim; document conversion itself remains
 			// injected and is still required for PDFs/Office/HTML extraction.
-			if h.options.Converter == nil && (kind == "txt" || kind == "html") {
+			if h.options.Converter == nil && (kind == kindTXT || kind == kindHTML) {
 				converted = string(data)
 			} else {
-				return Result{Source: source, Kind: "archive_member", Error: convErr.Error()}, convErr
+				return Result{Source: source, Kind: kindArchiveMember, Error: convErr.Error()}, convErr
 			}
 		}
 		chars := contentChars(converted)
 		return Result{
 			Source:       source,
-			Kind:         "archive_member",
+			Kind:         kindArchiveMember,
 			Content:      converted,
 			Bytes:        int64(len(data)),
 			Chars:        chars,
@@ -636,7 +636,7 @@ func (h *Harvester) archiveList(ctx context.Context, source string) (Result, err
 	chars := contentChars(content)
 	return Result{
 		Source:       source,
-		Kind:         "archive",
+		Kind:         kindArchive,
 		Content:      content,
 		Members:      members,
 		Path:         download.Path,

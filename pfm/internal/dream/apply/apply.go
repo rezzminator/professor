@@ -26,6 +26,8 @@ import (
 	"hostops/pfm/internal/dream/organ"
 )
 
+const noExplorerArchive = "NONE"
+
 var (
 	objectIDPattern  = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 	sha256Pattern    = regexp.MustCompile(`^[0-9a-f]{64}$`)
@@ -551,7 +553,7 @@ func prepare(
 		operations = append(operations, fmt.Sprintf("SURFACE\tagents/%s.md\t%d map rows", mapLane, lineCount(body)))
 	}
 
-	explorerArchive := "NONE"
+	explorerArchive := noExplorerArchive
 	if state.explorer {
 		name, err := availableArchiveName(request.Repo.Organ, "explorer-index.md", input.today, reservedArchives)
 		if err != nil {
@@ -757,7 +759,7 @@ func revalidateOrganState(repo artifact.RepoContext, before organState, prepared
 			return fmt.Errorf("archive target collision after preparation: %s", filepath.Join(repo.Organ, path))
 		}
 	}
-	if prepared.explorerArchive != "NONE" {
+	if prepared.explorerArchive != noExplorerArchive {
 		archive := filepath.Join(repo.Organ, "archive", prepared.explorerArchive)
 		if exists, err := pathExists(archive); err != nil {
 			return err

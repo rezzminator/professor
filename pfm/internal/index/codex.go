@@ -75,7 +75,7 @@ func parseCodex(
 			sourceKnown = true
 		}
 		if source := firstNonEmpty(record.ThreadSource, record.Payload.ThreadSource); source != "" {
-			rollout.UserThread = source == "user"
+			rollout.UserThread = source == messageRoleUser
 			sourceKnown = true
 		}
 
@@ -96,7 +96,7 @@ func parseCodex(
 		// counting it too would double-count. Queued injects delivered
 		// mid-turn write ONLY the response_item.
 		if record.Type == "response_item" && record.Payload.Type == "message" &&
-			record.Payload.Role == "user" {
+			record.Payload.Role == messageRoleUser {
 			prompt := naming.FlattenPromptText(record.Payload.Content)
 			if prompt == "" || protocolPrompt(prompt) {
 				return

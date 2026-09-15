@@ -519,7 +519,7 @@ func validateThemeURL(raw string) error {
 		return nil
 	}
 	host := parsed.Hostname()
-	if parsed.Scheme == "http" && (host == "127.0.0.1" || host == "::1" || host == "localhost") {
+	if parsed.Scheme == httpProtocol && (host == "127.0.0.1" || host == "::1" || host == "localhost") {
 		return nil
 	}
 	return fmt.Errorf("must be HTTPS (HTTP is accepted only for loopback tests)")

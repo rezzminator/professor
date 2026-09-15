@@ -18,9 +18,9 @@ func (h *Harvester) storeResult(
 	if err != nil {
 		return Result{Source: source, Kind: kind, Error: err.Error(), Rungs: rungs}
 	}
-	status := "miss"
+	status := cacheStatusMiss
 	if options.Refresh {
-		status = "refresh"
+		status = cacheStatusRefresh
 	}
 	// The public receipt reports the on-disk artifact size, including its
 	// provenance frontmatter, just like the Python cache result. Fall back to
@@ -97,7 +97,7 @@ func (h *Harvester) resultFromCache(source, kind, content string, meta map[strin
 		Content:      truncateInline(content, h.options.MaxInlineChars),
 		Path:         path,
 		Method:       meta["method"],
-		CacheStatus:  "hit",
+		CacheStatus:  cacheStatusHit,
 		Bytes:        bytes,
 		Chars:        chars,
 		ContentChars: chars,

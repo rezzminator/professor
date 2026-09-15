@@ -18,12 +18,15 @@ import (
 	"hostops/pfm/internal/mcpserv"
 )
 
-const mcpProtocolVersion = "2025-06-18"
+const (
+	mcpProtocolVersion = "2025-06-18"
+	harvesterServer    = "harvester"
+)
 
 var chatMCPTools = mcpserv.ToolNames()
 
 var harvesterMCPTools = []string{
-	"archive", "fetch", "fetchImage", "findWorks", "search", "searchCache",
+	archiveCommand, "fetch", "fetchImage", "findWorks", "search", "searchCache",
 }
 
 // mcpDaemonStatus is the stable local health document consumed by doctor and
@@ -62,10 +65,10 @@ func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
 	// daemon cannot serve.
 	servers := map[string][]string{}
 	if options.Chat != nil {
-		servers["chat"] = append([]string(nil), chatMCPTools...)
+		servers[chatCommand] = append([]string(nil), chatMCPTools...)
 	}
 	if options.Harvester != nil {
-		servers["harvester"] = append([]string(nil), harvesterMCPTools...)
+		servers[harvesterServer] = append([]string(nil), harvesterMCPTools...)
 	}
 	status := mcpDaemonStatus{
 		PFMVersion:      options.Version,
@@ -97,9 +100,9 @@ func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
 			}
 			writeMCPJSON(writer, current)
 		case "/mcp/chat":
-			serveMCPDaemonRoute(writer, request, options.Chat, "chat")
+			serveMCPDaemonRoute(writer, request, options.Chat, chatCommand)
 		case "/mcp/harvester":
-			serveMCPDaemonRoute(writer, request, options.Harvester, "harvester")
+			serveMCPDaemonRoute(writer, request, options.Harvester, harvesterServer)
 		default:
 			http.NotFound(writer, request)
 		}
@@ -138,8 +141,8 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int
 		fmt.Fprintf(stderr, "pfm mcp serve: configured port %d is outside 1..65535\n", port)
 		return 2
 	}
-	chatEnabled := runtime.Config.MCPServers["chat"].Enabled
-	harvesterEnabled := runtime.Config.MCPServers["harvester"].Enabled
+	chatEnabled := runtime.Config.MCPServers[chatCommand].Enabled
+	harvesterEnabled := runtime.Config.MCPServers[harvesterServer].Enabled
 	if !chatEnabled && !harvesterEnabled {
 		fmt.Fprintf(
 			stderr,

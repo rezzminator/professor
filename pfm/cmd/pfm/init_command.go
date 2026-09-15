@@ -16,12 +16,14 @@ import (
 	"hostops/pfm/internal/professor"
 )
 
+const claudeInstructionsFile = "CLAUDE.md"
+
 var initTemplatePaths = []struct {
 	source string
 	target string
 	skip   string
 }{
-	{source: "project/CLAUDE.md", target: "CLAUDE.md"},
+	{source: "project/CLAUDE.md", target: claudeInstructionsFile},
 	{source: "project/settings.json", target: ".claude/settings.json"},
 	{source: "project/rumdl-policy.toml", target: ".rumdl.toml"},
 	{source: "project/commands", target: ".claude/commands"},
@@ -43,7 +45,7 @@ type initCopy struct {
 
 func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := newFlagSet(
-		"init",
+		initCommand,
 		"usage: pfm init [dir] [--force]",
 		stderr,
 	)
@@ -211,7 +213,7 @@ func addScaffoldMarker(local, template, sha string, raw []byte) []byte {
 		template,
 		sha,
 	)
-	if local != "CLAUDE.md" && local != "AGENTS.md" && strings.HasSuffix(local, ".md") &&
+	if local != claudeInstructionsFile && local != "AGENTS.md" && strings.HasSuffix(local, ".md") &&
 		strings.HasPrefix(string(raw), "---\n") {
 		return append(append([]byte("---\n"), []byte(marker)...), raw[len("---\n"):]...)
 	}
@@ -288,7 +290,7 @@ func mainWorktreeOf(root string) string {
 }
 
 func isSourceRepo(root string) bool {
-	for _, relative := range []string{"CLAUDE.md", "AGENTS.md", ".claude/settings.json"} {
+	for _, relative := range []string{claudeInstructionsFile, "AGENTS.md", ".claude/settings.json"} {
 		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative))); err != nil {
 			return false
 		}

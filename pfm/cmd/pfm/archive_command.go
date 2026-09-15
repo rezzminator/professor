@@ -48,7 +48,7 @@ func (adapter killStoreAdapter) Unkill(ctx context.Context, id string) error {
 // came from. Nothing here deletes anything, ever.
 func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	flags := newFlagSet(
-		"archive",
+		archiveCommand,
 		"usage: pfm archive [--apply] [--subagents [--older-than DAYS]] [--restore id] [--prune-orphans]",
 		stderr,
 	)

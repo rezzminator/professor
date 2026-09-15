@@ -70,7 +70,7 @@ func updateSettings(
 	// always in agreement) — converges on the overlay; a genuinely custom
 	// command (an operator's own statusline) is left exactly as it is.
 	status, _ := document["statusLine"].(map[string]any)
-	currentStatus, _ := status["command"].(string)
+	currentStatus, _ := status[configCommandKey].(string)
 	switch {
 	case uninstall:
 		if currentStatus == overlayStatusCommand || RawStatusLineCommand(home, currentStatus) {
@@ -79,8 +79,8 @@ func updateSettings(
 		}
 	case currentStatus == "":
 		document["statusLine"] = map[string]any{
-			"type":                 "command",
-			"command":              overlayStatusCommand,
+			configTypeKey:          commandType,
+			configCommandKey:       overlayStatusCommand,
 			"padding":              float64(0),
 			"refreshInterval":      float64(3),
 			"hideVimModeIndicator": true,
@@ -88,8 +88,8 @@ func updateSettings(
 		changed = true
 	case currentStatus != overlayStatusCommand &&
 		(strings.Contains(currentStatus, "statusline-command.sh") || RawStatusLineCommand(home, currentStatus)):
-		status["type"] = "command"
-		status["command"] = overlayStatusCommand
+		status[configTypeKey] = commandType
+		status[configCommandKey] = overlayStatusCommand
 		changed = true
 	}
 
@@ -100,14 +100,14 @@ func updateSettings(
 		kept := hooks[:0]
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
-			command, _ := hook["command"].(string)
+			command, _ := hook[configCommandKey].(string)
 			original := command
 			if !uninstall && strings.Contains(command, "cc-usage-hook.sh") {
 				command = usageCommand
 			}
 			if command != original {
-				hook["command"] = command
-				hook["type"] = "command"
+				hook[configCommandKey] = command
+				hook[configTypeKey] = commandType
 				changed = true
 			}
 			if isRetiredHookCommand(command, pfmBinary) {
@@ -132,13 +132,13 @@ func updateSettings(
 			hooks, _ := entry["hooks"].([]any)
 			for _, hookValue := range hooks {
 				hook, _ := hookValue.(map[string]any)
-				command, _ := hook["command"].(string)
+				command, _ := hook[configCommandKey].(string)
 				if command == exploreDenyCommand {
-					if entry["matcher"] != "Agent|Task" {
+					if entry["matcher"] != hookExploreMatcher {
 						if settingsHookEntryHasMixedOwnership(entry, pfmBinary) {
 							continue
 						}
-						entry["matcher"] = "Agent|Task"
+						entry["matcher"] = hookExploreMatcher
 						changed = true
 					}
 				}
@@ -152,7 +152,7 @@ func updateSettings(
 		kept := hooks[:0]
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
-			command, _ := hook["command"].(string)
+			command, _ := hook[configCommandKey].(string)
 			if isRetiredHookCommand(command, pfmBinary) {
 				changed = true
 				continue
@@ -243,7 +243,7 @@ func hasPreservedMixedExploreDenyMatcher(raw []byte, pfmBinary string) bool {
 		hooks, _ := entry["hooks"].([]any)
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
-			if hook["command"] == exploreDeny {
+			if hook[configCommandKey] == exploreDeny {
 				return true
 			}
 		}
@@ -256,7 +256,7 @@ func rewriteCommandFields(value any, rewrite func(string) string) bool {
 	switch typed := value.(type) {
 	case map[string]any:
 		for key, child := range typed {
-			if key == "command" {
+			if key == configCommandKey {
 				if command, ok := child.(string); ok {
 					updated := rewrite(command)
 					if updated != command {
@@ -329,9 +329,9 @@ func rewriteMemoryHelperHookPaths(raw []byte, paths map[string]string, home stri
 				if !ok {
 					return nil, false, fmt.Errorf("settings hook must be an object")
 				}
-				command, _ := hook["command"].(string)
-				if replacement, ok := commands[command]; ok && hook["type"] == "command" {
-					hook["command"] = replacement
+				command, _ := hook[configCommandKey].(string)
+				if replacement, ok := commands[command]; ok && hook[configTypeKey] == commandType {
+					hook[configCommandKey] = replacement
 					changed = true
 				} else {
 					// Refusal is intentionally more conservative than rewriting:
@@ -419,7 +419,7 @@ func retiredHookCommandName(command string) (string, bool) {
 	if command == "" {
 		return "", false
 	}
-	for _, binary := range []string{"pfm", "cc-fleet"} {
+	for _, binary := range []string{MCPClientPFM, legacyFleetBinary} {
 		for _, retired := range retiredHookCommands {
 			full := binary + " " + retired.Subcommand
 			if command == full || strings.HasSuffix(command, "/"+full) {
@@ -514,7 +514,7 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 	if !found || strings.TrimSpace(rest) == "" {
 		return "", false
 	}
-	isPFMBinary := head == pfmBinary || head == "pfm" || head == "cc-fleet" ||
+	isPFMBinary := head == pfmBinary || head == MCPClientPFM || head == legacyFleetBinary ||
 		strings.HasSuffix(head, "/pfm") || strings.HasSuffix(head, "/cc-fleet")
 	if !isPFMBinary {
 		return "", false
@@ -565,7 +565,7 @@ func UnknownPFMHookCommands(raw []byte, home string) []string {
 			hooks, _ := entry["hooks"].([]any)
 			for _, hookValue := range hooks {
 				hook, _ := hookValue.(map[string]any)
-				command, _ := hook["command"].(string)
+				command, _ := hook[configCommandKey].(string)
 				if name, ok := unknownPFMHookCommand(command, pfmBinary); ok {
 					seen[name] = true
 				}
@@ -621,7 +621,7 @@ func removeRetiredHookCommands(document map[string]any, pfmBinary string) bool {
 			entryChanged := false
 			for _, hookValue := range hooks {
 				hook, _ := hookValue.(map[string]any)
-				command, _ := hook["command"].(string)
+				command, _ := hook[configCommandKey].(string)
 				if isRetiredHookCommand(command, pfmBinary) {
 					entryChanged = true
 					eventChanged = true
@@ -678,7 +678,7 @@ func hasHookCommand(entries []map[string]any, wanted string) bool {
 		hooks, _ := entry["hooks"].([]any)
 		for _, value := range hooks {
 			hook, _ := value.(map[string]any)
-			if hook["command"] == wanted {
+			if hook[configCommandKey] == wanted {
 				return true
 			}
 		}
@@ -694,7 +694,7 @@ func hasHookCommandWithMatcher(entries []map[string]any, wanted, matcher string)
 		hooks, _ := entry["hooks"].([]any)
 		for _, value := range hooks {
 			hook, _ := value.(map[string]any)
-			if hook["command"] == wanted {
+			if hook[configCommandKey] == wanted {
 				return true
 			}
 		}
@@ -713,8 +713,8 @@ func normalizeExpectedHookTypes(document map[string]any, expected []ExpectedHook
 			hooks, _ := entry["hooks"].([]any)
 			for _, hookValue := range hooks {
 				hook, _ := hookValue.(map[string]any)
-				if hook["command"] == wanted.Command && hook["type"] != "command" {
-					hook["type"] = "command"
+				if hook[configCommandKey] == wanted.Command && hook[configTypeKey] != commandType {
+					hook[configTypeKey] = commandType
 					changed = true
 				}
 			}
@@ -737,7 +737,7 @@ func appendHookWithMatcher(document map[string]any, event, matcher, command stri
 	hooks[event] = append(values, map[string]any{
 		"matcher": matcher,
 		"hooks": []any{map[string]any{
-			"type": "command", "command": command,
+			configTypeKey: commandType, configCommandKey: command,
 		}},
 	})
 }

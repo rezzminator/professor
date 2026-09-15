@@ -407,7 +407,7 @@ func (r *dohResolver) queryType(ctx context.Context, host, qtype string) ([]net.
 	if err != nil {
 		return nil, 0, fmt.Errorf("build DoH %s request for %s: %w", qtype, host, err)
 	}
-	req.Header.Set("Accept", "application/dns-json")
+	req.Header.Set(headerAccept, "application/dns-json")
 	req.Header.Set("User-Agent", defaultUA)
 	resp, err := r.client.Do(req)
 	if err != nil {

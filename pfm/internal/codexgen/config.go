@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	configVersion = 1
-	configRelPath = ".claude/codex-build.json"
+	configVersion         = 1
+	configRelPath         = ".claude/codex-build.json"
+	suffixModeNone        = "none"
+	suffixModeStripPrefix = "strip-prefix"
 )
 
 // Config is the project-local policy for the Codex compiler.  It deliberately
@@ -253,11 +255,11 @@ func validateConfig(cfg Config) error {
 		}
 	}
 	switch cfg.SuffixMode {
-	case "project", "strip-prefix", "none":
+	case "project", suffixModeStripPrefix, suffixModeNone:
 	default:
 		return fmt.Errorf("suffixMode %q must be project, strip-prefix, or none", cfg.SuffixMode)
 	}
-	if cfg.SuffixMode == "strip-prefix" && cfg.SuffixPrefix == "" {
+	if cfg.SuffixMode == suffixModeStripPrefix && cfg.SuffixPrefix == "" {
 		return errors.New("suffixPrefix is required when suffixMode is strip-prefix")
 	}
 	return nil

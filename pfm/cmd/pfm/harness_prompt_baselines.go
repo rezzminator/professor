@@ -13,6 +13,8 @@ import (
 	config "hostops/pfm/internal/config"
 )
 
+const unknownState = "unknown"
+
 // Baselines follow stable requested aliases. Resolved IDs and the baseline's
 // captured model are provenance, never evidence of behavioral drift by themselves.
 type harnessPromptModel struct{ alias, stem string }
@@ -47,7 +49,7 @@ func printModelHarnessPromptDoctor(
 	verboseDir string,
 ) int {
 	fmt.Fprintf(stdout, "doctor: harness-prompt requested=%s\n", model.alias)
-	baselinePath := filepath.Join(home, ".local", "share", "pfm", "install", "prompts", model.stem+".sha256")
+	baselinePath := filepath.Join(home, ".local", "share", "pfm", installCommand, "prompts", model.stem+".sha256")
 	raw, err := os.ReadFile(baselinePath)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: harness-prompt: baseline unreadable (%v) — run pfm install\n", err)
@@ -79,10 +81,10 @@ func printModelHarnessPromptDoctor(
 	captured, captureErr := configuredHarnessCapture(ctx, home, machine, model.alias, verboseDir)
 	resolved, version := captured.ResolvedModel, captured.CLIVersion
 	if resolved == "" {
-		resolved = "unknown"
+		resolved = unknownState
 	}
 	if version == "" {
-		version = "unknown"
+		version = unknownState
 	}
 	fmt.Fprintf(
 		stdout,

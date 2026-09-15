@@ -16,6 +16,125 @@ import (
 	"time"
 )
 
+const (
+	schemeHTTP    = "http"
+	schemeHTTPS   = "https"
+	headerAccept  = "Accept"
+	headerReferer = "Referer"
+
+	extension7Z   = ".7z"
+	extensionBMP  = ".bmp"
+	extensionGIF  = ".gif"
+	extensionJPG  = ".jpg"
+	extensionJPEG = ".jpeg"
+	extensionMD   = ".md"
+	extensionPDF  = ".pdf"
+	extensionPNG  = ".png"
+	extensionRAR  = ".rar"
+	extensionSVG  = ".svg"
+	extensionTAR  = ".tar"
+	extensionTIF  = ".tif"
+	extensionTIFF = ".tiff"
+	extensionTXT  = ".txt"
+	extensionWebP = ".webp"
+	extensionZIP  = ".zip"
+
+	mediaTypeHTML     = "text/html"
+	mediaTypePlain    = "text/plain"
+	mediaTypePDF      = "application/pdf"
+	mediaTypeJSON     = "application/json"
+	mediaTypeXHTML    = "application/xhtml+xml"
+	mediaTypeXML      = "application/xml"
+	mediaTypeTextXML  = "text/xml"
+	mediaTypeMarkdown = "text/markdown"
+
+	kindArchive       = "archive"
+	kindArchiveMember = "archive_member"
+	kind7Z            = "7z"
+	kindBMP           = "bmp"
+	kindBook          = "book"
+	kindCSV           = "csv"
+	kindDOCX          = "docx"
+	kindEPUB          = "epub"
+	kindGIF           = "gif"
+	kindHTML          = "html"
+	kindImage         = "image"
+	kindJPG           = "jpg"
+	kindJSON          = "json"
+	kindPaper         = "paper"
+	kindPDF           = "pdf"
+	kindPNG           = "png"
+	kindPPTX          = "pptx"
+	kindRAR           = "rar"
+	kindSVG           = "svg"
+	kindTAR           = "tar"
+	kindTIFF          = "tiff"
+	kindTXT           = "txt"
+	kindWebP          = "webp"
+	kindXLSX          = "xlsx"
+	kindZIP           = "zip"
+
+	errorKindChallenge  = "challenge"
+	errorKindBlocked    = "blocked"
+	errorKindCancelled  = "cancelled"
+	errorKindConnect    = "connect"
+	errorKindConversion = "conversion"
+	errorKindDisabled   = "disabled"
+	errorKindConvert    = "convert"
+	errorKindDNS        = "dns"
+	errorKindInternal   = "internal"
+	errorKindInvalid    = "invalid"
+	errorKindMissing    = "missing"
+	errorKindMissingPDF = "missing_pdf"
+	errorKindOversized  = "oversized"
+	errorKindRefused    = "refused"
+	errorKindTimeout    = "timeout"
+	errorKindTooLarge   = "too_large"
+	errorKindWrongKind  = "wrong_kind"
+
+	accessGold   = "gold"
+	accessGreen  = "green"
+	accessPublic = "public"
+
+	sourceArXiv           = "arxiv"
+	sourceCORE            = "core"
+	sourceCrossref        = "crossref"
+	sourceDOAJ            = "doaj"
+	sourceDOIMirror       = "doi-mirror"
+	sourceDOIViewer       = "doi-viewer"
+	sourceELife           = "elife"
+	sourceEuropePMC       = "europepmc"
+	sourceGoogleScholar   = "google-scholar"
+	sourceGutenberg       = "gutenberg"
+	sourceInternetArchive = "internetarchive"
+	sourceNBER            = "nber"
+	sourceIPFSCatalog     = "ipfs-catalog"
+	sourceMD5Catalog      = "md5-catalog"
+	sourceOpenAlex        = "openalex"
+	sourceOpenAIRE        = "openaire"
+	sourceOSF             = "osf"
+	sourcePLOS            = "plos"
+	sourceSemanticScholar = "semanticscholar"
+	sourceUnpaywall       = "unpaywall"
+	sourceZenodo          = "zenodo"
+
+	cacheLabel                 = "cache"
+	challengeMarkerCaptcha     = "captcha"
+	challengeMarkerCloudflare  = "cloudflare"
+	cacheStatusHit             = "hit"
+	cacheStatusMiss            = "miss"
+	cacheStatusRefresh         = "refresh"
+	frontmatterSourceHarvester = "harvester"
+	localLabel                 = "local"
+	localhostName              = "localhost"
+	publicDirName              = "public"
+	rungChromeImpersonation    = "chrome-impersonation"
+	rungDirect                 = "direct"
+	searchBackendBrave         = "brave"
+	searchBackendSearXNG       = "searxng"
+	resultDetailError          = "error"
+)
+
 // ErrBrowserPolicyDenied marks a browser fetch the SSRF guard refused — a
 // private or internal address. It is POLICY, not an outage: the terminal
 // message must never tell the caller to retry a permanent refusal, and it
@@ -202,15 +321,15 @@ func New(options Options) (*Harvester, error) {
 	if err != nil {
 		return nil, err
 	}
-	ipfsCatalogURL, err := normalizeProviderBaseURL("ipfs-catalog", options.IPFSCatalogURL)
+	ipfsCatalogURL, err := normalizeProviderBaseURL(sourceIPFSCatalog, options.IPFSCatalogURL)
 	if err != nil {
 		return nil, err
 	}
-	doiViewerURL, err := normalizeProviderBaseURL("doi-viewer", options.DOIViewerURL)
+	doiViewerURL, err := normalizeProviderBaseURL(sourceDOIViewer, options.DOIViewerURL)
 	if err != nil {
 		return nil, err
 	}
-	md5CatalogURL, err := normalizeProviderBaseURL("md5-catalog", options.MD5CatalogURL)
+	md5CatalogURL, err := normalizeProviderBaseURL(sourceMD5Catalog, options.MD5CatalogURL)
 	if err != nil {
 		return nil, err
 	}

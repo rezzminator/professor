@@ -57,7 +57,7 @@ func updateCodexHooks(
 		kept := hooks[:0]
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
-			command, _ := hook["command"].(string)
+			command, _ := hook[configCommandKey].(string)
 			if isRetiredHookCommand(command, pfmBinary) || retiredCommands[command] {
 				changed = true
 				continue
@@ -90,9 +90,9 @@ func updateCodexHooks(
 			handlers, _ := entry["hooks"].([]any)
 			for _, value := range handlers {
 				handler, _ := value.(map[string]any)
-				if handler["command"] == codexappendix.Command(home) {
-					if handler["type"] != "command" || !jsonNumberIs(handler["timeout"], 10) {
-						handler["type"] = "command"
+				if handler[configCommandKey] == codexappendix.Command(home) {
+					if handler[configTypeKey] != commandType || !jsonNumberIs(handler["timeout"], 10) {
+						handler[configTypeKey] = commandType
 						handler["timeout"] = float64(10)
 						changed = true
 					}

@@ -25,7 +25,7 @@ func runInternalAgentOpen(
 	)
 	id := flags.String("id", "", "session id")
 	cwd := flags.String("cwd", "", "project directory")
-	configDir := flags.String("config", "", "owning Claude config directory")
+	configDir := flags.String(configCommand, "", "owning Claude config directory")
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}

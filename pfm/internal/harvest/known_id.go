@@ -15,7 +15,7 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 	if !options.Refresh {
 		if body, cachedKind, meta, path, ok := h.cache.loadAny(
 			canonical,
-			[]string{"pdf", "docx", "xlsx", "pptx", "csv", "json", "txt", "html"},
+			[]string{kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindJSON, kindTXT, kindHTML},
 		); ok {
 			return h.resultFromCache(source, cachedKind, body, meta, path)
 		}

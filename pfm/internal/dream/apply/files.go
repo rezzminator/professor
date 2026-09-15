@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -359,30 +358,6 @@ func commit(
 	if err := writePrivateExclusive(filepath.Join(layout.Root, "APPLIED"), prepared.appliedRaw); err != nil {
 		return rollback(fmt.Errorf("mark stage applied: %w", err))
 	}
-	return nil
-}
-
-// copyFile is kept narrowly scoped for tests that verify the commit helper's
-// exclusive-create behavior with a short writer.
-func copyFile(destination string, source io.Reader) error {
-	file, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	keep := false
-	defer func() {
-		_ = file.Close()
-		if !keep {
-			_ = os.Remove(destination)
-		}
-	}()
-	if _, err := io.Copy(file, source); err != nil {
-		return err
-	}
-	if err := file.Close(); err != nil {
-		return err
-	}
-	keep = true
 	return nil
 }
 

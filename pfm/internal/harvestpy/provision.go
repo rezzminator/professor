@@ -105,15 +105,6 @@ func environmentBytes(platform Platform) int64 {
 	return -1
 }
 
-// This is the cold-cache uv/pip download closure measured from the embedded
-// frozen lock on 2026-08-18.  It includes source archives where the lock has
-// no compatible wheel, plus all CUDA/Torch/Docling artifacts required by the
-// old converter behavior.
-func packageDownloadBytes(platform Platform) int64 {
-	bytes, _, _ := packagePlan(platform)
-	return bytes
-}
-
 func packagePlan(platform Platform) (int64, string, []string) {
 	switch platform {
 	case Platform{GOOS: "linux", GOARCH: "amd64"}:

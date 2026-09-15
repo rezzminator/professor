@@ -230,19 +230,6 @@ func renderDreamApplyCommand(options dreamNightOptions, stage string, configPath
 	)
 }
 
-func runDream(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	ctx, stop := dreamCommandContext()
-	defer stop()
-	return runDreamWith(
-		ctx,
-		args,
-		stdin,
-		stdout,
-		stderr,
-		productionDreamRuntime(),
-	)
-}
-
 func runDreamConfigured(
 	args []string,
 	stdin io.Reader,

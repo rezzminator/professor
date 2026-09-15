@@ -454,20 +454,8 @@ func opencodeContinuityBanner(row compose.Row) string {
 	return banner.String()
 }
 
-func codexCommand(machine pfmconfig.Config, args ...string) string {
-	return codexCommandFor(machine, 1, args...)
-}
-
 func codexCommandFor(machine pfmconfig.Config, account int, args ...string) string {
 	return codexCommandWithAccount(hygiene, machine, account, args...)
-}
-
-func codexCommandWith(
-	environmentStrip string,
-	machine pfmconfig.Config,
-	args ...string,
-) string {
-	return codexCommandWithAccount(environmentStrip, machine, 1, args...)
 }
 
 func codexCommandWithAccount(

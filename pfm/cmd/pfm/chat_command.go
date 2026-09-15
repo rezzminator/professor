@@ -347,14 +347,6 @@ type chatNameDelivery func(
 	string,
 ) (int, string, error)
 
-func deliverChatName(
-	ctx context.Context,
-	chat headless.Chat,
-	name string,
-) (int, string, error) {
-	return deliverChatNameWithRuntime(ctx, chat, name)
-}
-
 func deliverChatNameWithRuntime(
 	ctx context.Context,
 	chat headless.Chat,

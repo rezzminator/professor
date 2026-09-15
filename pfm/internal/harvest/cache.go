@@ -1,7 +1,6 @@
 package harvest
 
 import (
-	"context"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
@@ -364,5 +363,3 @@ func (c *negativeCache) put(key string, result Result) {
 	c.entries[key] = negativeEntry{at: time.Now(), ttl: ttl, result: result}
 	c.mu.Unlock()
 }
-
-func cacheError(err error) bool { return err != nil && !errors.Is(err, context.Canceled) }

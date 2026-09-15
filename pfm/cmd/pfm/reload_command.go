@@ -118,15 +118,6 @@ func (tmux reloadCommandTmux) Display(ctx context.Context, socket, pane, message
 	return tmux.command(ctx, socket, "display-message", "-t", pane, message).Run()
 }
 
-func runChatReload(args []string, stdout, stderr io.Writer) int {
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: load config: %v\n", err)
-		return 1
-	}
-	return runChatReloadWithRuntime(args, stdout, stderr, runtime)
-}
-
 func runChatReloadWithRuntime(
 	args []string,
 	stdout, stderr io.Writer,

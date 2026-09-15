@@ -442,16 +442,6 @@ func (resolver *Resolver) resolveCxWindow(want string, panes []Pane) Outcome {
 	}
 }
 
-// bookmarkLabel and containsMedal read the statusline through naming, the one
-// package that owns that scrape (K3).
-func bookmarkLabel(capture string) string {
-	return naming.BookmarkLabel(capture)
-}
-
-func containsMedal(value string) bool {
-	return naming.ContainsMedal(value)
-}
-
 func isClaudePaneCommand(command string, binaries ...string) bool {
 	return isClaudeCommand(command, binaries...)
 }

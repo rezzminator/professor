@@ -2,7 +2,6 @@ package harvestmcp
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -310,15 +309,6 @@ func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
 	if !strings.Contains(onText, "`search`") {
 		t.Fatalf("searchCache miss text %q dropped `search` with a backend configured", onText)
 	}
-}
-
-func mustWorkingDir(t *testing.T) string {
-	t.Helper()
-	working, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return working
 }
 
 func contains(value, needle string) bool {

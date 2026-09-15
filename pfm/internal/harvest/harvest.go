@@ -151,30 +151,6 @@ func isLocalSource(source string) bool {
 	return filepath.IsAbs(source) || strings.HasPrefix(source, ".") || strings.ContainsAny(source, `/\\`)
 }
 
-func (h *Harvester) fetchTitle(ctx context.Context, title string, options FetchOptions) Result {
-	candidates, err := h.resolver().ResolveTitle(ctx, title)
-	if err != nil {
-		return Result{Source: title, Error: err.Error()}
-	}
-	for _, candidate := range candidates {
-		var result Result
-		if doi := DOIFrom(
-			candidate.URL,
-		); doi != "" && !strings.HasPrefix(strings.ToLower(candidate.URL), "http://") &&
-			!strings.HasPrefix(strings.ToLower(candidate.URL), "https://") {
-			result = h.fetchOA(ctx, doi, nil, options)
-		} else {
-			result = h.fetchURL(ctx, candidate.URL, options)
-		}
-		if result.Error == "" {
-			result.Source = title
-			result.Rungs = append([]string{"title:" + candidate.Source}, result.Rungs...)
-			return result
-		}
-	}
-	return Result{Source: title, Error: fmt.Sprintf("no confident work match for %q; use findWorks", title)}
-}
-
 func (h *Harvester) fetchURL(ctx context.Context, source string, options FetchOptions) Result {
 	return h.fetchURLWithPolicy(ctx, source, options, true)
 }

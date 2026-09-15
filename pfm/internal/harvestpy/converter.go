@@ -281,27 +281,6 @@ func (converter *Converter) Close() error {
 	return nil
 }
 
-func firstJSONLine(body []byte) ([]byte, []byte, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(body))
-	scanner.Buffer(make([]byte, 64*1024), 128<<20)
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return nil, nil, err
-		}
-		return nil, nil, errors.New("empty subprocess stdout")
-	}
-	line := append([]byte(nil), scanner.Bytes()...)
-	position := bytes.Index(body, scanner.Bytes())
-	if position < 0 {
-		return nil, nil, errors.New("response scanner offset unavailable")
-	}
-	end := position + len(scanner.Bytes())
-	if end < len(body) && body[end] == '\n' {
-		end++
-	}
-	return line, body[end:], nil
-}
-
 // Smoke invokes the same worker with a no-download import check.
 func (converter *Converter) Smoke(ctx context.Context) (map[string]any, error) {
 	line, stderr, err := converter.request(ctx, []byte("{\"op\":\"smoke\"}"))

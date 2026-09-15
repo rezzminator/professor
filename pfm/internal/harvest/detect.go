@@ -166,15 +166,6 @@ func baseContentType(value string) string {
 	return strings.ToLower(strings.TrimSpace(strings.SplitN(value, ";", 2)[0]))
 }
 
-// imageExtension is used by media cache naming and follows detect.image_ext.
-func imageExtension(location, fallback string) string {
-	ext := strings.ToLower(filepath.Ext(stripLocationQuery(location)))
-	if _, ok := detectImageExts[ext]; ok {
-		return ext
-	}
-	return fallback
-}
-
 func looksHTML(sample string) bool {
 	low := strings.ToLower(sample)
 	for _, m := range []string{"<html", "<!doctype html", "<head", "<body", "<div", "<table", "<article", "<section", "<span", "<p>", "<p "} {
@@ -184,4 +175,3 @@ func looksHTML(sample string) bool {
 	}
 	return false
 }
-func hasMagic(body []byte, magic ...byte) bool { return bytes.HasPrefix(body, magic) }

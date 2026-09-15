@@ -150,7 +150,8 @@ func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, erro
 		return LSOutput{}, err
 	}
 	rows := make([]ChatRow, 0, len(listed.Rows))
-	for _, row := range listed.Rows {
+	for index := range listed.Rows {
+		row := &listed.Rows[index]
 		session := row.SessionName
 		if session == "" {
 			session = row.ID
@@ -161,7 +162,7 @@ func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, erro
 		}
 		rows = append(rows, ChatRow{
 			Session: session, ID: row.ID, Engine: compose.EngineForKind(row.Kind),
-			State: chatRowState(row), Dir: row.CWD, Project: row.Project, Name: row.Name,
+			State: chatRowState(*row), Dir: row.CWD, Project: row.Project, Name: row.Name,
 			Account: account, Kind: row.Kind.String(), Killed: row.Killed,
 			Socket: row.Socket, Pane: row.PaneID,
 		})
@@ -225,13 +226,14 @@ func (current *backend) callerForRequest(
 	}
 	var match ChatRow
 	count := 0
-	for _, row := range listed.Rows {
+	for index := range listed.Rows {
+		row := &listed.Rows[index]
 		if row.ID != threadID || row.Engine != pfmengine.Codex || row.Killed ||
 			row.Kind != compose.LiveCodex.String() ||
 			row.Session == "" || row.Socket == "" || row.Pane == "" {
 			continue
 		}
-		match = row
+		match = *row
 		count++
 	}
 	if count == 0 {

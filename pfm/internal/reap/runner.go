@@ -318,8 +318,9 @@ func (runner *Runner) probeSockets(
 			socket.ProbeError = err.Error()
 		}
 		panePIDs := make([]int, 0, len(panes))
-		for _, pane := range panes {
-			allPanes = append(allPanes, pane)
+		for index := range panes {
+			pane := &panes[index]
+			allPanes = append(allPanes, *pane)
 			panePIDs = append(panePIDs, pane.PID)
 			if pane.Attached {
 				socket.Attached = true
@@ -343,8 +344,8 @@ func (runner *Runner) probeSockets(
 		return nil, fmt.Errorf("read session crumbs: %w", err)
 	}
 	byName := make(map[string]int, len(sockets))
-	for index, socket := range sockets {
-		byName[socket.Name] = index
+	for index := range sockets {
+		byName[sockets[index].Name] = index
 	}
 	for _, crumb := range crumbs.Crumbs {
 		index, found := byName[crumb.Socket]
@@ -430,7 +431,8 @@ func (runner *Runner) recentSessions(
 ) map[string]struct{} {
 	recent := make(map[string]struct{})
 	cutoff := runner.now().Add(-window)
-	for _, socket := range sockets {
+	for socketIndex := range sockets {
+		socket := &sockets[socketIndex]
 		for index, path := range socket.transcripts {
 			info, err := os.Stat(path)
 			if err != nil || !info.ModTime().After(cutoff) {
@@ -533,8 +535,8 @@ func (runner *Runner) apply(
 				break
 			}
 			attached := false
-			for _, pane := range panes {
-				if pane.Attached {
+			for index := range panes {
+				if panes[index].Attached {
 					attached = true
 				}
 			}

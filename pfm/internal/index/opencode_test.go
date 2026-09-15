@@ -121,7 +121,8 @@ CREATE INDEX part_session_idx ON part (session_id);`
 		{"m2", "i2", "ses_root", "now generalize", 200, "plan", "openai", "m2"},
 		{"m3", "i3", "ses_child", "child probe", 150, "explore", "anthropic", "claude"},
 	}
-	for _, p := range prompts {
+	for i := range prompts {
+		p := &prompts[i]
 		if _, err := db.Exec(
 			`INSERT INTO message (id, session_id, time_created, time_updated, data)
 			 VALUES (?, ?, ?, ?, json_object(

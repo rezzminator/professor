@@ -270,7 +270,7 @@ func Truncate(value string, limit int) string {
 		return value
 	}
 	value = value[:limit]
-	for !utf8.ValidString(value) && len(value) > 0 {
+	for !utf8.ValidString(value) && value != "" {
 		value = value[:len(value)-1]
 	}
 	return value

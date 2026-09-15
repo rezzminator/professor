@@ -14,9 +14,9 @@ const lessonMaxBytes = 240
 var (
 	anchorPattern      = regexp.MustCompile("^- `([^`]+)` — (blob|tree) `([0-9a-f]{12})`$")
 	mapFilenamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*\.md$`)
-	terminalRange      = regexp.MustCompile(`^(.+):([0-9]+(?:-[0-9]+)?)$`)
-	multipleRanges     = regexp.MustCompile(`:[0-9]+(?:-[0-9]+)?[,;:].+$`)
-	cleanH1Pattern     = regexp.MustCompile(`^#[[:space:]]+[^#[:space:]].+$`)
+	terminalRange      = regexp.MustCompile(`^(.+):(\d+(?:-\d+)?)$`)
+	multipleRanges     = regexp.MustCompile(`:\d+(?:-\d+)?[,;:].+$`)
+	cleanH1Pattern     = regexp.MustCompile(`^#[\s\v]+[^#\s\v].+$`)
 	legacyTitlePrefix  = regexp.MustCompile(`^(C:|L:|M:|MAP[-_: ])`)
 	provenancePattern  = regexp.MustCompile(`^Provenance: ([0-9]{4}-[0-9]{2}-[0-9]{2}) · sid ([0-9a-f]{8})$`)
 )

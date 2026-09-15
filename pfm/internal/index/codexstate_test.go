@@ -56,7 +56,8 @@ func buildCodexState(t *testing.T, path string, threads ...codexStateThread) {
 	if _, err := database.Exec(string(schema)); err != nil {
 		t.Fatalf("apply Codex state schema: %v", err)
 	}
-	for _, thread := range threads {
+	for i := range threads {
+		thread := &threads[i]
 		historyMode := thread.HistoryMode
 		if historyMode == "" {
 			historyMode = "legacy"
@@ -255,9 +256,10 @@ func codexRows(t *testing.T, database *store.Store) []compose.Row {
 		Options:  compose.Options{View: compose.AllView},
 	})
 	codex := make([]compose.Row, 0, len(output.Rows))
-	for _, row := range output.Rows {
+	for i := range output.Rows {
+		row := &output.Rows[i]
 		if row.Kind == compose.ResumeCodex {
-			codex = append(codex, row)
+			codex = append(codex, *row)
 		}
 	}
 	return codex
@@ -1050,7 +1052,8 @@ func defaultCodexIDs(t *testing.T, database *store.Store) []string {
 		t.Fatalf("DefaultCandidates() error = %v", err)
 	}
 	cached := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
+	for i := range candidates {
+		candidate := &candidates[i]
 		cached = append(cached, candidate.LineageRoot)
 	}
 	sort.Strings(cached)
@@ -1064,7 +1067,8 @@ func defaultCodexIDs(t *testing.T, database *store.Store) []string {
 		Options:  compose.Options{View: compose.DefaultView},
 	})
 	composed := make([]string, 0, len(output.Rows))
-	for _, row := range output.Rows {
+	for i := range output.Rows {
+		row := &output.Rows[i]
 		if row.Kind == compose.ResumeCodex {
 			composed = append(composed, row.ID)
 		}

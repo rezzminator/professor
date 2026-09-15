@@ -173,7 +173,8 @@ func BuildCosmos(rows []Row, events []shared.CommsEvent, nowNS int64, live bool)
 	}
 
 	if live {
-		for _, row := range rows {
+		for index := range rows {
+			row := rows[index]
 			if row.Killed || row.BG || !liveRow(row) {
 				continue
 			}
@@ -186,7 +187,8 @@ func BuildCosmos(rows []Row, events []shared.CommsEvent, nowNS int64, live bool)
 	}
 
 	unsigned := 0
-	for _, event := range events {
+	for index := range events {
+		event := events[index]
 		switch event.Kind {
 		case shared.KindInject:
 			if event.SenderSession == "" && event.SenderUUID == "" && event.SenderLabel == "" {
@@ -296,8 +298,10 @@ func BuildCosmos(rows []Row, events []shared.CommsEvent, nowNS int64, live bool)
 	sort.Slice(graph.Nodes, func(left, right int) bool {
 		leftLabel := graph.Nodes[left].Label.String()
 		rightLabel := graph.Nodes[right].Label.String()
-		if folded := strings.ToLower(leftLabel); folded != strings.ToLower(rightLabel) {
-			return folded < strings.ToLower(rightLabel)
+		leftFold := strings.ToLower(leftLabel)
+		rightFold := strings.ToLower(rightLabel)
+		if leftFold != rightFold {
+			return leftFold < rightFold
 		}
 		if leftLabel != rightLabel {
 			return leftLabel < rightLabel

@@ -6,11 +6,12 @@ import (
 )
 
 func TestParseAcceptsShortAndLongSpellings(t *testing.T) {
+	const spacedCodex = " codex "
 	tests := map[string]ID{
-		"cc":      Claude,
-		"Claude":  Claude,
-		" codex ": Codex,
-		"OX":      Opencode,
+		"cc":        Claude,
+		"Claude":    Claude,
+		spacedCodex: Codex,
+		"OX":        Opencode,
 	}
 	for value, want := range tests {
 		t.Run(value, func(t *testing.T) {

@@ -254,7 +254,8 @@ func computeWindowRenames(
 		return nil
 	}
 	paneByTarget := make(map[string]Pane, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := panes[index]
 		paneByTarget[pane.Socket+"\x00"+pane.PaneID] = pane
 	}
 	seenWindows := make(map[string]struct{})

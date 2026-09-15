@@ -134,14 +134,8 @@ func TestSamplerCountsClaudeAndCodexLifetimeTokensIncrementally(t *testing.T) {
 
 	claudePath := filepath.Join(root, "claude.jsonl")
 	codexPath := filepath.Join(root, "codex.jsonl")
-	claude := strings.Join([]string{
-		`{"timestamp":"2026-08-16T10:00:00Z","type":"user","message":{"role":"user"}}`,
-		`{"timestamp":"2026-08-16T11:00:00Z","type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200,"cache_creation_input_tokens":300,"output_tokens":400}}}`,
-	}, "\n") + "\n"
-	codex := strings.Join([]string{
-		`{"timestamp":"2026-08-16T10:30:00Z","type":"session_meta","payload":{}}`,
-		`{"timestamp":"2026-08-16T11:30:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9000}}}}`,
-	}, "\n") + "\n"
+	claude := `{"timestamp":"2026-08-16T10:00:00Z","type":"user","message":{"role":"user"}}` + "\n" + `{"timestamp":"2026-08-16T11:00:00Z","type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200,"cache_creation_input_tokens":300,"output_tokens":400}}}` + "\n"
+	codex := `{"timestamp":"2026-08-16T10:30:00Z","type":"session_meta","payload":{}}` + "\n" + `{"timestamp":"2026-08-16T11:30:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":9000}}}}` + "\n"
 	if err := os.WriteFile(claudePath, []byte(claude), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -552,8 +546,9 @@ func TestDockerIdentityIsResolvedOncePerCgroupID(t *testing.T) {
 
 func chatsBySocket(chats []Chat) map[string]Chat {
 	result := make(map[string]Chat, len(chats))
-	for _, chat := range chats {
-		result[chat.Socket] = chat
+	for index := range chats {
+		chat := &chats[index]
+		result[chat.Socket] = *chat
 	}
 	return result
 }

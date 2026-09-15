@@ -283,7 +283,8 @@ func NewModel(snapshot Snapshot) Model {
 	if model.samplingContext == nil {
 		model.samplingContext = context.Background()
 	}
-	for _, row := range model.rows {
+	for index := range model.rows {
+		row := &model.rows[index]
 		if row.ID != "" {
 			model.initialKilled[row.ID] = row.Killed
 		}
@@ -405,7 +406,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if !isStatsSamplingTab(model.tab) || message.generation != model.statsGeneration {
 			return model, nil
 		}
-		return model, model.startStatsSample()
+		command := model.startStatsSample()
+		return model, command
 	case cosmosSampleMsg:
 		if model.tab != TabCosmos || message.generation != model.statsGeneration {
 			return model, nil
@@ -428,7 +430,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		if model.tab != TabCosmos || message.generation != model.statsGeneration {
 			return model, nil
 		}
-		return model, model.startCosmosSample()
+		command := model.startCosmosSample()
+		return model, command
 	case cosmosTickMsg:
 		if model.tab != TabCosmos || !model.skyEnabled || message.generation != model.cosmosTickGeneration {
 			return model, nil
@@ -459,7 +462,8 @@ func (model Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		model.activity.Stamp(time.Now())
 		model.updateQuery(model.query.Value() + message.Content)
-		return model, model.wakeSky()
+		command := model.wakeSky()
+		return model, command
 	case tea.KeyMsg:
 		model.activity.Stamp(time.Now())
 		wake := model.wakeSky()
@@ -650,7 +654,8 @@ func (model Model) navigateHorizontal(direction int) (tea.Model, tea.Cmd) {
 	if model.tab == TabStats {
 		model.statsFocus = StatsFocusSubtab
 	}
-	return model, model.samplingTabTransition(previous)
+	command := model.samplingTabTransition(previous)
+	return model, command
 }
 
 func (model Model) switchTab(direction int) (tea.Model, tea.Cmd) {
@@ -659,7 +664,8 @@ func (model Model) switchTab(direction int) (tea.Model, tea.Cmd) {
 	if model.tab == TabStats {
 		model.statsFocus = StatsFocusSubtab
 	}
-	return model, model.samplingTabTransition(previous)
+	command := model.samplingTabTransition(previous)
+	return model, command
 }
 
 // samplingTabTransition owns cancellation-by-generation for the live tabs.
@@ -779,7 +785,8 @@ func (model Model) newChatEngines() []pfmengine.ID {
 		}
 		ids = append(ids, id)
 	}
-	for _, row := range model.rows {
+	for index := range model.rows {
+		row := &model.rows[index]
 		switch row.Kind {
 		case compose.NewClaude:
 			appendUnique(pfmengine.Claude)
@@ -856,9 +863,10 @@ func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {
 		case StatsFocusSubtab:
 			model.statsFocus = StatsFocusContent
 		case StatsFocusContent:
-			if model.statsSubtab == StatsChats && model.statsCursor+1 < len(model.stats.Chats) {
+			switch {
+			case model.statsSubtab == StatsChats && model.statsCursor+1 < len(model.stats.Chats):
 				model.statsCursor++
-			} else if model.statsSubtab == StatsDocker && model.statsDockerCursor+1 < len(model.stats.Docker) {
+			case model.statsSubtab == StatsDocker && model.statsDockerCursor+1 < len(model.stats.Docker):
 				model.statsDockerCursor++
 			}
 		}
@@ -867,11 +875,12 @@ func (model Model) updateStatsKey(key string) (tea.Model, tea.Cmd) {
 		case StatsFocusSubtab:
 			model.statsFocus = StatsFocusTop
 		case StatsFocusContent:
-			if model.statsSubtab == StatsChats && model.statsCursor > 0 {
+			switch {
+			case model.statsSubtab == StatsChats && model.statsCursor > 0:
 				model.statsCursor--
-			} else if model.statsSubtab == StatsDocker && model.statsDockerCursor > 0 {
+			case model.statsSubtab == StatsDocker && model.statsDockerCursor > 0:
 				model.statsDockerCursor--
-			} else {
+			default:
 				model.statsFocus = StatsFocusSubtab
 			}
 		}
@@ -966,7 +975,8 @@ func (model *Model) wakeSky() tea.Cmd {
 
 func liveSockets(rows []compose.Row) map[string]bool {
 	sockets := make(map[string]bool)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		if row.Socket != "" && isNameGroupRow(row.Kind) {
 			sockets[row.Socket] = true
 		}
@@ -976,7 +986,8 @@ func liveSockets(rows []compose.Row) map[string]bool {
 
 func liveEngineCounts(rows []compose.Row) map[pfmengine.ID]int {
 	counts := make(map[pfmengine.ID]int)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		switch row.Kind {
 		case compose.LiveCodex:
 			counts[pfmengine.Codex]++
@@ -1097,16 +1108,18 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 	fallback := model.cursor
 	rows := snapshot.Rows
 	updatePresent := false
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		if row.Kind == compose.ProfessorUpdate {
 			updatePresent = true
 			break
 		}
 	}
 	if !updatePresent {
-		for _, row := range model.rows {
+		for index := range model.rows {
+			row := &model.rows[index]
 			if row.Kind == compose.ProfessorUpdate {
-				rows = append([]compose.Row{row}, rows...)
+				rows = append([]compose.Row{*row}, rows...)
 				break
 			}
 		}
@@ -1119,11 +1132,12 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 			}
 		}
 		filtered := make([]compose.Row, 0, len(rows))
-		for _, row := range rows {
+		for index := range rows {
+			row := &rows[index]
 			if isLive(row.Kind) && model.deactivatedSockets[row.Socket] {
 				continue
 			}
-			filtered = append(filtered, row)
+			filtered = append(filtered, *row)
 		}
 		rows = filtered
 	}
@@ -1196,9 +1210,10 @@ func (model *Model) deactivate(row compose.Row) {
 	key := compose.RowKey(row)
 	fallback := model.cursor
 	kept := model.rows[:0]
-	for _, candidate := range model.rows {
-		if compose.RowKey(candidate) != key {
-			kept = append(kept, candidate)
+	for index := range model.rows {
+		candidate := &model.rows[index]
+		if compose.RowKey(*candidate) != key {
+			kept = append(kept, *candidate)
 		}
 	}
 	model.rows = kept
@@ -1289,7 +1304,8 @@ func (model *Model) rebuild(follow string, fallback int) {
 	model.search = make([]string, len(model.rows))
 	byProject := make(map[string]int)
 	model.groups = model.groups[:0]
-	for index, row := range model.rows {
+	for index := range model.rows {
+		row := &model.rows[index]
 		project := cleanField(row.Project)
 		if project == "" {
 			project = "?"
@@ -1338,14 +1354,16 @@ func (model *Model) rebuildOrder() {
 		// The update notice is an extra global action above the ordinary new-chat
 		// row. Neither row belongs to project activity order: pinning both keeps
 		// an active Professor chat from slipping between them.
-		for index, row := range model.rows {
-			if row.Kind == compose.ProfessorUpdate && model.visibleInView(row) {
+		for index := range model.rows {
+			row := &model.rows[index]
+			if row.Kind == compose.ProfessorUpdate && model.visibleInView(*row) {
 				model.order = append(model.order, index)
 				pinned[index] = true
 			}
 		}
-		for index, row := range model.rows {
-			if isNewChatKind(row.Kind) && model.visibleInView(row) {
+		for index := range model.rows {
+			row := &model.rows[index]
+			if isNewChatKind(row.Kind) && model.visibleInView(*row) {
 				model.order = append(model.order, index)
 				pinned[index] = true
 				newChatEmitted = true

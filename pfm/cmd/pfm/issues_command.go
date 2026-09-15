@@ -62,7 +62,8 @@ func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		return 0
 	}
 
-	for _, issue := range issues {
+	for index := range issues {
+		issue := &issues[index]
 		reporter := issue.ReporterLabel
 		if reporter == "" {
 			reporter = issue.ReporterSession

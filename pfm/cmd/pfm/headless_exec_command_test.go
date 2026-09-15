@@ -205,12 +205,12 @@ func TestHeadlessConsumersUseSharedRunner(t *testing.T) {
 		mustAbsent []string
 	}{
 		{
-			filepath.Join(root, "../../internal/ask/ask.go"),
+			filepath.Join(root, "..", "..", "internal", "ask", "ask.go"),
 			[]string{"headlessrun.Run("},
 			[]string{"exec.Command", "exec.CommandContext"},
 		},
 		{
-			filepath.Join(root, "../../internal/stats/limits.go"),
+			filepath.Join(root, "..", "..", "internal", "stats", "limits.go"),
 			[]string{"headlessrun.Run("},
 			[]string{"exec.Command", "exec.CommandContext"},
 		},

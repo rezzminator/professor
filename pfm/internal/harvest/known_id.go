@@ -131,30 +131,32 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 	// publisher URL.
 	if kind == IdentifierPMCID || kind == IdentifierPMID {
 		for _, c := range candidates {
-			if pmcid := extractPMCID(c.URL); pmcid != "" {
-				// PMC OA service (oa.fcgi) direct PDF — the ftp hrefs NCBI hands out
-				// are dead; PMCOAPDFURL rewrites them to the live deprecated/ https path.
-				trace = append(trace, "oa:pmc-fcgi")
-				oaPDF, oaErr := PMCOAPDFURL(ctx, h.oa, pmcid)
-				if oaErr != nil {
-					// The lookup FAILED — that is an outage, not proof the PMC
-					// OA service holds no PDF for this accession.
-					log.Printf("harvest: pmc oa.fcgi lookup failed for %s: %v", pmcid, oaErr)
+			pmcid := extractPMCID(c.URL)
+			if pmcid == "" {
+				continue
+			}
+			// PMC OA service (oa.fcgi) direct PDF — the ftp hrefs NCBI hands out
+			// are dead; PMCOAPDFURL rewrites them to the live deprecated/ https path.
+			trace = append(trace, "oa:pmc-fcgi")
+			oaPDF, oaErr := PMCOAPDFURL(ctx, h.oa, pmcid)
+			if oaErr != nil {
+				// The lookup FAILED — that is an outage, not proof the PMC
+				// OA service holds no PDF for this accession.
+				log.Printf("harvest: pmc oa.fcgi lookup failed for %s: %v", pmcid, oaErr)
+			}
+			if oaErr == nil && oaPDF != "" {
+				result := h.fetchURLWithPolicy(ctx, oaPDF, options, false)
+				if result.Error == "" {
+					result.Method = "mirror:pmc-oa-pdf"
+					return h.storeResultAlias(source, canonical, result, append([]string(nil), trace...), options)
 				}
-				if oaErr == nil && oaPDF != "" {
-					result := h.fetchURLWithPolicy(ctx, oaPDF, options, false)
-					if result.Error == "" {
-						result.Method = "mirror:pmc-oa-pdf"
-						return h.storeResultAlias(source, canonical, result, append([]string(nil), trace...), options)
-					}
-					trace = append(trace, "oa:pmc-oa-pdf")
-				}
-				for _, mirrorURL := range []string{PMCArticleURL(pmcid), "https://www.ebi.ac.uk/europepmc/webservices/rest/" + pmcid + "/fullTextXML"} {
-					result := h.fetchURL(ctx, mirrorURL, options)
-					if result.Error == "" {
-						trace := append([]string{"mirror:" + pmcid}, result.Rungs...)
-						return h.storeResultAlias(source, canonical, result, trace, options)
-					}
+				trace = append(trace, "oa:pmc-oa-pdf")
+			}
+			for _, mirrorURL := range []string{PMCArticleURL(pmcid), "https://www.ebi.ac.uk/europepmc/webservices/rest/" + pmcid + "/fullTextXML"} {
+				result := h.fetchURL(ctx, mirrorURL, options)
+				if result.Error == "" {
+					trace := append([]string{"mirror:" + pmcid}, result.Rungs...)
+					return h.storeResultAlias(source, canonical, result, trace, options)
 				}
 			}
 		}

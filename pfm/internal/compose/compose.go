@@ -84,7 +84,9 @@ func Compose(input Input) Output {
 		}
 	}
 
-	for _, row := range append(liveRows, agentRows...) {
+	liveRows = append(liveRows, agentRows...)
+	for index := range liveRows {
+		row := liveRows[index]
 		row = current.applyKill(row, EngineForKind(row.Kind))
 		countOmitted(row, &output.KilledCount, &output.SuppressedCount)
 		if visibleInView(row, input.Options.View) {
@@ -94,7 +96,8 @@ func Compose(input Input) Output {
 
 	claudeResume := make([]Row, 0)
 	claudeEligible := 0
-	for _, transcript := range input.Transcripts {
+	for index := range input.Transcripts {
+		transcript := input.Transcripts[index]
 		if _, live := current.liveTranscripts[transcript.UUID]; live {
 			continue
 		}
@@ -118,7 +121,8 @@ func Compose(input Input) Output {
 		if claudeEligible > claudeResumeCap {
 			output.SuppressedCount += claudeEligible - claudeResumeCap
 		}
-		for _, row := range claudeResume {
+		for index := range claudeResume {
+			row := claudeResume[index]
 			output.Rows = append(output.Rows, current.finalize(row))
 		}
 	} else {
@@ -134,7 +138,8 @@ func Compose(input Input) Output {
 
 	codexResume := make([]Row, 0)
 	codexEligible := 0
-	for _, lineage := range current.codexLineages {
+	for index := range current.codexLineages {
+		lineage := current.codexLineages[index]
 		if _, live := current.liveRollouts[lineage.RootID]; live {
 			continue
 		}
@@ -158,7 +163,8 @@ func Compose(input Input) Output {
 		if codexEligible > codexResumeCap {
 			output.SuppressedCount += codexEligible - codexResumeCap
 		}
-		for _, row := range codexResume {
+		for index := range codexResume {
+			row := codexResume[index]
 			output.Rows = append(output.Rows, current.finalize(row))
 		}
 	} else {
@@ -174,7 +180,8 @@ func Compose(input Input) Output {
 
 	ocResume := make([]Row, 0)
 	ocEligible := 0
-	for _, session := range input.OcSessions {
+	for index := range input.OcSessions {
+		session := input.OcSessions[index]
 		// Subagent children and archived sessions never earn rows: a child is
 		// part of its parent's turn, an archived one the user filed away.
 		if session.ParentID != "" || session.TimeArchivedMS != 0 {
@@ -196,7 +203,8 @@ func Compose(input Input) Output {
 		if ocEligible > ocResumeCap {
 			output.SuppressedCount += ocEligible - ocResumeCap
 		}
-		for _, row := range ocResume {
+		for index := range ocResume {
+			row := ocResume[index]
 			output.Rows = append(output.Rows, current.finalize(row))
 		}
 	} else {
@@ -222,7 +230,8 @@ func (current *composer) buildIndexes() {
 		map[string]store.CodexLineage,
 		len(current.codexLineages),
 	)
-	for _, lineage := range current.codexLineages {
+	for index := range current.codexLineages {
+		lineage := current.codexLineages[index]
 		current.lineageByRoot[lineage.RootID] = lineage
 	}
 
@@ -258,7 +267,8 @@ func (current *composer) buildIndexes() {
 			seeded: true,
 		}
 	}
-	for _, transcript := range current.input.Transcripts {
+	for index := range current.input.Transcripts {
+		transcript := current.input.Transcripts[index]
 		_, wantedAgent := wantedAgentIDs[transcript.UUID]
 		_, wantedLive := wantedTranscriptIDs[transcript.UUID]
 		if wantedAgent || wantedLive {
@@ -272,7 +282,8 @@ func (current *composer) buildIndexes() {
 	}
 	current.rolloutByPath = make(map[string]store.Rollout, len(wantedRolloutPaths))
 	current.rolloutByID = make(map[string]store.Rollout, len(wantedRolloutIDs))
-	for _, rollout := range current.input.Rollouts {
+	for index := range current.input.Rollouts {
+		rollout := current.input.Rollouts[index]
 		normalizedPath := cleanPath(rollout.Path)
 		if _, wanted := wantedRolloutPaths[normalizedPath]; wanted {
 			current.rolloutByPath[normalizedPath] = rollout
@@ -294,7 +305,8 @@ func (current *composer) buildIndexes() {
 	}
 	current.panesBySocket = make(map[string][]gather.Pane)
 	current.paneByTarget = make(map[string]gather.Pane, len(current.input.Snapshot.Panes))
-	for _, pane := range current.input.Snapshot.Panes {
+	for index := range current.input.Snapshot.Panes {
+		pane := current.input.Snapshot.Panes[index]
 		current.panesBySocket[pane.Socket] = append(
 			current.panesBySocket[pane.Socket],
 			pane,
@@ -986,7 +998,8 @@ func (current *composer) selectResumeRows(
 	switch current.input.Options.View {
 	case AllView:
 		selected := make([]Row, 0, len(rows))
-		for _, row := range rows {
+		for index := range rows {
+			row := rows[index]
 			selected = append(selected, current.finalize(row))
 		}
 		defaultRows := defaultEligibleCount(rows)
@@ -996,7 +1009,8 @@ func (current *composer) selectResumeRows(
 		return selected
 	case KilledView:
 		selected := make([]Row, 0)
-		for _, row := range rows {
+		for index := range rows {
+			row := rows[index]
 			if row.Killed {
 				selected = append(selected, current.finalize(row))
 			}
@@ -1095,7 +1109,8 @@ func visibleInView(row Row, view View) bool {
 
 func defaultEligibleCount(rows []Row) int {
 	count := 0
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if defaultEligible(row) {
 			count++
 		}
@@ -1110,7 +1125,8 @@ func collapseLiveServers(rows []Row) []Row {
 	}
 	winners := make(map[string]winner)
 	standalone := make([]Row, 0)
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.ID == "" || row.Kind == LiveSplit {
 			standalone = append(standalone, row)
 			continue

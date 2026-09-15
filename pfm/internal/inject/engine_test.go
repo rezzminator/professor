@@ -154,7 +154,7 @@ func TestScheduleAfterCurrentTurnComposedSelfCompactKeepsThenAndNoticeOnce(t *te
 	engine := newTestEngineWith(t, "cc-self-compact-schedule", fake, spawner)
 	engine.whoami = fakeSelf{identity: resolve.Identity{
 		Session:    "cc-self-compact-schedule",
-		SocketPath: filepath.Join("/tmp", "tmux-jail", "cc-self-compact-schedule"),
+		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-schedule"),
 		Pane:       "%1",
 		Engine:     "claude",
 		Source:     "test",
@@ -373,7 +373,7 @@ func newTestEngineWith(
 	clearStatedSender(t)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{
-			socket: filepath.Join("/tmp", "tmux-jail", socket),
+			socket: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", socket),
 			target: "%1",
 		},
 		Tmux:    tmux,
@@ -638,7 +638,7 @@ func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
 		want := []shared.CommsEvent{{
 			AtNS: 123, Kind: shared.KindInject, SenderSession: "sender",
 			SenderLabel: "Operator", SenderUUID: "1234567890", Target: "beta",
-			ReceiverSocket: filepath.Join("/tmp", "tmux-jail", "cc-1-2-3"),
+			ReceiverSocket: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-1-2-3"),
 			ReceiverPane:   "%1", Message: "hello\nverbatim",
 		}}
 		if !reflect.DeepEqual(recorded, want) {

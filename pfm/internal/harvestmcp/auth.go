@@ -167,9 +167,10 @@ func (s *authStore) load() {
 		fmt.Fprintf(os.Stderr, "harvester auth: invalid state %s: %v\n", s.statePath, err)
 		return
 	}
-	for _, c := range state.Clients {
+	for i := range state.Clients {
+		c := &state.Clients[i]
 		if c.ClientID != "" {
-			s.clients[c.ClientID] = oauthClient{persistedClient: c}
+			s.clients[c.ClientID] = oauthClient{persistedClient: *c}
 		}
 	}
 	for _, r := range state.Refresh {
@@ -188,7 +189,8 @@ func (s *authStore) saveLocked() {
 		return
 	}
 	state := authState{}
-	for _, c := range s.clients {
+	for id := range s.clients {
+		c := s.clients[id]
 		state.Clients = append(state.Clients, c.persistedClient)
 	}
 	for _, r := range s.refresh {

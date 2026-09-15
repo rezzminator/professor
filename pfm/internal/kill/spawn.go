@@ -34,7 +34,8 @@ func (spawner CommandSpawner) Spawn(
 	if err != nil {
 		return fmt.Errorf("detach kill finisher: %w", err)
 	}
-	arguments := append(prefixArgs, executable)
+	arguments := append([]string{}, prefixArgs...)
+	arguments = append(arguments, executable)
 	if spawner.ConfigPath != "" {
 		arguments = append(arguments, "--config", spawner.ConfigPath)
 	}

@@ -53,7 +53,7 @@ func newSignatureEngineWith(
 	clearStatedSender(t)
 	dependencies := Dependencies{
 		Resolver: fakeResolver{
-			socket: filepath.Join("/tmp", "tmux-jail", socket),
+			socket: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", socket),
 			target: "%1",
 		},
 		Tmux:       tmux,

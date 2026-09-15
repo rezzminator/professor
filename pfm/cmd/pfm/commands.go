@@ -375,12 +375,13 @@ func openID(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
-	for _, row := range scan.Output.Rows {
+	for index := range scan.Output.Rows {
+		row := &scan.Output.Rows[index]
 		if row.ID == id {
 			primary := fleet.PrimaryAccount(scan.Paths, runtime.Config)
 			return openRow(
 				ctx,
-				row,
+				*row,
 				runtime.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), primary),
 				initialCache1H(runtime.Config, primary),
 				stdout,

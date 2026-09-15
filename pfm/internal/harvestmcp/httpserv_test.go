@@ -66,7 +66,7 @@ func TestResolverClientRejectsPrivateRedirects(t *testing.T) {
 	if client.CheckRedirect == nil {
 		t.Fatal("resolver client has no redirect SSRF guard")
 	}
-	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/private", nil)
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/private", http.NoBody)
 	if err := client.CheckRedirect(request, nil); err == nil {
 		t.Fatal("resolver client allowed redirect to loopback")
 	}

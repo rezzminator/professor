@@ -339,7 +339,8 @@ func runParkedCodexClear(t *testing.T, failRefresh bool) {
 			if snapshot.Refreshing {
 				continue
 			}
-			for _, row := range snapshot.Rows {
+			for index := range snapshot.Rows {
+				row := &snapshot.Rows[index]
 				if row.ID == currentID {
 					t.Fatalf("cleared chat remained visible: %#v", row)
 				}

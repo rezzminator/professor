@@ -141,7 +141,7 @@ func TestMCPDaemonStatusReportsHarvesterExternalState(t *testing.T) {
 	state.Store(&failed)
 	handler := newMCPDaemonHandler(mcpDaemonOptions{Version: "test", External: &state})
 	recorder := httptest.NewRecorder()
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status", nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
 	var status mcpDaemonStatus
 	if err := json.NewDecoder(recorder.Body).Decode(&status); err != nil {
 		t.Fatal(err)

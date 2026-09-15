@@ -289,7 +289,7 @@ func readSurface(hookContext organ.HookContext, path string) (surface string, ex
 	return validated, true, nil
 }
 
-var sweepFilename = regexp.MustCompile(`^([0-9]{4}-[0-9]{2}-[0-9]{2})(?:-([0-9]+))?\.md$`)
+var sweepFilename = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})(?:-(\d+))?\.md$`)
 
 func nudgeHook(projectDirectory string, now time.Time) ([]byte, error) {
 	if projectDirectory == "" {

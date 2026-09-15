@@ -143,7 +143,8 @@ func ReconcileCodexPanesWith(
 	capturer := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
 
 	_, actions := ObserveCodexPanes(ctx, database, manager, capturer, live, runtime, cxNames, warn)
-	for _, action := range actions {
+	for index := range actions {
+		action := actions[index]
 		if action.Skip != "" && action.Bind == "" {
 			switch {
 			case action.Forget:
@@ -425,7 +426,8 @@ func CodexTitleThreads(
 		warn(fmt.Sprintf("codex pane reconcile: read Codex state stores: %v", err))
 		return titleThreads
 	}
-	for _, thread := range threads {
+	for index := range threads {
+		thread := threads[index]
 		if thread.Title == "" {
 			continue
 		}

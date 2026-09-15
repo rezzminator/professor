@@ -9,7 +9,7 @@ import (
 )
 
 var (
-	positiveIntegerPattern = regexp.MustCompile(`^[1-9][0-9]*$`)
+	positiveIntegerPattern = regexp.MustCompile(`^[1-9]\d*$`)
 	laneSlugPattern        = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 )
 

@@ -194,9 +194,11 @@ func logComposePhases(t *testing.T, input Input) {
 	liveRows = append(liveRows, splits...)
 	agents := current.agentRows()
 	liveDone := time.Now()
-	rows := append(liveRows, agents...)
+	liveRows = append(liveRows, agents...)
+	rows := liveRows
 	top := make([]Row, 0, claudeResumeCap)
-	for _, transcript := range input.Transcripts {
+	for index := range input.Transcripts {
+		transcript := input.Transcripts[index]
 		if _, live := current.liveTranscripts[transcript.UUID]; live {
 			continue
 		}

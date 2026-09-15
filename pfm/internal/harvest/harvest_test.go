@@ -476,7 +476,7 @@ func TestChromeTransportUsesUTLSAndRejectsMixedDNSAnswers(t *testing.T) {
 	if !ChromeTransport(h.chrome) {
 		t.Fatal("production Chrome client is not the uTLS transport")
 	}
-	req, err := http.NewRequest(http.MethodGet, "https://rebind.test/", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://rebind.test/", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +508,7 @@ func TestChromeHeadersMatchCapturedChrome146Profile(t *testing.T) {
 		return response(r, http.StatusOK, "text/html", strings.Repeat("rich ", 120)), nil
 	})
 	client := &http.Client{Transport: &userAgentTransport{base: base, ua: chromeUA, chrome: true}}
-	req, err := http.NewRequest(http.MethodGet, "https://example.test/headers", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/headers", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}

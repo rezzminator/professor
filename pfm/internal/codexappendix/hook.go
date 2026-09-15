@@ -58,7 +58,7 @@ func Run(input io.Reader, output io.Writer, home string) (returnErr error) {
 	if err != nil {
 		return err
 	}
-	if len(prompt) > 16384 || len(strings.TrimSpace(string(prompt))) == 0 || !utf8.Valid(prompt) {
+	if len(prompt) > 16384 || strings.TrimSpace(string(prompt)) == "" || !utf8.Valid(prompt) {
 		return fmt.Errorf("professor appendix must be nonempty UTF-8, at most 16 KiB")
 	}
 	body := marker + "\n\n" + strings.TrimSpace(string(prompt))

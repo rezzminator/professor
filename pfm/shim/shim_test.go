@@ -33,7 +33,8 @@ func jailedZshCommand(zsh, script, home string, extraEnv ...string) *exec.Cmd {
 		environment = append(environment, entry)
 	}
 	environment = append(environment, "HOME="+home)
-	command.Env = append(environment, extraEnv...)
+	environment = append(environment, extraEnv...)
+	command.Env = environment
 	return command
 }
 

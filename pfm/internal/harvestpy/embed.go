@@ -102,8 +102,8 @@ func loadTargets() map[Platform]Target {
 // Targets returns a copy so callers cannot mutate the process-wide pins.
 func Targets() map[Platform]Target {
 	result := make(map[Platform]Target, len(immutableTargets))
-	for platform, target := range immutableTargets {
-		result[platform] = target
+	for platform := range immutableTargets {
+		result[platform] = immutableTargets[platform]
 	}
 	return result
 }

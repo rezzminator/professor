@@ -385,7 +385,8 @@ func (model Model) renderStatsPanel(width, height int) string {
 			nameWidth, "NAME", "ENGINE", "CPU%", "RSS", "RAM%", "TOKENS", "TOK/MIN", "GEAR", "USAGE",
 		)
 		lines = append(lines, statsHeaderStyle.Render(fillLine(header, innerWidth)))
-		for index, chat := range model.stats.Chats {
+		for index := range model.stats.Chats {
+			chat := &model.stats.Chats[index]
 			if len(lines) >= innerHeight {
 				break
 			}
@@ -522,7 +523,8 @@ func (model Model) renderLimitCards(innerWidth int) []string {
 	appendLine := func(line string) {
 		lines = append(lines, line)
 	}
-	for _, account := range model.stats.Limits {
+	for index := range model.stats.Limits {
+		account := &model.stats.Limits[index]
 		if account.Unsupported {
 			// The engine has no limits concept at all — a card would be pure
 			// noise, not an error the operator can act on.
@@ -541,7 +543,7 @@ func (model Model) renderLimitCards(innerWidth int) []string {
 			continue
 		}
 		appendLine(borderStyle.Render(fillLine("  "+strings.Repeat("─", maxInt(0, innerWidth-2)), innerWidth)))
-		appendLine(statsHeaderStyle.Render(fillLine("  "+limitAccountHeader(account, now), innerWidth)))
+		appendLine(statsHeaderStyle.Render(fillLine("  "+limitAccountHeader(*account, now), innerWidth)))
 		if account.Status != "" {
 			appendLine(dimStyle.Render(fillLine("  ⚠ "+cleanField(account.Status), innerWidth)))
 			if len(account.Windows) == 0 {

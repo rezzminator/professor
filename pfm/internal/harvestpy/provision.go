@@ -452,7 +452,7 @@ func ensureInput(
 }
 
 func downloadFile(ctx context.Context, url, path string, expectedSize int64) (returnErr error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
 	}

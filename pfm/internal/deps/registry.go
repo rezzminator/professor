@@ -248,7 +248,9 @@ func Registry(options ...Options) []Entry {
 
 // Registered reports whether name is a fixed literal or stable registry key.
 func Registered(name string) bool {
-	for _, entry := range Registry(Options{Home: ".", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
+	entries := Registry(Options{Home: ".", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
+	for index := range entries {
+		entry := entries[index]
 		if entry.Name == name || entry.Command == name {
 			return true
 		}
@@ -310,7 +312,9 @@ func Resolve(name string) (string, error) {
 		return cached, nil
 	}
 	command := name
-	for _, entry := range Registry(Options{Home: ".", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH}) {
+	entries := Registry(Options{Home: ".", GOOS: runtime.GOOS, GOARCH: runtime.GOARCH})
+	for index := range entries {
+		entry := entries[index]
 		if entry.Name != name && entry.Command != name {
 			continue
 		}

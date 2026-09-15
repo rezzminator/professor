@@ -19,7 +19,7 @@ func TestUserAgentTransportSetsUAAndForwardsToBase(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
 	})
 	transport := &userAgentTransport{base: base, ua: "harvester-test/1.0"}
-	req, err := http.NewRequest(http.MethodGet, "https://example.test/doc", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/doc", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestUserAgentTransportRefusesPrivateHostBeforeForwarding(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
 	})
 	transport := &userAgentTransport{base: base, ua: "harvester-test/1.0"}
-	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:9/secret", nil)
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:9/secret", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestUserAgentTransportChromeAddsFingerprintHeaders(t *testing.T) {
 		seen = r.Header
 		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody, Request: r}, nil
 	})
-	req, err := http.NewRequest(http.MethodGet, "https://example.test/doc", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/doc", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestUserAgentTransportChromeAddsFingerprintHeaders(t *testing.T) {
 	}
 
 	seen = nil
-	req2, err := http.NewRequest(http.MethodGet, "https://example.test/doc", nil)
+	req2, err := http.NewRequest(http.MethodGet, "https://example.test/doc", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}

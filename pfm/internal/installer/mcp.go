@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -239,7 +240,8 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 		)
 	}
 	generated = append(generated, mcpFenceEnd)
-	wantedLines := append(kept, generated...)
+	wantedLines := append([]string{}, kept...)
+	wantedLines = append(wantedLines, generated...)
 	wanted := strings.TrimRight(strings.Join(wantedLines, "\n"), "\n") + "\n"
 	if string(raw) == wanted {
 		installer.ok(path + " wiring")
@@ -334,5 +336,5 @@ func sameJSONValue(left, right any) bool {
 		return false
 	}
 	b, err := json.Marshal(right)
-	return err == nil && string(a) == string(b)
+	return err == nil && bytes.Equal(a, b)
 }

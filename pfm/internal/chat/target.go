@@ -127,7 +127,8 @@ func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (rows
 // RosterCandidates projects composed rows onto the roster matching rule's input.
 func RosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
 	candidates := make([]resolve.RosterCandidate, 0, len(rows))
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		candidates = append(candidates, resolve.RosterCandidate{
 			Name: row.Name, ID: row.ID, Socket: row.Socket,
 			Session: row.SessionName, Pane: row.PaneID,
@@ -144,7 +145,8 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 	if err != nil || !found {
 		return headless.Chat{}, false, err
 	}
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.ID == match.ID && row.Socket == match.Socket &&
 			row.PaneID == match.Pane && row.Name == match.Name {
 			return FromRow(row), true, nil
@@ -207,7 +209,8 @@ func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Iden
 	if err != nil {
 		return resolve.Identity{}, false
 	}
-	for _, row := range scan.Output.Rows {
+	for index := range scan.Output.Rows {
+		row := scan.Output.Rows[index]
 		if row.ID != thread || row.Socket == "" {
 			continue
 		}

@@ -23,7 +23,8 @@ func prioritizeClaudeFiles(
 		return files
 	}
 	knownPaths := make(map[string]struct{})
-	for _, transcript := range existing {
+	for i := range existing {
+		transcript := &existing[i]
 		if filepath.Clean(transcript.CWD) == cwd {
 			knownPaths[filepath.Clean(transcript.Path)] = struct{}{}
 		}
@@ -70,8 +71,8 @@ func shouldDelta(file diskFile, found bool, oldSize, parsedOffset int64, full bo
 
 func writeTranscriptUpdates(ctx context.Context, database *store.Store, updates []store.Transcript) error {
 	return database.Batch(ctx, len(updates), func(tx *store.ImmediateTx, start, end int) error {
-		for _, transcript := range updates[start:end] {
-			if err := tx.UpsertTranscript(ctx, transcript); err != nil {
+		for i := range updates[start:end] {
+			if err := tx.UpsertTranscript(ctx, updates[start+i]); err != nil {
 				return err
 			}
 		}
@@ -81,8 +82,8 @@ func writeTranscriptUpdates(ctx context.Context, database *store.Store, updates 
 
 func writeRolloutUpdates(ctx context.Context, database *store.Store, updates []store.Rollout) error {
 	return database.Batch(ctx, len(updates), func(tx *store.ImmediateTx, start, end int) error {
-		for _, rollout := range updates[start:end] {
-			if err := tx.UpsertRollout(ctx, rollout); err != nil {
+		for i := range updates[start:end] {
+			if err := tx.UpsertRollout(ctx, updates[start+i]); err != nil {
 				return err
 			}
 		}

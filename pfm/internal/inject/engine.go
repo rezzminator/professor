@@ -1088,21 +1088,22 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	pasteTransport := !commandTransport &&
 		(request.FileBacked || utf8.RuneCountInString(message) > engine.inlineThreshold(target.Engine))
 	var sendErr error
-	if pasteTransport {
+	switch {
+	case pasteTransport:
 		sendErr = engine.tmux.SendPaste(
 			ctx,
 			target.SocketPath,
 			target.Pane,
 			message,
 		)
-	} else if commandTransport {
+	case commandTransport:
 		base.LiteralChunks, sendErr = engine.sendPacedLiteral(
 			ctx,
 			target,
 			message,
 			lock,
 		)
-	} else {
+	default:
 		sendErr = engine.tmux.SendLiteral(
 			ctx,
 			target.SocketPath,

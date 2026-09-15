@@ -163,15 +163,17 @@ func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error
 		if err != nil {
 			continue
 		}
-		for _, thread := range threads {
+		for index := range threads {
+			thread := &threads[index]
 			if _, newer := threadByID[thread.ID]; newer {
 				continue
 			}
-			threadByID[thread.ID] = thread
+			threadByID[thread.ID] = *thread
 		}
 	}
 	threads := make([]CodexThread, 0, len(threadByID))
-	for _, thread := range threadByID {
+	for threadID := range threadByID {
+		thread := threadByID[threadID]
 		threads = append(threads, thread)
 	}
 	sort.Slice(threads, func(left, right int) bool {
@@ -222,7 +224,8 @@ func NewCodexThreadResolverRoots(
 			return nil
 		}
 		rows := make([]resolve.CodexThread, 0, len(threads))
-		for _, thread := range threads {
+		for index := range threads {
+			thread := &threads[index]
 			if !thread.Listed() {
 				continue
 			}

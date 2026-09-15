@@ -34,9 +34,7 @@ func buildMinimalEpub(t *testing.T) []byte {
 	// Every member is written STORED (compression method 0) — the fixture only
 	// needs the mimetype member's bytes to sit where the spec puts them.
 	appendFile := func(name string, data []byte) {
-		out = append(out, 'P', 'K', 3, 4)
-		out = append(out, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-		out = append(out, byte(len(name)), 0)
+		out = append(out, 'P', 'K', 3, 4, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, byte(len(name)), 0)
 		out = append(out, name...)
 		out = append(out, data...)
 	}

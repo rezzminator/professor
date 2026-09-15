@@ -139,7 +139,8 @@ func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query st
 		return nil
 	}
 	out := make([]Candidate, 0, len(data.Results))
-	for _, work := range data.Results {
+	for i := range data.Results {
+		work := &data.Results[i]
 		handle := DOIFrom(work.DOI)
 		if handle == "" {
 			handle = work.OA.URL
@@ -321,13 +322,14 @@ func (r *Resolver) findSemanticScholar(ctx context.Context, client *http.Client,
 		}
 		handle := ""
 		free := ""
-		if doi := DOIFrom(paper.ExternalIDs.DOI); doi != "" {
+		switch doi := DOIFrom(paper.ExternalIDs.DOI); {
+		case doi != "":
 			handle = doi
-		} else if paper.ExternalIDs.ArXiv != "" {
+		case paper.ExternalIDs.ArXiv != "":
 			handle = "https://arxiv.org/pdf/" + paper.ExternalIDs.ArXiv
-		} else if paper.OpenAccessPDF.URL != "" {
+		case paper.OpenAccessPDF.URL != "":
 			handle = paper.OpenAccessPDF.URL
-		} else {
+		default:
 			continue // no fetchable handle → useless as a candidate
 		}
 		if paper.OpenAccessPDF.URL != "" || paper.ExternalIDs.ArXiv != "" {

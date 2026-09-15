@@ -2,6 +2,7 @@ package stats
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,7 +97,8 @@ type tokenRecord struct {
 func (sampler *Sampler) attachTokenUsage(rows []compose.Row, chats []Chat, now int64) []string {
 	pathsBySocket := make(map[string]map[string]bool)
 	sessionsBySocket := make(map[string]map[string]bool)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		if row.Socket == "" || row.Path == "" || !liveKind(row.Kind) {
 			continue
 		}
@@ -323,7 +325,8 @@ func (sampler *Sampler) readTokenUsageLocked(path string) (tokenMeasure, []strin
 		chunk, readErr := reader.ReadBytes('\n')
 		entry.offset += int64(len(chunk))
 		if len(chunk) > 0 {
-			line := append(entry.partial, chunk...)
+			line := append([]byte{}, entry.partial...)
+			line = append(line, chunk...)
 			entry.partial = nil
 			if line[len(line)-1] == '\n' {
 				line = line[:len(line)-1]
@@ -385,7 +388,7 @@ func tokenRewriteGuardMatches(file *os.File, entry *tokenCacheEntry) (bool, erro
 	if read != len(guard) {
 		return false, nil
 	}
-	return string(guard) == string(entry.rewriteGuard), nil
+	return bytes.Equal(guard, entry.rewriteGuard), nil
 }
 
 func updateTokenRewriteGuard(file *os.File, entry *tokenCacheEntry) error {
@@ -410,7 +413,7 @@ func updateTokenRewriteGuard(file *os.File, entry *tokenCacheEntry) error {
 }
 
 func applyTokenRecord(entry *tokenCacheEntry, line []byte) error {
-	if len(strings.TrimSpace(string(line))) == 0 {
+	if strings.TrimSpace(string(line)) == "" {
 		return nil
 	}
 	var record tokenRecord

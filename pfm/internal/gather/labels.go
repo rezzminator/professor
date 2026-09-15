@@ -42,7 +42,8 @@ func CaptureClaudeLabels(
 		return nil
 	}
 	candidates := make([]Pane, 0, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := panes[index]
 		if id, ok := pfmengine.FromSocket(pane.Socket); !ok || id != pfmengine.Claude {
 			continue
 		}
@@ -61,8 +62,9 @@ func CaptureClaudeLabels(
 	labels := make([]PaneLabel, len(candidates))
 	var waitGroup sync.WaitGroup
 	slots := make(chan struct{}, labelCaptureLimit)
-	for index, pane := range candidates {
-		index, pane := index, pane
+	for index := range candidates {
+		pane := candidates[index]
+		index := index
 		waitGroup.Add(1)
 		slots <- struct{}{}
 		go func() {

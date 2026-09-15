@@ -7,10 +7,10 @@ import (
 )
 
 var (
-	claudeMenuPattern = regexp.MustCompile(`❯[[:space:]]*[0-9]+\.[[:space:]]`)
-	codexMenuPattern  = regexp.MustCompile(`›[[:space:]]*[0-9]+\.[[:space:]]`)
-	numberedOption    = regexp.MustCompile(`^[[:space:]]*›?[[:space:]]*[0-9]+\.[[:space:]]`)
-	busyPattern       = regexp.MustCompile(`(?i)esc to interrupt|\([0-9]+s ·|· [0-9]+s|[0-9]+ tokens`)
+	claudeMenuPattern = regexp.MustCompile(`❯[\s\v]*\d+\.[\s\v]`)
+	codexMenuPattern  = regexp.MustCompile(`›[\s\v]*\d+\.[\s\v]`)
+	numberedOption    = regexp.MustCompile(`^[\s\v]*›?[\s\v]*\d+\.[\s\v]`)
+	busyPattern       = regexp.MustCompile(`(?i)esc to interrupt|\(\d+s ·|· \d+s|\d+ tokens`)
 	// The receipt Claude Code prints once a compaction has actually happened.
 	// It is the only positive evidence a pane carries that the turn a --then
 	// waiter was sent to ride out was a compaction AND that it finished.
@@ -19,10 +19,10 @@ var (
 	// rather than being silently treated as proven.
 	compactReceipt    = regexp.MustCompile(`(?i)compacted \(|(?:context|conversation) compacted`)
 	menuHintPattern   = regexp.MustCompile(`(?i)enter to (confirm|continue|select)|esc to (cancel|go back)`)
-	ansiPattern       = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+	ansiPattern       = regexp.MustCompile(`\x1b\[[0-?]*[\x20-\x2f]*[\x40-\x7e]`)
 	oscPattern        = regexp.MustCompile("\x1b\\][^\x07]*(\x07|\x1b\\\\)")
 	claudeAgentRow    = regexp.MustCompile(`^❯[[:space:]]+●[[:space:]]+[^[:space:]]+[[:space:]]{2,}[^[:space:]]`)
-	compactPattern    = regexp.MustCompile(`^[[:space:]]*/compact([[:space:]]|$)`)
+	compactPattern    = regexp.MustCompile(`^[\s\v]*/compact([\s\v]|$)`)
 	queueProofPattern = regexp.MustCompile(
 		`(?i)press up to edit queued messages|queued messages?|pending messages?|message (will be|was) (queued|submitted)|submitted after (the )?next tool call`,
 	)

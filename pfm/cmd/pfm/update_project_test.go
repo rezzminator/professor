@@ -607,7 +607,7 @@ func TestUpdateIgnoreRefusesDirectoryTemplate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(before) != string(after) {
+	if !bytes.Equal(before, after) {
 		t.Fatalf("baseline mutated by refused ignore: before=%s after=%s", before, after)
 	}
 }

@@ -769,7 +769,8 @@ func fixtureAccountRoots() []AccountRoot {
 }
 
 func rowByID(rows []Row, id string) (Row, bool) {
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.ID == id {
 			return row, true
 		}
@@ -779,7 +780,8 @@ func rowByID(rows []Row, id string) (Row, bool) {
 
 func rowsByKind(rows []Row, kind Kind) []Row {
 	var result []Row
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.Kind == kind {
 			result = append(result, row)
 		}
@@ -789,7 +791,8 @@ func rowsByKind(rows []Row, kind Kind) []Row {
 
 func rowIDs(rows []Row) []string {
 	var ids []string
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		if row.ID != "" {
 			ids = append(ids, row.ID)
 		}

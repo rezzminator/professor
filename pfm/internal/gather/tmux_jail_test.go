@@ -296,10 +296,7 @@ func TestProbeTmuxRetriesOneTransientReadFailure(t *testing.T) {
 }
 
 func TestParseLegacyPaneFallback(t *testing.T) {
-	output := strings.Join([]string{
-		"session\tpane title\t/work/project\t4\t1\t100\t%7\t/dev/pts/9\tClaude\t321",
-		"",
-	}, "\n")
+	output := "session\tpane title\t/work/project\t4\t1\t100\t%7\t/dev/pts/9\tClaude\t321\n"
 	panes, err := parseLegacyPaneOutput("cc-1-2-3", []byte(output))
 	if err != nil {
 		t.Fatal(err)
@@ -638,7 +635,8 @@ func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
 
 func paneSockets(panes []Pane) []string {
 	sockets := make([]string, 0, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := panes[index]
 		sockets = append(sockets, pane.Socket)
 	}
 	return sockets

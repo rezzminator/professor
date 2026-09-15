@@ -515,7 +515,7 @@ func compileAgents(
 				model = mapped
 			}
 			tools := strings.Split(fields["tools"], ",")
-			readOnly := len(strings.TrimSpace(fields["tools"])) > 0
+			readOnly := strings.TrimSpace(fields["tools"]) != ""
 			for _, tool := range tools {
 				tool = strings.TrimSpace(tool)
 				if tool == "Write" || tool == "Edit" || tool == "MultiEdit" || tool == "NotebookEdit" {

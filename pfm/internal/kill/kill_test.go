@@ -693,7 +693,8 @@ func listedByDefault(t *testing.T, database *store.Store, id string) bool {
 		t.Fatal(err)
 	}
 	cached := false
-	for _, candidate := range candidates {
+	for candidateIndex := range candidates {
+		candidate := &candidates[candidateIndex]
 		cached = cached || candidate.UUID == id
 	}
 	transcripts, err := database.Transcripts(ctx)
@@ -710,7 +711,8 @@ func listedByDefault(t *testing.T, database *store.Store, id string) bool {
 		Options:     compose.Options{View: compose.DefaultView},
 	})
 	composed := false
-	for _, row := range output.Rows {
+	for rowIndex := range output.Rows {
+		row := &output.Rows[rowIndex]
 		composed = composed || row.ID == id
 	}
 	if cached != composed {
@@ -828,7 +830,8 @@ func listedCodexByDefault(t *testing.T, database *store.Store, rootID string) bo
 		t.Fatal(err)
 	}
 	cached := false
-	for _, candidate := range candidates {
+	for candidateIndex := range candidates {
+		candidate := &candidates[candidateIndex]
 		cached = cached || candidate.LineageRoot == rootID
 	}
 	rollouts, err := database.Rollouts(ctx)
@@ -845,7 +848,8 @@ func listedCodexByDefault(t *testing.T, database *store.Store, rootID string) bo
 		Options:  compose.Options{View: compose.DefaultView},
 	})
 	composed := false
-	for _, row := range output.Rows {
+	for rowIndex := range output.Rows {
+		row := &output.Rows[rowIndex]
 		composed = composed || row.ID == rootID
 	}
 	if cached != composed {

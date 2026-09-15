@@ -1,6 +1,7 @@
 package harvestpy
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -136,7 +137,7 @@ func compareFile(path string, expected []byte) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	if string(body) != string(expected) {
+	if !bytes.Equal(body, expected) {
 		return fmt.Errorf("%s differs from embedded metadata", path)
 	}
 	return nil

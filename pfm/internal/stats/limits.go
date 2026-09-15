@@ -496,11 +496,12 @@ func (sampler *LimitsSampler) Sample(ctx context.Context) ([]AccountLimits, []st
 	now := sampler.now()
 	limits := make([]AccountLimits, 0, len(sampler.Accounts))
 	warnings := make([]string, 0)
-	for _, account := range sampler.Accounts {
+	for index := range sampler.Accounts {
+		account := &sampler.Accounts[index]
 		key := account.cacheKey()
 		cached, found := sampler.cached(key, now, account.Engine)
 		if !found {
-			cached = sampler.refresh(ctx, account, key, now)
+			cached = sampler.refresh(ctx, *account, key, now)
 		}
 		limits = append(limits, cached.limits)
 		warnings = append(warnings, cached.warnings...)
@@ -520,10 +521,11 @@ func (sampler *LimitsSampler) SampleLive(ctx context.Context) ([]AccountLimits, 
 	now := sampler.now()
 	limits := make([]AccountLimits, 0, len(sampler.Accounts))
 	warnings := make([]string, 0)
-	for _, account := range sampler.Accounts {
+	for index := range sampler.Accounts {
+		account := &sampler.Accounts[index]
 		key := account.cacheKey()
-		if sampler.structuralAccount(account) {
-			entry := sampler.refresh(ctx, account, key, now)
+		if sampler.structuralAccount(*account) {
+			entry := sampler.refresh(ctx, *account, key, now)
 			limits = append(limits, entry.limits)
 			warnings = append(warnings, entry.warnings...)
 			continue
@@ -536,12 +538,12 @@ func (sampler *LimitsSampler) SampleLive(ctx context.Context) ([]AccountLimits, 
 
 		entry, found := sampler.cachedAny(key)
 		if !found {
-			entry = sampler.accountEntry(account, now)
+			entry = sampler.accountEntry(*account, now)
 			entry.limits.Status = "refreshing limits…"
 		}
 		limits = append(limits, entry.limits)
 		warnings = append(warnings, entry.warnings...)
-		sampler.startRefresh(ctx, account, key)
+		sampler.startRefresh(ctx, *account, key)
 	}
 	return limits, warnings
 }
@@ -1020,7 +1022,7 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 	if endpoint == "" {
 		endpoint = defaultCodexUsageEndpoint
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, http.NoBody)
 	if err != nil {
 		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", err)
 	}

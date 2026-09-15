@@ -148,10 +148,11 @@ func Resolve(request Request) (Request, error) {
 		if binary == "" {
 			binary = pfmengine.MustLookup(request.Engine).Binary
 		}
-		if request.WithoutAccount {
+		switch {
+		case request.WithoutAccount:
 			// Diagnostics deliberately bypass the roster and use only the
 			// caller-provided complete environment.
-		} else if request.Account == 0 {
+		case request.Account == 0:
 			if len(request.Config.Accounts) > 0 {
 				request.Account = matchingClaudeAccount(request.Config.Accounts, request.ConfigDir)
 				if request.Account == 0 {
@@ -159,7 +160,7 @@ func Resolve(request Request) (Request, error) {
 				}
 				rosterPresent = true
 			}
-		} else {
+		default:
 			rosterPresent = true
 		}
 		if account, ok := request.Config.AccountByID(request.Account); ok {
@@ -176,10 +177,11 @@ func Resolve(request Request) (Request, error) {
 		if binary == "" {
 			binary = pfmengine.MustLookup(request.Engine).Binary
 		}
-		if request.WithoutAccount {
+		switch {
+		case request.WithoutAccount:
 			// Diagnostics deliberately bypass the roster and use only the
 			// caller-provided complete environment.
-		} else if request.Account == 0 {
+		case request.Account == 0:
 			if len(request.Config.CodexAccounts) > 0 {
 				request.Account = matchingCodexAccount(request.Config.CodexAccounts, request.ConfigDir)
 				if request.Account == 0 {
@@ -187,7 +189,7 @@ func Resolve(request Request) (Request, error) {
 				}
 				rosterPresent = true
 			}
-		} else {
+		default:
 			rosterPresent = true
 		}
 		if account, ok := request.Config.CodexAccountByID(request.Account); ok {
@@ -689,7 +691,8 @@ func setEnvironment(environment []string, id pfmengine.ID, configDir string, exp
 	if configDir != "" && name != "" {
 		filtered = append(filtered, name+"="+configDir)
 	}
-	*target = append(filtered, pfmengine.MustLookup(id).LaunchEnv...)
+	filtered = append(filtered, pfmengine.MustLookup(id).LaunchEnv...)
+	*target = filtered
 }
 
 type boundedBuffer struct {

@@ -304,7 +304,7 @@ func TestSelfCompactScheduleTellsTheCallerToStop(t *testing.T) {
 	engine := newTestEngineWith(t, "cx-self-compact", fake, &fakeSpawner{})
 	engine.whoami = fakeSelf{identity: resolve.Identity{
 		Session:    "cx-self-compact",
-		SocketPath: filepath.Join("/tmp", "tmux-jail", "cx-self-compact"),
+		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cx-self-compact"),
 		Pane:       "%1",
 		Engine:     "codex",
 		Source:     "test",
@@ -512,7 +512,7 @@ func TestScheduleSelfCompactComposesPerEngineAndForwardsThen(t *testing.T) {
 			engine := newTestEngineWith(t, "cc-self-compact-compose", fake, spawner)
 			engine.whoami = fakeSelf{identity: resolve.Identity{
 				Session:    "self-session",
-				SocketPath: filepath.Join("/tmp", "tmux-jail", "cc-self-compact-compose"),
+				SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-compose"),
 				Pane:       "%1",
 				Engine:     test.engine,
 			}}
@@ -561,7 +561,7 @@ func TestScheduleSelfCompactRefusesAnInvalidFocusBeforeScheduling(t *testing.T) 
 		engine := newTestEngineWith(t, "cc-self-compact-validate", fake, spawner)
 		engine.whoami = fakeSelf{identity: resolve.Identity{
 			Session:    "self-session",
-			SocketPath: filepath.Join("/tmp", "tmux-jail", "cc-self-compact-validate"),
+			SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-self-compact-validate"),
 			Pane:       "%1",
 		}}
 		result, err := engine.ScheduleSelfCompact(context.Background(), focus, []string{"resume"})

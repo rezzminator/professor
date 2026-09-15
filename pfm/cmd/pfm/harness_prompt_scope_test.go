@@ -31,7 +31,9 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 			home := t.TempDir()
 			stageHarnessPromptBaseline(t, home)
 			if tc.missing != "" {
-				if err := os.Remove(filepath.Join(home, ".local/share/pfm/install/prompts", tc.missing)); err != nil {
+				if err := os.Remove(
+					filepath.Join(home, ".local", "share", "pfm", "install", "prompts", tc.missing),
+				); err != nil {
 					t.Fatal(err)
 				}
 			}

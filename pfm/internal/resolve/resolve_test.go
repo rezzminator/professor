@@ -212,7 +212,8 @@ func TestResolveSessionExactAndSplitRules(t *testing.T) {
 		t.Fatalf("two-Claude split outcome = %+v", outcome)
 	}
 
-	multiple := append(single, Pane{
+	multiple := append([]Pane{}, single...)
+	multiple = append(multiple, Pane{
 		SocketPath:  "/jail/cc-2-1-1",
 		SessionName: "exact",
 		PaneID:      "%3",

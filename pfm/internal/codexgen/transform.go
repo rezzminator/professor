@@ -113,7 +113,7 @@ func swapModels(text string, modelMap map[string]string) string {
 		pattern := regexp.MustCompile(`(^|[^\w-])` + regexp.QuoteMeta(key) + `([^\w-]|$)`)
 		text = pattern.ReplaceAllStringFunc(text, func(match string) string {
 			start := 0
-			if len(match) > 0 && !isModelChar(match[0]) {
+			if match != "" && !isModelChar(match[0]) {
 				start = 1
 			}
 			end := len(match)

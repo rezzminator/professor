@@ -104,7 +104,8 @@ func leadWithCurrentProject(output Output, currentDir string) Output {
 	}
 
 	rowsByProject := make(map[string][]Row, len(order))
-	for _, row := range output.Rows {
+	for index := range output.Rows {
+		row := output.Rows[index]
 		if isNewChatKind(row.Kind) {
 			continue
 		}
@@ -132,7 +133,8 @@ func isNewChatKind(kind Kind) bool {
 
 func sortProjectRows(rows []Row) ([]Row, []string) {
 	rowsByProject := make(map[string][]Row)
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		rowsByProject[row.Project] = append(rowsByProject[row.Project], row)
 	}
 	type projectBlock struct {
@@ -178,10 +180,12 @@ func projectDirs(input Input) map[string]string {
 			seeded: true,
 		}
 	}
-	for _, transcript := range input.Transcripts {
+	for index := range input.Transcripts {
+		transcript := input.Transcripts[index]
 		rememberProjectDir(directories, transcript.CWD, transcript.EffectiveActivityNS())
 	}
-	for _, rollout := range input.Rollouts {
+	for index := range input.Rollouts {
+		rollout := input.Rollouts[index]
 		if rollout.UserThread {
 			rememberProjectDir(directories, rollout.CWD, rollout.MTimeNS)
 		}

@@ -58,7 +58,8 @@ func List(
 	}
 	filter := strings.ToLower(strings.TrimSpace(request.Project))
 	result = ListResult{KilledCount: scan.Output.KilledCount}
-	for _, row := range scan.Output.Rows {
+	for index := range scan.Output.Rows {
+		row := scan.Output.Rows[index]
 		if placeholderRow(row.Kind) {
 			continue
 		}

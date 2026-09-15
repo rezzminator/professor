@@ -65,7 +65,8 @@ func printTmuxTitlesDoctor(
 	}
 	seen := make(map[string]bool, len(probe.Panes))
 	sockets := make([]string, 0, len(probe.Panes))
-	for _, pane := range probe.Panes {
+	for index := range probe.Panes {
+		pane := &probe.Panes[index]
 		if seen[pane.Socket] {
 			continue
 		}

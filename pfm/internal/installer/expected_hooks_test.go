@@ -328,7 +328,8 @@ func removeHookFixture(t *testing.T, hook ExpectedHook) {
 
 func assertHookState(t *testing.T, results []HookProbeResult, hook ExpectedHook, state string) {
 	t.Helper()
-	for _, result := range results {
+	for index := range results {
+		result := &results[index]
 		if result.Hook.File == hook.File && result.Hook.Event == hook.Event && result.Hook.Name == hook.Name &&
 			result.State == state {
 			return

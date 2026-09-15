@@ -76,7 +76,8 @@ func Register(d Descriptor) {
 	if _, dup := registry[d.ID]; dup {
 		panic(fmt.Sprintf("engine %q registered twice", d.ID))
 	}
-	for id, existing := range registry {
+	for id := range registry {
+		existing := registry[id]
 		for _, candidate := range []string{string(d.ID), d.LongName} {
 			for _, registered := range []string{string(id), existing.LongName} {
 				if strings.EqualFold(candidate, registered) {
@@ -140,7 +141,8 @@ func Parse(value string) (ID, error) {
 	}
 	for _, id := range All() {
 		d := registry[id]
-		if want == string(d.ID) || want == strings.ToLower(d.LongName) {
+		longName := strings.ToLower(d.LongName)
+		if want == string(d.ID) || want == longName {
 			return d.ID, nil
 		}
 	}

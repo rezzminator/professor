@@ -2,14 +2,7 @@
 
 package stats
 
-func readHostResources(root string, _ int64, _ int) (
-	uint64,
-	uint64,
-	Header,
-	map[int]processSample,
-	[]string,
-	error,
-) {
+func readHostResources(root string, _ int64, _ int) (hostResources, error) {
 	if root == "" {
 		root = "/proc"
 	}

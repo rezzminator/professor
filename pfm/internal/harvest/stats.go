@@ -40,11 +40,12 @@ func (h *Harvester) recordStat(item string, result Result) {
 		Item: truncateRunes(item, 500),
 		OK:   result.Error == "",
 	}
-	if rec.OK {
+	switch {
+	case rec.OK:
 		rec.Detail = truncateRunes(result.Method, 200)
-	} else if result.ErrorKind != "" {
+	case result.ErrorKind != "":
 		rec.Detail = truncateRunes(result.ErrorKind, 200)
-	} else {
+	default:
 		rec.Detail = "error"
 	}
 	line, err := json.Marshal(rec)

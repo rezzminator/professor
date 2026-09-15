@@ -67,9 +67,9 @@ func lastLine(text string) string {
 }
 
 var (
-	doctorTallyPattern = regexp.MustCompile(`(?m)^doctor: (warnings|failures)=([0-9]+)$`)
+	doctorTallyPattern = regexp.MustCompile(`(?m)^doctor: (warnings|failures)=(\d+)$`)
 	doctorHexPattern   = regexp.MustCompile(`(?i)\b[0-9a-f]{8,}\b`)
-	doctorDigitPattern = regexp.MustCompile(`[0-9]+`)
+	doctorDigitPattern = regexp.MustCompile(`\d+`)
 )
 
 // parseDoctorTally reads the `doctor: warnings=N` / `doctor: failures=M`

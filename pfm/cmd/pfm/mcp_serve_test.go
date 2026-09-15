@@ -35,7 +35,7 @@ func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 	})
 
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", nil))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status without credentials = %d, body=%s", response.Code, response.Body.String())
 	}
@@ -62,7 +62,7 @@ func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 			w.WriteHeader(http.StatusNoContent)
 		}),
 	})
-	browser := httptest.NewRequest(http.MethodPost, "/mcp/chat", nil)
+	browser := httptest.NewRequest(http.MethodPost, "/mcp/chat", http.NoBody)
 	browser.Header.Set("Origin", "https://attacker.example")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, browser)
@@ -70,7 +70,7 @@ func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 		t.Fatalf("browser-origin request status=%d dispatched=%d, want 403/0", response.Code, dispatched)
 	}
 
-	local := httptest.NewRequest(http.MethodPost, "/mcp/chat", nil)
+	local := httptest.NewRequest(http.MethodPost, "/mcp/chat", http.NoBody)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, local)
 	if response.Code != http.StatusNoContent || dispatched != 1 {
@@ -167,7 +167,7 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 	})
 
 	disabled := httptest.NewRecorder()
-	handler.ServeHTTP(disabled, httptest.NewRequest(http.MethodPost, "/mcp/harvester", nil))
+	handler.ServeHTTP(disabled, httptest.NewRequest(http.MethodPost, "/mcp/harvester", http.NoBody))
 	if disabled.Code != http.StatusServiceUnavailable {
 		t.Fatalf("disabled route status = %d, want %d", disabled.Code, http.StatusServiceUnavailable)
 	}
@@ -177,7 +177,7 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 	}
 
 	enabled := httptest.NewRecorder()
-	handler.ServeHTTP(enabled, httptest.NewRequest(http.MethodPost, "/mcp/chat", nil))
+	handler.ServeHTTP(enabled, httptest.NewRequest(http.MethodPost, "/mcp/chat", http.NoBody))
 	if enabled.Code != http.StatusNoContent {
 		t.Fatalf(
 			"enabled route status = %d, want %d — disabling harvester must not dark chat",
@@ -187,7 +187,7 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 	}
 
 	unknown := httptest.NewRecorder()
-	handler.ServeHTTP(unknown, httptest.NewRequest(http.MethodGet, "/mcp/unknown", nil))
+	handler.ServeHTTP(unknown, httptest.NewRequest(http.MethodGet, "/mcp/unknown", http.NoBody))
 	if unknown.Code != http.StatusNotFound {
 		t.Fatalf("unregistered path status = %d, want %d", unknown.Code, http.StatusNotFound)
 	}
@@ -216,7 +216,7 @@ func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			handler := newMCPDaemonHandler(mcpDaemonOptions{Chat: test.chat, Harvester: test.harvester})
 			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", nil))
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
 			var status mcpDaemonStatus
 			if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
 				t.Fatal(err)

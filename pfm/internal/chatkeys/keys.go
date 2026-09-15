@@ -17,7 +17,7 @@ var namedKeys = map[string]bool{
 }
 
 var (
-	functionKey = regexp.MustCompile(`^F([1-9]|1[0-2])$`)
+	functionKey = regexp.MustCompile(`^F([1-9]|1[012])$`)
 	modifier    = regexp.MustCompile(`^([CMS]-)+`)
 )
 

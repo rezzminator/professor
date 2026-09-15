@@ -568,7 +568,7 @@ func refresh(ctx context.Context, options Options, cachePath string) (returnErr 
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, http.NoBody)
 	if err != nil {
 		return err
 	}
@@ -612,7 +612,7 @@ func Fetch(ctx context.Context, options Options) (usageResult Usage, returnErr e
 	if err != nil {
 		return Usage{}, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, options.Endpoint, http.NoBody)
 	if err != nil {
 		return Usage{}, fmt.Errorf("build usage request: %w", err)
 	}

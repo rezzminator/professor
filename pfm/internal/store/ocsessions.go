@@ -67,7 +67,8 @@ func (s *Store) ReplaceOcSessions(ctx context.Context, sessions []OcSession) (er
 			return fmt.Errorf("close existing oc session rows: %w", err)
 		}
 
-		for _, session := range sessions {
+		for index := range sessions {
+			session := &sessions[index]
 			_, err := tx.ExecContext(ctx, `
 INSERT INTO oc_sessions (`+ocSessionColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET

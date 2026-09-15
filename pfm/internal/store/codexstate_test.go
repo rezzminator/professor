@@ -50,7 +50,8 @@ func buildCodexState(t *testing.T, path string, threads ...codexStateThread) {
 	if _, err := database.ExecContext(ctx, string(schema)); err != nil {
 		t.Fatalf("apply Codex state schema: %v", err)
 	}
-	for _, thread := range threads {
+	for index := range threads {
+		thread := &threads[index]
 		historyMode := thread.HistoryMode
 		if historyMode == "" {
 			historyMode = "legacy"

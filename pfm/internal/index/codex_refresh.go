@@ -26,7 +26,8 @@ func RefreshCodexLineage(ctx context.Context, database *store.Store, id string) 
 	}
 	full := !found || version != codexParserVersion
 	updates := make([]store.Rollout, 0, len(family))
-	for _, previous := range family {
+	for i := range family {
+		previous := &family[i]
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf("refresh Codex clear lineage %q: %w", id, err)
 		}
@@ -47,7 +48,7 @@ func RefreshCodexLineage(ctx context.Context, database *store.Store, id string) 
 			UserThread:   previous.UserThread,
 		}
 		if shouldDelta(file, true, previous.Size, previous.ParsedOffset, full) {
-			start, base = previous.ParsedOffset, previous
+			start, base = previous.ParsedOffset, *previous
 		}
 		rollout, _, err := parseCodex(file, start, base)
 		if err != nil {

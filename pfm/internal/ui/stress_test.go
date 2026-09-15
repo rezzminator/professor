@@ -111,8 +111,9 @@ func stressRandomKeys(t *testing.T) {
 	large := NewModel(largeSnapshot(5_000))
 	rows := large.VisibleRows()
 	seen := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		key := compose.RowKey(row)
+	for index := range rows {
+		row := &rows[index]
+		key := compose.RowKey(*row)
 		if _, duplicate := seen[key]; duplicate {
 			t.Fatalf("natural order duplicated %q", key)
 		}

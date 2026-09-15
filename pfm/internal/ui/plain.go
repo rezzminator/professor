@@ -59,7 +59,9 @@ func RenderPlain(snapshot Snapshot) string {
 	model := NewModel(snapshot)
 	var output strings.Builder
 	previous := ""
-	for _, row := range model.VisibleRows() {
+	rows := model.VisibleRows()
+	for index := range rows {
+		row := &rows[index]
 		project := cleanField(row.Project)
 		if project == "" {
 			project = "?"
@@ -75,14 +77,14 @@ func RenderPlain(snapshot Snapshot) string {
 			rowMarker(row.Kind) + " " +
 				clipRunes(cleanField(row.Name), 30),
 		}
-		if badges := stripANSI(model.rowBadges(row)); badges != "" {
+		if badges := stripANSI(model.rowBadges(*row)); badges != "" {
 			parts = append(parts, badges)
 		}
 		parts = append(
 			parts,
 			fmt.Sprintf("%dp", row.PromptCount),
-			sizeBadge(row),
-			formatAge(row, snapshot.NowNS),
+			sizeBadge(*row),
+			formatAge(*row, snapshot.NowNS),
 		)
 		fmt.Fprintln(&output, strings.Join(parts, "  "))
 	}
@@ -97,7 +99,9 @@ func RenderTSV(snapshot Snapshot) string {
 	output.WriteString(
 		"kind\tid\tproject\tcwd\tname\tprompts\tsize\tactivity_ns\taccount\tkilled\tsocket\n",
 	)
-	for _, row := range model.VisibleRows() {
+	rows := model.VisibleRows()
+	for index := range rows {
+		row := &rows[index]
 		fields := []string{
 			row.Kind.String(),
 			row.ID,

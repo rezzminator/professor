@@ -140,7 +140,7 @@ func TestCompactWithSteerArmsWaiterOnlyAfterConfirmedSubmit(t *testing.T) {
 	// collided across every chat sharing the fleet-standard %0 pane
 	// (the 2026-09-03 self-compact that ate an operator's live draft).
 	wantLog := engine.steerLogPath(Target{
-		SocketPath: filepath.Join("/tmp", "tmux-jail", "cc-1-2-3"),
+		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-1-2-3"),
 		Pane:       "%1",
 	})
 	if spawned[0].LogPath != wantLog {

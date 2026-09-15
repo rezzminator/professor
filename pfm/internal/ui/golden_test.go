@@ -220,9 +220,10 @@ func opencodeGoldenSnapshot(width int) Model {
 func engineOnlyGoldenSnapshot(engine pfmengine.ID, width int) Model {
 	snapshot := fixtureSnapshot(width)
 	rows := make([]compose.Row, 0, len(snapshot.Rows))
-	for _, row := range snapshot.Rows {
+	for index := range snapshot.Rows {
+		row := &snapshot.Rows[index]
 		if compose.EngineForKind(row.Kind) == engine {
-			rows = append(rows, row)
+			rows = append(rows, *row)
 		}
 	}
 	snapshot.Rows = rows

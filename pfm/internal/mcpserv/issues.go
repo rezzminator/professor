@@ -114,7 +114,8 @@ func (service *Service) issueReporter(
 	if listErr != nil {
 		return reporter
 	}
-	for _, row := range listed.Rows {
+	for index := range listed.Rows {
+		row := &listed.Rows[index]
 		if row.Session == identity.Session {
 			reporter.Label = row.Name
 			reporter.CWD = row.Dir

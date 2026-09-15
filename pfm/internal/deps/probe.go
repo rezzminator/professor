@@ -100,7 +100,8 @@ func Probe(ctx context.Context, entries []Entry, options ProbeOptions) []Result 
 		options.LookPath = exec.LookPath
 	}
 	results := make([]Result, 0, len(entries))
-	for _, entry := range entries {
+	for index := range entries {
+		entry := entries[index]
 		result := Result{Entry: entry}
 		switch {
 		case !entry.AppliesTo(options.GOOS):
@@ -442,7 +443,7 @@ func atLeast(version, minimum string) bool {
 }
 
 func numericVersion(value string) []int {
-	fields := regexp.MustCompile(`[0-9]+`).FindAllString(value, -1)
+	fields := regexp.MustCompile(`\d+`).FindAllString(value, -1)
 	result := make([]int, 0, len(fields))
 	for _, field := range fields {
 		number, _ := strconv.Atoi(field)

@@ -529,7 +529,7 @@ func fetchTheme(ctx context.Context, client *http.Client, raw string) ([]byte, e
 	if client == nil {
 		client = &http.Client{Timeout: 30 * time.Second}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("create GET %s: %w", raw, err)
 	}

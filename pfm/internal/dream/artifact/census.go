@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-var nonnegativeIntegerPattern = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
+var nonnegativeIntegerPattern = regexp.MustCompile(`^(0|[1-9]\d*)$`)
 
 var censusKeys = []string{
 	"window-meta-count",

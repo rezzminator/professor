@@ -40,7 +40,7 @@ func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	default:
 		t.Fatalf("unexpected capture model %q", alias)
 	}
-	dir := filepath.Join(home, ".local/share/pfm/install/prompts")
+	dir := filepath.Join(home, ".local", "share", "pfm", "install", "prompts")
 	pin, err := os.ReadFile(filepath.Join(dir, stem+".sha256"))
 	if err != nil {
 		t.Fatal(err)

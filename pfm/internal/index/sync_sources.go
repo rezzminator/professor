@@ -29,8 +29,9 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 	}
 	forceFull := counters.options.Full || !versionFound || storedVersion != claudeParserVersion
 	byPath := make(map[string]store.Transcript, len(existing))
-	for _, transcript := range existing {
-		byPath[transcript.Path] = transcript
+	for i := range existing {
+		transcript := &existing[i]
+		byPath[transcript.Path] = *transcript
 	}
 
 	updates := make([]store.Transcript, 0)
@@ -63,7 +64,8 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 
 	deletes := make([]string, 0)
 	if !counters.options.PriorityOnly {
-		for _, transcript := range existing {
+		for i := range existing {
+			transcript := &existing[i]
 			_, pathPresent := presentPaths[transcript.Path]
 			_, idPresent := presentIDs[transcript.UUID]
 			if !pathPresent && !idPresent {
@@ -114,9 +116,10 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	forceFull := counters.options.Full || !versionFound || storedVersion != codexParserVersion
 	byPath := make(map[string]store.Rollout, len(existing))
 	byID := make(map[string]store.Rollout, len(existing))
-	for _, rollout := range existing {
-		byPath[rollout.Path] = rollout
-		byID[rollout.ID] = rollout
+	for i := range existing {
+		rollout := &existing[i]
+		byPath[rollout.Path] = *rollout
+		byID[rollout.ID] = *rollout
 	}
 
 	updates := make([]store.Rollout, 0)
@@ -158,7 +161,8 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 		updates = reconcileCodexState(found, root, updates, byID, presentIDs, counters)
 	}
 	deletes := make([]string, 0)
-	for _, rollout := range existing {
+	for i := range existing {
+		rollout := &existing[i]
 		_, pathPresent := presentPaths[rollout.Path]
 		_, idPresent := presentIDs[rollout.ID]
 		if !pathPresent && !idPresent {

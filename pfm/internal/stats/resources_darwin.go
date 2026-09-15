@@ -16,14 +16,7 @@ import (
 	"hostops/pfm/internal/deps"
 )
 
-func readHostResources(root string, now int64, cpuCount int) (
-	uint64,
-	uint64,
-	Header,
-	map[int]processSample,
-	[]string,
-	error,
-) {
+func readHostResources(root string, now int64, cpuCount int) (hostResources, error) {
 	// An existing override is a Linux-shaped test jail. Honour it verbatim;
 	// only the absent native /proc path crosses to Darwin's kernel readers.
 	if root != "" {
@@ -45,21 +38,14 @@ func readDockerResources(root string) ([]Container, map[string]dockerSample, []s
 	return []Container{}, map[string]dockerSample{}, nil, nil
 }
 
-func readDarwinHostResources(now int64, cpuCount int) (
-	uint64,
-	uint64,
-	Header,
-	map[int]processSample,
-	[]string,
-	error,
-) {
+func readDarwinHostResources(now int64, cpuCount int) (hostResources, error) {
 	header, err := readDarwinHeader()
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
 	processes, busy, warnings, err := readDarwinProcesses()
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
 	// ps reports cumulative process CPU in centiseconds. A wall-clock counter
 	// multiplied by the logical CPU count gives the matching host-total unit;
@@ -72,7 +58,7 @@ func readDarwinHostResources(now int64, cpuCount int) (
 	if busy <= total {
 		idle = total - busy
 	}
-	return total, idle, header, processes, warnings, nil
+	return hostResources{total: total, idle: idle, header: header, processes: processes, warnings: warnings}, nil
 }
 
 func readDarwinProcesses() (map[int]processSample, uint64, []string, error) {

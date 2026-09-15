@@ -81,7 +81,7 @@ func newDockerInspector(socketPath string) func(string) (string, string, error) 
 		request, err := http.NewRequest(
 			http.MethodGet,
 			"http://docker/containers/"+url.PathEscape(id)+"/json",
-			nil,
+			http.NoBody,
 		)
 		if err != nil {
 			return "", "", fmt.Errorf("build Docker identity request: %w", err)

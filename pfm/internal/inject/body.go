@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -232,7 +231,7 @@ func writeExclusive(path, body string) error {
 	if err != nil {
 		return err
 	}
-	_, writeErr := io.WriteString(file, body)
+	_, writeErr := file.WriteString(body)
 	closeErr := file.Close()
 	if writeErr == nil && closeErr == nil {
 		return nil

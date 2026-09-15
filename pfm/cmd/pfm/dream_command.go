@@ -186,9 +186,7 @@ func productionDreamRuntime(codexBinaries ...string) dreamCommandRuntime {
 			}
 			return dream.RenderMigrationResult(result), nil
 		},
-		restamp: func(mapArgument, workingDirectory string, now time.Time) (string, error) {
-			return dream.Restamp(mapArgument, workingDirectory, now)
-		},
+		restamp: dream.Restamp,
 		hook: func(request dreamHookRequest) ([]byte, error) {
 			return dream.Hook(dream.HookRequest{
 				Kind:             dream.HookKind(request.Kind),

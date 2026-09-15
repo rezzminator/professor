@@ -185,7 +185,9 @@ func ResolveRow(
 	if err != nil {
 		return "", "", "", ""
 	}
-	for _, row := range Compose(env, request.View, data, live).Rows {
+	rows := Compose(env, request.View, data, live).Rows
+	for index := range rows {
+		row := rows[index]
 		if row.ID == id {
 			return compose.EngineForKind(row.Kind), row.Path, row.Socket, row.PaneID
 		}

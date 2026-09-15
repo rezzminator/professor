@@ -767,20 +767,21 @@ func TestCorpusManifestIsPermanentAndHasThirtyOraclePairs(t *testing.T) {
 	}
 	ok := 0
 	for _, item := range value.Items {
-		if item.Status == "ok" && item.Oracle != "" && item.Raw != "" {
-			ok++
-			if _, err := os.Stat(filepath.Join("testdata", "corpus", item.Oracle)); err != nil {
-				t.Errorf("missing oracle %s: %v", item.Oracle, err)
-			}
-			if _, err := os.Stat(filepath.Join("testdata", "corpus", item.Raw)); err != nil {
-				t.Errorf("missing raw %s: %v", item.Raw, err)
-			}
-			if got := fileSHA256(filepath.Join("testdata", "corpus", item.Raw)); got != item.RawSHA {
-				t.Errorf("raw hash %s = %s, want %s", item.Raw, got, item.RawSHA)
-			}
-			if got := fileSHA256(filepath.Join("testdata", "corpus", item.Oracle)); got != item.OracleSHA {
-				t.Errorf("oracle hash %s = %s, want %s", item.Oracle, got, item.OracleSHA)
-			}
+		if item.Status != "ok" || item.Oracle == "" || item.Raw == "" {
+			continue
+		}
+		ok++
+		if _, err := os.Stat(filepath.Join("testdata", "corpus", item.Oracle)); err != nil {
+			t.Errorf("missing oracle %s: %v", item.Oracle, err)
+		}
+		if _, err := os.Stat(filepath.Join("testdata", "corpus", item.Raw)); err != nil {
+			t.Errorf("missing raw %s: %v", item.Raw, err)
+		}
+		if got := fileSHA256(filepath.Join("testdata", "corpus", item.Raw)); got != item.RawSHA {
+			t.Errorf("raw hash %s = %s, want %s", item.Raw, got, item.RawSHA)
+		}
+		if got := fileSHA256(filepath.Join("testdata", "corpus", item.Oracle)); got != item.OracleSHA {
+			t.Errorf("oracle hash %s = %s, want %s", item.Oracle, got, item.OracleSHA)
 		}
 	}
 	if ok != 30 {

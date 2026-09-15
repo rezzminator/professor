@@ -502,19 +502,20 @@ func (h *Harvester) fetchURLWithPolicy(
 					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", source, status)
 				} else {
 					converted, convErr := h.convert(ctx, "html", source, []byte(html))
-					if convErr != nil {
+					switch {
+					case convErr != nil:
 						// The render SUCCEEDED; the conversion step failing is
 						// a tool outage on this server — it must never read as
 						// "the wall won".
 						converterOutage = true
 						log.Printf("harvest: browser rung conversion failed for %s: %v", source, convErr)
-					} else if sameAsShell(appShellText, converted) {
+					case sameAsShell(appShellText, converted):
 						// The bundle did not produce route content in a real
 						// browser either — the render is still the shell.
 						browserShellRender = true
 						log.Printf("harvest: browser rung rendered only the app shell for %s", source)
-					} else if usableContent(converted, "html") && !isBibliographicLanding(converted) &&
-						(contentChars(converted) > lastContentChars || appShellText != "") && contentChars(converted) >= 500 {
+					case usableContent(converted, "html") && !isBibliographicLanding(converted) &&
+						(contentChars(converted) > lastContentChars || appShellText != "") && contentChars(converted) >= 500:
 						// Same thin-page floor as the HTML ladder above: a JS
 						// paywall overlay converting to a few hundred chars is
 						// a shell, not the article.

@@ -95,7 +95,8 @@ func EnrichLive(
 	live gather.Snapshot,
 ) (Data, error) {
 	transcriptIDs := make(map[string]struct{}, len(data.Transcripts))
-	for _, transcript := range data.Transcripts {
+	for index := range data.Transcripts {
+		transcript := data.Transcripts[index]
 		transcriptIDs[transcript.UUID] = struct{}{}
 	}
 	wantedTranscripts := make(map[string]struct{})
@@ -128,7 +129,8 @@ func EnrichLive(
 	}
 
 	rolloutIDs := make(map[string]struct{}, len(data.Rollouts))
-	for _, rollout := range data.Rollouts {
+	for index := range data.Rollouts {
+		rollout := data.Rollouts[index]
 		rolloutIDs[rollout.ID] = struct{}{}
 	}
 	for _, process := range live.Codex {
@@ -143,7 +145,8 @@ func EnrichLive(
 		if err != nil {
 			return Data{}, err
 		}
-		for _, rollout := range family {
+		for index := range family {
+			rollout := family[index]
 			if _, found := rolloutIDs[rollout.ID]; found {
 				continue
 			}

@@ -249,7 +249,7 @@ func (locator FilesystemRolloutLocator) sessionNames(
 			return nil, err
 		}
 		line := scanner.Bytes()
-		if len(strings.TrimSpace(string(line))) == 0 {
+		if strings.TrimSpace(string(line)) == "" {
 			continue
 		}
 		var row struct {

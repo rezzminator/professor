@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-var sweepNamePattern = regexp.MustCompile(`^([0-9]{4}-[0-9]{2}-[0-9]{2})(?:-([0-9]+))?\.md$`)
+var sweepNamePattern = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})(?:-(\d+))?\.md$`)
 
 type sweepCandidate struct {
 	path     string

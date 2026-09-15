@@ -171,7 +171,8 @@ func rolloutByPath(
 		return "", false
 	}
 	clean := filepath.Clean(path)
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		if filepath.Clean(rollout.Path) == clean {
 			return rollout.ID, true
 		}

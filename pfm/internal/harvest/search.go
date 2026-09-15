@@ -327,7 +327,7 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 			Results []struct{ Title, URL, Description string } `json:"results"`
 		} `json:"web"`
 	}
-	if e = json.Unmarshal(body, &data); e != nil {
+	if e := json.Unmarshal(body, &data); e != nil {
 		return nil, status, e
 	}
 	out := []SearchResult{}

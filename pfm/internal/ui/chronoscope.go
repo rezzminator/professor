@@ -342,10 +342,11 @@ func (model Model) openCosmosSelection() (tea.Model, tea.Cmd) {
 		model.cosmosStatus = "enter needs a live chat — " + label + " is gone; only the ledger remembers it"
 		return model, nil
 	}
-	for _, row := range model.rows {
-		if compose.RowKey(row) == node.RowKey {
+	for index := range model.rows {
+		row := &model.rows[index]
+		if compose.RowKey(*row) == node.RowKey {
 			model.outcome = OutcomeSelected
-			model.outcomeRow = row
+			model.outcomeRow = *row
 			return model, tea.Quit
 		}
 	}

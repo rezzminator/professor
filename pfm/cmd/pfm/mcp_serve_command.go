@@ -290,7 +290,7 @@ func enabledState(enabled bool) string {
 }
 
 func probeMCPDaemon(address string) (mcpDaemonStatus, bool) {
-	request, err := http.NewRequest(http.MethodGet, "http://"+address+"/status", nil)
+	request, err := http.NewRequest(http.MethodGet, "http://"+address+"/status", http.NoBody)
 	if err != nil {
 		return mcpDaemonStatus{}, false
 	}

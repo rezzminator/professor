@@ -191,10 +191,12 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 		cpuCount = runtime.NumCPU()
 	}
 
-	total, idle, header, processes, warnings, err := readHostResources(sampler.ProcRoot, now, cpuCount)
+	resources, err := readHostResources(sampler.ProcRoot, now, cpuCount)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	total, idle := resources.total, resources.idle
+	header, processes, warnings := resources.header, resources.processes, resources.warnings
 	docker, dockerRaw, dockerWarnings, err := readDockerResources(sampler.CgroupRoot)
 	if err != nil {
 		return Snapshot{}, err
@@ -261,27 +263,28 @@ func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot
 	}, nil
 }
 
-func readLinuxHostResources(root string) (
-	total uint64,
-	idle uint64,
-	header Header,
-	processes map[int]processSample,
-	warnings []string,
-	err error,
-) {
-	total, idle, err = readLinuxSystemCPU(root)
+type hostResources struct {
+	total     uint64
+	idle      uint64
+	header    Header
+	processes map[int]processSample
+	warnings  []string
+}
+
+func readLinuxHostResources(root string) (hostResources, error) {
+	total, idle, err := readLinuxSystemCPU(root)
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
-	header, err = readLinuxHeader(root)
+	header, err := readLinuxHeader(root)
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
-	processes, warnings, err = readLinuxProcesses(root)
+	processes, warnings, err := readLinuxProcesses(root)
 	if err != nil {
-		return 0, 0, Header{}, nil, nil, err
+		return hostResources{}, err
 	}
-	return total, idle, header, processes, warnings, nil
+	return hostResources{total: total, idle: idle, header: header, processes: processes, warnings: warnings}, nil
 }
 
 func readLinuxSystemCPU(root string) (total, idle uint64, err error) {
@@ -437,7 +440,8 @@ func chatTrees(
 	memoryTotal uint64,
 ) []Chat {
 	bySocket := make(map[string]*chatTree)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		if row.Socket == "" || !liveKind(row.Kind) {
 			continue
 		}

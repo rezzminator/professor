@@ -21,7 +21,7 @@ import (
 )
 
 func TestChromeHeaderCaptureOracle(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "https://example.test/", nil)
+	req, err := http.NewRequest(http.MethodGet, "https://example.test/", http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func equalStrings(a, b []string) bool {
 }
 
 func mustRequest(raw string) *http.Request {
-	req, err := http.NewRequest(http.MethodGet, raw, nil)
+	req, err := http.NewRequest(http.MethodGet, raw, http.NoBody)
 	if err != nil {
 		panic(err)
 	}

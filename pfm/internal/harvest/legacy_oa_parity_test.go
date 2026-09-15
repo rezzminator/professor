@@ -105,7 +105,7 @@ func TestLegacyFindWorksMergesPaperArxivAndBookDiscovery(t *testing.T) {
 	if paper.Authors != "C. E. Shannon" || paper.Year != 1948 || paper.Kind != "paper" {
 		t.Fatalf("findWorks paper metadata=%#v", got)
 	}
-	if len(got) == 0 || strings.ToLower(got[0].Free) == "closed" {
+	if len(got) == 0 || strings.EqualFold(got[0].Free, "closed") {
 		t.Fatalf("free exact-match candidates did not outrank the closed copy: %#v", got)
 	}
 }

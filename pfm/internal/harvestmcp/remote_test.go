@@ -110,7 +110,7 @@ func TestRemoteStaticGateway(t *testing.T) {
 		!strings.Contains(rec.Header().Get("WWW-Authenticate"), "resource_metadata") {
 		t.Fatalf("static challenge = %d %s", rec.Code, rec.Header().Get("WWW-Authenticate"))
 	}
-	req := httptest.NewRequest(http.MethodGet, "https://harvester.example.test/mcp", nil)
+	req := httptest.NewRequest(http.MethodGet, "https://harvester.example.test/mcp", http.NoBody)
 	req.Host = "harvester.example.test"
 	req.Header.Set("Authorization", "Bearer example-fixture-token")
 	rec = httptest.NewRecorder()

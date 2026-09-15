@@ -276,6 +276,15 @@ type testNightResult struct {
 	refiner      SeatResult
 }
 
+type successfulRunnerFixture struct {
+	runner   *Runner
+	host     *fakeHost
+	rollouts *fakeRollouts
+	commands *scriptedCommands
+	events   *eventLog
+	request  testNightRequest
+}
+
 func (log *eventLog) Record(event Event) error {
 	log.events = append(log.events, event)
 	return log.err
@@ -283,7 +292,7 @@ func (log *eventLog) Record(event Event) error {
 
 func successfulRunner(
 	t *testing.T,
-) (*Runner, *fakeHost, *fakeRollouts, *scriptedCommands, *eventLog, testNightRequest) {
+) successfulRunnerFixture {
 	t.Helper()
 	stage := t.TempDir()
 	distillTranscript := filepath.Join(t.TempDir(), "distill.jsonl")
@@ -326,7 +335,10 @@ func successfulRunner(
 			Name: "night-refiner", Socket: "dream-refiner-socket", Prompt: "REFINE\nbrief",
 		},
 	}
-	return runner, host, rollouts, commands, events, request
+	return successfulRunnerFixture{
+		runner: runner, host: host, rollouts: rollouts,
+		commands: commands, events: events, request: request,
+	}
 }
 
 func runTestNight(
@@ -377,7 +389,9 @@ func TestSeatLawRunsBeforeEveryEffect(t *testing.T) {
 }
 
 func TestRunnerUsesExactOrderOneAttemptAndLastAssistant(t *testing.T) {
-	runner, host, rollouts, commands, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts := fixture.runner, fixture.host, fixture.rollouts
+	commands, events, request := fixture.commands, fixture.events, fixture.request
 	if runner.seatTimeout != PerSeatTimeout {
 		t.Fatalf("live timeout = %s, want %s", runner.seatTimeout, PerSeatTimeout)
 	}
@@ -409,7 +423,9 @@ func TestRunnerUsesExactOrderOneAttemptAndLastAssistant(t *testing.T) {
 }
 
 func TestPreparedNightLeavesTheMechanicalGateGapAndSharesOnePinSet(t *testing.T) {
-	runner, host, _, commands, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host := fixture.runner, fixture.host
+	commands, events, request := fixture.commands, fixture.events, fixture.request
 	prepared, err := runner.PrepareNight(context.Background(), request.law, request.stage)
 	if err != nil {
 		t.Fatalf("PrepareNight() error = %v", err)
@@ -450,7 +466,8 @@ func TestPreparedNightLeavesTheMechanicalGateGapAndSharesOnePinSet(t *testing.T)
 }
 
 func TestProcessTreeGateRunsAfterTUIIsUpBeforeEachBrief(t *testing.T) {
-	runner, host, _, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, request := fixture.runner, fixture.host, fixture.request
 	processes := runner.dependencies.Processes.(*fakeProcessTree)
 	checks := 0
 	processes.before = func() {
@@ -481,7 +498,8 @@ func TestProcessTreeGateRunsAfterTUIIsUpBeforeEachBrief(t *testing.T) {
 }
 
 func TestExternalProcessFailsBeforeBriefAndLogsObservedTree(t *testing.T) {
-	runner, host, _, _, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, events, request := fixture.runner, fixture.host, fixture.events, fixture.request
 	processes := runner.dependencies.Processes.(*fakeProcessTree)
 	processes.verification.Descendants = append(
 		processes.verification.Descendants,
@@ -517,7 +535,8 @@ func TestExternalProcessFailsBeforeBriefAndLogsObservedTree(t *testing.T) {
 }
 
 func TestProcessTreeFailureEventCannotLeakCommandArguments(t *testing.T) {
-	runner, _, _, _, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, events, request := fixture.runner, fixture.events, fixture.request
 	processes := runner.dependencies.Processes.(*fakeProcessTree)
 	processes.verification.Descendants = append(
 		processes.verification.Descendants,
@@ -542,7 +561,8 @@ func TestProcessTreeFailureEventCannotLeakCommandArguments(t *testing.T) {
 }
 
 func TestUnresolvedPaneRootFailsBeforeBriefAndLogsVisibilityFailure(t *testing.T) {
-	runner, host, _, _, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, events, request := fixture.runner, fixture.host, fixture.events, fixture.request
 	host.paneRootErr = errors.New("tmux did not expose pane pid")
 
 	result, err := runTestNight(context.Background(), runner, request)
@@ -559,7 +579,8 @@ func TestUnresolvedPaneRootFailsBeforeBriefAndLogsVisibilityFailure(t *testing.T
 }
 
 func TestPreparedNightEnforcesOrderAndConsumesEveryAttempt(t *testing.T) {
-	runner, host, _, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, request := fixture.runner, fixture.host, fixture.request
 	prepared, err := runner.PrepareNight(context.Background(), request.law, request.stage)
 	if err != nil {
 		t.Fatalf("PrepareNight() error = %v", err)
@@ -591,7 +612,8 @@ func TestPreparedNightEnforcesOrderAndConsumesEveryAttempt(t *testing.T) {
 }
 
 func TestFailedPreparedDistillCannotRetryOrRunRefiner(t *testing.T) {
-	runner, host, rollouts, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts, request := fixture.runner, fixture.host, fixture.rollouts, fixture.request
 	rollouts.locateErr = errors.New("ambiguous rollout")
 	prepared, err := runner.PrepareNight(context.Background(), request.law, request.stage)
 	if err != nil {
@@ -638,7 +660,8 @@ func TestPreparedNightLawStillPrecedesEveryEffect(t *testing.T) {
 }
 
 func TestSeatPlanIsStageSandboxedAndCarriesEveryPin(t *testing.T) {
-	runner, host, _, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, request := fixture.runner, fixture.host, fixture.request
 	result, err := runTestNight(context.Background(), runner, request)
 	if err != nil {
 		t.Fatalf("RunNight() error = %v", err)
@@ -663,7 +686,9 @@ func TestSeatPlanIsStageSandboxedAndCarriesEveryPin(t *testing.T) {
 }
 
 func TestTimeoutFailsClosedAndCleansTheProcessGroupWithoutRetry(t *testing.T) {
-	runner, host, rollouts, _, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts := fixture.runner, fixture.host, fixture.rollouts
+	events, request := fixture.events, fixture.request
 	jailer := runner.dependencies.Jailer.(*fakeProcessJailer)
 	working := filepath.Join(t.TempDir(), "working.jsonl")
 	writeCodexTranscript(t, working, codexUser("still waiting"))
@@ -692,7 +717,8 @@ func TestTimeoutFailsClosedAndCleansTheProcessGroupWithoutRetry(t *testing.T) {
 }
 
 func TestContextCancellationStillUsesFreshCleanupContext(t *testing.T) {
-	runner, host, rollouts, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts, request := fixture.runner, fixture.host, fixture.rollouts, fixture.request
 	jailer := runner.dependencies.Jailer.(*fakeProcessJailer)
 	ctx, cancel := context.WithCancel(context.Background())
 	rollouts.cancel = cancel
@@ -715,7 +741,8 @@ func TestContextCancellationStillUsesFreshCleanupContext(t *testing.T) {
 }
 
 func TestProcessGroupCleanupFailureCannotRenderAsACompletedSeat(t *testing.T) {
-	runner, host, _, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, request := fixture.runner, fixture.host, fixture.request
 	jailer := runner.dependencies.Jailer.(*fakeProcessJailer)
 	jailer.killErr = errors.New("kernel refused group signal")
 	result, err := runTestNight(context.Background(), runner, request)
@@ -734,7 +761,8 @@ func TestProcessGroupCleanupFailureCannotRenderAsACompletedSeat(t *testing.T) {
 }
 
 func TestRolloutAmbiguityFailsClosedAndCleans(t *testing.T) {
-	runner, host, rollouts, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts, request := fixture.runner, fixture.host, fixture.rollouts, fixture.request
 	rollouts.locateErr = errors.New("ambiguous rollout: two candidates")
 	result, err := runTestNight(context.Background(), runner, request)
 	if err == nil || !strings.Contains(err.Error(), "ambiguous rollout") {
@@ -749,7 +777,8 @@ func TestRolloutAmbiguityFailsClosedAndCleans(t *testing.T) {
 }
 
 func TestCleanupFailureCannotRenderAsACompletedSeat(t *testing.T) {
-	runner, host, _, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, request := fixture.runner, fixture.host, fixture.request
 	host.killErr = errors.New("tmux refused kill")
 	result, err := runTestNight(context.Background(), runner, request)
 	if err == nil || !strings.Contains(err.Error(), "process group") {
@@ -764,7 +793,8 @@ func TestCleanupFailureCannotRenderAsACompletedSeat(t *testing.T) {
 }
 
 func TestUnprovenRenameOrPromptIsFailure(t *testing.T) {
-	runner, host, _, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, request := fixture.runner, fixture.host, fixture.request
 	host.confirmRename = false
 	result, err := runTestNight(context.Background(), runner, request)
 	if err == nil || !strings.Contains(err.Error(), "not proven") {
@@ -779,7 +809,9 @@ func TestUnprovenRenameOrPromptIsFailure(t *testing.T) {
 }
 
 func TestLargeCroppedComposerCannotPassWithoutRolloutTaskStarted(t *testing.T) {
-	runner, host, rollouts, _, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts := fixture.runner, fixture.host, fixture.rollouts
+	events, request := fixture.events, fixture.request
 	host.cropPrompt = true
 	host.dropPromptKey = true
 	rollouts.chats = nil
@@ -815,7 +847,8 @@ func TestLargeCroppedComposerCannotPassWithoutRolloutTaskStarted(t *testing.T) {
 }
 
 func TestWrongOrMissingTranscriptModelFailsAfterCleanup(t *testing.T) {
-	runner, host, rollouts, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts, request := fixture.runner, fixture.host, fixture.rollouts, fixture.request
 	path := filepath.Join(t.TempDir(), "wrong.jsonl")
 	writeCodexTranscriptWithConfig(
 		t, path, codexAssistant("answer"), "some-other-model", SeatEffort,
@@ -836,7 +869,8 @@ func TestWrongOrMissingTranscriptModelFailsAfterCleanup(t *testing.T) {
 }
 
 func TestWrongTranscriptEffortFailsAfterCleanup(t *testing.T) {
-	runner, host, rollouts, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts, request := fixture.runner, fixture.host, fixture.rollouts, fixture.request
 	path := filepath.Join(t.TempDir(), "wrong-effort.jsonl")
 	writeCodexTranscriptWithConfig(
 		t, path, codexAssistant("answer"), SeatModel, "low",
@@ -857,7 +891,8 @@ func TestWrongTranscriptEffortFailsAfterCleanup(t *testing.T) {
 }
 
 func TestEventWriteFailureStopsBeforeSpawn(t *testing.T) {
-	runner, host, _, _, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, events, request := fixture.runner, fixture.host, fixture.events, fixture.request
 	events.err = errors.New("disk full")
 	_, err := runTestNight(context.Background(), runner, request)
 	if err == nil || !strings.Contains(err.Error(), "record pinned seat configuration") {
@@ -869,7 +904,9 @@ func TestEventWriteFailureStopsBeforeSpawn(t *testing.T) {
 }
 
 func TestFailedMCPVerificationIsLoggedWithFactsBeforeReturning(t *testing.T) {
-	runner, host, _, commands, events, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host := fixture.runner, fixture.host
+	commands, events, request := fixture.commands, fixture.events, fixture.request
 	commands.results[1] = CommandResult{
 		Stdout:   "No MCP servers configured yet. Try `codex mcp add my-tool -- my-command`.\n",
 		Stderr:   "failed to load bootstrap configuration",
@@ -998,7 +1035,8 @@ func writeCodexTranscriptWithConfig(
 // first poll (a starved scheduler, a tiny timeout) still yields an examined
 // verdict — never "unproven" without a single look.
 func TestPromptProofExaminesTheRolloutOnceEvenWhenItsWindowIsAlreadySpent(t *testing.T) {
-	runner, host, rollouts, _, _, request := successfulRunner(t)
+	fixture := successfulRunner(t)
+	runner, host, rollouts, request := fixture.runner, fixture.host, fixture.rollouts, fixture.request
 	host.cropPrompt = true
 	host.dropPromptKey = true
 	rollouts.chats = nil

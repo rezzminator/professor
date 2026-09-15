@@ -102,7 +102,8 @@ func stressRequests() []Request {
 		},
 	}
 	requests := make([]Request, 0, len(rows)*2*3*2)
-	for _, row := range rows {
+	for index := range rows {
+		row := rows[index]
 		for _, bunker := range []bool{false, true} {
 			accounts := []int{1, 2, 3}
 			if row.Kind == compose.NewOpencode || row.Kind == compose.ResumeOpencode {

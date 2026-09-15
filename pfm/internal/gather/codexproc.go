@@ -287,7 +287,8 @@ func isRolloutUnder(root, target string) bool {
 
 func panesByPID(panes []Pane) map[int]Pane {
 	paneByPID := make(map[int]Pane, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := panes[index]
 		paneByPID[pane.PID] = pane
 	}
 	return paneByPID

@@ -78,7 +78,7 @@ var (
 	harnessModelIdentity = regexp.MustCompile(
 		`^ - You are powered by the model named [A-Za-z0-9 _-]+(?:\.[0-9]+[A-Za-z0-9 _-]*)*\. The exact model ID is [A-Za-z0-9._:-]+\.$`,
 	)
-	harnessKnowledgeCutoff = regexp.MustCompile(`^ - Assistant knowledge cutoff is [A-Za-z]+ [0-9]{4}\.$`)
+	harnessKnowledgeCutoff = regexp.MustCompile(`^ - Assistant knowledge cutoff is [A-Za-z]+ \d{4}\.$`)
 )
 
 // normalizeHarnessPrompt excludes only CLI identity metadata. Claude may omit
@@ -93,7 +93,7 @@ func normalizeHarnessPrompt(prompt string) string {
 	for index, line := range lines {
 		trimmed := strings.TrimLeft(line, " ")
 		width := 0
-		if len(line)-len(trimmed) <= 3 && len(trimmed) > 0 && (trimmed[0] == '`' || trimmed[0] == '~') {
+		if len(line)-len(trimmed) <= 3 && trimmed != "" && (trimmed[0] == '`' || trimmed[0] == '~') {
 			for width < len(trimmed) && trimmed[width] == trimmed[0] {
 				width++
 			}

@@ -81,15 +81,13 @@ func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	t.Setenv("PFM_DB", filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
 	t.Setenv("PFM_SHARED_DB", filepath.Join(home, ".cc", "fleet.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(home, "sid"))
-	t.Setenv("PFM_CLAUDE_ROOTS", strings.Join([]string{
-		filepath.Join(home, ".cc", "1", "projects"),
-		filepath.Join(home, ".cc", "2", "projects"),
-	}, string(os.PathListSeparator)))
+	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(home, ".cc", "1", "projects")+
+		string(os.PathListSeparator)+filepath.Join(home, ".cc", "2", "projects"))
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(home, ".codex"))
 	t.Setenv("PFM_TMUX_DIR", filepath.Join(home, "tmux"))
 	t.Setenv("PFM_TMUX_CONF", "/dev/null")
 	t.Setenv("PFM_PROC_ROOT", filepath.Join(home, "proc"))
-	t.Setenv("PATH", strings.Join([]string{canonicalDir, hostShimDir}, string(os.PathListSeparator)))
+	t.Setenv("PATH", canonicalDir+string(os.PathListSeparator)+hostShimDir)
 
 	runtime, err := pfmconfig.LoadRuntime("")
 	if err != nil {
@@ -268,7 +266,7 @@ func TestPFMPathWarningsIgnoreHostShimsOutsideTargetHome(t *testing.T) {
 
 	warnings := pfmPathWarnings(
 		home,
-		strings.Join([]string{canonicalDir, hostShimDir}, string(os.PathListSeparator)),
+		canonicalDir+string(os.PathListSeparator)+hostShimDir,
 	)
 	if len(warnings) != 0 {
 		t.Fatalf("target HOME PATH warnings=%q, want none for host shim", warnings)
@@ -296,7 +294,7 @@ func TestPFMPathWarningsReportHostShimsOutsideHomeWithoutAJail(t *testing.T) {
 
 	warnings := pfmPathWarnings(
 		home,
-		strings.Join([]string{canonicalDir, hostShimDir}, string(os.PathListSeparator)),
+		canonicalDir+string(os.PathListSeparator)+hostShimDir,
 	)
 	if !strings.Contains(strings.Join(warnings, "\n"), hostShim) {
 		t.Fatalf("PATH warnings=%q, want out-of-home shadow %q reported", warnings, hostShim)

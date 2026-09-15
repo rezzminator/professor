@@ -80,7 +80,8 @@ func Stream(
 		line, readErr := reader.ReadBytes('\n')
 		switch {
 		case len(line) > 0 && readErr == nil:
-			full := append(pending, line...)
+			pending = append(pending, line...)
+			full := pending
 			pending = nil
 			if entry, ok := transcript.Parse(full, string(engine)); ok {
 				if err := window.add(render(entry, options.Raw)); err != nil {

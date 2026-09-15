@@ -201,7 +201,7 @@ func (r *RemoteServer) bearerOK(req *http.Request) bool {
 
 func (r *RemoteServer) unauthorized(w http.ResponseWriter) {
 	w.Header().
-		Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource/mcp", scope="%s"`, r.publicURL, HarvesterScope))
+		Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata=%q, scope=%q`, r.publicURL+"/.well-known/oauth-protected-resource/mcp", HarvesterScope))
 	r.oauthError(w, http.StatusUnauthorized, "invalid_token", "missing or invalid bearer token")
 }
 

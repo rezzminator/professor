@@ -97,7 +97,8 @@ func readCrumbs(sidDir string, panes []Pane, sweep bool) (CrumbProbe, error) {
 	}
 
 	livePanes := make(map[string]struct{}, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := panes[index]
 		livePanes[pane.Socket+"\x00"+pane.PaneID] = struct{}{}
 	}
 

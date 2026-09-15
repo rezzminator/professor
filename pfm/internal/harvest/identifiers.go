@@ -66,7 +66,7 @@ func normalizeISBN(s string) string {
 		}
 		return -1
 	}, s))
-	if len(d) > 0 && strings.Trim(d, string(d[0])) == "" {
+	if d != "" && strings.Trim(d, string(d[0])) == "" {
 		return "" // reject checksum-valid placeholder values such as 0000000000
 	}
 	if len(d) == 13 && isbn13Valid(d) {
@@ -98,11 +98,12 @@ func isbn10Valid(s string) bool {
 	sum := 0
 	for i, r := range s {
 		v := 0
-		if r == 'X' && i == 9 {
+		switch {
+		case r == 'X' && i == 9:
 			v = 10
-		} else if r >= '0' && r <= '9' {
+		case r >= '0' && r <= '9':
 			v = int(r - '0')
-		} else {
+		default:
 			return false
 		}
 		sum += (10 - i) * v

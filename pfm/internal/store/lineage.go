@@ -27,11 +27,12 @@ func ResolveCodexLineages(
 ) ([]CodexLineage, map[string]string) {
 	byID := make(map[string]Rollout, len(rollouts))
 	ids := make([]string, 0, len(rollouts))
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		if rollout.ID == "" {
 			continue
 		}
-		byID[rollout.ID] = rollout
+		byID[rollout.ID] = *rollout
 		ids = append(ids, rollout.ID)
 	}
 	sort.Strings(ids)
@@ -42,7 +43,8 @@ func ResolveCodexLineages(
 	}
 
 	groups := make(map[string]*CodexLineage)
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		if !rollout.UserThread || rollout.ID == "" {
 			continue
 		}
@@ -63,7 +65,7 @@ func ResolveCodexLineages(
 			rollout.MTimeNS > lineage.Newest.MTimeNS ||
 			(rollout.MTimeNS == lineage.Newest.MTimeNS &&
 				rollout.ID > lineage.Newest.ID) {
-			lineage.Newest = rollout
+			lineage.Newest = *rollout
 		}
 	}
 
@@ -170,9 +172,10 @@ func (s *Store) CodexLineage(
 	if root == "" {
 		root = id
 	}
-	for _, lineage := range lineages {
+	for index := range lineages {
+		lineage := &lineages[index]
 		if lineage.RootID == root {
-			return lineage, true, nil
+			return *lineage, true, nil
 		}
 	}
 	return CodexLineage{}, false, nil
@@ -193,9 +196,10 @@ func (s *Store) RolloutLineage(
 		root = id
 	}
 	family := make([]Rollout, 0)
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		if roots[rollout.ID] == root {
-			family = append(family, rollout)
+			family = append(family, *rollout)
 		}
 	}
 	return family, nil
@@ -209,18 +213,20 @@ func (s *Store) ReconcileCodexLineageRoots(ctx context.Context) error {
 	}
 	_, roots := ResolveCodexLineages(rollouts)
 	updates := make([]Rollout, 0)
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		root := roots[rollout.ID]
 		if root != "" && root != rollout.LineageRoot {
 			rollout.LineageRoot = root
-			updates = append(updates, rollout)
+			updates = append(updates, *rollout)
 		}
 	}
 	return s.Batch(ctx, len(updates), func(
 		tx *ImmediateTx,
 		start, end int,
 	) error {
-		for _, rollout := range updates[start:end] {
+		for index := range updates[start:end] {
+			rollout := &updates[start+index]
 			if _, err := tx.ExecContext(
 				ctx,
 				"UPDATE rollouts SET lineage_root=? WHERE id=?",
@@ -251,10 +257,11 @@ func migrateCodexLineageKills(
 		return err
 	}
 	_, roots := ResolveCodexLineages(rollouts)
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		root := roots[rollout.ID]
 		if root == "" {
-			root = initialLineageRoot(rollout)
+			root = initialLineageRoot(*rollout)
 		}
 		if _, err := tx.ExecContext(
 			ctx,

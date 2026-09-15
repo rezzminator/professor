@@ -272,7 +272,8 @@ func (s *Store) transcriptPromptCounts(
 		return nil, fmt.Errorf("query clear-kill Codex prompt counts: %w", err)
 	}
 	lineages, _ := ResolveCodexLineages(rollouts)
-	for _, lineage := range lineages {
+	for index := range lineages {
+		lineage := &lineages[index]
 		if _, found := unresolved[lineage.RootID]; found {
 			counts[lineage.RootID] = lineage.PromptCount
 		}

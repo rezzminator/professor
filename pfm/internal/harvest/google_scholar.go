@@ -153,7 +153,8 @@ type scholarRow struct {
 func parseGoogleScholarFiltered(body []byte, limit int, wantedDOI string) []Candidate {
 	rows := parseGoogleScholarRows(body, limit, wantedDOI)
 	out := make([]Candidate, 0, len(rows))
-	for _, row := range rows {
+	for i := range rows {
+		row := &rows[i]
 		candidate := row.candidate
 		candidate.URL = row.citationURL
 		if row.directPDF != "" {
@@ -332,7 +333,8 @@ func scholarRowsWithVersions(
 	}
 	out := make([]Candidate, 0, limit)
 	versionAttempts := 0
-	for _, row := range rows {
+	for i := range rows {
+		row := &rows[i]
 		if len(out) >= limit {
 			break
 		}
@@ -347,7 +349,9 @@ func scholarRowsWithVersions(
 			if versionURL, ok := scholarVersionURL(baseURL, row.versionsURL); ok {
 				response, err := h.providerGet(ctx, versionURL, nil, providerHTMLMaxBody)
 				if err == nil && response.status < 400 && !providerChallenge(response.body, response.status) {
-					for _, version := range parseGoogleScholarRows(response.body, providerCandidateMax, wantedDOI) {
+					versions := parseGoogleScholarRows(response.body, providerCandidateMax, wantedDOI)
+					for i := range versions {
+						version := &versions[i]
 						if version.directPDF == "" ||
 							titleSimilarity(version.candidate.Title, row.candidate.Title) < .45 {
 							continue

@@ -139,14 +139,15 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	}
 	var err error
 	framed := hasFiles || present["task"] || present["task-file"]
-	if present["task-file"] {
+	switch {
+	case present["task-file"]:
 		request.Prompt, err = read(*taskFile)
 		request.Prompt = strings.TrimSpace(request.Prompt)
-	} else if present["task"] {
+	case present["task"]:
 		request.Prompt = *task
-	} else if present["prompt-file"] {
+	case present["prompt-file"]:
 		request.Prompt, err = read(*promptFile)
-	} else if !hasPrompt {
+	case !hasPrompt:
 		if request.Native && !framed {
 			request.Stdin = stdin
 		} else {
@@ -216,7 +217,8 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 					kept = append(kept, old)
 				}
 			}
-			request.Env = append(kept, entry)
+			kept = append(kept, entry)
+			request.Env = kept
 		}
 	}
 	if request.Native {

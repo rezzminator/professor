@@ -33,14 +33,14 @@ func TestPublicImagePathResolvesLocalRefsAndRefusesBareNames(t *testing.T) {
 			name:     "relative path with a directory separator joins basePath's dir",
 			raw:      "images/fig3.png",
 			basePath: "/srv/docs/report.md",
-			wantPath: filepath.Join("/srv/docs", "images/fig3.png"),
+			wantPath: filepath.Join(string(filepath.Separator), "srv", "docs", "images", "fig3.png"),
 			wantOK:   true,
 		},
 		{
 			name:     "dot-relative path joins basePath's dir even with no separator",
 			raw:      "./fig4.png",
 			basePath: "/srv/docs/report.md",
-			wantPath: filepath.Join("/srv/docs", "./fig4.png"),
+			wantPath: filepath.Join(string(filepath.Separator), "srv", "docs", "fig4.png"),
 			wantOK:   true,
 		},
 		{

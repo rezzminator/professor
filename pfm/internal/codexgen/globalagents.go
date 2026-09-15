@@ -1,6 +1,7 @@
 package codexgen
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -280,7 +281,7 @@ func sameGlobalAgentFile(path string, content []byte) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read global agent artifact %s: %w", path, err)
 	}
-	return string(raw) == string(content), nil
+	return bytes.Equal(raw, content), nil
 }
 
 func writeGlobalAgentFile(path string, content []byte) error {

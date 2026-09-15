@@ -71,12 +71,13 @@ func updateSettings(
 	// command (an operator's own statusline) is left exactly as it is.
 	status, _ := document["statusLine"].(map[string]any)
 	currentStatus, _ := status["command"].(string)
-	if uninstall {
+	switch {
+	case uninstall:
 		if currentStatus == overlayStatusCommand || RawStatusLineCommand(home, currentStatus) {
 			delete(document, "statusLine")
 			changed = true
 		}
-	} else if currentStatus == "" {
+	case currentStatus == "":
 		document["statusLine"] = map[string]any{
 			"type":                 "command",
 			"command":              overlayStatusCommand,
@@ -85,8 +86,8 @@ func updateSettings(
 			"hideVimModeIndicator": true,
 		}
 		changed = true
-	} else if currentStatus != overlayStatusCommand &&
-		(strings.Contains(currentStatus, "statusline-command.sh") || RawStatusLineCommand(home, currentStatus)) {
+	case currentStatus != overlayStatusCommand &&
+		(strings.Contains(currentStatus, "statusline-command.sh") || RawStatusLineCommand(home, currentStatus)):
 		status["type"] = "command"
 		status["command"] = overlayStatusCommand
 		changed = true

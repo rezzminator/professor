@@ -25,7 +25,7 @@ func TestPFMPathWarningsCatchResolutionAndHashShadows(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	warnings := pfmPathWarnings(home, strings.Join([]string{shadowDir, canonicalDir}, string(os.PathListSeparator)))
+	warnings := pfmPathWarnings(home, shadowDir+string(os.PathListSeparator)+canonicalDir)
 	joined := strings.Join(warnings, "\n")
 	if !strings.Contains(joined, "pfm_path_resolves=") ||
 		!strings.Contains(joined, "pfm_hash_mismatch=") ||
@@ -36,7 +36,7 @@ func TestPFMPathWarningsCatchResolutionAndHashShadows(t *testing.T) {
 	if err := os.WriteFile(shadow, []byte("production-candidate"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	warnings = pfmPathWarnings(home, strings.Join([]string{canonicalDir, shadowDir}, string(os.PathListSeparator)))
+	warnings = pfmPathWarnings(home, canonicalDir+string(os.PathListSeparator)+shadowDir)
 	if len(warnings) != 0 {
 		t.Fatalf("matching canonical-first PATH warnings = %q, want none", warnings)
 	}

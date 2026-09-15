@@ -174,7 +174,8 @@ func verifyRenames(
 func liveSockets(panes []gather.Pane) []string {
 	seen := make(map[string]bool, len(panes))
 	sockets := make([]string, 0, len(panes))
-	for _, pane := range panes {
+	for index := range panes {
+		pane := &panes[index]
 		if seen[pane.Socket] {
 			continue
 		}

@@ -46,9 +46,9 @@ func startCodexStatusPane(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 		t.Fatalf("start jailed codex pane %q: %v: %s", socket, err, output)
 	}
 	t.Cleanup(func() {
-		kill := exec.Command("tmux", "-L", socket, "kill-server")
-		kill.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
-		_ = kill.Run()
+		killCommand := exec.Command("tmux", "-L", socket, "kill-server")
+		killCommand.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
+		_ = killCommand.Run()
 	})
 	waitForPaneToPaint(t, tmuxTmpDir, socket, statusLine)
 }

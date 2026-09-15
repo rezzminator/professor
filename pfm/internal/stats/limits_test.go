@@ -1468,7 +1468,8 @@ func waitForNoCachedEntry(t *testing.T, sampler *LimitsSampler, accountID int) {
 
 func limitTestAccountKey(t *testing.T, sampler *LimitsSampler, accountID int) string {
 	t.Helper()
-	for _, account := range sampler.Accounts {
+	for index := range sampler.Accounts {
+		account := &sampler.Accounts[index]
 		if account.ID == accountID {
 			return account.cacheKey()
 		}

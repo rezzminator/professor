@@ -129,7 +129,8 @@ func runHarvest(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		}
 		fmt.Fprintln(stdout, string(encoded))
 	}
-	for _, result := range results {
+	for index := range results {
+		result := &results[index]
 		if result.Error != "" {
 			return 1
 		}

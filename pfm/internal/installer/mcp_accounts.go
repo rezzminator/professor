@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -246,7 +247,7 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 				okMessage += suffix
 			}
 		}
-		if string(before) != string(after) {
+		if !bytes.Equal(before, after) {
 			if err := installer.saveMCPOwnership(ownership); err != nil {
 				return nil, err
 			}

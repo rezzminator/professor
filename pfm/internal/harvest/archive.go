@@ -490,16 +490,7 @@ func readZip(path, name string) (body []byte, returnErr error) {
 			float64(entry.UncompressedSize64)/float64(entry.CompressedSize64) > float64(MaxArchiveRatio) {
 			return nil, fmt.Errorf("compression ratio exceeds limit")
 		}
-		r, e := entry.Open()
-		if e != nil {
-			return nil, e
-		}
-		defer func() {
-			if err := r.Close(); err != nil {
-				returnErr = errors.Join(returnErr, fmt.Errorf("close zip member %q: %w", name, err))
-			}
-		}()
-		body, e := io.ReadAll(io.LimitReader(r, MaxArchiveFileBytes+1))
+		body, e := readZipMember(entry, name)
 		if e != nil {
 			return nil, e
 		}
@@ -509,6 +500,19 @@ func readZip(path, name string) (body []byte, returnErr error) {
 		return body, nil
 	}
 	return nil, fmt.Errorf("member not found: %s", name)
+}
+
+func readZipMember(entry *zip.File, name string) (body []byte, returnErr error) {
+	r, err := entry.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err := r.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close zip member %q: %w", name, err))
+		}
+	}()
+	return io.ReadAll(io.LimitReader(r, MaxArchiveFileBytes+1))
 }
 
 func readTar(path, name string) (body []byte, returnErr error) {

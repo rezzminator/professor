@@ -732,7 +732,8 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 				fade = 1.0
 			}
 		}
-		x0, y0, cpx, cpy, x1, y1 := cosmosEdgeRail(fp, tp, cx, cy)
+		rail := cosmosEdgeRail(fp, tp, cx, cy)
+		x0, y0, cpx, cpy, x1, y1 := rail.x0, rail.y0, rail.cpx, rail.cpy, rail.x1, rail.y1
 		canvas.Bezier(x0, y0, cpx, cpy, x1, y1, fromColor, toColor, spotlight(edge, fade), dashed)
 	}
 
@@ -762,7 +763,8 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 				fromColor = rgbFromHex(configuredCosmosPalette.CosmosLineage)
 				particles = 1
 			}
-			x0, y0, cpx, cpy, x1, y1 := cosmosEdgeRail(fp, tp, cx, cy)
+			rail := cosmosEdgeRail(fp, tp, cx, cy)
+			x0, y0, cpx, cpy, x1, y1 := rail.x0, rail.y0, rail.cpx, rail.cpy, rail.x1, rail.y1
 			for index := 0; index < particles; index++ {
 				progress := math.Mod(clock/period+phase/(2*math.Pi)+float64(index)*0.5, 1)
 				px, py := BezierPoint(x0, y0, cpx, cpy, x1, y1, progress)
@@ -789,7 +791,8 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 			if !fok || !tok {
 				continue
 			}
-			x0, y0, cpx, cpy, x1, y1 := cosmosEdgeRail(fp, tp, cx, cy)
+			rail := cosmosEdgeRail(fp, tp, cx, cy)
+			x0, y0, cpx, cpy, x1, y1 := rail.x0, rail.y0, rail.cpx, rail.cpy, rail.x1, rail.y1
 			t := float64(age) / float64(duration)
 			base := lerpRGB(cosmosNodeColor(from), cosmosNodeColor(to), t)
 			if edge.Kind == shared.KindSpawn {
@@ -1386,12 +1389,16 @@ func cosmosLayout(
 	}
 }
 
-func cosmosEdgeRail(from, to cosmosPoint, cx, cy float64) (x0, y0, cpx, cpy, x1, y1 float64) {
-	x0, y0, x1, y1 = from.x, from.y, to.x, to.y
+type cosmosRail struct {
+	x0, y0, cpx, cpy, x1, y1 float64
+}
+
+func cosmosEdgeRail(from, to cosmosPoint, cx, cy float64) cosmosRail {
+	x0, y0, x1, y1 := from.x, from.y, to.x, to.y
 	mx, my := (x0+x1)/2, (y0+y1)/2
-	cpx = mx + (cx-mx)*0.30
-	cpy = my + (cy-my)*0.30
-	return
+	cpx := mx + (cx-mx)*0.30
+	cpy := my + (cy-my)*0.30
+	return cosmosRail{x0: x0, y0: y0, cpx: cpx, cpy: cpy, x1: x1, y1: y1}
 }
 
 func ease(t float64) float64 { return t * t * (3 - 2*t) }

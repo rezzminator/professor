@@ -270,10 +270,7 @@ func TestSessionFromCrumbUsesPaneSpecificIdentity(t *testing.T) {
 
 func TestTranscriptCWDReadsARecordBeforeTheSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.jsonl")
-	content := strings.Join([]string{
-		`{"type":"summary","message":"not a cwd"}`,
-		`{"cwd":"/jail/project","message":"start"}`,
-	}, "\n") + "\n"
+	content := `{"type":"summary","message":"not a cwd"}` + "\n" + `{"cwd":"/jail/project","message":"start"}` + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}

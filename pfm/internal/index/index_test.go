@@ -883,7 +883,8 @@ func dumpIndex(
 	}
 
 	var output strings.Builder
-	for _, transcript := range transcripts {
+	for i := range transcripts {
+		transcript := &transcripts[i]
 		fmt.Fprintf(
 			&output,
 			"T\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",
@@ -900,7 +901,8 @@ func dumpIndex(
 			strconv.FormatBool(transcript.IsBG),
 		)
 	}
-	for _, rollout := range rollouts {
+	for i := range rollouts {
+		rollout := &rollouts[i]
 		fmt.Fprintf(
 			&output,
 			"R\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%d\t%s\n",

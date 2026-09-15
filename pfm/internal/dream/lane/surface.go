@@ -19,7 +19,7 @@ const AgentSurfaceHeader = "Cached by the dreamer from earlier runs — read the
 
 var (
 	mapPointerPattern = regexp.MustCompile(` -> maps/[a-z0-9][a-z0-9-]*\.md$`)
-	surfaceRowPattern = regexp.MustCompile(`^- ([^[:space:]].*) -> (maps/[a-z0-9][a-z0-9-]*\.md)$`)
+	surfaceRowPattern = regexp.MustCompile(`^- ([^\s\v].*) -> (maps/[a-z0-9][a-z0-9-]*\.md)$`)
 )
 
 type RenderedSurfaces struct {

@@ -39,10 +39,11 @@ func reconcileCodexState(
 	counters *Counters,
 ) []store.Rollout {
 	positionByID := make(map[string]int, len(updates))
-	for position, rollout := range updates {
-		positionByID[rollout.ID] = position
+	for position := range updates {
+		positionByID[updates[position].ID] = position
 	}
-	for _, thread := range threads {
+	for i := range threads {
+		thread := &threads[i]
 		if thread.Listed() {
 			counters.CodexThreads++
 			// The rollout file may be absent or already deleted; the store
@@ -51,11 +52,11 @@ func reconcileCodexState(
 			presentIDs[thread.ID] = struct{}{}
 		}
 		if position, found := positionByID[thread.ID]; found {
-			updates[position] = applyCodexThread(updates[position], thread)
+			updates[position] = applyCodexThread(updates[position], *thread)
 			continue
 		}
 		if row, found := existing[thread.ID]; found {
-			adjusted := applyCodexThread(row, thread)
+			adjusted := applyCodexThread(row, *thread)
 			if adjusted != row {
 				positionByID[thread.ID] = len(updates)
 				updates = append(updates, adjusted)
@@ -67,7 +68,7 @@ func reconcileCodexState(
 		}
 		counters.CodexRowsCreated++
 		positionByID[thread.ID] = len(updates)
-		updates = append(updates, codexStoreRollout(thread, codexRoot))
+		updates = append(updates, codexStoreRollout(*thread, codexRoot))
 	}
 	return updates
 }
@@ -171,7 +172,8 @@ func reconcileCodexNames(
 		return err
 	}
 	updates := make([]store.CxName, 0)
-	for _, thread := range threads {
+	for i := range threads {
+		thread := &threads[i]
 		if !thread.Listed() || thread.Name == "" {
 			continue
 		}

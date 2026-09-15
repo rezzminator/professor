@@ -98,7 +98,7 @@ func Check(ctx context.Context, path, current, latestURL string, client *http.Cl
 	if client == nil {
 		client = &http.Client{Timeout: 12 * time.Second}
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodHead, latestURL, nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodHead, latestURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("build latest-release request: %w", err)
 	}
@@ -112,7 +112,7 @@ func Check(ctx context.Context, path, current, latestURL string, client *http.Cl
 		return err
 	}
 	if hop := renameHopURL(request.URL, resolved); hop != "" {
-		hopRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, hop, nil)
+		hopRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, hop, http.NoBody)
 		if err != nil {
 			return fmt.Errorf("build renamed Professor release request: %w", err)
 		}

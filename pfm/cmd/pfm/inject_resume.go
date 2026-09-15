@@ -217,7 +217,8 @@ func liveCrumbSession(
 		if err != nil {
 			return "", false, fmt.Errorf("prove crumb socket %q: %w", socket, err)
 		}
-		for _, pane := range panes {
+		for index := range panes {
+			pane := &panes[index]
 			if paneID == "" || pane.PaneID == paneID {
 				return socket + ":" + pane.PaneID, true, nil
 			}

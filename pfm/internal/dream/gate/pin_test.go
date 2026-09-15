@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
@@ -14,7 +15,7 @@ func TestPinAcceptsCanonicalSortedUniqueAbsolutePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Pin() error = %v", err)
 	}
-	if pin.Digest != hex.EncodeToString(digest[:]) || len(pin.Paths) != 2 || string(pin.Raw) != string(raw) {
+	if pin.Digest != hex.EncodeToString(digest[:]) || len(pin.Paths) != 2 || !bytes.Equal(pin.Raw, raw) {
 		t.Fatalf("Pin() = %#v", pin)
 	}
 }

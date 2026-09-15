@@ -406,7 +406,8 @@ func ReportHooks(stdout io.Writer, home string, machine pfmconfig.Config, claude
 		results = ProbeExpectedHooks(home, machine)
 	}
 	skipped := map[string]bool{}
-	for _, result := range results {
+	for index := range results {
+		result := &results[index]
 		hook := result.Hook
 		if claudeAbsent && strings.HasPrefix(hook.Target, "claude[") {
 			if !skipped[hook.Target] {

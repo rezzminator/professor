@@ -161,7 +161,8 @@ func TestReloadHideFlag(t *testing.T) {
 // the two facts that were missing: every setting has a flag, and the socket
 // finds itself.
 func TestReloadUsageTeachesTheFlagsAndTheSocketDefault(t *testing.T) {
-	for _, want := range []string{
+	haystack := reload.Usage
+	for _, needle := range []string{
 		"--account N",
 		"--1h on|off",
 		"--new",
@@ -172,8 +173,8 @@ func TestReloadUsageTeachesTheFlagsAndTheSocketDefault(t *testing.T) {
 		"--effort",
 		"detected automatically",
 	} {
-		if !strings.Contains(reload.Usage, want) {
-			t.Errorf("reload.Usage is missing %q:\n%s", want, reload.Usage)
+		if !strings.Contains(haystack, needle) {
+			t.Errorf("reload.Usage is missing %q:\n%s", needle, reload.Usage)
 		}
 	}
 }

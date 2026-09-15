@@ -315,7 +315,8 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		fmt.Fprintln(stdout, "live chats in this repo (name · session · state · last activity):")
 	}
 	found, elsewhere, killed := 0, 0, 0
-	for _, row := range scan.Output.Rows {
+	for index := range scan.Output.Rows {
+		row := &scan.Output.Rows[index]
 		if !pfmchat.IsLive(row.Kind) {
 			continue
 		}
@@ -327,7 +328,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 			elsewhere++
 			continue
 		}
-		chat := pfmchat.FromRow(row)
+		chat := pfmchat.FromRow(*row)
 		status, inspectErr := headless.Inspect(context.Background(), chat, time.Now())
 		state := "unknown"
 		if inspectErr != nil {
@@ -615,9 +616,10 @@ func parentBranchRow(ctx context.Context, id string, runtimes ...commandRuntime)
 	if err != nil {
 		return compose.Row{}, false, err
 	}
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
 		if row.ID == id {
-			return row, true, nil
+			return *row, true, nil
 		}
 	}
 	return compose.Row{}, false, nil

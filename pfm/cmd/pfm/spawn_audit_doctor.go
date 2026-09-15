@@ -323,7 +323,8 @@ func liveClaudeSpawns(
 	binary := claudeBinaryName(machine)
 
 	observations := make([]spawnObservation, 0, len(probe.Panes))
-	for _, pane := range probe.Panes {
+	for index := range probe.Panes {
+		pane := &probe.Panes[index]
 		if id, ok := pfmengine.FromSocket(pane.Socket); !ok || id != pfmengine.Claude {
 			continue
 		}

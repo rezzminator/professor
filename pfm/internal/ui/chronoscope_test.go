@@ -506,7 +506,8 @@ func TestNavigatorSpotlightDimsEveryOtherEdge(t *testing.T) {
 
 	midpoint := func(edge compose.CosmosEdge) (int, int) {
 		fp, tp := frame.points[edge.From], frame.points[edge.To]
-		x0, y0, cpx, cpy, x1, y1 := cosmosEdgeRail(fp, tp, frame.cx, frame.cy)
+		rail := cosmosEdgeRail(fp, tp, frame.cx, frame.cy)
+		x0, y0, cpx, cpy, x1, y1 := rail.x0, rail.y0, rail.cpx, rail.cpy, rail.x1, rail.y1
 		mx, my := BezierPoint(x0, y0, cpx, cpy, x1, y1, 0.5)
 		return int(mx), int(my)
 	}
@@ -1252,7 +1253,8 @@ func TestNavigatorSpotlightDimsTheCometBurstAndShockwaveRing(t *testing.T) {
 		age := now.Sub(time.Unix(0, edge.LastNS))
 		tt := ease(float64(age) / float64(duration))
 		fp, tp := frame.points[edge.From], frame.points[edge.To]
-		x0, y0, cpx, cpy, x1, y1 := cosmosEdgeRail(fp, tp, frame.cx, frame.cy)
+		rail := cosmosEdgeRail(fp, tp, frame.cx, frame.cy)
+		x0, y0, cpx, cpy, x1, y1 := rail.x0, rail.y0, rail.cpx, rail.cpy, rail.x1, rail.y1
 		hx, hy := BezierPoint(x0, y0, cpx, cpy, x1, y1, tt)
 		col, row := int(hx)/2, int(hy)/4
 
@@ -1348,7 +1350,7 @@ func TestRenderCompactCosmosEmptyStatesAndHeightBound(t *testing.T) {
 			})
 		}
 		model.cosmos = compose.CosmosGraph{Nodes: nodes, Edges: edges}
-		text := model.renderCosmosPanel(19, 7) // innerHeight = 5
+		text := model.renderCosmosPanel(19, 7)
 		lines := strings.Split(text, "\n")
 		if len(lines) != 7 { // top border + 5 body lines + bottom border
 			t.Fatalf(

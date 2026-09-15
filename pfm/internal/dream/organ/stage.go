@@ -228,7 +228,7 @@ func strictDescendant(root, candidate string) bool {
 	if err != nil || relative == "." || relative == ".." || filepath.IsAbs(relative) {
 		return false
 	}
-	return len(relative) > 0 && !stringsHasDotDotPrefix(relative)
+	return relative != "" && !stringsHasDotDotPrefix(relative)
 }
 
 func stringsHasDotDotPrefix(path string) bool {

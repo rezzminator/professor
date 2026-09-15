@@ -404,7 +404,8 @@ func printCodexPaneBindingDoctor(
 		// whole table and the uncertainty is stated rather than hidden.
 		fmt.Fprintf(stdout, "doctor: warning codex_panes=unreadable error=%v\n", paneErr)
 	}
-	for _, pane := range panes {
+	for paneIndex := range panes {
+		pane := &panes[paneIndex]
 		live[pane.Socket+" "+pane.PaneID] = true
 	}
 	knowLive := paneErr == nil
@@ -544,7 +545,8 @@ func printCodexPaneFollowDoctor(
 
 	unfollowable := 0
 	warnings := 0
-	for _, observedAction := range actions {
+	for actionIndex := range actions {
+		observedAction := &actions[actionIndex]
 		switch observedAction.Skip {
 		case "", fleet.CodexPaneSameLineage:
 			continue
@@ -715,7 +717,9 @@ func printDependencyDoctor(
 	entries []deps.Entry,
 	options deps.ProbeOptions,
 ) (warnings, failures int, claudeAbsent bool) {
-	for _, result := range configuredDependencyProbe(ctx, entries, options) {
+	results := configuredDependencyProbe(ctx, entries, options)
+	for resultIndex := range results {
+		result := &results[resultIndex]
 		entry := result.Entry
 		// A dependency the fleet engine itself cannot run without (Required,
 		// and not one of the opt-in harvestpy sidecar's own entries) is a

@@ -118,12 +118,13 @@ func (s *Store) defaultRollouts(
 		return nil, err
 	}
 	rollouts := make([]Rollout, 0, min(limit, len(lineages)))
-	for _, lineage := range lineages {
-		if codexLineageKilled(lineage, killedByID) ||
-			codexLineageLabelKilled(lineage, cxNames) {
+	for index := range lineages {
+		lineage := &lineages[index]
+		if codexLineageKilled(*lineage, killedByID) ||
+			codexLineageLabelKilled(*lineage, cxNames) {
 			continue
 		}
-		if codexLineageSuppressed(lineage) {
+		if codexLineageSuppressed(*lineage) {
 			continue
 		}
 		rollouts = append(rollouts, lineage.Newest)
@@ -167,13 +168,14 @@ LEFT JOIN `+effectiveKilled+` AS h ON h.uuid=t.uuid`,
 		return CachedCounts{}, err
 	}
 	var codexKilled, codexSuppressed int
-	for _, lineage := range lineages {
-		if codexLineageKilled(lineage, killedByID) ||
-			codexLineageLabelKilled(lineage, cxNames) {
+	for index := range lineages {
+		lineage := &lineages[index]
+		if codexLineageKilled(*lineage, killedByID) ||
+			codexLineageLabelKilled(*lineage, cxNames) {
 			codexKilled++
 			continue
 		}
-		if codexLineageSuppressed(lineage) {
+		if codexLineageSuppressed(*lineage) {
 			codexSuppressed++
 			continue
 		}
@@ -290,7 +292,8 @@ func (s *Store) codexLineageRows(
 // this package.
 func CodexThreads(rollouts []Rollout) []naming.CodexThread {
 	threads := make([]naming.CodexThread, 0, len(rollouts))
-	for _, rollout := range rollouts {
+	for index := range rollouts {
+		rollout := &rollouts[index]
 		threads = append(threads, naming.CodexThread{
 			ID:           rollout.ID,
 			SessionID:    rollout.SessionID,

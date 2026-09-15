@@ -300,17 +300,19 @@ func Run(
 	dead := false
 	empties := 0
 	dialogSeen := false
+exitPoll:
 	for i := 0; i < options.ExitTries; i++ {
 		panes, listErr := tmux.ListPanes(ctx, request.SocketPath)
-		if listErr != nil {
+		switch {
+		case listErr != nil:
 			return Result{}, fmt.Errorf("check pane exit state: %w", listErr)
-		} else if len(panes) == 0 {
+		case len(panes) == 0:
 			empties++
 			if empties >= 3 {
 				dead = true
-				break
+				break exitPoll
 			}
-		} else {
+		default:
 			empties = 0
 			for _, pane := range panes {
 				if pane.ID == request.Pane && pane.Dead {
@@ -318,13 +320,14 @@ func Run(
 				}
 			}
 			if dead {
-				break
+				break exitPoll
 			}
 		}
 		capture, captureErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
-		if captureErr != nil {
+		switch {
+		case captureErr != nil:
 			fmt.Fprintf(stderr, "pfm chat reload: confirm /exit submission (try %d): %v\n", i+1, captureErr)
-		} else if exitDialogOpen(capture) {
+		case exitDialogOpen(capture):
 			// Claude Code answers /exit with a confirmation whenever the chat
 			// has background work — a scheduled task, a background shell, a
 			// sub-agent — with "Exit and stop tasks" preselected. Nothing the
@@ -341,7 +344,7 @@ func Run(
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("confirm exit dialog: %w", err)
 			}
-		} else if composerShowsExit(capture) {
+		case composerShowsExit(capture):
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("retry /exit submission: %w", err)
 			}
@@ -433,8 +436,11 @@ func waitCallerIdle(
 				announced = true
 				fmt.Fprintln(stderr, "pfm chat reload: the chat's turn is still running — holding /exit until it ends")
 			}
-		} else if stable++; stable >= 2 {
-			return capture, nil
+		} else {
+			stable++
+			if stable >= 2 {
+				return capture, nil
+			}
 		}
 		if err := sleepPoll(ctx, options.Poll); err != nil {
 			return "", err
@@ -530,7 +536,7 @@ func composerShowsExit(capture string) bool {
 // exitDialogPattern is the selected row of Claude Code's background-work
 // exit confirmation ("❯ 1. Exit and stop tasks"). The marker has to sit on
 // the Exit row: a human who moved it to "Stay" gets that choice respected.
-var exitDialogPattern = regexp.MustCompile(`❯[[:space:]]*[0-9]+\.[[:space:]]*Exit`)
+var exitDialogPattern = regexp.MustCompile(`❯[\s\v]*\d+\.[\s\v]*Exit`)
 
 func exitDialogOpen(capture string) bool {
 	return exitDialogPattern.MatchString(capture)
@@ -546,7 +552,7 @@ func rosterContains(accounts []int, wanted int) bool {
 }
 
 func selectorOpen(capture string) bool {
-	selector := regexp.MustCompile(`❯[[:space:]]*[0-9]+\.`)
+	selector := regexp.MustCompile(`❯[\s\v]*\d+\.`)
 	for _, line := range strings.Split(capture, "\n") {
 		if selector.MatchString(line) {
 			return true
@@ -930,7 +936,6 @@ func engineLive(proc Process, panePID int, engine pfmengine.ID, claudeBinary, co
 	if engine == pfmengine.Codex {
 		binary = codexBinary
 	}
-processes:
 	for _, pid := range pids {
 		argv, err := proc.Cmdline(pid)
 		if err != nil {
@@ -950,7 +955,7 @@ processes:
 			stat, statErr := proc.Stat(current)
 			if statErr != nil {
 				if errors.Is(statErr, fs.ErrNotExist) {
-					continue processes
+					break
 				}
 				return false, fmt.Errorf("read process %d ancestry: %w", current, statErr)
 			}

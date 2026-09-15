@@ -91,18 +91,19 @@ func TestMain(m *testing.M) {
 	}
 	dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
 		results := make([]deps.Result, 0, len(entries))
-		for _, entry := range entries {
+		for index := range entries {
+			entry := &entries[index]
 			if !entry.AppliesTo(runtime.GOOS) {
 				results = append(
 					results,
-					deps.Result{Entry: entry, State: deps.StateSkipped, Error: "not this platform"},
+					deps.Result{Entry: *entry, State: deps.StateSkipped, Error: "not this platform"},
 				)
 				continue
 			}
 			results = append(
 				results,
 				deps.Result{
-					Entry:   entry,
+					Entry:   *entry,
 					State:   deps.StateOK,
 					Path:    "/test/bin/" + entry.Name,
 					Version: entry.MinVersion,

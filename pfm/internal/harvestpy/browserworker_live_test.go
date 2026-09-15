@@ -58,9 +58,7 @@ func TestLiveBrowserWorkerFetch(t *testing.T) {
 	if chromePath == "" {
 		t.Skip("named gap: no system Chrome binary resolves on this host")
 	}
-	html, status, err := worker.Fetch(ctx, "https://example.com/", "", true, 45000, func(url string) error {
-		return harvest.AssertFetchableStrict(url)
-	})
+	html, status, err := worker.Fetch(ctx, "https://example.com/", "", true, 45000, harvest.AssertFetchableStrict)
 	if err != nil {
 		t.Fatalf("live browser fetch failed: %v", err)
 	}

@@ -1148,15 +1148,16 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("read embedded asset %s: %w", asset.path, err)
 		}
-		if asset.path == "shim/pfm.zsh" {
+		switch {
+		case asset.path == "shim/pfm.zsh":
 			content, err = renderShimAsset(content, installer.options)
-		} else if asset.path == "bin/claude" {
+		case asset.path == "bin/claude":
 			content, err = renderClaudeLauncherAsset(content, installer.options)
-		} else if asset.path == "reload.command.md" {
+		case asset.path == "reload.command.md":
 			content, err = renderReloadCommandAsset(content)
-		} else if asset.path == "systemd/"+nameSyncTimerUnit {
+		case asset.path == "systemd/"+nameSyncTimerUnit:
 			content, err = renderNameSyncTimerAsset(content, installer.options)
-		} else if strings.HasPrefix(asset.path, "systemd/") {
+		case strings.HasPrefix(asset.path, "systemd/"):
 			content, err = renderServicePath(content, installer.options.Home)
 		}
 		if err != nil {
@@ -1486,8 +1487,7 @@ func (installer *engine) unwireCommands(assets []assetFile) error {
 
 func (installer *engine) commandTarget(asset string) (string, bool) {
 	commands := filepath.Join(installer.options.ConfigDir, "commands")
-	switch asset {
-	case "reload.command.md":
+	if asset == "reload.command.md" {
 		return filepath.Join(commands, "reload.md"), true
 	}
 	return "", false
@@ -1539,8 +1539,7 @@ func (installer *engine) unwireSkills(assets []assetFile) error {
 // account gets the skill, never the primary alone.
 func (installer *engine) skillTarget(configDir, asset string) (string, bool) {
 	skills := filepath.Join(configDir, "skills")
-	switch asset {
-	case "handoff.skill.md":
+	if asset == "handoff.skill.md" {
 		return filepath.Join(skills, "handoff", "SKILL.md"), true
 	}
 	return "", false

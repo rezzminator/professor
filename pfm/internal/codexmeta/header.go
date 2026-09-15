@@ -98,12 +98,16 @@ func Decode(line []byte) (Header, error) {
 	}, nil
 }
 
-func Read(path string) (Header, error) {
+func Read(path string) (header Header, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Header{}, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout %s: %w", path, err))
+		}
+	}()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for lines := 0; lines < 20 && scanner.Scan(); lines++ {

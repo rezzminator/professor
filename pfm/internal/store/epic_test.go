@@ -11,7 +11,11 @@ func TestEpicInjectionDedupeIsKeyedBySessionAndSlug(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	seen, err := database.EpicInjected(ctx, "session-a", "alpha")

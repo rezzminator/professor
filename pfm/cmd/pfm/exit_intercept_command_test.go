@@ -43,7 +43,9 @@ func TestRunExitIntercept(t *testing.T) {
 					t.Fatalf("front called unexpectedly with %v", args)
 				}
 				calls = append(calls, append([]string{}, args...))
-				stdout.Write([]byte("exit closed the chat\n"))
+				if _, err := stdout.Write([]byte("exit closed the chat\n")); err != nil {
+					t.Fatal(err)
+				}
 				return 0
 			}
 

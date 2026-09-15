@@ -178,12 +178,16 @@ type rolloutMeta struct {
 	CWD string
 }
 
-func readRolloutMeta(path string) (rolloutMeta, error) {
+func readRolloutMeta(path string) (meta rolloutMeta, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return rolloutMeta{}, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout %s: %w", path, err))
+		}
+	}()
 
 	reader := bufio.NewReaderSize(file, 64<<10)
 	line, err := reader.ReadBytes('\n')

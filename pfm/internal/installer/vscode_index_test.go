@@ -261,7 +261,11 @@ func TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow(t
 	if err := os.Chmod(unreadablePath, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(unreadablePath, 0o644) })
+	t.Cleanup(func() {
+		if err := os.Chmod(unreadablePath, 0o644); err != nil {
+			t.Errorf("restore unreadable settings permissions: %v", err)
+		}
+	})
 
 	installer := newVSCodeExtensionEngine(home, nil, true)
 	ownership := map[string]vscodeOwnershipRecord{

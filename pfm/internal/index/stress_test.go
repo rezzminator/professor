@@ -195,7 +195,11 @@ func TestIndexStressHelper(t *testing.T) {
 	strict := os.Getenv("PFM_STRESS_STRICT") == "1"
 
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := New(database)
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

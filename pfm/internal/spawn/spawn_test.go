@@ -568,7 +568,11 @@ func (fake *fakeCodex) recordRename() {
 	if err != nil {
 		panic(err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			panic(fmt.Errorf("close fake Codex rename ledger: %w", err))
+		}
+	}()
 	fmt.Fprintf(file, "{\"id\":\"fake-thread\",\"thread_name\":%q,\"updated_at\":%q}\n",
 		fake.name, time.Now().UTC().Format(time.RFC3339Nano))
 }

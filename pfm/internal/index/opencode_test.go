@@ -26,7 +26,11 @@ func seedOpencodeStore(t *testing.T, root string) {
 	if err != nil {
 		t.Fatalf("open fixture store: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close db: %v", err)
+		}
+	}()
 	script := `
 CREATE TABLE project (
   id TEXT PRIMARY KEY,
@@ -241,8 +245,10 @@ UPDATE message
        'role','user', 'agent','build',
        'model',json_object('providerID','openai','modelID','gpt-5.6-sol')
    )
- WHERE id = 'm2'`); err != nil {
-		db.Close()
+	 WHERE id = 'm2'`); err != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("update model fixture: %v; close database: %v", err, closeErr)
+		}
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -321,7 +327,9 @@ func TestReadOpencodeSessionsRejectsMalformedNativeJSONAndShapes(t *testing.T) {
 				t.Fatal(err)
 			}
 			if _, err := db.Exec(test.statement); err != nil {
-				db.Close()
+				if closeErr := db.Close(); closeErr != nil {
+					t.Fatalf("mutate fixture: %v; close database: %v", err, closeErr)
+				}
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {
@@ -351,7 +359,9 @@ DELETE FROM session;
 UPDATE message SET data = 'not-json' WHERE id = 'm1';
 UPDATE part SET data = 'not-json' WHERE id = 'i1';
 `); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("mutate orphan fixture: %v; close database: %v", err, closeErr)
+		}
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -372,7 +382,9 @@ func TestReadOpencodeSessionsAcceptsACompletelyEmptyNativeStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`DELETE FROM part; DELETE FROM message; DELETE FROM session;`); err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("empty fixture: %v; close database: %v", err, closeErr)
+		}
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {
@@ -418,11 +430,17 @@ func TestSyncOpencodeMirrorReplacesAndDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen fixture: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close db: %v", err)
+		}
+	}()
 	if _, err := db.Exec("DELETE FROM session WHERE id = 'ses_child'"); err != nil {
 		t.Fatalf("delete child: %v", err)
 	}
-	db.Close()
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	counters = Counters{}
 	if err := syncOpencodeMirror(ctx, database, root, &counters); err != nil {

@@ -108,12 +108,15 @@ func doiMirrorMaxBytes(h *Harvester) int64 {
 // searchBrave, the doi-mirror provider itself) reads its response through
 // here, so its error strings name the gateway generically rather than the
 // one caller ("doi-mirror") this function happened to be written for first.
-func readDOIMirrorResponse(resp *http.Response, max int64) ([]byte, int, string, error) {
+func readDOIMirrorResponse(
+	resp *http.Response,
+	max int64,
+) (body []byte, status int, contentType string, returnErr error) {
 	if resp == nil {
 		return nil, 0, "", errors.New("gateway received no HTTP response")
 	}
-	status := resp.StatusCode
-	contentType := resp.Header.Get("Content-Type")
+	status = resp.StatusCode
+	contentType = resp.Header.Get("Content-Type")
 	if resp.Body == nil {
 		return nil, status, contentType, errors.New("gateway received an empty response body")
 	}
@@ -121,8 +124,12 @@ func readDOIMirrorResponse(resp *http.Response, max int64) ([]byte, int, string,
 	if err != nil {
 		return nil, status, contentType, err
 	}
-	defer closeBody()
-	body, err := io.ReadAll(io.LimitReader(decoded, max+1))
+	defer func() {
+		if err := closeBody(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close response: %w", err))
+		}
+	}()
+	body, err = io.ReadAll(io.LimitReader(decoded, max+1))
 	if err != nil {
 		return nil, status, contentType, fmt.Errorf("read response: %w", err)
 	}

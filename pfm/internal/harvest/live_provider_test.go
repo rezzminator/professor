@@ -3,6 +3,7 @@ package harvest
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -414,7 +415,11 @@ func writeLiveDiagnostic(name string, result Result) {
 	if err != nil {
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "close live-provider diagnostic %s: %v\n", path, err)
+		}
+	}()
 	_ = file.Chmod(0o600)
 	_, _ = file.WriteString(line)
 }
@@ -566,7 +571,11 @@ type liveWorkerConverter struct {
 	dir    string
 }
 
-func (converter *liveWorkerConverter) Convert(ctx context.Context, kind, source string, body []byte) (string, error) {
+func (converter *liveWorkerConverter) Convert(
+	ctx context.Context,
+	kind, source string,
+	body []byte,
+) (markdown string, returnErr error) {
 	ext := filepath.Ext(source)
 	if ext == "" {
 		ext = "." + strings.TrimPrefix(strings.ToLower(kind), ".")
@@ -576,7 +585,11 @@ func (converter *liveWorkerConverter) Convert(ctx context.Context, kind, source 
 		return "", fmt.Errorf("create live conversion input: %w", err)
 	}
 	path := file.Name()
-	defer os.Remove(path)
+	defer func() {
+		if err := os.Remove(path); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove live conversion input %s: %w", path, err))
+		}
+	}()
 	if _, err := file.Write(body); err != nil {
 		_ = file.Close()
 		return "", err

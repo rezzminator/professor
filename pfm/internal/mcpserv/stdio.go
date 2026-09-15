@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -28,7 +29,11 @@ func (service *Service) RunStdio(
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		defer writer.Close()
+		defer func() {
+			if err := writer.Close(); err != nil {
+				log.Printf("mcp stdio: close request pipe: %v", err)
+			}
+		}()
 		buffered := bufio.NewReaderSize(input, 64<<10)
 		for {
 			frame, err := buffered.ReadBytes('\n')

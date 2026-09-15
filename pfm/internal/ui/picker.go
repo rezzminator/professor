@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -12,7 +13,7 @@ import (
 func (picker BubblePicker) Pick(
 	ctx context.Context,
 	snapshot Snapshot,
-) (Outcome, error) {
+) (outcome Outcome, returnErr error) {
 	openTTY := picker.OpenTTY
 	if openTTY == nil {
 		openTTY = func() (ReadWriteCloser, error) {
@@ -23,7 +24,11 @@ func (picker BubblePicker) Pick(
 	if err != nil {
 		return Outcome{}, fmt.Errorf("open picker /dev/tty: %w", err)
 	}
-	defer terminal.Close()
+	defer func() {
+		if err := terminal.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close picker /dev/tty: %w", err))
+		}
+	}()
 
 	samplingContext, cancelSamples := context.WithCancel(ctx)
 	defer cancelSamples()

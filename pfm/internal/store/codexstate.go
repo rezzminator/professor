@@ -251,12 +251,16 @@ func NewCodexThreadResolverRoots(
 }
 
 // readCodexState reads one state store, read-only while Codex writes it.
-func readCodexState(ctx context.Context, file string) ([]CodexThread, error) {
+func readCodexState(ctx context.Context, file string) (threads []CodexThread, returnErr error) {
 	db, err := sqlitedb.OpenReadOnly(file, 2*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("open Codex state store %q: %w", file, err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex state store %q: %w", file, err))
+		}
+	}()
 
 	columns, err := codexStateColumns(ctx, db)
 	if err != nil {
@@ -289,9 +293,13 @@ func readCodexState(ctx context.Context, file string) ([]CodexThread, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query Codex state store %q: %w", file, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex state rows %q: %w", file, err))
+		}
+	}()
 
-	threads := make([]CodexThread, 0)
+	threads = make([]CodexThread, 0)
 	for rows.Next() {
 		var thread CodexThread
 		var threadSource, title, firstUserMessage, preview string
@@ -339,14 +347,18 @@ func readCodexState(ctx context.Context, file string) ([]CodexThread, error) {
 // codexStateColumns reports the threads columns this generation actually has.
 // Codex grows the table over releases, so an older store is read through the
 // columns it carries instead of failing the whole pass.
-func codexStateColumns(ctx context.Context, db *sql.DB) (map[string]struct{}, error) {
+func codexStateColumns(ctx context.Context, db *sql.DB) (columns map[string]struct{}, returnErr error) {
 	rows, err := db.QueryContext(ctx, "PRAGMA table_info(threads)")
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex schema rows: %w", err))
+		}
+	}()
 
-	columns := make(map[string]struct{})
+	columns = make(map[string]struct{})
 	for rows.Next() {
 		var identifier int
 		var name, columnType string

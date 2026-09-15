@@ -16,7 +16,9 @@ func TestAnchorsUseRecordedTreeEvenAfterHeadMoves(t *testing.T) {
 	bHash := gitOutput(t, repo, "rev-parse", pinned+":b.txt")
 	valid := canonicalGateMap(aHash[:12], bHash[:12], "a.txt")
 
-	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("moved\n"), 0o600)
+	if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte("moved\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	gitRun(t, repo, "add", "a.txt")
 	gitRun(t, repo, "commit", "-m", "move head")
 

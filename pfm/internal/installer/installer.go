@@ -2269,7 +2269,7 @@ func (installer *engine) migrateOldState() error {
 	return nil
 }
 
-func (installer *engine) migrateLegacyCarrier(ctx context.Context) error {
+func (installer *engine) migrateLegacyCarrier(ctx context.Context) (returnErr error) {
 	carrier := filepath.Join(installer.options.Home, ".claude", ".cc-ls-hidden")
 	file, err := os.Open(carrier)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -2278,7 +2278,11 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("read retired kill carrier: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close retired kill carrier: %w", err))
+		}
+	}()
 	seen := map[string]bool{}
 	var ids []string
 	scanner := bufio.NewScanner(file)
@@ -2295,13 +2299,20 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) error {
 	sort.Strings(ids)
 	return installer.change(
 		fmt.Sprintf("merge %d retired carrier kill(s) into SQLite without overwriting existing rows", len(ids)),
-		func() error {
+		func() (returnErr error) {
 			values := paths.Values{
 				Home:     installer.options.Home,
 				SharedDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
 			}
 			state := shared.Open(ctx, values)
-			defer state.Close()
+			defer func() {
+				if err := state.Close(); err != nil {
+					returnErr = errors.Join(
+						returnErr,
+						fmt.Errorf("close shared store after carrier retirement: %w", err),
+					)
+				}
+			}()
 			if err := state.Degraded(); err != nil {
 				return fmt.Errorf("open shared store before carrier retirement: %w", err)
 			}

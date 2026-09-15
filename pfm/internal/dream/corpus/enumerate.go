@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -316,12 +317,16 @@ func isInvalidMetadata(err error) bool {
 	return ok
 }
 
-func readRegularFile(path string) ([]byte, error) {
+func readRegularFile(path string) (raw []byte, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close %s: %w", path, err))
+		}
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, err
@@ -329,7 +334,7 @@ func readRegularFile(path string) ([]byte, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("not a regular file")
 	}
-	raw, err := io.ReadAll(file)
+	raw, err = io.ReadAll(file)
 	if err != nil {
 		return nil, err
 	}

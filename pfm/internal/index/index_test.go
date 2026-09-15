@@ -468,7 +468,11 @@ func TestCodexFilenameIdentityPreventsForkCollisionAndWarmReparse(t *testing.T) 
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := New(database)
 	if err != nil {
 		t.Fatal(err)
@@ -546,7 +550,11 @@ func TestSDKSpawnedSessionsIndexAsBackgroundAndReparseOnVersionBump(t *testing.T
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := New(database)
 	if err != nil {
 		t.Fatal(err)
@@ -661,7 +669,11 @@ func TestBackgroundMarkerOnLaterRecordDoesNotRetroactivelyFlagInteractiveSession
 func TestPriorityProjectPassUpdatesOnlyLaunchCWDThenFullPass(t *testing.T) {
 	fixture := setupIndexFixture(t)
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := New(database)
 	if err != nil {
 		t.Fatal(err)

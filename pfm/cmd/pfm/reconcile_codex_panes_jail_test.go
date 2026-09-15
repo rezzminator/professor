@@ -146,7 +146,11 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const oldID = "11111111-1111-4111-8111-111111111111"
 	codexJailRollout(t, database, root, oldID, 1)
@@ -201,7 +205,11 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const oldID = "33333333-3333-4333-8333-333333333333"
 	codexJailRollout(t, database, root, oldID, 1)
@@ -258,7 +266,11 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const clearingOldID = "55555555-5555-4555-8555-555555555555"
 	const steadyID = "66666666-6666-4666-8666-666666666666"
@@ -334,7 +346,11 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const boundID = "99999999-9999-4999-8999-999999999999"
 	const duplicateID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -400,7 +416,11 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer database.Close()
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
 
 			const firstID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 			const secondID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
@@ -466,7 +486,11 @@ func TestReconcileCodexPanesKeepsBoundThreadSilentWhenNameIsEmpty(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const boundID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 	codexJailRollout(t, database, root, boundID, 3)
@@ -559,7 +583,11 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const clearedID = "11111111-1111-4111-8111-111111111111"
 	const liveID = "22222222-2222-4222-8222-222222222222"
@@ -626,7 +654,11 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const sharedID = "33333333-3333-4333-8333-333333333333"
 	codexJailRollout(t, database, root, sharedID, 2)
@@ -689,7 +721,11 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	codexJailRollout(t, database, root, parentID, 6)
 	codexJailChildRollout(t, database, root, childID, parentID, 7)
@@ -742,7 +778,11 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	codexJailRollout(t, database, root, parentID, 6)
 	codexJailRollout(t, database, root, rotatedID, 7)
@@ -859,7 +899,11 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	oldRollout := codexJailRollout(t, database, root, oldID, 1)
 
@@ -921,7 +965,11 @@ func codexJailStateTitle(t *testing.T, codexRoot, id, title, cwd string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	if _, err := state.Exec(`CREATE TABLE threads (
 		id TEXT PRIMARY KEY,
 		cwd TEXT,
@@ -970,7 +1018,11 @@ func TestReconcileCodexPanesMovesABindingForwardOnATitleOnlyName(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	aRollout := codexJailRollout(t, database, root, idA, 1)
 	codexJailRollout(t, database, root, idB, 1)
@@ -1043,7 +1095,11 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	const deadID = "77777777-7777-4777-8777-777777777777"
@@ -1156,7 +1212,11 @@ func TestReconcileCodexPanesRecordsTheNameItReAppliedAfterAClear(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	codexJailRollout(t, database, root, oldID, 1)
 
 	if err := database.UpsertCxName(context.Background(), store.CxName{

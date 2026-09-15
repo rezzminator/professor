@@ -18,7 +18,11 @@ func readCompleteLines(
 	if err != nil {
 		return start, 0, fmt.Errorf("open %q: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close %q: %w", path, closeErr))
+		}
+	}()
 
 	if _, err := file.Seek(start, io.SeekStart); err != nil {
 		return start, 0, fmt.Errorf("seek %q to %d: %w", path, start, err)

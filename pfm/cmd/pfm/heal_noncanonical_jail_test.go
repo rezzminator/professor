@@ -49,7 +49,11 @@ func healNoncanonicalJail(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	if _, err := state.Exec(
 		"CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT)",
 	); err != nil {
@@ -68,7 +72,11 @@ func healNoncanonicalJail(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer history.Close()
+	defer func() {
+		if err := history.Close(); err != nil {
+			t.Errorf("close history: %v", err)
+		}
+	}()
 	if _, err := history.Exec(`
 		CREATE TABLE thread_history_projection_state (
 			thread_id TEXT PRIMARY KEY,

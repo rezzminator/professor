@@ -73,7 +73,7 @@ type DeviceGate struct{}
 func (DeviceGate) Confirm(
 	ctx context.Context,
 	request GateRequest,
-) (bool, error) {
+) (confirmed bool, returnErr error) {
 	terminal, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrPermission) {
 		return false, nil
@@ -81,7 +81,11 @@ func (DeviceGate) Confirm(
 	if err != nil {
 		return false, nil
 	}
-	defer terminal.Close()
+	defer func() {
+		if err := terminal.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close controlling terminal: %w", err))
+		}
+	}()
 	settings, err := unix.IoctlGetTermios(int(terminal.Fd()), getTermios)
 	if err != nil {
 		return false, nil
@@ -97,7 +101,11 @@ func (DeviceGate) Confirm(
 	); err != nil {
 		return false, nil
 	}
-	defer unix.IoctlSetTermios(int(terminal.Fd()), setTermios, settings)
+	defer func() {
+		if err := unix.IoctlSetTermios(int(terminal.Fd()), setTermios, settings); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("restore controlling terminal settings: %w", err))
+		}
+	}()
 	return ReaderGate{Reader: terminal, Writer: terminal}.Confirm(ctx, request)
 }
 

@@ -36,7 +36,7 @@ func runChatOpen(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
-) int {
+) (exitCode int) {
 	flags := newFlagSet("chat open", "usage: pfm chat open <target>", stderr)
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
@@ -149,12 +149,12 @@ func runResolvedChatKill(
 	exit bool,
 	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
-) int {
+) (exitCode int) {
 	database, manager, code := openKillManager(stderr, runtimes...)
 	if code != 0 {
 		return code
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
 	target, err := manager.Kill(context.Background(), kill.Request{
 		ID:          chat.ID,
 		Engine:      chat.Engine,

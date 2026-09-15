@@ -115,7 +115,11 @@ func TestChatLSUsesConfiguredAccountRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	row, found, err := database.Transcript(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)

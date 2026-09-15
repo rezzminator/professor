@@ -18,7 +18,7 @@ import (
 // replaces it: a gather pass reads each pane's own status line and detects
 // the clear from there. Every unrelated or malformed payload returns 0
 // without output.
-func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...commandRuntime) int {
+func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
 	flags := newFlagSet(
 		"internal clear-kill",
 		"usage: pfm internal clear-kill < hook-payload.json",
@@ -52,7 +52,11 @@ func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...
 		fmt.Fprintln(stderr, "pfm internal clear-kill: store unavailable (fail-open)")
 		return 0
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			fmt.Fprintf(stderr, "pfm internal clear-kill: close database (fail-open): %v\n", err)
+		}
+	}()
 	ctx := context.Background()
 	transcript, found, err := database.Transcript(ctx, hook.SessionID)
 	if err != nil {

@@ -23,7 +23,11 @@ func TestInFlightTracksThePaneMutex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			t.Errorf("close lock: %v", err)
+		}
+	}()
 	if inFlight, err := InFlight(dir, "cc-1-1-1", "%0"); err != nil || inFlight {
 		t.Fatalf("file present, lock free: inFlight=%v err=%v, want false/nil", inFlight, err)
 	}

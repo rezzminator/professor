@@ -59,7 +59,11 @@ func writePaneEscape(t *testing.T, tty, sequence string) {
 	if err != nil {
 		t.Skipf("pane tty %s is not writable here: %v", tty, err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close file: %v", err)
+		}
+	}()
 	if _, err := file.WriteString(sequence); err != nil {
 		t.Fatalf("write pane escape: %v", err)
 	}

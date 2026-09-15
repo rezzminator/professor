@@ -23,7 +23,7 @@ func (executor *Executor) Solo(
 	id, keepSocket string,
 	liveAgent bool,
 	claudeBinaries ...string,
-) error {
+) (returnErr error) {
 	if id == "" {
 		return nil
 	}
@@ -39,11 +39,19 @@ func (executor *Executor) Solo(
 	if err != nil {
 		return fmt.Errorf("open solo lock: %w", err)
 	}
-	defer lockFile.Close()
+	defer func() {
+		if err := lockFile.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close solo lock %s: %w", lockPath, err))
+		}
+	}()
 	if err := flockContext(ctx, lockFile); err != nil {
 		return err
 	}
-	defer syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
+	defer func() {
+		if err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("unlock solo lock %s: %w", lockPath, err))
+		}
+	}()
 
 	entries, err := os.ReadDir(executor.sidDir)
 	if errors.Is(err, fs.ErrNotExist) {

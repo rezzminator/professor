@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 
@@ -333,7 +334,7 @@ ORDER BY id`)
 func queryRollouts(
 	ctx context.Context,
 	db queryExecer,
-) ([]Rollout, error) {
+) (rollouts []Rollout, returnErr error) {
 	rows, err := db.QueryContext(
 		ctx,
 		"SELECT "+rolloutColumns+" FROM rollouts ORDER BY id",
@@ -341,8 +342,12 @@ func queryRollouts(
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	rollouts := make([]Rollout, 0)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout rows: %w", err))
+		}
+	}()
+	rollouts = make([]Rollout, 0)
 	for rows.Next() {
 		rollout, err := scanRollout(rows)
 		if err != nil {

@@ -152,7 +152,7 @@ func LockPath(sidDir, socketName, pane string) string {
 // SessionEnd hook can tell a reload's /exit (the pane is being rebooted —
 // leave its terminal alone) from a human's. A missing lock file is a plain
 // "no"; a lock that cannot be probed is an error, never a "no".
-func InFlight(sidDir, socketName, pane string) (bool, error) {
+func InFlight(sidDir, socketName, pane string) (inFlight bool, returnErr error) {
 	lock, err := os.OpenFile(LockPath(sidDir, socketName, pane), os.O_RDWR, 0o600)
 	if errors.Is(err, os.ErrNotExist) {
 		return false, nil
@@ -160,7 +160,14 @@ func InFlight(sidDir, socketName, pane string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("open reload lock: %w", err)
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			returnErr = errors.Join(
+				returnErr,
+				fmt.Errorf("close reload lock %s: %w", LockPath(sidDir, socketName, pane), err),
+			)
+		}
+	}()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return true, nil

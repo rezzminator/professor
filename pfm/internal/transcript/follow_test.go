@@ -131,7 +131,11 @@ func appendRaw(t *testing.T, path, chunk string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			t.Errorf("close file: %v", err)
+		}
+	}()
 	if _, err := file.WriteString(chunk); err != nil {
 		t.Fatal(err)
 	}

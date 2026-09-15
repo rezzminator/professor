@@ -25,7 +25,7 @@ import (
 // applied by the same gather pass the picker runs, so there is exactly ONE
 // writer of a window name however this command is reached — a systemd path
 // unit on a codex rename, a timer, or a picker refresh.
-func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	flags := newFlagSet("name-sync", "usage: pfm name-sync [--dry-run]", stderr)
 	dryRun := flags.Bool("dry-run", false, "report the renames without applying them")
 	if code, ok := parseFlags(flags, args); !ok {
@@ -40,7 +40,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm name-sync: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 
 	// A delta index first: a codex rename lands in session_index.jsonl or the

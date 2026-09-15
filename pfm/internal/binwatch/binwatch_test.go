@@ -154,7 +154,9 @@ func TestServeUntilReplacedExitsForTheSupervisor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("daemon not serving before the replacement: %v", err)
 	}
-	response.Body.Close()
+	if err := response.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
 	close(replaced)
 	select {
 	case got := <-code:

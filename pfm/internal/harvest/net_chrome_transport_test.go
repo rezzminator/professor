@@ -93,18 +93,23 @@ func TestChromeClientHelloCaptureOracle(t *testing.T) {
 	client, server := net.Pipe()
 	done := make(chan []byte, 1)
 	go func() {
-		defer server.Close()
+		finish := func(payload []byte) {
+			if err := server.Close(); err != nil {
+				t.Errorf("close server: %v", err)
+			}
+			done <- payload
+		}
 		header := make([]byte, 5)
 		if _, err := io.ReadFull(server, header); err != nil {
-			done <- nil
+			finish(nil)
 			return
 		}
 		body := make([]byte, int(binary.BigEndian.Uint16(header[3:])))
 		if _, err := io.ReadFull(server, body); err != nil {
-			done <- nil
+			finish(nil)
 			return
 		}
-		done <- append(header, body...)
+		finish(append(header, body...))
 	}()
 	conf := &utls.Config{ServerName: "example.test", NextProtos: []string{"h2", "http/1.1"}}
 	uc := utls.UClient(client, conf, chrome146OracleProfile().GetClientHelloId(), false, false, true)

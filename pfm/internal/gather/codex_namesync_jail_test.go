@@ -51,7 +51,11 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	indexer, err := fleetindex.New(database)
 	if err != nil {
 		t.Fatal(err)

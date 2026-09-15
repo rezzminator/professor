@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -760,7 +761,9 @@ func providerRecordCandidates(body []byte, pageURL, source, query string, limit 
 				year := 0
 				if len(cells) > 3 {
 					if match := scholarYearRe.FindString(nodeText(cells[3])); match != "" {
-						fmt.Sscanf(match, "%d", &year)
+						if _, err := fmt.Sscanf(match, "%d", &year); err != nil {
+							fmt.Fprintf(os.Stderr, "harvest: parse mirror year %q: %v\n", match, err)
+						}
 					}
 				}
 				for _, anchor := range descendantsByTag(node, "a") {

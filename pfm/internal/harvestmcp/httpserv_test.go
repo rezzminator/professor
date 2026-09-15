@@ -14,7 +14,11 @@ func TestNewHTTPHandlerServesStreamableMCP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 
 	request := httptest.NewRequest(
 		http.MethodPost,

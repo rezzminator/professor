@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -401,7 +402,13 @@ func findIncompleteEnvironment(root string, platform Platform) (EnvironmentDiges
 	return EnvironmentDigest{}, false, nil
 }
 
-func ensureInput(ctx context.Context, path string, input Artifact, offline bool, download DownloadFunc) error {
+func ensureInput(
+	ctx context.Context,
+	path string,
+	input Artifact,
+	offline bool,
+	download DownloadFunc,
+) (returnErr error) {
 	if _, err := os.Stat(path); err == nil {
 		if err := VerifySHA256(path, input.SHA256); err == nil {
 			return nil
@@ -422,7 +429,11 @@ func ensureInput(ctx context.Context, path string, input Artifact, offline bool,
 		}
 	}
 	staging := path + fmt.Sprintf(".download-%d", time.Now().UnixNano())
-	defer os.Remove(staging)
+	defer func() {
+		if err := os.Remove(staging); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove download staging %s: %w", staging, err))
+		}
+	}()
 	if err := download(ctx, input.URL, staging); err != nil {
 		return fmt.Errorf("download %s: %w", input.URL, err)
 	}
@@ -440,7 +451,7 @@ func ensureInput(ctx context.Context, path string, input Artifact, offline bool,
 	return nil
 }
 
-func downloadFile(ctx context.Context, url, path string, expectedSize int64) error {
+func downloadFile(ctx context.Context, url, path string, expectedSize int64) (returnErr error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
@@ -449,7 +460,11 @@ func downloadFile(ctx context.Context, url, path string, expectedSize int64) err
 	if err != nil {
 		return fmt.Errorf("download request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close download response: %w", err))
+		}
+	}()
 	if response.StatusCode/100 != 2 {
 		return fmt.Errorf("download returned HTTP %s", response.Status)
 	}
@@ -479,12 +494,16 @@ func downloadFile(ctx context.Context, url, path string, expectedSize int64) err
 	return nil
 }
 
-func VerifySHA256(path, expected string) error {
+func VerifySHA256(path, expected string) (returnErr error) {
 	input, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open %s for SHA-256: %w", path, err)
 	}
-	defer input.Close()
+	defer func() {
+		if err := input.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close %s after SHA-256: %w", path, err))
+		}
+	}()
 	hash := sha256.New()
 	if _, err := io.Copy(hash, input); err != nil {
 		return fmt.Errorf("hash %s: %w", path, err)
@@ -496,13 +515,17 @@ func VerifySHA256(path, expected string) error {
 	return nil
 }
 
-func writePrivate(path string, body []byte) error {
+func writePrivate(path string, body []byte) (returnErr error) {
 	staging, err := os.CreateTemp(filepath.Dir(path), ".asset-")
 	if err != nil {
 		return fmt.Errorf("create %s: %w", path, err)
 	}
 	name := staging.Name()
-	defer os.Remove(name)
+	defer func() {
+		if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove private staging %s: %w", name, err))
+		}
+	}()
 	if err := staging.Chmod(0o600); err != nil {
 		_ = staging.Close()
 		return fmt.Errorf("chmod %s: %w", path, err)
@@ -520,29 +543,41 @@ func writePrivate(path string, body []byte) error {
 	return nil
 }
 
-func atomicCurrent(root, desired string) error {
+func atomicCurrent(root, desired string) (returnErr error) {
 	temporary := filepath.Join(root, ".current-") + fmt.Sprintf("%d", time.Now().UnixNano())
 	if err := os.Symlink(desired, temporary); err != nil {
 		return fmt.Errorf("stage harvestpy current pointer: %w", err)
 	}
-	defer os.Remove(temporary)
+	defer func() {
+		if err := os.Remove(temporary); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove current pointer staging %s: %w", temporary, err))
+		}
+	}()
 	if err := os.Rename(temporary, filepath.Join(root, "current")); err != nil {
 		return fmt.Errorf("publish harvestpy current pointer: %w", err)
 	}
 	return nil
 }
 
-func extractNamedBinary(path, name, destination string) error {
+func extractNamedBinary(path, name, destination string) (returnErr error) {
 	input, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer input.Close()
+	defer func() {
+		if err := input.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close binary archive %s: %w", path, err))
+		}
+	}()
 	gzipReader, err := gzip.NewReader(input)
 	if err != nil {
 		return err
 	}
-	defer gzipReader.Close()
+	defer func() {
+		if err := gzipReader.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close binary gzip stream %s: %w", path, err))
+		}
+	}()
 	archive := tar.NewReader(gzipReader)
 	for {
 		header, err := archive.Next()
@@ -563,7 +598,7 @@ func extractNamedBinary(path, name, destination string) error {
 	return fmt.Errorf("binary %q not found in archive", name)
 }
 
-func extractPython(path, destination string) (string, error) {
+func extractPython(path, destination string) (pythonPath string, returnErr error) {
 	if err := os.MkdirAll(destination, 0o700); err != nil {
 		return "", fmt.Errorf("create Python extraction root: %w", err)
 	}
@@ -571,12 +606,20 @@ func extractPython(path, destination string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer input.Close()
+	defer func() {
+		if err := input.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Python archive %s: %w", path, err))
+		}
+	}()
 	gzipReader, err := gzip.NewReader(input)
 	if err != nil {
 		return "", err
 	}
-	defer gzipReader.Close()
+	defer func() {
+		if err := gzipReader.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Python gzip stream %s: %w", path, err))
+		}
+	}()
 	archive := tar.NewReader(gzipReader)
 	var total int64
 	for {

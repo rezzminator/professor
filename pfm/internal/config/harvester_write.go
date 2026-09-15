@@ -1,7 +1,9 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -9,7 +11,7 @@ import (
 // writeAtomic is the harvester's config writer (harvester.go, migration.go), kept verbatim:
 // the harvester is out of the atomicfile migration by decision, so this file
 // stays in the C6 baseline. Every other config write goes through atomicfile.
-func writeAtomic(path string, content []byte) error {
+func writeAtomic(path string, content []byte) (returnErr error) {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("create config directory %s: %w", directory, err)
@@ -19,7 +21,11 @@ func writeAtomic(path string, content []byte) error {
 		return fmt.Errorf("create config scratch beside %s: %w", path, err)
 	}
 	temporary := file.Name()
-	defer os.Remove(temporary)
+	defer func() {
+		if err := os.Remove(temporary); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove config scratch %s: %w", temporary, err))
+		}
+	}()
 	if err := file.Chmod(0o600); err != nil {
 		_ = file.Close()
 		return fmt.Errorf("secure config scratch %s: %w", temporary, err)

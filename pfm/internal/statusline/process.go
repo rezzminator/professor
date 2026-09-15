@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -19,7 +20,7 @@ import (
 
 // SpawnDetached starts one refresher as a new session and releases the child.
 // The render path never waits for credentials, networks, or App Server startup.
-func SpawnDetached(kind RefreshKind) error {
+func SpawnDetached(kind RefreshKind) (returnErr error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve pfm executable: %w", err)
@@ -35,7 +36,11 @@ func SpawnDetached(kind RefreshKind) error {
 	if err != nil {
 		return fmt.Errorf("open null device: %w", err)
 	}
-	defer null.Close()
+	defer func() {
+		if err := null.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close null device: %w", err))
+		}
+	}()
 	command := exec.Command(executable, "statusline", argument)
 	command.Stdin = null
 	command.Stdout = null

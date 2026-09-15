@@ -22,7 +22,7 @@ import (
 //     one.
 //   - --json always emits a JSON array, even when it is empty, since a script
 //     reading structured output needs `[]` rather than a prose sentence.
-func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	flags := newFlagSet("issues", "usage: pfm issues [--all] [--json]", stderr)
 	all := flags.Bool("all", false, "include closed issues, not only open ones")
 	asJSON := flags.Bool("json", false, "print issues as a JSON array")
@@ -35,7 +35,7 @@ func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 	}
 	ctx := context.Background()
 	state := shared.Open(ctx, runtime.Paths)
-	defer state.Close()
+	defer func() { closeCommandResource(state, "pfm issues: close state", stderr, &exitCode) }()
 
 	issues, err := state.Issues(ctx, *all)
 	if err != nil {

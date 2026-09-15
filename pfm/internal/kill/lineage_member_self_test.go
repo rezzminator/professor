@@ -28,7 +28,11 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 		t.Run("rollout"+suffix, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
-			defer database.Close()
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
 			ctx := context.Background()
 
 			rootID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"

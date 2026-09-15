@@ -2,6 +2,7 @@ package inject
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -296,7 +297,7 @@ type CommandThenSpawner struct {
 func (spawner CommandThenSpawner) Spawn(
 	ctx context.Context,
 	request SteerSpawn,
-) error {
+) (returnErr error) {
 	executable := spawner.Executable
 	if executable == "" {
 		var err error
@@ -354,7 +355,11 @@ func (spawner CommandThenSpawner) Spawn(
 	if err != nil {
 		return fmt.Errorf("open null device for then waiter: %w", err)
 	}
-	defer null.Close()
+	defer func() {
+		if err := null.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close null device for then waiter: %w", err))
+		}
+	}()
 	command.Stdin = null
 	// A fresh chain truncates the log; a HOP appends — truncating on a hop
 	// would wipe the chain's earlier hops while they are still being written.
@@ -367,7 +372,11 @@ func (spawner CommandThenSpawner) Spawn(
 		command.Stdout = null
 		command.Stderr = null
 	} else {
-		defer log.Close()
+		defer func() {
+			if err := log.Close(); err != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("close then waiter log %s: %w", request.LogPath, err))
+			}
+		}()
 		command.Stdout = log
 		command.Stderr = log
 	}

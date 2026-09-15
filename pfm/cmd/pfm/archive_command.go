@@ -46,7 +46,7 @@ func (adapter killStoreAdapter) Unkill(ctx context.Context, id string) error {
 // The default is a DRY RUN, and the whole design is reversibility: every move
 // is recorded in the manifest, and --restore puts one back exactly where it
 // came from. Nothing here deletes anything, ever.
-func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	flags := newFlagSet(
 		"archive",
 		"usage: pfm archive [--apply] [--subagents [--older-than DAYS]] [--restore id] [--prune-orphans]",
@@ -91,7 +91,7 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		if code != 0 {
 			return code
 		}
-		defer database.Close()
+		defer func() { closeCommandResource(database, "pfm archive: close database", stderr, &exitCode) }()
 		return pruneOrphanedKills(
 			context.Background(), database, *yes || *apply, stdout, stderr,
 		)
@@ -101,7 +101,7 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	if code != 0 {
 		return code
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm archive: close database", stderr, &exitCode) }()
 	runner, err := archive.New(archive.Dependencies{
 		Paths:            resolved,
 		Kills:            killStoreAdapter{manager: manager},

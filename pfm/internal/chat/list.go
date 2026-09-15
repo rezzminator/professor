@@ -2,6 +2,8 @@ package chat
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -35,18 +37,27 @@ type ListResult struct {
 // picker's — a /clear observed here reconciles the Codex pane it moved — and
 // the picker's "start a new chat" placeholders are never listed: no chat
 // stands behind them. A Booting row is a real chat still coming up, and is.
-func List(ctx context.Context, runtime *pfmconfig.Runtime, request ListRequest, warn io.Writer) (ListResult, error) {
+func List(
+	ctx context.Context,
+	runtime *pfmconfig.Runtime,
+	request ListRequest,
+	warn io.Writer,
+) (result ListResult, returnErr error) {
 	database, err := store.Open(store.WithWarningWriter(warn))
 	if err != nil {
 		return ListResult{}, err
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
+		}
+	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{View: request.View, Runtime: runtime}, warn)
 	if err != nil {
 		return ListResult{}, err
 	}
 	filter := strings.ToLower(strings.TrimSpace(request.Project))
-	result := ListResult{KilledCount: scan.Output.KilledCount}
+	result = ListResult{KilledCount: scan.Output.KilledCount}
 	for _, row := range scan.Output.Rows {
 		if placeholderRow(row.Kind) {
 			continue

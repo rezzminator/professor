@@ -41,7 +41,11 @@ func buildCodexState(t *testing.T, path string, threads ...codexStateThread) {
 	if err != nil {
 		t.Fatalf("create scratch Codex state store: %v", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, string(schema)); err != nil {
 		t.Fatalf("apply Codex state schema: %v", err)

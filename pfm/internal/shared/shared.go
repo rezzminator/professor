@@ -263,11 +263,11 @@ func (s *Store) UnkillIfPayload(
 }
 
 // KilledRecords returns the complete shared kill state keyed by chat id.
-func (s *Store) KilledRecords(ctx context.Context) (map[string]KilledRecord, error) {
+func (s *Store) KilledRecords(ctx context.Context) (records map[string]KilledRecord, returnErr error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("query shared kills: %w", s.degraded)
 	}
-	records := make(map[string]KilledRecord)
+	records = make(map[string]KilledRecord)
 	rows, err := s.db.QueryContext(
 		ctx,
 		"SELECT uuid, hidden_at, at_payload FROM hidden",
@@ -275,7 +275,11 @@ func (s *Store) KilledRecords(ctx context.Context) (map[string]KilledRecord, err
 	if err != nil {
 		return nil, fmt.Errorf("query shared kills: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close shared kill rows: %w", err))
+		}
+	}()
 	for rows.Next() {
 		var id string
 		var killedAt int64
@@ -315,7 +319,7 @@ func (s *Store) KilledAt(ctx context.Context) (map[string]int64, error) {
 func (s *Store) Children(
 	ctx context.Context,
 	kind, key string,
-) ([]string, bool, error) {
+) (values []string, found bool, returnErr error) {
 	if s.db == nil {
 		return nil, false, nil
 	}
@@ -328,8 +332,11 @@ func (s *Store) Children(
 	if err != nil {
 		return nil, false, fmt.Errorf("query shared children: %w", err)
 	}
-	defer rows.Close()
-	var values []string
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close shared child rows: %w", err))
+		}
+	}()
 	for rows.Next() {
 		var value sql.NullString
 		if err := rows.Scan(&value); err != nil {
@@ -441,11 +448,11 @@ func (s *Store) RecordBranchSeat(
 }
 
 // BranchSeats returns every detached-fork marker keyed by immutable socket.
-func (s *Store) BranchSeats(ctx context.Context) (map[string]BranchSeat, error) {
+func (s *Store) BranchSeats(ctx context.Context) (result map[string]BranchSeat, returnErr error) {
 	if s.degraded != nil {
 		return nil, s.degraded
 	}
-	result := make(map[string]BranchSeat)
+	result = make(map[string]BranchSeat)
 	if s.db == nil {
 		return result, nil
 	}
@@ -457,7 +464,11 @@ func (s *Store) BranchSeats(ctx context.Context) (map[string]BranchSeat, error) 
 	if err != nil {
 		return nil, fmt.Errorf("read shared branch seats: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close shared branch seat rows: %w", err))
+		}
+	}()
 	for rows.Next() {
 		var key, parent string
 		var createdAt int64
@@ -531,12 +542,16 @@ func SetPrimaryAccount(
 	values paths.Values,
 	account int,
 	updatedAt int64,
-) error {
+) (returnErr error) {
 	if account < 1 {
 		return fmt.Errorf("primary account must be positive, got %d", account)
 	}
 	state := Open(ctx, values)
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close shared state: %w", err))
+		}
+	}()
 	if err := state.SetMeta(
 		ctx,
 		PrimaryAccountKey,
@@ -564,7 +579,11 @@ func primaryFromDatabase(ctx context.Context, path string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "shared: close primary account database %s: %v\n", path, err)
+		}
+	}()
 	var value string
 	if err := db.QueryRowContext(
 		ctx,

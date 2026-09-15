@@ -2,6 +2,7 @@ package codexappendix
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,7 +21,7 @@ func PromptPath(home string) string {
 // Run answers Codex's snake_case hook input with its camelCase output contract.
 // Unknown history never masquerades as absence: it emits a visible warning and
 // the current appendix, preserving ephemeral and remote launches.
-func Run(input io.Reader, output io.Writer, home string) error {
+func Run(input io.Reader, output io.Writer, home string) (returnErr error) {
 	raw, err := io.ReadAll(io.LimitReader(input, (1<<20)+1))
 	if err != nil {
 		return err
@@ -48,7 +49,11 @@ func Run(input io.Reader, output io.Writer, home string) error {
 	if err != nil {
 		return fmt.Errorf("read Professor appendix (run pfm install): %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Professor appendix: %w", err))
+		}
+	}()
 	prompt, err := io.ReadAll(io.LimitReader(file, 16385))
 	if err != nil {
 		return err

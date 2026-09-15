@@ -307,7 +307,11 @@ func TestResolveFailsLoudWhenTmuxCannotRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create socket: %v", err)
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	}()
 	resolver := &Resolver{tmux: CommandTmux{Binary: "pfm-test-missing-tmux"}, tmuxDir: tmuxDir}
 	for _, kind := range []Kind{Session, Label, CxWindow} {
 		outcome, err := resolver.Resolve(context.Background(), kind, "any-chat")
@@ -337,7 +341,11 @@ func TestResolveStillMissesPastADeadSocket(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create socket: %v", err)
 	}
-	defer listener.Close()
+	defer func() {
+		if err := listener.Close(); err != nil {
+			t.Errorf("close listener: %v", err)
+		}
+	}()
 	resolver := &Resolver{tmux: CommandTmux{Binary: binary}, tmuxDir: tmuxDir}
 	outcome, err := resolver.Resolve(context.Background(), Session, "any-chat")
 	if err != nil {

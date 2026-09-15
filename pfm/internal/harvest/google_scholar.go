@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -205,7 +206,9 @@ func parseGoogleScholarRows(body []byte, limit int, wantedDOI string) []scholarR
 		if summary := firstClass(row, "gs_a"); summary != nil {
 			summaryText := strings.TrimSpace(nodeText(summary))
 			if match := scholarYearRe.FindString(summaryText); match != "" {
-				fmt.Sscanf(match, "%d", &year)
+				if _, err := fmt.Sscanf(match, "%d", &year); err != nil {
+					fmt.Fprintf(os.Stderr, "harvest: parse Google Scholar year %q: %v\n", match, err)
+				}
 			}
 			authors = summaryText
 			if separator := strings.Index(authors, " - "); separator >= 0 {

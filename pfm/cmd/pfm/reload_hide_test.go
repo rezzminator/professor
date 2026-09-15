@@ -86,7 +86,11 @@ func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehi
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	for _, id := range []string{indexed, unindexed} {
 		killed, found, err := database.Killed(ctx, id)
 		if err != nil {

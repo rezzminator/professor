@@ -80,7 +80,11 @@ func TestHidingALiveChatKeepsItRunningAndKeepsItsHandles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	resolved := jailPaths(t)
 	apply, err := killApplier(context.Background(), database, commandRuntime{Paths: resolved})
 	if err != nil {
@@ -160,7 +164,11 @@ func TestKillingAChatThatIsNotRunningKillsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	apply, err := killApplier(context.Background(), database, commandRuntime{Paths: jailPaths(t)})
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +204,11 @@ func TestHidingAChatDoesNotCleanUpADeadSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	apply, err := killApplier(context.Background(), database, commandRuntime{Paths: jailPaths(t)})
 	if err != nil {
 		t.Fatal(err)

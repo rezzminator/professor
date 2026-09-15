@@ -69,7 +69,11 @@ func TestKillSpawnsTheExitFinisherWheneverTheTargetIsLive(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			jail := newKillJail(t)
 			database := jail.open(t)
-			defer database.Close()
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
 			spawner := &captureSpawner{}
 			manager, err := New(database, Dependencies{
 				Spawner: spawner,

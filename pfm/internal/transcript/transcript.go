@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -281,7 +282,7 @@ func Tail(
 	ctx context.Context,
 	path, engine string,
 	lastN, maxBytes int,
-) ([]Entry, bool, error) {
+) (entries []Entry, truncated bool, returnErr error) {
 	if lastN < 1 {
 		return nil, false, fmt.Errorf("tail count must be positive, got %d", lastN)
 	}
@@ -289,7 +290,11 @@ func Tail(
 	if err != nil {
 		return nil, false, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %s: %w", path, err))
+		}
+	}()
 
 	reader := bufio.NewReaderSize(file, 64<<10)
 	ring := make([]Entry, 0, lastN)
@@ -327,14 +332,17 @@ func Tail(
 // All returns every visible transcript entry in file order. It shares Parse
 // with tail/status so save and excerpt loading cannot invent a second record
 // interpretation.
-func All(ctx context.Context, path, engine string) ([]Entry, error) {
+func All(ctx context.Context, path, engine string) (entries []Entry, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %s: %w", path, err))
+		}
+	}()
 	reader := bufio.NewReaderSize(file, 64<<10)
-	var entries []Entry
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err

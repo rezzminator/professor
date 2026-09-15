@@ -53,16 +53,20 @@ func inspectRolloutTurn(ctx context.Context, path string) (rolloutTurnState, err
 func inspectRolloutTurnEvidence(
 	ctx context.Context,
 	path string,
-) (rolloutTurnEvidence, error) {
+) (evidence rolloutTurnEvidence, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return rolloutTurnEvidence{State: rolloutTurnPending}, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex rollout %s: %w", path, err))
+		}
+	}()
 
 	reader := bufio.NewReaderSize(file, 64<<10)
 	activeTurn := ""
-	evidence := rolloutTurnEvidence{State: rolloutTurnPending}
+	evidence = rolloutTurnEvidence{State: rolloutTurnPending}
 	for {
 		if err := ctx.Err(); err != nil {
 			return evidence, err

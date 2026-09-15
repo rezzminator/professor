@@ -314,7 +314,7 @@ func appendResumeInjection(
 	resolved paths.Values,
 	target resumeTarget,
 	message string,
-) (resumeReceipt, error) {
+) (receipt resumeReceipt, returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return resumeReceipt{}, err
 	}
@@ -322,11 +322,19 @@ func appendResumeInjection(
 	if err != nil {
 		return resumeReceipt{}, fmt.Errorf("open transcript %q: %w", target.Path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %q: %w", target.Path, err))
+		}
+	}()
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
 		return resumeReceipt{}, fmt.Errorf("lock transcript %q: %w", target.Path, err)
 	}
-	defer syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+	defer func() {
+		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_UN); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("unlock transcript %q: %w", target.Path, err))
+		}
+	}()
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return resumeReceipt{}, fmt.Errorf("rewind transcript %q: %w", target.Path, err)
 	}

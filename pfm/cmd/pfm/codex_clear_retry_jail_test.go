@@ -37,7 +37,11 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer database.Close()
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
 			manager, err := kill.New(database, kill.Dependencies{})
 			if err != nil {
 				t.Fatal(err)
@@ -63,7 +67,11 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer faultDB.Close()
+				defer func() {
+					if err := faultDB.Close(); err != nil {
+						t.Errorf("close faultDB: %v", err)
+					}
+				}()
 				if _, err := faultDB.Exec(
 					`CREATE TRIGGER reject_clear BEFORE INSERT ON hidden BEGIN SELECT RAISE(FAIL, 'clear write fault'); END`,
 				); err != nil {
@@ -221,7 +229,11 @@ func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer faultDB.Close()
+	defer func() {
+		if err := faultDB.Close(); err != nil {
+			t.Errorf("close faultDB: %v", err)
+		}
+	}()
 	if _, err := faultDB.Exec(
 		`CREATE TRIGGER reject_clear_retry BEFORE INSERT ON hidden BEGIN SELECT RAISE(FAIL, 'clear retry fault'); END`,
 	); err != nil {

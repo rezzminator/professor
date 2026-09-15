@@ -33,7 +33,11 @@ func TestCodexPaneBindingDoctorNamesContestedAndRetiredBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	manager, err := kill.New(database, kill.Dependencies{})
@@ -88,7 +92,11 @@ func TestCodexPaneBindingDoctorStaysQuietOnAHealthyTable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	manager, err := kill.New(database, kill.Dependencies{})
@@ -174,7 +182,11 @@ func TestCodexPaneDoctorNamesAPaneItCannotFollow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	var stdout bytes.Buffer
@@ -210,7 +222,11 @@ func TestCodexPaneDoctorStaysQuietOnAFollowablePane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	codexJailRollout(t, database, root, threadID, 1)
 
@@ -241,7 +257,11 @@ func TestCodexPaneBindingDoctorCountsDeadPaneBindingsAsStale(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
@@ -283,7 +303,11 @@ func TestCodexPaneDoctorUsesHeldRootDespiteModelFirstStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {

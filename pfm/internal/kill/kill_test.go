@@ -175,7 +175,11 @@ func (function refreshFunc) Refresh(ctx context.Context) error {
 func TestFinisherDiscoversConfigOwnedClaudeRoots(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	configDir := filepath.Join(jail.home, ".cc", "7")
 	writeTestFile(
@@ -210,7 +214,11 @@ func TestFinisherDiscoversConfigOwnedClaudeRoots(t *testing.T) {
 func TestManagerCanExitResolvedCodexSelfWithoutAmbientTmux(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
 		Spawner: spawner,
@@ -246,7 +254,11 @@ func TestManagerCanExitResolvedCodexSelfWithoutAmbientTmux(t *testing.T) {
 func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	claudeID := "11111111-1111-4111-8111-111111111111"
@@ -359,7 +371,11 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 func TestManagerStoreOnlyCodexSelfKills(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	threadID := "55555555-5555-4555-8555-555555555555"
@@ -418,7 +434,11 @@ func TestManagerStoreOnlyCodexSelfKills(t *testing.T) {
 func TestManagerCodexSelfReadsRolloutPathFromStateStore(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	threadID := "55555555-5555-4555-8555-555555555555"
@@ -486,7 +506,11 @@ func TestManagerCodexSelfReadsRolloutPathFromStateStore(t *testing.T) {
 func TestAdvanceCodexPaneReturnsThePreviousBindingAndChangedFlag(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	manager, err := New(database, Dependencies{})
@@ -533,7 +557,11 @@ func TestAdvanceCodexPaneReturnsThePreviousBindingAndChangedFlag(t *testing.T) {
 func TestManagerClaudeCrumbPrecedenceWritesNullBaseline(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	socketName := "cc-300-1-1"
 	paneID := "%5"
 	socketID := "33333333-3333-4333-8333-333333333333"
@@ -584,7 +612,11 @@ func TestManagerClaudeCrumbPrecedenceWritesNullBaseline(t *testing.T) {
 func TestKilledChatStaysKilledAsItGrowsUntilUnkill(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	id := "77777777-7777-4777-8777-777777777777"
@@ -704,7 +736,11 @@ func listedByDefault(t *testing.T, database *store.Store, id string) bool {
 func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	rootID := "88888888-8888-4888-8888-888888888888"
@@ -826,7 +862,11 @@ func listedCodexByDefault(t *testing.T, database *store.Store, rootID string) bo
 func TestFinisherChoreographyAndTeammateReaping(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	id := "55555555-5555-4555-8555-555555555555"
 	transcriptPath := filepath.Join(jail.claudeRoot, id+".jsonl")
@@ -929,7 +969,11 @@ func TestFinisherChoreographyAndTeammateReaping(t *testing.T) {
 func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	id := "77777777-7777-4777-8777-777777777777"
 	transcriptPath := filepath.Join(jail.claudeRoot, id+".jsonl")
@@ -1009,7 +1053,11 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 func TestFinisherCodexUsesQuit(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	id := "66666666-6666-4666-8666-666666666666"
 	path := filepath.Join(jail.codexRoot, "sessions", "rollout-"+id+".jsonl")
@@ -1206,7 +1254,11 @@ func writeCodexStateThread(
 	if err != nil {
 		t.Fatalf("create scratch Codex state store: %v", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, string(schema)); err != nil {
 		t.Fatalf("apply Codex state schema: %v", err)
@@ -1271,7 +1323,11 @@ func tmuxKilledAt(t *testing.T, database *store.Store, id string) int64 {
 func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	// Exactly the reported shape: project "?", no transcript row, no file.
@@ -1358,7 +1414,11 @@ func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 func TestKillingAnUnknownIDStillFailsWithoutAnEngine(t *testing.T) {
 	jail := newKillJail(t)
 	database := jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	manager, err := New(database, Dependencies{

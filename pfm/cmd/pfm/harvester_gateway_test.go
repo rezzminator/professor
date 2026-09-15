@@ -114,7 +114,11 @@ func TestHarvesterExternalGatewayReportsBindFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer occupied.Close()
+	defer func() {
+		if err := occupied.Close(); err != nil {
+			t.Errorf("close occupied: %v", err)
+		}
+	}()
 	runtime := externalRuntime(t, occupied.Addr().(*net.TCPAddr).Port)
 	var state atomic.Pointer[string]
 	stop, err := startHarvesterExternal(runtime, io.Discard, func(value string) { state.Store(&value) })

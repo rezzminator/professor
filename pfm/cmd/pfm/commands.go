@@ -32,7 +32,7 @@ func runLS(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
-) int {
+) (exitCode int) {
 	flags := newFlagSet(
 		"ls",
 		"usage: pfm ls [-a|--all] [--plain|--tsv] [id] | pfm ls --killed [--tsv]",
@@ -96,7 +96,7 @@ func runLS(
 		fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 		return 1
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm ls: close database", stderr, &exitCode) }()
 	sharedState := shared.Open(ctx, runtime.Paths)
 	defer func() {
 		if err := sharedState.Close(); err != nil {
@@ -339,18 +339,27 @@ func boolCount(values ...bool) int {
 	return count
 }
 
+func closeCommandResource(closer io.Closer, label string, stderr io.Writer, exitCode *int) {
+	if err := closer.Close(); err != nil {
+		fmt.Fprintf(stderr, "%s: %v\n", label, err)
+		if *exitCode == 0 {
+			*exitCode = 1
+		}
+	}
+}
+
 func openID(
 	ctx context.Context,
 	id string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
-) int {
+) (exitCode int) {
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm chat open: close database", stderr, &exitCode) }()
 	// READ-ONLY: open needs to FIND one row, never to persist a gather pass.
 	// A writing scan here wedges whenever the caller already holds the fleet
 	// store open in the same process — which is exactly what made chat_open
@@ -637,7 +646,7 @@ func rebootRow(
 	return row, nil
 }
 
-func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	flags := newFlagSet(
 		"index",
 		"usage: pfm index [--full] [--progress]",
@@ -657,7 +666,7 @@ func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 		fmt.Fprintf(stderr, "pfm index: %v\n", err)
 		return 1
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm index: close database", stderr, &exitCode) }()
 	indexer, err := fleetindex.NewWithRoots(database, runtime.Paths, runtime.Paths.Roots)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm index: %v\n", err)

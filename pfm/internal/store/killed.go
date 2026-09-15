@@ -314,7 +314,7 @@ func (s *Store) deriveEngineChunk(
 	ctx context.Context,
 	ids []string,
 	engines map[string]pfmengine.ID,
-) error {
+) (returnErr error) {
 	marks := placeholders(len(ids))
 	query := `
 SELECT uuid, ? FROM transcripts WHERE uuid IN (` + marks + `)
@@ -339,7 +339,11 @@ SELECT id, ? FROM oc_sessions WHERE id IN (` + marks + `)`
 	if err != nil {
 		return fmt.Errorf("derive killed chat engines: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close killed chat engine rows: %w", err))
+		}
+	}()
 	for rows.Next() {
 		var id, engine string
 		if err := rows.Scan(&id, &engine); err != nil {

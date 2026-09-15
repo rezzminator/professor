@@ -24,8 +24,17 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "deps: no jailed home: %v\n", err)
 		os.Exit(m.Run())
 	}
-	os.Setenv(paths.EnvHome, home)
+	if err := os.Setenv(paths.EnvHome, home); err != nil {
+		fmt.Fprintf(os.Stderr, "deps: jail home environment: %v\n", err)
+		if cleanupErr := os.RemoveAll(home); cleanupErr != nil {
+			fmt.Fprintf(os.Stderr, "deps: clean unused jailed home: %v\n", cleanupErr)
+		}
+		os.Exit(1)
+	}
 	code := m.Run()
-	os.RemoveAll(home)
+	if err := os.RemoveAll(home); err != nil {
+		fmt.Fprintf(os.Stderr, "deps: clean jailed home: %v\n", err)
+		code = 1
+	}
 	os.Exit(code)
 }

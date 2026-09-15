@@ -156,7 +156,7 @@ func runMCP(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
-) int {
+) (exitCode int) {
 	// The installed wiring historically invokes bare `pfm mcp`; preserve that
 	// argv as the chat server's serve action while making every new form named.
 	if len(args) == 0 {
@@ -229,7 +229,7 @@ func runMCP(
 		fmt.Fprintf(stderr, "pfm mcp: %v\n", err)
 		return 1
 	}
-	defer service.Close()
+	defer func() { closeCommandResource(service, "pfm mcp: close service", stderr, &exitCode) }()
 	if err := service.RunStdio(
 		context.Background(),
 		os.Stdin,
@@ -298,7 +298,7 @@ func resolveDevVersion(settings []debug.BuildSetting) string {
 	return fmt.Sprintf("dev (%s)", revision)
 }
 
-func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
 	flags := newFlagSet(
 		"chat kill",
 		"usage: pfm chat kill [self | id] [--exit]",
@@ -324,7 +324,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 	if code != 0 {
 		return code
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 	id := ""
 	var engine pfmengine.ID
@@ -359,7 +359,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 	return 0
 }
 
-func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
 	flags := newFlagSet("chat unkill", "usage: pfm chat unkill id", stderr)
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
@@ -372,7 +372,7 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	if code != 0 {
 		return code
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm chat unkill: close database", stderr, &exitCode) }()
 	if err := manager.Unkill(context.Background(), flags.Arg(0)); err != nil {
 		fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
 		return 1
@@ -381,7 +381,7 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	return 0
 }
 
-func runKilled(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runKilled(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
 	flags := newFlagSet(
 		"ls --killed",
 		"usage: pfm ls --killed",
@@ -398,7 +398,7 @@ func runKilled(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	if code != 0 {
 		return code
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm ls --killed: close database", stderr, &exitCode) }()
 	rows, err := manager.Killed(context.Background())
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm ls --killed: %v\n", err)
@@ -414,7 +414,7 @@ func runInternal(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
-) int {
+) (exitCode int) {
 	if len(args) != 0 && args[0] == "clear-kill" {
 		return runClearKill(args[1:], os.Stdin, stderr, runtime)
 	}
@@ -555,7 +555,7 @@ func runInternal(
 		fmt.Fprintf(stderr, "pfm internal kill-exit: %v\n", err)
 		return 1
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm internal kill-exit: close database", stderr, &exitCode) }()
 	finisher, err := kill.NewFinisher(database, kill.Dependencies{
 		Paths:       runtime.Paths,
 		ClaudeRoots: runtime.Config.ProjectRoots(),

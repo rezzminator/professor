@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -886,12 +887,16 @@ func localCommandRecord(content json.RawMessage) bool {
 	return strings.HasPrefix(trimmed, "<local-command-") || strings.HasPrefix(trimmed, "<command-name>")
 }
 
-func readTail(path string, size int64) ([]byte, error) {
+func readTail(path string, size int64) (tail []byte, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close tail file %s: %w", path, err))
+		}
+	}()
 	info, err := file.Stat()
 	if err != nil {
 		return nil, err
@@ -1032,7 +1037,11 @@ func gptRequestCount(runtime Runtime, now time.Time) (int, bool) {
 		logPath := filepath.Join(runtime.Home, ".local", "state", "claude-code-proxy", "proxy.log")
 		file, err := os.Open(logPath)
 		if err == nil {
-			defer file.Close()
+			defer func() {
+				if err := file.Close(); err != nil {
+					fmt.Fprintf(os.Stderr, "statusline: close GPT proxy log %s: %v\n", logPath, err)
+				}
+			}()
 			today := now.UTC().Format("2006-01-02")
 			count := 0
 			last := make([]int, 0, 3)

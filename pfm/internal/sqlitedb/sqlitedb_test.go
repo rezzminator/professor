@@ -27,7 +27,11 @@ func TestOpenStoreAppliesTheStorePragmaSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	for name, want := range map[string]string{
 		"journal_mode": "wal", "synchronous": "1", "foreign_keys": "1", "busy_timeout": "10000",
 	} {
@@ -56,7 +60,11 @@ func TestForeignOpenersKeepTheOwnersSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer readOnly.Close()
+	defer func() {
+		if err := readOnly.Close(); err != nil {
+			t.Errorf("close readOnly: %v", err)
+		}
+	}()
 	if _, err := readOnly.Exec("INSERT INTO threads VALUES ('a')"); err == nil {
 		t.Fatal("a read-only handle accepted a write")
 	}
@@ -67,7 +75,11 @@ func TestForeignOpenersKeepTheOwnersSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer readWrite.Close()
+	defer func() {
+		if err := readWrite.Close(); err != nil {
+			t.Errorf("close readWrite: %v", err)
+		}
+	}()
 	if _, err := readWrite.Exec("INSERT INTO threads VALUES ('a')"); err != nil {
 		t.Fatalf("read-write insert: %v", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -87,14 +88,22 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer chat.Close()
+	defer func() {
+		if err := chat.Close(); err != nil {
+			t.Errorf("close chat: %v", err)
+		}
+	}()
 	harvester, err := harvestmcp.NewConfigured("test", harvestmcp.Runtime{
 		Home: root, CacheDir: root + "/cache",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer harvester.Close()
+	defer func() {
+		if err := harvester.Close(); err != nil {
+			t.Errorf("close harvester: %v", err)
+		}
+	}()
 
 	handler := newMCPDaemonHandler(mcpDaemonOptions{
 		Version: "test", StartedAt: time.Now(), Endpoint: "http://127.0.0.1:8377",
@@ -108,7 +117,11 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer chatSession.Close()
+	defer func() {
+		if err := chatSession.Close(); err != nil {
+			t.Errorf("close chatSession: %v", err)
+		}
+	}()
 	tools, err := chatSession.ListTools(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +143,11 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer harvesterSession.Close()
+	defer func() {
+		if err := harvesterSession.Close(); err != nil {
+			t.Errorf("close harvesterSession: %v", err)
+		}
+	}()
 	if _, err := harvesterSession.CallTool(ctx, &mcp.CallToolParams{
 		Name: "searchCache", Arguments: map[string]any{"pattern": "never-match"},
 	}); err != nil {
@@ -255,7 +272,9 @@ func TestMCPServeBothDisabledRefusesBeforeBindingPort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("port %d still bound after refusal: %v", port, err)
 	}
-	listener.Close()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
@@ -263,15 +282,22 @@ func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer listener.Close()
 	portText := listener.Addr().(*net.TCPAddr).Port
 	port := strconv.Itoa(portText)
 	server := &http.Server{Handler: newMCPDaemonHandler(mcpDaemonOptions{
 		Version: "test", StartedAt: time.Unix(5, 0), Endpoint: "http://127.0.0.1:" + port,
 		Chat: http.NotFoundHandler(), Harvester: http.NotFoundHandler(),
 	})}
-	go server.Serve(listener)
-	defer server.Close()
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(listener) }()
+	defer func() {
+		if err := server.Close(); err != nil {
+			t.Errorf("close server: %v", err)
+		}
+		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("serve test daemon: %v", err)
+		}
+	}()
 
 	runtime := commandRuntime{Config: config.Defaults(t.TempDir(), nil)}
 	runtime.Config.MCP.HTTP.Port = portText

@@ -403,7 +403,9 @@ func TestHooksStayRepositoryHermeticAndStripWorktree(t *testing.T) {
 	writeHookFile(t, filepath.Join(first, ".professor", "stm", "agents", "qa.md"), "- First -> maps/first.md\n")
 	writeHookFile(t, filepath.Join(second, ".professor", "stm", "agents", "qa.md"), "- Second -> maps/second.md\n")
 	worktree := filepath.Join(second, ".worktrees", "topic")
-	os.MkdirAll(filepath.Dir(worktree), 0o700)
+	if err := os.MkdirAll(filepath.Dir(worktree), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	hookGit(t, second, "worktree", "add", "-q", "-b", "hook-topic", worktree)
 	got, err := Hook(
 		HookRequest{Kind: HookCodexSubagentInject, Input: []byte(`{"agent_type":"qa","cwd":"` + worktree + `"}`)},
@@ -488,7 +490,9 @@ func TestNudgeFailureBecomesPersistentEvidenceThenClears(t *testing.T) {
 	repository := hookRepository(t)
 	organRoot := filepath.Join(repository, ".professor", "stm")
 	badSweep := filepath.Join(organRoot, "dreamer", "2026-08-01.md")
-	os.MkdirAll(badSweep, 0o700)
+	if err := os.MkdirAll(badSweep, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Date(2026, 8, 13, 0, 0, 0, 0, time.UTC)
 	got, err := Hook(HookRequest{Kind: HookNudge, ProjectDirectory: repository, Now: now})
 	if err != nil || len(got) != 0 {
@@ -622,14 +626,18 @@ func TestNudgeDoesNotDependOnGitBeingHealthy(t *testing.T) {
 func hookRepository(t *testing.T) string {
 	t.Helper()
 	repository := filepath.Join(t.TempDir(), "repository")
-	os.MkdirAll(repository, 0o700)
+	if err := os.MkdirAll(repository, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	hookGit(t, repository, "init", "-q", "--initial-branch=main")
 	hookGit(t, repository, "config", "user.name", "Hook Test")
 	hookGit(t, repository, "config", "user.email", "hook@test.invalid")
 	writeHookFile(t, filepath.Join(repository, "anchor.txt"), "anchor\n")
 	writeHookFile(t, filepath.Join(repository, "stable.txt"), "stable\n")
 	for _, directory := range []string{"maps", "archive", "dreamer", "agents"} {
-		os.MkdirAll(filepath.Join(repository, ".professor", "stm", directory), 0o700)
+		if err := os.MkdirAll(filepath.Join(repository, ".professor", "stm", directory), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	writeHookFile(t, filepath.Join(repository, ".professor", "stm", "stm.md"), "# fixture\n")
 	// The lane declares the agent types it serves; Explore reads the tracer lane.

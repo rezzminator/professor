@@ -112,7 +112,11 @@ func (s *Store) WithImmediateTx(
 	if err != nil {
 		return fmt.Errorf("acquire sqlite connection: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close sqlite connection: %w", closeErr))
+		}
+	}()
 
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("begin immediate transaction: %w", err)

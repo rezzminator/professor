@@ -27,9 +27,13 @@ func clearCache1HEnv(t *testing.T) {
 		t.Cleanup(func(key, original string, had bool) func() {
 			return func() {
 				if had {
-					os.Setenv(key, original)
+					if err := os.Setenv(key, original); err != nil {
+						t.Errorf("restore %s: %v", key, err)
+					}
 				} else {
-					os.Unsetenv(key)
+					if err := os.Unsetenv(key); err != nil {
+						t.Errorf("keep %s unset: %v", key, err)
+					}
 				}
 			}
 		}(key, original, had))

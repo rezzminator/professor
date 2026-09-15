@@ -65,7 +65,7 @@ func codexIndexProof(codexRoots []string) renameProof {
 	}
 }
 
-func sessionIndexHasRename(path, name string, since time.Time) (bool, error) {
+func sessionIndexHasRename(path, name string, since time.Time) (renamed bool, returnErr error) {
 	file, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		// A home Codex has never renamed a thread in: nothing recorded yet.
@@ -74,7 +74,11 @@ func sessionIndexHasRename(path, name string, since time.Time) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("open Codex session index %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close Codex session index %s: %w", path, err))
+		}
+	}()
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {

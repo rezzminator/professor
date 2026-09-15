@@ -2,6 +2,7 @@ package kill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -20,7 +21,7 @@ type CommandSpawner struct {
 func (spawner CommandSpawner) Spawn(
 	ctx context.Context,
 	args ExitArgs,
-) error {
+) (returnErr error) {
 	executable := spawner.Executable
 	if executable == "" {
 		var err error
@@ -67,7 +68,11 @@ func (spawner CommandSpawner) Spawn(
 	if err != nil {
 		return fmt.Errorf("open null device for kill finisher: %w", err)
 	}
-	defer null.Close()
+	defer func() {
+		if err := null.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close null device for kill finisher: %w", err))
+		}
+	}()
 	command.Stdin = null
 	command.Stdout = null
 	command.Stderr = null

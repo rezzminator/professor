@@ -11,7 +11,11 @@ import (
 
 func TestRefreshCodexLineageFullDeltaAndUnrelatedFiles(t *testing.T) {
 	database := openIndexStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "rollout-child.jsonl")
 	prompt := `{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"hello"}]}}` + "\n"

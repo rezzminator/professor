@@ -181,7 +181,7 @@ func storeGeneration(name, prefix string) (int, bool) {
 // would judge a store Codex is actively writing from a stale snapshot.
 //
 // only, when set, limits the sweep to one thread id.
-func Sweep(ctx context.Context, stores Stores, only string) (Report, error) {
+func Sweep(ctx context.Context, stores Stores, only string) (report Report, returnErr error) {
 	rolloutByID, err := rolloutPaths(ctx, stores.State)
 	if err != nil {
 		return Report{}, err
@@ -190,7 +190,11 @@ func Sweep(ctx context.Context, stores Stores, only string) (Report, error) {
 	if err != nil {
 		return Report{}, err
 	}
-	defer history.Close()
+	defer func() {
+		if err := history.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close history store %q: %w", stores.History, err))
+		}
+	}()
 
 	rows, err := history.QueryContext(
 		ctx,
@@ -204,9 +208,13 @@ func Sweep(ctx context.Context, stores Stores, only string) (Report, error) {
 			err,
 		)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close projection cursor rows: %w", err))
+		}
+	}()
 
-	report := Report{Totals: make(map[Verdict]int)}
+	report = Report{Totals: make(map[Verdict]int)}
 	for rows.Next() {
 		var state ThreadState
 		if err := rows.Scan(&state.ID, &state.Offset, &state.Ordinal); err != nil {
@@ -259,7 +267,11 @@ func classify(
 	if err != nil {
 		return VerdictNoRollout, err.Error(), size
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "heal: close rollout %s: %v\n", rolloutPath, err)
+		}
+	}()
 
 	if offset > 0 {
 		previous := make([]byte, 1)
@@ -384,12 +396,16 @@ var openRollout = func(path string) (io.ReadCloser, error) {
 // are not records and not anomalies, matching the projector's own skip; a
 // trailing partial line with no newline is not an anomaly either — Codex
 // leaves it for the next pass.
-func scanOrdinals(path string) (anomaly, bool, error) {
+func scanOrdinals(path string) (found anomaly, hasAnomaly bool, returnErr error) {
 	source, err := openRollout(path)
 	if err != nil {
 		return anomaly{}, false, fmt.Errorf("open %q to scan ordinals: %w", path, err)
 	}
-	defer source.Close()
+	defer func() {
+		if err := source.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout %q: %w", path, err))
+		}
+	}()
 
 	reader := bufio.NewReader(source)
 	var offset int64
@@ -498,18 +514,26 @@ func indexByte(data []byte, target byte) int {
 }
 
 // rolloutPaths reads the thread → rollout mapping out of the state store.
-func rolloutPaths(ctx context.Context, statePath string) (map[string]string, error) {
+func rolloutPaths(ctx context.Context, statePath string) (paths map[string]string, returnErr error) {
 	state, err := openReadOnly(statePath)
 	if err != nil {
 		return nil, err
 	}
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close state store %q: %w", statePath, err))
+		}
+	}()
 	rows, err := state.QueryContext(ctx, "SELECT id, rollout_path FROM threads")
 	if err != nil {
 		return nil, fmt.Errorf("read threads from %q: %w", statePath, err)
 	}
-	defer rows.Close()
-	paths := make(map[string]string)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close thread rows: %w", err))
+		}
+	}()
+	paths = make(map[string]string)
 	for rows.Next() {
 		var id string
 		var path sql.NullString
@@ -543,7 +567,11 @@ func Live(codexRoot, threadID string) bool {
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "heal: close writer lock %s: %v\n", path, err)
+		}
+	}()
 	if err := unix.Flock(int(file.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		return true
 	}
@@ -586,12 +614,16 @@ func Backup(stores Stores, now time.Time) (string, error) {
 // rollout at the next resume. The three tables go in ONE immediate
 // transaction: a projection state without its items is a thread that resumes
 // empty, which is the very failure this repairs.
-func Delete(ctx context.Context, stores Stores, threadID string) error {
+func Delete(ctx context.Context, stores Stores, threadID string) (returnErr error) {
 	database, err := sqlitedb.OpenReadWrite(stores.History, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", stores.History, err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close history store %q: %w", stores.History, err))
+		}
+	}()
 
 	transaction, err := database.BeginTx(ctx, nil)
 	if err != nil {

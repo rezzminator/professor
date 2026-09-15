@@ -3,7 +3,9 @@
 package testjail
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,7 +56,10 @@ func Run(m *testing.M) int {
 	// per test and removes it. An extra layer would only spend a dozen of the
 	// 104 bytes a socket path is allowed, which is exactly the budget the
 	// longest test names need.
-	os.Setenv("TMPDIR", base)
+	if err := os.Setenv("TMPDIR", base); err != nil {
+		fmt.Fprintf(os.Stderr, "testjail: set TMPDIR to %s: %v\n", base, err)
+		return 1
+	}
 	defer jailHome(base)()
 	return m.Run()
 }
@@ -79,8 +84,18 @@ func jailHome(base string) func() {
 		fmt.Fprintf(os.Stderr, "testjail: no jailed home under %s: %v\n", base, err)
 		return func() {}
 	}
-	os.Setenv(paths.EnvHome, home)
-	return func() { os.RemoveAll(home) }
+	if err := os.Setenv(paths.EnvHome, home); err != nil {
+		fmt.Fprintf(os.Stderr, "testjail: set %s to %s: %v\n", paths.EnvHome, home, err)
+		if removeErr := os.RemoveAll(home); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "testjail: remove unused jail home %s: %v\n", home, removeErr)
+		}
+		return func() {}
+	}
+	return func() {
+		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Fprintf(os.Stderr, "testjail: remove jail home %s: %v\n", home, err)
+		}
+	}
 }
 
 // ShortRoot returns a unique temporary directory whose path is as short as this
@@ -103,7 +118,11 @@ func ShortRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("create short jail root: %v", err)
 	}
-	t.Cleanup(func() { os.RemoveAll(directory) })
+	t.Cleanup(func() {
+		if err := os.RemoveAll(directory); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("remove short jail root %s: %v", directory, err)
+		}
+	})
 	return directory
 }
 

@@ -2,7 +2,9 @@ package harvest
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -109,7 +111,7 @@ func (h *Harvester) binaryCachePath(source string) (string, string) {
 	return "", ""
 }
 
-func (h *Harvester) storeBinary(source, kind, method string, body []byte, refresh bool) Result {
+func (h *Harvester) storeBinary(source, kind, method string, body []byte, refresh bool) (result Result) {
 	ext := filepath.Ext(strings.Split(strings.Split(source, "?")[0], "#")[0])
 	if ext == "" || len(ext) > 5 {
 		ext = map[string]string{"jpg": ".jpg", "png": ".png", "gif": ".gif", "webp": ".webp", "bmp": ".bmp", "tiff": ".tiff", "svg": ".svg", "image": ".png", "zip": ".zip", "tar": ".tar", "7z": ".7z", "rar": ".rar"}[kind]
@@ -127,7 +129,15 @@ func (h *Harvester) storeBinary(source, kind, method string, body []byte, refres
 		return Result{Source: source, Error: e.Error()}
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() {
+		if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) && result.Error == "" {
+			result = Result{
+				Source: source,
+				Kind:   kind,
+				Error:  fmt.Sprintf("remove binary cache temp %s: %v", tmpName, err),
+			}
+		}
+	}()
 	if _, e = tmp.Write(body); e == nil {
 		e = tmp.Chmod(0o600)
 	}

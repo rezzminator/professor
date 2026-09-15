@@ -1,7 +1,9 @@
 package dream
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -54,7 +56,12 @@ func Restamp(mapArgument, workingDirectory string, now time.Time) (string, error
 		return "", fmt.Errorf("write restamped map: %w", err)
 	}
 	if err := os.Rename(temporary, mapPath); err != nil {
-		os.Remove(temporary)
+		if removeErr := os.Remove(temporary); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+			return "", errors.Join(
+				fmt.Errorf("replace map: %w", err),
+				fmt.Errorf("remove temporary map %s: %w", temporary, removeErr),
+			)
+		}
 		return "", fmt.Errorf("replace map: %w", err)
 	}
 	return fmt.Sprintf("restamp %s: %d row(s) updated at HEAD\n", filepath.Base(mapPath), moved), nil

@@ -323,7 +323,11 @@ func queryColumn(t *testing.T, state *Store, query string) []string {
 	if err != nil {
 		t.Fatalf("query %q: %v", query, err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("close rows: %v", err)
+		}
+	}()
 	var values []string
 	for rows.Next() {
 		var value string

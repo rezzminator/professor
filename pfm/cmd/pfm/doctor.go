@@ -77,7 +77,7 @@ func runDoctor(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
-) int {
+) (exitCode int) {
 	flags := newFlagSet(
 		"doctor",
 		"usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures",
@@ -129,7 +129,7 @@ func runDoctor(
 		fmt.Fprintf(stdout, "doctor: unhealthy database: %v\n", err)
 		return 3
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "doctor: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 	pathWarnings := pfmPathWarnings(resolved.Home, os.Getenv("PATH"))
 	for _, warning := range pathWarnings {

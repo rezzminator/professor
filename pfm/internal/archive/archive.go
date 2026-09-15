@@ -495,7 +495,7 @@ func (runner *Runner) backupSidecars() ([]string, error) {
 
 // pruneLines drops every line naming an archived id. The file is rewritten
 // through a temporary beside it, so an interrupted prune leaves the original.
-func (runner *Runner) pruneLines(path string, ids []string) (int, error) {
+func (runner *Runner) pruneLines(path string, ids []string) (dropped int, returnErr error) {
 	if len(ids) == 0 {
 		return 0, nil
 	}
@@ -506,7 +506,11 @@ func (runner *Runner) pruneLines(path string, ids []string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close %s: %w", path, err))
+		}
+	}()
 
 	wanted := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -516,9 +520,13 @@ func (runner *Runner) pruneLines(path string, ids []string) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("create a temporary beside %s: %w", path, err)
 	}
-	defer os.Remove(temporary.Name())
+	defer func() {
+		if err := os.Remove(temporary.Name()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary %s: %w", temporary.Name(), err))
+		}
+	}()
 
-	dropped := 0
+	dropped = 0
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
 	writer := bufio.NewWriter(temporary)
@@ -566,7 +574,11 @@ func isSidechain(path string) bool {
 	if err != nil {
 		return false
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "archive: close sidechain transcript %s: %v\n", path, err)
+		}
+	}()
 	head := make([]byte, headBytes)
 	read, err := file.Read(head)
 	if read <= 0 && err != nil {

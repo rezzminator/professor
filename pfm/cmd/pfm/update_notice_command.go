@@ -68,7 +68,11 @@ func triggerProfessorUpdateCheck(runtime commandRuntime) {
 	if err != nil {
 		return
 	}
-	defer null.Close()
+	defer func() {
+		if err := null.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "pfm update check: close null device: %v\n", err)
+		}
+	}()
 	latestURL := professorLatestReleaseURL
 	if override := strings.TrimSpace(os.Getenv("PFM_UPDATE_LATEST_URL")); override != "" {
 		latestURL = override

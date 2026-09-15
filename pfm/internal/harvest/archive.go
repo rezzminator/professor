@@ -97,7 +97,11 @@ func archiveFormat(path string) string {
 	if e != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "harvest: close archive probe %s: %v\n", path, err)
+		}
+	}()
 	head := make([]byte, 8)
 	_, _ = io.ReadFull(f, head)
 	switch {
@@ -134,12 +138,16 @@ func ListArchive(path string) ([]Member, error) {
 	}
 }
 
-func listZip(path string) ([]Member, error) {
+func listZip(path string) (members []Member, returnErr error) {
 	f, e := zip.OpenReader(path)
 	if e != nil {
 		return nil, fmt.Errorf("open zip: %w", e)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close zip %s: %w", path, err))
+		}
+	}()
 	out := make([]Member, 0, len(f.File))
 	var total int64
 	for _, entry := range f.File {
@@ -192,7 +200,7 @@ func openTar(path string) (io.Reader, func() error, error) {
 			_ = f.Close()
 			return nil, nil, err
 		}
-		return gz, func() error { _ = gz.Close(); return f.Close() }, nil
+		return gz, func() error { return errors.Join(gz.Close(), f.Close()) }, nil
 	}
 	if head[0] == 'B' && head[1] == 'Z' {
 		bz := bzip2.NewReader(f)
@@ -209,12 +217,16 @@ func openTar(path string) (io.Reader, func() error, error) {
 	return f, f.Close, nil
 }
 
-func listTar(path string) ([]Member, error) {
+func listTar(path string) (members []Member, returnErr error) {
 	r, closeFn, e := openTar(path)
 	if e != nil {
 		return nil, e
 	}
-	defer closeFn()
+	defer func() {
+		if err := closeFn(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close tar %s: %w", path, err))
+		}
+	}()
 	tr := tar.NewReader(r)
 	out := []Member{}
 	var total int64
@@ -253,12 +265,16 @@ func listTar(path string) ([]Member, error) {
 	return out, nil
 }
 
-func list7z(path string) ([]Member, error) {
+func list7z(path string) (members []Member, returnErr error) {
 	r, err := sevenzip.OpenReader(path)
 	if err != nil {
 		return nil, fmt.Errorf("open 7z: %w", err)
 	}
-	defer r.Close()
+	defer func() {
+		if err := r.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close 7z %s: %w", path, err))
+		}
+	}()
 	out := make([]Member, 0, len(r.File))
 	var total int64
 	for _, entry := range r.File {
@@ -289,7 +305,7 @@ func list7z(path string) ([]Member, error) {
 	return out, nil
 }
 
-func read7z(path, name string) ([]byte, error) {
+func read7z(path, name string) (body []byte, returnErr error) {
 	name = normalizedMemberName(name)
 	if err := validateMemberName(name); err != nil {
 		return nil, err
@@ -298,7 +314,11 @@ func read7z(path, name string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open 7z: %w", err)
 	}
-	defer r.Close()
+	defer func() {
+		if err := r.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close 7z %s: %w", path, err))
+		}
+	}()
 	for _, entry := range r.File {
 		if normalizedMemberName(entry.Name) != name {
 			continue
@@ -439,12 +459,16 @@ func ReadArchiveMember(path, name string) ([]byte, error) {
 	}
 }
 
-func readZip(path, name string) ([]byte, error) {
+func readZip(path, name string) (body []byte, returnErr error) {
 	f, e := zip.OpenReader(path)
 	if e != nil {
 		return nil, e
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close zip %s: %w", path, err))
+		}
+	}()
 	name = normalizedMemberName(name)
 	if e := validateMemberName(name); e != nil {
 		return nil, e
@@ -470,7 +494,11 @@ func readZip(path, name string) ([]byte, error) {
 		if e != nil {
 			return nil, e
 		}
-		defer r.Close()
+		defer func() {
+			if err := r.Close(); err != nil {
+				returnErr = errors.Join(returnErr, fmt.Errorf("close zip member %q: %w", name, err))
+			}
+		}()
 		body, e := io.ReadAll(io.LimitReader(r, MaxArchiveFileBytes+1))
 		if e != nil {
 			return nil, e
@@ -483,12 +511,16 @@ func readZip(path, name string) ([]byte, error) {
 	return nil, fmt.Errorf("member not found: %s", name)
 }
 
-func readTar(path, name string) ([]byte, error) {
+func readTar(path, name string) (body []byte, returnErr error) {
 	r, closeFn, e := openTar(path)
 	if e != nil {
 		return nil, e
 	}
-	defer closeFn()
+	defer func() {
+		if err := closeFn(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close tar %s: %w", path, err))
+		}
+	}()
 	name = normalizedMemberName(name)
 	if e := validateMemberName(name); e != nil {
 		return nil, e

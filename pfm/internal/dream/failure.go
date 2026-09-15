@@ -121,12 +121,16 @@ func clearNightFailure(path string) error {
 	return syncDirectory(filepath.Dir(path))
 }
 
-func syncDirectory(path string) error {
+func syncDirectory(path string) (returnErr error) {
 	directory, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("open marker directory %s: %w", path, err)
 	}
-	defer directory.Close()
+	defer func() {
+		if err := directory.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close marker directory %s: %w", path, err))
+		}
+	}()
 	if err := directory.Sync(); err != nil {
 		return fmt.Errorf("sync marker directory %s: %w", path, err)
 	}

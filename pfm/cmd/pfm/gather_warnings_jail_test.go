@@ -76,7 +76,11 @@ func TestInteractiveRefreshBuffersGatherWarningsUntilFlushed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	// The interactive path: streamFleetRefreshesWith is exactly what runLS
 	// starts in the background while BubblePicker.Pick owns the terminal.
@@ -154,7 +158,11 @@ func TestInteractiveRefreshKeepsUnresolvedCodexNamesSilent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	var warnings bufferedWarnings
 	var interactiveStderr bytes.Buffer

@@ -111,7 +111,11 @@ func TestCanceledPickerRefreshExitsWithoutReportingARefreshFailure(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -151,7 +155,11 @@ func TestPickerRefreshStreamRepeatsAtTheBaseInterval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	updates := make(chan ui.Snapshot, 1)
@@ -239,7 +247,11 @@ func TestCachedFirstPaintWhileIndexRefreshIsSlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -401,7 +413,11 @@ func TestAsyncCallerRefreshStormPreservesCursorAndGoroutines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)

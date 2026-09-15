@@ -30,13 +30,21 @@ func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer serverSession.Close()
+	defer func() {
+		if err := serverSession.Close(); err != nil {
+			t.Errorf("close serverSession: %v", err)
+		}
+	}()
 	client := mcp.NewClient(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
 	session, err := client.Connect(context.Background(), clientTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	}()
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -69,13 +77,21 @@ func listToolNames(t *testing.T, service *Service) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer serverSession.Close()
+	defer func() {
+		if err := serverSession.Close(); err != nil {
+			t.Errorf("close serverSession: %v", err)
+		}
+	}()
 	client := mcp.NewClient(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
 	session, err := client.Connect(context.Background(), clientTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	}()
 	tools, err := session.ListTools(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)

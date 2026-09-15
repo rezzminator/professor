@@ -211,20 +211,27 @@ func writeNotice(path string, notice Notice) error {
 // follow issues one HEAD request and returns its redirect target, both parsed
 // and as the raw Location header (kept for error messages). A non-3xx status
 // or a missing/unparsable Location is an error, never a silent "no update".
-func follow(client *http.Client, request *http.Request) (*url.URL, string, error) {
+func follow(
+	client *http.Client,
+	request *http.Request,
+) (resolved *url.URL, location string, returnErr error) {
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, "", fmt.Errorf("request latest Professor release: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close latest release response: %w", err))
+		}
+	}()
 	if response.StatusCode < 300 || response.StatusCode >= 400 {
 		return nil, "", fmt.Errorf("latest Professor release returned %s", response.Status)
 	}
-	location := strings.TrimSpace(response.Header.Get("Location"))
+	location = strings.TrimSpace(response.Header.Get("Location"))
 	if location == "" {
 		return nil, "", errors.New("latest Professor release redirect omitted Location")
 	}
-	resolved, err := request.URL.Parse(location)
+	resolved, err = request.URL.Parse(location)
 	if err != nil {
 		return nil, "", fmt.Errorf("parse latest Professor release redirect: %w", err)
 	}

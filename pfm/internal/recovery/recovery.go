@@ -130,14 +130,17 @@ type candidate struct {
 	mod  int64
 }
 
-func parse(ctx context.Context, path string) ([]turn, []turn, int, error) {
+func parse(ctx context.Context, path string) (turns, carried []turn, malformed int, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("open rollout %q: %w", path, err)
 	}
-	defer file.Close()
-	var turns, carried []turn
-	malformed := 0
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout %q: %w", path, err))
+		}
+	}()
+	malformed = 0
 	scanner := bufio.NewScanner(file)
 	// A message can contain a large tool result. Scanner's default 64 KiB cap
 	// would silently turn a valid rollout into a malformed one.

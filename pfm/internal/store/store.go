@@ -210,18 +210,18 @@ func ensureOcSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) error 
 		var notNull, pk int
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			rows.Close()
-			return fmt.Errorf("scan oc_sessions column: %w", err)
+			return errors.Join(fmt.Errorf("scan oc_sessions column: %w", err), rows.Close())
 		}
 		if name == "assistant_count" {
 			present = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("iterate oc_sessions columns: %w", err)
+		return errors.Join(fmt.Errorf("iterate oc_sessions columns: %w", err), rows.Close())
 	}
-	rows.Close()
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close oc_sessions columns: %w", err)
+	}
 	if present {
 		return nil
 	}

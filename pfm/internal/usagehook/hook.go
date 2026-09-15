@@ -4,6 +4,7 @@ package usagehook
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -562,7 +563,7 @@ func EnsurePrivateDirectory(path string) error {
 	return os.Chmod(path, 0o700)
 }
 
-func refresh(ctx context.Context, options Options, cachePath string) error {
+func refresh(ctx context.Context, options Options, cachePath string) (returnErr error) {
 	credential, err := loadCredential(ctx, options.ConfigDir)
 	if err != nil {
 		return err
@@ -577,7 +578,11 @@ func refresh(ctx context.Context, options Options, cachePath string) error {
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close usage response: %w", err))
+		}
+	}()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("usage endpoint returned %s", response.Status)
 	}
@@ -601,7 +606,7 @@ func refresh(ctx context.Context, options Options, cachePath string) error {
 
 // Fetch reads one account's current OAuth usage without touching the warning
 // cache. It is the shared fetch seam for the Limits tab and the prompt hook.
-func Fetch(ctx context.Context, options Options) (Usage, error) {
+func Fetch(ctx context.Context, options Options) (usageResult Usage, returnErr error) {
 	options = normalize(options)
 	credential, err := loadCredential(ctx, options.ConfigDir)
 	if err != nil {
@@ -617,7 +622,11 @@ func Fetch(ctx context.Context, options Options) (Usage, error) {
 	if err != nil {
 		return Usage{}, fmt.Errorf("fetch usage endpoint: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close usage response: %w", err))
+		}
+	}()
 	if response.StatusCode == http.StatusTooManyRequests {
 		return Usage{}, &RateLimitError{RetryAfter: ParseRetryAfter(response.Header.Get("Retry-After"), options.Now())}
 	}

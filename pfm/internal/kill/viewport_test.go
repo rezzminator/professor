@@ -49,7 +49,11 @@ func TestExitClosesTheBunkerPaneWatchingTheChat(t *testing.T) {
 		panesByTTY: map[string]string{"/dev/pts/9": "%42", "/dev/pts/3": "%7"},
 	}
 	finisher, database, id := exitFinisher(t, jail, tmux)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	if err := finisher.Run(context.Background(), ExitArgs{
 		Engine:     pfmengine.Claude,
@@ -75,7 +79,11 @@ func TestExitLeavesPanesThatWereNotWatchingAlone(t *testing.T) {
 		panesByTTY: map[string]string{"/dev/pts/3": "%7", "/dev/pts/4": "%8"},
 	}
 	finisher, database, id := exitFinisher(t, jail, tmux)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	if err := finisher.Run(context.Background(), ExitArgs{
 		Engine:     pfmengine.Claude,
@@ -96,7 +104,11 @@ func TestExitWithNoViewportKillsOnlyTheChat(t *testing.T) {
 	jail := newKillJail(t)
 	tmux := &fakeTmux{}
 	finisher, database, id := exitFinisher(t, jail, tmux)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	if err := finisher.Run(context.Background(), ExitArgs{
 		Engine:     pfmengine.Claude,

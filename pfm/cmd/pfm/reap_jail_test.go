@@ -179,7 +179,11 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 		t.Fatalf("apply left untouched fork alive:\n%s", stdout.String())
 	}
 	state = shared.Open(context.Background(), resolved)
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	if _, found, err := state.Meta(context.Background(), "branch-seat:"+socket); err != nil || found {
 		t.Fatalf("branch marker after reap found=%t err=%v", found, err)
 	}

@@ -47,7 +47,7 @@ func Stream(
 	engine pfmengine.ID,
 	options StreamOptions,
 	out io.Writer,
-) error {
+) (returnErr error) {
 	if path == "" {
 		return errors.New("this chat has no transcript to stream yet")
 	}
@@ -59,7 +59,11 @@ func Stream(
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %s: %w", path, err))
+		}
+	}()
 	if !options.FromStart {
 		if _, err := file.Seek(0, io.SeekEnd); err != nil {
 			return err

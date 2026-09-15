@@ -132,7 +132,7 @@ func writeMCPJSON(writer http.ResponseWriter, value any) {
 	}
 }
 
-func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
+func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	port := runtime.Config.MCP.HTTP.Port
 	if port < 1 || port > 65535 {
 		fmt.Fprintf(stderr, "pfm mcp serve: configured port %d is outside 1..65535\n", port)
@@ -158,7 +158,12 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 		fmt.Fprintf(stderr, "pfm mcp serve: listen loopback %s: %v\n", address, err)
 		return 1
 	}
-	defer listener.Close()
+	listenerOwned := true
+	defer func() {
+		if listenerOwned {
+			closeCommandResource(listener, "pfm mcp serve: close listener", stderr, &exitCode)
+		}
+	}()
 
 	// Gate at construction: a server whose config is off is never built, let
 	// alone mounted, so there is no live handler for a disabled route to
@@ -170,7 +175,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 			fmt.Fprintf(stderr, "pfm mcp serve: configure chat: %v\n", err)
 			return 1
 		}
-		defer chat.Close()
+		defer func() { closeCommandResource(chat, "pfm mcp serve: close chat service", stderr, &exitCode) }()
 		options.Chat = chat.NewHTTPHandler()
 	}
 	if harvesterEnabled {
@@ -179,7 +184,9 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 			fmt.Fprintf(stderr, "pfm mcp serve: configure harvester: %v\n", err)
 			return 1
 		}
-		defer harvester.Close()
+		defer func() {
+			closeCommandResource(harvester, "pfm mcp serve: close harvester service", stderr, &exitCode)
+		}()
 		options.Harvester = harvester.NewHTTPHandler()
 	}
 	external := &atomic.Pointer[string]{}
@@ -218,6 +225,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) int {
 		stdout, "pfm mcp serve\thttp://%s\tchat=%s\tharvester=%s\tharvester_external=%s\n",
 		address, enabledState(chatEnabled), enabledState(harvesterEnabled), *external.Load(),
 	)
+	listenerOwned = false // http.Server.Serve closes its listener before returning.
 	return binwatch.Serve(server, listener, stderr)
 }
 
@@ -291,7 +299,11 @@ func probeMCPDaemon(address string) (mcpDaemonStatus, bool) {
 	if err != nil {
 		return mcpDaemonStatus{}, false
 	}
-	defer response.Body.Close()
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "pfm mcp serve: close daemon probe response: %v\n", err)
+		}
+	}()
 	if response.StatusCode != http.StatusOK {
 		return mcpDaemonStatus{}, false
 	}

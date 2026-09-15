@@ -12,6 +12,7 @@ package harvest
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -81,7 +82,7 @@ type StatBucket struct {
 // records by detail → {total, ok, rate}. Missing/empty data is a healthy empty
 // map; malformed records are counted under _corrupt, and an all-corrupt file
 // returns an error so failed enumeration never renders as absence.
-func SummarizeStats(cacheDir string, lastN int) (map[string]*StatBucket, error) {
+func SummarizeStats(cacheDir string, lastN int) (summary map[string]*StatBucket, returnErr error) {
 	path := filepath.Join(cacheDir, statsFilename)
 	file, err := os.Open(path)
 	if err != nil {
@@ -90,7 +91,11 @@ func SummarizeStats(cacheDir string, lastN int) (map[string]*StatBucket, error) 
 		}
 		return nil, fmt.Errorf("open stats file: %w", err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close stats file: %w", err))
+		}
+	}()
 	if lastN <= 0 {
 		lastN = 5000
 	}

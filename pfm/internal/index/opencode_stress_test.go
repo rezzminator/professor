@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,7 +30,11 @@ func seedOpencodeStress(t *testing.T, root string, count int) {
 	if err != nil {
 		t.Fatalf("open stress store: %v", err)
 	}
-	defer db.Close()
+	defer func() {
+		if err := db.Close(); err != nil {
+			t.Errorf("close db: %v", err)
+		}
+	}()
 	script := `
 CREATE TABLE project (id TEXT PRIMARY KEY, worktree TEXT NOT NULL);
 CREATE TABLE session (
@@ -230,7 +235,11 @@ func TestStressOpencodeMirrorConcurrentPasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	errs := make(chan error, 4)
@@ -285,17 +294,19 @@ func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
 			writerDone <- err
 			return
 		}
-		defer live.Close()
+		var writerErr error
+		defer func() {
+			writerDone <- errors.Join(writerErr, live.Close())
+		}()
 		for round := 0; round < liveWrites; round++ {
 			select {
 			case <-stop:
-				writerDone <- nil
 				return
 			default:
 			}
 			tx, err := live.Begin()
 			if err != nil {
-				writerDone <- err
+				writerErr = err
 				return
 			}
 			messageID := fmt.Sprintf("live_msg_%d", round)
@@ -309,7 +320,7 @@ func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
 				messageID, timestamp, timestamp,
 			); err != nil {
 				_ = tx.Rollback()
-				writerDone <- err
+				writerErr = err
 				return
 			}
 			if _, err := tx.Exec(
@@ -318,11 +329,11 @@ func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
 				fmt.Sprintf("live_part_%d", round), messageID, timestamp, timestamp, strings.Repeat("w", 2000),
 			); err != nil {
 				_ = tx.Rollback()
-				writerDone <- err
+				writerErr = err
 				return
 			}
 			if err := tx.Commit(); err != nil {
-				writerDone <- err
+				writerErr = err
 				return
 			}
 			// Yield the write lock: OpenCode writes in bursts between turns,
@@ -334,7 +345,6 @@ func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
 		// can finish under CPU contention, turning a concurrency probe into an
 		// ever-expanding benchmark that times out by construction.
 		<-stop
-		writerDone <- nil
 	}()
 
 	reads := 0

@@ -3,6 +3,7 @@ package codexappendix
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -30,7 +31,7 @@ type message struct {
 // replacement checkpoint when older bytes fall outside the fixed read budget.
 // Native-only replay cases (lineage, rollback, legacy compaction) are explicitly
 // unknown, rather than reimplementing a second, subtly different history engine.
-func presentInHistory(path *string, body string) (bool, bool, error) {
+func presentInHistory(path *string, body string) (present, older bool, returnErr error) {
 	if path == nil || *path == "" {
 		return false, false, fmt.Errorf("native hook supplied no local transcript")
 	}
@@ -38,7 +39,11 @@ func presentInHistory(path *string, body string) (bool, bool, error) {
 	if err != nil {
 		return false, false, fmt.Errorf("open transcript: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript: %w", err))
+		}
+	}()
 	info, err := f.Stat()
 	if err != nil {
 		return false, false, err
@@ -72,7 +77,7 @@ func presentInHistory(path *string, body string) (bool, bool, error) {
 		return false, false, fmt.Errorf("transcript exceeds the %d record budget", recordLimit)
 	}
 
-	older := false
+	older = false
 	inspect := func(m message) bool {
 		if m.Type != "message" || m.Role != "developer" {
 			return false

@@ -184,10 +184,14 @@ func TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone(t *te
 		// "everything else ... busy counters" stays a warning) — the row this
 		// case adds carries no failure.
 		if err := database.SetMeta(context.Background(), "busy_kill_warnings", "1"); err != nil {
-			database.Close()
+			if closeErr := database.Close(); closeErr != nil {
+				t.Fatalf("set busy kill warning: %v; close database: %v", err, closeErr)
+			}
 			t.Fatal(err)
 		}
-		database.Close()
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
 
 		var stdout, stderr bytes.Buffer
 		code := runDoctor(nil, &stdout, &stderr, runtime)

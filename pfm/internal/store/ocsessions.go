@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -55,16 +56,16 @@ func (s *Store) ReplaceOcSessions(ctx context.Context, sessions []OcSession) (er
 		for rows.Next() {
 			var id string
 			if err := rows.Scan(&id); err != nil {
-				rows.Close()
-				return fmt.Errorf("scan existing oc session id: %w", err)
+				return errors.Join(fmt.Errorf("scan existing oc session id: %w", err), rows.Close())
 			}
 			existing[id] = true
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
-			return fmt.Errorf("iterate existing oc sessions: %w", err)
+			return errors.Join(fmt.Errorf("iterate existing oc sessions: %w", err), rows.Close())
 		}
-		rows.Close()
+		if err := rows.Close(); err != nil {
+			return fmt.Errorf("close existing oc session rows: %w", err)
+		}
 
 		for _, session := range sessions {
 			_, err := tx.ExecContext(ctx, `
@@ -118,15 +119,19 @@ ON CONFLICT(id) DO UPDATE SET
 }
 
 // OcSessions returns every indexed OpenCode session, newest activity first.
-func (s *Store) OcSessions(ctx context.Context) ([]OcSession, error) {
+func (s *Store) OcSessions(ctx context.Context) (sessions []OcSession, returnErr error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+ocSessionColumns+` FROM oc_sessions ORDER BY time_updated_ms DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query oc sessions: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close oc session rows: %w", err))
+		}
+	}()
 
-	sessions := make([]OcSession, 0)
+	sessions = make([]OcSession, 0)
 	for rows.Next() {
 		session, err := scanOcSession(rows)
 		if err != nil {

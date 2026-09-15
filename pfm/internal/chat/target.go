@@ -105,12 +105,16 @@ func Resolve(
 }
 
 // Rows is one read-only scan of the whole fleet (the all view).
-func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) ([]compose.Row, error) {
+func Rows(ctx context.Context, warn io.Writer, runtime *pfmconfig.Runtime) (rows []compose.Row, returnErr error) {
 	database, err := store.Open(store.WithWarningWriter(warn))
 	if err != nil {
 		return nil, err
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close fleet database: %w", err))
+		}
+	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
 		View: compose.AllView, ReadOnly: true, Runtime: runtime,
 	}, warn)
@@ -192,7 +196,11 @@ func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Iden
 	if err != nil {
 		return resolve.Identity{}, false
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			fmt.Fprintf(os.Stderr, "chat identity: close fleet database: %v\n", err)
+		}
+	}()
 	scan, err := fleet.Scan(ctx, database, fleet.Request{
 		View: compose.AllView, ReadOnly: true, Runtime: runtime,
 	}, io.Discard)

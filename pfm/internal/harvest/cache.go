@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -178,8 +179,8 @@ func (c *Cache) stale(path, kind string, meta map[string]string) bool {
 	return time.Since(stamp) > c.ttl
 }
 
-func (c *Cache) save(source, kind, method, body string, rungs []string) (string, error) {
-	path := c.path(source, kind)
+func (c *Cache) save(source, kind, method, body string, rungs []string) (path string, returnErr error) {
+	path = c.path(source, kind)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return path, fmt.Errorf("create cache directory: %w", err)
 	}
@@ -199,7 +200,11 @@ func (c *Cache) save(source, kind, method, body string, rungs []string) (string,
 		return path, fmt.Errorf("create cache temp: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() {
+		if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove cache temp %s: %w", tmpName, err))
+		}
+	}()
 	if _, err := tmp.WriteString(meta + body); err != nil {
 		_ = tmp.Close()
 		return path, fmt.Errorf("write cache: %w", err)

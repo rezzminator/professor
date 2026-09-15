@@ -85,7 +85,9 @@ func TestNewDirectClientStampsTheUserAgentOnTheWire(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ua %q: Get error = %v", tc.ua, err)
 		}
-		resp.Body.Close()
+		if err := resp.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
 		if seenUA != tc.want {
 			t.Fatalf("ua %q: wire User-Agent = %q, want %q", tc.ua, seenUA, tc.want)
 		}

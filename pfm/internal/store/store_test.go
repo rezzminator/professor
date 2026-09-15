@@ -104,7 +104,11 @@ ORDER BY name`)
 	if err != nil {
 		t.Fatalf("query schema tables: %v", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("close rows: %v", err)
+		}
+	}()
 
 	var got []string
 	for rows.Next() {

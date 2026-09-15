@@ -80,7 +80,7 @@ func InspectClaudeLauncher(home string) (ClaudeLauncherStatus, error) {
 // RepairClaudeLauncher is the fast SessionStart repair path. A correct link
 // costs one lstat and readlink; a displaced native symlink is recorded before
 // it is atomically replaced.
-func RepairClaudeLauncher(home string) (bool, error) {
+func RepairClaudeLauncher(home string) (repaired bool, returnErr error) {
 	status, err := InspectClaudeLauncher(home)
 	if err != nil {
 		return false, err
@@ -124,7 +124,11 @@ func RepairClaudeLauncher(home string) (bool, error) {
 	if err := os.Remove(temporaryPath); err != nil {
 		return false, err
 	}
-	defer os.Remove(temporaryPath)
+	defer func() {
+		if err := os.Remove(temporaryPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove Claude launcher staging %s: %w", temporaryPath, err))
+		}
+	}()
 	if err := os.Symlink(managed, temporaryPath); err != nil {
 		return false, fmt.Errorf("create managed Claude launcher link: %w", err)
 	}

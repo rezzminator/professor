@@ -84,7 +84,11 @@ func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 
 	_, last, err := service.chatLast(context.Background(), nil, LastInput{Target: "MCP_HAMMER_A"})
 	if err != nil || last.Text != "live answer" || last.Target != "MCP_HAMMER_A" {

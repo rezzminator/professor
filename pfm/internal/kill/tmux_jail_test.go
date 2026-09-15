@@ -143,7 +143,11 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	id := "88888888-8888-4888-8888-888888888888"
 	projectDir := filepath.Join(jail.claudeRoot, "project")
@@ -252,7 +256,11 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	const count = 10
 	args := make([]ExitArgs, 0, count)

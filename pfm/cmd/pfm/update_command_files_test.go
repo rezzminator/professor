@@ -205,7 +205,11 @@ func TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError(t *testing.T) {
 	if err := os.Chmod(parent, 0o000); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { os.Chmod(parent, 0o700) })
+	t.Cleanup(func() {
+		if err := os.Chmod(parent, 0o700); err != nil {
+			t.Errorf("restore parent permissions: %v", err)
+		}
+	})
 	runtime.Config = pfmconfig.Config{Path: original, Exists: true}
 
 	path, note, err := updateConfigPathAfterInstall(runtime)

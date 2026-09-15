@@ -437,7 +437,11 @@ func TestKilledWriteHelperProcess(t *testing.T) {
 	}
 
 	store := openTestStore(t)
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close store: %v", err)
+		}
+	}()
 	ready := os.Getenv(helperReadyEnv)
 	gate := os.Getenv(helperGateEnv)
 	if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {

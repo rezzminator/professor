@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -93,7 +94,7 @@ func (s *Store) OrphanedKills(ctx context.Context) ([]Killed, error) {
 	return orphans, nil
 }
 
-func (s *Store) orphanedKillIDs(ctx context.Context) ([]string, error) {
+func (s *Store) orphanedKillIDs(ctx context.Context) (ids []string, returnErr error) {
 	rows, err := s.db.QueryContext(
 		ctx,
 		"SELECT h.uuid "+orphanedKilledSource+" ORDER BY h.uuid",
@@ -101,9 +102,12 @@ func (s *Store) orphanedKillIDs(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query orphaned killed chats: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close orphaned killed rows: %w", err))
+		}
+	}()
 
-	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {

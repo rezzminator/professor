@@ -68,7 +68,11 @@ func TestResolveRowTargetReturnsTheComposedRowsLiveAddress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 
 	var stderr bytes.Buffer
 	engine, rolloutPath, gotSocket, gotPane := fleet.ResolveRow(
@@ -110,7 +114,11 @@ func TestResolveRowTargetResolvesNoLiveAddressForAResumableID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	if err := database.UpsertTranscript(context.Background(), store.Transcript{
 		UUID: id, Path: transcriptPath, CWD: "/work/project", Size: 1, PromptCount: 3,
 	}); err != nil {

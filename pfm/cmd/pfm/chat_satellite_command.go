@@ -168,7 +168,7 @@ func lastLines(value string, count int) string {
 	return strings.Join(lines, "\n")
 }
 
-func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
 	if len(args) < 1 || len(args) > 2 {
 		fmt.Fprintln(stderr, "usage: pfm chat save <target-file> [transcript-jsonl]")
 		return 2
@@ -208,7 +208,12 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		fmt.Fprintf(stderr, "pfm chat save: open target: %v\n", err)
 		return 1
 	}
-	defer file.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			closeCommandResource(file, "pfm chat save: close target", stderr, &exitCode)
+		}
+	}()
 	if _, err := fmt.Fprintf(
 		file,
 		"\n---\n\n# FULL TRANSCRIPT (script-dumped, verbatim)\n\nVisible chat text only — thinking and tool outputs are not recorded here.\nSource: %s\n\n%s---\n\n# ENVIRONMENT SNAPSHOT (script-dumped)\n\n",
@@ -219,6 +224,7 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		return 1
 	}
 	writeRepositorySnapshot(file)
+	closed = true
 	if err := file.Close(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat save: close target: %v\n", err)
 		return 1
@@ -272,7 +278,7 @@ func writeRepositorySnapshot(writer io.Writer) {
 	)
 }
 
-func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
 	all := false
 	for _, arg := range args {
 		switch arg {
@@ -288,7 +294,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
 		return 1
 	}
-	defer database.Close()
+	defer func() { closeCommandResource(database, "pfm chat ls: close database", stderr, &exitCode) }()
 	request := scanRequest{View: compose.AllView, ReadOnly: true}
 	if len(runtimes) != 0 {
 		request.Runtime = &runtimes[0]
@@ -855,12 +861,16 @@ func newestHistoryMatch(pool, slug, sid string) (string, error) {
 // generously, drop the (possibly partial) first line, keep only user/
 // assistant records with non-empty rendered text, drop synthetic reminder and
 // caveat preambles, then take the last count survivors.
-func readHistoryMessages(path string, count int) ([]historyMessage, error) {
+func readHistoryMessages(path string, count int) (messages []historyMessage, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close %s: %w", path, err))
+		}
+	}()
 	content, err := io.ReadAll(file)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
@@ -869,7 +879,6 @@ func readHistoryMessages(path string, count int) ([]historyMessage, error) {
 	if len(lines) > 0 {
 		lines = lines[1:]
 	}
-	var messages []historyMessage
 	for _, line := range lines {
 		line = strings.TrimRight(line, "\r")
 		if strings.TrimSpace(line) == "" {

@@ -255,7 +255,11 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stdio handshake: %v\nstderr:\n%s", err, serverStderr.String())
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
+		}
+	}()
 
 	var toolNames []string
 	for tool, err := range session.Tools(ctx, nil) {
@@ -464,7 +468,11 @@ func TestChatKeysMCPRejectsUnknownNamesBeforeResolution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	protocol := connectInMemory(t, service.Server())
 	result, err := protocol.clientSession.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "chat_keys",
@@ -772,7 +780,11 @@ func buildFleetBinary(t *testing.T, destination string) string {
 func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	_ = callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{
 		Excerpt: "alpha unique",
@@ -826,7 +838,11 @@ func TestMCPStressSequentialCallsNoLeaks(t *testing.T) {
 func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	clients := make([]protocolClient, 8)
 	for index := range clients {
 		clients[index] = connectInMemory(t, service.Server())
@@ -897,7 +913,11 @@ func TestMCPStressConcurrentEightClientsNoCrossTalk(t *testing.T) {
 func TestMCPAdversarialUnknownAndHugeArguments(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1036,7 +1056,11 @@ func TestChatReadBudgetsAndJunkFilter(t *testing.T) {
 		},
 	})
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	output := callTool[ReadOutput](t, client.clientSession, "chat_read", ReadInput{
 		Source:   "budget",

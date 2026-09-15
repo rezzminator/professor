@@ -86,7 +86,11 @@ func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer database.Close()
+			defer func() {
+				if err := database.Close(); err != nil {
+					t.Errorf("close database: %v", err)
+				}
+			}()
 			killed, found, err := database.Killed(context.Background(), id)
 			if err != nil {
 				t.Fatal(err)
@@ -137,7 +141,11 @@ func TestClearKillHookDoubleFireIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	killed, err := database.KilledChats(context.Background())
 	if err != nil || len(killed) != 1 || killed[0].ID != id ||
 		killed[0].BaselinePrompts == nil || *killed[0].BaselinePrompts != 1 {

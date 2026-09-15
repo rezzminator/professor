@@ -201,7 +201,11 @@ func TestRolloutUpsertRepairsCollapsedIdentityPathConflict(t *testing.T) {
 func TestDefaultCandidatesAreCappedAndCountsStayHonest(t *testing.T) {
 	setStoreTestJail(t)
 	database := openTestStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 	for index := 0; index < 35; index++ {
 		if err := database.UpsertTranscript(ctx, Transcript{
@@ -313,7 +317,11 @@ func TestDefaultCandidatesAreCappedAndCountsStayHonest(t *testing.T) {
 func TestDefaultRolloutsKilledOnAnyLineageMember(t *testing.T) {
 	setStoreTestJail(t)
 	database := openTestStore(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	ctx := context.Background()
 
 	for _, rollout := range lineageFixtureRollouts() {
@@ -441,7 +449,11 @@ func hasOcSessionsAssistantCount(t *testing.T, db *sql.DB) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("close rows: %v", err)
+		}
+	}()
 	for rows.Next() {
 		var cid, notNull, pk int
 		var name, colType string

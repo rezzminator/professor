@@ -106,7 +106,11 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 	elapsed := time.Since(started)
 
 	database = jail.open(t)
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	killed, err := database.KilledChats(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -153,7 +157,11 @@ func TestKillStressProcessHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
 	manager, err := New(database, Dependencies{})
 	if err != nil {
 		t.Fatal(err)

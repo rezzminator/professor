@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -154,7 +156,11 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 			fmt.Fprintf(stderr, "pfm internal launch: close launcher status file: %v\n", err)
 			return 1
 		}
-		defer os.Remove(statusPath)
+		defer func() {
+			if err := os.Remove(statusPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				fmt.Fprintf(stderr, "pfm internal launch: remove status file %s: %v\n", statusPath, err)
+			}
+		}()
 		gateRun = launcherStatusRun(startWait, realRun, tmuxBinary, socketPath, doneChannel, statusPath)
 	}
 

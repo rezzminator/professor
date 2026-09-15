@@ -25,7 +25,11 @@ func TestChatWhoamiReportsIdentityOrStatesItsAbsence(t *testing.T) {
 	t.Setenv(resolve.ClaudeSessionEnv, "")
 	t.Setenv(resolve.CodexThreadEnv, "")
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	output := callTool[WhoamiOutput](
 		t,
@@ -85,7 +89,11 @@ func TestChatFindRanksByNeedleVotesAndExcludesSelf(t *testing.T) {
 	t.Setenv(resolve.ClaudeSessionEnv, "selfchat")
 	t.Setenv(resolve.CodexThreadEnv, "")
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 
 	excerpt := strings.Join([]string{
@@ -153,7 +161,11 @@ func TestChatFindRanksByNeedleVotesAndExcludesSelf(t *testing.T) {
 func TestChatInjectCarriesTheThenArgument(t *testing.T) {
 	setupBackendFixture(t)
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 
 	compactPrimary := callTool[InjectOutput](t, client.clientSession, "chat_inject", InjectInput{
@@ -213,7 +225,11 @@ func TestChatCaptureBoundsAreAppliedAfterTheCapture(t *testing.T) {
 	}
 	setupBackendFixture(t)
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -261,7 +277,11 @@ func TestChatFindOnTheSharedDaemonExcludesNoAmbientSelf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	output := callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{Excerpt: line})
 	if output.SelfID != "" || output.Count != 1 || output.Candidates[0].ID != "launcher" {
@@ -283,7 +303,11 @@ func TestChatFindReportsNoMatchAsAnEmptyAnswer(t *testing.T) {
 	})
 	t.Setenv(resolve.ClaudeSessionEnv, "")
 	service := newFixtureService(t)
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 	client := connectInMemory(t, service.Server())
 	output := callTool[FindOutput](
 		t,

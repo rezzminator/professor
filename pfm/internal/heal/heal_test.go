@@ -113,7 +113,11 @@ func (jail *codexJail) addThread(t *testing.T, id string, records int) []int64 {
 		t.Fatal(err)
 	}
 	state := openJailDB(t, jail.stores.State)
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	execJail(
 		t,
 		state,
@@ -173,7 +177,11 @@ func (jail *codexJail) addThreadWithRecords(t *testing.T, id string, records []j
 		t.Fatal(err)
 	}
 	state := openJailDB(t, jail.stores.State)
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	execJail(
 		t,
 		state,
@@ -205,7 +213,11 @@ func (jail *codexJail) addThreadWithLines(t *testing.T, id string, lines []strin
 		t.Fatal(err)
 	}
 	state := openJailDB(t, jail.stores.State)
-	defer state.Close()
+	defer func() {
+		if err := state.Close(); err != nil {
+			t.Errorf("close state: %v", err)
+		}
+	}()
 	execJail(
 		t,
 		state,
@@ -433,7 +445,11 @@ func TestLiveThreadsAreSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			t.Errorf("close lock: %v", err)
+		}
+	}()
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX|unix.LOCK_NB); err != nil {
 		t.Fatalf("hold the writer lock: %v", err)
 	}

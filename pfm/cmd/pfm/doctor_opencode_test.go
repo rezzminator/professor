@@ -98,7 +98,9 @@ INSERT INTO message VALUES ('message', 'session', 1, 1, 'not-json');
 INSERT INTO part VALUES ('part', 'message', 'session', 1, 1, '{"type":"text","text":"prompt"}');
 `)
 	if err != nil {
-		db.Close()
+		if closeErr := db.Close(); closeErr != nil {
+			t.Fatalf("seed malformed OpenCode store: %v; close database: %v", err, closeErr)
+		}
 		t.Fatal(err)
 	}
 	if err := db.Close(); err != nil {

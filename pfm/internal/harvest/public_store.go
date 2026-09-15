@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,7 +141,7 @@ func (h *Harvester) writePublicFile(path string, data []byte) error {
 	return h.writeAtomic(path, data, 0o600)
 }
 
-func (h *Harvester) writeAtomic(path string, data []byte, mode os.FileMode) error {
+func (h *Harvester) writeAtomic(path string, data []byte, mode os.FileMode) (returnErr error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -149,7 +150,11 @@ func (h *Harvester) writeAtomic(path string, data []byte, mode os.FileMode) erro
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer func() {
+		if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove public temp %s: %w", tmpName, err))
+		}
+	}()
 	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
 		return err
@@ -245,7 +250,7 @@ func isPrivateMetadataPath(path, root string) bool {
 	return false
 }
 
-func readBoundedFile(path string, limit int64) ([]byte, error) {
+func readBoundedFile(path string, limit int64) (data []byte, returnErr error) {
 	if limit <= 0 {
 		limit = publicReadLimit
 	}
@@ -253,7 +258,11 @@ func readBoundedFile(path string, limit int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close artifact %s: %w", path, err))
+		}
+	}()
 	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
 		if err != nil {
 			return nil, err
@@ -262,7 +271,7 @@ func readBoundedFile(path string, limit int64) ([]byte, error) {
 	} else if info.Size() > limit {
 		return nil, errors.New("artifact exceeds public size limit")
 	}
-	data, err := io.ReadAll(io.LimitReader(f, limit+1))
+	data, err = io.ReadAll(io.LimitReader(f, limit+1))
 	if err != nil {
 		return nil, err
 	}

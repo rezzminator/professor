@@ -78,7 +78,7 @@ func (s *Store) DefaultCandidates(
 func (s *Store) defaultTranscripts(
 	ctx context.Context,
 	limit int,
-) ([]Transcript, error) {
+) (transcripts []Transcript, returnErr error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT `+transcriptColumns+`
 FROM transcripts AS t
@@ -90,8 +90,12 @@ LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query cached transcript candidates: %w", err)
 	}
-	defer rows.Close()
-	transcripts := make([]Transcript, 0, limit)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close cached transcript rows: %w", err))
+		}
+	}()
+	transcripts = make([]Transcript, 0, limit)
 	for rows.Next() {
 		transcript, err := scanTranscript(rows)
 		if err != nil {
@@ -367,7 +371,7 @@ func (s *Store) Transcript(
 }
 
 // Transcripts returns all transcripts ordered by UUID.
-func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
+func (s *Store) Transcripts(ctx context.Context) (transcripts []Transcript, returnErr error) {
 	rows, err := s.db.QueryContext(
 		ctx,
 		"SELECT "+transcriptColumns+" FROM transcripts AS t ORDER BY t.uuid",
@@ -375,9 +379,12 @@ func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query transcripts: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript rows: %w", err))
+		}
+	}()
 
-	var transcripts []Transcript
 	for rows.Next() {
 		transcript, err := scanTranscript(rows)
 		if err != nil {
@@ -482,7 +489,7 @@ func (s *Store) Rollout(ctx context.Context, id string) (Rollout, bool, error) {
 }
 
 // Rollouts returns all rollouts ordered by ID.
-func (s *Store) Rollouts(ctx context.Context) ([]Rollout, error) {
+func (s *Store) Rollouts(ctx context.Context) (rollouts []Rollout, returnErr error) {
 	rows, err := s.db.QueryContext(
 		ctx,
 		"SELECT "+rolloutColumns+" FROM rollouts ORDER BY id",
@@ -490,9 +497,12 @@ func (s *Store) Rollouts(ctx context.Context) ([]Rollout, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query rollouts: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout rows: %w", err))
+		}
+	}()
 
-	var rollouts []Rollout
 	for rows.Next() {
 		rollout, err := scanRollout(rows)
 		if err != nil {
@@ -613,7 +623,7 @@ func (s *Store) CxNames(ctx context.Context) (map[string]string, error) {
 // CxNameRecords returns the full Codex name mirror, keyed by rollout ID,
 // including the provenance reconcileCodexNames needs to arbitrate a store
 // name against a session_index rename.
-func (s *Store) CxNameRecords(ctx context.Context) (map[string]CxName, error) {
+func (s *Store) CxNameRecords(ctx context.Context) (records map[string]CxName, returnErr error) {
 	rows, err := s.db.QueryContext(
 		ctx,
 		"SELECT id, thread_name, source, renamed_at FROM cx_names ORDER BY id",
@@ -621,9 +631,13 @@ func (s *Store) CxNameRecords(ctx context.Context) (map[string]CxName, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query cx name records: %w", err)
 	}
-	defer rows.Close()
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close cx name rows: %w", err))
+		}
+	}()
 
-	records := make(map[string]CxName)
+	records = make(map[string]CxName)
 	for rows.Next() {
 		var record CxName
 		if err := rows.Scan(
@@ -682,7 +696,7 @@ func (s *Store) Meta(ctx context.Context, key string) (string, bool, error) {
 // A caller that wants to audit a whole key FAMILY — the per-pane Codex
 // bindings, say — cannot do it one Meta() at a time, because the thing worth
 // auditing is what two keys say about each other.
-func (s *Store) MetaPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+func (s *Store) MetaPrefix(ctx context.Context, prefix string) (values map[string]string, returnErr error) {
 	if prefix == "" {
 		return nil, errors.New("meta prefix scan needs a prefix")
 	}
@@ -693,8 +707,12 @@ func (s *Store) MetaPrefix(ctx context.Context, prefix string) (map[string]strin
 	if err != nil {
 		return nil, fmt.Errorf("query meta prefix %q: %w", prefix, err)
 	}
-	defer rows.Close()
-	values := make(map[string]string)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close meta prefix rows %q: %w", prefix, err))
+		}
+	}()
+	values = make(map[string]string)
 	for rows.Next() {
 		var key, value string
 		if err := rows.Scan(&key, &value); err != nil {

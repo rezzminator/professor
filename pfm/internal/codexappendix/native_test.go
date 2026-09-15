@@ -59,7 +59,11 @@ func TestNativeHookDelivery(t *testing.T) {
 	write(filepath.Join(account, "hooks.json"), string(encoded))
 	requests := make(chan map[string]any, 8)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
+		defer func() {
+			if err := r.Body.Close(); err != nil {
+				t.Errorf("close r.Body: %v", err)
+			}
+		}()
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 8<<20))
 		if err != nil {
 			t.Error(err)

@@ -346,7 +346,7 @@ func (finisher *Finisher) children(
 }
 
 // readChildFile reads one flat teammate file from an older install.
-func readChildFile(path string) ([]string, error) {
+func readChildFile(path string) (values []string, returnErr error) {
 	file, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -354,8 +354,11 @@ func readChildFile(path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	var values []string
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close child file %s: %w", path, err))
+		}
+	}()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		values = append(values, scanner.Text())

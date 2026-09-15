@@ -41,7 +41,7 @@ var epicInjectWindowName = func(ctx context.Context, identity resolve.Identity) 
 	return (inject.CommandTmux{}).WindowName(ctx, identity.SocketPath, target)
 }
 
-func runEpicInject(stdin io.Reader, stdout, stderr io.Writer) int {
+func runEpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
 	var payload epicInjectPayload
 	if err := json.NewDecoder(stdin).Decode(&payload); err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: decode hook payload: %v\n", err)
@@ -99,7 +99,11 @@ func runEpicInject(stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: open state: %v\n", err)
 		return 0
 	}
-	defer database.Close()
+	defer func() {
+		if err := database.Close(); err != nil {
+			fmt.Fprintf(stderr, "pfm internal epic-inject: close state (fail-open): %v\n", err)
+		}
+	}()
 	seen, err := database.EpicInjected(ctx, sessionID, slug)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: check state: %v\n", err)

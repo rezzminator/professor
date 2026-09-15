@@ -151,7 +151,11 @@ func TestChatMCPDispatchesStatefulActionsInProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
 
 	if _, _, err := service.chatName(context.Background(), nil, NameInput{
 		Target: "target", Name: "new name",

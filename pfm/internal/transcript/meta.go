@@ -3,6 +3,8 @@ package transcript
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -66,12 +68,12 @@ type metaRecord struct {
 }
 
 // ReadMeta scans the tail of a transcript for the run's own facts.
-func ReadMeta(path, engine string) (Meta, error) {
+func ReadMeta(path, engine string) (meta Meta, returnErr error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return Meta{}, err
 	}
-	meta := Meta{
+	meta = Meta{
 		SizeBytes:      info.Size(),
 		ModifiedUnixNS: info.ModTime().UnixNano(),
 	}
@@ -79,7 +81,11 @@ func ReadMeta(path, engine string) (Meta, error) {
 	if err != nil {
 		return meta, err
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %s: %w", path, err))
+		}
+	}()
 
 	offset := int64(0)
 	if info.Size() > metaWindow {

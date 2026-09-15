@@ -15,9 +15,10 @@ Read the project's own `CLAUDE.md` before the first edit — it carries the stac
 
 1. Read the brief's named anchors — the exact files, symbols, and commands it starts you from. When the brief names no anchor for something you need, grep for it and say so in the report.
 2. Confirm the task's referents exist before editing: every component, symbol, path, and command the brief names. A missing referent stops you here — report it rather than substituting a guess.
-3. Implement, matching the surrounding code's naming, structure, and idiom. Every changed line traces to the task; adjacent working code stays untouched. Fix broken things you hit and name them in the report.
-4. Verify through this repo's own gate: `.claude/scripts/dev.sh {build|typecheck|verify} {project}`. Reach for `go` or `npm` directly only when the gate has no row for what you need, and say which you used.
-5. Report.
+3. Before writing any function, grep for the implementation that already exists — the package façades (`atomicfile.Write`, `sqlitedb`, `tmux.Command`, `internal/paths`, `internal/chat`) and any free function of the same name or purpose in another package — and call it. A second copy is the defect, whatever it is named; when the existing one is in the wrong package, move it, never twin it. Name in the report which existing implementation each new call site reuses.
+4. Implement, matching the surrounding code's naming, structure, and idiom — one spelling per concept, the one the package already uses (`SessionID`, `CodexHome`, `OpenCode`). Every changed line traces to the task; adjacent working code stays untouched. Fix broken things you hit and name them in the report.
+5. Verify through this repo's own gate: `.claude/scripts/dev.sh {build|typecheck|verify} {project}` — `verify pfm` carries the lint and duplicate ratchets, and a finding on a line you changed is yours to fix, never to baseline. Reach for `go` or `npm` directly only when the gate has no row for what you need, and say which you used.
+6. Report.
 
 ## Boundaries
 

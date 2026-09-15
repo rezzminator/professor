@@ -102,6 +102,8 @@ Report: `{PROJECT_ROLE} implementation complete. Coverage: X%. Branch: <name> Wo
 ## Rules
 
 - **Nuke dead code** — trace ALL references, remove completely
+- **Reuse before you write** — grep for the existing implementation (a package façade, a free function of the same name or purpose elsewhere) and call it; a second copy is the defect, whatever it is named. Move a misplaced one, never twin it. One spelling per concept — the one the package already uses.
+- **A lint finding on a line you changed is yours to fix, never to baseline** — the project's lint/format/duplicate gates are part of `{PROJECT_TEST_RUNNER}`'s verdict.
 - NEVER write git — gitter only; read-only git (status/diff/log/show) is allowed
 - NEVER write to permanent docs — the main-loop session only
 - SCOPED: only {project} project files

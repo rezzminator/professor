@@ -32,7 +32,11 @@ Read the project's own `CLAUDE.md` before writing a test — it carries the suit
 - Tests only. When a test exposes a product defect, report it — the dev agent fixes it.
 - Git is gitter's alone. Read-only git is open to you.
 - `.claude/**` and every `CLAUDE.md` are guarded and route through `$pcm`.
-- A test never touches live state: in `pfm`, every test sets `TMUX_TMPDIR` to a temp dir and no test may reach a live `cc-*` / `cx-*` socket or the real `/tmp/cc-sid`.
+- A test never touches live state: in `pfm`, every test pins every process-inherited path it could reach — `TMUX_TMPDIR`, `HOME`, `CLAUDE_CONFIG_DIR`, every `PFM_*` knob — to a temp dir (`internal/testjail` is the one jail; a hand-rolled `os.MkdirTemp("/tmp", …)` is a second copy), and no test may reach a live `cc-*` / `cx-*` socket or the real `/tmp/cc-sid`.
+- A test pins a behavior that exists, never the absence of one that was removed: a deletion is proven by the build (the symbol is gone) and by the tests of what replaced it, not by a `NotContains` on the retired name.
+- A test's expectation is a literal or a fixture, never a value computed by the code under test; a test that passes with the function body emptied pins nothing.
+- A precondition the run cannot meet (no tmux, root, a missing toolchain) is `t.Skip` with the reason — a bare `return` reports PASS for a test that ran nothing.
+- "Watched failing" means a runtime assertion failed against the unfixed code; a compile error after a signature change proves the signature changed, not the behavior.
 
 ## Report format
 

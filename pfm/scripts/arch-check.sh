@@ -123,13 +123,13 @@ if g "$T/raw" "$T/notmux.list" -lE 'deps\.Executable\("tmux"\)|\[\]string\{"-S",
 else say C5-tmux-runner ERROR "grep could not read sources"; fi
 
 # C6 one atomic writer: outside internal/atomicfile/, a file naming an atomic-write
-# helper or hand-rolling the scratch-file-plus-rename pattern (os.CreateTemp + os.Rename).
+# helper or opening a scratch file itself (os.CreateTemp). The rename is NOT
+# required: a scratch file that never reaches os.Rename is still a hand-rolled
+# writer (headless/run had three such copies the old both-patterns rule missed).
 grep -v '^internal/atomicfile/' "$T/src.list" > "$T/noatomic.list"
 if g "$T/c6" "$T/noatomic.list" -lE '^func (writeAtomic|WriteAtomic|atomicWrite|AtomicWrite|writeFileAtomic|WriteFileAtomic)\(' &&
    g "$T/temps" "$T/noatomic.list" -l 'os\.CreateTemp('; then
-  if [ ! -s "$T/temps" ] || g "$T/renames" "$T/temps" -l 'os\.Rename('; then
-    [ -s "$T/temps" ] && cat "$T/renames" >> "$T/c6"; ratchet C6-atomic-write atomic-writers "$T/c6"
-  else say C6-atomic-write ERROR "grep could not read the scratch-file writers"; fi
+  cat "$T/temps" >> "$T/c6"; ratchet C6-atomic-write atomic-writers "$T/c6"
 else say C6-atomic-write ERROR "grep could not read sources"; fi
 
 # C7 one SQLite opener: sql.Open outside internal/sqlitedb/.
@@ -215,5 +215,39 @@ if g "$T/decl" "$T/src.list" -ohE '\b[A-Za-z_][A-Za-z0-9_]*[[:space:]]*(string[[
   if g "$T/raw" "$T/nopaths.list" -nE "$envread"; then count_by_file "$T/raw" > "$T/c16"; ratchet_counts C16-env-outside-paths env-outside-paths "$T/c16"
   else say C16-env-outside-paths ERROR "grep could not read sources"; fi
 else say C16-env-outside-paths ERROR "grep could not read the PFM_* name declarations"; fi
+
+# C17 one free function per name: the same unexported free-function name in two
+# files is a twin waiting to diverge (clipRunes x5, isLive/IsLive with opposite
+# answers). Case-folded so IsLive and isLive collide. Methods are excluded (a
+# String() per type is the language), as are _linux/_darwin pairs, which define
+# one identifier twice BY DESIGN (pfm/CLAUDE.md § one binary, two kernels).
+grep -vE '_(linux|darwin)\.go$' "$T/src.list" > "$T/nokernel.list"
+if g "$T/raw" "$T/nokernel.list" -nE '^func [A-Za-z_][A-Za-z0-9_]*\('; then
+  awk -F: '{ match($3, /^func [A-Za-z_][A-Za-z0-9_]*/); n=tolower(substr($3, 6, RLENGTH-5)); if (n!="main" && n!="init") print n" "$1 }' "$T/raw" \
+    | sort -u | awk '{files[$1]=files[$1]" "$2; c[$1]++} END {for (n in c) if (c[n]>1) print n":"files[n]}' | sort > "$T/c17"
+  ratchet C17-dup-functions dup-functions "$T/c17"
+else say C17-dup-functions ERROR "grep could not read function declarations"; fi
+
+# C18 one spelling per engine: OpenCode is the brand; Opencode / Oc* / oc* are
+# drift, and GPT is an undeclared synonym for Codex. Count per file, only shrinks.
+if g "$T/raw" "$T/all.list" -nE 'Opencode|\b[oO]c[A-Z][A-Za-z]+|GPT'; then count_by_file "$T/raw" > "$T/c18"; ratchet_counts C18-engine-spellings engine-spellings "$T/c18"
+else say C18-engine-spellings ERROR "grep could not read sources"; fi
+
+# C19 one environment namespace: CHAT_*, CC_*, DREAM_* reads are pfm's own
+# variables under a foreign prefix — a `grep PFM_` never finds them.
+if g "$T/raw" "$T/src.list" -nE '(Getenv|LookupEnv)\("(CHAT|CC|DREAM)_'; then count_by_file "$T/raw" > "$T/c19"; ratchet_counts C19-env-namespace env-namespace "$T/c19"
+else say C19-env-namespace ERROR "grep could not read sources"; fi
+
+# C20 one name for ~/.codex: CodexHome. codexRoot / CodexRoot / AccountHome
+# name the same directory in 43 files a `grep CodexHome` misses.
+if g "$T/raw" "$T/src.list" -nE '\b[cC]odexRoot\b|\bAccountHome\b'; then count_by_file "$T/raw" > "$T/c20"; ratchet_counts C20-codex-home codex-home "$T/c20"
+else say C20-codex-home ERROR "grep could not read sources"; fi
+
+# C21 one test jail: a test that hand-rolls its scratch root with
+# os.MkdirTemp("/tmp", ...) instead of testjail.ShortRoot has its own copy of
+# the jail, and the six copies already disagree on the DB path.
+grep -v '^internal/testjail/' "$T/test.list" > "$T/nojail.list"
+if g "$T/raw" "$T/nojail.list" -n 'os\.MkdirTemp("/tmp"'; then count_by_file "$T/raw" > "$T/c21"; ratchet_counts C21-test-jail test-jail-copies "$T/c21"
+else say C21-test-jail ERROR "grep could not read tests"; fi
 
 exit $rc

@@ -1,0 +1,90 @@
+# golangci-lint v2 — pfm's lint + format law. Installed at the version in
+# infra/tools.env; `make lint` checks, `make fmt` rewrites. The GATE runs
+# `make lint-new` (findings on lines changed since origin/develop only) so the
+# existing backlog never blocks a wave; `make lint` is the full burn-down view.
+version: "2"
+
+run:
+  timeout: 10m
+  tests: true
+  build-tags: [e2e]
+
+linters:
+  default: none
+  enable:
+    - errcheck      # every error handled — a swallowed error is a missing chat row
+    - govet
+    - staticcheck   # SA* bugs + ST* style (ST1003: sessionId → sessionID)
+    - unused
+    - ineffassign
+    - unconvert
+    - unparam
+    - misspell
+    - nolintlint    # every //nolint carries a linter name and a reason
+    - revive
+    - gocritic
+    - goconst       # a string spelled three times is a constant nobody named
+    - dupl          # AST-shape clone detection — survives renamed variables
+  settings:
+    errcheck:
+      # Writes to a terminal stream: 1,091 of the first measurement's 1,391
+      # errcheck findings, and a failed stderr write has no recovery path.
+      # Every other unchecked error (Close, Remove, Setenv, Flock) stays.
+      exclude-functions:
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - fmt.Fprint
+    dupl:
+      threshold: 100
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+      ignore-string-values: ['^(\s|%[sdvq]|\\n)*$']
+    gocritic:
+      enabled-tags: [diagnostic, style, performance]
+      disabled-checks:
+        - hugeParam        # value receivers are the package idiom; flagged noise
+        - unnamedResult
+        - whyNoLint        # nolintlint owns this
+    revive:
+      rules:
+        - name: confusing-naming     # isLive vs IsLive in one package
+        - name: receiver-naming
+        - name: var-naming
+        - name: import-shadowing
+        - name: unused-parameter
+        - name: redefines-builtin-id
+        - name: error-strings
+        - name: error-return
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: superfluous-else
+    staticcheck:
+      checks: ["all", "-ST1000", "-ST1020", "-ST1021", "-ST1022"]  # package/exported doc comments stay opt-in
+  exclusions:
+    generated: lax
+    rules:
+      # Test files legitimately repeat fixture shapes; dupl there hides real
+      # scaffolding twins behind noise the C6-style ratchets catch better.
+      - path: _test\.go$
+        linters: [dupl, goconst, unparam]
+
+formatters:
+  enable: [gofumpt, gci, golines]
+  settings:
+    gofumpt:
+      module-path: hostops/pfm
+      extra:
+        group-params: true
+    gci:
+      sections: [standard, default, prefix(hostops/pfm)]
+    golines:
+      max-len: 120
+      tab-len: 4
+      reformat-tags: true
+      shorten-comments: false
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

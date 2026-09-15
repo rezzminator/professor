@@ -1,0 +1,17 @@
+# go-test-coverage (version: infra/tools.env). Thresholds are a RATCHET like
+# .arch/: measured, then raised as waves land, never lowered. The gate reads
+# the merged profile `make cover` writes (unit + e2e binary runs).
+profile: tmp/cover/merged.out
+local-prefix: hostops/pfm
+threshold:
+  # Placeholders until the first fenced measurement; `make cover` prints the
+  # real numbers and the wave that lands this file pins them.
+  file: 0
+  package: 0
+  total: 0
+exclude:
+  paths:
+    - ^internal/installer/assets/   # staged shell/JS/Python, not Go
+    - ^internal/harvestpy/          # pinned Python sidecar
+    - _test\.go$
+breakdown-file-name: tmp/cover/breakdown.json

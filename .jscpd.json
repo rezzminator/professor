@@ -1,0 +1,31 @@
+{
+  "//": "Clone detection for what dupl cannot see: the shell/JS/Python staged under pfm/internal/installer/assets, this repo's scripts, and the shipped template scripts. --ignore-identifiers so a renamed-variable copy still counts. Version: infra/tools.env (JSCPD_VERSION).",
+  "minTokens": 50,
+  "minLines": 8,
+  "ignoreIdentifiers": true,
+  "mode": "strict",
+  "format": [
+    "bash",
+    "javascript",
+    "python",
+    "typescript"
+  ],
+  "path": [
+    "pfm/internal/installer/assets",
+    "pfm/scripts",
+    "scripts",
+    "infra",
+    ".claude/scripts",
+    "templates/project/scripts",
+    "templates/global"
+  ],
+  "ignore": [
+    "**/node_modules/**",
+    "**/tmp/**",
+    "**/*.md"
+  ],
+  "reporters": [
+    "console"
+  ],
+  "gitignore": true
+}

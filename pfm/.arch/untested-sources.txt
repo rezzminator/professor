@@ -127,9 +127,7 @@ internal/installer/scheduler_darwin.go
 internal/installer/scheduler_other.go
 internal/installer/settings.go
 internal/installer/settings_ownership.go
-internal/installer/themes.go
 internal/installer/types.go
-internal/installer/update_metadata.go
 internal/kill/doc.go
 internal/kill/finisher.go
 internal/kill/lineage.go
@@ -142,7 +140,6 @@ internal/mcpserv/read.go
 internal/mcpserv/search.go
 internal/mcpserv/stdio.go
 internal/mcpserv/types.go
-internal/mcpserv/workflows.go
 internal/naming/doc.go
 internal/reap/busy.go
 internal/reap/runner.go

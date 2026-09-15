@@ -105,6 +105,8 @@ jobs:
     steps:
       - name: Check out the repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -112,17 +114,18 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
-      - name: gofmt (must report nothing)
-        shell: bash
-        run: |
-          set -euo pipefail
-          unformatted="$(gofmt -l pfm)"
-          if [[ -n "$unformatted" ]]; then
-            echo "$unformatted"
-            echo "gofmt: FAILED — run gofmt -w on the files above" >&2
-            exit 1
-          fi
-          echo "gofmt: clean"
+      # The pinned tools (infra/tools.env) — the same versions the fence image
+      # carries, so this job and `dev.sh iso verify pfm` give one verdict.
+      - name: pinned tools (golangci-lint, go-test-coverage)
+        run: make -C pfm tools
+
+      - name: fmt-check (gofumpt + gci + golines, must report nothing)
+        run: make -C pfm fmt-check
+
+      # Judged against origin/main: a release may not add a lint finding on
+      # any line it changed. Needs the full history (fetch-depth: 0 above).
+      - name: lint-new (golangci-lint, lines changed since main)
+        run: git fetch --no-tags origin main:refs/remotes/origin/main && make -C pfm lint-new LINT_BASE=origin/main
 
       - name: go vet
         run: |

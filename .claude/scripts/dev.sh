@@ -135,8 +135,12 @@ cmd_status() { # cmd_status [project|all]
 act_templates() { # the shipped product: mechanical gates, no build
   local action="$1"
   case "$action" in
-    install|build|typecheck) info "templates: no $action step (markdown + shell)" ;;
+    install|build|typecheck|cover) info "templates: no $action step (markdown + shell)" ;;
     verify|test|all)
+      # Clone ratchet over the shell / JS / Python surface (scripts/clone-check.sh,
+      # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
+      # broken state is `CLONES ERROR` and rc 2, never a PASS.
+      run "templates: clone ratchet (jscpd)" -- bash "$REPO_ROOT/scripts/clone-check.sh"
       head_ "templates — leak gate"
       # EVERY tracked file in this repo is published, so the changed set is the
       # whole working tree — not a `templates scripts README INSTALL CHANGELOG
@@ -275,28 +279,24 @@ act_templates() { # the shipped product: mechanical gates, no build
   esac
 }
 
-gofmt_clean() { # gofmt_clean <dir> — 1 when gofmt lists a file, 2 when gofmt could not run
-  local out
-  out="$(gofmt -l "$1")" || { echo "gofmt could not run over $1 — NO file was checked" >&2; return 2; }
-  [[ -z "$out" ]] && return 0
-  printf 'unformatted (run gofmt -w under the pinned Go):\n%s\n' "$out" >&2
-  return 1
-}
-
 act_pfm() {
   local action="$1" d; d="$(proj_dir pfm)"
   need_tool go pfm || return 0
+  # fmt-check, lint-new and cover run through pfm/Makefile.
+  need_tool make pfm || return 0
   case "$action" in
     install) run "pfm: go mod download" -- go -C "$d" mod download ;;
     build)   run "pfm: go build" -- go -C "$d" build ./... ;;
     typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
     verify)
       run "pfm: go vet" -- go -C "$d" vet ./...
-      # CI's gofmt step, under the same pinned Go: gofmt output differs across
-      # Go releases, so a host gofmt newer than go.mod's can call this clean
-      # while CI refuses it — run through `iso` for the verdict CI will give.
-      run "pfm: gofmt" -- gofmt_clean "$d"
-      # The architecture ratchet (C1–C16 vs pfm/.arch/). Its own broken state
+      # Formatting and lint through the pinned golangci-lint (infra/tools.env):
+      # the Makefile names TOOLCHAIN-MISSING when the tool is absent — `make
+      # tools` on the host; the fence image bakes it in. lint-new judges only
+      # lines changed since origin/develop; `make lint` is the full backlog.
+      run "pfm: fmt-check (gofumpt + gci + golines)" -- make -C "$d" --no-print-directory fmt-check
+      run "pfm: lint-new (golangci-lint, changed lines)" -- make -C "$d" --no-print-directory lint-new
+      # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
       # is rc 2 (an enumerator or grep that could not run), never a PASS.
       run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh" ;;
     # -count=1 is not optional: without it a package whose inputs are unchanged
@@ -305,6 +305,11 @@ act_pfm() {
     # stress test alone takes ~4.5 minutes (268s watched), so the 10m default
     # turns an ordinary loaded host into a red suite that names the wrong cause.
     test)    run "pfm: go test" -- go -C "$d" test ./... -count=1 -timeout 25m ;;
+    # Cross-package unit coverage merged with any e2e GOCOVERDIR run, thresholded
+    # by pfm/.testcoverage.yml (a ratchet: measured, raised, never lowered).
+    # COVER_DIR is where the profiles land — the fence sets it to container HOME
+    # because the worktree mount is read-only.
+    cover)   run "pfm: coverage (go-test-coverage)" -- make -C "$d" --no-print-directory cover ;;
     all)     act_pfm build; act_pfm verify; act_pfm test ;;
   esac
 }
@@ -361,16 +366,18 @@ cmd_iso() { # cmd_iso <action> [project]
   local terms="${LEAK_TERMS:-$(dirname "$git_common")/scripts/leak-terms.txt}"
   local extra=()
   [[ -f "$terms" ]] && extra=(-v "$terms:/pfm-leak-terms.txt:ro" -e LEAK_TERMS=/pfm-leak-terms.txt)
+  # The worktree mount is read-only; coverage profiles land in container HOME.
+  extra+=(-e COVER_DIR=/root/cover)
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
   case "$action" in
     shell)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev zsh -c "$proof; exec zsh -i" ;;
     e2e)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
-    install|build|typecheck|verify|test|all|status)
+    install|build|typecheck|verify|test|cover|all|status)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
     *)
-      echo "usage: dev.sh iso {install|build|typecheck|verify|test|all|status|e2e|shell} [project]" >&2; exit 2 ;;
+      echo "usage: dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project]" >&2; exit 2 ;;
   esac
 }
 
@@ -384,8 +391,10 @@ commands:
   install                fetch dependencies
   build                  compile
   typecheck              vet / tsc --noEmit
-  verify                 pre-test gates (go vet + pfm's architecture ratchet, templates's leak + token gates)
+  verify                 pre-test gates (pfm: go vet, fmt-check, lint-new, architecture ratchet;
+                         templates: clone ratchet, leak + token gates)
   test                   run the test suite
+  cover                  pfm coverage: unit + e2e profiles merged, thresholded (.testcoverage.yml)
   all                    verify + build + test for the project
   iso <cmd> [project]    run any command above — plus e2e | shell — inside the
                          pfm-dev container fence (infra/), worktree mounted
@@ -404,7 +413,7 @@ SWEEP_ALL=0
 
 case "$CMD" in
   status) cmd_status "$TARGET" ;;
-  install|build|test|typecheck|verify|all)
+  install|build|test|typecheck|verify|cover|all)
     if [[ "$TARGET" == "all" ]]; then
       SWEEP_ALL=1
       for p in "${PROJECTS[@]}"; do head_ "$p :: $CMD"; dispatch "$p" "$CMD"; done

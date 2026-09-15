@@ -31,6 +31,16 @@ services:
       GOFLAGS: "-buildvcs=false"
       PFM_DEV_REPO_GIT_DIR: /pfm-git-common/${PFM_DEV_GIT_DIR_REL:?set by dev.sh iso — relative active gitdir}
       PFM_DEV_REPO_WORK_TREE: /worktree
+      # The same two paths as git's own environment, so every tool that shells
+      # out to plain `git` (golangci-lint's --new-from-merge-base, jscpd's
+      # --baseline-from-ref) resolves the linked worktree instead of the host
+      # path its .git file names. root-vs-host-uid ownership is dubious to git;
+      # the mount is read-only, so trusting it costs nothing.
+      GIT_DIR: /pfm-git-common/${PFM_DEV_GIT_DIR_REL}
+      GIT_WORK_TREE: /worktree
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
 
 volumes:
   pfm-dev-gocache:

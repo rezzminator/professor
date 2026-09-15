@@ -478,3 +478,7 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
 - Local (2026-09-15): `.claude/agents/{tracer,scheduler}.md` and `.claude/commands/{quality,wave}/*.md` are rewired
   local variants of their machine-global originals (this repo's anchors: `templates/**` in trace scope, placeholder
   hops, the dev/qa/gitter cast) — kept as files, not symlinks; root `CLAUDE.md` § Repo structure names the exception.
+- Local (2026-09-15): `.claude/scripts/dev.sh` gate wiring for this repo's own Go engine — `verify pfm` runs `make fmt-check`
+  + `make lint-new` (pinned golangci-lint, `infra/tools.env`) before the C1–C21 ratchet, a `cover` action runs
+  `make cover` (the fence exports `COVER_DIR=/root/cover`), and `verify templates` runs `scripts/clone-check.sh`
+  (jscpd). The adopter twin `templates/project/scripts/dev.sh` carries no pfm project, so none of it ships.

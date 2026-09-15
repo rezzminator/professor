@@ -183,6 +183,13 @@ Each derived artifact names its source and the command that regenerates or verif
 | C14 | every dispatched top-level command appears in usage (structural once `command_table.go` lands) | `FAIL dispatched but not in usage: <cmd>` |
 | C15 | every `pfm internal` entry appears in its usage (structural once `hooks.Table` lands) | `FAIL N dispatched, missing from usage: <entries>` |
 | C16 | no `PFM_*` env read outside `internal/paths` beyond baseline — a literal `Getenv("PFM_…")` or one through a constant holding a `PFM_*` name | `FAIL <file> (new N)` |
+| C17 | one free function per name across files, case-folded — `clipRunes` ×5, `isLive`/`IsLive` with opposite answers; methods and `_linux`/`_darwin` twins excluded | `FAIL <name>: <files>` |
+| C18 | one spelling per engine — `Opencode`, `Oc*`/`oc*`, and `GPT`-for-Codex counted per file, only shrinks | `FAIL <file> (new N)` |
+| C19 | one env namespace — `CHAT_*`, `CC_*`, `DREAM_*` reads counted per file; a `grep PFM_` must find every knob | `FAIL <file> (new N)` |
+| C20 | one name for `~/.codex` — `codexRoot`/`CodexRoot`/`AccountHome` counted per file; `CodexHome` is canonical | `FAIL <file> (new N)` |
+| C21 | one test jail — `os.MkdirTemp("/tmp", …)` in tests outside `internal/testjail` counted per file; `testjail.ShortRoot` is the jail | `FAIL <file> (new N)` |
+
+C6 was widened in the same pass: any `os.CreateTemp` outside `internal/atomicfile` is a hand-rolled writer, rename or not — the both-patterns rule had hidden three scratch-file copies in `headless/run`. Beyond the ratchet, `pfm/.golangci.yml` (dupl, goconst, gocritic, revive, staticcheck; gofumpt + gci + golines formatting) is the lint law and `scripts/clone-check.sh` (jscpd) ratchets the shell/JS/Python assets the Go tools cannot see.
 
 The body below is the exact script that produced § Metrics. § Migration step 1 commits it as `pfm/scripts/arch-check.sh` together with its `--measure` baselines. It needs bash, git and POSIX tools, and no Go toolchain.
 

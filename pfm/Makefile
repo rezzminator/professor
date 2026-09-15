@@ -35,8 +35,23 @@ AGENT   := com.professor.pfm.mcp
 # F6). $(REPO)/VERSION, not a bare "VERSION" — this file runs from pfm/.
 VERSION := $(shell cat $(REPO)/VERSION 2>/dev/null)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
+# Pinned tools (infra/tools.env): the host keeps them in TOOLS_BIN (gitignored
+# tmp/), the fence image in /usr/local/bin. A tool missing from both is
+# TOOLCHAIN-MISSING, never "use whatever golangci-lint is on PATH".
+# Keyed by OS/arch: the fence mounts this tree read-only from a darwin host,
+# so a linux container must never pick the host's binary — it finds nothing
+# under its own key and falls through to PATH (/usr/local/bin in the image).
+TOOLS_BIN ?= $(REPO)/tmp/tools/$(shell go env GOOS)-$(shell go env GOARCH)/bin
+LINT  := $(firstword $(wildcard $(TOOLS_BIN)/golangci-lint) $(shell command -v golangci-lint 2>/dev/null))
+COVER := $(firstword $(wildcard $(TOOLS_BIN)/go-test-coverage) $(shell command -v go-test-coverage 2>/dev/null))
+# Coverage outputs: the fence mounts the tree read-only, so dev.sh iso points
+# COVER_DIR at container HOME; on the host it lands in gitignored tmp/.
+COVER_DIR ?= $(REPO)/tmp/cover
+# lint-new judges lines changed since this ref: a wave against develop; CI
+# passes origin/main so a release is judged on everything since the last one.
+LINT_BASE ?= origin/develop
 
-.PHONY: help build fmt fmt-check vet arch test iso gate install host-install rollback \
+.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover test iso gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
@@ -53,18 +68,52 @@ help: ## List every target
 build: ## Compile to ./pfm.dev (a local artifact, never the shipped path)
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
 
-fmt: ## Rewrite formatting in place
-	gofmt -w .
+tools: ## Install the pinned tools from infra/tools.env into TOOLS_BIN
+	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/tools.sh
+
+# need-tool <var>: name the missing tool as TOOLCHAIN-MISSING instead of a bare
+# "command not found" three lines into a recipe.
+define need-tool
+	@test -x "$($(1))" || { echo "$(1): TOOLCHAIN-MISSING — run 'make tools' (infra/tools.env)" >&2; exit 1; }
+endef
+
+fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt)
+	$(call need-tool,LINT)
+	$(LINT) fmt ./...
 
 fmt-check: ## Fail if anything is unformatted, naming the files
-	@unformatted="$$(gofmt -l . | grep -v '^$$' || true)"; \
-	if [ -n "$$unformatted" ]; then \
-	  echo "UNFORMATTED:"; echo "$$unformatted"; exit 1; \
+	$(call need-tool,LINT)
+	@diff="$$($(LINT) fmt --diff ./... 2>&1 || true)"; \
+	files="$$(echo "$$diff" | grep '^diff ' | awk '{print $$NF}' | sed 's|^b/||')"; \
+	if [ -n "$$files" ]; then \
+	  echo "UNFORMATTED — $$(echo "$$files" | wc -l | tr -d ' ') file(s), run 'make fmt' (first 20):"; \
+	  echo "$$files" | head -20; exit 1; \
+	elif [ -n "$$diff" ]; then \
+	  echo "fmt-check: golangci-lint fmt did not run cleanly — NO file was checked:"; echo "$$diff" | tail -5; exit 2; \
 	fi; \
-	echo "gofmt: clean"
+	echo "fmt: clean"
+
+lint: ## Every finding in the module — the burn-down view
+	$(call need-tool,LINT)
+	$(LINT) run ./...
+
+lint-new: ## Findings on lines changed since LINT_BASE (origin/develop) — the gate view
+	$(call need-tool,LINT)
+	$(LINT) run --new-from-merge-base=$(LINT_BASE) ./...
 
 vet: ## go vet the whole module
 	go vet ./...
+
+cover: ## Unit coverage (cross-package) + any e2e GOCOVERDIR run, merged and thresholded
+	$(call need-tool,COVER)
+	rm -rf "$(COVER_DIR)/unit" && mkdir -p "$(COVER_DIR)/unit"
+	go test ./... -count=1 -coverpkg=./... -covermode=atomic -args -test.gocoverdir="$(COVER_DIR)/unit"
+	@dirs="$(COVER_DIR)/unit"; \
+	if ls "$(COVER_DIR)/e2e"/covmeta.* >/dev/null 2>&1; then dirs="$$dirs,$(COVER_DIR)/e2e"; fi; \
+	echo "cover: merging $$dirs"; \
+	go tool covdata textfmt -i="$$dirs" -o "$(COVER_DIR)/merged.out"
+	$(COVER) --config=.testcoverage.yml --profile="$(COVER_DIR)/merged.out" \
+	  --breakdown-file-name="$(COVER_DIR)/breakdown.json"
 
 arch: ## Architecture ratchet: size ceilings, one façade per mechanism, no new twins (baselines in .arch/)
 	bash scripts/arch-check.sh
@@ -78,7 +127,7 @@ test: ## Host test suite (delegates to dev.sh)
 iso: ## Containerised test suite (delegates to dev.sh iso)
 	bash $(DEV) iso test pfm
 
-gate: fmt-check vet arch test iso ## Everything a change must pass before it merges
+gate: fmt-check lint-new vet arch test iso ## Everything a change must pass before it merges
 	@echo "gate: all passed"
 
 # -------------------------------------------------------------- install ----

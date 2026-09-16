@@ -1039,7 +1039,8 @@ func gptRequestCount(runtime Runtime, now time.Time) (int, bool) {
 		if err == nil {
 			defer func() {
 				if err := file.Close(); err != nil {
-					fmt.Fprintf(os.Stderr, "statusline: close GPT proxy log %s: %v\n", logPath, err)
+					fmt.Fprintf(os.Stderr, "statusline: close %s proxy log %s: %v\n",
+						pfmengine.MustLookup(pfmengine.Codex).Short, logPath, err)
 				}
 			}()
 			today := now.UTC().Format("2006-01-02")

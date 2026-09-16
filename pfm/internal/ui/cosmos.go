@@ -43,14 +43,11 @@ type cosmosFrame struct {
 	hidden map[string]bool
 }
 
-// cosmosMoonOrbit is the one source of a moon ring's radius: the shared
-// orbit widens with the brood.
+// cosmosMoonOrbit is the shared moon ring radius, widened with the brood.
 func cosmosMoonOrbit(count int) float64 { return 5 + 2.5*float64(count) }
 
-// cosmosRingCap is how many planets share one ring before a system splits
-// into several: the most recently active chats take the inner track, the
-// quiet ones the outer, so a crowded project reads as a system with depth
-// instead of a ring of overlapping labels.
+// cosmosRingCap is how many planets share a ring before a system splits;
+// recent chats take inner tracks and quiet ones take outer tracks.
 const cosmosRingCap = 6
 
 // cosmosRingFactor is ring r's radius as a fraction of the system's outer
@@ -295,7 +292,7 @@ func (model *Model) mergeCosmosSeats() {
 			})
 			rings := (len(planets) + cosmosRingCap - 1) / cosmosRingCap
 			for ring := 0; ring < rings; ring++ {
-				start, end := ring*cosmosRingCap, minInt(len(planets), (ring+1)*cosmosRingCap)
+				start, end := ring*cosmosRingCap, min(len(planets), (ring+1)*cosmosRingCap)
 				offset := -math.Pi/2 + math.Pi*float64(ring)/float64(maxInt(1, rings))
 				assign(planets[start:end], offset, cosmosRingFactor(ring, rings))
 			}
@@ -1105,7 +1102,7 @@ func drawCosmosSun(
 
 	// Corona: dots multiply and widen with the family.
 	coronaRadius := 2.4 + math.Min(2.6, 0.25*float64(population))
-	coronaDots := minInt(14, 6+population)
+	coronaDots := min(14, 6+population)
 	for index := 0; index < coronaDots; index++ {
 		angle := clock*0.5 + phase + 2*math.Pi*float64(index)/float64(coronaDots)
 		shimmer := 0.30 + 0.25*heat + 0.20*math.Sin(clock*2.1+phase+float64(index))
@@ -1119,7 +1116,7 @@ func drawCosmosSun(
 	// Diffraction spikes from three planets up: four arms of light that
 	// twinkle independently, longer on hotter stars.
 	if population >= 3 {
-		armLength := 2 + minInt(4, population-2)
+		armLength := 2 + min(4, population-2)
 		for arm := 0; arm < 4; arm++ {
 			angle := float64(arm) * math.Pi / 2
 			twinkle := 0.5 + 0.5*math.Sin(clock*1.7+phase+float64(arm)*1.9)
@@ -1405,7 +1402,7 @@ func ease(t float64) float64 { return t * t * (3 - 2*t) }
 
 func drawCosmosTicker(canvas *Canvas, graph compose.CosmosGraph) {
 	nodes := cosmosNodeMap(graph.Nodes)
-	limit := minInt(2, len(graph.Edges))
+	limit := min(2, len(graph.Edges))
 	for index := 0; index < limit; index++ {
 		row := canvas.Rows - 2 - index
 		color := cosmosDimColor()

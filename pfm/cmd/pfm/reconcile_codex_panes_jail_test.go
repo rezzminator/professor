@@ -138,10 +138,8 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 	const socket = "cx-1800000001-1-1"
 	const newID = "22222222-2222-4222-8222-222222222222"
 	startCodexStatusPane(t, tmuxTmpDir, socket, "  "+newID+` · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
-
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -151,10 +149,8 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	const oldID = "11111111-1111-4111-8111-111111111111"
 	codexJailRollout(t, database, root, oldID, 1)
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +158,6 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", oldID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
@@ -171,7 +166,6 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
 	if err != nil || !found || bound != newID {
 		t.Fatalf("binding = (%q, %v, %v), want the new thread: stderr=%q", bound, found, err, stderr.String())
@@ -197,10 +191,8 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 		t.Fatal(err)
 	}
 	const socket = "cx-1800000002-1-1"
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
-
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -210,10 +202,8 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	const oldID = "33333333-3333-4333-8333-333333333333"
 	codexJailRollout(t, database, root, oldID, 1)
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -221,7 +211,6 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", oldID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	// No server was ever started on this socket: capture-pane fails.
 	fleet.ReconcileCodexPanes(
@@ -231,7 +220,6 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	if !strings.Contains(stderr.String(), "capture failed") {
 		t.Fatalf("stderr = %q, want a capture-failed message", stderr.String())
 	}
@@ -258,10 +246,8 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	const clearedID = "44444444-4444-4444-8444-444444444444"
 	startCodexStatusPane(t, tmuxTmpDir, clearingSocket, "  "+clearedID+` · /work/shared · Full Access\n`)
 	startCodexStatusPane(t, tmuxTmpDir, steadySocket, `  STEADY_CHAT · /work/shared · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
-
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -271,7 +257,6 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	const clearingOldID = "55555555-5555-4555-8555-555555555555"
 	const steadyID = "66666666-6666-4666-8666-666666666666"
 	codexJailRollout(t, database, root, clearingOldID, 1)
@@ -281,7 +266,6 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -292,7 +276,6 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), steadySocket, "%0", steadyID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
@@ -304,7 +287,6 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	if _, found, err := database.Killed(context.Background(), clearingOldID); err != nil || !found {
 		t.Fatalf(
 			"clearing pane's previous thread was not killed: found=%v error=%v stderr=%q",
@@ -339,7 +321,6 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	tmuxTmpDir := filepath.Join(root, "tmuxtmp")
 	const socket = "cx-1800000005-1-1"
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  FIX_HAND · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
@@ -351,7 +332,6 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	const boundID = "99999999-9999-4999-8999-999999999999"
 	const duplicateID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	codexJailRollout(t, database, root, boundID, 1)
@@ -362,7 +342,6 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -370,7 +349,6 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", boundID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
@@ -379,7 +357,6 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	if stderr.Len() != 0 {
 		t.Fatalf("steady duplicate name printed a shutdown warning: %q", stderr.String())
 	}
@@ -409,7 +386,6 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 			tmuxTmpDir := filepath.Join(root, "tmuxtmp")
 			socket := "cx-1800000006-" + strings.ReplaceAll(test.name, " ", "-")
 			startCodexStatusPane(t, tmuxTmpDir, socket, `  FIX_HAND · /work/example · Full Access\n`)
-
 			resolved := jailPaths(t)
 			resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 			database, err := store.Open()
@@ -421,7 +397,6 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 					t.Errorf("close database: %v", err)
 				}
 			}()
-
 			const firstID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 			const secondID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 			codexJailRollout(t, database, root, firstID, 1)
@@ -432,7 +407,6 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 			}); err != nil {
 				t.Fatal(err)
 			}
-
 			manager, err := kill.New(database, kill.Dependencies{})
 			if err != nil {
 				t.Fatal(err)
@@ -443,7 +417,6 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 					t.Fatal(err)
 				}
 			}
-
 			var stderr bytes.Buffer
 			fleet.ReconcileCodexPanes(
 				context.Background(),
@@ -479,7 +452,6 @@ func TestReconcileCodexPanesKeepsBoundThreadSilentWhenNameIsEmpty(t *testing.T) 
 	tmuxTmpDir := filepath.Join(root, "tmuxtmp")
 	const socket = "cx-1800000007-1-1"
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
@@ -491,7 +463,6 @@ func TestReconcileCodexPanesKeepsBoundThreadSilentWhenNameIsEmpty(t *testing.T) 
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	const boundID = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 	codexJailRollout(t, database, root, boundID, 3)
 	manager, err := kill.New(database, kill.Dependencies{})
@@ -501,7 +472,6 @@ func TestReconcileCodexPanesKeepsBoundThreadSilentWhenNameIsEmpty(t *testing.T) 
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", boundID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
@@ -576,7 +546,6 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	const socket = "cx-1800000010-1-1"
 	// The pane shows its NAME again, because the post-clear rename landed.
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  W5_TESTER · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
@@ -588,7 +557,6 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	const clearedID = "11111111-1111-4111-8111-111111111111"
 	const liveID = "22222222-2222-4222-8222-222222222222"
 	codexJailRollout(t, database, root, clearedID, 4)
@@ -599,7 +567,6 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -607,7 +574,6 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", liveID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
@@ -616,7 +582,6 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
 	if err != nil || !found || bound != liveID {
 		t.Fatalf(
@@ -647,7 +612,6 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 	for _, socket := range []string{first, second} {
 		startCodexStatusPane(t, tmuxTmpDir, socket, `  ENGINE_BUILDER · /work/example · Full Access\n`)
 	}
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
@@ -659,7 +623,6 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	const sharedID = "33333333-3333-4333-8333-333333333333"
 	codexJailRollout(t, database, root, sharedID, 2)
 	if err := database.ReplaceCxNames(context.Background(), []store.CxName{
@@ -667,7 +630,6 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -680,7 +642,6 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bindings := 0
 	for _, socket := range []string{first, second} {
 		bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
@@ -714,7 +675,6 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 	const parentID = "44444444-4444-4444-8444-444444444444"
 	const childID = "55555555-5555-4555-8555-555555555555"
 	startCodexStatusPane(t, tmuxTmpDir, socket, "  "+childID+` · /work/example · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
@@ -726,10 +686,8 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	codexJailRollout(t, database, root, parentID, 6)
 	codexJailChildRollout(t, database, root, childID, parentID, 7)
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -737,7 +695,6 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", parentID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
@@ -746,7 +703,6 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
 	if err != nil || !found || bound != childID {
 		t.Fatalf("binding = (%q, %v, %v), want the child %q", bound, found, err, childID)
@@ -771,7 +727,6 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 	const parentID = "66666666-6666-4666-8666-666666666666"
 	const rotatedID = "77777777-7777-4777-8777-777777777777"
 	startCodexStatusPane(t, tmuxTmpDir, socket, `  ROTATED_CHAT · /work/current · Full Access\n`)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
 	database, err := store.Open()
@@ -783,7 +738,6 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	codexJailRollout(t, database, root, parentID, 6)
 	codexJailRollout(t, database, root, rotatedID, 7)
 	rotated, found, err := database.Rollout(context.Background(), rotatedID)
@@ -799,7 +753,6 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 	}); err != nil {
 		t.Fatal(err)
 	}
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -811,7 +764,6 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 		root, "codex", "sessions", "2030", "01", "02",
 		"rollout-2030-01-02T03-04-06-"+rotatedID+".jsonl",
 	)
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
@@ -826,7 +778,6 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
-
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")
 	if err != nil || !found || bound != rotatedID {
 		t.Fatalf(
@@ -891,10 +842,8 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 	const newID = "55555555-5555-4555-8555-555555555555"
 	startCodexStatusPane(t, tmuxTmpDir, socket, "  "+newID+` · /work/example · Full Access
 `)
-
 	resolved := jailPaths(t)
 	resolved.TmuxDir = filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid()))
-
 	database, err := store.Open()
 	if err != nil {
 		t.Fatal(err)
@@ -904,9 +853,7 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 			t.Errorf("close database: %v", err)
 		}
 	}()
-
 	oldRollout := codexJailRollout(t, database, root, oldID, 1)
-
 	manager, err := kill.New(database, kill.Dependencies{})
 	if err != nil {
 		t.Fatal(err)
@@ -914,7 +861,6 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 	if _, _, err := manager.AdvanceCodexPane(context.Background(), socket, "%0", oldID); err != nil {
 		t.Fatal(err)
 	}
-
 	var stderr bytes.Buffer
 	fleet.ReconcileCodexPanes(
 		context.Background(),
@@ -1264,7 +1210,6 @@ func TestAReAppliedNameReSeatsAnUnboundPane(t *testing.T) {
 	const retiredID = "88888888-8888-4888-8888-888888888888"
 	const liveID = "99999999-9999-4999-8999-999999999999"
 	const chatName = "ENGINE_BUILDER"
-
 	retired := func(id string) (bool, bool) { return id == retiredID, true }
 	observations := []fleet.CodexPaneObservation{
 		{Socket: "cx-1", PaneID: "%0", Name: chatName},

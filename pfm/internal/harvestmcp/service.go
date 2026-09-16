@@ -834,9 +834,9 @@ func (service *Service) findWorks(
 		fmt.Fprintf(os.Stderr, "harvester export candidates: %v\n", err)
 		return nil, FindOutput{}, errors.New("could not prepare the discovered works for retrieval; retry later")
 	}
-	lines := renderFind(input.Query, candidates)
-	result := &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: lines}}}
-	return result, FindOutput{Candidates: candidates}, nil
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: renderFind(input.Query, candidates)}},
+	}, FindOutput{Candidates: candidates}, nil
 }
 
 func (service *Service) search(
@@ -871,13 +871,9 @@ func (service *Service) search(
 	for index := range results {
 		results[index].Engine = ""
 	}
-	result := &mcp.CallToolResult{
+	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: renderSearch(input.Query, results, "")}},
-	}
-	output := SearchOutput{
-		Results: results,
-	}
-	return result, output, nil
+	}, SearchOutput{Results: results}, nil
 }
 
 func (service *Service) fetchImage(
@@ -932,39 +928,20 @@ func (service *Service) archive(
 	}
 	resolved, resolveErr := service.harvester.ResolvePublicSource(input.Source)
 	result := harvest.Result{Source: input.Source}
-	var err error
+	err := resolveErr
 	if resolveErr != nil {
 		result.Error, result.ErrorKind = resolveErr.Error(), "policy"
-		err = resolveErr
 	} else {
 		result, err = service.harvester.Archive(ctx, resolved, input.Member)
 	}
 	result = service.harvester.PublicResult(input.Source, result, false)
-	if err != nil || result.Error != "" {
-		toolResult := &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}},
-		}
-		output := ArchiveOutput{
-			Result: result,
-		}
-		return toolResult, output, nil
+	text := service.describeFetch(input.Source, result, false)
+	if err == nil && result.Error == "" && input.Member == "" {
+		text = renderArchiveListing(input.Source, result.Members)
 	}
-	if input.Member == "" {
-		toolResult := &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: renderArchiveListing(input.Source, result.Members)}},
-		}
-		output := ArchiveOutput{
-			Result: result,
-		}
-		return toolResult, output, nil
-	}
-	toolResult := &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: service.describeFetch(input.Source, result, false)}},
-	}
-	output := ArchiveOutput{
-		Result: result,
-	}
-	return toolResult, output, nil
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: text}},
+	}, ArchiveOutput{Result: result}, nil
 }
 
 func (service *Service) searchCache(
@@ -997,16 +974,13 @@ func (service *Service) searchCache(
 	}
 	lines := make([]string, 0, len(hits)+2)
 	if len(hits) == 0 {
-		text := fmt.Sprintf(
-			"No cached pages match /%s/. This only searches pages already fetched — it does not search the web; %s",
-			input.Pattern,
-			harvest.SearchHint(searchEnabled(service.runtime),
-				"use `search` or `fetch` a source first.",
-				"fetch a source first.",
-			),
-		)
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: text}},
+			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf(
+				"No cached pages match /%s/. This only searches pages already fetched — it does not search the web; %s",
+				input.Pattern,
+				harvest.SearchHint(searchEnabled(service.runtime),
+					"use `search` or `fetch` a source first.", "fetch a source first."),
+			)}},
 		}, nil
 	}
 	lines = append(

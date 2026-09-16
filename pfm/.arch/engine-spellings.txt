@@ -48,7 +48,7 @@ internal/headless/run/run.go 1
 internal/index/index.go 2
 internal/index/opencode.go 12
 internal/index/opencode_stress_test.go 14
-internal/index/opencode_test.go 29
+internal/index/opencode_test.go 28
 internal/index/source_test.go 3
 internal/index/sync_sources.go 3
 internal/inject/engine.go 1

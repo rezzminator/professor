@@ -660,7 +660,7 @@ func displayIndex(value, marker string) int {
 }
 
 func firstDifference(want, got []byte) string {
-	limit := minInt(len(want), len(got))
+	limit := min(len(want), len(got))
 	for index := 0; index < limit; index++ {
 		if want[index] != got[index] {
 			return fmt.Sprintf(

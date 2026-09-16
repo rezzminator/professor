@@ -128,14 +128,8 @@ func Compose(input Input) Output {
 	} else {
 		output.Rows = append(
 			output.Rows,
-			current.selectResumeRows(
-				claudeResume,
-				claudeResumeCap,
-				&output.SuppressedCount,
-			)...,
-		)
+			current.selectResumeRows(claudeResume, claudeResumeCap, &output.SuppressedCount)...)
 	}
-
 	codexResume := make([]Row, 0)
 	codexEligible := 0
 	for index := range current.codexLineages {
@@ -170,12 +164,7 @@ func Compose(input Input) Output {
 	} else {
 		output.Rows = append(
 			output.Rows,
-			current.selectResumeRows(
-				codexResume,
-				codexResumeCap,
-				&output.SuppressedCount,
-			)...,
-		)
+			current.selectResumeRows(codexResume, codexResumeCap, &output.SuppressedCount)...)
 	}
 
 	ocResume := make([]Row, 0)
@@ -187,8 +176,8 @@ func Compose(input Input) Output {
 		if session.ParentID != "" || session.TimeArchivedMS != 0 {
 			continue
 		}
-		row := current.ocSessionRow(session)
-		row = current.applyKill(row, pfmengine.Opencode)
+		row := current.openCodeSessionRow(session)
+		row = current.applyKill(row, EngineForKind(row.Kind))
 		countOmitted(row, &output.KilledCount, &output.SuppressedCount)
 		if input.Options.View == DefaultView {
 			if defaultEligible(row) {
@@ -868,10 +857,10 @@ func (current *composer) rolloutRow(rollout store.Rollout, kind Kind) Row {
 	}
 }
 
-// ocSessionRow renders one OpenCode session. The title is authoritative —
+// openCodeSessionRow renders one OpenCode session. The title is authoritative —
 // OpenCode names its sessions itself — with the first prompt as fallback for
 // sessions it never titled.
-func (current *composer) ocSessionRow(session store.OcSession) Row {
+func (current *composer) openCodeSessionRow(session store.OcSession) Row {
 	name := session.Title
 	if name == "" {
 		name = naming.DisplayName("", "", session.FirstPrompt)

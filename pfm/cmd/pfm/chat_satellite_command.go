@@ -338,15 +338,8 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		} else {
 			state = status.State
 		}
-		// The chat's NAME is the identity an operator must act on — it is
-		// what `pfm chat name` / `pfm chat inject` / `pfm chat resolve`
-		// actually take, and it is already correctly derived (customTitle,
-		// aiTitle, first prompt, or an engine's own fallback marker) for
-		// every live row this loop reaches. Printing the raw tmux session id
-		// as the primary field trained an operator to copy THAT as an inject
-		// target, which put a session name where a pane id belongs. The
-		// session id is still printed, second, so nothing that parses this
-		// line loses information.
+		// Name is the actionable identity; retain the raw tmux session second
+		// so parsers lose no information.
 		handle := row.Socket
 		if row.SessionName != "" {
 			handle = row.SessionName
@@ -449,10 +442,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		fmt.Fprintln(stderr, "pfm chat branch: --session-id is required and must be one safe line")
 		return 2
 	}
-	// A fork is a peer of its parent chat, not a fresh chat: it must land on
-	// the parent's own account and cache posture, never the machine primary
-	// or the invoking shell's environment. Resolve the parent row once, up
-	// front, and carry both facts through explicitly.
+	// A fork inherits its parent's account and cache posture, not the caller's.
 	parent, parentFound, err := parentBranchRow(context.Background(), *id, runtimes...)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: resolve parent session: %v\n", err)
@@ -550,11 +540,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		}
 		return 1
 	}
-	// A resumed Codex fork can expose its idle composer while declining the
-	// startup rename modal. The ordinary chat-name route does not depend on
-	// that modal: it submits the complete /rename command through the guarded
-	// injector and converges the tmux window. Retry with that already-proven
-	// path before reporting the requested name as unconfirmed.
+	// If Codex declines its startup rename, retry through guarded /rename.
 	if engine == pfmengine.Codex && len(branchWarnings) != 0 {
 		var renameStderr bytes.Buffer
 		deliver := func(ctx context.Context, chat headless.Chat, name string) (int, string, error) {
@@ -606,13 +592,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	return 0
 }
 
-// parentBranchRow scans the same composed rows `pfm ls` shows for the row
-// whose ID matches the session being forked. found is false, with a nil
-// error, when the scan ran cleanly and simply found no such row — a fork of
-// a session pfm has never indexed. A non-nil error means the scan itself
-// could not run (store open, gather failure, …); that is never silently
-// folded into "not found", because a probe that could not run must never
-// report absence.
+// parentBranchRow distinguishes a cleanly absent parent from a failed scan.
 func parentBranchRow(ctx context.Context, id string, runtimes ...commandRuntime) (compose.Row, bool, error) {
 	rows, err := pfmchat.Rows(ctx, io.Discard, firstRuntime(runtimes))
 	if err != nil {
@@ -627,17 +607,8 @@ func parentBranchRow(ctx context.Context, id string, runtimes ...commandRuntime)
 	return compose.Row{}, false, nil
 }
 
-// forkCache1H resolves the prompt-cache TTL for a FORK, which must match the
-// parent chat exactly — a branch is a peer of its parent, not downstream work.
-//
-// initialCache1H is deliberately NOT used here. It reads the invoking process's
-// environment rather than the parent's observed/configured posture. A fork
-// must inherit the parent, even when its caller uses another cache window.
-//
-// A non-live parent is the honest unknown: C1H is observed from the live
-// process environment, so false on a dead row means "not observed", never "5m".
-// That case takes the account's configured posture, which is the same default a
-// fresh chat on that account would get.
+// forkCache1H inherits a live parent's observed TTL; otherwise it uses the
+// parent's account default because a dead row's false C1H is only "unobserved".
 func forkCache1H(parent compose.Row, parentFound bool, config pfmconfig.Config, account int) bool {
 	if parentFound && pfmchat.IsLive(parent.Kind) {
 		return parent.C1H
@@ -700,10 +671,7 @@ func currentClaudeModel(id string, runtimes ...commandRuntime) string {
 	}
 }
 
-// currentClaudeTranscriptPath follows the current process's explicit config
-// first. When that variable is intentionally absent for an implicit account,
-// the already-loaded runtime owns the configured account roots and can locate
-// the session without falling back to ~/.claude.
+// currentClaudeTranscriptPath prefers explicit config, then loaded account roots.
 func currentClaudeTranscriptPath(id, cwd string, runtimes ...commandRuntime) string {
 	slug := strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
 	if config := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); config != "" {
@@ -896,10 +864,7 @@ func readHistoryMessages(path string, count int) (messages []historyMessage, ret
 			} `json:"message"`
 		}
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
-			// A malformed line is skipped, never fatal — history.sh's jq -s
-			// pipeline is fed pre-filtered valid JSON per line by construction,
-			// but a hand-edited or truncated transcript should not abort the
-			// whole read over one bad record.
+			// Match history.sh: a malformed transcript row is skipped, not fatal.
 			continue
 		}
 		if record.Type != transcriptRoleUser && record.Type != "assistant" {

@@ -123,12 +123,8 @@ func Run(ctx context.Context, options Options) (Report, error) {
 		err = errors.Join(append([]error{err}, installer.planErrors...)...)
 	}
 	installer.say("")
-	installer.say(
-		"summary changed=%d ok=%d skipped=%d",
-		installer.report.Changed,
-		installer.report.OK,
-		installer.report.Skipped,
-	)
+	installer.say("summary changed=%d ok=%d skipped=%d", installer.report.Changed,
+		installer.report.OK, installer.report.Skipped)
 	if installer.outputErr != nil {
 		err = errors.Join(err, installer.outputErr)
 	}
@@ -167,10 +163,7 @@ func (installer *engine) preflightInstall(ctx context.Context) error {
 	options.Mode = ModeDryRun
 	options.Stdout = io.Discard
 	preview := &engine{
-		options:     options,
-		apply:       false,
-		stamp:       installer.stamp,
-		managedRoot: installer.managedRoot,
+		options: options, apply: false, stamp: installer.stamp, managedRoot: installer.managedRoot,
 	}
 	installErr := preview.install(ctx)
 	if len(preview.planErrors) != 0 {
@@ -658,13 +651,8 @@ func codexPlanBlockers(problems []string) []string {
 func (installer *engine) planCodexCommands(assets []assetFile, future bool) (result codexgen.Result, returnErr error) {
 	sourceHome := ""
 	cleanup := func() error { return nil }
-	if future &&
-		filepath.Clean(
-			installer.options.ConfigDir,
-		) == filepath.Join(
-			filepath.Clean(installer.options.Home),
-			".claude",
-		) {
+	if future && filepath.Clean(installer.options.ConfigDir) ==
+		filepath.Join(filepath.Clean(installer.options.Home), ".claude") {
 		var err error
 		sourceHome, cleanup, err = installer.futureCommandSource(assets)
 		if err != nil {

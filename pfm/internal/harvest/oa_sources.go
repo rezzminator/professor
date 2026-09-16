@@ -254,7 +254,7 @@ func (r *Resolver) doaj(ctx context.Context, client *http.Client, doi string) ([
 		return nil, err
 	}
 	out := []Candidate{}
-	for _, row := range data.Results[:minInt(len(data.Results), 1)] {
+	for _, row := range data.Results[:min(len(data.Results), 1)] {
 		for _, link := range row.Bib.Links {
 			if link.URL != "" && link.Type == "fulltext" {
 				out = append(

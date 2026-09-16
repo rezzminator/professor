@@ -66,7 +66,7 @@ func validateMemberName(name string) error {
 	// len(string) would incorrectly count UTF-8 bytes here.
 	if utf8.RuneCountInString(name) > 255 {
 		runes := []rune(name)
-		return fmt.Errorf("Member name too long (%d > 255): %q…", len(runes), string(runes[:minInt(len(runes), 80)]))
+		return fmt.Errorf("Member name too long (%d > 255): %q…", len(runes), string(runes[:min(len(runes), 80)]))
 	}
 	return nil
 }

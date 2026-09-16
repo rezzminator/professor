@@ -1031,7 +1031,6 @@ func (sampler *LimitsSampler) fetchCodexHTTP(ctx context.Context, account LimitA
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Cache-Control", "no-cache")
 	request.Header.Set("Pragma", "no-cache")
-
 	response, err := sampler.codexClient().Do(request)
 	if err != nil {
 		return codexUsage{}, fmt.Errorf("fetch Codex usage failed: %v", err)

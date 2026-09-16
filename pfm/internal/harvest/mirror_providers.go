@@ -105,12 +105,7 @@ func (h *Harvester) fetchDOIViewerDOI(ctx context.Context, doi string, options F
 	response, err := h.providerGet(providerCtx, pageURL, nil)
 	if err != nil {
 		return providerResult(
-			doi,
-			sourceDOIViewer,
-			"page request failed: "+err.Error(),
-			errorKind(err),
-			0,
-			false,
+			doi, sourceDOIViewer, "page request failed: "+err.Error(), errorKind(err), 0, false,
 			[]string{sourceDOIViewer},
 		)
 	}
@@ -132,24 +127,14 @@ func (h *Harvester) fetchDOIViewerDOI(ctx context.Context, doi string, options F
 	}
 	if providerChallenge(response.body, response.status) && !bytes.HasPrefix(response.body, []byte("%PDF-")) {
 		return providerResult(
-			doi,
-			sourceDOIViewer,
-			"page returned a challenge page",
-			errorKindChallenge,
-			response.status,
-			true,
+			doi, sourceDOIViewer, "page returned a challenge page", errorKindChallenge, response.status, true,
 			[]string{sourceDOIViewer},
 		)
 	}
 	pdfURL, ok := extractDOIViewerPDF(response.body)
 	if !ok {
 		return providerResult(
-			doi,
-			sourceDOIViewer,
-			"page contained no PDF link",
-			errorKindMissing,
-			response.status,
-			false,
+			doi, sourceDOIViewer, "page contained no PDF link", errorKindMissing, response.status, false,
 			[]string{sourceDOIViewer},
 		)
 	}
@@ -160,12 +145,7 @@ func (h *Harvester) fetchDOIViewerDOI(ctx context.Context, doi string, options F
 	resolvedPDF, err := resolveProviderURL(basePageURL, pdfURL)
 	if err != nil {
 		return providerResult(
-			doi,
-			sourceDOIViewer,
-			"PDF URL refused: "+err.Error(),
-			errorKind(err),
-			response.status,
-			false,
+			doi, sourceDOIViewer, "PDF URL refused: "+err.Error(), errorKind(err), response.status, false,
 			[]string{sourceDOIViewer},
 		)
 	}

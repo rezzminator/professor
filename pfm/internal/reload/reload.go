@@ -300,7 +300,6 @@ func Run(
 	dead := false
 	empties := 0
 	dialogSeen := false
-exitPoll:
 	for i := 0; i < options.ExitTries; i++ {
 		panes, listErr := tmux.ListPanes(ctx, request.SocketPath)
 		switch {
@@ -308,20 +307,15 @@ exitPoll:
 			return Result{}, fmt.Errorf("check pane exit state: %w", listErr)
 		case len(panes) == 0:
 			empties++
-			if empties >= 3 {
-				dead = true
-				break exitPoll
-			}
+			dead = empties >= 3
 		default:
 			empties = 0
 			for _, pane := range panes {
-				if pane.ID == request.Pane && pane.Dead {
-					dead = true
-				}
+				dead = dead || pane.ID == request.Pane && pane.Dead
 			}
-			if dead {
-				break exitPoll
-			}
+		}
+		if dead {
+			break
 		}
 		capture, captureErr := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		switch {
@@ -349,12 +343,8 @@ exitPoll:
 				return Result{}, fmt.Errorf("retry /exit submission: %w", err)
 			}
 		}
-		timer := time.NewTimer(options.Poll)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return Result{}, ctx.Err()
-		case <-timer.C:
+		if err := sleepPoll(ctx, options.Poll); err != nil {
+			return Result{}, err
 		}
 	}
 	if !dead {

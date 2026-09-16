@@ -77,11 +77,8 @@ func TestIndexerIteratesEveryConfiguredCodexRoot(t *testing.T) {
 	}
 	for index := range codexRoots {
 		id := fmt.Sprintf("codex-account-%d", index+1)
-		if rollout, found, err := database.Rollout(
-			context.Background(),
-			id,
-		); err != nil || !found ||
-			rollout.FirstPrompt != id {
+		rollout, found, err := database.Rollout(context.Background(), id)
+		if err != nil || !found || rollout.FirstPrompt != id {
 			t.Fatalf("Rollout(%q)=%#v found=%t err=%v", id, rollout, found, err)
 		}
 	}
@@ -791,13 +788,7 @@ func setupIndexFixture(t *testing.T) indexFixture {
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
-	t.Setenv(
-		paths.EnvClaudeRoots,
-		strings.Join(
-			[]string{linkOne, linkTwo, claudeRoot},
-			string(os.PathListSeparator),
-		),
-	)
+	t.Setenv(paths.EnvClaudeRoots, strings.Join([]string{linkOne, linkTwo, claudeRoot}, string(os.PathListSeparator)))
 	t.Setenv(paths.EnvCodexRoot, codexRoot)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
@@ -860,12 +851,7 @@ func assertSingleDelta(t *testing.T, counters Counters, files int, bytesRead int
 	}
 }
 
-func dumpIndex(
-	t *testing.T,
-	database *store.Store,
-	claudeRoot string,
-	codexRoot string,
-) string {
+func dumpIndex(t *testing.T, database *store.Store, claudeRoot, codexRoot string) string {
 	t.Helper()
 
 	ctx := context.Background()

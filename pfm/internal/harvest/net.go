@@ -683,7 +683,7 @@ func classifyKind(source, contentType string, body []byte) string {
 		return kindTIFF
 	}
 	if strings.HasPrefix(strings.TrimSpace(string(body)), "<svg") ||
-		strings.Contains(strings.ToLower(string(body[:minInt(len(body), 512)])), "<svg") {
+		strings.Contains(strings.ToLower(string(body[:min(len(body), 512)])), "<svg") {
 		return kindSVG
 	}
 	if strings.HasSuffix(strings.ToLower(strings.Split(strings.Split(source, "?")[0], "#")[0]), ".pdf") {
@@ -801,11 +801,4 @@ func stripJinaEnvelope(text string) string {
 		}
 	}
 	return strings.TrimLeft(strings.Join(lines[i:], "\n"), "\r\n")
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

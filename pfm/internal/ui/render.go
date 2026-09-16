@@ -379,7 +379,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 	innerHeight := maxInt(1, height-2)
 	lines := make([]string, 0, innerHeight)
 	if model.statsSubtab == StatsChats {
-		nameWidth := minInt(32, maxInt(8, innerWidth-72))
+		nameWidth := min(32, maxInt(8, innerWidth-72))
 		header := fmt.Sprintf(
 			"  %-*s %-7s %7s %8s %6s %9s %8s %5s %12s",
 			nameWidth, "NAME", "ENGINE", "CPU%", "RSS", "RAM%", "TOKENS", "TOK/MIN", "GEAR", "USAGE",
@@ -437,7 +437,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 		}
 	} else {
 		available := maxInt(16, innerWidth-36)
-		nameWidth := minInt(24, maxInt(8, available/3))
+		nameWidth := min(24, maxInt(8, available/3))
 		imageWidth := maxInt(8, available-nameWidth)
 		header := fmt.Sprintf(
 			"  %-*s %-*s %7s %8s %8s %6s",
@@ -496,8 +496,8 @@ func (model Model) renderLimitsPanel(width, height int) string {
 	innerHeight := maxInt(1, height-2)
 	allLines := model.renderLimitCards(innerWidth)
 	maximum := maxInt(0, len(allLines)-innerHeight)
-	offset := minInt(maxInt(0, model.limitsOffset), maximum)
-	end := minInt(len(allLines), offset+innerHeight)
+	offset := min(maxInt(0, model.limitsOffset), maximum)
+	end := min(len(allLines), offset+innerHeight)
 	lines := append([]string(nil), allLines[offset:end]...)
 	title := " limits "
 	if maximum > 0 {
@@ -614,7 +614,7 @@ func renderLimitWindow(now time.Time, window pfmstats.Window, innerWidth int) st
 	if showReset {
 		reserved += 18
 	}
-	barWidth := minInt(40, maxInt(1, innerWidth-reserved))
+	barWidth := min(40, maxInt(1, innerWidth-reserved))
 	name := fmt.Sprintf("%-*s", nameWidth, clipRunes(cleanField(window.Name), nameWidth))
 	bar := limitBar(window.UsedPct, barWidth)
 	percent := fmt.Sprintf("%.0f%% used", window.UsedPct)
@@ -1089,7 +1089,7 @@ func usageSpark(deltas []int64) string {
 			continue
 		}
 		height := int(float64(delta)/float64(busiest)*float64(len(blocks)-1) + 0.5)
-		runes = append(runes, blocks[minInt(height, len(blocks)-1)])
+		runes = append(runes, blocks[min(height, len(blocks)-1)])
 	}
 	return string(runes)
 }

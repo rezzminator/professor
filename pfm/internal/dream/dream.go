@@ -385,14 +385,9 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 	}
 	_ = coverage
 	distillAnchors, maps, err := runAnchorGate(
-		stage,
-		recordedTree,
-		git,
-		"anchor-results.tsv",
-		"anchor-survivors.txt",
-		"gate-anchors.log",
-		logger,
-		"distill",
+		stage, recordedTree, git,
+		"anchor-results.tsv", "anchor-survivors.txt", "gate-anchors.log",
+		logger, "distill",
 	)
 	if err != nil {
 		return result, err
@@ -457,14 +452,9 @@ func Night(ctx context.Context, request NightRequest, dependencies NightDependen
 		return result, err
 	}
 	postAnchors, _, err := runAnchorGate(
-		stage,
-		recordedTree,
-		git,
-		"anchor-postrefine.tsv",
-		"anchor-postrefine-survivors.txt",
-		"gate-anchors-postrefine.log",
-		logger,
-		refinerSeat,
+		stage, recordedTree, git,
+		"anchor-postrefine.tsv", "anchor-postrefine-survivors.txt", "gate-anchors-postrefine.log",
+		logger, refinerSeat,
 	)
 	if err != nil {
 		return result, err

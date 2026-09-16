@@ -36,10 +36,9 @@ import (
 
 const emptySummary = "none"
 
-// doctorTally is the two-tier count `runDoctor` threads through every row it
-// prints: warnings are advisory, failures are a state `pfm install --yes` is
-// responsible for and did not produce, or a required dependency the engine
-// cannot run without. Only failures gate `pfm update` (update_command.go);
+// doctorTally is the two-tier count `runDoctor` threads through every row: warnings are advisory;
+// failures mean `pfm install --yes` missed required state or a required dependency is unavailable.
+// Only failures gate `pfm update` (update_command.go);
 // warnings are reported as a delta against the pre-update baseline.
 type doctorTally struct {
 	warnings int
@@ -53,7 +52,6 @@ type harvestDoctor interface {
 	Inspect(string, harvestpy.Platform) (harvestpy.EnvironmentDigest, error)
 	Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error)
 }
-
 type pinnedHarvestDoctor struct{}
 
 // harvestDoctorOverride is nil in production. The command-package TestMain

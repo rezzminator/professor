@@ -722,7 +722,7 @@ func TestClassifyKindOOXMLExtensionBeatsZipMagic(t *testing.T) {
 	}
 	body := buf.Bytes()
 	if !bytes.HasPrefix(body, []byte("PK\x03\x04")) {
-		t.Fatalf("fixture is not a zip container: %q", body[:minInt(len(body), 4)])
+		t.Fatalf("fixture is not a zip container: %q", body[:min(len(body), 4)])
 	}
 	for _, tc := range []struct{ name, want string }{
 		{"report.docx", "docx"},

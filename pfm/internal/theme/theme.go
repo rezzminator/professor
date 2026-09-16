@@ -9,11 +9,11 @@ import (
 )
 
 const (
-	orangeColor          = "#ff9e64"
-	defaultOpencodeColor = "#5eead4"
-	tokyoOpencodeColor   = "#73daca"
-	tokyoAccentColor     = "#7dcfff"
-	tokyoWarningColor    = "#e0af68"
+	orangeColor       = "#ff9e64"
+	defaultGreenColor = "#5eead4"
+	tokyoGreenColor   = "#73daca"
+	tokyoAccentColor  = "#7dcfff"
+	tokyoWarningColor = "#e0af68"
 )
 
 // Palette is the color vocabulary shared by the picker and status panels.
@@ -75,11 +75,11 @@ type Palette struct {
 
 var defaultPalette = Palette{
 	EngineRow: map[pfmengine.ID]string{
-		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.Opencode: defaultOpencodeColor,
+		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.Opencode: defaultGreenColor,
 	},
 	AgentRow: "#fb923c",
 	StatsEngine: map[pfmengine.ID]string{
-		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.Opencode: defaultOpencodeColor,
+		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.Opencode: defaultGreenColor,
 	},
 	StatsCPU:      "#4ade80",
 	StatsRAM:      "#60a5fa",
@@ -94,7 +94,7 @@ var defaultPalette = Palette{
 	CosmosSunHot:  "#BFD7FF",
 	Header:        "#ffffff",
 	HeaderBg:      "#5f3dc4",
-	GroupA:        defaultOpencodeColor,
+	GroupA:        defaultGreenColor,
 	GroupB:        "#7dd3fc",
 	Border:        "#64748b",
 	Selected:      "#334155",
@@ -112,11 +112,11 @@ var defaultPalette = Palette{
 
 var tokyoNightPalette = Palette{
 	EngineRow: map[pfmengine.ID]string{
-		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.Opencode: tokyoOpencodeColor,
+		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.Opencode: tokyoGreenColor,
 	},
 	AgentRow: "#bb9af7",
 	StatsEngine: map[pfmengine.ID]string{
-		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.Opencode: tokyoOpencodeColor,
+		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.Opencode: tokyoGreenColor,
 	},
 	StatsCPU:      "#9ece6a",
 	StatsRAM:      "#7aa2f7",
@@ -131,7 +131,7 @@ var tokyoNightPalette = Palette{
 	CosmosSunHot:  "#B4C8FF",
 	Header:        "#c0caf5",
 	HeaderBg:      "#414868",
-	GroupA:        tokyoOpencodeColor,
+	GroupA:        tokyoGreenColor,
 	GroupB:        tokyoAccentColor,
 	Border:        "#3b4261",
 	Selected:      "#292e42",

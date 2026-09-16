@@ -190,7 +190,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	} else {
 		_ = getJSON(ctx, client, "https://directory.doabooks.org/rest/search?query="+url.QueryEscape(query), &doab)
 	}
-	for _, item := range doab[:minInt(len(doab), 5)] {
+	for _, item := range doab[:min(len(doab), 5)] {
 		if item.UUID == "" {
 			continue
 		}
@@ -310,7 +310,7 @@ func (r *Resolver) findBooks(ctx context.Context, client *http.Client, query str
 		} `json:"results"`
 	}
 	if err := getJSON(ctx, client, "https://gutendex.com/books?search="+url.QueryEscape(query), &gutendex); err == nil {
-		for _, book := range gutendex.Results[:minInt(len(gutendex.Results), 3)] {
+		for _, book := range gutendex.Results[:min(len(gutendex.Results), 3)] {
 			if book.Copyright {
 				continue
 			}

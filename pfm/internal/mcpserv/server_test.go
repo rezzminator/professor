@@ -34,10 +34,7 @@ type protocolClient struct {
 	serverSession *mcp.ServerSession
 }
 
-func connectInMemory(
-	t *testing.T,
-	server *mcp.Server,
-) protocolClient {
+func connectInMemory(t *testing.T, server *mcp.Server) protocolClient {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -65,12 +62,7 @@ func connectInMemory(
 	}
 }
 
-func callTool[T any](
-	t *testing.T,
-	session *mcp.ClientSession,
-	name string,
-	arguments any,
-) T {
+func callTool[T any](t *testing.T, session *mcp.ClientSession, name string, arguments any) T {
 	t.Helper()
 	// One bound covers every call here, and the heaviest is not close to the
 	// others: the oversize-paste case drives a full megabyte through bracketed
@@ -358,22 +350,14 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		t.Fatalf("post-inject capture = %+v", after)
 	}
 
-	selectorBefore := callTool[CaptureOutput](
-		t,
-		session,
-		"chat_capture",
-		CaptureInput{Target: jail.selectorSession},
-	)
+	selectorBefore := callTool[CaptureOutput](t, session, "chat_capture",
+		CaptureInput{Target: jail.selectorSession})
 	selector := callTool[InjectOutput](t, session, "chat_inject", InjectInput{
 		Target:  jail.selectorSession,
 		Message: "must not type",
 	})
-	selectorAfter := callTool[CaptureOutput](
-		t,
-		session,
-		"chat_capture",
-		CaptureInput{Target: jail.selectorSession},
-	)
+	selectorAfter := callTool[CaptureOutput](t, session, "chat_capture",
+		CaptureInput{Target: jail.selectorSession})
 	if selector.Code != 6 ||
 		selector.Typed ||
 		selector.Status != "refused" ||
@@ -391,12 +375,8 @@ func TestMCPHandshakeAndAllToolsOverJailedStdio(t *testing.T) {
 		Target:  jail.busySession,
 		Message: "wait until idle",
 	})
-	busyAfter := callTool[CaptureOutput](
-		t,
-		session,
-		"chat_capture",
-		CaptureInput{Target: jail.busySession},
-	)
+	busyAfter := callTool[CaptureOutput](t, session, "chat_capture",
+		CaptureInput{Target: jail.busySession})
 	if busy.Code != 0 || busy.Status != "queued" ||
 		!busy.Typed || !busy.Busy ||
 		!strings.Contains(busyAfter.Text, "QUEUED:wait until idle") ||
@@ -701,10 +681,7 @@ while True:
 	return jail
 }
 
-func (jail *stdioJail) startUI(
-	t *testing.T,
-	socket, session, script, mode, label, marker, initial string,
-) {
+func (jail *stdioJail) startUI(t *testing.T, socket, session, script, mode, label, marker, initial string) {
 	t.Helper()
 	command := exec.Command(
 		"tmux",

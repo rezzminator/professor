@@ -133,10 +133,7 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 	if err := os.MkdirAll(sessions, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	fileRollout := filepath.Join(
-		sessions,
-		"rollout-2026-01-01T00-00-00-file-thread.jsonl",
-	)
+	fileRollout := filepath.Join(sessions, "rollout-2026-01-01T00-00-00-file-thread.jsonl")
 	writeLines(
 		t,
 		fileRollout,
@@ -211,11 +208,7 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 
-	return codexStateFixture{
-		codexRoot:       codexRoot,
-		statePath:       statePath,
-		fileRolloutPath: fileRollout,
-	}
+	return codexStateFixture{codexRoot: codexRoot, statePath: statePath, fileRolloutPath: fileRollout}
 }
 
 func writeLines(t *testing.T, path string, lines ...string) {

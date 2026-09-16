@@ -1,6 +1,5 @@
 accountnumber: internal/agentopen/agentopen.go internal/usagehook/hook.go
 all: internal/engine/engine.go internal/transcript/transcript.go
-bookmarklabel: internal/naming/label.go internal/resolve/resolve.go
 boolint: internal/compose/compose.go internal/statusline/render.go
 check: internal/codexgen/compiler.go internal/harvestpy/check.go internal/updatecheck/updatecheck.go
 clip: internal/index/opencode.go internal/stale/stale.go
@@ -9,7 +8,6 @@ codexthreadid: internal/gather/codexproc.go internal/resolve/codex.go
 codexwindowname: internal/gather/gather.go internal/stats/limits.go
 command: internal/codexappendix/register.go internal/engine/matchutil/match.go internal/tmux/tmux.go
 compose: internal/compose/compose.go internal/fleet/scan.go
-containsmedal: internal/naming/label.go internal/resolve/resolve.go
 containsstring: cmd/pfm/update_command.go internal/dream/artifact/map.go internal/harvestmcp/remote.go
 defaultcachedir: internal/harvest/cache.go internal/usagehook/hook.go
 defaults: internal/config/config.go internal/spawn/types.go
@@ -35,7 +33,6 @@ lastcomposerline: internal/inject/guards.go internal/reload/reload.go
 lastlines: cmd/pfm/chat_satellite_command.go internal/inject/engine.go
 livesockets: cmd/pfm/namesync_command.go internal/ui/model.go
 load: internal/config/config.go internal/professor/baseline.go internal/theme/theme.go
-minint: internal/harvest/net.go internal/ui/model.go
 new: internal/action/executor.go internal/agentopen/agentopen.go internal/archive/archive.go internal/gather/gather.go internal/harvest/types.go internal/heal/runner.go internal/index/index.go internal/inject/engine.go internal/kill/manager.go internal/reap/runner.go internal/resolve/resolve.go
 newconfigured: internal/harvestmcp/service.go internal/mcpserv/server.go
 normalize: internal/installer/types.go internal/usagehook/hook.go

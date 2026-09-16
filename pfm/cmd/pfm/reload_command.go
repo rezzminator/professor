@@ -148,11 +148,7 @@ func runChatReloadWithRuntime(
 	tmux := reloadCommandTmux{}
 	callerSock := reloadSocketArgument(args)
 	callerPane := reloadPaneArgument(args)
-	// The scheduler resolves the target ONCE, here, while it still has a live
-	// tmux ancestor (or $TMUX) to walk. The worker below runs Setsid-detached
-	// with no such ancestor — reparented to init, invisible to
-	// resolve.NewWhoami's process walk — so the answer this call already has
-	// must be handed to the worker explicitly, never re-derived.
+	// Resolve before detaching; the worker has no tmux ancestry to recover.
 	socketPath, pane, _, code := reloadTarget(
 		context.Background(), callerSock, callerPane, resolved, runtime, tmux, stderr,
 	)
@@ -190,19 +186,11 @@ func runChatReloadWithRuntime(
 	workerArgs := []string{"--config", runtime.Config.Path, internalCommand, reloadRunCommand}
 	workerArgs = append(workerArgs, args...)
 	if callerSock == "" {
-		// The caller identified itself ambiently (no --sock of its own); hand
-		// the worker the absolute socket this scheduler just resolved, so the
-		// detached worker never has to re-run identity resolution to find it.
+		// Hand the detached worker the ambiently resolved absolute socket.
 		workerArgs = append(workerArgs, reloadSocketFlag, socketPath)
 	}
 	if callerPane == "" {
-		// --pane travels with the worker whether or not the caller passed
-		// --sock: a caller-supplied --sock alone can still name a multi-pane
-		// server, and only THIS scheduler — with its live ancestry or $TMUX —
-		// knew which of those panes was actually asking. A caller who named a
-		// pane itself already has one in `args`; appending a second would
-		// leave the worker's parser taking whichever came last, with no
-		// "specified twice" complaint of the kind --account makes.
+		// Preserve the scheduler-resolved pane unless the caller supplied one.
 		workerArgs = append(workerArgs, reloadPaneFlag, pane)
 	}
 	command := exec.Command(os.Args[0], workerArgs...)
@@ -274,10 +262,7 @@ func runChatReloadWorkerWithRuntime(
 			index++
 			effort = args[index]
 		case reloadPaneFlag:
-			// Internal: only the scheduler in runChatReloadWithRuntime ever
-			// appends this. It is not in reload.Usage and never documented to
-			// an operator — see reloadTarget for why the worker cannot afford
-			// to re-derive it.
+			// Internal scheduler plumbing; intentionally absent from reload.Usage.
 			if index+1 >= len(args) {
 				fmt.Fprintln(stderr, "pfm chat reload: --pane needs a pane id")
 				return 2
@@ -333,25 +318,12 @@ func runChatReloadWorkerWithRuntime(
 	if code != 0 {
 		return code
 	}
-	// T1 re-arm (2 of 2): a seat born with --role remembered its role in a
-	// crumb (cmd/pfm/run_command.go, WriteCrumb). ReadCrumb's three states
-	// stay distinct — no crumb is silently today's behavior; a crumb that
-	// exists but could not be read is a real error, never folded into "no
-	// role"; a live crumb appends rearm.Pointer to whatever --then already
-	// carries, flattened the same way the operator's own --then is, so it
-	// becomes one more line in the SAME single steer, never a rewrite of it.
+	// Re-arm a remembered role in the same flattened steer as --then.
 	if roleCrumb, ok, err := rearm.ReadCrumb(resolved.SIDDir, filepath.Base(socketPath), pane); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	} else if ok {
-		// rearm.DefaultThresholdBytes UNCHANGED here — deliberately, not an
-		// oversight. This channel is reloadCommandTmux.SendLiteral: one
-		// literal tmux send-keys -l of the whole steer, with no auto-file
-		// spill (unlike internal/inject/engine.go's self-compact channel,
-		// which spills any body above ~720-900 runes into a snapshot file —
-		// see rearmThresholdBytes there for why that path derives its own,
-		// smaller budget). Full text genuinely lands here at or under 4KB;
-		// do not "harmonize" this constant with the self-compact one.
+		// This literal tmux channel supports DefaultThresholdBytes without spill.
 		pointer := flattenThenLine(rearm.Pointer(roleCrumb, rearm.DefaultThresholdBytes))
 		if then == "" {
 			then = pointer
@@ -370,13 +342,10 @@ func runChatReloadWorkerWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
 	}
-	// leftBehind keeps the conversation's id past the --new blanking below:
-	// --hide acts on it, and only once Run has reported the reboot complete.
+	// Keep the old id for a post-success --hide.
 	leftBehind := id
 	if newSeat {
-		// transcript is kept: it still supplies the CWD below. Only the
-		// resumed session id is dropped, so claudeRun/codexRun omit
-		// --resume/resume and Result.New (SessionID == "") reports true.
+		// Keep transcript for CWD, but clear the id so the run starts fresh.
 		id = ""
 		if hide {
 			fmt.Fprintln(
@@ -528,13 +497,7 @@ func reloadSocketArgument(args []string) string {
 	return ""
 }
 
-// reloadPaneArgument reports a caller-supplied --pane, the sibling of
-// reloadSocketArgument. The scheduler reads it so that `--sock SERVER --pane
-// PANE` disambiguates a multi-pane server the way the flag's shape promises:
-// accepting the flag in validateReloadArgs and then resolving as though it
-// were absent would refuse that call with "has multiple panes" — accepting an
-// argument and silently dropping it is worse than the flat rejection this
-// validator used to give.
+// reloadPaneArgument reads the worker pane used to disambiguate a server.
 func reloadPaneArgument(args []string) string {
 	for index := 0; index+1 < len(args); index++ {
 		if args[index] == reloadPaneFlag {

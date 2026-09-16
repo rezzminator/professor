@@ -28,41 +28,22 @@ const (
 	keyDown       = "down"
 	keyCtrlP      = "ctrl+p"
 	keyCtrlN      = "ctrl+n"
-	// statsRefreshInterval is the Limits/Stats tab sample cadence while
-	// somebody is watching. The Stats tab (resourcesOnly — live CPU/memory
-	// bars) keeps this flat; the Limits tab decays via statsCadence instead
-	// (statsRefreshGrowth/statsRefreshMaxInterval), because this was the
-	// picker's last periodic loop without an idle backoff: an untouched
-	// Limits tab ticked every 2s forever, which is what kept re-arming a
-	// Codex provider sampler that execs `codex app-server` per fetch (2026-
-	// 09-08 measurement, devbox: one thread at 70%, `codex app-server`
-	// spawned every ~10s — see stats.CodexLiveLimitsTTL).
+	// statsRefreshInterval is the Limits/Stats cadence while watched. Stats
+	// (resourcesOnly — live CPU/memory bars) stays flat; Limits decays via
+	// statsCadence because its former 2s loop kept re-arming the Codex provider
+	// sampler (`codex app-server`; see stats.CodexLiveLimitsTTL).
 	statsRefreshInterval = 2 * time.Second
-	// defaultTickCadenceGrowth/statsRefreshMaxInterval are the Limits tab's
-	// tickCadence arithmetic — the same law as the sky tick (see
-	// skyTickGrowth above), just gentler: 2s stretching to 30s over a
-	// leisurely climb rather than parking outright, because a Limits sample
-	// remains cheap to at least glance at (SampleLive always returns the
-	// last-good cached card immediately; it never blocks on the network).
+	// statsRefreshMaxInterval caps Limits' tickCadence backoff at 30s rather
+	// than parking; SampleLive returns its last-good card without blocking.
 	statsRefreshMaxInterval = 30 * time.Second
 	cosmosRefreshInterval   = 2 * time.Second
 	clockRefreshInterval    = 5 * time.Second
-	// skyTickBaseInterval is the ambient sky/cosmos header widget's cadence
-	// while somebody is watching — ~8fps, fast enough that comets, wind, and
-	// twinkle read as motion. Unlike the fleet scan and the Stats/Cosmos tab
-	// samplers (both already gated off the moment their tab loses focus),
-	// this tick used to run unconditionally for the picker's entire life,
-	// tab or no tab, idle or not — an abandoned `pfm ls` (VS Code's
-	// tab-revival storm, 2026-09-03) rendered a full frame eight times a
-	// second for as long as the pane stayed open.
+	// skyTickBaseInterval is the watched ambient sky/cosmos cadence: ~8fps,
+	// enough for motion. Unlike tab-gated samplers, this tick once rendered
+	// for the picker's entire life, even when idle or on another tab.
 	//
-	// defaultTickCadenceGrowth decays it via the same tickCadence arithmetic that backs
-	// off the fleet scan (see activity.go), but steeper: at 8fps a gentle
-	// 1.1x ramp still takes minutes to matter, so skyTickParkThreshold marks
-	// the point — reached within a few seconds of continuous idle — where
-	// the loop stops rescheduling itself entirely rather than merely ticking
-	// slower forever. A keystroke (see wakeSky) restarts it instantly rather
-	// than waiting for a stale, already-scheduled tick to fire.
+	// tickCadence backs it off steeply; at skyTickParkThreshold the loop stops
+	// rescheduling entirely. wakeSky restarts it immediately on input.
 	skyTickBaseInterval  = 125 * time.Millisecond
 	skyTickParkThreshold = 1 * time.Second
 )
@@ -604,7 +585,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 		model.actionIndex = 0
 		return model, nil
 	case "pgdown":
-		model.cursor = minInt(
+		model.cursor = min(
 			maxInt(0, len(model.filtered)-1),
 			model.cursor+model.pageRows(),
 		)
@@ -898,11 +879,11 @@ func (model Model) updateLimitsKey(key string) (tea.Model, tea.Cmd) {
 	maximum := maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight)
 	switch key {
 	case keyDown, keyCtrlN:
-		model.limitsOffset = minInt(maximum, model.limitsOffset+1)
+		model.limitsOffset = min(maximum, model.limitsOffset+1)
 	case "up", keyCtrlP:
 		model.limitsOffset = maxInt(0, model.limitsOffset-1)
 	case "pgdown":
-		model.limitsOffset = minInt(maximum, model.limitsOffset+innerHeight)
+		model.limitsOffset = min(maximum, model.limitsOffset+innerHeight)
 	case "pgup":
 		model.limitsOffset = maxInt(0, model.limitsOffset-innerHeight)
 	case "home":
@@ -1047,7 +1028,7 @@ func (model *Model) applyStats(snapshot pfmstats.Snapshot) {
 	model.adoptClock(snapshot.SampleTime)
 	model.sortStats(follow)
 	innerWidth, innerHeight := model.limitViewportDimensions()
-	model.limitsOffset = minInt(model.limitsOffset, maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight))
+	model.limitsOffset = min(model.limitsOffset, maxInt(0, len(model.renderLimitCards(innerWidth))-innerHeight))
 }
 
 func (model *Model) sortStats(follow string) {
@@ -1073,7 +1054,7 @@ func (model *Model) sortStats(follow string) {
 			}
 		}
 	}
-	model.statsCursor = minInt(model.statsCursor, len(model.stats.Chats)-1)
+	model.statsCursor = min(model.statsCursor, len(model.stats.Chats)-1)
 }
 
 func (model Model) selectedStatsKey() string {
@@ -1495,7 +1476,7 @@ func (model *Model) refilter(follow string, fallback int) {
 			}
 		}
 	}
-	model.cursor = minInt(maxInt(fallback, 0), len(model.filtered)-1)
+	model.cursor = min(maxInt(fallback, 0), len(model.filtered)-1)
 }
 
 func runeSubsequence(pattern, candidate string) bool {
@@ -1635,13 +1616,6 @@ func (model Model) ValidUTF8Query() bool        { return utf8.ValidString(model.
 func (model Model) HasVisibleSelection() bool { // compact invariant helper
 	return len(model.filtered) == 0 ||
 		(model.cursor >= 0 && model.cursor < len(model.filtered))
-}
-
-func minInt(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
 }
 
 func maxInt(left, right int) int {

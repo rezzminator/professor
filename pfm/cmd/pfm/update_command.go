@@ -36,11 +36,7 @@ var (
 	updateRollbackDoctor  = runUpdateDoctor
 )
 
-// doctorOutcome is the verdict a candidate/baseline/rollback doctor run
-// reported — never an error on its own. Exit is the process exit code
-// (doctor.go: 0 clean, 1 warnings, 2 usage, 3 failures); Output is the
-// candidate's full captured stdout, read back to diff new warning rows
-// against a baseline and to detect a pre-M2 rollback binary.
+// doctorOutcome carries a doctor's exit/tallies and captured output for diffs.
 type doctorOutcome struct {
 	Exit     int
 	Warnings int
@@ -48,12 +44,7 @@ type doctorOutcome struct {
 	Output   string
 }
 
-// doctorExitError carries a doctor subprocess's own exit code and captured
-// output back to the caller as data, not as an opaque "target candidate
-// doctor: exit status N" — runUpdateDoctor/runUpdateBaselineDoctor read it to
-// build a doctorOutcome instead of treating every non-zero doctor exit as a
-// spawn failure. `install`'s error path is unaffected; this type is produced
-// only for the "doctor" subcommand.
+// doctorExitError preserves a doctor's nonzero verdict separately from spawn failure.
 type doctorExitError struct {
 	code   int
 	output string
@@ -77,9 +68,7 @@ var (
 	doctorDigitPattern = regexp.MustCompile(`\d+`)
 )
 
-// parseDoctorTally reads the `doctor: warnings=N` / `doctor: failures=M`
-// summary lines doctor.go prints (M2's exit-code table): absent means 0,
-// never "unknown" — the summary is only ever omitted when that tier is zero.
+// parseDoctorTally reads doctor summary rows; an omitted tier is zero.
 func parseDoctorTally(output string) (warnings, failures int) {
 	for _, match := range doctorTallyPattern.FindAllStringSubmatch(output, -1) {
 		count, err := strconv.Atoi(match[2])
@@ -95,10 +84,7 @@ func parseDoctorTally(output string) (warnings, failures int) {
 	return warnings, failures
 }
 
-// normalizeDoctorRow masks decimal runs and hex sequences of 8+ characters
-// (PIDs, byte counts, timestamps, content hashes) so a row that differs from
-// its baseline twin only by one of those numbers is recognised as the SAME
-// row, not a new one.
+// normalizeDoctorRow masks volatile numbers and long hex values before diffing.
 func normalizeDoctorRow(line string) string {
 	masked := doctorHexPattern.ReplaceAllString(line, "#")
 	return doctorDigitPattern.ReplaceAllString(masked, "#")
@@ -110,10 +96,7 @@ func isDoctorSummaryLine(line string) bool {
 		line == "doctor: clean"
 }
 
-// diffNewDoctorWarningRows returns every candidate output line with no
-// normalised twin in the baseline output, in the candidate's own order —
-// the rows the update itself introduced, read before the next update per the
-// doors table.
+// diffNewDoctorWarningRows returns candidate rows absent from the baseline.
 func diffNewDoctorWarningRows(baselineOutput, candidateOutput string) []string {
 	baselineRows := make(map[string]bool)
 	for _, line := range strings.Split(baselineOutput, "\n") {
@@ -135,13 +118,7 @@ func diffNewDoctorWarningRows(baselineOutput, candidateOutput string) []string {
 	return newRows
 }
 
-// rollbackDoctorPredatesFailureTiers reports whether a rollback doctor's
-// exit-1 output carries none of the three markers only a tier-aware doctor
-// ever prints: `doctor: failures=` (only emitted when failures > 0 —
-// doctor.go's printCombinedDoctor), `doctor: warnings=` (only emitted when
-// warnings > 0, so a warnings-only run NEVER prints `doctor: failures=`),
-// or `doctor: clean`. Such a binary predates this milestone and exits 1 on
-// warnings alone; its rollback is not residue.
+// rollbackDoctorPredatesFailureTiers recognizes old doctors that exit 1 on warnings.
 func rollbackDoctorPredatesFailureTiers(output string) bool {
 	return !strings.Contains(output, "doctor: failures=") &&
 		!strings.Contains(output, "doctor: warnings=") &&
@@ -350,12 +327,7 @@ func updateRepository(
 	if err != nil {
 		return fmt.Errorf("snapshot hook files before install: %w", err)
 	}
-	// Baseline doctor: the CURRENT binary's own health, read before any owned
-	// binary is replaced below — the pre-existing warnings the candidate's
-	// doctor is never blamed for (issue #24 finding 1). A baseline that
-	// cannot run, or answers with a code doctor never treats as a verdict
-	// (usage=2), never blocks the update: it is printed and the delta report
-	// below treats every candidate warning as new.
+	// Read current health before replacement so candidate deltas exclude old warnings.
 	baselineOutcome, baselineErr := updateBaselineDoctor(ctx, runtime, skipHarvest, stdout, stderr)
 	switch {
 	case baselineErr != nil:
@@ -506,9 +478,7 @@ func updateRepository(
 			}
 		}
 	default:
-		// A doctor exit code that is not one of doctor.go's own 0/1/3 (its
-		// usage-error 2, or anything a future release adds) answered nothing
-		// this gate can trust — never treated as a clean verdict.
+		// Unknown/usage exits are not health verdicts.
 		return updateFailure(
 			fmt.Errorf(
 				"doctor after update: exited %d — a doctor that cannot run is not a verdict",
@@ -739,12 +709,7 @@ func buildUpdateCandidate(ctx context.Context, repo, version, output string) err
 	if _, err := os.Stat(filepath.Join(repo, "pfm", "go.mod")); err == nil {
 		moduleRoot = filepath.Join(repo, "pfm")
 	}
-	// -buildvcs=false: the stage is a git worktree, whose .git is a FILE that
-	// cmd/go does not accept as a VCS root, so VCS stamping walks up and dies
-	// on any stray .git directory above it ("error obtaining VCS status").
-	// The version is stamped through -ldflags, and displayVersion reads VCS
-	// info only for an unstamped "dev" build, so nothing is lost. GOFLAGS is
-	// cleared below, so the flag must be an argument.
+	// The staged worktree needs explicit -buildvcs=false; GOFLAGS is cleared.
 	command := exec.CommandContext(
 		ctx,
 		deps.Executable("go"),

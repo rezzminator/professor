@@ -21,9 +21,7 @@ import (
 	"hostops/pfm/internal/transcript"
 )
 
-// Exit codes the headless family answers with. A consumer scripts against
-// these, so they are a contract: 0 only ever means the chat was found and the
-// verb did what it says.
+// Headless exit codes are a scripting contract: 0 means the verb succeeded.
 const (
 	helpFlag        = "--help"
 	helpCommand     = "help"
@@ -33,12 +31,9 @@ const (
 	thenAction      = "then"
 	codeUnknownChat = 4
 	codeDeadChat    = 3
-	// codeAwaitTimeout says the message was delivered and the chat is still
-	// working — a different fact from every failure, and the one a caller
-	// retries rather than escalates.
+	// codeAwaitTimeout means delivered but still working; callers may retry.
 	codeAwaitTimeout = 5
-	// codeUndelivered says nothing reached the model. The chat may be fine;
-	// the message is not in it.
+	// codeUndelivered means nothing reached the model.
 	codeUndelivered = 6
 )
 
@@ -125,9 +120,7 @@ func runChatWithRuntime(
 	case "reload":
 		return runChatReloadWithRuntime(rest, stdout, stderr, runtime)
 	case whoamiCommand:
-		// The settled public command is `pfm whoami`; `pfm chat whoami`
-		// remains a compatibility alias for callers already spelling it
-		// this way.
+		// Compatibility alias for the public `pfm whoami` command.
 		return runWhoami(rest, stdout, stderr, runtime)
 	case "find", "save", branchAction, "history", "ls":
 		return runChatSatellite(verb, rest, stdin, stdout, stderr, runtime)
@@ -434,9 +427,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 	messageFile := flags.String("file", "", "read the message from a file")
 	var steers steerList
 	flags.Var(&steers, thenAction, "follow-up steer; repeat for a chain")
-	// Only the flags BEFORE the name are parsed: everything after it is the
-	// message, verbatim. A message may legitimately start with a dash, and an
-	// order silently eaten as a flag is an order never delivered.
+	// Parse only flags before the name; the message may start with a dash.
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
@@ -606,8 +597,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 		}
 	}
 	if result.Unsigned {
-		// The recipient is told the message is unsigned; the SENDER is the one
-		// who can do something about it, and only if the reason reaches them.
+		// The sender also needs the unsigned warning because only it can act.
 		writeUnsignedInjectWarning(stderr)
 	}
 	return writeInjectResult(result, targetName, stdout, stderr)
@@ -637,21 +627,12 @@ func (single *singleSteer) Set(value string) error {
 	return nil
 }
 
-// runHeadlessSelfCompact is the CLI twin of the chat_self_compact MCP tool —
-// both share Engine.ScheduleSelfCompact (Task D), the ONE implementation
-// that composes "/compact " + focus and waits for the caller's OWN turn to
-// end before typing it, never a live /compact keystroke raced against
-// whatever the operator is doing right now
-// (the 2026-09-03 self-compact that ate an operator's live draft).
+// runHeadlessSelfCompact shares the MCP tool's ScheduleSelfCompact path, which
+// waits for the caller's turn to end instead of racing a live /compact.
 func runHeadlessSelfCompact(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := newFlagSet(
 		"chat self-compact",
-		// --then is NOT optional here, unlike chat inject's own
-		// [--then STEER]...: checkSteerChain unconditionally refuses any
-		// /compact primary (which is exactly what ScheduleSelfCompact
-		// always composes) carrying zero Then entries, so a self-compact
-		// call omitting --then always fails (F9 of the merge-gating
-		// review). Bracket-free and singular on purpose: exactly one.
+		// ScheduleSelfCompact requires exactly one continuation steer.
 		"usage: pfm chat self-compact --then STEER <focus>",
 		stderr,
 	)
@@ -722,13 +703,7 @@ func writeInjectResult(
 	}
 	fmt.Fprintln(stdout, result.Message)
 	if result.Proof != "" {
-		// A "scheduled" result (runHeadlessSelfCompact's success case: the
-		// primary hasn't typed yet, it rides out the caller's own turn
-		// first) carries no pane proof — Typed and Proof both stay Go zero
-		// values. Printing the "--- delivery proof ---" framing anyway
-		// would sit an empty body under a header that reads as confirmed,
-		// verified delivery to anyone scanning stdout, when nothing has
-		// actually been typed yet.
+		// Scheduled self-compaction has no proof until it is typed.
 		fmt.Fprintln(stdout, "--- delivery proof: target pane tail ---")
 		fmt.Fprintln(stdout, result.Proof)
 		fmt.Fprintln(stdout, "--- end delivery proof ---")
@@ -736,11 +711,7 @@ func writeInjectResult(
 	return 0
 }
 
-// writeUnsignedInjectWarning is now reached only when the operator asked for
-// it with --allow-unsigned. Without that flag the send is REFUSED before
-// delivery (inject.ErrUnsigned), because a message the recipient must not act
-// on was never worth delivering. The warning stays because a deliberate
-// unsigned send should still say what it cost.
+// writeUnsignedInjectWarning explains the risk of an explicit unsigned send.
 func writeUnsignedInjectWarning(stderr io.Writer) {
 	fmt.Fprintln(
 		stderr,

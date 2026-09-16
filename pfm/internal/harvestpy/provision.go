@@ -25,43 +25,28 @@ import (
 var ErrOfflineUnavailable = errors.New("harvestpy input is unavailable offline")
 
 const (
-	incompleteMarkerName = "INCOMPLETE"
-	uvFlagFormat         = "--format"
-	uvFlagPython         = "--python"
-	uvCommandPip         = "pip"
-	uvCommandList        = "list"
-	uvListFormatFreeze   = "freeze"
-	provisionStateReady  = "ready"
-	featureStateDisabled = "disabled"
-	goosDarwin           = "darwin"
-	goosLinux            = "linux"
-	goarchAMD64          = "amd64"
-	goarchARM64          = "arm64"
+	incompleteMarkerName, uvFlagFormat, uvFlagPython = "INCOMPLETE", "--format", "--python"
+	uvCommandPip, uvCommandList, uvListFormatFreeze  = "pip", "list", "freeze"
+	provisionStateReady, featureStateDisabled        = "ready", "disabled"
+	goosDarwin, goosLinux                            = "darwin", "linux"
+	goarchAMD64, goarchARM64                         = "amd64", "arm64"
 )
 
 var errProvisioningIncomplete = errors.New("harvestpy provisioning did not finish")
 
-// DownloadFunc is injected by tests/build tooling; the default is an atomic
-// HTTP downloader with no shell interpolation.
-type DownloadFunc func(context.Context, string, string) error
-
-// RunFunc executes uv commands.  The working directory is explicit and the
-// executable/arguments are never passed through a shell.
-type RunFunc func(context.Context, string, []string, string) ([]byte, error)
-
-// SmokeFunc verifies that one provisioned runtime can start the converter and
-// complete its no-download smoke protocol.
-type SmokeFunc func(context.Context, Runtime) (map[string]any, error)
-
-type ProvisionOptions struct {
-	Root     string
-	Cache    string
-	Platform Platform
-	Offline  bool
-	Download DownloadFunc
-	Run      RunFunc
-	Smoke    SmokeFunc
-}
+type (
+	DownloadFunc     func(context.Context, string, string) error
+	RunFunc          func(context.Context, string, []string, string) ([]byte, error)
+	SmokeFunc        func(context.Context, Runtime) (map[string]any, error)
+	ProvisionOptions struct {
+		Root, Cache string
+		Platform    Platform
+		Offline     bool
+		Download    DownloadFunc
+		Run         RunFunc
+		Smoke       SmokeFunc
+	}
+)
 
 type ProvisionResult struct {
 	Digest      string
@@ -69,10 +54,7 @@ type ProvisionResult struct {
 	Runtime     Runtime
 }
 
-// InstallPlan is the read-only, machine-renderable price of a pinned target.
-// PackageDownloadBytes is cold-cache measured for linux-amd64 and computed from
-// the exact pinned artifact set for the other supported targets; blocked targets
-// carry an explicit reason instead of an estimate.
+// InstallPlan is a pinned target's machine-readable price; blocked targets carry a reason.
 type InstallPlan struct {
 	Platform              string   `json:"platform"`
 	PythonVersion         string   `json:"python_version"`
@@ -91,8 +73,7 @@ type InstallPlan struct {
 	EnvironmentBytes      int64    `json:"environment_bytes"`
 }
 
-// Plan returns pinned URLs/hashes and measured/reported size fields without
-// touching disk or network.
+// Plan returns pinned inputs and measured sizes without touching disk or network.
 func Plan(platform Platform) (InstallPlan, error) {
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = runtime.GOOS, runtime.GOARCH
@@ -138,14 +119,11 @@ func packagePlan(platform Platform) (int64, string, []string) {
 	}
 }
 
-// RuntimeRoot is the stable current pointer consumed by installer/doctor.
 func RuntimeRoot(root string, platform Platform) string {
 	return filepath.Join(root, "env", platform.String(), "current")
 }
 
-// Provision downloads/verifies inputs, converges an isolated environment at
-// its final versioned path, runs two no-download smokes, then atomically
-// publishes the current pointer.
+// Provision converges and smoke-tests a pinned environment before publishing it atomically.
 func Provision(ctx context.Context, options ProvisionOptions) (ProvisionResult, error) {
 	return provision(ctx, options, immutableTargets)
 }
@@ -188,14 +166,10 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	); err == nil && existing.Digest == desired &&
 		existing.State == provisionStateReady {
 		if _, checkErr := Check(ctx, options.Root, platform); checkErr == nil {
-			return ProvisionResult{
-				Digest:      desired,
-				Environment: existing,
-				Runtime: Runtime{
-					Python: filepath.Join(current, "project", ".venv", "bin", "python"),
-					Script: filepath.Join(current, "project", "converter.py"),
-				},
-			}, nil
+			return ProvisionResult{Digest: desired, Environment: existing, Runtime: Runtime{
+				Python: filepath.Join(current, "project", ".venv", "bin", "python"),
+				Script: filepath.Join(current, "project", "converter.py"),
+			}}, nil
 		}
 	}
 	uvArchive := filepath.Join(options.Cache, "uv-"+platform.String()+".tar.gz")
@@ -259,9 +233,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err := extractNamedBinary(uvArchive, "uv", uvPath); err != nil {
 		return ProvisionResult{}, fmt.Errorf("extract harvestpy uv: %w", err)
 	}
-	// The standalone archive already carries its top-level `python/` tree;
-	// extract into the final version root so the published layout is
-	// <digest>/python/{BUILD,bin,lib,...}, not a double python/python nesting.
+	// The archive includes `python/`, so extract into the version root rather than nesting python/python.
 	pythonPath, err := extractPython(pythonArchive, staging)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("extract harvestpy Python: %w", err)
@@ -291,12 +263,8 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy locked dependency check failed: %w", err)
 	}
-	inventoryOutput, err := options.Run(
-		ctx,
-		uvPath,
-		[]string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, venvPython},
-		project,
-	)
+	inventoryArgs := []string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, venvPython}
+	inventoryOutput, err := options.Run(ctx, uvPath, inventoryArgs, project)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy installed inventory failed: %w", err)
 	}
@@ -304,8 +272,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy installed inventory is invalid: %w", err)
 	}
-	base.InventorySHA256 = inventorySHA
-	base.InventoryCount = inventoryCount
+	base.InventorySHA256, base.InventoryCount = inventorySHA, inventoryCount
 	smoke, err := options.Smoke(ctx, Runtime{Python: venvPython, Script: filepath.Join(project, "converter.py")})
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("harvestpy no-download smoke: %w", err)
@@ -324,8 +291,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	base.Imports = imports
 	base.State = provisionStateReady
 	base.Environment = final
-	// The environment is never renamed after uv sync; both smokes judge the
-	// same final runtime path.
+	// The environment is never renamed after uv sync; both smokes judge the same final runtime path.
 	finalRuntime := Runtime{
 		Python: filepath.Join(final, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(final, "project", "converter.py"),
@@ -367,8 +333,6 @@ func smokeRuntime(ctx context.Context, converterRuntime Runtime) (map[string]any
 	return result, err
 }
 
-// Inspect reads the current machine-readable environment record without
-// executing a converter.
 func Inspect(root string, platform Platform) (EnvironmentDigest, error) {
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = runtime.GOOS, runtime.GOARCH
@@ -388,10 +352,8 @@ func findIncompleteEnvironment(root string, platform Platform) (EnvironmentDiges
 		return EnvironmentDigest{}, false, nil
 	}
 	if err != nil {
-		return EnvironmentDigest{}, false, fmt.Errorf(
-			"inspect harvestpy environment root for incomplete provisioning: %w",
-			err,
-		)
+		return EnvironmentDigest{}, false,
+			fmt.Errorf("inspect harvestpy environment root for incomplete provisioning: %w", err)
 	}
 	for _, entry := range entries {
 		if !entry.IsDir() || strings.Contains(entry.Name(), ".repair-") {
@@ -420,11 +382,7 @@ func findIncompleteEnvironment(root string, platform Platform) (EnvironmentDiges
 	return EnvironmentDigest{}, false, nil
 }
 
-func ensureInput(
-	ctx context.Context,
-	path string,
-	input Artifact,
-	offline bool,
+func ensureInput(ctx context.Context, path string, input Artifact, offline bool,
 	download DownloadFunc,
 ) (returnErr error) {
 	if _, err := os.Stat(path); err == nil {
@@ -813,13 +771,8 @@ func runCommand(ctx context.Context, executable string, arguments []string, dire
 	command.Stderr = &stderr
 	err := command.Run()
 	if err != nil {
-		return stdout.Bytes(), fmt.Errorf(
-			"%s %s: %w (stderr: %s)",
-			executable,
-			strings.Join(arguments, " "),
-			err,
-			strings.TrimSpace(stderr.String()),
-		)
+		return stdout.Bytes(), fmt.Errorf("%s %s: %w (stderr: %s)", executable, strings.Join(arguments, " "), err,
+			strings.TrimSpace(stderr.String()))
 	}
 	return stdout.Bytes(), nil
 }

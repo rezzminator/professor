@@ -24,7 +24,6 @@ type fakePane struct {
 	name   string
 	alive  bool
 }
-
 type fakeHost struct {
 	mu            sync.Mutex
 	panes         map[string]*fakePane
@@ -54,10 +53,7 @@ func (host *fakeHost) NewSession(_ context.Context, spec spawn.SessionSpec) erro
 	return nil
 }
 
-func (host *fakeHost) Capture(
-	_ context.Context,
-	socket, _ string,
-) (string, error) {
+func (host *fakeHost) Capture(_ context.Context, socket, _ string) (string, error) {
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	pane, ok := host.panes[socket]
@@ -75,10 +71,7 @@ func (host *fakeHost) Capture(
 		return "Session renamed to " + pane.name + "\n›\n100% used", nil
 	case "prompt-typed":
 		if host.cropPrompt {
-			// A real 20KB+ composer can scroll its first line outside the
-			// visible capture. The prompt is still present (and its leading
-			// composer marker is visible), but spawn's first-line fingerprint
-			// cannot occur in these cropped rows.
+			// A 20KB+ composer can crop the first line while retaining the prompt and marker.
 			return "› tail of the large prompt remains in the composer\n100% used", nil
 		}
 		first := pane.prompt
@@ -93,11 +86,7 @@ func (host *fakeHost) Capture(
 	}
 }
 
-func (host *fakeHost) SendLiteral(
-	_ context.Context,
-	socket, _ string,
-	value string,
-) error {
+func (host *fakeHost) SendLiteral(_ context.Context, socket, _, value string) error {
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	pane := host.panes[socket]
@@ -114,11 +103,7 @@ func (host *fakeHost) SendLiteral(
 	return nil
 }
 
-func (host *fakeHost) SendKey(
-	_ context.Context,
-	socket, _ string,
-	key string,
-) error {
+func (host *fakeHost) SendKey(_ context.Context, socket, _, key string) error {
 	host.mu.Lock()
 	defer host.mu.Unlock()
 	pane := host.panes[socket]
@@ -142,10 +127,7 @@ func (host *fakeHost) SocketAlive(_ context.Context, socket string) bool {
 	return ok && pane.alive
 }
 
-func (host *fakeHost) PaneRootPID(
-	_ context.Context,
-	_, _ string,
-) (int, error) {
+func (host *fakeHost) PaneRootPID(_ context.Context, _, _ string) (int, error) {
 	return host.paneRootPID, host.paneRootErr
 }
 
@@ -185,10 +167,7 @@ type fakeProcessJailer struct {
 	killErr    error
 }
 
-func (jailer *fakeProcessJailer) Capture(
-	_ context.Context,
-	rootPID int,
-) (ProcessGroupJail, error) {
+func (jailer *fakeProcessJailer) Capture(_ context.Context, rootPID int) (ProcessGroupJail, error) {
 	if jailer.captureErr != nil {
 		return ProcessGroupJail{}, jailer.captureErr
 	}
@@ -200,10 +179,7 @@ func (jailer *fakeProcessJailer) Capture(
 	return jail, nil
 }
 
-func (jailer *fakeProcessJailer) Kill(
-	_ context.Context,
-	jail ProcessGroupJail,
-) error {
+func (jailer *fakeProcessJailer) Kill(_ context.Context, jail ProcessGroupJail) error {
 	jailer.kills = append(jailer.kills, jail)
 	return jailer.killErr
 }
@@ -290,9 +266,7 @@ func (log *eventLog) Record(event Event) error {
 	return log.err
 }
 
-func successfulRunner(
-	t *testing.T,
-) successfulRunnerFixture {
+func successfulRunner(t *testing.T) successfulRunnerFixture {
 	t.Helper()
 	stage := t.TempDir()
 	distillTranscript := filepath.Join(t.TempDir(), "distill.jsonl")
@@ -341,11 +315,7 @@ func successfulRunner(
 	}
 }
 
-func runTestNight(
-	ctx context.Context,
-	runner *Runner,
-	request testNightRequest,
-) (testNightResult, error) {
+func runTestNight(ctx context.Context, runner *Runner, request testNightRequest) (testNightResult, error) {
 	prepared, err := runner.PrepareNight(ctx, request.law, request.stage)
 	if err != nil {
 		return testNightResult{}, err
@@ -1008,10 +978,7 @@ func writeCodexTranscript(t *testing.T, path, lastLine string) {
 	writeCodexTranscriptWithConfig(t, path, lastLine, SeatModel, SeatEffort)
 }
 
-func writeCodexTranscriptWithConfig(
-	t *testing.T,
-	path, lastLine, model, effort string,
-) {
+func writeCodexTranscriptWithConfig(t *testing.T, path, lastLine, model, effort string) {
 	t.Helper()
 	content := sessionMeta("id", filepath.Dir(path)) + "\n" +
 		`{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn"}}` + "\n" +

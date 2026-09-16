@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Reza Khosravivala — Professor, the talk deck, LinkedIn, blog, GitHub.">
+<title>Reza Khosravivala</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@800&family=Instrument+Serif:ital@0;1&family=Instrument+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground: #0e1714; --panel: #15211d; --panel2: #1b2924; --line: #2a3833; --text: #e6ebe6; --muted: #8fa099; --amber: #e3a13a; --paper: #f1efe8;
+    --disp: "Big Shoulders Display", "Arial Narrow", sans-serif;
+    --serif: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+    --body: "Instrument Sans", "Helvetica Neue", Arial, sans-serif;
+    --mono: "IBM Plex Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--ground); }
+  body { margin: 0; background: var(--ground); color: var(--text); font-family: var(--body); font-size: 16px; line-height: 1.5; }
+  .wrap { max-width: 560px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 56px; display: flex; flex-direction: column; gap: 22px; }
+  .rule { display: flex; justify-content: space-between; gap: 12px; border-top: 2px solid var(--text); border-bottom: 1px solid var(--line); padding-block: 10px; }
+  .lbl { font-family: var(--mono); font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  .who { display: flex; flex-direction: column; gap: 6px; }
+  .who h1 { margin: 0; font-family: var(--serif); font-weight: 400; font-size: clamp(40px, 10vw, 56px); line-height: .95; letter-spacing: -.01em; color: var(--paper); text-wrap: balance; }
+  .who p { margin: 0; font-family: var(--serif); font-style: italic; font-size: 19px; color: #b9c5bf; }
+  .links { display: flex; flex-direction: column; gap: 10px; list-style: none; margin: 0; padding: 0; }
+  .lk { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 14px 16px; border: 1px solid var(--line); background: var(--panel); color: var(--text); text-decoration: none; transition: border-color 200ms, background 200ms, transform 200ms; }
+  .lk:hover, .lk:focus-visible { border-color: var(--amber); background: var(--panel2); transform: translateX(3px); outline: none; }
+  .lk .t { font-weight: 600; font-size: 17px; line-height: 1.25; }
+  .lk .u { font-family: var(--mono); font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; margin-top: 2px; }
+  .lk .ar { font-family: var(--mono); color: var(--amber); font-size: 18px; }
+  .lk.pro { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 20px 18px 18px; border-color: var(--amber); background: #120f09; box-shadow: 0 0 40px rgba(227,161,58,.12); }
+  .lk.pro .hd { display: flex; align-items: flex-end; gap: 12px; }
+  .lk.pro .hd b { font-family: var(--serif); font-weight: 400; font-size: 52px; line-height: .86; color: var(--paper); }
+  .lk.pro .hd span { font-size: 34px; line-height: 1; padding-bottom: 2px; }
+  .lk.pro .claim { font-family: var(--disp); text-transform: uppercase; font-weight: 800; font-size: 24px; line-height: 1; color: #b9c5bf; }
+  .lk.pro .claim em { font-style: normal; color: var(--amber); }
+  .lk.pro .u { color: #c9d3cd; }
+  .lk.pro .cmd { font-family: var(--mono); font-size: 13px; color: var(--paper); background: #0b0d0c; border: 1px solid #2c302e; padding: 8px 10px; }
+  .lk.pro .cmd i { font-style: normal; color: #7c847f; }
+  .sec { padding-top: 8px; }
+  .foot { font-family: var(--mono); font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+  @media (prefers-reduced-motion: reduce) { .lk { transition: none; } .lk:hover { transform: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="rule"><span class="lbl">Default is for amateurs</span><span class="lbl">2026</span></div>
+
+  <div class="who">
+    <h1>Reza Khosravivala</h1>
+    <p>Builder of Professor</p>
+  </div>
+
+  <ul class="links">
+    <li><a class="lk pro" href="https://github.com/rezzminator/professor" target="_blank" rel="noopener">
+      <div class="hd"><b>Professor</b><span aria-hidden="true">🎓</span></div>
+      <div class="claim">Install <em>15+ PhDs</em> with <em>one</em> command</div>
+      <div class="u">The discipline layer for Claude Code, Codex and OpenCode — a fleet that talks to itself, a harvester nothing can block, rules that bite.</div>
+      <div class="cmd"><i>$</i> pfm install --yes</div>
+      <div class="u">github.com/rezzminator/professor →</div>
+    </a></li>
+
+    <li><a class="lk" href="https://claude.ai/artifact/6n6RhL8aGkngUfUQyS2pag" target="_blank" rel="noopener"><span><span class="t">The talk deck</span><span class="u">every slide, animated · press → to walk it</span></span><span class="ar">→</span></a></li>
+  </ul>
+
+  <div class="sec lbl">Find me</div>
+  <ul class="links">
+    <li><a class="lk" href="https://www.linkedin.com/in/reza-khosravivala/" target="_blank" rel="noopener"><span><span class="t">LinkedIn</span><span class="u">linkedin.com/in/reza-khosravivala</span></span><span class="ar">→</span></a></li>
+    <li><a class="lk" href="https://rezakhosravivala.com" target="_blank" rel="noopener"><span><span class="t">Blog</span><span class="u">rezakhosravivala.com</span></span><span class="ar">→</span></a></li>
+    <li><a class="lk" href="https://github.com/rezzminator" target="_blank" rel="noopener"><span><span class="t">GitHub</span><span class="u">github.com/rezzminator</span></span><span class="ar">→</span></a></li>
+  </ul>
+
+  <div class="foot">Scanned this at the talk? The deck link above replays everything you just saw.</div>
+</div>
+</body>
+</html>

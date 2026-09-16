@@ -63,6 +63,8 @@ type ProcImage interface {
 	Image(pid int) (FileID, error)
 }
 
+func fileIDDevice[T ~int32 | ~uint32 | ~uint64](device T) uint64 { return uint64(device) }
+
 // FileIDOf is the identity of the file at path, following symlinks.
 func FileIDOf(path string) (FileID, error) {
 	info, err := os.Stat(path)
@@ -73,7 +75,7 @@ func FileIDOf(path string) (FileID, error) {
 	if !ok {
 		return FileID{}, fmt.Errorf("stat %s: no device and inode on this platform", path)
 	}
-	return FileID{Device: uint64(stat.Dev), Inode: stat.Ino}, nil
+	return FileID{Device: fileIDDevice(stat.Dev), Inode: stat.Ino}, nil
 }
 
 // NewProcFS returns the process-table reader for a given proc root.

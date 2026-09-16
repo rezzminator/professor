@@ -1556,6 +1556,7 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 		attached    bool
 		activityAgo time.Duration
 		forceNow    bool
+		draft       string
 		clientErr   error
 		wantCode    int
 		wantStatus  string
@@ -1564,9 +1565,20 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 		refuseNever string
 	}{
 		{
-			name:        "recent activity refuses",
+			// tmux's client_activity moves on focus events, mouse reports and
+			// the terminal's own query replies, not only keystrokes — an
+			// attached VS Code tab looks "typing" forever. Only a draft in the
+			// composer proves a human mid-sentence.
+			name:        "recent activity with an empty composer delivers",
 			attached:    true,
 			activityAgo: time.Second,
+			wantDeliver: true,
+		},
+		{
+			name:        "recent activity with a draft refuses",
+			attached:    true,
+			activityAgo: time.Second,
+			draft:       "❯ half a sentence",
 			wantCode:    CodeBusy,
 			wantStatus:  "typing",
 			wantSubstr:  []string{"%1", "force_now"},
@@ -1596,6 +1608,9 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			fake := &fakeTmux{capture: "conversation\n❯ ", submitOnEnter: true}
+			if test.draft != "" {
+				fake.capture = "conversation\n" + test.draft
+			}
 			fake.clientAttached = test.attached
 			fake.clientErr = test.clientErr
 			engine := newTestEngine(t, "cc-typist-guard", fake)

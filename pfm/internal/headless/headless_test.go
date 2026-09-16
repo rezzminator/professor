@@ -315,3 +315,29 @@ func TestWatchOnceStopsAtTheFirstIdle(t *testing.T) {
 		t.Fatalf("watch output = %q status = %#v", out.String(), status)
 	}
 }
+
+// TestIdleSecondsStayZeroWhileAToolRuns: idle_seconds is idleness, not silence.
+// A chat mid tool run writes nothing for minutes; counting that as idle time
+// handed a caller "working, idle 400 s" — two facts that contradict each other,
+// and a settle rule keyed on the number alone would have called the work done.
+func TestIdleSecondsStayZeroWhileAToolRuns(t *testing.T) {
+	path := writeChat(t, userLine("go"), toolLine("Bash"))
+	stamp := time.Now().Add(-90 * time.Second)
+	if err := os.Chtimes(path, stamp, stamp); err != nil {
+		t.Fatal(err)
+	}
+	status, err := Inspect(
+		context.Background(),
+		Chat{Name: "seat", Engine: "cc", Path: path, Live: true},
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != StateWorking {
+		t.Fatalf("state = %q, want %q", status.State, StateWorking)
+	}
+	if status.IdleSeconds != 0 {
+		t.Fatalf("idle seconds = %d while working, want 0", status.IdleSeconds)
+	}
+}

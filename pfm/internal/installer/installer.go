@@ -1412,16 +1412,22 @@ func (installer *engine) unwireHostOverlays() error {
 	return nil
 }
 
+// wireCommands links pfm's own commands (/reload) into EVERY configured Claude
+// seat's commands/, the way the global registries are wired — a seat whose
+// commands/ is a real directory rather than a symlink to the primary's would
+// otherwise have no /reload at all.
 func (installer *engine) wireCommands(assets []assetFile) error {
-	installer.say("commands -> %s", filepath.Join(installer.options.ConfigDir, "commands"))
-	for _, asset := range assets {
-		target, found := installer.commandTarget(asset.path)
-		if !found {
-			continue
-		}
-		source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
-		if _, err := installer.ensureLink(source, target); err != nil {
-			return err
+	for _, config := range installer.claudeConfigDirs() {
+		installer.say("commands -> %s", filepath.Join(config, "commands"))
+		for _, asset := range assets {
+			target, found := installer.commandTargetIn(config, asset.path)
+			if !found {
+				continue
+			}
+			source := filepath.Join(installer.managedRoot, filepath.FromSlash(asset.path))
+			if _, err := installer.ensureLink(source, target); err != nil {
+				return err
+			}
 		}
 	}
 	installer.say("")
@@ -1429,14 +1435,16 @@ func (installer *engine) wireCommands(assets []assetFile) error {
 }
 
 func (installer *engine) unwireCommands(assets []assetFile) error {
-	installer.say("commands -> %s", filepath.Join(installer.options.ConfigDir, "commands"))
-	for _, asset := range assets {
-		target, found := installer.commandTarget(asset.path)
-		if !found {
-			continue
-		}
-		if err := installer.unlinkOne(target); err != nil {
-			return err
+	for _, config := range installer.claudeConfigDirs() {
+		installer.say("commands -> %s", filepath.Join(config, "commands"))
+		for _, asset := range assets {
+			target, found := installer.commandTargetIn(config, asset.path)
+			if !found {
+				continue
+			}
+			if err := installer.unlinkOne(target); err != nil {
+				return err
+			}
 		}
 	}
 	if err := installer.retireLegacySwapCommand(); err != nil {
@@ -1447,7 +1455,11 @@ func (installer *engine) unwireCommands(assets []assetFile) error {
 }
 
 func (installer *engine) commandTarget(asset string) (string, bool) {
-	commands := filepath.Join(installer.options.ConfigDir, "commands")
+	return installer.commandTargetIn(installer.options.ConfigDir, asset)
+}
+
+func (installer *engine) commandTargetIn(config, asset string) (string, bool) {
+	commands := filepath.Join(config, "commands")
 	switch asset {
 	case "reload.command.md":
 		return filepath.Join(commands, "reload.md"), true

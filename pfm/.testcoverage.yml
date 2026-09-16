@@ -4,11 +4,9 @@
 profile: tmp/cover/merged.out
 local-prefix: hostops/pfm
 threshold:
-  # Placeholders until the first fenced measurement; `make cover` prints the
-  # real numbers and the wave that lands this file pins them.
   file: 0
-  package: 0
-  total: 0
+  package: 52
+  total: 77
 exclude:
   paths:
     - ^internal/installer/assets/   # staged shell/JS/Python, not Go

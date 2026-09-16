@@ -49,7 +49,6 @@ case "$git_dir" in
 esac
 export PFM_DEV_WORKTREE="$ROOT" PFM_DEV_GIT_COMMON="$git_common" PFM_DEV_GIT_DIR_REL="$git_dir_rel"
 if [ "$FRESH" -eq 1 ] || ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
-  bash "$ROOT/infra/prepare-fence-mounts.sh" "$ROOT"
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker compose -f "$ROOT/infra/docker-compose.yml" run -d --build --name "$NAME" pfm-dev sleep infinity >/dev/null
   echo "demo: container $NAME started"

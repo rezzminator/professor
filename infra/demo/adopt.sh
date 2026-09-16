@@ -31,8 +31,31 @@ if [ ! -f "$DIR/.professor/baseline.json" ]; then
   (cd "$DIR" && pfm init . | tail -2)
 fi
 cd "$DIR"
-pfm chat new --name "$(echo "$NAME" | tr a-z A-Z)_INSTALL" --engine cc --account 1 --cwd "$DIR" --await --timeout 1500 \
-  "pfm init has scaffolded Professor into this repository ($NAME). Follow /worktree/docs/SETUP.md § Install interview end to end, Phase 1 through Phase 3. Use these answers and do not ask them again: project identity: '$PITCH'; character: keep Professor; roster: single project, this repo, language from its package manifest; tech stack: as the repo shows; test command: '$TEST_CMD'; Tier B opt-ins: none; Codex dual-runtime: no; sacred ground: none beyond the defaults; ports: none. Treat 'go' as already typed. Fill every registered token from /worktree/docs/PLACEHOLDERS.md in the scaffolded files, write .professor/manifest.json, run the smoke test, and finish with one line: INSTALLED plus the count of files you changed." >/dev/null
+CHAT="$(echo "$NAME" | tr a-z A-Z)_INSTALL"
+# Idempotent by marker: the interview's own closing commit means the install is
+# done; an existing <NAME>_INSTALL row means it is running — a re-run of up.sh
+# never spawns a second interview, it waits for the first.
+if git log --oneline 2>/dev/null | grep -q "professor: install"; then
+  echo "adopt: $NAME already carries the 'professor: install' commit — interview skipped"
+  exit 0
+fi
+if pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" '$5 == n' | grep -q .; then
+  echo "adopt: $CHAT already exists — waiting for it to settle"
+elif ! pfm chat new --name "$CHAT" --engine cc --account 1 --cwd "$DIR" --await --timeout 1500 \
+  "pfm init has scaffolded Professor into this repository ($NAME). Follow /worktree/docs/SETUP.md § Install interview end to end, Phase 1 through Phase 3. Use these answers and do not ask them again: project identity: '$PITCH'; character: keep Professor; roster: single project, this repo, language from its package manifest; tech stack: as the repo shows; test command: '$TEST_CMD'; Tier B opt-ins: none; Codex dual-runtime: no; sacred ground: none beyond the defaults; ports: none. Treat 'go' as already typed. Fill every registered token from /worktree/docs/PLACEHOLDERS.md in the scaffolded files, write .professor/manifest.json, run the smoke test, and finish with one line: INSTALLED plus the count of files you changed." >/dev/null; then
+  # --await returns early when another message reaches the chat mid-turn (a
+  # hook, a nudge); the chat is still working, so the settle loop below is the
+  # judge, not the exit status.
+  echo "adopt: --await returned early (see above) — waiting on $CHAT's own idle instead"
+fi
+# Settled = the chat has been idle for a full minute; bounded by the same 25 min.
+deadline=$((SECONDS + 1500))
+while :; do
+  idle="$(pfm chat status "$CHAT" --json 2>/dev/null | jq -r '.idle_seconds // 0')"
+  [ "${idle:-0}" -ge 60 ] && break
+  [ "$SECONDS" -lt "$deadline" ] || { echo "adopt: $CHAT did not settle within 25 min (last idle=${idle}s) — attach it: pfm chat capture $CHAT" >&2; exit 1; }
+  sleep 15
+done
 # Only tokens the registry substitutes count: PLACEHOLDERS.md's closing
 # "Runtime metavariables" section registers tokens that stay literal by design
 # ({SCOPE}, {SEED_*}, …), and a shell ${VAR} was never a placeholder.
@@ -40,6 +63,8 @@ reg=/worktree/docs/PLACEHOLDERS.md
 runtime="$(sed -n '/^## Runtime metavariables/,$p' "$reg" | grep -oE '\{[A-Z][A-Z0-9_]{3,}\}' | sort -u)"
 registry="$(sed '/^## Runtime metavariables/,$d' "$reg" | grep -oE '\{[A-Z][A-Z0-9_]{3,}\}' | sort -u | grep -vxF "$runtime" || true)"
 [ -n "$registry" ] || { echo "adopt: $reg names no substituted tokens — the sweep cannot run" >&2; exit 1; }
-left="$(grep -rIlF "$registry" CLAUDE.md .claude 2>/dev/null | wc -l | tr -d ' ')"
+# grep exits 1 on "no file matched" — the healthy outcome — which pipefail would
+# otherwise turn into a silent abort right before the good news.
+left="$({ grep -rIlF "$registry" CLAUDE.md .claude 2>/dev/null || true; } | wc -l | tr -d ' ')"
 echo "adopt: $NAME interview settled · TOKENS-LEFT: $left file(s) with an unfilled token"
 git add -A >/dev/null 2>&1 && git -c user.name=demo -c user.email=demo@example.invalid commit -q -m "professor: install" 2>/dev/null || true

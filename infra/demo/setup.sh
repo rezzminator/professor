@@ -80,7 +80,7 @@ install)
     jq '. + {skipDangerousModePermissionPrompt: true}' "$dir/settings.json" > "$dir/settings.json.tmp" && mv "$dir/settings.json.tmp" "$dir/settings.json"
   done < <(jq -r '.accounts[].configDir' "$CONFIG")
   # 4. The shell: Starship's Catppuccin powerline after pfm's shim.
-  starship preset catppuccin-powerline -o "$HOME/.config/starship.toml"
+  [ -f "$HOME/.config/starship.toml" ] || starship preset catppuccin-powerline -o "$HOME/.config/starship.toml"
   grep -q 'starship init zsh' "$HOME/.zshrc" 2>/dev/null || echo 'eval "$(starship init zsh)"' >> "$HOME/.zshrc"
   # The fence runs as root, and Claude Code refuses --dangerously-skip-permissions
   # under root unless IS_SANDBOX=1 says the machine is disposable — which this one
@@ -110,9 +110,14 @@ install)
 EOF
   echo '{"$schema": "https://opencode.ai/tui.json", "theme": "tokyonight"}' > "$HOME/.config/opencode/tui.json"
   if [ ! -f "$HOME/.local/share/opencode/opencode.db" ]; then
+    # The probe leaves one resumable OpenCode row under a name OpenCode invents
+    # ("Ready Request" one day, "Ready instruction request" the next), so the
+    # row to hide is found by difference, not by name.
+    ox_rows() { "$HOME/.local/bin/pfm" ls --tsv 2>/dev/null | awk -F'\t' '$1 == "resume-opencode" {print $2}' | sort; }
+    before="$(ox_rows)"
     (cd "/work/${PROJECTS[0]}" && timeout 180 opencode run "reply with one word: ready" | tail -1 | grep -qi ready) \
       || { echo "setup: OpenCode's first run did not answer 'ready' — its ChatGPT auth is not live" >&2; exit 1; }
-    "$HOME/.local/bin/pfm" ls --tsv | awk -F'\t' '$1 ~ /^resume-/ && $5 == "Ready Request" {print $2}' | xargs -r -n1 "$HOME/.local/bin/pfm" chat kill >/dev/null
+    comm -13 <(printf '%s\n' "$before") <(ox_rows) | xargs -r -n1 "$HOME/.local/bin/pfm" chat kill >/dev/null
   fi
   mkdir -p "$HOME/headless" && cp "$HERE"/headless/* "$HOME/headless/"
   echo "install: $(jq -r '.accounts | length' "$CONFIG") Claude seats + Codex + OpenCode, $(ls /work | wc -l | tr -d ' ') projects, headless kit in ~/headless"

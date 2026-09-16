@@ -8,7 +8,7 @@
 # ends them early.
 #
 #   storm.sh start [N=6] [SENDS=30]     spawn STORM_1..N and kick the first pings
-#   storm.sh stop                       end every STORM_* chat
+#   storm.sh stop                       end every STORM_<n> chat (kill-storm.sh)
 #
 # Cheapest posture per engine, overridable from the environment:
 #   STORM_CC_ACCOUNT=3 STORM_CC_MODEL=sonnet STORM_CC_EFFORT=low     (Claude seat)
@@ -64,12 +64,6 @@ start)
   done
   pfm ls --plain | grep -E 'STORM_' || echo "storm: no STORM rows are live"
   ;;
-stop)
-  # end the live rows, then hide the ended ones: an ended chat lingers as a
-  # resumable ↻ row, and the picker should show the fleet, not the rehearsal.
-  for n in $(pfm ls --tsv 2>/dev/null | awk -F'\t' '$1 ~ /^live-/ && $5 ~ /^STORM_/ {print $5}'); do pfm chat end "$n" >/dev/null && echo "ended $n"; done
-  sleep 2
-  for id in $(pfm ls --tsv 2>/dev/null | awk -F'\t' '$1 ~ /^resume-/ && $5 ~ /^STORM_/ {print $2}'); do pfm chat kill "$id" >/dev/null && echo "hid $id"; done
-  ;;
+stop) exec "$(dirname "$0")/kill-storm.sh" ;;
 *) echo "usage: storm.sh start [N] [SENDS] | stop" >&2; exit 2 ;;
 esac

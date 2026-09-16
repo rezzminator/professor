@@ -10,7 +10,9 @@ harness under `infra/readme-gif/` for the take that must never spend a token.
 infra/demo/up.sh                 # container → tools → config → credentials → pfm install → adopt → fleet
 infra/demo/up.sh --no-fleet      # everything but the chats
 docker exec -it -w /work/express -e TERM=xterm-256color -e COLORTERM=truecolor pfm-demo zsh -i
-docker exec -w /tmp pfm-demo bash /worktree/infra/demo/storm.sh start   # the cosmos storm; `stop` ends it
+docker exec -w /tmp pfm-demo bash /worktree/infra/demo/storm.sh start   # the cosmos storm
+docker exec -w /tmp pfm-demo bash /worktree/infra/demo/kill-storm.sh      # ends the STORM_<n> rows, nothing else
+code infra/demo/pfm-demo.code-workspace                                   # VS Code attached inside the container
 docker rm -f pfm-demo            # tear down; the copied credentials die with it
 ```
 
@@ -26,6 +28,9 @@ docker rm -f pfm-demo            # tear down; the copied credentials die with it
   chats round-robin across Claude, Codex and OpenCode (seat/model/effort per engine
   set by `STORM_*` env, see its header) answering every message with a real
   `chat_inject` back and a ping onward, until each has sent SENDS lines.
+- `kill-storm.sh` (container): ends every `STORM_<n>` chat and hides the ended rows —
+  exact-name match, so the slide chats survive; its closing line is the proof (0 STORM
+  rows left, other live rows before → after equal), non-zero exit otherwise.
 - `creds.sh` (host, macOS): copies the selected seats' OAuth credentials from the
   Keychain, `~/.codex/auth.json`, and OpenCode's ChatGPT `auth.json` into the
   container over stdin — nothing lands on the host disk, nothing is printed.

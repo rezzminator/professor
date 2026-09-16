@@ -52,7 +52,8 @@ for pair in "${seats[@]}"; do
     alt="Claude Code-credentials-$(printf '%s' "$host_dir" | shasum -a 256 | cut -c1-8)"
     blob="$(security find-generic-password -s "$alt" -w 2>/dev/null)" || { echo "creds: no Keychain entry for seat $host_dir (tried '$service' and '$alt')" >&2; exit 1; }
   }
-  jq -e '.claudeAiOauth.accessToken | strings | length > 0' <<<"$blob" >/dev/null 2>&1 || { echo "creds: the Keychain blob for $host_dir is not a claudeAiOauth credential" >&2; exit 1; }
+  jq -e '.claudeAiOauth | objects' <<<"$blob" >/dev/null 2>&1 || { echo "creds: the Keychain blob for $host_dir is not a claudeAiOauth credential" >&2; exit 1; }
+  jq -e '.claudeAiOauth.accessToken | strings | length > 0' <<<"$blob" >/dev/null 2>&1 || { echo "creds: seat $host_dir is logged out on this host (empty access token) — log it in first: CLAUDE_CONFIG_DIR=$host_dir claude, then /login — or leave it out of --accounts" >&2; exit 1; }
   size="$(printf '%s' "$blob" | put "$cont_dir/.credentials.json")"
   echo "creds: seat $host_dir → $cont_dir/.credentials.json ($size bytes)"
 done

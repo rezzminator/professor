@@ -14,7 +14,7 @@
 # storm that is still blowing, not a stopped one.
 set -uo pipefail
 export PATH="$HOME/.local/bin:$PATH"
-cd /tmp
+cd /tmp || exit 1
 storm='$5 ~ /^STORM_[0-9]+$/'
 others() { pfm ls --tsv 2>/dev/null | awk -F'\t' "\$1 ~ /^live-/ && !($storm)" | wc -l | tr -d ' '; }
 before="$(others)"

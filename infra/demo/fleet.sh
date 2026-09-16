@@ -22,8 +22,12 @@ READY='Reply with exactly one line confirming you are ready, then wait for instr
 # Seat B is the second configured Claude seat (the reload beat moves a chat onto
 # it); with a single seat configured it falls back to the first. Read, never
 # assumed: a seat the host could not hand in is not in this config.
-SEAT_B="$(jq -r '.accounts[1].id // .accounts[0].id' "$HOME/.config/pfm/pfm.config.json")"
-[ -n "$SEAT_B" ] && [ "$SEAT_B" != null ] || { echo "fleet: no Claude seat in ~/.config/pfm/pfm.config.json" >&2; exit 1; }
+# Seats come from up.sh's probe (the ones that answered, in config order); with
+# no record, the config order is trusted.
+read -r -a LIVE <<<"$(cat "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r '[.accounts[].id] | join(" ")' "$HOME/.config/pfm/pfm.config.json")"
+SEAT_A="${LIVE[0]:-}"
+SEAT_B="${LIVE[1]:-$SEAT_A}"
+[ -n "$SEAT_A" ] && [ "$SEAT_A" != null ] || { echo "fleet: no Claude seat in ~/.config/pfm/pfm.config.json" >&2; exit 1; }
 live() { pfm ls --plain 2>/dev/null | grep -q "^● $1 "; }
 spawn() { # spawn <name> <engine cc|cx> <project> <account> <prompt> — idempotent: a live row is kept
   if live "$1"; then echo "kept $1 (live)"; return; fi
@@ -32,16 +36,16 @@ spawn() { # spawn <name> <engine cc|cx> <project> <account> <prompt> — idempot
   echo "spawned $1 ($2 · $3)"
   sleep 4
 }
-spawn DEMO_CLAUDE cc express 1 "You are DEMO_CLAUDE, the Claude side of a live pfm fleet demo; DEMO_CODEX is the Codex chat beside you. $READY"
+spawn DEMO_CLAUDE cc express "$SEAT_A" "You are DEMO_CLAUDE, the Claude side of a live pfm fleet demo; DEMO_CODEX is the Codex chat beside you. $READY"
 spawn DEMO_CODEX cx express 1 "You are DEMO_CODEX, the Codex side of a live pfm fleet demo; DEMO_CLAUDE is the Claude chat beside you. $READY"
-spawn HARV_ORCH cc harvester 1 "You are HARV_ORCH, orchestrator of the harvester project. $READY"
+spawn HARV_ORCH cc harvester "$SEAT_A" "You are HARV_ORCH, orchestrator of the harvester project. $READY"
 spawn HARV_REVIEW cx harvester 1 "You are HARV_REVIEW, reviewer on the harvester project. $READY"
 spawn ATLAS_ORCH cx atlas 1 "You are ATLAS_ORCH, orchestrator of the atlas project. $READY"
 spawn ATLAS_REVIEW cc atlas "$SEAT_B" "You are ATLAS_REVIEW, reviewer on the atlas project. $READY"
 spawn LUMEN_ORCH cc lumen "$SEAT_B" "You are LUMEN_ORCH, orchestrator of the lumen project. $READY"
 spawn LUMEN_DOCS cx lumen 1 "You are LUMEN_DOCS, docs writer on the lumen project. $READY"
-spawn ORBIT_ORCH cc orbit 1 "You are ORBIT_ORCH, orchestrator of the orbit project. $READY"
+spawn ORBIT_ORCH cc orbit "$SEAT_A" "You are ORBIT_ORCH, orchestrator of the orbit project. $READY"
 spawn ORBIT_QA cx orbit 1 "You are ORBIT_QA, QA on the orbit project. $READY"
-spawn MIGRATION cc atlas 1 "We are migrating the ledger table to the v7 schema step by step. The table is ledger(id, account_id, amount_cents, posted_at). Step 1: write migrations/v7_ledger.sql adding a refund_reason text column and an index on (account_id, posted_at). Do step 1 now, report in two lines, then stop and wait — I will tell you when to continue."
+spawn MIGRATION cc atlas "$SEAT_A" "We are migrating the ledger table to the v7 schema step by step. The table is ledger(id, account_id, amount_cents, posted_at). Step 1: write migrations/v7_ledger.sql adding a refund_reason text column and an index on (account_id, posted_at). Do step 1 now, report in two lines, then stop and wait — I will tell you when to continue."
 spawn WAVE_TRAIN cc lumen "$SEAT_B" "You are WAVE_TRAIN, running a three-wave build train on the lumen project. $READY"
 pfm ls --plain

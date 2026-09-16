@@ -31,6 +31,10 @@ tools)
   command -v claude >/dev/null && command -v codex >/dev/null || npm install -g @anthropic-ai/claude-code @openai/codex >/dev/null
   command -v opencode >/dev/null || npm install -g opencode-ai >/dev/null
   command -v starship >/dev/null || curl -fsSL https://starship.rs/install.sh | sh -s -- -y >/dev/null
+  # The VS Code workspace opens its terminals in /work/express; the directory
+  # exists from the first minute so a terminal opens before the Express step
+  # has cloned into it (git clone accepts an empty directory).
+  mkdir -p /work/express
   echo "tools: pfm $(pfm version 2>/dev/null | head -1) · claude $(claude --version) · codex $(codex --version) · opencode $(opencode --version) · $(starship --version | head -1)"
   ;;
 install)
@@ -39,7 +43,7 @@ install)
   while read -r dir; do
     dir="$(expand "$dir")"; mkdir -p "$dir"
     [ -f "$dir/settings.json" ] || echo '{}' > "$dir/settings.json"
-    [ -s "$dir/.credentials.json" ] || { echo "setup: seat $dir has no .credentials.json — run creds.sh first" >&2; exit 1; }
+    [ -s "$dir/.credentials.json" ] || { echo "setup: NOTE — seat $dir has no .credentials.json — it logs in inside the container (up.sh --login) or creds.sh copies it; up.sh probes every seat before the interview" >&2; true; }
   done < <(jq -r '.accounts[].configDir' "$CONFIG")
   while read -r home; do
     home="$(expand "$home")"; mkdir -p "$home"
@@ -54,16 +58,17 @@ install)
     dir="$(expand "$dir")"; [ "$dir" = "$primary" ] && continue
     [ -L "$dir/projects" ] || { rm -rf "$dir/projects"; ln -s "$primary/projects" "$dir/projects"; }
   done < <(jq -r '.accounts[].configDir' "$CONFIG")
-  # 2. pfm install exactly as a user runs it from the clone (themes are terminal dressing only).
+  # 2. pfm install exactly as a user runs it from the clone, Claude Code themes included: the
+  #    seats wear the professor palettes the presenter's machines wear.
   #    ~/.professor is where pfm expects the blueprint clone (pfm update check,
   #    the global fan-out); on a real host it IS the checkout, here it links to the mount.
   [ -e "$HOME/.professor" ] || ln -s "$SRC" "$HOME/.professor"
   #    The harvester's Python sidecar can refuse a platform (a pinned CUDA wheel on
   #    linux-arm64 did); the demo then installs without it and SAYS so — the deck's
   #    harvester section is an animation, the fleet does not depend on the sidecar.
-  if ! (cd "$SRC" && pfm install --yes --skip-themes); then
+  if ! (cd "$SRC" && pfm install --yes); then
     echo "setup: WARNING — pfm install with the harvester failed (see above); retrying with --skip-harvest: the harvester MCP is NOT available in this container" >&2
-    (cd "$SRC" && pfm install --yes --skip-themes --skip-harvest)
+    (cd "$SRC" && pfm install --yes --skip-harvest)
   fi
   "$HERE/daemon.sh" # no init system in the fence: the MCP HTTP daemon runs from here
   # 3. Claude Code's first-run state: onboarding done, every demo project trusted, so no
@@ -73,12 +78,22 @@ install)
   #    The bypass-permissions warning is a second first-run screen whose default is
   #    "No, exit" — a spawn's typed prompt dies in it. Accepting it once writes
   #    skipDangerousModePermissionPrompt into settings.json; that is what is seeded.
-  while read -r dir; do
+  #    The seat's Claude Code theme follows its medal (🥇 gold · 🥈 silver · 🥉 bronze):
+  #    the professor-* overlays pfm install placed in the primary seat's themes/, which
+  #    every other seat reaches through a symlink, as on the host.
+  while IFS=$'\t' read -r dir emoji; do
     dir="$(expand "$dir")"; f="$dir/.claude.json"
     [ -s "$f" ] || echo '{}' > "$f"
-    jq --argjson trust "$trust" '. + {hasCompletedOnboarding: true, theme: "dark"} | .projects = ((.projects // {}) + $trust)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
-    jq '. + {skipDangerousModePermissionPrompt: true}' "$dir/settings.json" > "$dir/settings.json.tmp" && mv "$dir/settings.json.tmp" "$dir/settings.json"
-  done < <(jq -r '.accounts[].configDir' "$CONFIG")
+    #    Claude Code's first run drops theme:"dark" into .claude.json, and that key
+    #    beats settings.json's custom theme — dropped, as the presenter's host has it.
+    jq --argjson trust "$trust" '. + {hasCompletedOnboarding: true} | del(.theme) | .projects = ((.projects // {}) + $trust)' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+    case "$emoji" in 🥇) theme=professor-gold ;; 🥈) theme=professor-silver ;; 🥉) theme=professor-bronze ;; *) theme=tokyo-night ;; esac
+    #    The presenter's own Claude Code look and habits: fullscreen TUI (the
+    #    composer sits at the bottom, output above), low default effort, no
+    #    attribution lines, no feedback drafts, no workflow-usage nag.
+    jq --arg t "custom:$theme" '. + {skipDangerousModePermissionPrompt: true, skipAutoPermissionPrompt: true, skipWorkflowUsageWarning: true, theme: $t, tui: "fullscreen", effortLevel: "low", feedbackDrafts: "off", attribution: {commit: "", pr: "", sessionUrl: false}}' "$dir/settings.json" > "$dir/settings.json.tmp" && mv "$dir/settings.json.tmp" "$dir/settings.json"
+    [ "$dir" = "$primary" ] || [ -e "$dir/themes" ] || ln -s "$primary/themes" "$dir/themes"
+  done < <(jq -r '.accounts[] | "\(.configDir)\t\(.emoji)"' "$CONFIG")
   # 4. The shell: Starship's Catppuccin powerline after pfm's shim.
   [ -f "$HOME/.config/starship.toml" ] || starship preset catppuccin-powerline -o "$HOME/.config/starship.toml"
   grep -q 'starship init zsh' "$HOME/.zshrc" 2>/dev/null || echo 'eval "$(starship init zsh)"' >> "$HOME/.zshrc"
@@ -86,6 +101,7 @@ install)
   # under root unless IS_SANDBOX=1 says the machine is disposable — which this one
   # is. Every spawn inherits it from the shell (or from the script that spawns).
   grep -q 'IS_SANDBOX' "$HOME/.zshrc" || echo 'export IS_SANDBOX=1' >> "$HOME/.zshrc"
+  grep -q 'demo/aliases.zsh' "$HOME/.zshrc" || echo 'source /worktree/infra/demo/aliases.zsh' >> "$HOME/.zshrc"
   # 5. Projects: plain invented repos on develop for the fleet to live in.
   git config --global user.name demo
   git config --global user.email demo@example.invalid

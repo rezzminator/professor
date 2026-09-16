@@ -9,8 +9,7 @@
 	"remoteAuthority": "attached-container+70666d2d64656d6f",
 	"folders": [
 		{ "name": "express (Professor installed)", "uri": "vscode-remote://attached-container+70666d2d64656d6f/work/express" },
-		{ "name": "fleet projects", "uri": "vscode-remote://attached-container+70666d2d64656d6f/work" },
-		{ "name": "professor (read-only mount)", "uri": "vscode-remote://attached-container+70666d2d64656d6f/worktree" },
+		{ "name": "professor (~/.professor, read-only mount)", "uri": "vscode-remote://attached-container+70666d2d64656d6f/root/.professor" },
 	],
 	"settings": {
 		// The demo window is painted magenta so it can never be mistaken for a
@@ -18,8 +17,22 @@
 		"window.title": "pfm-demo · ${activeEditorShort}",
 		"editor.formatOnSave": false,
 		"files.trimTrailingWhitespace": true,
-		"files.readonlyInclude": { "**/worktree/**": true },
-		"terminal.integrated.defaultProfile.linux": "zsh",
+		"files.readonlyInclude": { "**/.professor/**": true, "**/worktree/**": true },
+		// Terminals as on the host: "Professor" is the pfm VS Code extension's own
+		// profile — it opens the fleet picker and names the tab after the chat
+		// (15 cycling icons, 6 colours); "shell" is a plain zsh for storm-up,
+		// idle-down and friends.
+		"terminal.integrated.profiles.linux": {
+			"shell": { "path": "/usr/bin/zsh", "args": ["-l"], "icon": "terminal", "color": "terminal.ansiCyan" }
+		},
+		"terminal.integrated.defaultProfile.linux": "Professor",
+		"terminal.integrated.tabs.title": "${sequence}",
+		"terminal.integrated.enablePersistentSessions": true,
+		"terminal.integrated.persistentSessionReviveProcess": "never",
+		"terminal.integrated.showExitAlert": false,
+		"terminal.integrated.confirmOnKill": "never",
+		"terminal.integrated.shellIntegration.decorationsEnabled": "never",
+		"terminal.integrated.minimumContrastRatio": 1,
 		"terminal.integrated.cwd": "/work/express",
 		"terminal.integrated.env.linux": { "TERM": "xterm-256color", "COLORTERM": "truecolor" },
 		"terminal.integrated.fontSize": 15,
@@ -67,7 +80,6 @@
 			"timonwong.shellcheck",
 			"foxundermoon.shell-format",
 			"mads-hartmann.bash-ide-vscode",
-			"davidanson.vscode-markdownlint",
 			"redhat.vscode-yaml",
 		],
 	}

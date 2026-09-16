@@ -30,7 +30,8 @@ while [ $# -gt 0 ]; do
     *) echo "usage: creds.sh --container NAME --seat HOST_DIR=CONTAINER_DIR … [--codex HOST_HOME=CONTAINER_HOME] [--opencode HOST_FILE=CONTAINER_FILE]" >&2; exit 2 ;;
   esac
 done
-[ -n "$NAME" ] && [ "${#seats[@]}" -gt 0 ] || { echo "creds: --container and at least one --seat are required" >&2; exit 2; }
+[ -n "$NAME" ] || { echo "creds: --container is required" >&2; exit 2; }
+[ "${#seats[@]}" -gt 0 ] || [ -n "$CODEX" ] || [ -n "$OPENCODE" ] || { echo "creds: nothing to copy — give --seat, --codex or --opencode" >&2; exit 2; }
 [ "$(uname -s)" = Darwin ] || { echo "creds: the Keychain reader runs on macOS only" >&2; exit 1; }
 command -v jq >/dev/null || { echo "creds: TOOLCHAIN-MISSING — jq" >&2; exit 1; }
 
@@ -44,7 +45,7 @@ put() { # put <container path> — file body on stdin, mode 0600, parent created
   docker exec -i "$NAME" sh -c 'umask 077; p="$1"; case "$p" in "~"*) p="$HOME${p#\~}";; esac; mkdir -p "$(dirname "$p")"; cat > "$p"; wc -c < "$p"' sh "$path"
 }
 
-for pair in "${seats[@]}"; do
+for pair in ${seats[@]+"${seats[@]}"}; do  # no --seat at all is valid: the seats log in inside the container (up.sh --login)
   host_dir="${pair%%=*}"; cont_dir="${pair#*=}"
   service="$(service_for "$host_dir")"
   blob="$(security find-generic-password -s "$service" -w 2>/dev/null)" || {
@@ -53,7 +54,10 @@ for pair in "${seats[@]}"; do
     blob="$(security find-generic-password -s "$alt" -w 2>/dev/null)" || { echo "creds: no Keychain entry for seat $host_dir (tried '$service' and '$alt')" >&2; exit 1; }
   }
   jq -e '.claudeAiOauth | objects' <<<"$blob" >/dev/null 2>&1 || { echo "creds: the Keychain blob for $host_dir is not a claudeAiOauth credential" >&2; exit 1; }
-  jq -e '.claudeAiOauth.accessToken | strings | length > 0' <<<"$blob" >/dev/null 2>&1 || { echo "creds: seat $host_dir is logged out on this host (empty access token) — log it in first: CLAUDE_CONFIG_DIR=$host_dir claude, then /login — or leave it out of --accounts" >&2; exit 1; }
+  if ! jq -e '.claudeAiOauth.accessToken | strings | length > 0' <<<"$blob" >/dev/null 2>&1; then
+    echo "creds: SKIPPED seat $host_dir — logged out on this host (empty access token); it stays configured in the container and logs in there: CLAUDE_CONFIG_DIR=$cont_dir claude, then /login" >&2
+    continue
+  fi
   size="$(printf '%s' "$blob" | put "$cont_dir/.credentials.json")"
   echo "creds: seat $host_dir → $cont_dir/.credentials.json ($size bytes)"
 done

@@ -14,6 +14,16 @@ export PATH="$HOME/.local/bin:$PATH"
 PORT="$(jq -r '.mcp.port // 18377' "$HOME/.config/pfm/pfm.config.json" 2>/dev/null || echo 18377)"
 LOG=/tmp/pfm-mcp.log
 up() { [ "$(curl -s -o /dev/null -w '%{http_code}' -m 2 "http://127.0.0.1:$PORT/mcp/chat" || true)" != 000 ]; }
+# A daemon started before setup.sh tools rebuilt pfm still runs the OLD binary
+# (go build renames a fresh file over it; the process's exe reads "(deleted)").
+# Restarted here, so a re-run of up.sh after a pfm change serves the new code
+# instead of the old one under a fresh build's name.
+stale="$(pgrep -f 'pfm mc[p] serve' | head -1 || true)"
+if [ -n "$stale" ] && readlink "/proc/$stale/exe" 2>/dev/null | grep -q ' (deleted)$'; then
+  echo "daemon: pfm mcp serve (pid $stale) runs a replaced binary — restarting it"
+  kill "$stale" 2>/dev/null || true
+  for _ in $(seq 1 10); do up || break; sleep 0.5; done
+fi
 if up; then echo "daemon: pfm mcp serve already answering on :$PORT"; exit 0; fi
 nohup pfm mcp serve >"$LOG" 2>&1 < /dev/null &
 disown

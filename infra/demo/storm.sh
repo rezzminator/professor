@@ -22,12 +22,14 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 cd /tmp
-PROJECTS=(atlas lumen orbit harvester)
+PROJECTS=(atlas lumen orbit) # three systems: with N=6 the sky shows two storm chats per star
 # Engines round-robin. OpenCode is real in this container (picker → New OpenCode
 # chat) but `pfm chat new` has no OpenCode door yet — no headless planner, no
 # spawn launcher, no naming — so it is not in the default rotation.
 read -r -a ENGINES <<<"${STORM_ENGINES:-cc cx}"
-CC_ACCOUNT="${STORM_CC_ACCOUNT:-3}" CC_MODEL="${STORM_CC_MODEL:-sonnet}" CC_EFFORT="${STORM_CC_EFFORT:-low}"
+CC_MODEL="${STORM_CC_MODEL:-sonnet}" CC_EFFORT="${STORM_CC_EFFORT:-low}"
+# The Claude seat: the last one that answered up.sh's probe (config order), unless STORM_CC_ACCOUNT says otherwise.
+CC_ACCOUNT="${STORM_CC_ACCOUNT:-$(awk '{print $NF}' "$HOME/.local/state/pfm/demo-seats-live" 2>/dev/null || jq -r ".accounts[-1].id" "$HOME/.config/pfm/pfm.config.json")}"
 GPT_MODEL="${STORM_GPT_MODEL:-gpt-5.6-luna}" GPT_EFFORT="${STORM_GPT_EFFORT:-medium}"
 "$(dirname "$0")/daemon.sh" # chat_* over HTTP for Codex rows; harmless when already up
 case "${1:-}" in

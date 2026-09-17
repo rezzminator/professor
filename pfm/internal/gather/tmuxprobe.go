@@ -360,6 +360,9 @@ func (tmux TmuxProbe) ShowGlobalOption(
 	)
 	output, err := command.Output()
 	if err != nil {
+		if serverGone(err) {
+			return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, ErrServerGone)
+		}
 		return "", fmt.Errorf("read tmux option %s %s: %w", socket, name, err)
 	}
 	return strings.TrimRight(string(output), "\n"), nil

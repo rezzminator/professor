@@ -508,25 +508,17 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	// installer-owned end to end — materialized under the managed root and
 	// symlinked at their contracted ~/.local/bin names, same as every other
 	// embedded asset and the Claude launcher.
-	assertLink(
-		t,
-		filepath.Join(home, ".local", "bin", "pfm-statusline"),
-		filepath.Join(managed, "bin", "pfm-statusline"),
-	)
-	assertLink(
-		t,
-		filepath.Join(home, ".local", "bin", "tmux-title-renudge"),
-		filepath.Join(managed, "bin", "tmux-title-renudge"),
-	)
-	if info, err := os.Stat(
-		filepath.Join(managed, "bin", "pfm-statusline"),
-	); err != nil ||
-		info.Mode().Perm() != 0o755 {
-		t.Fatalf("managed pfm-statusline mode=%v err=%v, want 0755", info, err)
-	}
-	statuslineShim := readFixture(t, filepath.Join(managed, "bin", "pfm-statusline"))
-	if want := "#!/usr/bin/env bash\n" + `exec "$HOME/.local/bin/pfm" internal statusline "$@"` + "\n"; statuslineShim != want {
-		t.Fatalf("managed pfm-statusline=%q, want native exec shim %q", statuslineShim, want)
+	for name, command := range map[string]string{"pfm-statusline": "statusline", "tmux-title-renudge": "tmux-title-renudge"} {
+		managedShim := filepath.Join(managed, "bin", name)
+		assertLink(t, filepath.Join(home, ".local", "bin", name), managedShim)
+		if info, err := os.Stat(managedShim); err != nil || info.Mode().Perm() != 0o755 {
+			t.Fatalf("managed %s mode=%v err=%v, want 0755", name, info, err)
+		}
+		shim := readFixture(t, managedShim)
+		want := "#!/usr/bin/env bash\n" + `exec "$HOME/.local/bin/pfm" internal ` + command + ` "$@"` + "\n"
+		if shim != want {
+			t.Fatalf("managed %s=%q, want native exec shim %q", name, shim, want)
+		}
 	}
 	settings := readFixture(t, filepath.Join(config, "settings.json"))
 	for _, wanted := range []string{

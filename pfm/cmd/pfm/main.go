@@ -64,7 +64,7 @@ var internalSubcommands = []string{
 	"codex-appendix", "codex-launch", "compact-nudge", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
 	"launcher-repair", "primary-get", "primary-set", "reload-intercept",
-	reloadRunCommand, "stale", statuslineCommand, thenAction, "update-check",
+	reloadRunCommand, "stale", statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
 }
 
 func main() {
@@ -135,7 +135,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runHeal(args[1:], stdout, stderr)
 	case "name-sync":
 		return runNameSync(args[1:], stdout, stderr, runtime)
-	case statuslineCommand:
+	case "statusline":
 		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime)
 	case "usage-hook":
 		return runUsageHookWithRuntime(args[1:], stdout, stderr, runtime)
@@ -456,6 +456,9 @@ func runInternal(
 	if len(args) != 0 && args[0] == "then" {
 		return hookentry.Then(args[1:], stderr, runtime)
 	}
+	if len(args) != 0 && args[0] == "tmux-title-renudge" {
+		return hookentry.TmuxTitleRenudge(args[1:], stderr, runtime)
+	}
 	if len(args) != 0 && args[0] == "update-check" {
 		return hookentry.UpdateCheck(args[1:], stderr)
 	}
@@ -499,14 +502,11 @@ func runInternal(
 	if len(args) == 0 {
 		// This literal stays in sync by construction: scripts/arch-check.sh's C15 check
 		// greps the pipe-joined subcommand names out of main.go's raw
-		// source text below, so a runtime-joined string here (fine for Go,
-		// blind to a static grep) would defeat that ratchet.
-		// TestInternalSubcommandsReachTheirHandler is the runtime half of
-		// the same guarantee: every internalSubcommands name reaches a real
-		// branch in runInternal's if-chain below.
+		// source text below; runtime joining would defeat that ratchet.
+		// The runtime test requires every registry name to reach a branch above.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

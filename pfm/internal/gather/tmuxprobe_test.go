@@ -2,6 +2,7 @@ package gather
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,24 @@ import (
 
 	pfmtmux "hostops/pfm/internal/tmux"
 )
+
+func TestShowGlobalOptionClassifiesGoneServer(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "tmux")
+	script := "#!/bin/sh\necho 'no server running on fake socket' >&2\nexit 1\n"
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const socket = "cc-stale-1-2-3"
+	client := TmuxProbe{Binary: binary, TmuxTmpDir: t.TempDir()}
+
+	_, err := client.ShowGlobalOption(context.Background(), socket, "set-titles-string")
+	if !errors.Is(err, ErrServerGone) {
+		t.Fatalf("ShowGlobalOption error = %v, want ErrServerGone", err)
+	}
+	if !strings.Contains(err.Error(), socket) {
+		t.Fatalf("ShowGlobalOption error = %q, want socket context", err)
+	}
+}
 
 // TestProbeTmuxFailsWholeWhenTmuxCannotRun is the regression for the shared
 // MCP daemon going deaf: launchd started it with /usr/bin:/bin:/usr/sbin:/sbin,

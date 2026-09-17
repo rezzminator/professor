@@ -1,6 +1,6 @@
 ---
 name: rr
-description: Answers one research query inline — sources cited; delegate for "rr", "quick research", "fast answer with sources" when one web search will not do and deep-rr is overkill; low effort by default, "super rr" → the caller passes effort: medium at spawn. Returns the saved .professor/RR/{slug}-{date}.md path first, then the cited answer and open questions.
+description: 'Answers one research query inline — sources cited; delegate for "rr", "quick research", "fast answer with sources" when one web search will not do and deep-rr is overkill; low effort by default, "super rr" → the caller passes effort: medium at spawn. Returns the saved .professor/RR/{slug}-{date}.md path first, then the cited answer and open questions.'
 tools: WebSearch, WebFetch, Read, Write, Agent, mcp__harvester__searchCache, mcp__harvester__findWorks, mcp__harvester__fetch, mcp__harvester__search
 model: opus
 ---

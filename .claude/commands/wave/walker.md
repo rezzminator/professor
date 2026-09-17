@@ -1,7 +1,7 @@
 ---
 name: wave:walker
 description: Verifies a landed wave end-to-end — every changed flow, seam and field walked to its terminal; supplements the reviewer gate, never replaces it. Auto after /wave:live W6; `/wave:walker {report-path}` by hand, `branch` for a pre-merge worktree diff; `walker fast <mission>` / "fast walk" → the tracer agent. Returns the verdict written into the wave report.
-argument-hint: [report path | branch [report path] | fast <mission>]
+argument-hint: "[report path | branch [report path] | fast <mission>]"
 ---
 
 # Wave Walker — Trace + Review, One Fold

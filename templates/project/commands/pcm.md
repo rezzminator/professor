@@ -1,7 +1,7 @@
 ---
 name: pcm
 description: MANDATORY — route every framework or process-file change here; owns CLAUDE.md, .claude/** and the .codex/ mirror. `audit [scope|all]` reports pipeline consistency, read-only; `retro` folds the .professor/retro.md inbox. Not for the pfm CLI or `pfm update` → /pfm.
-argument-hint: [change request|audit [scope|all]|retro]
+argument-hint: "[change request|audit [scope|all]|retro]"
 ---
 
 # PCM — Professor Change Manager

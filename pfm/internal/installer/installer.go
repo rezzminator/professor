@@ -19,9 +19,9 @@ import (
 	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/codexappendix"
 	"hostops/pfm/internal/codexgen"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/harvestpy"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 )
 
 type engine struct {
@@ -2308,7 +2308,7 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) (returnErr er
 				Home:     installer.options.Home,
 				SharedDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
 			}
-			state := shared.Open(ctx, values)
+			state := fleetdb.Open(ctx, values)
 			defer func() {
 				if err := state.Close(); err != nil {
 					returnErr = errors.Join(

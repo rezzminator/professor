@@ -12,10 +12,10 @@ import (
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/gather"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
 )
@@ -156,12 +156,12 @@ func resolveCosmosSafe(flagValue, termProgram string) bool {
 }
 
 type commsReader interface {
-	CommsSince(context.Context, int64, int) ([]shared.CommsEvent, error)
+	CommsSince(context.Context, int64, int) ([]fleetdb.CommsEvent, error)
 }
 
 type cosmosSampler struct{ reader commsReader }
 
-func (sampler cosmosSampler) Sample(ctx context.Context, sinceNS int64) ([]shared.CommsEvent, error) {
+func (sampler cosmosSampler) Sample(ctx context.Context, sinceNS int64) ([]fleetdb.CommsEvent, error) {
 	return sampler.reader.CommsSince(ctx, sinceNS, compose.CosmosEventCap)
 }
 

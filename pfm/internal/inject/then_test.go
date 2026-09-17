@@ -11,8 +11,8 @@ import (
 	"time"
 
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 func TestDeliverThenDoesNotRecordExcludedHandoffEdge(t *testing.T) {
@@ -25,7 +25,7 @@ func TestDeliverThenDoesNotRecordExcludedHandoffEdge(t *testing.T) {
 	engine.options.ThenIdleStable = 1
 	engine.options.ThenSettle = time.Nanosecond
 	recorded := 0
-	engine.recorder = func(context.Context, shared.CommsEvent) error {
+	engine.recorder = func(context.Context, fleetdb.CommsEvent) error {
 		recorded++
 		return nil
 	}

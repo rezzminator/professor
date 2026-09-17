@@ -1,4 +1,4 @@
-package shared
+package fleetdb
 
 import (
 	"context"

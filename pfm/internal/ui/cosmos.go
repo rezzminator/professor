@@ -13,7 +13,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
+	"hostops/pfm/internal/fleetdb"
 )
 
 type star struct {
@@ -66,7 +66,7 @@ func cosmosRingSpeed(factor float64) float64 { return math.Pow(math.Max(0.2, fac
 
 type cosmosSampleMsg struct {
 	generation uint64
-	events     []shared.CommsEvent
+	events     []fleetdb.CommsEvent
 	err        error
 }
 
@@ -148,7 +148,7 @@ func cosmosOrbits(
 	parents := make(map[string]string)
 	children := make(map[string][]string)
 	for _, edge := range edges {
-		if edge.Kind != shared.KindSpawn || edge.From == edge.To {
+		if edge.Kind != fleetdb.KindSpawn || edge.From == edge.To {
 			continue
 		}
 		parent, parentSeen := nodes[edge.From]
@@ -330,7 +330,7 @@ func (model *Model) mergeCosmosSeats() {
 		}
 	}
 	for _, edge := range graph.Edges {
-		if !hadSeats || edge.Kind != shared.KindSpawn || !newKeys[edge.To] {
+		if !hadSeats || edge.Kind != fleetdb.KindSpawn || !newKeys[edge.To] {
 			continue
 		}
 		parent, child := next[edge.From], next[edge.To]
@@ -631,7 +631,7 @@ func drawCosmosMeteor(canvas *Canvas, now time.Time) {
 // beneath it should read as "in flight". Spawn lineage flights run longer
 // than a plain message so the two remain distinguishable at a glance.
 func cosmosCometDuration(kind string) time.Duration {
-	if kind == shared.KindSpawn {
+	if kind == fleetdb.KindSpawn {
 		return 1800 * time.Millisecond
 	}
 	return 1500 * time.Millisecond
@@ -741,7 +741,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 		fade, heat := cosmosEdgeLight(age, edge.Count)
 		dashed := false
 		fromColor, toColor := cosmosNodeColor(from), cosmosNodeColor(to)
-		if edge.Kind == shared.KindSpawn {
+		if edge.Kind == fleetdb.KindSpawn {
 			dashed = true
 			fromColor = rgbFromHex(configuredCosmosPalette.CosmosLineage)
 		}
@@ -792,7 +792,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 			period := 5 + 2.5*math.Sin(phase)
 			fromColor, toColor := cosmosNodeColor(nodes[edge.From]), cosmosNodeColor(nodes[edge.To])
 			particles := 2
-			if edge.Kind == shared.KindSpawn {
+			if edge.Kind == fleetdb.KindSpawn {
 				fromColor = rgbFromHex(configuredCosmosPalette.CosmosLineage)
 				particles = 1
 			}
@@ -828,7 +828,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 			x0, y0, cpx, cpy, x1, y1 := rail.x0, rail.y0, rail.cpx, rail.cpy, rail.x1, rail.y1
 			t := float64(age) / float64(duration)
 			base := lerpRGB(cosmosNodeColor(from), cosmosNodeColor(to), t)
-			if edge.Kind == shared.KindSpawn {
+			if edge.Kind == fleetdb.KindSpawn {
 				base = lerpRGB(rgbFromHex(configuredCosmosPalette.CosmosLineage), white, 0.4)
 			}
 			et := ease(t)
@@ -863,7 +863,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 		for _, edge := range graph.Edges {
 			var duration, startRadius, endRadius, blend float64
 			var dotCount int
-			if edge.Kind == shared.KindSpawn {
+			if edge.Kind == fleetdb.KindSpawn {
 				duration, startRadius, endRadius, blend, dotCount = 1.6, 2, 11, 0.5, 26
 			} else {
 				// Inject rings stay tighter, brighter, and shorter-lived

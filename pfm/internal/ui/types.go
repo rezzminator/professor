@@ -6,7 +6,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
+	"hostops/pfm/internal/fleetdb"
 	pfmstats "hostops/pfm/internal/stats"
 )
 
@@ -56,7 +56,7 @@ type StatsSampler interface {
 // CosmosSampler keeps the open cosmos tab current without making rendering
 // query the shared database.
 type CosmosSampler interface {
-	Sample(ctx context.Context, sinceNS int64) ([]shared.CommsEvent, error)
+	Sample(ctx context.Context, sinceNS int64) ([]fleetdb.CommsEvent, error)
 }
 
 // Picker is the common boundary used by the interactive, plain, and TSV

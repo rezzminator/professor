@@ -11,7 +11,7 @@ import (
 	modernsqlite "modernc.org/sqlite"
 
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
+	"hostops/pfm/internal/fleetdb"
 )
 
 const (
@@ -153,7 +153,7 @@ func (s *Store) KilledChats(ctx context.Context) ([]Killed, error) {
 	for id, record := range records {
 		killedAt[id] = record.KilledAt
 	}
-	ids := shared.SortedIDs(killedAt)
+	ids := fleetdb.SortedIDs(killedAt)
 	engines, err := s.deriveEngines(ctx, ids)
 	if err != nil {
 		return nil, err
@@ -179,7 +179,7 @@ func (s *Store) KilledChats(ctx context.Context) ([]Killed, error) {
 // /clear or explicit permanent kill from the stale read/delete race.
 func (s *Store) activeKilledRecords(
 	ctx context.Context,
-) (map[string]shared.KilledRecord, error) {
+) (map[string]fleetdb.KilledRecord, error) {
 	for attempt := 0; attempt < 3; attempt++ {
 		records, err := s.state.KilledRecords(ctx)
 		if err != nil {

@@ -18,7 +18,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
+	"hostops/pfm/internal/fleetdb"
 	pfmstats "hostops/pfm/internal/stats"
 	"hostops/pfm/internal/theme"
 )
@@ -327,7 +327,7 @@ func limitsGoldenModel(width int) Model {
 
 // cosmosGoldenSnapshot builds the fixed-clock cosmos snapshot both the
 // no-sky and the sky-enabled goldens render. The inject event is pinned
-// 300ms before "now" on purpose: with cosmosCometDuration(shared.KindInject)
+// 300ms before "now" on purpose: with cosmosCometDuration(fleetdb.KindInject)
 // at 1500ms, that lands the comet genuinely mid-flight for any caller that
 // renders with the sky on, rather than pinning a frame the gate could pass
 // whether the glow code ran or was never wired.
@@ -390,17 +390,17 @@ func cosmosGoldenSnapshotSeeded(width int) Snapshot {
 
 // cosmosGoldenEvents is the fixed ledger every cosmos golden is cut from: one
 // inject 300ms old (mid-comet) and one spawn ten minutes old.
-func cosmosGoldenEvents(nowNS int64, rows []compose.Row) []shared.CommsEvent {
-	return []shared.CommsEvent{
+func cosmosGoldenEvents(nowNS int64, rows []compose.Row) []fleetdb.CommsEvent {
+	return []fleetdb.CommsEvent{
 		{
 			ID:   2,
-			AtNS: nowNS - int64(300*time.Millisecond), Kind: shared.KindInject,
+			AtNS: nowNS - int64(300*time.Millisecond), Kind: fleetdb.KindInject,
 			SenderUUID: rows[0].ID, Target: rows[1].Name,
 			Message: "QA: cosmos goldens are pinned",
 		},
 		{
 			ID:   1,
-			AtNS: nowNS - int64(10*time.Minute), Kind: shared.KindSpawn,
+			AtNS: nowNS - int64(10*time.Minute), Kind: fleetdb.KindSpawn,
 			SenderUUID: rows[0].ID, Target: rows[4].Name,
 			Message: "begin the child seat",
 		},

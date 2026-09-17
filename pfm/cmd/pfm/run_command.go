@@ -16,11 +16,11 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/rearm"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/spawn"
 )
 
@@ -175,7 +175,7 @@ func runRun(
 	}
 	spawnedAt := time.Now()
 	parent := parentChatID()
-	state := shared.Open(context.Background(), resolved)
+	state := fleetdb.Open(context.Background(), resolved)
 	if parent != "" {
 		if err := registerDetachedChild(state, parent, result.Socket, spawnedAt.Unix()); err != nil {
 			fmt.Fprintf(
@@ -221,8 +221,8 @@ func runRun(
 	// ReceiverPane is left unset: spawn.Result carries no pane id (a fresh
 	// session's first pane is conventionally "%0", but nothing here confirms
 	// that invariant, so it is not invented).
-	if err := state.RecordComms(context.Background(), shared.CommsEvent{
-		AtNS: spawnedAt.UnixNano(), Kind: shared.KindSpawn, SenderSession: parent,
+	if err := state.RecordComms(context.Background(), fleetdb.CommsEvent{
+		AtNS: spawnedAt.UnixNano(), Kind: fleetdb.KindSpawn, SenderSession: parent,
 		Target: *name, ReceiverSocket: filepath.Join(resolved.TmuxDir, result.Socket), Message: prompt,
 	}); err != nil {
 		fmt.Fprintf(stderr, "pfm: comms ledger: %v\n", err)
@@ -325,13 +325,13 @@ func parentChatID() string {
 	return os.Getenv("CODEX_THREAD_ID")
 }
 
-func registerDetachedChild(state *shared.Store, parent, socket string, createdAt int64) error {
+func registerDetachedChild(state *fleetdb.Store, parent, socket string, createdAt int64) error {
 	if state.Degraded() != nil {
 		return state.Degraded()
 	}
 	return state.AddChild(
 		context.Background(),
-		shared.KindNew,
+		fleetdb.KindNew,
 		parent,
 		socket,
 		createdAt,

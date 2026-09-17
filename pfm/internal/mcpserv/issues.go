@@ -8,8 +8,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 // issueServicedesk files one agent complaint into the shared operator ledger.
@@ -33,19 +33,19 @@ func (service *Service) issueServicedesk(
 	}
 	severity := strings.TrimSpace(input.Severity)
 	if severity == "" {
-		severity = shared.IssueSeverityMedium
+		severity = fleetdb.IssueSeverityMedium
 	}
-	if severity != shared.IssueSeverityLow &&
-		severity != shared.IssueSeverityMedium &&
-		severity != shared.IssueSeverityHigh {
+	if severity != fleetdb.IssueSeverityLow &&
+		severity != fleetdb.IssueSeverityMedium &&
+		severity != fleetdb.IssueSeverityHigh {
 		return nil, IssueOutput{}, fmt.Errorf(
 			"severity must be %q, %q, or %q, got %q",
-			shared.IssueSeverityLow, shared.IssueSeverityMedium, shared.IssueSeverityHigh,
+			fleetdb.IssueSeverityLow, fleetdb.IssueSeverityMedium, fleetdb.IssueSeverityHigh,
 			input.Severity,
 		)
 	}
 	reporter := service.issueReporter(ctx, request)
-	id, err := service.backend.sharedState.RecordIssue(ctx, shared.Issue{
+	id, err := service.backend.sharedState.RecordIssue(ctx, fleetdb.Issue{
 		AtNS:            time.Now().UnixNano(),
 		Title:           title,
 		Detail:          detail,
@@ -95,15 +95,15 @@ func (service *Service) issueReporter(
 		}
 	}
 	if !service.backend.allowAmbientIdentity {
-		return issueReporter{Session: shared.UnidentifiedSender}
+		return issueReporter{Session: fleetdb.UnidentifiedSender}
 	}
 	identifier, identifierErr := resolve.NewWhoami(resolve.WhoamiDependencies{})
 	if identifierErr != nil {
-		return issueReporter{Session: shared.UnidentifiedSender}
+		return issueReporter{Session: fleetdb.UnidentifiedSender}
 	}
 	identity, identifyErr := identifier.Identify(ctx)
 	if identifyErr != nil || identity.Session == "" {
-		return issueReporter{Session: shared.UnidentifiedSender}
+		return issueReporter{Session: fleetdb.UnidentifiedSender}
 	}
 	reporter := issueReporter{
 		Session: identity.Session,

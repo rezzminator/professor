@@ -9,11 +9,11 @@ import (
 	"os"
 
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 // runWhoami prints THIS chat's own tmux session name — its identity, and the
@@ -134,9 +134,9 @@ func newInjectEngineAllowingUnsigned(
 	return inject.New(dependencies)
 }
 
-func sharedCommsRecorder(values paths.Values) func(context.Context, shared.CommsEvent) error {
-	return func(ctx context.Context, event shared.CommsEvent) error {
-		state := shared.Open(ctx, values)
+func sharedCommsRecorder(values paths.Values) func(context.Context, fleetdb.CommsEvent) error {
+	return func(ctx context.Context, event fleetdb.CommsEvent) error {
+		state := fleetdb.Open(ctx, values)
 		recordErr := state.RecordComms(ctx, event)
 		closeErr := state.Close()
 		if closeErr != nil {

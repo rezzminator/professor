@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 )
 
 const (
@@ -215,7 +215,7 @@ func (runner *Runner) Run(
 	if err != nil {
 		return Report{}, err
 	}
-	state := shared.Open(ctx, runner.paths)
+	state := fleetdb.Open(ctx, runner.paths)
 	branchSeats, branchErr := state.BranchSeats(ctx)
 	closeErr := state.Close()
 	if branchErr != nil || closeErr != nil {

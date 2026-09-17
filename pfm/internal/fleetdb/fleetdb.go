@@ -1,9 +1,9 @@
-// Package shared is the fleet's authoritative state store.
+// Package fleetdb is the fleet's authoritative state store — operator decisions: kills, comms, issues.
 //
 // The SQLite database at ~/.cc/fleet.db holds every operator decision: killed
 // chats, spawned teammates, and the primary account. The transcript database
 // (paths.Values.DB) remains a derived cache that a rescan can rebuild.
-package shared
+package fleetdb
 
 import (
 	"context"

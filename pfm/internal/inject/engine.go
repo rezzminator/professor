@@ -15,11 +15,11 @@ import (
 	"unicode/utf8"
 
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/rearm"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 // SenderSessionEnv, SenderLabelEnv, and SenderIDEnv are how a chat states its
@@ -43,7 +43,7 @@ type Engine struct {
 	codexSeat     SelfIdentifier
 	binaries      map[pfmengine.ID]string
 	accountEmojis []string
-	recorder      func(context.Context, shared.CommsEvent) error
+	recorder      func(context.Context, fleetdb.CommsEvent) error
 	warningWriter io.Writer
 	// sidDir is where T1 role re-arm crumbs live (paths.Values.SIDDir) —
 	// the same directory the existing SID transcript crumbs and reload
@@ -730,9 +730,9 @@ func (engine *Engine) Inject(ctx context.Context, request Request) (Result, erro
 		return result, err
 	}
 	sender := engine.sender(ctx)
-	event := shared.CommsEvent{
+	event := fleetdb.CommsEvent{
 		AtNS:           engine.options.Now().UnixNano(),
-		Kind:           shared.KindInject,
+		Kind:           fleetdb.KindInject,
 		SenderSession:  sender.Session,
 		SenderLabel:    sender.Label,
 		SenderUUID:     sender.UUID,

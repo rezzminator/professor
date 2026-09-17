@@ -13,10 +13,10 @@ import (
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/store"
 )
 
@@ -31,7 +31,7 @@ type injectionService interface {
 
 type backend struct {
 	database             *store.Store
-	sharedState          *shared.Store
+	sharedState          *fleetdb.Store
 	injector             injectionService
 	resolver             resolve.Resolver
 	chat                 ChatVerbs
@@ -59,7 +59,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 	if err != nil {
 		return nil, err
 	}
-	sharedState := shared.Open(context.Background(), runtime.Paths)
+	sharedState := fleetdb.Open(context.Background(), runtime.Paths)
 	resolver, err := resolve.New(nil, resolve.Binaries{
 		Values: map[pfmengine.ID]string{
 			pfmengine.Claude: runtime.ClaudeBinary,

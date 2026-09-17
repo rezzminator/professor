@@ -16,21 +16,21 @@ import (
 	"hostops/pfm/internal/compose"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/fleetdb"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
 )
 
 type fakeCommsReader struct {
-	events  []shared.CommsEvent
+	events  []fleetdb.CommsEvent
 	err     error
 	sinceNS int64
 	limit   int
 }
 
-func (reader *fakeCommsReader) CommsSince(_ context.Context, sinceNS int64, limit int) ([]shared.CommsEvent, error) {
+func (reader *fakeCommsReader) CommsSince(_ context.Context, sinceNS int64, limit int) ([]fleetdb.CommsEvent, error) {
 	reader.sinceNS = sinceNS
 	reader.limit = limit
 	return reader.events, reader.err
@@ -39,8 +39,8 @@ func (reader *fakeCommsReader) CommsSince(_ context.Context, sinceNS int64, limi
 func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 	const nowNS = int64(48 * time.Hour)
 	t.Run("healthy", func(t *testing.T) {
-		reader := &fakeCommsReader{events: []shared.CommsEvent{{
-			AtNS: nowNS - 1, Kind: shared.KindInject,
+		reader := &fakeCommsReader{events: []fleetdb.CommsEvent{{
+			AtNS: nowNS - 1, Kind: fleetdb.KindInject,
 			SenderLabel: "Alpha", Target: "Beta", Message: "hello",
 		}}}
 		snapshot := buildSnapshot(
@@ -72,10 +72,10 @@ func TestComposeFleetPacksCosmosLedgerState(t *testing.T) {
 	})
 
 	t.Run("cap warning", func(t *testing.T) {
-		events := make([]shared.CommsEvent, compose.CosmosEventCap)
+		events := make([]fleetdb.CommsEvent, compose.CosmosEventCap)
 		for index := range events {
-			events[index] = shared.CommsEvent{
-				AtNS: int64(index + 1), Kind: shared.KindInject,
+			events[index] = fleetdb.CommsEvent{
+				AtNS: int64(index + 1), Kind: fleetdb.KindInject,
 				SenderLabel: "Alpha", Target: "Beta", Message: "hello",
 			}
 		}

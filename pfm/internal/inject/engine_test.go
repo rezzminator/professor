@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 type fakeResolver struct {
@@ -614,7 +614,7 @@ func TestInjectGuardAndDeliveryMatrix(t *testing.T) {
 }
 
 func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
-	newEngine := func(t *testing.T, recorder func(context.Context, shared.CommsEvent) error) (*Engine, *bytes.Buffer) {
+	newEngine := func(t *testing.T, recorder func(context.Context, fleetdb.CommsEvent) error) (*Engine, *bytes.Buffer) {
 		t.Helper()
 		fake := &fakeTmux{capture: "› ", submitOnEnter: true}
 		engine := newTestEngine(t, "cc-1-2-3", fake)
@@ -626,8 +626,8 @@ func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
 	}
 
 	t.Run("direct delivery", func(t *testing.T) {
-		var recorded []shared.CommsEvent
-		engine, warnings := newEngine(t, func(_ context.Context, event shared.CommsEvent) error {
+		var recorded []fleetdb.CommsEvent
+		engine, warnings := newEngine(t, func(_ context.Context, event fleetdb.CommsEvent) error {
 			recorded = append(recorded, event)
 			return nil
 		})
@@ -635,8 +635,8 @@ func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
 		if err != nil || result.Code != 0 || !result.Typed {
 			t.Fatalf("Inject() = %+v, %v", result, err)
 		}
-		want := []shared.CommsEvent{{
-			AtNS: 123, Kind: shared.KindInject, SenderSession: "sender",
+		want := []fleetdb.CommsEvent{{
+			AtNS: 123, Kind: fleetdb.KindInject, SenderSession: "sender",
 			SenderLabel: "Operator", SenderUUID: "1234567890", Target: "beta",
 			ReceiverSocket: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-1-2-3"),
 			ReceiverPane:   "%1", Message: "hello\nverbatim",
@@ -650,7 +650,7 @@ func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
 	})
 
 	t.Run("recorder failure warns without changing delivery", func(t *testing.T) {
-		engine, warnings := newEngine(t, func(context.Context, shared.CommsEvent) error {
+		engine, warnings := newEngine(t, func(context.Context, fleetdb.CommsEvent) error {
 			return errors.New("database unavailable")
 		})
 		result, err := engine.Inject(context.Background(), Request{Target: "beta", Message: "delivered"})
@@ -667,7 +667,7 @@ func TestInjectDoesNotRecordTypedButUndeliveredMessage(t *testing.T) {
 	fake := &fakeTmux{capture: "› "}
 	engine := newTestEngine(t, "cx-undelivered-ledger", fake)
 	recorded := 0
-	engine.recorder = func(context.Context, shared.CommsEvent) error {
+	engine.recorder = func(context.Context, fleetdb.CommsEvent) error {
 		recorded++
 		return nil
 	}

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 )
 
 // newIssuesTestService builds a Service with an isolated shared database and
@@ -74,8 +74,8 @@ func TestIssueServicedeskDefaultsSeverityToMedium(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issues: %v", err)
 	}
-	if len(stored) != 1 || stored[0].Severity != shared.IssueSeverityMedium {
-		t.Fatalf("stored severity = %+v, want exactly one row with severity %q", stored, shared.IssueSeverityMedium)
+	if len(stored) != 1 || stored[0].Severity != fleetdb.IssueSeverityMedium {
+		t.Fatalf("stored severity = %+v, want exactly one row with severity %q", stored, fleetdb.IssueSeverityMedium)
 	}
 }
 
@@ -83,7 +83,7 @@ func TestIssueServicedeskDefaultsSeverityToMedium(t *testing.T) {
 // load-bearing test for the whole ReporterSession field: a filer whose
 // identity cannot be derived (no MCP _meta.threadId, ambient identity not
 // permitted — the shared HTTP daemon's ordinary case) must still be
-// recorded, and recorded under the literal shared.UnidentifiedSender
+// recorded, and recorded under the literal fleetdb.UnidentifiedSender
 // sentinel, never an empty string. An empty reporter_session is
 // indistinguishable from "column not populated yet"; only the sentinel says
 // "looked, found nobody."
@@ -102,7 +102,7 @@ func TestIssueServicedeskRecordsUnidentifiedSenderWhenNoCallerIdentity(t *testin
 	if err != nil {
 		t.Fatalf("Issues: %v", err)
 	}
-	var row *shared.Issue
+	var row *fleetdb.Issue
 	for index := range stored {
 		if stored[index].ID == output.ID {
 			row = &stored[index]
@@ -114,11 +114,11 @@ func TestIssueServicedeskRecordsUnidentifiedSenderWhenNoCallerIdentity(t *testin
 	if row.ReporterSession == "" {
 		t.Fatalf(
 			"reporter_session is empty, want the %q sentinel — an empty column is indistinguishable from a capture-path bug",
-			shared.UnidentifiedSender,
+			fleetdb.UnidentifiedSender,
 		)
 	}
-	if row.ReporterSession != shared.UnidentifiedSender {
-		t.Fatalf("reporter_session = %q, want the literal sentinel %q", row.ReporterSession, shared.UnidentifiedSender)
+	if row.ReporterSession != fleetdb.UnidentifiedSender {
+		t.Fatalf("reporter_session = %q, want the literal sentinel %q", row.ReporterSession, fleetdb.UnidentifiedSender)
 	}
 }
 

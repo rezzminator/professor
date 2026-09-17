@@ -14,21 +14,21 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"hostops/pfm/internal/compose"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 type countingCosmosSampler struct {
-	events []shared.CommsEvent
+	events []fleetdb.CommsEvent
 	err    error
 	calls  int
 	since  int64
 }
 
-func (sampler *countingCosmosSampler) Sample(_ context.Context, sinceNS int64) ([]shared.CommsEvent, error) {
+func (sampler *countingCosmosSampler) Sample(_ context.Context, sinceNS int64) ([]fleetdb.CommsEvent, error) {
 	sampler.calls++
 	sampler.since = sinceNS
-	return append([]shared.CommsEvent(nil), sampler.events...), sampler.err
+	return append([]fleetdb.CommsEvent(nil), sampler.events...), sampler.err
 }
 
 func TestCosmosCanvasQuantizesEveryColorWithoutCursorAddressing(t *testing.T) {
@@ -87,8 +87,8 @@ func TestCosmosTinyPaneFallsBackToNewestEdges(t *testing.T) {
 func TestCosmosParentlessSpawnIsNotEmptyInEitherLayout(t *testing.T) {
 	snapshot := fixtureSnapshot(80)
 	snapshot.NoSky = true
-	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, []shared.CommsEvent{{
-		AtNS: fixtureNowNS, Kind: shared.KindSpawn, Target: "orphan",
+	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, []fleetdb.CommsEvent{{
+		AtNS: fixtureNowNS, Kind: fleetdb.KindSpawn, Target: "orphan",
 		ReceiverSocket: "cx-orphan",
 	}}, fixtureNowNS, false)
 	if len(snapshot.Cosmos.Nodes) != 1 || len(snapshot.Cosmos.Edges) != 0 {
@@ -115,8 +115,8 @@ func TestCosmosParentlessSpawnIsNotEmptyInEitherLayout(t *testing.T) {
 }
 
 func TestCosmosSamplerIsLazyAndRetainsGraphOnFailure(t *testing.T) {
-	sampler := &countingCosmosSampler{events: []shared.CommsEvent{{
-		AtNS: fixtureNowNS - int64(time.Second), Kind: shared.KindInject,
+	sampler := &countingCosmosSampler{events: []fleetdb.CommsEvent{{
+		AtNS: fixtureNowNS - int64(time.Second), Kind: fleetdb.KindInject,
 		SenderUUID: "11111111-1111-4111-8111-111111111111",
 		Target:     "RR", Message: "fresh",
 	}}}
@@ -232,7 +232,7 @@ func TestCosmosSeatSurvivesGraphRefreshAndSpawnStartsAtParent(t *testing.T) {
 	child := compose.CosmosNode{Key: "chat:name:child", Label: resolve.Named("child")}
 	model.cosmos.Nodes = append(model.cosmos.Nodes, child)
 	model.cosmos.Edges = append(model.cosmos.Edges, compose.CosmosEdge{
-		From: parent, To: child.Key, Kind: shared.KindSpawn, LastNS: fixtureNowNS,
+		From: parent, To: child.Key, Kind: fleetdb.KindSpawn, LastNS: fixtureNowNS,
 	})
 	model.mergeCosmosSeats()
 	if model.cosmosSeats[parent].Angle != 0.42 {
@@ -260,8 +260,8 @@ func TestCosmosMoonsShareOneEvenlySpacedOrbit(t *testing.T) {
 	moonB := compose.CosmosNode{Key: "chat:name:moon-b", Label: resolve.Named("moon-b"), Home: parentHome}
 	model.cosmos.Nodes = append(model.cosmos.Nodes, moonA, moonB)
 	model.cosmos.Edges = append(model.cosmos.Edges,
-		compose.CosmosEdge{From: parent, To: moonA.Key, Kind: shared.KindSpawn, LastNS: fixtureNowNS},
-		compose.CosmosEdge{From: parent, To: moonB.Key, Kind: shared.KindSpawn, LastNS: fixtureNowNS},
+		compose.CosmosEdge{From: parent, To: moonA.Key, Kind: fleetdb.KindSpawn, LastNS: fixtureNowNS},
+		compose.CosmosEdge{From: parent, To: moonB.Key, Kind: fleetdb.KindSpawn, LastNS: fixtureNowNS},
 	)
 	model.mergeCosmosSeats()
 	canvas := NewCanvas(118, 24)
@@ -345,8 +345,8 @@ func TestCosmosCrossStarSpawnIsAPlanetNotAMoon(t *testing.T) {
 		"chat:name:local":  {Key: "chat:name:local", Home: ".professor"},
 	}
 	edges := []compose.CosmosEdge{
-		{From: "chat:name:parent", To: "chat:name:child", Kind: shared.KindSpawn},
-		{From: "chat:name:parent", To: "chat:name:local", Kind: shared.KindSpawn},
+		{From: "chat:name:parent", To: "chat:name:child", Kind: fleetdb.KindSpawn},
+		{From: "chat:name:parent", To: "chat:name:local", Kind: fleetdb.KindSpawn},
 	}
 	parents, children := cosmosOrbits(edges, nodes)
 	if parents["chat:name:child"] != "" {
@@ -442,9 +442,9 @@ func TestClipCosmosLabelTruncatesVisiblyWithinAvailableSpace(t *testing.T) {
 func cosmosTestModel(width int, noSky bool) Model {
 	snapshot := fixtureSnapshot(width)
 	snapshot.NoSky = noSky
-	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, []shared.CommsEvent{{
+	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, []fleetdb.CommsEvent{{
 		AtNS:       fixtureNowNS - int64(300*time.Millisecond),
-		Kind:       shared.KindInject,
+		Kind:       fleetdb.KindInject,
 		SenderUUID: "11111111-1111-4111-8111-111111111111",
 		Target:     "RR",
 		Message:    "hello cosmos",
@@ -468,7 +468,7 @@ func TestApplyCosmosGraphStoresGraphAsGiven(t *testing.T) {
 			{Key: "chat:id:X", Label: resolve.Named("X"), LastNS: fixtureNowNS},
 			{Key: "chat:id:Y", Label: resolve.Named("Y"), LastNS: fixtureNowNS},
 		},
-		Edges: []compose.CosmosEdge{{From: "chat:id:X", To: "chat:id:Y", Kind: shared.KindInject}},
+		Edges: []compose.CosmosEdge{{From: "chat:id:X", To: "chat:id:Y", Kind: fleetdb.KindInject}},
 	}
 	model.applyCosmosGraph(first)
 	if len(model.cosmos.Nodes) != 2 || len(model.cosmos.Edges) != 1 {
@@ -506,8 +506,8 @@ func TestApplyCosmosGraphNeverCarriesADeadNodeLiveButReplayRendersItDimmed(t *te
 	rows := []compose.Row{
 		{Kind: compose.LiveClaude, ID: "killed-id", Name: "Killed", Socket: "cc-killed", PaneID: "%1", Killed: true},
 	}
-	events := []shared.CommsEvent{{
-		AtNS: fixtureNowNS - int64(time.Hour), Kind: shared.KindInject,
+	events := []fleetdb.CommsEvent{{
+		AtNS: fixtureNowNS - int64(time.Hour), Kind: fleetdb.KindInject,
 		SenderUUID: "killed-id", Target: "Someone", Message: "last words",
 	}}
 	deadKey := "chat:id:killed-id"
@@ -593,9 +593,9 @@ func TestCosmosRendersARawSessionAddressedSendOnTheExistingNode(t *testing.T) {
 	build := func(noSky bool) Model {
 		snapshot := fixtureSnapshot(80)
 		snapshot.NoSky = noSky
-		snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, []shared.CommsEvent{{
+		snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, []fleetdb.CommsEvent{{
 			AtNS:       fixtureNowNS - int64(300*time.Millisecond),
-			Kind:       shared.KindInject,
+			Kind:       fleetdb.KindInject,
 			SenderUUID: "11111111-1111-4111-8111-111111111111",
 			// The pathological shape: the caller addressed the chat by
 			// the raw session id the old reply footer handed it, and the
@@ -642,7 +642,7 @@ func TestCosmosRendersARawSessionAddressedSendOnTheExistingNode(t *testing.T) {
 	inFlight := cosmosUniverseDots(model, time.Unix(0, fixtureNowNS))
 	landed := cosmosUniverseDots(
 		model,
-		time.Unix(0, fixtureNowNS+int64(cosmosCometDuration(shared.KindInject))),
+		time.Unix(0, fixtureNowNS+int64(cosmosCometDuration(fleetdb.KindInject))),
 	)
 	if inFlight <= landed {
 		t.Fatalf(

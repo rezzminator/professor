@@ -10,8 +10,8 @@ import (
 	"os"
 	"sync"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/sqlitedb"
 )
 
@@ -64,7 +64,7 @@ var migrations = [...]string{
 // operator decisions such as kills, teammates, and the primary account.
 type Store struct {
 	db    *sql.DB
-	state *shared.Store
+	state *fleetdb.Store
 	path  string
 
 	warnMu sync.Mutex
@@ -113,7 +113,7 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 
 	store := &Store{
 		db:    db,
-		state: shared.Open(ctx, resolved),
+		state: fleetdb.Open(ctx, resolved),
 		path:  resolved.DB,
 		warn:  settings.warn,
 	}
@@ -142,7 +142,7 @@ func (s *Store) SharedDegraded() error { return s.state.Degraded() }
 
 // Shared exposes the shared state store for the few callers that need it
 // directly, including the teammate reaper.
-func (s *Store) Shared() *shared.Store { return s.state }
+func (s *Store) Shared() *fleetdb.Store { return s.state }
 
 func (s *Store) migrate(ctx context.Context) error {
 	return s.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
@@ -282,7 +282,7 @@ func (s *Store) adoptLocalKills(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	for _, id := range shared.SortedIDs(adopted) {
+	for _, id := range fleetdb.SortedIDs(adopted) {
 		if _, alreadyShared := existing[id]; alreadyShared {
 			continue
 		}

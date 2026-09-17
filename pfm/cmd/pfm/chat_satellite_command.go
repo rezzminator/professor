@@ -24,11 +24,11 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/store"
 	pfmtmux "hostops/pfm/internal/tmux"
@@ -557,7 +557,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 			)
 		}
 	}
-	state := shared.Open(context.Background(), resolved)
+	state := fleetdb.Open(context.Background(), resolved)
 	recordErr := state.RecordBranchSeat(context.Background(), socket, *id, time.Now().Unix())
 	closeErr := state.Close()
 	if recordErr != nil || closeErr != nil {

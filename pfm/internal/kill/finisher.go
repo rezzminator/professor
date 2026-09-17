@@ -13,9 +13,9 @@ import (
 
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/index"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/store"
 )
 
@@ -269,7 +269,7 @@ func (finisher *Finisher) reapTeammates(
 		".cc-new-children",
 		id,
 	)
-	detached, err := finisher.children(ctx, shared.KindNew, id, detachedPath)
+	detached, err := finisher.children(ctx, fleetdb.KindNew, id, detachedPath)
 	if err != nil {
 		reapErrors = append(reapErrors, err)
 	}
@@ -285,7 +285,7 @@ func (finisher *Finisher) reapTeammates(
 			reapErrors = append(reapErrors, err)
 		}
 	}
-	if err := state.ClearChildren(ctx, shared.KindNew, id); err != nil {
+	if err := state.ClearChildren(ctx, fleetdb.KindNew, id); err != nil {
 		reapErrors = append(reapErrors, err)
 	}
 	if err := os.Remove(detachedPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -298,7 +298,7 @@ func (finisher *Finisher) reapTeammates(
 		".cc-pane-children",
 		id,
 	)
-	panes, err := finisher.children(ctx, shared.KindPane, id, panePath)
+	panes, err := finisher.children(ctx, fleetdb.KindPane, id, panePath)
 	if err != nil {
 		reapErrors = append(reapErrors, err)
 	}
@@ -313,7 +313,7 @@ func (finisher *Finisher) reapTeammates(
 			pane,
 		)
 	}
-	if err := state.ClearChildren(ctx, shared.KindPane, id); err != nil {
+	if err := state.ClearChildren(ctx, fleetdb.KindPane, id); err != nil {
 		reapErrors = append(reapErrors, err)
 	}
 	if err := os.Remove(panePath); err != nil && !errors.Is(err, fs.ErrNotExist) {

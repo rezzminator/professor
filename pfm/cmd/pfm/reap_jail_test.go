@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 )
 
 // The reaper KILLS things, so its fixtures run against real tmux servers on
@@ -145,7 +145,7 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := shared.Open(context.Background(), resolved)
+	state := fleetdb.Open(context.Background(), resolved)
 	if state.Degraded() != nil {
 		t.Fatal(state.Degraded())
 	}
@@ -178,7 +178,7 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 	if reapServerAlive(root, socket) {
 		t.Fatalf("apply left untouched fork alive:\n%s", stdout.String())
 	}
-	state = shared.Open(context.Background(), resolved)
+	state = fleetdb.Open(context.Background(), resolved)
 	defer func() {
 		if err := state.Close(); err != nil {
 			t.Errorf("close state: %v", err)

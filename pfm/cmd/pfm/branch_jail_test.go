@@ -15,8 +15,8 @@ import (
 	"time"
 
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 )
 
 // TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller is the hard
@@ -145,7 +145,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := shared.Open(context.Background(), resolved)
+	state := fleetdb.Open(context.Background(), resolved)
 	seats, seatsErr := state.BranchSeats(context.Background())
 	closeErr := state.Close()
 	if seatsErr != nil || closeErr != nil {

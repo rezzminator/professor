@@ -11,8 +11,8 @@ import (
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 )
 
 // PrimaryAccount resolves the fleet DB's meta row first, then the
@@ -28,7 +28,7 @@ func PrimaryAccount(values paths.Values, configs ...pfmconfig.Config) int {
 	if len(configs) != 0 {
 		machine = configs[0]
 	}
-	account, found := shared.PrimaryAccount(context.Background(), values)
+	account, found := fleetdb.PrimaryAccount(context.Background(), values)
 	if found {
 		if _, exists := machine.Account(account); exists {
 			return account
@@ -46,7 +46,7 @@ func SetPrimaryAccount(values paths.Values, machine pfmconfig.Config, account in
 	if _, found := machine.Account(account); !found {
 		return fmt.Errorf("primary account %d is not in the configured roster", account)
 	}
-	return shared.SetPrimaryAccount(context.Background(), values, account, time.Now().Unix())
+	return fleetdb.SetPrimaryAccount(context.Background(), values, account, time.Now().Unix())
 }
 
 // CurrentSocket is the tmux socket name of the calling process's own server

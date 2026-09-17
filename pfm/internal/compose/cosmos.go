@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 const (
@@ -164,7 +164,7 @@ type cosmosBuilder struct {
 // spoken; the event walk beneath still advances a node's LastNS past its
 // seed the moment real traffic is newer, since touch only ever moves a
 // node's clock forward.
-func BuildCosmos(rows []Row, events []shared.CommsEvent, nowNS int64, live bool) CosmosGraph {
+func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool) CosmosGraph {
 	builder := cosmosBuilder{
 		directory: resolve.NewDirectory(rows, rowAddress),
 		nodes:     make(map[string]CosmosNode),
@@ -190,7 +190,7 @@ func BuildCosmos(rows []Row, events []shared.CommsEvent, nowNS int64, live bool)
 	for index := range events {
 		event := events[index]
 		switch event.Kind {
-		case shared.KindInject:
+		case fleetdb.KindInject:
 			if event.SenderSession == "" && event.SenderUUID == "" && event.SenderLabel == "" {
 				unsigned++
 			}
@@ -200,7 +200,7 @@ func BuildCosmos(rows []Row, events []shared.CommsEvent, nowNS int64, live bool)
 			builder.touch(to, event.AtNS)
 			builder.addEdge(from.Key, to.Key, event)
 			builder.warm(event.AtNS, from, to)
-		case shared.KindSpawn:
+		case fleetdb.KindSpawn:
 			child := builder.chatNode(receiverAddress(event))
 			builder.touch(child, event.AtNS)
 			if event.SenderSession == "" && event.SenderUUID == "" && event.SenderLabel == "" {
@@ -372,7 +372,7 @@ func rowAddress(row Row) resolve.Address {
 // is not a hedge: the reply footer used to hand callers a raw session id to
 // address a chat by, so the target column genuinely holds session names,
 // labels and stale labels alike.
-func senderAddress(event shared.CommsEvent) resolve.Address {
+func senderAddress(event fleetdb.CommsEvent) resolve.Address {
 	return resolve.Address{
 		ID:      event.SenderUUID,
 		Session: event.SenderSession,
@@ -380,7 +380,7 @@ func senderAddress(event shared.CommsEvent) resolve.Address {
 	}
 }
 
-func receiverAddress(event shared.CommsEvent) resolve.Address {
+func receiverAddress(event fleetdb.CommsEvent) resolve.Address {
 	return resolve.Address{
 		Session: event.ReceiverSocket,
 		Pane:    event.ReceiverPane,
@@ -500,7 +500,7 @@ func (builder *cosmosBuilder) warm(atNS int64, nodes ...CosmosNode) {
 	}
 }
 
-func (builder *cosmosBuilder) addEdge(from, to string, event shared.CommsEvent) {
+func (builder *cosmosBuilder) addEdge(from, to string, event fleetdb.CommsEvent) {
 	if from == "" || to == "" {
 		return
 	}

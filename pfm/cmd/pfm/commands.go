@@ -17,12 +17,12 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/heal"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 	pfmstats "hostops/pfm/internal/stats"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
@@ -97,7 +97,7 @@ func runLS(
 		return 1
 	}
 	defer func() { closeCommandResource(database, "pfm ls: close database", stderr, &exitCode) }()
-	sharedState := shared.Open(ctx, runtime.Paths)
+	sharedState := fleetdb.Open(ctx, runtime.Paths)
 	defer func() {
 		if err := sharedState.Close(); err != nil {
 			fmt.Fprintf(stderr, "pfm ls: close shared state: %v\n", err)
@@ -597,7 +597,7 @@ func killChatServer(
 			_ = os.Remove(filepath.Join(resolved.SIDDir, entry.Name()))
 		}
 	}
-	state := shared.Open(ctx, resolved)
+	state := fleetdb.Open(ctx, resolved)
 	clearErr := state.ClearBranchSeat(ctx, socket)
 	closeErr := state.Close()
 	if clearErr != nil || closeErr != nil {

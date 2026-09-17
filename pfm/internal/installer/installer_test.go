@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/reload"
-	"hostops/pfm/internal/shared"
 )
 
 type fakeRunner struct {
@@ -367,7 +367,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	}
 	bbTarget := filepath.Join(config, "commands", "bb.md")
 	writeFixture(t, bbTarget, "operator copy\n")
-	seed := shared.Open(context.Background(), paths.Values{
+	seed := fleetdb.Open(context.Background(), paths.Values{
 		Home: home, SharedDB: filepath.Join(home, ".cc", "fleet.db"),
 	})
 	if err := seed.Kill(context.Background(), "killed-a", 99); err != nil {
@@ -580,7 +580,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		t.Fatalf("zshrc was not converged:\n%s", zshrc)
 	}
 
-	state := shared.Open(context.Background(), paths.Values{
+	state := fleetdb.Open(context.Background(), paths.Values{
 		Home: home, SharedDB: filepath.Join(home, ".cc", "fleet.db"),
 	})
 	killed, err := state.KilledAt(context.Background())

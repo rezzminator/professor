@@ -10,7 +10,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
+	"hostops/pfm/internal/fleetdb"
 )
 
 // cosmosPlayRate is the chronoscope's playback speed: one real second replays
@@ -43,7 +43,7 @@ func (model Model) viewGraph() compose.CosmosGraph {
 // is non-nil even for an empty sample: a nil timeline means "never sampled",
 // which the scrub keys refuse on by name.
 func (model *Model) rebuildCosmosTimeline() {
-	timeline := make([]shared.CommsEvent, 0, len(model.cosmosEvents))
+	timeline := make([]fleetdb.CommsEvent, 0, len(model.cosmosEvents))
 	timeline = append(timeline, model.cosmosEvents...)
 	sort.SliceStable(timeline, func(left, right int) bool {
 		if timeline[left].AtNS != timeline[right].AtNS {

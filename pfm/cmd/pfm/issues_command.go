@@ -7,7 +7,7 @@ import (
 	"io"
 	"time"
 
-	"hostops/pfm/internal/shared"
+	"hostops/pfm/internal/fleetdb"
 )
 
 // runIssues lists the servicedesk complaint box agents file through the
@@ -34,7 +34,7 @@ func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		return 2
 	}
 	ctx := context.Background()
-	state := shared.Open(ctx, runtime.Paths)
+	state := fleetdb.Open(ctx, runtime.Paths)
 	defer func() { closeCommandResource(state, "pfm issues: close state", stderr, &exitCode) }()
 
 	issues, err := state.Issues(ctx, *all)

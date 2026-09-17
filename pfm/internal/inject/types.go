@@ -6,8 +6,8 @@ import (
 	"io"
 	"time"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 const (
@@ -260,7 +260,7 @@ type Dependencies struct {
 	// CODEX_THREAD_ID to the live fleet seat after ambient tmux and ancestry
 	// recovery both fail. Nil means that lookup is unavailable.
 	CodexSeat SelfIdentifier
-	Recorder  func(context.Context, shared.CommsEvent) error
+	Recorder  func(context.Context, fleetdb.CommsEvent) error
 	// WarningWriter receives non-fatal recorder failures. Nil uses stderr.
 	WarningWriter io.Writer
 	Options       Options

@@ -15,11 +15,11 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/index"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/store"
 )
 
@@ -934,16 +934,16 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := database.Shared()
-	if err := state.AddChild(ctx, shared.KindNew, id, "cc-501-1-1", 1); err != nil {
+	if err := state.AddChild(ctx, fleetdb.KindNew, id, "cc-501-1-1", 1); err != nil {
 		t.Fatal(err)
 	}
-	if err := state.AddChild(ctx, shared.KindPane, id, "cc-502-1-1\t%21", 1); err != nil {
+	if err := state.AddChild(ctx, fleetdb.KindPane, id, "cc-502-1-1\t%21", 1); err != nil {
 		t.Fatal(err)
 	}
 	// A teammate of a DIFFERENT chat must survive this reap.
 	if err := state.AddChild(
 		ctx,
-		shared.KindNew,
+		fleetdb.KindNew,
 		"neighbour",
 		"cc-503-1-1",
 		1,
@@ -985,15 +985,15 @@ func TestFinisherReapsTeammatesFromTheSharedChildrenTable(t *testing.T) {
 		t.Fatalf("killed panes = %q", tmux.killedPanes)
 	}
 	// The reaped rows are gone and the neighbour's rows are untouched.
-	if values, _, err := state.Children(ctx, shared.KindNew, id); err != nil ||
+	if values, _, err := state.Children(ctx, fleetdb.KindNew, id); err != nil ||
 		len(values) != 0 {
 		t.Fatalf("children after reap = %v, %v", values, err)
 	}
-	if values, _, err := state.Children(ctx, shared.KindPane, id); err != nil ||
+	if values, _, err := state.Children(ctx, fleetdb.KindPane, id); err != nil ||
 		len(values) != 0 {
 		t.Fatalf("pane children after reap = %v, %v", values, err)
 	}
-	values, _, err := state.Children(ctx, shared.KindNew, "neighbour")
+	values, _, err := state.Children(ctx, fleetdb.KindNew, "neighbour")
 	if err != nil || !reflect.DeepEqual(values, []string{"cc-503-1-1"}) {
 		t.Fatalf("neighbour children = %v, %v", values, err)
 	}

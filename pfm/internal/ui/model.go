@@ -15,7 +15,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/shared"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/sky"
 	"hostops/pfm/internal/spawn"
 	pfmstats "hostops/pfm/internal/stats"
@@ -129,7 +129,7 @@ type Model struct {
 	statsError           string
 	cosmos               compose.CosmosGraph
 	cosmosSampler        CosmosSampler
-	cosmosEvents         []shared.CommsEvent
+	cosmosEvents         []fleetdb.CommsEvent
 	cosmosSeats          map[string]*cosmosSeat
 	cosmosNowNS          int64
 	cosmosLoading        bool
@@ -152,7 +152,7 @@ type Model struct {
 	cosmosPast      *compose.CosmosGraph
 	cosmosViewNS    int64
 	cosmosPlaying   bool
-	cosmosTimeline  []shared.CommsEvent
+	cosmosTimeline  []fleetdb.CommsEvent
 	cosmosPastCount int
 	cosmosPastCutNS int64
 	// cosmosSelected is the node key under the navigator's reticle ("" for

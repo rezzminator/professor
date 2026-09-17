@@ -10,8 +10,8 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"hostops/pfm/internal/compose"
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/shared"
 )
 
 // U1: TestChronoscopeScrubCutsThePastFromTheSameEvents pins the chronoscope's
@@ -181,12 +181,12 @@ func TestChronoscopeReplayRendersADeadChatAsAGhostNotAnAlarm(t *testing.T) {
 	rows[0].Name = "Ghosty"
 	snapshot.Rows = rows
 
-	oldEvent := shared.CommsEvent{
-		AtNS: fixtureNowNS - int64(10*time.Minute), Kind: shared.KindInject,
+	oldEvent := fleetdb.CommsEvent{
+		AtNS: fixtureNowNS - int64(10*time.Minute), Kind: fleetdb.KindInject,
 		SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket,
 		Message: "dying words",
 	}
-	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, []shared.CommsEvent{oldEvent}, fixtureNowNS, true)
+	snapshot.Cosmos = compose.BuildCosmos(snapshot.Rows, []fleetdb.CommsEvent{oldEvent}, fixtureNowNS, true)
 
 	model := NewModel(snapshot)
 	model.tab = TabCosmos
@@ -201,7 +201,7 @@ func TestChronoscopeReplayRendersADeadChatAsAGhostNotAnAlarm(t *testing.T) {
 		}
 	}
 
-	model.cosmosEvents = []shared.CommsEvent{oldEvent}
+	model.cosmosEvents = []fleetdb.CommsEvent{oldEvent}
 	model.rebuildCosmosTimeline()
 	replay, _ := applyKey(t, model, printableKey('['))
 	if replay.cosmosPast == nil {
@@ -267,7 +267,7 @@ func TestChronoscopeReplayRendersADeadChatAsAGhostNotAnAlarm(t *testing.T) {
 func TestChronoscopeEmptyPastNamesTheMomentNotTheLedger(t *testing.T) {
 	t.Run("scrubbed before the first event names the moment", func(t *testing.T) {
 		model := cosmosGoldenModel(80)
-		model.cosmosEvents = []shared.CommsEvent{}
+		model.cosmosEvents = []fleetdb.CommsEvent{}
 		model.rebuildCosmosTimeline()
 		pressed, _ := applyKey(t, model, printableKey('['))
 		text := ansi.Strip(pressed.renderCosmosPanel(80, 9))
@@ -285,7 +285,7 @@ func TestChronoscopeEmptyPastNamesTheMomentNotTheLedger(t *testing.T) {
 
 	t.Run("ledger health is a now-fact and rides over the replay", func(t *testing.T) {
 		model := cosmosGoldenModel(80)
-		model.cosmosEvents = []shared.CommsEvent{}
+		model.cosmosEvents = []fleetdb.CommsEvent{}
 		model.rebuildCosmosTimeline()
 		pressed, _ := applyKey(t, model, printableKey('['))
 		pressed.cosmos.Err = "sqlite: database is locked"
@@ -358,8 +358,8 @@ func TestNavigatorSelectionCyclesAndReconciles(t *testing.T) {
 	}
 
 	newSnapshot := fixtureSnapshot(120)
-	newSnapshot.Cosmos = compose.BuildCosmos(newSnapshot.Rows, []shared.CommsEvent{{
-		AtNS: fixtureNowNS, Kind: shared.KindInject,
+	newSnapshot.Cosmos = compose.BuildCosmos(newSnapshot.Rows, []fleetdb.CommsEvent{{
+		AtNS: fixtureNowNS, Kind: fleetdb.KindInject,
 		SenderUUID: newSnapshot.Rows[1].ID, Target: newSnapshot.Rows[4].Name, ReceiverSocket: "",
 		Message: "unrelated traffic",
 	}}, fixtureNowNS, false)
@@ -472,17 +472,17 @@ func TestNavigatorSpotlightDimsEveryOtherEdge(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	snapshot.NoSky = true // isolate the plain rail Bezier from comet/wind/twinkle noise
 	rows := snapshot.Rows
-	touching := shared.CommsEvent{
-		AtNS: fixtureNowNS - int64(time.Minute), Kind: shared.KindInject,
+	touching := fleetdb.CommsEvent{
+		AtNS: fixtureNowNS - int64(time.Minute), Kind: fleetdb.KindInject,
 		SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket,
 		Message: "touches the selection",
 	}
-	unrelated := shared.CommsEvent{
-		AtNS: fixtureNowNS - int64(time.Minute), Kind: shared.KindInject,
+	unrelated := fleetdb.CommsEvent{
+		AtNS: fixtureNowNS - int64(time.Minute), Kind: fleetdb.KindInject,
 		SenderUUID: rows[4].ID, Target: rows[5].Name,
 		Message: "does not touch the selection",
 	}
-	snapshot.Cosmos = compose.BuildCosmos(rows, []shared.CommsEvent{touching, unrelated}, fixtureNowNS, false)
+	snapshot.Cosmos = compose.BuildCosmos(rows, []fleetdb.CommsEvent{touching, unrelated}, fixtureNowNS, false)
 	model := NewModel(snapshot)
 	model.tab = TabCosmos
 	selectedKey := "chat:id:" + rows[0].ID
@@ -556,17 +556,17 @@ func TestNavigatorSpotlightDimsEveryOtherEdge(t *testing.T) {
 func TestSystemFocusCyclesAndPushesOtherStarsOffFrame(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	rows := snapshot.Rows
-	intraAlpha := shared.CommsEvent{
-		AtNS: fixtureNowNS, Kind: shared.KindInject,
+	intraAlpha := fleetdb.CommsEvent{
+		AtNS: fixtureNowNS, Kind: fleetdb.KindInject,
 		SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket,
 		Message: "inside alpha",
 	}
-	crossToBeta := shared.CommsEvent{
-		AtNS: fixtureNowNS, Kind: shared.KindSpawn,
+	crossToBeta := fleetdb.CommsEvent{
+		AtNS: fixtureNowNS, Kind: fleetdb.KindSpawn,
 		SenderUUID: rows[0].ID, Target: rows[4].Name,
 		Message: "leaves for beta",
 	}
-	snapshot.Cosmos = compose.BuildCosmos(rows, []shared.CommsEvent{intraAlpha, crossToBeta}, fixtureNowNS, false)
+	snapshot.Cosmos = compose.BuildCosmos(rows, []fleetdb.CommsEvent{intraAlpha, crossToBeta}, fixtureNowNS, false)
 	model := NewModel(snapshot)
 	model.tab = TabCosmos
 
@@ -912,12 +912,12 @@ func TestNavigatorEnterOpensALiveSplitRowWithNoPaneID(t *testing.T) {
 	if splitRow.Kind != compose.LiveSplit || splitRow.ID != "" || splitRow.Socket == "" {
 		t.Fatalf("setup: fixture row 2 must be a LiveSplit row with a socket and no pane ID: %#v", splitRow)
 	}
-	touching := shared.CommsEvent{
-		AtNS: fixtureNowNS, Kind: shared.KindInject,
+	touching := fleetdb.CommsEvent{
+		AtNS: fixtureNowNS, Kind: fleetdb.KindInject,
 		SenderUUID: rows[0].ID, Target: splitRow.Name, ReceiverSocket: splitRow.Socket,
 		Message: "hello split",
 	}
-	snapshot.Cosmos = compose.BuildCosmos(rows, []shared.CommsEvent{touching}, fixtureNowNS, false)
+	snapshot.Cosmos = compose.BuildCosmos(rows, []fleetdb.CommsEvent{touching}, fixtureNowNS, false)
 	model := NewModel(snapshot)
 	model.tab = TabCosmos
 
@@ -962,10 +962,10 @@ func TestNavigatorEnterOpensALiveSplitRowWithNoPaneID(t *testing.T) {
 func TestCosmosSelectionHUDNamesAllFourLifecycleStates(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	rows := snapshot.Rows
-	events := []shared.CommsEvent{
+	events := []fleetdb.CommsEvent{
 		{
 			AtNS:           fixtureNowNS,
-			Kind:           shared.KindInject,
+			Kind:           fleetdb.KindInject,
 			SenderUUID:     rows[0].ID,
 			Target:         rows[1].Name,
 			ReceiverSocket: rows[1].Socket,
@@ -973,7 +973,7 @@ func TestCosmosSelectionHUDNamesAllFourLifecycleStates(t *testing.T) {
 		},
 		{
 			AtNS:       fixtureNowNS,
-			Kind:       shared.KindInject,
+			Kind:       fleetdb.KindInject,
 			SenderUUID: rows[4].ID,
 			Target:     "resumable reply",
 			Message:    "from a resumable row",
@@ -1152,7 +1152,7 @@ func TestRenderCompactCosmosFocusFiltersEdgesToTheSystem(t *testing.T) {
 			{
 				From:        "chat:name:Aone",
 				To:          "chat:name:Atwo",
-				Kind:        shared.KindInject,
+				Kind:        fleetdb.KindInject,
 				Count:       1,
 				LastNS:      fixtureNowNS,
 				LastMessage: "alpha chatter",
@@ -1160,7 +1160,7 @@ func TestRenderCompactCosmosFocusFiltersEdgesToTheSystem(t *testing.T) {
 			{
 				From:        "chat:name:Bone",
 				To:          "chat:name:Btwo",
-				Kind:        shared.KindInject,
+				Kind:        fleetdb.KindInject,
 				Count:       1,
 				LastNS:      fixtureNowNS,
 				LastMessage: "beta chatter",
@@ -1189,19 +1189,19 @@ func TestNavigatorSpotlightDimsTheCometBurstAndShockwaveRing(t *testing.T) {
 	snapshot := fixtureSnapshot(120)
 	snapshot.NoSky = false // sky ON: the burst and shockwave passes are sky-only
 	rows := snapshot.Rows
-	givesSelectionItsOwnNode := shared.CommsEvent{
-		AtNS: fixtureNowNS - int64(10*time.Minute), Kind: shared.KindInject,
+	givesSelectionItsOwnNode := fleetdb.CommsEvent{
+		AtNS: fixtureNowNS - int64(10*time.Minute), Kind: fleetdb.KindInject,
 		SenderUUID: rows[0].ID, Target: rows[1].Name, ReceiverSocket: rows[1].Socket,
 		Message: "old, not mid-comet, gives the selection its own node",
 	}
-	unrelated := shared.CommsEvent{
-		AtNS: fixtureNowNS - int64(300*time.Millisecond), Kind: shared.KindInject,
+	unrelated := fleetdb.CommsEvent{
+		AtNS: fixtureNowNS - int64(300*time.Millisecond), Kind: fleetdb.KindInject,
 		SenderUUID: rows[4].ID, Target: rows[5].Name,
 		Message: "mid-comet, does not touch the selection",
 	}
 	snapshot.Cosmos = compose.BuildCosmos(
 		rows,
-		[]shared.CommsEvent{givesSelectionItsOwnNode, unrelated},
+		[]fleetdb.CommsEvent{givesSelectionItsOwnNode, unrelated},
 		fixtureNowNS,
 		false,
 	)
@@ -1305,7 +1305,7 @@ func TestNavigatorSpotlightDimsTheCometBurstAndShockwaveRing(t *testing.T) {
 func TestRenderCompactCosmosEmptyStatesAndHeightBound(t *testing.T) {
 	t.Run("replay before the first event names the moment, not \"yet\"", func(t *testing.T) {
 		model := cosmosGoldenModel(80)
-		model.cosmosEvents = []shared.CommsEvent{}
+		model.cosmosEvents = []fleetdb.CommsEvent{}
 		model.rebuildCosmosTimeline()
 		pressed, _ := applyKey(t, model, printableKey('['))
 		// width 80 keeps the message unabbreviated; height 7 (<8) is what
@@ -1345,7 +1345,7 @@ func TestRenderCompactCosmosEmptyStatesAndHeightBound(t *testing.T) {
 				compose.CosmosNode{Key: to, Label: resolve.Named("to-" + suffix), Home: "alpha"},
 			)
 			edges = append(edges, compose.CosmosEdge{
-				From: from, To: to, Kind: shared.KindInject, Count: 1,
+				From: from, To: to, Kind: fleetdb.KindInject, Count: 1,
 				LastNS: fixtureNowNS - int64(i)*int64(time.Second), LastMessage: "message",
 			})
 		}
@@ -1383,8 +1383,8 @@ func TestCosmosMoonOfMoonSeedsFromParentRegardlessOfNodeOrder(t *testing.T) {
 	// graph.Nodes' own order to find a parent's freshly written seat.
 	model.cosmos.Nodes = append(model.cosmos.Nodes, moonC, moonB)
 	model.cosmos.Edges = append(model.cosmos.Edges,
-		compose.CosmosEdge{From: parent, To: moonB.Key, Kind: shared.KindSpawn, LastNS: fixtureNowNS},
-		compose.CosmosEdge{From: moonB.Key, To: moonC.Key, Kind: shared.KindSpawn, LastNS: fixtureNowNS},
+		compose.CosmosEdge{From: parent, To: moonB.Key, Kind: fleetdb.KindSpawn, LastNS: fixtureNowNS},
+		compose.CosmosEdge{From: moonB.Key, To: moonC.Key, Kind: fleetdb.KindSpawn, LastNS: fixtureNowNS},
 	)
 	model.mergeCosmosSeats()
 

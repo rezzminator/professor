@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/shared"
 	"hostops/pfm/internal/spawn"
 )
 
@@ -439,7 +439,7 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 	if got := jail.onlyWindowName(t); got != "_KILL codex worker" {
 		t.Fatalf("codex window=%q, want inline launch name", got)
 	}
-	state := shared.Open(context.Background(), paths.Values{
+	state := fleetdb.Open(context.Background(), paths.Values{
 		SharedDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
 	})
 	t.Cleanup(func() { _ = state.Close() })
@@ -458,7 +458,7 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 	// conventionally "%0", but nothing here proves that invariant, so
 	// run_command.go does not invent one).
 	wantSocket := filepath.Join(jail.tmuxDir, entries[0].Name())
-	if len(events) != 1 || events[0].Kind != shared.KindSpawn ||
+	if len(events) != 1 || events[0].Kind != fleetdb.KindSpawn ||
 		events[0].SenderSession != "" || events[0].Target != "_KILL codex worker" ||
 		events[0].ReceiverSocket != wantSocket || events[0].ReceiverPane != "" ||
 		events[0].Message != "read the incident report" {

@@ -15,7 +15,7 @@ import (
 // applying a pending ⌃X kill or a pending ⌃S primary-account switch. It
 // drives the REAL Bubble Tea picker inside a scratch tmux pane — the same
 // subprocess-reexec technique TestJailedEvalAttachFromPlainAndNestedTmux uses
-// (attach_e2e_test.go) — because the bug lives in the command loop wired
+// (attach_jail_test.go) — because the bug lives in the command loop wired
 // around the picker (runLS), not in the pure Model in isolation.
 func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -54,7 +54,7 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	// The picker paints its cached first frame, then promotes the row once
 	// the async gather goroutine finishes. Pressing keys before that settles
 	// risks landing on a frame that has not drawn the row yet
-	// (attach_e2e_test.go:proveAttach uses the same wait for the same reason).
+	// (attach_jail_test.go:proveAttach uses the same wait for the same reason).
 	waitForTmuxPaneText(t, socket, jail.env, "PICKERCANCEL", 5*time.Second)
 	for _, key := range []string{"C-x", "C-s", "Escape"} {
 		send := exec.Command("tmux", "-L", socket, "send-keys", "-t", "picker", key)

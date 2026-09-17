@@ -532,7 +532,7 @@ func TestAsyncCallerRefreshStormPreservesCursorAndGoroutines(t *testing.T) {
 }
 
 // TestInternalPrimarySetGetDispatch is F5's regression test: the retired
-// TestShimLaunchPosture (shim/shim_test.go) was the only place that ran a
+// TestShimLaunchPosture (internal/installer/shim/shim_test.go) was the only place that ran a
 // primary-account switch through `pfm internal primary-set` / `primary-get`
 // end to end, and it drove those subcommands through a HAND-WRITTEN fake
 // shell-script "pfm" fixture, never the real Go dispatch — the shell

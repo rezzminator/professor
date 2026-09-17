@@ -175,7 +175,7 @@ func bootingRowsFromTSV(t *testing.T) map[string]string {
 // no killed-store write, no non-zero exit on quit — and Enter must
 // synthesize the same Live attach line an ordinary live row gets and really
 // execute it, the same subprocess-reexec and raw/inside-tmux technique
-// attach_e2e_test.go's proveAttach uses (stdout is a real tty here, so
+// attach_jail_test.go's proveAttach uses (stdout is a real tty here, so
 // dispatchAction's own terminal branch execs tmux directly — no zsh/eval
 // wrapper is needed for a TMUX= line).
 func TestBootingRowInteractivePickerJailed(t *testing.T) {
@@ -213,7 +213,7 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 		// The picker paints its cached first frame, then promotes the row once
 		// the async gather goroutine finds the live pane; pressing keys before
 		// that settles risks landing on a frame that has not drawn it yet
-		// (attach_e2e_test.go:proveAttach uses the same wait for the same
+		// (attach_jail_test.go:proveAttach uses the same wait for the same
 		// reason). Down moves off row 0 ("New Claude chat") onto the booting
 		// row — the only other row this minimal jail composes. Wait for "◐",
 		// the marker rowMarker() (internal/ui/render.go) paints ONLY for
@@ -314,7 +314,7 @@ type bootingPickerJail struct {
 }
 
 // newBootingPickerJail wires the same subprocess-reexec technique
-// attach_e2e_test.go's newAttachJail uses, minus its pre-seeded transcript:
+// attach_jail_test.go's newAttachJail uses, minus its pre-seeded transcript:
 // this jail's Claude store starts empty, so the interactive picker composes
 // exactly ["New Claude chat", the one booting row under test] — nothing else
 // to navigate around.

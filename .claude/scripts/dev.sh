@@ -229,6 +229,25 @@ act_templates() { # the shipped product: mechanical gates, no build
         esac
       fi
 
+      head_ "templates — generate the engine mirrors"
+      # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked: a fresh
+      # clone holds none, so verify generates them from the Claude sources
+      # before any gate reads them. Current mirrors are left alone (the fence
+      # mounts the tree read-only and CI generates on the host first); the
+      # tree's own compiler runs, never a host pfm binary (a stale host build
+      # rewrites what it does not understand).
+      if ! need_tool go templates || ! need_tool node templates; then
+        fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
+      elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex check "$REPO_ROOT") >/dev/null 2>&1 \
+        && node .claude/scripts/build-opencode.mjs check >/dev/null 2>&1; then
+        ok "engine mirrors current — nothing generated"
+      elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex build "$REPO_ROOT") \
+        && node .claude/scripts/build-opencode.mjs generate; then
+        ok "engine mirrors generated from the Claude sources"
+      else
+        fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
+      fi
+
       head_ "templates — codex generated-marker claim"
       # The templates dir's shipped JS compiler and this repo's `pfm codex build`
       # write the same $HOME/.codex outputs on adopter hosts. A copy that stops

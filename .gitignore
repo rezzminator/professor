@@ -13,12 +13,26 @@ node_modules/
 # prevent — and each carries its own upstream LICENSE with its author's name,
 # which the leak gate correctly refuses for this repo.
 .claude/skills/
-# Codex command wrappers are tracked so clean checkouts pass mirror checks.
-# Source-fetched skill trees remain ignored at their Claude source above — and
-# so is the .codex mirror LINK to each one: `pfm codex build` recreates it from
-# whatever `.claude/skills/` holds, and a tracked link into an ignored tree
-# resolves only in the working copy that added it. One line per fetched skill.
-.codex/skills/deep-rr
+# Generated mirrors are never tracked beside their source: their compiler
+# (`pfm codex build` for Codex, `build-opencode.mjs generate` for OpenCode)
+# writes them at install/init time and the Stop hook keeps them current on
+# every later edit. A fresh clone has none of these paths until it generates
+# — `pfm codex build .` + `node .claude/scripts/build-opencode.mjs generate`
+# — which every gate that reads them runs first (see `scripts/
+# check-agent-roster.mjs`'s NOT GENERATED state and the CI `Generate mirrors`
+# step). Keepers stay tracked and are NOT covered by these rules:
+# `.codex/config.toml` (hand-written, holds one generated `mcp_servers`
+# fence), `.codex/rules/**`, `.codex/README.md`, `templates/global/agents/*.md`.
+/AGENTS.md
+/pfm/AGENTS.md
+.codex/agents/
+.codex/skills/
+.opencode/agent/
+.opencode/command/
+.opencode/LICENSE
+.opencode/SECURITY.md
+.opencode/opencode.jsonc
+templates/global/agents/*.toml
 # OpenCode mirror (build-opencode.mjs): skill symlinks stay untracked like
 # .codex/skills/; the goals/ tree is the goal plugin's live session state.
 .opencode/skills/

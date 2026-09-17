@@ -32,6 +32,10 @@ type ClaudeLauncherStatus struct {
 // the configured location, the native versions directory, or PATH.
 var ErrClaudeBinaryNotFound = errors.New("claude binary not found")
 
+// ErrConfiguredClaudeBinaryNotFound reports that claude.binary names no
+// executable in its absolute location or the caller-supplied PATH.
+var ErrConfiguredClaudeBinaryNotFound = errors.New("configured Claude binary not found")
+
 func managedClaudeLauncher(home string) string {
 	return filepath.Join(
 		home,
@@ -53,10 +57,11 @@ func claudeLauncherStatePath(home string) string {
 }
 
 // ResolveClaudeBinary selects the real Claude executable behind pfm's managed
-// launcher. A configured executable wins, followed by the newest native
-// version and then each PATH component in order. The canonical and managed
-// launchers, including physical aliases of the managed file, are never
-// returned because doing so would recurse back into pfm.
+// launcher. A configured executable wins and a missing configured command
+// fails explicitly; otherwise the newest native version wins, followed by each
+// PATH component in order. The canonical and managed launchers, including
+// physical aliases of the managed file, are never returned because doing so
+// would recurse back into pfm.
 func ResolveClaudeBinary(home, configuredBinary, pathEnv string) (string, error) {
 	managed := managedClaudeLauncher(home)
 	canonical := canonicalClaudeLauncher(home)
@@ -69,6 +74,24 @@ func ResolveClaudeBinary(home, configuredBinary, pathEnv string) (string, error)
 		if eligible {
 			return configuredBinary, nil
 		}
+	} else if configuredBinary != "" {
+		for _, directory := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+			if directory == "" {
+				directory = "."
+			}
+			candidate, err := filepath.Abs(filepath.Join(directory, configuredBinary))
+			if err != nil {
+				return "", fmt.Errorf("resolve configured Claude binary %s in %s: %w", configuredBinary, directory, err)
+			}
+			eligible, err := eligibleClaudeBinary(candidate, canonical, managed)
+			if err != nil {
+				return "", fmt.Errorf("inspect configured Claude binary %s: %w", candidate, err)
+			}
+			if eligible {
+				return candidate, nil
+			}
+		}
+		return "", fmt.Errorf("%w: %s", ErrConfiguredClaudeBinaryNotFound, configuredBinary)
 	}
 
 	report, err := InspectClaudeVersions(home, configuredBinary)

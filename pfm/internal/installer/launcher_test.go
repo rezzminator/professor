@@ -146,6 +146,50 @@ func TestResolveClaudeBinaryUsesConfiguredThenNewestThenPATH(t *testing.T) {
 	}
 }
 
+func TestResolveClaudeBinaryUsesRelativeConfiguredCommandFromSuppliedPATH(t *testing.T) {
+	home := t.TempDir()
+	versions := filepath.Join(home, ".local", "share", "claude", "versions")
+	if err := os.MkdirAll(versions, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	newest := filepath.Join(versions, "9.9.9")
+	writeExecutable(t, newest)
+	pathDir := filepath.Join(home, "path-bin")
+	if err := os.MkdirAll(pathDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configured := filepath.Join(pathDir, "claude-nightly")
+	writeExecutable(t, configured)
+
+	resolved, err := ResolveClaudeBinary(home, "claude-nightly", pathDir)
+	if err != nil || resolved != configured {
+		t.Fatalf("relative configured resolution=%q err=%v, want %q", resolved, err, configured)
+	}
+}
+
+func TestResolveClaudeBinaryMissingRelativeConfiguredCommandFails(t *testing.T) {
+	home := t.TempDir()
+	newest := filepath.Join(home, ".local", "share", "claude", "versions", "9.9.9")
+	if err := os.MkdirAll(filepath.Dir(newest), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, newest)
+	pathDir := filepath.Join(home, "path-bin")
+	if err := os.MkdirAll(pathDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, filepath.Join(pathDir, "claude"))
+
+	resolved, err := ResolveClaudeBinary(home, "claude-nightly", pathDir)
+	if err == nil || resolved != "" || !strings.Contains(err.Error(), "claude-nightly") {
+		t.Fatalf(
+			"missing relative configured resolution=%q err=%v, want an error naming claude-nightly without fallback",
+			resolved,
+			err,
+		)
+	}
+}
+
 func TestResolveClaudeBinarySkipsManagedAliasesAndHonorsPATHOrder(t *testing.T) {
 	home := t.TempDir()
 	managed := managedClaudeLauncher(home)

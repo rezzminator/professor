@@ -307,7 +307,7 @@ func runInstallE2E(t *testing.T) {
 
 	var fresh surfaceSnapshot
 	var freshHome string
-	t.Run("install", func(_ *testing.T) {
+	t.Run("install", func(t *testing.T) {
 		home := harness.newHome(harness.headBinary)
 		freshHome = home
 		result := harness.pfm(home, "install", "--yes", "--skip-harvest")
@@ -316,7 +316,11 @@ func runInstallE2E(t *testing.T) {
 		harness.assertInstalled(home)
 		result = harness.pfm(home, "doctor")
 		harness.requireSkippedHarvestDoctor(result)
-		fresh, _ = harness.snapshot(home)
+		var err error
+		fresh, err = harness.snapshot(home)
+		if err != nil {
+			t.Fatalf("snapshot fresh install: %v", err)
+		}
 	})
 
 	t.Run("init", func(t *testing.T) {
@@ -401,8 +405,15 @@ func runInstallE2E(t *testing.T) {
 			t.Fatalf("updated pfm version=%q, want %s", strings.TrimSpace(version.stdout), wantVersion)
 		}
 		harness.assertInstalled(home)
-		updated, _ := harness.snapshot(home)
-		if differences := snapshotDifferences(fresh, updated); len(differences) != 0 {
+		updated, err := harness.snapshot(home)
+		if err != nil {
+			t.Fatalf("snapshot updated install: %v", err)
+		}
+		differences, err := snapshotDifferences(fresh, updated)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(differences) != 0 {
 			t.Fatalf("update convergence failed; differing paths: %s", strings.Join(differences, ", "))
 		}
 	})
@@ -1393,7 +1404,10 @@ func addSnapshotFile(path, home string, snapshot surfaceSnapshot) error {
 	return nil
 }
 
-func snapshotDifferences(left, right surfaceSnapshot) []string {
+func snapshotDifferences(left, right surfaceSnapshot) ([]string, error) {
+	if len(left) == 0 && len(right) == 0 {
+		return nil, errors.New("both snapshots empty — nothing was compared")
+	}
 	seen := make(map[string]bool, len(left)+len(right))
 	for key := range left {
 		seen[key] = true
@@ -1408,7 +1422,14 @@ func snapshotDifferences(left, right surfaceSnapshot) []string {
 		}
 	}
 	sort.Strings(differences)
-	return differences
+	return differences, nil
+}
+
+func TestSnapshotDifferencesRejectsEmptySnapshots(t *testing.T) {
+	_, err := snapshotDifferences(nil, nil)
+	if err == nil || err.Error() != "both snapshots empty — nothing was compared" {
+		t.Fatalf("empty snapshot error = %v, want named refusal", err)
+	}
 }
 
 func normalizeHome(value, home string) string {

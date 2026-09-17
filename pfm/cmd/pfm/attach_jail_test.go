@@ -20,9 +20,9 @@ const attachHelperEnv = "PFM_ATTACH_HELPER"
 // subprocess integration tests. Keeping the CLI inside the test process is
 // load-bearing for process-table fixtures: TestMain installs the jail's
 // package-level seams before run dispatches.
-func TestPFMAttachHelper(_ *testing.T) {
+func TestPFMAttachHelper(t *testing.T) {
 	if os.Getenv(attachHelperEnv) != "1" {
-		return
+		t.Skip("pfm attach fixture runs only as a helper process")
 	}
 	separator := -1
 	for index, argument := range os.Args {

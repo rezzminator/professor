@@ -212,9 +212,9 @@ func TestInternalLaunchPrintExecsDirectlyWithoutTmux(t *testing.T) {
 	}
 }
 
-func TestInternalLaunchPrintHelper(_ *testing.T) {
+func TestInternalLaunchPrintHelper(t *testing.T) {
 	if os.Getenv("PFM_TEST_LAUNCH_PRINT_HELPER") != "1" {
-		return
+		t.Skip("internal launch print fixture runs only as a helper process")
 	}
 	code := run(
 		[]string{"internal", "launch", "--real", os.Getenv("PFM_TEST_LAUNCH_REAL"), "--", "-p", "hello"},

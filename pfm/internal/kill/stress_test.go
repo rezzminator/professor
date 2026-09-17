@@ -147,7 +147,7 @@ func TestStressTwentyKillUnkillProcesses(t *testing.T) {
 
 func TestKillStressProcessHelper(t *testing.T) {
 	if os.Getenv(killStressHelperEnv) != "1" {
-		return
+		t.Skip("kill stress fixture runs only as a helper process")
 	}
 	index := 0
 	if _, err := fmt.Sscanf(os.Getenv(killStressIndexEnv), "%d", &index); err != nil {

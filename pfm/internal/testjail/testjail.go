@@ -50,6 +50,18 @@ func Run(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "testjail: clear CLAUDE_CONFIG_DIR: %v\n", err)
 		return 1
 	}
+	// Git fixtures must read only repository-local configuration. A developer's
+	// global identity, aliases, hooks, signing policy, or system configuration
+	// must never steer a test subprocess.
+	for name, value := range map[string]string{
+		"GIT_CONFIG_GLOBAL":   "/dev/null",
+		"GIT_CONFIG_NOSYSTEM": "1",
+	} {
+		if err := os.Setenv(name, value); err != nil {
+			fmt.Fprintf(os.Stderr, "testjail: set %s to %s: %v\n", name, value, err)
+			return 1
+		}
+	}
 	base, err := filepath.EvalSymlinks(os.TempDir())
 	if short, shortErr := filepath.EvalSymlinks("/tmp"); shortErr == nil {
 		base, err = short, nil

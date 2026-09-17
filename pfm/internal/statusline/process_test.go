@@ -85,9 +85,9 @@ done
 	}
 }
 
-func TestCodexAppServerFixture(_ *testing.T) {
+func TestCodexAppServerFixture(t *testing.T) {
 	if os.Getenv("PFM_GPT_APP_SERVER_FIXTURE") != "1" {
-		return
+		t.Skip("Codex App Server fixture runs only as a helper process")
 	}
 	reader := bufio.NewReader(os.Stdin)
 	lines := make([]string, 0, 3)

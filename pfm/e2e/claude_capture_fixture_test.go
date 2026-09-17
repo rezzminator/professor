@@ -16,7 +16,7 @@ import (
 
 func TestClaudeHarnessCaptureFixture(t *testing.T) {
 	if os.Getenv("PFM_E2E_CLAUDE_CAPTURE") != "1" {
-		return
+		t.Skip("Claude harness capture fixture runs only as a helper process")
 	}
 	home := os.Getenv("PFM_E2E_HOME")
 	if home == "" || home != os.Getenv("HOME") {

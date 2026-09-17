@@ -67,7 +67,7 @@ func TestLimitAccountsKeepCodexIndependentFromClaudeRoster(t *testing.T) {
 			)
 		}
 	}
-	if account := accounts[5]; account.Engine != pfmengine.Opencode || !account.Absent ||
+	if account := accounts[5]; account.Engine != pfmengine.OpenCode || !account.Absent ||
 		account.Label != "no OpenCode accounts configured" {
 		t.Fatalf("OpenCode absence=%#v, want named absent row", account)
 	}
@@ -83,13 +83,13 @@ func TestLimitAccountsNameBothEmptyRosters(t *testing.T) {
 	}
 }
 
-func TestLimitAccountsIncludesConfiguredOpencodeSeat(t *testing.T) {
+func TestLimitAccountsIncludesConfiguredOpenCodeSeat(t *testing.T) {
 	accounts := limitAccounts(commandRuntime{Config: pfmconfig.Config{
-		OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 7, Home: "/jail/opencode"}},
+		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 7, Home: "/jail/opencode"}},
 	}})
 	var found bool
 	for _, account := range accounts {
-		if account.Engine == pfmengine.Opencode {
+		if account.Engine == pfmengine.OpenCode {
 			found = account.ID == 7 && account.Label == "OpenCode 7" && !account.Absent
 		}
 	}
@@ -98,18 +98,18 @@ func TestLimitAccountsIncludesConfiguredOpencodeSeat(t *testing.T) {
 	}
 }
 
-func TestConfiguredOpencodeLimitIsUnsupportedNotAbsent(t *testing.T) {
+func TestConfiguredOpenCodeLimitIsUnsupportedNotAbsent(t *testing.T) {
 	accounts := limitAccounts(commandRuntime{Config: pfmconfig.Config{
-		OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 7, Home: "/jail/opencode"}},
+		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 7, Home: "/jail/opencode"}},
 	}})
 	var configured pfmstats.LimitAccount
 	for _, account := range accounts {
-		if account.Engine == pfmengine.Opencode {
+		if account.Engine == pfmengine.OpenCode {
 			configured = account
 			break
 		}
 	}
-	if configured.Engine != pfmengine.Opencode || configured.Absent {
+	if configured.Engine != pfmengine.OpenCode || configured.Absent {
 		t.Fatalf("configured OpenCode limit row=%#v, want a configured (not absent) row", configured)
 	}
 	limits, warnings := pfmstats.NewLimitsSampler([]pfmstats.LimitAccount{configured}).Sample(context.Background())

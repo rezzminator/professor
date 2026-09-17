@@ -267,7 +267,7 @@ func limitAccounts(runtime commandRuntime) []pfmstats.LimitAccount {
 		)+len(
 			runtime.Config.CodexAccounts,
 		)+len(
-			runtime.Config.OpencodeAccounts,
+			runtime.Config.OpenCodeAccounts,
 		)+3,
 	)
 	if len(runtime.Config.Accounts) == 0 {
@@ -313,17 +313,17 @@ func limitAccounts(runtime commandRuntime) []pfmstats.LimitAccount {
 			CodexAuthPath: filepath.Join(account.Home, "auth.json"),
 		})
 	}
-	if len(runtime.Config.OpencodeAccounts) == 0 {
+	if len(runtime.Config.OpenCodeAccounts) == 0 {
 		accounts = append(accounts, pfmstats.LimitAccount{
-			Engine: pfmengine.Opencode,
-			Label:  "no " + pfmengine.MustLookup(pfmengine.Opencode).Short + " accounts configured",
+			Engine: pfmengine.OpenCode,
+			Label:  "no " + pfmengine.MustLookup(pfmengine.OpenCode).Short + " accounts configured",
 			Absent: true,
 		})
 	}
-	for _, account := range runtime.Config.OpencodeAccounts {
+	for _, account := range runtime.Config.OpenCodeAccounts {
 		accounts = append(accounts, pfmstats.LimitAccount{
-			ID: account.ID, Engine: pfmengine.Opencode,
-			Label: fmt.Sprintf("%s %d", pfmengine.MustLookup(pfmengine.Opencode).Short, account.ID),
+			ID: account.ID, Engine: pfmengine.OpenCode,
+			Label: fmt.Sprintf("%s %d", pfmengine.MustLookup(pfmengine.OpenCode).Short, account.ID),
 		})
 	}
 	return accounts

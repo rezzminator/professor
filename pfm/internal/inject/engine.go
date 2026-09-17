@@ -77,7 +77,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 		Values: map[pfmengine.ID]string{
 			pfmengine.Claude:   dependencies.ClaudeBinary,
 			pfmengine.Codex:    dependencies.CodexBinary,
-			pfmengine.Opencode: dependencies.OpencodeBinary,
+			pfmengine.OpenCode: dependencies.OpenCodeBinary,
 		},
 		AccountEmojis: dependencies.AccountEmojis,
 	}

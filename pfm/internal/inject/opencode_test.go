@@ -6,15 +6,15 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 )
 
-func TestPaneCommandEngineRecognizesOpencode(t *testing.T) {
+func TestPaneCommandEngineRecognizesOpenCode(t *testing.T) {
 	cases := []struct {
 		command  string
 		binaries map[pfmengine.ID]string
 		want     string
 	}{
-		{"opencode", nil, string(pfmengine.Opencode)},
-		{"/home/me/.local/bin/opencode", nil, string(pfmengine.Opencode)},
-		{"ocx", map[pfmengine.ID]string{pfmengine.Opencode: "ocx"}, string(pfmengine.Opencode)},
+		{"opencode", nil, string(pfmengine.OpenCode)},
+		{"/home/me/.local/bin/opencode", nil, string(pfmengine.OpenCode)},
+		{"ocx", map[pfmengine.ID]string{pfmengine.OpenCode: "ocx"}, string(pfmengine.OpenCode)},
 		{"codex", nil, string(pfmengine.Codex)},
 		{"claude", nil, string(pfmengine.Claude)},
 		{"2.1.47", nil, string(pfmengine.Claude)},
@@ -27,11 +27,11 @@ func TestPaneCommandEngineRecognizesOpencode(t *testing.T) {
 	}
 }
 
-func TestTargetFromPartsRecognizesOpencodeSockets(t *testing.T) {
+func TestTargetFromPartsRecognizesOpenCodeSockets(t *testing.T) {
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "")
 	for _, socket := range []string{"/tmp/tmux-0/ox-1-2-3,99,0"} {
 		target := targetFromParts(socket, "%5")
-		if target.Engine != string(pfmengine.Opencode) {
+		if target.Engine != string(pfmengine.OpenCode) {
 			t.Errorf("targetFromParts(%q).Engine = %q, want ox", socket, target.Engine)
 		}
 	}
@@ -40,10 +40,10 @@ func TestTargetFromPartsRecognizesOpencodeSockets(t *testing.T) {
 	}
 }
 
-func TestTargetFromPartsProbeOpencodeSocket(t *testing.T) {
+func TestTargetFromPartsProbeOpenCodeSocket(t *testing.T) {
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")
 	target := targetFromParts("/tmp/jail/probe-ox-7,3,0", "%2")
-	if target.Engine != string(pfmengine.Opencode) {
+	if target.Engine != string(pfmengine.OpenCode) {
 		t.Errorf("probe socket engine = %q, want ox", target.Engine)
 	}
 }
@@ -56,18 +56,18 @@ func TestTargetFromPartsNamesUnknownSocketEngine(t *testing.T) {
 	}
 }
 
-func TestEngineNameCoversOpencode(t *testing.T) {
-	if got := engineName(string(pfmengine.Opencode)); got != "OpenCode" {
+func TestEngineNameCoversOpenCode(t *testing.T) {
+	if got := engineName(string(pfmengine.OpenCode)); got != "OpenCode" {
 		t.Errorf("engineName(ox) = %q, want OpenCode", got)
 	}
 }
 
-func TestAutoFileThresholdInheritsCodexBoundForOpencode(t *testing.T) {
+func TestAutoFileThresholdInheritsCodexBoundForOpenCode(t *testing.T) {
 	engine := &Engine{options: withDefaults(Options{
 		ClaudeInlineMax: 500,
 		CodexInlineMax:  300,
 	})}
-	if got := engine.inlineThreshold(string(pfmengine.Opencode)); got != 300 {
+	if got := engine.inlineThreshold(string(pfmengine.OpenCode)); got != 300 {
 		t.Errorf("ox threshold = %d, want Codex's 300", got)
 	}
 }

@@ -24,10 +24,10 @@ const (
 	clsCodex2 // bright gold
 	clsCodex3 // bold gold core
 
-	clsOpencode0 // far-dim magenta (faint)
-	clsOpencode1 // dim magenta
-	clsOpencode2 // bright magenta
-	clsOpencode3 // bold magenta core
+	clsOpenCode0 // far-dim magenta (faint)
+	clsOpenCode1 // dim magenta
+	clsOpenCode2 // bright magenta
+	clsOpenCode3 // bold magenta core
 
 	clsFallback0 // far-dim fallback for a newly registered engine
 	clsFallback1 // dim fallback
@@ -50,7 +50,7 @@ const starFallback = clsFallback0
 var starBase = map[pfmengine.ID]styleClass{
 	pfmengine.Claude:   clsClaude0,
 	pfmengine.Codex:    clsCodex0,
-	pfmengine.Opencode: clsOpencode0,
+	pfmengine.OpenCode: clsOpenCode0,
 }
 
 // bodyCls maps engine x brightness level (0..3, clamped) to a styleClass.
@@ -96,10 +96,10 @@ var styleTab = func() [numClasses]lipgloss.Style {
 
 	// The theme's third accent is magenta, deliberately distinct from the
 	// blue and amber built-ins.
-	t[clsOpencode0] = fg("5").Faint(true)
-	t[clsOpencode1] = fg("5")
-	t[clsOpencode2] = fg("13")
-	t[clsOpencode3] = fg("13").Bold(true)
+	t[clsOpenCode0] = fg("5").Faint(true)
+	t[clsOpenCode1] = fg("5")
+	t[clsOpenCode2] = fg("13")
+	t[clsOpenCode3] = fg("13").Bold(true)
 
 	// A fourth engine is visible without a palette edit. The neutral cyan
 	// fallback is deliberately not clsBgStar: a live chat must never render as

@@ -43,7 +43,7 @@ func init() {
 		DefaultRoots: func(home string) []string { return []string{filepath.Join(home, ".codex")} },
 	})
 	Register(Descriptor{
-		ID:              Opencode,
+		ID:              OpenCode,
 		Name:            "OpenCode",
 		Short:           "OpenCode",
 		LongName:        "opencode",

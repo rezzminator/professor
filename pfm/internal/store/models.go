@@ -2,10 +2,10 @@ package store
 
 import "hostops/pfm/internal/engine"
 
-// OcSession is one indexed OpenCode session, read from OpenCode's own SQLite
+// OpenCodeSession is one indexed OpenCode session, read from OpenCode's own SQLite
 // store (opencode.db). It is the OpenCode twin of Transcript/Rollout: every
 // field is derived data, rebuildable by re-reading that store.
-type OcSession struct {
+type OpenCodeSession struct {
 	ID    string
 	Title string
 	// Directory is the session's working directory; ProjectDir the project

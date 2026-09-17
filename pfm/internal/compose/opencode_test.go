@@ -6,8 +6,8 @@ import (
 	"hostops/pfm/internal/store"
 )
 
-func ocFixture() []store.OcSession {
-	return []store.OcSession{
+func openCodeFixture() []store.OpenCodeSession {
+	return []store.OpenCodeSession{
 		{ID: "ses_live", Title: "live one", Directory: "/work/a", ProjectDir: "/work/a", TimeUpdatedMS: 9_000},
 		{
 			ID:            "ses_titled",
@@ -44,14 +44,14 @@ func ocFixture() []store.OcSession {
 	}
 }
 
-func TestOpencodeSessionsBecomeResumeRows(t *testing.T) {
+func TestOpenCodeSessionsBecomeResumeRows(t *testing.T) {
 	output := Compose(Input{
-		OcSessions: ocFixture(),
-		Options:    Options{View: AllView},
+		OpenCodeSessions: openCodeFixture(),
+		Options:          Options{View: AllView},
 	})
 	rows := make(map[string]Row)
 	for _, row := range output.Rows {
-		if row.Kind == ResumeOpencode {
+		if row.Kind == ResumeOpenCode {
 			rows[row.ID] = row
 		}
 	}
@@ -85,9 +85,9 @@ func TestOpencodeSessionsBecomeResumeRows(t *testing.T) {
 // and never answered — exactly as empty as a Claude transcript with no
 // visible turns. It must be suppressed in the default view and counted in
 // SuppressedCount, never shown as if it were a real chat.
-func TestOpencodeSessionWithNoAssistantReplyIsSuppressed(t *testing.T) {
+func TestOpenCodeSessionWithNoAssistantReplyIsSuppressed(t *testing.T) {
 	output := Compose(Input{
-		OcSessions: []store.OcSession{
+		OpenCodeSessions: []store.OpenCodeSession{
 			{
 				ID: "ses_unanswered", Title: "unanswered", Directory: "/work/a", ProjectDir: "/work/a",
 				TimeUpdatedMS: 1, PromptCount: 1, AssistantCount: 0,
@@ -107,9 +107,9 @@ func TestOpencodeSessionWithNoAssistantReplyIsSuppressed(t *testing.T) {
 
 // An OpenCode session with at least one prompt AND at least one assistant
 // reply is a real, answered chat and must be shown.
-func TestOpencodeSessionWithAssistantReplyIsShown(t *testing.T) {
+func TestOpenCodeSessionWithAssistantReplyIsShown(t *testing.T) {
 	output := Compose(Input{
-		OcSessions: []store.OcSession{
+		OpenCodeSessions: []store.OpenCodeSession{
 			{
 				ID: "ses_answered", Title: "answered", Directory: "/work/a", ProjectDir: "/work/a",
 				TimeUpdatedMS: 1, PromptCount: 1, AssistantCount: 1,
@@ -134,10 +134,10 @@ func TestOpencodeSessionWithAssistantReplyIsShown(t *testing.T) {
 	}
 }
 
-func TestOpencodeKilledSessionsAreOmittedAndCounted(t *testing.T) {
+func TestOpenCodeKilledSessionsAreOmittedAndCounted(t *testing.T) {
 	killedAt := int64(12345)
 	output := Compose(Input{
-		OcSessions: []store.OcSession{
+		OpenCodeSessions: []store.OpenCodeSession{
 			{ID: "ses_dead", Title: "dead", Directory: "/work/x", ProjectDir: "/work/x", TimeUpdatedMS: 1},
 			{ID: "ses_alive", Title: "alive", Directory: "/work/y", ProjectDir: "/work/y", TimeUpdatedMS: 2},
 		},

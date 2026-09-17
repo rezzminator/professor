@@ -21,15 +21,15 @@ func (source gatherIndexSource) Sync(
 		return index.SyncClaude(ctx, database, roots, counters)
 	case pfmengine.Codex:
 		return index.SyncCodex(ctx, database, roots, counters)
-	case pfmengine.Opencode:
-		return index.SyncOpencode(ctx, database, roots, counters)
+	case pfmengine.OpenCode:
+		return index.SyncOpenCode(ctx, database, roots, counters)
 	default:
 		return nil
 	}
 }
 
 func init() {
-	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.Opencode} {
+	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.OpenCode} {
 		index.RegisterSource(id, gatherIndexSource{id: id})
 	}
 }

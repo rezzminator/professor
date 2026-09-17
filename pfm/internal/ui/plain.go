@@ -16,7 +16,7 @@ import (
 
 // sizeBadge is formatSize, but an OpenCode row (no file size, always 0) shows "—" rather than a lying "0B".
 func sizeBadge(row compose.Row) string {
-	if compose.EngineForKind(row.Kind) == pfmengine.Opencode {
+	if compose.EngineForKind(row.Kind) == pfmengine.OpenCode {
 		return "—"
 	}
 	return formatSize(row.Size)

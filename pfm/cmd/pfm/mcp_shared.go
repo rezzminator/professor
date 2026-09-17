@@ -23,7 +23,7 @@ func mcpRuntime(runtime commandRuntime, ambient bool) mcpserv.Runtime {
 		ConfigPath:           runtime.Config.Path,
 		ClaudeBinary:         runtime.Config.Claude.Binary,
 		CodexBinary:          runtime.Config.Codex.Binary,
-		OpencodeBinary:       runtime.Config.OpenCode.Binary,
+		OpenCodeBinary:       runtime.Config.OpenCode.Binary,
 		Chat:                 pfmchat.Verbs{Runtime: &runtime, Warnings: os.Stderr},
 		Names:                pfmchat.NameResolver{Runtime: &runtime},
 		AllowAmbientIdentity: ambient,

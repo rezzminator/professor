@@ -79,5 +79,5 @@ func List(
 
 // placeholderRow is the picker's "start a new chat" action row.
 func placeholderRow(kind compose.Kind) bool {
-	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpencode
+	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
 }

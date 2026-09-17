@@ -191,14 +191,14 @@ func (s *Store) migrate(ctx context.Context) error {
 		// Bumping user_version for it would instead lock every older pfm on
 		// this machine out of the whole store the moment one binary ran it —
 		// including the very binary pfm update's rollback restores.
-		if err := ensureOcSessionsAssistantCount(ctx, tx); err != nil {
+		if err := ensureOpenCodeSessionsAssistantCount(ctx, tx); err != nil {
 			return err
 		}
 		return nil
 	})
 }
 
-func ensureOcSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) error {
+func ensureOpenCodeSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) error {
 	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(oc_sessions)")
 	if err != nil {
 		return fmt.Errorf("inspect oc_sessions columns: %w", err)

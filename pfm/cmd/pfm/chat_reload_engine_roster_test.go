@@ -27,15 +27,15 @@ func TestValidateReloadAccountUsesTheSeatEngineRoster(t *testing.T) {
 	}
 }
 
-func TestReloadExplicitlyRejectsOpencode(t *testing.T) {
-	machine := pfmconfig.Config{OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/opencode"}}}
-	if _, err := validateReloadAccount(machine, pfmengine.Opencode, 1); err == nil ||
+func TestReloadExplicitlyRejectsOpenCode(t *testing.T) {
+	machine := pfmconfig.Config{OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/opencode"}}}
+	if _, err := validateReloadAccount(machine, pfmengine.OpenCode, 1); err == nil ||
 		!strings.Contains(err.Error(), "OpenCode") {
 		t.Fatalf("validateReloadAccount(OpenCode) error=%v, want product-level refusal", err)
 	}
 	_, err := findEngineTranscript(paths.Values{Roots: map[pfmengine.ID][]string{
-		pfmengine.Claude: {t.TempDir()}, pfmengine.Opencode: {t.TempDir()},
-	}}, machine, pfmengine.Opencode, "ses-fixture")
+		pfmengine.Claude: {t.TempDir()}, pfmengine.OpenCode: {t.TempDir()},
+	}}, machine, pfmengine.OpenCode, "ses-fixture")
 	if err == nil || !strings.Contains(err.Error(), "OpenCode") {
 		t.Fatalf("findEngineTranscript(OpenCode) error=%v, want product-level refusal", err)
 	}

@@ -119,15 +119,15 @@ func Synthesize(request Request) (Plan, error) {
 	if err != nil {
 		return Plan{}, err
 	}
-	if request.Prompt != "" && route != NewClaude && route != NewCodex && route != NewOpencode {
+	if request.Prompt != "" && route != NewClaude && route != NewCodex && route != NewOpenCode {
 		return Plan{}, fmt.Errorf("initial prompt is not valid for %s route", request.Row.Kind)
 	}
 	switch route {
-	case ResumeOpencode:
+	case ResumeOpenCode:
 		// One fleet-wide OpenCode seat: no per-account roster to satisfy, the
 		// binary comes from the machine config's opencode section.
-	case NewOpencode:
-		if _, found := machine.OpencodeAccountByID(request.PrimaryAccount); !found {
+	case NewOpenCode:
+		if _, found := machine.OpenCodeAccountByID(request.PrimaryAccount); !found {
 			return Plan{}, fmt.Errorf(
 				"requested OpenCode account %d is not in the configured roster",
 				request.PrimaryAccount,
@@ -196,7 +196,7 @@ func Synthesize(request Request) (Plan, error) {
 			plan.Line += " " + Quote(request.Prompt)
 		}
 		plan.Line += ")"
-	case NewOpencode:
+	case NewOpenCode:
 		if request.Row.CWD == "" || request.FreshSocket == "" {
 			return Plan{}, errors.New("new OpenCode action requires cwd and fresh socket")
 		}
@@ -205,7 +205,7 @@ func Synthesize(request Request) (Plan, error) {
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
-			pfmengine.MustLookup(pfmengine.Opencode).Binary,
+			pfmengine.MustLookup(pfmengine.OpenCode).Binary,
 			machine.Source("opencode.binary") == pfmconfig.SourceFile,
 		))
 		command.WriteByte(' ')
@@ -215,8 +215,8 @@ func Synthesize(request Request) (Plan, error) {
 			command.WriteString(Quote(request.Prompt))
 		}
 		plan.Run = command.String()
-		plan = onChatServer(plan, request, machine, pfmengine.Opencode)
-	case ResumeOpencode:
+		plan = onChatServer(plan, request, machine, pfmengine.OpenCode)
+	case ResumeOpenCode:
 		if request.Row.ID == "" || request.Row.CWD == "" ||
 			request.FreshSocket == "" {
 			return Plan{}, errors.New(
@@ -228,7 +228,7 @@ func Synthesize(request Request) (Plan, error) {
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
-			pfmengine.MustLookup(pfmengine.Opencode).Binary,
+			pfmengine.MustLookup(pfmengine.OpenCode).Binary,
 			machine.Source("opencode.binary") == pfmconfig.SourceFile,
 		))
 		command.WriteString(" --session ")
@@ -236,7 +236,7 @@ func Synthesize(request Request) (Plan, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(request.Row.CWD))
 		plan.Run = opencodeContinuityBanner(request.Row) + command.String()
-		plan = onChatServer(plan, request, machine, pfmengine.Opencode)
+		plan = onChatServer(plan, request, machine, pfmengine.OpenCode)
 	case Live:
 		if request.Row.Socket == "" {
 			return Plan{}, errors.New("live action requires a socket")
@@ -331,8 +331,8 @@ func routeForKind(kind compose.Kind) (Route, error) {
 		return NewClaude, nil
 	case compose.NewCodex:
 		return NewCodex, nil
-	case compose.NewOpencode:
-		return NewOpencode, nil
+	case compose.NewOpenCode:
+		return NewOpenCode, nil
 	case compose.LiveClaude, compose.LiveCodex, compose.LiveSplit:
 		return Live, nil
 	// A booting row carries no other identity than its socket, so Enter can
@@ -350,8 +350,8 @@ func routeForKind(kind compose.Kind) (Route, error) {
 		return ResumeClaude, nil
 	case compose.ResumeCodex:
 		return ResumeCodex, nil
-	case compose.ResumeOpencode:
-		return ResumeOpencode, nil
+	case compose.ResumeOpenCode:
+		return ResumeOpenCode, nil
 	default:
 		return 0, fmt.Errorf("unsupported row kind %s", kind)
 	}
@@ -506,7 +506,7 @@ func codexCommandWithAccount(
 
 func normalizedMachineConfig(machine pfmconfig.Config, home string) pfmconfig.Config {
 	if machine.Version == pfmconfig.Version &&
-		(len(machine.Accounts) != 0 || len(machine.CodexAccounts) != 0 || len(machine.OpencodeAccounts) != 0) {
+		(len(machine.Accounts) != 0 || len(machine.CodexAccounts) != 0 || len(machine.OpenCodeAccounts) != 0) {
 		return machine
 	}
 	return pfmconfig.Defaults(home, nil)

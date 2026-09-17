@@ -71,7 +71,7 @@ func goldenSourceComment(route Route) string {
 		return "# N — fresh Claude launch"
 	case NewCodex:
 		return "# C — fresh Codex launch"
-	case NewOpencode:
+	case NewOpenCode:
 		return "# P — fresh OpenCode launch"
 	case Live:
 		return "# L — live chat attach"
@@ -81,7 +81,7 @@ func goldenSourceComment(route Route) string {
 		return "# R — Claude resume"
 	case ResumeCodex:
 		return "# X — Codex resume"
-	case ResumeOpencode:
+	case ResumeOpenCode:
 		return "# O — OpenCode resume"
 	default:
 		panic("unknown golden route")

@@ -363,7 +363,7 @@ func TestSynthesizeRejectsNUL(t *testing.T) {
 func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 	prompt := "Explain v0.61.2, ask for approval, then run pfm update."
 	machine := testMachineConfig("/home/test")
-	machine.OpencodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/home/test/.local/share/opencode"}}
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/home/test/.local/share/opencode"}}
 
 	tests := []struct {
 		name string
@@ -382,7 +382,7 @@ func TestPickerLaunchPromptReachesClaudeCodexAndOpenCode(t *testing.T) {
 		},
 		{
 			name: "OpenCode",
-			row:  compose.Row{Kind: compose.NewOpencode, CWD: "/work/.professor"},
+			row:  compose.Row{Kind: compose.NewOpenCode, CWD: "/work/.professor"},
 			want: []string{"opencode", "--prompt", Quote(prompt)},
 		},
 	}
@@ -465,7 +465,7 @@ func writeActionFile(
 func TestEveryFreshServerRouteIsBornThroughTheOneChatServerCreator(t *testing.T) {
 	engineFor := map[Route]pfmengine.ID{
 		NewClaude: pfmengine.Claude, Agent: pfmengine.Claude, ResumeClaude: pfmengine.Claude,
-		NewOpencode: pfmengine.Opencode, ResumeOpencode: pfmengine.Opencode,
+		NewOpenCode: pfmengine.OpenCode, ResumeOpenCode: pfmengine.OpenCode,
 		ResumeCodex: pfmengine.Codex,
 	}
 	seen := make(map[Route]bool, len(engineFor))

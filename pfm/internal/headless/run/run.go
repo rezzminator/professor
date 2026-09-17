@@ -139,7 +139,7 @@ func Resolve(request Request) (Request, error) {
 	if _, err := pfmengine.Lookup(request.Engine); err != nil {
 		return Request{}, err
 	}
-	if request.Engine == pfmengine.Opencode {
+	if request.Engine == pfmengine.OpenCode {
 		return Request{}, fmt.Errorf("OpenCode does not support headless runs")
 	}
 

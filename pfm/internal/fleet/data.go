@@ -12,11 +12,11 @@ import (
 // Data is the index DB's side of one scan: every indexed chat the view can
 // compose, plus the operator's kills.
 type Data struct {
-	Transcripts []store.Transcript
-	Rollouts    []store.Rollout
-	OcSessions  []store.OcSession
-	CxNames     map[string]string
-	Killed      []store.Killed
+	Transcripts      []store.Transcript
+	Rollouts         []store.Rollout
+	OpenCodeSessions []store.OpenCodeSession
+	CxNames          map[string]string
+	Killed           []store.Killed
 	// CachedCounts, when set, carries the default view's killed/suppressed
 	// totals — LoadDefaultData reads capped candidates, so compose cannot
 	// count them from the rows it was given.
@@ -33,7 +33,7 @@ func LoadData(ctx context.Context, database *store.Store) (Data, error) {
 	if err != nil {
 		return Data{}, err
 	}
-	ocSessions, err := database.OcSessions(ctx)
+	openCodeSessions, err := database.OpenCodeSessions(ctx)
 	if err != nil {
 		return Data{}, err
 	}
@@ -46,11 +46,11 @@ func LoadData(ctx context.Context, database *store.Store) (Data, error) {
 		return Data{}, err
 	}
 	return Data{
-		Transcripts: transcripts,
-		Rollouts:    rollouts,
-		OcSessions:  ocSessions,
-		CxNames:     cxNames,
-		Killed:      killed,
+		Transcripts:      transcripts,
+		Rollouts:         rollouts,
+		OpenCodeSessions: openCodeSessions,
+		CxNames:          cxNames,
+		Killed:           killed,
 	}, nil
 }
 
@@ -62,8 +62,8 @@ func LoadDefaultData(ctx context.Context, database *store.Store) (Data, error) {
 	}
 	// The default view caps resume rows per engine; the OpenCode mirror is a
 	// full read (it has no per-file delta machinery), so it bypasses
-	// DefaultCandidates by design and compose applies ocResumeCap itself.
-	ocSessions, err := database.OcSessions(ctx)
+	// DefaultCandidates by design and compose applies openCodeResumeCap itself.
+	openCodeSessions, err := database.OpenCodeSessions(ctx)
 	if err != nil {
 		return Data{}, err
 	}
@@ -76,12 +76,12 @@ func LoadDefaultData(ctx context.Context, database *store.Store) (Data, error) {
 		return Data{}, err
 	}
 	return Data{
-		Transcripts:  transcripts,
-		Rollouts:     rollouts,
-		OcSessions:   ocSessions,
-		CxNames:      cxNames,
-		Killed:       killed,
-		CachedCounts: &counts,
+		Transcripts:      transcripts,
+		Rollouts:         rollouts,
+		OpenCodeSessions: openCodeSessions,
+		CxNames:          cxNames,
+		Killed:           killed,
+		CachedCounts:     &counts,
 	}, nil
 }
 

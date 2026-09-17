@@ -80,7 +80,7 @@ func runRun(
 		return 2
 	}
 	resolved := runtime.Paths
-	directory, err := runDirectory(*cwd)
+	directory, err := runDir(*cwd)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 1
@@ -307,11 +307,11 @@ func resolveRunEngineIDAccount(
 		if _, found := machine.CodexAccountByID(account); !found {
 			return "", 0, fmt.Errorf("requested Codex account %d is not in the configured roster", account)
 		}
-	case pfmengine.Opencode:
-		if account == 0 && len(machine.OpencodeAccounts) != 0 {
-			account = machine.OpencodeAccounts[0].ID
+	case pfmengine.OpenCode:
+		if account == 0 && len(machine.OpenCodeAccounts) != 0 {
+			account = machine.OpenCodeAccounts[0].ID
 		}
-		if _, found := machine.OpencodeAccountByID(account); !found {
+		if _, found := machine.OpenCodeAccountByID(account); !found {
 			return "", 0, fmt.Errorf("OpenCode account %d is not in the configured roster", account)
 		}
 	}
@@ -520,7 +520,7 @@ func composeRolePrompt(constitution, prompt string) string {
 	return constitution + rolePromptSeparator + prompt
 }
 
-func runDirectory(requested string) (string, error) {
+func runDir(requested string) (string, error) {
 	directory := requested
 	if directory == "" {
 		current, err := os.Getwd()

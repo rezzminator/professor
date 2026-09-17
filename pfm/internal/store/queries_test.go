@@ -440,10 +440,10 @@ func TestV4MigrationAddsCxNameProvenanceIdempotently(t *testing.T) {
 	}
 }
 
-// hasOcSessionsAssistantCount reports whether oc_sessions carries the
+// hasOpenCodeSessionsAssistantCount reports whether oc_sessions carries the
 // additive assistant_count column, read directly via PRAGMA table_info so
 // the check never depends on the ensure step it is proving.
-func hasOcSessionsAssistantCount(t *testing.T, db *sql.DB) bool {
+func hasOpenCodeSessionsAssistantCount(t *testing.T, db *sql.DB) bool {
 	t.Helper()
 	rows, err := db.Query("PRAGMA table_info(oc_sessions)")
 	if err != nil {
@@ -487,17 +487,17 @@ func TestFreshStoreEnsuresAssistantCountAtSchema8(t *testing.T) {
 			got,
 		)
 	}
-	if !hasOcSessionsAssistantCount(t, fresh.db) {
+	if !hasOpenCodeSessionsAssistantCount(t, fresh.db) {
 		t.Fatal("fresh store has no oc_sessions.assistant_count column")
 	}
 }
 
-// TestEnsureOcSessionsAssistantCountAddsColumnIdempotently builds a database
+// TestEnsureOpenCodeSessionsAssistantCountAddsColumnIdempotently builds a database
 // at schema 8 the way an older pfm (before assistant_count existed) would
 // have left it — the v1..v8 migrations only, no assistant_count — and proves
 // the ensure step adds the column on open, round-trips it through
-// ReplaceOcSessions/OcSessions, and never fails when run twice.
-func TestEnsureOcSessionsAssistantCountAddsColumnIdempotently(t *testing.T) {
+// ReplaceOpenCodeSessions/OpenCodeSessions, and never fails when run twice.
+func TestEnsureOpenCodeSessionsAssistantCountAddsColumnIdempotently(t *testing.T) {
 	dbPath := setStoreTestJail(t)
 	ctx := context.Background()
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o700); err != nil {
@@ -515,7 +515,7 @@ func TestEnsureOcSessionsAssistantCountAddsColumnIdempotently(t *testing.T) {
 	if _, err := database.ExecContext(ctx, "PRAGMA user_version=8"); err != nil {
 		t.Fatal(err)
 	}
-	if hasOcSessionsAssistantCount(t, database) {
+	if hasOpenCodeSessionsAssistantCount(t, database) {
 		t.Fatal("fixture already carries assistant_count — it must start without the column")
 	}
 	if err := database.Close(); err != nil {
@@ -524,16 +524,16 @@ func TestEnsureOcSessionsAssistantCountAddsColumnIdempotently(t *testing.T) {
 
 	opened := openTestStore(t)
 	assertSchemaVersion(t, opened, SchemaVersion)
-	if !hasOcSessionsAssistantCount(t, opened.db) {
+	if !hasOpenCodeSessionsAssistantCount(t, opened.db) {
 		t.Fatal("opening a pre-assistant_count schema-8 database did not add the column")
 	}
-	if err := opened.ReplaceOcSessions(
+	if err := opened.ReplaceOpenCodeSessions(
 		ctx,
-		[]OcSession{{ID: "ses-1", Title: "fixture", AssistantCount: 3}},
+		[]OpenCodeSession{{ID: "ses-1", Title: "fixture", AssistantCount: 3}},
 	); err != nil {
 		t.Fatal(err)
 	}
-	sessions, err := opened.OcSessions(ctx)
+	sessions, err := opened.OpenCodeSessions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -549,7 +549,7 @@ func TestEnsureOcSessionsAssistantCountAddsColumnIdempotently(t *testing.T) {
 	reopened := openTestStore(t)
 	t.Cleanup(func() { _ = reopened.Close() })
 	assertSchemaVersion(t, reopened, SchemaVersion)
-	sessions, err = reopened.OcSessions(ctx)
+	sessions, err = reopened.OpenCodeSessions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

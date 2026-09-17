@@ -8,15 +8,15 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 )
 
-func TestSynthesizeNewOpencodeLaunchesFreshConfiguredSeat(t *testing.T) {
+func TestSynthesizeNewOpenCodeLaunchesFreshConfiguredSeat(t *testing.T) {
 	machine := pfmconfig.Config{
 		Version:          pfmconfig.Version,
-		OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/opencode"}},
+		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/opencode"}},
 		OpenCode:         pfmconfig.OpenCode{Binary: "/opt/opencode stable"},
 		Sources:          map[string]pfmconfig.Source{"opencode.binary": pfmconfig.SourceFile},
 	}
 	plan, err := Synthesize(Request{
-		Row:            compose.Row{Kind: compose.NewOpencode, CWD: "/work/nuts"},
+		Row:            compose.Row{Kind: compose.NewOpenCode, CWD: "/work/nuts"},
 		PrimaryAccount: 1,
 		FreshSocket:    "ox-1-2-4",
 		Config:         machine,
@@ -24,8 +24,8 @@ func TestSynthesizeNewOpencodeLaunchesFreshConfiguredSeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("synthesize: %v", err)
 	}
-	if plan.Route != NewOpencode {
-		t.Fatalf("route = %v, want %v", plan.Route, NewOpencode)
+	if plan.Route != NewOpenCode {
+		t.Fatalf("route = %v, want %v", plan.Route, NewOpenCode)
 	}
 	if !strings.Contains(plan.Run, Quote(machine.OpenCode.Binary)) || strings.Contains(plan.Run, "--session") {
 		t.Fatalf("fresh OpenCode run = %q", plan.Run)
@@ -39,10 +39,10 @@ func TestSynthesizeNewOpencodeLaunchesFreshConfiguredSeat(t *testing.T) {
 	}
 }
 
-func TestSynthesizeNewOpencodeRequiresSeatAndLaunchContext(t *testing.T) {
+func TestSynthesizeNewOpenCodeRequiresSeatAndLaunchContext(t *testing.T) {
 	machine := pfmconfig.Config{
 		Version:          pfmconfig.Version,
-		OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/opencode"}},
+		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: "/opencode"}},
 		OpenCode:         pfmconfig.OpenCode{Binary: "opencode"},
 	}
 	for _, test := range []struct {
@@ -53,7 +53,7 @@ func TestSynthesizeNewOpencodeRequiresSeatAndLaunchContext(t *testing.T) {
 		{
 			name: "account must be configured",
 			request: Request{
-				Row:            compose.Row{Kind: compose.NewOpencode, CWD: "/work"},
+				Row:            compose.Row{Kind: compose.NewOpenCode, CWD: "/work"},
 				PrimaryAccount: 9,
 				FreshSocket:    "ox-1",
 				Config:         machine,
@@ -63,7 +63,7 @@ func TestSynthesizeNewOpencodeRequiresSeatAndLaunchContext(t *testing.T) {
 		{
 			name: "cwd is required",
 			request: Request{
-				Row:            compose.Row{Kind: compose.NewOpencode},
+				Row:            compose.Row{Kind: compose.NewOpenCode},
 				PrimaryAccount: 1,
 				FreshSocket:    "ox-1",
 				Config:         machine,
@@ -73,7 +73,7 @@ func TestSynthesizeNewOpencodeRequiresSeatAndLaunchContext(t *testing.T) {
 		{
 			name: "fresh socket is required",
 			request: Request{
-				Row:            compose.Row{Kind: compose.NewOpencode, CWD: "/work"},
+				Row:            compose.Row{Kind: compose.NewOpenCode, CWD: "/work"},
 				PrimaryAccount: 1,
 				Config:         machine,
 			},
@@ -89,10 +89,10 @@ func TestSynthesizeNewOpencodeRequiresSeatAndLaunchContext(t *testing.T) {
 	}
 }
 
-func TestSynthesizeResumeOpencodeLaunchesTheSession(t *testing.T) {
+func TestSynthesizeResumeOpenCodeLaunchesTheSession(t *testing.T) {
 	plan, err := Synthesize(Request{
 		Row: compose.Row{
-			Kind: compose.ResumeOpencode,
+			Kind: compose.ResumeOpenCode,
 			ID:   "ses_abc123",
 			CWD:  "/work/nuts",
 			Name: "math chat",
@@ -103,8 +103,8 @@ func TestSynthesizeResumeOpencodeLaunchesTheSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("synthesize: %v", err)
 	}
-	if plan.Route != ResumeOpencode {
-		t.Fatalf("route = %v, want %v", plan.Route, ResumeOpencode)
+	if plan.Route != ResumeOpenCode {
+		t.Fatalf("route = %v, want %v", plan.Route, ResumeOpenCode)
 	}
 	if !strings.Contains(plan.Run, "--session") || !strings.Contains(plan.Run, "/work/nuts") {
 		t.Errorf("run misses the session resume: %q", plan.Run)
@@ -120,11 +120,11 @@ func TestSynthesizeResumeOpencodeLaunchesTheSession(t *testing.T) {
 	}
 }
 
-func TestSynthesizeResumeOpencodeRequiresIdentity(t *testing.T) {
+func TestSynthesizeResumeOpenCodeRequiresIdentity(t *testing.T) {
 	for _, request := range []Request{
-		{Row: compose.Row{Kind: compose.ResumeOpencode, CWD: "/w"}, FreshSocket: "ox-1"},
-		{Row: compose.Row{Kind: compose.ResumeOpencode, ID: "s"}, FreshSocket: "ox-1"},
-		{Row: compose.Row{Kind: compose.ResumeOpencode, ID: "s", CWD: "/w"}},
+		{Row: compose.Row{Kind: compose.ResumeOpenCode, CWD: "/w"}, FreshSocket: "ox-1"},
+		{Row: compose.Row{Kind: compose.ResumeOpenCode, ID: "s"}, FreshSocket: "ox-1"},
+		{Row: compose.Row{Kind: compose.ResumeOpenCode, ID: "s", CWD: "/w"}},
 	} {
 		if _, err := Synthesize(request); err == nil {
 			t.Errorf("request %+v: expected an error", request)

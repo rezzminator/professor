@@ -192,7 +192,7 @@ func (runner *Runner) runKilled(
 	// unsupported engines remain killed and are reported separately.
 	decided := make([]string, 0, len(killed))
 	for _, chat := range killed {
-		if chat.Engine == pfmengine.Opencode {
+		if chat.Engine == pfmengine.OpenCode {
 			report.Unsupported = append(report.Unsupported, chat.ID)
 			continue
 		}

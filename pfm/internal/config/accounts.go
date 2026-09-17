@@ -61,26 +61,26 @@ func (config Config) PrimaryAccountFor(engine pfmengine.ID, claudePrimary int) i
 	switch engine {
 	case pfmengine.Codex:
 		return config.PrimaryCodexAccount()
-	case pfmengine.Opencode:
-		return config.PrimaryOpencodeAccount()
+	case pfmengine.OpenCode:
+		return config.PrimaryOpenCodeAccount()
 	default:
 		return claudePrimary
 	}
 }
 
-// OpencodeAccountIDs lists every OpenCode account id, in roster order.
-func (config Config) OpencodeAccountIDs() []int {
-	result := make([]int, 0, len(config.OpencodeAccounts))
-	for _, account := range config.OpencodeAccounts {
+// OpenCodeAccountIDs lists every OpenCode account id, in roster order.
+func (config Config) OpenCodeAccountIDs() []int {
+	result := make([]int, 0, len(config.OpenCodeAccounts))
+	for _, account := range config.OpenCodeAccounts {
 		result = append(result, account.ID)
 	}
 	return result
 }
 
-// PrimaryOpencodeAccount is the first OpenCode account's id, or 0 with none.
-func (config Config) PrimaryOpencodeAccount() int {
-	if len(config.OpencodeAccounts) == 0 {
+// PrimaryOpenCodeAccount is the first OpenCode account's id, or 0 with none.
+func (config Config) PrimaryOpenCodeAccount() int {
+	if len(config.OpenCodeAccounts) == 0 {
 		return 0
 	}
-	return config.OpencodeAccounts[0].ID
+	return config.OpenCodeAccounts[0].ID
 }

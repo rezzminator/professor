@@ -253,8 +253,8 @@ type Dependencies struct {
 	// values to verify a live pane without assuming the defaults.
 	ClaudeBinary string
 	CodexBinary  string
-	// OpencodeBinary verifies a live OpenCode pane the same way.
-	OpencodeBinary string
+	// OpenCodeBinary verifies a live OpenCode pane the same way.
+	OpenCodeBinary string
 	AccountEmojis  []string
 	// CodexSeat is the last sender-identity rung. It maps this process's
 	// CODEX_THREAD_ID to the live fleet seat after ambient tmux and ancestry

@@ -120,7 +120,7 @@ func newInjectEngineAllowingUnsigned(
 		}
 		dependencies.ClaudeBinary = runtimes[0].Config.Claude.Binary
 		dependencies.CodexBinary = runtimes[0].Config.Codex.Binary
-		dependencies.OpencodeBinary = runtimes[0].Config.OpenCode.Binary
+		dependencies.OpenCodeBinary = runtimes[0].Config.OpenCode.Binary
 		dependencies.Recorder = sharedCommsRecorder(runtimes[0].Paths)
 		dependencies.WarningWriter = os.Stderr
 		for _, account := range runtimes[0].Config.Accounts {

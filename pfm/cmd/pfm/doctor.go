@@ -101,7 +101,7 @@ func runDoctor(
 	printDoctorConfig(stdout, runtime)
 	tally.warnings += printHarvesterConfigDoctor(stdout, runtime)
 	tally.warnings += printEngineDoctor(stdout, runtime.Config)
-	tally.warnings += printOpencodeStoreDoctor(context.Background(), stdout, runtime.Config)
+	tally.warnings += printOpenCodeStoreDoctor(context.Background(), stdout, runtime.Config)
 	tally.warnings += printEngineCapabilities(stdout)
 	tally.warnings += printMCPClientCutover(stdout, runtime)
 	if mcpConfigured(runtime) {
@@ -605,14 +605,14 @@ func liveCodexPanes(ctx context.Context, runtime commandRuntime) ([]gather.Pane,
 	return panes, nil
 }
 
-func printOpencodeStoreDoctor(ctx context.Context, stdout io.Writer, machine config.Config) int {
-	if len(machine.OpencodeAccounts) == 0 {
+func printOpenCodeStoreDoctor(ctx context.Context, stdout io.Writer, machine config.Config) int {
+	if len(machine.OpenCodeAccounts) == 0 {
 		fmt.Fprintln(stdout, "doctor: opencode store=absent")
 		return 0
 	}
 	warnings := 0
-	for _, account := range machine.OpencodeAccounts {
-		if err := index.ProbeOpencodeStore(ctx, account.Home); err != nil {
+	for _, account := range machine.OpenCodeAccounts {
+		if err := index.ProbeOpenCodeStore(ctx, account.Home); err != nil {
 			warnings++
 			fmt.Fprintf(stdout, "doctor: opencode store=unhealthy account=%d error=%v\n", account.ID, err)
 			continue

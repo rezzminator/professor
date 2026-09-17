@@ -87,23 +87,23 @@ func TestDatabaseEngineEdgeRejectsUnknownWithAcceptedSet(t *testing.T) {
 	}
 }
 
-func TestKilledChatsDeriveOpencodeEngineFromMirror(t *testing.T) {
+func TestKilledChatsDeriveOpenCodeEngineFromMirror(t *testing.T) {
 	setStoreTestJail(t)
 	database := openTestStore(t)
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
 	const id = "ses-opencode"
-	if err := database.ReplaceOcSessions(ctx, []OcSession{{ID: id, Title: "fixture"}}); err != nil {
+	if err := database.ReplaceOpenCodeSessions(ctx, []OpenCodeSession{{ID: id, Title: "fixture"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Kill(ctx, Killed{ID: id, Engine: pfmengine.Opencode, KilledAt: 1}); err != nil {
+	if err := database.Kill(ctx, Killed{ID: id, Engine: pfmengine.OpenCode, KilledAt: 1}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := database.KilledChats(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 || rows[0].Engine != pfmengine.Opencode {
+	if len(rows) != 1 || rows[0].Engine != pfmengine.OpenCode {
 		t.Fatalf("KilledChats()=%#v, want one OpenCode row", rows)
 	}
 	counts, err := database.Counts(ctx)
@@ -121,16 +121,16 @@ func TestOpenCodeKillBecomesPrunableOnlyAfterMirrorRemoval(t *testing.T) {
 	t.Cleanup(func() { _ = database.Close() })
 	ctx := context.Background()
 	const id = "ses-opencode-prunable"
-	if err := database.ReplaceOcSessions(ctx, []OcSession{{ID: id, Title: "fixture"}}); err != nil {
+	if err := database.ReplaceOpenCodeSessions(ctx, []OpenCodeSession{{ID: id, Title: "fixture"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Kill(ctx, Killed{ID: id, Engine: pfmengine.Opencode, KilledAt: 1}); err != nil {
+	if err := database.Kill(ctx, Killed{ID: id, Engine: pfmengine.OpenCode, KilledAt: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if counts, err := database.Counts(ctx); err != nil || counts.OrphanedKills != 0 {
 		t.Fatalf("mirrored OpenCode kill counts=%+v err=%v, want non-orphan", counts, err)
 	}
-	if err := database.ReplaceOcSessions(ctx, nil); err != nil {
+	if err := database.ReplaceOpenCodeSessions(ctx, nil); err != nil {
 		t.Fatal(err)
 	}
 	counts, err := database.Counts(ctx)

@@ -17,14 +17,14 @@ import (
 func registerEngines() {
 	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
 	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
-	index.RegisterSource(pfmengine.Opencode, opencodeengine.Source{})
+	index.RegisterSource(pfmengine.OpenCode, opencodeengine.Source{})
 
 	spawn.RegisterLauncher(pfmengine.Claude, claudeengine.Launcher{})
 	spawn.RegisterLauncher(pfmengine.Codex, codexengine.Launcher{})
 
 	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
-	gather.RegisterMatcher(pfmengine.Opencode, opencodeengine.Matcher{})
+	gather.RegisterMatcher(pfmengine.OpenCode, opencodeengine.Matcher{})
 
 	stats.RegisterUsageSource(pfmengine.Claude, claudeengine.UsageSource{})
 	stats.RegisterUsageSource(pfmengine.Codex, codexengine.UsageSource{})
@@ -41,7 +41,7 @@ func init() { registerEngines() }
 var engineCapabilityExceptions = map[pfmengine.ID]map[string]bool{
 	// OpenCode has a session index and a process matcher. It has no usage API,
 	// headless planner, ask runner, or managed launcher in this tree.
-	pfmengine.Opencode: {indexCommand: true, "matcher": true},
+	pfmengine.OpenCode: {indexCommand: true, "matcher": true},
 }
 
 func expectedEngineCapabilities(id pfmengine.ID, all []string) map[string]bool {

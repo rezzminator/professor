@@ -51,7 +51,7 @@ func archiveJail(t *testing.T) paths.Values {
 		Roots: map[pfmengine.ID][]string{
 			pfmengine.Claude:   {filepath.Join(root, "home", ".cc", "1", "projects")},
 			pfmengine.Codex:    {filepath.Join(root, "home", ".codex")},
-			pfmengine.Opencode: {filepath.Join(root, "home", ".local", "share", "opencode")},
+			pfmengine.OpenCode: {filepath.Join(root, "home", ".local", "share", "opencode")},
 		},
 		SIDDir:     filepath.Join(root, "sid"),
 		ArchiveDir: filepath.Join(root, "home", ".claude-archive"),
@@ -75,9 +75,9 @@ func archiveJail(t *testing.T) paths.Values {
 // archive cannot move one session without moving all of them. A killed
 // OpenCode session must therefore stay killed and be reported as unsupported;
 // treating it as an orphan and retiring the kill makes the chat come back.
-func TestArchivePreservesUnsupportedOpencodeKill(t *testing.T) {
+func TestArchivePreservesUnsupportedOpenCodeKill(t *testing.T) {
 	values := archiveJail(t)
-	kills := &fakeKills{rows: []KilledChat{{ID: "ses-opencode", Engine: pfmengine.Opencode}}}
+	kills := &fakeKills{rows: []KilledChat{{ID: "ses-opencode", Engine: pfmengine.OpenCode}}}
 	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
 	if err != nil {
 		t.Fatal(err)

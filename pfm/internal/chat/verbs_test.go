@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 	// refuses an engine it cannot index — and the matchers its gathers use.
 	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
 	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
-	index.RegisterSource(pfmengine.Opencode, opencodeengine.Source{})
+	index.RegisterSource(pfmengine.OpenCode, opencodeengine.Source{})
 	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
 	os.Exit(testjail.Run(m))

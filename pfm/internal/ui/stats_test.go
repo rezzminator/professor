@@ -334,13 +334,13 @@ func TestLimitsTabScrollsAcrossClaudeCodexAndOpenCodeCardsAfterResize(t *testing
 		{Account: 2, Engine: pfmengine.Codex, Label: "Codex 2", Windows: []pfmstats.Window{{Name: "7d", UsedPct: 4}}},
 		{
 			Account: 1,
-			Engine:  pfmengine.Opencode,
+			Engine:  pfmengine.OpenCode,
 			Label:   "OpenCode 1",
 			Windows: []pfmstats.Window{{Name: "5h", UsedPct: 5}},
 		},
 		{
 			Account: 2,
-			Engine:  pfmengine.Opencode,
+			Engine:  pfmengine.OpenCode,
 			Label:   "OpenCode 2",
 			Windows: []pfmstats.Window{{Name: "7d", UsedPct: 6}},
 		},
@@ -419,7 +419,7 @@ func TestLimitsTabOmitsUnsupportedEngines(t *testing.T) {
 	model.tab = TabLimits
 	model.stats = pfmstats.Snapshot{Limits: []pfmstats.AccountLimits{
 		{Account: 1, Engine: pfmengine.Claude, Windows: []pfmstats.Window{{Name: "5h", UsedPct: 5}}},
-		{Account: 1, Engine: pfmengine.Opencode, Unsupported: true, Status: "engine ox: no usage source registered"},
+		{Account: 1, Engine: pfmengine.OpenCode, Unsupported: true, Status: "engine ox: no usage source registered"},
 	}}
 	plain := ansi.Strip(model.renderLimitsPanel(120, 10))
 	if strings.Contains(plain, "no usage source") || strings.Contains(plain, "OpenCode") {
@@ -805,15 +805,15 @@ func TestStatsPropertiesUseSemanticColors(t *testing.T) {
 	}
 }
 
-func TestStatsOpencodeEngineUsesItsOwnColor(t *testing.T) {
+func TestStatsOpenCodeEngineUsesItsOwnColor(t *testing.T) {
 	model := NewModel(fixtureSnapshot(120))
 	model.tab = TabStats
 	model.stats = pfmstats.Snapshot{Ready: true, Chats: []pfmstats.Chat{{
-		Name: "OPEN", Engine: pfmengine.MustLookup(pfmengine.Opencode).LongName,
+		Name: "OPEN", Engine: pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 		CPUValid: true,
 	}}}
 	panel := model.renderStatsPanel(120, 8)
-	want := statsEngineStyles[pfmengine.Opencode].Render("opencode")
+	want := statsEngineStyles[pfmengine.OpenCode].Render("opencode")
 	if !strings.Contains(panel, want) {
 		t.Fatalf("OpenCode stats row lacks its engine color %q:\n%s", want, panel)
 	}

@@ -4,7 +4,7 @@ import (
 	"sort"
 )
 
-type projectDirectory struct {
+type projectDir struct {
 	path       string
 	activityNS int64
 	seeded     bool
@@ -47,7 +47,7 @@ func withNewRows(output Output) Output {
 	}
 	if output.includeNewOpenCode {
 		rows = append(rows, Row{
-			Kind:    NewOpencode,
+			Kind:    NewOpenCode,
 			Name:    "New OpenCode chat",
 			Project: project,
 			CWD:     directory,
@@ -128,7 +128,7 @@ func leadWithCurrentProject(output Output, currentDir string) Output {
 }
 
 func isNewChatKind(kind Kind) bool {
-	return kind == NewClaude || kind == NewCodex || kind == NewOpencode
+	return kind == NewClaude || kind == NewCodex || kind == NewOpenCode
 }
 
 func sortProjectRows(rows []Row) ([]Row, []string) {
@@ -172,10 +172,10 @@ func sortProjectRows(rows []Row) ([]Row, []string) {
 }
 
 func projectDirs(input Input) map[string]string {
-	directories := make(map[string]projectDirectory)
+	directories := make(map[string]projectDir)
 	if input.Options.CurrentDir != "" {
 		project := projectName(input.Options.CurrentDir)
-		directories[project] = projectDirectory{
+		directories[project] = projectDir{
 			path:   cleanPath(input.Options.CurrentDir),
 			seeded: true,
 		}
@@ -198,7 +198,7 @@ func projectDirs(input Input) map[string]string {
 }
 
 func rememberProjectDir(
-	directories map[string]projectDirectory,
+	directories map[string]projectDir,
 	path string,
 	activityNS int64,
 ) {
@@ -210,7 +210,7 @@ func rememberProjectDir(
 	if found && (incumbent.seeded || incumbent.activityNS > activityNS) {
 		return
 	}
-	directories[project] = projectDirectory{
+	directories[project] = projectDir{
 		path:       cleanPath(path),
 		activityNS: activityNS,
 	}

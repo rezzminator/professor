@@ -80,8 +80,8 @@ type Snapshot struct {
 	CodexPrimaryAccount    int
 	CodexAccountIDs        []int
 	CodexAccountEmojis     map[int]string
-	OpencodePrimaryAccount int
-	OpencodeAccountIDs     []int
+	OpenCodePrimaryAccount int
+	OpenCodeAccountIDs     []int
 	Theme                  string
 	Cache1H                bool
 	NowNS                  int64

@@ -64,14 +64,14 @@ func TestActionStress(t *testing.T) {
 
 func stressRequests() []Request {
 	machine := testMachineConfig("/home/test")
-	machine.OpencodeAccounts = []pfmconfig.OpenCodeAccount{{
+	machine.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{
 		ID: 1, Home: "/home/test/.local/share/opencode",
 	}}
 	machine.OpenCode.Binary = "opencode"
 	rows := []compose.Row{
 		{Kind: compose.NewClaude, CWD: "/work/project"},
 		{Kind: compose.NewCodex, CWD: "/work/project"},
-		{Kind: compose.NewOpencode, CWD: "/work/project"},
+		{Kind: compose.NewOpenCode, CWD: "/work/project"},
 		{
 			Kind:        compose.LiveClaude,
 			ID:          "11111111-1111-4111-8111-111111111111",
@@ -91,7 +91,7 @@ func stressRequests() []Request {
 			CWD:  "/work/project",
 		},
 		{
-			Kind: compose.ResumeOpencode,
+			Kind: compose.ResumeOpenCode,
 			ID:   "ses_stress_opencode",
 			CWD:  "/work/project",
 		},
@@ -106,7 +106,7 @@ func stressRequests() []Request {
 		row := rows[index]
 		for _, bunker := range []bool{false, true} {
 			accounts := []int{1, 2, 3}
-			if row.Kind == compose.NewOpencode || row.Kind == compose.ResumeOpencode {
+			if row.Kind == compose.NewOpenCode || row.Kind == compose.ResumeOpenCode {
 				accounts = []int{1}
 			}
 			for _, account := range accounts {
@@ -115,7 +115,7 @@ func stressRequests() []Request {
 					switch row.Kind {
 					case compose.NewCodex, compose.ResumeCodex:
 						freshPrefix = "cx"
-					case compose.NewOpencode, compose.ResumeOpencode:
+					case compose.NewOpenCode, compose.ResumeOpenCode:
 						freshPrefix = "ox"
 					}
 					requests = append(requests, Request{

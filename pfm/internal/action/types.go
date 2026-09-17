@@ -14,13 +14,13 @@ type Route byte
 const (
 	NewClaude    Route = 'N'
 	NewCodex     Route = 'C'
-	NewOpencode  Route = 'P'
+	NewOpenCode  Route = 'P'
 	Live         Route = 'L'
 	Agent        Route = 'A'
 	ResumeClaude Route = 'R'
 	ResumeCodex  Route = 'X'
-	// ResumeOpencode takes the next free letter; 'O' reads as OpenCode.
-	ResumeOpencode Route = 'O'
+	// ResumeOpenCode takes the next free letter; 'O' reads as OpenCode.
+	ResumeOpenCode Route = 'O'
 )
 
 // Request is every value needed to synthesize and prepare one selected row.

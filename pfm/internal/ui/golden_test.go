@@ -78,7 +78,7 @@ func TestRenderGoldens(t *testing.T) {
 			name: "OpenCode row ansi 80 columns",
 			path: "ui_opencode_80.ansi",
 			got: func() string {
-				return quoteANSI(opencodeGoldenSnapshot(80).View().Content)
+				return quoteANSI(openCodeGoldenSnapshot(80).View().Content)
 			},
 		},
 		{
@@ -206,10 +206,10 @@ func TestRenderGoldens(t *testing.T) {
 	}
 }
 
-func opencodeGoldenSnapshot(width int) Model {
+func openCodeGoldenSnapshot(width int) Model {
 	snapshot := fixtureSnapshot(width)
 	snapshot.Rows = []compose.Row{{
-		Kind: compose.ResumeOpencode, ID: "oc-golden", Name: "OpenCode session",
+		Kind: compose.ResumeOpenCode, ID: "oc-golden", Name: "OpenCode session",
 		Project: "alpha", CWD: "/work/alpha", PromptCount: 3,
 		ActivityNS: fixtureNowNS - int64(time.Minute),
 	}}

@@ -178,21 +178,21 @@ func TestSnapshotCountsIncludesEveryEngine(t *testing.T) {
 	got := stripANSI(SnapshotCounts(map[pfmengine.ID]int{
 		pfmengine.Claude:   2,
 		pfmengine.Codex:    3,
-		pfmengine.Opencode: 4,
+		pfmengine.OpenCode: 4,
 	}))
 	if got != "·2 ✦3 ✦4" {
 		t.Fatalf("SnapshotCounts() = %q, want all three engine counts", got)
 	}
 }
 
-func TestFrameRendersOpencodeOnlyFleet(t *testing.T) {
+func TestFrameRendersOpenCodeOnlyFleet(t *testing.T) {
 	const now = 1200 * 1_000_000
 	empty := joined(Frame(Options{Width: 18, Height: 3, TimeNS: now}))
-	opencode := joined(Frame(Options{
-		Counts: map[pfmengine.ID]int{pfmengine.Opencode: 5},
+	openCode := joined(Frame(Options{
+		Counts: map[pfmengine.ID]int{pfmengine.OpenCode: 5},
 		Width:  18, Height: 3, TimeNS: now,
 	}))
-	if opencode == empty || !strings.ContainsAny(opencode, "✦+*") {
-		t.Fatalf("OpenCode-only fleet rendered as empty:\n%s", opencode)
+	if openCode == empty || !strings.ContainsAny(openCode, "✦+*") {
+		t.Fatalf("OpenCode-only fleet rendered as empty:\n%s", openCode)
 	}
 }

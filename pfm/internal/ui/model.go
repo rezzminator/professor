@@ -109,8 +109,8 @@ type Model struct {
 	codexPrimary         int
 	initialCodexPrimary  int
 	codexAccountIDs      []int
-	opencodePrimary      int
-	opencodeAccountIDs   []int
+	openCodePrimary      int
+	openCodeAccountIDs   []int
 	cache1H              bool
 	tab                  Tab
 	statsSubtab          StatsSubtab
@@ -225,8 +225,8 @@ func NewModel(snapshot Snapshot) Model {
 		codexPrimary:        validAccount(snapshot.CodexPrimaryAccount, snapshot.CodexAccountIDs),
 		initialCodexPrimary: validAccount(snapshot.CodexPrimaryAccount, snapshot.CodexAccountIDs),
 		codexAccountIDs:     normalizedAccountIDs(snapshot.CodexAccountIDs),
-		opencodePrimary:     validAccount(snapshot.OpencodePrimaryAccount, snapshot.OpencodeAccountIDs),
-		opencodeAccountIDs:  normalizedAccountIDs(snapshot.OpencodeAccountIDs),
+		openCodePrimary:     validAccount(snapshot.OpenCodePrimaryAccount, snapshot.OpenCodeAccountIDs),
+		openCodeAccountIDs:  normalizedAccountIDs(snapshot.OpenCodeAccountIDs),
 		cache1H:             snapshot.Cache1H,
 		query:               input,
 		initialKilled:       make(map[string]bool),
@@ -257,7 +257,7 @@ func NewModel(snapshot Snapshot) Model {
 		newChatEngine: defaultNewChatEngine(
 			snapshot.AccountIDs,
 			snapshot.CodexAccountIDs,
-			snapshot.OpencodeAccountIDs,
+			snapshot.OpenCodeAccountIDs,
 		),
 	}
 	if model.samplingContext == nil {
@@ -280,15 +280,15 @@ var (
 	configuredCodexAccountEmojis map[int]string
 )
 
-func defaultNewChatEngine(claude, codex, opencode []int) pfmengine.ID {
+func defaultNewChatEngine(claude, codex, openCode []int) pfmengine.ID {
 	if len(normalizedAccountIDs(claude)) != 0 ||
-		(len(normalizedAccountIDs(codex)) == 0 && len(normalizedAccountIDs(opencode)) == 0) {
+		(len(normalizedAccountIDs(codex)) == 0 && len(normalizedAccountIDs(openCode)) == 0) {
 		return pfmengine.Claude
 	}
 	if len(normalizedAccountIDs(codex)) != 0 {
 		return pfmengine.Codex
 	}
-	return pfmengine.Opencode
+	return pfmengine.OpenCode
 }
 
 func copyEmojis(values map[int]string) map[int]string {
@@ -521,9 +521,9 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				case pfmengine.Claude:
 					row.Kind = compose.NewClaude
 					row.Name = "New " + pfmengine.MustLookup(pfmengine.Claude).Short + " chat"
-				case pfmengine.Opencode:
-					row.Kind = compose.NewOpencode
-					row.Name = "New " + pfmengine.MustLookup(pfmengine.Opencode).Short + " chat"
+				case pfmengine.OpenCode:
+					row.Kind = compose.NewOpenCode
+					row.Name = "New " + pfmengine.MustLookup(pfmengine.OpenCode).Short + " chat"
 				default:
 					model.killStatus = "new chat is not available for " + pfmengine.MustLookup(
 						model.newChatEngine,
@@ -772,8 +772,8 @@ func (model Model) newChatEngines() []pfmengine.ID {
 			appendUnique(pfmengine.Claude)
 		case compose.NewCodex:
 			appendUnique(pfmengine.Codex)
-		case compose.NewOpencode:
-			appendUnique(pfmengine.Opencode)
+		case compose.NewOpenCode:
+			appendUnique(pfmengine.OpenCode)
 		}
 	}
 	for _, id := range spawn.RegisteredLaunchers() {
@@ -811,8 +811,8 @@ func (model *Model) cycleSelectedAccount() {
 		model.codexPrimary = nextAccount(model.codexPrimary, model.codexAccountIDs)
 		return
 	}
-	if engine == pfmengine.Opencode {
-		model.opencodePrimary = nextAccount(model.opencodePrimary, model.opencodeAccountIDs)
+	if engine == pfmengine.OpenCode {
+		model.openCodePrimary = nextAccount(model.openCodePrimary, model.openCodeAccountIDs)
 		return
 	}
 	model.primary = nextAccount(model.primary, model.accountIDs)
@@ -1396,7 +1396,7 @@ func (model *Model) rebuildOrder() {
 }
 
 func isNewChatKind(kind compose.Kind) bool {
-	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpencode
+	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
 }
 
 // nameGroupPrefix reads a GROUP:NAME declaration off a chat name.
@@ -1429,7 +1429,7 @@ func nameGroupPrefix(name string) (string, bool) {
 // with its live namesakes exactly like a live row would.
 func isNameGroupRow(kind compose.Kind) bool {
 	return isLive(kind) || kind == compose.Agent || kind == compose.Booting ||
-		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpencode
+		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpenCode
 }
 
 func (model *Model) refilter(follow string, fallback int) {
@@ -1574,8 +1574,8 @@ func (model Model) accountForEngine(engine pfmengine.ID) int {
 	switch engine {
 	case pfmengine.Codex:
 		return model.codexPrimary
-	case pfmengine.Opencode:
-		return model.opencodePrimary
+	case pfmengine.OpenCode:
+		return model.openCodePrimary
 	default:
 		return model.primary
 	}

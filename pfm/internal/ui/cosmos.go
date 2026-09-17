@@ -1583,7 +1583,7 @@ func cosmosNodeGlyph(node compose.CosmosNode) rune {
 	switch pfmengine.ID(node.Engine) {
 	case pfmengine.Codex:
 		return '▲'
-	case pfmengine.Opencode:
+	case pfmengine.OpenCode:
 		return '◆'
 	case pfmengine.Claude:
 		return '✳'

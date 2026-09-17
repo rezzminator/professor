@@ -129,8 +129,8 @@ func openProfessorUpdate(
 		row.Kind = compose.NewClaude
 	case pfmengine.Codex:
 		row.Kind = compose.NewCodex
-	case pfmengine.Opencode:
-		row.Kind = compose.NewOpencode
+	case pfmengine.OpenCode:
+		row.Kind = compose.NewOpenCode
 	default:
 		fmt.Fprintf(stderr, "pfm ls: update: unsupported engine %q\n", outcome.Engine)
 		return 1

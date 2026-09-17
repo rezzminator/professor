@@ -20,9 +20,9 @@ import (
 func TestMain(m *testing.M) {
 	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
 	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
-	index.RegisterSource(pfmengine.Opencode, opencodeengine.Source{})
+	index.RegisterSource(pfmengine.OpenCode, opencodeengine.Source{})
 	gather.RegisterMatcher(pfmengine.Claude, claudeengine.Matcher{})
 	gather.RegisterMatcher(pfmengine.Codex, codexengine.Matcher{})
-	gather.RegisterMatcher(pfmengine.Opencode, opencodeengine.Matcher{})
+	gather.RegisterMatcher(pfmengine.OpenCode, opencodeengine.Matcher{})
 	os.Exit(testjail.Run(m))
 }

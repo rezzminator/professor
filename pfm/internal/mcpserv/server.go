@@ -64,9 +64,9 @@ type Runtime struct {
 	ConfigPath   string
 	ClaudeBinary string
 	CodexBinary  string
-	// OpencodeBinary is the configured OpenCode launch command; empty means
+	// OpenCodeBinary is the configured OpenCode launch command; empty means
 	// the registered OpenCode descriptor's default binary.
-	OpencodeBinary string
+	OpenCodeBinary string
 	// Chat is the typed verb layer (production: chat.Verbs over the command's
 	// runtime). Verbs not yet on it still reach package main through Dispatch.
 	Chat ChatVerbs

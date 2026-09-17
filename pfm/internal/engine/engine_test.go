@@ -11,7 +11,7 @@ func TestParseAcceptsShortAndLongSpellings(t *testing.T) {
 		"cc":        Claude,
 		"Claude":    Claude,
 		spacedCodex: Codex,
-		"OX":        Opencode,
+		"OX":        OpenCode,
 	}
 	for value, want := range tests {
 		t.Run(value, func(t *testing.T) {

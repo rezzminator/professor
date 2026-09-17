@@ -29,7 +29,7 @@ func TestUnknownEngineIsANamedError(t *testing.T) {
 }
 
 func TestKnownUnsupportedEngineGetsProductFacingError(t *testing.T) {
-	_, err := PlannerFor(pfmengine.Opencode)
+	_, err := PlannerFor(pfmengine.OpenCode)
 	if err == nil || err.Error() != "OpenCode does not support headless chat" {
 		t.Fatalf("PlannerFor(OpenCode) error = %v", err)
 	}

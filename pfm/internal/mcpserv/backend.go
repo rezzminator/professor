@@ -52,8 +52,8 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 	if runtime.ClaudeBinary == "" {
 		runtime.ClaudeBinary = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	if runtime.OpencodeBinary == "" {
-		runtime.OpencodeBinary = pfmengine.MustLookup(pfmengine.Opencode).Binary
+	if runtime.OpenCodeBinary == "" {
+		runtime.OpenCodeBinary = pfmengine.MustLookup(pfmengine.OpenCode).Binary
 	}
 	database, err := store.Open(store.WithWarningWriter(warnings))
 	if err != nil {
@@ -78,7 +78,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		Spawner:        inject.CommandThenSpawner{ConfigPath: runtime.ConfigPath},
 		ClaudeBinary:   runtime.ClaudeBinary,
 		CodexBinary:    runtime.CodexBinary,
-		OpencodeBinary: runtime.OpencodeBinary,
+		OpenCodeBinary: runtime.OpenCodeBinary,
 		AccountEmojis:  accountEmojis(runtime.Accounts),
 		Recorder:       sharedState.RecordComms,
 		WarningWriter:  warnings,

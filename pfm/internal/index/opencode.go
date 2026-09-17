@@ -22,7 +22,7 @@ import (
 // hang. An index seconds behind a live chat is the same contract the Claude
 // and Codex walkers already have.
 
-type opencodeRow struct {
+type openCodeRow struct {
 	validationOnly  int64
 	sessionID       string
 	title           string
@@ -47,7 +47,7 @@ type opencodeRow struct {
 	badPartShape    int64
 }
 
-const opencodeSessionsQuery = `
+const openCodeSessionsQuery = `
 WITH raw_message AS MATERIALIZED (
     SELECT id, session_id, time_created,
            json_valid(data) AS data_valid,
@@ -204,13 +204,13 @@ SELECT 1 AS validation_only,
  WHERE NOT EXISTS (SELECT 1 FROM session)
 `
 
-// ReadOpencodeSessions reads OpenCode's session store into OcSession rows.
+// ReadOpenCodeSessions reads OpenCode's session store into OpenCodeSession rows.
 // A missing opencode.db means the engine is not installed — that is a real,
 // checkable answer ("no store exists"), not a silent failure, so it returns
 // zero sessions and a nil error; a PRESENT database that cannot be opened or
 // parsed is an error and says so.
-func ReadOpencodeSessions(ctx context.Context, root string) (
-	sessions []store.OcSession,
+func ReadOpenCodeSessions(ctx context.Context, root string) (
+	sessions []store.OpenCodeSession,
 	returnErr error,
 ) {
 	dbPath := filepath.Join(root, "opencode.db")
@@ -241,7 +241,7 @@ func ReadOpencodeSessions(ctx context.Context, root string) (
 			)
 		}
 	}()
-	rows, err := db.QueryContext(ctx, opencodeSessionsQuery)
+	rows, err := db.QueryContext(ctx, openCodeSessionsQuery)
 	if err != nil {
 		return nil, fmt.Errorf("query opencode sessions: %w", err)
 	}
@@ -254,9 +254,9 @@ func ReadOpencodeSessions(ctx context.Context, root string) (
 		}
 	}()
 
-	sessions = make([]store.OcSession, 0)
+	sessions = make([]store.OpenCodeSession, 0)
 	for rows.Next() {
-		var row opencodeRow
+		var row openCodeRow
 		if err := rows.Scan(
 			&row.validationOnly,
 			&row.sessionID, &row.title, &row.directory,
@@ -283,7 +283,7 @@ func ReadOpencodeSessions(ctx context.Context, root string) (
 		if row.validationOnly != 0 {
 			continue
 		}
-		sessions = append(sessions, store.OcSession{
+		sessions = append(sessions, store.OpenCodeSession{
 			ID:             row.sessionID,
 			Title:          row.title,
 			Directory:      row.directory,
@@ -308,11 +308,11 @@ func ReadOpencodeSessions(ctx context.Context, root string) (
 	return sessions, nil
 }
 
-// ProbeOpencodeStore runs the production reader and discards its rows. Doctor
+// ProbeOpenCodeStore runs the production reader and discards its rows. Doctor
 // therefore proves that both the native schema and the stored JSON are readable;
 // a schema-only prepare could report healthy while every real index pass fails.
-func ProbeOpencodeStore(ctx context.Context, root string) error {
-	_, err := ReadOpencodeSessions(ctx, root)
+func ProbeOpenCodeStore(ctx context.Context, root string) error {
+	_, err := ReadOpenCodeSessions(ctx, root)
 	return err
 }
 
@@ -345,20 +345,20 @@ func clip(prompt string) string {
 	return prompt
 }
 
-// syncOpencodeMirror replaces the oc_sessions mirror with one pass's view.
-func syncOpencodeMirror(
+// syncOpenCodeMirror replaces the oc_sessions mirror with one pass's view.
+func syncOpenCodeMirror(
 	ctx context.Context,
 	database *store.Store,
 	root string,
 	counters *Counters,
 ) error {
-	sessions, err := ReadOpencodeSessions(ctx, root)
+	sessions, err := ReadOpenCodeSessions(ctx, root)
 	if err != nil {
 		return fmt.Errorf("read opencode sessions: %w", err)
 	}
-	if err := database.ReplaceOcSessions(ctx, sessions); err != nil {
+	if err := database.ReplaceOpenCodeSessions(ctx, sessions); err != nil {
 		return fmt.Errorf("replace opencode mirror: %w", err)
 	}
-	counters.OcSessions = len(sessions)
+	counters.OpenCodeSessions = len(sessions)
 	return nil
 }

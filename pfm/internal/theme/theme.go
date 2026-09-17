@@ -75,11 +75,11 @@ type Palette struct {
 
 var defaultPalette = Palette{
 	EngineRow: map[pfmengine.ID]string{
-		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.Opencode: defaultGreenColor,
+		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.OpenCode: defaultGreenColor,
 	},
 	AgentRow: "#fb923c",
 	StatsEngine: map[pfmengine.ID]string{
-		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.Opencode: defaultGreenColor,
+		pfmengine.Claude: orangeColor, pfmengine.Codex: "#38bdf8", pfmengine.OpenCode: defaultGreenColor,
 	},
 	StatsCPU:      "#4ade80",
 	StatsRAM:      "#60a5fa",
@@ -112,11 +112,11 @@ var defaultPalette = Palette{
 
 var tokyoNightPalette = Palette{
 	EngineRow: map[pfmengine.ID]string{
-		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.Opencode: tokyoGreenColor,
+		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.OpenCode: tokyoGreenColor,
 	},
 	AgentRow: "#bb9af7",
 	StatsEngine: map[pfmengine.ID]string{
-		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.Opencode: tokyoGreenColor,
+		pfmengine.Claude: "#ffb38a", pfmengine.Codex: "#89ddff", pfmengine.OpenCode: tokyoGreenColor,
 	},
 	StatsCPU:      "#9ece6a",
 	StatsRAM:      "#7aa2f7",

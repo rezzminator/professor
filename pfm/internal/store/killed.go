@@ -290,7 +290,7 @@ func (s *Store) transcriptPromptCounts(
 // stored column. The shared killed table is keyed by uuid alone, so the engine
 // is read back out of whichever index table claims the id:
 // a transcript uses engine.Claude, a rollout or lineage root uses engine.Codex,
-// and an OpenCode mirror row uses engine.Opencode. An id no table knows is an
+// and an OpenCode mirror row uses engine.OpenCode. An id no table knows is an
 // orphaned kill and keeps an empty engine, which
 // compose reads as "killed whatever the engine".
 func (s *Store) deriveEngines(
@@ -329,7 +329,7 @@ UNION ALL
 SELECT id, ? FROM oc_sessions WHERE id IN (` + marks + `)`
 	// One bound id list per IN clause: five clauses, five copies.
 	arguments := make([]any, 0, (len(ids)+1)*5)
-	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.Codex, pfmengine.Codex, pfmengine.Opencode} {
+	for _, id := range []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.Codex, pfmengine.Codex, pfmengine.OpenCode} {
 		arguments = append(arguments, string(id))
 		for _, id := range ids {
 			arguments = append(arguments, id)

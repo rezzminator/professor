@@ -14,5 +14,5 @@ import (
 func init() {
 	index.RegisterSource(pfmengine.Claude, claudeengine.Source{})
 	index.RegisterSource(pfmengine.Codex, codexengine.Source{})
-	index.RegisterSource(pfmengine.Opencode, opencodeengine.Source{})
+	index.RegisterSource(pfmengine.OpenCode, opencodeengine.Source{})
 }

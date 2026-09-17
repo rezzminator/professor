@@ -137,10 +137,10 @@ func TestNewChatCarouselAndChatActionCarousel(t *testing.T) {
 	snapshot.Rows = []compose.Row{
 		{Kind: compose.NewClaude, Name: "New Claude chat", Project: "new"},
 		{Kind: compose.NewCodex, Name: "New Codex chat", Project: "new"},
-		{Kind: compose.NewOpencode, Name: "New OpenCode chat", Project: "new", Account: 5},
+		{Kind: compose.NewOpenCode, Name: "New OpenCode chat", Project: "new", Account: 5},
 	}
-	snapshot.OpencodePrimaryAccount = 5
-	snapshot.OpencodeAccountIDs = []int{5}
+	snapshot.OpenCodePrimaryAccount = 5
+	snapshot.OpenCodeAccountIDs = []int{5}
 	snapshot.MergeNewChat = true
 	model := NewModel(snapshot)
 	if model.NewChatEngine() != pfmengine.Claude {
@@ -151,11 +151,11 @@ func TestNewChatCarouselAndChatActionCarousel(t *testing.T) {
 		t.Fatalf("right new-chat engine=%q command=%v", model.NewChatEngine(), command)
 	}
 	model, command = applyKey(t, model, specialKey(tea.KeyRight))
-	if command != nil || model.NewChatEngine() != pfmengine.Opencode {
+	if command != nil || model.NewChatEngine() != pfmengine.OpenCode {
 		t.Fatalf("second right new-chat engine=%q command=%v", model.NewChatEngine(), command)
 	}
 	model, command = applyKey(t, model, specialKey(tea.KeyEnter))
-	if command == nil || model.Result().Kind != OutcomeSelected || model.Result().Row.Kind != compose.NewOpencode ||
+	if command == nil || model.Result().Kind != OutcomeSelected || model.Result().Row.Kind != compose.NewOpenCode ||
 		model.Result().PrimaryAccount != 5 {
 		t.Fatalf("new-chat Enter result=%#v command=%v", model.Result(), command)
 	}
@@ -207,15 +207,15 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 			},
 			{Kind: compose.NewClaude, Name: "New Claude chat", Project: "project", CWD: "/work/project"},
 			{Kind: compose.NewCodex, Name: "New Codex chat", Project: "project", CWD: "/work/project"},
-			{Kind: compose.NewOpencode, Name: "New OpenCode chat", Project: "project", CWD: "/work/project"},
+			{Kind: compose.NewOpenCode, Name: "New OpenCode chat", Project: "project", CWD: "/work/project"},
 		},
 		View:                   compose.DefaultView,
 		PrimaryAccount:         1,
 		AccountIDs:             []int{1},
 		CodexPrimaryAccount:    2,
 		CodexAccountIDs:        []int{2},
-		OpencodePrimaryAccount: 3,
-		OpencodeAccountIDs:     []int{3},
+		OpenCodePrimaryAccount: 3,
+		OpenCodeAccountIDs:     []int{3},
 		MergeNewChat:           true,
 		NowNS:                  fixtureNowNS,
 		Width:                  120,
@@ -295,10 +295,10 @@ func TestProfessorUpdateBannerIsFullWidthGoldAndAnimated(t *testing.T) {
 			{Kind: compose.ProfessorUpdate, ID: "pfm-update-v0.61.2", Name: "v0.61.2", Project: ".professor"},
 			{Kind: compose.NewClaude, Name: "New Claude chat", Project: ".professor"},
 			{Kind: compose.NewCodex, Name: "New Codex chat", Project: ".professor"},
-			{Kind: compose.NewOpencode, Name: "New OpenCode chat", Project: ".professor"},
+			{Kind: compose.NewOpenCode, Name: "New OpenCode chat", Project: ".professor"},
 		},
 		View: compose.DefaultView, MergeNewChat: true, NowNS: fixtureNowNS,
-		AccountIDs: []int{1}, CodexAccountIDs: []int{1}, OpencodeAccountIDs: []int{1},
+		AccountIDs: []int{1}, CodexAccountIDs: []int{1}, OpenCodeAccountIDs: []int{1},
 		Width: 120, Height: 20,
 	}
 	model := NewModel(snapshot)

@@ -55,7 +55,7 @@ func TestConfiguredEmojiAndLegacyMedalsAreRecognized(t *testing.T) {
 // the hue, not the exact shade, so a theme stays free to restyle.
 func TestEngineIdentityHuesHoldAcrossPalettes(t *testing.T) {
 	wantHue := map[pfmengine.ID]string{
-		pfmengine.Claude: "orange", pfmengine.Codex: "blue", pfmengine.Opencode: "green",
+		pfmengine.Claude: "orange", pfmengine.Codex: "blue", pfmengine.OpenCode: "green",
 	}
 	for _, paletteName := range []string{"default", "tokyo-night"} {
 		palette := Load(paletteName)

@@ -22,11 +22,11 @@ func TestDoctorRejectsAnUnreadableOpenCodeSchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opencodeRoot := resolved.Roots[pfmengine.Opencode][0]
-	if err := os.MkdirAll(opencodeRoot, 0o700); err != nil {
+	openCodeRoot := resolved.Roots[pfmengine.OpenCode][0]
+	if err := os.MkdirAll(openCodeRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", filepath.Join(opencodeRoot, "opencode.db"))
+	db, err := sql.Open("sqlite", filepath.Join(openCodeRoot, "opencode.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +108,8 @@ INSERT INTO part VALUES ('part', 'message', 'session', 1, 1, '{"type":"text","te
 	}
 
 	var stdout bytes.Buffer
-	warnings := printOpencodeStoreDoctor(context.Background(), &stdout, pfmconfig.Config{
-		OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: root}},
+	warnings := printOpenCodeStoreDoctor(context.Background(), &stdout, pfmconfig.Config{
+		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: root}},
 	})
 	if warnings == 0 || !strings.Contains(stdout.String(), "doctor: opencode store=unhealthy") {
 		t.Fatalf("doctor warnings=%d output=%q, want malformed row reported unhealthy", warnings, stdout.String())

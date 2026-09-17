@@ -40,7 +40,7 @@ var (
 			Foreground(lipgloss.Color("#94a3b8"))
 	codexStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#e879f9"))
-	opencodeStyle = lipgloss.NewStyle().
+	openCodeStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#60a5fa"))
 	agentStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#fb923c"))
@@ -92,7 +92,7 @@ func configureStyles(palette theme.Palette) {
 		Background(lipgloss.Color(palette.Selected))
 	dimStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dim))
 	codexStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Codex]))
-	opencodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.Opencode]))
+	openCodeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.EngineRow[pfmengine.OpenCode]))
 	agentStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.AgentRow))
 	statsHeaderStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(palette.StatsHeader))
 	statsClaudeStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.StatsEngine[pfmengine.Claude]))
@@ -200,8 +200,8 @@ func (model Model) renderHeader(width int) string {
 		if len(model.codexAccountIDs) != 0 {
 			headerAccount = model.codexPrimary
 			headerMedal = codexAccountMedal(headerAccount)
-		} else if len(model.opencodeAccountIDs) != 0 {
-			headerAccount = model.opencodePrimary
+		} else if len(model.openCodeAccountIDs) != 0 {
+			headerAccount = model.openCodePrimary
 			headerMedal = accountMedal(headerAccount)
 		}
 	}
@@ -892,8 +892,8 @@ func (model Model) renderGroupedRow(
 		return professorUpdateStyle.Render(line)
 	case compose.LiveCodex, compose.ResumeCodex, compose.NewCodex:
 		return codexStyle.Render(line)
-	case compose.ResumeOpencode, compose.NewOpencode:
-		return opencodeStyle.Render(line)
+	case compose.ResumeOpenCode, compose.NewOpenCode:
+		return openCodeStyle.Render(line)
 	case compose.LiveClaude, compose.ResumeClaude, compose.NewClaude:
 		return statsClaudeStyle.Render(line)
 	case compose.Agent:
@@ -960,9 +960,9 @@ func rowMarker(kind compose.Kind) string {
 		return "◐"
 	case compose.Agent:
 		return "⚙"
-	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpencode:
+	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
 		return "↻"
-	case compose.NewClaude, compose.NewCodex, compose.NewOpencode:
+	case compose.NewClaude, compose.NewCodex, compose.NewOpenCode:
 		return "✦"
 	case compose.ProfessorUpdate:
 		return "⬆"
@@ -976,7 +976,7 @@ func (model Model) rowBadges(row compose.Row) string {
 	switch row.Kind {
 	case compose.LiveCodex, compose.ResumeCodex, compose.NewCodex:
 		badges = append(badges, "⬢")
-	case compose.ResumeOpencode, compose.NewOpencode:
+	case compose.ResumeOpenCode, compose.NewOpenCode:
 		badges = append(badges, "◇")
 	case compose.Agent:
 		badges = append(badges, "⚙ agent")

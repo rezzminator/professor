@@ -15,7 +15,7 @@ type ID string
 const (
 	Claude   ID = "cc"
 	Codex    ID = "cx"
-	Opencode ID = "ox"
+	OpenCode ID = "ox"
 )
 
 // Descriptor is everything pfm knows about an engine that is DATA. Behaviour

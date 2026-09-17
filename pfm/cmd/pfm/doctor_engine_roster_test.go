@@ -51,14 +51,14 @@ func TestDoctorEngineRosterMatrix(t *testing.T) {
 		{
 			name: "opencode only",
 			machine: pfmconfig.Config{
-				OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1}},
+				OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1}},
 			},
 			want: "doctor: roster cc=0 cx=0 ox=1 default=ox\n",
 		},
 		{
 			name: "opencode requested but store absent",
 			machine: pfmconfig.Config{
-				Ask: pfmconfig.AskConfig{Engine: pfmengine.Opencode},
+				Ask: pfmconfig.AskConfig{Engine: pfmengine.OpenCode},
 			},
 			want:        "doctor: roster cc=0 cx=0 ox=0 default=none error=no engines configured: Claude roster empty; Codex roster empty; OpenCode store absent\n",
 			wantWarning: 1,

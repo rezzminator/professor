@@ -45,14 +45,14 @@ func TestResolveRunEngineAccountUsesTheChosenRoster(t *testing.T) {
 	}
 }
 
-func TestResolveRunEngineAccountValidatesOpencodeRoster(t *testing.T) {
+func TestResolveRunEngineAccountValidatesOpenCodeRoster(t *testing.T) {
 	clearCallerEngineEnv(t)
 	machine := pfmconfig.Config{
-		OpencodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 5, Home: "/opencode"}},
-		Ask:              pfmconfig.AskConfig{Engine: pfmengine.Opencode},
+		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 5, Home: "/opencode"}},
+		Ask:              pfmconfig.AskConfig{Engine: pfmengine.OpenCode},
 	}
 	engine, account, err := resolveRunEngineAccount("", 0, machine, 0)
-	if err != nil || engine != pfmengine.Opencode || account != 5 {
+	if err != nil || engine != pfmengine.OpenCode || account != 5 {
 		t.Fatalf("default OpenCode = %q/%d error=%v, want ox/5", engine, account, err)
 	}
 	_, _, err = resolveRunEngineAccount("opencode", 8, machine, 0)

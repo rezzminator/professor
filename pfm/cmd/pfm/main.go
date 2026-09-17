@@ -3,14 +3,13 @@ package main
 
 import (
 	"context"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"runtime/debug"
 	"strconv"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
@@ -23,24 +22,23 @@ import (
 )
 
 const (
-	chatCommand        = "chat"
-	initCommand        = "init"
-	indexCommand       = "index"
-	headlessCommand    = "headless"
-	whoamiCommand      = "whoami"
-	versionCommand     = "version"
-	developmentVersion = "dev"
-	configCommand      = "config"
-	archiveCommand     = "archive"
-	internalCommand    = "internal"
-	reloadRunCommand   = "reload-run"
-	serveCommand       = "serve"
-	installCommand     = "install"
-	mcpCommand         = "mcp"
-	updateCommand      = "update"
+	chatCommand      = "chat"
+	initCommand      = "init"
+	indexCommand     = "index"
+	headlessCommand  = "headless"
+	whoamiCommand    = "whoami"
+	versionCommand   = "version"
+	configCommand    = "config"
+	archiveCommand   = "archive"
+	internalCommand  = "internal"
+	reloadRunCommand = "reload-run"
+	serveCommand     = "serve"
+	installCommand   = "install"
+	mcpCommand       = "mcp"
+	updateCommand    = "update"
 )
 
-var version = developmentVersion
+var version = config.DevelopmentVersion
 
 // topLevelSubcommands names every case the switch in run dispatches by
 // argv[0] — the single source both TestTopLevelSubcommandsReachTheirHandler
@@ -95,6 +93,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 1
 		}
 	}
+	runtime.Version = version
 	// The one place the machine config reaches a Codex rename's proof.
 	spawn.UseCodexHomes(runtime.Config.CodexHomes())
 	if len(args) == 0 {
@@ -176,7 +175,7 @@ func runMCP(
 	// The installed wiring historically invokes bare `pfm mcp`; preserve that
 	// argv as the chat server's serve action while making every new form named.
 	if len(args) == 0 {
-		args = []string{chatCommand, serveCommand}
+		args = []string{config.MCPServerChat, serveCommand}
 	}
 	if len(args) == 1 && args[0] == serveCommand {
 		return runMCPServe(stdout, stderr, runtime)
@@ -194,7 +193,7 @@ func runMCP(
 		}
 		return 0
 	}
-	if len(args) < 2 || (len(args) > 2 && (args[0] != harvesterServer || args[1] != serveCommand)) {
+	if len(args) < 2 || (len(args) > 2 && (args[0] != config.MCPServerHarvester || args[1] != serveCommand)) {
 		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp serve | pfm mcp <server> enable|disable|serve")
 		return 2
 	}
@@ -233,10 +232,10 @@ func runMCP(
 		)
 		return 1
 	}
-	if name == harvesterServer {
+	if name == config.MCPServerHarvester {
 		return runHarvesterMCP(args[2:], stdout, stderr, runtime)
 	}
-	if name != chatCommand {
+	if name != config.MCPServerChat {
 		fmt.Fprintf(stderr, "pfm mcp %s: registered server has no implementation\n", name)
 		return 1
 	}
@@ -245,7 +244,7 @@ func runMCP(
 		fmt.Fprintf(stderr, "pfm mcp: %v\n", err)
 		return 1
 	}
-	defer func() { closeCommandResource(service, "pfm mcp: close service", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(service, "pfm mcp: close service", stderr, &exitCode) }()
 	if err := service.RunStdio(
 		context.Background(),
 		os.Stdin,
@@ -258,8 +257,8 @@ func runMCP(
 }
 
 func runVersion(args []string, stdout, stderr io.Writer) int {
-	flags := newFlagSet(versionCommand, "usage: pfm version", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet(versionCommand, "usage: pfm version", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -278,7 +277,7 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 // build's own binary, ldflags or not, so falling back to it turns an
 // unstamped "dev" into a build the operator can still identify.
 func displayVersion() string {
-	if version != developmentVersion {
+	if version != config.DevelopmentVersion {
 		return version
 	}
 	info, ok := debug.ReadBuildInfo()
@@ -303,7 +302,7 @@ func resolveDevVersion(settings []debug.BuildSetting) string {
 		}
 	}
 	if revision == "" {
-		return developmentVersion
+		return config.DevelopmentVersion
 	}
 	if len(revision) > 12 {
 		revision = revision[:12]
@@ -315,14 +314,14 @@ func resolveDevVersion(settings []debug.BuildSetting) string {
 }
 
 func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat kill",
 		"usage: pfm chat kill [self | id] [--exit]",
 		stderr,
 	)
 	self := flags.Bool("self", false, "kill the calling tmux chat")
 	exit := flags.Bool("exit", false, "gracefully close after killing")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() > 1 || (*self && flags.NArg() != 0) ||
@@ -331,7 +330,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		return 2
 	}
 
-	runtime, err := optionalCommandRuntime(runtimes)
+	runtime, err := config.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat kill: config: %v\n", err)
 		return 1
@@ -340,7 +339,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 	if code != 0 {
 		return code
 	}
-	defer func() { closeCommandResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 	id := ""
 	var engine pfmengine.ID
@@ -376,8 +375,8 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 }
 
 func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
-	flags := newFlagSet("chat unkill", "usage: pfm chat unkill id", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat unkill", "usage: pfm chat unkill id", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -388,7 +387,7 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	if code != 0 {
 		return code
 	}
-	defer func() { closeCommandResource(database, "pfm chat unkill: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm chat unkill: close database", stderr, &exitCode) }()
 	if err := manager.Unkill(context.Background(), flags.Arg(0)); err != nil {
 		fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
 		return 1
@@ -398,12 +397,12 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 }
 
 func runKilled(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"ls --killed",
 		"usage: pfm ls --killed",
 		stderr,
 	)
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -414,7 +413,7 @@ func runKilled(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	if code != 0 {
 		return code
 	}
-	defer func() { closeCommandResource(database, "pfm ls --killed: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm ls --killed: close database", stderr, &exitCode) }()
 	rows, err := manager.Killed(context.Background())
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm ls --killed: %v\n", err)
@@ -490,12 +489,12 @@ func runInternal(
 		return stale.Run(args[1:], stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "primary-set" {
-		flags := newFlagSet(
+		flags := cli.NewFlagSet(
 			"internal primary-set",
 			"usage: pfm internal primary-set <account>",
 			stderr,
 		)
-		if code, ok := parseFlags(flags, args[1:]); !ok {
+		if code, ok := cli.ParseFlags(flags, args[1:]); !ok {
 			return code
 		}
 		if flags.NArg() != 1 {
@@ -542,7 +541,7 @@ func runInternal(
 		)
 		return 1
 	}
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"internal kill-exit",
 		"usage: pfm internal kill-exit --engine cc|cx --id id --path path --socket path --socket-name name --pane %id",
 		stderr,
@@ -553,7 +552,7 @@ func runInternal(
 	socket := flags.String("socket", "", "tmux socket path")
 	socketName := flags.String("socket-name", "", "tmux socket basename")
 	pane := flags.String("pane", "", "tmux pane id")
-	if code, ok := parseFlags(flags, args[1:]); !ok {
+	if code, ok := cli.ParseFlags(flags, args[1:]); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *engine == "" || *id == "" ||
@@ -571,7 +570,7 @@ func runInternal(
 		fmt.Fprintf(stderr, "pfm internal kill-exit: %v\n", err)
 		return 1
 	}
-	defer func() { closeCommandResource(database, "pfm internal kill-exit: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm internal kill-exit: close database", stderr, &exitCode) }()
 	finisher, err := kill.NewFinisher(database, kill.Dependencies{
 		Paths:       runtime.Paths,
 		ClaudeRoots: runtime.Config.ProjectRoots(),
@@ -598,7 +597,7 @@ func openKillManager(
 	stderr io.Writer,
 	runtimes ...commandRuntime,
 ) (*store.Store, *kill.Manager, int) {
-	runtime, err := optionalCommandRuntime(runtimes)
+	runtime, err := config.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 		return nil, nil, 1
@@ -615,48 +614,6 @@ func openKillManager(
 		return nil, nil, 1
 	}
 	return database, manager, 0
-}
-
-func newFlagSet(name, usage string, stderr io.Writer) *flag.FlagSet {
-	flags := flag.NewFlagSet(name, flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	flags.Usage = func() {
-		fmt.Fprintln(stderr, usage)
-	}
-	return flags
-}
-
-func parseFlags(flags *flag.FlagSet, args []string) (int, bool) {
-	if err := flags.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0, false
-		}
-		return 2, false
-	}
-	return 0, true
-}
-
-// parseFlagsAnywhere accepts flags before OR after the positional arguments,
-// because that is how the family is documented and how a human types it:
-// `status seat --json` must not read as three positionals. Go's flag package
-// stops at the first non-flag token, so the remainder is re-parsed until only
-// positionals are left.
-func parseFlagsAnywhere(
-	flags *flag.FlagSet,
-	args []string,
-) ([]string, int, bool) {
-	positional := make([]string, 0, 2)
-	for {
-		if code, ok := parseFlags(flags, args); !ok {
-			return nil, code, false
-		}
-		rest := flags.Args()
-		if len(rest) == 0 {
-			return positional, 0, true
-		}
-		positional = append(positional, rest[0])
-		args = rest[1:]
-	}
 }
 
 func printUsage(w io.Writer) {

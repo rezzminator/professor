@@ -14,13 +14,14 @@ import (
 	"time"
 
 	"hostops/pfm/internal/binwatch"
+	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/harvestmcp"
 	"hostops/pfm/internal/mcpserv"
 )
 
 const (
 	mcpProtocolVersion = "2025-06-18"
-	harvesterServer    = "harvester"
 )
 
 var chatMCPTools = mcpserv.ToolNames()
@@ -65,10 +66,10 @@ func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
 	// daemon cannot serve.
 	servers := map[string][]string{}
 	if options.Chat != nil {
-		servers[chatCommand] = append([]string(nil), chatMCPTools...)
+		servers[config.MCPServerChat] = append([]string(nil), chatMCPTools...)
 	}
 	if options.Harvester != nil {
-		servers[harvesterServer] = append([]string(nil), harvesterMCPTools...)
+		servers[config.MCPServerHarvester] = append([]string(nil), harvesterMCPTools...)
 	}
 	status := mcpDaemonStatus{
 		PFMVersion:      options.Version,
@@ -100,9 +101,9 @@ func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
 			}
 			writeMCPJSON(writer, current)
 		case "/mcp/chat":
-			serveMCPDaemonRoute(writer, request, options.Chat, chatCommand)
+			serveMCPDaemonRoute(writer, request, options.Chat, config.MCPServerChat)
 		case "/mcp/harvester":
-			serveMCPDaemonRoute(writer, request, options.Harvester, harvesterServer)
+			serveMCPDaemonRoute(writer, request, options.Harvester, config.MCPServerHarvester)
 		default:
 			http.NotFound(writer, request)
 		}
@@ -141,8 +142,8 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int
 		fmt.Fprintf(stderr, "pfm mcp serve: configured port %d is outside 1..65535\n", port)
 		return 2
 	}
-	chatEnabled := runtime.Config.MCPServers[chatCommand].Enabled
-	harvesterEnabled := runtime.Config.MCPServers[harvesterServer].Enabled
+	chatEnabled := runtime.Config.MCPServers[config.MCPServerChat].Enabled
+	harvesterEnabled := runtime.Config.MCPServers[config.MCPServerHarvester].Enabled
 	if !chatEnabled && !harvesterEnabled {
 		fmt.Fprintf(
 			stderr,
@@ -164,7 +165,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int
 	listenerOwned := true
 	defer func() {
 		if listenerOwned {
-			closeCommandResource(listener, "pfm mcp serve: close listener", stderr, &exitCode)
+			cli.CloseResource(listener, "pfm mcp serve: close listener", stderr, &exitCode)
 		}
 	}()
 
@@ -178,7 +179,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int
 			fmt.Fprintf(stderr, "pfm mcp serve: configure chat: %v\n", err)
 			return 1
 		}
-		defer func() { closeCommandResource(chat, "pfm mcp serve: close chat service", stderr, &exitCode) }()
+		defer func() { cli.CloseResource(chat, "pfm mcp serve: close chat service", stderr, &exitCode) }()
 		options.Chat = chat.NewHTTPHandler()
 	}
 	if harvesterEnabled {
@@ -188,7 +189,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int
 			return 1
 		}
 		defer func() {
-			closeCommandResource(harvester, "pfm mcp serve: close harvester service", stderr, &exitCode)
+			cli.CloseResource(harvester, "pfm mcp serve: close harvester service", stderr, &exitCode)
 		}()
 		options.Harvester = harvester.NewHTTPHandler()
 	}

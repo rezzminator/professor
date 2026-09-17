@@ -4,12 +4,13 @@ import (
 	"fmt"
 	"io"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/installer"
 )
 
 func runInternalLauncherRepair(args []string, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("internal launcher-repair", "usage: pfm internal launcher-repair", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("internal launcher-repair", "usage: pfm internal launcher-repair", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {

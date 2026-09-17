@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/reap"
 )
@@ -22,7 +23,7 @@ import (
 // The default is a DRY RUN. A wrongly kept socket costs memory; a wrongly
 // killed one costs a chat nobody can get back, so killing has to be asked for.
 func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"reap",
 		"usage: pfm reap [--apply] [--horizon 48h] [--busy-recent SECONDS] [--json]",
 		stderr,
@@ -43,7 +44,7 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		"seconds of transcript writes that count as a working chat",
 	)
 	asJSON := flags.Bool(jsonFormat, false, "emit one JSON report instead of the text table")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *busyRecent < 0 || *horizon < 0 {

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/professor"
 )
@@ -39,9 +40,7 @@ var projectStatusOrder = []projectStatus{
 	projectLocalDeleted,
 }
 
-// missingBaselineMessage is the one text every "no .professor/baseline.json"
-// surface renders — check (human + json), the bare `pfm update` post-report,
-// and pin/drop/ignore stderr — so the guidance never drifts between copies.
+// missingBaselineMessage keeps every missing-baseline surface's guidance identical.
 const missingBaselineMessage = ".professor/baseline.json not found — pfm update adopt pins an existing install; pfm init scaffolds a new one"
 
 var errBaselineNotFound = errors.New(missingBaselineMessage)
@@ -73,10 +72,10 @@ func (report projectReport) reviewRequired() int {
 func runProjectUpdate(action string, args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
 	switch action {
 	case checkAction:
-		flags := newFlagSet("update check", "usage: pfm update check [--root DIR] [--json]", stderr)
+		flags := cli.NewFlagSet("update check", "usage: pfm update check [--root DIR] [--json]", stderr)
 		rootFlag := flags.String("root", "", "project root")
 		jsonOutput := flags.Bool(jsonFormat, false, "write one JSON object")
-		positional, code, ok := parseFlagsAnywhere(flags, args)
+		positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
 		if !ok {
 			return code
 		}
@@ -376,7 +375,7 @@ func writeProjectUnmanaged(stdout io.Writer, jsonOutput bool) {
 }
 
 func runProjectPin(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"update pin",
 		"usage: pfm update pin <local>... | --all [--template TEMPLATE] [--root DIR]",
 		stderr,
@@ -384,7 +383,7 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime commandRunti
 	rootFlag := flags.String("root", "", "project root")
 	pinAll := flags.Bool("all", false, "pin every UPDATED file")
 	templateFlag := flags.String("template", "", "template path for a newly adopted local file")
-	locals, code, ok := parseFlagsAnywhere(flags, args)
+	locals, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -487,9 +486,9 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime commandRunti
 }
 
 func runProjectDrop(args []string, stdout, stderr io.Writer) int {
-	flags := newFlagSet("update drop", "usage: pfm update drop <local>... [--root DIR]", stderr)
+	flags := cli.NewFlagSet("update drop", "usage: pfm update drop <local>... [--root DIR]", stderr)
 	rootFlag := flags.String("root", "", "project root")
-	locals, code, ok := parseFlagsAnywhere(flags, args)
+	locals, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -531,14 +530,12 @@ func runProjectDrop(args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// runProjectAdopt bootstraps pins for an install that already has its
-// project files — never scaffolded by `pfm init`. It reuses planInitCopies
-// (init_command.go) so the pinnable set never drifts from what init deploys.
+// runProjectAdopt pins an existing install using the same file plan as init.
 func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("update adopt", "usage: pfm update adopt [--root DIR] [--at REF]", stderr)
+	flags := cli.NewFlagSet("update adopt", "usage: pfm update adopt [--root DIR] [--at REF]", stderr)
 	rootFlag := flags.String("root", "", "project root")
 	atFlag := flags.String("at", "", "blueprint ref to pin against (defaults to the store HEAD)")
-	positional, code, ok := parseFlagsAnywhere(flags, args)
+	positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -733,13 +730,12 @@ func adoptGitShowTemplate(root, ref, template string) (raw []byte, missing bool,
 	return nil, false, adoptGitFailure(fmt.Sprintf("show %s at %s", template, ref), gitErr, stderrText)
 }
 
-// runProjectIgnore maintains Baseline.Ignored — templates a NEW walk should
-// count and skip rather than surface for adoption.
+// runProjectIgnore maintains templates a NEW walk skips rather than offers for adoption.
 func runProjectIgnore(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("update ignore", "usage: pfm update ignore <template>... [--undo] [--root DIR]", stderr)
+	flags := cli.NewFlagSet("update ignore", "usage: pfm update ignore <template>... [--undo] [--root DIR]", stderr)
 	rootFlag := flags.String("root", "", "project root")
 	undo := flags.Bool("undo", false, "remove templates from the ignore list")
-	values, code, ok := parseFlagsAnywhere(flags, args)
+	values, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}

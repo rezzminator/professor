@@ -16,6 +16,8 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/cli"
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/update"
@@ -130,7 +132,7 @@ func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	if len(args) > 0 {
 		switch args[0] {
 		case checkAction, "adopt", "pin", "ignore", "drop":
-			runtime, err := optionalCommandRuntime(runtimes)
+			runtime, err := pfmconfig.OptionalRuntime(runtimes)
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
 				return 1
@@ -138,7 +140,7 @@ func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 			return runProjectUpdate(args[0], args[1:], stdout, stderr, runtime)
 		}
 	}
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		updateCommand,
 		"usage: pfm update [--to vX.Y.Z] [--repo PATH] [--skip-harvest] [--root DIR] [--json]\n       pfm update {check|adopt|pin|ignore|drop} [options]",
 		stderr,
@@ -148,7 +150,7 @@ func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	skipHarvest := flags.Bool("skip-harvest", false, "leave the optional harvestpy runtime unmanaged")
 	projectRoot := flags.String("root", "", "project root used for the post-update template report")
 	jsonOutput := flags.Bool(jsonFormat, false, "write the project report as one JSON object")
-	positional, code, ok := parseFlagsAnywhere(flags, args)
+	positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -156,7 +158,7 @@ func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		flags.Usage()
 		return 2
 	}
-	runtime, err := optionalCommandRuntime(runtimes)
+	runtime, err := pfmconfig.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
 		return 1

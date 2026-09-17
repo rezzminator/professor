@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 
+	"hostops/pfm/internal/cli"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/heal"
 	"hostops/pfm/internal/paths"
@@ -17,14 +18,14 @@ import (
 // from the rollout, which is why this is safe at all, but a rebuild is only
 // free while the rollout is whole.
 func runHeal(args []string, stdout, stderr io.Writer) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"heal",
 		"usage: pfm heal [--apply | --thread id]",
 		stderr,
 	)
 	apply := flags.Bool("apply", false, "heal every broken thread that is not live")
 	thread := flags.String("thread", "", "heal one thread if its projection is broken")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || (*apply && *thread != "") {

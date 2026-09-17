@@ -18,6 +18,7 @@ import (
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/ask"
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -78,14 +79,14 @@ func runDoctor(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (exitCode int) {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		doctorCommand,
 		"usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures",
 		stderr,
 	)
 	verbose := flags.Bool("verbose", false, "write raw dependency probe output under tmp/")
 	skipHarvest := flags.Bool("skip-harvest", false, "exclude the optional harvestpy runtime from health")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -129,7 +130,7 @@ func runDoctor(
 		fmt.Fprintf(stdout, "doctor: unhealthy database: %v\n", err)
 		return 3
 	}
-	defer func() { closeCommandResource(database, "doctor: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "doctor: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 	pathWarnings := pfmPathWarnings(resolved.Home, os.Getenv("PATH"))
 	for _, warning := range pathWarnings {
@@ -1440,7 +1441,7 @@ func printDoctorConfig(stdout io.Writer, runtime commandRuntime) {
 		fmt.Fprintf(
 			stdout,
 			"doctor: config %s=%t (%s)\n",
-			mcpServerKey(name),
+			config.MCPServerKey(name),
 			runtime.Config.MCPServers[name].Enabled,
 			runtime.Config.MCPServerSource(name),
 		)
@@ -1457,14 +1458,6 @@ func printDoctorConfig(stdout io.Writer, runtime commandRuntime) {
 		runtime.Config.Harvester.Path,
 		runtime.Config.Harvester.Exists,
 	)
-}
-
-// mcpServerKey names where a registered server's enabled flag is configured.
-func mcpServerKey(name string) string {
-	if name == harvesterServer {
-		return "harvester.enabled"
-	}
-	return "mcp.servers." + name + ".enabled"
 }
 
 // retiredHarvesterEnv maps every environment variable the harvester used to

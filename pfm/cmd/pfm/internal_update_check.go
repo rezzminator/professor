@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
@@ -33,10 +34,10 @@ func professorUpdateCachePath(runtime commandRuntime) string {
 }
 
 func cachedProfessorUpdateRow(runtime commandRuntime) (compose.Row, bool) {
-	if strings.TrimSpace(version) == "" || version == developmentVersion {
+	if !runtime.IsRelease() {
 		return compose.Row{}, false
 	}
-	notice, found, err := updatecheck.Read(professorUpdateCachePath(runtime), version)
+	notice, found, err := updatecheck.Read(professorUpdateCachePath(runtime), runtime.Version)
 	if err != nil || !found {
 		return compose.Row{}, false
 	}
@@ -57,7 +58,7 @@ func cachedProfessorUpdateRow(runtime commandRuntime) (compose.Row, bool) {
 // The child owns every network and cache error; the picker neither waits for
 // it nor emits a warning that could corrupt the active alternate-screen frame.
 func triggerProfessorUpdateCheck(runtime commandRuntime) {
-	if strings.TrimSpace(version) == "" || version == developmentVersion {
+	if !runtime.IsRelease() {
 		return
 	}
 	executable, err := os.Executable()
@@ -81,7 +82,7 @@ func triggerProfessorUpdateCheck(runtime commandRuntime) {
 		executable,
 		internalCommand, "update-check",
 		"--cache", professorUpdateCachePath(runtime),
-		"--current", version,
+		"--current", runtime.Version,
 		"--url", latestURL,
 	)
 	command.Stdin = null
@@ -92,7 +93,7 @@ func triggerProfessorUpdateCheck(runtime commandRuntime) {
 }
 
 func runInternalUpdateCheck(args []string, stderr io.Writer) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"internal update-check",
 		"usage: pfm internal update-check --cache PATH --current vX.Y.Z --url URL",
 		stderr,
@@ -100,7 +101,7 @@ func runInternalUpdateCheck(args []string, stderr io.Writer) int {
 	cache := flags.String("cache", "", "update cache path")
 	current := flags.String("current", "", "installed pfm version")
 	latestURL := flags.String("url", professorLatestReleaseURL, "latest release redirect")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *cache == "" || *current == "" || *latestURL == "" {

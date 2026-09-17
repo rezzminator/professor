@@ -9,6 +9,7 @@ import (
 	"os"
 
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/naming"
@@ -22,10 +23,10 @@ import (
 // caller can switch to this binary without reading differently. --json adds
 // the engine identity for callers that want more than the handle.
 func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(whoamiCommand, "usage: pfm whoami [--json | --label]", stderr)
+	flags := cli.NewFlagSet(whoamiCommand, "usage: pfm whoami [--json | --label]", stderr)
 	asJSON := flags.Bool(jsonFormat, false, "print the full identity as JSON")
 	asLabel := flags.Bool("label", false, "print the chat label, falling back to its session")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || (*asJSON && *asLabel) {

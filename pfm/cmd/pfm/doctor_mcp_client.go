@@ -74,11 +74,16 @@ func printClaudeRegistryRows(stdout io.Writer, registries []installer.ClaudeRegi
 	anyPFM := false
 	for _, registry := range registries {
 		out := outcome{registry: registry}
-		for _, report := range installer.InspectClaudeServers(registry.Path, port, harvesterServer, chatCommand) {
+		for _, report := range installer.InspectClaudeServers(
+			registry.Path,
+			port,
+			config.MCPServerHarvester,
+			config.MCPServerChat,
+		) {
 			switch report.Name {
-			case harvesterServer:
+			case config.MCPServerHarvester:
 				out.harvester = report.State
-			case chatCommand:
+			case config.MCPServerChat:
 				out.chat = report.State
 			}
 			if report.Error != nil {

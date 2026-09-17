@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 )
@@ -28,7 +29,7 @@ const (
 // was writing by hand — a poll loop over `last` that cannot tell a new answer
 // from the previous one, which is the bug this verb exists to delete.
 func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat ask",
 		"usage: pfm chat ask [--timeout SECS] [--settle SECS] [--now] "+
 			"[--json] [--progress] <name> <message>",
@@ -42,7 +43,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...command
 	// Only the flags BEFORE the name are parsed, exactly as `inject` does it:
 	// a message may legitimately start with a dash, and an order silently
 	// eaten as a flag is an order never delivered.
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() < 2 || *timeout < 0 || *settle < 0 {

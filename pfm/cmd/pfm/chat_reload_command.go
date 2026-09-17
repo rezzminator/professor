@@ -838,7 +838,7 @@ func reloadBirth(
 		if engine == pfmengine.Codex {
 			account = accountForCodexHome(machine, env["CODEX_HOME"])
 		} else {
-			account = accountForConfig(machine, env["CLAUDE_CONFIG_DIR"])
+			account = machine.AccountForConfigDir(env["CLAUDE_CONFIG_DIR"])
 			cache = env["FORCE_PROMPT_CACHING_5M"] != "1"
 		}
 		return account, cache, nil
@@ -848,7 +848,7 @@ func reloadBirth(
 	if engine == pfmengine.Codex {
 		account = accountForCodexHome(machine, os.Getenv("CODEX_HOME"))
 	} else {
-		account = accountForConfig(machine, os.Getenv("CLAUDE_CONFIG_DIR"))
+		account = machine.AccountForConfigDir(os.Getenv("CLAUDE_CONFIG_DIR"))
 	}
 	return account, cache, nil
 }
@@ -863,34 +863,6 @@ func reloadEngineLabel(id pfmengine.ID) string {
 		return "unknown-engine"
 	}
 	return pfmengine.MustLookup(id).Short
-}
-
-func accountForConfig(machine pfmconfig.Config, config string) int {
-	if len(machine.Accounts) == 0 {
-		return 1
-	}
-	if config == "" {
-		for _, account := range machine.Accounts {
-			if account.Implicit {
-				return account.ID
-			}
-		}
-		return machine.Accounts[0].ID
-	}
-	if resolved, err := filepath.EvalSymlinks(config); err == nil {
-		config = resolved
-	}
-	config = filepath.Clean(config)
-	for _, account := range machine.Accounts {
-		candidate := filepath.Clean(account.ConfigDir)
-		if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
-			candidate = resolved
-		}
-		if config == candidate {
-			return account.ID
-		}
-	}
-	return machine.Accounts[0].ID
 }
 
 func accountForCodexHome(machine pfmconfig.Config, home string) int {

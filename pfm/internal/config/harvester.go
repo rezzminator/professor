@@ -509,7 +509,7 @@ func validateHTTPURL(value string, allowPath bool) error {
 // MCPServerSource reports where a registered server's enabled flag came from.
 // The harvester's lives in harvester.config.json.
 func (config Config) MCPServerSource(name string) Source {
-	if name == mcpServerHarvester {
+	if name == MCPServerHarvester {
 		return config.Source("harvester.enabled")
 	}
 	return config.Source("mcp.servers." + name + ".enabled")

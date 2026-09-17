@@ -13,12 +13,6 @@ import (
 // one shape lives in internal/config (Runtime, LoadRuntime).
 type commandRuntime = pfmconfig.Runtime
 
-// optionalCommandRuntime is a branch's trailing runtime, or the default one
-// loaded now.
-func optionalCommandRuntime(runtimes []commandRuntime) (commandRuntime, error) {
-	return pfmconfig.RuntimeOrDefault(firstRuntime(runtimes))
-}
-
 // firstRuntime is a branch's optional trailing runtime as the pointer the
 // package APIs take; nil hands each package its own default.
 func firstRuntime(runtimes []commandRuntime) *commandRuntime {

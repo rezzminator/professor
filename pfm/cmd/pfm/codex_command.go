@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/codexgen"
 )
 
@@ -41,7 +42,7 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 		return 2
 	}
 
-	flags := newFlagSet("codex "+args[0], "usage: pfm codex "+args[0]+" [repo-root] [options]", stderr)
+	flags := cli.NewFlagSet("codex "+args[0], "usage: pfm codex "+args[0]+" [repo-root] [options]", stderr)
 	home := flags.String("home", "", "Codex global source/output home")
 	var models, excludeDirs, excludeProjects, neverRegister repeatString
 	flags.Var(&models, "model", "model alias mapping alias=value; repeatable")
@@ -52,7 +53,7 @@ func runCodex(args []string, stdout, stderr io.Writer, runtime commandRuntime) i
 	flags.Var(&neverRegister, "never-register", "do not register an agent; repeatable")
 	suffixMode := flags.String("suffix-mode", "", "agent suffix mode")
 	suffixPrefix := flags.String("suffix-prefix", "", "agent suffix prefix")
-	positionals, code, ok := parseFlagsAnywhere(flags, args[1:])
+	positionals, code, ok := cli.ParseFlagsAnywhere(flags, args[1:])
 	if !ok {
 		return code
 	}
@@ -144,9 +145,9 @@ func printCodexUsage(w io.Writer) {
 // repository root: its source and destinations are all anchored on --home
 // (default: this process's resolved HOME).
 func runCodexAgents(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("codex agents", "usage: pfm codex agents [--home PATH]", stderr)
+	flags := cli.NewFlagSet("codex agents", "usage: pfm codex agents [--home PATH]", stderr)
 	home := flags.String("home", "", "host HOME whose global agents get compiled and installed")
-	positionals, code, ok := parseFlagsAnywhere(flags, args)
+	positionals, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}

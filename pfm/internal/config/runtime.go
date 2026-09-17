@@ -7,6 +7,8 @@ import (
 	"hostops/pfm/internal/paths"
 )
 
+const DevelopmentVersion = "dev"
+
 // Runtime is the resolved machine policy for one pfm process: the effective
 // config and the filesystem locations it implies. It is loaded exactly once
 // per invocation and then passed, immutable, to every package that consumes
@@ -25,6 +27,19 @@ type Runtime struct {
 	Paths          paths.Values
 	ConfigError    error
 	ConfigExplicit bool
+	Version        string
+}
+
+func (runtime Runtime) IsRelease() bool {
+	return runtime.Version != "" && runtime.Version != DevelopmentVersion
+}
+
+// OptionalRuntime returns the caller's first runtime, or loads the default.
+func OptionalRuntime(runtimes []Runtime) (Runtime, error) {
+	if len(runtimes) != 0 {
+		return runtimes[0], nil
+	}
+	return LoadRuntime("")
 }
 
 // LoadRuntime resolves paths, loads the config at configPath (the default

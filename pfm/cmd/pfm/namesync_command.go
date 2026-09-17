@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
@@ -26,9 +27,9 @@ import (
 // writer of a window name however this command is reached — a systemd path
 // unit on a codex rename, a timer, or a picker refresh.
 func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
-	flags := newFlagSet("name-sync", "usage: pfm name-sync [--dry-run]", stderr)
+	flags := cli.NewFlagSet("name-sync", "usage: pfm name-sync [--dry-run]", stderr)
 	dryRun := flags.Bool("dry-run", false, "report the renames without applying them")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -40,7 +41,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	defer func() { closeCommandResource(database, "pfm name-sync: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm name-sync: close database", stderr, &exitCode) }()
 	ctx := context.Background()
 
 	// A delta index first: a codex rename lands in session_index.jsonl or the

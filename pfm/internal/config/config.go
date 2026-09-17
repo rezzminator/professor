@@ -21,11 +21,10 @@ import (
 const Version = 2
 
 const (
-	mcpServerHarvester = "harvester"
-	jsonKeyEnabled     = "enabled"
-	engineKeyBinary    = "binary"
-	engineKeyYolo      = "yolo"
-	jsonKeyPort        = "port"
+	jsonKeyEnabled  = "enabled"
+	engineKeyBinary = "binary"
+	engineKeyYolo   = "yolo"
+	jsonKeyPort     = "port"
 )
 
 type Source string
@@ -273,7 +272,7 @@ type Config struct {
 func productionMCPServers() map[string]MCPServer {
 	return map[string]MCPServer{
 		"chat":             {Enabled: false},
-		mcpServerHarvester: {Enabled: false},
+		MCPServerHarvester: {Enabled: false},
 	}
 }
 
@@ -496,12 +495,12 @@ func defaultsWithMCPServers(
 	servers := make(map[string]MCPServer, len(registered))
 	for name, server := range registered {
 		servers[name] = server
-		if name != mcpServerHarvester {
+		if name != MCPServerHarvester {
 			sources["mcp.servers."+name+".enabled"] = SourceDefault
 		}
 	}
 	harvester := DefaultHarvester()
-	if server, found := registered[mcpServerHarvester]; found {
+	if server, found := registered[MCPServerHarvester]; found {
 		harvester.Enabled = server.Enabled
 	}
 	for _, key := range harvesterSourceKeys {
@@ -909,7 +908,7 @@ func loadWithMCPServers(
 					"mcp.servers."+name+".enabled",
 				)
 			}
-			if name == mcpServerHarvester {
+			if name == MCPServerHarvester {
 				// Pre-split layout: the flag now lives in harvester.config.json.
 				// Honored until `pfm install` migrates it (PlanMigration).
 				enabled := *server.Enabled
@@ -997,8 +996,8 @@ func finishHarvester(result *Config, home string, registered map[string]MCPServe
 	if err := loadHarvester(result, home, legacyEnabled); err != nil {
 		return err
 	}
-	if _, found := registered[mcpServerHarvester]; found {
-		result.MCP.Servers[mcpServerHarvester] = MCPServer{Enabled: result.Harvester.Enabled}
+	if _, found := registered[MCPServerHarvester]; found {
+		result.MCP.Servers[MCPServerHarvester] = MCPServer{Enabled: result.Harvester.Enabled}
 	}
 	result.MCPServers = cloneMCPServers(result.MCP.Servers)
 	if result.Harvester.External.Enabled && result.Harvester.External.Port == result.MCP.HTTP.Port {
@@ -1477,7 +1476,7 @@ func SetMCPServer(config Config, name string, enabled bool) (bool, error) {
 	if !registered {
 		return false, fmt.Errorf("unknown MCP server %q", name)
 	}
-	if name == mcpServerHarvester {
+	if name == MCPServerHarvester {
 		return SetHarvesterEnabled(config, enabled)
 	}
 	if server.Enabled == enabled {
@@ -1648,7 +1647,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 	}
 	servers := make(map[string]any, len(config.MCP.Servers))
 	for name, server := range config.MCP.Servers {
-		if name == mcpServerHarvester {
+		if name == MCPServerHarvester {
 			continue // lives in harvester.config.json (MarshalHarvester)
 		}
 		servers[name] = map[string]any{jsonKeyEnabled: server.Enabled}

@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"hostops/pfm/internal/agentopen"
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/fleet"
 )
 
@@ -18,7 +19,7 @@ func runInternalAgentOpen(
 	stderr io.Writer,
 	runtime commandRuntime,
 ) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"internal agent-open",
 		"usage: pfm internal agent-open --id id --cwd path [--config path]",
 		stderr,
@@ -26,7 +27,7 @@ func runInternalAgentOpen(
 	id := flags.String("id", "", "session id")
 	cwd := flags.String("cwd", "", "project directory")
 	configDir := flags.String(configCommand, "", "owning Claude config directory")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *id == "" || *cwd == "" {
@@ -68,7 +69,7 @@ func runInternalAgentOpen(
 			CWD:            *cwd,
 			OwningConfig:   *configDir,
 			PrimaryAccount: primary,
-			Cache1H:        initialCache1H(runtime.Config, primary),
+			Cache1H:        runtime.Config.InitialCache1H(primary),
 		},
 	); err != nil {
 		var outside *agentopen.OutsidePFMError

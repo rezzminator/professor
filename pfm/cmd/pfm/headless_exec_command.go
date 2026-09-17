@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"hostops/pfm/internal/cli"
 	pfmengine "hostops/pfm/internal/engine"
 	headlessrun "hostops/pfm/internal/headless/run"
 )
@@ -25,7 +26,7 @@ const (
 )
 
 func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("headless exec", "usage: pfm headless exec [options] [-- ENGINE_ARGS...]\n"+
+	flags := cli.NewFlagSet("headless exec", "usage: pfm headless exec [options] [-- ENGINE_ARGS...]\n"+
 		"  --engine claude|codex --model MODEL --effort EFFORT --account ID\n"+
 		"  --prompt TEXT | --prompt-file FILE | stdin\n"+
 		"  --files FILE... --labels LABEL... --task TEXT | --task-file FILE\n"+
@@ -88,7 +89,7 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		}
 	}
 	args, hasFiles := expandHeadlessFileArgs(flags, args)
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *account < 0 || math.IsNaN(*timeout) || math.IsInf(*timeout, 0) || *timeout < 0 ||

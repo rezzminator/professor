@@ -13,6 +13,7 @@ import (
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/agentrole"
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
@@ -42,7 +43,7 @@ func runRun(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat new",
 		"usage: pfm chat new --name NAME [--engine cc|cx] [--cwd DIR] "+
 			"[--account N] [--1h] [--model M] [--effort E] [--prompt-file PATH] [--role ROLE] "+
@@ -67,7 +68,7 @@ func runRun(
 	settle := flags.Int("settle", askSettleSeconds, "with --await: seconds of quiet before an answer is finished")
 	progress := flags.Bool("progress", false, "with --await: print the chat's turns to stderr while waiting")
 	attach := flags.Bool("attach", false, "attach this terminal after launch")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	positional := flags.Args()

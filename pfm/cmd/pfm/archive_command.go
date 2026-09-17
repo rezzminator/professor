@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/archive"
+	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
@@ -47,7 +48,7 @@ func (adapter killStoreAdapter) Unkill(ctx context.Context, id string) error {
 // is recorded in the manifest, and --restore puts one back exactly where it
 // came from. Nothing here deletes anything, ever.
 func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		archiveCommand,
 		"usage: pfm archive [--apply] [--subagents [--older-than DAYS]] [--restore id] [--prune-orphans]",
 		stderr,
@@ -66,7 +67,7 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	restore := flags.String("restore", "", "put one archived chat back")
 	pruneOrphans := flags.Bool("prune-orphans", false, "report orphaned kill rows")
 	yes := flags.Bool("yes", false, "with --prune-orphans, delete the reported rows")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 || *olderThan < 0 || (*yes && !*pruneOrphans) ||
@@ -91,7 +92,7 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		if code != 0 {
 			return code
 		}
-		defer func() { closeCommandResource(database, "pfm archive: close database", stderr, &exitCode) }()
+		defer func() { cli.CloseResource(database, "pfm archive: close database", stderr, &exitCode) }()
 		return pruneOrphanedKills(
 			context.Background(), database, *yes || *apply, stdout, stderr,
 		)
@@ -101,7 +102,7 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	if code != 0 {
 		return code
 	}
-	defer func() { closeCommandResource(database, "pfm archive: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm archive: close database", stderr, &exitCode) }()
 	runner, err := archive.New(archive.Dependencies{
 		Paths:            resolved,
 		Kills:            killStoreAdapter{manager: manager},

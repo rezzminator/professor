@@ -8,6 +8,7 @@ import (
 	"time"
 
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/inject"
 )
 
@@ -25,7 +26,7 @@ const chatKeysSettle = 400 * time.Millisecond
 func validKey(key string) bool { return pfmchat.KeyValid(key) }
 
 func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat keys", chatKeysUsage, stderr)
+	flags := cli.NewFlagSet("chat keys", chatKeysUsage, stderr)
 	delay := flags.Duration(
 		"delay", chatKeysDefaultDelay, "pause between keys (e.g. 250ms)",
 	)
@@ -35,7 +36,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	capture := flags.Bool(
 		"capture", false, "print the pane after the keys land",
 	)
-	rest, code, ok := parseFlagsAnywhere(flags, args)
+	rest, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}

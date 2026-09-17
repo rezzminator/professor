@@ -14,6 +14,24 @@ import (
 	"hostops/pfm/internal/testjail"
 )
 
+func clearBranchCache1HEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"CC_ARM_1H", "ENABLE_PROMPT_CACHING_1H"} {
+		original, had := os.LookupEnv(key)
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset %s: %v", key, err)
+		}
+		t.Cleanup(func() {
+			if had {
+				if err := os.Setenv(key, original); err != nil {
+					t.Errorf("restore %s: %v", key, err)
+				}
+			}
+		})
+	}
+	t.Setenv("CLAUDECODE", "")
+}
+
 // branchInheritJail is the shared fixture for the "a fork inherits its
 // parent's account and cache TTL" regression suite: two configured Claude
 // accounts — 1 is the machine primary (M), 7 is the account the fork's
@@ -370,7 +388,7 @@ func TestChatBranchNonLiveParentTakesConfiguredDefaultNotFalse(t *testing.T) {
 	if err := os.WriteFile(jail.configPath, []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	clearCache1HEnv(t)
+	clearBranchCache1HEnv(t)
 
 	const parentID = "a5000000-5555-4555-8555-555555555555"
 	const branchSocket = "probe-branch-cache-default"

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -33,7 +34,7 @@ func installHarvestProvisioner() installer.HarvestProvisioner {
 }
 
 func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		installCommand,
 		"usage: pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]",
 		stderr,
@@ -48,7 +49,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	skipEngine := flags.String("skip-engine", "", "skip one optional engine (supported: codex)")
 	skipThemes := flags.Bool("skip-themes", false, "skip Claude Code themes, source-fetched and bundled")
 	configDir := flags.String("config-dir", "", "target config directory instead of ~/.claude")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -68,7 +69,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	if *yes {
 		mode = installer.ModeApply
 	}
-	runtime, runtimeErr := optionalCommandRuntime(runtimes)
+	runtime, runtimeErr := pfmconfig.OptionalRuntime(runtimes)
 	if runtimeErr != nil {
 		fmt.Fprintf(stderr, "pfm install: resolve dependency config: %v\n", runtimeErr)
 		return 1
@@ -183,7 +184,7 @@ func migrateMachineConfig(mode installer.Mode, stdout, stderr io.Writer, runtime
 
 func professorThemeManifestURL(currentVersion string) string {
 	reference := strings.TrimSpace(currentVersion)
-	if reference == "" || reference == developmentVersion {
+	if reference == "" || reference == pfmconfig.DevelopmentVersion {
 		reference = "main"
 	}
 	return "https://raw.githubusercontent.com/" + updatecheck.ProfessorRepo + "/" + reference + "/templates/themes/sources.json"

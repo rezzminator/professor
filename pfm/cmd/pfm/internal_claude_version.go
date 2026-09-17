@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/installer"
 )
 
@@ -27,8 +28,8 @@ import (
 // macOS to identify each running process's image, and this command only
 // ever wants the newest build's path, never which builds are live.
 func runInternalClaudeVersion(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("internal claude-version", "usage: pfm internal claude-version", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("internal claude-version", "usage: pfm internal claude-version", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {

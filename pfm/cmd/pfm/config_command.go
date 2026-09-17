@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 )
@@ -50,9 +51,9 @@ func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 }
 
 func runConfigInit(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet("config init", "usage: pfm config init [--force]", stderr)
+	flags := cli.NewFlagSet("config init", "usage: pfm config init [--force]", stderr)
 	force := flags.Bool("force", false, "overwrite an existing config")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -199,7 +200,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		fmt.Fprintf(
 			stdout,
 			"config %s=%t (%s)\n",
-			mcpServerKey(name),
+			pfmconfig.MCPServerKey(name),
 			config.MCPServers[name].Enabled,
 			config.MCPServerSource(name),
 		)
@@ -229,7 +230,7 @@ func printResolvedHarvesterConfig(stdout io.Writer, config pfmconfig.Config) {
 		return
 	}
 	values := map[string]string{}
-	flattenHarvesterConfig(harvesterServer, tree, values)
+	flattenHarvesterConfig(pfmconfig.MCPServerHarvester, tree, values)
 	for _, key := range pfmconfig.HarvesterSourceKeys() {
 		fmt.Fprintf(stdout, "config %s=%s (%s)\n", key, values[key], config.Source(key))
 	}

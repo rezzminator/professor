@@ -1,6 +1,10 @@
 package config
 
-import pfmengine "hostops/pfm/internal/engine"
+import (
+	"path/filepath"
+
+	pfmengine "hostops/pfm/internal/engine"
+)
 
 // Account projections: the per-engine views of the roster that the fleet scan,
 // the picker and the runtime loader each need. They live here, beside the
@@ -66,6 +70,35 @@ func (config Config) PrimaryAccountFor(engine pfmengine.ID, claudePrimary int) i
 	default:
 		return claudePrimary
 	}
+}
+
+// AccountForConfigDir returns the Claude account represented by configDir.
+func (config Config) AccountForConfigDir(configDir string) int {
+	if len(config.Accounts) == 0 {
+		return 1
+	}
+	if configDir == "" {
+		for _, account := range config.Accounts {
+			if account.Implicit {
+				return account.ID
+			}
+		}
+		return config.Accounts[0].ID
+	}
+	if resolved, err := filepath.EvalSymlinks(configDir); err == nil {
+		configDir = resolved
+	}
+	configDir = filepath.Clean(configDir)
+	for _, account := range config.Accounts {
+		candidate := filepath.Clean(account.ConfigDir)
+		if resolved, err := filepath.EvalSymlinks(candidate); err == nil {
+			candidate = resolved
+		}
+		if configDir == candidate {
+			return account.ID
+		}
+	}
+	return config.Accounts[0].ID
 }
 
 // OpenCodeAccountIDs lists every OpenCode account id, in roster order.

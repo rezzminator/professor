@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 
+	"hostops/pfm/internal/cli"
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/index"
 )
 
@@ -19,12 +21,12 @@ import (
 // the clear from there. Every unrelated or malformed payload returns 0
 // without output.
 func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"internal clear-kill",
 		"usage: pfm internal clear-kill < hook-payload.json",
 		stderr,
 	)
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -66,7 +68,7 @@ func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...
 	if !found {
 		return 0
 	}
-	runtime, runtimeErr := optionalCommandRuntime(runtimes)
+	runtime, runtimeErr := pfmconfig.OptionalRuntime(runtimes)
 	if runtimeErr != nil {
 		fmt.Fprintf(stderr, "pfm internal clear-kill: config unavailable (fail-open): %v\n", runtimeErr)
 		return 0

@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/cli"
+	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
@@ -66,8 +68,8 @@ func runChatOpen(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (exitCode int) {
-	flags := newFlagSet("chat open", "usage: pfm chat open <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat open", "usage: pfm chat open <target>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -82,9 +84,9 @@ func runChatOpen(
 }
 
 func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
+	flags := cli.NewFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
 	exit := flags.Bool("exit", false, "gracefully close after killing")
-	targets, code, ok := parseFlagsAnywhere(flags, args)
+	targets, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -181,7 +183,7 @@ func runResolvedChatKill(
 	if code != 0 {
 		return code
 	}
-	defer func() { closeCommandResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
 	target, err := manager.Kill(context.Background(), kill.Request{
 		ID:          chat.ID,
 		Engine:      chat.Engine,
@@ -210,8 +212,8 @@ func runResolvedChatKill(
 }
 
 func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat unkill", "usage: pfm chat unkill <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat unkill", "usage: pfm chat unkill <target>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -234,8 +236,8 @@ func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandR
 }
 
 func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat resolve", "usage: pfm chat resolve <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat resolve", "usage: pfm chat resolve <target>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -273,8 +275,8 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 }
 
 func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat capture", "usage: pfm chat capture <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat capture", "usage: pfm chat capture <target>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -316,15 +318,15 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 }
 
 func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat recover", "usage: pfm chat recover <thread-id|rollout-path>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat recover", "usage: pfm chat recover <thread-id|rollout-path>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()
 		return 2
 	}
-	_, err := optionalCommandRuntime(runtimes)
+	_, err := pfmconfig.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat recover: load config: %v\n", err)
 		return 1
@@ -404,8 +406,8 @@ func runChatNameWith(
 	deliver chatNameDelivery,
 	runtimes ...commandRuntime,
 ) int {
-	flags := newFlagSet("chat name", "usage: pfm chat name <target> <name>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat name", "usage: pfm chat name <target> <name>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() < 2 {
@@ -461,8 +463,8 @@ func applyChatName(
 }
 
 func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat end", "usage: pfm chat end <target>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat end", "usage: pfm chat end <target>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -494,7 +496,7 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	// exactly what this exists to prevent, but the chat is dead either way,
 	// so a removal failure is a visible WARNING here, never a reason to
 	// report `pfm chat end` itself as failed.
-	if endRuntime, err := optionalCommandRuntime(runtimes); err != nil {
+	if endRuntime, err := pfmconfig.OptionalRuntime(runtimes); err != nil {
 		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not resolve paths to remove its role re-arm crumb: %v\n", err)
 	} else if err := rearm.RemoveCrumb(endRuntime.Paths.SIDDir, filepath.Base(chat.Socket), chat.Pane); err != nil {
 		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not remove role re-arm crumb: %v\n", err)

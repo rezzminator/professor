@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"hostops/pfm/internal/action"
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/compose"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
@@ -67,14 +68,14 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 }
 
 func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"internal launch",
 		"usage: pfm internal launch --real /absolute/path [--cwd DIR] -- [claude arguments]",
 		stderr,
 	)
 	realBinary := flags.String("real", "", "absolute path to the real Claude binary")
 	cwd := flags.String("cwd", "", "working directory for the Claude pane")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	arguments := append([]string(nil), flags.Args()...)

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/nudge"
@@ -37,13 +38,13 @@ func runStatuslineWithRuntime(
 	machine commandRuntime,
 ) int {
 	const statuslineHostEngine = pfmengine.Claude // pfm statusline is launched only by Claude Code's statusline hook; an environment that names no engine is that hook's
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"statusline",
 		"usage: pfm statusline [--refresh-gpt]",
 		stderr,
 	)
 	refreshCodex := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -160,8 +161,8 @@ func runUsageHookWithRuntime(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) int {
-	flags := newFlagSet("usage-hook", "usage: pfm usage-hook", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("usage-hook", "usage: pfm usage-hook", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {

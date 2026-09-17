@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/fleetdb"
 )
 
@@ -23,10 +24,10 @@ import (
 //   - --json always emits a JSON array, even when it is empty, since a script
 //     reading structured output needs `[]` rather than a prose sentence.
 func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
-	flags := newFlagSet("issues", "usage: pfm issues [--all] [--json]", stderr)
+	flags := cli.NewFlagSet("issues", "usage: pfm issues [--all] [--json]", stderr)
 	all := flags.Bool("all", false, "include closed issues, not only open ones")
 	asJSON := flags.Bool(jsonFormat, false, "print issues as a JSON array")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -35,7 +36,7 @@ func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 	}
 	ctx := context.Background()
 	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
-	defer func() { closeCommandResource(state, "pfm issues: close state", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(state, "pfm issues: close state", stderr, &exitCode) }()
 
 	issues, err := state.Issues(ctx, *all)
 	if err != nil {

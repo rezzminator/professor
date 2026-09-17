@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/cli"
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/professor"
 )
@@ -44,13 +46,13 @@ type initCopy struct {
 }
 
 func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		initCommand,
 		"usage: pfm init [dir] [--force]",
 		stderr,
 	)
 	force := flags.Bool("force", false, "overwrite colliding scaffold files")
-	positional, code, ok := parseFlagsAnywhere(flags, args)
+	positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -67,7 +69,7 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		fmt.Fprintf(stderr, "pfm init: resolve target: %v\n", err)
 		return 1
 	}
-	runtime, err := optionalCommandRuntime(runtimes)
+	runtime, err := pfmconfig.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm init: config: %v\n", err)
 		return 1

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/action"
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
@@ -33,7 +34,7 @@ func runLS(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (exitCode int) {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"ls",
 		"usage: pfm ls [-a|--all] [--plain|--tsv] [id] | pfm ls --killed [--tsv]",
 		stderr,
@@ -52,7 +53,7 @@ func runLS(
 		"auto",
 		"vscode-safe cosmos rendering: auto|on|off (auto arms when TERM_PROGRAM=vscode)",
 	)
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() > 1 ||
@@ -96,7 +97,7 @@ func runLS(
 		fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 		return 1
 	}
-	defer func() { closeCommandResource(database, "pfm ls: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm ls: close database", stderr, &exitCode) }()
 	sharedState := fleetdb.OpenSharedState(ctx, runtime.Paths)
 	defer func() {
 		if err := sharedState.Close(); err != nil {
@@ -107,7 +108,7 @@ func runLS(
 	request := scanRequest{
 		View: view,
 		// Fleet-wide picker: no chat chosen yet, so no per-account override applies.
-		Cache1H: initialCache1H(runtime.Config, 0),
+		Cache1H: runtime.Config.InitialCache1H(0),
 		NoSky:   *noSky,
 		Safe:    *safe,
 		Runtime: &runtime,
@@ -339,15 +340,6 @@ func boolCount(values ...bool) int {
 	return count
 }
 
-func closeCommandResource(closer io.Closer, label string, stderr io.Writer, exitCode *int) {
-	if err := closer.Close(); err != nil {
-		fmt.Fprintf(stderr, "%s: %v\n", label, err)
-		if *exitCode == 0 {
-			*exitCode = 1
-		}
-	}
-}
-
 func openID(
 	ctx context.Context,
 	id string,
@@ -359,7 +351,7 @@ func openID(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
-	defer func() { closeCommandResource(database, "pfm chat open: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm chat open: close database", stderr, &exitCode) }()
 	// READ-ONLY: open needs to FIND one row, never to persist a gather pass.
 	// A writing scan here wedges whenever the caller already holds the fleet
 	// store open in the same process — which is exactly what made chat_open
@@ -383,7 +375,7 @@ func openID(
 				ctx,
 				*row,
 				runtime.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), primary),
-				initialCache1H(runtime.Config, primary),
+				runtime.Config.InitialCache1H(primary),
 				stdout,
 				stderr,
 				runtime,
@@ -492,28 +484,6 @@ func freshEngineSocket(id pfmengine.ID) string {
 		os.Getpid(),
 		binary.BigEndian.Uint16(randomBytes[:]),
 	)
-}
-
-// initialCache1H resolves the prompt-cache TTL for a freshly launched chat.
-// Config sets the default; CC_ARM_1H or ENABLE_PROMPT_CACHING_1H, when
-// PRESENT in the environment at all (any value, not just "1"), is an
-// explicit override that wins over config. CC_ARM_1H is accepted from
-// existing automation; native actions carry the chosen TTL in ClaudeSpawn.
-//
-// account is the Claude account the chat will be born under, or 0 when the
-// caller has no account context yet (the fleet-wide picker default).
-// EffectiveClaude resolves an unknown account to the top-level posture, so
-// 0 is the honest way to say "no per-account override applies here" — the
-// accounts[N].claude.cache1h key is otherwise decoded and marshalled but
-// never read, a knob that reports "set" while changing nothing.
-func initialCache1H(config pfmconfig.Config, account int) bool {
-	if value, ok := os.LookupEnv("CC_ARM_1H"); ok {
-		return value == "1"
-	}
-	if value, ok := os.LookupEnv("ENABLE_PROMPT_CACHING_1H"); ok {
-		return value == "1" && os.Getenv("CLAUDECODE") == ""
-	}
-	return config.EffectiveClaude(account).Cache1H
 }
 
 // reportKills is the receipt for hidden-state writes made while the picker was
@@ -648,14 +618,14 @@ func rebootRow(
 }
 
 func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		indexCommand,
 		"usage: pfm index [--full] [--progress]",
 		stderr,
 	)
 	full := flags.Bool("full", false, "reparse every indexed file")
 	progress := flags.Bool("progress", false, "report start and elapsed time to stderr")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -667,7 +637,7 @@ func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (
 		fmt.Fprintf(stderr, "pfm index: %v\n", err)
 		return 1
 	}
-	defer func() { closeCommandResource(database, "pfm index: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm index: close database", stderr, &exitCode) }()
 	indexer, err := fleetindex.NewWithRoots(database, runtime.Paths, runtime.Paths.Roots)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm index: %v\n", err)

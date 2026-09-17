@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/ask"
+	"hostops/pfm/internal/cli"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/harvest"
 	"hostops/pfm/internal/harvestmcp"
@@ -44,13 +45,13 @@ func runHarvesterMCP(args []string, _, stderr io.Writer, runtime commandRuntime)
 			return 2
 		}
 	}
-	flags := newFlagSet("mcp harvester serve", "usage: pfm mcp harvester serve [--transport stdio]", stderr)
+	flags := cli.NewFlagSet("mcp harvester serve", "usage: pfm mcp harvester serve [--transport stdio]", stderr)
 	transport := flags.String(
 		"transport",
 		"stdio",
 		"MCP transport (stdio only; HTTP gateways are served by `pfm mcp serve`)",
 	)
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
@@ -91,11 +92,15 @@ func runHarvest(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 	if askArgs, ok := harvestAskAlias(args); ok {
 		return runHarvestAsk(askArgs, stdout, stderr, runtime)
 	}
-	flags := newFlagSet("harvest", "usage: pfm harvest [--refresh] [--size-only] [--json] <url|doi|path>...", stderr)
+	flags := cli.NewFlagSet(
+		"harvest",
+		"usage: pfm harvest [--refresh] [--size-only] [--json] <url|doi|path>...",
+		stderr,
+	)
 	refresh := flags.Bool("refresh", false, "bypass the cache and fetch fresh content")
 	sizeOnly := flags.Bool("size-only", false, "fetch and cache content but print only size and cache path")
 	jsonOutput := flags.Bool(jsonFormat, false, "print machine-readable result objects")
-	sources, code, ok := parseFlagsAnywhere(flags, args)
+	sources, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -154,7 +159,7 @@ func harvestAskAlias(args []string) ([]string, bool) {
 }
 
 func runHarvestAsk(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"harvest ask",
 		"usage: pfm harvest ask -p <prompt> [--engine claude|codex] [--model MODEL] [--effort EFFORT] [--refresh] <url|doi|path>...",
 		stderr,
@@ -165,7 +170,7 @@ func runHarvestAsk(args []string, stdout, stderr io.Writer, runtime commandRunti
 	model := flags.String("model", "", "override the configured ask model")
 	effort := flags.String("effort", "", "override the configured reasoning effort")
 	refresh := flags.Bool("refresh", false, "bypass the harvest cache")
-	sources, code, ok := parseFlagsAnywhere(flags, args)
+	sources, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}

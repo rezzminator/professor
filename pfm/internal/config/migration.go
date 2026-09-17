@@ -134,7 +134,7 @@ func PlanMigration(config Config) (Migration, error) {
 	if err != nil {
 		return Migration{}, err
 	}
-	if content, found := servers[mcpServerHarvester]; found {
+	if content, found := servers[MCPServerHarvester]; found {
 		var server rawMCPServer
 		if err := decodeStrict(content, &server); err != nil {
 			return Migration{}, fmt.Errorf("decode config %s mcp.servers.harvester: %w", config.Path, err)
@@ -274,7 +274,7 @@ func rewriteMigratedConfig(migration Migration) error {
 		if err != nil {
 			return err
 		}
-		delete(servers, mcpServerHarvester)
+		delete(servers, MCPServerHarvester)
 		if len(servers) == 0 {
 			delete(mcpObject, "servers")
 		} else {

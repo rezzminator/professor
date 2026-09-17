@@ -19,6 +19,7 @@ import (
 
 	"hostops/pfm/internal/action"
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
@@ -38,8 +39,8 @@ import (
 const branchAction = "branch"
 
 func runChatFind(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet("chat find", "usage: pfm chat find <excerpt-file>", stderr)
-	if code, ok := parseFlags(flags, args); !ok {
+	flags := cli.NewFlagSet("chat find", "usage: pfm chat find <excerpt-file>", stderr)
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 1 {
@@ -213,7 +214,7 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	closed := false
 	defer func() {
 		if !closed {
-			closeCommandResource(file, "pfm chat save: close target", stderr, &exitCode)
+			cli.CloseResource(file, "pfm chat save: close target", stderr, &exitCode)
 		}
 	}()
 	if _, err := fmt.Fprintf(
@@ -296,7 +297,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
 		return 1
 	}
-	defer func() { closeCommandResource(database, "pfm chat ls: close database", stderr, &exitCode) }()
+	defer func() { cli.CloseResource(database, "pfm chat ls: close database", stderr, &exitCode) }()
 	request := scanRequest{View: compose.AllView, ReadOnly: true}
 	if len(runtimes) != 0 {
 		request.Runtime = &runtimes[0]
@@ -395,7 +396,7 @@ func pathWithinDir(path, root string) bool {
 }
 
 func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat branch",
 		"usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] [--account N] [--name NAME] [name]",
 		stderr,
@@ -405,14 +406,14 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	requestedCWD := flags.String("cwd", "", "project directory for the detached fork")
 	account := flags.Int("account", 0, "configured engine account")
 	requestedName := flags.String("name", "", "detached fork name")
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if *requestedName != "" && flags.NArg() != 0 {
 		flags.Usage()
 		return 2
 	}
-	runtime, err := optionalCommandRuntime(runtimes)
+	runtime, err := pfmconfig.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: load config: %v\n", err)
 		return 1
@@ -709,12 +710,12 @@ type historyMessage struct {
 // script: read a chat's on-disk transcript as deep as its tail carries, not
 // bounded to a live pane's visible scrollback.
 func runChatHistory(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat history",
 		"usage: pfm chat history <sid-prefix|jsonl-path> [messages] [project-slug]",
 		stderr,
 	)
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() < 1 || flags.NArg() > 3 {

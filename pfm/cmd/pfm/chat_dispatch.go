@@ -12,6 +12,7 @@ import (
 	"time"
 
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -198,7 +199,7 @@ func reportTargetError(err error, name string, stdout, stderr io.Writer, asJSON 
 }
 
 func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat status",
 		"usage: pfm chat status <target> [--json] [--summary] [--ask] [--engine claude|codex] [--model MODEL]",
 		stderr,
@@ -212,7 +213,7 @@ func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...comm
 	)
 	summaryEngine := flags.String("engine", "", "override the configured ask engine")
 	summaryModel := flags.String("model", "", "override the configured ask model")
-	names, code, ok := parseFlagsAnywhere(flags, args)
+	names, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -266,7 +267,7 @@ func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...comm
 }
 
 func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat read",
 		"usage: pfm chat read <target> [--tail N] [--condensed] [--json]",
 		stderr,
@@ -274,7 +275,7 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 	tail := flags.Int("tail", 1, "how many entries to read, newest last")
 	condensed := flags.Bool("condensed", false, "one T/A/U line per entry")
 	asJSON := flags.Bool(jsonFormat, false, "emit a JSON array of entries")
-	names, code, ok := parseFlagsAnywhere(flags, args)
+	names, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -320,12 +321,12 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 }
 
 func runHeadlessLast(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat last",
 		"usage: pfm chat last <target>",
 		stderr,
 	)
-	names, code, ok := parseFlagsAnywhere(flags, args)
+	names, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -357,7 +358,7 @@ func runHeadlessLast(args []string, stdout, stderr io.Writer, runtimes ...comman
 }
 
 func runHeadlessStream(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat stream",
 		"usage: pfm chat stream <target> [--filter REGEX] [--margin N] "+
 			"[--from-start] [--raw] [--no-follow]",
@@ -368,7 +369,7 @@ func runHeadlessStream(args []string, stdout, stderr io.Writer, runtimes ...comm
 	fromStart := flags.Bool("from-start", false, "replay the transcript before following")
 	raw := flags.Bool("raw", false, "print full entry text instead of condensed lines")
 	noFollow := flags.Bool("no-follow", false, "drain what exists and exit")
-	names, code, ok := parseFlagsAnywhere(flags, args)
+	names, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}
@@ -418,7 +419,7 @@ func runHeadlessStream(args []string, stdout, stderr io.Writer, runtimes ...comm
 }
 
 func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat inject",
 		"usage: pfm chat inject [--force-now] [--then STEER]... [--file PATH] [--allow-unsigned] <target> <message>\n"+
 			"       `/compact` is refused here — use `pfm chat self-compact`",
@@ -432,10 +433,10 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 	flags.BoolVar(&retiredNoSig, "no-sig", false, "retired compatibility flag; signatures remain mandatory")
 	flags.BoolVar(&allowUnsigned, "allow-unsigned", false, "send even when no sender identity can be derived")
 	messageFile := flags.String("file", "", "read the message from a file")
-	var steers steerList
+	var steers cli.StringList
 	flags.Var(&steers, thenAction, "follow-up steer; repeat for a chain")
 	// Parse only flags before the name; the message may start with a dash.
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if retiredNoSig {
@@ -500,7 +501,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 			return codeUnknownChat
 		}
 		if found {
-			machine, runtimeErr := optionalCommandRuntime(runtimes)
+			machine, runtimeErr := pfmconfig.OptionalRuntime(runtimes)
 			if runtimeErr != nil {
 				fmt.Fprintf(stderr, "pfm chat inject: %v\n", runtimeErr)
 				return codeUndelivered
@@ -637,7 +638,7 @@ func (single *singleSteer) Set(value string) error {
 // runHeadlessSelfCompact shares the MCP tool's ScheduleSelfCompact path, which
 // waits for the caller's turn to end instead of racing a live /compact.
 func runHeadlessSelfCompact(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat self-compact",
 		// ScheduleSelfCompact requires exactly one continuation steer.
 		"usage: pfm chat self-compact --then STEER <focus>",
@@ -649,7 +650,7 @@ func runHeadlessSelfCompact(args []string, stdout, stderr io.Writer, runtimes ..
 		thenAction,
 		"the one mandatory post-compact steer, typed into the reborn chat once compaction settles",
 	)
-	if code, ok := parseFlags(flags, args); !ok {
+	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() < 1 {
@@ -734,7 +735,7 @@ func writeUnsignedInjectWarning(stderr io.Writer) {
 }
 
 func runHeadlessWatch(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := newFlagSet(
+	flags := cli.NewFlagSet(
 		"chat watch",
 		"usage: pfm chat watch <target> [--idle-after SECS] "+
 			"[--on-idle CMD] [--on-exit CMD] [--once]",
@@ -745,7 +746,7 @@ func runHeadlessWatch(args []string, stdout, stderr io.Writer, runtimes ...comma
 	onExit := flags.String("on-exit", "", "shell command to run on EXIT or DEAD")
 	once := flags.Bool("once", false, "stop after the first IDLE")
 	poll := flags.Int("poll", 2, "seconds between samples")
-	names, code, ok := parseFlagsAnywhere(flags, args)
+	names, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
 	}

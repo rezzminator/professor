@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/mcpserv"
 )
 
@@ -28,7 +29,7 @@ func mcpRuntime(runtime commandRuntime, ambient bool) mcpserv.Runtime {
 		Names:                pfmchat.NameResolver{Runtime: &runtime},
 		AllowAmbientIdentity: ambient,
 		Dispatch: func(_ context.Context, args []string, stdout, stderr io.Writer) int {
-			if len(args) == 0 || args[0] != chatCommand {
+			if len(args) == 0 || args[0] != config.MCPServerChat {
 				fmt.Fprintln(stderr, "pfm: MCP dispatch requires chat argv")
 				return 2
 			}

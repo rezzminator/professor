@@ -26,7 +26,7 @@ type compactNudgePayload struct {
 // wired into Claude settings alone), main chat only, governed by the account's
 // claude.compactNudge policy.
 func runCompactNudge(stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
-	account := accountForConfig(runtime.Config, os.Getenv("CLAUDE_CONFIG_DIR"))
+	account := runtime.Config.AccountForConfigDir(os.Getenv("CLAUDE_CONFIG_DIR"))
 	prefs := runtime.Config.EffectiveClaude(account).CompactNudge
 	return compactNudge(stdin, stdout, stderr, runtime.Paths.SIDDir, prefs)
 }

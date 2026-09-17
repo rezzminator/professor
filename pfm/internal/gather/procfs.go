@@ -48,6 +48,16 @@ type ProcMemory interface {
 	RSSKB(pid int) (int64, error)
 }
 
+// Terminate asks a process to exit. A process that already exited satisfies
+// the request.
+func Terminate(pid int) error {
+	err := syscall.Kill(pid, syscall.SIGTERM)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
+}
+
 // FileID names one file by device and inode: the identity an install's
 // rename-over gives the binary's path anew, and a process already running the
 // old image keeps.
@@ -137,7 +147,7 @@ func (proc RealProcFS) Cmdline(pid int) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return splitNUL(content), nil
+	return SplitNUL(content), nil
 }
 
 // Environ returns the process environment keyed before the first equals sign.
@@ -147,7 +157,7 @@ func (proc RealProcFS) Environ(pid int) (map[string]string, error) {
 		return nil, err
 	}
 	environment := make(map[string]string)
-	for _, entry := range splitNUL(content) {
+	for _, entry := range SplitNUL(content) {
 		key, value, found := strings.Cut(entry, "=")
 		if found {
 			environment[key] = value
@@ -284,7 +294,9 @@ func (proc RealProcFS) path(pid int, element string) string {
 	return filepath.Join(proc.root(), strconv.Itoa(pid), element)
 }
 
-func splitNUL(content []byte) []string {
+// SplitNUL decodes a NUL-delimited kernel vector, preserving meaningful empty
+// fields and removing only trailing delimiters.
+func SplitNUL(content []byte) []string {
 	parts := strings.Split(string(content), "\x00")
 	for len(parts) != 0 && parts[len(parts)-1] == "" {
 		parts = parts[:len(parts)-1]

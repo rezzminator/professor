@@ -122,11 +122,7 @@ func (processes RealProcesses) Processes(ctx context.Context) ([]Process, error)
 }
 func (RealProcesses) Alive(pid int) bool { return pid > 0 && syscall.Kill(pid, 0) == nil }
 func (RealProcesses) Terminate(pid int) error {
-	err := syscall.Kill(pid, syscall.SIGTERM)
-	if errors.Is(err, syscall.ESRCH) {
-		return nil
-	}
-	return err
+	return gather.Terminate(pid)
 }
 
 func (RealProcesses) Kill(pid int) error {

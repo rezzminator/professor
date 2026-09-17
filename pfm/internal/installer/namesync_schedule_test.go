@@ -48,6 +48,40 @@ func TestNameSyncIntervalRendersIntoBothSchedulers(t *testing.T) {
 	}
 }
 
+func TestNameSyncSchedulersInvokeApply(t *testing.T) {
+	home := t.TempDir()
+	service, err := readAsset("systemd/pfm-name-sync.service")
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderedService, err := renderServicePath(service, home)
+	if err != nil {
+		t.Fatalf("render systemd service: %v", err)
+	}
+	if !strings.Contains(string(renderedService), "ExecStart=%h/.local/bin/pfm name-sync --apply") {
+		t.Errorf("systemd name-sync argv does not apply changes:\n%s", renderedService)
+	}
+
+	plist, err := readAsset(launchdAsset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	renderedPlist, err := renderNameSyncLaunchAgent(
+		[]byte(strings.ReplaceAll(string(plist), "__PFM_HOME__", home)),
+		Options{},
+	)
+	if err == nil {
+		renderedPlist, err = renderServicePath(renderedPlist, home)
+	}
+	if err != nil {
+		t.Fatalf("render launch agent: %v", err)
+	}
+	wantLaunchdArgv := "<string>name-sync</string>\n\t\t<string>--apply</string>"
+	if !strings.Contains(string(renderedPlist), wantLaunchdArgv) {
+		t.Errorf("launchd name-sync argv does not apply changes:\n%s", renderedPlist)
+	}
+}
+
 // A caller with no machine config (a direct Options literal) gets the poll the
 // fleet shipped with, never a zero that would make systemd refuse the unit.
 func TestNameSyncIntervalFallsBackToTheShippedDefault(t *testing.T) {

@@ -64,6 +64,12 @@
     "global/commands/quality/doc.md": {
       "curated": true
     },
+    "global/commands/quality/integration-suite.md": {
+      "curated": true
+    },
+    "global/commands/quality/llm-codebase.md": {
+      "curated": true
+    },
     "global/commands/quality/md-forlint.md": {
       "curated": true
     },
@@ -83,12 +89,6 @@
       "curated": true
     },
     "global/commands/wave/ccc.md": {
-      "curated": true
-    },
-    "global/skills/architecture-design/SKILL.md": {
-      "curated": true
-    },
-    "global/skills/architecture-design/references/integration-design.md": {
       "curated": true
     },
     "global/skills/sources.json": {

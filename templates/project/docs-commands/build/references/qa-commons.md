@@ -37,7 +37,7 @@ Acceptance gates for every test written.
 
 ## Integration lanes
 
-Applies when the project's integration suite is lane-shaped (designed with the `architecture-design` skill's `integration` mode; contract: `~/.claude/skills/architecture-design/references/integration-design.md`).
+Applies when the project's integration suite is lane-shaped (designed with `/quality:integration-suite`, whose body is the contract).
 
 - TARGETED runs the solo lanes that own the touched area; FULL and POST-MERGE run the whole sequence in its canonical order.
 - A new capability lands with its landscape row, its map row and its beat in the same change; the map gate is part of the FULL gate.

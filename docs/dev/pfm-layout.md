@@ -1,6 +1,6 @@
 # pfm layout — phase P2c "layout moves"
 
-**Status:** DESIGN, brownfield, executable. Measured on `wave/reliability-gates @ c28b072d` (2026-09-17), `pfm/`-relative paths (module `hostops/pfm`). Method: `$architecture-design` (brownfield: measure, then migrate incrementally — under a tenth of the tree moves, so no rebuild). Companion: `docs/dev/pfm-architecture.md` (the target package map and C1–C21); this document is its layout slice and changes where files live, never what pfm does.
+**Status:** DESIGN, brownfield, executable. Measured on `wave/reliability-gates @ c28b072d` (2026-09-17), `pfm/`-relative paths (module `hostops/pfm`). Method: `/quality:llm-codebase` (brownfield: measure, then migrate incrementally — under a tenth of the tree moves, so no rebuild). Companion: `docs/dev/pfm-architecture.md` (the target package map and C1–C21); this document is its layout slice and changes where files live, never what pfm does.
 
 **Precondition (P2b done first):** `pfm/internal/dream/**`, `pfm/prompts/**` and `cmd/pfm/dream_command.go` + `dream_command_test.go` are gone. `pfm/prompts/embed.go` embeds only `dreamer` and its only importers are `internal/dream/resources/resources.go` and `internal/dream/live_contract_test.go`, so P2b must delete the whole `pfm/prompts/` package — a surviving `//go:embed dreamer` with no files is a compile error. Step 0 below checks this.
 

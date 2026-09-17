@@ -1,6 +1,12 @@
-# Integration Design
+---
+name: quality:integration-suite
+description: Designs test lanes over shared state — `/quality:integration-suite <project|subsystem>`, "design our integration tests", "refactor the e2e suite", before building any live or end-to-end harness: landscape from code, research pass, lanes, crossings, map gate, harness contract. Returns a design document plus file skeletons; edits no code. Source-tree layout → /quality:llm-codebase.
+argument-hint: <project|subsystem>
+---
 
-Design a project's integration suite as lanes over one shared state: every capability inventoried from code, every capability mapped to a step that asserts it, the steps ordered so features meet each other the way they do in production. The output is a design document plus the file skeletons a build hand fills; this reference edits no code.
+# Integration Suite
+
+Design a project's integration suite as lanes over one shared state: every capability inventoried from code, every capability mapped to a step that asserts it, the steps ordered so features meet each other the way they do in production. The design document goes to `architect` for review, then to /wave:refine and the project's builder.
 
 ## Contents
 
@@ -128,11 +134,11 @@ Sections, in this order, at the path the brief names:
 
 ## Hand-off to the build and test hands
 
-The design document goes through SKILL.md § Hand-off. In a project installed from this blueprint, the suite is then built and kept by the per-project agents under `{project}/.claude/agents/`:
+In a project installed from this blueprint, the suite is built and kept by the per-project agents under `{project}/.claude/agents/`:
 
 - `developer.md` builds the harness, the mocks and the lanes from the wave specs of Build order.
 - `qa.md` runs them: § Scope maps onto lanes — TARGETED runs the solo lanes owning the touched area, FULL and POST-MERGE run the sequence; Step 6 compliance checks and § QA fix chain apply to a defect a lane exposes.
-- `docs/commands/build/references/qa-commons.md` §§ Test validity, Run verdicts, Integration lanes carry the rules both hands share with this reference; a project without the blueprint applies Laws 7–9 directly.
+- `docs/commands/build/references/qa-commons.md` §§ Test validity, Run verdicts, Integration lanes carry the rules both hands share with this command; a project without the blueprint applies Laws 7–9 directly.
 
 ## Seed evidence
 

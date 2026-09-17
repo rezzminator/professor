@@ -50,6 +50,13 @@ Waves 0, 1, 2, 3 build in parallel (disjoint files; one worktree; gitter commits
 
 Fence for every `pfm/` build or test during a wave (`dev.sh iso …` from the worktree, relative path); a regression test is watched red before it counts; gitter is the only git writer; `.claude/**`, `templates/**`, any `CLAUDE.md` through `/pcm`; nothing identifying in tracked files; push only on the user's explicit ask; every agent report is verified against the artifact on disk before it is relayed.
 
+## Added after the first review with the user (2026-09-17)
+
+- **Wave 6 — activity log** (`waves/6-activity-log/spec.md`): `log/slog`, one JSONL per pfm home, levels per environment, every corner logged; a lane beat passes only on its assertion AND a clean log.
+- **Wave 7 — mock-engine + weak-model rehearsal** (`waves/7-mock-engine/spec.md`): one scripted stand-in for all three engines gates every commit; the release rehearsal runs on a weaker real model (Codex Terra, high effort).
+- **Wave 8 — close the known gaps** (`waves/8-close-known-gaps/spec.md`): OpenCode MCP wiring, OpenCode layer for adopters, harvestpy on arm64, duplicate-seat advisory — fixed, not ledgered; `known-gaps.yml` ships empty, entries need an expiry.
+- Order: 6 lands before the Wave 4 lanes are written (the beats assert on it); 7's mock-engine before Wave 3's B2 (cmd/pfm) so the slow suite moves onto it; 8 in parallel where packages are disjoint.
+
 ## Prior art
 
 Two research reports fed the wave specs (each spec carries its own § Prior art): `.professor/RR/agent-fleet-testing-release-chain-2026-09-17.md` — how Codex CLI, OpenCode, Goose, claude-squad, zellij, chezmoi, mise, Homebrew, aider, Cline, Claude Code and the MCP conformance suite test and gate releases (chezmoi's four-tier ladder is the closest template; no neighbour keys its merge gate on a live model; none documents a flaky quarantine) — and `.professor/RR/hermetic-trustworthy-test-gates-2026-09-17.md` — the literature on hermetic suites, flake economics (FSE 2014 / Google TAP), the four-tier release chain, `testscript`/`synctest`/pty seams, and honest known-gap ledgers (`xfail strict`); no source quantifies a parallelism sweet spot or a CI-time ratchet — those are this train's own measurements.

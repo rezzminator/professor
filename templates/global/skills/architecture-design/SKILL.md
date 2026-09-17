@@ -1,6 +1,6 @@
 ---
 name: architecture-design
-description: Lays out a codebase for agent maintainers — one directory per unit of change, grep-true names, no parallel registries. Use for `$architecture-design <feature|LLM call|project|path>`, "where should X live", before /wave:refine on a feature touching 3+ directories, and every new LLM call; greenfield designs a tree, brownfield measures then migrates. Returns a design document; edits no code.
+description: Lays out agent-maintainable codebases — `$architecture-design <feature|LLM call|project|path>`, "where should X live", before /wave:refine on a feature touching 3+ directories, every new LLM call; greenfield designs a tree, brownfield measures then migrates; `integration <project>` designs the integration-test suite as lanes. Returns a design document; edits no code.
 ---
 
 # Architecture Design
@@ -11,6 +11,7 @@ Design for a reader whose context resets every session: one change lands in one 
 
 - target: a feature, an LLM call, a project, or a path
 - mode: greenfield (nothing exists) or brownfield (a tree exists — measure before designing)
+- mode `integration <project>`: the target is the integration-test suite — follow `references/integration-design.md` in place of § Procedure; § Hand-off applies unchanged
 - the project's CLAUDE.md and the live tree (`ls`, `git ls-files` — never recalled)
 - evidence and baselines: the project's architecture playbook or epic evidence record, when one exists (`docs/epics/{epic}/playbook.md`)
 

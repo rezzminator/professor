@@ -74,7 +74,7 @@ Follow `docs/commands/build/references/qa-commons.md` § Diff-driven attack map.
 
 ## Step 5: Run tests (scope-aware)
 
-**Affected-first** per `docs/commands/build/references/qa-commons.md` §§ Affected-first, Isolation on suspicion — then run the scope below.
+**Affected-first** per `docs/commands/build/references/qa-commons.md` §§ Affected-first, Isolation on suspicion — then run the scope below; a lane-shaped integration suite maps onto the scopes per § Integration lanes, and every verdict you report follows § Run verdicts.
 
 Run per the scope set in the spawn brief (see ## Scope). External services are mocked; the data/state layer, entrypoints, auth, and any queue-via-emulator are real (`.env.test`). PRE-MERGE scopes use the pipeline's isolated stack (ports from `<worktree>/.env.ports`, NOT the shared default test ports). NEVER boot the project's dev server in QA — it loads `.env.local` and writes to the LOCAL dev data layer regardless of the allocated port; the integration harness boots its own per-worker instances.
 

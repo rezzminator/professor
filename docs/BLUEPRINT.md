@@ -51,7 +51,7 @@ Every command, agent, and rule sorts into one of three tiers:
 **Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones and the in-tree links):**
 
 - **deep-rr** — in-tree research protocol under `workflows/deep-rr/`, linked by host installation.
-- **architecture-design** — codebase layout designed for agent maintainers: one directory per unit of change, a fixed file anatomy, grep-true names, façades for the cross-cutting calls, and the brief anchors a build hand reads; greenfield designs a tree, brownfield measures the existing one and writes the migration. Ships in-tree under `templates/global/skills/architecture-design/`, linked by host installation.
+- **architecture-design** — codebase layout designed for agent maintainers: one directory per unit of change, a fixed file anatomy, grep-true names, façades for the cross-cutting calls, and the brief anchors a build hand reads; greenfield designs a tree, brownfield measures the existing one and writes the migration; its `integration` mode designs a project's integration-test suite as lanes over one shared state (`references/integration-design.md`: landscape from code, research pass, crossings, map gate, harness contract). Ships in-tree under `templates/global/skills/architecture-design/`, linked by host installation.
 - **ghostwriter** — captures a writer's mechanical fingerprint and generates in that voice.
 - **vision-factory** — forge, validate, and stress-test a startup vision.
 

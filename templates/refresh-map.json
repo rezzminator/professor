@@ -88,6 +88,9 @@
     "global/skills/architecture-design/SKILL.md": {
       "curated": true
     },
+    "global/skills/architecture-design/references/integration-design.md": {
+      "curated": true
+    },
     "global/skills/sources.json": {
       "curated": true
     },

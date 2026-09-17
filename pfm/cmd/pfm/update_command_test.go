@@ -392,6 +392,7 @@ func TestUpdateRunsPostBuildActionsThroughTheSelectedCandidate(t *testing.T) {
 	}
 	marker := filepath.Join(t.TempDir(), "candidate-argv.log")
 	t.Setenv("PFM_UPDATE_CANDIDATE_MARKER", marker)
+	useScriptedUpdateCandidate(t)
 	previousInstaller := runInstaller
 	t.Cleanup(func() { runInstaller = previousInstaller })
 	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {

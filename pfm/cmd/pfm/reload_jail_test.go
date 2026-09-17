@@ -74,6 +74,8 @@ func TestChatSwapAliasIsRetired(t *testing.T) {
 
 func TestChatReloadRefusesAnOpenSelectorOnAProbeSocket(t *testing.T) {
 	jailTest(t)
+	t.Setenv("PFM_RELOAD_DELAY_MS", "1")
+	t.Setenv("PFM_RELOAD_POLL_MS", "1")
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}

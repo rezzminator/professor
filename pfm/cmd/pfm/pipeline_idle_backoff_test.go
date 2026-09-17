@@ -100,6 +100,7 @@ func TestRefreshCadenceCapsAndNilClockNeverBacksOff(t *testing.T) {
 // keystroke must wake it within one park-poll interval, not a stale
 // already-scheduled multi-minute timer.
 func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
+	shortenRefreshIntervals(t)
 	jailTest(t)
 
 	database, err := store.Open()
@@ -157,7 +158,7 @@ func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 		if ok {
 			t.Fatalf("a third pass arrived while parked and untouched: %#v", snapshot)
 		}
-	case <-time.After(3 * time.Second):
+	case <-time.After(50 * time.Millisecond):
 	}
 
 	// A keystroke must wake it inside a poll or two — not wait on an
@@ -168,8 +169,8 @@ func TestPickerRefreshStreamParksThenWakesOnKeystroke(t *testing.T) {
 		if !ok {
 			t.Fatal("refresh stream closed instead of waking on a keystroke")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no pass arrived within 5s of a keystroke while parked")
+	case <-time.After(time.Second):
+		t.Fatal("no pass arrived within 1s of a keystroke while parked")
 	}
 	cancel()
 	for range updates {

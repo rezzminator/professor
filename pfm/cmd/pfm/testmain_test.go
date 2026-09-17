@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -16,6 +18,8 @@ import (
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/testjail"
 )
+
+var testPFMBinary string
 
 type noNetworkHarvestProvisioner struct{}
 
@@ -78,6 +82,24 @@ func noNetworkHarvestDigest() harvestpy.EnvironmentDigest {
 // TestMain gives this package a short, canonical TMPDIR before any test builds
 // a path from it. See internal/testjail for why both properties matter.
 func TestMain(m *testing.M) {
+	binaryDir := ""
+	if os.Getenv(attachHelperEnv) != "1" {
+		var err error
+		binaryDir, err = os.MkdirTemp("", "pfm-cmd-test-binary-")
+		if err != nil {
+			_, _ = os.Stderr.WriteString("create shared pfm test binary directory: " + err.Error() + "\n")
+			os.Exit(1)
+		}
+		testPFMBinary = filepath.Join(binaryDir, "pfm")
+		build := exec.Command("go", "build", "-trimpath", "-buildvcs=false", "-o", testPFMBinary, ".")
+		if output, buildErr := build.CombinedOutput(); buildErr != nil {
+			_, _ = os.Stderr.WriteString(
+				"build shared pfm test binary: " + buildErr.Error() + ": " + string(output) + "\n",
+			)
+			_ = os.RemoveAll(binaryDir)
+			os.Exit(1)
+		}
+	}
 	// Mirrors main()'s own call (issue #24 F1): every test in this package
 	// calls run()/runInternal() directly, never main(), so without this the
 	// registry stays unset for the whole suite and every unknown-pfm-hook
@@ -132,5 +154,12 @@ func TestMain(m *testing.M) {
 			CLIVersion:    "fixture",
 		}, nil
 	}
-	os.Exit(testjail.Run(m))
+	code := testjail.Run(m)
+	if binaryDir != "" {
+		if err := os.RemoveAll(binaryDir); err != nil && code == 0 {
+			_, _ = os.Stderr.WriteString("remove shared pfm test binary directory: " + err.Error() + "\n")
+			code = 1
+		}
+	}
+	os.Exit(code)
 }

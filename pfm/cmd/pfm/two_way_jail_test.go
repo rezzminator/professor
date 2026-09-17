@@ -77,7 +77,7 @@ func TestAskHoldsATwoWayConversation(t *testing.T) {
 	for _, question := range []string{"first question", "second question"} {
 		var out, errors bytes.Buffer
 		code := run([]string{
-			"chat", "ask", "--timeout", "60", "--settle", "1",
+			"chat", "ask", "--timeout", "60", "--settle", "0",
 			socket, question,
 		}, &out, &errors)
 		if code != 0 {
@@ -115,7 +115,7 @@ func TestAskReportsATimeoutWithoutLosingDelivery(t *testing.T) {
 
 	var out, errorsOut bytes.Buffer
 	code := run([]string{
-		"chat", "ask", "--timeout", "2", "--settle", "1",
+		"chat", "ask", "--timeout", "1", "--settle", "0",
 		socket, "answer me",
 	}, &out, &errorsOut)
 	if code != codeAwaitTimeout {
@@ -149,8 +149,8 @@ func TestRunRefusesToCallAnUnheardPromptDelivered(t *testing.T) {
 	t.Setenv("CC_STUB_DEAF", "1")
 	restoreGrace, restoreWindow := launchGrace, launchProofWindow
 	restoreRescue := launchRescueWindow
-	launchGrace, launchProofWindow = 3*time.Second, 6*time.Second
-	launchRescueWindow = 4 * time.Second
+	launchGrace, launchProofWindow = 50*time.Millisecond, 250*time.Millisecond
+	launchRescueWindow = 250 * time.Millisecond
 	t.Cleanup(func() {
 		launchGrace, launchProofWindow = restoreGrace, restoreWindow
 		launchRescueWindow = restoreRescue

@@ -14,6 +14,7 @@ import (
 
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/shared"
+	"hostops/pfm/internal/spawn"
 )
 
 // stubRecorder is the half of a stub engine that makes it a CHAT rather than a
@@ -222,6 +223,14 @@ func TestRunJailPinsXDGConfigHome(t *testing.T) {
 
 func newRunJail(t *testing.T) *runJail {
 	t.Helper()
+	previousTimings := runSpawnTimings
+	runSpawnTimings = spawn.Timings{
+		Poll:  10 * time.Millisecond,
+		Boot:  time.Second,
+		Step:  time.Second,
+		Typed: 10 * time.Millisecond,
+	}
+	t.Cleanup(func() { runSpawnTimings = previousTimings })
 	// /tmp, not t.TempDir(): a tmux socket path must stay inside the ~100
 	// byte sun_path limit, which the test-name-derived TempDir blows past.
 	root, err := os.MkdirTemp("/tmp", "ccfrun")

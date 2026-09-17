@@ -215,8 +215,10 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 		// that settles risks landing on a frame that has not drawn it yet
 		// (attach_e2e_test.go:proveAttach uses the same wait for the same
 		// reason). Down moves off row 0 ("New Claude chat") onto the booting
-		// row — the only other row this minimal jail composes.
-		time.Sleep(5 * time.Second)
+		// row — the only other row this minimal jail composes. Wait for "◐",
+		// the marker rowMarker() (internal/ui/render.go) paints ONLY for
+		// compose.Booting — the row itself never paints the word "booting".
+		waitForTmuxPaneText(t, driverSocket, jail.env, "◐", 5*time.Second)
 		for _, key := range []string{"Down", "C-x", "Escape"} {
 			send := jail.tmux(driverSocket, "send-keys", "-t", "driver:0.0", key)
 			if output, err := send.CombinedOutput(); err != nil {
@@ -266,7 +268,9 @@ func TestBootingRowInteractivePickerJailed(t *testing.T) {
 			_ = jail.tmux(driverSocket, "kill-server").Run()
 		})
 
-		time.Sleep(5 * time.Second)
+		// Same wait as above: "◐" is the row's own painted marker, not the
+		// word "booting".
+		waitForTmuxPaneText(t, driverSocket, jail.env, "◐", 5*time.Second)
 		for _, key := range []string{"Down", "Enter"} {
 			send := jail.tmux(driverSocket, "send-keys", "-t", "driver:0.0", key)
 			if output, err := send.CombinedOutput(); err != nil {

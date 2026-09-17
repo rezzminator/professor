@@ -32,11 +32,11 @@ import (
 //     bug in the code under test rather than a path that ran out of room.
 //
 //   - CANONICAL, because /var is a symlink to /private/var on macOS, so every
-//     default temp path resolves to something other than itself. The dreamer
-//     refuses a non-canonical root on purpose: the repository root becomes the
-//     registry key, and one repository reachable by two spellings would own two
-//     sets of memory. A real repository under /Users satisfies that invariant;
-//     only the temp dir cannot.
+//     default temp path resolves to something other than itself. Paths used as
+//     stable filesystem identities must have one spelling: allowing one
+//     location to appear under both its symlinked and resolved paths splits
+//     state that belongs together. A normal checkout satisfies that invariant;
+//     only the default temp dir cannot.
 //
 // /tmp is the answer to both: it is short everywhere, and resolving it once
 // yields /private/tmp on macOS and /tmp on Linux — canonical on each.
@@ -140,6 +140,23 @@ func ShortRoot(t *testing.T) string {
 // ~/.claude/projects. The two must never be allowed to disagree.
 func Fleet(t *testing.T) string {
 	t.Helper()
+	return fleetSetenv(t, t.Setenv)
+}
+
+// FleetEnv builds the same scratch fleet as Fleet without changing the test
+// process environment. It returns an environment suitable for exec.Cmd.Env, so
+// a test whose jail is confined to subprocesses may run in parallel.
+func FleetEnv(t *testing.T) (string, []string) {
+	t.Helper()
+	environment := append([]string(nil), os.Environ()...)
+	root := fleetSetenv(t, func(name, value string) {
+		environment = append(environment, name+"="+value)
+	})
+	return root, environment
+}
+
+func fleetSetenv(t *testing.T, setenv func(string, string)) string {
+	t.Helper()
 	root := ShortRoot(t)
 	// The engine roots are named for their engines, spelled by the registry.
 	claudeRoot := pfmengine.MustLookup(pfmengine.Claude).LongName
@@ -149,17 +166,17 @@ func Fleet(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
+	setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	// The index DB, under the name it is migrating to (design § Glossary).
-	t.Setenv(paths.EnvDB, filepath.Join(root, "index.db"))
-	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
-	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, claudeRoot))
-	t.Setenv(paths.EnvCodexRoot, filepath.Join(root, codexRoot))
-	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
-	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
-	t.Setenv("HOME", filepath.Join(root, "home"))
-	t.Setenv(paths.EnvProcRoot, filepath.Join(root, "proc"))
-	t.Setenv(paths.EnvTmuxConf, "/dev/null")
+	setenv(paths.EnvDB, filepath.Join(root, "index.db"))
+	setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
+	setenv(paths.EnvClaudeRoots, filepath.Join(root, claudeRoot))
+	setenv(paths.EnvCodexRoot, filepath.Join(root, codexRoot))
+	setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
+	setenv(paths.EnvHome, filepath.Join(root, "home"))
+	setenv("HOME", filepath.Join(root, "home"))
+	setenv(paths.EnvProcRoot, filepath.Join(root, "proc"))
+	setenv(paths.EnvTmuxConf, "/dev/null")
 	return root
 }
 

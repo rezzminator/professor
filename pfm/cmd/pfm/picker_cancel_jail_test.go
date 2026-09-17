@@ -55,7 +55,7 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	// the async gather goroutine finishes. Pressing keys before that settles
 	// risks landing on a frame that has not drawn the row yet
 	// (attach_e2e_test.go:proveAttach uses the same wait for the same reason).
-	time.Sleep(5 * time.Second)
+	waitForTmuxPaneText(t, socket, jail.env, "PICKERCANCEL", 5*time.Second)
 	for _, key := range []string{"C-x", "C-s", "Escape"} {
 		send := exec.Command("tmux", "-L", socket, "send-keys", "-t", "picker", key)
 		send.Env = jail.env
@@ -92,6 +92,23 @@ func TestJailedPickerEscDoesNotWritePendingKillOrPrimarySwitch(t *testing.T) {
 	if got := strings.TrimSpace(string(output)); got != "" {
 		t.Fatalf("Esc left a kill behind: %q", got)
 	}
+}
+
+func waitForTmuxPaneText(t *testing.T, socket string, environment []string, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last string
+	for time.Now().Before(deadline) {
+		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-p")
+		capture.Env = environment
+		output, err := capture.CombinedOutput()
+		last = string(output)
+		if err == nil && strings.Contains(last, want) {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("tmux pane did not paint %q within %s; last capture=%q", want, timeout, last)
 }
 
 type pickerCancelJail struct {
@@ -144,20 +161,13 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 		t.Fatal(err)
 	}
 
-	executable, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	wrapper := "#!/bin/sh\nexec " + shellQuote(executable) +
-		" -test.run '^TestPFMAttachHelper$' -- \"$@\"\n"
 	binary := filepath.Join(home, ".local", "bin", "pfm")
-	if err := os.WriteFile(binary, []byte(wrapper), 0o700); err != nil {
+	if err := os.Symlink(testPFMBinary, binary); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(home, ".local", "bin") + string(os.PathListSeparator) +
 		os.Getenv("PATH")
 	env := replaceAttachEnv(os.Environ(), map[string]string{
-		attachHelperEnv:    "1",
 		"HOME":             home,
 		"PATH":             path,
 		"TERM":             "xterm-256color",

@@ -69,19 +69,8 @@ func waitForPaneToPaint(t *testing.T, tmuxTmpDir, socket, statusLine string) {
 	// The fixture passes the line as a printf FORMAT; the trailing \n is the
 	// only escape it uses, so the painted text is the literal before it.
 	want := strings.TrimSpace(strings.TrimSuffix(statusLine, `\n`))
-	deadline := time.Now().Add(5 * time.Second)
-	var last string
-	for time.Now().Before(deadline) {
-		capture := exec.Command("tmux", "-L", socket, "capture-pane", "-p", "-t", socket)
-		capture.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
-		output, err := capture.CombinedOutput()
-		last = string(output)
-		if err == nil && strings.Contains(last, want) {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("FIXTURE: pane %q never painted %q within 5s; last capture=%q", socket, want, last)
+	environment := append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmuxTmpDir)
+	waitForTmuxPaneText(t, socket, environment, want, 5*time.Second)
 }
 
 func codexJailRollout(
@@ -765,7 +754,7 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 		"rollout-2030-01-02T03-04-06-"+rotatedID+".jsonl",
 	)
 	var stderr bytes.Buffer
-	fleet.ReconcileCodexPanes(
+	fleet.ReconcileCodexPanesWith(
 		context.Background(),
 		database,
 		gather.Snapshot{
@@ -776,6 +765,7 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 			}},
 		},
 		commandRuntime{Paths: resolved},
+		fakeCodexRenamer{name: "ROTATED_CHAT"},
 		fleet.PrintWarn(&stderr),
 	)
 	bound, found, err := manager.CodexPaneBinding(context.Background(), socket, "%0")

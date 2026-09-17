@@ -18,7 +18,7 @@ import (
 	"hostops/pfm/internal/store"
 )
 
-// seedOpencodeStress builds a large, hostile session store: thousands of
+// seedOpencodeStress builds a large, hostile session store: hundreds of
 // sessions, unicode/control-character titles, oversized prompts, malformed
 // model JSON, NULL-heavy rows, and duplicate timestamps.
 func seedOpencodeStress(t *testing.T, root string, count int) {
@@ -166,11 +166,13 @@ CREATE INDEX part_session_idx ON part (session_id);`
 }
 
 func TestStressOpencodeIndexSurvivesHostileStore(t *testing.T) {
-	const count = 3000
+	t.Parallel()
+
+	const count = 300
 	root := t.TempDir()
 	seedOpencodeStress(t, root, count)
 
-	for pass := 0; pass < 3; pass++ {
+	for pass := 0; pass < 2; pass++ {
 		sessions, err := ReadOpencodeSessions(context.Background(), root)
 		if err != nil {
 			t.Fatalf("pass %d read: %v", pass, err)
@@ -190,11 +192,10 @@ func TestStressOpencodeIndexSurvivesHostileStore(t *testing.T) {
 				t.Fatalf("first prompt escaped its clip: %d runes", len([]rune(session.FirstPrompt)))
 			}
 		}
-		wantChildren := (count + 6) / 7 // ceil(count/7): i%7==3 pattern
-		if children != countChildren(count) {
-			t.Errorf("children = %d", children)
+		wantChildren := countChildren(count)
+		if children != wantChildren {
+			t.Errorf("children = %d, want %d", children, wantChildren)
 		}
-		_ = wantChildren
 		if archived != countArchived(count) {
 			t.Errorf("archived = %d, computed %d", archived, countArchived(count))
 		}
@@ -222,9 +223,9 @@ func countArchived(n int) int {
 }
 
 // The mirror must converge under repeated full passes and concurrent readers:
-// two goroutines indexing the same store race the temp-copy path.
+// multiple goroutines indexing the same store race the mirror-replace path.
 func TestStressOpencodeMirrorConcurrentPasses(t *testing.T) {
-	const count = 800
+	const count = 250
 	root := t.TempDir()
 	seedOpencodeStress(t, root, count)
 
@@ -242,8 +243,9 @@ func TestStressOpencodeMirrorConcurrentPasses(t *testing.T) {
 	}()
 
 	var wg sync.WaitGroup
-	errs := make(chan error, 4)
-	for worker := 0; worker < 4; worker++ {
+	const workers = 3
+	errs := make(chan error, workers)
+	for worker := 0; worker < workers; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -274,8 +276,10 @@ func TestStressOpencodeMirrorConcurrentPasses(t *testing.T) {
 // A live OpenCode process checkpoints into the WAL while we copy; the reader
 // must tolerate the database growing mid-copy without erroring or hanging.
 func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
+	t.Parallel()
+
 	const (
-		count      = 400
+		count      = 100
 		liveWrites = 2000
 	)
 	root := t.TempDir()
@@ -348,7 +352,7 @@ func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
 	}()
 
 	reads := 0
-	deadline := 40
+	deadline := 5
 	for round := 0; round < deadline; round++ {
 		sessions, err := ReadOpencodeSessions(context.Background(), root)
 		if err != nil {

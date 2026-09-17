@@ -164,6 +164,7 @@ func TestParkedPickerRetriesRefreshAfterCodexClear(t *testing.T) {
 // probe retries the database write instead of treating the unchanged rollout
 // as proof that reconciliation succeeded.
 func TestParkedPickerRetriesWarnedBindingFailureWithUnchangedHeldRollout(t *testing.T) {
+	shortenRefreshIntervals(t)
 	database, manager, socket, oldID, currentID := codexRegatherJailFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -272,6 +273,7 @@ func (runner *clearRetryIndexRunner) Run(context.Context, fleetindex.Options) (f
 
 func runParkedCodexClear(t *testing.T, failRefresh bool) {
 	t.Helper()
+	shortenRefreshIntervals(t)
 	database, manager, socket, oldID, currentID := codexRegatherJailFixture(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

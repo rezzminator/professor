@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"os"
@@ -18,8 +17,9 @@ import (
 const attachHelperEnv = "PFM_ATTACH_HELPER"
 
 // TestPFMAttachHelper turns the package test binary into the real CLI for
-// subprocess integration tests. The shell wrapper below still exercises main's
-// run dispatcher, real indexing/gather/compose/action code, and /dev/tty TUI.
+// subprocess integration tests. Keeping the CLI inside the test process is
+// load-bearing for process-table fixtures: TestMain installs the jail's
+// package-level seams before run dispatches.
 func TestPFMAttachHelper(_ *testing.T) {
 	if os.Getenv(attachHelperEnv) != "1" {
 		return
@@ -235,6 +235,7 @@ func (jail *attachJail) proveAttach(
 
 	var command *exec.Cmd
 	var input io.WriteCloser
+	var output synchronizedBuffer
 	driverSocket := ""
 	if mode == "plain" {
 		command = testjail.PTYCommand(scriptPath)
@@ -243,7 +244,6 @@ func (jail *attachJail) proveAttach(
 		if err != nil {
 			t.Fatal(err)
 		}
-		var output bytes.Buffer
 		command.Stdout = &output
 		command.Stderr = &output
 		if err := command.Start(); err != nil {
@@ -283,7 +283,33 @@ func (jail *attachJail) proveAttach(
 		// live after async gather. Under a parallel full-suite stress run the
 		// gather goroutine can be CPU-starved; this functional proof must not
 		// press Enter while the deliberately stale first frame is still shown.
-		time.Sleep(5 * time.Second)
+		if mode == "plain" {
+			// The picker renders through its own /dev/tty handle
+			// (internal/ui/picker.go:Pick opens /dev/tty directly and hands it
+			// to bubbletea as both input and output), never through the
+			// process's stdout/stderr that command.Stdout captures here, and
+			// testjail.PTYCommand wraps script(1) with no separate PTY-master
+			// handle to poll instead. Confirmed live: even with the deadline
+			// widened to 20s, output never advances past the initial
+			// alt-screen setup escape sequence — the painted row is genuinely
+			// unobservable in plain mode, so this stays a bounded sleep.
+			time.Sleep(5 * time.Second)
+		} else {
+			deadline := time.Now().Add(5 * time.Second)
+			ready := false
+			for time.Now().Before(deadline) {
+				capture := jail.tmux(driverSocket, "capture-pane", "-p", "-t", "driver:0.0")
+				captured, captureErr := capture.Output()
+				if captureErr == nil && strings.Contains(string(captured), "JAILATTACH") {
+					ready = true
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			if !ready {
+				t.Fatalf("%s picker did not paint the target row within 5s", mode)
+			}
+		}
 		if mode == "plain" {
 			if _, err := io.WriteString(input, "JAILATTACH\r"); err != nil {
 				t.Fatalf("drive plain picker: %v", err)

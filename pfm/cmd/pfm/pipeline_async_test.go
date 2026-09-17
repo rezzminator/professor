@@ -150,6 +150,7 @@ func (runner *immediateIndexRunner) Run(
 }
 
 func TestPickerRefreshStreamRepeatsAtTheBaseInterval(t *testing.T) {
+	shortenRefreshIntervals(t)
 	jailTest(t)
 	database, err := store.Open()
 	if err != nil {
@@ -217,6 +218,24 @@ refreshed:
 			t.Fatalf("routine picker index stage %d walked the whole corpus: %#v", index, option)
 		}
 	}
+}
+
+func shortenRefreshIntervals(t *testing.T) {
+	t.Helper()
+	previousInterval := fleetRefreshInterval
+	previousParkThreshold := fleetRefreshParkThreshold
+	previousParkPoll := fleetRefreshParkPollInterval
+	previousCodexPoll := fleetRefreshCodexPollInterval
+	fleetRefreshInterval = 10 * time.Millisecond
+	fleetRefreshParkThreshold = 20 * time.Millisecond
+	fleetRefreshParkPollInterval = 5 * time.Millisecond
+	fleetRefreshCodexPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() {
+		fleetRefreshInterval = previousInterval
+		fleetRefreshParkThreshold = previousParkThreshold
+		fleetRefreshParkPollInterval = previousParkPoll
+		fleetRefreshCodexPollInterval = previousCodexPoll
+	})
 }
 
 func (runner *slowIndexRunner) Run(

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hostops/pfm/internal/config"
 )
@@ -33,6 +34,7 @@ func writeFakeHarnessClaude(t *testing.T, body string) string {
 // CHECK FAILED — the doctor row that reports this never gets to guess whether
 // the OAuth-only routing spent real money.
 func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *testing.T) {
+	shortenHarnessCaptureSinkGrace(t)
 	binary := writeFakeHarnessClaude(
 		t,
 		"printf '{\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":12,\"output_tokens\":4},\"result\":\"hi\"}\\n'\nexit 0\n",
@@ -58,6 +60,7 @@ func TestHarnessCaptureReportsBypassWhenTheCLIAnswersWithoutHittingTheSink(t *te
 // capture launches with a fresh, per-capture CLAUDE_CONFIG_DIR — never the
 // caller's real one — and removes it once the capture returns.
 func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
+	shortenHarnessCaptureSinkGrace(t)
 	record := filepath.Join(t.TempDir(), "config-dir-seen.txt")
 	t.Setenv("PFM_TEST_HARNESS_CONFIGDIR_RECORD", record)
 	binary := writeFakeHarnessClaude(
@@ -98,6 +101,7 @@ func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 // the harness run's own stdout/stderr under tmp/pfm-doctor/ — today that
 // evidence is discarded and a timeout renders as bare prose no one can act on.
 func TestDoctorVerboseKeepsTheHarnessRunOutput(t *testing.T) {
+	shortenHarnessCaptureSinkGrace(t)
 	binary := writeFakeHarnessClaude(t, "printf 'diagnostic-stderr-line\\n' 1>&2\nexit 1\n")
 	machine := config.Config{}
 	machine.Claude.Binary = binary
@@ -120,4 +124,11 @@ func TestDoctorVerboseKeepsTheHarnessRunOutput(t *testing.T) {
 	if _, err := os.Stat(hitsPath); err != nil {
 		t.Fatalf("%s not written: %v", hitsPath, err)
 	}
+}
+
+func shortenHarnessCaptureSinkGrace(t *testing.T) {
+	t.Helper()
+	previous := harnessCaptureSinkGrace
+	harnessCaptureSinkGrace = 20 * time.Millisecond
+	t.Cleanup(func() { harnessCaptureSinkGrace = previous })
 }

@@ -595,10 +595,10 @@ func (h *Harvester) Archive(ctx context.Context, source, member string) (Result,
 			stored.Content = content
 			stored.Chars = len(content)
 			stored.ContentChars = len(content)
-			stored.Tokens = estimateTokens(content)
+			stored.Tokens = EstimateTokens(content)
 			return stored, nil
 		}
-		converted, convErr := h.convert(ctx, kind, source, data)
+		converted, convErr := h.convertFetchedContent(ctx, kind, source, data)
 		if convErr != nil {
 			// A nil converter is useful for archive browsing tests and raw text
 			// members. Preserve bytes verbatim; document conversion itself remains
@@ -617,7 +617,7 @@ func (h *Harvester) Archive(ctx context.Context, source, member string) (Result,
 			Bytes:        int64(len(data)),
 			Chars:        chars,
 			ContentChars: chars,
-			Tokens:       estimateTokens(converted),
+			Tokens:       EstimateTokens(converted),
 		}, nil
 	}
 	return h.archiveList(ctx, source)
@@ -644,7 +644,7 @@ func (h *Harvester) archiveList(ctx context.Context, source string) (Result, err
 		CacheStatus:  download.CacheStatus,
 		Chars:        chars,
 		ContentChars: chars,
-		Tokens:       estimateTokens(content),
+		Tokens:       EstimateTokens(content),
 	}, nil
 }
 

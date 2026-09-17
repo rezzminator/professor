@@ -54,7 +54,7 @@ func SyncClaude(ctx context.Context, database *store.Store, roots []string, coun
 		} else {
 			counters.FullParsed++
 		}
-		transcript, bytesRead, parseErr := parseClaude(file, start, base)
+		transcript, bytesRead, parseErr := parseClaudeTranscriptFile(file, start, base)
 		if parseErr != nil {
 			return parseErr
 		}
@@ -142,7 +142,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 		} else {
 			counters.FullParsed++
 		}
-		rollout, bytesRead, parseErr := parseCodex(file, start, base)
+		rollout, bytesRead, parseErr := parseCodexRolloutFile(file, start, base)
 		if parseErr != nil {
 			return parseErr
 		}
@@ -153,7 +153,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 
 	threads := make([]store.CodexThread, 0)
 	for _, root := range roots {
-		found, readErr := readCodexThreads(ctx, root)
+		found, readErr := loadIndexedCodexThreads(ctx, root)
 		if readErr != nil {
 			return readErr
 		}

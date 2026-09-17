@@ -73,8 +73,8 @@ type InstallPlan struct {
 	EnvironmentBytes      int64    `json:"environment_bytes"`
 }
 
-// Plan returns pinned inputs and measured sizes without touching disk or network.
-func Plan(platform Platform) (InstallPlan, error) {
+// PlanConversionEnvironment returns pinned inputs and measured sizes without touching disk or network.
+func PlanConversionEnvironment(platform Platform) (InstallPlan, error) {
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = runtime.GOOS, runtime.GOARCH
 	}
@@ -165,7 +165,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 		filepath.Join(current, "environment.json"),
 	); err == nil && existing.Digest == desired &&
 		existing.State == provisionStateReady {
-		if _, checkErr := Check(ctx, options.Root, platform); checkErr == nil {
+		if _, checkErr := CheckConversionEnvironment(ctx, options.Root, platform); checkErr == nil {
 			return ProvisionResult{Digest: desired, Environment: existing, Runtime: Runtime{
 				Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 				Script: filepath.Join(current, "project", "converter.py"),
@@ -333,7 +333,7 @@ func smokeRuntime(ctx context.Context, converterRuntime Runtime) (map[string]any
 	return result, err
 }
 
-func Inspect(root string, platform Platform) (EnvironmentDigest, error) {
+func InspectConversionEnvironment(root string, platform Platform) (EnvironmentDigest, error) {
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = runtime.GOOS, runtime.GOARCH
 	}

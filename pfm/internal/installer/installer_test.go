@@ -367,7 +367,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	}
 	bbTarget := filepath.Join(config, "commands", "bb.md")
 	writeFixture(t, bbTarget, "operator copy\n")
-	seed := fleetdb.Open(context.Background(), paths.Values{
+	seed := fleetdb.OpenSharedState(context.Background(), paths.Values{
 		Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db"),
 	})
 	if err := seed.Kill(context.Background(), "killed-a", 99); err != nil {
@@ -480,8 +480,8 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		)
 		assertLink(
 			t,
-			filepath.Join(unitDir, "timers.target.wants", "pfm-name-sync.timer"),
-			filepath.Join(unitDir, "pfm-name-sync.timer"),
+			filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
+			filepath.Join(unitDir, nameSyncTimerUnit),
 		)
 	}
 	// The predecessor's enablement links are a systemd concept; a launchd host
@@ -580,7 +580,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		t.Fatalf("zshrc was not converged:\n%s", zshrc)
 	}
 
-	state := fleetdb.Open(context.Background(), paths.Values{
+	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
 		Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db"),
 	})
 	killed, err := state.KilledAt(context.Background())
@@ -650,7 +650,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	}
 	for _, removed := range []string{
 		filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
-		filepath.Join(unitDir, "timers.target.wants", "pfm-name-sync.timer"),
+		filepath.Join(unitDir, "timers.target.wants", nameSyncTimerUnit),
 	} {
 		if _, err := os.Lstat(removed); !os.IsNotExist(err) {
 			t.Fatalf("uninstall left enablement link at %s: %v", removed, err)
@@ -1583,7 +1583,7 @@ func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 	wantCalls := []string{
 		"systemctl --user is-active --quiet pfm-name-sync.service",
 		"systemctl --user daemon-reload",
-		"systemctl --user enable --now pfm-name-sync.path pfm-name-sync.timer",
+		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit,
 	}
 	if schedulerIsLaunchd {
 		// launchd has no manager probe to fail: the agent is bootstrapped into

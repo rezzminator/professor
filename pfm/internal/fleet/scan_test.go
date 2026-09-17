@@ -61,7 +61,7 @@ func TestResolveEnvRefusesAnUnreadableClock(t *testing.T) {
 // totals survive compose: the default view reads capped candidates, so the
 // killed and suppressed counts can only come from the load.
 func TestComposeCarriesTheDefaultViewsCachedCounts(t *testing.T) {
-	output := Compose(
+	output := ComposeFleet(
 		Env{Config: pfmconfig.Defaults(t.TempDir(), nil)},
 		compose.DefaultView,
 		Data{CachedCounts: &store.CachedCounts{Killed: 7, Suppressed: 3}},

@@ -458,13 +458,13 @@ func TestGoogleDriveDownloadURLRecognizesOnlyOwnedFileLinks(t *testing.T) {
 }
 
 func TestTokenEstimateMatchesOracleRegimes(t *testing.T) {
-	if got := estimateTokens(strings.Repeat("word ", 100)); got != 250 {
+	if got := EstimateTokens(strings.Repeat("word ", 100)); got != 250 {
 		t.Fatalf("prose tokens=%d", got)
 	}
-	if got := estimateTokens(strings.Repeat("{}[];", 100)); got != 278 {
+	if got := EstimateTokens(strings.Repeat("{}[];", 100)); got != 278 {
 		t.Fatalf("code tokens=%d", got)
 	}
-	if got := estimateTokens(strings.Repeat("漢", 10)); got != 13 {
+	if got := EstimateTokens(strings.Repeat("漢", 10)); got != 13 {
 		t.Fatalf("CJK tokens=%d", got)
 	}
 }

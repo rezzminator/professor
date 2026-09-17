@@ -294,7 +294,7 @@ func scholarVersionURL(baseRaw, raw string) (string, bool) {
 		return "", false
 	}
 	resolved.Fragment = ""
-	if assertFetchable(resolved.String(), false) != nil {
+	if validateFetchURL(resolved.String(), false) != nil {
 		return "", false
 	}
 	return resolved.String(), true
@@ -314,7 +314,7 @@ func scholarResourceURL(baseRaw, raw string) string {
 		return ""
 	}
 	resolved.Fragment = ""
-	if assertFetchable(resolved.String(), false) != nil {
+	if validateFetchURL(resolved.String(), false) != nil {
 		return ""
 	}
 	return resolved.String()

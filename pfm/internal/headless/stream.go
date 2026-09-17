@@ -84,7 +84,7 @@ func Stream(
 			full := pending
 			pending = nil
 			if entry, ok := transcript.Parse(full, string(engine)); ok {
-				if err := window.add(render(entry, options.Raw)); err != nil {
+				if err := window.add(renderStreamEntry(entry, options.Raw)); err != nil {
 					return err
 				}
 			}
@@ -105,10 +105,8 @@ func Stream(
 			}
 			return ErrChatGone
 		}
-		select {
-		case <-ctx.Done():
+		if err := waitForNextPoll(ctx, poll); err != nil {
 			return window.flush()
-		case <-time.After(poll):
 		}
 	}
 }
@@ -116,7 +114,7 @@ func Stream(
 // ErrChatGone ends a follow whose chat stopped existing.
 var ErrChatGone = errors.New("the chat is gone")
 
-func render(entry transcript.Entry, raw bool) string {
+func renderStreamEntry(entry transcript.Entry, raw bool) string {
 	if !raw {
 		return transcript.Condensed(entry)
 	}

@@ -2,7 +2,6 @@ package fleetdb
 
 import (
 	"context"
-	"errors"
 	"fmt"
 )
 
@@ -100,10 +99,9 @@ FROM issues`
 	if err != nil {
 		return nil, fmt.Errorf("query issues: %w", err)
 	}
-	result := make([]Issue, 0)
-	for rows.Next() {
+	return collectRows(rows, func(rows rowSet) (Issue, error) {
 		var issue Issue
-		if err := rows.Scan(
+		err := rows.Scan(
 			&issue.ID,
 			&issue.AtNS,
 			&issue.Title,
@@ -116,24 +114,7 @@ FROM issues`
 			&issue.ReporterCWD,
 			&issue.ReporterEngine,
 			&issue.Status,
-		); err != nil {
-			scanErr := fmt.Errorf("scan issue: %w", err)
-			if closeErr := rows.Close(); closeErr != nil {
-				return nil, errors.Join(scanErr, fmt.Errorf("close issue rows: %w", closeErr))
-			}
-			return nil, scanErr
-		}
-		result = append(result, issue)
-	}
-	if err := rows.Err(); err != nil {
-		iterationErr := fmt.Errorf("iterate issues: %w", err)
-		if closeErr := rows.Close(); closeErr != nil {
-			return nil, errors.Join(iterationErr, fmt.Errorf("close issue rows: %w", closeErr))
-		}
-		return nil, iterationErr
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close issue rows: %w", err)
-	}
-	return result, nil
+		)
+		return issue, err
+	}, "scan issue", "iterate issues", "close issue rows")
 }

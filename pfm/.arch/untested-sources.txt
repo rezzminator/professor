@@ -29,7 +29,6 @@ e2e/doc.go
 internal/action/claude_spawn.go
 internal/action/doc.go
 internal/action/gate.go
-internal/action/process.go
 internal/action/process_darwin.go
 internal/action/process_linux.go
 internal/action/quote.go

@@ -21,7 +21,7 @@ func TestCheckPersistsLatestReleaseForTheNextInvocation(t *testing.T) {
 	defer server.Close()
 
 	cache := filepath.Join(t.TempDir(), "update.json")
-	if err := Check(context.Background(), cache, "v0.61.1", server.URL, server.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", server.URL, server.Client()); err != nil {
 		t.Fatalf("Check() error = %v", err)
 	}
 	notice, found, err := Read(cache, "v0.61.1")
@@ -42,7 +42,7 @@ func TestLocalHotfixVersionStillDiscoversNewRelease(t *testing.T) {
 
 	cache := filepath.Join(t.TempDir(), "update.json")
 	const current = "v0.61.3-local.2"
-	if err := Check(context.Background(), cache, current, server.URL, server.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, current, server.URL, server.Client()); err != nil {
 		t.Fatalf("Check(local hotfix) error = %v", err)
 	}
 	notice, found, err := Read(cache, current)
@@ -60,7 +60,7 @@ func TestReadOffersReleaseToItsOwnPrerelease(t *testing.T) {
 
 	cache := filepath.Join(t.TempDir(), "update.json")
 	const current = "0.78.0-alpha"
-	if err := Check(context.Background(), cache, current, server.URL, server.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, current, server.URL, server.Client()); err != nil {
 		t.Fatalf("Check(prerelease) error = %v", err)
 	}
 	notice, found, err := Read(cache, current)
@@ -83,7 +83,7 @@ func TestReadDoesNotOfferAnOlderReleaseToAPrerelease(t *testing.T) {
 
 	cache := filepath.Join(t.TempDir(), "update.json")
 	const current = "0.78.0-alpha"
-	if err := Check(context.Background(), cache, current, server.URL, server.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, current, server.URL, server.Client()); err != nil {
 		t.Fatalf("Check(prerelease vs older release) error = %v", err)
 	}
 	if notice, found, err := Read(cache, current); err != nil || found {
@@ -100,7 +100,7 @@ func TestReadDoesNotOfferAReleaseToItsOwnBuildMetadata(t *testing.T) {
 
 	cache := filepath.Join(t.TempDir(), "update.json")
 	const current = "0.78.0+build.5"
-	if err := Check(context.Background(), cache, current, server.URL, server.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, current, server.URL, server.Client()); err != nil {
 		t.Fatalf("Check(build metadata current) error = %v", err)
 	}
 	if notice, found, err := Read(cache, current); err != nil || found {
@@ -130,7 +130,7 @@ func TestCheckFollowsOneGitHubOwnerRenameHopToTheTag(t *testing.T) {
 
 	cache := filepath.Join(t.TempDir(), "update.json")
 	latestURL := server.URL + "/mreza0100/professor/releases/latest"
-	if err := Check(context.Background(), cache, "v0.61.1", latestURL, server.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", latestURL, server.Client()); err != nil {
 		t.Fatalf("Check() error = %v", err)
 	}
 	notice, found, err := Read(cache, "v0.61.1")
@@ -159,7 +159,7 @@ func TestCheckRejectsASecondRenameHop(t *testing.T) {
 
 	cache := filepath.Join(t.TempDir(), "update.json")
 	latestURL := server.URL + "/mreza0100/professor/releases/latest"
-	if err := Check(context.Background(), cache, "v0.61.1", latestURL, server.Client()); err == nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", latestURL, server.Client()); err == nil {
 		t.Fatal("Check() with two rename hops returned nil error, want an error")
 	}
 }
@@ -184,7 +184,7 @@ func TestCheckRejectsACrossHostRenameHop(t *testing.T) {
 
 	cache := filepath.Join(t.TempDir(), "update.json")
 	latestURL := server.URL + "/mreza0100/professor/releases/latest"
-	if err := Check(context.Background(), cache, "v0.61.1", latestURL, server.Client()); err == nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", latestURL, server.Client()); err == nil {
 		t.Fatal("Check() with cross-host redirect returned nil error, want an error")
 	}
 	if otherHostHit {
@@ -206,7 +206,7 @@ func TestCheckRejectsARenameHopToADifferentRepo(t *testing.T) {
 
 	cache := filepath.Join(t.TempDir(), "update.json")
 	latestURL := server.URL + "/mreza0100/professor/releases/latest"
-	if err := Check(context.Background(), cache, "v0.61.1", latestURL, server.Client()); err == nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", latestURL, server.Client()); err == nil {
 		t.Fatal("Check() with different-repo redirect returned nil error, want an error")
 	}
 }
@@ -217,7 +217,7 @@ func TestFailedRefreshPreservesLastSuccessfulNotice(t *testing.T) {
 		writer.WriteHeader(http.StatusFound)
 	}))
 	cache := filepath.Join(t.TempDir(), "update.json")
-	if err := Check(context.Background(), cache, "v0.61.1", good.URL, good.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", good.URL, good.Client()); err != nil {
 		t.Fatal(err)
 	}
 	notice, found, err := Read(cache, "v0.61.1")
@@ -234,7 +234,7 @@ func TestFailedRefreshPreservesLastSuccessfulNotice(t *testing.T) {
 		writer.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer failing.Close()
-	if err := Check(context.Background(), cache, "v0.61.1", failing.URL, failing.Client()); err == nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", failing.URL, failing.Client()); err == nil {
 		t.Fatal("failed refresh returned nil")
 	}
 	if notice, found, err := Read(cache, "v0.61.1"); err != nil || !found || notice.Latest != "v0.61.2" {
@@ -251,10 +251,10 @@ func TestRecentSuccessfulCheckSuppressesRedundantNetworkLookup(t *testing.T) {
 	}))
 	defer server.Close()
 	cache := filepath.Join(t.TempDir(), "update.json")
-	if err := Check(context.Background(), cache, "v0.61.4", server.URL, server.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.4", server.URL, server.Client()); err != nil {
 		t.Fatal(err)
 	}
-	if err := Check(context.Background(), cache, "v0.61.4", server.URL, server.Client()); err != nil {
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.4", server.URL, server.Client()); err != nil {
 		t.Fatal(err)
 	}
 	if hits != 1 {

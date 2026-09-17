@@ -286,7 +286,7 @@ func stageExpectedHookFixtures(t *testing.T) (string, pfmconfig.Config) {
 	}
 	writeFixture(
 		t,
-		filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
+		settingsHookOwnershipPath(managedRootForHome(home)),
 		string(encoded),
 	)
 	return home, machine

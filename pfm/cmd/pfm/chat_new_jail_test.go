@@ -439,7 +439,7 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 	if got := jail.onlyWindowName(t); got != "_KILL codex worker" {
 		t.Fatalf("codex window=%q, want inline launch name", got)
 	}
-	state := fleetdb.Open(context.Background(), paths.Values{
+	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
 		FleetDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
 	})
 	t.Cleanup(func() { _ = state.Close() })

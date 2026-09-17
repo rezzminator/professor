@@ -108,9 +108,9 @@ type Store struct {
 	degraded error
 }
 
-// Open records a database initialization failure in Degraded. Operations then
+// OpenSharedState records a database initialization failure in Degraded. Operations then
 // return that failure instead of pretending an operator decision was stored.
-func Open(ctx context.Context, values paths.Values) *Store {
+func OpenSharedState(ctx context.Context, values paths.Values) *Store {
 	store := &Store{
 		path: values.FleetDB,
 	}
@@ -511,7 +511,7 @@ func (s *Store) ClearBranchSeat(ctx context.Context, socket string) error {
 	return nil
 }
 
-// PrimaryAccount reports the database value first, then the
+// ClaudePrimaryAccount reports the database value first, then the
 // ~/.claude-primary mirror when the database has none, and not-found when
 // neither parses. The
 // roster membership is the CALLER's to apply from the effective machine
@@ -519,7 +519,7 @@ func (s *Store) ClearBranchSeat(ctx context.Context, socket string) error {
 //
 // It opens the database read-only and never creates it: reading the primary
 // account must not be the act that brings a state store into existence.
-func PrimaryAccount(ctx context.Context, values paths.Values) (int, bool) {
+func ClaudePrimaryAccount(ctx context.Context, values paths.Values) (int, bool) {
 	if account, found := primaryFromDatabase(ctx, values.FleetDB); found {
 		return account, true
 	}
@@ -534,10 +534,10 @@ func PrimaryAccount(ctx context.Context, values paths.Values) (int, bool) {
 	return account, true
 }
 
-// SetPrimaryAccount updates the authoritative shared row and its statusline
+// SetClaudePrimaryAccount updates the authoritative shared row and its statusline
 // mirror. The database is written first; a mirror failure is returned loudly
 // so a caller never reports a primary switch that only half landed.
-func SetPrimaryAccount(
+func SetClaudePrimaryAccount(
 	ctx context.Context,
 	values paths.Values,
 	account int,
@@ -546,7 +546,7 @@ func SetPrimaryAccount(
 	if account < 1 {
 		return fmt.Errorf("primary account must be positive, got %d", account)
 	}
-	state := Open(ctx, values)
+	state := OpenSharedState(ctx, values)
 	defer func() {
 		if err := state.Close(); err != nil {
 			returnErr = errors.Join(returnErr, fmt.Errorf("close shared state: %w", err))

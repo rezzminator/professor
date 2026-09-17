@@ -83,11 +83,11 @@ func (h *Harvester) PublicHandle(source string) (string, error) {
 	if source == "" {
 		return "", errors.New("public handle requires a public HTTP(S) URL")
 	}
-	if err := assertFetchable(source, false); err != nil {
+	if err := validateFetchURL(source, false); err != nil {
 		log.Printf("harvest: public handle rejected %q: %v", source, err)
 		return "", errors.New("public handle requires a public HTTP(S) URL")
 	}
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -122,7 +122,7 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		if err := assertFetchable(target, false); err != nil {
+		if err := validateFetchURL(target, false); err != nil {
 			log.Printf("harvest: stored public handle target rejected %q: %v", target, err)
 			return "", errors.New("stored public source is no longer fetchable")
 		}
@@ -149,7 +149,7 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 	if err != nil {
 		return "", errors.New("local source cannot be resolved")
 	}
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -197,7 +197,7 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 }
 
 func (h *Harvester) readPublicHandle(source string) (string, error) {
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -242,7 +242,7 @@ func (h *Harvester) publicDisplayHandle(identity, exportedPath string) (string, 
 	if isLocalSource(identity) || strings.HasPrefix(strings.ToLower(identity), "file://") {
 		return exportedPath, nil
 	}
-	if err := assertFetchable(identity, false); err != nil {
+	if err := validateFetchURL(identity, false); err != nil {
 		log.Printf("harvest: cache identity is not a public URL %q: %v", identity, err)
 		return "", errors.New("cache match has no public identity")
 	}

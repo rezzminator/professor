@@ -38,7 +38,7 @@ func normalizeDOIMirrorURL(raw string) (string, error) {
 	if parsed.RawQuery != "" || parsed.ForceQuery || strings.Contains(raw, "#") {
 		return "", fmt.Errorf("invalid doi-mirror URL %q: query and fragment are not allowed", raw)
 	}
-	if err := assertFetchable(raw, false); err != nil {
+	if err := validateFetchURL(raw, false); err != nil {
 		return "", fmt.Errorf("invalid doi-mirror URL %q: %w", raw, err)
 	}
 	return raw, nil
@@ -85,7 +85,7 @@ func gatewayClient(base *http.Client, jar http.CookieJar) *http.Client {
 		if len(via) >= 10 {
 			return errors.New("gateway redirect limit exceeded")
 		}
-		if err := assertFetchable(next.URL.String(), false); err != nil {
+		if err := validateFetchURL(next.URL.String(), false); err != nil {
 			return err
 		}
 		if existingRedirect != nil {
@@ -148,7 +148,7 @@ func (h *Harvester) doiMirrorLookup(
 	if base == "" {
 		return doiMirrorLookup{}, doiMirrorFailure{message: "provider is disabled", kind: errorKindDisabled}
 	}
-	if err := assertFetchable(base, false); err != nil {
+	if err := validateFetchURL(base, false); err != nil {
 		return doiMirrorLookup{}, doiMirrorFailure{message: "lookup URL refused: " + err.Error(), kind: errorKind(err)}
 	}
 	// The lookup POST goes through the fetch gateway like every other harvester
@@ -242,7 +242,7 @@ func (h *Harvester) doiMirrorDownload(
 		if attempt == 1 {
 			*rungs = append(*rungs, "doi-mirror:chrome")
 		}
-		if err := assertFetchable(lookup.pdfURL, false); err != nil {
+		if err := validateFetchURL(lookup.pdfURL, false); err != nil {
 			failure := doiMirrorFailure{message: "PDF URL refused: " + err.Error(), kind: errorKind(err)}
 			if attempt == 0 {
 				return nil, 0, failure
@@ -391,7 +391,7 @@ func (h *Harvester) fetchDOIMirror(ctx context.Context, identifier string, optio
 			rungs,
 		)
 	}
-	converted, err := h.convert(attemptCtx, kindPDF, pdfSource, pdfBody)
+	converted, err := h.convertFetchedContent(attemptCtx, kindPDF, pdfSource, pdfBody)
 	if err != nil {
 		return doiMirrorFailure{
 			message: "PDF conversion failed: " + err.Error(),
@@ -509,7 +509,7 @@ func doiMirrorPDFLink(body []byte, finalURL string) (string, error) {
 		return "", fmt.Errorf("doi-mirror PDF link is invalid")
 	}
 	resolved.Fragment = ""
-	if err := assertFetchable(resolved.String(), false); err != nil {
+	if err := validateFetchURL(resolved.String(), false); err != nil {
 		return "", fmt.Errorf("doi-mirror PDF link refused: %w", err)
 	}
 	return resolved.String(), nil

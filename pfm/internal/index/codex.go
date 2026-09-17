@@ -35,7 +35,7 @@ type codexPayload struct {
 	Content        json.RawMessage `json:"content"`
 }
 
-func parseCodex(
+func parseCodexRolloutFile(
 	file diskFile,
 	start int64,
 	rollout store.Rollout,
@@ -53,13 +53,13 @@ func parseCodex(
 		if err := json.Unmarshal(line, &record); err != nil {
 			return
 		}
-		if value := firstNonEmpty(record.CWD, record.Payload.CWD); value != "" {
+		if value := firstNonEmptyCodexField(record.CWD, record.Payload.CWD); value != "" {
 			rollout.CWD = value
 		}
-		if value := firstNonEmpty(record.SessionID, record.Payload.SessionID); value != "" {
+		if value := firstNonEmptyCodexField(record.SessionID, record.Payload.SessionID); value != "" {
 			rollout.SessionID = value
 		}
-		if value := firstNonEmpty(
+		if value := firstNonEmptyCodexField(
 			record.ParentThread,
 			record.ParentThreadID,
 			record.Payload.ParentThread,
@@ -74,7 +74,7 @@ func parseCodex(
 			rollout.UserThread = false
 			sourceKnown = true
 		}
-		if source := firstNonEmpty(record.ThreadSource, record.Payload.ThreadSource); source != "" {
+		if source := firstNonEmptyCodexField(record.ThreadSource, record.Payload.ThreadSource); source != "" {
 			rollout.UserThread = source == messageRoleUser
 			sourceKnown = true
 		}
@@ -171,7 +171,7 @@ func protocolPrompt(prompt string) bool {
 	return false
 }
 
-func firstNonEmpty(values ...string) string {
+func firstNonEmptyCodexField(values ...string) string {
 	for _, value := range values {
 		if value != "" {
 			return value

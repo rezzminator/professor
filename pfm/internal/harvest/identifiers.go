@@ -56,7 +56,7 @@ func ExtractMetaLinks(pageHTML string) (doi, pdf, title string) {
 	return
 }
 
-func normalizeISBN(s string) string {
+func NormalizeISBN(s string) string {
 	d := strings.ToUpper(strings.Map(func(r rune) rune {
 		if r >= '0' && r <= '9' {
 			return r
@@ -77,7 +77,6 @@ func normalizeISBN(s string) string {
 	}
 	return ""
 }
-func NormalizeISBN(s string) string { return normalizeISBN(s) }
 
 func isbn13Valid(s string) bool {
 	if !strings.HasPrefix(s, "978") && !strings.HasPrefix(s, "979") {
@@ -129,9 +128,9 @@ func NormalizeIdentifier(input string) string {
 		return strings.TrimSpace(input[5:])
 	}
 	if strings.HasPrefix(low, "isbn:") {
-		return normalizeISBN(input[5:])
+		return NormalizeISBN(input[5:])
 	}
-	return normalizeISBN(input)
+	return NormalizeISBN(input)
 }
 
 func ClassifyIdentifier(input string) IdentifierKind {
@@ -166,7 +165,7 @@ func ClassifyIdentifier(input string) IdentifierKind {
 	if regexp.MustCompile(`^\d{7,9}$`).MatchString(trim) {
 		return IdentifierPMID
 	}
-	if strings.HasPrefix(low, "isbn:") || normalizeISBN(trim) != "" {
+	if strings.HasPrefix(low, "isbn:") || NormalizeISBN(trim) != "" {
 		return IdentifierISBN
 	}
 	return IdentifierNone

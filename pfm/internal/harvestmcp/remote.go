@@ -71,7 +71,7 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	if version == "" {
 		version = "dev"
 	}
-	service, err := NewConfigured(version, runtime)
+	service, err := NewConfiguredHarvester(version, runtime)
 	if err != nil {
 		return nil, err
 	}

@@ -37,7 +37,7 @@ type engine struct {
 type pinnedHarvestProvisioner struct{}
 
 func (pinnedHarvestProvisioner) Plan(platform harvestpy.Platform) (harvestpy.InstallPlan, error) {
-	return harvestpy.Plan(platform)
+	return harvestpy.PlanConversionEnvironment(platform)
 }
 
 func (pinnedHarvestProvisioner) Provision(
@@ -52,7 +52,7 @@ func (pinnedHarvestProvisioner) Check(
 	root string,
 	platform harvestpy.Platform,
 ) (harvestpy.CheckReport, error) {
-	return harvestpy.Check(ctx, root, platform)
+	return harvestpy.CheckConversionEnvironment(ctx, root, platform)
 }
 
 // NewHarvestProvisioner returns the production pinned-runtime adapter. Tests
@@ -60,7 +60,7 @@ func (pinnedHarvestProvisioner) Check(
 func NewHarvestProvisioner() HarvestProvisioner { return pinnedHarvestProvisioner{} }
 
 func Run(ctx context.Context, options Options) (Report, error) {
-	options, err := normalize(options)
+	options, err := normalizeInstallerOptions(options)
 	if err != nil {
 		return Report{}, fmt.Errorf("resolve installer options: %w", err)
 	}
@@ -91,7 +91,7 @@ func Run(ctx context.Context, options Options) (Report, error) {
 		options:     options,
 		apply:       options.Mode != ModeDryRun,
 		stamp:       options.Now().Format("20060102-150405"),
-		managedRoot: filepath.Join(options.Home, ".local", "share", "pfm", "install"),
+		managedRoot: managedRootForHome(options.Home),
 	}
 	installer.say("pfm install: home=%s config=%s", options.Home, options.ConfigDir)
 	switch options.Mode {
@@ -103,13 +103,8 @@ func Run(ctx context.Context, options Options) (Report, error) {
 		installer.say("MODE: uninstall")
 	}
 	installer.say("")
-	if options.Mode == ModeApply {
-		if err := installer.preflightInstall(ctx); err != nil {
-			return installer.report, err
-		}
-	}
-	if options.Mode == ModeUninstall {
-		if err := installer.preflightUninstall(ctx); err != nil {
+	if options.Mode != ModeDryRun {
+		if err := installer.preflight(ctx, options.Mode); err != nil {
 			return installer.report, err
 		}
 	}
@@ -154,50 +149,40 @@ func nameSyncServiceRunning(ctx context.Context, runner CommandRunner) (running,
 	return false, false
 }
 
-// preflightInstall executes the complete dry planner against the same host
-// snapshot immediately before apply. Every planner stays read-only, but all
-// conflicts and future paths are computed before installHarvest or asset
-// staging can mutate the machine.
-func (installer *engine) preflightInstall(ctx context.Context) error {
+// preflight executes the selected complete planner against the same host
+// snapshot immediately before mutation. Every planner stays read-only, but all
+// conflicts and future paths are computed before install or uninstall can
+// mutate the machine.
+func (installer *engine) preflight(ctx context.Context, mode Mode) error {
 	options := installer.options
-	options.Mode = ModeDryRun
 	options.Stdout = io.Discard
 	preview := &engine{
 		options: options, apply: false, stamp: installer.stamp, managedRoot: installer.managedRoot,
 	}
-	installErr := preview.install(ctx)
-	if len(preview.planErrors) != 0 {
-		installErr = errors.Join(append([]error{installErr}, preview.planErrors...)...)
+	var (
+		planErr error
+		label   string
+	)
+	switch mode {
+	case ModeApply:
+		preview.options.Mode = ModeDryRun
+		planErr = preview.install(ctx)
+		label = "preflight apply plan"
+	case ModeUninstall:
+		preview.options.Mode = ModeUninstall
+		planErr = preview.uninstall(ctx)
+		label = "preflight uninstall plan"
+	default:
+		return fmt.Errorf("preflight unknown installer mode %d", mode)
 	}
-	if installErr != nil {
-		return fmt.Errorf("preflight apply plan: %w", installErr)
+	if len(preview.planErrors) != 0 {
+		planErr = errors.Join(append([]error{planErr}, preview.planErrors...)...)
+	}
+	if planErr != nil {
+		return fmt.Errorf("%s: %w", label, planErr)
 	}
 	if preview.outputErr != nil {
-		return fmt.Errorf("preflight apply plan output: %w", preview.outputErr)
-	}
-	return nil
-}
-
-// preflightUninstall runs the complete removal planner before any installed
-// launcher, command, hook, unit, or ownership artifact is touched. Codex
-// command conflicts are therefore refusals, never half-uninstalled hosts.
-func (installer *engine) preflightUninstall(ctx context.Context) error {
-	options := installer.options
-	options.Mode = ModeUninstall
-	options.Stdout = io.Discard
-	preview := &engine{
-		options: options, apply: false, stamp: installer.stamp,
-		managedRoot: installer.managedRoot,
-	}
-	uninstallErr := preview.uninstall(ctx)
-	if len(preview.planErrors) != 0 {
-		uninstallErr = errors.Join(append([]error{uninstallErr}, preview.planErrors...)...)
-	}
-	if uninstallErr != nil {
-		return fmt.Errorf("preflight uninstall plan: %w", uninstallErr)
-	}
-	if preview.outputErr != nil {
-		return fmt.Errorf("preflight uninstall plan output: %w", preview.outputErr)
+		return fmt.Errorf("%s output: %w", label, preview.outputErr)
 	}
 	return nil
 }
@@ -825,7 +810,7 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	}
 	managerAvailable := installer.userManagerAvailable(ctx)
 	if managerAvailable && installer.apply {
-		installer.runSystemctl(ctx, "disable", "--now", "pfm-name-sync.path", "pfm-name-sync.timer", mcpUnitName)
+		installer.runSystemctl(ctx, "disable", "--now", "pfm-name-sync.path", nameSyncTimerUnit, mcpUnitName)
 	}
 	if _, err := installer.retireUnitEnablements(
 		filepath.Join(installer.options.Home, ".config", "systemd", "user"),
@@ -1779,7 +1764,7 @@ func (installer *engine) retireEmptyDirTolerant(path string) error {
 var unitNames = []string{
 	"pfm-name-sync.path",
 	"pfm-name-sync.service",
-	"pfm-name-sync.timer",
+	nameSyncTimerUnit,
 }
 
 const (
@@ -1799,7 +1784,7 @@ var unitEnablements = []struct {
 	wants string
 }{
 	{unit: "pfm-name-sync.path", wants: systemdDefaultWants},
-	{unit: "pfm-name-sync.timer", wants: "timers.target.wants"},
+	{unit: nameSyncTimerUnit, wants: "timers.target.wants"},
 	{unit: mcpUnitName, wants: systemdDefaultWants},
 }
 
@@ -1927,7 +1912,7 @@ func (installer *engine) reloadUnits(ctx context.Context) {
 		return
 	}
 	installer.runSystemctl(ctx, "daemon-reload")
-	installer.runSystemctl(ctx, "enable", "--now", "pfm-name-sync.path", "pfm-name-sync.timer")
+	installer.runSystemctl(ctx, "enable", "--now", "pfm-name-sync.path", nameSyncTimerUnit)
 	if installer.mcpAnyEnabled() {
 		installer.runSystemctl(ctx, "enable", "--now", mcpUnitName)
 	}
@@ -1954,7 +1939,7 @@ func (installer *engine) runSystemctl(ctx context.Context, arguments ...string) 
 }
 
 func (installer *engine) wireSettings() error {
-	ownershipPath := filepath.Join(installer.managedRoot, "settings-hook-ownership.json")
+	ownershipPath := settingsHookOwnershipPath(installer.managedRoot)
 	ownership, ownershipRaw, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {
 		return fmt.Errorf("read settings hook ownership %s: %w", ownershipPath, err)
@@ -2080,7 +2065,7 @@ func (installer *engine) writeSettingsHookOwnership(
 }
 
 func (installer *engine) wireCodexHooks() error {
-	ownershipPath := filepath.Join(installer.managedRoot, "settings-hook-ownership.json")
+	ownershipPath := settingsHookOwnershipPath(installer.managedRoot)
 	ownership, ownershipRaw, err := readSettingsHookOwnership(ownershipPath)
 	if err != nil {
 		return fmt.Errorf("read settings hook ownership %s: %w", ownershipPath, err)
@@ -2175,7 +2160,7 @@ func (installer *engine) wireCodexHooks() error {
 			}
 		} else if installer.options.CodexBinary != "" {
 			if err := installer.change("trust Professor appendix hook "+account, func() error {
-				return codexappendix.Register(
+				return codexappendix.RegisterAppendix(
 					context.Background(),
 					installer.options.CodexBinary,
 					installer.options.Home,
@@ -2308,7 +2293,7 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) (returnErr er
 				Home:    installer.options.Home,
 				FleetDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
 			}
-			state := fleetdb.Open(ctx, values)
+			state := fleetdb.OpenSharedState(ctx, values)
 			defer func() {
 				if err := state.Close(); err != nil {
 					returnErr = errors.Join(

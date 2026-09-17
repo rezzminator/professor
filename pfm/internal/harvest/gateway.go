@@ -117,7 +117,7 @@ var errGatewayNoRung = errors.New("every gateway rung was exhausted")
 // fetch runs one request through the gateway ladder.
 func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
 	if !req.trustedOrigin {
-		if err := assertFetchable(req.url, false); err != nil {
+		if err := validateFetchURL(req.url, false); err != nil {
 			return gatewayResponse{}, err
 		}
 	}
@@ -234,7 +234,7 @@ func (h *Harvester) gatewayRung(
 func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
 	var out gatewayResponse
 	if !req.trustedOrigin {
-		if err := assertFetchable(req.url, false); err != nil {
+		if err := validateFetchURL(req.url, false); err != nil {
 			return out, err
 		}
 	}

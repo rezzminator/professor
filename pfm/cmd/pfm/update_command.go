@@ -353,7 +353,7 @@ func updateRepository(
 		sourceAdvanced = true
 	}
 	for index := range replacements {
-		if err := replaceUpdateFile(candidateA, replacements[index].target); err != nil {
+		if err := copyUpdateFile(candidateA, replacements[index].target); err != nil {
 			rollbackErr := rollbackUpdateState(
 				ctx,
 				repo,
@@ -573,7 +573,7 @@ func rollbackUpdateReplacements(replacements []updateReplacement, stderr io.Writ
 		if !replacement.replaced {
 			continue
 		}
-		if err := replaceUpdateFile(replacement.backup, replacement.target); err != nil {
+		if err := copyUpdateFile(replacement.backup, replacement.target); err != nil {
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("%s: %w", replacement.target, err))
 			continue
 		}
@@ -720,14 +720,7 @@ func buildUpdateCandidate(ctx context.Context, repo, version, output string) err
 }
 
 func envWithEmptyGOFLAGS() []string {
-	env := make([]string, 0, len(os.Environ())+1)
-	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, "GOFLAGS=") {
-			continue
-		}
-		env = append(env, entry)
-	}
-	return append(env, "GOFLAGS=")
+	return environmentWith("GOFLAGS", "")
 }
 
 func fileHash(path string) (string, error) {
@@ -739,18 +732,6 @@ func fileHash(path string) (string, error) {
 }
 
 func copyUpdateFile(source, target string) error {
-	raw, err := os.ReadFile(source)
-	if err != nil {
-		return err
-	}
-	info, err := os.Stat(source)
-	if err != nil {
-		return err
-	}
-	return atomicfile.Write(target, raw, info.Mode().Perm())
-}
-
-func replaceUpdateFile(source, target string) error {
 	raw, err := os.ReadFile(source)
 	if err != nil {
 		return err
@@ -916,12 +897,5 @@ func runUpdateCandidateCommand(
 }
 
 func updateSourceRepoEnv(sourceRepo string) []string {
-	environment := make([]string, 0, len(os.Environ())+1)
-	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, "PFM_SOURCE_REPO=") {
-			continue
-		}
-		environment = append(environment, entry)
-	}
-	return append(environment, "PFM_SOURCE_REPO="+sourceRepo)
+	return environmentWith("PFM_SOURCE_REPO", sourceRepo)
 }

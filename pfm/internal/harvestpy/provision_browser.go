@@ -29,10 +29,10 @@ func BrowserRuntimeRoot(root string, platform Platform) string {
 // downloads Chromium — patchright drives system Chrome via channel="chrome".
 // The conversion environment is not touched.
 func ProvisionBrowser(ctx context.Context, options ProvisionOptions) (ProvisionResult, error) {
-	return provisionBrowser(ctx, options, immutableTargets)
+	return provisionBrowserWithTargets(ctx, options, immutableTargets)
 }
 
-func provisionBrowser(
+func provisionBrowserWithTargets(
 	ctx context.Context,
 	options ProvisionOptions,
 	targets map[Platform]Target,

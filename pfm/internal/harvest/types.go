@@ -359,7 +359,7 @@ func New(options Options) (*Harvester, error) {
 	options.MD5CatalogURL = resolved.md5CatalogURL
 	options.GoogleScholarURL = resolved.googleScholarURL
 	if options.CacheDir == "" {
-		dir, err := defaultCacheDir()
+		dir, err := defaultHarvestCacheDir()
 		if err != nil {
 			return nil, err
 		}

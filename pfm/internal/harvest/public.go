@@ -132,7 +132,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 		} else {
 			fetchedAt := ""
 			body = string(raw)
-			meta, parsed := parseFrontmatter(string(raw))
+			meta, parsed := parseCacheFrontmatter(string(raw))
 			if strings.HasPrefix(string(raw), "---\n") && meta["source"] != frontmatterSourceHarvester &&
 				(meta["url"] != "" || meta["method"] != "" || meta["rungs"] != "") {
 				return h.publicExportFailure(
@@ -199,7 +199,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 
 	out.Chars = contentChars(body)
 	out.ContentChars = out.Chars
-	out.Tokens = estimateTokens(body)
+	out.Tokens = EstimateTokens(body)
 	if metadataRemoved > 0 && inlineLimit > 0 {
 		inlineLimit -= metadataRemoved
 		if inlineLimit < 1 {

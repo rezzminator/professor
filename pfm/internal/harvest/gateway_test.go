@@ -195,7 +195,7 @@ func TestGatewayClientJarSemantics(t *testing.T) {
 }
 
 // TestGatewayFetchHonorsTrustedOrigin: gatewayFetch used to call
-// assertFetchable(req.url, false) unconditionally, refusing the operator's
+// validateFetchURL(req.url, false) unconditionally, refusing the operator's
 // own loopback origin as a private host even though gatewayAttempt (which
 // every rung underneath actually calls) already honors trustedOrigin. The two
 // entry points must agree.

@@ -24,7 +24,7 @@ var testPFMBinary string
 type noNetworkHarvestProvisioner struct{}
 
 func (noNetworkHarvestProvisioner) Plan(platform harvestpy.Platform) (harvestpy.InstallPlan, error) {
-	return harvestpy.Plan(platform)
+	return harvestpy.PlanConversionEnvironment(platform)
 }
 
 func (noNetworkHarvestProvisioner) Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error) {

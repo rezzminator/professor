@@ -18,7 +18,7 @@ type userAgentTransport struct {
 }
 
 func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if err := assertFetchable(req.URL.String(), false); err != nil {
+	if err := validateFetchURL(req.URL.String(), false); err != nil {
 		return nil, err
 	}
 	clone := req.Clone(req.Context())

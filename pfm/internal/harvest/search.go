@@ -276,7 +276,7 @@ func searchSearXNG(ctx context.Context, q string, o SearchOptions) ([]SearchResu
 			}
 			out = append(
 				out,
-				SearchResult{Title: r.Title, URL: r.URL, Snippet: truncateRunes(r.Content, 300), Engine: engine},
+				SearchResult{Title: r.Title, URL: r.URL, Snippet: truncateOutputRunes(r.Content, 300), Engine: engine},
 			)
 		}
 	}
@@ -338,7 +338,7 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 				SearchResult{
 					Title:   r.Title,
 					URL:     r.URL,
-					Snippet: truncateRunes(r.Description, 300),
+					Snippet: truncateOutputRunes(r.Description, 300),
 					Engine:  searchBackendBrave,
 				},
 			)
@@ -347,7 +347,7 @@ func searchBrave(ctx context.Context, q string, o SearchOptions) ([]SearchResult
 	return out, status, nil
 }
 
-func truncateRunes(value string, maxRunes int) string {
+func truncateOutputRunes(value string, maxRunes int) string {
 	r := []rune(value)
 	if len(r) <= maxRunes {
 		return value

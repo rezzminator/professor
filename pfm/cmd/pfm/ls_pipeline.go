@@ -587,7 +587,7 @@ func sendRefresh(
 	refreshing bool,
 	updates chan<- ui.Snapshot,
 ) bool {
-	snapshot := buildSnapshot(ctx, environment, request, fleet.Compose(environment, request.View, data, live))
+	snapshot := buildSnapshot(ctx, environment, request, fleet.ComposeFleet(environment, request.View, data, live))
 	snapshot.Refreshing = refreshing
 	select {
 	case updates <- snapshot:

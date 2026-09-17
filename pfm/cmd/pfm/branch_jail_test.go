@@ -145,7 +145,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := fleetdb.Open(context.Background(), resolved)
+	state := fleetdb.OpenSharedState(context.Background(), resolved)
 	seats, seatsErr := state.BranchSeats(context.Background())
 	closeErr := state.Close()
 	if seatsErr != nil || closeErr != nil {

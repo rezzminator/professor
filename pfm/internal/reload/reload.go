@@ -520,7 +520,7 @@ func sleepPoll(ctx context.Context, poll time.Duration) error {
 }
 
 func composerShowsExit(capture string) bool {
-	return strings.Contains(strings.Join(strings.Fields(lastComposerLine(capture)), " "), "/exit")
+	return strings.Contains(strings.Join(strings.Fields(lastReloadComposerLine(capture)), " "), "/exit")
 }
 
 // exitDialogPattern is the selected row of Claude Code's background-work
@@ -660,7 +660,7 @@ func deliverThen(
 			if trustPrompt {
 				continue
 			}
-			if lastComposerLine(capture) != "" {
+			if lastReloadComposerLine(capture) != "" {
 				goto ready
 			}
 		}
@@ -889,7 +889,7 @@ func squashSpace(value string) string {
 	return strings.Join(strings.Fields(value), "")
 }
 
-func lastComposerLine(capture string) string {
+func lastReloadComposerLine(capture string) string {
 	lines := strings.Split(capture, "\n")
 	for index := len(lines) - 1; index >= 0; index-- {
 		if strings.Contains(lines[index], "❯") || strings.Contains(lines[index], "›") {

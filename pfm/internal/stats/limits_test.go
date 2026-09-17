@@ -383,7 +383,7 @@ func TestCodexWindowNameUsesServerSeconds(t *testing.T) {
 		{seconds: 5_400, want: "90m"},
 		{seconds: 45, want: "45s"},
 	} {
-		if got := codexWindowName(test.seconds); got != test.want {
+		if got := codexUsageWindowName(test.seconds); got != test.want {
 			t.Errorf("codexWindowName(%d)=%q, want %q", test.seconds, got, test.want)
 		}
 	}

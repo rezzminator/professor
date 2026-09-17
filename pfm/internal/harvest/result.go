@@ -39,7 +39,7 @@ func (h *Harvester) storeResult(
 		Bytes:        bytes,
 		Chars:        chars,
 		ContentChars: chars,
-		Tokens:       estimateTokens(content),
+		Tokens:       EstimateTokens(content),
 		HTTPStatus:   statusCode,
 		Rungs:        rungs,
 	}
@@ -54,7 +54,7 @@ func (h *Harvester) storeResultAlias(
 	content := result.Content
 	if result.Path != "" {
 		if raw, err := os.ReadFile(result.Path); err == nil {
-			_, content = parseFrontmatter(string(raw))
+			_, content = parseCacheFrontmatter(string(raw))
 		}
 	}
 	stored := h.storeResult(
@@ -86,7 +86,7 @@ func (h *Harvester) resultFromCache(source, kind, content string, meta map[strin
 	} else {
 		bytes = int64(len(content))
 	}
-	tokens := estimateTokens(content)
+	tokens := EstimateTokens(content)
 	if stored, parseErr := strconv.Atoi(meta["token_count"]); parseErr == nil && stored >= 0 {
 		tokens = stored
 	}

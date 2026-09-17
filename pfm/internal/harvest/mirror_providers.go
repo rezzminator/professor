@@ -89,7 +89,7 @@ func resolveProviderURL(base, raw string) (string, error) {
 	}
 	resolved := baseURL.ResolveReference(ref)
 	resolved.Fragment = ""
-	if err := assertFetchable(resolved.String(), false); err != nil {
+	if err := validateFetchURL(resolved.String(), false); err != nil {
 		return "", err
 	}
 	return resolved.String(), nil
@@ -296,7 +296,7 @@ func (h *Harvester) md5CatalogRecord(ctx context.Context, md5 string) (string, s
 			parsed = baseURL.ResolveReference(parsed)
 		}
 		parsed.Fragment = ""
-		if err := assertFetchable(parsed.String(), false); err != nil {
+		if err := validateFetchURL(parsed.String(), false); err != nil {
 			return "", response.finalURL, &providerLookupError{
 				message: err.Error(),
 				kind:    errorKind(err),

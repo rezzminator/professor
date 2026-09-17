@@ -61,6 +61,11 @@ type projectReport struct {
 	Items    []projectReportItem
 }
 
+type projectTerminalEnvelope struct {
+	Error    string `json:"error,omitempty"`
+	Terminal string `json:"terminal"`
+}
+
 func (report projectReport) reviewRequired() int {
 	return report.Counts[projectUpdated] + report.Counts[projectNew] + report.Counts[projectGoneUpstream] + report.Counts[projectLocalDeleted]
 }
@@ -342,7 +347,7 @@ func writeProjectFailure(stdout io.Writer, jsonOutput bool, err error) {
 	terminal := "FAILED — " + err.Error()
 	if jsonOutput {
 		if encodeErr := json.NewEncoder(stdout).
-			Encode(map[string]any{"error": err.Error(), "terminal": terminal}); encodeErr != nil {
+			Encode(projectTerminalEnvelope{Error: err.Error(), Terminal: terminal}); encodeErr != nil {
 			fmt.Fprintf(stdout, "FAILED — encode project error: %v\n", encodeErr)
 		}
 		return
@@ -362,7 +367,7 @@ func writeProjectFailure(stdout io.Writer, jsonOutput bool, err error) {
 func writeProjectUnmanaged(stdout io.Writer, jsonOutput bool) {
 	terminal := "NOT-MANAGED — no .professor/baseline.json at or above this directory (expected in the Professor source clone); run `pfm update check` inside each adopted project"
 	if jsonOutput {
-		if encodeErr := json.NewEncoder(stdout).Encode(map[string]any{"terminal": terminal}); encodeErr != nil {
+		if encodeErr := json.NewEncoder(stdout).Encode(projectTerminalEnvelope{Terminal: terminal}); encodeErr != nil {
 			fmt.Fprintf(stdout, "NOT-MANAGED — encode project report: %v\n", encodeErr)
 		}
 		return

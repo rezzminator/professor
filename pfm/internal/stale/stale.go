@@ -80,13 +80,13 @@ func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
 			if errors.Is(signal(pid, 0), syscall.ESRCH) {
 				continue
 			}
-			scan.Unreadable = append(scan.Unreadable, fmt.Sprintf("pid=%d  %s: %v", pid, clip(command), err))
+			scan.Unreadable = append(scan.Unreadable, fmt.Sprintf("pid=%d  %s: %v", pid, clipCommand(command), err))
 			continue
 		}
 		if image != current {
 			scan.Stale = append(
 				scan.Stale,
-				Process{PID: pid, Command: clip(command), MCP: slices.Contains(argv, "mcp")},
+				Process{PID: pid, Command: clipCommand(command), MCP: slices.Contains(argv, "mcp")},
 			)
 		}
 	}
@@ -97,7 +97,13 @@ func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
 // scans again and fails naming each survivor — readback, not trust. It only
 // ever signals images that are not the installed binary, so the binary just
 // installed, and the daemon restarted on it, are never touched.
-func Sweep(table gather.ProcFS, binary string, signal Signaler, stdout io.Writer, wait time.Duration) error {
+func SweepStaleProcesses(
+	table gather.ProcFS,
+	binary string,
+	signal Signaler,
+	stdout io.Writer,
+	wait time.Duration,
+) error {
 	scan, err := Find(table, binary, signal)
 	if err != nil {
 		return err
@@ -172,7 +178,7 @@ func deliver(signal Signaler, pid int, which syscall.Signal) {
 	}
 }
 
-func clip(command string) string {
+func clipCommand(command string) string {
 	if runes := []rune(command); len(runes) > 70 {
 		return string(runes[:70])
 	}
@@ -210,7 +216,7 @@ func run(args []string, stdout, stderr io.Writer, table gather.ProcFS, installed
 	}
 	binary := *binaryFlag
 	if *sweep {
-		if err := Sweep(table, binary, signal, stdout, 3*time.Second); err != nil {
+		if err := SweepStaleProcesses(table, binary, signal, stdout, 3*time.Second); err != nil {
 			fmt.Fprintf(stderr, "pfm internal stale: %v\n", err)
 			return 1
 		}

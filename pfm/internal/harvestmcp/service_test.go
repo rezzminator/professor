@@ -14,7 +14,7 @@ import (
 )
 
 func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
-	service, err := NewConfigured(
+	service, err := NewConfiguredHarvester(
 		"test",
 		Runtime{
 			Home:       t.TempDir(),
@@ -109,7 +109,10 @@ func listToolNames(t *testing.T, service *Service) []string {
 // still listed `search`, and calling it always failed with a configuration
 // error the caller had no way to see in advance.
 func TestSearchToolHiddenWithoutABackend(t *testing.T) {
-	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	service, err := NewConfiguredHarvester(
+		"test",
+		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +128,7 @@ func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 // TestSearchToolListedWithSearXNGConfigured is TestSearchToolHiddenWithoutABackend's
 // positive twin: a configured backend must still register the tool.
 func TestSearchToolListedWithSearXNGConfigured(t *testing.T) {
-	service, err := NewConfigured(
+	service, err := NewConfiguredHarvester(
 		"test",
 		Runtime{
 			Home:       t.TempDir(),
@@ -206,7 +209,7 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	result := harvest.Result{HTTPStatus: 200}
 
-	searchOn, err := NewConfigured(
+	searchOn, err := NewConfiguredHarvester(
 		"test",
 		Runtime{
 			Home:       t.TempDir(),
@@ -225,7 +228,10 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 		}
 	}
 
-	searchOff, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	searchOff, err := NewConfiguredHarvester(
+		"test",
+		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +254,7 @@ func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	t.Setenv(paths.EnvHome, home)
 	t.Setenv("WEBFETCH_DIR", filepath.Join(t.TempDir(), "legacy"))
-	service, err := NewConfigured("test", Runtime{Home: home})
+	service, err := NewConfiguredHarvester("test", Runtime{Home: home})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,7 +266,7 @@ func TestServiceCacheIsTheOneRootNotTheWorkingDirectory(t *testing.T) {
 
 func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 	home := t.TempDir()
-	service, err := NewConfigured("test", Runtime{
+	service, err := NewConfiguredHarvester("test", Runtime{
 		Home:             home,
 		CacheDir:         filepath.Join(home, "cache"),
 		DOIMirrorURL:     "https://mirror.example/doi-mirror",
@@ -291,7 +297,10 @@ func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 // `use `search“ list: it must not point at a `search` tool the server does
 // not advertise.
 func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
-	off, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")})
+	off, err := NewConfiguredHarvester(
+		"test",
+		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +314,7 @@ func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
 		t.Fatalf("searchCache miss text %q names `search` with no backend configured", offText)
 	}
 
-	on, err := NewConfigured(
+	on, err := NewConfiguredHarvester(
 		"test",
 		Runtime{
 			Home:       t.TempDir(),

@@ -111,10 +111,8 @@ func (watcher Watcher) Watch(
 			// Back to work: the next idle is a new event worth announcing.
 			announcedIdle = false
 		}
-		select {
-		case <-ctx.Done():
-			return status, ctx.Err()
-		case <-time.After(poll):
+		if err := waitForNextPoll(ctx, poll); err != nil {
+			return status, err
 		}
 	}
 }

@@ -297,7 +297,7 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 			rungs,
 		)
 	}
-	converted, err := h.convert(ctx, kind, fileURL, response.body)
+	converted, err := h.convertFetchedContent(ctx, kind, fileURL, response.body)
 	if err != nil {
 		if kind != kindPDF || !emptyPDFConversionError(err) {
 			return providerResult(

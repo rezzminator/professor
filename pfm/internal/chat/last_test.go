@@ -21,7 +21,7 @@ func TestLastReadsTheNewestAnswerPastLaterToolCalls(t *testing.T) {
 		assistantSaid("tests are green"),
 		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}}]}}`,
 	)
-	result, err := Last(context.Background(), nil, LastRequest{Target: id})
+	result, err := LastAnswer(context.Background(), nil, LastRequest{Target: id})
 	if err != nil {
 		t.Fatalf("Last() error = %v", err)
 	}
@@ -37,7 +37,7 @@ func TestLastNamesAChatThatHasNotAnswered(t *testing.T) {
 	root := testjail.Fleet(t)
 	const id = "b2222222-2222-4222-8222-222222222222"
 	seedClaudeChat(t, root, id)
-	result, err := Last(context.Background(), nil, LastRequest{Target: id})
+	result, err := LastAnswer(context.Background(), nil, LastRequest{Target: id})
 	var target *TargetError
 	if !errors.Is(err, ErrNoAnswer) || errors.As(err, &target) {
 		t.Fatalf("Last() error = %v, want ErrNoAnswer and no *TargetError", err)

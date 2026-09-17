@@ -19,7 +19,7 @@ type Verbs struct {
 
 // Last is chat.Last over the bound runtime.
 func (verbs Verbs) Last(ctx context.Context, request LastRequest) (LastResult, error) {
-	return Last(ctx, verbs.Runtime, request)
+	return LastAnswer(ctx, verbs.Runtime, request)
 }
 
 // Status is chat.Status over the bound runtime.

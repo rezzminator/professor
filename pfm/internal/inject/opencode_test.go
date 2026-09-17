@@ -57,7 +57,7 @@ func TestTargetFromPartsNamesUnknownSocketEngine(t *testing.T) {
 }
 
 func TestEngineNameCoversOpenCode(t *testing.T) {
-	if got := engineName(string(pfmengine.OpenCode)); got != "OpenCode" {
+	if got := injectedEngineName(string(pfmengine.OpenCode)); got != "OpenCode" {
 		t.Errorf("engineName(ox) = %q, want OpenCode", got)
 	}
 }

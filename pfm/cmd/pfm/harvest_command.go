@@ -65,7 +65,7 @@ func runHarvesterMCP(args []string, _, stderr io.Writer, runtime commandRuntime)
 		)
 		return 2
 	}
-	service, err := harvestmcp.NewConfigured(version, harvestRuntime(runtime))
+	service, err := harvestmcp.NewConfiguredHarvester(version, harvestRuntime(runtime))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm mcp harvester: %v\n", err)
 		return 1

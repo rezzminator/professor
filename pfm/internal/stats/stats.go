@@ -447,7 +447,7 @@ func chatTrees(
 		}
 		tree := bySocket[row.Socket]
 		if tree == nil {
-			tree = &chatTree{chat: Chat{Socket: row.Socket, Name: row.Name, Engine: engineName(row.Kind)}}
+			tree = &chatTree{chat: Chat{Socket: row.Socket, Name: row.Name, Engine: statsEngineName(row.Kind)}}
 			bySocket[row.Socket] = tree
 		}
 		tree.roots = append(tree.roots, row.PanePIDs...)
@@ -527,7 +527,7 @@ func liveKind(kind compose.Kind) bool {
 		kind == compose.LiveSplit || kind == compose.Agent || kind == compose.Booting
 }
 
-func engineName(kind compose.Kind) string {
+func statsEngineName(kind compose.Kind) string {
 	if kind == compose.LiveCodex {
 		return pfmengine.MustLookup(pfmengine.Codex).LongName
 	}

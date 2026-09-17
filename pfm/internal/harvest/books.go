@@ -20,7 +20,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	var out []Candidate
 	// OAPEN exposes direct ORIGINAL bitstreams for open academic books.
 	var search string
-	if isbn := normalizeISBN(query); isbn != "" {
+	if isbn := NormalizeISBN(query); isbn != "" {
 		search = "isbn:" + isbn
 	} else {
 		search = "title:" + query
@@ -68,7 +68,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		}
 	}
 	// Gutendex is useful for public-domain title searches and has no key.
-	if normalizeISBN(query) == "" {
+	if NormalizeISBN(query) == "" {
 		var data struct {
 			Results []struct {
 				Title     string            `json:"title"`
@@ -99,7 +99,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	}
 	// OpenLibrary index -> Internet Archive full text, with the oracle's
 	// public-domain gate. Never serve controlled-lending copies.
-	isbn := normalizeISBN(query)
+	isbn := NormalizeISBN(query)
 	ocaid := ""
 	if isbn != "" {
 		var data struct {
@@ -241,7 +241,7 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 			} `json:"items"`
 		}
 		bookQuery := query
-		if isbn := normalizeISBN(query); isbn != "" {
+		if isbn := NormalizeISBN(query); isbn != "" {
 			bookQuery = "isbn:" + isbn
 		}
 		bookURL := "https://www.googleapis.com/books/v1/volumes?q=" + url.QueryEscape(
@@ -366,7 +366,7 @@ func preferredTextFormat(formats map[string]string) (string, string) {
 // internetarchive's). Endpoint verified live 2026-08-22 — note the working form
 // is `/brief/isbn/{id}.json`, NOT `/brief/json/{isbn}` (that 400s).
 func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query string) []Candidate {
-	isbn := normalizeISBN(query)
+	isbn := NormalizeISBN(query)
 	if isbn == "" {
 		return nil
 	}

@@ -66,7 +66,10 @@ func errorKind(err error) string {
 	return errorKindConnect
 }
 
-func failureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
+// FailureMessage returns the transport core's canonical terminal diagnostic.
+// Protocol adapters, negative-cache errors, and direct-fetch errors share this
+// renderer so their actionable guidance cannot drift.
+func FailureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
 	if kind == errorKindInvalid {
 		return fmt.Sprintf("Invalid URL: %s — %s", item, SearchHint(searchAvailable,
 			"check it for typos, or use `search` to find the source.",
@@ -139,13 +142,6 @@ func failureMessage(item string, status int, kind string, challenge, searchAvail
 	))
 }
 
-// FailureMessage exposes the transport core's canonical terminal diagnostic
-// to protocol adapters. Keeping one renderer prevents MCP receipts from
-// drifting away from negative-cache and direct-fetch errors.
-func FailureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
-	return failureMessage(item, status, kind, challenge, searchAvailable)
-}
-
 func safeHTTPClient(chrome bool, resolve ...func(context.Context, string) ([]net.IP, error)) *http.Client {
 	timeout := 30 * time.Second
 	if chrome {
@@ -189,7 +185,7 @@ func safeHTTPClientTimeoutWithResolver(
 		ua = chromeUA
 	}
 	client := &http.Client{Transport: &userAgentTransport{base: transport, ua: ua, chrome: chrome}, Timeout: timeout}
-	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error { return assertFetchable(req.URL.String(), false) }
+	client.CheckRedirect = func(req *http.Request, _ []*http.Request) error { return validateFetchURL(req.URL.String(), false) }
 	return client
 }
 
@@ -313,7 +309,7 @@ func setUserAgent(client *http.Client, ua string) {
 // net_ua_transport.go — transport-internal, below the fetch gateway, like
 // net_chrome_transport.go. This file only builds and reads it.
 
-func assertFetchable(raw string, strictDNS bool) error {
+func validateFetchURL(raw string, strictDNS bool) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme == "" || u.Host == "" {
 		return fmt.Errorf("invalid URL: %s", raw)
@@ -369,7 +365,7 @@ func assertFetchable(raw string, strictDNS bool) error {
 	return nil
 }
 
-// lookupIP is the resolver seam behind assertFetchable. Its default is the
+// lookupIP is the resolver seam behind validateFetchURL. Its default is the
 // same DNS-over-HTTPS resolver every dial pins to (ResolvePublicHost): a
 // system resolver the network rewrites must not decide what the pre-check
 // refuses. query (doh.go) bounds its own timeout, so context.Background()
@@ -381,7 +377,7 @@ var lookupIP = func(host string) ([]net.IP, error) {
 
 // AssertFetchable is the public SSRF/scheme chokepoint for adapters whose
 // transport dials only the address it validated itself.
-func AssertFetchable(raw string) error { return assertFetchable(raw, false) }
+func AssertFetchable(raw string) error { return validateFetchURL(raw, false) }
 
 // AssertFetchableStrict additionally FAILS CLOSED on resolver failure. It is
 // the authority for the browser worker: Chrome re-resolves every URL with no
@@ -391,10 +387,10 @@ func AssertFetchable(raw string) error { return assertFetchable(raw, false) }
 // approval, so a DNS change after the second check remains a documented
 // residual risk until the browser transport can pin a validated address.
 func AssertFetchableStrict(raw string) error {
-	if err := assertFetchable(raw, true); err != nil {
+	if err := validateFetchURL(raw, true); err != nil {
 		return err
 	}
-	return assertFetchable(raw, true)
+	return validateFetchURL(raw, true)
 }
 
 func IsPrivateHost(raw string) bool {

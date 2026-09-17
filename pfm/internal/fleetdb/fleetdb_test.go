@@ -147,7 +147,7 @@ func TestDegradedStoreRejectsOperatorStateChanges(t *testing.T) {
 		Home:    filepath.Join(root, "home"),
 	}
 	ctx := context.Background()
-	state := Open(ctx, values)
+	state := OpenSharedState(ctx, values)
 	t.Cleanup(func() { _ = state.Close() })
 
 	if state.Degraded() == nil {
@@ -213,7 +213,7 @@ func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
 	state, values := openTestStore(t)
 	ctx := context.Background()
 
-	if account, found := PrimaryAccount(ctx, values); found {
+	if account, found := ClaudePrimaryAccount(ctx, values); found {
 		t.Fatalf("PrimaryAccount() with nothing recorded = %d, %v", account, found)
 	}
 
@@ -224,14 +224,14 @@ func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
 	if err := os.WriteFile(mirror, []byte("1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if account, found := PrimaryAccount(ctx, values); !found || account != 1 {
+	if account, found := ClaudePrimaryAccount(ctx, values); !found || account != 1 {
 		t.Fatalf("PrimaryAccount() from the mirror = %d, %v", account, found)
 	}
 
 	if err := state.SetMeta(ctx, PrimaryAccountKey, "2", 99); err != nil {
 		t.Fatal(err)
 	}
-	if account, found := PrimaryAccount(ctx, values); !found || account != 2 {
+	if account, found := ClaudePrimaryAccount(ctx, values); !found || account != 2 {
 		t.Fatalf(
 			"PrimaryAccount() = %d, %v; want 2 — the database outranks a stale mirror",
 			account,
@@ -271,7 +271,7 @@ func TestPrimaryAccountNeverCreatesTheDatabase(t *testing.T) {
 		FleetDB: filepath.Join(root, "state", "fleet.db"),
 		Home:    filepath.Join(root, "home"),
 	}
-	if account, found := PrimaryAccount(context.Background(), values); found {
+	if account, found := ClaudePrimaryAccount(context.Background(), values); found {
 		t.Fatalf("PrimaryAccount() = %d, %v, want not found", account, found)
 	}
 	if _, err := os.Stat(values.FleetDB); !os.IsNotExist(err) {
@@ -285,10 +285,10 @@ func TestSetPrimaryAccountKeepsDatabaseAndMirrorInLockstep(t *testing.T) {
 		Home:    root,
 		FleetDB: filepath.Join(root, ".cc", "fleet.db"),
 	}
-	if err := SetPrimaryAccount(context.Background(), values, 2, 123); err != nil {
+	if err := SetClaudePrimaryAccount(context.Background(), values, 2, 123); err != nil {
 		t.Fatal(err)
 	}
-	if account, found := PrimaryAccount(context.Background(), values); !found || account != 2 {
+	if account, found := ClaudePrimaryAccount(context.Background(), values); !found || account != 2 {
 		t.Fatalf("PrimaryAccount()=%d,%v, want 2,true", account, found)
 	}
 	content, err := os.ReadFile(filepath.Join(root, ".claude-primary"))
@@ -308,7 +308,7 @@ func openTestStore(t *testing.T) (*Store, paths.Values) {
 		FleetDB: filepath.Join(root, "cc", "fleet.db"),
 		Home:    filepath.Join(root, "home"),
 	}
-	state := Open(context.Background(), values)
+	state := OpenSharedState(context.Background(), values)
 	if err := state.Degraded(); err != nil {
 		t.Fatalf("Open() degraded: %v", err)
 	}

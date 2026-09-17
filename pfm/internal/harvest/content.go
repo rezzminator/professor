@@ -11,7 +11,7 @@ import (
 	"golang.org/x/net/html"
 )
 
-func (h *Harvester) convert(ctx context.Context, kind, source string, body []byte) (string, error) {
+func (h *Harvester) convertFetchedContent(ctx context.Context, kind, source string, body []byte) (string, error) {
 	if kind == kindTXT {
 		return string(body), nil
 	}
@@ -108,7 +108,7 @@ func bibliographicDocumentURL(body []byte, baseRaw string) string {
 							resolved := base.ResolveReference(parsed)
 							resolved.Fragment = ""
 							if (resolved.Scheme == schemeHTTP || resolved.Scheme == schemeHTTPS) &&
-								assertFetchable(resolved.String(), false) == nil {
+								validateFetchURL(resolved.String(), false) == nil {
 								found = resolved.String()
 							}
 						}

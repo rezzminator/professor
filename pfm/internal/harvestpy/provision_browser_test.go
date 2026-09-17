@@ -26,7 +26,7 @@ func TestProvisionBrowserConvergesUnderThePlatformRoot(t *testing.T) {
 
 	var mu sync.Mutex
 	smokes := 0
-	result, err := provisionBrowser(context.Background(), ProvisionOptions{
+	result, err := provisionBrowserWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
 		Download: func(_ context.Context, url, _ string) error {
 			t.Fatalf("unit provisioning hit the network (%s) — the targets seam is not injected", url)

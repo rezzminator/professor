@@ -61,7 +61,7 @@ func (s *Store) killedWrite(
 	write func() error,
 ) error {
 	err := write()
-	if !isBusy(err) {
+	if !isSQLiteBusy(err) {
 		return err
 	}
 
@@ -74,7 +74,7 @@ func (s *Store) killedWrite(
 	}
 
 	err = write()
-	if !isBusy(err) {
+	if !isSQLiteBusy(err) {
 		return err
 	}
 
@@ -91,7 +91,7 @@ func (s *Store) killedWrite(
 	return err
 }
 
-func isBusy(err error) bool {
+func isSQLiteBusy(err error) bool {
 	var sqliteError *modernsqlite.Error
 	return errors.As(err, &sqliteError) &&
 		sqliteError.Code()&0xff == sqliteBusyCode

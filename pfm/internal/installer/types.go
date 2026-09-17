@@ -136,7 +136,7 @@ type Options struct {
 
 	// ProcRoot is the process table pruneClaudeVersions reads to tell a
 	// version a live chat is executing from one it is safe to remove. Empty
-	// resolves to PFM_PROC_ROOT-or-/proc in normalize, same as the rest of
+	// resolves to PFM_PROC_ROOT-or-/proc in normalizeInstallerOptions, same as the rest of
 	// the fleet; jail tests set it directly so the probe never touches a
 	// real /proc.
 	ProcRoot string
@@ -179,7 +179,7 @@ func (execCommandRunner) Output(ctx context.Context, name string, args ...string
 	return exec.CommandContext(ctx, deps.Executable(name), args...).Output()
 }
 
-func normalize(options Options) (Options, error) {
+func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.Home == "" {
 		var err error
 		options.Home, err = os.UserHomeDir()

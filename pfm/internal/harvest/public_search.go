@@ -128,7 +128,7 @@ func (h *Harvester) searchPrivateCache(pattern string, _ int, ignoreCase bool) (
 			log.Printf("harvest: private cache search cannot read %q: %v", path, readErr)
 			return errors.New("private cache search could not read an artifact")
 		}
-		meta, body := parseFrontmatter(string(raw))
+		meta, body := parseCacheFrontmatter(string(raw))
 		if meta["source"] == frontmatterSourceHarvester {
 			body = stripGeneratedSourceMetadata(body)
 		}
@@ -176,7 +176,7 @@ func (h *Harvester) readPublicBody(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if meta, body := parseFrontmatter(string(raw)); meta["source"] == frontmatterSourceHarvester {
+	if meta, body := parseCacheFrontmatter(string(raw)); meta["source"] == frontmatterSourceHarvester {
 		return body, nil
 	}
 	return string(raw), nil

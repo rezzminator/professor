@@ -161,7 +161,7 @@ func (h *Harvester) fetchURLWithPolicy(
 	options FetchOptions,
 	allowOAPivot bool,
 ) Result {
-	if err := assertFetchable(source, false); err != nil {
+	if err := validateFetchURL(source, false); err != nil {
 		if strings.Contains(err.Error(), "unsupported URL scheme") {
 			return Result{
 				Source: source,
@@ -325,7 +325,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				}
 			}
 		}
-		converted, err := h.convert(ctx, kind, source, body)
+		converted, err := h.convertFetchedContent(ctx, kind, source, body)
 		if err != nil {
 			continue
 		}
@@ -501,7 +501,7 @@ func (h *Harvester) fetchURLWithPolicy(
 					lastChallenge = true
 					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", source, status)
 				} else {
-					converted, convErr := h.convert(ctx, kindHTML, source, []byte(html))
+					converted, convErr := h.convertFetchedContent(ctx, kindHTML, source, []byte(html))
 					switch {
 					case convErr != nil:
 						// The render SUCCEEDED; the conversion step failing is
@@ -633,7 +633,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			}
 		}
 	}
-	message := failureMessage(source, lastStatus, lastErrorKind, lastChallenge, h.settings.searchAvailable)
+	message := FailureMessage(source, lastStatus, lastErrorKind, lastChallenge, h.settings.searchAvailable)
 	if wrongPDF {
 		message = fmt.Sprintf(
 			"%s has a .pdf address but did not return a PDF (non-PDF content — likely an HTML paywall/login wall or a bot-block). %s",
@@ -816,7 +816,7 @@ func (h *Harvester) fetchLocal(ctx context.Context, source string, options Fetch
 			return h.resultFromCache(source, kind, cached, meta, cachePath)
 		}
 	}
-	converted, err := h.convert(ctx, kind, source, body)
+	converted, err := h.convertFetchedContent(ctx, kind, source, body)
 	if err != nil {
 		return Result{Source: source, Kind: kind, Error: err.Error()}
 	}

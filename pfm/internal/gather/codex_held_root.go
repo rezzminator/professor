@@ -34,7 +34,7 @@ func heldCodexRoot(links []FDLink, roots []string) (string, error) {
 		}
 		observed = true
 		seen[path] = true
-		header, err := codexmeta.Read(path)
+		header, err := codexmeta.ReadHeader(path)
 		if err != nil {
 			return "", fmt.Errorf("read held rollout %s: %w", path, err)
 		}

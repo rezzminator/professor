@@ -10,7 +10,7 @@ import (
 )
 
 func TestNewHTTPHandlerServesStreamableMCP(t *testing.T) {
-	service, err := NewConfigured("test", Runtime{Home: t.TempDir(), CacheDir: t.TempDir()})
+	service, err := NewConfiguredHarvester("test", Runtime{Home: t.TempDir(), CacheDir: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}

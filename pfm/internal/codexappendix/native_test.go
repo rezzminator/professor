@@ -86,7 +86,7 @@ func TestNativeHookDelivery(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("PFM_HOME", home)
 	t.Setenv("CODEX_HOME", account)
-	if err := Register(context.Background(), native, home, account, false); err != nil {
+	if err := RegisterAppendix(context.Background(), native, home, account, false); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := rpc(context.Background(), native, account, "hooks/list", map[string]any{"cwds": []string{project}})
@@ -150,7 +150,7 @@ func TestNativeHookDelivery(t *testing.T) {
 		"--json",
 		"Second model capture.",
 	)
-	if err := Register(context.Background(), native, home, account, true); err != nil {
+	if err := RegisterAppendix(context.Background(), native, home, account, true); err != nil {
 		t.Fatal(err)
 	}
 	raw, err = rpc(context.Background(), native, account, "hooks/list", map[string]any{"cwds": []string{project}})

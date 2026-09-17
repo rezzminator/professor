@@ -894,7 +894,7 @@ func usageWindows(usage usagehook.Usage, now time.Time) []Window {
 		}
 		resetAt, resetNote := parseReset(source.ResetsAt)
 		usedPct := *source.Utilization
-		if resetPassed(resetAt, now) {
+		if codexResetPassed(resetAt, now) {
 			// The reading belongs to a window that has already rolled over;
 			// show the row so the account keeps its shape, but no bar and no
 			// number until a refetch lands. UnknownUsedPct is what says "no
@@ -917,7 +917,7 @@ const expiredResetNote = "reset passed · awaiting refetch"
 // resetPassed reports whether a parsed reset moment is in the past. A window
 // with no parsable reset (zero time) is not expired — it is merely unknown,
 // and parseReset already says so.
-func resetPassed(resetAt, now time.Time) bool {
+func codexResetPassed(resetAt, now time.Time) bool {
 	return !resetAt.IsZero() && !resetAt.After(now)
 }
 
@@ -1297,7 +1297,7 @@ func appendCodexWindows(windows []Window, bucket codexRateLimitBucket, suffix st
 		if entry == nil {
 			continue
 		}
-		name := codexWindowName(entry.LimitWindowSeconds)
+		name := codexUsageWindowName(entry.LimitWindowSeconds)
 		if suffix != "" {
 			name += "-" + suffix
 		}
@@ -1329,7 +1329,7 @@ func codexBucketSuffix(id string, bucket codexRateLimitBucket) string {
 	return strings.ReplaceAll(value, "_", "-")
 }
 
-func codexWindowName(seconds int64) string {
+func codexUsageWindowName(seconds int64) string {
 	switch seconds {
 	case 18_000:
 		return "5h"

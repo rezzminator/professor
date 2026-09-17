@@ -28,7 +28,7 @@ func PrimaryAccount(values paths.Values, configs ...pfmconfig.Config) int {
 	if len(configs) != 0 {
 		machine = configs[0]
 	}
-	account, found := fleetdb.PrimaryAccount(context.Background(), values)
+	account, found := fleetdb.ClaudePrimaryAccount(context.Background(), values)
 	if found {
 		if _, exists := machine.Account(account); exists {
 			return account
@@ -46,7 +46,7 @@ func SetPrimaryAccount(values paths.Values, machine pfmconfig.Config, account in
 	if _, found := machine.Account(account); !found {
 		return fmt.Errorf("primary account %d is not in the configured roster", account)
 	}
-	return fleetdb.SetPrimaryAccount(context.Background(), values, account, time.Now().Unix())
+	return fleetdb.SetClaudePrimaryAccount(context.Background(), values, account, time.Now().Unix())
 }
 
 // CurrentSocket is the tmux socket name of the calling process's own server

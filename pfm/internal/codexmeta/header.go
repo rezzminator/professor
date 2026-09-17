@@ -98,7 +98,7 @@ func Decode(line []byte) (Header, error) {
 	}, nil
 }
 
-func Read(path string) (header Header, returnErr error) {
+func ReadHeader(path string) (header Header, returnErr error) {
 	file, err := os.Open(path)
 	if err != nil {
 		return Header{}, err

@@ -28,7 +28,7 @@ type LastResult struct {
 // Last reads the target's newest assistant turn. A chat with no transcript
 // yet is ErrNoTranscript and one that has not answered is ErrNoAnswer; both
 // carry the resolved chat in the result.
-func Last(ctx context.Context, runtime *pfmconfig.Runtime, request LastRequest) (LastResult, error) {
+func LastAnswer(ctx context.Context, runtime *pfmconfig.Runtime, request LastRequest) (LastResult, error) {
 	target, err := Target(ctx, request.Target, runtime)
 	if err != nil {
 		return LastResult{}, err

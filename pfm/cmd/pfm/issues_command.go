@@ -34,7 +34,7 @@ func runIssues(args []string, stdout, stderr io.Writer, runtime commandRuntime) 
 		return 2
 	}
 	ctx := context.Background()
-	state := fleetdb.Open(ctx, runtime.Paths)
+	state := fleetdb.OpenSharedState(ctx, runtime.Paths)
 	defer func() { closeCommandResource(state, "pfm issues: close state", stderr, &exitCode) }()
 
 	issues, err := state.Issues(ctx, *all)

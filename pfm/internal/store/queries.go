@@ -374,31 +374,14 @@ func (s *Store) Transcript(
 }
 
 // Transcripts returns all transcripts ordered by UUID.
-func (s *Store) Transcripts(ctx context.Context) (transcripts []Transcript, returnErr error) {
-	rows, err := s.db.QueryContext(
+func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
+	return queryRows(
 		ctx,
+		s.db,
 		"SELECT "+transcriptColumns+" FROM transcripts AS t ORDER BY t.uuid",
+		"transcript",
+		scanTranscript,
 	)
-	if err != nil {
-		return nil, fmt.Errorf("query transcripts: %w", err)
-	}
-	defer func() {
-		if err := rows.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript rows: %w", err))
-		}
-	}()
-
-	for rows.Next() {
-		transcript, err := scanTranscript(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan transcript: %w", err)
-		}
-		transcripts = append(transcripts, transcript)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate transcripts: %w", err)
-	}
-	return transcripts, nil
 }
 
 func scanTranscript(row rowScanner) (Transcript, error) {
@@ -492,31 +475,44 @@ func (s *Store) Rollout(ctx context.Context, id string) (Rollout, bool, error) {
 }
 
 // Rollouts returns all rollouts ordered by ID.
-func (s *Store) Rollouts(ctx context.Context) (rollouts []Rollout, returnErr error) {
-	rows, err := s.db.QueryContext(
+func (s *Store) Rollouts(ctx context.Context) ([]Rollout, error) {
+	return queryRows(
 		ctx,
+		s.db,
 		"SELECT "+rolloutColumns+" FROM rollouts ORDER BY id",
+		"rollout",
+		scanRollout,
 	)
+}
+
+func queryRows[T any](
+	ctx context.Context,
+	db queryExecer,
+	query string,
+	rowName string,
+	scan func(rowScanner) (T, error),
+) (items []T, returnErr error) {
+	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, fmt.Errorf("query rollouts: %w", err)
+		return nil, fmt.Errorf("query %ss: %w", rowName, err)
 	}
 	defer func() {
 		if err := rows.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close rollout rows: %w", err))
+			returnErr = errors.Join(returnErr, fmt.Errorf("close %s rows: %w", rowName, err))
 		}
 	}()
 
 	for rows.Next() {
-		rollout, err := scanRollout(rows)
+		item, err := scan(rows)
 		if err != nil {
-			return nil, fmt.Errorf("scan rollout: %w", err)
+			return nil, fmt.Errorf("scan %s: %w", rowName, err)
 		}
-		rollouts = append(rollouts, rollout)
+		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate rollouts: %w", err)
+		return nil, fmt.Errorf("iterate %ss: %w", rowName, err)
 	}
-	return rollouts, nil
+	return items, nil
 }
 
 func scanRollout(row rowScanner) (Rollout, error) {

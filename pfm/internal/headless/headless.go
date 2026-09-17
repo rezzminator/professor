@@ -165,10 +165,13 @@ func Inspect(
 	}
 
 	entries, _, err := transcript.Tail(ctx, chat.Path, string(chat.Engine), 1, transcript.TextCap)
-	if err == nil && len(entries) > 0 {
+	if err != nil {
+		return status, fmt.Errorf("read chat transcript tail %s: %w", chat.Path, err)
+	}
+	if len(entries) > 0 {
 		status.Last = transcript.Condensed(entries[len(entries)-1])
 		if chat.Live {
-			if entries[len(entries)-1].Role == transcript.RoleAssistant {
+			if assistantAnswered(entries[len(entries)-1].Role) {
 				status.State = StateIdle
 			} else {
 				status.State = StateWorking
@@ -181,6 +184,10 @@ func Inspect(
 		status.IdleSeconds = 0
 	}
 	return status, nil
+}
+
+func assistantAnswered(role string) bool {
+	return role == transcript.RoleAssistant
 }
 
 // Missing is the status of a name nothing answers to. It is a value, not an

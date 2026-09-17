@@ -47,7 +47,7 @@ func TestUserAgentTransportSetsUAAndForwardsToBase(t *testing.T) {
 }
 
 // TestUserAgentTransportRefusesPrivateHostBeforeForwarding: RoundTrip
-// re-validates every request through assertFetchable before it ever reaches
+// re-validates every request through validateFetchURL before it ever reaches
 // the wrapped transport — the SSRF guard the gateway relies on holds even at
 // this innermost layer, not only at gatewayAttempt's own check.
 func TestUserAgentTransportRefusesPrivateHostBeforeForwarding(t *testing.T) {

@@ -182,7 +182,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int
 		options.Chat = chat.NewHTTPHandler()
 	}
 	if harvesterEnabled {
-		harvester, err := harvestmcp.NewConfigured(version, harvestRuntime(runtime))
+		harvester, err := harvestmcp.NewConfiguredHarvester(version, harvestRuntime(runtime))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm mcp serve: configure harvester: %v\n", err)
 			return 1

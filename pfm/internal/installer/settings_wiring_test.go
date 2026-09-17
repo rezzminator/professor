@@ -421,7 +421,7 @@ func TestInstallOwnershipLedgerClaimsHooksAlreadyPresentInSettings(t *testing.T)
 	}
 	writeFixture(
 		t,
-		filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
+		settingsHookOwnershipPath(managedRootForHome(home)),
 		string(encoded),
 	)
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
@@ -542,7 +542,7 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 	}
 	writeFixture(
 		t,
-		filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
+		settingsHookOwnershipPath(managedRootForHome(home)),
 		string(encoded),
 	)
 	machine := pfmconfig.Config{Accounts: []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude")}}}
@@ -861,7 +861,7 @@ func TestDreamHookPauseRetiresEveryCopyAndPreservesNeighbors(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	ownershipPath := filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json")
+	ownershipPath := settingsHookOwnershipPath(managedRootForHome(home))
 	if info, err := os.Stat(ownershipPath); err != nil || info.Mode().Perm() != 0o600 {
 		t.Fatalf("ownership ledger mode=%v err=%v, want 0600", info, err)
 	}
@@ -996,7 +996,7 @@ func TestUninstallRefusesToStrandOwnedHookInInvalidCodexJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeFixture(t, filepath.Join(managed, "settings-hook-ownership.json"), string(encoded))
+	writeFixture(t, settingsHookOwnershipPath(managed), string(encoded))
 	installer := engine{options: Options{Mode: ModeUninstall, Home: home}, managedRoot: managed}
 	err = installer.wireCodexHooks()
 	if err == nil || !strings.Contains(err.Error(), "refuse to strand owned hooks in invalid Codex hooks JSON") {

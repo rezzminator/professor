@@ -48,7 +48,7 @@ func TestTargetsPinEveryRequestedPlatformAndVerifyableInputs(t *testing.T) {
 }
 
 func TestPlanExposesPinnedDownloadsAndMeasuredLinuxClosure(t *testing.T) {
-	plan, err := Plan(Platform{GOOS: "linux", GOARCH: "amd64"})
+	plan, err := PlanConversionEnvironment(Platform{GOOS: "linux", GOARCH: "amd64"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestPlanExposesPinnedDownloadsAndMeasuredLinuxClosure(t *testing.T) {
 		{Platform{GOOS: "darwin", GOARCH: "amd64"}, -1, "blocked-exact-lock"},
 		{Platform{GOOS: "darwin", GOARCH: "arm64"}, 389353114, "pinned-lock-artifact-sum"},
 	} {
-		other, err := Plan(tc.platform)
+		other, err := PlanConversionEnvironment(tc.platform)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -432,12 +432,12 @@ func TestInspectAndCheckReportIncompleteProvisioning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	digest, inspectErr := Inspect(root, platform)
+	digest, inspectErr := InspectConversionEnvironment(root, platform)
 	if digest.State != "incomplete" || inspectErr == nil ||
 		!strings.Contains(inspectErr.Error(), "provisioning did not finish") {
 		t.Fatalf("Inspect incomplete = %#v, %v", digest, inspectErr)
 	}
-	report, checkErr := Check(context.Background(), root, platform)
+	report, checkErr := CheckConversionEnvironment(context.Background(), root, platform)
 	if report.Digest.State != "incomplete" || checkErr == nil ||
 		!strings.Contains(report.Checks["marker"].Error, "provisioning did not finish") {
 		t.Fatalf("Check incomplete = %#v, %v", report, checkErr)
@@ -627,7 +627,7 @@ func TestCheckRejectsAChangedInstalledInventory(t *testing.T) {
 		t.Fatal(err)
 	}
 	write(filepath.Join(venv, "lib", "python3.11", "site-packages", "removed.dist-info"), "present", 0o600)
-	report, err := Check(context.Background(), root, platform)
+	report, err := CheckConversionEnvironment(context.Background(), root, platform)
 	if err != nil || !report.Healthy {
 		t.Fatalf("healthy fixture rejected: %#v %v", report, err)
 	}
@@ -637,7 +637,7 @@ func TestCheckRejectsAChangedInstalledInventory(t *testing.T) {
 	if err := os.Remove(filepath.Join(venv, "lib", "python3.11", "site-packages", "removed.dist-info")); err != nil {
 		t.Fatal(err)
 	}
-	report, err = Check(context.Background(), root, platform)
+	report, err = CheckConversionEnvironment(context.Background(), root, platform)
 	if err == nil || report.Checks["lock_completeness"].OK {
 		t.Fatalf("missing installed package was accepted: %#v %v", report, err)
 	}
@@ -726,7 +726,7 @@ func TestCheckInventoryIgnoresUVsStderrBanner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	report, err := Check(context.Background(), root, platform)
+	report, err := CheckConversionEnvironment(context.Background(), root, platform)
 	if err != nil || !report.Healthy {
 		t.Fatalf("uv's stderr banner was decoded as a freeze record: report=%#v err=%v", report, err)
 	}

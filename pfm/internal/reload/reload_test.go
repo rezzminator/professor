@@ -300,7 +300,13 @@ func TestRunRefusesAnOverlappingPaneReload(t *testing.T) {
 	}
 	_, err = Run(
 		context.Background(),
-		Request{Engine: pfmengine.Claude, SocketPath: "/tmp/probe-1", Pane: "%7", Account: 2, AccountIDs: []int{2}},
+		Request{
+			Engine:     pfmengine.Claude,
+			SocketPath: "/tmp/probe-1",
+			Pane:       "%7",
+			Account:    2,
+			AccountIDs: []int{2},
+		},
 		Options{SIDDir: dir, Delay: -1},
 		nil,
 		nil,
@@ -611,7 +617,7 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 
 func TestLastComposerLineFindsCodexCommandAbovePopupWhitespace(t *testing.T) {
 	capture := "Codex\n› /exit\n" + strings.Repeat("\n", 30)
-	if got := lastComposerLine(capture); !strings.Contains(got, "/exit") {
+	if got := lastReloadComposerLine(capture); !strings.Contains(got, "/exit") {
 		t.Fatalf("lastComposerLine()=%q, want the visible Codex command", got)
 	}
 }

@@ -6,6 +6,37 @@ import (
 	"fmt"
 )
 
+type rowSet interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+	Close() error
+}
+
+func collectRows[T any](
+	rows rowSet,
+	scan func(rowSet) (T, error),
+	scanContext, iterationContext, closeContext string,
+) (result []T, returnErr error) {
+	result = make([]T, 0)
+	defer func() {
+		if err := rows.Close(); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("%s: %w", closeContext, err))
+		}
+	}()
+	for rows.Next() {
+		value, err := scan(rows)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", scanContext, err)
+		}
+		result = append(result, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%s: %w", iterationContext, err)
+	}
+	return result, nil
+}
+
 const (
 	KindInject = "inject"
 	KindSpawn  = "spawn"
@@ -81,9 +112,9 @@ LIMIT ?`, sinceNS, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query comms events: %w", err)
 	}
-	for rows.Next() {
+	return collectRows(rows, func(rows rowSet) (CommsEvent, error) {
 		var event CommsEvent
-		if err := rows.Scan(
+		err := rows.Scan(
 			&event.ID,
 			&event.AtNS,
 			&event.Kind,
@@ -96,24 +127,7 @@ LIMIT ?`, sinceNS, limit)
 			&event.GroupName,
 			&event.Members,
 			&event.Message,
-		); err != nil {
-			scanErr := fmt.Errorf("scan comms event: %w", err)
-			if closeErr := rows.Close(); closeErr != nil {
-				return nil, errors.Join(scanErr, fmt.Errorf("close comms rows: %w", closeErr))
-			}
-			return nil, scanErr
-		}
-		result = append(result, event)
-	}
-	if err := rows.Err(); err != nil {
-		iterationErr := fmt.Errorf("iterate comms events: %w", err)
-		if closeErr := rows.Close(); closeErr != nil {
-			return nil, errors.Join(iterationErr, fmt.Errorf("close comms rows: %w", closeErr))
-		}
-		return nil, iterationErr
-	}
-	if err := rows.Close(); err != nil {
-		return nil, fmt.Errorf("close comms rows: %w", err)
-	}
-	return result, nil
+		)
+		return event, err
+	}, "scan comms event", "iterate comms events", "close comms rows")
 }

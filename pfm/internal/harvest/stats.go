@@ -37,14 +37,14 @@ func (h *Harvester) recordStat(item string, result Result) {
 	}
 	rec := statRecord{
 		TS:   time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-		Item: truncateRunes(item, 500),
+		Item: truncateOutputRunes(item, 500),
 		OK:   result.Error == "",
 	}
 	switch {
 	case rec.OK:
-		rec.Detail = truncateRunes(result.Method, 200)
+		rec.Detail = truncateOutputRunes(result.Method, 200)
 	case result.ErrorKind != "":
-		rec.Detail = truncateRunes(result.ErrorKind, 200)
+		rec.Detail = truncateOutputRunes(result.ErrorKind, 200)
 	default:
 		rec.Detail = resultDetailError
 	}

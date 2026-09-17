@@ -96,7 +96,7 @@ type Service struct {
 // NewConfigured builds the stdio-independent service for tests and command
 // wiring. A nil converter is not used: all document conversion is delegated
 // to the pinned Python worker selected by the runtime.
-func NewConfigured(version string, runtime Runtime) (*Service, error) {
+func NewConfiguredHarvester(version string, runtime Runtime) (*Service, error) {
 	cacheDir, err := harvest.CacheRoot(runtime.CacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve harvester cache root: %w", err)
@@ -119,7 +119,7 @@ func NewConfigured(version string, runtime Runtime) (*Service, error) {
 		return nil, err
 	}
 	server := mcp.NewServer(&mcp.Implementation{Name: "harvester", Version: version}, &mcp.ServerOptions{
-		Instructions: serverInstructions(searchEnabled(runtime)),
+		Instructions: serverInstructions(runtimeSearchEnabled(runtime)),
 	})
 	resolver := &harvest.Resolver{
 		Client: resolverClient, ContactEmail: runtime.ContactEmail, GoogleBooksAPIKey: runtime.GoogleBooksAPIKey,
@@ -217,7 +217,7 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 		SearXNGURL:            runtime.SearXNGURL,
 		BraveAPIKey:           runtime.BraveAPIKey,
 		DisableSearch:         runtime.DisableSearch,
-		SearchAvailable:       searchEnabled(runtime),
+		SearchAvailable:       runtimeSearchEnabled(runtime),
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("construct harvester: %w", err)
@@ -490,7 +490,7 @@ func (service *Service) register() {
 			return result, nil, err
 		},
 	)
-	if searchEnabled(service.runtime) {
+	if runtimeSearchEnabled(service.runtime) {
 		mcp.AddTool(
 			service.server,
 			&mcp.Tool{
@@ -978,7 +978,7 @@ func (service *Service) searchCache(
 			Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf(
 				"No cached pages match /%s/. This only searches pages already fetched — it does not search the web; %s",
 				input.Pattern,
-				harvest.SearchHint(searchEnabled(service.runtime),
+				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
 					"use `search` or `fetch` a source first.", "fetch a source first."),
 			)}},
 		}, nil
@@ -1043,7 +1043,7 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 				"# %s\nERROR: Fetched %s but it yielded no readable content (empty after extraction) — nothing to size. %s",
 				source,
 				source,
-				harvest.SearchHint(searchEnabled(service.runtime),
+				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
 					"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
 					"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
 				),
@@ -1078,7 +1078,7 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 			message = fmt.Sprintf(
 				"Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). %s",
 				source,
-				harvest.SearchHint(searchEnabled(service.runtime),
+				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
 					"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
 					"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
 				),

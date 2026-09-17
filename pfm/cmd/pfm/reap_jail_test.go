@@ -145,7 +145,7 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := fleetdb.Open(context.Background(), resolved)
+	state := fleetdb.OpenSharedState(context.Background(), resolved)
 	if state.Degraded() != nil {
 		t.Fatal(state.Degraded())
 	}
@@ -178,7 +178,7 @@ func TestReapClassifiesAndClearsAnUntouchedDetachedFork(t *testing.T) {
 	if reapServerAlive(root, socket) {
 		t.Fatalf("apply left untouched fork alive:\n%s", stdout.String())
 	}
-	state = fleetdb.Open(context.Background(), resolved)
+	state = fleetdb.OpenSharedState(context.Background(), resolved)
 	defer func() {
 		if err := state.Close(); err != nil {
 			t.Errorf("close state: %v", err)

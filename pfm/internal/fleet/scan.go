@@ -112,7 +112,7 @@ func Scan(
 		}
 	}
 	return Result{
-		Output:   Compose(env, request.View, data, live),
+		Output:   ComposeFleet(env, request.View, data, live),
 		Live:     live,
 		Counters: counters,
 		Env:      env,
@@ -139,7 +139,7 @@ func ScanCached(
 	if err != nil {
 		return Result{}, err
 	}
-	return Result{Output: Compose(env, request.View, data, gather.Snapshot{}), Env: env}, nil
+	return Result{Output: ComposeFleet(env, request.View, data, gather.Snapshot{}), Env: env}, nil
 }
 
 // ResolveRow looks id up in a compose pass over CURRENT database state
@@ -185,7 +185,7 @@ func ResolveRow(
 	if err != nil {
 		return "", "", "", ""
 	}
-	rows := Compose(env, request.View, data, live).Rows
+	rows := ComposeFleet(env, request.View, data, live).Rows
 	for index := range rows {
 		row := rows[index]
 		if row.ID == id {
@@ -239,7 +239,7 @@ func ResolveEnv(request Request) (Env, error) {
 
 // Compose classifies, merges and sorts one view's rows from the loaded data
 // and the live snapshot. It never writes.
-func Compose(env Env, view compose.View, data Data, live gather.Snapshot) compose.Output {
+func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) compose.Output {
 	output := compose.Compose(compose.Input{
 		Snapshot:         live,
 		Transcripts:      data.Transcripts,

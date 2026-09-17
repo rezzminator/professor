@@ -60,7 +60,7 @@ func (c *Cache) Search(pattern string, maxResults int, ignoreCase bool) ([]Cache
 			log.Printf("harvest cache search cannot read %s: %v", path, e)
 			return nil
 		}
-		meta, body := parseFrontmatter(string(raw))
+		meta, body := parseCacheFrontmatter(string(raw))
 		hits := rx.FindAllString(body, -1)
 		if len(hits) == 0 {
 			return nil
@@ -94,7 +94,7 @@ func (h *Harvester) SearchCache(pattern string, maxResults int, ignoreCase bool)
 
 func newCache(root string, ttl time.Duration) *Cache { return &Cache{root: root, ttl: ttl} }
 
-func defaultCacheDir() (string, error) {
+func defaultHarvestCacheDir() (string, error) {
 	// The default cache lives in exactly ONE place: <home>/.professor/.cache
 	// (beside pfm's other home state such as ~/.professor/agents). It must
 	// never follow the process's working directory — the cwd-walking default
@@ -116,7 +116,7 @@ func CacheRoot(configured string) (string, error) {
 	if strings.TrimSpace(configured) != "" {
 		return filepath.Clean(configured), nil
 	}
-	return defaultCacheDir()
+	return defaultHarvestCacheDir()
 }
 
 // CacheKey returns a stable type-specific filesystem key.
@@ -141,7 +141,7 @@ func (c *Cache) load(source, kind string) (body string, meta map[string]string, 
 	if err != nil {
 		return "", nil, path, false
 	}
-	meta, body = parseFrontmatter(string(raw))
+	meta, body = parseCacheFrontmatter(string(raw))
 	if c.stale(path, kind, meta) {
 		return "", meta, path, false
 	}
@@ -190,7 +190,7 @@ func (c *Cache) save(source, kind, method, body string, rungs []string) (path st
 		return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(value)
 	}
 	meta := fmt.Sprintf("---\nurl: %s\nfetched_at: %s\nsource: harvester\nmethod: %s\ntoken_count: %d\n",
-		safe(source), time.Now().UTC().Format(time.RFC3339), safe(method), estimateTokens(body))
+		safe(source), time.Now().UTC().Format(time.RFC3339), safe(method), EstimateTokens(body))
 	if len(rungs) > 0 {
 		meta += "rungs: " + strings.Join(rungs, ", ") + "\n"
 	}
@@ -222,7 +222,7 @@ func (c *Cache) save(source, kind, method, body string, rungs []string) (path st
 	return path, nil
 }
 
-func parseFrontmatter(raw string) (map[string]string, string) {
+func parseCacheFrontmatter(raw string) (map[string]string, string) {
 	meta := map[string]string{}
 	if !strings.HasPrefix(raw, "---\n") {
 		return meta, raw
@@ -245,7 +245,7 @@ func parseFrontmatter(raw string) (map[string]string, string) {
 	return meta, body
 }
 
-func estimateTokens(text string) int {
+func EstimateTokens(text string) int {
 	if text == "" {
 		return 0
 	}
@@ -298,7 +298,6 @@ func estimateTokens(text string) int {
 	}
 	return (n + 1) / 2
 }
-func EstimateTokens(text string) int { return estimateTokens(text) }
 
 func truncateInline(body string, limit int) string {
 	if limit <= 0 {

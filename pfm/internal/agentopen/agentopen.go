@@ -280,7 +280,7 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 			opener.stderr,
 			"no live agent found for %s — resuming fresh (account %d)\n",
 			request.ID,
-			accountNumber(request.PrimaryAccount),
+			effectiveAgentAccount(request.PrimaryAccount),
 		)
 		return opener.resumeFresh(ctx, request, primary, primary)
 	}
@@ -295,7 +295,7 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 			fmt.Fprintf(
 				opener.stderr,
 				"⚙ %s is a tmux-resident chat on %s — attaching its window\n",
-				displayName(hit),
+				agentDisplayName(hit),
 				socket,
 			)
 			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
@@ -309,16 +309,16 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 				parent = comm
 			}
 		}
-		return &OutsidePFMError{Name: displayName(hit), PID: hit.PID, Parent: parent}
+		return &OutsidePFMError{Name: agentDisplayName(hit), PID: hit.PID, Parent: parent}
 	}
 
 	if hit.activity() == "busy" {
 		fmt.Fprintf(
 			opener.stderr,
 			"⚙ %s (account %d) is BUSY — attaching. Pick '%s' in the view; ⌃C detaches.\n",
-			displayName(hit),
+			agentDisplayName(hit),
 			account,
-			displayName(hit),
+			agentDisplayName(hit),
 		)
 		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
 			return fmt.Errorf("release attach lock: %w", err)
@@ -330,10 +330,10 @@ func (opener *Opener) Open(ctx context.Context, request Request) error {
 	fmt.Fprintf(
 		opener.stderr,
 		"⚙ %s (account %d, state: %s) — taking over → fresh resume under account %d\n",
-		displayName(hit),
+		agentDisplayName(hit),
 		account,
 		hit.activity(),
-		accountNumber(request.PrimaryAccount),
+		effectiveAgentAccount(request.PrimaryAccount),
 	)
 	if hit.PID > 0 && opener.processes.Alive(hit.PID) {
 		if err := opener.processes.Terminate(hit.PID); err != nil {
@@ -481,11 +481,11 @@ func (opener *Opener) accountForConfig(config string) int {
 	return 1
 }
 
-func accountNumber(account int) int {
+func effectiveAgentAccount(account int) int {
 	return account
 }
 
-func displayName(agent Agent) string {
+func agentDisplayName(agent Agent) string {
 	if agent.Name != "" {
 		return agent.Name
 	}

@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-func (h *Harvester) cacheRoot() (string, error) {
+func (h *Harvester) resolvedCacheRoot() (string, error) {
 	if h == nil || strings.TrimSpace(h.options.CacheDir) == "" {
 		return "", errors.New("harvester cache directory is unavailable")
 	}
@@ -30,7 +30,7 @@ func (h *Harvester) cacheRoot() (string, error) {
 }
 
 func (h *Harvester) publicRoot() (string, error) {
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -87,7 +87,7 @@ func ensureNamespaceDir(path string, create bool) error {
 }
 
 func (h *Harvester) publicArtifactPath(source, kind, oldPath, ext string) (string, error) {
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return "", err
 	}
@@ -110,13 +110,13 @@ func (h *Harvester) writePublicMarkdown(path, body string, fetchedAt ...string) 
 		}
 	}
 	meta := "---\nfetched_at: " + stamp + "\ntoken_count: " + fmt.Sprint(
-		estimateTokens(body),
+		EstimateTokens(body),
 	) + "\nsource: harvester\n---\n\n"
 	return h.writePublicFile(path, []byte(meta+body))
 }
 
 func (h *Harvester) writePublicFile(path string, data []byte) error {
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func (h *Harvester) readPublicArtifact(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, err := h.cacheRoot()
+	root, err := h.resolvedCacheRoot()
 	if err != nil {
 		return nil, err
 	}

@@ -418,7 +418,13 @@ func (model Model) renderCosmosPanel(width, height int) string {
 	// paved over by them.
 	drawCosmosLegend(canvas, model.classicSky)
 	if chip := model.cosmosModeChip(); chip != "" {
-		canvas.Text(1, 0, truncateRunes(chip, maxInt(0, canvas.Cols-2)), rgbFromHex(configuredCosmosPalette.Warn), true)
+		canvas.Text(
+			1,
+			0,
+			ellipsizeRunes(chip, maxInt(0, canvas.Cols-2)),
+			rgbFromHex(configuredCosmosPalette.Warn),
+			true,
+		)
 	}
 	if len(visible) != 0 {
 		model.drawCosmosUniverse(canvas, graph, now, view)
@@ -440,7 +446,7 @@ func (model Model) renderCosmosPanel(width, height int) string {
 		if len(graph.Warnings) > 1 {
 			warning += fmt.Sprintf(" (+%d)", len(graph.Warnings)-1)
 		}
-		canvas.Text(1, canvas.Rows-1, truncateRunes(warning, maxInt(0, canvas.Cols-2)), cosmosDimColor(), false)
+		canvas.Text(1, canvas.Rows-1, ellipsizeRunes(warning, maxInt(0, canvas.Cols-2)), cosmosDimColor(), false)
 	}
 	return framePanel(title, strings.Split(canvas.render(), "\n"), width)
 }
@@ -523,10 +529,10 @@ func (model Model) renderCompactCosmos(width, innerWidth, innerHeight int) strin
 			listed++
 			from, to := nodes[edge.From], nodes[edge.To]
 			labelWidth := maxInt(1, (innerWidth-3)/2)
-			identity := truncateRunes(
+			identity := ellipsizeRunes(
 				from.Label.String(),
 				labelWidth,
-			) + " → " + truncateRunes(
+			) + " → " + ellipsizeRunes(
 				to.Label.String(),
 				labelWidth,
 			)
@@ -893,8 +899,12 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 	// glow in this function: --no-sky renders a static frame, full stop.
 	var inboundFlash, outboundFlash map[string]float64
 	if model.skyEnabled {
-		inboundFlash = newestInboundFlash(graph.Edges, view.UnixNano())
-		outboundFlash = newestOutboundFlash(graph.Edges, view.UnixNano())
+		inboundFlash = newestDirectionalFlash(graph.Edges, view.UnixNano(), func(edge compose.CosmosEdge) string {
+			return edge.To
+		})
+		outboundFlash = newestDirectionalFlash(graph.Edges, view.UnixNano(), func(edge compose.CosmosEdge) string {
+			return edge.From
+		})
 	}
 	white := rgbFromHex(configuredCosmosPalette.CosmosBright)
 	orbitDepth := func(key string) int {
@@ -948,7 +958,7 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 		)
 		colX, colY := int(point.x)/2, int(point.y)/4
 		canvas.SetCell(colX, colY, '✹', color, true)
-		label := truncateRunes(cosmosHomeLabel(home), maxInt(0, canvas.Cols-2))
+		label := ellipsizeRunes(cosmosHomeLabel(home), maxInt(0, canvas.Cols-2))
 		starLabels = append(starLabels, struct {
 			x, y int
 			text string
@@ -1215,7 +1225,7 @@ func clipCosmosLabel(label string, rightward bool, colX, cols int) string {
 	if available > cosmosLabelCap {
 		available = cosmosLabelCap
 	}
-	return truncateRunes(label, available)
+	return ellipsizeRunes(label, available)
 }
 
 // cosmosStarPoints seats every star — one per distinct Home among the visible
@@ -1446,7 +1456,7 @@ func drawCosmosTicker(canvas *Canvas, graph compose.CosmosGraph) {
 			color = rgbFromHex(configuredCosmosPalette.CosmosBright)
 		}
 		line := cosmosTickerLine(graph.Edges[index], nodes)
-		canvas.Text(1, row, truncateRunes(line, maxInt(0, canvas.Cols-2)), color, false)
+		canvas.Text(1, row, ellipsizeRunes(line, maxInt(0, canvas.Cols-2)), color, false)
 	}
 }
 
@@ -1480,7 +1490,7 @@ func (model Model) drawCosmosBanner(canvas *Canvas) {
 	alarm := rgbFromHex(configuredCosmosPalette.Warn)
 	canvas.Text(x, y, "┌"+repeat('─', width-2)+"┐", alarm, false)
 	for index, line := range lines {
-		line = truncateRunes(line, maxInt(0, width-2))
+		line = ellipsizeRunes(line, maxInt(0, width-2))
 		color := rgbFromHex(configuredCosmosPalette.CosmosBright)
 		if index > 0 {
 			color = cosmosDimColor()
@@ -1495,7 +1505,7 @@ func (model Model) drawCosmosBanner(canvas *Canvas) {
 }
 
 func centerCosmosText(canvas *Canvas, row int, text string, color RGB, bold bool) {
-	text = truncateRunes(text, canvas.Cols)
+	text = ellipsizeRunes(text, canvas.Cols)
 	x := (canvas.Cols - len([]rune(text))) / 2
 	if x < 0 {
 		x = 0
@@ -1514,7 +1524,7 @@ func repeat(char rune, count int) string {
 	return string(result)
 }
 
-func truncateRunes(value string, maximum int) string {
+func ellipsizeRunes(value string, maximum int) string {
 	if maximum <= 0 {
 		return ""
 	}
@@ -1528,7 +1538,7 @@ func truncateRunes(value string, maximum int) string {
 	return string(runes[:maximum-1]) + "…"
 }
 
-func ansiTruncateRunes(value string, maximum int) string { return truncateRunes(value, maximum) }
+func ansiTruncateRunes(value string, maximum int) string { return ellipsizeRunes(value, maximum) }
 
 func cosmosNodeMap(nodes []compose.CosmosNode) map[string]compose.CosmosNode {
 	result := make(map[string]compose.CosmosNode, len(nodes))
@@ -1538,28 +1548,16 @@ func cosmosNodeMap(nodes []compose.CosmosNode) map[string]compose.CosmosNode {
 	return result
 }
 
-func newestInboundFlash(edges []compose.CosmosEdge, nowNS int64) map[string]float64 {
+func newestDirectionalFlash(
+	edges []compose.CosmosEdge,
+	nowNS int64,
+	endpoint func(compose.CosmosEdge) string,
+) map[string]float64 {
 	latest := make(map[string]int64)
 	for _, edge := range edges {
-		if edge.LastNS > latest[edge.To] {
-			latest[edge.To] = edge.LastNS
-		}
-	}
-	result := make(map[string]float64, len(latest))
-	for key, atNS := range latest {
-		age := float64(nowNS-atNS) / float64(time.Second)
-		if age >= 0 && age < 1.5 {
-			result[key] = math.Max(0, 1-age/1.5)
-		}
-	}
-	return result
-}
-
-func newestOutboundFlash(edges []compose.CosmosEdge, nowNS int64) map[string]float64 {
-	latest := make(map[string]int64)
-	for _, edge := range edges {
-		if edge.LastNS > latest[edge.From] {
-			latest[edge.From] = edge.LastNS
+		key := endpoint(edge)
+		if edge.LastNS > latest[key] {
+			latest[key] = edge.LastNS
 		}
 	}
 	result := make(map[string]float64, len(latest))

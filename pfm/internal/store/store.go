@@ -113,7 +113,7 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 
 	store := &Store{
 		db:    db,
-		state: fleetdb.Open(ctx, resolved),
+		state: fleetdb.OpenSharedState(ctx, resolved),
 		path:  resolved.DB,
 		warn:  settings.warn,
 	}

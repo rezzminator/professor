@@ -194,7 +194,7 @@ func removeFile(path string) error {
 	return nil
 }
 
-func paneExists(panes []Pane, paneID string) bool {
+func paneExists(panes []ActionPane, paneID string) bool {
 	for _, pane := range panes {
 		if pane.PaneID == paneID {
 			return true

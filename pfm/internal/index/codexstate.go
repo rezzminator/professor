@@ -10,7 +10,7 @@ import (
 
 // readCodexThreads loads the Codex CLI's own view of its conversations, newest
 // state generation first.
-func readCodexThreads(
+func loadIndexedCodexThreads(
 	ctx context.Context,
 	codexHome string,
 ) ([]store.CodexThread, error) {

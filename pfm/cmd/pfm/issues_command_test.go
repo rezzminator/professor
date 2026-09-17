@@ -23,7 +23,7 @@ func TestRunIssuesDefaultsToOpenOnlyAndJSONAllReturnsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	state := fleetdb.Open(ctx, resolved)
+	state := fleetdb.OpenSharedState(ctx, resolved)
 	if _, err := state.RecordIssue(ctx, fleetdb.Issue{
 		AtNS: 1, Title: "open issue", Detail: "still needs a human",
 		Severity: fleetdb.IssueSeverityLow, Area: "areaA",

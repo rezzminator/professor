@@ -36,7 +36,7 @@ func (message *borrowedRawMessage) UnmarshalJSON(content []byte) error {
 	return nil
 }
 
-func parseClaude(
+func parseClaudeTranscriptFile(
 	file diskFile,
 	start int64,
 	transcript store.Transcript,

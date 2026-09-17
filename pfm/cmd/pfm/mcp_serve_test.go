@@ -93,7 +93,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 			t.Errorf("close chat: %v", err)
 		}
 	}()
-	harvester, err := harvestmcp.NewConfigured("test", harvestmcp.Runtime{
+	harvester, err := harvestmcp.NewConfiguredHarvester("test", harvestmcp.Runtime{
 		Home: root, CacheDir: root + "/cache",
 	})
 	if err != nil {

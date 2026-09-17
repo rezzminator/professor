@@ -23,11 +23,11 @@ type CheckReport struct {
 	Checks  map[string]CheckStatus `json:"checks"`
 }
 
-// Check verifies the pointer, marker, embedded assets, interpreter version,
-// environment shape, and a live no-download conversion.  Every failed check
-// remains visible in the returned report; a failed report also returns an
-// error so callers cannot mistake it for a healthy result.
-func Check(ctx context.Context, root string, platform Platform) (CheckReport, error) {
+// CheckConversionEnvironment verifies the pointer, marker, embedded assets,
+// interpreter version, environment shape, and a live no-download conversion.
+// Every failed check remains visible in the returned report; a failed report
+// also returns an error so callers cannot mistake it for a healthy result.
+func CheckConversionEnvironment(ctx context.Context, root string, platform Platform) (CheckReport, error) {
 	report := CheckReport{Checks: make(map[string]CheckStatus)}
 	set := func(name string, err error) {
 		if err == nil {
@@ -63,7 +63,7 @@ func Check(ctx context.Context, root string, platform Platform) (CheckReport, er
 			}())
 		}
 	}
-	digest, digestErr := Inspect(root, platform)
+	digest, digestErr := InspectConversionEnvironment(root, platform)
 	report.Digest = digest
 	if digestErr != nil {
 		set("marker", digestErr)

@@ -142,7 +142,7 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 	fixture.process(303, fixture.binary, fixture.binary, "mcp", "serve")
 	var sent []string
 	var stdout bytes.Buffer
-	err := Sweep(
+	err := SweepStaleProcesses(
 		gather.NewProcFS(fixture.root),
 		fixture.binary,
 		fixture.signaler(map[int]bool{302: true}, nil, &sent),
@@ -170,7 +170,7 @@ func TestSweepFailsLoudOnASurvivor(t *testing.T) {
 	fixture.process(401, fixture.old, fixture.binary, "ls")
 	var sent []string
 	var stdout bytes.Buffer
-	err := Sweep(
+	err := SweepStaleProcesses(
 		gather.NewProcFS(fixture.root),
 		fixture.binary,
 		fixture.signaler(map[int]bool{401: true}, map[int]bool{401: true}, &sent),

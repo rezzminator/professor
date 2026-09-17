@@ -61,7 +61,7 @@ func Read(path, current string) (Notice, bool, error) {
 	if err := json.Unmarshal(raw, &notice); err != nil {
 		return Notice{}, false, fmt.Errorf("decode update cache: %w", err)
 	}
-	installed, installedOK := parseVersion(current)
+	installed, installedOK := parseNoticeVersion(current)
 	latest, latestOK := parseReleaseVersion(notice.Latest)
 	if !installedOK || !latestOK || !newer(latest, installed) {
 		return Notice{}, false, nil
@@ -74,8 +74,8 @@ func Read(path, current string) (Notice, bool, error) {
 // cache only after a complete, valid response. A failed lookup leaves the last
 // successful notice intact, so temporary network failures cannot make an
 // already-known update disappear.
-func Check(ctx context.Context, path, current, latestURL string, client *http.Client) error {
-	if _, ok := parseVersion(current); !ok {
+func CheckForUpdate(ctx context.Context, path, current, latestURL string, client *http.Client) error {
+	if _, ok := parseNoticeVersion(current); !ok {
 		return fmt.Errorf("current version %q is not vMAJOR.MINOR.PATCH[-prerelease]", current)
 	}
 	release, err := acquire(path + ".lock")
@@ -288,7 +288,7 @@ func normalizeVersion(value string) string {
 	return value
 }
 
-func parseVersion(value string) (semanticVersion, bool) {
+func parseNoticeVersion(value string) (semanticVersion, bool) {
 	value = strings.TrimPrefix(normalizeVersion(value), "v")
 	var prerelease bool
 	if separator := strings.IndexAny(value, "-+"); separator >= 0 {
@@ -324,7 +324,7 @@ func parseReleaseVersion(value string) (semanticVersion, bool) {
 	if strings.ContainsAny(normalized, "-+") {
 		return semanticVersion{}, false
 	}
-	return parseVersion(normalized)
+	return parseNoticeVersion(normalized)
 }
 
 func newer(candidate, current semanticVersion) bool {

@@ -9,7 +9,14 @@ import (
 	"sort"
 )
 
-const settingsHookOwnershipVersion = 1
+const (
+	settingsHookOwnershipName    = "settings-hook-ownership.json"
+	settingsHookOwnershipVersion = 1
+)
+
+func settingsHookOwnershipPath(managedRoot string) string {
+	return filepath.Join(managedRoot, settingsHookOwnershipName)
+}
 
 type settingsHookKey struct {
 	Event   string

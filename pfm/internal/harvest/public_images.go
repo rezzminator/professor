@@ -36,7 +36,7 @@ func (h *Harvester) rewritePublicImages(source, body, basePath string) (string, 
 		if err != nil {
 			return "", errors.New("embedded image cannot be resolved")
 		}
-		root, err := h.cacheRoot()
+		root, err := h.resolvedCacheRoot()
 		if err != nil {
 			return "", err
 		}

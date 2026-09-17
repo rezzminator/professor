@@ -14,7 +14,7 @@ import (
 // searchEnabled is the one place a Runtime's search configuration turns into
 // the enabled bool the search tool, its instructions, and its hints all key
 // off of — never re-derived a second way per call site.
-func searchEnabled(runtime Runtime) bool {
+func runtimeSearchEnabled(runtime Runtime) bool {
 	return harvest.SearchEnabled(harvest.SearchOptions{
 		SearXNGURL: runtime.SearXNGURL, BraveAPIKey: runtime.BraveAPIKey, DisableSearch: runtime.DisableSearch,
 	})

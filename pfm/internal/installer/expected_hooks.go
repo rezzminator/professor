@@ -137,15 +137,14 @@ func physicalSettingsPath(path string) string {
 // command path, then cross-checks the same ownership ledger uninstall reads.
 func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult {
 	expected := ExpectedHooks(home, config)
-	ownership, _, ownershipErr := readSettingsHookOwnership(
-		filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
-	)
+	ownershipPath := settingsHookOwnershipPath(managedRootForHome(home))
+	ownership, _, ownershipErr := readSettingsHookOwnership(ownershipPath)
 	if ownershipErr != nil {
 		return []HookProbeResult{
 			{
 				Hook: ExpectedHook{
 					Target: "ownership",
-					File:   filepath.Join(home, ".local", "share", "pfm", "install", "settings-hook-ownership.json"),
+					File:   ownershipPath,
 				},
 				State: stateBroken,
 				Error: ownershipErr.Error(),

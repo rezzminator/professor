@@ -1,59 +1,10 @@
-accountnumber: internal/agentopen/agentopen.go internal/usagehook/hook.go
 all: internal/engine/engine.go internal/transcript/transcript.go
-boolint: internal/compose/compose.go internal/statusline/render.go
-check: internal/codexgen/compiler.go internal/harvestpy/check.go internal/updatecheck/updatecheck.go
-clip: internal/index/opencode.go internal/stale/stale.go
-cliprunes: internal/gather/gather.go internal/naming/naming.go internal/resolve/resolve.go internal/spawn/spawn.go internal/ui/render.go
-codexthreadid: internal/gather/codexproc.go internal/resolve/codex.go
-codexwindowname: internal/gather/gather.go internal/stats/limits.go
 command: internal/codexappendix/register.go internal/tmux/tmux.go
-compose: internal/compose/compose.go internal/fleet/scan.go
-defaultcachedir: internal/harvest/cache.go internal/usagehook/hook.go
 defaults: internal/config/config.go internal/spawn/types.go
-displayname: internal/agentopen/agentopen.go internal/naming/naming.go
-enginename: internal/inject/engine.go internal/stats/stats.go
-exitcode: internal/deps/probe.go internal/headless/run/run.go
-fileage: internal/statusline/render.go internal/usagehook/hook.go
 find: internal/chat/find.go internal/stale/stale.go
-firstnonempty: internal/compose/compose.go internal/index/codex.go
-flatten: internal/spawn/spawn.go internal/transcript/transcript.go
-formattokens: internal/statusline/render.go internal/ui/render.go
-inspect: internal/harvestpy/provision.go internal/headless/headless.go
-isbusy: internal/inject/guards.go internal/store/killed.go
-isclaudecommand: internal/gather/agents.go internal/resolve/resolve.go
-iscodexcommand: internal/gather/agents.go internal/resolve/resolve.go
-islive: internal/chat/target.go internal/ui/model.go
-isnewchatkind: internal/compose/order.go internal/ui/model.go
-last: internal/chat/last.go internal/transcript/transcript.go
-lastcomposerline: internal/inject/guards.go internal/reload/reload.go
-lastlines: cmd/pfm/chat_satellite_command.go internal/inject/engine.go
-livesockets: cmd/pfm/namesync_command.go internal/ui/model.go
 load: internal/config/config.go internal/professor/baseline.go internal/theme/theme.go
 new: internal/action/executor.go internal/agentopen/agentopen.go internal/archive/archive.go internal/gather/gather.go internal/harvest/types.go internal/heal/runner.go internal/index/index.go internal/inject/engine.go internal/kill/manager.go internal/reap/runner.go internal/resolve/resolve.go
-newconfigured: internal/harvestmcp/service.go internal/mcpserv/server.go
-normalize: internal/installer/types.go internal/usagehook/hook.go
-numericversion: internal/action/executor.go internal/deps/probe.go
-open: internal/fleetdb/fleetdb.go internal/store/store.go
 openreadonly: internal/heal/heal.go internal/sqlitedb/sqlitedb.go
 parse: internal/engine/engine.go internal/recovery/recovery.go internal/transcript/transcript.go
-parseclaude: internal/index/claude.go internal/transcript/transcript.go
-parsecodex: internal/index/codex.go internal/transcript/transcript.go
-parsefrontmatter: internal/codexgen/transform.go internal/harvest/cache.go
-parseusage: internal/ask/ask.go internal/headless/run/run.go
-parseversion: internal/update/version.go internal/updatecheck/updatecheck.go
-plan: internal/harvestpy/provision.go internal/reap/reap.go
-primaryaccount: internal/fleet/accounts.go internal/fleetdb/fleetdb.go
-read: internal/codexmeta/header.go internal/updatecheck/updatecheck.go
-readcodexthreads: internal/index/codexstate.go internal/store/codexstate.go
-register: internal/codexappendix/register.go internal/engine/engine.go
-render: internal/headless/stream.go internal/statusline/render.go
-resetpassed: internal/stats/limits.go internal/usagehook/hook.go
 resolve: internal/agentrole/agentrole.go internal/chat/target.go internal/deps/registry.go internal/headless/run/run.go internal/paths/paths.go
 run: cmd/pfm/main.go internal/codexappendix/hook.go internal/codexgen/compiler.go internal/headless/run/run.go internal/installer/installer.go internal/recovery/recovery.go internal/reload/reload.go internal/spawn/spawn.go internal/stale/stale.go internal/testjail/testjail.go
-searchenabled: internal/harvest/search.go internal/harvestmcp/search_gate.go
-setprimaryaccount: internal/fleet/accounts.go internal/fleetdb/fleetdb.go
-socketepoch: internal/compose/compose.go internal/resolve/resolve.go
-splitnul: internal/action/process.go internal/gather/procfs.go
-sweep: internal/heal/heal.go internal/stale/stale.go
-transcriptidfrompath: cmd/pfm/chat_inject_resume.go internal/compose/compose.go
-truncaterunes: internal/harvest/search.go internal/ui/cosmos.go

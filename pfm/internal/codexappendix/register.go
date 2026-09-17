@@ -39,7 +39,7 @@ type hook struct {
 
 // Register asks the installed harness for the exact trust fingerprint. No model
 // turn or copied config/credential home is involved. Only our handler is trusted.
-func Register(ctx context.Context, binary, home, account string, uninstall bool) error {
+func RegisterAppendix(ctx context.Context, binary, home, account string, uninstall bool) error {
 	if uninstall {
 		return Unregister(account)
 	}

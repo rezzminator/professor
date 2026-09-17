@@ -37,7 +37,7 @@ func TestReadDoesNotSearchAnUnboundedTranscript(t *testing.T) {
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := Read(path); err == nil {
+		if _, err := ReadHeader(path); err == nil {
 			t.Fatal("accepted metadata beyond bounded prefix")
 		}
 	}

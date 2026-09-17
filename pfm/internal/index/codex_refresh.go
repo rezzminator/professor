@@ -50,7 +50,7 @@ func RefreshCodexLineage(ctx context.Context, database *store.Store, id string) 
 		if shouldDelta(file, true, previous.Size, previous.ParsedOffset, full) {
 			start, base = previous.ParsedOffset, *previous
 		}
-		rollout, _, err := parseCodex(file, start, base)
+		rollout, _, err := parseCodexRolloutFile(file, start, base)
 		if err != nil {
 			return fmt.Errorf("refresh Codex clear rollout %q: %w", previous.Path, err)
 		}

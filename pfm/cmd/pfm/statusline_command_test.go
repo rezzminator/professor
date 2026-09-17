@@ -41,18 +41,18 @@ func TestStatuslineCommandRendersFromJailedInput(t *testing.T) {
 	}
 }
 
-func TestDetachedRefreshCLIPathWritesGPTCacheInTwinHome(t *testing.T) {
+func TestDetachedRefreshCLIPathWritesCodexCacheInTwinHome(t *testing.T) {
 	jailTest(t)
 	root := t.TempDir()
 	cacheDir := filepath.Join(root, "tmp")
 	t.Setenv("PFM_HOME", root)
 
-	originalGPT := statuslineGPTOptions
+	originalCodex := statuslineCodexOptions
 	t.Cleanup(func() {
-		statuslineGPTOptions = originalGPT
+		statuslineCodexOptions = originalCodex
 	})
-	statuslineGPTOptions = func() statusline.GPTOptions {
-		return statusline.GPTOptions{
+	statuslineCodexOptions = func() statusline.CodexOptions {
+		return statusline.CodexOptions{
 			Now: func() time.Time { return time.Unix(1_786_838_400, 0) },
 			ReadRateLimits: func(context.Context) ([]byte, error) {
 				return os.ReadFile(

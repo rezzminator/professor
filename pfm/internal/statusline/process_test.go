@@ -17,22 +17,22 @@ func TestAppServerHandshakeCarriesJSONRPCAndReadsIDOne(t *testing.T) {
 	command := exec.CommandContext(
 		context.Background(),
 		os.Args[0],
-		"-test.run=TestGPTAppServerFixture",
+		"-test.run=TestCodexAppServerFixture",
 		"--",
 		"app-server",
 	)
 	command.Env = append(os.Environ(), "PFM_GPT_APP_SERVER_FIXTURE=1")
-	body, err := readGPTRateLimitsCommand(command)
+	body, err := readCodexRateLimitsCommand(command)
 	if err != nil {
 		t.Fatal(err)
 	}
-	parsed, err := parseGPTRateLimits(body)
+	parsed, err := parseCodexRateLimits(body)
 	if err != nil || parsed["planType"] != "plus" {
 		t.Fatalf("parsed=%#v err=%v", parsed, err)
 	}
 }
 
-func TestReadGPTRateLimitsWithBinaryAtHomeIsolatesAccounts(t *testing.T) {
+func TestReadCodexRateLimitsWithBinaryAtHomeIsolatesAccounts(t *testing.T) {
 	binDir := t.TempDir()
 	codex := filepath.Join(binDir, "codex")
 	script := `#!/bin/sh
@@ -53,11 +53,11 @@ exit 2
 	firstHome := filepath.Join(t.TempDir(), "codex-one")
 	secondHome := filepath.Join(t.TempDir(), "codex-two")
 
-	first, err := ReadGPTRateLimitsWithBinaryAtHome(context.Background(), "codex", firstHome)
+	first, err := ReadCodexRateLimitsWithBinaryAtHome(context.Background(), "codex", firstHome)
 	if err != nil {
 		t.Fatalf("first App Server read: %v", err)
 	}
-	second, err := ReadGPTRateLimitsWithBinaryAtHome(context.Background(), "codex", secondHome)
+	second, err := ReadCodexRateLimitsWithBinaryAtHome(context.Background(), "codex", secondHome)
 	if err != nil {
 		t.Fatalf("second App Server read: %v", err)
 	}
@@ -69,7 +69,7 @@ exit 2
 	}
 }
 
-func TestReadGPTRateLimitsRejectsMalformedOrWrongIDResponses(t *testing.T) {
+func TestReadCodexRateLimitsRejectsMalformedOrWrongIDResponses(t *testing.T) {
 	command := exec.Command("sh", "-c", `
 while IFS= read -r line; do
   count=$((count + 1))
@@ -79,13 +79,13 @@ while IFS= read -r line; do
   fi
 done
 `)
-	_, err := readGPTRateLimitsCommand(command)
+	_, err := readCodexRateLimitsCommand(command)
 	if err == nil || !strings.Contains(err.Error(), "no id=1 response") {
 		t.Fatalf("wrong-id App Server response error=%v, want named missing id=1 failure", err)
 	}
 }
 
-func TestGPTAppServerFixture(_ *testing.T) {
+func TestCodexAppServerFixture(_ *testing.T) {
 	if os.Getenv("PFM_GPT_APP_SERVER_FIXTURE") != "1" {
 		return
 	}

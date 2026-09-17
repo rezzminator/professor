@@ -208,12 +208,13 @@ func (quietRunner) Output(
 func TestStatuslineCapturedInputGoldens(t *testing.T) {
 	for _, sample := range []struct {
 		name    string
+		fixture string
 		account int
 		engine  string
 		env     map[string]string
 	}{
-		{name: "primary", account: 1, engine: "claude", env: map[string]string{"PFM_TEST_PROBE_SOCKETS": "1"}},
-		{name: "gpt", account: 4, engine: "codex", env: map[string]string{
+		{name: "primary", fixture: "primary", account: 1, engine: "claude", env: map[string]string{"PFM_TEST_PROBE_SOCKETS": "1"}},
+		{name: "codex", fixture: "gpt", account: 4, engine: "codex", env: map[string]string{
 			"PFM_TEST_PROBE_SOCKETS": "1",
 			"ANTHROPIC_MODEL":        "gpt-5.6-sol[1m]",
 		}},
@@ -250,7 +251,7 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			raw, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.name+".json"))
+			raw, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.fixture+".json"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -286,7 +287,7 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			want, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.name+".golden"))
+			want, err := os.ReadFile(filepath.Join("testdata", "render-"+sample.fixture+".golden"))
 			if err != nil {
 				t.Fatalf("golden is missing; captured output is:\n%s", strconv.Quote(got))
 			}
@@ -375,7 +376,7 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 	}
 }
 
-func TestCodexEngineOwnsGPTUsageIndependentOfAccountID(t *testing.T) {
+func TestCodexEngineOwnsCodexUsageIndependentOfAccountID(t *testing.T) {
 	root := t.TempDir()
 	input := []byte(`{
   "model":{"display_name":"Claude"},
@@ -508,7 +509,7 @@ func TestCacheWindowSaysSoWhenTheTranscriptCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestGPTAuthRejectStreakIsTheLastThreeCompletedRequests(t *testing.T) {
+func TestCodexAuthRejectStreakIsTheLastThreeCompletedRequests(t *testing.T) {
 	root := t.TempDir()
 	logDir := filepath.Join(root, ".local", "state", "claude-code-proxy")
 	if err := os.MkdirAll(logDir, 0o700); err != nil {
@@ -522,7 +523,7 @@ func TestGPTAuthRejectStreakIsTheLastThreeCompletedRequests(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(logDir, "proxy.log"), []byte(log), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	count, reject := gptRequestCount(Runtime{
+	count, reject := codexRequestCount(Runtime{
 		Now:  func() time.Time { return time.Date(2026, 8, 16, 5, 0, 0, 0, time.UTC) },
 		Home: root, CacheDir: filepath.Join(root, "cache"),
 	}, time.Date(2026, 8, 16, 5, 0, 0, 0, time.UTC))

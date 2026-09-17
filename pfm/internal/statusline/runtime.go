@@ -19,7 +19,7 @@ import (
 type RefreshKind string
 
 const (
-	RefreshKindGPT RefreshKind = "gpt"
+	RefreshKindCodex RefreshKind = "gpt"
 )
 
 // CommandRunner is the small read-only command seam used by the git segment.
@@ -80,7 +80,7 @@ func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
 	} else if configDir == "" {
 		configDir = filepath.Join(resolved.Home, ".claude")
 	}
-	cacheDir := filepath.Dir(GPTCachePath(os.Getenv(paths.EnvHome), os.Getuid()))
+	cacheDir := filepath.Dir(CodexStatuslineCachePath(os.Getenv(paths.EnvHome), os.Getuid()))
 	rateDir := ClaudeRateLimitDir(os.Getenv(paths.EnvHome), os.Getuid())
 	return Runtime{
 		Now:          time.Now,
@@ -119,10 +119,10 @@ func EngineFromEnvironment(getenv func(string) string) (pfmengine.ID, error) {
 	return "", ErrNoEngineInEnvironment
 }
 
-// GPTCachePath is the one filesystem rule for the Codex App Server limits
+// CodexStatuslineCachePath is the one filesystem rule for the Codex App Server limits
 // cache. Production uses the host temp directory; a PFM_HOME jail keeps the
-// cache inside that jail.
-func GPTCachePath(jailHome string, uid int) string {
+// cache inside that jail. The cc-gpt-usage name is a legacy on-disk contract.
+func CodexStatuslineCachePath(jailHome string, uid int) string {
 	cacheDir := os.TempDir()
 	if jailHome != "" {
 		cacheDir = filepath.Join(jailHome, "tmp")
@@ -134,7 +134,7 @@ func GPTCachePath(jailHome string, uid int) string {
 // windows harvested from statusline input. Limits readers use the same path so
 // the statusline writer remains the single owner of this cache.
 func ClaudeRateLimitDir(jailHome string, uid int) string {
-	return filepath.Join(filepath.Dir(GPTCachePath(jailHome, uid)), "cc-rate-limits")
+	return filepath.Join(filepath.Dir(CodexStatuslineCachePath(jailHome, uid)), "cc-rate-limits")
 }
 
 func (runtime Runtime) getenv(name string) string {

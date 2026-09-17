@@ -17,8 +17,8 @@ import (
 	"hostops/pfm/internal/usagehook"
 )
 
-var statuslineGPTOptions = func() statusline.GPTOptions {
-	return statusline.GPTOptions{}
+var statuslineCodexOptions = func() statusline.CodexOptions {
+	return statusline.CodexOptions{}
 }
 
 func runStatusline(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -42,7 +42,7 @@ func runStatuslineWithRuntime(
 		"usage: pfm statusline [--refresh-gpt]",
 		stderr,
 	)
-	refreshGPT := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
+	refreshCodex := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
 	if code, ok := parseFlags(flags, args); !ok {
 		return code
 	}
@@ -52,11 +52,11 @@ func runStatuslineWithRuntime(
 	}
 
 	ctx := context.Background()
-	if *refreshGPT {
-		options := statuslineGPTOptions()
+	if *refreshCodex {
+		options := statuslineCodexOptions()
 		account := accountForCodexHome(machine.Config, os.Getenv("CODEX_HOME"))
 		options.Binary = machine.Config.EffectiveCodex(account).Binary
-		if err := statusline.RefreshGPT(ctx, options); err != nil {
+		if err := statusline.RefreshCodex(ctx, options); err != nil {
 			fmt.Fprintf(stderr, "pfm statusline: refresh GPT cache: %v\n", err)
 			return 1
 		}

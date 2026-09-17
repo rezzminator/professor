@@ -13,24 +13,24 @@ import (
 	"hostops/pfm/internal/paths"
 )
 
-// GPTOptions describes the detached Codex App Server cache refresh.
-type GPTOptions struct {
+// CodexOptions describes the detached Codex App Server cache refresh.
+type CodexOptions struct {
 	CachePath      string
 	Binary         string
 	ReadRateLimits func(context.Context) ([]byte, error)
 	Now            func() time.Time
 }
 
-// RefreshGPT extracts the id=1 account/rateLimits/read response from an App
+// RefreshCodex extracts the id=1 account/rateLimits/read response from an App
 // Server JSONL exchange and atomically replaces the cache.
-func RefreshGPT(ctx context.Context, options GPTOptions) error {
+func RefreshCodex(ctx context.Context, options CodexOptions) error {
 	if options.CachePath == "" {
-		options.CachePath = GPTCachePath(os.Getenv(paths.EnvHome), os.Getuid())
+		options.CachePath = CodexStatuslineCachePath(os.Getenv(paths.EnvHome), os.Getuid())
 	}
 	defer removeRefreshLock(options.CachePath)
 	if options.ReadRateLimits == nil {
 		options.ReadRateLimits = func(ctx context.Context) ([]byte, error) {
-			return ReadGPTRateLimitsWithBinary(ctx, options.Binary)
+			return ReadCodexRateLimitsWithBinary(ctx, options.Binary)
 		}
 	}
 	if options.Now == nil {
@@ -40,7 +40,7 @@ func RefreshGPT(ctx context.Context, options GPTOptions) error {
 	if err != nil {
 		return err
 	}
-	rateLimits, err := parseGPTRateLimits(body)
+	rateLimits, err := parseCodexRateLimits(body)
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func RefreshGPT(ctx context.Context, options GPTOptions) error {
 	return atomicfile.Write(options.CachePath, encoded, 0o600)
 }
 
-func parseGPTRateLimits(body []byte) (map[string]any, error) {
+func parseCodexRateLimits(body []byte) (map[string]any, error) {
 	scanner := bufio.NewScanner(strings.NewReader(string(body)))
 	scanner.Buffer(make([]byte, 64*1024), 1<<20)
 	for scanner.Scan() {

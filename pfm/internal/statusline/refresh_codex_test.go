@@ -12,14 +12,14 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 )
 
-func TestGPTRefresherWritesRecordedRateLimitsAtomically(t *testing.T) {
+func TestCodexRefresherWritesRecordedRateLimitsAtomically(t *testing.T) {
 	root := t.TempDir()
 	cachePath := filepath.Join(root, "gpt.json")
 	if err := os.WriteFile(strings.TrimSuffix(cachePath, ".json")+".lock", nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	fixture := mustFixture(t, "gpt-app-server.jsonl")
-	err := RefreshGPT(context.Background(), GPTOptions{
+	err := RefreshCodex(context.Background(), CodexOptions{
 		CachePath: cachePath,
 		ReadRateLimits: func(context.Context) ([]byte, error) {
 			return fixture, nil
@@ -74,8 +74,8 @@ func TestRenderSchedulesStaleRefreshersWithoutWaiting(t *testing.T) {
 	}
 	select {
 	case kind := <-spawned:
-		if kind != RefreshKindGPT {
-			t.Fatalf("spawned retired refresher %q, want only %q", kind, RefreshKindGPT)
+		if kind != RefreshKindCodex {
+			t.Fatalf("spawned retired refresher %q, want only %q", kind, RefreshKindCodex)
 		}
 	default:
 		t.Fatal("GPT refresher was not spawned")

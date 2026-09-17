@@ -241,7 +241,7 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 				"statusline quota %s claims account %d, want %d", entry.Name(), snapshot.Account, account.ID,
 			)
 		}
-		if snapshot.ConfigDir == "" || !sameConfigDirectory(snapshot.ConfigDir, account.ConfigDir) {
+		if snapshot.ConfigDir == "" || !sameConfigDir(snapshot.ConfigDir, account.ConfigDir) {
 			continue
 		}
 		confirmedAt := time.Unix(snapshot.ConfirmedAt, 0)
@@ -306,7 +306,7 @@ func (sampler *LimitsSampler) fetchClaudeStatusline(
 	return usage, latestAt, true, nil
 }
 
-func sameConfigDirectory(left, right string) bool {
+func sameConfigDir(left, right string) bool {
 	leftResolved, leftErr := filepath.EvalSymlinks(left)
 	rightResolved, rightErr := filepath.EvalSymlinks(right)
 	if leftErr == nil && rightErr == nil {
@@ -1085,7 +1085,7 @@ func (sampler *LimitsSampler) fetchCodexAppServer(ctx context.Context, account L
 	if home == "" && account.CodexAuthPath != "" {
 		home = filepath.Dir(account.CodexAuthPath)
 	}
-	body, err := statusline.ReadGPTRateLimitsWithBinaryAtHome(ctx, account.CodexBinary, home)
+	body, err := statusline.ReadCodexRateLimitsWithBinaryAtHome(ctx, account.CodexBinary, home)
 	if err != nil {
 		return codexUsage{}, err
 	}
@@ -1166,7 +1166,7 @@ func readCodexCacheRecord(path string) (codexCacheRecord, error) {
 }
 
 func writeCodexCacheRecord(path string, record codexCacheRecord) error {
-	if err := usagehook.EnsurePrivateDirectory(filepath.Dir(path)); err != nil {
+	if err := usagehook.EnsurePrivateDir(filepath.Dir(path)); err != nil {
 		return err
 	}
 	body, err := json.Marshal(record)

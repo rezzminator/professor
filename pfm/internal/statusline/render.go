@@ -276,11 +276,11 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 
 	l3 := ""
 	if runtime.Engine == pfmengine.Codex {
-		gptLine, replacement := gptSegment(runtime, now, contextTokens, l2)
+		codexLine, replacement := codexSegment(runtime, now, contextTokens, l2)
 		if replacement != "" {
 			l2 = replacement
 		}
-		l3 = appendSegment(l3, gptLine)
+		l3 = appendSegment(l3, codexLine)
 	}
 	l3 = appendRateSegments(l3, now, data)
 
@@ -954,19 +954,19 @@ func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Du
 	}
 }
 
-type gptUsageCache struct {
-	Primary   *gptWindow `json:"primary"`
-	Secondary *gptWindow `json:"secondary"`
-	PlanType  string     `json:"planType"`
+type codexUsageCache struct {
+	Primary   *codexWindow `json:"primary"`
+	Secondary *codexWindow `json:"secondary"`
+	PlanType  string       `json:"planType"`
 }
 
-type gptWindow struct {
+type codexWindow struct {
 	UsedPercent        float64 `json:"usedPercent"`
 	WindowDurationMins int64   `json:"windowDurationMins"`
 	ResetsAt           int64   `json:"resetsAt"`
 }
 
-func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 string) (string, string) {
+func codexSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 string) (string, string) {
 	model := runtime.getenv("ANTHROPIC_MODEL")
 	if model == "" {
 		model = "gpt-5.6-sol"
@@ -979,7 +979,7 @@ func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 s
 	} else {
 		segment += sep + red + "⇅ proxy DOWN" + reset
 	}
-	requests, authReject := gptRequestCount(runtime, now)
+	requests, authReject := codexRequestCount(runtime, now)
 	if requests > 0 {
 		segment += sep + dim + "↻ " + strconv.Itoa(requests) + " today" + reset
 	}
@@ -987,11 +987,11 @@ func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 s
 		segment += sep + red + "⚠ auth-reject streak — WS upgrade refused; CCP_CODEX_TRANSPORT=http" + reset
 	}
 	usagePath := filepath.Join(runtime.CacheDir, fmt.Sprintf("cc-gpt-usage-%d.json", runtime.UID))
-	armRefresh(runtime, RefreshKindGPT, usagePath, 5*time.Minute)
+	armRefresh(runtime, RefreshKindCodex, usagePath, 5*time.Minute)
 	usageBody, usageErr := os.ReadFile(usagePath)
-	var usage gptUsageCache
+	var usage codexUsageCache
 	if usageErr == nil && json.Unmarshal(usageBody, &usage) == nil {
-		for _, window := range []*gptWindow{usage.Primary, usage.Secondary} {
+		for _, window := range []*codexWindow{usage.Primary, usage.Secondary} {
 			if window == nil || window.UsedPercent < 0 {
 				continue
 			}
@@ -1031,7 +1031,7 @@ func gptSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2 s
 	return segment, replacement
 }
 
-func gptRequestCount(runtime Runtime, now time.Time) (int, bool) {
+func codexRequestCount(runtime Runtime, now time.Time) (int, bool) {
 	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-gptreq")
 	if fileAge(cachePath, now) > 30*time.Second {
 		logPath := filepath.Join(runtime.Home, ".local", "state", "claude-code-proxy", "proxy.log")

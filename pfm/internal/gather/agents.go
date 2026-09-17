@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/engine/matchutil"
 )
 
 // DetectAgents returns strict session identities for Claude processes using a
@@ -88,12 +87,12 @@ func detectAgentsFrom(
 // hosting a chat is not a process tree hosting somebody's dev server — so
 // there is one spelling of it (K3).
 func IsClaudeCommand(cmdline []string, binaries ...string) bool {
-	return matchutil.Command(pfmengine.Claude, cmdline, true, binaries...)
+	return pfmengine.MatchCommand(pfmengine.Claude, cmdline, true, binaries...)
 }
 
 // IsCodexCommand reports whether an argv belongs to a Codex process.
 func IsCodexCommand(cmdline []string, binaries ...string) bool {
-	return matchutil.Command(pfmengine.Codex, cmdline, false, binaries...)
+	return pfmengine.MatchCommand(pfmengine.Codex, cmdline, false, binaries...)
 }
 
 func isClaudeCommand(cmdline []string, binaries ...string) bool {

@@ -1,12 +1,9 @@
 package codex
 
-import (
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/engine/matchutil"
-)
+import pfmengine "hostops/pfm/internal/engine"
 
 type Matcher struct{}
 
 func (Matcher) IsCommand(argv []string, binaries ...string) bool {
-	return matchutil.Command(pfmengine.Codex, argv, false, binaries...)
+	return pfmengine.MatchCommand(pfmengine.Codex, argv, false, binaries...)
 }

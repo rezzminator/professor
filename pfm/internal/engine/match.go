@@ -1,21 +1,18 @@
-// Package matchutil holds the one executable-matching implementation shared
-// by engine registry matchers and legacy process scanners.
-package matchutil
+package engine
 
 import (
 	"path/filepath"
 	"strings"
-
-	pfmengine "hostops/pfm/internal/engine"
 )
 
-// Command reports whether argv names an engine process. VersionNamed enables
+// MatchCommand is the one executable matcher for engine registry matchers and process scanners.
+// VersionNamed enables
 // Claude's native-install convention where argv[0] is a dotted version number.
-func Command(id pfmengine.ID, argv []string, versionNamed bool, binaries ...string) bool {
+func MatchCommand(id ID, argv []string, versionNamed bool, binaries ...string) bool {
 	if len(argv) == 0 {
 		return false
 	}
-	descriptor := pfmengine.MustLookup(id)
+	descriptor := MustLookup(id)
 	executable := filepath.ToSlash(argv[0])
 	name := filepath.Base(executable)
 	if name == descriptor.Binary {

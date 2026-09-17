@@ -172,7 +172,9 @@ func newAttachJail(t *testing.T) *attachJail {
 		transcript: transcript,
 		id:         id,
 		env:        env,
-		shim:       filepath.Clean(filepath.Join(cwd, "..", "..", "shim", "pfm.zsh")),
+		shim: filepath.Clean(filepath.Join(
+			cwd, "..", "..", "internal", "installer", "assets", "shim", "pfm.zsh",
+		)),
 	}
 }
 
@@ -227,7 +229,7 @@ func (jail *attachJail) proveAttach(
 		commandText = `eval "$(` + commandText + `)"`
 	}
 	scriptPath := filepath.Join(jail.root, suffix+".zsh")
-	script := "#!/usr/bin/env zsh\nsource " + shellQuote(jail.shim) + "\n" +
+	script := "#!/usr/bin/env zsh\nsource " + shellQuote(jail.shim) + " || exit 97\n" +
 		commandText + "\nprint -r -- attached > " + shellQuote(marker) + "\n"
 	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
 		t.Fatal(err)

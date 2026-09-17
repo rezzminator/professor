@@ -348,7 +348,7 @@ func readShimFile(t *testing.T, path string) string {
 
 func embeddedShimPath(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join("..", "internal", "installer", "assets", "shim", "pfm.zsh")
+	path := filepath.Join("..", "assets", "shim", "pfm.zsh")
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("embedded shim asset %s: %v", path, err)
 	}

@@ -1,6 +1,6 @@
 # pfm Go CLI — user-facing capability inventory
 
-Scope: `pfm/cmd/pfm/commands.go`, `pfm/cmd/pfm/*_command.go` (non-test), `pfm/cmd/pfm/main.go`, `pfm/HARVESTER.md`, `pfm/HEADLESS.md` (no `pfm/README.md` in this repo), plus the top-of-file comment of each named `internal/*` package's main file (no `doc.go` files exist in this repo — verified by listing). Harvester internals (`internal/harvest*`), tests, and quality judgments are out of scope.
+Scope: `pfm/cmd/pfm/commands.go`, `pfm/cmd/pfm/*_command.go` (non-test), `pfm/cmd/pfm/main.go`, `pfm/internal/harvest/README.md`, `pfm/internal/headless/README.md` (no `pfm/README.md` in this repo), plus the top-of-file comment of each named `internal/*` package's main file (no `doc.go` files exist in this repo — verified by listing). Harvester internals (`internal/harvest*`), tests, and quality judgments are out of scope.
 
 Git stamp: HEAD `00da35b5`, 0 dirty lines (clean working tree) at trace start.
 
@@ -174,7 +174,7 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 
 ### `pfm mcp harvester serve` — MCP tools (registered in `pfm/internal/harvestmcp`, cross-referenced via `pfm/cmd/pfm/mcp_serve_command.go:25-27`; internals out of scope)
 
-| MCP tool | What it does | Evidence | Documented in HARVESTER.md |
+| MCP tool | What it does | Evidence | Documented in `pfm/internal/harvest/README.md` |
 |---|---|---|---|
 | `fetch` | Fetch URL/DOI/ISBN/PMID/PMCID/local file | `mcp_serve_command.go:25-27`, `mcp.AddTool(..., Name: "fetch", ...)` | Yes (line ~23) |
 | `findWorks` | Find papers/works by title, bibliographic candidates | same | Yes (line ~23) |
@@ -191,7 +191,7 @@ Every spelling checked and found ABSENT, with the grep that proved it:
 
 - `pfm chat goal` — `grep -n '"goal"' pfm/cmd/pfm/headless_command.go` and `pfm/cmd/pfm/chat_command.go`: zero hits. `chat_goal` exists only as an MCP tool.
 - `pfm chat kill-exit` — `grep -n '"kill-exit"' pfm/cmd/pfm/chat_command.go`: zero hits. `kill-exit` exists only as `pfm internal kill-exit`.
-- `pfm/README.md` — does not exist in this repo (`ls` confirmed; `pfm/HARVESTER.md` and `pfm/HEADLESS.md` do exist and were read).
+- `pfm/README.md` — does not exist in this repo (`ls` confirmed; `pfm/internal/harvest/README.md` and `pfm/internal/headless/README.md` do exist and were read).
 - `doc.go` for all 22 named `internal/*` packages in the boundary (chat, inject, reload, spawn, sky, fleet, headless, mcpserv, dream, heal, reap, archive, updatecheck, installer, codexgen, statusline, stats, usagehook, nudge, agentopen, agentrole, recovery, rearm) — none exist (`ls pfm/internal/$p/doc.go` returned "No such file or directory" for all 22); the eponymous main file's top comment was used instead per the brief's fallback.
 
 ## Named gaps / not fully resolved (never silently dropped)
@@ -262,8 +262,8 @@ EDGE = contains one or more capabilities, quoted by a tracer. NOT-MINE = in scop
 - pfm/cmd/pfm/update_project.go — EDGE (`pfm update check/pin/ignore/drop/adopt`)
 - pfm/cmd/pfm/whoami_command.go — EDGE (`pfm whoami`)
 - pfm/README.md — ABSENT from repo (not a hole; confirmed nonexistent)
-- pfm/HARVESTER.md — EDGE (read fully; cross-referenced harvester MCP tool docs)
-- pfm/HEADLESS.md — EDGE (read fully; cross-referenced headless exec flags)
+- pfm/internal/harvest/README.md — EDGE (read fully; cross-referenced harvester MCP tool docs)
+- pfm/internal/headless/README.md — EDGE (read fully; cross-referenced headless exec flags)
 
 FRONTIER (not walked to completion by any tracer, named rather than dropped):
 - `pfm/internal/stale/*` — the `stale` package's own subcommand surface behind `pfm internal stale` was never opened.
@@ -275,6 +275,6 @@ FRONTIER (not walked to completion by any tracer, named rather than dropped):
 - Git stamp: HEAD `00da35b5`, working tree clean (0 dirty lines), at trace start.
 - Tracers dispatched: 7 (6 primary threads + 1 mop-up). Reports received: 7. Reconciled: yes, no missing report.
 - Mop-up: run (not skipped) — closed 5 named gaps: `name-sync` disposition, 8 headless-forwarded chat verbs (new/last/status/stream/inject/self-compact/watch/modal), `run_command.go`'s role (`chat new`), exact `install` flag spellings (verbatim-verified), and `goal`/`kill-exit` absence checks (verbatim grep, zero hits).
-- Files in boundary read or dispositioned: 55 of 56 `pfm/cmd/pfm/*.go` non-test files (all except none knowingly skipped; `pipeline.go` read only enough to disposition NOT-MINE, not deep-walked for a hidden capability — named above), plus `main.go`, `commands.go`, `pfm/HARVESTER.md`, `pfm/HEADLESS.md` (`pfm/README.md` does not exist), plus the eponymous main file of all 22 named `internal/*` packages for top-comment context (no `doc.go` exists in any of them, confirmed by directory listing).
+- Files in boundary read or dispositioned: 55 of 56 `pfm/cmd/pfm/*.go` non-test files (all except none knowingly skipped; `pipeline.go` read only enough to disposition NOT-MINE, not deep-walked for a hidden capability — named above), plus `main.go`, `commands.go`, `pfm/internal/harvest/README.md`, `pfm/internal/headless/README.md` (`pfm/README.md` does not exist), plus the eponymous main file of all 22 named `internal/*` packages for top-comment context (no `doc.go` exists in any of them, confirmed by directory listing).
 - Commands/subcommands/flags found: **~100 distinct user-facing entries** across top-level commands (≈70 rows counting flag variants), `pfm internal` hook plumbing (19 verbs), `pfm chat` verbs (24 verbs), MCP chat tools (20), and MCP harvester tools (6) — see per-section tables above for the exact enumerated set; this total is a rollup of the tables, not a substitute for them.
 - Never claimed "clean" from a partial read: `doctor.go` (54k, partial-read but its 30-check dispatch fully enumerated via targeted grep+read of the dispatch body, lines 59-303); `reload_command.go` (38k, ~548/~1100 lines read, flags/dispatch fully covered, worker internals not); `chat_satellite_command.go` (32k, ~250/~950 lines read, all 6 dispatched verbs covered).

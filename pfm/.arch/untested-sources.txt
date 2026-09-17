@@ -41,7 +41,7 @@ internal/action/types.go
 internal/agentopen/real.go
 internal/archive/live.go
 internal/archive/manifest.go
-internal/chatkeys/keys.go
+internal/chat/keys.go
 internal/codexappendix/history.go
 internal/codexappendix/register.go
 internal/codexgen/compiler.go
@@ -58,7 +58,7 @@ internal/engine/claude/capabilities.go
 internal/engine/claude/match.go
 internal/engine/codex/capabilities.go
 internal/engine/codex/match.go
-internal/engine/matchutil/match.go
+internal/engine/match.go
 internal/engine/opencode/index.go
 internal/engine/opencode/match.go
 internal/gather/agents.go

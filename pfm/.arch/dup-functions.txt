@@ -6,7 +6,7 @@ clip: internal/index/opencode.go internal/stale/stale.go
 cliprunes: internal/gather/gather.go internal/naming/naming.go internal/resolve/resolve.go internal/spawn/spawn.go internal/ui/render.go
 codexthreadid: internal/gather/codexproc.go internal/resolve/codex.go
 codexwindowname: internal/gather/gather.go internal/stats/limits.go
-command: internal/codexappendix/register.go internal/engine/matchutil/match.go internal/tmux/tmux.go
+command: internal/codexappendix/register.go internal/tmux/tmux.go
 compose: internal/compose/compose.go internal/fleet/scan.go
 defaultcachedir: internal/harvest/cache.go internal/usagehook/hook.go
 defaults: internal/config/config.go internal/spawn/types.go
@@ -33,7 +33,7 @@ new: internal/action/executor.go internal/agentopen/agentopen.go internal/archiv
 newconfigured: internal/harvestmcp/service.go internal/mcpserv/server.go
 normalize: internal/installer/types.go internal/usagehook/hook.go
 numericversion: internal/action/executor.go internal/deps/probe.go
-open: internal/shared/shared.go internal/store/store.go
+open: internal/fleetdb/fleetdb.go internal/store/store.go
 openreadonly: internal/heal/heal.go internal/sqlitedb/sqlitedb.go
 parse: internal/engine/engine.go internal/recovery/recovery.go internal/transcript/transcript.go
 parseclaude: internal/index/claude.go internal/transcript/transcript.go
@@ -42,7 +42,7 @@ parsefrontmatter: internal/codexgen/transform.go internal/harvest/cache.go
 parseusage: internal/ask/ask.go internal/headless/run/run.go
 parseversion: internal/update/version.go internal/updatecheck/updatecheck.go
 plan: internal/harvestpy/provision.go internal/reap/reap.go
-primaryaccount: internal/fleet/accounts.go internal/shared/shared.go
+primaryaccount: internal/fleet/accounts.go internal/fleetdb/fleetdb.go
 read: internal/codexmeta/header.go internal/updatecheck/updatecheck.go
 readcodexthreads: internal/index/codexstate.go internal/store/codexstate.go
 register: internal/codexappendix/register.go internal/engine/engine.go
@@ -51,7 +51,7 @@ resetpassed: internal/stats/limits.go internal/usagehook/hook.go
 resolve: internal/agentrole/agentrole.go internal/chat/target.go internal/deps/registry.go internal/headless/run/run.go internal/paths/paths.go
 run: cmd/pfm/main.go internal/codexappendix/hook.go internal/codexgen/compiler.go internal/headless/run/run.go internal/installer/installer.go internal/recovery/recovery.go internal/reload/reload.go internal/spawn/spawn.go internal/stale/stale.go internal/testjail/testjail.go
 searchenabled: internal/harvest/search.go internal/harvestmcp/search_gate.go
-setprimaryaccount: internal/fleet/accounts.go internal/shared/shared.go
+setprimaryaccount: internal/fleet/accounts.go internal/fleetdb/fleetdb.go
 socketepoch: internal/compose/compose.go internal/resolve/resolve.go
 splitnul: internal/action/process.go internal/gather/procfs.go
 sweep: internal/heal/heal.go internal/stale/stale.go

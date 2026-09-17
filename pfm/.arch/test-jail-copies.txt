@@ -1,4 +1,4 @@
-cmd/pfm/attach_e2e_test.go 1
+cmd/pfm/attach_jail_test.go 1
 cmd/pfm/booting_row_jail_test.go 1
 cmd/pfm/chat_server_command_test.go 1
 cmd/pfm/namesync_titles_regression_test.go 1

@@ -3,6 +3,7 @@ package codexgen
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -136,6 +137,59 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 			err,
 			got,
 		)
+	}
+}
+
+func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
+	home := t.TempDir()
+	writeTestFile(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "agents", "quoted.md"),
+		"---\nname: quoted\ndescription: 'a: b, \"c\"'\n---\n\nBody.\n",
+	)
+
+	if _, err := RunGlobalAgents(GlobalAgentsOptions{Home: home}); err != nil {
+		t.Fatalf("RunGlobalAgents: %v", err)
+	}
+	got := string(mustReadTestFile(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "agents", "quoted.toml"),
+	))
+	want := "name = \"quoted\"\n" +
+		"description = \"a: b, \\\"c\\\"\"\n" +
+		"developer_instructions = \"\"\"\nBody.\n\"\"\"\n"
+	if got != want {
+		t.Fatalf("quoted.toml =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestTrackedGlobalAgentTwinsMatchCompiler(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate codexgen test source")
+	}
+	agentsDir := filepath.Join(filepath.Dir(testFile), "..", "..", "..", "templates", "global", "agents")
+	sources, err := filepath.Glob(filepath.Join(agentsDir, "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) == 0 {
+		t.Fatalf("no global agent sources in %s", agentsDir)
+	}
+	for _, source := range sources {
+		t.Run(strings.TrimSuffix(filepath.Base(source), ".md"), func(t *testing.T) {
+			target, generated, err := renderGlobalAgentTOML(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tracked, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatalf("read tracked twin %s: %v", target, err)
+			}
+			if generated != string(tracked) {
+				t.Fatalf("tracked twin %s differs from compiler output", target)
+			}
+		})
 	}
 }
 

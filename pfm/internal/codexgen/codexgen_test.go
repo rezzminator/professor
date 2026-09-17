@@ -264,6 +264,28 @@ func TestFrontmatterAndRosterTransform(t *testing.T) {
 	}
 }
 
+func TestFrontmatterUnquotesYAMLScalars(t *testing.T) {
+	raw := "---\n" +
+		"single: 'a: b, \"c\" and it''s fine'\n" +
+		"double: \"line one\\n\\\"line two\\\" \\\\ end\"\n" +
+		"plain: unchanged: value\n" +
+		"---\nbody\n"
+	fields, _, err := parseFrontmatter(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"single": `a: b, "c" and it's fine`,
+		"double": "line one\n\"line two\" \\ end",
+		"plain":  "unchanged: value",
+	}
+	for key, expected := range want {
+		if got := fields[key]; got != expected {
+			t.Errorf("%s = %q, want %q", key, got, expected)
+		}
+	}
+}
+
 func TestDanglingGlobalCommandIsHonestAndCheckWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()

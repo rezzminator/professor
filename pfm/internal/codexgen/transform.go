@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -83,9 +84,31 @@ func parseFrontmatter(text string) (map[string]string, string, error) {
 			// would make a valid Claude agent impossible to mirror.
 			continue
 		}
-		fields[match[1]] = match[2]
+		value, err := unquoteFrontmatterScalar(match[2])
+		if err != nil {
+			return nil, "", fmt.Errorf("frontmatter field %s: %w", match[1], err)
+		}
+		fields[match[1]] = value
 	}
 	return fields, strings.Join(lines[end+1:], "\n"), nil
+}
+
+func unquoteFrontmatterScalar(value string) (string, error) {
+	if len(value) < 2 || value[0] != value[len(value)-1] {
+		return value, nil
+	}
+	switch value[0] {
+	case '\'':
+		return strings.ReplaceAll(value[1:len(value)-1], "''", "'"), nil
+	case '"':
+		unquoted, err := strconv.Unquote(value)
+		if err != nil {
+			return "", fmt.Errorf("decode double-quoted YAML scalar: %w", err)
+		}
+		return unquoted, nil
+	default:
+		return value, nil
+	}
 }
 
 func transformMarkdown(text string, options TransformOptions) string {

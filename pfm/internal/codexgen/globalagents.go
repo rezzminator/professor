@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 )
@@ -77,17 +76,6 @@ type GlobalAgentAction struct {
 const (
 	globalAgentBodyOld = "children are Explore+haiku (never\nyour own type)"
 	globalAgentBodyNew = "children are spawned via spawn_agent as the `explorer` role (never your own type)"
-)
-
-// globalAgentFrontmatter requires the entire file to be exactly
-// "---\n<frontmatter>\n---\n<body>" with nothing before it and the body
-// running to end of file — the same shape build-global-agents.py required
-// (\A...\Z, DOTALL). A file that doesn't fit this shape (extra leading
-// content, no closing "---" line) is not a global agent source.
-var (
-	globalAgentFrontmatter = regexp.MustCompile(`(?s)\A---\n(.*?)\n---\n(.*)\z`)
-	globalAgentNameField   = regexp.MustCompile(`(?m)^name:\s*(.+)$`)
-	globalAgentDescField   = regexp.MustCompile(`(?m)^description:\s*(.+)$`)
 )
 
 // RunGlobalAgents is the Go port of the retired host script
@@ -311,19 +299,19 @@ func renderGlobalAgentTOML(mdPath string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("read %s: %w", mdPath, err)
 	}
-	match := globalAgentFrontmatter.FindStringSubmatch(string(raw))
-	if match == nil {
+	fields, body, err := parseFrontmatter(string(raw))
+	if err != nil {
+		return "", "", fmt.Errorf("parse %s: %w", mdPath, err)
+	}
+	if len(fields) == 0 {
 		return "", "", fmt.Errorf("%s: no frontmatter", mdPath)
 	}
-	frontmatter, body := match[1], strings.TrimSpace(match[2])
-
-	nameMatch := globalAgentNameField.FindStringSubmatch(frontmatter)
-	descMatch := globalAgentDescField.FindStringSubmatch(frontmatter)
-	if nameMatch == nil || descMatch == nil {
+	name := strings.TrimSpace(fields["name"])
+	description := strings.TrimSpace(fields["description"])
+	if name == "" || description == "" {
 		return "", "", fmt.Errorf("%s: frontmatter needs both name: and description", mdPath)
 	}
-	name := strings.TrimSpace(nameMatch[1])
-	description := strings.TrimSpace(descMatch[1])
+	body = strings.TrimSpace(body)
 
 	body = strings.ReplaceAll(body, globalAgentBodyOld, globalAgentBodyNew)
 

@@ -69,12 +69,17 @@ retire() {
 }
 
 check_seats() { # every answering seat: /reload linked, professor theme, fullscreen, no theme override
-  local id dir theme tui bad=""
+  local id dir theme theme_rc reason tui bad=""
   [ -n "$SEAT_A" ] || { fail seats "no Claude seat recorded (demo-seats-live) or configured"; return; }
   for id in "${LIVE[@]}"; do
     dir="$(seat_dir "$id")"
     [ -e "$dir/commands/reload.md" ] || bad+=" seat $id: commands/reload.md missing (pfm install did not wire it);"
-    theme="$(jq -r '.theme // ""' "$dir/settings.json" 2>/dev/null)"; [[ "$theme" == custom:professor-* ]] || bad+=" seat $id: theme=${theme:-<none>};"
+    if theme="$(jq -r '.theme // ""' "$dir/settings.json" 2>&1)"; then
+      [[ "$theme" == custom:professor-* ]] || bad+=" seat $id: theme=${theme:-<none>};"
+    else
+      theme_rc=$?; reason="$(printf '%s' "$theme" | tr '\n' ' ')"
+      bad+=" seat $id: theme=UNREADABLE(${reason:-jq exit $theme_rc with no error text});"
+    fi
     tui="$(jq -r '.tui // ""' "$dir/settings.json" 2>/dev/null)"; [ "$tui" = fullscreen ] || bad+=" seat $id: tui=${tui:-<none>};"
     [ "$(jq -r 'has("theme")' "$dir/.claude.json" 2>/dev/null)" = false ] || bad+=" seat $id: .claude.json carries a theme key (overrides settings.json);"
   done

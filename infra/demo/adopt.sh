@@ -125,5 +125,16 @@ if ! { pfm codex build . && pfm codex check .; } >"$log" 2>&1; then
   echo "adopt: pfm codex build/check failed in $DIR — $log:" >&2; tail -20 "$log" >&2; exit 1
 fi
 echo "adopt: Codex mirror compiled — $(grep -E 'CODEX (BUILD|CHECK) PASS' "$log" | tr '\n' ' ')"
-git add -A >/dev/null 2>&1 && git -c user.name=demo -c user.email=demo@example.invalid commit -q -m "professor: install" 2>/dev/null || true
+add_rc=0; add_stderr="$(git add -A 2>&1)" || add_rc=$?
+if [ "$add_rc" -ne 0 ]; then
+  add_stderr="$(printf '%s' "$add_stderr" | tr '\n' ' ')"
+  echo "adopt: FAILED to add — ${add_stderr:-git add exit $add_rc with no error text}" >&2
+  exit 1
+fi
+commit_rc=0; commit_stderr="$(git -c user.name=demo -c user.email=demo@example.invalid commit -q -m "professor: install" 2>&1)" || commit_rc=$?
+if [ "$commit_rc" -ne 0 ]; then
+  commit_stderr="$(printf '%s' "$commit_stderr" | tr '\n' ' ')"
+  echo "adopt: FAILED to commit — ${commit_stderr:-git commit exit $commit_rc with no error text}" >&2
+  exit 1
+fi
 echo "adopt: $NAME installed and committed ('professor: install')"

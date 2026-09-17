@@ -27,9 +27,11 @@ const (
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
 	// test` is refused the real home rather than handed it silently.
-	EnvRealHome   = "PFM_TEST_REAL_HOME"
-	EnvProcRoot   = "PFM_PROC_ROOT"
-	EnvCgroupRoot = "PFM_CGROUP_ROOT"
+	EnvRealHome        = "PFM_TEST_REAL_HOME"
+	EnvProcRoot        = "PFM_PROC_ROOT"
+	EnvCgroupRoot      = "PFM_CGROUP_ROOT"
+	EnvDevRepoGitDir   = "PFM_DEV_REPO_GIT_DIR"
+	EnvDevRepoWorkTree = "PFM_DEV_REPO_WORK_TREE"
 	// EnvTmuxConf pins the config a chat's tmux server is born with. Unset —
 	// the way a real chat runs — the server loads ~/.tmux.conf like every other
 	// terminal on the machine, because a chat IS a terminal the user lives in:
@@ -98,6 +100,14 @@ func EnvOr(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// DevRepoGitDir returns the fence-mounted git directory when root is the
+// corresponding mounted worktree.
+func DevRepoGitDir(root string) (string, bool) {
+	workTree := strings.TrimSpace(os.Getenv(EnvDevRepoWorkTree))
+	gitDir := strings.TrimSpace(os.Getenv(EnvDevRepoGitDir))
+	return gitDir, gitDir != "" && filepath.Clean(workTree) == filepath.Clean(root)
 }
 
 // Home resolves the operator home every pfm path hangs from: the PFM_HOME

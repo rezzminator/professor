@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/deps"
+	pfmpaths "hostops/pfm/internal/paths"
 )
 
 const UnknownSelfHostedSHA = "self-hosted@unknown"
@@ -85,14 +86,20 @@ func InspectStore(root string) (Store, error) {
 }
 
 func storeSHA(root string) (string, error) {
-	gitPath := filepath.Join(root, ".git")
-	if _, err := os.Stat(gitPath); errors.Is(err, fs.ErrNotExist) {
-		return UnknownSelfHostedSHA, nil
-	} else if err != nil {
-		return "", fmt.Errorf("UNREADABLE %s: %w", gitPath, err)
+	gitDir, useFenceGit := pfmpaths.DevRepoGitDir(root)
+	if !useFenceGit {
+		gitPath := filepath.Join(root, ".git")
+		if _, err := os.Stat(gitPath); errors.Is(err, fs.ErrNotExist) {
+			return UnknownSelfHostedSHA, nil
+		} else if err != nil {
+			return "", fmt.Errorf("UNREADABLE %s: %w", gitPath, err)
+		}
 	}
 	command := exec.Command(deps.Executable("git"), "rev-parse", "--short", "HEAD")
 	command.Dir = root
+	if useFenceGit {
+		command.Env = append(os.Environ(), "GIT_DIR="+gitDir, "GIT_WORK_TREE="+root)
+	}
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("UNREADABLE blueprint git state %s: %w: %s", root, err, strings.TrimSpace(string(output)))

@@ -2,9 +2,12 @@ package professor
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	pfmpaths "hostops/pfm/internal/paths"
 )
 
 func TestHashTemplateUsesExactBytes(t *testing.T) {
@@ -49,4 +52,69 @@ func TestResolveStoreDefaultsToSelfHostedUnknownWithoutGit(t *testing.T) {
 	if store.Root != blueprint || store.Version != "0.65.0" || store.SHA != "self-hosted@unknown" {
 		t.Fatalf("ResolveStore() = %#v", store)
 	}
+}
+
+func TestStoreSHAUsesFenceGitContractForLinkedWorktree(t *testing.T) {
+	repository := filepath.Join(t.TempDir(), "repository")
+	runStoreGit(t, "init", "-q", repository)
+	runStoreGit(t, "-C", repository, "config", "user.email", "fixture.invalid")
+	runStoreGit(t, "-C", repository, "config", "user.name", "fixture-identity")
+	if err := os.WriteFile(filepath.Join(repository, "tracked.txt"), []byte("fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runStoreGit(t, "-C", repository, "add", "tracked.txt")
+	runStoreGit(t, "-C", repository, "commit", "-qm", "fixture")
+
+	linkedRoot := filepath.Join(t.TempDir(), "linked-worktree")
+	runStoreGit(t, "-C", repository, "worktree", "add", "--detach", "-q", linkedRoot, "HEAD")
+	gitDir := runStoreGit(t, "-C", linkedRoot, "rev-parse", "--git-dir")
+	want := runStoreGit(t, "-C", linkedRoot, "rev-parse", "--short", "HEAD")
+	if err := os.WriteFile(
+		filepath.Join(linkedRoot, ".git"),
+		[]byte("gitdir: /nonexistent/host/path\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(pfmpaths.EnvDevRepoWorkTree, "  "+linkedRoot+"  ")
+	t.Setenv(pfmpaths.EnvDevRepoGitDir, "  "+gitDir+"  ")
+
+	got, err := storeSHA(linkedRoot)
+	if err != nil {
+		t.Fatalf("storeSHA() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("storeSHA() = %q, want %q", got, want)
+	}
+}
+
+func TestStoreSHAKeepsBrokenGitFileUnreadableWithoutFenceContract(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(root, ".git"),
+		[]byte("gitdir: /nonexistent/host/path\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(pfmpaths.EnvDevRepoWorkTree, "")
+	t.Setenv(pfmpaths.EnvDevRepoGitDir, "")
+
+	got, err := storeSHA(root)
+	if err == nil || !strings.Contains(err.Error(), "UNREADABLE blueprint git state") {
+		t.Fatalf("storeSHA() = %q, %v; want UNREADABLE error", got, err)
+	}
+	if got == UnknownSelfHostedSHA {
+		t.Fatalf("storeSHA() = %q; broken git metadata must not look absent", got)
+	}
+}
+
+func runStoreGit(t *testing.T, arguments ...string) string {
+	t.Helper()
+	command := exec.Command("git", arguments...)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(arguments, " "), err, output)
+	}
+	return strings.TrimSpace(string(output))
 }

@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pfmpaths "hostops/pfm/internal/paths"
 )
 
 const (
@@ -231,8 +233,8 @@ func TestCopySourceTreeEnumeratesLinkedWorktreeWithFenceGitDir(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PFM_DEV_REPO_WORK_TREE", source)
-	t.Setenv("PFM_DEV_REPO_GIT_DIR", gitDir)
+	t.Setenv(pfmpaths.EnvDevRepoWorkTree, source)
+	t.Setenv(pfmpaths.EnvDevRepoGitDir, gitDir)
 	target := filepath.Join(t.TempDir(), "staged")
 	if err := copySourceTree(source, target); err != nil {
 		t.Fatalf("copy linked worktree through fence: %v", err)
@@ -457,8 +459,8 @@ func sourceRepo(t *testing.T) string {
 		return prepareSourceRepoWithGit(
 			t,
 			root,
-			strings.TrimSpace(os.Getenv("PFM_DEV_REPO_WORK_TREE")),
-			strings.TrimSpace(os.Getenv("PFM_DEV_REPO_GIT_DIR")),
+			strings.TrimSpace(os.Getenv(pfmpaths.EnvDevRepoWorkTree)),
+			strings.TrimSpace(os.Getenv(pfmpaths.EnvDevRepoGitDir)),
 		)
 	}
 	_, file, _, ok := runtime.Caller(0)
@@ -474,8 +476,8 @@ func sourceRepo(t *testing.T) string {
 
 func prepareSourceRepo(t *testing.T, root string) string {
 	t.Helper()
-	workTree := strings.TrimSpace(os.Getenv("PFM_DEV_REPO_WORK_TREE"))
-	gitDir := strings.TrimSpace(os.Getenv("PFM_DEV_REPO_GIT_DIR"))
+	workTree := strings.TrimSpace(os.Getenv(pfmpaths.EnvDevRepoWorkTree))
+	gitDir := strings.TrimSpace(os.Getenv(pfmpaths.EnvDevRepoGitDir))
 	if workTree == "" || gitDir == "" || filepath.Clean(root) != filepath.Clean(workTree) {
 		workTree = ""
 		gitDir = ""
@@ -550,8 +552,8 @@ func currentE2ETag(t *testing.T) string {
 }
 
 func copySourceTree(source, target string) error {
-	workTree := strings.TrimSpace(os.Getenv("PFM_DEV_REPO_WORK_TREE"))
-	gitDir := strings.TrimSpace(os.Getenv("PFM_DEV_REPO_GIT_DIR"))
+	workTree := strings.TrimSpace(os.Getenv(pfmpaths.EnvDevRepoWorkTree))
+	gitDir := strings.TrimSpace(os.Getenv(pfmpaths.EnvDevRepoGitDir))
 	if workTree == "" || gitDir == "" || filepath.Clean(source) != filepath.Clean(workTree) {
 		metadata := fmt.Sprintf("worktree=%q git-dir=%q", workTree, gitDir)
 		workTree = ""

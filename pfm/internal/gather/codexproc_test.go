@@ -14,9 +14,9 @@ import (
 // the process stays invisible, which is the pre-0.146 behavior every other
 // caller still gets.
 func TestDetectCodexThreadsIdentifiesSessionsWithoutRolloutFiles(t *testing.T) {
-	codexRoot := t.TempDir()
+	codexHome := t.TempDir()
 	declared := filepath.Join(
-		codexRoot,
+		codexHome,
 		"sessions",
 		"2026",
 		"rollout-2026-01-01T00-00-00-paginated.jsonl",
@@ -37,7 +37,7 @@ func TestDetectCodexThreadsIdentifiesSessionsWithoutRolloutFiles(t *testing.T) {
 		CurrentPath: "/work/paginated",
 	}}
 
-	if invisible, err := DetectCodex(proc, codexRoot, panes); err != nil ||
+	if invisible, err := DetectCodex(proc, codexHome, panes); err != nil ||
 		len(invisible) != 0 {
 		t.Fatalf("DetectCodex() = %#v, error = %v; want no rollout-less rows", invisible, err)
 	}
@@ -46,7 +46,7 @@ func TestDetectCodexThreadsIdentifiesSessionsWithoutRolloutFiles(t *testing.T) {
 	var gotBirth int64
 	got, err := DetectCodexThreads(
 		proc,
-		codexRoot,
+		codexHome,
 		panes,
 		func(exported, cwd string, birth int64, _, _ string) (string, string) {
 			gotExported, gotCWD, gotBirth = exported, cwd, birth
@@ -188,7 +188,7 @@ func TestCodexResumeArgvTakesOnlyAUUID(t *testing.T) {
 // An unidentifiable codex process — the app-server daemon, for instance —
 // never becomes a live chat row.
 func TestDetectCodexThreadsSkipsUnidentifiedProcesses(t *testing.T) {
-	codexRoot := t.TempDir()
+	codexHome := t.TempDir()
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
@@ -201,7 +201,7 @@ func TestDetectCodexThreadsSkipsUnidentifiedProcesses(t *testing.T) {
 
 	live, err := DetectCodexThreads(
 		proc,
-		codexRoot,
+		codexHome,
 		panes,
 		func(string, string, int64, string, string) (string, string) { return "", "" },
 	)
@@ -217,8 +217,8 @@ func TestDetectCodexThreadsSkipsUnidentifiedProcesses(t *testing.T) {
 // can rotate it while argv and CODEX_THREAD_ID still name the old thread, so
 // the file must win without consulting the state-store resolver.
 func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing.T) {
-	codexRoot := t.TempDir()
-	rollout := filepath.Join(codexRoot, "sessions", "2026", "rollout-live.jsonl")
+	codexHome := t.TempDir()
+	rollout := filepath.Join(codexHome, "sessions", "2026", "rollout-live.jsonl")
 	writeRolloutMeta(t, rollout, "user", "")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
@@ -233,7 +233,7 @@ func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing
 
 	live, err := DetectCodexThreads(
 		proc,
-		codexRoot,
+		codexHome,
 		panes,
 		func(string, string, int64, string, string) (string, string) {
 			t.Fatal("the resolver was consulted for a session holding a rollout descriptor")
@@ -266,10 +266,10 @@ func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing
 // pane's own screen (ls_pipeline.go). Blanket-true here would silently restore
 // the defect this field exists to prevent.
 func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
-	codexRoot := t.TempDir()
-	heldRollout := filepath.Join(codexRoot, "sessions", "2026", "rollout-held.jsonl")
+	codexHome := t.TempDir()
+	heldRollout := filepath.Join(codexHome, "sessions", "2026", "rollout-held.jsonl")
 	writeRolloutMeta(t, heldRollout, "user", "")
-	resolvedRollout := filepath.Join(codexRoot, "sessions", "2026", "rollout-resolved-paginated.jsonl")
+	resolvedRollout := filepath.Join(codexHome, "sessions", "2026", "rollout-resolved-paginated.jsonl")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
 		400: {
@@ -291,7 +291,7 @@ func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 
 	live, err := DetectCodexThreads(
 		proc,
-		codexRoot,
+		codexHome,
 		panes,
 		func(exported, _ string, _ int64, _, _ string) (string, string) {
 			return exported, resolvedRollout

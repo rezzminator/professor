@@ -27,7 +27,7 @@ func SpawnDetached(kind RefreshKind) (returnErr error) {
 	}
 	argument := ""
 	switch kind {
-	case RefreshKindGPT:
+	case RefreshKindCodex:
 		argument = "--refresh-gpt"
 	default:
 		return fmt.Errorf("unknown statusline refresher %q", kind)
@@ -55,21 +55,21 @@ func SpawnDetached(kind RefreshKind) (returnErr error) {
 	return nil
 }
 
-// ReadGPTRateLimits performs the complete Codex App Server initialize exchange
+// ReadCodexRateLimits performs the complete Codex App Server initialize exchange
 // and returns its id=1 response. It runs only in a detached refresher child.
-func ReadGPTRateLimits(ctx context.Context) ([]byte, error) {
-	return ReadGPTRateLimitsWithBinary(ctx, pfmengine.MustLookup(pfmengine.Codex).Binary)
+func ReadCodexRateLimits(ctx context.Context) ([]byte, error) {
+	return ReadCodexRateLimitsWithBinary(ctx, pfmengine.MustLookup(pfmengine.Codex).Binary)
 }
 
-// ReadGPTRateLimitsWithBinary uses the machine-configured Codex command.
-func ReadGPTRateLimitsWithBinary(ctx context.Context, binary string) ([]byte, error) {
-	return ReadGPTRateLimitsWithBinaryAtHome(ctx, binary, "")
+// ReadCodexRateLimitsWithBinary uses the machine-configured Codex command.
+func ReadCodexRateLimitsWithBinary(ctx context.Context, binary string) ([]byte, error) {
+	return ReadCodexRateLimitsWithBinaryAtHome(ctx, binary, "")
 }
 
-// ReadGPTRateLimitsWithBinaryAtHome reads one configured Codex account. An
+// ReadCodexRateLimitsWithBinaryAtHome reads one configured Codex account. An
 // explicit home keeps multi-account limits isolated from the caller's own
 // CODEX_HOME.
-func ReadGPTRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome string) ([]byte, error) {
+func ReadCodexRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome string) ([]byte, error) {
 	if binary == "" {
 		binary = pfmengine.MustLookup(pfmengine.Codex).Binary
 	}
@@ -79,7 +79,7 @@ func ReadGPTRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome st
 	if codexHome != "" {
 		command.Env = replaceCommandEnv(os.Environ(), "CODEX_HOME", codexHome)
 	}
-	return readGPTRateLimitsCommand(command)
+	return readCodexRateLimitsCommand(command)
 }
 
 func replaceCommandEnv(environment []string, name, value string) []string {
@@ -93,7 +93,7 @@ func replaceCommandEnv(environment []string, name, value string) []string {
 	return append(replaced, prefix+value)
 }
 
-func readGPTRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
+func readCodexRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("open App Server stdin: %w", err)

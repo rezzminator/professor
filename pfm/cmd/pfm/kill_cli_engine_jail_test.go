@@ -219,10 +219,10 @@ func newKillCLIJail(t *testing.T) *killCLIJail {
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	sidDir := filepath.Join(root, "sid")
 	claudeRoot := filepath.Join(root, "claude")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	procRoot := filepath.Join(root, "proc")
 	for _, directory := range []string{
-		home, tmuxDir, sidDir, claudeRoot, codexRoot, procRoot,
+		home, tmuxDir, sidDir, claudeRoot, codexHome, procRoot,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -234,7 +234,7 @@ func newKillCLIJail(t *testing.T) *killCLIJail {
 	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
 	t.Setenv("PFM_SID_DIR", sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", claudeRoot)
-	t.Setenv("PFM_CODEX_ROOT", codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", codexHome)
 	t.Setenv("PFM_TMUX_DIR", tmuxDir)
 	t.Setenv("PFM_PROC_ROOT", procRoot)
 	t.Setenv("PFM_TEST_PROBE_SOCKETS", "1")

@@ -113,13 +113,13 @@ func (manager *Manager) identifyCodexSelf(
 	// through its open file descriptor exactly as before.
 	live, err := gather.DetectCodexThreadsInRoots(
 		manager.proc,
-		manager.paths.codexRoots,
+		manager.paths.codexHomes,
 		[]gather.Pane{{
 			Socket: socketName,
 			PaneID: paneID,
 			PID:    panePID,
 		}},
-		store.NewCodexThreadResolverRoots(ctx, manager.paths.codexRoots, manager.CodexPaneBound(ctx)),
+		store.NewCodexThreadResolverRoots(ctx, manager.paths.codexHomes, manager.CodexPaneBound(ctx)),
 	)
 	if err != nil {
 		return Target{}, err

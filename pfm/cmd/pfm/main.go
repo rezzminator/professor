@@ -575,7 +575,7 @@ func runInternal(
 	finisher, err := kill.NewFinisher(database, kill.Dependencies{
 		Paths:       runtime.Paths,
 		ClaudeRoots: runtime.Config.ProjectRoots(),
-		CodexRoots:  runtime.Config.CodexHomes(),
+		CodexHomes:  runtime.Config.CodexHomes(),
 	})
 	if err == nil {
 		err = finisher.Run(context.Background(), kill.ExitArgs{

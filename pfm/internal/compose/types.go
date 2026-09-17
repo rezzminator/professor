@@ -24,13 +24,13 @@ const (
 	// live operation it supports (attach), matching the socket-only identity
 	// it carries.
 	Booting
-	// ResumeOpencode is one indexed OpenCode session. Appended last ON PURPOSE:
+	// ResumeOpenCode is one indexed OpenCode session. Appended last ON PURPOSE:
 	// Kind values are compared numerically in golden fixtures, so renumbering
 	// an existing kind would silently rewrite every fixture row.
-	ResumeOpencode
-	// NewOpencode is appended for the same compatibility reason. It launches a
+	ResumeOpenCode
+	// NewOpenCode is appended for the same compatibility reason. It launches a
 	// fresh OpenCode TUI in a fleet-owned ox socket.
-	NewOpencode
+	NewOpenCode
 	// ProfessorUpdate is a cached, interactive-only release notice inserted by
 	// cmd/pfm ahead of the merged new-chat row. It is deliberately not emitted
 	// by Compose, so plain and TSV output retain their stable row contracts.
@@ -57,9 +57,9 @@ func (kind Kind) String() string {
 		return "new-codex"
 	case Booting:
 		return "booting"
-	case ResumeOpencode:
+	case ResumeOpenCode:
 		return "resume-opencode"
-	case NewOpencode:
+	case NewOpenCode:
 		return "new-opencode"
 	case ProfessorUpdate:
 		return "professor-update"
@@ -95,22 +95,22 @@ type Options struct {
 	PrimaryAccount      int
 	CodexAccountIDs     []int
 	PrimaryCodexAccount int
-	OpencodeAccountIDs  []int
-	PrimaryOpencode     int
+	OpenCodeAccountIDs  []int
+	PrimaryOpenCode     int
 	NowNS               int64
 }
 
 // Input is the complete immutable input to one composition pass.
 type Input struct {
-	Snapshot     gather.Snapshot
-	Transcripts  []store.Transcript
-	Rollouts     []store.Rollout
-	OcSessions   []store.OcSession
-	CxNames      map[string]string
-	Killed       []store.Killed
-	AccountRoots []AccountRoot
-	CodexRoots   []AccountRoot
-	Options      Options
+	Snapshot         gather.Snapshot
+	Transcripts      []store.Transcript
+	Rollouts         []store.Rollout
+	OpenCodeSessions []store.OpenCodeSession
+	CxNames          map[string]string
+	Killed           []store.Killed
+	AccountRoots     []AccountRoot
+	CodexHomes       []AccountRoot
+	Options          Options
 }
 
 // Row is one live, resumable, agent, or new-chat choice.
@@ -132,7 +132,7 @@ type Row struct {
 	CWD         string
 	Size        int64
 	PromptCount int64
-	// AssistantCount is set only for a ResumeOpencode row: an OpenCode
+	// AssistantCount is set only for a ResumeOpenCode row: an OpenCode
 	// session has no file size, so its reality signal is prompts answered,
 	// not bytes on disk. A session with prompts but no assistant reply is
 	// exactly as empty as a Claude transcript with no visible turns.

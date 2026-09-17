@@ -241,14 +241,14 @@ func ResolveEnv(request Request) (Env, error) {
 // and the live snapshot. It never writes.
 func Compose(env Env, view compose.View, data Data, live gather.Snapshot) compose.Output {
 	output := compose.Compose(compose.Input{
-		Snapshot:     live,
-		Transcripts:  data.Transcripts,
-		Rollouts:     data.Rollouts,
-		OcSessions:   data.OcSessions,
-		CxNames:      data.CxNames,
-		Killed:       data.Killed,
-		AccountRoots: accountRoots(env.Config.Accounts),
-		CodexRoots:   codexAccountRoots(env.Config.CodexAccounts),
+		Snapshot:         live,
+		Transcripts:      data.Transcripts,
+		Rollouts:         data.Rollouts,
+		OpenCodeSessions: data.OpenCodeSessions,
+		CxNames:          data.CxNames,
+		Killed:           data.Killed,
+		AccountRoots:     accountRoots(env.Config.Accounts),
+		CodexHomes:       codexAccountRoots(env.Config.CodexAccounts),
 		Options: compose.Options{
 			View:                view,
 			CurrentDir:          env.CurrentDir,
@@ -256,8 +256,8 @@ func Compose(env Env, view compose.View, data Data, live gather.Snapshot) compos
 			PrimaryAccount:      env.Primary,
 			CodexAccountIDs:     env.Config.CodexAccountIDs(),
 			PrimaryCodexAccount: env.Config.PrimaryCodexAccount(),
-			OpencodeAccountIDs:  env.Config.OpencodeAccountIDs(),
-			PrimaryOpencode:     env.Config.PrimaryOpencodeAccount(),
+			OpenCodeAccountIDs:  env.Config.OpenCodeAccountIDs(),
+			PrimaryOpenCode:     env.Config.PrimaryOpenCodeAccount(),
 			NowNS:               env.NowNS,
 		},
 	})

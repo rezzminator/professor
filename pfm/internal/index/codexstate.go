@@ -12,9 +12,9 @@ import (
 // state generation first.
 func readCodexThreads(
 	ctx context.Context,
-	codexRoot string,
+	codexHome string,
 ) ([]store.CodexThread, error) {
-	files, err := store.CodexStateFiles(codexRoot)
+	files, err := store.CodexStateFiles(codexHome)
 	if err != nil {
 		return nil, err
 	}
@@ -32,7 +32,7 @@ func readCodexThreads(
 // rollout file was parsed keep their file-derived size and prompt count.
 func reconcileCodexState(
 	threads []store.CodexThread,
-	codexRoot string,
+	codexHome string,
 	updates []store.Rollout,
 	existing map[string]store.Rollout,
 	presentIDs map[string]struct{},
@@ -68,7 +68,7 @@ func reconcileCodexState(
 		}
 		counters.CodexRowsCreated++
 		positionByID[thread.ID] = len(updates)
-		updates = append(updates, codexStoreRollout(*thread, codexRoot))
+		updates = append(updates, codexStoreRollout(*thread, codexHome))
 	}
 	return updates
 }
@@ -114,14 +114,14 @@ func applyCodexThread(
 // store's own recency, which is the only timestamp such a thread has.
 func codexStoreRollout(
 	thread store.CodexThread,
-	codexRoot string,
+	codexHome string,
 ) store.Rollout {
 	path := thread.RolloutPath
 	if path == "" {
 		// The rollout row's path is a unique key as well as a location. A
 		// placeholder keeps the key without claiming a file that Codex never
 		// wrote; walkCodexRollouts only ever collects rollout-*.jsonl names.
-		path = filepath.Join(codexRoot, "sessions", thread.ID+".jsonl")
+		path = filepath.Join(codexHome, "sessions", thread.ID+".jsonl")
 	}
 	activityNS := int64(0)
 	if thread.ActivityAt > 0 {

@@ -333,11 +333,11 @@ func newBootingPickerJail(t *testing.T) *bootingPickerJail {
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	sidDir := filepath.Join(root, "sid")
 	claudeRoot := filepath.Join(root, "claude")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	procRoot := filepath.Join(root, "proc")
 	for _, directory := range []string{
 		filepath.Join(home, ".local", "bin"),
-		tmuxDir, sidDir, claudeRoot, codexRoot, procRoot,
+		tmuxDir, sidDir, claudeRoot, codexHome, procRoot,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -366,7 +366,7 @@ func newBootingPickerJail(t *testing.T) *bootingPickerJail {
 		"PFM_DB":           filepath.Join(root, "fleet.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
-		"PFM_CODEX_ROOT":   codexRoot,
+		"PFM_CODEX_ROOT":   codexHome,
 		"PFM_TMUX_DIR":     tmuxDir,
 		"PFM_PROC_ROOT":    procRoot,
 	})

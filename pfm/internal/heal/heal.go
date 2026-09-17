@@ -120,21 +120,21 @@ type Stores struct {
 	Root    string
 }
 
-// FindStores locates the newest generation of each store under codexRoot.
+// FindStores locates the newest generation of each store under codexHome.
 // Codex leaves older generations behind when it migrates, and the highest N is
 // the live one.
-func FindStores(codexRoot string) (Stores, error) {
-	if codexRoot == "" {
+func FindStores(codexHome string) (Stores, error) {
+	if codexHome == "" {
 		return Stores{}, errors.New("no Codex home to heal")
 	}
-	entries, err := os.ReadDir(codexRoot)
+	entries, err := os.ReadDir(codexHome)
 	if errors.Is(err, fs.ErrNotExist) {
-		return Stores{}, fmt.Errorf("no Codex home at %s", codexRoot)
+		return Stores{}, fmt.Errorf("no Codex home at %s", codexHome)
 	}
 	if err != nil {
-		return Stores{}, fmt.Errorf("read Codex home %q: %w", codexRoot, err)
+		return Stores{}, fmt.Errorf("read Codex home %q: %w", codexHome, err)
 	}
-	stores := Stores{Root: codexRoot}
+	stores := Stores{Root: codexHome}
 	stateGeneration, historyGeneration := -1, -1
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -143,19 +143,19 @@ func FindStores(codexRoot string) (Stores, error) {
 		if generation, ok := storeGeneration(entry.Name(), "state_"); ok &&
 			generation > stateGeneration {
 			stateGeneration = generation
-			stores.State = filepath.Join(codexRoot, entry.Name())
+			stores.State = filepath.Join(codexHome, entry.Name())
 		}
 		if generation, ok := storeGeneration(entry.Name(), "thread_history_"); ok &&
 			generation > historyGeneration {
 			historyGeneration = generation
-			stores.History = filepath.Join(codexRoot, entry.Name())
+			stores.History = filepath.Join(codexHome, entry.Name())
 		}
 	}
 	if stores.State == "" {
-		return Stores{}, fmt.Errorf("no state_N.sqlite under %s", codexRoot)
+		return Stores{}, fmt.Errorf("no state_N.sqlite under %s", codexHome)
 	}
 	if stores.History == "" {
-		return Stores{}, fmt.Errorf("no thread_history_N.sqlite under %s", codexRoot)
+		return Stores{}, fmt.Errorf("no thread_history_N.sqlite under %s", codexHome)
 	}
 	return stores, nil
 }
@@ -561,8 +561,8 @@ func openReadOnly(path string) (*sql.DB, error) {
 // A held lock means a running seat owns the thread and its in-memory cursor
 // would race a heal, so the thread is left alone. A lock file that exists but
 // is NOT held is the ordinary leftover of a closed seat.
-func Live(codexRoot, threadID string) bool {
-	path := filepath.Join(codexRoot, "thread-writer-locks", threadID+".lock")
+func Live(codexHome, threadID string) bool {
+	path := filepath.Join(codexHome, "thread-writer-locks", threadID+".lock")
 	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {
 		return false

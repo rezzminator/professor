@@ -49,14 +49,14 @@ func codexRenameProof() renameProof {
 //
 // An entry counts only when it carries the name AND a rename time at or after
 // since, so an older rename to the same name is never taken for this one.
-func codexIndexProof(codexRoots []string) renameProof {
-	roots := append([]string(nil), codexRoots...)
+func codexIndexProof(codexHomes []string) renameProof {
+	homes := append([]string(nil), codexHomes...)
 	return func(name string, since time.Time) (bool, error) {
-		if len(roots) == 0 {
+		if len(homes) == 0 {
 			return false, errors.New("no Codex home is configured to read the rename from")
 		}
-		for _, root := range roots {
-			landed, err := sessionIndexHasRename(filepath.Join(root, codexmeta.SessionIndexFile), name, since)
+		for _, home := range homes {
+			landed, err := sessionIndexHasRename(filepath.Join(home, codexmeta.SessionIndexFile), name, since)
 			if err != nil || landed {
 				return landed, err
 			}

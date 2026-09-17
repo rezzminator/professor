@@ -409,13 +409,13 @@ func CodexTitleThreads(
 	warn Warn,
 ) map[string][]string {
 	titleThreads := make(map[string][]string)
-	codexRoots := runtime.Paths.Roots[pfmengine.Codex]
-	files := make([]string, 0, len(codexRoots))
-	for _, codexRoot := range codexRoots {
-		rootFiles, err := store.CodexStateFiles(codexRoot)
+	codexHomes := runtime.Paths.Roots[pfmengine.Codex]
+	files := make([]string, 0, len(codexHomes))
+	for _, codexHome := range codexHomes {
+		rootFiles, err := store.CodexStateFiles(codexHome)
 		if err != nil {
 			warn(fmt.Sprintf(
-				"codex pane reconcile: list Codex state store %q: %v", codexRoot, err,
+				"codex pane reconcile: list Codex state store %q: %v", codexHome, err,
 			))
 			continue
 		}

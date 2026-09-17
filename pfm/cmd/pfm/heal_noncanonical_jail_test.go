@@ -20,15 +20,15 @@ import (
 func healNoncanonicalJail(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	if err := os.MkdirAll(filepath.Join(codexRoot, "sessions"), 0o700); err != nil {
+	codexHome := filepath.Join(root, "codex")
+	if err := os.MkdirAll(filepath.Join(codexHome, "sessions"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_HOME", root)
-	t.Setenv("PFM_CODEX_ROOT", codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", codexHome)
 
 	const id = "66666666-6666-4666-8666-666666666666"
-	rollout := filepath.Join(codexRoot, "sessions", "rollout-"+id+".jsonl")
+	rollout := filepath.Join(codexHome, "sessions", "rollout-"+id+".jsonl")
 	lines := []string{
 		`{"ordinal":0,"type":"event_msg","payload":{"type":"user_message"}}`,
 		`{"ordinal":1,"type":"event_msg","payload":{"type":"user_message"}}`,
@@ -45,7 +45,7 @@ func healNoncanonicalJail(t *testing.T) string {
 	// desync this package was originally built for.
 	offset := len(lines[0]+"\n") + len(lines[1]+"\n") + len(lines[2]+"\n")
 
-	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexRoot, "state_1.sqlite"))
+	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, "state_1.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func healNoncanonicalJail(t *testing.T) string {
 
 	history, err := sql.Open(
 		"sqlite",
-		"file:"+filepath.Join(codexRoot, "thread_history_1.sqlite"),
+		"file:"+filepath.Join(codexHome, "thread_history_1.sqlite"),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func healNoncanonicalJail(t *testing.T) string {
 // rows.
 func TestHealCommandPrintsNoncanonicalAdvice(t *testing.T) {
 	id := healNoncanonicalJail(t)
-	codexRoot := os.Getenv("PFM_CODEX_ROOT")
+	codexHome := os.Getenv("PFM_CODEX_ROOT")
 
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"heal"}, &stdout, &stderr); code != 0 {
@@ -122,7 +122,7 @@ func TestHealCommandPrintsNoncanonicalAdvice(t *testing.T) {
 	if !strings.Contains(stdout.String(), "never rebuilt") {
 		t.Fatalf("the report did not carry the never-rebuilt advice:\n%s", stdout.String())
 	}
-	if healProjectionRows(t, codexRoot, id) != 1 {
+	if healProjectionRows(t, codexHome, id) != 1 {
 		t.Fatal("the report deleted a noncanonical projection row")
 	}
 
@@ -134,7 +134,7 @@ func TestHealCommandPrintsNoncanonicalAdvice(t *testing.T) {
 	if !strings.Contains(stdout.String(), "left_alone=1") {
 		t.Fatalf("--apply did not count the left-alone thread:\n%s", stdout.String())
 	}
-	if healProjectionRows(t, codexRoot, id) != 1 {
+	if healProjectionRows(t, codexHome, id) != 1 {
 		t.Fatal("--apply deleted a noncanonical projection")
 	}
 }

@@ -50,11 +50,11 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 			ConfigPath: dependencies.ConfigPath,
 		}
 	}
-	codexRoots := dependencies.CodexRoots
-	if codexRoots == nil {
-		codexRoots = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
+	codexHomes := dependencies.CodexHomes
+	if codexHomes == nil {
+		codexHomes = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
 	} else {
-		codexRoots = append([]string{}, codexRoots...)
+		codexHomes = append([]string{}, codexHomes...)
 	}
 	return &Manager{
 		database: database,
@@ -65,7 +65,7 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 		paths: resolvedPaths{
 			home:       resolved.Home,
 			sidDir:     resolved.SIDDir,
-			codexRoots: codexRoots,
+			codexHomes: codexHomes,
 			tmuxDir:    resolved.TmuxDir,
 		},
 	}, nil

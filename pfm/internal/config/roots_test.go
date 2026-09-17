@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestReportRootsWarnsOnUnreachableClaudeAndCodexRoots(t *testing.T) {
+func TestReportRootsWarnsOnUnreachableClaudeAndCodexHomes(t *testing.T) {
 	home := t.TempDir()
 	reachable := filepath.Join(home, "reachable")
 	if err := os.MkdirAll(reachable, 0o700); err != nil {

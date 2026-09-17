@@ -86,7 +86,7 @@ func metadataIdentityService(t *testing.T) *Service {
 	t.Setenv(paths.EnvDB, jail.database)
 	t.Setenv(paths.EnvSIDDir, jail.sid)
 	t.Setenv(paths.EnvClaudeRoots, jail.claude)
-	t.Setenv(paths.EnvCodexRoot, jail.codex)
+	t.Setenv(paths.EnvCodexHome, jail.codex)
 	t.Setenv(paths.EnvTmuxDir, jail.tmuxDir)
 	t.Setenv(paths.EnvProcRoot, jail.proc)
 	resolved, err := paths.Resolve()
@@ -121,7 +121,7 @@ func metadataIdentityService(t *testing.T) *Service {
 		Spawner:        metadataThenSpawner{},
 		ClaudeBinary:   "claude",
 		CodexBinary:    "codex",
-		OpencodeBinary: "opencode",
+		OpenCodeBinary: "opencode",
 		Recorder:       service.backend.sharedState.RecordComms,
 		WarningWriter:  service.backend.warnings,
 	})

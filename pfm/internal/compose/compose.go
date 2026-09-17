@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	claudeResumeCap = 30
-	codexResumeCap  = 15
-	ocResumeCap     = 10
+	claudeResumeCap   = 30
+	codexResumeCap    = 15
+	openCodeResumeCap = 10
 )
 
 type composer struct {
@@ -62,10 +62,10 @@ func Compose(input Input) Output {
 		ProjectDirs:        cloneStringMap(current.projectDirs),
 		includeNewClaude:   input.Options.View != KilledView && len(input.AccountRoots) != 0,
 		includeNewCodex:    input.Options.View != KilledView && len(input.Options.CodexAccountIDs) != 0,
-		includeNewOpenCode: input.Options.View != KilledView && len(input.Options.OpencodeAccountIDs) != 0,
+		includeNewOpenCode: input.Options.View != KilledView && len(input.Options.OpenCodeAccountIDs) != 0,
 		primaryAccount:     input.Options.PrimaryAccount,
 		primaryCodex:       input.Options.PrimaryCodexAccount,
-		primaryOpenCode:    input.Options.PrimaryOpencode,
+		primaryOpenCode:    input.Options.PrimaryOpenCode,
 		fallbackDir:        input.Options.CurrentDir,
 	}
 	if !configuredAccount(input.AccountRoots, output.primaryAccount) {
@@ -78,9 +78,9 @@ func Compose(input Input) Output {
 			output.primaryCodex = input.Options.CodexAccountIDs[0]
 		}
 	}
-	if !configuredID(input.Options.OpencodeAccountIDs, output.primaryOpenCode) {
-		if len(input.Options.OpencodeAccountIDs) != 0 {
-			output.primaryOpenCode = input.Options.OpencodeAccountIDs[0]
+	if !configuredID(input.Options.OpenCodeAccountIDs, output.primaryOpenCode) {
+		if len(input.Options.OpenCodeAccountIDs) != 0 {
+			output.primaryOpenCode = input.Options.OpenCodeAccountIDs[0]
 		}
 	}
 
@@ -167,10 +167,10 @@ func Compose(input Input) Output {
 			current.selectResumeRows(codexResume, codexResumeCap, &output.SuppressedCount)...)
 	}
 
-	ocResume := make([]Row, 0)
-	ocEligible := 0
-	for index := range input.OcSessions {
-		session := input.OcSessions[index]
+	openCodeResume := make([]Row, 0)
+	openCodeEligible := 0
+	for index := range input.OpenCodeSessions {
+		session := input.OpenCodeSessions[index]
 		// Subagent children and archived sessions never earn rows: a child is
 		// part of its parent's turn, an archived one the user filed away.
 		if session.ParentID != "" || session.TimeArchivedMS != 0 {
@@ -181,27 +181,27 @@ func Compose(input Input) Output {
 		countOmitted(row, &output.KilledCount, &output.SuppressedCount)
 		if input.Options.View == DefaultView {
 			if defaultEligible(row) {
-				ocEligible++
-				ocResume = insertTopRow(ocResume, row, ocResumeCap)
+				openCodeEligible++
+				openCodeResume = insertTopRow(openCodeResume, row, openCodeResumeCap)
 			}
 		} else {
-			ocResume = append(ocResume, row)
+			openCodeResume = append(openCodeResume, row)
 		}
 	}
 	if input.Options.View == DefaultView {
-		if ocEligible > ocResumeCap {
-			output.SuppressedCount += ocEligible - ocResumeCap
+		if openCodeEligible > openCodeResumeCap {
+			output.SuppressedCount += openCodeEligible - openCodeResumeCap
 		}
-		for index := range ocResume {
-			row := ocResume[index]
+		for index := range openCodeResume {
+			row := openCodeResume[index]
 			output.Rows = append(output.Rows, current.finalize(row))
 		}
 	} else {
 		output.Rows = append(
 			output.Rows,
 			current.selectResumeRows(
-				ocResume,
-				ocResumeCap,
+				openCodeResume,
+				openCodeResumeCap,
 				&output.SuppressedCount,
 			)...,
 		)
@@ -248,10 +248,10 @@ func (current *composer) buildIndexes() {
 		map[string]store.Transcript,
 		len(wantedTranscriptPaths),
 	)
-	directories := make(map[string]projectDirectory)
+	directories := make(map[string]projectDir)
 	if current.input.Options.CurrentDir != "" {
 		project := projectName(current.input.Options.CurrentDir)
-		directories[project] = projectDirectory{
+		directories[project] = projectDir{
 			path:   cleanPath(current.input.Options.CurrentDir),
 			seeded: true,
 		}
@@ -334,7 +334,7 @@ func (current *composer) buildIndexes() {
 	// the symlink-safe attribution contract is preserved without putting the
 	// common path on the filesystem.
 	current.claudeAccounts = newAccountMatcher(current.input.AccountRoots)
-	current.codexAccounts = newAccountMatcher(current.input.CodexRoots)
+	current.codexAccounts = newAccountMatcher(current.input.CodexHomes)
 }
 
 func canonicalPath(path string) string {
@@ -895,13 +895,13 @@ func (current *composer) rolloutRow(rollout store.Rollout, kind Kind) Row {
 // openCodeSessionRow renders one OpenCode session. The title is authoritative —
 // OpenCode names its sessions itself — with the first prompt as fallback for
 // sessions it never titled.
-func (current *composer) openCodeSessionRow(session store.OcSession) Row {
+func (current *composer) openCodeSessionRow(session store.OpenCodeSession) Row {
 	name := session.Title
 	if name == "" {
 		name = naming.DisplayName("", "", session.FirstPrompt)
 	}
 	return Row{
-		Kind:           ResumeOpencode,
+		Kind:           ResumeOpenCode,
 		ID:             session.ID,
 		Name:           name,
 		Project:        projectName(session.ProjectDir),
@@ -1114,7 +1114,7 @@ func defaultEligible(row Row) bool {
 	// with prompts but zero assistant messages was opened and never
 	// answered — exactly as empty as a Claude transcript with no visible
 	// turns. The displayed prompt count is never fudged to fake either case.
-	if row.Kind == ResumeOpencode {
+	if row.Kind == ResumeOpenCode {
 		return !row.BG && row.PromptCount > 0 && row.AssistantCount > 0
 	}
 	return !row.BG && row.Size > 0 && row.PromptCount > 0
@@ -1273,8 +1273,8 @@ func EngineForKindChecked(kind Kind) (pfmengine.ID, error) {
 	switch kind {
 	case LiveCodex, ResumeCodex, NewCodex:
 		return pfmengine.Codex, nil
-	case ResumeOpencode, NewOpencode:
-		return pfmengine.Opencode, nil
+	case ResumeOpenCode, NewOpenCode:
+		return pfmengine.OpenCode, nil
 	case LiveClaude, ResumeClaude, NewClaude, LiveSplit, Agent, Booting:
 		return pfmengine.Claude, nil
 	default:

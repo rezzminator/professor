@@ -181,7 +181,7 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	counters.Deleted += len(deletes)
 	counters.RowsTouched += len(updates) + len(deletes)
 
-	if counters.legacySingleCodexRoot && len(roots) == 1 {
+	if counters.legacySingleCodexHome && len(roots) == 1 {
 		err = reloadCxNames(ctx, database, roots[0], counters)
 	} else {
 		err = reloadCxNamesFromRoots(ctx, database, roots, counters)
@@ -200,13 +200,13 @@ func SyncCodex(ctx context.Context, database *store.Store, roots []string, count
 	return nil
 }
 
-// SyncOpencode runs OpenCode's session-mirror pass.
-func SyncOpencode(ctx context.Context, database *store.Store, roots []string, counters *Counters) error {
+// SyncOpenCode runs OpenCode's session-mirror pass.
+func SyncOpenCode(ctx context.Context, database *store.Store, roots []string, counters *Counters) error {
 	if counters.options.PriorityOnly {
 		return nil
 	}
 	for _, root := range roots {
-		if err := syncOpencodeMirror(ctx, database, root, counters); err != nil {
+		if err := syncOpenCodeMirror(ctx, database, root, counters); err != nil {
 			return err
 		}
 	}

@@ -41,7 +41,7 @@ func TestAccountAttributionUsesThirdAliasAndLongestNestedRoot(t *testing.T) {
 			{Account: 11, Path: filepath.Join(aliasOne, "projects")},
 			{Account: 12, Path: filepath.Join(aliasOne, "projects", "nested")},
 		},
-		CodexRoots: []AccountRoot{
+		CodexHomes: []AccountRoot{
 			{Account: 21, Path: filepath.Join(aliasOne, "projects")},
 			{Account: 22, Path: filepath.Join(aliasOne, "projects", "nested")},
 		},

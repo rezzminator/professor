@@ -58,12 +58,12 @@ type Dependencies struct {
 	Busy           BusyProbe
 	ClaudeBinary   string
 	CodexBinary    string
-	OpencodeBinary string
-	// CodexRoots is every configured Codex account home. The idle-horizon
+	OpenCodeBinary string
+	// CodexHomes is every configured Codex account home. The idle-horizon
 	// check resolves a Codex seat to its rollout by finding the live process
 	// that still holds it open, the same in-process path DetectCodex already
 	// used for the roster — never a shelled-out `pfm chat resolve`.
-	CodexRoots []string
+	CodexHomes []string
 	KillServer KillServerFunc
 	Now        func() time.Time
 }
@@ -76,8 +76,8 @@ type Runner struct {
 	busy           BusyProbe
 	claudeBinary   string
 	codexBinary    string
-	opencodeBinary string
-	codexRoots     []string
+	openCodeBinary string
+	codexHomes     []string
 	killServer     KillServerFunc
 	now            func() time.Time
 }
@@ -165,8 +165,8 @@ func New(dependencies Dependencies) (*Runner, error) {
 		busy:           busy,
 		claudeBinary:   dependencies.ClaudeBinary,
 		codexBinary:    dependencies.CodexBinary,
-		opencodeBinary: dependencies.OpencodeBinary,
-		codexRoots:     dependencies.CodexRoots,
+		openCodeBinary: dependencies.OpenCodeBinary,
+		codexHomes:     dependencies.CodexHomes,
 		killServer:     dependencies.KillServer,
 		now:            now,
 	}, nil
@@ -206,7 +206,7 @@ func (runner *Runner) Run(
 	}
 	report.AgentsOK = input.AgentsOK
 
-	tree, err := NewProcessTree(runner.proc, runner.claudeBinary, runner.codexBinary, runner.opencodeBinary)
+	tree, err := NewProcessTree(runner.proc, runner.claudeBinary, runner.codexBinary, runner.openCodeBinary)
 	if err != nil {
 		return Report{}, err
 	}
@@ -373,9 +373,9 @@ func (runner *Runner) probeSockets(
 	// `pfm chat resolve`. A resolution failure here is soft on purpose — it
 	// leaves those sockets' ActivityPaths empty, which the idle check reads
 	// as UNKNOWN (never reaped), not as "no Codex chats exist".
-	if len(runner.codexRoots) > 0 {
+	if len(runner.codexHomes) > 0 {
 		liveCodex, err := gather.DetectCodexThreadsInRoots(
-			runner.proc, runner.codexRoots, allPanes, nil, runner.codexBinary,
+			runner.proc, runner.codexHomes, allPanes, nil, runner.codexBinary,
 		)
 		if err == nil {
 			for _, thread := range liveCodex {

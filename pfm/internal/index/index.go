@@ -44,18 +44,18 @@ type Counters struct {
 	CodexThreads     int
 	CodexRowsCreated int
 
-	// OcSessions counts the OpenCode sessions mirrored this pass. The mirror
+	// OpenCodeSessions counts the OpenCode sessions mirrored this pass. The mirror
 	// is a full replace, so this is the population, not a delta.
-	OcSessions            int
+	OpenCodeSessions      int
 	options               Options
-	legacySingleCodexRoot bool
+	legacySingleCodexHome bool
 }
 
 // Indexer incrementally mirrors session stores into SQLite.
 type Indexer struct {
 	database              *store.Store
 	roots                 map[pfmengine.ID][]string
-	legacySingleCodexRoot bool
+	legacySingleCodexHome bool
 }
 
 // New resolves the jailed or default host paths used by an Indexer.
@@ -76,7 +76,7 @@ func New(database *store.Store) (*Indexer, error) {
 func NewWithPaths(database *store.Store, resolved paths.Values) (*Indexer, error) {
 	indexer, err := newWithRoots(database, resolved.Roots)
 	if indexer != nil {
-		indexer.legacySingleCodexRoot = true
+		indexer.legacySingleCodexHome = true
 	}
 	return indexer, err
 }
@@ -112,7 +112,7 @@ func newWithRoots(database *store.Store, roots map[pfmengine.ID][]string) (*Inde
 func (indexer *Indexer) Run(ctx context.Context, options Options) (Counters, error) {
 	counters := Counters{
 		options:               options,
-		legacySingleCodexRoot: indexer.legacySingleCodexRoot,
+		legacySingleCodexHome: indexer.legacySingleCodexHome,
 	}
 	ids := pfmengine.All()
 	engineSources := make([]Source, 0, len(ids))

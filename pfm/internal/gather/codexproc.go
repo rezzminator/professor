@@ -31,8 +31,8 @@ type CodexThreadResolver func(
 // DetectCodex maps live codex processes to panes using pid ancestry. It sees
 // only sessions that hold a rollout file descriptor or state the thread they
 // resumed in their own argv.
-func DetectCodex(proc ProcFS, codexRoot string, panes []Pane) ([]LiveCodex, error) {
-	return DetectCodexThreads(proc, codexRoot, panes, nil)
+func DetectCodex(proc ProcFS, codexHome string, panes []Pane) ([]LiveCodex, error) {
+	return DetectCodexThreads(proc, codexHome, panes, nil)
 }
 
 // DetectCodexThreads is DetectCodex plus state-store identity, so a Codex
@@ -40,12 +40,12 @@ func DetectCodex(proc ProcFS, codexRoot string, panes []Pane) ([]LiveCodex, erro
 // thread since Codex 0.146.1 — is still a live chat instead of a missing one.
 func DetectCodexThreads(
 	proc ProcFS,
-	codexRoot string,
+	codexHome string,
 	panes []Pane,
 	identify CodexThreadResolver,
 	binaries ...string,
 ) ([]LiveCodex, error) {
-	return DetectCodexThreadsInRoots(proc, []string{codexRoot}, panes, identify, binaries...)
+	return DetectCodexThreadsInRoots(proc, []string{codexHome}, panes, identify, binaries...)
 }
 
 // DetectCodexThreadsInRoots is DetectCodexThreads over every configured
@@ -53,7 +53,7 @@ func DetectCodexThreads(
 // its rollout descriptor; rollout-less sessions use the roster-wide resolver.
 func DetectCodexThreadsInRoots(
 	proc ProcFS,
-	codexRoots []string,
+	codexHomes []string,
 	panes []Pane,
 	identify CodexThreadResolver,
 	binaries ...string,
@@ -62,7 +62,7 @@ func DetectCodexThreadsInRoots(
 	if err != nil {
 		return nil, fmt.Errorf("list processes for Codex scan: %w", err)
 	}
-	return detectCodexThreadsInRootsFrom(cmdlines, proc, codexRoots, panes, identify, binaries...)
+	return detectCodexThreadsInRootsFrom(cmdlines, proc, codexHomes, panes, identify, binaries...)
 }
 
 // detectCodexThreadsInRootsFrom is DetectCodexThreadsInRoots over an
@@ -70,7 +70,7 @@ func DetectCodexThreadsInRoots(
 func detectCodexThreadsInRootsFrom(
 	cmdlines map[int][]string,
 	proc ProcFS,
-	codexRoots []string,
+	codexHomes []string,
 	panes []Pane,
 	identify CodexThreadResolver,
 	binaries ...string,
@@ -102,7 +102,7 @@ func detectCodexThreadsInRootsFrom(
 			)
 			continue
 		}
-		rolloutPath, identityErr := heldCodexRoot(links, codexRoots)
+		rolloutPath, identityErr := heldCodexRoot(links, codexHomes)
 		if errors.Is(identityErr, errHeldSubagents) && hasCodexAncestor(proc, pid, pane.PID, cmdlines, binaries) {
 			continue
 		}

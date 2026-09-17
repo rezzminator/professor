@@ -62,8 +62,8 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		Busy:           reap.NewClaudeAgentsConfigured(resolved, runtime.Config.Claude.Binary, configDirs),
 		ClaudeBinary:   runtime.Config.Claude.Binary,
 		CodexBinary:    runtime.Config.Codex.Binary,
-		OpencodeBinary: runtime.Config.OpenCode.Binary,
-		CodexRoots:     runtime.Config.CodexHomes(),
+		OpenCodeBinary: runtime.Config.OpenCode.Binary,
+		CodexHomes:     runtime.Config.CodexHomes(),
 		KillServer: func(ctx context.Context, socket string) error {
 			return killChatServer(ctx, resolved, socket)
 		},

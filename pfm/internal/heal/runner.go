@@ -24,9 +24,9 @@ type Runner struct {
 	now    func() time.Time
 }
 
-// New locates the stores under codexRoot.
-func New(codexRoot string, now func() time.Time) (*Runner, error) {
-	stores, err := FindStores(codexRoot)
+// New locates the stores under codexHome.
+func New(codexHome string, now func() time.Time) (*Runner, error) {
+	stores, err := FindStores(codexHome)
 	if err != nil {
 		return nil, err
 	}
@@ -107,11 +107,11 @@ func (runner *Runner) Run(
 // message and a nil error, because opening the chat matters more than
 // repairing it, and the resume's own continuity banner already warns when a
 // thread looks short.
-func Thread(ctx context.Context, codexRoot, threadID string) string {
+func Thread(ctx context.Context, codexHome, threadID string) string {
 	if threadID == "" {
 		return ""
 	}
-	runner, err := New(codexRoot, nil)
+	runner, err := New(codexHome, nil)
 	if err != nil {
 		return ""
 	}

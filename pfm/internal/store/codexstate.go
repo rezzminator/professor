@@ -87,19 +87,19 @@ func (thread CodexThread) MachineSpawned() bool {
 	return thread.Source == codexExecSource && !thread.Renamed
 }
 
-// CodexStateFiles lists the Codex state stores under codexRoot, newest
+// CodexStateFiles lists the Codex state stores under codexHome, newest
 // generation first. Codex leaves older generations behind when it migrates,
 // and the highest N is the live store.
-func CodexStateFiles(codexRoot string) ([]string, error) {
-	if codexRoot == "" {
+func CodexStateFiles(codexHome string) ([]string, error) {
+	if codexHome == "" {
 		return nil, nil
 	}
-	entries, err := os.ReadDir(codexRoot)
+	entries, err := os.ReadDir(codexHome)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read Codex root %q: %w", codexRoot, err)
+		return nil, fmt.Errorf("read Codex root %q: %w", codexHome, err)
 	}
 	type generation struct {
 		number int
@@ -116,7 +116,7 @@ func CodexStateFiles(codexRoot string) ([]string, error) {
 		}
 		generations = append(generations, generation{
 			number: number,
-			path:   filepath.Join(codexRoot, entry.Name()),
+			path:   filepath.Join(codexHome, entry.Name()),
 		})
 	}
 	sort.Slice(generations, func(left, right int) bool {
@@ -197,23 +197,23 @@ type CodexPaneBound func(socket, paneID string) (id string, found bool)
 // gather.DetectCodexThreads expect.
 func NewCodexThreadResolver(
 	ctx context.Context,
-	codexRoot string,
+	codexHome string,
 	bound CodexPaneBound,
 ) func(exported, cwd string, birth int64, socket, paneID string) (id, rolloutPath string) {
-	return NewCodexThreadResolverRoots(ctx, []string{codexRoot}, bound)
+	return NewCodexThreadResolverRoots(ctx, []string{codexHome}, bound)
 }
 
 // NewCodexThreadResolverRoots resolves rollout-less live processes across the
 // complete config-owned Codex roster.
 func NewCodexThreadResolverRoots(
 	ctx context.Context,
-	codexRoots []string,
+	codexHomes []string,
 	bound CodexPaneBound,
 ) func(exported, cwd string, birth int64, socket, paneID string) (id, rolloutPath string) {
 	candidates := sync.OnceValue(func() []resolve.CodexThread {
 		files := make([]string, 0)
-		for _, codexRoot := range codexRoots {
-			rootFiles, err := CodexStateFiles(codexRoot)
+		for _, codexHome := range codexHomes {
+			rootFiles, err := CodexStateFiles(codexHome)
 			if err != nil {
 				continue
 			}

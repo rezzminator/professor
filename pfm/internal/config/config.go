@@ -252,7 +252,7 @@ type Config struct {
 	Accounts         []Account
 	AccountSkips     []AccountSkip
 	CodexAccounts    []CodexAccount
-	OpencodeAccounts []OpenCodeAccount
+	OpenCodeAccounts []OpenCodeAccount
 	Claude           Claude
 	Codex            Codex
 	OpenCode         OpenCode
@@ -425,8 +425,8 @@ func resolveExistingPath(home string) string {
 // Defaults returns today's effective behavior over the supplied discovery
 // roots. The roots are preserved byte-for-byte as discovery inputs; only the
 // corresponding launch directory is derived.
-func Defaults(home string, projectRoots []string, codexRoots ...string) Config {
-	return defaultsWithMCPServers(home, projectRoots, productionMCPServers(), codexRoots...)
+func Defaults(home string, projectRoots []string, codexHomes ...string) Config {
+	return defaultsWithMCPServers(home, projectRoots, productionMCPServers(), codexHomes...)
 }
 
 func engineConfigKey(id pfmengine.ID, field string) string {
@@ -437,7 +437,7 @@ func defaultsWithMCPServers(
 	home string,
 	projectRoots []string,
 	registered map[string]MCPServer,
-	codexRoots ...string,
+	codexHomes ...string,
 ) Config {
 	accounts := make([]Account, 0, len(projectRoots))
 	var accountSkips []AccountSkip
@@ -454,23 +454,23 @@ func defaultsWithMCPServers(
 	if len(accounts) == 0 {
 		accounts, accountSkips = discoverAccounts(home)
 	}
-	codexRoot := pfmengine.MustLookup(pfmengine.Codex).DefaultRoots(home)[0]
-	if len(codexRoots) != 0 && strings.TrimSpace(codexRoots[0]) != "" {
-		codexRoot = filepath.Clean(codexRoots[0])
+	codexHome := pfmengine.MustLookup(pfmengine.Codex).DefaultRoots(home)[0]
+	if len(codexHomes) != 0 && strings.TrimSpace(codexHomes[0]) != "" {
+		codexHome = filepath.Clean(codexHomes[0])
 	}
 	var codexAccounts []CodexAccount
-	codexValid, codexErr := hasValidCodexCredentials(codexRoot)
+	codexValid, codexErr := hasValidCodexCredentials(codexHome)
 	if codexErr != nil {
 		accountSkips = append(accountSkips, AccountSkip{
-			ConfigDir: codexRoot, Reason: fmt.Sprintf("codex discovery failed: %v", codexErr),
+			ConfigDir: codexHome, Reason: fmt.Sprintf("codex discovery failed: %v", codexErr),
 		})
 	} else if codexValid {
-		codexAccounts = []CodexAccount{{ID: 1, Home: codexRoot, Emoji: DefaultEmoji(1)}}
+		codexAccounts = []CodexAccount{{ID: 1, Home: codexHome, Emoji: DefaultEmoji(1)}}
 	}
-	var opencodeAccounts []OpenCodeAccount
-	opencodeHome := pfmengine.MustLookup(pfmengine.Opencode).DefaultRoots(home)[0]
-	if _, err := os.Stat(filepath.Join(opencodeHome, "opencode.db")); err == nil {
-		opencodeAccounts = []OpenCodeAccount{{ID: 1, Home: opencodeHome}}
+	var openCodeAccounts []OpenCodeAccount
+	openCodeHome := pfmengine.MustLookup(pfmengine.OpenCode).DefaultRoots(home)[0]
+	if _, err := os.Stat(filepath.Join(openCodeHome, "opencode.db")); err == nil {
+		openCodeAccounts = []OpenCodeAccount{{ID: 1, Home: openCodeHome}}
 	}
 	sources := map[string]Source{
 		"version":  SourceDefault,
@@ -482,7 +482,7 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
-		engineConfigKey(pfmengine.Opencode, engineKeyBinary): SourceDefault,
+		engineConfigKey(pfmengine.OpenCode, engineKeyBinary): SourceDefault,
 		"mcp.http.port":       SourceDefault,
 		"ask.engine":          SourceDefault,
 		"tmux.titles.enabled": SourceDefault,
@@ -514,7 +514,7 @@ func defaultsWithMCPServers(
 		Accounts:         accounts,
 		AccountSkips:     accountSkips,
 		CodexAccounts:    codexAccounts,
-		OpencodeAccounts: opencodeAccounts,
+		OpenCodeAccounts: openCodeAccounts,
 		Claude: Claude{
 			PermissionMode: PermissionBypass,
 			Binary:         pfmengine.MustLookup(pfmengine.Claude).Binary,
@@ -522,7 +522,7 @@ func defaultsWithMCPServers(
 			CompactNudge:   DefaultCompactNudge(),
 		},
 		Codex:      Codex{Yolo: true, Binary: pfmengine.MustLookup(pfmengine.Codex).Binary},
-		OpenCode:   OpenCode{Binary: pfmengine.MustLookup(pfmengine.Opencode).Binary},
+		OpenCode:   OpenCode{Binary: pfmengine.MustLookup(pfmengine.OpenCode).Binary},
 		Tmux:       Tmux{Titles: DefaultTmuxTitles()},
 		NameSync:   DefaultNameSync(),
 		MCPServers: servers,
@@ -668,7 +668,7 @@ func hasValidCodexCredentials(home string) (bool, error) {
 	return valid, nil
 }
 
-func skipsOutsideDirectory(skips []AccountSkip, root string) []AccountSkip {
+func skipsOutsideDir(skips []AccountSkip, root string) []AccountSkip {
 	filtered := make([]AccountSkip, 0, len(skips))
 	for _, skip := range skips {
 		relative, err := filepath.Rel(root, skip.ConfigDir)
@@ -683,17 +683,17 @@ func skipsOutsideDirectory(skips []AccountSkip, root string) []AccountSkip {
 
 // Load reads a machine config over defaults. An absent file returns defaults;
 // every present-file error is returned with the file path attached.
-func Load(path, home string, projectRoots []string, codexRoots ...string) (Config, error) {
-	return loadWithMCPServers(path, home, projectRoots, productionMCPServers(), codexRoots...)
+func Load(path, home string, projectRoots []string, codexHomes ...string) (Config, error) {
+	return loadWithMCPServers(path, home, projectRoots, productionMCPServers(), codexHomes...)
 }
 
 func loadWithMCPServers(
 	path, home string,
 	projectRoots []string,
 	registered map[string]MCPServer,
-	codexRoots ...string,
+	codexHomes ...string,
 ) (Config, error) {
-	result := defaultsWithMCPServers(home, projectRoots, registered, codexRoots...)
+	result := defaultsWithMCPServers(home, projectRoots, registered, codexHomes...)
 	if path == "" {
 		path = resolveExistingPath(home)
 	} else if !filepath.IsAbs(path) {
@@ -798,7 +798,7 @@ func loadWithMCPServers(
 		// An explicit Claude roster is authoritative. Diagnostics from default
 		// ~/.cc discovery must not re-enter observers as phantom skipped
 		// accounts; unrelated discovery failures remain visible.
-		result.AccountSkips = skipsOutsideDirectory(result.AccountSkips, filepath.Join(home, ".cc"))
+		result.AccountSkips = skipsOutsideDir(result.AccountSkips, filepath.Join(home, ".cc"))
 		result.Sources["accounts"] = SourceFile
 		for index, value := range *raw.Accounts {
 			if value.Emoji != "" {
@@ -879,7 +879,7 @@ func loadWithMCPServers(
 				return Config{}, fmt.Errorf("config %s: opencode.binary must be a non-empty command", result.Path)
 			}
 			result.OpenCode.Binary = binary
-			result.Sources[engineConfigKey(pfmengine.Opencode, engineKeyBinary)] = SourceFile
+			result.Sources[engineConfigKey(pfmengine.OpenCode, engineKeyBinary)] = SourceFile
 		}
 	}
 
@@ -972,9 +972,9 @@ func loadWithMCPServers(
 					result.Ask.Engine,
 				)
 			}
-		case pfmengine.Opencode:
-			if counts[pfmengine.Opencode] == 0 {
-				descriptor := pfmengine.MustLookup(pfmengine.Opencode)
+		case pfmengine.OpenCode:
+			if counts[pfmengine.OpenCode] == 0 {
+				descriptor := pfmengine.MustLookup(pfmengine.OpenCode)
 				return Config{}, fmt.Errorf(
 					"config %s: ask.engine %q has zero %s accounts; create %s or choose another engine",
 					result.Path,
@@ -1343,9 +1343,9 @@ func (config Config) CodexAccountByID(id int) (CodexAccount, bool) {
 	return CodexAccount{}, false
 }
 
-// OpencodeAccountByID returns the implicit OpenCode seat when its store exists.
-func (config Config) OpencodeAccountByID(id int) (OpenCodeAccount, bool) {
-	for _, account := range config.OpencodeAccounts {
+// OpenCodeAccountByID returns the implicit OpenCode seat when its store exists.
+func (config Config) OpenCodeAccountByID(id int) (OpenCodeAccount, bool) {
+	for _, account := range config.OpenCodeAccounts {
 		if account.ID == id {
 			return account, true
 		}
@@ -1413,8 +1413,8 @@ func (config Config) Engines() EngineCounts {
 	if count := len(config.CodexAccounts); count != 0 {
 		counts[pfmengine.Codex] = count
 	}
-	if count := len(config.OpencodeAccounts); count != 0 {
-		counts[pfmengine.Opencode] = count
+	if count := len(config.OpenCodeAccounts); count != 0 {
+		counts[pfmengine.OpenCode] = count
 	}
 	return counts
 }
@@ -1435,9 +1435,9 @@ func (config Config) DefaultEngine() (pfmengine.ID, error) {
 		if counts[pfmengine.Codex] > 0 {
 			return pfmengine.Codex, nil
 		}
-	case pfmengine.Opencode:
-		if counts[pfmengine.Opencode] > 0 {
-			return pfmengine.Opencode, nil
+	case pfmengine.OpenCode:
+		if counts[pfmengine.OpenCode] > 0 {
+			return pfmengine.OpenCode, nil
 		}
 	}
 	if counts[pfmengine.Claude] > 0 {
@@ -1446,8 +1446,8 @@ func (config Config) DefaultEngine() (pfmengine.ID, error) {
 	if counts[pfmengine.Codex] > 0 {
 		return pfmengine.Codex, nil
 	}
-	if counts[pfmengine.Opencode] > 0 {
-		return pfmengine.Opencode, nil
+	if counts[pfmengine.OpenCode] > 0 {
+		return pfmengine.OpenCode, nil
 	}
 	return "", errors.New("no engines configured: Claude roster empty; Codex roster empty; OpenCode store absent")
 }

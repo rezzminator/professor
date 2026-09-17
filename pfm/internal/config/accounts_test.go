@@ -13,7 +13,7 @@ func TestAccountProjectionsFollowTheRoster(t *testing.T) {
 	machine := Config{
 		Accounts:         []Account{{ID: 1, Emoji: "🥇"}, {ID: 2, Emoji: "·"}},
 		CodexAccounts:    []CodexAccount{{ID: 3, Home: "/c/codex-3", Emoji: "🟢"}, {ID: 4, Home: "/c/codex-4"}},
-		OpencodeAccounts: []OpenCodeAccount{{ID: 5}},
+		OpenCodeAccounts: []OpenCodeAccount{{ID: 5}},
 	}
 	if got := machine.CodexHomes(); !reflect.DeepEqual(got, []string{"/c/codex-3", "/c/codex-4"}) {
 		t.Errorf("CodexHomes() = %v", got)
@@ -21,11 +21,11 @@ func TestAccountProjectionsFollowTheRoster(t *testing.T) {
 	if got := machine.PrimaryCodexAccount(); got != 3 {
 		t.Errorf("PrimaryCodexAccount() = %d", got)
 	}
-	if got := machine.OpencodeAccountIDs(); !reflect.DeepEqual(got, []int{5}) {
-		t.Errorf("OpencodeAccountIDs() = %v", got)
+	if got := machine.OpenCodeAccountIDs(); !reflect.DeepEqual(got, []int{5}) {
+		t.Errorf("OpenCodeAccountIDs() = %v", got)
 	}
-	if got := machine.PrimaryOpencodeAccount(); got != 5 {
-		t.Errorf("PrimaryOpencodeAccount() = %d", got)
+	if got := machine.PrimaryOpenCodeAccount(); got != 5 {
+		t.Errorf("PrimaryOpenCodeAccount() = %d", got)
 	}
 	emojis := machine.AccountEmojis()
 	if len(emojis) != 2 || emojis[1] != machine.EmojiFor(1) || emojis[2] != machine.EmojiFor(2) {
@@ -40,7 +40,7 @@ func TestAccountProjectionsFollowTheRoster(t *testing.T) {
 		}
 	}
 	var empty Config
-	if empty.PrimaryCodexAccount() != 0 || empty.PrimaryOpencodeAccount() != 0 || len(empty.CodexHomes()) != 0 {
+	if empty.PrimaryCodexAccount() != 0 || empty.PrimaryOpenCodeAccount() != 0 || len(empty.CodexHomes()) != 0 {
 		t.Error("an engine with no accounts must project to zero values")
 	}
 }
@@ -53,12 +53,12 @@ func TestPrimaryAccountForPicksTheRowsOwnEngine(t *testing.T) {
 	machine := Config{
 		Accounts:         []Account{{ID: 1}, {ID: 2}},
 		CodexAccounts:    []CodexAccount{{ID: 1, Home: "/c/codex"}},
-		OpencodeAccounts: []OpenCodeAccount{{ID: 7}},
+		OpenCodeAccounts: []OpenCodeAccount{{ID: 7}},
 	}
 	for engine, want := range map[pfmengine.ID]int{
 		pfmengine.Claude:   2,
 		pfmengine.Codex:    1,
-		pfmengine.Opencode: 7,
+		pfmengine.OpenCode: 7,
 	} {
 		if got := machine.PrimaryAccountFor(engine, 2); got != want {
 			t.Fatalf("PrimaryAccountFor(%s, claude primary 2) = %d, want %d", engine, got, want)

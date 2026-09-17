@@ -19,17 +19,17 @@ import (
 func reloadCxNamesFromRoots(
 	ctx context.Context,
 	database *store.Store,
-	codexRoots []string,
+	codexHomes []string,
 	counters *Counters,
 ) error {
 	type source struct {
 		path string
 		size int64
 	}
-	sources := make([]source, 0, len(codexRoots))
+	sources := make([]source, 0, len(codexHomes))
 	signature := sha256.New()
-	for _, codexRoot := range codexRoots {
-		path := filepath.Join(codexRoot, codexmeta.SessionIndexFile)
+	for _, codexHome := range codexHomes {
+		path := filepath.Join(codexHome, codexmeta.SessionIndexFile)
 		size, mtimeNS := int64(-1), int64(-1)
 		if info, err := os.Stat(path); err == nil {
 			size = info.Size()
@@ -37,7 +37,7 @@ func reloadCxNamesFromRoots(
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("stat Codex session index %q: %w", path, err)
 		}
-		fmt.Fprintf(signature, "%s\x00%d\x00%d\x00", filepath.Clean(codexRoot), size, mtimeNS)
+		fmt.Fprintf(signature, "%s\x00%d\x00%d\x00", filepath.Clean(codexHome), size, mtimeNS)
 		sources = append(sources, source{path: path, size: size})
 	}
 	signatureText := hex.EncodeToString(signature.Sum(nil))
@@ -106,10 +106,10 @@ func cxRenameTime(entry codexmeta.SessionIndexEntry) int64 {
 func reloadCxNames(
 	ctx context.Context,
 	database *store.Store,
-	codexRoot string,
+	codexHome string,
 	counters *Counters,
 ) error {
-	path := filepath.Join(codexRoot, codexmeta.SessionIndexFile)
+	path := filepath.Join(codexHome, codexmeta.SessionIndexFile)
 	size, mtimeNS := int64(-1), int64(-1)
 	if info, err := os.Stat(path); err == nil {
 		size = info.Size()

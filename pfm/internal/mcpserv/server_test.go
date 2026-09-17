@@ -201,7 +201,7 @@ func setupBackendFixture(t *testing.T) string {
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, sid)
 	t.Setenv(paths.EnvClaudeRoots, claude)
-	t.Setenv(paths.EnvCodexRoot, codex)
+	t.Setenv(paths.EnvCodexHome, codex)
 	t.Setenv(paths.EnvTmuxDir, tmux)
 	t.Setenv(paths.EnvProcRoot, proc)
 	return root
@@ -709,7 +709,7 @@ func (jail *stdioJail) environment() []string {
 		paths.EnvDB+"="+jail.database,
 		paths.EnvSIDDir+"="+jail.sid,
 		paths.EnvClaudeRoots+"="+jail.claude,
-		paths.EnvCodexRoot+"="+jail.codex,
+		paths.EnvCodexHome+"="+jail.codex,
 		paths.EnvTmuxDir+"="+jail.tmuxDir,
 		paths.EnvProcRoot+"="+jail.proc,
 		// A jailed daemon has no tmux server, no session id and no ancestry to

@@ -64,9 +64,9 @@ func TestNativeProcFSSmokeOwnProcessOnly(t *testing.T) {
 }
 
 func TestDetectCodexRootMetadataAndAncestorMatching(t *testing.T) {
-	codexRoot := t.TempDir()
-	first := filepath.Join(codexRoot, "sessions", "2026", "rollout-first.jsonl")
-	second := filepath.Join(codexRoot, "sessions", "2026", "rollout-second.jsonl")
+	codexHome := t.TempDir()
+	first := filepath.Join(codexHome, "sessions", "2026", "rollout-first.jsonl")
+	second := filepath.Join(codexHome, "sessions", "2026", "rollout-second.jsonl")
 	writeRolloutMeta(t, first, "user", "")
 	writeRolloutMeta(t, second, "subagent", "first")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
@@ -89,7 +89,7 @@ func TestDetectCodexRootMetadataAndAncestorMatching(t *testing.T) {
 	}}
 	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
-	got, err := DetectCodex(proc, codexRoot, panes)
+	got, err := DetectCodex(proc, codexHome, panes)
 	if err != nil {
 		t.Fatalf("DetectCodex() error = %v", err)
 	}

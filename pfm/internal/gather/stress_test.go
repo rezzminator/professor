@@ -242,7 +242,7 @@ func stressProcFSScale(t *testing.T) {
 		codexCount   = 200
 		fdCount      = 100
 	)
-	codexRoot := "/fixture/codex"
+	codexHome := "/fixture/codex"
 	processes := make(map[int]fakeProcess, processCount)
 	for pid := 1; pid <= processCount; pid++ {
 		processes[pid] = fakeProcess{
@@ -263,7 +263,7 @@ func stressProcFSScale(t *testing.T) {
 			})
 		}
 		rollout := filepath.Join(
-			codexRoot,
+			codexHome,
 			"sessions",
 			"stress",
 			fmt.Sprintf("rollout-%03d.jsonl", index),
@@ -283,7 +283,7 @@ func stressProcFSScale(t *testing.T) {
 	proc := &fakeProcFS{processes: processes}
 
 	started := time.Now()
-	live, err := DetectCodex(proc, codexRoot, panes)
+	live, err := DetectCodex(proc, codexHome, panes)
 	elapsed := time.Since(started)
 	if err != nil {
 		t.Fatalf("DetectCodex(5k/20k fds) error = %v", err)

@@ -22,8 +22,8 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	}
 	root := testjail.ShortRoot(t)
 	home := filepath.Join(root, "home")
-	codexRoot := filepath.Join(root, "codex")
-	for _, directory := range []string{home, codexRoot, filepath.Join(root, "claude")} {
+	codexHome := filepath.Join(root, "codex")
+	for _, directory := range []string{home, codexHome, filepath.Join(root, "claude")} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -33,7 +33,7 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	t.Setenv(paths.EnvDB, filepath.Join(root, "pfm.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid())))
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
@@ -41,7 +41,7 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	const threadID = "11111111-1111-4111-8111-111111111111"
 	indexLine := `{"id":"` + threadID + `","thread_name":"INDEX_TWIN","updated_at":"2026-08-16T12:00:00Z"}` + "\n"
 	if err := os.WriteFile(
-		filepath.Join(codexRoot, "session_index.jsonl"),
+		filepath.Join(codexHome, "session_index.jsonl"),
 		[]byte(indexLine),
 		0o600,
 	); err != nil {

@@ -39,15 +39,15 @@ type turn struct {
 }
 
 // Run locates target as either a readable rollout path or a thread id beneath
-// codexRoot/sessions, then rebuilds all three recovered files from scratch.
-func Run(ctx context.Context, codexRoot, target string) (Result, error) {
+// codexHome/sessions, then rebuilds all three recovered files from scratch.
+func Run(ctx context.Context, codexHome, target string) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
 	if strings.TrimSpace(target) == "" {
 		return Result{}, errors.New("a thread id or rollout path is required")
 	}
-	rollout, err := locate(codexRoot, target)
+	rollout, err := locate(codexHome, target)
 	if err != nil {
 		return Result{}, err
 	}
@@ -62,7 +62,7 @@ func Run(ctx context.Context, codexRoot, target string) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	out := filepath.Join(codexRoot, "recovered-"+threadID)
+	out := filepath.Join(codexHome, "recovered-"+threadID)
 	if err := os.MkdirAll(out, 0o700); err != nil {
 		return Result{}, fmt.Errorf("create recovery directory %q: %w", out, err)
 	}
@@ -78,7 +78,7 @@ func Run(ctx context.Context, codexRoot, target string) (Result, error) {
 	}, nil
 }
 
-func locate(codexRoot, target string) (string, error) {
+func locate(codexHome, target string) (string, error) {
 	if info, err := os.Stat(target); err == nil {
 		if !info.Mode().IsRegular() {
 			return "", fmt.Errorf("rollout is not a regular file: %s", target)
@@ -87,7 +87,7 @@ func locate(codexRoot, target string) (string, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return "", fmt.Errorf("stat rollout %q: %w", target, err)
 	}
-	sessions := filepath.Join(codexRoot, "sessions")
+	sessions := filepath.Join(codexHome, "sessions")
 	var candidates []candidate
 	err := filepath.WalkDir(sessions, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

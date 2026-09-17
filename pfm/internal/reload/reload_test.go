@@ -407,7 +407,7 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	run, err := engineRun(Request{
 		Engine:      "cx",
 		Account:     9,
-		AccountHome: "/jail/codex/9",
+		CodexHome:   "/jail/codex/9",
 		CodexBinary: "/opt/codex safe",
 		CodexYolo:   false,
 		SessionID:   "019ff700-0000-7000-8000-000000000001",
@@ -429,8 +429,8 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	}
 }
 
-func TestOpencodeRunIsNotMisroutedToClaude(t *testing.T) {
-	run, err := engineRun(Request{Engine: pfmengine.Opencode})
+func TestOpenCodeRunIsNotMisroutedToClaude(t *testing.T) {
+	run, err := engineRun(Request{Engine: pfmengine.OpenCode})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,12 +439,12 @@ func TestOpencodeRunIsNotMisroutedToClaude(t *testing.T) {
 	}
 }
 
-func TestRunRefusesOpencodeBeforeExitingThePane(t *testing.T) {
+func TestRunRefusesOpenCodeBeforeExitingThePane(t *testing.T) {
 	tmux := &fakeReloadTmux{}
 	_, err := Run(
 		context.Background(),
 		Request{
-			Engine: pfmengine.Opencode, SocketPath: "/tmp/ox-session", Pane: "%7",
+			Engine: pfmengine.OpenCode, SocketPath: "/tmp/ox-session", Pane: "%7",
 			PanePID: 700, Account: 1, AccountIDs: []int{1}, CWD: "/work",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
@@ -501,7 +501,7 @@ func TestRunWaitsForExitTextToRenderBeforeSubmitting(t *testing.T) {
 		Request{
 			Engine: pfmengine.Codex, SocketPath: "/tmp/tmux-1000/probe-reload-render", Pane: "%7",
 			PanePID: 700, SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
-			Account: 1, AccountIDs: []int{1}, AccountHome: "/jail/codex/1",
+			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
 		tmux,
@@ -529,7 +529,7 @@ func TestRunRefusesBlindExitWhenTextNeverRenders(t *testing.T) {
 		Request{
 			Engine: pfmengine.Codex, SocketPath: filepath.Join(t.TempDir(), "fake-codex-socket"), Pane: "%7",
 			PanePID: 700, SessionID: "019ff700-0000-7000-8000-000000000001", CWD: "/jail/project",
-			Account: 1, AccountIDs: []int{1}, AccountHome: "/jail/codex/1",
+			Account: 1, AccountIDs: []int{1}, CodexHome: "/jail/codex/1",
 		},
 		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1},
 		tmux,

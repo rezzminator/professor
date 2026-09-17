@@ -24,7 +24,7 @@ type killTmuxJail struct {
 	sidDir     string
 	home       string
 	claudeRoot string
-	codexRoot  string
+	codexHome  string
 	sockets    []string
 }
 
@@ -43,14 +43,14 @@ func newKillTmuxJail(t *testing.T) *killTmuxJail {
 		sidDir:     filepath.Join(root, "sid"),
 		home:       filepath.Join(root, "home"),
 		claudeRoot: filepath.Join(root, "claude"),
-		codexRoot:  filepath.Join(root, "codex"),
+		codexHome:  filepath.Join(root, "codex"),
 	}
 	for _, directory := range []string{
 		jail.tmuxDir,
 		jail.sidDir,
 		jail.home,
 		jail.claudeRoot,
-		jail.codexRoot,
+		jail.codexHome,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -63,7 +63,7 @@ func newKillTmuxJail(t *testing.T) *killTmuxJail {
 	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
-	t.Setenv("PFM_CODEX_ROOT", jail.codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)
 	t.Setenv("PFM_TMUX_DIR", jail.tmuxDir)
 	t.Cleanup(func() {
 		for _, socket := range jail.sockets {

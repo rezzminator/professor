@@ -10,8 +10,8 @@ func TestConfiguredBinaryBasenamesReachLiveDetectors(t *testing.T) {
 	customClaude := "/opt/tools/claude enterprise"
 	customCodex := "/opt/tools/codex safe"
 	claudeSession := "11111111-1111-4111-8111-111111111111"
-	codexRoot := t.TempDir()
-	rollout := filepath.Join(codexRoot, "sessions", "2026", "rollout-configured.jsonl")
+	codexHome := t.TempDir()
+	rollout := filepath.Join(codexHome, "sessions", "2026", "rollout-configured.jsonl")
 	writeRolloutMeta(t, rollout, "user", "")
 	proc := &fakeProcFS{processes: map[int]fakeProcess{
 		100: {stat: ProcStat{ParentPID: 1}},
@@ -69,7 +69,7 @@ func TestConfiguredBinaryBasenamesReachLiveDetectors(t *testing.T) {
 		t.Fatalf("DetectCache1H() = %#v, want configured Claude socket", cacheSockets)
 	}
 
-	codex, err := DetectCodexThreads(proc, codexRoot, panes, nil, customCodex)
+	codex, err := DetectCodexThreads(proc, codexHome, panes, nil, customCodex)
 	if err != nil {
 		t.Fatalf("DetectCodexThreads() error = %v", err)
 	}

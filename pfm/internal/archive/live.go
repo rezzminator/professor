@@ -31,7 +31,7 @@ var uuidPattern = regexp.MustCompile(
 //     writing even when the process states nothing at all.
 func LiveSessions(
 	proc gather.ProcFS,
-	codexRoot string,
+	codexHome string,
 	sidDir string,
 	binaries ...string,
 ) map[string]struct{} {
@@ -42,7 +42,7 @@ func LiveSessions(
 	live := make(map[string]struct{})
 	pids, err := proc.PIDs()
 	if err == nil {
-		sessionsRoot := filepath.Join(codexRoot, "sessions")
+		sessionsRoot := filepath.Join(codexHome, "sessions")
 		for _, pid := range pids {
 			cmdline, err := proc.Cmdline(pid)
 			if err != nil {

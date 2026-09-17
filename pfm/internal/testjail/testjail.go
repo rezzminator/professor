@@ -160,8 +160,8 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	root := ShortRoot(t)
 	// The engine roots are named for their engines, spelled by the registry.
 	claudeRoot := pfmengine.MustLookup(pfmengine.Claude).LongName
-	codexRoot := pfmengine.MustLookup(pfmengine.Codex).LongName
-	for _, directory := range []string{"t", "sid", claudeRoot, codexRoot, "tmux", "home", "proc"} {
+	codexHome := pfmengine.MustLookup(pfmengine.Codex).LongName
+	for _, directory := range []string{"t", "sid", claudeRoot, codexHome, "tmux", "home", "proc"} {
 		if err := os.MkdirAll(filepath.Join(root, directory), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -171,7 +171,7 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	setenv(paths.EnvDB, filepath.Join(root, "index.db"))
 	setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	setenv(paths.EnvClaudeRoots, filepath.Join(root, claudeRoot))
-	setenv(paths.EnvCodexRoot, filepath.Join(root, codexRoot))
+	setenv(paths.EnvCodexHome, filepath.Join(root, codexHome))
 	setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	setenv(paths.EnvHome, filepath.Join(root, "home"))
 	setenv("HOME", filepath.Join(root, "home"))

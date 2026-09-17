@@ -78,7 +78,7 @@ type Request struct {
 	CWD         string
 	Account     int
 	AccountIDs  []int
-	AccountHome string
+	CodexHome   string
 	CodexBinary string
 	CodexYolo   bool
 	Cache1H     bool
@@ -606,8 +606,8 @@ func codexRun(request Request) (string, error) {
 		"env", "-u", "CODEX_THREAD_ID", "-u", "CLAUDE_CODE_SESSION_ID",
 		"-u", "CLAUDECODE", "-u", "CLAUDE_CONFIG_DIR",
 	}
-	if request.AccountHome != "" {
-		parts = append(parts, "CODEX_HOME="+action.Quote(request.AccountHome))
+	if request.CodexHome != "" {
+		parts = append(parts, "CODEX_HOME="+action.Quote(request.CodexHome))
 	}
 	binary := request.CodexBinary
 	if binary == "" {

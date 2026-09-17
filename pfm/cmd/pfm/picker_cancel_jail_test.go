@@ -135,7 +135,7 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 	claudeRoot := filepath.Join(root, "claude")
 	project := filepath.Join(root, "work", "picker-cancel-project")
 	procRoot := filepath.Join(root, "proc")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	for _, directory := range []string{
 		filepath.Join(home, ".local", "bin"),
 		tmuxDir,
@@ -143,7 +143,7 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 		claudeRoot,
 		project,
 		procRoot,
-		codexRoot,
+		codexHome,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -177,7 +177,7 @@ func newPickerCancelJail(t *testing.T) *pickerCancelJail {
 		"PFM_DB":           filepath.Join(root, "fleet.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
-		"PFM_CODEX_ROOT":   codexRoot,
+		"PFM_CODEX_ROOT":   codexHome,
 		"PFM_TMUX_DIR":     tmuxDir,
 		"PFM_PROC_ROOT":    procRoot,
 	})

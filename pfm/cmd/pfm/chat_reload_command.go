@@ -423,7 +423,7 @@ func runChatReloadWorkerWithRuntime(
 			CWD:         cwd,
 			Account:     acct,
 			AccountIDs:  selected.IDs,
-			AccountHome: selected.CodexHome,
+			CodexHome:   selected.CodexHome,
 			CodexBinary: selected.CodexBinary,
 			CodexYolo:   selected.CodexYolo,
 			Cache1H:     cache,
@@ -782,7 +782,7 @@ func reloadBirth(
 	stderr io.Writer,
 ) (int, bool, error) {
 	engine := reloadEngine(socketPath)
-	if engine == pfmengine.Opencode {
+	if engine == pfmengine.OpenCode {
 		return 0, false, errors.New("OpenCode does not support in-place reload")
 	}
 	ids := machine.AccountIDs()
@@ -918,7 +918,7 @@ type reloadAccountSelection struct {
 
 func validateReloadAccount(machine pfmconfig.Config, engine pfmengine.ID, account int) (reloadAccountSelection, error) {
 	switch engine {
-	case pfmengine.Opencode:
+	case pfmengine.OpenCode:
 		return reloadAccountSelection{}, errors.New("OpenCode does not support in-place reload")
 	case pfmengine.Codex:
 		if len(machine.CodexAccounts) == 0 {
@@ -1133,7 +1133,7 @@ func findEngineTranscript(
 	id string,
 ) (string, error) {
 	switch engine {
-	case pfmengine.Opencode:
+	case pfmengine.OpenCode:
 		return "", errors.New("OpenCode does not support in-place reload")
 	case pfmengine.Claude:
 		return findClaudeTranscript(resolved.Roots[pfmengine.Claude], id)

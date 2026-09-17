@@ -27,8 +27,8 @@ func (source builtinTestSource) Sync(
 		return SyncClaude(ctx, database, roots, counters)
 	case pfmengine.Codex:
 		return SyncCodex(ctx, database, roots, counters)
-	case pfmengine.Opencode:
-		return SyncOpencode(ctx, database, roots, counters)
+	case pfmengine.OpenCode:
+		return SyncOpenCode(ctx, database, roots, counters)
 	default:
 		return nil
 	}
@@ -37,7 +37,7 @@ func (source builtinTestSource) Sync(
 func init() {
 	RegisterSource(pfmengine.Claude, builtinTestSource{id: pfmengine.Claude})
 	RegisterSource(pfmengine.Codex, builtinTestSource{id: pfmengine.Codex})
-	RegisterSource(pfmengine.Opencode, builtinTestSource{id: pfmengine.Opencode})
+	RegisterSource(pfmengine.OpenCode, builtinTestSource{id: pfmengine.OpenCode})
 }
 
 func TestUnknownEngineIsANamedError(t *testing.T) {
@@ -73,7 +73,7 @@ func TestRunRefusesAnEngineWithNoIndexSource(t *testing.T) {
 	t.Cleanup(func() { _ = database.Close() })
 	indexer, err := NewWithRoots(database, paths.Values{}, map[pfmengine.ID][]string{
 		pfmengine.Claude: {fixture.claudeRoot},
-		pfmengine.Codex:  {fixture.codexRoot},
+		pfmengine.Codex:  {fixture.codexHome},
 	})
 	if err != nil {
 		t.Fatal(err)

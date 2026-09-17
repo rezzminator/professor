@@ -34,7 +34,7 @@ func TestKillDependenciesCopiesTheClaudeRoots(t *testing.T) {
 	if len(dependencies.ClaudeRoots) != 1 || dependencies.ClaudeRoots[0] != "/c/claude-1" {
 		t.Fatalf("ClaudeRoots = %v, want an independent copy", dependencies.ClaudeRoots)
 	}
-	if len(dependencies.CodexRoots) != 1 || dependencies.CodexRoots[0] != "/c/codex-1" ||
+	if len(dependencies.CodexHomes) != 1 || dependencies.CodexHomes[0] != "/c/codex-1" ||
 		dependencies.ConfigPath != "/c/config.toml" {
 		t.Fatalf("dependencies = %+v", dependencies)
 	}

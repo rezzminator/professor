@@ -33,7 +33,7 @@ func KillDependencies(runtime pfmconfig.Runtime) kill.Dependencies {
 	return kill.Dependencies{
 		Paths:       runtime.Paths,
 		ClaudeRoots: append([]string(nil), runtime.Paths.Roots[pfmengine.Claude]...),
-		CodexRoots:  runtime.Config.CodexHomes(),
+		CodexHomes:  runtime.Config.CodexHomes(),
 		ConfigPath:  runtime.Config.Path,
 	}
 }
@@ -77,7 +77,7 @@ func Gather(
 		CodexThread: store.NewCodexThreadResolverRoots(
 			ctx, env.Config.CodexHomes(), bindingManager.CodexPaneBound(ctx),
 		),
-		CodexRoots:   env.Config.CodexHomes(),
+		CodexHomes:   env.Config.CodexHomes(),
 		ClaudeBinary: env.Config.Claude.Binary,
 		CodexBinary:  env.Config.Codex.Binary,
 		LabelEmojis:  env.Config.LabelEmojis(),

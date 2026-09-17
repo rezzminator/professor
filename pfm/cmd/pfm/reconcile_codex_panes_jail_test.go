@@ -886,18 +886,18 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 }
 
 // codexJailStateTitle writes a scratch Codex state store directly under
-// codexRoot as state_1.sqlite — the shape store.CodexStateFiles walks — with
+// codexHome as state_1.sqlite — the shape store.CodexStateFiles walks — with
 // one thread row carrying id and a title. Only the columns
 // store.readCodexState requires (id, cwd, created_at, thread_source) or
 // reads (title) are present: the full production schema fixture is
 // internal/store/codexstate_test.go's buildCodexState, unexported and in a
 // different package, so this is the cmd/pfm-side counterpart.
-func codexJailStateTitle(t *testing.T, codexRoot, id, title, cwd string) {
+func codexJailStateTitle(t *testing.T, codexHome, id, title, cwd string) {
 	t.Helper()
-	if err := os.MkdirAll(codexRoot, 0o700); err != nil {
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexRoot, "state_1.sqlite"))
+	state, err := sql.Open("sqlite", "file:"+filepath.Join(codexHome, "state_1.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}

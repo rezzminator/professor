@@ -38,10 +38,10 @@ func TestSelfKillOnUnindexedLineageMemberResolvesToRoot(t *testing.T) {
 			rootID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 			memberID := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 			rootPath := filepath.Join(
-				jail.codexRoot, "sessions", "rollout-2026-07-27T10-00-00-"+rootID+".jsonl",
+				jail.codexHome, "sessions", "rollout-2026-07-27T10-00-00-"+rootID+".jsonl",
 			)
 			memberPath := filepath.Join(
-				jail.codexRoot, "sessions", "rollout-2026-07-27T10-05-00-"+memberID+suffix+".jsonl",
+				jail.codexHome, "sessions", "rollout-2026-07-27T10-05-00-"+memberID+suffix+".jsonl",
 			)
 
 			// The root: an ordinary already-indexed conversation, exactly what the

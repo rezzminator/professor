@@ -185,7 +185,7 @@ func TestFinisherDiscoversConfigOwnedClaudeRoots(t *testing.T) {
 	finisher, err := NewFinisher(database, Dependencies{Paths: paths.Values{
 		Home:    jail.home,
 		SIDDir:  jail.sidDir,
-		Roots:   map[pfmengine.ID][]string{pfmengine.Codex: {jail.codexRoot}},
+		Roots:   map[pfmengine.ID][]string{pfmengine.Codex: {jail.codexHome}},
 		TmuxDir: jail.tmuxDir,
 	}})
 	if err != nil {
@@ -257,7 +257,7 @@ func TestManagerIdentifiesClaudeAndCodexSelf(t *testing.T) {
 	}
 	codexID := "22222222-2222-4222-8222-222222222222"
 	rolloutPath := filepath.Join(
-		jail.codexRoot,
+		jail.codexHome,
 		"sessions",
 		"2026",
 		"07",
@@ -361,7 +361,7 @@ func TestManagerStoreOnlyCodexSelfKills(t *testing.T) {
 	threadID := "55555555-5555-4555-8555-555555555555"
 	writeCodexStateThread(
 		t,
-		filepath.Join(jail.codexRoot, "state_0.sqlite"),
+		filepath.Join(jail.codexHome, "state_0.sqlite"),
 		threadID,
 		"/work/store-only",
 		"",
@@ -419,7 +419,7 @@ func TestManagerCodexSelfReadsRolloutPathFromStateStore(t *testing.T) {
 	threadID := "55555555-5555-4555-8555-555555555555"
 	rolloutID := "66666666-6666-4666-8666-666666666666"
 	rolloutPath := filepath.Join(
-		jail.codexRoot,
+		jail.codexHome,
 		"sessions",
 		"2026",
 		"07",
@@ -427,7 +427,7 @@ func TestManagerCodexSelfReadsRolloutPathFromStateStore(t *testing.T) {
 	)
 	writeCodexStateThread(
 		t,
-		filepath.Join(jail.codexRoot, "state_0.sqlite"),
+		filepath.Join(jail.codexHome, "state_0.sqlite"),
 		threadID,
 		"/work/paginated",
 		rolloutPath,
@@ -704,7 +704,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	childID := "99999999-9999-4999-8999-999999999999"
 	if err := database.UpsertRollout(ctx, store.Rollout{
 		ID:          rootID,
-		Path:        filepath.Join(jail.codexRoot, "sessions", "rollout-"+rootID+".jsonl"),
+		Path:        filepath.Join(jail.codexHome, "sessions", "rollout-"+rootID+".jsonl"),
 		Size:        100,
 		MTimeNS:     100,
 		CWD:         "/work/proja",
@@ -718,7 +718,7 @@ func TestKilledCodexLineageMatchesAnyMemberIDUntilUnkill(t *testing.T) {
 	// to the root by session_id — exactly what `codex resume` produces.
 	if err := database.UpsertRollout(ctx, store.Rollout{
 		ID:          childID,
-		Path:        filepath.Join(jail.codexRoot, "sessions", "rollout-"+childID+".jsonl"),
+		Path:        filepath.Join(jail.codexHome, "sessions", "rollout-"+childID+".jsonl"),
 		Size:        200,
 		MTimeNS:     200,
 		CWD:         "/work/proja",
@@ -1004,7 +1004,7 @@ func TestFinisherCodexUsesQuit(t *testing.T) {
 	database := jail.open(t)
 	ctx := context.Background()
 	id := "66666666-6666-4666-8666-666666666666"
-	path := filepath.Join(jail.codexRoot, "sessions", "rollout-"+id+".jsonl")
+	path := filepath.Join(jail.codexHome, "sessions", "rollout-"+id+".jsonl")
 	if err := database.UpsertRollout(ctx, store.Rollout{
 		ID:          id,
 		Path:        path,
@@ -1108,7 +1108,7 @@ type killJail struct {
 	sidDir     string
 	tmuxDir    string
 	claudeRoot string
-	codexRoot  string
+	codexHome  string
 	dbPath     string
 }
 
@@ -1121,7 +1121,7 @@ func newKillJail(t *testing.T) killJail {
 		sidDir:     filepath.Join(root, "sid"),
 		tmuxDir:    filepath.Join(root, "tmux"),
 		claudeRoot: filepath.Join(root, "claude"),
-		codexRoot:  filepath.Join(root, "codex"),
+		codexHome:  filepath.Join(root, "codex"),
 		dbPath:     filepath.Join(root, "fleet.db"),
 	}
 	for _, directory := range []string{
@@ -1129,7 +1129,7 @@ func newKillJail(t *testing.T) killJail {
 		jail.sidDir,
 		jail.tmuxDir,
 		jail.claudeRoot,
-		jail.codexRoot,
+		jail.codexHome,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -1139,7 +1139,7 @@ func newKillJail(t *testing.T) killJail {
 	t.Setenv("PFM_DB", jail.dbPath)
 	t.Setenv("PFM_SID_DIR", jail.sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", jail.claudeRoot)
-	t.Setenv("PFM_CODEX_ROOT", jail.codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", jail.codexHome)
 	t.Setenv("PFM_TMUX_DIR", jail.tmuxDir)
 	t.Setenv("PFM_HOME", jail.home)
 	return jail

@@ -31,13 +31,13 @@ const (
 type indexRefresher struct {
 	database    *store.Store
 	claudeRoots []string
-	codexRoots  []string
+	codexHomes  []string
 }
 
 func (refresher indexRefresher) Refresh(ctx context.Context) error {
 	indexer, err := index.NewWithRoots(refresher.database, paths.Values{}, map[pfmengine.ID][]string{
 		pfmengine.Claude: refresher.claudeRoots,
-		pfmengine.Codex:  refresher.codexRoots,
+		pfmengine.Codex:  refresher.codexHomes,
 	})
 	if err != nil {
 		return err
@@ -70,11 +70,11 @@ func NewFinisher(
 	if now == nil {
 		now = time.Now
 	}
-	codexRoots := dependencies.CodexRoots
-	if codexRoots == nil {
-		codexRoots = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
+	codexHomes := dependencies.CodexHomes
+	if codexHomes == nil {
+		codexHomes = append([]string(nil), resolved.Roots[pfmengine.Codex]...)
 	} else {
-		codexRoots = append([]string{}, codexRoots...)
+		codexHomes = append([]string{}, codexHomes...)
 	}
 	refresher := dependencies.Refresher
 	if refresher == nil {
@@ -88,7 +88,7 @@ func NewFinisher(
 		refresher = indexRefresher{
 			database:    database,
 			claudeRoots: append([]string(nil), claudeRoots...),
-			codexRoots:  append([]string(nil), codexRoots...),
+			codexHomes:  append([]string(nil), codexHomes...),
 		}
 	}
 	delay := dependencies.Delay
@@ -114,7 +114,7 @@ func NewFinisher(
 		paths: resolvedPaths{
 			home:       resolved.Home,
 			sidDir:     resolved.SIDDir,
-			codexRoots: codexRoots,
+			codexHomes: codexHomes,
 			tmuxDir:    resolved.TmuxDir,
 		},
 	}, nil

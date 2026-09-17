@@ -13,8 +13,8 @@ import (
 func recoveryJail(t *testing.T, content, id string) (string, string) {
 	t.Helper()
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, ".codex")
-	sessions := filepath.Join(codexRoot, "sessions", "2026", "08", "16")
+	codexHome := filepath.Join(root, ".codex")
+	sessions := filepath.Join(codexHome, "sessions", "2026", "08", "16")
 	if err := os.MkdirAll(sessions, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -23,7 +23,7 @@ func recoveryJail(t *testing.T, content, id string) (string, string) {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_HOME", root)
-	t.Setenv("PFM_CODEX_ROOT", codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", codexHome)
 	return root, rollout
 }
 

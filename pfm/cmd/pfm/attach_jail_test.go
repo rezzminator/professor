@@ -102,7 +102,7 @@ func newAttachJail(t *testing.T) *attachJail {
 	claudeRoot := filepath.Join(root, "claude")
 	project := filepath.Join(root, "work", "attach-project")
 	procRoot := filepath.Join(root, "proc")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	for _, directory := range []string{
 		filepath.Join(home, ".local", "bin"),
 		tmuxDir,
@@ -110,7 +110,7 @@ func newAttachJail(t *testing.T) *attachJail {
 		claudeRoot,
 		project,
 		procRoot,
-		codexRoot,
+		codexHome,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
 			t.Fatal(err)
@@ -160,7 +160,7 @@ func newAttachJail(t *testing.T) *attachJail {
 		"PFM_DB":           filepath.Join(root, "fleet.db"),
 		"PFM_SID_DIR":      sidDir,
 		"PFM_CLAUDE_ROOTS": claudeRoot,
-		"PFM_CODEX_ROOT":   codexRoot,
+		"PFM_CODEX_ROOT":   codexHome,
 		"PFM_TMUX_DIR":     tmuxDir,
 		"PFM_PROC_ROOT":    procRoot,
 	})

@@ -115,7 +115,7 @@
     ".claude/commands/wave/refine.md": "7245bc0fbf26fc26fc2e5eaad8b0c019af69b809fdf77e98e119f430dd0800ea",
     ".claude/commands/wave/walker.md": "ef7fecb7d5246bef38f179560890204ad40d3fc0679a0429eb699692e9136ae2",
     ".claude/scripts/build-opencode.mjs": "7717ae54f116729ee551c53d1bb640d5f7e1de4a47df25b57b1fa301c2e0a67c",
-    ".claude/scripts/codex-sync.sh": "a9179abfe7b73717b550e54387e76bc316de4de0acaa2b8a01c6db26faaadbe3",
+    ".claude/scripts/codex-sync.sh": "3982c84f2f111fcdbb70e56d7eb725e17211f223cb777fec1f242970680f9cc8",
     ".claude/scripts/dev.sh": "796c906ba109d91bb0b16af8c37b04154d0208a3b3ce9582e0b551186392ad2f",
     ".claude/scripts/explore-deny.sh": "966d38099cd592963ef54b54fb7544d4d44437fd4e36faae0846219ab57b26b6",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",

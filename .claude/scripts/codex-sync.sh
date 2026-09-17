@@ -52,6 +52,16 @@ case "$MODE" in
     OUT=$(pfm codex build "$REPO_ROOT" 2>&1) && CODEX_BUILD=0 || CODEX_BUILD=$?
     CHK=$(pfm codex check "$REPO_ROOT" 2>&1) && CODEX_CHECK=0 || CODEX_CHECK=$?
     OGEN=""; OCHK=""
+    # The Stop hook runs with the harness's PATH, which carries no mise shim
+    # dir: a node installed through mise is invisible here. Add the shim and
+    # user-bin dirs when node is not already on PATH (the user's login shell
+    # sees the same node).
+    if ! command -v node >/dev/null 2>&1; then
+      for shim_dir in "$HOME/.local/share/mise/shims" "$HOME/.local/bin"; do
+        [[ -d "$shim_dir" ]] && PATH="$shim_dir:$PATH"
+      done
+      export PATH
+    fi
     if command -v node >/dev/null 2>&1; then
       OGEN=$(node "$REPO_ROOT/.claude/scripts/build-opencode.mjs" generate 2>&1) && OC_BUILD=0 || OC_BUILD=$?
       OCHK=$(node "$REPO_ROOT/.claude/scripts/build-opencode.mjs" check 2>&1) && OC_CHECK=0 || OC_CHECK=$?

@@ -14,6 +14,7 @@ import (
 	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/hookentry"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
@@ -413,59 +414,59 @@ func runInternal(
 	runtime commandRuntime,
 ) (exitCode int) {
 	if len(args) != 0 && args[0] == "clear-kill" {
-		return runClearKill(args[1:], os.Stdin, stderr, runtime)
+		return hookentry.ClearKill(args[1:], os.Stdin, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "agent-open" {
-		return runInternalAgentOpen(args[1:], stderr, runtime)
+		return hookentry.AgentOpen(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "codex-launch" {
-		return runCodexLaunchCompatibility(args[1:], stderr)
+		return hookentry.CodexLaunch(args[1:], stderr)
 	}
 	if len(args) != 0 && args[0] == "codex-appendix" {
-		return runCodexAppendix(os.Stdin, stdout, stderr, runtime)
+		return hookentry.CodexAppendix(os.Stdin, stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "launch" {
-		return runInternalLaunch(args[1:], stdout, stderr, runtime)
+		return hookentry.Launch(args[1:], stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "launcher-repair" {
-		return runInternalLauncherRepair(args[1:], stderr, runtime)
+		return hookentry.LauncherRepair(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "claude-version" {
-		return runInternalClaudeVersion(args[1:], stdout, stderr, runtime)
+		return hookentry.ClaudeVersion(args[1:], stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "explore-deny" {
-		return runExploreDeny(os.Stdin, stdout, stderr)
+		return hookentry.ExploreDeny(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "epic-inject" {
-		return runEpicInject(os.Stdin, stdout, stderr)
+		return hookentry.EpicInject(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "reload-intercept" {
-		return runReloadIntercept(os.Stdin, stdout, stderr, runtime)
+		return hookentry.ReloadIntercept(os.Stdin, stdout, stderr, runtime, runChatReloadWithRuntime)
 	}
 	if len(args) != 0 && args[0] == "exit-intercept" {
-		return runExitIntercept(os.Stdin, stdout, stderr, runtime)
+		return hookentry.ExitIntercept(os.Stdin, stdout, stderr, runtime, runKill)
 	}
 	if len(args) != 0 && args[0] == "exit-close" {
-		return runExitClose(os.Stdin, stderr)
+		return hookentry.ExitClose(os.Stdin, stderr)
 	}
 	if len(args) != 0 && args[0] == "compact-nudge" {
-		return runCompactNudge(os.Stdin, stdout, stderr, runtime)
+		return hookentry.CompactNudge(os.Stdin, stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "reload-run" {
 		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "then" {
-		return runInternalThen(args[1:], stderr, runtime)
+		return hookentry.Then(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "update-check" {
-		return runInternalUpdateCheck(args[1:], stderr)
+		return hookentry.UpdateCheck(args[1:], stderr)
 	}
 	if len(args) != 0 && args[0] == "primary-get" {
 		fmt.Fprintln(stdout, fleet.PrimaryAccount(runtime.Paths, runtime.Config))
 		return 0
 	}
 	if len(args) != 0 && args[0] == "chat-server" {
-		return runInternalChatServer(args[1:], stderr, runtime)
+		return hookentry.ChatServer(args[1:], stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "stale" {
 		return stale.Run(args[1:], stdout, stderr)

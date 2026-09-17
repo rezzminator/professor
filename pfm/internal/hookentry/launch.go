@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"context"
@@ -26,31 +26,28 @@ import (
 	pfmtmux "hostops/pfm/internal/tmux"
 )
 
-var launchExec = syscall.Exec
+// LaunchExec is the process-replacing seam used by launch and codex-launch.
+var LaunchExec = syscall.Exec
 
 const launcherWaitTimeout = 7 * 24 * time.Hour
 
 var nonInteractiveClaudeSubcommands = map[string]bool{
-	agentsCommand: true, mcpCommand: true, updateCommand: true, installCommand: true,
-	doctorCommand: true, "setup-token": true, "plugin": true, configCommand: true,
+	"agents": true, "mcp": true, "update": true, "install": true,
+	"doctor": true, "setup-token": true, "plugin": true, "config": true,
 }
 
-// launchPassThrough is the pure policy boundary for the managed Claude
-// launcher. It deliberately knows nothing about config, files, or tmux state
-// beyond the caller-provided environment strings.
 func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 	if forced {
 		return true
 	}
 	if socketPath, _, _ := strings.Cut(tmux, ","); socketPath != "" {
-		socket := filepath.Base(socketPath)
-		if _, ok := pfmengine.FromSocket(socket); ok {
+		if _, ok := pfmengine.FromSocket(filepath.Base(socketPath)); ok {
 			return true
 		}
 	}
 	for _, argument := range arguments {
 		switch argument {
-		case "-p", "--print", "--output-format", "-h", helpFlag, "--version", "-v":
+		case "-p", "--print", "--output-format", "-h", "--help", "--version", "-v":
 			return true
 		}
 		if strings.HasPrefix(argument, "--output-format=") {
@@ -66,7 +63,8 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 	return false
 }
 
-func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+// Launch is the managed Claude launcher entry.
+func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	flags := cli.NewFlagSet(
 		"internal launch",
 		"usage: pfm internal launch --real /absolute/path [--cwd DIR] -- [claude arguments]",
@@ -83,13 +81,12 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		return 2
 	}
 	if launchPassThrough(arguments, os.Getenv("TMUX"), os.Getenv("PFM_LAUNCH_PASSTHROUGH") == "1") {
-		if err := launchExec(*realBinary, append([]string{*realBinary}, arguments...), os.Environ()); err != nil {
+		if err := LaunchExec(*realBinary, append([]string{*realBinary}, arguments...), os.Environ()); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-
 	workingDir := *cwd
 	if workingDir == "" {
 		var err error
@@ -111,11 +108,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		}
 	}
 	realRun, err := action.LauncherRun(
-		*realBinary,
-		arguments,
-		configDir,
-		runtime.Paths.Home,
-		runtime.Config.EffectiveClaude(primary),
+		*realBinary, arguments, configDir, runtime.Paths.Home, runtime.Config.EffectiveClaude(primary),
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
@@ -159,13 +152,11 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		}()
 		gateRun = launcherStatusRun(startWait, realRun, tmuxBinary, socketPath, doneChannel, statusPath)
 	}
-
 	titles := runtime.Config.Tmux.Titles
 	client := spawn.TmuxSpawner{Binary: tmuxBinary, TmuxDir: runtime.Paths.TmuxDir, Titles: &titles}
 	ctx := context.Background()
 	if err := client.NewSession(ctx, spawn.SessionSpec{
-		Socket: socket, Session: session, Window: spawn.WindowName(""),
-		CWD: workingDir, Run: gateRun,
+		Socket: socket, Session: session, Window: spawn.WindowName(""), CWD: workingDir, Run: gateRun,
 		Width: action.HeadlessWidth, Height: action.HeadlessHeight,
 	}); err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)
@@ -177,7 +168,6 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 			_ = launchTmuxCommand(ctx, tmuxBinary, socketPath, "kill-server").Run()
 		}
 	}()
-
 	if interactive {
 		failed = false
 		arguments := []string{
@@ -192,13 +182,12 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 			"-t",
 			session,
 		}
-		if err := launchExec(tmuxBinary, arguments, deps.EnvironmentWith("TMUX", "")); err != nil {
+		if err := LaunchExec(tmuxBinary, arguments, deps.EnvironmentWith("TMUX", "")); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: attach tmux session: %v\n", err)
 			return 1
 		}
 		return 0
 	}
-
 	waitCtx, cancelWait := context.WithTimeout(ctx, launcherWaitTimeout)
 	defer cancelWait()
 	waiter := launchTmuxCommand(waitCtx, tmuxBinary, socketPath, "wait-for", doneChannel)
@@ -246,9 +235,6 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 	return status
 }
 
-// tmux 1.8 introduced wait-for. Keep this minimum aligned with the doctor
-// dependency registry. Reference: upstream CHANGES, "CHANGES FROM 1.7 TO 1.8":
-// https://github.com/tmux/tmux/blob/master/CHANGES
 func launcherStatusRun(startWait, realRun, tmuxBinary, socketPath, doneChannel, statusPath string) string {
 	signalDone := "TMUX= " + action.Quote(tmuxBinary) + " -S " + action.Quote(socketPath) +
 		" wait-for -S " + action.Quote(doneChannel)

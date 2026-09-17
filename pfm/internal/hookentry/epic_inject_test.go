@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"bytes"
@@ -14,7 +14,7 @@ import (
 )
 
 func TestEpicInjectDedupeFollowsSessionAndEpicRename(t *testing.T) {
-	setStoreTestJailForCommand(t)
+	setStoreTestJailForHookEntry(t)
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
 		t.Fatal(err)
@@ -28,61 +28,47 @@ func TestEpicInjectDedupeFollowsSessionAndEpicRename(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	payload, err := json.Marshal(map[string]string{
-		"transcript_path": filepath.Join(root, "transcript.jsonl"),
-		"cwd":             filepath.Join(root, "src", "nested"),
-	})
 	if err := os.MkdirAll(filepath.Join(root, "src", "nested"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	payload, err := json.Marshal(map[string]string{
+		"transcript_path": filepath.Join(root, "transcript.jsonl"), "cwd": filepath.Join(root, "src", "nested"),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	window := "E_alpha_chat"
-	oldIdentify := epicInjectIdentify
-	oldWindow := epicInjectWindowName
+	oldIdentify, oldWindow := epicInjectIdentify, epicInjectWindowName
 	epicInjectIdentify = func(context.Context) (resolve.Identity, error) {
 		return resolve.Identity{ID: "session-a", SocketPath: "/jail/cc", Pane: "%1"}, nil
 	}
-	epicInjectWindowName = func(context.Context, resolve.Identity) (string, error) {
-		return window, nil
-	}
-	t.Cleanup(func() {
-		epicInjectIdentify = oldIdentify
-		epicInjectWindowName = oldWindow
-	})
-
-	call := func() (string, int) {
+	epicInjectWindowName = func(context.Context, resolve.Identity) (string, error) { return window, nil }
+	t.Cleanup(func() { epicInjectIdentify, epicInjectWindowName = oldIdentify, oldWindow })
+	call := func() string {
 		var stdout, stderr bytes.Buffer
-		code := runEpicInject(bytes.NewReader(payload), &stdout, &stderr)
-		if code != 0 {
+		if code := EpicInject(bytes.NewReader(payload), &stdout, &stderr); code != 0 {
 			t.Fatalf("epic inject code=%d stderr=%q", code, stderr.String())
 		}
-		return stdout.String(), code
+		return stdout.String()
 	}
-	first, _ := call()
-	if !strings.Contains(first, "INJECTED EPIC alpha/manifest.md") ||
+	if first := call(); !strings.Contains(first, "INJECTED EPIC alpha/manifest.md") ||
 		!strings.Contains(first, "manifest alpha") {
 		t.Fatalf("first injection = %q", first)
 	}
-	second, _ := call()
-	if second != "" {
+	if second := call(); second != "" {
 		t.Fatalf("same epic injected twice: %q", second)
 	}
 	window = "E_beta_chat"
-	third, _ := call()
-	if !strings.Contains(third, "INJECTED EPIC beta/manifest.md") {
+	if third := call(); !strings.Contains(third, "INJECTED EPIC beta/manifest.md") {
 		t.Fatalf("renamed epic injection = %q", third)
 	}
 	window = "E_alpha_chat"
-	fourth, _ := call()
-	if fourth != "" {
+	if fourth := call(); fourth != "" {
 		t.Fatalf("renamed-back epic injected twice: %q", fourth)
 	}
 }
 
-func setStoreTestJailForCommand(t *testing.T) {
+func setStoreTestJailForHookEntry(t *testing.T) {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))

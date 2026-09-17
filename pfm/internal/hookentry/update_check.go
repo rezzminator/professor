@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"context"
@@ -13,7 +13,8 @@ import (
 
 const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
-func runInternalUpdateCheck(args []string, stderr io.Writer) int {
+// UpdateCheck refreshes the release notice cache for the picker.
+func UpdateCheck(args []string, stderr io.Writer) int {
 	flags := cli.NewFlagSet(
 		"internal update-check",
 		"usage: pfm internal update-check --cache PATH --current vX.Y.Z --url URL",

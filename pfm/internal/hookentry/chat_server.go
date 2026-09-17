@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"context"
@@ -6,17 +6,13 @@ import (
 	"io"
 	"path/filepath"
 
-	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/spawn"
 )
 
-// runInternalChatServer is `pfm internal chat-server <socket> <cwd> <run>`,
-// the shim's door to the one chat-server creator (spawn.TmuxSpawner.NewSession):
-// `cx` gets every door's options and a window named for the socket's engine.
-// An unreadable config fails CLOSED on the title only — the chat still opens,
-// the host keeps its title, and stderr says why.
-func runInternalChatServer(args []string, stderr io.Writer, runtime commandRuntime) int {
+// ChatServer is the shim's door to the one chat-server creator.
+func ChatServer(args []string, stderr io.Writer, runtime config.Runtime) int {
 	if len(args) != 3 || !filepath.IsAbs(args[1]) || args[2] == "" {
 		fmt.Fprintln(stderr, "usage: pfm internal chat-server <socket> <absolute-cwd> <run>")
 		return 2
@@ -37,7 +33,7 @@ func runInternalChatServer(args []string, stderr io.Writer, runtime commandRunti
 			"pfm internal chat-server: config unreadable, leaving the terminal title to the host: %v\n",
 			runtime.ConfigError,
 		)
-		titles = pfmconfig.TmuxTitles{Enabled: false}
+		titles = config.TmuxTitles{Enabled: false}
 	}
 	creator := spawn.TmuxSpawner{TmuxDir: runtime.Paths.TmuxDir, Titles: &titles}
 	if err := creator.NewSession(context.Background(), spawn.SessionSpec{

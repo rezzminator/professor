@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"context"
@@ -7,26 +7,14 @@ import (
 	"io"
 
 	"hostops/pfm/internal/cli"
-	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/index"
 )
 
-// runClearKill is the fail-open /clear hook for Claude's own
-// SessionEnd(reason=clear): the hook payload names the completed session id
-// directly. Codex has no equivalent hook wired anymore — its
-// SessionStart(source=clear) fires on the new session's FIRST TURN, by which
-// point every Codex chat on the host shares one app-server daemon pid, so the
-// hook could never say which pane cleared. fleet.ReconcileCodexPanes
-// replaces it: a gather pass reads each pane's own status line and detects
-// the clear from there. Every unrelated or malformed payload returns 0
-// without output.
-func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
-	flags := cli.NewFlagSet(
-		"internal clear-kill",
-		"usage: pfm internal clear-kill < hook-payload.json",
-		stderr,
-	)
+// ClearKill is the fail-open /clear hook for Claude's SessionEnd event.
+func ClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...config.Runtime) (exitCode int) {
+	flags := cli.NewFlagSet("internal clear-kill", "usage: pfm internal clear-kill < hook-payload.json", stderr)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
@@ -49,7 +37,6 @@ func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...
 	if hook.Event != "SessionEnd" || hook.Reason != "clear" {
 		return 0
 	}
-
 	database, manager, code := fleet.OpenKillManager(stderr, runtimes...)
 	if code != 0 {
 		fmt.Fprintln(stderr, "pfm internal clear-kill: store unavailable (fail-open)")
@@ -69,7 +56,7 @@ func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...
 	if !found {
 		return 0
 	}
-	runtime, runtimeErr := pfmconfig.OptionalRuntime(runtimes)
+	runtime, runtimeErr := config.OptionalRuntime(runtimes)
 	if runtimeErr != nil {
 		fmt.Fprintf(stderr, "pfm internal clear-kill: config unavailable (fail-open): %v\n", runtimeErr)
 		return 0
@@ -79,9 +66,7 @@ func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...
 		fmt.Fprintf(stderr, "pfm internal clear-kill: prepare transcript refresh (fail-open): %v\n", err)
 		return 0
 	}
-	if _, err := indexer.Run(ctx, index.Options{
-		PriorityCWD: transcript.CWD, PriorityOnly: true,
-	}); err != nil {
+	if _, err := indexer.Run(ctx, index.Options{PriorityCWD: transcript.CWD, PriorityOnly: true}); err != nil {
 		fmt.Fprintf(stderr, "pfm internal clear-kill: refresh transcript baseline (fail-open): %v\n", err)
 		return 0
 	}

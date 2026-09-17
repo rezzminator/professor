@@ -1,7 +1,6 @@
 cmd/pfm/attach_jail_test.go 1
 cmd/pfm/booting_row_jail_test.go 1
 cmd/pfm/chat_new_jail_test.go 1
-cmd/pfm/internal_chat_server_test.go 1
 cmd/pfm/namesync_titles_regression_test.go 1
 cmd/pfm/picker_cancel_jail_test.go 1
 e2e/install_e2e_test.go 2
@@ -11,6 +10,7 @@ internal/action/tmux_titles_jail_test.go 1
 internal/config/tmux_titles_render_jail_test.go 1
 internal/gather/tmux_jail_test.go 1
 internal/gather/tmuxprobe_test.go 1
+internal/hookentry/chat_server_test.go 1
 internal/inject/claude_stash_real_test.go 1
 internal/kill/tmux_jail_test.go 1
 internal/mcpserv/server_test.go 1

@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"encoding/json"
@@ -8,13 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/nudge"
 )
 
-// compactNudgePayload is the slice of the UserPromptSubmit hook JSON the
-// reminder needs. agent_id / agent_type only appear on a sub-agent's turn: the
-// milestone is the main chat's, never its helper's, so those are skipped.
 type compactNudgePayload struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
@@ -22,16 +19,14 @@ type compactNudgePayload struct {
 	AgentType      string `json:"agent_type"`
 }
 
-// runCompactNudge is the `pfm internal compact-nudge` hook: Claude only (it is
-// wired into Claude settings alone), main chat only, governed by the account's
-// claude.compactNudge policy.
-func runCompactNudge(stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
+// CompactNudge is the Claude-only main-chat compact reminder hook.
+func CompactNudge(stdin io.Reader, stdout, stderr io.Writer, runtime config.Runtime) int {
 	account := runtime.Config.AccountForConfigDir(os.Getenv("CLAUDE_CONFIG_DIR"))
 	prefs := runtime.Config.EffectiveClaude(account).CompactNudge
-	return compactNudge(stdin, stdout, stderr, runtime.Paths.SIDDir, prefs)
+	return compactNudgeWith(stdin, stdout, stderr, runtime.Paths.SIDDir, prefs)
 }
 
-func compactNudge(stdin io.Reader, stdout, stderr io.Writer, sidDir string, prefs pfmconfig.CompactNudge) int {
+func compactNudgeWith(stdin io.Reader, stdout, stderr io.Writer, sidDir string, prefs config.CompactNudge) int {
 	var payload compactNudgePayload
 	if err := json.NewDecoder(stdin).Decode(&payload); err != nil {
 		fmt.Fprintf(stderr, "pfm internal compact-nudge: decode hook payload: %v\n", err)

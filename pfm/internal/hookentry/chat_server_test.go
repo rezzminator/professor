@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"bytes"
@@ -10,13 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/paths"
 )
 
-// chatServerRuntime is a jailed runtime whose tmux directory is SHORT — a
-// long socket path is "File name too long", which reads like a tmux bug.
-func chatServerRuntime(t *testing.T, enabled bool) (commandRuntime, string) {
+func chatServerRuntime(t *testing.T, enabled bool) (config.Runtime, string) {
 	t.Helper()
 	root, err := os.MkdirTemp("/tmp", "pfmcs")
 	if err != nil {
@@ -24,16 +22,16 @@ func chatServerRuntime(t *testing.T, enabled bool) (commandRuntime, string) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
-	machine := pfmconfig.Defaults(root, nil)
+	machine := config.Defaults(root, nil)
 	machine.Tmux.Titles.Enabled = enabled
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
-	return commandRuntime{Config: machine, Paths: paths.Values{Home: root, TmuxDir: tmuxDir}}, tmuxDir
+	return config.Runtime{Config: machine, Paths: paths.Values{Home: root, TmuxDir: tmuxDir}}, tmuxDir
 }
 
-func runChatServer(t *testing.T, runtime commandRuntime, args ...string) (string, int) {
+func runChatServer(t *testing.T, runtime config.Runtime, args ...string) (string, int) {
 	t.Helper()
 	var stderr bytes.Buffer
-	code := runInternalChatServer(args, &stderr, runtime)
+	code := ChatServer(args, &stderr, runtime)
 	if code == 0 && len(args) == 3 {
 		socketPath := filepath.Join(runtime.Paths.TmuxDir, args[0])
 		t.Cleanup(func() {
@@ -56,10 +54,6 @@ func readChatServer(t *testing.T, socketPath string, arguments ...string) string
 	return strings.TrimSpace(string(output))
 }
 
-// The shim's `cx` creates its server through this door, so a Codex chat opened
-// from the shell is born by the same creator as every other door's: the
-// machine's title policy, automatic-rename off, and a window named for the
-// socket's engine.
 func TestChatServerDoorCreatesTheShellsServerThroughTheOneCreator(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -73,7 +67,7 @@ func TestChatServerDoorCreatesTheShellsServerThroughTheOneCreator(t *testing.T) 
 	for _, check := range []struct{ got, want string }{
 		{readChatServer(t, socketPath, "display-message", "-p", "-t", socket, "#{window_name}"), "Codex"},
 		{readChatServer(t, socketPath, "show-options", "-gv", "set-titles"), "on"},
-		{readChatServer(t, socketPath, "show-options", "-gv", "set-titles-string"), pfmconfig.TmuxTitlesString},
+		{readChatServer(t, socketPath, "show-options", "-gv", "set-titles-string"), config.TmuxTitlesString},
 		{readChatServer(t, socketPath, "show-window-options", "-gv", "automatic-rename"), "off"},
 	} {
 		if check.got != check.want {
@@ -82,8 +76,6 @@ func TestChatServerDoorCreatesTheShellsServerThroughTheOneCreator(t *testing.T) 
 	}
 }
 
-// Fail-CLOSED on the title only: a config pfm could not read still opens the
-// chat, leaves the host's terminal title alone, and says why on stderr.
 func TestChatServerDoorLeavesTheTitleToTheHostOnAnUnreadableConfig(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
@@ -93,19 +85,17 @@ func TestChatServerDoorLeavesTheTitleToTheHostOnAnUnreadableConfig(t *testing.T)
 	socket := "cx-1800000052-1-1"
 	stderr, code := runChatServer(t, runtime, socket, "/tmp", "sleep 120")
 	if code != 0 || !strings.Contains(stderr, "config unreadable") {
-		t.Fatalf("code=%d stderr=%q, want an opened chat and the reason named", code, stderr)
+		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
 	socketPath := filepath.Join(tmuxDir, socket)
 	if got := readChatServer(t, socketPath, "show-options", "-gv", "set-titles"); got != "off" {
-		t.Fatalf("set-titles = %q, want the host's untouched off", got)
+		t.Fatalf("set-titles = %q, want off", got)
 	}
 	if got := readChatServer(t, socketPath, "show-window-options", "-gv", "automatic-rename"); got != "off" {
-		t.Fatalf("automatic-rename = %q, want off regardless of the title policy", got)
+		t.Fatalf("automatic-rename = %q, want off", got)
 	}
 }
 
-// The socket is the engine marker and a path segment: one that names no
-// engine, or that would leave the tmux directory, is refused before tmux runs.
 func TestChatServerDoorRefusesWhatItCannotPlace(t *testing.T) {
 	runtime, _ := chatServerRuntime(t, true)
 	for _, args := range [][]string{
@@ -117,7 +107,7 @@ func TestChatServerDoorRefusesWhatItCannotPlace(t *testing.T) {
 		{"cx-1800000053-1-1", "/tmp", ""},
 	} {
 		if stderr, code := runChatServer(t, runtime, args...); code != 2 || stderr == "" {
-			t.Fatalf("args %q: code=%d stderr=%q, want a named refusal", args, code, stderr)
+			t.Fatalf("args %q: code=%d stderr=%q", args, code, stderr)
 		}
 	}
 }

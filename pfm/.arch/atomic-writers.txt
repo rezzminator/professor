@@ -1,8 +1,8 @@
-cmd/pfm/internal_launch.go
 internal/archive/archive.go
 internal/config/harvester_write.go
 internal/harvest/cache.go
 internal/harvest/media.go
 internal/harvest/public_store.go
 internal/harvestpy/provision.go
+internal/hookentry/launch.go
 internal/installer/launcher.go

@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"fmt"
@@ -8,9 +8,8 @@ import (
 	"hostops/pfm/internal/deps"
 )
 
-// Older sourced shims and already-rendered tmux commands still call this entry
-// point. Keep their argv/account behavior; native hooks now own prompt delivery.
-func runCodexLaunchCompatibility(args []string, stderr io.Writer) int {
+// CodexLaunch keeps older sourced shims and rendered tmux commands compatible.
+func CodexLaunch(args []string, stderr io.Writer) int {
 	if len(args) == 0 {
 		fmt.Fprintln(stderr, "usage: pfm internal codex-launch BINARY [arguments...]")
 		return 2
@@ -20,7 +19,7 @@ func runCodexLaunchCompatibility(args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "resolve Codex launcher: %v\n", err)
 		return 1
 	}
-	if err := launchExec(binary, append([]string{binary}, args[1:]...), os.Environ()); err != nil {
+	if err := LaunchExec(binary, append([]string{binary}, args[1:]...), os.Environ()); err != nil {
 		fmt.Fprintf(stderr, "launch Codex: %v\n", err)
 		return 1
 	}

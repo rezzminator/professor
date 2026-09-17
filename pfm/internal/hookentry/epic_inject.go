@@ -1,4 +1,4 @@
-package main
+package hookentry
 
 import (
 	"context"
@@ -41,7 +41,8 @@ var epicInjectWindowName = func(ctx context.Context, identity resolve.Identity) 
 	return (inject.TmuxInjector{}).WindowName(ctx, identity.SocketPath, target)
 }
 
-func runEpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
+// EpicInject injects an epic manifest once per session and epic name.
+func EpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
 	var payload epicInjectPayload
 	if err := json.NewDecoder(stdin).Decode(&payload); err != nil {
 		fmt.Fprintf(stderr, "pfm internal epic-inject: decode hook payload: %v\n", err)
@@ -112,8 +113,7 @@ func runEpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {
 	if seen {
 		return 0
 	}
-	marker := "INJECTED EPIC " + slug + "/manifest.md"
-	contextText := marker + "\n" + string(manifest)
+	contextText := "INJECTED EPIC " + slug + "/manifest.md\n" + string(manifest)
 	response := struct {
 		HookSpecificOutput struct {
 			HookEventName     string `json:"hookEventName"`

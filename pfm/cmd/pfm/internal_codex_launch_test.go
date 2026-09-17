@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"reflect"
 	"testing"
+
+	"hostops/pfm/internal/hookentry"
 )
 
 func TestCodexLaunchCompatibilityForAlreadyLoadedShells(t *testing.T) {
@@ -15,11 +17,11 @@ func TestCodexLaunchCompatibilityForAlreadyLoadedShells(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	previous := launchExec
-	t.Cleanup(func() { launchExec = previous })
+	previous := hookentry.LaunchExec
+	t.Cleanup(func() { hookentry.LaunchExec = previous })
 	sentinel := errors.New("exec intercepted")
 	called := false
-	launchExec = func(path string, args, env []string) error {
+	hookentry.LaunchExec = func(path string, args, env []string) error {
 		called = true
 		if path != binary ||
 			!reflect.DeepEqual(args, []string{binary, "-c", "printf untouched", "--", "literal prompt"}) ||

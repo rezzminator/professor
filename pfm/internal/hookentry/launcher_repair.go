@@ -1,14 +1,15 @@
-package main
+package hookentry
 
 import (
 	"fmt"
 	"io"
 
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/installer"
 )
 
-func runInternalLauncherRepair(args []string, stderr io.Writer, runtime commandRuntime) int {
+func LauncherRepair(args []string, stderr io.Writer, runtime config.Runtime) int {
 	flags := cli.NewFlagSet("internal launcher-repair", "usage: pfm internal launcher-repair", stderr)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code

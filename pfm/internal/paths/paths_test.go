@@ -1,6 +1,7 @@
 package paths
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -61,6 +62,51 @@ func TestResolveOverrides(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve() = %#v, want %#v", got, want)
+	}
+}
+
+func TestDevRepoGitDirMatchesSymlinkedWorktreeRoot(t *testing.T) {
+	physical := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "blueprint")
+	if err := os.Symlink(physical, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvDevRepoWorkTree, "  "+physical+"  ")
+	t.Setenv(EnvDevRepoGitDir, "  /fence/git-dir  ")
+
+	gitDir, ok := DevRepoGitDir(alias)
+	if !ok || gitDir != "/fence/git-dir" {
+		t.Fatalf("DevRepoGitDir(%q) = %q, %t; want physical match", alias, gitDir, ok)
+	}
+}
+
+func TestDevRepoGitDirLogsPhysicalResolutionFailureBeforeCleanFallback(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-worktree")
+	t.Setenv(EnvDevRepoWorkTree, missing)
+	t.Setenv(EnvDevRepoGitDir, "/fence/git-dir")
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStderr := os.Stderr
+	os.Stderr = writer
+	gitDir, ok := DevRepoGitDir(missing)
+	os.Stderr = previousStderr
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	logged, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if !ok || gitDir != "/fence/git-dir" {
+		t.Fatalf("DevRepoGitDir(%q) = %q, %t; want cleaned fallback match", missing, gitDir, ok)
+	}
+	if !strings.Contains(string(logged), missing) || !strings.Contains(string(logged), "falling back") {
+		t.Fatalf("stderr = %q, want path and fallback diagnostic", logged)
 	}
 }
 

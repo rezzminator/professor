@@ -107,7 +107,33 @@ func EnvOr(name, fallback string) string {
 func DevRepoGitDir(root string) (string, bool) {
 	workTree := strings.TrimSpace(os.Getenv(EnvDevRepoWorkTree))
 	gitDir := strings.TrimSpace(os.Getenv(EnvDevRepoGitDir))
-	return gitDir, gitDir != "" && filepath.Clean(workTree) == filepath.Clean(root)
+	if gitDir == "" {
+		return "", false
+	}
+	cleanWorkTree := filepath.Clean(workTree)
+	cleanRoot := filepath.Clean(root)
+	physicalWorkTree, workTreeErr := filepath.EvalSymlinks(cleanWorkTree)
+	physicalRoot, rootErr := filepath.EvalSymlinks(cleanRoot)
+	if workTreeErr == nil && rootErr == nil {
+		return gitDir, filepath.Clean(physicalWorkTree) == filepath.Clean(physicalRoot)
+	}
+	if workTreeErr != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"pfm: resolve fence worktree %s: %v; falling back to cleaned path comparison\n",
+			cleanWorkTree,
+			workTreeErr,
+		)
+	}
+	if rootErr != nil {
+		fmt.Fprintf(
+			os.Stderr,
+			"pfm: resolve blueprint root %s: %v; falling back to cleaned path comparison\n",
+			cleanRoot,
+			rootErr,
+		)
+	}
+	return gitDir, cleanWorkTree == cleanRoot
 }
 
 // Home resolves the operator home every pfm path hangs from: the PFM_HOME

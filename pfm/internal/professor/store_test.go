@@ -55,6 +55,39 @@ func TestResolveStoreDefaultsToSelfHostedUnknownWithoutGit(t *testing.T) {
 }
 
 func TestStoreSHAUsesFenceGitContractForLinkedWorktree(t *testing.T) {
+	linkedRoot, gitDir, want := linkedWorktreeStoreFixture(t)
+	t.Setenv(pfmpaths.EnvDevRepoWorkTree, "  "+linkedRoot+"  ")
+	t.Setenv(pfmpaths.EnvDevRepoGitDir, "  "+gitDir+"  ")
+
+	got, err := storeSHA(linkedRoot)
+	if err != nil {
+		t.Fatalf("storeSHA() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("storeSHA() = %q, want %q", got, want)
+	}
+}
+
+func TestStoreSHAUsesFenceGitContractForSymlinkedBlueprintRoot(t *testing.T) {
+	linkedRoot, gitDir, want := linkedWorktreeStoreFixture(t)
+	alias := filepath.Join(t.TempDir(), "blueprint")
+	if err := os.Symlink(linkedRoot, alias); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(pfmpaths.EnvDevRepoWorkTree, linkedRoot)
+	t.Setenv(pfmpaths.EnvDevRepoGitDir, gitDir)
+
+	got, err := storeSHA(alias)
+	if err != nil {
+		t.Fatalf("storeSHA() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("storeSHA() = %q, want %q", got, want)
+	}
+}
+
+func linkedWorktreeStoreFixture(t *testing.T) (string, string, string) {
+	t.Helper()
 	repository := filepath.Join(t.TempDir(), "repository")
 	runStoreGit(t, "init", "-q", repository)
 	runStoreGit(t, "-C", repository, "config", "user.email", "fixture.invalid")
@@ -76,16 +109,7 @@ func TestStoreSHAUsesFenceGitContractForLinkedWorktree(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(pfmpaths.EnvDevRepoWorkTree, "  "+linkedRoot+"  ")
-	t.Setenv(pfmpaths.EnvDevRepoGitDir, "  "+gitDir+"  ")
-
-	got, err := storeSHA(linkedRoot)
-	if err != nil {
-		t.Fatalf("storeSHA() error = %v", err)
-	}
-	if got != want {
-		t.Fatalf("storeSHA() = %q, want %q", got, want)
-	}
+	return linkedRoot, gitDir, want
 }
 
 func TestStoreSHAKeepsBrokenGitFileUnreadableWithoutFenceContract(t *testing.T) {

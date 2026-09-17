@@ -59,7 +59,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 	if err != nil {
 		return nil, err
 	}
-	sharedState := fleetdb.Open(context.Background(), runtime.Paths)
+	sharedState := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
 	resolver, err := resolve.New(nil, resolve.Binaries{
 		Values: map[pfmengine.ID]string{
 			pfmengine.Claude: runtime.ClaudeBinary,
@@ -183,14 +183,14 @@ func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, erro
 // reported as a contradiction, never smoothed into one of its two halves.
 func chatRowState(row compose.Row) string {
 	switch {
-	case row.Killed && chat.IsLive(row.Kind):
+	case row.Killed && row.Kind.IsAddressable():
 		return "killed-but-live"
 	case row.Kind == compose.Booting:
 		// A booting chat HAS a socket and already answers chat_inject by
 		// name. Excluding it made chat_ls report a chat that exists as
 		// simply absent for its first minute.
 		return "booting"
-	case chat.IsLive(row.Kind):
+	case row.Kind.IsAddressable():
 		return "idle"
 	default:
 		return "resumable"

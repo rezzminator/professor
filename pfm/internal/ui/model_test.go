@@ -223,7 +223,7 @@ func TestProfessorUpdateRowLeadsNewChatPersistsAcrossRefreshAndLaunchesChosenEng
 	}
 	model := NewModel(snapshot)
 	visible := model.VisibleRows()
-	if len(visible) < 2 || visible[0].Kind != compose.ProfessorUpdate || !isNewChatKind(visible[1].Kind) {
+	if len(visible) < 2 || visible[0].Kind != compose.ProfessorUpdate || !isNewChatActionKind(visible[1].Kind) {
 		t.Fatalf("visible order = %#v, want update immediately before merged new-chat row", visible)
 	}
 	model, command := applyKey(t, model, controlKey('x'))
@@ -595,7 +595,7 @@ func TestEnterOutcomeEveryKindAndLiveReboot(t *testing.T) {
 		// Reboot is ⌃O, never ⌃B: the picker always runs inside tmux, and C-b is
 		// tmux's prefix — it never reaches the picker.
 		reboot, rebootCommand := applyKey(t, model, controlKey('o'))
-		if isLive(row.Kind) {
+		if row.Kind.IsLiveSeat() {
 			if rebootCommand == nil ||
 				reboot.Result().Kind != OutcomeReboot ||
 				compose.RowKey(reboot.Result().Row) != compose.RowKey(row) {

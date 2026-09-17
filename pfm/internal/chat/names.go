@@ -106,7 +106,7 @@ func liveSeats(rows []compose.Row, requiredEngine string) []compose.Row {
 	seats := make([]compose.Row, 0, len(rows))
 	for index := range rows {
 		row := rows[index]
-		if !IsLive(row.Kind) || row.Killed || row.Socket == "" ||
+		if !row.Kind.IsAddressable() || row.Killed || row.Socket == "" ||
 			(row.PaneID == "" && row.SessionName == "") ||
 			(requiredEngine != "" && string(compose.EngineForKind(row.Kind)) != requiredEngine) {
 			continue

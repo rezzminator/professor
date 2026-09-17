@@ -132,7 +132,7 @@ func RosterCandidates(rows []compose.Row) []resolve.RosterCandidate {
 		candidates = append(candidates, resolve.RosterCandidate{
 			Name: row.Name, ID: row.ID, Socket: row.Socket,
 			Session: row.SessionName, Pane: row.PaneID,
-			Engine: string(compose.EngineForKind(row.Kind)), Live: IsLive(row.Kind),
+			Engine: string(compose.EngineForKind(row.Kind)), Live: row.Kind.IsAddressable(),
 		})
 	}
 	return candidates
@@ -155,15 +155,6 @@ func Match(rows []compose.Row, name string) (headless.Chat, bool, error) {
 	return headless.Chat{}, false, fmt.Errorf("resolved roster row disappeared from the same snapshot")
 }
 
-// IsLive reports whether a row kind is a running chat (booting included).
-func IsLive(kind compose.Kind) bool {
-	return kind == compose.LiveClaude ||
-		kind == compose.LiveCodex ||
-		kind == compose.LiveSplit ||
-		kind == compose.Agent ||
-		kind == compose.Booting
-}
-
 // FromRow is a composed row in the shape every verb operates on.
 func FromRow(row compose.Row) headless.Chat {
 	return headless.Chat{
@@ -175,7 +166,7 @@ func FromRow(row compose.Row) headless.Chat {
 		Socket:  row.Socket,
 		Session: row.SessionName,
 		Pane:    row.PaneID,
-		Live:    IsLive(row.Kind),
+		Live:    row.Kind.IsAddressable(),
 	}
 }
 

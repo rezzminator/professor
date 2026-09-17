@@ -68,6 +68,17 @@ func (kind Kind) String() string {
 	}
 }
 
+// IsLiveSeat reports whether kind is a running primary chat seat.
+func (kind Kind) IsLiveSeat() bool {
+	return kind == LiveClaude || kind == LiveCodex || kind == LiveSplit
+}
+
+// IsAddressable reports whether kind has a live process or pane that chat
+// verbs can address.
+func (kind Kind) IsAddressable() bool {
+	return kind.IsLiveSeat() || kind == Agent || kind == Booting
+}
+
 // View selects the default, all, or killed-only row set.
 type View uint8
 

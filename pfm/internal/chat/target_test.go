@@ -120,8 +120,8 @@ func TestFromRowCarriesTheRowAndItsLiveness(t *testing.T) {
 		t.Fatalf("FromRow() = %#v, want %#v", got, want)
 	}
 	for _, kind := range []compose.Kind{compose.ResumeClaude, compose.ResumeCodex} {
-		if IsLive(kind) {
-			t.Fatalf("IsLive(%v) = true for a resumable row", kind)
+		if kind.IsAddressable() {
+			t.Fatalf("IsAddressable(%v) = true for a resumable row", kind)
 		}
 	}
 }

@@ -499,7 +499,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// so tmux swallowed the keystroke before the picker ever saw it. Any
 	// replacement must stay clear of the tmux prefix.
 	case "ctrl+o":
-		if row, ok := model.selectedRow(); ok && isLive(row.Kind) {
+		if row, ok := model.selectedRow(); ok && row.Kind.IsLiveSeat() {
 			model.outcome = OutcomeReboot
 			model.outcomeRow = row
 			return model, tea.Quit
@@ -513,7 +513,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				model.outcomeEngine = model.newChatEngine
 				return model, tea.Quit
 			}
-			if model.mergeNewChat && isNewChatKind(row.Kind) {
+			if model.mergeNewChat && isNewChatActionKind(row.Kind) {
 				switch model.newChatEngine {
 				case pfmengine.Codex:
 					row.Kind = compose.NewCodex
@@ -537,7 +537,7 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			switch model.actionIndex {
 			case 1:
-				if isLive(row.Kind) {
+				if row.Kind.IsLiveSeat() {
 					model.outcome = OutcomeReboot
 					model.outcomeRow = row
 					return model, tea.Quit
@@ -552,14 +552,14 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				switch {
 				case row.Kind == compose.LiveSplit:
 					model.killStatus = "deactive refused — split live window; deactivate its chats individually"
-				case isLive(row.Kind) && row.Socket != "":
+				case row.Kind.IsLiveSeat() && row.Socket != "":
 					model.deactivate(row)
 				default:
 					model.killStatus = "deactive refused — " + row.Name + " is not running"
 				}
 				return model, nil
 			default:
-				if isNewChatKind(row.Kind) {
+				if isNewChatActionKind(row.Kind) {
 					row.Account = model.accountForKind(row.Kind)
 				}
 				model.outcome = OutcomeSelected
@@ -721,7 +721,7 @@ func batchCommands(commands ...tea.Cmd) tea.Cmd {
 
 func (model Model) navigateChatHorizontal(direction int) (tea.Model, tea.Cmd) {
 	if row, ok := model.selectedRow(); ok && model.mergeNewChat &&
-		(isNewChatKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
+		(isNewChatActionKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
 		model.newChatEngine = adjacentID(model.newChatEngine, direction, model.newChatEngines())
 		return model, nil
 	}
@@ -804,7 +804,7 @@ func (model *Model) cycleSelectedAccount() {
 		return
 	}
 	engine := compose.EngineForKind(row.Kind)
-	if model.mergeNewChat && isNewChatKind(row.Kind) {
+	if model.mergeNewChat && isNewChatActionKind(row.Kind) {
 		engine = model.newChatEngine
 	}
 	if engine == pfmengine.Codex {
@@ -953,7 +953,7 @@ func (model *Model) wakeSky() tea.Cmd {
 	return skyTickCmd(skyTickBaseInterval)
 }
 
-func liveSockets(rows []compose.Row) map[string]bool {
+func trackedChatSockets(rows []compose.Row) map[string]bool {
 	sockets := make(map[string]bool)
 	for index := range rows {
 		row := &rows[index]
@@ -1105,7 +1105,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 		}
 	}
 	if len(model.deactivatedSockets) != 0 {
-		live := liveSockets(rows)
+		live := trackedChatSockets(rows)
 		for socket := range model.deactivatedSockets {
 			if !live[socket] {
 				delete(model.deactivatedSockets, socket)
@@ -1114,7 +1114,7 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 		filtered := make([]compose.Row, 0, len(rows))
 		for index := range rows {
 			row := &rows[index]
-			if isLive(row.Kind) && model.deactivatedSockets[row.Socket] {
+			if row.Kind.IsLiveSeat() && model.deactivatedSockets[row.Socket] {
 				continue
 			}
 			filtered = append(filtered, *row)
@@ -1122,8 +1122,8 @@ func (model *Model) applyRefresh(snapshot Snapshot) {
 		rows = filtered
 	}
 	if model.skyEnabled {
-		before := liveSockets(model.rows)
-		after := liveSockets(rows)
+		before := trackedChatSockets(model.rows)
+		after := trackedChatSockets(rows)
 		eventTime := snapshot.NowNS
 		if eventTime == 0 {
 			eventTime = model.nowNS
@@ -1242,7 +1242,7 @@ func (model *Model) toggleKilled() {
 		Killed: !row.Killed,
 		Socket: row.Socket,
 		PaneID: row.PaneID,
-		Live:   isLive(row.Kind),
+		Live:   row.Kind.IsLiveSeat(),
 		Name:   row.Name,
 	}
 	// ⌃X lands NOW — the store write, and the kill when the row is live. It
@@ -1343,7 +1343,7 @@ func (model *Model) rebuildOrder() {
 		}
 		for index := range model.rows {
 			row := &model.rows[index]
-			if isNewChatKind(row.Kind) && model.visibleInView(*row) {
+			if isNewChatActionKind(row.Kind) && model.visibleInView(*row) {
 				model.order = append(model.order, index)
 				pinned[index] = true
 				newChatEmitted = true
@@ -1359,7 +1359,7 @@ func (model *Model) rebuildOrder() {
 			if !model.visibleInView(model.rows[index]) {
 				continue
 			}
-			if model.mergeNewChat && isNewChatKind(model.rows[index].Kind) {
+			if model.mergeNewChat && isNewChatActionKind(model.rows[index].Kind) {
 				if newChatEmitted {
 					continue
 				}
@@ -1395,7 +1395,7 @@ func (model *Model) rebuildOrder() {
 	}
 }
 
-func isNewChatKind(kind compose.Kind) bool {
+func isNewChatActionKind(kind compose.Kind) bool {
 	return kind == compose.NewClaude || kind == compose.NewCodex || kind == compose.NewOpenCode
 }
 
@@ -1428,7 +1428,7 @@ func nameGroupPrefix(name string) (string, bool) {
 // Agent, Booting, and every resumable kind — a resumable SOLO:BUILD groups
 // with its live namesakes exactly like a live row would.
 func isNameGroupRow(kind compose.Kind) bool {
-	return isLive(kind) || kind == compose.Agent || kind == compose.Booting ||
+	return kind.IsAddressable() ||
 		kind == compose.ResumeClaude || kind == compose.ResumeCodex || kind == compose.ResumeOpenCode
 }
 
@@ -1528,12 +1528,6 @@ func (model Model) selectedKey() string {
 
 func rowEngine(kind compose.Kind) pfmengine.ID {
 	return compose.EngineForKind(kind)
-}
-
-func isLive(kind compose.Kind) bool {
-	return kind == compose.LiveClaude ||
-		kind == compose.LiveCodex ||
-		kind == compose.LiveSplit
 }
 
 // Result returns the effects accumulated by the pure model. Cancelled reverts

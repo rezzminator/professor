@@ -116,7 +116,7 @@ func runChatReadExcerpt(args []string, stdout, stderr io.Writer, runtimes ...com
 	}
 	body := renderTranscript(entries)
 	if limit > 0 {
-		body = lastLines(body, limit)
+		body = lastTranscriptLines(body, limit)
 	}
 	if err := os.MkdirAll(filepath.Join("tmp", "chat-loads"), 0o700); err != nil {
 		fmt.Fprintf(stderr, "pfm chat read: create output directory: %v\n", err)
@@ -162,7 +162,7 @@ func renderTranscript(entries []transcript.Entry) string {
 	return output.String()
 }
 
-func lastLines(value string, count int) string {
+func lastTranscriptLines(value string, count int) string {
 	lines := strings.Split(value, "\n")
 	if len(lines) > count {
 		lines = lines[len(lines)-count:]
@@ -319,7 +319,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	found, elsewhere, killed := 0, 0, 0
 	for index := range scan.Output.Rows {
 		row := &scan.Output.Rows[index]
-		if !pfmchat.IsLive(row.Kind) {
+		if !row.Kind.IsAddressable() {
 			continue
 		}
 		if row.Killed || row.NameKilled {
@@ -513,7 +513,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		socket = override
 	}
 	titles := runtime.Config.Tmux.Titles
-	tmux := spawn.CommandTmux{TmuxDir: resolved.TmuxDir, Titles: &titles}
+	tmux := spawn.TmuxSpawner{TmuxDir: resolved.TmuxDir, Titles: &titles}
 	var branchWarnings []string
 	if engine == pfmengine.Codex {
 		spawned, spawnErr := spawn.Run(context.Background(), tmux, spawn.Request{
@@ -557,7 +557,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 			)
 		}
 	}
-	state := fleetdb.Open(context.Background(), resolved)
+	state := fleetdb.OpenSharedState(context.Background(), resolved)
 	recordErr := state.RecordBranchSeat(context.Background(), socket, *id, time.Now().Unix())
 	closeErr := state.Close()
 	if recordErr != nil || closeErr != nil {
@@ -610,7 +610,7 @@ func parentBranchRow(ctx context.Context, id string, runtimes ...commandRuntime)
 // forkCache1H inherits a live parent's observed TTL; otherwise it uses the
 // parent's account default because a dead row's false C1H is only "unobserved".
 func forkCache1H(parent compose.Row, parentFound bool, config pfmconfig.Config, account int) bool {
-	if parentFound && pfmchat.IsLive(parent.Kind) {
+	if parentFound && parent.Kind.IsAddressable() {
 		return parent.C1H
 	}
 	return config.EffectiveClaude(account).Cache1H

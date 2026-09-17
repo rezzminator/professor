@@ -64,7 +64,7 @@ Prepended to both briefs, `{CONTAINER}` / `{STABLE}` / `{NEW}` substituted:
 
 ## Brief B — update to the candidate
 
-`{UPDATE_PROMPT}` is the text `professorUpdatePrompt` (`pfm/cmd/pfm/update_notice_command.go`) returns for `{NEW}` at the candidate — the words a real adopter's update chat opens with from the `pfm ls` banner, so the rehearsal tests the product's own prompt, never a hand-tuned stand-in. A Stage B friction the prompt caused is fixed in that function.
+`{UPDATE_PROMPT}` is the text `professorUpdatePrompt` (`pfm/internal/picker/update_row.go`) returns for `{NEW}` at the candidate — the words a real adopter's update chat opens with from the `pfm ls` banner, so the rehearsal tests the product's own prompt, never a hand-tuned stand-in. A Stage B friction the prompt caused is fixed in that function.
 
 > A new Professor release, {NEW}, is published. The user opened the update chat from `pfm ls`'s **PROFESSOR UPDATE** banner in the source clone `~/.professor`, and it opens with the update prompt quoted at the end — work it as written, running its commands from `~/.professor` (`docker exec {CONTAINER} bash -lc 'cd ~/.professor && …'`), the directory that chat starts in. The user approves the overview you present: record the overview and its checklist as your first step's `note`, then continue past the approval gate. Where a step needs docs, read them at {NEW} (`git -C ~/.professor show {NEW}:INSTALL.md`, `docs/SETUP.md` at {NEW}) — the installed copy is the old release.
 >

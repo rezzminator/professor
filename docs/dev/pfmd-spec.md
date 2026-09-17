@@ -168,7 +168,7 @@ Each phase is gated by `daemon.<phase>.enabled` in `~/.config/pfm/pfm.config.jso
 ### Phase 5 — socket handoff on upgrade
 
 - **New:** `internal/daemon/handoff.go` (`PFMD_LISTEN_FD`, `net.FileListener`, candidate validation).
-- **Touched:** `Makefile:80,100-116` — `mcp-restart` becomes `daemon-restart`, `pkill` deleted; `cmd/pfm/update_command.go:510-540` — `applyUpdateInstall` calls the handoff; `internal/installer/installer.go:318-322` — the unconditional `systemctl restart` becomes a handoff with the restart as fallback.
+- **Touched:** `Makefile:80,100-116` — `mcp-restart` becomes `daemon-restart`, `pkill` deleted; `internal/update/run.go` — `applyUpdateInstall` calls the handoff; `internal/installer/installer.go:318-322` — the unconditional `systemctl restart` becomes a handoff with the restart as fallback.
 - **Tests:** `internal/daemon/handoff_jail_test.go` (a client holding an open connection across a handoff sees no `ECONNRESET`; the socket inode is unchanged), `handoff_badbinary_test.go` (a candidate that fails `--version` is never exec'd), `cmd/pfm/update_handoff_test.go`, and an `e2e/` case in the style of `e2e/install_e2e_test.go`.
 
 ## Open questions

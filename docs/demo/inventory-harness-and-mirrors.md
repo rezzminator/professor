@@ -41,11 +41,11 @@ Install:
 
 Verify (`pfm doctor`):
 
-- `pfm/cmd/pfm/harness_prompt_baselines.go:20` — `{sonnet: harness-original}, {opus: harness-opus}`.
-- `pfm/cmd/pfm/harness_prompt_doctor.go:39-43` `configuredHarnessCapture()`; `:60-99` `normalizeHarnessPrompt()`; `:117-161` `captureHarnessPrompt()` — headless Claude against a localhost sink returning HTTP 400, so no model inference occurs (README:47).
-- States, each named: BASELINE UNREADABLE (baselines.go:40) → "run pfm install"; BASELINE MALFORMED (:45,:50); BASELINE UNAVAILABLE (:58); CHECK FAILED (doctor.go:105, "drift unknown"); MATCHES (:110); DRIFT (:112, "harness instructions changed; review before re-pinning").
-- CLI entry `pfm/cmd/pfm/doctor.go:119` `printHarnessPromptDoctor` from `runDoctor()` at `:59`.
-- `pfm/internal/professor/store.go:40-56` `ResolveStore()`, `:58-85` `InspectStore()`, `:32-38` `HashTemplate()`; `baseline.go:39-57` `Load()`, `:85-103` `Save()` → `~/.professor/baseline.json` (`FilePin{TemplateHash, PinnedSHA, PinnedAt}`), written by `init_command.go:90-141`. Callers: `doctor.go:119`, `baselines.go:25`, `init_command.go:84`, `update_project.go:127-131`, `ask/ask.go:64`.
+- `pfm/internal/doctor/harness_prompt_baselines.go` — `{sonnet: harness-original}, {opus: harness-opus}`.
+- `pfm/internal/doctor/harness_prompt.go` defines `configuredHarnessCapture()`, `normalizeHarnessPrompt()`, and `captureHarnessPrompt()` — headless Claude against a localhost sink returning HTTP 400, so no model inference occurs (README:47).
+- States, each named: BASELINE UNREADABLE → "run pfm install"; BASELINE MALFORMED; BASELINE UNAVAILABLE; CHECK FAILED ("drift unknown"); MATCHES; DRIFT ("harness instructions changed; review before re-pinning") in `pfm/internal/doctor/harness_prompt_baselines.go`.
+- CLI entry `pfm/internal/doctor/doctor.go` calls `printHarnessPromptDoctor` from `Run()`.
+- `pfm/internal/professor/store.go` defines `ResolveStore()`, `InspectStore()`, and `HashTemplate()`; `baseline.go` defines `Load()` and `Save()` → `~/.professor/baseline.json` (`FilePin{TemplateHash, PinnedSHA, PinnedAt}`), written by `scaffold.go`. Callers: `internal/doctor/doctor.go`, `internal/doctor/harness_prompt_baselines.go`, `internal/professor/scaffold.go`, `internal/professor/project.go`, `ask/ask.go`.
 
 ### A.5 What `.model` / `.sha256` pin (hash re-verified live: both MATCH)
 

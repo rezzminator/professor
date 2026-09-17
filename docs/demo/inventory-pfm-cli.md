@@ -45,9 +45,9 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 | `pfm index` | Refresh the transcript index (incremental by default) | `pfm/cmd/pfm/main.go:66-67`, `pfm/cmd/pfm/commands.go:612` (`func runIndex`) | Yes — purpose-built incremental indexer replacing ~300 forks/refresh of the predecessor zsh tool |
 | `pfm index --full` | Reparse every indexed file | `pfm/cmd/pfm/commands.go:618` | No — variant |
 | `pfm index --progress` | Report start/elapsed time to stderr | `pfm/cmd/pfm/commands.go:619` | No — variant |
-| `pfm doctor` | Runs one unified suite of ~30 environment/fleet-health checks (config, engine binaries, MCP daemon, PATH, pre-push hook, harness-prompt baseline, spawn-audit, tmux-titles, launcher, host overlay, deps, git hooks, DB version/integrity/counts/WAL, process table, project roots, professor repo state, Codex pane bindings, crumb dir, harvestpy runtime, harvest cache) — no user-selectable subcommands | `pfm/cmd/pfm/main.go:68-69`, `pfm/cmd/pfm/doctor.go:59-303` | Yes — single consolidated multi-subsystem health gate spanning Go+shell+DB+process-table |
-| `pfm doctor --verbose` | Write raw dependency-probe output under `tmp/` | `pfm/cmd/pfm/doctor.go:64-66` | No — verbosity flag |
-| `pfm doctor --skip-harvest` | Exclude the optional harvestpy runtime from the health pass | `pfm/cmd/pfm/doctor.go:64-66` | No — scoping flag |
+| `pfm doctor` | Runs one unified suite of ~30 environment/fleet-health checks (config, engine binaries, MCP daemon, PATH, pre-push hook, harness-prompt baseline, spawn-audit, tmux-titles, launcher, host overlay, deps, git hooks, DB version/integrity/counts/WAL, process table, project roots, professor repo state, Codex pane bindings, crumb dir, harvestpy runtime, harvest cache) — no user-selectable subcommands | `pfm/cmd/pfm/main.go`, `pfm/internal/doctor/doctor.go` | Yes — single consolidated multi-subsystem health gate spanning Go+shell+DB+process-table |
+| `pfm doctor --verbose` | Write raw dependency-probe output under `tmp/` | `pfm/internal/doctor/doctor.go` | No — verbosity flag |
+| `pfm doctor --skip-harvest` | Exclude the optional harvestpy runtime from the health pass | `pfm/internal/doctor/doctor.go` | No — scoping flag |
 | `pfm config` | Initialize, inspect, or validate machine configuration | `pfm/cmd/pfm/main.go:70-71` | No — standard config subcommand family |
 | `pfm config init [--force]` | Write config + harvester files | `pfm/cmd/pfm/config_command.go:22` | No |
 | `pfm config show` | Display resolved configuration with sources | `pfm/cmd/pfm/config_command.go:24` | No |
@@ -69,13 +69,13 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 | `pfm usage-hook` | The fail-open usage-limit prompt hook | `pfm/cmd/pfm/main.go:84-85`, `pfm/cmd/pfm/statusline_command.go:149` (`func runUsageHook`) | No — hook-only, fail-open safety pattern is not itself novel |
 | `pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine NAME] [--skip-themes] [--config-dir DIR]` | Stages the self-contained host integration (binaries, launch agent/service, optional VS Code extension) | `pfm/cmd/pfm/main.go:86-87`, `pfm/cmd/pfm/install_command.go:38-43` | Yes — self-contained multi-surface installer (binary+shim+launchd/systemd+VS Code) in one command |
 | `pfm uninstall [--config-dir DIR]` | Reverses every install step, preserving config directories | `pfm/cmd/pfm/main.go:88-89`, `pfm/cmd/pfm/uninstall_command.go:9-30` | No — symmetric teardown of `install` |
-| `pfm update` | Upgrades the pfm binary and harvestpy sidecar (`--to vX.Y.Z`) | `pfm/cmd/pfm/main.go:90-91`, `pfm/cmd/pfm/update_command.go:101-150` | No — standard self-update |
-| `pfm update check [--root DIR] [--json]` | Scans an adopter project against its pinned baseline: UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED | `pfm/cmd/pfm/update_project.go:70-91` | Yes — three-tier template-baseline reconciliation report, not a generic diff |
-| `pfm update pin <local>...\|--all [--template T] [--root DIR]` | Pins local/newly-adopted files to the current blueprint snapshot | `pfm/cmd/pfm/update_project.go:130+` | Yes — per-file adoption gate tied to a template baseline |
-| `pfm update ignore <template>... [--undo] [--root DIR]` | Adds/removes templates from a project's ignore list (skips future comparisons) | `pfm/cmd/pfm/update_project.go:380+` | Yes — template-level opt-out from the update-check surface |
-| `pfm update drop <local>... [--root DIR]` | Deletes a file's baseline record so it stops being tracked for updates | `pfm/cmd/pfm/update_project.go:280+` | Yes — asymmetric "forget" distinct from ignore |
-| `pfm update adopt [--root DIR] [--at REF]` | Bootstraps a new project baseline from the store's HEAD or an explicit ref (for installs that predate scaffolding) | `pfm/cmd/pfm/update_project.go:330+` | Yes — retroactive baseline capture |
-| `pfm init [dir] [--force]` | Scaffolds project templates once and pins their baseline | `pfm/cmd/pfm/main.go:92-93`, `pfm/cmd/pfm/init_command.go:44-87` | No — one-time scaffold command, common pattern (framework-specific content is novel, the verb shape is not) |
+| `pfm update` | Upgrades the pfm binary and harvestpy sidecar (`--to vX.Y.Z`) | `pfm/cmd/pfm/main.go`, `pfm/internal/update/run.go` | No — standard self-update |
+| `pfm update check [--root DIR] [--json]` | Scans an adopter project against its pinned baseline: UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED | `pfm/internal/professor/project.go` | Yes — three-tier template-baseline reconciliation report, not a generic diff |
+| `pfm update pin <local>...\|--all [--template T] [--root DIR]` | Pins local/newly-adopted files to the current blueprint snapshot | `pfm/internal/professor/project.go` | Yes — per-file adoption gate tied to a template baseline |
+| `pfm update ignore <template>... [--undo] [--root DIR]` | Adds/removes templates from a project's ignore list (skips future comparisons) | `pfm/internal/professor/project.go` | Yes — template-level opt-out from the update-check surface |
+| `pfm update drop <local>... [--root DIR]` | Deletes a file's baseline record so it stops being tracked for updates | `pfm/internal/professor/project.go` | Yes — asymmetric "forget" distinct from ignore |
+| `pfm update adopt [--root DIR] [--at REF]` | Bootstraps a new project baseline from the store's HEAD or an explicit ref (for installs that predate scaffolding) | `pfm/internal/professor/project.go` | Yes — retroactive baseline capture |
+| `pfm init [dir] [--force]` | Scaffolds project templates once and pins their baseline | `pfm/cmd/pfm/main.go`, `pfm/cmd/pfm/init_command.go`, `pfm/internal/professor/scaffold.go` | No — one-time scaffold command, common pattern (framework-specific content is novel, the verb shape is not) |
 | `pfm whoami [--json] [--label]` | Prints this chat's own tmux session name/identity | `pfm/cmd/pfm/main.go:94-95`, `pfm/cmd/pfm/whoami_command.go:24` | Yes — self-identity disclosure for a process inside a live tmux/engine session |
 | `pfm issues [--all] [--json]` | Lists servicedesk complaints filed through the `issue_servicedesk` MCP tool | `pfm/cmd/pfm/main.go:96-97`, `pfm/cmd/pfm/issues_command.go:25` | Yes — durable complaint ledger fed by an MCP tool, read back via CLI |
 | `pfm mcp` (bare) | Alias for `pfm mcp chat serve` (preserves historical bare-`pfm mcp` invocation) | `pfm/cmd/pfm/main.go:98-99`, `main.go:124-135` | No — back-compat alias |
@@ -107,7 +107,7 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 | `pfm internal compact-nudge` | Compact-milestone reminder hook (stdin-driven) | `pfm/cmd/pfm/main.go:420-421`, `pfm/cmd/pfm/compact_nudge_command.go` | No — hook-only reminder |
 | `pfm internal reload-run` | Worker entry for a queued chat reload (backs `pfm chat reload`) | `pfm/cmd/pfm/main.go:423-424` (`runChatReloadWorkerWithRuntime`) | No — internal worker for a user-facing verb already counted under `chat reload` |
 | `pfm internal then --socket --target [--self] --steer TEXT...` | Detached waiter that chains follow-up steers once a pane settles | `pfm/cmd/pfm/main.go:426-427`, `pfm/cmd/pfm/then_command.go:32` | Yes — event-driven async action chaining tied to pane completion |
-| `pfm internal update-check --cache --current --url` | Checks a release endpoint and caches the result for a background update notice | `pfm/cmd/pfm/main.go:429-430`, `pfm/cmd/pfm/update_notice_command.go` | No — standard background update-check plumbing |
+| `pfm internal update-check --cache --current --url` | Checks a release endpoint and caches the result for a background update notice | `pfm/cmd/pfm/main.go`, `pfm/internal/hookentry/update_check.go` | No — standard background update-check plumbing |
 | `pfm internal primary-get` | Prints the current primary account | `pfm/cmd/pfm/main.go:432-435` | No — plumbing read |
 | `pfm internal chat-server <socket> <cwd> <run>` | Creates a bare tmux session for a chat (platform-specific wiring) | `pfm/cmd/pfm/main.go:436-437`, `pfm/cmd/pfm/chat_server_command.go` | No — session bootstrap plumbing |
 | `pfm internal stale [args]` | Delegates to the `stale` package's own CLI | `pfm/cmd/pfm/main.go:439-440` | UNKNOWN — `stale.Run` implementation not in this trace's file boundary; not further resolved |
@@ -222,20 +222,20 @@ EDGE = contains one or more capabilities, quoted by a tracer. NOT-MINE = in scop
 - pfm/cmd/pfm/codex_launch_compat.go — EDGE (`pfm internal codex-launch`)
 - pfm/cmd/pfm/compact_nudge_command.go — EDGE (`pfm internal compact-nudge`)
 - pfm/cmd/pfm/config_command.go — EDGE (`pfm config init/show/validate`)
-- pfm/cmd/pfm/doctor.go — EDGE (`pfm doctor`, 30 checks)
+- pfm/internal/doctor/doctor.go — EDGE (`pfm doctor`, 30 checks)
 - pfm/cmd/pfm/dream_command.go — EDGE (`pfm dream night/apply/inspect/morning/migrate-anchors/restamp/hook`)
 - pfm/cmd/pfm/engines.go — NOT-MINE (no independent capability found by any tracer)
 - pfm/cmd/pfm/epic_inject_command.go — EDGE (`pfm internal epic-inject`)
 - pfm/cmd/pfm/exit_close_command.go — EDGE (`pfm internal exit-close`)
 - pfm/cmd/pfm/exit_intercept_command.go — EDGE (`pfm internal exit-intercept`)
 - pfm/cmd/pfm/explore_deny_command.go — EDGE (`pfm internal explore-deny`)
-- pfm/cmd/pfm/harness_prompt_baselines.go — EDGE (doctor's harness-prompt check helper, no independent CLI verb)
-- pfm/cmd/pfm/harness_prompt_doctor.go — EDGE (doctor's harness-prompt check helper, no independent CLI verb)
+- pfm/internal/doctor/harness_prompt_baselines.go — EDGE (doctor's harness-prompt check helper, no independent CLI verb)
+- pfm/internal/doctor/harness_prompt.go — EDGE (doctor's harness-prompt check helper, no independent CLI verb)
 - pfm/cmd/pfm/harvest_command.go — EDGE (`pfm harvest`, `pfm harvest ask`)
 - pfm/cmd/pfm/headless_command.go — EDGE (chat verb forwarding switch: new/last/status/stream/inject/self-compact/watch/modal/whoami/reload/ask/keys)
 - pfm/cmd/pfm/headless_exec_command.go — EDGE (`pfm headless` exec flags)
 - pfm/cmd/pfm/heal_command.go — EDGE (`pfm heal`)
-- pfm/cmd/pfm/init_command.go — EDGE (`pfm init`)
+- pfm/cmd/pfm/init_command.go + pfm/internal/professor/scaffold.go — EDGE (`pfm init`)
 - pfm/cmd/pfm/inject_resume.go — NOT-MINE (helper, no independent dispatcher found)
 - pfm/cmd/pfm/install_command.go — EDGE (`pfm install`, all 6 flags verified verbatim)
 - pfm/cmd/pfm/issues_command.go — EDGE (`pfm issues`)
@@ -257,9 +257,9 @@ EDGE = contains one or more capabilities, quoted by a tracer. NOT-MINE = in scop
 - pfm/cmd/pfm/then_command.go — EDGE (`pfm internal then`)
 - pfm/cmd/pfm/tmux_titles_doctor.go — EDGE (doctor's tmux-titles check helper, no independent CLI verb)
 - pfm/cmd/pfm/uninstall_command.go — EDGE (`pfm uninstall`)
-- pfm/cmd/pfm/update_command.go — EDGE (`pfm update`)
-- pfm/cmd/pfm/update_notice_command.go — EDGE (`pfm internal update-check`)
-- pfm/cmd/pfm/update_project.go — EDGE (`pfm update check/pin/ignore/drop/adopt`)
+- pfm/internal/update/run.go — EDGE (`pfm update`)
+- pfm/internal/hookentry/update_check.go + pfm/internal/picker/update_row.go — EDGE (`pfm internal update-check`)
+- pfm/internal/professor/project.go — EDGE (`pfm update check/pin/ignore/drop/adopt`)
 - pfm/cmd/pfm/whoami_command.go — EDGE (`pfm whoami`)
 - pfm/README.md — ABSENT from repo (not a hole; confirmed nonexistent)
 - pfm/internal/harvest/README.md — EDGE (read fully; cross-referenced harvester MCP tool docs)

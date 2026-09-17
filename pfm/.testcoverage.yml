@@ -6,7 +6,7 @@ local-prefix: hostops/pfm
 threshold:
   file: 0
   package: 52
-  total: 77
+  total: 77.6
 exclude:
   paths:
     - ^internal/installer/assets/   # staged shell/JS/Python, not Go

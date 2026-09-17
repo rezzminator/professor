@@ -15,8 +15,8 @@ import (
 func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	home := t.TempDir()
 	values := paths.Values{
-		Home:     home,
-		SharedDB: filepath.Join(home, ".cc", "fleet.db"),
+		Home:    home,
+		FleetDB: filepath.Join(home, ".cc", "fleet.db"),
 	}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
@@ -49,8 +49,8 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	bareValues := paths.Values{
-		Home:     bare,
-		SharedDB: filepath.Join(blocked, "fleet.db"),
+		Home:    bare,
+		FleetDB: filepath.Join(blocked, "fleet.db"),
 	}
 	if err := SetPrimaryAccount(bareValues, machine, 2); err != nil {
 		t.Fatalf("fallback SetPrimaryAccount() = %v", err)

@@ -56,7 +56,7 @@ func reapJail(t *testing.T) string {
 	t.Setenv("PFM_CLAUDE_ROOTS", accountRoot)
 	t.Setenv("PFM_CODEX_ROOT", filepath.Join(root, "codex"))
 	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_TMUX_CONF", "/dev/null")
 	// The reaper reads the REAL /proc here on purpose: the jail's panes are
 	// real processes, and the non-chat guard is only proved by a real process

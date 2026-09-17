@@ -546,8 +546,8 @@ func TestAsyncCallerRefreshStormPreservesCursorAndGoroutines(t *testing.T) {
 func TestInternalPrimarySetGetDispatch(t *testing.T) {
 	home := t.TempDir()
 	values := paths.Values{
-		Home:     home,
-		SharedDB: filepath.Join(home, ".cc", "fleet.db"),
+		Home:    home,
+		FleetDB: filepath.Join(home, ".cc", "fleet.db"),
 	}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
@@ -636,7 +636,7 @@ func TestPrimaryWritebackIgnoresTheUnsetSentinel(t *testing.T) {
 // primaryWriteback's whole point is keeping that call from ever happening.
 func TestPrimaryWritebackSentinelNeverHitsTheRosterCheck(t *testing.T) {
 	home := t.TempDir()
-	values := paths.Values{Home: home, SharedDB: filepath.Join(home, ".cc", "fleet.db")}
+	values := paths.Values{Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db")}
 	machine := config.Defaults(home, []string{
 		filepath.Join(home, ".cc", "1", "projects"),
 		filepath.Join(home, ".cc", "2", "projects"),

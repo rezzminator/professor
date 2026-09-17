@@ -161,11 +161,11 @@ func TestPrepareSourceRepoStagesEvenAReadyRepository(t *testing.T) {
 func TestCopySourceTreePreservesInternalSymlinks(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "source")
 	target := filepath.Join(t.TempDir(), "target")
-	linkedDirectory := filepath.Join(source, ".claude", "skills", "fixture")
-	if err := os.MkdirAll(linkedDirectory, 0o700); err != nil {
+	linkedDir := filepath.Join(source, ".claude", "skills", "fixture")
+	if err := os.MkdirAll(linkedDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(linkedDirectory, "SKILL.md"), []byte("fixture\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(linkedDir, "SKILL.md"), []byte("fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(source, ".codex", "skills", "fixture")
@@ -636,9 +636,9 @@ func copySourceTreeWithGit(source, target, workTree, gitDir string) error {
 	return nil
 }
 
-func runGitFixture(t *testing.T, directory string, args ...string) {
+func runGitFixture(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	result := runGit(directory, args...)
+	result := runGit(dir, args...)
 	if result.err != nil {
 		t.Fatalf(
 			"source fixture git %s: %v\n%s",
@@ -791,7 +791,7 @@ func (h *e2eHarness) environment(home string) []string {
 		"HOME":                  home,
 		"PFM_HOME":              home,
 		"PFM_DB":                filepath.Join(home, ".local", "state", "pfm", "fleet.db"),
-		"PFM_SHARED_DB":         filepath.Join(home, ".cc", "fleet.db"),
+		"PFM_FLEET_DB":          filepath.Join(home, ".cc", "fleet.db"),
 		"PFM_SID_DIR":           filepath.Join(home, "sid"),
 		"PFM_CLAUDE_ROOTS":      strings.Join(roots, string(os.PathListSeparator)),
 		"PFM_CODEX_ROOT":        filepath.Join(home, ".codex"),
@@ -1514,9 +1514,9 @@ func runTool(home, name string, args ...string) commandResult {
 	return commandResult{stdout: stdout.String(), stderr: stderr.String(), err: err}
 }
 
-func runGit(directory string, args ...string) commandResult {
+func runGit(dir string, args ...string) commandResult {
 	command := exec.Command("git", args...)
-	command.Dir = directory
+	command.Dir = dir
 	command.Env = appendCleanEnv(os.Environ(), map[string]string{"GIT_CONFIG_NOSYSTEM": "1"})
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout

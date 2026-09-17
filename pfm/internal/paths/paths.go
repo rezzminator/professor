@@ -14,13 +14,13 @@ import (
 
 const (
 	EnvDB          = "PFM_DB"
-	EnvSharedDB    = "PFM_SHARED_DB"
+	EnvFleetDB     = "PFM_FLEET_DB"
 	EnvSIDDir      = "PFM_SID_DIR"
 	EnvClaudeRoots = "PFM_CLAUDE_ROOTS"
-	EnvCodexRoot   = "PFM_CODEX_ROOT"
-	// EnvOpencodeRoot jails OpenCode's data home (~/.local/share/opencode),
+	EnvCodexHome   = "PFM_CODEX_ROOT"
+	// EnvOpenCodeRoot jails OpenCode's data home (~/.local/share/opencode),
 	// the directory holding its SQLite session store opencode.db.
-	EnvOpencodeRoot = "PFM_OPENCODE_ROOT"
+	EnvOpenCodeRoot = "PFM_OPENCODE_ROOT"
 	EnvTmuxDir      = "PFM_TMUX_DIR"
 	EnvHome         = "PFM_HOME"
 	// EnvRealHome lets the rare test that MUST see the operator's own
@@ -76,15 +76,15 @@ func EnsureTmuxDir(directory string) error {
 // Values contains the filesystem locations used by pfm.
 //
 // DB is this binary's own derived cache (transcripts, rollouts, names) and
-// nothing else reads it. SharedDB is the authoritative operator state: kills,
+// nothing else reads it. FleetDB is the authoritative operator state: kills,
 // teammates, and the primary account.
 type Values struct {
-	DB       string
-	SharedDB string
-	SIDDir   string
-	Roots    map[pfmengine.ID][]string
-	TmuxDir  string
-	Home     string
+	DB      string
+	FleetDB string
+	SIDDir  string
+	Roots   map[pfmengine.ID][]string
+	TmuxDir string
+	Home    string
 	// ArchiveDir is ~/.claude-archive: where archived transcripts and rollouts
 	// go, with the manifest that puts them back. It is defined relative to Home.
 	ArchiveDir string
@@ -157,9 +157,9 @@ func Resolve() (Values, error) {
 
 	return Values{
 		DB: EnvOr(EnvDB, filepath.Join(home, ".local", "state", "pfm", "fleet.db")),
-		// The shared database defaults to $HOME/.cc/fleet.db. PFM_DB already
-		// overrides the private cache, so the shared handle gets a distinct name.
-		SharedDB:   EnvOr(EnvSharedDB, filepath.Join(home, ".cc", "fleet.db")),
+		// The fleet database defaults to $HOME/.cc/fleet.db. PFM_DB already
+		// overrides the private cache, so the fleet handle gets a distinct name.
+		FleetDB:    EnvOr(EnvFleetDB, filepath.Join(home, ".cc", "fleet.db")),
 		SIDDir:     EnvOr(EnvSIDDir, filepath.Join(defaultTmpDir, "cc-sid")),
 		Roots:      roots,
 		TmuxDir:    EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),

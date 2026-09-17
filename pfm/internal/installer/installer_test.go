@@ -354,9 +354,9 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	writeFixture(t, filepath.Join(config, ".cc-ls-hidden"), "killed-b\nkilled-a\n")
 	writeFixture(t, filepath.Join(config, "bin", "cc-kill.sh"), "retired\n")
 	writeFixture(t, filepath.Join(home, ".zshrc"), "alias keep=yes\nsource /old/cc-fleet.zsh\n")
-	unitDirectory := filepath.Join(home, ".config", "systemd", "user")
-	legacyPathWant := filepath.Join(unitDirectory, "default.target.wants", "cc-name-sync.path")
-	legacyTimerWant := filepath.Join(unitDirectory, "timers.target.wants", "cc-name-sync.timer")
+	unitDir := filepath.Join(home, ".config", "systemd", "user")
+	legacyPathWant := filepath.Join(unitDir, "default.target.wants", "cc-name-sync.path")
+	legacyTimerWant := filepath.Join(unitDir, "timers.target.wants", "cc-name-sync.timer")
 	for _, target := range []string{legacyPathWant, legacyTimerWant} {
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			t.Fatal(err)
@@ -368,7 +368,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	bbTarget := filepath.Join(config, "commands", "bb.md")
 	writeFixture(t, bbTarget, "operator copy\n")
 	seed := fleetdb.Open(context.Background(), paths.Values{
-		Home: home, SharedDB: filepath.Join(home, ".cc", "fleet.db"),
+		Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db"),
 	})
 	if err := seed.Kill(context.Background(), "killed-a", 99); err != nil {
 		t.Fatal(err)
@@ -475,13 +475,13 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		)
 		assertLink(
 			t,
-			filepath.Join(unitDirectory, "default.target.wants", "pfm-name-sync.path"),
-			filepath.Join(unitDirectory, "pfm-name-sync.path"),
+			filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
+			filepath.Join(unitDir, "pfm-name-sync.path"),
 		)
 		assertLink(
 			t,
-			filepath.Join(unitDirectory, "timers.target.wants", "pfm-name-sync.timer"),
-			filepath.Join(unitDirectory, "pfm-name-sync.timer"),
+			filepath.Join(unitDir, "timers.target.wants", "pfm-name-sync.timer"),
+			filepath.Join(unitDir, "pfm-name-sync.timer"),
 		)
 	}
 	// The predecessor's enablement links are a systemd concept; a launchd host
@@ -581,7 +581,7 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 	}
 
 	state := fleetdb.Open(context.Background(), paths.Values{
-		Home: home, SharedDB: filepath.Join(home, ".cc", "fleet.db"),
+		Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db"),
 	})
 	killed, err := state.KilledAt(context.Background())
 	closeErr := state.Close()
@@ -649,8 +649,8 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		}
 	}
 	for _, removed := range []string{
-		filepath.Join(unitDirectory, "default.target.wants", "pfm-name-sync.path"),
-		filepath.Join(unitDirectory, "timers.target.wants", "pfm-name-sync.timer"),
+		filepath.Join(unitDir, "default.target.wants", "pfm-name-sync.path"),
+		filepath.Join(unitDir, "timers.target.wants", "pfm-name-sync.timer"),
 	} {
 		if _, err := os.Lstat(removed); !os.IsNotExist(err) {
 			t.Fatalf("uninstall left enablement link at %s: %v", removed, err)

@@ -77,7 +77,7 @@ func TestDegradedStoreRejectsCommsWritesAndReads(t *testing.T) {
 	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	state := Open(context.Background(), paths.Values{SharedDB: filepath.Join(blocker, "fleet.db")})
+	state := Open(context.Background(), paths.Values{FleetDB: filepath.Join(blocker, "fleet.db")})
 	t.Cleanup(func() { _ = state.Close() })
 
 	if err := state.RecordComms(

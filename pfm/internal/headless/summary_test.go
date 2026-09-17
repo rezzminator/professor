@@ -110,7 +110,7 @@ func summaryTestStore(t *testing.T) (string, *store.Store) {
 	root := t.TempDir()
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvSharedDB, filepath.Join(root, "state", "shared.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "state", "shared.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	database, err := store.Open()

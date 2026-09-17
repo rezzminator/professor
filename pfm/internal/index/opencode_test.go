@@ -14,10 +14,10 @@ import (
 	"hostops/pfm/internal/store"
 )
 
-// seedOpencodeStore builds the OpenCode v1.14.30 store shape from its published
+// seedOpenCodeStore builds the OpenCode v1.14.30 store shape from its published
 // Drizzle schema. Session usage lived only in assistant-message JSON in that
 // release; later OpenCode versions added denormalized session summary columns.
-func seedOpencodeStore(t *testing.T, root string) {
+func seedOpenCodeStore(t *testing.T, root string) {
 	t.Helper()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir opencode root: %v", err)
@@ -162,11 +162,11 @@ CREATE INDEX part_session_idx ON part (session_id);`
 	}
 }
 
-func TestReadOpencodeSessionsReadsTheFixtureStore(t *testing.T) {
+func TestReadOpenCodeSessionsReadsTheFixtureStore(t *testing.T) {
 	root := t.TempDir()
-	seedOpencodeStore(t, root)
+	seedOpenCodeStore(t, root)
 
-	sessions, err := ReadOpencodeSessions(context.Background(), root)
+	sessions, err := ReadOpenCodeSessions(context.Background(), root)
 	if err != nil {
 		t.Fatalf("read sessions: %v", err)
 	}
@@ -232,9 +232,9 @@ func TestReadOpencodeSessionsReadsTheFixtureStore(t *testing.T) {
 	}
 }
 
-func TestReadOpencodeSessionsCompactsNativeModelID(t *testing.T) {
+func TestReadOpenCodeSessionsCompactsNativeModelID(t *testing.T) {
 	root := t.TempDir()
-	seedOpencodeStore(t, root)
+	seedOpenCodeStore(t, root)
 
 	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
 	if err != nil {
@@ -256,7 +256,7 @@ UPDATE message
 		t.Fatal(err)
 	}
 
-	sessions, err := ReadOpencodeSessions(context.Background(), root)
+	sessions, err := ReadOpenCodeSessions(context.Background(), root)
 	if err != nil {
 		t.Fatalf("read sessions: %v", err)
 	}
@@ -274,8 +274,8 @@ UPDATE message
 	t.Fatal("native model session missing")
 }
 
-func TestReadOpencodeSessionsMissingStoreIsQuietlyEmpty(t *testing.T) {
-	sessions, err := ReadOpencodeSessions(context.Background(), t.TempDir())
+func TestReadOpenCodeSessionsMissingStoreIsQuietlyEmpty(t *testing.T) {
+	sessions, err := ReadOpenCodeSessions(context.Background(), t.TempDir())
 	if err != nil {
 		t.Fatalf("missing store must not error: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestReadOpencodeSessionsMissingStoreIsQuietlyEmpty(t *testing.T) {
 	}
 }
 
-func TestReadOpencodeSessionsRejectsMalformedNativeJSONAndShapes(t *testing.T) {
+func TestReadOpenCodeSessionsRejectsMalformedNativeJSONAndShapes(t *testing.T) {
 	tests := []struct {
 		name      string
 		statement string
@@ -322,7 +322,7 @@ func TestReadOpencodeSessionsRejectsMalformedNativeJSONAndShapes(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
-			seedOpencodeStore(t, root)
+			seedOpenCodeStore(t, root)
 			db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
 			if err != nil {
 				t.Fatal(err)
@@ -337,9 +337,9 @@ func TestReadOpencodeSessionsRejectsMalformedNativeJSONAndShapes(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err = ReadOpencodeSessions(context.Background(), root)
+			_, err = ReadOpenCodeSessions(context.Background(), root)
 			if err == nil || !strings.Contains(err.Error(), test.wantError) {
-				t.Fatalf("ReadOpencodeSessions() error = %v, want %q", err, test.wantError)
+				t.Fatalf("ReadOpenCodeSessions() error = %v, want %q", err, test.wantError)
 			}
 			if strings.Contains(err.Error(), "not-json") {
 				t.Fatalf("validation error leaked stored content: %v", err)
@@ -348,9 +348,9 @@ func TestReadOpencodeSessionsRejectsMalformedNativeJSONAndShapes(t *testing.T) {
 	}
 }
 
-func TestReadOpencodeSessionsRejectsMalformedOrphansWithoutSessions(t *testing.T) {
+func TestReadOpenCodeSessionsRejectsMalformedOrphansWithoutSessions(t *testing.T) {
 	root := t.TempDir()
-	seedOpencodeStore(t, root)
+	seedOpenCodeStore(t, root)
 	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -369,15 +369,15 @@ UPDATE part SET data = 'not-json' WHERE id = 'i1';
 		t.Fatal(err)
 	}
 
-	_, err = ReadOpencodeSessions(context.Background(), root)
+	_, err = ReadOpenCodeSessions(context.Background(), root)
 	if err == nil || !strings.Contains(err.Error(), "validate opencode message JSON") {
-		t.Fatalf("ReadOpencodeSessions() error = %v, want orphan validation error", err)
+		t.Fatalf("ReadOpenCodeSessions() error = %v, want orphan validation error", err)
 	}
 }
 
-func TestReadOpencodeSessionsAcceptsACompletelyEmptyNativeStore(t *testing.T) {
+func TestReadOpenCodeSessionsAcceptsACompletelyEmptyNativeStore(t *testing.T) {
 	root := t.TempDir()
-	seedOpencodeStore(t, root)
+	seedOpenCodeStore(t, root)
 	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -392,7 +392,7 @@ func TestReadOpencodeSessionsAcceptsACompletelyEmptyNativeStore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessions, err := ReadOpencodeSessions(context.Background(), root)
+	sessions, err := ReadOpenCodeSessions(context.Background(), root)
 	if err != nil {
 		t.Fatalf("empty native store must remain valid: %v", err)
 	}
@@ -405,7 +405,7 @@ func openMirrorStore(t *testing.T) *store.Store {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv(paths.EnvDB, filepath.Join(root, "fleet.db"))
-	t.Setenv(paths.EnvSharedDB, filepath.Join(root, "shared.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "shared.db"))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
@@ -413,18 +413,18 @@ func openMirrorStore(t *testing.T) *store.Store {
 	return database
 }
 
-func TestSyncOpencodeMirrorReplacesAndDeletes(t *testing.T) {
+func TestSyncOpenCodeMirrorReplacesAndDeletes(t *testing.T) {
 	database := openMirrorStore(t)
 	ctx := context.Background()
 	root := t.TempDir()
-	seedOpencodeStore(t, root)
+	seedOpenCodeStore(t, root)
 
 	var counters Counters
-	if err := syncOpencodeMirror(ctx, database, root, &counters); err != nil {
+	if err := syncOpenCodeMirror(ctx, database, root, &counters); err != nil {
 		t.Fatalf("first sync: %v", err)
 	}
-	if counters.OcSessions != 3 {
-		t.Fatalf("OcSessions = %d, want 3", counters.OcSessions)
+	if counters.OpenCodeSessions != 3 {
+		t.Fatalf("OpenCodeSessions = %d, want 3", counters.OpenCodeSessions)
 	}
 	// The source loses ses_child entirely; the next pass must drop it.
 	db, err := sql.Open("sqlite", filepath.Join(root, "opencode.db"))
@@ -444,10 +444,10 @@ func TestSyncOpencodeMirrorReplacesAndDeletes(t *testing.T) {
 	}
 
 	counters = Counters{}
-	if err := syncOpencodeMirror(ctx, database, root, &counters); err != nil {
+	if err := syncOpenCodeMirror(ctx, database, root, &counters); err != nil {
 		t.Fatalf("second sync: %v", err)
 	}
-	stored, err := database.OcSessions(ctx)
+	stored, err := database.OpenCodeSessions(ctx)
 	if err != nil {
 		t.Fatalf("reread mirror: %v", err)
 	}

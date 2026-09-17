@@ -112,9 +112,9 @@ type Store struct {
 // return that failure instead of pretending an operator decision was stored.
 func Open(ctx context.Context, values paths.Values) *Store {
 	store := &Store{
-		path: values.SharedDB,
+		path: values.FleetDB,
 	}
-	db, err := openDatabase(ctx, values.SharedDB)
+	db, err := openDatabase(ctx, values.FleetDB)
 	if err != nil {
 		store.degraded = err
 		return store
@@ -520,7 +520,7 @@ func (s *Store) ClearBranchSeat(ctx context.Context, socket string) error {
 // It opens the database read-only and never creates it: reading the primary
 // account must not be the act that brings a state store into existence.
 func PrimaryAccount(ctx context.Context, values paths.Values) (int, bool) {
-	if account, found := primaryFromDatabase(ctx, values.SharedDB); found {
+	if account, found := primaryFromDatabase(ctx, values.FleetDB); found {
 		return account, true
 	}
 	content, err := os.ReadFile(filepath.Join(values.Home, ".claude-primary"))

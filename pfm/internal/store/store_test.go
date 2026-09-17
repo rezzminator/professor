@@ -62,10 +62,10 @@ func setStoreTestJail(t *testing.T) string {
 	// Pinned explicitly, not merely inherited from the jailed home: nothing in
 	// this package may reach the real ~/.cc/fleet.db, which the live fleet is
 	// writing while these tests run.
-	t.Setenv(paths.EnvSharedDB, filepath.Join(root, "cc", "fleet.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "cc", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, filepath.Join(root, "codex"))
+	t.Setenv(paths.EnvCodexHome, filepath.Join(root, "codex"))
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 	return dbPath

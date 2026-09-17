@@ -48,7 +48,7 @@ func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := jailTest(t)
 			sharedPath := filepath.Join(root, "shared.db")
-			t.Setenv("PFM_SHARED_DB", sharedPath)
+			t.Setenv("PFM_FLEET_DB", sharedPath)
 			t.Setenv("TMUX", "")
 			t.Setenv("TMUX_PANE", "")
 			t.Setenv("CODEX_THREAD_ID", "")
@@ -107,7 +107,7 @@ func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {
 
 func TestClearKillHookDoubleFireIsIdempotent(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
 	id := "22222222-2222-4222-8222-222222222222"
 	transcriptPath := filepath.Join(root, "claude", "project", id+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(transcriptPath), 0o700); err != nil {

@@ -92,7 +92,7 @@ func TestForeignOpenersKeepTheOwnersSettings(t *testing.T) {
 }
 
 // TestOpenersReachAPathWithURICharacters pins that a path is a path, not URI
-// text: a home or PFM_SHARED_DB directory holding "?", "#" or "%41" must open
+// text: a home or PFM_FLEET_DB directory holding "?", "#" or "%41" must open
 // that very file — never a truncated or percent-decoded neighbor, which would
 // read as an empty database.
 func TestOpenersReachAPathWithURICharacters(t *testing.T) {

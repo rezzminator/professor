@@ -18,10 +18,10 @@ import (
 	"hostops/pfm/internal/store"
 )
 
-// seedOpencodeStress builds a large, hostile session store: hundreds of
+// seedOpenCodeStress builds a large, hostile session store: hundreds of
 // sessions, unicode/control-character titles, oversized prompts, malformed
 // model JSON, NULL-heavy rows, and duplicate timestamps.
-func seedOpencodeStress(t *testing.T, root string, count int) {
+func seedOpenCodeStress(t *testing.T, root string, count int) {
 	t.Helper()
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
@@ -165,15 +165,15 @@ CREATE INDEX part_session_idx ON part (session_id);`
 	}
 }
 
-func TestStressOpencodeIndexSurvivesHostileStore(t *testing.T) {
+func TestStressOpenCodeIndexSurvivesHostileStore(t *testing.T) {
 	t.Parallel()
 
 	const count = 300
 	root := t.TempDir()
-	seedOpencodeStress(t, root, count)
+	seedOpenCodeStress(t, root, count)
 
 	for pass := 0; pass < 2; pass++ {
-		sessions, err := ReadOpencodeSessions(context.Background(), root)
+		sessions, err := ReadOpenCodeSessions(context.Background(), root)
 		if err != nil {
 			t.Fatalf("pass %d read: %v", pass, err)
 		}
@@ -224,14 +224,14 @@ func countArchived(n int) int {
 
 // The mirror must converge under repeated full passes and concurrent readers:
 // multiple goroutines indexing the same store race the mirror-replace path.
-func TestStressOpencodeMirrorConcurrentPasses(t *testing.T) {
+func TestStressOpenCodeMirrorConcurrentPasses(t *testing.T) {
 	const count = 250
 	root := t.TempDir()
-	seedOpencodeStress(t, root, count)
+	seedOpenCodeStress(t, root, count)
 
 	jail := t.TempDir()
 	t.Setenv(paths.EnvDB, filepath.Join(jail, "fleet.db"))
-	t.Setenv(paths.EnvSharedDB, filepath.Join(jail, "shared.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(jail, "shared.db"))
 	database, err := store.Open()
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
@@ -250,12 +250,12 @@ func TestStressOpencodeMirrorConcurrentPasses(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			var counters Counters
-			if err := syncOpencodeMirror(context.Background(), database, root, &counters); err != nil {
+			if err := syncOpenCodeMirror(context.Background(), database, root, &counters); err != nil {
 				errs <- err
 				return
 			}
-			if counters.OcSessions != count {
-				errs <- fmt.Errorf("OcSessions = %d, want %d", counters.OcSessions, count)
+			if counters.OpenCodeSessions != count {
+				errs <- fmt.Errorf("OpenCodeSessions = %d, want %d", counters.OpenCodeSessions, count)
 			}
 		}()
 	}
@@ -264,7 +264,7 @@ func TestStressOpencodeMirrorConcurrentPasses(t *testing.T) {
 	for err := range errs {
 		t.Fatal(err)
 	}
-	stored, err := database.OcSessions(context.Background())
+	stored, err := database.OpenCodeSessions(context.Background())
 	if err != nil {
 		t.Fatalf("read mirror: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestStressOpencodeMirrorConcurrentPasses(t *testing.T) {
 
 // A live OpenCode process checkpoints into the WAL while we copy; the reader
 // must tolerate the database growing mid-copy without erroring or hanging.
-func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
+func TestStressOpenCodeReadWhileWriterActive(t *testing.T) {
 	t.Parallel()
 
 	const (
@@ -283,7 +283,7 @@ func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
 		liveWrites = 2000
 	)
 	root := t.TempDir()
-	seedOpencodeStress(t, root, count)
+	seedOpenCodeStress(t, root, count)
 
 	dbPath := filepath.Join(root, "opencode.db")
 	stop := make(chan struct{})
@@ -354,7 +354,7 @@ func TestStressOpencodeReadWhileWriterActive(t *testing.T) {
 	reads := 0
 	deadline := 5
 	for round := 0; round < deadline; round++ {
-		sessions, err := ReadOpencodeSessions(context.Background(), root)
+		sessions, err := ReadOpenCodeSessions(context.Background(), root)
 		if err != nil {
 			close(stop)
 			t.Fatalf("concurrent read %d failed: %v", round, err)

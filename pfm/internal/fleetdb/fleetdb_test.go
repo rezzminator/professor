@@ -143,8 +143,8 @@ func TestDegradedStoreRejectsOperatorStateChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	values := paths.Values{
-		SharedDB: filepath.Join(blocker, "fleet.db"),
-		Home:     filepath.Join(root, "home"),
+		FleetDB: filepath.Join(blocker, "fleet.db"),
+		Home:    filepath.Join(root, "home"),
 	}
 	ctx := context.Background()
 	state := Open(ctx, values)
@@ -268,22 +268,22 @@ func TestBranchSeatMarkersRoundTripWithoutChangingTheSchema(t *testing.T) {
 func TestPrimaryAccountNeverCreatesTheDatabase(t *testing.T) {
 	root := t.TempDir()
 	values := paths.Values{
-		SharedDB: filepath.Join(root, "state", "fleet.db"),
-		Home:     filepath.Join(root, "home"),
+		FleetDB: filepath.Join(root, "state", "fleet.db"),
+		Home:    filepath.Join(root, "home"),
 	}
 	if account, found := PrimaryAccount(context.Background(), values); found {
 		t.Fatalf("PrimaryAccount() = %d, %v, want not found", account, found)
 	}
-	if _, err := os.Stat(values.SharedDB); !os.IsNotExist(err) {
-		t.Fatalf("reading the primary account created %s: %v", values.SharedDB, err)
+	if _, err := os.Stat(values.FleetDB); !os.IsNotExist(err) {
+		t.Fatalf("reading the primary account created %s: %v", values.FleetDB, err)
 	}
 }
 
 func TestSetPrimaryAccountKeepsDatabaseAndMirrorInLockstep(t *testing.T) {
 	root := t.TempDir()
 	values := paths.Values{
-		Home:     root,
-		SharedDB: filepath.Join(root, ".cc", "fleet.db"),
+		Home:    root,
+		FleetDB: filepath.Join(root, ".cc", "fleet.db"),
 	}
 	if err := SetPrimaryAccount(context.Background(), values, 2, 123); err != nil {
 		t.Fatal(err)
@@ -305,8 +305,8 @@ func openTestStore(t *testing.T) (*Store, paths.Values) {
 
 	root := t.TempDir()
 	values := paths.Values{
-		SharedDB: filepath.Join(root, "cc", "fleet.db"),
-		Home:     filepath.Join(root, "home"),
+		FleetDB: filepath.Join(root, "cc", "fleet.db"),
+		Home:    filepath.Join(root, "home"),
 	}
 	state := Open(context.Background(), values)
 	if err := state.Degraded(); err != nil {

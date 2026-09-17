@@ -1525,7 +1525,7 @@ func (installer *engine) unwireSkills(assets []assetFile) error {
 			// The skill's own directory (e.g. skills/handoff/) is created by
 			// ensureLink's MkdirAll on link; remove it here once its one link is
 			// gone, tolerantly — an operator file left beside it must survive.
-			if err := installer.retireEmptyDirectoryTolerant(filepath.Dir(target)); err != nil {
+			if err := installer.retireEmptyDirTolerant(filepath.Dir(target)); err != nil {
 				return err
 			}
 		}
@@ -1613,7 +1613,7 @@ func (installer *engine) retireBBInstall() error {
 		}
 	}
 	for _, relative := range []string{"codex-skills/bb/agents", "codex-skills/bb", "codex-skills"} {
-		if err := installer.retireEmptyDirectory(
+		if err := installer.retireEmptyDir(
 			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
 		); err != nil {
 			return err
@@ -1684,7 +1684,7 @@ func (installer *engine) retireChatCommands() error {
 		}
 	}
 	for _, relative := range []string{"chat/group", "chat/self", chatName} {
-		if err := installer.retireEmptyDirectory(
+		if err := installer.retireEmptyDir(
 			filepath.Join(installer.managedRoot, filepath.FromSlash(relative)),
 		); err != nil {
 			return err
@@ -1692,12 +1692,12 @@ func (installer *engine) retireChatCommands() error {
 	}
 	// The host side is never unconditionally empty the way managedRoot is: an
 	// operator's own file, or one of the links above skipped as unowned,
-	// legitimately survives here. retireEmptyDirectory's hard failure on a
+	// legitimately survives here. retireEmptyDir's hard failure on a
 	// non-empty directory is right for managedRoot's fully pfm-owned tree; it
 	// would wrongly abort every future install for an operator with one
 	// leftover file, so the host cleanup is best-effort instead.
 	for _, relative := range []string{"chat/group", "chat/self", chatName} {
-		if err := installer.retireEmptyDirectoryTolerant(
+		if err := installer.retireEmptyDirTolerant(
 			filepath.Join(commands, filepath.FromSlash(relative)),
 		); err != nil {
 			return err
@@ -1732,7 +1732,7 @@ func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {
 	return repos, nil
 }
 
-func (installer *engine) retireEmptyDirectory(path string) error {
+func (installer *engine) retireEmptyDir(path string) error {
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -1755,13 +1755,13 @@ func (installer *engine) retireEmptyDirectory(path string) error {
 	return installer.change("remove empty "+path, func() error { return os.Remove(path) })
 }
 
-// retireEmptyDirectoryTolerant removes path only once it has actually turned
-// out empty. Unlike retireEmptyDirectory, a directory left non-empty is a
+// retireEmptyDirTolerant removes path only once it has actually turned out
+// empty. Unlike retireEmptyDir, a directory left non-empty is a
 // routine, visible skip rather than a hard failure — the same tolerant
 // os.Remove-and-skip idiom removeManagedAssets uses for its own directory
 // sweep, appropriate wherever content the operator (not this installer)
 // controls can legitimately remain.
-func (installer *engine) retireEmptyDirectoryTolerant(path string) error {
+func (installer *engine) retireEmptyDirTolerant(path string) error {
 	if !installer.apply {
 		return nil
 	}
@@ -2305,8 +2305,8 @@ func (installer *engine) migrateLegacyCarrier(ctx context.Context) (returnErr er
 		fmt.Sprintf("merge %d retired carrier kill(s) into SQLite without overwriting existing rows", len(ids)),
 		func() (returnErr error) {
 			values := paths.Values{
-				Home:     installer.options.Home,
-				SharedDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
+				Home:    installer.options.Home,
+				FleetDB: filepath.Join(installer.options.Home, ".cc", "fleet.db"),
 			}
 			state := fleetdb.Open(ctx, values)
 			defer func() {

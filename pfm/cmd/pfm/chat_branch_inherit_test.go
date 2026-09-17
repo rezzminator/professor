@@ -34,12 +34,12 @@ func newBranchInheritJail(t *testing.T) *branchInheritJail {
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	sidDir := filepath.Join(root, "sid")
 	procRoot := filepath.Join(root, "proc")
-	codexRoot := filepath.Join(root, "codex")
+	codexHome := filepath.Join(root, "codex")
 	binDir := filepath.Join(root, "bin")
 	primaryDir := filepath.Join(root, "acct1")
 	parentDir := filepath.Join(root, "acct7")
 	for _, directory := range []string{
-		home, tmuxDir, sidDir, procRoot, codexRoot, binDir,
+		home, tmuxDir, sidDir, procRoot, codexHome, binDir,
 		filepath.Join(primaryDir, "projects"), filepath.Join(parentDir, "projects"),
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -71,10 +71,10 @@ func newBranchInheritJail(t *testing.T) *branchInheritJail {
 	t.Setenv("TMUX_TMPDIR", root)
 	t.Setenv("PFM_HOME", home)
 	t.Setenv("PFM_DB", filepath.Join(root, "fleet.db"))
-	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PFM_SID_DIR", sidDir)
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(root, "unused-claude-roots"))
-	t.Setenv("PFM_CODEX_ROOT", codexRoot)
+	t.Setenv("PFM_CODEX_ROOT", codexHome)
 	t.Setenv("PFM_TMUX_DIR", tmuxDir)
 	t.Setenv("PFM_TMUX_CONF", "/dev/null")
 	t.Setenv("PFM_PROC_ROOT", procRoot)

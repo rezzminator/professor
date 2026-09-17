@@ -23,7 +23,7 @@ func jailRuntime(t *testing.T) *pfmconfig.Runtime {
 	home := t.TempDir()
 	return &pfmconfig.Runtime{
 		Config: pfmconfig.Defaults(home, []string{filepath.Join(home, ".cc", "1", "projects")}),
-		Paths:  paths.Values{Home: home, SharedDB: filepath.Join(home, ".cc", "fleet.db")},
+		Paths:  paths.Values{Home: home, FleetDB: filepath.Join(home, ".cc", "fleet.db")},
 	}
 }
 

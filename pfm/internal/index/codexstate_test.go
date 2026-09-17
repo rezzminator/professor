@@ -119,7 +119,7 @@ func execCodexState(t *testing.T, path, statement string, args ...any) {
 }
 
 type codexStateFixture struct {
-	codexRoot       string
+	codexHome       string
 	statePath       string
 	fileRolloutPath string
 }
@@ -128,8 +128,8 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 	t.Helper()
 
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	sessions := filepath.Join(codexRoot, "sessions", "2026", "01", "01")
+	codexHome := filepath.Join(root, "codex")
+	sessions := filepath.Join(codexHome, "sessions", "2026", "01", "01")
 	if err := os.MkdirAll(sessions, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -152,12 +152,12 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 		`{"type":"session_meta","payload":{"id":"killed-subagent","cwd":"/work/kept"}}`,
 		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"delegated work"}]}}`,
 	)
-	writeLines(t, filepath.Join(codexRoot, "session_index.jsonl"),
+	writeLines(t, filepath.Join(codexHome, "session_index.jsonl"),
 		`{"id":"file-thread","thread_name":"SESSION INDEX NAME"}`,
 		`{"id":"legacy-named","thread_name":"ONLY IN SESSION INDEX"}`,
 	)
 
-	statePath := filepath.Join(codexRoot, "state_5.sqlite")
+	statePath := filepath.Join(codexHome, "state_5.sqlite")
 	buildCodexState(t, statePath,
 		codexStateThread{
 			ID:               "file-thread",
@@ -204,11 +204,11 @@ func setupCodexStateFixture(t *testing.T) codexStateFixture {
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
 
-	return codexStateFixture{codexRoot: codexRoot, statePath: statePath, fileRolloutPath: fileRollout}
+	return codexStateFixture{codexHome: codexHome, statePath: statePath, fileRolloutPath: fileRollout}
 }
 
 func writeLines(t *testing.T, path string, lines ...string) {
@@ -369,7 +369,7 @@ INSERT INTO threads (
 ) VALUES ('resumed-thread', '', 500, 600, 'cli', 'openai', '/work/resumed',
   '', 'workspace-write', 'on-request', 7, 0, 'verify the dispatch claim', '',
   'user', 600, 'paginated', NULL)`)
-	indexPath := filepath.Join(fixture.codexRoot, "session_index.jsonl")
+	indexPath := filepath.Join(fixture.codexHome, "session_index.jsonl")
 	appendJSONLine(t, indexPath, map[string]any{
 		"id":          "resumed-thread",
 		"thread_name": "AWCX",
@@ -420,7 +420,7 @@ INSERT INTO threads (
 // undated store name.
 func TestCodexSessionIndexRenameBeatsStaleStoreName(t *testing.T) {
 	fixture := setupCodexStateFixture(t)
-	indexPath := filepath.Join(fixture.codexRoot, "session_index.jsonl")
+	indexPath := filepath.Join(fixture.codexHome, "session_index.jsonl")
 	appendJSONLine(t, indexPath, map[string]any{
 		"id":          "file-thread",
 		"thread_name": "FRESH RENAME",
@@ -651,8 +651,8 @@ func setupMachineSpawnedFixture(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	sessions := filepath.Join(codexRoot, "sessions", "2026", "08", "10")
+	codexHome := filepath.Join(root, "codex")
+	sessions := filepath.Join(codexHome, "sessions", "2026", "08", "10")
 	const twinPrompt = "Trace one planned API field through directly evidenced repos"
 
 	threads := []codexStateThread{
@@ -724,17 +724,17 @@ func setupMachineSpawnedFixture(t *testing.T) string {
 				strconv.Quote(threads[index].FirstUserMessage)+`}]}}`,
 		)
 	}
-	buildCodexState(t, filepath.Join(codexRoot, "state_5.sqlite"), threads...)
+	buildCodexState(t, filepath.Join(codexHome, "state_5.sqlite"), threads...)
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvSharedDB, filepath.Join(root, "cc", "fleet.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "cc", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
-	return codexRoot
+	return codexHome
 }
 
 // THE TWIN REGRESSION. A workflow's verify twins used to list as two of the
@@ -847,8 +847,8 @@ func setupPaginatedContentFixture(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
-	codexRoot := filepath.Join(root, "codex")
-	sessions := filepath.Join(codexRoot, "sessions", "2026", "08", "12")
+	codexHome := filepath.Join(root, "codex")
+	sessions := filepath.Join(codexHome, "sessions", "2026", "08", "12")
 
 	threads := []codexStateThread{
 		{
@@ -893,17 +893,17 @@ func setupPaginatedContentFixture(t *testing.T) string {
 				`","thread_source":"user","cwd":"`+threads[index].CWD+`"}}`,
 		)
 	}
-	buildCodexState(t, filepath.Join(codexRoot, "state_5.sqlite"), threads...)
+	buildCodexState(t, filepath.Join(codexHome, "state_5.sqlite"), threads...)
 
 	t.Setenv("TMUX_TMPDIR", filepath.Join(root, "t"))
 	t.Setenv(paths.EnvDB, filepath.Join(root, "state", "fleet.db"))
-	t.Setenv(paths.EnvSharedDB, filepath.Join(root, "cc", "fleet.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(root, "cc", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(root, "sid"))
 	t.Setenv(paths.EnvClaudeRoots, filepath.Join(root, "claude"))
-	t.Setenv(paths.EnvCodexRoot, codexRoot)
+	t.Setenv(paths.EnvCodexHome, codexHome)
 	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	t.Setenv(paths.EnvHome, filepath.Join(root, "home"))
-	return codexRoot
+	return codexHome
 }
 
 // THE BUG. A header-only rollout file has nonzero Size once parsed — bytes on

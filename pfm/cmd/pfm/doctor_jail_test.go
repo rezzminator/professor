@@ -79,7 +79,7 @@ func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	t.Setenv("HOME", home)
 	t.Setenv("PFM_HOME", home)
 	t.Setenv("PFM_DB", filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
-	t.Setenv("PFM_SHARED_DB", filepath.Join(home, ".cc", "fleet.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(home, ".cc", "fleet.db"))
 	t.Setenv("PFM_SID_DIR", filepath.Join(home, "sid"))
 	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(home, ".cc", "1", "projects")+
 		string(os.PathListSeparator)+filepath.Join(home, ".cc", "2", "projects"))

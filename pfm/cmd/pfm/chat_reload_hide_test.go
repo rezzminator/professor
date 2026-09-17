@@ -22,7 +22,7 @@ import (
 // "hidden".
 func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehind(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
 	ctx := context.Background()
 	runtime := commandRuntime{Paths: paths.Values{Home: filepath.Join(root, "home")}}
 
@@ -128,7 +128,7 @@ func TestHideReloadedConversationRecordsAPermanentKillForTheConversationLeftBehi
 // this passes with no launcher on PATH and no error.
 func TestHideReloadedConversationNeverSpawnsTheExitFinisher(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv("PFM_SHARED_DB", filepath.Join(root, "shared.db"))
+	t.Setenv("PFM_FLEET_DB", filepath.Join(root, "shared.db"))
 	t.Setenv("PATH", "")
 	ctx := context.Background()
 	runtime := commandRuntime{Paths: paths.Values{Home: filepath.Join(root, "home")}}

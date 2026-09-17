@@ -440,7 +440,7 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 		t.Fatalf("codex window=%q, want inline launch name", got)
 	}
 	state := fleetdb.Open(context.Background(), paths.Values{
-		SharedDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
+		FleetDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
 	})
 	t.Cleanup(func() { _ = state.Close() })
 	events, err := state.CommsSince(context.Background(), 0, 10)

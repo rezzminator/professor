@@ -80,7 +80,7 @@ func runChatOpen(
 	if code != 0 {
 		return code
 	}
-	return openID(context.Background(), chat.ID, stdout, stderr, runtime)
+	return pfmchat.OpenID(context.Background(), chat.ID, stdout, stderr, &runtime)
 }
 
 func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -245,7 +245,7 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 		return 2
 	}
 	name := flags.Arg(0)
-	engine, err := newInjectEngine(runtimes...)
+	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat resolve: %v\n", err)
 		return codeUndelivered
@@ -378,7 +378,7 @@ func deliverChatNameWithRuntime(
 	name string,
 	runtimes ...commandRuntime,
 ) (int, string, error) {
-	engine, err := newInjectEngine(runtimes...)
+	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
 	if err != nil {
 		return 1, "", err
 	}

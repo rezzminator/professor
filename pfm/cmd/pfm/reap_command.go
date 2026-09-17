@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/reap"
@@ -66,7 +67,7 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		OpenCodeBinary: runtime.Config.OpenCode.Binary,
 		CodexHomes:     runtime.Config.CodexHomes(),
 		KillServer: func(ctx context.Context, socket string) error {
-			return killChatServer(ctx, resolved, socket)
+			return pfmchat.KillServer(ctx, resolved, socket)
 		},
 	})
 	if err != nil {

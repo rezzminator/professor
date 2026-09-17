@@ -298,11 +298,11 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		return 1
 	}
 	defer func() { cli.CloseResource(database, "pfm chat ls: close database", stderr, &exitCode) }()
-	request := scanRequest{View: compose.AllView, ReadOnly: true}
+	request := fleet.Request{View: compose.AllView, ReadOnly: true}
 	if len(runtimes) != 0 {
 		request.Runtime = &runtimes[0]
 	}
-	scan, err := scanFleet(context.Background(), database, request, stderr)
+	scan, err := fleet.Scan(context.Background(), database, request, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat ls: %v\n", err)
 		return 1
@@ -347,7 +347,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		}
 		location := ""
 		if all {
-			location = strings.Replace(row.CWD, scan.Paths.Home, "~", 1) + "  "
+			location = strings.Replace(row.CWD, scan.Env.Paths.Home, "~", 1) + "  "
 		}
 		fmt.Fprintf(
 			stdout, "  %-28s %-24s %-7s %s%s\n",
@@ -533,7 +533,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		})
 	}
 	if err != nil {
-		rollbackErr := killChatServer(context.Background(), resolved, socket)
+		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket)
 		if rollbackErr != nil {
 			fmt.Fprintf(stderr, "pfm chat branch: create detached seat: %v; rollback: %v\n", err, rollbackErr)
 		} else {
@@ -562,7 +562,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	recordErr := state.RecordBranchSeat(context.Background(), socket, *id, time.Now().Unix())
 	closeErr := state.Close()
 	if recordErr != nil || closeErr != nil {
-		rollbackErr := killChatServer(context.Background(), resolved, socket)
+		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket)
 		failure := errors.Join(recordErr, closeErr)
 		if rollbackErr != nil {
 			failure = errors.Join(failure, fmt.Errorf("rollback detached seat: %w", rollbackErr))

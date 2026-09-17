@@ -5,24 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strconv"
 	"time"
 
-	"hostops/pfm/internal/action"
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/heal"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/spawn"
 	pfmstats "hostops/pfm/internal/stats"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
@@ -83,7 +79,7 @@ func runLS(
 			flags.Usage()
 			return 2
 		}
-		return openID(context.Background(), flags.Arg(0), stdout, stderr, runtime)
+		return pfmchat.OpenID(context.Background(), flags.Arg(0), stdout, stderr, &runtime)
 	}
 
 	view := compose.DefaultView
@@ -225,7 +221,7 @@ func runLS(
 			fmt.Fprintln(stderr, "pfm ls: deactive refused for split live window")
 			return 1
 		}
-		if err := killChatServer(ctx, scan.Paths, outcome.Row.Socket); err != nil {
+		if err := pfmchat.KillServer(ctx, scan.Paths, outcome.Row.Socket); err != nil {
 			fmt.Fprintf(stderr, "pfm ls: deactive %s: %v\n", outcome.Row.Name, err)
 			return 1
 		}
@@ -237,16 +233,17 @@ func runLS(
 			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
 			return 1
 		}
-		return openRow(ctx, row, outcome.PrimaryAccount, cache1H, stdout, stderr, runtime)
+		return pfmchat.OpenRow(ctx, row, outcome.PrimaryAccount, cache1H, "", stdout, stderr, &runtime)
 	case ui.OutcomeSelected:
-		return openRow(
+		return pfmchat.OpenRow(
 			ctx,
 			outcome.Row,
 			outcome.PrimaryAccount,
 			cache1H,
+			"",
 			stdout,
 			stderr,
-			runtime,
+			&runtime,
 		)
 	case ui.OutcomeCancelled, ui.OutcomeNone:
 		return 0
@@ -339,136 +336,6 @@ func boolCount(values ...bool) int {
 	return count
 }
 
-func openID(
-	ctx context.Context,
-	id string,
-	stdout, stderr io.Writer,
-	runtime commandRuntime,
-) (exitCode int) {
-	database, err := store.Open(store.WithWarningWriter(stderr))
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-		return 1
-	}
-	defer func() { cli.CloseResource(database, "pfm chat open: close database", stderr, &exitCode) }()
-	// READ-ONLY: open needs to FIND one row, never to persist a gather pass.
-	// A writing scan here wedges whenever the caller already holds the fleet
-	// store open in the same process — which is exactly what made chat_open
-	// hang forever when it was served by the `pfm mcp serve` daemon while the
-	// identical call over a one-shot CLI returned in seconds.
-	scan, err := scanFleet(
-		ctx,
-		database,
-		scanRequest{View: compose.AllView, ReadOnly: true, Runtime: &runtime},
-		stderr,
-	)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-		return 1
-	}
-	for index := range scan.Output.Rows {
-		row := &scan.Output.Rows[index]
-		if row.ID == id {
-			primary := fleet.PrimaryAccount(scan.Paths, runtime.Config)
-			return openRow(
-				ctx,
-				*row,
-				runtime.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), primary),
-				runtime.Config.InitialCache1H(primary),
-				stdout,
-				stderr,
-				runtime,
-			)
-		}
-	}
-	fmt.Fprintf(stderr, "pfm chat open: chat %q is not indexed\n", id)
-	return 1
-}
-
-func openRow(
-	ctx context.Context,
-	row compose.Row,
-	primary int,
-	cache1H bool,
-	stdout, stderr io.Writer,
-	runtime commandRuntime,
-) int {
-	return openRowWithPrompt(ctx, row, primary, cache1H, "", stdout, stderr, runtime)
-}
-
-func openRowWithPrompt(
-	ctx context.Context,
-	row compose.Row,
-	primary int,
-	cache1H bool,
-	prompt string,
-	stdout, stderr io.Writer,
-	runtime commandRuntime,
-) int {
-	resolved := runtime.Paths
-	if row.Kind != compose.LiveClaude &&
-		row.Kind != compose.LiveCodex &&
-		row.Kind != compose.LiveSplit {
-		if info, statErr := os.Stat(row.CWD); statErr != nil || !info.IsDir() {
-			if currentDir, cwdErr := os.Getwd(); cwdErr == nil {
-				row.CWD = currentDir
-			}
-		}
-	}
-	// The Codex projection repair rides the resume path itself: a wedged
-	// thread is repaired in the same breath that opens it, with no shell
-	// helper in the run string to be missing, unexecutable, or stale.
-	healCodexRoot := resolved.FirstRoot(pfmengine.Codex)
-	if account, found := runtime.Config.CodexAccountByID(primary); found {
-		healCodexRoot = account.Home
-	}
-	executor, err := action.New(action.Dependencies{
-		Stderr: stderr,
-		Heal: func(ctx context.Context, threadID string) string {
-			return heal.Thread(ctx, healCodexRoot, threadID)
-		},
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-		return 1
-	}
-	fresh, err := freshSocketForKind(row.Kind)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-		return 1
-	}
-	line, err := executor.Open(ctx, action.Request{
-		Row:            row,
-		Prompt:         prompt,
-		PrimaryAccount: primary,
-		Cache1H:        cache1H,
-		Bunker:         inBunker(),
-		Home:           resolved.Home,
-		FreshSocket:    fresh,
-		CurrentTMUX:    os.Getenv("TMUX"),
-		Config:         runtime.Config,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
-		return 1
-	}
-	if line != "" {
-		if err := action.Dispatch(stdout, line); err != nil {
-			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
-			return 1
-		}
-	}
-	return 0
-}
-
-func freshSocketForKind(kind compose.Kind) (string, error) {
-	id, err := compose.EngineForKindChecked(kind)
-	if err != nil {
-		return "", err
-	}
-	return spawn.FreshSocket(id), nil
-}
-
 // reportKills is the receipt for hidden-state writes made while the picker was
 // open. Hiding a resumable-only chat changes list visibility only; hiding a
 // LIVE chat also ends it, through the same exit choreography `pfm chat kill`
@@ -524,45 +391,6 @@ func killApplier(
 	}, nil
 }
 
-// killChatServer ends one chat's tmux server and removes every handle that
-// would otherwise keep pointing at it — the socket file, and the sid crumbs
-// that resolve a chat to its server. It is the single termination sequence:
-// ⌃O reboots a chat through it and deactive puts one to sleep through it.
-func killChatServer(
-	ctx context.Context,
-	resolved paths.Values,
-	socket string,
-) error {
-	tmux := action.TmuxExecutor{TmuxDir: resolved.TmuxDir}
-	if err := tmux.KillServer(ctx, socket); err != nil {
-		// Killing a corpse fails loudly for no reason — a socket file outlives
-		// its server. The goal is "not running", so ask whether it is rather
-		// than reporting a failure the user cannot act on.
-		if tmux.SocketAlive(ctx, socket) {
-			return err
-		}
-	}
-	_ = os.Remove(filepath.Join(resolved.TmuxDir, socket))
-	entries, _ := os.ReadDir(resolved.SIDDir)
-	for _, entry := range entries {
-		if name, _, ok := gather.ParseCrumbName(entry.Name()); ok &&
-			name == socket {
-			_ = os.Remove(filepath.Join(resolved.SIDDir, entry.Name()))
-		}
-	}
-	state := fleetdb.OpenSharedState(ctx, resolved)
-	clearErr := state.ClearBranchSeat(ctx, socket)
-	closeErr := state.Close()
-	if clearErr != nil || closeErr != nil {
-		return fmt.Errorf(
-			"clear branch marker after ending %s: %w",
-			socket,
-			errors.Join(clearErr, closeErr),
-		)
-	}
-	return nil
-}
-
 func deactivateApplier(
 	ctx context.Context,
 	resolved paths.Values,
@@ -571,7 +399,7 @@ func deactivateApplier(
 		if row.Socket == "" {
 			return errors.New("selected chat has no live server")
 		}
-		return killChatServer(ctx, resolved, row.Socket)
+		return pfmchat.KillServer(ctx, resolved, row.Socket)
 	}
 }
 
@@ -584,7 +412,7 @@ func rebootRow(
 	if row.Kind == compose.LiveSplit || row.ID == "" {
 		return compose.Row{}, errors.New("a split live row cannot be rebooted as one chat")
 	}
-	if err := killChatServer(ctx, resolved, row.Socket); err != nil {
+	if err := pfmchat.KillServer(ctx, resolved, row.Socket); err != nil {
 		fmt.Fprintf(stderr, "pfm: reboot kill-server %s: %v\n", row.Socket, err)
 	}
 	if row.Kind == compose.LiveCodex {

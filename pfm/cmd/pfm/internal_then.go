@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
 )
 
@@ -36,7 +37,7 @@ func runInternalThen(args []string, stderr io.Writer, runtimes ...commandRuntime
 		flags.Usage()
 		return 2
 	}
-	engine, err := newInjectEngine(runtimes...)
+	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal then: %v\n", err)
 		return 1

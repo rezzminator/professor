@@ -478,7 +478,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 		return 2
 	}
 	ctx := context.Background()
-	engine, err := newInjectEngineAllowingUnsigned(allowUnsigned, runtimes...)
+	engine, err := pfmchat.NewInjectEngine(allowUnsigned, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat inject: %v\n", err)
 		return codeUndelivered
@@ -659,7 +659,7 @@ func runHeadlessSelfCompact(args []string, stdout, stderr io.Writer, runtimes ..
 	}
 	focus := strings.Join(flags.Args(), " ")
 	ctx := context.Background()
-	engine, err := newInjectEngine(runtimes...)
+	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat self-compact: %v\n", err)
 		return codeUndelivered

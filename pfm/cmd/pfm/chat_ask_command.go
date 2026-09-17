@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
@@ -69,7 +70,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat ask: %v\n", err)
 		return 1
 	}
-	engine, err := newInjectEngine(runtimes...)
+	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat ask: %v\n", err)
 		return 1

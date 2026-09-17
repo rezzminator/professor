@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
@@ -138,7 +139,7 @@ func openProfessorUpdate(
 	}
 	row.Name = "Professor update " + strings.TrimPrefix(outcome.Row.ID, "pfm-update-")
 	row.Account = outcome.PrimaryAccount
-	return openRowWithPrompt(
+	return pfmchat.OpenRow(
 		ctx,
 		row,
 		outcome.PrimaryAccount,
@@ -146,7 +147,7 @@ func openProfessorUpdate(
 		professorUpdatePrompt(outcome.Row),
 		stdout,
 		stderr,
-		runtime,
+		&runtime,
 	)
 }
 

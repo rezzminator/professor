@@ -29,7 +29,7 @@ Use `$dev build pfm` · `$dev verify pfm` · `$dev test pfm` for anything the pi
 
 `cmd/pfm/` holds the CLI adapters and the end-to-end jail tests; `pfm help` lists the subcommands. Each `internal/` package opens with a doc comment naming what it owns: `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` is the package map.
 
-`internal/installer/assets/shim/pfm.zsh` is the thin post-cutover wrapper (`shim/` holds only its tests). `testdata/` holds `claude-store/ codex-store/ crumbs/ proc/ golden/` plus the reference harness `e2e.sh`.
+`internal/installer/assets/shim/pfm.zsh` is the thin post-cutover wrapper (`internal/installer/shim/` holds only its tests). `cmd/pfm` file names start with their unit — `chat_ ls_ doctor_ internal_ update_` — so `ls cmd/pfm/<unit>_*` lists a unit. `testdata/` holds `claude-store/ codex-store/ crumbs/ proc/ golden/` plus the reference harness `e2e.sh`.
 
 ## Platforms
 
@@ -63,7 +63,7 @@ Two rules follow from the table:
 - **The architecture ratchet.** `scripts/arch-check.sh` checks C1–C21 against the `.arch/` baselines, and `.claude/scripts/dev.sh verify pfm` runs it. A baseline only shrinks: `--measure` locks a shrink, a new entry is a FAIL to fix, and a genuinely new exception is a hand edit to `.arch/` named in the commit message.
 - **The lint law.** `.golangci.yml` (dupl, goconst, gocritic, revive, staticcheck; gofumpt + gci + golines at 120) and `.testcoverage.yml` are gates, not advice: `make lint-new` blocks a wave on the lines it changed, `make lint` is the burn-down view, `make cover` thresholds only ratchet up. Tools are pinned in `infra/tools.env` — `make tools` on the host, baked into the fence image.
 - **A kill is permanent; the store table keeps its `hidden` name.** A kill of a LIVE chat always runs the detached exit choreography; `--exit` is its explicit form.
-- **One binary, two kernels — and the seam is a build tag, never a runtime `if`.** Linux and macOS are both supported. Where they differ, a `_linux.go` / `_darwin.go` pair defines the same identifier and the caller stays platform-blind (`getTermios`, `nativeProcFS`, `nativeProcesses`, `schedulerIsLaunchd`). Three differences are load-bearing: there is no `/proc`, so the process table comes from `sysctl` and `ProcFS` dispatches through `gather.NewProcFS` — which still honours an EXISTING root, because that is how the jail feeds it fixtures; tmux's ioctl and format-separator spellings differ, so parse through `internal/tmuxfmt` and never against one spelling; and there is no dead-launchd jail, so the installer's rc 97 gate narrows to "not mid-execution" rather than "manager not live". A platform whose constants nobody has confirmed must fail to BUILD, not fall back to a guess.
+- **One binary, two kernels — and the seam is a build tag, never a runtime `if`.** Linux and macOS are both supported. Where they differ, a `_linux.go` / `_darwin.go` pair defines the same identifier and the caller stays platform-blind (`getTermios`, `nativeProcFS`, `nativeProcesses`, `schedulerIsLaunchd`). Three differences are load-bearing: there is no `/proc`, so the process table comes from `sysctl` and `ProcFS` dispatches through `gather.NewProcFS` — which still honours an EXISTING root, because that is how the jail feeds it fixtures; tmux's ioctl and format-separator spellings differ, so parse through `internal/tmux` (`format.go`) and never against one spelling; and there is no dead-launchd jail, so the installer's rc 97 gate narrows to "not mid-execution" rather than "manager not live". A platform whose constants nobody has confirmed must fail to BUILD, not fall back to a guess.
 - **Never hardcode `$HOME`, `/tmp`, a socket dir, or `/proc`.** Every filesystem location resolves through `internal/paths`; `/proc` sits behind the `ProcFS` interface. This is not decoration — it is the only reason the suite can run in a jail.
 - **The ratchet counts prompts, not bytes (K2).** Kill baselines are `baseline_prompts`; auto-unkill is `prompt_count > baseline`. Legacy byte baselines convert exactly once at import.
 - **Account identity, emoji, theme, and permission posture come ONLY from `internal/config`** — a hardcoded account count, `.cc/N` literal, medal emoji, or bypass flag outside the config package is a defect.
@@ -100,7 +100,7 @@ Test-jail overrides only — **not a config system** (`internal/paths/paths.go`)
 
 `PFM_TMUX_CONF` is load-bearing beyond the jail: unset, a chat's tmux server loads the user's own `~/.tmux.conf` — because a chat IS a terminal the user lives in, and one that ignores their config wears the wrong status bar. Jails set it to `/dev/null` so a real machine config can never steer a fixture.
 
-Test knobs outside `internal/paths`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`); `PFM_TEST_FRESH_SOCKET` (`cmd/pfm/pipeline.go`).
+Test knobs outside `internal/paths`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`); `PFM_TEST_FRESH_SOCKET` (`cmd/pfm/ls_pipeline.go`).
 
 ## Boundaries
 

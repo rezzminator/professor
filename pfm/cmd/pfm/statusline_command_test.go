@@ -88,6 +88,39 @@ func TestStatuslineRejectsRetiredVertexRefreshFlag(t *testing.T) {
 	}
 }
 
+func TestInternalStatuslineRoutesToNativeCommandContract(t *testing.T) {
+	jailTest(t)
+	var directStdout, directStderr bytes.Buffer
+	directCode := runStatuslineWithRuntime(
+		[]string{"unexpected"},
+		strings.NewReader("not read for a usage error"),
+		&directStdout,
+		&directStderr,
+		commandRuntime{},
+	)
+
+	var internalStdout, internalStderr bytes.Buffer
+	internalCode := runInternal(
+		[]string{"statusline", "unexpected"},
+		&internalStdout,
+		&internalStderr,
+		commandRuntime{},
+	)
+
+	if internalCode != directCode || internalStdout.String() != directStdout.String() ||
+		internalStderr.String() != directStderr.String() {
+		t.Fatalf(
+			"internal statusline = code %d stdout %q stderr %q, direct = code %d stdout %q stderr %q",
+			internalCode,
+			internalStdout.String(),
+			internalStderr.String(),
+			directCode,
+			directStdout.String(),
+			directStderr.String(),
+		)
+	}
+}
+
 func TestStatuslineAndUsageHookCommandsFailOpen(t *testing.T) {
 	jailTest(t)
 	root := t.TempDir()

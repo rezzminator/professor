@@ -524,6 +524,10 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 		info.Mode().Perm() != 0o755 {
 		t.Fatalf("managed pfm-statusline mode=%v err=%v, want 0755", info, err)
 	}
+	statuslineShim := readFixture(t, filepath.Join(managed, "bin", "pfm-statusline"))
+	if want := "#!/usr/bin/env bash\n" + `exec "$HOME/.local/bin/pfm" internal statusline "$@"` + "\n"; statuslineShim != want {
+		t.Fatalf("managed pfm-statusline=%q, want native exec shim %q", statuslineShim, want)
+	}
 	settings := readFixture(t, filepath.Join(config, "settings.json"))
 	for _, wanted := range []string{
 		home + "/.local/bin/pfm-statusline",

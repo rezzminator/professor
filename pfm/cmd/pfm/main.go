@@ -26,47 +26,45 @@ import (
 )
 
 const (
-	chatCommand      = "chat"
-	initCommand      = "init"
-	indexCommand     = "index"
-	headlessCommand  = "headless"
-	whoamiCommand    = "whoami"
-	versionCommand   = "version"
-	configCommand    = "config"
-	archiveCommand   = "archive"
-	internalCommand  = "internal"
-	reloadRunCommand = "reload-run"
-	serveCommand     = "serve"
-	installCommand   = "install"
-	mcpCommand       = "mcp"
-	updateCommand    = "update"
-	doctorCommand    = "doctor"
-	checkAction      = "check"
+	chatCommand       = "chat"
+	initCommand       = "init"
+	indexCommand      = "index"
+	headlessCommand   = "headless"
+	whoamiCommand     = "whoami"
+	versionCommand    = "version"
+	configCommand     = "config"
+	archiveCommand    = "archive"
+	internalCommand   = "internal"
+	reloadRunCommand  = "reload-run"
+	serveCommand      = "serve"
+	installCommand    = "install"
+	mcpCommand        = "mcp"
+	updateCommand     = "update"
+	doctorCommand     = "doctor"
+	checkAction       = "check"
+	statuslineCommand = "statusline"
 )
 
 var version = config.DevelopmentVersion
 
-// topLevelSubcommands names every case the switch in run dispatches by
-// argv[0] — the single source both TestTopLevelSubcommandsReachTheirHandler
-// and installer.SetImplementedSubcommands read, so the installer's
+// topLevelSubcommands names every argv[0] case for both the reachability test
+// and installer.SetImplementedSubcommands, so the installer's
 // unknown-pfm-hook predicate (issue #24 F1) can never drift from what this
 // binary actually implements.
 var topLevelSubcommands = []string{
 	versionCommand, "ls", chatCommand, "harvest", headlessCommand, indexCommand, doctorCommand,
-	configCommand, "reap", archiveCommand, "heal", "name-sync", "statusline",
+	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand,
 }
 
-// internalSubcommands names every case runInternal dispatches by args[0] —
-// the usage line below and TestInternalSubcommandsReachTheirHandler both
-// derive from this one list, alongside installer.SetImplementedSubcommands.
+// internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-version", "clear-kill",
 	"codex-appendix", "codex-launch", "compact-nudge", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
 	"launcher-repair", "primary-get", "primary-set", "reload-intercept",
-	reloadRunCommand, "stale", thenAction, "update-check",
+	reloadRunCommand, "stale", statuslineCommand, thenAction, "update-check",
 }
 
 func main() {
@@ -137,7 +135,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runHeal(args[1:], stdout, stderr)
 	case "name-sync":
 		return runNameSync(args[1:], stdout, stderr, runtime)
-	case "statusline":
+	case statuslineCommand:
 		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime)
 	case "usage-hook":
 		return runUsageHookWithRuntime(args[1:], stdout, stderr, runtime)
@@ -471,6 +469,9 @@ func runInternal(
 	if len(args) != 0 && args[0] == "stale" {
 		return stale.Run(args[1:], stdout, stderr)
 	}
+	if len(args) != 0 && args[0] == "statusline" {
+		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime)
+	}
 	if len(args) != 0 && args[0] == "primary-set" {
 		flags := cli.NewFlagSet(
 			"internal primary-set",
@@ -496,8 +497,7 @@ func runInternal(
 		return 0
 	}
 	if len(args) == 0 {
-		// This literal stays in sync with internalSubcommands by
-		// construction, not derivation: scripts/arch-check.sh's C15 check
+		// This literal stays in sync by construction: scripts/arch-check.sh's C15 check
 		// greps the pipe-joined subcommand names out of main.go's raw
 		// source text below, so a runtime-joined string here (fine for Go,
 		// blind to a static grep) would defeat that ratchet.
@@ -506,7 +506,7 @@ func runInternal(
 		// branch in runInternal's if-chain below.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|then|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|update-check [options]",
 		)
 		return 2
 	}

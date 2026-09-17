@@ -17,7 +17,7 @@ import (
 // avoids requiring a real Codex account or model request in installer e2e.
 func TestCodexHookAPIFixture(t *testing.T) {
 	if os.Getenv("PFM_E2E_CODEX_HOOK_FIXTURE") != "1" {
-		t.Skip("Codex hook API fixture runs only as a helper process")
+		t.Skip("needs PFM_E2E_CODEX_HOOK_FIXTURE=1")
 	}
 	account := os.Getenv("CODEX_HOME")
 	source := filepath.Join(account, "hooks.json")

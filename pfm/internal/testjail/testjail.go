@@ -131,11 +131,7 @@ func jailHome(base string) func() {
 // children include a socket.
 func ShortRoot(t *testing.T) string {
 	t.Helper()
-	base := os.TempDir()
-	if short, err := filepath.EvalSymlinks("/tmp"); err == nil {
-		base = short
-	}
-	directory, err := os.MkdirTemp(base, "j")
+	directory, err := CreateShortRoot()
 	if err != nil {
 		t.Fatalf("create short jail root: %v", err)
 	}
@@ -145,6 +141,16 @@ func ShortRoot(t *testing.T) string {
 		}
 	})
 	return directory
+}
+
+// CreateShortRoot returns an unregistered short root for harnesses that do not
+// have a *testing.T. The caller owns cleanup.
+func CreateShortRoot() (string, error) {
+	base := os.TempDir()
+	if short, err := filepath.EvalSymlinks("/tmp"); err == nil {
+		base = short
+	}
+	return os.MkdirTemp(base, "j")
 }
 
 // Fleet builds a scratch fleet under a ShortRoot and points every pfm path at

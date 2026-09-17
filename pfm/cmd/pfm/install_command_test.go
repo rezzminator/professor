@@ -15,6 +15,7 @@ import (
 
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/paths"
@@ -96,7 +97,7 @@ func TestInstallerAndDoctorUseImplicitClaudeRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if warnings := printMCPClientCutover(
+	if warnings := doctor.PrintMCPClientCutover(
 		&output,
 		runtime,
 	); warnings != 1 ||
@@ -369,12 +370,12 @@ func TestInstallSkipHarvestPreviewPreservesTheConfirmationFlag(t *testing.T) {
 }
 
 func TestInstallSkipEngineCodexReachesProbeInstallerAndConfirmation(t *testing.T) {
-	savedProbe, savedInstaller := dependencyProbeOverride, runInstaller
+	savedProbe, savedInstaller := doctor.DependencyProbeOverride, runInstaller
 	t.Cleanup(func() {
-		dependencyProbeOverride = savedProbe
+		doctor.DependencyProbeOverride = savedProbe
 		runInstaller = savedInstaller
 	})
-	dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, options deps.ProbeOptions) []deps.Result {
+	doctor.DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, options deps.ProbeOptions) []deps.Result {
 		if !options.SkipEngines[pfmengine.Codex] {
 			t.Fatal("--skip-engine codex did not reach dependency probe options")
 		}

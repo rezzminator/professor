@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"context"
@@ -39,6 +39,23 @@ import (
 
 const emptySummary = "none"
 
+const (
+	doctorCommand   = "doctor"
+	indexCommand    = "index"
+	headlessCommand = "headless"
+	askAction       = "ask"
+	versionCommand  = "version"
+)
+
+// StateUnavailable is the stable diagnostic state for a probe that could not run.
+const StateUnavailable = "unavailable"
+
+// Dependencies are composition-root policies used by the doctor without
+// importing the command package that owns them.
+type Dependencies struct {
+	ExpectedEngineCapabilities func(pfmengine.ID, []string) map[string]bool
+}
+
 // doctorTally is the two-tier count `runDoctor` threads through every row: warnings are advisory;
 // failures mean `pfm install --yes` missed required state or a required dependency is unavailable.
 // Only failures gate `pfm update` (update_command.go);
@@ -60,9 +77,9 @@ type pinnedHarvestDoctor struct{}
 // harvestDoctorOverride is nil in production. The command-package TestMain
 // supplies a complete no-network fixture so existing doctor tests exercise
 // fleet health without requiring a user-managed Python environment.
-var harvestDoctorOverride harvestDoctor
+var HarvestOverride harvestDoctor
 
-var dependencyProbeOverride func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result
+var DependencyProbeOverride func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result
 
 func (pinnedHarvestDoctor) Inspect(root string, platform harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
 	return harvestpy.InspectConversionEnvironment(root, platform)
@@ -76,10 +93,12 @@ func (pinnedHarvestDoctor) Check(
 	return harvestpy.CheckConversionEnvironment(ctx, root, platform)
 }
 
-func runDoctor(
+// Run performs one health pass and returns 0 clean, 1 warnings, 2 usage, or 3 failures.
+func Run(
 	args []string,
 	stdout, stderr io.Writer,
-	runtime commandRuntime,
+	runtime config.Runtime,
+	dependencies Dependencies,
 ) (exitCode int) {
 	flags := cli.NewFlagSet(
 		doctorCommand,
@@ -101,12 +120,12 @@ func runDoctor(
 		fmt.Fprintf(stdout, "doctor: config error=%v\n", runtime.ConfigError)
 		tally.fail()
 	}
-	printDoctorConfig(stdout, runtime)
+	PrintConfig(stdout, runtime)
 	tally.warnings += printHarvesterConfigDoctor(stdout, runtime)
 	tally.warnings += printEngineDoctor(stdout, runtime.Config)
 	tally.warnings += printOpenCodeStoreDoctor(context.Background(), stdout, runtime.Config)
-	tally.warnings += printEngineCapabilities(stdout)
-	tally.warnings += printMCPClientCutover(stdout, runtime)
+	tally.warnings += PrintEngineCapabilities(stdout, dependencies)
+	tally.warnings += PrintMCPClientCutover(stdout, runtime)
 	if mcpConfigured(runtime) {
 		status, daemonErr := mcpserv.DaemonReachability(runtime)
 		if daemonErr != nil {
@@ -121,9 +140,14 @@ func runDoctor(
 				status.Endpoint,
 			)
 			tally.warnings += printHarvesterExternalDoctor(stdout, runtime.Config.Harvester, status.HarvesterExternal)
-			if status.PFMVersion != version {
+			if status.PFMVersion != runtime.Version {
 				tally.warn()
-				fmt.Fprintf(stdout, "doctor: mcp daemon=version-skew daemon=%s client=%s\n", status.PFMVersion, version)
+				fmt.Fprintf(
+					stdout,
+					"doctor: mcp daemon=version-skew daemon=%s client=%s\n",
+					status.PFMVersion,
+					runtime.Version,
+				)
 			}
 		}
 	}
@@ -192,7 +216,7 @@ func runDoctor(
 	)
 	tally.warnings += claudeVersionsWarnings
 	tally.failures += claudeVersionsFailures
-	depWarnings, depFailures, claudeAbsent := printDependencyDoctor(
+	depWarnings, depFailures, claudeAbsent := PrintDependencies(
 		ctx,
 		stdout,
 		resolved.Home,
@@ -314,7 +338,7 @@ func runDoctor(
 	tally.warnings += config.ReportRoots(stdout, runtime.Config.Accounts, runtime.Config.CodexAccounts, claudeAbsent)
 	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
 
-	tally.warnings += printCodexPaneBindingDoctor(ctx, stdout, database, runtime)
+	tally.warnings += PrintCodexPaneBinding(ctx, stdout, database, runtime)
 
 	crumbEntries, crumbInvalid, crumbErr := crumbHealth(resolved.SIDDir)
 	if crumbErr != nil {
@@ -374,11 +398,11 @@ func runDoctor(
 //
 // Both were found on a real host by reading the meta table by hand. Neither
 // produced a single line of output anywhere in pfm. They do now.
-func printCodexPaneBindingDoctor(
+func PrintCodexPaneBinding(
 	ctx context.Context,
 	stdout io.Writer,
 	database *store.Store,
-	runtime commandRuntime,
+	runtime config.Runtime,
 ) int {
 	manager, err := kill.New(database, fleet.KillDependencies(runtime))
 	if err != nil {
@@ -485,7 +509,7 @@ func printCodexPaneBindingDoctor(
 		"doctor: codex_pane_bindings total=%d live=%d stale=%d contested=%d retired=%d undecodable=%d\n",
 		len(bindings), len(bindings)-stale-undecodable, stale, contested, retired, undecodable,
 	)
-	warnings += printCodexPaneFollowDoctor(ctx, stdout, database, manager, runtime, snapshot, paneErr)
+	warnings += PrintCodexPaneFollow(ctx, stdout, database, manager, runtime, snapshot, paneErr)
 	if warnings != 0 {
 		fmt.Fprintf(
 			stdout,
@@ -516,12 +540,12 @@ func printCodexPaneBindingDoctor(
 //
 // It runs the SAME decision the reconcile pass runs, over a fresh capture, so
 // the report cannot drift from the behaviour it describes.
-func printCodexPaneFollowDoctor(
+func PrintCodexPaneFollow(
 	ctx context.Context,
 	stdout io.Writer,
 	database *store.Store,
 	manager *kill.Manager,
-	runtime commandRuntime,
+	runtime config.Runtime,
 	snapshot gather.Snapshot,
 	paneErr error,
 ) int {
@@ -581,7 +605,7 @@ func printCodexPaneFollowDoctor(
 // directory. It exists so `pfm doctor` can audit pane state without paying for
 // a whole fleet gather (procfs walk, every engine, every transcript) that it
 // would use one field of.
-func liveCodexPanes(ctx context.Context, runtime commandRuntime) ([]gather.ProbePane, error) {
+func liveCodexPanes(ctx context.Context, runtime config.Runtime) ([]gather.ProbePane, error) {
 	entries, err := os.ReadDir(runtime.Paths.TmuxDir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -640,7 +664,7 @@ func printEngineDoctor(stdout io.Writer, machine config.Config) int {
 	return 0
 }
 
-func printEngineCapabilities(stdout io.Writer) int {
+func PrintEngineCapabilities(stdout io.Writer, dependencies Dependencies) int {
 	capabilities := []struct {
 		name string
 		ids  []pfmengine.ID
@@ -667,7 +691,10 @@ func printEngineCapabilities(stdout io.Writer) int {
 				actual[capability.name] = true
 			}
 		}
-		expected := expectedEngineCapabilities(id, allNames)
+		expected := map[string]bool{}
+		if dependencies.ExpectedEngineCapabilities != nil {
+			expected = dependencies.ExpectedEngineCapabilities(id, allNames)
+		}
 		missing := make([]string, 0)
 		unexpected := make([]string, 0)
 		for _, name := range allNames {
@@ -707,13 +734,13 @@ func containsEngine(ids []pfmengine.ID, want pfmengine.ID) bool {
 }
 
 func configuredDependencyProbe(ctx context.Context, entries []deps.Entry, options deps.ProbeOptions) []deps.Result {
-	if dependencyProbeOverride != nil {
-		return dependencyProbeOverride(ctx, entries, options)
+	if DependencyProbeOverride != nil {
+		return DependencyProbeOverride(ctx, entries, options)
 	}
 	return deps.Probe(ctx, entries, options)
 }
 
-func printDependencyDoctor(
+func PrintDependencies(
 	ctx context.Context,
 	stdout io.Writer,
 	home string,
@@ -1041,7 +1068,7 @@ func printHarvestSearchDoctor(ctx context.Context, stdout io.Writer, harvester c
 	return 0
 }
 
-func mcpConfigured(runtime commandRuntime) bool {
+func mcpConfigured(runtime config.Runtime) bool {
 	for _, server := range runtime.Config.MCPServers {
 		if server.Enabled {
 			return true
@@ -1051,8 +1078,8 @@ func mcpConfigured(runtime commandRuntime) bool {
 }
 
 func configuredHarvestDoctor() harvestDoctor {
-	if harvestDoctorOverride != nil {
-		return harvestDoctorOverride
+	if HarvestOverride != nil {
+		return HarvestOverride
 	}
 	return pinnedHarvestDoctor{}
 }
@@ -1212,7 +1239,7 @@ func browserEnvFingerprint(digest harvestpy.EnvironmentDigest) string {
 	if len(digest.Digest) >= 8 {
 		return digest.Digest[:8]
 	}
-	return unknownState
+	return StateUnknown
 }
 
 // gateOn is harvester.config.json fetch.browser — the same value the core's
@@ -1390,7 +1417,7 @@ func harvestDoctorCheck(report harvestpy.CheckReport, name string, checkErr erro
 	return false, "check did not report healthy"
 }
 
-func printDoctorConfig(stdout io.Writer, runtime commandRuntime) {
+func PrintConfig(stdout io.Writer, runtime config.Runtime) {
 	fmt.Fprintf(
 		stdout,
 		"doctor: config path=%s exists=%t\n",
@@ -1465,7 +1492,7 @@ func printDoctorConfig(stdout io.Writer, runtime commandRuntime) {
 // retiredHarvesterEnv maps every environment variable the harvester used to
 // read to where that setting lives now. The harvester ignores them all, so a
 // set one is a setting that silently stopped applying — doctor says so.
-var retiredHarvesterEnv = []struct{ name, now string }{
+var RetiredHarvesterEnv = []struct{ Name, Now string }{
 	{"SEARXNG_URL", "search.searxngURL"},
 	{"BRAVE_API_KEY", "search.braveApiKey"},
 	{"HARVESTER_DISABLE_SEARCH", "search.enabled"},
@@ -1514,7 +1541,7 @@ func printHarvesterExternalDoctor(stdout io.Writer, harvester config.HarvesterCo
 // applying without an error: a config migration still pending (pre-split
 // layout, an interrupted migration's leftover, the old default port), and a
 // retired environment variable still set. Each is a warning.
-func printHarvesterConfigDoctor(stdout io.Writer, runtime commandRuntime) int {
+func printHarvesterConfigDoctor(stdout io.Writer, runtime config.Runtime) int {
 	warnings := 0
 	if migration, err := config.PlanMigration(runtime.Config); err != nil {
 		warnings++
@@ -1524,24 +1551,24 @@ func printHarvesterConfigDoctor(stdout io.Writer, runtime commandRuntime) int {
 		fmt.Fprintf(stdout, "doctor: config layout=pre-split path=%s remediation=run pfm install --yes (%s)\n",
 			runtime.Config.Path, strings.Join(migration.Steps(), "; "))
 	}
-	for _, retired := range retiredHarvesterEnv {
-		if strings.TrimSpace(os.Getenv(retired.name)) == "" {
+	for _, retired := range RetiredHarvesterEnv {
+		if strings.TrimSpace(os.Getenv(retired.Name)) == "" {
 			continue
 		}
 		warnings++
-		if retired.now == "" {
+		if retired.Now == "" {
 			fmt.Fprintf(
 				stdout,
 				"doctor: harvester retired_env=%s is set but ignored (removed; pfm never honored it)\n",
-				retired.name,
+				retired.Name,
 			)
 			continue
 		}
 		fmt.Fprintf(
 			stdout,
 			"doctor: harvester retired_env=%s is set but ignored — move it to %s in %s\n",
-			retired.name,
-			retired.now,
+			retired.Name,
+			retired.Now,
 			runtime.Config.Harvester.Path,
 		)
 	}
@@ -1733,7 +1760,7 @@ func knownSIDMetadata(name string) bool {
 	return ok && paneID == ""
 }
 
-func liveCodexSnapshot(ctx context.Context, runtime commandRuntime, manager *kill.Manager) (gather.Snapshot, error) {
+func liveCodexSnapshot(ctx context.Context, runtime config.Runtime, manager *kill.Manager) (gather.Snapshot, error) {
 	panes, err := liveCodexPanes(ctx, runtime)
 	snapshot := gather.Snapshot{Panes: panes}
 	if err != nil || len(panes) == 0 {

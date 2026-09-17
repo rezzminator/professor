@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"bytes"
@@ -12,8 +12,6 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/paths"
 )
 
 func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
@@ -237,15 +235,15 @@ func TestDoctorEnumeratesExternalDependenciesAndInstalledHooks(t *testing.T) {
 }
 
 func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
-	saved := dependencyProbeOverride
-	t.Cleanup(func() { dependencyProbeOverride = saved })
+	saved := DependencyProbeOverride
+	t.Cleanup(func() { DependencyProbeOverride = saved })
 	entries := []deps.Entry{
 		{Name: "tmux", Required: true, MinVersion: "1.8"},
 		{Name: "ps", Required: true, Platforms: []string{"darwin"}},
 		{Name: "codex", Required: true, InstallHint: "install configured Codex"},
 		{Name: "claude", Required: true},
 	}
-	dependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
+	DependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
 		return []deps.Result{
 			{Entry: entries[0], State: deps.StateOK, Path: "/fixture/tmux", Version: "3.4"},
 			{Entry: entries[1], State: deps.StateSkipped, Error: "not this platform"},
@@ -260,7 +258,7 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 		}
 	}
 	var output bytes.Buffer
-	if _, failures, _ := printDependencyDoctor(
+	if _, failures, _ := PrintDependencies(
 		context.Background(),
 		&output,
 		"",
@@ -288,8 +286,8 @@ func TestDependencyDoctorRowsKeepMissingBrokenAndSkippedDistinct(t *testing.T) {
 // both stay broken and counted. The identity check is installer.ClaudeAbsent,
 // never a string match on stderr.
 func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
-	saved := dependencyProbeOverride
-	t.Cleanup(func() { dependencyProbeOverride = saved })
+	saved := DependencyProbeOverride
+	t.Cleanup(func() { DependencyProbeOverride = saved })
 	home := t.TempDir()
 	launcher := filepath.Join(home, ".local", "bin", pfmengine.MustLookup(pfmengine.Claude).Binary)
 	// Required:true here (unlike the real registry's optional claude entry) is
@@ -311,14 +309,14 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
-			dependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
+			DependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
 				return []deps.Result{{
 					Entry: entry, State: deps.StateBroken, Path: testCase.path,
 					ExitCode: testCase.exitCode, Error: fmt.Sprintf("exit status %d", testCase.exitCode),
 				}}
 			}
 			var output bytes.Buffer
-			_, failures, claudeAbsent := printDependencyDoctor(
+			_, failures, claudeAbsent := PrintDependencies(
 				context.Background(),
 				&output,
 				home,
@@ -349,18 +347,18 @@ func TestDependencyDoctorClaudeAbsenceIsNamedNotWarned(t *testing.T) {
 }
 
 func TestDependencyDoctorTimeoutRowNamesTimeoutNotBroken(t *testing.T) {
-	saved := dependencyProbeOverride
-	t.Cleanup(func() { dependencyProbeOverride = saved })
+	saved := DependencyProbeOverride
+	t.Cleanup(func() { DependencyProbeOverride = saved })
 	entries := []deps.Entry{
 		{Name: "tmux", Required: true},
 	}
-	dependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
+	DependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
 		return []deps.Result{
 			{Entry: entries[0], State: deps.StateTimeout, Path: "/fixture/tmux", Error: "timeout (5s)"},
 		}
 	}
 	var output bytes.Buffer
-	_, failures, _ := printDependencyDoctor(context.Background(), &output, "", entries, deps.ProbeOptions{})
+	_, failures, _ := PrintDependencies(context.Background(), &output, "", entries, deps.ProbeOptions{})
 	if failures != 1 {
 		t.Fatalf(
 			"failures=%d, want 1 — a required timed-out dep still contributes its failure\n%s",
@@ -377,17 +375,17 @@ func TestDependencyDoctorTimeoutRowNamesTimeoutNotBroken(t *testing.T) {
 }
 
 func TestDependencyDoctorCancellationRowNamesCallerStopNotBroken(t *testing.T) {
-	saved := dependencyProbeOverride
-	t.Cleanup(func() { dependencyProbeOverride = saved })
+	saved := DependencyProbeOverride
+	t.Cleanup(func() { DependencyProbeOverride = saved })
 	entry := deps.Entry{Name: "tmux", Required: true}
-	dependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
+	DependencyProbeOverride = func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result {
 		return []deps.Result{{
 			Entry: entry, State: deps.StateCancelled, Path: "/fixture/tmux",
 			Error: "cancelled by parent context",
 		}}
 	}
 	var output bytes.Buffer
-	_, failures, _ := printDependencyDoctor(context.Background(), &output, "", []deps.Entry{entry}, deps.ProbeOptions{})
+	_, failures, _ := PrintDependencies(context.Background(), &output, "", []deps.Entry{entry}, deps.ProbeOptions{})
 	if failures != 1 {
 		t.Fatalf("failures=%d, want 1 for a required unanswered probe\n%s", failures, output.String())
 	}
@@ -399,145 +397,5 @@ func TestDependencyDoctorCancellationRowNamesCallerStopNotBroken(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "broken") {
 		t.Fatalf("caller cancellation must not be diagnosed as broken:\n%s", output.String())
-	}
-}
-
-func TestInstallPreflightRefusesRequiredDependencyBeforeInstallerRuns(t *testing.T) {
-	savedProbe, savedInstaller := dependencyProbeOverride, runInstaller
-	t.Cleanup(func() {
-		dependencyProbeOverride = savedProbe
-		runInstaller = savedInstaller
-	})
-	dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
-		for _, entry := range entries {
-			if entry.Name == "tmux" {
-				return []deps.Result{{Entry: entry, State: deps.StateMissing}}
-			}
-		}
-		t.Fatal("tmux registry entry missing")
-		return nil
-	}
-	called := false
-	runInstaller = func(context.Context, installer.Options) (installer.Report, error) {
-		called = true
-		return installer.Report{}, nil
-	}
-	home := t.TempDir()
-	runtime := commandRuntime{
-		Config: pfmconfig.Config{Claude: pfmconfig.Claude{Binary: "claude"}, Codex: pfmconfig.Codex{Binary: "codex"}},
-		Paths: paths.Values{
-			Home:  home,
-			Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}},
-		},
-	}
-	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 1 {
-		t.Fatalf("install code=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
-	}
-	if called || !strings.Contains(stdout.String(), "doctor: dep tmux path=(none) MISSING required") ||
-		!strings.Contains(stderr.String(), "required dependency preflight failed") {
-		t.Fatalf("called=%t stdout=%s stderr=%s", called, stdout.String(), stderr.String())
-	}
-}
-
-func TestInstallPreflightDoesNotRefuseBrokenOptionalEngine(t *testing.T) {
-	savedProbe, savedInstaller := dependencyProbeOverride, runInstaller
-	t.Cleanup(func() {
-		dependencyProbeOverride = savedProbe
-		runInstaller = savedInstaller
-	})
-	dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
-		for _, entry := range entries {
-			if entry.Name == "codex" {
-				return []deps.Result{
-					{
-						Entry: entry,
-						State: deps.StateBroken,
-						Path:  "/fixture/codex",
-						Error: "self-doctor failed: auth missing",
-					},
-				}
-			}
-		}
-		t.Fatal("codex registry entry missing")
-		return nil
-	}
-	called := false
-	runInstaller = func(context.Context, installer.Options) (installer.Report, error) {
-		called = true
-		return installer.Report{}, nil
-	}
-	home := t.TempDir()
-	runtime := commandRuntime{
-		Config: pfmconfig.Config{
-			Codex:         pfmconfig.Codex{Binary: "codex"},
-			CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}},
-		},
-		Paths: paths.Values{Home: home},
-	}
-	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--yes", "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf(
-			"install code=%d stdout=%s stderr=%s, want optional Codex failure to remain non-blocking",
-			code,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-	if !called || !strings.Contains(stdout.String(), "dep codex") ||
-		!strings.Contains(stdout.String(), "auth missing") {
-		t.Fatalf(
-			"called=%t stdout=%s stderr=%s, want a visible optional failure followed by install",
-			called,
-			stdout.String(),
-			stderr.String(),
-		)
-	}
-}
-
-func TestInstallPreflightFailureStillPreviewsInDryRun(t *testing.T) {
-	savedProbe, savedInstaller := dependencyProbeOverride, runInstaller
-	t.Cleanup(func() {
-		dependencyProbeOverride = savedProbe
-		runInstaller = savedInstaller
-	})
-	dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
-		for _, entry := range entries {
-			if entry.Name == "tmux" {
-				return []deps.Result{{Entry: entry, State: deps.StateMissing}}
-			}
-		}
-		t.Fatal("tmux registry entry missing")
-		return nil
-	}
-	called := false
-	runInstaller = func(_ context.Context, options installer.Options) (installer.Report, error) {
-		if options.Mode != installer.ModeDryRun {
-			t.Errorf("install mode=%v, want dry run", options.Mode)
-		}
-		called = true
-		return installer.Report{}, nil
-	}
-	home := t.TempDir()
-	runtime := commandRuntime{
-		Config: pfmconfig.Config{Claude: pfmconfig.Claude{Binary: "claude"}, Codex: pfmconfig.Codex{Binary: "codex"}},
-		Paths: paths.Values{
-			Home:  home,
-			Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}},
-		},
-	}
-	var stdout, stderr bytes.Buffer
-	if code := runInstall([]string{"--skip-harvest"}, &stdout, &stderr, runtime); code != 1 {
-		t.Fatalf("install code=%d, want 1\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
-	}
-	if !called {
-		t.Fatal("read-only preview never ran — a fresh machine gets no plan at all")
-	}
-	if !strings.Contains(stdout.String(), "doctor: dep tmux path=(none) MISSING required") ||
-		!strings.Contains(stderr.String(), "required dependency preflight failed") {
-		t.Fatalf("missing preflight report:\nstdout=%s\nstderr=%s", stdout.String(), stderr.String())
-	}
-	if strings.Contains(stdout.String(), "if you agree, run again") {
-		t.Fatalf("apply confirmation offered despite failed preflight:\n%s", stdout.String())
 	}
 }

@@ -214,7 +214,11 @@ func TestHeadlessConsumersUseSharedRunner(t *testing.T) {
 			[]string{"headlessrun.Run("},
 			[]string{"exec.Command", "exec.CommandContext"},
 		},
-		{filepath.Join(root, "doctor_harness_prompt.go"), []string{"headlessrun.Run("}, nil},
+		{
+			filepath.Join(root, "..", "..", "internal", "doctor", "harness_prompt.go"),
+			[]string{"headlessrun.Run("},
+			nil,
+		},
 	}
 	for _, testCase := range cases {
 		body, err := os.ReadFile(testCase.path)

@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"bytes"
@@ -24,7 +24,9 @@ import (
 func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	t.Helper()
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
-	return testjail.CleanHome(t)
+	runtime := testjail.CleanHome(t)
+	stageHarnessPromptBaseline(t, runtime.Paths.Home)
+	return runtime
 }
 
 func TestDoctorFreshTargetHomeIsClean(t *testing.T) {
@@ -137,9 +139,9 @@ func TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone(t *te
 
 	t.Run("a required dependency missing exits 3 with failures=1", func(t *testing.T) {
 		runtime := buildCleanDoctorHome(t)
-		saved := dependencyProbeOverride
-		t.Cleanup(func() { dependencyProbeOverride = saved })
-		dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
+		saved := DependencyProbeOverride
+		t.Cleanup(func() { DependencyProbeOverride = saved })
+		DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
 			results := make([]deps.Result, 0, len(entries))
 			for _, entry := range entries {
 				if !entry.AppliesTo(goRuntime.GOOS) {
@@ -270,7 +272,7 @@ func TestCrumbHealthMissingDirectoryIsEmpty(t *testing.T) {
 // a golden "clean" doctor run into a warning.
 func clearRetiredHarvesterEnv(t *testing.T) {
 	t.Helper()
-	for _, retired := range retiredHarvesterEnv {
-		t.Setenv(retired.name, "")
+	for _, retired := range RetiredHarvesterEnv {
+		t.Setenv(retired.Name, "")
 	}
 }

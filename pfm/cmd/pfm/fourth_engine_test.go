@@ -11,6 +11,7 @@ import (
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/ask"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/index"
@@ -82,12 +83,15 @@ func TestFourthEngineNeedsOnlyItsOwnPackage(t *testing.T) {
 		t.Fatalf("decoded ask config=%#v", machine.Ask)
 	}
 
-	var doctor strings.Builder
-	if warnings := printEngineCapabilities(&doctor); warnings != 0 {
-		t.Fatalf("doctor warnings=%d row=%q", warnings, doctor.String())
+	var doctorOutput strings.Builder
+	if warnings := doctor.PrintEngineCapabilities(
+		&doctorOutput,
+		doctor.Dependencies{ExpectedEngineCapabilities: expectedEngineCapabilities},
+	); warnings != 0 {
+		t.Fatalf("doctor warnings=%d row=%q", warnings, doctorOutput.String())
 	}
-	if !strings.Contains(doctor.String(), "zz=index,launcher,matcher,usage,headless,ask") {
-		t.Fatalf("doctor row omitted fourth engine: %q", doctor.String())
+	if !strings.Contains(doctorOutput.String(), "zz=index,launcher,matcher,usage,headless,ask") {
+		t.Fatalf("doctor row omitted fourth engine: %q", doctorOutput.String())
 	}
 
 	current := pfmengine.Claude

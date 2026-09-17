@@ -12,8 +12,16 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 )
+
+func clearRetiredHarvesterEnv(t *testing.T) {
+	t.Helper()
+	for _, retired := range doctor.RetiredHarvesterEnv {
+		t.Setenv(retired.Name, "")
+	}
+}
 
 func TestLaunchPassThroughPredicate(t *testing.T) {
 	t.Parallel()

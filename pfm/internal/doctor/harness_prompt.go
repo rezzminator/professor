@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"context"
@@ -35,13 +35,13 @@ var harnessCaptureSinkGrace = 2 * time.Second
 // pattern as dependencyProbeOverride and installer.HookProbeOverride. Only the CAPTURE
 // step is ever swapped; the baseline read and the verdict comparison stay
 // real, so a test still exercises the actual match/DRIFT/CHECK-FAILED logic.
-type harnessCapture struct {
+type HarnessCapture struct {
 	Prompt        string
 	ResolvedModel string
 	CLIVersion    string
 }
 
-var harnessCaptureOverride func(context.Context, string, config.Config, string, string) (harnessCapture, error)
+var HarnessCaptureOverride func(context.Context, string, config.Config, string, string) (HarnessCapture, error)
 
 // errClaudeAbsent marks a capture failure as "no Claude Code binary
 // installed" — installer.ClaudeAbsent's verdict — so the doctor row can
@@ -61,9 +61,9 @@ func configuredHarnessCapture(
 	home string,
 	machine config.Config,
 	model, verboseDir string,
-) (harnessCapture, error) {
-	if harnessCaptureOverride != nil {
-		return harnessCaptureOverride(ctx, home, machine, model, verboseDir)
+) (HarnessCapture, error) {
+	if HarnessCaptureOverride != nil {
+		return HarnessCaptureOverride(ctx, home, machine, model, verboseDir)
 	}
 	return captureHarnessPrompt(ctx, home, machine, model, verboseDir)
 }
@@ -166,10 +166,10 @@ func captureHarnessPrompt(
 	home string,
 	machine config.Config,
 	model, verboseDir string,
-) (harnessCapture, error) {
+) (HarnessCapture, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		return harnessCapture{}, fmt.Errorf("open capture sink: %w", err)
+		return HarnessCapture{}, fmt.Errorf("open capture sink: %w", err)
 	}
 	bodies := make(chan []byte, 1)
 	hits := &harnessSinkHits{}
@@ -179,14 +179,14 @@ func captureHarnessPrompt(
 
 	resolvedPaths, pathErr := paths.Resolve()
 	if pathErr != nil {
-		return harnessCapture{}, fmt.Errorf("resolve harness capture scratch directory: %w", pathErr)
+		return HarnessCapture{}, fmt.Errorf("resolve harness capture scratch directory: %w", pathErr)
 	}
 	if err := os.MkdirAll(resolvedPaths.SIDDir, 0o700); err != nil {
-		return harnessCapture{}, fmt.Errorf("create harness capture scratch base %s: %w", resolvedPaths.SIDDir, err)
+		return HarnessCapture{}, fmt.Errorf("create harness capture scratch base %s: %w", resolvedPaths.SIDDir, err)
 	}
 	configDir, err := os.MkdirTemp(resolvedPaths.SIDDir, "pfm-harness-configdir-")
 	if err != nil {
-		return harnessCapture{}, fmt.Errorf("create throwaway CLAUDE_CONFIG_DIR: %w", err)
+		return HarnessCapture{}, fmt.Errorf("create throwaway CLAUDE_CONFIG_DIR: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(configDir) }()
 
@@ -208,14 +208,14 @@ func captureHarnessPrompt(
 			}
 		}
 		if installer.ClaudeAbsent(home, resolved, deps.ExitCode(versionErr)) {
-			return harnessCapture{}, errClaudeAbsent
+			return HarnessCapture{}, errClaudeAbsent
 		}
-		return harnessCapture{}, fmt.Errorf("read Claude CLI version: %w", versionErr)
+		return HarnessCapture{}, fmt.Errorf("read Claude CLI version: %w", versionErr)
 	}
 	version := strings.TrimSpace(string(versionRaw))
 	devNull, stdinErr := os.Open(os.DevNull)
 	if stdinErr != nil {
-		return harnessCapture{}, fmt.Errorf("open %s for the capture run's stdin: %w", os.DevNull, stdinErr)
+		return HarnessCapture{}, fmt.Errorf("open %s for the capture run's stdin: %w", os.DevNull, stdinErr)
 	}
 	defer func() { _ = devNull.Close() }()
 	result, runErr := headlessrun.Run(ctx, headlessrun.Request{
@@ -228,7 +228,7 @@ func captureHarnessPrompt(
 		// stream that carries nothing (issue #24 finding 6 observed a "no
 		// stdin data received in 3s" warning when stdin was left ambiguous).
 		Args: []string{
-			"x", "--output-format", jsonFormat, "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
+			"x", "--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 			"--max-turns", "1", "--exclude-dynamic-system-prompt-sections",
 		},
 		Env:   harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
@@ -240,14 +240,14 @@ func captureHarnessPrompt(
 			"harness-prompt.stdout",
 			[]byte(result.Stdout),
 		); writeErr != nil {
-			return harnessCapture{}, fmt.Errorf("write harness capture stdout evidence: %w", writeErr)
+			return HarnessCapture{}, fmt.Errorf("write harness capture stdout evidence: %w", writeErr)
 		}
 		if writeErr := deps.WriteVerboseFile(
 			verboseDir,
 			"harness-prompt.stderr",
 			[]byte(result.Stderr),
 		); writeErr != nil {
-			return harnessCapture{}, fmt.Errorf("write harness capture stderr evidence: %w", writeErr)
+			return HarnessCapture{}, fmt.Errorf("write harness capture stderr evidence: %w", writeErr)
 		}
 	}
 	// The CLI exits nonzero by design — the sink refused its request; the
@@ -268,7 +268,7 @@ func captureHarnessPrompt(
 			_ = writeHarnessSinkHits(verboseDir, hits)
 		}
 		if hits.count() == 0 && runErr == nil && claudeAnsweredWithoutSink(result.Stdout) {
-			return harnessCapture{CLIVersion: version}, fmt.Errorf(
+			return HarnessCapture{CLIVersion: version}, fmt.Errorf(
 				"%w (OAuth-only routing on cli=%s) — one minimal request may have been billed",
 				errHarnessBypassedSink,
 				version,
@@ -278,7 +278,7 @@ func captureHarnessPrompt(
 		if verboseDir != "" {
 			message = fmt.Errorf("%w — see %s (--verbose)", message, filepath.Join(verboseDir, "harness-prompt.stderr"))
 		}
-		return harnessCapture{CLIVersion: version}, errors.Join(message, runErr)
+		return HarnessCapture{CLIVersion: version}, errors.Join(message, runErr)
 	}
 }
 
@@ -421,16 +421,16 @@ func joinSystemBlocks(body []byte) (string, error) {
 	return strings.Join(texts, "\n\n=== SYSTEM BLOCK ===\n\n") + "\n", nil
 }
 
-func decodeHarnessCapture(body []byte) (harnessCapture, error) {
+func decodeHarnessCapture(body []byte) (HarnessCapture, error) {
 	var request struct {
 		Model string `json:"model"`
 	}
 	if err := json.Unmarshal(body, &request); err != nil {
-		return harnessCapture{}, fmt.Errorf("parse captured request: %w", err)
+		return HarnessCapture{}, fmt.Errorf("parse captured request: %w", err)
 	}
 	if strings.TrimSpace(request.Model) == "" {
-		return harnessCapture{}, errors.New("captured request carries no resolved model")
+		return HarnessCapture{}, errors.New("captured request carries no resolved model")
 	}
 	prompt, err := joinSystemBlocks(body)
-	return harnessCapture{Prompt: prompt, ResolvedModel: request.Model}, err
+	return HarnessCapture{Prompt: prompt, ResolvedModel: request.Model}, err
 }

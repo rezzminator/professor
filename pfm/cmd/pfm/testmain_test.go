@@ -14,6 +14,7 @@ import (
 
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/doctor"
 	"hostops/pfm/internal/harvestpy"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/testjail"
@@ -107,11 +108,11 @@ func TestMain(m *testing.M) {
 	installer.SetImplementedSubcommands(topLevelSubcommands, internalSubcommands)
 	installHarvestProvisionerOverride = noNetworkHarvestProvisioner{}
 	installThemeHTTPClientOverride = &http.Client{Transport: noNetworkThemeTransport{}}
-	harvestDoctorOverride = noNetworkHarvestDoctor{}
-	prePushGateProbeOverride = func(context.Context) prePushGate {
-		return prePushGate{State: "outside-repository"}
+	doctor.HarvestOverride = noNetworkHarvestDoctor{}
+	doctor.PrePushGateProbeOverride = func(context.Context) doctor.PrePushGate {
+		return doctor.PrePushGate{State: "outside-repository"}
 	}
-	dependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
+	doctor.DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
 		results := make([]deps.Result, 0, len(entries))
 		for index := range entries {
 			entry := &entries[index]
@@ -147,8 +148,8 @@ func TestMain(m *testing.M) {
 	// whether a doctor fixture reads as matches/DRIFT/CHECK-FAILED still
 	// depends only on what baseline (if any) the fixture stages, via
 	// stageHarnessPromptBaseline in main_test.go.
-	harnessCaptureOverride = func(_ context.Context, _ string, _ pfmconfig.Config, alias, _ string) (harnessCapture, error) {
-		return harnessCapture{
+	doctor.HarnessCaptureOverride = func(_ context.Context, _ string, _ pfmconfig.Config, alias, _ string) (doctor.HarnessCapture, error) {
+		return doctor.HarnessCapture{
 			Prompt:        harnessPromptFixtureCaptured,
 			ResolvedModel: "claude-" + alias + "-5",
 			CLIVersion:    "fixture",

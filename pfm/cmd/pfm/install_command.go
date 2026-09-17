@@ -11,6 +11,7 @@ import (
 	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/professor"
@@ -98,7 +99,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 	entries := deps.Registry(deps.Options{
 		Home: runtime.Paths.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 	})
-	_, preflight, _ := printDependencyDoctor(
+	_, preflight, _ := doctor.PrintDependencies(
 		context.Background(),
 		stdout,
 		runtime.Paths.Home,

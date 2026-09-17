@@ -11,6 +11,7 @@ import (
 
 	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/config"
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/installer"
@@ -117,7 +118,13 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "index":
 		return runIndex(args[1:], stdout, stderr, runtime)
 	case "doctor":
-		return runDoctor(args[1:], stdout, stderr, runtime)
+		return doctor.Run(
+			args[1:],
+			stdout,
+			stderr,
+			runtime,
+			doctor.Dependencies{ExpectedEngineCapabilities: expectedEngineCapabilities},
+		)
 	case "config":
 		return runConfig(args[1:], stdout, stderr, runtime)
 	case "reap":

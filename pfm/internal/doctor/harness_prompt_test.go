@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"bytes"
@@ -141,16 +141,16 @@ func TestJoinSystemBlocksMatchesBaselineRendering(t *testing.T) {
 // doctor_jail_test.go, launch_command_test.go, doctor_external_test.go) able
 // to reach match, DRIFT, and CHECK FAILED without a real `claude` binary.
 func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
-	saved := harnessCaptureOverride
-	t.Cleanup(func() { harnessCaptureOverride = saved })
+	saved := HarnessCaptureOverride
+	t.Cleanup(func() { HarnessCaptureOverride = saved })
 
 	stageBaseline := func(t *testing.T, home, captured, name string) {
 		stageModelHarnessPromptBaseline(t, home, harnessPromptModels[0], captured, name)
 	}
-	refuseCapture := func(t *testing.T) func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-		return func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
+	refuseCapture := func(t *testing.T) func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+		return func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
 			t.Fatal("capture must not run before the baseline is readable and well-formed")
-			return harnessCapture{}, nil
+			return HarnessCapture{}, nil
 		}
 	}
 
@@ -163,7 +163,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 		{
 			name: "missing baseline never reaches the capture step",
 			setup: func(t *testing.T, _ string) {
-				harnessCaptureOverride = refuseCapture(t)
+				HarnessCaptureOverride = refuseCapture(t)
 			},
 			wantWarn: true,
 			want:     "doctor: harness-prompt: baseline unreadable",
@@ -178,7 +178,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 				if err := os.WriteFile(path, []byte("not-two-fields\n"), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				harnessCaptureOverride = refuseCapture(t)
+				HarnessCaptureOverride = refuseCapture(t)
 			},
 			wantWarn: true,
 			want:     "doctor: harness-prompt: baseline malformed",
@@ -187,8 +187,8 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			name: "override content matching the staged baseline reports clean",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
-				harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-					return harnessCapture{
+				HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+					return HarnessCapture{
 						Prompt:        "captured-fixture\n",
 						ResolvedModel: "claude-sonnet-5",
 						CLIVersion:    "fixture",
@@ -202,8 +202,8 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			name: "override content diverging from the staged baseline reports DRIFT",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
-				harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-					return harnessCapture{
+				HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+					return HarnessCapture{
 						Prompt:        "a different live prompt\n",
 						ResolvedModel: "claude-sonnet-5",
 						CLIVersion:    "fixture",
@@ -217,8 +217,8 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			name: "override capture error reports CHECK FAILED, never DRIFT or matches",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
-				harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-					return harnessCapture{}, errors.New("no API request reached the capture sink")
+				HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+					return HarnessCapture{}, errors.New("no API request reached the capture sink")
 				}
 			},
 			wantWarn: true,
@@ -228,8 +228,8 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 			name: "Claude absence reports skipped, never CHECK FAILED, and no warning",
 			setup: func(t *testing.T, home string) {
 				stageBaseline(t, home, "captured-fixture\n", "fixture-baseline.md")
-				harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-					return harnessCapture{}, errClaudeAbsent
+				HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+					return HarnessCapture{}, errClaudeAbsent
 				}
 			},
 			wantWarn: false,

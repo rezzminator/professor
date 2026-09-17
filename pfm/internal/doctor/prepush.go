@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"context"
@@ -17,11 +17,10 @@ import (
 const (
 	expectedHooksPath = ".githooks"
 	brokenState       = "broken"
-	unavailableState  = "unavailable"
 	unreadableState   = "unreadable"
 )
 
-type prePushGate struct {
+type PrePushGate struct {
 	Repository string
 	Actual     string
 	State      string
@@ -31,12 +30,12 @@ type prePushGate struct {
 // prePushGateProbeOverride keeps command-package tests independent of the
 // checkout that runs them. Production leaves it nil; the dedicated pre-push
 // tests clear the test default and exercise inspectPrePushGate end to end.
-var prePushGateProbeOverride func(context.Context) prePushGate
+var PrePushGateProbeOverride func(context.Context) PrePushGate
 
 func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
-	var gate prePushGate
-	if prePushGateProbeOverride != nil {
-		gate = prePushGateProbeOverride(ctx)
+	var gate PrePushGate
+	if PrePushGateProbeOverride != nil {
+		gate = PrePushGateProbeOverride(ctx)
 	} else {
 		gate = inspectPrePushGate(ctx)
 	}
@@ -47,7 +46,7 @@ func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
 	case "not-configured":
 		fmt.Fprintln(stdout, "doctor: pre-push gate=not-configured hook=.githooks/pre-push ABSENT")
 		return 0
-	case unavailableState:
+	case StateUnavailable:
 		fmt.Fprintf(stdout, "doctor: pre-push gate=unavailable dependency=git error=%v\n", gate.Error)
 		return 0
 	case "armed":
@@ -75,34 +74,34 @@ func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
 	}
 }
 
-func inspectPrePushGate(ctx context.Context) prePushGate {
+func inspectPrePushGate(ctx context.Context) PrePushGate {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return prePushGate{State: unreadableState, Error: fmt.Errorf("resolve working directory: %w", err)}
+		return PrePushGate{State: unreadableState, Error: fmt.Errorf("resolve working directory: %w", err)}
 	}
 	git := deps.Executable("git")
 	repositoryBytes, err := exec.CommandContext(ctx, git, "-C", cwd, "rev-parse", "--show-toplevel").CombinedOutput()
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
-			return prePushGate{State: unavailableState, Error: err}
+			return PrePushGate{State: StateUnavailable, Error: err}
 		}
 		message := strings.TrimSpace(string(repositoryBytes))
 		if strings.Contains(strings.ToLower(message), "not a git repository") {
-			return prePushGate{State: "outside-repository"}
+			return PrePushGate{State: "outside-repository"}
 		}
-		return prePushGate{State: unreadableState, Error: fmt.Errorf("resolve repository: %w: %s", err, message)}
+		return PrePushGate{State: unreadableState, Error: fmt.Errorf("resolve repository: %w: %s", err, message)}
 	}
 	repository := filepath.Clean(strings.TrimSpace(string(repositoryBytes)))
 	hook := filepath.Join(repository, expectedHooksPath, "pre-push")
 	hookInfo, hookErr := os.Stat(hook)
 
-	actualBytes, configErr := exec.CommandContext(ctx, git, "-C", repository, configCommand, "--get", "core.hooksPath").
+	actualBytes, configErr := exec.CommandContext(ctx, git, "-C", repository, "config", "--get", "core.hooksPath").
 		CombinedOutput()
 	actual := strings.TrimSpace(string(actualBytes))
 	if configErr != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(configErr, &exitErr) || exitErr.ExitCode() != 1 || actual != "" {
-			return prePushGate{
+			return PrePushGate{
 				Repository: repository,
 				State:      unreadableState,
 				Error:      fmt.Errorf("read core.hooksPath: %w: %s", configErr, actual),
@@ -111,10 +110,10 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 	}
 
 	if errors.Is(hookErr, os.ErrNotExist) && actual == "" {
-		return prePushGate{Repository: repository, State: "not-configured"}
+		return PrePushGate{Repository: repository, State: "not-configured"}
 	}
 	if hookErr != nil {
-		return prePushGate{
+		return PrePushGate{
 			Repository: repository,
 			Actual:     actual,
 			State:      brokenState,
@@ -122,7 +121,7 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 		}
 	}
 	if !hookInfo.Mode().IsRegular() || hookInfo.Mode().Perm()&0o111 == 0 {
-		return prePushGate{
+		return PrePushGate{
 			Repository: repository,
 			Actual:     actual,
 			State:      brokenState,
@@ -131,7 +130,7 @@ func inspectPrePushGate(ctx context.Context) prePushGate {
 	}
 
 	if !installer.PrePushGateArmed(repository, actual) {
-		return prePushGate{Repository: repository, Actual: actual, State: "unwired"}
+		return PrePushGate{Repository: repository, Actual: actual, State: "unwired"}
 	}
-	return prePushGate{Repository: repository, Actual: actual, State: "armed"}
+	return PrePushGate{Repository: repository, Actual: actual, State: "armed"}
 }

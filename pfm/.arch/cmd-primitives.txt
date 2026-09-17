@@ -1,8 +1,6 @@
 cmd/pfm/chat_dispatch.go 1
 cmd/pfm/chat_reload_command.go 1
 cmd/pfm/chat_satellite_command.go 5
-cmd/pfm/doctor_harness_prompt.go 1
-cmd/pfm/doctor_prepush.go 2
 cmd/pfm/harvest_command.go 1
 cmd/pfm/headless_exec_command.go 1
 cmd/pfm/internal_update_check.go 1

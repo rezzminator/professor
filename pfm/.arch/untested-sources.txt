@@ -5,8 +5,6 @@ cmd/pfm/chat_dispatch.go
 cmd/pfm/chat_inject_resume.go
 cmd/pfm/chat_keys_command.go
 cmd/pfm/chat_new_command.go
-cmd/pfm/doctor_harness_prompt_baselines.go
-cmd/pfm/doctor_prepush.go
 cmd/pfm/engines.go
 cmd/pfm/harvest_command.go
 cmd/pfm/heal_command.go
@@ -55,6 +53,9 @@ internal/codexgen/transform.go
 internal/compose/doc.go
 internal/compose/order.go
 internal/compose/types.go
+internal/doctor/doc.go
+internal/doctor/harness_prompt_baselines.go
+internal/doctor/prepush.go
 internal/engine/builtin.go
 internal/engine/claude/capabilities.go
 internal/engine/claude/match.go

@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"bytes"
@@ -13,8 +13,8 @@ import (
 )
 
 func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T) {
-	saved := harnessCaptureOverride
-	t.Cleanup(func() { harnessCaptureOverride = saved })
+	saved := HarnessCaptureOverride
+	t.Cleanup(func() { HarnessCaptureOverride = saved })
 	for _, tc := range []struct {
 		name, model, prompt, missing, want string
 		err                                error
@@ -38,9 +38,9 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 				}
 			}
 			called := false
-			harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
+			HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
 				called = true
-				return harnessCapture{Prompt: tc.prompt, ResolvedModel: tc.model, CLIVersion: "2.1.fixture"}, tc.err
+				return HarnessCapture{Prompt: tc.prompt, ResolvedModel: tc.model, CLIVersion: "2.1.fixture"}, tc.err
 			}
 			var output bytes.Buffer
 			code := printModelHarnessPromptDoctor(

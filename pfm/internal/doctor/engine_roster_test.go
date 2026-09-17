@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"bytes"
@@ -104,7 +104,7 @@ func TestDoctorWarnsWhenANewEngineRegistersOnlySomeCapabilities(t *testing.T) {
 	index.RegisterSource(id, fourthSource{})
 	gather.RegisterMatcher(id, fourthMatcher{})
 	var stdout bytes.Buffer
-	warnings := printEngineCapabilities(&stdout)
+	warnings := PrintEngineCapabilities(&stdout, testDependencies())
 	if warnings == 0 || !strings.Contains(stdout.String(), "zz=index,matcher") ||
 		!strings.Contains(strings.ToLower(stdout.String()), "missing") {
 		t.Fatalf("partial engine was silent: warnings=%d output=%q", warnings, stdout.String())
@@ -113,7 +113,7 @@ func TestDoctorWarnsWhenANewEngineRegistersOnlySomeCapabilities(t *testing.T) {
 
 func TestDoctorEngineCapabilities(t *testing.T) {
 	var stdout bytes.Buffer
-	if warnings := printEngineCapabilities(&stdout); warnings != 0 {
+	if warnings := PrintEngineCapabilities(&stdout, testDependencies()); warnings != 0 {
 		t.Fatalf("printEngineCapabilities() warnings=%d output=%q", warnings, stdout.String())
 	}
 	want := "doctor: engines cc=index,launcher,matcher,usage,headless,ask cx=index,launcher,matcher,usage,headless,ask ox=index,matcher\n"

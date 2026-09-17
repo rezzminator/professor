@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"context"
@@ -13,13 +13,14 @@ import (
 	config "hostops/pfm/internal/config"
 )
 
-const unknownState = "unknown"
+// StateUnknown is the stable diagnostic state for a value a probe could not determine.
+const StateUnknown = "unknown"
 
 // Baselines follow stable requested aliases. Resolved IDs and the baseline's
 // captured model are provenance, never evidence of behavioral drift by themselves.
-type harnessPromptModel struct{ alias, stem string }
+type HarnessPromptModel struct{ Alias, Stem string }
 
-var harnessPromptModels = []harnessPromptModel{{"sonnet", "harness-original"}, {"opus", "harness-opus"}}
+var HarnessPromptModels = []HarnessPromptModel{{"sonnet", "harness-original"}, {"opus", "harness-opus"}}
 
 func printHarnessPromptDoctor(
 	ctx context.Context,
@@ -29,7 +30,7 @@ func printHarnessPromptDoctor(
 	verboseDir string,
 ) int {
 	warnings := 0
-	for _, model := range harnessPromptModels {
+	for _, model := range HarnessPromptModels {
 		warnings += printModelHarnessPromptDoctor(ctx, stdout, home, machine, model, verboseDir)
 	}
 	return warnings
@@ -45,11 +46,11 @@ func printModelHarnessPromptDoctor(
 	stdout io.Writer,
 	home string,
 	machine config.Config,
-	model harnessPromptModel,
+	model HarnessPromptModel,
 	verboseDir string,
 ) int {
-	fmt.Fprintf(stdout, "doctor: harness-prompt requested=%s\n", model.alias)
-	baselinePath := filepath.Join(home, ".local", "share", "pfm", installCommand, "prompts", model.stem+".sha256")
+	fmt.Fprintf(stdout, "doctor: harness-prompt requested=%s\n", model.Alias)
+	baselinePath := filepath.Join(home, ".local", "share", "pfm", "install", "prompts", model.Stem+".sha256")
 	raw, err := os.ReadFile(baselinePath)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: harness-prompt: baseline unreadable (%v) — run pfm install\n", err)
@@ -65,7 +66,7 @@ func printModelHarnessPromptDoctor(
 		fmt.Fprintln(stdout, "doctor: harness-prompt: baseline malformed — run pfm install")
 		return 1
 	}
-	modelRaw, modelErr := os.ReadFile(filepath.Join(filepath.Dir(baselinePath), model.stem+".model"))
+	modelRaw, modelErr := os.ReadFile(filepath.Join(filepath.Dir(baselinePath), model.Stem+".model"))
 	baselineModel := strings.TrimSpace(string(modelRaw))
 	baseline, baselineErr := os.ReadFile(filepath.Join(filepath.Dir(baselinePath), fields[1]))
 	baselineSum := sha256.Sum256(baseline)
@@ -78,18 +79,18 @@ func printModelHarnessPromptDoctor(
 		)
 		return 1
 	}
-	captured, captureErr := configuredHarnessCapture(ctx, home, machine, model.alias, verboseDir)
+	captured, captureErr := configuredHarnessCapture(ctx, home, machine, model.Alias, verboseDir)
 	resolved, version := captured.ResolvedModel, captured.CLIVersion
 	if resolved == "" {
-		resolved = unknownState
+		resolved = StateUnknown
 	}
 	if version == "" {
-		version = unknownState
+		version = StateUnknown
 	}
 	fmt.Fprintf(
 		stdout,
 		"doctor: harness-prompt scope=claude-model-baseline runtime=claude-code requested=%s resolved=%s cli=%q baseline=%s baseline_model=%s unchecked=active-chat,fable,codex\n",
-		model.alias,
+		model.Alias,
 		resolved,
 		version,
 		fields[1],

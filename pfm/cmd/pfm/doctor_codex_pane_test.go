@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/config"
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/store"
 )
@@ -62,7 +64,7 @@ func TestCodexPaneBindingDoctorNamesContestedAndRetiredBindings(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	warnings := printCodexPaneBindingDoctor(ctx, &stdout, database, commandRuntime{Paths: resolved})
+	warnings := doctor.PrintCodexPaneBinding(ctx, &stdout, database, commandRuntime{Paths: resolved})
 	report := stdout.String()
 	if warnings < 2 {
 		t.Fatalf("warnings = %d, want at least 2 (contested + retired): %s", warnings, report)
@@ -112,7 +114,7 @@ func TestCodexPaneBindingDoctorStaysQuietOnAHealthyTable(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	warnings := printCodexPaneBindingDoctor(ctx, &stdout, database, commandRuntime{Paths: resolved})
+	warnings := doctor.PrintCodexPaneBinding(ctx, &stdout, database, commandRuntime{Paths: resolved})
 	report := stdout.String()
 	if warnings != 0 {
 		t.Fatalf("healthy table reported %d warnings: %s", warnings, report)
@@ -153,7 +155,7 @@ func TestCodexPaneBindingsDistinguishAnEmptyTableFromAnUnreadableOne(t *testing.
 	}
 
 	var stdout bytes.Buffer
-	if warnings := printCodexPaneBindingDoctor(
+	if warnings := doctor.PrintCodexPaneBinding(
 		ctx, &stdout, database, commandRuntime{},
 	); warnings == 0 {
 		t.Fatalf("doctor called an unreadable binding table healthy: %s", stdout.String())
@@ -190,7 +192,7 @@ func TestCodexPaneDoctorNamesAPaneItCannotFollow(t *testing.T) {
 	ctx := context.Background()
 
 	var stdout bytes.Buffer
-	warnings := printCodexPaneBindingDoctor(ctx, &stdout, database, commandRuntime{Paths: resolved})
+	warnings := doctor.PrintCodexPaneBinding(ctx, &stdout, database, commandRuntime{Paths: resolved})
 	report := stdout.String()
 	if warnings == 0 {
 		t.Fatalf("doctor called an unfollowable pane healthy:\n%s", report)
@@ -231,7 +233,7 @@ func TestCodexPaneDoctorStaysQuietOnAFollowablePane(t *testing.T) {
 	codexJailRollout(t, database, root, threadID, 1)
 
 	var stdout bytes.Buffer
-	warnings := printCodexPaneBindingDoctor(ctx, &stdout, database, commandRuntime{Paths: resolved})
+	warnings := doctor.PrintCodexPaneBinding(ctx, &stdout, database, commandRuntime{Paths: resolved})
 	report := stdout.String()
 	if warnings != 0 || strings.Contains(report, "unfollowable socket") {
 		t.Fatalf("a followable pane was reported unfollowable (%d warnings):\n%s", warnings, report)
@@ -278,7 +280,7 @@ func TestCodexPaneBindingDoctorCountsDeadPaneBindingsAsStale(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	warnings := printCodexPaneBindingDoctor(ctx, &stdout, database, commandRuntime{Paths: resolved})
+	warnings := doctor.PrintCodexPaneBinding(ctx, &stdout, database, commandRuntime{Paths: resolved})
 	report := stdout.String()
 	if strings.Contains(report, "contested") && !strings.Contains(report, "contested=0") {
 		t.Fatalf("dead-pane litter was reported as contested:\n%s", report)
@@ -321,7 +323,7 @@ func TestCodexPaneDoctorUsesHeldRootDespiteModelFirstStatus(t *testing.T) {
 		Paths:  resolved,
 		Config: config.Config{CodexAccounts: []config.CodexAccount{{ID: 1, Home: filepath.Join(root, "codex")}}},
 	}
-	panes, err := liveCodexPanes(ctx, runtime)
+	panes, err := (gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}).ListPanes(ctx, socket)
 	if err != nil || len(panes) != 1 {
 		t.Fatalf("panes=%#v err=%v", panes, err)
 	}
@@ -334,7 +336,7 @@ func TestCodexPaneDoctorUsesHeldRootDespiteModelFirstStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	warnings := printCodexPaneBindingDoctor(ctx, &output, database, runtime)
+	warnings := doctor.PrintCodexPaneBinding(ctx, &output, database, runtime)
 	if warnings != 0 || strings.Contains(output.String(), "unfollowable socket=") {
 		t.Fatalf("held root was dropped: warnings=%d\n%s", warnings, output.String())
 	}

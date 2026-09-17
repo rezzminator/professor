@@ -11,6 +11,7 @@ import (
 
 	"hostops/pfm/internal/ask"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/harvest"
 	"hostops/pfm/internal/harvestmcp"
@@ -305,7 +306,7 @@ func writeHarvestAskReceipt(
 		Status string         `json:"status"`
 		Input  string         `json:"input"`
 		Result harvest.Result `json:"result"`
-	}{Status: unavailableState, Input: source, Result: harvest.PublicFailure(source, result)}, "", "  ")
+	}{Status: doctor.StateUnavailable, Input: source, Result: harvest.PublicFailure(source, result)}, "", "  ")
 	if err != nil {
 		return "", receiptDir, fmt.Errorf("encode receipt: %w", err)
 	}

@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 // registry pfm never reached reads as visibly absent rather than silently
 // skipped), and the historical standalone-harvester cutover check for Codex
 // and the project-scope .mcp.json (unaffected by CLAUDE_CONFIG_DIR).
-func printMCPClientCutover(stdout io.Writer, runtime commandRuntime) int {
+func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 	warnings := 0
 	registries := installer.ClaudeUserRegistries(
 		runtime.Paths.Home,

@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"bytes"
@@ -15,10 +15,10 @@ import (
 func TestHarnessDoctorModelVersionAloneDoesNotWarn(t *testing.T) {
 	home := t.TempDir()
 	stageHarnessPromptBaseline(t, home)
-	saved := harnessCaptureOverride
-	t.Cleanup(func() { harnessCaptureOverride = saved })
-	harnessCaptureOverride = func(context.Context, string, config.Config, string, string) (harnessCapture, error) {
-		return harnessCapture{
+	saved := HarnessCaptureOverride
+	t.Cleanup(func() { HarnessCaptureOverride = saved })
+	HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+		return HarnessCapture{
 			Prompt:        harnessPromptFixtureCaptured,
 			ResolvedModel: "claude-sonnet-5-1-20260906",
 			CLIVersion:    "2.2.0",
@@ -52,8 +52,8 @@ func TestHarnessMetadataPatternsDoNotHideBehavior(t *testing.T) {
 }
 
 func TestHarnessDoctorChecksEachModelAndKeepsFailuresSeparate(t *testing.T) {
-	saved := harnessCaptureOverride
-	t.Cleanup(func() { harnessCaptureOverride = saved })
+	saved := HarnessCaptureOverride
+	t.Cleanup(func() { HarnessCaptureOverride = saved })
 	for _, scenario := range []struct {
 		name            string
 		changed, failed string
@@ -70,19 +70,19 @@ func TestHarnessDoctorChecksEachModelAndKeepsFailuresSeparate(t *testing.T) {
 				"opus":   "Opus instructions.\n# Delegation\nAsk before delegating.\n",
 			}
 			for _, model := range harnessPromptModels {
-				stageModelHarnessPromptBaseline(t, home, model, prompts[model.alias], model.alias+"-fixture.md")
+				stageModelHarnessPromptBaseline(t, home, model, prompts[model.Alias], model.Alias+"-fixture.md")
 			}
 			var calls []string
-			harnessCaptureOverride = func(_ context.Context, _ string, _ config.Config, alias, _ string) (harnessCapture, error) {
+			HarnessCaptureOverride = func(_ context.Context, _ string, _ config.Config, alias, _ string) (HarnessCapture, error) {
 				calls = append(calls, alias)
 				if alias == scenario.failed {
-					return harnessCapture{}, fmt.Errorf("capture unavailable")
+					return HarnessCapture{}, fmt.Errorf("capture unavailable")
 				}
 				prompt := prompts[alias]
 				if alias == scenario.changed {
 					prompt += "Delegate without asking.\n"
 				}
-				return harnessCapture{
+				return HarnessCapture{
 					Prompt:        prompt,
 					ResolvedModel: "claude-" + alias + "-6-1",
 					CLIVersion:    "3.0.0",

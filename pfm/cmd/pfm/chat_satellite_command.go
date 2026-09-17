@@ -23,6 +23,7 @@ import (
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/fleetdb"
@@ -333,7 +334,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		}
 		chat := pfmchat.FromRow(*row)
 		status, inspectErr := headless.Inspect(context.Background(), chat, time.Now())
-		state := unknownState
+		state := doctor.StateUnknown
 		if inspectErr != nil {
 			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", chat.Name, inspectErr)
 		} else {

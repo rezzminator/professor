@@ -1,9 +1,9 @@
 cmd/pfm/chat_dispatch.go 812
 cmd/pfm/chat_reload_command.go 1192
 cmd/pfm/chat_satellite_command.go 970
-cmd/pfm/doctor.go 1753
 internal/compose/compose.go 1355
 internal/config/config.go 1750
+internal/doctor/doctor.go 1779
 internal/harvest/harvest.go 834
 internal/harvest/mirror_providers.go 829
 internal/harvestmcp/service.go 1266

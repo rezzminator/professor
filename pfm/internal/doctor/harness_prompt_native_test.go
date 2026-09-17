@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"context"
@@ -24,7 +24,7 @@ func TestHarnessPromptNativeRepeatedCapture(t *testing.T) {
 	machine.Claude.Binary = binary
 	for _, model := range harnessPromptModels {
 		baselineDir := filepath.Join("..", "..", "internal", "installer", "assets", "prompts")
-		pin, err := os.ReadFile(filepath.Join(baselineDir, model.stem+".sha256"))
+		pin, err := os.ReadFile(filepath.Join(baselineDir, model.Stem+".sha256"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -37,14 +37,14 @@ func TestHarnessPromptNativeRepeatedCapture(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		var previous harnessCapture
+		var previous HarnessCapture
 		for attempt := 0; attempt < 3; attempt++ {
-			captured, err := captureHarnessPrompt(context.Background(), t.TempDir(), machine, model.alias, "")
+			captured, err := captureHarnessPrompt(context.Background(), t.TempDir(), machine, model.Alias, "")
 			if err != nil {
 				t.Fatal(err)
 			}
 			if normalizeHarnessPrompt(captured.Prompt) != normalizeHarnessPrompt(string(baseline)) {
-				t.Fatalf("%s built-in instructions differ from reviewed baseline", model.alias)
+				t.Fatalf("%s built-in instructions differ from reviewed baseline", model.Alias)
 			}
 			if captured.ResolvedModel == "" || captured.CLIVersion == "" {
 				t.Fatalf("capture lacks identity: %+v", captured)
@@ -57,7 +57,7 @@ func TestHarnessPromptNativeRepeatedCapture(t *testing.T) {
 			t.Logf(
 				"capture=%d requested=%s resolved=%s cli=%s normalized_sha256=%s",
 				attempt+1,
-				model.alias,
+				model.Alias,
 				captured.ResolvedModel,
 				captured.CLIVersion,
 				hex.EncodeToString(sum[:]),
@@ -70,7 +70,7 @@ func TestHarnessPromptNativeRepeatedCapture(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err := os.WriteFile(filepath.Join(dir, model.alias+"-capture.json"), raw, 0o600); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, model.Alias+"-capture.json"), raw, 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}

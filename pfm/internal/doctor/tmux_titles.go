@@ -1,4 +1,4 @@
-package main
+package doctor
 
 import (
 	"context"
@@ -93,7 +93,7 @@ func printTmuxTitlesDoctor(
 			continue
 		}
 		divergent++
-		expected := toggleOffFlag
+		expected := "off"
 		if intended == titlesPfmOwned {
 			expected = "on"
 		}
@@ -121,17 +121,17 @@ func readTmuxTitlesState(
 	defer cancel()
 	actualTitles, err := tmux.ShowGlobalOption(commandContext, socket, "set-titles")
 	if err != nil {
-		return unknownState, fmt.Sprintf("show-options failed: %v", err)
+		return StateUnknown, fmt.Sprintf("show-options failed: %v", err)
 	}
 	if !pfmEnabled {
-		if actualTitles == toggleOffFlag {
+		if actualTitles == "off" {
 			return titlesHostOwned, "set-titles off"
 		}
 		return titlesDivergent, fmt.Sprintf("set-titles %s; expected set-titles off", actualTitles)
 	}
 	actualString, err := tmux.ShowGlobalOption(commandContext, socket, "set-titles-string")
 	if err != nil {
-		return unknownState, fmt.Sprintf("show-options failed: %v", err)
+		return StateUnknown, fmt.Sprintf("show-options failed: %v", err)
 	}
 	if actualTitles == "on" && actualString == config.TmuxTitlesString {
 		// Keep the ownership row compact; the string is still read and compared

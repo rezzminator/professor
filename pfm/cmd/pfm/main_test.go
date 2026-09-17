@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/spawn"
@@ -507,9 +508,9 @@ func TestDoctorReportsDamagedDatabaseWithoutPanic(t *testing.T) {
 // the repository shipped the hook but no diagnostic distinguished "armed"
 // from "file exists and Git will never execute it".
 func TestDoctorNamesAnExistingButUnwiredPrePushGate(t *testing.T) {
-	savedProbe := prePushGateProbeOverride
-	prePushGateProbeOverride = nil
-	t.Cleanup(func() { prePushGateProbeOverride = savedProbe })
+	savedProbe := doctor.PrePushGateProbeOverride
+	doctor.PrePushGateProbeOverride = nil
+	t.Cleanup(func() { doctor.PrePushGateProbeOverride = savedProbe })
 
 	root := jailTest(t)
 	repository := filepath.Join(root, "repository")
@@ -585,78 +586,6 @@ func TestDoctorNamesAnExistingButUnwiredPrePushGate(t *testing.T) {
 	}
 }
 
-func TestDoctorRecognizesThenFailedAsSatelliteMetadata(t *testing.T) {
-	root := jailTest(t)
-	sidDir := filepath.Join(root, "sid")
-	for name, content := range map[string]string{
-		"cc-1-2-3":              "/transcripts/live.jsonl",
-		"cc-1-2-3.then-failed":  "prompt preserved for retry",
-		"reload-cc-1-2-3.log":   "completed fleet reload",
-		"reload-vsct.log":       "completed bunker reload",
-		"reload-probe.log":      "not a fleet reload",
-		".open.uuid":            "lock metadata",
-		"cc-1-2-3.not-metadata": "invalid",
-	} {
-		if err := os.WriteFile(
-			filepath.Join(sidDir, name),
-			[]byte(content),
-			0o600,
-		); err != nil {
-			t.Fatal(err)
-		}
-	}
-	entries, invalid, err := crumbHealth(sidDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entries != 7 || invalid != 2 {
-		t.Fatalf("crumbHealth() entries=%d invalid=%d", entries, invalid)
-	}
-}
-
-// The live sid directory holds two classes doctor must not call rot: crumbs
-// the statusline writes for chats on servers the fleet excludes (the vsct
-// bunker) and the dot-prefixed lock DIRECTORIES the zsh creates with mkdir to
-// serialize opens.
-func TestDoctorIgnoresBunkerCrumbsAndOpenLockDirectories(t *testing.T) {
-	root := jailTest(t)
-	sidDir := filepath.Join(root, "sid")
-	for name, content := range map[string]string{
-		"cc-1-2-3":  "/transcripts/live.jsonl",
-		"vsct":      "/transcripts/bunker.jsonl",
-		"vsct.%187": "/transcripts/bunker.jsonl",
-		"rotten":    "neither a crumb nor sid metadata",
-	} {
-		if err := os.WriteFile(
-			filepath.Join(sidDir, name),
-			[]byte(content),
-			0o600,
-		); err != nil {
-			t.Fatal(err)
-		}
-	}
-	for _, directory := range []string{
-		".open.88888888-8888-4888-8888-888888888888",
-		"rotten-directory",
-	} {
-		if err := os.Mkdir(filepath.Join(sidDir, directory), 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	entries, invalid, err := crumbHealth(sidDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if entries != 6 || invalid != 2 {
-		t.Fatalf(
-			"crumbHealth() entries=%d invalid=%d, want 6 and 2 (rotten + rotten-directory)",
-			entries,
-			invalid,
-		)
-	}
-}
-
 func TestUsageErrors(t *testing.T) {
 	jailTest(t)
 	for _, args := range [][]string{
@@ -677,7 +606,7 @@ func TestUsageErrors(t *testing.T) {
 }
 
 // harnessPromptFixtureCaptured is the fixed "live" prompt every jailed
-// doctor test observes through harnessCaptureOverride (set in TestMain).
+// doctor test observes through doctor.HarnessCaptureOverride (set in TestMain).
 // Its content is arbitrary — the check only ever hashes it and compares
 // against whatever baseline stageHarnessPromptBaseline pins alongside it.
 const harnessPromptFixtureCaptured = "pfm jail fixture harness prompt\n"
@@ -689,14 +618,19 @@ const harnessPromptFixtureCaptured = "pfm jail fixture harness prompt\n"
 // re-deriving or re-pinning the real embedded asset.
 func stageHarnessPromptBaseline(t *testing.T, home string) {
 	t.Helper()
-	for _, model := range harnessPromptModels {
+	for _, model := range doctor.HarnessPromptModels {
 		stageModelHarnessPromptBaseline(t, home, model, harnessPromptFixtureCaptured, "harness-prompt-fixture.md")
 	}
 }
 
-func stageModelHarnessPromptBaseline(t *testing.T, home string, model harnessPromptModel, captured, name string) {
+func stageModelHarnessPromptBaseline(
+	t *testing.T,
+	home string,
+	model doctor.HarnessPromptModel,
+	captured, name string,
+) {
 	t.Helper()
-	testjail.StageHarnessPromptBaseline(t, home, model.alias, model.stem, captured, name)
+	testjail.StageHarnessPromptBaseline(t, home, model.Alias, model.Stem, captured, name)
 }
 
 func jailTest(t *testing.T) string {

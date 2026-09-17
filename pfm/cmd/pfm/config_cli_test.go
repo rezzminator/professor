@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/paths"
 )
 
@@ -344,48 +343,6 @@ func TestConfigShowDistinguishesInputAndEffectiveSchema(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("config show stderr=%q, want empty", stderr.String())
-	}
-}
-
-func TestDoctorConfigRenderingShowsEffectiveValuesAndSources(t *testing.T) {
-	root := jailTest(t)
-	home := filepath.Join(root, "config-home")
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(root, "doctor-machine.json")
-	if err := os.WriteFile(path, []byte(`{
-  "version": 1,
-  "accounts": [{"id": 7, "configDir": "~/account-seven"}],
-  "claude": {"permissionMode": "prompt", "binary": "claude-fixture"},
-  "codex": {"yolo": false, "binary": "codex-fixture"},
-  "mcp": {"servers": {"chat": {"enabled": true}}}
-}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := config.Load(path, home, nil)
-	if err != nil {
-		t.Fatalf("config.Load() error = %v", err)
-	}
-
-	var stdout bytes.Buffer
-	printDoctorConfig(&stdout, commandRuntime{Config: loaded})
-	want := strings.Join([]string{
-		"doctor: config path=" + path + " exists=true",
-		"doctor: config version=2 effective (input=1 file)",
-		"doctor: config theme=default (default)",
-		"doctor: config accounts=7:" + filepath.Join(home, "account-seven") + " (file)",
-		"doctor: config claude.permissionMode=prompted (file)",
-		"doctor: config claude.binary=claude-fixture (file)",
-		"doctor: config codex.yolo=false (file)",
-		"doctor: config codex.binary=codex-fixture (file)",
-		"doctor: config mcp.servers.chat.enabled=true (file)",
-		"doctor: config harvester.enabled=false (default)",
-		"doctor: config mcp.http.port=18377 (default)",
-		"doctor: config harvester path=" + filepath.Join(root, config.HarvesterFileName) + " exists=false",
-	}, "\n") + "\n"
-	if stdout.String() != want {
-		t.Fatalf("printDoctorConfig() = %q, want %q", stdout.String(), want)
 	}
 }
 

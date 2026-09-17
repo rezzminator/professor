@@ -305,7 +305,7 @@ func (spawn ClaudeSpawn) leanEnvironment(prefs pfmconfig.ClaudePrefs) bool {
 // wiring one in here would print on every ordinary launch of an account that
 // simply has not run `pfm install` yet. The surface that DOES report this
 // gap already exists: `pfm doctor`'s spawn audit
-// (cmd/pfm/spawn_audit_doctor.go, spawnDoorStamp feeding classifySpawn)
+// (cmd/pfm/doctor_spawn_audit.go, spawnDoorStamp feeding classifySpawn)
 // reports a live Professor-policy launch with no --system-prompt-file in its
 // argv as VIOLATION, "fresh launch with no prompt material — some spawn site
 // bypassed the door".

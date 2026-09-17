@@ -3,6 +3,7 @@ cmd/pfm/doctor.go 5
 cmd/pfm/doctor_engine_roster_test.go 2
 cmd/pfm/doctor_opencode_test.go 3
 cmd/pfm/engines.go 3
+cmd/pfm/internal_update_check.go 2
 cmd/pfm/limits_accounts_test.go 8
 cmd/pfm/mcp_shared.go 1
 cmd/pfm/pipeline.go 2
@@ -13,7 +14,6 @@ cmd/pfm/run_command.go 4
 cmd/pfm/run_engine_roster_test.go 4
 cmd/pfm/statusline_command.go 7
 cmd/pfm/statusline_command_test.go 5
-cmd/pfm/update_notice_command.go 2
 cmd/pfm/whoami_command.go 1
 internal/action/golden_test.go 2
 internal/action/opencode_test.go 18

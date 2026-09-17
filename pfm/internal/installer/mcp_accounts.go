@@ -30,7 +30,7 @@ type ClaudeRegistry struct {
 // $HOME/.claude.json, every other account at its own ConfigDir/.claude.json),
 // plus the ambient CLAUDE_CONFIG_DIR the invoking shell exported, when that
 // path is not already listed (the launcher shim passes it straight through —
-// launch_command.go). Deduplicated by physical path so one file is never
+// internal_launch.go). Deduplicated by physical path so one file is never
 // listed twice under two reasons.
 func ClaudeUserRegistries(home string, accounts []pfmconfig.Account, ambientConfigDir string) []ClaudeRegistry {
 	seen := map[string]bool{}
@@ -63,7 +63,7 @@ func ClaudeUserRegistries(home string, accounts []pfmconfig.Account, ambientConf
 		add(
 			filepath.Join(ambient, ".claude.json"),
 			fmt.Sprintf(
-				"ambient CLAUDE_CONFIG_DIR=%s (the claude launcher passes it through — launch_command.go)",
+				"ambient CLAUDE_CONFIG_DIR=%s (the claude launcher passes it through — internal_launch.go)",
 				ambient,
 			),
 			0,

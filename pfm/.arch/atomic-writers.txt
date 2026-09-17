@@ -1,4 +1,4 @@
-cmd/pfm/launch_command.go
+cmd/pfm/internal_launch.go
 internal/archive/archive.go
 internal/config/harvester_write.go
 internal/harvest/cache.go

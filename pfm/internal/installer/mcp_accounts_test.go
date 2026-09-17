@@ -71,7 +71,7 @@ func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
 // CLAUDE_CONFIG_DIR reads THAT directory's .claude.json, not the implicit
 // account's $HOME/.claude.json a bare account-driven fanout would assume —
 // the launcher shim passes the ambient var straight through
-// (launch_command.go), so the registry resolver must list both files, each
+// (internal_launch.go), so the registry resolver must list both files, each
 // naming why it is a registry pfm cares about.
 func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(t *testing.T) {
 	home := t.TempDir()
@@ -94,7 +94,7 @@ func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(
 	if registries[1].Path != ambientPath {
 		t.Fatalf("registries[1].Path=%s, want the ambient CLAUDE_CONFIG_DIR file %s", registries[1].Path, ambientPath)
 	}
-	wantReason := "ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — launch_command.go)"
+	wantReason := "ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — internal_launch.go)"
 	if registries[1].Reason != wantReason {
 		t.Fatalf("registries[1].Reason=%q, want %q", registries[1].Reason, wantReason)
 	}

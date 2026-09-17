@@ -1,6 +1,6 @@
 cmd/pfm/attach_jail_test.go 1
 cmd/pfm/booting_row_jail_test.go 1
-cmd/pfm/chat_server_command_test.go 1
+cmd/pfm/internal_chat_server_test.go 1
 cmd/pfm/namesync_titles_regression_test.go 1
 cmd/pfm/picker_cancel_jail_test.go 1
 cmd/pfm/run_jail_test.go 1

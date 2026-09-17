@@ -52,7 +52,7 @@ func TestDoctorMCPClientRowNamesEachRegistryAndItsReason(t *testing.T) {
 		t.Fatalf("doctor output missing the healthy implicit-account row %q:\n%s", implicitRow, out)
 	}
 	ambientRow := "doctor: mcp client=claude registry=" + filepath.Join(ambient, ".claude.json") +
-		" (ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — launch_command.go)) harvester=absent chat=absent" +
+		" (ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — internal_launch.go)) harvester=absent chat=absent" +
 		" remediation=run pfm install --yes (registers every registry a pfm-launched Claude reads)"
 	if !strings.Contains(out, ambientRow) {
 		t.Fatalf("doctor output missing the absent ambient-registry warning row %q:\n%s", ambientRow, out)

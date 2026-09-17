@@ -21,13 +21,13 @@ import (
 // own invariant, so a future edit that reintroduces gather.NewProcFS here
 // (a fake ProcFS whose PIDs() would fail any real caller) fails loudly.
 func TestInternalClaudeVersionCommandNeverConstructsAProcessTable(t *testing.T) {
-	source, err := os.ReadFile("claude_version_command.go")
+	source, err := os.ReadFile("internal_claude_version.go")
 	if err != nil {
-		t.Fatalf("read claude_version_command.go: %v", err)
+		t.Fatalf("read internal_claude_version.go: %v", err)
 	}
 	if strings.Contains(string(source), "gather.") {
 		t.Fatalf(
-			"claude_version_command.go references the process table (gather.*) — every `claude` launch would pay for a probe it never uses:\n%s",
+			"internal_claude_version.go references the process table (gather.*) — every `claude` launch would pay for a probe it never uses:\n%s",
 			source,
 		)
 	}

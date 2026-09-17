@@ -44,13 +44,6 @@ var commandLinks = []string{
 	"reload.md",
 }
 
-var commandRoots = []string{
-	e2eCommandRoot,
-	".cc/1/commands",
-	".cc/2/commands",
-	".cc/3/commands",
-}
-
 var managedAssets = []string{
 	"reload.command.md",
 	"shim/pfm.zsh",
@@ -972,26 +965,7 @@ func (h *e2eHarness) assertInstalled(home string) {
 			}
 		}
 	}
-	for _, root := range commandRoots {
-		for _, relative := range commandLinks {
-			path := filepath.Join(home, root, relative)
-			info, err := os.Lstat(path)
-			if err != nil || info.Mode()&os.ModeSymlink == 0 {
-				h.t.Fatalf(
-					"install surface failed; differing paths: %s; status: %v",
-					filepath.Join(root, relative),
-					err,
-				)
-			}
-			if _, err := filepath.EvalSymlinks(path); err != nil {
-				h.t.Fatalf(
-					"install surface failed; differing paths: %s unresolved symlink; status: %v",
-					filepath.Join(root, relative),
-					err,
-				)
-			}
-		}
-	}
+	h.assertCommandLinksInstalled(home)
 	shim := filepath.Join(managed, "shim", "pfm.zsh")
 	if result := runTool(home, "zsh", "-n", shim); result.err != nil {
 		h.t.Fatalf("install surface failed; differing paths: shim/pfm.zsh syntax; status: %v", result.err)
@@ -1315,14 +1289,7 @@ func (h *e2eHarness) assertUninstalled(home string) {
 			h.t.Fatalf("uninstall failed; differing paths: %s; status: %v", relative, err)
 		}
 	}
-	for _, root := range commandRoots {
-		for _, relative := range commandLinks {
-			path := filepath.Join(root, relative)
-			if _, err := os.Lstat(filepath.Join(home, path)); !os.IsNotExist(err) {
-				h.t.Fatalf("uninstall failed; differing paths: %s; status: %v", path, err)
-			}
-		}
-	}
+	h.assertCommandLinksUninstalled(home)
 	canonical := filepath.Join(home, e2eCanonicalClaude)
 	target, err := os.Readlink(canonical)
 	if err != nil || !strings.HasSuffix(filepath.ToSlash(target), "/.local/share/claude/versions/2.1.238") {

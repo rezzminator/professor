@@ -72,6 +72,34 @@ func (installer *engine) migrateMemoryHelpers() error {
 			for _, alias := range migration.aliases {
 				hookPaths[alias] = filepath.Join(filepath.Dir(alias), filepath.Base(migration.newPath))
 			}
+			physical, resolveErr := filepath.EvalSymlinks(migration.oldPath)
+			if resolveErr != nil {
+				return fmt.Errorf(
+					"resolve retired memory helper %s for hook aliases: %w",
+					migration.oldPath,
+					resolveErr,
+				)
+			}
+			// A seat directory alias is visited only once, but settings may still
+			// spell the helper through any configured lexical path.
+			lexicalDirs := []string{filepath.Join(installer.options.Home, ".claude"), installer.options.ConfigDir}
+			lexicalDirs = append(lexicalDirs, installer.options.ConfigDirs...)
+			for _, dir := range lexicalDirs {
+				if strings.TrimSpace(dir) == "" {
+					continue
+				}
+				oldPath := filepath.Join(filepath.Clean(dir), "scripts", filepath.Base(migration.oldPath))
+				resolved, aliasErr := filepath.EvalSymlinks(oldPath)
+				if errors.Is(aliasErr, fs.ErrNotExist) {
+					continue
+				}
+				if aliasErr != nil {
+					return fmt.Errorf("resolve retired memory helper hook alias %s: %w", oldPath, aliasErr)
+				}
+				if filepath.Clean(resolved) == filepath.Clean(physical) {
+					hookPaths[oldPath] = filepath.Join(filepath.Dir(oldPath), filepath.Base(migration.newPath))
+				}
+			}
 		}
 	}
 	settings, err := installer.planMemoryHelperSettingsRewrites(hookPaths)

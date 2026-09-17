@@ -304,7 +304,11 @@ act_pfm() {
     # pass. -timeout is measured, not guessed — internal/index's OpenCode WAL
     # stress test alone takes ~4.5 minutes (268s watched), so the 10m default
     # turns an ordinary loaded host into a red suite that names the wrong cause.
-    test)    run "pfm: go test" -- go -C "$d" test ./... -count=1 -timeout 25m ;;
+    test)
+      run "pfm: go test" -- go -C "$d" test ./... -count=1 -timeout 25m
+      # The e2e package is build-tagged: without this row the integration
+      # routes compile for nobody and the gate reports a suite it never ran.
+      run "pfm: e2e (tagged)" -- go -C "$d" test -tags e2e -p 1 -count=1 -timeout 25m ./e2e/... ;;
     # Cross-package unit coverage merged with any e2e GOCOVERDIR run, thresholded
     # by pfm/.testcoverage.yml (a ratchet: measured, raised, never lowered).
     # COVER_DIR is where the profiles land — the fence sets it to container HOME

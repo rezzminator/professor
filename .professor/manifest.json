@@ -118,7 +118,7 @@
     ".claude/commands/wave/walker.md": "ef7fecb7d5246bef38f179560890204ad40d3fc0679a0429eb699692e9136ae2",
     ".claude/scripts/build-opencode.mjs": "7717ae54f116729ee551c53d1bb640d5f7e1de4a47df25b57b1fa301c2e0a67c",
     ".claude/scripts/codex-sync.sh": "a9179abfe7b73717b550e54387e76bc316de4de0acaa2b8a01c6db26faaadbe3",
-    ".claude/scripts/dev.sh": "cea30d8254c69f8f1b278337d36e835abb1c4073e650d222088d74aec6192fa8",
+    ".claude/scripts/dev.sh": "d98623679913178f9ffaddb6490b95085adbb4cb3de903ac70992e6ddefc57a5",
     ".claude/scripts/explore-deny.sh": "966d38099cd592963ef54b54fb7544d4d44437fd4e36faae0846219ab57b26b6",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
     ".claude/scripts/guard-stamp.sh": "837bce7d5846b7ed6172a5de579a642fe60fbf99cc27e73cfa235b935b14001e",

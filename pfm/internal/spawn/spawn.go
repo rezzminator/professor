@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"hostops/pfm/internal/naming"
 )
 
 // The Codex rename markers below are read from the codex binary's own strings
@@ -642,7 +644,7 @@ func composerNeedle(text string) string {
 	if index := strings.IndexAny(first, "\r\n"); index >= 0 {
 		first = first[:index]
 	}
-	return clipRunes(flatten(first), composerNeedleMax)
+	return naming.ClipRunes(flattenComposerText(first), composerNeedleMax)
 }
 
 // composerHolds reports whether the composer — the LAST marker line, below
@@ -655,7 +657,7 @@ func composerHolds(capture, needle string) bool {
 	if line == "" {
 		return false
 	}
-	return strings.Contains(flatten(line), needle)
+	return strings.Contains(flattenComposerText(line), needle)
 }
 
 func lastLineContaining(capture, marker string) string {
@@ -668,7 +670,7 @@ func lastLineContaining(capture, marker string) string {
 	return last
 }
 
-func flatten(value string) string {
+func flattenComposerText(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
@@ -763,16 +765,5 @@ func WindowName(name string) string {
 	if cleaned == "" {
 		return "chat"
 	}
-	return clipRunes(cleaned, 40)
-}
-
-func clipRunes(value string, limit int) string {
-	count := 0
-	for index := range value {
-		if count == limit {
-			return value[:index]
-		}
-		count++
-	}
-	return value
+	return naming.ClipRunes(cleaned, 40)
 }

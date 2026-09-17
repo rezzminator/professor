@@ -75,7 +75,7 @@ func RenderPlain(snapshot Snapshot) string {
 		}
 		parts := []string{
 			rowMarker(row.Kind) + " " +
-				clipRunes(cleanField(row.Name), 30),
+				clipRunesEllipsis(cleanField(row.Name), 30),
 		}
 		if badges := stripANSI(model.rowBadges(*row)); badges != "" {
 			parts = append(parts, badges)

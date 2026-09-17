@@ -179,10 +179,10 @@ func CxName(
 			continue
 		}
 		if name := names[id]; name != "" {
-			return clipRunes(squashTabsAndNewlines(name), 60)
+			return ClipRunes(squashTabsAndNewlines(name), 60)
 		}
 	}
-	return clipRunes(squashTabsAndNewlines(firstUserMessage), 60)
+	return ClipRunes(squashTabsAndNewlines(firstUserMessage), 60)
 }
 
 // CodexRowName is the name one Codex conversation is listed under, given its
@@ -212,7 +212,8 @@ func CodexRowName(
 	return name
 }
 
-func clipRunes(value string, limit int) string {
+// ClipRunes returns at most limit runes without splitting UTF-8.
+func ClipRunes(value string, limit int) string {
 	count := 0
 	for index := range value {
 		if count == limit {

@@ -16,6 +16,7 @@ import (
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/sky"
 	pfmstats "hostops/pfm/internal/stats"
 	"hostops/pfm/internal/theme"
@@ -400,7 +401,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 			}
 			tokens := "…"
 			if chat.TokensKnown {
-				tokens = formatTokens(chat.TokenCount)
+				tokens = formatUsageTokens(chat.TokenCount)
 			}
 			tokensPerMinute := "…"
 			if chat.TokenRateValid {
@@ -408,7 +409,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 			}
 			plain := fmt.Sprintf(
 				"  %-*s %-7s %7s %8s %5.1f%% %9s %8s %5s %12s",
-				nameWidth, clipRunes(cleanField(chat.Name), nameWidth), chat.Engine, cpu,
+				nameWidth, clipRunesEllipsis(cleanField(chat.Name), nameWidth), chat.Engine, cpu,
 				formatSize(int64(chat.RSSBytes)), chat.RAMPercent,
 				tokens, tokensPerMinute, gear, usageSpark(chat.Spark),
 			)
@@ -424,7 +425,7 @@ func (model Model) renderStatsPanel(width, height int) string {
 				}
 			}
 			line := "  " + statsNameStyle.Render(fmt.Sprintf(
-				"%-*s", nameWidth, clipRunes(cleanField(chat.Name), nameWidth),
+				"%-*s", nameWidth, clipRunesEllipsis(cleanField(chat.Name), nameWidth),
 			)) + " " + engineStyle.Render(fmt.Sprintf("%-7s", chat.Engine)) +
 				" " + statsCPUStyle.Render(fmt.Sprintf("%7s", cpu)) +
 				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", formatSize(int64(chat.RSSBytes)))) +
@@ -458,8 +459,8 @@ func (model Model) renderStatsPanel(width, height int) string {
 			}
 			plain := fillLine(fmt.Sprintf(
 				"  %-*s %-*s %7s %8s %8s %5.1f%%",
-				nameWidth, clipRunes(cleanField(container.Name), nameWidth),
-				imageWidth, clipRunes(cleanField(container.Image), imageWidth), cpu,
+				nameWidth, clipRunesEllipsis(cleanField(container.Name), nameWidth),
+				imageWidth, clipRunesEllipsis(cleanField(container.Image), imageWidth), cpu,
 				formatSize(int64(container.MemoryBytes)), limit,
 				container.MemoryPercent,
 			), innerWidth)
@@ -468,9 +469,9 @@ func (model Model) renderStatsPanel(width, height int) string {
 				continue
 			}
 			line := "  " + statsNameStyle.Render(fmt.Sprintf(
-				"%-*s", nameWidth, clipRunes(cleanField(container.Name), nameWidth),
+				"%-*s", nameWidth, clipRunesEllipsis(cleanField(container.Name), nameWidth),
 			)) + " " + statsImageStyle.Render(fmt.Sprintf(
-				"%-*s", imageWidth, clipRunes(cleanField(container.Image), imageWidth),
+				"%-*s", imageWidth, clipRunesEllipsis(cleanField(container.Image), imageWidth),
 			)) + " " + statsCPUStyle.Render(fmt.Sprintf("%7s", cpu)) +
 				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", formatSize(int64(container.MemoryBytes)))) +
 				" " + statsMemoryStyle.Render(fmt.Sprintf("%8s", limit)) +
@@ -615,7 +616,7 @@ func renderLimitWindow(now time.Time, window pfmstats.Window, innerWidth int) st
 		reserved += 18
 	}
 	barWidth := min(40, maxInt(1, innerWidth-reserved))
-	name := fmt.Sprintf("%-*s", nameWidth, clipRunes(cleanField(window.Name), nameWidth))
+	name := fmt.Sprintf("%-*s", nameWidth, clipRunesEllipsis(cleanField(window.Name), nameWidth))
 	bar := limitBar(window.UsedPct, barWidth)
 	percent := fmt.Sprintf("%.0f%% used", window.UsedPct)
 	if window.UsedPct < 0 {
@@ -755,7 +756,7 @@ func (model Model) renderListPanel(width, height int) string {
 					if model.projectOrdinal(project)%2 == 1 {
 						style = groupStyleB
 					}
-					group := "╭─ " + clipRunes(project, maxInt(1, innerWidth-5))
+					group := "╭─ " + clipRunesEllipsis(project, maxInt(1, innerWidth-5))
 					lines = append(
 						lines,
 						style.Render(fillLine(group, innerWidth)),
@@ -827,7 +828,7 @@ func (model Model) renderGroupedRow(
 	if name == "" {
 		name = "(unnamed)"
 	}
-	if model.mergeNewChat && (isNewChatKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
+	if model.mergeNewChat && (isNewChatActionKind(row.Kind) || row.Kind == compose.ProfessorUpdate) {
 		ids := model.newChatEngines()
 		labels := make([]string, 0, len(ids))
 		for _, id := range ids {
@@ -871,7 +872,7 @@ func (model Model) renderGroupedRow(
 	left := pointer + marker + " " + name + " " + badges + " " +
 		fmt.Sprintf("%4s %6s", prompts, size)
 	age := formatAge(row, model.nowNS)
-	if selected && (!model.mergeNewChat || (!isNewChatKind(row.Kind) && row.Kind != compose.ProfessorUpdate)) {
+	if selected && (!model.mergeNewChat || (!isNewChatActionKind(row.Kind) && row.Kind != compose.ProfessorUpdate)) {
 		age += "  " + carouselBoxes(model.actionIndex)
 	}
 	leftWidth := maxInt(1, width-lipgloss.Width(age)-1)
@@ -1055,7 +1056,7 @@ func formatSize(size int64) string {
 	return "0B"
 }
 
-func formatTokens(tokens int64) string {
+func formatUsageTokens(tokens int64) string {
 	if tokens < 0 {
 		return "…"
 	}
@@ -1166,18 +1167,17 @@ func fixedDisplayColumn(value string, width int) string {
 	return value
 }
 
-func clipRunes(value string, limit int) string {
+func clipRunesEllipsis(value string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
-	runes := []rune(value)
-	if len(runes) <= limit {
+	if len([]rune(value)) <= limit {
 		return value
 	}
 	if limit == 1 {
 		return "…"
 	}
-	return string(runes[:limit-1]) + "…"
+	return naming.ClipRunes(value, limit-1) + "…"
 }
 
 func cleanField(value string) string {

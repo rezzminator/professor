@@ -11,6 +11,7 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
 )
 
@@ -82,7 +83,7 @@ func New(dependencies Dependencies) (*Gatherer, error) {
 				tmuxTmpDir = "/tmp"
 			}
 		}
-		tmux = CommandTmux{
+		tmux = TmuxProbe{
 			Binary:     dependencies.TmuxBinary,
 			TmuxTmpDir: tmuxTmpDir,
 		}
@@ -112,7 +113,7 @@ func New(dependencies Dependencies) (*Gatherer, error) {
 // Gather probes live state. Pane-dependent filesystem and ProcFS probes run
 // concurrently after the one-command-per-socket tmux snapshot is available.
 func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
-	var tmuxProbe TmuxProbe
+	var tmuxProbe TmuxSnapshot
 	var err error
 	if gatherer.readOnly {
 		tmuxProbe, err = ProbeTmuxReadOnly(
@@ -217,7 +218,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 	)
 
 	return Snapshot{
-		Panes:           append([]Pane(nil), tmuxProbe.Panes...),
+		Panes:           append([]ProbePane(nil), tmuxProbe.Panes...),
 		Crumbs:          append([]Crumb(nil), crumbs.Crumbs...),
 		Codex:           append([]LiveCodex(nil), codex...),
 		ClaudeProcesses: append([]ClaudeProcess(nil), claudeProcesses...),
@@ -244,8 +245,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 // how a chat ends up answering to something nobody typed, so this is the only
 // one.
 func computeWindowRenames(
-	panes []Pane,
-	codex []LiveCodex,
+	panes []ProbePane, codex []LiveCodex,
 	labels []PaneLabel,
 	resolveRollout CodexNameResolver,
 	resolveID CodexIDNameResolver,
@@ -253,7 +253,7 @@ func computeWindowRenames(
 	if resolveRollout == nil && resolveID == nil && len(labels) == 0 {
 		return nil
 	}
-	paneByTarget := make(map[string]Pane, len(panes))
+	paneByTarget := make(map[string]ProbePane, len(panes))
 	for index := range panes {
 		pane := panes[index]
 		paneByTarget[pane.Socket+"\x00"+pane.PaneID] = pane
@@ -319,12 +319,11 @@ func computeWindowRenames(
 // capture is not an absent label: renaming from the sibling that DID answer
 // would stamp one chat's name on a window hosting two.
 func claudeWindowRenames(
-	paneByTarget map[string]Pane,
-	labels []PaneLabel,
+	paneByTarget map[string]ProbePane, labels []PaneLabel,
 	seenWindows map[string]struct{},
 ) []WindowRename {
 	type windowPlan struct {
-		pane  Pane
+		pane  ProbePane
 		label string
 		skip  bool
 	}
@@ -415,16 +414,5 @@ const WindowNameRunes = 24
 // for the name-sync timer). Two writers that clipped differently would each
 // see the other's name as drift and rename the window back and forth forever.
 func WindowNameFor(name string) string {
-	return clipRunes(name, WindowNameRunes)
-}
-
-func clipRunes(value string, limit int) string {
-	count := 0
-	for index := range value {
-		if count == limit {
-			return value[:index]
-		}
-		count++
-	}
-	return value
+	return naming.ClipRunes(name, WindowNameRunes)
 }

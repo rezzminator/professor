@@ -20,13 +20,26 @@ type dockerIdentity struct {
 	err   string
 }
 
-// NewSampler wires the production-only Docker identity resolver. Resource
-// pressure still comes exclusively from cgroups; the daemon is contacted at
-// most once for each newly observed immutable container ID.
+// dockerSocketPath is where a real Docker daemon's control socket lives.
+const dockerSocketPath = "/var/run/docker.sock"
+
+// NewSampler wires the Docker identity resolver against the real daemon
+// socket. Resource pressure still comes exclusively from cgroups; the
+// daemon is contacted at most once for each newly observed immutable
+// container ID.
 func NewSampler(procRoot, cgroupRoot string) *Sampler {
+	return NewSamplerWithDockerSocket(procRoot, cgroupRoot, dockerSocketPath)
+}
+
+// NewSamplerWithDockerSocket is NewSampler with the daemon socket path as a
+// seam: a test wires it to a jailed unix socket (hostfixture-style) instead
+// of the real, host-only /var/run/docker.sock, so the "production" wiring
+// path runs — and is proven — in the fence, not only newDockerInspector in
+// isolation.
+func NewSamplerWithDockerSocket(procRoot, cgroupRoot, dockerSocket string) *Sampler {
 	return &Sampler{
 		ProcRoot: procRoot, CgroupRoot: cgroupRoot,
-		DockerInspect: newDockerInspector("/var/run/docker.sock"),
+		DockerInspect: newDockerInspector(dockerSocket),
 	}
 }
 

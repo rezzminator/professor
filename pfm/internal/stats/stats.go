@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
 )
@@ -153,7 +154,7 @@ func (sampler *Sampler) SampleResources(rows []compose.Row) (Snapshot, error) {
 // counters. Provider failures remain visible in the returned cards and
 // warnings; they do not make the snapshot unready.
 func (sampler *Sampler) SampleLimits() Snapshot {
-	now := time.Now().UnixNano()
+	now := clock.Real.Now().UnixNano()
 	if sampler.Clock != nil {
 		now = sampler.Clock()
 	}
@@ -169,7 +170,7 @@ func (sampler *Sampler) SampleLimits() Snapshot {
 // keeps stale windows visible while it refreshes due accounts asynchronously;
 // the caller's context bounds those refresh workers to its lifetime.
 func (sampler *Sampler) SampleLiveLimits(ctx context.Context) Snapshot {
-	now := time.Now().UnixNano()
+	now := clock.Real.Now().UnixNano()
 	if sampler.Clock != nil {
 		now = sampler.Clock()
 	}
@@ -182,7 +183,7 @@ func (sampler *Sampler) SampleLiveLimits(ctx context.Context) Snapshot {
 }
 
 func (sampler *Sampler) sample(rows []compose.Row, includeLimits bool) (Snapshot, error) {
-	now := time.Now().UnixNano()
+	now := clock.Real.Now().UnixNano()
 	if sampler.Clock != nil {
 		now = sampler.Clock()
 	}

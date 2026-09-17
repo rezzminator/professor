@@ -5,11 +5,11 @@ package spawn
 import (
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/paths"
 )
 
 // serviceScopeCommand escapes a chat server from the user service that
@@ -21,8 +21,9 @@ func serviceScopeCommand(
 	ctx context.Context,
 	binary string,
 	arguments, environment []string,
+	env paths.Env,
 ) (*exec.Cmd, error) {
-	if strings.TrimSpace(os.Getenv("INVOCATION_ID")) == "" {
+	if strings.TrimSpace(env.Get("INVOCATION_ID")) == "" {
 		command := exec.CommandContext(ctx, binary, arguments...)
 		command.Env = environment
 		return command, nil

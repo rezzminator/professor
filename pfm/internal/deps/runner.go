@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"sync"
+	"syscall"
 )
 
 // RunOptions configures one Runner.Run call: the environment and working
@@ -40,6 +42,36 @@ type RunResult struct {
 type Runner interface {
 	Run(ctx context.Context, argv []string, opts RunOptions) (RunResult, error)
 	LookPath(name string) (string, error)
+	// Start launches argv and returns as soon as it is running, never
+	// waiting on it here — the shape every streaming or detached spawn
+	// (chat_dispatch.go's hook runner, chat_reload_command.go's detached
+	// self re-exec, inject.CommandThenSpawner.Spawn) needs instead of Run's
+	// wait-to-completion contract.
+	Start(ctx context.Context, argv []string, opts StartOptions) (Process, error)
+}
+
+// StartOptions configures one Runner.Start call: the environment and
+// working directory the child inherits (the same defaults RunOptions
+// takes), where its stdout/stderr are wired, and whether it detaches into
+// its own session.
+type StartOptions struct {
+	Env            []string
+	Dir            string
+	Stdout, Stderr io.Writer
+	// Detach starts the child in its own session (SysProcAttr{Setsid: true}
+	// on unix) and releases it immediately after Start — the process is
+	// never waited on, because a detached child is expected to outlive this
+	// one. Process.Wait on a Detach process reports that error rather than
+	// blocking forever on a process this Runner no longer holds.
+	Detach bool
+}
+
+// Process is the running child Runner.Start hands back: its pid, a Wait to
+// block for its exit, and a Release to give it up without waiting.
+type Process interface {
+	Pid() int
+	Wait() error
+	Release() error
 }
 
 // RealRunner runs argv through os/exec.
@@ -64,7 +96,14 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	err := command.Run()
-	result := RunResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), ExitCode: ExitCode(err)}
+	// A nil err IS the zero exit code — ExitCode(nil) answers -1 ("never
+	// reached one"), which is right for a process that never ran but wrong
+	// here: this command ran and exited 0.
+	exitCode := 0
+	if err != nil {
+		exitCode = ExitCode(err)
+	}
+	result := RunResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), ExitCode: exitCode}
 	var exitErr *exec.ExitError
 	if err != nil && !errors.As(err, &exitErr) {
 		return result, fmt.Errorf("run %q: %w", argv[0], err)
@@ -77,6 +116,75 @@ func (RealRunner) LookPath(name string) (string, error) {
 	return exec.LookPath(name)
 }
 
+// Start launches argv and returns immediately. A non-Detach start wraps
+// ctx's cancellation (exec.CommandContext) exactly as Run does; a Detach
+// start runs in its own session and is released right after Start, so
+// nothing here holds its process table entry, and Wait on the returned
+// Process reports that rather than blocking on a process this Runner no
+// longer owns.
+func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (Process, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("deps: RealRunner.Start: empty argv")
+	}
+	var command *exec.Cmd
+	if opts.Detach {
+		// A detached child must outlive this call, so it is never wired to
+		// ctx's cancellation the way a streamed, waited-on child is.
+		command = exec.Command(argv[0], argv[1:]...)
+		command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	} else {
+		command = exec.CommandContext(ctx, argv[0], argv[1:]...)
+	}
+	command.Env = opts.Env
+	command.Dir = opts.Dir
+	command.Stdout = opts.Stdout
+	command.Stderr = opts.Stderr
+	if err := command.Start(); err != nil {
+		return nil, fmt.Errorf("start %q: %w", argv[0], err)
+	}
+	if opts.Detach {
+		pid := command.Process.Pid
+		if err := command.Process.Release(); err != nil {
+			return nil, fmt.Errorf("release detached %q: %w", argv[0], err)
+		}
+		return &releasedProcess{pid: pid, argv0: argv[0]}, nil
+	}
+	return &realProcess{command: command}, nil
+}
+
+// realProcess wraps a started, non-detached *exec.Cmd this Runner still
+// owns: Wait and Release forward to it directly.
+type realProcess struct {
+	command *exec.Cmd
+}
+
+func (p *realProcess) Pid() int { return p.command.Process.Pid }
+
+func (p *realProcess) Wait() error { return p.command.Wait() }
+
+func (p *realProcess) Release() error { return p.command.Process.Release() }
+
+// releasedProcess is what Start(Detach: true) hands back: the pid it saw
+// before releasing the process handle. Nothing here can wait on the real
+// child any more — Wait says so by name instead of blocking forever on a
+// process table entry this Runner gave up.
+type releasedProcess struct {
+	pid   int
+	argv0 string
+}
+
+func (p *releasedProcess) Pid() int { return p.pid }
+
+func (p *releasedProcess) Wait() error {
+	return fmt.Errorf(
+		"deps: Process.Wait: %q (pid %d) was started detached and released; it cannot be waited on",
+		p.argv0,
+		p.pid,
+	)
+}
+
+func (p *releasedProcess) Release() error { return nil }
+
 // FakeRunner scripts Runner responses by argv prefix and records every call
 // on a ledger. Script order does not matter: the LONGEST matching prefix
 // wins, so a caller can script a broad default ("git") alongside a
@@ -88,10 +196,12 @@ func (RealRunner) LookPath(name string) (string, error) {
 // binary, which is what a fixture like hostfixture.NoTmux wants for free by
 // scripting nothing.
 type FakeRunner struct {
-	mu      sync.Mutex
-	scripts []fakeScript
-	lookups map[string]fakeLookup
-	calls   []RunCall
+	mu           sync.Mutex
+	scripts      []fakeScript
+	lookups      map[string]fakeLookup
+	calls        []RunCall
+	startScripts []fakeStartScript
+	starts       []StartCall
 }
 
 type fakeScript struct {
@@ -110,6 +220,31 @@ type RunCall struct {
 	Argv []string
 	Opts RunOptions
 }
+
+// StartCall is one Start invocation FakeRunner recorded on its ledger —
+// Calls' Start counterpart.
+type StartCall struct {
+	Argv []string
+	Opts StartOptions
+}
+
+type fakeStartScript struct {
+	prefix  []string
+	pid     int
+	waitErr error
+	err     error
+}
+
+// fakeProcess is the scripted Process FakeRunner.Start hands back: a fixed
+// pid and a fixed Wait error, never a real process.
+type fakeProcess struct {
+	pid     int
+	waitErr error
+}
+
+func (p *fakeProcess) Pid() int       { return p.pid }
+func (p *fakeProcess) Wait() error    { return p.waitErr }
+func (p *fakeProcess) Release() error { return nil }
 
 // Script registers result/err for every Run call whose argv starts with
 // prefix.
@@ -153,6 +288,60 @@ func (f *FakeRunner) Run(_ context.Context, argv []string, opts RunOptions) (Run
 		return RunResult{ExitCode: -1}, UnscriptedError{Argv: append([]string(nil), argv...)}
 	}
 	return best.result, best.err
+}
+
+// ScriptStart registers the Process a Start call whose argv starts with
+// prefix gets back: pid, the error Process.Wait answers, and the error
+// Start itself returns (non-nil err short-circuits before a Process is
+// built, the same shape Script's err does for Run).
+func (f *FakeRunner) ScriptStart(prefix []string, pid int, waitErr, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startScripts = append(f.startScripts, fakeStartScript{
+		prefix:  append([]string(nil), prefix...),
+		pid:     pid,
+		waitErr: waitErr,
+		err:     err,
+	})
+}
+
+// Start records the call on the Start ledger, then answers with the
+// longest registered ScriptStart match, or a default Process (pid 4242,
+// Wait nil) when nothing was scripted — a caller that never cares about the
+// spawned process's identity does not have to script one.
+func (f *FakeRunner) Start(_ context.Context, argv []string, opts StartOptions) (Process, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.starts = append(f.starts, StartCall{Argv: append([]string(nil), argv...), Opts: opts})
+	var best *fakeStartScript
+	for index := range f.startScripts {
+		script := &f.startScripts[index]
+		if !argvHasPrefix(argv, script.prefix) {
+			continue
+		}
+		if best == nil || len(script.prefix) > len(best.prefix) {
+			best = script
+		}
+	}
+	if best == nil {
+		return &fakeProcess{pid: 4242}, nil
+	}
+	if best.err != nil {
+		return nil, best.err
+	}
+	return &fakeProcess{pid: best.pid, waitErr: best.waitErr}, nil
+}
+
+// Starts returns every Start call FakeRunner has recorded, in call order —
+// Calls' Start counterpart, with the same copy-on-read isolation.
+func (f *FakeRunner) Starts() []StartCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	starts := make([]StartCall, len(f.starts))
+	for index, call := range f.starts {
+		starts[index] = StartCall{Argv: append([]string(nil), call.Argv...), Opts: call.Opts}
+	}
+	return starts
 }
 
 // LookPath answers a scripted name, or ENOENT (exec.ErrNotFound) for one

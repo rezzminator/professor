@@ -11,6 +11,7 @@ import (
 
 	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/nudge"
 	"hostops/pfm/internal/paths"
@@ -99,7 +100,9 @@ func runStatuslineWithRuntime(
 			runtime.AccountEmojis[account.ID] = machine.Config.EmojiFor(account.ID)
 		}
 	}
-	runtime.Spawn = statusline.SpawnDetached
+	runtime.Spawn = func(kind statusline.RefreshKind) error {
+		return statusline.SpawnDetached(kind, deps.RealRunner{})
+	}
 	rendered, err := statusline.Render(ctx, raw, runtime)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm statusline: render (fail-open): %v\n", err)

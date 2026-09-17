@@ -12,6 +12,7 @@ import (
 	"time"
 
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/kill"
@@ -150,10 +151,9 @@ func TestChatReloadSchedulesADetachedWorker(t *testing.T) {
 	t.Cleanup(func() { startReloadWorker = old })
 	var workerArgs []string
 	detached := false
-	startReloadWorker = func(command *exec.Cmd) error {
-		workerArgs = append([]string(nil), command.Args...)
-		detached = command.SysProcAttr != nil && command.SysProcAttr.Setsid &&
-			command.Stdin != os.Stdin && command.Stdout == command.Stderr
+	startReloadWorker = func(argv []string, opts deps.StartOptions) error {
+		workerArgs = append([]string(nil), argv...)
+		detached = opts.Detach && opts.Stdout != nil && opts.Stdout == opts.Stderr
 		return nil
 	}
 	var stdout, stderr bytes.Buffer
@@ -224,8 +224,8 @@ func TestChatReloadHandsTheWorkerAnExplicitSockAndPane(t *testing.T) {
 	old := startReloadWorker
 	t.Cleanup(func() { startReloadWorker = old })
 	var workerArgs []string
-	startReloadWorker = func(command *exec.Cmd) error {
-		workerArgs = append([]string(nil), command.Args...)
+	startReloadWorker = func(argv []string, _ deps.StartOptions) error {
+		workerArgs = append([]string(nil), argv...)
 		return nil
 	}
 	var stdout, stderr bytes.Buffer
@@ -290,8 +290,8 @@ func TestChatReloadWithExplicitPaneOnAMultiPaneServerResolves(t *testing.T) {
 	old := startReloadWorker
 	t.Cleanup(func() { startReloadWorker = old })
 	var workerArgs []string
-	startReloadWorker = func(command *exec.Cmd) error {
-		workerArgs = append([]string(nil), command.Args...)
+	startReloadWorker = func(argv []string, _ deps.StartOptions) error {
+		workerArgs = append([]string(nil), argv...)
 		return nil
 	}
 	var stdout, stderr bytes.Buffer

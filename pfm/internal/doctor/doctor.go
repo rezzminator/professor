@@ -173,6 +173,7 @@ func Run(
 	if len(pathWarnings) == 0 {
 		fmt.Fprintln(stdout, "doctor: path canonical")
 	}
+	printActivityLogDoctor(stdout, runtime)
 	tally.warnings += printPrePushDoctor(context.Background(), stdout)
 	verboseDir := ""
 	if *verbose {

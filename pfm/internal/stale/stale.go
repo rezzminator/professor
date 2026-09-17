@@ -10,6 +10,7 @@
 package stale
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -21,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/paths"
 )
@@ -103,6 +105,7 @@ func SweepStaleProcesses(
 	signal Signaler,
 	stdout io.Writer,
 	wait time.Duration,
+	clk clock.Clock,
 ) error {
 	scan, err := Find(table, binary, signal)
 	if err != nil {
@@ -125,7 +128,7 @@ func SweepStaleProcesses(
 		fmt.Fprintf(stdout, "sweep: TERM pid=%d  %s\n", process.PID, process.Command)
 		deliver(signal, process.PID, syscall.SIGTERM)
 	}
-	survivors, err := awaitExit(table, binary, signal, wait)
+	survivors, err := awaitExit(table, binary, signal, wait, clk)
 	if err != nil {
 		return err
 	}
@@ -134,7 +137,7 @@ func SweepStaleProcesses(
 		deliver(signal, process.PID, syscall.SIGKILL)
 	}
 	if len(survivors) != 0 {
-		if survivors, err = awaitExit(table, binary, signal, wait); err != nil {
+		if survivors, err = awaitExit(table, binary, signal, wait, clk); err != nil {
 			return err
 		}
 	}
@@ -155,17 +158,25 @@ func SweepStaleProcesses(
 // awaitExit re-scans until no stale process is left or wait runs out, and
 // returns what is left. A re-scan that fails is an error, never an empty
 // "all gone".
-func awaitExit(table gather.ProcFS, binary string, signal Signaler, wait time.Duration) ([]Process, error) {
-	deadline := time.Now().Add(wait)
+func awaitExit(
+	table gather.ProcFS,
+	binary string,
+	signal Signaler,
+	wait time.Duration,
+	clk clock.Clock,
+) ([]Process, error) {
+	deadline := clk.Now().Add(wait)
 	for {
 		scan, err := Find(table, binary, signal)
 		if err != nil {
 			return nil, fmt.Errorf("re-scan after signalling: %w", err)
 		}
-		if len(scan.Stale) == 0 || time.Now().After(deadline) {
+		if len(scan.Stale) == 0 || clk.Now().After(deadline) {
 			return scan.Stale, nil
 		}
-		time.Sleep(wait / 10)
+		if err := clk.Sleep(context.Background(), wait/10); err != nil {
+			return scan.Stale, nil
+		}
 	}
 }
 
@@ -199,10 +210,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal stale: %v\n", err)
 		return 1
 	}
-	return run(args, stdout, stderr, gather.NewProcFS(resolved.ProcRoot), binary, syscall.Kill)
+	return runStale(args, stdout, stderr, gather.NewProcFS(resolved.ProcRoot), binary, syscall.Kill, clock.Real)
 }
 
-func run(args []string, stdout, stderr io.Writer, table gather.ProcFS, installed string, signal Signaler) int {
+func runStale(
+	args []string,
+	stdout, stderr io.Writer,
+	table gather.ProcFS,
+	installed string,
+	signal Signaler,
+	clk clock.Clock,
+) int {
 	flags := flag.NewFlagSet("internal stale", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	sweep := flags.Bool("sweep", false, "TERM, then KILL, every stale pfm process and prove none is left")
@@ -216,7 +234,7 @@ func run(args []string, stdout, stderr io.Writer, table gather.ProcFS, installed
 	}
 	binary := *binaryFlag
 	if *sweep {
-		if err := SweepStaleProcesses(table, binary, signal, stdout, 3*time.Second); err != nil {
+		if err := SweepStaleProcesses(table, binary, signal, stdout, 3*time.Second, clk); err != nil {
 			fmt.Fprintf(stderr, "pfm internal stale: %v\n", err)
 			return 1
 		}

@@ -217,3 +217,27 @@ func TestSocketUnderKeepsTheSocketInsideTheTmuxDir(t *testing.T) {
 		t.Fatal("SocketUnder with no tmux directory answered a path")
 	}
 }
+
+// The activity log hangs off the same pfm state directory as the fleet cache,
+// so a jail, a fence and the live host each keep their own and never mix.
+func TestResolveLogFileHangsOffTheHomesStateDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(EnvHome, home)
+	resolved, err := Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl")
+	if resolved.LogFile != want {
+		t.Fatalf("LogFile = %q, want %q", resolved.LogFile, want)
+	}
+	other := t.TempDir()
+	t.Setenv(EnvHome, other)
+	second, err := Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.LogFile == resolved.LogFile {
+		t.Fatalf("two homes resolved to one activity log: %s", second.LogFile)
+	}
+}

@@ -57,7 +57,7 @@ var topLevelSubcommands = []string{
 	versionCommand, "ls", chatCommand, "harvest", headlessCommand, indexCommand, doctorCommand,
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
-	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand,
+	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
@@ -80,7 +80,7 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func run(args []string, stdout, stderr io.Writer) int {
+func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	configPath, args, err := splitGlobalConfig(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm: %v\n", err)
@@ -100,6 +100,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	runtime.Version = version
+	finishLog := openActivityLog(args, runtime, stderr)
+	defer func() { finishLog(exitCode) }()
 	// The one place the machine config reaches a Codex rename's proof.
 	spawn.UseCodexHomes(runtime.Config.CodexHomes())
 	if len(args) == 0 {
@@ -119,6 +121,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runHeadless(args[1:], stdout, stderr, runtime)
 	case "index":
 		return runIndex(args[1:], stdout, stderr, runtime, clock.Real)
+	case "log":
+		return runLog(args[1:], stdout, stderr, runtime)
 	case "doctor":
 		return doctor.Run(
 			args[1:],
@@ -376,7 +380,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		PaneID:      paneID,
 		Self:        *self,
 		Exit:        *exit,
-		Environment: kill.Environment(),
+		Environment: kill.Environment(paths.OSEnv{}),
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
@@ -601,6 +605,7 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  init      scaffold project templates once and pin their baselines")
 	fmt.Fprintln(w, "  config    initialize, inspect, or validate machine configuration")
 	fmt.Fprintln(w, "  doctor    inspect fleet database and jail health")
+	fmt.Fprintln(w, "  log       read this home's activity log: --since --level --chat --cmd --follow")
 	fmt.Fprintln(w, "  version   print the pfm version")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "wiring commands:")

@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/naming"
 )
 
@@ -117,7 +118,7 @@ func Run(
 		return Result{}, err
 	}
 	timings := request.Timings.orDefaults()
-	trace := newTracer(request.Trace, time.Now())
+	trace := newTracer(request.Trace, clock.Real.Now())
 	window := WindowName(request.Name)
 	spec := SessionSpec{
 		Socket:  request.Socket,
@@ -216,7 +217,7 @@ func waitForBoot(
 	socket, target string,
 	timings Timings,
 ) (string, error) {
-	deadline := time.Now().Add(timings.Boot)
+	deadline := clock.Real.Now().Add(timings.Boot)
 	previous := ""
 	settled := false
 	for {
@@ -238,7 +239,7 @@ func waitForBoot(
 			settled = false
 		}
 		previous = trimmed
-		if time.Now().After(deadline) {
+		if clock.Real.Now().After(deadline) {
 			if trimmed == "" {
 				return "", fmt.Errorf(
 					"the chat drew nothing within %s on socket %s",
@@ -305,7 +306,7 @@ func waitForComposer(
 	trace tracer,
 	ready func(string) bool,
 ) bool {
-	deadline := time.Now().Add(timings.Boot)
+	deadline := clock.Real.Now().Add(timings.Boot)
 	previous := ""
 	dismissals := 0
 	held := 0
@@ -335,7 +336,7 @@ func waitForComposer(
 		default:
 			held = 0
 		}
-		if time.Now().After(deadline) {
+		if clock.Real.Now().After(deadline) {
 			return false
 		}
 		if err := sleep(ctx, timings.Poll); err != nil {
@@ -371,7 +372,7 @@ func nameCodexThread(
 	trace tracer,
 	proof renameProof,
 ) (named bool, warning string, blocked bool) {
-	since := time.Now().Add(-renameClockSlack)
+	since := clock.Real.Now().Add(-renameClockSlack)
 	for attempt := 0; attempt < renameAttempts; attempt++ {
 		if attempt > 0 && proof != nil {
 			landed, err := proof(name, since)
@@ -717,13 +718,13 @@ func pollCapture(
 	timings Timings,
 	satisfied func(string) bool,
 ) bool {
-	deadline := time.Now().Add(timings.Step)
+	deadline := clock.Real.Now().Add(timings.Step)
 	for {
 		capture, err := tmux.Capture(ctx, socket, target)
 		if err == nil && satisfied(capture) {
 			return true
 		}
-		if time.Now().After(deadline) {
+		if clock.Real.Now().After(deadline) {
 			return false
 		}
 		if err := sleep(ctx, timings.Poll); err != nil {
@@ -733,17 +734,7 @@ func pollCapture(
 }
 
 func sleep(ctx context.Context, duration time.Duration) error {
-	if duration <= 0 {
-		return ctx.Err()
-	}
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	return clock.Real.Sleep(ctx, duration)
 }
 
 // WindowName reduces a chat name to something tmux can carry as a window name:

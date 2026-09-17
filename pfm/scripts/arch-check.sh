@@ -52,7 +52,9 @@ grep '_test\.go$' "$T/all.list" > "$T/test.list"
 
 # g <out> <list> <grep args...>: grep over a file list; returns 2 when grep could
 # not read (rc ≥ 2), so an unreadable tree never passes as a clean one.
-g() { local out=$1 list=$2; shift 2; grep "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
+# An EMPTY list is never "clean": grep with no file operands would read stdin
+# and hang the gate, so it is reported as an enumerator that could not run.
+g() { local out=$1 list=$2; shift 2; [ -s "$list" ] || return 2; grep "$@" $(cat "$list") > "$out"; [ $? -le 1 ] || return 2; }
 
 # ratchet <id> <name> <current>: set ratchet — FAIL on any line the baseline lacks.
 ratchet() {
@@ -262,5 +264,17 @@ grep -vE '^internal/(clock|deps|paths|tmux)/' "$T/src.list" > "$T/noseam.list"
 if g "$T/raw" "$T/noseam.list" -nE 'os\.Getenv|LookupEnv|UserHomeDir|user\.Current|exec\.Command|exec\.CommandContext|exec\.LookPath|time\.Now|time\.Sleep|time\.After|time\.NewTimer|time\.NewTicker|time\.Tick|net\.Dial|net\.Listen'; then
   count_by_file "$T/raw" > "$T/c22"; ratchet_counts C22-host-doors host-doors "$T/c22"
 else say C22-host-doors ERROR "grep could not read sources"; fi
+
+# C23 one activity log: a bare log.Print*/log.Fatal* or a hand-rolled
+# fmt.Fprint*(os.Stderr in non-test code writes where nothing can read it back
+# — no level, no fields, no destination a field report or a lane beat can
+# attach (docs/dev/trains/testing-foundation/waves/6-activity-log/spec.md).
+# internal/obs IS the destination and cmd/pfm's stderr IS a verb's user-facing
+# output, so both are outside the count; every other package moves onto
+# obs.Logger/obs.Span as part B migrates it, and this baseline only shrinks.
+grep -vE '^(internal/obs/|cmd/pfm/)' "$T/src.list" > "$T/noobs.list"
+if g "$T/raw" "$T/noobs.list" -nHE '\blog\.(Print|Fatal)|fmt\.Fprint[a-zA-Z]*\(os\.Stderr'; then
+  count_by_file "$T/raw" > "$T/c23"; ratchet_counts C23-bare-log bare-log "$T/c23"
+else say C23-bare-log ERROR "grep could not read sources"; fi
 
 exit $rc

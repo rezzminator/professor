@@ -5,12 +5,11 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	fleetindex "hostops/pfm/internal/index"
@@ -41,7 +40,7 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 	}
 	now := dependencies.Now
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
 	spawner := dependencies.Spawner
 	if spawner == nil {
@@ -71,12 +70,17 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 	}, nil
 }
 
-// Environment reads the three caller values used by --self.
-func Environment() SelfEnvironment {
+// Environment reads the three caller values used by --self, through env
+// (pfm/TESTPLAN.md § Seams, paths.Env); nil reads the real process
+// environment.
+func Environment(env paths.Env) SelfEnvironment {
+	if env == nil {
+		env = paths.OSEnv{}
+	}
 	return SelfEnvironment{
-		TMUX:            os.Getenv("TMUX"),
-		TMUXPane:        os.Getenv("TMUX_PANE"),
-		ClaudeSessionID: os.Getenv("CLAUDE_CODE_SESSION_ID"),
+		TMUX:            env.Get("TMUX"),
+		TMUXPane:        env.Get("TMUX_PANE"),
+		ClaudeSessionID: env.Get("CLAUDE_CODE_SESSION_ID"),
 	}
 }
 

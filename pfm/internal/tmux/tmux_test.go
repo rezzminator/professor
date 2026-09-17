@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"hostops/pfm/internal/hostfixture"
 )
 
 // TestCommandAddressesTheSocketAndClearsTMUX pins the runner's contract: the
@@ -97,5 +99,23 @@ func TestCouldNotRunSeparatesAnUnstartableTmuxFromAFailingServer(t *testing.T) {
 	}
 	if CouldNotRun(nil) {
 		t.Fatal("CouldNotRun(nil) = true")
+	}
+}
+
+// TestCouldNotRunClassifiesHostfixtureNoTmuxsLookPathError is hostfixture
+// case 4 (NoTmux): a caller that resolves tmux through a deps.Runner
+// (deps.FakeRunner.LookPath scripted ENOENT, exactly the shape NoTmux
+// builds) must have that error classified as CouldNotRun — the same "tmux
+// itself never started" bucket the real-exec ENOENT cases above land in —
+// so a probe sweeping every socket fails whole instead of reporting an
+// empty fleet.
+func TestCouldNotRunClassifiesHostfixtureNoTmuxsLookPathError(t *testing.T) {
+	fixture := hostfixture.NoTmux(t)
+	_, err := fixture.Runner.LookPath("tmux")
+	if err == nil {
+		t.Fatal("NoTmux fixture's LookPath(tmux) returned nil error")
+	}
+	if !CouldNotRun(err) {
+		t.Fatalf("CouldNotRun(%v) = false, want true for NoTmux's scripted ENOENT", err)
 	}
 }

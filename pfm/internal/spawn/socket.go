@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/engine"
 )
 
@@ -24,7 +24,7 @@ func FreshSocket(id engine.ID) string {
 	return fmt.Sprintf(
 		"%s%d-%d-%d",
 		descriptor.SocketPrefix,
-		time.Now().Unix(),
+		clock.Real.Now().Unix(),
 		os.Getpid(),
 		binary.BigEndian.Uint16(randomBytes[:]),
 	)

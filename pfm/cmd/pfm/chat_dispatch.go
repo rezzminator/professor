@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"regexp"
 	"strings"
-	"time"
 
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
@@ -109,7 +107,7 @@ func runChatWithRuntime(
 	case askAction:
 		return runHeadlessAsk(rest, stdout, stderr, clock.Real, runtime)
 	case "watch":
-		return runHeadlessWatch(rest, stdout, stderr, runtime)
+		return runHeadlessWatch(rest, stdout, stderr, deps.RealRunner{}, runtime)
 	case "capture":
 		return runChatCapture(rest, stdout, stderr, runtime)
 	case "keys":
@@ -734,77 +732,6 @@ func writeUnsignedInjectWarning(stderr io.Writer) {
 			inject.SenderSessionEnv+"=$(pfm whoami) "+
 			inject.SenderLabelEnv+"=<label> <command>.",
 	)
-}
-
-func runHeadlessWatch(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := cli.NewFlagSet(
-		"chat watch",
-		"usage: pfm chat watch <target> [--idle-after SECS] "+
-			"[--on-idle CMD] [--on-exit CMD] [--once]",
-		stderr,
-	)
-	idleAfter := flags.Int("idle-after", 0, "seconds of idle before IDLE is emitted")
-	onIdle := flags.String("on-idle", "", "shell command to run on IDLE")
-	onExit := flags.String("on-exit", "", "shell command to run on EXIT or DEAD")
-	once := flags.Bool("once", false, "stop after the first IDLE")
-	poll := flags.Int("poll", 2, "seconds between samples")
-	names, code, ok := cli.ParseFlagsAnywhere(flags, args)
-	if !ok {
-		return code
-	}
-	if len(names) != 1 || *idleAfter < 0 || *poll < 1 {
-		flags.Usage()
-		return 2
-	}
-	name := names[0]
-	ctx := context.Background()
-	if _, code := headlessTarget(ctx, name, stdout, stderr, false, runtimes...); code != 0 {
-		return code
-	}
-	watcher := headless.Watcher{
-		Name:    name,
-		Resolve: chatResolver(name, runtimes...),
-	}
-	status, err := watcher.Watch(ctx, headless.WatchOptions{
-		IdleAfter: time.Duration(*idleAfter) * time.Second,
-		Poll:      time.Duration(*poll) * time.Second,
-		Once:      *once,
-		OnIdle:    hookRunner(*onIdle, stderr),
-		OnExit:    hookRunner(*onExit, stderr),
-	}, stdout)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat watch: %v\n", err)
-		return 1
-	}
-	if !status.Alive() {
-		return codeDeadChat
-	}
-	return 0
-}
-
-// hookRunner runs a --on-idle/--on-exit command with the chat's facts in the
-// environment, so a hook can act without re-resolving anything.
-func hookRunner(command string, stderr io.Writer) func(headless.Status) error {
-	if strings.TrimSpace(command) == "" {
-		return nil
-	}
-	return func(status headless.Status) error {
-		process := exec.Command(deps.Executable("sh"), "-c", command)
-		process.Env = append(
-			os.Environ(),
-			"CC_CHAT_NAME="+status.Name,
-			"CC_CHAT_STATE="+status.State,
-			"CC_CHAT_ENGINE="+string(status.Engine),
-			"CC_CHAT_SOCKET="+status.Socket,
-			"CC_CHAT_SESSION_ID="+status.SessionID,
-		)
-		process.Stdout = stderr
-		process.Stderr = stderr
-		if err := process.Run(); err != nil {
-			fmt.Fprintf(stderr, "pfm chat watch: hook failed: %v\n", err)
-		}
-		return nil
-	}
 }
 
 func entryText(entry transcript.Entry) string {

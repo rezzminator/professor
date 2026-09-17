@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Self-test for scripts/arch-check.sh's C23-bare-log ratchet: the check must
+# COUNT a bare log.Printf outside internal/obs and cmd/pfm, must NOT count one
+# inside them, and must refuse a count above the committed baseline. It runs
+# arch-check.sh against a throwaway git fixture (PFM=<fixture>), never against
+# this repo, and asserts on the CHECK C23-bare-log line rather than the exit
+# status — the fixture carries none of the other baselines, so every other
+# check legitimately reports ERROR there.
+#
+# Harness style follows scripts/test-sweep_test.sh, the sibling shell test.
+set -uo pipefail
+
+ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
+SUT="$ROOT/scripts/arch-check.sh"
+T="$(mktemp -d "${TMPDIR:-/tmp}/pfm-arch-check-test.XXXXXX")"
+cleanup() { rm -rf -- "$T"; }
+trap cleanup EXIT
+
+PASS=0
+FAIL=0
+ok()  { printf 'PASS  %s\n' "$1"; PASS=$((PASS+1)); }
+bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n' "$@" >&2; FAIL=$((FAIL+1)); }
+
+# fixture <dir>: a minimal git tree arch-check can enumerate.
+fixture() {
+  local dir=$1
+  mkdir -p "$dir/internal/loud" "$dir/internal/obs" "$dir/cmd/pfm" "$dir/.arch"
+  printf 'package loud\n\nimport "log"\n\nfunc Shout() { log.Printf("hello") }\n' > "$dir/internal/loud/loud.go"
+  printf 'package obs\n\nimport "log"\n\nfunc Shout() { log.Printf("hello") }\n' > "$dir/internal/obs/obs.go"
+  printf 'package main\n\nimport (\n\t"fmt"\n\t"os"\n)\n\nfunc main() { fmt.Fprintln(os.Stderr, "usage") }\n' > "$dir/cmd/pfm/main.go"
+  git -C "$dir" init -q 2>/dev/null || return 1
+  git -C "$dir" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null || return 1
+}
+
+# The fixture is its own git repo, so the fence's mounted-repo overrides
+# (PFM_DEV_REPO_GIT_DIR/WORK_TREE, honoured by arch-check's repo_git) are
+# dropped here — with them set, arch-check enumerates the MOUNTED repo against
+# the fixture directory and lists no files at all.
+c23_line() {
+  env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$1" bash "$SUT" </dev/null 2>&1 | grep 'C23-bare-log'
+}
+
+# ---- 1: a bare log.Printf outside obs/cmd is counted, and a missing baseline
+# is an ERROR, never a PASS ---------------------------------------------------
+
+REPO="$T/no-baseline"
+if fixture "$REPO"; then
+  line=$(c23_line "$REPO")
+  if [[ "$line" == *ERROR* && "$line" == *bare-log.txt* ]]; then
+    ok "C23: a missing baseline reports ERROR, not PASS"
+  else
+    bad "C23: expected ERROR for a missing baseline" "$line"
+  fi
+else
+  bad "C23: could not build the git fixture (is git available?)"
+fi
+
+# ---- 2: with a baseline that lists it, the fixture's one call site passes,
+# and neither internal/obs nor cmd/pfm is counted -----------------------------
+
+echo 'internal/loud/loud.go 1' > "$REPO/.arch/bare-log.txt"
+line=$(c23_line "$REPO")
+if [[ "$line" == *PASS* && "$line" == *"1 in 1 keys"* ]]; then
+  ok "C23: counts the one call site outside internal/obs and cmd/pfm, and only that one"
+else
+  bad "C23: expected PASS with exactly one counted call site" "$line"
+fi
+
+# ---- 3: the baseline refuses to grow ----------------------------------------
+
+printf 'package loud\n\nimport "log"\n\nfunc Shout() { log.Printf("hello") }\nfunc Again() { log.Fatalf("bye") }\n' \
+  > "$REPO/internal/loud/loud.go"
+line=$(c23_line "$REPO")
+if [[ "$line" == *FAIL* && "$line" == *"internal/loud/loud.go (1->2)"* ]]; then
+  ok "C23: a second bare call in a baselined file FAILs the ratchet"
+else
+  bad "C23: expected FAIL when a baselined count grows" "$line"
+fi
+
+# ---- 4: a file the baseline never listed FAILs ------------------------------
+
+REPO2="$T/new-file"
+if fixture "$REPO2"; then
+  : > "$REPO2/.arch/bare-log.txt"
+  line=$(c23_line "$REPO2")
+  if [[ "$line" == *FAIL* && "$line" == *"internal/loud/loud.go (new 1)"* ]]; then
+    ok "C23: a call site in a file the baseline does not list FAILs"
+  else
+    bad "C23: expected FAIL for an unlisted file" "$line"
+  fi
+else
+  bad "C23: could not build the second git fixture"
+fi
+
+printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]

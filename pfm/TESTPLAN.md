@@ -810,6 +810,33 @@ Ranked by identity resolution across resume/store/fork edges, kill-store integri
 
 ---
 
+## Activity log
+
+One structured destination for every corner of the engine
+(`docs/dev/trains/testing-foundation/waves/6-activity-log/spec.md`).
+`internal/obs` is that destination: `obs.OpenLog` installs the process logger
+at `cmd/pfm` entry and brackets the verb with `cmd.start`/`cmd.exit`,
+`obs.Logger(ctx)` reads it, `obs.With(ctx, ...)` scopes it, `obs.Span(ctx,
+name)` times a unit of work, and `obs.Test(t)` hands a test the same handler
+the file gets. Part A is the foundation only — no existing `log.Printf` has
+moved yet; ratchet `C23-bare-log` (`.arch/bare-log.txt`, 88 call sites in 34
+files) holds the line while part B migrates each corner.
+
+| Concern | Where | Tier | Proof |
+| --- | --- | --- | --- |
+| One file per pfm home, never mixed | `paths.Values.LogFile` = `<home>/.local/state/pfm/log/pfm.jsonl` | `JAIL` | `obs.TestOpenLogWritesOneFilePerHome`, `paths.TestResolveLogFileHangsOffTheHomesStateDirectory` |
+| Size-capped rotation, no dependency | `obs` rotator, `log.keepFiles` / `log.maxMB` in `pfm.config.json` | `JAIL` | `obs.TestRotatorCapsOneHomeAtKeepFiles`, `config.TestLogKeysFromFile` |
+| Level per environment: `-alpha` → debug, release → info, `log.level`, then `PFM_LOG_LEVEL` | `obs.resolveLevel` | `JAIL` | `obs.TestOpenLogLevelPerEnvironment`, `obs.TestOpenLogReportsAnUnparsableLevelInsteadOfIgnoringIt` |
+| `PFM_LOG=stderr` mirrors a foreground run | `obs.openDestination` | `JAIL` | `obs.TestOpenLogMirrorsToStderr` |
+| Every record carries `ts level msg cmd pid version`, and `chat seat engine sock dur_ms err` where known | `obs.OpenLog`, `obs.With`, `obs.Span` | `JAIL` | `obs.TestOpenLogRecordsCarryEveryDeclaredField`, `obs.TestWithScopesAChatSeatEngineAndSocketOntoEveryRecord` |
+| **Never a credential, a token, a prompt body or a transcript line** | `obs.Scrub` — an allow-list of field keys plus value scrubbing (`sk-`, `Bearer `, `oauth`, over 512 bytes) | `JAIL` | `obs.TestScrubRefusesCredentialsTokensPromptsAndTranscriptLines` |
+| `pfm log [--since --level --chat --cmd --follow]` | `obs.ReadActivity`, `cmd/pfm/log_command.go` | `JAIL` | `obs.TestReadActivity*`, `cmd/pfm.TestLogVerbReadsWhatTheProcessWrote` |
+| `pfm doctor` names the log path and its size | `doctor.printActivityLogDoctor` | `JAIL` | `doctor.TestPrintActivityLogDoctorNamesThePathAndSize`, `...SeparatesAbsenceFromAFailedLook` |
+| Process entry brackets every verb | `cmd/pfm/main.go` `run()` | `JAIL` | `cmd/pfm.TestRunWritesCommandStartAndExit` |
+| The ratchet itself | `scripts/arch-check.sh` C23 | `JAIL+sh` | `scripts/arch-check_test.sh` |
+
+---
+
 ## Seams
 
 The unit-test law (`docs/dev/trains/testing-foundation/waves/3-unit-law/spec.md`): a unit under test has every dependency on the host, the account, an API or another process MOCKED at its seam. Four packages carry that seam for the whole module; the rule is the same in each — production code calls the real implementation, a test scripts the fake, and nothing outside these four packages talks to the bare host directly (ratchet C22, `pfm/scripts/arch-check.sh`, `pfm/.arch/host-doors.txt`).
@@ -817,11 +844,11 @@ The unit-test law (`docs/dev/trains/testing-foundation/waves/3-unit-law/spec.md`
 | Package | Seam | Real | Fake |
 | --- | --- | --- | --- |
 | `internal/clock` | `Clock` (`Now`, `Sleep(ctx, d)`, `After`, `NewTimer`, `NewTicker`) | `clock.Real` — the wall clock | `clock.Fake` — deterministic; `Advance(d)` fires every due sleep/timer/ticker in due-time order, `Pending()` counts what is still registered, a `Sleep` blocks until `Advance` or `ctx` releases it |
-| `internal/deps` | `Runner` (`Run(ctx, argv, opts) (RunResult, error)`, `LookPath`) | `deps.RealRunner` — `exec.CommandContext` | `deps.FakeRunner` — scripted by argv prefix (longest match wins), a call ledger (`Calls()`), an unscripted call is `UnscriptedError`, never a silent empty result |
+| `internal/deps` | `Runner` (`Run(ctx, argv, opts) (RunResult, error)`, `LookPath`, `Start(ctx, argv, opts) (Process, error)` for a streaming or detached spawn) | `deps.RealRunner` — `exec.CommandContext`; `Start(Detach: true)` runs `SysProcAttr{Setsid: true}` and releases the process right after Start | `deps.FakeRunner` — scripted by argv prefix (longest match wins), a call ledger (`Calls()`/`Starts()`), an unscripted call is `UnscriptedError`, never a silent empty result; an unscripted `Start` defaults to a `Process` of pid 4242 and a nil `Wait` |
 | `internal/tmux` | the façade's command surface (`capture-pane`, `list-sessions`/`list-windows`/`list-panes` `-F`, `send-keys`, `display-message`, `respawn-pane`, `kill-server`) | `Command`/`Invocation` — unchanged | `tmux.Fake` — scripted by subcommand (`Script`) or subcommand+socket (`ScriptFor`), a call ledger (`Calls()`), an unscripted call is `ErrUnscripted`; the real façade is untouched |
 | `internal/paths` | `Env` (`Get`, `Lookup`, `Home`, `Hostname`, `User`) | `paths.OSEnv` — `os.Getenv`/`LookupEnv`/`UserHomeDir`/`Hostname`/`user.Current`; `EnvOr`/`Home` are `EnvOrFrom`/`HomeFrom` over it | `paths.MapEnv` — an in-memory environment plus configurable `Home`/`Hostname`/`User` errors |
 
-Wave 3 batch B0 is additive only: the seams exist and are tested, but `installer.Options.Now/Sleep`, `kill.Dependencies.Now`, `reap.Dependencies.Now`, `picker.ActivityClock` and `statusline.Runtime.Now` are unchanged — later batches migrate each caller onto the shared seam.
+Wave 3 batch B0 is additive only: the seams exist and are tested, but `installer.Options.Now/Sleep`, `kill.Dependencies.Now`, `reap.Dependencies.Now`, `picker.ActivityClock` and `statusline.Runtime.Now` are unchanged — later batches migrate each caller onto the shared seam. B3 migrates `kill.Dependencies.Now`, `stats.LimitsSampler.now`, `spawn`'s internal `sleep`/deadline doors, `stale`'s sweep wait and `statusline.Runtime.now` onto `clock.Real` as their fallback (the per-package `func() time.Time` field shape stays, only its default changes) and folds `kill.CommandSpawner`/`inject.CommandThenSpawner`'s detach-and-release exec plumbing onto `deps.Runner.Start`; `installer.Options.Now/Sleep`, `reap.Dependencies.Now` and `picker.ActivityClock` remain for a later batch.
 
 ## Host fixtures
 
@@ -839,3 +866,5 @@ Wave 3 batch B0 is additive only: the seams exist and are tested, but `installer
 | 8 | `ExpiredCreds` / `NoCreds` | `.credentials.json` with `expiresAt` in the past; the file absent plus a Keychain (`security`) not-found script | `usagehook`, `doctor` seat rows, `headless`, `resolve` |
 | 9 | `StaleArtifacts` | a dead tmux socket file, an exited process's pid file, a `fleet.db-wal`, a leftover reload lock | `reap`, `stale`, `fleetdb`, `reload.InFlight`, `kill` |
 | 10 | `TwoWriters` | runs a caller's function twice concurrently against the same jailed fleet | `atomicfile`, `installer` ownership ledgers, `fleetdb`, `updatecheck` lock |
+
+`stats.NewSampler`'s Docker identity resolver is otherwise "production only" — its one caller wires a hardcoded `/var/run/docker.sock`, a daemon no fence has. `stats.NewSamplerWithDockerSocket` is the same construction with the socket path as a seam, so `TestNewSamplerWithDockerSocketWiresResolveDockerIdentities` proves that wiring end to end against a jailed unix socket instead of only testing `newDockerInspector` in isolation.

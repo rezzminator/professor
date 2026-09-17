@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleetdb"
@@ -68,7 +69,7 @@ func NewFinisher(
 	}
 	now := dependencies.Now
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
 	codexHomes := dependencies.CodexHomes
 	if codexHomes == nil {
@@ -370,12 +371,5 @@ func readChildFile(path string) (values []string, returnErr error) {
 }
 
 func waitContext(ctx context.Context, duration time.Duration) error {
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+	return clock.Real.Sleep(ctx, duration)
 }

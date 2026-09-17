@@ -25,6 +25,10 @@ type TmuxSpawner struct {
 	// config keeps today's behaviour instead of silently handing the title to
 	// the host.
 	Titles *pfmconfig.TmuxTitles
+	// Env is the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env)
+	// serviceScopeCommand reads INVOCATION_ID through; nil defaults to
+	// paths.OSEnv{}.
+	Env paths.Env
 }
 
 // preflightBinary proves the executable word a pane is about to run resolves
@@ -129,7 +133,11 @@ func (tmux TmuxSpawner) newSessionCommand(
 		tmux.Binary,
 		filepath.Join(tmux.TmuxDir, socket),
 		arguments...)
-	return serviceScopeCommand(ctx, binary, commandArguments, environment)
+	env := tmux.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	return serviceScopeCommand(ctx, binary, commandArguments, environment, env)
 }
 
 func (tmux TmuxSpawner) Capture(

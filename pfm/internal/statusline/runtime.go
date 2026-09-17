@@ -3,13 +3,14 @@ package statusline
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
@@ -34,8 +35,14 @@ func (commandRunner) Output(
 	name string,
 	args ...string,
 ) ([]byte, error) {
-	command := exec.CommandContext(ctx, deps.Executable(name), args...)
-	return command.Output()
+	result, err := deps.RealRunner{}.Run(ctx, append([]string{deps.Executable(name)}, args...), deps.RunOptions{})
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return result.Stdout, nil
 }
 
 // Runtime holds every environmental input to a render. Tests replace all of
@@ -57,7 +64,7 @@ type Runtime struct {
 	AccountEmojis map[int]string
 	Engine        pfmengine.ID
 
-	// A non-nil Env is a closed test environment. Nil reads os.Getenv.
+	// A non-nil Env is a closed test environment. Nil reads the real process environment.
 	Env map[string]string
 
 	Command CommandRunner
@@ -69,21 +76,22 @@ func DefaultRuntime(id pfmengine.ID) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
-	columns, _ := strconv.Atoi(os.Getenv("COLUMNS"))
+	env := paths.OSEnv{}
+	columns, _ := strconv.Atoi(env.Get("COLUMNS"))
 	descriptor := pfmengine.MustLookup(id)
-	configDir := os.Getenv(pfmengine.MustLookup(pfmengine.Claude).HomeEnv)
+	configDir := env.Get(pfmengine.MustLookup(pfmengine.Claude).HomeEnv)
 	if id == pfmengine.Codex {
-		configDir = os.Getenv(descriptor.HomeEnv)
+		configDir = env.Get(descriptor.HomeEnv)
 		if configDir == "" {
 			configDir = resolved.FirstRoot(pfmengine.Codex)
 		}
 	} else if configDir == "" {
 		configDir = filepath.Join(resolved.Home, ".claude")
 	}
-	cacheDir := filepath.Dir(CodexStatuslineCachePath(os.Getenv(paths.EnvHome), os.Getuid()))
-	rateDir := ClaudeRateLimitDir(os.Getenv(paths.EnvHome), os.Getuid())
+	cacheDir := filepath.Dir(CodexStatuslineCachePath(env.Get(paths.EnvHome), os.Getuid()))
+	rateDir := ClaudeRateLimitDir(env.Get(paths.EnvHome), os.Getuid())
 	return Runtime{
-		Now:          time.Now,
+		Now:          clock.Real.Now,
 		Home:         resolved.Home,
 		ConfigDir:    configDir,
 		CacheDir:     cacheDir,
@@ -141,14 +149,14 @@ func (runtime Runtime) getenv(name string) string {
 	if runtime.Env != nil {
 		return runtime.Env[name]
 	}
-	return os.Getenv(name)
+	return paths.OSEnv{}.Get(name)
 }
 
 func (runtime Runtime) now() time.Time {
 	if runtime.Now != nil {
 		return runtime.Now()
 	}
-	return time.Now()
+	return clock.Real.Now()
 }
 
 func (runtime Runtime) normalized() Runtime {
@@ -156,7 +164,7 @@ func (runtime Runtime) normalized() Runtime {
 		runtime.Engine = pfmengine.Claude
 	}
 	if runtime.Home == "" {
-		runtime.Home, _ = os.UserHomeDir()
+		runtime.Home, _ = paths.OSEnv{}.Home()
 	}
 	if runtime.ConfigDir == "" {
 		runtime.ConfigDir = filepath.Join(runtime.Home, ".claude")

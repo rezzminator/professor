@@ -257,6 +257,7 @@ type Config struct {
 	OpenCode         OpenCode
 	Tmux             Tmux
 	NameSync         NameSync
+	Log              Log
 	MCPServers       map[string]MCPServer
 	MCP              MCPConfig
 	Ask              AskConfig
@@ -286,6 +287,7 @@ type rawConfig struct {
 	Tmux     *rawTmux      `json:"tmux,omitempty"`
 	NameSync *rawNameSync  `json:"nameSync,omitempty"`
 	MCP      *rawMCP       `json:"mcp,omitempty"`
+	Log      *rawLog       `json:"log,omitempty"`
 	Ask      *rawAsk       `json:"ask,omitempty"`
 }
 
@@ -524,6 +526,7 @@ func defaultsWithMCPServers(
 		OpenCode:   OpenCode{Binary: pfmengine.MustLookup(pfmengine.OpenCode).Binary},
 		Tmux:       Tmux{Titles: DefaultTmuxTitles()},
 		NameSync:   DefaultNameSync(),
+		Log:        DefaultLog(),
 		MCPServers: servers,
 		MCP:        MCPConfig{Servers: cloneMCPServers(servers), HTTP: MCPHTTP{Port: DefaultMCPPort}},
 		Harvester:  harvester,
@@ -893,6 +896,9 @@ func loadWithMCPServers(
 		}
 		result.NameSync.Interval = interval
 		result.Sources["nameSync.interval"] = SourceFile
+	}
+	if err := applyLog(&result, raw.Log); err != nil {
+		return Config{}, err
 	}
 
 	var legacyHarvesterEnabled *bool

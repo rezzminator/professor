@@ -11,11 +11,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	pfmchat "hostops/pfm/internal/chat"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
@@ -43,11 +43,14 @@ const (
 
 type reloadCommandTmux struct{}
 
-var startReloadWorker = func(command *exec.Cmd) error {
-	if err := command.Start(); err != nil {
+// startReloadWorker launches the detached worker (Detach: true) and releases
+// it; a test overrides this var to script the launch.
+var startReloadWorker = func(argv []string, opts deps.StartOptions) error {
+	process, err := deps.RealRunner{}.Start(context.Background(), argv, opts)
+	if err != nil {
 		return err
 	}
-	return command.Process.Release()
+	return process.Release()
 }
 
 func (reloadCommandTmux) command(ctx context.Context, socket string, args ...string) *exec.Cmd {
@@ -174,16 +177,6 @@ func runChatReloadWithRuntime(
 			fmt.Fprintf(stderr, "pfm chat reload: close worker log: %v\n", err)
 		}
 	}()
-	null, err := os.Open(os.DevNull)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: open null input: %v\n", err)
-		return 1
-	}
-	defer func() {
-		if err := null.Close(); err != nil {
-			fmt.Fprintf(stderr, "pfm chat reload: close null input: %v\n", err)
-		}
-	}()
 	workerArgs := []string{"--config", runtime.Config.Path, internalCommand, reloadRunCommand}
 	workerArgs = append(workerArgs, args...)
 	if callerSock == "" {
@@ -194,12 +187,8 @@ func runChatReloadWithRuntime(
 		// Preserve the scheduler-resolved pane unless the caller supplied one.
 		workerArgs = append(workerArgs, reloadPaneFlag, pane)
 	}
-	command := exec.Command(os.Args[0], workerArgs...)
-	command.Stdin = null
-	command.Stdout = log
-	command.Stderr = log
-	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := startReloadWorker(command); err != nil {
+	argv := append([]string{os.Args[0]}, workerArgs...) // Stdin unset: a detached Start child defaults to /dev/null.
+	if err := startReloadWorker(argv, deps.StartOptions{Stdout: log, Stderr: log, Detach: true}); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: schedule worker: %v\n", err)
 		return 1
 	}

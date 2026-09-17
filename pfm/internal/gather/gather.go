@@ -4,12 +4,12 @@ package gather
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
+	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/naming"
 	"hostops/pfm/internal/paths"
@@ -72,13 +72,13 @@ func New(dependencies Dependencies) (*Gatherer, error) {
 	}
 	now := dependencies.Now
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
 		tmuxTmpDir := dependencies.TmuxTmpDir
 		if tmuxTmpDir == "" {
-			tmuxTmpDir = os.Getenv("TMUX_TMPDIR")
+			tmuxTmpDir = paths.OSEnv{}.Get("TMUX_TMPDIR")
 			if tmuxTmpDir == "" {
 				tmuxTmpDir = "/tmp"
 			}

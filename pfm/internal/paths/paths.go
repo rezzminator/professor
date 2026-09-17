@@ -38,7 +38,12 @@ const (
 	// one that ignores their config wears tmux's default green status bar at
 	// the bottom while every other window wears theirs on top. Jails set it to
 	// /dev/null so a machine's real config can never steer a fixture.
-	EnvTmuxConf   = "PFM_TMUX_CONF"
+	EnvTmuxConf = "PFM_TMUX_CONF"
+	// EnvLogLevel overrides the activity log's level for one run, and
+	// EnvLogMirror set to "stderr" mirrors every record onto stderr for a
+	// foreground run (internal/obs).
+	EnvLogLevel   = "PFM_LOG_LEVEL"
+	EnvLogMirror  = "PFM_LOG"
 	defaultTmpDir = "/tmp"
 )
 
@@ -92,6 +97,11 @@ type Values struct {
 	ArchiveDir string
 	ProcRoot   string
 	CgroupRoot string
+	// LogFile is the home's activity log, the JSON-lines file internal/obs
+	// writes and `pfm log` reads. It hangs off the same pfm state directory
+	// as the fleet cache, so a jail, a fence and the live host each keep
+	// their own and can never mix.
+	LogFile string
 }
 
 // EnvOr returns a non-empty environment override, or fallback otherwise.
@@ -219,6 +229,7 @@ func Resolve() (Values, error) {
 		TmuxDir:    EnvOr(EnvTmuxDir, filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))),
 		Home:       home,
 		ArchiveDir: filepath.Join(home, ".claude-archive"),
+		LogFile:    filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 		ProcRoot:   EnvOr(EnvProcRoot, "/proc"),
 		CgroupRoot: EnvOr(EnvCgroupRoot, "/sys/fs/cgroup"),
 	}, nil

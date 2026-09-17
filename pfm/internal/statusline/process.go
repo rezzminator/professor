@@ -5,13 +5,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 
 	"hostops/pfm/internal/deps"
@@ -19,8 +17,10 @@ import (
 )
 
 // SpawnDetached starts one refresher as a new session and releases the child.
-// The render path never waits for credentials, networks, or App Server startup.
-func SpawnDetached(kind RefreshKind) (returnErr error) {
+// The render path never waits for credentials, networks, or App Server
+// startup. runner is the deps.Runner seam (pfm/TESTPLAN.md § Seams); nil
+// defaults to deps.RealRunner{}.
+func SpawnDetached(kind RefreshKind, runner deps.Runner) (returnErr error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("resolve pfm executable: %w", err)
@@ -32,24 +32,21 @@ func SpawnDetached(kind RefreshKind) (returnErr error) {
 	default:
 		return fmt.Errorf("unknown statusline refresher %q", kind)
 	}
-	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	if err != nil {
-		return fmt.Errorf("open null device: %w", err)
+	if runner == nil {
+		runner = deps.RealRunner{}
 	}
-	defer func() {
-		if err := null.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close null device: %w", err))
-		}
-	}()
-	command := exec.Command(executable, "statusline", argument)
-	command.Stdin = null
-	command.Stdout = null
-	command.Stderr = null
-	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := command.Start(); err != nil {
+	// Stdin/Stdout/Stderr left unset: a detached Start child defaults to the
+	// null device, the same /dev/null this refresher wired explicitly before
+	// this seam.
+	process, err := runner.Start(
+		context.Background(),
+		[]string{executable, "statusline", argument},
+		deps.StartOptions{Detach: true},
+	)
+	if err != nil {
 		return fmt.Errorf("start detached %s refresher: %w", kind, err)
 	}
-	if err := command.Process.Release(); err != nil {
+	if err := process.Release(); err != nil {
 		return fmt.Errorf("release detached %s refresher: %w", kind, err)
 	}
 	return nil

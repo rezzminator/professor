@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	headlessrun "hostops/pfm/internal/headless/run"
@@ -42,6 +43,7 @@ type LimitAccount struct {
 type LimitsSampler struct {
 	Accounts []LimitAccount
 	Now      func() time.Time
+	Env      paths.Env // host-environment seam; nil defaults to paths.OSEnv{}
 	TTL      time.Duration
 	// CodexTTL overrides TTL for Codex accounts only. Zero means "no
 	// override" — Codex falls back to TTL exactly like before, which is
@@ -164,7 +166,7 @@ func (sampler *LimitsSampler) now() time.Time {
 	if sampler.Now != nil {
 		return sampler.Now()
 	}
-	return time.Now()
+	return clock.Real.Now()
 }
 
 // fetchClaudeCached is the default Fetch implementation: it reads and writes
@@ -198,7 +200,11 @@ func (sampler *LimitsSampler) fetchClaude(
 func (sampler *LimitsSampler) fetchClaudeStatusline(
 	account LimitAccount,
 ) (usagehook.Usage, time.Time, bool, error) {
-	directory := statusline.ClaudeRateLimitDir(os.Getenv(paths.EnvHome), os.Getuid())
+	env := sampler.Env
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	directory := statusline.ClaudeRateLimitDir(env.Get(paths.EnvHome), os.Getuid())
 	entries, err := os.ReadDir(directory)
 	if err != nil {
 		if os.IsNotExist(err) {

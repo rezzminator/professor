@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/hostfixture"
 )
 
 // fixture is a process table on disk — <root>/<pid>/{cmdline,exe} — the
@@ -85,6 +87,7 @@ func (fixture *fixture) signaler(ignoreTerm, ignoreKill map[int]bool, sent *[]st
 }
 
 func TestFindNamesOnlyPfmProcessesRunningAReplacedBinary(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(101, fixture.old, fixture.binary, "mcp", "chat", "serve")
 	fixture.process(102, fixture.binary, fixture.binary, "mcp", "serve")
@@ -110,6 +113,7 @@ func TestFindNamesOnlyPfmProcessesRunningAReplacedBinary(t *testing.T) {
 // "Could not look" is never "nothing there": a live pfm whose image cannot be
 // read is named, and fails the scan, rather than passing as fresh.
 func TestFindNamesAProcessItCouldNotRead(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(201, "", fixture.binary, "ls")
 	var sent []string
@@ -122,9 +126,31 @@ func TestFindNamesAProcessItCouldNotRead(t *testing.T) {
 	}
 }
 
+// TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable is
+// hostfixture case 9 (StaleArtifacts): a pid that exited between the pid
+// listing and the image read must be SKIPPED, not folded into
+// scan.Unreadable — that column exists for a process still alive whose
+// image genuinely could not be read, and a real ESRCH from a dead pid is
+// evidence of neither.
+func TestFindSkipsAnExitedPfmProcessInsteadOfReportingItUnreadable(t *testing.T) {
+	// hostfixture.StaleArtifacts uses t.Setenv internally (testjail.Fleet),
+	// which testing.T refuses to combine with t.Parallel.
+	artifacts := hostfixture.StaleArtifacts(t)
+	fixture := newFixture(t)
+	fixture.process(artifacts.StalePID, "", "pfm", "mcp", "serve")
+	scan, err := Find(gather.NewProcFS(fixture.root), fixture.binary, syscall.Kill)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scan.Unreadable) != 0 {
+		t.Fatalf("scan.Unreadable = %v, want the exited pid skipped, not reported unreadable", scan.Unreadable)
+	}
+}
+
 // A table that cannot say which file a process runs is refused outright: the
 // sweep would otherwise classify every process as fresh and report clean.
 func TestFindRefusesATableThatCannotReadImages(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	var sent []string
 	_, err := Find(imageless{gather.NewProcFS(fixture.root)}, fixture.binary, fixture.signaler(nil, nil, &sent))
@@ -136,6 +162,7 @@ func TestFindRefusesATableThatCannotReadImages(t *testing.T) {
 type imageless struct{ gather.ProcFS }
 
 func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(301, fixture.old, fixture.binary, "ls")
 	fixture.process(302, fixture.old, fixture.binary, "mcp", "chat", "serve")
@@ -148,6 +175,7 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 		fixture.signaler(map[int]bool{302: true}, nil, &sent),
 		&stdout,
 		10*time.Millisecond,
+		clock.Real,
 	)
 	if err != nil {
 		t.Fatalf("sweep: %v\n%s", err, stdout.String())
@@ -166,6 +194,7 @@ func TestSweepTermsThenKillsThenProvesNoneLeft(t *testing.T) {
 }
 
 func TestSweepFailsLoudOnASurvivor(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(401, fixture.old, fixture.binary, "ls")
 	var sent []string
@@ -176,6 +205,7 @@ func TestSweepFailsLoudOnASurvivor(t *testing.T) {
 		fixture.signaler(map[int]bool{401: true}, map[int]bool{401: true}, &sent),
 		&stdout,
 		10*time.Millisecond,
+		clock.Real,
 	)
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("err = %v, want the survivor named", err)
@@ -183,35 +213,47 @@ func TestSweepFailsLoudOnASurvivor(t *testing.T) {
 }
 
 func TestRunReportsNoneAndStaleDistinctly(t *testing.T) {
+	t.Parallel()
 	fixture := newFixture(t)
 	fixture.process(501, fixture.binary, fixture.binary, "mcp", "serve")
 	var sent []string
 	var stdout, stderr bytes.Buffer
 	signal := fixture.signaler(nil, nil, &sent)
-	if code := run(
+	if code := runStale(
 		nil,
 		&stdout,
 		&stderr,
 		gather.NewProcFS(fixture.root),
 		fixture.binary,
 		signal,
+		clock.Real,
 	); code != 0 ||
 		!strings.Contains(stdout.String(), "stale: none") {
 		t.Fatalf("code=%d stdout=%q stderr=%q, want none", code, stdout.String(), stderr.String())
 	}
 	fixture.process(502, fixture.old, fixture.binary, "ls")
 	stdout.Reset()
-	if code := run(nil, &stdout, &stderr, gather.NewProcFS(fixture.root), fixture.binary, signal); code != 0 ||
-		!strings.Contains(stdout.String(), "STALE pid=502") || !strings.Contains(stdout.String(), "make sweep-stale") {
+	if code := runStale(
+		nil,
+		&stdout,
+		&stderr,
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		signal,
+		clock.Real,
+	); code != 0 ||
+		!strings.Contains(stdout.String(), "STALE pid=502") ||
+		!strings.Contains(stdout.String(), "make sweep-stale") {
 		t.Fatalf("code=%d stdout=%q, want pid 502 listed with the sweep named", code, stdout.String())
 	}
-	if code := run(
+	if code := runStale(
 		[]string{"--bogus"},
 		&stdout,
 		&stderr,
 		gather.NewProcFS(fixture.root),
 		fixture.binary,
 		signal,
+		clock.Real,
 	); code != 2 {
 		t.Fatalf("code=%d, want a usage refusal", code)
 	}
@@ -220,6 +262,7 @@ func TestRunReportsNoneAndStaleDistinctly(t *testing.T) {
 // kill(2) reads pid 0 as the caller's process group and -1 as every process
 // the user owns: the sweep must never hand either to a signal.
 func TestDeliverRefusesPidsThatNameMoreThanOneProcess(t *testing.T) {
+	t.Parallel()
 	var sent []int
 	record := func(pid int, _ syscall.Signal) error { sent = append(sent, pid); return nil }
 	for _, pid := range []int{0, -1, -42} {

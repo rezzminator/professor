@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -291,6 +291,9 @@ type CommandThenSpawner struct {
 	ConfigPath string
 	Setsid     string
 	Nohup      string
+	// Runner is the deps.Runner seam Spawn launches the waiter through; nil
+	// defaults to deps.RealRunner{}.
+	Runner deps.Runner
 }
 
 // Spawn launches the detached waiter and returns as soon as it is running.
@@ -333,14 +336,6 @@ func (spawner CommandThenSpawner) Spawn(
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var command *exec.Cmd
-	if usingNohup {
-		// The POSIX floor has no `setsid -f`; start it asynchronously and
-		// release the process handle so the waiter outlives this caller.
-		command = exec.Command(launcher, arguments...)
-	} else {
-		command = exec.CommandContext(ctx, launcher, arguments...)
-	}
 	stated := []string{
 		"CHAT_INJECT_SOCKET=" + request.SocketPath,
 		"CHAT_THEN_CHAIN=1",
@@ -350,7 +345,10 @@ func (spawner CommandThenSpawner) Spawn(
 	// answers with the FIRST match, so appending over an inherited value would
 	// leave the inherited one winning, and a chain hop would sign as whoever
 	// spawned the hop before it.
-	command.Env = append(withoutNames(os.Environ(), stated), stated...)
+	env := append(withoutNames(os.Environ(), stated), stated...)
+	// Stdin is left unset: a deps.Runner.Start child reads from the null
+	// device by default (os/exec's own contract for a nil Stdin) exactly as
+	// the explicit /dev/null wiring this replaced did.
 	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("open null device for then waiter: %w", err)
@@ -360,36 +358,50 @@ func (spawner CommandThenSpawner) Spawn(
 			returnErr = errors.Join(returnErr, fmt.Errorf("close null device for then waiter: %w", err))
 		}
 	}()
-	command.Stdin = null
 	// A fresh chain truncates the log; a HOP appends — truncating on a hop
 	// would wipe the chain's earlier hops while they are still being written.
 	flags := os.O_CREATE | os.O_WRONLY | os.O_TRUNC
 	if request.Append {
 		flags = os.O_CREATE | os.O_WRONLY | os.O_APPEND
 	}
+	var stdout, stderr io.Writer = null, null
 	log, err := os.OpenFile(request.LogPath, flags, 0o600)
-	if err != nil {
-		command.Stdout = null
-		command.Stderr = null
-	} else {
+	if err == nil {
 		defer func() {
 			if err := log.Close(); err != nil {
 				returnErr = errors.Join(returnErr, fmt.Errorf("close then waiter log %s: %w", request.LogPath, err))
 			}
 		}()
-		command.Stdout = log
-		command.Stderr = log
+		stdout, stderr = log, log
 	}
-	if usingNohup {
-		if err := command.Start(); err != nil {
+	runner := spawner.Runner
+	if runner == nil {
+		runner = deps.RealRunner{}
+	}
+	opts := deps.StartOptions{
+		Env:    env,
+		Stdout: stdout,
+		Stderr: stderr,
+		// The nohup floor detaches by releasing the process handle right
+		// after Start (deps.StartOptions' Detach shape); the setsid launcher
+		// already forks and returns on its own (setsid -f), so Spawn waits
+		// on it exactly as it waited on command.Run() before this seam.
+		Detach: usingNohup,
+	}
+	process, err := runner.Start(ctx, append([]string{launcher}, arguments...), opts)
+	if err != nil {
+		if usingNohup {
 			return fmt.Errorf("start detached then waiter with nohup: %w", err)
 		}
-		if err := command.Process.Release(); err != nil {
+		return fmt.Errorf("start detached then waiter with setsid: %w", err)
+	}
+	if usingNohup {
+		if err := process.Release(); err != nil {
 			return fmt.Errorf("release detached then waiter: %w", err)
 		}
 		return nil
 	}
-	if err := command.Run(); err != nil {
+	if err := process.Wait(); err != nil {
 		return fmt.Errorf("start detached then waiter with setsid: %w", err)
 	}
 	return nil

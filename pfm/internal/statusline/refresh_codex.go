@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/paths"
 )
 
@@ -19,13 +20,21 @@ type CodexOptions struct {
 	Binary         string
 	ReadRateLimits func(context.Context) ([]byte, error)
 	Now            func() time.Time
+	// Env is the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env)
+	// the default CachePath is resolved through; nil defaults to
+	// paths.OSEnv{}.
+	Env paths.Env
 }
 
 // RefreshCodex extracts the id=1 account/rateLimits/read response from an App
 // Server JSONL exchange and atomically replaces the cache.
 func RefreshCodex(ctx context.Context, options CodexOptions) error {
 	if options.CachePath == "" {
-		options.CachePath = CodexStatuslineCachePath(os.Getenv(paths.EnvHome), os.Getuid())
+		env := options.Env
+		if env == nil {
+			env = paths.OSEnv{}
+		}
+		options.CachePath = CodexStatuslineCachePath(env.Get(paths.EnvHome), os.Getuid())
 	}
 	defer removeRefreshLock(options.CachePath)
 	if options.ReadRateLimits == nil {
@@ -34,7 +43,7 @@ func RefreshCodex(ctx context.Context, options CodexOptions) error {
 		}
 	}
 	if options.Now == nil {
-		options.Now = time.Now
+		options.Now = clock.Real.Now
 	}
 	body, err := options.ReadRateLimits(ctx)
 	if err != nil {

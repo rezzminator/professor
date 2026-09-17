@@ -1,6 +1,7 @@
 package deps
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os/exec"
@@ -141,5 +142,136 @@ func TestFakeRunnerCallsRecordsEveryRunInOrder(t *testing.T) {
 	calls[0].Argv[0] = "mutated"
 	if fresh := fake.Calls(); fresh[0].Argv[0] != "git" {
 		t.Fatalf("Calls()[0].Argv[0] = %q after external mutation, want unaffected %q", fresh[0].Argv[0], "git")
+	}
+}
+
+func TestRealRunnerStartCapturesStdoutStderrAndWaits(t *testing.T) {
+	t.Parallel()
+	var runner RealRunner
+	var stdout, stderr bytes.Buffer
+	process, err := runner.Start(
+		context.Background(),
+		[]string{"sh", "-c", "echo out; echo err >&2; exit 0"},
+		StartOptions{Stdout: &stdout, Stderr: &stderr},
+	)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if process.Pid() <= 0 {
+		t.Fatalf("Pid() = %d, want > 0", process.Pid())
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if got := stdout.String(); got != "out\n" {
+		t.Fatalf("Stdout = %q, want %q", got, "out\n")
+	}
+	if got := stderr.String(); got != "err\n" {
+		t.Fatalf("Stderr = %q, want %q", got, "err\n")
+	}
+}
+
+func TestRealRunnerStartDetachReleasesAndWaitNamesIt(t *testing.T) {
+	t.Parallel()
+	var runner RealRunner
+	process, err := runner.Start(
+		context.Background(),
+		[]string{"sh", "-c", "exit 0"},
+		StartOptions{Detach: true},
+	)
+	if err != nil {
+		t.Fatalf("Start(Detach) error = %v", err)
+	}
+	if process.Pid() <= 0 {
+		t.Fatalf("Pid() = %d, want > 0", process.Pid())
+	}
+	if err := process.Wait(); err == nil {
+		t.Fatal("Wait() on a detached, released process returned nil error, want one naming the release")
+	}
+	if err := process.Release(); err != nil {
+		t.Fatalf("Release() error = %v", err)
+	}
+}
+
+func TestRealRunnerStartReturnsAnErrorWhenTheBinaryCannotStart(t *testing.T) {
+	t.Parallel()
+	var runner RealRunner
+	_, err := runner.Start(context.Background(), []string{"pfm-runner-test-no-such-binary"}, StartOptions{})
+	if err == nil {
+		t.Fatal("Start() with a nonexistent binary returned nil error")
+	}
+}
+
+func TestFakeRunnerStartDefaultsToPid4242AndNilWait(t *testing.T) {
+	t.Parallel()
+	fake := &FakeRunner{}
+	process, err := fake.Start(context.Background(), []string{"codex", "app-server"}, StartOptions{Detach: true})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if process.Pid() != 4242 {
+		t.Fatalf("Pid() = %d, want default 4242", process.Pid())
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v, want nil default", err)
+	}
+}
+
+func TestFakeRunnerStartRecordsCallOnItsOwnLedger(t *testing.T) {
+	t.Parallel()
+	fake := &FakeRunner{}
+	if _, err := fake.Start(
+		context.Background(),
+		[]string{"pfm", "internal", "then"},
+		StartOptions{Dir: "/repo", Detach: true},
+	); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	starts := fake.Starts()
+	if len(starts) != 1 {
+		t.Fatalf("Starts() returned %d entries, want 1", len(starts))
+	}
+	if starts[0].Argv[0] != "pfm" || starts[0].Opts.Dir != "/repo" || !starts[0].Opts.Detach {
+		t.Fatalf("Starts()[0] = %+v, want argv[0]=pfm, Dir=/repo, Detach=true", starts[0])
+	}
+}
+
+func TestFakeRunnerScriptStartControlsPidWaitAndError(t *testing.T) {
+	t.Parallel()
+	fake := &FakeRunner{}
+	fake.ScriptStart([]string{"claude"}, 99, errors.New("scripted wait failure"), nil)
+	fake.ScriptStart([]string{"codex"}, 0, nil, errors.New("scripted start failure"))
+
+	process, err := fake.Start(context.Background(), []string{"claude", "app-server"}, StartOptions{})
+	if err != nil {
+		t.Fatalf("Start(claude) error = %v", err)
+	}
+	if process.Pid() != 99 {
+		t.Fatalf("Pid() = %d, want 99", process.Pid())
+	}
+	if err := process.Wait(); err == nil || err.Error() != "scripted wait failure" {
+		t.Fatalf("Wait() error = %v, want %q", err, "scripted wait failure")
+	}
+
+	_, err = fake.Start(context.Background(), []string{"codex", "app-server"}, StartOptions{})
+	if err == nil || err.Error() != "scripted start failure" {
+		t.Fatalf("Start(codex) error = %v, want %q", err, "scripted start failure")
+	}
+}
+
+// TestRealRunnerRunReportsZeroExitCodeOnSuccess is the regression for a bug
+// this batch hit through internal/kill's viewport.go: RunResult.ExitCode
+// answered -1 (ExitCode(nil)'s "never reached one" sentinel) even for a
+// command that ran and exited 0, so a caller checking ExitCode != 0 for
+// failure misread every successful run as a failure.
+func TestRealRunnerRunReportsZeroExitCodeOnSuccess(t *testing.T) {
+	t.Parallel()
+	var runner RealRunner
+	result, err := runner.Run(context.Background(), []string{"sh", "-c", "exit 0"}, RunOptions{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("ExitCode = %d, want 0 on a successful run", result.ExitCode)
 	}
 }

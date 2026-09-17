@@ -3,11 +3,11 @@
 package stats
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -62,12 +62,18 @@ func readDarwinHostResources(now int64, cpuCount int) (hostResources, error) {
 }
 
 func readDarwinProcesses() (map[int]processSample, uint64, []string, error) {
-	output, err := exec.Command(
-		deps.Executable("ps"), "-A", "-o", "pid=,ppid=,time=,rss=,comm=",
-	).Output()
+	result, err := deps.RealRunner{}.Run(
+		context.Background(),
+		[]string{deps.Executable("ps"), "-A", "-o", "pid=,ppid=,time=,rss=,comm="},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
 	if err != nil {
 		return nil, 0, nil, fmt.Errorf("sample Darwin process counters via ps: %w", err)
 	}
+	output := result.Stdout
 	processes := make(map[int]processSample)
 	var busy uint64
 	var warnings []string
@@ -139,10 +145,14 @@ func readDarwinHeader() (Header, error) {
 	if err != nil {
 		return Header{}, fmt.Errorf("read Darwin host memory size: %w", err)
 	}
-	output, err := exec.Command(deps.Executable("vm_stat")).Output()
+	result, err := deps.RealRunner{}.Run(context.Background(), []string{deps.Executable("vm_stat")}, deps.RunOptions{})
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
 	if err != nil {
 		return Header{}, fmt.Errorf("sample Darwin host memory via vm_stat: %w", err)
 	}
+	output := result.Stdout
 	pageSize, pages, err := parseDarwinVMStat(string(output))
 	if err != nil {
 		return Header{}, err

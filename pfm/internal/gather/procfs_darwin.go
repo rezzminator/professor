@@ -3,9 +3,9 @@
 package gather
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -123,11 +123,19 @@ func (proc *DarwinProcFS) RSSKB(pid int) (int64, error) {
 }
 
 func (proc *DarwinProcFS) loadResident() {
-	output, err := exec.Command(deps.Executable("ps"), "-A", "-o", "pid=,rss=").Output()
+	result, err := deps.RealRunner{}.Run(
+		context.Background(),
+		[]string{deps.Executable("ps"), "-A", "-o", "pid=,rss="},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
 	if err != nil {
 		proc.residentErr = fmt.Errorf("sample resident memory via ps: %w", err)
 		return
 	}
+	output := result.Stdout
 	proc.resident = make(map[int]int64)
 	for _, line := range strings.Split(string(output), "\n") {
 		fields := strings.Fields(line)
@@ -150,9 +158,15 @@ func (proc *DarwinProcFS) loadResident() {
 // transcript a live chat holds open, and "no open files" is a claim, not a
 // shrug — reporting it falsely would let archive evict a file still in use.
 func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
-	output, err := exec.Command(
-		deps.Executable("lsof"), "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn",
-	).Output()
+	result, err := deps.RealRunner{}.Run(
+		context.Background(),
+		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn"},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
+	output := result.Stdout
 	if err != nil {
 		// lsof exits non-zero when a pid owns no matching files at all, and it
 		// still prints what it found. Only an empty result alongside an error is
@@ -193,9 +207,15 @@ func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
 // the one the process still holds after an install renamed a new file over
 // the path. A missing entry is an error, never a zero identity.
 func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
-	output, err := exec.Command(
-		deps.Executable("lsof"), "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di",
-	).Output()
+	result, err := deps.RealRunner{}.Run(
+		context.Background(),
+		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di"},
+		deps.RunOptions{},
+	)
+	if err == nil && result.ExitCode != 0 {
+		err = fmt.Errorf("exit status %d", result.ExitCode)
+	}
+	output := result.Stdout
 	if err != nil && len(output) == 0 {
 		return FileID{}, fmt.Errorf("read the executable of pid %d via lsof: %w", pid, err)
 	}

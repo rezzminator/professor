@@ -47,3 +47,44 @@ func TestDockerInspectorReadsIdentityFromJailedSocket(t *testing.T) {
 		t.Fatalf("Docker inspector identity = %q %q", name, image)
 	}
 }
+
+// TestNewSamplerWithDockerSocketWiresResolveDockerIdentities proves the
+// "production only" NewSampler construction path — normally reachable only
+// against the real host's /var/run/docker.sock — runs in the fence: the
+// seam (NewSamplerWithDockerSocket) points it at a jailed unix socket, and
+// resolveDockerIdentities is exercised end to end through the wiring
+// NewSampler itself builds, not just newDockerInspector called directly.
+func TestNewSamplerWithDockerSocketWiresResolveDockerIdentities(t *testing.T) {
+	t.Parallel()
+	socket := filepath.Join(t.TempDir(), "probe-docker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"Name":"/professor-web","Config":{"Image":"registry.example/professor:web"}}`))
+	})}
+	serveErrors := make(chan error, 1)
+	go func() { serveErrors <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		if err := server.Close(); err != nil {
+			t.Errorf("close jailed Docker server: %v", err)
+		}
+		if err := <-serveErrors; err != nil && err != http.ErrServerClosed {
+			t.Errorf("serve jailed Docker fixture: %v", err)
+		}
+	})
+
+	sampler := NewSamplerWithDockerSocket(t.TempDir(), t.TempDir(), socket)
+	if sampler.DockerInspect == nil {
+		t.Fatal("NewSamplerWithDockerSocket built a Sampler with a nil DockerInspect")
+	}
+	containers := []Container{{ID: "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"}}
+	if warnings := sampler.resolveDockerIdentities(containers); len(warnings) != 0 {
+		t.Fatalf("resolveDockerIdentities warnings = %v, want none", warnings)
+	}
+	if containers[0].Name != "professor-web" || containers[0].Image != "registry.example/professor:web" {
+		t.Fatalf("resolved container = %+v", containers[0])
+	}
+}

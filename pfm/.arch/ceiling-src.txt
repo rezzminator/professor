@@ -14,7 +14,7 @@ internal/installer/installer.go 2536
 internal/installer/vscode.go 812
 internal/professor/project.go 944
 internal/reload/reload.go 1048
-internal/stats/limits.go 1344
+internal/stats/limits.go 1355
 internal/statusline/render.go 1117
 internal/ui/cosmos.go 1593
 internal/ui/model.go 1620

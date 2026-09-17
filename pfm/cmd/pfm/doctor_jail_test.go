@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/store"
+	"hostops/pfm/internal/testjail"
 )
 
 // buildCleanDoctorHome stages the fixture a healthy target HOME carries —
@@ -24,76 +24,7 @@ import (
 func buildCleanDoctorHome(t *testing.T) commandRuntime {
 	t.Helper()
 	clearRetiredHarvesterEnv(t) // golden doctor output must not depend on an ambient retired harvester variable
-	home := t.TempDir()
-	canonicalDir := filepath.Join(home, ".local", "bin")
-	hostShimDir := filepath.Join(t.TempDir(), "bin")
-	for _, directory := range []string{
-		canonicalDir,
-		hostShimDir,
-		filepath.Join(home, ".cc", "1", "projects"),
-		filepath.Join(home, ".cc", "2", "projects"),
-		filepath.Join(home, ".codex"),
-		filepath.Join(home, ".local", "state", "pfm"),
-		filepath.Join(home, "proc"),
-		filepath.Join(home, "tmux"),
-	} {
-		if err := os.MkdirAll(directory, 0o700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	canonical := filepath.Join(canonicalDir, "pfm")
-	if err := os.WriteFile(canonical, []byte("target-pfm"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", "claude")
-	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(managedClaude, filepath.Join(canonicalDir, "claude")); err != nil {
-		t.Fatal(err)
-	}
-	// The pfm-statusline and tmux-title-renudge host overlays are contracted
-	// pfm-install artifacts (issue #14 F1); a fixture representing a healthy
-	// target HOME carries both, same managed-copy-then-symlink shape as the
-	// Claude launcher above.
-	for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
-		managedOverlay := filepath.Join(home, ".local", "share", "pfm", "install", "bin", overlay)
-		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(managedOverlay, filepath.Join(canonicalDir, overlay)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stageHarnessPromptBaseline(t, home)
-
-	t.Setenv("HOME", home)
-	t.Setenv("PFM_HOME", home)
-	t.Setenv("PFM_DB", filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
-	t.Setenv("PFM_FLEET_DB", filepath.Join(home, ".cc", "fleet.db"))
-	t.Setenv("PFM_SID_DIR", filepath.Join(home, "sid"))
-	t.Setenv("PFM_CLAUDE_ROOTS", filepath.Join(home, ".cc", "1", "projects")+
-		string(os.PathListSeparator)+filepath.Join(home, ".cc", "2", "projects"))
-	t.Setenv("PFM_CODEX_ROOT", filepath.Join(home, ".codex"))
-	t.Setenv("PFM_TMUX_DIR", filepath.Join(home, "tmux"))
-	t.Setenv("PFM_TMUX_CONF", "/dev/null")
-	t.Setenv("PFM_PROC_ROOT", filepath.Join(home, "proc"))
-	t.Setenv("PATH", canonicalDir+string(os.PathListSeparator)+hostShimDir)
-
-	runtime, err := pfmconfig.LoadRuntime("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return runtime
+	return testjail.CleanHome(t)
 }
 
 func TestDoctorFreshTargetHomeIsClean(t *testing.T) {

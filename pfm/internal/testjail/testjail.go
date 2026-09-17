@@ -3,6 +3,8 @@
 package testjail
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -13,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
@@ -178,6 +181,158 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	setenv(paths.EnvProcRoot, filepath.Join(root, "proc"))
 	setenv(paths.EnvTmuxConf, "/dev/null")
 	return root
+}
+
+// InstalledHome builds the host artifacts a healthy pfm install carries on
+// top of a scratch fleet and returns the fleet root.
+func InstalledHome(t *testing.T) string {
+	t.Helper()
+
+	root := Fleet(t)
+	jailedHome := filepath.Join(root, "home")
+	if err := os.MkdirAll(filepath.Join(jailedHome, ".local", "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	canonical := filepath.Join(jailedHome, ".local", "bin", "pfm")
+	if err := os.WriteFile(canonical, []byte("jailed-pfm"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	managedClaude := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", "claude")
+	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(managedClaude, filepath.Join(jailedHome, ".local", "bin", "claude")); err != nil {
+		t.Fatal(err)
+	}
+	// The pfm-statusline and tmux-title-renudge host overlays are contracted
+	// pfm-install artifacts (issue #14 F1) the same way the Claude launcher
+	// is — a jail meant to represent a healthy install carries both, same
+	// managed-copy-then-symlink shape.
+	for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
+		managedOverlay := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", overlay)
+		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(managedOverlay, filepath.Join(jailedHome, ".local", "bin", overlay)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	testPath := []string{filepath.Dir(canonical)}
+	for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
+		if _, err := os.Stat(filepath.Join(directory, "pfm")); os.IsNotExist(err) {
+			testPath = append(testPath, directory)
+		}
+	}
+	t.Setenv("PATH", strings.Join(testPath, string(os.PathListSeparator)))
+	return root
+}
+
+// StageHarnessPromptBaseline writes one managed harness-prompt baseline pin.
+func StageHarnessPromptBaseline(t *testing.T, home, alias, stem, captured, name string) {
+	t.Helper()
+	sum := sha256.Sum256([]byte(captured))
+	pin := hex.EncodeToString(sum[:]) + "  " + name + "\n"
+	dir := filepath.Join(home, ".local", "share", "pfm", "install", "prompts")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for filename, data := range map[string]string{
+		stem + ".sha256": pin,
+		name:             captured,
+		stem + ".model":  "claude-" + alias + "-5\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, filename), []byte(data), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// CleanHome stages a healthy target HOME and returns the runtime a clean
+// diagnostic reads.
+func CleanHome(t *testing.T) config.Runtime {
+	t.Helper()
+	home := t.TempDir()
+	canonicalDir := filepath.Join(home, ".local", "bin")
+	hostShimDir := filepath.Join(t.TempDir(), "bin")
+	for _, directory := range []string{
+		canonicalDir,
+		hostShimDir,
+		filepath.Join(home, ".cc", "1", "projects"),
+		filepath.Join(home, ".cc", "2", "projects"),
+		filepath.Join(home, ".codex"),
+		filepath.Join(home, ".local", "state", "pfm"),
+		filepath.Join(home, "proc"),
+		filepath.Join(home, "tmux"),
+	} {
+		if err := os.MkdirAll(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	canonical := filepath.Join(canonicalDir, "pfm")
+	if err := os.WriteFile(canonical, []byte("target-pfm"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", "claude")
+	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(managedClaude, filepath.Join(canonicalDir, "claude")); err != nil {
+		t.Fatal(err)
+	}
+	// The pfm-statusline and tmux-title-renudge host overlays are contracted
+	// pfm-install artifacts (issue #14 F1); a fixture representing a healthy
+	// target HOME carries both, same managed-copy-then-symlink shape as the
+	// Claude launcher above.
+	for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
+		managedOverlay := filepath.Join(home, ".local", "share", "pfm", "install", "bin", overlay)
+		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(managedOverlay, filepath.Join(canonicalDir, overlay)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const (
+		captured = "pfm jail fixture harness prompt\n"
+		name     = "harness-prompt-fixture.md"
+	)
+	for _, model := range []struct{ alias, stem string }{{"sonnet", "harness-original"}, {"opus", "harness-opus"}} {
+		StageHarnessPromptBaseline(t, home, model.alias, model.stem, captured, name)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv(paths.EnvDB, filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
+	t.Setenv(paths.EnvFleetDB, filepath.Join(home, ".cc", "fleet.db"))
+	t.Setenv(paths.EnvSIDDir, filepath.Join(home, "sid"))
+	t.Setenv(paths.EnvClaudeRoots, filepath.Join(home, ".cc", "1", "projects")+
+		string(os.PathListSeparator)+filepath.Join(home, ".cc", "2", "projects"))
+	t.Setenv(paths.EnvCodexHome, filepath.Join(home, ".codex"))
+	t.Setenv(paths.EnvTmuxDir, filepath.Join(home, "tmux"))
+	t.Setenv(paths.EnvTmuxConf, "/dev/null")
+	t.Setenv(paths.EnvProcRoot, filepath.Join(home, "proc"))
+	t.Setenv("PATH", canonicalDir+string(os.PathListSeparator)+hostShimDir)
+
+	loadedRuntime, err := config.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return loadedRuntime
 }
 
 // PTYCommand builds a command that runs argv on a REAL pty via script(1), for

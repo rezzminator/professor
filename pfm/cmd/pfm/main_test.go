@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -698,65 +696,13 @@ func stageHarnessPromptBaseline(t *testing.T, home string) {
 
 func stageModelHarnessPromptBaseline(t *testing.T, home string, model harnessPromptModel, captured, name string) {
 	t.Helper()
-	sum := sha256.Sum256([]byte(captured))
-	pin := hex.EncodeToString(sum[:]) + "  " + name + "\n"
-	dir := filepath.Join(home, ".local", "share", "pfm", "install", "prompts")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for filename, data := range map[string]string{model.stem + ".sha256": pin, name: captured, model.stem + ".model": "claude-" + model.alias + "-5\n"} {
-		if err := os.WriteFile(filepath.Join(dir, filename), []byte(data), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	testjail.StageHarnessPromptBaseline(t, home, model.alias, model.stem, captured, name)
 }
 
 func jailTest(t *testing.T) string {
 	t.Helper()
-
-	root := testjail.Fleet(t)
-	jailedHome := filepath.Join(root, "home")
-	if err := os.MkdirAll(filepath.Join(jailedHome, ".local", "bin"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	canonical := filepath.Join(root, "home", ".local", "bin", "pfm")
-	if err := os.WriteFile(canonical, []byte("jailed-pfm"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	managedClaude := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", "claude")
-	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(managedClaude, filepath.Join(root, "home", ".local", "bin", "claude")); err != nil {
-		t.Fatal(err)
-	}
-	// The pfm-statusline and tmux-title-renudge host overlays are contracted
-	// pfm-install artifacts (issue #14 F1) the same way the Claude launcher
-	// is — a jail meant to represent a healthy install carries both, same
-	// managed-copy-then-symlink shape.
-	for _, overlay := range []string{"pfm-statusline", "tmux-title-renudge"} {
-		managedOverlay := filepath.Join(root, "home", ".local", "share", "pfm", "install", "bin", overlay)
-		if err := os.MkdirAll(filepath.Dir(managedOverlay), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(managedOverlay, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(managedOverlay, filepath.Join(root, "home", ".local", "bin", overlay)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	stageHarnessPromptBaseline(t, jailedHome)
-	testPath := []string{filepath.Dir(canonical)}
-	for _, directory := range filepath.SplitList(os.Getenv("PATH")) {
-		if _, err := os.Stat(filepath.Join(directory, "pfm")); os.IsNotExist(err) {
-			testPath = append(testPath, directory)
-		}
-	}
-	t.Setenv("PATH", strings.Join(testPath, string(os.PathListSeparator)))
+	root := testjail.InstalledHome(t)
+	stageHarnessPromptBaseline(t, filepath.Join(root, "home"))
 	return root
 }
 

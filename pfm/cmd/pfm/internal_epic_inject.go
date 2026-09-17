@@ -38,7 +38,7 @@ var epicInjectWindowName = func(ctx context.Context, identity resolve.Identity) 
 	if identity.SocketPath == "" || target == "" {
 		return "", resolve.ErrNoTmux
 	}
-	return (inject.CommandTmux{}).WindowName(ctx, identity.SocketPath, target)
+	return (inject.TmuxInjector{}).WindowName(ctx, identity.SocketPath, target)
 }
 
 func runEpicInject(stdin io.Reader, stdout, stderr io.Writer) (exitCode int) {

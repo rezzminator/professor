@@ -26,7 +26,7 @@ func TestProbeTmuxFailsWholeWhenTmuxCannotRun(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	for _, probe := range []struct {
 		name string
-		run  func(context.Context, string, TmuxClient, time.Time) (TmuxProbe, error)
+		run  func(context.Context, string, TmuxClient, time.Time) (TmuxSnapshot, error)
 	}{
 		{name: "sweeping", run: ProbeTmux},
 		{name: "read-only", run: ProbeTmuxReadOnly},
@@ -35,7 +35,7 @@ func TestProbeTmuxFailsWholeWhenTmuxCannotRun(t *testing.T) {
 			tmuxDir := t.TempDir()
 			now := time.Now()
 			createCorpseSocket(t, filepath.Join(tmuxDir, "cc-7-8-9"), now.Add(-2*time.Hour))
-			client := CommandTmux{Binary: "pfm-test-missing-tmux", TmuxTmpDir: tmuxDir}
+			client := TmuxProbe{Binary: "pfm-test-missing-tmux", TmuxTmpDir: tmuxDir}
 
 			result, err := probe.run(context.Background(), tmuxDir, client, now)
 			if err == nil {
@@ -100,7 +100,7 @@ func TestConvergeGlobalOptionsChangesOnlyWhatDiverges(t *testing.T) {
 		kill.Env = environment
 		_ = kill.Run()
 	})
-	client := CommandTmux{Binary: "tmux", TmuxTmpDir: root}
+	client := TmuxProbe{Binary: "tmux", TmuxTmpDir: root}
 	options := [][]string{
 		{"set-option", "-g", "set-titles", "off"},
 		{"set-window-option", "-g", "automatic-rename", "off"},

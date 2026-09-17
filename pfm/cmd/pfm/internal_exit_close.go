@@ -106,7 +106,7 @@ func runExitClose(stdin io.Reader, stderr io.Writer) int {
 		context.Background(),
 		socketPath,
 		kill.ViewportDeps{
-			Tmux:      kill.CommandTmux{},
+			Tmux:      kill.TmuxKiller{},
 			Processes: kill.CommandProcessTable{},
 			Signals:   kill.ProcessSignaller{},
 		},

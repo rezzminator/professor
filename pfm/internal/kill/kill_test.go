@@ -1289,7 +1289,7 @@ func TestKillingALiveAgentRowSticksWhileItRuns(t *testing.T) {
 			PaneID:    paneID,
 			SessionID: agentID,
 		}},
-		Panes: []gather.Pane{{
+		Panes: []gather.ProbePane{{
 			Socket:      socket,
 			SessionName: socket,
 			PaneID:      paneID,

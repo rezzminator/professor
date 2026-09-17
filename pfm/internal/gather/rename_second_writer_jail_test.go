@@ -91,7 +91,7 @@ func TestAutomaticRenameIsNotTheSecondWriter(t *testing.T) {
 	socket, windowID, _ := startRenameProbeServer(t, "autorename")
 	renameProbeTmux(t, socket, "set-window-option", "-g", "automatic-rename", "on")
 
-	if err := (CommandTmux{TmuxTmpDir: "/tmp"}).RenameWindow(context.Background(), WindowRename{
+	if err := (TmuxProbe{TmuxTmpDir: "/tmp"}).RenameWindow(context.Background(), WindowRename{
 		Socket: socket, WindowID: windowID, CurrentName: "before", TargetName: "WANTED",
 	}); err != nil {
 		t.Fatal(err)
@@ -116,7 +116,7 @@ func TestAutomaticRenameIsNotTheSecondWriter(t *testing.T) {
 // with allow-rename on or off.
 func TestOSCTitleWriteNeverTouchesTheWindowName(t *testing.T) {
 	socket, windowID, tty := startRenameProbeServer(t, "osc")
-	if err := (CommandTmux{TmuxTmpDir: "/tmp"}).RenameWindow(context.Background(), WindowRename{
+	if err := (TmuxProbe{TmuxTmpDir: "/tmp"}).RenameWindow(context.Background(), WindowRename{
 		Socket: socket, WindowID: windowID, CurrentName: "before", TargetName: "WANTED",
 	}); err != nil {
 		t.Fatal(err)
@@ -153,7 +153,7 @@ func TestRenameWindowLatchSurvivesAScreenTitleEscape(t *testing.T) {
 	socket, windowID, tty := startRenameProbeServer(t, "latch")
 	renameProbeTmux(t, socket, "set-window-option", "-g", "allow-rename", "on")
 
-	if err := (CommandTmux{TmuxTmpDir: "/tmp"}).RenameWindow(context.Background(), WindowRename{
+	if err := (TmuxProbe{TmuxTmpDir: "/tmp"}).RenameWindow(context.Background(), WindowRename{
 		Socket: socket, WindowID: windowID, CurrentName: "before", TargetName: "WANTED",
 	}); err != nil {
 		t.Fatal(err)

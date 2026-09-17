@@ -249,13 +249,13 @@ func composeStressInput() Input {
 		})
 	}
 
-	panes := make([]gather.Pane, 0, paneCount)
+	panes := make([]gather.ProbePane, 0, paneCount)
 	crumbs := make([]gather.Crumb, 0, paneCount)
 	for index := 0; index < paneCount; index++ {
 		socketIndex := index % socketCount
 		socket := fmt.Sprintf("cc-%d-100-%d", 1000+socketIndex, socketIndex)
 		paneID := fmt.Sprintf("%%%d", index)
-		panes = append(panes, gather.Pane{
+		panes = append(panes, gather.ProbePane{
 			Socket:      socket,
 			SessionName: socket,
 			PaneTitle:   "stress",

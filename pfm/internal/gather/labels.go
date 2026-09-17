@@ -35,13 +35,12 @@ type PaneLabel struct {
 func CaptureClaudeLabels(
 	ctx context.Context,
 	capturer PaneCapturer,
-	panes []Pane,
-	configured ...[]string,
+	panes []ProbePane, configured ...[]string,
 ) []PaneLabel {
 	if capturer == nil {
 		return nil
 	}
-	candidates := make([]Pane, 0, len(panes))
+	candidates := make([]ProbePane, 0, len(panes))
 	for index := range panes {
 		pane := panes[index]
 		if id, ok := pfmengine.FromSocket(pane.Socket); !ok || id != pfmengine.Claude {

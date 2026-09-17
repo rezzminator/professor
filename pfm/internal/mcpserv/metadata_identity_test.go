@@ -117,7 +117,7 @@ func metadataIdentityService(t *testing.T) *Service {
 			socket:   filepath.Join(jail.tmuxDir, jail.busySocket),
 			pane:     "%0",
 		},
-		Tmux:           inject.CommandTmux{},
+		Tmux:           inject.TmuxInjector{},
 		Spawner:        metadataThenSpawner{},
 		ClaudeBinary:   "claude",
 		CodexBinary:    "codex",

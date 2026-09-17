@@ -21,7 +21,7 @@ type injectTmuxJail struct {
 }
 
 type verifiedChatTmux struct {
-	CommandTmux
+	TmuxInjector
 	command string
 }
 
@@ -214,7 +214,7 @@ func (jail *injectTmuxJail) startBusyPane(
 	started := time.Now()
 	deadline := started.Add(jailPaneReadyBudget)
 	for {
-		capture, err := CommandTmux{}.Capture(
+		capture, err := TmuxInjector{}.Capture(
 			context.Background(),
 			filepath.Join(jail.tmuxDir, socket),
 			pane,
@@ -288,7 +288,7 @@ func (jail *injectTmuxJail) startCompactTranscriptPane(
 	started := time.Now()
 	deadline := started.Add(jailPaneReadyBudget)
 	for {
-		capture, captureErr := CommandTmux{}.Capture(
+		capture, captureErr := TmuxInjector{}.Capture(
 			context.Background(),
 			filepath.Join(jail.tmuxDir, socket),
 			pane,
@@ -376,7 +376,7 @@ func TestJailedThenWaiterDeliversAfterIdleExactlyOnce(t *testing.T) {
 	if result.Code != 0 || result.Status != "delivered" || !result.Typed {
 		t.Fatalf("DeliverThen() = %+v", result)
 	}
-	capture, err := CommandTmux{}.Capture(ctx, socketPath, pane, false, FullScrollback)
+	capture, err := TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +443,7 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 	if !strings.Contains(queued.Message, "queued into") {
 		t.Fatalf("queue receipt is not distinct: %q", queued.Message)
 	}
-	capture, err := CommandTmux{}.Capture(ctx, socketPath, pane, false, FullScrollback)
+	capture, err := TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,7 +472,7 @@ func TestJailedBusyCodexQueuesAndLongFileDeliversByPaste(t *testing.T) {
 		fileQueued.AutoFilePath != "" {
 		t.Fatalf("long file-backed queue result = %+v", fileQueued)
 	}
-	capture, err = CommandTmux{}.Capture(ctx, socketPath, pane, false, FullScrollback)
+	capture, err = TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil || !strings.Contains(capture, long) {
 		t.Fatalf("busy fixture did not receive the full file-backed body byte-exact: err=%v capture=%q", err, capture)
 	}
@@ -522,7 +522,7 @@ func TestJailedBusyClaudeQueuesWithoutControlKeys(t *testing.T) {
 	if !strings.Contains(queued.Message, "busy Claude accepted") {
 		t.Fatalf("queue receipt does not identify Claude: %q", queued.Message)
 	}
-	capture, err := CommandTmux{}.Capture(ctx, socketPath, pane, false, FullScrollback)
+	capture, err := TmuxInjector{}.Capture(ctx, socketPath, pane, false, FullScrollback)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,7 +553,7 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: pane},
-		Tmux:     verifiedChatTmux{CommandTmux: CommandTmux{}, command: "claude"},
+		Tmux:     verifiedChatTmux{TmuxInjector: TmuxInjector{}, command: "claude"},
 		Spawner:  &fakeSpawner{},
 		Options: Options{
 			Poll:            10 * time.Millisecond,
@@ -597,7 +597,7 @@ func TestJailedLongCompactFocusFiresWithFullTranscript(t *testing.T) {
 	}
 	if result.Code != 0 || result.Status != "queued" || !result.Typed ||
 		result.AutoFilePath != "" || result.LiteralChunks < 2 {
-		capture, captureErr := CommandTmux{}.Capture(
+		capture, captureErr := TmuxInjector{}.Capture(
 			context.Background(),
 			socketPath,
 			pane,
@@ -669,7 +669,7 @@ func TestJailedCaptureReturnsWholeScrollback(t *testing.T) {
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 	engine, err := New(Dependencies{
 		Resolver: fakeResolver{socket: socketPath, target: session},
-		Tmux:     CommandTmux{},
+		Tmux:     TmuxInjector{},
 		Spawner:  &fakeSpawner{},
 		Options:  Options{LockRoot: filepath.Join(jail.root, "locks")},
 	})
@@ -727,7 +727,7 @@ func TestJailedClientActivityReportsUnattendedAndDeadSocket(t *testing.T) {
 	jail.sockets = append(jail.sockets, socket)
 	socketPath := filepath.Join(jail.tmuxDir, socket)
 
-	tmux := CommandTmux{}
+	tmux := TmuxInjector{}
 	last, ok, err := tmux.ClientActivity(context.Background(), socketPath, session)
 	if err != nil {
 		t.Fatalf("ClientActivity() on an unattended live session returned an error instead of ok=false: %v", err)

@@ -14,8 +14,8 @@ import (
 
 type liveDuringCorpseReprobe struct{}
 
-func (liveDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.Pane, error) {
-	return []gather.Pane{{PaneID: "%1"}}, nil
+func (liveDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.ProbePane, error) {
+	return []gather.ProbePane{{PaneID: "%1"}}, nil
 }
 
 func (liveDuringCorpseReprobe) Sessions(context.Context, string) ([]VSCTSession, error) {
@@ -32,7 +32,7 @@ func (liveDuringCorpseReprobe) ClientIdle(context.Context, string) (time.Duratio
 
 type unreadableDuringCorpseReprobe struct{}
 
-func (unreadableDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.Pane, error) {
+func (unreadableDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.ProbePane, error) {
 	return nil, errors.New("fixture permission denied")
 }
 
@@ -106,7 +106,7 @@ func TestApplyPreservesAPlannedCorpseWhenReprobeIsUnreadable(t *testing.T) {
 // filesystem removal rather than stopping at the re-probe gate.
 type goneDuringCorpseReprobe struct{}
 
-func (goneDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.Pane, error) {
+func (goneDuringCorpseReprobe) ListPanes(context.Context, string) ([]gather.ProbePane, error) {
 	return nil, gather.ErrServerGone
 }
 
@@ -886,7 +886,7 @@ type fakeClientIdleTmux struct {
 	err   error
 }
 
-func (fakeClientIdleTmux) ListPanes(context.Context, string) ([]gather.Pane, error) {
+func (fakeClientIdleTmux) ListPanes(context.Context, string) ([]gather.ProbePane, error) {
 	return nil, nil
 }
 

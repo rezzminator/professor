@@ -30,12 +30,12 @@ type CodexIdentity struct {
 func CaptureCodexIdentity(
 	ctx context.Context,
 	capturer PaneCapturer,
-	panes []Pane,
+	panes []ProbePane,
 ) []CodexIdentity {
 	if capturer == nil {
 		return nil
 	}
-	candidates := make([]Pane, 0, len(panes))
+	candidates := make([]ProbePane, 0, len(panes))
 	for index := range panes {
 		pane := panes[index]
 		if id, ok := pfmengine.FromSocket(pane.Socket); !ok || id != pfmengine.Codex {

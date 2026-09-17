@@ -145,7 +145,7 @@ func New(dependencies Dependencies) (*Runner, error) {
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmux = CommandTmux{TmuxDir: resolved.TmuxDir, Now: now}
+		tmux = TmuxReaper{TmuxDir: resolved.TmuxDir, Now: now}
 	}
 	proc := dependencies.Proc
 	if proc == nil {
@@ -215,7 +215,7 @@ func (runner *Runner) Run(
 	if err != nil {
 		return Report{}, err
 	}
-	state := fleetdb.Open(ctx, runner.paths)
+	state := fleetdb.OpenSharedState(ctx, runner.paths)
 	branchSeats, branchErr := state.BranchSeats(ctx)
 	closeErr := state.Close()
 	if branchErr != nil || closeErr != nil {
@@ -303,7 +303,7 @@ func (runner *Runner) probeSockets(
 		return files[left].name < files[right].name
 	})
 
-	allPanes := make([]gather.Pane, 0)
+	allPanes := make([]gather.ProbePane, 0)
 	sockets := make([]Socket, 0, len(files))
 	for _, file := range files {
 		socket := Socket{Name: file.name, Age: runner.now().Sub(file.modTime)}
@@ -408,7 +408,7 @@ func isReapSocketName(name string) bool {
 func (runner *Runner) listPanes(
 	ctx context.Context,
 	socket string,
-) ([]gather.Pane, error) {
+) ([]gather.ProbePane, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	panes, err := runner.tmux.ListPanes(probeCtx, socket)

@@ -95,7 +95,7 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	}
 	windowID := strings.TrimSpace(string(windowIDOutput))
 	renames := computeWindowRenames(
-		[]Pane{{
+		[]ProbePane{{
 			Socket:      socket,
 			SessionName: socket,
 			WindowID:    windowID,
@@ -110,7 +110,7 @@ func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {
 	if len(renames) != 1 || renames[0].TargetName != "INDEX_TWIN" {
 		t.Fatalf("renames=%#v", renames)
 	}
-	if err := (CommandTmux{TmuxTmpDir: root}).RenameWindow(
+	if err := (TmuxProbe{TmuxTmpDir: root}).RenameWindow(
 		context.Background(), renames[0],
 	); err != nil {
 		t.Fatal(err)

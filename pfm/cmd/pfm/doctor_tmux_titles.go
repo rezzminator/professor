@@ -57,7 +57,7 @@ func printTmuxTitlesDoctor(
 		intended, machine.Tmux.Titles.Enabled, machine.Source("tmux.titles.enabled"),
 	)
 
-	client := gather.CommandTmux{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
+	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
 	probe, err := gather.ProbeTmuxReadOnly(ctx, resolved.TmuxDir, client, time.Now())
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: tmux titles sockets=unprobed error=%v\n", err)
@@ -113,7 +113,7 @@ func printTmuxTitlesDoctor(
 // not evidence that pfm has taken ownership.
 func readTmuxTitlesState(
 	ctx context.Context,
-	tmux gather.CommandTmux,
+	tmux gather.TmuxProbe,
 	socket string,
 	pfmEnabled bool,
 ) (state, detail string) {

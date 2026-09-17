@@ -64,7 +64,7 @@ func NewFinisher(
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmux = CommandTmux{}
+		tmux = TmuxKiller{}
 	}
 	now := dependencies.Now
 	if now == nil {

@@ -111,7 +111,7 @@ func ReconcileCodexPanes(
 		database,
 		live,
 		runtime,
-		spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir},
+		spawn.TmuxSpawner{TmuxDir: runtime.Paths.TmuxDir},
 		warn,
 	)
 }
@@ -140,7 +140,7 @@ func ReconcileCodexPanesWith(
 		warn(fmt.Sprintf("Codex pane reconcile: read thread names: %v", err))
 		return changed
 	}
-	capturer := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
+	capturer := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
 
 	_, actions := ObserveCodexPanes(ctx, database, manager, capturer, live, runtime, cxNames, warn)
 	for index := range actions {

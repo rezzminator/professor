@@ -563,7 +563,7 @@ func agentCommand(
 }
 
 // onChatServer puts the plan's run on a fresh server the executor creates
-// detached through the one chat-server creator (spawn.CommandTmux.NewSession),
+// detached through the one chat-server creator (spawn.TmuxSpawner.NewSession),
 // born with the engine's short name as its window, and makes the eval line
 // the attach to it. The line never creates a server itself: an attached
 // `tmux new-session` there was a creator with no title policy and a window

@@ -104,8 +104,8 @@ func codexJailRollout(
 	return rolloutPath
 }
 
-func codexPane(socket, paneID string) gather.Pane {
-	return gather.Pane{
+func codexPane(socket, paneID string) gather.ProbePane {
+	return gather.ProbePane{
 		Socket:         socket,
 		SessionName:    socket,
 		WindowID:       "@1",
@@ -151,7 +151,7 @@ func TestReconcileCodexPanesKillsThePreviousBoundThreadAndAdvancesTheBinding(t *
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -205,7 +205,7 @@ func TestReconcileCodexPanesCaptureFailedKillsNothingAndNamesTheFailure(t *testi
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -269,7 +269,7 @@ func TestReconcileCodexPanesOnlyKillsTheClearingPaneInASharedCWD(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{
+		gather.Snapshot{Panes: []gather.ProbePane{
 			codexPane(clearingSocket, "%0"),
 			codexPane(steadySocket, "%0"),
 		}},
@@ -342,7 +342,7 @@ func TestReconcileCodexPanesUsesExistingBindingForDuplicateName(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -410,7 +410,7 @@ func TestReconcileCodexPanesSkipsDuplicateNameWithoutUsableBindingQuietly(t *tes
 			fleet.ReconcileCodexPanes(
 				context.Background(),
 				database,
-				gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+				gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 				commandRuntime{Paths: resolved},
 				fleet.PrintWarn(&stderr),
 			)
@@ -465,7 +465,7 @@ func TestReconcileCodexPanesKeepsBoundThreadSilentWhenNameIsEmpty(t *testing.T) 
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -567,7 +567,7 @@ func TestReconcileCodexPanesNameNeverMovesTheBindingBackwards(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -627,7 +627,7 @@ func TestReconcileCodexPanesNeverBindsTwoPanesToOneThread(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(first, "%0"), codexPane(second, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(first, "%0"), codexPane(second, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -688,7 +688,7 @@ func TestReconcileCodexPanesTreatsASameLineageResumeAsNoClear(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -758,7 +758,7 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 		context.Background(),
 		database,
 		gather.Snapshot{
-			Panes: []gather.Pane{codexPane(socket, "%0")},
+			Panes: []gather.ProbePane{codexPane(socket, "%0")},
 			Codex: []gather.LiveCodex{{
 				Socket: socket, PaneID: "%0", RolloutPath: currentRollout,
 				RolloutHeld: true,
@@ -786,7 +786,7 @@ func TestReconcileCodexPanesFollowsTheLiveProcessesCurrentRollout(t *testing.T) 
 	pane.CurrentPath = "/work/current"
 	output := compose.Compose(compose.Input{
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{pane},
+			Panes: []gather.ProbePane{pane},
 			Codex: []gather.LiveCodex{{
 				Socket: socket, PaneID: "%0", RolloutPath: currentRollout,
 			}},
@@ -856,7 +856,7 @@ func TestReconcileCodexPanesFollowsAClearWhenTheProcessHoldsNoRollout(t *testing
 		context.Background(),
 		database,
 		gather.Snapshot{
-			Panes: []gather.Pane{codexPane(socket, "%0")},
+			Panes: []gather.ProbePane{codexPane(socket, "%0")},
 			Codex: []gather.LiveCodex{{
 				Socket: socket, PaneID: "%0",
 				RolloutPath: oldRollout,
@@ -978,7 +978,7 @@ func TestReconcileCodexPanesMovesABindingForwardOnATitleOnlyName(t *testing.T) {
 		context.Background(),
 		database,
 		gather.Snapshot{
-			Panes: []gather.Pane{codexPane(socket, "%0")},
+			Panes: []gather.ProbePane{codexPane(socket, "%0")},
 			// A live process that holds no rollout file descriptor — the
 			// shared app-server shape — whose only guess (A, the stale
 			// binding) must never overrule the screen's own title.
@@ -1062,7 +1062,7 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		ctx,
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -1087,7 +1087,7 @@ func TestReconcileCodexPanesDropsABindingOnAClearRetiredThread(t *testing.T) {
 	fleet.ReconcileCodexPanes(
 		ctx,
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(reseated, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(reseated, "%0")}},
 		commandRuntime{Paths: resolved},
 		fleet.PrintWarn(&stderr),
 	)
@@ -1173,7 +1173,7 @@ func TestReconcileCodexPanesRecordsTheNameItReAppliedAfterAClear(t *testing.T) {
 	fleet.ReconcileCodexPanesWith(
 		context.Background(),
 		database,
-		gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+		gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 		commandRuntime{Paths: resolved},
 		fakeCodexRenamer{name: chatName},
 		fleet.PrintWarn(&stderr),

@@ -87,7 +87,7 @@ func TestDetectCodexRootMetadataAndAncestorMatching(t *testing.T) {
 			fdLinks: []FDLink{{FD: 1, Target: first}},
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
 	got, err := DetectCodex(proc, codexHome, panes)
 	if err != nil {
@@ -143,7 +143,7 @@ func TestDetectAgentsAndCache1H(t *testing.T) {
 			stat: ProcStat{ParentPID: 500},
 		},
 	}}
-	panes := []Pane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
+	panes := []ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
 
 	agents, err := DetectAgents(proc, home, panes)
 	if err != nil {
@@ -242,7 +242,7 @@ func TestCache1HBadgeFollowsTheOptOut(t *testing.T) {
 					stat:       ProcStat{ParentPID: 500},
 				},
 			}}
-			panes := []Pane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
+			panes := []ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
 			sockets, err := DetectCache1H(proc, panes)
 			if err != nil {
 				t.Fatalf("DetectCache1H() error = %v", err)
@@ -281,7 +281,7 @@ func TestCache1HSharedSocketTakesTheColdestBirth(t *testing.T) {
 		processes[forced] = cold
 		sockets, err := DetectCache1H(
 			&fakeProcFS{processes: processes},
-			[]Pane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}},
+			[]ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}},
 		)
 		if err != nil {
 			t.Fatalf("DetectCache1H() error = %v", err)
@@ -294,7 +294,7 @@ func TestCache1HSharedSocketTakesTheColdestBirth(t *testing.T) {
 
 func TestWindowConvergenceClipsRunesOnlyHere(t *testing.T) {
 	longName := strings.Repeat("界", 25)
-	panes := []Pane{{
+	panes := []ProbePane{{
 		Socket:      "cx-1-2-3",
 		SessionName: "cx-session",
 		WindowID:    "@1",

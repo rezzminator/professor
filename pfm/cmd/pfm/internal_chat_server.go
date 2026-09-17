@@ -12,7 +12,7 @@ import (
 )
 
 // runInternalChatServer is `pfm internal chat-server <socket> <cwd> <run>`,
-// the shim's door to the one chat-server creator (spawn.CommandTmux.NewSession):
+// the shim's door to the one chat-server creator (spawn.TmuxSpawner.NewSession):
 // `cx` gets every door's options and a window named for the socket's engine.
 // An unreadable config fails CLOSED on the title only — the chat still opens,
 // the host keeps its title, and stderr says why.
@@ -39,7 +39,7 @@ func runInternalChatServer(args []string, stderr io.Writer, runtime commandRunti
 		)
 		titles = pfmconfig.TmuxTitles{Enabled: false}
 	}
-	creator := spawn.CommandTmux{TmuxDir: runtime.Paths.TmuxDir, Titles: &titles}
+	creator := spawn.TmuxSpawner{TmuxDir: runtime.Paths.TmuxDir, Titles: &titles}
 	if err := creator.NewSession(context.Background(), spawn.SessionSpec{
 		Socket: args[0], Session: args[0], Window: pfmengine.MustLookup(engine).Short,
 		CWD: args[1], Run: args[2],

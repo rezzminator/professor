@@ -313,7 +313,7 @@ func liveClaudeSpawns(
 	resolved paths.Values,
 	machine config.Config,
 ) ([]spawnObservation, []string, error) {
-	client := gather.CommandTmux{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
+	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
 	probe, err := gather.ProbeTmuxReadOnly(ctx, resolved.TmuxDir, client, time.Now())
 	if err != nil {
 		return nil, nil, fmt.Errorf("probe tmux sockets under %s: %w", resolved.TmuxDir, err)

@@ -30,7 +30,7 @@ func TestConfiguredBinaryBasenamesReachLiveDetectors(t *testing.T) {
 			stat:    ProcStat{ParentPID: 101},
 		},
 	}}
-	panes := []Pane{
+	panes := []ProbePane{
 		{Socket: "cc-configured", PaneID: "%1", PID: 100, TTY: "/dev/ttys001"},
 		{Socket: "cx-configured", PaneID: "%2", PID: 101},
 	}

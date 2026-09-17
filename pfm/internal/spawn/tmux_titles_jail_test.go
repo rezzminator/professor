@@ -36,7 +36,7 @@ func newTitlesProbeServer(t *testing.T, socket string, titles *pfmconfig.TmuxTit
 	// set-titles itself, and the question here is what pfm applied.
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
 
-	tmux := CommandTmux{TmuxDir: tmuxDir, Titles: titles}
+	tmux := TmuxSpawner{TmuxDir: tmuxDir, Titles: titles}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Claude", CWD: root,
 		Width: 180, Height: 45, Run: "sleep 120",
@@ -124,7 +124,7 @@ func TestNewSessionWithoutASizeLetsTheFirstClientSizeTheWindow(t *testing.T) {
 	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
 	socket := "probe-cc-1800000014-1-1"
-	tmux := CommandTmux{TmuxDir: tmuxDir}
+	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Claude", CWD: root, Run: "sleep 120",
 	}); err != nil {

@@ -114,7 +114,7 @@ func (manager *Manager) identifyCodexSelf(
 	live, err := gather.DetectCodexThreadsInRoots(
 		manager.proc,
 		manager.paths.codexHomes,
-		[]gather.Pane{{
+		[]gather.ProbePane{{
 			Socket: socketName,
 			PaneID: paneID,
 			PID:    panePID,

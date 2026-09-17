@@ -365,7 +365,7 @@ func (service *Service) chatKeys(
 		}
 		return nil, output, fmt.Errorf("resolve %q: %s", input.Target, detail)
 	}
-	tmux := inject.CommandTmux{}
+	tmux := inject.TmuxInjector{}
 	for index, key := range input.Keys {
 		if index > 0 && delay > 0 {
 			timer := time.NewTimer(delay)

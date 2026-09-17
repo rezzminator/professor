@@ -102,7 +102,7 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stdout, "windows planned: %d\n", len(live.Renames))
 		return 0
 	}
-	titlesTmux := gather.CommandTmux{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
+	titlesTmux := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(environment.Paths.TmuxDir)}
 	titlesUnverified := convergeChatServerOptions(
 		ctx,
 		titlesTmux,
@@ -140,7 +140,7 @@ func verifyRenames(
 	renames []gather.WindowRename,
 	stderr io.Writer,
 ) (converged, unverified int) {
-	reader := inject.CommandTmux{}
+	reader := inject.TmuxInjector{}
 	for _, rename := range renames {
 		socketPath := filepath.Join(runtime.Paths.TmuxDir, rename.Socket)
 		actual, err := reader.WindowName(ctx, socketPath, rename.WindowID)
@@ -171,7 +171,7 @@ func verifyRenames(
 // already probed these servers to plan window renames; titles convergence
 // reuses that same enumeration rather than probing the tmux directory a
 // second time.
-func liveSockets(panes []gather.Pane) []string {
+func liveSockets(panes []gather.ProbePane) []string {
 	seen := make(map[string]bool, len(panes))
 	sockets := make([]string, 0, len(panes))
 	for index := range panes {
@@ -188,7 +188,7 @@ func liveSockets(panes []gather.Pane) []string {
 
 // convergeChatServerOptions is the ONE place an EXISTING live server is
 // brought onto pfmconfig.ChatServerOptions — the list the one chat-server
-// creator (spawn.CommandTmux.NewSession) applies at birth — so a server that
+// creator (spawn.TmuxSpawner.NewSession) applies at birth — so a server that
 // predates a policy change, one a scheduler outage left behind, or one born
 // before its door went through the creator converges on the next scheduled
 // name-sync. A HOST-owned title policy contributes no title option, so a host
@@ -202,7 +202,7 @@ func liveSockets(panes []gather.Pane) []string {
 // count closes it.
 func convergeChatServerOptions(
 	ctx context.Context,
-	tmux gather.CommandTmux,
+	tmux gather.TmuxProbe,
 	sockets []string,
 	titles pfmconfig.TmuxTitles,
 	stdout, stderr io.Writer,

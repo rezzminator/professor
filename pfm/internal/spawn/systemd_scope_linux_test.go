@@ -34,7 +34,7 @@ exit 0
 	t.Setenv("PATH", bin)
 	t.Setenv("INVOCATION_ID", "service-invocation")
 	t.Setenv("SYSTEMD_RUN_LOG", logPath)
-	tmux := CommandTmux{Binary: tmuxPath, TmuxDir: filepath.Join(root, "tmux")}
+	tmux := TmuxSpawner{Binary: tmuxPath, TmuxDir: filepath.Join(root, "tmux")}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: "cx-scope", Session: "cx-scope", Window: "Codex", CWD: root,
 		Width: 180, Height: 45, Run: "sleep 120",
@@ -62,7 +62,7 @@ func TestChatSpawnInsideUserServiceRefusesWithoutSystemdRun(t *testing.T) {
 
 	t.Setenv("PATH", bin)
 	t.Setenv("INVOCATION_ID", "service-invocation")
-	err := (CommandTmux{Binary: tmuxPath, TmuxDir: filepath.Join(root, "tmux")}).NewSession(
+	err := (TmuxSpawner{Binary: tmuxPath, TmuxDir: filepath.Join(root, "tmux")}).NewSession(
 		context.Background(),
 		SessionSpec{
 			Socket: "cx-mortal", Session: "cx-mortal", Window: "Codex", CWD: root,

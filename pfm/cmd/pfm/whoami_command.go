@@ -61,7 +61,7 @@ func runWhoami(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		if target == "" {
 			target = identity.Session
 		}
-		capture, captureErr := (inject.CommandTmux{}).Capture(
+		capture, captureErr := (inject.TmuxInjector{}).Capture(
 			ctx, identity.SocketPath, target, true, inject.FullScrollback,
 		)
 		if captureErr == nil {
@@ -136,7 +136,7 @@ func newInjectEngineAllowingUnsigned(
 
 func sharedCommsRecorder(values paths.Values) func(context.Context, fleetdb.CommsEvent) error {
 	return func(ctx context.Context, event fleetdb.CommsEvent) error {
-		state := fleetdb.Open(ctx, values)
+		state := fleetdb.OpenSharedState(ctx, values)
 		recordErr := state.RecordComms(ctx, event)
 		closeErr := state.Close()
 		if closeErr != nil {

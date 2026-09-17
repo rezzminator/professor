@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-func codexPane(socket, paneID string) Pane {
-	return Pane{
+func codexPane(socket, paneID string) ProbePane {
+	return ProbePane{
 		Socket:         socket,
 		SessionName:    socket,
 		WindowID:       "@1",
@@ -21,7 +21,7 @@ func codexPane(socket, paneID string) Pane {
 // sets Failed with neither field set, and Failed must never be read as "this
 // pane runs nothing".
 func TestCaptureCodexIdentity(t *testing.T) {
-	panes := []Pane{
+	panes := []ProbePane{
 		codexPane("cx-1-2-3", "%1"),
 		codexPane("cx-4-5-6", "%1"),
 		codexPane("cx-7-8-9", "%1"),
@@ -64,7 +64,7 @@ func TestCaptureCodexIdentity(t *testing.T) {
 
 // A claude pane, a squatter, and a viewport never carry a codex identity.
 func TestCaptureCodexIdentityFiltersToLiveCodexPanes(t *testing.T) {
-	panes := []Pane{
+	panes := []ProbePane{
 		{Socket: "cc-1-2-3", SessionName: "cc-1-2-3", WindowID: "@1", PaneID: "%1", CurrentCommand: "claude"},
 		{Socket: "cx-1-2-3", SessionName: "someone-else", WindowID: "@1", PaneID: "%1", CurrentCommand: "codex"},
 		{Socket: "cx-4-5-6", SessionName: "cx-4-5-6", WindowID: "@1", PaneID: "%1", CurrentCommand: "tmux"},

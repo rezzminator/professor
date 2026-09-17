@@ -198,7 +198,7 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	spawner := &captureSpawner{}
 	manager, err := New(database, Dependencies{
 		ProcFS:  &fakeProc{},
-		Tmux:    CommandTmux{},
+		Tmux:    TmuxKiller{},
 		Spawner: spawner,
 		Now:     func() time.Time { return time.Unix(500, 0) },
 	})
@@ -221,7 +221,7 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	}
 
 	finisher, err := NewFinisher(database, Dependencies{
-		Tmux:         CommandTmux{},
+		Tmux:         TmuxKiller{},
 		Delay:        10 * time.Millisecond,
 		PollEvery:    10 * time.Millisecond,
 		PollAttempts: 200,
@@ -232,7 +232,7 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	if err := finisher.Run(ctx, spawner.args[0]); err != nil {
 		t.Fatal(err)
 	}
-	if (CommandTmux{}).PaneExists(ctx, socketPath, paneID) {
+	if (TmuxKiller{}).PaneExists(ctx, socketPath, paneID) {
 		t.Fatal("target pane survived kill-exit")
 	}
 	for _, path := range []string{
@@ -305,7 +305,7 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		})
 	}
 	finisher, err := NewFinisher(database, Dependencies{
-		Tmux:         CommandTmux{},
+		Tmux:         TmuxKiller{},
 		Refresher:    refreshFunc(func(context.Context) error { return nil }),
 		Delay:        5 * time.Millisecond,
 		PollEvery:    5 * time.Millisecond,
@@ -331,7 +331,7 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		if runErr != nil {
 			t.Fatalf("finisher %d: %v", position, runErr)
 		}
-		if (CommandTmux{}).PaneExists(
+		if (TmuxKiller{}).PaneExists(
 			context.Background(),
 			args[position].SocketPath,
 			args[position].PaneID,

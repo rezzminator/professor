@@ -15,12 +15,12 @@ import (
 
 var pasteSequence atomic.Uint64
 
-// CommandTmux invokes tmux against an explicit socket pathname.
-type CommandTmux struct {
+// TmuxInjector invokes tmux against an explicit socket pathname.
+type TmuxInjector struct {
 	Binary string
 }
 
-func (tmux CommandTmux) Capture(
+func (tmux TmuxInjector) Capture(
 	ctx context.Context,
 	socketPath, target string,
 	styled bool,
@@ -42,7 +42,7 @@ func (tmux CommandTmux) Capture(
 	return string(output), err
 }
 
-func (tmux CommandTmux) SendLiteral(
+func (tmux TmuxInjector) SendLiteral(
 	ctx context.Context,
 	socketPath, target, text string,
 ) error {
@@ -64,7 +64,7 @@ func (tmux CommandTmux) SendLiteral(
 // instead of rendering a several-screen inline draft whose submit state
 // cannot be proven. A private, one-shot buffer prevents concurrent injects
 // into different panes from sharing bytes.
-func (tmux CommandTmux) SendPaste(
+func (tmux TmuxInjector) SendPaste(
 	ctx context.Context,
 	socketPath, target, text string,
 ) error {
@@ -92,7 +92,7 @@ func (tmux CommandTmux) SendPaste(
 	return nil
 }
 
-func (tmux CommandTmux) SendKey(
+func (tmux TmuxInjector) SendKey(
 	ctx context.Context,
 	socketPath, target, key string,
 ) error {
@@ -106,7 +106,7 @@ func (tmux CommandTmux) SendKey(
 	).Run()
 }
 
-func (tmux CommandTmux) CancelCopyMode(
+func (tmux TmuxInjector) CancelCopyMode(
 	ctx context.Context,
 	socketPath, target string,
 ) error {
@@ -121,7 +121,7 @@ func (tmux CommandTmux) CancelCopyMode(
 	).Run()
 }
 
-func (tmux CommandTmux) PaneInMode(
+func (tmux TmuxInjector) PaneInMode(
 	ctx context.Context,
 	socketPath, target string,
 ) (bool, error) {
@@ -140,7 +140,7 @@ func (tmux CommandTmux) PaneInMode(
 	return strings.TrimSpace(string(output)) == "1", nil
 }
 
-func (tmux CommandTmux) PaneCommand(
+func (tmux TmuxInjector) PaneCommand(
 	ctx context.Context,
 	socketPath, target string,
 ) (string, error) {
@@ -156,7 +156,7 @@ func (tmux CommandTmux) PaneCommand(
 	return strings.TrimSpace(string(output)), err
 }
 
-func (tmux CommandTmux) CurrentSession(
+func (tmux TmuxInjector) CurrentSession(
 	ctx context.Context,
 	socketPath string,
 ) (string, error) {
@@ -172,7 +172,7 @@ func (tmux CommandTmux) CurrentSession(
 
 // WindowName reads the tmux window name backing a target, the human thread
 // name pfm sets on codex panes.
-func (tmux CommandTmux) WindowName(
+func (tmux TmuxInjector) WindowName(
 	ctx context.Context,
 	socketPath, target string,
 ) (string, error) {
@@ -198,7 +198,7 @@ func (tmux CommandTmux) WindowName(
 // is the honest "an unattended pane has no typist" answer (ok=false, err
 // nil); a real tmux error is returned as err and must never be read as "the
 // pane is unattended".
-func (tmux CommandTmux) ClientActivity(
+func (tmux TmuxInjector) ClientActivity(
 	ctx context.Context,
 	socketPath, target string,
 ) (time.Time, bool, error) {
@@ -236,7 +236,7 @@ func (tmux CommandTmux) ClientActivity(
 	return last, found, nil
 }
 
-func (tmux CommandTmux) command(
+func (tmux TmuxInjector) command(
 	ctx context.Context,
 	socketPath string,
 	arguments ...string,

@@ -162,7 +162,7 @@ func TestRealClaudeStashSemantics(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	tmux := CommandTmux{}
+	tmux := TmuxInjector{}
 	capture := func() string {
 		text, err := tmux.Capture(ctx, socket, session, false, 0)
 		if err != nil {
@@ -212,7 +212,7 @@ func TestRealClaudeStashSemantics(t *testing.T) {
 	// would silently break with zero signal from the one test built to
 	// catch exactly that. This closes the gap.
 	stashedMarkerPresent := func(text string) bool {
-		return strings.Contains(strings.ToLower(lastLines(text, 8)), "stashed")
+		return strings.Contains(strings.ToLower(captureLastLines(text, 8)), "stashed")
 	}
 	// clearComposer backspaces whatever is CURRENTLY visible in the composer
 	// down to empty, self-correcting against whatever case-to-case semantics

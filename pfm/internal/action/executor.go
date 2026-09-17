@@ -23,7 +23,7 @@ func New(dependencies Dependencies) (*Executor, error) {
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmux = CommandTmux{TmuxDir: resolved.TmuxDir}
+		tmux = TmuxExecutor{TmuxDir: resolved.TmuxDir}
 	}
 	processes := dependencies.Processes
 	if processes == nil {
@@ -273,7 +273,7 @@ func (executor *Executor) SelfSwitch(
 	return true
 }
 
-func chooseEngineWindow(panes []Pane, engineCommands ...string) int {
+func chooseEngineWindow(panes []ActionPane, engineCommands ...string) int {
 	engines := make(map[string]bool, len(pfmengine.All())+len(engineCommands))
 	for _, id := range pfmengine.All() {
 		engines[pfmengine.MustLookup(id).Binary] = true
@@ -290,14 +290,14 @@ func chooseEngineWindow(panes []Pane, engineCommands ...string) int {
 	}
 	for _, pane := range panes {
 		if pane.CurrentCommand == "node" ||
-			numericVersion(pane.CurrentCommand) {
+			isNumericVersion(pane.CurrentCommand) {
 			return pane.WindowIndex
 		}
 	}
 	return panes[0].WindowIndex
 }
 
-func numericVersion(command string) bool {
+func isNumericVersion(command string) bool {
 	dot := strings.IndexByte(command, '.')
 	if dot <= 0 {
 		return false

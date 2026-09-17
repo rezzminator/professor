@@ -41,7 +41,7 @@ func TestCodexHeldRootWinsOverChildFirstDescriptors(t *testing.T) {
 		},
 		401: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 400}, fdLinks: []FDLink{{FD: 2, Target: child}}},
 	}}
-	panes := []Pane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}}
+	panes := []ProbePane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}}
 	live, err := DetectCodex(proc, root, panes)
 	if err != nil || len(live) != 1 || live[0].ThreadID != "parent" {
 		t.Fatalf("root identity=%#v err=%v", live, err)
@@ -85,7 +85,7 @@ func TestCodexUnknownAndConflictingHeldMetadataCannotClaimPane(t *testing.T) {
 					400: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: links},
 				},
 			}
-			live, err := DetectCodex(proc, root, []Pane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}})
+			live, err := DetectCodex(proc, root, []ProbePane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}})
 			if err != nil || len(live) != 1 || live[0].RolloutHeld || live[0].ThreadID != "" ||
 				live[0].IdentityError == "" {
 				t.Fatalf("unproven root=%#v err=%v", live, err)
@@ -122,7 +122,7 @@ func TestRevertedCodexRolloutKeepsStableThreadIdentity(t *testing.T) {
 			400: {cmdline: []string{"codex"}, stat: ProcStat{ParentPID: 100}, fdLinks: []FDLink{{FD: 3, Target: path}}},
 		},
 	}
-	live, err := DetectCodex(proc, root, []Pane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}})
+	live, err := DetectCodex(proc, root, []ProbePane{{PID: 100, Socket: "cx-1-2-3", PaneID: "%0"}})
 	if err != nil || len(live) != 1 || live[0].ThreadID != id || !live[0].RolloutHeld {
 		t.Fatalf("reverted root=%+v err=%v", live, err)
 	}

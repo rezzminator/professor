@@ -95,7 +95,7 @@ func TestCrumbPrecedenceAndSocketTrust(t *testing.T) {
 		1400,
 	)
 	input.Transcripts = append(input.Transcripts, distrusted)
-	input.Snapshot.Panes = append(input.Snapshot.Panes, gather.Pane{
+	input.Snapshot.Panes = append(input.Snapshot.Panes, gather.ProbePane{
 		Socket: "cc-500-1-1",
 		PaneID: "%5",
 	})
@@ -136,7 +136,7 @@ func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 		Transcripts: []store.Transcript{claude},
 		Rollouts:    []store.Rollout{codex},
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{
+			Panes: []gather.ProbePane{
 				{Socket: "cc-1-2-3", PaneID: "%1"},
 				{Socket: "cx-4-5-6", PaneID: "%2"},
 			},
@@ -179,7 +179,7 @@ func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 func TestLiveProjectFallsBackToPaneCurrentPath(t *testing.T) {
 	output := Compose(Input{
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cc-7-8-9",
 				PaneID:      "%7",
 				CurrentPath: "/work/proja",
@@ -262,7 +262,7 @@ func splitFixtureInput() Input {
 		},
 		AccountRoots: fixtureAccountRoots(),
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{
+			Panes: []gather.ProbePane{
 				{Socket: "cc-100-1-1", PaneID: "%1", PaneTitle: "one"},
 				{Socket: "cc-100-1-1", PaneID: "%2", PaneTitle: "two"},
 				{Socket: "cc-200-1-1", PaneID: "%3"},
@@ -668,7 +668,7 @@ func fixtureInput(view View) Input {
 		},
 		AccountRoots: fixtureAccountRoots(),
 		Snapshot: gather.Snapshot{
-			Panes: []gather.Pane{
+			Panes: []gather.ProbePane{
 				{
 					Socket:      "cc-100-1-1",
 					SessionName: "cc-old",
@@ -835,7 +835,7 @@ func TestLiveCodexWithoutARolloutFileIsOneKillableRow(t *testing.T) {
 				PaneID:   "%3",
 				ThreadID: paginated.ID,
 			}},
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cx-300-1-1",
 				SessionName: "cx-300-1-1",
 				PaneID:      "%3",
@@ -872,7 +872,7 @@ func TestLiveCodexWithoutARolloutFileIsOneKillableRow(t *testing.T) {
 				PaneID:   "%3",
 				ThreadID: paginated.ID,
 			}},
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cx-300-1-1",
 				SessionName: "cx-300-1-1",
 				PaneID:      "%3",
@@ -906,7 +906,7 @@ func TestLiveCodexIsExemptFromEmptinessSuppression(t *testing.T) {
 				PaneID:   "%4",
 				ThreadID: threadID,
 			}},
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cx-400-1-1",
 				SessionName: "cx-400-1-1",
 				PaneID:      "%4",
@@ -945,7 +945,7 @@ func TestLiveMachineSpawnedCodexStaysSuppressed(t *testing.T) {
 				PaneID:   "%5",
 				ThreadID: threadID,
 			}},
-			Panes: []gather.Pane{{
+			Panes: []gather.ProbePane{{
 				Socket:      "cx-401-1-1",
 				SessionName: "cx-401-1-1",
 				PaneID:      "%5",

@@ -15,7 +15,7 @@ import (
 
 // Tmux is the reaper's whole tmux surface.
 type Tmux interface {
-	ListPanes(ctx context.Context, socket string) ([]gather.Pane, error)
+	ListPanes(ctx context.Context, socket string) ([]gather.ProbePane, error)
 	Sessions(ctx context.Context, socket string) ([]VSCTSession, error)
 	KillSession(ctx context.Context, socket, session string) error
 	// ClientIdle answers exemption 1 — how long ago #{client_activity} last
@@ -27,9 +27,9 @@ type Tmux interface {
 	ClientIdle(ctx context.Context, socket string) (idle time.Duration, found bool, err error)
 }
 
-// CommandTmux talks to tmux inside one socket directory and nowhere else, so a
+// TmuxReaper talks to tmux inside one socket directory and nowhere else, so a
 // jail's TMUX_TMPDIR is the whole world a test run can reach.
-type CommandTmux struct {
+type TmuxReaper struct {
 	Binary  string
 	TmuxDir string
 	Now     func() time.Time
@@ -37,11 +37,11 @@ type CommandTmux struct {
 
 // ListPanes reads one socket's panes through the same probe the picker uses,
 // so both halves of the fleet see one shape of a chat (K3).
-func (tmux CommandTmux) ListPanes(
+func (tmux TmuxReaper) ListPanes(
 	ctx context.Context,
 	socket string,
-) ([]gather.Pane, error) {
-	return gather.CommandTmux{
+) ([]gather.ProbePane, error) {
+	return gather.TmuxProbe{
 		Binary:     tmux.Binary,
 		TmuxTmpDir: filepath.Dir(tmux.TmuxDir),
 	}.ListPanes(ctx, socket)
@@ -49,7 +49,7 @@ func (tmux CommandTmux) ListPanes(
 
 // Sessions lists the sessions on a SHARED socket — the vsct bunker, where
 // plain terminals live many-to-one rather than one server per chat.
-func (tmux CommandTmux) Sessions(
+func (tmux TmuxReaper) Sessions(
 	ctx context.Context,
 	socket string,
 ) ([]VSCTSession, error) {
@@ -113,7 +113,7 @@ func (tmux CommandTmux) Sessions(
 // ClientIdle reads #{client_activity} for every client attached to socket
 // and returns how long ago the MOST recently active one moved — the freshest
 // client is the one that decides whether a chat is "open for the operator".
-func (tmux CommandTmux) ClientIdle(
+func (tmux TmuxReaper) ClientIdle(
 	ctx context.Context,
 	socket string,
 ) (time.Duration, bool, error) {
@@ -158,7 +158,7 @@ func (tmux CommandTmux) ClientIdle(
 }
 
 // KillSession ends one session on a shared socket, leaving its neighbours up.
-func (tmux CommandTmux) KillSession(
+func (tmux TmuxReaper) KillSession(
 	ctx context.Context,
 	socket, session string,
 ) error {
@@ -181,7 +181,7 @@ func (tmux CommandTmux) KillSession(
 	return nil
 }
 
-func (tmux CommandTmux) command(
+func (tmux TmuxReaper) command(
 	ctx context.Context,
 	socket string,
 	arguments ...string,

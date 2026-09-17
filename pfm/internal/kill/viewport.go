@@ -59,7 +59,7 @@ type ClientLister interface {
 
 // ClientPIDs lists the `tmux attach` processes currently attached to this
 // server — one per terminal the chat is being watched through.
-func (tmux CommandTmux) ClientPIDs(
+func (tmux TmuxKiller) ClientPIDs(
 	ctx context.Context,
 	socketPath string,
 ) ([]int, error) {

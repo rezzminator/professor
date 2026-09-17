@@ -15,9 +15,9 @@ import (
 	pfmtmux "hostops/pfm/internal/tmux"
 )
 
-// CommandTmux invokes tmux only through the configured socket directory, the
-// same jailed shape action.CommandTmux uses.
-type CommandTmux struct {
+// TmuxSpawner invokes tmux only through the configured socket directory, the
+// same jailed shape action.TmuxExecutor uses.
+type TmuxSpawner struct {
 	Binary  string
 	TmuxDir string
 	// Titles is the resolved tmux.titles policy. NIL is the default (pfm owns
@@ -61,7 +61,7 @@ func preflightBinary(binary string) error {
 }
 
 // NewSession is the ONE chat-server creator: spawn.Run, the Claude launcher,
-// the picker (action.CommandTmux.CreateChatServer) and the shell shim
+// the picker (action.TmuxExecutor.CreateChatServer) and the shell shim
 // (`pfm internal chat-server`) all create a chat's server here, detached, and
 // give it pfmconfig.ChatServerOptions — the list name-sync converges live
 // servers onto. A second creator is a server born without that list: no title
@@ -69,7 +69,7 @@ func preflightBinary(binary string) error {
 //
 // A zero Width or Height states no size, so the first client to attach sizes
 // the window; tmux refuses `-x 0`.
-func (tmux CommandTmux) NewSession(
+func (tmux TmuxSpawner) NewSession(
 	ctx context.Context,
 	spec SessionSpec,
 ) error {
@@ -120,7 +120,7 @@ func (tmux CommandTmux) NewSession(
 	return nil
 }
 
-func (tmux CommandTmux) newSessionCommand(
+func (tmux TmuxSpawner) newSessionCommand(
 	ctx context.Context,
 	socket string,
 	arguments ...string,
@@ -132,7 +132,7 @@ func (tmux CommandTmux) newSessionCommand(
 	return serviceScopeCommand(ctx, binary, commandArguments, environment)
 }
 
-func (tmux CommandTmux) Capture(
+func (tmux TmuxSpawner) Capture(
 	ctx context.Context,
 	socket, target string,
 ) (string, error) {
@@ -144,7 +144,7 @@ func (tmux CommandTmux) Capture(
 	return string(output), err
 }
 
-func (tmux CommandTmux) SendLiteral(
+func (tmux TmuxSpawner) SendLiteral(
 	ctx context.Context,
 	socket, target, text string,
 ) error {
@@ -155,14 +155,14 @@ func (tmux CommandTmux) SendLiteral(
 	).Run()
 }
 
-func (tmux CommandTmux) SendKey(
+func (tmux TmuxSpawner) SendKey(
 	ctx context.Context,
 	socket, target, key string,
 ) error {
 	return tmux.command(ctx, socket, "send-keys", "-t", target, key).Run()
 }
 
-func (tmux CommandTmux) command(
+func (tmux TmuxSpawner) command(
 	ctx context.Context,
 	socket string,
 	arguments ...string,

@@ -48,7 +48,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		if err != nil {
 			return resumeTarget{}, false, fmt.Errorf("resolve transcript path %q: %w", target, err)
 		}
-		return resumeTarget{ID: transcriptIDFromPath(path), Path: path}, true, nil
+		return resumeTarget{ID: composeTranscriptIDFromPath(path), Path: path}, true, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return resumeTarget{}, false, fmt.Errorf("stat transcript target %q: %w", target, err)
 	}
@@ -61,7 +61,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		exact := make([]resumeTarget, 0, 1)
 		prefix := make([]resumeTarget, 0, 2)
 		for _, path := range files {
-			id := transcriptIDFromPath(path)
+			id := composeTranscriptIDFromPath(path)
 			switch {
 			case id == target:
 				exact = append(exact, resumeTarget{ID: id, Path: path})
@@ -126,7 +126,10 @@ func sessionToken(value string) bool {
 	return true
 }
 
-func transcriptIDFromPath(path string) string {
+// composeTranscriptIDFromPath is the cmd seam for compose's canonical, currently
+// unexported transcriptIDFromPath. Exporting that helper requires a compose edit,
+// which this package-scoped change cannot make.
+func composeTranscriptIDFromPath(path string) string {
 	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 }
 
@@ -192,7 +195,7 @@ func liveCrumbSession(
 	if err != nil {
 		return "", false, fmt.Errorf("read session crumbs %q: %w", resolved.SIDDir, err)
 	}
-	client := gather.CommandTmux{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
+	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
 	for _, entry := range entries {
 		if !entry.Type().IsRegular() {
 			continue
@@ -208,7 +211,7 @@ func liveCrumbSession(
 		if err != nil {
 			return "", false, fmt.Errorf("read session crumb %q: %w", entry.Name(), err)
 		}
-		crumbID := transcriptIDFromPath(strings.TrimSpace(string(content)))
+		crumbID := composeTranscriptIDFromPath(strings.TrimSpace(string(content)))
 		if crumbID != id {
 			continue
 		}

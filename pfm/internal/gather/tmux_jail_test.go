@@ -29,7 +29,7 @@ type tmuxJail struct {
 
 type alwaysFailTmux struct{}
 
-func (alwaysFailTmux) ListPanes(context.Context, string) ([]Pane, error) {
+func (alwaysFailTmux) ListPanes(context.Context, string) ([]ProbePane, error) {
 	return nil, fmt.Errorf("dead server")
 }
 
@@ -40,12 +40,12 @@ type failOnceTmux struct {
 func (tmux *failOnceTmux) ListPanes(
 	context.Context,
 	string,
-) ([]Pane, error) {
+) ([]ProbePane, error) {
 	tmux.calls++
 	if tmux.calls == 1 {
 		return nil, fmt.Errorf("transient server race")
 	}
-	return []Pane{{Socket: "cc-1-2-3", PaneID: "%1"}}, nil
+	return []ProbePane{{Socket: "cc-1-2-3", PaneID: "%1"}}, nil
 }
 
 func newTmuxJail(t *testing.T) *tmuxJail {
@@ -270,7 +270,7 @@ func TestServerGoneReadsTmuxOwnWords(t *testing.T) {
 
 type goneServerTmux struct{}
 
-func (goneServerTmux) ListPanes(_ context.Context, socket string) ([]Pane, error) {
+func (goneServerTmux) ListPanes(_ context.Context, socket string) ([]ProbePane, error) {
 	return nil, fmt.Errorf("%w: %s", ErrServerGone, socket)
 }
 
@@ -335,7 +335,7 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 	createCorpseSocket(t, oldCorpsePath, now.Add(-2*time.Hour))
 	createCorpseSocket(t, freshCorpsePath, now.Add(-30*time.Minute))
 
-	client := CommandTmux{Binary: "tmux", TmuxTmpDir: jail.root}
+	client := TmuxProbe{Binary: "tmux", TmuxTmpDir: jail.root}
 	probe, err := ProbeTmux(context.Background(), jail.tmuxDir, client, now)
 	if err != nil {
 		t.Fatalf("ProbeTmux() error = %v", err)
@@ -374,7 +374,7 @@ func TestJailedTmuxProbeAndGather(t *testing.T) {
 		t.Fatalf("fresh corpse was removed: %v", err)
 	}
 
-	paneBySocket := make(map[string]Pane)
+	paneBySocket := make(map[string]ProbePane)
 	for _, pane := range probe.Panes {
 		paneBySocket[pane.Socket] = pane
 	}
@@ -523,12 +523,12 @@ func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
 	}
 
 	now := time.Now()
-	client := CommandTmux{Binary: "tmux", TmuxTmpDir: jail.root}
+	client := TmuxProbe{Binary: "tmux", TmuxTmpDir: jail.root}
 	probe, err := ProbeTmux(context.Background(), jail.tmuxDir, client, now)
 	if err != nil {
 		t.Fatalf("ProbeTmux() error = %v", err)
 	}
-	paneBySocket := make(map[string]Pane, len(probe.Panes))
+	paneBySocket := make(map[string]ProbePane, len(probe.Panes))
 	for _, pane := range probe.Panes {
 		paneBySocket[pane.Socket] = pane
 	}
@@ -633,7 +633,7 @@ func TestJailedResumedCodexPaneNamingAndConflicts(t *testing.T) {
 	}
 }
 
-func paneSockets(panes []Pane) []string {
+func paneSockets(panes []ProbePane) []string {
 	sockets := make([]string, 0, len(panes))
 	for index := range panes {
 		pane := panes[index]

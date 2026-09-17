@@ -31,7 +31,7 @@ type CodexThreadResolver func(
 // DetectCodex maps live codex processes to panes using pid ancestry. It sees
 // only sessions that hold a rollout file descriptor or state the thread they
 // resumed in their own argv.
-func DetectCodex(proc ProcFS, codexHome string, panes []Pane) ([]LiveCodex, error) {
+func DetectCodex(proc ProcFS, codexHome string, panes []ProbePane) ([]LiveCodex, error) {
 	return DetectCodexThreads(proc, codexHome, panes, nil)
 }
 
@@ -41,8 +41,7 @@ func DetectCodex(proc ProcFS, codexHome string, panes []Pane) ([]LiveCodex, erro
 func DetectCodexThreads(
 	proc ProcFS,
 	codexHome string,
-	panes []Pane,
-	identify CodexThreadResolver,
+	panes []ProbePane, identify CodexThreadResolver,
 	binaries ...string,
 ) ([]LiveCodex, error) {
 	return DetectCodexThreadsInRoots(proc, []string{codexHome}, panes, identify, binaries...)
@@ -54,8 +53,7 @@ func DetectCodexThreads(
 func DetectCodexThreadsInRoots(
 	proc ProcFS,
 	codexHomes []string,
-	panes []Pane,
-	identify CodexThreadResolver,
+	panes []ProbePane, identify CodexThreadResolver,
 	binaries ...string,
 ) ([]LiveCodex, error) {
 	cmdlines, err := processCmdlines(proc)
@@ -71,8 +69,7 @@ func detectCodexThreadsInRootsFrom(
 	cmdlines map[int][]string,
 	proc ProcFS,
 	codexHomes []string,
-	panes []Pane,
-	identify CodexThreadResolver,
+	panes []ProbePane, identify CodexThreadResolver,
 	binaries ...string,
 ) ([]LiveCodex, error) {
 	pids := sortedPIDs(cmdlines)
@@ -199,7 +196,7 @@ func CodexRolloutID(path string) string {
 
 // CodexThreadID names the live conversation a detected Codex process owns.
 // A current rollout always wins; ThreadID is the rollout-less resolver rung.
-func CodexThreadID(process LiveCodex) string {
+func LiveCodexThreadID(process LiveCodex) string {
 	if id := CodexRolloutID(process.RolloutPath); id != "" {
 		return id
 	}
@@ -285,8 +282,8 @@ func isRolloutUnder(root, target string) bool {
 		!strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
-func panesByPID(panes []Pane) map[int]Pane {
-	paneByPID := make(map[int]Pane, len(panes))
+func panesByPID(panes []ProbePane) map[int]ProbePane {
+	paneByPID := make(map[int]ProbePane, len(panes))
 	for index := range panes {
 		pane := panes[index]
 		paneByPID[pane.PID] = pane
@@ -294,7 +291,7 @@ func panesByPID(panes []Pane) map[int]Pane {
 	return paneByPID
 }
 
-func paneForProcess(proc ProcFS, pid int, paneByPID map[int]Pane) (Pane, bool) {
+func paneForProcess(proc ProcFS, pid int, paneByPID map[int]ProbePane) (ProbePane, bool) {
 	current := pid
 	for depth := 0; depth <= 4; depth++ {
 		if pane, found := paneByPID[current]; found {
@@ -309,5 +306,5 @@ func paneForProcess(proc ProcFS, pid int, paneByPID map[int]Pane) (Pane, bool) {
 		}
 		current = stat.ParentPID
 	}
-	return Pane{}, false
+	return ProbePane{}, false
 }

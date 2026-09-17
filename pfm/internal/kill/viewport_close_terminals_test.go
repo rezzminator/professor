@@ -252,7 +252,7 @@ func TestCommandTmuxClientPIDsRealServer(t *testing.T) {
 	jail.sockets = append(jail.sockets, socket)
 	socketPath := jail.tmuxDir + "/" + socket
 
-	pids, err := (CommandTmux{}).ClientPIDs(ctx, socketPath)
+	pids, err := (TmuxKiller{}).ClientPIDs(ctx, socketPath)
 	if err != nil {
 		t.Fatalf("ClientPIDs before attach: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestCommandTmuxClientPIDsRealServer(t *testing.T) {
 
 	var pidsAfter []int
 	for attempt := 0; attempt < 50; attempt++ {
-		pidsAfter, err = (CommandTmux{}).ClientPIDs(ctx, socketPath)
+		pidsAfter, err = (TmuxKiller{}).ClientPIDs(ctx, socketPath)
 		if err != nil {
 			t.Fatalf("ClientPIDs after attach: %v", err)
 		}

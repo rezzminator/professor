@@ -77,7 +77,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	}
 	pane := chatPaneTarget(chat.Pane, chat.Session, chat.Socket)
 
-	tmux := inject.CommandTmux{}
+	tmux := inject.TmuxInjector{}
 	for index, key := range keys {
 		if index > 0 && *delay > 0 {
 			time.Sleep(*delay)

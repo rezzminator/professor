@@ -24,13 +24,13 @@ func DetectCrumblessLive(
 	proc ProcFS,
 	claudeProcesses []ClaudeProcess,
 	crumbs []Crumb,
-	panes []Pane,
+	panes []ProbePane,
 ) []CrumblessLive {
 	crumbedSockets := make(map[string]struct{}, len(crumbs))
 	for _, crumb := range crumbs {
 		crumbedSockets[crumb.Socket] = struct{}{}
 	}
-	paneByTarget := make(map[string]Pane, len(panes))
+	paneByTarget := make(map[string]ProbePane, len(panes))
 	for index := range panes {
 		pane := panes[index]
 		paneByTarget[pane.Socket+"\x00"+pane.PaneID] = pane

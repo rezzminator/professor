@@ -10,12 +10,12 @@ import (
 	pfmtmux "hostops/pfm/internal/tmux"
 )
 
-// CommandTmux invokes tmux only through an explicit socket pathname.
-type CommandTmux struct {
+// TmuxKiller invokes tmux only through an explicit socket pathname.
+type TmuxKiller struct {
 	Binary string
 }
 
-func (tmux CommandTmux) PanePID(
+func (tmux TmuxKiller) PanePID(
 	ctx context.Context,
 	socketPath, paneID string,
 ) (int, error) {
@@ -39,7 +39,7 @@ func (tmux CommandTmux) PanePID(
 	return pid, nil
 }
 
-func (tmux CommandTmux) PaneExists(
+func (tmux TmuxKiller) PaneExists(
 	ctx context.Context,
 	socketPath, paneID string,
 ) bool {
@@ -62,7 +62,7 @@ func (tmux CommandTmux) PaneExists(
 	return false
 }
 
-func (tmux CommandTmux) SendLine(
+func (tmux TmuxKiller) SendLine(
 	ctx context.Context,
 	socketPath, paneID, line string,
 ) error {
@@ -91,7 +91,7 @@ func (tmux CommandTmux) SendLine(
 	return nil
 }
 
-func (tmux CommandTmux) KillPane(
+func (tmux TmuxKiller) KillPane(
 	ctx context.Context,
 	socketPath, paneID string,
 ) error {
@@ -100,7 +100,7 @@ func (tmux CommandTmux) KillPane(
 
 // ClientTTYs lists the terminals attached to this server. A chat's clients ARE
 // its viewports — the panes a person is watching it through.
-func (tmux CommandTmux) ClientTTYs(
+func (tmux TmuxKiller) ClientTTYs(
 	ctx context.Context,
 	socketPath string,
 ) ([]string, error) {
@@ -127,7 +127,7 @@ func (tmux CommandTmux) ClientTTYs(
 // merely defines $TMUX, and a row that arrives "_"-joined is silently
 // unsplittable. A tty is /dev/pts/N and a pane is %N, so a space cannot be
 // ambiguous.
-func (tmux CommandTmux) PanesByTTY(
+func (tmux TmuxKiller) PanesByTTY(
 	ctx context.Context,
 	socketPath string,
 ) (map[string]string, error) {
@@ -147,14 +147,14 @@ func (tmux CommandTmux) PanesByTTY(
 	return panes, nil
 }
 
-func (tmux CommandTmux) KillServer(
+func (tmux TmuxKiller) KillServer(
 	ctx context.Context,
 	socketPath string,
 ) error {
 	return tmux.command(ctx, socketPath, "kill-server").Run()
 }
 
-func (tmux CommandTmux) command(
+func (tmux TmuxKiller) command(
 	ctx context.Context,
 	socketPath string,
 	arguments ...string,

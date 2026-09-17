@@ -37,7 +37,7 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 	}
 	tmux := dependencies.Tmux
 	if tmux == nil {
-		tmux = CommandTmux{}
+		tmux = TmuxKiller{}
 	}
 	now := dependencies.Now
 	if now == nil {

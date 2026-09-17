@@ -54,7 +54,7 @@ func Gather(
 		store.CodexThreads(data.Rollouts),
 		data.CxNames,
 	)
-	tmuxClient := gather.CommandTmux{
+	tmuxClient := gather.TmuxProbe{
 		TmuxTmpDir: filepath.Dir(env.Paths.TmuxDir),
 	}
 	// The pane-binding manager lets the rollout-less live-process resolver

@@ -31,8 +31,8 @@ type composer struct {
 	lineageByRoot    map[string]store.CodexLineage
 	lineageRootByID  map[string]string
 	killedByID       map[string]store.Killed
-	panesBySocket    map[string][]gather.Pane
-	paneByTarget     map[string]gather.Pane
+	panesBySocket    map[string][]gather.ProbePane
+	paneByTarget     map[string]gather.ProbePane
 	claudeSockets    map[string]struct{}
 	cacheSockets     map[string]struct{}
 	liveTranscripts  map[string]struct{}
@@ -238,7 +238,7 @@ func (current *composer) buildIndexes() {
 	wantedRolloutIDs := make(map[string]struct{}, len(current.input.Snapshot.Codex))
 	for _, process := range current.input.Snapshot.Codex {
 		wantedRolloutPaths[cleanPath(process.RolloutPath)] = struct{}{}
-		wantedRolloutIDs[gather.CodexThreadID(process)] = struct{}{}
+		wantedRolloutIDs[gather.LiveCodexThreadID(process)] = struct{}{}
 	}
 	current.transcriptByID = make(
 		map[string]store.Transcript,
@@ -292,8 +292,8 @@ func (current *composer) buildIndexes() {
 	for _, killed := range current.input.Killed {
 		current.killedByID[killed.ID] = killed
 	}
-	current.panesBySocket = make(map[string][]gather.Pane)
-	current.paneByTarget = make(map[string]gather.Pane, len(current.input.Snapshot.Panes))
+	current.panesBySocket = make(map[string][]gather.ProbePane)
+	current.paneByTarget = make(map[string]gather.ProbePane, len(current.input.Snapshot.Panes))
 	for index := range current.input.Snapshot.Panes {
 		pane := current.input.Snapshot.Panes[index]
 		current.panesBySocket[pane.Socket] = append(
@@ -526,7 +526,7 @@ func (current *composer) liveClaudeRows() ([]Row, []Row) {
 		}
 
 		var crumb gather.Crumb
-		var pane gather.Pane
+		var pane gather.ProbePane
 		if len(paneIDs) == 1 {
 			crumb = socketCrumbs.panes[paneIDs[0]]
 			pane = current.paneByTarget[targetKey(socket, paneIDs[0])]
@@ -551,7 +551,7 @@ func (current *composer) liveClaudeRows() ([]Row, []Row) {
 
 func (current *composer) liveClaudeRow(
 	socket string,
-	pane gather.Pane,
+	pane gather.ProbePane,
 	path string,
 ) (Row, string) {
 	transcript, found := current.transcriptByPath[cleanPath(path)]
@@ -696,11 +696,11 @@ func (current *composer) liveCodexRows() []Row {
 		}
 		rollout, found := current.rolloutByPath[cleanPath(process.RolloutPath)]
 		if !found {
-			rollout, found = current.rolloutByID[gather.CodexThreadID(process)]
+			rollout, found = current.rolloutByID[gather.LiveCodexThreadID(process)]
 		}
 		if !found {
 			rollout = store.Rollout{
-				ID:   gather.CodexThreadID(process),
+				ID:   gather.LiveCodexThreadID(process),
 				Path: process.RolloutPath,
 			}
 		}

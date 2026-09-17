@@ -138,7 +138,7 @@ func runRun(
 		trace = stderr
 	}
 	titles := runtime.Config.Tmux.Titles
-	result, err := spawn.Run(context.Background(), spawn.CommandTmux{
+	result, err := spawn.Run(context.Background(), spawn.TmuxSpawner{
 		TmuxDir: resolved.TmuxDir,
 		Titles:  &titles,
 	}, spawn.Request{
@@ -175,7 +175,7 @@ func runRun(
 	}
 	spawnedAt := time.Now()
 	parent := parentChatID()
-	state := fleetdb.Open(context.Background(), resolved)
+	state := fleetdb.OpenSharedState(context.Background(), resolved)
 	if parent != "" {
 		if err := registerDetachedChild(state, parent, result.Socket, spawnedAt.Unix()); err != nil {
 			fmt.Fprintf(
@@ -387,15 +387,10 @@ func awaitLaunch(
 	if await {
 		return awaitAnswer(ctx, "run", name, handle, options, false, stdout, stderr, runtimes...)
 	}
-	proof := options
-	proof.StopOnDelivery = true
-	proof.Timeout = launchProofWindow
 	turn, err := headless.Await(
 		ctx,
-		func(ctx context.Context) (headless.Chat, bool, error) {
-			return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
-		},
-		proof,
+		chatResolver(handle, runtimes...),
+		deliveryProofOptions(options, launchProofWindow),
 	)
 	if turn.Delivered {
 		return 0
@@ -403,9 +398,7 @@ func awaitLaunch(
 	if rescueLaunchPrompt(ctx, handle, stderr, runtimes...) {
 		rescued, _ := headless.Await(
 			ctx,
-			func(ctx context.Context) (headless.Chat, bool, error) {
-				return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
-			},
+			chatResolver(handle, runtimes...),
 			rescueProofOptions(options),
 		)
 		if rescued.Delivered {
@@ -444,9 +437,13 @@ var launchRescueWindow = 30 * time.Second
 var launchRescueSettle = 500 * time.Millisecond
 
 func rescueProofOptions(options headless.AwaitOptions) headless.AwaitOptions {
+	return deliveryProofOptions(options, launchRescueWindow)
+}
+
+func deliveryProofOptions(options headless.AwaitOptions, timeout time.Duration) headless.AwaitOptions {
 	proof := options
 	proof.StopOnDelivery = true
-	proof.Timeout = launchRescueWindow
+	proof.Timeout = timeout
 	return proof
 }
 
@@ -471,7 +468,7 @@ func rescueLaunchPrompt(
 		return false
 	}
 	pane := chatPaneTarget(chat.Pane, chat.Session, chat.Socket)
-	tmux := inject.CommandTmux{}
+	tmux := inject.TmuxInjector{}
 	if err := tmux.SendKey(ctx, socketPath, pane, "Escape"); err != nil {
 		return false
 	}

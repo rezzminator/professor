@@ -56,7 +56,7 @@ func (titles TmuxTitles) Options() [][]string {
 }
 
 // ChatServerOptions is the ONE option list a chat's tmux server carries:
-// spawn.CommandTmux.NewSession — the one chat-server creator every door calls —
+// spawn.TmuxSpawner.NewSession — the one chat-server creator every door calls —
 // applies it at birth, and name-sync converges every live server onto it. The
 // title half follows the policy (nil is the default, pfm-owned); automatic-
 // rename off is never gated, because the window name is the fleet's DNS

@@ -6,7 +6,7 @@ package gather
 // from a VIEWPORT — a pane running `tmux attach` against another chat's socket,
 // which mirrors that chat's statusline and would otherwise donate the inner
 // chat's 🔖 label to the outer window's name.
-type Pane struct {
+type ProbePane struct {
 	Socket         string
 	SessionName    string
 	WindowID       string
@@ -20,9 +20,9 @@ type Pane struct {
 	Attached       bool
 }
 
-// TmuxProbe is the live pane result plus recoverable sweep diagnostics.
-type TmuxProbe struct {
-	Panes         []Pane
+// TmuxSnapshot is the live pane result plus recoverable sweep diagnostics.
+type TmuxSnapshot struct {
+	Panes         []ProbePane
 	CorpseSwept   []string
 	ProbeWarnings []string
 }
@@ -117,7 +117,7 @@ type CrumblessLive struct {
 
 // Snapshot is one immutable-by-convention gather result.
 type Snapshot struct {
-	Panes           []Pane
+	Panes           []ProbePane
 	Crumbs          []Crumb
 	Codex           []LiveCodex
 	ClaudeProcesses []ClaudeProcess

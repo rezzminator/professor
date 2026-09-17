@@ -97,7 +97,7 @@ func runLS(
 		return 1
 	}
 	defer func() { closeCommandResource(database, "pfm ls: close database", stderr, &exitCode) }()
-	sharedState := fleetdb.Open(ctx, runtime.Paths)
+	sharedState := fleetdb.OpenSharedState(ctx, runtime.Paths)
 	defer func() {
 		if err := sharedState.Close(); err != nil {
 			fmt.Fprintf(stderr, "pfm ls: close shared state: %v\n", err)
@@ -580,7 +580,7 @@ func killChatServer(
 	resolved paths.Values,
 	socket string,
 ) error {
-	tmux := action.CommandTmux{TmuxDir: resolved.TmuxDir}
+	tmux := action.TmuxExecutor{TmuxDir: resolved.TmuxDir}
 	if err := tmux.KillServer(ctx, socket); err != nil {
 		// Killing a corpse fails loudly for no reason — a socket file outlives
 		// its server. The goal is "not running", so ask whether it is rather
@@ -597,7 +597,7 @@ func killChatServer(
 			_ = os.Remove(filepath.Join(resolved.SIDDir, entry.Name()))
 		}
 	}
-	state := fleetdb.Open(ctx, resolved)
+	state := fleetdb.OpenSharedState(ctx, resolved)
 	clearErr := state.ClearBranchSeat(ctx, socket)
 	closeErr := state.Close()
 	if clearErr != nil || closeErr != nil {

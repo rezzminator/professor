@@ -40,7 +40,7 @@ type Request struct {
 }
 
 // ChatServer is a detached server that must exist before its attach line is
-// emitted. The executor creates it through spawn.CommandTmux.NewSession, the
+// emitted. The executor creates it through spawn.TmuxSpawner.NewSession, the
 // one chat-server creator, so a picker-born chat carries the same server
 // options as every other door's.
 type ChatServer struct {
@@ -67,7 +67,7 @@ type Plan struct {
 }
 
 // Pane is the tmux state needed by solo and self-switch.
-type Pane struct {
+type ActionPane struct {
 	PaneID         string
 	TTY            string
 	SessionName    string
@@ -78,7 +78,7 @@ type Pane struct {
 
 // TmuxClient contains only action mutations and prerequisite probes.
 type TmuxClient interface {
-	ListPanes(ctx context.Context, socket string) ([]Pane, error)
+	ListPanes(ctx context.Context, socket string) ([]ActionPane, error)
 	SocketAlive(ctx context.Context, socket string) bool
 	KillPane(ctx context.Context, socket, paneID string) error
 	KillServer(ctx context.Context, socket string) error

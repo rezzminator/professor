@@ -17,7 +17,7 @@ import (
 
 type fakeActionTmux struct {
 	mutex        sync.Mutex
-	panes        map[string][]Pane
+	panes        map[string][]ActionPane
 	alive        map[string]bool
 	killedPanes  []string
 	killedServer []string
@@ -29,13 +29,13 @@ type fakeActionTmux struct {
 func (tmux *fakeActionTmux) ListPanes(
 	_ context.Context,
 	socket string,
-) ([]Pane, error) {
+) ([]ActionPane, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
 	if !tmux.alive[socket] {
 		return nil, errors.New("dead socket")
 	}
-	return append([]Pane(nil), tmux.panes[socket]...), nil
+	return append([]ActionPane(nil), tmux.panes[socket]...), nil
 }
 
 func (tmux *fakeActionTmux) SocketAlive(
@@ -183,7 +183,7 @@ func TestSoloReapsPaneAloneServerAndStrayWithKeepTTY(t *testing.T) {
 			// failed probe is covered separately and must preserve its crumb.
 			"cc-500-1-1": true,
 		},
-		panes: map[string][]Pane{
+		panes: map[string][]ActionPane{
 			"cc-100-1-1": {{PaneID: "%1", TTY: "pts/1"}},
 			"cc-200-1-1": {
 				{PaneID: "%2", TTY: "pts/2"},
@@ -376,7 +376,7 @@ func TestExecutorGateSelfSwitchDeadFallbackAndCodexPrepare(t *testing.T) {
 	jailAction(t)
 	tmux := &fakeActionTmux{
 		alive: map[string]bool{"cc-100-1-1": true},
-		panes: map[string][]Pane{
+		panes: map[string][]ActionPane{
 			"cc-100-1-1": {
 				{PaneID: "%1", WindowIndex: 0, CurrentCommand: "bash"},
 				{PaneID: "%2", WindowIndex: 3, CurrentCommand: "claude"},
@@ -483,7 +483,7 @@ func TestExecutorCodexWindowVerificationAndDeadFallback(t *testing.T) {
 			"cx-renamed": true,
 			"cx-live":    true,
 		},
-		panes: map[string][]Pane{
+		panes: map[string][]ActionPane{
 			"cx-renamed": {{
 				SessionName: "codex-session",
 				WindowName:  "renamed-away",

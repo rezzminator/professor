@@ -62,7 +62,7 @@ var harvestDoctorOverride harvestDoctor
 var dependencyProbeOverride func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result
 
 func (pinnedHarvestDoctor) Inspect(root string, platform harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
-	return harvestpy.Inspect(root, platform)
+	return harvestpy.InspectConversionEnvironment(root, platform)
 }
 
 func (pinnedHarvestDoctor) Check(
@@ -70,7 +70,7 @@ func (pinnedHarvestDoctor) Check(
 	root string,
 	platform harvestpy.Platform,
 ) (harvestpy.CheckReport, error) {
-	return harvestpy.Check(ctx, root, platform)
+	return harvestpy.CheckConversionEnvironment(ctx, root, platform)
 }
 
 func runDoctor(
@@ -537,7 +537,7 @@ func printCodexPaneFollowDoctor(
 		fmt.Fprintf(stdout, "doctor: warning codex_pane_names=unreadable error=%v\n", err)
 		return 1
 	}
-	capturer := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
+	capturer := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
 	silent := func(message string) { fmt.Fprintf(stdout, "doctor: warning %s\n", message) }
 	_, actions := fleet.ObserveCodexPanes(
 		ctx, database, manager, capturer, snapshot, runtime, cxNames, silent,
@@ -578,7 +578,7 @@ func printCodexPaneFollowDoctor(
 // directory. It exists so `pfm doctor` can audit pane state without paying for
 // a whole fleet gather (procfs walk, every engine, every transcript) that it
 // would use one field of.
-func liveCodexPanes(ctx context.Context, runtime commandRuntime) ([]gather.Pane, error) {
+func liveCodexPanes(ctx context.Context, runtime commandRuntime) ([]gather.ProbePane, error) {
 	entries, err := os.ReadDir(runtime.Paths.TmuxDir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -587,8 +587,8 @@ func liveCodexPanes(ctx context.Context, runtime commandRuntime) ([]gather.Pane,
 		}
 		return nil, fmt.Errorf("read tmux directory %s: %w", runtime.Paths.TmuxDir, err)
 	}
-	tmux := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
-	panes := make([]gather.Pane, 0, len(entries))
+	tmux := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
+	panes := make([]gather.ProbePane, 0, len(entries))
 	for _, entry := range entries {
 		socket := entry.Name()
 		if id, ok := pfmengine.FromSocket(socket); !ok || id != pfmengine.Codex {
@@ -1077,7 +1077,7 @@ func printHarvestPythonDoctor(
 	}
 	warnings := 0
 
-	plan, planErr := harvestpy.Plan(platform)
+	plan, planErr := harvestpy.PlanConversionEnvironment(platform)
 	if planErr != nil {
 		fmt.Fprintf(stdout, "doctor: harvestpy pinned_version=(default) unavailable error=%v\n", planErr)
 		warnings++

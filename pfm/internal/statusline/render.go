@@ -253,7 +253,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		data.ContextWindow.CurrentUsage.CacheCreationInputTokens +
 		data.ContextWindow.CurrentUsage.InputTokens
 	if wide && contextTokens > 0 {
-		l2 += sep + dim + "🧮" + formatTokens(contextTokens) + reset
+		l2 += sep + dim + "🧮" + formatContextTokens(contextTokens) + reset
 	}
 	// Never width-gated: a 97-column VS Code pane once lost the timer to the
 	// same gate as the token count, and a missing cache timer is indistinguishable
@@ -363,7 +363,7 @@ func makeBar(percent, width int) string {
 		strings.Repeat("▱", width-filled) + reset
 }
 
-func formatTokens(tokens int64) string {
+func formatContextTokens(tokens int64) string {
 	switch {
 	case tokens >= 1_000_000:
 		return fmt.Sprintf("%d.%dM", tokens/1_000_000, tokens%1_000_000/100_000)
@@ -645,7 +645,7 @@ func convergeWindowName(ctx context.Context, runtime Runtime, data input) {
 		rename := gather.WindowRename{
 			Socket: socket, WindowID: pane, CurrentName: current, TargetName: label,
 		}
-		client := gather.CommandTmux{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
+		client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.TmuxDir)}
 		if err := client.RenameWindow(commandContext, rename); err != nil {
 			return
 		}
@@ -928,7 +928,7 @@ func formatCacheTime(duration time.Duration, expired bool) string {
 	return fmt.Sprintf("%ds", seconds)
 }
 
-func fileAge(path string, now time.Time) time.Duration {
+func statuslineFileAge(path string, now time.Time) time.Duration {
 	info, err := os.Stat(path)
 	if err != nil {
 		return 100 * 365 * 24 * time.Hour
@@ -937,7 +937,7 @@ func fileAge(path string, now time.Time) time.Duration {
 }
 
 func armRefresh(runtime Runtime, kind RefreshKind, cachePath string, ttl time.Duration) {
-	if runtime.Spawn == nil || fileAge(cachePath, runtime.now()) <= ttl {
+	if runtime.Spawn == nil || statuslineFileAge(cachePath, runtime.now()) <= ttl {
 		return
 	}
 	lockPath := strings.TrimSuffix(cachePath, ".json") + ".lock"
@@ -1026,14 +1026,14 @@ func codexSegment(runtime Runtime, now time.Time, contextTokens int64, currentL2
 		}
 		replacement = urgencyEmoji(percent) + " " + makeBar(percent, 10) + " " +
 			percentColor(percent) + strconv.Itoa(percent) + "%" + reset + " " + dim +
-			"of " + formatTokens(window) + reset + rest
+			"of " + formatContextTokens(window) + reset + rest
 	}
 	return segment, replacement
 }
 
 func codexRequestCount(runtime Runtime, now time.Time) (int, bool) {
 	cachePath := filepath.Join(runtime.CacheDir, "cc-sl-gptreq")
-	if fileAge(cachePath, now) > 30*time.Second {
+	if statuslineFileAge(cachePath, now) > 30*time.Second {
 		logPath := filepath.Join(runtime.Home, ".local", "state", "claude-code-proxy", "proxy.log")
 		file, err := os.Open(logPath)
 		if err == nil {
@@ -1072,7 +1072,7 @@ func codexRequestCount(runtime Runtime, now time.Time) (int, bool) {
 			for _, status := range last {
 				reject = reject && (status == 401 || status == 403)
 			}
-			_ = atomicfile.Write(cachePath, []byte(fmt.Sprintf("%d\t%d\n", count, boolInt(reject))), 0o600)
+			_ = atomicfile.Write(cachePath, []byte(fmt.Sprintf("%d\t%d\n", count, boolDigit(reject))), 0o600)
 		}
 	}
 	body, err := os.ReadFile(cachePath)
@@ -1088,7 +1088,7 @@ func codexRequestCount(runtime Runtime, now time.Time) (int, bool) {
 	return count, reject == 1
 }
 
-func boolInt(value bool) int {
+func boolDigit(value bool) int {
 	if value {
 		return 1
 	}

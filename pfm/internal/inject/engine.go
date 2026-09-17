@@ -89,7 +89,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 		dependencies.Resolver = resolver
 	}
 	if dependencies.Tmux == nil {
-		dependencies.Tmux = CommandTmux{}
+		dependencies.Tmux = TmuxInjector{}
 	}
 	if dependencies.Spawner == nil {
 		dependencies.Spawner = CommandThenSpawner{}
@@ -925,7 +925,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		}
 	}
 	if strings.Contains(strings.ToLower(capture), "restore the code") ||
-		strings.Contains(strings.ToLower(lastLines(capture, 12)), "create a plan?") {
+		strings.Contains(strings.ToLower(captureLastLines(capture, 12)), "create a plan?") {
 		if err := engine.tmux.SendKey(
 			ctx,
 			target.SocketPath,
@@ -1007,7 +1007,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			return base, nil
 		}
 		base.DraftStashed = strings.Contains(
-			strings.ToLower(lastLines(capture, 8)),
+			strings.ToLower(captureLastLines(capture, 8)),
 			"stashed",
 		)
 		draftLine := lastComposerLine(capture)
@@ -1035,7 +1035,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			if err != nil {
 				break
 			}
-			if strings.Contains(strings.ToLower(lastLines(capture, 8)), "stashed") {
+			if strings.Contains(strings.ToLower(captureLastLines(capture, 8)), "stashed") {
 				base.DraftStashed = true
 			}
 			draftLine = lastComposerLine(capture)
@@ -1278,26 +1278,26 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		base.Message = fmt.Sprintf(
 			"queued COMMAND into %q — busy %s accepted %d paced literal chunk(s) without interruption (Enter confirmed, input cleared)",
 			target.Pane,
-			engineName(target.Engine),
+			injectedEngineName(target.Engine),
 			base.LiteralChunks,
 		)
 	case queueing && request.FileBacked:
 		base.Message = fmt.Sprintf(
 			"queued FILE-BACKED into %q — busy %s accepted the bracketed-paste block without interruption (Enter confirmed, input cleared)",
 			target.Pane,
-			engineName(target.Engine),
+			injectedEngineName(target.Engine),
 		)
 	case queueing && pasteTransport:
 		base.Message = fmt.Sprintf(
 			"queued PASTE into %q — busy %s accepted the bracketed-paste block without interruption (Enter confirmed, input cleared)",
 			target.Pane,
-			engineName(target.Engine),
+			injectedEngineName(target.Engine),
 		)
 	case queueing:
 		base.Message = fmt.Sprintf(
 			"queued into %q — busy %s accepted the turn without interruption (Enter confirmed, input cleared)",
 			target.Pane,
-			engineName(target.Engine),
+			injectedEngineName(target.Engine),
 		)
 	case commandTransport:
 		base.Message = fmt.Sprintf(
@@ -1399,7 +1399,7 @@ func (engine *Engine) pasteRescue(target Target, request Request, prepared Prepa
 	return stored, note
 }
 
-func engineName(value string) string {
+func injectedEngineName(value string) string {
 	id, err := pfmengine.Parse(value)
 	if err != nil {
 		return fmt.Sprintf("engine %q", value)
@@ -1878,7 +1878,7 @@ func tailRunes(value string, count int) string {
 	return string(runes)
 }
 
-func lastLines(value string, count int) string {
+func captureLastLines(value string, count int) string {
 	lines := strings.Split(value, "\n")
 	if len(lines) > count {
 		lines = lines[len(lines)-count:]

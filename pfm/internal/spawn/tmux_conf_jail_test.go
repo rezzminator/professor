@@ -41,7 +41,7 @@ func TestChatServerLoadsTheConfigItIsGiven(t *testing.T) {
 	t.Setenv(paths.EnvTmuxConf, config)
 
 	const socket = "cc-1800000009-1-1"
-	tmux := CommandTmux{TmuxDir: tmuxDir}
+	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket:  socket,
 		Session: socket,
@@ -85,7 +85,7 @@ func TestChatServerCreatesMissingSocketDirectoryOnFreshMachine(t *testing.T) {
 	tmuxDir := filepath.Join(root, "missing", "tmux-"+strconv.Itoa(os.Getuid()))
 	t.Setenv(paths.EnvTmuxConf, "/dev/null")
 	const socket = "cx-1800000010-1-1"
-	tmux := CommandTmux{TmuxDir: tmuxDir}
+	tmux := TmuxSpawner{TmuxDir: tmuxDir}
 	if err := tmux.NewSession(context.Background(), SessionSpec{
 		Socket: socket, Session: socket, Window: "Codex", CWD: root,
 		Width: 180, Height: 45, Run: "sleep 120",

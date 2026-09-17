@@ -152,7 +152,7 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 	}
 	var stderr bytes.Buffer
 	executor, err := New(Dependencies{
-		Tmux: CommandTmux{
+		Tmux: TmuxExecutor{
 			Binary:  "tmux",
 			TmuxDir: jail.tmuxDir,
 		},
@@ -185,7 +185,7 @@ func TestJailedSoloCompetingAttemptsAndSelfSwitch(t *testing.T) {
 			t.Fatalf("solo attempt %d: %v", index, runErr)
 		}
 	}
-	commandTmux := CommandTmux{Binary: "tmux", TmuxDir: jail.tmuxDir}
+	commandTmux := TmuxExecutor{Binary: "tmux", TmuxDir: jail.tmuxDir}
 	if !commandTmux.SocketAlive(context.Background(), keepSocket) {
 		t.Fatal("solo killed keep socket")
 	}

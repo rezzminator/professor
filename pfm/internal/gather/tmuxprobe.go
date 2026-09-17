@@ -23,7 +23,7 @@ import (
 
 // TmuxClient probes one named tmux socket.
 type TmuxClient interface {
-	ListPanes(ctx context.Context, socket string) ([]Pane, error)
+	ListPanes(ctx context.Context, socket string) ([]ProbePane, error)
 }
 
 // PaneCapturer is the optional TmuxClient extension that reads a pane's
@@ -57,14 +57,14 @@ func serverGone(err error) bool {
 		strings.Contains(stderr, "No such file or directory")
 }
 
-// CommandTmux invokes a tmux binary inside a caller-supplied TMUX_TMPDIR.
-type CommandTmux struct {
+// TmuxProbe invokes a tmux binary inside a caller-supplied TMUX_TMPDIR.
+type TmuxProbe struct {
 	Binary     string
 	TmuxTmpDir string
 }
 
 // ListPanes performs one list-panes -a call for socket.
-func (tmux CommandTmux) ListPanes(ctx context.Context, socket string) ([]Pane, error) {
+func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane, error) {
 	binary := tmux.Binary
 	if binary == "" {
 		binary = deps.Executable("tmux")
@@ -146,7 +146,7 @@ func (tmux CommandTmux) ListPanes(ctx context.Context, socket string) ([]Pane, e
 	}
 
 	lines := strings.Split(strings.TrimSuffix(string(output), "\n"), "\n")
-	panes := make([]Pane, 0, len(lines))
+	panes := make([]ProbePane, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -177,7 +177,7 @@ func (tmux CommandTmux) ListPanes(ctx context.Context, socket string) ([]Pane, e
 				err,
 			)
 		}
-		panes = append(panes, Pane{
+		panes = append(panes, ProbePane{
 			Socket:         socket,
 			SessionName:    fields[0],
 			WindowID:       fields[1],
@@ -194,9 +194,9 @@ func (tmux CommandTmux) ListPanes(ctx context.Context, socket string) ([]Pane, e
 	return panes, nil
 }
 
-func parseLegacyPaneOutput(socket string, output []byte) ([]Pane, error) {
+func parseLegacyPaneOutput(socket string, output []byte) ([]ProbePane, error) {
 	lines := strings.Split(strings.TrimSuffix(string(output), "\n"), "\n")
-	panes := make([]Pane, 0, len(lines))
+	panes := make([]ProbePane, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -228,7 +228,7 @@ func parseLegacyPaneOutput(socket string, output []byte) ([]Pane, error) {
 				err,
 			)
 		}
-		panes = append(panes, Pane{
+		panes = append(panes, ProbePane{
 			Socket:      socket,
 			SessionName: fields[0],
 			PaneTitle:   fields[1],
@@ -247,7 +247,7 @@ func parseLegacyPaneOutput(socket string, output []byte) ([]Pane, error) {
 // namespace used by ListPanes. Joined wrapped lines (-J) match how the label
 // resolver reads a statusline, so a label wrapped by a narrow pane still
 // reads whole.
-func (tmux CommandTmux) CapturePane(
+func (tmux TmuxProbe) CapturePane(
 	ctx context.Context,
 	socket, paneID string,
 ) (string, error) {
@@ -296,7 +296,7 @@ func (tmux CommandTmux) CapturePane(
 // sets pane_title, never the window name.) The latch is WINDOW-scoped on
 // purpose — it protects the windows pfm addresses the fleet by, and leaves the
 // operator's own windows and their global setting alone.
-func (tmux CommandTmux) RenameWindow(
+func (tmux TmuxProbe) RenameWindow(
 	ctx context.Context,
 	rename WindowRename,
 ) error {
@@ -344,7 +344,7 @@ func (tmux CommandTmux) RenameWindow(
 // without `-A`, which omits a line entirely when an option sits at its
 // default — so an "off" server reads back "off", never silence mistaken for
 // "unset".
-func (tmux CommandTmux) ShowGlobalOption(
+func (tmux TmuxProbe) ShowGlobalOption(
 	ctx context.Context,
 	socket, name string,
 ) (string, error) {
@@ -367,11 +367,11 @@ func (tmux CommandTmux) ShowGlobalOption(
 
 // ApplyGlobalOptions runs each `set-option -g` argument vector against socket
 // — the exact argv shape config.TmuxTitles.Options() returns, and the same
-// shape action.CommandTmux and spawn.CommandTmux apply at server creation.
+// shape action.TmuxExecutor and spawn.TmuxSpawner apply at server creation.
 // Reusing that shape here means an EXISTING server converges onto the same
 // policy a fresh one is created with, through one option-setting mechanism
 // rather than a second one (K3).
-func (tmux CommandTmux) ApplyGlobalOptions(
+func (tmux TmuxProbe) ApplyGlobalOptions(
 	ctx context.Context,
 	socket string,
 	options [][]string,
@@ -407,7 +407,7 @@ func (tmux CommandTmux) ApplyGlobalOptions(
 // every applied one back. It returns one `name "was" -> "now"` transition per
 // option it changed. An option that could not be read, applied or verified is
 // an error naming it, never an empty "nothing to converge".
-func (tmux CommandTmux) ConvergeGlobalOptions(
+func (tmux TmuxProbe) ConvergeGlobalOptions(
 	ctx context.Context,
 	socket string,
 	options [][]string,
@@ -449,7 +449,7 @@ func (tmux CommandTmux) ConvergeGlobalOptions(
 // case that motivated the script) never gets a fresh one without this forced
 // two-step. Both steps end at value, so the visible title never actually
 // changes.
-func (tmux CommandTmux) NudgeTitlesString(
+func (tmux TmuxProbe) NudgeTitlesString(
 	ctx context.Context,
 	socket, value string,
 ) error {
@@ -472,7 +472,7 @@ func ProbeTmux(
 	tmuxDir string,
 	client TmuxClient,
 	now time.Time,
-) (TmuxProbe, error) {
+) (TmuxSnapshot, error) {
 	return probeTmux(ctx, tmuxDir, client, now, true)
 }
 
@@ -484,7 +484,7 @@ func ProbeTmuxReadOnly(
 	tmuxDir string,
 	client TmuxClient,
 	now time.Time,
-) (TmuxProbe, error) {
+) (TmuxSnapshot, error) {
 	return probeTmux(ctx, tmuxDir, client, now, false)
 }
 
@@ -494,8 +494,8 @@ func probeTmux(
 	client TmuxClient,
 	now time.Time,
 	sweep bool,
-) (TmuxProbe, error) {
-	var result TmuxProbe
+) (TmuxSnapshot, error) {
+	var result TmuxSnapshot
 	entries, err := os.ReadDir(tmuxDir)
 	if errors.Is(err, fs.ErrNotExist) {
 		return result, nil
@@ -595,7 +595,7 @@ func probeTmux(
 		})
 	}
 	if err := group.Wait(); err != nil {
-		return TmuxProbe{}, err
+		return TmuxSnapshot{}, err
 	}
 
 	sort.Slice(result.Panes, func(left, right int) bool {

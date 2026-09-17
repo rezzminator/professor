@@ -83,7 +83,7 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 				fleet.ReconcileCodexPanes(
 					ctx,
 					database,
-					gather.Snapshot{Panes: []gather.Pane{codexPane(socket, "%0")}},
+					gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
 					commandRuntime{Paths: resolved},
 					fleet.PrintWarn(&stderr),
 				)

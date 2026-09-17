@@ -18,7 +18,7 @@ func TestNameSyncTitlesReportsAnUnreadableServerAsUnverified(t *testing.T) {
 		t.Skip("tmux is not installed")
 	}
 	root := t.TempDir()
-	client := gather.CommandTmux{Binary: "tmux", TmuxTmpDir: root}
+	client := gather.TmuxProbe{Binary: "tmux", TmuxTmpDir: root}
 	titles := pfmconfig.DefaultTmuxTitles()
 	var stdout, stderr bytes.Buffer
 	unverified := convergeChatServerOptions(
@@ -73,7 +73,7 @@ func TestTmuxTitlesDoctorReportsStringDriftAsDivergent(t *testing.T) {
 
 	state, detail := readTmuxTitlesState(
 		context.Background(),
-		gather.CommandTmux{Binary: "tmux", TmuxTmpDir: root},
+		gather.TmuxProbe{Binary: "tmux", TmuxTmpDir: root},
 		socket,
 		true,
 	)
@@ -124,7 +124,7 @@ func TestNameSyncFreezesAWindowNameTheServerStillAutoRenames(t *testing.T) {
 			kill.Env = environment
 			_ = kill.Run()
 		})
-		client := gather.CommandTmux{Binary: "tmux", TmuxTmpDir: root}
+		client := gather.TmuxProbe{Binary: "tmux", TmuxTmpDir: root}
 		var stdout, stderr bytes.Buffer
 		unverified := convergeChatServerOptions(
 			context.Background(), client, []string{socket},

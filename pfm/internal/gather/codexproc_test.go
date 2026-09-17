@@ -30,7 +30,7 @@ func TestDetectCodexThreadsIdentifiesSessionsWithoutRolloutFiles(t *testing.T) {
 			birth:   1700,
 		},
 	}}
-	panes := []Pane{{
+	panes := []ProbePane{{
 		Socket:      "cx-1-2-3",
 		PaneID:      "%4",
 		PID:         100,
@@ -98,7 +98,7 @@ func TestDetectCodexThreadsIdentifiesResumedSessionsByArgv(t *testing.T) {
 			birth: 1786403951,
 		},
 	}}
-	panes := []Pane{{
+	panes := []ProbePane{{
 		Socket:      "cx-1-2-3",
 		PaneID:      "%4",
 		PID:         100,
@@ -134,7 +134,7 @@ func TestDetectCodexThreadsPrefersResumeArgvOverAnInheritedEnvironment(t *testin
 			stat:    ProcStat{ParentPID: 100},
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
 	var asked string
 	live, err := DetectCodexThreads(
@@ -197,7 +197,7 @@ func TestDetectCodexThreadsSkipsUnidentifiedProcesses(t *testing.T) {
 			birth:   1700,
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
 	live, err := DetectCodexThreads(
 		proc,
@@ -229,7 +229,7 @@ func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing
 			stat:    ProcStat{ParentPID: 100},
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 
 	live, err := DetectCodexThreads(
 		proc,
@@ -284,7 +284,7 @@ func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 			stat:    ProcStat{ParentPID: 101},
 		},
 	}}
-	panes := []Pane{
+	panes := []ProbePane{
 		{Socket: "cx-1-2-3", PaneID: "%4", PID: 100},
 		{Socket: "cx-4-5-6", PaneID: "%5", PID: 101},
 	}
@@ -351,7 +351,7 @@ func TestDetectCodexThreadsMatchesRolloutsUnderEveryConfiguredRoot(t *testing.T)
 			stat:    ProcStat{ParentPID: 100},
 		},
 	}}
-	panes := []Pane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
+	panes := []ProbePane{{Socket: "cx-1-2-3", PaneID: "%4", PID: 100}}
 	live, err := DetectCodexThreadsInRoots(proc, roots, panes, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -385,7 +385,7 @@ func TestHeldCodexRootOutranksSubagentDescriptor(t *testing.T) {
 			fdLinks: []FDLink{{FD: 3, Target: child}, {FD: 7, Target: parent}},
 		},
 	}}
-	live, err := DetectCodexThreads(proc, root, []Pane{{Socket: "cx-1-2-3", PaneID: "%0", PID: 100}}, nil)
+	live, err := DetectCodexThreads(proc, root, []ProbePane{{Socket: "cx-1-2-3", PaneID: "%0", PID: 100}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

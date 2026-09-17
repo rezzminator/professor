@@ -429,7 +429,7 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	}
 	var stdout, stderr bytes.Buffer
 	code := runChatReloadWorkerWithRuntime(
-		[]string{"--sock", socket, "--new", "--account", "1"}, &stdout, &stderr, runtime,
+		[]string{"--sock", socket, "--new", "--account", "1"}, &stdout, &stderr, runtime, nil,
 	)
 	if code != 0 {
 		t.Fatalf("fresh reload rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
@@ -508,6 +508,7 @@ func TestReloadTargetIdentityNeverFallsBackToTheCallerSession(t *testing.T) {
 		"/tmp/tmux-1000/probe-pfm-reload-target",
 		"%7",
 		false,
+		nil,
 	)
 	if err == nil || !strings.Contains(err.Error(), "couldn't identify") {
 		t.Fatalf("target without its own breadcrumb borrowed caller identity: %v", err)
@@ -571,6 +572,7 @@ func TestExplicitCodexReloadUsesPaneBindingWithoutBreadcrumb(t *testing.T) {
 		filepath.Join(resolved.TmuxDir, socket),
 		pane,
 		false,
+		nil,
 	)
 	if err != nil || gotID != wantID || gotTranscript != rollout {
 		t.Fatalf(

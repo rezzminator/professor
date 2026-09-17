@@ -13,11 +13,13 @@ import (
 
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/transcript"
 )
 
@@ -89,7 +91,7 @@ func runChatWithRuntime(
 	verb, rest := args[0], args[1:]
 	switch verb {
 	case newAction:
-		return runRun(rest, stdout, stderr, runtime)
+		return runRun(rest, stdout, stderr, runtime, paths.OSEnv{}, clock.Real)
 	case "open":
 		return runChatOpen(rest, stdout, stderr, runtime)
 	case "read":
@@ -105,32 +107,32 @@ func runChatWithRuntime(
 	case "self-compact":
 		return runHeadlessSelfCompact(rest, stdout, stderr, runtime)
 	case askAction:
-		return runHeadlessAsk(rest, stdout, stderr, runtime)
+		return runHeadlessAsk(rest, stdout, stderr, clock.Real, runtime)
 	case "watch":
 		return runHeadlessWatch(rest, stdout, stderr, runtime)
 	case "capture":
 		return runChatCapture(rest, stdout, stderr, runtime)
 	case "keys":
-		return runChatKeys(rest, stdout, stderr, runtime)
+		return runChatKeys(rest, stdout, stderr, clock.Real, runtime)
 	case "recover":
 		return runChatRecover(rest, stdout, stderr, runtime)
 	case "name":
 		return runChatName(rest, stdout, stderr, runtime)
 	case "kill":
-		return runChatKill(rest, stdout, stderr, runtime)
+		return runChatKill(rest, stdout, stderr, paths.OSEnv{}, runtime)
 	case "unkill":
 		return runChatUnkill(rest, stdout, stderr, runtime)
 	case "end":
 		return runChatEnd(rest, stdout, stderr, runtime)
 	case "reload":
-		return runChatReloadWithRuntime(rest, stdout, stderr, runtime)
+		return runChatReloadWithRuntime(rest, stdout, stderr, runtime, paths.OSEnv{})
 	case whoamiCommand:
 		// Compatibility alias for the public `pfm whoami` command.
 		return runWhoami(rest, stdout, stderr, runtime)
 	case "find", "save", branchAction, "history", "ls":
-		return runChatSatellite(verb, rest, stdin, stdout, stderr, runtime)
+		return runChatSatellite(verb, rest, stdin, stdout, stderr, paths.OSEnv{}, clock.Real, runtime)
 	case "modal":
-		return runChatModal(rest, stdout, stderr)
+		return runChatModal(rest, stdout, stderr, clock.Real)
 	case "resolve":
 		return runChatResolve(rest, stdout, stderr, runtime)
 	case helpCommand, "-h", helpFlag:
@@ -570,7 +572,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 				fmt.Fprintf(stderr, "pfm chat inject: prepare resume body: %v\n", prepareErr)
 				return codeUndelivered
 			}
-			receipt, appendErr := appendResumeInjection(ctx, resolved, target, prepared.Message)
+			receipt, appendErr := appendResumeInjection(ctx, resolved, target, prepared.Message, clock.Real)
 			if appendErr != nil {
 				fmt.Fprintf(stderr, "pfm chat inject: %v\n", appendErr)
 				return codeUndelivered

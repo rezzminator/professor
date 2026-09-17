@@ -15,6 +15,7 @@ import (
 
 	"hostops/pfm/internal/binwatch"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/harvestmcp"
 	"hostops/pfm/internal/mcpserv"
@@ -38,11 +39,17 @@ type mcpDaemonOptions struct {
 	Harvester http.Handler
 	// External reports the external gateway state at request time.
 	External *atomic.Pointer[string]
+	// Clock defaults StartedAt when it is left zero; nil reads the wall
+	// clock exactly as an unset StartedAt always has.
+	Clock clock.Clock
 }
 
 func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
 	if options.StartedAt.IsZero() {
-		options.StartedAt = time.Now().UTC()
+		options.StartedAt = options.Clock.Now().UTC()
 	}
 	// Servers reports only what is actually mounted below, never the full
 	// registered set: mcp.servers.<name>.enabled=false means the handler was
@@ -120,7 +127,8 @@ func writeMCPJSON(writer http.ResponseWriter, value any) {
 	}
 }
 
-func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
+func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clock) (exitCode int) {
+	clk = defaultClock(clk)
 	port := runtime.Config.MCP.HTTP.Port
 	if port < 1 || port > 65535 {
 		fmt.Fprintf(stderr, "pfm mcp serve: configured port %d is outside 1..65535\n", port)
@@ -200,7 +208,8 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int
 		}
 	}
 	options.External = external
-	options.StartedAt = time.Now().UTC()
+	options.Clock = clk
+	options.StartedAt = clk.Now().UTC()
 	handler := newMCPDaemonHandler(options)
 	server := &http.Server{
 		Handler:           handler,

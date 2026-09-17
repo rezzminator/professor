@@ -14,7 +14,8 @@ import (
 // session variable must win whenever it is present.
 //
 // getenv is injected so a caller can pin a fake environment in a test; every
-// production call site passes os.Getenv.
+// production call site passes the process environment's Get method
+// (paths.Env.Get, seamed per pfm/TESTPLAN.md § Seams).
 func callerEngine(getenv func(string) string) (pfmengine.ID, bool) {
 	switch {
 	case getenv(resolve.ClaudeSessionEnv) != "":

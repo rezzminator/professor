@@ -11,6 +11,7 @@ import (
 
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
@@ -83,7 +84,8 @@ func runChatOpen(
 	return pfmchat.OpenID(context.Background(), chat.ID, stdout, stderr, &runtime)
 }
 
-func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) int {
+	env = defaultEnv(env)
 	flags := cli.NewFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
 	exit := flags.Bool("exit", false, "gracefully close after killing")
 	targets, code, ok := cli.ParseFlagsAnywhere(flags, args)
@@ -98,7 +100,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		// Codex tool shells are served by app-server and carry no TMUX. Resolve
 		// their CODEX_THREAD_ID through the fleet store, then preserve the live
 		// row's immutable socket and pane for the detached exit finisher.
-		if os.Getenv("TMUX") == "" && os.Getenv(resolve.CodexThreadEnv) != "" {
+		if env.Get("TMUX") == "" && env.Get(resolve.CodexThreadEnv) != "" {
 			chat, found, err := pfmchat.Resolve(context.Background(), "self", io.Discard, firstRuntime(runtimes))
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
@@ -532,17 +534,19 @@ func runChatSatellite(
 	args []string,
 	_ io.Reader,
 	stdout, stderr io.Writer,
+	env paths.Env,
+	clk clock.Clock,
 	runtimes ...commandRuntime,
 ) int {
 	switch verb {
 	case "find":
 		return runChatFind(args, stdout, stderr, runtimes...)
 	case "save":
-		return runChatSave(args, stdout, stderr, runtimes...)
+		return runChatSave(args, stdout, stderr, env, runtimes...)
 	case branchAction:
-		return runChatBranch(args, stdout, stderr, runtimes...)
+		return runChatBranch(args, stdout, stderr, env, clk, runtimes...)
 	case "ls":
-		return runChatLS(args, stdout, stderr, runtimes...)
+		return runChatLS(args, stdout, stderr, clk, runtimes...)
 	case "history":
 		return runChatHistory(args, stdout, stderr, runtimes...)
 	default:

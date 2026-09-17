@@ -134,7 +134,9 @@ func runChatReloadWithRuntime(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
+	env paths.Env,
 ) int {
+	env = defaultEnv(env)
 	if len(args) == 1 && (args[0] == helpFlag || args[0] == "-h") {
 		fmt.Fprintln(stdout, reload.Usage)
 		return 0
@@ -149,7 +151,7 @@ func runChatReloadWithRuntime(
 	callerPane := reloadPaneArgument(args)
 	// Resolve before detaching; the worker has no tmux ancestry to recover.
 	socketPath, pane, _, code := reloadTarget(
-		context.Background(), callerSock, callerPane, resolved, runtime, tmux, stderr,
+		context.Background(), callerSock, callerPane, resolved, runtime, tmux, stderr, env,
 	)
 	if code != 0 {
 		return code
@@ -211,14 +213,16 @@ func runChatReloadWorker(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm chat reload: load config: %v\n", err)
 		return 1
 	}
-	return runChatReloadWorkerWithRuntime(args, stdout, stderr, runtime)
+	return runChatReloadWorkerWithRuntime(args, stdout, stderr, runtime, paths.OSEnv{})
 }
 
 func runChatReloadWorkerWithRuntime(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
+	env paths.Env,
 ) int {
+	env = defaultEnv(env)
 	if err := validateReloadArgs(args); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2
@@ -313,6 +317,7 @@ func runChatReloadWorkerWithRuntime(
 		runtime,
 		tmux,
 		stderr,
+		env,
 	)
 	if code != 0 {
 		return code
@@ -336,7 +341,7 @@ func runChatReloadWorkerWithRuntime(
 		)
 	}
 	engine := reloadEngine(socketPath)
-	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "")
+	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "", env)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 1
@@ -371,7 +376,7 @@ func runChatReloadWorkerWithRuntime(
 	if info, statErr := os.Stat(cwd); statErr != nil || !info.IsDir() {
 		cwd, _ = os.Getwd()
 	}
-	birthAccount, birthCache, err := reloadBirth(resolved, runtime.Config, socketPath, paneState, stderr)
+	birthAccount, birthCache, err := reloadBirth(resolved, runtime.Config, socketPath, paneState, stderr, env)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
 		return 2
@@ -405,8 +410,8 @@ func runChatReloadWorkerWithRuntime(
 		Home:        resolved.Home,
 		SIDDir:      resolved.SIDDir,
 		ClaudeRoots: resolved.Roots[pfmengine.Claude],
-		Delay:       reloadDurationEnv("PFM_RELOAD_DELAY_MS", 1500),
-		Poll:        reloadDurationEnv("PFM_RELOAD_POLL_MS", 1000),
+		Delay:       reloadDurationEnv("PFM_RELOAD_DELAY_MS", 1500, env),
+		Poll:        reloadDurationEnv("PFM_RELOAD_POLL_MS", 1000, env),
 		ExitTries:   reload.ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_EXIT_TRIES", 20),
 		IdleTries:   reload.ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_IDLE_TRIES", 120),
 		ThenTries:   reload.ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_THEN_TRIES", 900),
@@ -644,8 +649,9 @@ func reloadRequestedAccount(args []string) int {
 	return 0
 }
 
-func reloadDurationEnv(name string, fallbackMS int) time.Duration {
-	if raw, present := os.LookupEnv(name); present {
+func reloadDurationEnv(name string, fallbackMS int, env paths.Env) time.Duration {
+	env = defaultEnv(env)
+	if raw, present := env.Lookup(name); present {
 		if value, err := strconv.Atoi(raw); err == nil && value >= 0 {
 			if value == 0 {
 				return -1
@@ -672,7 +678,9 @@ func reloadTarget(
 	runtime commandRuntime,
 	tmux reload.Tmux,
 	stderr io.Writer,
+	env paths.Env,
 ) (string, string, reload.Pane, int) {
+	env = defaultEnv(env)
 	if sock != "" {
 		path := sock
 		if !filepath.IsAbs(path) {
@@ -716,7 +724,7 @@ func reloadTarget(
 		}
 		identity = recovered
 	}
-	return reloadTargetFromIdentity(ctx, identity, tmux, stderr)
+	return reloadTargetFromIdentity(ctx, identity, tmux, stderr, env)
 }
 
 func reloadTargetFromIdentity(
@@ -724,11 +732,13 @@ func reloadTargetFromIdentity(
 	identity resolve.Identity,
 	tmux reload.Tmux,
 	stderr io.Writer,
+	env paths.Env,
 ) (string, string, reload.Pane, int) {
+	env = defaultEnv(env)
 	path := identity.SocketPath
 	pane := identity.Pane
 	if pane == "" {
-		pane = os.Getenv("TMUX_PANE")
+		pane = env.Get("TMUX_PANE")
 	}
 	panes, err := tmux.ListPanes(ctx, path)
 	if err != nil {
@@ -780,7 +790,9 @@ func reloadBirth(
 	socketPath string,
 	pane reload.Pane,
 	stderr io.Writer,
+	env paths.Env,
 ) (int, bool, error) {
+	env = defaultEnv(env)
 	engine := reloadEngine(socketPath)
 	if engine == pfmengine.OpenCode {
 		return 0, false, errors.New("OpenCode does not support in-place reload")
@@ -846,9 +858,9 @@ func reloadBirth(
 	// A tool shell can be detached from the seat's process tree. In that case
 	// its own birth config is the only safe account rung for a cache-only reload.
 	if engine == pfmengine.Codex {
-		account = accountForCodexHome(machine, os.Getenv("CODEX_HOME"))
+		account = accountForCodexHome(machine, env.Get("CODEX_HOME"))
 	} else {
-		account = machine.AccountForConfigDir(os.Getenv("CLAUDE_CONFIG_DIR"))
+		account = machine.AccountForConfigDir(env.Get("CLAUDE_CONFIG_DIR"))
 	}
 	return account, cache, nil
 }
@@ -948,7 +960,9 @@ func resolveReloadSession(
 	machine pfmconfig.Config,
 	socketPath, pane string,
 	allowAmbient bool,
+	env paths.Env,
 ) (string, string, error) {
+	env = defaultEnv(env)
 	id, crumbPath, err := reload.SessionFromCrumb(
 		resolved.SIDDir,
 		filepath.Base(socketPath),
@@ -974,9 +988,9 @@ func resolveReloadSession(
 	}
 	engine := reloadEngine(socketPath)
 	if id == "" && allowAmbient {
-		ambient := os.Getenv("CLAUDE_CODE_SESSION_ID")
+		ambient := env.Get("CLAUDE_CODE_SESSION_ID")
 		if engine == pfmengine.Codex {
-			ambient = os.Getenv("CODEX_THREAD_ID")
+			ambient = env.Get("CODEX_THREAD_ID")
 		}
 		if fleet.ChatIDPattern.MatchString(ambient) {
 			path, err := findEngineTranscript(resolved, machine, engine, ambient)

@@ -97,6 +97,7 @@ func TestInternalStatuslineRoutesToNativeCommandContract(t *testing.T) {
 		&directStdout,
 		&directStderr,
 		commandRuntime{},
+		nil,
 	)
 
 	var internalStdout, internalStderr bytes.Buffer
@@ -181,6 +182,7 @@ func TestCodexSeatUsageHookNeverTouchesClaudeCredentials(t *testing.T) {
 		&stdout,
 		&stderr,
 		commandRuntime{},
+		nil,
 	); code != 0 || stdout.Len() != 0 ||
 		stderr.Len() != 0 {
 		t.Fatalf(

@@ -21,6 +21,7 @@ import (
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/agentopen"
 	pfmchat "hostops/pfm/internal/chat"
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -320,7 +321,9 @@ func appendResumeInjection(
 	resolved paths.Values,
 	target resumeTarget,
 	message string,
+	clk clock.Clock,
 ) (receipt resumeReceipt, returnErr error) {
+	clk = defaultClock(clk)
 	if err := ctx.Err(); err != nil {
 		return resumeReceipt{}, err
 	}
@@ -373,7 +376,7 @@ func appendResumeInjection(
 		"parentUuid":  parent,
 		"uuid":        eventID,
 		"promptId":    promptID,
-		"timestamp":   time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+		"timestamp":   clk.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
 		"isSidechain": false,
 		"isMeta":      false,
 		"message": map[string]any{
@@ -396,7 +399,7 @@ func appendResumeInjection(
 	}
 	backup := filepath.Join(
 		backupDir,
-		fmt.Sprintf("%s-%d-%s.jsonl", sessionID, time.Now().UTC().UnixNano(), eventID[:8]),
+		fmt.Sprintf("%s-%d-%s.jsonl", sessionID, clk.Now().UTC().UnixNano(), eventID[:8]),
 	)
 	backupFile, err := os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {

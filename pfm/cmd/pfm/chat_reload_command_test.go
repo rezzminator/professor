@@ -95,7 +95,7 @@ func TestReloadTargetWithPaneSelectsItAmongSeveralWithoutWhoami(t *testing.T) {
 	var stderr bytes.Buffer
 	socket, pane, state, code := reloadTarget(
 		context.Background(), "/jail/tmux/cc-multi", "%2",
-		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr,
+		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
 	if code != 0 || socket != "/jail/tmux/cc-multi" || pane != "%2" || state.PID != 22 {
 		t.Fatalf(
@@ -114,7 +114,7 @@ func TestReloadTargetWithPaneRejectsAPaneThatIsNotLive(t *testing.T) {
 	var stderr bytes.Buffer
 	_, _, _, code := reloadTarget(
 		context.Background(), "/jail/tmux/cc-gone", "%9",
-		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr,
+		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
 	if code == 0 || !strings.Contains(stderr.String(), "pane %9 is not live on /jail/tmux/cc-gone") {
 		t.Fatalf("reload target with a dead pane code=%d stderr=%q", code, stderr.String())
@@ -134,7 +134,7 @@ func TestReloadTargetWithSockOnlyKeepsTheSinglePaneRule(t *testing.T) {
 	var stderr bytes.Buffer
 	_, _, _, code := reloadTarget(
 		context.Background(), "/jail/tmux/cc-multi", "",
-		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr,
+		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
 	if code == 0 || !strings.Contains(stderr.String(), "multiple panes") {
 		t.Fatalf(
@@ -148,7 +148,7 @@ func TestReloadTargetWithSockOnlyKeepsTheSinglePaneRule(t *testing.T) {
 	stderr.Reset()
 	socket, pane, state, code := reloadTarget(
 		context.Background(), "/jail/tmux/cc-solo", "",
-		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: single}, &stderr,
+		paths.Values{}, commandRuntime{}, reloadTargetTmux{panes: single}, &stderr, nil,
 	)
 	if code != 0 || socket != "/jail/tmux/cc-solo" || pane != "%7" || state.PID != 77 {
 		t.Fatalf(
@@ -174,7 +174,7 @@ func TestReloadTargetAcceptsRecoveredCodexSeatWithoutAmbientTmux(t *testing.T) {
 	var stderr bytes.Buffer
 
 	socket, pane, state, code := reloadTargetFromIdentity(
-		context.Background(), identity, reloadTargetTmux{panes: panes}, &stderr,
+		context.Background(), identity, reloadTargetTmux{panes: panes}, &stderr, nil,
 	)
 	if code != 0 || socket != identity.SocketPath || pane != "%0" || state.PID != 42 {
 		t.Fatalf(

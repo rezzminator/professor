@@ -254,7 +254,7 @@ func TestMCPServeBothDisabledRefusesBeforeBindingPort(t *testing.T) {
 	// either here — that is the case under test.
 
 	var stdout, stderr bytes.Buffer
-	if code := runMCPServe(&stdout, &stderr, runtime); code != 1 {
+	if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
 		t.Fatalf("both-disabled serve code = %d, want 1", code)
 	}
 	if stdout.Len() != 0 {
@@ -303,7 +303,7 @@ func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
 	runtime.Config.MCP.HTTP.Port = portText
 	runtime.Config.MCPServers["chat"] = config.MCPServer{Enabled: true}
 	var stdout, stderr bytes.Buffer
-	if code := runMCPServe(&stdout, &stderr, runtime); code != 1 {
+	if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
 		t.Fatalf("second serve code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "already running (pid") || !strings.Contains(stderr.String(), "since") {

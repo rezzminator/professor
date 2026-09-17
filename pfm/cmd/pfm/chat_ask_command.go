@@ -10,6 +10,7 @@ import (
 
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 )
@@ -29,7 +30,8 @@ const (
 // back with what it said. It is `inject` plus the wait every caller of inject
 // was writing by hand — a poll loop over `last` that cannot tell a new answer
 // from the previous one, which is the bug this verb exists to delete.
-func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runHeadlessAsk(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
+	clk = defaultClock(clk)
 	flags := cli.NewFlagSet(
 		"chat ask",
 		"usage: pfm chat ask [--timeout SECS] [--settle SECS] [--now] "+
@@ -78,7 +80,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...command
 	// Inject queues directly in a working Claude or Codex composer. The retry
 	// remains for an engine that cannot expose a safe queue; --timeout bounds
 	// that fallback, and --now interrupts instead of queueing.
-	start := time.Now()
+	start := clk.Now()
 	budget := time.Duration(*timeout) * time.Second
 	result, err := engine.Inject(ctx, inject.Request{
 		Target:   chat.Socket,
@@ -86,8 +88,11 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...command
 		ForceNow: *force,
 	})
 	for err == nil && result.Code == inject.CodeBusy &&
-		(budget == 0 || time.Since(start)+busyRetry < budget) {
-		time.Sleep(busyRetry)
+		(budget == 0 || clk.Now().Sub(start)+busyRetry < budget) {
+		if sleepErr := clk.Sleep(ctx, busyRetry); sleepErr != nil {
+			fmt.Fprintf(stderr, "pfm chat ask: %v\n", sleepErr)
+			return 1
+		}
 		result, err = engine.Inject(ctx, inject.Request{
 			Target:   chat.Socket,
 			Message:  message,
@@ -107,7 +112,7 @@ func runHeadlessAsk(args []string, stdout, stderr io.Writer, runtimes ...command
 	// means wait for as long as it takes.
 	remaining := time.Duration(0)
 	if budget > 0 {
-		remaining = budget - time.Since(start)
+		remaining = budget - clk.Now().Sub(start)
 	}
 	if budget > 0 && remaining <= 0 {
 		fmt.Fprintf(

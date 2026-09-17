@@ -9,6 +9,7 @@ import (
 
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/inject"
 )
 
@@ -25,7 +26,8 @@ const chatKeysSettle = 400 * time.Millisecond
 
 func validKey(key string) bool { return pfmchat.KeyValid(key) }
 
-func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatKeys(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) int {
+	clk = defaultClock(clk)
 	flags := cli.NewFlagSet("chat keys", chatKeysUsage, stderr)
 	delay := flags.Duration(
 		"delay", chatKeysDefaultDelay, "pause between keys (e.g. 250ms)",
@@ -81,7 +83,10 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	tmux := inject.TmuxInjector{}
 	for index, key := range keys {
 		if index > 0 && *delay > 0 {
-			time.Sleep(*delay)
+			if err := clk.Sleep(ctx, *delay); err != nil {
+				fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
+				return 1
+			}
 		}
 		var err error
 		if *literal {
@@ -99,7 +104,10 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	if !*capture {
 		return 0
 	}
-	time.Sleep(chatKeysSettle)
+	if err := clk.Sleep(ctx, chatKeysSettle); err != nil {
+		fmt.Fprintf(stderr, "pfm chat keys: %v\n", err)
+		return 1
+	}
 	captureText, err := tmux.Capture(ctx, socketPath, pane, false, 0)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat keys: capture: %v\n", err)

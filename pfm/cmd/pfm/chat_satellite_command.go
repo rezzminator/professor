@@ -9,7 +9,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -20,6 +19,7 @@ import (
 	"hostops/pfm/internal/action"
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
@@ -172,7 +172,8 @@ func lastTranscriptLines(value string, count int) string {
 	return strings.Join(lines, "\n")
 }
 
-func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
+func runChatSave(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (exitCode int) {
+	env = defaultEnv(env)
 	if len(args) < 1 || len(args) > 2 {
 		fmt.Fprintln(stderr, "usage: pfm chat save <target-file> [transcript-jsonl]")
 		return 2
@@ -182,7 +183,7 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	if len(args) == 2 {
 		transcriptPath = args[1]
 	} else {
-		id := os.Getenv("CLAUDE_CODE_SESSION_ID")
+		id := env.Get("CLAUDE_CODE_SESSION_ID")
 		if id == "" {
 			fmt.Fprintln(stderr, "pfm chat save: CLAUDE_CODE_SESSION_ID is not set and no transcript path was given")
 			return 1
@@ -192,7 +193,7 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 			fmt.Fprintf(stderr, "pfm chat save: current directory: %v\n", err)
 			return 1
 		}
-		transcriptPath = currentClaudeTranscriptPath(id, cwd, runtimes...)
+		transcriptPath = currentClaudeTranscriptPath(id, cwd, env, runtimes...)
 		if transcriptPath == "" {
 			fmt.Fprintln(stderr, "pfm chat save: could not resolve the current Claude transcript")
 			return 1
@@ -227,7 +228,7 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 		fmt.Fprintf(stderr, "pfm chat save: write transcript: %v\n", err)
 		return 1
 	}
-	writeRepositorySnapshot(file)
+	writeRepositorySnapshot(file, deps.RealRunner{})
 	closed = true
 	if err := file.Close(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat save: close target: %v\n", err)
@@ -254,35 +255,8 @@ func runChatSave(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 	return 0
 }
 
-func writeRepositorySnapshot(writer io.Writer) {
-	inside := exec.Command(deps.Executable("git"), "rev-parse", "--is-inside-work-tree")
-	if err := inside.Run(); err != nil {
-		fmt.Fprintln(writer, "(not a git repository)")
-		return
-	}
-	branch, branchErr := exec.Command(deps.Executable("git"), branchAction, "--show-current").Output()
-	status, statusErr := exec.Command(deps.Executable("git"), "status", "--short").Output()
-	worktrees, worktreeErr := exec.Command(deps.Executable("git"), "worktree", "list").Output()
-	if branchErr != nil || statusErr != nil || worktreeErr != nil {
-		fmt.Fprintf(
-			writer,
-			"(repository snapshot failed: branch=%v status=%v worktrees=%v)\n",
-			branchErr,
-			statusErr,
-			worktreeErr,
-		)
-		return
-	}
-	fmt.Fprintf(
-		writer,
-		"Branch: %s\n\n```\n%s```\n\nWorktrees:\n```\n%s```\n",
-		strings.TrimSpace(string(branch)),
-		status,
-		worktrees,
-	)
-}
-
-func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
+func runChatLS(args []string, stdout, stderr io.Writer, clk clock.Clock, runtimes ...commandRuntime) (exitCode int) {
+	clk = defaultClock(clk)
 	all := false
 	for _, arg := range args {
 		switch arg {
@@ -333,7 +307,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 			continue
 		}
 		chat := pfmchat.FromRow(*row)
-		status, inspectErr := headless.Inspect(context.Background(), chat, time.Now())
+		status, inspectErr := headless.Inspect(context.Background(), chat, clk.Now())
 		state := doctor.StateUnknown
 		if inspectErr != nil {
 			fmt.Fprintf(stderr, "pfm chat ls: inspect %s: %v\n", chat.Name, inspectErr)
@@ -396,7 +370,15 @@ func pathWithinDir(path, root string) bool {
 	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
-func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatBranch(
+	args []string,
+	stdout, stderr io.Writer,
+	env paths.Env,
+	clk clock.Clock,
+	runtimes ...commandRuntime,
+) int {
+	env = defaultEnv(env)
+	clk = defaultClock(clk)
 	flags := cli.NewFlagSet(
 		"chat branch",
 		"usage: pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] [--account N] [--name NAME] [name]",
@@ -421,7 +403,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	}
 	engineInput := strings.TrimSpace(*requestedEngine)
 	if engineInput == "" {
-		caller, ok := callerEngine(os.Getenv)
+		caller, ok := callerEngine(env.Get)
 		if !ok {
 			fmt.Fprintln(stderr, "pfm chat branch: no ambient session id; pass --engine and --session-id")
 			return 1
@@ -435,9 +417,9 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	}
 	if *id == "" {
 		if engine == pfmengine.Claude {
-			*id = os.Getenv(resolve.ClaudeSessionEnv)
+			*id = env.Get(resolve.ClaudeSessionEnv)
 		} else {
-			*id = os.Getenv(resolve.CodexThreadEnv)
+			*id = env.Get(resolve.CodexThreadEnv)
 		}
 	}
 	if strings.TrimSpace(*id) == "" || strings.ContainsAny(*id, "\r\n\x00") {
@@ -498,7 +480,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	}
 	model := ""
 	if engine == pfmengine.Claude {
-		model = currentClaudeModel(*id, runtime)
+		model = currentClaudeModel(*id, env, runtime)
 	}
 	plan, err := action.HeadlessFork(action.HeadlessForkRequest{
 		Engine: engine, SessionID: *id, Name: name, CWD: cwd,
@@ -511,7 +493,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		return 1
 	}
 	socket := spawn.FreshSocket(engine)
-	if override := os.Getenv(spawn.TestFreshSocketEnv); override != "" {
+	if override := env.Get(spawn.TestFreshSocketEnv); override != "" {
 		socket = override
 	}
 	titles := runtime.Config.Tmux.Titles
@@ -560,7 +542,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		}
 	}
 	state := fleetdb.OpenSharedState(context.Background(), resolved)
-	recordErr := state.RecordBranchSeat(context.Background(), socket, *id, time.Now().Unix())
+	recordErr := state.RecordBranchSeat(context.Background(), socket, *id, clk.Now().Unix())
 	closeErr := state.Close()
 	if recordErr != nil || closeErr != nil {
 		rollbackErr := pfmchat.KillServer(context.Background(), resolved, socket)
@@ -646,12 +628,13 @@ func defaultBranchName(id string) string {
 	return name
 }
 
-func currentClaudeModel(id string, runtimes ...commandRuntime) string {
+func currentClaudeModel(id string, env paths.Env, runtimes ...commandRuntime) string {
+	env = defaultEnv(env)
 	cwd, err := os.Getwd()
 	if err != nil {
 		return ""
 	}
-	path := currentClaudeTranscriptPath(id, cwd, runtimes...)
+	path := currentClaudeTranscriptPath(id, cwd, env, runtimes...)
 	if path == "" {
 		return ""
 	}
@@ -674,9 +657,10 @@ func currentClaudeModel(id string, runtimes ...commandRuntime) string {
 }
 
 // currentClaudeTranscriptPath prefers explicit config, then loaded account roots.
-func currentClaudeTranscriptPath(id, cwd string, runtimes ...commandRuntime) string {
+func currentClaudeTranscriptPath(id, cwd string, env paths.Env, runtimes ...commandRuntime) string {
+	env = defaultEnv(env)
 	slug := strings.NewReplacer("/", "-", ".", "-").Replace(cwd)
-	if config := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); config != "" {
+	if config := strings.TrimSpace(env.Get("CLAUDE_CONFIG_DIR")); config != "" {
 		return filepath.Join(config, "projects", slug, id+".jsonl")
 	}
 	if len(runtimes) != 0 {
@@ -935,7 +919,8 @@ func tailLines(content string, count int) []string {
 	return lines
 }
 
-func runChatModal(args []string, stdout, stderr io.Writer) int {
+func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock) int {
+	clk = defaultClock(clk)
 	if len(args) != 3 || args[1] != "deny" {
 		fmt.Fprintln(stderr, "usage: pfm chat modal <tmux-session> deny <down-count>")
 		return 2
@@ -960,7 +945,10 @@ func runChatModal(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "pfm chat modal: send Down: %v: %s\n", err, strings.TrimSpace(string(output)))
 			return 1
 		}
-		time.Sleep(200 * time.Millisecond)
+		if err := clk.Sleep(context.Background(), 200*time.Millisecond); err != nil {
+			fmt.Fprintf(stderr, "pfm chat modal: %v\n", err)
+			return 1
+		}
 	}
 	if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Enter").
 		CombinedOutput(); err != nil {

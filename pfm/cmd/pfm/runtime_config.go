@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/paths"
 )
 
 // commandRuntime is the process runtime every command branch consumes; the
@@ -20,6 +22,34 @@ func firstRuntime(runtimes []commandRuntime) *commandRuntime {
 		return nil
 	}
 	return &runtimes[0]
+}
+
+// firstEnv is the same optional-trailing-argument shape as firstRuntime, for
+// the host-environment seam (pfm/TESTPLAN.md § Seams, paths.Env): a caller's
+// pinned environment, or the real process environment when none was given.
+func firstEnv(envs []paths.Env) paths.Env {
+	if len(envs) == 0 {
+		return defaultEnv(nil)
+	}
+	return defaultEnv(envs[0])
+}
+
+// defaultEnv is firstEnv's shape for a single optional paths.Env parameter:
+// a caller's pinned environment, or the real one when nil.
+func defaultEnv(env paths.Env) paths.Env {
+	if env == nil {
+		return paths.OSEnv{}
+	}
+	return env
+}
+
+// defaultClock is defaultEnv's shape for the time seam (clock.Clock): a
+// caller's pinned clock, or the real wall clock when nil.
+func defaultClock(clk clock.Clock) clock.Clock {
+	if clk == nil {
+		return clock.Real
+	}
+	return clk
 }
 
 // splitGlobalConfig accepts the global flag only before the command. This is

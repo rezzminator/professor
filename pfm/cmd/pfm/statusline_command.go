@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -14,6 +13,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/nudge"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/statusline"
 	"hostops/pfm/internal/usagehook"
 )
@@ -28,7 +28,7 @@ func runStatusline(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "pfm statusline: load config (fail-open): %v\n", err)
 		return 0
 	}
-	return runStatuslineWithRuntime(args, stdin, stdout, stderr, runtime)
+	return runStatuslineWithRuntime(args, stdin, stdout, stderr, runtime, paths.OSEnv{})
 }
 
 func runStatuslineWithRuntime(
@@ -36,7 +36,9 @@ func runStatuslineWithRuntime(
 	stdin io.Reader,
 	stdout, stderr io.Writer,
 	machine commandRuntime,
+	env paths.Env,
 ) int {
+	env = defaultEnv(env)
 	const statuslineHostEngine = pfmengine.Claude // pfm statusline is launched only by Claude Code's statusline hook; an environment that names no engine is that hook's
 	flags := cli.NewFlagSet(
 		"statusline",
@@ -55,7 +57,7 @@ func runStatuslineWithRuntime(
 	ctx := context.Background()
 	if *refreshCodex {
 		options := statuslineCodexOptions()
-		account := accountForCodexHome(machine.Config, os.Getenv("CODEX_HOME"))
+		account := accountForCodexHome(machine.Config, env.Get("CODEX_HOME"))
 		options.Binary = machine.Config.EffectiveCodex(account).Binary
 		if err := statusline.RefreshCodex(ctx, options); err != nil {
 			fmt.Fprintf(stderr, "pfm statusline: refresh GPT cache: %v\n", err)
@@ -70,7 +72,7 @@ func runStatuslineWithRuntime(
 		return 0
 	}
 	recordContextSample(raw, machine.Paths.SIDDir, stderr)
-	id, engineErr := statusline.EngineFromEnvironment(os.Getenv)
+	id, engineErr := statusline.EngineFromEnvironment(env.Get)
 	if errors.Is(engineErr, statusline.ErrNoEngineInEnvironment) {
 		id = statuslineHostEngine
 	} else if engineErr != nil {
@@ -153,14 +155,16 @@ func runUsageHook(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm usage-hook: load config (fail-open): %v\n", err)
 		return 0
 	}
-	return runUsageHookWithRuntime(args, stdout, stderr, runtime)
+	return runUsageHookWithRuntime(args, stdout, stderr, runtime, paths.OSEnv{})
 }
 
 func runUsageHookWithRuntime(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
+	env paths.Env,
 ) int {
+	env = defaultEnv(env)
 	flags := cli.NewFlagSet("usage-hook", "usage: pfm usage-hook", stderr)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -169,7 +173,7 @@ func runUsageHookWithRuntime(
 		flags.Usage()
 		return 2
 	}
-	id, _ := statusline.EngineFromEnvironment(os.Getenv)
+	id, _ := statusline.EngineFromEnvironment(env.Get)
 	if id == pfmengine.Codex {
 		return 0
 	}

@@ -10,6 +10,7 @@ import (
 	"strconv"
 
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
@@ -18,6 +19,7 @@ import (
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/picker"
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/stale"
@@ -116,7 +118,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "headless":
 		return runHeadless(args[1:], stdout, stderr, runtime)
 	case "index":
-		return runIndex(args[1:], stdout, stderr, runtime)
+		return runIndex(args[1:], stdout, stderr, runtime, clock.Real)
 	case "doctor":
 		return doctor.Run(
 			args[1:],
@@ -136,9 +138,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "name-sync":
 		return runNameSync(args[1:], stdout, stderr, runtime)
 	case "statusline":
-		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime)
+		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, paths.OSEnv{})
 	case "usage-hook":
-		return runUsageHookWithRuntime(args[1:], stdout, stderr, runtime)
+		return runUsageHookWithRuntime(args[1:], stdout, stderr, runtime, paths.OSEnv{})
 	case "install":
 		return runInstall(args[1:], stdout, stderr, runtime)
 	case "uninstall":
@@ -188,7 +190,7 @@ func runMCP(
 		args = []string{config.MCPServerChat, serveCommand}
 	}
 	if len(args) == 1 && args[0] == serveCommand {
-		return runMCPServe(stdout, stderr, runtime)
+		return runMCPServe(stdout, stderr, runtime, clock.Real)
 	}
 	if len(args) == 1 && args[0] == "ls" {
 		for _, name := range config.RegisteredMCPServers() {
@@ -442,7 +444,10 @@ func runInternal(
 		return hookentry.EpicInject(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "reload-intercept" {
-		return hookentry.ReloadIntercept(os.Stdin, stdout, stderr, runtime, runChatReloadWithRuntime)
+		reloadFront := func(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {
+			return runChatReloadWithRuntime(args, stdout, stderr, runtime, paths.OSEnv{})
+		}
+		return hookentry.ReloadIntercept(os.Stdin, stdout, stderr, runtime, reloadFront)
 	}
 	if len(args) != 0 && args[0] == "exit-intercept" {
 		return hookentry.ExitIntercept(os.Stdin, stdout, stderr, runtime, runKill)
@@ -454,7 +459,7 @@ func runInternal(
 		return hookentry.CompactNudge(os.Stdin, stdout, stderr, runtime, nil)
 	}
 	if len(args) != 0 && args[0] == "reload-run" {
-		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime)
+		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime, paths.OSEnv{})
 	}
 	if len(args) != 0 && args[0] == "then" {
 		return hookentry.Then(args[1:], stderr, runtime)
@@ -476,7 +481,7 @@ func runInternal(
 		return stale.Run(args[1:], stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "statusline" {
-		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime)
+		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, paths.OSEnv{})
 	}
 	if len(args) != 0 && args[0] == "primary-set" {
 		flags := cli.NewFlagSet(

@@ -8,11 +8,13 @@ import (
 	"time"
 
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/store"
 )
 
-func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
+func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clock) (exitCode int) {
+	clk = defaultClock(clk)
 	flags := cli.NewFlagSet(
 		indexCommand,
 		"usage: pfm index [--full] [--progress]",
@@ -38,7 +40,7 @@ func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (
 		fmt.Fprintf(stderr, "pfm index: %v\n", err)
 		return 1
 	}
-	started := time.Now()
+	started := clk.Now()
 	if *progress {
 		fmt.Fprintln(stderr, "pfm index: scanning")
 	}
@@ -51,12 +53,12 @@ func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (
 		_ = database.SetMeta(
 			context.Background(),
 			"last_full_index_at",
-			strconv.FormatInt(time.Now().Unix(), 10),
+			strconv.FormatInt(clk.Now().Unix(), 10),
 		)
 	}
 	fmt.Fprintln(stdout, formatCounters(counters))
 	if *progress {
-		fmt.Fprintf(stderr, "pfm index: done in %s\n", time.Since(started).Round(time.Millisecond))
+		fmt.Fprintf(stderr, "pfm index: done in %s\n", clk.Now().Sub(started).Round(time.Millisecond))
 	}
 	return 0
 }

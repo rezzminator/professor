@@ -14,6 +14,7 @@ import (
 	"hostops/pfm/internal/agentrole"
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
@@ -21,6 +22,7 @@ import (
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/naming"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/rearm"
 	"hostops/pfm/internal/spawn"
 )
@@ -42,7 +44,11 @@ func runRun(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
+	env paths.Env,
+	clk clock.Clock,
 ) int {
+	env = defaultEnv(env)
+	clk = defaultClock(clk)
 	flags := cli.NewFlagSet(
 		"chat new",
 		"usage: pfm chat new --name NAME [--engine cc|cx] [--cwd DIR] "+
@@ -91,6 +97,7 @@ func runRun(
 		*account,
 		runtime.Config,
 		fleet.PrimaryAccount(resolved, runtime.Config),
+		env,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
@@ -135,7 +142,7 @@ func runRun(
 	// choreography: what was typed, which screen came back, which overlay was
 	// dismissed. A chat driven blind is a chat debugged blind.
 	var trace io.Writer
-	if os.Getenv(spawnTraceEnv) != "" {
+	if env.Get(spawnTraceEnv) != "" {
 		trace = stderr
 	}
 	titles := runtime.Config.Tmux.Titles
@@ -174,8 +181,8 @@ func runRun(
 	if !result.Named {
 		return 1
 	}
-	spawnedAt := time.Now()
-	parent := parentChatID()
+	spawnedAt := clk.Now()
+	parent := parentChatID(env)
 	state := fleetdb.OpenSharedState(context.Background(), resolved)
 	if parent != "" {
 		if err := registerDetachedChild(state, parent, result.Socket, spawnedAt.Unix()); err != nil {
@@ -251,6 +258,7 @@ func runRun(
 		result,
 		stdout,
 		stderr,
+		clk,
 		runtime,
 	)
 	if code != 0 {
@@ -264,10 +272,12 @@ func resolveRunEngineAccount(
 	requestedAccount int,
 	machine pfmconfig.Config,
 	primaryClaude int,
+	envs ...paths.Env,
 ) (pfmengine.ID, int, error) {
+	env := firstEnv(envs)
 	engineInput := requestedEngine
 	if strings.TrimSpace(engineInput) == "" {
-		if caller, ok := callerEngine(os.Getenv); ok {
+		if caller, ok := callerEngine(env.Get); ok {
 			return resolveRunEngineIDAccount(caller, requestedAccount, machine, primaryClaude)
 		}
 		defaultEngine, err := machine.DefaultEngine()
@@ -319,11 +329,11 @@ func resolveRunEngineIDAccount(
 	return id, account, nil
 }
 
-func parentChatID() string {
-	if id := os.Getenv("CLAUDE_CODE_SESSION_ID"); id != "" {
+func parentChatID(env paths.Env) string {
+	if id := env.Get("CLAUDE_CODE_SESSION_ID"); id != "" {
 		return id
 	}
-	return os.Getenv("CODEX_THREAD_ID")
+	return env.Get("CODEX_THREAD_ID")
 }
 
 func registerDetachedChild(state *fleetdb.Store, parent, socket string, createdAt int64) error {
@@ -382,6 +392,7 @@ func awaitLaunch(
 	options headless.AwaitOptions,
 	result spawn.Result,
 	stdout, stderr io.Writer,
+	clk clock.Clock,
 	runtimes ...commandRuntime,
 ) int {
 	handle := chatHandle(result.Socket, name)
@@ -396,7 +407,7 @@ func awaitLaunch(
 	if turn.Delivered {
 		return 0
 	}
-	if rescueLaunchPrompt(ctx, handle, stderr, runtimes...) {
+	if rescueLaunchPrompt(ctx, handle, stderr, clk, runtimes...) {
 		rescued, _ := headless.Await(
 			ctx,
 			chatResolver(handle, runtimes...),
@@ -458,6 +469,7 @@ func rescueLaunchPrompt(
 	ctx context.Context,
 	handle string,
 	_ io.Writer,
+	clk clock.Clock,
 	runtimes ...commandRuntime,
 ) bool {
 	chat, found, err := pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
@@ -473,7 +485,9 @@ func rescueLaunchPrompt(
 	if err := tmux.SendKey(ctx, socketPath, pane, "Escape"); err != nil {
 		return false
 	}
-	time.Sleep(launchRescueSettle)
+	if err := clk.Sleep(ctx, launchRescueSettle); err != nil {
+		return false
+	}
 	if err := tmux.SendKey(ctx, socketPath, pane, "Enter"); err != nil {
 		return false
 	}

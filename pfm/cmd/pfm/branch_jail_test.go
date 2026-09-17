@@ -135,7 +135,7 @@ func TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller(t *testing.T) {
 	before := branchCallerShape(t, callerPath)
 	started := time.Now()
 	var stdout, stderr bytes.Buffer
-	if code := runChatBranch(nil, &stdout, &stderr); code != 0 {
+	if code := runChatBranch(nil, &stdout, &stderr, nil, nil); code != 0 {
 		t.Fatalf("chat branch rc=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if elapsed := time.Since(started); elapsed > 3*time.Second {

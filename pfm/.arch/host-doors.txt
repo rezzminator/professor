@@ -1,15 +1,6 @@
-cmd/pfm/chat_ask_command.go 2
-cmd/pfm/chat_caller_engine.go 1
-cmd/pfm/chat_command.go 1
 cmd/pfm/chat_dispatch.go 1
-cmd/pfm/chat_inject_resume.go 2
-cmd/pfm/chat_keys_command.go 2
-cmd/pfm/chat_new_command.go 6
-cmd/pfm/chat_reload_command.go 7
-cmd/pfm/chat_satellite_command.go 13
-cmd/pfm/index_command.go 2
-cmd/pfm/mcp_serve_command.go 4
-cmd/pfm/statusline_command.go 3
+cmd/pfm/chat_reload_command.go 1
+cmd/pfm/mcp_serve_command.go 2
 internal/action/claude_spawn.go 1
 internal/action/process_darwin.go 1
 internal/action/solo.go 1

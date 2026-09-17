@@ -46,7 +46,7 @@ func TestChatSaveUsesConfiguredImplicitAccountRoot(t *testing.T) {
 		},
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runChatSave([]string{target}, &stdout, &stderr, runtime); code != 0 {
+	if code := runChatSave([]string{target}, &stdout, &stderr, nil, runtime); code != 0 {
 		t.Fatalf("save code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	saved, err := os.ReadFile(target)
@@ -79,7 +79,7 @@ func TestCurrentClaudeModelUsesConfiguredAccountRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
-	got := currentClaudeModel(id, commandRuntime{Paths: paths.Values{
+	got := currentClaudeModel(id, nil, commandRuntime{Paths: paths.Values{
 		Home:  filepath.Join(root, "home"),
 		Roots: map[pfmengine.ID][]string{pfmengine.Claude: {projects}},
 	}})
@@ -165,6 +165,8 @@ func TestChatHistoryUsesConfiguredRootsToResolveTheTranscript(t *testing.T) {
 		strings.NewReader(""),
 		&stdout,
 		&stderr,
+		nil,
+		nil,
 		runtime,
 	); code != 0 {
 		t.Fatalf("history code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())

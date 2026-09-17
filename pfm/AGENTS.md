@@ -27,9 +27,9 @@ Use `$dev build pfm` · `$dev verify pfm` · `$dev test pfm` for anything the pi
 
 ## File Structure
 
-`cmd/pfm/` holds the CLI adapters and the end-to-end jail tests; `pfm help` lists the subcommands. Each `internal/` package opens with a doc comment naming what it owns: `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` is the package map.
+`cmd/pfm/` holds the CLI adapters and the end-to-end jail tests; the doctor, the hook entries, the picker, the self-update and the project baselines are `internal/{doctor,hookentry,picker,update,professor}`; `pfm help` lists the subcommands. Each `internal/` package opens with a doc comment naming what it owns: `go list -f '{{.ImportPath}}: {{.Doc}}' ./internal/...` is the package map.
 
-`internal/installer/assets/shim/pfm.zsh` is the thin post-cutover wrapper (`internal/installer/shim/` holds only its tests). `cmd/pfm` file names start with their unit — `chat_ ls_ doctor_ internal_ update_` — so `ls cmd/pfm/<unit>_*` lists a unit. `testdata/` holds `claude-store/ codex-store/ crumbs/ proc/ golden/` plus the reference harness `e2e.sh`.
+`internal/installer/assets/shim/pfm.zsh` is the thin post-cutover wrapper (`internal/installer/shim/` holds only its tests). `cmd/pfm` file names start with their unit — `chat_` is the one multi-file unit still in main; `doctor ls internal update` left for `internal/` — so `ls cmd/pfm/<unit>_*` lists a unit. `testdata/` holds `claude-store/ codex-store/ crumbs/ proc/ golden/` plus the reference harness `e2e.sh`.
 
 ## Platforms
 
@@ -100,7 +100,7 @@ Test-jail overrides only — **not a config system** (`internal/paths/paths.go`)
 
 `PFM_TMUX_CONF` is load-bearing beyond the jail: unset, a chat's tmux server loads the user's own `~/.tmux.conf` — because a chat IS a terminal the user lives in, and one that ignores their config wears the wrong status bar. Jails set it to `/dev/null` so a real machine config can never steer a fixture.
 
-Test knobs outside `internal/paths`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`); `PFM_TEST_FRESH_SOCKET` (`cmd/pfm/ls_pipeline.go`).
+Test knobs outside `internal/paths`: the scan clock `PFM_TEST_NOW_NS` (`internal/fleet/scan.go`); `PFM_TEST_FRESH_SOCKET` (`internal/spawn/socket.go`).
 
 ## Boundaries
 

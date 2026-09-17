@@ -8,7 +8,7 @@
 - `templates/`: the shipped framework — `templates/project/` (per-install templates, scaffolded into an adopter and then owned there) + `templates/global/` (machine-global agents/commands/skills — the originals, symlink-live) + `templates/prompts/` (the fleet prompt + harness baseline). Markdown + shell, no build; the gates are `scripts/leak-check.sh` and `scripts/refresh-scope.sh`.
 - `pfm/`: fleet engine — Go 1.24, `cmd/pfm` + `internal/*`. Owns its staged host assets under `pfm/internal/installer/assets/`; `pfm install` stages them. Also owns the only harvester under `internal/harvest` + `internal/harvestmcp`, over a pinned Python conversion sidecar in `internal/harvestpy/`.
 - `workflows/`: in-tree engines — `deep-rr/` (the USER-ONLY research workflow), linked into `~/.claude/skills/` by `pfm install`.
-- `infra/`: the isolated-dev fence (`docker-compose.yml`, the `pfm-dev` image, `release-rehearsal.sh`, `check-self-hosted-manifest.sh`) — `dev.sh iso` and `$pfm-release` drive it.
+- `infra/`: `fence/` (`docker-compose.yml`, the `pfm-dev` image, `release-rehearsal.sh`) — `dev.sh iso` and `$pfm-release` drive it; `demo/` is the live-demo fence for presentations; `check-self-hosted-manifest.sh` stays at the top level, a repo gate, not fence-only.
 - `docs/`: the specs — `BLUEPRINT.md` (philosophy), `SETUP.md` (generation), `PLACEHOLDERS.md` (substitution law) — plus `commands/` reference cards and `dev/` wave trains.
 - `scripts/`: repo-level gates (`leak-check.sh`, `refresh-scope.sh`); `.githooks/` runs the leak gate `pre-push`.
 - `releases/` + root `README.md` / `INSTALL.md` / `CHANGELOG.md` / `VERSION`: the public face — edited with template-grade care.

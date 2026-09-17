@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Install the pinned developer tools from infra/tools.env with `go install`.
-#   infra/tools.sh [--bin DIR]   default DIR: $TOOLS_BIN, else <repo>/tmp/tools/<os>-<arch>/bin
+# Install the pinned developer tools from infra/fence/tools.env with `go install`.
+#   infra/fence/tools.sh [--bin DIR]   default DIR: $TOOLS_BIN, else <repo>/tmp/tools/<os>-<arch>/bin
 # Prints one line per tool: TOOL <name> <version> INSTALLED|PRESENT <path>.
 # BROKEN STATE: a missing tools.env, an unset version, a failed `go install`,
 # or a binary that does not answer --version = a named line and a non-zero
@@ -14,7 +14,7 @@ ENV_FILE="$HERE/tools.env"
 source "$ENV_FILE"
 # Default keyed by OS/arch — the same rule pfm/Makefile resolves with, so a
 # darwin host and the linux fence never see each other's binaries.
-BIN="${TOOLS_BIN:-$HERE/../tmp/tools/$(go env GOOS)-$(go env GOARCH)/bin}"
+BIN="${TOOLS_BIN:-$HERE/../../tmp/tools/$(go env GOOS)-$(go env GOARCH)/bin}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --bin) BIN="$2"; shift 2 ;;

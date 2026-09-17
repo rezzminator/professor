@@ -23,10 +23,6 @@
   <a href="docs/BLUEPRINT.md">Blueprint</a>
 </p>
 
-<p align="center">
-  <img src="docs/img/pfm-fleet.gif" alt="pfm ls: a fleet of Claude Code chats across four projects and two accounts, fuzzy-found, then the Limits dashboard for two Claude and two Codex accounts, then the cosmos sky with a live comms ledger of chats messaging each other" width="900">
-</p>
-
 <h2 align="center">Professor is a complete, integrated toolbox for everything you want to do — that Anthropic, OpenAI <em>or anyone else</em> will <em>never</em> give you.</h2>
 
 <p align="center">

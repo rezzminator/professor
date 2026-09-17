@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Clone ratchet over the shell / JS / Python surface — jscpd (version pinned in
-# infra/tools.env) with .jscpd.json against the committed fingerprint baseline
+# infra/fence/tools.env) with .jscpd.json against the committed fingerprint baseline
 # .jscpd-baseline.json: a clone whose fingerprint the baseline lacks is NEW and
 # fails; a removed clone is a shrink the next --measure locks in.
 #   scripts/clone-check.sh            check: FAIL on any new clone (named)
@@ -13,9 +13,9 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BASELINE="$ROOT/.jscpd-baseline.json"
 MODE="${1:-check}"
 case "$MODE" in check|--measure) ;; *) echo "usage: clone-check.sh [--measure]" >&2; exit 2 ;; esac
-# shellcheck source=../infra/tools.env
-source "$ROOT/infra/tools.env"
-[[ -n "${JSCPD_VERSION:-}" ]] || { echo "CLONES ERROR JSCPD_VERSION unset in infra/tools.env"; exit 2; }
+# shellcheck source=../infra/fence/tools.env
+source "$ROOT/infra/fence/tools.env"
+[[ -n "${JSCPD_VERSION:-}" ]] || { echo "CLONES ERROR JSCPD_VERSION unset in infra/fence/tools.env"; exit 2; }
 command -v npx >/dev/null || { echo "CLONES ERROR TOOLCHAIN-MISSING — npx not on PATH"; exit 2; }
 LOG="$(mktemp)"; trap 'rm -f "$LOG"' EXIT
 run() { (cd "$ROOT" && npx --yes "jscpd@${JSCPD_VERSION}" --config .jscpd.json --fail-on-empty --baseline "$BASELINE" "$@") >"$LOG" 2>&1; }

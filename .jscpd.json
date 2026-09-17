@@ -1,5 +1,5 @@
 {
-  "//": "Clone detection for what dupl cannot see: the shell/JS/Python staged under pfm/internal/installer/assets, this repo's scripts, and the shipped template scripts. --ignore-identifiers so a renamed-variable copy still counts. Version: infra/tools.env (JSCPD_VERSION).",
+  "//": "Clone detection for what dupl cannot see: the shell/JS/Python staged under pfm/internal/installer/assets, this repo's scripts, and the shipped template scripts. --ignore-identifiers so a renamed-variable copy still counts. Version: infra/fence/tools.env (JSCPD_VERSION).",
   "minTokens": 50,
   "minLines": 8,
   "ignoreIdentifiers": true,

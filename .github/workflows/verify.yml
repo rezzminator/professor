@@ -114,7 +114,7 @@ jobs:
           go-version-file: pfm/go.mod
           cache-dependency-path: pfm/go.sum
 
-      # The pinned tools (infra/tools.env) — the same versions the fence image
+      # The pinned tools (infra/fence/tools.env) — the same versions the fence image
       # carries, so this job and `dev.sh iso verify pfm` give one verdict.
       - name: pinned tools (golangci-lint, go-test-coverage)
         run: make -C pfm tools

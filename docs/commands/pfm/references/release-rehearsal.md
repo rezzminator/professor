@@ -2,7 +2,7 @@
 
 `/pfm:release` Step 10. A cheap Codex model plays an adopter on a fresh fenced machine: it installs the STABLE release exactly as the stable docs say, then updates to the CANDIDATE exactly as the candidate's docs say. Whatever it trips on, a real adopter trips on — the rehearsal exists to find that friction before `main` moves.
 
-## The machine — `infra/release-rehearsal.sh`
+## The machine — `infra/fence/release-rehearsal.sh`
 
 The container `pfm-release-rehearsal` is a brand-new Linux host (own HOME, no Claude or Codex CLI, no GitHub access for this repo). Its only Professor source is `/root/upstream.git`, built from this repo's git objects. Sequence, each step checked by the script:
 
@@ -44,7 +44,7 @@ pfm headless exec --engine codex --model "$MODEL" --effort medium --no-session-p
     "properties":{"doc_ref":{"type":"string"},"command":{"type":"string"},"observed":{"type":"string"},"expected":{"type":"string"},"workaround":{"type":"string"}}}}}}
 ```
 
-Judge the result, never the model's verdict alone: re-run each claimed-clean step's check yourself through `infra/release-rehearsal.sh exec`, and replay each FRICTION command before fixing it. A missing `result.json`, a schema-invalid one, or a non-zero driver exit is BLOCKED — the rehearsal failed to run, which is never CLEAN.
+Judge the result, never the model's verdict alone: re-run each claimed-clean step's check yourself through `infra/fence/release-rehearsal.sh exec`, and replay each FRICTION command before fixing it. A missing `result.json`, a schema-invalid one, or a non-zero driver exit is BLOCKED — the rehearsal failed to run, which is never CLEAN.
 
 ## Shared brief preamble
 

@@ -35,7 +35,7 @@ AGENT   := com.professor.pfm.mcp
 # F6). $(REPO)/VERSION, not a bare "VERSION" — this file runs from pfm/.
 VERSION := $(shell cat $(REPO)/VERSION 2>/dev/null)
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
-# Pinned tools (infra/tools.env): the host keeps them in TOOLS_BIN (gitignored
+# Pinned tools (infra/fence/tools.env): the host keeps them in TOOLS_BIN (gitignored
 # tmp/), the fence image in /usr/local/bin. A tool missing from both is
 # TOOLCHAIN-MISSING, never "use whatever golangci-lint is on PATH".
 # Keyed by OS/arch: the fence mounts this tree read-only from a darwin host,
@@ -68,13 +68,13 @@ help: ## List every target
 build: ## Compile to ./pfm.dev (a local artifact, never the shipped path)
 	go build $(LDFLAGS) -o $(LOCAL) ./cmd/pfm
 
-tools: ## Install the pinned tools from infra/tools.env into TOOLS_BIN
-	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/tools.sh
+tools: ## Install the pinned tools from infra/fence/tools.env into TOOLS_BIN
+	TOOLS_BIN=$(TOOLS_BIN) bash $(REPO)/infra/fence/tools.sh
 
 # need-tool <var>: name the missing tool as TOOLCHAIN-MISSING instead of a bare
 # "command not found" three lines into a recipe.
 define need-tool
-	@test -x "$($(1))" || { echo "$(1): TOOLCHAIN-MISSING — run 'make tools' (infra/tools.env)" >&2; exit 1; }
+	@test -x "$($(1))" || { echo "$(1): TOOLCHAIN-MISSING — run 'make tools' (infra/fence/tools.env)" >&2; exit 1; }
 endef
 
 fmt: ## Rewrite formatting in place (gofumpt + gci + golines via golangci-lint fmt), both kernels

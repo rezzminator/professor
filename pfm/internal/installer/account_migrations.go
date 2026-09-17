@@ -9,16 +9,6 @@ import (
 )
 
 func (installer *engine) claudeConfigDirs() []string {
-	if installer.options.ConfigDirs != nil {
-		return installer.options.ConfigDirs
-	}
-	return []string{installer.options.ConfigDir}
-}
-
-// seatConfigDirs returns the directories launched Claude seats actually read.
-// claudeConfigDirs instead preserves the configured account-root roster used by
-// migrations and fanout, which may omit the implicit seat's real config dir.
-func (installer *engine) seatConfigDirs() []string {
 	dirs := make([]string, 0, len(installer.options.ConfigDirs)+1)
 	dirs = append(dirs, installer.options.ConfigDir)
 	dirs = append(dirs, installer.options.ConfigDirs...)
@@ -36,6 +26,8 @@ func dedupePhysicalDirs(dirs []string) []string {
 		physical := dir
 		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 			physical = filepath.Clean(resolved)
+		} else {
+			fmt.Fprintf(os.Stderr, "installer: resolve config directory %s: %v\n", dir, err)
 		}
 		if seen[physical] {
 			continue

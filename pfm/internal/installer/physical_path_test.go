@@ -29,6 +29,44 @@ func TestInstallPhysicalPathStableAcrossCreation(t *testing.T) {
 	}
 }
 
+func TestDedupePhysicalDirsLogsBrokenSymlinkFallback(t *testing.T) {
+	root := t.TempDir()
+	broken := filepath.Join(root, "broken-config")
+	if err := os.Symlink(filepath.Join(root, "missing-target"), broken); err != nil {
+		t.Fatal(err)
+	}
+	_, evalErr := filepath.EvalSymlinks(broken)
+	if evalErr == nil {
+		t.Fatal("broken symlink unexpectedly resolved")
+	}
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStderr := os.Stderr
+	os.Stderr = writer
+	dirs := dedupePhysicalDirs([]string{broken})
+	os.Stderr = previousStderr
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	logged, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(dirs) != 1 || dirs[0] != broken {
+		t.Fatalf("dedupePhysicalDirs=%q, want fallback path %q", dirs, broken)
+	}
+	if !strings.Contains(string(logged), broken) || !strings.Contains(string(logged), evalErr.Error()) {
+		t.Fatalf("stderr=%q, want path %q and full EvalSymlinks error %q", logged, broken, evalErr)
+	}
+}
+
 func TestInstallHookOwnershipCanonicalizesLegacyAliases(t *testing.T) {
 	root := t.TempDir()
 	realRoot, err := filepath.EvalSymlinks(root)

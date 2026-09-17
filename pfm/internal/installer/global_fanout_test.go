@@ -89,6 +89,31 @@ func TestGlobalWiringReachesEveryConfiguredAccount(t *testing.T) {
 	}
 }
 
+func TestGlobalCommandsReachConfigDirAndConfigDirs(t *testing.T) {
+	home := t.TempDir()
+	repo := stageGlobalFanoutSource(t, home)
+	primary := filepath.Join(home, ".claude")
+	second := filepath.Join(home, ".cc", "2")
+	third := filepath.Join(home, ".cc", "3")
+	installer := &engine{
+		options: Options{
+			Home: home, ConfigDir: primary, ConfigDirs: []string{second, third},
+			SourceRepo: repo, Stdout: io.Discard,
+		},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       true,
+		stamp:       "fixture",
+	}
+
+	if err := installer.wireGlobalCommands(); err != nil {
+		t.Fatalf("wireGlobalCommands: %v", err)
+	}
+	source := filepath.Join(repo, "templates", "global", "commands", "alpha.md")
+	for _, configDir := range []string{primary, second, third} {
+		assertFanoutLink(t, filepath.Join(configDir, "commands", "alpha.md"), source)
+	}
+}
+
 // TestGlobalWiringDryRunPlansEveryConfiguredAccount pins the rule the whole
 // installer holds to: the preview IS the apply's plan. A dry run that named
 // only the primary account would hide exactly the defect above from the

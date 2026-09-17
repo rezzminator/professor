@@ -1427,7 +1427,7 @@ func (installer *engine) unwireHostOverlays() error {
 // commands/ is a real directory rather than a symlink to the primary's would
 // otherwise have no /reload at all.
 func (installer *engine) wireCommands(assets []assetFile) error {
-	for _, config := range installer.seatConfigDirs() {
+	for _, config := range installer.claudeConfigDirs() {
 		installer.say("commands -> %s", filepath.Join(config, "commands"))
 		for _, asset := range assets {
 			target, found := installer.commandTargetIn(config, asset.path)
@@ -1445,7 +1445,7 @@ func (installer *engine) wireCommands(assets []assetFile) error {
 }
 
 func (installer *engine) unwireCommands(assets []assetFile) error {
-	for _, config := range installer.seatConfigDirs() {
+	for _, config := range installer.claudeConfigDirs() {
 		installer.say("commands -> %s", filepath.Join(config, "commands"))
 		for _, asset := range assets {
 			target, found := installer.commandTargetIn(config, asset.path)
@@ -1478,7 +1478,7 @@ func (installer *engine) commandTargetIn(config, asset string) (string, bool) {
 
 func (installer *engine) wireSkills(assets []assetFile) error {
 	installer.say("skills -> %s", installer.claudeRegistries("skills"))
-	for _, config := range installer.seatConfigDirs() {
+	for _, config := range installer.claudeConfigDirs() {
 		for _, asset := range assets {
 			target, found := installer.skillTarget(config, asset.path)
 			if !found {
@@ -1496,7 +1496,7 @@ func (installer *engine) wireSkills(assets []assetFile) error {
 
 func (installer *engine) unwireSkills(assets []assetFile) error {
 	installer.say("skills -> %s", installer.claudeRegistries("skills"))
-	for _, config := range installer.seatConfigDirs() {
+	for _, config := range installer.claudeConfigDirs() {
 		for _, asset := range assets {
 			target, found := installer.skillTarget(config, asset.path)
 			if !found {

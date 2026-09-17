@@ -300,7 +300,7 @@ func (installer *engine) planMemoryHelperSettingsRewrites(
 }
 
 func (installer *engine) memoryHelperConfigDirs() []string {
-	dirs := append([]string{filepath.Join(installer.options.Home, ".claude")}, installer.seatConfigDirs()...)
+	dirs := append([]string{filepath.Join(installer.options.Home, ".claude")}, installer.claudeConfigDirs()...)
 	return dedupePhysicalDirs(dirs)
 }
 

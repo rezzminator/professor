@@ -26,7 +26,6 @@ import (
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/store"
 	pfmtmux "hostops/pfm/internal/tmux"
-	"hostops/pfm/internal/tmuxfmt"
 )
 
 const (
@@ -69,8 +68,8 @@ func (tmux reloadCommandTmux) ListPanes(ctx context.Context, socket string) ([]r
 		if line == "" {
 			continue
 		}
-		// Either spelling of the control separator: see internal/tmuxfmt.
-		fields := tmuxfmt.SplitN(line, 5)
+		// Either spelling of the control separator: see internal/tmux/format.go.
+		fields := pfmtmux.FormatSplit(line, 5)
 		if len(fields) != 5 {
 			return nil, fmt.Errorf("tmux returned %d pane fields", len(fields))
 		}

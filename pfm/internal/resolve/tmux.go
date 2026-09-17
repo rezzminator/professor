@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	pfmtmux "hostops/pfm/internal/tmux"
-	"hostops/pfm/internal/tmuxfmt"
 )
 
 // CommandTmux invokes tmux with an explicit socket pathname.
@@ -42,8 +41,8 @@ func (tmux CommandTmux) ListPanes(
 		if line == "" {
 			continue
 		}
-		// Either spelling of the control separator: see internal/tmuxfmt.
-		fields := tmuxfmt.SplitN(line, 4)
+		// Either spelling of the control separator: see internal/tmux/format.go.
+		fields := pfmtmux.FormatSplit(line, 4)
 		if len(fields) != 4 {
 			return nil, fmt.Errorf(
 				"tmux socket %q returned %d fields in %q",

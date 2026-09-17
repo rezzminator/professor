@@ -1,4 +1,4 @@
-package tmuxfmt
+package tmux
 
 import (
 	"fmt"
@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestSplitNAcceptsBothTmuxSeparatorSpellingsAtEveryCallSiteArity(t *testing.T) {
+func TestFormatSplitAcceptsBothTmuxSeparatorSpellingsAtEveryCallSiteArity(t *testing.T) {
 	for _, separator := range []struct {
 		name  string
 		value string
@@ -25,24 +25,24 @@ func TestSplitNAcceptsBothTmuxSeparatorSpellingsAtEveryCallSiteArity(t *testing.
 				}
 
 				line := strings.Join(want, separator.value)
-				if got := SplitN(line, count); !reflect.DeepEqual(got, want) {
-					t.Fatalf("SplitN(%q, %d) = %#v, want %#v", line, count, got, want)
+				if got := FormatSplit(line, count); !reflect.DeepEqual(got, want) {
+					t.Fatalf("FormatSplit(%q, %d) = %#v, want %#v", line, count, got, want)
 				}
 			})
 		}
 	}
 }
 
-func TestSplitNTreatsEscapedSpellingInsideFieldContentAsASeparator(t *testing.T) {
+func TestFormatSplitTreatsEscapedSpellingInsideFieldContentAsASeparator(t *testing.T) {
 	line := "title" + Escaped + "with-content" + Escaped + "socket"
 	want := []string{"title", "with-content", "socket"}
 
-	if got := SplitN(line, 3); !reflect.DeepEqual(got, want) {
-		t.Fatalf("SplitN(%q, 3) = %#v, want %#v", line, got, want)
+	if got := FormatSplit(line, 3); !reflect.DeepEqual(got, want) {
+		t.Fatalf("FormatSplit(%q, 3) = %#v, want %#v", line, got, want)
 	}
 }
 
-func TestSplitNDegenerateRecordsAndSplitNCapAreStable(t *testing.T) {
+func TestFormatSplitDegenerateRecordsAndSplitCapAreStable(t *testing.T) {
 	tests := []struct {
 		name  string
 		line  string
@@ -61,18 +61,18 @@ func TestSplitNDegenerateRecordsAndSplitNCapAreStable(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := SplitN(tt.line, tt.count); !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("SplitN(%q, %d) = %#v, want %#v", tt.line, tt.count, got, tt.want)
+			if got := FormatSplit(tt.line, tt.count); !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("FormatSplit(%q, %d) = %#v, want %#v", tt.line, tt.count, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestJoinRoundTripsThroughSplitN(t *testing.T) {
+func TestFormatJoinRoundTripsThroughFormatSplit(t *testing.T) {
 	want := []string{"#{session_name}", "#{pane_id}", "#{pane_current_path}", "#{pane_pid}"}
-	line := Join(want...)
+	line := FormatJoin(want...)
 
-	if got := SplitN(line, len(want)); !reflect.DeepEqual(got, want) {
-		t.Fatalf("SplitN(Join(fields...), %d) = %#v, want %#v", len(want), got, want)
+	if got := FormatSplit(line, len(want)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("FormatSplit(FormatJoin(fields...), %d) = %#v, want %#v", len(want), got, want)
 	}
 }

@@ -19,7 +19,6 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	pfmtmux "hostops/pfm/internal/tmux"
-	"hostops/pfm/internal/tmuxfmt"
 )
 
 // TmuxClient probes one named tmux socket.
@@ -154,9 +153,9 @@ func (tmux CommandTmux) ListPanes(ctx context.Context, socket string) ([]Pane, e
 		}
 		// The format joins fields with a raw 0x1F, but which spelling comes
 		// BACK is tmux-version dependent — older builds render it as the
-		// printable escape \037, tmux 3.6 emits the byte. tmuxfmt accepts
+		// printable escape \037, tmux 3.6 emits the byte. FormatSplit accepts
 		// both; assuming one silently reads a whole record as a single field.
-		fields := tmuxfmt.SplitN(line, 10)
+		fields := pfmtmux.FormatSplit(line, 10)
 		if len(fields) != 10 {
 			return nil, fmt.Errorf(
 				"tmux %s returned %d pane fields in %q",

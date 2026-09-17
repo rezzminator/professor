@@ -13,7 +13,7 @@ import (
 	pfmtmux "hostops/pfm/internal/tmux"
 )
 
-func TestShowGlobalOptionClassifiesGoneServer(t *testing.T) {
+func TestShowGlobalOptionAndIdentityNudgeClassifyGoneServer(t *testing.T) {
 	binary := filepath.Join(t.TempDir(), "tmux")
 	script := "#!/bin/sh\necho 'no server running on fake socket' >&2\nexit 1\n"
 	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
@@ -29,6 +29,97 @@ func TestShowGlobalOptionClassifiesGoneServer(t *testing.T) {
 	if !strings.Contains(err.Error(), socket) {
 		t.Fatalf("ShowGlobalOption error = %q, want socket context", err)
 	}
+	err = client.NudgeTitlesIdentity(context.Background(), socket)
+	if !errors.Is(err, ErrServerGone) {
+		t.Fatalf("NudgeTitlesIdentity error = %v, want ErrServerGone", err)
+	}
+	if !strings.Contains(err.Error(), socket) {
+		t.Fatalf("NudgeTitlesIdentity error = %q, want socket context", err)
+	}
+}
+
+func TestNudgeTitlesStringRoundTripsExplicitIdentity(t *testing.T) {
+	client, state, commands := newTitlesProbeFixture(t)
+	const socket = "cc-explicit-identity"
+
+	if err := client.NudgeTitlesString(context.Background(), socket, "#P"); err != nil {
+		t.Fatal(err)
+	}
+
+	gotState, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotState) != "#P\n" {
+		t.Fatalf("identity after nudge = %q, want #P", strings.TrimSuffix(string(gotState), "\n"))
+	}
+	gotCommands, err := os.ReadFile(commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommands := "-L " + socket + " set-option -g set-titles-string #P \n" +
+		"-L " + socket + " set-option -g set-titles-string #P\n"
+	if string(gotCommands) != wantCommands {
+		t.Fatalf("tmux commands = %q, want %q", gotCommands, wantCommands)
+	}
+}
+
+func TestNudgeTitlesIdentityReadsAndRestoresSocketValue(t *testing.T) {
+	client, state, commands := newTitlesProbeFixture(t)
+	const socket = "cc-socket-identity"
+
+	if err := client.NudgeTitlesIdentity(context.Background(), socket); err != nil {
+		t.Fatal(err)
+	}
+
+	gotState, err := os.ReadFile(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(gotState) != "#T\n" {
+		t.Fatalf("identity after nudge = %q, want #T", strings.TrimSuffix(string(gotState), "\n"))
+	}
+	gotCommands, err := os.ReadFile(commands)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommands := "-L " + socket + " show -gv set-titles-string\n" +
+		"-L " + socket + " set-option -g set-titles-string #T \n" +
+		"-L " + socket + " set-option -g set-titles-string #T\n"
+	if string(gotCommands) != wantCommands {
+		t.Fatalf("tmux commands = %q, want %q", gotCommands, wantCommands)
+	}
+}
+
+func newTitlesProbeFixture(t *testing.T) (TmuxProbe, string, string) {
+	t.Helper()
+	root := t.TempDir()
+	binary := filepath.Join(root, "tmux")
+	state := filepath.Join(root, "state")
+	commands := filepath.Join(root, "commands")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$PFM_TEST_TMUX_COMMANDS"
+case "$3" in
+show)
+	cat "$PFM_TEST_TMUX_STATE"
+	;;
+set-option)
+	printf '%s\n' "$6" > "$PFM_TEST_TMUX_STATE"
+	;;
+*)
+	exit 2
+	;;
+esac
+`
+	if err := os.WriteFile(binary, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(state, []byte("#T\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_TEST_TMUX_COMMANDS", commands)
+	t.Setenv("PFM_TEST_TMUX_STATE", state)
+	return TmuxProbe{Binary: binary, TmuxTmpDir: root}, state, commands
 }
 
 // TestProbeTmuxFailsWholeWhenTmuxCannotRun is the regression for the shared

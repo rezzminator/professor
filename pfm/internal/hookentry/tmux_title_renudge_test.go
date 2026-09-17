@@ -16,7 +16,7 @@ import (
 )
 
 type fakeTmuxTitleRenudger struct {
-	titles   map[string]string
+	options  map[string]map[string]string
 	readErrs map[string]error
 	nudgeErr map[string]error
 	nudges   map[string]string
@@ -24,15 +24,16 @@ type fakeTmuxTitleRenudger struct {
 
 func (fake *fakeTmuxTitleRenudger) ShowGlobalOption(
 	_ context.Context,
-	socket, _ string,
+	socket, name string,
 ) (string, error) {
-	return fake.titles[socket], fake.readErrs[socket]
+	return fake.options[socket][name], fake.readErrs[socket]
 }
 
-func (fake *fakeTmuxTitleRenudger) NudgeTitlesString(
-	_ context.Context,
-	socket, value string,
-) error {
+func (fake *fakeTmuxTitleRenudger) NudgeTitlesIdentity(ctx context.Context, socket string) error {
+	value, err := fake.ShowGlobalOption(ctx, socket, "set-titles-string")
+	if err != nil {
+		return err
+	}
 	if err := fake.nudgeErr[socket]; err != nil {
 		return err
 	}
@@ -71,7 +72,7 @@ func callTmuxTitleRenudge(
 
 func newFakeTmuxTitleRenudger() *fakeTmuxTitleRenudger {
 	return &fakeTmuxTitleRenudger{
-		titles:   make(map[string]string),
+		options:  make(map[string]map[string]string),
 		readErrs: make(map[string]error),
 		nudgeErr: make(map[string]error),
 		nudges:   make(map[string]string),
@@ -86,21 +87,24 @@ func TestTmuxTitleRenudgeMissingDirectoryIsSuccess(t *testing.T) {
 	}
 }
 
-func TestTmuxTitleRenudgeUsesCanonicalValueAndIgnoresNonSockets(t *testing.T) {
+func TestTmuxTitleRenudgePreservesSocketValueAndIgnoresNonSockets(t *testing.T) {
 	tmuxDir := t.TempDir()
 	listenOnTestSocket(t, tmuxDir, "cc-live")
 	if err := os.WriteFile(filepath.Join(tmuxDir, "not-a-socket"), []byte("fixture"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	fake := newFakeTmuxTitleRenudger()
-	fake.titles["cc-live"] = "on"
+	fake.options["cc-live"] = map[string]string{
+		"set-titles":        "on",
+		"set-titles-string": "#T",
+	}
 
 	code, stderr := callTmuxTitleRenudge(t, tmuxDir, fake)
 	if code != 0 || stderr != "" {
 		t.Fatalf("enabled server: code=%d stderr=%q", code, stderr)
 	}
-	if len(fake.nudges) != 1 || fake.nudges["cc-live"] != config.TmuxTitlesString {
-		t.Fatalf("nudges=%v, want cc-live=%q", fake.nudges, config.TmuxTitlesString)
+	if len(fake.nudges) != 1 || fake.nudges["cc-live"] != "#T" {
+		t.Fatalf("nudges=%v, want cc-live=%q", fake.nudges, "#T")
 	}
 }
 
@@ -108,7 +112,7 @@ func TestTmuxTitleRenudgeAllHostOwnedReturnsThree(t *testing.T) {
 	tmuxDir := t.TempDir()
 	listenOnTestSocket(t, tmuxDir, "cc-host")
 	fake := newFakeTmuxTitleRenudger()
-	fake.titles["cc-host"] = "off"
+	fake.options["cc-host"] = map[string]string{"set-titles": "off"}
 
 	code, stderr := callTmuxTitleRenudge(t, tmuxDir, fake)
 	if code != 3 ||
@@ -120,9 +124,12 @@ func TestTmuxTitleRenudgeAllHostOwnedReturnsThree(t *testing.T) {
 
 func TestTmuxTitleRenudgeSkipsStaleSocket(t *testing.T) {
 	tmuxDir := t.TempDir()
-	listenOnTestSocket(t, tmuxDir, "cc-stale")
+	listenOnTestSocket(t, tmuxDir, "cc-stale-before-read")
+	listenOnTestSocket(t, tmuxDir, "cc-stale-before-nudge")
 	fake := newFakeTmuxTitleRenudger()
-	fake.readErrs["cc-stale"] = errors.Join(errors.New("probe failed"), gather.ErrServerGone)
+	fake.readErrs["cc-stale-before-read"] = errors.Join(errors.New("probe failed"), gather.ErrServerGone)
+	fake.options["cc-stale-before-nudge"] = map[string]string{"set-titles": "on"}
+	fake.nudgeErr["cc-stale-before-nudge"] = errors.Join(errors.New("nudge failed"), gather.ErrServerGone)
 
 	code, stderr := callTmuxTitleRenudge(t, tmuxDir, fake)
 	if code != 0 || stderr != "" || len(fake.nudges) != 0 {
@@ -146,7 +153,7 @@ func TestTmuxTitleRenudgeReportsNudgeFailureWithSocketContext(t *testing.T) {
 	tmuxDir := t.TempDir()
 	listenOnTestSocket(t, tmuxDir, "cc-broken")
 	fake := newFakeTmuxTitleRenudger()
-	fake.titles["cc-broken"] = "on"
+	fake.options["cc-broken"] = map[string]string{"set-titles": "on"}
 	fake.nudgeErr["cc-broken"] = errors.New("write failed")
 
 	code, stderr := callTmuxTitleRenudge(t, tmuxDir, fake)

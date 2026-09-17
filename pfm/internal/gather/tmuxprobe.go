@@ -469,6 +469,17 @@ func (tmux TmuxProbe) NudgeTitlesString(
 	return nil
 }
 
+// NudgeTitlesIdentity re-sends a live server's own set-titles-string without
+// imposing a caller's title policy on it. This is the bystander-safe form of
+// the nudge: read the socket's identity, perturb it, then restore it exactly.
+func (tmux TmuxProbe) NudgeTitlesIdentity(ctx context.Context, socket string) error {
+	value, err := tmux.ShowGlobalOption(ctx, socket, "set-titles-string")
+	if err != nil {
+		return fmt.Errorf("read tmux titles string for identity nudge on %s: %w", socket, err)
+	}
+	return tmux.NudgeTitlesString(ctx, socket, value)
+}
+
 // ProbeTmux enumerates chat sockets and probes each server concurrently.
 func ProbeTmux(
 	ctx context.Context,

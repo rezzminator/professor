@@ -16,10 +16,10 @@ import (
 
 type tmuxTitleRenudger interface {
 	ShowGlobalOption(ctx context.Context, socket, name string) (string, error)
-	NudgeTitlesString(ctx context.Context, socket, value string) error
+	NudgeTitlesIdentity(ctx context.Context, socket string) error
 }
 
-// TmuxTitleRenudge re-emits pfm-owned terminal titles on every live tmux server.
+// TmuxTitleRenudge re-emits each live tmux server's own terminal title.
 func TmuxTitleRenudge(args []string, stderr io.Writer, runtime config.Runtime) int {
 	probe := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(runtime.Paths.TmuxDir)}
 	return tmuxTitleRenudgeWith(args, stderr, runtime, probe)
@@ -92,7 +92,9 @@ func tmuxTitleRenudgeWith(
 			hostOwned++
 			continue
 		}
-		if nudgeErr := probe.NudgeTitlesString(ctx, socket, config.TmuxTitlesString); nudgeErr != nil {
+		if nudgeErr := probe.NudgeTitlesIdentity(ctx, socket); errors.Is(nudgeErr, gather.ErrServerGone) {
+			continue
+		} else if nudgeErr != nil {
 			fmt.Fprintf(stderr, "pfm internal tmux-title-renudge: nudge socket %s: %v\n", socket, nudgeErr)
 			failed = true
 			continue

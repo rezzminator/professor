@@ -10,9 +10,78 @@ import (
 	"strings"
 	"testing"
 
+	pfmconfig "hostops/pfm/internal/config"
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/paths"
+	"hostops/pfm/internal/testjail"
 )
+
+func TestNameSyncDefaultsToPreview(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	root := testjail.Fleet(t)
+	tmuxDir := filepath.Join(root, "tmux-"+strconv.Itoa(os.Getuid()))
+	t.Setenv(paths.EnvTmuxDir, tmuxDir)
+	resolved := jailPaths(t)
+	const (
+		socket      = "cc-1800000099-42-1"
+		original    = "ORIGINAL"
+		targetLabel = "PREVIEW_TARGET"
+	)
+	socketPath := filepath.Join(tmuxDir, socket)
+	start := exec.Command(
+		"tmux", "-L", socket, "-f", "/dev/null",
+		"new-session", "-d", "-s", socket, "-n", original,
+		"printf '🥇 acct  🔖 "+targetLabel+" │ 42%%\\n'; sleep 120",
+	)
+	start.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+root)
+	if output, err := start.CombinedOutput(); err != nil {
+		t.Fatalf("start preview server: %v: %s", err, output)
+	}
+	t.Cleanup(func() {
+		kill := exec.Command("tmux", "-S", socketPath, "kill-server")
+		kill.Env = append(os.Environ(), "TMUX=")
+		_ = kill.Run()
+	})
+
+	runtime := commandRuntime{
+		Paths: resolved,
+		Config: pfmconfig.Defaults(
+			resolved.Home,
+			resolved.Roots[pfmengine.Claude],
+			resolved.FirstRoot(pfmengine.Codex),
+		),
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runNameSync(nil, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runNameSync() code=%d stderr=%q", code, stderr.String())
+	}
+	if got := readProbe(t, socketPath, "display-message", "-p", "#{window_name}"); got != original {
+		t.Fatalf("window name = %q, want unchanged %q in the default preview", got, original)
+	}
+	if !strings.Contains(stdout.String(), "would rename "+socket) ||
+		!strings.Contains(stdout.String(), original+" -> "+targetLabel) {
+		t.Fatalf("stdout=%q, want the planned rename", stdout.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runNameSync([]string{"--dry-run"}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runNameSync(--dry-run) code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "dry run is the default; --apply performs the renames\n") {
+		t.Fatalf("stderr=%q, want the deprecated alias note", stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := runNameSync([]string{"--apply"}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runNameSync(--apply) code=%d stderr=%q", code, stderr.String())
+	}
+	if got := readProbe(t, socketPath, "display-message", "-p", "#{window_name}"); got != targetLabel {
+		t.Fatalf("window name = %q, want applied %q", got, targetLabel)
+	}
+}
 
 // name-sync reports what it ACHIEVED, not what it attempted. The fixture puts
 // one window in each state on a probe server: one whose name matches what was

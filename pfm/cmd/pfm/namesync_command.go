@@ -27,14 +27,17 @@ import (
 // writer of a window name however this command is reached — a systemd path
 // unit on a codex rename, a timer, or a picker refresh.
 func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
-	flags := cli.NewFlagSet("name-sync", "usage: pfm name-sync [--dry-run]", stderr)
-	dryRun := flags.Bool("dry-run", false, "report the renames without applying them")
+	flags := cli.NewFlagSet("name-sync", "usage: pfm name-sync [--apply] [--dry-run]", stderr)
+	apply, dryRun := flags.Bool("apply", false, "perform renames"), flags.Bool("dry-run", false, "preview alias")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
 	if flags.NArg() != 0 {
 		flags.Usage()
 		return 2
+	}
+	if *dryRun {
+		fmt.Fprintln(stderr, "dry run is the default; --apply performs the renames")
 	}
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
@@ -67,10 +70,9 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	// ReadOnly is what makes --dry-run a dry run: the gather pass applies the
-	// renames it plans, and only a read-only pass plans without applying.
+	// Only an explicit --apply lets the gather pass perform its planned renames.
 	live, err := fleet.Gather(ctx, database, environment, data,
-		*dryRun,
+		!*apply,
 		fleet.PrintWarn(stderr),
 		stderr,
 	)
@@ -78,11 +80,11 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		fmt.Fprintf(stderr, "pfm name-sync: %v\n", err)
 		return 1
 	}
-	if !*dryRun {
+	if *apply {
 		fleet.ReconcileCodexPanes(ctx, database, live, runtime, fleet.PrintWarn(stderr))
 	}
 	verb := "renamed"
-	if *dryRun {
+	if !*apply {
 		verb = "would rename"
 	}
 	for _, rename := range live.Renames {
@@ -96,10 +98,8 @@ func runNameSync(args []string, stdout, stderr io.Writer, runtime commandRuntime
 			rename.TargetName,
 		)
 	}
-	if *dryRun {
-		// A dry run applied nothing, so it has nothing to verify. It reports
-		// the PLAN, and says so — a plan counted as an outcome is exactly the
-		// lie this command used to tell.
+	if !*apply {
+		// A preview reports its plan; it has no applied outcome to verify.
 		fmt.Fprintf(stdout, "windows planned: %d\n", len(live.Renames))
 		return 0
 	}

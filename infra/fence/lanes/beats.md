@@ -1,6 +1,8 @@
 # Wave 4 Tier B — beat map
 
-Per-lane ordered beat list, DFS order as `docs/dev/trains/testing-foundation/waves/4-integration-dfs/spec.md` gives it. Each beat names what it asserts, the seat(s) it spends (`cc:N | cx | oc | none`), and the landscape ids (`docs/dev/testing/landscape.md`) it covers. A beat marked `known-gap` reports `✗ known-gap` and does not fail the suite — see `infra/fence/lanes/known-gaps.yml`. Items whose `needs` column names `systemd/launchd` get a beat that asserts the named advisory in the container (no systemd/launchd host) rather than a skip; those beats are folded into the doctor/daemon-unit beats above by lane.
+Per-lane ordered beat list, DFS order as `docs/dev/trains/testing-foundation/waves/4-integration-dfs/spec.md` gives it. Each beat names what it asserts, the seat(s) it spends (`cc:N | cx | oc | none`), and the landscape ids (`docs/dev/testing/landscape.md`) it covers. A beat marked `known-gap` reports `known-gap` and does not fail the suite — see `infra/fence/lanes/known-gaps.yml`. Items whose `needs` column names `systemd/launchd` get a beat that asserts the named advisory in the container (no systemd/launchd host) rather than a skip; those beats are folded into the doctor/daemon-unit beats above by lane.
+
+The canonical order is **O1 → E1 → E2 → E3 → F → M → A → O2**, run in ONE container over accumulating pfm state (`run.sh`); any lane also runs alone from a fresh root, its `need` prelude making what the sequence would have made. Lane O is one area with two entry points: **O1** before any chat exists (install idempotence, host assets, hooks, seats, credentials, dropped seat, symlinked home, doctor, heal) and **O2** the destructive tail (reap over F's storm, archive/index over a real history, headless, harvester, and `uninstall` LAST, since it tears the machine down). The four beats marked **cross-lane** are the spec's planned overlap: they assert the state ANOTHER lane built and carry that lane's landscape ids as second rows in `map.tsv`.
 
 ### Lane R — root
 
@@ -80,6 +82,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `F.15-addressing` · fleet-wide addressing/search: `find`, `save`, `history`, `resolve`, `modal` deny · spends none · C58,C59,C62,C63,C64
 - `F.16-picker-plumbing` · picker plumbing: per-window pane opener, tmux-session shim · spends none · X18,X19
 - `F.17-additional-k-coverage` · additional K-category items this lane also asserts (auto-reconciled) · spends none · K10,K11,K27
+- `F.18-e1-chat-survives-storm` · **cross-lane** — after the storm and kill-storm, E1's named chat still answers `status`/`last`/`inject` (the sequence's first cross-lane state effect) · spends cc:1 · C22,C28,C32
 
 ### Lane M — MCP
 
@@ -97,6 +100,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `M.12-harvester-cache-gate` · harvest local cache + search-backend gating back the MCP tools · spends cc:3 · H10,H11
 - `M.13-dropped-seat-roster` · a dropped seat's absence shows up in the daemon's own seat roster · spends cc:3 · I38
 - `M.14-end-to-end` · one chat-driven call per server proves engine wiring end to end (Claude `chat_status` on itself + `fetch` a URL; Codex the same over HTTP) · spends cc:3+cx · (none)
+- `M.15-live-chats-survive-daemon-restart` · **cross-lane** — after the exit-75 restart, E1's Claude chat (stdio) and E2's Codex chat (HTTP) each make their next MCP call successfully · spends cc:1+cx · M31,M34
 
 ### Lane A — adopter
 
@@ -114,34 +118,45 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `A.12-dev-suite` · `/dev status|test` runs express's own suite · spends cc:2 · (none)
 - `A.13-opencode-layer-gap` · the OpenCode compile layer for adopters is confirmed absent — known gap · spends cc:2 · `known-gap` · P37
 - `A.14-release-notice` · the picker's cached release-notice refreshes · spends none · X41
+- `A.15-fleet-unchanged-by-update` · **cross-lane** — `pfm update` + the hook rewrite while the fleet is up: `pfm ls` rows and every live chat's hook ownership are unchanged · spends cc:1 · C1,I23
 
-### Lane O — ops & host
+### Lane O1 — ops & host, before any chat exists
 
-- `O.01-install-idempotent` · a second `pfm install --yes` is idempotent (changed=0) · spends cc:1 · I96
-- `O.02-dropped-seat` · a dropped seat loses exactly its owned hooks and ledger rows (P10.2) · spends cc:1 · I38
-- `O.03-credential` · a seat with an expired/absent credential refuses by name at every surface (doctor, `chat new`, `/reload`) · spends cc:1 · K23
-- `O.04-symlinked-home` · `~/.claude` as a symlink, and a blueprint reached through one (P10.1 class) · spends cc:1 · I37
-- `O.05-doctor-pass` · `pfm doctor` every row green or a named advisory (no systemd/launchd in the container is the named one) · spends cc:1 · I41,I42,I43,I44,I45,I46,I47,I48,I49,I50,I51,I52,I53,I54,I55,I56,I57,I58,I59,I60,I61,I62,I64,I65,I66,I67,I68,I5,I6,I12,I13
-- `O.06-heal` · `pfm heal` reports/rebuilds wedged Codex thread-history · spends cc:1 · X11
-- `O.07-reap` · `pfm reap` classification + actions (dry-run default, --apply, --horizon, --busy-recent, --json) · spends cc:1 · L8,L9,L10,L11,L12,L13,L14,L15,L16,L17,L18,L19,L20,L21,L22,L23,L24,L25,L26
-- `O.08-archive` · `pfm archive` (apply / subagents / restore / prune-orphans) · spends cc:1 · X6,X7,X8,X9,X10
-- `O.09-index` · `pfm index` · spends cc:1 · X5
-- `O.10-headless` · headless on cc and cx · spends cc:1 · X15,X16,X17,K17
-- `O.11-harvester` · harvester: `pfm harvest` ask + sidecar provisioning (real on x86_64; arm64 = known gap) · spends cc:1 · `known-gap` · H1,H2,H3,H4,H5,H6,H7,H8,H9,H12
-- `O.12-uninstall` · `uninstall` removes everything owned, keeps a foreign hook planted before install, leaves no ledger · spends cc:1 · I69,I70,I71,I72,I73,I74,I75,I76,I77,I78,I79,I80,I81,I82,I83,I84,I85,I86,I87,I88,I89,I97
-- `O.13-host-assets` · host asset staging is present after install (launcher, overlays, skill/command links, themes, harness baseline) · spends cc:1 · I1,I2,I3,I4,I7,I8,I9,I10,I11,I14,I15,I16,I17,I18,I19,I20,I21,I22,I23
-- `O.14-hooks-installed` · hooks are installed correctly per engine · spends cc:1 · I24,I25,I26,I27,I28,I29,I30,I31,I32,I33
-- `O.15-seats` · seats configuration: implicit + explicit accounts, fanout, Codex homes, OpenCode home absence · spends cc:1 · I34,I35,I36,I39,I40
-- `O.16-doc-vs-code` · doc-vs-code confirmed behaviors (settings-global merge, project hooks, git-bridge skill, themes, MCP) · spends cc:1 · I90,I91,I92,I93,I94,I95
-- `O.17-top-level` · the top-level `pfm doctor` command contract (exit 0/1/2/3) · spends cc:1 · I98
-- `O.18-misc-ops` · misc ops CLI: version, config, issues, whoami, usage-hook · spends cc:1 · X1,X2,X3,X4,X12,X13,X14,C65
-- `O.19-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias, clear-kill, kill-exit, claude-version, explore-deny, epic-inject, title-renudge · spends cc:1 · X21,X22,X26,X29,X30,X32,X33,X34,X37,X40,T34,T37
-- `O.20-additional-i-coverage` · additional I-category items this lane also asserts (auto-reconciled) · spends cc:1 · I63
-- `O.21-additional-l-coverage` · additional L-category items this lane also asserts (auto-reconciled) · spends cc:1 · L32
+Runs FIRST in the sequence: it asserts the machine the other lanes will live on, and every beat that mutates the install restores what it changed (a dropped seat is a spare, never the seat E1 runs on).
+
+- `O1.01-install-idempotent` · a second `pfm install --yes` is idempotent (changed=0) · spends none · I96
+- `O1.02-host-assets` · host asset staging is present after install (launcher, overlays, skill/command links, themes, harness baseline) · spends none · I1,I2,I3,I4,I7,I8,I9,I10,I11,I14,I15,I16,I17,I18,I19,I20,I21,I22,I23
+- `O1.03-hooks-installed` · hooks are installed correctly per engine · spends none · I24,I25,I26,I27,I28,I29,I30,I31,I32,I33
+- `O1.04-seats` · seats configuration: implicit + explicit accounts, fanout, Codex homes, OpenCode home absence · spends none · I34,I35,I36,I39,I40
+- `O1.05-credential` · a seat with an expired/absent credential refuses by name at every surface (doctor, `chat new`) · spends none · K23
+- `O1.06-dropped-seat` · a dropped spare seat loses exactly its owned hooks and ledger rows (P10.2), then is restored · spends none · I38
+- `O1.07-symlinked-home` · a Claude home reached through a symlink, and a blueprint reached through one (P10.1 class) · spends none · I37
+- `O1.08-duplicate-seat-login` · two seats holding one account → `pfm doctor` names the duplicate; the advisory lands with Wave 3 B5a · spends none · `known-gap` · (none)
+- `O1.09-doctor-pass` · `pfm doctor` every row green or a named advisory (no systemd/launchd in the container is the named one) · spends none · I41,I42,I43,I44,I45,I46,I47,I48,I49,I50,I51,I52,I53,I54,I55,I56,I57,I58,I59,I60,I61,I62,I64,I65,I66,I67,I68,I5,I6,I12,I13
+- `O1.10-doctor-exit-contract` · the top-level `pfm doctor` command contract (exit 0/1/2/3) · spends none · I98
+- `O1.11-heal` · `pfm heal` reports/rebuilds wedged Codex thread-history · spends none · X11
+- `O1.12-doc-vs-code` · doc-vs-code confirmed behaviors (settings-global merge, project hooks, git-bridge skill, themes, MCP) · spends none · I90,I91,I92,I93,I94,I95
+- `O1.13-misc-ops` · misc ops CLI: version, config, issues, whoami, usage-hook · spends none · X1,X2,X3,X4,X12,X13,X14,C65
+
+### Lane O2 — ops & host, the destructive tail
+
+Runs LAST: it reaps the graveyard F's storm filled, archives a real history, and ends by tearing the machine down.
+
+- `O2.01-reap` · `pfm reap` classification + actions (dry-run default, --apply, --horizon, --busy-recent, --json) over the states F's storm left · spends none · L8,L9,L10,L11,L12,L13,L14,L15,L16,L17,L18,L19,L20,L21,L22,L23,L24,L25,L26
+- `O2.02-archive` · `pfm archive` (apply / subagents / restore / prune-orphans) over a real transcript history · spends none · X6,X7,X8,X9,X10
+- `O2.03-index` · `pfm index` · spends none · X5
+- `O2.04-headless` · headless on cc and cx · spends cc:1+cx · X15,X16,X17,K17
+- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias, clear-kill, kill-exit, claude-version, explore-deny, epic-inject, title-renudge · spends none · X21,X22,X26,X29,X30,X32,X33,X34,X37,X40,T34,T37
+- `O2.06-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows read clean from the operator's side while E2's chat lives · spends none · I63
+- `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `inject` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:1 · L32
+- `O2.08-dropped-seat-with-live-chat` · **cross-lane** — a seat dropped while a chat lives on it: the chat keeps working and `pfm doctor` names the seat · spends cc:1 · I38
+- `O2.09-harvester` · harvester: `pfm harvest` ask + sidecar provisioning (real on x86_64; linux-arm64 = known gap) · spends none · `known-gap` · H1,H2,H3,H4,H5,H6,H7,H8,H9,H12
+- `O2.10-uninstall` · LAST beat of the run: `uninstall` removes everything owned, keeps a foreign hook planted before install, leaves no ledger · spends none · I69,I70,I71,I72,I73,I74,I75,I76,I77,I78,I79,I80,I81,I82,I83,I84,I85,I86,I87,I88,I89,I97
 
 ## Coverage
 
-- ids mapped / total: **429/429**
-- ids mapped to ≥ 2 lanes: **14** — C32 (E1+E2), C39 (E1+E2), C40 (E1+E2), I37 (A+O), I38 (M+O), I63 (E2+O), I96 (F+O), K12 (E1+F), K23 (E1+O), L5 (E1+F), L32 (E1+O), M34 (E2+M), M36 (E3+M), T31 (E1+E2+E3)
-- beats per lane: E1 25, E2 11, E3 3, F 17, M 14, A 14, O 21, R 6
+- ids mapped / total: **429/429** (`check-map.sh` is the gate, `map.tsv` the index)
+- ids mapped to ≥ 2 lanes: **18** — C1 (A+F), C22 (E1+F), C28 (E1+F), C32 (E1+E2+F), C39 (E1+E2), C40 (E1+E2), I23 (A+O1), I37 (A+O1), I38 (M+O1+O2), I63 (E2+O2), I96 (F+O1), K12 (E1+F), K23 (E1+O1), L5 (E1+F), L32 (E1+O2), M34 (E2+M), M36 (E3+M), T31 (E1+E2+E3)
+- beats per lane (total / carrying landscape ids): E1 25/25, E2 11/10, E3 3/2, F 18/18, M 15/14, A 15/13, O1 13/12, O2 10/10, R 6/0
+- written today: E1, O1 — every other lane is listed in `pending.txt` and reported `NOT WRITTEN` by name until it lands (spec build order step 2)
 - unmapped ids: none

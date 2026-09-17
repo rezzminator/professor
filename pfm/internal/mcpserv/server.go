@@ -11,7 +11,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"hostops/pfm/internal/chat"
-	"hostops/pfm/internal/chatkeys"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
@@ -327,11 +326,11 @@ func (service *Service) chatKeys(
 	}
 	if !input.Literal {
 		for _, key := range input.Keys {
-			if !chatkeys.Valid(key) {
+			if !chat.KeyValid(key) {
 				return nil, KeysOutput{}, fmt.Errorf(
 					"%q is not a tmux key; set literal=true to type it as text, or use one of: %s",
 					key,
-					chatkeys.Names(),
+					chat.KeyNames(),
 				)
 			}
 		}

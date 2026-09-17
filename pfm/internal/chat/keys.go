@@ -1,6 +1,4 @@
-// Package chatkeys contains the tmux key-name contract shared by the chat
-// command and its MCP adapter.
-package chatkeys
+package chat
 
 import (
 	"regexp"
@@ -21,9 +19,10 @@ var (
 	modifier    = regexp.MustCompile(`^([CMS]-)+`)
 )
 
-// Valid reports whether tmux resolves key as a keypress rather than literal
-// text. Unknown names must be rejected by callers before SendKey is invoked.
-func Valid(key string) bool {
+// KeyValid reports whether key satisfies the tmux key-name contract the chat
+// keys verb and its MCP tool validate against. Unknown names must be rejected
+// by callers before SendKey is invoked.
+func KeyValid(key string) bool {
 	if key == "" {
 		return false
 	}
@@ -37,8 +36,8 @@ func Valid(key string) bool {
 	return namedKeys[base] || functionKey.MatchString(base)
 }
 
-// Names returns the stable refusal-message suffix used by the CLI.
-func Names() string {
+// KeyNames returns the stable refusal-message suffix used by the CLI.
+func KeyNames() string {
 	names := make([]string, 0, len(namedKeys))
 	for name := range namedKeys {
 		names = append(names, name)

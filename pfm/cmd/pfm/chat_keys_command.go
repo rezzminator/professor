@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/chatkeys"
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/inject"
 )
 
@@ -22,7 +22,7 @@ const chatKeysDefaultDelay = 120 * time.Millisecond
 // chatKeysSettle lets the pane finish redrawing before --capture reads it.
 const chatKeysSettle = 400 * time.Millisecond
 
-func validKey(key string) bool { return chatkeys.Valid(key) }
+func validKey(key string) bool { return pfmchat.KeyValid(key) }
 
 func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	flags := newFlagSet("chat keys", chatKeysUsage, stderr)
@@ -47,7 +47,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 
 	if !*literal {
 		for _, key := range keys {
-			if chatkeys.Valid(key) {
+			if pfmchat.KeyValid(key) {
 				continue
 			}
 			fmt.Fprintf(
@@ -55,7 +55,7 @@ func runChatKeys(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 				"pfm chat keys: %q is not a tmux key — tmux would type it as "+
 					"text; pass --literal to mean that, or use one of: %s\n",
 				key,
-				chatkeys.Names(),
+				pfmchat.KeyNames(),
 			)
 			return 2
 		}

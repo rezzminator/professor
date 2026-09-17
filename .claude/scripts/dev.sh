@@ -346,20 +346,12 @@ cmd_iso() { # cmd_iso <action> [project]
     fail_step "iso: TOOLCHAIN-MISSING — $compose not found"; exit 1
   fi
 
-  local git_common git_dir git_dir_relative
-  git_common="$(git -C "$REPO_ROOT" rev-parse --git-common-dir)"
-  if [[ "$git_common" != /* ]]; then git_common="$REPO_ROOT/$git_common"; fi
-  git_common="$(cd "$git_common" && pwd -P)"
-  git_dir="$(git -C "$REPO_ROOT" rev-parse --absolute-git-dir)"
-  git_dir="$(cd "$git_dir" && pwd -P)"
-  case "$git_dir" in
-    "$git_common") git_dir_relative="." ;;
-    "$git_common"/*) git_dir_relative="${git_dir#"$git_common"/}" ;;
-    *) fail_step "iso: git directory $git_dir is outside common directory $git_common"; exit 1 ;;
-  esac
-  export PFM_DEV_WORKTREE="$REPO_ROOT"
-  export PFM_DEV_GIT_COMMON="$git_common"
-  export PFM_DEV_GIT_DIR_REL="$git_dir_relative"
+  # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
+  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence-env.sh — the demo and
+  # readme-gif fences source the same file, so the three never drift.
+  local git_common
+  ROOT="$REPO_ROOT" FENCE_CALLER="iso" . "$REPO_ROOT/infra/fence-env.sh"
+  git_common="$PFM_DEV_GIT_COMMON"
   # The leak denylist is untracked and lives only in the main checkout, so a
   # linked worktree's mount never carries it; hand it in read-only (LEAK_TERMS
   # wins). Without one the in-fence leak gate fails loudly — never a fake pass.

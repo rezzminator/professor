@@ -489,3 +489,4 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
 - Local (2026-09-17): `.claude/scripts/dev.sh iso run <command…>` — an arbitrary command inside the fence from the
   worktree root, for probes the fixed rows do not cover (`go test -json` on one package, `make -C pfm lint`); the
   adopter twin carries no `iso` and gets nothing.
+- `dev.sh iso` resolves the fence mount contract by sourcing `infra/fence-env.sh` (`ROOT` + `FENCE_CALLER` in, the three `PFM_DEV_*` exports out) — the same file `infra/demo/up.sh` and `infra/readme-gif/record.sh` source; this repo's own gate wiring, the adopter `dev.sh` twin has no `iso` action.

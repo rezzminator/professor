@@ -82,7 +82,10 @@ func runReap(args []string, stdout, stderr io.Writer, runtime commandRuntime) in
 		fmt.Fprintf(stderr, "pfm reap: %v\n", err)
 		return 1
 	}
-	printReapReport(report, *apply, *asJSON, stdout, stderr)
+	if err := printReapReport(report, *apply, *asJSON, stdout, stderr); err != nil {
+		fmt.Fprintf(stderr, "pfm reap: encode JSON: %v\n", err)
+		return 1
+	}
 	// A sweep that reports success having failed to kill is the failure mode
 	// this command exists to prevent: any decision apply actually attempted
 	// and could not complete forces the exit code non-zero.
@@ -118,7 +121,7 @@ func printReapReport(
 	apply bool,
 	asJSON bool,
 	stdout, stderr io.Writer,
-) {
+) error {
 	if !report.AgentsOK {
 		fmt.Fprintf(
 			stderr,
@@ -130,7 +133,7 @@ func printReapReport(
 	reapGroup, sparedGroup, unknownGroup := groupReapDecisions(report.Decisions)
 
 	if asJSON {
-		writeJSON(stdout, reapJSONReport{
+		return writeJSON(stdout, reapJSONReport{
 			Apply:     apply,
 			Reap:      toReapJSONRows(reapGroup),
 			Spared:    toReapJSONRows(sparedGroup),
@@ -141,7 +144,6 @@ func printReapReport(
 			Failed:    report.Failed,
 			Warnings:  report.Warnings,
 		})
-		return
 	}
 
 	fmt.Fprintf(stdout, "%-38s %-6s %8s  %s\n", "SOCKET", "STATE", "RAM(MB)", "LABEL [cwd]")
@@ -165,7 +167,7 @@ func printReapReport(
 			stdout,
 			"dry run — nothing changed. Re-run with --apply to reap.",
 		)
-		return
+		return nil
 	}
 	fmt.Fprintf(
 		stdout,
@@ -193,6 +195,7 @@ func printReapReport(
 			report.AvailAfter/1024,
 		)
 	}
+	return nil
 }
 
 func printReapSection(w io.Writer, name string, decisions []reap.Decision) {

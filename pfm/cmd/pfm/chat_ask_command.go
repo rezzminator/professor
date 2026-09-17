@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
 )
@@ -156,9 +155,7 @@ func awaitAnswer(
 ) int {
 	turn, err := headless.Await(
 		ctx,
-		func(ctx context.Context) (headless.Chat, bool, error) {
-			return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
-		},
+		chatResolver(handle, runtimes...),
 		options,
 	)
 	return reportTurn(turn, err, verb, name, options.Timeout, asJSON, stdout, stderr)
@@ -178,7 +175,10 @@ func reportTurn(
 		turn.Name = name
 	}
 	if asJSON {
-		writeJSON(stdout, turn)
+		if encodeErr := writeJSON(stdout, turn); encodeErr != nil {
+			fmt.Fprintf(stderr, "pfm chat %s: encode JSON: %v\n", verb, encodeErr)
+			return 1
+		}
 	} else if turn.Answer != "" {
 		fmt.Fprintln(stdout, turn.Answer)
 	}

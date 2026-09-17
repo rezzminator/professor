@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -192,13 +191,7 @@ func headlessTarget(
 // could not look exits 2 and never reads as "no such chat".
 func reportTargetError(err error, name string, stdout, stderr io.Writer, asJSON bool) int {
 	if errors.Is(err, pfmchat.ErrUnknownChat) {
-		if asJSON {
-			writeJSON(stdout, headless.Missing(name))
-		} else {
-			fmt.Fprintf(stdout, "%s\t%s\n", name, headless.StateMissing)
-		}
-		fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", name)
-		return codeUnknownChat
+		return renderNoSuchChat(name, stdout, stderr, asJSON)
 	}
 	fmt.Fprintf(stderr, "pfm chat: %v\n", err)
 	return 2
@@ -253,7 +246,10 @@ func runHeadlessStatus(args []string, stdout, stderr io.Writer, runtimes ...comm
 		return 1
 	}
 	if *asJSON {
-		writeJSON(stdout, status)
+		if err := writeJSON(stdout, status); err != nil {
+			fmt.Fprintf(stderr, "pfm chat status: encode JSON: %v\n", err)
+			return 1
+		}
 	} else {
 		fmt.Fprintln(stdout, status.Line())
 		if *withSummary {
@@ -290,8 +286,7 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 	chat, entries, truncated, err := pfmchat.ReadEntries(ctx, names[0], *tail, firstRuntime(runtimes))
 	if err != nil {
 		if errors.Is(err, pfmchat.ErrUnknownChat) {
-			fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", names[0])
-			return codeUnknownChat
+			return renderNoSuchChat(names[0], stdout, stderr, *asJSON)
 		}
 		if errors.Is(err, pfmchat.ErrNoTranscript) {
 			fmt.Fprintf(stderr, "pfm chat read: %q has not written a transcript yet\n", chat.Name)
@@ -302,13 +297,16 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 	}
 	switch {
 	case *asJSON:
-		writeJSON(stdout, map[string]any{
+		if err := writeJSON(stdout, map[string]any{
 			"name":      chat.Name,
 			"engine":    chat.Engine,
 			"path":      chat.Path,
 			"truncated": truncated,
 			"entries":   entries,
-		})
+		}); err != nil {
+			fmt.Fprintf(stderr, "pfm chat read: encode JSON: %v\n", err)
+			return 1
+		}
 	case *condensed:
 		for _, entry := range entries {
 			fmt.Fprintln(stdout, transcript.Condensed(entry))
@@ -335,7 +333,11 @@ func runHeadlessLast(args []string, stdout, stderr io.Writer, runtimes ...comman
 		flags.Usage()
 		return 2
 	}
-	result, err := pfmchat.Last(context.Background(), firstRuntime(runtimes), pfmchat.LastRequest{Target: names[0]})
+	result, err := pfmchat.LastAnswer(
+		context.Background(),
+		firstRuntime(runtimes),
+		pfmchat.LastRequest{Target: names[0]},
+	)
 	var targetErr *pfmchat.TargetError
 	switch {
 	case errors.As(err, &targetErr):
@@ -683,7 +685,7 @@ func writeInjectResult(
 	}
 	if result.Code != 0 {
 		if result.Code == inject.CodeUnknown {
-			fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", target)
+			renderNoSuchChat(target, io.Discard, stderr, false)
 			if strings.Contains(strings.ToLower(result.Message), "ambiguous") {
 				fmt.Fprintln(stderr, result.Message)
 			}
@@ -757,10 +759,8 @@ func runHeadlessWatch(args []string, stdout, stderr io.Writer, runtimes ...comma
 		return code
 	}
 	watcher := headless.Watcher{
-		Name: name,
-		Resolve: func(ctx context.Context) (headless.Chat, bool, error) {
-			return pfmchat.Resolve(ctx, name, io.Discard, firstRuntime(runtimes))
-		},
+		Name:    name,
+		Resolve: chatResolver(name, runtimes...),
 	}
 	status, err := watcher.Watch(ctx, headless.WatchOptions{
 		IdleAfter: time.Duration(*idleAfter) * time.Second,
@@ -809,10 +809,4 @@ func entryText(entry transcript.Entry) string {
 		return entry.Tool + " " + entry.Input
 	}
 	return entry.Text
-}
-
-func writeJSON(out io.Writer, value any) {
-	encoder := json.NewEncoder(out)
-	encoder.SetIndent("", "  ")
-	_ = encoder.Encode(value)
 }

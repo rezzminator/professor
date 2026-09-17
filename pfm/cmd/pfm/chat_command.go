@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -21,6 +22,34 @@ import (
 	"hostops/pfm/internal/resolve"
 	pfmtmux "hostops/pfm/internal/tmux"
 )
+
+func renderNoSuchChat(name string, stdout, stderr io.Writer, asJSON bool) int {
+	if asJSON {
+		if err := writeJSON(stdout, headless.Missing(name)); err != nil {
+			fmt.Fprintf(stderr, "pfm chat: encode JSON: %v\n", err)
+			return 1
+		}
+	} else {
+		fmt.Fprintf(stdout, "%s\t%s\n", name, headless.StateMissing)
+	}
+	fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", name)
+	return codeUnknownChat
+}
+
+func chatResolver(
+	handle string,
+	runtimes ...commandRuntime,
+) func(context.Context) (headless.Chat, bool, error) {
+	return func(ctx context.Context) (headless.Chat, bool, error) {
+		return pfmchat.Resolve(ctx, handle, io.Discard, firstRuntime(runtimes))
+	}
+}
+
+func writeJSON(out io.Writer, value any) error {
+	encoder := json.NewEncoder(out)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}
 
 func runChatRead(args []string, _ io.Reader, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
 	if len(args) > 0 {
@@ -125,9 +154,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, runtimes ...commandRun
 			)
 		}
 	case !fleet.ChatIDPattern.MatchString(target):
-		fmt.Fprintf(stdout, "%s\tnot-found\n", target)
-		fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", target)
-		return codeUnknownChat
+		return renderNoSuchChat(target, stdout, stderr, false)
 	}
 	killArgs := make([]string, 0, 2)
 	if *exit {
@@ -199,9 +226,7 @@ func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandR
 			return 1
 		}
 		if !found {
-			fmt.Fprintf(stdout, "%s\tnot-found\n", target)
-			fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", target)
-			return codeUnknownChat
+			return renderNoSuchChat(target, stdout, stderr, false)
 		}
 		target = chat.ID
 	}
@@ -230,9 +255,7 @@ func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...command
 	}
 	if code != 0 {
 		if code == inject.CodeUnknown {
-			fmt.Fprintf(stdout, "%s\t%s\n", name, headless.StateMissing)
-			fmt.Fprintf(stderr, "pfm chat: no chat named %q\n", name)
-			return codeUnknownChat
+			return renderNoSuchChat(name, stdout, stderr, false)
 		}
 		if detail != "" {
 			fmt.Fprintln(stderr, detail)
@@ -278,7 +301,7 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 	if target == "" {
 		target = chat.Socket
 	}
-	capture, err := (inject.CommandTmux{}).Capture(
+	capture, err := (inject.TmuxInjector{}).Capture(
 		context.Background(), socketPath, target, true, inject.FullScrollback,
 	)
 	if err != nil {

@@ -375,10 +375,11 @@ func contextFloorPath(runtime Runtime, project string) string {
 	if cacheRoot == "" {
 		cacheRoot = filepath.Join(runtime.Home, ".cache")
 	}
-	harness := "claude"
-	if runtime.Engine == pfmengine.Codex {
-		harness = "codex"
+	engineID := runtime.Engine
+	if engineID == "" {
+		engineID = pfmengine.Claude
 	}
+	harness := pfmengine.MustLookup(engineID).LongName
 	return filepath.Join(cacheRoot, "pfm-statusline", harness+"-"+sanitizeProject(project)+".txt")
 }
 

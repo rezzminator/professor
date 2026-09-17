@@ -74,7 +74,7 @@ func ResolveClaudeBinary(home, configuredBinary, pathEnv string) (string, error)
 		if eligible {
 			return configuredBinary, nil
 		}
-	} else if configuredBinary != "" {
+	} else if configuredBinary != "" && configuredBinary != pfmengine.MustLookup(pfmengine.Claude).Binary {
 		for _, directory := range strings.Split(pathEnv, string(os.PathListSeparator)) {
 			if directory == "" {
 				directory = "."

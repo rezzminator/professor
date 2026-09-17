@@ -190,6 +190,20 @@ func TestResolveClaudeBinaryMissingRelativeConfiguredCommandFails(t *testing.T) 
 	}
 }
 
+func TestResolveClaudeBinaryDefaultNameStillUsesNativeFallback(t *testing.T) {
+	home := t.TempDir()
+	newest := filepath.Join(home, ".local", "share", "claude", "versions", "9.9.9")
+	if err := os.MkdirAll(filepath.Dir(newest), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeExecutable(t, newest)
+
+	resolved, err := ResolveClaudeBinary(home, "claude", t.TempDir())
+	if err != nil || resolved != newest {
+		t.Fatalf("default-name resolution=%q err=%v, want native fallback %q", resolved, err, newest)
+	}
+}
+
 func TestResolveClaudeBinarySkipsManagedAliasesAndHonorsPATHOrder(t *testing.T) {
 	home := t.TempDir()
 	managed := managedClaudeLauncher(home)

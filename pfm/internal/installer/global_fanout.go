@@ -12,6 +12,7 @@ import (
 
 	"hostops/pfm/internal/codexgen"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/paths"
 )
 
 // This file holds the machine-global wiring that fans out across EVERY
@@ -76,6 +77,12 @@ const (
 	// registry on a host with no Claude Code binary (ClaudeAbsent), so
 	// finding it unlinked there is not a defect either — named, not warned.
 	GlobalAgentsNoClaude GlobalAgentsState = "NO-CLAUDE"
+	// GlobalAgentsDangling: a ~/.codex/agents/<name>.toml link resolves to
+	// the pfm-owned generated directory by name, but nothing is there
+	// anymore — codexgen.GlobalLinkDangling surfaced by name, never silently
+	// folded into MISSING, because a rerun of `pfm codex agents`/`pfm
+	// install` self-heals it by recompiling first.
+	GlobalAgentsDangling GlobalAgentsState = "DANGLING"
 )
 
 // GlobalAgentsStatus is one reported line's worth of facts: either one
@@ -181,11 +188,67 @@ func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent
 	}
 	sort.Strings(sources)
 
-	statuses := make([]GlobalAgentsStatus, 0, len(accounts))
+	statuses := make([]GlobalAgentsStatus, 0, len(accounts)+1)
 	for _, account := range accounts {
 		statuses = append(statuses, inspectAccountGlobalAgents(account, repo, sources))
 	}
+	// The compiled Codex .toml twins are host-wide — one ~/.codex/agents
+	// registry, never per-account — so this check runs once, not fanned
+	// across accounts the way the .claude/agents/*.md check above is.
+	statuses = append(statuses, inspectHostGlobalCodexAgents(home, repo, sources))
 	return statuses
+}
+
+// inspectHostGlobalCodexAgents classifies every ~/.codex/agents/<name>.toml
+// link against the pfm-owned generated directory (paths.GeneratedCodexAgentsDir)
+// the compiler writes into. Account is 0 and Dir names the registry itself —
+// the same host-wide shape GlobalAgentsStatus.Describe already renders for
+// NO-CLONE/NO-SOURCES — because this registry is not scoped to one Claude
+// account.
+func inspectHostGlobalCodexAgents(home, repo string, sources []string) GlobalAgentsStatus {
+	registry := filepath.Join(home, ".codex", "agents")
+	generated := paths.GeneratedCodexAgentsDir(home)
+	status := GlobalAgentsStatus{Dir: registry, State: GlobalAgentsLinked}
+	var conflicting, dangling, missing []string
+	for _, source := range sources {
+		name := strings.TrimSuffix(filepath.Base(source), ".md")
+		target := filepath.Join(registry, name+".toml")
+		desired := filepath.Join(generated, name+".toml")
+		state, _, err := codexgen.ClassifyGlobalLink(target, desired, repo, codexgen.GlobalLinkFile)
+		if err != nil {
+			status.State = GlobalAgentsUnreadable
+			status.Error = err.Error()
+			return status
+		}
+		switch state {
+		case codexgen.GlobalLinkCorrect:
+		case codexgen.GlobalLinkConflict:
+			conflicting = append(conflicting, name)
+		case codexgen.GlobalLinkDangling:
+			// An error to look must never render as ABSENCE: the link
+			// itself resolves to the right generated path by name, but
+			// the compiled file behind it is gone — named DANGLING, never
+			// folded into "missing" (a state that would read as never
+			// having been installed at all).
+			dangling = append(dangling, name)
+		default:
+			missing = append(missing, name)
+		}
+	}
+	switch {
+	case len(dangling) != 0:
+		status.State = GlobalAgentsDangling
+		status.Names = dangling
+		status.Missing = missing
+	case len(conflicting) != 0:
+		status.State = GlobalAgentsConflict
+		status.Names = conflicting
+		status.Missing = missing
+	case len(missing) != 0:
+		status.State = GlobalAgentsMissing
+		status.Names = missing
+	}
+	return status
 }
 
 // ReportGlobalAgents reports one line per configured Claude account naming
@@ -209,7 +272,7 @@ func ReportGlobalAgents(
 		fmt.Fprintf(w, "doctor: global-agents %s\n", status.Describe())
 		switch status.State {
 		case GlobalAgentsLinked, GlobalAgentsNoClone, GlobalAgentsNoClaude:
-		case GlobalAgentsMissing, GlobalAgentsUnreadable:
+		case GlobalAgentsMissing, GlobalAgentsUnreadable, GlobalAgentsDangling:
 			failures++
 		default:
 			warnings++
@@ -339,4 +402,58 @@ func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error 
 		}
 	}
 	return nil
+}
+
+// unwireGeneratedCodexAgents removes the pfm-owned generated directory the
+// compiled Codex global agent .toml twins live in (paths.GeneratedCodexAgentsDir)
+// and every ~/.codex/agents/<name>.toml link this installer owns. Ownership
+// is decided by the link's TARGET, the same rule retireOrphanGlobalCommands
+// holds to: only a symlink resolving INSIDE the generated directory is ours
+// to remove — an operator's own agent file, or a link pointing anywhere
+// else, is left untouched.
+func (installer *engine) unwireGeneratedCodexAgents() error {
+	generated := paths.GeneratedCodexAgentsDir(installer.options.Home)
+	registry := filepath.Join(installer.options.Home, ".codex", "agents")
+	entries, err := os.ReadDir(registry)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect Codex global agents registry %s: %w", registry, err)
+	}
+	for _, entry := range entries {
+		path := filepath.Join(registry, entry.Name())
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect Codex global agent link %s: %w", path, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			continue
+		}
+		target, err := os.Readlink(path)
+		if err != nil {
+			return fmt.Errorf("read Codex global agent link %s: %w", path, err)
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(filepath.Dir(path), target)
+		}
+		target = filepath.Clean(target)
+		if target != generated && !strings.HasPrefix(target, generated+string(filepath.Separator)) {
+			continue
+		}
+		if err := installer.retire(path, "retired generated Codex agent link"); err != nil {
+			return err
+		}
+	}
+	if _, err := os.Lstat(generated); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect generated Codex agents directory %s: %w", generated, err)
+	}
+	return installer.change("remove "+generated, func() error {
+		if err := os.RemoveAll(generated); err != nil {
+			return fmt.Errorf("remove generated Codex agents directory %s: %w", generated, err)
+		}
+		return nil
+	})
 }

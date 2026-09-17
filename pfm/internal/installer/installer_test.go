@@ -1014,7 +1014,11 @@ func TestWireCodexAgentsInstallsSymlinksNotCopies(t *testing.T) {
 		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
 	assertLink(t,
 		filepath.Join(home, ".codex", "agents", "alpha.toml"),
-		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml"))
+		filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml"))
+	twin := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")
+	if _, err := os.Lstat(twin); !os.IsNotExist(err) {
+		t.Fatalf("install wrote a .toml twin inside the source clone, lstat err=%v", err)
+	}
 }
 
 // TestWireCodexAgentsReportsAndPreservesAForeignConflict is the conflict-law
@@ -1508,7 +1512,7 @@ Read only.
 	}
 	for _, path := range []string{
 		conflict,
-		filepath.Join(home, ".professor", "templates", "global", "agents", "tracer.toml"),
+		filepath.Join(paths.GeneratedCodexAgentsDir(home), "tracer.toml"),
 		filepath.Join(home, ".claude", "agents", "tracer.md"),
 		filepath.Join(home, ".codex", "agents", "tracer.toml"),
 	} {
@@ -1525,6 +1529,7 @@ Read only.
 	}
 	for _, path := range []string{
 		filepath.Join(home, ".professor", "templates", "global", "agents", "tracer.toml"),
+		filepath.Join(paths.GeneratedCodexAgentsDir(home), "tracer.toml"),
 		filepath.Join(home, ".claude", "agents", "tracer.md"),
 		filepath.Join(home, ".codex", "agents", "tracer.toml"),
 	} {

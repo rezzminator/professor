@@ -33,6 +33,16 @@ const (
 	// or a directory sitting where a file link belongs (or vice versa).
 	// Never ours — reported, never overwritten, never deleted.
 	GlobalLinkConflict GlobalLinkState = "conflict"
+	// GlobalLinkDangling: a symlink already points at the desired source
+	// path, but nothing exists there anymore — the pfm-owned generated
+	// directory a compiled Codex agent twin lives in was removed (partial
+	// uninstall, a wiped state dir) while the registry link survived. Ours,
+	// but a build cannot silently call this "correct": the link resolving to
+	// the right NAME is not the same as an operator actually having the
+	// agent. ApplyGlobalLink repoints it exactly like Missing/WrongTarget —
+	// the recompile step that runs first in RunGlobalAgents' build phase
+	// recreates the missing file before this link is re-applied.
+	GlobalLinkDangling GlobalLinkState = "dangling"
 )
 
 // GlobalLinkKind selects whether the desired target is a single file link or
@@ -65,6 +75,12 @@ func ClassifyGlobalLink(target, source, sourceRepoRoot string, kind GlobalLinkKi
 		}
 		resolved := resolveGlobalLink(target, raw)
 		if resolved == filepath.Clean(source) {
+			if _, statErr := os.Stat(resolved); statErr != nil {
+				if errors.Is(statErr, fs.ErrNotExist) {
+					return GlobalLinkDangling, resolved, nil
+				}
+				return "", "", fmt.Errorf("inspect global link target %s: %w", resolved, statErr)
+			}
 			return GlobalLinkCorrect, resolved, nil
 		}
 		if withinGlobalLinkRoot(resolved, sourceRepoRoot) {
@@ -92,7 +108,7 @@ func ApplyGlobalLink(target, source string, state GlobalLinkState) error {
 	switch state {
 	case GlobalLinkCorrect, GlobalLinkConflict:
 		return nil
-	case GlobalLinkMissing, GlobalLinkCopy, GlobalLinkWrongTarget:
+	case GlobalLinkMissing, GlobalLinkCopy, GlobalLinkWrongTarget, GlobalLinkDangling:
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", filepath.Dir(target), err)
 		}
@@ -123,6 +139,8 @@ func DescribeGlobalLinkState(state GlobalLinkState, target, source, found string
 		return target + " is a copy where a link belongs — rerun pfm install (want -> " + source + ")"
 	case GlobalLinkWrongTarget:
 		return target + " -> " + found + " (want -> " + source + ")"
+	case GlobalLinkDangling:
+		return "DANGLING " + target + " -> " + found + " (target does not exist — rerun pfm install)"
 	case GlobalLinkConflict:
 		if found == "" {
 			return "CONFLICT " + target + ": not ours"

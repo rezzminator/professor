@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/paths"
 )
 
 // TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution covers the
@@ -45,7 +47,7 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	}
 
 	alphaTOML := string(
-		mustReadTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")),
+		mustReadTestFile(t, filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml")),
 	)
 	if strings.Contains(alphaTOML, "children are Explore+haiku") {
 		t.Fatalf("alpha.toml: substitution did not fire:\n%s", alphaTOML)
@@ -57,10 +59,25 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	for _, expect := range []struct{ target, source string }{
 		{filepath.Join(home, ".claude", "agents", "alpha.md"), filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")},
 		{filepath.Join(home, ".claude", "agents", "beta.md"), filepath.Join(home, ".professor", "templates", "global", "agents", "beta.md")},
-		{filepath.Join(home, ".codex", "agents", "alpha.toml"), filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")},
-		{filepath.Join(home, ".codex", "agents", "beta.toml"), filepath.Join(home, ".professor", "templates", "global", "agents", "beta.toml")},
+		{
+			filepath.Join(home, ".codex", "agents", "alpha.toml"),
+			filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml"),
+		},
+		{
+			filepath.Join(home, ".codex", "agents", "beta.toml"),
+			filepath.Join(paths.GeneratedCodexAgentsDir(home), "beta.toml"),
+		},
 	} {
 		assertGlobalSymlink(t, expect.target, expect.source)
+	}
+
+	// No .toml is ever written beside the .md source inside the clone —
+	// the whole point of this move.
+	for _, name := range []string{"alpha.toml", "beta.toml"} {
+		inClone := filepath.Join(home, ".professor", "templates", "global", "agents", name)
+		if _, err := os.Lstat(inClone); !os.IsNotExist(err) {
+			t.Fatalf("expected no .toml written inside the clone at %s, lstat err=%v", inClone, err)
+		}
 	}
 
 	// The .claude install is the raw source, untouched by the Codex-only
@@ -121,7 +138,7 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 	}
 
 	got := string(
-		mustReadTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.toml")),
+		mustReadTestFile(t, filepath.Join(paths.GeneratedCodexAgentsDir(home), "quirky.toml")),
 	)
 	want := "name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
@@ -153,7 +170,7 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 	}
 	got := string(mustReadTestFile(
 		t,
-		filepath.Join(home, ".professor", "templates", "global", "agents", "quoted.toml"),
+		filepath.Join(paths.GeneratedCodexAgentsDir(home), "quoted.toml"),
 	))
 	want := "name = \"quoted\"\n" +
 		"description = \"a: b, \\\"c\\\"\"\n" +
@@ -178,16 +195,20 @@ func TestTrackedGlobalAgentTwinsMatchCompiler(t *testing.T) {
 	}
 	for _, source := range sources {
 		t.Run(strings.TrimSuffix(filepath.Base(source), ".md"), func(t *testing.T) {
-			target, generated, err := renderGlobalAgentTOML(source)
+			generatedPath, generated, err := renderGlobalAgentTOML(source, t.TempDir())
 			if err != nil {
 				t.Fatal(err)
 			}
-			tracked, err := os.ReadFile(target)
+			// The tracked twin still lives beside the .md source in this
+			// repo (9b retires it); the compiler itself no longer writes
+			// there — only content equivalence is asserted here.
+			trackedPath := filepath.Join(filepath.Dir(source), filepath.Base(generatedPath))
+			tracked, err := os.ReadFile(trackedPath)
 			if err != nil {
-				t.Fatalf("read tracked twin %s: %v", target, err)
+				t.Fatalf("read tracked twin %s: %v", trackedPath, err)
 			}
 			if generated != string(tracked) {
-				t.Fatalf("tracked twin %s differs from compiler output", target)
+				t.Fatalf("tracked twin %s differs from compiler output", trackedPath)
 			}
 		})
 	}
@@ -294,7 +315,7 @@ func TestGlobalAgentsInstallSymlinksTheDesiredTargets(t *testing.T) {
 		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
 	assertGlobalSymlink(t,
 		filepath.Join(home, ".codex", "agents", "alpha.toml"),
-		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml"))
+		filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml"))
 }
 
 // TestGlobalAgentsInstallReplacesALegacyCopyWithASymlink covers the exact
@@ -348,6 +369,39 @@ func TestGlobalAgentsInstallRepointsAStaleInRepoSymlink(t *testing.T) {
 	assertGlobalSymlink(t,
 		filepath.Join(home, ".claude", "agents", "alpha.md"),
 		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
+}
+
+// TestGlobalAgentsRepointsALinkStillTargetingTheOldInCloneTOML is the
+// migration case this wave exists for: an existing ~/.codex/agents/alpha.toml
+// symlink still points at the retired in-clone
+// {SourceRepo}/templates/global/agents/alpha.toml. That target resolves
+// INSIDE the source repository, so it classifies WrongTarget — still ours —
+// and a run re-points it at the pfm-owned generated directory instead of
+// reporting a conflict.
+func TestGlobalAgentsRepointsALinkStillTargetingTheOldInCloneTOML(t *testing.T) {
+	home := t.TempDir()
+	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+	oldInCloneTOML := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")
+	writeTestFile(t, oldInCloneTOML, "name = \"alpha\"\ndescription = \"stale tracked twin\"\n")
+	codexDest := filepath.Join(home, ".codex", "agents")
+	if err := os.MkdirAll(codexDest, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(oldInCloneTOML, filepath.Join(codexDest, "alpha.toml")); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RunGlobalAgents(GlobalAgentsOptions{Home: home})
+	if err != nil {
+		t.Fatalf("RunGlobalAgents: %v", err)
+	}
+	if len(result.Problems) != 0 {
+		t.Fatalf("a link still targeting the old in-clone twin was reported as a conflict: %#v", result.Problems)
+	}
+	assertGlobalSymlink(t,
+		filepath.Join(home, ".codex", "agents", "alpha.toml"),
+		filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml"))
 }
 
 // TestGlobalAgentsInstallLeavesAForeignSymlinkAlone is the conflict-law pin:

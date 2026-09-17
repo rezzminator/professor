@@ -196,7 +196,7 @@ func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {
 	claude := writeTranscript(
 		t,
 		"claude.jsonl",
-		`{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"cache_read_input_tokens":400,"cache_creation_input_tokens":98,"output_tokens":500}}}
+		`{"type":"assistant","message":{"model":"claude-opus-5","usage":{"input_tokens":2,"cache_read_input_tokens":400,"cache_creation_input_tokens":98}}}
 {"type":"assistant","message":{"model":"<synthetic>","usage":{}}}
 `,
 	)
@@ -207,13 +207,129 @@ func TestReadMetaTakesTheLiveModelAndContext(t *testing.T) {
 	if meta.Model != "claude-opus-5" {
 		t.Fatalf("model = %q — <synthetic> is the harness, not a choice", meta.Model)
 	}
-	if meta.ContextTokens != 1000 {
-		t.Fatalf("context tokens = %d, want 1000 (cache reads ARE context)", meta.ContextTokens)
+	if meta.ContextTokens != 500 {
+		t.Fatalf("context tokens = %d, want 500 (cache reads ARE context)", meta.ContextTokens)
 	}
 	// No window is stated anywhere in a Claude transcript, so the percentage
 	// must stay unknown rather than be guessed from a model name.
 	if percent := meta.ContextPercent(); percent != 0 {
 		t.Fatalf("context percent = %f, want 0 (unknown)", percent)
+	}
+}
+
+func TestReadMetaClaudeContextExcludesOutputTokens(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"usage":{"input_tokens":2,"cache_read_input_tokens":400,"cache_creation_input_tokens":98,"output_tokens":500}}}`+"\n",
+	)
+	meta, err := ReadMeta(path, "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.ContextTokens != 500 {
+		t.Fatalf("context tokens = %d, want input occupancy 500 without output tokens", meta.ContextTokens)
+	}
+}
+
+func TestReadMetaClaudeIgnoresNewerSidechainUsage(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"claude.jsonl",
+		`{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200,"cache_creation_input_tokens":300}}}
+{"type":"assistant","isSidechain":true,"message":{"usage":{"input_tokens":1000,"cache_read_input_tokens":2000,"cache_creation_input_tokens":3000}}}
+`,
+	)
+	meta, err := ReadMeta(path, "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.ContextTokens != 600 {
+		t.Fatalf("context tokens = %d, want last main-chain input occupancy 600", meta.ContextTokens)
+	}
+}
+
+func TestReadMetaClaudeCompactBoundaryOrdering(t *testing.T) {
+	tests := []struct {
+		name          string
+		lines         string
+		wantTokens    int64
+		wantCompacted bool
+		wantPost      int64
+	}{
+		{
+			name: "boundary after usage marks stale occupancy",
+			lines: `{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200}}}
+{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":41}}`,
+			wantTokens:    300,
+			wantCompacted: true,
+			wantPost:      41,
+		},
+		{
+			name: "boundary before usage is not newer",
+			lines: `{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":41}}
+{"type":"assistant","message":{"usage":{"input_tokens":100,"cache_read_input_tokens":200}}}`,
+			wantTokens: 300,
+		},
+		{
+			name: "new top-level usage clears compact state",
+			lines: `{"type":"assistant","message":{"usage":{"input_tokens":100}}}
+{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":41}}
+{"type":"assistant","usage":{"input_tokens":7,"cache_read_input_tokens":8,"output_tokens":900}}`,
+			wantTokens: 15,
+		},
+		{
+			name: "output-only record does not clear compact state",
+			lines: `{"type":"assistant","message":{"usage":{"input_tokens":100}}}
+{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":41}}
+{"type":"assistant","usage":{"output_tokens":900}}`,
+			wantTokens:    100,
+			wantCompacted: true,
+			wantPost:      41,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeTranscript(t, "claude.jsonl", test.lines+"\n")
+			meta, err := ReadMeta(path, "cc")
+			if err != nil {
+				t.Fatalf("ReadMeta() error = %v", err)
+			}
+			if meta.ContextTokens != test.wantTokens ||
+				meta.CompactedAfterUsage != test.wantCompacted ||
+				meta.PostCompactTokens != test.wantPost {
+				t.Fatalf(
+					"meta = %#v, want tokens=%d compacted=%t post=%d",
+					meta,
+					test.wantTokens,
+					test.wantCompacted,
+					test.wantPost,
+				)
+			}
+		})
+	}
+}
+
+func TestReadMetaClaudeCountsOnlyRealHumanPromptsAcrossWholeFile(t *testing.T) {
+	content := `{"type":"user","message":{"content":"first real prompt"}}
+` + strings.Repeat(`{"type":"assistant","message":{"content":"padding"}}
+`, 12000) + `{"type":"user","isMeta":true,"message":{"content":"metadata prompt"}}
+{"type":"user","isSidechain":true,"message":{"content":"sidechain prompt"}}
+{"type":"user","isCompactSummary":true,"message":{"content":"compact summary"}}
+{"type":"user","message":{"content":"<system-reminder>injected</system-reminder>"}}
+{"type":"user","message":{"content":""}}
+{"type":"assistant","message":{"content":"not a prompt"}}
+{"type":"user","message":{"content":[{"type":"tool_result","content":"ignored"},{"type":"text","text":"second\nreal prompt"}]}}
+`
+	if len(content) <= 512<<10 {
+		t.Fatalf("fixture size = %d, must exceed the retired tail window", len(content))
+	}
+	meta, err := ReadMeta(writeTranscript(t, "claude.jsonl", content), "cc")
+	if err != nil {
+		t.Fatalf("ReadMeta() error = %v", err)
+	}
+	if meta.HumanPrompts != 2 {
+		t.Fatalf("human prompts = %d, want 2", meta.HumanPrompts)
 	}
 }
 

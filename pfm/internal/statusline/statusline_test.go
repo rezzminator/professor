@@ -14,6 +14,7 @@ import (
 	"time"
 
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/transcript"
 )
 
 func TestEngineFromEnvironmentRefusesMissingEngine(t *testing.T) {
@@ -263,7 +264,7 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 			raw = []byte(strings.ReplaceAll(
 				string(raw),
 				"__TRANSCRIPT__",
-				writeGoldenTranscript(t, root, now.Add(-12*time.Minute)),
+				writeGoldenTranscript(t, root, now.Add(-12*time.Minute), sample.engine),
 			))
 			engineID, parseErr := pfmengine.Parse(sample.engine)
 			if parseErr != nil {
@@ -300,10 +301,17 @@ func TestStatuslineCapturedInputGoldens(t *testing.T) {
 
 // writeGoldenTranscript lays down a one-turn transcript inside the jail and
 // returns its path, so a golden can anchor the cache window at a fixed offset.
-func writeGoldenTranscript(t *testing.T, root string, turn time.Time) string {
+func writeGoldenTranscript(t *testing.T, root string, turn time.Time, engine string) string {
 	t.Helper()
 	path := filepath.Join(root, "transcript.jsonl")
-	body := `{"type":"user","timestamp":"` + turn.UTC().Format(time.RFC3339Nano) + `"}` + "\n"
+	body := `{"type":"assistant","timestamp":"` + turn.UTC().Format(time.RFC3339Nano) + `"}` + "\n"
+	if engine == "codex" {
+		body += `{"payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":136000},"model_context_window":272000}}}` + "\n"
+	} else {
+		body = `{"type":"assistant","timestamp":"` + turn.UTC().
+			Format(time.RFC3339Nano) +
+			`","message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":419000}}}` + "\n"
+	}
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -373,6 +381,201 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("render lacks %q:\n%q", want, got)
 		}
+	}
+}
+
+func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	transcript := strings.Join([]string{
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":699000,"cache_creation_input_tokens":0,"output_tokens":1000}}}`,
+		`{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":150000}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	xdgCache := filepath.Join(root, "xdg-cache")
+	floorDir := filepath.Join(xdgCache, "pfm-statusline")
+	if err := os.MkdirAll(floorDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(floorDir, "claude-work-sample.txt"), []byte("50000\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	encodedTranscriptPath, err := json.Marshal(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := []byte(`{
+  "model":{"id":"claude-opus-4-1","display_name":"Opus 4"},
+  "cwd":"/work/sample",
+  "context_window":{"used_percentage":77},
+  "transcript_path":` + string(encodedTranscriptPath) + `
+}`)
+	got, err := Render(context.Background(), input, Runtime{
+		Home:     root,
+		CacheDir: filepath.Join(root, "cache"),
+		TmuxDir:  filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"),
+		Columns:  120,
+		UID:      1000,
+		Env:      map[string]string{"XDG_CACHE_HOME": xdgCache},
+		Command:  quietRunner{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
+	if !strings.Contains(plain, "▰▰▱▱▱▱▱▱▱▱ ~20%") || strings.Contains(plain, "77%") {
+		t.Fatalf(
+			"post-compact gauge did not use floor + postTokens estimate, or retained stale self-report:\n%q",
+			plain,
+		)
+	}
+}
+
+func TestRenderMarksCompactBoundaryEstimateWithoutPostTokens(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	transcript := strings.Join([]string{
+		`{"type":"assistant","message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":699000}}}`,
+		`{"type":"system","subtype":"compact_boundary","compactMetadata":{}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encodedPath, err := json.Marshal(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Render(context.Background(), []byte(`{
+  "model":{"id":"claude-opus-4-1","display_name":"Opus 4"},
+  "cwd":"/work/sample",
+  "context_window":{"used_percentage":77},
+  "transcript_path":`+string(encodedPath)+`
+}`), Runtime{
+		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000, Env: map[string]string{},
+		Command: quietRunner{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
+	if !strings.Contains(plain, "~70%") || strings.Contains(plain, "77%") {
+		t.Fatalf("compact boundary without postTokens did not mark the prior occupancy as estimated:\n%q", plain)
+	}
+}
+
+func TestContextFloorKeyMatchesRetiredOverlay(t *testing.T) {
+	if got := sanitizeProject(""); got != "root" {
+		t.Fatalf("empty project key = %q, want root", got)
+	}
+	if got := sanitizeProject("/work/acme.api_v2"); got != "work-acme-api-v2" {
+		t.Fatalf("sanitized project key = %q", got)
+	}
+	if got := sanitizeProject("/" + strings.Repeat("a", 100)); len(got) != 80 {
+		t.Fatalf("long project key length = %d, want 80", len(got))
+	}
+	window := contextWindow(
+		Runtime{Env: map[string]string{}, Engine: pfmengine.Claude},
+		input{Model: struct {
+			ID          string `json:"id"`
+			DisplayName string `json:"display_name"`
+		}{ID: "claude-haiku-4", DisplayName: "Claude"}},
+		transcript.Meta{},
+	)
+	if window != 200_000 {
+		t.Fatalf("Haiku model-id window = %d, want 200000", window)
+	}
+}
+
+func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	transcript := strings.Join([]string{
+		`{"type":"user","message":{"content":"first"}}`,
+		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":249000}}}`,
+		`{"type":"user","message":{"content":"second"}}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encodedPath, err := json.Marshal(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Render(context.Background(), []byte(`{
+  "model":{"display_name":"Opus 4"},
+  "cwd":"/work/sample",
+  "context_window":{"used_percentage":77,"current_usage":{"input_tokens":1000}},
+  "transcript_path":`+string(encodedPath)+`
+}`), Runtime{
+		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000, Env: map[string]string{},
+		Command: quietRunner{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
+	if !strings.Contains(plain, "25%") || strings.Contains(plain, "77%") || !strings.Contains(plain, "🧮1.0K ✎2") {
+		t.Fatalf("measured transcript gauge or prompt count missing:\n%q", plain)
+	}
+	floor, err := os.ReadFile(filepath.Join(root, ".cache", "pfm-statusline", "claude-work-sample.txt"))
+	if err != nil || string(floor) != "250000\n" {
+		t.Fatalf("cached floor = %q, %v; want 250000", floor, err)
+	}
+}
+
+func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "session.jsonl")
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"assistant","message":{"usage":{"input_tokens":1000}}}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	segment := cacheWindowSegment(
+		Runtime{Home: root, CacheDir: filepath.Join(root, "cache")},
+		time.Now(),
+		transcriptPath,
+	)
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(segment, "")
+	if !strings.Contains(plain, "💾1h∞") || strings.Contains(plain, "1h?") {
+		t.Fatalf("unknown default cache window = %q, want 1h∞", plain)
+	}
+}
+
+func TestCodexSegmentDoesNotOverwriteTranscriptGauge(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "rollout.jsonl")
+	transcript := `{"payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":68000},"model_context_window":272000}}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	encodedPath, err := json.Marshal(transcriptPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Render(context.Background(), []byte(`{
+  "context_window":{"used_percentage":77,"current_usage":{"input_tokens":136000}},
+  "transcript_path":`+string(encodedPath)+`
+}`), Runtime{
+		Home: root, CacheDir: filepath.Join(root, "cache"), TmuxDir: filepath.Join(root, "tmux"),
+		ProcRoot: filepath.Join(root, "proc"), Columns: 120, UID: 1000, Engine: pfmengine.Codex,
+		Env: map[string]string{"ANTHROPIC_MODEL": "gpt-5.6-sol"}, Command: quietRunner{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(got, "")
+	if !strings.Contains(plain, "25% of 272.0K") || strings.Contains(plain, "50%") || strings.Contains(plain, "77%") {
+		t.Fatalf("Codex overwrote transcript gauge:\n%q", plain)
 	}
 }
 

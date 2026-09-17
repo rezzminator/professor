@@ -36,12 +36,21 @@ func TestResolveRosterNameAmbiguityNamesStableAddresses(t *testing.T) {
 // comes back is exactly what ResolveRosterName's exact rung would take.
 func TestResolveRosterSeatNamesTheSeatByIDThenBySeat(t *testing.T) {
 	roster := []RosterCandidate{
-		{Name: "LUNA:ORCHESTRATOR", ID: "5a3bb7cb-258d", Socket: "cc-1788256324-1866070-42739", Pane: "%0", Live: true},
+		{
+			Name:   "LUNA:ORCHESTRATOR",
+			ID:     "5a3bb7cb-258d",
+			Socket: "cc-1788256324-1866070-42739",
+			Pane:   "%0",
+			Live:   true,
+		},
 		{Name: "LUNA:BUILDER", ID: "builder", Socket: "cx-1-2-3", Pane: "%1", Live: true},
 		{Name: "LUNA:BUILDER", ID: "builder", Socket: "cx-4-5-6", Pane: "%1", Live: true},
 		{Name: "Retired", ID: "5a3bb7cb-258d", Socket: "cc-old", Pane: "%0"},
 	}
-	byID, found := ResolveRosterSeat(roster, Identity{ID: "5a3bb7cb-258d", SocketName: "cc-elsewhere", Pane: "%9"})
+	byID, found := ResolveRosterSeat(
+		roster,
+		Identity{ID: "5a3bb7cb-258d", SocketName: "cc-elsewhere", Pane: "%9"},
+	)
 	if !found || byID != "LUNA:ORCHESTRATOR" {
 		t.Fatalf("by id = (%q,%t), want the live row's name", byID, found)
 	}

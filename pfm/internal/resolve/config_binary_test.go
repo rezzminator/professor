@@ -13,7 +13,7 @@ func TestResolverUsesConfiguredClaudeBasenameForSplitSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	outcome := resolver.resolveSession("split", []Pane{
+	outcome := resolver.resolveSession("split", []ResolvedPane{
 		{
 			SocketPath:     "/jail/cc-configured",
 			SessionName:    "split",
@@ -38,7 +38,7 @@ func TestResolverUsesConfiguredCodexBasenameForWindowNames(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	outcome := resolver.resolveCxWindow("configured thread", []Pane{{
+	outcome := resolver.resolveCxWindow("configured thread", []ResolvedPane{{
 		SocketPath:     "/jail/custom-engine",
 		PaneID:         "%9",
 		CurrentCommand: customCodex,
@@ -58,8 +58,8 @@ func TestEngineCommandBasenamesAcceptConfiguredPaths(t *testing.T) {
 		check   func(string, ...string) bool
 		binary  string
 	}{
-		{name: "claude", command: customClaude, check: isClaudeCommand, binary: customClaude},
-		{name: "codex", command: customCodex, check: isCodexCommand, binary: customCodex},
+		{name: "claude", command: customClaude, check: isClaudePaneCommand, binary: customClaude},
+		{name: "codex", command: customCodex, check: isCodexPaneCommand, binary: customCodex},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if !test.check(test.command, test.binary) {
@@ -67,14 +67,14 @@ func TestEngineCommandBasenamesAcceptConfiguredPaths(t *testing.T) {
 			}
 		})
 	}
-	if isCodexCommand(customCodex) {
+	if isCodexPaneCommand(customCodex) {
 		t.Fatal("custom Codex basename was accepted without its configured policy")
 	}
 }
 
 func TestResolverStillReturnsNoMatchForUnknownConfiguredCommand(t *testing.T) {
 	resolver := &Resolver{tmux: fakeTmux{}}
-	outcome := resolver.resolveSession("split", []Pane{
+	outcome := resolver.resolveSession("split", []ResolvedPane{
 		{SocketPath: "/jail/cc", SessionName: "split", PaneID: "%1", CurrentCommand: "custom-claude"},
 		{SocketPath: "/jail/cc", SessionName: "split", PaneID: "%2", CurrentCommand: "bash"},
 	})

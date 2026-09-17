@@ -9,15 +9,15 @@ import (
 	pfmtmux "hostops/pfm/internal/tmux"
 )
 
-// CommandTmux invokes tmux with an explicit socket pathname.
-type CommandTmux struct {
+// TmuxResolver invokes tmux with an explicit socket pathname.
+type TmuxResolver struct {
 	Binary string
 }
 
-func (tmux CommandTmux) ListPanes(
+func (tmux TmuxResolver) ListPanes(
 	ctx context.Context,
 	socketPath string,
-) ([]Pane, error) {
+) ([]ResolvedPane, error) {
 	format := strings.Join([]string{
 		"#{session_name}",
 		"#{pane_id}",
@@ -36,7 +36,7 @@ func (tmux CommandTmux) ListPanes(
 		return nil, err
 	}
 	lines := strings.Split(strings.TrimSuffix(string(output), "\n"), "\n")
-	panes := make([]Pane, 0, len(lines))
+	panes := make([]ResolvedPane, 0, len(lines))
 	for _, line := range lines {
 		if line == "" {
 			continue
@@ -51,7 +51,7 @@ func (tmux CommandTmux) ListPanes(
 				line,
 			)
 		}
-		panes = append(panes, Pane{
+		panes = append(panes, ResolvedPane{
 			SocketPath:     socketPath,
 			SessionName:    fields[0],
 			PaneID:         fields[1],
@@ -62,7 +62,7 @@ func (tmux CommandTmux) ListPanes(
 	return panes, nil
 }
 
-func (tmux CommandTmux) CapturePane(
+func (tmux TmuxResolver) CapturePane(
 	ctx context.Context,
 	socketPath, paneID string,
 ) (string, error) {
@@ -78,7 +78,7 @@ func (tmux CommandTmux) CapturePane(
 	return string(output), err
 }
 
-func (tmux CommandTmux) command(
+func (tmux TmuxResolver) command(
 	ctx context.Context,
 	socketPath string,
 	arguments ...string,

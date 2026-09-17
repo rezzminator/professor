@@ -11,7 +11,7 @@ import (
 
 // DetectAgents returns strict session identities for Claude processes using a
 // non-primary config directory.
-func DetectAgents(proc ProcFS, home string, panes []Pane, binaries ...string) ([]Agent, error) {
+func DetectAgents(proc ProcFS, home string, panes []ProbePane, binaries ...string) ([]Agent, error) {
 	cmdlines, err := processCmdlines(proc)
 	if err != nil {
 		return nil, fmt.Errorf("list processes for agent scan: %w", err)
@@ -25,8 +25,7 @@ func detectAgentsFrom(
 	cmdlines map[int][]string,
 	proc ProcFS,
 	home string,
-	panes []Pane,
-	binaries ...string,
+	panes []ProbePane, binaries ...string,
 ) ([]Agent, error) {
 	pids := sortedPIDs(cmdlines)
 	paneByPID := panesByPID(panes)
@@ -36,7 +35,7 @@ func detectAgentsFrom(
 
 	for _, pid := range pids {
 		cmdline := cmdlines[pid]
-		if !isClaudeCommand(cmdline, binaries...) {
+		if !IsClaudeCommand(cmdline, binaries...) {
 			continue
 		}
 		sessionIDs := claudeSessionIDs(cmdline)
@@ -93,10 +92,6 @@ func IsClaudeCommand(cmdline []string, binaries ...string) bool {
 // IsCodexCommand reports whether an argv belongs to a Codex process.
 func IsCodexCommand(cmdline []string, binaries ...string) bool {
 	return pfmengine.MatchCommand(pfmengine.Codex, cmdline, false, binaries...)
-}
-
-func isClaudeCommand(cmdline []string, binaries ...string) bool {
-	return IsClaudeCommand(cmdline, binaries...)
 }
 
 func claudeSessionIDs(cmdline []string) []string {

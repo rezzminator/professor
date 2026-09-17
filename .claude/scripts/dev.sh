@@ -376,8 +376,15 @@ cmd_iso() { # cmd_iso <action> [project]
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; go -C pfm test -count=1 -tags e2e -p 1 ./e2e/..." ;;
     install|build|typecheck|verify|test|cover|all|status)
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; ./.claude/scripts/dev.sh $action $target" ;;
+    run)
+      # An arbitrary command inside the fence, from the worktree root — for the
+      # probes the fixed rows do not cover (`go test -json ./cmd/pfm`, a single
+      # package, `make -C pfm lint`). Exit status is the command's own.
+      local cmd="${*:2}"
+      [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
     *)
-      echo "usage: dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project]" >&2; exit 2 ;;
+      echo "usage: dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project] | iso run <command…>" >&2; exit 2 ;;
   esac
 }
 

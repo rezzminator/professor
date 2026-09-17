@@ -486,3 +486,6 @@ template twin. If it only makes sense because this repo IS the blueprint, it bel
   `doom_loop` to `allow` (OpenCode defaults the last two to `ask`, which stalls an unattended chat on its first read
   outside the worktree); the guarded-file and Git-write denies still win as the last matching rules. No adopter twin
   ships this compiler.
+- Local (2026-09-17): `.claude/scripts/dev.sh iso run <command…>` — an arbitrary command inside the fence from the
+  worktree root, for probes the fixed rows do not cover (`go test -json` on one package, `make -C pfm lint`); the
+  adopter twin carries no `iso` and gets nothing.

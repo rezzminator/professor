@@ -1,0 +1,24 @@
+# A detached shell on a chat-shaped scratch socket is an unattached orphan.
+exec jail-tmux -L cc-1700000001-4242-8 -f /dev/null new-session -d -s cc-1700000001-4242-8 sh $WORK/orphan.sh
+exec sh -c 'printf "%s\n" "$1" > "$2"' sh $WORK/orphan.jsonl $PFM_SID_DIR/cc-1700000001-4242-8
+exec touch -t 202301010000 $WORK/orphan.jsonl
+exec jail-pfm reap --json
+stdout '"socket": "cc-1700000001-4242-8"'
+stdout '"state": "orph"'
+stdout '"reason": "unattached, idle"'
+! stdout '"state": "KILL"'
+
+# Apply preserves the candidate and reason classification, changing only the action state.
+exec jail-pfm reap --apply --json
+stdout '"socket": "cc-1700000001-4242-8"'
+stdout '"state": "KILL"'
+stdout '"reason": "unattached, idle"'
+! exec jail-tmux -L cc-1700000001-4242-8 has-session -t cc-1700000001-4242-8
+
+-- orphan.sh --
+#!/bin/sh
+printf 'orphan fixture\n'
+exec sh -i
+
+-- orphan.jsonl --
+{"type":"user","sessionId":"b2222222-2222-4222-8222-222222222222","cwd":"/fixture","timestamp":"2023-01-01T00:00:00Z","message":{"content":"old fixture"}}

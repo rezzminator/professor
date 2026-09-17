@@ -1,0 +1,24 @@
+# Every target-taking chat surface uses the one not-found token and exact rc 4.
+exec jail-pfm-rc 4 chat status absent
+stdout '^absent[\t]not-found$'
+stderr 'no chat named "absent"'
+exec jail-pfm-rc 4 chat capture absent
+stdout '^absent[\t]not-found$'
+exec jail-pfm-rc 4 chat keys absent Enter
+stdout '^absent[\t]not-found$'
+exec jail-pfm-rc 4 chat inject --allow-unsigned absent hello
+stderr 'no chat named "absent"'
+! stdout .
+exec jail-pfm-rc 4 chat ask absent hello
+stdout '^absent[\t]not-found$'
+exec jail-pfm-rc 4 chat name absent renamed
+stdout '^absent[\t]not-found$'
+exec jail-pfm-rc 4 chat kill absent
+stdout '^absent[\t]not-found$'
+exec jail-pfm-rc 4 chat unkill absent
+stdout '^absent[\t]not-found$'
+exec jail-pfm-rc 4 chat end absent
+stdout '^absent[\t]not-found$'
+exec jail-pfm-rc 4 chat resolve absent
+stdout '^absent[\t]not-found$'
+! stdout LIVE

@@ -14,6 +14,8 @@ Go paths are relative to `~/.professor/pfm/` (the engine lives at the repo root 
 | `LIVE-READ` | Read-only observation of live state (`pfm ls --tsv`, `--plain`, `--killed`, `doctor`, `sqlite3 -readonly`). Never mutates. |
 | **`REAL-SESSION`** | ⚠ **CANNOT be jailed.** Needs a genuine `claude` / `codex` process, a real transcript/rollout writer, or a real Claude-account login. The supervisor must schedule these deliberately on a scratch project directory. |
 
+`Coverage` references under `e2e/testdata/scripts/` are txtar routes that drive the instrumented built `pfm` binary in a jailed scratch tmux namespace.
+
 ## Legend — the REGRESSION column
 
 The four identity/state regressions that established this plan. A tagged row must retain a fixture.
@@ -153,8 +155,9 @@ The compiler is one static-binary surface. `build` may write only generated arti
 
 ### A.2 — Doctor probe classification
 
-| probe | safety | expected behavior | regression |
-| --- | --- | --- | --- |
+| probe | safety | expected behavior | regression | Coverage |
+| --- | --- | --- | --- | --- |
+| `pfm doctor` in an empty jail names every `TOOLCHAIN` row and exits 3 for missing required dependencies | JAIL | `cmd/pfm/main.go`, `internal/doctor/doctor.go`, `internal/doctor/jail_test.go`; required-tool failures are visible and distinct from warnings or absence | | `e2e/testdata/scripts/doctor.txtar` |
 | config load error | JAIL | visible config FAILURE, rc 3 | `config_cli_test.go` |
 | disabled MCP daemon | JAIL | no daemon probe or warning | `internal/doctor/jail_test.go` |
 | enabled MCP daemon reachability | JAIL | running is clean; unreachable is a warning and rc 1 | `mcp_serve_test.go` |
@@ -166,7 +169,7 @@ The compiler is one static-binary surface. `build` may write only generated arti
 | host overlay symlinks (`pfm-statusline`, `tmux-title-renudge`) and statusLine wiring | JAIL | a canonical link resolving to the managed copy is `ok`; absent is `missing`, rc 3; not resolving to the managed copy is `DISPLACED`, rc 3; a configured account's `statusLine.command` still naming raw `pfm statusline` is a FAILURE, rc 3 | `internal/doctor/host_overlay_test.go`, `internal/installer/installer.go` (`InspectHostOverlays`) |
 | tmux title ownership per live socket | JAIL+tmux | INFO only, never a warning and never a write: the resolved `tmux.titles` policy is printed with its source, then each live socket is read with `show-options -g set-titles` and reported `pfm-owned` or `host-owned`; an unreadable socket is `unknown` with the reason | `internal/doctor/tmux_titles.go`, `internal/doctor/tmux_titles_test.go` |
 | external-command registry coverage | JAIL | every production literal exec is registered and routed through `deps.Resolve`; configured engine names and provisioned harvest paths have one owner | `internal/deps/guard_test.go` |
-| dependency resolve/version/minimum | JAIL | fake PATH binaries distinguish ok, below-minimum, garbage, missing, failed execution, and timeout; tmux requires 1.8; a `Required` dependency the fleet engine cannot run without (e.g. `tmux`) missing/broken/timeout/cancelled is a FAILURE, rc 3 — the opt-in harvestpy sidecar's own `Required` deps (`uv`, the provisioned interpreter) stay warnings, rc 1, since the fleet engine runs without them | `internal/deps/probe_test.go`, `internal/doctor/external_test.go`, `internal/doctor/jail_test.go` (`TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone`) |
+| dependency resolve/version/minimum | JAIL | fake PATH binaries distinguish ok, below-minimum, garbage, missing, failed execution, and timeout; tmux requires 1.8; a `Required` dependency the fleet engine cannot run without (e.g. `tmux`) missing/broken/timeout/cancelled is a FAILURE, rc 3 — the opt-in harvestpy sidecar's own `Required` deps (`uv`, the provisioned interpreter) stay warnings, rc 1, since the fleet engine runs without them | `internal/deps/probe_test.go`, `internal/doctor/external_test.go`, `internal/doctor/jail_test.go` (`TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone`) | `e2e/testdata/scripts/doctor.txtar` (empty-jail missing-required case only) |
 | dependency platform and harvest filters | JAIL | Darwin/Linux-only rows say `skipped (not this platform)` off-platform; install-owned harvest rows say provisioned-by-install or `--skip-harvest` without being probed | `internal/deps/probe_test.go` |
 | configured engine self-doctors | JAIL | supported Claude/Codex doctor commands run under their own 30s self-doctor bound (falls back to the probe `Timeout` when `SelfDoctorTimeout` is unset); unsupported or interactive-only surfaces say unavailable; a summary call that outruns its bound stays `ok` and is named `timeout (<duration>)`, never broken; a real non-zero exit still reads broken and quotes the first output line | `internal/deps/probe_test.go`, `internal/doctor/external_test.go` |
 | installer-owned hooks | JAIL | every global/account Claude hook and the Codex clear-kill hook is present, parseable, canonical-binary-pointing, and ledger-owned; missing, broken JSON, and stale path are each a FAILURE (rc 3, `ReportHooks` returns `(warnings, failures)`); drift stays a distinct warning, rc 1 | `internal/installer/expected_hooks_test.go` (`TestReportHooksCountsMissingAsFailureAndDriftAsWarning`), `internal/doctor/external_test.go` |
@@ -300,7 +303,10 @@ A hand-linked `extensions/professor` directory is never loaded on its own: moder
 | the staged `package.json` contributes exactly one keybinding for `professor.newChatTerminal` — `ctrl+shift+alt+t` / `cmd+shift+alt+t` | JAIL | `internal/installer/vscode_extension_test.go:TestVSCodeExtensionContributesOneKeybindingForTheCommand` | |
 | the operator matrix — keybinding press, command palette, terminal `+` dropdown pick — each produces a tab whose icon is NOT the default profile's `mortar-board`, with a window reload between rounds | REAL-SESSION | manual: run all three, reload between rounds, confirm each tab's icon cycles | not automated — see § Flows that CANNOT be jailed, item 39 |
 
-| `reap` dry run classifies every socket, changes nothing | JAIL+tmux | `cmd/pfm/reap_jail_test.go:134-189`, `internal/reap/reap.go:139-160` | |
+| flow | safety | expected | regression | Coverage |
+| --- | --- | --- | --- | --- |
+| `reap` dry run classifies every socket, changes nothing | JAIL+tmux | `cmd/pfm/reap_jail_test.go:134-189`, `internal/reap/reap.go:139-160` | | `e2e/testdata/scripts/reap-preview.txtar` |
+| `reap --apply` reports the same socket classification as the preceding preview; only the actions differ | JAIL+tmux | `cmd/pfm/reap_command.go`, `internal/reap/reap.go` | | `e2e/testdata/scripts/reap-preview.txtar` |
 | `reap` KEEP rules: attached, self, `cc-new-*`, busy, transcript written < 60s | JAIL | `internal/reap/reap_test.go:14-200` | |
 | `reap` never kills a socket hosting non-chat processes (dev servers, `uv`) | JAIL+tmux | `internal/reap/proc.go:78-110`, `cmd/pfm/reap_jail_test.go:134-189` | |
 | `reap` exempts a chat's OWN subtree (its MCP servers, its tool shells) | JAIL | `internal/reap/proc_test.go:86-97` | |
@@ -322,8 +328,9 @@ A hand-linked `extensions/professor` directory is never loaded on its own: moder
 | `heal --thread` is a silent exit-0 no-op on a healthy thread | JAIL | `cmd/pfm/heal_jail_test.go:152-176` | |
 | ResumeCodex runs the native projection repair before the seat is created | JAIL | `internal/action/executor.go:113-127`, `testdata/golden/cmdlines.txt:47-54` | |
 | `name-sync` converges both engines' window names; `--dry-run` changes nothing | JAIL+tmux | `internal/gather/labels_jail_test.go:14-90` | |
-| `name-sync` reads every renamed window's name BACK and counts only a verified match as converged; each unverified window is printed with the value read (`window S W: wanted "A", reads "B" after rename`) and the command exits 1; `--dry-run` reports `windows planned: N` because it applied nothing | JAIL+tmux | `cmd/pfm/namesync_command.go` (`verifyRenames`), `cmd/pfm/namesync_verify_jail_test.go` | issue #14 F13 |
-| `name-sync` converges every live server onto `config.ChatServerOptions` through one reader/applier (`gather.CommandTmux.ConvergeGlobalOptions`): a server still auto-renaming its window (a picker chat born before the one creator) stops on the next pass under either title policy, each transition is named, and an unreadable server counts unverified, never "nothing to converge" | JAIL+tmux | `cmd/pfm/namesync_command.go` (`convergeChatServerOptions`), `cmd/pfm/namesync_titles_regression_test.go`, `internal/gather/tmuxprobe_test.go` | |
+| `name-sync` previews by default; `--apply` renames the same planned windows | JAIL+tmux | `cmd/pfm/namesync_command.go`, `cmd/pfm/namesync_verify_jail_test.go` | | `e2e/testdata/scripts/name-sync.txtar` |
+| `name-sync` reads every renamed window's name BACK and counts only a verified match as converged; each unverified window is printed with the value read (`window S W: wanted "A", reads "B" after rename`) and the command exits 1; `--dry-run` reports `windows planned: N` because it applied nothing | JAIL+tmux | `cmd/pfm/namesync_command.go` (`verifyRenames`), `cmd/pfm/namesync_verify_jail_test.go` | issue #14 F13 | `e2e/testdata/scripts/name-sync.txtar` |
+| `name-sync` converges every live server onto `config.ChatServerOptions` through one reader/applier (`gather.CommandTmux.ConvergeGlobalOptions`): a server still auto-renaming its window (a picker chat born before the one creator) stops on the next pass under either title policy, each transition is named, and an unreadable server counts unverified, never "nothing to converge" | JAIL+tmux | `cmd/pfm/namesync_command.go` (`convergeChatServerOptions`), `cmd/pfm/namesync_titles_regression_test.go`, `internal/gather/tmuxprobe_test.go` | | `e2e/testdata/scripts/name-sync.txtar` (readable-server option convergence only) |
 | every picker route that opens a fresh server (N, P, O, A, R, X) plans a `ChatServer` the executor creates through the one creator, born with its engine's short window name; the eval line is only the attach, never a `new-session` | JAIL | `internal/action/synth.go` (`onChatServer`), `internal/action/synth_test.go`, `testdata/golden/cmdlines.txt` | |
 | `pfm chat open` opens a row on its OWN engine's primary account (`config.PrimaryAccountFor`), never the Claude primary on a Codex/OpenCode row | JAIL + LIVE door re-run | `internal/config/accounts.go`, `internal/config/accounts_test.go` (`TestPrimaryAccountForPicksTheRowsOwnEngine`), `cmd/pfm/ls_command.go` | named gap: no jail fixture for a two-Claude/one-Codex roster `chat open`; proven at the live door |
 | `pfm internal stale` (`make stale`) names every pfm process whose executable is not the installed binary by device+inode — `/proc/<pid>/exe` on Linux, lsof's program entry on macOS (`gather.ProcImage`) — distinguishes none / stale / could-not-read (non-zero), and refuses a table that cannot read images | JAIL + LIVE-READ (macOS, cross-checked against lsof) | `internal/stale/stale.go`, `internal/stale/stale_test.go`, `internal/gather/procfs.go` (`Image`, `FileIDOf`), `internal/gather/procfs_darwin.go` | |
@@ -577,10 +584,13 @@ Each row is one **session kind** crossed with the operations that touch it. This
 
 ## H — `pfm chat`: subcommands, guards, `--then`, exit codes
 
-| flow | safety | expected behavior (source) | regression |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------- | ----------------------- |
-| root `whoami [--label]` → this chat's immutable socket identity or display label | JAIL+tmux | `whoami_command.go`, `whoami_test.go` | |
-| `chat new NAME` → detached chat on a fresh immutable `cc-*`/`cx-*` socket | JAIL+tmux | `run_command.go`, `run_jail_test.go` | |
+| flow | safety | expected behavior (source) | regression | Coverage |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | --------------------------------------------------------------------------- | ----------------------- | --- |
+| root `whoami [--label]` → this chat's immutable socket identity or display label | JAIL+tmux | `whoami_command.go`, `whoami_test.go` | | |
+| `chat new NAME` → detached chat on a fresh immutable `cc-*`/`cx-*` socket | JAIL+tmux | `run_command.go`, `run_jail_test.go` | | `e2e/testdata/scripts/chat-lifecycle.txtar` |
+| `chat ls --all` lists a newly created live chat and stops listing it after `chat end` | JAIL+tmux | `cmd/pfm/chat_satellite_command.go`, `internal/picker/picker.go` | | `e2e/testdata/scripts/chat-lifecycle.txtar` |
+| `chat inject <target> <message>` delivers the literal message to the resolved live pane | JAIL+tmux | `cmd/pfm/headless_command.go`, `internal/inject` | | `e2e/testdata/scripts/chat-lifecycle.txtar` |
+| `chat status <target>` reports the newly created live chat | JAIL+tmux | `cmd/pfm/headless_command.go`, `internal/headless` | | `e2e/testdata/scripts/chat-lifecycle.txtar` |
 | a named chat resolves by its launch name before the first prompt creates a transcript or crumb | JAIL+tmux | `booting_row_jail_test.go`, `internal/compose/compose_test.go` | |
 | `chat new NAME --attach` → launch, then attach this terminal; `--await --attach` → rc 2 | JAIL+tmux | `chat_new_command.go`, `attach_jail_test.go` | |
 | `chat open <name                                                                                                                                                     | socket    | id                                                                          | self>` → attach action | JAIL+tmux | `chat_command.go`, `attach_jail_test.go` | |
@@ -603,18 +613,22 @@ Each row is one **session kind** crossed with the operations that touch it. This
 | a 2,147-rune `/compact` focus bypasses auto-file, is paced under one lock, fires byte-exact, and queues safely while busy — proven through `engine.inject` with `Chain: true` (`chat inject` itself no longer carries a `/compact` primary) | JAIL+tmux | `then_test.go`, `tmux_jail_test.go` | |
 | `--force-now` interrupts only a busy live target and marks the forced delivery | JAIL+tmux | `internal/inject` | |
 | signature: `/`-prefixed commands travel bare; plain text carries the sender identity | JAIL+tmux | `internal/inject` | |
-| `chat ask` delivers, waits and prints only the answer; timeout remains rc 5 | JAIL+tmux | `ask_command.go`, `internal/headless/converse.go` | |
+| `chat ask` delivers, waits and prints only the answer; timeout remains rc 5 | JAIL+tmux | `ask_command.go`, `internal/headless/converse.go` | | |
 | `chat read`, `last`, `stream`, `status`, and `watch` preserve transcript/state semantics | JAIL | `headless_command.go`, `internal/headless`, `internal/transcript` | |
-| `chat capture` resolves the target, requires a live pane, and prints full scrollback | JAIL+tmux | `chat_command.go` | |
-| `chat name` sends `/rename`, then converges that exact pane's window in the same process | JAIL+tmux | `chat_command.go`, `chat_name_jail_test.go` | B4 |
-| `chat kill` / `unkill` resolve names through the store; `self` shares the picker path | JAIL+tmux | `chat_command.go`, `kill_cli_engine_jail_test.go` | B2, B3 |
+| `chat read <target>` prints the target's transcript with its requested bounds | JAIL | `headless_command.go`, `internal/transcript` | | |
+| `chat keys [--delay ms] [--literal] [--capture] <target> <key>...` sends the requested tmux keys | JAIL+tmux | `chat_keys_command.go` | | |
+| `chat capture` resolves the target, requires a live pane, and prints full scrollback | JAIL+tmux | `chat_command.go` | | |
+| `chat name` sends `/rename`, then converges that exact pane's window in the same process | JAIL+tmux | `chat_command.go`, `chat_name_jail_test.go` | B4 | |
+| `chat resolve` after `chat name` reports the renamed chat's immutable socket, session, and id | JAIL+tmux | `cmd/pfm/chat_command.go`, `internal/resolve` | B4 | |
+| `chat kill` / `unkill` resolve names through the store; `self` shares the picker path | JAIL+tmux | `chat_command.go`, `kill_cli_engine_jail_test.go` | B2, B3 | |
 | `chat kill <id\|self>` on a live target also ends it (exit finisher); see § E for the shared `kill.Manager.Kill` flow rows covering all three doors and the reload `--hide` store-only exception | JAIL+tmux | `chat_command.go`, `kill_cli_engine_jail_test.go` | see § E |
-| `chat end` kills only the resolved chat server | JAIL+tmux | `chat_command.go` | |
+| `chat end` kills only the resolved chat server | JAIL+tmux | `chat_command.go` | | `e2e/testdata/scripts/chat-lifecycle.txtar` |
 | `chat find`, `save`, `load`, `branch`, `ls`, and `history` are all native Go | JAIL | `chat_satellite_command.go`, `chat_satellite_command_test.go` | |
 | `chat branch [name]` creates a real detached Claude/Codex fork on an immutable socket, preserves caller layout/focus, names Codex through its rename UI, defaults to `<parent>-branch`, and is explicitly reapable while untouched | JAIL+tmux | `branch_jail_test.go`, `internal/action/headless_fork_test.go`, `internal/reap/reap_test.go`, `reap_jail_test.go` | |
 | a bare fleet launch execs its tmux client so harness exit also ends the owning terminal | JAIL+PTY | `internal/installer/shim/shim_test.go`, `internal/installer/assets/shim/pfm.zsh` | |
-| `chat resolve <target>` prints immutable socket, tmux session and chat id | JAIL | `chat_command.go` | B1 |
-| exit contract: 0 delivered/queued, 2 usage, 3 dead, 4 unknown, 5 answer timeout, 6 undelivered | JAIL | `headless_command.go`, `headless_matrix_test.go`, `inject_cli_jail_test.go` | |
+| `chat resolve <target>` prints immutable socket, tmux session and chat id | JAIL | `chat_command.go` | B1 | |
+| every target-taking `chat` verb against a missing name prints the one `not-found` token and exits rc 4 | JAIL | `cmd/pfm/chat_dispatch.go`, `cmd/pfm/headless_matrix_test.go` (`TestUnknownChatIsRc4WithAMachineShape`) | | `e2e/testdata/scripts/no-such-chat.txtar` |
+| exit contract: 0 delivered/queued, 2 usage, 3 dead, 4 unknown, 5 answer timeout, 6 undelivered | JAIL | `headless_command.go`, `headless_matrix_test.go`, `inject_cli_jail_test.go` | | `e2e/testdata/scripts/no-such-chat.txtar` (rc 4 only) |
 | hidden root compatibility alias emits a deprecation; `run`, `dump`, and the old stream verb are gone | JAIL | `main.go`, `headless_matrix_test.go` | |
 | cache-window status stays compact, labels every shown unit, and omits a zero-hour field (`💾5m✗21m10s`, but `💾5m✗1h55m0s`); no prose is added | UNIT | `internal/statusline/render.go`, `statusline_test.go` | live display regression |
 
@@ -676,11 +690,13 @@ The Go action policy owns fresh Claude launches. The binary executes selected ac
 
 ## K — Installer and systemd units
 
-| flow | safety | expected behavior (source) | regression |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------- | ---------- |
+| flow | safety | expected behavior (source) | regression | Coverage |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------- | ---------- | --- |
 | bare `pfm install` previews the full plan, writes nothing, and ends with the exact `pfm install --yes` confirmation | JAIL | `install_command_test.go`, `internal/installer` | |
 | `pfm install --yes` applies the same classification as the preview; an executing name-sync service refuses before writes with actionable rc 97 | JAIL | `install_command_test.go`, installer tests | |
-| `pfm install --yes --skip-harvest` applies with `ProvisionHarvest=false` and prints exactly `harvestpy: skipped (blocked, not attempted)` without calling the provisioner | JAIL | `install_command_test.go`, `internal/installer/harvest_integration_test.go` | |
+| `pfm install --yes --skip-harvest` applies with `ProvisionHarvest=false` and prints exactly `harvestpy: skipped (blocked, not attempted)` without calling the provisioner | JAIL | `install_command_test.go`, `internal/installer/harvest_integration_test.go` | | `e2e/testdata/scripts/install-init.txtar` |
+| `pfm init <project>` scaffolds the project and writes `.professor/baseline.json` | JAIL | `cmd/pfm/init_command.go`, `internal/professor/baseline.go` | | `e2e/testdata/scripts/install-init.txtar` |
+| `pfm update check` after init prints the `UPDATED`, `NEW`, `GONE-UPSTREAM`, and `LOCAL-DELETED` state header | JAIL | `internal/professor/project.go`, `internal/update/project_test.go` | | `e2e/testdata/scripts/install-init.txtar` |
 | bare `pfm install --skip-harvest` previews `harvestpy: would skip (blocked, not attempted)` and preserves the flag in its confirmation | JAIL | `install_command_test.go`, `internal/installer/harvest_integration_test.go` | |
 | `pfm install --vscode` previews and selectively merges a PFM picker profile selected as the default terminal (a settings profile — never the extension's contributed `Professor`, which would make a window reload drop every restored terminal), AND the four terminal-persistence keys (`enablePersistentSessions` true, `persistentSessionReviveProcess` "never", `showExitAlert` false, `remote.autoForwardPorts` false) into VS Code JSONC; repeat installs are byte-idempotent, comments/foreign profiles survive, updates retain ownership, an owned `Professor` default (from the release that briefly selected it) moves back to `PFM` while any other operator override of an owned key is relinquished rather than fought back, and uninstall restores only owned fields | JAIL+e2e | `install_command_test.go`, `internal/installer/vscode_test.go`, `internal/installer/vscode_profile_migration_test.go`, `e2e/install_e2e_test.go` | |
 | `pfm install --vscode` links the staged Professor extension into `extensions/professor` of every VS Code product root present (the portable root is `$VSCODE_PORTABLE` itself), never creating a product that is absent; the ledger records each link; an ordinary install over a pre-extension ledger links it too; repeat installs are idempotent; a pre-existing non-link target is backed up and restored on uninstall; uninstall removes only links still pointing at pfm's staged copy; the embedded `package.json` profile title is the extension's contributed profile and is never the default pfm writes | JAIL | `internal/installer/vscode_extension_test.go` | |
@@ -704,7 +720,8 @@ The Go action policy owns fresh Claude launches. The binary executes selected ac
 | `pfm-name-sync.timer` 15-min drift fallback | JAIL+sh | `systemd/pfm-name-sync.timer` | |
 | `nameSync.interval` renders into BOTH schedulers from ONE value — launchd `StartInterval` in whole seconds and systemd `OnUnitInactiveSec` as the duration — and a caller with no config falls back to the shipped 15m instead of a unit systemd refuses | JAIL | `internal/installer/namesync_schedule.go`, `internal/installer/namesync_schedule_test.go` (`TestNameSyncIntervalRendersIntoBothSchedulers`, `TestNameSyncIntervalFallsBackToTheShippedDefault`) | issue #14 F12 |
 | `pfm install --yes` stages the systemd timer with the marker already rendered — an unrendered `OnUnitInactiveSec` is a unit systemd cannot parse | JAIL | `internal/installer/namesync_schedule_test.go` (`TestApplyStagesTheTimerWithTheConfiguredInterval`) | issue #14 F12 |
-| `pfm internal chat-server` (the shim's door) fails CLOSED on the title only: an unreadable config still opens the chat, the host keeps its title, the reason is on stderr; a socket naming no engine or leaving the tmux dir is refused before tmux runs | JAIL+tmux | `cmd/pfm/chat_server_command.go`, `cmd/pfm/chat_server_command_test.go` | issue #14 F10 |
+| `pfm internal chat-server` creates a detached chat server through `spawn.TmuxSpawner.NewSession` with `config.ChatServerOptions` | JAIL+tmux | `internal/hookentry/chat_server.go`, `internal/spawn/tmux.go` | issue #14 F10 | |
+| `pfm internal chat-server` (the shim's door) fails CLOSED on the title only: an unreadable config still opens the chat, the host keeps its title, the reason is on stderr; a socket naming no engine or leaving the tmux dir is refused before tmux runs | JAIL+tmux | `internal/hookentry/chat_server.go`, `internal/hookentry/chat_server_test.go` | issue #14 F10 | |
 | `pfm-name-sync.service` `ExecStart` runs the BINARY, never a `.sh` | JAIL+sh | `systemd/pfm-name-sync.service` | |
 | installer retires the carrier, old units, script links, statusline shell, segments and Python refreshers | JAIL | `internal/installer`, installer tests | |
 | installer rewires Claude and Codex clear-kill, statusline, usage and dream hooks while preserving unrelated entries | JAIL | `internal/installer`, installer tests | |

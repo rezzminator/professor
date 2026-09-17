@@ -145,6 +145,19 @@ func prepareCoverageDirectory() error {
 	return nil
 }
 
+func TestScripts(t *testing.T) {
+	requireE2EFence(t)
+	source := sourceRepo(t)
+	testscript.Run(t, testscript.Params{
+		Dir:                 "testdata/scripts",
+		RequireExplicitExec: true,
+		RequireUniqueNames:  true,
+		Setup: func(env *testscript.Env) error {
+			return setupScriptJail(env, source)
+		},
+	})
+}
+
 func setupScriptJail(env *testscript.Env, source string) error {
 	root, err := testjail.CreateShortRoot()
 	if err != nil {

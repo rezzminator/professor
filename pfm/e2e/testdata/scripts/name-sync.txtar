@@ -1,0 +1,21 @@
+# The pane status line is the same synthetic label fixture used by the jail test.
+exec jail-tmux -L cc-1800000099-42-1 -f /dev/null new-session -d -s cc-1800000099-42-1 -n ORIGINAL sh $WORK/name-fixture.sh
+
+# Preview reports the same rename but leaves the window untouched.
+exec jail-pfm name-sync
+stdout 'would rename cc-1800000099-42-1'
+stdout 'ORIGINAL -> PREVIEW_TARGET'
+exec jail-tmux -L cc-1800000099-42-1 display-message -p -t cc-1800000099-42-1 '#{window_name}'
+stdout '^ORIGINAL$'
+! stdout PREVIEW_TARGET
+
+# Apply performs the planned rename.
+exec jail-pfm name-sync --apply
+stdout 'renamed cc-1800000099-42-1'
+exec jail-tmux -L cc-1800000099-42-1 display-message -p -t cc-1800000099-42-1 '#{window_name}'
+stdout '^PREVIEW_TARGET$'
+
+-- name-fixture.sh --
+#!/bin/sh
+printf '🥇 acct  🔖 PREVIEW_TARGET │ 42%%\n'
+exec sleep 120

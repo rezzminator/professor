@@ -236,3 +236,35 @@ Each step is one commit (gitter; pathspec = the step's files plus `.arch/`), lea
 4. **Test doubles in two `TestMain`s.** `cmd/pfm/testmain_test.go` and `internal/doctor/testmain_test.go` each hold `noNetworkHarvestDoctor` and the dependency-probe fake (~60 lines). Recommendation: accept the twin — a `doctor/doctortest` package would be importable by `cmd/pfm` but not by doctor's own internal tests, and making doctor's tests external loses every unexported probe. Cost: one fake to update in two places when `harvestpy.CheckReport` changes.
 5. **`internal_update_check.go` splits across two packages.** Recommendation: as designed (picker half in `picker/update_row.go`, entry body in `hookentry/update_check.go`) — the alternative of moving all of it to `updatecheck` would make `updatecheck` (a leaf) import `compose`, `ui` and `installer`. Cost: the `pfm internal update-check` argv the picker builds and the entry that parses it live in two files; the wire is the argv, and both name it in one comment each.
 6. **`engineCapabilityExceptions` stays in `engines.go`.** Recommendation: pass it into `doctor.Run` as `Dependencies`; folding it into `engine.Descriptor` (an engine declaring what it lacks) is right but changes the registry's shape, not a move. Cost: one struct with one field until then.
+
+## Ceiling raises in the reliability train
+
+The closed-world join of `28c1db02` against HEAD has exactly **23** paths whose ceiling is higher at HEAD: 13 source files and 10 test files. For each path, the first raise is in `70b0db62`; its parent-to-commit file diff was inspected at that commit (rather than inferred from the later tree) and contains only the `gofumpt`/`gci`/`golines(120)` rewrite: import regrouping, declaration/call wrapping, and the trailing commas required by that wrapping. Thus all 23 are `reflow`, none are `moved-in`, and none are `UNATTRIBUTED`. “First new” is the ceiling written by that raising commit; “current” is the HEAD ceiling, so later shrinkage and merge growth are not folded into the attribution.
+
+| File | Old (`28c1db02`) | First new | First-raise commit | Cause | Current | Later train ceiling movement |
+| --- | ---: | ---: | --- | --- | ---: | --- |
+| `cmd/pfm/chat_satellite_command.go` | 944 | 992 | `70b0db62` | `reflow` | 970 | tightened 22 |
+| `internal/compose/compose.go` | 1,312 | 1,315 | `70b0db62` | `reflow` | 1,355 | `41e78a5d` merge growth +40 |
+| `internal/config/config.go` | 1,652 | 1,759 | `70b0db62` | `reflow` | 1,750 | tightened 9 |
+| `internal/harvestmcp/service.go` | 999 | 1,266 | `70b0db62` | `reflow` | 1,266 | none |
+| `internal/harvestpy/provision.go` | 801 | 835 | `70b0db62` | `reflow` | 835 | none |
+| `internal/inject/engine.go` | 1,891 | 1,899 | `70b0db62` | `reflow` | 1,905 | `41e78a5d` merge growth +6 |
+| `internal/installer/installer.go` | 2,451 | 2,536 | `70b0db62` | `reflow` | 2,536 | `41e78a5d` merge growth +15 to 2,551, later tightened 15 |
+| `internal/reload/reload.go` | 963 | 1,032 | `70b0db62` | `reflow` | 1,032 | none |
+| `internal/stats/limits.go` | 1,309 | 1,344 | `70b0db62` | `reflow` | 1,344 | none |
+| `internal/statusline/render.go` | 1,112 | 1,118 | `70b0db62` | `reflow` | 1,117 | tightened 1 |
+| `internal/ui/cosmos.go` | 1,482 | 1,555 | `70b0db62` | `reflow` | 1,593 | `41e78a5d` merge growth +40 to 1,595, later tightened 2 |
+| `internal/ui/model.go` | 1,610 | 1,635 | `70b0db62` | `reflow` | 1,620 | tightened 15 |
+| `internal/ui/render.go` | 1,178 | 1,188 | `70b0db62` | `reflow` | 1,188 | none |
+| `cmd/pfm/reconcile_codex_panes_jail_test.go` | 1,224 | 1,234 | `70b0db62` | `reflow` | 1,229 | tightened 5 |
+| `e2e/install_e2e_test.go` | 1,442 | 1,526 | `70b0db62` | `reflow` | 1,506 | tightened 20 |
+| `internal/harvestpy/harvestpy_test.go` | 1,107 | 1,202 | `70b0db62` | `reflow` | 1,201 | tightened 1 |
+| `internal/index/codexstate_test.go` | 1,067 | 1,073 | `70b0db62` | `reflow` | 1,073 | none |
+| `internal/index/index_test.go` | 1,019 | 1,025 | `70b0db62` | `reflow` | 1,025 | none |
+| `internal/inject/engine_test.go` | 1,735 | 1,783 | `70b0db62` | `reflow` | 1,798 | `41e78a5d` merge growth +15 |
+| `internal/installer/installer_test.go` | 1,700 | 1,798 | `70b0db62` | `reflow` | 1,798 | none |
+| `internal/mcpserv/server_test.go` | 1,076 | 1,080 | `70b0db62` | `reflow` | 1,080 | none |
+| `internal/stats/limits_test.go` | 1,854 | 1,980 | `70b0db62` | `reflow` | 1,980 | none |
+| `internal/ui/chronoscope_test.go` | 1,291 | 1,444 | `70b0db62` | `reflow` | 1,444 | none |
+
+Classification: **23 `reflow`; 0 `moved-in`; 0 `UNATTRIBUTED`**. The later `41e78a5d` ratchet commit recorded growth from the develop merge in five of these files independently of the formatter raise (four source files and one test); those deltas are recorded above. Because the attribution pass found no `UNATTRIBUTED` raise, it mandates no manual ceiling re-tightening.

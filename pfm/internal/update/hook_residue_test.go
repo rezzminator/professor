@@ -1,10 +1,13 @@
-package main
+package update
 
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/installer"
 )
 
 // TestUpdateRollbackResidueNamesTheStrandedHookCommands extends
@@ -14,10 +17,14 @@ import (
 // message names the stranded entry instead of only saying "reconcile it by
 // hand" — the operator's repair instruction must be concrete.
 func TestUpdateRollbackResidueNamesTheStrandedHookCommands(t *testing.T) {
-	stranded := []byte(
-		"{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"pfm internal exit-intercept-vnext\"}]}]}\n}\n",
-	)
+	installer.SetImplementedSubcommands(nil, nil)
+	var stranded []byte
 	settings, _, stderr := updateHookRollbackFixture(t, func(settings string) {
+		home := filepath.Dir(filepath.Dir(filepath.Dir(settings)))
+		command := filepath.Join(home, ".local", "bin", "pfm") + " internal exit-intercept-vnext"
+		stranded = []byte(
+			"{\n  \"hooks\": {\"UserPromptSubmit\": [{\"hooks\": [{\"command\": \"" + command + "\"}]}]}\n}\n",
+		)
 		if err := os.WriteFile(settings, stranded, 0o600); err != nil {
 			t.Fatal(err)
 		}

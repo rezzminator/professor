@@ -1,6 +1,4 @@
 cmd/pfm/reconcile_codex_panes_jail_test.go 1229
-cmd/pfm/update_command_test.go 1279
-cmd/pfm/update_project_test.go 1018
 e2e/install_e2e_test.go 1526
 internal/compose/compose_test.go 1121
 internal/harvestmcp/remote_legacy_parity_test.go 1273
@@ -14,3 +12,5 @@ internal/kill/kill_test.go 1378
 internal/mcpserv/server_test.go 1080
 internal/stats/limits_test.go 1980
 internal/ui/chronoscope_test.go 1444
+internal/update/project_test.go 1051
+internal/update/run_test.go 1148

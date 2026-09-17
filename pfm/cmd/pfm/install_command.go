@@ -13,6 +13,7 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/professor"
 	"hostops/pfm/internal/updatecheck"
 )
 
@@ -255,7 +256,7 @@ func newInstallerOptions(
 // checkout (a cron job, a different cwd) must still find its own clone
 // rather than falling through empty to the release manifest URL.
 func resolveInstallSourceRepo(home string) string {
-	if repo := discoverSourceRepo(); repo != "" {
+	if repo := professor.DiscoverSourceRepo(); repo != "" {
 		return repo
 	}
 	if strings.TrimSpace(home) == "" {

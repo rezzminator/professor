@@ -1,4 +1,4 @@
-package main
+package update
 
 import (
 	"bytes"
@@ -20,7 +20,7 @@ import (
 // candidate process only.
 func updateConfigMigrationTestRuntime(
 	t *testing.T,
-) (runtime commandRuntime, repo, legacyPath, migratedPath string, originalContent []byte) {
+) (runtime pfmconfig.Runtime, repo, legacyPath, migratedPath string, originalContent []byte) {
 	t.Helper()
 	runtime, repo = updateRollbackTestRuntime(t)
 	configDir := filepath.Join(runtime.Paths.Home, ".config", "pfm")
@@ -54,20 +54,20 @@ func TestUpdateCandidateDoctorReceivesTheMigratedConfigPath(t *testing.T) {
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		// Simulates the candidate's install migrating the pre-split config.
 		return os.Rename(legacyPath, migratedPath)
 	}
 	var capturedConfigPath string
-	updateRunDoctor = func(_ context.Context, _ string, _ commandRuntime, configPath string, _ bool, _, _ io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(_ context.Context, _ string, _ pfmconfig.Runtime, configPath string, _ bool, _, _ io.Writer) (doctorOutcome, error) {
 		capturedConfigPath = configPath
 		return doctorOutcome{}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
-		t.Fatalf("runUpdate() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("Run() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if capturedConfigPath != migratedPath {
 		t.Fatalf("candidate doctor --config=%q, want the migrated path %q", capturedConfigPath, migratedPath)
@@ -105,23 +105,23 @@ func TestUpdateRollbackRestoresTheConfigFilesTheMigrationRenamed(t *testing.T) {
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return os.Rename(legacyPath, migratedPath)
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
-	updateRollbackInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf("runUpdate() code=0, want the candidate doctor failure to roll back; stdout=%q", stdout.String())
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
+		t.Fatalf("Run() code=0, want the candidate doctor failure to roll back; stdout=%q", stdout.String())
 	}
 	if got, err := os.ReadFile(legacyPath); err != nil || !bytes.Equal(got, originalContent) {
 		t.Fatalf("config.json after rollback=%q err=%v, want the original bytes %q restored", got, err, originalContent)
@@ -129,7 +129,11 @@ func TestUpdateRollbackRestoresTheConfigFilesTheMigrationRenamed(t *testing.T) {
 	if _, err := os.Stat(migratedPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("pfm.config.json after rollback: stat err=%v, want it gone (the migration's rename undone)", err)
 	}
-	if !strings.Contains(stderr.String(), "restored "+legacyPath+" to its pre-update state") {
+	physicalLegacyPath, err := filepath.EvalSymlinks(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.String(), "restored "+physicalLegacyPath+" to its pre-update state") {
 		t.Fatalf("stderr=%q, want the restored-config-file report", stderr.String())
 	}
 }
@@ -153,27 +157,27 @@ func TestUpdateRollbackInstallSeesAnExistingConfigPath(t *testing.T) {
 	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
 	}
-	updateApplyInstall = func(context.Context, string, string, string, commandRuntime, bool, io.Writer, io.Writer) error {
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
 		return os.Rename(legacyPath, migratedPath)
 	}
-	updateRunDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
 	}
 	stubUpdateBaselineDoctor(t, doctorOutcome{})
 	rollbackInstallSawConfig := false
-	updateRollbackInstall = func(_ context.Context, _, _, _ string, rollbackRuntime commandRuntime, _ bool, _, _ io.Writer) error {
+	updateRollbackInstall = func(_ context.Context, _, _, _ string, rollbackRuntime pfmconfig.Runtime, _ bool, _, _ io.Writer) error {
 		if _, err := os.Stat(rollbackRuntime.Config.Path); err == nil {
 			rollbackInstallSawConfig = true
 		}
 		return nil
 	}
-	updateRollbackDoctor = func(context.Context, string, commandRuntime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
 		return doctorOutcome{}, nil
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
-		t.Fatalf("runUpdate() code=0, want the candidate doctor failure to roll back; stdout=%q", stdout.String())
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
+		t.Fatalf("Run() code=0, want the candidate doctor failure to roll back; stdout=%q", stdout.String())
 	}
 	if !rollbackInstallSawConfig {
 		t.Fatalf("rollback install ran with runtime.Config.Path=%q missing from disk", runtime.Config.Path)

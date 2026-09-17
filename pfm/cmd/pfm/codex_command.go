@@ -11,6 +11,7 @@ import (
 
 	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/codexgen"
+	"hostops/pfm/internal/professor"
 )
 
 const agentsCommand = "agents"
@@ -199,7 +200,7 @@ func codexRepoRoot() (string, error) {
 		}
 		if fallback == "" {
 			if info, statErr := os.Stat(
-				filepath.Join(dir, claudeInstructionsFile),
+				filepath.Join(dir, professor.ClaudeInstructionsFile),
 			); statErr == nil &&
 				info.Mode().IsRegular() {
 				fallback = dir

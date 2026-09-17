@@ -1,6 +1,6 @@
 // Shared scripted-executable fixtures for update_command_test.go.
 
-package main
+package update
 
 import (
 	"context"

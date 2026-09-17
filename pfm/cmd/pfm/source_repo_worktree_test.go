@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"hostops/pfm/internal/professor"
 )
 
 // TestDiscoverSourceRepoMapsALinkedWorktreeToItsMainCheckout pins the source
@@ -54,7 +56,7 @@ func TestDiscoverSourceRepoMapsALinkedWorktreeToItsMainCheckout(t *testing.T) {
 	git("worktree", "add", "--detach", "-q", worktree, "HEAD")
 
 	t.Chdir(filepath.Join(worktree, "pfm"))
-	got, err := filepath.EvalSymlinks(discoverSourceRepo())
+	got, err := filepath.EvalSymlinks(professor.DiscoverSourceRepo())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +70,7 @@ func TestDiscoverSourceRepoMapsALinkedWorktreeToItsMainCheckout(t *testing.T) {
 
 	// The main checkout itself still discovers as itself.
 	t.Chdir(clone)
-	if got, _ := filepath.EvalSymlinks(discoverSourceRepo()); got != want {
+	if got, _ := filepath.EvalSymlinks(professor.DiscoverSourceRepo()); got != want {
 		t.Fatalf("discoverSourceRepo() from the main checkout = %q, want %q", got, want)
 	}
 }

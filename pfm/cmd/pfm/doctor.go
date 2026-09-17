@@ -31,6 +31,7 @@ import (
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
 	"hostops/pfm/internal/paths"
+	"hostops/pfm/internal/professor"
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/stats"
 	"hostops/pfm/internal/store"
@@ -311,7 +312,7 @@ func runDoctor(
 	}
 
 	tally.warnings += config.ReportRoots(stdout, runtime.Config.Accounts, runtime.Config.CodexAccounts, claudeAbsent)
-	tally.warnings += printProfessorDoctor(stdout, ".", resolved.Home)
+	tally.warnings += professor.PrintDoctor(stdout, ".", resolved.Home)
 
 	tally.warnings += printCodexPaneBindingDoctor(ctx, stdout, database, runtime)
 

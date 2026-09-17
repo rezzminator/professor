@@ -1,4 +1,4 @@
-package main
+package update
 
 import (
 	"bytes"
@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
-	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/installer"
 )
 
@@ -38,7 +38,7 @@ type updateFileSnapshot struct {
 // binary, which reads only the legacy name — without these files restored
 // first, it converges on defaults and tears down every MCP service the real
 // config enabled, including the launch agent.
-func snapshotUpdateOwnedFiles(runtime commandRuntime) ([]updateFileSnapshot, error) {
+func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, error) {
 	home := runtime.Paths.Home
 	candidates := []string{filepath.Join(filepath.Dir(installer.SourceRepoPath(home)), "settings-hook-ownership.json")}
 	for _, hook := range installer.ExpectedHooks(home, runtime.Config) {
@@ -47,10 +47,10 @@ func snapshotUpdateOwnedFiles(runtime commandRuntime) ([]updateFileSnapshot, err
 	if runtime.Config.Path != "" {
 		configDir := filepath.Dir(runtime.Config.Path)
 		for _, name := range []string{
-			pfmconfig.FileName,
-			pfmconfig.LegacyFileName,
-			pfmconfig.HarvesterFileName,
-			pfmconfig.LegacyBackupName,
+			config.FileName,
+			config.LegacyFileName,
+			config.HarvesterFileName,
+			config.LegacyBackupName,
 		} {
 			candidates = append(candidates, filepath.Join(configDir, name))
 		}
@@ -166,7 +166,7 @@ func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {
 // readUpdateHookFile: it is never folded into the "gone/migrated" notes,
 // which would misreport a stat failure as an absent file. The caller treats
 // a returned error as a failed update step.
-func updateConfigPathAfterInstall(runtime commandRuntime) (path, note string, err error) {
+func updateConfigPathAfterInstall(runtime config.Runtime) (path, note string, err error) {
 	original := runtime.Config.Path
 	if original == "" {
 		return "", "", nil
@@ -176,11 +176,11 @@ func updateConfigPathAfterInstall(runtime commandRuntime) (path, note string, er
 	} else if !errors.Is(statErr, fs.ErrNotExist) {
 		return "", "", fmt.Errorf("stat config %s: %w", original, statErr)
 	}
-	migrated := filepath.Join(filepath.Dir(original), pfmconfig.FileName)
+	migrated := filepath.Join(filepath.Dir(original), config.FileName)
 	if _, statErr := os.Stat(migrated); statErr == nil {
 		return migrated, fmt.Sprintf("config migrated by the update: %s → %s", original, migrated), nil
 	} else if !errors.Is(statErr, fs.ErrNotExist) {
 		return "", "", fmt.Errorf("stat migrated config %s: %w", migrated, statErr)
 	}
-	return "", fmt.Sprintf("config %s is gone after install and no %s replaced it", original, pfmconfig.FileName), nil
+	return "", fmt.Sprintf("config %s is gone after install and no %s replaced it", original, config.FileName), nil
 }

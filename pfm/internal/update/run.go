@@ -1,4 +1,4 @@
-package main
+package update
 
 import (
 	"bytes"
@@ -17,16 +17,19 @@ import (
 
 	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/cli"
-	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/professor"
 	"hostops/pfm/internal/semver"
-	"hostops/pfm/internal/update"
 )
 
 const (
-	checkAction   = "check"
-	doctorCommand = "doctor"
+	checkAction    = "check"
+	doctorCommand  = "doctor"
+	updateCommand  = "update"
+	installCommand = "install"
+	jsonFormat     = "json"
 )
 
 // These seams keep update tests entirely inside their throwaway repositories;
@@ -39,6 +42,26 @@ var (
 	updateRollbackInstall = applyUpdateInstall
 	updateRollbackDoctor  = runUpdateDoctor
 )
+
+// StubBaselineDoctorForTest replaces the pre-update subprocess doctor with a
+// clean verdict and returns a restore function. It exists for cmd/pfm's two
+// retained binary-contract tests: os.Executable there is the Go test binary,
+// not a runnable pfm binary.
+func StubBaselineDoctorForTest() func() {
+	previous := updateBaselineDoctor
+	updateBaselineDoctor = func(
+		context.Context,
+		config.Runtime,
+		bool,
+		io.Writer,
+		io.Writer,
+	) (doctorOutcome, error) {
+		return doctorOutcome{}, nil
+	}
+	return func() {
+		updateBaselineDoctor = previous
+	}
+}
 
 // doctorOutcome carries a doctor's exit/tallies and captured output for diffs.
 type doctorOutcome struct {
@@ -129,16 +152,17 @@ func rollbackDoctorPredatesFailureTiers(output string) bool {
 		!strings.Contains(output, "doctor: clean")
 }
 
-func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+// Run replaces the installed binary with a reproducible candidate, doctors it, and rolls back an untrusted verdict.
+func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) int {
 	if len(args) > 0 {
 		switch args[0] {
 		case checkAction, "adopt", "pin", "ignore", "drop":
-			runtime, err := pfmconfig.OptionalRuntime(runtimes)
+			runtime, err := config.OptionalRuntime(runtimes)
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
 				return 1
 			}
-			return runProjectUpdate(args[0], args[1:], stdout, stderr, runtime)
+			return professor.RunProjectUpdate(args[0], args[1:], stdout, stderr, runtime)
 		}
 	}
 	flags := cli.NewFlagSet(
@@ -159,7 +183,7 @@ func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		flags.Usage()
 		return 2
 	}
-	runtime, err := pfmconfig.OptionalRuntime(runtimes)
+	runtime, err := config.OptionalRuntime(runtimes)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm update: config: %v\n", err)
 		return 1
@@ -181,16 +205,11 @@ func runUpdate(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		fmt.Fprintf(stderr, "pfm update: %v\n", err)
 		return 1
 	}
-	root, found, err := resolveProjectRoot(*projectRoot)
-	if err != nil {
-		writeProjectFailure(stdout, *jsonOutput, err)
-		return 1
+	postArgs := []string{"--root", *projectRoot}
+	if *jsonOutput {
+		postArgs = append(postArgs, "--json")
 	}
-	if found {
-		return renderProjectCheck(root, runtime.Paths.Home, *jsonOutput, stdout)
-	}
-	writeProjectUnmanaged(stdout, *jsonOutput)
-	return 0
+	return professor.RunProjectUpdate("", postArgs, stdout, stderr, runtime)
 }
 
 func updateRepository(
@@ -198,7 +217,7 @@ func updateRepository(
 	repo, requestedTag string,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
-	runtime commandRuntime,
+	runtime config.Runtime,
 ) (err error) {
 	previousRef, err := updateGitOutput(ctx, repo, "rev-parse", "--verify", "HEAD")
 	if err != nil {
@@ -548,7 +567,7 @@ func releaseNotesForUpdate(
 	if err != nil {
 		return previousTag, nil, fmt.Errorf("list release notes at %s: %w", target, err)
 	}
-	paths, err = update.ReleaseNotes(previousTag, target, strings.Split(listing, "\n"))
+	paths, err = ReleaseNotes(previousTag, target, strings.Split(listing, "\n"))
 	return previousTag, paths, err
 }
 
@@ -598,7 +617,7 @@ func rollbackUpdateState(
 	sourceAdvanced bool,
 	replacements []updateReplacement,
 	hookSnapshots []updateFileSnapshot,
-	runtime commandRuntime,
+	runtime config.Runtime,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
 ) error {
@@ -754,7 +773,7 @@ func copyUpdateFile(source, target string) error {
 func applyUpdateInstall(
 	ctx context.Context,
 	candidate, repo, sourceRepo string,
-	runtime commandRuntime,
+	runtime config.Runtime,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
 ) error {
@@ -789,7 +808,7 @@ func applyUpdateInstall(
 func runUpdateDoctor(
 	ctx context.Context,
 	candidate string,
-	_ commandRuntime,
+	_ config.Runtime,
 	configPath string,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
@@ -844,7 +863,7 @@ func runUpdateDoctor(
 // baseline to compare against."
 func runUpdateBaselineDoctor(
 	ctx context.Context,
-	runtime commandRuntime,
+	runtime config.Runtime,
 	skipHarvest bool,
 	stdout, stderr io.Writer,
 ) (doctorOutcome, error) {

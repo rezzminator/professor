@@ -19,6 +19,7 @@ import (
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/stale"
 	"hostops/pfm/internal/store"
+	"hostops/pfm/internal/update"
 )
 
 const (
@@ -36,6 +37,8 @@ const (
 	installCommand   = "install"
 	mcpCommand       = "mcp"
 	updateCommand    = "update"
+	doctorCommand    = "doctor"
+	checkAction      = "check"
 )
 
 var version = config.DevelopmentVersion
@@ -134,7 +137,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "uninstall":
 		return runUninstall(args[1:], stdout, stderr, runtime)
 	case "update":
-		return runUpdate(args[1:], stdout, stderr, runtime)
+		return update.Run(args[1:], stdout, stderr, runtime)
 	case "init":
 		return runInit(args[1:], stdout, stderr, runtime)
 	case "whoami":

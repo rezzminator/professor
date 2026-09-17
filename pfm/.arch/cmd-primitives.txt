@@ -6,5 +6,3 @@ cmd/pfm/doctor_prepush.go 2
 cmd/pfm/harvest_command.go 1
 cmd/pfm/headless_exec_command.go 1
 cmd/pfm/internal_update_check.go 1
-cmd/pfm/update_command.go 4
-cmd/pfm/update_project.go 1

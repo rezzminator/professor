@@ -1,4 +1,4 @@
-package main
+package update
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	config "hostops/pfm/internal/config"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/professor"
 )
@@ -21,9 +22,9 @@ func TestUpdateCheckReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	before := projectTreeDigest(t, fixture.project)
 	var stdout, stderr bytes.Buffer
-	code := runUpdate([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime)
+	code := Run([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime)
 	if code != 3 {
-		t.Fatalf("runUpdate(check) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("Run(check) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{
 		"current       1",
@@ -51,7 +52,7 @@ func TestUpdateCheckReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
 func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate(
+	if code := Run(
 		[]string{"pin", ".claude/updated-one.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -72,7 +73,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"check", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -88,7 +89,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"pin", "--template", "project/new.md", ".claude/new.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -98,7 +99,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"pin", "--all", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -108,7 +109,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"drop", ".claude/gone.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -119,7 +120,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	writeProjectFixtureFile(t, fixture.project, ".claude/deleted.md", "restored locally\n")
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"pin", ".claude/deleted.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -129,7 +130,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"check", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -143,7 +144,7 @@ func TestUpdatePinAdvancesOnlySelectedFilesAndDropClearsDeferredStates(t *testin
 func TestUpdateCheckJSONIsOneObjectAndUnreadableBaselineFails(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate(
+	if code := Run(
 		[]string{"check", "--json", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -164,7 +165,7 @@ func TestUpdateCheckJSONIsOneObjectAndUnreadableBaselineFails(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"check", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -172,23 +173,6 @@ func TestUpdateCheckJSONIsOneObjectAndUnreadableBaselineFails(t *testing.T) {
 	); code != 1 ||
 		!strings.Contains(stdout.String(), "FAILED — BASELINE-MALFORMED") {
 		t.Fatalf("malformed check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-}
-
-func TestProfessorDoctorProjectLine(t *testing.T) {
-	fixture := newProjectUpdateFixture(t)
-	var output bytes.Buffer
-	warnings := printProfessorDoctor(&output, fixture.project, fixture.runtime.Paths.Home)
-	if warnings != 0 || !strings.Contains(output.String(), "professor: current 1 · review-required 5") {
-		t.Fatalf("doctor warnings=%d output=%q", warnings, output.String())
-	}
-	if err := os.WriteFile(professor.BaselinePath(fixture.project), []byte("{"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	output.Reset()
-	warnings = printProfessorDoctor(&output, fixture.project, fixture.runtime.Paths.Home)
-	if warnings != 1 || !strings.Contains(output.String(), "professor: UNREADABLE") {
-		t.Fatalf("unreadable doctor warnings=%d output=%q", warnings, output.String())
 	}
 }
 
@@ -205,28 +189,21 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	writeProjectFixtureFile(t, project, "CLAUDE.md", "# local\n")
 	writeProjectFixtureFile(t, project, ".claude/commands/dev.md", "---\nname: dev\n---\nlocal\n")
 	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 	headSHA := projectGitShortSHA(t, store)
 
-	storeStruct, err := professor.ResolveStore(project, home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	plan, err := planInitCopies(storeStruct)
-	if err != nil {
-		t.Fatal(err)
-	}
+	const planSize = 11
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("adopt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "adopted 2 file(s)") {
 		t.Fatalf("adopt stdout=%q", stdout.String())
 	}
-	wantAbsent := len(plan) - 2
+	wantAbsent := planSize - 2
 	if !strings.Contains(stdout.String(), fmt.Sprintf("absent        %d", wantAbsent)) {
-		t.Fatalf("adopt absent count stdout=%q, want absent %d (plan size %d)", stdout.String(), wantAbsent, len(plan))
+		t.Fatalf("adopt absent count stdout=%q, want absent %d (plan size %d)", stdout.String(), wantAbsent, planSize)
 	}
 
 	baseline, err := professor.Load(project)
@@ -242,7 +219,7 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("second adopt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "adopted 0 file(s)") ||
@@ -256,10 +233,10 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	// carries templates/project/agents/per-project/developer.md — a file
 	// planInitCopies deliberately skips, so it is never in plan and is
 	// never absent, but check still counts it NEW: NEW = plan size - 2 + 1.
-	if code := runUpdate([]string{"check", "--root", project}, &stdout, &stderr, runtime); code != 3 {
+	if code := Run([]string{"check", "--root", project}, &stdout, &stderr, runtime); code != 3 {
 		t.Fatalf("check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	wantNew := len(plan) - 2 + 1
+	wantNew := planSize - 2 + 1
 	for _, want := range []string{"current       2", fmt.Sprintf("NEW           %d", wantNew)} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("check output missing %q:\n%s", want, stdout.String())
@@ -280,10 +257,10 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 	writeProjectFixtureFile(t, project, ".claude/commands/dev.md", "local dev\n")
 	writeProjectFixtureFile(t, project, ".claude/commands/later.md", "local later\n")
 	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"adopt", "--root", project, "--at", oldSHA}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"adopt", "--root", project, "--at", oldSHA}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("adopt --at code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "absent-at-ref 1") {
@@ -313,7 +290,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"check", "--root", project}, &stdout, &stderr, runtime); code != 3 {
+	if code := Run([]string{"check", "--root", project}, &stdout, &stderr, runtime); code != 3 {
 		t.Fatalf("check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), ".claude/commands/dev.md   project/commands/dev.md  pinned @"+oldSHA) ||
@@ -355,7 +332,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"adopt", "--root", noGitProject, "--at", "HEAD"},
 		&stdout,
 		&stderr,
@@ -367,7 +344,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"adopt", "--root", project, "--at", "nosuchref"},
 		&stdout,
 		&stderr,
@@ -385,7 +362,7 @@ func TestUpdateAdoptAtPinsAgainstBlueprintRefAndValidatesIt(t *testing.T) {
 func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 	fixture := newProjectUpdateFixture(t)
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate(
+	if code := Run(
 		[]string{"ignore", "project/new.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -399,7 +376,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 3 {
+	if code := Run([]string{"check", "--root", fixture.project}, &stdout, &stderr, fixture.runtime); code != 3 {
 		t.Fatalf("check after ignore code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, want := range []string{"NEW           0", "ignored       1", "REVIEW REQUIRED — 4 items"} {
@@ -410,7 +387,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"check", "--json", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -429,7 +406,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"ignore", "project/current.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -441,7 +418,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"ignore", "project/nope.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -453,7 +430,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"ignore", "--undo", "project/new.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -464,7 +441,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"check", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -476,7 +453,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"ignore", "project/new.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -487,7 +464,7 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 	writeProjectFixtureFile(t, fixture.project, ".claude/new.md", "adapted locally\n")
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"pin", "--template", "project/new.md", ".claude/new.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -511,9 +488,9 @@ func TestUpdateIgnoreManagesBaselineIgnored(t *testing.T) {
 func TestUpdateCheckMissingBaselineNamesAdoptCommand(t *testing.T) {
 	dir := t.TempDir()
 	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"check", "--root", dir}, &stdout, &stderr, runtime); code != 1 {
+	if code := Run([]string{"check", "--root", dir}, &stdout, &stderr, runtime); code != 1 {
 		t.Fatalf("missing baseline check code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "pfm update adopt pins an existing install") {
@@ -547,10 +524,10 @@ func TestUpdateAdoptRemovesNewlyPinnedTemplateFromIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("adopt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	got, err := professor.Load(project)
@@ -593,10 +570,10 @@ func TestUpdateIgnoreRefusesDirectoryTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 
 	var stdout, stderr bytes.Buffer
-	code := runUpdate([]string{"ignore", "project/commands", "--root", project}, &stdout, &stderr, runtime)
+	code := Run([]string{"ignore", "project/commands", "--root", project}, &stdout, &stderr, runtime)
 	if code != 1 {
 		t.Fatalf("ignore directory code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -627,10 +604,10 @@ func TestUpdateAdoptStdoutFirstLineNamesRootAndBlueprint(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
+	if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("adopt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	firstLine, _, _ := strings.Cut(stdout.String(), "\n")
@@ -647,7 +624,7 @@ func TestUpdateAdoptStdoutFirstLineNamesRootAndBlueprint(t *testing.T) {
 func TestUpdateAdoptNothingToPinReportsBlueprintPinUnchanged(t *testing.T) {
 	store := newScaffoldStoreFixture(t)
 	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 
 	t.Run("fresh baseline", func(t *testing.T) {
 		project := t.TempDir()
@@ -663,7 +640,7 @@ func TestUpdateAdoptNothingToPinReportsBlueprintPinUnchanged(t *testing.T) {
 			t.Fatal(err)
 		}
 		var stdout, stderr bytes.Buffer
-		if code := runUpdate([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
+		if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
 			t.Fatalf("adopt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		if !strings.Contains(stdout.String(), "adopted 0 file(s); blueprint pin unchanged (none)") {
@@ -703,7 +680,7 @@ func TestUpdateAdoptNothingToPinReportsBlueprintPinUnchanged(t *testing.T) {
 			t.Fatal(err)
 		}
 		var stdout, stderr bytes.Buffer
-		if code := runUpdate([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
+		if code := Run([]string{"adopt", "--root", project}, &stdout, &stderr, runtime); code != 0 {
 			t.Fatalf("adopt code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 		}
 		if !strings.Contains(stdout.String(), "adopted 0 file(s); blueprint pin unchanged (abc1234)") {
@@ -759,10 +736,10 @@ func TestUpdateIgnoreRefusalNamesEveryPinningLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 	home := t.TempDir()
-	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 
 	var stdout, stderr bytes.Buffer
-	code := runUpdate([]string{"ignore", "project/commands/dev.md", "--root", project}, &stdout, &stderr, runtime)
+	code := Run([]string{"ignore", "project/commands/dev.md", "--root", project}, &stdout, &stderr, runtime)
 	if code != 1 {
 		t.Fatalf("ignore pinned-twice code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
@@ -782,7 +759,7 @@ func TestUpdateIgnoreCountsAlreadyIgnoredSeparately(t *testing.T) {
 	writeProjectFixtureFile(t, fixture.store, "templates/project/extra.md", "extra\n")
 
 	var stdout, stderr bytes.Buffer
-	if code := runUpdate(
+	if code := Run(
 		[]string{"ignore", "project/new.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -796,7 +773,7 @@ func TestUpdateIgnoreCountsAlreadyIgnoredSeparately(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"ignore", "project/new.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -810,7 +787,7 @@ func TestUpdateIgnoreCountsAlreadyIgnoredSeparately(t *testing.T) {
 
 	stdout.Reset()
 	stderr.Reset()
-	if code := runUpdate(
+	if code := Run(
 		[]string{"ignore", "project/extra.md", "project/new.md", "--root", fixture.project},
 		&stdout,
 		&stderr,
@@ -866,7 +843,7 @@ type projectUpdateFixture struct {
 	store   string
 	oldSHA  string
 	headSHA string
-	runtime commandRuntime
+	runtime config.Runtime
 }
 
 func newProjectUpdateFixture(t *testing.T) projectUpdateFixture {
@@ -964,7 +941,7 @@ func newProjectUpdateFixture(t *testing.T) projectUpdateFixture {
 		store:   storeRoot,
 		oldSHA:  oldSHA,
 		headSHA: headSHA,
-		runtime: commandRuntime{Paths: paths.Values{Home: home}},
+		runtime: config.Runtime{Paths: paths.Values{Home: home}},
 	}
 }
 
@@ -1015,4 +992,60 @@ func projectTreeDigest(t *testing.T, root string) string {
 	}
 	sort.Strings(rows)
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(rows, "\n"))))
+}
+
+func newScaffoldStoreFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]struct {
+		content string
+		mode    os.FileMode
+	}{
+		"VERSION":                         {content: "0.65.0\n", mode: 0o600},
+		"templates/project/CLAUDE.md":     {content: "# {TOKEN} contract\n", mode: 0o600},
+		"templates/project/settings.json": {content: "{}\n", mode: 0o600},
+		"templates/project/rumdl-policy.toml": {
+			content: "# fixture rumdl policy\n[global]\n",
+			mode:    0o600,
+		},
+		"templates/project/commands/dev.md": {
+			content: "---\nname: dev\n---\n{TOKEN}\n",
+			mode:    0o600,
+		},
+		"templates/project/agents/gitter.md": {
+			content: "---\nname: gitter\n---\nbody\n",
+			mode:    0o600,
+		},
+		"templates/project/agents/per-project/developer.md": {
+			content: "---\nname: developer\n---\nbody\n",
+			mode:    0o600,
+		},
+		"templates/project/scripts/dev.sh": {
+			content: "#!/usr/bin/env bash\nset -euo pipefail\n",
+			mode:    0o755,
+		},
+		"templates/project/skills/legal/SKILL.md": {
+			content: "---\nname: legal\n---\nbody\n",
+			mode:    0o600,
+		},
+		"templates/project/epics/TEMPLATE.md":                         {content: "# Epic\n", mode: 0o600},
+		"templates/project/codex/config.toml":                         {content: "model = \"{TOKEN}\"\n", mode: 0o600},
+		"templates/project/docs-commands/wave/references/fix-core.md": {content: "# Fix Core\n", mode: 0o600},
+		"templates/project/docs-agents/_index.md":                     {content: "# Agents\n", mode: 0o600},
+	}
+	for relative, fixture := range files {
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(fixture.content), fixture.mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gitTemp(t, root, "init", "-q")
+	gitTemp(t, root, "config", "user.email", "fixture.invalid")
+	gitTemp(t, root, "config", "user.name", "fixture-identity")
+	gitTemp(t, root, "add", ".")
+	gitTemp(t, root, "commit", "-qm", "fixture store")
+	return root
 }

@@ -131,6 +131,8 @@ internal/mcpserv/search.go
 internal/mcpserv/stdio.go
 internal/mcpserv/types.go
 internal/naming/doc.go
+internal/professor/scaffold.go
+internal/professor/source_repo.go
 internal/reap/busy.go
 internal/reap/runner.go
 internal/reap/tmux.go

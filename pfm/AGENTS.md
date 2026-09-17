@@ -96,7 +96,7 @@ Package tests beside every package, plus the end-to-end jail tests under `cmd/pf
 
 Test-jail overrides only — **not a config system** (`internal/paths/paths.go`):
 
-`PFM_HOME` · `PFM_DB` · `PFM_SHARED_DB` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF`
+`PFM_HOME` · `PFM_DB` · `PFM_FLEET_DB` · `PFM_SID_DIR` · `PFM_CLAUDE_ROOTS` · `PFM_CODEX_ROOT` · `PFM_TMUX_DIR` · `PFM_PROC_ROOT` · `PFM_TMUX_CONF`
 
 `PFM_TMUX_CONF` is load-bearing beyond the jail: unset, a chat's tmux server loads the user's own `~/.tmux.conf` — because a chat IS a terminal the user lives in, and one that ignores their config wears the wrong status bar. Jails set it to `/dev/null` so a real machine config can never steer a fixture.
 

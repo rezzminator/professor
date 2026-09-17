@@ -225,9 +225,9 @@ docker info >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — the docker daemon is n
 
 mkdir -p "$OUT" || die "cannot write $OUT" 2
 if [ "$ROOT_MODE" = rebuild ]; then
-  bash "$ROOT_SH" --rebuild >/dev/null || die "the root image could not be rebuilt (lines above)" 1
+  bash "$ROOT_SH" --rebuild >"$OUT/root.log" || { tail -n 40 "$OUT/root.log" >&2; die "the root image could not be rebuilt — full build output: $OUT/root.log" 1; }
 elif ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  bash "$ROOT_SH" >/dev/null || die "the root image could not be built (lines above)" 1
+  bash "$ROOT_SH" >"$OUT/root.log" || { tail -n 40 "$OUT/root.log" >&2; die "the root image could not be built — full build output: $OUT/root.log" 1; }
 fi
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "no image $IMAGE after the root build — nothing to run" 1
 

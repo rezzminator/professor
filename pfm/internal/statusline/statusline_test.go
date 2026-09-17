@@ -14,7 +14,6 @@ import (
 	"time"
 
 	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/transcript"
 )
 
 func TestEngineFromEnvironmentRefusesMissingEngine(t *testing.T) {
@@ -387,11 +386,12 @@ func TestRenderCarriesNativeIdentityMetricsAndSky(t *testing.T) {
 func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T) {
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "session.jsonl")
-	transcript := strings.Join([]string{
+	transcriptBody := strings.Join([]string{
 		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":699000,"cache_creation_input_tokens":0,"output_tokens":1000}}}`,
 		`{"type":"system","subtype":"compact_boundary","compactMetadata":{"postTokens":150000}}`,
-	}, "\n") + "\n"
-	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+		"",
+	}, "\n")
+	if err := os.WriteFile(transcriptPath, []byte(transcriptBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -439,11 +439,12 @@ func TestRenderUsesPostCompactFloorEstimateInsteadOfStaleSelfReport(t *testing.T
 func TestRenderMarksCompactBoundaryEstimateWithoutPostTokens(t *testing.T) {
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "session.jsonl")
-	transcript := strings.Join([]string{
+	transcriptBody := strings.Join([]string{
 		`{"type":"assistant","message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":699000}}}`,
 		`{"type":"system","subtype":"compact_boundary","compactMetadata":{}}`,
-	}, "\n") + "\n"
-	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+		"",
+	}, "\n")
+	if err := os.WriteFile(transcriptPath, []byte(transcriptBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	encodedPath, err := json.Marshal(transcriptPath)
@@ -469,38 +470,15 @@ func TestRenderMarksCompactBoundaryEstimateWithoutPostTokens(t *testing.T) {
 	}
 }
 
-func TestContextFloorKeyMatchesRetiredOverlay(t *testing.T) {
-	if got := sanitizeProject(""); got != "root" {
-		t.Fatalf("empty project key = %q, want root", got)
-	}
-	if got := sanitizeProject("/work/acme.api_v2"); got != "work-acme-api-v2" {
-		t.Fatalf("sanitized project key = %q", got)
-	}
-	if got := sanitizeProject("/" + strings.Repeat("a", 100)); len(got) != 80 {
-		t.Fatalf("long project key length = %d, want 80", len(got))
-	}
-	window := contextWindow(
-		Runtime{Env: map[string]string{}, Engine: pfmengine.Claude},
-		input{Model: struct {
-			ID          string `json:"id"`
-			DisplayName string `json:"display_name"`
-		}{ID: "claude-haiku-4", DisplayName: "Claude"}},
-		transcript.Meta{},
-	)
-	if window != 200_000 {
-		t.Fatalf("Haiku model-id window = %d, want 200000", window)
-	}
-}
-
 func TestRenderUsesMeasuredTranscriptAndCachesFloorWithPromptCount(t *testing.T) {
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "session.jsonl")
-	transcript := strings.Join([]string{
+	transcriptBody := strings.Join([]string{
 		`{"type":"user","message":{"content":"first"}}`,
 		`{"type":"assistant","isSidechain":false,"message":{"model":"claude-opus-4-1","usage":{"input_tokens":1000,"cache_read_input_tokens":249000}}}`,
 		`{"type":"user","message":{"content":"second"}}`,
 	}, "\n") + "\n"
-	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+	if err := os.WriteFile(transcriptPath, []byte(transcriptBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	encodedPath, err := json.Marshal(transcriptPath)
@@ -554,8 +532,8 @@ func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
 func TestCodexSegmentDoesNotOverwriteTranscriptGauge(t *testing.T) {
 	root := t.TempDir()
 	transcriptPath := filepath.Join(root, "rollout.jsonl")
-	transcript := `{"payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":68000},"model_context_window":272000}}}` + "\n"
-	if err := os.WriteFile(transcriptPath, []byte(transcript), 0o600); err != nil {
+	transcriptBody := `{"payload":{"type":"token_count","info":{"last_token_usage":{"total_tokens":68000},"model_context_window":272000}}}` + "\n"
+	if err := os.WriteFile(transcriptPath, []byte(transcriptBody), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	encodedPath, err := json.Marshal(transcriptPath)

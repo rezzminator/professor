@@ -149,7 +149,7 @@ func applyMeta(meta *Meta, state *metaScanState, line []byte, engine string) {
 	if parsed.IsSidechain {
 		return
 	}
-	if parsed.Type == "user" && !parsed.IsMeta && !parsed.IsCompactSummary {
+	if parsed.Type == RoleUser && !parsed.IsMeta && !parsed.IsCompactSummary {
 		prompt := naming.FlattenPromptText(parsed.Message.Content)
 		if prompt != "" && !naming.IsJunkPrompt(prompt) {
 			meta.HumanPrompts++

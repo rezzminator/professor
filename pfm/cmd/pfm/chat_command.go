@@ -465,7 +465,7 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		return 1
 	}
 	// T1 re-arm cleanup: this socket is dead, so any role crumb it carried
-	// (cmd/pfm/run_command.go's WriteCrumb) is litter — nothing on this kill
+	// (cmd/pfm/chat_new_command.go's WriteCrumb) is litter — nothing on this kill
 	// path, or any other, will ever read it again. Best-effort: SIDDir
 	// accumulating one un-removed crumb per --role seat ever launched is
 	// exactly what this exists to prevent, but the chat is dead either way,

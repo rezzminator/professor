@@ -3,7 +3,7 @@
 // `pfm chat reload` and the chat_self_compact MCP tool.
 //
 // Birth (agentrole.Resolve, folded into the launch prompt by
-// cmd/pfm/run_command.go's composeRolePrompt) reads the FULL constitution
+// cmd/pfm/chat_new_command.go's composeRolePrompt) reads the FULL constitution
 // text exactly once, at the cheapest moment — before any goal. That binding
 // lives inside the session's first user turn, and a user turn is
 // compactable. A forensic pass over this host's real Codex rollout corpus —
@@ -44,7 +44,7 @@ import (
 // already keeps in the same SID directory: the CC session-id crumb chat.sh's
 // own hooks write there (a bare "<socket>" file whose content is a
 // transcript path) and pfm's own "reload-<socket>.log" worker logs
-// (cmd/pfm/reload_command.go). Without a distinct prefix a role crumb would
+// (cmd/pfm/chat_reload_command.go). Without a distinct prefix a role crumb would
 // collide with, or be mistaken for, either of those.
 const crumbPrefix = "role-"
 
@@ -182,7 +182,7 @@ func RemoveCrumb(sidDir, socket, paneID string) error {
 }
 
 // Pointer composes the re-arm text for crumb — the single writer both reset
-// paths (cmd/pfm/reload_command.go and internal/inject/engine.go's
+// paths (cmd/pfm/chat_reload_command.go and internal/inject/engine.go's
 // ScheduleAfterCurrentTurn) compose their steer through, mirroring the
 // existing inject.SelfCompactStopNotice precedent of one constant text
 // every caller inherits.

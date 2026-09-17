@@ -127,7 +127,7 @@ func assertNoStaleCodexRow(t *testing.T, rows []compose.Row, oldID, newID, conte
 
 // T4 — a reconcile pass that moves a binding must not compose from the
 // gather it moved the binding OUT from under: scanFleet's own regather
-// (pipeline.go, the block after fleet.ReconcileCodexPanes returns true).
+// (ls_pipeline.go, the block after fleet.ReconcileCodexPanes returns true).
 //
 // Before the reconcile pass runs, the pane's binding is still the PRE-clear
 // thread (oldID); the pane's own screen has already moved to the bare
@@ -159,7 +159,7 @@ func TestScanFleetRegathersAfterAMovedBindingSoTheSuccessorRendersLive(t *testin
 
 // T4, the interactive stream's twin of the test above: streamFleetRefreshesWith
 // runs the SAME "gather, reconcile, regather-if-moved, compose" shape for its
-// very first pass (pipeline.go, the movedBinding block between the priority
+// very first pass (ls_pipeline.go, the movedBinding block between the priority
 // index run and the first non-Refreshing send) — a materially different code
 // path from scanFleet's, not a shared helper, so a fix or regression in one
 // does not guarantee the other. The periodic loop's OWN copy of this same

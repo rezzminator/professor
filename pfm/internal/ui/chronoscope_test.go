@@ -170,7 +170,7 @@ func TestChronoscopePlayAdvancesAtSixtyTimesAndSnapsToLive(t *testing.T) {
 // compose.BuildCosmos's own live-drop doc comment): a row Killed right now,
 // with ledger activity in the past, is dropped from the LIVE graph by
 // BuildCosmos(live=true) itself — the exact shape every real caller builds
-// model.cosmos from (cmd/pfm/pipeline.go, ui/model.go's own refresh) — but
+// model.cosmos from (cmd/pfm/ls_pipeline.go, ui/model.go's own refresh) — but
 // still renders — dim and static, never the removed alarm blink — when the
 // chronoscope is scrubbed back to when it was talking, cut with live=false.
 func TestChronoscopeReplayRendersADeadChatAsAGhostNotAnAlarm(t *testing.T) {

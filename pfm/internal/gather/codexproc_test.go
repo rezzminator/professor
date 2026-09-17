@@ -263,7 +263,7 @@ func TestDetectCodexThreadsPrefersCurrentRolloutOverInheritedIdentity(t *testing
 // resolver still gets a RolloutPath — the resolver's answer, for display and
 // lineage — but it must never be marked held, because fleet.ObserveCodexPanes uses
 // RolloutHeld to decide whether this identity is allowed to override the
-// pane's own screen (pipeline.go). Blanket-true here would silently restore
+// pane's own screen (ls_pipeline.go). Blanket-true here would silently restore
 // the defect this field exists to prevent.
 func TestDetectCodexThreadsMarksOnlyAnFDHeldRolloutAsHeld(t *testing.T) {
 	codexRoot := t.TempDir()

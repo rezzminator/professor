@@ -108,7 +108,7 @@ func callsPointerWithDerivedCall(t *testing.T, path, selName string) bool {
 // TestReloadAndSelfCompactBothComposeThroughPointer pins behaviour 1 (ONE
 // WRITER for the re-arm pointer text) together with the reload half of
 // behaviour 3 (the deliberate reload/self-compact threshold asymmetry):
-// both reset call sites — cmd/pfm/reload_command.go and
+// both reset call sites — cmd/pfm/chat_reload_command.go and
 // internal/inject/engine.go — must call rearm.Pointer rather than composing
 // their own steer string, and each must pass the specific threshold
 // Pointer's own doc comment promises: reload passes
@@ -120,8 +120,8 @@ func callsPointerWithDerivedCall(t *testing.T, path, selName string) bool {
 func TestReloadAndSelfCompactBothComposeThroughPointer(t *testing.T) {
 	root := moduleRoot(t)
 
-	t.Run("reload_command.go calls rearm.Pointer with the unmodified default threshold", func(t *testing.T) {
-		path := filepath.Join(root, "cmd", "pfm", "reload_command.go")
+	t.Run("chat_reload_command.go calls rearm.Pointer with the unmodified default threshold", func(t *testing.T) {
+		path := filepath.Join(root, "cmd", "pfm", "chat_reload_command.go")
 		if !callsPointerWithSelectorArg(t, path, "rearm", "DefaultThresholdBytes") {
 			t.Fatalf("%s: no rearm.Pointer(..., rearm.DefaultThresholdBytes) call found", path)
 		}

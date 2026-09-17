@@ -55,5 +55,5 @@ setprimaryaccount: internal/fleet/accounts.go internal/fleetdb/fleetdb.go
 socketepoch: internal/compose/compose.go internal/resolve/resolve.go
 splitnul: internal/action/process.go internal/gather/procfs.go
 sweep: internal/heal/heal.go internal/stale/stale.go
-transcriptidfrompath: cmd/pfm/inject_resume.go internal/compose/compose.go
+transcriptidfrompath: cmd/pfm/chat_inject_resume.go internal/compose/compose.go
 truncaterunes: internal/harvest/search.go internal/ui/cosmos.go

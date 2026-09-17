@@ -613,7 +613,7 @@ func TestLimitsSamplerServesLastGoodClaudeCacheDuringSharedBackoff(t *testing.T)
 
 // --- shared on-disk cache regression coverage -------------------------------
 //
-// Every picker process constructs its own LimitsSampler (cmd/pfm/commands.go,
+// Every picker process constructs its own LimitsSampler (cmd/pfm/ls_command.go,
 // `statsSampler.Limits = pfmstats.NewLimitsSampler(...)` runs once per `pfm ls`
 // invocation). LimitsSampler.cache today (limits.go:47-48) is an unexported,
 // in-process map — nothing on disk backs it — so two samplers standing in for

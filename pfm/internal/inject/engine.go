@@ -513,7 +513,7 @@ func (engine *Engine) ScheduleAfterCurrentTurn(
 	// rearm.Pointer as one more link in the steer chain. Then is already a
 	// chain — the --then waiter delivers each steer one settled turn apart
 	// (DeliverThen) — so this is one more hop, never a rewrite of the
-	// caller's own steers. See internal/rearm and cmd/pfm/run_command.go's
+	// caller's own steers. See internal/rearm and cmd/pfm/chat_new_command.go's
 	// WriteCrumb for the other half.
 	then := request.Then
 	if isSelfCompactRequest(request) {
@@ -616,7 +616,7 @@ func (engine *Engine) ScheduleSelfCompact(
 
 // rolePointer looks up target's remembered T1 role — if any — and composes
 // its re-arm text. The three ReadCrumb states stay distinct here exactly as
-// they do in cmd/pfm/reload_command.go: no crumb returns ("", false, nil),
+// they do in cmd/pfm/chat_reload_command.go: no crumb returns ("", false, nil),
 // today's exact behavior; a crumb that exists but could not be read returns
 // a real error rather than silently behaving as "no role"; a live crumb
 // returns its rearm.Pointer text, sized to THIS channel's own budget — see
@@ -667,7 +667,7 @@ const rearmPreamblePadding = 200
 // channel's budget is smaller than rearm.DefaultThresholdBytes — which, for
 // every role measured so far, it always is.
 //
-// cmd/pfm/reload_command.go keeps rearm.DefaultThresholdBytes unchanged: its
+// cmd/pfm/chat_reload_command.go keeps rearm.DefaultThresholdBytes unchanged: its
 // channel (reloadCommandTmux.SendLiteral) has no equivalent spill, so full
 // text genuinely lands there. Do not "harmonize" the two call sites — they
 // answer different questions about different channels.
@@ -1790,7 +1790,7 @@ func (engine *Engine) senderLabel(
 // hyphen inside one component alias with the join delimiter: two distinct
 // (socket, pane) pairs whose hyphen boundary fell in different places could
 // sanitize to the identical path (this repo's own socket names are
-// hyphen-joined numeric triples — cmd/pfm/commands.go's freshEngineSocket,
+// hyphen-joined numeric triples — cmd/pfm/ls_command.go's freshEngineSocket,
 // "%s%d-%d-%d"). Sanitizing first and joining on a delimiter the sanitizer
 // never produces makes that collision structurally impossible.
 func (engine *Engine) steerLogPath(target Target) string {

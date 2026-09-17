@@ -1,7 +1,7 @@
+cmd/pfm/chat_dispatch.go 818
+cmd/pfm/chat_reload_command.go 1193
 cmd/pfm/chat_satellite_command.go 970
 cmd/pfm/doctor.go 1753
-cmd/pfm/headless_command.go 818
-cmd/pfm/reload_command.go 1193
 cmd/pfm/update_command.go 927
 cmd/pfm/update_project.go 964
 internal/compose/compose.go 1355

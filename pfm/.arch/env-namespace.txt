@@ -1,2 +1,2 @@
-cmd/pfm/commands.go 1
+cmd/pfm/ls_command.go 1
 internal/inject/engine.go 1

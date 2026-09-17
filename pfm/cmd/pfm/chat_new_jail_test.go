@@ -456,7 +456,7 @@ func TestChatNewSpawnsANamedCodexChat(t *testing.T) {
 	// as three ghost nodes. ReceiverPane is asserted empty deliberately:
 	// spawn.Result carries no pane id (a fresh session's first pane is
 	// conventionally "%0", but nothing here proves that invariant, so
-	// run_command.go does not invent one).
+	// chat_new_command.go does not invent one).
 	wantSocket := filepath.Join(jail.tmuxDir, entries[0].Name())
 	if len(events) != 1 || events[0].Kind != fleetdb.KindSpawn ||
 		events[0].SenderSession != "" || events[0].Target != "_KILL codex worker" ||

@@ -56,7 +56,7 @@ func TestRolePointerChoosesShortPointerUnderChannelBudget(t *testing.T) {
 	sidDir := t.TempDir()
 	artifactPath := filepath.Join(t.TempDir(), "dev.md")
 	// 1000 bytes: comfortably under rearm.DefaultThresholdBytes (4096), so
-	// reload_command.go's own channel would re-arm this FULL TEXT — but
+	// chat_reload_command.go's own channel would re-arm this FULL TEXT — but
 	// comfortably over this channel's derived budget (ClaudeInlineMax 720
 	// minus rearmPreamblePadding 200 = 520).
 	body := strings.Repeat("x", 1000) + "\n"

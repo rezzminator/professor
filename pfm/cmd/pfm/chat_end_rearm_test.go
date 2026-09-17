@@ -13,11 +13,11 @@ import (
 
 // TestChatEndRemovesRoleCrumbOnKill pins T1 re-arm's cleanup half (behaviour
 // 6, cmd/pfm/chat_command.go's runChatEnd): a seat's remembered role crumb
-// (cmd/pfm/run_command.go's WriteCrumb, exercised directly by
+// (cmd/pfm/chat_new_command.go's WriteCrumb, exercised directly by
 // internal/rearm's own package tests) is litter once its socket is dead;
 // the canonical kill path `pfm chat end` removes it on the same tmux
 // kill-server call that ends the chat. The crumb here is seeded directly
-// with rearm.WriteCrumb — exactly the shape run_command.go's own --role
+// with rearm.WriteCrumb — exactly the shape chat_new_command.go's own --role
 // path produces — onto a plain (roleless) real spawn, so this test proves
 // runChatEnd's OWN wiring to rearm.RemoveCrumb without also depending on
 // the --role launch path spawn.Run already needs its own coverage for.

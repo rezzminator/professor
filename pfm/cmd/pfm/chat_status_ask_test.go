@@ -8,7 +8,7 @@ import (
 )
 
 // TestChatStatusEngineModelGuardCoversAskAndSummary pins
-// headless_command.go's runHeadlessStatus guard: --engine/--model require
+// chat_dispatch.go's runHeadlessStatus guard: --engine/--model require
 // --summary OR --ask (either verb satisfies it), and are still rejected
 // with exit 2 naming both verbs when NEITHER is given.
 func TestChatStatusEngineModelGuardCoversAskAndSummary(t *testing.T) {

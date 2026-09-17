@@ -325,7 +325,7 @@ func TestBuildCosmosRetiredGroupKindSkipsSilently(t *testing.T) {
 
 // TestBuildCosmosDeadChatConvergesSpawnAndInjectOnOneGhostNode is the
 // regression for the three-nodes-per-chat bug: a spawn event recorded the
-// receiver's tmux session as a BARE NAME (run_command.go:152's pre-fix
+// receiver's tmux session as a BARE NAME (chat_new_command.go:152's pre-fix
 // shape) while an inject event for the very same chat, once it has no
 // surviving row to resolve against (it died), states its own identity as
 // that SAME bare session name via sender_session. Before the fix these two

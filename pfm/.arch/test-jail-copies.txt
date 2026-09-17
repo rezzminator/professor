@@ -1,9 +1,9 @@
 cmd/pfm/attach_jail_test.go 1
 cmd/pfm/booting_row_jail_test.go 1
+cmd/pfm/chat_new_jail_test.go 1
 cmd/pfm/internal_chat_server_test.go 1
 cmd/pfm/namesync_titles_regression_test.go 1
 cmd/pfm/picker_cancel_jail_test.go 1
-cmd/pfm/run_jail_test.go 1
 e2e/install_e2e_test.go 2
 e2e/update_picker_e2e_test.go 1
 internal/action/tmux_jail_test.go 1

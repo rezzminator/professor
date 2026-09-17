@@ -28,6 +28,10 @@ type ClaudeLauncherStatus struct {
 	Target string
 }
 
+// ErrClaudeBinaryNotFound reports that no executable Claude binary exists in
+// the configured location, the native versions directory, or PATH.
+var ErrClaudeBinaryNotFound = errors.New("claude binary not found")
+
 func managedClaudeLauncher(home string) string {
 	return filepath.Join(
 		home,
@@ -46,6 +50,77 @@ func canonicalClaudeLauncher(home string) string {
 
 func claudeLauncherStatePath(home string) string {
 	return filepath.Join(home, ".local", "share", "pfm", "install", "launcher.state")
+}
+
+// ResolveClaudeBinary selects the real Claude executable behind pfm's managed
+// launcher. A configured executable wins, followed by the newest native
+// version and then each PATH component in order. The canonical and managed
+// launchers, including physical aliases of the managed file, are never
+// returned because doing so would recurse back into pfm.
+func ResolveClaudeBinary(home, configuredBinary, pathEnv string) (string, error) {
+	managed := managedClaudeLauncher(home)
+	canonical := canonicalClaudeLauncher(home)
+
+	if filepath.IsAbs(configuredBinary) {
+		eligible, err := eligibleClaudeBinary(configuredBinary, canonical, managed)
+		if err != nil {
+			return "", fmt.Errorf("inspect configured Claude binary %s: %w", configuredBinary, err)
+		}
+		if eligible {
+			return configuredBinary, nil
+		}
+	}
+
+	report, err := InspectClaudeVersions(home, configuredBinary)
+	if err != nil {
+		return "", fmt.Errorf("inspect Claude versions: %w", err)
+	}
+	if report.Newest != nil {
+		return report.Newest.Path, nil
+	}
+
+	for _, directory := range strings.Split(pathEnv, string(os.PathListSeparator)) {
+		if directory == "" {
+			directory = "."
+		}
+		candidate, err := filepath.Abs(filepath.Join(directory, pfmengine.MustLookup(pfmengine.Claude).Binary))
+		if err != nil {
+			return "", fmt.Errorf("resolve Claude PATH candidate in %s: %w", directory, err)
+		}
+		eligible, err := eligibleClaudeBinary(candidate, canonical, managed)
+		if err != nil {
+			return "", fmt.Errorf("inspect Claude PATH candidate %s: %w", candidate, err)
+		}
+		if eligible {
+			return candidate, nil
+		}
+	}
+	return "", ErrClaudeBinaryNotFound
+}
+
+func eligibleClaudeBinary(candidate, canonical, managed string) (bool, error) {
+	candidate = filepath.Clean(candidate)
+	if candidate == filepath.Clean(canonical) || candidate == filepath.Clean(managed) {
+		return false, nil
+	}
+	candidateInfo, err := os.Stat(candidate)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !candidateInfo.Mode().IsRegular() || candidateInfo.Mode().Perm()&0o111 == 0 {
+		return false, nil
+	}
+	managedInfo, err := os.Stat(managed)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return true, nil
+		}
+		return false, fmt.Errorf("inspect managed Claude launcher %s: %w", managed, err)
+	}
+	return !os.SameFile(candidateInfo, managedInfo), nil
 }
 
 func InspectClaudeLauncher(home string) (ClaudeLauncherStatus, error) {
@@ -241,11 +316,11 @@ func (installer *engine) unwireClaudeLauncher() error {
 	})
 }
 
-// ClaudeAbsent reports whether path is pfm's own Claude launcher AND its
-// last run exited 127 — the shim's contract for "no real Claude binary
-// resolved" (assets/bin/claude). Any other exit code, or a path that is not
-// pfm's launcher, is a real failure, never absence: doctor's dep and
-// harness-prompt rows both decide "Claude is absent" through this one check.
+// ClaudeAbsent reports whether path is pfm's own Claude launcher AND its last
+// run exited 127 — the managed launch contract for "no real Claude binary
+// resolved". Any other exit code, or a path that is not pfm's launcher, is a
+// real failure, never absence: doctor's dep and harness-prompt rows both decide
+// "Claude is absent" through this one check.
 func ClaudeAbsent(home, path string, exitCode int) bool {
 	if exitCode != 127 {
 		return false

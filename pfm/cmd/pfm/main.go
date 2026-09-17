@@ -60,7 +60,7 @@ var topLevelSubcommands = []string{
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
-	"agent-open", "chat-server", "claude-version", "clear-kill",
+	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-appendix", "codex-launch", "compact-nudge", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
 	"launcher-repair", "primary-get", "primary-set", "reload-intercept",
@@ -423,6 +423,9 @@ func runInternal(
 	if len(args) != 0 && args[0] == "codex-appendix" {
 		return hookentry.CodexAppendix(os.Stdin, stdout, stderr, runtime)
 	}
+	if len(args) != 0 && args[0] == "claude-launch" {
+		return hookentry.ClaudeLaunch(args[1:], stdout, stderr, runtime)
+	}
 	if len(args) != 0 && args[0] == "launch" {
 		return hookentry.Launch(args[1:], stdout, stderr, runtime)
 	}
@@ -500,13 +503,10 @@ func runInternal(
 		return 0
 	}
 	if len(args) == 0 {
-		// This literal stays in sync by construction: scripts/arch-check.sh's C15 check
-		// greps the pipe-joined subcommand names out of main.go's raw
-		// source text below; runtime joining would defeat that ratchet.
-		// The runtime test requires every registry name to reach a branch above.
+		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

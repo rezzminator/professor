@@ -504,10 +504,14 @@ func TestApplyIsSelfContainedIdempotentAndReversible(t *testing.T) {
 			t.Fatalf("retired file remains at %s: %v", retired, err)
 		}
 	}
-	// F1: the pfm-statusline and tmux-title-renudge host overlays are
-	// installer-owned end to end — materialized under the managed root and
-	// symlinked at their contracted ~/.local/bin names, same as every other
-	// embedded asset and the Claude launcher.
+	// F1: host overlays are materialized under the managed root and symlinked
+	// at their contracted ~/.local/bin names, including the Claude launcher.
+	managedClaude := filepath.Join(managed, "bin", "claude")
+	assertLink(t, filepath.Join(home, ".local", "bin", "claude"), managedClaude)
+	wantClaude := "#!/bin/sh\n" + `exec "$HOME/.local/bin/pfm" internal claude-launch "$@"` + "\n"
+	if got := readFixture(t, managedClaude); got != wantClaude {
+		t.Fatalf("managed claude=%q, want exact native exec shim", got)
+	}
 	for name, command := range map[string]string{"pfm-statusline": "statusline", "tmux-title-renudge": "tmux-title-renudge"} {
 		managedShim := filepath.Join(managed, "bin", name)
 		assertLink(t, filepath.Join(home, ".local", "bin", name), managedShim)

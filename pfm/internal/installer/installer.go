@@ -1124,8 +1124,6 @@ func (installer *engine) stageAssets(assets []assetFile) (bool, error) {
 		switch {
 		case asset.path == "shim/pfm.zsh":
 			content, err = renderShimAsset(content, installer.options)
-		case asset.path == "bin/claude":
-			content, err = renderClaudeLauncherAsset(content, installer.options)
 		case asset.path == "reload.command.md":
 			content, err = renderReloadCommandAsset(content)
 		case asset.path == "systemd/"+nameSyncTimerUnit:

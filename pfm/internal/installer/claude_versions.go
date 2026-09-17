@@ -64,12 +64,12 @@ func claudeVersionsDir(home string) string {
 // newest), and marks the structural protections: newest, unparsed name, the
 // configured `claude.binary`, and a displaced native target.
 //
-// It deliberately touches NO process table. `pfm internal claude-version` —
-// the launcher shim's hot path, run on every single `claude` launch — calls
-// only this half; probing every live pid for its executing image (a fork of
-// `lsof` per pid on macOS, see gather.ProcImage) is expensive and useless
-// there, since the shim only wants the newest build's path. The live-process
-// half is ProbeLiveClaudeVersions, a separate call only `pfm doctor` and
+// It deliberately touches NO process table. ResolveClaudeBinary — the managed
+// launcher's hot path, run on every single `claude` launch — calls only this
+// half; probing every live pid for its executing image (a fork of `lsof` per
+// pid on macOS, see gather.ProcImage) is expensive and useless there, since
+// resolution only wants the newest build's path. The live-process half is
+// ProbeLiveClaudeVersions, a separate call only `pfm doctor` and
 // pruneClaudeVersions (the destructive path) make.
 func InspectClaudeVersions(home, configuredBinary string) (ClaudeVersionsReport, error) {
 	dir := claudeVersionsDir(home)
@@ -176,7 +176,7 @@ type Signaler func(pid int, signal syscall.Signal) error
 // half: cross-referencing the live process table against every version
 // already enumerated, so a build a running chat is executing is never read
 // as unused. Only `pfm doctor` and pruneClaudeVersions call it — never the
-// launcher shim's hot path (see InspectClaudeVersions's doc comment).
+// managed launcher's hot path (see InspectClaudeVersions's doc comment).
 //
 // Scoping mirrors internal/stale.Find (stale.go:53-89): a pid is a Claude
 // candidate only when its argv[0] names the Claude binary, lives inside the

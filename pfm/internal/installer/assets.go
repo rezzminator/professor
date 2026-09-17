@@ -94,19 +94,6 @@ func renderShimAsset(content []byte, options Options) ([]byte, error) {
 	return []byte(text), nil
 }
 
-func renderClaudeLauncherAsset(content []byte, options Options) ([]byte, error) {
-	configured := ""
-	if strings.HasPrefix(options.ClaudeBinary, "/") {
-		configured = options.ClaudeBinary
-	}
-	rendered, err := replaceSingleAssetMarker(
-		string(content),
-		"__PFM_CONFIGURED_CLAUDE__",
-		shellSingleQuoted(configured),
-	)
-	return []byte(rendered), err
-}
-
 // renderReloadCommandAsset replaces the {{RELOAD_USAGE}} token in the
 // `/reload` command card's frontmatter description with reload.Usage itself
 // — the picker then shows the human EXACTLY the flags `reload.Run` accepts,
@@ -175,10 +162,6 @@ func replaceSingleAssetMarker(content, marker, replacement string) (string, erro
 		return "", fmt.Errorf("asset marker %q occurs %d times, want exactly once", marker, count)
 	}
 	return strings.Replace(content, marker, replacement, 1), nil
-}
-
-func shellSingleQuoted(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
 }
 
 func sortedBoolKeys(values map[int]bool) []int {

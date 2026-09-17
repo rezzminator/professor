@@ -23,8 +23,9 @@ type SummaryOptions struct {
 }
 
 type SummaryResult struct {
-	Text   string
-	Cached bool
+	Text    string
+	Cached  bool
+	Warning error
 }
 
 // Summarize isolates one exchange, consults its exact-offset cache, and pays
@@ -87,7 +88,7 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 	}
 	answer, runErr := runner.Run(ctx, input)
 	removeErr := removePreparedFiles([]string{prepared})
-	if runErr != nil || removeErr != nil {
+	if runErr != nil {
 		return failedSummary(errors.Join(runErr, removeErr))
 	}
 	text := strings.Join(strings.Fields(answer.Answer), " ")
@@ -97,10 +98,10 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 	text = limitWords(text, 40)
 	if exchange.complete {
 		if err := options.Database.PutChatSummary(ctx, chat.Path, exchange.offset, text); err != nil {
-			return failedSummary(err)
+			return failedSummary(errors.Join(err, removeErr))
 		}
 	}
-	return SummaryResult{Text: text}
+	return SummaryResult{Text: text, Warning: removeErr}
 }
 
 func failedSummary(err error) SummaryResult {

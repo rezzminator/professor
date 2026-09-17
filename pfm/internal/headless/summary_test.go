@@ -2,6 +2,8 @@ package headless
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,11 +35,11 @@ printf 'one two three four five six seven eight nine ten eleven twelve thirteen 
 	}
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath}
 	first := Summarize(context.Background(), chat, options)
-	if first.Cached || len(strings.Fields(first.Text)) != 40 {
+	if first.Cached || first.Warning != nil || len(strings.Fields(first.Text)) != 40 {
 		t.Fatalf("first summary=%+v words=%d", first, len(strings.Fields(first.Text)))
 	}
 	second := Summarize(context.Background(), chat, options)
-	if !second.Cached || second.Text != first.Text {
+	if !second.Cached || second.Warning != nil || second.Text != first.Text {
 		t.Fatalf("second summary=%+v, first=%+v", second, first)
 	}
 	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "x" {
@@ -72,6 +74,43 @@ func TestSummarizeMarksPartialAndNeverCachesIt(t *testing.T) {
 	}
 	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "xx" {
 		t.Fatalf("runner calls=%q err=%v", calls, err)
+	}
+}
+
+func TestSummarizePreservesAnswerWhenPreparedExchangeCleanupFails(t *testing.T) {
+	root, database := summaryTestStore(t)
+	transcriptPath := filepath.Join(root, "exchange.jsonl")
+	writeSummaryTranscript(t, transcriptPath,
+		`{"type":"user","message":{"role":"user","content":"what changed?"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"the cleanup path"}}`,
+	)
+	tempDir := filepath.Join(root, "tmp", "chat-status")
+	bin := filepath.Join(root, "bin")
+	writeSummaryStub(t, bin, "codex", `
+set -eu
+set -- "$HEADLESS_TEMP_DIR"/exchange-*.md
+[ "$#" -eq 1 ]
+[ -f "$1" ]
+rm "$1"
+printf 'cleanup-resistant summary\n'`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
+
+	result := Summarize(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, SummaryOptions{
+		Config: summaryMachine("codex"), Database: database, TempDir: tempDir,
+	})
+	if result.Text != "cleanup-resistant summary" || strings.HasPrefix(result.Text, "failed (") {
+		t.Fatalf("summary lost its computed answer after cleanup failure: %+v", result)
+	}
+	if !errors.Is(result.Warning, fs.ErrNotExist) {
+		t.Fatalf("summary cleanup warning=%v, want fs.ErrNotExist", result.Warning)
+	}
+
+	cached := Summarize(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, SummaryOptions{
+		Config: summaryMachine("codex"), Database: database, TempDir: tempDir,
+	})
+	if cached.Text != result.Text || !cached.Cached || cached.Warning != nil {
+		t.Fatalf("summary was not cached after cleanup warning: first=%+v cached=%+v", result, cached)
 	}
 }
 

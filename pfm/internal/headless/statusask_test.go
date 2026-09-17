@@ -2,6 +2,8 @@ package headless
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,19 +95,51 @@ func TestAskPaysRunnerEveryCallNeverCaches(t *testing.T) {
 	chat := Chat{Name: "seat", Engine: "cc", Path: transcriptPath, Live: false}
 
 	first := Ask(context.Background(), chat, options)
-	if !strings.HasPrefix(first.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): ") {
+	if !strings.HasPrefix(first.Text, "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): ") ||
+		first.Warning != nil {
 		t.Fatalf("first ask=%+v", first)
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
 	second := Ask(context.Background(), chat, options)
-	if second.Text != first.Text {
+	if second.Text != first.Text || second.Warning != nil {
 		t.Fatalf("second ask text drifted: first=%q second=%q", first.Text, second.Text)
 	}
 	assertNoLeakedTempFiles(t, tempDir)
 
 	if calls, err := os.ReadFile(counter); err != nil || string(calls) != "xx" {
 		t.Fatalf("runner calls=%q err=%v, want both calls paid (Ask never caches)", calls, err)
+	}
+}
+
+func TestAskPreservesAnswerWhenPreparedExchangeCleanupFails(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "exchange.jsonl")
+	writeSummaryTranscript(t, transcriptPath,
+		`{"type":"user","message":{"role":"user","content":"status?"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":"steady state"}}`,
+	)
+	tempDir := filepath.Join(root, "tmp", "chat-status")
+	bin := filepath.Join(root, "bin")
+	writeSummaryStub(t, bin, "claude", `
+set -eu
+set -- "$HEADLESS_TEMP_DIR"/exchange-*.md
+[ "$#" -eq 1 ]
+[ -f "$1" ]
+rm "$1"
+printf 'cleanup-resistant answer\n'`)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("HEADLESS_TEMP_DIR", tempDir)
+
+	result := Ask(context.Background(), Chat{Name: "seat", Engine: "cc", Path: transcriptPath}, AskOptions{
+		Config: summaryMachine("claude"), TempDir: tempDir,
+	})
+	if result.Text != "TRANSCRIPT-ONLY (chat is not live: there is no pane to capture): cleanup-resistant answer" ||
+		strings.HasPrefix(result.Text, "failed (") {
+		t.Fatalf("ask lost its computed answer after cleanup failure: %+v", result)
+	}
+	if !errors.Is(result.Warning, fs.ErrNotExist) {
+		t.Fatalf("ask cleanup warning=%v, want fs.ErrNotExist", result.Warning)
 	}
 }
 

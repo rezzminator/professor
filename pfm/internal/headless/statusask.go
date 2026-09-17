@@ -27,7 +27,8 @@ type AskOptions struct {
 
 // AskResult is Ask's answer. There is no Cached flag: Ask never caches.
 type AskResult struct {
-	Text string
+	Text    string
+	Warning error
 }
 
 // Ask answers what a chat is doing RIGHT NOW, grounded in its live tmux pane
@@ -48,7 +49,7 @@ func Ask(ctx context.Context, chat Chat, options AskOptions) (result AskResult) 
 	var contentFiles, sourceLabels []string
 	defer func() {
 		if err := removePreparedFiles(contentFiles); err != nil {
-			result = failedAsk(err)
+			result.Warning = errors.Join(result.Warning, err)
 		}
 	}()
 

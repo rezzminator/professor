@@ -57,11 +57,14 @@ func Status(
 			Config: machine.Config, Database: database,
 			Engine: request.Engine, Model: request.Model,
 		})
+		status.Summary = summary.Text
+		status.SummaryCached = summary.Cached
+		if summary.Warning != nil && warnings != nil {
+			fmt.Fprintf(warnings, "pfm chat status: summary cleanup warning: %v\n", summary.Warning)
+		}
 		if err := database.Close(); err != nil {
 			return headless.Status{}, fmt.Errorf("close summary cache: %w", err)
 		}
-		status.Summary = summary.Text
-		status.SummaryCached = summary.Cached
 	}
 	if request.Ask {
 		// No cache: a pane changes continuously, so Ask pays an ask runner on
@@ -73,6 +76,9 @@ func Status(
 			Engine: request.Engine, Model: request.Model,
 		})
 		status.Ask = answer.Text
+		if answer.Warning != nil && warnings != nil {
+			fmt.Fprintf(warnings, "pfm chat status: ask cleanup warning: %v\n", answer.Warning)
+		}
 	}
 	return status, nil
 }

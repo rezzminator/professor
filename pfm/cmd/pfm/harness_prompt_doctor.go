@@ -26,6 +26,8 @@ import (
 	"hostops/pfm/internal/paths"
 )
 
+var harnessCaptureSinkGrace = 2 * time.Second
+
 // harnessCaptureOverride is nil in production; printHarnessPromptDoctor then
 // runs the real capture below. A jail has no genuine `claude` binary to spawn
 // — that is REAL-SESSION territory (TESTPLAN.md), never jailable — so the
@@ -261,7 +263,7 @@ func captureHarnessPrompt(
 			_ = writeHarnessSinkHits(verboseDir, hits)
 		}
 		return captured, err
-	case <-time.After(2 * time.Second):
+	case <-time.After(harnessCaptureSinkGrace):
 		if verboseDir != "" {
 			_ = writeHarnessSinkHits(verboseDir, hits)
 		}

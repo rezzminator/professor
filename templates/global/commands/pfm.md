@@ -18,7 +18,6 @@ Operator verbs:
 - chat: operate on one chat — new, open, status, last, read, stream, inject, self-compact, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, find, save, branch, history, resolve
 - headless: run Claude or Codex through one isolated process interface (`pfm headless exec`)
 - harvest: fetch and convert a URL, DOI, ISBN, PMID, PMCID, or local path to markdown
-- dream: build and inject repository memory organs (night, apply, inspect, morning, migrate-anchors, restamp, hook)
 - index: refresh the transcript index
 - whoami: this chat's own tmux session name
 - issues: servicedesk complaints filed through `issue_servicedesk`

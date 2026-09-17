@@ -201,7 +201,7 @@ func (values Values) SocketUnder(socket string) (string, error) {
 }
 
 // FirstRoot is the engine's first configured root, or "" with none — the root
-// a single-root consumer (recovery, heal, the dreamer's rollout locator) reads.
+// a single-root consumer such as recovery or heal reads.
 func (values Values) FirstRoot(id pfmengine.ID) string {
 	if roots := values.Roots[id]; len(roots) != 0 {
 		return roots[0]

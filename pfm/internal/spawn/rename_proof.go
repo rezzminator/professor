@@ -25,7 +25,7 @@ var codexHomes atomic.Pointer[[]string]
 
 // UseCodexHomes names the Codex homes whose ledgers prove a rename. It is the
 // one place the machine config reaches the rename: every door that names a
-// Codex chat — chat new, chat branch, the post-/clear re-apply, a dream seat —
+// Codex chat — chat new, chat branch, and the post-/clear re-apply —
 // goes through RenameCodex, and RenameCodex reads the homes set here.
 func UseCodexHomes(homes []string) {
 	owned := append([]string(nil), homes...)

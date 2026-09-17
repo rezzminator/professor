@@ -22,7 +22,7 @@
 pfm has 98.5K source lines and 101.4K test lines across 64 packages. The package boundaries under `internal/` are mostly sound; three structural defects make maintenance expensive:
 
 1. **`cmd/pfm` is where the logic lives.** It is 18,203 lines of `package main` in 58 files and imports 47 of the 63 internal packages. It is touched by **67% of all pfm commits** (146 of 219 non-release commits since 2026-06-01), and only 19 of those commits touched it alone. The MCP server reaches every stateful chat verb by building an argv slice, calling `runChatWithRuntime` in `package main`, and parsing the printed stdout (`internal/mcpserv/actions.go:32,84,295`; `cmd/pfm/mcp_shared.go:29`). The chat family's behavior is therefore unreachable except through a CLI string.
-2. **Mechanisms are re-implemented per package.** There are 10 concrete tmux runners (`CommandTmux` in 7 packages, plus `agentopen.RealTmux`, `dream/seat.CommandHost` and `cmd/pfm/reload_command.go:30`), about 2,100 lines of which roughly 1,500 are the same socket-scoped `command()` shape. There are also 6 named atomic-write helpers plus about 25 inline temp-and-rename sites, 7 `sql.Open` call sites with two near-identical pragma sets, 4 JSONL line-reading idioms with 3 different line caps, and a second procfs reader in `resolve` forced by an import cycle (`gather` imports `resolve`).
+2. **Mechanisms are re-implemented per package.** There are 9 concrete tmux runners (`CommandTmux` in 7 packages, plus `agentopen.RealTmux` and `cmd/pfm/reload_command.go:30`), about 2,100 lines of which roughly 1,500 are the same socket-scoped `command()` shape. There are also 6 named atomic-write helpers plus about 25 inline temp-and-rename sites, 7 `sql.Open` call sites with two near-identical pragma sets, 4 JSONL line-reading idioms with 3 different line caps, and a second procfs reader in `resolve` forced by an import cycle (`gather` imports `resolve`).
 3. **The reader's first hop gives wrong directions, and the lists are hand-kept.** `pfm/CLAUDE.md` cites two deleted packages (`check/`, `legacy/`), two missing docs (`PLAN.md`, `CUTOVER.md`) and an env var nothing reads (`PFM_DB_SCRIPT`). It says "no build tags, no per-OS packages" in § Stack, while 21 `_linux`/`_darwin` files exist and its own § Code Standards mandates them. Its package table covers 22 of 61 internal packages, its "Subcommands today" line misses 7 of 23 commands (`harvest config uninstall update init issues codex`), and its Platforms table misses the darwin-required `security` entry (`internal/deps/registry.go:65`). The `pfm internal` usage string names 8 of its 19 dispatched entries, and `docs/dev/pfm-surface.md:44` names 7. The MCP server's routing prose (`internal/mcpserv/server.go:103`) names 6 verbs as excluded, while 8 have no tool (`ask` and `branch` go unnamed). Two different databases are both named `fleet.db`.
 
 The design fixes all three incrementally. No rebuild is needed: under a fifth of the tree moves.
@@ -47,7 +47,6 @@ Co-change evidence is the number of commits since 2026-06-01, releases excluded,
 | Installer | host wiring (links, units, settings, Codex agents, overlays, MCP clients) | `internal/installer/` split by surface | `installer.go` 2,484 lines, 32 commits |
 | Installer migrations | one-time retire/migrate steps with a sunset | `internal/installer/migrations/` **new** | 1,624 lines in 49 retire/migrate/legacy funcs (name heuristic) |
 | Harvester | transport, MCP surface, Python sidecar | `internal/harvest/`, `harvestmcp/`, `harvestpy/` | cohesive today; unchanged |
-| Dream | memory organ, isolated by `internal/dream/isolation_test.go` | `internal/dream/**` | cohesive today; unchanged |
 | Headless | one-shot engine processes; two-way await | `internal/headless/`, `headless/run/`, `ask/` | unchanged |
 | Hygiene | dry-run-first reap, archive, heal | `internal/{reap,archive,heal}/` | unchanged |
 | Engine registry | which engines exist; per-engine adapters | `internal/engine/**` | `matchutil` folds into `engine` |
@@ -98,12 +97,12 @@ pfm/
     atomicfile/                     # NEW. Write(path, body, mode): temp → chmod → write → fsync → close → rename
     jsonl/                          # NEW. Lines(r, fn): the one line iterator and line-length policy
     fleetdb/                        # RENAMED from shared/ (3 files)
-    store/                          # the index DB (rename to indexdb: Open ruling 4)
+    store/                          # the index DB (rename to indexdb: Open ruling 3)
     engine/  claude/ codex/ opencode/   # matchutil/ folded into engine/match.go
     installer/                      # installer.go split by surface; migrations/ below
       migrations/                   # NEW. v<version>_<slug>.go per step + steps.go ordered slice
     unchanged: action agentopen agentrole archive ask codexappendix codexgen codexmeta compose config deps
-               dream/** gather harvest harvestmcp harvestpy headless headless/run heal index inject kill
+               gather harvest harvestmcp harvestpy headless headless/run heal index inject kill
                mcpserv naming nudge paths rearm recovery reap reload resolve sky spawn stats statusline
                testjail theme transcript ui updatecheck usagehook
 ```
@@ -119,11 +118,11 @@ One term per concept, spelled the same in the directory, the identifier, the wir
 | One operation on one chat | verb | `internal/chat/<verb>.go` · `chat.Verbs` | CLI `pfm chat <verb>` · MCP `chat_<verb>` (`-` → `_`) | verbs live in `cmd/pfm/*_command.go`; dispatch sits in `headless_command.go:85`; `pfm headless <verb>` is a second entry to every verb, with the aliases `run`→`new` and `transcript`→`read` (`headless_command.go:54-61`) |
 | Resolved paths + config for one process | Runtime | `internal/config` · `config.Runtime` (`LoadRuntime`, `RuntimeOrDefault`) | — | `mcpserv.Runtime` (a second shape; `commandRuntime` is now an alias) |
 | A `pfm internal` entrypoint (hooks are the subset with a harness event) | entry | `internal/hooks/table.go` · `hooks.Table` | argv `pfm internal <entry>` (unchanged — installed wiring depends on it) | if-chain at `main.go:381`; usage lists 8 of 19 |
-| The one tmux process runner | tmux runner | `internal/tmux` · `tmux.Runner` | — | `CommandTmux` ×7, `RealTmux`, `CommandHost`, `reloadCommandTmux` |
+| The one tmux process runner | tmux runner | `internal/tmux` · `tmux.Runner` | — | `CommandTmux` ×7, `RealTmux`, `reloadCommandTmux` |
 | Account usage windows | limits | `internal/limits` · `limits.Sampler` | cache `cc-usage-<uid>/acct-N.json` (unchanged) | lives in `stats` beside resource sampling |
 | A one-time host migration | migration step | `internal/installer/migrations/v<ver>_<slug>.go` · `migrations.Steps` | — | 49 `retire*`/`migrate*`/`*Legacy*` funcs across 12 files |
 | Executable matching per engine | engine match | `engine.MatchCommand` | — | package `engine/matchutil` |
-| Removing a chat from the list (and ending it if live) | **Open ruling 5** | — | CLI `kill`, MCP `chat_kill` | CLI/package say `kill`, the UI and MCP description say `hide`, the SQL table says `hidden` |
+| Removing a chat from the list (and ending it if live) | **Open ruling 4** | — | CLI `kill`, MCP `chat_kill` | CLI/package say `kill`, the UI and MCP description say `hide`, the SQL table says `hidden` |
 
 ## 4. Façades
 
@@ -131,8 +130,8 @@ A unit calls the façade and never the primitive. Checks C4–C7 enforce the fir
 
 | Concern | Module | Primitive it hides | Today |
 | --- | --- | --- | --- |
-| tmux commands | `internal/tmux` (`Runner.Command`, `ListPanes`, `Capture`, `SendLiteral`, `SendKey`, `KillServer`, `RenameWindow`) | `exec.Command(deps.Executable("tmux"), "-S", …)` + `TMUX=` env strip + `-F` parsing | 10 runners (§ finding 2); consumers keep their narrow `TmuxClient` interfaces, satisfied by `*tmux.Runner` |
-| Process table | `internal/procfs` | `/proc/<pid>/{stat,environ}`, `kern.proc.pid`, `kern.procargs2` | `gather` and `resolve` each decode `stat`/`environ` on both OSes (`resolve/procfs_linux.go:22,37` vs `gather/procfs.go:113,158`); resolve's copy drops `StartTime`. `dream/seat` keeps its copy by design (Open ruling 3) |
+| tmux commands | `internal/tmux` (`Runner.Command`, `ListPanes`, `Capture`, `SendLiteral`, `SendKey`, `KillServer`, `RenameWindow`) | `exec.Command(deps.Executable("tmux"), "-S", …)` + `TMUX=` env strip + `-F` parsing | 9 runners (§ finding 2); consumers keep their narrow `TmuxClient` interfaces, satisfied by `*tmux.Runner` |
+| Process table | `internal/procfs` | `/proc/<pid>/{stat,environ}`, `kern.proc.pid`, `kern.procargs2` | `gather` and `resolve` each decode `stat`/`environ` on both OSes (`resolve/procfs_linux.go:22,37` vs `gather/procfs.go:113,158`); resolve's copy drops `StartTime`. |
 | SQLite open | `internal/sqlitedb` (`OpenWriter`, `OpenReadOnly`) | `sql.Open("sqlite", …)` + pragmas | `store/store.go:118,162` and `shared/shared.go:128,151` are near-identical; read-only DSNs use 2000 ms vs 5000 ms at `heal/heal.go:336,403`, `index/opencode.go:228`, `store/codexstate.go:255` |
 | Atomic file write | `internal/atomicfile.Write` | `CreateTemp` → `Chmod` → write → `Sync` → `Close` → `Rename` | 6 helpers that differ on `Sync`/`MkdirAll` (`usagehook/hook.go:668`, `config/config.go:1528`, `recovery/recovery.go:229`, `statusline/render.go:929`, `installer/files.go:24`, `updatecheck/updatecheck.go:194`), plus about 25 inline renames |
 | Transcript/rollout lines | `internal/jsonl.Lines` | `bufio.Reader`/`Scanner` loops with ad hoc caps | 4 idioms; caps of 64 KB default, 1 MB, 8 MB and 32 MB, plus uncapped `ReadBytes` (`index/stream.go:33`, `transcript/transcript.go:294,336`, `codexmeta/header.go:90`, `recovery/recovery.go:142`, `archive/archive.go:523`, `archive/manifest.go:78`) |
@@ -158,7 +157,7 @@ Each derived artifact names its source and the command that regenerates or verif
 | package map in `pfm/CLAUDE.md` | `// Package` doc comments | `go list -f '{{.ImportPath}} — {{.Doc}}' ./...`; C9 fails a package without one |
 | `PFM_*` list in `pfm/CLAUDE.md` | `internal/paths` constants | the doc points at `paths.go`; C16 ratchets reads outside `paths` |
 | Platforms table in `pfm/CLAUDE.md` | `deps.Registry` (`internal/deps/registry.go`) | `pfm doctor` prints the live rows; the doc keeps only the two gating rules |
-| installer migration order | `internal/installer/migrations/` files | `steps_test.go`: slice == directory listing, `Since` versions ascend, none older than the sunset window (Open ruling 7) |
+| installer migration order | `internal/installer/migrations/` files | `steps_test.go`: slice == directory listing, `Since` versions ascend, none older than the sunset window (Open ruling 6) |
 | SQL schema migrations | `internal/store/migration_v*.sql` | existing `go:embed` + `migrate` (`store/store.go`) |
 | over-ceiling files, primitive sites, untested sources | `pfm/.arch/*.txt` baselines | `pfm/scripts/arch-check.sh`; a baseline only ever shrinks |
 
@@ -185,7 +184,7 @@ Each derived artifact names its source and the command that regenerates or verif
 | C16 | no `PFM_*` env read outside `internal/paths` beyond baseline — a literal `Getenv("PFM_…")` or one through a constant holding a `PFM_*` name | `FAIL <file> (new N)` |
 | C17 | one free function per name across files, case-folded — `clipRunes` ×5, `isLive`/`IsLive` with opposite answers; methods and `_linux`/`_darwin` twins excluded | `FAIL <name>: <files>` |
 | C18 | one spelling per engine — `Opencode`, `Oc*`/`oc*`, and `GPT`-for-Codex counted per file, only shrinks | `FAIL <file> (new N)` |
-| C19 | one env namespace — `CHAT_*`, `CC_*`, `DREAM_*` reads counted per file; a `grep PFM_` must find every knob | `FAIL <file> (new N)` |
+| C19 | one env namespace — `CHAT_*` and `CC_*` reads counted per file; a `grep PFM_` must find every knob | `FAIL <file> (new N)` |
 | C20 | one name for `~/.codex` — `codexRoot`/`CodexRoot`/`AccountHome` counted per file; `CodexHome` is canonical | `FAIL <file> (new N)` |
 | C21 | one test jail — `os.MkdirTemp("/tmp", …)` in tests outside `internal/testjail` counted per file; `testjail.ShortRoot` is the jail | `FAIL <file> (new N)` |
 
@@ -234,7 +233,7 @@ if [ "$MODE" = --measure ]; then say C3-cmd-budget MEASURE "cmd/pfm = $n lines";
 src | grep '^cmd/pfm/' | xargs grep -nE 'exec\.Command|sql\.Open|os\.(WriteFile|Rename)\(' | cut -d: -f1 | sort | uniq -c | awk '{print $2" x"$1}' > "$T/c4"; ratchet C4-cmd-primitives cmd-primitives "$T/c4"
 
 # C5 one tmux runner: concrete runners outside internal/tmux/
-src | grep -v '^internal/tmux/' | xargs grep -lE '^type (CommandTmux|RealTmux|CommandHost|reloadCommandTmux) struct' > "$T/c5"; ratchet C5-tmux-runner tmux-runners "$T/c5"
+src | grep -v '^internal/tmux/' | xargs grep -lE '^type (CommandTmux|RealTmux|reloadCommandTmux) struct' > "$T/c5"; ratchet C5-tmux-runner tmux-runners "$T/c5"
 
 # C6 one atomic writer: named helpers outside internal/fsatomic/
 src | grep -v '^internal/fsatomic/' | xargs grep -lE '^func (writeAtomic|WriteAtomic|atomicWrite|AtomicWrite)\(' > "$T/c6"; ratchet C6-atomic-write atomic-writers "$T/c6"
@@ -298,14 +297,14 @@ Hops are reported as the pair source-only · orientation.
 | files re-read ≥ 2× per session | median 0 · p75 2 · max 5 | ≤ 2 |
 | zero-result searches per session | 0 | 0 |
 | source files > 800 lines / test files > 1,000 | 24 / 12 | 0 / 0 (ratchet) |
-| concrete tmux runners · atomic-write helpers · `sql.Open` sites | 10 · 6 · 5 files (7 calls) | 1 · 1 · 1 |
+| concrete tmux runners · atomic-write helpers · `sql.Open` sites | 9 · 6 · 5 files (7 calls) | 1 · 1 · 1 |
 | MCP argv calls into `package main` | 3 call sites carrying every stateful verb | 0 |
 | dangling pointers in `pfm/CLAUDE.md` · incomplete hand lists in it | 5 (`check/ legacy/ PLAN.md CUTOVER.md PFM_DB_SCRIPT`) + 1 self-contradiction · 3 (subcommands −7, packages −39, platforms −1) | 0 · 0 (lists replaced by `go list`, `pfm help`, `deps/registry.go`) |
 | packages without a doc comment | 10 | 0 |
 | `pfm internal` entries missing from usage | 11 of 19 | 0 (structural) |
 | unreferenced exported funcs (heuristic, see gaps) | 5 (`harvest/mirror.go` ×3, `ui/model.go` ×2) | 0 |
 
-**Named gaps.** The hop sample covers Claude seats only; Codex seats, where most pfm builds run, were not measured. The dead-code count is a grep heuristic. `deadcode` could not be built offline (x/tools test deps are missing from the module cache), and the installed `golangci-lint` v1.64.8 cannot read go1.27 export data (Open ruling 9).
+**Named gaps.** The hop sample covers Claude seats only; Codex seats, where most pfm builds run, were not measured. The dead-code count is a grep heuristic. `deadcode` could not be built offline (x/tools test deps are missing from the module cache), and the installed `golangci-lint` v1.64.8 cannot read go1.27 export data (Open ruling 8).
 
 ## 8. Migration
 
@@ -318,7 +317,7 @@ Hops are reported as the pair source-only · orientation.
 - step 4(a)'s first verbs: target resolution, `last`, `status` and `read` in `internal/chat`. MCP `chat_last` and `chat_status` call `chat.Verbs` typed (C10 10 → 8).
 - step 4(a)'s rest and 4(d)'s `mcpSharedOperations`: `chat.List`, `chat.Find` and `chat.NameResolver`. MCP `chat_ls`, `chat_find` and `chat_read` call `ChatVerbs`, and inject's roster rung is one resolver for the CLI and MCP. `capture`, `whoami` and `resolve` already called `inject` and `resolve` typed, so they needed no move. An index pass refuses an engine with no index source instead of skipping it.
 - step 2's `internal/atomicfile`: every hand-rolled byte writer calls `atomicfile.Write`. C6 counts inline `os.CreateTemp` + `os.Rename` too, and its baseline is the 12 files the name grep missed: the streaming writers, plus the harvester's writer (`config.writeAtomic`, kept verbatim in `config/harvester_write.go`) and `harvest/cache.go`, which are held out of this wave.
-- step 2's `internal/sqlitedb` and `internal/tmux`: every SQLite open goes through `OpenStore`, `OpenReadOnly` or `OpenReadWrite` (C7 7 → 0), and the tmux builders in kill, inject, resolve, reap, spawn, action, agentopen, reload, launch and the chat commands call `tmux.Command`. C5 keeps `gather/tmuxprobe.go` (its own socket addressing) and `dream/seat/host.go` (dream isolation). The ratchet runs in the C locale and inside the fence (`dev.sh verify pfm`).
+- step 2's `internal/sqlitedb` and `internal/tmux`: every SQLite open goes through `OpenStore`, `OpenReadOnly` or `OpenReadWrite` (C7 7 → 0), and the tmux builders in kill, inject, resolve, reap, spawn, action, agentopen, reload, launch and the chat commands call `tmux.Command`. C5 keeps `gather/tmuxprobe.go` (its own socket addressing). The ratchet runs in the C locale and inside the fence (`dev.sh verify pfm`).
 
 The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
 
@@ -338,7 +337,7 @@ The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
 8. **Renames, one mechanical commit each.** `shared` → `fleetdb` (plus the field and env); the index DB file `fleet.db` → `index.db` (an installer step that moves the file and never deletes it: an older binary still finds its hides in the fleet DB and re-indexes the rest); `matchutil` → `engine.MatchCommand`; `stats/limits.go` + `usage_source.go` → `internal/limits`, which **must land before pfmd Phase 2** so the daemon's poller and its clients import one package; and `store` → `indexdb` if ruled. *Moves:* C8, C11, glossary divergence.
 9. **Installer.** Split `installer.go` by surface (Codex agents, global links, units, harvest install, overlays), and move every `retire*` and `migrate*` step into `internal/installer/migrations/` with a `Since` version and a sunset. *Moves:* C1 (the largest file), plus a standing trim of one-time code.
 
-**What dies:** `mcpserv.Dispatch` and its argv adapters; `runChatSatellite`; the `run()` switch, `printUsage` and `diagnosticCommand` as three hand lists; the `runInternal` if-chain and its usage string; `reloadCommandTmux` and 8 more tmux runners; resolve's procfs; 5 atomic-write helpers; 2 pragma sets; `engine/matchutil`; the package name `shared`; the duplicate `fleet.db`; the package table and subcommand list in `pfm/CLAUDE.md`; and migration steps past their sunset.
+**What dies:** `mcpserv.Dispatch` and its argv adapters; `runChatSatellite`; the `run()` switch, `printUsage` and `diagnosticCommand` as three hand lists; the `runInternal` if-chain and its usage string; `reloadCommandTmux` and 7 more tmux runners; resolve's procfs; 5 atomic-write helpers; 2 pragma sets; `engine/matchutil`; the package name `shared`; the duplicate `fleet.db`; the package table and subcommand list in `pfm/CLAUDE.md`; and migration steps past their sunset.
 
 **Queued specs** (`docs/dev/trains/queue/2026-08-2*`) touch `reap`, `mcp enable`, Codex rebind, spawn cgroups and same-name resolution. None conflicts. A step that moves a file a queued spec cites re-anchors that spec in the same wave, which is a coupled edit.
 
@@ -366,13 +365,12 @@ Each ruling lists the recommendation first.
 
 1. **Line ceiling.** 800 source / 1,000 test (24 + 12 files over today). The alternative, 600 / 800, puts 39 + 23 over.
 2. **`cmd/pfm` end-state budget.** 5,000 lines, lowered wave by wave through C3.
-3. **Dream isolation.** Admit `internal/tmux` and `internal/procfs` (pure mechanisms that hold no host state) to `dream/seat`'s allowlist in `internal/dream/isolation_test.go`, or keep the seat's deliberate copies. The owner's rule; the recommendation is to admit them.
-4. **`store` → `indexdb`.** One mechanical rename that makes both database packages name what they hold. The recommendation is yes, late (step 8).
-5. **kill / hide / hidden.** Pick one term for "remove from the list, end if live". CLI and MCP names are wire keys; a rename needs an alias period.
-6. **`docs/dev/pfm-surface.md`.** Keep the hand-written prose and add a parity check that every command, verb and entry it names exists and vice versa (recommended), or generate its name columns from `pfm help --markdown`.
-7. **Installer migration sunset.** How long a retire/migrate step lives. The recommendation is 10 minor versions past its `Since`. This depends on how far behind an adopter may upgrade from.
-8. **JSONL line policy.** Recommended: one uncapped `ReadBytes` iterator (7 of today's 11 sites already work this way), with a partial final line returned as an error, never skipped.
-9. **Dead-code gate.** Pin `golang.org/x/tools/cmd/deadcode` (the Go team's tool) so C-dead replaces the grep heuristic. It needs your approval to install.
-10. **Rebuild vs incremental.** Incremental, as above.
-11. **`pfm headless <chat-verb>` alias surface.** Retire it, so that `pfm headless` means only `exec`, the one-shot process. A grep over `*.md *.go *.sh *.zsh *.json *.toml` outside tests finds no consumer. It is a user-facing spelling, so the recommendation is to retire it behind one release of a deprecation notice.
-12. **`docs/dev/pfm-surface.md` drift, fix now or at ruling 6.** Its top-level table documents `pfm run` and `pfm agent open`, and neither is a top-level command: `run` is a `pfm headless` alias for `chat new`, and agent-open is `pfm internal agent-open`. It also names 7 of 19 internal entries.
+3. **`store` → `indexdb`.** One mechanical rename that makes both database packages name what they hold. The recommendation is yes, late (step 8).
+4. **kill / hide / hidden.** Pick one term for "remove from the list, end if live". CLI and MCP names are wire keys; a rename needs an alias period.
+5. **`docs/dev/pfm-surface.md`.** Keep the hand-written prose and add a parity check that every command, verb and entry it names exists and vice versa (recommended), or generate its name columns from `pfm help --markdown`.
+6. **Installer migration sunset.** How long a retire/migrate step lives. The recommendation is 10 minor versions past its `Since`. This depends on how far behind an adopter may upgrade from.
+7. **JSONL line policy.** Recommended: one uncapped `ReadBytes` iterator (7 of today's 11 sites already work this way), with a partial final line returned as an error, never skipped.
+8. **Dead-code gate.** Pin `golang.org/x/tools/cmd/deadcode` (the Go team's tool) so C-dead replaces the grep heuristic. It needs your approval to install.
+9. **Rebuild vs incremental.** Incremental, as above.
+10. **`pfm headless <chat-verb>` alias surface.** Retire it, so that `pfm headless` means only `exec`, the one-shot process. A grep over `*.md *.go *.sh *.zsh *.json *.toml` outside tests finds no consumer. It is a user-facing spelling, so the recommendation is to retire it behind one release of a deprecation notice.
+11. **`docs/dev/pfm-surface.md` drift, fix now or at ruling 5.** Its top-level table documents `pfm run` and `pfm agent open`, and neither is a top-level command: `run` is a `pfm headless` alias for `chat new`, and agent-open is `pfm internal agent-open`. It also names 7 of 19 internal entries.

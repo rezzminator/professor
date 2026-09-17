@@ -10,10 +10,8 @@ import (
 )
 
 // moduleRoot walks upward from the test's working directory to the nearest
-// go.mod — the same pattern internal/dream/isolation_test.go uses, kept
-// package-local rather than exported, since duplicating this handful of
-// lines per package is the repo's own precedent (see that file's own
-// comment on internal/dream/seat's deliberate duplication).
+// go.mod. It stays package-local rather than exporting test-only machinery;
+// duplicating this handful of setup lines per package is the repo's precedent.
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

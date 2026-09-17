@@ -9,8 +9,8 @@ services:
       dockerfile: pfm-dev.Dockerfile
     image: professor-pfm-dev
     # A real machine has an init that reaps orphans; a bare container does
-    # not, so a double-forked descendant lingers as a zombie and the dream
-    # seat's proc-jailer stress reads "still exists" for a process that is
+    # not, so a double-forked descendant lingers as a zombie and the
+    # proc-jailer stress reads "still exists" for a process that is
     # already dead. tini closes that gap.
     init: true
     volumes:

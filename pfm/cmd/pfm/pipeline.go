@@ -22,6 +22,10 @@ import (
 
 const (
 	testFreshSocketEnv = "PFM_TEST_FRESH_SOCKET"
+	fleetRefreshGrowth = 13
+)
+
+var (
 	// fleetRefreshInterval is the cadence while somebody is driving the picker.
 	// One pass is expensive on a real fleet — a tmux fork+exec PER LIVE
 	// SOCKET (measured ~50 on this box) plus a whole store read and a
@@ -30,6 +34,10 @@ const (
 	// (2026-09-03: 1741 ticks/30s, ~58%, on a real-fleet real-box measurement
 	// with the sky tick already fixed — the scan itself was the rest).
 	fleetRefreshInterval = 5 * time.Second
+	// fleetRefreshParkThreshold is the point past which the loop stops
+	// scheduling unconditional full-fleet passes. Known Codex panes retain
+	// lightweight identity checks so /clear in another pane stays observable.
+	fleetRefreshParkThreshold = 60 * time.Second
 	// fleetRefreshGrowth stretches the interval after every pass nobody
 	// interrupted. It is deliberately steep, not the gentle curve a cheaper
 	// operation could afford: at ~5+ CPU-seconds a pass, even a handful of
@@ -37,11 +45,6 @@ const (
 	// idle budget outright, so the climb is sized to cross
 	// fleetRefreshParkThreshold within a SINGLE untouched interval (5s × 13 =
 	// 65s ≥ 60s) rather than many gentle ones.
-	fleetRefreshGrowth = 13
-	// fleetRefreshParkThreshold is the point past which the loop stops
-	// scheduling unconditional full-fleet passes. Known Codex panes retain
-	// lightweight identity checks so /clear in another pane stays observable.
-	fleetRefreshParkThreshold = 60 * time.Second
 	// Presence polling stays responsive while expensive idle identity probes
 	// use their own slower cadence.
 	fleetRefreshParkPollInterval  = 2 * time.Second

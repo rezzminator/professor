@@ -49,7 +49,7 @@ var version = developmentVersion
 // binary actually implements.
 var topLevelSubcommands = []string{
 	versionCommand, "ls", chatCommand, "harvest", headlessCommand, indexCommand, doctorCommand,
-	configCommand, "dream", "reap", archiveCommand, "heal", "name-sync", "statusline",
+	configCommand, "reap", archiveCommand, "heal", "name-sync", "statusline",
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand,
 }
@@ -118,8 +118,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runDoctor(args[1:], stdout, stderr, runtime)
 	case "config":
 		return runConfig(args[1:], stdout, stderr, runtime)
-	case "dream":
-		return runDreamConfigured(args[1:], os.Stdin, stdout, stderr, runtime)
 	case "reap":
 		return runReap(args[1:], stdout, stderr, runtime)
 	case "archive":
@@ -669,7 +667,6 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end")
 	fmt.Fprintln(w, "  headless  run Claude or Codex through one isolated process interface")
 	fmt.Fprintln(w, "  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path")
-	fmt.Fprintln(w, "  dream     build and inject repository memory organs")
 	fmt.Fprintln(w, "  index     refresh the transcript index")
 	fmt.Fprintln(w, "  whoami    print this chat's own tmux session name")
 	fmt.Fprintln(w, "  issues    list servicedesk complaints filed through issue_servicedesk")

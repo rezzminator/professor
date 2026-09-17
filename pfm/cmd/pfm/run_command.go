@@ -24,6 +24,11 @@ import (
 	"hostops/pfm/internal/spawn"
 )
 
+// runSpawnTimings is zero in production, which makes spawn use its live
+// defaults. Package integration tests replace it with short timings because
+// their local TUI fixtures paint synchronously.
+var runSpawnTimings spawn.Timings
+
 // spawnTraceEnv turns on the spawn choreography trace on stderr.
 const spawnTraceEnv = "PFM_SPAWN_TRACE"
 
@@ -148,6 +153,7 @@ func runRun(
 		PromptOnCommandLine: plan.PromptOnCommandLine,
 		Width:               action.HeadlessWidth,
 		Height:              action.HeadlessHeight,
+		Timings:             runSpawnTimings,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)

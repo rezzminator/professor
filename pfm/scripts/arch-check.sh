@@ -233,9 +233,9 @@ else say C17-dup-functions ERROR "grep could not read function declarations"; fi
 if g "$T/raw" "$T/all.list" -nE 'Opencode|\b[oO]c[A-Z][A-Za-z]+|GPT'; then count_by_file "$T/raw" > "$T/c18"; ratchet_counts C18-engine-spellings engine-spellings "$T/c18"
 else say C18-engine-spellings ERROR "grep could not read sources"; fi
 
-# C19 one environment namespace: CHAT_*, CC_*, DREAM_* reads are pfm's own
+# C19 one environment namespace: CHAT_*, CC_* reads are pfm's own
 # variables under a foreign prefix — a `grep PFM_` never finds them.
-if g "$T/raw" "$T/src.list" -nE '(Getenv|LookupEnv)\("(CHAT|CC|DREAM)_'; then count_by_file "$T/raw" > "$T/c19"; ratchet_counts C19-env-namespace env-namespace "$T/c19"
+if g "$T/raw" "$T/src.list" -nE '(Getenv|LookupEnv)\("(CHAT|CC)_'; then count_by_file "$T/raw" > "$T/c19"; ratchet_counts C19-env-namespace env-namespace "$T/c19"
 else say C19-env-namespace ERROR "grep could not read sources"; fi
 
 # C20 one name for ~/.codex: CodexHome. codexRoot / CodexRoot / AccountHome

@@ -143,7 +143,6 @@ internal/spawn/types.go
 internal/stats/resources_darwin.go
 internal/stats/resources_linux.go
 internal/stats/tokens.go
-internal/statusline/refresh_gpt.go
 internal/statusline/render.go
 internal/statusline/runtime.go
 internal/store/doc.go

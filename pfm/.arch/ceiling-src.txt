@@ -1,5 +1,5 @@
 cmd/pfm/chat_dispatch.go 818
-cmd/pfm/chat_reload_command.go 1193
+cmd/pfm/chat_reload_command.go 1192
 cmd/pfm/chat_satellite_command.go 970
 cmd/pfm/doctor.go 1753
 cmd/pfm/update_command.go 927

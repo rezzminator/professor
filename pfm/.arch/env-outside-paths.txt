@@ -10,6 +10,6 @@ internal/gather/tmuxprobe.go 1
 internal/harvestmcp/service.go 1
 internal/inject/engine.go 1
 internal/stats/limits.go 1
-internal/statusline/refresh_gpt.go 1
+internal/statusline/refresh_codex.go 1
 internal/statusline/runtime.go 2
 internal/usagehook/hook.go 2

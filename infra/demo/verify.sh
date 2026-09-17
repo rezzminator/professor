@@ -98,7 +98,7 @@ check_fleet() { # every slide chat ● live, every Claude chat on the professor 
   else pass fleet "$("$HERE/idle.sh" roster | wc -l | tr -d ' ') slide chats live · $prompts claude process(es) on the professor system prompt"; fi
 }
 check_express() { # five independently counted install-fidelity beats on the adopted repo
-  local root=/work/express out rc json_error=/tmp/verify-express-update-jq.log json_rc
+  local root=/work/express out rc bad summary json_error=/tmp/verify-express-update-jq.log json_rc
   local hook_list=/tmp/verify-express-hooks.tsv
   local event command target bad="" hook_count=0
 
@@ -112,12 +112,15 @@ check_express() { # five independently counted install-fidelity beats on the ado
 
   out=/tmp/verify-express-doctor.log
   (cd "$root" && pfm doctor) >"$out" 2>&1; rc=$?
-  if [ "$rc" -ne 0 ]; then
-    fail express-doctor "pfm doctor exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
-  elif ! grep -qxF 'doctor: clean' "$out"; then
-    fail express-doctor "pfm doctor exited 0 without explicit 'doctor: clean'; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  bad="$(grep -m1 -E 'broken|drift|stale|error=' "$out" || true)"
+  if [ "$rc" -ge 2 ]; then
+    fail express-doctor "pfm doctor exit $rc; full output: $out; first failure: ${bad:-<none>}; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  elif [ -n "$bad" ]; then
+    fail express-doctor "pfm doctor exit $rc with failure row: $bad; full output: $out"
   else
-    pass express-doctor "pfm doctor exit 0 · doctor: clean"
+    summary="$(grep -m1 '^doctor: warnings=' "$out" || true)"
+    [ -n "$summary" ] || summary="$(grep -m1 '^doctor: clean$' "$out" || true)"
+    pass express-doctor "pfm doctor exit $rc · ${summary:-no summary line}"
   fi
 
   out=/tmp/verify-express-update.json

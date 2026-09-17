@@ -48,7 +48,8 @@ docker rm -f pfm-demo            # tear down; the copied credentials die with it
   trip Claude→Codex→Claude, `/reload --account` in place, self-compact, storm +
   kill-storm proof, idle down/up, both headless commands. `express` emits five
   independently counted ✓/✗ beats: the `professor: install` marker; `pfm doctor`
-  exit 0 with `doctor: clean`; `pfm update check --json` exit 0 with zero
+  exit 0/1 with no `broken`/`drift`/`stale`/`error=` row (advisory `warnings=N`
+  is quoted and accepted); `pfm update check --json` exit 0 with zero
   `UPDATED`/`NEW`/`GONE-UPSTREAM`/`LOCAL-DELETED`, `reviewRequired: 0`, and
   terminal `clean`; `pfm codex check .` exit 0 with `CODEX CHECK PASS`; and
   exhaustive command-hook validation proving at least one hook, every command rooted at

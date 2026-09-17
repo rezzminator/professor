@@ -98,9 +98,9 @@ check_fleet() { # every slide chat ● live, every Claude chat on the professor 
   else pass fleet "$("$HERE/idle.sh" roster | wc -l | tr -d ' ') slide chats live · $prompts claude process(es) on the professor system prompt"; fi
 }
 check_express() { # five independently counted install-fidelity beats on the adopted repo
-  local root=/work/express out rc bad summary json_error=/tmp/verify-express-update-jq.log json_rc
+  local root=/work/express out rc doctor_bad summary json_error=/tmp/verify-express-update-jq.log json_rc
   local hook_list=/tmp/verify-express-hooks.tsv
-  local event command target bad="" hook_count=0
+  local event command target hook_bad="" hook_count=0
 
   if [ ! -d "$root/.git" ]; then
     fail express "$root is not a repository (adopt.sh never ran)"
@@ -112,11 +112,11 @@ check_express() { # five independently counted install-fidelity beats on the ado
 
   out=/tmp/verify-express-doctor.log
   (cd "$root" && pfm doctor) >"$out" 2>&1; rc=$?
-  bad="$(grep -m1 -E 'broken|drift|stale|error=' "$out" || true)"
+  doctor_bad="$(grep -m1 -E 'broken|drift|stale|error=' "$out" || true)"
   if [ "$rc" -ge 2 ]; then
-    fail express-doctor "pfm doctor exit $rc; full output: $out; first failure: ${bad:-<none>}; tail: $(tail -3 "$out" | tr '\n' ' ')"
-  elif [ -n "$bad" ]; then
-    fail express-doctor "pfm doctor exit $rc with failure row: $bad; full output: $out"
+    fail express-doctor "pfm doctor exit $rc; full output: $out; first failure: ${doctor_bad:-<none>}; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  elif [ -n "$doctor_bad" ]; then
+    fail express-doctor "pfm doctor exit $rc with failure row: $doctor_bad; full output: $out"
   else
     summary="$(grep -m1 '^doctor: warnings=' "$out" || true)"
     [ -n "$summary" ] || summary="$(grep -m1 '^doctor: clean$' "$out" || true)"
@@ -158,22 +158,22 @@ check_express() { # five independently counted install-fidelity beats on the ado
     while IFS=$'\t' read -r event command; do
       hook_count=$((hook_count + 1))
       if [[ ! "$command" =~ ^\$CLAUDE_PROJECT_DIR/([A-Za-z0-9._/-]+)([[:space:]].*)?$ ]]; then
-        bad+=" $event: malformed/unrooted command '$command';"
+        hook_bad+=" $event: malformed/unrooted command '$command';"
         continue
       fi
       target="${BASH_REMATCH[1]}"
       if [[ "/$target/" == *"/../"* || "/$target/" == *"/./"* || "$target" == /* || "$target" == */ ]]; then
-        bad+=" $event: malformed project-relative target '$target';"
+        hook_bad+=" $event: malformed project-relative target '$target';"
       elif [ ! -e "$root/$target" ]; then
-        bad+=" $event: missing \$CLAUDE_PROJECT_DIR/$target;"
+        hook_bad+=" $event: missing \$CLAUDE_PROJECT_DIR/$target;"
       else
         printf '%s\t%s\n' "$event" "$command" >>"$out"
       fi
     done <"$hook_list"
     if [ "$hook_count" -eq 0 ]; then
       fail express-hooks "zero command hooks found in .claude/settings.json (enumeration completed)"
-    elif [ -n "$bad" ]; then
-      fail express-hooks "$hook_count command hook(s) enumerated;$bad full validated-hook list: $out"
+    elif [ -n "$hook_bad" ]; then
+      fail express-hooks "$hook_count command hook(s) enumerated;$hook_bad full validated-hook list: $out"
     else
       pass express-hooks "$hook_count command hook path(s) rooted at \$CLAUDE_PROJECT_DIR and present"
     fi

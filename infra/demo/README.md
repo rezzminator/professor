@@ -6,8 +6,20 @@ built from this checkout, real chats talking through the chat MCP. Nothing in
 the container is a stand-in — the readme-gif recorder keeps its own fake
 harness under `infra/readme-gif/` for the take that must never spend a token.
 
+## Tier B — wave-close only
+
+Tier B is the live end-to-end gate at wave close, not a per-commit check. It
+uses real seats and spends real tokens. The wave closer runs these exact
+commands, in order:
+
 ```bash
-infra/demo/up.sh                 # container → tools → config → credentials → pfm install → look → adopt → fleet → verify
+infra/demo/up.sh
+docker exec -w /tmp pfm-demo bash /worktree/infra/demo/verify.sh
+```
+
+Other demo-fence entry points:
+
+```bash
 infra/demo/up.sh --no-fleet      # everything but the chats (and so no verify)
 infra/demo/up.sh --no-verify     # the fleet without the end-to-end gate
 docker exec -it -w /work/express -e TERM=xterm-256color -e COLORTERM=truecolor pfm-demo zsh -i
@@ -31,12 +43,19 @@ docker rm -f pfm-demo            # tear down; the copied credentials die with it
   the `professor: install` marker is committed only after `pfm codex build` +
   `check` pass and the codex-sync hook script is in place.
 - `verify.sh [CHECK...]` (container, last step of up.sh): the deck's beats run for
-  real and judged from pfm's reports — seats (`/reload` linked, theme, TUI),
-  daemon, fleet live + system prompt, Express install + Codex mirror, inject
-  round trip Claude→Codex→Claude, `/reload --account` in place, self-compact,
-  storm + kill-storm proof, idle down/up, both headless commands. One ✓/✗ line
-  per check, the closing count, exit 1 on any ✗; its throwaway chats are
-  ended and hidden.
+  real and are judged from pfm's reports — seats (`/reload` linked, theme, TUI),
+  daemon, fleet live + system prompt, Express install fidelity, inject round
+  trip Claude→Codex→Claude, `/reload --account` in place, self-compact, storm +
+  kill-storm proof, idle down/up, both headless commands. `express` emits six
+  independently counted ✓/✗ beats: the `professor: install` marker; `pfm doctor`
+  exit 0 with `doctor: clean`; `pfm update check --json` exit 0 with zero
+  `UPDATED`/`NEW`/`GONE-UPSTREAM`/`LOCAL-DELETED`, `reviewRequired: 0`, and
+  terminal `clean`; `pfm codex check .` exit 0 with `CODEX CHECK PASS`;
+  `node .claude/scripts/build-opencode.mjs doctor` exit 0 with `DOCTOR PASS`;
+  and exhaustive command-hook validation proving at least one hook, every command rooted at
+  `$CLAUDE_PROJECT_DIR`, and every referenced target present. Every other named
+  check emits one line. The closing count includes all beats, exit 1 on any ✗,
+  and throwaway chats are ended and hidden.
 - `storm.sh start [N] [SENDS] | stop` (container): the cosmos storm — N cheap
   chats round-robin across Claude, Codex and OpenCode (seat/model/effort per engine
   set by `STORM_*` env, see its header) answering every message with a real

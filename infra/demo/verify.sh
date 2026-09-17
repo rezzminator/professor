@@ -8,7 +8,7 @@
 #
 #   verify.sh              every check, in order
 #   verify.sh CHECK...     only the named checks:
-#                          seats daemon fleet express inject reload compact storm idle headless
+#                          seats daemon fleet express (six beats) inject reload compact storm idle headless
 #
 # Cost: five throwaway chats (PING_CLAUDE, PING_CODEX, RELOAD_T, COMPACT_T,
 # STORM_1..2) — a few short model turns; they are ended and hidden at the end.
@@ -92,17 +92,94 @@ check_fleet() { # every slide chat ● live, every Claude chat on the professor 
   elif [ "${prompts:-0}" -lt 1 ]; then fail fleet "every slide chat is live but no claude process carries --system-prompt-file (claude.systemPrompt not applied)"
   else pass fleet "$("$HERE/idle.sh" roster | wc -l | tr -d ' ') slide chats live · $prompts claude process(es) on the professor system prompt"; fi
 }
-check_express() { # Professor installed on the real repo, Codex mirror compiled, hooks wired
-  local log=/tmp/verify-codex.log
-  [ -d /work/express/.git ] || { fail express "/work/express is not a repository (adopt.sh never ran)"; return; }
-  ( cd /work/express || exit 1
-    git log --oneline 2>/dev/null | grep -q 'professor: install' || { echo "no 'professor: install' commit — the interview did not finish"; exit 1; }
-    [ -x .claude/scripts/codex-sync.sh ] || { echo ".claude/scripts/codex-sync.sh missing — the Stop hook names it"; exit 1; }
-    grep -q 'codex-sync.sh' .claude/settings.json || { echo ".claude/settings.json wires no codex-sync.sh hook"; exit 1; }
-    { pfm codex build . && pfm codex check .; } >"$log" 2>&1 || { echo "pfm codex build/check failed: $(tail -3 "$log" | tr '\n' ' ')"; exit 1; }
-    grep -qE 'CODEX CHECK PASS' "$log" || { echo "pfm codex check exited 0 without CODEX CHECK PASS: $(tail -2 "$log" | tr '\n' ' ')"; exit 1; }
-    echo "'professor: install' committed · codex-sync hooks wired · $(grep -E 'CODEX (BUILD|CHECK) PASS' "$log" | tr '\n' ' ')"
-  ) > /tmp/verify-express.out 2>&1 && pass express "$(cat /tmp/verify-express.out)" || fail express "$(cat /tmp/verify-express.out)"
+check_express() { # six independently counted install-fidelity beats on the adopted repo
+  local root=/work/express out rc json_error=/tmp/verify-express-update-jq.log json_rc
+  local hook_list=/tmp/verify-express-hooks.tsv
+  local event command target bad="" hook_count=0
+
+  if [ ! -d "$root/.git" ]; then
+    fail express "$root is not a repository (adopt.sh never ran)"
+  elif (cd "$root" && git log --oneline 2>/dev/null | grep -q 'professor: install'); then
+    pass express "'professor: install' marker committed"
+  else
+    fail express "no 'professor: install' commit — the interview did not finish"
+  fi
+
+  out=/tmp/verify-express-doctor.log
+  (cd "$root" && pfm doctor) >"$out" 2>&1; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail express-doctor "pfm doctor exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  elif ! grep -qxF 'doctor: clean' "$out"; then
+    fail express-doctor "pfm doctor exited 0 without explicit 'doctor: clean'; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  else
+    pass express-doctor "pfm doctor exit 0 · doctor: clean"
+  fi
+
+  out=/tmp/verify-express-update.json
+  (cd "$root" && pfm update check --json) >"$out" 2>&1; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail express-update "pfm update check --json exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  else
+    jq -e '.counts.UPDATED == 0 and .counts.NEW == 0 and .counts["GONE-UPSTREAM"] == 0 and .counts["LOCAL-DELETED"] == 0 and .reviewRequired == 0 and .terminal == "clean"' \
+      "$out" >/dev/null 2>"$json_error"; json_rc=$?
+    if [ "$json_rc" -eq 0 ]; then
+      pass express-update "zero UPDATED/NEW/GONE-UPSTREAM/LOCAL-DELETED · reviewRequired 0 · terminal clean"
+    elif [ -s "$json_error" ]; then
+      fail express-update "exit 0 but JSON validation failed (jq exit $json_rc): $(tr '\n' ' ' <"$json_error"); full command output: $out"
+    else
+      fail express-update "exit 0 but expected zero UPDATED/NEW/GONE-UPSTREAM/LOCAL-DELETED, reviewRequired 0, terminal clean; full output: $out; saw: $(tr '\n' ' ' <"$out")"
+    fi
+  fi
+
+  out=/tmp/verify-express-codex.log
+  (cd "$root" && pfm codex check .) >"$out" 2>&1; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail express-codex "pfm codex check . exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  elif ! grep -q '^CODEX CHECK PASS' "$out"; then
+    fail express-codex "exit 0 without CODEX CHECK PASS; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  else
+    pass express-codex "$(grep '^CODEX CHECK PASS' "$out" | tail -1)"
+  fi
+
+  out=/tmp/verify-express-opencode.log
+  (cd "$root" && node .claude/scripts/build-opencode.mjs doctor) >"$out" 2>&1; rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail express-opencode "OpenCode doctor exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  elif ! grep -q '^DOCTOR PASS' "$out"; then
+    fail express-opencode "exit 0 without DOCTOR PASS; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
+  else
+    pass express-opencode "$(grep '^DOCTOR PASS' "$out" | tail -1)"
+  fi
+
+  out=/tmp/verify-express-hooks.log
+  if ! jq -r '.hooks | to_entries[] | .key as $event | .value[] | .hooks[] | select(.type == "command") | [$event, (.command // "")] | @tsv' \
+      "$root/.claude/settings.json" >"$hook_list" 2>"$out"; then
+    fail express-hooks "could not enumerate command hooks from .claude/settings.json; full output: $out; saw: $(tr '\n' ' ' <"$out")"
+  else
+    : >"$out"
+    while IFS=$'\t' read -r event command; do
+      hook_count=$((hook_count + 1))
+      if [[ ! "$command" =~ ^\$CLAUDE_PROJECT_DIR/([A-Za-z0-9._/-]+)([[:space:]].*)?$ ]]; then
+        bad+=" $event: malformed/unrooted command '$command';"
+        continue
+      fi
+      target="${BASH_REMATCH[1]}"
+      if [[ "/$target/" == *"/../"* || "/$target/" == *"/./"* || "$target" == /* || "$target" == */ ]]; then
+        bad+=" $event: malformed project-relative target '$target';"
+      elif [ ! -e "$root/$target" ]; then
+        bad+=" $event: missing \$CLAUDE_PROJECT_DIR/$target;"
+      else
+        printf '%s\t%s\n' "$event" "$command" >>"$out"
+      fi
+    done <"$hook_list"
+    if [ "$hook_count" -eq 0 ]; then
+      fail express-hooks "zero command hooks found in .claude/settings.json (enumeration completed)"
+    elif [ -n "$bad" ]; then
+      fail express-hooks "$hook_count command hook(s) enumerated;$bad full validated-hook list: $out"
+    else
+      pass express-hooks "$hook_count command hook path(s) rooted at \$CLAUDE_PROJECT_DIR and present"
+    fi
+  fi
 }
 check_inject() { # slide 2: a Claude chat messages a Codex chat and reads the answer back — signed both ways
   local out

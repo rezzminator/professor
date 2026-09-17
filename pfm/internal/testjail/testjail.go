@@ -44,6 +44,12 @@ import (
 // /tmp is the answer to both: it is short everywhere, and resolving it once
 // yields /private/tmp on macOS and /tmp on Linux — canonical on each.
 func Run(m *testing.M) int {
+	// Installer tests must not inherit an operator account as an MCP write
+	// target. Packages that can install host state enter through this jail.
+	if err := os.Setenv("CLAUDE_CONFIG_DIR", ""); err != nil {
+		fmt.Fprintf(os.Stderr, "testjail: clear CLAUDE_CONFIG_DIR: %v\n", err)
+		return 1
+	}
 	base, err := filepath.EvalSymlinks(os.TempDir())
 	if short, shortErr := filepath.EvalSymlinks("/tmp"); shortErr == nil {
 		base, err = short, nil

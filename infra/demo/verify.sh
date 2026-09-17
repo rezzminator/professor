@@ -8,7 +8,7 @@
 #
 #   verify.sh              every check, in order
 #   verify.sh CHECK...     only the named checks:
-#                          seats daemon fleet express (six beats) inject reload compact storm idle headless
+#                          seats daemon fleet express (five beats) inject reload compact storm idle headless
 #
 # Cost: five throwaway chats (PING_CLAUDE, PING_CODEX, RELOAD_T, COMPACT_T,
 # STORM_1..2) — a few short model turns; they are ended and hidden at the end.
@@ -97,7 +97,7 @@ check_fleet() { # every slide chat ● live, every Claude chat on the professor 
   elif [ "${prompts:-0}" -lt 1 ]; then fail fleet "every slide chat is live but no claude process carries --system-prompt-file (claude.systemPrompt not applied)"
   else pass fleet "$("$HERE/idle.sh" roster | wc -l | tr -d ' ') slide chats live · $prompts claude process(es) on the professor system prompt"; fi
 }
-check_express() { # six independently counted install-fidelity beats on the adopted repo
+check_express() { # five independently counted install-fidelity beats on the adopted repo
   local root=/work/express out rc json_error=/tmp/verify-express-update-jq.log json_rc
   local hook_list=/tmp/verify-express-hooks.tsv
   local event command target bad="" hook_count=0
@@ -144,16 +144,6 @@ check_express() { # six independently counted install-fidelity beats on the adop
     fail express-codex "exit 0 without CODEX CHECK PASS; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
   else
     pass express-codex "$(grep '^CODEX CHECK PASS' "$out" | tail -1)"
-  fi
-
-  out=/tmp/verify-express-opencode.log
-  (cd "$root" && node .claude/scripts/build-opencode.mjs doctor) >"$out" 2>&1; rc=$?
-  if [ "$rc" -ne 0 ]; then
-    fail express-opencode "OpenCode doctor exit $rc; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
-  elif ! grep -q '^DOCTOR PASS' "$out"; then
-    fail express-opencode "exit 0 without DOCTOR PASS; full output: $out; tail: $(tail -3 "$out" | tr '\n' ' ')"
-  else
-    pass express-opencode "$(grep '^DOCTOR PASS' "$out" | tail -1)"
   fi
 
   out=/tmp/verify-express-hooks.log

@@ -46,13 +46,12 @@ docker rm -f pfm-demo            # tear down; the copied credentials die with it
   real and are judged from pfm's reports — seats (`/reload` linked, theme, TUI),
   daemon, fleet live + system prompt, Express install fidelity, inject round
   trip Claude→Codex→Claude, `/reload --account` in place, self-compact, storm +
-  kill-storm proof, idle down/up, both headless commands. `express` emits six
+  kill-storm proof, idle down/up, both headless commands. `express` emits five
   independently counted ✓/✗ beats: the `professor: install` marker; `pfm doctor`
   exit 0 with `doctor: clean`; `pfm update check --json` exit 0 with zero
   `UPDATED`/`NEW`/`GONE-UPSTREAM`/`LOCAL-DELETED`, `reviewRequired: 0`, and
-  terminal `clean`; `pfm codex check .` exit 0 with `CODEX CHECK PASS`;
-  `node .claude/scripts/build-opencode.mjs doctor` exit 0 with `DOCTOR PASS`;
-  and exhaustive command-hook validation proving at least one hook, every command rooted at
+  terminal `clean`; `pfm codex check .` exit 0 with `CODEX CHECK PASS`; and
+  exhaustive command-hook validation proving at least one hook, every command rooted at
   `$CLAUDE_PROJECT_DIR`, and every referenced target present. Every other named
   check emits one line. The closing count includes all beats, exit 1 on any ✗,
   and throwaway chats are ended and hidden.

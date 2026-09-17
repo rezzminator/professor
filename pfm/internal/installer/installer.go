@@ -2020,19 +2020,8 @@ func (installer *engine) wireSettings() error {
 			return err
 		}
 	}
-	if installer.options.Mode == ModeUninstall {
-		for path := range ownership {
-			if seenOwnershipPaths[path] {
-				continue
-			}
-			if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-				delete(ownership, path)
-				continue
-			} else if err != nil {
-				return fmt.Errorf("inspect unvisited owned settings path %s: %w", path, err)
-			}
-			return fmt.Errorf("refuse to strand hooks in unvisited owned settings path %s", path)
-		}
+	if err := installer.reconcileUnvisitedSettingsOwnership(ownership, seenOwnershipPaths); err != nil {
+		return err
 	}
 	return installer.writeSettingsHookOwnership(ownershipPath, ownershipRaw, ownership)
 }

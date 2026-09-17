@@ -272,26 +272,8 @@ func (installer *engine) planMemoryHelperSettingsRewrites(
 }
 
 func (installer *engine) memoryHelperConfigDirs() []string {
-	dirs := []string{filepath.Join(installer.options.Home, ".claude")}
-	if installer.options.ConfigDirs == nil {
-		dirs = append(dirs, installer.options.ConfigDir)
-	} else {
-		dirs = append(dirs, installer.options.ConfigDirs...)
-	}
-	seen := make(map[string]bool, len(dirs))
-	result := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		if strings.TrimSpace(dir) == "" {
-			continue
-		}
-		dir = filepath.Clean(dir)
-		if seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		result = append(result, dir)
-	}
-	return result
+	dirs := append([]string{filepath.Join(installer.options.Home, ".claude")}, installer.seatConfigDirs()...)
+	return dedupePhysicalDirs(dirs)
 }
 
 func normalizedMemoryHelperFingerprint(content []byte) (string, error) {

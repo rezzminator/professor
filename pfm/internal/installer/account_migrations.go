@@ -15,6 +15,37 @@ func (installer *engine) claudeConfigDirs() []string {
 	return []string{installer.options.ConfigDir}
 }
 
+// seatConfigDirs returns the directories launched Claude seats actually read.
+// claudeConfigDirs instead preserves the configured account-root roster used by
+// migrations and fanout, which may omit the implicit seat's real config dir.
+func (installer *engine) seatConfigDirs() []string {
+	dirs := make([]string, 0, len(installer.options.ConfigDirs)+1)
+	dirs = append(dirs, installer.options.ConfigDir)
+	dirs = append(dirs, installer.options.ConfigDirs...)
+	return dedupePhysicalDirs(dirs)
+}
+
+func dedupePhysicalDirs(dirs []string) []string {
+	seen := make(map[string]bool, len(dirs))
+	result := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		dir = filepath.Clean(dir)
+		physical := dir
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			physical = filepath.Clean(resolved)
+		}
+		if seen[physical] {
+			continue
+		}
+		seen[physical] = true
+		result = append(result, dir)
+	}
+	return result
+}
+
 func (installer *engine) retireRenamedCodexAgents() error {
 	for _, home := range installer.codexHomes() {
 		for _, name := range retiredGlobalAgents {

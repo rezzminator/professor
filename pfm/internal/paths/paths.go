@@ -96,7 +96,15 @@ type Values struct {
 
 // EnvOr returns a non-empty environment override, or fallback otherwise.
 func EnvOr(name, fallback string) string {
-	if value := os.Getenv(name); value != "" {
+	return EnvOrFrom(OSEnv{}, name, fallback)
+}
+
+// EnvOrFrom is EnvOr expressed over an injected Env — the seam a host
+// fixture, or a future paths caller, composes against instead of the live
+// process environment. EnvOr itself is exactly this over OSEnv, so the two
+// can never drift.
+func EnvOrFrom(env Env, name, fallback string) string {
+	if value := env.Get(name); value != "" {
 		return value
 	}
 	return fallback
@@ -153,10 +161,20 @@ func DevRepoGitDir(root string) (string, bool) {
 // place the difference is visible, so a missing jail is an error here
 // rather than a surprise several layers down.
 func Home() (string, error) {
-	if home := os.Getenv(EnvHome); home != "" {
+	return HomeFrom(OSEnv{})
+}
+
+// HomeFrom is Home expressed over an injected Env — used by hostfixture and
+// a future paths caller. The testing.Testing() refusal to resolve a real
+// operator home from inside a test applies unconditionally: it is what
+// makes a MapEnv-backed fixture and the live process behave identically
+// under `go test`, never one safe and the other silently reading the
+// machine.
+func HomeFrom(env Env) (string, error) {
+	if home := env.Get(EnvHome); home != "" {
 		return home, nil
 	}
-	if testing.Testing() && os.Getenv(EnvRealHome) == "" {
+	if testing.Testing() && env.Get(EnvRealHome) == "" {
 		return "", fmt.Errorf(
 			"refusing to resolve the operator's real home directory inside a test: "+
 				"point %s at a temporary directory (see internal/testjail), or set %s=1 "+
@@ -164,7 +182,7 @@ func Home() (string, error) {
 			EnvHome, EnvRealHome,
 		)
 	}
-	home, err := os.UserHomeDir()
+	home, err := env.Home()
 	if err != nil {
 		return "", fmt.Errorf("resolve home directory: %w", err)
 	}

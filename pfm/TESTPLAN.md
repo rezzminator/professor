@@ -807,3 +807,35 @@ Ranked by identity resolution across resume/store/fork edges, kill-store integri
 | 7 | **`collapseLiveServers` + `ServerCount`** (`compose/compose.go:759-803`) | Silently merges rows by `engine+ID`. Two genuinely different chats that resolve to the same id (see #1) disappear into one row; the loser is unreachable. |
 | 8 | **`--exit` finisher choreography** (`kill/finisher.go:94-245`) | Detached, delayed, and it re-asserts a kill AFTER an index refresh. It races the engine's own transcript flush and reaps teammates by an id that may already have been canonicalized. |
 | 9 | **Primary-account round trip** (`internal/picker/pipeline.go`, `fleetdb/fleetdb.go`, `internal/installer/assets/shim/pfm.zsh`) | The store and launcher must enforce the same account roster. |
+
+---
+
+## Seams
+
+The unit-test law (`docs/dev/trains/testing-foundation/waves/3-unit-law/spec.md`): a unit under test has every dependency on the host, the account, an API or another process MOCKED at its seam. Four packages carry that seam for the whole module; the rule is the same in each — production code calls the real implementation, a test scripts the fake, and nothing outside these four packages talks to the bare host directly (ratchet C22, `pfm/scripts/arch-check.sh`, `pfm/.arch/host-doors.txt`).
+
+| Package | Seam | Real | Fake |
+| --- | --- | --- | --- |
+| `internal/clock` | `Clock` (`Now`, `Sleep(ctx, d)`, `After`, `NewTimer`, `NewTicker`) | `clock.Real` — the wall clock | `clock.Fake` — deterministic; `Advance(d)` fires every due sleep/timer/ticker in due-time order, `Pending()` counts what is still registered, a `Sleep` blocks until `Advance` or `ctx` releases it |
+| `internal/deps` | `Runner` (`Run(ctx, argv, opts) (RunResult, error)`, `LookPath`) | `deps.RealRunner` — `exec.CommandContext` | `deps.FakeRunner` — scripted by argv prefix (longest match wins), a call ledger (`Calls()`), an unscripted call is `UnscriptedError`, never a silent empty result |
+| `internal/tmux` | the façade's command surface (`capture-pane`, `list-sessions`/`list-windows`/`list-panes` `-F`, `send-keys`, `display-message`, `respawn-pane`, `kill-server`) | `Command`/`Invocation` — unchanged | `tmux.Fake` — scripted by subcommand (`Script`) or subcommand+socket (`ScriptFor`), a call ledger (`Calls()`), an unscripted call is `ErrUnscripted`; the real façade is untouched |
+| `internal/paths` | `Env` (`Get`, `Lookup`, `Home`, `Hostname`, `User`) | `paths.OSEnv` — `os.Getenv`/`LookupEnv`/`UserHomeDir`/`Hostname`/`user.Current`; `EnvOr`/`Home` are `EnvOrFrom`/`HomeFrom` over it | `paths.MapEnv` — an in-memory environment plus configurable `Home`/`Hostname`/`User` errors |
+
+Wave 3 batch B0 is additive only: the seams exist and are tested, but `installer.Options.Now/Sleep`, `kill.Dependencies.Now`, `reap.Dependencies.Now`, `picker.ActivityClock` and `statusline.Runtime.Now` are unchanged — later batches migrate each caller onto the shared seam.
+
+## Host fixtures
+
+`internal/hostfixture` — the ten most common host edge cases, each built on `testjail` + `paths.MapEnv` + `deps.FakeRunner` + `clock.Fake`, each with its own test proving the state it claims (`internal/hostfixture/doc.go` names all thirteen in one line each):
+
+| # | fixture | builds | first consumers |
+| --- | --- | --- | --- |
+| 1 | `NoHome` / `ReadOnlyHome` | `HOME`/`PFM_HOME` unset; a home dir at `0o555` (skipped by name when the fence runs as root) | `paths`, `installer`, `fleetdb`, `store` |
+| 2 | `SymlinkedConfigDir` | `~/.claude` → a physical dir elsewhere in the jail | `installer.claudeConfigDirs`, `paths.DevRepoGitDir`, `professor.storeSHA` |
+| 3 | `CaseFoldProbe` | creates `a`/`A`, reports whether the filesystem folded them | `installer` link/ledger paths, `codexgen` output names |
+| 4 | `NoTmux` / `OldTmux` | `deps.FakeRunner` returns ENOENT for tmux / a version below `deps.Registry`'s minimum | `tmux`, `doctor`, `spawn`, `reload` |
+| 5 | `NoServiceManager` | ENOENT for `systemctl` and `launchctl` | `installer` units, `doctor`, `kill` service scope |
+| 6 | `BareTerm` | `TERM` unset, `LANG`/`LC_ALL=C` | `statusline`, `ui` cosmos glyphs, `hookentry` renudge |
+| 7 | `OddPaths` | HOME sits under a directory with a space and a non-ASCII character | `paths`, `inject` lock namespace, `fleet` scan, `archive` |
+| 8 | `ExpiredCreds` / `NoCreds` | `.credentials.json` with `expiresAt` in the past; the file absent plus a Keychain (`security`) not-found script | `usagehook`, `doctor` seat rows, `headless`, `resolve` |
+| 9 | `StaleArtifacts` | a dead tmux socket file, an exited process's pid file, a `fleet.db-wal`, a leftover reload lock | `reap`, `stale`, `fleetdb`, `reload.InFlight`, `kill` |
+| 10 | `TwoWriters` | runs a caller's function twice concurrently against the same jailed fleet | `atomicfile`, `installer` ownership ledgers, `fleetdb`, `updatecheck` lock |

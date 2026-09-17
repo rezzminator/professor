@@ -837,6 +837,24 @@ func TestRunWaitsForTheCallerTurnToEndBeforeTypingExit(t *testing.T) {
 	}
 }
 
+// A mid-turn /reload used to hold /exit with the wait logged only to the
+// worker's own stderr; the pane itself must announce the wait, then the reboot.
+func TestRunAnnouncesTheHoldAndTheRebootOnThePane(t *testing.T) {
+	tmux := &busyThenIdleTmux{busyCaptures: 3, typedAfter: -1}
+	options := Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, IdleTries: 10}
+	_, err := Run(
+		context.Background(), reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-announce"), options, tmux, nil, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantWaiting := "pfm reload: waiting for this turn to end, then rebooting this chat"
+	wantRebooting := "pfm reload: rebooting now"
+	if len(tmux.displays) != 2 || tmux.displays[0] != wantWaiting || tmux.displays[1] != wantRebooting {
+		t.Fatalf("pane displays=%#v, want [%q, %q]", tmux.displays, wantWaiting, wantRebooting)
+	}
+}
+
 func TestRunRefusesToTypeExitIntoAChatThatStaysBusy(t *testing.T) {
 	tmux := &busyThenIdleTmux{busyCaptures: 1 << 30, typedAfter: -1}
 	_, err := Run(

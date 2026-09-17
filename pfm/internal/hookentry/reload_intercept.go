@@ -39,7 +39,11 @@ func ReloadIntercept(
 	}
 	var captured bytes.Buffer
 	if reload(words, &captured, &captured, runtime) == 0 {
-		return blockPromptQuietly(stdout)
+		reason := fmt.Sprintf(
+			"reload scheduled — this chat reboots when the current turn ends (%s)",
+			strings.TrimSpace(captured.String()),
+		)
+		return blockPrompt(stdout, reason)
 	}
 	fmt.Fprintf(stderr, "reload: %s", captured.String())
 	return 2

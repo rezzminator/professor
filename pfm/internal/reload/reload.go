@@ -425,10 +425,16 @@ func waitCallerIdle(
 			if !announced {
 				announced = true
 				fmt.Fprintln(stderr, "pfm chat reload: the chat's turn is still running — holding /exit until it ends")
+				announcePane(
+					ctx, request, tmux, stderr, "pfm reload: waiting for this turn to end, then rebooting this chat",
+				)
 			}
 		} else {
 			stable++
 			if stable >= 2 {
+				if announced {
+					announcePane(ctx, request, tmux, stderr, "pfm reload: rebooting now")
+				}
 				return capture, nil
 			}
 		}
@@ -437,6 +443,14 @@ func waitCallerIdle(
 		}
 	}
 	return "", fmt.Errorf("chat still busy after %d polls — /exit was not typed, nothing changed", options.IdleTries)
+}
+
+// announcePane puts a Display message on the caller's own pane; a failure
+// here is logged, never fatal — the pane is a courtesy, not the contract.
+func announcePane(ctx context.Context, request Request, tmux Tmux, stderr io.Writer, message string) {
+	if err := tmux.Display(ctx, request.SocketPath, request.Pane, message); err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: display %q: %v\n", message, err)
+	}
 }
 
 // exitIncomplete names the state a refused /exit leaves behind, because

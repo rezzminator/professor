@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -17,7 +16,7 @@ import (
 
 var (
 	exitCloseTerminals = kill.CloseTerminals
-	exitCloseEnv       = os.Getenv
+	exitCloseEnv       = paths.OSEnv{}.Get
 	exitCloseInFlight  = reload.InFlight
 )
 

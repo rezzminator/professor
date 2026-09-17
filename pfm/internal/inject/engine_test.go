@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/resolve"
 )
@@ -621,7 +622,7 @@ func TestInjectRecordsOnlyDeliveredDirectMessages(t *testing.T) {
 		warnings := &bytes.Buffer{}
 		engine.recorder = recorder
 		engine.warningWriter = warnings
-		engine.options.Now = func() time.Time { return time.Unix(0, 123) }
+		engine.options.Clock = fixedClock{Clock: clock.Real, now: time.Unix(0, 123)}
 		return engine, warnings
 	}
 
@@ -1007,7 +1008,7 @@ func TestLongProseAutoFilePreservesBodySignatureAndProof(t *testing.T) {
 func TestPersistBodyPrunesExpiredMarkdownByAge(t *testing.T) {
 	engine := newTestEngine(t, "cc-body-prune", &fakeTmux{capture: "❯ "})
 	now := time.Date(2031, 2, 3, 4, 5, 6, 7, time.UTC)
-	engine.options.Now = func() time.Time { return now }
+	engine.options.Clock = fixedClock{Clock: clock.Real, now: now}
 	engine.options.BodyMaxAge = 24 * time.Hour
 	if err := os.MkdirAll(engine.options.BodyRoot, 0o700); err != nil {
 		t.Fatal(err)
@@ -1648,7 +1649,7 @@ func TestInjectRefusesATypingHumanUnlessForced(t *testing.T) {
 			engine := newTestEngine(t, "cc-typist-guard", fake)
 			now := time.Unix(1_700_000_000, 0)
 			fake.clientActivity = now.Add(-test.activityAgo)
-			engine.options.Now = func() time.Time { return now }
+			engine.options.Clock = fixedClock{Clock: clock.Real, now: now}
 			result, err := engine.Inject(context.Background(), Request{
 				Target:   "chat",
 				Message:  "ordinary message, not a command",

@@ -10,9 +10,39 @@ import (
 	"testing"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/resolve"
 )
+
+// countingClock hands back a fresh, later instant on every Now() call while
+// every other Clock method delegates to the embedded clock.Clock — a thin
+// adapter (never a second fake) for the one test that needs "one second
+// elapsed" per poll without a real sleep or a driven Advance.
+type countingClock struct {
+	clock.Clock
+	start time.Time
+	calls int
+}
+
+func (c *countingClock) Now() time.Time {
+	c.calls++
+	return c.start.Add(time.Duration(c.calls) * time.Second)
+}
+
+// fixedClock hands back the SAME instant from every Now() call while every
+// other Clock method delegates to the embedded clock.Clock — the seam a
+// test reaches for instead of clock.NewFake whenever the code path under
+// test can still block on a real Sleep (acquireTargetLock's lock-settle
+// wait, chiefly): a bare Fake never advances on its own, so a Sleep it was
+// never told to release hangs the test forever, where clock.Real's Sleep
+// just... sleeps, briefly, the way it always has.
+type fixedClock struct {
+	clock.Clock
+	now time.Time
+}
+
+func (c fixedClock) Now() time.Time { return c.now }
 
 // fakeSelf answers "who am I" without asking the machine. Resolving the target
 // "self" for real needs a live tmux seat, so a test that leans on the ambient
@@ -422,11 +452,8 @@ func TestDeliverThenHoldsForTypistThenDelivers(t *testing.T) {
 
 	start := time.Unix(1_700_000_000, 0)
 	fake.clientActivity = start
-	var calls int
-	engine.options.Now = func() time.Time {
-		calls++
-		return start.Add(time.Duration(calls) * time.Second)
-	}
+	counting := &countingClock{Clock: clock.Real, start: start}
+	engine.options.Clock = counting
 
 	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
 	if err != nil {
@@ -435,10 +462,10 @@ func TestDeliverThenHoldsForTypistThenDelivers(t *testing.T) {
 	if result.Code != 0 || !result.Typed {
 		t.Fatalf("DeliverThen() = %+v, want a confirmed delivery once the typist went quiet", result)
 	}
-	if calls < 3 {
+	if counting.calls < 3 {
 		t.Fatalf(
 			"delivered before the typist actually went quiet: waitForQuietTypist's clock only advanced %d time(s), want at least 3 (TypistQuiet=3s at 1s/poll)",
-			calls,
+			counting.calls,
 		)
 	}
 	enters := 0
@@ -475,7 +502,7 @@ func TestDeliverThenRefusesWhenTypistNeverClears(t *testing.T) {
 	// The clock always reads "1s after the last keystroke" — quiet never
 	// crosses the 3s TypistQuiet threshold no matter how many times it is
 	// sampled.
-	engine.options.Now = func() time.Time { return start.Add(time.Second) }
+	engine.options.Clock = fixedClock{Clock: clock.Real, now: start.Add(time.Second)}
 
 	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
 	if err != nil {
@@ -600,7 +627,7 @@ func TestDeliverThenReportsUndeliveredWhenTmuxUnreadable(t *testing.T) {
 	engine.options.TypistQuiet = 3 * time.Second
 
 	start := time.Unix(1_700_000_000, 0)
-	engine.options.Now = func() time.Time { return start }
+	engine.options.Clock = fixedClock{Clock: clock.Real, now: start}
 
 	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
 	if err != nil {

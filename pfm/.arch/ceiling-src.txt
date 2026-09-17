@@ -9,7 +9,7 @@ internal/harvest/mirror_providers.go 829
 internal/harvestmcp/service.go 1266
 internal/harvestpy/provision.go 835
 internal/headless/run/run.go 958
-internal/inject/engine.go 1905
+internal/inject/engine.go 1913
 internal/installer/installer.go 2536
 internal/installer/vscode.go 812
 internal/professor/project.go 944

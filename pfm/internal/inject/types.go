@@ -6,7 +6,9 @@ import (
 	"io"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/fleetdb"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
 )
 
@@ -215,9 +217,12 @@ type Options struct {
 	LockRoot          string
 	BodyRoot          string
 	BodyMaxAge        time.Duration
-	Now               func() time.Time
-	Sender            *Sender
-	DisableSignature  bool
+	// Clock is the time seam every Now/Sleep in this package crosses instead
+	// of the bare standard-library clock — nil defaults to clock.Real, so a
+	// caller outside the test suite behaves exactly as it always has.
+	Clock            clock.Clock
+	Sender           *Sender
+	DisableSignature bool
 	// AllowUnsigned permits delivery when no sender identity could be derived.
 	// It is OFF by default: an unsigned message asks its recipient to act on
 	// an instruction from nobody, and the recipient's only correct response is
@@ -264,4 +269,10 @@ type Dependencies struct {
 	// WarningWriter receives non-fatal recorder failures. Nil uses stderr.
 	WarningWriter io.Writer
 	Options       Options
+	// Env is the process-environment seam every host-environment read in this
+	// package crosses instead — nil defaults to paths.OSEnv{}, so a caller
+	// outside the test suite reads the real environment exactly as it always
+	// has, and a test can inject paths.MapEnv (or hostfixture's Base.Env) to
+	// jail every read.
+	Env paths.Env
 }

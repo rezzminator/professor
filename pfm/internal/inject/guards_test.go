@@ -3,6 +3,7 @@ package inject
 import "testing"
 
 func TestSelectorLineExactChatShGuards(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		capture string
@@ -47,6 +48,7 @@ func TestSelectorLineExactChatShGuards(t *testing.T) {
 }
 
 func TestIsBusyExactMarkers(t *testing.T) {
+	t.Parallel()
 	for _, capture := range []string{
 		"esc to interrupt",
 		"Working… (12s · ↓ 100 tokens)",
@@ -65,6 +67,7 @@ func TestIsBusyExactMarkers(t *testing.T) {
 }
 
 func TestHasDraftRecognizesUnicodeTextButNotFormatPlaceholders(t *testing.T) {
+	t.Parallel()
 	// Format controls are not visible draft text. The ASCII space between them
 	// must not turn an otherwise invisible placeholder into a real draft.
 	if hasDraft("❯ \u200b \u200b") {
@@ -81,6 +84,7 @@ func TestHasDraftRecognizesUnicodeTextButNotFormatPlaceholders(t *testing.T) {
 }
 
 func TestLastComposerLineUsesStructuralScreenOrder(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		capture string
@@ -124,6 +128,7 @@ func TestLastComposerLineUsesStructuralScreenOrder(t *testing.T) {
 // silently widened into "any placeholder counts, however it got there" for
 // the literal transport, which never asked tmux to bracket anything.
 func TestDeliveryProvenPlaceholderOnlyCountsForPasteTransport(t *testing.T) {
+	t.Parallel()
 	before := "conversation\n❯ "
 	after := "conversation\n[Pasted text #1 +12 lines]\n❯ "
 	message := "the original long message body, never itself visible in the capture"

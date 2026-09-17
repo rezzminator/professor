@@ -14,9 +14,9 @@ internal/action/claude_spawn.go 1
 internal/action/process_darwin.go 1
 internal/action/solo.go 1
 internal/action/tmux.go 1
-internal/agentopen/agentopen.go 1
+internal/agentopen/agentopen.go 2
 internal/archive/archive.go 1
-internal/binwatch/binwatch.go 2
+internal/binwatch/binwatch.go 3
 internal/chat/find.go 1
 internal/chat/open.go 1
 internal/chat/status.go 1
@@ -55,13 +55,7 @@ internal/headless/converse.go 2
 internal/headless/run/run.go 2
 internal/headless/watch.go 1
 internal/heal/runner.go 1
-internal/hookentry/claude_launch.go 1
-internal/hookentry/compact_nudge.go 1
-internal/hookentry/exit_close.go 1
-internal/hookentry/launch.go 1
 internal/hostfixture/fixtures_stale.go 1
-internal/inject/engine.go 15
-internal/inject/lock.go 6
 internal/inject/then.go 3
 internal/installer/launchd.go 1
 internal/installer/markdown_tool.go 2
@@ -84,7 +78,6 @@ internal/professor/source_repo.go 1
 internal/professor/store.go 1
 internal/reap/runner.go 1
 internal/reap/tmux.go 2
-internal/reload/reload.go 9
 internal/resolve/whoami.go 4
 internal/spawn/service_scope_darwin.go 1
 internal/spawn/service_scope_linux.go 3

@@ -179,7 +179,7 @@ func (engine *Engine) persistBody(body, target string) (string, []string, error)
 	if err != nil {
 		return "", nil, err
 	}
-	stamp := engine.options.Now().UTC().Format("20060102T150405.000000000Z")
+	stamp := engine.options.Clock.Now().UTC().Format("20060102T150405.000000000Z")
 	stem := stamp + "-" + safeBodyTarget(target)
 	for sequence := 0; sequence < 1000; sequence++ {
 		name := stem + ".md"
@@ -204,7 +204,7 @@ func (engine *Engine) pruneBodies(root string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("enumerate inject bodies in %q: %w", root, err)
 	}
-	cutoff := engine.options.Now().Add(-engine.options.BodyMaxAge)
+	cutoff := engine.options.Clock.Now().Add(-engine.options.BodyMaxAge)
 	warnings := make([]string, 0)
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".md" {

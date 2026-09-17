@@ -29,6 +29,7 @@ func callCompactNudge(t *testing.T, payload []byte, sidDir string, prefs config.
 }
 
 func TestCompactNudgeSpeaksOncePerBandFromTheStatuslineSample(t *testing.T) {
+	t.Parallel()
 	sidDir := t.TempDir()
 	prefs := config.CompactNudge{Enabled: true, Start: 35, Step: 10}
 	payload := nudgePayload(t, map[string]string{"session_id": "sess-a", "transcript_path": "/jail/sess-a.jsonl"})
@@ -62,6 +63,7 @@ func TestCompactNudgeSpeaksOncePerBandFromTheStatuslineSample(t *testing.T) {
 }
 
 func TestCompactNudgeHonoursTheConfigAndSkipsSubAgents(t *testing.T) {
+	t.Parallel()
 	sidDir := t.TempDir()
 	if err := nudge.RecordContext(sidDir, "sess-b", 60); err != nil {
 		t.Fatal(err)
@@ -96,6 +98,7 @@ func TestCompactNudgeHonoursTheConfigAndSkipsSubAgents(t *testing.T) {
 }
 
 func TestCompactNudgeNamesAMissingSampleAndABadPayload(t *testing.T) {
+	t.Parallel()
 	sidDir := t.TempDir()
 	prefs := config.CompactNudge{Enabled: true, Start: 35, Step: 10}
 	out, errText := callCompactNudge(t, nudgePayload(t, map[string]string{"session_id": "sess-c"}), sidDir, prefs)

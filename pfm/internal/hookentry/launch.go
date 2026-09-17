@@ -22,6 +22,7 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/spawn"
 	pfmtmux "hostops/pfm/internal/tmux"
 )
@@ -64,7 +65,10 @@ func launchPassThrough(arguments []string, tmux string, forced bool) bool {
 }
 
 // Launch is the managed Claude launcher entry.
-func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
+func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env paths.Env) int {
+	if env == nil {
+		env = paths.OSEnv{}
+	}
 	flags := cli.NewFlagSet(
 		"internal launch",
 		"usage: pfm internal launch --real /absolute/path [--cwd DIR] -- [claude arguments]",
@@ -80,7 +84,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime) int
 		flags.Usage()
 		return 2
 	}
-	if launchPassThrough(arguments, os.Getenv("TMUX"), os.Getenv("PFM_LAUNCH_PASSTHROUGH") == "1") {
+	if launchPassThrough(arguments, env.Get("TMUX"), env.Get("PFM_LAUNCH_PASSTHROUGH") == "1") {
 		if err := LaunchExec(*realBinary, append([]string{*realBinary}, arguments...), os.Environ()); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: exec real Claude: %v\n", err)
 			return 1

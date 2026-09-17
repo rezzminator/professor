@@ -252,14 +252,14 @@ else say C21-test-jail ERROR "grep could not read tests"; fi
 
 # C22 host doors stay inside their four seam packages: a bare os.Getenv/
 # LookupEnv/UserHomeDir/user.Current/exec.Command/exec.CommandContext/
-# exec.LookPath/time.Now/Sleep/After/NewTimer/Tick/net.Dial/net.Listen in
-# non-test code outside internal/{clock,deps,paths,tmux} is a door the unit-
-# test-law wave (docs/dev/trains/testing-foundation/waves/3-unit-law/
-# spec.md § Three seams item 4) has not seamed yet; the baseline only
-# shrinks as later batches migrate a package onto clock.Clock, deps.Runner,
-# tmux.Fake or paths.Env.
+# exec.LookPath/time.Now/Sleep/After/NewTimer/NewTicker/Tick/net.Dial/
+# net.Listen in non-test code outside internal/{clock,deps,paths,tmux} is a
+# door the unit-test-law wave (docs/dev/trains/testing-foundation/waves/
+# 3-unit-law/spec.md § Three seams item 4) has not seamed yet; the baseline
+# only shrinks as later batches migrate a package onto clock.Clock,
+# deps.Runner, tmux.Fake or paths.Env.
 grep -vE '^internal/(clock|deps|paths|tmux)/' "$T/src.list" > "$T/noseam.list"
-if g "$T/raw" "$T/noseam.list" -nE 'os\.Getenv|LookupEnv|UserHomeDir|user\.Current|exec\.Command|exec\.CommandContext|exec\.LookPath|time\.Now|time\.Sleep|time\.After|time\.NewTimer|time\.Tick|net\.Dial|net\.Listen'; then
+if g "$T/raw" "$T/noseam.list" -nE 'os\.Getenv|LookupEnv|UserHomeDir|user\.Current|exec\.Command|exec\.CommandContext|exec\.LookPath|time\.Now|time\.Sleep|time\.After|time\.NewTimer|time\.NewTicker|time\.Tick|net\.Dial|net\.Listen'; then
   count_by_file "$T/raw" > "$T/c22"; ratchet_counts C22-host-doors host-doors "$T/c22"
 else say C22-host-doors ERROR "grep could not read sources"; fi
 

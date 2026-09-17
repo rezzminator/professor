@@ -18,10 +18,12 @@ import (
 	"unicode"
 
 	"hostops/pfm/internal/action"
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/inject"
+	"hostops/pfm/internal/paths"
 )
 
 // Usage leads with the flags because a caller who guesses is guessing
@@ -109,6 +111,8 @@ type Options struct {
 	ExitTries   int
 	IdleTries   int
 	ThenTries   int
+	// Clock is the time seam every wait crosses; nil defaults to clock.Real.
+	Clock clock.Clock
 }
 
 type Result struct {
@@ -138,6 +142,9 @@ func (o *Options) defaults() {
 	}
 	if o.ThenTries == 0 {
 		o.ThenTries = 900
+	}
+	if o.Clock == nil {
+		o.Clock = clock.Real
 	}
 }
 
@@ -240,12 +247,8 @@ func Run(
 	}
 
 	if options.Delay > 0 {
-		timer := time.NewTimer(options.Delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return Result{}, ctx.Err()
-		case <-timer.C:
+		if err := options.Clock.Sleep(ctx, options.Delay); err != nil {
+			return Result{}, err
 		}
 	}
 	if err := tmux.SetRemain(ctx, request.SocketPath, request.Pane, true); err != nil {
@@ -290,7 +293,7 @@ func Run(
 	if err := tmux.SendLiteral(ctx, request.SocketPath, request.Pane, "/exit"); err != nil {
 		return Result{}, fmt.Errorf("send /exit: %w", err)
 	}
-	if err := waitExitRendered(ctx, request, tmux, stderr); err != nil {
+	if err := waitExitRendered(ctx, request, options.Clock, tmux, stderr); err != nil {
 		return Result{}, err
 	}
 	if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
@@ -343,7 +346,7 @@ func Run(
 				return Result{}, fmt.Errorf("retry /exit submission: %w", err)
 			}
 		}
-		if err := sleepPoll(ctx, options.Poll); err != nil {
+		if err := sleepPoll(ctx, options.Clock, options.Poll); err != nil {
 			return Result{}, err
 		}
 	}
@@ -379,7 +382,7 @@ func Run(
 	return Result{Account: request.Account, Cache1H: request.Cache1H, New: request.SessionID == ""}, nil
 }
 
-func waitExitRendered(ctx context.Context, request Request, tmux Tmux, stderr io.Writer) error {
+func waitExitRendered(ctx context.Context, request Request, clk clock.Clock, tmux Tmux, stderr io.Writer) error {
 	for attempt := 0; attempt < 40; attempt++ {
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
@@ -387,12 +390,8 @@ func waitExitRendered(ctx context.Context, request Request, tmux Tmux, stderr io
 		} else if composerShowsExit(capture) {
 			return nil
 		}
-		timer := time.NewTimer(50 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := clk.Sleep(ctx, 50*time.Millisecond); err != nil {
+			return err
 		}
 	}
 	return errors.New("typed /exit never rendered — refusing blind Enter")
@@ -438,7 +437,7 @@ func waitCallerIdle(
 				return capture, nil
 			}
 		}
-		if err := sleepPoll(ctx, options.Poll); err != nil {
+		if err := sleepPoll(ctx, options.Clock, options.Poll); err != nil {
 			return "", err
 		}
 	}
@@ -522,15 +521,8 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 	return errors.Join(cause, errors.New("the pane shows neither the typed /exit nor an exit dialog"))
 }
 
-func sleepPoll(ctx context.Context, poll time.Duration) error {
-	timer := time.NewTimer(poll)
-	select {
-	case <-ctx.Done():
-		timer.Stop()
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
+func sleepPoll(ctx context.Context, clk clock.Clock, poll time.Duration) error {
+	return clk.Sleep(ctx, poll)
 }
 
 func composerShowsExit(capture string) bool {
@@ -657,6 +649,8 @@ func deliverThen(
 	proc Process,
 	stderr io.Writer,
 ) error {
+	// Idempotent: a direct-call test never routes through Run's defaults().
+	options.defaults()
 	for i := 0; i < options.ThenTries; i++ {
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
@@ -678,12 +672,8 @@ func deliverThen(
 				goto ready
 			}
 		}
-		timer := time.NewTimer(time.Second)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := options.Clock.Sleep(ctx, time.Second); err != nil {
+			return err
 		}
 	}
 	return fmt.Errorf("reload --then: input box never appeared")
@@ -748,7 +738,9 @@ ready:
 				typed = true
 				break
 			}
-			time.Sleep(200 * time.Millisecond)
+			if err := options.Clock.Sleep(ctx, 200*time.Millisecond); err != nil {
+				return err
+			}
 			continue
 		}
 		// capture != baseline is a weak, supporting signal only: both TUIs
@@ -763,7 +755,9 @@ ready:
 			typed = true
 			break
 		}
-		time.Sleep(200 * time.Millisecond)
+		if err := options.Clock.Sleep(ctx, 200*time.Millisecond); err != nil {
+			return err
+		}
 	}
 	if !typed {
 		return errors.New(
@@ -781,11 +775,15 @@ ready:
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 			return fmt.Errorf("reload --then: submit prompt: %w", err)
 		}
-		time.Sleep(150 * time.Millisecond)
+		if err := options.Clock.Sleep(ctx, 150*time.Millisecond); err != nil {
+			return err
+		}
 		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 			return fmt.Errorf("reload --then: confirm prompt submit: %w", err)
 		}
-		time.Sleep(400 * time.Millisecond)
+		if err := options.Clock.Sleep(ctx, 400*time.Millisecond); err != nil {
+			return err
+		}
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
 			return fmt.Errorf("reload --then: verify prompt submit: %w", err)
@@ -1040,8 +1038,10 @@ func SessionFromCrumb(sidDir, socket, pane string) (string, string, error) {
 	return "", "", nil
 }
 
-func ParseIntEnv(name string, fallback int) int {
-	if value, err := strconv.Atoi(os.Getenv(name)); err == nil && value > 0 {
+// ParseIntEnv reads name through env and returns fallback when it is unset
+// or not a positive integer.
+func ParseIntEnv(env paths.Env, name string, fallback int) int {
+	if value, err := strconv.Atoi(env.Get(name)); err == nil && value > 0 {
 		return value
 	}
 	return fallback

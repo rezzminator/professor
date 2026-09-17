@@ -8,6 +8,7 @@ import "testing"
 // unsent draft, refusing every inject into an idle Codex chat. The line below
 // is a real tmux capture of that composer (Codex 0.154 under tmux-256color+Tc).
 func TestIdleCodexSparkleIsNotADraft(t *testing.T) {
+	t.Parallel()
 	styled := "\x1b[1m\x1b[39m›\x1b[0m\x1b[38;2;63;77;80m\x1b[48;2;42;55;58m⠁\x1b[2m\x1b[39mAsk Codex to do anything\x1b[0m\x1b[48;2;42;55;58m         \x1b[38;2;96;110;113m⠈\x1b[39m      \x1b[38;2;126;140;144m⠁"
 	if !isDimPlaceholder(styled) {
 		t.Fatalf("idle Codex composer with sparkle glyphs read as a draft: %q", stripTerminalControl(styled))

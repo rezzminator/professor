@@ -424,10 +424,10 @@ func runInternal(
 		return hookentry.CodexAppendix(os.Stdin, stdout, stderr, runtime)
 	}
 	if len(args) != 0 && args[0] == "claude-launch" {
-		return hookentry.ClaudeLaunch(args[1:], stdout, stderr, runtime)
+		return hookentry.ClaudeLaunch(args[1:], stdout, stderr, runtime, nil)
 	}
 	if len(args) != 0 && args[0] == "launch" {
-		return hookentry.Launch(args[1:], stdout, stderr, runtime)
+		return hookentry.Launch(args[1:], stdout, stderr, runtime, nil)
 	}
 	if len(args) != 0 && args[0] == "launcher-repair" {
 		return hookentry.LauncherRepair(args[1:], stderr, runtime)
@@ -451,7 +451,7 @@ func runInternal(
 		return hookentry.ExitClose(os.Stdin, stderr)
 	}
 	if len(args) != 0 && args[0] == "compact-nudge" {
-		return hookentry.CompactNudge(os.Stdin, stdout, stderr, runtime)
+		return hookentry.CompactNudge(os.Stdin, stdout, stderr, runtime, nil)
 	}
 	if len(args) != 0 && args[0] == "reload-run" {
 		return runChatReloadWorkerWithRuntime(args[1:], os.Stdout, stderr, runtime)

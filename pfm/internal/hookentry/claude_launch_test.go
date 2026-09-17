@@ -69,7 +69,7 @@ func TestClaudeLaunchResolvesAndDelegatesToLaunch(t *testing.T) {
 			}
 			var stderr bytes.Buffer
 			arguments := []string{"--resume", "session-id"}
-			if code := ClaudeLaunch(arguments, &bytes.Buffer{}, &stderr, runtime); code != 0 {
+			if code := ClaudeLaunch(arguments, &bytes.Buffer{}, &stderr, runtime, paths.OSEnv{}); code != 0 {
 				t.Fatalf("ClaudeLaunch() code=%d stderr=%q, want 0", code, stderr.String())
 			}
 			if execPath != wantBinary {
@@ -90,7 +90,7 @@ func TestClaudeLaunchReturns127WhenClaudeBinaryIsAbsent(t *testing.T) {
 
 	runtime := config.Runtime{Paths: paths.Values{Home: home}}
 	var stderr bytes.Buffer
-	if code := ClaudeLaunch([]string{"--version"}, &bytes.Buffer{}, &stderr, runtime); code != 127 {
+	if code := ClaudeLaunch([]string{"--version"}, &bytes.Buffer{}, &stderr, runtime, paths.OSEnv{}); code != 127 {
 		t.Fatalf("ClaudeLaunch() code=%d stderr=%q, want 127", code, stderr.String())
 	}
 	const want = "pfm claude launcher: no real Claude binary found\n"

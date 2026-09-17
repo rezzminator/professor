@@ -18,6 +18,7 @@ import (
 // inlineThreshold check) — and STRICTLY BELOW rearm.DefaultThresholdBytes,
 // never handed rearm.Pointer's day-one design ceiling unchecked.
 func TestRearmThresholdBytesUnderBothSpillLinesAndDefault(t *testing.T) {
+	t.Parallel()
 	engine := &Engine{options: withDefaults(Options{})}
 
 	for _, test := range []struct {
@@ -53,6 +54,7 @@ func TestRearmThresholdBytesUnderBothSpillLinesAndDefault(t *testing.T) {
 // seat at a frozen copy instead of re-reading the live artifact — the exact
 // drift T1 exists to prevent.
 func TestRolePointerChoosesShortPointerUnderChannelBudget(t *testing.T) {
+	t.Parallel()
 	sidDir := t.TempDir()
 	artifactPath := filepath.Join(t.TempDir(), "dev.md")
 	// 1000 bytes: comfortably under rearm.DefaultThresholdBytes (4096), so

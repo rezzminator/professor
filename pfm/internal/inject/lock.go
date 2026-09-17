@@ -1,6 +1,7 @@
 package inject
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -10,12 +11,14 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 type targetLock struct {
-	path string
-	pid  int
-	now  func() time.Time
+	path  string
+	pid   int
+	clock clock.Clock
 }
 
 // lockDirName mirrors chat.sh's _inject_lock_acquire filename scheme byte for
@@ -34,7 +37,13 @@ func lockDirName(key string) string {
 	return sanitized + ".lock"
 }
 
+// acquireTargetLock takes ctx and clk explicitly (never the bare standard-
+// library clock, and never a package default) because it is the seam both
+// engine.inject (clk = engine.options.Clock) and a test (clk = clock.Real or
+// clock.NewFake) already have a Clock in hand to hand down.
 func acquireTargetLock(
+	ctx context.Context,
+	clk clock.Clock,
 	root, key string,
 	timeout, poll, maxHold time.Duration,
 ) (*targetLock, error) {
@@ -43,17 +52,19 @@ func acquireTargetLock(
 	}
 	path := filepath.Join(root, lockDirName(key))
 	pid := os.Getpid()
-	deadline := time.Now().Add(timeout)
+	deadline := clk.Now().Add(timeout)
 	for {
 		if err := os.Mkdir(path, 0o700); err == nil {
-			lock := &targetLock{path: path, pid: pid, now: time.Now}
+			lock := &targetLock{path: path, pid: pid, clock: clk}
 			if err := lock.beat(); err != nil {
 				_ = os.RemoveAll(path)
 				return nil, err
 			}
 			// The settle/re-read closes chat.sh's double-steal race.
 			if poll > 0 {
-				time.Sleep(minDuration(poll, 50*time.Millisecond))
+				if err := clk.Sleep(ctx, minDuration(poll, 50*time.Millisecond)); err != nil {
+					return nil, err
+				}
 			}
 			ownerPID, _, _ := readLockOwner(path)
 			if ownerPID == pid {
@@ -70,15 +81,17 @@ func acquireTargetLock(
 		// never stale: the contender waits out its deadline instead.
 		ownerPID, epoch, ok := readLockOwner(path)
 		stale := ok && (processDead(ownerPID) ||
-			time.Now().Unix()-epoch > int64(maxHold/time.Second))
+			clk.Now().Unix()-epoch > int64(maxHold/time.Second))
 		if stale {
 			_ = os.RemoveAll(path)
 			continue
 		}
-		if !time.Now().Before(deadline) {
+		if !clk.Now().Before(deadline) {
 			return nil, fmt.Errorf("inject target lock timeout")
 		}
-		time.Sleep(poll)
+		if err := clk.Sleep(ctx, poll); err != nil {
+			return nil, err
+		}
 	}
 }
 
@@ -87,7 +100,7 @@ func (lock *targetLock) beat() error {
 	if ok && ownerPID != lock.pid {
 		return nil
 	}
-	content := fmt.Sprintf("%d %d\n", lock.pid, lock.now().Unix())
+	content := fmt.Sprintf("%d %d\n", lock.pid, lock.clock.Now().Unix())
 	return os.WriteFile(filepath.Join(lock.path, "owner"), []byte(content), 0o600)
 }
 

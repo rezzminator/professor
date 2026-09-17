@@ -407,9 +407,9 @@ func runChatReloadWorkerWithRuntime(
 		ClaudeRoots: resolved.Roots[pfmengine.Claude],
 		Delay:       reloadDurationEnv("PFM_RELOAD_DELAY_MS", 1500),
 		Poll:        reloadDurationEnv("PFM_RELOAD_POLL_MS", 1000),
-		ExitTries:   reload.ParseIntEnv("PFM_RELOAD_EXIT_TRIES", 20),
-		IdleTries:   reload.ParseIntEnv("PFM_RELOAD_IDLE_TRIES", 120),
-		ThenTries:   reload.ParseIntEnv("PFM_RELOAD_THEN_TRIES", 900),
+		ExitTries:   reload.ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_EXIT_TRIES", 20),
+		IdleTries:   reload.ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_IDLE_TRIES", 120),
+		ThenTries:   reload.ParseIntEnv(paths.OSEnv{}, "PFM_RELOAD_THEN_TRIES", 900),
 	}
 	result, err := reload.Run(
 		context.Background(),

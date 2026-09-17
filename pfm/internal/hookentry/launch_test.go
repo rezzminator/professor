@@ -52,6 +52,7 @@ func TestLaunchPassThroughPredicate(t *testing.T) {
 }
 
 func TestReadLaunchStatusRejectsMissingAndInvalidFiles(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "status")
 	_, err := readLaunchStatus(path)
 	if err == nil || !strings.Contains(err.Error(), "launcher status file missing") {

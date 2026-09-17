@@ -14,6 +14,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/naming"
@@ -45,6 +46,8 @@ type Engine struct {
 	accountEmojis []string
 	recorder      func(context.Context, fleetdb.CommsEvent) error
 	warningWriter io.Writer
+	// env is Dependencies.Env, defaulting to paths.OSEnv{}.
+	env paths.Env
 	// sidDir is where T1 role re-arm crumbs live (paths.Values.SIDDir) —
 	// the same directory the existing SID transcript crumbs and reload
 	// worker logs already share. See internal/rearm.
@@ -97,12 +100,15 @@ func New(dependencies Dependencies) (*Engine, error) {
 	if dependencies.WarningWriter == nil {
 		dependencies.WarningWriter = os.Stderr
 	}
+	if dependencies.Env == nil {
+		dependencies.Env = paths.OSEnv{}
+	}
 	resolved, err := paths.Resolve()
 	if err != nil {
 		return nil, err
 	}
 	options := withDefaults(dependencies.Options)
-	applyEnvironment(&options)
+	applyEnvironment(&options, dependencies.Env)
 	if options.BodyRoot == "" {
 		options.BodyRoot = filepath.Join(
 			resolved.Home,
@@ -113,10 +119,10 @@ func New(dependencies Dependencies) (*Engine, error) {
 	// shares that namespace so a Go inject and a chat.sh inject into the same
 	// pane mutually exclude instead of interleaving keystrokes.
 	if options.LockRoot == "" {
-		options.LockRoot = filepath.Join(tempRoot(), "chat-inject-locks")
+		options.LockRoot = filepath.Join(tempRoot(dependencies.Env), "chat-inject-locks")
 	}
 	if options.ThenLogRoot == "" {
-		options.ThenLogRoot = tempRoot()
+		options.ThenLogRoot = tempRoot(dependencies.Env)
 	}
 	if dependencies.Identifier == nil {
 		identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
@@ -137,6 +143,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 		accountEmojis: append([]string(nil), dependencies.AccountEmojis...),
 		recorder:      dependencies.Recorder,
 		warningWriter: dependencies.WarningWriter,
+		env:           dependencies.Env,
 		sidDir:        resolved.SIDDir,
 	}, nil
 }
@@ -168,6 +175,7 @@ func (engine *Engine) WithIdentity(identity resolve.Identity, label string) *Eng
 		accountEmojis: append([]string(nil), engine.accountEmojis...),
 		recorder:      engine.recorder,
 		warningWriter: engine.warningWriter,
+		env:           engine.env,
 		sidDir:        engine.sidDir,
 	}
 }
@@ -190,14 +198,14 @@ func cloneEngineBinaries(values map[pfmengine.ID]string) map[pfmengine.ID]string
 
 // tempRoot is chat.sh's ${TMPDIR:-/tmp}, the root both implementations share
 // for inject locks and --then chain logs.
-func tempRoot() string {
-	if value := os.Getenv("TMPDIR"); value != "" {
+func tempRoot(env paths.Env) string {
+	if value := env.Get("TMPDIR"); value != "" {
 		return strings.TrimRight(value, "/")
 	}
 	return "/tmp"
 }
 
-func applyEnvironment(options *Options) {
+func applyEnvironment(options *Options, env paths.Env) {
 	seconds := []struct {
 		name   string
 		target *time.Duration
@@ -215,7 +223,7 @@ func applyEnvironment(options *Options) {
 		{"CHAT_THEN_SETTLE", &options.ThenSettle},
 	}
 	for _, setting := range seconds {
-		value := os.Getenv(setting.name)
+		value := env.Get(setting.name)
 		if value == "" {
 			continue
 		}
@@ -241,7 +249,7 @@ func applyEnvironment(options *Options) {
 		{"CHAT_THEN_IDLE_STABLE", &options.ThenIdleStable},
 	}
 	for _, setting := range integers {
-		value := os.Getenv(setting.name)
+		value := env.Get(setting.name)
 		if value == "" {
 			continue
 		}
@@ -310,8 +318,8 @@ func withDefaults(options Options) Options {
 	if options.BodyMaxAge == 0 {
 		options.BodyMaxAge = defaultBodyMaxAge
 	}
-	if options.Now == nil {
-		options.Now = time.Now
+	if options.Clock == nil {
+		options.Clock = clock.Real
 	}
 	// chat.sh:1063-1077 __then cadence.
 	if options.ThenMin == 0 {
@@ -362,7 +370,7 @@ func (engine *Engine) resolve(
 		identity, err := engine.whoami.Identify(ctx)
 		if (err != nil || identity.Session == "") &&
 			engine.codexSeat != nil &&
-			os.Getenv(resolve.CodexThreadEnv) != "" {
+			engine.env.Get(resolve.CodexThreadEnv) != "" {
 			identity, err = engine.codexSeat.Identify(ctx)
 		}
 		if err != nil || identity.Session == "" || identity.SocketPath == "" {
@@ -372,7 +380,7 @@ func (engine *Engine) resolve(
 		if identity.Pane != "" {
 			pane = identity.Pane
 		}
-		target := targetFromParts(identity.SocketPath, pane)
+		target := targetFromParts(identity.SocketPath, pane, engine.env)
 		if identity.Engine == string(pfmengine.Codex) {
 			target.Engine = string(pfmengine.Codex)
 		}
@@ -382,14 +390,14 @@ func (engine *Engine) resolve(
 		// chat.sh:549 — pane ids are unique per tmux SERVER, not globally, so a
 		// bare %id needs its socket from CHAT_INJECT_SOCKET (set by the __then
 		// waiter re-delivering to the pane it watched) or from our own $TMUX.
-		socket := os.Getenv("CHAT_INJECT_SOCKET")
+		socket := engine.env.Get("CHAT_INJECT_SOCKET")
 		if socket == "" {
-			socket = currentSocketPath()
+			socket = currentSocketPath(engine.env)
 		}
 		if socket == "" {
 			return Target{}, CodeUnknown, "raw pane target requires TMUX", nil
 		}
-		return targetFromParts(socket, name), 0, "", nil
+		return targetFromParts(socket, name, engine.env), 0, "", nil
 	}
 	if engine.names != nil {
 		target, code, detail, err := engine.names.ResolveName(ctx, name, requiredEngine)
@@ -439,7 +447,7 @@ func (engine *Engine) resolve(
 					kind,
 				)
 			}
-			target := targetFromParts(socket, pane)
+			target := targetFromParts(socket, pane, engine.env)
 			target.Name = name
 			if session, sessionErr := engine.tmux.CurrentSession(ctx, socket); sessionErr == nil {
 				target.Session = session
@@ -731,7 +739,7 @@ func (engine *Engine) Inject(ctx context.Context, request Request) (Result, erro
 	}
 	sender := engine.sender(ctx)
 	event := fleetdb.CommsEvent{
-		AtNS:           engine.options.Now().UnixNano(),
+		AtNS:           engine.options.Clock.Now().UnixNano(),
 		Kind:           fleetdb.KindInject,
 		SenderSession:  sender.Session,
 		SenderLabel:    sender.Label,
@@ -780,6 +788,8 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		ResolutionNote: detail,
 	}
 	lock, err := acquireTargetLock(
+		ctx,
+		engine.options.Clock,
 		engine.options.LockRoot,
 		target.SocketPath+":"+target.Pane,
 		engine.options.LockTimeout,
@@ -836,7 +846,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 				return Result{}, err
 			}
 			base.Interrupted = true
-			sleepContext(ctx, engine.options.Poll)
+			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capture(ctx, target, 0)
 			if err != nil {
 				base.Code = CodeDead
@@ -846,7 +856,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		}
 	} else if base.Busy && !queueing {
 		for attempt := 0; attempt < engine.options.BusyTries; attempt++ {
-			sleepContext(ctx, engine.options.Poll)
+			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capture(ctx, target, 0)
 			if err != nil {
 				base.Code = CodeDead
@@ -894,7 +904,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		// leaves a draft in the composer; an empty composer with recent
 		// activity is a watched pane, not a typed one.
 		if typing && hasDraft(lastComposerLine(capture)) {
-			if quiet := engine.options.Now().Sub(last); quiet < engine.options.TypistQuiet {
+			if quiet := engine.options.Clock.Now().Sub(last); quiet < engine.options.TypistQuiet {
 				base.Code = CodeBusy
 				base.Status = "typing"
 				base.Message = fmt.Sprintf(
@@ -916,7 +926,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		if err := engine.tmux.CancelCopyMode(ctx, target.SocketPath, target.Pane); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			base.Code = CodeDead
@@ -934,7 +944,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			base.Code = CodeDead
@@ -953,7 +963,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		if err := engine.tmux.CancelCopyMode(ctx, target.SocketPath, target.Pane); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			base.Code = CodeDead
@@ -999,7 +1009,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			base.Code = CodeDead
@@ -1030,7 +1040,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			); err != nil {
 				return Result{}, err
 			}
-			sleepContext(ctx, engine.options.Poll)
+			engine.sleepContext(ctx, engine.options.Poll)
 			capture, err = engine.capture(ctx, target, 0)
 			if err != nil {
 				break
@@ -1129,7 +1139,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			(pasteTransport && HasPastePlaceholder(capture))) {
 			break
 		}
-		sleepContext(ctx, engine.options.Poll)
+		engine.sleepContext(ctx, engine.options.Poll)
 	}
 	// Render-settle is advisory only. Echo detection flakes on wrapping,
 	// bracketed-paste placeholders, and footer glyphs; once literal bytes have
@@ -1150,7 +1160,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		); err != nil {
 			return Result{}, err
 		}
-		sleepContext(ctx, engine.options.EnterSettle)
+		engine.sleepContext(ctx, engine.options.EnterSettle)
 		capture, err = engine.capture(ctx, target, 0)
 		if err != nil {
 			continue
@@ -1226,7 +1236,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		base.Steers = len(request.Then)
 	}
 
-	sleepContext(ctx, engine.options.ProofSettle)
+	engine.sleepContext(ctx, engine.options.ProofSettle)
 	proof, proofErr := engine.capture(ctx, target, 0)
 	if proofErr != nil {
 		base.Status = "delivered_unproven"
@@ -1430,7 +1440,7 @@ func (engine *Engine) sendPacedLiteral(
 		}
 		chunks++
 		if end < len(runes) {
-			sleepContext(ctx, engine.options.CommandChunkGap)
+			engine.sleepContext(ctx, engine.options.CommandChunkGap)
 		}
 	}
 	return chunks, nil
@@ -1670,7 +1680,7 @@ func (engine *Engine) sender(ctx context.Context) Sender {
 			engine.senderSelf = *engine.options.Sender
 			return
 		}
-		if stated, ok := statedSender(); ok {
+		if stated, ok := statedSender(engine.env); ok {
 			engine.senderSelf = stated
 			return
 		}
@@ -1686,11 +1696,11 @@ func (engine *Engine) sender(ctx context.Context) Sender {
 // statedSender reads the identity a spawning chat handed this process. It is
 // read from our OWN environment only — never from a message or a caller flag,
 // so a chat can state who IT is and never who somebody else is.
-func statedSender() (Sender, bool) {
+func statedSender(env paths.Env) (Sender, bool) {
 	stated := Sender{
-		Session: os.Getenv(SenderSessionEnv),
-		Label:   os.Getenv(SenderLabelEnv),
-		UUID:    os.Getenv(SenderIDEnv),
+		Session: env.Get(SenderSessionEnv),
+		Label:   env.Get(SenderLabelEnv),
+		UUID:    env.Get(SenderIDEnv),
 	}
 	if stated.Session == "" && stated.Label == "" && stated.UUID == "" {
 		return Sender{}, false
@@ -1708,12 +1718,12 @@ func statedSender() (Sender, bool) {
 // is read from, and whether it is live at all: a sender with no seat has no
 // label to read and signs by its session id alone.
 func (engine *Engine) detectSender(ctx context.Context) (Sender, resolve.Identity, bool) {
-	sender := Sender{UUID: os.Getenv("CLAUDE_CODE_SESSION_ID")}
+	sender := Sender{UUID: engine.env.Get("CLAUDE_CODE_SESSION_ID")}
 	identity, err := engine.whoami.Identify(ctx)
 	if (err != nil || identity.Session == "") &&
 		engine.codexSeat != nil &&
-		os.Getenv(resolve.CodexThreadEnv) != "" &&
-		os.Getenv(resolve.ClaudeSessionEnv) == "" {
+		engine.env.Get(resolve.CodexThreadEnv) != "" &&
+		engine.env.Get(resolve.ClaudeSessionEnv) == "" {
 		identity, err = engine.codexSeat.Identify(ctx)
 	}
 	if err != nil || identity.Session == "" {
@@ -1810,10 +1820,10 @@ func (engine *Engine) steerLogPath(target Target) string {
 	return filepath.Join(engine.options.ThenLogRoot, "chat-then-"+name+".log")
 }
 
-func targetFromParts(socketPath, pane string) Target {
+func targetFromParts(socketPath, pane string, env paths.Env) Target {
 	base := filepath.Base(socketPath)
 	id, ok := pfmengine.FromSocket(base)
-	if !ok && os.Getenv("PFM_TEST_PROBE_SOCKETS") == "1" {
+	if !ok && env.Get("PFM_TEST_PROBE_SOCKETS") == "1" {
 		id, ok = pfmengine.FromSocket(strings.TrimPrefix(base, "probe-"))
 	}
 	if !ok {
@@ -1834,8 +1844,8 @@ func firstTwo(fields []string) (string, string, bool) {
 	return fields[0], fields[1], true
 }
 
-func currentSocketPath() string {
-	value := os.Getenv("TMUX")
+func currentSocketPath(env paths.Env) string {
+	value := env.Get("TMUX")
 	if comma := strings.IndexByte(value, ','); comma >= 0 {
 		value = value[:comma]
 	}
@@ -1886,16 +1896,14 @@ func captureLastLines(value string, count int) string {
 	return strings.Join(lines, "\n")
 }
 
-func sleepContext(ctx context.Context, duration time.Duration) {
+// sleepContext waits duration or until ctx is cancelled, through the
+// engine's own Clock seam (nil defaults to clock.Real), so a test driving
+// clock.NewFake advances every retry loop here without a real sleep.
+func (engine *Engine) sleepContext(ctx context.Context, duration time.Duration) {
 	if duration <= 0 {
 		return
 	}
-	timer := time.NewTimer(duration)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-	case <-timer.C:
-	}
+	_ = engine.options.Clock.Sleep(ctx, duration)
 }
 
 // captureLabel reads this chat's own 🔖 label through naming, the one package

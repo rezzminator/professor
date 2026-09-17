@@ -167,7 +167,7 @@ func (engine *Engine) waitForSettledTurn(
 	socketPath, target string,
 	selfTarget bool,
 ) bool {
-	sleepContext(ctx, engine.options.ThenMin)
+	engine.sleepContext(ctx, engine.options.ThenMin)
 
 	// Step 1 exists only for a self-inject, where the pane is busy with the
 	// CALLER's turn when the waiter wakes up. For any other target nothing else
@@ -194,7 +194,7 @@ func (engine *Engine) waitForSettledTurn(
 		// compaction receipt is on screen and the pane has gone quiet, the
 		// turn we were sent to ride out is provably over.
 		if turnStarted && sample.receipt && !sample.busy {
-			sleepContext(ctx, engine.options.ThenSettle)
+			engine.sleepContext(ctx, engine.options.ThenSettle)
 			return true
 		}
 
@@ -205,7 +205,7 @@ func (engine *Engine) waitForSettledTurn(
 				stable++
 			}
 			if stable >= engine.options.ThenIdleStable {
-				sleepContext(ctx, engine.options.ThenSettle)
+				engine.sleepContext(ctx, engine.options.ThenSettle)
 				return true
 			}
 		}
@@ -225,13 +225,13 @@ func (engine *Engine) waitForSettledTurn(
 				stable++
 			}
 			if stable >= engine.options.ThenIdleStable {
-				sleepContext(ctx, engine.options.ThenSettle)
+				engine.sleepContext(ctx, engine.options.ThenSettle)
 				return false
 			}
 		}
-		sleepContext(ctx, engine.options.ThenIdlePoll)
+		engine.sleepContext(ctx, engine.options.ThenIdlePoll)
 	}
-	sleepContext(ctx, engine.options.ThenSettle)
+	engine.sleepContext(ctx, engine.options.ThenSettle)
 	return false
 }
 
@@ -273,10 +273,10 @@ func (engine *Engine) waitForQuietTypist(
 				target,
 				err,
 			)
-		case !typing || engine.options.Now().Sub(last) >= engine.options.TypistQuiet:
+		case !typing || engine.options.Clock.Now().Sub(last) >= engine.options.TypistQuiet:
 			return true, nil
 		}
-		sleepContext(ctx, engine.options.ThenIdlePoll)
+		engine.sleepContext(ctx, engine.options.ThenIdlePoll)
 	}
 	if engine.options.ThenIdleTries > 0 && errCount == engine.options.ThenIdleTries {
 		return false, lastErr

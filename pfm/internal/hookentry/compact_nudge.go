@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/nudge"
+	"hostops/pfm/internal/paths"
 )
 
 type compactNudgePayload struct {
@@ -20,8 +20,11 @@ type compactNudgePayload struct {
 }
 
 // CompactNudge is the Claude-only main-chat compact reminder hook.
-func CompactNudge(stdin io.Reader, stdout, stderr io.Writer, runtime config.Runtime) int {
-	account := runtime.Config.AccountForConfigDir(os.Getenv("CLAUDE_CONFIG_DIR"))
+func CompactNudge(stdin io.Reader, stdout, stderr io.Writer, runtime config.Runtime, env paths.Env) int {
+	if env == nil {
+		env = paths.OSEnv{}
+	}
+	account := runtime.Config.AccountForConfigDir(env.Get("CLAUDE_CONFIG_DIR"))
 	prefs := runtime.Config.EffectiveClaude(account).CompactNudge
 	return compactNudgeWith(stdin, stdout, stderr, runtime.Paths.SIDDir, prefs)
 }

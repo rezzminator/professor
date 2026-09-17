@@ -72,8 +72,9 @@ func accountRoots(accounts []pfmconfig.Account) []compose.AccountRoot {
 			path = absolute
 		}
 		roots = append(roots, compose.AccountRoot{
-			Account: account.ID,
-			Path:    filepath.Clean(path),
+			Account:   account.ID,
+			Path:      filepath.Clean(path),
+			ConfigDir: account.ConfigDir,
 		})
 	}
 	return roots
@@ -82,7 +83,7 @@ func accountRoots(accounts []pfmconfig.Account) []compose.AccountRoot {
 func codexAccountRoots(accounts []pfmconfig.CodexAccount) []compose.AccountRoot {
 	result := make([]compose.AccountRoot, 0, len(accounts))
 	for _, account := range accounts {
-		result = append(result, compose.AccountRoot{Account: account.ID, Path: account.Home})
+		result = append(result, compose.AccountRoot{Account: account.ID, Path: account.Home, ConfigDir: account.Home})
 	}
 	return result
 }

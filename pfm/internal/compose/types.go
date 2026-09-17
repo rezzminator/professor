@@ -81,6 +81,10 @@ const (
 type AccountRoot struct {
 	Account int
 	Path    string
+	// ConfigDir is the seat's config dir (CLAUDE_CONFIG_DIR / CODEX_HOME). A
+	// live process names its seat by this, and it stays distinct when every
+	// seat's Path resolves to one shared transcript store.
+	ConfigDir string
 }
 
 // Options controls pure presentation choices.

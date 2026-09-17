@@ -161,6 +161,19 @@ func awaitAnswer(
 		},
 		options,
 	)
+	return reportTurn(turn, err, verb, name, options.Timeout, asJSON, stdout, stderr)
+}
+
+// reportTurn renders one finished wait and answers with its exit code. It is
+// the whole exit-code contract of the two-way verbs in one place.
+func reportTurn(
+	turn headless.Turn,
+	err error,
+	verb, name string,
+	timeout time.Duration,
+	asJSON bool,
+	stdout, stderr io.Writer,
+) int {
 	if turn.Name == "" {
 		turn.Name = name
 	}
@@ -179,6 +192,8 @@ func awaitAnswer(
 		)
 	}
 	switch {
+	case err == nil && turn.Superseded:
+		return codeAwaitSuperseded
 	case err == nil:
 		return 0
 	case errors.Is(err, headless.ErrAwaitTimeout):
@@ -188,7 +203,7 @@ func awaitAnswer(
 				"was delivered, the answer is not in yet\n",
 			verb,
 			name,
-			int(options.Timeout.Seconds()),
+			int(timeout.Seconds()),
 		)
 		return codeAwaitTimeout
 	case errors.Is(err, headless.ErrChatGone):

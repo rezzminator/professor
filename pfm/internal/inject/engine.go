@@ -888,7 +888,12 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			)
 			return base, nil
 		}
-		if typing {
+		// client_activity moves on focus events, mouse reports and the
+		// terminal's own query replies as well as keystrokes, so an attached
+		// VS Code tab reads as "typing" without end. A human mid-sentence
+		// leaves a draft in the composer; an empty composer with recent
+		// activity is a watched pane, not a typed one.
+		if typing && hasDraft(lastComposerLine(capture)) {
 			if quiet := engine.options.Now().Sub(last); quiet < engine.options.TypistQuiet {
 				base.Code = CodeBusy
 				base.Status = "typing"

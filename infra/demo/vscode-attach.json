@@ -1,0 +1,16 @@
+{
+  "workspaceFolder": "/work/express",
+  "extensions": [
+    "vscodevim.vim",
+    "usernamehw.errorlens",
+    "aaron-bond.better-comments",
+    "eamodio.gitlens",
+    "golang.go",
+    "mads-hartmann.bash-ide-vscode",
+    "timonwong.shellcheck",
+    "redhat.vscode-yaml",
+    "dbaeumer.vscode-eslint",
+    "esbenp.prettier-vscode",
+    "christian-kohler.path-intellisense"
+  ]
+}

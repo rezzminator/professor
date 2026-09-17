@@ -41,6 +41,7 @@ var webglCustomGlyphRanges = []struct {
 // accepted renderer; adding one here is a decision, not a convenience.
 var webglComputedGlyphExemptions = map[string]string{
 	"internal/ui/cosmoscanvas.go": "the cosmos star field is a braille dot canvas by construction; replacing it is a canvas rewrite, not a glyph swap",
+	"internal/inject/guards.go":   "reads Codex's braille idle sparkle out of a captured pane to tell a draft from decoration; it recognises the range and renders nothing",
 }
 
 func webglCustomGlyphRange(r rune) string {

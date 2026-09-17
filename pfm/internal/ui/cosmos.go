@@ -637,6 +637,31 @@ func cosmosCometDuration(kind string) time.Duration {
 	return 1500 * time.Millisecond
 }
 
+// cosmosEdgeHaloHeat is the heat below which a rail loses its halo and
+// runs as a single thread: a message about three minutes old, or an edge
+// that never carried more than a couple of messages.
+const cosmosEdgeHaloHeat = 0.2
+
+// cosmosEdgeLight is the rail's memory of its traffic. fade is the line's
+// brightness: full at the moment a message lands, settling over ~2.5
+// minutes to a floor that stays readable against the sky — an edge from
+// this morning is still a line, not a rumour. heat is what makes a rail
+// SHINE — the white blend and the halo — and it comes from two places: a
+// fresh message (fading over ~2 minutes) or accumulated traffic, so an edge
+// that has carried a storm stays thick after the storm passes. Both are
+// clamped to [0, 1].
+func cosmosEdgeLight(ageSeconds float64, count int) (fade, heat float64) {
+	if ageSeconds < 0 {
+		ageSeconds = 0
+	}
+	fade = 0.42 + 0.58*math.Exp(-ageSeconds/150)
+	heat = math.Exp(-ageSeconds / 120)
+	if count > 1 {
+		heat = math.Max(heat, math.Min(0.45, 0.08*float64(count-1)))
+	}
+	return math.Min(1, fade), math.Min(1, heat)
+}
+
 func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph, now, view time.Time) {
 	nodes := cosmosNodeMap(graph.Nodes)
 	frame := cosmosLayout(
@@ -713,12 +738,11 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 		if age < 0 {
 			age = 0
 		}
-		fade := 0.20 + 0.80*math.Exp(-age/40)
+		fade, heat := cosmosEdgeLight(age, edge.Count)
 		dashed := false
 		fromColor, toColor := cosmosNodeColor(from), cosmosNodeColor(to)
 		if edge.Kind == shared.KindSpawn {
 			dashed = true
-			fade = math.Max(0.35, fade)
 			fromColor = rgbFromHex(configuredCosmosPalette.CosmosLineage)
 		}
 		if model.skyEnabled {
@@ -729,8 +753,20 @@ func (model Model) drawCosmosUniverse(canvas *Canvas, graph compose.CosmosGraph,
 				fade = 1.0
 			}
 		}
+		// Heat whitens the rail toward CosmosBright and wraps it in a halo —
+		// the same curve translated one braille row up and down, dimmer —
+		// so a live conversation reads as a thick, shining cable and a
+		// day-old one as a thin thread, both still visible.
+		bright := rgbFromHex(configuredCosmosPalette.CosmosBright)
+		fromColor = lerpRGB(fromColor, bright, 0.40*heat)
+		toColor = lerpRGB(toColor, bright, 0.40*heat)
 		rail := cosmosEdgeRail(fp, tp, cx, cy)
 		x0, y0, cpx, cpy, x1, y1 := rail.x0, rail.y0, rail.cpx, rail.cpy, rail.x1, rail.y1
+		if heat >= cosmosEdgeHaloHeat {
+			halo := spotlight(edge, fade*0.55*heat)
+			canvas.Bezier(x0, y0-1, cpx, cpy-1, x1, y1-1, fromColor, toColor, halo, dashed)
+			canvas.Bezier(x0, y0+1, cpx, cpy+1, x1, y1+1, fromColor, toColor, halo, dashed)
+		}
 		canvas.Bezier(x0, y0, cpx, cpy, x1, y1, fromColor, toColor, spotlight(edge, fade), dashed)
 	}
 

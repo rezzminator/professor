@@ -52,8 +52,12 @@ type Chat struct {
 // Status is the machine-readable verdict. Field names are a contract — a
 // consumer scripts against them.
 type Status struct {
-	Name          string       `json:"name"`
-	State         string       `json:"state"`
+	Name  string `json:"name"`
+	State string `json:"state"`
+	// IdleSeconds is how long the chat has been idle — nonzero ONLY when State
+	// is idle. A working chat mid tool run writes nothing for minutes; that
+	// silence is not idleness, and reporting it as such made the number
+	// contradict the state beside it.
 	IdleSeconds   int64        `json:"idle_seconds"`
 	Engine        pfmengine.ID `json:"engine"`
 	Model         string       `json:"model,omitempty"`
@@ -172,6 +176,9 @@ func Inspect(
 		}
 	} else if chat.Live {
 		status.State = StateWorking
+	}
+	if status.State != StateIdle {
+		status.IdleSeconds = 0
 	}
 	return status, nil
 }

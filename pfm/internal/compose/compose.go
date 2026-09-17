@@ -372,6 +372,10 @@ type accountPathRoot struct {
 	account    int
 	configured string
 	canonical  string
+	// configDir / configDirCanonical: the seat's own config dir, when the
+	// root carries one; empty roots never match a process by config dir.
+	configDir          string
+	configDirCanonical string
 }
 
 type accountMatcher struct {
@@ -385,13 +389,40 @@ func newAccountMatcher(roots []AccountRoot) accountMatcher {
 			continue
 		}
 		configured := absoluteCleanPath(root.Path)
-		matcher.roots = append(matcher.roots, accountPathRoot{
+		entry := accountPathRoot{
 			account:    root.Account,
 			configured: configured,
 			canonical:  canonicalPath(configured),
-		})
+		}
+		if root.ConfigDir != "" {
+			entry.configDir = absoluteCleanPath(root.ConfigDir)
+			entry.configDirCanonical = canonicalPath(entry.configDir)
+		}
+		matcher.roots = append(matcher.roots, entry)
 	}
 	return matcher
+}
+
+// accountForConfigDir names the seat whose config dir a live process runs
+// under — an exact match, configured spelling or canonical. Zero when the
+// process names no config dir or none of the roots carries one, so the
+// caller falls back to the transcript path.
+func (matcher accountMatcher) accountForConfigDir(dir string) int {
+	if dir == "" {
+		return 0
+	}
+	normalized := absoluteCleanPath(dir)
+	canonical := canonicalPath(normalized)
+	for _, root := range matcher.roots {
+		if root.configDir == "" {
+			continue
+		}
+		if normalized == root.configDir || normalized == root.configDirCanonical ||
+			canonical == root.configDir || canonical == root.configDirCanonical {
+			return root.account
+		}
+	}
+	return 0
 }
 
 func (matcher accountMatcher) accountFor(path string) int {
@@ -794,7 +825,11 @@ func (current *composer) agentRows() []Row {
 		if row.Name == "" {
 			row.Name = "(no prompt)"
 		}
-		if row.Account == 0 {
+		// The process's config dir is the seat, whatever store the transcript
+		// sits in: with seats sharing one store, the path names every seat.
+		if account := current.claudeAccounts.accountForConfigDir(agent.ConfigDir); account != 0 {
+			row.Account = account
+		} else if row.Account == 0 {
 			row.Account = current.accountFor(agent.ConfigDir)
 		}
 		_, row.C1H = current.cacheSockets[agent.Socket]

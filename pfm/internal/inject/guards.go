@@ -83,9 +83,19 @@ func hasDraft(line string) bool {
 	rest = strings.TrimPrefix(rest, "›")
 	rest = strings.TrimSpace(rest)
 	rest = strings.ReplaceAll(rest, "Press up to edit queued messages", "")
+	// A lone ASCII spinner frame is the TUI's idle animation, not a draft.
+	if trimmed := strings.TrimSpace(rest); len(trimmed) == 1 && strings.ContainsAny(trimmed, `|/-\`) {
+		return false
+	}
 	for _, character := range rest {
 		// A genuine non-ASCII draft is still text. Exclude whitespace and
-		// format controls so contextual zero-width placeholders stay empty.
+		// format controls so contextual zero-width placeholders stay empty,
+		// and the Braille Patterns block: Codex sparkles its idle composer
+		// with those glyphs in 24-bit greys (not SGR dim) under a truecolor
+		// terminal, and nobody types braille as a message.
+		if character >= 0x2800 && character <= 0x28FF {
+			continue
+		}
 		if unicode.IsGraphic(character) && !unicode.IsSpace(character) {
 			return true
 		}
@@ -104,26 +114,48 @@ func HasPastePlaceholder(value string) bool {
 }
 
 func isDimPlaceholder(styledLine string) bool {
-	if !strings.Contains(styledLine, "\x1b[2m") {
+	if !strings.Contains(styledLine, "\x1b[2m") && !strings.Contains(styledLine, ";2m") {
 		return false
 	}
-	// chat.sh treats the whole dim SGR-2 span as contextual placeholder text.
-	withoutDim := styledLine
-	for {
-		start := strings.Index(withoutDim, "\x1b[2m")
-		if start < 0 {
+	// Walk the SGR sequences and drop every character painted while dim is
+	// on. Dim is an attribute, not a span: it starts with a parameter 2
+	// (alone or in a list such as 1;2) and ends only at a full reset (0 or
+	// empty) or the explicit 22 — a colour change like 39 in between keeps
+	// it. Codex interleaves exactly such colour resets inside its dim
+	// placeholder, so a "strip to the next escape" reading kept the hint
+	// text and called it a draft.
+	var visible strings.Builder
+	dim := false
+	rest := styledLine
+	for rest != "" {
+		match := ansiPattern.FindStringIndex(rest)
+		if match == nil {
+			if !dim {
+				visible.WriteString(rest)
+			}
 			break
 		}
-		rest := withoutDim[start+len("\x1b[2m"):]
-		end := strings.Index(rest, "\x1b[")
-		if end < 0 {
-			withoutDim = withoutDim[:start]
-			break
+		if !dim {
+			visible.WriteString(rest[:match[0]])
 		}
-		withoutDim = withoutDim[:start] + rest[end:]
+		sequence := rest[match[0]:match[1]]
+		if strings.HasSuffix(sequence, "m") {
+			params := strings.TrimSuffix(strings.TrimPrefix(sequence, "\x1b["), "m")
+			if params == "" {
+				dim = false
+			}
+			for _, param := range strings.Split(params, ";") {
+				switch param {
+				case "0", "22":
+					dim = false
+				case "2":
+					dim = true
+				}
+			}
+		}
+		rest = rest[match[1]:]
 	}
-	withoutDim = stripTerminalControl(withoutDim)
-	return !hasDraft(withoutDim)
+	return !hasDraft(stripTerminalControl(visible.String()))
 }
 
 func lastComposerLine(capture string) string {

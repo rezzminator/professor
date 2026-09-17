@@ -44,6 +44,16 @@ var hygieneNames = []string{
 
 var hygiene = envStripWords(hygieneNames)
 
+// opencodeHygieneNames widens the fleet strip for OpenCode alone. An OpenCode
+// born in a VS Code terminal inherits CLAUDE_CODE_SSE_PORT from the Claude
+// Code extension; OpenCode then dials that port without the lock-file token,
+// the extension closes the socket with 1008, and OpenCode's backoff resets on
+// every open — one rejected handshake per second for the life of the chat.
+// Claude keeps the variable: the CLI reads the token and the IDE link is wanted.
+var opencodeHygieneNames = append(append([]string{}, hygieneNames...), "CLAUDE_CODE_SSE_PORT")
+
+var opencodeHygiene = envStripWords(opencodeHygieneNames)
+
 // envStripWords renders one strip list as the `env -u NAME …` prefix.
 func envStripWords(names []string) string {
 	var words strings.Builder
@@ -191,7 +201,7 @@ func Synthesize(request Request) (Plan, error) {
 			return Plan{}, errors.New("new OpenCode action requires cwd and fresh socket")
 		}
 		var command strings.Builder
-		command.WriteString(hygiene)
+		command.WriteString(opencodeHygiene)
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,
@@ -214,7 +224,7 @@ func Synthesize(request Request) (Plan, error) {
 			)
 		}
 		var command strings.Builder
-		command.WriteString(hygiene)
+		command.WriteString(opencodeHygiene)
 		command.WriteByte(' ')
 		command.WriteString(binaryWord(
 			machine.OpenCode.Binary,

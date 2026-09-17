@@ -35,6 +35,11 @@ const (
 	codeAwaitTimeout = 5
 	// codeUndelivered means nothing reached the model.
 	codeUndelivered = 6
+	// codeAwaitSuperseded says the chat answered, but a second message reached
+	// it mid-wait — the printed answer is the newest one and may be theirs.
+	// The answer is real and is printed; the claim on it is not provable, so
+	// it is not a 0.
+	codeAwaitSuperseded = 7
 )
 
 func runHeadless(

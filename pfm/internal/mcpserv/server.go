@@ -190,7 +190,7 @@ func (service *Service) register() {
 	}, service.chatLast)
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_status",
-		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds, context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
+		Description: "Inspects one chat — \"is chat X idle / busy / dead\", \"what is it doing\". Call chat_status{target:\"my-chat\"}; summary:true adds a digest of its last exchange, ask:true a live-screen answer. Returns name, state, idle_seconds (nonzero only while state is idle), context_pct and last; state dead is a result, not an error; a tool error = the target did not resolve or the status command failed.",
 		Annotations: readOnly,
 	}, service.chatStatus)
 	mcp.AddTool(service.server, &mcp.Tool{

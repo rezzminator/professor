@@ -8,6 +8,7 @@ cmd/pfm/chat_new_command.go
 cmd/pfm/engines.go
 cmd/pfm/harvest_command.go
 cmd/pfm/heal_command.go
+cmd/pfm/index_command.go
 cmd/pfm/init_command.go
 cmd/pfm/internal_agent_open.go
 cmd/pfm/internal_clear_kill.go
@@ -15,8 +16,7 @@ cmd/pfm/internal_codex_appendix.go
 cmd/pfm/internal_launcher_repair.go
 cmd/pfm/internal_prompt_block.go
 cmd/pfm/internal_then.go
-cmd/pfm/ls_command.go
-cmd/pfm/ls_pipeline.go
+cmd/pfm/internal_update_check.go
 cmd/pfm/mcp_serve_command.go
 cmd/pfm/namesync_command.go
 cmd/pfm/reap_command.go

@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/compose"
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
@@ -86,7 +87,7 @@ func TestHidingALiveChatKeepsItRunningAndKeepsItsHandles(t *testing.T) {
 		}
 	}()
 	resolved := jailPaths(t)
-	apply, err := killApplier(context.Background(), database, commandRuntime{Paths: resolved})
+	apply, err := killApplier(context.Background(), database, pfmconfig.Runtime{Paths: resolved})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,7 @@ func TestKillingAChatThatIsNotRunningKillsNothing(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-	apply, err := killApplier(context.Background(), database, commandRuntime{Paths: jailPaths(t)})
+	apply, err := killApplier(context.Background(), database, pfmconfig.Runtime{Paths: jailPaths(t)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +210,7 @@ func TestHidingAChatDoesNotCleanUpADeadSocket(t *testing.T) {
 			t.Errorf("close database: %v", err)
 		}
 	}()
-	apply, err := killApplier(context.Background(), database, commandRuntime{Paths: jailPaths(t)})
+	apply, err := killApplier(context.Background(), database, pfmconfig.Runtime{Paths: jailPaths(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

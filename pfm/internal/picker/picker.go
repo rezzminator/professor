@@ -1,4 +1,7 @@
-package main
+// Package picker is the pfm ls loop: cached first frame, streamed refreshes
+// with idle backoff, the cosmos sampler, and key to action over fleet.Scan,
+// with every row action delegated to chat.
+package picker
 
 import (
 	"context"
@@ -6,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"strconv"
 	"time"
 
 	pfmchat "hostops/pfm/internal/chat"
@@ -16,7 +18,6 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/fleetdb"
-	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
 	pfmstats "hostops/pfm/internal/stats"
@@ -24,10 +25,10 @@ import (
 	"hostops/pfm/internal/ui"
 )
 
-func runLS(
+func Run(
 	args []string,
 	stdout, stderr io.Writer,
-	runtime commandRuntime,
+	runtime pfmconfig.Runtime,
 ) (exitCode int) {
 	flags := cli.NewFlagSet(
 		"ls",
@@ -56,7 +57,7 @@ func runLS(
 		flags.Usage()
 		return 2
 	}
-	if *safe != "auto" && *safe != "on" && *safe != toggleOffFlag {
+	if *safe != "auto" && *safe != "on" && *safe != "off" {
 		fmt.Fprintf(stderr, "pfm ls: --safe must be auto, on, or off (got %q)\n", *safe)
 		return 2
 	}
@@ -72,7 +73,7 @@ func runLS(
 		// The killed ledger is already a stable three-column TSV contract.
 		// Accepting --tsv makes that format explicit for scripts instead of
 		// returning an empty success or rejecting a harmless format request.
-		return runKilled(nil, stdout, stderr, runtime)
+		return listKilled(nil, stdout, stderr, runtime)
 	}
 	if flags.NArg() == 1 {
 		if all || *plain || *tsv {
@@ -253,7 +254,7 @@ func runLS(
 	}
 }
 
-func limitAccounts(runtime commandRuntime) []pfmstats.LimitAccount {
+func limitAccounts(runtime pfmconfig.Runtime) []pfmstats.LimitAccount {
 	accounts := make(
 		[]pfmstats.LimitAccount,
 		0,
@@ -365,7 +366,7 @@ func reportKills(changes []ui.KillChange, stderr io.Writer) {
 func killApplier(
 	ctx context.Context,
 	database *store.Store,
-	runtime commandRuntime,
+	runtime pfmconfig.Runtime,
 ) (func(ui.KillChange) error, error) {
 	manager, err := kill.New(database, fleet.KillDependencies(runtime))
 	if err != nil {
@@ -428,14 +429,8 @@ func rebootRow(
 	return row, nil
 }
 
-func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
-	flags := cli.NewFlagSet(
-		indexCommand,
-		"usage: pfm index [--full] [--progress]",
-		stderr,
-	)
-	full := flags.Bool("full", false, "reparse every indexed file")
-	progress := flags.Bool("progress", false, "report start and elapsed time to stderr")
+func listKilled(args []string, stdout, stderr io.Writer, runtime pfmconfig.Runtime) (exitCode int) {
+	flags := cli.NewFlagSet("ls --killed", "usage: pfm ls --killed", stderr)
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
@@ -443,103 +438,18 @@ func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime) (
 		flags.Usage()
 		return 2
 	}
-	database, err := store.Open(store.WithWarningWriter(stderr))
+	database, manager, code := fleet.OpenKillManager(stderr, runtime)
+	if code != 0 {
+		return code
+	}
+	defer func() { cli.CloseResource(database, "pfm ls --killed: close database", stderr, &exitCode) }()
+	rows, err := manager.Killed(context.Background())
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm index: %v\n", err)
+		fmt.Fprintf(stderr, "pfm ls --killed: %v\n", err)
 		return 1
 	}
-	defer func() { cli.CloseResource(database, "pfm index: close database", stderr, &exitCode) }()
-	indexer, err := fleetindex.NewWithRoots(database, runtime.Paths, runtime.Paths.Roots)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm index: %v\n", err)
-		return 1
+	for _, row := range rows {
+		fmt.Fprintf(stdout, "%s\t%s\t%d\n", row.ID, row.Engine, row.KilledAt)
 	}
-	started := time.Now()
-	if *progress {
-		fmt.Fprintln(stderr, "pfm index: scanning")
-	}
-	counters, err := indexer.Run(context.Background(), fleetindex.Options{Full: *full})
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm index: %v\n", err)
-		return 1
-	}
-	if *full {
-		_ = database.SetMeta(
-			context.Background(),
-			"last_full_index_at",
-			strconv.FormatInt(time.Now().Unix(), 10),
-		)
-	}
-	fmt.Fprintln(stdout, formatCounters(counters))
-	if *progress {
-		fmt.Fprintf(stderr, "pfm index: done in %s\n", time.Since(started).Round(time.Millisecond))
-	}
-	return 0
-}
-
-func formatCounters(counters fleetindex.Counters) string {
-	return fmt.Sprintf(
-		"files=%d skipped=%d delta=%d full=%d deleted=%d touched=%d bytes=%d cx_names=%t",
-		counters.FilesSeen,
-		counters.FilesSkipped,
-		counters.DeltaParsed,
-		counters.FullParsed,
-		counters.Deleted,
-		counters.RowsTouched,
-		counters.BytesRead,
-		counters.CxNamesReloaded,
-	)
-}
-
-// pruneOrphanedKills reports, and only with confirm deletes, the kills doctor
-// counts as orphaned_killed. A kill cannot be recovered once deleted, so the
-// dry run is the default and the count is always printed.
-func pruneOrphanedKills(
-	ctx context.Context,
-	database *store.Store,
-	confirm bool,
-	stdout, stderr io.Writer,
-) int {
-	orphans, err := database.OrphanedKills(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm archive: %v\n", err)
-		return 1
-	}
-	if !confirm {
-		for _, orphan := range orphans {
-			fmt.Fprintf(
-				stdout,
-				"would prune\t%s\t%s\t%d\n",
-				orphan.ID,
-				orphan.Engine,
-				orphan.KilledAt,
-			)
-		}
-		fmt.Fprintf(
-			stdout,
-			"pfm archive: %d orphaned kill(s); re-run with --yes to delete\n",
-			len(orphans),
-		)
-		return 0
-	}
-	deleted, err := database.DeleteOrphanedKills(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm archive: %v\n", err)
-		return 1
-	}
-	for _, orphan := range orphans {
-		fmt.Fprintf(
-			stdout,
-			"pruned\t%s\t%s\t%d\n",
-			orphan.ID,
-			orphan.Engine,
-			orphan.KilledAt,
-		)
-	}
-	fmt.Fprintf(
-		stdout,
-		"pfm archive: pruned %d orphaned kill(s)\n",
-		deleted,
-	)
 	return 0
 }

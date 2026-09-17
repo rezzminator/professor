@@ -640,6 +640,15 @@ func jailTest(t *testing.T) string {
 	return root
 }
 
+func jailPaths(t *testing.T) paths.Values {
+	t.Helper()
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatalf("resolve jail paths: %v", err)
+	}
+	return resolved
+}
+
 func writeJailedCodexAuth(t *testing.T, root string) {
 	t.Helper()
 	if err := os.WriteFile(

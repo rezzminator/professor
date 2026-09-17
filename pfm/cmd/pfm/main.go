@@ -17,6 +17,7 @@ import (
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
+	"hostops/pfm/internal/picker"
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/stale"
 	"hostops/pfm/internal/store"
@@ -101,14 +102,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	// The one place the machine config reaches a Codex rename's proof.
 	spawn.UseCodexHomes(runtime.Config.CodexHomes())
 	if len(args) == 0 {
-		return runLS(nil, stdout, stderr, runtime)
+		return picker.Run(nil, stdout, stderr, runtime)
 	}
 
 	switch args[0] {
 	case "version", "--version":
 		return runVersion(args[1:], stdout, stderr)
 	case "ls":
-		return runLS(args[1:], stdout, stderr, runtime)
+		return picker.Run(args[1:], stdout, stderr, runtime)
 	case "chat":
 		return runChatWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime)
 	case "harvest":
@@ -403,35 +404,6 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		return 1
 	}
 	fmt.Fprintf(stdout, "unkilled %s\n", flags.Arg(0))
-	return 0
-}
-
-func runKilled(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
-	flags := cli.NewFlagSet(
-		"ls --killed",
-		"usage: pfm ls --killed",
-		stderr,
-	)
-	if code, ok := cli.ParseFlags(flags, args); !ok {
-		return code
-	}
-	if flags.NArg() != 0 {
-		flags.Usage()
-		return 2
-	}
-	database, manager, code := fleet.OpenKillManager(stderr, runtimes...)
-	if code != 0 {
-		return code
-	}
-	defer func() { cli.CloseResource(database, "pfm ls --killed: close database", stderr, &exitCode) }()
-	rows, err := manager.Killed(context.Background())
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm ls --killed: %v\n", err)
-		return 1
-	}
-	for _, row := range rows {
-		fmt.Fprintf(stdout, "%s\t%s\t%d\n", row.ID, row.Engine, row.KilledAt)
-	}
 	return 0
 }
 

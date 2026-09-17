@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 func TestLimitAccountsKeepCodexIndependentFromClaudeRoster(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(paths.EnvHome, home)
-	runtime := commandRuntime{
+	runtime := pfmconfig.Runtime{
 		Paths: paths.Values{
 			Home:  home,
 			Roots: map[pfmengine.ID][]string{pfmengine.Codex: {filepath.Join(home, ".codex")}},
@@ -74,7 +74,7 @@ func TestLimitAccountsKeepCodexIndependentFromClaudeRoster(t *testing.T) {
 }
 
 func TestLimitAccountsNameBothEmptyRosters(t *testing.T) {
-	accounts := limitAccounts(commandRuntime{Config: pfmconfig.Config{}})
+	accounts := limitAccounts(pfmconfig.Runtime{Config: pfmconfig.Config{}})
 	if len(accounts) != 3 || !accounts[0].Absent || !accounts[1].Absent || !accounts[2].Absent ||
 		accounts[0].Label != "no Claude accounts configured" ||
 		accounts[1].Label != "no Codex accounts configured" ||
@@ -84,7 +84,7 @@ func TestLimitAccountsNameBothEmptyRosters(t *testing.T) {
 }
 
 func TestLimitAccountsIncludesConfiguredOpenCodeSeat(t *testing.T) {
-	accounts := limitAccounts(commandRuntime{Config: pfmconfig.Config{
+	accounts := limitAccounts(pfmconfig.Runtime{Config: pfmconfig.Config{
 		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 7, Home: "/jail/opencode"}},
 	}})
 	var found bool
@@ -99,7 +99,7 @@ func TestLimitAccountsIncludesConfiguredOpenCodeSeat(t *testing.T) {
 }
 
 func TestConfiguredOpenCodeLimitIsUnsupportedNotAbsent(t *testing.T) {
-	accounts := limitAccounts(commandRuntime{Config: pfmconfig.Config{
+	accounts := limitAccounts(pfmconfig.Runtime{Config: pfmconfig.Config{
 		OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 7, Home: "/jail/opencode"}},
 	}})
 	var configured pfmstats.LimitAccount

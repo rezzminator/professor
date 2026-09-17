@@ -7,4 +7,4 @@ new: internal/action/executor.go internal/agentopen/agentopen.go internal/archiv
 openreadonly: internal/heal/heal.go internal/sqlitedb/sqlitedb.go
 parse: internal/engine/engine.go internal/recovery/recovery.go internal/transcript/transcript.go
 resolve: internal/agentrole/agentrole.go internal/chat/target.go internal/deps/registry.go internal/headless/run/run.go internal/paths/paths.go
-run: cmd/pfm/main.go internal/codexappendix/hook.go internal/codexgen/compiler.go internal/doctor/doctor.go internal/headless/run/run.go internal/installer/installer.go internal/recovery/recovery.go internal/reload/reload.go internal/spawn/spawn.go internal/stale/stale.go internal/testjail/testjail.go internal/update/run.go
+run: cmd/pfm/main.go internal/codexappendix/hook.go internal/codexgen/compiler.go internal/doctor/doctor.go internal/headless/run/run.go internal/installer/installer.go internal/picker/picker.go internal/recovery/recovery.go internal/reload/reload.go internal/spawn/spawn.go internal/stale/stale.go internal/testjail/testjail.go internal/update/run.go

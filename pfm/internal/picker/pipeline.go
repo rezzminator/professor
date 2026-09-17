@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/compose"
+	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/fleetdb"
@@ -134,7 +135,7 @@ type scanRequest struct {
 	// Safe is the --safe flag verbatim (auto|on|off); resolveCosmosSafe
 	// turns it into the snapshot's CosmosSafe bool at build time.
 	Safe    string
-	Runtime *commandRuntime
+	Runtime *pfmconfig.Runtime
 	Comms   commsReader
 }
 
@@ -147,7 +148,7 @@ func resolveCosmosSafe(flagValue, termProgram string) bool {
 	switch flagValue {
 	case "on":
 		return true
-	case toggleOffFlag:
+	case "off":
 		return false
 	default:
 		return termProgram == "vscode"

@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"bytes"
@@ -531,19 +531,10 @@ func TestAsyncCallerRefreshStormPreservesCursorAndGoroutines(t *testing.T) {
 	)
 }
 
-// TestInternalPrimarySetGetDispatch is F5's regression test: the retired
-// TestShimLaunchPosture (internal/installer/shim/shim_test.go) was the only place that ran a
-// primary-account switch through `pfm internal primary-set` / `primary-get`
-// end to end, and it drove those subcommands through a HAND-WRITTEN fake
-// shell-script "pfm" fixture, never the real Go dispatch — the shell
-// functions it exercised (_cc_run, cc-swap, _cc_primary) are exactly what
-// this PR retires. TestPrimaryAccountGoesThroughTheStateStore above already
-// proves fleet.SetPrimaryAccount/fleet.PrimaryAccount persist through the shared
-// store; this test proves the thin CLI argv layer around them — runInternal
-// itself, main.go's "primary-set" (~419-450) and "primary-get" (~421)
-// cases — actually reaches those functions with the right parsing, output,
-// and exit codes.
-func TestInternalPrimarySetGetDispatch(t *testing.T) {
+// TestPrimaryAccountSetGetDirectly exercises the fleet API used by the
+// main-package primary-get and primary-set adapters without coupling picker
+// tests back to those binary dispatchers.
+func TestPrimaryAccountSetGetDirectly(t *testing.T) {
 	home := t.TempDir()
 	values := paths.Values{
 		Home:    home,
@@ -553,43 +544,23 @@ func TestInternalPrimarySetGetDispatch(t *testing.T) {
 		filepath.Join(home, ".cc", "1", "projects"),
 		filepath.Join(home, ".cc", "2", "projects"),
 	})
-	rt := commandRuntime{Config: machine, Paths: values}
+	rt := config.Runtime{Config: machine, Paths: values}
 
-	var stdout, stderr bytes.Buffer
-	if code := runInternal([]string{"primary-set", "2"}, &stdout, &stderr, rt); code != 0 {
-		t.Fatalf("runInternal(primary-set 2) = %d, stderr=%q", code, stderr.String())
+	if err := fleet.SetPrimaryAccount(rt.Paths, rt.Config, 2); err != nil {
+		t.Fatalf("SetPrimaryAccount(2): %v", err)
 	}
-	if stdout.String() != "" {
-		t.Fatalf("primary-set printed to stdout: %q", stdout.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := runInternal([]string{"primary-get"}, &stdout, &stderr, rt); code != 0 {
-		t.Fatalf("runInternal(primary-get) = %d, stderr=%q", code, stderr.String())
-	}
-	if got := strings.TrimSpace(stdout.String()); got != "2" {
-		t.Fatalf("primary-get printed %q, want the persisted account 2", got)
+	if got := fleet.PrimaryAccount(rt.Paths, rt.Config); got != 2 {
+		t.Fatalf("PrimaryAccount() = %d, want the persisted account 2", got)
 	}
 
 	// An off-roster account is refused, and refused BEFORE anything
 	// persists — the CLI reports the failure rather than the shim's old
 	// fail-open silence.
-	stdout.Reset()
-	stderr.Reset()
-	if code := runInternal([]string{"primary-set", "9"}, &stdout, &stderr, rt); code == 0 {
-		t.Fatalf("runInternal(primary-set 9) accepted an off-roster account")
-	} else if !strings.Contains(stderr.String(), "primary-set") {
-		t.Fatalf("primary-set failure did not name itself: %q", stderr.String())
+	if err := fleet.SetPrimaryAccount(rt.Paths, rt.Config, 9); err == nil {
+		t.Fatal("SetPrimaryAccount(9) accepted an off-roster account")
 	}
-
-	stdout.Reset()
-	stderr.Reset()
-	if code := runInternal([]string{"primary-get"}, &stdout, &stderr, rt); code != 0 {
-		t.Fatalf("runInternal(primary-get) after refused switch = %d, stderr=%q", code, stderr.String())
-	}
-	if got := strings.TrimSpace(stdout.String()); got != "2" {
-		t.Fatalf("primary-get after a refused switch = %q, want the still-persisted account 2", got)
+	if got := fleet.PrimaryAccount(rt.Paths, rt.Config); got != 2 {
+		t.Fatalf("PrimaryAccount() after refused switch = %d, want 2", got)
 	}
 }
 

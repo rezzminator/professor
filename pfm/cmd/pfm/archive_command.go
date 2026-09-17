@@ -12,6 +12,7 @@ import (
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
+	"hostops/pfm/internal/store"
 )
 
 // killStoreAdapter exposes the kill manager as the archive's killed-chat
@@ -124,6 +125,39 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		return 1
 	}
 	printArchiveReport(report, *apply, *subagents, resolved, stdout)
+	return 0
+}
+
+// pruneOrphanedKills reports, and only with confirm deletes, the kills doctor
+// counts as orphaned_killed. A kill cannot be recovered once deleted, so the
+// dry run is the default and the count is always printed.
+func pruneOrphanedKills(
+	ctx context.Context,
+	database *store.Store,
+	confirm bool,
+	stdout, stderr io.Writer,
+) int {
+	orphans, err := database.OrphanedKills(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm archive: %v\n", err)
+		return 1
+	}
+	if !confirm {
+		for _, orphan := range orphans {
+			fmt.Fprintf(stdout, "would prune\t%s\t%s\t%d\n", orphan.ID, orphan.Engine, orphan.KilledAt)
+		}
+		fmt.Fprintf(stdout, "pfm archive: %d orphaned kill(s); re-run with --yes to delete\n", len(orphans))
+		return 0
+	}
+	deleted, err := database.DeleteOrphanedKills(ctx)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm archive: %v\n", err)
+		return 1
+	}
+	for _, orphan := range orphans {
+		fmt.Fprintf(stdout, "pruned\t%s\t%s\t%d\n", orphan.ID, orphan.Engine, orphan.KilledAt)
+	}
+	fmt.Fprintf(stdout, "pfm archive: pruned %d orphaned kill(s)\n", deleted)
 	return 0
 }
 

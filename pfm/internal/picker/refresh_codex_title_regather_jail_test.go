@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"bytes"
@@ -57,7 +57,7 @@ func codexRegatherJailFixture(
 	// outranks TMUX_TMPDIR in paths.Resolve()'s own EnvOr(EnvTmuxDir, ...) —
 	// so TMUX_TMPDIR alone is not enough; both must point at the same real
 	// server. The reconcile-only tests elsewhere in this package instead pass
-	// an explicit commandRuntime and never need this.
+	// an explicit config.Runtime and never need this.
 	t.Setenv("TMUX_TMPDIR", tmuxTmpDir)
 	t.Setenv("PFM_TMUX_DIR", filepath.Join(tmuxTmpDir, "tmux-"+strconv.Itoa(os.Getuid())))
 	socket = "cx-1800000030-1-1"

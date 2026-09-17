@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"bytes"
@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	fleetindex "hostops/pfm/internal/index"
@@ -84,7 +85,7 @@ func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {
 					ctx,
 					database,
 					gather.Snapshot{Panes: []gather.ProbePane{codexPane(socket, "%0")}},
-					commandRuntime{Paths: resolved},
+					pfmconfig.Runtime{Paths: resolved},
 					fleet.PrintWarn(&stderr),
 				)
 			}

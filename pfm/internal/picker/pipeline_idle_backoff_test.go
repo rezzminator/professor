@@ -1,4 +1,4 @@
-package main
+package picker
 
 import (
 	"bytes"

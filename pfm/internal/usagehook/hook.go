@@ -200,7 +200,7 @@ func Evaluate(ctx context.Context, options Options) (string, error) {
 		return "", err
 	}
 	account := accountNumber(options.Home, options.ConfigDir, options.AccountDirs)
-	if err := EnsurePrivateDirectory(options.CacheDir); err != nil {
+	if err := EnsurePrivateDir(options.CacheDir); err != nil {
 		return "", err
 	}
 	now := options.Now()
@@ -509,7 +509,7 @@ func ReadCacheRecord(path string) (CacheRecord, error) {
 // directory and atomic-rename discipline this hook's own refresh() has
 // always used.
 func WriteCacheRecord(path string, record CacheRecord) error {
-	if err := EnsurePrivateDirectory(filepath.Dir(path)); err != nil {
+	if err := EnsurePrivateDir(filepath.Dir(path)); err != nil {
 		return err
 	}
 	body, err := json.Marshal(record)
@@ -550,7 +550,7 @@ func ParseRetryAfter(value string, now time.Time) time.Duration {
 	return 0
 }
 
-func EnsurePrivateDirectory(path string) error {
+func EnsurePrivateDir(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}

@@ -90,16 +90,16 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		return 0
 	}
 
-	workingDirectory := *cwd
-	if workingDirectory == "" {
+	workingDir := *cwd
+	if workingDir == "" {
 		var err error
-		workingDirectory, err = os.Getwd()
+		workingDir, err = os.Getwd()
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: resolve cwd: %v\n", err)
 			return 1
 		}
 	}
-	if !filepath.IsAbs(workingDirectory) || strings.ContainsRune(workingDirectory, '\x00') {
+	if !filepath.IsAbs(workingDir) || strings.ContainsRune(workingDir, '\x00') {
 		fmt.Fprintln(stderr, "pfm internal launch: --cwd must be an absolute path")
 		return 2
 	}
@@ -169,7 +169,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 	ctx := context.Background()
 	if err := client.NewSession(ctx, spawn.SessionSpec{
 		Socket: socket, Session: session, Window: spawn.WindowName(""),
-		CWD: workingDirectory, Run: gateRun,
+		CWD: workingDir, Run: gateRun,
 		Width: action.HeadlessWidth, Height: action.HeadlessHeight,
 	}); err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: %v\n", err)

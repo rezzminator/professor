@@ -326,7 +326,7 @@ func runChatLS(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 			killed++
 			continue
 		}
-		if !all && !withinDirectory(row.CWD, root) {
+		if !all && !pathWithinDir(row.CWD, root) {
 			elsewhere++
 			continue
 		}
@@ -388,7 +388,7 @@ func repositoryRoot() (string, error) {
 	}
 }
 
-func withinDirectory(path, root string) bool {
+func pathWithinDir(path, root string) bool {
 	path = filepath.Clean(path)
 	root = filepath.Clean(root)
 	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))

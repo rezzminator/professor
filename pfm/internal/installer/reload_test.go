@@ -16,7 +16,7 @@ func TestReloadCommandTargetMigratesLegacySwap(t *testing.T) {
 	}
 }
 
-func TestSkillTargetMapsHandoffUnderItsOwnDirectory(t *testing.T) {
+func TestSkillTargetMapsHandoffUnderItsOwnDir(t *testing.T) {
 	installer := &engine{options: Options{ConfigDir: filepath.Join(t.TempDir(), ".claude")}}
 	target, ok := installer.skillTarget(installer.options.ConfigDir, "handoff.skill.md")
 	if !ok {

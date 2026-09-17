@@ -819,20 +819,20 @@ func runUpdateDoctor(
 	// binary, not whichever source checkout invoked it, so run from a fresh
 	// non-repository directory and keep an unwired maintainer checkout from
 	// rolling back an otherwise healthy update.
-	doctorDirectory, err := os.MkdirTemp("", "pfm-update-doctor-")
+	doctorDir, err := os.MkdirTemp("", "pfm-update-doctor-")
 	if err != nil {
 		return doctorOutcome{}, fmt.Errorf("create isolated doctor directory: %w", err)
 	}
 	defer func() {
-		if cleanupErr := os.RemoveAll(doctorDirectory); cleanupErr != nil {
-			fmt.Fprintf(stderr, "pfm update: cleanup isolated doctor directory %s: %v\n", doctorDirectory, cleanupErr)
+		if cleanupErr := os.RemoveAll(doctorDir); cleanupErr != nil {
+			fmt.Fprintf(stderr, "pfm update: cleanup isolated doctor directory %s: %v\n", doctorDir, cleanupErr)
 		}
 	}()
 	runErr := runUpdateCandidateCommand(
 		ctx,
 		candidate,
 		configPath,
-		doctorDirectory,
+		doctorDir,
 		"",
 		stdout,
 		stderr,
@@ -875,7 +875,7 @@ func runUpdateCandidateCommand(
 	ctx context.Context,
 	candidate string,
 	configPath string,
-	workingDirectory string,
+	workingDir string,
 	sourceRepo string,
 	stdout, stderr io.Writer,
 	commandName string,
@@ -888,7 +888,7 @@ func runUpdateCandidateCommand(
 	args = append(args, commandName)
 	args = append(args, commandArgs...)
 	command := exec.CommandContext(ctx, candidate, args...)
-	command.Dir = workingDirectory
+	command.Dir = workingDir
 	if sourceRepo != "" {
 		command.Env = updateSourceRepoEnv(sourceRepo)
 	}

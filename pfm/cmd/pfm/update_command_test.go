@@ -167,7 +167,7 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		return os.WriteFile(output, []byte("new\n"), 0o755)
 	}
 	installCalls, doctorCalls := 0, 0
-	updateApplyInstall = func(_ context.Context, candidate, workingDirectory, sourceRepo string, _ commandRuntime, skipHarvest bool, _, _ io.Writer) error {
+	updateApplyInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ commandRuntime, skipHarvest bool, _, _ io.Writer) error {
 		installCalls++
 		if !strings.HasSuffix(candidate, "pfm-a") {
 			t.Fatalf("install candidate=%q, want first reproducible build", candidate)
@@ -175,8 +175,8 @@ func TestUpdateReplacesOwnedBinaryLeavesUnownedCopyAndRunsDoctor(t *testing.T) {
 		if !skipHarvest {
 			t.Fatal("update did not propagate --skip-harvest to install")
 		}
-		if workingDirectory != repo {
-			t.Fatalf("candidate installer working directory=%q, want source repo %q", workingDirectory, repo)
+		if workingDir != repo {
+			t.Fatalf("candidate installer working directory=%q, want source repo %q", workingDir, repo)
 		}
 		if sourceRepo != repo {
 			t.Fatalf("candidate installer source marker=%q, want %q", sourceRepo, repo)
@@ -463,12 +463,12 @@ func TestUpdateRollsBackAfterStagingFailure(t *testing.T) {
 		t.Fatal("doctor ran after install failure")
 		return doctorOutcome{}, nil
 	}
-	updateRollbackInstall = func(_ context.Context, candidate, workingDirectory, sourceRepo string, _ commandRuntime, _ bool, _, _ io.Writer) error {
+	updateRollbackInstall = func(_ context.Context, candidate, workingDir, sourceRepo string, _ commandRuntime, _ bool, _, _ io.Writer) error {
 		if !strings.Contains(candidate, "previous-") {
 			t.Fatalf("rollback installer candidate=%q, want preserved previous binary", candidate)
 		}
-		if workingDirectory != repo {
-			t.Fatalf("rollback installer working directory=%q, want restored source repo %q", workingDirectory, repo)
+		if workingDir != repo {
+			t.Fatalf("rollback installer working directory=%q, want restored source repo %q", workingDir, repo)
 		}
 		if sourceRepo != repo {
 			t.Fatalf("rollback installer source marker=%q, want %q", sourceRepo, repo)

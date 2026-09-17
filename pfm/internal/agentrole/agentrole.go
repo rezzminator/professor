@@ -84,7 +84,7 @@ func otherEngine(engineID pfmengine.ID) (pfmengine.ID, bool) {
 // Resolve returns the constitution text for role, on a seat born with
 // engineID, launched from cwd, against host home, alongside the Artifact it
 // was read from. cwd is the same directory value runRun already computes
-// from --cwd (runDirectory's return, before any repo walk); home is
+// from --cwd (runDir's return, before any repo walk); home is
 // runtime.Paths.Home, the fleet's resolved $HOME.
 //
 // Resolution never falls back across engines and never merges two partial

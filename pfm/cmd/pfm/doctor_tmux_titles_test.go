@@ -21,8 +21,8 @@ func TestTmuxTitlesDoctorReportsBothOwnersOnProbeSockets(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not installed")
 	}
-	socketDirectory := "tmux-" + strconv.Itoa(os.Getuid())
-	base := filepath.Join(os.TempDir(), socketDirectory)
+	socketDir := "tmux-" + strconv.Itoa(os.Getuid())
+	base := filepath.Join(os.TempDir(), socketDir)
 	if err := os.MkdirAll(base, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +35,7 @@ func TestTmuxTitlesDoctorReportsBothOwnersOnProbeSockets(t *testing.T) {
 			t.Errorf("remove probe jail: %v", err)
 		}
 	})
-	tmuxDir := filepath.Join(root, socketDirectory)
+	tmuxDir := filepath.Join(root, socketDir)
 	if err := os.MkdirAll(tmuxDir, 0o700); err != nil {
 		t.Fatal(err)
 	}

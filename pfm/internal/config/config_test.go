@@ -295,16 +295,16 @@ func TestLoadConfiguredAccountsDropUnregisteredDiscoverySkips(t *testing.T) {
 	}
 }
 
-func TestSkipsOutsideDirectoryPreservesUnrelatedDiscoveryFailures(t *testing.T) {
+func TestSkipsOutsideDirPreservesUnrelatedDiscoveryFailures(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	claudeRoot := filepath.Join(home, ".cc")
 	codexFailure := AccountSkip{ConfigDir: filepath.Join(home, ".codex"), Reason: "codex discovery failed: fixture"}
-	got := skipsOutsideDirectory([]AccountSkip{
+	got := skipsOutsideDir([]AccountSkip{
 		{ID: 4, ConfigDir: filepath.Join(claudeRoot, "4"), Reason: "no valid credentials"},
 		codexFailure,
 	}, claudeRoot)
 	if !reflect.DeepEqual(got, []AccountSkip{codexFailure}) {
-		t.Fatalf("skipsOutsideDirectory()=%#v, want only unrelated discovery failure", got)
+		t.Fatalf("skipsOutsideDir()=%#v, want only unrelated discovery failure", got)
 	}
 }
 

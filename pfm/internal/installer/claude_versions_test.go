@@ -364,9 +364,9 @@ func TestInspectClaudeVersionsRefusesWhenIdentifyingTheConfiguredBinaryFailsForA
 	// os.Stat fails with ENOTDIR — a real error distinct from "not exist",
 	// and one that even root cannot bypass (unlike a permission bit),
 	// so the test is reliable in the fenced container too.
-	notADirectory := filepath.Join(home, "not-a-directory")
-	writeExecutable(t, notADirectory)
-	configured := filepath.Join(notADirectory, "claude")
+	notADir := filepath.Join(home, "not-a-directory")
+	writeExecutable(t, notADir)
+	configured := filepath.Join(notADir, "claude")
 
 	if _, err := InspectClaudeVersions(home, configured); err == nil {
 		t.Fatal("InspectClaudeVersions silently ignored a non-absence error identifying the configured binary")

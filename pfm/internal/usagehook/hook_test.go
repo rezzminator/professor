@@ -438,7 +438,7 @@ func TestEvaluateDoesNotReuseAReassignedAccountCache(t *testing.T) {
 	}
 }
 
-func TestEvaluateWarningRecoveryRequiresTheSameConfigDirectory(t *testing.T) {
+func TestEvaluateWarningRecoveryRequiresTheSameConfigDir(t *testing.T) {
 	root := t.TempDir()
 	configA := filepath.Join(root, ".cc", "2-a")
 	configB := filepath.Join(root, ".cc", "2-b")

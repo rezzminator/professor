@@ -1,12 +1,12 @@
-# go-test-coverage (version: infra/tools.env). Thresholds are a RATCHET like
-# .arch/: measured, then raised as waves land, never lowered. The gate reads
-# the merged profile `make cover` writes (unit + e2e binary runs).
+# go-test-coverage (version: infra/tools.env) takes whole-percent thresholds.
+# They ratchet like .arch/: raise only after merged coverage reaches the next
+# integer. The gate reads `make cover`'s merged unit + e2e binary profile.
 profile: tmp/cover/merged.out
 local-prefix: hostops/pfm
 threshold:
   file: 0
   package: 52
-  total: 77.6
+  total: 77
 exclude:
   paths:
     - ^internal/installer/assets/   # staged shell/JS/Python, not Go

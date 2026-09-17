@@ -28,7 +28,7 @@ internal/ask/runner_test.go 1
 internal/chat/list.go 1
 internal/chat/list_test.go 2
 internal/chat/verbs_test.go 1
-internal/compose/compose.go 25
+internal/compose/compose.go 24
 internal/compose/engine_roster_test.go 2
 internal/compose/opencode_test.go 11
 internal/compose/order.go 2

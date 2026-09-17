@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -307,7 +308,7 @@ func (r *RemoteServer) authorize(w http.ResponseWriter, req *http.Request) {
 	r.store.mu.Lock()
 	client, known := r.store.clients[clientID]
 	r.store.mu.Unlock()
-	if !known || !containsString(client.RedirectURIs, redirect) {
+	if !known || !slices.Contains(client.RedirectURIs, redirect) {
 		r.oauthError(w, http.StatusBadRequest, "invalid_request", "unknown client or redirect_uri")
 		return
 	}
@@ -593,13 +594,4 @@ func (r *RemoteServer) revoke(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Pragma", "no-cache")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(http.StatusOK)
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }

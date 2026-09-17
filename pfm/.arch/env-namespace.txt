@@ -1,3 +1,2 @@
 cmd/pfm/commands.go 1
-internal/dream/seat/host.go 1
 internal/inject/engine.go 1

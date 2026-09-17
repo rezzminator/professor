@@ -1,12 +1,6 @@
 cmd/pfm/launch_command.go
 internal/archive/archive.go
 internal/config/harvester_write.go
-internal/dream/apply/files.go
-internal/dream/corpus/write.go
-internal/dream/dream.go
-internal/dream/failure.go
-internal/dream/hooks.go
-internal/dream/operations.go
 internal/harvest/cache.go
 internal/harvest/media.go
 internal/harvest/public_store.go

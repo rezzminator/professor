@@ -8,21 +8,17 @@ codexthreadid: internal/gather/codexproc.go internal/resolve/codex.go
 codexwindowname: internal/gather/gather.go internal/stats/limits.go
 command: internal/codexappendix/register.go internal/engine/matchutil/match.go internal/tmux/tmux.go
 compose: internal/compose/compose.go internal/fleet/scan.go
-containsstring: cmd/pfm/update_command.go internal/dream/artifact/map.go internal/harvestmcp/remote.go
 defaultcachedir: internal/harvest/cache.go internal/usagehook/hook.go
 defaults: internal/config/config.go internal/spawn/types.go
-digest: internal/dream/corpus/enumerate.go internal/harvestmcp/auth.go
 displayname: internal/agentopen/agentopen.go internal/naming/naming.go
 enginename: internal/inject/engine.go internal/stats/stats.go
-ensureprivatedirectory: internal/dream/organ/stage.go internal/usagehook/hook.go
 exitcode: internal/deps/probe.go internal/headless/run/run.go
 fileage: internal/statusline/render.go internal/usagehook/hook.go
 find: internal/chat/find.go internal/stale/stale.go
 firstnonempty: internal/compose/compose.go internal/index/codex.go
 flatten: internal/spawn/spawn.go internal/transcript/transcript.go
 formattokens: internal/statusline/render.go internal/ui/render.go
-hascontrol: internal/dream/apply/apply.go internal/dream/corpus/enumerate.go internal/dream/seat/runner.go
-inspect: internal/dream/operations.go internal/harvestpy/provision.go internal/headless/headless.go
+inspect: internal/harvestpy/provision.go internal/headless/headless.go
 isbusy: internal/inject/guards.go internal/store/killed.go
 isclaudecommand: internal/gather/agents.go internal/resolve/resolve.go
 iscodexcommand: internal/gather/agents.go internal/resolve/resolve.go
@@ -45,29 +41,19 @@ parsecodex: internal/index/codex.go internal/transcript/transcript.go
 parsefrontmatter: internal/codexgen/transform.go internal/harvest/cache.go
 parseusage: internal/ask/ask.go internal/headless/run/run.go
 parseversion: internal/update/version.go internal/updatecheck/updatecheck.go
-pathexists: internal/config/migration.go internal/dream/apply/files.go
 plan: internal/harvestpy/provision.go internal/reap/reap.go
 primaryaccount: internal/fleet/accounts.go internal/shared/shared.go
 read: internal/codexmeta/header.go internal/updatecheck/updatecheck.go
 readcodexthreads: internal/index/codexstate.go internal/store/codexstate.go
-readregular: internal/dream/apply/files.go internal/dream/dream.go
 register: internal/codexappendix/register.go internal/engine/engine.go
 render: internal/headless/stream.go internal/statusline/render.go
-renderanchorresults: internal/dream/apply/apply.go internal/dream/dream.go
-renderpaths: internal/dream/apply/apply.go internal/dream/corpus/render.go
-repositoryroot: cmd/pfm/chat_satellite_command.go internal/dream/operations.go internal/dream/organ/organ.go
 resetpassed: internal/stats/limits.go internal/usagehook/hook.go
-resolve: internal/agentrole/agentrole.go internal/chat/target.go internal/deps/registry.go internal/dream/organ/organ.go internal/headless/run/run.go internal/paths/paths.go
-run: cmd/pfm/main.go internal/codexappendix/hook.go internal/codexgen/compiler.go internal/dream/apply/apply.go internal/headless/run/run.go internal/installer/installer.go internal/recovery/recovery.go internal/reload/reload.go internal/spawn/spawn.go internal/stale/stale.go internal/testjail/testjail.go
+resolve: internal/agentrole/agentrole.go internal/chat/target.go internal/deps/registry.go internal/headless/run/run.go internal/paths/paths.go
+run: cmd/pfm/main.go internal/codexappendix/hook.go internal/codexgen/compiler.go internal/headless/run/run.go internal/installer/installer.go internal/recovery/recovery.go internal/reload/reload.go internal/spawn/spawn.go internal/stale/stale.go internal/testjail/testjail.go
 searchenabled: internal/harvest/search.go internal/harvestmcp/search_gate.go
 setprimaryaccount: internal/fleet/accounts.go internal/shared/shared.go
 socketepoch: internal/compose/compose.go internal/resolve/resolve.go
-splitlines: internal/dream/corpus/enumerate.go internal/dream/gate/pin.go internal/dream/lane/lane.go
 splitnul: internal/action/process.go internal/gather/procfs.go
 sweep: internal/heal/heal.go internal/stale/stale.go
 transcriptidfrompath: cmd/pfm/inject_resume.go internal/compose/compose.go
 truncaterunes: internal/harvest/search.go internal/ui/cosmos.go
-validatestage: internal/dream/organ/stage.go internal/dream/seat/runner.go
-write: internal/atomicfile/atomicfile.go internal/dream/corpus/write.go
-writeprivate: internal/dream/corpus/write.go internal/harvestpy/provision.go
-writeprivateexclusive: internal/dream/apply/files.go internal/dream/dream.go

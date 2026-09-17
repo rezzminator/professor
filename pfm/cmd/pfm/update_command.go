@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -219,7 +220,7 @@ func updateRepository(
 	} else if _, ok := update.ParseVersion(target); !ok {
 		return fmt.Errorf("invalid target tag %q (expected vMAJOR.MINOR.PATCH)", target)
 	}
-	if !containsString(tags, target) {
+	if !slices.Contains(tags, target) {
 		return fmt.Errorf("target tag %q is not present after fetch", target)
 	}
 	status, err := updateGitOutput(ctx, repo, "status", "--porcelain", "--untracked-files=all")
@@ -670,15 +671,6 @@ func preferredUpdateSourceRepo(home, repo string) string {
 		return recorded
 	}
 	return repo
-}
-
-func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
 }
 
 func updateGitRun(ctx context.Context, repo string, args ...string) error {

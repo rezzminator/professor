@@ -2,8 +2,6 @@ cmd/pfm/chat_command.go 6
 cmd/pfm/reload_command.go 1
 internal/archive/live.go 2
 internal/config/config.go 5
-internal/dream/seat/host.go 1
-internal/dream/seat/locator.go 5
 internal/fleet/reconcile.go 3
 internal/gather/codexproc.go 4
 internal/gather/gather.go 1

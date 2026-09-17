@@ -1,7 +1,5 @@
 cmd/pfm
 internal/codexgen
-internal/dream
-internal/dream/seat
 internal/engine/claude
 internal/engine/codex
 internal/engine/opencode

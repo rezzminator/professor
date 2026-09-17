@@ -345,3 +345,84 @@ func TestIdleSecondsStayZeroWhileAToolRuns(t *testing.T) {
 		t.Fatalf("idle seconds = %d while working, want 0", status.IdleSeconds)
 	}
 }
+
+func TestIdleSecondsStayZeroWhileANewerClaudeSidechainRuns(t *testing.T) {
+	path := writeChat(t, userLine("go"), assistantLine("waiting"))
+	sessionID := "session-with-agent"
+	sidechainDir := filepath.Join(filepath.Dir(path), sessionID, "subagents")
+	if err := os.MkdirAll(sidechainDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sidechain := filepath.Join(sidechainDir, "agent-working.jsonl")
+	if err := os.WriteFile(sidechain, []byte(assistantLine("working")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parentStamp := time.Now().Add(-90 * time.Second)
+	sidechainStamp := parentStamp.Add(30 * time.Second)
+	if err := os.Chtimes(path, parentStamp, parentStamp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(sidechain, sidechainStamp, sidechainStamp); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := Inspect(context.Background(), Chat{
+		Name: "seat", ID: sessionID, Engine: "cc", Path: path, Live: true,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != StateWorking || status.IdleSeconds != 0 {
+		t.Fatalf("status = %#v, want working with zero idle seconds", status)
+	}
+}
+
+func TestOlderClaudeSidechainKeepsParentIdleVerdict(t *testing.T) {
+	path := writeChat(t, userLine("go"), assistantLine("done"))
+	sessionID := "session-with-finished-agent"
+	sidechainDir := filepath.Join(filepath.Dir(path), sessionID, "subagents")
+	if err := os.MkdirAll(sidechainDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	sidechain := filepath.Join(sidechainDir, "agent-finished.jsonl")
+	if err := os.WriteFile(sidechain, []byte(assistantLine("done")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	parentStamp := time.Now().Add(-60 * time.Second)
+	sidechainStamp := parentStamp.Add(-30 * time.Second)
+	if err := os.Chtimes(path, parentStamp, parentStamp); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(sidechain, sidechainStamp, sidechainStamp); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := Inspect(context.Background(), Chat{
+		Name: "seat", ID: sessionID, Engine: "cc", Path: path, Live: true,
+	}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.State != StateIdle || status.IdleSeconds < 59 {
+		t.Fatalf("status = %#v, want idle from newer parent transcript", status)
+	}
+}
+
+func TestUnreadableClaudeSidechainDirectoryIsAnInspectError(t *testing.T) {
+	path := writeChat(t, userLine("go"), assistantLine("waiting"))
+	sessionID := "session-with-unreadable-agents"
+	sessionDir := filepath.Join(filepath.Dir(path), sessionID)
+	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessionDir, "subagents"), []byte("not a directory\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := Inspect(context.Background(), Chat{
+		Name: "seat", ID: sessionID, Engine: "cc", Path: path, Live: true,
+	}, time.Now())
+	if err == nil || !strings.Contains(err.Error(), "read Claude sidechain directory") {
+		t.Fatalf("Inspect() = %#v, %v; want visible sidechain error", status, err)
+	}
+}

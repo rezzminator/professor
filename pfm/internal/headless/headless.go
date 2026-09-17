@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"time"
 
 	pfmengine "hostops/pfm/internal/engine"
@@ -180,6 +182,15 @@ func Inspect(
 	} else if chat.Live {
 		status.State = StateWorking
 	}
+	if chat.Live && chat.Engine == pfmengine.Claude && chat.ID != "" {
+		sidechainWorking, err := newerClaudeSidechain(chat.Path, chat.ID, meta.ModifiedUnixNS)
+		if err != nil {
+			return status, err
+		}
+		if sidechainWorking {
+			status.State = StateWorking
+		}
+	}
 	if status.State != StateIdle {
 		status.IdleSeconds = 0
 	}
@@ -188,6 +199,34 @@ func Inspect(
 
 func assistantAnswered(role string) bool {
 	return role == transcript.RoleAssistant
+}
+
+func newerClaudeSidechain(transcriptPath, sessionID string, parentModifiedUnixNS int64) (bool, error) {
+	directory := filepath.Join(filepath.Dir(transcriptPath), sessionID, "subagents")
+	entries, err := os.ReadDir(directory)
+	if errors.Is(err, fs.ErrNotExist) {
+		if _, lstatErr := os.Lstat(directory); errors.Is(lstatErr, fs.ErrNotExist) {
+			return false, nil
+		} else if lstatErr != nil {
+			return false, fmt.Errorf("inspect Claude sidechain directory %s: %w", directory, lstatErr)
+		}
+	}
+	if err != nil {
+		return false, fmt.Errorf("read Claude sidechain directory %s: %w", directory, err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".jsonl" {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return false, fmt.Errorf("inspect Claude sidechain %s: %w", filepath.Join(directory, entry.Name()), err)
+		}
+		if info.ModTime().UnixNano() > parentModifiedUnixNS {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Missing is the status of a name nothing answers to. It is a value, not an

@@ -16,6 +16,7 @@ import (
 
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/mcpserv"
 )
 
 func freeLoopbackPort(t *testing.T) int {
@@ -142,7 +143,7 @@ func TestMCPDaemonStatusReportsHarvesterExternalState(t *testing.T) {
 	handler := newMCPDaemonHandler(mcpDaemonOptions{Version: "test", External: &state})
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
-	var status mcpDaemonStatus
+	var status mcpserv.DaemonStatus
 	if err := json.NewDecoder(recorder.Body).Decode(&status); err != nil {
 		t.Fatal(err)
 	}

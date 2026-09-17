@@ -176,7 +176,7 @@ func bootingRowsFromTSV(t *testing.T) map[string]string {
 // synthesize the same Live attach line an ordinary live row gets and really
 // execute it, the same subprocess-reexec and raw/inside-tmux technique
 // attach_jail_test.go's proveAttach uses (stdout is a real tty here, so
-// dispatchAction's own terminal branch execs tmux directly — no zsh/eval
+// action.Dispatch's own terminal branch execs tmux directly — no zsh/eval
 // wrapper is needed for a TMUX= line).
 func TestBootingRowInteractivePickerJailed(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {

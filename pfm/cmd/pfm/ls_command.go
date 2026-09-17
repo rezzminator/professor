@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +22,7 @@ import (
 	fleetindex "hostops/pfm/internal/index"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
+	"hostops/pfm/internal/spawn"
 	pfmstats "hostops/pfm/internal/stats"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/ui"
@@ -433,7 +432,7 @@ func openRowWithPrompt(
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
 	}
-	fresh, err := freshSocket(row.Kind)
+	fresh, err := freshSocketForKind(row.Kind)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat open: %v\n", err)
 		return 1
@@ -454,7 +453,7 @@ func openRowWithPrompt(
 		return 1
 	}
 	if line != "" {
-		if err := dispatchAction(stdout, line); err != nil {
+		if err := action.Dispatch(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "pfm chat open: execute action: %v\n", err)
 			return 1
 		}
@@ -462,28 +461,12 @@ func openRowWithPrompt(
 	return 0
 }
 
-func freshSocket(kind compose.Kind) (string, error) {
+func freshSocketForKind(kind compose.Kind) (string, error) {
 	id, err := compose.EngineForKindChecked(kind)
 	if err != nil {
 		return "", err
 	}
-	return freshEngineSocket(id), nil
-}
-
-func freshEngineSocket(id pfmengine.ID) string {
-	if value := os.Getenv(testFreshSocketEnv); value != "" {
-		return value
-	}
-	descriptor := pfmengine.MustLookup(id)
-	var randomBytes [2]byte
-	_, _ = rand.Read(randomBytes[:])
-	return fmt.Sprintf(
-		"%s%d-%d-%d",
-		descriptor.SocketPrefix,
-		time.Now().Unix(),
-		os.Getpid(),
-		binary.BigEndian.Uint16(randomBytes[:]),
-	)
+	return spawn.FreshSocket(id), nil
 }
 
 // reportKills is the receipt for hidden-state writes made while the picker was

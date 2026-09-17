@@ -21,7 +21,6 @@ import (
 )
 
 const (
-	testFreshSocketEnv = "PFM_TEST_FRESH_SOCKET"
 	fleetRefreshGrowth = 13
 )
 

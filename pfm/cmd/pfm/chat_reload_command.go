@@ -1078,7 +1078,7 @@ func hideReloadedConversation(
 	if id == "" {
 		return "", errors.New("hide needs the id of the conversation left behind")
 	}
-	database, manager, code := openKillManager(stderr, runtime)
+	database, manager, code := fleet.OpenKillManager(stderr, runtime)
 	if code != 0 {
 		return "", fmt.Errorf("open the fleet store to hide %s (exit %d, cause above)", id, code)
 	}

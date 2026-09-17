@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"hostops/pfm/internal/spawn"
 )
 
 // TestChatOpenScansReadOnly is the regression for openID's scanFleet call: it
@@ -26,7 +28,7 @@ import (
 // "openID's scan requested ReadOnly".
 func TestChatOpenScansReadOnly(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(testFreshSocketEnv, "cc-1700000000-1-1")
+	t.Setenv(spawn.TestFreshSocketEnv, "cc-1700000000-1-1")
 
 	project := filepath.Join(root, "work", "project")
 	transcriptDir := filepath.Join(root, "claude", "project")

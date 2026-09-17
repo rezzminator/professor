@@ -30,22 +30,6 @@ var harvesterMCPTools = []string{
 	archiveCommand, "fetch", "fetchImage", "findWorks", "search", "searchCache",
 }
 
-// mcpDaemonStatus is the stable local health document consumed by doctor and
-// by the single-instance probe.
-type mcpDaemonStatus struct {
-	PFMVersion      string              `json:"pfmVersion"`
-	ProtocolVersion string              `json:"protocolVersion"`
-	Servers         map[string][]string `json:"servers"`
-	PID             int                 `json:"pid"`
-	StartTime       string              `json:"startTime"`
-	Endpoint        string              `json:"endpoint"`
-	// HarvesterExternal is the authenticated external gateway's live state:
-	// "disabled", "listening on HOST:PORT as URL", or "failed: <error>". A
-	// failed external bind never takes the loopback port down with it, so it
-	// must be visible HERE — doctor reads it — not only in the service log.
-	HarvesterExternal string `json:"harvesterExternal,omitempty"`
-}
-
 type mcpDaemonOptions struct {
 	Version   string
 	StartedAt time.Time
@@ -71,7 +55,7 @@ func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
 	if options.Harvester != nil {
 		servers[config.MCPServerHarvester] = append([]string(nil), harvesterMCPTools...)
 	}
-	status := mcpDaemonStatus{
+	status := mcpserv.DaemonStatus{
 		PFMVersion:      options.Version,
 		ProtocolVersion: mcpProtocolVersion,
 		Servers:         servers,
@@ -153,7 +137,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime) (exitCode int
 		return 1
 	}
 	address := "127.0.0.1:" + strconv.Itoa(port)
-	if existing, ok := probeMCPDaemon(address); ok {
+	if existing, ok := mcpserv.ProbeDaemon(address); ok {
 		fmt.Fprintf(stderr, "pfm mcp serve: already running (pid %d, since %s)\n", existing.PID, existing.StartTime)
 		return 1
 	}
@@ -291,40 +275,4 @@ func enabledState(enabled bool) string {
 		return "enabled"
 	}
 	return "disabled"
-}
-
-func probeMCPDaemon(address string) (mcpDaemonStatus, bool) {
-	request, err := http.NewRequest(http.MethodGet, "http://"+address+"/status", http.NoBody)
-	if err != nil {
-		return mcpDaemonStatus{}, false
-	}
-	client := &http.Client{Timeout: 300 * time.Millisecond}
-	response, err := client.Do(request)
-	if err != nil {
-		return mcpDaemonStatus{}, false
-	}
-	defer func() {
-		if err := response.Body.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "pfm mcp serve: close daemon probe response: %v\n", err)
-		}
-	}()
-	if response.StatusCode != http.StatusOK {
-		return mcpDaemonStatus{}, false
-	}
-	var status mcpDaemonStatus
-	if err := json.NewDecoder(response.Body).Decode(&status); err != nil || status.PID < 1 {
-		return mcpDaemonStatus{}, false
-	}
-	return status, true
-}
-
-// mcpDaemonReachability is kept separate from config printing so doctor can
-// report a failed probe as a named state rather than silently omitting it.
-func mcpDaemonReachability(runtime commandRuntime) (mcpDaemonStatus, error) {
-	address := "127.0.0.1:" + strconv.Itoa(runtime.Config.MCP.HTTP.Port)
-	status, ok := probeMCPDaemon(address)
-	if !ok {
-		return mcpDaemonStatus{}, fmt.Errorf("unreachable at http://%s/status", address)
-	}
-	return status, nil
 }

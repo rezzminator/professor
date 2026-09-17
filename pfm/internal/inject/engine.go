@@ -1790,7 +1790,7 @@ func (engine *Engine) senderLabel(
 // hyphen inside one component alias with the join delimiter: two distinct
 // (socket, pane) pairs whose hyphen boundary fell in different places could
 // sanitize to the identical path (this repo's own socket names are
-// hyphen-joined numeric triples — cmd/pfm/ls_command.go's freshEngineSocket,
+// hyphen-joined numeric triples — spawn.FreshSocket,
 // "%s%d-%d-%d"). Sanitizing first and joining on a delimiter the sanitizer
 // never produces makes that collision structurally impossible.
 func (engine *Engine) steerLogPath(target Target) string {

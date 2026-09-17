@@ -4,11 +4,11 @@ cmd/pfm/doctor.go 1
 cmd/pfm/init_command.go 1
 cmd/pfm/internal_launch.go 1
 cmd/pfm/internal_update_check.go 1
-cmd/pfm/ls_command.go 1
 internal/fleet/scan.go 1
 internal/gather/tmuxprobe.go 1
 internal/harvestmcp/service.go 1
 internal/inject/engine.go 1
+internal/spawn/socket.go 1
 internal/stats/limits.go 1
 internal/statusline/refresh_codex.go 1
 internal/statusline/runtime.go 2

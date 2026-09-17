@@ -18,7 +18,6 @@ import (
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/compose"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -122,16 +121,12 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
 		return 1
 	}
-	tmuxBinary, err := deps.Resolve(tmuxExecutable)
+	tmuxBinary, err := deps.Resolve(pfmtmux.Binary)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: find tmux: %v\n", err)
 		return 1
 	}
-	socket, err := freshSocket(compose.NewClaude)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm internal launch: allocate socket: %v\n", err)
-		return 1
-	}
+	socket := spawn.FreshSocket(pfmengine.Claude)
 	session := socket
 	socketPath := filepath.Join(runtime.Paths.TmuxDir, socket)
 	startChannel := "pfm-launch-start-" + socket
@@ -186,7 +181,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 	if interactive {
 		failed = false
 		arguments := []string{
-			tmuxExecutable,
+			pfmtmux.Binary,
 			"-S",
 			socketPath,
 			"wait-for",
@@ -197,7 +192,7 @@ func runInternalLaunch(args []string, stdout, stderr io.Writer, runtime commandR
 			"-t",
 			session,
 		}
-		if err := launchExec(tmuxBinary, arguments, environmentWith("TMUX", "")); err != nil {
+		if err := launchExec(tmuxBinary, arguments, deps.EnvironmentWith("TMUX", "")); err != nil {
 			fmt.Fprintf(stderr, "pfm internal launch: attach tmux session: %v\n", err)
 			return 1
 		}

@@ -335,7 +335,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		fmt.Fprintf(stderr, "pfm chat kill: config: %v\n", err)
 		return 1
 	}
-	database, manager, code := openKillManager(stderr, runtime)
+	database, manager, code := fleet.OpenKillManager(stderr, runtime)
 	if code != 0 {
 		return code
 	}
@@ -383,7 +383,7 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		flags.Usage()
 		return 2
 	}
-	database, manager, code := openKillManager(stderr, runtimes...)
+	database, manager, code := fleet.OpenKillManager(stderr, runtimes...)
 	if code != 0 {
 		return code
 	}
@@ -409,7 +409,7 @@ func runKilled(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 		flags.Usage()
 		return 2
 	}
-	database, manager, code := openKillManager(stderr, runtimes...)
+	database, manager, code := fleet.OpenKillManager(stderr, runtimes...)
 	if code != 0 {
 		return code
 	}
@@ -591,29 +591,6 @@ func runInternal(
 		return 1
 	}
 	return 0
-}
-
-func openKillManager(
-	stderr io.Writer,
-	runtimes ...commandRuntime,
-) (*store.Store, *kill.Manager, int) {
-	runtime, err := config.OptionalRuntime(runtimes)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm: config: %v\n", err)
-		return nil, nil, 1
-	}
-	database, err := store.Open(store.WithWarningWriter(stderr))
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm: %v\n", err)
-		return nil, nil, 1
-	}
-	manager, err := kill.New(database, fleet.KillDependencies(runtime))
-	if err != nil {
-		_ = database.Close()
-		fmt.Fprintf(stderr, "pfm: %v\n", err)
-		return nil, nil, 1
-	}
-	return database, manager, 0
 }
 
 func printUsage(w io.Writer) {

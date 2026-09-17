@@ -29,6 +29,7 @@ import (
 	"hostops/pfm/internal/index"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/kill"
+	"hostops/pfm/internal/mcpserv"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/stats"
@@ -106,7 +107,7 @@ func runDoctor(
 	tally.warnings += printEngineCapabilities(stdout)
 	tally.warnings += printMCPClientCutover(stdout, runtime)
 	if mcpConfigured(runtime) {
-		status, daemonErr := mcpDaemonReachability(runtime)
+		status, daemonErr := mcpserv.DaemonReachability(runtime)
 		if daemonErr != nil {
 			tally.warn()
 			fmt.Fprintf(stdout, "doctor: mcp daemon=unreachable error=%v\n", daemonErr)

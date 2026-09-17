@@ -20,6 +20,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/semver"
 	"hostops/pfm/internal/update"
 )
 
@@ -215,11 +216,11 @@ func updateRepository(
 	tags := strings.Fields(tagOutput)
 	target := strings.TrimSpace(requestedTag)
 	if target == "" {
-		target, err = update.SelectHighest(tags)
+		target, err = semver.SelectHighest(tags)
 		if err != nil {
 			return fmt.Errorf("resolve latest release: %w", err)
 		}
-	} else if _, ok := update.ParseVersion(target); !ok {
+	} else if _, ok := semver.ParseVersion(target); !ok {
 		return fmt.Errorf("invalid target tag %q (expected vMAJOR.MINOR.PATCH)", target)
 	}
 	if !slices.Contains(tags, target) {
@@ -239,8 +240,8 @@ func updateRepository(
 		}
 	} else {
 		currentTag, describeErr := updateGitOutput(ctx, repo, "describe", "--tags", "--abbrev=0", previousRef)
-		currentVersion, currentOK := update.ParseVersion(strings.TrimSpace(currentTag))
-		targetVersion, targetOK := update.ParseVersion(target)
+		currentVersion, currentOK := semver.ParseVersion(strings.TrimSpace(currentTag))
+		targetVersion, targetOK := semver.ParseVersion(target)
 		if describeErr == nil && currentOK && targetOK && targetVersion.Less(currentVersion) {
 			return fmt.Errorf("target %s would downgrade source from %s", target, strings.TrimSpace(currentTag))
 		}
@@ -722,7 +723,7 @@ func buildUpdateCandidate(ctx context.Context, repo, version, output string) err
 }
 
 func envWithEmptyGOFLAGS() []string {
-	return environmentWith("GOFLAGS", "")
+	return deps.EnvironmentWith("GOFLAGS", "")
 }
 
 func fileHash(path string) (string, error) {
@@ -899,5 +900,5 @@ func runUpdateCandidateCommand(
 }
 
 func updateSourceRepoEnv(sourceRepo string) []string {
-	return environmentWith("PFM_SOURCE_REPO", sourceRepo)
+	return deps.EnvironmentWith("PFM_SOURCE_REPO", sourceRepo)
 }

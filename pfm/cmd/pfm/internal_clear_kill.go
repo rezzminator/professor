@@ -8,6 +8,7 @@ import (
 
 	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/index"
 )
 
@@ -49,7 +50,7 @@ func runClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...
 		return 0
 	}
 
-	database, manager, code := openKillManager(stderr, runtimes...)
+	database, manager, code := fleet.OpenKillManager(stderr, runtimes...)
 	if code != 0 {
 		fmt.Fprintln(stderr, "pfm internal clear-kill: store unavailable (fail-open)")
 		return 0

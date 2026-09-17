@@ -1,4 +1,3 @@
-cmd/pfm/main_test.go 1040
 cmd/pfm/reconcile_codex_panes_jail_test.go 1229
 cmd/pfm/update_command_test.go 1279
 cmd/pfm/update_project_test.go 1018

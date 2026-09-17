@@ -1781,7 +1781,7 @@ func TestSteerLogPathScopedBySocketAsWellAsPane(t *testing.T) {
 	// component alias with the join delimiter, so two distinct (socket,
 	// pane) pairs whose hyphen boundary fell in a different place could
 	// still collide on one sanitized path. This repo's own socket names are
-	// hyphen-joined numeric triples (cmd/pfm/ls_command.go's freshEngineSocket,
+	// hyphen-joined numeric triples (spawn.FreshSocket,
 	// "%s%d-%d-%d"), so this is not a contrived pair.
 	hyphenA := engine.steerLogPath(Target{SocketPath: "/tmp/tmux-jail/cc-1787705979-3980493", Pane: "30867"})
 	hyphenB := engine.steerLogPath(Target{SocketPath: "/tmp/tmux-jail/cc-1787705979", Pane: "3980493-30867"})

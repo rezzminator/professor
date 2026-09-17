@@ -5,16 +5,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"go/ast"
 	"go/parser"
 	"go/printer"
 	"go/token"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -22,6 +19,7 @@ import (
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
+	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/testjail"
 )
@@ -416,7 +414,7 @@ func TestKillSelfResolveAndInternalCLI(t *testing.T) {
 
 func TestWiredIndexListOpenAndDoctor(t *testing.T) {
 	root := jailTest(t)
-	t.Setenv(testFreshSocketEnv, "cc-1700000000-1-1")
+	t.Setenv(spawn.TestFreshSocketEnv, "cc-1700000000-1-1")
 	project := filepath.Join(root, "work", "project")
 	transcriptDir := filepath.Join(root, "claude", "project")
 	if err := os.MkdirAll(project, 0o700); err != nil {
@@ -678,107 +676,6 @@ func TestUsageErrors(t *testing.T) {
 			t.Fatalf("run(%q) emitted no usage/error", args)
 		}
 	}
-}
-
-func TestActionDispatchPipeGoldenAndTTYExec(t *testing.T) {
-	originalTerminal := actionOutputIsTerminal
-	originalLookPath := actionLookPath
-	originalExec := actionExec
-	t.Cleanup(func() {
-		actionOutputIsTerminal = originalTerminal
-		actionLookPath = originalLookPath
-		actionExec = originalExec
-	})
-
-	const attachLine = "TMUX= tmux -L 'cc-1-2-3' attach -t 'live-session'"
-	var stdout bytes.Buffer
-	actionOutputIsTerminal = func(io.Writer) bool { return false }
-	if err := dispatchAction(&stdout, attachLine); err != nil {
-		t.Fatal(err)
-	}
-	if got, want := stdout.String(), attachLine+"\n"; got != want {
-		t.Fatalf("pipe action = %q, want byte-identical %q", got, want)
-	}
-
-	type execCall struct {
-		path string
-		args []string
-		env  []string
-	}
-	var calls []execCall
-	execReturned := errors.New("exec test return")
-	actionOutputIsTerminal = func(io.Writer) bool { return true }
-	actionLookPath = func(file string) (string, error) {
-		return "/jail/bin/" + file, nil
-	}
-	actionExec = func(path string, args, env []string) error {
-		calls = append(calls, execCall{
-			path: path,
-			args: append([]string(nil), args...),
-			env:  append([]string(nil), env...),
-		})
-		return execReturned
-	}
-
-	t.Setenv("TMUX", "/tmp/driver,1,0")
-	stdout.Reset()
-	if err := dispatchAction(&stdout, attachLine); !errors.Is(err, execReturned) {
-		t.Fatalf("terminal attach error = %v", err)
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("terminal attach printed %q", stdout.String())
-	}
-	if len(calls) != 1 ||
-		calls[0].path != "/jail/bin/tmux" ||
-		!reflect.DeepEqual(
-			calls[0].args,
-			[]string{
-				"tmux", "-L", "cc-1-2-3",
-				"attach", "-t", "live-session",
-			},
-		) ||
-		environmentValue(calls[0].env, "TMUX") != "" {
-		t.Fatalf("terminal tmux exec = %#v", calls)
-	}
-
-	const shellLine = "(cd -- '/work/project' && CODEX_HOME='/work/codex' cx)"
-	if err := dispatchAction(&stdout, shellLine); !errors.Is(err, execReturned) {
-		t.Fatalf("terminal shell error = %v", err)
-	}
-	if len(calls) != 2 ||
-		calls[1].path != "/jail/bin/zsh" ||
-		!reflect.DeepEqual(
-			calls[1].args,
-			[]string{"zsh", "-ic", shellLine},
-		) {
-		t.Fatalf("terminal zsh exec = %#v", calls)
-	}
-}
-
-func TestDirectTmuxArgumentsPreserveQuotedData(t *testing.T) {
-	line := `TMUX= exec tmux -L 'cc-1'"'"'quoted' new-session -c '/work/a b' 'printf "$HOME;*"!'`
-	got, direct, err := directTmuxArguments(line)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []string{
-		"-L", "cc-1'quoted",
-		"new-session", "-c", "/work/a b",
-		`printf "$HOME;*"!`,
-	}
-	if !direct || !reflect.DeepEqual(got, want) {
-		t.Fatalf("directTmuxArguments() = %q, %v; want %q, true", got, direct, want)
-	}
-}
-
-func environmentValue(environment []string, key string) string {
-	prefix := key + "="
-	for _, entry := range environment {
-		if strings.HasPrefix(entry, prefix) {
-			return strings.TrimPrefix(entry, prefix)
-		}
-	}
-	return "\x00missing"
 }
 
 // harnessPromptFixtureCaptured is the fixed "live" prompt every jailed

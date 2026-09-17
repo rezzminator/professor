@@ -12,7 +12,7 @@ import (
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/update"
+	"hostops/pfm/internal/semver"
 )
 
 // ClaudeVersionKeepCount is the retention window PlanClaudeVersionPrune uses
@@ -23,7 +23,7 @@ const ClaudeVersionKeepCount = 2
 // ClaudeVersion is one build under ~/.local/share/claude/versions.
 type ClaudeVersion struct {
 	Path      string
-	Version   update.Version
+	Version   semver.Version
 	VersionOK bool
 	Bytes     int64
 	ModTime   time.Time
@@ -94,7 +94,7 @@ func InspectClaudeVersions(home, configuredBinary string) (ClaudeVersionsReport,
 			continue
 		}
 		path := filepath.Join(dir, entry.Name())
-		version, ok := update.ParseVersion("v" + entry.Name())
+		version, ok := semver.ParseVersion("v" + entry.Name())
 		id, err := gather.FileIDOf(path)
 		if err != nil {
 			return ClaudeVersionsReport{}, fmt.Errorf("identify Claude version %s: %w", path, err)
@@ -257,7 +257,7 @@ func isClaudeVersionCandidate(argv []string, versionsDir string) bool {
 	if withinDir(argv[0], versionsDir) {
 		return true
 	}
-	_, ok := update.ParseVersion("v" + base)
+	_, ok := semver.ParseVersion("v" + base)
 	return ok
 }
 

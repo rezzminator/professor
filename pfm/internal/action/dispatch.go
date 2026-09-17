@@ -1,4 +1,4 @@
-package main
+package action
 
 import (
 	"errors"
@@ -12,55 +12,53 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"hostops/pfm/internal/deps"
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
-const tmuxExecutable = "tmux"
+// OutputIsTerminal is the terminal-detection seam used by Dispatch.
+var OutputIsTerminal = func(writer io.Writer) bool {
+	file, ok := writer.(interface{ Fd() uintptr })
+	return ok && term.IsTerminal(file.Fd())
+}
 
-var (
-	actionOutputIsTerminal = func(writer io.Writer) bool {
-		file, ok := writer.(interface{ Fd() uintptr })
-		return ok && term.IsTerminal(file.Fd())
-	}
-	actionLookPath = deps.Resolve
-	actionExec     = syscall.Exec
-)
+// LookPath is the executable-resolution seam used by Dispatch.
+var LookPath = deps.Resolve
 
-// dispatchAction preserves the K1 one-line protocol for a captured stdout.
-// With a human-facing terminal, pfm becomes the selected action instead.
-func dispatchAction(stdout io.Writer, line string) error {
-	if !actionOutputIsTerminal(stdout) {
+// Exec is the process-replacement seam used by Dispatch.
+var Exec = syscall.Exec
+
+// Dispatch preserves the K1 one-line protocol for captured stdout. With a
+// human-facing terminal, pfm becomes the selected action instead.
+func Dispatch(stdout io.Writer, line string) error {
+	if !OutputIsTerminal(stdout) {
 		_, err := fmt.Fprintln(stdout, line)
 		return err
 	}
-	return executeAction(line)
+	return execute(line)
 }
 
-func executeAction(line string) error {
+func execute(line string) error {
 	arguments, tmuxAction, err := directTmuxArguments(line)
 	if err != nil {
 		return err
 	}
 	if tmuxAction {
-		path, err := actionLookPath(tmuxExecutable)
+		path, err := LookPath(pfmtmux.Binary)
 		if err != nil {
 			return fmt.Errorf("find tmux: %w", err)
 		}
-		return actionExec(
-			path,
-			append([]string{tmuxExecutable}, arguments...),
-			environmentWith("TMUX", ""),
-		)
+		return Exec(path, append([]string{pfmtmux.Binary}, arguments...), deps.EnvironmentWith("TMUX", ""))
 	}
 
-	path, err := actionLookPath("zsh")
+	path, err := LookPath("zsh")
 	if err != nil {
 		return fmt.Errorf("find zsh: %w", err)
 	}
-	return actionExec(path, []string{"zsh", "-ic", line}, os.Environ())
+	return Exec(path, []string{"zsh", "-ic", line}, os.Environ())
 }
 
 func directTmuxArguments(line string) ([]string, bool, error) {
-	words, err := splitGeneratedShellWords(line)
+	words, err := SplitShellWords(line)
 	if err != nil {
 		return nil, false, fmt.Errorf("decode tmux action: %w", err)
 	}
@@ -71,7 +69,7 @@ func directTmuxArguments(line string) ([]string, bool, error) {
 	if index < len(words) && words[index] == "exec" {
 		index++
 	}
-	if index >= len(words) || words[index] != tmuxExecutable {
+	if index >= len(words) || words[index] != pfmtmux.Binary {
 		return nil, false, errors.New("generated TMUX action is not a tmux command")
 	}
 	if index+1 >= len(words) {
@@ -80,9 +78,9 @@ func directTmuxArguments(line string) ([]string, bool, error) {
 	return words[index+1:], true, nil
 }
 
-// splitGeneratedShellWords decodes the quoting emitted by action.Quote. It
-// performs no expansion, substitution, globbing, or operator interpretation.
-func splitGeneratedShellWords(line string) ([]string, error) {
+// SplitShellWords decodes the quoting emitted by Quote. It performs no
+// expansion, substitution, globbing, or operator interpretation.
+func SplitShellWords(line string) ([]string, error) {
 	words := make([]string, 0, 12)
 	var word strings.Builder
 	var quote rune
@@ -146,16 +144,4 @@ func splitGeneratedShellWords(line string) ([]string, error) {
 	}
 	flush()
 	return words, nil
-}
-
-func environmentWith(key, value string) []string {
-	prefix := key + "="
-	environment := make([]string, 0, len(os.Environ())+1)
-	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, prefix) {
-			continue
-		}
-		environment = append(environment, entry)
-	}
-	return append(environment, prefix+value)
 }

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"hostops/pfm/internal/action"
 )
 
 // reloadInterceptRun runs the reload FRONT in-process — the same
@@ -62,11 +64,11 @@ func runReloadIntercept(stdin io.Reader, stdout, stderr io.Writer, runtime comma
 }
 
 // splitReloadWords tokenizes a human-typed `/reload …` prompt with the same
-// quoting rules splitGeneratedShellWords decodes for a generated command
+// quoting rules action.SplitShellWords decodes for a generated command
 // line: double and single quotes, a backslash escape recognized only inside
 // double quotes, and an unterminated quote reported as an error rather than
 // silently swallowed into the next word. A dedicated name keeps this call
 // site self-documenting without a second parser to drift from the first.
 func splitReloadWords(s string) ([]string, error) {
-	return splitGeneratedShellWords(s)
+	return action.SplitShellWords(s)
 }

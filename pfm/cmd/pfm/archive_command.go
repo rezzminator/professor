@@ -9,6 +9,7 @@ import (
 	"hostops/pfm/internal/archive"
 	"hostops/pfm/internal/cli"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/paths"
 )
@@ -88,7 +89,7 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		return 0
 	}
 	if *pruneOrphans {
-		database, _, code := openKillManager(stderr, runtime)
+		database, _, code := fleet.OpenKillManager(stderr, runtime)
 		if code != 0 {
 			return code
 		}
@@ -98,7 +99,7 @@ func runArchive(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		)
 	}
 
-	database, manager, code := openKillManager(stderr, runtime)
+	database, manager, code := fleet.OpenKillManager(stderr, runtime)
 	if code != 0 {
 		return code
 	}

@@ -60,6 +60,7 @@ internal/engine/codex/match.go
 internal/engine/match.go
 internal/engine/opencode/index.go
 internal/engine/opencode/match.go
+internal/fleet/killmanager.go
 internal/gather/agents.go
 internal/gather/cache1h.go
 internal/gather/claudeproc.go
@@ -121,6 +122,7 @@ internal/kill/self.go
 internal/kill/spawn.go
 internal/kill/tmux.go
 internal/kill/types.go
+internal/mcpserv/daemon_status.go
 internal/mcpserv/read.go
 internal/mcpserv/search.go
 internal/mcpserv/stdio.go

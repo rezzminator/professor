@@ -179,7 +179,7 @@ func runResolvedChatKill(
 	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
 ) (exitCode int) {
-	database, manager, code := openKillManager(stderr, runtimes...)
+	database, manager, code := fleet.OpenKillManager(stderr, runtimes...)
 	if code != 0 {
 		return code
 	}

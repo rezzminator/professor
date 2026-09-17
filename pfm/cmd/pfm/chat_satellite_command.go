@@ -474,7 +474,7 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		fmt.Fprintf(stderr, "pfm chat branch: configured %s binary %q is not executable: %v\n", engine, binary, err)
 		return 1
 	}
-	if _, err := deps.Resolve(tmuxExecutable); err != nil {
+	if _, err := deps.Resolve(pfmtmux.Binary); err != nil {
 		fmt.Fprintln(stderr, "pfm chat branch: tmux is not on PATH")
 		return 1
 	}
@@ -509,8 +509,8 @@ func runChatBranch(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		fmt.Fprintf(stderr, "pfm chat branch: plan fork: %v\n", err)
 		return 1
 	}
-	socket := freshEngineSocket(engine)
-	if override := os.Getenv(testFreshSocketEnv); override != "" {
+	socket := spawn.FreshSocket(engine)
+	if override := os.Getenv(spawn.TestFreshSocketEnv); override != "" {
 		socket = override
 	}
 	titles := runtime.Config.Tmux.Titles

@@ -146,7 +146,7 @@ func runRun(
 		Trace:               trace,
 		Engine:              engineName,
 		Name:                *name,
-		Socket:              freshEngineSocket(engineName),
+		Socket:              spawn.FreshSocket(engineName),
 		CWD:                 directory,
 		Run:                 plan.Run,
 		Binary:              plan.Binary,
@@ -214,7 +214,7 @@ func runRun(
 		}
 	}
 	// result.Socket is the bare session name spawn.Run was asked to create
-	// (freshEngineSocket's own output), not a resolvable socket PATH — the
+	// (spawn.FreshSocket's own output), not a resolvable socket PATH — the
 	// inject recorder (internal/inject/engine.go) writes result.SocketPath,
 	// the full tmux -S argument. Recording the bare name here left the
 	// cosmos graph's receiver-side row lookup (paneKey(socket, pane)) unable
@@ -345,7 +345,7 @@ func attachRunResult(attach bool, result spawn.Result, stdout, stderr io.Writer)
 	}
 	line := "TMUX= tmux -L " + action.Quote(result.Socket) +
 		" attach -t " + action.Quote(result.Session)
-	if err := dispatchAction(stdout, line); err != nil {
+	if err := action.Dispatch(stdout, line); err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: attach: %v\n", err)
 		return 1
 	}

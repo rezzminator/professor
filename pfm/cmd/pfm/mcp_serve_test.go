@@ -42,7 +42,7 @@ func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 	if got := response.Header().Get("WWW-Authenticate"); got != "" {
 		t.Fatalf("unauthenticated loopback service advertised auth challenge %q", got)
 	}
-	var status mcpDaemonStatus
+	var status mcpserv.DaemonStatus
 	if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 			handler := newMCPDaemonHandler(mcpDaemonOptions{Chat: test.chat, Harvester: test.harvester})
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
-			var status mcpDaemonStatus
+			var status mcpserv.DaemonStatus
 			if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
 				t.Fatal(err)
 			}

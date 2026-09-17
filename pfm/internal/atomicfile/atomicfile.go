@@ -61,3 +61,28 @@ func Write(path string, content []byte, mode fs.FileMode) (err error) {
 	published = true
 	return nil
 }
+
+// WriteScratch writes a disposable file in directory and returns its path and
+// cleanup. The file is never published over a durable target, so it needs no
+// rename or directory sync.
+func WriteScratch(directory, pattern string, content []byte) (path string, cleanup func(), err error) {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return "", nil, fmt.Errorf("create scratch directory %s: %w", directory, err)
+	}
+	file, err := os.CreateTemp(directory, pattern)
+	if err != nil {
+		return "", nil, fmt.Errorf("create scratch file: %w", err)
+	}
+	path = file.Name()
+	cleanup = func() { _ = os.Remove(path) }
+	if _, err := file.Write(content); err != nil {
+		closeErr := file.Close()
+		cleanup()
+		return "", nil, fmt.Errorf("write scratch file: %w", errors.Join(err, closeErr))
+	}
+	if err := file.Close(); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("close scratch file: %w", err)
+	}
+	return path, cleanup, nil
+}

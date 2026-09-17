@@ -932,18 +932,18 @@ func insideTempBase(t *testing.T, pwd, base string) bool {
 // cache_creation_input_tokens was dropped, the receipt reported single-digit input tokens for it —
 // a number small enough to look like a working measurement and wrong enough to mislead every
 // reader of it. Pins the class: every input-billing field Claude reports survives into the receipt.
-func TestParseUsageKeepsEveryInputBillingFieldClaudeReports(t *testing.T) {
-	usage, err := parseUsage(json.RawMessage(`{
+func TestParseTokenUsageKeepsEveryInputBillingFieldClaudeReports(t *testing.T) {
+	usage, err := parseTokenUsage(json.RawMessage(`{
 		"input_tokens": 2,
 		"cached_input_tokens": 0,
 		"cache_creation_input_tokens": 15842,
 		"output_tokens": 4678
 	}`))
 	if err != nil {
-		t.Fatalf("parseUsage: %v", err)
+		t.Fatalf("parseTokenUsage: %v", err)
 	}
 	if usage == nil {
-		t.Fatal("parseUsage returned no usage for a populated Claude usage block")
+		t.Fatal("parseTokenUsage returned no usage for a populated Claude usage block")
 	}
 	if usage.CacheCreation != 15842 {
 		t.Fatalf("cache creation tokens = %d, want 15842", usage.CacheCreation)
@@ -955,7 +955,7 @@ func TestParseUsageKeepsEveryInputBillingFieldClaudeReports(t *testing.T) {
 	if !strings.Contains(string(body), `"cache_creation_input_tokens":15842`) {
 		t.Fatalf("the receipt's usage block dropped the cache-write tokens: %s", body)
 	}
-	alias, err := parseUsage(json.RawMessage(`{"cache_write_input_tokens": 7}`))
+	alias, err := parseTokenUsage(json.RawMessage(`{"cache_write_input_tokens": 7}`))
 	if err != nil || alias == nil || alias.CacheCreation != 7 {
 		t.Fatalf("cache_write_input_tokens alias not honoured: %+v (%v)", alias, err)
 	}

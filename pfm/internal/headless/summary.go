@@ -4,14 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 
 	"hostops/pfm/internal/ask"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/transcript"
 )
 
 const summaryPrompt = "Summarize this exchange in ≤ 40 words: what was asked, what was delivered or is still in flight."
@@ -36,17 +34,15 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 	if options.Database == nil {
 		return failedSummary(fmt.Errorf("summary cache is not configured"))
 	}
-	entries, offset, err := transcript.From(ctx, chat.Path, string(chat.Engine), 0)
+	exchange, ok, err := readLatestExchange(ctx, chat)
 	if err != nil {
 		return failedSummary(fmt.Errorf("read exchange: %w", err))
 	}
-	prompt, response, ok := transcript.LastExchange(entries)
 	if !ok {
 		return SummaryResult{Text: "unavailable (no human exchange)"}
 	}
-	complete := len(entries) != 0 && entries[len(entries)-1].Role == transcript.RoleAssistant
-	if complete {
-		cached, found, cacheErr := options.Database.ChatSummary(ctx, chat.Path, offset)
+	if exchange.complete {
+		cached, found, cacheErr := options.Database.ChatSummary(ctx, chat.Path, exchange.offset)
 		if cacheErr != nil {
 			return failedSummary(cacheErr)
 		}
@@ -71,7 +67,7 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 		return failedSummary(err)
 	}
 
-	prepared, err := writePreparedExchange(options.TempDir, prompt, response, complete)
+	prepared, err := writePreparedExchange(options.TempDir, exchange.prompt, exchange.response, exchange.complete)
 	if err != nil {
 		return failedSummary(err)
 	}
@@ -82,79 +78,36 @@ func Summarize(ctx context.Context, chat Chat, options SummaryOptions) SummaryRe
 		Engine:       engineName,
 		Model:        options.Model,
 	}, options.Config)
-	if !complete {
+	if !exchange.complete {
 		input.Prompt += " The response is PARTIAL because the seat is still working."
 	}
 	if resolveErr != nil {
-		removeErr := os.Remove(prepared)
+		removeErr := removePreparedFiles([]string{prepared})
 		return failedSummary(errors.Join(resolveErr, removeErr))
 	}
 	answer, runErr := runner.Run(ctx, input)
-	removeErr := os.Remove(prepared)
+	removeErr := removePreparedFiles([]string{prepared})
 	if runErr != nil || removeErr != nil {
 		return failedSummary(errors.Join(runErr, removeErr))
 	}
 	text := strings.Join(strings.Fields(answer.Answer), " ")
-	if !complete {
+	if !exchange.complete {
 		text = "PARTIAL: " + text
 	}
-	text = limitSummaryWords(text, 40)
-	if complete {
-		if err := options.Database.PutChatSummary(ctx, chat.Path, offset, text); err != nil {
+	text = limitWords(text, 40)
+	if exchange.complete {
+		if err := options.Database.PutChatSummary(ctx, chat.Path, exchange.offset, text); err != nil {
 			return failedSummary(err)
 		}
 	}
 	return SummaryResult{Text: text}
 }
 
-func writePreparedExchange(directory string, prompt, response []transcript.Entry, complete bool) (string, error) {
-	directory, err := preparedScratchDir(directory)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return "", fmt.Errorf("create prepared exchange directory: %w", err)
-	}
-	file, err := os.CreateTemp(directory, "exchange-*.md")
-	if err != nil {
-		return "", fmt.Errorf("create prepared exchange: %w", err)
-	}
-	path := file.Name()
-	var content strings.Builder
-	content.WriteString("PROMPT\n")
-	for _, entry := range prompt {
-		content.WriteString(transcript.Condensed(entry))
-		content.WriteByte('\n')
-	}
-	content.WriteString("RESPONSE\n")
-	for _, entry := range response {
-		content.WriteString(transcript.Condensed(entry))
-		content.WriteByte('\n')
-	}
-	if complete {
-		content.WriteString("STATE: COMPLETE\n")
-	} else {
-		content.WriteString("STATE: PARTIAL\n")
-	}
-	_, writeErr := file.WriteString(content.String())
-	closeErr := file.Close()
-	if writeErr != nil || closeErr != nil {
-		removeErr := os.Remove(path)
-		return "", fmt.Errorf("write prepared exchange: %w", errors.Join(writeErr, closeErr, removeErr))
-	}
-	return path, nil
-}
-
 func failedSummary(err error) SummaryResult {
-	detail := "unknown error"
-	if err != nil {
-		detail = strings.Join(strings.Fields(err.Error()), " ")
-		detail = transcript.Truncate(detail, transcript.TextCap)
-	}
-	return SummaryResult{Text: "failed (" + detail + ")"}
+	return SummaryResult{Text: failedResultText(err)}
 }
 
-func limitSummaryWords(value string, limit int) string {
+func limitWords(value string, limit int) string {
 	words := strings.Fields(value)
 	if len(words) > limit {
 		words = words[:limit]

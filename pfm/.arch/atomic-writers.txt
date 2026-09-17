@@ -5,7 +5,4 @@ internal/harvest/cache.go
 internal/harvest/media.go
 internal/harvest/public_store.go
 internal/harvestpy/provision.go
-internal/headless/run/run.go
-internal/headless/statusask.go
-internal/headless/summary.go
 internal/installer/launcher.go

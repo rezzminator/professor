@@ -20,6 +20,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"hostops/pfm/internal/atomicfile"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -84,6 +85,7 @@ type Request struct {
 	Native             bool
 	systemPromptFile   string
 	schemaFilePath     string
+	binaryPath         string
 	unsupportedOptions []string
 }
 
@@ -143,66 +145,27 @@ func Resolve(request Request) (Request, error) {
 		return Request{}, fmt.Errorf("OpenCode does not support headless runs")
 	}
 
-	var rosterDir, binary string
-	var rosterPresent bool
-	switch request.Engine {
-	case pfmengine.Claude:
-		binary = strings.TrimSpace(request.Config.Claude.Binary)
-		if binary == "" {
-			binary = pfmengine.MustLookup(request.Engine).Binary
+	binary, accounts := configuredEngineAccounts(request)
+	rosterPresent := !request.WithoutAccount && (request.Account != 0 || len(accounts) > 0)
+	if !request.WithoutAccount && request.Account == 0 && len(accounts) > 0 {
+		request.Account = accountIDForConfigDir(accounts, request.ConfigDir)
+		if request.Account == 0 {
+			request.Account = accounts[0].id
 		}
-		switch {
-		case request.WithoutAccount:
-			// Diagnostics deliberately bypass the roster and use only the
-			// caller-provided complete environment.
-		case request.Account == 0:
-			if len(request.Config.Accounts) > 0 {
-				request.Account = matchingClaudeAccount(request.Config.Accounts, request.ConfigDir)
-				if request.Account == 0 {
-					request.Account = request.Config.Accounts[0].ID
-				}
-				rosterPresent = true
-			}
-		default:
-			rosterPresent = true
+	}
+	var rosterDir string
+	if !request.WithoutAccount && rosterPresent {
+		account, ok := configuredAccountByID(accounts, request.Account)
+		if !ok {
+			return Request{}, fmt.Errorf(
+				"requested %s account %d is not in the configured roster",
+				pfmengine.MustLookup(request.Engine).Short,
+				request.Account,
+			)
 		}
-		if account, ok := request.Config.AccountByID(request.Account); ok {
-			rosterDir = account.ConfigDir
-			prefs := request.Config.EffectiveClaude(request.Account)
-			if strings.TrimSpace(prefs.Binary) != "" {
-				binary = strings.TrimSpace(prefs.Binary)
-			}
-		} else if !request.WithoutAccount && (request.Account != 0 || len(request.Config.Accounts) > 0) {
-			return Request{}, fmt.Errorf("requested Claude account %d is not in the configured roster", request.Account)
-		}
-	case pfmengine.Codex:
-		binary = strings.TrimSpace(request.Config.Codex.Binary)
-		if binary == "" {
-			binary = pfmengine.MustLookup(request.Engine).Binary
-		}
-		switch {
-		case request.WithoutAccount:
-			// Diagnostics deliberately bypass the roster and use only the
-			// caller-provided complete environment.
-		case request.Account == 0:
-			if len(request.Config.CodexAccounts) > 0 {
-				request.Account = matchingCodexAccount(request.Config.CodexAccounts, request.ConfigDir)
-				if request.Account == 0 {
-					request.Account = request.Config.CodexAccounts[0].ID
-				}
-				rosterPresent = true
-			}
-		default:
-			rosterPresent = true
-		}
-		if account, ok := request.Config.CodexAccountByID(request.Account); ok {
-			rosterDir = account.Home
-			prefs := request.Config.EffectiveCodex(request.Account)
-			if strings.TrimSpace(prefs.Binary) != "" {
-				binary = strings.TrimSpace(prefs.Binary)
-			}
-		} else if !request.WithoutAccount && (request.Account != 0 || len(request.Config.CodexAccounts) > 0) {
-			return Request{}, fmt.Errorf("requested Codex account %d is not in the configured roster", request.Account)
+		rosterDir = account.configDir
+		if account.binary != "" {
+			binary = account.binary
 		}
 	}
 	if request.ConfigDir != "" && rosterDir != "" && filepath.Clean(request.ConfigDir) != filepath.Clean(rosterDir) {
@@ -227,7 +190,8 @@ func Resolve(request Request) (Request, error) {
 	} else if !rosterPresent {
 		return Request{}, fmt.Errorf("%s account roster is empty; configure an account", request.Engine)
 	}
-	if _, err := deps.Resolve(binary); err != nil {
+	binaryPath, err := deps.Resolve(binary)
+	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return Request{}, &BinaryMissingError{
 				Engine: pfmengine.MustLookup(request.Engine).LongName,
@@ -237,6 +201,7 @@ func Resolve(request Request) (Request, error) {
 		}
 		return Request{}, fmt.Errorf("resolve %s binary %q: %w", request.Engine, binary, err)
 	}
+	request.binaryPath = binaryPath
 
 	if !request.Native {
 		prefs := request.Config.Ask.PrefsFor(request.Engine)
@@ -305,30 +270,85 @@ func Resolve(request Request) (Request, error) {
 	return request, nil
 }
 
-func matchingClaudeAccount(accounts []pfmconfig.Account, configDir string) int {
+type configuredEngineAccount struct {
+	id        int
+	configDir string
+	binary    string
+}
+
+func configuredEngineAccounts(request Request) (string, []configuredEngineAccount) {
+	var binary string
+	var accounts []configuredEngineAccount
+	switch request.Engine {
+	case pfmengine.Claude:
+		binary = strings.TrimSpace(request.Config.Claude.Binary)
+		accounts = make([]configuredEngineAccount, 0, len(request.Config.Accounts))
+		for _, account := range request.Config.Accounts {
+			accounts = append(accounts, configuredEngineAccount{
+				id:        account.ID,
+				configDir: account.ConfigDir,
+				binary:    strings.TrimSpace(request.Config.EffectiveClaude(account.ID).Binary),
+			})
+		}
+	case pfmengine.Codex:
+		binary = strings.TrimSpace(request.Config.Codex.Binary)
+		accounts = make([]configuredEngineAccount, 0, len(request.Config.CodexAccounts))
+		for _, account := range request.Config.CodexAccounts {
+			accounts = append(accounts, configuredEngineAccount{
+				id:        account.ID,
+				configDir: account.Home,
+				binary:    strings.TrimSpace(request.Config.EffectiveCodex(account.ID).Binary),
+			})
+		}
+	}
+	if binary == "" {
+		binary = pfmengine.MustLookup(request.Engine).Binary
+	}
+	return binary, accounts
+}
+
+func accountIDForConfigDir(accounts []configuredEngineAccount, configDir string) int {
 	if configDir == "" {
 		return 0
 	}
 	want := filepath.Clean(configDir)
 	for _, account := range accounts {
-		if filepath.Clean(account.ConfigDir) == want {
-			return account.ID
+		if filepath.Clean(account.configDir) == want {
+			return account.id
 		}
 	}
 	return 0
 }
 
-func matchingCodexAccount(accounts []pfmconfig.CodexAccount, configDir string) int {
-	if configDir == "" {
-		return 0
-	}
-	want := filepath.Clean(configDir)
+func configuredAccountByID(accounts []configuredEngineAccount, id int) (configuredEngineAccount, bool) {
 	for _, account := range accounts {
-		if filepath.Clean(account.Home) == want {
-			return account.ID
+		if account.id == id {
+			return account, true
 		}
 	}
-	return 0
+	return configuredEngineAccount{}, false
+}
+
+func ensureScratchBase(base string) (string, error) {
+	if base == "" {
+		resolved, resolveErr := paths.Resolve()
+		if resolveErr != nil {
+			return "", fmt.Errorf("resolve headless scratch directory: %w", resolveErr)
+		}
+		base = resolved.SIDDir
+	}
+	if err := os.MkdirAll(base, 0o700); err != nil {
+		return "", fmt.Errorf("create headless scratch base %s: %w", base, err)
+	}
+	return base, nil
+}
+
+func writeHeadlessScratch(base, pattern string, data []byte) (path string, cleanup func(), err error) {
+	base, err = ensureScratchBase(base)
+	if err != nil {
+		return "", nil, err
+	}
+	return atomicfile.WriteScratch(base, pattern, data)
 }
 
 func Run(parent context.Context, request Request) (result Result, runErr error) {
@@ -357,16 +377,9 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 	cwd := request.CWD
 	cleanup := func() error { return nil }
 	if request.Sealed {
-		base := request.TempDir
-		if base == "" {
-			resolvedPaths, pathErr := paths.Resolve()
-			if pathErr != nil {
-				return result, fmt.Errorf("resolve headless scratch directory: %w", pathErr)
-			}
-			base = resolvedPaths.SIDDir
-		}
-		if err := os.MkdirAll(base, 0o700); err != nil {
-			return result, fmt.Errorf("create headless scratch base %s: %w", base, err)
+		base, baseErr := ensureScratchBase(request.TempDir)
+		if baseErr != nil {
+			return result, baseErr
 		}
 		cwd, err = os.MkdirTemp(base, "pfm-headless-")
 		if err != nil {
@@ -392,101 +405,43 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		}
 	}()
 	if request.SystemPrompt != nil && (request.Engine == pfmengine.Claude || request.Engine == pfmengine.Codex) {
-		base := request.TempDir
-		if base == "" {
-			resolvedPaths, pathErr := paths.Resolve()
-			if pathErr != nil {
-				return result, fmt.Errorf("resolve headless prompt scratch directory: %w", pathErr)
-			}
-			base = resolvedPaths.SIDDir
-		}
-		if err := os.MkdirAll(base, 0o700); err != nil {
-			return result, fmt.Errorf("create headless prompt scratch base %s: %w", base, err)
-		}
-		file, fileErr := os.CreateTemp(base, "pfm-headless-system-*.txt")
+		name, removePrompt, fileErr := writeHeadlessScratch(
+			request.TempDir,
+			"pfm-headless-system-*.txt",
+			[]byte(*request.SystemPrompt),
+		)
 		if fileErr != nil {
-			return result, fmt.Errorf("create headless system prompt file: %w", fileErr)
-		}
-		name := file.Name()
-		if _, fileErr = file.WriteString(*request.SystemPrompt); fileErr == nil {
-			fileErr = file.Close()
-		} else {
-			_ = file.Close()
-		}
-		if fileErr != nil {
-			_ = os.Remove(name)
-			return result, fmt.Errorf("write headless system prompt file: %w", fileErr)
+			return result, fmt.Errorf("materialize headless system prompt: %w", fileErr)
 		}
 		request.systemPromptFile = name
 		previousCleanup := cleanup
 		cleanup = func() error {
-			removeErr := os.Remove(name)
-			if errors.Is(removeErr, os.ErrNotExist) {
-				removeErr = nil
-			}
-			scratchErr := previousCleanup()
-			if removeErr != nil && scratchErr != nil {
-				return fmt.Errorf("remove system prompt %s: %v; cleanup scratch: %w", name, removeErr, scratchErr)
-			}
-			if removeErr != nil {
-				return fmt.Errorf("remove system prompt %s: %w", name, removeErr)
-			}
-			return scratchErr
+			removePrompt()
+			return previousCleanup()
 		}
 	}
 	if request.Schema != nil && request.Engine == pfmengine.Codex {
-		base := request.TempDir
-		if base == "" {
-			resolvedPaths, pathErr := paths.Resolve()
-			if pathErr != nil {
-				return result, fmt.Errorf("resolve headless schema scratch directory: %w", pathErr)
-			}
-			base = resolvedPaths.SIDDir
-		}
-		if err := os.MkdirAll(base, 0o700); err != nil {
-			return result, fmt.Errorf("create headless schema scratch base %s: %w", base, err)
-		}
-		file, fileErr := os.CreateTemp(base, "pfm-headless-schema-*.json")
+		name, removeSchema, fileErr := writeHeadlessScratch(
+			request.TempDir,
+			"pfm-headless-schema-*.json",
+			request.Schema,
+		)
 		if fileErr != nil {
-			return result, fmt.Errorf("create headless output schema file: %w", fileErr)
-		}
-		name := file.Name()
-		if _, fileErr = file.Write(request.Schema); fileErr == nil {
-			fileErr = file.Close()
-		} else {
-			_ = file.Close()
-		}
-		if fileErr != nil {
-			_ = os.Remove(name)
-			return result, fmt.Errorf("write headless output schema file: %w", fileErr)
+			return result, fmt.Errorf("materialize headless output schema: %w", fileErr)
 		}
 		request.schemaFilePath = name
 		previousCleanup := cleanup
 		cleanup = func() error {
-			removeErr := os.Remove(name)
-			if errors.Is(removeErr, os.ErrNotExist) {
-				removeErr = nil
-			}
-			scratchErr := previousCleanup()
-			if removeErr != nil && scratchErr != nil {
-				return fmt.Errorf("remove output schema %s: %v; cleanup scratch: %w", name, removeErr, scratchErr)
-			}
-			if removeErr != nil {
-				return fmt.Errorf("remove output schema %s: %w", name, removeErr)
-			}
-			return scratchErr
+			removeSchema()
+			return previousCleanup()
 		}
 	}
 
-	binary, err := resolvedBinary(request)
-	if err != nil {
-		return result, err
-	}
 	argv, err := arguments(request)
 	if err != nil {
 		return result, err
 	}
-	command := exec.CommandContext(ctx, binary, argv...)
+	command := exec.CommandContext(ctx, request.binaryPath, argv...)
 	configureBoundedCommand(command)
 	if cwd != "" {
 		command.Dir = cwd
@@ -510,7 +465,7 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 	runErr = command.Run()
 	result.Duration = time.Since(started)
 	result.Stdout, result.Stderr = stdout.String(), stderr.String()
-	result.ExitCode = exitCode(runErr)
+	result.ExitCode = processExitCode(runErr)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
 		result.IsError = true
@@ -555,26 +510,6 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		return result, err
 	}
 	return result, nil
-}
-
-func resolvedBinary(request Request) (string, error) {
-	var binary string
-	switch request.Engine {
-	case pfmengine.Claude:
-		binary = request.Config.Claude.Binary
-		if request.Account != 0 {
-			binary = request.Config.EffectiveClaude(request.Account).Binary
-		}
-	case pfmengine.Codex:
-		binary = request.Config.Codex.Binary
-		if request.Account != 0 {
-			binary = request.Config.EffectiveCodex(request.Account).Binary
-		}
-	}
-	if strings.TrimSpace(binary) == "" {
-		binary = pfmengine.MustLookup(request.Engine).Binary
-	}
-	return deps.Resolve(strings.TrimSpace(binary))
 }
 
 func arguments(request Request) ([]string, error) {
@@ -728,7 +663,7 @@ func writerFor(stream, capture io.Writer) io.Writer {
 	return io.MultiWriter(stream, capture)
 }
 
-func exitCode(err error) int {
+func processExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
@@ -796,7 +731,7 @@ func parseOutput(result *Result, request Request) error {
 		}
 		result.StructuredOutput = append(json.RawMessage(nil), envelope.Structured...)
 		var err error
-		result.Usage, err = parseUsage(envelope.Usage)
+		result.Usage, err = parseTokenUsage(envelope.Usage)
 		if err != nil {
 			return fmt.Errorf("parse Claude usage: %w", err)
 		}
@@ -878,7 +813,7 @@ func parseCodexJSONL(result *Result, request Request) error {
 			}
 			terminal = true
 			var err error
-			result.Usage, err = parseUsage(event.Usage)
+			result.Usage, err = parseTokenUsage(event.Usage)
 			if err != nil {
 				return fmt.Errorf("parse Codex usage: %w", err)
 			}
@@ -910,7 +845,7 @@ func parseCodexJSONL(result *Result, request Request) error {
 	return nil
 }
 
-func parseUsage(raw json.RawMessage) (*TokenUsage, error) {
+func parseTokenUsage(raw json.RawMessage) (*TokenUsage, error) {
 	if len(raw) == 0 || string(raw) == jsonNull {
 		return nil, nil
 	}

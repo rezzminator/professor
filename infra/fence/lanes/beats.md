@@ -42,6 +42,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `E1.23-launcher` · the managed Claude launcher entry starts the pane · spends cc:1 · X20,X31,X38
 - `E1.24-exit-contract` · the shared headless-verb exit contract holds across the matrix · spends cc:1 · C66
 - `E1.25-end` · `end` kills the whole tmux server, ending the lane · spends cc:1 · C49
+- `E1.26-resolver-duplicate-candidate` · a name held by exactly one live row plus its own resume row (what `E1.06`'s `--new` leaves behind) resolves to the live row, never `ambiguous` · spends cc:1 · C32 · known-gap
 
 ### Lane E2 — Codex
 

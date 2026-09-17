@@ -6,9 +6,19 @@
 #   . "$(dirname "$0")/lib.sh"
 #   lane_begin E1
 #   need "a live chat" 'live_chat E1_MAIN' 'spawn_main' || lane_abort "no chat"
-#   beat E1.12-status C22 C23 ; spends cc:1 ; target E1_MAIN
+#   lane_reopen 'spawn_main'
+#   beat E1.12-status C22 C23 ; spends cc:1 ; target_live E1_MAIN
 #   requires E1.01-open-seat1 && { ... ; pass "status reported idle" ; }
 #   lane_end
+#
+# Liveness — a beat that cannot assert anything without a live chat declares it
+# with `target_live <chat>` (or `anchor_socket <socket>`, for the window where a
+# `/reload --new` has taken the NAME off the live session). `requires` then
+# costs one `pfm ls --tsv`: no live row and the beat is `blocked-by <the beat
+# that last saw it alive>` in seconds instead of ✗ after a full wait, the lane
+# spends its ONE `lane_reopen` command, and every later beat says the same. Both
+# waits (`wait_last`, `wait_for`) abandon a dead anchor the same way, returning
+# 2 with LANE_WAIT_WHY — a bound no deadline can outrun.
 #
 # Verdicts — exactly one per beat, and a beat left without one is named by the
 # NEXT beat (never silently dropped):
@@ -16,7 +26,9 @@
 #   fail <why>           ✗ it did not; the raw pane dump lands in the lane log
 #   known [gap-id]       the beat is a ledger entry (known-gaps.yml): counted
 #                        apart, does not fail the lane
-#   blocked <beat>       a declared precondition beat failed: never ✗, never silent
+#   blocked <by> [why]   a declared precondition failed — a beat, the run's own
+#                        shape (`seats cc:1`), or the target chat's liveness:
+#                        never ✗ for somebody else's failure, never silent
 # `requires <beat>` is the guard that turns a failed precondition into `blocked`.
 #
 # The known-gap ledger is enforced here, not trusted: an entry without
@@ -57,6 +69,9 @@ LANE_ID="" LANE_LOG="" LANE_TIMELINE="" LANE_T0=0
 LANE_BEATS=0 LANE_FAILED=0 LANE_KNOWN=0 LANE_BLOCKED=0
 LANE_CUR="" LANE_CUR_T0=0 LANE_CUR_IDS="" LANE_CUR_SEAT="none" LANE_CUR_OFFSET=""
 LANE_CUR_EXPECT="" LANE_BAD_BEATS="" LANE_TARGET="" LANE_LOG_STATE="UNKNOWN"
+# The liveness anchor (see `target_live` / `anchor_socket`), the beat that last
+# saw it alive, the lane's one re-open command and whether it has been spent.
+LANE_ANCHOR="" LANE_ALIVE_SEEN="" LANE_REOPEN="" LANE_REOPEN_DONE=0 LANE_WAIT_WHY=""
 
 # ─── plumbing ───────────────────────────────────────────────────────────────
 
@@ -209,6 +224,8 @@ beat() { # beat <id> [landscape-ids…]
   LANE_CUR_SEAT=none
   LANE_CUR_EXPECT=""
   LANE_TARGET=""
+  LANE_ANCHOR=""
+  LANE_WAIT_WHY=""
   if [ -f "$LANE_PFM_LOG" ]; then
     LANE_CUR_OFFSET="$(wc -c <"$LANE_PFM_LOG" 2>/dev/null | tr -d ' ')"
     [ -n "$LANE_CUR_OFFSET" ] || LANE_CUR_OFFSET=0
@@ -228,6 +245,80 @@ target() { # target <chat> — the pane a failed verdict dumps raw
   LANE_TARGET="$1"
 }
 
+# target_live <chat> — the pane a ✗ dumps AND the chat this beat cannot assert
+# anything without. `requires` refuses to run the body when that chat has no
+# live row, and every wait abandons it the moment its row dies.
+target_live() {
+  LANE_TARGET="$1"
+  LANE_ANCHOR="name:$1"
+}
+
+# anchor_socket <socket> — follow the chat by its tmux SOCKET instead of its
+# name, for the window where the name cannot be trusted: `/reload --new` leaves
+# the NAME on the old session id (now a resume row) and auto-names the fresh
+# live session from its steer, while the socket is unchanged across the reboot.
+anchor_socket() { LANE_ANCHOR="sock:$1"; }
+
+# lane_reopen <cmd> — the ONE re-open this lane may spend when its anchored chat
+# has died: run `need`-style after the first blocked beat, never twice.
+lane_reopen() { LANE_REOPEN="$1"; }
+
+_lane_alive_probe() {
+  case "$LANE_ANCHOR" in
+    name:*) [ -n "$(live_field "${LANE_ANCHOR#name:}" 11)" ] ;;
+    sock:*) [ -n "$(socket_field "${LANE_ANCHOR#sock:}" 2)" ] ;;
+    *) return 0 ;;
+  esac
+}
+
+# lane_alive — 0 when this beat's anchor still has a live row. No anchor
+# declared: nothing to judge, so 0 (a beat that never named a chat is not a beat
+# this guard governs). Three probes a second apart, because a reboot in place
+# empties the row for a moment and a single miss there is a false burial — still
+# seconds, never the minutes a full wait costs.
+lane_alive() {
+  _lane_alive_probe && return 0
+  sleep 1
+  _lane_alive_probe && return 0
+  sleep 1
+  _lane_alive_probe
+}
+
+_lane_anchor_label() {
+  case "$LANE_ANCHOR" in
+    name:*) printf '%s' "${LANE_ANCHOR#name:}" ;;
+    sock:*) printf 'the chat on socket %s' "${LANE_ANCHOR#sock:}" ;;
+    *) printf '%s' "${LANE_TARGET:-<no target>}" ;;
+  esac
+}
+
+_lane_mark_alive() { # remember which beat last saw this anchor alive
+  [ -n "$LANE_ANCHOR" ] || return 0
+  LANE_ALIVE_SEEN="$(printf '%s\n' "$LANE_ALIVE_SEEN" | grep -v "^$LANE_ANCHOR	" || true)
+$LANE_ANCHOR	$LANE_CUR"
+}
+
+_lane_last_alive() { # the beat that last saw this anchor alive, or a named absence
+  local seen
+  seen="$(printf '%s\n' "$LANE_ALIVE_SEEN" | awk -F'\t' -v a="$LANE_ANCHOR" '$1 == a { b = $2 } END { print b }')"
+  printf '%s' "${seen:-no beat in this lane ever saw it alive}"
+}
+
+# _lane_reopen — the lane's single re-open attempt, spent AFTER the blocked
+# verdict is recorded so the beat itself still costs seconds.
+_lane_reopen() {
+  if [ -z "$LANE_REOPEN" ]; then
+    _lane_log_only "   reopen: no re-open command declared (lane_reopen <cmd>) — $(_lane_anchor_label) stays gone for every later beat"
+    return 0
+  fi
+  if [ "$LANE_REOPEN_DONE" -ne 0 ]; then
+    _lane_log_only "   reopen: already attempted once this lane — not retried (a lane re-opens its chat once, never in a loop)"
+    return 0
+  fi
+  LANE_REOPEN_DONE=1
+  need "$(_lane_anchor_label) back alive" 'lane_alive' "$LANE_REOPEN" || true
+}
+
 expect-log() { # expect-log <pattern> — an error record this beat provokes ON PURPOSE
   LANE_CUR_EXPECT="$LANE_CUR_EXPECT
 $1"
@@ -237,20 +328,54 @@ pane() { # pane <target> — the chat's pane as text, for an assertion
   pfm chat capture "$1" 2>&1
 }
 
+# _lane_tmux_dir — where this machine's tmux sockets live, first existing wins.
+_lane_tmux_dir() {
+  local d
+  for d in "${PFM_TMUX_DIR:-}" "${TMUX_TMPDIR:-}" "/tmp/tmux-$(id -u)"; do
+    [ -n "$d" ] && [ -d "$d" ] && { printf '%s' "$d"; return 0; }
+  done
+  return 1
+}
+
+# _lane_fleet_dump — the fleet's own listing plus a pane tail from EVERY live
+# tmux socket. A chat that vanished must still leave bytes: "NO SOCKET" alone
+# says only that the row is gone, never what the machine looked like when it went.
+_lane_fleet_dump() {
+  local dir sock rows
+  rows="$(pfm ls --tsv 2>&1)"
+  _lane_log_only "   raw-dump: pfm ls --tsv (the whole fleet at this beat's failure)"
+  _lane_log_only "${rows:-   raw-dump: pfm ls --tsv printed nothing}"
+  if ! dir="$(_lane_tmux_dir)"; then
+    _lane_log_only "   raw-dump: no tmux socket directory found (tried \$PFM_TMUX_DIR, \$TMUX_TMPDIR, /tmp/tmux-$(id -u)) — no pane could be captured"
+    return 0
+  fi
+  for sock in "$dir"/*; do
+    [ -S "$sock" ] || [ -f "$sock" ] || continue
+    _lane_log_only "   raw-dump: $(basename "$sock") capture-pane -e -p (tail 20)"
+    if ! tmux -S "$sock" capture-pane -e -p 2>&1 | tail -20 >>"$LANE_LOG"; then
+      _lane_log_only "   raw-dump: capture-pane FAILED on $(basename "$sock")"
+    fi
+  done
+}
+
 _lane_raw_dump() { # the failed beat's pane, escapes included (zellij's rule)
   local sock
   if [ -z "$LANE_TARGET" ]; then
     _lane_log_only "   raw-dump: no pane target declared for this beat (target <chat> declares one)"
     return 0
   fi
-  sock="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$LANE_TARGET" '$5 == n { print $11; exit }')"
+  sock="$(live_field "$LANE_TARGET" 11)"
+  case "$LANE_ANCHOR" in sock:*) [ -n "$sock" ] || sock="${LANE_ANCHOR#sock:}" ;; esac
   if [ -z "$sock" ]; then
-    _lane_log_only "   raw-dump: NO SOCKET for $LANE_TARGET — pfm ls --tsv carries no row for it"
+    _lane_log_only "   raw-dump: NO SOCKET for $LANE_TARGET — pfm ls --tsv carries no live row for it; the fleet listing and every tmux socket follow"
+    _lane_fleet_dump
     return 0
   fi
   _lane_log_only "   raw-dump: tmux -S $sock capture-pane -e -p -S - ($LANE_TARGET)"
-  tmux -S "$sock" capture-pane -e -p -S - >>"$LANE_LOG" 2>&1 ||
-    _lane_log_only "   raw-dump: capture-pane FAILED on $sock (the server may be gone)"
+  if ! tmux -S "$sock" capture-pane -e -p -S - >>"$LANE_LOG" 2>&1; then
+    _lane_log_only "   raw-dump: capture-pane FAILED on $sock (the server may be gone) — the fleet listing and every tmux socket follow"
+    _lane_fleet_dump
+  fi
 }
 
 # _lane_log_slice — the activity-log records written during this beat. Prints
@@ -346,14 +471,16 @@ known() { # known [gap-id] — defaults to the current beat, the ledger's key
   _lane_close known "known" "$(gap_field "$gap" why) [owner $(gap_field "$gap" owner) · expires $expires]"
 }
 
-blocked() { # blocked <by-beat>
-  _lane_close blocked "blocked" "blocked-by $1"
+blocked() { # blocked <by-beat|condition> [why]
+  _lane_close blocked "blocked" "blocked-by $1${2:+ — $2}"
 }
 
-# requires <beat…> — 0 when every named beat passed. Otherwise the CURRENT beat
-# is closed `blocked-by <first bad one>` and 1 is returned, so the caller's
-# `requires X && { … }` body never runs and never reports ✗ for someone else's
-# failure.
+# requires <beat…> — 0 when every named beat passed AND this beat's declared
+# live chat still has a live row. Otherwise the CURRENT beat is closed
+# `blocked-by <the first bad one | the beat that last saw the chat alive>` and 1
+# is returned, so the caller's `requires X && { … }` body never runs and never
+# reports ✗ for someone else's failure — nor spends minutes waiting on a chat
+# that is already gone.
 requires() {
   local b
   for b in "$@"; do
@@ -361,7 +488,14 @@ requires() {
       *" $b "*) blocked "$b"; return 1 ;;
     esac
   done
-  return 0
+  [ -n "$LANE_ANCHOR" ] || return 0
+  if lane_alive; then
+    _lane_mark_alive
+    return 0
+  fi
+  blocked "$(_lane_last_alive)" "$(_lane_anchor_label) has no live row in pfm ls --tsv — nothing to assert against"
+  _lane_reopen
+  return 1
 }
 
 # need <name> <check-cmd> <make-cmd> — a lane's own precondition: satisfied when
@@ -393,35 +527,88 @@ need() {
 
 live_chat() { pfm ls --plain 2>/dev/null | grep -q "^● $1 "; }
 
-chat_row() { # chat_row <name> — the chat's `pfm ls --tsv` row, or nothing
-  pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$1" '$5 == n { print; exit }'
+_rows_named() { # every `pfm ls --tsv` row carrying this name, header dropped
+  pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$1" 'NR > 1 && $5 == n'
 }
+
+chat_row() { # chat_row <name> — the chat's row, the LIVE one when it has one
+  local row
+  row="$(live_row "$1")"
+  if [ -n "$row" ]; then
+    printf '%s\n' "$row"
+    return 0
+  fi
+  _rows_named "$1" | head -1
+}
+
+# live_row <name> — the LIVE row carrying that name. A name is regularly held by
+# one live row AND its own resume rows (`/reload --new` leaves one behind); a
+# reader that takes the first match reads a dead conversation's fields.
+live_row() { _rows_named "$1" | awk -F'\t' '$1 ~ /^live-/ { print; exit }'; }
 
 # row_field <name> <column> — one field of that row. Columns (pfm ls --tsv
 # header): 1 kind · 2 id · 3 project · 4 cwd · 5 name · 6 prompts · 7 size ·
 # 8 activity_ns · 9 account · 10 killed · 11 socket.
 row_field() { chat_row "$1" | awk -F'\t' -v c="$2" '{ print $c }'; }
 
+# live_field <name> <column> — one field of the LIVE row.
+live_field() { live_row "$1" | awk -F'\t' -v c="$2" '{ print $c }'; }
+
+# socket_field <socket> <column> — one field of the live row ON that socket: the
+# only handle that survives a `/reload --new`, which changes both the session id
+# and the name while the tmux socket stays put.
+socket_field() {
+  pfm ls --tsv 2>/dev/null |
+    awk -F'\t' -v s="$1" -v c="$2" 'NR > 1 && $1 ~ /^live-/ && $11 == s { print $c; exit }'
+}
+
+# _lane_wait_dead — 0 when this beat's anchored chat has died under a wait; sets
+# LANE_WAIT_WHY. A wait with no anchor has nothing to abandon. TWO consecutive
+# dead reads end the wait: one is a reboot in flight, two in a row is a chat
+# nothing will bring back inside this wait.
+LANE_WAIT_MISSES=0
+_lane_wait_dead() {
+  [ -n "$LANE_ANCHOR" ] || return 1
+  if lane_alive; then
+    LANE_WAIT_MISSES=0
+    return 1
+  fi
+  LANE_WAIT_MISSES=$((LANE_WAIT_MISSES + 1))
+  [ "$LANE_WAIT_MISSES" -ge 2 ] || return 1
+  LANE_WAIT_WHY="$(_lane_anchor_label) has no live row (two consecutive reads) — the wait was abandoned rather than run to its deadline"
+  return 0
+}
+
 # wait_last <chat> <needle> <secs> — polls the chat's LAST assistant message for
-# a literal needle. 1 on timeout, so the caller can name what never arrived.
+# a literal needle. 1 on timeout and 2 when the beat's anchored chat died first
+# — each with its own LANE_WAIT_WHY, because "it never answered" and "there was
+# nothing left to answer" are different findings.
 wait_last() {
   local deadline=$(( $(_lane_now) + $3 ))
+  LANE_WAIT_WHY="" LANE_WAIT_MISSES=0
   while [ "$(_lane_now)" -lt "$deadline" ]; do
+    _lane_wait_dead && return 2
     pfm chat last "$1" 2>/dev/null | grep -qF -- "$2" && return 0
     sleep 5
   done
+  LANE_WAIT_WHY="timed out after $3s waiting for '$2' from $1"
   return 1
 }
 
-# wait_for <secs> <cmd> — polls until cmd succeeds; 1 on timeout (never a silent
-# pass: the caller names what it was waiting for).
+# wait_for <secs> <cmd> — polls until cmd succeeds; 1 on timeout, 2 when the
+# beat's anchored chat died first (never a silent pass: the caller names what it
+# was waiting for, and LANE_WAIT_WHY names which of the two happened).
 wait_for() {
-  local deadline=$(( $(_lane_now) + $1 ))
+  local secs="$1" deadline=$(( $(_lane_now) + $1 ))
   shift
+  LANE_WAIT_WHY="" LANE_WAIT_MISSES=0
   while [ "$(_lane_now)" -lt "$deadline" ]; do
+    _lane_wait_dead && return 2
     # shellcheck disable=SC2294 # the condition arrives as a shell string, by design
     eval "$@" >/dev/null 2>&1 && return 0
     sleep 3
   done
+  # shellcheck disable=SC2034 # read by the lanes, which name the reason in their verdict
+  LANE_WAIT_WHY="timed out after ${secs}s waiting for: $*"
   return 1
 }

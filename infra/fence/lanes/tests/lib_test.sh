@@ -26,20 +26,42 @@ bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n'
 # ── stubs: a fleet that lists nothing, a tmux that captures nothing ──────────
 BIN="$T/bin"
 mkdir -p "$BIN"
-cat >"$BIN/pfm" <<'STUB'
+# The fleet the stub reports is a FIXTURE FILE ($T/rows.tsv, header-less rows in
+# `pfm ls --tsv` shape). Absent, the fleet lists nothing — which is what most of
+# these cases want; the liveness cases rewrite it between beats to make a chat
+# appear and vanish under the lane.
+ROWS="$T/rows.tsv"
+cat >"$BIN/pfm" <<STUB
 #!/usr/bin/env bash
+ROWS="$ROWS"
+LAST="$T/last.txt"
+STUB
+cat >>"$BIN/pfm" <<'STUB'
 case "$1 ${2:-}" in
-  "ls --plain") exit 0 ;;
-  "ls --tsv") printf 'kind\tid\tproject\tcwd\tname\tprompts\tsize\tactivity_ns\taccount\tkilled\tsocket\n' ;;
+  "ls --plain")
+    [ -f "$ROWS" ] && awk -F'\t' '$1 ~ /^live-/ { print "● " $5 " " }' "$ROWS"
+    exit 0 ;;
+  "ls --tsv")
+    printf 'kind\tid\tproject\tcwd\tname\tprompts\tsize\tactivity_ns\taccount\tkilled\tsocket\n'
+    [ -f "$ROWS" ] && cat "$ROWS"
+    exit 0 ;;
+  "chat last") [ -f "$LAST" ] && cat "$LAST"; exit 0 ;;
   *) exit 0 ;;
 esac
 STUB
 cat >"$BIN/tmux" <<'STUB'
 #!/usr/bin/env bash
+echo "tmux stub: no server on $*" >&2
 exit 1
 STUB
 chmod +x "$BIN/pfm" "$BIN/tmux"
 export PATH="$BIN:$PATH"
+
+live_rows() { # live_rows — TL_CHAT live on its socket, plus its own resume row
+  printf 'live-claude\tsid-new\tp\t/work\tTL_CHAT\t1\t10\t1\t1\tfalse\tcc-1-2-3\n' >"$ROWS"
+  printf 'resume-claude\tsid-old\tp\t/work\tTL_CHAT\t1\t10\t1\t1\tfalse\t\n' >>"$ROWS"
+}
+dead_rows() { rm -f "$ROWS"; }
 
 gaps_file() { # gaps_file <path> — the fixture ledger
   cat >"$1" <<'YML'
@@ -329,6 +351,129 @@ if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'unexpected error record'; th
   ok "expect-log: a pattern that does not match the record still fails the beat"
 else
   bad "expect-log mismatch" "rc=$RC" "$OUT"
+fi
+
+# ---- 15: the row readers tell a LIVE row from its own resume row ----------
+
+live_rows
+OUT="$(bash -c ". '$LIB'; printf '%s|%s|%s|%s\n' \"\$(live_field TL_CHAT 11)\" \"\$(live_field TL_CHAT 2)\" \"\$(socket_field cc-1-2-3 2)\" \"\$(socket_field cc-1-2-3 5)\"" 2>&1)"
+if [ "$OUT" = 'cc-1-2-3|sid-new|sid-new|TL_CHAT' ]; then
+  ok "live_field/socket_field read the LIVE row, never the resume row that shares its name ($OUT)"
+else
+  bad "live row readers" "got=[$OUT] want=[cc-1-2-3|sid-new|sid-new|TL_CHAT]"
+fi
+dead_rows
+
+# ---- 16: a vanished target is BLOCKED (fast), named, and re-opened ONCE ----
+
+live_rows
+# The re-open the lane declares: the chat comes back on its socket.
+cp "$ROWS" "$T/rows-live.tsv"
+printf '#!/usr/bin/env bash\ncp "%s" "%s"\n' "$T/rows-live.tsv" "$ROWS" >"$T/reopen.sh"
+run_lane liveness \
+  'lane_begin TL' \
+  "lane_reopen \"bash '$T/reopen.sh'\"" \
+  'beat TL.30-live Z1; target_live TL_CHAT; requires && pass "the chat is alive"' \
+  "rm -f '$ROWS'" \
+  'beat TL.31-gone Z2; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
+  'beat TL.32-back Z3; target_live TL_CHAT; requires && pass "the re-open brought it back"' \
+  "rm -f '$ROWS'" \
+  'beat TL.33-gone-again Z4; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
+  'lane_end'
+dur="$(awk -F'\t' '$2 == "TL.31-gone" { print $5 }' "$LANE_DIR/TL.timeline.tsv" 2>/dev/null)"
+if printf '%s' "$OUT" | grep -q 'TL blocked TL.31-gone — blocked-by TL.30-live' &&
+  printf '%s' "$OUT" | grep -q 'TL_CHAT has no live row' &&
+  ! printf '%s' "$OUT" | grep -q MUST-NOT-HAPPEN &&
+  printf '%s' "$OUT" | grep -q 'TL ✓ TL.32-back' &&
+  printf '%s' "$OUT" | grep -q 'TL blocked TL.33-gone-again — blocked-by TL.32-back' &&
+  grep -q 'reopen: already attempted once' "$LANE_DIR/TL.log" 2>/dev/null &&
+  [ -n "$dur" ] && [ "$dur" -lt 5 ]; then
+  ok "liveness guard: a dead target is blocked-by the beat that last saw it alive in ${dur}s, re-opened exactly once"
+else
+  bad "liveness guard" "dur=[$dur]" "$OUT" "$(cat "$LANE_DIR/TL.log" 2>&1)"
+fi
+dead_rows
+
+# ---- 17: a lane with no re-open declared says so instead of going quiet ----
+
+run_lane noreopen \
+  'lane_begin TL' \
+  'beat TL.34-gone Z1; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
+  'lane_end'
+if printf '%s' "$OUT" | grep -q 'TL blocked TL.34-gone — blocked-by' &&
+  grep -q 'reopen: no re-open command declared' "$LANE_DIR/TL.log" 2>/dev/null; then
+  ok "liveness guard with no lane_reopen: still blocked, and the missing re-open is NAMED"
+else
+  bad "no reopen declared" "$OUT" "$(cat "$LANE_DIR/TL.log" 2>&1)"
+fi
+
+# ---- 18: every wait is bounded and fails fast on a dead target ------------
+
+run_lane waits \
+  'lane_begin TL' \
+  'beat TL.40-wait Z1; target_live TL_CHAT; t0=$SECONDS; wait_last TL_CHAT NEVER 300; rc=$?;
+   printf "WAITLAST rc=%s elapsed=%s why=%s\n" "$rc" "$((SECONDS - t0))" "$LANE_WAIT_WHY"
+   t0=$SECONDS; wait_for 300 false; rc=$?
+   printf "WAITFOR rc=%s elapsed=%s why=%s\n" "$rc" "$((SECONDS - t0))" "$LANE_WAIT_WHY"
+   pass "the waits returned"' \
+  'lane_end'
+lastline="$(printf '%s\n' "$OUT" | grep '^WAITLAST ')"
+forline="$(printf '%s\n' "$OUT" | grep '^WAITFOR ')"
+if printf '%s' "$lastline" | grep -qE 'rc=2 elapsed=([0-9]|1[0-9]) why=.*no live row' &&
+  printf '%s' "$forline" | grep -qE 'rc=2 elapsed=([0-9]|1[0-9]) why=.*no live row'; then
+  ok "waits: wait_last and wait_for abandon a dead target in seconds, not minutes, naming why ($lastline)"
+else
+  bad "bounded waits" "last=[$lastline]" "for=[$forline]" "$OUT"
+fi
+
+# ---- 19: a timeout still reports as a TIMEOUT, not as a dead target -------
+
+live_rows
+run_lane waittimeout \
+  'lane_begin TL' \
+  'beat TL.41-timeout Z1; target_live TL_CHAT; wait_last TL_CHAT NEVER 1; rc=$?;
+   printf "TIMEOUT rc=%s why=%s\n" "$rc" "$LANE_WAIT_WHY"; pass "x"' \
+  'lane_end'
+if printf '%s\n' "$OUT" | grep -qE '^TIMEOUT rc=1 why=.*(timed out|1s)'; then
+  ok "waits: a real timeout on a LIVE target is rc 1 and says it timed out (never 'no live row')"
+else
+  bad "wait timeout" "$(printf '%s\n' "$OUT" | grep '^TIMEOUT ')" "$OUT"
+fi
+dead_rows
+
+# ---- 20: blocked carries a reason beside the beat that blocked it ---------
+
+run_lane blockedwhy \
+  'lane_begin TL' \
+  'beat TL.42-seats Z1; blocked "seats cc:1" "no second seat in this run"' \
+  'lane_end'
+if printf '%s' "$OUT" | grep -q 'TL blocked TL.42-seats — blocked-by seats cc:1 — no second seat in this run'; then
+  ok "blocked: a reason travels beside the blocker ('no second seat in this run')"
+else
+  bad "blocked reason" "$OUT"
+fi
+
+# ---- 21: a failure with no socket still leaves BYTES ----------------------
+
+mkdir -p "$T/tmuxdir"
+: >"$T/tmuxdir/cc-ghost-1"
+: >"$T/tmuxdir/cc-ghost-2"
+export TMUX_TMPDIR="$T/tmuxdir"
+run_lane evidence \
+  'lane_begin TL' \
+  'beat TL.50-dead Z1; target TL_CHAT; fail "nothing answered"' \
+  'lane_end'
+unset TMUX_TMPDIR
+log="$(cat "$LANE_DIR/TL.log" 2>/dev/null)"
+if printf '%s' "$log" | grep -q 'raw-dump: NO SOCKET for TL_CHAT' &&
+  printf '%s' "$log" | grep -q 'raw-dump: pfm ls --tsv' &&
+  printf '%s' "$log" | grep -qP 'kind\tid\tproject' &&
+  printf '%s' "$log" | grep -q 'raw-dump: cc-ghost-1' &&
+  printf '%s' "$log" | grep -q 'raw-dump: cc-ghost-2' &&
+  printf '%s' "$log" | grep -q 'tmux stub: no server'; then
+  ok "failure evidence: no socket → the fleet listing AND a capture attempt per socket under the tmux tmpdir"
+else
+  bad "failure evidence" "$log"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

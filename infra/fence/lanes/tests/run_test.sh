@@ -41,16 +41,20 @@ STUB
 chmod +x "$BIN/docker"
 cat >"$T/root-stub.sh" <<'STUB'
 #!/usr/bin/env bash
-case "${1:-}" in
-  --print-hash) printf 'deadbeefcafe\n' ;;
-  *) printf 'pfm-lane-root:deadbeefcafe\n' ;;
-esac
+printf '%s\n' "$*" >>"${STUB_ROOT_LOG:-/dev/null}"
+# The real root.sh parses its flags in any order, so the stub must too: the
+# runner now passes the seat roster (--accounts N) ahead of the verb.
+for arg in "$@"; do
+  if [ "$arg" = --print-hash ]; then printf 'deadbeefcafe\n'; exit 0; fi
+done
+printf 'pfm-lane-root:deadbeefcafe\n'
 STUB
 chmod +x "$T/root-stub.sh"
 export PATH="$BIN:$PATH"
 export LANE_ROOT_SH="$T/root-stub.sh"
 export LANE_OUT_ROOT="$T/out"
 export STUB_DOCKER_LOG="$T/docker.log"
+export STUB_ROOT_LOG="$T/root.log"
 
 run_sut() { OUT="$(bash "$RUN" "$@" 2>&1)"; RC=$?; }
 
@@ -199,6 +203,42 @@ if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'BUILD (no image for this has
   ok "root image: absent for this hash → the plan says BUILD"
 else
   bad "image decision" "rc=$RC" "$OUT"
+fi
+
+# ---- 13: --seats selects the root's seat roster --------------------------
+# A root built with every seat, driven by a run that was told `--seats cc:1`,
+# offers the lane a second seat it holds no credential for: the account-switch
+# beats then fail for the harness's reason, not the product's.
+
+: >"$T/root.log"
+run_sut --lanes E1 --seats cc:1 --dry-run
+if [ "$RC" -eq 0 ] && grep -q -- '--accounts 1' "$T/root.log" &&
+  printf '%s' "$OUT" | grep -q 'run: seats       cc:1'; then
+  ok "--seats cc:1 reaches the root builder as --accounts 1 (the container roster is the run's seats)"
+else
+  bad "seat plumbing" "rc=$RC" "root.log=[$(cat "$T/root.log")]" "$OUT"
+fi
+
+: >"$T/root.log"
+run_sut --lanes E1 --seats cc:1,cc:2 --dry-run
+if [ "$RC" -eq 0 ] && grep -q -- '--accounts 1,2' "$T/root.log"; then
+  ok "--seats cc:1,cc:2 reaches the root builder as --accounts 1,2"
+else
+  bad "seat plumbing (two seats)" "rc=$RC" "root.log=[$(cat "$T/root.log")]"
+fi
+
+# ---- 14: the root hash covers the seat roster ---------------------------
+# Same tree, different seats = a different container config. One hash for both
+# would serve a one-seat image to a two-seat run and call it REUSE.
+
+REAL_ROOT="$SUT_DIR/root.sh"
+h1="$(bash "$REAL_ROOT" --print-hash --accounts 1 2>&1)"
+h2="$(bash "$REAL_ROOT" --print-hash --accounts 1,2 2>&1)"
+h3="$(bash "$REAL_ROOT" --print-hash --accounts 1 2>&1)"
+if [ -n "$h1" ] && [ "$h1" = "$h3" ] && [ "$h1" != "$h2" ]; then
+  ok "root hash: the seat roster is a hash input ($h1 vs $h2), and it is stable for one roster"
+else
+  bad "root hash over seats" "h1=[$h1] h2=[$h2] h3=[$h3]"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

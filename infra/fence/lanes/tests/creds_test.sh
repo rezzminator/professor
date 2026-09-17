@@ -23,6 +23,8 @@ TOKEN='sk-ant-oat01-LANE-FIXTURE-TOKEN-NEVER-PRINT'
 # CONTAINER's home, which expands it there, not here.
 # shellcheck disable=SC2088
 CONTAINER_SEAT_2='~/.cc/2'
+# shellcheck disable=SC2088 # same rule for seat 1: the ~ belongs to the container
+CONTAINER_SEAT_1='~/.cc/1'
 FAKE_HOME="$T/home"
 mkdir -p "$FAKE_HOME/.cc/1" "$FAKE_HOME/.cc/2" "$FAKE_HOME/.codex" "$FAKE_HOME/.local/share/opencode"
 printf '{"claudeAiOauth":{"accessToken":"%s","refreshToken":"%s"}}\n' "$TOKEN" "$TOKEN" >"$FAKE_HOME/.cc/1/.credentials.json"
@@ -68,25 +70,56 @@ run_sut() {
   RC=$?
 }
 
-# ---- 1: --print-config maps every seat onto the container's ~/.cc/<id> -----
+# ---- 1: --print-config lists ONLY the seats that hold a credential --------
+# Seat 2 has no credential file and seat 3 is logged out, so a container built
+# from this roster must never offer them: a lane that reads two seats out of the
+# config and can only drive one reports the difference as a product failure.
 
 run_sut --print-config --config "$CONFIG"
+roster="$(printf '%s' "$OUT" | grep '^{')"
 if [ "$RC" -eq 0 ] &&
-  [ "$(printf '%s' "$OUT" | jq -r '.accounts | length')" = 3 ] &&
-  [ "$(printf '%s' "$OUT" | jq -r '.accounts[1].configDir')" = "$CONTAINER_SEAT_2" ] &&
-  [ "$(printf '%s' "$OUT" | jq -r '.mcp.servers.chat.enabled')" = true ]; then
-  ok "--print-config: the host roster re-homed on ~/.cc/<id>, both MCP servers enabled"
+  [ "$(printf '%s' "$roster" | jq -r '.accounts | length')" = 1 ] &&
+  [ "$(printf '%s' "$roster" | jq -r '.accounts[0].id')" = 1 ] &&
+  [ "$(printf '%s' "$roster" | jq -r '.accounts[0].configDir')" = "$CONTAINER_SEAT_1" ] &&
+  [ "$(printf '%s' "$roster" | jq -r '.mcp.servers.chat.enabled')" = true ] &&
+  printf '%s' "$OUT" | grep -q 'seat 2 (🥈): NO CREDENTIAL' &&
+  printf '%s' "$OUT" | grep -q 'seat 3 (🥉): NO CREDENTIAL' &&
+  printf '%s' "$OUT" | grep -q 'dropped from the container roster'; then
+  ok "--print-config: only credentialed seats re-homed on ~/.cc/<id>; each dropped seat NAMED"
 else
   bad "print-config" "rc=$RC" "$OUT"
 fi
 
+# ---- 1b: a seat WITH a credential keeps its container path ----------------
+
+printf '{"claudeAiOauth":{"accessToken":"%s"}}\n' "$TOKEN" >"$FAKE_HOME/.cc/2/.credentials.json"
+run_sut --print-config --config "$CONFIG"
+roster="$(printf '%s' "$OUT" | grep '^{')"
+if [ "$RC" -eq 0 ] &&
+  [ "$(printf '%s' "$roster" | jq -r '.accounts | length')" = 2 ] &&
+  [ "$(printf '%s' "$roster" | jq -r '.accounts[1].configDir')" = "$CONTAINER_SEAT_2" ]; then
+  ok "--print-config: a seat that IS logged in stays in the roster on ~/.cc/<id>"
+else
+  bad "print-config credentialed seat" "rc=$RC" "$OUT"
+fi
+rm -f "$FAKE_HOME/.cc/2/.credentials.json"
+
 # ---- 2: --accounts narrows the roster -------------------------------------
 
 run_sut --print-config --config "$CONFIG" --accounts 1
-if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | jq -r '.accounts | length')" = 1 ]; then
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | grep '^{' | jq -r '.accounts | length')" = 1 ]; then
   ok "--accounts 1 narrows the container roster to one seat"
 else
   bad "accounts filter" "rc=$RC" "$OUT"
+fi
+
+# ---- 2b: no requested seat holds a credential → exit 1, named -------------
+
+run_sut --print-config --config "$CONFIG" --accounts 2,3
+if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'not one requested Claude seat holds a credential'; then
+  ok "--print-config over seats that are all logged out exits 1 by name, never an empty roster"
+else
+  bad "print-config empty roster" "rc=$RC" "$OUT"
 fi
 
 # ---- 3: staging — each seat by name, and NOT ONE token byte printed -------
@@ -116,7 +149,7 @@ fi
 
 mv "$FAKE_HOME/.cc/1/.credentials.json" "$T/away.json"
 run_sut --container fake --config "$CONFIG"
-if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'not one Claude seat could be staged'; then
+if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'not one requested Claude seat holds a credential'; then
   ok "zero seats staged: exit 1 with the named reason, never an empty success"
 else
   bad "zero seats" "rc=$RC" "$OUT"

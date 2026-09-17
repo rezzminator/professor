@@ -59,6 +59,14 @@ while [ $# -gt 0 ]; do
 done
 case "$ROOT_MODE" in reuse|rebuild) ;; *) echo "run: --root takes reuse|rebuild, not '$ROOT_MODE'" >&2; exit 2 ;; esac
 
+# The run's Claude seats ARE the root's seat roster: `--seats cc:1` builds a
+# container whose pfm config lists seat 1 only, so a lane can never read a
+# second seat out of the config and then find nothing staged for it. The
+# selection is a root-hash input (root.sh), so a one-seat image is never reused
+# for a two-seat run. No cc: seat named leaves the roster at the host's own.
+ACCOUNTS="$(printf '%s\n' $SEATS | awk -F: '/^cc:/ { printf "%s%s", sep, $2; sep = "," }')"
+root_sh() { bash "$ROOT_SH" ${ACCOUNTS:+--accounts "$ACCOUNTS"} "$@"; }
+
 # The beat library is the one ledger parser: run.sh never re-reads known-gaps.yml
 # with its own rules. Both variables below are read by lib.sh on the next line.
 # shellcheck disable=SC2034
@@ -161,7 +169,7 @@ fi
 
 # ─── the root image ─────────────────────────────────────────────────────────
 
-HASH="$(bash "$ROOT_SH" --print-hash 2>&1)" || die "root hash: $HASH" 2
+HASH="$(root_sh --print-hash 2>&1)" || die "root hash: $HASH" 2
 IMAGE="pfm-lane-root:$HASH"
 if [ "$ROOT_MODE" = rebuild ]; then
   ROOT_DECISION="REBUILD (--root rebuild)"
@@ -198,7 +206,7 @@ OUT="$OUT_ROOT/$STAMP"
 if [ "$DRY" -eq 1 ]; then
   say "run: PLAN (--dry-run — nothing was executed, no container, no model turn)"
   say "run: mode        $MODE"
-  say "run: root hash   $HASH (pfm/**, templates/**, docs/SETUP.md, infra/fence/**)"
+  say "run: root hash   $HASH (pfm/**, templates/**, docs/SETUP.md, infra/fence/**, seats ${ACCOUNTS:-<all>})"
   say "run: root image  $IMAGE — $ROOT_DECISION"
   say "run: lane order  $(printf '%s' "$ORDER" | tr ' ' '>' | sed 's/>/ → /g')"
   say "run: seats       $SEATS"
@@ -225,9 +233,9 @@ docker info >/dev/null 2>&1 || die "TOOLCHAIN-MISSING — the docker daemon is n
 
 mkdir -p "$OUT" || die "cannot write $OUT" 2
 if [ "$ROOT_MODE" = rebuild ]; then
-  bash "$ROOT_SH" --rebuild >"$OUT/root.log" || { tail -n 40 "$OUT/root.log" >&2; die "the root image could not be rebuilt — full build output: $OUT/root.log" 1; }
+  root_sh --rebuild >"$OUT/root.log" || { tail -n 40 "$OUT/root.log" >&2; die "the root image could not be rebuilt — full build output: $OUT/root.log" 1; }
 elif ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  bash "$ROOT_SH" >"$OUT/root.log" || { tail -n 40 "$OUT/root.log" >&2; die "the root image could not be built — full build output: $OUT/root.log" 1; }
+  root_sh >"$OUT/root.log" || { tail -n 40 "$OUT/root.log" >&2; die "the root image could not be built — full build output: $OUT/root.log" 1; }
 fi
 docker image inspect "$IMAGE" >/dev/null 2>&1 || die "no image $IMAGE after the root build — nothing to run" 1
 

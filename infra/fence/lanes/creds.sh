@@ -11,6 +11,12 @@
 # host's seat roster with container-local dirs — `--print-config` prints exactly
 # that JSON and root.sh writes it, so the mapping has one author.
 #
+# The roster carries ONLY seats this host can actually log in: a seat with no
+# usable credential is dropped by name (`seat 2 (🥈): NO CREDENTIAL — …;
+# dropped from the container roster`) in BOTH modes. A config that offers a seat
+# nothing was staged for makes the lane spend a beat switching onto a seat that
+# cannot answer, and the ✗ lands on the product for the harness's mistake.
+#
 # Two credential paths, one per platform:
 #   darwin  each seat's OAuth blob comes from the Keychain — infra/demo/creds.sh
 #           is the reader, called once per seat so a failure names the seat id.
@@ -27,8 +33,10 @@
 #
 # BROKEN STATE: every configured seat is reported by name — `seat 2 (🥈): NO
 # CREDENTIAL — <why>` — and the closing line counts both sides
-# (`creds: 3 staged · 2 NO CREDENTIAL · Claude seats staged: 1`). Exit 1 only when NOT ONE Claude seat
-# was staged (a container that can run no lane at all); a missing Codex or
+# (`creds: 3 staged · 2 NO CREDENTIAL · Claude seats staged: 1`). Exit 1 when no
+# requested seat holds a credential at all (the roster would be empty) and,
+# separately, when a roster seat could not be STAGED — a logged-out host and a
+# container that would not take the copy are different findings; a missing Codex or
 # OpenCode auth is named and non-fatal, since only E2/E3 need them. An
 # unreadable config, or docker not answering, exits 2 before anything is copied.
 set -uo pipefail
@@ -55,11 +63,58 @@ command -v jq >/dev/null || fatal "TOOLCHAIN-MISSING — jq"
 
 expand() { case "$1" in "~"*) printf '%s' "$HOME${1#\~}" ;; *) printf '%s' "$1" ;; esac; }
 
-# The container's config: the host's seats re-homed on ~/.cc/<id>, one Codex
+staged=0 seats_staged=0 absent=0
+report_absent() { echo "creds: $1" >&2; absent=$((absent + 1)); }
+
+is_darwin() { [ "$(uname -s)" = Darwin ]; }
+
+# seat_credential_why <host-config-dir> — empty when this host holds a usable
+# credential for that seat, otherwise the reason it cannot be staged. ONE
+# implementation: the roster filter below and the staging loop ask the same
+# question, so a seat can never be offered to a lane and then not staged.
+seat_credential_why() {
+  if is_darwin; then
+    # Only the Keychain reader (infra/demo/creds.sh) can answer, and it needs a
+    # container — so on darwin presence is proven at staging time, per seat.
+    return 0
+  fi
+  if [ ! -s "$1/.credentials.json" ]; then
+    printf '%s' "$1/.credentials.json is missing or empty (log this seat in on the host, or inside the container)"
+    return 0
+  fi
+  if ! jq -e '.claudeAiOauth.accessToken | strings | length > 0' "$1/.credentials.json" >/dev/null 2>&1; then
+    printf '%s' "$1/.credentials.json carries no claudeAiOauth.accessToken (logged out on this host)"
+  fi
+}
+
+# The seats this container may offer: the requested ones MINUS every seat this
+# host cannot log in. A roster listing a seat with no credential is the harness
+# lying to the lane — the lane reads it as a second seat, spends a beat
+# switching onto it, and the ✗ belongs to nobody.
+KEPT=""
+while IFS=$'\t' read -r id host_dir; do
+  [ -n "$id" ] || continue
+  why="$(seat_credential_why "$(expand "$host_dir")")"
+  emoji="$(jq -r --argjson want "$id" '.accounts[] | select(.id == $want) | .emoji // ""' "$CONFIG")"
+  if [ -n "$why" ]; then
+    report_absent "seat $id ($emoji): NO CREDENTIAL — $why; dropped from the container roster"
+    continue
+  fi
+  KEPT="$KEPT${KEPT:+,}$id"
+done < <(jq -r --arg ids "$ACCOUNTS" '
+  (if $ids == "" then [.accounts[].id] else ($ids | split(",") | map(tonumber)) end) as $want
+  | .accounts[] | select(.id as $id | $want | index($id)) | "\(.id)\t\(.configDir)"' "$CONFIG")
+
+if [ -z "$KEPT" ]; then
+  echo "creds: not one requested Claude seat holds a credential (asked for ${ACCOUNTS:-<all>}) — the container roster would be empty and the container can run no lane" >&2
+  exit 1
+fi
+
+# The container's config: the KEPT seats re-homed on ~/.cc/<id>, one Codex
 # home, the OpenCode home, both MCP servers on. `accounts` order is the host's.
 container_config() {
-  jq -c --arg ids "$ACCOUNTS" '
-    (if $ids == "" then [.accounts[].id] else ($ids | split(",") | map(tonumber)) end) as $want
+  jq -c --arg ids "$KEPT" '
+    ($ids | split(",") | map(tonumber)) as $want
     | {version: 2,
        accounts: [.accounts[] | select(.id as $id | $want | index($id)) | {id, configDir: ("~/.cc/" + (.id | tostring)), emoji}],
        codex: {homes: [{id: 1, home: "~/.codex", emoji: "🥇"}]},
@@ -88,11 +143,6 @@ put() {
     sh "$1"
 }
 
-staged=0 seats_staged=0 absent=0
-report_absent() { echo "creds: $1" >&2; absent=$((absent + 1)); }
-
-is_darwin() { [ "$(uname -s)" = Darwin ]; }
-
 # ── Claude seats ────────────────────────────────────────────────────────────
 while IFS=$'\t' read -r id cont_dir emoji; do
   # The container dir comes from the mapped config; the HOST dir from the host
@@ -113,14 +163,8 @@ while IFS=$'\t' read -r id cont_dir emoji; do
     fi
     continue
   fi
-  if [ ! -s "$host_dir/.credentials.json" ]; then
-    report_absent "seat $id ($emoji): NO CREDENTIAL — $host_dir/.credentials.json is missing or empty (log this seat in on the host, or inside the container)"
-    continue
-  fi
-  if ! jq -e '.claudeAiOauth.accessToken | strings | length > 0' "$host_dir/.credentials.json" >/dev/null 2>&1; then
-    report_absent "seat $id ($emoji): NO CREDENTIAL — $host_dir/.credentials.json carries no claudeAiOauth.accessToken (logged out on this host)"
-    continue
-  fi
+  # The roster filter above already refused every seat with no usable
+  # credential, so reaching here means the file was readable a moment ago.
   if size="$(put "$cont_dir/.credentials.json" <"$host_dir/.credentials.json")"; then
     echo "creds: seat $id ($emoji) staged → $cont_dir/.credentials.json ($size bytes)"
     staged=$((staged + 1)) seats_staged=$((seats_staged + 1))
@@ -174,7 +218,7 @@ fi
 
 echo "creds: $staged staged · $absent NO CREDENTIAL · Claude seats staged: $seats_staged"
 if [ "$seats_staged" -eq 0 ]; then
-  echo "creds: not one Claude seat could be staged — the container can run no lane" >&2
+  echo "creds: the roster held seat(s) $KEPT but not one could be STAGED into $NAME — the container can run no lane" >&2
   exit 1
 fi
 exit 0

@@ -34,6 +34,7 @@ C29	E1	E1.13-last-read-stream
 C30	E1	E1.13-last-read-stream
 C31	E1	E1.13-last-read-stream
 C32	E1	E1.16-inject
+C32	E1	E1.26-resolver-duplicate-candidate
 C32	E2	E2.07-inject-ask-watch
 C32	F	F.18-e1-chat-survives-storm
 C33	E1	E1.16-inject

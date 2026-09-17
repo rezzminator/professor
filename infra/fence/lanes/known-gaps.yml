@@ -34,6 +34,12 @@ gaps:
     date: 2026-09-17
     expires: 2026-10-15
     arch: linux-arm64
+  - beat: E1.26-resolver-duplicate-candidate
+    landscape_id: C32
+    why: "the roster resolver reports a name held by ONE live row and its own resume row as ambiguous, and names the same session id as both candidates (`excerpt is ambiguous between <sid> and <sid>`) — the duplicate-candidate bug fixed outside this lane; until it lands, every name-addressed verb refuses a chat that /reload --new has left a resume row behind"
+    owner: GOD
+    date: 2026-09-17
+    expires: 2026-10-15
   - beat: O1.08-duplicate-seat-login
     landscape_id: none
     why: "pfm doctor does not name two seats holding one account; the advisory lands with Wave 3 B5a (also Wave 8 item 4)"

@@ -22,8 +22,9 @@
 #
 # <hash> = sha256 over the tracked content of pfm/**, templates/**,
 # docs/SETUP.md, infra/fence/** (`git ls-files -s`) PLUS the worktree's dirty
-# diff and its untracked files there — so an uncommitted edit changes the hash
-# and can never be served by a stale image. Same hash → the image is reused and
+# diff and its untracked files there, AND the `--accounts` seat roster this root
+# is built for — so an uncommitted edit or a different seat selection changes the
+# hash and can never be served by a stale image. Same hash → the image is reused and
 # said so by name; the ~15-minute interview is paid once per template change.
 #
 # The image carries real seat tokens. It is LOCAL ONLY: this script never runs
@@ -73,6 +74,10 @@ sha256_stdin() {
 # diff against HEAD, and every untracked file's blob hash. A failure in ANY of
 # the three is fatal — a hash over a partial list would silently reuse a stale image.
 hash_inputs() {
+  # The seat roster is part of what this image IS: a root built for --accounts 1
+  # carries a one-seat pfm config, and serving it to a two-seat run would answer
+  # REUSE for a machine that cannot run those lanes.
+  printf 'accounts:%s\n' "${ACCOUNTS:-<all>}"
   git -C "$ROOT" ls-files -s -- $HASH_PATHS || return 1
   git -C "$ROOT" diff HEAD -- $HASH_PATHS || return 1
   git -C "$ROOT" ls-files -o --exclude-standard -- $HASH_PATHS |

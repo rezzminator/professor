@@ -57,23 +57,31 @@ need "the pfm MCP daemon on :$PORT" \
 
 # ─── E1.01 — the spawn ceremony ─────────────────────────────────────────────
 
+# open_main — the lane's chat, opened the one way: E1.01 spawns it and the
+# library's single re-open (lane_reopen) spends the same command after the
+# chat dies under a later beat.
+open_main() {
+  pfm chat new --name "$CHAT" --engine cc --account "$SEAT" --cwd "$CWD" --await --timeout 300 \
+    "You are $CHAT, the chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says, nothing more." 2>&1
+}
+lane_reopen 'open_main'
+
 beat E1.01-open-seat1 K1
 spends "cc:$SEAT"
 target "$CHAT"
 if live_chat "$CHAT"; then
-  pass "$CHAT was already live (the sequence built it): kind $(row_field "$CHAT" 1) · account $(row_field "$CHAT" 9)"
+  pass "$CHAT was already live (the sequence built it): kind $(live_field "$CHAT" 1) · account $(live_field "$CHAT" 9)"
 else
-  out="$(pfm chat new --name "$CHAT" --engine cc --account "$SEAT" --cwd "$CWD" --await --timeout 300 \
-    "You are $CHAT, the chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says, nothing more." 2>&1)"
+  out="$(open_main)"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     fail "pfm chat new exited $rc: $(one_line "$out")"
   elif ! live_chat "$CHAT"; then
     fail "chat new exited 0 but no live row for $CHAT: $(one_line "$(pfm ls --plain)")"
-  elif [ "$(row_field "$CHAT" 9)" != "$SEAT" ]; then
-    fail "the row reports account $(row_field "$CHAT" 9), not the requested $SEAT"
+  elif [ "$(live_field "$CHAT" 9)" != "$SEAT" ]; then
+    fail "the row reports account $(live_field "$CHAT" 9), not the requested $SEAT"
   else
-    pass "live row, kind $(row_field "$CHAT" 1), account $SEAT, socket $(row_field "$CHAT" 11)"
+    pass "live row, kind $(live_field "$CHAT" 1), account $SEAT, socket $(live_field "$CHAT" 11)"
   fi
 fi
 
@@ -81,7 +89,7 @@ fi
 
 beat E1.02-statusline-theme T31 T33 T35
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
   theme="$(jq -r '.theme // ""' "$SEAT_DIR/settings.json" 2>&1)" ||
@@ -89,13 +97,19 @@ if requires E1.01-open-seat1; then
   case "$theme" in custom:professor-*) ;; *) bad="$bad theme=${theme:-<none>} (want custom:professor-*);" ;; esac
   tui="$(jq -r '.tui // ""' "$SEAT_DIR/settings.json" 2>/dev/null)"
   [ "$tui" = fullscreen ] || bad="$bad tui=${tui:-<none>};"
-  sock="$(row_field "$CHAT" 11)"
-  window="$(tmux -S "$sock" list-windows -F '#{window_name}' 2>&1)"
-  case "$window" in *"$CHAT"*) ;; *) bad="$bad tmux window name '$(one_line "$window")' does not carry the label;" ;; esac
+  # The socket comes from the LIVE row read at this beat, never from an earlier
+  # beat's value: a reboot in between moves the chat and the old socket answers
+  # "error connecting to …" — an error that must never be read as a window name.
+  sock="$(live_field "$CHAT" 11)"
+  if window="$(tmux -S "$sock" list-windows -F '#{window_name}' 2>&1)"; then
+    case "$window" in *"$CHAT"*) ;; *) bad="$bad tmux window name '$(one_line "$window")' does not carry the label;" ;; esac
+  else
+    bad="$bad tmux list-windows FAILED on the live socket $sock ($(one_line "$window")) — the window name could not be read at all;"
+  fi
   # Exit code AND output: an error message on stderr is not a render, and a
   # check that accepts either cannot tell a healthy statusline from a broken one.
   render="$(printf '{"session_id":"%s","model":{"display_name":"sonnet"},"workspace":{"current_dir":"%s"}}' \
-    "$(row_field "$CHAT" 2)" "$CWD" | pfm statusline 2>&1)"
+    "$(live_field "$CHAT" 2)" "$CWD" | pfm statusline 2>&1)"
   render_rc=$?
   [ "$render_rc" -eq 0 ] || bad="$bad pfm statusline exited $render_rc ($(one_line "$render"));"
   [ -n "$render" ] || bad="$bad pfm statusline rendered nothing;"
@@ -119,25 +133,29 @@ reload_via_pane() {
     REPLY_WHY="pfm chat inject refused the /reload prompt: $(one_line "$out")"
     return 1
   }
-  wait_last "$CHAT" "$needle" 300 || {
-    REPLY_WHY="no $needle from $CHAT in 300s; its last: $(one_line "$(pfm chat last "$CHAT" 2>&1)")"
-    return 1
-  }
-  return 0
+  wait_last "$CHAT" "$needle" 300
+  case $? in
+    0) return 0 ;;
+    2) REPLY_WHY="$LANE_WAIT_WHY (waiting for $needle)"; return 1 ;;
+    *) REPLY_WHY="no $needle from $CHAT in 300s; its last: $(one_line "$(pfm chat last "$CHAT" 2>&1)")"; return 1 ;;
+  esac
 }
 
 beat E1.03-reload-account C50
-spends "cc:$ALT"
-target "$CHAT"
+spends "cc:${ALT:-none}"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   if [ -z "$ALT" ]; then
-    fail "only one Claude seat is configured — /reload --account cannot be asserted (configure a second seat in the root)"
+    # Not a failure: this run was given one seat, so there is no second seat to
+    # reboot onto. The roster the container carries IS the run's --seats
+    # (lanes/creds.sh), so an empty ALT is the run's own shape, not a defect.
+    blocked "seats $LANE_SEATS" "no second seat in this run — /reload --account needs two credentialed seats (run with --seats cc:1,cc:2)"
   else
-    before="$(row_field "$CHAT" 9)"
+    before="$(live_field "$CHAT" 9)"
     if ! reload_via_pane RELOADED-ACCT --account "$ALT"; then
       fail "$REPLY_WHY"
-    elif [ "$(row_field "$CHAT" 9)" != "$ALT" ]; then
-      fail "the steer ran but the row still reports account $(row_field "$CHAT" 9) (was $before, asked for $ALT)"
+    elif [ "$(live_field "$CHAT" 9)" != "$ALT" ]; then
+      fail "the steer ran but the row still reports account $(live_field "$CHAT" 9) (was $before, asked for $ALT)"
     else
       pass "rebooted in place onto seat $ALT (row account $before → $ALT) and ran its --then steer"
     fi
@@ -145,8 +163,8 @@ if requires E1.01-open-seat1; then
 fi
 
 beat E1.04-reload-model-effort C51 C52
-spends "cc:$ALT"
-target "$CHAT"
+spends "cc:${ALT:-$SEAT}"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   if ! reload_via_pane RELOADED-MODEL --model sonnet --effort medium; then
     fail "$REPLY_WHY"
@@ -158,8 +176,8 @@ if requires E1.01-open-seat1; then
 fi
 
 beat E1.05-reload-1h C53 K26
-spends "cc:$ALT"
-target "$CHAT"
+spends "cc:${ALT:-$SEAT}"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   if ! reload_via_pane RELOADED-1H-ON --1h on; then
     fail "--1h on: $REPLY_WHY"
@@ -173,33 +191,108 @@ if requires E1.01-open-seat1; then
   fi
 fi
 
+# reload_new_on_socket <flags…> — `/reload --new` followed BY SOCKET, not by
+# name. The reboot takes the name with it: the old session id keeps `$CHAT` as a
+# resume row and the fresh live session is auto-named from its own steer
+# ("Reloaded-new"), so a name-addressed wait sits on a dead conversation. The
+# socket is unchanged across the reboot (column 11), so the fresh session id
+# appearing on it IS the assertion. Prints nothing; $REPLY_WHY on failure,
+# $NEW_ID and $NEW_NAME on success.
+NEW_ID="" NEW_NAME=""
+reload_new_on_socket() {
+  local sock="$1" was="$2" out
+  shift 2
+  REPLY_WHY="" NEW_ID="" NEW_NAME=""
+  out="$(pfm chat inject --allow-unsigned "$CHAT" "/reload $* --then \"reply with exactly one word: RELOADED-NEW\"" 2>&1)" || {
+    REPLY_WHY="pfm chat inject refused the /reload prompt: $(one_line "$out")"
+    return 1
+  }
+  if ! wait_for 300 "[ -n \"\$(socket_field '$sock' 2)\" ] && [ \"\$(socket_field '$sock' 2)\" != '$was' ]"; then
+    REPLY_WHY="no fresh session id on socket $sock in 300s (it still reads '$(socket_field "$sock" 2)'); ${LANE_WAIT_WHY:-no wait reason recorded}"
+    return 1
+  fi
+  NEW_ID="$(socket_field "$sock" 2)"
+  NEW_NAME="$(socket_field "$sock" 5)"
+  return 0
+}
+
 beat E1.06-reload-new C54 C55 L33
-spends "cc:$ALT"
-target "$CHAT"
+spends "cc:${ALT:-$SEAT}"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
-  id_before="$(row_field "$CHAT" 2)"
-  if ! reload_via_pane RELOADED-NEW --new; then
+  sock="$(live_field "$CHAT" 11)"
+  id_before="$(socket_field "$sock" 2)"
+  anchor_socket "$sock" # from here the NAME is not a handle; the socket is
+  observed=""
+  if ! reload_new_on_socket "$sock" "$id_before" --new; then
     fail "--new: $REPLY_WHY"
-  elif [ "$(row_field "$CHAT" 2)" = "$id_before" ]; then
-    fail "--new kept the same session id $id_before — it must open a fresh session"
   else
-    id_new="$(row_field "$CHAT" 2)"
-    if ! reload_via_pane RELOADED-NEWHIDE --new --hide; then
-      fail "--new --hide: $REPLY_WHY (plain --new had already produced $id_new)"
+    id_new="$NEW_ID"
+    # ASSERTED OBSERVATION, not a verdict: `--new` does not carry the chat's
+    # name onto the reborn session — the name stays with the id left behind
+    # (now a resume row) and the live session is auto-named from its steer.
+    # Whether that is the product's intent is the owner's ruling; the lane
+    # records what it saw and renames the live session back so later beats,
+    # which address the chat BY NAME, resolve at all.
+    observed="observed: after --new the live session on $sock is named '$NEW_NAME' (the label '$CHAT' stayed with the id left behind)"
+    if [ "$NEW_NAME" != "$CHAT" ]; then
+      name_out="$(pfm chat name "$id_new" "$CHAT" 2>&1)"
+      name_rc=$?
+      sleep 2
     else
-      visible="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" '$5 == n && $10 == "false" { c++ } END { print c + 0 }')"
+      name_out="the reborn session already carried the label" name_rc=0
+    fi
+    if [ "$id_new" = "$id_before" ]; then
+      fail "--new kept the same session id $id_before on socket $sock — it must open a fresh session"
+    elif [ "$name_rc" -ne 0 ] || [ "$(socket_field "$sock" 5)" != "$CHAT" ]; then
+      fail "the reborn session could not be renamed back to $CHAT (pfm chat name exited $name_rc: $(one_line "$name_out")); the row on $sock reads '$(socket_field "$sock" 5)' — $observed"
+    elif ! reload_new_on_socket "$sock" "$id_new" --new --hide; then
+      fail "--new --hide: $REPLY_WHY (plain --new had already produced $id_new) — $observed"
+    else
+      id_hide="$NEW_ID"
+      [ "$NEW_NAME" = "$CHAT" ] || pfm chat name "$id_hide" "$CHAT" >/dev/null 2>&1
+      sleep 2
+      visible="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $10 == "false" { c++ } END { print c + 0 }')"
       if [ "$visible" -ne 1 ]; then
-        fail "after --new --hide, $visible unhidden rows carry the name $CHAT (want exactly 1: the new session)"
+        fail "after --new --hide, $visible unhidden rows carry the name $CHAT (want exactly 1: the new session) — $observed"
       else
-        pass "fresh session ids $id_before → $id_new → $(row_field "$CHAT" 2); --hide left exactly one visible row"
+        pass "fresh session ids $id_before → $id_new → $id_hide on one unchanged socket $sock; --hide left exactly one visible row · $observed"
       fi
     fi
   fi
 fi
 
+# ─── E1.26 — one live row plus its own resume row is not "ambiguous" ─────────
+# Placed here, and nowhere else: E1.06's `--new` is what leaves the name held by
+# a live session AND the conversation it replaced, which is the shape the
+# resolver has to get right for every later name-addressed beat.
+
+beat E1.26-resolver-duplicate-candidate C32
+spends "cc:$SEAT"
+target_live "$CHAT"
+if requires E1.01-open-seat1; then
+  live_rows="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $1 ~ /^live-/ { c++ } END { print c + 0 }')"
+  resume_rows="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $1 !~ /^live-/ { c++ } END { print c + 0 }')"
+  if [ "$live_rows" -ne 1 ] || [ "$resume_rows" -lt 1 ]; then
+    fail "the shape this beat exists to assert is not present: $live_rows live row(s) and $resume_rows resume row(s) carry '$CHAT' (want exactly 1 live plus at least its own resume row) — nothing was asserted"
+  else
+    out="$(pfm chat inject --allow-unsigned "$CHAT" "reply with exactly one word: RESOLVE-OK" 2>&1)"
+    rc=$?
+    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qi 'ambiguous'; then
+      known E1.26-resolver-duplicate-candidate
+    elif [ "$rc" -ne 0 ]; then
+      fail "inject on a name held by one live row and $resume_rows resume row(s) exited $rc for another reason: $(one_line "$out")"
+    elif ! wait_last "$CHAT" RESOLVE-OK 240; then
+      fail "the inject was accepted but never landed: ${LANE_WAIT_WHY:-no wait reason recorded}"
+    else
+      pass "'$CHAT' resolved to its one live row with $resume_rows resume row(s) of its own beside it"
+    fi
+  fi
+fi
+
 beat E1.07-reload-then C56 X39
-spends "cc:$ALT"
-target "$CHAT"
+spends "cc:${ALT:-$SEAT}"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   if ! reload_via_pane THEN-OK; then
     fail "$REPLY_WHY"
@@ -209,30 +302,26 @@ if requires E1.01-open-seat1; then
 fi
 
 beat E1.08-reload-sock C57
-spends "cc:$ALT"
-target "$CHAT"
+spends "cc:${ALT:-$SEAT}"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
-  sock="$(row_field "$CHAT" 11)"
-  if [ -z "$sock" ]; then
-    fail "no socket in the row for $CHAT — --sock cannot be asserted"
+  sock="$(live_field "$CHAT" 11)"
+  out="$(pfm chat reload --sock "$sock" --then "reply with exactly one word: SOCK-OK" 2>&1)"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    fail "pfm chat reload --sock $sock exited $rc: $(one_line "$out")"
+  elif ! wait_last "$CHAT" SOCK-OK 300; then
+    fail "reload --sock accepted but no SOCK-OK: ${LANE_WAIT_WHY:-no wait reason recorded}; last: $(one_line "$(pfm chat last "$CHAT" 2>&1)")"
   else
-    out="$(pfm chat reload --sock "$sock" --then "reply with exactly one word: SOCK-OK" 2>&1)"
-    rc=$?
-    if [ "$rc" -ne 0 ]; then
-      fail "pfm chat reload --sock $sock exited $rc: $(one_line "$out")"
-    elif ! wait_last "$CHAT" SOCK-OK 300; then
-      fail "reload --sock accepted but no SOCK-OK in 300s; last: $(one_line "$(pfm chat last "$CHAT" 2>&1)")"
-    else
-      pass "reload addressed by its own socket $sock rebooted and steered"
-    fi
+    pass "reload addressed by its own socket $sock rebooted and steered"
   fi
 fi
 
 # ─── E1.09 — /reload typed WHILE the chat is busy ───────────────────────────
 
 beat E1.09-reload-while-busy L32 X35 X36 L34
-spends "cc:$ALT"
-target "$CHAT"
+spends "cc:${ALT:-$SEAT}"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   busy="$(pfm chat inject --allow-unsigned "$CHAT" \
     "Count from 1 to 40, one number per line, pausing about a second between numbers. Do not stop early." 2>&1)"
@@ -246,7 +335,7 @@ if requires E1.01-open-seat1; then
   # client's MESSAGE LOG, not in the pane scrollback — both surfaces are read,
   # and the failure names both, so "not on the pane" is never mistaken for
   # "never announced".
-  sock="$(row_field "$CHAT" 11)"
+  sock="$(live_field "$CHAT" 11)"
   hold=""
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     hold="$({ tmux -S "$sock" show-messages 2>&1; pane "$CHAT"; } |
@@ -269,16 +358,21 @@ fi
 
 beat E1.10-reload-credential K23
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   if [ -z "$ALT" ]; then
-    fail "only one Claude seat is configured — the absent-credential refusal cannot be asserted"
+    blocked "seats $LANE_SEATS" "no second seat in this run — the absent-credential refusal needs a seat to reload ONTO (run with --seats cc:1,cc:2)"
   else
     alt_dir="$(jq -r --argjson want "$ALT" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")"
     case "$alt_dir" in "~"*) alt_dir="$HOME${alt_dir#\~}" ;; esac
     moved=0
     if [ -f "$alt_dir/.credentials.json" ]; then mv "$alt_dir/.credentials.json" "$alt_dir/.credentials.json.lane"; moved=1; fi
-    out="$(pfm chat reload --sock "$(row_field "$CHAT" 11)" --account "$ALT" 2>&1)"
+    # --sock is the ONE handle a caller outside the pane has: with it,
+    # reloadTarget takes the socket's single live pane; without it the command
+    # falls to ambient identity and refuses ("this chat is not inside tmux").
+    # The socket is read from the LIVE row here, never carried from an earlier beat.
+    sock="$(live_field "$CHAT" 11)"
+    out="$(pfm chat reload --sock "$sock" --account "$ALT" 2>&1)"
     rc=$?
     pane_txt="$(pane "$CHAT" | tail -6)"
     [ "$moved" -eq 1 ] && mv "$alt_dir/.credentials.json.lane" "$alt_dir/.credentials.json"
@@ -309,7 +403,7 @@ ROLE
   out="$(pfm chat new --name "$ROLE_CHAT" --engine cc --account "$SEAT" --cwd "$CWD" --role lane-role \
     --await --timeout 300 "Reply with one word: ready." 2>&1)"
   rc=$?
-  sock="$(row_field "$ROLE_CHAT" 11)"
+  sock="$(live_field "$ROLE_CHAT" 11)"
   crumb=""
   for candidate in "$SID_DIR"/role-*; do
     [ -f "$candidate" ] || continue
@@ -336,7 +430,7 @@ fi
 
 beat E1.12-status C22 C23 C24 C25 C26 C27 L5
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
   base="$(pfm chat status "$CHAT" 2>&1)" || bad="$bad status base exited non-zero ($(one_line "$base"));"
@@ -368,7 +462,7 @@ fi
 
 beat E1.13-last-read-stream C28 C29 C30 C31
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
   last="$(pfm chat last "$CHAT" 2>&1)" || bad="$bad last exited non-zero;"
@@ -376,17 +470,32 @@ if requires E1.01-open-seat1; then
   tail_out="$(pfm chat read "$CHAT" --tail 2 --condensed 2>&1)" || bad="$bad read --tail 2 --condensed exited non-zero ($(one_line "$tail_out"));"
   json="$(pfm chat read "$CHAT" --json 2>&1)" || bad="$bad read --json exited non-zero;"
   printf '%s' "$json" | jq -e . >/dev/null 2>&1 || bad="$bad read --json is not JSON: $(one_line "$json");"
-  # C30, the excerpt-file form: read the transcript by PATH, not by target.
-  jsonl="$(find "$SEAT_DIR/projects" -name "$(row_field "$CHAT" 2)*.jsonl" 2>/dev/null | head -1)"
-  if [ -z "$jsonl" ]; then
-    bad="$bad no transcript file for session $(row_field "$CHAT" 2) under $SEAT_DIR/projects (the excerpt-file form cannot be asserted);"
+  # C30, the excerpt-file form. `pfm chat read` takes a TARGET or an EXCERPT
+  # FILE — a regular file whose extension is NOT .jsonl (cmd/pfm/chat_command.go
+  # runChatRead): its CONTENT is matched against every transcript, the same
+  # search `pfm chat find <excerpt-file>` prints. A transcript PATH is neither:
+  # it falls through to the target form and is refused as "no chat named …".
+  sid="$(live_field "$CHAT" 2)"
+  excerpt=/tmp/e1-excerpt.txt
+  printf '%s\n' "$last" | tail -3 >"$excerpt"
+  if [ ! -s "$excerpt" ]; then
+    bad="$bad the chat's last answer was empty, so no excerpt could be written — the excerpt-file form was NOT asserted;"
   else
-    file_read="$(pfm chat read "$jsonl" --tail 1 2>&1)" || bad="$bad read <transcript path> exited non-zero ($(one_line "$file_read"));"
+    found="$(pfm chat find "$excerpt" 2>&1)"
+    found_rc=$?
+    [ "$found_rc" -eq 0 ] || bad="$bad chat find <excerpt-file> exited $found_rc ($(one_line "$found"));"
+    printf '%s' "$found" | grep -qF "$sid" ||
+      bad="$bad chat find matched a session other than the chat's own $sid: $(one_line "$found");"
+    file_read="$(pfm chat read "$excerpt" 20 2>&1)"
+    file_rc=$?
+    [ "$file_rc" -eq 0 ] || bad="$bad chat read <excerpt-file> exited $file_rc ($(one_line "$file_read"));"
+    printf '%s' "$file_read" | grep -q 'Extracted ->' ||
+      bad="$bad chat read <excerpt-file> did not report the extracted file: $(one_line "$file_read");"
   fi
   stream="$(timeout 60 pfm chat stream "$CHAT" --from-start --no-follow 2>&1 | head -20)"
   [ -n "$stream" ] || bad="$bad stream --from-start --no-follow printed nothing;"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "last, read (--tail/--condensed/--json/by-path $(basename "$jsonl")), stream all read the transcript from outside"
+    pass "last, read (--tail/--condensed/--json), find + read by EXCERPT FILE onto session $sid, stream — all from outside"
   fi
 fi
 
@@ -394,7 +503,7 @@ fi
 
 beat E1.14-capture-keys C41 C42
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   cap="$(pfm chat capture "$CHAT" 2>&1)"
   rc=$?
@@ -420,7 +529,7 @@ fi
 
 beat E1.15-ask C39
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   out="$(pfm chat ask "$CHAT" --timeout 240 "reply with exactly one word: ASK-OK" 2>&1)"
   rc=$?
@@ -437,7 +546,7 @@ fi
 
 beat E1.16-inject C32 C33 C34 C35 C36 C37 L27 L28 L29 L30 L31
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
   pfm chat inject --allow-unsigned "$CHAT" "reply with exactly one word: INJECT-OK" >/dev/null 2>&1 ||
@@ -482,7 +591,7 @@ fi
 
 beat E1.17-watch C40
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   out="$(timeout 240 pfm chat watch "$CHAT" --idle-after 10 --once 2>&1)"
   rc=$?
@@ -499,15 +608,15 @@ fi
 
 beat E1.18-name C44 C45 K12
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   grouped="$CHAT:lane"
-  sock="$(row_field "$CHAT" 11)"
+  sock="$(live_field "$CHAT" 11)"
   out="$(pfm chat name "$CHAT" "$grouped" 2>&1)"
   rc=$?
   sleep 3
   window="$(tmux -S "$sock" list-windows -F '#{window_name}' 2>/dev/null | head -1)"
-  row_name="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v s="$sock" '$11 == s { print $5; exit }')"
+  row_name="$(socket_field "$sock" 5)"
   back="$(pfm chat name "$grouped" "$CHAT" 2>&1)"
   back_rc=$?
   sleep 3
@@ -517,7 +626,7 @@ if requires E1.01-open-seat1; then
     fail "the row for socket $sock reports name '$row_name' after the rename to '$grouped'"
   elif [ "${window#*"$CHAT"}" = "$window" ]; then
     fail "the tmux window name '$window' never converged on the new label"
-  elif [ "$back_rc" -ne 0 ] || [ "$(row_field "$CHAT" 11)" != "$sock" ]; then
+  elif [ "$back_rc" -ne 0 ] || [ "$(live_field "$CHAT" 11)" != "$sock" ]; then
     fail "the rename back to $CHAT failed (exit $back_rc): $(one_line "$back")"
   else
     pass "'{name}:{group}' label converged in the row and the tmux window ('$window'), then renamed back"
@@ -528,7 +637,7 @@ fi
 
 beat E1.19-kill-unkill C46 C48 X28
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
   pfm chat kill "$CHAT" >/dev/null 2>&1 || bad="$bad kill exited non-zero;"
@@ -553,7 +662,7 @@ fi
 
 beat E1.20-self-compact C38 L35 L37
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   # `pfm chat self-compact` resolves the CALLER's own chat (ambient identity), so
   # from outside the fleet the chat is asked to call the tool on itself — the
@@ -579,7 +688,7 @@ fi
 
 beat E1.21-exit-close X27 X25
 spends none
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
   close_out="$(printf '{"session_id":"lane-no-such-session","reason":"other"}' | pfm internal exit-close 2>&1)"
@@ -598,7 +707,7 @@ fi
 
 beat E1.22-handoff T38 C61
 spends "cc:$SEAT"
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   before_ids="$(pfm ls --tsv 2>/dev/null | awk -F'\t' 'NR > 1 { print $2 }' | sort)"
   out="$(pfm chat inject --allow-unsigned "$CHAT" \
@@ -625,24 +734,48 @@ fi
 
 beat E1.23-launcher X20 X31 X38
 spends none
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
   launcher="$HOME/.local/bin/claude"
   [ -e "$launcher" ] || bad="$bad no managed launcher at $launcher (pfm install stages it);"
   real="$(readlink -f "$launcher" 2>/dev/null)"
   printf '%s' "$real" | grep -q 'pfm' || bad="$bad $launcher resolves to '${real:-<unresolvable>}', not a pfm shim;"
-  ver="$(pfm internal claude-version 2>&1)"
+  # `pfm internal claude-version` (internal/hookentry/claude_version.go) prints
+  # the newest MANAGED build under ~/.local/share/claude/versions and exits 127
+  # with EMPTY stdout when that directory holds none — the contract its own Go
+  # test pins. 127 is therefore a real answer ("this machine runs Claude from
+  # somewhere else"), not a missing verb: the beat asserts the branch it is in,
+  # and only a third shape is a ✗.
+  versions_dir="$HOME/.local/share/claude/versions"
+  ver="$(pfm internal claude-version 2>/dev/null)"
   ver_rc=$?
-  [ "$ver_rc" -eq 0 ] || bad="$bad pfm internal claude-version exited $ver_rc ($(one_line "$ver"));"
-  [ -n "$ver" ] || bad="$bad pfm internal claude-version printed nothing;"
+  ver_err="$(pfm internal claude-version 2>&1 >/dev/null)"
+  case "$ver_rc" in
+    0)
+      [ -n "$ver" ] || bad="$bad pfm internal claude-version exited 0 and printed nothing (exit 0 promises the newest build's path);"
+      [ -x "$ver" ] || bad="$bad pfm internal claude-version printed '$ver', which is not an executable file;"
+      version_note="managed build $ver"
+      ;;
+    127)
+      [ -z "$ver" ] || bad="$bad pfm internal claude-version exited 127 (no managed build) but still printed '$(one_line "$ver")';"
+      if [ -n "$(find "$versions_dir" -maxdepth 1 -type f -perm -u+x 2>/dev/null | head -1)" ]; then
+        bad="$bad pfm internal claude-version exited 127 while $versions_dir DOES carry an executable build;"
+      fi
+      version_note="no managed build under $versions_dir — 127 with empty stdout, the documented absence (this container launches Claude from $real)"
+      ;;
+    *)
+      bad="$bad pfm internal claude-version exited $ver_rc — neither 0 (a path) nor 127 (no managed build): $(one_line "$ver_err");"
+      version_note="exit $ver_rc"
+      ;;
+  esac
   sl="$(printf '{"session_id":"x","model":{"display_name":"sonnet"},"workspace":{"current_dir":"%s"}}' "$CWD" |
     pfm internal statusline 2>&1)"
   sl_rc=$?
   [ "$sl_rc" -eq 0 ] || bad="$bad pfm internal statusline (the alias) exited $sl_rc ($(one_line "$sl"));"
   [ -n "$sl" ] || bad="$bad pfm internal statusline (the alias) rendered nothing;"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "launcher $launcher → $real · claude-version '$(one_line "$ver")' · statusline alias renders"
+    pass "launcher $launcher → $real · claude-version: $version_note · statusline alias renders"
   fi
 fi
 
@@ -650,7 +783,7 @@ fi
 
 beat E1.24-exit-contract C66
 spends none
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
   bad=""
   pfm chat status NO_SUCH_CHAT_LANE >/dev/null 2>&1
@@ -674,9 +807,9 @@ fi
 
 beat E1.25-end C49
 spends none
-target "$CHAT"
+target_live "$CHAT"
 if requires E1.01-open-seat1; then
-  sock="$(row_field "$CHAT" 11)"
+  sock="$(live_field "$CHAT" 11)"
   out="$(pfm chat end "$CHAT" 2>&1)"
   rc=$?
   sleep 3

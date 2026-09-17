@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-
 	_ "modernc.org/sqlite"
+
+	pfmconfig "hostops/pfm/internal/config"
 )
 
 func TestDoctorRejectsMalformedOpenCodeRowsInsteadOfReportingHealthy(t *testing.T) {

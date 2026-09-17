@@ -190,6 +190,7 @@ func InstalledHome(t *testing.T) string {
 
 	root := Fleet(t)
 	jailedHome := filepath.Join(root, "home")
+	claudeBinary := pfmengine.MustLookup(pfmengine.Claude).Binary
 	if err := os.MkdirAll(filepath.Join(jailedHome, ".local", "bin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -197,14 +198,14 @@ func InstalledHome(t *testing.T) string {
 	if err := os.WriteFile(canonical, []byte("jailed-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	managedClaude := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", "claude")
+	managedClaude := filepath.Join(jailedHome, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(managedClaude, filepath.Join(jailedHome, ".local", "bin", "claude")); err != nil {
+	if err := os.Symlink(managedClaude, filepath.Join(jailedHome, ".local", "bin", claudeBinary)); err != nil {
 		t.Fatal(err)
 	}
 	// The pfm-statusline and tmux-title-renudge host overlays are contracted
@@ -258,6 +259,7 @@ func StageHarnessPromptBaseline(t *testing.T, home, alias, stem, captured, name 
 func CleanHome(t *testing.T) config.Runtime {
 	t.Helper()
 	home := t.TempDir()
+	claudeBinary := pfmengine.MustLookup(pfmengine.Claude).Binary
 	canonicalDir := filepath.Join(home, ".local", "bin")
 	hostShimDir := filepath.Join(t.TempDir(), "bin")
 	for _, directory := range []string{
@@ -281,14 +283,14 @@ func CleanHome(t *testing.T) config.Runtime {
 	if err := os.WriteFile(filepath.Join(hostShimDir, "pfm"), []byte("host-pfm"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", "claude")
+	managedClaude := filepath.Join(home, ".local", "share", "pfm", "install", "bin", claudeBinary)
 	if err := os.MkdirAll(filepath.Dir(managedClaude), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(managedClaude, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(managedClaude, filepath.Join(canonicalDir, "claude")); err != nil {
+	if err := os.Symlink(managedClaude, filepath.Join(canonicalDir, claudeBinary)); err != nil {
 		t.Fatal(err)
 	}
 	// The pfm-statusline and tmux-title-renudge host overlays are contracted

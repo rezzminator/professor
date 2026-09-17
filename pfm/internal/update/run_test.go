@@ -889,54 +889,6 @@ func TestUpdateReportsReleaseNotesCannotList(t *testing.T) {
 	}
 }
 
-func newTaggedBuildFixture(t *testing.T) string {
-	t.Helper()
-	repo := t.TempDir()
-	gitTemp(t, repo, "init", "-q")
-	gitTemp(t, repo, "config", "user.email", "fixture.invalid")
-	gitTemp(t, repo, "config", "user.name", "fixture-identity")
-	mainPath := filepath.Join(repo, "pfm", "cmd", "pfm", "main.go")
-	if err := os.MkdirAll(filepath.Dir(mainPath), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(
-		filepath.Join(repo, "pfm", "go.mod"),
-		[]byte("module fixture.invalid/pfm\n\ngo 1.24\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	// The fixture command only needs version output. Keep the source small and
-	// deterministic so two staged update builds hash identically.
-	if err := os.WriteFile(
-		mainPath,
-		[]byte(
-			"package main\n\nimport (\n\t\"fmt\"\n\t\"os\"\n)\n\nvar version = \"dev\"\n\nfunc main() {\n\tif marker := os.Getenv(\"PFM_UPDATE_CANDIDATE_MARKER\"); marker != \"\" {\n\t\tfile, err := os.OpenFile(marker, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)\n\t\tif err != nil {\n\t\t\tpanic(err)\n\t\t}\n\t\tfmt.Fprintln(file, os.Args[1:])\n\t\t_ = file.Close()\n\t}\n\tfmt.Println(\"pfm\", version)\n}\n",
-		),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	gitTemp(t, repo, "add", ".")
-	gitTemp(t, repo, "commit", "-qm", "fixture previous release")
-	gitTemp(t, repo, "tag", "v0.9.0")
-	if err := os.WriteFile(filepath.Join(repo, ".e2e-current-source"), []byte("current\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	gitTemp(t, repo, "add", ".e2e-current-source")
-	gitTemp(t, repo, "commit", "-qm", "fixture current release")
-	gitTemp(t, repo, "tag", "v0.10.0")
-	remote := filepath.Join(t.TempDir(), "remote.git")
-	if err := os.MkdirAll(remote, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	gitTemp(t, remote, "init", "--bare", "-q")
-	gitTemp(t, repo, "remote", "add", "origin", remote)
-	gitTemp(t, repo, "push", "-q", "origin", "HEAD", "--tags")
-	gitTemp(t, repo, "checkout", "-qb", "installed", "v0.9.0")
-	return repo
-}
-
 func gitTemp(t *testing.T, repo string, args ...string) {
 	t.Helper()
 	command := exec.Command("git", args...)

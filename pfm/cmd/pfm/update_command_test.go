@@ -112,7 +112,11 @@ func newTaggedBuildFixture(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Dir(mainPath), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repo, "pfm", "go.mod"), []byte("module fixture.invalid/pfm\n\ngo 1.24\n"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(repo, "pfm", "go.mod"),
+		[]byte("module fixture.invalid/pfm\n\ngo 1.24\n"),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(mainPath, []byte(

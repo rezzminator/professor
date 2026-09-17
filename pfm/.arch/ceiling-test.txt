@@ -13,4 +13,4 @@ internal/mcpserv/server_test.go 1080
 internal/stats/limits_test.go 1980
 internal/ui/chronoscope_test.go 1444
 internal/update/project_test.go 1051
-internal/update/run_test.go 1148
+internal/update/run_test.go 1100

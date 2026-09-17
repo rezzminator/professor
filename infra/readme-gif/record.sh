@@ -45,16 +45,7 @@ if ! compgen -G "$HOME/Library/Fonts/FiraCodeNerdFontMono-*" >/dev/null &&
 fi
 
 # 1. The fence, exactly as dev.sh iso mounts it.
-git_common="$(git -C "$ROOT" rev-parse --git-common-dir)"
-[[ "$git_common" == /* ]] || git_common="$ROOT/$git_common"
-git_common="$(cd "$git_common" && pwd -P)"
-git_dir="$(cd "$(git -C "$ROOT" rev-parse --absolute-git-dir)" && pwd -P)"
-case "$git_dir" in
-  "$git_common") git_dir_rel="." ;;
-  "$git_common"/*) git_dir_rel="${git_dir#"$git_common"/}" ;;
-  *) echo "readme-gif: git dir $git_dir is outside common dir $git_common" >&2; exit 1 ;;
-esac
-export PFM_DEV_WORKTREE="$ROOT" PFM_DEV_GIT_COMMON="$git_common" PFM_DEV_GIT_DIR_REL="$git_dir_rel"
+FENCE_CALLER=readme-gif . "$ROOT/infra/fence-env.sh"
 if ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker compose -f "$ROOT/infra/docker-compose.yml" run -d --build --name "$NAME" pfm-dev sleep infinity >/dev/null

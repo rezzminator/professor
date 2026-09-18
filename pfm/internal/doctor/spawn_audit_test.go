@@ -353,3 +353,58 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 		)
 	}
 }
+
+// TestArgvCarriesOutputStyleDefaultAcceptsAThemedPayload pins the JSON-parse
+// rewrite: a themed --settings value still carries the disabled output style
+// (an extra "theme" key is accepted), the plain const still carries it, a
+// payload missing outputStyle does not, and malformed JSON never counts as
+// present rather than as an unproven read.
+func TestArgvCarriesOutputStyleDefaultAcceptsAThemedPayload(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		argv []string
+		want bool
+	}{
+		{
+			name: "themed payload as a word pair",
+			argv: []string{"claude", "--settings", `{"outputStyle":"default","theme":"dark"}`},
+			want: true,
+		},
+		{
+			name: "plain const as a word pair",
+			argv: []string{"claude", "--settings", `{"outputStyle":"default"}`},
+			want: true,
+		},
+		{
+			name: "themed payload in --settings= form",
+			argv: []string{"claude", `--settings={"outputStyle":"default","theme":"dark"}`},
+			want: true,
+		},
+		{
+			name: "missing outputStyle key",
+			argv: []string{"claude", "--settings", `{"theme":"dark"}`},
+			want: false,
+		},
+		{
+			name: "another outputStyle value",
+			argv: []string{"claude", "--settings", `{"outputStyle":"lean"}`},
+			want: false,
+		},
+		{
+			name: "malformed JSON",
+			argv: []string{"claude", "--settings", `{"outputStyle":`},
+			want: false,
+		},
+		{
+			name: "--settings with no following word",
+			argv: []string{"claude", "--settings"},
+			want: false,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := argvCarriesOutputStyleDefault(test.argv); got != test.want {
+				t.Fatalf("argvCarriesOutputStyleDefault(%#v) = %v, want %v", test.argv, got, test.want)
+			}
+		})
+	}
+}

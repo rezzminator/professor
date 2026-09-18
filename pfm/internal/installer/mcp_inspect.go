@@ -69,7 +69,7 @@ func InspectHarvesterClientCutover(home string, port int, registries, codexHomes
 	seen := map[string]bool{}
 	for _, path := range registries {
 		if !seen[path] {
-			reports = append(reports, inspectClaudeServers(path, port, mcpServerHarvester)...)
+			reports = append(reports, InspectClaudeServers(path, port, mcpServerHarvester)...)
 			seen[path] = true
 		}
 	}
@@ -77,15 +77,8 @@ func InspectHarvesterClientCutover(home string, port int, registries, codexHomes
 		reports = append(reports, inspectCodexHarvester(filepath.Join(dir, "config.toml"), port))
 	}
 	// Root .mcp.json is historical/project-scope evidence, not Claude user scope.
-	reports = append(reports, inspectClaudeServers(filepath.Join(home, ".mcp.json"), port, mcpServerHarvester)...)
+	reports = append(reports, InspectClaudeServers(filepath.Join(home, ".mcp.json"), port, mcpServerHarvester)...)
 	return reports
-}
-
-// InspectClaudeServers is InspectHarvesterClientCutover's per-registry,
-// per-server primitive exported for doctor's registry+reason row, which needs
-// both "harvester" and "chat" classified for the same path in one call.
-func InspectClaudeServers(path string, port int, names ...string) []MCPClientCutover {
-	return inspectClaudeServers(path, port, names...)
 }
 
 // InspectOpenCodeServers classifies the two machine-scope OpenCode MCP
@@ -200,11 +193,14 @@ func classifyOpenCodeRegistration(name string, registration map[string]any, home
 	}
 }
 
-// inspectClaudeServers classifies every name's registration in path's
+// InspectClaudeServers classifies every name's registration in path's
 // mcpServers object, one report per name (in the order given). A missing or
 // unreadable file/document reports every name Absent/Unreadable identically —
-// there is only one file to blame, not one per server.
-func inspectClaudeServers(path string, port int, names ...string) []MCPClientCutover {
+// there is only one file to blame, not one per server. It is
+// InspectHarvesterClientCutover's per-registry, per-server primitive, exported
+// for doctor's registry+reason row, which needs both "harvester" and "chat"
+// classified for the same path in one call.
+func InspectClaudeServers(path string, port int, names ...string) []MCPClientCutover {
 	client := pfmengine.MustLookup(pfmengine.Claude).LongName
 	base := func(name string) MCPClientCutover {
 		return MCPClientCutover{Client: client, Name: name, State: MCPClientAbsent, Path: path}

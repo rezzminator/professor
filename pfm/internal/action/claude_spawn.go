@@ -138,6 +138,9 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	if spawn.leanEnvironment(prefs) {
 		command.WriteString(" CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1")
 	}
+	if prefs.NativeCursor {
+		command.WriteString(" " + nativeCursorEnv)
+	}
 	for _, assignment := range pfmengine.MustLookup(pfmengine.Claude).LaunchEnv {
 		name, value, _ := strings.Cut(assignment, "=")
 		command.WriteByte(' ')
@@ -152,7 +155,9 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))
 	}
-	for _, argument := range pfmengine.LaunchArgsFor(pfmengine.Claude, spawn.Args) {
+	for _, argument := range pfmengine.LaunchArgsWithSettings(
+		pfmengine.Claude, spawn.Args, pfmengine.ClaudeSettingsPayload(prefs.Theme),
+	) {
 		command.WriteByte(' ')
 		command.WriteString(Quote(argument))
 	}
@@ -275,6 +280,9 @@ func (spawn ClaudeSpawn) Environment(environ []string) []string {
 	if spawn.leanEnvironment(prefs) {
 		result = append(result, "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1")
 	}
+	if prefs.NativeCursor {
+		result = append(result, nativeCursorEnv)
+	}
 	return append(result, pfmengine.MustLookup(pfmengine.Claude).LaunchEnv...)
 }
 
@@ -283,7 +291,9 @@ func (spawn ClaudeSpawn) Environment(environ []string) []string {
 func (spawn ClaudeSpawn) argv(prefs pfmconfig.ClaudePrefs) []string {
 	argv := make([]string, 0, len(spawn.Args)+8)
 	argv = append(argv, spawn.Args...)
-	argv = append(argv, pfmengine.LaunchArgsFor(pfmengine.Claude, spawn.Args)...)
+	argv = append(argv, pfmengine.LaunchArgsWithSettings(
+		pfmengine.Claude, spawn.Args, pfmengine.ClaudeSettingsPayload(prefs.Theme),
+	)...)
 	if spawn.Model != "" {
 		argv = append(argv, "--model", spawn.Model)
 	}
@@ -339,6 +349,10 @@ func (spawn ClaudeSpawn) cacheAssignment() string {
 	}
 	return "FORCE_PROMPT_CACHING_5M=1"
 }
+
+// nativeCursorEnv is the assignment claude.nativeCursor adds to a launch; both
+// renderers above spell it from here so they cannot drift.
+const nativeCursorEnv = "CLAUDE_CODE_NATIVE_CURSOR=1"
 
 // leanEnvironment reports whether CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1 travels
 // with the launch: the configured choice for a conversational spawn, and

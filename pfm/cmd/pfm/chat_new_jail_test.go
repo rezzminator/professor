@@ -117,7 +117,8 @@ render() {
   esac
 }
 render
-while IFS= read -r -N1 ch; do
+# -d '' -n1, never -N1: the darwin CI runner's /bin/bash is 3.2, whose read has no -N.
+while IFS= read -r -d '' -n1 ch; do
   if [ "$modals" -gt 0 ]; then
     # A startup overlay: ONLY Escape gets out of it, everything else vanishes
     # into it exactly as the real hooks/trust modals swallow keystrokes.
@@ -186,7 +187,8 @@ if [ -n "$prompt" ] && [ -z "$CC_STUB_DEAF" ] && [ -z "$CC_STUB_OVERLAY" ]; then
 pending=""; dismissed=0
 if [ -n "$CC_STUB_OVERLAY" ]; then pending="$prompt"; fi
 render
-while IFS= read -r -N1 ch; do
+# -d '' -n1, never -N1: the darwin CI runner's /bin/bash is 3.2, whose read has no -N.
+while IFS= read -r -d '' -n1 ch; do
   case "$ch" in
     $'\033') dismissed=1 ;;
     $'\n'|$'\r')

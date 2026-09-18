@@ -9,10 +9,12 @@ set -euo pipefail
 #          mirror compiles from (.claude/**, any CLAUDE.md, $HOME/.claude/commands/**),
 #          drop the repo-scoped dirty flag tmp/professor_codex_dirty.
 #   sync — Stop: if the flag is present, run both mirrors' build+check; success
-#          clears the flag silently, failure BLOCKS turn end (exit 2, reason on
-#          stderr) so a broken mirror is fixed, never silently shipped. Respects
-#          stop_hook_active — a block never loops; on a suppressed block the flag
-#          stays set so the next turn retries. The block names WHICH of the four
+#          clears the flag silently, failure WARNS (exit 1, reason on stderr —
+#          shown to the user, the turn ends) and leaves the flag set so the
+#          next turn retries: a broken mirror is visible every turn until fixed,
+#          never silently shipped, and never a wall the chat cannot end a turn
+#          past (a blocking exit 2 took whole sessions down on a stale $HOME
+#          link). Respects stop_hook_active. The warning names WHICH of the four
 #          stages failed and prints only that stage's output: build failure and
 #          check failure are different defects with different repairs, and one
 #          message covering both reports a compile broken while the writer says
@@ -74,12 +76,12 @@ case "$MODE" in
     (( CODEX_CHECK != 0 )) && FAILED="${FAILED:+$FAILED, }codex check"
     (( OC_BUILD != 0 )) && FAILED="${FAILED:+$FAILED, }opencode build"
     (( OC_CHECK != 0 )) && FAILED="${FAILED:+$FAILED, }opencode check"
-    printf 'codex-sync: %s failed after this turn'\''s framework edits — fix before ending the turn.\n' "$FAILED" >&2
+    printf 'codex-sync WARNING: %s failed after this turn'\''s framework edits — the mirror is stale; fix it next turn (the flag stays set and this warning repeats until it passes).\n' "$FAILED" >&2
     (( CODEX_BUILD != 0 )) && printf 'codex build:\n%s\n' "${OUT:-}" >&2
     (( CODEX_CHECK != 0 )) && printf 'codex check:\n%s\n' "${CHK:-}" >&2
     (( OC_BUILD != 0 )) && printf 'opencode build:\n%s\n' "${OGEN:-}" >&2
     (( OC_CHECK != 0 )) && printf 'opencode check:\n%s\n' "${OCHK:-}" >&2
-    exit 2
+    exit 1
     ;;
 esac
 exit 0

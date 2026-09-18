@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -135,21 +136,31 @@ func predatesLayer(observation spawnObservation, layerStampUnix int64) (time.Dur
 }
 
 // argvCarriesOutputStyleDefault reports whether argv disables Claude Code's
-// own output style the way every fleet spawn door does: `--settings
-// {"outputStyle":"default"}`, as one word pair or as `--settings=<json>`.
+// own output style the way every fleet spawn door does: a `--settings` word
+// pair or a `--settings=<json>` word whose value parses as a JSON object
+// with `"outputStyle":"default"` — a themed payload (an extra `"theme"` key)
+// still counts; malformed JSON, another outputStyle, or a missing one does
+// not.
 func argvCarriesOutputStyleDefault(argv []string) bool {
 	for index, argument := range argv {
-		if argument == "--settings" {
-			if index+1 < len(argv) && argv[index+1] == pfmengine.OutputStyleDefaultSettings {
-				return true
+		var raw string
+		switch argument {
+		case "--settings":
+			if index+1 >= len(argv) {
+				continue
 			}
-			continue
+			raw = argv[index+1]
+		default:
+			value, found := strings.CutPrefix(argument, "--settings=")
+			if !found {
+				continue
+			}
+			raw = value
 		}
-		if value, found := strings.CutPrefix(
-			argument,
-			"--settings=",
-		); found &&
-			value == pfmengine.OutputStyleDefaultSettings {
+		var settings struct {
+			OutputStyle string `json:"outputStyle"`
+		}
+		if err := json.Unmarshal([]byte(raw), &settings); err == nil && settings.OutputStyle == "default" {
 			return true
 		}
 	}

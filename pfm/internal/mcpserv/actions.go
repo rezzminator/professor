@@ -2,6 +2,7 @@ package mcpserv
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -9,10 +10,17 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"hostops/pfm/internal/chat"
+	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 )
 
 const chatCommand = "chat"
+
+// statusError is an ActionOutput's failure status, beside server.go's
+// statusNotFound and statusAmbiguous: the verb did not run. A chat that is
+// simply not there is statusNotFound — absence and a step that could not run
+// are never the same answer.
+const statusError = "error"
 
 func (service *Service) chatLast(
 	ctx context.Context,
@@ -139,6 +147,13 @@ func (service *Service) chatNew(
 	return service.cliAction(ctx, args...)
 }
 
+// chatOpen never routes through cliTargetAction/Dispatch: that seam ends in
+// action.Dispatch, whose K1 non-terminal branch only ever prints the eval
+// line for a shell wrapper to `eval` — the MCP daemon has no shell reading
+// its stdout, so the line went nowhere and nothing opened. chat_open instead
+// takes chat.OpenDetachedID, the verb layer's own door for a caller with no
+// terminal to attach: the same resolution and the same preparation `pfm chat
+// open` runs, ending in action.Executor.OpenDetached instead of an eval line.
 func (service *Service) chatOpen(
 	ctx context.Context,
 	request *mcp.CallToolRequest,
@@ -148,7 +163,49 @@ func (service *Service) chatOpen(
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
-	return service.cliTargetAction(ctx, "open", target)
+	return service.chatOpenDetached(ctx, target)
+}
+
+func (service *Service) chatOpenDetached(
+	ctx context.Context,
+	target string,
+) (*mcp.CallToolResult, ActionOutput, error) {
+	if strings.TrimSpace(target) == "" {
+		return nil, ActionOutput{}, fmt.Errorf("target is required")
+	}
+	// The daemon carries only a thin projection of the machine's config
+	// (server.go's Runtime); a real open needs the FULL config — every
+	// configured Codex/OpenCode account among them — so it is loaded fresh
+	// here, exactly as a bare CLI invocation would load it.
+	effective, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		return nil, ActionOutput{}, fmt.Errorf("chat_open: load machine config: %w", err)
+	}
+	// Resolved exactly as `pfm chat open` resolves it — by name, id prefix or
+	// socket — because a name is how a caller addresses a chat. A door
+	// matching only the indexed id answers a perfectly good name with an
+	// absence.
+	resolved, err := chat.Target(ctx, target, &effective)
+	if err != nil {
+		// Absence and a fleet that could not be read are different answers:
+		// not_found means no such chat, error means the lookup itself failed.
+		status, code := statusError, 2
+		if errors.Is(err, chat.ErrUnknownChat) {
+			status, code = statusNotFound, 1
+		}
+		output := ActionOutput{Status: status, Code: code, Message: err.Error()}
+		return nil, output, fmt.Errorf("chat_open: %w", err)
+	}
+	result, err := chat.OpenDetachedID(ctx, resolved.ID, service.backend.warnings, &effective)
+	if err != nil {
+		output := ActionOutput{Status: statusError, Code: 1, Message: err.Error()}
+		return nil, output, fmt.Errorf("chat_open: %w", err)
+	}
+	message := fmt.Sprintf("%s %s on socket %s", result.State, result.Name, result.Socket)
+	if result.Detail != "" {
+		message += " — " + result.Detail
+	}
+	return nil, ActionOutput{Status: "ok", Code: 0, Message: message}, nil
 }
 
 func (service *Service) chatName(
@@ -260,7 +317,7 @@ func (service *Service) cliTargetAction(
 
 func (service *Service) cliAction(ctx context.Context, args ...string) (*mcp.CallToolResult, ActionOutput, error) {
 	if service.backend.dispatch == nil {
-		output := ActionOutput{Status: "error", Code: 1}
+		output := ActionOutput{Status: statusError, Code: 1}
 		return nil, output, fmt.Errorf("chat action in-process CLI dispatcher is not configured")
 	}
 	var stdout, stderr strings.Builder
@@ -270,7 +327,7 @@ func (service *Service) cliAction(ctx context.Context, args ...string) (*mcp.Cal
 		if message == "" {
 			message = strings.TrimSpace(stdout.String())
 		}
-		output := ActionOutput{Status: "error", Code: code, Message: message}
+		output := ActionOutput{Status: statusError, Code: code, Message: message}
 		return nil, output, fmt.Errorf("pfm %s exited %d: %s", strings.Join(args, " "), code, message)
 	}
 	return nil, ActionOutput{Status: "ok", Code: 0, Message: strings.TrimSpace(stdout.String())}, nil

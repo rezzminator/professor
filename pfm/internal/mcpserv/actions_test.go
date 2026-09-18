@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -185,5 +187,67 @@ func TestChatLastAndStatusRefuseWithoutAVerbLayer(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), `unknown engine "gpt"`) || len(verbs.statuses) != 0 {
 		t.Fatalf("chat_status engine=gpt error = %v, calls = %+v; want a refusal before the verb", err, verbs.statuses)
+	}
+}
+
+// TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess pins chat_open's
+// failure shape now that it opens through action.OpenDetached instead of the
+// argv Dispatch seam: a target that is not indexed comes back as a tool
+// error naming the target, never an "ok" ActionOutput with nothing behind
+// it.
+func TestChatOpenUnindexedTargetIsATooErrorNeverEmptySuccess(t *testing.T) {
+	setupBackendFixture(t)
+	service := newFixtureService(t)
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
+	_, output, err := service.chatOpen(context.Background(), nil, TargetInput{Target: "no-such-chat"})
+	if err == nil || !strings.Contains(err.Error(), "no-such-chat") {
+		t.Fatalf("chat_open unindexed target error = %v, want it to name the target", err)
+	}
+	if output.Status == "ok" {
+		t.Fatalf("chat_open unindexed target reported ok: %+v", output)
+	}
+}
+
+// TestChatOpenResolvesATargetByName pins the resolution the CLI has and the
+// MCP door lost: `pfm chat open` reaches its row through chat.Target (name,
+// id prefix or socket), so addressing a chat by its NAME is the ordinary
+// case. A door matching row.ID == target answers a name with "is not
+// indexed" — an absence for a chat that is right there.
+func TestChatOpenResolvesATargetByName(t *testing.T) {
+	root := setupBackendFixture(t)
+	// The fixture's own Claude chat, addressed the way a caller does.
+	rows, err := chat.Rows(context.Background(), io.Discard, nil)
+	if err != nil {
+		t.Fatalf("fleet scan failed, so the case below would pass vacuously: %v", err)
+	}
+	var name string
+	for _, row := range rows {
+		if row.ID == "alpha" {
+			name = row.Name
+		}
+	}
+	if name == "" || name == "alpha" {
+		t.Fatalf("fixture row alpha has no name distinct from its id: %+v", rows)
+	}
+	// The spawn must not reach a real tmux server: with the socket directory
+	// gone, the detached door fails loudly at its OWN step. What is pinned
+	// here is that the name got it that far at all.
+	t.Setenv(paths.EnvTmuxDir, filepath.Join(root, "no-such-tmux-dir"))
+	service := newFixtureService(t)
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Errorf("close service: %v", err)
+		}
+	}()
+	_, output, err := service.chatOpen(context.Background(), nil, TargetInput{Target: name})
+	if errors.Is(err, chat.ErrUnknownChat) || (err != nil && strings.Contains(err.Error(), "not indexed")) {
+		t.Fatalf("chat_open %q = %v; the name never reached the open door", name, err)
+	}
+	if err != nil && !strings.Contains(err.Error(), "open detached") {
+		t.Fatalf("chat_open %q failed before the open door: %v (output %+v)", name, err, output)
 	}
 }

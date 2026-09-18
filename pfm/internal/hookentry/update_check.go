@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/updatecheck"
 )
 
@@ -32,7 +33,7 @@ func UpdateCheck(args []string, stderr io.Writer) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	client := &http.Client{Timeout: 12 * time.Second}
+	client := obs.WrapClient(&http.Client{Timeout: 12 * time.Second})
 	if err := updatecheck.CheckForUpdate(ctx, *cache, *current, *latestURL, client); err != nil {
 		fmt.Fprintf(stderr, "pfm internal update-check: %v\n", err)
 		return 1

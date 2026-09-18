@@ -69,6 +69,7 @@ var declaredKeys = map[string]bool{
 	"cause":   true,
 	"subcmd":  true,
 	"retries": true,
+	"line":    true, // Lane B: one harvestpy stderr line (Process.Stderr), a WARN record per line
 }
 
 // Declared reports whether key is on the activity log's allow-list.

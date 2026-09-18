@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"hostops/pfm/internal/obs"
 )
 
 const dockerIdentityResponseLimit = 4 << 20
@@ -89,7 +91,7 @@ func newDockerInspector(socketPath string) func(string) (string, string, error) 
 			return dialer.DialContext(ctx, "unix", socketPath)
 		},
 	}
-	client := &http.Client{Transport: transport, Timeout: time.Second}
+	client := obs.WrapClient(&http.Client{Transport: transport, Timeout: time.Second})
 	return func(id string) (string, string, error) {
 		request, err := http.NewRequest(
 			http.MethodGet,

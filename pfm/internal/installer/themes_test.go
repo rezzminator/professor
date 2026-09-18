@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/obs"
 )
 
 func TestBundledThemeInstallsFromSourceRepoThenReleaseAndReportsAMissingFile(t *testing.T) {
@@ -276,5 +278,44 @@ func TestThemePreviewLabelsBundledPaletteAsReadNotFetch(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "fetch theme sonar-gold") {
 		t.Fatalf("preview output still labels the bundled palette as fetched:\n%s", output.String())
+	}
+}
+
+// TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients pins
+// the installer's http.out door (spec § Middleware): the theme fetch leaves
+// one comp=http.out record whether it built its own client or was handed one,
+// and the query string never reaches the log.
+func TestFetchThemeWritesAnHTTPOutRecordForConstructedAndInjectedClients(t *testing.T) {
+	_, recorder := obs.Test(t)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		if _, err := io.WriteString(response, `{"name":"Sonar Gold"}`); err != nil {
+			t.Errorf("write theme: %v", err)
+		}
+	}))
+	defer server.Close()
+	for _, client := range []*http.Client{nil, server.Client()} {
+		content, err := fetchTheme(
+			context.Background(), client, server.URL+"/themes/sonar-gold.json?token=THEMESECRET",
+		)
+		if err != nil || string(content) != `{"name":"Sonar Gold"}` {
+			t.Fatalf("fetchTheme = %q, %v", content, err)
+		}
+	}
+	records := recorder.Records()
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want one http.out record per fetch: %s", len(records), recorder.Raw())
+	}
+	for _, record := range records {
+		for key, want := range map[string]any{
+			obs.FieldComp: "http.out", "op": "request", "method": http.MethodGet, "path": "/themes/sonar-gold.json",
+			"status": float64(http.StatusOK), "bytes": float64(len(`{"name":"Sonar Gold"}`)),
+		} {
+			if got, _ := record.Field(key); got != want {
+				t.Fatalf("http.out record %s = %v, want %v: %v", key, got, want, record.Fields)
+			}
+		}
+	}
+	if strings.Contains(recorder.Raw(), "THEMESECRET") {
+		t.Fatalf("the query string reached the activity log: %s", recorder.Raw())
 	}
 }

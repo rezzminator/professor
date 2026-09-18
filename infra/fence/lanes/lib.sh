@@ -531,8 +531,11 @@ need() {
 
 live_chat() { pfm ls --plain 2>/dev/null | grep -q "^● $1 "; }
 
-_rows_named() { # every `pfm ls --tsv` row carrying this name, header dropped
-  pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$1" 'NR > 1 && $5 == n'
+_rows_named() { # every row carrying this name, header dropped. Reads `pfm ls
+  # -a --tsv`, never the default `--tsv` view: a killed row drops out of the
+  # default view entirely (compose.go defaultEligible), so row_field/live_row
+  # built on the default view could never read a kill back after it happened.
+  pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v n="$1" 'NR > 1 && $5 == n'
 }
 
 chat_row() { # chat_row <name> — the chat's row, the LIVE one when it has one

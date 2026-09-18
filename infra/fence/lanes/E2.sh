@@ -251,7 +251,9 @@ if requires E2.01-open-seat; then
           bad="$bad [--new --hide]: fresh thread $id_new but no RELOADED-CX-2: ${LANE_WAIT_WHY:-no wait reason recorded}; last: $(one_line "$(pfm chat last "$id_new" 2>&1)");"
         else
           visible="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v n="$CHAT" 'NR > 1 && $5 == n && $10 == "false" { c++ } END { print c + 0 }')"
-          hidden="$(pfm ls --tsv 2>/dev/null | awk -F'\t' -v i="$id_before" 'NR > 1 && $2 == i { print $10; exit }')"
+          # -a: the thread left behind is expected to read killed=true, which
+          # the default --tsv view would never show (it drops killed rows).
+          hidden="$(pfm ls -a --tsv 2>/dev/null | awk -F'\t' -v i="$id_before" 'NR > 1 && $2 == i { print $10; exit }')"
           if [ "$visible" -ne 1 ]; then
             bad="$bad [--new --hide]: $visible unhidden rows carry the name $CHAT (want exactly 1: the fresh thread $id_new);"
           elif [ "$hidden" != true ]; then

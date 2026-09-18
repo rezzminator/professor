@@ -42,6 +42,17 @@ case "$1 ${2:-}" in
     [ -f "$ROWS" ] && awk -F'\t' '$1 ~ /^live-/ { print "● " $5 " " }' "$ROWS"
     exit 0 ;;
   "ls --tsv")
+    # the real default view: killed rows (column 10) drop out of sight.
+    printf 'kind\tid\tproject\tcwd\tname\tprompts\tsize\tactivity_ns\taccount\tkilled\tsocket\n'
+    [ -f "$ROWS" ] && awk -F'\t' '$10 != "true"' "$ROWS"
+    exit 0 ;;
+  "ls -a")
+    # -a is the only view that still carries killed rows; every caller of it
+    # must pass --tsv too, or the stub itself is being called wrong.
+    if [ "${3:-}" != --tsv ]; then
+      echo "pfm stub: ls -a called without --tsv" >&2
+      exit 2
+    fi
     printf 'kind\tid\tproject\tcwd\tname\tprompts\tsize\tactivity_ns\taccount\tkilled\tsocket\n'
     [ -f "$ROWS" ] && cat "$ROWS"
     exit 0 ;;
@@ -406,6 +417,18 @@ if printf '%s' "$OUT" | grep -q 'TL blocked TL.34-gone — blocked-by' &&
 else
   bad "no reopen declared" "$OUT" "$(cat "$LANE_DIR/TL.log" 2>&1)"
 fi
+
+# ---- 17b: row_field reads a KILLED row too — the default `ls --tsv` view --
+# drops killed rows, so the readers must go through `ls -a --tsv`.
+
+printf 'live-claude\tsid-k\tp\t/work\tTL_CHAT\t1\t10\t1\t1\ttrue\tcc-9-9-9\n' >"$ROWS"
+OUT="$(bash -c ". '$LIB'; row_field TL_CHAT 10" 2>&1)"
+if [ "$OUT" = true ]; then
+  ok "row_field reads a killed row (column 10 = true) that the default ls --tsv view hides"
+else
+  bad "row_field on a killed row" "got=[$OUT] want=[true]"
+fi
+dead_rows
 
 # ---- 18: every wait is bounded and fails fast on a dead target ------------
 

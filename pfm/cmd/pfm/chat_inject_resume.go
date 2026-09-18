@@ -101,6 +101,7 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		}
 		return resumeTarget{}, false, err
 	}
+	matches = deduplicateTranscriptMatches(matches)
 	match := matches[0]
 	if len(matches) > 1 && matches[1].Hits == match.Hits {
 		return resumeTarget{}, false, fmt.Errorf(
@@ -110,6 +111,23 @@ func resolveResumeTarget(target string, runtimes ...commandRuntime) (resumeTarge
 		)
 	}
 	return resumeTarget{ID: match.ID, Path: match.Path}, true, nil
+}
+
+// deduplicateTranscriptMatches collapses account or registry copies of one
+// session before the ambiguity check. Find already orders matches by best hit
+// count and then path, so retaining the first row preserves that deterministic
+// winner while distinct session IDs remain candidates for ambiguity.
+func deduplicateTranscriptMatches(matches []pfmchat.TranscriptMatch) []pfmchat.TranscriptMatch {
+	unique := matches[:0]
+	seen := make(map[string]bool, len(matches))
+	for _, match := range matches {
+		if seen[match.ID] {
+			continue
+		}
+		seen[match.ID] = true
+		unique = append(unique, match)
+	}
+	return unique
 }
 
 func sessionToken(value string) bool {

@@ -2,7 +2,6 @@ cmd/pfm/archive_command.go
 cmd/pfm/chat_ask_command.go
 cmd/pfm/chat_command.go
 cmd/pfm/chat_dispatch.go
-cmd/pfm/chat_inject_resume.go
 cmd/pfm/chat_keys_command.go
 cmd/pfm/chat_new_command.go
 cmd/pfm/engines.go

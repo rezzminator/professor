@@ -7,19 +7,15 @@ import (
 	"time"
 )
 
-// MaxValueBytes is the size a logged value may not exceed. A prompt body, a
-// transcript line and a captured pane are all far above it, and none of them
-// belongs in the activity log — so an oversize value is refused whole rather
-// than truncated, because the first 512 bytes of a prompt is still the prompt.
-const MaxValueBytes = 512
-
 // redactedValue replaces a value the rule refuses; the reason is spelled into
 // it so a reader sees a REFUSED field rather than a missing one.
 const redactedValue = "<redacted>"
 
 // secretMarkers are the substrings that make a value a credential no matter
-// which key carries it: an API key, an Authorization header, an OAuth blob.
-var secretMarkers = []string{"sk-", "bearer ", "oauth"}
+// which key carries it: an API key, an Authorization header (bearer or basic),
+// an OAuth blob. They are the LAST line, not the plan: a middleware logs the
+// SHAPE of an argument (argc, host, path, bytes), never the argument.
+var secretMarkers = []string{"sk-", "bearer ", "basic ", "authorization", "oauth"}
 
 // declaredKeys is the activity log's allow-list: the only field keys a record
 // may carry a real value under. Everything else is refused at the handler, so
@@ -39,6 +35,7 @@ var declaredKeys = map[string]bool{
 	FieldDur:        true,
 	FieldErr:        true,
 	FieldExit:       true,
+	FieldComp:       true,
 	// Operational fields every corner of the engine reports with: what it
 	// decided, why, over what, and how much.
 	"state":    true,
@@ -56,6 +53,22 @@ var declaredKeys = map[string]bool{
 	"pane":     true,
 	"window":   true,
 	"session":  true,
+	// The argument and result SHAPE fields the middleware doors report
+	// (spec § Middleware): a count, a name, a code — never the value itself.
+	"argc":    true,
+	"host":    true,
+	"status":  true,
+	"rows":    true,
+	"table":   true,
+	"kind":    true,
+	"op":      true,
+	"route":   true,
+	"method":  true,
+	"prior":   true,
+	"next":    true,
+	"cause":   true,
+	"subcmd":  true,
+	"retries": true,
 }
 
 // Declared reports whether key is on the activity log's allow-list.
@@ -64,11 +77,12 @@ func Declared(key string) bool { return declaredKeys[key] }
 // Scrub is THE redaction rule of the activity log, applied by every handler
 // this package builds (file, stderr mirror and obs.Test alike) as slog's
 // ReplaceAttr: slog's "time" becomes FieldTime, a key the allow-list does not
-// declare loses its value, and a declared key's value is refused when it looks
-// like a credential or is too large to be anything but a body.
+// declare loses its value, a declared key's value is refused when it looks
+// like a credential, and what survives is cut at MaxValueBytes (TruncateValue).
 //
 // It is deliberately the LAST thing before the writer: a call site that gets
-// its field wrong writes a refused value, never a secret.
+// its field wrong writes a refused value, never a secret, and never more than
+// the field cap.
 func Scrub(groups []string, attr slog.Attr) slog.Attr {
 	if len(groups) == 0 && attr.Key == slog.TimeKey {
 		attr.Key = FieldTime
@@ -83,9 +97,9 @@ func Scrub(groups []string, attr slog.Attr) slog.Attr {
 	return slog.Attr{Key: attr.Key, Value: scrubValue(attr.Value)}
 }
 
-// scrubValue refuses a credential-looking or oversize value. Non-string kinds
-// are rendered first: a token handed over as fmt.Stringer or wrapped in an
-// error is the same token.
+// scrubValue refuses a credential-looking value and caps the rest. Non-string
+// kinds are rendered first: a token handed over as fmt.Stringer or wrapped in
+// an error is the same token.
 func scrubValue(value slog.Value) slog.Value {
 	resolved := value.Resolve()
 	switch resolved.Kind() {
@@ -94,16 +108,13 @@ func scrubValue(value slog.Value) slog.Value {
 		if resolved.Kind() == slog.KindAny {
 			text = fmt.Sprint(resolved.Any())
 		}
-		if len(text) > MaxValueBytes {
-			return slog.StringValue(fmt.Sprintf("<redacted: %d bytes>", len(text)))
-		}
 		lowered := strings.ToLower(text)
 		for _, marker := range secretMarkers {
 			if strings.Contains(lowered, marker) {
 				return slog.StringValue(redactedValue)
 			}
 		}
-		return slog.StringValue(text)
+		return slog.StringValue(TruncateValue(text))
 	default:
 		return resolved
 	}

@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+
+	"hostops/pfm/internal/clock"
 )
 
 // DefaultKeepFiles and DefaultMaxMB are the rotation the fleet ships with when
@@ -19,20 +21,24 @@ const (
 // rotator is the size-capped JSON-lines sink: it appends to path and, when the
 // next record would carry the file past maxBytes, renames pfm.jsonl to
 // pfm.jsonl.1 (shifting 1→2 … keep-1, dropping the oldest) and opens a fresh
-// one. In-tree on purpose — a rotation library would be a dependency for
-// twenty lines (§ Destinations and environments).
+// one; prune (retain.go) then drops the generations past keepDays. Whichever
+// limit is reached first wins. In-tree on purpose — a rotation library would
+// be a dependency for twenty lines (§ Destinations and environments).
 type rotator struct {
 	mutex    sync.Mutex
 	path     string
 	keep     int
 	maxBytes int64
+	keepDays int
+	timing   clock.Clock
 	file     *os.File
 	size     int64
 }
 
 // newRotator opens path for append, creating its directory, and reports the
-// size already on disk so the first write rotates when it must.
-func newRotator(path string, keep, maxMB int) (*rotator, error) {
+// size already on disk so the first write rotates when it must. keepDays is
+// the time limit (0 disables it), measured on timing.
+func newRotator(path string, keep, maxMB, keepDays int, timing clock.Clock) (*rotator, error) {
 	if keep < 1 {
 		keep = DefaultKeepFiles
 	}
@@ -42,8 +48,16 @@ func newRotator(path string, keep, maxMB int) (*rotator, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create activity log directory %s: %w", filepath.Dir(path), err)
 	}
-	opened := &rotator{path: path, keep: keep, maxBytes: int64(maxMB) * 1024 * 1024}
+	opened := &rotator{
+		path: path, keep: keep, maxBytes: int64(maxMB) * 1024 * 1024, keepDays: keepDays, timing: timing,
+	}
 	if err := opened.reopen(); err != nil {
+		return nil, err
+	}
+	if err := opened.prune(); err != nil {
+		if closeErr := opened.Close(); closeErr != nil {
+			return nil, fmt.Errorf("%w (and close: %w)", err, closeErr)
+		}
 		return nil, err
 	}
 	return opened, nil
@@ -125,5 +139,8 @@ func (writer *rotator) rotate() error {
 	} else if err := os.Remove(writer.path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("drop activity log %s: %w", writer.path, err)
 	}
-	return writer.reopen()
+	if err := writer.reopen(); err != nil {
+		return err
+	}
+	return writer.prune()
 }

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/clock"
 )
 
 // TestRotatorCapsOneHomeAtKeepFiles pins the in-tree rotation: the current
@@ -13,7 +15,7 @@ import (
 func TestRotatorCapsOneHomeAtKeepFiles(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "log", "pfm.jsonl")
-	writer, err := newRotator(path, 3, 1)
+	writer, err := newRotator(path, 3, 1, 0, clock.Real)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +54,7 @@ func TestRotatorCapsOneHomeAtKeepFiles(t *testing.T) {
 
 func TestRotatorAppendsToAnExistingFileAndDefaultsItsCaps(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	writer, err := newRotator(path, 0, 0)
+	writer, err := newRotator(path, 0, 0, 0, clock.Real)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +67,7 @@ func TestRotatorAppendsToAnExistingFileAndDefaultsItsCaps(t *testing.T) {
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := newRotator(path, 0, 0)
+	reopened, err := newRotator(path, 0, 0, 0, clock.Real)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +91,7 @@ func TestRotatorRefusesAnUnwritableDirectory(t *testing.T) {
 	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newRotator(filepath.Join(blocked, "log", "pfm.jsonl"), 3, 1); err == nil {
+	if _, err := newRotator(filepath.Join(blocked, "log", "pfm.jsonl"), 3, 1, 0, clock.Real); err == nil {
 		t.Fatal("newRotator accepted a path under a regular file")
 	}
 }

@@ -17,7 +17,7 @@ import (
 )
 
 // LogUsage is `pfm log`'s one-line usage.
-const LogUsage = "usage: pfm log [--since 10m] [--level warn] [--chat X] [--cmd reload] [--follow]"
+const LogUsage = "usage: pfm log [--since 10m] [--level warn] [--chat X] [--cmd reload] [--comp mcp] [--follow]"
 
 // followPoll is how often --follow looks for records appended since the last
 // read. The reader holds no lock: the writer only ever appends.
@@ -29,6 +29,7 @@ type logFilter struct {
 	level slog.Level
 	chat  string
 	cmd   string
+	comp  string
 }
 
 // ReadActivity is `pfm log`: a filter over the home's activity file that
@@ -43,9 +44,10 @@ func ReadActivity(
 ) int {
 	flags := cli.NewFlagSet("log", LogUsage, stderr)
 	since := flags.Duration("since", 0, "only records written within this duration")
-	level := flags.String("level", "", "only records at this level or above (debug, info, warn, error)")
+	level := flags.String("level", "", "only records at this level or above ("+strings.Join(LevelNames, ", ")+")")
 	chat := flags.String(FieldChat, "", "only records scoped to this chat")
 	command := flags.String(FieldCmd, "", "only records written by this pfm verb")
+	comp := flags.String(FieldComp, "", "only records of this component ("+strings.Join(Components, ", ")+")")
 	follow := flags.Bool("follow", false, "keep reading as records are appended")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -57,15 +59,21 @@ func ReadActivity(
 	if timing == nil {
 		timing = clock.Real
 	}
-	filter := logFilter{level: slog.LevelDebug, chat: *chat, cmd: *command}
+	filter := logFilter{level: slog.LevelDebug, chat: *chat, cmd: *command, comp: *comp}
 	if *since > 0 {
 		filter.after = timing.Now().Add(-*since)
 	}
 	if strings.TrimSpace(*level) != "" {
-		if err := filter.level.UnmarshalText([]byte(strings.TrimSpace(*level))); err != nil {
-			fmt.Fprintf(stderr, "pfm log: --level %q is not one of debug, info, warn, error\n", *level)
+		parsed, err := ParseLevel(*level)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm log: --level: %v\n", err)
 			return 2
 		}
+		filter.level = parsed
+	}
+	if *comp != "" && !KnownComponent(*comp) {
+		fmt.Fprintf(stderr, "pfm log: --comp %q is not one of %s\n", *comp, strings.Join(Components, ", "))
+		return 2
 	}
 	file, err := os.Open(path)
 	if err != nil {
@@ -133,6 +141,9 @@ func matchLog(line string, filter logFilter) (printed, readable bool) {
 		return false, true
 	}
 	if filter.cmd != "" && fieldText(fields[FieldCmd]) != filter.cmd {
+		return false, true
+	}
+	if filter.comp != "" && fieldText(fields[FieldComp]) != filter.comp {
 		return false, true
 	}
 	var level slog.Level

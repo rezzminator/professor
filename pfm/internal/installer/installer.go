@@ -322,6 +322,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if mcpErr != nil {
 		return mcpErr
 	}
+	if err := installer.wireLogDefault(); err != nil {
+		return err
+	}
 	if err := installer.wireShell(false); err != nil {
 		return err
 	}

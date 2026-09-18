@@ -61,7 +61,7 @@ func TestScrubRefusesCredentialsTokensPromptsAndTranscriptLines(t *testing.T) {
 	}
 }
 
-func TestScrubRefusesUndeclaredKeysAndOversizeValues(t *testing.T) {
+func TestScrubRefusesUndeclaredKeysAndCapsOversizeValues(t *testing.T) {
 	if Declared("nobody-declared-this") {
 		t.Fatal("an undeclared key reported as declared")
 	}
@@ -72,11 +72,10 @@ func TestScrubRefusesUndeclaredKeysAndOversizeValues(t *testing.T) {
 	}
 	oversize := strings.Repeat("x", MaxValueBytes+1)
 	got := Scrub(nil, slog.String(FieldErr, oversize))
-	if !strings.HasPrefix(got.Value.String(), "<redacted: ") {
-		t.Fatalf("oversize value = %q, want a redacted marker", got.Value.String())
-	}
-	if strings.Contains(got.Value.String(), oversize[:MaxValueBytes]) {
-		t.Fatal("an oversize value was truncated instead of refused — the head of a prompt is still the prompt")
+	if want := oversize[:MaxValueBytes] + "…(truncated 1 bytes)"; got.Value.String() != want {
+		t.Fatalf(
+			"oversize value = len %d, want the %d byte head plus the marker", len(got.Value.String()), MaxValueBytes,
+		)
 	}
 	fits := strings.Repeat("x", MaxValueBytes)
 	if kept := Scrub(nil, slog.String(FieldErr, fits)); kept.Value.String() != fits {
@@ -96,5 +95,60 @@ func TestScrubRenamesTimeToTS(t *testing.T) {
 	}
 	if _, found := records[0].Field(slog.TimeKey); found {
 		t.Fatalf("record still carries slog's %q key: %s", slog.TimeKey, recorder.Raw())
+	}
+}
+
+// TestScrubAtDebugWithTheShapeFields re-runs the redaction law at DEBUG with
+// every field a middleware reports (spec § Middleware, brief A5): the planted
+// secrets never land, whichever declared key carries them, and every shape key
+// Lanes B and C use is declared.
+func TestScrubAtDebugWithTheShapeFields(t *testing.T) {
+	ctx, recorder := Test(t)
+	shape := []string{
+		"argc", "host", "path", "status", "bytes", "rows", "table", "kind", "op", "tool", "route", "method", "hook",
+		"decision", "reason", "prior", "next", "cause", "subcmd", "target", "retries", "pid", FieldComp,
+	}
+	for _, key := range shape {
+		if !Declared(key) {
+			t.Fatalf("shape field %q is not declared", key)
+		}
+	}
+	const (
+		key    = "sk-ant-api03-PLANTEDKEY"
+		bearer = "Bearer PLANTEDTOKEN.SIG"
+		header = "Authorization: Basic UExBTlRFRA=="
+		prompt = "You are a helpful assistant; the user's planted prompt body"
+	)
+	Logger(Component(ctx, "http.out")).Debug("http.out.request",
+		"path", "/v1/messages?key="+key,
+		"reason", bearer,
+		"target", header,
+		"authorization", header,
+		"prompt", prompt,
+		"body", prompt,
+		"argc", 3,
+	)
+	written := recorder.Raw()
+	for name, leaked := range map[string]string{
+		"key": "PLANTEDKEY", "bearer": "PLANTEDTOKEN", "header": "UExBTlRFRA", "prompt": "planted prompt body",
+	} {
+		if strings.Contains(written, leaked) {
+			t.Fatalf("%s leaked at DEBUG: %s", name, written)
+		}
+	}
+	records := recorder.Records()
+	if len(records) != 1 || records[0].Level != "DEBUG" {
+		t.Fatalf("records = %+v, want one DEBUG record", records)
+	}
+	for _, refused := range []string{"authorization", "prompt", "body"} {
+		if value, _ := records[0].Field(refused); value != redactedValue {
+			t.Fatalf("undeclared %q = %v, want %s", refused, value, redactedValue)
+		}
+	}
+	if argc, _ := records[0].Field("argc"); argc != float64(3) {
+		t.Fatalf("argc = %v, want the shape to survive", argc)
+	}
+	if comp, _ := records[0].Field(FieldComp); comp != "http.out" {
+		t.Fatalf("comp = %v, want http.out", comp)
 	}
 }

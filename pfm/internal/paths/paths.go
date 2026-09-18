@@ -39,12 +39,14 @@ const (
 	// the bottom while every other window wears theirs on top. Jails set it to
 	// /dev/null so a machine's real config can never steer a fixture.
 	EnvTmuxConf = "PFM_TMUX_CONF"
-	// EnvLogLevel overrides the activity log's level for one run, and
+	// EnvLogLevel overrides the activity log's level for one run,
+	// EnvLogComponents (`mcp=debug,db=off`) its per-component levels, and
 	// EnvLogMirror set to "stderr" mirrors every record onto stderr for a
 	// foreground run (internal/obs).
-	EnvLogLevel   = "PFM_LOG_LEVEL"
-	EnvLogMirror  = "PFM_LOG"
-	defaultTmpDir = "/tmp"
+	EnvLogLevel      = "PFM_LOG_LEVEL"
+	EnvLogComponents = "PFM_LOG_COMPONENTS"
+	EnvLogMirror     = "PFM_LOG"
+	defaultTmpDir    = "/tmp"
 )
 
 // TmuxConfigArguments returns the `-f <config>` a chat server is created with,

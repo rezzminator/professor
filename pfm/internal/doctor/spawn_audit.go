@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/action"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
@@ -134,21 +136,31 @@ func predatesLayer(observation spawnObservation, layerStampUnix int64) (time.Dur
 }
 
 // argvCarriesOutputStyleDefault reports whether argv disables Claude Code's
-// own output style the way every fleet spawn door does: `--settings
-// {"outputStyle":"default"}`, as one word pair or as `--settings=<json>`.
+// own output style the way every fleet spawn door does: a `--settings` word
+// pair or a `--settings=<json>` word whose value parses as a JSON object
+// with `"outputStyle":"default"` — a themed payload (an extra `"theme"` key)
+// still counts; malformed JSON, another outputStyle, or a missing one does
+// not.
 func argvCarriesOutputStyleDefault(argv []string) bool {
 	for index, argument := range argv {
-		if argument == "--settings" {
-			if index+1 < len(argv) && argv[index+1] == pfmengine.OutputStyleDefaultSettings {
-				return true
+		var raw string
+		switch argument {
+		case "--settings":
+			if index+1 >= len(argv) {
+				continue
 			}
-			continue
+			raw = argv[index+1]
+		default:
+			value, found := strings.CutPrefix(argument, "--settings=")
+			if !found {
+				continue
+			}
+			raw = value
 		}
-		if value, found := strings.CutPrefix(
-			argument,
-			"--settings=",
-		); found &&
-			value == pfmengine.OutputStyleDefaultSettings {
+		var settings struct {
+			OutputStyle string `json:"outputStyle"`
+		}
+		if err := json.Unmarshal([]byte(raw), &settings); err == nil && settings.OutputStyle == "default" {
 			return true
 		}
 	}
@@ -168,6 +180,17 @@ func printSpawnAuditDoctor(
 	machine config.Config,
 	primary int,
 ) int {
+	return printSpawnAuditDoctorWithClock(ctx, stdout, resolved, machine, primary, clock.Real)
+}
+
+func printSpawnAuditDoctorWithClock(
+	ctx context.Context,
+	stdout io.Writer,
+	resolved paths.Values,
+	machine config.Config,
+	primary int,
+	clk clock.Clock,
+) int {
 	prefs := machine.EffectiveClaude(primary)
 	if prefs.SystemPrompt == "" || prefs.SystemPrompt == config.SystemPromptProduction {
 		// Production expects no prompt material anywhere, so every seat would
@@ -182,7 +205,7 @@ func printSpawnAuditDoctor(
 		return 0
 	}
 
-	observations, unread, err := liveClaudeSpawns(ctx, resolved, machine)
+	observations, unread, err := liveClaudeSpawns(ctx, resolved, machine, clk)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: spawn-audit: CHECK FAILED to run (%v) — live chats unaudited\n", err)
 		return 1
@@ -312,9 +335,13 @@ func liveClaudeSpawns(
 	ctx context.Context,
 	resolved paths.Values,
 	machine config.Config,
+	clk clock.Clock,
 ) ([]spawnObservation, []string, error) {
 	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
-	probe, err := gather.ProbeTmuxReadOnly(ctx, resolved.TmuxDir, client, time.Now())
+	if clk == nil {
+		clk = clock.Real
+	}
+	probe, err := gather.ProbeTmuxReadOnly(ctx, resolved.TmuxDir, client, clk.Now())
 	if err != nil {
 		return nil, nil, fmt.Errorf("probe tmux sockets under %s: %w", resolved.TmuxDir, err)
 	}

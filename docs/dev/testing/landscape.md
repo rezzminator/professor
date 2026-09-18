@@ -1,3 +1,4 @@
+<!-- rumdl-disable -->
 # pfm functionality landscape — Tier B lane map
 
 This is the tracked copy of `tmp/inventory/landscape.md`, the flat id-numbered inventory the
@@ -6,7 +7,9 @@ item text, `needs:`, `today:` and source columns are unchanged from the inventor
 derived them from code (`tmp/inventory/{cli,mcp,install,fleet,tests}.md`); the one addition is
 `lane(s)`, filled by `infra/fence/lanes/map.tsv` (the reverse index lives there, keyed the other
 way: `landscape_id · lane · beat`). A new item lands here with its beat in `infra/fence/lanes/
-beats.md` in the same commit — this file and the map never drift apart.
+beats.md` in the same commit — this file and the map never drift apart, and
+`infra/fence/lanes/check-map.sh` is the gate that says so. Running the lanes:
+`docs/dev/testing/lanes.md`.
 
 # pfm functionality landscape
 
@@ -27,122 +30,122 @@ the item.
 
 ### Host assets
 
-I1 · Claude launcher shim staged + symlinked `~/.local/bin/claude` · needs:none · today:U · install.md:24 · lane(s):O
-I2 · `pfm-statusline` overlay staged + symlinked · needs:none · today:U · install.md:25 · lane(s):O
-I3 · `tmux-title-renudge` overlay staged + symlinked · needs:tmux · today:U · install.md:26 · lane(s):O
-I4 · `handoff.skill.md` symlinked per Claude account · needs:seat:cc · today:NONE ⚠ known-gap (no doctor probe for skill-link health) · install.md:27 · lane(s):O
-I5 · launchd name-sync plist wiring (macOS only) · needs:systemd/launchd · today:NONE ⚠ known-gap (no doctor row found; unverified on Linux) · install.md:28 · lane(s):O
-I6 · launchd MCP plist wiring (macOS only, MCP-enabled gate) · needs:systemd/launchd,network · today:U · install.md:29 · lane(s):O
-I7 · `codex-appendix.md` staged, consumed as Codex SessionStart hook file · needs:seat:cx · today:U · install.md:30 · lane(s):O
-I8 · harness-prompt baseline files (opus + original) for drift doctor · needs:none · today:U · install.md:31 · lane(s):O
-I9 · `professor-prompt.md` system-prompt file (`claude.systemPrompt="professor"`) · needs:seat:cc · today:NONE ⚠ known-gap (no dedicated doctor row) · install.md:32 · lane(s):O
-I10 · `reload.command.md` installed command file (Claude + Codex mirror) · needs:seat:cc · today:NONE ⚠ known-gap (no doctor row for command-link health) · install.md:33 · lane(s):O
-I11 · `pfm.zsh` shim sourced from `~/.zshrc` (defines `cc`/`cx`/`co`/`pfm` launchers) · needs:none · today:U (indirect via `pfmPathWarnings`) · install.md:34 · lane(s):O
-I12 · systemd `pfm-mcp.service` unit (Linux, MCP-enabled gate) · needs:systemd/launchd,network · today:U · install.md:35 · lane(s):O
-I13 · systemd `pfm-name-sync.{path,service,timer}` units (Linux) · needs:systemd/launchd · today:NONE ⚠ known-gap (no dedicated systemd-unit doctor row) · install.md:36 · lane(s):O
-I14 · VS Code extension + `extensions.json` entry + `PFM` terminal profile wiring · needs:none · today:U · install.md:37 · lane(s):O
-I15 · Claude Code themes bundle (3: professor-gold/silver/bronze) · needs:seat:cc · today:NONE ⚠ known-gap (no `printThemeDoctor` row found) · install.md:38 · lane(s):O
-I16 · Harvestpy pinned Python conversion runtime provisioning (opt-in) · needs:network · today:U · install.md:39 · lane(s):O
-I17 · Global commands wiring (Claude symlink + Codex mirror) · needs:seat:cc,seat:cx · today:NONE ⚠ known-gap (no dedicated doctor row for command-link health) · install.md:40 · lane(s):O
-I18 · Global skills wiring (Claude only) · needs:seat:cc · today:NONE ⚠ known-gap (no dedicated doctor row) · install.md:41 · lane(s):O
-I19 · Global agents wiring — Claude `.md` symlink side · needs:seat:cc · today:U (`ReportGlobalAgents`) · install.md:42 · lane(s):O
-I20 · Global agents wiring — Codex `.toml` compile side (`wireCodexAgents`) · needs:seat:cx · today:U · install.md:42 · lane(s):O
-I21 · `source-repo` marker anchoring every global link · needs:git · today:U (indirect) · install.md:43 · lane(s):O
-I22 · `mcp-auth-token` credential file · needs:network · today:U (indirect via MCP reachability) · install.md:44 · lane(s):O
-I23 · `settings-hook-ownership.json` ledger, cross-checked against live files · needs:seat:cc,seat:cx · today:U · install.md:45,79-84 · lane(s):O
+I1 · Claude launcher shim staged + symlinked `~/.local/bin/claude` · needs:none · today:U · install.md:24 · lane(s):O1
+I2 · `pfm-statusline` overlay staged + symlinked · needs:none · today:U · install.md:25 · lane(s):O1
+I3 · `tmux-title-renudge` overlay staged + symlinked · needs:tmux · today:U · install.md:26 · lane(s):O1
+I4 · `handoff.skill.md` symlinked per Claude account · needs:seat:cc · today:NONE ⚠ known-gap (no doctor probe for skill-link health) · install.md:27 · lane(s):O1
+I5 · launchd name-sync plist wiring (macOS only) · needs:systemd/launchd · today:NONE ⚠ known-gap (no doctor row found; unverified on Linux) · install.md:28 · lane(s):O1
+I6 · launchd MCP plist wiring (macOS only, MCP-enabled gate) · needs:systemd/launchd,network · today:U · install.md:29 · lane(s):O1
+I7 · `codex-appendix.md` staged, consumed as Codex SessionStart hook file · needs:seat:cx · today:U · install.md:30 · lane(s):O1
+I8 · harness-prompt baseline files (opus + original) for drift doctor · needs:none · today:U · install.md:31 · lane(s):O1
+I9 · `professor-prompt.md` system-prompt file (`claude.systemPrompt="professor"`) · needs:seat:cc · today:NONE ⚠ known-gap (no dedicated doctor row) · install.md:32 · lane(s):O1
+I10 · `reload.command.md` installed command file (Claude + Codex mirror) · needs:seat:cc · today:NONE ⚠ known-gap (no doctor row for command-link health) · install.md:33 · lane(s):O1
+I11 · `pfm.zsh` shim sourced from `~/.zshrc` (defines `cc`/`cx`/`co`/`pfm` launchers) · needs:none · today:U (indirect via `pfmPathWarnings`) · install.md:34 · lane(s):O1
+I12 · systemd `pfm-mcp.service` unit (Linux, MCP-enabled gate) · needs:systemd/launchd,network · today:U · install.md:35 · lane(s):O1
+I13 · systemd `pfm-name-sync.{path,service,timer}` units (Linux) · needs:systemd/launchd · today:NONE ⚠ known-gap (no dedicated systemd-unit doctor row) · install.md:36 · lane(s):O1
+I14 · VS Code extension + `extensions.json` entry + `PFM` terminal profile wiring · needs:none · today:U · install.md:37 · lane(s):O1
+I15 · Claude Code themes bundle (3: professor-gold/silver/bronze) · needs:seat:cc · today:NONE ⚠ known-gap (no `printThemeDoctor` row found) · install.md:38 · lane(s):O1
+I16 · Harvestpy pinned Python conversion runtime provisioning (opt-in) · needs:network · today:U · install.md:39 · lane(s):O1
+I17 · Global commands wiring (Claude symlink + Codex mirror) · needs:seat:cc,seat:cx · today:NONE ⚠ known-gap (no dedicated doctor row for command-link health) · install.md:40 · lane(s):O1
+I18 · Global skills wiring (Claude only) · needs:seat:cc · today:NONE ⚠ known-gap (no dedicated doctor row) · install.md:41 · lane(s):O1
+I19 · Global agents wiring — Claude `.md` symlink side · needs:seat:cc · today:U (`ReportGlobalAgents`) · install.md:42 · lane(s):O1
+I20 · Global agents wiring — Codex `.toml` compile side (`wireCodexAgents`) · needs:seat:cx · today:U · install.md:42 · lane(s):O1
+I21 · `source-repo` marker anchoring every global link · needs:git · today:U (indirect) · install.md:43 · lane(s):O1
+I22 · `mcp-auth-token` credential file · needs:network · today:U (indirect via MCP reachability) · install.md:44 · lane(s):O1
+I23 · `settings-hook-ownership.json` ledger, cross-checked against live files · needs:seat:cc,seat:cx · today:U · install.md:45,79-84 · lane(s):O1,A
 
 ### Hooks (installer-owned)
 
-I24 · Claude `SessionStart` → `pfm internal launcher-repair` (repairs displaced claude symlink) · needs:seat:cc · today:U · install.md:64 · lane(s):O
-I25 · Claude `UserPromptSubmit` → `pfm usage-hook` (spend tracking) · needs:seat:cc,network · today:U · install.md:65 · lane(s):O
-I26 · Claude `SessionEnd` → `pfm internal clear-kill` · needs:seat:cc · today:U · install.md:66 · lane(s):O
-I27 · Claude `SessionEnd` → `pfm internal exit-close` · needs:seat:cc,tmux · today:U · install.md:67 · lane(s):O
-I28 · Claude `PreToolUse` (`Agent|Task`) → `pfm internal explore-deny` (guarded-file subagent deny) · needs:seat:cc · today:U · install.md:68 · lane(s):O
-I29 · Claude `UserPromptSubmit` → `pfm internal epic-inject` · needs:seat:cc,tmux · today:U · install.md:69 · lane(s):O
-I30 · Claude `UserPromptSubmit` → `pfm internal reload-intercept` · needs:seat:cc,tmux · today:U · install.md:70 · lane(s):O
-I31 · Claude `UserPromptSubmit` → `pfm internal exit-intercept` · needs:seat:cc,tmux · today:U · install.md:71 · lane(s):O
-I32 · Claude `UserPromptSubmit` → `pfm internal compact-nudge` · needs:seat:cc · today:U · install.md:72 · lane(s):O
-I33 · Codex `SessionStart` (`startup|resume|clear`) → codex-appendix injection · needs:seat:cx · today:U · install.md:73 · lane(s):O
+I24 · Claude `SessionStart` → `pfm internal launcher-repair` (repairs displaced claude symlink) · needs:seat:cc · today:U · install.md:64 · lane(s):O1
+I25 · Claude `UserPromptSubmit` → `pfm usage-hook` (spend tracking) · needs:seat:cc,network · today:U · install.md:65 · lane(s):O1
+I26 · Claude `SessionEnd` → `pfm internal clear-kill` · needs:seat:cc · today:U · install.md:66 · lane(s):O1
+I27 · Claude `SessionEnd` → `pfm internal exit-close` · needs:seat:cc,tmux · today:U · install.md:67 · lane(s):O1
+I28 · Claude `PreToolUse` (`Agent|Task`) → `pfm internal explore-deny` (guarded-file subagent deny) · needs:seat:cc · today:U · install.md:68 · lane(s):O1
+I29 · Claude `UserPromptSubmit` → `pfm internal epic-inject` · needs:seat:cc,tmux · today:U · install.md:69 · lane(s):O1
+I30 · Claude `UserPromptSubmit` → `pfm internal reload-intercept` · needs:seat:cc,tmux · today:U · install.md:70 · lane(s):O1
+I31 · Claude `UserPromptSubmit` → `pfm internal exit-intercept` · needs:seat:cc,tmux · today:U · install.md:71 · lane(s):O1
+I32 · Claude `UserPromptSubmit` → `pfm internal compact-nudge` · needs:seat:cc · today:U · install.md:72 · lane(s):O1
+I33 · Codex `SessionStart` (`startup|resume|clear`) → codex-appendix injection · needs:seat:cx · today:U · install.md:73 · lane(s):O1
 
 ### Seats
 
-I34 · Implicit account 1 discovery (`~/.cc/1` → `~/.claude` fallback) · needs:seat:cc · today:U · install.md:93-103 · lane(s):O
-I35 · Explicit `~/.cc/N` additional accounts (N≥2) · needs:seat:cc · today:U · install.md:104-106 · lane(s):O
-I36 · `installer.Options.ConfigDir`/`ConfigDirs` fanout · needs:seat:cc · today:U · install.md:107-110 · lane(s):O
-I37 · `claudeConfigDirs()` physical-path dedup (symlink-aware) · needs:seat:cc · today:U · install.md:111-115 · lane(s):A,O
-I38 · Dropped-seat hook-ownership reconciliation, refuses stranding on uninstall · needs:seat:cc · today:U · install.md:116-123 · lane(s):M,O
-I39 · Codex homes configuration (default `~/.codex`, or `Options.CodexHomes`) · needs:seat:cx · today:U · install.md:124-126 · lane(s):O
-I40 · OpenCode home — never written by `pfm install` ⚠ known-gap (confirmed absence) · needs:seat:oc · today:NONE · install.md:127-132 · lane(s):O
+I34 · Implicit account 1 discovery (`~/.cc/1` → `~/.claude` fallback) · needs:seat:cc · today:U · install.md:93-103 · lane(s):O1
+I35 · Explicit `~/.cc/N` additional accounts (N≥2) · needs:seat:cc · today:U · install.md:104-106 · lane(s):O1
+I36 · `installer.Options.ConfigDir`/`ConfigDirs` fanout · needs:seat:cc · today:U · install.md:107-110 · lane(s):O1
+I37 · `claudeConfigDirs()` physical-path dedup (symlink-aware) · needs:seat:cc · today:U · install.md:111-115 · lane(s):O1,A
+I38 · Dropped-seat hook-ownership reconciliation, refuses stranding on uninstall · needs:seat:cc · today:U · install.md:116-123 · lane(s):O1,M,O2
+I39 · Codex homes configuration (default `~/.codex`, or `Options.CodexHomes`) · needs:seat:cx · today:U · install.md:124-126 · lane(s):O1
+I40 · OpenCode home — never written by `pfm install` ⚠ known-gap (confirmed absence) · needs:seat:oc · today:NONE · install.md:127-132 · lane(s):O1
 
 ### Doctor row families
 
-I41 · Doctor: config dump (info only) · needs:none · today:U · install.md:230 · lane(s):O
-I42 · Doctor: harvester config warnings · needs:network · today:U · install.md:231 · lane(s):O
-I43 · Doctor: engine roster warnings · needs:none · today:U · install.md:232 · lane(s):O
-I44 · Doctor: OpenCode store warnings · needs:seat:oc · today:U · install.md:233 · lane(s):O
-I45 · Doctor: engine capabilities warnings · needs:none · today:U · install.md:234 · lane(s):O
-I46 · Doctor: MCP client cutover warnings · needs:network · today:U · install.md:235 · lane(s):O
-I47 · Doctor: MCP daemon reachability + harvester-external + version-skew · needs:network · today:U · install.md:236 · lane(s):O
-I48 · Doctor: database health (user_version/quick_check/shared-store/row-counts/WAL/busy), direct `return 3` · needs:none · today:U · install.md:237 · lane(s):O
-I49 · Doctor: PATH canonical warnings · needs:none · today:U · install.md:238 · lane(s):O
-I50 · Doctor: pre-push gate warnings · needs:git · today:U · install.md:239 · lane(s):O
-I51 · Doctor: harness-prompt drift warnings · needs:seat:cc · today:U · install.md:240 · lane(s):O
-I52 · Doctor: spawn audit warnings · needs:tmux · today:U · install.md:241 · lane(s):O
-I53 · Doctor: tmux titles (info only — "both title owners are legitimate") · needs:tmux · today:U · install.md:242 · lane(s):O
-I54 · Doctor: Claude launcher failures (missing/DISPLACED/unknown) · needs:seat:cc · today:U · install.md:243 · lane(s):O
-I55 · Doctor: VS Code warnings · needs:none · today:U · install.md:244 · lane(s):O
-I56 · Doctor: Claude versions/retention warnings+failures · needs:seat:cc · today:U · install.md:245 · lane(s):O
-I57 · Doctor: dependency probe warnings+failures (gates `claudeAbsent` later rows) · needs:none · today:U+A (`doctor.txtar`) · install.md:246 · lane(s):O
-I58 · Doctor: host overlays — every non-ok state is a FAILURE, never a warning · needs:none · today:U · install.md:247 · lane(s):O
-I59 · Doctor: global agents warnings (Conflict/NoSources/Unresolved) + failures (Missing/Unreadable) · needs:seat:cc,seat:cx · today:U · install.md:248 · lane(s):O
-I60 · Doctor: hooks warnings (drift) + failures (missing/broken/stale) · needs:seat:cc,seat:cx · today:U · install.md:249 · lane(s):O
-I61 · Doctor: roots (Claude/Codex account roots) warnings · needs:seat:cc,seat:cx · today:U · install.md:250 · lane(s):O
-I62 · Doctor: professor project row — `UNREADABLE` folded into warnings not failures ⚠ known-gap (severity mismatch) · needs:project · today:U · install.md:251 · lane(s):O
-I63 · Doctor: Codex pane binding warnings (contested/retired `/clear` bindings) · needs:seat:cx,tmux · today:U · install.md:252 · lane(s):E2,O
-I64 · Doctor: crumb health (SID dir) warnings · needs:seat:cc · today:U · install.md:253 · lane(s):O
-I65 · Doctor: harvestpy environment warnings (skippable `--skip-harvest`) · needs:network · today:U · install.md:254 · lane(s):O
-I66 · Doctor: harvest cache warnings · needs:none · today:U · install.md:255 · lane(s):O
-I67 · Doctor: harvest search warnings · needs:network · today:U · install.md:256 · lane(s):O
-I68 · Doctor: overall exit-code tally (0 clean / 1 warnings / 2 usage / 3 failures) · needs:none · today:U+A (`doctor.txtar`) · install.md:219-227 · lane(s):O
+I41 · Doctor: config dump (info only) · needs:none · today:U · install.md:230 · lane(s):O1
+I42 · Doctor: harvester config warnings · needs:network · today:U · install.md:231 · lane(s):O1
+I43 · Doctor: engine roster warnings · needs:none · today:U · install.md:232 · lane(s):O1
+I44 · Doctor: OpenCode store warnings · needs:seat:oc · today:U · install.md:233 · lane(s):O1
+I45 · Doctor: engine capabilities warnings · needs:none · today:U · install.md:234 · lane(s):O1
+I46 · Doctor: MCP client cutover warnings · needs:network · today:U · install.md:235 · lane(s):O1
+I47 · Doctor: MCP daemon reachability + harvester-external + version-skew · needs:network · today:U · install.md:236 · lane(s):O1
+I48 · Doctor: database health (user_version/quick_check/shared-store/row-counts/WAL/busy), direct `return 3` · needs:none · today:U · install.md:237 · lane(s):O1
+I49 · Doctor: PATH canonical warnings · needs:none · today:U · install.md:238 · lane(s):O1
+I50 · Doctor: pre-push gate warnings · needs:git · today:U · install.md:239 · lane(s):O1
+I51 · Doctor: harness-prompt drift warnings · needs:seat:cc · today:U · install.md:240 · lane(s):O1
+I52 · Doctor: spawn audit warnings · needs:tmux · today:U · install.md:241 · lane(s):O1
+I53 · Doctor: tmux titles (info only — "both title owners are legitimate") · needs:tmux · today:U · install.md:242 · lane(s):O1
+I54 · Doctor: Claude launcher failures (missing/DISPLACED/unknown) · needs:seat:cc · today:U · install.md:243 · lane(s):O1
+I55 · Doctor: VS Code warnings · needs:none · today:U · install.md:244 · lane(s):O1
+I56 · Doctor: Claude versions/retention warnings+failures · needs:seat:cc · today:U · install.md:245 · lane(s):O1
+I57 · Doctor: dependency probe warnings+failures (gates `claudeAbsent` later rows) · needs:none · today:U+A (`doctor.txtar`) · install.md:246 · lane(s):O1
+I58 · Doctor: host overlays — every non-ok state is a FAILURE, never a warning · needs:none · today:U · install.md:247 · lane(s):O1
+I59 · Doctor: global agents warnings (Conflict/NoSources/Unresolved) + failures (Missing/Unreadable) · needs:seat:cc,seat:cx · today:U · install.md:248 · lane(s):O1
+I60 · Doctor: hooks warnings (drift) + failures (missing/broken/stale) · needs:seat:cc,seat:cx · today:U · install.md:249 · lane(s):O1
+I61 · Doctor: roots (Claude/Codex account roots) warnings · needs:seat:cc,seat:cx · today:U · install.md:250 · lane(s):O1
+I62 · Doctor: professor project row — `UNREADABLE` folded into warnings not failures ⚠ known-gap (severity mismatch) · needs:project · today:U · install.md:251 · lane(s):O1
+I63 · Doctor: Codex pane binding warnings (contested/retired `/clear` bindings) · needs:seat:cx,tmux · today:U · install.md:252 · lane(s):E2,O2
+I64 · Doctor: crumb health (SID dir) warnings · needs:seat:cc · today:U · install.md:253 · lane(s):O1
+I65 · Doctor: harvestpy environment warnings (skippable `--skip-harvest`) · needs:network · today:U · install.md:254 · lane(s):O1
+I66 · Doctor: harvest cache warnings · needs:none · today:U · install.md:255 · lane(s):O1
+I67 · Doctor: harvest search warnings · needs:network · today:U · install.md:256 · lane(s):O1
+I68 · Doctor: overall exit-code tally (0 clean / 1 warnings / 2 usage / 3 failures) · needs:none · today:U+A (`doctor.txtar`) · install.md:219-227 · lane(s):O1
 
 ### Uninstall
 
-I69 · Uninstall removes harvestpy managed env+cache · needs:none · today:U · install.md:265 · lane(s):O
-I70 · Uninstall removes staged theme files · needs:none · today:U · install.md:265 · lane(s):O
-I71 · Uninstall removes/restores Claude launcher symlink (displaced-native backup restore) · needs:seat:cc · today:U · install.md:266-267 · lane(s):O
-I72 · Uninstall removes host overlay symlinks · needs:none · today:U · install.md:268 · lane(s):O
-I73 · Uninstall removes `/reload` command link · needs:seat:cc · today:U · install.md:269 · lane(s):O
-I74 · Uninstall removes `handoff` skill link · needs:seat:cc · today:U · install.md:269 · lane(s):O
-I75 · Uninstall removes Codex command mirror (empty asset list = delete every wired command) · needs:seat:cx · today:U · install.md:270-271 · lane(s):O
-I76 · Uninstall removes `/bb` + `/chat:*` command remnants · needs:seat:cc · today:U · install.md:271 · lane(s):O
-I77 · Uninstall removes macOS launch agents / Linux systemd units+enablements · needs:systemd/launchd · today:U · install.md:272-274 · lane(s):O
-I78 · Uninstall removes Claude `settings.json` + Codex `hooks.json` hook entries (ownership-scoped) · needs:seat:cc,seat:cx · today:U · install.md:274-276 · lane(s):O
-I79 · Uninstall removes MCP client registrations · needs:network · today:U · install.md:276 · lane(s):O
-I80 · Uninstall removes the `source .../pfm.zsh` line from `~/.zshrc` · needs:none · today:U · install.md:277 · lane(s):O
-I81 · Uninstall removes VS Code extension link/index entry/terminal-profile settings · needs:none · today:U · install.md:278-279 · lane(s):O
-I82 · Uninstall removes every staged file under the managed root, prunes empty subdirs · needs:none · today:U · install.md:279-280 · lane(s):O
-I83 · Uninstall removes the update-metadata file (apply mode only) · needs:none · today:U · install.md:281-282 · lane(s):O
-I84 · Uninstall guarantee: never strips a foreign hook coexisting in the same settings/hooks file · needs:seat:cc,seat:cx · today:U · install.md:286-293 · lane(s):O
-I85 · Uninstall guarantee: never removes an operator's own agent/command/skill file (classified by link target) · needs:seat:cc,seat:cx · today:U · install.md:294-297 · lane(s):O
-I86 · Uninstall guarantee: never touches project scaffold files (`.professor/`, `CLAUDE.md`, `.claude/**`) · needs:project · today:U · install.md:298-302 · lane(s):O
-I87 · Uninstall guarantee: never force-removes a non-empty managed directory · needs:none · today:U · install.md:303-305 · lane(s):O
-I88 · Backup guarantee: every destructive in-place rewrite gets a timestamped backup first · needs:none · today:U · install.md:307-311 · lane(s):O
-I89 · Backup retention: no pruning routine found for old timestamped backups ⚠ known-gap (UNKNOWN — targeted not exhaustive search) · needs:none · today:NONE · install.md:312-315 · lane(s):O
+I69 · Uninstall removes harvestpy managed env+cache · needs:none · today:U · install.md:265 · lane(s):O2
+I70 · Uninstall removes staged theme files · needs:none · today:U · install.md:265 · lane(s):O2
+I71 · Uninstall removes/restores Claude launcher symlink (displaced-native backup restore) · needs:seat:cc · today:U · install.md:266-267 · lane(s):O2
+I72 · Uninstall removes host overlay symlinks · needs:none · today:U · install.md:268 · lane(s):O2
+I73 · Uninstall removes `/reload` command link · needs:seat:cc · today:U · install.md:269 · lane(s):O2
+I74 · Uninstall removes `handoff` skill link · needs:seat:cc · today:U · install.md:269 · lane(s):O2
+I75 · Uninstall removes Codex command mirror (empty asset list = delete every wired command) · needs:seat:cx · today:U · install.md:270-271 · lane(s):O2
+I76 · Uninstall removes `/bb` + `/chat:*` command remnants · needs:seat:cc · today:U · install.md:271 · lane(s):O2
+I77 · Uninstall removes macOS launch agents / Linux systemd units+enablements · needs:systemd/launchd · today:U · install.md:272-274 · lane(s):O2
+I78 · Uninstall removes Claude `settings.json` + Codex `hooks.json` hook entries (ownership-scoped) · needs:seat:cc,seat:cx · today:U · install.md:274-276 · lane(s):O2
+I79 · Uninstall removes MCP client registrations · needs:network · today:U · install.md:276 · lane(s):O2
+I80 · Uninstall removes the `source .../pfm.zsh` line from `~/.zshrc` · needs:none · today:U · install.md:277 · lane(s):O2
+I81 · Uninstall removes VS Code extension link/index entry/terminal-profile settings · needs:none · today:U · install.md:278-279 · lane(s):O2
+I82 · Uninstall removes every staged file under the managed root, prunes empty subdirs · needs:none · today:U · install.md:279-280 · lane(s):O2
+I83 · Uninstall removes the update-metadata file (apply mode only) · needs:none · today:U · install.md:281-282 · lane(s):O2
+I84 · Uninstall guarantee: never strips a foreign hook coexisting in the same settings/hooks file · needs:seat:cc,seat:cx · today:U · install.md:286-293 · lane(s):O2
+I85 · Uninstall guarantee: never removes an operator's own agent/command/skill file (classified by link target) · needs:seat:cc,seat:cx · today:U · install.md:294-297 · lane(s):O2
+I86 · Uninstall guarantee: never touches project scaffold files (`.professor/`, `CLAUDE.md`, `.claude/**`) · needs:project · today:U · install.md:298-302 · lane(s):O2
+I87 · Uninstall guarantee: never force-removes a non-empty managed directory · needs:none · today:U · install.md:303-305 · lane(s):O2
+I88 · Backup guarantee: every destructive in-place rewrite gets a timestamped backup first · needs:none · today:U · install.md:307-311 · lane(s):O2
+I89 · Backup retention: no pruning routine found for old timestamped backups ⚠ known-gap (UNKNOWN — targeted not exhaustive search) · needs:none · today:NONE · install.md:312-315 · lane(s):O2
 
 ### Doc vs code
 
-I90 · §7b-i `settings-global.json` merge is a Phase-2 Claude-session hand-merge, not `pfm` Go code ⚠ known-gap · needs:seat:cc · today:NONE · install.md:324-331 · lane(s):O
-I91 · §7d/§7e `notify.sh`/`format-md.sh` are project-scoped hooks shipped via `templates/project/settings.json`, not host hooks (clarification) · needs:project · today:U · install.md:332-337 · lane(s):O
-I92 · §7g git-host bridge skill (`host-{gh,glab}`) is Phase-2 Claude-session generated, zero Go references ⚠ known-gap · needs:seat:cc,git · today:NONE · install.md:338-342 · lane(s):O
-I93 · §7h themes — implemented, matches doc (confirmed correct) · needs:seat:cc · today:U · install.md:343-344 · lane(s):O
-I94 · §7f-i MCP — implemented, matches doc (confirmed correct) · needs:network · today:U · install.md:345-348 · lane(s):O
-I95 · `wireCodexAgents` naming trap — wires BOTH Claude+Codex sides under a Codex-sounding name ⚠ known-gap (reader confusion, not a functional bug) · needs:none · today:U · install.md:349-354 · lane(s):O
+I90 · §7b-i `settings-global.json` merge is a Phase-2 Claude-session hand-merge, not `pfm` Go code ⚠ known-gap · needs:seat:cc · today:NONE · install.md:324-331 · lane(s):O1
+I91 · §7d/§7e `notify.sh`/`format-md.sh` are project-scoped hooks shipped via `templates/project/settings.json`, not host hooks (clarification) · needs:project · today:U · install.md:332-337 · lane(s):O1
+I92 · §7g git-host bridge skill (`host-{gh,glab}`) is Phase-2 Claude-session generated, zero Go references ⚠ known-gap · needs:seat:cc,git · today:NONE · install.md:338-342 · lane(s):O1
+I93 · §7h themes — implemented, matches doc (confirmed correct) · needs:seat:cc · today:U · install.md:343-344 · lane(s):O1
+I94 · §7f-i MCP — implemented, matches doc (confirmed correct) · needs:network · today:U · install.md:345-348 · lane(s):O1
+I95 · `wireCodexAgents` naming trap — wires BOTH Claude+Codex sides under a Codex-sounding name ⚠ known-gap (reader confusion, not a functional bug) · needs:none · today:U · install.md:349-354 · lane(s):O1
 
 ### Top-level CLI commands
 
-I96 · `pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]` · needs:systemd/launchd,network · today:U+A · cli.md:142 · lane(s):F,O
-I97 · `pfm uninstall [--config-dir DIR]` · needs:systemd/launchd · today:U+A · cli.md:148 · lane(s):O
-I98 · `pfm doctor [--verbose] [--skip-harvest]` command itself (exit 0/1/2/3 contract) · needs:tmux,network,git,project · today:U+A (`doctor.txtar`) · cli.md:92 · lane(s):O
+I96 · `pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]` · needs:systemd/launchd,network · today:U+A · cli.md:142 · lane(s):O1,F
+I97 · `pfm uninstall [--config-dir DIR]` · needs:systemd/launchd · today:U+A · cli.md:148 · lane(s):O2
+I98 · `pfm doctor [--verbose] [--skip-harvest]` command itself (exit 0/1/2/3 contract) · needs:tmux,network,git,project · today:U+A (`doctor.txtar`) · cli.md:92 · lane(s):O1
 
 ---
 
@@ -213,7 +216,7 @@ P37 · `.opencode/**` layer — compiled by `build-opencode.mjs`, entirely outsi
 
 ## C — Chat verbs (66)
 
-C1 · `pfm ls` interactive fleet picker (cosmos TUI over `fleet.Scan`) · needs:tmux · today:U · cli.md:29 · lane(s):F
+C1 · `pfm ls` interactive fleet picker (cosmos TUI over `fleet.Scan`) · needs:tmux · today:U · cli.md:29 · lane(s):F,A
 C2 · `pfm ls --plain` · needs:tmux · today:U · cli.md:29 · lane(s):F
 C3 · `pfm ls --tsv` · needs:tmux · today:U · cli.md:29 · lane(s):F
 C4 · `pfm ls -a/--all` · needs:tmux · today:U · cli.md:29 · lane(s):F
@@ -234,17 +237,17 @@ C18 · `pfm chat new --role ROLE` · needs:tmux · today:U · cli.md:42 · lane(
 C19 · `pfm chat new --await [--timeout S] [--settle S] [--progress]` · needs:tmux · today:U · cli.md:42 · lane(s):F
 C20 · `pfm chat new --attach` · needs:tmux · today:U · cli.md:42 · lane(s):F
 C21 · `pfm chat open <target>` · needs:tmux · today:U · cli.md:43 · lane(s):F
-C22 · `pfm chat status <target>` base · needs:tmux · today:U · cli.md:44 · lane(s):E1
+C22 · `pfm chat status <target>` base · needs:tmux · today:U · cli.md:44 · lane(s):E1,F
 C23 · `pfm chat status --json` · needs:tmux · today:U · cli.md:44 · lane(s):E1
 C24 · `pfm chat status --summary` · needs:tmux · today:U · cli.md:44 · lane(s):E1
 C25 · `pfm chat status --ask` · needs:tmux · today:U · cli.md:44 · lane(s):E1
 C26 · `pfm chat status --engine claude|codex` (requires `--summary`/`--ask`) · needs:tmux · today:U · cli.md:44 · lane(s):E1
 C27 · `pfm chat status --model MODEL` · needs:tmux · today:U · cli.md:44 · lane(s):E1
-C28 · `pfm chat last <target>` · needs:none · today:U · cli.md:45 · lane(s):E1
+C28 · `pfm chat last <target>` · needs:none · today:U · cli.md:45 · lane(s):E1,F
 C29 · `pfm chat read <target> [--tail N] [--condensed] [--json]` · needs:none · today:U · cli.md:46 · lane(s):E1
 C30 · `pfm chat read` excerpt-file compatibility form · needs:none · today:U · cli.md:46 · lane(s):E1
 C31 · `pfm chat stream <target> [--filter REGEX] [--margin N] [--from-start] [--raw] [--no-follow]` · needs:tmux · today:NONE (no dedicated test file found) · cli.md:47 · lane(s):E1
-C32 · `pfm chat inject <target> <message>` base delivery · needs:tmux · today:U+B (`check_inject`) · cli.md:48 · lane(s):E1,E2
+C32 · `pfm chat inject <target> <message>` base delivery · needs:tmux · today:U+B (`check_inject`) · cli.md:48 · lane(s):E1,E2,F
 C33 · `pfm chat inject --force-now` · needs:tmux · today:U · cli.md:48 · lane(s):E1
 C34 · `pfm chat inject --then STEER` (repeatable) · needs:tmux · today:U · cli.md:48 · lane(s):E1
 C35 · `pfm chat inject --file PATH` · needs:tmux · today:U · cli.md:48 · lane(s):E1
@@ -277,7 +280,7 @@ C61 · `pfm chat branch [--engine claude|codex] [--session-id ID] [--cwd DIR] [-
 C62 · `pfm chat history <sid-prefix|jsonl-path> [messages] [project-slug]` · needs:none · today:U · cli.md:64 · lane(s):F
 C63 · `pfm chat modal <tmux-session> deny <down-count>` · needs:tmux · today:U · cli.md:65 · lane(s):F
 C64 · `pfm chat resolve <target>` · needs:tmux · today:U · cli.md:66 · lane(s):F
-C65 · `pfm chat whoami` (alias of `pfm whoami`) · needs:tmux · today:U · cli.md:67 · lane(s):O
+C65 · `pfm chat whoami` (alias of `pfm whoami`) · needs:tmux · today:U · cli.md:67 · lane(s):O1
 C66 · Shared headless-verb exit contract (0/2/3/4/5/6/7 across ask/status/read/last/stream/inject/watch/self-compact) · needs:none · today:U · cli.md:34-38 · lane(s):E1
 
 ---
@@ -300,13 +303,13 @@ K13 · Hidden/killed: name-based self-kill via `_KILL`/`_HIDE` prefix (case-inse
 K14 · Hidden/killed: store-based kill via fleetdb `hidden` table (K2 prompt-ratchet auto-unkill) · needs:none · today:U · fleet.md:82-91 · lane(s):F
 K15 · Headless-by-construction: every `chat new` launch has no attached terminal by default · needs:tmux · today:U · fleet.md:97-101 · lane(s):F
 K16 · `--attach` opt-in interactive tmux-attach line · needs:tmux · today:U · fleet.md:100-101 · lane(s):F
-K17 · `pfm headless exec`/`run` scripting front (`run`→`new`, `transcript`→`read` aliases) · needs:seat:cc/cx/oc,network · today:U · fleet.md:102-104 · lane(s):O
+K17 · `pfm headless exec`/`run` scripting front (`run`→`new`, `transcript`→`read` aliases) · needs:seat:cc/cx/oc,network · today:U · fleet.md:102-104 · lane(s):O2
 K18 · Storm chats — NOT a `pfm` CLI verb; `infra/demo/storm.sh` wraps ordinary `chat new`/`end`/`kill` · needs:tmux,network · today:B (`check_storm`) · fleet.md:106-124 · lane(s):F
 K19 · `pfm storm`/`pfm idle` confirmed NOT to exist as subcommands (documented absence, not a failed search) · needs:none · today:NONE · fleet.md:118-124,252-255 · lane(s):F
 K20 · Role/prompt-file: `--role ROLE` composes a registered agent constitution ahead of the prompt · needs:tmux · today:U · fleet.md:128-131 · lane(s):F
 K21 · Role/prompt-file: `--prompt-file PATH` (mutually exclusive with inline prompt) · needs:tmux · today:U · fleet.md:131-134 · lane(s):F
 K22 · Role re-arm crumb write so `reload`/`self-compact` can re-apply the role after a reset · needs:tmux · today:U · fleet.md:134-137 · lane(s):E1
-K23 · Account/seat: `--account N` on `chat new`/`reload`/`branch`, hard error on unconfigured id · needs:tmux · today:U · fleet.md:141-146 · lane(s):E1,O
+K23 · Account/seat: `--account N` on `chat new`/`reload`/`branch`, hard error on unconfigured id · needs:tmux · today:U · fleet.md:141-146 · lane(s):O1,E1
 K24 · Account medal-emoji identity (🥇🥈🥉, retired 🍀) across label/statusline/TUI · needs:tmux · today:U · fleet.md:146-149 · lane(s):F
 K25 · 1h cache mode: `--1h` on `chat new` · needs:tmux,seat:cc · today:U · fleet.md:153 · lane(s):F
 K26 · 1h cache mode: `--1h on|off` on `chat reload` · needs:tmux,seat:cc · today:U · fleet.md:153-154 · lane(s):E1
@@ -362,10 +365,10 @@ T30 · TUI rendered/captured end-to-end in exactly one e2e test; nothing else ex
 T31 · `pfm statusline [--refresh-gpt]` render (account badge→git→effort→rate-limit→Codex usage→cache-window segments, fail-open) · needs:none · today:U · cli.md:130 · lane(s):E1,E2,E3
 T32 · `pfm statusline --refresh-gpt` (execs codex rate-limit read) · needs:network,seat:cx · today:U · cli.md:130 · lane(s):E2
 T33 · Statusline side effect: `convergeWindowName` renames the tmux window on a single-pane Claude render (staleness-cached) · needs:tmux,seat:cc · today:U · fleet.md:367-375 · lane(s):E1
-T34 · `pfm internal tmux-title-renudge` sweep re-emits OSC titles on every live socket · needs:tmux · today:U · fleet.md:377-381 · lane(s):O
+T34 · `pfm internal tmux-title-renudge` sweep re-emits OSC titles on every live socket · needs:tmux · today:U · fleet.md:377-381 · lane(s):O2
 T35 · Theme wiring: `custom:professor-gold/silver/bronze` selectable via `settings.json` or `/theme` · needs:seat:cc · today:U (`themes_test.go`) · fleet.md:383-397 · lane(s):E1
 T36 · pfm TUI's own internal theme palettes (`default`/`tokyo-night`, distinct from Claude Code CLI themes) · needs:tmux · today:U · fleet.md:394-397 · lane(s):F
-T37 · `/reload` installed slash-command file (body substituted from `reload.Usage`, never drifts) · needs:seat:cc · today:NONE ⚠ known-gap (no doctor row for link health) · fleet.md:404-412 · lane(s):O
+T37 · `/reload` installed slash-command file (body substituted from `reload.Usage`, never drifts) · needs:seat:cc · today:NONE ⚠ known-gap (no doctor row for link health) · fleet.md:404-412 · lane(s):O2
 T38 · `/handoff [--branch]` installed skill (writes handoff file, reboots pane or spawns detached sibling) · needs:seat:cc,tmux · today:U · fleet.md:413-419 · lane(s):E1
 
 ---
@@ -450,31 +453,31 @@ L4 · Idle detection: `StateIdle` iff newest record role = assistant; `StateWork
 L5 · Sidechain override: `newerClaudeSidechain` forces `StateWorking` when a subagent transcript is newer than its parent · needs:none · today:U · fleet.md:440-444 · lane(s):E1,F
 L6 · `IdleSeconds` populated only when `State==StateIdle` · needs:none · today:U · fleet.md:445-447 · lane(s):F
 L7 · `Missing(name)` explicit absence value, never silent · needs:none · today:U · fleet.md:448-449 · lane(s):F
-L8 · Reap classification: `self` · needs:tmux · today:U · fleet.md:457 · lane(s):O
-L9 · Reap classification: `keep` (attached) · needs:tmux · today:U · fleet.md:457-458 · lane(s):O
-L10 · Reap classification: `mate` (`cc-new-*` detached teammate, reaped only by parent's close choreography) · needs:tmux · today:U · fleet.md:458-459 · lane(s):O
-L11 · Reap classification: `busy` (engine self-reports working) · needs:tmux · today:U · fleet.md:459 · lane(s):O
-L12 · Reap classification: `active` (transcript written moments ago) · needs:tmux · today:U · fleet.md:459-460 · lane(s):O
-L13 · Reap classification: `hosts` (panes hosting non-chat processes, never reapable) · needs:tmux · today:U · fleet.md:460-461 · lane(s):O
-L14 · Reap classification: `fork` (untouched detached `/chat:branch` seat, reapable) · needs:tmux · today:U · fleet.md:462-463 · lane(s):O
-L15 · Reap classification: `orph` (unattached idle — THE reapable case) · needs:tmux · today:U · fleet.md:463 · lane(s):O
-L16 · Reap classification: `IDLE` (attached but both transcript+window_activity stale) · needs:tmux · today:U · fleet.md:464-466 · lane(s):O
-L17 · Reap classification: `KILL` (orphan actually killed this run) · needs:tmux · today:U+A (`reap-preview.txtar`) · fleet.md:466 · lane(s):O
-L18 · Reap classification: `dead` (socket file, no server, old enough) · needs:tmux · today:U · fleet.md:467 · lane(s):O
-L19 · Reap classification: `SKIP` (deliberately left alone, reason attached) · needs:tmux · today:U · fleet.md:467 · lane(s):O
-L20 · Reap classification: `UNKN` (transcript unreadable — never reapable regardless of idle time) · needs:tmux · today:U · fleet.md:467-469 · lane(s):O
-L21 · Reap actions: `None`/`KillServer`/`RemoveSocketFile`/`KillSession` · needs:tmux · today:U · fleet.md:470-471 · lane(s):O
-L22 · `pfm reap` dry-run default (matches `--apply` plan exactly) · needs:tmux · today:U+A (`reap-preview.txtar`) · cli.md:106 · lane(s):O
-L23 · `pfm reap --apply` · needs:tmux · today:U+A · cli.md:106 · lane(s):O
-L24 · `pfm reap --horizon 48h` · needs:tmux · today:U · cli.md:106 · lane(s):O
-L25 · `pfm reap --busy-recent SECONDS` · needs:tmux · today:U · cli.md:106 · lane(s):O
-L26 · `pfm reap --json` · needs:tmux · today:U · cli.md:106 · lane(s):O
+L8 · Reap classification: `self` · needs:tmux · today:U · fleet.md:457 · lane(s):O2
+L9 · Reap classification: `keep` (attached) · needs:tmux · today:U · fleet.md:457-458 · lane(s):O2
+L10 · Reap classification: `mate` (`cc-new-*` detached teammate, reaped only by parent's close choreography) · needs:tmux · today:U · fleet.md:458-459 · lane(s):O2
+L11 · Reap classification: `busy` (engine self-reports working) · needs:tmux · today:U · fleet.md:459 · lane(s):O2
+L12 · Reap classification: `active` (transcript written moments ago) · needs:tmux · today:U · fleet.md:459-460 · lane(s):O2
+L13 · Reap classification: `hosts` (panes hosting non-chat processes, never reapable) · needs:tmux · today:U · fleet.md:460-461 · lane(s):O2
+L14 · Reap classification: `fork` (untouched detached `/chat:branch` seat, reapable) · needs:tmux · today:U · fleet.md:462-463 · lane(s):O2
+L15 · Reap classification: `orph` (unattached idle — THE reapable case) · needs:tmux · today:U · fleet.md:463 · lane(s):O2
+L16 · Reap classification: `IDLE` (attached but both transcript+window_activity stale) · needs:tmux · today:U · fleet.md:464-466 · lane(s):O2
+L17 · Reap classification: `KILL` (orphan actually killed this run) · needs:tmux · today:U+A (`reap-preview.txtar`) · fleet.md:466 · lane(s):O2
+L18 · Reap classification: `dead` (socket file, no server, old enough) · needs:tmux · today:U · fleet.md:467 · lane(s):O2
+L19 · Reap classification: `SKIP` (deliberately left alone, reason attached) · needs:tmux · today:U · fleet.md:467 · lane(s):O2
+L20 · Reap classification: `UNKN` (transcript unreadable — never reapable regardless of idle time) · needs:tmux · today:U · fleet.md:467-469 · lane(s):O2
+L21 · Reap actions: `None`/`KillServer`/`RemoveSocketFile`/`KillSession` · needs:tmux · today:U · fleet.md:470-471 · lane(s):O2
+L22 · `pfm reap` dry-run default (matches `--apply` plan exactly) · needs:tmux · today:U+A (`reap-preview.txtar`) · cli.md:106 · lane(s):O2
+L23 · `pfm reap --apply` · needs:tmux · today:U+A · cli.md:106 · lane(s):O2
+L24 · `pfm reap --horizon 48h` · needs:tmux · today:U · cli.md:106 · lane(s):O2
+L25 · `pfm reap --busy-recent SECONDS` · needs:tmux · today:U · cli.md:106 · lane(s):O2
+L26 · `pfm reap --json` · needs:tmux · today:U · cli.md:106 · lane(s):O2
 L27 · Inject busy/menu guards: `IsBusy` spinner-regex detection · needs:tmux · today:U · fleet.md:169-175,476-478 · lane(s):E1
 L28 · Inject busy/menu guards: `SelectorLine`/menu detection (Claude `❯` vs Codex `›` regexes) · needs:tmux · today:U · fleet.md:171-172 · lane(s):E1
 L29 · Inject busy/menu guards: draft detection (excludes spinner/idle-sparkle glyphs) · needs:tmux · today:U · fleet.md:172-174 · lane(s):E1
 L30 · Inject busy/menu guards: compaction-receipt regex · needs:tmux · today:U · fleet.md:174-175 · lane(s):E1
 L31 · Inject delivery proof requires visible-past-composer OR paste-placeholder OR queue-proof-text OR busy false→true flip (never "composer is empty" alone) · needs:tmux · today:U · fleet.md:479-484 · lane(s):E1
-L32 · Reload worker: reboot-in-place under new account/cache/model/effort · needs:tmux,seat:cc · today:U+B (`check_reload`) · fleet.md:486-494 · lane(s):E1,O
+L32 · Reload worker: reboot-in-place under new account/cache/model/effort · needs:tmux,seat:cc · today:U+B (`check_reload`) · fleet.md:486-494 · lane(s):E1,O2
 L33 · Reload worker: `--new` fresh-session variant · needs:tmux,seat:cc · today:U · fleet.md:486-494 · lane(s):E1
 L34 · Reload worker: detached scheduling via `pfm internal reload-run` · needs:tmux,seat:cc · today:U · cli.md:59,222 · lane(s):E1
 L35 · Self-compact scheduling: `ScheduleSelfCompact` validates one control-char-free focus line · needs:tmux · today:U · fleet.md:498-502 · lane(s):E1
@@ -490,63 +493,63 @@ L42 · name-sync never runs more than once concurrently by design (systemd path 
 
 ## H — Harvester: CLI + sidecar + cache + search (12)
 
-H1 · `pfm harvest [--refresh] [--size-only] [--json] <sources>...` (1-50 sources, ordered results) · needs:network · today:U · cli.md:73 · lane(s):O
-H2 · `pfm harvest ask -p <prompt> [--engine claude|codex] [--model M] [--effort E] [--refresh] <sources>...` · needs:network,seat:cc/cx · today:U+A (`TestHarvestAskE2E`) · cli.md:74 · lane(s):O
-H3 · Harvest source kind: URL · needs:network · today:U · cli.md:73 · lane(s):O
-H4 · Harvest source kind: DOI · needs:network · today:U · cli.md:73 · lane(s):O
-H5 · Harvest source kind: ISBN · needs:network · today:U · cli.md:73 · lane(s):O
-H6 · Harvest source kind: PMID · needs:network · today:U · cli.md:73 · lane(s):O
-H7 · Harvest source kind: PMCID · needs:network · today:U · cli.md:73 · lane(s):O
-H8 · Harvest source kind: local path · needs:none · today:U · cli.md:73 · lane(s):O
-H9 · Harvestpy pinned Python conversion sidecar (non-HTML document conversion) · needs:network · today:U (`internal/harvestpy`, 37 tests) · mcp.md:42 · lane(s):O
+H1 · `pfm harvest [--refresh] [--size-only] [--json] <sources>...` (1-50 sources, ordered results) · needs:network · today:U · cli.md:73 · lane(s):O2
+H2 · `pfm harvest ask -p <prompt> [--engine claude|codex] [--model M] [--effort E] [--refresh] <sources>...` · needs:network,seat:cc/cx · today:U+A (`TestHarvestAskE2E`) · cli.md:74 · lane(s):O2
+H3 · Harvest source kind: URL · needs:network · today:U · cli.md:73 · lane(s):O2
+H4 · Harvest source kind: DOI · needs:network · today:U · cli.md:73 · lane(s):O2
+H5 · Harvest source kind: ISBN · needs:network · today:U · cli.md:73 · lane(s):O2
+H6 · Harvest source kind: PMID · needs:network · today:U · cli.md:73 · lane(s):O2
+H7 · Harvest source kind: PMCID · needs:network · today:U · cli.md:73 · lane(s):O2
+H8 · Harvest source kind: local path · needs:none · today:U · cli.md:73 · lane(s):O2
+H9 · Harvestpy pinned Python conversion sidecar (non-HTML document conversion) · needs:network · today:U (`internal/harvestpy`, 37 tests) · mcp.md:42 · lane(s):O2
 H10 · Harvest local cache (backs `fetch`/`fetchImage` results, read by `searchCache`) · needs:none · today:U · mcp.md:42-47 · lane(s):M
 H11 · Harvest search-backend config (SearXNG URL or Brave API key gates the `search` tool's visibility) · needs:network · today:U (`search_gate_test.go`) · mcp.md:44 · lane(s):M
-H12 · Tier B: `setup.sh install` falls back to `--skip-harvest` silently on provisioning failure; no `verify.sh` beat asserts the harvester landed ⚠ known-gap · needs:network,docker · today:NONE · tests.md:391,437 · lane(s):O
+H12 · Tier B: `setup.sh install` falls back to `--skip-harvest` silently on provisioning failure; no `verify.sh` beat asserts the harvester landed ⚠ known-gap · needs:network,docker · today:NONE · tests.md:391,437 · lane(s):O2
 
 ---
 
 ## X — Misc CLI (41)
 
-X1 · `pfm version` / `pfm --version` · needs:none · today:U · cli.md:23 · lane(s):O
-X2 · `pfm config init [--force]` · needs:none · today:U · cli.md:98 · lane(s):O
-X3 · `pfm config show` · needs:none · today:U · cli.md:99 · lane(s):O
-X4 · `pfm config validate` · needs:none · today:U · cli.md:100 · lane(s):O
-X5 · `pfm index [--full] [--progress]` · needs:none · today:U · cli.md:86 · lane(s):O
-X6 · `pfm archive [--apply] [--subagents [--older-than DAYS]] [--restore id] [--prune-orphans [--yes]]` base · needs:none · today:U · cli.md:112 · lane(s):O
-X7 · `pfm archive --apply` · needs:none · today:U · cli.md:112 · lane(s):O
-X8 · `pfm archive --subagents [--older-than DAYS]` · needs:none · today:U · cli.md:112 · lane(s):O
-X9 · `pfm archive --restore id` · needs:none · today:U · cli.md:112 · lane(s):O
-X10 · `pfm archive --prune-orphans [--yes]` · needs:none · today:U · cli.md:112 · lane(s):O
-X11 · `pfm heal [--apply | --thread id]` (report/rebuild wedged Codex thread-history) · needs:seat:cx · today:U · cli.md:118 · lane(s):O
-X12 · `pfm issues [--all] [--json]` (servicedesk complaint listing) · needs:none · today:U · cli.md:177 · lane(s):O
-X13 · `pfm whoami [--json | --label]` · needs:tmux · today:U · cli.md:171 · lane(s):O
-X14 · `pfm usage-hook` fail-open UserPromptSubmit usage-limit warning (Codex no-op) · needs:network · today:U · cli.md:136 · lane(s):O
-X15 · `pfm headless [exec] [options]` isolated non-interactive engine invocation (no tmux) · needs:seat:cc/cx/oc,network · today:U · cli.md:80 · lane(s):O
-X16 · `pfm headless` `--schema`/`--json-schema` structured output · needs:seat:cc/cx/oc,network · today:U · cli.md:80 · lane(s):O
-X17 · `pfm headless` `--tools`/`--setting-sources`/`--strict-mcp-config` controls · needs:seat:cc/cx/oc,network · today:U · cli.md:80 · lane(s):O
+X1 · `pfm version` / `pfm --version` · needs:none · today:U · cli.md:23 · lane(s):O1
+X2 · `pfm config init [--force]` · needs:none · today:U · cli.md:98 · lane(s):O1
+X3 · `pfm config show` · needs:none · today:U · cli.md:99 · lane(s):O1
+X4 · `pfm config validate` · needs:none · today:U · cli.md:100 · lane(s):O1
+X5 · `pfm index [--full] [--progress]` · needs:none · today:U · cli.md:86 · lane(s):O2
+X6 · `pfm archive [--apply] [--subagents [--older-than DAYS]] [--restore id] [--prune-orphans [--yes]]` base · needs:none · today:U · cli.md:112 · lane(s):O2
+X7 · `pfm archive --apply` · needs:none · today:U · cli.md:112 · lane(s):O2
+X8 · `pfm archive --subagents [--older-than DAYS]` · needs:none · today:U · cli.md:112 · lane(s):O2
+X9 · `pfm archive --restore id` · needs:none · today:U · cli.md:112 · lane(s):O2
+X10 · `pfm archive --prune-orphans [--yes]` · needs:none · today:U · cli.md:112 · lane(s):O2
+X11 · `pfm heal [--apply | --thread id]` (report/rebuild wedged Codex thread-history) · needs:seat:cx · today:U · cli.md:118 · lane(s):O1
+X12 · `pfm issues [--all] [--json]` (servicedesk complaint listing) · needs:none · today:U · cli.md:177 · lane(s):O1
+X13 · `pfm whoami [--json | --label]` · needs:tmux · today:U · cli.md:171 · lane(s):O1
+X14 · `pfm usage-hook` fail-open UserPromptSubmit usage-limit warning (Codex no-op) · needs:network · today:U · cli.md:136 · lane(s):O1
+X15 · `pfm headless [exec] [options]` isolated non-interactive engine invocation (no tmux) · needs:seat:cc/cx/oc,network · today:U · cli.md:80 · lane(s):O2
+X16 · `pfm headless` `--schema`/`--json-schema` structured output · needs:seat:cc/cx/oc,network · today:U · cli.md:80 · lane(s):O2
+X17 · `pfm headless` `--tools`/`--setting-sources`/`--strict-mcp-config` controls · needs:seat:cc/cx/oc,network · today:U · cli.md:80 · lane(s):O2
 X18 · `pfm internal agent-open --id id --cwd path [--config path]` (picker's embedded per-window pane opener) — no dedicated file found ⚠ known-gap · needs:tmux · today:NONE · cli.md:204 · lane(s):F
 X19 · `pfm internal chat-server <socket> <cwd> <run>` (shim's tmux-session creator) · needs:tmux · today:U · cli.md:205 · lane(s):F
 X20 · `pfm internal claude-launch -- [claude args]` · needs:tmux · today:U · cli.md:206 · lane(s):E1
-X21 · `pfm internal claude-version` · needs:none · today:U · cli.md:207 · lane(s):O
-X22 · `pfm internal clear-kill < payload.json` (SessionEnd hook body) · needs:none · today:U · cli.md:208 · lane(s):O
+X21 · `pfm internal claude-version` · needs:none · today:U · cli.md:207 · lane(s):O2
+X22 · `pfm internal clear-kill < payload.json` (SessionEnd hook body) · needs:none · today:U · cli.md:208 · lane(s):O2
 X23 · `pfm internal codex-appendix` (stdin/stdout hook rewrite) — no test found by name ⚠ known-gap · needs:none · today:NONE · cli.md:209 · lane(s):E2
 X24 · `pfm internal codex-launch BINARY [args...]` (process-replacing exec) · needs:tmux,seat:cx · today:U · cli.md:210 · lane(s):E2
 X25 · `pfm internal compact-nudge` (UserPromptSubmit hook body) · needs:none · today:U · cli.md:211 · lane(s):E1
-X26 · `pfm internal epic-inject` (UserPromptSubmit hook body, epic manifest via window name) · needs:tmux · today:U · cli.md:212 · lane(s):O
+X26 · `pfm internal epic-inject` (UserPromptSubmit hook body, epic manifest via window name) · needs:tmux · today:U · cli.md:212 · lane(s):O2
 X27 · `pfm internal exit-close` (SessionEnd hook body, skips mid-reload) · needs:tmux · today:U · cli.md:213 · lane(s):E1
 X28 · `pfm internal exit-intercept` (prompt hook body, `e`/`/e` → `kill --self --exit`) · needs:tmux,seat:cc · today:U · cli.md:214 · lane(s):E1
-X29 · `pfm internal explore-deny` (PreToolUse hook body, denies non-haiku Explore subagent) · needs:none · today:U · cli.md:215 · lane(s):O
-X30 · `pfm internal kill-exit --engine --id --path --socket --socket-name --pane` (tmux pane-death finisher) · needs:tmux · today:U · cli.md:216 · lane(s):O
+X29 · `pfm internal explore-deny` (PreToolUse hook body, denies non-haiku Explore subagent) · needs:none · today:U · cli.md:215 · lane(s):O2
+X30 · `pfm internal kill-exit --engine --id --path --socket --socket-name --pane` (tmux pane-death finisher) · needs:tmux · today:U · cli.md:216 · lane(s):O2
 X31 · `pfm internal launch --real PATH [--cwd DIR] -- [args]` (managed Claude launcher entry, process-replacing) · needs:tmux · today:U · cli.md:217 · lane(s):E1
-X32 · `pfm internal launcher-repair` — no test found by name ⚠ known-gap · needs:seat:cc · today:NONE · cli.md:218 · lane(s):O
-X33 · `pfm internal primary-get` — no test found by name ⚠ known-gap · needs:none · today:NONE · cli.md:219 · lane(s):O
-X34 · `pfm internal primary-set <account>` — no test found by name ⚠ known-gap · needs:none · today:NONE · cli.md:220 · lane(s):O
+X32 · `pfm internal launcher-repair` — no test found by name ⚠ known-gap · needs:seat:cc · today:NONE · cli.md:218 · lane(s):O2
+X33 · `pfm internal primary-get` — no test found by name ⚠ known-gap · needs:none · today:NONE · cli.md:219 · lane(s):O2
+X34 · `pfm internal primary-set <account>` — no test found by name ⚠ known-gap · needs:none · today:NONE · cli.md:220 · lane(s):O2
 X35 · `pfm internal reload-intercept` (prompt hook body, `/reload ...` → injected `chat reload`) · needs:tmux,seat:cc · today:U · cli.md:221 · lane(s):E1
 X36 · `pfm internal reload-run [reload flags]` (detached worker performing the respawn) · needs:tmux,seat:cc · today:U · cli.md:222 · lane(s):E1
-X37 · `pfm internal stale [--sweep] [--binary PATH]` (lists/TERM-KILLs stale-binary processes) · needs:none · today:U · cli.md:223 · lane(s):O
+X37 · `pfm internal stale [--sweep] [--binary PATH]` (lists/TERM-KILLs stale-binary processes) · needs:none · today:U · cli.md:223 · lane(s):O2
 X38 · `pfm internal statusline` (alias of `pfm statusline`) · needs:none · today:U · cli.md:224 · lane(s):E1
 X39 · `pfm internal then --socket --target [--self] --steer text...` (detached `--then` follow-up waiter) · needs:tmux · today:U · cli.md:225 · lane(s):E1
-X40 · `pfm internal tmux-title-renudge` (OSC title repaint sweep) · needs:tmux · today:U · cli.md:226 · lane(s):O
+X40 · `pfm internal tmux-title-renudge` (OSC title repaint sweep) · needs:tmux · today:U · cli.md:226 · lane(s):O2
 X41 · `pfm internal update-check --cache PATH --current vX.Y.Z --url URL` (picker's cached release-notice refresh) — only its wiring is tested, the `internal/updatecheck` package itself not opened ⚠ known-gap · needs:network · today:NONE · cli.md:227 · lane(s):A
 
 ---

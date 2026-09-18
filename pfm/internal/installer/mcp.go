@@ -15,6 +15,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	pfmconfig "hostops/pfm/internal/config"
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 const (
@@ -23,14 +24,18 @@ const (
 	mcpFenceBegin      = "# BEGIN pfm mcp_servers — installer-owned"
 	mcpFenceEnd        = "# END pfm mcp_servers — installer-owned"
 	chatName           = "chat"
+	mcpCommand         = "mcp"
+	mcpServeCommand    = "serve"
 	mcpServerHarvester = "harvester"
 	httpProtocol       = "http"
 )
 
 type mcpOwnership struct {
-	Pending       map[string]map[string]any `json:"pending,omitempty"`
-	Clients       []string                  `json:"clients,omitempty"`
-	Registrations map[string]map[string]any `json:"registrations,omitempty"`
+	Pending               map[string]map[string]any `json:"pending,omitempty"`
+	Clients               []string                  `json:"clients,omitempty"`
+	Registrations         map[string]map[string]any `json:"registrations,omitempty"`
+	OpenCodePending       map[string]map[string]any `json:"opencodePending,omitempty"`
+	OpenCodeRegistrations map[string]map[string]any `json:"opencodeRegistrations,omitempty"`
 }
 
 func (installer *engine) mcpAnyEnabled() bool {
@@ -66,6 +71,9 @@ func (installer *engine) wireMCP() error {
 		return err
 	}
 	if err := installer.writeMCPCodeConfig(wiredNames); err != nil {
+		return err
+	}
+	if err := installer.writeMCPOpenCodeJSON(wiredNames); err != nil {
 		return err
 	}
 	if err := installer.removeLegacyMCPCredential(); err != nil {
@@ -117,7 +125,7 @@ func (installer *engine) mcpClientRegistration(name string) map[string]any {
 		return map[string]any{
 			configTypeKey:    "stdio",
 			configCommandKey: installer.mcpChatCommand(),
-			configArgsKey:    []string{"mcp", chatName, "serve"},
+			configArgsKey:    []string{mcpCommand, chatName, mcpServeCommand},
 		}
 	}
 	return map[string]any{
@@ -162,7 +170,7 @@ func (installer *engine) isPFMStdioClient(name string, registration map[string]a
 	if !ok || len(args) != 3 {
 		return false
 	}
-	for index, want := range []string{"mcp", chatName, "serve"} {
+	for index, want := range []string{mcpCommand, chatName, mcpServeCommand} {
 		if got, ok := args[index].(string); !ok || got != want {
 			return false
 		}
@@ -259,11 +267,244 @@ func (installer *engine) mcpURL(name string) string {
 	return fmt.Sprintf("http://127.0.0.1:%d/mcp/%s", installer.options.MCPPort, name)
 }
 
+// OpenCodeConfigPath is the machine-scope JSONC registry OpenCode reads.
+// OpenCode has one user config, unlike Codex's per-account TOML homes.
+func OpenCodeConfigPath(home string) string {
+	return filepath.Join(home, ".config", pfmengine.MustLookup(pfmengine.OpenCode).LongName, "opencode.jsonc")
+}
+
+func (installer *engine) mcpOpenCodeRegistration(name string) map[string]any {
+	if name == chatName {
+		return map[string]any{
+			"type":    "local",
+			"command": []string{installer.mcpChatCommand(), mcpCommand, chatName, mcpServeCommand},
+			"enabled": true,
+		}
+	}
+	return map[string]any{
+		"type":    "remote",
+		"url":     installer.mcpURL(name),
+		"enabled": true,
+	}
+}
+
+func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
+	path := strings.TrimSpace(installer.options.OpenCodeConfigPath)
+	if path == "" {
+		return nil
+	}
+	path = physicalSettingsPath(path)
+	ownership, err := installer.loadMCPOwnership()
+	if err != nil {
+		return err
+	}
+	if ownership.OpenCodeRegistrations == nil {
+		ownership.OpenCodeRegistrations = map[string]map[string]any{}
+	}
+	if ownership.OpenCodePending == nil {
+		ownership.OpenCodePending = map[string]map[string]any{}
+	}
+	original, existed, err := readMCPFile(path)
+	if err != nil {
+		return fmt.Errorf("read OpenCode MCP config %s: %w", path, err)
+	}
+	base := original
+	if !existed {
+		base = []byte("{}\n")
+	}
+	document, err := decodeJSONCObject(base)
+	if err != nil {
+		return fmt.Errorf("parse OpenCode MCP config %s: %w", path, err)
+	}
+	servers := map[string]any{}
+	if value, present := document["mcp"]; present {
+		var ok bool
+		servers, ok = value.(map[string]any)
+		if !ok || servers == nil {
+			return fmt.Errorf("OpenCode MCP config %s: mcp must be an object", path)
+		}
+	}
+	owned := ownership.OpenCodeRegistrations[path]
+	if owned == nil {
+		owned = map[string]any{}
+	}
+	for name, registration := range ownership.OpenCodePending[path] {
+		if sameJSONValue(servers[name], registration) {
+			owned[name] = registration
+		}
+	}
+	wanted := map[string]bool{}
+	for _, name := range names {
+		if name == chatName || name == mcpServerHarvester {
+			wanted[name] = true
+		}
+	}
+	removeNames := map[string]bool{}
+	setNames := map[string]map[string]any{}
+	next := map[string]any{}
+	for name, registration := range owned {
+		current, present := servers[name]
+		if !present || !sameJSONValue(current, registration) {
+			continue
+		}
+		if wanted[name] {
+			desired := installer.mcpOpenCodeRegistration(name)
+			next[name] = desired
+			if !sameJSONValue(current, desired) {
+				setNames[name] = desired
+			}
+			continue
+		}
+		removeNames[name] = true
+	}
+	for name := range wanted {
+		registration := installer.mcpOpenCodeRegistration(name)
+		current, present := servers[name]
+		_, ours := next[name]
+		if present && !ours {
+			installer.skip("preserve conflicting manual OpenCode MCP client " + name)
+			continue
+		}
+		next[name] = registration
+		if !present || !sameJSONValue(current, registration) {
+			setNames[name] = registration
+		}
+	}
+	wantedRaw, err := rewriteOpenCodeMCP(base, removeNames, setNames)
+	if err != nil {
+		return fmt.Errorf("plan OpenCode MCP config %s: %w", path, err)
+	}
+	ownership.OpenCodePending[path] = next
+	changed := !bytes.Equal(base, wantedRaw)
+	if changed {
+		if err := installer.saveMCPOwnership(ownership); err != nil {
+			return err
+		}
+		if err := installer.change(changeDescription(path, existed), func() error {
+			return installer.writeMCPFile(path, original, wantedRaw, existed)
+		}); err != nil {
+			return err
+		}
+	} else {
+		installer.ok(path + " OpenCode MCP wiring")
+	}
+	if len(next) > 0 {
+		ownership.OpenCodeRegistrations[path] = next
+	} else {
+		delete(ownership.OpenCodeRegistrations, path)
+	}
+	delete(ownership.OpenCodePending, path)
+	return installer.saveMCPOwnership(ownership)
+}
+
+func (installer *engine) removeMCPOpenCodeJSON() error {
+	path := strings.TrimSpace(installer.options.OpenCodeConfigPath)
+	if path == "" {
+		return nil
+	}
+	ownership, err := installer.loadMCPOwnership()
+	if err != nil {
+		return err
+	}
+	if ownership.OpenCodeRegistrations == nil && ownership.OpenCodePending == nil {
+		return nil
+	}
+	return installer.writeMCPOpenCodeJSON(nil)
+}
+
+func (installer *engine) loadMCPOwnership() (mcpOwnership, error) {
+	ownership := mcpOwnership{}
+	raw, err := os.ReadFile(installer.mcpOwnershipPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return ownership, nil
+	}
+	if err != nil {
+		return ownership, fmt.Errorf("read MCP ownership: %w", err)
+	}
+	if err := json.Unmarshal(raw, &ownership); err != nil {
+		return ownership, fmt.Errorf("decode MCP ownership: %w", err)
+	}
+	return ownership, nil
+}
+
+// rewriteOpenCodeMCP edits only the top-level `mcp` object and leaves every
+// comment and unowned top-level/server property byte-for-byte intact.
+func rewriteOpenCodeMCP(raw []byte, removeNames map[string]bool, setNames map[string]map[string]any) ([]byte, error) {
+	result := append([]byte(nil), raw...)
+	var err error
+	remove := make([]string, 0, len(removeNames))
+	for name := range removeNames {
+		remove = append(remove, name)
+	}
+	sort.Strings(remove)
+	for _, name := range remove {
+		result, err = editOpenCodeServer(result, name, nil, true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	set := make([]string, 0, len(setNames))
+	for name := range setNames {
+		set = append(set, name)
+	}
+	sort.Strings(set)
+	for _, name := range set {
+		registration := setNames[name]
+		encoded, err := json.Marshal(registration)
+		if err != nil {
+			return nil, err
+		}
+		result, err = editOpenCodeServer(result, name, encoded, false)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func editOpenCodeServer(raw []byte, name string, value []byte, remove bool) ([]byte, error) {
+	top, err := parseJSONCObject(raw, 0)
+	if err != nil {
+		return nil, err
+	}
+	mcpProperty, found := top.byName["mcp"]
+	if !found {
+		if remove {
+			return raw, nil
+		}
+		servers := map[string]any{}
+		var registration map[string]any
+		if err := json.Unmarshal(value, &registration); err != nil {
+			return nil, err
+		}
+		servers[name] = registration
+		encoded, err := json.Marshal(map[string]any{"mcp": servers})
+		if err != nil {
+			return nil, err
+		}
+		return setJSONCProperty(raw, 0, "mcp", encoded)
+	}
+	document, err := decodeJSONCObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := document["mcp"].(map[string]any); !ok {
+		return nil, errors.New("OpenCode mcp property must be an object")
+	}
+	if remove {
+		return removeJSONCProperty(raw, mcpProperty.valueStart, name)
+	}
+	return setJSONCProperty(raw, mcpProperty.valueStart, name, value)
+}
+
 func (installer *engine) removeMCPClientRegistrations() error {
 	if _, err := installer.writeMCPClientJSON(nil); err != nil {
 		return err
 	}
 	if err := installer.removeMCPCodeConfig(); err != nil {
+		return err
+	}
+	if err := installer.removeMCPOpenCodeJSON(); err != nil {
 		return err
 	}
 	if err := installer.removeLegacyMCPConfigAuth(); err != nil {

@@ -19,6 +19,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 // ExitReplaced is the server's exit status when its binary was replaced under
@@ -39,16 +41,25 @@ const (
 // replaced. A server that cannot watch itself still serves, but says — on
 // every start — that an install will NOT refresh it.
 func Serve(server *http.Server, listener net.Listener, stderr io.Writer) int {
-	ctx, stop := context.WithCancel(context.Background())
-	defer stop()
-	return serve(server, listener, ownReplacement(ctx, stderr), stderr)
+	return ServeWithClock(server, listener, stderr, clock.Real)
 }
 
-func ownReplacement(ctx context.Context, stderr io.Writer) <-chan struct{} {
+// ServeWithClock is Serve with the polling clock injected for a jailed daemon
+// or a deterministic unit test.
+func ServeWithClock(server *http.Server, listener net.Listener, stderr io.Writer, clk clock.Clock) int {
+	if clk == nil {
+		clk = clock.Real
+	}
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	return serve(server, listener, ownReplacement(ctx, stderr, clk), stderr)
+}
+
+func ownReplacement(ctx context.Context, stderr io.Writer, clk clock.Clock) <-chan struct{} {
 	path, err := os.Executable()
 	if err == nil {
 		var replaced <-chan struct{}
-		if replaced, err = watch(ctx, path, watchInterval, stderr); err == nil {
+		if replaced, err = watchWithClock(ctx, path, watchInterval, stderr, clk); err == nil {
 			return replaced
 		}
 	}
@@ -70,20 +81,33 @@ func ownReplacement(ctx context.Context, stderr io.Writer) <-chan struct{} {
 // treated as a replacement: restarting onto a binary that is not there would
 // take the server down with nothing to come back on.
 func watch(ctx context.Context, path string, interval time.Duration, stderr io.Writer) (<-chan struct{}, error) {
+	return watchWithClock(ctx, path, interval, stderr, clock.Real)
+}
+
+func watchWithClock(
+	ctx context.Context,
+	path string,
+	interval time.Duration,
+	stderr io.Writer,
+	clk clock.Clock,
+) (<-chan struct{}, error) {
+	if clk == nil {
+		clk = clock.Real
+	}
 	started, err := os.Stat(path)
 	if err != nil {
 		return nil, fmt.Errorf("stat own executable %s: %w", path, err)
 	}
 	replaced := make(chan struct{})
 	go func() {
-		ticker := time.NewTicker(interval)
+		ticker := clk.NewTicker(interval)
 		defer ticker.Stop()
 		unreadable := false
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case <-ticker.C:
+			case <-ticker.C():
 			}
 			current, err := os.Stat(path)
 			if err != nil {

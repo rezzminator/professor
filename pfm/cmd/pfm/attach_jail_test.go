@@ -229,8 +229,19 @@ func (jail *attachJail) proveAttach(
 		commandText = `eval "$(` + commandText + `)"`
 	}
 	scriptPath := filepath.Join(jail.root, suffix+".zsh")
+	releasePath := ""
+	if mode == "inside-tmux" {
+		releasePath = filepath.Join(jail.root, suffix+".release")
+	}
 	script := "#!/usr/bin/env zsh\nsource " + shellQuote(jail.shim) + " || exit 97\n" +
 		commandText + "\nprint -r -- attached > " + shellQuote(marker) + "\n"
+	if releasePath != "" {
+		// The command may have handed a client to the target server while the
+		// outer shell is already ready to exit. Keep this non-bunker driver
+		// pane alive until the parent has observed and detached that client;
+		// cleanup writes the same release file before killing the server.
+		script += "while [[ ! -e " + shellQuote(releasePath) + " ]]; do sleep 0.01; done\n"
+	}
 	if err := os.WriteFile(scriptPath, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -276,6 +287,9 @@ func (jail *attachJail) proveAttach(
 			t.Fatalf("start nested driver: %v: %s", err, output)
 		}
 		t.Cleanup(func() {
+			if releasePath != "" {
+				_ = os.WriteFile(releasePath, []byte("cleanup\n"), 0o600)
+			}
 			_ = jail.tmux(driverSocket, "kill-server").Run()
 		})
 	}
@@ -320,10 +334,38 @@ func (jail *attachJail) proveAttach(
 			send := jail.tmux(
 				driverSocket,
 				"send-keys", "-t", "driver:0.0",
-				"JAILATTACH", "Enter",
+				"JAILATTACH",
 			)
 			if output, err := send.CombinedOutput(); err != nil {
-				t.Fatalf("drive nested picker: %v: %s", err, output)
+				t.Fatalf("drive nested picker filter: %v: %s", err, output)
+			}
+			filterDeadline := time.Now().Add(5 * time.Second)
+			filtered := false
+			lastFrame := ""
+			for time.Now().Before(filterDeadline) {
+				capture := jail.tmux(driverSocket, "capture-pane", "-p", "-t", "driver:0.0")
+				captured, captureErr := capture.Output()
+				frame := string(captured)
+				lastFrame = frame
+				if captureErr == nil &&
+					strings.Contains(frame, "fleet 1 ") &&
+					strings.Contains(frame, "JAILATTACH") &&
+					strings.Contains(frame, "›") {
+					filtered = true
+					break
+				}
+				time.Sleep(25 * time.Millisecond)
+			}
+			if !filtered {
+				t.Fatalf("nested picker did not select JAILATTACH after filtering; last frame: %q", lastFrame)
+			}
+			send = jail.tmux(
+				driverSocket,
+				"send-keys", "-t", "driver:0.0",
+				"Enter",
+			)
+			if output, err := send.CombinedOutput(); err != nil {
+				t.Fatalf("drive nested picker enter: %v: %s", err, output)
 			}
 		}
 	}
@@ -345,6 +387,10 @@ func (jail *attachJail) proveAttach(
 		time.Sleep(25 * time.Millisecond)
 	}
 	if sessions != targetSession {
+		if mode != "plain" {
+			captured, captureErr := jail.tmux(driverSocket, "capture-pane", "-p", "-t", "driver:0.0").CombinedOutput()
+			t.Logf("attach timeout driver pane (err=%v): %q", captureErr, string(captured))
+		}
 		t.Fatalf(
 			"%s/%s did not switch client to target session: got %q",
 			mode,
@@ -357,6 +403,11 @@ func (jail *attachJail) proveAttach(
 	}
 	if output, err := jail.tmux(targetSocket, "detach-client").CombinedOutput(); err != nil {
 		t.Fatalf("detach final proof client: %v: %s", err, output)
+	}
+	if releasePath != "" {
+		if err := os.WriteFile(releasePath, []byte("released\n"), 0o600); err != nil {
+			t.Fatalf("release nested driver: %v", err)
+		}
 	}
 	if command != nil {
 		wait := make(chan error, 1)

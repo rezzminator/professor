@@ -1,15 +1,2 @@
-cmd/pfm/chat_new_command.go 1
-cmd/pfm/chat_satellite_command.go 1
-internal/doctor/doctor.go 1
-internal/fleet/scan.go 1
 internal/gather/tmuxprobe.go 1
-internal/harvestmcp/service.go 1
-internal/hookentry/launch.go 1
-internal/inject/engine.go 1
-internal/picker/update_row.go 1
-internal/professor/source_repo.go 1
 internal/spawn/socket.go 1
-internal/stats/limits.go 1
-internal/statusline/refresh_codex.go 1
-internal/statusline/runtime.go 2
-internal/usagehook/hook.go 2

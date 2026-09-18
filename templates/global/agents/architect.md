@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Fills gaps in a spec or design doc — fixes false anchors, wrong mechanisms, coupled edits, and missed failure modes in the file, then spawns fresh architects until a pass declares NO MORE GAPS. Delegate for /wave:refine R4, an $architecture-design hand-off, or "make this plan buildable". Returns pass count, deltas, and open decisions.
+description: Fills gaps in a spec or design doc — fixes false anchors, wrong mechanisms, coupled edits, and missed failure modes in the file, then spawns fresh architects until a pass declares NO MORE GAPS. Delegate for /wave:refine R4, a /quality:llm-codebase or /quality:integration-suite hand-off, or "make this plan buildable". Returns pass count, deltas, and open decisions.
 model: opus # frontier-judgment default — retune to your model tier
 effort: xhigh
 tools: Read, Edit, Write, Bash, Glob, Grep, Agent

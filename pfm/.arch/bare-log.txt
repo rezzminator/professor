@@ -27,7 +27,6 @@ internal/heal/heal.go 2
 internal/installer/account_migrations.go 1
 internal/mcpserv/daemon_status.go 1
 internal/mcpserv/stdio.go 1
-internal/picker/update_row.go 1
 internal/statusline/context.go 6
 internal/statusline/render.go 1
 internal/testjail/testjail.go 7

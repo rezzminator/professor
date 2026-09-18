@@ -4,14 +4,19 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	goRuntime "runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/harvest"
 )
 
@@ -25,15 +30,15 @@ func TestAskProtocolRoundTrip(t *testing.T) {
 		fakeBrowserWorker()
 		return
 	}
-	previous := browserWorkerCommand
-	browserWorkerCommand = func(_, _ string) (*exec.Cmd, error) {
-		command := exec.Command(os.Args[0], "-test.run=TestAskProtocolRoundTrip")
-		command.Env = append(os.Environ(), "GO_HARVESTPY_FAKE_BROWSER_WORKER=1")
-		return command, nil
-	}
-	defer func() { browserWorkerCommand = previous }()
-
-	worker := NewBrowserWorker(Runtime{Python: "unused", Script: "unused"})
+	worker := NewBrowserWorker(Runtime{
+		Python: "fake-browser",
+		Script: "script",
+		Runner: browserTestRunner(
+			t,
+			[]string{"https://publisher.example.test/walled", "http://169.254.169.254/latest/meta-data/"},
+			"rendered",
+		),
+	})
 	var consulted []string
 	html, status, err := worker.Fetch(
 		context.Background(),
@@ -134,15 +139,10 @@ func TestNilAskHandlerFailsClosed(t *testing.T) {
 		fakeBrowserWorkerDenyingNothing()
 		return
 	}
-	previous := browserWorkerCommand
-	browserWorkerCommand = func(_, _ string) (*exec.Cmd, error) {
-		command := exec.Command(os.Args[0], "-test.run=TestNilAskHandlerFailsClosed")
-		command.Env = append(os.Environ(), "GO_HARVESTPY_FAKE_BROWSER_WORKER=1")
-		return command, nil
-	}
-	defer func() { browserWorkerCommand = previous }()
-
-	worker := NewBrowserWorker(Runtime{Python: "unused", Script: "unused"})
+	worker := NewBrowserWorker(Runtime{
+		Python: "fake-browser", Script: "script",
+		Runner: browserTestRunner(t, []string{"https://example.test/"}, "denied"),
+	})
 	html, _, err := worker.Fetch(context.Background(), "https://publisher.example.test/walled", "", true, 45000, nil)
 	if err == nil {
 		t.Fatal("nil onAsk must fail closed, got success")
@@ -151,6 +151,166 @@ func TestNilAskHandlerFailsClosed(t *testing.T) {
 		t.Fatalf("fail-closed reason not reported: %v", err)
 	}
 	_ = html
+}
+
+func browserTestRunner(t *testing.T, urls []string, mode string) *deps.FakeRunner {
+	t.Helper()
+	requestReader, requestWriter := io.Pipe()
+	responseReader, responseWriter := io.Pipe()
+	runner := &deps.FakeRunner{}
+	runner.ScriptInteractive([]string{"fake-browser"}, deps.InteractiveScript{
+		Pid:    7001,
+		Stdin:  requestWriter,
+		Stdout: responseReader,
+	})
+	go func() {
+		reader := bufio.NewReader(requestReader)
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+		var request struct {
+			Op       string `json:"op"`
+			URL      string `json:"url"`
+			Headless *bool  `json:"headless"`
+		}
+		if err := json.Unmarshal([]byte(line), &request); err != nil {
+			return
+		}
+		replies := make([]AskReply, 0, len(urls))
+		for _, rawURL := range urls {
+			ask, _ := json.Marshal(map[string]string{"ask": "fetchable", "url": rawURL})
+			if _, err := fmt.Fprintln(responseWriter, string(ask)); err != nil {
+				return
+			}
+			replyLine, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			var reply AskReply
+			if json.Unmarshal([]byte(replyLine), &reply) != nil {
+				return
+			}
+			replies = append(replies, reply)
+		}
+		body := map[string]any{"ok": true, "status": 200, "html": mode}
+		if mode == "denied" {
+			body = map[string]any{
+				"ok":    false,
+				"error": fmt.Sprintf("handler said allow=%t reason=%s", replies[0].Allow, replies[0].Reason),
+			}
+		} else {
+			body["html"] = fmt.Sprintf(
+				"<html>rendered headless=%t allow=%t reason=%q allow=%t reason=%q</html>",
+				*request.Headless,
+				replies[0].Allow,
+				replies[0].Reason,
+				replies[1].Allow,
+				replies[1].Reason,
+			)
+		}
+		encoded, _ := json.Marshal(body)
+		_, _ = fmt.Fprintln(responseWriter, string(encoded))
+		_ = responseWriter.Close()
+	}()
+	t.Cleanup(func() {
+		_ = requestReader.Close()
+		_ = requestWriter.Close()
+		_ = responseReader.Close()
+		_ = responseWriter.Close()
+	})
+	return runner
+}
+
+func TestBrowserWorkerCancellationClosesPendingRead(t *testing.T) {
+	requestReader, requestWriter := io.Pipe()
+	pending := newBlockingReadCloser()
+	runner := &deps.FakeRunner{}
+	runner.ScriptInteractive([]string{"fake-browser"}, deps.InteractiveScript{
+		Pid:    7002,
+		Stdin:  requestWriter,
+		Stdout: pending,
+	})
+	go func() {
+		_, _ = io.Copy(io.Discard, requestReader)
+	}()
+	worker := NewBrowserWorker(Runtime{Python: "fake-browser", Script: "script", Runner: runner})
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := worker.Fetch(ctx, "https://example.test/", "", true, 1000, nil)
+		result <- err
+	}()
+	select {
+	case <-pending.started:
+	case <-time.After(time.Second):
+		t.Fatal("browser worker did not reach its pending response read")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "request cancelled") {
+			t.Fatalf("Fetch() error = %v, want cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Fetch() remained blocked after cancellation")
+	}
+	select {
+	case <-pending.closed:
+	case <-time.After(time.Second):
+		t.Fatal("pending browser response read survived cancellation")
+	}
+	_ = requestReader.Close()
+}
+
+func TestBrowserWorkerFallsBackToDirectKillWhenGroupKillFails(t *testing.T) {
+	stdinReader, stdinWriter := io.Pipe()
+	stdoutReader, stdoutWriter := io.Pipe()
+	defer func() {
+		_ = stdinReader.Close()
+		_ = stdoutWriter.Close()
+	}()
+
+	fake := &deps.FakeRunner{}
+	fake.ScriptInteractive([]string{"fake-browser"}, deps.InteractiveScript{
+		Pid:      7003,
+		Stdin:    stdinWriter,
+		Stdout:   stdoutReader,
+		GroupErr: errors.New("group kill denied"),
+	})
+	worker := NewBrowserWorker(Runtime{Python: "fake-browser", Script: "script", Runner: fake})
+	if _, err := worker.ensureWorkerLocked(); err != nil {
+		t.Fatalf("ensureWorkerLocked() error = %v", err)
+	}
+	if err := worker.Close(); err == nil || !strings.Contains(err.Error(), "kill browser worker process group") {
+		t.Fatalf("Close() error = %v, want contextual group-kill error", err)
+	}
+	calls := fake.LifecycleCalls()
+	if len(calls) != 3 || calls[0].Action != "kill-group" || calls[1].Action != "kill" || calls[2].Action != "wait" {
+		t.Fatalf("lifecycle calls = %+v, want kill-group, kill, wait", calls)
+	}
+}
+
+type blockingReadCloser struct {
+	started chan struct{}
+	closed  chan struct{}
+	start   sync.Once
+	close   sync.Once
+}
+
+func newBlockingReadCloser() *blockingReadCloser {
+	return &blockingReadCloser{started: make(chan struct{}), closed: make(chan struct{})}
+}
+
+func (reader *blockingReadCloser) Read([]byte) (int, error) {
+	reader.start.Do(func() { close(reader.started) })
+	<-reader.closed
+	return 0, io.ErrClosedPipe
+}
+
+func (reader *blockingReadCloser) Close() error {
+	reader.close.Do(func() { close(reader.closed) })
+	return nil
 }
 
 func fakeBrowserWorkerDenyingNothing() {

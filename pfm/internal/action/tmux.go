@@ -158,9 +158,16 @@ func (runner ExecRunner) Run(
 	name string,
 	args ...string,
 ) error {
-	command := exec.CommandContext(ctx, deps.Executable(name), args...)
-	command.Stdin = runner.Stdin
-	command.Stdout = runner.Stdout
-	command.Stderr = runner.Stderr
-	return command.Run()
+	process, err := (deps.RealRunner{}).Start(ctx, append([]string{deps.Executable(name)}, args...), deps.StartOptions{
+		Stdin:  runner.Stdin,
+		Stdout: runner.Stdout,
+		Stderr: runner.Stderr,
+	})
+	if err != nil {
+		return err
+	}
+	if err := process.Wait(); err != nil {
+		return fmt.Errorf("run %s: %w", name, err)
+	}
+	return nil
 }

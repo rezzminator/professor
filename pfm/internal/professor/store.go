@@ -1,13 +1,13 @@
 package professor
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -22,6 +22,7 @@ type Store struct {
 	Templates string
 	Version   string
 	SHA       string
+	runner    deps.Runner
 }
 
 type projectManifest struct {
@@ -53,10 +54,17 @@ func ResolveStore(projectRoot, home string) (Store, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return Store{}, fmt.Errorf("UNREADABLE %s: %w", manifestPath, err)
 	}
-	return InspectStore(blueprintRoot)
+	return InspectStoreWithRunner(blueprintRoot, deps.RealRunner{})
 }
 
 func InspectStore(root string) (Store, error) {
+	return InspectStoreWithRunner(root, deps.RealRunner{})
+}
+
+func InspectStoreWithRunner(root string, runner deps.Runner) (Store, error) {
+	if runner == nil {
+		return Store{}, errors.New("inspect blueprint store: runner is nil")
+	}
 	absolute, err := filepath.Abs(root)
 	if err != nil {
 		return Store{}, fmt.Errorf("resolve blueprint store %s: %w", root, err)
@@ -78,14 +86,21 @@ func InspectStore(root string) (Store, error) {
 	if version == "" {
 		return Store{}, fmt.Errorf("UNREADABLE %s: empty version", versionPath)
 	}
-	sha, err := storeSHA(absolute)
+	sha, err := storeSHAWithRunner(absolute, runner)
 	if err != nil {
 		return Store{}, err
 	}
-	return Store{Root: absolute, Templates: templates, Version: version, SHA: sha}, nil
+	return Store{Root: absolute, Templates: templates, Version: version, SHA: sha, runner: runner}, nil
 }
 
 func storeSHA(root string) (string, error) {
+	return storeSHAWithRunner(root, deps.RealRunner{})
+}
+
+func storeSHAWithRunner(root string, runner deps.Runner) (string, error) {
+	if runner == nil {
+		return "", errors.New("UNREADABLE blueprint git state: runner is nil")
+	}
 	gitDir, useFenceGit := pfmpaths.DevRepoGitDir(root)
 	if !useFenceGit {
 		gitPath := filepath.Join(root, ".git")
@@ -95,16 +110,29 @@ func storeSHA(root string) (string, error) {
 			return "", fmt.Errorf("UNREADABLE %s: %w", gitPath, err)
 		}
 	}
-	command := exec.Command(deps.Executable("git"), "rev-parse", "--short", "HEAD")
-	command.Dir = root
+	argv := []string{deps.Executable("git"), "rev-parse", "--short", "HEAD"}
+	env := os.Environ()
 	if useFenceGit {
-		command.Env = append(os.Environ(), "GIT_DIR="+gitDir, "GIT_WORK_TREE="+root)
+		env = append(env, "GIT_DIR="+gitDir, "GIT_WORK_TREE="+root)
 	}
-	output, err := command.CombinedOutput()
+	result, err := runner.Run(context.Background(), argv, deps.RunOptions{Dir: root, Env: env})
 	if err != nil {
-		return "", fmt.Errorf("UNREADABLE blueprint git state %s: %w: %s", root, err, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf(
+			"UNREADABLE blueprint git state %s: %w: %s",
+			root,
+			err,
+			strings.TrimSpace(string(result.Stderr)),
+		)
 	}
-	sha := strings.TrimSpace(string(output))
+	if result.ExitCode != 0 {
+		return "", fmt.Errorf(
+			"UNREADABLE blueprint git state %s: git exited with status %d: %s",
+			root,
+			result.ExitCode,
+			strings.TrimSpace(string(result.Stderr)),
+		)
+	}
+	sha := strings.TrimSpace(string(result.Stdout))
 	if sha == "" {
 		return "", fmt.Errorf("UNREADABLE blueprint git state %s: empty revision", root)
 	}
@@ -133,4 +161,45 @@ func readStoreFile(path string) ([]byte, error) {
 		return nil, &os.PathError{Op: "read", Path: path, Err: fs.ErrPermission}
 	}
 	return os.ReadFile(path)
+}
+
+func adoptGit(runner deps.Runner, root string, args ...string) (string, string, error) {
+	if runner == nil {
+		return "", "", errors.New("adopt Git: runner is nil")
+	}
+	result, err := runner.Run(
+		context.Background(),
+		append([]string{deps.Executable("git")}, args...),
+		deps.RunOptions{Dir: root},
+	)
+	if err != nil {
+		return string(result.Stdout), string(result.Stderr), err
+	}
+	if result.ExitCode != 0 {
+		return string(result.Stdout), string(result.Stderr), gitExitError{code: result.ExitCode}
+	}
+	return string(result.Stdout), string(result.Stderr), nil
+}
+
+type gitExitError struct{ code int }
+
+func (err gitExitError) Error() string { return fmt.Sprintf("git exited with status %d", err.code) }
+func (err gitExitError) ExitCode() int { return err.code }
+
+func adoptGitFailure(action string, err error, stderrText string) error {
+	return fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(stderrText))
+}
+
+func adoptGitShowTemplate(runner deps.Runner, root, ref, template string) ([]byte, bool, error) {
+	stdout, stderrText, gitErr := adoptGit(runner, root, "show", ref+":templates/"+template)
+	if gitErr == nil {
+		return []byte(stdout), false, nil
+	}
+	trimmed := strings.TrimSpace(stderrText)
+	var exitErr interface{ ExitCode() int }
+	if errors.As(gitErr, &exitErr) && exitErr.ExitCode() == 128 &&
+		(strings.Contains(trimmed, "does not exist in") || strings.Contains(trimmed, "exists on disk, but not in")) {
+		return nil, true, nil
+	}
+	return nil, false, adoptGitFailure(fmt.Sprintf("show %s at %s", template, ref), gitErr, stderrText)
 }

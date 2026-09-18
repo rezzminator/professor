@@ -18,7 +18,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 const statsFilename = "stats.jsonl"
@@ -36,7 +35,7 @@ func (h *Harvester) recordStat(item string, result Result) {
 		return
 	}
 	rec := statRecord{
-		TS:   time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+		TS:   h.nowClock().Now().UTC().Format("2006-01-02T15:04:05Z"),
 		Item: truncateOutputRunes(item, 500),
 		OK:   result.Error == "",
 	}

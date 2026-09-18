@@ -3,13 +3,15 @@ package harvestpy
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"hostops/pfm/internal/deps"
 )
 
 type CheckStatus struct {
@@ -28,6 +30,29 @@ type CheckReport struct {
 // Every failed check remains visible in the returned report; a failed report
 // also returns an error so callers cannot mistake it for a healthy result.
 func CheckConversionEnvironment(ctx context.Context, root string, platform Platform) (CheckReport, error) {
+	return evaluateConversionEnvironment(ctx, root, platform, deps.RealRunner{})
+}
+
+// CheckConversionEnvironmentWithRunner is the process-seamed health check.
+// The compatibility wrapper above retains the production default.
+func CheckConversionEnvironmentWithRunner(
+	ctx context.Context,
+	root string,
+	platform Platform,
+	runner deps.Runner,
+) (CheckReport, error) {
+	if runner == nil {
+		runner = deps.RealRunner{}
+	}
+	return evaluateConversionEnvironment(ctx, root, platform, runner)
+}
+
+func evaluateConversionEnvironment(
+	ctx context.Context,
+	root string,
+	platform Platform,
+	runner deps.Runner,
+) (CheckReport, error) {
 	report := CheckReport{Checks: make(map[string]CheckStatus)}
 	set := func(name string, err error) {
 		if err == nil {
@@ -92,16 +117,17 @@ func CheckConversionEnvironment(ctx context.Context, root string, platform Platf
 		set("current_target", verifyCurrentTarget(current, digest))
 		set(
 			"interpreter",
-			checkInterpreter(ctx, filepath.Join(current, "project", ".venv", "bin", "python"), digest.Python),
+			checkInterpreter(ctx, runner, filepath.Join(current, "project", ".venv", "bin", "python"), digest.Python),
 		)
 		set("interpreter_build", checkPythonBuild(filepath.Join(current, "python", "BUILD"), digest.Python))
 		set("environment_shape", checkEnvironmentShape(current))
-		set("dependency_check", checkDependencies(ctx, current))
-		set("lock_completeness", checkInventory(ctx, current, digest))
+		set("dependency_check", checkDependencies(ctx, runner, current, platform))
+		set("lock_completeness", checkInventory(ctx, runner, current, digest))
 		if report.Checks["interpreter"].OK {
 			smokeConverter := NewConverter(Runtime{
 				Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 				Script: filepath.Join(current, "project", "converter.py"),
+				Runner: runner,
 			})
 			smoke, smokeErr := smokeConverter.Smoke(ctx)
 			_ = smokeConverter.Close()
@@ -143,21 +169,36 @@ func compareFile(path string, expected []byte) error {
 	return nil
 }
 
-func checkInterpreter(ctx context.Context, path, wanted string) error {
-	command := exec.CommandContext(ctx, path, "--version")
-	output, err := command.CombinedOutput()
+func checkInterpreter(ctx context.Context, runner deps.Runner, path, wanted string) error {
+	result, err := runner.Run(ctx, []string{path, "--version"}, deps.RunOptions{})
 	if err != nil {
-		return fmt.Errorf("run Python version: %w (output: %s)", err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("run Python version: %w (output: %s)", err, interpreterOutput(result))
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf(
+			"run Python version: exit %d (output: %s)",
+			result.ExitCode,
+			interpreterOutput(result),
+		)
 	}
 	// Standalone Python reports its semantic version (3.11.15), while the
 	// artifact build stamp (+20260610) is carried by the pinned target URL.
 	// Compare the semantic portion here so a valid interpreter is not rejected
 	// merely because --version omits the packaging suffix.
 	semantic := strings.SplitN(wanted, "+", 2)[0]
-	if !strings.Contains(string(output), semantic) {
-		return fmt.Errorf("python version %q does not contain pinned %q", strings.TrimSpace(string(output)), wanted)
+	if !strings.Contains(string(result.Stdout), semantic) {
+		return fmt.Errorf(
+			"python version %q does not contain pinned %q",
+			strings.TrimSpace(string(result.Stdout)),
+			wanted,
+		)
 	}
 	return nil
+}
+
+func interpreterOutput(result deps.RunResult) string {
+	output := append(append([]byte(nil), result.Stdout...), result.Stderr...)
+	return strings.TrimSpace(string(output))
 }
 
 func checkPythonBuild(path, wanted string) error {
@@ -229,25 +270,128 @@ func checkEnvironmentShape(root string) error {
 	return nil
 }
 
-func checkDependencies(ctx context.Context, root string) error {
+func checkDependencies(ctx context.Context, runner deps.Runner, root string, platform Platform) error {
 	uv := filepath.Join(root, "uv")
 	python := filepath.Join(root, "project", ".venv", "bin", "python")
-	if _, err := runCommand(
+	if _, err := runCommandWithRunner(
 		ctx,
+		runner,
 		uv,
 		[]string{uvCommandPip, "check", uvFlagPython, python},
 		filepath.Join(root, "project"),
 	); err != nil {
+		allowed, inspectErr := acceptPinnedArm64SBSAFailure(platform, root, err)
+		if inspectErr != nil {
+			return errors.Join(fmt.Errorf("uv pip check failed: %w", err), inspectErr)
+		}
+		if allowed {
+			return nil
+		}
 		return fmt.Errorf("uv pip check failed: %w", err)
 	}
 	return nil
 }
 
-func checkInventory(ctx context.Context, root string, expected EnvironmentDigest) error {
+// acceptPinnedArm64SBSAFailure contains one upstream wheel metadata false-positive.
+// nvidia-cusparselt-cu13 0.8.1 ships an aarch64 shared library but labels its
+// wheel manylinux2014_sbsa, which uv reports as incompatible on linux-aarch64.
+// The package is accepted only when the exact pinned lock, wheel metadata, and
+// shared library are present; every other uv pip check failure remains fatal.
+func acceptPinnedArm64SBSAFailure(platform Platform, root string, checkErr error) (bool, error) {
+	if platform != (Platform{GOOS: goosLinux, GOARCH: goarchARM64}) {
+		return false, nil
+	}
+	message := strings.ToLower(checkErr.Error())
+	if !strings.Contains(message, "nvidia-cusparselt-cu13") ||
+		!strings.Contains(message, "built for a different platform") {
+		return false, nil
+	}
+	lock, err := os.ReadFile(filepath.Join(root, "project", "uv.lock"))
+	if err != nil {
+		return false, fmt.Errorf("read lock while checking pinned arm64 wheel exception: %w", err)
+	}
+	if !hasPinnedArm64PackageRecord(string(lock)) {
+		return false, nil
+	}
+	pattern := filepath.Join(
+		root,
+		"project",
+		".venv",
+		"lib",
+		"python*",
+		"site-packages",
+		"nvidia_cusparselt_cu13-0.8.1.dist-info",
+		"WHEEL",
+	)
+	wheels, err := filepath.Glob(pattern)
+	if err != nil {
+		return false, fmt.Errorf("find pinned arm64 wheel metadata: %w", err)
+	}
+	if len(wheels) != 1 {
+		return false, nil
+	}
+	wheel, err := os.ReadFile(wheels[0])
+	if err != nil {
+		return false, fmt.Errorf("read pinned arm64 wheel metadata %s: %w", wheels[0], err)
+	}
+	if !strings.Contains("\n"+string(wheel), "\nTag: py3-none-manylinux2014_sbsa\n") {
+		return false, nil
+	}
+	libPath := filepath.Join(
+		filepath.Dir(filepath.Dir(wheels[0])),
+		"nvidia",
+		"cusparselt",
+		"lib",
+		"libcusparseLt.so.0",
+	)
+	info, err := os.Stat(libPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect pinned arm64 wheel library %s: %w", libPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, nil
+	}
+	elfFile, err := elf.Open(libPath)
+	if err != nil {
+		return false, nil
+	}
+	machine := elfFile.Machine
+	if err := elfFile.Close(); err != nil {
+		return false, fmt.Errorf("close pinned arm64 wheel library %s: %w", libPath, err)
+	}
+	return machine == elf.EM_AARCH64, nil
+}
+
+func hasPinnedArm64PackageRecord(lock string) bool {
+	for _, record := range strings.Split(lock, "[[package]]") {
+		if !lockRecordHasLine(record, `name = "nvidia-cusparselt-cu13"`) ||
+			!lockRecordHasLine(record, `version = "0.8.1"`) ||
+			!strings.Contains(record, "manylinux2014_aarch64") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func lockRecordHasLine(record, want string) bool {
+	for _, line := range strings.Split(record, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func checkInventory(ctx context.Context, runner deps.Runner, root string, expected EnvironmentDigest) error {
 	uv := filepath.Join(root, "uv")
 	python := filepath.Join(root, "project", ".venv", "bin", "python")
-	output, err := runCommand(
+	output, err := runCommandWithRunner(
 		ctx,
+		runner,
 		uv,
 		[]string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, python},
 		filepath.Join(root, "project"),

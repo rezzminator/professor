@@ -3,11 +3,65 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"testing"
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
 )
+
+func TestResolveDevVersion(t *testing.T) {
+	const fullRevision = "8f9b8bb29513ff82f0ce31d5fc4547f9e30b7071"
+	cases := []struct {
+		name     string
+		settings []debug.BuildSetting
+		want     string
+	}{
+		{name: "no settings", settings: nil, want: "dev"},
+		{
+			name:     "vcs present but no revision key",
+			settings: []debug.BuildSetting{{Key: "vcs", Value: "git"}},
+			want:     "dev",
+		},
+		{
+			name: "clean checkout",
+			settings: []debug.BuildSetting{
+				{Key: "vcs.revision", Value: fullRevision},
+				{Key: "vcs.modified", Value: "false"},
+			},
+			want: "dev (8f9b8bb29513)",
+		},
+		{
+			name: "modified checkout",
+			settings: []debug.BuildSetting{
+				{Key: "vcs.revision", Value: fullRevision},
+				{Key: "vcs.modified", Value: "true"},
+			},
+			want: "dev (8f9b8bb29513, modified)",
+		},
+		{
+			name: "short revision",
+			settings: []debug.BuildSetting{
+				{Key: "vcs.revision", Value: "8f9b8bb"},
+				{Key: "vcs.modified", Value: "false"},
+			},
+			want: "dev (8f9b8bb)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResolveDevVersion(tc.settings); got != tc.want {
+				t.Fatalf("ResolveDevVersion(%v) = %q, want %q", tc.settings, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDisplayVersionPrefersLdflagsStamp(t *testing.T) {
+	if got := DisplayVersion("v0.67.0"); got != "v0.67.0" {
+		t.Fatalf("DisplayVersion() = %q, want the ldflags-stamped version unchanged", got)
+	}
+}
 
 func brokenConfig(t *testing.T) string {
 	t.Helper()

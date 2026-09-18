@@ -20,6 +20,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/headless"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/store"
 )
@@ -181,8 +182,9 @@ func FromRow(row compose.Row) headless.Chat {
 // after the tmux rungs fail, because CODEX_THREAD_ID is INHERITED — a process
 // with a pane of its own must never be renamed by an id it merely inherited.
 func SeatIdentity(ctx context.Context, runtime *pfmconfig.Runtime) (resolve.Identity, bool) {
-	thread := os.Getenv(resolve.CodexThreadEnv)
-	if thread == "" || os.Getenv(resolve.ClaudeSessionEnv) != "" {
+	env := paths.OSEnv{}
+	thread := env.Get(resolve.CodexThreadEnv)
+	if thread == "" || env.Get(resolve.ClaudeSessionEnv) != "" {
 		return resolve.Identity{}, false
 	}
 	database, err := store.Open(store.WithWarningWriter(io.Discard))

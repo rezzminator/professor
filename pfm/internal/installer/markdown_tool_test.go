@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/deps"
 )
 
 // writeScript writes an executable shell fixture named name inside dir,
@@ -82,6 +84,34 @@ func TestInstallMarkdownToolAlreadyPresentIsANoOp(t *testing.T) {
 			}
 			assertNeverRan(t, marker, "uv")
 		})
+	}
+}
+
+func TestInstallMarkdownToolUsesInjectedProcessRunner(t *testing.T) {
+	runner := &deps.FakeRunner{}
+	runner.ScriptLookPath("rumdl", "/fixture/rumdl", nil)
+	runner.Script([]string{"/fixture/rumdl", "--version"}, deps.RunResult{
+		Stdout:   []byte("rumdl 0.2.73\n"),
+		ExitCode: 0,
+	}, nil)
+	var output bytes.Buffer
+	eng := &engine{options: Options{
+		Home:          t.TempDir(),
+		Stdout:        &output,
+		ProcessRunner: runner,
+	}, apply: true}
+
+	if err := eng.installMarkdownTool(context.Background()); err != nil {
+		t.Fatalf("installMarkdownTool: %v\n%s", err, output.String())
+	}
+	if !strings.Contains(output.String(), "rumdl already present (0.2.73)") {
+		t.Fatalf("output=%q, want injected runner's rumdl version", output.String())
+	}
+	if eng.report.OK != 1 || eng.report.Skipped != 0 {
+		t.Fatalf("report=%+v, want OK=1 Skipped=0", eng.report)
+	}
+	if calls := runner.Calls(); len(calls) != 1 || len(calls[0].Argv) != 2 || calls[0].Argv[0] != "/fixture/rumdl" {
+		t.Fatalf("runner calls=%+v, want only injected rumdl --version", calls)
 	}
 }
 

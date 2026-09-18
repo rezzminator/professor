@@ -237,6 +237,16 @@ func Resolve() (Values, error) {
 	}, nil
 }
 
+// GeneratedCodexAgentsDir is where pfm compiles the machine-global Codex
+// agent .toml twins (codexgen.RunGlobalAgents) — pfm-owned state, never
+// inside the source clone a template's .md lives in, so a stale compiler on
+// any host can never rewrite a tracked file. A `~/.codex/agents/<name>.toml`
+// link points here; uninstall removes this whole directory along with the
+// links it owns.
+func GeneratedCodexAgentsDir(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "generated", "codex-agents")
+}
+
 // SocketPath resolves a chat's tmux socket to an absolute path: an absolute
 // socket is returned unchanged, a bare name resolves under the private tmux
 // directory. It lives here because both cmd/pfm and internal/headless need it

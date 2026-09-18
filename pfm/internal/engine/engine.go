@@ -222,3 +222,23 @@ func LaunchArgsFor(id ID, callerArgs []string) []string {
 	}
 	return kept
 }
+
+// LaunchArgsWithSettings behaves like LaunchArgsFor, except when settings is
+// non-empty it replaces the value following a kept --settings flag — letting
+// a caller with resolved Claude prefs (a theme) override the baseline
+// --settings payload while leaving the caller-stated-flag drop rule (above)
+// unchanged. settings is ignored (and the plain LaunchArgsFor result kept)
+// when empty, or when the caller's own --settings already won the drop.
+func LaunchArgsWithSettings(id ID, callerArgs []string, settings string) []string {
+	kept := LaunchArgsFor(id, callerArgs)
+	if settings == "" {
+		return kept
+	}
+	for index, flag := range kept {
+		if flag == "--settings" && index+1 < len(kept) {
+			kept[index+1] = settings
+			break
+		}
+	}
+	return kept
+}

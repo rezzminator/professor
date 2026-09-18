@@ -802,6 +802,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.reconcileCodexCommands(nil); err != nil {
 		return err
 	}
+	if err := installer.unwireGeneratedCodexAgents(); err != nil {
+		return err
+	}
 	if err := installer.retireBBInstall(); err != nil {
 		return err
 	}

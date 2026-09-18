@@ -34,6 +34,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/sqlitedb"
 )
 
@@ -603,7 +604,7 @@ func Backup(stores Stores, now time.Time) (string, error) {
 			return "", fmt.Errorf("read %s for backup: %w", source, err)
 		}
 		target := filepath.Join(destination, filepath.Base(source))
-		if err := os.WriteFile(target, content, 0o600); err != nil {
+		if err := atomicfile.Write(target, content, 0o600); err != nil {
 			return "", fmt.Errorf("write %s: %w", target, err)
 		}
 	}

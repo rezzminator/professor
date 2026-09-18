@@ -7,14 +7,18 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"hostops/pfm/internal/paths"
 )
 
 // GlobalAgentsOptions selects the host HOME whose global Codex agents get
 // (re)compiled and installed. The source directory is always
-// {SourceRepo}/templates/global/agents; installs land at {ClaudeConfigDir}/
-// agents for every configured Claude account (a symlink to the raw .md,
-// Claude reads it directly) and {Home}/.codex/agents (a symlink to the
-// compiled .toml, Codex reads it directly).
+// {SourceRepo}/templates/global/agents; the compiled .toml twins land in the
+// pfm-owned generated directory (paths.GeneratedCodexAgentsDir), never
+// inside the source clone. Installs land at {ClaudeConfigDir}/agents for
+// every configured Claude account (a symlink to the raw .md, Claude reads it
+// directly) and {Home}/.codex/agents (a symlink to the generated .toml,
+// Codex reads it directly).
 type GlobalAgentsOptions struct {
 	Home string
 	// SourceRepo is the clone the symlink targets and the source-repo
@@ -32,8 +36,9 @@ type GlobalAgentsOptions struct {
 	Mode             Mode
 }
 
-// GlobalAgentCompiled is one desired TOML beside its source .md. Build writes
-// changed bytes; check reports the same desired artifact without writing it.
+// GlobalAgentCompiled is one desired TOML in the pfm-owned generated
+// directory. Build writes changed bytes; check reports the same desired
+// artifact without writing it.
 type GlobalAgentCompiled struct {
 	Path string
 	Size int64
@@ -80,15 +85,19 @@ const (
 
 // RunGlobalAgents is the Go port of the retired host script
 // ~/.professor/templates/global/agents/build-global-agents.py: it compiles
-// every {SourceRepo}/templates/global/agents/*.md into a sibling TOML,
-// validates every compiled TOML parses, then SYMLINKS every configured
-// Claude agents registry (ClaudeConfigDirs, {Home}/.claude by default) to
-// the .md sources and {Home}/.codex/agents to the compiled .toml files —
-// updates to the source repo propagate through the link, no reinstall
-// required. A regular-file copy already at a desired target (the shape the
-// old copy-based installer left behind) is replaced with the link; a
-// symlink pointing outside the source repository is a conflict this never
-// touches — see ClassifyGlobalLink/ApplyGlobalLink in globallink.go.
+// every {SourceRepo}/templates/global/agents/*.md into the pfm-owned
+// generated directory (paths.GeneratedCodexAgentsDir(home)), validates every
+// compiled TOML parses, then SYMLINKS every configured Claude agents
+// registry (ClaudeConfigDirs, {Home}/.claude by default) to the .md sources
+// and {Home}/.codex/agents to the generated .toml files — updates to the
+// source repo propagate through the link, no reinstall required. A
+// regular-file copy already at a desired target (the shape the old
+// copy-based installer left behind) is replaced with the link; a symlink
+// pointing outside the source repository is a conflict this never touches —
+// see ClassifyGlobalLink/ApplyGlobalLink in globallink.go. A link still
+// pointing at the old in-clone {SourceRepo}/templates/global/agents/{name}.toml
+// resolves inside the source repository, so it classifies WrongTarget and is
+// re-pointed here on the next run.
 //
 // TOML escaping mirrors build-codex.mjs:151-153 exactly — see
 // globalAgentEscape / globalAgentEscapeMultiline — because a raw `"` in an
@@ -118,6 +127,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 	sourceRepo = filepath.Clean(sourceRepo)
 	agentsDir := filepath.Join(sourceRepo, "templates", "global", "agents")
+	outputDir := paths.GeneratedCodexAgentsDir(home)
 
 	sources, err := globSorted(filepath.Join(agentsDir, "*.md"))
 	if err != nil {
@@ -137,7 +147,7 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 	compiledAgents := make([]compiledAgent, 0, len(sources))
 	for _, src := range sources {
-		out, content, err := renderGlobalAgentTOML(src)
+		out, content, err := renderGlobalAgentTOML(src, outputDir)
 		if err != nil {
 			return GlobalAgentsResult{}, err
 		}
@@ -294,7 +304,7 @@ func writeGlobalAgentFile(path string, content []byte) error {
 	return nil
 }
 
-func renderGlobalAgentTOML(mdPath string) (string, string, error) {
+func renderGlobalAgentTOML(mdPath, outputDir string) (string, string, error) {
 	raw, err := os.ReadFile(mdPath)
 	if err != nil {
 		return "", "", fmt.Errorf("read %s: %w", mdPath, err)
@@ -319,7 +329,7 @@ func renderGlobalAgentTOML(mdPath string) (string, string, error) {
 		"description = \"" + globalAgentEscape(description) + "\"\n" +
 		"developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
 
-	out := filepath.Join(filepath.Dir(mdPath), name+".toml")
+	out := filepath.Join(outputDir, name+".toml")
 	return out, content, nil
 }
 

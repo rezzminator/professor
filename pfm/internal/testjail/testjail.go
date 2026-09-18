@@ -62,6 +62,17 @@ func Run(m *testing.M) int {
 			return 1
 		}
 	}
+	// A `go` child (internal/update's rebuild, a `go run`) derives GOCACHE,
+	// GOPATH and GOMODCACHE from HOME when they are unset, and every jail below
+	// rehomes HOME — so the build cache and the module download cache would
+	// land INSIDE the jail, and a child still writing at teardown makes
+	// RemoveAll fail with "directory not empty" (measured: TestKillSelfResolve-
+	// AndInternalCLI, 5/6 red under load). Pin all three to the real user's
+	// locations here, while HOME is still the real one. A missing home or
+	// cache dir is reported, never silently left to the jail.
+	if code := pinGoDirs(); code != 0 {
+		return code
+	}
 	base, err := filepath.EvalSymlinks(os.TempDir())
 	if short, shortErr := filepath.EvalSymlinks("/tmp"); shortErr == nil {
 		base, err = short, nil
@@ -384,4 +395,42 @@ func PTYCommand(argv ...string) *exec.Cmd {
 		return exec.Command(scriptBinary, "-qefc", strings.Join(quoted, " "), "/dev/null")
 	}
 	return exec.Command(scriptBinary, append([]string{"-qe", "/dev/null"}, argv...)...)
+}
+
+// pinGoDirs sets GOCACHE, GOPATH and GOMODCACHE — each only when unset — to the
+// defaults Go itself would derive from the REAL home, so a `go` child spawned
+// under a jailed HOME never writes into the jail. Returns a non-zero exit code
+// when a value cannot be set; a missing user cache/home dir is reported and the
+// variable left as it was.
+func pinGoDirs() int {
+	set := func(name, value string) int {
+		if err := os.Setenv(name, value); err != nil {
+			fmt.Fprintf(os.Stderr, "testjail: set %s: %v\n", name, err)
+			return 1
+		}
+		return 0
+	}
+	if os.Getenv("GOCACHE") == "" {
+		if cache, err := os.UserCacheDir(); err != nil {
+			fmt.Fprintf(os.Stderr, "testjail: GOCACHE left unpinned — user cache dir: %v\n", err)
+		} else if code := set("GOCACHE", filepath.Join(cache, "go-build")); code != 0 {
+			return code
+		}
+	}
+	gopath := os.Getenv("GOPATH")
+	if gopath == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "testjail: GOPATH/GOMODCACHE left unpinned — user home dir: %v\n", err)
+			return 0
+		}
+		gopath = filepath.Join(home, "go")
+		if code := set("GOPATH", gopath); code != 0 {
+			return code
+		}
+	}
+	if os.Getenv("GOMODCACHE") == "" {
+		return set("GOMODCACHE", filepath.Join(filepath.SplitList(gopath)[0], "pkg", "mod"))
+	}
+	return 0
 }

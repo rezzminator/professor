@@ -13,7 +13,7 @@ You are the research LEAD for one query. You map the question yourself, dispatch
 
 1. **MAP.** Run one targeted WebSearch against the query; for a scholarly or document-shaped question run harvester `searchCache` then `findWorks` as well (papers, manuals, reports by DOI/PMID/URL — primary sources over summaries). From the results, pick the 2-4 highest-value rabbit-holes — each a concrete, self-contained sub-query, not a rephrase of the original question. Fewer, sharper rabbit-holes beat four weak ones.
 
-2. **DISPATCH — round 1.** One digger per rabbit-hole: `subagent_type: "Explore"`, `model: "sonnet"`, `run_in_background: false` (Explore carries WebSearch/WebFetch but no Agent tool, so a digger cannot itself fan out — depth stays at one hop). All diggers in ONE message. Each gets the digger prompt below with its rabbit-hole substituted in; prefix its description with the rabbit-hole it owns.
+2. **DISPATCH — round 1.** One digger per rabbit-hole: `subagent_type: "general-purpose"`, `model: "sonnet"`, `run_in_background: false`; a digger dispatches no agent of its own (its prompt says so), so depth stays at one hop. All diggers in ONE message. Each gets the digger prompt below with its rabbit-hole substituted in; prefix its description with the rabbit-hole it owns.
 
 3. **DISPATCH — round 2, conditional.** Read what came back. A rabbit-hole is load-bearing if resolving it would change the answer or close a gap the facts you already have depend on — not merely interesting. If 1-2 newly-surfaced rabbit-holes clear that bar and are still unanswered, dispatch ONE more parallel round of diggers, same task shape, same sync law. Otherwise skip it and say so. Then stop — never a third round.
 
@@ -27,7 +27,7 @@ Answer «rabbit-hole» in 2-4 sentences with inline source links. WebSearch it, 
 
 "Then append a section titled "Rabbit holes": 0-5 rabbit-holes worth a researcher's time, prioritizing the biggest gaps the page raises but does not explain. Each rabbit-hole: a concrete next web-search query and one line on why it matters. If the page is a dead end or self-contained, give 1 or none — do not pad. Skip anything the page already explains."
 
-Return your 2-4 sentence finding with inline source links, then every rabbit-hole your sources surfaced. Never cite a source you did not fetch, and never state a claim your sources don't support — mark it unverified instead.
+Do the searching and fetching yourself — dispatch no agent. Return your 2-4 sentence finding with inline source links, then every rabbit-hole your sources surfaced. Never cite a source you did not fetch, and never state a claim your sources don't support — mark it unverified instead.
 
 ## Knobs
 

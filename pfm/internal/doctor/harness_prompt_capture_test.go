@@ -1,7 +1,11 @@
 package doctor
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,6 +13,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/config"
+	"hostops/pfm/internal/deps"
 )
 
 // writeFakeHarnessClaude stages a shell `claude` stand-in used ONLY by the
@@ -132,3 +137,101 @@ func shortenHarnessCaptureSinkGrace(t *testing.T) {
 	harnessCaptureSinkGrace = 20 * time.Millisecond
 	t.Cleanup(func() { harnessCaptureSinkGrace = previous })
 }
+
+func TestHarnessCaptureVersionUsesWaitDelay(t *testing.T) {
+	shortenHarnessCaptureSinkGrace(t)
+	binary := deps.Executable("sh")
+	fake := &deps.FakeRunner{}
+	fake.Script([]string{binary, "--version"}, deps.RunResult{Stdout: []byte("2.1.fixture\n")}, nil)
+	machine := config.Config{}
+	machine.Claude.Binary = binary
+	_, _ = captureHarnessPromptWithDeps(
+		t.Context(), t.TempDir(), machine, "sonnet", "", Dependencies{Runner: fake},
+	)
+	calls := fake.Calls()
+	if len(calls) == 0 {
+		t.Fatal("capture made no version call")
+	}
+	if got := calls[0].Opts.WaitDelay; got != 500*time.Millisecond {
+		t.Fatalf("version RunOptions.WaitDelay = %s, want 500ms", got)
+	}
+}
+
+func TestHarnessCaptureReturnsDecodedResultWithEvidenceWriteError(t *testing.T) {
+	shortenHarnessCaptureSinkGrace(t)
+	verboseDir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(verboseDir, "sink-hits.txt"), 0o700); err != nil {
+		t.Fatalf("make sink evidence directory: %v", err)
+	}
+	binary := deps.Executable("sh")
+	runner := harnessCaptureHTTPRunner{binary: binary}
+	machine := config.Config{}
+	machine.Claude.Binary = binary
+	captured, err := captureHarnessPromptWithDeps(
+		t.Context(), t.TempDir(), machine, "sonnet", verboseDir, Dependencies{Runner: runner},
+	)
+	if err == nil || !strings.Contains(err.Error(), "sink hit evidence") {
+		t.Fatalf("capture error = %v, want sink evidence write error", err)
+	}
+	if captured.ResolvedModel != "fixture-model" || captured.Prompt == "" {
+		t.Fatalf("capture = %+v, want decoded result preserved with evidence error", captured)
+	}
+}
+
+type harnessCaptureHTTPRunner struct {
+	binary string
+}
+
+func (runner harnessCaptureHTTPRunner) Run(
+	_ context.Context,
+	argv []string,
+	_ deps.RunOptions,
+) (deps.RunResult, error) {
+	if len(argv) == 2 && argv[0] == runner.binary && argv[1] == "--version" {
+		return deps.RunResult{Stdout: []byte("2.1.fixture\n")}, nil
+	}
+	return deps.RunResult{ExitCode: -1}, fmt.Errorf("unexpected Run argv %q", argv)
+}
+
+func (runner harnessCaptureHTTPRunner) LookPath(name string) (string, error) {
+	return name, nil
+}
+
+func (runner harnessCaptureHTTPRunner) Start(
+	_ context.Context,
+	_ []string,
+	options deps.StartOptions,
+) (deps.Process, error) {
+	for _, entry := range options.Env {
+		if strings.HasPrefix(entry, "ANTHROPIC_BASE_URL=") {
+			response, err := http.Post(
+				strings.TrimPrefix(entry, "ANTHROPIC_BASE_URL=")+"/v1/messages",
+				"application/json",
+				strings.NewReader(
+					`{"model":"fixture-model","system":[{"text":"captured fixture prompt"}]}`,
+				),
+			)
+			if err != nil {
+				return nil, err
+			}
+			_ = response.Body.Close()
+			return harnessCaptureHTTPProcess{}, nil
+		}
+	}
+	return nil, errors.New("capture runner missing ANTHROPIC_BASE_URL")
+}
+
+type harnessCaptureHTTPProcess struct{}
+
+func (harnessCaptureHTTPProcess) Pid() int       { return 1 }
+func (harnessCaptureHTTPProcess) Wait() error    { return nil }
+func (harnessCaptureHTTPProcess) Release() error { return nil }
+func (harnessCaptureHTTPProcess) StdinPipe() (io.WriteCloser, error) {
+	return nil, errors.New("stdin pipe unavailable")
+}
+
+func (harnessCaptureHTTPProcess) StdoutPipe() (io.ReadCloser, error) {
+	return nil, errors.New("stdout pipe unavailable")
+}
+func (harnessCaptureHTTPProcess) Kill() error      { return nil }
+func (harnessCaptureHTTPProcess) KillGroup() error { return nil }

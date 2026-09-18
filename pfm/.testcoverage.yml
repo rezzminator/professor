@@ -1,4 +1,4 @@
-# go-test-coverage (version: infra/tools.env) takes whole-percent thresholds.
+# go-test-coverage (version: infra/fence/tools.env) takes whole-percent thresholds.
 # They ratchet like .arch/: raise only after merged coverage reaches the next
 # integer. The gate reads `make cover`'s merged unit + e2e binary profile.
 profile: tmp/cover/merged.out

@@ -18,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/harvest"
 )
 
@@ -61,6 +62,9 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 		)
 	}
 	runtime := options.Runtime
+	if runtime.Clock == nil {
+		runtime.Clock = clock.Real
+	}
 	cache, err := harvest.CacheRoot(runtime.CacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve harvester cache root: %w", err)
@@ -80,7 +84,7 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	if statePath == "" {
 		statePath = defaultAuthStatePath(service.runtime.CacheDir)
 	}
-	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath)
+	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath, runtime.Clock)
 	r.mcp = mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return service.Server() },
 		&mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true},
@@ -221,7 +225,7 @@ func (r *RemoteServer) authMetadata() map[string]any {
 		"revocation_endpoint":              r.publicURL + "/revoke",
 		"scopes_supported":                 []string{HarvesterScope},
 		"response_types_supported":         []string{"code"},
-		"grant_types_supported":            []string{grantAuthorizationCode, grantRefreshToken},
+		"grant_types_supported":            []string{authorizationCodeGrant, refreshTokenGrant},
 		"code_challenge_methods_supported": []string{pkceMethodS256},
 		"token_endpoint_auth_methods_supported": []string{
 			tokenAuthNone,
@@ -503,7 +507,7 @@ func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 	var response tokenResponse
 	var code string
 	switch grant {
-	case grantAuthorizationCode:
+	case authorizationCodeGrant:
 		response, code = r.store.exchange(
 			req.Form.Get("code"),
 			clientID,
@@ -511,8 +515,8 @@ func (r *RemoteServer) token(w http.ResponseWriter, req *http.Request) {
 			req.Form.Get("code_verifier"),
 			resource,
 		)
-	case grantRefreshToken:
-		response, code = r.store.refreshExchange(req.Form.Get(grantRefreshToken), clientID, resource)
+	case refreshTokenGrant:
+		response, code = r.store.refreshExchange(req.Form.Get(refreshTokenGrant), clientID, resource)
 	default:
 		r.oauthError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type is not supported")
 		return

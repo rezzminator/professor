@@ -8,10 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -62,10 +60,27 @@ func configuredHarnessCapture(
 	machine config.Config,
 	model, verboseDir string,
 ) (HarnessCapture, error) {
+	return configuredHarnessCaptureWithDeps(
+		ctx,
+		home,
+		machine,
+		model,
+		verboseDir,
+		normalizeDependencies(Dependencies{}),
+	)
+}
+
+func configuredHarnessCaptureWithDeps(
+	ctx context.Context,
+	home string,
+	machine config.Config,
+	model, verboseDir string,
+	dependencies Dependencies,
+) (HarnessCapture, error) {
 	if HarnessCaptureOverride != nil {
 		return HarnessCaptureOverride(ctx, home, machine, model, verboseDir)
 	}
-	return captureHarnessPrompt(ctx, home, machine, model, verboseDir)
+	return captureHarnessPromptWithDeps(ctx, home, machine, model, verboseDir, dependencies)
 }
 
 // harnessBuildStamp is the CLI build stamp inside the billing-header system
@@ -167,7 +182,18 @@ func captureHarnessPrompt(
 	machine config.Config,
 	model, verboseDir string,
 ) (HarnessCapture, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	return captureHarnessPromptWithDeps(ctx, home, machine, model, verboseDir, normalizeDependencies(Dependencies{}))
+}
+
+func captureHarnessPromptWithDeps(
+	ctx context.Context,
+	home string,
+	machine config.Config,
+	model, verboseDir string,
+	dependencies Dependencies,
+) (HarnessCapture, error) {
+	dependencies = normalizeDependencies(dependencies)
+	listener, err := dependencies.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return HarnessCapture{}, fmt.Errorf("open capture sink: %w", err)
 	}
@@ -195,24 +221,35 @@ func captureHarnessPrompt(
 		binary = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
 	versionCtx, versionCancel := context.WithTimeout(ctx, 5*time.Second)
-	versionCmd := exec.CommandContext(versionCtx, binary, "--version")
-	versionCmd.WaitDelay = 500 * time.Millisecond
-	versionCmd.Env = harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir)
-	versionRaw, versionErr := versionCmd.Output()
+	versionResult, versionErr := dependencies.Runner.Run(versionCtx, []string{binary, "--version"}, deps.RunOptions{
+		Env:       harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
+		WaitDelay: 500 * time.Millisecond,
+	})
 	versionCancel()
+	versionExit := versionResult.ExitCode
 	if versionErr != nil {
+		versionExit = -1
+	}
+	if versionErr != nil || versionResult.ExitCode != 0 {
 		resolved := binary
 		if !filepath.IsAbs(resolved) {
-			if looked, lookErr := exec.LookPath(binary); lookErr == nil {
+			if looked, lookErr := dependencies.Runner.LookPath(binary); lookErr == nil {
 				resolved = looked
 			}
 		}
-		if installer.ClaudeAbsent(home, resolved, deps.ExitCode(versionErr)) {
+		if installer.ClaudeAbsent(home, resolved, versionExit) {
 			return HarnessCapture{}, errClaudeAbsent
 		}
-		return HarnessCapture{}, fmt.Errorf("read Claude CLI version: %w", versionErr)
+		if versionErr != nil {
+			return HarnessCapture{}, fmt.Errorf("read Claude CLI version: %w", versionErr)
+		}
+		return HarnessCapture{}, fmt.Errorf(
+			"read Claude CLI version: command exited %d: %s",
+			versionExit,
+			strings.TrimSpace(string(versionResult.Stderr)),
+		)
 	}
-	version := strings.TrimSpace(string(versionRaw))
+	version := strings.TrimSpace(string(versionResult.Stdout))
 	devNull, stdinErr := os.Open(os.DevNull)
 	if stdinErr != nil {
 		return HarnessCapture{}, fmt.Errorf("open %s for the capture run's stdin: %w", os.DevNull, stdinErr)
@@ -231,8 +268,9 @@ func captureHarnessPrompt(
 			"x", "--output-format", "json", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`,
 			"--max-turns", "1", "--exclude-dynamic-system-prompt-sections",
 		},
-		Env:   harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
-		Stdin: devNull,
+		Env:    harnessCaptureEnv(os.Environ(), "http://"+listener.Addr().String(), configDir),
+		Stdin:  devNull,
+		Runner: dependencies.Runner,
 	})
 	if verboseDir != "" {
 		if writeErr := deps.WriteVerboseFile(
@@ -260,12 +298,16 @@ func captureHarnessPrompt(
 		captured, err := decodeHarnessCapture(body)
 		captured.CLIVersion = version
 		if verboseDir != "" {
-			_ = writeHarnessSinkHits(verboseDir, hits)
+			if hitsErr := writeHarnessSinkHits(verboseDir, hits); hitsErr != nil {
+				return captured, errors.Join(err, fmt.Errorf("write harness sink hit evidence: %w", hitsErr))
+			}
 		}
 		return captured, err
-	case <-time.After(harnessCaptureSinkGrace):
+	case <-dependencies.Clock.After(harnessCaptureSinkGrace):
 		if verboseDir != "" {
-			_ = writeHarnessSinkHits(verboseDir, hits)
+			if hitsErr := writeHarnessSinkHits(verboseDir, hits); hitsErr != nil {
+				return HarnessCapture{}, fmt.Errorf("write harness sink hit evidence: %w", hitsErr)
+			}
 		}
 		if hits.count() == 0 && runErr == nil && claudeAnsweredWithoutSink(result.Stdout) {
 			return HarnessCapture{CLIVersion: version}, fmt.Errorf(

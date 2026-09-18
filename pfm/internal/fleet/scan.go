@@ -12,8 +12,8 @@ import (
 	"io"
 	"os"
 	"strconv"
-	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
@@ -220,8 +220,8 @@ func ResolveEnv(request Request) (Env, error) {
 	if err != nil {
 		return Env{}, fmt.Errorf("read current directory: %w", err)
 	}
-	nowNS := time.Now().UnixNano()
-	if value := os.Getenv(TestNowNSEnv); value != "" {
+	nowNS := clock.Real.Now().UnixNano()
+	if value := (paths.OSEnv{}).Get(TestNowNSEnv); value != "" {
 		parsed, parseErr := strconv.ParseInt(value, 10, 64)
 		if parseErr != nil {
 			return Env{}, fmt.Errorf("%s: %w", TestNowNSEnv, parseErr)

@@ -5,18 +5,19 @@ set -euo pipefail
 #   mark — PostToolUse(Edit|Write): when the edited file is a Claude source the mirror
 #          compiles from (.claude/**, any CLAUDE.md, $HOME/.claude/commands/**), drop
 #          the repo-scoped dirty flag tmp/professor_codex_dirty.
-#   sync — Stop: if the flag is present, run `pfm codex build` then `pfm codex
-#          check`; success clears the flag silently, failure BLOCKS
-#          turn end (exit 2, reason on stderr) so a broken mirror is fixed, never
-#          silently shipped. Respects stop_hook_active — a block never loops; on a
-#          suppressed block the flag stays set so the next turn retries.
+#   sync — Stop: if the flag is present, run both Codex and OpenCode build+check
+#          pairs; success clears the flag silently, failure WARNS (exit 1, reason
+#          on stderr — shown to the user, the turn ends) and leaves the flag set
+#          so the next turn retries: a broken mirror is visible every turn until
+#          fixed, never silently shipped, and never a wall the chat cannot end a
+#          turn past. Respects stop_hook_active.
 # Coverage (declared): sees Edit/Write TOOL calls only. A Bash-driven write (sed,
 # redirect) to a Claude source does NOT set the flag — `pfm codex check` in the
 # pfm `structure` audit scope remains the backstop for that shape.
 #
-# `pfm codex build` is the SINGLE writer of the mirror. The legacy JS compiler is
-# retained unwired for reference only: two writers stamp different generated
-# markers into the same files, so each rewrites the other's output on every run.
+# `pfm codex build` and `pfm opencode build` are the SINGLE writers of their
+# mirrors. The legacy JavaScript compiler is retired; no second writer may stamp
+# a competing marker into the same OpenCode outputs.
 
 MODE="${1:-mark}"
 INPUT=$(cat 2>/dev/null || true)
@@ -53,7 +54,9 @@ case "$MODE" in
     [[ -x "$PFM_BIN" ]] || { rm -f "$FLAG"; exit 0; }
     OUT=$("$PFM_BIN" codex build "$REPO_ROOT" 2>&1) && BUILD=0 || BUILD=$?
     CHK=$("$PFM_BIN" codex check "$REPO_ROOT" 2>&1) && CHECK=0 || CHECK=$?
-    if (( BUILD == 0 && CHECK == 0 )); then
+    OGEN=$("$PFM_BIN" opencode build "$REPO_ROOT" 2>&1) && OC_BUILD=0 || OC_BUILD=$?
+    OCHK=$("$PFM_BIN" opencode check "$REPO_ROOT" 2>&1) && OC_CHECK=0 || OC_CHECK=$?
+    if (( BUILD == 0 && CHECK == 0 && OC_BUILD == 0 && OC_CHECK == 0 )); then
       rm -f "$FLAG"
       exit 0
     fi
@@ -66,10 +69,14 @@ case "$MODE" in
     FAILED=""
     (( BUILD != 0 )) && FAILED="${FAILED:+$FAILED, }codex build"
     (( CHECK != 0 )) && FAILED="${FAILED:+$FAILED, }codex check"
-    printf 'codex-sync: %s failed after this turn'\''s framework edits — fix before ending the turn.\n' "$FAILED" >&2
+    (( OC_BUILD != 0 )) && FAILED="${FAILED:+$FAILED, }opencode build"
+    (( OC_CHECK != 0 )) && FAILED="${FAILED:+$FAILED, }opencode check"
+    printf 'codex-sync WARNING: %s failed after this turn'\''s framework edits — the mirror is stale; fix it next turn (the flag stays set and this warning repeats until it passes).\n' "$FAILED" >&2
     (( BUILD != 0 )) && printf 'codex build:\n%s\n' "${OUT:-}" >&2
     (( CHECK != 0 )) && printf 'codex check:\n%s\n' "${CHK:-}" >&2
-    exit 2
+    (( OC_BUILD != 0 )) && printf 'opencode build:\n%s\n' "${OGEN:-}" >&2
+    (( OC_CHECK != 0 )) && printf 'opencode check:\n%s\n' "${OCHK:-}" >&2
+    exit 1
     ;;
 esac
 exit 0

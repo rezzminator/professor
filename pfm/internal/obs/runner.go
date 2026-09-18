@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os/exec"
 	"path/filepath"
@@ -109,28 +110,23 @@ func (process *loggedProcess) Release() error {
 	return err
 }
 
-// Kill and KillGroup forward to the inner Process when it has them (the
-// sibling's Runner grows both; this worktree's deps.Process does not carry
-// them yet) and record the terminal either way — a kill nobody could
-// forward is an ERROR naming the pid, never a silent no-op.
+// StdinPipe and StdoutPipe hand the child's pipes straight through: the
+// bytes on them are never the log's business.
+func (process *loggedProcess) StdinPipe() (io.WriteCloser, error) { return process.next.StdinPipe() }
+
+func (process *loggedProcess) StdoutPipe() (io.ReadCloser, error) { return process.next.StdoutPipe() }
+
+// Kill and KillGroup forward to the inner Process and record the terminal
+// either way, so a kill that failed is an ERROR naming the pid.
 func (process *loggedProcess) Kill() error {
-	killer, ok := process.next.(interface{ Kill() error })
-	return process.forwardKill("runner.kill", ok, func() error { return killer.Kill() })
+	err := process.next.Kill()
+	process.terminal("runner.kill", errorLevel(err), err)
+	return err
 }
 
 func (process *loggedProcess) KillGroup() error {
-	killer, ok := process.next.(interface{ KillGroup() error })
-	return process.forwardKill("runner.killgroup", ok, func() error { return killer.KillGroup() })
-}
-
-func (process *loggedProcess) forwardKill(op string, forwardable bool, kill func() error) error {
-	var err error
-	if forwardable {
-		err = kill()
-	} else {
-		err = fmt.Errorf("obs: %s: process %d cannot be killed through this Runner", op, process.Pid())
-	}
-	process.terminal(op, errorLevel(err), err)
+	err := process.next.KillGroup()
+	process.terminal("runner.killgroup", errorLevel(err), err)
 	return err
 }
 
@@ -206,6 +202,24 @@ type waitedProcess struct {
 func (process waitedProcess) Pid() int       { return process.pid }
 func (process waitedProcess) Wait() error    { return process.err }
 func (process waitedProcess) Release() error { return nil }
+
+// A waitedProcess has already exited: it has no pipes and nothing to kill, and
+// says so rather than answering nil.
+func (process waitedProcess) StdinPipe() (io.WriteCloser, error) {
+	return nil, fmt.Errorf("obs: process %d already exited: no stdin pipe", process.pid)
+}
+
+func (process waitedProcess) StdoutPipe() (io.ReadCloser, error) {
+	return nil, fmt.Errorf("obs: process %d already exited: no stdout pipe", process.pid)
+}
+
+func (process waitedProcess) Kill() error {
+	return fmt.Errorf("obs: process %d already exited: nothing to kill", process.pid)
+}
+
+func (process waitedProcess) KillGroup() error {
+	return fmt.Errorf("obs: process %d already exited: nothing to kill", process.pid)
+}
 
 // StartFailed is Started's counterpart for a direct door whose *exec.Cmd
 // never started: the one ERROR record a wrapped Runner.Start would write.

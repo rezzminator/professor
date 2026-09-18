@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/sqlitedb"
@@ -69,10 +71,12 @@ type Store struct {
 
 	warnMu sync.Mutex
 	warn   io.Writer
+	clock  clock.Clock
 }
 
 type openOptions struct {
-	warn io.Writer
+	warn  io.Writer
+	clock clock.Clock
 }
 
 // OpenOption customizes process-local Store behavior.
@@ -84,6 +88,15 @@ func WithWarningWriter(w io.Writer) OpenOption {
 	return func(options *openOptions) {
 		if w != nil {
 			options.warn = w
+		}
+	}
+}
+
+// WithClock injects the store clock for deterministic busy retry and audit timestamps.
+func WithClock(value clock.Clock) OpenOption {
+	return func(options *openOptions) {
+		if value != nil {
+			options.clock = value
 		}
 	}
 }
@@ -101,7 +114,7 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 		return nil, fmt.Errorf("resolve store paths: %w", err)
 	}
 
-	settings := openOptions{warn: os.Stderr}
+	settings := openOptions{warn: os.Stderr, clock: clock.Real}
 	for _, option := range options {
 		option(&settings)
 	}
@@ -116,6 +129,7 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 		state: fleetdb.OpenSharedState(ctx, resolved),
 		path:  resolved.DB,
 		warn:  settings.warn,
+		clock: settings.clock,
 	}
 	if err := store.migrate(ctx); err != nil {
 		return nil, errors.Join(err, store.Close())
@@ -132,6 +146,20 @@ func OpenContext(ctx context.Context, options ...OpenOption) (*Store, error) {
 		return nil, errors.Join(err, store.Close())
 	}
 	return store, nil
+}
+
+func (s *Store) clockNow() time.Time {
+	if s.clock == nil {
+		return clock.Real.Now()
+	}
+	return s.clock.Now()
+}
+
+func (s *Store) clockTimer(duration time.Duration) clock.Timer {
+	if s.clock == nil {
+		return clock.Real.NewTimer(duration)
+	}
+	return s.clock.NewTimer(duration)
 }
 
 // SharedPath reports the shared state database this Store writes kills to.

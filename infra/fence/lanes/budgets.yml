@@ -1,0 +1,30 @@
+# Tier B wall budgets — structure now, numbers after three green runs.
+#
+# `unpinned` means RECORD, DO NOT JUDGE: run.sh prints the measured wall next to
+# the word so nobody reads silence as a pass. A lane with NO row here is red
+# (`UNBUDGETED`) — a new lane must declare itself before it can run.
+# Pinning: take the median of three green runs and ratchet DOWN only, the rule
+# pfm/.testtiming.yml already follows. Targets from the spec until then:
+# root ≤ 15 min (paid once per template change), a solo lane ≤ 12 min, the full
+# sequence ≤ 75 min with the root cached.
+tolerance: 1.25
+
+# The whole canonical sequence, O1 → … → O2, in one container.
+sequence: unpinned
+
+lanes:
+  O1: unpinned
+  E1: unpinned
+  E2: unpinned
+  E3: unpinned
+  F: unpinned
+  M: unpinned
+  A: unpinned
+  O2: unpinned
+
+# Wave 7's release rehearsal runs this suite under one engine/model/effort combo;
+# the model is unset until that wave picks it.
+rehearsal:
+  engine: cx
+  model: "<unset>"
+  effort: high

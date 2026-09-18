@@ -44,3 +44,37 @@ func TestInspectHarvesterClientCutoverRefusesANilRegistryList(t *testing.T) {
 		t.Fatalf("reports[0].Error=%v, want an error naming the missing registry list", reports[0].Error)
 	}
 }
+
+func TestInspectOpenCodeServersReportsHealthyPartialForeignAndUnreadable(t *testing.T) {
+	home := t.TempDir()
+	path := OpenCodeConfigPath(home)
+	writeFixture(
+		t,
+		path,
+		`{"mcp":{"chat":{"type":"local","command":["`+filepath.Join(
+			home,
+			".local",
+			"bin",
+			"pfm",
+		)+`","mcp","chat","serve"],"enabled":true},"harvester":{"type":"remote","url":"http://127.0.0.1:8456/mcp/harvester","enabled":true}}}`,
+	)
+	reports := InspectOpenCodeServers(path, home, 8456, chatName, mcpServerHarvester)
+	if len(reports) != 2 || reports[0].State != MCPClientPFM || reports[1].State != MCPClientPFM {
+		t.Fatalf("healthy reports=%#v, want two pfm rows", reports)
+	}
+	writeFixture(t, path, `{"mcp":{"chat":{"type":"local","enabled":true}}}`)
+	reports = InspectOpenCodeServers(path, home, 8456, chatName, mcpServerHarvester)
+	if reports[0].State != MCPClientPartial || reports[1].State != MCPClientAbsent {
+		t.Fatalf("partial reports=%#v, want chat partial and harvester absent", reports)
+	}
+	writeFixture(t, path, `{"mcp":{"chat":{"type":"remote","url":"https://operator.invalid","enabled":true}}}`)
+	reports = InspectOpenCodeServers(path, home, 8456, chatName)
+	if reports[0].State != MCPClientForeignRegistration {
+		t.Fatalf("foreign report=%#v, want foreign-registration", reports[0])
+	}
+	writeFixture(t, path, `{`)
+	reports = InspectOpenCodeServers(path, home, 8456, chatName)
+	if reports[0].State != MCPClientUnreadable || reports[0].Error == nil {
+		t.Fatalf("unreadable report=%#v, want error-bearing unreadable", reports[0])
+	}
+}

@@ -1,5 +1,5 @@
 # golangci-lint v2 — pfm's lint + format law. Installed at the version in
-# infra/tools.env; `make lint` checks, `make fmt` rewrites. The GATE runs
+# infra/fence/tools.env; `make lint` checks, `make fmt` rewrites. The GATE runs
 # `make lint-new` (findings on lines changed since origin/develop only) so the
 # existing backlog never blocks a wave; `make lint` is the full burn-down view.
 version: "2"

@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"hostops/pfm/internal/clock"
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/obs"
 )
 
@@ -14,7 +15,7 @@ import (
 func openActivityLog(args []string, runtime commandRuntime, stderr io.Writer) func(exitCode int) {
 	machine := runtime.Config.Log
 	_, finish := obs.OpenLog(context.Background(), obs.Settings{
-		Cmd: obs.Verb(args), Version: displayVersion(), Level: machine.Level, Components: machine.Components,
+		Cmd: obs.Verb(args), Version: config.DisplayVersion(version), Level: machine.Level, Components: machine.Components,
 		KeepFiles: machine.KeepFiles, MaxMB: machine.MaxMB, KeepDays: machine.KeepDays, Stderr: stderr,
 	})
 	return finish

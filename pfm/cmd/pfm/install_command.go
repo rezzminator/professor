@@ -215,6 +215,7 @@ func newInstallerOptions(
 		}
 		options.MCPPort = runtime.Config.MCP.HTTP.Port
 		options.MCPConfigPath = runtime.Config.Path
+		options.OpenCodeConfigPath = installer.OpenCodeConfigPath(runtime.Paths.Home)
 		options.ClaudeBinary = runtime.Config.Claude.Binary
 		options.CodexBinary = runtime.Config.Codex.Binary
 		if options.CodexBinary == "" {

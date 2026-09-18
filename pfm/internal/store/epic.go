@@ -30,7 +30,7 @@ func (s *Store) EpicInjected(ctx context.Context, sessionID, slug string) (bool,
 func (s *Store) RecordEpicInjection(ctx context.Context, sessionID, slug string) error {
 	if _, err := s.db.ExecContext(ctx, `
 INSERT OR IGNORE INTO epic_injections(session_id, slug, injected_at)
-VALUES (?, ?, ?)`, sessionID, slug, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	VALUES (?, ?, ?)`, sessionID, slug, s.clockNow().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("record epic injection %q/%q: %w", sessionID, slug, err)
 	}
 	return nil

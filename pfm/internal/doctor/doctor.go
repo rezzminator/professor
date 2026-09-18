@@ -7,18 +7,18 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	goRuntime "runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/ask"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -54,6 +54,26 @@ const StateUnavailable = "unavailable"
 // importing the command package that owns them.
 type Dependencies struct {
 	ExpectedEngineCapabilities func(pfmengine.ID, []string) map[string]bool
+	Clock                      clock.Clock
+	Env                        paths.Env
+	Runner                     deps.Runner
+	Listen                     func(string, string) (net.Listener, error)
+}
+
+func normalizeDependencies(dependencies Dependencies) Dependencies {
+	if dependencies.Clock == nil {
+		dependencies.Clock = clock.Real
+	}
+	if dependencies.Env == nil {
+		dependencies.Env = paths.OSEnv{}
+	}
+	if dependencies.Runner == nil {
+		dependencies.Runner = deps.RealRunner{}
+	}
+	if dependencies.Listen == nil {
+		dependencies.Listen = net.Listen
+	}
+	return dependencies
 }
 
 // doctorTally is the two-tier count `runDoctor` threads through every row: warnings are advisory;
@@ -72,7 +92,6 @@ type harvestDoctor interface {
 	Inspect(string, harvestpy.Platform) (harvestpy.EnvironmentDigest, error)
 	Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error)
 }
-type pinnedHarvestDoctor struct{}
 
 // harvestDoctorOverride is nil in production. The command-package TestMain
 // supplies a complete no-network fixture so existing doctor tests exercise
@@ -81,18 +100,6 @@ var HarvestOverride harvestDoctor
 
 var DependencyProbeOverride func(context.Context, []deps.Entry, deps.ProbeOptions) []deps.Result
 
-func (pinnedHarvestDoctor) Inspect(root string, platform harvestpy.Platform) (harvestpy.EnvironmentDigest, error) {
-	return harvestpy.InspectConversionEnvironment(root, platform)
-}
-
-func (pinnedHarvestDoctor) Check(
-	ctx context.Context,
-	root string,
-	platform harvestpy.Platform,
-) (harvestpy.CheckReport, error) {
-	return harvestpy.CheckConversionEnvironment(ctx, root, platform)
-}
-
 // Run performs one health pass and returns 0 clean, 1 warnings, 2 usage, or 3 failures.
 func Run(
 	args []string,
@@ -100,6 +107,7 @@ func Run(
 	runtime config.Runtime,
 	dependencies Dependencies,
 ) (exitCode int) {
+	dependencies = normalizeDependencies(dependencies)
 	flags := cli.NewFlagSet(
 		doctorCommand,
 		"usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures",
@@ -121,7 +129,8 @@ func Run(
 		tally.fail()
 	}
 	PrintConfig(stdout, runtime)
-	tally.warnings += printHarvesterConfigDoctor(stdout, runtime)
+	tally.warnings += printHarvesterConfigDoctorWithEnv(stdout, runtime, dependencies.Env)
+	tally.warnings += printDuplicateSeatLogins(stdout, runtime, dependencies.Env)
 	tally.warnings += printEngineDoctor(stdout, runtime.Config)
 	tally.warnings += printOpenCodeStoreDoctor(context.Background(), stdout, runtime.Config)
 	tally.warnings += PrintEngineCapabilities(stdout, dependencies)
@@ -158,7 +167,7 @@ func Run(
 	}
 	defer func() { cli.CloseResource(database, "doctor: close database", stderr, &exitCode) }()
 	ctx := context.Background()
-	pathWarnings := pfmPathWarnings(resolved.Home, os.Getenv("PATH"))
+	pathWarnings := pfmPathWarningsWithEnv(resolved.Home, dependencies.Env.Get("PATH"), dependencies.Env)
 	for _, warning := range pathWarnings {
 		fmt.Fprintf(stdout, "doctor: warning %s\n", warning)
 		if strings.HasPrefix(warning, "pfm_path_resolves=") || strings.HasPrefix(warning, "pfm_hash_mismatch=") {
@@ -174,21 +183,29 @@ func Run(
 		fmt.Fprintln(stdout, "doctor: path canonical")
 	}
 	printActivityLogDoctor(stdout, runtime)
-	tally.warnings += printPrePushDoctor(context.Background(), stdout)
+	tally.warnings += printPrePushDoctorWithRunner(context.Background(), stdout, dependencies.Runner)
 	verboseDir := ""
 	if *verbose {
 		verboseDir = filepath.Join("tmp", "pfm-doctor")
 	}
-	tally.warnings += printHarnessPromptDoctor(context.Background(), stdout, resolved.Home, runtime.Config, verboseDir)
-	tally.warnings += printSpawnAuditDoctor(
+	tally.warnings += printHarnessPromptDoctorWithDeps(
+		context.Background(),
+		stdout,
+		resolved.Home,
+		runtime.Config,
+		verboseDir,
+		dependencies,
+	)
+	tally.warnings += printSpawnAuditDoctorWithClock(
 		context.Background(),
 		stdout,
 		resolved,
 		runtime.Config,
 		fleet.PrimaryAccount(resolved, runtime.Config),
+		dependencies.Clock,
 	)
 	// INFO only, and it adds no warnings: both title owners are legitimate.
-	printTmuxTitlesDoctor(context.Background(), stdout, resolved, runtime.Config)
+	printTmuxTitlesDoctorWithClock(context.Background(), stdout, resolved, runtime.Config, dependencies.Clock)
 	launcher, launcherErr := installer.InspectClaudeLauncher(resolved.Home)
 	if launcherErr != nil {
 		tally.fail()
@@ -359,13 +376,14 @@ func Run(
 	if *skipHarvest {
 		fmt.Fprintln(stdout, "doctor: harvestpy skipped (--skip-harvest)")
 	} else {
-		tally.warnings += printHarvestPythonDoctor(
+		tally.warnings += printHarvestPythonDoctorWithRunner(
 			ctx,
 			stdout,
 			resolved.Home,
 			harvestpy.Platform{},
 			configuredHarvestDoctor(),
 			runtime.Config.Harvester.Fetch.Browser,
+			dependencies.Runner,
 		)
 	}
 	tally.warnings += printHarvestCacheDoctor(stdout, runtime.Config.Harvester)
@@ -1093,6 +1111,25 @@ func printHarvestPythonDoctor(
 	doctor harvestDoctor,
 	browserGate bool,
 ) int {
+	return printHarvestPythonDoctorWithRunner(ctx, stdout, home, platform, doctor, browserGate, deps.RealRunner{})
+}
+
+func printHarvestPythonDoctorWithRunner(
+	ctx context.Context,
+	stdout io.Writer,
+	home string,
+	platform harvestpy.Platform,
+	doctor harvestDoctor,
+	browserGate bool,
+	runner deps.Runner,
+) int {
+	if runner == nil {
+		runner = deps.RealRunner{}
+	}
+	if pinned, ok := doctor.(pinnedHarvestDoctor); ok {
+		pinned.runner = runner
+		doctor = pinned
+	}
 	if platform.GOOS == "" {
 		platform.GOOS, platform.GOARCH = goRuntime.GOOS, goRuntime.GOARCH
 	}
@@ -1104,7 +1141,18 @@ func printHarvestPythonDoctor(
 		// The conversion env is absent (honest absence), but the opt-in
 		// browser row must still report: with fetch.browser on a missing
 		// environment is the NOT_PROVISIONED state, never silence.
-		return appendHarvestBrowserDoctorRow(ctx, stdout, root, platform, 0, browserGate)
+		return appendHarvestBrowserDoctorRowWithRunner(
+			ctx,
+			stdout,
+			root,
+			platform,
+			0,
+			browserGate,
+			runner,
+			func() string {
+				return resolveChromeForDoctorWithRunner(runner)
+			},
+		)
 	}
 	warnings := 0
 
@@ -1192,7 +1240,18 @@ func printHarvestPythonDoctor(
 		}
 		fmt.Fprintf(stdout, "doctor: harvestpy live_smoke=(file) broken error=%s\n", smokeErr)
 	}
-	return appendHarvestBrowserDoctorRow(ctx, stdout, root, platform, warnings, browserGate)
+	return appendHarvestBrowserDoctorRowWithRunner(
+		ctx,
+		stdout,
+		root,
+		platform,
+		warnings,
+		browserGate,
+		runner,
+		func() string {
+			return resolveChromeForDoctorWithRunner(runner)
+		},
+	)
 }
 
 // resolveChromeForDoctor re-checks the Google Chrome locations the browser
@@ -1201,6 +1260,13 @@ func printHarvestPythonDoctor(
 // launches only GOOGLE Chrome, so reporting a chromium-only host as healthy
 // would pass smoke and fail every launch.
 func resolveChromeForDoctor() string {
+	return resolveChromeForDoctorWithRunner(deps.RealRunner{})
+}
+
+func resolveChromeForDoctorWithRunner(runner deps.Runner) string {
+	if runner == nil {
+		runner = deps.RealRunner{}
+	}
 	for _, candidate := range []string{
 		"google-chrome", "google-chrome-stable",
 		"/usr/bin/google-chrome", "/usr/bin/google-chrome-stable",
@@ -1212,7 +1278,7 @@ func resolveChromeForDoctor() string {
 			}
 			continue
 		}
-		if path, err := exec.LookPath(candidate); err == nil {
+		if path, err := runner.LookPath(candidate); err == nil {
 			return path
 		}
 	}
@@ -1227,14 +1293,6 @@ func resolveChromeForDoctor() string {
 // doctorChromeResolver is injectable so tests can simulate a Chrome-less
 // host without depending on the machine they run on.
 var doctorChromeResolver = resolveChromeForDoctor
-
-// doctorBrowserSmoke runs the worker's no-launch smoke probe LIVE — the same
-// verdict path a fetch would trust. Injectable so tests simulate smoke
-// results without provisioning an environment.
-var doctorBrowserSmoke = func(ctx context.Context, interpreter, script string) (map[string]any, error) {
-	worker := harvestpy.NewBrowserWorker(harvestpy.Runtime{Python: interpreter, Script: script})
-	return worker.Smoke(ctx)
-}
 
 func browserEnvFingerprint(digest harvestpy.EnvironmentDigest) string {
 	if len(digest.Digest) >= 8 {
@@ -1253,6 +1311,34 @@ func appendHarvestBrowserDoctorRow(
 	warnings int,
 	gateOn bool,
 ) int {
+	return appendHarvestBrowserDoctorRowWithRunner(
+		ctx,
+		stdout,
+		root,
+		platform,
+		warnings,
+		gateOn,
+		deps.RealRunner{},
+		doctorChromeResolver,
+	)
+}
+
+func appendHarvestBrowserDoctorRowWithRunner(
+	ctx context.Context,
+	stdout io.Writer,
+	root string,
+	platform harvestpy.Platform,
+	warnings int,
+	gateOn bool,
+	runner deps.Runner,
+	chromeResolver func() string,
+) int {
+	if runner == nil {
+		runner = deps.RealRunner{}
+	}
+	if chromeResolver == nil {
+		chromeResolver = func() string { return resolveChromeForDoctorWithRunner(runner) }
+	}
 	digest, inspectErr := harvestpy.InspectBrowser(root, platform)
 	envDir := harvestpy.BrowserRuntimeRoot(root, platform)
 	interpreter := filepath.Join(envDir, "project", ".venv", "bin", "python")
@@ -1339,7 +1425,7 @@ func appendHarvestBrowserDoctorRow(
 	// S2: LIVE smoke — patchright importability and Chrome resolution are
 	// proven NOW, on this host, exactly as a fetch would; the provision-time
 	// record alone is a snapshot, and snapshots go stale silently.
-	smoke, smokeErr := doctorBrowserSmoke(ctx, interpreter, script)
+	smoke, smokeErr := runDoctorBrowserSmokeWithRunner(ctx, interpreter, script, runner)
 	if smokeErr != nil {
 		fmt.Fprintf(
 			stdout,
@@ -1376,7 +1462,7 @@ func appendHarvestBrowserDoctorRow(
 			}
 			continue
 		}
-		if _, lookErr := exec.LookPath(candidate); lookErr == nil {
+		if _, lookErr := runner.LookPath(candidate); lookErr == nil {
 			fmt.Fprintf(
 				stdout,
 				"doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n",
@@ -1387,7 +1473,7 @@ func appendHarvestBrowserDoctorRow(
 			return warnings
 		}
 	}
-	if fallback := doctorChromeResolver(); fallback != "" {
+	if fallback := chromeResolver(); fallback != "" {
 		fmt.Fprintf(
 			stdout,
 			"doctor: harvestpy_browser %s patchright=present(live smoke) chrome=%s healthy source_hash=%s\n",
@@ -1418,172 +1504,18 @@ func harvestDoctorCheck(report harvestpy.CheckReport, name string, checkErr erro
 	return false, "check did not report healthy"
 }
 
-func PrintConfig(stdout io.Writer, runtime config.Runtime) {
-	fmt.Fprintf(
-		stdout,
-		"doctor: config path=%s exists=%t\n",
-		runtime.Config.Path,
-		runtime.Config.Exists,
-	)
-	fmt.Fprintf(
-		stdout,
-		"doctor: config version=%d effective (input=%d %s)\n",
-		runtime.Config.Version,
-		runtime.Config.InputVersion,
-		runtime.Config.Source(versionCommand),
-	)
-	fmt.Fprintf(stdout, "doctor: config theme=%s (%s)\n", runtime.Config.Theme, runtime.Config.Source("theme"))
-	accounts := make([]string, 0, len(runtime.Config.Accounts))
-	for _, account := range runtime.Config.Accounts {
-		accounts = append(accounts, fmt.Sprintf("%d:%s", account.ID, account.ConfigDir))
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: config accounts=%s (%s)\n",
-		strings.Join(accounts, ","),
-		runtime.Config.Source("accounts"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"doctor: config claude.permissionMode=%s (%s)\n",
-		runtime.Config.Claude.PermissionMode,
-		runtime.Config.Source("claude.permissionMode"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"doctor: config claude.binary=%s (%s)\n",
-		runtime.Config.Claude.Binary,
-		runtime.Config.Source("claude.binary"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"doctor: config codex.yolo=%t (%s)\n",
-		runtime.Config.Codex.Yolo,
-		runtime.Config.Source("codex.yolo"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"doctor: config codex.binary=%s (%s)\n",
-		runtime.Config.Codex.Binary,
-		runtime.Config.Source("codex.binary"),
-	)
-	for _, name := range config.RegisteredMCPServers() {
-		fmt.Fprintf(
-			stdout,
-			"doctor: config %s=%t (%s)\n",
-			config.MCPServerKey(name),
-			runtime.Config.MCPServers[name].Enabled,
-			runtime.Config.MCPServerSource(name),
-		)
-	}
-	fmt.Fprintf(
-		stdout,
-		"doctor: config mcp.http.port=%d (%s)\n",
-		runtime.Config.MCP.HTTP.Port,
-		runtime.Config.Source("mcp.http.port"),
-	)
-	fmt.Fprintf(
-		stdout,
-		"doctor: config harvester path=%s exists=%t\n",
-		runtime.Config.Harvester.Path,
-		runtime.Config.Harvester.Exists,
-	)
-}
-
-// retiredHarvesterEnv maps every environment variable the harvester used to
-// read to where that setting lives now. The harvester ignores them all, so a
-// set one is a setting that silently stopped applying — doctor says so.
-var RetiredHarvesterEnv = []struct{ Name, Now string }{
-	{"SEARXNG_URL", "search.searxngURL"},
-	{"BRAVE_API_KEY", "search.braveApiKey"},
-	{"HARVESTER_DISABLE_SEARCH", "search.enabled"},
-	{"HARVESTER_CONTACT_EMAIL", "scholarly.contactEmail"},
-	{"GOOGLE_BOOKS_API_KEY", "scholarly.googleBooksApiKey"},
-	{"CORE_API_KEY", "scholarly.coreApiKey"},
-	{"SEMANTIC_SCHOLAR_API_KEY", "scholarly.semanticScholarApiKey"},
-	{"HARVESTER_BROWSER", "fetch.browser"},
-	{"HARVESTER_PDF_OCR", "convert.pdfOcr"},
-	{"HARVESTER_PDF_LAYOUT", "convert.pdfLayout"},
-	{"WEBFETCH_DIR", "cache.dir"},
-	{"HARVESTER_CACHE_DIR", "cache.dir"},
-	{"HARVESTER_CACHE_TTL", "cache.ttlSeconds"},
-	{"HARVESTER_NEG_TTL", "cache.negativeTtlSeconds"},
-	{"HARVESTER_NEG_TTL_TRANSIENT", "cache.negativeTransientTtlSeconds"},
-	{"HARVESTER_MAX_INLINE_CHARS", "output.maxInlineChars"},
-	{"HARVESTER_STATE_DIR", "external.stateDir"},
-	{"HARVESTER_AUTH_PASSPHRASE", "external.auth.passphrase"},
-	{"HARVESTER_STATIC_TOKEN", "external.auth.staticToken"},
-	{"HARVESTER_LOCAL_ROOTS", ""},
-	{"PFM_HARVEST_PYTHON", ""},
-}
-
-// printHarvesterExternalDoctor reports the external gateway whenever it is
-// configured on: the daemon's live state, or why it cannot be running. A
-// configured gateway that never opened is a warning, never an absent line.
-func printHarvesterExternalDoctor(stdout io.Writer, harvester config.HarvesterConfig, reported string) int {
-	if !harvester.External.Enabled {
-		return 0
-	}
-	state := reported
-	switch {
-	case !harvester.Enabled:
-		state = "off (external.enabled is true but harvester.enabled is false; the gateway only runs with the harvester)"
-	case state == "":
-		state = "not reported (daemon predates the external gateway; restart it)"
-	}
-	fmt.Fprintf(stdout, "doctor: mcp harvester_external=%s\n", state)
-	if strings.HasPrefix(state, "listening") {
-		return 0
-	}
-	return 1
-}
-
-// printHarvesterConfigDoctor reports the two ways a harvester setting can stop
-// applying without an error: a config migration still pending (pre-split
-// layout, an interrupted migration's leftover, the old default port), and a
-// retired environment variable still set. Each is a warning.
-func printHarvesterConfigDoctor(stdout io.Writer, runtime config.Runtime) int {
-	warnings := 0
-	if migration, err := config.PlanMigration(runtime.Config); err != nil {
-		warnings++
-		fmt.Fprintf(stdout, "doctor: config layout=unknown error=%v\n", err)
-	} else if !migration.Empty() {
-		warnings++
-		fmt.Fprintf(stdout, "doctor: config layout=pre-split path=%s remediation=run pfm install --yes (%s)\n",
-			runtime.Config.Path, strings.Join(migration.Steps(), "; "))
-	}
-	for _, retired := range RetiredHarvesterEnv {
-		if strings.TrimSpace(os.Getenv(retired.Name)) == "" {
-			continue
-		}
-		warnings++
-		if retired.Now == "" {
-			fmt.Fprintf(
-				stdout,
-				"doctor: harvester retired_env=%s is set but ignored (removed; pfm never honored it)\n",
-				retired.Name,
-			)
-			continue
-		}
-		fmt.Fprintf(
-			stdout,
-			"doctor: harvester retired_env=%s is set but ignored — move it to %s in %s\n",
-			retired.Name,
-			retired.Now,
-			runtime.Config.Harvester.Path,
-		)
-	}
-	return warnings
-}
-
 // pfmPathWarnings checks both precedence and byte identity. A copied binary
 // later on PATH can become the next active binary after a shell/toolchain
 // change, so checking command resolution alone is insufficient.
 func pfmPathWarnings(home, pathEnvironment string) []string {
+	return pfmPathWarningsWithEnv(home, pathEnvironment, paths.OSEnv{})
+}
+
+func pfmPathWarningsWithEnv(home, pathEnvironment string, env paths.Env) []string {
 	canonical := filepath.Join(home, ".local", "bin", "pfm")
 	canonical, _ = filepath.Abs(canonical)
 	targetHome, _ := filepath.Abs(home)
-	jailed := os.Getenv(paths.EnvHome) != "" || os.Getenv("PFM_DEV_FENCE") != ""
+	jailed := env.Get(paths.EnvHome) != "" || env.Get("PFM_DEV_FENCE") != ""
 	canonicalHash, err := executableHash(canonical)
 	if err != nil {
 		return []string{fmt.Sprintf("pfm_canonical=%s error=%v", canonical, err)}
@@ -1658,107 +1590,6 @@ func executableHash(path string) ([sha256.Size]byte, error) {
 		return [sha256.Size]byte{}, err
 	}
 	return sha256.Sum256(content), nil
-}
-
-func metaCounter(
-	ctx context.Context,
-	database *store.Store,
-	key string,
-) (int64, error) {
-	value, found, err := database.Meta(ctx, key)
-	if err != nil || !found {
-		return 0, err
-	}
-	count, err := strconv.ParseInt(value, 10, 64)
-	if err != nil || count < 0 {
-		return 0, fmt.Errorf("%s has invalid value %q", key, value)
-	}
-	return count, nil
-}
-
-func crumbHealth(path string) (entries, invalid int, err error) {
-	return crumbHealthWith(path, os.Stat, os.ReadDir)
-}
-
-func crumbHealthWith(
-	path string,
-	stat func(string) (os.FileInfo, error),
-	readDir func(string) ([]os.DirEntry, error),
-) (entries, invalid int, err error) {
-	info, err := stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return 0, 0, nil
-		}
-		return 0, 0, err
-	}
-	if !info.IsDir() {
-		return 0, 0, fmt.Errorf("%s is not a directory", path)
-	}
-	directory, err := readDir(path)
-	if err != nil {
-		return 0, 0, err
-	}
-	for _, entry := range directory {
-		entries++
-		name := entry.Name()
-		// A dot prefix marks sid bookkeeping rather than a crumb: the .lock
-		// files and the open-lock directories the zsh creates with mkdir.
-		if name == "" || name[0] == '.' {
-			continue
-		}
-		if entry.IsDir() {
-			invalid++
-			continue
-		}
-		if _, _, ok := gather.ParseCrumbName(name); ok {
-			continue
-		}
-		if filepath.Ext(name) == ".lock" ||
-			nonFleetServerCrumb(name) ||
-			knownSIDMetadata(name) {
-			continue
-		}
-		invalid++
-	}
-	return entries, invalid, nil
-}
-
-// nonFleetServerCrumb reports whether a crumb names a tmux server the fleet
-// deliberately excludes. The statusline writes a crumb for every Claude chat
-// it sees, including chats on the vsct bunker, so those names are ordinary
-// sid traffic rather than rot.
-func nonFleetServerCrumb(name string) bool {
-	socket := name
-	if marker := strings.LastIndex(name, ".%"); marker >= 0 {
-		socket = name[:marker]
-	}
-	return strings.HasPrefix(socket, "vsct")
-}
-
-func knownSIDMetadata(name string) bool {
-	for _, prefix := range []string{"nudge-ctx-", "nudge-band-"} {
-		if session, ok := strings.CutPrefix(name, prefix); ok {
-			return strings.TrimSpace(session) != ""
-		}
-	}
-	const reloadPrefix = "reload-"
-	const logSuffix = ".log"
-	if strings.HasPrefix(name, reloadPrefix) && strings.HasSuffix(name, logSuffix) {
-		socket := strings.TrimSuffix(strings.TrimPrefix(name, reloadPrefix), logSuffix)
-		if _, paneID, ok := gather.ParseCrumbName(socket); ok && paneID == "" {
-			return true
-		}
-		return nonFleetServerCrumb(socket)
-	}
-
-	const suffix = ".then-failed"
-	if !strings.HasSuffix(name, suffix) {
-		return false
-	}
-	socket := strings.TrimSuffix(name, suffix)
-	_, paneID, ok := gather.ParseCrumbName(socket)
-	return ok && paneID == ""
 }
 
 func liveCodexSnapshot(ctx context.Context, runtime config.Runtime, manager *kill.Manager) (gather.Snapshot, error) {

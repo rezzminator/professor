@@ -3,6 +3,7 @@ package obs
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os/exec"
 	"strings"
@@ -19,11 +20,13 @@ type killableProcess struct {
 	killed []string
 }
 
-func (p *killableProcess) Pid() int         { return p.pid }
-func (p *killableProcess) Wait() error      { return nil }
-func (p *killableProcess) Release() error   { return nil }
-func (p *killableProcess) Kill() error      { p.killed = append(p.killed, "kill"); return nil }
-func (p *killableProcess) KillGroup() error { p.killed = append(p.killed, "group"); return nil }
+func (p *killableProcess) Pid() int                           { return p.pid }
+func (p *killableProcess) Wait() error                        { return nil }
+func (p *killableProcess) Release() error                     { return nil }
+func (p *killableProcess) Kill() error                        { p.killed = append(p.killed, "kill"); return nil }
+func (p *killableProcess) KillGroup() error                   { p.killed = append(p.killed, "group"); return nil }
+func (p *killableProcess) StdinPipe() (io.WriteCloser, error) { return nil, errors.New("no pipe") }
+func (p *killableProcess) StdoutPipe() (io.ReadCloser, error) { return nil, errors.New("no pipe") }
 
 // startRunner is a Runner whose Start hands back a fixed Process, so the
 // wrapper's terminal records can be asserted against a known inner.

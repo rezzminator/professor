@@ -86,6 +86,10 @@ type Request struct {
 	CodexYolo   bool
 	Cache1H     bool
 	Then        string
+	// Name is the display name the chat wore before a --new reboot; the
+	// reborn pane takes it over and the abandoned session is relabelled
+	// (followName). "" carries nothing — a chat named from its prompts.
+	Name string
 	// Model and Effort pin the reborn seat's tier — the same pair
 	// HeadlessRequest carries for a fresh launch (internal/action/headless.go).
 	// "" means "inherit whatever the CLI/account would have chosen on its
@@ -368,12 +372,8 @@ func Run(
 	if request.Then != "" {
 		if request.Transcript != "" {
 			if info, statErr := os.Stat(request.Transcript); statErr == nil {
-				scaled := 90 + 30*int(info.Size()/1048576)
-				if scaled > 900 {
-					scaled = 900
-				}
 				if options.ThenTries == 900 {
-					options.ThenTries = scaled
+					options.ThenTries = min(900, 90+30*int(info.Size()/1048576))
 				}
 			}
 		}
@@ -381,6 +381,9 @@ func Run(
 			return Result{}, errors.Join(err, failThen(ctx, request, options.SIDDir, tmux, err.Error()))
 		}
 		trail.Reach("then-delivered", "--then delivered")
+	}
+	if request.SessionID == "" {
+		followName(ctx, request, options, tmux, proc, stderr)
 	}
 	return Result{Account: request.Account, Cache1H: request.Cache1H, New: request.SessionID == ""}, nil
 }

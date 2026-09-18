@@ -55,7 +55,7 @@ func (commands ExecCommands) command(
 	configDir string,
 	cache1H bool,
 	args ...string,
-) (*exec.Cmd, error) {
+) (*action.ProcessCommand, error) {
 	account, err := commands.accountFor(configDir)
 	if err != nil {
 		return nil, err

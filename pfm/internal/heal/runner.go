@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 // Options are one heal run's knobs.
@@ -31,7 +33,7 @@ func New(codexHome string, now func() time.Time) (*Runner, error) {
 		return nil, err
 	}
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
 	return &Runner{stores: stores, now: now}, nil
 }

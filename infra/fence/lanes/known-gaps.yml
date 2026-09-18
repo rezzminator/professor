@@ -1,25 +1,48 @@
 # Tier B known gaps — a listed beat reports `known-gap` and does not fail the suite;
 # a listed beat that PASSES is a red row ("known-gap now passes — remove the entry").
 # Source: docs/dev/trains/testing-foundation/waves/4-integration-dfs/spec.md
+#
+# Every entry needs `expires:` (Wave 8's law — a known issue is fixed, not
+# ledgered): no expires, or a date in the past, and the run is red before a
+# single lane starts (lib.sh `gaps_validate`, called by run.sh). An `arch:` entry
+# is a gap only on that architecture — anywhere else the beat must assert for
+# real, and reporting `known` there is itself a red row.
+# Wave 8 deletes each entry in the commit that fixes its gap.
 gaps:
   - beat: M.03-register-opencode
     landscape_id: M36
     why: "OpenCode MCP wiring is confirmed not implemented anywhere in the pfm installer"
     owner: GOD
     date: 2026-09-17
+    expires: 2026-10-15
   - beat: E3.02-mcp-known-gap
     landscape_id: M36
     why: "the OpenCode lane hits the same confirmed-absent MCP wiring on its own DFS path"
     owner: GOD
     date: 2026-09-17
+    expires: 2026-10-15
   - beat: A.13-opencode-layer-gap
     landscape_id: P37
     why: "the .opencode/** compile layer is outside the pfm module; no pfm command wires it for adopters"
     owner: GOD
     date: 2026-09-17
-  - beat: O.11-harvester
+    expires: 2026-10-15
+  - beat: O2.09-harvester
     landscape_id: H9
     why: "the harvestpy pinned Python conversion sidecar has no verified provisioning path on linux-arm64"
     owner: GOD
     date: 2026-09-17
+    expires: 2026-10-15
     arch: linux-arm64
+  - beat: E1.26-resolver-duplicate-candidate
+    landscape_id: C32
+    why: "the roster resolver reports a name held by ONE live row and its own resume row as ambiguous, and names the same session id as both candidates (`excerpt is ambiguous between <sid> and <sid>`) — the duplicate-candidate bug fixed outside this lane; until it lands, every name-addressed verb refuses a chat that /reload --new has left a resume row behind"
+    owner: GOD
+    date: 2026-09-17
+    expires: 2026-10-15
+  - beat: O1.08-duplicate-seat-login
+    landscape_id: none
+    why: "pfm doctor does not name two seats holding one account; the advisory lands with Wave 3 B5a (also Wave 8 item 4)"
+    owner: GOD
+    date: 2026-09-17
+    expires: 2026-10-15

@@ -5,27 +5,25 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/ui"
 	"hostops/pfm/internal/updatecheck"
 )
 
 const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
-var startProfessorUpdateCheck = func(command *exec.Cmd) error {
-	if err := command.Start(); err != nil {
-		return err
-	}
-	return command.Process.Release()
+var startProfessorUpdateCheck = func(ctx context.Context, argv []string, options deps.StartOptions) error {
+	_, err := (deps.RealRunner{}).Start(ctx, argv, options)
+	return err
 }
 
 func professorUpdateCachePath(runtime pfmconfig.Runtime) string {
@@ -63,20 +61,11 @@ func triggerProfessorUpdateCheck(runtime pfmconfig.Runtime) {
 	if err != nil {
 		return
 	}
-	null, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
-	if err != nil {
-		return
-	}
-	defer func() {
-		if err := null.Close(); err != nil {
-			fmt.Fprintf(os.Stderr, "pfm update check: close null device: %v\n", err)
-		}
-	}()
 	latestURL := professorLatestReleaseURL
-	if override := strings.TrimSpace(os.Getenv("PFM_UPDATE_LATEST_URL")); override != "" {
+	if override := strings.TrimSpace((paths.OSEnv{}).Get("PFM_UPDATE_LATEST_URL")); override != "" {
 		latestURL = override
 	}
-	command := exec.Command(
+	argv := []string{
 		executable,
 		"internal",
 		"update-check",
@@ -86,10 +75,10 @@ func triggerProfessorUpdateCheck(runtime pfmconfig.Runtime) {
 		runtime.Version,
 		"--url",
 		latestURL,
-	)
-	command.Stdin, command.Stdout, command.Stderr = null, null, null
-	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	_ = startProfessorUpdateCheck(command)
+	}
+	_ = startProfessorUpdateCheck(context.Background(), argv, deps.StartOptions{
+		Detach: true,
+	})
 }
 
 func openProfessorUpdate(

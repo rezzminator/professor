@@ -422,9 +422,7 @@ func runHeadlessInject(args []string, stdout, stderr io.Writer, runtimes ...comm
 			"       `/compact` is refused here — use `pfm chat self-compact`",
 		stderr,
 	)
-	var force bool
-	var retiredNoSig bool
-	var allowUnsigned bool
+	var force, retiredNoSig, allowUnsigned bool
 	flags.BoolVar(&force, "now", false, "interrupt a working chat instead of waiting")
 	flags.BoolVar(&force, "force-now", false, "interrupt a working chat instead of waiting")
 	flags.BoolVar(&retiredNoSig, "no-sig", false, "retired compatibility flag; signatures remain mandatory")

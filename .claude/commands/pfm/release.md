@@ -11,7 +11,7 @@ argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}]'
 - Public repo: `rezzminator/professor` — **this repo IS the upstream.** The working copy you are in is the one that publishes.
 - Blueprint tree: `templates/` · Public README: `README.md` · Release notes: `releases/vX.Y.Z.md` · Index: `CHANGELOG.md` · Version file: `VERSION`
 - Release worktrees: `.worktrees/release/main` (detached, byte-identical to `origin/main` — the STABLE side) and `.worktrees/release/develop` (branch `release/v{NEW}` from `develop` — the CANDIDATE side). Every release edit, fix, and commit lands in the candidate worktree; the live checkout holds other sessions' WIP and is never swept.
-- Rehearsal: `infra/release-rehearsal.sh` (the fenced adopter machine) + `$CDOCS/pfm/$REFS/release-rehearsal.md` (the Codex driver and its briefs).
+- Rehearsal: `infra/fence/release-rehearsal.sh` (the fenced adopter machine) + `$CDOCS/pfm/$REFS/release-rehearsal.md` (the Codex driver and its briefs).
 - The **live source project** — the private repo whose `.claude/` the templates are derived from — is NOT this repo. It is named with `--from {path}` and is optional; without it, the refresh pass is skipped (Step 4).
 
 ## Pre-flight

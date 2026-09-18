@@ -174,7 +174,7 @@ PR title: `Add Professor to Projects`
 PR body:
 
 ```
-Adds Professor under Projects: a fleet framework spanning Claude Code, Codex and OpenCode, including an OpenCode-compiled discipline layer (agents/commands/skills via build-opencode.mjs) and pfm, a cross-harness fleet CLI/TUI. MIT licensed.
+Adds Professor under Projects: a fleet framework spanning Claude Code, Codex and OpenCode, including a pfm-compiled OpenCode discipline layer for agents, commands, and skills, plus a cross-harness fleet CLI/TUI. MIT licensed.
 ```
 
 ---

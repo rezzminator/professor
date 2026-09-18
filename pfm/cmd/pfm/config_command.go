@@ -163,6 +163,7 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.Source("claude.permissionMode"),
 	)
 	fmt.Fprintf(stdout, "config claude.binary=%s (%s)\n", config.Claude.Binary, config.Source("claude.binary"))
+	fmt.Fprintf(stdout, "config claude.theme=%s (%s)\n", config.Claude.Theme, config.Source("claude.theme"))
 	fmt.Fprintf(
 		stdout,
 		"config claude.compactNudge.enabled=%t (%s)\n",

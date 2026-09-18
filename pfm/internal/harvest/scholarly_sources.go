@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 const (
@@ -171,7 +173,7 @@ func providerResult(source, provider, message, kind string, status int, challeng
 	}
 }
 
-func providerContext(ctx context.Context) (context.Context, context.CancelFunc) {
+func providerContext(ctx context.Context, current ...time.Time) (context.Context, context.CancelFunc) {
 	if _, ok := ctx.Value(providerCookieJarKey{}).(http.CookieJar); !ok {
 		if jar, err := cookiejar.New(nil); err == nil {
 			ctx = context.WithValue(ctx, providerCookieJarKey{}, jar)
@@ -179,7 +181,11 @@ func providerContext(ctx context.Context) (context.Context, context.CancelFunc) 
 			log.Printf("harvest: provider cookie jar creation failed: %v", err)
 		}
 	}
-	providerDeadline := time.Now().Add(providerTimeout)
+	now := clock.Real.Now()
+	if len(current) > 0 {
+		now = current[0]
+	}
+	providerDeadline := now.Add(providerTimeout)
 	if parentDeadline, ok := ctx.Deadline(); ok && !providerDeadline.Before(parentDeadline) {
 		return ctx, func() {}
 	}
@@ -195,7 +201,7 @@ func (h *Harvester) fetchProviderArtifact(
 	providerCtx := ctx
 	var cancel context.CancelFunc
 	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		providerCtx, cancel = providerContext(ctx)
+		providerCtx, cancel = providerContext(ctx, h.nowClock().Now())
 		defer cancel()
 	}
 	return h.fetchProviderArtifactWithPolicy(

@@ -186,7 +186,7 @@ func (installer *engine) vscodeExtensionLinks() []string {
 			filepath.Join(home, ".vscode-server"),
 			filepath.Join(home, ".vscode-server-insiders"),
 		}
-		if portable := os.Getenv("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
+		if portable := installer.env().Get("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
 			roots = append(roots, portable)
 		}
 	}
@@ -731,7 +731,7 @@ func (installer *engine) vscodeSettingsPaths() []string {
 			filepath.Join(home, "Library", "Application Support", "VSCodium", "User", "settings.json"),
 		}
 	} else {
-		configRoot := os.Getenv("XDG_CONFIG_HOME")
+		configRoot := installer.env().Get("XDG_CONFIG_HOME")
 		if !filepath.IsAbs(configRoot) {
 			configRoot = filepath.Join(home, ".config")
 		}
@@ -744,7 +744,7 @@ func (installer *engine) vscodeSettingsPaths() []string {
 			filepath.Join(home, ".vscode-server-insiders", "data", "Machine", "settings.json"),
 		}
 	}
-	if portable := os.Getenv("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
+	if portable := installer.env().Get("VSCODE_PORTABLE"); filepath.IsAbs(portable) {
 		// VSCODE_PORTABLE is the portable data directory itself, not the
 		// install folder holding it (see vscodeExtensionLinks).
 		candidates = append(candidates, filepath.Join(portable, "user-data", "User", "settings.json"))

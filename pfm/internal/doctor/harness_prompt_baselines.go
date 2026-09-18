@@ -29,9 +29,27 @@ func printHarnessPromptDoctor(
 	machine config.Config,
 	verboseDir string,
 ) int {
+	return printHarnessPromptDoctorWithDeps(
+		ctx,
+		stdout,
+		home,
+		machine,
+		verboseDir,
+		normalizeDependencies(Dependencies{}),
+	)
+}
+
+func printHarnessPromptDoctorWithDeps(
+	ctx context.Context,
+	stdout io.Writer,
+	home string,
+	machine config.Config,
+	verboseDir string,
+	dependencies Dependencies,
+) int {
 	warnings := 0
 	for _, model := range HarnessPromptModels {
-		warnings += printModelHarnessPromptDoctor(ctx, stdout, home, machine, model, verboseDir)
+		warnings += printModelHarnessPromptDoctorWithDeps(ctx, stdout, home, machine, model, verboseDir, dependencies)
 	}
 	return warnings
 }
@@ -48,6 +66,26 @@ func printModelHarnessPromptDoctor(
 	machine config.Config,
 	model HarnessPromptModel,
 	verboseDir string,
+) int {
+	return printModelHarnessPromptDoctorWithDeps(
+		ctx,
+		stdout,
+		home,
+		machine,
+		model,
+		verboseDir,
+		normalizeDependencies(Dependencies{}),
+	)
+}
+
+func printModelHarnessPromptDoctorWithDeps(
+	ctx context.Context,
+	stdout io.Writer,
+	home string,
+	machine config.Config,
+	model HarnessPromptModel,
+	verboseDir string,
+	dependencies Dependencies,
 ) int {
 	fmt.Fprintf(stdout, "doctor: harness-prompt requested=%s\n", model.Alias)
 	baselinePath := filepath.Join(home, ".local", "share", "pfm", "install", "prompts", model.Stem+".sha256")
@@ -79,7 +117,7 @@ func printModelHarnessPromptDoctor(
 		)
 		return 1
 	}
-	captured, captureErr := configuredHarnessCapture(ctx, home, machine, model.Alias, verboseDir)
+	captured, captureErr := configuredHarnessCaptureWithDeps(ctx, home, machine, model.Alias, verboseDir, dependencies)
 	resolved, version := captured.ResolvedModel, captured.CLIVersion
 	if resolved == "" {
 		resolved = StateUnknown

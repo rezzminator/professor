@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/clock"
 )
 
 // ClaudeInstructionsFile is the project instructions file scaffolded from the blueprint.
@@ -63,7 +64,7 @@ func Scaffold(source, target string, force bool, stdout io.Writer) (int, error) 
 		},
 		Files: make(map[string]FilePin),
 	}
-	pinnedAt := time.Now().Format(time.DateOnly)
+	pinnedAt := clock.Real.Now().Format(time.DateOnly)
 	for _, entry := range plan {
 		targetPath := filepath.Join(target, filepath.FromSlash(entry.local))
 		if _, err := os.Stat(targetPath); err == nil && !force {

@@ -1,0 +1,5 @@
+UNPINNED — captured by Tier B E2.09/lanes/capture-shapes.sh (not yet written)
+# Codex's working footer as the TUI paints it. No pfm reader pins this
+# spelling (internal/inject/guards.go:13 is engine-agnostic and documents the
+# Codex compaction receipt as a NAMED GAP), so mockengine refuses to render a
+# Codex pane until a scenario supplies pane.busy from a real capture.

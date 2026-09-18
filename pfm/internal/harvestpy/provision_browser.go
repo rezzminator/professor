@@ -12,6 +12,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"hostops/pfm/internal/clock"
+	"hostops/pfm/internal/deps"
 )
 
 // BrowserRuntimeRoot is the stable current pointer for the opt-in real-browser
@@ -51,8 +54,16 @@ func provisionBrowserWithTargets(
 	if options.Cache == "" {
 		options.Cache = filepath.Join(options.Root, "cache")
 	}
+	if options.Runner == nil {
+		options.Runner = deps.RealRunner{}
+	}
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
 	if options.Run == nil {
-		options.Run = runCommand
+		options.Run = func(ctx context.Context, executable string, arguments []string, directory string) ([]byte, error) {
+			return runCommandWithRunner(ctx, options.Runner, executable, arguments, directory)
+		}
 	}
 	if options.Smoke == nil {
 		options.Smoke = smokeBrowserRuntime
@@ -77,6 +88,7 @@ func provisionBrowserWithTargets(
 		browserRuntime := Runtime{
 			Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 			Script: filepath.Join(current, "project", "browser.py"),
+			Runner: options.Runner,
 		}
 		if _, smokeErr := options.Smoke(ctx, browserRuntime); smokeErr == nil {
 			return ProvisionResult{Digest: desired, Environment: existing, Runtime: browserRuntime}, nil
@@ -84,10 +96,24 @@ func provisionBrowserWithTargets(
 	}
 	uvArchive := filepath.Join(options.Cache, "uv-"+platform.String()+".tar.gz")
 	pythonArchive := filepath.Join(options.Cache, "python-"+platform.String()+".tar.gz")
-	if err := ensureInput(ctx, uvArchive, target.UV, options.Offline, options.Download); err != nil {
+	if err := ensureInputWithClock(
+		ctx,
+		uvArchive,
+		target.UV,
+		options.Offline,
+		options.Download,
+		options.Clock,
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("prepare browser uv input: %w", err)
 	}
-	if err := ensureInput(ctx, pythonArchive, target.Python, options.Offline, options.Download); err != nil {
+	if err := ensureInputWithClock(
+		ctx,
+		pythonArchive,
+		target.Python,
+		options.Offline,
+		options.Download,
+		options.Clock,
+	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("prepare browser Python input: %w", err)
 	}
 	if err := os.MkdirAll(envRoot, 0o700); err != nil {
@@ -167,7 +193,10 @@ func provisionBrowserWithTargets(
 	}
 	base.InventorySHA256 = inventorySHA
 	base.InventoryCount = inventoryCount
-	smoke, err := options.Smoke(ctx, Runtime{Python: venvPython, Script: filepath.Join(project, "browser.py")})
+	smoke, err := options.Smoke(
+		ctx,
+		Runtime{Python: venvPython, Script: filepath.Join(project, "browser.py"), Runner: options.Runner},
+	)
 	if err != nil {
 		return ProvisionResult{}, fmt.Errorf("browser no-download smoke: %w", err)
 	}
@@ -180,6 +209,7 @@ func provisionBrowserWithTargets(
 	finalRuntime := Runtime{
 		Python: filepath.Join(final, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(final, "project", "browser.py"),
+		Runner: options.Runner,
 	}
 	// The environment is never renamed after uv sync (the venv interpreter
 	// symlink is absolute); both smokes judge the same final runtime path.
@@ -194,12 +224,13 @@ func provisionBrowserWithTargets(
 	if err := writePrivate(filepath.Join(final, "environment.json"), append(marker, '\n')); err != nil {
 		return ProvisionResult{}, err
 	}
-	if err := atomicCurrent(envRoot, desired); err != nil {
+	if err := atomicCurrentWithClock(envRoot, desired, options.Clock); err != nil {
 		return ProvisionResult{}, err
 	}
 	return ProvisionResult{Digest: desired, Environment: base, Runtime: Runtime{
 		Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(current, "project", "browser.py"),
+		Runner: options.Runner,
 	}}, nil
 }
 
@@ -237,6 +268,7 @@ func EnsureBrowser(ctx context.Context, options ProvisionOptions) (Runtime, erro
 	resolved := Runtime{
 		Python: filepath.Join(current, "project", ".venv", "bin", "python"),
 		Script: filepath.Join(current, "project", "browser.py"),
+		Runner: options.Runner,
 	}
 	reason := ""
 	if _, statErr := os.Stat(resolved.Python); errors.Is(statErr, os.ErrNotExist) {

@@ -27,16 +27,15 @@ const (
 
 var chatMCPTools = mcpserv.ToolNames()
 
-var harvesterMCPTools = []string{
-	archiveCommand, "fetch", "fetchImage", "findWorks", "search", "searchCache",
-}
-
 type mcpDaemonOptions struct {
 	Version   string
 	StartedAt time.Time
 	Endpoint  string
 	Chat      http.Handler
 	Harvester http.Handler
+	// HarvesterTools is the runtime-dependent registered surface from
+	// harvestmcp.RegisteredToolNames — the search gate rules out a package var.
+	HarvesterTools []string
 	// External reports the external gateway state at request time.
 	External *atomic.Pointer[string]
 	// Clock defaults StartedAt when it is left zero; nil reads the wall
@@ -60,7 +59,7 @@ func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
 		servers[config.MCPServerChat] = append([]string(nil), chatMCPTools...)
 	}
 	if options.Harvester != nil {
-		servers[config.MCPServerHarvester] = append([]string(nil), harvesterMCPTools...)
+		servers[config.MCPServerHarvester] = append([]string(nil), options.HarvesterTools...)
 	}
 	status := mcpserv.DaemonStatus{
 		PFMVersion:      options.Version,
@@ -184,6 +183,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 			cli.CloseResource(harvester, "pfm mcp serve: close harvester service", stderr, &exitCode)
 		}()
 		options.Harvester = harvester.NewHTTPHandler()
+		options.HarvesterTools = harvestmcp.RegisteredToolNames(harvestRuntime(runtime))
 	}
 	external := &atomic.Pointer[string]{}
 	setExternal := func(state string) { external.Store(&state) }

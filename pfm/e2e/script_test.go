@@ -18,6 +18,7 @@ import (
 
 	"github.com/rogpeppe/go-internal/testscript"
 
+	"hostops/pfm/internal/mockengine"
 	"hostops/pfm/internal/testjail"
 )
 
@@ -26,6 +27,9 @@ const (
 	e2eScriptBinaryEnv = "PFM_E2E_SCRIPT_BINARY"
 	e2eScriptRootEnv   = "PFM_E2E_SCRIPT_ROOT"
 	e2eScriptOwnerEnv  = "PFM_E2E_SCRIPT_OWNER"
+	// e2eMockEngineEnv is the built cmd/mock-engine binary every script jail
+	// installs as its `claude` (internal/mockengine).
+	e2eMockEngineEnv = "PFM_E2E_MOCK_ENGINE"
 )
 
 type jailedTestMain struct{ m *testing.M }
@@ -85,17 +89,36 @@ func TestMain(m *testing.M) {
 }
 
 func prepareScriptBinary(goBinary string) error {
-	if binary := strings.TrimSpace(os.Getenv(e2eScriptBinaryEnv)); binary != "" {
-		if _, err := os.Stat(binary); err != nil {
-			return fmt.Errorf("reuse %s=%s: %w", e2eScriptBinaryEnv, binary, err)
-		}
-		return prepareCoverageDirectory()
-	}
 	_, sourceFile, _, ok := runtime.Caller(0)
 	if !ok {
 		return errors.New("locate script harness source")
 	}
 	pfmRoot := filepath.Clean(filepath.Join(filepath.Dir(sourceFile), ".."))
+	if binary := strings.TrimSpace(os.Getenv(e2eScriptBinaryEnv)); binary != "" {
+		if _, err := os.Stat(binary); err != nil {
+			return fmt.Errorf("reuse %s=%s: %w", e2eScriptBinaryEnv, binary, err)
+		}
+		if strings.TrimSpace(os.Getenv(e2eMockEngineEnv)) == "" {
+			root, err := testjail.CreateShortRoot()
+			if err != nil {
+				return fmt.Errorf("create short mock-engine root: %w", err)
+			}
+			if err := buildMockEngine(goBinary, pfmRoot, root); err != nil {
+				_ = os.RemoveAll(root)
+				return err
+			}
+			for name, value := range map[string]string{
+				e2eScriptRootEnv:  root,
+				e2eScriptOwnerEnv: strconv.Itoa(os.Getpid()),
+			} {
+				if err := os.Setenv(name, value); err != nil {
+					_ = os.RemoveAll(root)
+					return fmt.Errorf("set %s: %w", name, err)
+				}
+			}
+		}
+		return prepareCoverageDirectory()
+	}
 	root, err := testjail.CreateShortRoot()
 	if err != nil {
 		return fmt.Errorf("create short binary root: %w", err)
@@ -110,6 +133,10 @@ func prepareScriptBinary(goBinary string) error {
 		_ = os.RemoveAll(root)
 		return fmt.Errorf("%w: %s", buildErr, strings.TrimSpace(string(output)))
 	}
+	if err := buildMockEngine(goBinary, pfmRoot, root); err != nil {
+		_ = os.RemoveAll(root)
+		return err
+	}
 	for name, value := range map[string]string{
 		e2eScriptBinaryEnv: binary,
 		e2eScriptRootEnv:   root,
@@ -121,6 +148,21 @@ func prepareScriptBinary(goBinary string) error {
 		}
 	}
 	return prepareCoverageDirectory()
+}
+
+// buildMockEngine builds cmd/mock-engine into root and publishes its path.
+func buildMockEngine(goBinary, pfmRoot, root string) error {
+	binary := filepath.Join(root, "mock-engine")
+	command := exec.Command(goBinary, "build", "-o", binary, "./cmd/mock-engine")
+	command.Dir = pfmRoot
+	command.Env = append(os.Environ(), "GOTOOLCHAIN=local", "GOTELEMETRY=off")
+	if output, err := command.CombinedOutput(); err != nil {
+		return fmt.Errorf("build mock-engine: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	if err := os.Setenv(e2eMockEngineEnv, binary); err != nil {
+		return fmt.Errorf("set %s: %w", e2eMockEngineEnv, err)
+	}
+	return nil
 }
 
 func prepareCoverageDirectory() error {
@@ -172,13 +214,17 @@ func setupScriptJail(env *testscript.Env, source string) error {
 	home := filepath.Join(root, "home")
 	tmuxBase := filepath.Join(root, "t")
 	tmuxDir := filepath.Join(tmuxBase, "tmux-"+strconv.Itoa(os.Getuid()))
-	claudeRoot := filepath.Join(root, "claude")
+	// The spawn strips CLAUDE_CONFIG_DIR (internal/action/synth.go:31) and an
+	// implicit account sets none back, so the engine files its transcript
+	// under HOME/.claude/projects — the primary root of a real host
+	// (internal/engine/builtin.go:61) — and that is where the index looks.
+	claudeRoot := filepath.Join(home, ".claude", "projects")
 	codexRoot := filepath.Join(root, "codex")
 	binDir := filepath.Join(root, "bin")
 	for _, directory := range []string{
-		filepath.Join(home, ".claude"), filepath.Join(home, ".local", "bin"),
+		claudeRoot, filepath.Join(home, ".local", "bin"),
 		filepath.Join(home, ".config", "pfm"), filepath.Join(home, ".cc"),
-		claudeRoot, codexRoot, filepath.Join(root, "sid"), filepath.Join(root, "proc"),
+		codexRoot, filepath.Join(root, "sid"), filepath.Join(root, "proc"),
 		tmuxDir, filepath.Join(root, "state"), filepath.Join(root, "tmp"), binDir,
 	} {
 		if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -188,18 +234,36 @@ func setupScriptJail(env *testscript.Env, source string) error {
 	if err := os.WriteFile(filepath.Join(home, ".claude-primary"), []byte("2\n"), 0o600); err != nil {
 		return fmt.Errorf("write primary account fixture: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(binDir, "claude"), []byte(scriptClaudeFixture), 0o700); err != nil {
-		return fmt.Errorf("write Claude fixture: %w", err)
+	// The mock engine is the jail's Claude: on PATH under the engine's own
+	// name (argv[0] selects the engine) and at the native versions path the
+	// launcher execs by absolute path (MOCK_ENGINE_ENGINE names the engine
+	// there, since that basename is a version number).
+	mockEngine := strings.TrimSpace(os.Getenv(e2eMockEngineEnv))
+	if mockEngine == "" {
+		return fmt.Errorf("%s is unset: the mock engine was not built before the script jail", e2eMockEngineEnv)
+	}
+	if err := os.Symlink(mockEngine, filepath.Join(binDir, "claude")); err != nil {
+		return fmt.Errorf("link Claude mock on PATH: %w", err)
 	}
 	nativeClaude := filepath.Join(home, ".local", "share", "claude", "versions", "2.1.238")
 	if err := os.MkdirAll(filepath.Dir(nativeClaude), 0o700); err != nil {
 		return fmt.Errorf("create native Claude fixture directory: %w", err)
 	}
-	if err := os.WriteFile(nativeClaude, []byte(scriptClaudeFixture), 0o700); err != nil {
-		return fmt.Errorf("write native Claude fixture: %w", err)
+	if err := os.Symlink(mockEngine, nativeClaude); err != nil {
+		return fmt.Errorf("link native Claude fixture: %w", err)
 	}
 	if err := os.Symlink(nativeClaude, filepath.Join(home, ".local", "bin", "claude")); err != nil {
 		return fmt.Errorf("link native Claude fixture: %w", err)
+	}
+	busy := 0
+	scenario := filepath.Join(root, "mock-engine.json")
+	if err := (mockengine.Scenario{
+		Version:   "2.1.238 (Claude Code)",
+		SessionID: "b1111111-1111-4111-8111-111111111111",
+		BusyMS:    &busy,
+		Jail:      mockengine.Jail{ProcRoot: filepath.Join(root, "proc"), SIDDir: filepath.Join(root, "sid")},
+	}).Write(scenario); err != nil {
+		return fmt.Errorf("write mock-engine scenario: %w", err)
 	}
 	if err := writeSchedulerFixtures(home); err != nil {
 		return err
@@ -249,7 +313,8 @@ func setupScriptJail(env *testscript.Env, source string) error {
 		"PFM_E2E_HOME":           home, e2eSourceRepo: scriptSource,
 		"PFM_SOURCE_REPO":       scriptSource,
 		"PFM_HARVESTPY_OFFLINE": "1",
-		"CC_STUB_TRANSCRIPT":    filepath.Join(claudeRoot, "fixture", "b1111111-1111-4111-8111-111111111111.jsonl"),
+		mockengine.EnvScenario:  scenario,
+		mockengine.EnvEngine:    "claude",
 		"PATH":                  path,
 	}
 	for name, value := range values {
@@ -342,50 +407,3 @@ func runSleepUntilCommand() {
 	fmt.Fprintf(os.Stderr, "sleep-until: timeout pattern=%q error=%v capture=%q\n", os.Args[3], lastErr, last)
 	os.Exit(1)
 }
-
-const scriptClaudeFixture = `#!/usr/bin/env bash
-if [ "${1-}" = agents ]; then printf '[]\n'; exit 0; fi
-if [ "${1-}" = --version ]; then printf '2.1.238 (Claude Code)\n'; exit 0; fi
-stty -icanon -echo -ixon min 1 time 0 2>/dev/null
-sock="${TMUX%%,*}"; sock="${sock##*/}"
-transcript="$CC_STUB_TRANSCRIPT"
-mkdir -p "$(dirname "$transcript")" "$PFM_SID_DIR" "$PFM_PROC_ROOT/$$/fd"
-: > "$transcript"
-printf '%s\n' "$transcript" > "$PFM_SID_DIR/$sock"
-printf 'claude\0--jailed\0' > "$PFM_PROC_ROOT/$$/cmdline"
-printf '%s (claude) S %s 1 1 0 -1 0 0 0 0 0 0 0 0 0 0 0 20 0 100\n' "$$" "$PPID" > "$PFM_PROC_ROOT/$$/stat"
-: > "$PFM_PROC_ROOT/$$/environ"
-trap 'rm -rf "$PFM_PROC_ROOT/$$"' EXIT
-esc() { printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
-turn() {
-  printf '{"type":"user","sessionId":"b1111111-1111-4111-8111-111111111111","cwd":"%s","message":{"content":"%s"}}\n' "$(esc "$PWD")" "$(esc "$1")" >> "$transcript"
-  printf '{"type":"assistant","message":{"content":[{"type":"text","text":"ack: %s"}]}}\n' "$(esc "$1")" >> "$transcript"
-  printf '\r\nUSER:%s\r\nack: %s\r\n' "$1" "$1"
-}
-prompt=""; name=""; take=""
-for argument in "$@"; do
-  if [ -n "$take" ]; then
-    [ "$take" = name ] && name="$argument"
-    take=""
-    continue
-  fi
-  case "$argument" in
-    --name) take=name ;;
-    --model|--effort) take=skip ;;
-    -*) ;;
-    *) prompt="$argument"; break ;;
-  esac
-done
-[ -n "$name" ] && printf '{"type":"custom-title","customTitle":"%s"}\n' "$(esc "$name")" >> "$transcript"
-printf 'claude ready\r\n❯ '
-[ -n "$prompt" ] && turn "$prompt"
-buf=""
-while IFS= read -r -N1 ch; do
-  case "$ch" in
-    $'\n'|$'\r') [ -n "$buf" ] && turn "$buf"; buf=""; printf '❯ ' ;;
-    $'\033') ;;
-    $'\177'|$'\b') buf="${buf%?}" ;;
-    *) buf="$buf$ch"; printf '%s' "$ch" ;;
-  esac
-done
-`

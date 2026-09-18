@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/clock"
 )
 
 const (
@@ -75,10 +76,24 @@ func Read(path, current string) (Notice, bool, error) {
 // successful notice intact, so temporary network failures cannot make an
 // already-known update disappear.
 func CheckForUpdate(ctx context.Context, path, current, latestURL string, client *http.Client) error {
+	return CheckForUpdateWithClock(ctx, path, current, latestURL, client, clock.Real)
+}
+
+// CheckForUpdateWithClock is CheckForUpdate with the repository clock injected
+// for callers that must make lock expiry and cache freshness deterministic.
+func CheckForUpdateWithClock(
+	ctx context.Context,
+	path, current, latestURL string,
+	client *http.Client,
+	clk clock.Clock,
+) error {
+	if clk == nil {
+		clk = clock.Real
+	}
 	if _, ok := parseNoticeVersion(current); !ok {
 		return fmt.Errorf("current version %q is not vMAJOR.MINOR.PATCH[-prerelease]", current)
 	}
-	release, err := acquire(path + ".lock")
+	release, err := acquire(path+".lock", clk.Now())
 	if err != nil {
 		return err
 	}
@@ -87,7 +102,7 @@ func CheckForUpdate(ctx context.Context, path, current, latestURL string, client
 	}
 	defer release()
 
-	now := time.Now().UTC()
+	now := clk.Now().UTC()
 	recent, err := checkedRecently(path, current, now)
 	if err != nil {
 		return err
@@ -167,7 +182,7 @@ func checkedRecently(path, current string, now time.Time) (bool, error) {
 	return age >= 0 && age <= checkFreshFor, nil
 }
 
-func acquire(path string) (func(), error) {
+func acquire(path string, now time.Time) (func(), error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create update cache directory: %w", err)
 	}
@@ -190,7 +205,7 @@ func acquire(path string) (func(), error) {
 			}
 			return nil, fmt.Errorf("inspect update lock: %w", statErr)
 		}
-		if time.Since(info.ModTime()) <= lockStaleAfter {
+		if now.Sub(info.ModTime()) <= lockStaleAfter {
 			return nil, nil
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {

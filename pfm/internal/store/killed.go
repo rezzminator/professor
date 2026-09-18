@@ -65,12 +65,12 @@ func (s *Store) killedWrite(
 		return err
 	}
 
-	timer := time.NewTimer(busyRetryDelay)
+	timer := s.clockTimer(busyRetryDelay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-timer.C:
+	case <-timer.C():
 	}
 
 	err = write()

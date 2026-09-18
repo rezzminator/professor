@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
@@ -258,7 +258,7 @@ func buildSnapshot(
 		NowNS:                  environment.NowNS,
 		InitialQuery:           request.Query,
 		NoSky:                  request.NoSky,
-		CosmosSafe:             resolveCosmosSafe(request.Safe, os.Getenv("TERM_PROGRAM")),
+		CosmosSafe:             resolveCosmosSafe(request.Safe, (paths.OSEnv{}).Get("TERM_PROGRAM")),
 		Cosmos:                 cosmos,
 	}
 }
@@ -273,6 +273,7 @@ type refreshDependencies struct {
 	// caller and every existing stream test — reads as permanently active and
 	// holds the loop at fleetRefreshInterval, exactly as before the backoff.
 	activity *ui.ActivityClock
+	clock    clock.Clock
 }
 
 func streamFleetRefreshes(
@@ -404,7 +405,11 @@ func streamFleetRefreshesWith(
 	}
 
 	cadence := newRefreshCadence(dependencies.activity)
-	timer := time.NewTimer(cadence.interval)
+	refreshClock := dependencies.clock
+	if refreshClock == nil {
+		refreshClock = clock.Real
+	}
+	timer := refreshClock.NewTimer(cadence.interval)
 	defer timer.Stop()
 	// parked survives across iterations: once the cadence backs off past
 	// fleetRefreshParkThreshold, the loop stops doing real passes on every
@@ -430,7 +435,7 @@ func streamFleetRefreshesWith(
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
+		case <-timer.C():
 		}
 		// Rearm BEFORE the pass, never after it. The body below leaves through
 		// several `continue`s on transient errors, and a Reset parked at the
@@ -440,10 +445,10 @@ func streamFleetRefreshesWith(
 		next := cadence.next()
 		if parked && next >= fleetRefreshParkThreshold && !pendingRefresh {
 			timer.Reset(fleetRefreshParkPollInterval)
-			if request.ReadOnly || len(live.Codex) == 0 || time.Now().Before(nextCodexProbe) {
+			if request.ReadOnly || len(live.Codex) == 0 || refreshClock.Now().Before(nextCodexProbe) {
 				continue
 			}
-			nextCodexProbe = time.Now().Add(fleetRefreshCodexPollInterval)
+			nextCodexProbe = refreshClock.Now().Add(fleetRefreshCodexPollInterval)
 			probe := gather.Snapshot{Panes: live.Panes}
 			probe.Codex, err = gather.RefreshCodexHeldRollouts(
 				gather.NewProcFS(environment.Paths.ProcRoot), live.Codex, environment.Paths.Roots[pfmengine.Codex],

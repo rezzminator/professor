@@ -61,8 +61,20 @@ ratchet() {
   local id=$1 name=$2 cur=$3
   sort -u "$cur" -o "$cur"
   if [ "$MODE" = --measure ]; then
-    mkdir -p "$BASE"
-    if [ -f "$BASE/$name.txt" ]; then comm -12 "$BASE/$name.txt" "$cur" > "$T/measured"; mv "$T/measured" "$BASE/$name.txt"; else cp "$cur" "$BASE/$name.txt"; fi
+    if ! mkdir -p "$BASE"; then
+      say "$id" ERROR "could not create .arch directory for $name"
+      return
+    fi
+    if [ -f "$BASE/$name.txt" ]; then
+      if ! comm -12 "$BASE/$name.txt" "$cur" > "$T/measured" ||
+         ! mv "$T/measured" "$BASE/$name.txt"; then
+        say "$id" ERROR "could not update .arch/$name.txt"
+        return
+      fi
+    elif ! cp "$cur" "$BASE/$name.txt"; then
+      say "$id" ERROR "could not write .arch/$name.txt"
+      return
+    fi
     say "$id" MEASURE "$(wc -l < "$BASE/$name.txt" | tr -d ' ') entries -> .arch/$name.txt"; return
   fi
   [ -f "$BASE/$name.txt" ] || { say "$id" ERROR "baseline .arch/$name.txt missing — cannot tell new from old"; return; }
@@ -80,10 +92,20 @@ ratchet_counts() {
   local id=$1 name=$2 cur=$3 slack=${4:-0}
   sort -u "$cur" -o "$cur"
   if [ "$MODE" = --measure ]; then
-    mkdir -p "$BASE"
+    if ! mkdir -p "$BASE"; then
+      say "$id" ERROR "could not create .arch directory for $name"
+      return
+    fi
     if [ -f "$BASE/$name.txt" ]; then
-      awk 'FILENAME==ARGV[1] {base[$1]=$2; next} ($1 in base) {print $1" "($2<base[$1] ? $2 : base[$1])}' "$BASE/$name.txt" "$cur" | sort -u > "$T/measured"; mv "$T/measured" "$BASE/$name.txt"
-    else cp "$cur" "$BASE/$name.txt"; fi
+      if ! awk 'FILENAME==ARGV[1] {base[$1]=$2; next} ($1 in base) {print $1" "($2<base[$1] ? $2 : base[$1])}' "$BASE/$name.txt" "$cur" | sort -u > "$T/measured" ||
+         ! mv "$T/measured" "$BASE/$name.txt"; then
+        say "$id" ERROR "could not update .arch/$name.txt"
+        return
+      fi
+    elif ! cp "$cur" "$BASE/$name.txt"; then
+      say "$id" ERROR "could not write .arch/$name.txt"
+      return
+    fi
     say "$id" MEASURE "$(awk '{s+=$2} END {print s+0}' "$BASE/$name.txt") in $(wc -l < "$BASE/$name.txt" | tr -d ' ') keys -> .arch/$name.txt"; return
   fi
   [ -f "$BASE/$name.txt" ] || { say "$id" ERROR "baseline .arch/$name.txt missing — cannot tell new from old"; return; }
@@ -108,7 +130,28 @@ ratchet_counts C2-ceiling-test ceiling-test "$T/c2" "$CEIL_SLACK"
 grep '^cmd/pfm/' "$T/src.list" > "$T/cmd.list"
 n=$(xargs cat < "$T/cmd.list" | wc -l | tr -d ' ')
 if [ ! -s "$T/cmd.list" ]; then say C3-cmd-budget ERROR "no cmd/pfm sources listed — the enumerator did not run"
-elif [ "$MODE" = --measure ]; then mkdir -p "$BASE"; [ -f "$BASE/cmd-budget.txt" ] && [ "$(cat "$BASE/cmd-budget.txt")" -lt "$n" ] && n=$(cat "$BASE/cmd-budget.txt"); echo "$n" > "$BASE/cmd-budget.txt"; say C3-cmd-budget MEASURE "budget $n lines -> .arch/cmd-budget.txt"
+elif [ "$MODE" = --measure ]; then
+  if ! mkdir -p "$BASE"; then
+    say C3-cmd-budget ERROR "could not create .arch directory for cmd-budget"
+  else
+    budget=""
+    budget_ok=1
+    if [ -f "$BASE/cmd-budget.txt" ]; then
+      if ! budget=$(cat "$BASE/cmd-budget.txt"); then
+        say C3-cmd-budget ERROR "could not read .arch/cmd-budget.txt"
+        budget_ok=0
+      elif [ "$budget" -lt "$n" ]; then
+        n=$budget
+      fi
+    fi
+    if [ "$budget_ok" -eq 1 ]; then
+      if ! printf '%s\n' "$n" > "$BASE/cmd-budget.txt"; then
+        say C3-cmd-budget ERROR "could not write .arch/cmd-budget.txt"
+      else
+        say C3-cmd-budget MEASURE "budget $n lines -> .arch/cmd-budget.txt"
+      fi
+    fi
+  fi
 elif [ ! -f "$BASE/cmd-budget.txt" ]; then say C3-cmd-budget ERROR "baseline .arch/cmd-budget.txt missing"
 elif [ "$n" -gt "$(cat "$BASE/cmd-budget.txt")" ]; then say C3-cmd-budget FAIL "cmd/pfm = $n > budget $(cat "$BASE/cmd-budget.txt")"
 else say C3-cmd-budget PASS "cmd/pfm = $n <= budget $(cat "$BASE/cmd-budget.txt")"; fi
@@ -259,8 +302,10 @@ else say C21-test-jail ERROR "grep could not read tests"; fi
 # door the unit-test-law wave (docs/dev/trains/testing-foundation/waves/
 # 3-unit-law/spec.md § Three seams item 4) has not seamed yet; the baseline
 # only shrinks as later batches migrate a package onto clock.Clock,
-# deps.Runner, tmux.Fake or paths.Env.
-grep -vE '^internal/(clock|deps|paths|tmux)/' "$T/src.list" > "$T/noseam.list"
+# deps.Runner, tmux.Fake or paths.Env. internal/mockengine + cmd/mock-engine
+# are the fifth seam: the mock IS a host (exec, env, files, clock) — the thing
+# the other four fake — so its doors are its purpose, not a leak to migrate.
+grep -vE '^(internal/(clock|deps|paths|tmux|mockengine)|cmd/mock-engine)/' "$T/src.list" > "$T/noseam.list"
 if g "$T/raw" "$T/noseam.list" -nE 'os\.Getenv|LookupEnv|UserHomeDir|user\.Current|exec\.Command|exec\.CommandContext|exec\.LookPath|time\.Now|time\.Sleep|time\.After|time\.NewTimer|time\.NewTicker|time\.Tick|net\.Dial|net\.Listen'; then
   count_by_file "$T/raw" > "$T/c22"; ratchet_counts C22-host-doors host-doors "$T/c22"
 else say C22-host-doors ERROR "grep could not read sources"; fi

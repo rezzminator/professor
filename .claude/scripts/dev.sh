@@ -32,7 +32,7 @@ proj_dir() {
 # must not fail on a missing node, and must still fail on a missing go.
 proj_tools() {
   case "$1" in
-    templates) echo "node" ;;
+    templates) echo "node go" ;;
     pfm)       echo "go" ;;
     *) return 1 ;;
   esac
@@ -229,6 +229,25 @@ act_templates() { # the shipped product: mechanical gates, no build
         esac
       fi
 
+      head_ "templates — generate the engine mirrors"
+      # The mirrors (AGENTS.md, .codex/**, .opencode/**) are untracked: a fresh
+      # clone holds none, so verify generates them from the Claude sources
+      # before any gate reads them. Current mirrors are left alone (the fence
+      # mounts the tree read-only and CI generates on the host first); the
+      # tree's own compiler runs, never a host pfm binary (a stale host build
+      # rewrites what it does not understand).
+      if ! need_tool go templates || ! need_tool node templates; then
+        fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
+      elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex check "$REPO_ROOT") >/dev/null 2>&1 \
+        && node .claude/scripts/build-opencode.mjs check >/dev/null 2>&1; then
+        ok "engine mirrors current — nothing generated"
+      elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex build "$REPO_ROOT") \
+        && node .claude/scripts/build-opencode.mjs generate; then
+        ok "engine mirrors generated from the Claude sources"
+      else
+        fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
+      fi
+
       head_ "templates — codex generated-marker claim"
       # The templates dir's shipped JS compiler and this repo's `pfm codex build`
       # write the same $HOME/.codex outputs on adopter hosts. A copy that stops
@@ -255,16 +274,17 @@ act_templates() { # the shipped product: mechanical gates, no build
         fail_step "token pricing FAILED — a published model id resolves to the wrong rate, or the PRICING table could not be read (see output)"
       fi
 
-      run "OpenCode installed symlink layout" -- node scripts/test-opencode-generation.mjs
-
-      head_ "templates — opencode mirror"
-      # The OpenCode mirror must be current AND valid: check re-derives every
-      # output from the Claude sources; doctor additionally parses each artifact.
-      if need_tool node templates && node .claude/scripts/build-opencode.mjs check \
-        && node .claude/scripts/build-opencode.mjs doctor | tail -1; then
+      head_ "templates — native opencode mirror"
+      # Build the source-under-test inside the fence; verification must never
+      # depend on or install a host binary. The ignored artifact also gives this
+      # repo's Stop hook a current compiler while develop remains uninstalled.
+      local opencode_bin="/pfm-timing/pfm-dev-bin"
+      if need_tool go templates && go -C pfm build -o "$opencode_bin" ./cmd/pfm \
+        && "$opencode_bin" opencode check "$REPO_ROOT" --home "/pfm-timing/opencode-verify-home" \
+        && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "/pfm-timing/opencode-verify-home"; then
         ok "opencode mirror current and parseable"
       else
-        fail_step "opencode mirror FAILED — run: node .claude/scripts/build-opencode.mjs generate"
+        fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
       fi
 
       head_ "templates — self-hosted manifest"
@@ -290,7 +310,7 @@ act_pfm() {
     typecheck) run "pfm: go vet" -- go -C "$d" vet ./... ;;
     verify)
       run "pfm: go vet" -- go -C "$d" vet ./...
-      # Formatting and lint through the pinned golangci-lint (infra/tools.env):
+      # Formatting and lint through the pinned golangci-lint (infra/fence/tools.env):
       # the Makefile names TOOLCHAIN-MISSING when the tool is absent — `make
       # tools` on the host; the fence image bakes it in. lint-new judges only
       # lines changed since origin/develop; `make lint` is the full backlog.
@@ -352,7 +372,7 @@ dispatch() { # dispatch <project> <action>
 }
 
 # ─── iso — the container fence ───────────────────────────────────────────────
-# Runs a command inside the pfm-dev container (infra/docker-compose.yml) with
+# Runs a command inside the pfm-dev container (infra/fence/docker-compose.yml) with
 # THIS checkout — the worktree this script belongs to — mounted at /work: a
 # fresh machine per run (own HOME, own tmux, no published ports). Files are
 # edited on the host; the container only builds and tests.
@@ -371,16 +391,16 @@ cmd_iso() { # cmd_iso <action> [project]
     fail_step "iso: TOOLCHAIN-MISSING — the docker daemon is not reachable ('docker info' failed); start Docker and retry"
     exit 1
   fi
-  local compose="$REPO_ROOT/infra/docker-compose.yml"
+  local compose="$REPO_ROOT/infra/fence/docker-compose.yml"
   if [[ ! -f "$compose" ]]; then
     fail_step "iso: TOOLCHAIN-MISSING — $compose not found"; exit 1
   fi
 
   # The fence mount contract (PFM_DEV_WORKTREE / PFM_DEV_GIT_COMMON /
-  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence-env.sh — the demo and
-  # readme-gif fences source the same file, so the three never drift.
+  # PFM_DEV_GIT_DIR_REL) is resolved once, in infra/fence/fence-env.sh — the demo
+  # fence sources the same file, so the two never drift.
   local git_common
-  ROOT="$REPO_ROOT" FENCE_CALLER="iso" . "$REPO_ROOT/infra/fence-env.sh"
+  ROOT="$REPO_ROOT" FENCE_CALLER="iso" . "$REPO_ROOT/infra/fence/fence-env.sh"
   git_common="$PFM_DEV_GIT_COMMON"
   # The leak denylist is untracked and lives only in the main checkout, so a
   # linked worktree's mount never carries it; hand it in read-only (LEAK_TERMS

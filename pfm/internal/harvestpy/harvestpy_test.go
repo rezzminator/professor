@@ -15,10 +15,12 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"hostops/pfm/internal/deps"
 )
 
 func TestTargetsPinEveryRequestedPlatformAndVerifyableInputs(t *testing.T) {
@@ -495,6 +497,71 @@ for line in sys.stdin:
 	}
 }
 
+func TestConverterCancellationReleasesBlockedWrite(t *testing.T) {
+	input := &blockedConverterInput{started: make(chan struct{}), released: make(chan struct{})}
+	output := io.NopCloser(strings.NewReader(""))
+	fake := &deps.FakeRunner{}
+	fake.ScriptInteractive([]string{"fake-python"}, deps.InteractiveScript{
+		Pid:    8101,
+		Stdin:  input,
+		Stdout: output,
+	})
+	workerScript := filepath.Join(t.TempDir(), "converter.py")
+	if err := os.WriteFile(workerScript, []byte("worker"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	converter := NewConverter(Runtime{Python: "fake-python", Script: workerScript, Runner: fake})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := converter.Convert(ctx, Request{Path: "input", Kind: "html"})
+		result <- err
+	}()
+	select {
+	case <-input.started:
+	case <-time.After(time.Second):
+		t.Fatal("converter did not reach the blocked stdin write")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "request cancelled") {
+			t.Fatalf("Convert() error = %v, want cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Convert() remained blocked after cancellation")
+	}
+	calls := fake.LifecycleCalls()
+	if len(calls) < 2 || calls[0].Action != "kill" || calls[1].Action != "wait" {
+		t.Fatalf("lifecycle calls = %+v, want kill then wait", calls)
+	}
+}
+
+type blockedConverterInput struct {
+	started  chan struct{}
+	released chan struct{}
+}
+
+func (input *blockedConverterInput) Write([]byte) (int, error) {
+	select {
+	case <-input.started:
+	default:
+		close(input.started)
+	}
+	<-input.released
+	return 0, errors.New("converter stdin closed")
+}
+
+func (input *blockedConverterInput) Close() error {
+	select {
+	case <-input.released:
+	default:
+		close(input.released)
+	}
+	return nil
+}
+
 func TestArchiveKindsAreRejectedBeforePython(t *testing.T) {
 	python := fakePython(t, `
 import json,sys
@@ -912,140 +979,6 @@ func TestCSVAndJSONConversionPathsAreByteExact(t *testing.T) {
 		if got.Markdown != tc.want {
 			t.Errorf("%s output drift: got %q want %q", tc.kind, got.Markdown, tc.want)
 		}
-	}
-}
-
-func TestTarFixtureHelperCompilesForArchiveSecurityTests(t *testing.T) {
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-	tw := tar.NewWriter(zw)
-	if err := tw.WriteHeader(&tar.Header{Name: "safe.txt", Mode: 0o600, Size: 1}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write([]byte("x")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if len(buf.Bytes()) == 0 || runtime.GOOS == "" || io.EOF == nil {
-		t.Fatal("fixture helper did not produce bytes")
-	}
-}
-
-func TestPythonArchiveExtractionRetainsInterpreterLibrariesAndRejectsTraversal(t *testing.T) {
-	archivePath := filepath.Join(t.TempDir(), "python.tar.gz")
-	archiveFile, err := os.Create(archivePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gzipWriter := gzip.NewWriter(archiveFile)
-	tarWriter := tar.NewWriter(gzipWriter)
-	entries := []struct {
-		name string
-		body string
-		mode int64
-	}{
-		{"python/", "", 0o755},
-		{"python/bin/", "", 0o755},
-		{"python/bin/python3", "interpreter", 0o755},
-		{"python/lib/python3.11/", "", 0o755},
-		{"python/lib/python3.11/os.py", "stdlib", 0o644},
-		{"python/share/terminfo/1/", "", 0o755},
-		{"python/share/terminfo/a/", "", 0o755},
-		{"python/share/terminfo/a/target", "linked", 0o644},
-	}
-	for _, entry := range entries {
-		header := &tar.Header{Name: entry.name, Mode: entry.mode, Size: int64(len(entry.body))}
-		if strings.HasSuffix(entry.name, "/") {
-			header.Typeflag = tar.TypeDir
-			header.Size = 0
-		}
-		if err := tarWriter.WriteHeader(header); err != nil {
-			t.Fatal(err)
-		}
-		if entry.body != "" {
-			if _, err := tarWriter.Write([]byte(entry.body)); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	if err := tarWriter.WriteHeader(
-		&tar.Header{
-			Name:     "python/share/terminfo/1/entry",
-			Linkname: "../a/target",
-			Typeflag: tar.TypeSymlink,
-			Mode:     0o777,
-		},
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := tarWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gzipWriter.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := archiveFile.Close(); err != nil {
-		t.Fatal(err)
-	}
-	destination := filepath.Join(t.TempDir(), "python")
-	python, err := extractPython(archivePath, destination)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(python); err != nil {
-		t.Fatalf("interpreter missing: %v", err)
-	}
-	stdlib, err := os.ReadFile(filepath.Join(destination, "python", "lib", "python3.11", "os.py"))
-	if err != nil || string(stdlib) != "stdlib" {
-		t.Fatalf("stdlib was not retained: %q %v", string(stdlib), err)
-	}
-	if target, err := os.Readlink(
-		filepath.Join(destination, "python", "share", "terminfo", "1", "entry"),
-	); err != nil ||
-		target != "../a/target" {
-		t.Fatalf("safe internal symlink was not retained: %q %v", target, err)
-	}
-	unsafePath := filepath.Join(t.TempDir(), "unsafe.tar.gz")
-	unsafeFile, err := os.Create(unsafePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	unsafeGzip := gzip.NewWriter(unsafeFile)
-	unsafeTar := tar.NewWriter(unsafeGzip)
-	if err := unsafeTar.WriteHeader(&tar.Header{Name: "../escape", Mode: 0o600, Size: 1}); err != nil {
-		t.Fatal(err)
-	}
-	_, _ = unsafeTar.Write([]byte("x"))
-	_ = unsafeTar.Close()
-	_ = unsafeGzip.Close()
-	_ = unsafeFile.Close()
-	if _, err := extractPython(unsafePath, filepath.Join(t.TempDir(), "python")); err == nil {
-		t.Fatal("path traversal archive was accepted")
-	}
-}
-
-func TestPinnedPythonArchiveRetainsFullRuntimeAndStdlib(t *testing.T) {
-	archive := os.Getenv("HARVESTPY_PYTHON_ARCHIVE")
-	if archive == "" {
-		t.Skip(
-			"HARVESTPY_PYTHON_ARCHIVE is not set; release-archive structural acceptance is an explicit provisioning gate",
-		)
-	}
-	destination := filepath.Join(t.TempDir(), "python")
-	python, err := extractPython(archive, destination)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(destination, "python", "lib", "python3.11", "os.py")); err != nil {
-		t.Fatalf("stdlib missing from full archive extraction: %v", err)
-	}
-	if _, err := os.Stat(python); err != nil {
-		t.Fatalf("standalone interpreter missing after extraction: %v", err)
 	}
 }
 

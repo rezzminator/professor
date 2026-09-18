@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"runtime/debug"
 	"strconv"
 
 	"hostops/pfm/internal/cli"
@@ -50,13 +49,11 @@ const (
 
 var version = config.DevelopmentVersion
 
-// topLevelSubcommands names every argv[0] case for both the reachability test
-// and installer.SetImplementedSubcommands, so the installer's
-// unknown-pfm-hook predicate (issue #24 F1) can never drift from what this
-// binary actually implements.
+// topLevelSubcommands lists every argv[0] case for reachability and installer parity.
 var topLevelSubcommands = []string{
 	versionCommand, "ls", chatCommand, "harvest", headlessCommand, indexCommand, doctorCommand,
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
+	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
 }
@@ -162,6 +159,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runMCP(args[1:], stdout, stderr, runtime)
 	case pfmengine.MustLookup(pfmengine.Codex).LongName:
 		return runCodex(args[1:], stdout, stderr, runtime)
+	case pfmengine.MustLookup(pfmengine.OpenCode).LongName:
+		return runOpenCode(args[1:], stdout, stderr, runtime)
 	case "internal":
 		return runInternal(args[1:], stdout, stderr, runtime)
 	case "help", "-h", "--help":
@@ -171,6 +170,38 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		fmt.Fprintf(stderr, "pfm: unknown command %q\n", args[0])
 		printUsage(stderr)
 		return 2
+	}
+}
+
+func printUsage(w io.Writer) {
+	for _, line := range []string{
+		"usage: pfm [--config PATH] <command> [options]", "", "operator commands:",
+		"  ls        list or pick fleet chats",
+		"  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end",
+		"  headless  run Claude or Codex through one isolated process interface",
+		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path",
+		"  index     refresh the transcript index",
+		"  whoami    print this chat's own tmux session name",
+		"  issues    list servicedesk complaints filed through issue_servicedesk",
+		"  reap      classify the socket graveyard; --apply reclaims it",
+		"  archive   move killed chats and old subagent transcripts out of sight, reversibly",
+		"  heal      report or repair wedged Codex history projections",
+		"  install   wire or remove the self-contained host integration",
+		"  uninstall remove the self-contained host integration",
+		"  update    update the binary; check, adopt, pin, ignore, or drop project template baselines",
+		"  init      scaffold project templates once and pin their baselines",
+		"  config    initialize, inspect, or validate machine configuration",
+		"  doctor    inspect fleet database and jail health",
+		"  log       read this home's activity log: --since --level --chat --cmd --follow",
+		"  version   print the pfm version", "", "wiring commands:",
+		"  name-sync converge live chat window names",
+		"  statusline render the native Claude status line",
+		"  usage-hook the fail-open usage-limit prompt hook",
+		"  mcp       list, configure, or serve registered MCP servers (stdio or loopback HTTP)",
+		"  codex     compile or check the Codex project mirror",
+		"  opencode  compile, check, or inspect the OpenCode project mirror",
+	} {
+		fmt.Fprintln(w, line)
 	}
 }
 
@@ -282,52 +313,8 @@ func runVersion(args []string, stdout, stderr io.Writer) int {
 		flags.Usage()
 		return 2
 	}
-	fmt.Fprintf(stdout, "pfm %s\n", displayVersion())
+	fmt.Fprintf(stdout, "pfm %s\n", config.DisplayVersion(version))
 	return 0
-}
-
-// displayVersion resolves the reported version. A release build stamps
-// `version` via ldflags (`-X main.version=...`, see Makefile `host-install`);
-// an unstamped build — `go build ./cmd/pfm` with no ldflags — leaves it at
-// "dev", which alone tells nobody which commit they are running. Go itself
-// already answers that: since 1.18 the toolchain embeds VCS info in every
-// build's own binary, ldflags or not, so falling back to it turns an
-// unstamped "dev" into a build the operator can still identify.
-func displayVersion() string {
-	if version != config.DevelopmentVersion {
-		return version
-	}
-	info, ok := debug.ReadBuildInfo()
-	if !ok {
-		return version
-	}
-	return resolveDevVersion(info.Settings)
-}
-
-// resolveDevVersion is the pure half of displayVersion, split out so a test
-// can drive it with fabricated settings instead of needing a real
-// VCS-stamped binary (go test's own binary carries none — see main_test.go).
-func resolveDevVersion(settings []debug.BuildSetting) string {
-	var revision string
-	var modified bool
-	for _, setting := range settings {
-		switch setting.Key {
-		case "vcs.revision":
-			revision = setting.Value
-		case "vcs.modified":
-			modified = setting.Value == "true"
-		}
-	}
-	if revision == "" {
-		return config.DevelopmentVersion
-	}
-	if len(revision) > 12 {
-		revision = revision[:12]
-	}
-	if modified {
-		return fmt.Sprintf("dev (%s, modified)", revision)
-	}
-	return fmt.Sprintf("dev (%s)", revision)
 }
 
 func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (exitCode int) {
@@ -528,7 +515,7 @@ func runInternal(
 			stderr,
 			"pfm internal: unknown subcommand %q — registered by a different pfm version than this binary (%s); run `pfm install --yes` with the binary you intend to keep\n",
 			args[0],
-			displayVersion(),
+			config.DisplayVersion(version),
 		)
 		return 1
 	}
@@ -582,35 +569,4 @@ func runInternal(
 		return 1
 	}
 	return 0
-}
-
-func printUsage(w io.Writer) {
-	fmt.Fprintln(w, "usage: pfm [--config PATH] <command> [options]")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "operator commands:")
-	fmt.Fprintln(w, "  ls        list or pick fleet chats")
-	fmt.Fprintln(w, "  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end")
-	fmt.Fprintln(w, "  headless  run Claude or Codex through one isolated process interface")
-	fmt.Fprintln(w, "  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path")
-	fmt.Fprintln(w, "  index     refresh the transcript index")
-	fmt.Fprintln(w, "  whoami    print this chat's own tmux session name")
-	fmt.Fprintln(w, "  issues    list servicedesk complaints filed through issue_servicedesk")
-	fmt.Fprintln(w, "  reap      classify the socket graveyard; --apply reclaims it")
-	fmt.Fprintln(w, "  archive   move killed chats and old subagent transcripts out of sight, reversibly")
-	fmt.Fprintln(w, "  heal      report or repair wedged Codex history projections")
-	fmt.Fprintln(w, "  install   wire or remove the self-contained host integration")
-	fmt.Fprintln(w, "  uninstall remove the self-contained host integration")
-	fmt.Fprintln(w, "  update    update the binary; check, adopt, pin, ignore, or drop project template baselines")
-	fmt.Fprintln(w, "  init      scaffold project templates once and pin their baselines")
-	fmt.Fprintln(w, "  config    initialize, inspect, or validate machine configuration")
-	fmt.Fprintln(w, "  doctor    inspect fleet database and jail health")
-	fmt.Fprintln(w, "  log       read this home's activity log: --since --level --chat --cmd --follow")
-	fmt.Fprintln(w, "  version   print the pfm version")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "wiring commands:")
-	fmt.Fprintln(w, "  name-sync converge live chat window names")
-	fmt.Fprintln(w, "  statusline render the native Claude status line")
-	fmt.Fprintln(w, "  usage-hook the fail-open usage-limit prompt hook")
-	fmt.Fprintln(w, "  mcp       list, configure, or serve registered MCP servers (stdio or loopback HTTP)")
-	fmt.Fprintln(w, "  codex     compile or check the Codex project mirror")
 }

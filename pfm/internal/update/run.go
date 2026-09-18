@@ -1,18 +1,14 @@
 package update
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
@@ -42,115 +38,6 @@ var (
 	updateRollbackInstall = applyUpdateInstall
 	updateRollbackDoctor  = runUpdateDoctor
 )
-
-// StubBaselineDoctorForTest replaces the pre-update subprocess doctor with a
-// clean verdict and returns a restore function. It exists for cmd/pfm's two
-// retained binary-contract tests: os.Executable there is the Go test binary,
-// not a runnable pfm binary.
-func StubBaselineDoctorForTest() func() {
-	previous := updateBaselineDoctor
-	updateBaselineDoctor = func(
-		context.Context,
-		config.Runtime,
-		bool,
-		io.Writer,
-		io.Writer,
-	) (doctorOutcome, error) {
-		return doctorOutcome{}, nil
-	}
-	return func() {
-		updateBaselineDoctor = previous
-	}
-}
-
-// doctorOutcome carries a doctor's exit/tallies and captured output for diffs.
-type doctorOutcome struct {
-	Exit     int
-	Warnings int
-	Failures int
-	Output   string
-}
-
-// doctorExitError preserves a doctor's nonzero verdict separately from spawn failure.
-type doctorExitError struct {
-	code   int
-	output string
-}
-
-func (e *doctorExitError) Error() string {
-	if strings.TrimSpace(e.output) != "" {
-		return fmt.Sprintf("doctor exited %d: %s", e.code, strings.TrimSpace(lastLine(e.output)))
-	}
-	return fmt.Sprintf("doctor exited %d", e.code)
-}
-
-func lastLine(text string) string {
-	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
-	return lines[len(lines)-1]
-}
-
-var (
-	doctorTallyPattern = regexp.MustCompile(`(?m)^doctor: (warnings|failures)=(\d+)$`)
-	doctorHexPattern   = regexp.MustCompile(`(?i)\b[0-9a-f]{8,}\b`)
-	doctorDigitPattern = regexp.MustCompile(`\d+`)
-)
-
-// parseDoctorTally reads doctor summary rows; an omitted tier is zero.
-func parseDoctorTally(output string) (warnings, failures int) {
-	for _, match := range doctorTallyPattern.FindAllStringSubmatch(output, -1) {
-		count, err := strconv.Atoi(match[2])
-		if err != nil {
-			continue
-		}
-		if match[1] == "warnings" {
-			warnings = count
-		} else {
-			failures = count
-		}
-	}
-	return warnings, failures
-}
-
-// normalizeDoctorRow masks volatile numbers and long hex values before diffing.
-func normalizeDoctorRow(line string) string {
-	masked := doctorHexPattern.ReplaceAllString(line, "#")
-	return doctorDigitPattern.ReplaceAllString(masked, "#")
-}
-
-func isDoctorSummaryLine(line string) bool {
-	return strings.HasPrefix(line, "doctor: warnings=") ||
-		strings.HasPrefix(line, "doctor: failures=") ||
-		line == "doctor: clean"
-}
-
-// diffNewDoctorWarningRows returns candidate rows absent from the baseline.
-func diffNewDoctorWarningRows(baselineOutput, candidateOutput string) []string {
-	baselineRows := make(map[string]bool)
-	for _, line := range strings.Split(baselineOutput, "\n") {
-		if line == "" {
-			continue
-		}
-		baselineRows[normalizeDoctorRow(line)] = true
-	}
-	var newRows []string
-	for _, line := range strings.Split(candidateOutput, "\n") {
-		if line == "" || isDoctorSummaryLine(line) {
-			continue
-		}
-		if baselineRows[normalizeDoctorRow(line)] {
-			continue
-		}
-		newRows = append(newRows, line)
-	}
-	return newRows
-}
-
-// rollbackDoctorPredatesFailureTiers recognizes old doctors that exit 1 on warnings.
-func rollbackDoctorPredatesFailureTiers(output string) bool {
-	return !strings.Contains(output, "doctor: failures=") &&
-		!strings.Contains(output, "doctor: warnings=") &&
-		!strings.Contains(output, "doctor: clean")
-}
 
 // Run replaces the installed binary with a reproducible candidate, doctors it, and rolls back an untrusted verdict.
 func Run(args []string, stdout, stderr io.Writer, runtimes ...config.Runtime) int {
@@ -696,26 +583,35 @@ func preferredUpdateSourceRepo(home, repo string) string {
 }
 
 func updateGitRun(ctx context.Context, repo string, args ...string) error {
-	command := exec.CommandContext(ctx, deps.Executable("git"), args...)
-	command.Dir = repo
-	command.Env = os.Environ()
-	var output bytes.Buffer
-	command.Stdout = &output
-	command.Stderr = &output
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(output.String()))
+	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo})
+	if err != nil {
+		return fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf(
+			"git %s: exited %d: %s",
+			strings.Join(args, " "),
+			result.ExitCode,
+			strings.TrimSpace(string(result.Stdout)+string(result.Stderr)),
+		)
 	}
 	return nil
 }
 
 func updateGitOutput(ctx context.Context, repo string, args ...string) (string, error) {
-	command := exec.CommandContext(ctx, deps.Executable("git"), args...)
-	command.Dir = repo
-	output, err := command.CombinedOutput()
+	result, err := currentUpdateRunner().Run(ctx, append([]string{"git"}, args...), deps.RunOptions{Dir: repo})
 	if err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return string(output), nil
+	if result.ExitCode != 0 {
+		return "", fmt.Errorf(
+			"git %s: exited %d: %s",
+			strings.Join(args, " "),
+			result.ExitCode,
+			strings.TrimSpace(string(result.Stdout)+string(result.Stderr)),
+		)
+	}
+	return string(result.Stdout), nil
 }
 
 func buildUpdateCandidate(ctx context.Context, repo, version, output string) error {
@@ -724,19 +620,19 @@ func buildUpdateCandidate(ctx context.Context, repo, version, output string) err
 		moduleRoot = filepath.Join(repo, "pfm")
 	}
 	// The staged worktree needs explicit -buildvcs=false; GOFLAGS is cleared.
-	command := exec.CommandContext(
-		ctx,
-		deps.Executable("go"),
-		"-C", moduleRoot,
-		"build", "-trimpath", "-buildvcs=false", "-ldflags", "-X main.version="+version,
-		"-o", output,
-		"./cmd/pfm",
-	)
-	command.Env = envWithEmptyGOFLAGS()
-	command.Dir = repo
-	outputBytes, err := command.CombinedOutput()
+	result, err := currentUpdateRunner().Run(ctx, []string{
+		"go", "-C", moduleRoot, "build", "-trimpath", "-buildvcs=false", "-ldflags", "-X main.version=" + version,
+		"-o", output, "./cmd/pfm",
+	}, deps.RunOptions{Dir: repo, Env: envWithEmptyGOFLAGS()})
 	if err != nil {
-		return fmt.Errorf("go build: %w: %s", err, strings.TrimSpace(string(outputBytes)))
+		return fmt.Errorf("go build: %w", err)
+	}
+	if result.ExitCode != 0 {
+		return fmt.Errorf(
+			"go build: exited %d: %s",
+			result.ExitCode,
+			strings.TrimSpace(string(result.Stdout)+string(result.Stderr)),
+		)
 	}
 	return nil
 }
@@ -872,52 +768,4 @@ func runUpdateBaselineDoctor(
 		return doctorOutcome{}, fmt.Errorf("resolve current binary for baseline doctor: %w", err)
 	}
 	return runUpdateDoctor(ctx, self, runtime, runtime.Config.Path, skipHarvest, stdout, stderr)
-}
-
-func runUpdateCandidateCommand(
-	ctx context.Context,
-	candidate string,
-	configPath string,
-	workingDir string,
-	sourceRepo string,
-	stdout, stderr io.Writer,
-	commandName string,
-	commandArgs ...string,
-) error {
-	args := make([]string, 0, len(commandArgs)+3)
-	if configPath != "" {
-		args = append(args, "--config", configPath)
-	}
-	args = append(args, commandName)
-	args = append(args, commandArgs...)
-	command := exec.CommandContext(ctx, candidate, args...)
-	command.Dir = workingDir
-	if sourceRepo != "" {
-		command.Env = updateSourceRepoEnv(sourceRepo)
-	}
-	command.Stderr = stderr
-	var captured *bytes.Buffer
-	if commandName == doctorCommand {
-		// Captured AND still shown live: the operator reads the rows as they
-		// print, and runUpdateDoctor reads them back afterward to classify the
-		// exit and diff against the baseline.
-		captured = &bytes.Buffer{}
-		command.Stdout = io.MultiWriter(stdout, captured)
-	} else {
-		command.Stdout = stdout
-	}
-	if err := command.Run(); err != nil {
-		if commandName == doctorCommand {
-			var exitErr *exec.ExitError
-			if errors.As(err, &exitErr) {
-				return &doctorExitError{code: exitErr.ExitCode(), output: captured.String()}
-			}
-		}
-		return fmt.Errorf("target candidate %s: %w", commandName, err)
-	}
-	return nil
-}
-
-func updateSourceRepoEnv(sourceRepo string) []string {
-	return deps.EnvironmentWith("PFM_SOURCE_REPO", sourceRepo)
 }

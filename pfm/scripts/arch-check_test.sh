@@ -11,7 +11,7 @@
 set -uo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-SUT="$ROOT/scripts/arch-check.sh"
+SUT="${SUT:-$ROOT/scripts/arch-check.sh}"
 T="$(mktemp -d "${TMPDIR:-/tmp}/pfm-arch-check-test.XXXXXX")"
 cleanup() { rm -rf -- "$T"; }
 trap cleanup EXIT
@@ -38,6 +38,10 @@ fixture() {
 # the fixture directory and lists no files at all.
 c23_line() {
   env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$1" bash "$SUT" </dev/null 2>&1 | grep 'C23-bare-log'
+}
+
+c23_measure() {
+  env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$1" bash "$SUT" --measure
 }
 
 # ---- 1: a bare log.Printf outside obs/cmd is counted, and a missing baseline
@@ -90,6 +94,47 @@ if fixture "$REPO2"; then
   fi
 else
   bad "C23: could not build the second git fixture"
+fi
+
+# ---- 5: a baseline write failure is an ERROR and a nonzero exit ------------
+
+REPO3="$T/measure-write-failure"
+if fixture "$REPO3"; then
+  # Override cp for only the bare-log destination. The pre-fix measure path
+  # ignored this failure and incorrectly reported MEASURE with exit 0.
+  mkdir -p "$REPO3/bin"
+  printf '%s\n' '#!/usr/bin/env bash' 'case "${!#}" in' '  */bare-log.txt) exit 7 ;;' 'esac' 'exec /usr/bin/cp "$@"' > "$REPO3/bin/cp"
+  chmod +x "$REPO3/bin/cp"
+  log="$REPO3/measure.log"
+  if PATH="$REPO3/bin:$PATH" c23_measure "$REPO3" >"$log" 2>&1; then measure_rc=0; else measure_rc=$?; fi
+  line=$(grep 'C23-bare-log' "$log" || true)
+  if [ "$measure_rc" -ne 0 ] && [[ "$line" == *ERROR* ]]; then
+    ok "C23: a baseline write failure reports ERROR and exits nonzero"
+  else
+    bad "C23: expected a nonzero ERROR for a baseline write failure" "rc=$measure_rc" "$line"
+  fi
+else
+  bad "C23: could not build the measure-write-failure fixture"
+fi
+
+# ---- 6: a baseline replacement failure is also an ERROR --------------------
+
+REPO4="$T/measure-mv-failure"
+if fixture "$REPO4"; then
+  printf 'internal/loud/loud.go 1\n' > "$REPO4/.arch/bare-log.txt"
+  mkdir -p "$REPO4/bin"
+  printf '%s\n' '#!/usr/bin/env bash' 'case "${!#}" in' '  */bare-log.txt) exit 7 ;;' 'esac' 'exec /usr/bin/mv "$@"' > "$REPO4/bin/mv"
+  chmod +x "$REPO4/bin/mv"
+  log="$REPO4/measure.log"
+  if PATH="$REPO4/bin:$PATH" env -u PFM_DEV_REPO_GIT_DIR -u PFM_DEV_REPO_WORK_TREE PFM="$REPO4" bash "$SUT" --measure >"$log" 2>&1; then measure_rc=0; else measure_rc=$?; fi
+  line=$(grep 'C23-bare-log' "$log" || true)
+  if [ "$measure_rc" -ne 0 ] && [[ "$line" == *ERROR* ]]; then
+    ok "C23: a baseline replacement failure reports ERROR and exits nonzero"
+  else
+    bad "C23: expected a nonzero ERROR for a baseline replacement failure" "rc=$measure_rc" "$line"
+  fi
+else
+  bad "C23: could not build the measure-mv-failure fixture"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

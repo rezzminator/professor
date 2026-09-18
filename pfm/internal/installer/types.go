@@ -5,12 +5,12 @@ package installer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"os/exec"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/harvestpy"
@@ -87,6 +87,8 @@ type Options struct {
 	CodexHomes []string
 	// CodexBinary enables native hook trust registration for command callers.
 	CodexBinary string
+	Clock       clock.Clock
+	Env         paths.Env
 	// SourceRepo is the clone whose templates and binary are being installed.
 	// Empty preserves an existing marker when install is invoked elsewhere.
 	SourceRepo string
@@ -97,12 +99,20 @@ type Options struct {
 	Sleep  func(time.Duration)
 	Stdout io.Writer
 	Runner CommandRunner
+	// ProcessRunner owns installer commands whose stdout/stderr and exit code
+	// are part of the result (for example rumdl and uv). Runner remains the
+	// compatibility seam for simple command/status probes.
+	ProcessRunner deps.Runner
 
 	MCPEnabled    map[string]bool
 	MCPPort       int
 	MCPConfigPath string
-	ClaudeBinary  string
-	CodexYolo     map[int]bool
+	// OpenCodeConfigPath is the machine-scope JSONC registry OpenCode reads.
+	// Command callers always resolve it from the effective home; direct legacy
+	// callers may leave it empty to opt out of OpenCode wiring.
+	OpenCodeConfigPath string
+	ClaudeBinary       string
+	CodexYolo          map[int]bool
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches
@@ -168,21 +178,74 @@ type Report struct {
 
 type execCommandRunner struct{}
 
+type commandExitError struct {
+	name string
+	code int
+	text string
+}
+
+func (err commandExitError) Error() string {
+	return fmt.Sprintf("%s exited %d: %s", err.name, err.code, err.text)
+}
+
+func (err commandExitError) ExitCode() int { return err.code }
+
+func (installer *engine) env() paths.Env {
+	if installer.options.Env != nil {
+		return installer.options.Env
+	}
+	return paths.OSEnv{}
+}
+
+func (installer *engine) now() time.Time {
+	if installer.options.Now != nil {
+		return installer.options.Now()
+	}
+	if installer.options.Clock != nil {
+		return installer.options.Clock.Now()
+	}
+	return clock.Real.Now()
+}
+
+func (installer *engine) processRunner() deps.Runner {
+	if installer.options.ProcessRunner != nil {
+		return installer.options.ProcessRunner
+	}
+	return deps.RealRunner{}
+}
+
 func (execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
-	command := exec.CommandContext(ctx, deps.Executable(name), args...)
-	command.Stdout = io.Discard
-	command.Stderr = io.Discard
-	return command.Run()
+	result, err := (deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return commandExitError{name: name, code: result.ExitCode, text: string(result.Stderr)}
+	}
+	return nil
 }
 
 func (execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, deps.Executable(name), args...).Output()
+	result, err := (deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+	if err != nil {
+		return nil, err
+	}
+	if result.ExitCode != 0 {
+		return result.Stdout, commandExitError{name: name, code: result.ExitCode, text: string(result.Stderr)}
+	}
+	return result.Stdout, nil
 }
 
 func normalizeInstallerOptions(options Options) (Options, error) {
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
+	if options.Env == nil {
+		options.Env = paths.OSEnv{}
+	}
 	if options.Home == "" {
 		var err error
-		options.Home, err = os.UserHomeDir()
+		options.Home, err = options.Env.Home()
 		if err != nil {
 			return options, err
 		}
@@ -191,7 +254,10 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 		options.ConfigDir = options.Home + "/.claude"
 	}
 	if options.ProcRoot == "" {
-		options.ProcRoot = paths.EnvOr(paths.EnvProcRoot, "/proc")
+		options.ProcRoot = options.Env.Get(paths.EnvProcRoot)
+		if options.ProcRoot == "" {
+			options.ProcRoot = "/proc"
+		}
 	}
 	if options.MCPPort == 0 {
 		options.MCPPort = pfmconfig.DefaultMCPPort
@@ -200,16 +266,16 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 		options.CodexYolo = map[int]bool{1: true, 2: true, 3: true}
 	}
 	if options.Now == nil {
-		options.Now = time.Now
-	}
-	if options.Sleep == nil {
-		options.Sleep = time.Sleep
+		options.Now = options.Clock.Now
 	}
 	if options.Stdout == nil {
 		options.Stdout = io.Discard
 	}
 	if options.Runner == nil {
 		options.Runner = execCommandRunner{}
+	}
+	if options.ProcessRunner == nil {
+		options.ProcessRunner = deps.RealRunner{}
 	}
 	if options.ProvisionHarvest && options.HarvestProvisioner == nil {
 		options.HarvestProvisioner = NewHarvestProvisioner()

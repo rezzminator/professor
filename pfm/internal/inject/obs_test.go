@@ -79,7 +79,7 @@ func TestInjectAndSelfCompactRecordTheirOutcomeAsATransition(t *testing.T) {
 func TestDeliverThenRecordsItsOutcomeAsATransition(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	engine := newTestEngineWith(t, "cc-then-door", &fakeTmux{capture: "❯ "}, &fakeSpawner{})
-	if result, err := engine.DeliverThen(ctx, "", "%1", nil, false); err != nil || result.Code != 1 {
+	if result, err := engine.DeliverThen(ctx, ThenWait{Target: "%1"}); err != nil || result.Code != 1 {
 		t.Fatalf("DeliverThen() = %+v, %v", result, err)
 	}
 	records := stateRecords(recorder, "then")

@@ -10,6 +10,9 @@
 # Run from /tmp: /worktree's .git file points at a host path the container cannot
 # resolve, so any git command there fails.
 #
+# DEMO_OPENCODE_PROBE=0 skips `install`'s one live OpenCode turn (and says so);
+# the lane root's no-live-turn build sets it (infra/fence/lanes/root.sh --no-adopt).
+#
 # BROKEN STATE: any failing step exits non-zero with its own message (set -e).
 # `install` requires the seats' credentials to be in place already (creds.sh):
 # pfm's config validation refuses a Codex home without auth.json, and the
@@ -125,7 +128,12 @@ install)
 }
 EOF
   echo '{"$schema": "https://opencode.ai/tui.json", "theme": "tokyonight"}' > "$HOME/.config/opencode/tui.json"
-  if [ ! -f "$HOME/.local/share/opencode/opencode.db" ]; then
+  if [ "${DEMO_OPENCODE_PROBE:-1}" = 0 ]; then
+    # The lane root's --no-adopt build spends no model turn at all
+    # (infra/fence/lanes/root.sh): no probe, so no opencode.db and no OpenCode
+    # row until lane E3's own prelude makes one. Named, never silent.
+    echo "setup: OpenCode live probe SKIPPED (DEMO_OPENCODE_PROBE=0) — no opencode.db yet, so pfm lists no OpenCode home until a real OpenCode run happens" >&2
+  elif [ ! -f "$HOME/.local/share/opencode/opencode.db" ]; then
     # The probe leaves one resumable OpenCode row under a name OpenCode invents
     # ("Ready Request" one day, "Ready instruction request" the next), so the
     # row to hide is found by difference, not by name.

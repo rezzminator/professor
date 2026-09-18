@@ -12,6 +12,7 @@ package archive
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -23,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/paths"
@@ -148,7 +151,7 @@ func New(dependencies Dependencies) (*Runner, error) {
 	}
 	now := dependencies.Now
 	if now == nil {
-		now = time.Now
+		now = clock.Real.Now
 	}
 	return &Runner{
 		paths:            resolved,
@@ -485,7 +488,7 @@ func (runner *Runner) backupSidecars() ([]string, error) {
 			directory,
 			filepath.Base(source)+"."+stamp,
 		)
-		if err := os.WriteFile(target, content, 0o600); err != nil {
+		if err := atomicfile.Write(target, content, 0o600); err != nil {
 			return nil, fmt.Errorf("write %s: %w", target, err)
 		}
 		backups = append(backups, target)
@@ -516,20 +519,10 @@ func (runner *Runner) pruneLines(path string, ids []string) (dropped int, return
 	for _, id := range ids {
 		wanted[strings.ToLower(id)] = struct{}{}
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return 0, fmt.Errorf("create a temporary beside %s: %w", path, err)
-	}
-	defer func() {
-		if err := os.Remove(temporary.Name()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			returnErr = errors.Join(returnErr, fmt.Errorf("remove temporary %s: %w", temporary.Name(), err))
-		}
-	}()
-
 	dropped = 0
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	writer := bufio.NewWriter(temporary)
+	var content bytes.Buffer
 	for scanner.Scan() {
 		line := scanner.Text()
 		archived := false
@@ -543,26 +536,17 @@ func (runner *Runner) pruneLines(path string, ids []string) (dropped int, return
 			dropped++
 			continue
 		}
-		if _, err := writer.WriteString(line + "\n"); err != nil {
-			return 0, fmt.Errorf("write %s: %w", temporary.Name(), err)
+		if _, err := content.WriteString(line + "\n"); err != nil {
+			return 0, fmt.Errorf("buffer %s: %w", path, err)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return 0, fmt.Errorf("read %s: %w", path, err)
 	}
-	if err := writer.Flush(); err != nil {
-		return 0, fmt.Errorf("flush %s: %w", temporary.Name(), err)
-	}
-	if err := temporary.Close(); err != nil {
-		return 0, fmt.Errorf("close %s: %w", temporary.Name(), err)
-	}
 	if dropped == 0 {
 		return 0, nil
 	}
-	if err := os.Chmod(temporary.Name(), 0o600); err != nil {
-		return 0, fmt.Errorf("chmod %s: %w", temporary.Name(), err)
-	}
-	if err := os.Rename(temporary.Name(), path); err != nil {
+	if err := atomicfile.Write(path, content.Bytes(), 0o600); err != nil {
 		return 0, fmt.Errorf("replace %s: %w", path, err)
 	}
 	return dropped, nil
@@ -597,7 +581,7 @@ func moveFile(source, target string) error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", source, err)
 	}
-	if err := os.WriteFile(target, content, 0o600); err != nil {
+	if err := atomicfile.Write(target, content, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", target, err)
 	}
 	if err := os.Remove(source); err != nil {

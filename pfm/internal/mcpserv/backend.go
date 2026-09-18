@@ -10,6 +10,7 @@ import (
 	"unicode"
 
 	"hostops/pfm/internal/chat"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
@@ -30,6 +31,7 @@ type injectionService interface {
 }
 
 type backend struct {
+	clock                clock.Clock
 	database             *store.Store
 	sharedState          *fleetdb.Store
 	injector             injectionService
@@ -42,6 +44,9 @@ type backend struct {
 }
 
 func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error) {
+	if runtime.Clock == nil {
+		runtime.Clock = clock.Real
+	}
 	if len(runtime.Accounts) == 0 {
 		machine := pfmconfig.Defaults(runtime.Paths.Home, runtime.Paths.Roots[pfmengine.Claude])
 		runtime.Accounts = machine.Accounts
@@ -89,6 +94,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		return nil, err
 	}
 	return &backend{
+		clock:                runtime.Clock,
 		database:             database,
 		sharedState:          sharedState,
 		injector:             injector,

@@ -21,16 +21,18 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 const (
 	HarvesterScope             = "harvest"
-	grantAuthorizationCode     = "authorization_code"
+	authorizationCodeGrant     = "authorization_code"
 	pkceMethodS256             = "S256"
 	tokenAuthClientSecretBasic = "client_secret_basic"
 	tokenAuthClientSecretPost  = "client_secret_post"
 	tokenAuthNone              = "none"
-	grantRefreshToken          = "refresh_token"
+	refreshTokenGrant          = "refresh_token"
 	oauthErrorInvalidGrant     = "invalid_grant"
 	oauthErrorInvalidTarget    = "invalid_target"
 	oauthErrorServer           = "server_error"
@@ -139,6 +141,7 @@ type authStore struct {
 	passphrase string
 	staticHash string
 	statePath  string
+	clock      clock.Clock
 	clients    map[string]oauthClient
 	pending    map[string]pendingConsent
 	codes      map[string]authorizationCode
@@ -146,10 +149,14 @@ type authStore struct {
 	refresh    map[string]refreshToken
 }
 
-func newAuthStore(issuer, resource, passphrase, staticToken, statePath string) *authStore {
+func newAuthStore(issuer, resource, passphrase, staticToken, statePath string, clocks ...clock.Clock) *authStore {
+	watch := clock.Real
+	if len(clocks) > 0 && clocks[0] != nil {
+		watch = clocks[0]
+	}
 	s := &authStore{
 		issuer: issuer, resource: resource, passphrase: passphrase,
-		statePath: statePath, clients: map[string]oauthClient{},
+		statePath: statePath, clock: watch, clients: map[string]oauthClient{},
 		pending: map[string]pendingConsent{}, codes: map[string]authorizationCode{},
 		access: map[string]accessToken{}, refresh: map[string]refreshToken{},
 	}
@@ -255,7 +262,7 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 		return persistedClient{}, "", oauthErrorServer
 	}
 	c.ClientID = id
-	c.ClientIDIssuedAt = time.Now().Unix()
+	c.ClientIDIssuedAt = s.clock.Now().Unix()
 	var secret string
 	if c.TokenEndpointAuthMethod != tokenAuthNone {
 		secret, err = tokenURLSafe(24)
@@ -266,7 +273,7 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	}
 	c.ClientSecretExpiresAt = 0
 	if len(c.GrantTypes) == 0 {
-		c.GrantTypes = []string{grantAuthorizationCode, grantRefreshToken}
+		c.GrantTypes = []string{authorizationCodeGrant, refreshTokenGrant}
 	}
 	if len(c.ResponseTypes) == 0 {
 		c.ResponseTypes = []string{"code"}
@@ -353,7 +360,7 @@ func (s *authStore) begin(
 		Challenge:   challenge,
 		Method:      method,
 		Resource:    resource,
-		Created:     time.Now(),
+		Created:     s.clock.Now(),
 	}
 	s.mu.Unlock()
 	return txn, nil
@@ -363,7 +370,7 @@ func (s *authStore) consent(txn, supplied string) (string, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.pending[txn]
-	if !ok || time.Since(p.Created) > consentTTL || s.passphrase == "" {
+	if !ok || s.clock.Now().Sub(p.Created) > consentTTL || s.passphrase == "" {
 		delete(s.pending, txn)
 		return "", false, false
 	}
@@ -389,7 +396,7 @@ func (s *authStore) consent(txn, supplied string) (string, bool, bool) {
 		Scope:       p.Scope,
 		Challenge:   p.Challenge,
 		Resource:    p.Resource,
-		Expires:     time.Now().Add(authCodeTTL),
+		Expires:     s.clock.Now().Add(authCodeTTL),
 	}
 	return code, true, true
 }
@@ -398,7 +405,7 @@ func (s *authStore) exchange(code, clientID, redirect, verifier, resource string
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c, ok := s.codes[code]
-	if !ok || time.Now().After(c.Expires) || c.ClientID != clientID || c.RedirectURI != redirect {
+	if !ok || s.clock.Now().After(c.Expires) || c.ClientID != clientID || c.RedirectURI != redirect {
 		return tokenResponse{}, oauthErrorInvalidGrant
 	}
 	if resource != "" && !ResourceMatches(resource, s.resource) {
@@ -448,7 +455,7 @@ func (s *authStore) issueLocked(clientID string, scope []string) (tokenResponse,
 		ClientID: clientID,
 		Scope:    append([]string(nil), scope...),
 		Resource: s.resource,
-		Expires:  time.Now().Add(accessTokenTTL),
+		Expires:  s.clock.Now().Add(accessTokenTTL),
 	}
 	hash := digest(refresh)
 	s.refresh[hash] = refreshToken{Hash: hash, ClientID: clientID, Scope: append([]string(nil), scope...)}
@@ -488,7 +495,7 @@ func (s *authStore) verify(raw string) bool {
 		return true
 	}
 	h, ok := s.access[digest(raw)]
-	if !ok || time.Now().After(h.Expires) || !ResourceMatches(h.Resource, s.resource) {
+	if !ok || s.clock.Now().After(h.Expires) || !ResourceMatches(h.Resource, s.resource) {
 		return false
 	}
 	return true

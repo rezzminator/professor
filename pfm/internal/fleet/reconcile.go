@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
-	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
@@ -273,7 +273,7 @@ func ReconcileCodexPanesWith(
 			ID:         action.Bind,
 			ThreadName: name,
 			Source:     store.CxNameSourceSessionIndex,
-			RenamedAt:  time.Now().UnixNano(),
+			RenamedAt:  clock.Real.Now().UnixNano(),
 		}); err != nil {
 			warn(fmt.Sprintf(
 				"codex pane %s %s: record re-applied chat name: %v",

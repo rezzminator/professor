@@ -57,10 +57,10 @@ HOST_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/pfm/pfm.config.json"
 [ -f "$HOST_CONFIG" ] || missing "host pfm config $HOST_CONFIG (the seats to mirror come from it)"
 
 # 1. The fence, exactly as dev.sh iso mounts it.
-FENCE_CALLER=demo . "$ROOT/infra/fence-env.sh"
+FENCE_CALLER=demo . "$ROOT/infra/fence/fence-env.sh"
 if [ "$FRESH" -eq 1 ] || ! docker ps --format '{{.Names}}' | grep -qx "$NAME"; then
   docker rm -f "$NAME" >/dev/null 2>&1 || true
-  docker compose -f "$ROOT/infra/docker-compose.yml" run -d --build --name "$NAME" pfm-dev sleep infinity >/dev/null
+  docker compose -f "$ROOT/infra/fence/docker-compose.yml" run -d --build --name "$NAME" pfm-dev sleep infinity >/dev/null
   echo "demo: container $NAME started"
 else
   echo "demo: reusing running container $NAME"

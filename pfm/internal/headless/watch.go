@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 // WatchOptions controls a blocking watch.
@@ -29,6 +31,7 @@ type Watcher struct {
 	Name    string
 	Resolve func(context.Context) (Chat, bool, error)
 	Now     func() time.Time
+	Clock   clock.Clock
 }
 
 // Watch blocks, writing one line per event: IDLE when a chat stops owing an
@@ -48,7 +51,12 @@ func (watcher Watcher) Watch(
 	}
 	now := watcher.Now
 	if now == nil {
-		now = time.Now
+		if watcher.Clock == nil {
+			watcher.Clock = clock.Real
+		}
+		now = watcher.Clock.Now
+	} else if watcher.Clock == nil {
+		watcher.Clock = clock.Real
 	}
 	announcedIdle := false
 	for {
@@ -111,7 +119,7 @@ func (watcher Watcher) Watch(
 			// Back to work: the next idle is a new event worth announcing.
 			announcedIdle = false
 		}
-		if err := waitForNextPoll(ctx, poll); err != nil {
+		if err := waitForNextPoll(ctx, watcher.Clock, poll); err != nil {
 			return status, err
 		}
 	}

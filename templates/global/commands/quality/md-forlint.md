@@ -62,7 +62,7 @@ The five categories and the reader each serves:
 - prompt: `.claude/**`, `CLAUDE.md`, any shipped prompt template, and every injected prompt asset (`**/*.prompt.md`, an engine's staged prompts). An LLM reads it whole at runtime, so bytes are the cost. Exempt from the reader-facing rules (repeated headings, inline HTML, leading H1, link text) and from heading-level rewriting — a prompt's heading levels are addressing.
 - doc: `docs/**`, engine specs, child-project docs. An agent greps, then reads one file. Table de-padding and link integrity (dangling relative links, dead anchors) earn the most here.
 - public: `README.md`, `INSTALL.md`, `CHANGELOG.md`. Rendered for a person; repeated version headings and dated entries are the format, not a smell.
-- generated: `AGENTS.md`, `.codex/**`, `.opencode/**`. Excluded. Format the Claude source and recompile (`pfm codex build .`, `build-opencode.mjs`); formatting a mirror is drift its own check will flag.
+- generated: `AGENTS.md`, `.codex/**`, `.opencode/**`. Excluded. Format the Claude source and recompile (`pfm codex build .`, `pfm opencode build .`); formatting a mirror is drift its own check will flag.
 - record: `releases/**`, `.professor/**` ledgers, `**/testdata/**`. Excluded. Published history, machine-parsed ledgers, and byte-exact fixtures — a reformat is a falsified record or a red suite.
 
 ## What formatting buys — and what it does not

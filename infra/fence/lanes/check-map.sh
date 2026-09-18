@@ -15,11 +15,25 @@
 #        changed the copy anyway) / `LANDSCAPE-FMT-FAILED` (rumdl would not run)
 #   1. every id in docs/dev/testing/landscape.md has a row in map.tsv
 #      → `UNMAPPED-ID: <id>`
-#   2. every beat in map.tsv exists in its lane script. A lane that is not
-#      written yet is a named line (`lane F: NOT WRITTEN (12 beats pending)`)
-#      and is tolerated ONLY while pending.txt lists it — and pending.txt must
-#      shrink to empty: a pending lane whose script exists is a red row.
-#      → `MISSING-BEAT: <beat>` / `PENDING-STALE: <lane>` / `UNDECLARED-LANE: <lane>`
+#   2. BOTH directions between map.tsv and a written lane script agree, or the
+#      gate is a coincidence detector that can only ever look one way:
+#        a. every beat in map.tsv exists in its lane script. A lane that is not
+#           written yet is a named line (`lane F: NOT WRITTEN (12 beats
+#           pending)`) and is tolerated ONLY while pending.txt lists it — and
+#           pending.txt must shrink to empty: a pending lane whose script
+#           exists is a red row.
+#           → `MISSING-BEAT: <beat>` / `PENDING-STALE: <lane>` /
+#             `UNDECLARED-LANE: <lane>`
+#        b. every `beat <ID>` line in a WRITTEN lane script has a map.tsv row —
+#           unless beats.md marks that beat's landscape ids `(none)`, in which
+#           case the beat is deliberately code-only and this check leaves it
+#           alone. A beat added with real landscape ids but no map.tsv row is
+#           otherwise invisible to direction (a) forever, since (a) only ever
+#           walks FROM the map — this is the check that would have caught it.
+#           → `UNMAPPED-BEAT: <beat>`
+#      BROKEN STATE: a beat with landscape ids and no map row prints clean
+#      here today only if it slips past both a and b; b existing at all is
+#      what keeps that from being silent.
 #   3. machine-derived, so the doc cannot drift: every command in the built
 #      `pfm --help` tree and every tool name served by pfm's two MCP servers is
 #      carried by a MAPPED landscape row.
@@ -43,6 +57,7 @@ ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 LANDSCAPE="${LANE_LANDSCAPE:-$ROOT/docs/dev/testing/landscape.md}"
 MAP="$HERE/map.tsv"
 PENDING="$HERE/pending.txt"
+BEATS="$HERE/beats.md"
 PFM="" DERIVE=1
 
 while [ $# -gt 0 ]; do
@@ -117,6 +132,18 @@ for lane in $lanes_in_map; do
       missing=$((missing + 1))
     done
     say "lane $lane: written · $((n_beats - missing))/$n_beats mapped beats present"
+    # direction (b): every `beat <ID>` in the script has a map.tsv row, unless
+    # beats.md marks that beat's landscape ids `(none)` — a beat added with
+    # real ids but no row is otherwise invisible to direction (a) above.
+    unmapped_beats=0
+    for b in $(grep -oE '^[[:space:]]*beat [A-Za-z0-9_.-]+' "$HERE/$lane.sh" | awk '{ print $2 }' | sort -u); do
+      awk -F'\t' -v l="$lane" -v b="$b" '$2 == l && $3 == b { f = 1 } END { exit(f ? 0 : 1) }' "$MAP" && continue
+      ids_field="$(grep -E "^- \`$b\`" "$BEATS" | sed -E 's/.* · ([^·]*)$/\1/')"
+      [ "$ids_field" = "(none)" ] && continue
+      red "UNMAPPED-BEAT: $b is in $lane.sh with no row in $(basename "$MAP") (beats.md does not mark it (none))"
+      unmapped_beats=$((unmapped_beats + 1))
+    done
+    say "lane $lane: reverse (script → map) · $unmapped_beats beat(s) with no map row and no (none) in $(basename "$BEATS")"
   elif pending_lane "$lane"; then
     say "lane $lane: NOT WRITTEN ($n_beats beats pending) — declared in $(basename "$PENDING")"
   else
@@ -231,5 +258,5 @@ if [ "$map_bad" -ne 0 ]; then
   echo "check-map: ✗ $map_bad finding(s)" >&2
   exit 1
 fi
-say "clean — landscape machine-read, every landscape id mapped, every mapped beat present or its lane declared pending, every derived command and tool carried"
+say "clean — landscape machine-read, every landscape id mapped, every mapped beat present or its lane declared pending, every coded beat mapped or marked (none), every derived command and tool carried"
 exit 0

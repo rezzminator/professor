@@ -643,8 +643,13 @@ if requires; then
   fi
   # K40: the ProfessorUpdate row is inserted only by a RELEASE build's cached
   # update notice; a tree build inserts none. Whichever this binary is, the
-  # picker frame must agree with it.
+  # picker frame must agree with it. On a release build the notice's cache is
+  # professorUpdateCachePath(runtime) = dirname(PFM_DB)/update-check.json
+  # (pfm/internal/picker/update_row.go) — its presence is the beat's own
+  # ground truth for whether the frame SHOULD carry a ⬆ row, so a release
+  # build is read for it too, never credited unconditionally.
   version="$(pfm version 2>&1)"
+  update_cache="$(dirname "${PFM_DB:-$HOME/.local/state/pfm/fleet.db}")/update-check.json"
   if tui_open 120 40 ls -a; then
     frame="$(tui_pane)"
     printf '%s' "$frame" | grep -q '● ' || bad="$bad TUI frame shows no ● live row;"
@@ -655,7 +660,17 @@ if requires; then
         printf '%s' "$frame" | grep -q '⬆' && bad="$bad K40 a ⬆ ProfessorUpdate row on a non-release build ($version);"
         held="$held K40(absent-on-$(one_line "$version" | tr ' ' '_'))"
         ;;
-      *) held="$held K40(release-build:$(one_line "$version" | tr ' ' '_'),row-follows-its-cache)" ;;
+      *)
+        if [ -s "$update_cache" ]; then
+          printf '%s' "$frame" | grep -q '⬆' ||
+            bad="$bad K40 $update_cache holds a cached update notice but the frame shows no ⬆ ProfessorUpdate row ($version);"
+          held="$held K40(release-build:$(one_line "$version" | tr ' ' '_'),cache-present-row-checked)"
+        else
+          printf '%s' "$frame" | grep -q '⬆' &&
+            bad="$bad K40 the frame shows a ⬆ ProfessorUpdate row but $update_cache holds no cached notice ($version);"
+          held="$held K40(release-build:$(one_line "$version" | tr ' ' '_'),cache-absent-row-checked)"
+        fi
+        ;;
     esac
   else
     bad="$bad K40 $TUI_WHY;"

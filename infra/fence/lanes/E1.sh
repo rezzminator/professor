@@ -492,7 +492,10 @@ if requires E1.01-open-seat1; then
     printf '%s' "$file_read" | grep -q 'Extracted ->' ||
       bad="$bad chat read <excerpt-file> did not report the extracted file: $(one_line "$file_read");"
   fi
-  stream="$(timeout 60 pfm chat stream "$CHAT" --from-start --no-follow 2>&1 | head -20)"
+  stream_full="$(timeout 60 pfm chat stream "$CHAT" --from-start --no-follow 2>&1)"
+  stream_rc=$?
+  stream="$(printf '%s\n' "$stream_full" | head -20)"
+  [ "$stream_rc" -eq 0 ] || bad="$bad stream --from-start --no-follow exited $stream_rc ($(one_line "$stream"));"
   [ -n "$stream" ] || bad="$bad stream --from-start --no-follow printed nothing;"
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "last, read (--tail/--condensed/--json), find + read by EXCERPT FILE onto session $sid, stream — all from outside"

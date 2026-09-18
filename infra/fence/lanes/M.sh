@@ -840,6 +840,20 @@ fi
 beat M.09-chat-tools M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14
 spends "cc:$SEAT"
 target_live "$CHAT"
+# every refusal this beat provokes on purpose (chat_resolve/chat_inject
+# validation and the unsigned-over-HTTP refusal), so Wave 6's activity log
+# never turns a passing beat red on its own intentional errors.
+expect-log 'kind must be label, session, or cxwin'
+expect-log 'UNSIGNED'
+expect-log 'shared HTTP daemon'
+expect-log 'name is required'
+expect-log 'must be a non-empty thread id'
+expect-log 'limit must be between 1 and 50'
+expect-log 'tail_lines must be between 1 and 1000'
+expect-log 'focus must be one non-empty line'
+expect-log 'is not a tmux key'
+expect-log 'has no live Codex tmux seat'
+expect-log 'engine and model require summary=true or ask=true'
 if requires; then
   bad=""
   notes=""
@@ -1100,6 +1114,13 @@ fi
 beat M.10-chat-tools-gap M15 M16 M17 M18 M19 M20
 spends "cc:$SEAT"
 target "$NEW_CHAT"
+# the validation refusals this beat provokes on purpose, declared before the
+# fleet's activity log (Wave 6) can turn them into an unexplained ✗.
+expect-log 'CLAUDE_CODE_SESSION_ID is not set'
+expect-log 'is not a file path'
+expect-log 'name must be one non-empty line'
+expect-log 'severity must be'
+expect-log 'title is required'
 bad=""
 notes=""
 if ! live_chat "$NEW_CHAT"; then
@@ -1474,6 +1495,9 @@ fi
 
 beat M.13-dropped-seat-roster I38
 spends none
+# the roster/effort refusals this beat provokes on purpose from the spare seat.
+expect-log 'is not in the configured roster'
+expect-log 'unknown Claude effort'
 if [ -z "$SPARE" ]; then
   blocked "seats $LANE_SEATS" "no second seat in this run — dropping the only seat would take the lane's own chat with it (run with --seats cc:1,cc:2)"
 else

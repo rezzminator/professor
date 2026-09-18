@@ -350,6 +350,7 @@ say "run: $total_beats beats · $total_failed failed · $total_known known-gap �
 
 status=0
 [ -n "$failed_lanes" ] && { say "run: ✗ lane(s) with a failing beat:$failed_lanes"; status=1; }
+[ -n "$missing_rows" ] && { say "run: ✗ lane(s) with no result row:$missing_rows"; status=1; }
 [ -n "$unmapped" ] && status=1
 [ "$budget_reds" -gt 0 ] && { say "run: ✗ $budget_reds budget verdict(s) red"; status=1; }
 exit "$status"

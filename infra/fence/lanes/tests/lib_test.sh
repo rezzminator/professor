@@ -115,7 +115,7 @@ run_lane() {
     printf '. "%s"\n' "$LIB"
     printf '%s\n' "$@"
   } >"$T/$name.sh"
-  OUT="$(LANE_OUT_DIR="$LANE_DIR" LANE_GAPS="$T/gaps.yml" LANE_PFM_LOG="${LANE_PFM_LOG_FIXTURE:-$T/absent.jsonl}" \
+  OUT="$(LANE_OUT_DIR="$LANE_DIR" LANE_GAPS="${LANE_GAPS_FIXTURE:-$T/gaps.yml}" LANE_PFM_LOG="${LANE_PFM_LOG_FIXTURE:-$T/absent.jsonl}" \
     LANE_TODAY="${LANE_TODAY_FIXTURE:-2026-09-17}" bash "$T/$name.sh" 2>&1)"
   RC=$?
 }
@@ -241,6 +241,21 @@ if [ "$RC" -ne 0 ] &&
   ok "gaps_validate: exit 1 naming the entry with no expiry AND the expired one"
 else
   bad "gaps_validate" "rc=$RC" "$OUT"
+fi
+
+# ---- 8b: an unreadable ledger is named, not silently "not listed" ---------
+# gap_listed's stderr must carry gap_record's own KNOWN-GAPS-UNREADABLE line —
+# an unreadable ledger and "no entry for this beat" must never collapse into
+# the same silent false.
+
+LANE_GAPS_FIXTURE="$T/no-such-gaps.yml" run_lane unreadable_gaps \
+  'lane_begin TL' \
+  'beat TL.09-nogaps Z1; pass "held"' \
+  'lane_end'
+if printf '%s' "$OUT" | grep -q 'KNOWN-GAPS-UNREADABLE'; then
+  ok "gap_listed: an unreadable ledger is NAMED (KNOWN-GAPS-UNREADABLE), never silently 'not listed'"
+else
+  bad "unreadable ledger" "$OUT"
 fi
 
 cat >"$T/clean-gaps.yml" <<'YML'

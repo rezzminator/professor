@@ -17,10 +17,16 @@ ok() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
 bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n' "$@" >&2; FAIL=$((FAIL + 1)); }
 
 # A COPY of the lanes directory: the budget and ledger fixtures are edited in
-# place, and run.sh resolves every sibling from its own location.
-LANES="$T/lanes"
-mkdir -p "$LANES"
+# place, and run.sh resolves every sibling from its own location. Nested under
+# $T/infra/fence/lanes (not bare $T/lanes) so run.sh's own HERE/../../..
+# resolves ROOT to $T exactly as it does in the real tree — the non-dry-run
+# path (test 15) sources container.sh's lane_fence_env, which needs a real
+# $ROOT/infra/fence/fence-env.sh and a real git repo to read.
+LANES="$T/infra/fence/lanes"
+mkdir -p "$LANES" "$T/infra/fence"
 cp "$SUT_DIR"/*.sh "$SUT_DIR"/*.yml "$SUT_DIR"/*.tsv "$SUT_DIR"/pending.txt "$LANES/" 2>/dev/null
+cp "$SUT_DIR/../fence-env.sh" "$T/infra/fence/fence-env.sh" 2>/dev/null
+(cd "$T" && git init -q && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m fixture)
 RUN="$LANES/run.sh"
 [ -f "$RUN" ] || { echo "run_test: no run.sh at $RUN" >&2; exit 2; }
 
@@ -247,6 +253,20 @@ if [ -n "$h1" ] && [ "$h1" = "$h3" ] && [ "$h1" != "$h2" ]; then
   ok "root hash: the seat roster is a hash input ($h1 vs $h2), and it is stable for one roster"
 else
   bad "root hash over seats" "h1=[$h1] h2=[$h2] h3=[$h3]"
+fi
+
+# ---- 15: a lane that produces no result row fails the run's exit code -----
+# (F11) The docker stub never actually copies a row.tsv into $OUT — a real
+# lane container the exec exited 0 for but that died before lane_end (crash,
+# OOM-kill) looks exactly like this: exec rc 0, no row file landed. lib.sh's
+# own docstring says a missing .row.tsv is never a pass; the exit code must
+# say so too, not just the printed "✗ lane … produced no result row" line.
+
+run_sut --lanes E1 --root reuse
+if printf '%s' "$OUT" | grep -q 'run: ✗ lane E1 produced no result row' && [ "$RC" -ne 0 ]; then
+  ok "a lane with no result row (exec 0, no row.tsv landed) fails the run's own exit code, not just its printed line"
+else
+  bad "missing row exit code" "rc=$RC" "$OUT"
 fi
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"

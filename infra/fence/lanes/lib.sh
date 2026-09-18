@@ -72,6 +72,11 @@ export PFM_LOG_LEVEL=debug
 LANE_ID="" LANE_LOG="" LANE_TIMELINE="" LANE_T0=0
 LANE_BEATS=0 LANE_FAILED=0 LANE_KNOWN=0 LANE_BLOCKED=0
 LANE_CUR="" LANE_CUR_T0=0 LANE_CUR_IDS="" LANE_CUR_SEAT="none" LANE_CUR_OFFSET=""
+# The offset the NEXT beat() must start its slice from instead of re-stamping
+# to the log's current end — set by requires() right before _lane_reopen runs,
+# so the re-open's own log writes land inside the following beat's slice
+# rather than a gap no beat's sweep ever reads.
+LANE_NEXT_OFFSET=""
 LANE_CUR_EXPECT="" LANE_BAD_BEATS="" LANE_TARGET="" LANE_LOG_STATE="UNKNOWN"
 # The liveness anchor (see `target_live` / `anchor_socket`), the beat that last
 # saw it alive, the lane's one re-open command and whether it has been spent.
@@ -121,7 +126,12 @@ gap_field() { # gap_field <beat> <key> — the value, or empty
   gap_record "$1" 2>/dev/null | awk -F'\t' -v k="$2" '$1 == k { print $2; exit }'
 }
 
-gap_listed() { gap_record "$1" >/dev/null 2>&1; }
+# gap_listed <beat> — 0 when the beat has a ledger entry. `gap_record` already
+# names an unreadable ledger on stderr (KNOWN-GAPS-UNREADABLE); that message is
+# let through here on purpose so every caller (gap_applies → pass()/known())
+# still SEES the ledger-unreadable case instead of it collapsing into the same
+# silent false as "not listed".
+gap_listed() { gap_record "$1" >/dev/null; }
 
 # gap_applies <beat> — 0 when the ledger entry governs THIS host (an entry with
 # `arch:` only governs that architecture; elsewhere the beat must assert for real).
@@ -230,7 +240,12 @@ beat() { # beat <id> [landscape-ids…]
   LANE_TARGET=""
   LANE_ANCHOR=""
   LANE_WAIT_WHY=""
-  if [ -f "$LANE_PFM_LOG" ]; then
+  if [ -n "$LANE_NEXT_OFFSET" ]; then
+    # A re-open ran just before this beat opened — keep its slice starting
+    # where the BLOCKED beat's did, so the re-open's own log writes are swept.
+    LANE_CUR_OFFSET="$LANE_NEXT_OFFSET"
+    LANE_NEXT_OFFSET=""
+  elif [ -f "$LANE_PFM_LOG" ]; then
     LANE_CUR_OFFSET="$(wc -c <"$LANE_PFM_LOG" 2>/dev/null | tr -d ' ')"
     [ -n "$LANE_CUR_OFFSET" ] || LANE_CUR_OFFSET=0
   else
@@ -417,6 +432,13 @@ _lane_close() { # _lane_close <verdict> <glyph> <detail>
   dur=$(( $(_lane_now) - LANE_CUR_T0 ))
   # An unexpected error record turns any non-✗ verdict into ✗ (the spec's law:
   # a beat passes on its asserted result AND a clean activity log).
+  # A log that was PRESENT at lane start and cannot be swept now is "we failed
+  # to look", never a clean log: the beat goes ✗ and says so on its own line.
+  if [ "$verdict" != fail ] && [ "$LANE_LOG_STATE" = PRESENT ] &&
+    { [ -z "$LANE_CUR_OFFSET" ] || [ ! -f "$LANE_PFM_LOG" ]; }; then
+    verdict=fail glyph="✗"
+    detail="$detail; activity-log sweep SKIPPED — $LANE_PFM_LOG gone or no offset recorded for this beat"
+  fi
   if [ "$verdict" != fail ]; then
     unexpected="$(_lane_log_slice)" || {
       _lane_log_only "   activity log: unexpected error record(s) in this beat's slice:"
@@ -498,6 +520,10 @@ requires() {
     return 0
   fi
   blocked "$(_lane_last_alive)" "$(_lane_anchor_label) has no live row in pfm ls --tsv — nothing to assert against"
+  # blocked() just closed the beat and cleared LANE_CUR_OFFSET's owner; carry
+  # this beat's own slice start forward so the re-open's log writes below land
+  # in the NEXT beat's slice instead of a window no beat's sweep ever reads.
+  LANE_NEXT_OFFSET="$LANE_CUR_OFFSET"
   _lane_reopen
   return 1
 }

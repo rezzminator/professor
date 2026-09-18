@@ -206,5 +206,33 @@ else
   bad "unreadable landscape" "rc=$RC (map run was $saved_rc)" "$OUT"
 fi
 
+# ---- 10: UNMAPPED-BEAT — direction (b), script → map.tsv ------------------
+# A beat added to a WRITTEN lane script with real landscape ids but no
+# map.tsv row must be caught even though direction (a) (map.tsv → script)
+# never walks it — the gate must see the missing row, not just its mirror.
+
+beats() { printf '%b' "$1" >"$LANES/beats.md"; }
+printf 'beat O1.02-codeonly Z9\n' >>"$LANES/O1.sh"
+map 'Z1\tE1\tE1.01-fixture\nZ2\tO1\tO1.01-fixture\nZ3\tE1\tE1.01-fixture\n'
+beats '- `O1.02-codeonly` · fixture code-only beat with REAL ids · spends none · Z9\n'
+run_sut --no-derive
+if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q "UNMAPPED-BEAT: O1.02-codeonly is in O1.sh with no row in map.tsv"; then
+  ok "UNMAPPED-BEAT: a coded beat with real landscape ids and no map row is caught (direction b)"
+else
+  bad "unmapped beat (real ids)" "rc=$RC" "$OUT"
+fi
+
+# ---- 11: the SAME shape, but beats.md marks it (none) — stays clean -------
+# The six benign code-only beats today (A.11-guard-hook etc.) all carry
+# (none) in beats.md; direction (b) must leave them alone.
+
+beats '- `O1.02-codeonly` · fixture code-only beat, deliberately unmapped · spends none · (none)\n'
+run_sut --no-derive
+if [ "$RC" -eq 0 ] && ! printf '%s' "$OUT" | grep -q 'UNMAPPED-BEAT'; then
+  ok "a coded beat beats.md marks (none) is left alone by direction b — the six benign ids stay green"
+else
+  bad "unmapped beat marked none" "rc=$RC" "$OUT"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

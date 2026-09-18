@@ -135,12 +135,25 @@ fi
 command -v docker >/dev/null || fatal "TOOLCHAIN-MISSING — docker"
 docker inspect "$NAME" >/dev/null 2>&1 || fatal "container $NAME does not exist"
 
-# put <container path> — body on stdin, mode 0600, parent created, size read
-# back from the container (the demo reader's mechanic, kept identical).
+# put <container path> <host source path> — body on stdin (must be
+# `<"$2"`), mode 0600, parent created, size read back from the container (the
+# demo reader's mechanic, kept identical) — `set -e` in the sh -c so a `cat`
+# that fails mid-write (quota, revoked permission, full container fs) aborts
+# BEFORE `wc -c` reads back a truncated file as a clean size (mirrors
+# root.sh's `|| step_failed` fail-loud shape). The read-back size is then
+# compared against the HOST source's own size — root.sh:157's shape, applied
+# to a byte count instead of an exit code.
 put() {
-  docker exec -i "$NAME" sh -c \
-    'umask 077; p="$1"; case "$p" in "~"*) p="$HOME${p#\~}";; esac; mkdir -p "$(dirname "$p")"; cat > "$p"; wc -c < "$p"' \
-    sh "$1"
+  local dest="$1" src="$2" size src_size
+  size="$(docker exec -i "$NAME" sh -c \
+    'set -e; umask 077; p="$1"; case "$p" in "~"*) p="$HOME${p#\~}";; esac; mkdir -p "$(dirname "$p")" && cat > "$p" && wc -c < "$p"' \
+    sh "$dest" <"$src")" || return 1
+  src_size="$(wc -c <"$src" | tr -d ' ')"
+  if [ "$size" != "$src_size" ]; then
+    echo "put: staged $size bytes into $NAME:$dest but source $src is $src_size bytes" >&2
+    return 1
+  fi
+  printf '%s' "$size"
 }
 
 # ── Claude seats ────────────────────────────────────────────────────────────
@@ -165,7 +178,7 @@ while IFS=$'\t' read -r id cont_dir emoji; do
   fi
   # The roster filter above already refused every seat with no usable
   # credential, so reaching here means the file was readable a moment ago.
-  if size="$(put "$cont_dir/.credentials.json" <"$host_dir/.credentials.json")"; then
+  if size="$(put "$cont_dir/.credentials.json" "$host_dir/.credentials.json")"; then
     echo "creds: seat $id ($emoji) staged → $cont_dir/.credentials.json ($size bytes)"
     staged=$((staged + 1)) seats_staged=$((seats_staged + 1))
   else
@@ -187,7 +200,7 @@ elif [ ! -s "$codex_host/auth.json" ]; then
   report_absent "codex home: NO CREDENTIAL — $codex_host/auth.json is missing or empty (sign in with codex on the host); lane E2 cannot run"
 elif ! jq -e '.tokens | objects' "$codex_host/auth.json" >/dev/null 2>&1; then
   report_absent "codex home: NO CREDENTIAL — $codex_host/auth.json carries no tokens object"
-elif size="$(put "$codex_cont/auth.json" <"$codex_host/auth.json")"; then
+elif size="$(put "$codex_cont/auth.json" "$codex_host/auth.json")"; then
   echo "creds: codex $codex_cont/auth.json staged ($size bytes)"
   staged=$((staged + 1))
 else
@@ -209,7 +222,7 @@ elif [ ! -s "$oc_host" ]; then
   report_absent "opencode: NO CREDENTIAL — $oc_host is missing or empty (opencode auth login on the host); lane E3 cannot run"
 elif ! jq -e '.openai | objects | select(.type == "oauth")' "$oc_host" >/dev/null 2>&1; then
   report_absent "opencode: NO CREDENTIAL — $oc_host carries no openai oauth entry"
-elif size="$(put "$oc_cont" <"$oc_host")"; then
+elif size="$(put "$oc_cont" "$oc_host")"; then
   echo "creds: opencode $oc_cont staged ($size bytes)"
   staged=$((staged + 1))
 else

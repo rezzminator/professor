@@ -46,7 +46,12 @@ cat >"$CONFIG" <<JSON
 JSON
 
 # docker stub: `inspect` succeeds, `exec -i` consumes stdin into the jail and
-# prints the byte count the real one prints. It never echoes the body.
+# prints the byte count the real one prints — via `wc -c` on a FILE, not a
+# `$(cat)` capture, which would strip stdin's trailing newline and undercount
+# by exactly the bytes put()'s own size-vs-source comparison must catch. It
+# never echoes the body. `DOCKER_TRUNCATE` (when set) drops the last byte
+# BEFORE the size is read back, simulating a write that failed mid-copy —
+# put() must then read a short count and fail the seat, never stage it.
 BIN="$T/bin"
 mkdir -p "$BIN" "$T/staged"
 cat >"$BIN/docker" <<'STUB'
@@ -54,9 +59,12 @@ cat >"$BIN/docker" <<'STUB'
 case "$1" in
   inspect) exit 0 ;;
   exec)
-    body="$(cat)"
-    printf '%s' "$body" >"$STUB_STAGE/$(date +%s%N).blob"
-    printf '%s\n' "${#body}"
+    blob="$STUB_STAGE/$(date +%s%N).$$.blob"
+    cat >"$blob"
+    if [ -n "${DOCKER_TRUNCATE:-}" ]; then
+      head -c -1 "$blob" >"$blob.trunc" 2>/dev/null && mv "$blob.trunc" "$blob"
+    fi
+    wc -c <"$blob" | tr -d ' '
     ;;
   *) exit 0 ;;
 esac
@@ -143,6 +151,25 @@ if [ "$(grep -lF "$TOKEN" "$T/staged"/*.blob 2>/dev/null | wc -l | tr -d ' ')" -
   ok "the credential bodies did travel (2+ blobs reached the container over stdin)"
 else
   bad "staging path" "no credential blob reached the docker stub: $(ls "$T/staged")"
+fi
+
+# ---- 3b: a write that lands short (quota, revoked perm) is NOT staged -----
+# DOCKER_TRUNCATE makes the stub's read-back size one byte short of what was
+# sent — put() must catch the mismatch and refuse the seat, never report it
+# staged on a byte count that does not match the source.
+
+run_sut_truncated() {
+  OUT="$(HOME="$FAKE_HOME" OPENCODE_AUTH="$FAKE_HOME/.local/share/opencode/auth.json" DOCKER_TRUNCATE=1 \
+    bash "$SUT" "$@" 2>&1)"
+  RC=$?
+}
+run_sut_truncated --container fake --config "$CONFIG" --accounts 1
+if printf '%s' "$OUT" | grep -q 'seat 1 (🥇): NO CREDENTIAL' &&
+  printf '%s' "$OUT" | grep -q 'the copy into fake failed' &&
+  ! printf '%s' "$OUT" | grep -q 'seat 1 (🥇) staged'; then
+  ok "staging: a short write (truncated read-back size) is refused, never reported staged"
+else
+  bad "truncated write" "rc=$RC" "$OUT"
 fi
 
 # ---- 4: not one seat staged → exit 1, named ------------------------------

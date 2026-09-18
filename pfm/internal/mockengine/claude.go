@@ -516,6 +516,10 @@ func (session *claudeSession) headless() int {
 	started := time.Now()
 	step := proc.script.next()
 	for !step.terminal() {
+		if step.sideEffecting() {
+			warn(proc.stderr, "-p fast-forwards past the scripted %s step — no hook fires, nothing is recorded "+
+				"for it in headless mode", step.Type)
+		}
 		step = proc.script.next()
 	}
 	if step.Type == StepCrash {

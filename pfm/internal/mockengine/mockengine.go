@@ -196,6 +196,7 @@ func newUUID() string {
 	if _, err := rand.Read(raw[:]); err != nil {
 		// crypto/rand never fails on the platforms pfm builds for; a fixed
 		// fixture id is still a valid UUID rather than a crash.
+		warn(os.Stderr, "crypto/rand.Read failed, falling back to a fixed fixture UUID: %v", err)
 		return "00000000-0000-4000-8000-000000000000"
 	}
 	raw[6] = (raw[6] & 0x0f) | 0x40

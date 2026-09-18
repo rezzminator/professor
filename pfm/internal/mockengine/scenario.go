@@ -96,8 +96,12 @@ type Step struct {
 	// menu: the numbered options and the 1-based preselected row.
 	Options  []string `json:"options,omitempty"`
 	Selected int      `json:"selected,omitempty"`
-	// compact: the postTokens the compact_boundary record carries.
-	PostTokens int64 `json:"post_tokens,omitempty"`
+	// compact: the postTokens the compact_boundary record carries. Codex's
+	// PreserveAppendix re-emits the still-live SessionStart developer message
+	// in replacement_history, so codexappendix's found==true branch is
+	// reachable; the default omits it, exercising the absent branch instead.
+	PostTokens       int64 `json:"post_tokens,omitempty"`
+	PreserveAppendix bool  `json:"preserve_appendix,omitempty"`
 	// crash / exit: the process exit code.
 	ExitCode int `json:"exit_code,omitempty"`
 	// mcp: the [mcp_servers.<server>] block of config.toml to connect to.
@@ -220,6 +224,18 @@ func (step Step) terminal() bool {
 	return false
 }
 
+// sideEffecting reports whether the step fires a hook, writes a record or
+// does an MCP handshake — the beats `-p`'s fast-forward (claude.go:headless)
+// consumes from the cursor without ever running, so it must name what it
+// skipped rather than silently dropping it.
+func (step Step) sideEffecting() bool {
+	switch step.Type {
+	case StepToolCall, StepBackgroundAgent, StepCompact, StepMCP:
+		return true
+	}
+	return false
+}
+
 // cursorSuffix names the file beside a scenario that remembers how many
 // steps earlier processes consumed, so one script spans a resume, a headless
 // call and its follow-up: the ordered list is the session's, not one
@@ -317,7 +333,13 @@ func (running *script) advance(count int) {
 	if err := atomicfile.Write(running.cursor, []byte(strconv.Itoa(running.position)), 0o600); err != nil {
 		// The next process would replay this step; the error is loud on the
 		// next read rather than swallowed here.
-		_ = os.WriteFile(running.cursor, []byte("unwritable: "+err.Error()), 0o600)
+		if writeErr := os.WriteFile(running.cursor, []byte("unwritable: "+err.Error()), 0o600); writeErr != nil {
+			fmt.Fprintf(
+				os.Stderr,
+				"mock-engine: cursor %s unwritable (%v) and the fallback write also failed: %v\n",
+				running.cursor, err, writeErr,
+			)
+		}
 	}
 }
 

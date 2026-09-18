@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hostops/pfm/internal/codexappendix"
 	"hostops/pfm/internal/codexmeta"
@@ -205,9 +206,11 @@ func (fix *fixture) appendixAnswer(payload string) string {
 	return out.String()
 }
 
-func TestCodexSessionStartHookIsAnsweredByPfmsAppendixAndLandsInHistory(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
+// wireCodexAppendixHook stages pfm's own appendix and a hook.json SessionStart
+// entry that replays pfm's handler answer for a fresh thread — the same
+// choreography both the found and absent presentInHistory tests start from.
+func (fix *fixture) wireCodexAppendixHook() {
+	fix.t.Helper()
 	fix.stageAppendix()
 	// The hook command replays what pfm's handler answers to a fresh thread;
 	// the recorder keeps the payload the mock sent it.
@@ -219,7 +222,7 @@ func TestCodexSessionStartHookIsAnsweredByPfmsAppendixAndLandsInHistory(t *testi
 			strings.ReplaceAll(strings.TrimSpace(answer), "'", `'"'"'`)+"'\n"),
 		0o700,
 	); err != nil {
-		t.Fatal(err)
+		fix.t.Fatal(err)
 	}
 	document := map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{
 		"matcher": codexappendix.Matcher,
@@ -227,11 +230,17 @@ func TestCodexSessionStartHookIsAnsweredByPfmsAppendixAndLandsInHistory(t *testi
 	}}}}
 	content, err := json.Marshal(document)
 	if err != nil {
-		t.Fatal(err)
+		fix.t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(fix.codexHome, "hooks.json"), content, 0o600); err != nil {
-		t.Fatal(err)
+		fix.t.Fatal(err)
 	}
+}
+
+func TestCodexSessionStartHookIsAnsweredByPfmsAppendixAndLandsInHistory(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.wireCodexAppendixHook()
 	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0)})
 	session := fix.startTUI("codex", codexArgs(), nil)
 	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "›") })
@@ -269,6 +278,43 @@ func TestCodexSessionStartHookIsAnsweredByPfmsAppendixAndLandsInHistory(t *testi
 	if strings.Contains(compacted, "systemMessage") || !strings.Contains(compacted, "additionalContext") {
 		t.Fatalf(
 			"after compaction codexappendix.Run = %s, want a clean re-injection (replacement_history read, no warning)",
+			compacted,
+		)
+	}
+}
+
+// TestCodexCompactPreservesAppendixReachesTheFoundBranch exercises the other
+// half of presentInHistory's "compacted" case (history.go:119-125): when the
+// scenario's compact step re-emits the still-live developer message in
+// replacement_history, codexappendix must find it there and skip re-injection
+// — the found==true branch the F1 review finding named unreachable.
+func TestCodexCompactPreservesAppendixReachesTheFoundBranch(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.wireCodexAppendixHook()
+	fix.write(Scenario{
+		SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0),
+		Steps: []Step{
+			{Type: StepTurn, Reply: "ok"},
+			{Type: StepCompact, PreserveAppendix: true},
+		},
+	})
+	session := fix.startTUI("codex", codexArgs(), nil)
+	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "›") })
+	rollout := fix.rolloutPath()
+	session.typeLine("first")
+	session.waitFrame("the reply", func(frame string) bool { return strings.Contains(frame, "ok") })
+	session.typeLine("/compact")
+	session.waitFrame("the supplied compacted shape", func(frame string) bool {
+		return strings.Contains(frame, codexShapes.Compacted)
+	})
+	compacted := fix.appendixAnswer(
+		`{"hook_event_name":"SessionStart","source":"compact","transcript_path":"` + rollout + `"}`,
+	)
+	if strings.TrimSpace(compacted) != "{}" {
+		t.Fatalf(
+			"after a compact step that preserves the appendix, codexappendix.Run = %s, want {} (found in "+
+				"replacement_history, no re-injection)",
 			compacted,
 		)
 	}
@@ -316,5 +362,31 @@ func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
 	}
 	if want := mcpserv.ToolNames(); strings.Join(tools, ",") != strings.Join(want, ",") {
 		t.Fatalf("tools/list from pfm's server = %v, want %v", tools, want)
+	}
+}
+
+// TestMCPBoundedContextAppliesTheConfiguredTimeout covers F4: session.mcp's
+// context.WithTimeout must actually bound the mcp.StreamableClientTransport
+// handshake — verified at the context itself rather than over a real hung
+// TCP peer, whose cancellation the vendored SDK does not reliably honour
+// (reproduced independently of this package: a StreamableClientTransport
+// with MaxRetries: -1 against a server that never answers can outlive a
+// caller's context by minutes, an upstream limitation outside this
+// boundary). Without mcpBoundedContext, the mock would hand Connect/ListTools
+// the caller's own context — which carries no deadline of its own — leaving
+// MaxRetries: -1 free to hang forever exactly as F4 named.
+func TestMCPBoundedContextAppliesTheConfiguredTimeout(t *testing.T) {
+	previous := mcpTimeout
+	mcpTimeout = 250 * time.Millisecond
+	t.Cleanup(func() { mcpTimeout = previous })
+	bounded, cancel := mcpBoundedContext(context.Background())
+	defer cancel()
+	deadline, ok := bounded.Deadline()
+	if !ok {
+		t.Fatal("mcpBoundedContext returned a context with no deadline — an mcp.StreamableClientTransport with " +
+			"MaxRetries: -1 would then have nothing bounding it")
+	}
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > mcpTimeout {
+		t.Fatalf("deadline is %s from now, want within (0, %s]", remaining, mcpTimeout)
 	}
 }

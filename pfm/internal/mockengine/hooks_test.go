@@ -250,6 +250,68 @@ func TestClaudeFiresTheInstalledHooksAndHonoursTheirAnswers(t *testing.T) {
 	}
 }
 
+// installBrokenHook writes a settings.json whose handler for event prints
+// malformed JSON stdout, which runHookCommand refuses to decode.
+func (fix *fixture) installBrokenHook(event string) {
+	fix.t.Helper()
+	broken := filepath.Join(fix.root, "broken-hook.sh")
+	if err := os.WriteFile(broken, []byte("#!/bin/sh\nprintf '{not json'\n"), 0o700); err != nil {
+		fix.t.Fatal(err)
+	}
+	document := map[string]any{"hooks": map[string]any{
+		event: []any{map[string]any{"hooks": []any{map[string]any{"type": "command", "command": broken}}}},
+	}}
+	content, err := json.Marshal(document)
+	if err != nil {
+		fix.t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fix.configDir, "settings.json"), content, 0o600); err != nil {
+		fix.t.Fatal(err)
+	}
+}
+
+// TestClaudePromptHookErrorStopsTheTurnInsteadOfFallingOpen covers F2: a
+// UserPromptSubmit handler that cannot be read must not fall through as if it
+// had approved — the pane would otherwise be indistinguishable from a hook
+// that ran cleanly.
+func TestClaudePromptHookErrorStopsTheTurnInsteadOfFallingOpen(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.installBrokenHook("UserPromptSubmit")
+	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0)})
+	session := fix.startTUI("claude", claudeArgs(), nil)
+	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+	session.typeLine("go")
+	if code := session.waitExit(); code != ExitUnpinned {
+		t.Fatalf("exit = %d, want %d (a broken prompt hook must not fall open)", code, ExitUnpinned)
+	}
+	if !strings.Contains(session.stderr.String(), "prompt hooks") {
+		t.Fatalf("stderr = %q, want it to name the failed prompt hooks", session.stderr.String())
+	}
+}
+
+// TestClaudeToolHookErrorStopsTheTurnInsteadOfFallingOpen covers F2's other
+// arm: a PreToolUse handler that cannot be read must not paint the tool as
+// having run and been approved.
+func TestClaudeToolHookErrorStopsTheTurnInsteadOfFallingOpen(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	fix.installBrokenHook("PreToolUse")
+	fix.write(Scenario{SessionID: fixtureSession, BusyMS: intPtr(0), Steps: []Step{
+		{Type: StepToolCall, Tool: "Agent", Input: json.RawMessage(`{}`)},
+		{Type: StepTurn, Reply: "unreachable"},
+	}})
+	session := fix.startTUI("claude", claudeArgs(), nil)
+	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "❯") })
+	session.typeLine("go")
+	if code := session.waitExit(); code != ExitUnpinned {
+		t.Fatalf("exit = %d, want %d (a broken tool hook must not fall open)", code, ExitUnpinned)
+	}
+	if !strings.Contains(session.stderr.String(), "tool Agent") {
+		t.Fatalf("stderr = %q, want it to name the failed tool hook", session.stderr.String())
+	}
+}
+
 func parsedEntries(t *testing.T, path string) []transcript.Entry {
 	t.Helper()
 	entries := make([]transcript.Entry, 0)

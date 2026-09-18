@@ -1,6 +1,7 @@
 package mockengine
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +16,20 @@ import (
 
 	"hostops/pfm/internal/codexmeta"
 )
+
+// mcpTimeout bounds the mock's own MCP handshake against a dead or hanging
+// endpoint — the same discipline hooks.go:162 applies to hook commands. A
+// var, not a const, so a test can shrink it rather than block for 30s proving
+// a hang is eventually bounded.
+var mcpTimeout = 30 * time.Second
+
+// mcpBoundedContext is the context session.mcp connects and lists tools
+// under: an mcp.StreamableClientTransport with MaxRetries: -1 has no bound of
+// its own, so a dead or hanging endpoint would otherwise block the mock
+// forever — the same discipline hooks.go:162 applies to hook commands.
+func mcpBoundedContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, mcpTimeout)
+}
 
 // codexInvocation is the Codex command line pfm emits (internal/action for
 // the TUI, internal/reload/reload.go:638 `resume "<id>"`) plus the doors the
@@ -76,6 +91,10 @@ type codexSession struct {
 	hooks     hookSet
 	environ   []string
 	seat      *seat
+	// devContext is the live SessionStart additionalContext folded into history
+	// as a developer message, when one was — /compact re-emits it so
+	// codexappendix's presentInHistory can find it in replacement_history too.
+	devContext string
 }
 
 func serveCodex(proc *process) int {
@@ -265,6 +284,7 @@ func (session *codexSession) start(resumed bool) error {
 		}}); err != nil {
 			return err
 		}
+		session.devContext = context
 	}
 	return nil
 }
@@ -331,14 +351,24 @@ func (session *codexSession) tool(step Step) (string, error) {
 }
 
 // compact writes the `compacted` record internal/codexappendix/history.go:109
-// reads: the replacement history is the summary alone.
-func (session *codexSession) compact(Step) error {
+// reads: the replacement history is the summary, plus the still-live
+// developer message (if any) it started with — so both the found and absent
+// branches of codexappendix's presentInHistory stay reachable, rather than
+// the mock guessing a shape that permanently biases one branch away.
+func (session *codexSession) compact(step Step) error {
+	history := []codexMessage{{
+		Type: payloadMessage, Role: roleUser,
+		Content: []codexContent{{Type: blockInputText, Text: "Summary of the thread so far (fixture)."}},
+	}}
+	if step.PreserveAppendix && session.devContext != "" {
+		history = append(history, codexMessage{
+			Type: payloadMessage, Role: roleDeveloper,
+			Content: []codexContent{{Type: blockInputText, Text: session.devContext}},
+		})
+	}
 	return session.write(codexRecord{Type: "compacted", Payload: map[string]any{
-		payloadMessage: "Summary of the thread so far (fixture).",
-		"replacement_history": []codexMessage{{
-			Type: payloadMessage, Role: roleUser,
-			Content: []codexContent{{Type: blockInputText, Text: "Summary of the thread so far (fixture)."}},
-		}},
+		payloadMessage:        "Summary of the thread so far (fixture).",
+		"replacement_history": history,
 	}})
 }
 
@@ -394,9 +424,11 @@ func (session *codexSession) mcp(step Step) error {
 	if !ok || server.URL == "" {
 		return fmt.Errorf("%s has no [mcp_servers.%s] url", path, name)
 	}
+	bounded, cancel := mcpBoundedContext(session.proc.ctx)
+	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "mock-engine", Version: session.proc.script.Version}, nil)
 	connection, err := client.Connect(
-		session.proc.ctx,
+		bounded,
 		&mcp.StreamableClientTransport{Endpoint: server.URL, MaxRetries: -1, DisableStandaloneSSE: true},
 		nil,
 	)
@@ -408,7 +440,7 @@ func (session *codexSession) mcp(step Step) error {
 			warn(session.proc.stderr, "close MCP session: %v", err)
 		}
 	}()
-	tools, err := connection.ListTools(session.proc.ctx, nil)
+	tools, err := connection.ListTools(bounded, nil)
 	if err != nil {
 		return fmt.Errorf("tools/list against %s: %w", server.URL, err)
 	}

@@ -9,13 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"hostops/pfm/internal/action"
@@ -27,6 +25,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/paths"
+	"hostops/pfm/internal/reload"
 )
 
 const transcriptRoleUser = "user"
@@ -327,31 +326,18 @@ func appendResumeInjection(
 	if err := ctx.Err(); err != nil {
 		return resumeReceipt{}, err
 	}
-	file, err := os.OpenFile(target.Path, os.O_RDWR, 0)
+	// The lock/backup/append discipline is reload.Transcript's — one writer
+	// shared with `reload --new`'s left-behind label, never a second copy.
+	transcript, err := reload.OpenTranscript(target.Path)
 	if err != nil {
-		return resumeReceipt{}, fmt.Errorf("open transcript %q: %w", target.Path, err)
+		return resumeReceipt{}, err
 	}
 	defer func() {
-		if err := file.Close(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close transcript %q: %w", target.Path, err))
+		if err := transcript.Close(); err != nil {
+			returnErr = errors.Join(returnErr, err)
 		}
 	}()
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		return resumeReceipt{}, fmt.Errorf("lock transcript %q: %w", target.Path, err)
-	}
-	defer func() {
-		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_UN); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("unlock transcript %q: %w", target.Path, err))
-		}
-	}()
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
-		return resumeReceipt{}, fmt.Errorf("rewind transcript %q: %w", target.Path, err)
-	}
-	raw, err := io.ReadAll(file)
-	if err != nil {
-		return resumeReceipt{}, fmt.Errorf("read transcript %q: %w", target.Path, err)
-	}
-	tail, err := lastUUIDEvent(raw)
+	tail, err := lastUUIDEvent(transcript.Raw())
 	if err != nil {
 		return resumeReceipt{}, fmt.Errorf("read transcript tail %q: %w", target.Path, err)
 	}
@@ -393,42 +379,12 @@ func appendResumeInjection(
 	if err != nil {
 		return resumeReceipt{}, fmt.Errorf("encode injected transcript event: %w", err)
 	}
-	backupDir := filepath.Join(resolved.Home, ".claude-sessions", ".chat-inject-backups")
-	if err := os.MkdirAll(backupDir, 0o700); err != nil {
-		return resumeReceipt{}, fmt.Errorf("create transcript backup directory %q: %w", backupDir, err)
-	}
 	backup := filepath.Join(
-		backupDir,
+		reload.TranscriptBackupDir(resolved.Home),
 		fmt.Sprintf("%s-%d-%s.jsonl", sessionID, clk.Now().UTC().UnixNano(), eventID[:8]),
 	)
-	backupFile, err := os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return resumeReceipt{}, fmt.Errorf("create transcript backup %q: %w", backup, err)
-	}
-	if _, err := backupFile.Write(raw); err != nil {
-		_ = backupFile.Close()
-		return resumeReceipt{}, fmt.Errorf("write transcript backup %q: %w", backup, err)
-	}
-	if err := backupFile.Sync(); err != nil {
-		_ = backupFile.Close()
-		return resumeReceipt{}, fmt.Errorf("sync transcript backup %q: %w", backup, err)
-	}
-	if err := backupFile.Close(); err != nil {
-		return resumeReceipt{}, fmt.Errorf("close transcript backup %q: %w", backup, err)
-	}
-	if _, err := file.Seek(0, io.SeekEnd); err != nil {
-		return resumeReceipt{}, fmt.Errorf("seek transcript %q for append: %w", target.Path, err)
-	}
-	if len(raw) > 0 && raw[len(raw)-1] != '\n' {
-		if _, err := file.Write([]byte{'\n'}); err != nil {
-			return resumeReceipt{}, fmt.Errorf("separate transcript append %q: %w", target.Path, err)
-		}
-	}
-	if _, err := file.Write(append(encoded, '\n')); err != nil {
-		return resumeReceipt{}, fmt.Errorf("append transcript %q: %w", target.Path, err)
-	}
-	if err := file.Sync(); err != nil {
-		return resumeReceipt{}, fmt.Errorf("sync transcript %q: %w", target.Path, err)
+	if err := transcript.Append(encoded, backup); err != nil {
+		return resumeReceipt{}, err
 	}
 	return resumeReceipt{SessionID: sessionID, EventID: eventID, ParentID: parent, Backup: backup}, nil
 }

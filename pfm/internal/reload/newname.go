@@ -8,11 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"hostops/pfm/internal/clock"
+	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/inject"
 )
 
 // LeftBehindSuffix is appended to the abandoned session's custom title by a
@@ -96,8 +100,44 @@ func followName(ctx context.Context, request Request, options Options, tmux Tmux
 		fmt.Fprintf(stderr, "pfm chat reload --new: name %q is not one line — not carried\n", request.Name)
 		return
 	}
+	options.defaults()
+	// The steer was only proven TYPED and submitted (deliverThen) — its turn
+	// is still running. A slash command typed into a running turn is ordinary
+	// conversation text, not a TUI command, so the rename has to wait out that
+	// turn first. The wait is inject's, the one this repo has
+	// (inject.SettledTurn); a second copy here would drift from it.
+	if request.Then != "" {
+		settled := inject.SettledTurn{
+			Capture: func(ctx context.Context) (string, error) {
+				return tmux.Capture(ctx, request.SocketPath, request.Pane)
+			},
+			Sleep:      func(ctx context.Context, duration time.Duration) { _ = options.Clock.Sleep(ctx, duration) },
+			Pane:       request.Pane,
+			Min:        options.Poll,
+			Poll:       options.Poll,
+			Settle:     options.Poll,
+			BusyTries:  renameBusyTries,
+			IdleTries:  options.IdleTries,
+			IdleStable: renameIdleStable,
+		}
+		switch observed, err := settled.Run(ctx); {
+		case err != nil:
+			fmt.Fprintf(
+				stderr,
+				"pfm chat reload --new: could not read %s while waiting out the steer's turn: %v — typing the rename anyway\n",
+				request.Pane,
+				err,
+			)
+		case !observed:
+			fmt.Fprintf(
+				stderr,
+				"pfm chat reload --new: no turn boundary seen after the steer — the rename may land inside its turn\n",
+			)
+		}
+	}
 	rename := request
 	rename.Then = "/rename " + request.Name
+	since := options.Clock.Now()
 	if err := deliverThen(ctx, rename, options, tmux, proc, stderr); err != nil {
 		fmt.Fprintf(
 			stderr,
@@ -107,8 +147,27 @@ func followName(ctx context.Context, request Request, options Options, tmux Tmux
 			request.Pane,
 			request.Name,
 		)
-	} else {
+	} else if landed, err := waitRenameLanded(ctx, request, options, since); landed {
 		fmt.Fprintf(stderr, "pfm chat reload --new: reborn chat renamed %q\n", request.Name)
+	} else {
+		// Typed is not renamed. deliverThen proves keystrokes reached the
+		// composer and were submitted; whether the harness executed them as a
+		// slash command is a different claim, and printing the success line on
+		// the first one is how a chat kept its auto-name while stderr said it
+		// had been renamed. The claim now rests on the reborn transcript's own
+		// custom-title record — and when that cannot be read, the line says so
+		// and carries the recovery command.
+		reason := "no custom-title record naming it appeared in the reborn transcript"
+		if err != nil {
+			reason = err.Error()
+		}
+		fmt.Fprintf(
+			stderr,
+			"pfm chat reload --new: the rename was typed but NOT confirmed (%s) — run: pfm chat name %s %q\n",
+			reason,
+			request.Pane,
+			request.Name,
+		)
 	}
 	if request.Transcript == "" {
 		return
@@ -130,6 +189,116 @@ func followName(ctx context.Context, request Request, options Options, tmux Tmux
 		title,
 		request.Transcript,
 	)
+}
+
+const (
+	// renameBusyTries bounds how many polls the settled-turn wait spends
+	// looking for the steer's turn to BEGIN before it falls back to steady
+	// idle. A steer whose turn started and finished inside one poll is the
+	// ordinary short answer, not a failure.
+	renameBusyTries = 15
+	// renameIdleStable is how many consecutive quiet samples end that turn —
+	// the same two-in-a-row proof waitCallerIdle uses for the /exit.
+	renameIdleStable = 2
+	// renameConfirmTries bounds the readback, polled at options.Poll: the
+	// harness writes its custom-title record when it executes /rename, which
+	// is one short turn away, not minutes — and a rename that has not landed
+	// by then is reported as unconfirmed rather than waited out in silence.
+	renameConfirmTries = 15
+	// renameMTimeSkew is the slack waitRenameLanded allows between this
+	// process's clock and the filesystem's timestamp granularity.
+	renameMTimeSkew = 2 * time.Second
+)
+
+// waitRenameLanded reads the rename back rather than assuming it. A Claude
+// /rename writes a custom-title record into the LIVE session's transcript
+// (the shape TranscriptTitle reads, and index/claude.go after it), so the
+// reborn transcript — any transcript under the account's roots written since
+// the keystrokes went in, other than the one this reboot abandoned — carrying
+// exactly this name is the rename having taken effect.
+//
+// The three states stay distinct: landed, not landed, and could-not-look. An
+// engine whose rename leaves no such record, or a caller that handed down no
+// roots to look in, is the last one — an error, never a quiet "no".
+func waitRenameLanded(ctx context.Context, request Request, options Options, since time.Time) (bool, error) {
+	if request.Engine != pfmengine.Claude {
+		return false, fmt.Errorf(
+			"a %s rename leaves no custom-title record this can read back",
+			engineLabel(request.Engine),
+		)
+	}
+	if len(options.ClaudeRoots) == 0 {
+		return false, errors.New("no Claude session roots were given to read the new name back from")
+	}
+	// The cutoff is nudged back because a file's mtime and this process's
+	// clock are not the same clock: a filesystem with coarse timestamp
+	// granularity can stamp a file written just now slightly EARLIER than the
+	// instant we read before typing, and a confirmation missed that way would
+	// report a rename that did happen as one that did not.
+	cutoff := since.Add(-renameMTimeSkew)
+	var lastErr error
+	for attempt := 0; attempt < renameConfirmTries; attempt++ {
+		found, err := renameRecorded(options.ClaudeRoots, request.Transcript, request.Name, cutoff)
+		if err != nil {
+			lastErr = err
+		}
+		if found {
+			return true, nil
+		}
+		if err := options.Clock.Sleep(ctx, options.Poll); err != nil {
+			return false, err
+		}
+	}
+	if lastErr != nil {
+		return false, fmt.Errorf("could not read the reborn transcript back: %w", lastErr)
+	}
+	return false, nil
+}
+
+// renameRecorded is one sweep of the roots for a transcript written since the
+// rename was typed whose resolved title is exactly the requested name.
+func renameRecorded(roots []string, skip, name string, since time.Time) (bool, error) {
+	found := false
+	var walkErr error
+	for _, root := range roots {
+		err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+			switch {
+			case found:
+				return filepath.SkipAll
+			case err != nil:
+				// A directory that could not be walked is a failure to LOOK.
+				// It is remembered and the sweep continues: another root may
+				// still hold the answer, and a partial look must never report
+				// itself as "not renamed".
+				walkErr = errors.Join(walkErr, err)
+				return nil
+			case entry.IsDir() || filepath.Ext(path) != ".jsonl" || path == skip:
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil {
+				walkErr = errors.Join(walkErr, err)
+				return nil
+			}
+			if info.ModTime().Before(since) {
+				return nil
+			}
+			title, err := TranscriptTitle(path)
+			if err != nil {
+				walkErr = errors.Join(walkErr, err)
+				return nil
+			}
+			if title == name {
+				found = true
+				return filepath.SkipAll
+			}
+			return nil
+		})
+		if err != nil {
+			walkErr = errors.Join(walkErr, err)
+		}
+	}
+	return found, walkErr
 }
 
 // labelTranscript appends one custom-title record to a Claude transcript

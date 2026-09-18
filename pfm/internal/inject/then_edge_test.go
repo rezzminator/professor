@@ -85,6 +85,16 @@ func (fake fakeSelf) Identify(context.Context) (resolve.Identity, error) {
 type paneFrame struct {
 	phase   string
 	capture string
+	// visible is what a capture of the VISIBLE fold alone returns, when that
+	// differs from the history capture samplePane asks for. "" means the two
+	// agree. A frame that sets it models the one shape the receipt count
+	// exists for: a receipt that is in the pane's history but clipped out of
+	// the visible fold, and scrolls back into view later.
+	visible string
+	// err is a capture that FAILED. The zero paneSample is not what this
+	// frame hands back — the error is, so the waiter can tell a pane it could
+	// not read from a pane with nothing on it.
+	err error
 }
 
 const (
@@ -119,7 +129,7 @@ func (script *paneScript) Capture(
 	_ context.Context,
 	_, _ string,
 	_ bool,
-	_ int,
+	scrollback int,
 ) (string, error) {
 	script.mu.Lock()
 	defer script.mu.Unlock()
@@ -128,7 +138,14 @@ func (script *paneScript) Capture(
 		index = len(script.frames) - 1
 	}
 	script.served++
-	return script.frames[index].capture, nil
+	frame := script.frames[index]
+	if frame.err != nil {
+		return "", frame.err
+	}
+	if scrollback == 0 && frame.visible != "" {
+		return frame.visible, nil
+	}
+	return frame.capture, nil
 }
 
 // decidedIn names the phase the waiter was looking at when it stopped waiting.
@@ -163,6 +180,18 @@ func newScriptedEngine(t *testing.T, frames []paneFrame) (*Engine, *paneScript) 
 	return engine, script
 }
 
+// mustSettle runs the settled-turn wait and fails the test on the baseline
+// error — the state that means the pane could not be read even once, which no
+// scripted fixture here produces (settled_test.go covers that one on purpose).
+func mustSettle(t *testing.T, engine *Engine, selfTarget bool) bool {
+	t.Helper()
+	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", selfTarget)
+	if err != nil {
+		t.Fatalf("waitForSettledTurn() baseline error: %v", err)
+	}
+	return observed
+}
+
 func repeatFrame(phase, capture string, count int) []paneFrame {
 	frames := make([]paneFrame, 0, count)
 	for range count {
@@ -185,7 +214,7 @@ func TestThenWaiterDoesNotDeliverBeforeTheCompactionRuns(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseDone, captureReceipt, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	mustSettle(t, engine, true)
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -214,7 +243,7 @@ func TestThenWaiterDoesNotDeliverIntoResumedWork(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseLate, captureReceipt, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	mustSettle(t, engine, true)
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -246,7 +275,7 @@ func TestThenWaiterStillReleasesWithoutACompactionReceipt(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseResumed, captureBusy, 8)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	mustSettle(t, engine, true)
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -274,7 +303,7 @@ func TestCompactionReceiptNeedsToAppear(t *testing.T) {
 	if !strings.Contains(frames[2].capture, "Compacted") {
 		t.Fatalf("fixture no longer shows a stale receipt during the gap")
 	}
-	engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	mustSettle(t, engine, true)
 
 	if got := script.decidedIn(); got != phaseDone {
 		t.Fatalf(
@@ -301,7 +330,7 @@ func TestThenWaiterDoesNotBurnTheBudgetWaitingForATurnThatAlreadyRan(t *testing.
 	engine.options.ThenIdleTries = 500
 	engine.options.ThenIdleStable = 2
 
-	observed := engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	observed := mustSettle(t, engine, true)
 
 	if observed {
 		t.Fatal(
@@ -407,7 +436,7 @@ func TestNonSelfWaiterDoesNotWaitOutATurnItDidNotStart(t *testing.T) {
 	frames = append(frames, repeatFrame(phaseLate, captureBusy, 6)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	observed := engine.waitForSettledTurn(context.Background(), "", "chat", false)
+	observed := mustSettle(t, engine, false)
 
 	if !observed {
 		t.Fatal(
@@ -687,7 +716,7 @@ func TestThenWaiterAcceptsTheReceiptWhileABackgroundAgentKeepsThePaneBusy(t *tes
 			engine, script := newScriptedEngine(t, frames)
 			engine.options.ThenBusyTries = 4
 			engine.options.ThenIdleTries = 8
-			observed := engine.waitForSettledTurn(context.Background(), "", "chat", selfTarget)
+			observed := mustSettle(t, engine, selfTarget)
 
 			if !observed {
 				t.Fatal(
@@ -712,19 +741,32 @@ func TestThenWaiterAcceptsTheReceiptWhileABackgroundAgentKeepsThePaneBusy(t *tes
 // TestThenWaiterIgnoresAReceiptThatWasAlreadyOnScreenWhenItWoke is the
 // stale-receipt trap of the rule above (the class reload_then_proof_test.go's
 // stale placeholder pins): a receipt already in the baseline capture and
-// never re-appearing proves nothing about THIS turn, footer or no footer.
+// never re-printed proves nothing about THIS turn, footer or no footer.
+//
+// The fixture is deliberately one the OLD condition passes and the new one
+// fails (F7): the baseline carries a receipt AND a busy footer, a turn is
+// then seen to start, and the pane goes idle with that same receipt still on
+// it. "turnStarted && receipt && !busy" fires on the first idle frame — it
+// never asked whether the receipt was NEW — while the count-based rule sees
+// one receipt before and one after and refuses. The idle-stable fallback is
+// held out of reach (IdleStable above the whole budget) so the two codepaths
+// differ in the RESULT, not merely in when they returned.
 func TestThenWaiterIgnoresAReceiptThatWasAlreadyOnScreenWhenItWoke(t *testing.T) {
-	frames := repeatFrame(phaseLate, captureBusyReceipt, 12)
+	var frames []paneFrame
+	frames = append(frames, repeatFrame(phaseCaller, captureBusyReceipt, 3)...)
+	frames = append(frames, repeatFrame(phaseLate, captureReceipt, 12)...)
 
 	engine, script := newScriptedEngine(t, frames)
-	engine.options.ThenBusyTries = 3
+	engine.options.ThenBusyTries = 2
 	engine.options.ThenIdleTries = 6
-	observed := engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	engine.options.ThenIdleStable = 30
+	observed := mustSettle(t, engine, false)
 
 	if observed {
 		t.Fatal(
 			"waiter took a receipt that was already on screen in its baseline " +
-				"capture as proof this turn's compaction ran — a receipt must APPEAR",
+				"capture as proof this turn's compaction ran — a receipt must be " +
+				"newly PRINTED, not merely still there once the footer cleared",
 		)
 	}
 	if script.served < 3 {

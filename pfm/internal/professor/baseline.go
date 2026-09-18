@@ -32,6 +32,38 @@ type FilePin struct {
 	PinnedAt     string `json:"pinnedAt"`
 }
 
+// PinSummary spells WHICH pins a baseline holds and when they were stamped —
+// the evidence `pfm init`'s refusal shows for "this project is already
+// scaffolded". Files is a map, so ranging it for "the" date reported an
+// arbitrary entry's, which is well-defined only while every pin shares one
+// stamp; `pfm update pin` (one file, today's date) breaks that. The newest
+// stamp is the answer, and pins that disagree say so rather than picking a
+// winner silently. A baseline that pins NOTHING is its own state, never a
+// date that could not be found: it is the degenerate shape a second init
+// would leave behind, and the refusal exists to preserve it.
+func (baseline Baseline) PinSummary() string {
+	if len(baseline.Files) == 0 {
+		return "pinning no files at all"
+	}
+	newest := ""
+	spread := false
+	for _, pin := range baseline.Files {
+		switch {
+		case newest == "":
+			newest = pin.PinnedAt
+		case pin.PinnedAt != newest:
+			spread = true
+			if pin.PinnedAt > newest {
+				newest = pin.PinnedAt
+			}
+		}
+	}
+	if spread {
+		return fmt.Sprintf("%d file(s) pinned, the newest on %s — pins span several dates", len(baseline.Files), newest)
+	}
+	return fmt.Sprintf("%d file(s) pinned by pfm init on %s", len(baseline.Files), newest)
+}
+
 func BaselinePath(root string) string {
 	return filepath.Join(root, ".professor", "baseline.json")
 }

@@ -318,7 +318,9 @@ func TestClaimArmedLeavesAnotherLiveWaitersRecord(t *testing.T) {
 	t.Cleanup(func() { _ = child.Process.Kill(); _ = child.Wait() })
 	writeArmedFixture(t, path, child.Process.Pid, "/compact theirs", time.Now())
 
-	engine.claimArmed(path, "resume")
+	if err := engine.claimArmed(path, "resume"); err != nil {
+		t.Fatalf("claimArmed() over a readable record held by another live waiter = %v, want no error", err)
+	}
 
 	record, _, err := readArmedRecord(path)
 	if err != nil || record.PID != child.Process.Pid || record.Steer != "/compact theirs" {
@@ -330,5 +332,120 @@ func TestClaimArmedLeavesAnotherLiveWaitersRecord(t *testing.T) {
 	}
 	if !strings.Contains(warnings.String(), "held by pid "+strconv.Itoa(child.Process.Pid)) {
 		t.Fatalf("the refused claim was not logged: %q", warnings.String())
+	}
+}
+
+// TestScheduleHoldsThePaneLockAcrossCheckAndArm pins F3: refuseIfArmed only
+// READS the armed record and armRecord writes it a spawn later, so with
+// nothing spanning the two, concurrent schedules onto one pane could both
+// observe it unarmed and both spawn a waiter. The check-and-arm now runs
+// under the pane's own inject lock — the same lock a live inject holds — so
+// a schedule that cannot take that lock is refused instead of racing. Held
+// here by THIS process, whose pid is provably alive, so the lock is never
+// stolen as stale.
+func TestScheduleHoldsThePaneLockAcrossCheckAndArm(t *testing.T) {
+	spawner := &fakeSpawner{}
+	engine := newTestEngineWith(t, "cc-armed", &fakeTmux{capture: captureIdle}, spawner)
+	engine.options.LockTimeout = 50 * time.Millisecond
+
+	target, _, _, err := engine.Resolve(context.Background(), "chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	held, refusal := engine.lockTarget(context.Background(), target)
+	if refusal != "" {
+		t.Fatalf("could not take the pane lock for the fixture: %s", refusal)
+	}
+	defer held.release()
+
+	result, err := engine.ScheduleAfterCurrentTurn(context.Background(), armedRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Code != CodeUndelivered || !strings.Contains(result.Message, "could not acquire inject lock") {
+		t.Fatalf(
+			"ScheduleAfterCurrentTurn() = %+v while the pane's inject lock was held; want a Code %d refusal naming the lock — the check and the arming must be one step",
+			result,
+			CodeUndelivered,
+		)
+	}
+	if spawned := spawner.spawned(); len(spawned) != 0 {
+		t.Fatalf("a waiter was spawned while the pane lock was held by someone else: %+v", spawned)
+	}
+}
+
+// TestScheduleRefusalNamesTheTargetsEngine pins F9: SteerSpawn carries the
+// engine and announce.go spells it out, but the armed refusal did not — a
+// Codex-pane refusal read identically to a Claude one, though the two carry
+// different waiter contracts.
+func TestScheduleRefusalNamesTheTargetsEngine(t *testing.T) {
+	for _, tc := range []struct{ socket, want string }{
+		{"cc-armed", "engine claude"},
+		{"cx-armed", "engine codex"},
+	} {
+		t.Run(tc.socket, func(t *testing.T) {
+			spawner := &fakeSpawner{}
+			engine := newTestEngineWith(t, tc.socket, &fakeTmux{capture: captureIdle}, spawner)
+			writeArmedFixture(t, armedFixturePath(engine, tc.socket), os.Getpid(), "resume the wave", time.Now())
+
+			result, err := engine.ScheduleAfterCurrentTurn(context.Background(), armedRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Code != CodeBusy {
+				t.Fatalf("ScheduleAfterCurrentTurn() = %+v, want a Code %d armed refusal", result, CodeBusy)
+			}
+			if !strings.Contains(result.Message, tc.want) {
+				t.Fatalf("armed refusal %q does not name the target's engine (%q)", result.Message, tc.want)
+			}
+		})
+	}
+}
+
+// TestDeliverThenRefusesToClaimAnUnreadableArmedRecord pins F4: claimArmed
+// warned about a record it could not decode and then stamped its own pid onto
+// the zero value, erasing the identity of an arming it never read — the
+// second waiter the record exists to prevent, and a third schedule would then
+// be refused by name against the wrong one. The waiter now stops, names the
+// path and the read error on its visible result, and leaves the record byte
+// for byte as it found it.
+func TestDeliverThenRefusesToClaimAnUnreadableArmedRecord(t *testing.T) {
+	fake := &fakeTmux{capture: captureIdle, submitOnEnter: true}
+	spawner := &fakeSpawner{}
+	engine := newTestEngineWith(t, "cc-armed", fake, spawner)
+	path := armedFixturePath(engine, "cc-armed")
+	torn := []byte(`{"pid":4242,"socket":"/tmp/tmux-jail/cc-armed","pane":"%1","ste`)
+	if err := os.WriteFile(path, torn, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := engine.DeliverThen(context.Background(), ThenWait{
+		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-armed"),
+		Target:     "%1",
+		Steers:     []string{"resume the wave"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Code != CodeUndelivered || result.Status != statusUndelivered {
+		t.Fatalf(
+			"DeliverThen() = %+v over an armed record that could not be read; want a Code %d undelivered result — an unreadable record is never absence",
+			result,
+			CodeUndelivered,
+		)
+	}
+	if !strings.Contains(result.Message, path) ||
+		!strings.Contains(result.Message, "could not read the armed steer record") {
+		t.Fatalf("undelivered message %q names neither the record path nor the read failure", result.Message)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(got, torn) {
+		t.Fatalf("the unreadable armed record was rewritten: %q, want it untouched (%q)", got, torn)
+	}
+	if len(fake.keys) != 0 || len(fake.literals) != 0 {
+		t.Fatalf("typed into the pane after refusing to claim: keys=%q literals=%q", fake.keys, fake.literals)
 	}
 }

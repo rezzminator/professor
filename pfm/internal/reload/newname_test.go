@@ -11,6 +11,7 @@ import (
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/index"
+	"hostops/pfm/internal/inject"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
 )
@@ -21,12 +22,57 @@ import (
 type renameTmux struct {
 	*delayedThenTmux
 	literals []string
+	// claudeRoot, when set, makes this fake stand in for the harness on the
+	// other end of the keystrokes: a /rename it EXECUTES writes the reborn
+	// session's custom-title record, exactly as Claude Code does. Left unset,
+	// the keystrokes land and nothing is renamed — the state the "typed but
+	// NOT confirmed" warning exists for.
+	claudeRoot string
+	// busyLeft is how many captures after a submit render the engine's busy
+	// footer: the steer's turn, still running.
+	busyLeft int
+	// typedWhileBusy records a literal typed while the pane still read busy —
+	// the state a /rename must never be typed in, because a slash command
+	// typed into a running turn is conversation text, not a TUI command.
+	typedWhileBusy []string
+}
+
+// Capture renders the steer's turn as a RUNNING turn for busyLeft polls after
+// its submit — the state deliverThen leaves behind and never waits out.
+func (tmux *renameTmux) Capture(ctx context.Context, socket, pane string) (string, error) {
+	capture, err := tmux.delayedThenTmux.Capture(ctx, socket, pane)
+	if err != nil || tmux.busyLeft <= 0 || !tmux.submitted {
+		return capture, err
+	}
+	tmux.busyLeft--
+	return capture + "\nWorking on it\n  esc to interrupt\n", nil
 }
 
 func (tmux *renameTmux) SendLiteral(ctx context.Context, socket, pane, value string) error {
+	if capture, err := tmux.Capture(ctx, socket, pane); err == nil && inject.IsBusy(capture) {
+		tmux.typedWhileBusy = append(tmux.typedWhileBusy, value)
+	}
 	tmux.literals = append(tmux.literals, value)
 	tmux.submitted = false
+	if name, ok := strings.CutPrefix(value, "/rename "); ok && tmux.claudeRoot != "" {
+		writeRebornTranscript(tmux.claudeRoot, name)
+	}
 	return tmux.delayedThenTmux.SendLiteral(ctx, socket, pane, value)
+}
+
+// rebornSID is the session the --new reboot started; its transcript is where
+// Claude records the name /rename gave it.
+const rebornSID = "33333333-3333-4333-8333-333333333333"
+
+// writeRebornTranscript is the harness half of a /rename: the live session's
+// transcript gains the custom-title record every by-name verb reads.
+func writeRebornTranscript(claudeRoot, name string) {
+	dir := filepath.Join(claudeRoot, "project-x")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	line := `{"type":"custom-title","customTitle":"` + name + `","sessionId":"` + rebornSID + `"}` + "\n"
+	_ = os.WriteFile(filepath.Join(dir, rebornSID+".jsonl"), []byte(line), 0o600)
 }
 
 const leftBehindSID = "22222222-2222-4222-8222-222222222222"
@@ -69,7 +115,16 @@ func runNew(t *testing.T, tmux *renameTmux, home, transcript, name, then string,
 			AccountIDs: []int{1},
 			Then:       then,
 		},
-		Options{Home: home, SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2, ThenTries: 2},
+		Options{
+			Home:        home,
+			SIDDir:      t.TempDir(),
+			ClaudeRoots: []string{filepath.Join(home, "projects")},
+			Delay:       -1,
+			Poll:        -1,
+			ExitTries:   2,
+			ThenTries:   2,
+			IdleTries:   4,
+		},
 		tmux,
 		promptReadyProc{tmux: tmux.delayedThenTmux},
 		stderr,
@@ -120,7 +175,7 @@ func TestRunNewRenamesTheRebornChatAfterTheSteerAndRelabelsTheSessionLeftBehind(
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmux := &renameTmux{delayedThenTmux: &delayedThenTmux{}}
+	tmux := &renameTmux{delayedThenTmux: &delayedThenTmux{}, claudeRoot: claudeRoot}
 	var stderr bytes.Buffer
 
 	result := runNew(t, tmux, home, transcript, "Wave lead", "continue the task", &stderr)
@@ -211,7 +266,7 @@ func TestRunNewWarnsWhenTheLeftBehindTranscriptCannotBeLabelled(t *testing.T) {
 	if err := os.MkdirAll(transcript, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	tmux := &renameTmux{delayedThenTmux: &delayedThenTmux{}}
+	tmux := &renameTmux{delayedThenTmux: &delayedThenTmux{}, claudeRoot: filepath.Join(home, "projects")}
 	var stderr bytes.Buffer
 
 	result := runNew(t, tmux, home, transcript, "Wave lead", "continue the task", &stderr)
@@ -291,5 +346,61 @@ func TestRunNewRefusesToTypeANameThatIsNotOneLine(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "not one line") {
 		t.Fatalf("worker log does not report the refused name: %q", stderr.String())
+	}
+}
+
+// TestRunNewTypesTheRenameOnlyAfterTheSteersTurnSettles pins F5's first half:
+// deliverThen proves the steer was TYPED and submitted, never that its turn
+// ended, so the /rename went in while the model was still answering — where a
+// slash command is ordinary conversation text, not a TUI command, and the
+// chat keeps its auto-name. The rename now waits out that turn through the
+// one settled-turn wait this repo has (inject.SettledTurn).
+func TestRunNewTypesTheRenameOnlyAfterTheSteersTurnSettles(t *testing.T) {
+	home := t.TempDir()
+	claudeRoot := filepath.Join(home, "projects")
+	transcript := writeLeftBehindTranscript(t, claudeRoot, "Wave lead")
+	tmux := &renameTmux{delayedThenTmux: &delayedThenTmux{}, claudeRoot: claudeRoot, busyLeft: 4}
+	var stderr bytes.Buffer
+
+	runNew(t, tmux, home, transcript, "Wave lead", "continue the task", &stderr)
+
+	if want := []string{"/exit", "continue the task", "/rename Wave lead"}; !reflect.DeepEqual(tmux.literals, want) {
+		t.Fatalf("typed %q, want %q", tmux.literals, want)
+	}
+	if len(tmux.typedWhileBusy) != 0 {
+		t.Fatalf(
+			"typed %q into a pane that still read BUSY with the steer's turn — a /rename typed into a running turn is conversation text, not a command",
+			tmux.typedWhileBusy,
+		)
+	}
+	if !strings.Contains(stderr.String(), `renamed "Wave lead"`) {
+		t.Fatalf("worker log does not report the rename it confirmed: %q", stderr.String())
+	}
+}
+
+// TestRunNewWarnsWhenTheRenameWasTypedButNeverTookEffect pins F5's second
+// half: the success line used to rest on the keystrokes having landed. Here
+// they land and nothing renames the chat — no custom-title record appears —
+// so the line must be a warning naming the recovery command, never a claim
+// that the chat was renamed.
+func TestRunNewWarnsWhenTheRenameWasTypedButNeverTookEffect(t *testing.T) {
+	home := t.TempDir()
+	transcript := writeLeftBehindTranscript(t, filepath.Join(home, "projects"), "Wave lead")
+	// claudeRoot unset: the keystrokes land, the harness does nothing with them.
+	tmux := &renameTmux{delayedThenTmux: &delayedThenTmux{}}
+	var stderr bytes.Buffer
+
+	runNew(t, tmux, home, transcript, "Wave lead", "continue the task", &stderr)
+
+	if want := []string{"/exit", "continue the task", "/rename Wave lead"}; !reflect.DeepEqual(tmux.literals, want) {
+		t.Fatalf("typed %q, want %q", tmux.literals, want)
+	}
+	log := stderr.String()
+	if strings.Contains(log, `reborn chat renamed "Wave lead"`) {
+		t.Fatalf("worker log claims a rename that never took effect — typed is not renamed: %q", log)
+	}
+	if !strings.Contains(log, "typed but NOT confirmed") ||
+		!strings.Contains(log, `pfm chat name %7 "Wave lead"`) {
+		t.Fatalf("worker log does not name the unconfirmed rename and its recovery command: %q", log)
 	}
 }

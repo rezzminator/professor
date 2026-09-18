@@ -68,16 +68,14 @@ func refuseRescaffold(force bool, target string, stderr io.Writer) (int, bool) {
 		fmt.Fprintf(stderr, "pfm init: inspect baseline: %v\n", statErr)
 		return 1, true
 	}
-	pinnedAt := "unknown date"
+	pinned := ""
 	if baseline, err := professor.Load(target); err != nil {
-		pinnedAt = fmt.Sprintf("(unreadable: %v)", err)
+		pinned = fmt.Sprintf("could not be read: %v", err)
 	} else {
-		for _, pin := range baseline.Files {
-			pinnedAt = pin.PinnedAt
-		}
+		pinned = baseline.PinSummary()
 	}
-	fmt.Fprintf(stderr, "pfm init: %s is already scaffolded (%s exists, pinned by pfm init on %s) — "+
+	fmt.Fprintf(stderr, "pfm init: %s is already scaffolded (%s exists, %s) — "+
 		"a second init would rewrite the baseline; run `pfm update check` to see upstream changes, "+
-		"or `pfm init --force` to re-scaffold and re-pin\n", target, professor.BaselinePath(target), pinnedAt)
+		"or `pfm init --force` to re-scaffold and re-pin\n", target, professor.BaselinePath(target), pinned)
 	return 2, true
 }

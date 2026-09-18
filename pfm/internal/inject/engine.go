@@ -537,6 +537,20 @@ func (engine *Engine) ScheduleAfterCurrentTurn(
 	steers = append(steers, request.Message)
 	steers = append(steers, then...)
 	logPath := engine.steerLogPath(target)
+	// The check and the arming are ONE step, under the pane's own inject lock.
+	// refuseIfArmed only READS the armed record; the matching write happens
+	// later, inside spawner.Spawn (armRecord), so two schedules whose reads
+	// both landed before either write both saw an unarmed pane and both
+	// spawned a waiter — armRecord's "leave a live arming alone" branch
+	// suppresses the second RECORD, never the second PROCESS, and two waiters
+	// then race one pane and one O_TRUNC log. The lock is the same one a live
+	// inject holds while it types (lockTarget), and it is released as soon as
+	// the record is down and the waiter is running.
+	lock, lockRefusal := engine.lockTarget(ctx, target)
+	if lockRefusal != "" {
+		return refused(CodeUndelivered, lockRefusal), nil
+	}
+	defer lock.release()
 	if result, ok := engine.refuseIfArmed(target, request, logPath); !ok {
 		return result, nil
 	}
@@ -793,22 +807,10 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		Pane:           target.Pane,
 		ResolutionNote: detail,
 	}
-	lock, err := acquireTargetLock(
-		ctx,
-		engine.options.Clock,
-		engine.options.LockRoot,
-		target.SocketPath+":"+target.Pane,
-		engine.options.LockTimeout,
-		engine.options.LockPoll,
-		engine.options.LockMaxHold,
-	)
-	if err != nil {
+	lock, lockRefusal := engine.lockTarget(ctx, target)
+	if lockRefusal != "" {
 		base.Code = CodeUndelivered
-		base.Message = fmt.Sprintf(
-			"could not acquire inject lock for %q: %v",
-			target.Pane,
-			err,
-		)
+		base.Message = lockRefusal
 		return base, nil
 	}
 	defer lock.release()

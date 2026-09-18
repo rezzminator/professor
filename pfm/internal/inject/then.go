@@ -43,11 +43,43 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 		}
 	}
 	armed := armedPathFor(engine.steerLogPath(Target{SocketPath: socketPath, Pane: target}))
-	engine.claimArmed(armed, steers[0])
+	if claimErr := engine.claimArmed(armed, steers[0]); claimErr != nil {
+		// The record could not be READ. Claiming it anyway would overwrite an
+		// arming whose identity is unknown — see claimArmed. Nothing is typed
+		// and nothing is released: the record stays exactly as it was found,
+		// for whoever wrote it.
+		return Result{
+			Status: statusUndelivered,
+			Code:   CodeUndelivered,
+			Message: fmt.Sprintf(
+				"then steer NOT delivered: could not read the armed steer record %s: %v — refusing to claim it over an arming this waiter cannot identify; steer kept in the log: %q",
+				armed,
+				claimErr,
+				steers[0],
+			),
+		}, nil
+	}
 	defer func() {
 		engine.releaseArmed(armed, err == nil && result.Code == 0 && result.Steers > 0)
 	}()
-	observed := engine.waitForSettledTurn(ctx, socketPath, target, wait.SelfTarget)
+	observed, baselineErr := engine.waitForSettledTurn(ctx, socketPath, target, wait.SelfTarget)
+	if baselineErr != nil {
+		// Not one capture of the pane succeeded, so the waiter never had a
+		// reference frame to judge a compaction receipt against. Delivering
+		// here would be delivering blind — and reporting the strong guarantee
+		// over a pane that was never read once is the exact shape this waiter
+		// exists to refuse.
+		return Result{
+			Status: statusUndelivered,
+			Code:   CodeUndelivered,
+			Message: fmt.Sprintf(
+				"then steer NOT delivered: could not read pane %q even once for a baseline (last tmux error: %v) — the waiter never had a reference frame for this turn; steer kept in the log: %q",
+				target,
+				baselineErr,
+				steers[0],
+			),
+		}, nil
+	}
 	if !observed && wait.Engine == string(pfmengine.Codex) {
 		// The steady-idle fallback below is a GUESS, and on a Codex pane it
 		// is the wrong one: the Claude busy regex does not know the Codex
@@ -121,168 +153,6 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 // statusUndelivered is the Result.Status of a waiter that gave up without
 // typing: the steer is in the log, nothing reached the pane.
 const statusUndelivered = "undelivered"
-
-// paneSample is one observation of the target pane. Busy alone cannot answer
-// "is the turn I was sent to ride out over yet" — it is true for ANY turn,
-// including the caller's own and the one the session starts by itself after a
-// compaction. The receipt is the only positive evidence in the pane that a
-// compaction actually ran.
-type paneSample struct {
-	busy    bool
-	receipt bool
-}
-
-func (engine *Engine) samplePane(
-	ctx context.Context,
-	socketPath, target string,
-) paneSample {
-	capture, err := engine.tmux.Capture(ctx, socketPath, target, false, 0)
-	if err != nil {
-		// An unreadable pane is not busy; the delivery attempt reports the
-		// dead pane truthfully instead of spinning here.
-		return paneSample{}
-	}
-	return paneSample{
-		busy:    IsBusy(capture),
-		receipt: CompactionReceipt(capture),
-	}
-}
-
-// waitForSettledTurn rides out the turn the PRIMARY started and reports whether
-// it ever actually saw that turn.
-//
-// The old shape (chat.sh:1062-1077) waited for the pane to go busy and then for
-// idle to hold steady. That works only if the busy it latches onto belongs to
-// the primary — and busy carries no identity. For a self-inject the pane is
-// already busy with the caller's own turn when the waiter wakes up, so the
-// waiter would ride out the WRONG turn and then race whichever idle came first,
-// losing in one of two directions depending on nothing but timing:
-//
-//   - caller stops promptly -> the waiter sees the idle BEFORE the queued
-//     /compact has run and delivers the steer into a session that is about to
-//     be compacted away, taking the steer with it.
-//   - caller keeps working -> the brief idle right after the compaction is
-//     shorter than the stability window, so the waiter sleeps through the one
-//     usable moment and delivers on top of work that already resumed.
-//
-// Both are the same defect. The fix is to stop inferring the turn from a
-// coincidence and identify it instead:
-//
-//  1. the caller's own turn must END first (an idle observation) — until then
-//     nothing on screen can belong to the primary;
-//  2. a turn must START after that (a busy observation) — that one is the
-//     primary's;
-//  3. a compaction receipt seen after BOTH is positive proof the primary was a
-//     compaction and that it finished, so the first quiet sample after it is
-//     the delivery point.
-//
-// Requiring the receipt to arrive after step 2 is what keeps step 3 from
-// becoming a coincidence detector in its own right: a receipt already on screen
-// when the waiter wakes up is scrollback from an EARLIER compaction and proves
-// nothing about this one.
-//
-// Step 3 has a second door, for the pane a background sub-agent keeps busy.
-// Its footer matches busyPattern for as long as the agent runs, so the pane
-// NEVER reads idle: step 1 cannot complete for a self-inject, and the
-// "receipt AND quiet" test never passes for anyone — the waiter burned its
-// whole budget (~10 min) and then delivered on the WARNING path (Wave 8 item
-// 5, beat E1.20). Sidechains are allowed — /compact works beside a background
-// agent — so the receipt is the boundary: a BASELINE capture before the loop
-// records whether a receipt was already on screen, and a receipt that appears
-// afterwards while the pane still reads busy is this turn's, footer or no
-// footer. A receipt already in the baseline stays scrollback and proves
-// nothing, exactly as before. A receipt that appears at an IDLE sample before
-// any turn was seen to start is still not taken as proof: that is also what a
-// stale receipt uncovered by the caller's footer clearing looks like
-// (TestCompactionReceiptNeedsToAppear), and the steady-idle path below still
-// delivers that shape — with the WARNING that says the guarantee is weaker.
-//
-// Step 3 cannot apply to a primary that prints no receipt — a reload steer, a
-// plain queued message, and (a NAMED gap) a Codex compaction, whose receipt
-// spelling nobody here has confirmed. Those fall back to steps 1-2 plus the
-// steady-idle window, which is strictly better than the old behaviour because
-// the caller's own turn can no longer be mistaken for the primary's.
-//
-// The returned bool is false when the bound expired without ever observing a
-// turn boundary. It is not an error — refusing to deliver would strand the
-// chain, which is worse — but it is a WEAKER guarantee than the caller asked
-// for, and DeliverThen says so on the visible result rather than only in a log.
-func (engine *Engine) waitForSettledTurn(
-	ctx context.Context,
-	socketPath, target string,
-	selfTarget bool,
-) bool {
-	engine.sleepContext(ctx, engine.options.ThenMin)
-
-	// Step 1 exists only for a self-inject, where the pane is busy with the
-	// CALLER's turn when the waiter wakes up. For any other target nothing else
-	// owns that pane, so its first busy already belongs to the primary and
-	// insisting on a prior idle would wait out a boundary that never comes.
-	callerYielded := !selfTarget
-	turnStarted := false
-	stable := 0
-	sinceYield := 0
-	// The baseline is the receipt's reference frame: only a receipt that was
-	// NOT here when the waiter woke can be this turn's.
-	baseline := engine.samplePane(ctx, socketPath, target)
-
-	tries := engine.options.ThenBusyTries + engine.options.ThenIdleTries
-	for attempt := 0; attempt < tries; attempt++ {
-		sample := engine.samplePane(ctx, socketPath, target)
-
-		switch {
-		case !callerYielded:
-			callerYielded = !sample.busy
-		case !turnStarted:
-			turnStarted = sample.busy
-			sinceYield++
-		}
-
-		// Positive proof outranks the busy/idle dance: once this turn's own
-		// compaction receipt is on screen and the pane has gone quiet — or
-		// has newly appeared while a background agent's footer keeps the pane
-		// reading busy — the turn we were sent to ride out is provably over.
-		if sample.receipt && ((turnStarted && !sample.busy) || (!baseline.receipt && sample.busy)) {
-			engine.sleepContext(ctx, engine.options.ThenSettle)
-			return true
-		}
-
-		if turnStarted {
-			if sample.busy {
-				stable = 0
-			} else {
-				stable++
-			}
-			if stable >= engine.options.ThenIdleStable {
-				engine.sleepContext(ctx, engine.options.ThenSettle)
-				return true
-			}
-		}
-
-		// The primary's turn never began. Either it started and finished
-		// inside ThenMin, or this pane does not report busy at all. Holding
-		// out for a boundary that already went by would burn the whole idle
-		// budget — minutes — and strand the steer, which is a worse failure
-		// than delivering on a weaker guarantee. So fall back to steady idle
-		// and return false, which is what puts the warning on the result
-		// instead of letting a guess pass for proof.
-		if callerYielded && !turnStarted &&
-			sinceYield > engine.options.ThenBusyTries {
-			if sample.busy {
-				stable = 0
-			} else {
-				stable++
-			}
-			if stable >= engine.options.ThenIdleStable {
-				engine.sleepContext(ctx, engine.options.ThenSettle)
-				return false
-			}
-		}
-		engine.sleepContext(ctx, engine.options.ThenIdlePoll)
-	}
-	engine.sleepContext(ctx, engine.options.ThenSettle)
-	return false
-}
 
 // waitForQuietTypist holds the waiter back from delivering a steer over a
 // human mid-keystroke — the same guard engine.inject applies to a live

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // armedRecord is the ONE post-command steer armed on a pane, kept beside the
@@ -141,6 +143,23 @@ func (record armedRecord) since() string {
 	return time.Unix(record.Stamp, 0).UTC().Format(time.RFC3339)
 }
 
+// armedEngineLabel names the target's engine for a refusal — a Codex-pane
+// refusal must not read identically to a Claude one, because the two carry
+// different waiter contracts (announce.go's WaitingFor says so out loud). The
+// spelling comes from the engine registry, never from a local table; an
+// Engine this package cannot resolve is named as itself rather than defaulted
+// to Claude, because "which engine" is exactly what the reader came for.
+func armedEngineLabel(engineID string) string {
+	if engineID == "" {
+		return "engine unknown"
+	}
+	id, err := pfmengine.Parse(engineID)
+	if err != nil {
+		return "engine " + engineID
+	}
+	return "engine " + strings.ToLower(pfmengine.MustLookup(id).Short)
+}
+
 // refuseIfArmed is ScheduleAfterCurrentTurn's gate before it spawns: a live
 // arming on this pane refuses the request BY NAME; a stale one (waiter gone)
 // is replaced with a note on the log; an unreadable one refuses with the
@@ -169,8 +188,9 @@ func (engine *Engine) refuseIfArmed(target Target, request Request, logPath stri
 		return refused(
 			CodeBusy,
 			fmt.Sprintf(
-				"a post-command steer is already armed on %q (waiter %s since %s, steer: %q) — wait for it or kill that waiter",
+				"a post-command steer is already armed on %q (%s) (waiter %s since %s, steer: %q) — wait for it or kill that waiter",
 				target.Pane,
+				armedEngineLabel(target.Engine),
 				record.waiter(),
 				record.since(),
 				record.Steer,
@@ -210,17 +230,25 @@ func armRecord(request SteerSpawn, now time.Time) error {
 // process, so a second schedule can tell a live arming from a stale one. A
 // record the spawner never wrote (an older spawner, a direct call) is
 // created rather than assumed; one another LIVE waiter owns is theirs and
-// stays so. A failure here is logged, never fatal — the steer still
-// delivers; only the refusal of a second arming gets weaker.
-func (engine *Engine) claimArmed(path, steer string) {
+// stays so.
+//
+// A record that could not be READ is the one state this must never claim
+// over: readArmedRecord's own contract says an unreadable record is an error
+// and never absence, because stamping this waiter's pid onto it would erase
+// the identity of the arming it could not read — exactly the second waiter
+// the record exists to prevent, and the refusal of a third schedule would
+// then name the wrong one. The error is returned, and DeliverThen stops with
+// it on the visible result; a warning alone is not sufficient. A write
+// failure stays a warning: the record's OWNER is unchanged by it.
+func (engine *Engine) claimArmed(path, steer string) error {
 	record, _, err := readArmedRecord(path)
 	if err != nil {
-		engine.warnf("pfm: then waiter: could not read armed steer record %s: %v\n", path, err)
+		return err
 	}
 	now := engine.options.Clock.Now()
 	if record.PID != 0 && record.PID != os.Getpid() && record.alive(now) {
 		engine.warnf("pfm: then waiter: armed steer record %s is held by %s; leaving it\n", path, record.waiter())
-		return
+		return nil
 	}
 	if record.Steer == "" {
 		record.Steer = steerExcerpt(steer)
@@ -230,6 +258,7 @@ func (engine *Engine) claimArmed(path, steer string) {
 	if err := writeArmedRecord(path, record); err != nil {
 		engine.warnf("pfm: then waiter: %v (%s)\n", err, path)
 	}
+	return nil
 }
 
 // releaseArmed is the waiter's half on exit. handoff (this hop delivered and

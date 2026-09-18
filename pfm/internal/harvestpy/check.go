@@ -369,10 +369,43 @@ func hasPinnedArm64PackageRecord(lock string) bool {
 	for _, record := range strings.Split(lock, "[[package]]") {
 		if !lockRecordHasLine(record, `name = "nvidia-cusparselt-cu13"`) ||
 			!lockRecordHasLine(record, `version = "0.8.1"`) ||
-			!strings.Contains(record, "manylinux2014_aarch64") {
+			!lockRecordHasWheel(record, "nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_aarch64.whl") {
 			continue
 		}
 		return true
+	}
+	return false
+}
+
+func lockRecordHasWheel(record, filename string) bool {
+	const wheelsPrefix = "wheels = ["
+	start := strings.Index(record, wheelsPrefix)
+	if start < 0 {
+		return false
+	}
+	body := record[start+len(wheelsPrefix):]
+	end := strings.IndexByte(body, ']')
+	if end < 0 {
+		return false
+	}
+	for _, line := range strings.Split(body[:end], "\n") {
+		const urlPrefix = `url = "`
+		urlStart := strings.Index(line, urlPrefix)
+		if urlStart < 0 {
+			continue
+		}
+		urlStart += len(urlPrefix)
+		urlEnd := strings.IndexByte(line[urlStart:], '"')
+		if urlEnd < 0 {
+			continue
+		}
+		url := line[urlStart : urlStart+urlEnd]
+		if query := strings.IndexAny(url, "?#"); query >= 0 {
+			url = url[:query]
+		}
+		if filepath.Base(url) == filename {
+			return true
+		}
 	}
 	return false
 }

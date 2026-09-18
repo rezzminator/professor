@@ -143,6 +143,38 @@ url = "manylinux2014_aarch64"
 	}
 }
 
+func TestCheckDependenciesRejectsArm64PinWithoutExactAarch64Wheel(t *testing.T) {
+	root := arm64DependencyFixture(t, true, "py3-none-manylinux2014_sbsa", minimalELF(elf.EM_AARCH64))
+	lock := `[[package]]
+name = "nvidia-cusparselt-cu13"
+version = "0.8.1"
+dependencies = ["manylinux2014_aarch64"]
+wheels = [
+    { url = "https://example.invalid/nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_sbsa.whl" },
+]
+`
+	if err := os.WriteFile(filepath.Join(root, "project", "uv.lock"), []byte(lock), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &deps.FakeRunner{}
+	runner.Script(
+		[]string{filepath.Join(root, "uv"), "pip", "check"},
+		deps.RunResult{
+			ExitCode: 1,
+			Stderr:   []byte("The package nvidia-cusparselt-cu13 was built for a different platform"),
+		},
+		nil,
+	)
+	if err := checkDependencies(
+		context.Background(),
+		runner,
+		root,
+		Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+	); err == nil {
+		t.Fatal("arm64 false-positive accepted without the exact aarch64 wheel filename")
+	}
+}
+
 func arm64DependencyFixture(t *testing.T, lockPin bool, wheelTag string, library []byte) string {
 	t.Helper()
 	root := t.TempDir()
@@ -160,7 +192,7 @@ func arm64DependencyFixture(t *testing.T, lockPin bool, wheelTag string, library
 	}
 	lock := "name = \"other-package\"\nurl = \"manylinux2014_x86_64\"\n"
 	if lockPin {
-		lock = "name = \"nvidia-cusparselt-cu13\"\nversion = \"0.8.1\"\nurl = \"manylinux2014_aarch64\"\n"
+		lock = "[[package]]\nname = \"nvidia-cusparselt-cu13\"\nversion = \"0.8.1\"\nwheels = [\n    { url = \"https://example.invalid/nvidia_cusparselt_cu13-0.8.1-py3-none-manylinux2014_aarch64.whl\" },\n]\n"
 	}
 	if err := os.WriteFile(filepath.Join(root, "project", "uv.lock"), []byte(lock), 0o600); err != nil {
 		t.Fatal(err)

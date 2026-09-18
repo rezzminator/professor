@@ -233,6 +233,63 @@ func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 	}
 }
 
+// TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate pins the search-gate
+// fix to /status: the harvester's advertised tool list must track
+// harvestmcp.ToolNames for the runtime actually mounted, never a hardcoded
+// six-tool list that claims `search` whether or not runtimeSearchEnabled
+// holds. Before the fix, mcp_serve_command.go's package-level
+// harvesterMCPTools always listed `search`; that defect is what this test
+// would have caught.
+func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		runtime    harvestmcp.Runtime
+		wantSearch bool
+	}{
+		{"search disabled", harvestmcp.Runtime{Home: t.TempDir(), CacheDir: t.TempDir() + "/cache"}, false},
+		{
+			"search enabled",
+			harvestmcp.Runtime{Home: t.TempDir(), CacheDir: t.TempDir() + "/cache", SearXNGURL: "http://searxng.example.test"},
+			true,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			harvester, err := harvestmcp.NewConfiguredHarvester("test", test.runtime)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				if err := harvester.Close(); err != nil {
+					t.Errorf("close harvester: %v", err)
+				}
+			}()
+			handler := newMCPDaemonHandler(mcpDaemonOptions{
+				Harvester:      harvester.NewHTTPHandler(),
+				HarvesterTools: harvestmcp.RegisteredToolNames(test.runtime),
+			})
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
+			var status mcpserv.DaemonStatus
+			if err := json.Unmarshal(response.Body.Bytes(), &status); err != nil {
+				t.Fatal(err)
+			}
+			listed := status.Servers[config.MCPServerHarvester]
+			hasSearch := false
+			for _, name := range listed {
+				if name == "search" {
+					hasSearch = true
+				}
+			}
+			if hasSearch != test.wantSearch {
+				t.Fatalf(
+					"harvester tools = %v, search listed = %v, want %v",
+					listed, hasSearch, test.wantSearch,
+				)
+			}
+		})
+	}
+}
+
 // TestMCPServeBothDisabledRefusesBeforeBindingPort pins the #8 fix at the
 // command layer: mcp.servers.chat.enabled=false AND
 // mcp.servers.harvester.enabled=false must refuse to start with a non-zero

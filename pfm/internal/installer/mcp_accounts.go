@@ -284,7 +284,8 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 
 func (installer *engine) saveMCPOwnership(ownership mcpOwnership) error {
 	path := installer.mcpOwnershipPath()
-	if len(ownership.Clients) == 0 && len(ownership.Registrations) == 0 && len(ownership.Pending) == 0 {
+	if len(ownership.Clients) == 0 && len(ownership.Registrations) == 0 && len(ownership.Pending) == 0 &&
+		len(ownership.OpenCodeRegistrations) == 0 && len(ownership.OpenCodePending) == 0 {
 		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
 			return nil
 		} else if err != nil {

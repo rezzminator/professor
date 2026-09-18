@@ -8,7 +8,7 @@ import (
 	"hostops/pfm/internal/installer"
 )
 
-// printMCPClientCutover reports two disjoint surfaces: every user-scope
+// PrintMCPClientCutover reports three disjoint surfaces: every user-scope
 // Claude registry a pfm-launched Claude can actually read (installer.
 // ClaudeUserRegistries — one row per file, naming why pfm considers it a
 // registry, with both the "harvester" and "chat" server states so a
@@ -52,10 +52,63 @@ func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 			)
 		}
 	}
+	warnings += printOpenCodeRows(stdout, runtime.Paths.Home, runtime.Config.MCP.HTTP.Port)
 	if warnings == 0 {
 		fmt.Fprintln(stdout, "doctor: mcp client-cutover=complete")
 	}
 	return warnings
+}
+
+func printOpenCodeRows(stdout io.Writer, home string, port int) int {
+	path := installer.OpenCodeConfigPath(home)
+	reports := installer.InspectOpenCodeServers(
+		path,
+		home,
+		port,
+		config.MCPServerHarvester,
+		config.MCPServerChat,
+	)
+	states := map[string]string{}
+	var inspectionError error
+	for _, report := range reports {
+		states[report.Name] = report.State
+		if report.Error != nil {
+			inspectionError = report.Error
+		}
+	}
+	harvester, chat := states[config.MCPServerHarvester], states[config.MCPServerChat]
+	state := installer.MCPClientPartial
+	switch {
+	case harvester == installer.MCPClientUnreadable || chat == installer.MCPClientUnreadable:
+		state = installer.MCPClientUnreadable
+	case harvester == installer.MCPClientPFM && chat == installer.MCPClientPFM:
+		state = installer.MCPClientPFM
+	case harvester == installer.MCPClientAbsent && chat == installer.MCPClientAbsent:
+		state = installer.MCPClientAbsent
+	case harvester == installer.MCPClientForeignRegistration || chat == installer.MCPClientForeignRegistration:
+		state = installer.MCPClientForeignRegistration
+	}
+	base := fmt.Sprintf(
+		"doctor: mcp client=opencode config=%s harvester=%s chat=%s state=%s",
+		path,
+		harvester,
+		chat,
+		state,
+	)
+	switch state {
+	case installer.MCPClientUnreadable:
+		fmt.Fprintf(stdout, "%s error=%v\n", base, inspectionError)
+		return 1
+	case installer.MCPClientPFM:
+		fmt.Fprintln(stdout, base)
+		return 0
+	case installer.MCPClientAbsent:
+		fmt.Fprintln(stdout, base)
+		return 0
+	default:
+		fmt.Fprintf(stdout, "%s remediation=run pfm install --yes\n", base)
+		return 1
+	}
 }
 
 // printClaudeRegistryRows prints one row per registry ClaudeUserRegistries

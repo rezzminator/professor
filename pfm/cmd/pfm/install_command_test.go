@@ -44,6 +44,9 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 	if _, found := options.CodexYolo[4]; found {
 		t.Fatalf("Codex policies inherited Claude account IDs: %#v", options.CodexYolo)
 	}
+	if options.OpenCodeConfigPath != installer.OpenCodeConfigPath(home) {
+		t.Fatalf("OpenCodeConfigPath=%q, want %q", options.OpenCodeConfigPath, installer.OpenCodeConfigPath(home))
+	}
 }
 
 // TestInstallOptionsSourceRepoFallsBackToTheRecordedClone is a REGRESSION

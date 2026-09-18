@@ -107,8 +107,12 @@ type Options struct {
 	MCPEnabled    map[string]bool
 	MCPPort       int
 	MCPConfigPath string
-	ClaudeBinary  string
-	CodexYolo     map[int]bool
+	// OpenCodeConfigPath is the machine-scope JSONC registry OpenCode reads.
+	// Command callers always resolve it from the effective home; direct legacy
+	// callers may leave it empty to opt out of OpenCode wiring.
+	OpenCodeConfigPath string
+	ClaudeBinary       string
+	CodexYolo          map[int]bool
 	// NameSyncInterval is the machine config's nameSync.interval. It renders
 	// into BOTH schedulers — the launchd job's StartInterval and the systemd
 	// timer's OnUnitInactiveSec — from this ONE value, so a host that switches

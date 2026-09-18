@@ -398,6 +398,114 @@ func TestMCPManualConflictIsNotClaimedOrRemoved(t *testing.T) {
 	}
 }
 
+func TestMCPOpenCodeWiringPreservesJSONCAndUnownedServers(t *testing.T) {
+	home := t.TempDir()
+	configPath := OpenCodeConfigPath(home)
+	original := `{
+  // OpenCode owns this comment.
+  "name": "operator-config",
+  "mcp": {
+    // The operator owns this server.
+    "manual": {"type": "remote", "url": "https://manual.invalid/mcp", "enabled": true}
+  }
+}
+`
+	writeFixture(t, configPath, original)
+	e := engine{
+		options: Options{
+			Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456,
+			Stdout: io.Discard,
+		},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       true,
+		stamp:       "fixture",
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{chatName, mcpServerHarvester}); err != nil {
+		t.Fatal(err)
+	}
+	raw := readFixture(t, configPath)
+	if !strings.Contains(raw, "OpenCode owns this comment") || !strings.Contains(raw, `"name": "operator-config"`) ||
+		!strings.Contains(raw, `"manual":`) {
+		t.Fatalf("OpenCode wiring discarded comments or unowned keys:\n%s", raw)
+	}
+	document, err := decodeJSONCObject([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers, _ := document["mcp"].(map[string]any)
+	chat, _ := servers[chatName].(map[string]any)
+	if chat["type"] != "local" || chat["enabled"] != true {
+		t.Fatalf("chat registration=%#v, want enabled local registration", chat)
+	}
+	command, _ := chat["command"].([]any)
+	if len(command) != 4 || command[0] != filepath.Join(home, ".local", "bin", "pfm") ||
+		command[1] != "mcp" || command[2] != "chat" || command[3] != "serve" {
+		t.Fatalf("chat command=%#v, want absolute pfm stdio argv", command)
+	}
+	harvester, _ := servers[mcpServerHarvester].(map[string]any)
+	if harvester["type"] != "remote" || harvester["enabled"] != true ||
+		harvester["url"] != "http://127.0.0.1:8456/mcp/harvester" {
+		t.Fatalf("harvester registration=%#v, want enabled remote registration", harvester)
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{chatName, mcpServerHarvester}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, configPath); got != raw {
+		t.Fatalf("idempotent OpenCode apply rewrote the machine config:\nbefore=%s\nafter=%s", raw, got)
+	}
+
+	dry := e
+	dry.apply = false
+	dry.options.Stdout = io.Discard
+	before := readFixture(t, configPath)
+	if err := dry.writeMCPOpenCodeJSON([]string{chatName, mcpServerHarvester}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, configPath); got != before {
+		t.Fatal("OpenCode dry-run mutated the machine config")
+	}
+}
+
+func TestMCPOpenCodeUninstallRemovesOnlyExactOwnedRegistrations(t *testing.T) {
+	home := t.TempDir()
+	configPath := OpenCodeConfigPath(home)
+	writeFixture(
+		t,
+		configPath,
+		`{"mcp":{"manual":{"type":"remote","url":"https://manual.invalid/mcp","enabled":true}}}`,
+	)
+	e := engine{
+		options:     Options{Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456, Stdout: io.Discard},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       true,
+		stamp:       "fixture",
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{chatName, mcpServerHarvester}); err != nil {
+		t.Fatal(err)
+	}
+	// A manual replacement has precedence over the receipt and must survive.
+	raw := readFixture(t, configPath)
+	updated := strings.Replace(raw, `"type":"local"`, `"type":"remote","url":"https://manual.invalid/chat"`, 1)
+	if updated == raw {
+		t.Fatalf("fixture did not replace the owned chat registration:\n%s", raw)
+	}
+	writeFixture(t, configPath, updated)
+	if err := e.removeMCPOpenCodeJSON(); err != nil {
+		t.Fatal(err)
+	}
+	document, err := decodeJSONCObject([]byte(readFixture(t, configPath)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers, _ := document["mcp"].(map[string]any)
+	if _, ok := servers[chatName]; !ok {
+		t.Fatal("uninstall removed a manual replacement of PFM chat")
+	}
+	if _, ok := servers[mcpServerHarvester]; ok {
+		t.Fatal("uninstall retained PFM-owned harvester")
+	}
+}
+
 // TestMCPInstallMigratesAnOwnedHTTPChatClientToStdio pins required test #11:
 // pfm's own PREVIOUS HTTP "chat" registration (the shape every install wrote
 // before this wave) is recognized as owned and migrated to the new stdio

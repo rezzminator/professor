@@ -29,7 +29,7 @@ node_modules/
 # check-agent-roster.mjs`'s NOT GENERATED state and the CI `Generate mirrors`
 # step). Keepers stay tracked and are NOT covered by these rules:
 # `.codex/config.toml` (hand-written, holds one generated `mcp_servers`
-# fence), `.codex/rules/**`, `.codex/README.md`, `templates/global/agents/*.md`.
+# fence), `templates/global/agents/*.md`.
 /AGENTS.md
 /pfm/AGENTS.md
 .codex/agents/

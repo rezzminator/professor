@@ -54,7 +54,7 @@ argument-hint: '{patch|minor|major} "{summary}" [--from {live-project-root}]'
 
     c. `gitter` Phase RELEASE (`v{NEW}`): the `develop → main` PR, green required checks, merge, annotated tag, `develop` fast-forwarded onto `main`. STOP at the first failed step and report which.
 
-13. **Close** — open the next development line on `develop` in the live checkout: `VERSION`, `.professor/VERSION` and `manifest.json`'s `installed_from.version` become `{NEXT}-alpha` (`{NEXT}` = `{NEW}` with minor + 1, patch 0), `infra/check-self-hosted-manifest.sh` passes, and `gitter` commits `chore(release): open v{NEXT}-alpha on develop` and pushes `develop` — a build from `develop` then never reports itself as the release it follows. `infra/release-rehearsal.sh down`; `gitter` removes both release worktrees and the merged `release/v{NEW}` branch.
+13. **Close** — open the next development line on `develop` in the live checkout: `VERSION`, `.professor/VERSION` and `manifest.json`'s `installed_from.version` become `{NEXT}-alpha` (`{NEXT}` = `{NEW}` with minor + 1, patch 0), `infra/check-self-hosted-manifest.sh` passes, and `gitter` commits `chore(release): open v{NEXT}-alpha on develop` and pushes `develop` — a build from `develop` then never reports itself as the release it follows. `infra/fence/release-rehearsal.sh down`; `gitter` removes both release worktrees and the merged `release/v{NEW}` branch.
 
 14. **Report** the release PR URL, merge SHA, tag URL, source SHA (or "no refresh"), reviewer and rehearsal verdicts with the attempt count, and the release-note bullets, ending with: `Blueprint released: v{NEW}. URL: https://github.com/rezzminator/professor/releases/tag/v{NEW}`
 

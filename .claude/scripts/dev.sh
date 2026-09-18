@@ -239,10 +239,10 @@ act_templates() { # the shipped product: mechanical gates, no build
       if ! need_tool go templates || ! need_tool node templates; then
         fail_step "mirror generation could not run — no mirror gate below is a verdict on the tree"
       elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex check "$REPO_ROOT") >/dev/null 2>&1 \
-        && node .claude/scripts/build-opencode.mjs check >/dev/null 2>&1; then
+        && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode check "$REPO_ROOT") >/dev/null 2>&1; then
         ok "engine mirrors current — nothing generated"
       elif (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm codex build "$REPO_ROOT") \
-        && node .claude/scripts/build-opencode.mjs generate; then
+        && (cd "$REPO_ROOT/pfm" && go run ./cmd/pfm opencode build "$REPO_ROOT"); then
         ok "engine mirrors generated from the Claude sources"
       else
         fail_step "mirror generation FAILED — no mirror gate below is a verdict on the tree (see output)"
@@ -272,6 +272,13 @@ act_templates() { # the shipped product: mechanical gates, no build
         ok "every published model id resolves to its intended rate"
       else
         fail_step "token pricing FAILED — a published model id resolves to the wrong rate, or the PRICING table could not be read (see output)"
+      fi
+
+      head_ "templates — codex-sync missing compiler"
+      if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/templates/project/scripts/codex-sync.sh"; then
+        ok "codex-sync names unavailable compiler and retains dirty flag"
+      else
+        fail_step "codex-sync regression FAILED — unavailable compiler must be named and dirty flag retained"
       fi
 
       head_ "templates — native opencode mirror"

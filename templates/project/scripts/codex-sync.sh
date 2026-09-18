@@ -49,9 +49,10 @@ case "$MODE" in
     [[ -n "$REPO_ROOT" ]] || REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
     FLAG="$REPO_ROOT/tmp/professor_codex_dirty"
     [[ -f "$FLAG" ]] || exit 0
-    # A host without pfm silently skips the auto-compile — clear the flag so it
-    # never blocks turn end (mirror rebuild happens on the next pfm-equipped run).
-    [[ -x "$PFM_BIN" ]] || { rm -f "$FLAG"; exit 0; }
+    if [[ ! -x "$PFM_BIN" ]]; then
+      printf 'codex-sync: compiler unavailable — mirrors were not checked; dirty flag retained\n' >&2
+      exit 1
+    fi
     OUT=$("$PFM_BIN" codex build "$REPO_ROOT" 2>&1) && BUILD=0 || BUILD=$?
     CHK=$("$PFM_BIN" codex check "$REPO_ROOT" 2>&1) && CHECK=0 || CHECK=$?
     OGEN=$("$PFM_BIN" opencode build "$REPO_ROOT" 2>&1) && OC_BUILD=0 || OC_BUILD=$?

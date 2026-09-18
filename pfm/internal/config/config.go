@@ -80,7 +80,8 @@ type ClaudePrefs struct {
 	// Cache1H is Claude Code's prompt-cache TTL choice: true selects the
 	// ~32%-cheaper 1-hour TTL (ENABLE_PROMPT_CACHING_1H), false the 5-minute
 	// TTL. Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
-	Cache1H bool
+	Cache1H      bool
+	NativeCursor bool
 	// CompactNudge governs the UserPromptSubmit reminder that a self-compact
 	// is due at a context milestone — see decodeClaudePrefs for the defaults.
 	CompactNudge CompactNudge
@@ -313,6 +314,7 @@ type rawClaude struct {
 	PermissionMode *string          `json:"permissionMode,omitempty"`
 	Binary         *string          `json:"binary,omitempty"`
 	Cache1H        *bool            `json:"cache1h,omitempty"`
+	NativeCursor   *bool            `json:"nativeCursor,omitempty"`
 	SystemPrompt   *string          `json:"systemPrompt,omitempty"`
 	CompactNudge   *rawCompactNudge `json:"compactNudge,omitempty"`
 }
@@ -478,6 +480,7 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, "permissionMode"):  SourceDefault,
 		engineConfigKey(pfmengine.Claude, engineKeyBinary):   SourceDefault,
 		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
+		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
@@ -751,22 +754,17 @@ func loadWithMCPServers(
 		}
 		if raw.Claude.PermissionMode != nil {
 			result.Sources[engineConfigKey(pfmengine.Claude, "permissionMode")] = SourceFile
-		}
-		if raw.Claude.Binary != nil {
-			result.Sources[engineConfigKey(pfmengine.Claude, engineKeyBinary)] = SourceFile
-		}
-		if raw.Claude.Cache1H != nil {
-			result.Sources[engineConfigKey(pfmengine.Claude, "cache1h")] = SourceFile
-		}
-		if raw.Claude.PermissionMode != nil {
 			result.Claude.PermissionMode = prefs.PermissionMode
 		}
 		if raw.Claude.Binary != nil {
+			result.Sources[engineConfigKey(pfmengine.Claude, engineKeyBinary)] = SourceFile
 			result.Claude.Binary = prefs.Binary
 		}
 		if raw.Claude.Cache1H != nil {
+			result.Sources[engineConfigKey(pfmengine.Claude, "cache1h")] = SourceFile
 			result.Claude.Cache1H = prefs.Cache1H
 		}
+		applyNativeCursor(&result.Claude, raw.Claude.NativeCursor, false, result.Sources, -1)
 		if raw.Claude.SystemPrompt != nil {
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
@@ -820,6 +818,7 @@ func loadWithMCPServers(
 				} else {
 					result.Sources[fmt.Sprintf("accounts[%d].claude.cache1h", index)] = SourceFile
 				}
+				applyNativeCursor(&prefs, value.Claude.NativeCursor, result.Claude.NativeCursor, result.Sources, index)
 				// Same inheritance for the nudge policy: seeded from the
 				// resolved top level, then only the fields this account set.
 				applied, err := applyCompactNudge(
@@ -1323,7 +1322,7 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// Unconditional, like EffectiveCodex's Yolo: Load already seeded an
 		// unset account-level Cache1H with the resolved top-level value, so
 		// there is no false-zero ambiguity left to guard against here.
-		result.Cache1H = account.Claude.Cache1H
+		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
 		result.CompactNudge = account.Claude.CompactNudge
 		if account.Claude.SystemPrompt != "" {
 			result.SystemPrompt = account.Claude.SystemPrompt
@@ -1625,6 +1624,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 				"permissionMode": account.Claude.PermissionMode,
 				engineKeyBinary:  account.Claude.Binary,
 				"cache1h":        account.Claude.Cache1H,
+				"nativeCursor":   account.Claude.NativeCursor,
 			}
 		}
 		if account.Codex != nil {
@@ -1680,6 +1680,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			"permissionMode": config.Claude.PermissionMode,
 			engineKeyBinary:  config.Claude.Binary,
 			"cache1h":        config.Claude.Cache1H,
+			"nativeCursor":   config.Claude.NativeCursor,
 			"compactNudge": map[string]any{
 				jsonKeyEnabled: config.Claude.CompactNudge.Enabled,
 				"start":        config.Claude.CompactNudge.Start,

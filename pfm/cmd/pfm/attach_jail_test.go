@@ -339,25 +339,40 @@ func (jail *attachJail) proveAttach(
 			if output, err := send.CombinedOutput(); err != nil {
 				t.Fatalf("drive nested picker filter: %v: %s", err, output)
 			}
-			filterDeadline := time.Now().Add(5 * time.Second)
-			filtered := false
+			// Enter must never land on the picker's stale first frame:
+			// scanFleetCached (internal/picker/pipeline.go) paints the transcript
+			// as a ↻ Resume row before the async gather promotes it, and every
+			// one of "fleet 1 " (the filtered row count), "JAILATTACH" and
+			// "›" (the cursor) is already true on THAT stale frame — none of
+			// the three distinguishes it from the live one. Only the row's own
+			// live glyph ● (ui.rowMarker) does, so poll for it on the SAME line
+			// as the selected JAILATTACH row rather than trusting the filtered
+			// count or the cursor alone.
+			liveDeadline := time.Now().Add(5 * time.Second)
+			live := false
 			lastFrame := ""
-			for time.Now().Before(filterDeadline) {
+			for time.Now().Before(liveDeadline) {
 				capture := jail.tmux(driverSocket, "capture-pane", "-p", "-t", "driver:0.0")
 				captured, captureErr := capture.Output()
 				frame := string(captured)
 				lastFrame = frame
-				if captureErr == nil &&
-					strings.Contains(frame, "fleet 1 ") &&
-					strings.Contains(frame, "JAILATTACH") &&
-					strings.Contains(frame, "›") {
-					filtered = true
+				if captureErr == nil {
+					for _, line := range strings.Split(frame, "\n") {
+						if strings.Contains(line, "JAILATTACH") &&
+							strings.Contains(line, "›") &&
+							strings.Contains(line, "●") {
+							live = true
+							break
+						}
+					}
+				}
+				if live {
 					break
 				}
 				time.Sleep(25 * time.Millisecond)
 			}
-			if !filtered {
-				t.Fatalf("nested picker did not select JAILATTACH after filtering; last frame: %q", lastFrame)
+			if !live {
+				t.Fatalf("nested picker row for JAILATTACH never promoted to live; last frame: %q", lastFrame)
 			}
 			send = jail.tmux(
 				driverSocket,

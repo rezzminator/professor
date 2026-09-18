@@ -236,9 +236,14 @@ func Run(
 		}
 		return pfmchat.OpenRow(ctx, row, outcome.PrimaryAccount, cache1H, "", stdout, stderr, &runtime)
 	case ui.OutcomeSelected:
+		selectedRow, err := resolveSelectedRow(ctx, database, outcome.Row, &runtime, stderr)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm ls: %v\n", err)
+			return 1
+		}
 		return pfmchat.OpenRow(
 			ctx,
-			outcome.Row,
+			selectedRow,
 			outcome.PrimaryAccount,
 			cache1H,
 			"",
@@ -251,6 +256,58 @@ func Run(
 	default:
 		fmt.Fprintf(stderr, "pfm ls: unsupported picker outcome %d\n", outcome.Kind)
 		return 1
+	}
+}
+
+// resolveSelectedRow re-resolves an OutcomeSelected row against the current
+// fleet before OpenRow acts on it. The picker's first frame comes from
+// scanFleetCached, which composes over an EMPTY gather (Run above) — a chat
+// that goes live after that frame was painted still renders as a stale
+// Resume row when Enter lands, and opening it straight would have OpenRow's
+// Resume branch synthesize a FRESH server for a chat that is already
+// running: a second seat of the same conversation. fleet.Scan, ReadOnly, is
+// the same live re-scan chat.OpenID already resolves an id through before
+// opening it (internal/chat/open.go) — reusing it here is what lets a row
+// that is live NOW attach instead of resuming.
+//
+// A row with no ID (a new-chat or split row) or one that is not a Resume
+// kind is already the freshest thing the picker can act on, so there is
+// nothing to re-resolve and no extra scan is paid for it. A scan failure is
+// returned rather than swallowed: silently keeping the stale row here is
+// exactly the hazard this function exists to close.
+func resolveSelectedRow(
+	ctx context.Context,
+	database *store.Store,
+	row compose.Row,
+	runtime *pfmconfig.Runtime,
+	stderr io.Writer,
+) (compose.Row, error) {
+	if row.ID == "" || !isResumeRowKind(row.Kind) {
+		return row, nil
+	}
+	scan, err := fleet.Scan(ctx, database, fleet.Request{
+		View: compose.AllView, ReadOnly: true, Runtime: runtime,
+	}, stderr)
+	if err != nil {
+		return compose.Row{}, fmt.Errorf("re-resolve %s before open: %w", row.ID, err)
+	}
+	for index := range scan.Output.Rows {
+		if scan.Output.Rows[index].ID == row.ID {
+			return scan.Output.Rows[index], nil
+		}
+	}
+	return row, nil
+}
+
+// isResumeRowKind reports whether kind is one of the resumable-only kinds
+// resolveSelectedRow re-resolves: the kinds scanFleetCached's empty gather
+// can paint for a chat that is actually live right now.
+func isResumeRowKind(kind compose.Kind) bool {
+	switch kind {
+	case compose.ResumeClaude, compose.ResumeCodex, compose.ResumeOpenCode:
+		return true
+	default:
+		return false
 	}
 }
 

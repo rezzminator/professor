@@ -30,6 +30,7 @@ import (
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/professor"
 	"hostops/pfm/internal/spawn"
@@ -68,7 +69,7 @@ func normalizeDependencies(dependencies Dependencies) Dependencies {
 		dependencies.Env = paths.OSEnv{}
 	}
 	if dependencies.Runner == nil {
-		dependencies.Runner = deps.RealRunner{}
+		dependencies.Runner = obs.Runner(deps.RealRunner{})
 	}
 	if dependencies.Listen == nil {
 		dependencies.Listen = net.Listen
@@ -183,6 +184,7 @@ func Run(
 		fmt.Fprintln(stdout, "doctor: path canonical")
 	}
 	printActivityLogDoctor(stdout, runtime)
+	tally.warnings += printServiceManagerDoctor(ctx, stdout, dependencies.Runner)
 	tally.warnings += printPrePushDoctorWithRunner(context.Background(), stdout, dependencies.Runner)
 	verboseDir := ""
 	if *verbose {
@@ -241,7 +243,7 @@ func Run(
 		deps.Registry(deps.Options{
 			Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 		}),
-		deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest},
+		deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest, Runner: obs.Runner(deps.RealRunner{})},
 	)
 	tally.warnings += depWarnings
 	tally.failures += depFailures
@@ -1111,7 +1113,9 @@ func printHarvestPythonDoctor(
 	doctor harvestDoctor,
 	browserGate bool,
 ) int {
-	return printHarvestPythonDoctorWithRunner(ctx, stdout, home, platform, doctor, browserGate, deps.RealRunner{})
+	return printHarvestPythonDoctorWithRunner(
+		ctx, stdout, home, platform, doctor, browserGate, obs.Runner(deps.RealRunner{}),
+	)
 }
 
 func printHarvestPythonDoctorWithRunner(
@@ -1124,7 +1128,7 @@ func printHarvestPythonDoctorWithRunner(
 	runner deps.Runner,
 ) int {
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	if pinned, ok := doctor.(pinnedHarvestDoctor); ok {
 		pinned.runner = runner
@@ -1260,12 +1264,12 @@ func printHarvestPythonDoctorWithRunner(
 // launches only GOOGLE Chrome, so reporting a chromium-only host as healthy
 // would pass smoke and fail every launch.
 func resolveChromeForDoctor() string {
-	return resolveChromeForDoctorWithRunner(deps.RealRunner{})
+	return resolveChromeForDoctorWithRunner(obs.Runner(deps.RealRunner{}))
 }
 
 func resolveChromeForDoctorWithRunner(runner deps.Runner) string {
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	for _, candidate := range []string{
 		"google-chrome", "google-chrome-stable",
@@ -1318,7 +1322,7 @@ func appendHarvestBrowserDoctorRow(
 		platform,
 		warnings,
 		gateOn,
-		deps.RealRunner{},
+		obs.Runner(deps.RealRunner{}),
 		doctorChromeResolver,
 	)
 }
@@ -1334,7 +1338,7 @@ func appendHarvestBrowserDoctorRowWithRunner(
 	chromeResolver func() string,
 ) int {
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	if chromeResolver == nil {
 		chromeResolver = func() string { return resolveChromeForDoctorWithRunner(runner) }

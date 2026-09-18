@@ -9,9 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
+
+	"hostops/pfm/internal/deps"
 )
 
 // Runtime identifies the pinned Python executable and worker script. The
@@ -20,6 +21,7 @@ import (
 type Runtime struct {
 	Python string
 	Script string
+	Runner deps.Runner
 	// PDFOCR / PDFLayout are harvester.config.json convert.pdfOcr /
 	// convert.pdfLayout, handed to converter.py through its own
 	// HARVESTER_PDF_* protocol variables (workerEnv).
@@ -85,10 +87,11 @@ type Converter struct {
 }
 
 type workerProcess struct {
-	command *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  *bufio.Reader
-	stderr  lockedBuffer
+	process    deps.Process
+	stdin      io.WriteCloser
+	stdout     *bufio.Reader
+	stdoutPipe io.ReadCloser
+	stderr     *lockedBuffer
 }
 
 // lockedBuffer is the stderr sink a worker subprocess fills from os/exec's
@@ -199,10 +202,30 @@ func (converter *Converter) request(ctx context.Context, body []byte) ([]byte, s
 	if err != nil {
 		return nil, "", err
 	}
-	if _, err := worker.stdin.Write(append(body, '\n')); err != nil {
-		stderr := strings.TrimSpace(worker.stderr.String())
-		converter.stopWorkerLocked()
-		return nil, stderr, fmt.Errorf("harvestpy worker write failed: %w (stderr: %s)", err, stderr)
+	payload := append(append([]byte(nil), body...), '\n')
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := worker.stdin.Write(payload)
+		writeResult <- err
+	}()
+	select {
+	case err := <-writeResult:
+		if err != nil {
+			stderr := strings.TrimSpace(worker.stderr.String())
+			cleanupErr := converter.stopWorkerLocked()
+			return nil, stderr, fmt.Errorf(
+				"harvestpy worker write failed: %w (stderr: %s; cleanup: %v)",
+				err,
+				stderr,
+				cleanupErr,
+			)
+		}
+	case <-ctx.Done():
+		cleanupErr := converter.stopWorkerLocked()
+		if cleanupErr != nil {
+			return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w (cleanup: %v)", ctx.Err(), cleanupErr)
+		}
+		return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w", ctx.Err())
 	}
 	result := make(chan struct {
 		line []byte
@@ -217,13 +240,21 @@ func (converter *Converter) request(ctx context.Context, body []byte) ([]byte, s
 	}()
 	select {
 	case <-ctx.Done():
-		converter.stopWorkerLocked()
+		cleanupErr := converter.stopWorkerLocked()
+		if cleanupErr != nil {
+			return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w (cleanup: %v)", ctx.Err(), cleanupErr)
+		}
 		return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w", ctx.Err())
 	case response := <-result:
 		if response.err != nil {
 			stderr := strings.TrimSpace(worker.stderr.String())
-			converter.stopWorkerLocked()
-			return nil, stderr, fmt.Errorf("harvestpy worker read failed: %w (stderr: %s)", response.err, stderr)
+			cleanupErr := converter.stopWorkerLocked()
+			return nil, stderr, fmt.Errorf(
+				"harvestpy worker read failed: %w (stderr: %s; cleanup: %v)",
+				response.err,
+				stderr,
+				cleanupErr,
+			)
 		}
 		return response.line, strings.TrimSpace(worker.stderr.String()), nil
 	}
@@ -240,46 +271,75 @@ func (converter *Converter) ensureWorkerLocked() (*workerProcess, error) {
 	if err != nil {
 		return nil, err
 	}
-	command := exec.Command(converter.runtime.Python, script)
-	command.Env = workerEnv(os.Environ(), converter.runtime)
-	stdin, err := command.StdinPipe()
+	runner := converter.runtime.Runner
+	if runner == nil {
+		runner = deps.RealRunner{}
+	}
+	stderr := &lockedBuffer{}
+	process, err := runner.Start(context.Background(), []string{converter.runtime.Python, script}, deps.StartOptions{
+		Env:        workerEnv(os.Environ(), converter.runtime),
+		StdinPipe:  true,
+		StdoutPipe: true,
+		Stderr:     stderr,
+	})
 	if err != nil {
+		return nil, fmt.Errorf("start harvestpy worker: %w", err)
+	}
+	stdin, err := process.StdinPipe()
+	if err != nil {
+		_ = process.Kill()
+		_ = process.Wait()
 		return nil, fmt.Errorf("open harvestpy worker stdin: %w", err)
 	}
-	stdout, err := command.StdoutPipe()
+	stdout, err := process.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
+		_ = process.Kill()
+		_ = process.Wait()
 		return nil, fmt.Errorf("open harvestpy worker stdout: %w", err)
 	}
-	worker := &workerProcess{command: command, stdin: stdin, stdout: bufio.NewReader(stdout)}
-	command.Stderr = &worker.stderr
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("start harvestpy worker: %w", err)
+	worker := &workerProcess{
+		process:    process,
+		stdin:      stdin,
+		stdout:     bufio.NewReader(stdout),
+		stdoutPipe: stdout,
+		stderr:     stderr,
 	}
 	converter.worker = worker
 	return worker, nil
 }
 
-func (converter *Converter) stopWorkerLocked() {
+func (converter *Converter) stopWorkerLocked() error {
 	if converter.worker == nil {
-		return
+		return nil
 	}
 	worker := converter.worker
 	converter.worker = nil
-	_ = worker.stdin.Close()
-	if worker.command.Process != nil {
-		_ = worker.command.Process.Kill()
+	var cleanupErr error
+	if err := worker.stdin.Close(); err != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close worker stdin: %w", err))
 	}
-	_ = worker.command.Wait()
+	if err := worker.stdoutPipe.Close(); err != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close worker stdout: %w", err))
+	}
+	killErr := worker.process.Kill()
+	if errors.Is(killErr, os.ErrProcessDone) {
+		killErr = nil
+	}
+	if killErr != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill worker: %w", killErr))
+	}
+	if err := worker.process.Wait(); err != nil && killErr != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for killed worker: %w", err))
+	}
+	return cleanupErr
 }
 
 // Close terminates the managed worker and is safe to call repeatedly.
 func (converter *Converter) Close() error {
 	converter.mu.Lock()
 	defer converter.mu.Unlock()
-	converter.stopWorkerLocked()
-	return nil
+	return converter.stopWorkerLocked()
 }
 
 // Smoke invokes the same worker with a no-download import check.

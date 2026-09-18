@@ -18,6 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/harvest"
 )
 
@@ -61,6 +62,9 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 		)
 	}
 	runtime := options.Runtime
+	if runtime.Clock == nil {
+		runtime.Clock = clock.Real
+	}
 	cache, err := harvest.CacheRoot(runtime.CacheDir)
 	if err != nil {
 		return nil, fmt.Errorf("resolve harvester cache root: %w", err)
@@ -80,7 +84,7 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	if statePath == "" {
 		statePath = defaultAuthStatePath(service.runtime.CacheDir)
 	}
-	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath)
+	r.store = newAuthStore(publicURL, r.resource, options.Passphrase, options.StaticToken, statePath, runtime.Clock)
 	r.mcp = mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return service.Server() },
 		&mcp.StreamableHTTPOptions{JSONResponse: false, Stateless: false, DisableLocalhostProtection: true},

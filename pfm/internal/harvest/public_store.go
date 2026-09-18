@@ -102,7 +102,7 @@ func (h *Harvester) publicArtifactPath(source, kind, oldPath, ext string) (strin
 }
 
 func (h *Harvester) writePublicMarkdown(path, body string, fetchedAt ...string) error {
-	stamp := time.Now().UTC().Format(time.RFC3339)
+	stamp := h.nowClock().Now().UTC().Format(time.RFC3339)
 	if len(fetchedAt) > 0 {
 		candidate := strings.TrimSpace(fetchedAt[0])
 		if _, err := time.Parse(time.RFC3339, candidate); err == nil {

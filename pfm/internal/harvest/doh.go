@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 // DNS-over-HTTPS resolution for every harvester dial.
@@ -142,6 +144,7 @@ func browserHostResolverRuleFrom(rawURL string, ips []net.IP) string {
 type dohResolver struct {
 	endpoint string
 	client   *http.Client
+	clock    clock.Clock
 
 	mu    sync.Mutex
 	cache map[string]dohEntry
@@ -195,6 +198,7 @@ func newDOHResolver() *dohResolver {
 	return &dohResolver{
 		endpoint: dohEndpoint,
 		client:   &http.Client{Transport: transport, Timeout: dohTimeout},
+		clock:    clock.Real,
 		cache:    make(map[string]dohEntry),
 		warned:   make(map[string]bool),
 		fallback: func(ctx context.Context, host string) ([]net.IP, error) {
@@ -288,8 +292,12 @@ func (r *dohResolver) warnOnce(host string, err error) {
 func (r *dohResolver) cached(host string) ([]net.IP, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	watch := r.clock
+	if watch == nil {
+		watch = clock.Real
+	}
 	entry, ok := r.cache[host]
-	if !ok || time.Now().After(entry.expires) {
+	if !ok || watch.Now().After(entry.expires) {
 		return nil, false
 	}
 	return append([]net.IP(nil), entry.ips...), true
@@ -307,7 +315,11 @@ func (r *dohResolver) store(host string, ips []net.IP, ttl time.Duration) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.cache[host] = dohEntry{ips: append([]net.IP(nil), ips...), expires: time.Now().Add(ttl)}
+	watch := r.clock
+	if watch == nil {
+		watch = clock.Real
+	}
+	r.cache[host] = dohEntry{ips: append([]net.IP(nil), ips...), expires: watch.Now().Add(ttl)}
 }
 
 // dohNXDomainError marks a DoH answer of Status 3 (NXDOMAIN): the resolver

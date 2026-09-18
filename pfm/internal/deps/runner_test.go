@@ -4,8 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestRealRunnerRunCapturesStdoutStderrAndExitCode(t *testing.T) {
@@ -171,6 +178,26 @@ func TestRealRunnerStartCapturesStdoutStderrAndWaits(t *testing.T) {
 	}
 }
 
+func TestRealRunnerStartWiresOrdinaryStdin(t *testing.T) {
+	t.Parallel()
+	input := strings.NewReader("hello\n")
+	var stdout bytes.Buffer
+	process, err := (RealRunner{}).Start(
+		context.Background(),
+		[]string{"sh", "-c", "read line; printf 'reply:%s\\n' \"$line\""},
+		StartOptions{Stdin: input, Stdout: &stdout},
+	)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if got := stdout.String(); got != "reply:hello\n" {
+		t.Fatalf("Stdout = %q, want %q", got, "reply:hello\\n")
+	}
+}
+
 func TestRealRunnerStartDetachReleasesAndWaitNamesIt(t *testing.T) {
 	t.Parallel()
 	var runner RealRunner
@@ -199,6 +226,121 @@ func TestRealRunnerStartReturnsAnErrorWhenTheBinaryCannotStart(t *testing.T) {
 	_, err := runner.Start(context.Background(), []string{"pfm-runner-test-no-such-binary"}, StartOptions{})
 	if err == nil {
 		t.Fatal("Start() with a nonexistent binary returned nil error")
+	}
+}
+
+func TestRealRunnerStartOwnsInteractivePipesAndProcessGroup(t *testing.T) {
+	t.Parallel()
+	process, err := (RealRunner{}).Start(
+		context.Background(),
+		[]string{"sh", "-c", "read line; printf 'reply:%s\\n' \"$line\""},
+		StartOptions{
+			StdinPipe:    true,
+			StdoutPipe:   true,
+			ProcessGroup: true,
+		},
+	)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	stdin, err := process.StdinPipe()
+	if err != nil {
+		t.Fatalf("StdinPipe() error = %v", err)
+	}
+	stdout, err := process.StdoutPipe()
+	if err != nil {
+		t.Fatalf("StdoutPipe() error = %v", err)
+	}
+	if _, err := io.WriteString(stdin, "hello\n"); err != nil {
+		t.Fatalf("write stdin: %v", err)
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+	body, err := io.ReadAll(stdout)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	if got := string(body); got != "reply:hello\n" {
+		t.Fatalf("stdout = %q, want reply\n", got)
+	}
+	if err := process.Wait(); err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+}
+
+// TestRealRunnerStartWaitDelayClosesInheritedPipe proves the process seam
+// retains exec.Cmd's inherited-descriptor protection. The shell exits, while
+// its background child keeps stdout open; Wait must still return at the
+// configured delay instead of waiting for that child.
+func TestRealRunnerStartWaitDelayClosesInheritedPipe(t *testing.T) {
+	t.Parallel()
+	var stdout bytes.Buffer
+	process, err := (RealRunner{}).Start(
+		context.Background(),
+		[]string{"sh", "-c", "sleep 30 & exit 0"},
+		StartOptions{Stdout: &stdout, WaitDelay: 25 * time.Millisecond, ProcessGroup: true},
+	)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = process.KillGroup() })
+	started := time.Now()
+	err = process.Wait()
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("Wait() took %s, want WaitDelay to close inherited pipe", elapsed)
+	}
+	if err == nil {
+		t.Fatal("Wait() returned nil after WaitDelay closed an inherited pipe")
+	}
+}
+
+// TestRealRunnerRunWaitDelayClosesInheritedPipe covers the synchronous seam
+// separately from Start: RunOptions must reach exec.Cmd.WaitDelay too.
+func TestRealRunnerRunWaitDelayClosesInheritedPipe(t *testing.T) {
+	t.Parallel()
+	pidFile := filepath.Join(t.TempDir(), "child.pid")
+	script := fmt.Sprintf("sleep 30 & echo $! > %s; exit 0", shellQuote(pidFile))
+	started := time.Now()
+	_, err := (RealRunner{}).Run(
+		context.Background(),
+		[]string{"sh", "-c", script},
+		RunOptions{WaitDelay: 25 * time.Millisecond},
+	)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("Run() took %s, want WaitDelay to close inherited pipe", elapsed)
+	}
+	if err == nil {
+		t.Fatal("Run() returned nil after WaitDelay closed an inherited pipe")
+	}
+	if raw, readErr := os.ReadFile(pidFile); readErr == nil {
+		if pid, parseErr := strconv.Atoi(strings.TrimSpace(string(raw))); parseErr == nil {
+			if child, findErr := os.FindProcess(pid); findErr == nil {
+				_ = child.Kill()
+			}
+		}
+	}
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func TestRealRunnerKillGroupStopsDescendants(t *testing.T) {
+	t.Parallel()
+	process, err := (RealRunner{}).Start(
+		context.Background(),
+		[]string{"sh", "-c", "sleep 30"},
+		StartOptions{ProcessGroup: true},
+	)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := process.KillGroup(); err != nil {
+		t.Fatalf("KillGroup() error = %v", err)
+	}
+	if err := process.Wait(); err == nil {
+		t.Fatal("Wait() after KillGroup() returned nil, want signal status")
 	}
 }
 
@@ -234,6 +376,117 @@ func TestFakeRunnerStartRecordsCallOnItsOwnLedger(t *testing.T) {
 	if starts[0].Argv[0] != "pfm" || starts[0].Opts.Dir != "/repo" || !starts[0].Opts.Detach {
 		t.Fatalf("Starts()[0] = %+v, want argv[0]=pfm, Dir=/repo, Detach=true", starts[0])
 	}
+}
+
+func TestFakeRunnerUnscriptedInteractiveStartFailsLoudly(t *testing.T) {
+	t.Parallel()
+	fake := &FakeRunner{}
+	_, err := fake.Start(
+		context.Background(),
+		[]string{"python", "worker.py"},
+		StartOptions{StdinPipe: true, StdoutPipe: true},
+	)
+	if err == nil {
+		t.Fatal("unscripted interactive Start() returned nil error")
+	}
+	var unscripted UnscriptedError
+	if !errors.As(err, &unscripted) {
+		t.Fatalf("error = %v (%T), want UnscriptedError", err, err)
+	}
+}
+
+func TestFakeRunnerInteractiveLifecycleLedger(t *testing.T) {
+	t.Parallel()
+	fake := &FakeRunner{}
+	fake.ScriptInteractive([]string{"worker"}, InteractiveScript{
+		Pid:    87,
+		Stdin:  discardWriteCloser{},
+		Stdout: io.NopCloser(strings.NewReader("")),
+	})
+	process, err := fake.Start(
+		context.Background(),
+		[]string{"worker", "--stream"},
+		StartOptions{StdinPipe: true, StdoutPipe: true, ProcessGroup: true},
+	)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := process.KillGroup(); err != nil {
+		t.Fatalf("KillGroup() error = %v", err)
+	}
+	_ = process.Wait()
+	calls := fake.LifecycleCalls()
+	if len(calls) != 2 || calls[0].Action != "kill-group" || calls[1].Action != "wait" {
+		t.Fatalf("LifecycleCalls() = %+v, want kill-group then wait", calls)
+	}
+}
+
+func TestFakeRunnerInteractiveProcessCanReleaseBlockedWrite(t *testing.T) {
+	t.Parallel()
+	input := &blockingWriteCloser{released: make(chan struct{})}
+	fake := &FakeRunner{}
+	fake.ScriptInteractive([]string{"worker"}, InteractiveScript{
+		Pid:    88,
+		Stdin:  input,
+		Stdout: io.NopCloser(strings.NewReader("")),
+	})
+	process, err := fake.Start(
+		context.Background(),
+		[]string{"worker"},
+		StartOptions{StdinPipe: true, StdoutPipe: true},
+	)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	writeDone := make(chan error, 1)
+	go func() {
+		_, writeErr := processInput(process, []byte("blocked"))
+		writeDone <- writeErr
+	}()
+	select {
+	case <-writeDone:
+		t.Fatal("write completed before pipe close")
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := input.Close(); err != nil {
+		t.Fatalf("close input: %v", err)
+	}
+	select {
+	case <-writeDone:
+	case <-time.After(time.Second):
+		t.Fatal("blocked write did not release after pipe close")
+	}
+}
+
+func processInput(process Process, body []byte) (int, error) {
+	stdin, err := process.StdinPipe()
+	if err != nil {
+		return 0, err
+	}
+	return stdin.Write(body)
+}
+
+type blockingWriteCloser struct {
+	released chan struct{}
+}
+
+type discardWriteCloser struct{}
+
+func (discardWriteCloser) Write(body []byte) (int, error) { return len(body), nil }
+func (discardWriteCloser) Close() error                   { return nil }
+
+func (w *blockingWriteCloser) Write([]byte) (int, error) {
+	<-w.released
+	return 0, errors.New("input closed")
+}
+
+func (w *blockingWriteCloser) Close() error {
+	select {
+	case <-w.released:
+	default:
+		close(w.released)
+	}
+	return nil
 }
 
 func TestFakeRunnerScriptStartControlsPidWaitAndError(t *testing.T) {

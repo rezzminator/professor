@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 const (
@@ -168,6 +170,7 @@ type BrowserFetcher interface {
 // explicit zero: CacheTTL < 0 never expires cached documents, NegativeTTL /
 // NegativeTransientTTL < 0 never cache failures.
 type Options struct {
+	Clock          clock.Clock
 	CacheDir       string
 	CacheTTL       time.Duration
 	Client         *http.Client
@@ -292,6 +295,7 @@ type Result struct {
 // Harvester owns transport, policy and cache state.
 type Harvester struct {
 	options      Options
+	clock        clock.Clock
 	client       *http.Client
 	chrome       *http.Client
 	binaryDirect *http.Client
@@ -306,6 +310,13 @@ type Harvester struct {
 	settings     settings
 }
 
+func (h *Harvester) nowClock() clock.Clock {
+	if h != nil && h.clock != nil {
+		return h.clock
+	}
+	return clock.Real
+}
+
 type fetchFlight struct {
 	done   chan struct{}
 	result Result
@@ -317,6 +328,9 @@ type fetchFlight struct {
 // CacheDir was given and the one default (<home>/.professor/.cache) cannot be
 // resolved — never by caching somewhere else.
 func New(options Options) (*Harvester, error) {
+	if options.Clock == nil {
+		options.Clock = clock.Real
+	}
 	doiMirrorURL, err := normalizeDOIMirrorURL(options.DOIMirrorURL)
 	if err != nil {
 		return nil, err
@@ -444,6 +458,7 @@ func New(options Options) (*Harvester, error) {
 	setUserAgent(jina, userAgent)
 	return &Harvester{
 		options:      options,
+		clock:        options.Clock,
 		client:       client,
 		chrome:       chrome,
 		binaryDirect: binaryDirect,
@@ -451,8 +466,8 @@ func New(options Options) (*Harvester, error) {
 		jina:         jina,
 		oa:           oa,
 		userAgent:    userAgent,
-		cache:        newCache(options.CacheDir, options.CacheTTL),
-		neg:          newNegativeCache(options.NegativeTTL, options.NegativeTransientTTL),
+		cache:        newCache(options.CacheDir, options.CacheTTL, options.Clock),
+		neg:          newNegativeCache(options.NegativeTTL, options.NegativeTransientTTL, options.Clock),
 		flights:      make(map[string]*fetchFlight),
 		settings:     resolved,
 	}, nil

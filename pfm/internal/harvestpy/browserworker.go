@@ -9,9 +9,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 	"sync"
+
+	"hostops/pfm/internal/deps"
 )
 
 // AskReply is one answer from the SSRF authority for a worker guard ask.
@@ -67,8 +68,7 @@ func NewBrowserWorker(runtime Runtime) *BrowserWorker {
 func (worker *BrowserWorker) Close() error {
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
-	worker.stopWorkerLocked()
-	return nil
+	return worker.stopWorkerLocked()
 }
 
 // Fetch renders source in system Chrome through the interactive stdio
@@ -183,10 +183,30 @@ func (worker *BrowserWorker) requestInteractive(
 	if err != nil {
 		return nil, "", err
 	}
-	if _, err := browser.stdin.Write(append(body, '\n')); err != nil {
-		stderr := stderrTail(browser.stderr.String())
-		worker.stopWorkerLocked()
-		return nil, stderr, fmt.Errorf("browser worker write failed: %w (stderr: %s)", err, stderr)
+	payload := append(append([]byte(nil), body...), '\n')
+	writeResult := make(chan error, 1)
+	go func() {
+		_, err := browser.stdin.Write(payload)
+		writeResult <- err
+	}()
+	select {
+	case err := <-writeResult:
+		if err != nil {
+			stderr := stderrTail(browser.stderr.String())
+			cleanupErr := worker.stopWorkerLocked()
+			return nil, stderr, fmt.Errorf(
+				"browser worker write failed: %w (stderr: %s; cleanup: %v)",
+				err,
+				stderr,
+				cleanupErr,
+			)
+		}
+	case <-ctx.Done():
+		cleanupErr := worker.stopWorkerLocked()
+		if cleanupErr != nil {
+			return nil, "", fmt.Errorf("browser worker request cancelled: %w (cleanup: %v)", ctx.Err(), cleanupErr)
+		}
+		return nil, "", fmt.Errorf("browser worker request cancelled: %w", ctx.Err())
 	}
 	type readResult struct {
 		line []byte
@@ -200,13 +220,21 @@ func (worker *BrowserWorker) requestInteractive(
 		}()
 		select {
 		case <-ctx.Done():
-			worker.stopWorkerLocked()
+			cleanupErr := worker.stopWorkerLocked()
+			if cleanupErr != nil {
+				return nil, "", fmt.Errorf("browser worker request cancelled: %w (cleanup: %v)", ctx.Err(), cleanupErr)
+			}
 			return nil, "", fmt.Errorf("browser worker request cancelled: %w", ctx.Err())
 		case result := <-read:
 			if result.err != nil {
 				stderr := stderrTail(browser.stderr.String())
-				worker.stopWorkerLocked()
-				return nil, stderr, fmt.Errorf("browser worker read failed: %w (stderr: %s)", result.err, stderr)
+				cleanupErr := worker.stopWorkerLocked()
+				return nil, stderr, fmt.Errorf(
+					"browser worker read failed: %w (stderr: %s; cleanup: %v)",
+					result.err,
+					stderr,
+					cleanupErr,
+				)
 			}
 			var ask browserAsk
 			if unmarshalErr := json.Unmarshal(result.line, &ask); unmarshalErr == nil && ask.Ask == "fetchable" {
@@ -222,26 +250,40 @@ func (worker *BrowserWorker) requestInteractive(
 				if marshalErr != nil {
 					return nil, "", fmt.Errorf("marshal browser ask reply: %w", marshalErr)
 				}
-				if _, writeErr := browser.stdin.Write(append(answer, '\n')); writeErr != nil {
+				writeResult := make(chan error, 1)
+				payload := append(append([]byte(nil), answer...), '\n')
+				go func() {
+					_, writeErr := browser.stdin.Write(payload)
+					writeResult <- writeErr
+				}()
+				select {
+				case writeErr := <-writeResult:
+					if writeErr == nil {
+						continue
+					}
 					stderr := stderrTail(browser.stderr.String())
-					worker.stopWorkerLocked()
-					return nil, stderr, fmt.Errorf("browser worker ask reply failed: %w (stderr: %s)", writeErr, stderr)
+					cleanupErr := worker.stopWorkerLocked()
+					return nil, stderr, fmt.Errorf(
+						"browser worker ask reply failed: %w (stderr: %s; cleanup: %v)",
+						writeErr,
+						stderr,
+						cleanupErr,
+					)
+				case <-ctx.Done():
+					cleanupErr := worker.stopWorkerLocked()
+					if cleanupErr != nil {
+						return nil, "", fmt.Errorf(
+							"browser worker ask reply cancelled: %w (cleanup: %v)",
+							ctx.Err(),
+							cleanupErr,
+						)
+					}
+					return nil, "", fmt.Errorf("browser worker ask reply cancelled: %w", ctx.Err())
 				}
-				continue
 			}
 			return result.line, stderrTail(browser.stderr.String()), nil
 		}
 	}
-}
-
-// browserWorkerCommand is injectable for protocol tests; production validates
-// the provisioned script is a regular file, then execs the pinned interpreter.
-var browserWorkerCommand = func(python, script string) (*exec.Cmd, error) {
-	info, statErr := os.Stat(script)
-	if statErr != nil || info.IsDir() || !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("browser worker script is not provisioned: %s", script)
-	}
-	return exec.Command(python, script), nil
 }
 
 func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
@@ -253,46 +295,85 @@ func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
 			"browser interpreter path is empty; the browser environment is NOT provisioned (it provisions on the first browser fetch once fetch.browser is true in harvester.config.json)",
 		)
 	}
-	command, err := browserWorkerCommand(worker.runtime.Python, worker.runtime.Script)
-	if err != nil {
-		return nil, err
+	if worker.runtime.Runner == nil {
+		info, err := os.Stat(worker.runtime.Script)
+		if err != nil || info.IsDir() || !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("browser worker script is not provisioned: %s", worker.runtime.Script)
+		}
 	}
-	configureBrowserCommand(command)
-	stdin, err := command.StdinPipe()
-	if err != nil {
-		return nil, fmt.Errorf("open browser worker stdin: %w", err)
+	runner := worker.runtime.Runner
+	if runner == nil {
+		runner = deps.RealRunner{}
 	}
-	stdout, err := command.StdoutPipe()
+	stderr := &lockedBuffer{}
+	process, err := runner.Start(
+		context.Background(),
+		[]string{worker.runtime.Python, worker.runtime.Script},
+		deps.StartOptions{
+			StdinPipe:    true,
+			StdoutPipe:   true,
+			ProcessGroup: true,
+			Stderr:       stderr,
+		},
+	)
 	if err != nil {
-		_ = stdin.Close()
-		return nil, fmt.Errorf("open browser worker stdout: %w", err)
-	}
-	process := &workerProcess{command: command, stdin: stdin, stdout: bufio.NewReader(stdout)}
-	command.Stderr = &process.stderr
-	if err := command.Start(); err != nil {
-		_ = stdin.Close()
 		return nil, fmt.Errorf("start browser worker: %w", err)
 	}
-	worker.worker = process
-	return process, nil
+	stdin, err := process.StdinPipe()
+	if err != nil {
+		_ = process.KillGroup()
+		_ = process.Wait()
+		return nil, fmt.Errorf("open browser worker stdin: %w", err)
+	}
+	stdout, err := process.StdoutPipe()
+	if err != nil {
+		_ = stdin.Close()
+		_ = process.KillGroup()
+		_ = process.Wait()
+		return nil, fmt.Errorf("open browser worker stdout: %w", err)
+	}
+	processState := &workerProcess{
+		process:    process,
+		stdin:      stdin,
+		stdout:     bufio.NewReader(stdout),
+		stdoutPipe: stdout,
+		stderr:     stderr,
+	}
+	worker.worker = processState
+	return processState, nil
 }
 
-func (worker *BrowserWorker) stopWorkerLocked() {
+func (worker *BrowserWorker) stopWorkerLocked() error {
 	if worker.worker == nil {
-		return
+		return nil
 	}
 	process := worker.worker
 	worker.worker = nil
-	_ = process.stdin.Close()
-	if process.command.Process != nil {
-		// Kill the whole process GROUP: patchright's node driver and the Chrome
-		// it launched are children of the python worker, and killing only the
-		// direct child leaves Chrome reparented and alive.
-		if err := killBrowserProcessGroup(process.command.Process.Pid); err != nil {
-			_ = process.command.Process.Kill()
+	var cleanupErr error
+	if err := process.stdin.Close(); err != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close browser worker stdin: %w", err))
+	}
+	if err := process.stdoutPipe.Close(); err != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close browser worker stdout: %w", err))
+	}
+	killErr := process.process.KillGroup()
+	if errors.Is(killErr, os.ErrProcessDone) {
+		killErr = nil
+	}
+	if killErr != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill browser worker process group: %w", killErr))
+		if err := process.process.Kill(); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill browser worker process: %w", err))
 		}
 	}
-	_ = process.command.Wait()
+	if err := process.process.Wait(); err != nil {
+		// A successful group kill normally makes Wait return the signal status;
+		// only report it when the kill itself failed, where it is diagnostic.
+		if cleanupErr != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for browser worker: %w", err))
+		}
+	}
+	return cleanupErr
 }
 
 var _ io.Closer = (*BrowserWorker)(nil)

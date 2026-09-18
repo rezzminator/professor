@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // RunOptions configures one Runner.Run call: the environment and working
@@ -20,6 +21,10 @@ type RunOptions struct {
 	Env   []string
 	Dir   string
 	Stdin []byte
+	// WaitDelay bounds the time exec.Cmd waits for its I/O copy goroutines
+	// after the child exits or its context is cancelled. A zero value keeps
+	// os/exec's default (no extra bound).
+	WaitDelay time.Duration
 }
 
 // RunResult is one command's completed run: stdout and stderr split (never
@@ -55,9 +60,25 @@ type Runner interface {
 // takes), where its stdout/stderr are wired, and whether it detaches into
 // its own session.
 type StartOptions struct {
-	Env            []string
-	Dir            string
+	Env []string
+	Dir string
+	// WaitDelay has the same meaning as RunOptions.WaitDelay. It is carried
+	// through the seam so streaming callers retain exec.Cmd's guarantee that
+	// inherited descriptors cannot strand Wait or its copy goroutines.
+	WaitDelay time.Duration
+	// Stdin is ordinary input wired to the child. It cannot be combined with
+	// StdinPipe; use the latter when the caller owns an interactive stream.
+	Stdin          io.Reader
 	Stdout, Stderr io.Writer
+	// StdinPipe and StdoutPipe keep the native process pipes inside deps. The
+	// returned Process exposes the corresponding handles without leaking
+	// exec.Cmd to callers.
+	StdinPipe  bool
+	StdoutPipe bool
+	// ProcessGroup gives the child its own process group so KillGroup can stop
+	// descendants as well as the direct child. Detached processes always get a
+	// new session and therefore a process group automatically.
+	ProcessGroup bool
 	// Detach starts the child in its own session (SysProcAttr{Setsid: true}
 	// on unix) and releases it immediately after Start — the process is
 	// never waited on, because a detached child is expected to outlive this
@@ -72,6 +93,10 @@ type Process interface {
 	Pid() int
 	Wait() error
 	Release() error
+	StdinPipe() (io.WriteCloser, error)
+	StdoutPipe() (io.ReadCloser, error)
+	Kill() error
+	KillGroup() error
 }
 
 // RealRunner runs argv through os/exec.
@@ -89,6 +114,7 @@ func (RealRunner) Run(ctx context.Context, argv []string, opts RunOptions) (RunR
 	command := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	command.Env = opts.Env
 	command.Dir = opts.Dir
+	command.WaitDelay = opts.WaitDelay
 	if opts.Stdin != nil {
 		command.Stdin = bytes.NewReader(opts.Stdin)
 	}
@@ -126,6 +152,15 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 	if len(argv) == 0 {
 		return nil, errors.New("deps: RealRunner.Start: empty argv")
 	}
+	if opts.Detach && (opts.StdinPipe || opts.StdoutPipe) {
+		return nil, errors.New("deps: detached process cannot own input or output pipes")
+	}
+	if opts.Stdin != nil && opts.StdinPipe {
+		return nil, errors.New("deps: StartOptions cannot combine Stdin and StdinPipe")
+	}
+	if opts.Stdout != nil && opts.StdoutPipe {
+		return nil, errors.New("deps: StartOptions cannot combine Stdout and StdoutPipe")
+	}
 	var command *exec.Cmd
 	if opts.Detach {
 		// A detached child must outlive this call, so it is never wired to
@@ -134,12 +169,43 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 		command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	} else {
 		command = exec.CommandContext(ctx, argv[0], argv[1:]...)
+		if opts.ProcessGroup {
+			command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		}
 	}
 	command.Env = opts.Env
 	command.Dir = opts.Dir
+	command.WaitDelay = opts.WaitDelay
+	if opts.Stdin != nil {
+		command.Stdin = opts.Stdin
+	}
 	command.Stdout = opts.Stdout
 	command.Stderr = opts.Stderr
+	var stdin io.WriteCloser
+	var stdout io.ReadCloser
+	var err error
+	if opts.StdinPipe {
+		stdin, err = command.StdinPipe()
+		if err != nil {
+			return nil, fmt.Errorf("open %q stdin pipe: %w", argv[0], err)
+		}
+	}
+	if opts.StdoutPipe {
+		stdout, err = command.StdoutPipe()
+		if err != nil {
+			if stdin != nil {
+				_ = stdin.Close()
+			}
+			return nil, fmt.Errorf("open %q stdout pipe: %w", argv[0], err)
+		}
+	}
 	if err := command.Start(); err != nil {
+		if stdin != nil {
+			_ = stdin.Close()
+		}
+		if stdout != nil {
+			_ = stdout.Close()
+		}
 		return nil, fmt.Errorf("start %q: %w", argv[0], err)
 	}
 	if opts.Detach {
@@ -149,13 +215,16 @@ func (RealRunner) Start(ctx context.Context, argv []string, opts StartOptions) (
 		}
 		return &releasedProcess{pid: pid, argv0: argv[0]}, nil
 	}
-	return &realProcess{command: command}, nil
+	return &realProcess{command: command, stdin: stdin, stdout: stdout, processGroup: opts.ProcessGroup}, nil
 }
 
 // realProcess wraps a started, non-detached *exec.Cmd this Runner still
 // owns: Wait and Release forward to it directly.
 type realProcess struct {
-	command *exec.Cmd
+	command      *exec.Cmd
+	stdin        io.WriteCloser
+	stdout       io.ReadCloser
+	processGroup bool
 }
 
 func (p *realProcess) Pid() int { return p.command.Process.Pid }
@@ -163,6 +232,41 @@ func (p *realProcess) Pid() int { return p.command.Process.Pid }
 func (p *realProcess) Wait() error { return p.command.Wait() }
 
 func (p *realProcess) Release() error { return p.command.Process.Release() }
+
+func (p *realProcess) StdinPipe() (io.WriteCloser, error) {
+	if p.stdin == nil {
+		return nil, errors.New("deps: process stdin pipe was not requested")
+	}
+	return p.stdin, nil
+}
+
+func (p *realProcess) StdoutPipe() (io.ReadCloser, error) {
+	if p.stdout == nil {
+		return nil, errors.New("deps: process stdout pipe was not requested")
+	}
+	return p.stdout, nil
+}
+
+func (p *realProcess) Kill() error {
+	if p.command.Process == nil {
+		return errors.New("deps: process has not started")
+	}
+	return p.command.Process.Kill()
+}
+
+func (p *realProcess) KillGroup() error {
+	if !p.processGroup {
+		return errors.New("deps: process group was not requested")
+	}
+	if p.command.Process == nil {
+		return errors.New("deps: process has not started")
+	}
+	err := syscall.Kill(-p.command.Process.Pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return err
+}
 
 // releasedProcess is what Start(Detach: true) hands back: the pid it saw
 // before releasing the process handle. Nothing here can wait on the real
@@ -185,6 +289,22 @@ func (p *releasedProcess) Wait() error {
 
 func (p *releasedProcess) Release() error { return nil }
 
+func (p *releasedProcess) StdinPipe() (io.WriteCloser, error) {
+	return nil, errors.New("deps: detached process has no stdin pipe")
+}
+
+func (p *releasedProcess) StdoutPipe() (io.ReadCloser, error) {
+	return nil, errors.New("deps: detached process has no stdout pipe")
+}
+
+func (p *releasedProcess) Kill() error {
+	return errors.New("deps: detached process was released; it cannot be killed")
+}
+
+func (p *releasedProcess) KillGroup() error {
+	return errors.New("deps: detached process was released; it cannot be killed")
+}
+
 // FakeRunner scripts Runner responses by argv prefix and records every call
 // on a ledger. Script order does not matter: the LONGEST matching prefix
 // wins, so a caller can script a broad default ("git") alongside a
@@ -202,6 +322,7 @@ type FakeRunner struct {
 	calls        []RunCall
 	startScripts []fakeStartScript
 	starts       []StartCall
+	lifecycle    []LifecycleCall
 }
 
 type fakeScript struct {
@@ -228,23 +349,93 @@ type StartCall struct {
 	Opts StartOptions
 }
 
+// LifecycleCall records a FakeRunner Process lifecycle operation in order.
+// It is deliberately separate from StartCall so tests can assert cleanup
+// happened after cancellation without inspecting a real process table.
+type LifecycleCall struct {
+	Pid    int
+	Action string
+}
+
 type fakeStartScript struct {
-	prefix  []string
-	pid     int
-	waitErr error
-	err     error
+	prefix     []string
+	pid        int
+	waitErr    error
+	err        error
+	stdin      io.WriteCloser
+	stdout     io.ReadCloser
+	killErr    error
+	groupErr   error
+	releaseErr error
 }
 
 // fakeProcess is the scripted Process FakeRunner.Start hands back: a fixed
 // pid and a fixed Wait error, never a real process.
 type fakeProcess struct {
-	pid     int
-	waitErr error
+	pid        int
+	waitErr    error
+	stdin      io.WriteCloser
+	stdout     io.ReadCloser
+	killErr    error
+	groupErr   error
+	releaseErr error
+	owner      *FakeRunner
 }
 
-func (p *fakeProcess) Pid() int       { return p.pid }
-func (p *fakeProcess) Wait() error    { return p.waitErr }
-func (p *fakeProcess) Release() error { return nil }
+func (p *fakeProcess) Pid() int { return p.pid }
+func (p *fakeProcess) Wait() error {
+	p.owner.recordLifecycle(p.pid, "wait")
+	return p.waitErr
+}
+
+func (p *fakeProcess) Release() error {
+	p.owner.recordLifecycle(p.pid, "release")
+	return p.releaseErr
+}
+
+func (p *fakeProcess) StdinPipe() (io.WriteCloser, error) {
+	if p.stdin == nil {
+		return nil, errors.New("deps: fake process stdin pipe was not scripted")
+	}
+	return p.stdin, nil
+}
+
+func (p *fakeProcess) StdoutPipe() (io.ReadCloser, error) {
+	if p.stdout == nil {
+		return nil, errors.New("deps: fake process stdout pipe was not scripted")
+	}
+	return p.stdout, nil
+}
+
+func (p *fakeProcess) Kill() error {
+	p.owner.recordLifecycle(p.pid, "kill")
+	return p.killErr
+}
+
+func (p *fakeProcess) KillGroup() error {
+	p.owner.recordLifecycle(p.pid, "kill-group")
+	return p.groupErr
+}
+
+func (f *FakeRunner) recordLifecycle(pid int, action string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lifecycle = append(f.lifecycle, LifecycleCall{Pid: pid, Action: action})
+}
+
+// InteractiveScript supplies the owned streams and lifecycle answers for a
+// FakeRunner.Start call. A stream is only returned when the corresponding
+// StartOptions pipe was requested; unscripted streaming starts fail loudly.
+type InteractiveScript struct {
+	Pid        int
+	WaitErr    error
+	StartErr   error
+	Stdin      io.WriteCloser
+	Stdout     io.ReadCloser
+	KillErr    error
+	GroupErr   error
+	ReleaseErr error
+}
 
 // Script registers result/err for every Run call whose argv starts with
 // prefix.
@@ -305,6 +496,20 @@ func (f *FakeRunner) ScriptStart(prefix []string, pid int, waitErr, err error) {
 	})
 }
 
+// ScriptInteractive registers a streaming Start response. It is separate
+// from ScriptStart so existing detached and waited callers keep their small
+// API while interactive consumers can own deterministic pipes and lifecycle
+// failures.
+func (f *FakeRunner) ScriptInteractive(prefix []string, script InteractiveScript) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startScripts = append(f.startScripts, fakeStartScript{
+		prefix: append([]string(nil), prefix...), pid: script.Pid, waitErr: script.WaitErr, err: script.StartErr,
+		stdin: script.Stdin, stdout: script.Stdout, killErr: script.KillErr,
+		groupErr: script.GroupErr, releaseErr: script.ReleaseErr,
+	})
+}
+
 // Start records the call on the Start ledger, then answers with the
 // longest registered ScriptStart match, or a default Process (pid 4242,
 // Wait nil) when nothing was scripted — a caller that never cares about the
@@ -312,6 +517,15 @@ func (f *FakeRunner) ScriptStart(prefix []string, pid int, waitErr, err error) {
 func (f *FakeRunner) Start(_ context.Context, argv []string, opts StartOptions) (Process, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if opts.Detach && (opts.StdinPipe || opts.StdoutPipe) {
+		return nil, errors.New("deps: detached process cannot own input or output pipes")
+	}
+	if opts.Stdin != nil && opts.StdinPipe {
+		return nil, errors.New("deps: StartOptions cannot combine Stdin and StdinPipe")
+	}
+	if opts.Stdout != nil && opts.StdoutPipe {
+		return nil, errors.New("deps: StartOptions cannot combine Stdout and StdoutPipe")
+	}
 	f.starts = append(f.starts, StartCall{Argv: append([]string(nil), argv...), Opts: opts})
 	var best *fakeStartScript
 	for index := range f.startScripts {
@@ -324,12 +538,28 @@ func (f *FakeRunner) Start(_ context.Context, argv []string, opts StartOptions) 
 		}
 	}
 	if best == nil {
-		return &fakeProcess{pid: 4242}, nil
+		if opts.StdinPipe || opts.StdoutPipe {
+			return nil, UnscriptedError{Argv: append([]string(nil), argv...)}
+		}
+		return &fakeProcess{pid: 4242, owner: f}, nil
 	}
 	if best.err != nil {
 		return nil, best.err
 	}
-	return &fakeProcess{pid: best.pid, waitErr: best.waitErr}, nil
+	if (opts.StdinPipe && best.stdin == nil) || (opts.StdoutPipe && best.stdout == nil) {
+		return nil, fmt.Errorf("deps: FakeRunner: interactive script for %q did not provide requested pipes", argv)
+	}
+	return &fakeProcess{
+		pid: best.pid, waitErr: best.waitErr, stdin: best.stdin, stdout: best.stdout,
+		killErr: best.killErr, groupErr: best.groupErr, releaseErr: best.releaseErr, owner: f,
+	}, nil
+}
+
+// LifecycleCalls returns a copy of every FakeRunner Process lifecycle call.
+func (f *FakeRunner) LifecycleCalls() []LifecycleCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]LifecycleCall(nil), f.lifecycle...)
 }
 
 // Starts returns every Start call FakeRunner has recorded, in call order —
@@ -338,7 +568,8 @@ func (f *FakeRunner) Starts() []StartCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	starts := make([]StartCall, len(f.starts))
-	for index, call := range f.starts {
+	for index := range f.starts {
+		call := &f.starts[index]
 		starts[index] = StartCall{Argv: append([]string(nil), call.Argv...), Opts: call.Opts}
 	}
 	return starts

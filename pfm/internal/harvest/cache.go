@@ -15,14 +15,16 @@ import (
 	"sync"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/paths"
 )
 
 // Cache is a type-partitioned markdown cache. Images and archives do not
 // expire; publication-like kinds do.
 type Cache struct {
-	root string
-	ttl  time.Duration
+	root  string
+	ttl   time.Duration
+	clock clock.Clock
 }
 
 type CacheSearchResult struct {
@@ -92,7 +94,13 @@ func (h *Harvester) SearchCache(pattern string, maxResults int, ignoreCase bool)
 	return h.cache.Search(pattern, maxResults, ignoreCase)
 }
 
-func newCache(root string, ttl time.Duration) *Cache { return &Cache{root: root, ttl: ttl} }
+func newCache(root string, ttl time.Duration, clocks ...clock.Clock) *Cache {
+	watch := clock.Real
+	if len(clocks) > 0 && clocks[0] != nil {
+		watch = clocks[0]
+	}
+	return &Cache{root: root, ttl: ttl, clock: watch}
+}
 
 func defaultHarvestCacheDir() (string, error) {
 	// The default cache lives in exactly ONE place: <home>/.professor/.cache
@@ -174,9 +182,9 @@ func (c *Cache) stale(path, kind string, meta map[string]string) bool {
 		if statErr != nil {
 			return false
 		}
-		return time.Since(info.ModTime()) > c.ttl
+		return c.clock.Now().Sub(info.ModTime()) > c.ttl
 	}
-	return time.Since(stamp) > c.ttl
+	return c.clock.Now().Sub(stamp) > c.ttl
 }
 
 func (c *Cache) save(source, kind, method, body string, rungs []string) (path string, returnErr error) {
@@ -190,7 +198,7 @@ func (c *Cache) save(source, kind, method, body string, rungs []string) (path st
 		return strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A").Replace(value)
 	}
 	meta := fmt.Sprintf("---\nurl: %s\nfetched_at: %s\nsource: harvester\nmethod: %s\ntoken_count: %d\n",
-		safe(source), time.Now().UTC().Format(time.RFC3339), safe(method), EstimateTokens(body))
+		safe(source), c.clock.Now().UTC().Format(time.RFC3339), safe(method), EstimateTokens(body))
 	if len(rungs) > 0 {
 		meta += "rungs: " + strings.Join(rungs, ", ") + "\n"
 	}
@@ -319,6 +327,7 @@ type negativeCache struct {
 	mu        sync.Mutex
 	ttl       time.Duration
 	transient time.Duration
+	clock     clock.Clock
 	entries   map[string]negativeEntry
 }
 type negativeEntry struct {
@@ -327,15 +336,19 @@ type negativeEntry struct {
 	result Result
 }
 
-func newNegativeCache(ttl, transient time.Duration) *negativeCache {
-	return &negativeCache{ttl: ttl, transient: transient, entries: map[string]negativeEntry{}}
+func newNegativeCache(ttl, transient time.Duration, clocks ...clock.Clock) *negativeCache {
+	watch := clock.Real
+	if len(clocks) > 0 && clocks[0] != nil {
+		watch = clocks[0]
+	}
+	return &negativeCache{ttl: ttl, transient: transient, clock: watch, entries: map[string]negativeEntry{}}
 }
 
 func (c *negativeCache) get(key string) (Result, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
-	if !ok || time.Since(e.at) >= e.ttl {
+	if !ok || c.clock.Now().Sub(e.at) >= e.ttl {
 		if ok {
 			delete(c.entries, key)
 		}
@@ -346,7 +359,7 @@ func (c *negativeCache) get(key string) (Result, bool) {
 	// remain stable while a repeated request learns when retrying is worthwhile.
 	result := e.result
 	if result.Error != "" {
-		remaining := e.ttl - time.Since(e.at)
+		remaining := e.ttl - c.clock.Now().Sub(e.at)
 		seconds := int((remaining + 500*time.Millisecond) / time.Second)
 		if seconds < 0 {
 			seconds = 0
@@ -364,6 +377,6 @@ func (c *negativeCache) put(key string, result Result) {
 		result.ErrorKind == errorKindDNS {
 		ttl = c.transient
 	}
-	c.entries[key] = negativeEntry{at: time.Now(), ttl: ttl, result: result}
+	c.entries[key] = negativeEntry{at: c.clock.Now(), ttl: ttl, result: result}
 	c.mu.Unlock()
 }

@@ -1,12 +1,40 @@
 package engine
 
-import "path/filepath"
+import (
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+)
 
 // OutputStyleDefaultSettings is the --settings payload every Claude launch
 // carries to disable Claude Code's own output style. Claude Code has no
 // "none" style; the built-in "default" style appends nothing, so naming it
 // is the off switch — see Claude's LaunchArgs below for why.
 const OutputStyleDefaultSettings = `{"outputStyle":"default"}`
+
+// claudeSettings is the --settings payload shape: outputStyle always
+// present, theme only when claude.theme resolved non-empty.
+type claudeSettings struct {
+	OutputStyle string `json:"outputStyle"`
+	Theme       string `json:"theme,omitempty"`
+}
+
+// ClaudeSettingsPayload is the --settings payload for a Claude launch: byte-
+// identical to OutputStyleDefaultSettings when theme is empty (so an
+// untouched account moves no goldens), else the same object with theme
+// merged in.
+func ClaudeSettingsPayload(theme string) string {
+	if theme == "" {
+		return OutputStyleDefaultSettings
+	}
+	payload, err := json.Marshal(claudeSettings{OutputStyle: "default", Theme: theme})
+	if err != nil {
+		// claudeSettings holds only plain strings — json.Marshal fails on
+		// channels, funcs, and cycles, none of which this type can hold.
+		panic(fmt.Sprintf("engine: marshal claude settings: %v", err))
+	}
+	return string(payload)
+}
 
 func init() {
 	Register(Descriptor{

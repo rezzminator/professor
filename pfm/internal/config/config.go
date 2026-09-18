@@ -73,7 +73,7 @@ type AccountSkip struct {
 
 type ClaudePrefs struct {
 	PermissionMode string
-	Binary         string
+	Binary, Theme  string
 	// SystemPrompt is one of the SystemPrompt* values; empty means
 	// SystemPromptProduction.
 	SystemPrompt string
@@ -313,6 +313,7 @@ type rawAccount struct {
 type rawClaude struct {
 	PermissionMode *string          `json:"permissionMode,omitempty"`
 	Binary         *string          `json:"binary,omitempty"`
+	Theme          *string          `json:"theme,omitempty"`
 	Cache1H        *bool            `json:"cache1h,omitempty"`
 	NativeCursor   *bool            `json:"nativeCursor,omitempty"`
 	SystemPrompt   *string          `json:"systemPrompt,omitempty"`
@@ -479,6 +480,7 @@ func defaultsWithMCPServers(
 		"accounts": SourceDefault,
 		engineConfigKey(pfmengine.Claude, "permissionMode"):  SourceDefault,
 		engineConfigKey(pfmengine.Claude, engineKeyBinary):   SourceDefault,
+		engineConfigKey(pfmengine.Claude, "theme"):           SourceDefault,
 		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
 		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
@@ -748,7 +750,8 @@ func loadWithMCPServers(
 	// PermissionMode/Binary do, so "unset at this account" is decided here,
 	// once, instead of guessed from a materialized zero value later.
 	if raw.Claude != nil {
-		prefs, err := decodeClaudePrefs(*raw.Claude, result.Path, pfmengine.MustLookup(pfmengine.Claude).LongName, -1)
+		name := pfmengine.MustLookup(pfmengine.Claude).LongName
+		prefs, err := decodeClaudePrefs(*raw.Claude, result.Path, name, -1)
 		if err != nil {
 			return Config{}, err
 		}
@@ -764,27 +767,20 @@ func loadWithMCPServers(
 			result.Sources[engineConfigKey(pfmengine.Claude, "cache1h")] = SourceFile
 			result.Claude.Cache1H = prefs.Cache1H
 		}
+		if err := applyTheme(&result.Claude, raw.Claude.Theme, name, -1, result.Sources); err != nil {
+			return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
+		}
 		applyNativeCursor(&result.Claude, raw.Claude.NativeCursor, false, result.Sources, -1)
 		if raw.Claude.SystemPrompt != nil {
 			result.Claude.SystemPrompt = prefs.SystemPrompt
 			result.Sources[engineConfigKey(pfmengine.Claude, "systemPrompt")] = SourceFile
 		}
-		applied, err := applyCompactNudge(
-			result.Claude.CompactNudge,
-			raw.Claude.CompactNudge,
-			result.Path,
-			pfmengine.MustLookup(pfmengine.Claude).LongName,
-			-1,
-		)
+		applied, err := applyCompactNudge(result.Claude.CompactNudge, raw.Claude.CompactNudge, result.Path, name, -1)
 		if err != nil {
 			return Config{}, err
 		}
 		result.Claude.CompactNudge = applied
-		recordCompactNudgeSources(
-			result.Sources,
-			pfmengine.MustLookup(pfmengine.Claude).LongName,
-			raw.Claude.CompactNudge,
-		)
+		recordCompactNudgeSources(result.Sources, name, raw.Claude.CompactNudge)
 	}
 	if raw.Accounts != nil {
 		accounts, err := validateAccounts(*raw.Accounts, home)
@@ -818,6 +814,9 @@ func loadWithMCPServers(
 				} else {
 					result.Sources[fmt.Sprintf("accounts[%d].claude.cache1h", index)] = SourceFile
 				}
+				if err := applyTheme(&prefs, value.Claude.Theme, "accounts", index, result.Sources); err != nil {
+					return Config{}, fmt.Errorf("config %s: %w", result.Path, err)
+				}
 				applyNativeCursor(&prefs, value.Claude.NativeCursor, result.Claude.NativeCursor, result.Sources, index)
 				// Same inheritance for the nudge policy: seeded from the
 				// resolved top level, then only the fields this account set.
@@ -832,11 +831,8 @@ func loadWithMCPServers(
 					return Config{}, err
 				}
 				prefs.CompactNudge = applied
-				recordCompactNudgeSources(
-					result.Sources,
-					fmt.Sprintf("accounts[%d].claude", index),
-					value.Claude.CompactNudge,
-				)
+				key := fmt.Sprintf("accounts[%d].claude", index)
+				recordCompactNudgeSources(result.Sources, key, value.Claude.CompactNudge)
 				result.Accounts[index].Claude = &prefs
 			}
 			if value.Codex != nil {
@@ -1308,8 +1304,7 @@ func (config Config) AccountByID(id int) (Account, bool) {
 	return Account{}, false
 }
 
-// EffectiveClaude resolves an account override over the top-level Claude
-// posture and binary. Unknown accounts receive the top-level posture.
+// EffectiveClaude resolves an account override over the top-level Claude posture, binary, and theme; unknown accounts receive the top-level posture.
 func (config Config) EffectiveClaude(id int) ClaudePrefs {
 	result := config.Claude
 	if account, ok := config.AccountByID(id); ok && account.Claude != nil {
@@ -1318,6 +1313,9 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		}
 		if account.Claude.Binary != "" {
 			result.Binary = account.Claude.Binary
+		}
+		if account.Claude.Theme != "" {
+			result.Theme = account.Claude.Theme
 		}
 		// Unconditional, like EffectiveCodex's Yolo: Load already seeded an
 		// unset account-level Cache1H with the resolved top-level value, so
@@ -1623,6 +1621,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			value[claudeName] = map[string]any{
 				"permissionMode": account.Claude.PermissionMode,
 				engineKeyBinary:  account.Claude.Binary,
+				"theme":          themeMarshalValue(account.Claude.Theme),
 				"cache1h":        account.Claude.Cache1H,
 				"nativeCursor":   account.Claude.NativeCursor,
 			}
@@ -1679,6 +1678,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		claudeName: map[string]any{
 			"permissionMode": config.Claude.PermissionMode,
 			engineKeyBinary:  config.Claude.Binary,
+			"theme":          themeMarshalValue(config.Claude.Theme),
 			"cache1h":        config.Claude.Cache1H,
 			"nativeCursor":   config.Claude.NativeCursor,
 			"compactNudge": map[string]any{

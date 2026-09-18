@@ -227,7 +227,7 @@ func TestRunnerNilNextIsTheRealRunner(t *testing.T) {
 	if !ok {
 		t.Fatalf("Runner(nil) = %T", Runner(nil))
 	}
-	if _, real := wrapped.next.(deps.RealRunner); !real {
+	if _, isReal := wrapped.next.(deps.RealRunner); !isReal {
 		t.Fatalf("Runner(nil).next = %T, want deps.RealRunner", wrapped.next)
 	}
 }

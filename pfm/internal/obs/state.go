@@ -19,11 +19,11 @@ const compState = "state"
 func Transition(ctx context.Context, comp, prior, next, cause string) func(err error) {
 	started := current(ctx).timing.Now()
 	return func(err error) {
-		transition(ctx, comp, prior, next, cause, started, err)
+		recordTransition(ctx, comp, prior, next, cause, started, err)
 	}
 }
 
-func transition(ctx context.Context, comp, prior, next, cause string, started time.Time, err error) {
+func recordTransition(ctx context.Context, comp, prior, next, cause string, started time.Time, err error) {
 	record(ctx, compState, "state.transition", errorLevel(err, slog.LevelInfo), started, err,
 		slog.String("kind", comp), slog.String("prior", prior), slog.String("next", next), slog.String("cause", cause))
 }
@@ -51,7 +51,7 @@ func (trail *Trail) Reach(next, cause string) {
 	if trail.ended {
 		return
 	}
-	transition(trail.ctx, trail.comp, trail.state, next, cause, trail.started, nil)
+	recordTransition(trail.ctx, trail.comp, trail.state, next, cause, trail.started, nil)
 	trail.state = next
 	trail.started = current(trail.ctx).timing.Now()
 }
@@ -67,5 +67,5 @@ func (trail *Trail) End(err error) {
 	if err != nil {
 		next, cause = "failed", "run aborted"
 	}
-	transition(trail.ctx, trail.comp, trail.state, next, cause, trail.started, err)
+	recordTransition(trail.ctx, trail.comp, trail.state, next, cause, trail.started, err)
 }

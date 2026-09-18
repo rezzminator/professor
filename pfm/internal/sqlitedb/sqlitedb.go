@@ -32,12 +32,12 @@ const StoreBusyTimeout = 10 * time.Second
 // another's writes — synchronous=NORMAL and foreign keys on.
 func OpenStore(ctx context.Context, path string) (*sql.DB, error) {
 	finish := obs.SQLOpen(ctx, "store", path)
-	database, err := openStore(ctx, path)
+	database, err := openStoreFile(ctx, path)
 	finish(err)
 	return database, err
 }
 
-func openStore(ctx context.Context, path string) (*sql.DB, error) {
+func openStoreFile(ctx context.Context, path string) (*sql.DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory for %s: %w", path, err)
 	}

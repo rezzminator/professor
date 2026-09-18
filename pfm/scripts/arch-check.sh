@@ -259,8 +259,10 @@ else say C21-test-jail ERROR "grep could not read tests"; fi
 # door the unit-test-law wave (docs/dev/trains/testing-foundation/waves/
 # 3-unit-law/spec.md § Three seams item 4) has not seamed yet; the baseline
 # only shrinks as later batches migrate a package onto clock.Clock,
-# deps.Runner, tmux.Fake or paths.Env.
-grep -vE '^internal/(clock|deps|paths|tmux)/' "$T/src.list" > "$T/noseam.list"
+# deps.Runner, tmux.Fake or paths.Env. internal/mockengine + cmd/mock-engine
+# are the fifth seam: the mock IS a host (exec, env, files, clock) — the thing
+# the other four fake — so its doors are its purpose, not a leak to migrate.
+grep -vE '^(internal/(clock|deps|paths|tmux|mockengine)|cmd/mock-engine)/' "$T/src.list" > "$T/noseam.list"
 if g "$T/raw" "$T/noseam.list" -nE 'os\.Getenv|LookupEnv|UserHomeDir|user\.Current|exec\.Command|exec\.CommandContext|exec\.LookPath|time\.Now|time\.Sleep|time\.After|time\.NewTimer|time\.NewTicker|time\.Tick|net\.Dial|net\.Listen'; then
   count_by_file "$T/raw" > "$T/c22"; ratchet_counts C22-host-doors host-doors "$T/c22"
 else say C22-host-doors ERROR "grep could not read sources"; fi

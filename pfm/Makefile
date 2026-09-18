@@ -50,8 +50,11 @@ COVER_DIR ?= $(REPO)/tmp/cover
 # lint-new judges lines changed since this ref: a wave against develop; CI
 # passes origin/main so a release is judged on everything since the last one.
 LINT_BASE ?= origin/develop
+# The first provisional fenced capture uses conservative serial concurrency;
+# W5 re-measures the sweep and may ratchet this toward the observed knee.
+TESTFLAGS ?= -p 1 -parallel 1
 
-.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover test iso gate install host-install rollback \
+.PHONY: help build tools fmt fmt-check lint lint-new vet arch cover test testflags iso timing sweep gate install host-install rollback \
         mcp-restart mcp-status stale sweep-stale clean
 
 help: ## List every target
@@ -131,13 +134,29 @@ arch: ## Architecture ratchet: size ceilings, one façade per mechanism, no new 
 	bash scripts/arch-check.sh
 
 # ----------------------------------------------------------------- gate ----
-# Both delegate. dev.sh is the single definition of this project's gate.
+# Both delegate. dev.sh is the single definition of this project's gate: it
+# runs `go test $(TESTFLAGS) -json ./...`, pipes the stream through
+# `scripts/test-timing.sh --check` (its own "pfm: test timing (budget)" row —
+# a run over pfm/.testtiming.yml's budgets is red, offender named), and the
+# e2e row the same way. TESTFLAGS travels through the environment so this
+# file stays a delegate, never a second definition of `go test`'s flags.
 
-test: ## Host test suite (delegates to dev.sh)
-	bash $(DEV) test pfm
+test: ## Host test suite (delegates to dev.sh; TESTFLAGS -> `go test`, piped through the timing check)
+	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh test pfm
 
-iso: ## Containerised test suite (delegates to dev.sh iso)
-	bash $(DEV) iso test pfm
+testflags:
+	@printf '%s\n' '$(TESTFLAGS)'
+
+iso: ## Containerised test suite (delegates to dev.sh iso; same TESTFLAGS)
+	cd "$(REPO)" && TESTFLAGS="$(TESTFLAGS)" bash .claude/scripts/dev.sh iso test pfm
+
+timing: ## Print the most recently written suite timing TSV
+	@python3 -c 'from pathlib import Path; import sys; files = [p for p in Path(sys.argv[1]).rglob("*.tsv") if p.name.startswith(("unit", "e2e"))]; p = max(files, key=lambda p: p.stat().st_mtime) if files else None; sys.exit("timing: no suite TSV — run the test gate first") if p is None else print(str(p) + "\n" + p.read_text(), end="")' "$(REPO)/tmp/timing"
+
+sweep: ## Measure the fenced concurrency sweep and publish its report
+	bash scripts/test-sweep.sh --preflight
+	cd "$(REPO)" && bash .claude/scripts/dev.sh iso run 'bash pfm/scripts/test-sweep.sh --run --wait-quiet --label fence --out /pfm-timing/sweep-fence.tsv --json /pfm-timing/sweep-json'
+	bash scripts/test-sweep.sh --report "$(REPO)/tmp/timing/sweep-fence.tsv"
 
 gate: fmt-check lint-new vet arch test iso ## Everything a change must pass before it merges
 	@echo "gate: all passed"

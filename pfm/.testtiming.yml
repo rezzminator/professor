@@ -1,0 +1,80 @@
+# pfm test timing budgets — PROVISIONAL first ratchet.
+# Values are one successful fenced capture rounded up, then doubled.
+# Re-measure from three captures at W5 close; budgets only shrink.
+# Evidence is retained under tmp/timing/provisional-serial-utf8-20260918/.
+tolerance: 1.25
+suites:
+  unit:
+    wall_s: 1174
+    packages:
+      hostops/pfm/cmd/pfm: 498
+      hostops/pfm/e2e: 2
+      hostops/pfm/internal/action: 26
+      hostops/pfm/internal/agentopen: 2
+      hostops/pfm/internal/agentrole: 2
+      hostops/pfm/internal/archive: 2
+      hostops/pfm/internal/ask: 2
+      hostops/pfm/internal/atomicfile: 2
+      hostops/pfm/internal/binwatch: 2
+      hostops/pfm/internal/chat: 2
+      hostops/pfm/internal/cli: 2
+      hostops/pfm/internal/clock: 2
+      hostops/pfm/internal/codexappendix: 2
+      hostops/pfm/internal/codexgen: 2
+      hostops/pfm/internal/codexmeta: 2
+      hostops/pfm/internal/compose: 2
+      hostops/pfm/internal/config: 2
+      hostops/pfm/internal/deps: 42
+      hostops/pfm/internal/doctor: 6
+      hostops/pfm/internal/engine: 2
+      hostops/pfm/internal/engine/claude: 2
+      hostops/pfm/internal/engine/codex: 2
+      hostops/pfm/internal/engine/opencode: 2
+      hostops/pfm/internal/fleet: 2
+      hostops/pfm/internal/fleetdb: 2
+      hostops/pfm/internal/gather: 22
+      hostops/pfm/internal/harvest: 132
+      hostops/pfm/internal/harvestmcp: 2
+      hostops/pfm/internal/harvestpy: 2
+      hostops/pfm/internal/headless: 8
+      hostops/pfm/internal/headless/run: 2
+      hostops/pfm/internal/heal: 4
+      hostops/pfm/internal/hookentry: 2
+      hostops/pfm/internal/hostfixture: 2
+      hostops/pfm/internal/index: 56
+      hostops/pfm/internal/inject: 16
+      hostops/pfm/internal/installer: 44
+      hostops/pfm/internal/installer/shim: 2
+      hostops/pfm/internal/kill: 14
+      hostops/pfm/internal/mcpserv: 92
+      hostops/pfm/internal/naming: 2
+      hostops/pfm/internal/nudge: 2
+      hostops/pfm/internal/obs: 2
+      hostops/pfm/internal/paths: 2
+      hostops/pfm/internal/picker: 16
+      hostops/pfm/internal/professor: 2
+      hostops/pfm/internal/reap: 2
+      hostops/pfm/internal/rearm: 2
+      hostops/pfm/internal/recovery: 2
+      hostops/pfm/internal/reload: 6
+      hostops/pfm/internal/resolve: 40
+      hostops/pfm/internal/semver: 2
+      hostops/pfm/internal/sky: 2
+      hostops/pfm/internal/spawn: 10
+      hostops/pfm/internal/sqlitedb: 2
+      hostops/pfm/internal/stale: 2
+      hostops/pfm/internal/stats: 4
+      hostops/pfm/internal/statusline: 4
+      hostops/pfm/internal/store: 12
+      hostops/pfm/internal/testjail: 2
+      hostops/pfm/internal/theme: 2
+      hostops/pfm/internal/tmux: 2
+      hostops/pfm/internal/transcript: 2
+      hostops/pfm/internal/ui: 10
+      hostops/pfm/internal/update: 26
+      hostops/pfm/internal/updatecheck: 2
+      hostops/pfm/internal/usagehook: 2
+  e2e:
+    wall_s: 224
+    packages:
+      hostops/pfm/e2e: 224

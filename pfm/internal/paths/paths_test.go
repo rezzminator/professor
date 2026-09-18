@@ -59,6 +59,7 @@ func TestResolveOverrides(t *testing.T) {
 		ArchiveDir: filepath.Join(home, ".claude-archive"),
 		ProcRoot:   procRoot,
 		CgroupRoot: cgroupRoot,
+		LogFile:    filepath.Join(home, ".local", "state", "pfm", "log", "pfm.jsonl"),
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Resolve() = %#v, want %#v", got, want)

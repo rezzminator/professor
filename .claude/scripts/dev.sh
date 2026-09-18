@@ -305,10 +305,36 @@ act_pfm() {
     # stress test alone takes ~4.5 minutes (268s watched), so the 10m default
     # turns an ordinary loaded host into a red suite that names the wrong cause.
     test)
-      run "pfm: go test" -- go -C "$d" test ./... -count=1 -timeout 25m
-      # The e2e package is build-tagged: without this row the integration
-      # routes compile for nobody and the gate reports a suite it never ran.
-      run "pfm: e2e (tagged)" -- go -C "$d" test -tags e2e -p 1 -count=1 -timeout 25m ./e2e/... ;;
+      local flags_text timing_base timing_run
+      local testflags=()
+      if ! flags_text="$(make -s -C "$d" --no-print-directory testflags)"; then
+        fail_step "pfm: TESTFLAGS could not be read from Makefile"; return
+      fi
+      read -r -a testflags <<< "$flags_text"
+      timing_base="${PFM_TEST_TIMING_DIR:-$REPO_ROOT/tmp/timing}"
+      mkdir -p "$timing_base"
+      timing_run="$(mktemp -d "$timing_base/run.XXXXXX")"
+      # Positional arguments keep flags and output paths out of shell code.
+      # The JSON is retained even on failure; timing is a separate verdict.
+      run "pfm: go test" -- bash -c '
+        go -C "$1" test "${@:3}" -count=1 -timeout 25m -json ./... >"$2"
+        rc=$?
+        if (( rc != 0 )); then cat "$2"; fi
+        jq -r "select(.Action == \"skip\" and .Test != null) | \"GAP skipped test: \" + .Package + \" \" + .Test" "$2" || exit 2
+        exit "$rc"
+      ' _ "$d" "$timing_run/unit.json" "${testflags[@]}"
+      run "pfm: test timing (budget)" -- bash "$d/scripts/test-timing.sh" \
+        --check --suite unit --out "$timing_run/unit.tsv" "$timing_run/unit.json"
+      # Tagged Tier A runs serially and has its own budget and artifact.
+      run "pfm: e2e (tagged)" -- bash -c '
+        go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
+        rc=$?
+        if (( rc != 0 )); then cat "$2"; fi
+        jq -r "select(.Action == \"skip\" and .Test != null) | \"GAP skipped test: \" + .Package + \" \" + .Test" "$2" || exit 2
+        exit "$rc"
+      ' _ "$d" "$timing_run/e2e.json"
+      run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
+        --check --suite e2e --out "$timing_run/e2e.tsv" "$timing_run/e2e.json" ;;
     # Cross-package unit coverage merged with any e2e GOCOVERDIR run, thresholded
     # by pfm/.testcoverage.yml (a ratchet: measured, raised, never lowered).
     # COVER_DIR is where the profiles land — the fence sets it to container HOME
@@ -364,6 +390,10 @@ cmd_iso() { # cmd_iso <action> [project]
   [[ -f "$terms" ]] && extra=(-v "$terms:/pfm-leak-terms.txt:ro" -e LEAK_TERMS=/pfm-leak-terms.txt)
   # The worktree mount is read-only; coverage profiles land in container HOME.
   extra+=(-e COVER_DIR=/root/cover)
+  # Only generated timing artifacts are writable; the source mount stays read-only.
+  mkdir -p "$REPO_ROOT/tmp/timing"
+  extra+=(-v "$REPO_ROOT/tmp/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing)
+  if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
   case "$action" in
     shell)

@@ -146,8 +146,25 @@ jobs:
       # fails here, fix it or mark it skipped in the package with a reason;
       # never restore a filter at this level, which hides the failure from the
       # one place that reports it.
-      - name: go test (whole pfm module)
-        run: go -C pfm test ./...
+      #
+      # The same fenced entry point owns unit, tagged e2e and timing verdicts.
+      - name: timing tool fixtures (fenced)
+        run: |
+          .claude/scripts/dev.sh iso run 'bash pfm/scripts/test-timing_test.sh && bash pfm/scripts/test-sweep_test.sh'
+
+      - name: pfm suites and timing budgets (fenced)
+        run: .claude/scripts/dev.sh iso test pfm
+
+      - name: upload test-timing TSV
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: pfm-test-timing
+          path: |
+            tmp/timing/**/*.tsv
+            tmp/timing/**/*.json
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: leak-check (secrets / machine-absolute paths, full tracked tree)
         env:

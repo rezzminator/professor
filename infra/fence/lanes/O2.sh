@@ -646,6 +646,41 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · /reload card carries reload.Usage"
 fi
 
+# ─── O2.05b — the activity-log reader ───────────────────────────────────────
+
+beat O2.05b-activity-log X42
+spends none
+bad=""
+log_err=/tmp/o2-log.err
+# X42 pfm log: every earlier beat of this lane ran pfm at debug, so the reader
+# has records to show. An EMPTY answer here is a reader that could not read,
+# never "nothing happened".
+all="$(pfm log --since 60m 2>"$log_err")"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad pfm log --since 60m exited $rc: $(one_line "$(cat "$log_err")");"
+n_all="$(printf "%s\n" "$all" | grep -c .)"
+[ "$n_all" -gt 0 ] || bad="$bad pfm log --since 60m printed nothing after a lane of debug-level pfm runs: $(one_line "$(cat "$log_err")");"
+# A filter narrows, never widens.
+errs="$(pfm log --since 60m --level error 2>"$log_err")"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad pfm log --level error exited $rc: $(one_line "$(cat "$log_err")");"
+n_err="$(printf "%s\n" "$errs" | grep -c .)"
+[ "$n_err" -le "$n_all" ] || bad="$bad --level error printed $n_err record(s), more than the unfiltered $n_all;"
+# A refused filter is a usage error that names the accepted set — never an empty, exit-0 listing.
+pfm log --comp lane-no-such-component >/dev/null 2>"$log_err"
+rc=$?
+[ "$rc" -eq 2 ] || bad="$bad pfm log --comp <unknown> exited $rc (want 2, usage);"
+grep -qF "is not one of" "$log_err" || bad="$bad pfm log --comp <unknown> did not name the accepted components: $(one_line "$(cat "$log_err")");"
+pfm log --level lane-no-such-level >/dev/null 2>"$log_err"
+rc=$?
+[ "$rc" -eq 2 ] || bad="$bad pfm log --level <unknown> exited $rc (want 2, usage);"
+pfm log stray >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || bad="$bad pfm log with a positional argument exited $rc (want 2, usage);"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "pfm log --since 60m: $n_all record(s), --level error: $n_err · unknown --comp and --level exit 2 naming the accepted set · a positional argument exits 2"
+fi
+
 # ─── O2.06 — doctor's codex_pane rows while E2's chat lives ─────────────────
 
 beat O2.06-doctor-codex-pane I63

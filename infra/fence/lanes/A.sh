@@ -899,16 +899,30 @@ else
   fi
 fi
 
-# ─── A.13 — the OpenCode compile layer for adopters (known gap) ─────────────
+# ─── A.13 — the OpenCode compile layer for adopters: build, check, doctor ───
 
-beat A.13-opencode-layer-gap P37
+beat A.13-opencode-layer P37
 spends none
-if [ -d "$EXPRESS/.opencode" ] && [ -n "$(find "$EXPRESS/.opencode" -name 'opencode.jsonc' -o -name '*.md' 2>/dev/null | head -1)" ]; then
-  fail "express carries a compiled .opencode/ layer — the ledgered gap (no pfm command wires it for adopters) no longer holds: remove the entry or name what produced it"
-elif pfm --help 2>&1 | grep -qi 'opencode'; then
-  fail "pfm --help names an opencode verb — the ledgered absence is no longer true"
-else
-  known A.13-opencode-layer-gap
+bad=""
+bld="$(in_express pfm opencode build .)"
+bld_rc=$?
+[ "$bld_rc" -eq 0 ] && [ "$(printf '%s\n' "$bld" | tail -1)" = 'OPENCODE BUILD PASS' ] ||
+  bad="$bad pfm opencode build exited $bld_rc without 'OPENCODE BUILD PASS' ($(one_line "$bld"));"
+chk="$(in_express pfm opencode check .)"
+chk_rc=$?
+[ "$chk_rc" -eq 0 ] && [ "$(printf '%s\n' "$chk" | tail -1)" = 'OPENCODE CHECK PASS' ] ||
+  bad="$bad pfm opencode check exited $chk_rc without 'OPENCODE CHECK PASS' ($(one_line "$chk")); the build it just ran should have left check clean;"
+doc="$(in_express pfm opencode doctor .)"
+doc_rc=$?
+[ "$doc_rc" -eq 0 ] && [ "$(printf '%s\n' "$doc" | tail -1)" = 'OPENCODE DOCTOR PASS' ] ||
+  bad="$bad pfm opencode doctor exited $doc_rc without 'OPENCODE DOCTOR PASS' ($(one_line "$doc"));"
+[ -f "$EXPRESS/.opencode/opencode.jsonc" ] || bad="$bad no $EXPRESS/.opencode/opencode.jsonc after a passing build;"
+[ -d "$EXPRESS/.opencode/agent" ] && [ -n "$(find "$EXPRESS/.opencode/agent" -name '*.md' 2>/dev/null | head -1)" ] ||
+  bad="$bad no $EXPRESS/.opencode/agent/*.md after a passing build;"
+[ -d "$EXPRESS/.opencode/command" ] && [ -n "$(find "$EXPRESS/.opencode/command" -name '*.md' 2>/dev/null | head -1)" ] ||
+  bad="$bad no $EXPRESS/.opencode/command/*.md after a passing build;"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "pfm opencode build|check|doctor all PASS over $EXPRESS: .opencode/{opencode.jsonc,agent/*.md,command/*.md} present"
 fi
 
 # ─── A.14 — the picker's cached release notice, refreshed by the internal verb

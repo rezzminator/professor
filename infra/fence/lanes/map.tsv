@@ -34,7 +34,7 @@ C29	E1	E1.13-last-read-stream
 C30	E1	E1.13-last-read-stream
 C31	E1	E1.13-last-read-stream
 C32	E1	E1.16-inject
-C32	E1	E1.26-resolver-duplicate-candidate
+C32	E1	E1.26-resolver-prefers-live
 C32	E2	E2.07-inject-ask-watch
 C32	F	F.18-e1-chat-survives-storm
 C33	E1	E1.16-inject
@@ -313,7 +313,7 @@ M34	E2	E2.06-mcp-http
 M34	M	M.02-register-codex
 M34	M	M.15-live-chats-survive-daemon-restart
 M35	M	M.02-register-codex
-M36	E3	E3.02-mcp-known-gap
+M36	E3	E3.02-mcp-registered
 M36	M	M.03-register-opencode
 M37	M	M.04-doctor-mcp
 M38	M	M.04-doctor-mcp
@@ -370,7 +370,7 @@ P33	A	A.07-self-update
 P34	A	A.08-codex-mirror
 P35	A	A.08-codex-mirror
 P36	A	A.09-codex-agents
-P37	A	A.13-opencode-layer-gap
+P37	A	A.13-opencode-layer
 T1	F	F.08-tui-picker
 T2	F	F.08-tui-picker
 T3	F	F.08-tui-picker
@@ -452,3 +452,4 @@ X38	E1	E1.23-launcher
 X39	E1	E1.07-reload-then
 X40	O2	O2.05-internal-plumbing
 X41	A	A.14-release-notice
+X42	O2	O2.05b-activity-log

@@ -262,12 +262,16 @@ if requires E1.01-open-seat1; then
   fi
 fi
 
-# ─── E1.26 — one live row plus its own resume row is not "ambiguous" ─────────
+# ─── E1.26 — one live row plus its own resume row resolves to the live row ──
 # Placed here, and nowhere else: E1.06's `--new` is what leaves the name held by
 # a live session AND the conversation it replaced, which is the shape the
 # resolver has to get right for every later name-addressed beat.
+# resolve.ResolveRosterName (internal/resolve/roster.go) dedupes this exact
+# pair — of several exact-name matches, the unique LIVE one wins instead of
+# refusing ambiguous (internal/resolve/roster_test.go
+# TestResolveRosterNamePrefersTheUniqueLiveRow pins it at the unit layer).
 
-beat E1.26-resolver-duplicate-candidate C32
+beat E1.26-resolver-prefers-live C32
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -278,10 +282,8 @@ if requires E1.01-open-seat1; then
   else
     out="$(pfm chat inject --allow-unsigned "$CHAT" "reply with exactly one word: RESOLVE-OK" 2>&1)"
     rc=$?
-    if [ "$rc" -ne 0 ] && printf '%s' "$out" | grep -qi 'ambiguous'; then
-      known E1.26-resolver-duplicate-candidate
-    elif [ "$rc" -ne 0 ]; then
-      fail "inject on a name held by one live row and $resume_rows resume row(s) exited $rc for another reason: $(one_line "$out")"
+    if [ "$rc" -ne 0 ]; then
+      fail "'$CHAT' held by 1 live row and $resume_rows resume row(s) of its own refused (exit $rc): $(one_line "$out") — resolve.ResolveRosterName's unique-live-row rule should have taken the live row"
     elif ! wait_last "$CHAT" RESOLVE-OK 240; then
       fail "the inject was accepted but never landed: ${LANE_WAIT_WHY:-no wait reason recorded}"
     else

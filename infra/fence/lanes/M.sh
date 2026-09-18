@@ -70,13 +70,6 @@ SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/lane-m.XXXXXX")"
 
 lane_begin M
 
-# note <text> — an observation that is not a verdict, to the operator and the
-# lane log (M.03 must name what it looked at before it reports the known gap).
-note() {
-  printf '%s\n' "$LANE_ID · $1"
-  printf '%s\n' "$LANE_ID · $1" >>"$LANE_LOG"
-}
-
 # ── prelude: what this lane needs, made when it is missing, no-op otherwise ──
 [ -f "$CONFIG" ] || lane_abort "no pfm config at $CONFIG — the root image was not built by lanes/root.sh"
 jq -e --argjson want "$SEAT" '.accounts[] | select(.id == $want)' "$CONFIG" >/dev/null 2>&1 ||
@@ -416,25 +409,30 @@ else
   fi
 fi
 
-# ─── M.03 — OpenCode registration: the known gap ────────────────────────────
+# ─── M.03 — OpenCode registration: chat local + harvester remote, doctor row ─
 
 beat M.03-register-opencode M36
 spends none
+bad=""
 OC_CFG="$HOME/.config/opencode/opencode.jsonc"
-if [ -n "$INSTALL_OUT" ]; then
-  oc_lines="$(printf '%s\n' "$INSTALL_OUT" | grep -ic 'opencode' || true)"
-  oc_mcp_lines="$(printf '%s\n' "$INSTALL_OUT" | grep -i 'opencode' | grep -ic 'mcp' || true)"
-  note "M.03 looked at: pfm install --yes output ($(printf '%s\n' "$INSTALL_OUT" | grep -c .) lines) — $oc_lines line(s) name opencode, $oc_mcp_lines of them name mcp (the installer wrote no OpenCode MCP wiring)"
+strip_jsonc() { sed 's#//.*$##' "$1"; }
+if [ ! -f "$OC_CFG" ]; then
+  bad="$bad no OpenCode MCP config at $OC_CFG — pfm install --yes did not write it;"
 else
-  note "M.03 looked at: pfm install --yes output UNAVAILABLE (M.01's install did not run) — the installer's OpenCode MCP wiring could not be read from its report"
+  strip_jsonc "$OC_CFG" | jq -e --arg bin "$PFM_BIN" \
+    '.mcp.chat | .type == "local" and .command == [$bin, "mcp", "chat", "serve"] and .enabled == true' >/dev/null 2>&1 ||
+    bad="$bad M36: $OC_CFG mcp.chat is not the local shape {type local, command [$PFM_BIN mcp chat serve], enabled true}: $(one_line "$(strip_jsonc "$OC_CFG" | jq -c '.mcp.chat' 2>&1)");"
+  strip_jsonc "$OC_CFG" | jq -e --arg url "http://127.0.0.1:$PORT/mcp/harvester" \
+    '.mcp.harvester | .type == "remote" and .url == $url and .enabled == true' >/dev/null 2>&1 ||
+    bad="$bad M36: $OC_CFG mcp.harvester is not the remote shape {type remote, url http://127.0.0.1:$PORT/mcp/harvester, enabled true}: $(one_line "$(strip_jsonc "$OC_CFG" | jq -c '.mcp.harvester' 2>&1)");"
 fi
-if [ -f "$OC_CFG" ]; then
-  oc_mcp="$(sed 's#//.*$##' "$OC_CFG" | jq -c '.mcp // empty' 2>/dev/null || echo '<not parseable as JSON>')"
-  note "M.03 looked at: $OC_CFG mcp entry: ${oc_mcp:-<none>} — written by the fence's setup.sh (infra/demo/setup.sh install), not by pfm"
-else
-  note "M.03 looked at: $OC_CFG — absent"
+oc_doctor_out="$(pfm doctor 2>&1)"
+oc_row="$(printf '%s\n' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
+printf '%s\n' "$oc_row" | grep -qE 'harvester=pfm chat=pfm state=pfm$' ||
+  bad="$bad M36: pfm doctor's opencode MCP row is not healthy: $(one_line "${oc_row:-no client=opencode row at all}");"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "$OC_CFG: chat local ($PFM_BIN mcp chat serve) + harvester remote (:$PORT/mcp/harvester), both enabled; pfm doctor's opencode row reads harvester=pfm chat=pfm state=pfm"
 fi
-known
 
 # ─── M.04 — doctor: registration classes, Codex + project cutover, daemon ───
 

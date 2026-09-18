@@ -42,7 +42,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `E1.23-launcher` · the managed Claude launcher entry starts the pane · spends none · X20,X31,X38
 - `E1.24-exit-contract` · the shared headless-verb exit contract holds across the matrix · spends none · C66
 - `E1.25-end` · `end` kills the whole tmux server, ending the lane · spends none · C49
-- `E1.26-resolver-duplicate-candidate` · a name held by exactly one live row plus its own resume row (what `E1.06`'s `--new` leaves behind) resolves to the live row, never `ambiguous` · spends cc:$SEAT · C32 · known-gap
+- `E1.26-resolver-prefers-live` · a name held by exactly one live row plus its own resume row (what `E1.06`'s `--new` leaves behind) resolves to the live row · spends cc:$SEAT · C32
 
 ### Lane E2 — Codex
 
@@ -61,7 +61,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 ### Lane E3 — OpenCode
 
 - `E3.01-open-seat` · opens one oc chat, label/title/statusline converge on the OpenCode home (same shape as E1) · spends oc · K3,T31
-- `E3.02-mcp-known-gap` · the MCP beat hits the confirmed-absent OpenCode wiring — reported `known-gap`, never a skip · spends oc · `known-gap` · M36
+- `E3.02-mcp-registered` · OpenCode's chat (local stdio) + harvester (remote HTTP) MCP registration and `pfm doctor`'s healthy row · spends none · M36
 - `E3.03-everything-else` · everything else on the OpenCode home is asserted for real, reusing the shared CLI surface already proven in E1/F/O · spends oc · (none)
 
 ### Lane F — fleet
@@ -89,7 +89,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 
 - `M.01-register-claude` · registration per engine: Claude stdio + HTTP wired from the files the installer wrote · spends none · M30,M31,M32,M33
 - `M.02-register-codex` · registration per engine: Codex HTTP-only, fenced block preserves a foreign entry · spends none · M34,M35
-- `M.03-register-opencode` · registration per engine: OpenCode — known gap · spends none · `known-gap` · M36
+- `M.03-register-opencode` · registration per engine: OpenCode — chat local stdio + harvester remote HTTP, `pfm doctor`'s healthy row · spends none · M36
 - `M.04-doctor-mcp` · `pfm doctor` MCP registration classification + daemon reachability + version-skew · spends none · M37,M38,M39
 - `M.05-daemon-core` · daemon: single loopback port, health, restart on replaced binary (rebuild in-container, exit-75) · spends none · M40,M41,M42,M43,M44,M45,M46
 - `M.06-daemon-units` · daemon service units: systemd live in the container, launchd = named advisory · spends none · M47,M48
@@ -117,7 +117,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `A.10-symlinked-blueprint` · a symlinked blueprint is reached correctly through `pfm update` (P10.1 class, update side) · spends none · I37
 - `A.11-guard-hook` · the guard hook DENIES a real chat's Edit of `.claude/**` without the `/pcm` stamp and ALLOWS it with the stamp; the Stop hook recompiles `AGENTS.md` · spends cc:$SEAT · (none)
 - `A.12-dev-suite` · `/dev status|test` runs express's own suite · spends none · (none)
-- `A.13-opencode-layer-gap` · the OpenCode compile layer for adopters is confirmed absent — known gap · spends none · `known-gap` · P37
+- `A.13-opencode-layer` · the OpenCode compile layer for adopters: `pfm opencode build|check|doctor` all PASS over the adopter project · spends none · P37
 - `A.14-release-notice` · the picker's cached release-notice refreshes · spends none · X41
 - `A.15-fleet-unchanged-by-update` · **cross-lane** — `pfm update` + the hook rewrite while the fleet is up: `pfm ls` rows and every live chat's hook ownership are unchanged · spends cc:$SEAT · C1,I23
 
@@ -132,7 +132,7 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 - `O1.05-credential` · a seat with an expired/absent credential refuses by name at every surface (doctor, `chat new`) · spends none · K23
 - `O1.06-dropped-seat` · a dropped spare seat loses exactly its owned hooks and ledger rows (P10.2), then is restored · spends none · I38
 - `O1.07-symlinked-home` · a Claude home reached through a symlink, and a blueprint reached through one (P10.1 class) · spends none · I37
-- `O1.08-duplicate-seat-login` · two seats holding one account → `pfm doctor` names the duplicate; the advisory lands with Wave 3 B5a · spends none · `known-gap` · (none)
+- `O1.08-duplicate-seat-login` · two seats' registries recording one OAuth login (planted `oauthAccount.emailAddress`) → `pfm doctor` advises by name (`duplicate-seat-login email=… seats=…`) · spends none · (none)
 - `O1.09-doctor-pass` · `pfm doctor` every row green or a named advisory (no systemd/launchd in the container is the named one) · spends none · I41,I42,I43,I44,I45,I46,I47,I48,I49,I50,I51,I52,I53,I54,I55,I56,I57,I58,I59,I60,I61,I62,I64,I65,I66,I67,I68,I5,I6,I12,I13
 - `O1.10-doctor-exit-contract` · the top-level `pfm doctor` command contract (exit 0/1/2/3) · spends none · I98
 - `O1.11-heal` · `pfm heal` reports/rebuilds wedged Codex thread-history · spends none · X11
@@ -149,6 +149,7 @@ Runs LAST: it reaps the graveyard F's storm filled, archives a real history, and
 - `O2.03-index` · `pfm index` · spends none · X5
 - `O2.04-headless` · headless on cc and cx · spends cc:$SEAT+cx · X15,X16,X17,K17
 - `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias, clear-kill, kill-exit, claude-version, explore-deny, epic-inject, title-renudge · spends none · X21,X22,X26,X29,X30,X32,X33,X34,X37,X40,T34,T37
+- `O2.05b-activity-log` · the activity-log reader: `pfm log` shows the lane's own records, a filter narrows, an unknown `--comp`/`--level` and a positional argument exit 2 · spends none · X42
 - `O2.06-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows read clean from the operator's side while E2's chat lives · spends none · I63
 - `O2.07-reload-while-busy-operator` · the reload-while-busy seam from the OPERATOR's side: `inject` during a busy turn queues, and the reload worker's reboot-in-place holds · spends cc:$SEAT · L32
 - `O2.08-dropped-seat-with-live-chat` · **cross-lane** — a seat dropped while a chat lives on it: the chat keeps working and `pfm doctor` names the seat · spends cc:${SPARE:-none} · I38

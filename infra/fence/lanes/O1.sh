@@ -259,25 +259,43 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "the linked blueprint $BLUEPRINT resolves in doctor, and a seat reached through $link kept doctor and ls clean; config restored"
 fi
 
-# ─── O1.08 — two seats on one account (known gap until Wave 3 B5a) ──────────
+# ─── O1.08 — two seats recording one OAuth login ────────────────────────────
 
 beat O1.08-duplicate-seat-login
 spends none
-if [ -z "$SPARE" ] || [ ! -s "$SEAT_DIR/.credentials.json" ]; then
-  fail "no spare seat or no credential on seat $SEAT — the duplicate-login advisory cannot be provoked"
+if [ -z "$SPARE" ]; then
+  fail "only one Claude seat is configured — the duplicate-login advisory needs a second seat's registry to plant a matching email into"
 else
-  cp "$SPARE_DIR/.credentials.json" "$SPARE_DIR/.credentials.json.lane" 2>/dev/null
-  cp "$SEAT_DIR/.credentials.json" "$SPARE_DIR/.credentials.json"
+  SEAT_JSON="$SEAT_DIR/.claude.json"
+  SPARE_JSON="$SPARE_DIR/.claude.json"
+  EMAIL="lane-o1.08-duplicate@example.invalid"
+  bad=""
+  seat_had=0
+  spare_had=0
+  [ -f "$SEAT_JSON" ] && { cp "$SEAT_JSON" "$SEAT_JSON.lane-backup"; seat_had=1; }
+  [ -f "$SPARE_JSON" ] && { cp "$SPARE_JSON" "$SPARE_JSON.lane-backup"; spare_had=1; }
+  # printDuplicateSeatLogins (pfm/internal/doctor/config_checks.go) keys purely
+  # off each registry's own oauthAccount.emailAddress — the same field a real
+  # second login on the same account leaves behind — so planting the identical
+  # value into both seats' registries provokes the exact code path without a
+  # second real credential (TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin
+  # in config_checks_test.go does the same thing at the unit layer).
+  for json in "$SEAT_JSON" "$SPARE_JSON"; do
+    base="$([ -s "$json" ] && cat "$json" || echo '{}')"
+    printf '%s' "$base" | jq -c --arg email "$EMAIL" '(.oauthAccount //= {}) | .oauthAccount.emailAddress = $email' >"$json.lane-planted" 2>&1 &&
+      mv "$json.lane-planted" "$json" || bad="$bad could not plant the fixture email into $json: $(one_line "$(cat "$json.lane-planted" 2>/dev/null)");"
+  done
   dup="$(pfm doctor 2>&1)"
-  if [ -f "$SPARE_DIR/.credentials.json.lane" ]; then
-    mv "$SPARE_DIR/.credentials.json.lane" "$SPARE_DIR/.credentials.json"
-  else
-    rm -f "$SPARE_DIR/.credentials.json"
-  fi
-  if printf '%s' "$dup" | grep -qiE 'duplicate|same account|two seats'; then
-    pass "doctor names the duplicate: $(one_line "$(printf '%s' "$dup" | grep -iE 'duplicate|same account|two seats' | head -1)")"
-  else
-    known O1.08-duplicate-seat-login
+  if [ "$seat_had" -eq 1 ]; then mv "$SEAT_JSON.lane-backup" "$SEAT_JSON"; else rm -f "$SEAT_JSON"; fi
+  if [ "$spare_had" -eq 1 ]; then mv "$SPARE_JSON.lane-backup" "$SPARE_JSON"; else rm -f "$SPARE_JSON"; fi
+  line="$(printf '%s\n' "$dup" | grep -F 'duplicate-seat-login' | grep -F "$EMAIL" | head -1)"
+  seats_field="$(printf '%s' "$line" | grep -oE 'seats=[^ ]*')"
+  [ -n "$line" ] || bad="$bad pfm doctor did not name the planted duplicate: $(one_line "$(printf '%s\n' "$dup" | grep -iF duplicate | head -1)");"
+  printf '%s' "$seats_field" | grep -qF "$SEAT:" || bad="$bad the advisory's seats= field is missing seat $SEAT: $(one_line "$seats_field");"
+  printf '%s' "$seats_field" | grep -qF "$SPARE:" || bad="$bad the advisory's seats= field is missing seat $SPARE: $(one_line "$seats_field");"
+  printf '%s' "$line" | grep -qF "share one OAuth usage cap" || bad="$bad the advisory line dropped its remediation text: $(one_line "$line");"
+  if [ -n "$bad" ]; then fail "$bad"; else
+    pass "planting $EMAIL into $SEAT_JSON and $SPARE_JSON made pfm doctor emit: $(one_line "$line")"
   fi
 fi
 

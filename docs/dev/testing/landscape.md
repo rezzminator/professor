@@ -418,7 +418,7 @@ M32 · Claude registration: harvester server wired HTTP per account · needs:sea
 M33 · Claude re-install maintains prior pfm registration shape (`isPFMStdioClient`/`isPFMHTTPClient`) · needs:seat:cc · today:U · mcp.md:63 · lane(s):M
 M34 · Codex registration: both chat+harvester wired HTTP in `config.toml [mcp_servers]` fence · needs:seat:cx,network · today:U · mcp.md:65-69 · lane(s):E2,M
 M35 · Codex fenced block preserves a pre-existing foreign `[mcp_servers]` entry of the same name · needs:seat:cx · today:U · mcp.md:68 · lane(s):M
-M36 · OpenCode MCP wiring — confirmed NOT implemented anywhere in the pfm installer ⚠ known-gap · needs:seat:oc · today:NONE · mcp.md:71-73 · lane(s):E3,M
+M36 · OpenCode MCP wiring — chat registered local/stdio (`pfm mcp chat serve`), harvester registered remote/HTTP, both under `.opencode/opencode.jsonc`'s `mcp` key; `pfm doctor`'s `client=opencode` row reads healthy · needs:seat:oc · today:U (`internal/installer/mcp_wiring_test.go`, `internal/installer/mcp_inspect_test.go`, `internal/doctor/mcp_client_test.go`) · mcp.md:71-73 · lane(s):E3,M
 M37 · `pfm doctor` MCP registration-file classification (PFM/Absent/ForeignRegistration/LegacyStandalone/Unreadable) · needs:seat:cc,network · today:U · mcp.md:75-79 · lane(s):M
 M38 · `pfm doctor` historical Codex + project-scope harvester cutover inspection · needs:seat:cx · today:U · mcp.md:80 · lane(s):M
 M39 · `pfm doctor` live daemon reachability probe (`GET /status`, version-skew warning) · needs:network · today:U · mcp.md:81 · lane(s):M
@@ -551,6 +551,7 @@ X38 · `pfm internal statusline` (alias of `pfm statusline`) · needs:none · to
 X39 · `pfm internal then --socket --target [--self] --steer text...` (detached `--then` follow-up waiter) · needs:tmux · today:U · cli.md:225 · lane(s):E1
 X40 · `pfm internal tmux-title-renudge` (OSC title repaint sweep) · needs:tmux · today:U · cli.md:226 · lane(s):O2
 X41 · `pfm internal update-check --cache PATH --current vX.Y.Z --url URL` (picker's cached release-notice refresh) — only its wiring is tested, the `internal/updatecheck` package itself not opened ⚠ known-gap · needs:network · today:NONE · cli.md:227 · lane(s):A
+X42 · `pfm log [--since D] [--level L] [--chat X] [--cmd V] [--comp C] [--follow]` reads the activity log `log/pfm.jsonl`; an unknown `--level`/`--comp` is a usage error naming the accepted set, an absent log says so on stderr · needs:none · today:U (`internal/obs/logcmd_test.go`) · cli.md · lane(s):O2
 
 ---
 
@@ -565,17 +566,17 @@ None — every row read across the five inventories converted into an atomic ite
 | Area | Items | today=NONE |
 |---|---|---|
 | I — Install/host wiring | 98 | 12 |
-| P — Project scaffold/update | 37 | 5 |
+| P — Project scaffold/update | 37 | 4 |
 | C — Chat verbs | 66 | 3 |
 | K — Chat kinds/labels/engines | 40 | 1 |
 | T — TUI | 38 | 1 |
 | M — MCP | 55 | 11 |
 | L — Lifecycle mechanics | 42 | 0 |
 | H — Harvester | 12 | 1 |
-| X — Misc CLI | 41 | 6 |
-| **Total** | **429** | **40** |
+| X — Misc CLI | 42 | 6 |
+| **Total** | **430** | **39** |
 
-`today=NONE` breakdown by id: I4,I5,I9,I10,I13,I15,I17,I18,I40,I89,I90,I92 (12) · P12,P13,P14,P15,P37 (5) · C31,C40,C41 (3) · K19 (1) · T37 (1) · M15,M16,M17,M18,M21,M22,M25,M26,M28,M29,M48 (11) · H12 (1) · X18,X23,X32,X33,X34,X41 (6).
+`today=NONE` breakdown by id: I4,I5,I9,I10,I13,I15,I17,I18,I40,I89,I90,I92 (12) · P12,P13,P14,P15 (4) · C31,C40,C41 (3) · K19 (1) · T37 (1) · M15,M16,M17,M18,M21,M22,M25,M26,M28,M29,M48 (11) · H12 (1) · X18,X23,X32,X33,X34,X41 (6).
 
 ---
 

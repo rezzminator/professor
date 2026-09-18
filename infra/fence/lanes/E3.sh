@@ -96,6 +96,7 @@ OC_HOME="${PFM_OPENCODE_ROOT:-$HOME/.local/share/opencode}"
 OC_DB="$OC_HOME/opencode.db"
 PORT="$(jq -r '.mcp.http.port // 18377' "$CONFIG" 2>/dev/null || echo 18377)"
 TUI_SOCK="${TMPDIR:-/tmp}/e3-lane-tui.sock"
+PFM_BIN="$HOME/.local/bin/pfm"
 
 lane_begin E3
 
@@ -296,23 +297,35 @@ else
   fail "the picker could not open a new OpenCode chat: $(one_line "$out")"
 fi
 
-# ─── E3.02 — the confirmed-absent OpenCode MCP wiring (known gap) ───────────
+# ─── E3.02 — OpenCode MCP wiring: chat local + harvester remote, doctor row ─
 
-beat E3.02-mcp-known-gap M36
-spends oc
+beat E3.02-mcp-registered M36
+spends none
+bad=""
 OC_CFG="$HOME/.config/opencode/opencode.jsonc"
-# What this looked at first, logged before the verdict either way: the file
-# pfm's OWN installer would have registered MCP into, by analogy with
-# pfm/internal/installer/mcp_accounts.go (Claude's .claude.json) and mcp.go's
-# wireMCP (Codex's config.toml, a fenced "# BEGIN pfm mcp_servers" block).
-# Grepping the whole installer package for "opencode" returns zero hits: no
-# comparable OpenCode writer exists.
-if [ -f "$OC_CFG" ]; then
-  _lane_log_only "   E3.02: $OC_CFG exists ($(wc -c <"$OC_CFG" | tr -d ' ') bytes) — this lane's own prelude (or the fence's demo setup) wrote it for OpenCode to launch at all; grep for a pfm-owned fence finds none: $(grep -c 'BEGIN pfm' "$OC_CFG" 2>/dev/null || echo 0) 'BEGIN pfm' marker(s) — no registration in it came from 'pfm install'"
+strip_jsonc() { sed 's#//.*$##' "$1"; }
+# The file pfm's OWN installer registers MCP into: pfm/internal/installer/
+# mcp.go writeMCPOpenCodeJSON, by the same fence discipline as Claude's
+# .claude.json (mcp_accounts.go) and Codex's config.toml (mcp.go wireMCP) —
+# root.sh's own `pfm install --yes` (setup.sh install) wrote this file before
+# this lane ran.
+if [ ! -f "$OC_CFG" ]; then
+  bad="$bad no OpenCode MCP config at $OC_CFG — pfm install --yes did not write it;"
 else
-  _lane_log_only "   E3.02: $OC_CFG (the OpenCode config file pfm's installer would register MCP into) is absent"
+  strip_jsonc "$OC_CFG" | jq -e --arg bin "$PFM_BIN" \
+    '.mcp.chat | .type == "local" and .command == [$bin, "mcp", "chat", "serve"] and .enabled == true' >/dev/null 2>&1 ||
+    bad="$bad M36: $OC_CFG mcp.chat is not the local shape {type local, command [$PFM_BIN mcp chat serve], enabled true}: $(one_line "$(strip_jsonc "$OC_CFG" | jq -c '.mcp.chat' 2>&1)");"
+  strip_jsonc "$OC_CFG" | jq -e --arg url "http://127.0.0.1:$PORT/mcp/harvester" \
+    '.mcp.harvester | .type == "remote" and .url == $url and .enabled == true' >/dev/null 2>&1 ||
+    bad="$bad M36: $OC_CFG mcp.harvester is not the remote shape {type remote, url http://127.0.0.1:$PORT/mcp/harvester, enabled true}: $(one_line "$(strip_jsonc "$OC_CFG" | jq -c '.mcp.harvester' 2>&1)");"
 fi
-known
+oc_doctor_out="$(pfm doctor 2>&1)"
+oc_row="$(printf '%s\n' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
+printf '%s\n' "$oc_row" | grep -qE 'harvester=pfm chat=pfm state=pfm$' ||
+  bad="$bad M36: pfm doctor's opencode MCP row is not healthy: $(one_line "${oc_row:-no client=opencode row at all}");"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "$OC_CFG: chat local ($PFM_BIN mcp chat serve) + harvester remote (:$PORT/mcp/harvester), both enabled; pfm doctor's opencode row reads harvester=pfm chat=pfm state=pfm"
+fi
 
 # ─── E3.03 — everything else: the shared CLI surface's REAL, sourced verdict
 #             against a chat that is structurally never "live" (fact 2/3) ───

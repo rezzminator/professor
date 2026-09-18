@@ -133,7 +133,10 @@ func TestOpenLogLevelPerEnvironment(t *testing.T) {
 		{name: "alpha build defaults to debug", version: "1.2.3-alpha", wantDebug: true, wantInfo: true},
 		{name: "release build defaults to info", version: "1.2.3", wantDebug: false, wantInfo: true},
 		{name: "config lifts a release build", version: "1.2.3", configured: "debug", wantDebug: true, wantInfo: true},
-		{name: "config quiets an alpha build", version: "1.2.3-alpha", configured: "warn", wantDebug: false, wantInfo: false},
+		{
+			name: "config quiets an alpha build", version: "1.2.3-alpha", configured: "warn",
+			wantDebug: false, wantInfo: false,
+		},
 		{name: "env overrides the build", version: "1.2.3", envLevel: "debug", wantDebug: true, wantInfo: true},
 		{
 			name: "env overrides the config", version: "1.2.3-alpha", configured: "error", envLevel: "debug",
@@ -213,5 +216,51 @@ func TestVerbNamesTheCommandOrThePicker(t *testing.T) {
 		if got := Verb(argv); got != want {
 			t.Fatalf("Verb(%q) = %q, want %q", args, got, want)
 		}
+	}
+}
+
+// TestOpenLogOffWritesNoFile: `off` records nothing AND creates nothing — an
+// operator who turned the log off finds no pfm.jsonl, not an empty one.
+func TestOpenLogOffWritesNoFile(t *testing.T) {
+	for name, settings := range map[string]Settings{
+		"config": {Cmd: "ls", Version: "1.2.3-alpha", Level: "off"},
+		"env":    {Cmd: "ls", Version: "1.2.3-alpha", Level: "debug"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if name == "env" {
+				t.Setenv(paths.EnvLogLevel, "off")
+			}
+			finish, path := openIn(t, t.TempDir(), settings)
+			Logger(context.Background()).Error("must.not.land")
+			finish(0)
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Fatalf("stat %s: err = %v, want the file to not exist", path, err)
+			}
+			if Enabled(context.Background(), "mcp", slog.LevelError) {
+				t.Fatal("Enabled = true while the log is off")
+			}
+		})
+	}
+}
+
+// TestOpenLogNamesTheSettingThatStaysInForce: a bad PFM_LOG_LEVEL or
+// PFM_LOG_COMPONENTS is reported with the accepted values and what stands.
+func TestOpenLogNamesTheSettingThatStaysInForce(t *testing.T) {
+	stderr := &bytes.Buffer{}
+	t.Setenv(paths.EnvLogLevel, "chatty")
+	t.Setenv(paths.EnvLogComponents, "database=debug")
+	finish, path := openIn(t, t.TempDir(), Settings{Cmd: "doctor", Version: "1.2.3", Level: "warn", Stderr: stderr})
+	Logger(context.Background()).Warn("still.writing")
+	finish(0)
+	for _, want := range []string{
+		paths.EnvLogLevel, "chatty", "debug, info, warn, warning, error, off", "keeping warn from config",
+		paths.EnvLogComponents, "database", "cli, mcp, http.in",
+	} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr = %q, want %q in it", stderr.String(), want)
+		}
+	}
+	if text := recordsText(readLog(t, path)); !strings.Contains(text, "still.writing") {
+		t.Fatalf("a bad override silenced the log: %s", text)
 	}
 }

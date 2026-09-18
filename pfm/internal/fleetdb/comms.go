@@ -67,7 +67,7 @@ func (s *Store) RecordComms(ctx context.Context, event CommsEvent) error {
 	if s.db == nil {
 		return fmt.Errorf("record comms event: %w", s.degraded)
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.exec(ctx, `
 INSERT INTO comms(
   at_ns,kind,sender_session,sender_label,sender_uuid,target,
   receiver_socket,receiver_pane,group_name,members,message
@@ -102,7 +102,7 @@ func (s *Store) CommsSince(
 	if limit <= 0 {
 		return result, nil
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.query(ctx, `
 SELECT id,at_ns,kind,sender_session,sender_label,sender_uuid,target,
        receiver_socket,receiver_pane,group_name,members,message
 FROM comms

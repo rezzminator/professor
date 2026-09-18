@@ -59,8 +59,10 @@ func (pinnedHarvestProvisioner) Check(
 // should inject their own HarvestProvisioner through Options instead.
 func NewHarvestProvisioner() HarvestProvisioner { return pinnedHarvestProvisioner{} }
 
-func Run(ctx context.Context, options Options) (Report, error) {
-	options, err := normalizeInstallerOptions(options)
+func Run(ctx context.Context, options Options) (report Report, err error) {
+	endRun := runSpan(ctx, options.Mode)
+	defer func() { endRun(err) }()
+	options, err = normalizeInstallerOptions(options)
 	if err != nil {
 		return Report{}, fmt.Errorf("resolve installer options: %w", err)
 	}
@@ -321,6 +323,9 @@ func (installer *engine) install(ctx context.Context) error {
 	}
 	if mcpErr != nil {
 		return mcpErr
+	}
+	if err := installer.wireLogDefault(); err != nil {
+		return err
 	}
 	if err := installer.wireShell(false); err != nil {
 		return err
@@ -1085,9 +1090,12 @@ func (installer *engine) change(message string, action func() error) error {
 	installer.say("  change  %s", message)
 	installer.report.Changed++
 	if !installer.apply || action == nil {
+		installer.record("change", message, nil)
 		return nil
 	}
-	return action()
+	err := action()
+	installer.record("change", message, err)
+	return err
 }
 
 // changeDescription selects the message installer.change reports for a
@@ -1106,11 +1114,13 @@ func changeDescription(path string, existed bool) string {
 func (installer *engine) ok(message string) {
 	installer.say("  ok      %s", message)
 	installer.report.OK++
+	installer.record("ok", message, nil)
 }
 
 func (installer *engine) skip(message string) {
 	installer.say("  skip    %s", message)
 	installer.report.Skipped++
+	installer.record("skip", message, nil)
 }
 
 func (installer *engine) stageAssets(assets []assetFile) (bool, error) {

@@ -322,4 +322,5 @@ if g "$T/raw" "$T/noobs.list" -nHE '\blog\.(Print|Fatal)|fmt\.Fprint[a-zA-Z]*\(o
   count_by_file "$T/raw" > "$T/c23"; ratchet_counts C23-bare-log bare-log "$T/c23"
 else say C23-bare-log ERROR "grep could not read sources"; fi
 
+bash "$PFM/scripts/arch-c24.sh" "$MODE"; c24=$?; [ "$c24" -gt "$rc" ] && rc=$c24 # C24 lives in its own script
 exit $rc

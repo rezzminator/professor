@@ -17,6 +17,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/inject"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/transcript"
 )
@@ -107,7 +108,7 @@ func runChatWithRuntime(
 	case askAction:
 		return runHeadlessAsk(rest, stdout, stderr, clock.Real, runtime)
 	case "watch":
-		return runHeadlessWatch(rest, stdout, stderr, deps.RealRunner{}, runtime)
+		return runHeadlessWatch(rest, stdout, stderr, obs.Runner(deps.RealRunner{}), runtime)
 	case "capture":
 		return runChatCapture(rest, stdout, stderr, runtime)
 	case "keys":
@@ -321,11 +322,7 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 }
 
 func runHeadlessLast(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
-	flags := cli.NewFlagSet(
-		"chat last",
-		"usage: pfm chat last <target>",
-		stderr,
-	)
+	flags := cli.NewFlagSet("chat last", "usage: pfm chat last <target>", stderr)
 	names, code, ok := cli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code

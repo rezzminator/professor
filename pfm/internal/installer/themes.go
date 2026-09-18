@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/obs"
 )
 
 const (
@@ -525,15 +526,17 @@ func validateThemeURL(raw string) error {
 	return fmt.Errorf("must be HTTPS (HTTP is accepted only for loopback tests)")
 }
 
+// fetchTheme is the installer's http.out door (spec § Middleware): the client
+// it builds or is handed is wrapped, so every theme fetch leaves one record.
 func fetchTheme(ctx context.Context, client *http.Client, raw string) ([]byte, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		client = obs.WrapClient(&http.Client{Timeout: 30 * time.Second})
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("create GET %s: %w", raw, err)
 	}
-	response, err := client.Do(request)
+	response, err := obs.WrapClient(client).Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s: %w", raw, err)
 	}

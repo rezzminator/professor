@@ -95,9 +95,9 @@ func Environment(env paths.Env) SelfEnvironment {
 func (manager *Manager) Kill(
 	ctx context.Context,
 	request Request,
-) (Target, error) {
-	var target Target
-	var err error
+) (target Target, err error) {
+	trail := killTrail(ctx)
+	defer func() { killed(trail, requestShape(request), err) }()
 	switch {
 	case request.Self:
 		target, err = manager.IdentifySelf(ctx, request.Environment)
@@ -148,7 +148,9 @@ func (manager *Manager) Kill(
 func (manager *Manager) KillCleared(
 	ctx context.Context,
 	id string,
-) (Target, bool, error) {
+) (target Target, found bool, err error) {
+	trail := killTrail(ctx)
+	defer func() { cleared(trail, found, err) }()
 	if id == "" {
 		return Target{}, false, nil
 	}
@@ -238,7 +240,9 @@ func (manager *Manager) AdvanceCodexPane(
 func (manager *Manager) KillClearedCodex(
 	ctx context.Context,
 	id string,
-) (Target, bool, error) {
+) (target Target, found bool, err error) {
+	trail := killTrail(ctx)
+	defer func() { cleared(trail, found, err) }()
 	if id == "" {
 		return Target{}, false, nil
 	}

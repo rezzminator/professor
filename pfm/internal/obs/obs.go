@@ -85,6 +85,17 @@ func Span(ctx context.Context, name string) func(err error) {
 	}
 }
 
+// Clock returns the clock in play for ctx: the scoped one a context carries,
+// else the process clock (clock.Real, unless OpenLog was opened with a
+// different one). A wrapper outside this package that times its own door —
+// the tmux door among them — reads the door's completion time through this,
+// the same clock every middleware in this package reads through current, so
+// a test's fake clock reaches every door uniformly rather than one wrapper
+// quietly keeping the wall clock.
+func Clock(ctx context.Context) clock.Clock {
+	return current(ctx).timing
+}
+
 // current resolves the scope in play: the context's, else the process one.
 func current(ctx context.Context) *scope {
 	if ctx != nil {

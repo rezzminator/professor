@@ -2,10 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/obs"
 )
 
@@ -74,5 +79,69 @@ func TestLogVerbReadsWhatTheProcessWrote(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), `"cmd":"log"`) {
 		t.Fatalf("--cmd version printed another verb's records:\n%s", stdout.String())
+	}
+}
+
+// writeJailConfig writes the jail's pfm.config.json body.
+func writeJailConfig(t *testing.T, root, body string) {
+	t.Helper()
+	path := filepath.Join(root, "home", ".config", "pfm", config.FileName)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"version": 2, "log": `+body+`}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRunHandsTheWholeLogPolicyToTheActivityLog pins the process entry: the
+// machine's log.components and log.keepDays reach obs.OpenLog, not just the
+// level — a component the config lifts to debug is enabled after run(), and
+// a rotated file past keepDays is gone.
+func TestRunHandsTheWholeLogPolicyToTheActivityLog(t *testing.T) {
+	root := jailTest(t)
+	writeJailConfig(t, root, `{"level": "error", "keepDays": 30, "components": {"cli": "debug"}}`)
+	aged := jailPaths(t).LogFile + ".1"
+	if err := os.MkdirAll(filepath.Dir(aged), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(aged, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-31 * 24 * time.Hour)
+	if err := os.Chtimes(aged, old, old); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"version"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(version) = %d; stderr = %q", code, stderr.String())
+	}
+	ctx := context.Background()
+	if !obs.Enabled(ctx, "cli", slog.LevelDebug) {
+		t.Fatal("log.components.cli=debug did not reach the process logger")
+	}
+	if obs.Enabled(ctx, "mcp", slog.LevelInfo) {
+		t.Fatal("log.level=error did not reach the process logger for an unlisted component")
+	}
+	if _, err := os.Stat(aged); !os.IsNotExist(err) {
+		t.Fatalf("log.keepDays did not reach the rotator: %s still exists (err %v)", aged, err)
+	}
+}
+
+// TestRunWithLogOffWritesNoFile: `log.level: "off"` in the machine config
+// turns the whole log off for every verb — no pfm.jsonl appears.
+func TestRunWithLogOffWritesNoFile(t *testing.T) {
+	root := jailTest(t)
+	writeJailConfig(t, root, `{"level": "off"}`)
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"version"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(version) = %d; stderr = %q", code, stderr.String())
+	}
+	if _, err := os.Stat(jailPaths(t).LogFile); !os.IsNotExist(err) {
+		t.Fatalf("log off still produced %s (err %v)", jailPaths(t).LogFile, err)
+	}
+	stdout.Reset()
+	if code := run([]string{"log", "--comp", "cli"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("run(log --comp cli) = %d; stderr = %q", code, stderr.String())
 	}
 }

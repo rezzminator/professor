@@ -3,7 +3,6 @@ package reap
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -185,6 +184,6 @@ func (tmux TmuxReaper) command(
 	ctx context.Context,
 	socket string,
 	arguments ...string,
-) *exec.Cmd {
-	return pfmtmux.Command(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
+) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
 }

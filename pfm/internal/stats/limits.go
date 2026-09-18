@@ -19,6 +19,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	headlessrun "hostops/pfm/internal/headless/run"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/statusline"
 	"hostops/pfm/internal/usagehook"
@@ -143,23 +144,22 @@ func NewLimitsSampler(accounts []LimitAccount) *LimitsSampler {
 	return sampler
 }
 
+// client and codexClient are http.out doors: constructed or injected, wrapped in place.
 func (sampler *LimitsSampler) client() *http.Client {
 	if sampler.Client != nil {
-		return sampler.Client
+		return obs.WrapClient(sampler.Client)
 	}
-	return &http.Client{Timeout: 6 * time.Second}
+	return obs.WrapClient(&http.Client{Timeout: 6 * time.Second})
 }
 
 func (sampler *LimitsSampler) codexClient() *http.Client {
 	if sampler.CodexClient != nil {
-		return sampler.CodexClient
+		return obs.WrapClient(sampler.CodexClient)
 	}
-	return &http.Client{
-		Timeout: 20 * time.Second,
-		CheckRedirect: func(*http.Request, []*http.Request) error {
-			return http.ErrUseLastResponse
-		},
-	}
+	return obs.WrapClient(&http.Client{
+		Timeout:       20 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	})
 }
 
 func (sampler *LimitsSampler) now() time.Time {

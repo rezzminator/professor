@@ -3,7 +3,6 @@ package resolve
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	pfmtmux "hostops/pfm/internal/tmux"
@@ -82,6 +81,6 @@ func (tmux TmuxResolver) command(
 	ctx context.Context,
 	socketPath string,
 	arguments ...string,
-) *exec.Cmd {
-	return pfmtmux.Command(ctx, tmux.Binary, socketPath, arguments...)
+) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, tmux.Binary, socketPath, arguments...)
 }

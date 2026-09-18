@@ -23,20 +23,23 @@ const AlphaSuffix = "-alpha"
 const StderrMirror = "stderr"
 
 // Settings is what a process entry tells the activity log: which verb is
-// running, which build, and the machine's log policy from pfm.config.json.
-// Everything else has a default: Path falls back to the resolved home's
-// pfm.jsonl, Env to the real process, Timing to the wall clock, Stderr to
-// os.Stderr.
+// running, which build, and the machine's log policy from pfm.config.json
+// (Level and Components as § Control spells them; KeepDays 0 disables the
+// time limit). Everything else has a default: Path falls back to the resolved
+// home's pfm.jsonl, Env to the real process, Timing to the wall clock, Stderr
+// to os.Stderr.
 type Settings struct {
-	Cmd       string
-	Version   string
-	Level     string
-	KeepFiles int
-	MaxMB     int
-	Path      string
-	Env       paths.Env
-	Timing    clock.Clock
-	Stderr    io.Writer
+	Cmd        string
+	Version    string
+	Level      string
+	Components map[string]string
+	KeepFiles  int
+	MaxMB      int
+	KeepDays   int
+	Path       string
+	Env        paths.Env
+	Timing     clock.Clock
+	Stderr     io.Writer
 }
 
 // process holds the logger OpenLog installed. Until then every Logger call
@@ -63,6 +66,8 @@ func processScope() *scope {
 // A destination that cannot be resolved or opened is NOT silent: the reason
 // goes to Settings.Stderr and the process keeps running against a discarding
 // logger, because losing the activity log is never a reason to fail a verb.
+// A global level of `off` is the one quiet case: nothing is recorded and no
+// file is created.
 func OpenLog(ctx context.Context, settings Settings) (context.Context, func(exitCode int)) {
 	env := settings.Env
 	if env == nil {
@@ -76,13 +81,20 @@ func OpenLog(ctx context.Context, settings Settings) (context.Context, func(exit
 	if stderr == nil {
 		stderr = os.Stderr
 	}
-	level, levelErr := resolveLevel(env, settings.Level, settings.Version)
+	levels, levelErr := ResolveLevels(
+		Policy{Version: settings.Version, Level: settings.Level, Components: settings.Components}, env,
+	)
 	if levelErr != nil {
 		fmt.Fprintf(stderr, "pfm: activity log: %v\n", levelErr)
 	}
-	destination, closer, openErr := openDestination(env, settings, level, stderr)
-	if openErr != nil {
-		fmt.Fprintf(stderr, "pfm: activity log unavailable: %v\n", openErr)
+	destination, closer := slog.Handler(discardHandler{}), io.Closer(nil)
+	if levels.Global.Level != LevelOff {
+		var openErr error
+		destination, closer, openErr = openDestination(env, settings, timing, stderr)
+		if openErr != nil {
+			fmt.Fprintf(stderr, "pfm: activity log unavailable: %v\n", openErr)
+		}
+		destination = levelHandler{next: destination, levels: levels}
 	}
 	logger := slog.New(destination).With(
 		FieldCmd, settings.Cmd,
@@ -113,16 +125,18 @@ func OpenLog(ctx context.Context, settings Settings) (context.Context, func(exit
 }
 
 // openDestination builds the handler records are written through: the home's
-// pfm.jsonl, plus a stderr mirror when paths.EnvLogMirror asks for one. A
-// failure returns the discarding handler AND the reason — the caller reports
-// it, so a log nobody can write never reads as a quiet one.
+// pfm.jsonl, plus a stderr mirror when paths.EnvLogMirror asks for one. The
+// destination takes every level — levelHandler in front of it owns the
+// control — and applies Scrub last. A failure returns the discarding handler
+// AND the reason — the caller reports it, so a log nobody can write never
+// reads as a quiet one.
 func openDestination(
 	env paths.Env,
 	settings Settings,
-	level slog.Level,
+	timing clock.Clock,
 	stderr io.Writer,
 ) (slog.Handler, io.Closer, error) {
-	options := &slog.HandlerOptions{Level: level, ReplaceAttr: Scrub}
+	options := &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: Scrub}
 	mirror := env.Get(paths.EnvLogMirror) == StderrMirror
 	path := settings.Path
 	if path == "" {
@@ -132,7 +146,7 @@ func openDestination(
 		}
 		path = resolved.LogFile
 	}
-	writer, err := newRotator(path, settings.KeepFiles, settings.MaxMB)
+	writer, err := newRotator(path, settings.KeepFiles, settings.MaxMB, settings.KeepDays, timing)
 	if err != nil {
 		return mirrorOnly(mirror, stderr, options), nil, err
 	}
@@ -150,38 +164,6 @@ func mirrorOnly(mirror bool, stderr io.Writer, options *slog.HandlerOptions) slo
 		return slog.NewJSONHandler(stderr, options)
 	}
 	return discardHandler{}
-}
-
-// resolveLevel resolves the record level in force: the build's default —
-// debug for an -alpha VERSION, info for a release — overridden by
-// pfm.config.json's log.level, and then by PFM_LOG_LEVEL, which is the
-// foreground switch and therefore wins over both. An unparsable value is
-// returned as an error with the level that stands, never silently ignored.
-func resolveLevel(env paths.Env, configured, version string) (slog.Level, error) {
-	level := slog.LevelInfo
-	if strings.HasSuffix(strings.TrimSpace(version), AlphaSuffix) {
-		level = slog.LevelDebug
-	}
-	for _, candidate := range []struct{ source, value string }{
-		{"config log.level", configured},
-		{paths.EnvLogLevel, env.Get(paths.EnvLogLevel)},
-	} {
-		text := strings.TrimSpace(candidate.value)
-		if text == "" {
-			continue
-		}
-		var parsed slog.Level
-		if err := parsed.UnmarshalText([]byte(text)); err != nil {
-			return level, fmt.Errorf(
-				"%s: %q is not one of debug, info, warn, error; keeping %s",
-				candidate.source,
-				text,
-				level,
-			)
-		}
-		level = parsed
-	}
-	return level, nil
 }
 
 // Verb names the command a process is running, for the cmd field: the first

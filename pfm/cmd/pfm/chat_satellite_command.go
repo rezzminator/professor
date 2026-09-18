@@ -29,6 +29,7 @@ import (
 	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/headless"
 	"hostops/pfm/internal/naming"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/spawn"
@@ -228,7 +229,7 @@ func runChatSave(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 		fmt.Fprintf(stderr, "pfm chat save: write transcript: %v\n", err)
 		return 1
 	}
-	writeRepositorySnapshot(file, deps.RealRunner{})
+	writeRepositorySnapshot(file, obs.Runner(deps.RealRunner{}))
 	closed = true
 	if err := file.Close(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat save: close target: %v\n", err)
@@ -940,7 +941,7 @@ func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock) int 
 		return 1
 	}
 	for index := 0; index < count; index++ {
-		if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Down").
+		if output, err := pfmtmux.Exec(context.Background(), "", socketPath, "send-keys", "Down").
 			CombinedOutput(); err != nil {
 			fmt.Fprintf(stderr, "pfm chat modal: send Down: %v: %s\n", err, strings.TrimSpace(string(output)))
 			return 1
@@ -950,7 +951,7 @@ func runChatModal(args []string, stdout, stderr io.Writer, clk clock.Clock) int 
 			return 1
 		}
 	}
-	if output, err := pfmtmux.Command(context.Background(), "", socketPath, "send-keys", "Enter").
+	if output, err := pfmtmux.Exec(context.Background(), "", socketPath, "send-keys", "Enter").
 		CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat modal: send Enter: %v: %s\n", err, strings.TrimSpace(string(output)))
 		return 1

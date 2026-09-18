@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"path/filepath"
 	"testing"
+
+	"hostops/pfm/internal/obs"
 )
 
 func TestDockerInspectorReadsIdentityFromJailedSocket(t *testing.T) {
+	_, recorder := obs.Test(t)
 	socket := filepath.Join(t.TempDir(), "probe-docker.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -45,6 +48,21 @@ func TestDockerInspectorReadsIdentityFromJailedSocket(t *testing.T) {
 	}
 	if name != "/professor-web" || image != "registry.example/professor:web" {
 		t.Fatalf("Docker inspector identity = %q %q", name, image)
+	}
+	// The http.out door (spec § Middleware): the unix-socket client is wrapped,
+	// so the probe leaves one record naming the Docker host and path — never a
+	// header or the body.
+	records := recorder.Records()
+	if len(records) != 1 {
+		t.Fatalf("records = %d, want one http.out record: %s", len(records), recorder.Raw())
+	}
+	for key, want := range map[string]any{
+		obs.FieldComp: "http.out", "op": "request", "method": http.MethodGet, "host": "docker",
+		"path": "/containers/" + id + "/json", "status": float64(http.StatusOK),
+	} {
+		if got, _ := records[0].Field(key); got != want {
+			t.Fatalf("http.out record %s = %v, want %v: %v", key, got, want, records[0].Fields)
+		}
 	}
 }
 

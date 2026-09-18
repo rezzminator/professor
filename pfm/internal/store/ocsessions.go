@@ -121,7 +121,7 @@ ON CONFLICT(id) DO UPDATE SET
 
 // OpenCodeSessions returns every indexed OpenCode session, newest activity first.
 func (s *Store) OpenCodeSessions(ctx context.Context) (sessions []OpenCodeSession, returnErr error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.logged().QueryContext(ctx, `
 SELECT `+openCodeSessionColumns+` FROM oc_sessions ORDER BY time_updated_ms DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("query oc sessions: %w", err)
@@ -151,7 +151,7 @@ SELECT `+openCodeSessionColumns+` FROM oc_sessions ORDER BY time_updated_ms DESC
 // was never scanned is meta-key business, not this query's.
 func (s *Store) CountOpenCodeSessions(ctx context.Context) (int, error) {
 	var count int
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM oc_sessions").Scan(&count)
+	err := s.logged().QueryRowContext(ctx, "SELECT COUNT(*) FROM oc_sessions").Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("count oc sessions: %w", err)
 	}

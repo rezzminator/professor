@@ -11,7 +11,7 @@ import (
 // ChatSummary returns the paid summary for one exact transcript frontier.
 func (s *Store) ChatSummary(ctx context.Context, path string, offset int64) (string, bool, error) {
 	var summary string
-	err := s.db.QueryRowContext(ctx, `
+	err := s.logged().QueryRowContext(ctx, `
 SELECT summary
 FROM chat_summaries
 WHERE transcript_path=? AND last_offset=?`, path, offset).Scan(&summary)
@@ -36,7 +36,7 @@ func (s *Store) PutChatSummary(ctx context.Context, path string, offset int64, s
 	if strings.TrimSpace(summary) == "" {
 		return fmt.Errorf("chat summary is empty")
 	}
-	_, err := execWrite(ctx, s.db, `
+	_, err := execWrite(ctx, s.logged(), `
 INSERT INTO chat_summaries (transcript_path, last_offset, summary)
 VALUES (?, ?, ?)
 ON CONFLICT(transcript_path, last_offset) DO UPDATE SET

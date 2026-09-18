@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"strings"
+
+	"hostops/pfm/internal/obs"
 )
 
 // The fetch gateway: the ONE function every harvester HTTP egress goes through.
@@ -289,15 +291,20 @@ func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, e
 // keeps its own client's redirect policy untouched — that policy refuses every
 // redirect by name, and wrapping it in the generic SSRF check would report a
 // walked-off redirect as a private-host error, naming the wrong cause.
+//
+// Both clones are the harvester's http.out door (spec § Middleware): the
+// per-request copy is wrapped, so every attempt of every rung leaves one
+// record, while the shared client's Transport — the one configureProxy,
+// setUserAgent and IsPinnedClient inspect by type — is never touched.
 func gatewayRequestClient(req gatewayRequest) *http.Client {
 	if req.trustedOrigin {
 		clone := *req.client
 		if req.jar != nil {
 			clone.Jar = req.jar
 		}
-		return &clone
+		return obs.WrapClient(&clone)
 	}
-	return gatewayClient(req.client, req.jar)
+	return obs.WrapClient(gatewayClient(req.client, req.jar))
 }
 
 // gatewayReadBody decodes the response and applies the byte ceiling under the

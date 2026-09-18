@@ -3,7 +3,6 @@ package kill
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -158,6 +157,6 @@ func (tmux TmuxKiller) command(
 	ctx context.Context,
 	socketPath string,
 	arguments ...string,
-) *exec.Cmd {
-	return pfmtmux.Command(ctx, tmux.Binary, socketPath, arguments...)
+) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, tmux.Binary, socketPath, arguments...)
 }

@@ -12,6 +12,7 @@ import (
 	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/obs"
 )
 
 // DeliverThen is the waiter half of chat.sh's __then subcommand
@@ -27,6 +28,8 @@ import (
 // one delivered and armed it, removed on the chain's last delivery or on any
 // refusal — so ScheduleAfterCurrentTurn can refuse a second arming by name.
 func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Result, err error) {
+	states := trail(ctx, "then")
+	defer func() { outcome(states, result, err) }()
 	ctx = withSender(ctx, engine.sender(ctx))
 	socketPath, target, steers := wait.SocketPath, wait.Target, wait.Steers
 	if target == "" || len(steers) == 0 || steers[0] == "" {
@@ -211,7 +214,7 @@ type CommandThenSpawner struct {
 	Setsid     string
 	Nohup      string
 	// Runner is the deps.Runner seam Spawn launches the waiter through; nil
-	// defaults to deps.RealRunner{}.
+	// defaults to obs.Runner(deps.RealRunner{}).
 	Runner deps.Runner
 	// Clock stamps the armed record (armed.go); nil defaults to clock.Real.
 	Clock clock.Clock
@@ -300,7 +303,7 @@ func (spawner CommandThenSpawner) Spawn(
 	}
 	runner := spawner.Runner
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	opts := deps.StartOptions{
 		Env:    env,

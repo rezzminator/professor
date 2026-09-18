@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/config"
+	"hostops/pfm/internal/obs"
 )
 
 // DaemonStatus is the stable local health document consumed by doctor and the
@@ -29,7 +30,7 @@ func ProbeDaemon(address string) (DaemonStatus, bool) {
 	if err != nil {
 		return DaemonStatus{}, false
 	}
-	client := &http.Client{Timeout: 300 * time.Millisecond}
+	client := obs.WrapClient(&http.Client{Timeout: 300 * time.Millisecond})
 	response, err := client.Do(request)
 	if err != nil {
 		return DaemonStatus{}, false

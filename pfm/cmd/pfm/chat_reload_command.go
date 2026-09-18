@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/kill"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/rearm"
 	"hostops/pfm/internal/reload"
@@ -46,15 +46,15 @@ type reloadCommandTmux struct{}
 // startReloadWorker launches the detached worker (Detach: true) and releases
 // it; a test overrides this var to script the launch.
 var startReloadWorker = func(argv []string, opts deps.StartOptions) error {
-	process, err := deps.RealRunner{}.Start(context.Background(), argv, opts)
+	process, err := obs.Runner(deps.RealRunner{}).Start(context.Background(), argv, opts)
 	if err != nil {
 		return err
 	}
 	return process.Release()
 }
 
-func (reloadCommandTmux) command(ctx context.Context, socket string, args ...string) *exec.Cmd {
-	return pfmtmux.Command(ctx, "", socket, args...)
+func (reloadCommandTmux) command(ctx context.Context, socket string, args ...string) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, "", socket, args...)
 }
 
 func (tmux reloadCommandTmux) ListPanes(ctx context.Context, socket string) ([]reload.Pane, error) {
@@ -163,10 +163,7 @@ func runChatReloadWithRuntime(
 		fmt.Fprintf(stderr, "pfm chat reload: create worker log directory: %v\n", err)
 		return 1
 	}
-	logPath := filepath.Join(
-		resolved.SIDDir,
-		"reload-"+filepath.Base(socketPath)+".log",
-	)
+	logPath := filepath.Join(resolved.SIDDir, "reload-"+filepath.Base(socketPath)+".log")
 	log, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: open worker log: %v\n", err)

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 func readHostResources(root string, now int64, cpuCount int) (hostResources, error) {
@@ -62,7 +63,7 @@ func readDarwinHostResources(now int64, cpuCount int) (hostResources, error) {
 }
 
 func readDarwinProcesses() (map[int]processSample, uint64, []string, error) {
-	result, err := deps.RealRunner{}.Run(
+	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
 		[]string{deps.Executable("ps"), "-A", "-o", "pid=,ppid=,time=,rss=,comm="},
 		deps.RunOptions{},
@@ -145,7 +146,8 @@ func readDarwinHeader() (Header, error) {
 	if err != nil {
 		return Header{}, fmt.Errorf("read Darwin host memory size: %w", err)
 	}
-	result, err := deps.RealRunner{}.Run(context.Background(), []string{deps.Executable("vm_stat")}, deps.RunOptions{})
+	result, err := obs.Runner(deps.RealRunner{}).
+		Run(context.Background(), []string{deps.Executable("vm_stat")}, deps.RunOptions{})
 	if err == nil && result.ExitCode != 0 {
 		err = fmt.Errorf("exit status %d", result.ExitCode)
 	}

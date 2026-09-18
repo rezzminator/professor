@@ -14,6 +14,7 @@ import (
 
 	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -177,7 +178,11 @@ func New(dependencies Dependencies) (*Runner, error) {
 func (runner *Runner) Run(
 	ctx context.Context,
 	options Options,
-) (Report, error) {
+) (report Report, err error) {
+	// The state door: one transition per sweep phase; a failure is
+	// attributed to the phase the sweep was in.
+	trail := obs.NewTrail(ctx, "reap", "requested")
+	defer func() { trail.End(err) }()
 	input := Input{
 		Self:         options.Self,
 		Apply:        options.Apply,
@@ -197,7 +202,6 @@ func (runner *Runner) Run(
 		input.ClientActive = defaultClientActive
 	}
 
-	var report Report
 	busyIDs, err := runner.busy.BusySessions(ctx)
 	input.AgentsOK = err == nil
 	input.BusyIDs = busyIDs
@@ -235,20 +239,28 @@ func (runner *Runner) Run(
 		return Report{}, fmt.Errorf("list bunker sessions: %w", err)
 	}
 	input.VSCT = sessions
+	trail.Reach("probed", "every socket classified")
 
 	decisions := Plan(input)
+	trail.Reach("planned", "decisions planned")
 	if options.Apply {
 		report.AvailBefore = runner.availableKB()
 		var warnings []string
 		decisions, warnings = runner.apply(ctx, decisions)
 		report.Warnings = warnings
 		report.AvailAfter = runner.availableKB()
+		trail.Reach("applied", "decisions applied")
 	}
 	report.Decisions = decisions
 	for _, decision := range decisions {
+		// Each decision is its own state record: what the socket became and
+		// why — the reason is the classifier's shape, never chat content.
+		var failed error
 		if decision.Failed {
 			report.Failed++
+			failed = errors.New("apply failed: " + decision.Reason)
 		}
+		obs.Transition(ctx, "reap", "socket", string(decision.State), decision.Reason)(failed)
 		switch decision.State {
 		case StateOrphan, StateFork, StateIdle:
 			report.Orphans++

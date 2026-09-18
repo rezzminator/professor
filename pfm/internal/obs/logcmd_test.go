@@ -176,3 +176,71 @@ func TestReadActivityRefusesAnUnknownLevelAndExtraArguments(t *testing.T) {
 		t.Fatalf("a positional argument exited %d, want 2", code)
 	}
 }
+
+// compLine renders one component-scoped record.
+func compLine(stamp time.Time, message, comp string) string {
+	return fmt.Sprintf(
+		`{"ts":%q,"level":"INFO","msg":%q,"cmd":"chat","pid":1,"version":"1.2.3","comp":%q}`,
+		stamp.UTC().Format(time.RFC3339Nano), message, comp,
+	)
+}
+
+// TestReadActivityFiltersByComp: `pfm log --comp mcp` keeps one component's
+// records; an unregistered name is the registry's error, exit 2.
+func TestReadActivityFiltersByComp(t *testing.T) {
+	now := time.Now()
+	path := fixtureLog(t,
+		compLine(now, "mcp.record", "mcp"),
+		compLine(now, "db.record", "db"),
+		logLine(now, "INFO", "unscoped.record", "chat", ""),
+	)
+	var stdout, stderr bytes.Buffer
+	ctx := context.Background()
+	if code := ReadActivity(ctx, []string{"--comp", "mcp"}, &stdout, &stderr, path, clock.Real); code != 0 {
+		t.Fatalf("ReadActivity --comp mcp = %d; stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "mcp.record") {
+		t.Fatalf("output missing the mcp record:\n%s", stdout.String())
+	}
+	for _, refused := range []string{"db.record", "unscoped.record"} {
+		if strings.Contains(stdout.String(), refused) {
+			t.Fatalf("output kept %q past --comp mcp:\n%s", refused, stdout.String())
+		}
+	}
+	stdout.Reset()
+	if code := ReadActivity(ctx, []string{"--comp", "database"}, &stdout, &stderr, path, clock.Real); code != 2 {
+		t.Fatalf("an unknown --comp exited %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), `"database"`) ||
+		!strings.Contains(stderr.String(), strings.Join(Components, ", ")) {
+		t.Fatalf("stderr = %q, want the unknown component and the registry named", stderr.String())
+	}
+	if !strings.Contains(LogUsage, "--comp mcp") {
+		t.Fatalf("LogUsage = %q, want --comp in it", LogUsage)
+	}
+}
+
+// TestReadActivityLevelUsesTheOneParser: `warning` and `off` are read by the
+// same parser as every other level surface.
+func TestReadActivityLevelUsesTheOneParser(t *testing.T) {
+	now := time.Now()
+	path := fixtureLog(t,
+		logLine(now, "INFO", "info.record", "chat", ""),
+		logLine(now, "WARN", "warn.record", "chat", ""),
+	)
+	var stdout, stderr bytes.Buffer
+	ctx := context.Background()
+	if code := ReadActivity(ctx, []string{"--level", "warning"}, &stdout, &stderr, path, clock.Real); code != 0 {
+		t.Fatalf("--level warning = %d; stderr = %q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "info.record") || !strings.Contains(stdout.String(), "warn.record") {
+		t.Fatalf("--level warning printed:\n%s", stdout.String())
+	}
+	stdout.Reset()
+	if code := ReadActivity(ctx, []string{"--level", "chatty"}, &stdout, &stderr, path, clock.Real); code != 2 {
+		t.Fatalf("--level chatty = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), strings.Join(LevelNames, ", ")) {
+		t.Fatalf("stderr = %q, want every accepted level named", stderr.String())
+	}
+}

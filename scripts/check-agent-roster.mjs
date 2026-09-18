@@ -83,7 +83,7 @@ const missingDirs = [
 ].filter(Boolean);
 if (missingDirs.length) {
   console.error(
-    `agent-roster: NOT GENERATED — ${missingDirs.join(", ")} absent; run: cd pfm && go run ./cmd/pfm codex build .. && node .claude/scripts/build-opencode.mjs generate`,
+    `agent-roster: NOT GENERATED — ${missingDirs.join(", ")} absent; run: cd pfm && go run ./cmd/pfm codex build .. && go run ./cmd/pfm opencode build ..`,
   );
   process.exit(3);
 }

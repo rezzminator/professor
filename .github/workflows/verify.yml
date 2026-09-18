@@ -45,7 +45,7 @@ jobs:
           cd "$RUNNER_TEMP/professor-fence/pfm"
           go run ./cmd/pfm codex build ..
           cd "$RUNNER_TEMP/professor-fence"
-          node .claude/scripts/build-opencode.mjs generate
+          (cd pfm && go run ./cmd/pfm opencode build ..)
 
       - name: Stage private leak-check policy
         env:

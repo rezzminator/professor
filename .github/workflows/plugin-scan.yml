@@ -40,7 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           (cd pfm && go run ./cmd/pfm codex build ..)
-          node .claude/scripts/build-opencode.mjs generate
+          (cd pfm && go run ./cmd/pfm opencode build ..)
 
       - name: Scan
         uses: hashgraph-online/ai-plugin-scanner-action@caba2e96aa8ad2feb6cf6fca52442b52e22e779f # v1.2.635

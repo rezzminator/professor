@@ -25,12 +25,12 @@ import (
 
 const (
 	HarvesterScope             = "harvest"
-	grantAuthorizationCode     = "authorization_code"
+	authorizationCodeGrant     = "authorization_code"
 	pkceMethodS256             = "S256"
 	tokenAuthClientSecretBasic = "client_secret_basic"
 	tokenAuthClientSecretPost  = "client_secret_post"
 	tokenAuthNone              = "none"
-	grantRefreshToken          = "refresh_token"
+	refreshTokenGrant          = "refresh_token"
 	oauthErrorInvalidGrant     = "invalid_grant"
 	oauthErrorInvalidTarget    = "invalid_target"
 	oauthErrorServer           = "server_error"
@@ -266,7 +266,7 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	}
 	c.ClientSecretExpiresAt = 0
 	if len(c.GrantTypes) == 0 {
-		c.GrantTypes = []string{grantAuthorizationCode, grantRefreshToken}
+		c.GrantTypes = []string{authorizationCodeGrant, refreshTokenGrant}
 	}
 	if len(c.ResponseTypes) == 0 {
 		c.ResponseTypes = []string{"code"}

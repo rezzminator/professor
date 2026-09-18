@@ -96,9 +96,15 @@ else
 fi
 
 # ---- 4: the default selection drops pending lanes BY NAME ----------------
+# The pending state is this suite's own fixture: two lane scripts moved aside
+# and a pending.txt naming them — never the real directory's pending list, which
+# is empty once every lane is written.
 
+mv "$LANES/F.sh" "$T/F.sh.aside" && mv "$LANES/M.sh" "$T/M.sh.aside" ||
+  { echo "run_test: the lanes copy has no F.sh/M.sh to move aside" >&2; exit 2; }
+printf 'F\nM\n' >"$LANES/pending.txt"
 run_sut --dry-run
-if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'NOT WRITTEN — pending lanes dropped from this plan: E2 E3 F M A O2'; then
+if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'NOT WRITTEN — pending lanes dropped from this plan: F M'; then
   ok "a bare run names every pending lane it dropped instead of shrinking the sequence silently"
 else
   bad "pending drop" "rc=$RC" "$OUT"
@@ -112,6 +118,8 @@ if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep -q 'lane F is NOT WRITTEN'; then
 else
   bad "named pending lane" "rc=$RC" "$OUT"
 fi
+mv "$T/F.sh.aside" "$LANES/F.sh" && mv "$T/M.sh.aside" "$LANES/M.sh"
+: >"$LANES/pending.txt"
 
 # ---- 6: an unknown lane is refused, exit 2 ------------------------------
 

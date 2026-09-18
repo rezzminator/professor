@@ -77,7 +77,7 @@ infra/fence/lanes/run.sh --check-budget E1 700   # the verdict for a recorded wa
 
 ## Extend it — a landscape item lands with its beat, in the same commit
 
-1. Add the item to `docs/dev/testing/landscape.md` with its `lane(s):` column.
+1. Add the item to `docs/dev/testing/landscape.md` with its `lane(s):` column. The file is machine-read: line 1 is `<!-- rumdl-disable -->`, the inline marker rumdl honours in `fmt` too, so neither the format-md hook nor a bare `rumdl fmt` reflows its id rows (`check-map.sh` fails `LANDSCAPE-FORMATTABLE` without it and, with rumdl on PATH, formats a copy and demands byte-identity).
 2. Add its beat to `infra/fence/lanes/beats.md` under that lane, naming what it asserts, the seat it spends and its landscape ids.
 3. Add the `landscape-id · lane · beat` row(s) to `infra/fence/lanes/map.tsv`.
 4. Write the beat in `infra/fence/lanes/<lane>.sh` using only `lib.sh`: `beat <id> <landscape-ids…>`, `spends <seat>`, `target <chat>` (or `target_live <chat>` when the beat cannot assert anything without that chat alive), then exactly one of `pass` / `fail` / `known` / `blocked`. Assert from pfm's own report or the pane — never from what a model said.

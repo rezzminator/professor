@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Fixture-driven tests for lanes/check-map.sh — the three map findings
-# (UNMAPPED-ID, MISSING-BEAT, PENDING-STALE / NOT WRITTEN) and the one thing a
-# gate must never do: report clean for a check it could not run (DERIVE-FAILED).
+# (UNMAPPED-ID, MISSING-BEAT, PENDING-STALE / NOT WRITTEN), the machine-read
+# landscape gate (LANDSCAPE-FORMATTABLE, the byte-stability run, its named
+# NOT-PERFORMED line) and the one thing a gate must never do: report clean for a
+# check it could not run (DERIVE-FAILED).
 # Runs against a COPY of the lanes directory and a tiny fixture landscape.
 #
 #   bash infra/fence/lanes/tests/check-map_test.sh
@@ -19,11 +21,16 @@ bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n'
 LANES="$T/lanes"
 mkdir -p "$LANES"
 cp "$SUT_DIR"/*.sh "$SUT_DIR"/*.yml "$SUT_DIR"/pending.txt "$LANES/" 2>/dev/null
+# The copy brings every REAL lane script along (uppercase names: E1.sh, F.sh…);
+# this suite's lanes are the two fixtures written below and nothing else, so a
+# lane landing in the real directory can never flip a pending-lane case here.
+find "$LANES" -maxdepth 1 -name '[A-Z]*.sh' -delete
 SUT="$LANES/check-map.sh"
 [ -f "$SUT" ] || { echo "check-map_test: no check-map.sh at $SUT" >&2; exit 2; }
 
 LAND="$T/landscape.md"
 cat >"$LAND" <<'MD'
+<!-- rumdl-disable -->
 # fixture landscape
 Z1 · `pfm chat status <target>` base · needs:none · today:U · fixture:1 · lane(s):E1
 Z2 · `pfm doctor` fixture row · needs:none · today:U · fixture:2 · lane(s):O1
@@ -46,7 +53,7 @@ printf 'F\n' >"$LANES/pending.txt"
 # PATH with no pfm at all, so the derive cannot run unless a test provides one.
 BIN="$T/bin"
 mkdir -p "$BIN"
-for tool in bash awk sed grep sort uniq head tail cut tr wc find mktemp rm cat printf jq basename dirname expr date; do
+for tool in bash awk sed grep sort uniq head tail cut tr wc find mktemp rm cat printf jq basename dirname expr date cp cmp diff; do
   real="$(command -v "$tool" 2>/dev/null)" || continue
   ln -sf "$real" "$BIN/$tool"
 done
@@ -64,6 +71,46 @@ if [ "$RC" -eq 0 ] &&
   ok "clean map + --no-derive: exit 0, and the skipped derive is NAMED, not implied clean"
 else
   bad "clean map" "rc=$RC" "$OUT"
+fi
+
+# ---- 1a: the landscape without its machine-read marker is red -------------
+# (Wave 8 item 8: a formatter reflowed the 429 id rows into 27 paragraphs)
+
+UNMARKED="$T/unmarked.md"
+tail -n +2 "$LAND" >"$UNMARKED"
+OUT="$(env PATH="$BIN" LANE_LANDSCAPE="$UNMARKED" bash "$SUT" --no-derive 2>&1)"; RC=$?
+if [ "$RC" -eq 1 ] &&
+  printf '%s' "$OUT" | grep -q "LANDSCAPE-FORMATTABLE: line 1 of unmarked.md is not '<!-- rumdl-disable -->'" &&
+  ! printf '%s' "$OUT" | grep -q '^check-map: clean'; then
+  ok "LANDSCAPE-FORMATTABLE: a landscape whose line 1 is not the rumdl-disable marker is red, never clean"
+else
+  bad "unmarked landscape" "rc=$RC" "$OUT"
+fi
+
+# ---- 1b: marker present, rumdl absent → the formatter half is NAMED not run --
+
+run_sut --no-derive
+if [ "$RC" -eq 0 ] &&
+  printf '%s' "$OUT" | grep -q 'landscape machine-read: marker on line 1; rumdl not on PATH — the formatter run itself was NOT PERFORMED'; then
+  ok "marker present, no rumdl: exit 0 and the skipped formatter run is NAMED, never implied"
+else
+  bad "marker without rumdl" "rc=$RC" "$OUT"
+fi
+
+# ---- 1c: marker present, rumdl present → a copy is formatted and compared --
+
+if real_rumdl="$(command -v rumdl 2>/dev/null)"; then
+  ln -sf "$real_rumdl" "$BIN/rumdl"
+  run_sut --no-derive
+  if [ "$RC" -eq 0 ] &&
+    printf '%s' "$OUT" | grep -q 'landscape machine-read: marker on line 1, byte-stable under rumdl fmt'; then
+    ok "marker present, rumdl present: the copy is byte-stable and the line says the run happened"
+  else
+    bad "marker with rumdl" "rc=$RC" "$OUT"
+  fi
+  rm -f "$BIN/rumdl"
+else
+  printf 'SKIP  rumdl is not on this host — the byte-stability run (1c) was NOT exercised\n'
 fi
 
 # ---- 2: an unmapped landscape id is a finding, exit 1 ---------------------

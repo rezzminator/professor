@@ -1,3 +1,4 @@
+<!-- rumdl-disable -->
 # pfm functionality landscape — Tier B lane map
 
 This is the tracked copy of `tmp/inventory/landscape.md`, the flat id-numbered inventory the

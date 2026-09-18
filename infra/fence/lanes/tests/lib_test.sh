@@ -476,5 +476,15 @@ else
   bad "failure evidence" "$log"
 fi
 
+# ── the debug ruling: every lane runs pfm at PFM_LOG_LEVEL=debug ─────────────
+# Forced, not defaulted: a caller's own level would leave the activity log
+# (Wave 6) too thin for a beat's slice to be judged on.
+level="$(PFM_LOG_LEVEL=info bash -c ". '$LIB'; printf '%s' \"\$PFM_LOG_LEVEL\"")"
+if [ "$level" = debug ]; then
+  ok "sourcing lib.sh forces PFM_LOG_LEVEL=debug even over a caller's own level"
+else
+  bad "PFM_LOG_LEVEL ruling" "got '$level', want 'debug'"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

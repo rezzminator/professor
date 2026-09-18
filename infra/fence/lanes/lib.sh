@@ -64,6 +64,10 @@ LANE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 : "${LANE_SEATS:=cc:1}"
 : "${LANE_PFM_LOG:=${PFM_HOME:-$HOME/.local/state/pfm}/log/pfm.jsonl}"
 : "${LANE_TODAY:=$(date +%Y-%m-%d)}"
+# Every lane runs pfm at debug (Wave 4 ruling, 2026-09-18): the activity log
+# (Wave 6) is judged per beat, and a thinner level would hide the records a
+# slice is judged on. Forced over any caller's own level, never defaulted.
+export PFM_LOG_LEVEL=debug
 
 LANE_ID="" LANE_LOG="" LANE_TIMELINE="" LANE_T0=0
 LANE_BEATS=0 LANE_FAILED=0 LANE_KNOWN=0 LANE_BLOCKED=0

@@ -4,7 +4,15 @@
 #
 #   check-map.sh [--pfm PATH] [--no-derive]
 #
-# Three checks, each naming its own broken state:
+# Four checks, each naming its own broken state:
+#   0. docs/dev/testing/landscape.md is machine-read: line 1 carries
+#      `<!-- rumdl-disable -->`, the inline marker rumdl honours in `fmt` as well
+#      as `check`, so the format-md hook and a bare `rumdl fmt` both leave its
+#      bare `<id> ·` rows alone (measured 2026-09-18: unmarked, 429 rows reflowed
+#      into 27). With rumdl on PATH the check also formats a COPY and demands
+#      byte-identity; without it, that half is a named NOT-PERFORMED line.
+#      → `LANDSCAPE-FORMATTABLE` (no marker) / `LANDSCAPE-MUTABLE` (rumdl
+#        changed the copy anyway) / `LANDSCAPE-FMT-FAILED` (rumdl would not run)
 #   1. every id in docs/dev/testing/landscape.md has a row in map.tsv
 #      → `UNMAPPED-ID: <id>`
 #   2. every beat in map.tsv exists in its lane script. A lane that is not
@@ -53,6 +61,29 @@ derive_fail() { printf 'check-map: DERIVE-FAILED: %s\n' "$1" >&2; derive_failed=
 
 [ -f "$LANDSCAPE" ] || { echo "check-map: LANDSCAPE-UNREADABLE — $LANDSCAPE does not exist" >&2; exit 2; }
 [ -f "$MAP" ] || { echo "check-map: MAP-UNREADABLE — $MAP does not exist" >&2; exit 2; }
+
+# ─── 0. the landscape is machine-read: a formatter leaves it byte-identical ─
+
+MARKER='<!-- rumdl-disable -->'
+if [ "$(head -n 1 "$LANDSCAPE")" != "$MARKER" ]; then
+  red "LANDSCAPE-FORMATTABLE: line 1 of $(basename "$LANDSCAPE") is not '$MARKER' — a markdown formatter would reflow its id rows into paragraphs"
+elif command -v rumdl >/dev/null 2>&1; then
+  # rumdl reads its config from the CURRENT directory: the copy sits beside a
+  # copy of the repo's own policy, so this run judges the real rules.
+  scratch="$(mktemp -d "${TMPDIR:-/tmp}/check-map-fmt.XXXXXX")"
+  cp "$LANDSCAPE" "$scratch/landscape.md"
+  [ -f "$ROOT/.rumdl.toml" ] && cp "$ROOT/.rumdl.toml" "$scratch/.rumdl.toml"
+  if ! (cd "$scratch" && rumdl fmt landscape.md >/dev/null 2>&1); then
+    derive_fail "LANDSCAPE-FMT-FAILED: rumdl fmt exited non-zero on a copy of $(basename "$LANDSCAPE") — byte-stability could not be judged"
+  elif ! cmp -s "$LANDSCAPE" "$scratch/landscape.md"; then
+    red "LANDSCAPE-MUTABLE: rumdl fmt changed $(diff "$LANDSCAPE" "$scratch/landscape.md" | grep -c '^[<>]') line(s) of $(basename "$LANDSCAPE") despite the marker"
+  else
+    say "landscape machine-read: marker on line 1, byte-stable under rumdl fmt"
+  fi
+  rm -rf -- "$scratch"
+else
+  say "landscape machine-read: marker on line 1; rumdl not on PATH — the formatter run itself was NOT PERFORMED"
+fi
 
 # ─── 1. every landscape id is mapped ────────────────────────────────────────
 
@@ -193,12 +224,12 @@ JSON
 fi
 
 if [ "$derive_failed" -ne 0 ]; then
-  echo "check-map: the derived surface could NOT be checked (DERIVE-FAILED above) — this is not a clean verdict" >&2
+  echo "check-map: a check could NOT be run (the FAILED line above) — this is not a clean verdict" >&2
   exit 2
 fi
 if [ "$map_bad" -ne 0 ]; then
   echo "check-map: ✗ $map_bad finding(s)" >&2
   exit 1
 fi
-say "clean — every landscape id mapped, every mapped beat present or its lane declared pending, every derived command and tool carried"
+say "clean — landscape machine-read, every landscape id mapped, every mapped beat present or its lane declared pending, every derived command and tool carried"
 exit 0

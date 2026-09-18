@@ -143,7 +143,8 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 
 Runs LAST: it reaps the graveyard F's storm filled, archives a real history, and ends by tearing the machine down.
 
-- `O2.01-reap` · `pfm reap` classification + actions (dry-run default, --apply, --horizon, --busy-recent, --json) over the states F's storm left · spends none · L8,L9,L10,L11,L12,L13,L14,L15,L16,L17,L18,L19,L20,L21,L22,L23,L24,L25,L26
+- `O2.01-reap` · `pfm reap` classification + actions (dry-run default, --apply, --horizon, --busy-recent, --json) over the states F's storm left — the sixteen states a live fleet can provoke · spends cc:1 · L8,L9,L10,L11,L12,L13,L15,L17,L18,L19,L21,L22,L23,L24,L25,L26
+- `O2.01b-reap-unprovokable` · the three reap states no live fleet can provoke (`fork`, `IDLE`, `UNKN`: a scripted engine AND a clock door — `pfm reap` has no `--now`) · spends none · L14,L16,L20 · `blocked wave7-mock-engine` until Wave 7 lands
 - `O2.02-archive` · `pfm archive` (apply / subagents / restore / prune-orphans) over a real transcript history · spends none · X6,X7,X8,X9,X10
 - `O2.03-index` · `pfm index` · spends none · X5
 - `O2.04-headless` · headless on cc and cx · spends cc:1+cx · X15,X16,X17,K17
@@ -158,6 +159,6 @@ Runs LAST: it reaps the graveyard F's storm filled, archives a real history, and
 
 - ids mapped / total: **429/429** (`check-map.sh` is the gate, `map.tsv` the index)
 - ids mapped to ≥ 2 lanes: **18** — C1 (A+F), C22 (E1+F), C28 (E1+F), C32 (E1+E2+F), C39 (E1+E2), C40 (E1+E2), I23 (A+O1), I37 (A+O1), I38 (M+O1+O2), I63 (E2+O2), I96 (F+O1), K12 (E1+F), K23 (E1+O1), L5 (E1+F), L32 (E1+O2), M34 (E2+M), M36 (E3+M), T31 (E1+E2+E3)
-- beats per lane (total / carrying landscape ids): E1 25/25, E2 11/10, E3 3/2, F 18/18, M 15/14, A 15/13, O1 13/12, O2 10/10, R 6/0
-- written today: E1, O1 — every other lane is listed in `pending.txt` and reported `NOT WRITTEN` by name until it lands (spec build order step 2)
+- beats per lane (total / carrying landscape ids): E1 25/25, E2 11/10, E3 3/2, F 18/18, M 15/14, A 15/13, O1 13/12, O2 11/11, R 6/0
+- written: all eight lanes (O1, E1, E2, E3, F, M, A, O2) — `pending.txt` is empty; a beat whose state only a scripted engine can provoke reports `blocked wave7-mock-engine` by name until Wave 7 lands (F.07 K31/K32/K37, F.11 L2/L3, O2.01b L14/L16/L20)
 - unmapped ids: none

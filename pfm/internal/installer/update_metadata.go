@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"hostops/pfm/internal/atomicfile"
 )
@@ -251,4 +252,72 @@ func canonicalBinaryOwnershipContent(home string) ([]byte, error) {
 		return nil, fmt.Errorf("encode binary ownership ledger: %w", err)
 	}
 	return append(encoded, '\n'), nil
+}
+
+func (installer *engine) removeUpdateMetadata() error {
+	for _, path := range []string{SourceRepoPath(installer.options.Home), binaryOwnershipPath(installer.options.Home)} {
+		if _, err := os.Lstat(path); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		if err := installer.change("remove "+path, func() error { return os.Remove(path) }); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(installer.managedRoot); err != nil &&
+		!errors.Is(err, fs.ErrNotExist) && !errors.Is(err, syscall.ENOTEMPTY) {
+		return err
+	}
+	return nil
+}
+
+func (installer *engine) writeUpdateMetadata() error {
+	if installer.options.SourceRepo != "" {
+		content, err := sourceRepoMarkerContent(installer.options.SourceRepo)
+		if err != nil {
+			return err
+		}
+		path := SourceRepoPath(installer.options.Home)
+		if !sameFile(path, content, 0o600) {
+			if err := installer.change("write "+path, func() error {
+				return WriteSourceRepoMarker(installer.options.Home, installer.options.SourceRepo)
+			}); err != nil {
+				return err
+			}
+		} else {
+			installer.ok(path)
+		}
+		abs, err := filepath.Abs(installer.options.SourceRepo)
+		if err != nil {
+			return fmt.Errorf("resolve source repository %q: %w", installer.options.SourceRepo, err)
+		}
+		if err := installer.armSourceRepoPrePushGate(filepath.Clean(abs)); err != nil {
+			return err
+		}
+	} else {
+		if err := installer.reportSourceRepoMarker(); err != nil {
+			return err
+		}
+		if recorded, err := ReadSourceRepoMarker(installer.options.Home); err == nil {
+			if err := installer.armSourceRepoPrePushGate(recorded); err != nil {
+				return err
+			}
+		}
+	}
+	content, err := canonicalBinaryOwnershipContent(installer.options.Home)
+	if err != nil {
+		return err
+	}
+	path := binaryOwnershipPath(installer.options.Home)
+	if !sameFile(path, content, 0o600) {
+		if err := installer.change("write "+path, func() error {
+			return RecordCanonicalBinary(installer.options.Home)
+		}); err != nil {
+			return err
+		}
+	} else {
+		installer.ok(path)
+	}
+	return nil
 }

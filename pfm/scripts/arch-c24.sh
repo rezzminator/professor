@@ -42,6 +42,11 @@ trap 'rm -rf "$T"' EXIT
 # Same enumerator arch-check.sh uses: the worktree's own index, untracked
 # files included, deleted ones excluded; the fence hands the mounted git dir
 # over through PFM_DEV_REPO_GIT_DIR/PFM_DEV_REPO_WORK_TREE.
+#
+# internal/mockengine and cmd/mock-engine are test-only fake engines, never
+# linked into the pfm binary — the same C22 exemption (arch-check.sh § C22)
+# applies here: the mock IS a host (exec, files, a fake sqlite-backed store),
+# so its doors are its purpose, not a leak this census tracks.
 repo_git() {
   if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" && -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
     git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" \
@@ -52,7 +57,8 @@ repo_git() {
 }
 repo_git ls-files -co --exclude-standard '*.go' 2>/dev/null \
   | while read -r f; do [ -f "$f" ] && echo "$f"; done \
-  | grep -v '_test\.go$' | grep -vE '^internal/(testjail|hostfixture)/' | sort -u > "$T/src.list"
+  | grep -v '_test\.go$' \
+  | grep -vE '^internal/(testjail|hostfixture|mockengine)/|^cmd/mock-engine/' | sort -u > "$T/src.list"
 [ -s "$T/src.list" ] || { say ERROR "no Go sources listed under $PFM — the enumerator did not run"; exit 2; }
 
 # g <out> <list> <grep args...>: grep -n over a list; rc 2 when grep could not

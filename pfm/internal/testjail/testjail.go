@@ -47,7 +47,7 @@ func Run(m *testing.M) int {
 	// Installer tests must not inherit an operator account as an MCP write
 	// target. Packages that can install host state enter through this jail.
 	if err := os.Setenv("CLAUDE_CONFIG_DIR", ""); err != nil {
-		fmt.Fprintf(os.Stderr, "testjail: clear CLAUDE_CONFIG_DIR: %v\n", err)
+		warnSetup("clear CLAUDE_CONFIG_DIR: %v", err)
 		return 1
 	}
 	// Git fixtures must read only repository-local configuration. A developer's
@@ -58,7 +58,7 @@ func Run(m *testing.M) int {
 		"GIT_CONFIG_NOSYSTEM": "1",
 	} {
 		if err := os.Setenv(name, value); err != nil {
-			fmt.Fprintf(os.Stderr, "testjail: set %s to %s: %v\n", name, value, err)
+			warnSetup("set %s to %s: %v", name, value, err)
 			return 1
 		}
 	}
@@ -89,11 +89,18 @@ func Run(m *testing.M) int {
 	// 104 bytes a socket path is allowed, which is exactly the budget the
 	// longest test names need.
 	if err := os.Setenv("TMPDIR", base); err != nil {
-		fmt.Fprintf(os.Stderr, "testjail: set TMPDIR to %s: %v\n", base, err)
+		warnSetup("set TMPDIR to %s: %v", base, err)
 		return 1
 	}
 	defer jailHome(base)()
 	return m.Run()
+}
+
+// warnSetup reports a testjail setup failure on stderr, in the "testjail:
+// ..." shape every caller here uses — the one door every message in this
+// file writes stderr through.
+func warnSetup(format string, args ...any) {
+	fmt.Fprintf(os.Stderr, "testjail: "+format+"\n", args...)
 }
 
 // jailHome points PFM_HOME at a private directory for the WHOLE package, so a
@@ -113,19 +120,19 @@ func Run(m *testing.M) int {
 func jailHome(base string) func() {
 	home, err := os.MkdirTemp(base, "pfm-jail-home-")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "testjail: no jailed home under %s: %v\n", base, err)
+		warnSetup("no jailed home under %s: %v", base, err)
 		return func() {}
 	}
 	if err := os.Setenv(paths.EnvHome, home); err != nil {
-		fmt.Fprintf(os.Stderr, "testjail: set %s to %s: %v\n", paths.EnvHome, home, err)
+		warnSetup("set %s to %s: %v", paths.EnvHome, home, err)
 		if removeErr := os.RemoveAll(home); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "testjail: remove unused jail home %s: %v\n", home, removeErr)
+			warnSetup("remove unused jail home %s: %v", home, removeErr)
 		}
 		return func() {}
 	}
 	return func() {
 		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			fmt.Fprintf(os.Stderr, "testjail: remove jail home %s: %v\n", home, err)
+			warnSetup("remove jail home %s: %v", home, err)
 		}
 	}
 }
@@ -405,23 +412,28 @@ func PTYCommand(argv ...string) *exec.Cmd {
 func pinGoDirs() int {
 	set := func(name, value string) int {
 		if err := os.Setenv(name, value); err != nil {
-			fmt.Fprintf(os.Stderr, "testjail: set %s: %v\n", name, err)
+			warnSetup("set %s: %v", name, err)
 			return 1
 		}
 		return 0
 	}
-	if os.Getenv("GOCACHE") == "" {
+	// One door for all three lookups: paths.OSEnv wraps the same process
+	// environment and home-directory reads this jail would otherwise call
+	// directly, three times over.
+	env := paths.OSEnv{}
+	unset := func(name string) bool { return env.Get(name) == "" }
+	if unset("GOCACHE") {
 		if cache, err := os.UserCacheDir(); err != nil {
-			fmt.Fprintf(os.Stderr, "testjail: GOCACHE left unpinned — user cache dir: %v\n", err)
+			warnSetup("GOCACHE left unpinned — user cache dir: %v", err)
 		} else if code := set("GOCACHE", filepath.Join(cache, "go-build")); code != 0 {
 			return code
 		}
 	}
-	gopath := os.Getenv("GOPATH")
+	gopath := env.Get("GOPATH")
 	if gopath == "" {
-		home, err := os.UserHomeDir()
+		home, err := env.Home()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "testjail: GOPATH/GOMODCACHE left unpinned — user home dir: %v\n", err)
+			warnSetup("GOPATH/GOMODCACHE left unpinned — user home dir: %v", err)
 			return 0
 		}
 		gopath = filepath.Join(home, "go")
@@ -429,7 +441,7 @@ func pinGoDirs() int {
 			return code
 		}
 	}
-	if os.Getenv("GOMODCACHE") == "" {
+	if unset("GOMODCACHE") {
 		return set("GOMODCACHE", filepath.Join(filepath.SplitList(gopath)[0], "pkg", "mod"))
 	}
 	return 0

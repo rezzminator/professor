@@ -124,5 +124,25 @@ else
   bad "C24: expected ERROR for an empty source list" "$line (rc $rc)"
 fi
 
+# ---- 8: a door under internal/mockengine/ is exempt like internal/testjail --
+MOCK="$T/mock"
+if fixture "$MOCK"; then
+  mkdir -p "$MOCK/internal/mockengine"
+  printf 'package mockengine\n\nimport "os/exec"\n\nfunc Spawn() { _ = exec.Command("sh") }\n' \
+    > "$MOCK/internal/mockengine/hooks.go"
+  git -C "$MOCK" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
+  line=$(c24 "$MOCK" --measure)
+  baseline="$(cat "$MOCK/.arch/unwrapped-door.txt")"
+  if [[ "$line" == *MEASURE* ]] \
+    && ! grep -q 'mockengine' <<<"$baseline" \
+    && grep -q '^proc:internal/loud/loud.go 2$' <<<"$baseline"; then
+    ok "C24: a proc door under internal/mockengine/ is not counted while the same door in internal/loud/ still is"
+  else
+    bad "C24: expected mockengine exempt and internal/loud/loud.go still counted" "$baseline"
+  fi
+else
+  bad "C24: could not build the mockengine fixture"
+fi
+
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

@@ -3,7 +3,6 @@ package reload
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -993,35 +992,6 @@ func failThen(ctx context.Context, request Request, sidDir string, tmux Tmux, re
 		}
 	}
 	return errors.Join(failures...)
-}
-
-func TranscriptCWD(path string) (string, error) {
-	if path == "" {
-		return "", nil
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open reload transcript %q: %w", path, err)
-	}
-	decoder := json.NewDecoder(file)
-	cwd := ""
-	for i := 0; i < 40; i++ {
-		var row map[string]any
-		if err := decoder.Decode(&row); errors.Is(err, io.EOF) {
-			break
-		} else if err != nil {
-			_ = file.Close()
-			return "", fmt.Errorf("decode reload transcript %q record %d: %w", path, i+1, err)
-		}
-		if value, ok := row["cwd"].(string); ok && value != "" {
-			cwd = value
-			break
-		}
-	}
-	if err := file.Close(); err != nil {
-		return "", fmt.Errorf("close reload transcript %q: %w", path, err)
-	}
-	return cwd, nil
 }
 
 func SessionFromCrumb(sidDir, socket, pane string) (string, string, error) {

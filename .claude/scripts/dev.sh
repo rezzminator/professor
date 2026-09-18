@@ -294,6 +294,12 @@ act_templates() { # the shipped product: mechanical gates, no build
         fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
       fi
 
+      head_ "templates — OpenCode writer references"
+      if node "$REPO_ROOT/scripts/check-opencode-writer.mjs"; then
+        ok "live surfaces use native pfm opencode"
+      else
+        fail_step "OpenCode writer reference FAILED — use native pfm opencode on every named surface"
+      fi
       head_ "templates — self-hosted manifest"
       if bash infra/check-self-hosted-manifest.sh "$REPO_ROOT" templates pfm; then
         ok "self-hosted manifest version, roster, and hashes match the repository"

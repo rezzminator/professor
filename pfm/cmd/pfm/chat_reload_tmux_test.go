@@ -33,3 +33,18 @@ func TestReloadCommandTmuxRecordsUnderTheTmuxComponent(t *testing.T) {
 	}
 	_ = context.Background
 }
+
+// TestReloadCommandTmuxSetRemainAgainstNoServer: SetRemain's on/off branches
+// both run their tmux invocation through the same command() door — against a
+// socket nothing serves, both forms fail the same way the caller expects.
+func TestReloadCommandTmuxSetRemainAgainstNoServer(t *testing.T) {
+	ctx := context.Background()
+	socket := filepath.Join(t.TempDir(), "no-server")
+	tmux := reloadCommandTmux{}
+	if err := tmux.SetRemain(ctx, socket, "%0", true); err == nil {
+		t.Fatal("SetRemain(on) against a socket nothing serves succeeded")
+	}
+	if err := tmux.SetRemain(ctx, socket, "%0", false); err == nil {
+		t.Fatal("SetRemain(off) against a socket nothing serves succeeded")
+	}
+}

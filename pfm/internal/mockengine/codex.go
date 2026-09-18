@@ -273,18 +273,20 @@ func (session *codexSession) start(resumed bool) error {
 		return err
 	}
 	for index := range answers {
-		context := answers[index].Specific.AdditionalContext
-		if context == "" {
+		additional := answers[index].Specific.AdditionalContext
+		if additional == "" {
 			continue
 		}
 		// Codex folds additionalContext into history as a developer message
 		// — the record internal/codexappendix/history.go:81-93 looks for.
 		if err := session.write(codexRecord{Type: recordResponseItem, Payload: codexMessage{
-			Type: payloadMessage, Role: roleDeveloper, Content: []codexContent{{Type: blockInputText, Text: context}},
+			Type:    payloadMessage,
+			Role:    roleDeveloper,
+			Content: []codexContent{{Type: blockInputText, Text: additional}},
 		}}); err != nil {
 			return err
 		}
-		session.devContext = context
+		session.devContext = additional
 	}
 	return nil
 }

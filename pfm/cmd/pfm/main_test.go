@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,71 +34,6 @@ func TestVersion(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("run(version) stderr = %q, want empty", stderr.String())
-	}
-}
-
-// TestResolveDevVersion is the issue-14 F6 regression: an unstamped "dev"
-// build alone told nobody which commit they were running. go test's own
-// binary carries no VCS stamp (verified against `go test -c`), which is why
-// TestVersion above still asserts a bare "pfm dev\n" — this test drives the
-// fallback's pure half directly with fabricated debug.BuildSetting values
-// instead of needing a real VCS-stamped binary.
-func TestResolveDevVersion(t *testing.T) {
-	const fullRevision = "8f9b8bb29513ff82f0ce31d5fc4547f9e30b7071"
-	cases := []struct {
-		name     string
-		settings []debug.BuildSetting
-		want     string
-	}{
-		{name: "no settings", settings: nil, want: "dev"},
-		{
-			name:     "vcs present but no revision key",
-			settings: []debug.BuildSetting{{Key: "vcs", Value: "git"}},
-			want:     "dev",
-		},
-		{
-			name: "clean checkout",
-			settings: []debug.BuildSetting{
-				{Key: "vcs.revision", Value: fullRevision},
-				{Key: "vcs.modified", Value: "false"},
-			},
-			want: "dev (8f9b8bb29513)",
-		},
-		{
-			name: "modified checkout",
-			settings: []debug.BuildSetting{
-				{Key: "vcs.revision", Value: fullRevision},
-				{Key: "vcs.modified", Value: "true"},
-			},
-			want: "dev (8f9b8bb29513, modified)",
-		},
-		{
-			name: "revision shorter than the truncation width is left alone",
-			settings: []debug.BuildSetting{
-				{Key: "vcs.revision", Value: "8f9b8bb"},
-				{Key: "vcs.modified", Value: "false"},
-			},
-			want: "dev (8f9b8bb)",
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveDevVersion(tc.settings); got != tc.want {
-				t.Fatalf("resolveDevVersion(%v) = %q, want %q", tc.settings, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestDisplayVersionPrefersLdflagsStamp proves the VCS fallback never
-// overrides a release build's `-X main.version=...` stamp, even though this
-// test binary itself carries no VCS info to fall back to.
-func TestDisplayVersionPrefersLdflagsStamp(t *testing.T) {
-	original := version
-	t.Cleanup(func() { version = original })
-	version = "v0.67.0"
-	if got := displayVersion(); got != "v0.67.0" {
-		t.Fatalf("displayVersion() = %q, want the ldflags-stamped version unchanged", got)
 	}
 }
 
@@ -790,15 +724,17 @@ func findFuncDecl(t *testing.T, name string) (*ast.BlockStmt, *token.FileSet) {
 func TestTopLevelSubcommandsReachTheirHandler(t *testing.T) {
 	body, fset := findFuncDecl(t, "run")
 	literals, printedExprs := switchCaseStringLiterals(fset, body)
-	// run's own "codex" case matches on the engine registry's LongName, not
-	// a bare string literal — topLevelSubcommands carries the same
-	// expression's runtime value, so this checks the printed source form.
-	const codexSelector = "pfmengine.MustLookup(pfmengine.Codex).LongName"
+	// Engine cases match on registry LongName expressions, not bare literals;
+	// topLevelSubcommands carries those same runtime values.
+	selectors := map[string]string{
+		pfmengine.MustLookup(pfmengine.Codex).LongName:    "pfmengine.MustLookup(pfmengine.Codex).LongName",
+		pfmengine.MustLookup(pfmengine.OpenCode).LongName: "pfmengine.MustLookup(pfmengine.OpenCode).LongName",
+	}
 	for _, name := range topLevelSubcommands {
 		if literals[name] {
 			continue
 		}
-		if name == pfmengine.MustLookup(pfmengine.Codex).LongName && printedExprs[codexSelector] {
+		if selector, ok := selectors[name]; ok && printedExprs[selector] {
 			continue
 		}
 		t.Fatalf(

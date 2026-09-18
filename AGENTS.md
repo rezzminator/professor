@@ -22,20 +22,20 @@ Build/test through `.claude/scripts/dev.sh {status|install|build|typecheck|verif
 
 - **Machine-global** (`templates/global/`): truth is the original in the blueprint clone. `pfm install` symlinks each original into the engine registries (`~/.claude/{agents,commands,skills}`); `pfm codex agents` compiles the Codex `.toml` twins beside their `.md` and links them into `~/.codex/agents/`. Saving a template IS the deploy — on this host `~/.professor` is this checkout.
 - **Project** (`templates/project/` → an adopter's `AGENTS.md`, `.claude/**`, `docs/`, `.codex/` keepers): truth is the adopter's local file, full stop. `pfm init` scaffolds once and pins every file in `.professor/baseline.json`; `pfm update adopt [--at REF]` pins an install that predates scaffolding. `pfm update check` reports `UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED`, each with the exact `git diff` to read; the adopter's session hand-applies what belongs, then `pfm update pin` (accept) / `ignore` (never adopt) / `drop` (forget). pfm never rewrites a project file after init.
-- **Engine mirrors** (`AGENTS.md`, `.codex/**`, `.opencode/**`): generated from the project's Claude sources by `pfm codex build|check` and `build-opencode.mjs`; never hand-edited.
+- **Engine mirrors** (`AGENTS.md`, `.codex/**`, `.opencode/**`): generated from the project's Claude sources by `pfm codex build|check` and `pfm opencode build|check|doctor`; never hand-edited.
 
 The reverse direction is the release: `$pfm-release` sends reviewers over `develop`'s diff against `main` (commit messages included) to write `releases/vX.Y.Z.md` + `CHANGELOG.md` and every adopter instruction; with `--from {live-project}` its refresh pass re-derives `templates/project/**` from that project's live files per `templates/refresh-map.json` (`scripts/refresh-scope.sh` + `scripts/genericize.sh`); without it, hand-authored template edits ship as they are.
 
 ## Three-runtime team — Claude + Codex + OpenCode
 
-`AGENTS.md` and `AGENTS.md` are one shared contract; runtime wrappers translate mechanics, never identity or protocol. `AGENTS.md` is **compiled** from this file — never hand-edited, never a symlink; edit `AGENTS.md` and the `Stop` hook recompiles both mirrors. OpenCode reads the same compiled `AGENTS.md` (its loader prefers it over `AGENTS.md`) plus its own `.opencode/` layer, compiled by `build-opencode.mjs`: agents (`.opencode/agent/*.md`), commands (`/flat-name`), skill symlinks, and `opencode.jsonc`, where guarded-file and non-gitter Git-write denies remain pinned. Every `.claude/agents/*.md` role compiles for Codex and OpenCode; only registered `gitter` retains Git-write authority. The active main Codex chat may use the user-authorized fallback under § Process when gitter is unavailable. After a Bash-driven write bypassed the hook:
+`AGENTS.md` and `AGENTS.md` are one shared contract; runtime wrappers translate mechanics, never identity or protocol. `AGENTS.md` is **compiled** from this file — never hand-edited, never a symlink; edit `AGENTS.md` and the `Stop` hook recompiles both mirrors. OpenCode reads the same compiled `AGENTS.md` (its loader prefers it over `AGENTS.md`) plus its own `.opencode/` layer, compiled by `pfm opencode build`: agents (`.opencode/agent/*.md`), commands (`/flat-name`), skill symlinks, and `opencode.jsonc`, where guarded-file and non-gitter Git-write denies remain pinned. Every `.claude/agents/*.md` role compiles for Codex and OpenCode; only registered `gitter` retains Git-write authority. The active main Codex chat may use the user-authorized fallback under § Process when gitter is unavailable. After a Bash-driven write bypassed the hook:
 
 ```bash
 pfm codex build . && pfm codex check .
-node .claude/scripts/build-opencode.mjs generate && node .claude/scripts/build-opencode.mjs doctor
+pfm opencode build . && pfm opencode doctor .
 ```
 
-`pfm codex build` is the SINGLE writer of the Codex mirror; the legacy repo-local JS compiler is retired — `templates/project/scripts/build-codex.mjs` lives only in the adopter blueprint.
+`pfm codex build` and `pfm opencode build` are the SINGLE writers of their mirrors; `templates/project/scripts/build-codex.mjs` lives only in the adopter blueprint.
 
 ## Path vars
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"runtime/debug"
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/paths"
@@ -32,6 +33,43 @@ type Runtime struct {
 
 func (runtime Runtime) IsRelease() bool {
 	return runtime.Version != "" && runtime.Version != DevelopmentVersion
+}
+
+// DisplayVersion returns a stamped release version or an identifying VCS
+// suffix for an unstamped development build.
+func DisplayVersion(stamped string) string {
+	if stamped != DevelopmentVersion {
+		return stamped
+	}
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return stamped
+	}
+	return ResolveDevVersion(info.Settings)
+}
+
+// ResolveDevVersion formats the VCS settings embedded in a development build.
+func ResolveDevVersion(settings []debug.BuildSetting) string {
+	var revision string
+	var modified bool
+	for _, setting := range settings {
+		switch setting.Key {
+		case "vcs.revision":
+			revision = setting.Value
+		case "vcs.modified":
+			modified = setting.Value == "true"
+		}
+	}
+	if revision == "" {
+		return DevelopmentVersion
+	}
+	if len(revision) > 12 {
+		revision = revision[:12]
+	}
+	if modified {
+		return fmt.Sprintf("dev (%s, modified)", revision)
+	}
+	return fmt.Sprintf("dev (%s)", revision)
 }
 
 // OptionalRuntime returns the caller's first runtime, or loads the default.

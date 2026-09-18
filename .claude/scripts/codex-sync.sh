@@ -4,7 +4,7 @@ set -euo pipefail
 # Mirror auto-compile — the deterministic "always compile after framework edits".
 # Compiles BOTH runtime mirrors from the same Claude sources:
 #   Codex — `pfm codex build` (single writer) + `pfm codex check`
-#   OpenCode — `.claude/scripts/build-opencode.mjs generate` + `check`
+#   OpenCode — `pfm opencode build` + `check`
 #   mark — PostToolUse(Edit|Write): when the edited file is a Claude source either
 #          mirror compiles from (.claude/**, any CLAUDE.md, $HOME/.claude/commands/**),
 #          drop the repo-scoped dirty flag tmp/professor_codex_dirty.
@@ -20,12 +20,12 @@ set -euo pipefail
 #          so — a bare "a mirror failed" is indistinguishable from any of them.
 # Coverage (declared): sees Edit/Write TOOL calls only. A Bash-driven write (sed,
 # redirect) to a Claude source does NOT set the flag — `pfm codex check` and
-# `build-opencode.mjs check` in the pfm `structure` audit scope remain the
-# backstop for that shape.
+# `pfm opencode check` in the pfm `structure` audit scope remain the backstop
+# for that shape.
 #
-# `pfm codex build` is the SINGLE writer of the Codex mirror; build-opencode.mjs
-# of the OpenCode mirror. Cross-runtime markers are not shared: each writer only
-# reclaims files carrying its own (or its declared predecessors') marker.
+# `pfm codex build` and `pfm opencode build` are the SINGLE writers of their
+# mirrors. Cross-runtime markers are not shared: each writer only reclaims files
+# carrying its own (or its declared predecessors') marker.
 
 MODE="${1:-mark}"
 INPUT=$(cat 2>/dev/null || true)
@@ -49,15 +49,16 @@ case "$MODE" in
     REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
     FLAG="$REPO_ROOT/tmp/professor_codex_dirty"
     [[ -f "$FLAG" ]] || exit 0
-    OUT=$(pfm codex build "$REPO_ROOT" 2>&1) && CODEX_BUILD=0 || CODEX_BUILD=$?
-    CHK=$(pfm codex check "$REPO_ROOT" 2>&1) && CODEX_CHECK=0 || CODEX_CHECK=$?
-    OGEN=""; OCHK=""
-    if command -v node >/dev/null 2>&1; then
-      OGEN=$(node "$REPO_ROOT/.claude/scripts/build-opencode.mjs" generate 2>&1) && OC_BUILD=0 || OC_BUILD=$?
-      OCHK=$(node "$REPO_ROOT/.claude/scripts/build-opencode.mjs" check 2>&1) && OC_CHECK=0 || OC_CHECK=$?
-    else
-      OC_BUILD=127; OC_CHECK=127; OGEN="node not found"; OCHK="node not found"
+    PFM_BIN="$REPO_ROOT/tmp/timing/pfm-dev-bin"
+    [[ -x "$PFM_BIN" ]] || PFM_BIN=$(command -v pfm 2>/dev/null || true)
+    if [[ -z "$PFM_BIN" || ! -x "$PFM_BIN" ]]; then
+      printf 'codex-sync: compiler unavailable — mirrors were not checked; dirty flag retained\n' >&2
+      exit 1
     fi
+    OUT=$("$PFM_BIN" codex build "$REPO_ROOT" 2>&1) && CODEX_BUILD=0 || CODEX_BUILD=$?
+    CHK=$("$PFM_BIN" codex check "$REPO_ROOT" 2>&1) && CODEX_CHECK=0 || CODEX_CHECK=$?
+    OGEN=$("$PFM_BIN" opencode build "$REPO_ROOT" 2>&1) && OC_BUILD=0 || OC_BUILD=$?
+    OCHK=$("$PFM_BIN" opencode check "$REPO_ROOT" 2>&1) && OC_CHECK=0 || OC_CHECK=$?
     if (( CODEX_BUILD == 0 && CODEX_CHECK == 0 && OC_BUILD == 0 && OC_CHECK == 0 )); then
       rm -f "$FLAG"
       exit 0
@@ -71,12 +72,12 @@ case "$MODE" in
     FAILED=""
     (( CODEX_BUILD != 0 )) && FAILED="${FAILED:+$FAILED, }codex build"
     (( CODEX_CHECK != 0 )) && FAILED="${FAILED:+$FAILED, }codex check"
-    (( OC_BUILD != 0 )) && FAILED="${FAILED:+$FAILED, }opencode generate"
+    (( OC_BUILD != 0 )) && FAILED="${FAILED:+$FAILED, }opencode build"
     (( OC_CHECK != 0 )) && FAILED="${FAILED:+$FAILED, }opencode check"
     printf 'codex-sync: %s failed after this turn'\''s framework edits — fix before ending the turn.\n' "$FAILED" >&2
     (( CODEX_BUILD != 0 )) && printf 'codex build:\n%s\n' "${OUT:-}" >&2
     (( CODEX_CHECK != 0 )) && printf 'codex check:\n%s\n' "${CHK:-}" >&2
-    (( OC_BUILD != 0 )) && printf 'opencode generate:\n%s\n' "${OGEN:-}" >&2
+    (( OC_BUILD != 0 )) && printf 'opencode build:\n%s\n' "${OGEN:-}" >&2
     (( OC_CHECK != 0 )) && printf 'opencode check:\n%s\n' "${OCHK:-}" >&2
     exit 2
     ;;

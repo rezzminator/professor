@@ -32,7 +32,7 @@ proj_dir() {
 # must not fail on a missing node, and must still fail on a missing go.
 proj_tools() {
   case "$1" in
-    templates) echo "node" ;;
+    templates) echo "node go" ;;
     pfm)       echo "go" ;;
     *) return 1 ;;
   esac
@@ -255,16 +255,17 @@ act_templates() { # the shipped product: mechanical gates, no build
         fail_step "token pricing FAILED — a published model id resolves to the wrong rate, or the PRICING table could not be read (see output)"
       fi
 
-      run "OpenCode installed symlink layout" -- node scripts/test-opencode-generation.mjs
-
-      head_ "templates — opencode mirror"
-      # The OpenCode mirror must be current AND valid: check re-derives every
-      # output from the Claude sources; doctor additionally parses each artifact.
-      if need_tool node templates && node .claude/scripts/build-opencode.mjs check \
-        && node .claude/scripts/build-opencode.mjs doctor | tail -1; then
+      head_ "templates — native opencode mirror"
+      # Build the source-under-test inside the fence; verification must never
+      # depend on or install a host binary. The ignored artifact also gives this
+      # repo's Stop hook a current compiler while develop remains uninstalled.
+      local opencode_bin="/pfm-timing/pfm-dev-bin"
+      if need_tool go templates && go -C pfm build -o "$opencode_bin" ./cmd/pfm \
+        && "$opencode_bin" opencode check "$REPO_ROOT" --home "/pfm-timing/opencode-verify-home" \
+        && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "/pfm-timing/opencode-verify-home"; then
         ok "opencode mirror current and parseable"
       else
-        fail_step "opencode mirror FAILED — run: node .claude/scripts/build-opencode.mjs generate"
+        fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
       fi
 
       head_ "templates — self-hosted manifest"

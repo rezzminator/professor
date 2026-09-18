@@ -50,6 +50,7 @@ suites:
       hostops/pfm/internal/naming: 2
       hostops/pfm/internal/nudge: 2
       hostops/pfm/internal/obs: 2
+      hostops/pfm/internal/opencodegen: 2
       hostops/pfm/internal/paths: 2
       hostops/pfm/internal/picker: 16
       hostops/pfm/internal/professor: 2

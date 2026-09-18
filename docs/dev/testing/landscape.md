@@ -207,7 +207,7 @@ P36 · `pfm codex agents [--home PATH]` (global agent `.md`→`.toml`, symlinks 
 
 ### OpenCode layer
 
-P37 · `.opencode/**` layer — compiled by `build-opencode.mjs`, entirely outside the `pfm` module; no `pfm` command wires it ⚠ known-gap (confirmed absence) · needs:seat:oc · today:NONE · mcp.md:71-73 · lane(s):A
+P37 · `pfm opencode build|check|doctor [repo-root] [--home PATH]` compiles and validates `.opencode/**` plus the global command registry · needs:project · today:U (`internal/opencodegen`, `cmd/pfm/opencode_command_test.go`) · mcp.md:71-73 · lane(s):A
 
 ---
 

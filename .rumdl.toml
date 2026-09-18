@@ -31,7 +31,7 @@ disable = ["MD014", "MD036", "MD040", "MD046", "MD063", "MD072", "MD073"]
 unfixable = ["MD018", "MD020", "MD056", "MD075"]
 
 # Generated mirrors are rebuilt from their Claude sources, never hand-formatted:
-# format the source and recompile (`pfm codex build .`, build-opencode.mjs).
+# format the source and recompile (`pfm codex build .`, `pfm opencode build .`).
 # `releases/` and `CHANGELOG.md` history plus `.professor/` ledgers are records,
 # not prose.
 # A wave train under `docs/dev/trains/` is a per-run append-log whose prose cites

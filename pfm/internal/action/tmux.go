@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/spawn"
 	pfmtmux "hostops/pfm/internal/tmux"
 )
@@ -143,8 +143,8 @@ func (tmux TmuxExecutor) command(
 	ctx context.Context,
 	socket string,
 	arguments ...string,
-) *exec.Cmd {
-	return pfmtmux.Command(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
+) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
 }
 
 type ExecRunner struct {
@@ -158,11 +158,12 @@ func (runner ExecRunner) Run(
 	name string,
 	args ...string,
 ) error {
-	process, err := (deps.RealRunner{}).Start(ctx, append([]string{deps.Executable(name)}, args...), deps.StartOptions{
-		Stdin:  runner.Stdin,
-		Stdout: runner.Stdout,
-		Stderr: runner.Stderr,
-	})
+	process, err := obs.Runner(deps.RealRunner{}).
+		Start(ctx, append([]string{deps.Executable(name)}, args...), deps.StartOptions{
+			Stdin:  runner.Stdin,
+			Stdout: runner.Stdout,
+			Stderr: runner.Stderr,
+		})
 	if err != nil {
 		return err
 	}

@@ -29,6 +29,7 @@
 package rearm
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +40,7 @@ import (
 
 	"hostops/pfm/internal/agentrole"
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/obs"
 )
 
 // crumbPrefix distinguishes a role re-arm crumb from the other files pfm
@@ -96,7 +98,9 @@ func crumbPaths(sidDir, socket, paneID string) []string {
 // WriteCrumb persists crumb for socket, keyed the bare-socket way — see
 // crumbPaths. Called once, at `chat new --role` time, once the seat is
 // confirmed live.
-func WriteCrumb(sidDir, socket string, crumb Crumb) error {
+func WriteCrumb(sidDir, socket string, crumb Crumb) (err error) {
+	end := obs.Transition(context.Background(), "rearm", "unarmed", "armed", "crumb written")
+	defer func() { end(err) }()
 	if strings.TrimSpace(sidDir) == "" {
 		return errors.New("role re-arm: sid directory is empty")
 	}
@@ -172,14 +176,17 @@ func ReadCrumb(sidDir, socket, paneID string) (Crumb, bool, error) {
 // everything that went wrong, not just the first; callers on the kill path
 // are expected to log this as a WARNING and never fail the kill over it —
 // the chat is dead either way.
-func RemoveCrumb(sidDir, socket, paneID string) error {
+func RemoveCrumb(sidDir, socket, paneID string) (err error) {
+	end := obs.Transition(context.Background(), "rearm", "armed", "disarmed", "crumb removed")
+	defer func() { end(err) }()
 	var errs []error
 	for _, path := range crumbPaths(sidDir, socket, paneID) {
 		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			errs = append(errs, fmt.Errorf("role re-arm: remove crumb %s: %w", path, err))
 		}
 	}
-	return errors.Join(errs...)
+	err = errors.Join(errs...)
+	return err
 }
 
 // Pointer composes the re-arm text for crumb — the single writer both reset

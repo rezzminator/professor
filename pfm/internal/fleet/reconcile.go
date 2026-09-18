@@ -11,6 +11,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/kill"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/store"
 )
@@ -217,6 +218,9 @@ func ReconcileCodexPanesWith(
 				"codex pane %s %s: advance binding: %v", action.Socket, action.PaneID, err,
 			))
 			continue
+		}
+		if moved {
+			obs.Transition(ctx, "fleet", "bound", "rebound", "codex pane advanced")(nil)
 		}
 		changed = changed || moved
 		if action.ClearKill == "" {

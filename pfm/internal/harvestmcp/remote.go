@@ -20,6 +20,7 @@ import (
 
 	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/harvest"
+	"hostops/pfm/internal/obs"
 )
 
 const mcpPath = "/mcp"
@@ -94,7 +95,9 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 
 // Handler returns a net/http handler suitable for httptest.NewRecorder or a
 // production server. It never redirects /mcp to /mcp/.
-func (r *RemoteServer) Handler() http.Handler { return http.HandlerFunc(r.serveHTTP) }
+func (r *RemoteServer) Handler() http.Handler {
+	return obs.Handler("harvester-remote", http.HandlerFunc(r.serveHTTP))
+}
 
 // Close releases the shared conversion worker. It is safe to call repeatedly,
 // which lets command setup failures clean up a partially constructed gateway.

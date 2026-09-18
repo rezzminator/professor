@@ -669,6 +669,34 @@ exit 2`)
 	}
 }
 
+// TestProbeRecordsEachVersionProbe proves ProbeOptions.Runner is the seam a
+// version probe crosses: obs cannot import deps (obs.Runner's own signature
+// names deps.Runner), so the observed door lives at this boundary instead — a
+// FakeRunner sees every VersionArgs invocation boundedOutputWithEnvironment
+// would otherwise have run via a bare exec.CommandContext, and Probe's
+// parsed result is unchanged by crossing it.
+func TestProbeRecordsEachVersionProbe(t *testing.T) {
+	runner := &FakeRunner{}
+	runner.Script([]string{"/usr/bin/tmux", "-V"}, RunResult{Stdout: []byte("tmux 3.4\n"), ExitCode: 0}, nil)
+	entries := []Entry{
+		{
+			Name: "tmux", Command: "/usr/bin/tmux", Required: true,
+			VersionArgs: []string{"-V"}, Parse: prefixedVersion("tmux"),
+		},
+	}
+	results := Probe(context.Background(), entries, ProbeOptions{
+		GOOS: "linux", Timeout: ProbeTimeout, Runner: runner,
+		LookPath: func(string) (string, error) { return "/usr/bin/tmux", nil },
+	})
+	if results[0].State != StateOK || results[0].Version != "3.4" {
+		t.Fatalf("result=%#v, want OK 3.4 through the injected Runner", results[0])
+	}
+	calls := runner.Calls()
+	if len(calls) != 1 || strings.Join(calls[0].Argv, " ") != "/usr/bin/tmux -V" {
+		t.Fatalf("runner saw %v, want exactly one call carrying the version probe argv", calls)
+	}
+}
+
 func writeProbeStub(t *testing.T, directory, name, body string) {
 	t.Helper()
 	path := filepath.Join(directory, name)

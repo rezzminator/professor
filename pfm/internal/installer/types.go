@@ -14,6 +14,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/harvestpy"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -211,11 +212,11 @@ func (installer *engine) processRunner() deps.Runner {
 	if installer.options.ProcessRunner != nil {
 		return installer.options.ProcessRunner
 	}
-	return deps.RealRunner{}
+	return obs.Runner(deps.RealRunner{})
 }
 
 func (execCommandRunner) Run(ctx context.Context, name string, args ...string) error {
-	result, err := (deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
 	if err != nil {
 		return err
 	}
@@ -226,7 +227,7 @@ func (execCommandRunner) Run(ctx context.Context, name string, args ...string) e
 }
 
 func (execCommandRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
-	result, err := (deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
+	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{name}, args...), deps.RunOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +276,7 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 		options.Runner = execCommandRunner{}
 	}
 	if options.ProcessRunner == nil {
-		options.ProcessRunner = deps.RealRunner{}
+		options.ProcessRunner = obs.Runner(deps.RealRunner{})
 	}
 	if options.ProvisionHarvest && options.HarvestProvisioner == nil {
 		options.HarvestProvisioner = NewHarvestProvisioner()

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // CodexLaunch keeps older sourced shims and rendered tmux commands compatible.
@@ -14,7 +15,7 @@ func CodexLaunch(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "usage: pfm internal codex-launch BINARY [arguments...]")
 		return 2
 	}
-	binary, err := deps.Resolve(args[0])
+	binary, err := obs.Runner(deps.RealRunner{}).LookPath(args[0])
 	if err != nil {
 		fmt.Fprintf(stderr, "resolve Codex launcher: %v\n", err)
 		return 1

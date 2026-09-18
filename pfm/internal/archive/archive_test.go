@@ -11,6 +11,7 @@ import (
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -92,6 +93,35 @@ func TestArchivePreservesUnsupportedOpenCodeKill(t *testing.T) {
 	}
 	if len(report.Unsupported) != 1 || report.Unsupported[0] != "ses-opencode" {
 		t.Fatalf("OpenCode archive limitation was hidden: report=%+v", report)
+	}
+}
+
+// TestRunRecordsTheArchivesStateTransitions: Run walks the state door (spec
+// § Middleware, `state`) — requested to planned to done — one comp=state
+// record per phase with dur_ms; an empty killed set plans and moves nothing.
+func TestRunRecordsTheArchivesStateTransitions(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	values := archiveJail(t)
+	runner, err := New(Dependencies{Paths: values, Kills: &fakeKills{}, Proc: emptyProc{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(ctx, Options{Apply: false}); err != nil {
+		t.Fatal(err)
+	}
+	var path []string
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "archive" {
+			continue
+		}
+		next, _ := record.Field("next")
+		path = append(path, next.(string))
+	}
+	if got := strings.Join(path, ","); got != "planned,done" {
+		t.Fatalf("archive state path = %s, want planned,done: %s", got, recorder.Raw())
 	}
 }
 

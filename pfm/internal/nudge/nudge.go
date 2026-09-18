@@ -10,6 +10,7 @@
 package nudge
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/obs"
 )
 
 func samplePath(sidDir, sessionID string) string {
@@ -62,7 +64,22 @@ func Band(percent, start, step int) int {
 // once when a band is first reached on the way up, never again inside it, and
 // again after the context fell (a compaction) and climbed back. The last band
 // spoken at is the only state.
-func Decide(sidDir, sessionID string, percent, start, step int) (int, bool, error) {
+func Decide(sidDir, sessionID string, percent, start, step int) (threshold int, fire bool, err error) {
+	defer func() {
+		next := "held"
+		if fire {
+			next = "nudged"
+		}
+		obs.Transition(
+			context.Background(),
+			"nudge",
+			"watching",
+			next,
+			fmt.Sprintf("%d%% vs threshold %d", percent, threshold),
+		)(
+			err,
+		)
+	}()
 	band := Band(percent, start, step)
 	last, _, err := readInt(bandPath(sidDir, sessionID))
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 const processWaitAfterCancel = 500 * time.Millisecond
@@ -20,7 +21,7 @@ func runProcess(
 	options deps.StartOptions,
 ) error {
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	process, err := runner.Start(ctx, argv, options)
 	if err != nil {

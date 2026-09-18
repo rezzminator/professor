@@ -84,7 +84,8 @@ func runChatOpen(
 	return pfmchat.OpenID(context.Background(), chat.ID, stdout, stderr, &runtime)
 }
 
-func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) int {
+func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (code int) {
+	defer func() { pfmchat.RecordVerb(context.Background(), "kill", code) }()
 	env = defaultEnv(env)
 	flags := cli.NewFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
 	exit := flags.Bool("exit", false, "gracefully close after killing")
@@ -213,10 +214,11 @@ func runResolvedChatKill(
 	return 0
 }
 
-func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
+	defer func() { pfmchat.RecordVerb(context.Background(), "unkill", code) }()
 	flags := cli.NewFlagSet("chat unkill", "usage: pfm chat unkill <target>", stderr)
-	if code, ok := cli.ParseFlags(flags, args); !ok {
-		return code
+	if parseCode, ok := cli.ParseFlags(flags, args); !ok {
+		return parseCode
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()
@@ -234,7 +236,8 @@ func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandR
 		}
 		target = chat.ID
 	}
-	return runUnkill([]string{target}, stdout, stderr, runtimes...)
+	code = runUnkill([]string{target}, stdout, stderr, runtimes...)
+	return code
 }
 
 func runChatResolve(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
@@ -443,7 +446,8 @@ func applyChatName(
 	name string,
 	deliver chatNameDelivery,
 	stderr io.Writer,
-) int {
+) (code int) {
+	defer func() { pfmchat.RecordVerb(ctx, "name", code) }()
 	resultCode, resultMessage, err := deliver(ctx, chat, name)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat name: %v\n", err)
@@ -464,10 +468,11 @@ func applyChatName(
 	return 0
 }
 
-func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
+	defer func() { pfmchat.RecordVerb(context.Background(), "end", code) }()
 	flags := cli.NewFlagSet("chat end", "usage: pfm chat end <target>", stderr)
-	if code, ok := cli.ParseFlags(flags, args); !ok {
-		return code
+	if parseCode, ok := cli.ParseFlags(flags, args); !ok {
+		return parseCode
 	}
 	if flags.NArg() != 1 {
 		flags.Usage()

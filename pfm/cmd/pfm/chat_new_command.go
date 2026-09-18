@@ -179,8 +179,10 @@ func runRun(
 	}
 	printRunResult(summary, engineName, result)
 	if !result.Named {
+		pfmchat.RecordVerb(context.Background(), "new", 1)
 		return 1
 	}
+	pfmchat.RecordVerb(context.Background(), "new", 0)
 	spawnedAt := clk.Now()
 	parent := parentChatID(env)
 	state := fleetdb.OpenSharedState(context.Background(), resolved)

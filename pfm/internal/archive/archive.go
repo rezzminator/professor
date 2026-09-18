@@ -28,6 +28,7 @@ import (
 	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -163,11 +164,17 @@ func New(dependencies Dependencies) (*Runner, error) {
 	}, nil
 }
 
-// Run plans the archive and, with Apply, performs it.
+// Run plans the archive and, with Apply, performs it. The state door walks
+// requested → planned → applied (with Apply) → done/failed, mirroring the
+// reap sweep (internal/reap/runner.go's Run), plus one comp=state record per
+// planned or performed move — "chat" is the prior state every move starts
+// from, since a move begins as an ordinary killed or sidechain chat.
 func (runner *Runner) Run(
 	ctx context.Context,
 	options Options,
-) (Report, error) {
+) (report Report, err error) {
+	trail := obs.NewTrail(ctx, "archive", "requested")
+	defer func() { trail.End(err) }()
 	live := LiveSessions(
 		runner.proc,
 		firstEngineRoot(runner.paths.Roots[pfmengine.Codex]),
@@ -175,9 +182,30 @@ func (runner *Runner) Run(
 		runner.codexBinary,
 	)
 	if options.Subagents {
-		return runner.runSubagents(options, live)
+		report, err = runner.runSubagents(options, live)
+	} else {
+		report, err = runner.runKilled(ctx, options, live)
 	}
-	return runner.runKilled(ctx, options, live)
+	if err != nil {
+		return Report{}, err
+	}
+	trail.Reach("planned", "moves classified")
+	if options.Apply {
+		trail.Reach("applied", "moves applied")
+	}
+	for _, move := range report.Moves {
+		state, cause := "planned", "archive move planned"
+		var failed error
+		switch {
+		case move.Applied:
+			state, cause = "moved", "archive move applied"
+		case move.Failed != "":
+			state, cause = "failed", move.Failed
+			failed = errors.New(move.Failed)
+		}
+		obs.Transition(ctx, "archive", "chat", state, cause)(failed)
+	}
+	return report, nil
 }
 
 func (runner *Runner) runKilled(

@@ -19,6 +19,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	fleetindex "hostops/pfm/internal/index"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
 )
@@ -68,7 +69,9 @@ func Scan(
 	database *store.Store,
 	request Request,
 	stderr io.Writer,
-) (Result, error) {
+) (result Result, err error) {
+	end := obs.Transition(ctx, "fleet", "stale", "scanned", "roster gathered")
+	defer func() { end(err) }()
 	env, err := ResolveEnv(request)
 	if err != nil {
 		return Result{}, err

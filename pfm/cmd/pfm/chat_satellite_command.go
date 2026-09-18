@@ -454,11 +454,11 @@ func runChatBranch(
 	if engine == pfmengine.Codex {
 		binary = runtime.Config.EffectiveCodex(selectedAccount).Binary
 	}
-	if _, err := deps.Resolve(binary); err != nil {
+	if _, err := obs.Runner(deps.RealRunner{}).LookPath(binary); err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: configured %s binary %q is not executable: %v\n", engine, binary, err)
 		return 1
 	}
-	if _, err := deps.Resolve(pfmtmux.Binary); err != nil {
+	if _, err := obs.Runner(deps.RealRunner{}).LookPath(pfmtmux.Binary); err != nil {
 		fmt.Fprintln(stderr, "pfm chat branch: tmux is not on PATH")
 		return 1
 	}

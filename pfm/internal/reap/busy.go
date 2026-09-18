@@ -12,6 +12,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -52,7 +53,7 @@ func NewClaudeAgentsConfigured(
 	if binaryName == "" {
 		binaryName = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	binary, err := deps.Resolve(binaryName)
+	binary, err := obs.Runner(deps.RealRunner{}).LookPath(binaryName)
 	if err != nil {
 		if filepath.IsAbs(binaryName) {
 			binary = binaryName

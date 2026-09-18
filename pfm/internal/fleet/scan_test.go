@@ -1,6 +1,7 @@
 package fleet
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,10 +10,47 @@ import (
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/store"
 	"hostops/pfm/internal/testjail"
 )
+
+// TestScanRecordsATransition: Scan walks the state door (spec § Middleware,
+// `state`) — stale to scanned, comp=state, kind=fleet — never the composed
+// rows themselves.
+func TestScanRecordsATransition(t *testing.T) {
+	testjail.Fleet(t)
+	recorderCtx, recorder := obs.Test(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	var stderr bytes.Buffer
+	if _, err := Scan(recorderCtx, database, Request{View: compose.DefaultView, ReadOnly: true}, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "fleet" {
+			continue
+		}
+		if next, _ := record.Field("next"); next == "scanned" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Scan() wrote no fleet->scanned transition: %s", recorder.Raw())
+	}
+}
 
 func TestMain(m *testing.M) {
 	os.Exit(testjail.Run(m))

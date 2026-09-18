@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/clock"
+	"hostops/pfm/internal/obs"
 )
 
 // Options are one heal run's knobs.
@@ -52,11 +53,17 @@ func (runner *Runner) Stores() Stores {
 func (runner *Runner) Run(
 	ctx context.Context,
 	options Options,
-) (Report, error) {
-	report, err := Sweep(ctx, runner.stores, options.Thread)
+) (report Report, err error) {
+	// The state door: one transition per run phase; a failure is attributed
+	// to the phase the run was in.
+	trail := obs.NewTrail(ctx, "heal", "requested")
+	defer func() { trail.End(err) }()
+
+	report, err = Sweep(ctx, runner.stores, options.Thread)
 	if err != nil {
 		return Report{}, err
 	}
+	trail.Reach("scanned", "projection cursors judged")
 	if !options.Apply && options.Thread == "" {
 		return report, nil
 	}
@@ -67,20 +74,19 @@ func (runner *Runner) Run(
 			broken = append(broken, thread)
 		}
 	}
-	if len(broken) == 0 {
-		return report, nil
-	}
 	for _, thread := range broken {
 		if Live(runner.stores.Root, thread.ID) {
 			report.SkippedLive = append(report.SkippedLive, thread.ID)
 		}
 	}
-	if len(report.SkippedLive) == len(broken) {
+	trail.Reach("planned", "broken threads classified")
+	if len(broken) == 0 || len(report.SkippedLive) == len(broken) {
 		// Nothing to write, so nothing to back up.
 		return report, nil
 	}
-	backup, err := Backup(runner.stores, runner.now())
-	if err != nil {
+	backup, backupErr := Backup(runner.stores, runner.now())
+	if backupErr != nil {
+		err = backupErr
 		return Report{}, err
 	}
 	report.BackupDir = backup
@@ -93,11 +99,13 @@ func (runner *Runner) Run(
 		if _, live := skipped[thread.ID]; live {
 			continue
 		}
-		if err := Delete(ctx, runner.stores, thread.ID); err != nil {
-			return Report{}, fmt.Errorf("heal %s: %w", thread.ID, err)
+		if deleteErr := Delete(ctx, runner.stores, thread.ID); deleteErr != nil {
+			err = fmt.Errorf("heal %s: %w", thread.ID, deleteErr)
+			return Report{}, err
 		}
 		report.Healed = append(report.Healed, thread.ID)
 	}
+	trail.Reach("repaired", "broken threads healed")
 	return report, nil
 }
 

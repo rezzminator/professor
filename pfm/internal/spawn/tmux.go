@@ -10,6 +10,7 @@ import (
 
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	pfmtmux "hostops/pfm/internal/tmux"
 )
@@ -53,7 +54,7 @@ func preflightBinary(binary string) error {
 		}
 		return nil
 	}
-	if _, err := deps.Resolve(binary); err != nil {
+	if _, err := obs.Runner(deps.RealRunner{}).LookPath(binary); err != nil {
 		return fmt.Errorf(
 			"engine binary %q is not reachable from this process's PATH: %w — a systemd user service starts with systemd's default PATH; pin an absolute <engine>.binary in the machine config or extend the unit's Environment=PATH",
 			binary,

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 type CheckStatus struct {
@@ -30,7 +31,7 @@ type CheckReport struct {
 // Every failed check remains visible in the returned report; a failed report
 // also returns an error so callers cannot mistake it for a healthy result.
 func CheckConversionEnvironment(ctx context.Context, root string, platform Platform) (CheckReport, error) {
-	return evaluateConversionEnvironment(ctx, root, platform, deps.RealRunner{})
+	return evaluateConversionEnvironment(ctx, root, platform, obs.Runner(deps.RealRunner{}))
 }
 
 // CheckConversionEnvironmentWithRunner is the process-seamed health check.
@@ -42,7 +43,7 @@ func CheckConversionEnvironmentWithRunner(
 	runner deps.Runner,
 ) (CheckReport, error) {
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	return evaluateConversionEnvironment(ctx, root, platform, runner)
 }
@@ -170,7 +171,12 @@ func compareFile(path string, expected []byte) error {
 }
 
 func checkInterpreter(ctx context.Context, runner deps.Runner, path, wanted string) error {
+	process := obs.NewProcess(ctx, "check")
+	process.Started(0, nil)
+	end := process.Request("version")
 	result, err := runner.Run(ctx, []string{path, "--version"}, deps.RunOptions{})
+	end(len(result.Stdout)+len(result.Stderr), err)
+	process.Exited(err)
 	if err != nil {
 		return fmt.Errorf("run Python version: %w (output: %s)", err, interpreterOutput(result))
 	}

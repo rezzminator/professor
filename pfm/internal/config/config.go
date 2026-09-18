@@ -1581,7 +1581,9 @@ func configWithoutMCPAuthToken(config Config) ([]byte, bool, error) {
 // init`. It deliberately emits resolved defaults so the file is useful as a
 // documented starting point while the loader remains backward compatible.
 func MarshalDefault(home string, projectRoots []string) ([]byte, error) {
-	return Marshal(Defaults(home, projectRoots), false)
+	defaults := Defaults(home, projectRoots)
+	defaults.Log.Level = InstallLogLevel
+	return Marshal(defaults, false)
 }
 
 // WriteDefault installs the default machine file atomically. Existing files
@@ -1694,6 +1696,7 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 			"http":    map[string]any{jsonKeyPort: config.MCP.HTTP.Port},
 		},
 		"ask": askValue,
+		"log": MarshalLog(config.Log),
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
@@ -1703,45 +1706,4 @@ func Marshal(config Config, redact bool) ([]byte, error) {
 		return RedactSecrets(append(content, '\n')), nil
 	}
 	return append(content, '\n'), nil
-}
-
-// RedactSecrets preserves JSON shape while replacing secret-looking object
-// fields. It is intentionally generic so future credentials are safe by
-// default without another display-path audit.
-func RedactSecrets(content []byte) []byte {
-	var value any
-	if err := json.Unmarshal(content, &value); err != nil {
-		return content
-	}
-	redactJSON(value)
-	var encoded bytes.Buffer
-	encoder := json.NewEncoder(&encoded)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(value); err != nil {
-		return content
-	}
-	return encoded.Bytes()
-}
-
-func redactJSON(value any) {
-	switch typed := value.(type) {
-	case map[string]any:
-		for key, child := range typed {
-			lower := strings.ToLower(key)
-			if strings.Contains(lower, "token") || strings.Contains(lower, "secret") ||
-				strings.Contains(lower, "credential") ||
-				strings.Contains(lower, "password") ||
-				strings.Contains(lower, "passphrase") ||
-				strings.Contains(lower, "apikey") {
-				typed[key] = "<redacted>"
-				continue
-			}
-			redactJSON(child)
-		}
-	case []any:
-		for _, child := range typed {
-			redactJSON(child)
-		}
-	}
 }

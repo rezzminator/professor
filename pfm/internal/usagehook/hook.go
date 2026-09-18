@@ -18,6 +18,7 @@ import (
 
 	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/clock"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -363,6 +364,7 @@ func normalize(options Options) Options {
 	if options.Client == nil {
 		options.Client = &http.Client{Timeout: 6 * time.Second}
 	}
+	options.Client = obs.WrapClient(options.Client)
 	if options.Endpoint == "" {
 		options.Endpoint = defaultEndpoint
 	}

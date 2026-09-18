@@ -12,6 +12,7 @@ import (
 
 	"hostops/pfm/internal/compose"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -59,7 +60,9 @@ func New(dependencies Dependencies) (*Executor, error) {
 func (executor *Executor) Open(
 	ctx context.Context,
 	request Request,
-) (string, error) {
+) (line string, err error) {
+	trail := obs.NewTrail(ctx, "action", "requested")
+	defer func() { trail.End(err) }()
 	if executor == nil {
 		return "", errors.New("action executor is nil")
 	}
@@ -111,6 +114,7 @@ func (executor *Executor) Open(
 			if err != nil {
 				return "", err
 			}
+			trail.Reach("opened", "pane attached")
 			return plan.Line, nil
 		}
 	}
@@ -148,6 +152,7 @@ func (executor *Executor) Open(
 			return "", err
 		}
 	}
+	trail.Reach("opened", "pane attached")
 	return plan.Line, nil
 }
 
@@ -249,6 +254,7 @@ func (executor *Executor) SelfSwitch(
 			executor.stderr,
 			"pfm: already inside this chat's tmux — refusing to nest it inside itself; switch windows yourself (prefix + w)",
 		)
+		obs.Transition(ctx, "action", "attached", "switched", "self-switch")(nil)
 		return true
 	}
 	sort.SliceStable(panes, func(left, right int) bool {
@@ -264,12 +270,14 @@ func (executor *Executor) SelfSwitch(
 			executor.stderr,
 			"pfm: already inside this chat's tmux — refusing to nest it inside itself; switch windows yourself (prefix + w)",
 		)
+		obs.Transition(ctx, "action", "attached", "switched", "self-switch")(nil)
 		return true
 	}
 	fmt.Fprintln(
 		executor.stderr,
 		"pfm: already inside this chat's tmux — switched to its window (a session must never nest inside itself)",
 	)
+	obs.Transition(ctx, "action", "attached", "switched", "self-switch")(nil)
 	return true
 }
 

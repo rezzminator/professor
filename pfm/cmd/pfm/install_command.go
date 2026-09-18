@@ -14,6 +14,7 @@ import (
 	"hostops/pfm/internal/doctor"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/professor"
 	"hostops/pfm/internal/updatecheck"
 )
@@ -108,6 +109,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 			SkipHarvest:  *skipHarvest,
 			SkipEngines:  map[pfmengine.ID]bool{pfmengine.Codex: skipCodex},
 			Provisioning: true,
+			Runner:       obs.Runner(deps.RealRunner{}),
 		},
 	)
 	if preflight != 0 && mode == installer.ModeApply {

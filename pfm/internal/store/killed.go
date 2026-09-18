@@ -12,6 +12,7 @@ import (
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleetdb"
+	"hostops/pfm/internal/obs"
 )
 
 const (
@@ -60,8 +61,13 @@ func (s *Store) killedWrite(
 	id string,
 	write func() error,
 ) error {
+	// The ONLY busy-retry loop in the package, so Retries lives here: the
+	// fleetdb statement underneath write() already records its own verb and
+	// table, and this record adds the retry count around the whole attempt.
+	op := obs.SQL(ctx, storeKind, "UPDATE hidden")
 	err := write()
 	if !isSQLiteBusy(err) {
+		op.End(1, err)
 		return err
 	}
 
@@ -69,15 +75,19 @@ func (s *Store) killedWrite(
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
+		op.End(1, ctx.Err())
 		return ctx.Err()
 	case <-timer.C():
 	}
 
+	op.Retries++
 	err = write()
 	if !isSQLiteBusy(err) {
+		op.End(1, err)
 		return err
 	}
 
+	op.End(1, err)
 	s.warningf(
 		"WARNING: pfm could not %s %q in %s: SQLite remained busy after "+
 			"retry; the change was NOT written\n",
@@ -234,7 +244,7 @@ func (s *Store) transcriptPromptCounts(
 		for index, id := range chunk {
 			arguments[index] = id
 		}
-		rows, err := s.db.QueryContext(
+		rows, err := s.logged().QueryContext(
 			ctx,
 			"SELECT uuid,prompt_count FROM transcripts WHERE uuid IN ("+placeholders(len(chunk))+")",
 			arguments...,
@@ -336,7 +346,7 @@ SELECT id, ? FROM oc_sessions WHERE id IN (` + marks + `)`
 		}
 	}
 
-	rows, err := s.db.QueryContext(ctx, query, arguments...)
+	rows, err := s.logged().QueryContext(ctx, query, arguments...)
 	if err != nil {
 		return fmt.Errorf("derive killed chat engines: %w", err)
 	}
@@ -418,10 +428,10 @@ func (s *Store) syncEffectiveKilled(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, effectiveKilledDDL); err != nil {
+	if _, err := s.logged().ExecContext(ctx, effectiveKilledDDL); err != nil {
 		return fmt.Errorf("create effective killed mirror: %w", err)
 	}
-	if _, err := s.db.ExecContext(
+	if _, err := s.logged().ExecContext(
 		ctx,
 		"DELETE FROM "+effectiveKilled,
 	); err != nil {
@@ -443,7 +453,7 @@ func (s *Store) syncEffectiveKilled(ctx context.Context) error {
 			values = append(values, "(?,?)"...)
 			arguments = append(arguments, ids[index], records[ids[index]].KilledAt)
 		}
-		if _, err := s.db.ExecContext(
+		if _, err := s.logged().ExecContext(
 			ctx,
 			"INSERT INTO "+effectiveKilled+"(uuid,killed_at) VALUES "+string(values),
 			arguments...,

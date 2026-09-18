@@ -285,7 +285,7 @@ func (s *Store) adoptLocalKills(ctx context.Context) error {
 		return nil
 	}
 
-	rows, err := s.db.QueryContext(ctx, "SELECT id, hidden_at FROM hidden")
+	rows, err := s.logged().QueryContext(ctx, "SELECT id, hidden_at FROM hidden")
 	if err != nil {
 		return fmt.Errorf("read kills awaiting adoption: %w", err)
 	}
@@ -331,7 +331,7 @@ func userVersion(ctx context.Context, query rowQueryer) (int, error) {
 
 // UserVersion reports PRAGMA user_version.
 func (s *Store) UserVersion(ctx context.Context) (int, error) {
-	return userVersion(ctx, s.db)
+	return userVersion(ctx, s.logged())
 }
 
 // Path reports the database pathname resolved when the Store was opened.

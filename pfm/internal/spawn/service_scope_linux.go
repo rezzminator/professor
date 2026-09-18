@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -28,7 +29,7 @@ func serviceScopeCommand(
 		command.Env = environment
 		return command, nil
 	}
-	systemdRun, err := deps.Resolve("systemd-run")
+	systemdRun, err := obs.Runner(deps.RealRunner{}).LookPath("systemd-run")
 	if err != nil {
 		return nil, fmt.Errorf(
 			"running inside a systemd user service requires systemd-run to create a durable chat scope: %w",

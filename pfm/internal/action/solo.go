@@ -15,6 +15,7 @@ import (
 	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/obs"
 )
 
 // Solo closes every competing tmux host and stray Claude process for a
@@ -25,6 +26,8 @@ func (executor *Executor) Solo(
 	liveAgent bool,
 	claudeBinaries ...string,
 ) (returnErr error) {
+	trail := obs.NewTrail(ctx, "action", "multi")
+	defer func() { trail.End(returnErr) }()
 	if id == "" {
 		return nil
 	}
@@ -163,6 +166,7 @@ func (executor *Executor) Solo(
 			)
 		}
 	}
+	trail.Reach("solo", "other panes killed")
 	return nil
 }
 

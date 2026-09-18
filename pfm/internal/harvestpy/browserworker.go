@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // AskReply is one answer from the SSRF authority for a worker guard ask.
@@ -113,7 +114,7 @@ func (worker *BrowserWorker) FetchPinned(
 	if err != nil {
 		return "", 0, fmt.Errorf("marshal browser fetch request: %w", err)
 	}
-	line, stderr, err := worker.requestInteractive(ctx, body, onAsk)
+	line, stderr, err := worker.requestInteractive(ctx, "fetch", body, onAsk)
 	if err != nil {
 		return "", 0, err
 	}
@@ -138,7 +139,7 @@ func (worker *BrowserWorker) FetchPinned(
 
 // Smoke invokes the browser worker's no-launch importability probe.
 func (worker *BrowserWorker) Smoke(ctx context.Context) (map[string]any, error) {
-	line, stderr, err := worker.requestInteractive(ctx, []byte(`{"op":"smoke"}`), func(string) error {
+	line, stderr, err := worker.requestInteractive(ctx, "smoke", []byte(`{"op":"smoke"}`), func(string) error {
 		return errors.New("smoke never asks")
 	})
 	if err != nil {
@@ -174,15 +175,18 @@ func stderrTail(stderr string) string {
 
 func (worker *BrowserWorker) requestInteractive(
 	ctx context.Context,
+	op string,
 	body []byte,
 	onAsk func(url string) error,
-) ([]byte, string, error) {
+) (line []byte, tail string, returnErr error) {
 	worker.mu.Lock()
 	defer worker.mu.Unlock()
 	browser, err := worker.ensureWorkerLocked()
 	if err != nil {
 		return nil, "", err
 	}
+	end := browser.obs.Request(op)
+	defer func() { end(len(line), returnErr) }()
 	payload := append(append([]byte(nil), body...), '\n')
 	writeResult := make(chan error, 1)
 	go func() {
@@ -303,8 +307,9 @@ func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
 	}
 	runner := worker.runtime.Runner
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
+	processObs := obs.NewProcess(context.Background(), "browser")
 	stderr := &lockedBuffer{}
 	process, err := runner.Start(
 		context.Background(),
@@ -313,12 +318,14 @@ func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
 			StdinPipe:    true,
 			StdoutPipe:   true,
 			ProcessGroup: true,
-			Stderr:       stderr,
+			Stderr:       processObs.Stderr(stderr),
 		},
 	)
 	if err != nil {
+		processObs.Started(0, err)
 		return nil, fmt.Errorf("start browser worker: %w", err)
 	}
+	processObs.Started(process.Pid(), nil)
 	stdin, err := process.StdinPipe()
 	if err != nil {
 		_ = process.KillGroup()
@@ -338,6 +345,7 @@ func (worker *BrowserWorker) ensureWorkerLocked() (*workerProcess, error) {
 		stdout:     bufio.NewReader(stdout),
 		stdoutPipe: stdout,
 		stderr:     stderr,
+		obs:        processObs,
 	}
 	worker.worker = processState
 	return processState, nil
@@ -349,6 +357,7 @@ func (worker *BrowserWorker) stopWorkerLocked() error {
 	}
 	process := worker.worker
 	worker.worker = nil
+	process.obs.Stop("close")
 	var cleanupErr error
 	if err := process.stdin.Close(); err != nil {
 		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close browser worker stdin: %w", err))
@@ -364,13 +373,20 @@ func (worker *BrowserWorker) stopWorkerLocked() error {
 		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill browser worker process group: %w", killErr))
 		if err := process.process.Kill(); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill browser worker process: %w", err))
+			process.obs.Killed(err)
+		} else {
+			process.obs.Killed(nil)
 		}
+	} else {
+		process.obs.Killed(nil)
 	}
-	if err := process.process.Wait(); err != nil {
+	waitErr := process.process.Wait()
+	process.obs.Exited(waitErr)
+	if waitErr != nil {
 		// A successful group kill normally makes Wait return the signal status;
 		// only report it when the kill itself failed, where it is diagnostic.
 		if cleanupErr != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for browser worker: %w", err))
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for browser worker: %w", waitErr))
 		}
 	}
 	return cleanupErr

@@ -25,6 +25,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -193,7 +194,7 @@ func Resolve(request Request) (Request, error) {
 	} else if !rosterPresent {
 		return Request{}, fmt.Errorf("%s account roster is empty; configure an account", request.Engine)
 	}
-	binaryPath, err := deps.Resolve(binary)
+	binaryPath, err := obs.Runner(deps.RealRunner{}).LookPath(binary)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return Request{}, &BinaryMissingError{

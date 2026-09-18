@@ -12,13 +12,14 @@ import (
 
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
-var updateRunner deps.Runner = deps.RealRunner{}
+var updateRunner deps.Runner = obs.Runner(deps.RealRunner{})
 
 func currentUpdateRunner() deps.Runner {
 	if updateRunner == nil {
-		return deps.RealRunner{}
+		return obs.Runner(deps.RealRunner{})
 	}
 	return updateRunner
 }

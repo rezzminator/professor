@@ -18,6 +18,7 @@ import (
 
 	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 var ErrOfflineUnavailable = errors.New("harvestpy input is unavailable offline")
@@ -144,7 +145,7 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 		options.Cache = filepath.Join(options.Root, "cache")
 	}
 	if options.Runner == nil {
-		options.Runner = deps.RealRunner{}
+		options.Runner = obs.Runner(deps.RealRunner{})
 	}
 	if options.Clock == nil {
 		options.Clock = clock.Real
@@ -477,7 +478,10 @@ func downloadFile(ctx context.Context, url, path string, expectedSize int64) (re
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
 	}
-	response, err := http.DefaultClient.Do(request)
+	// A zero-value client IS http.DefaultClient's policy; never mutate the
+	// global itself, since downloadFile is the ONE caller reaching outside
+	// harvestpy's Python-sidecar protocol onto the open network.
+	response, err := obs.WrapClient(&http.Client{}).Do(request)
 	if err != nil {
 		return fmt.Errorf("download request: %w", err)
 	}
@@ -591,7 +595,15 @@ func runCommandWithRunner(
 	arguments []string,
 	directory string,
 ) ([]byte, error) {
+	process := obs.NewProcess(ctx, "provision")
+	process.Started(0, nil)
+	end := process.Request(filepath.Base(executable))
 	result, err := runner.Run(ctx, append([]string{executable}, arguments...), deps.RunOptions{Dir: directory})
+	if len(result.Stderr) > 0 {
+		_, _ = process.Stderr(io.Discard).Write(result.Stderr)
+	}
+	end(len(result.Stdout), err)
+	process.Exited(err)
 	if err != nil {
 		return result.Stdout, fmt.Errorf("%s %s: %w (stderr: %s)", executable, strings.Join(arguments, " "), err,
 			strings.TrimSpace(string(result.Stderr)))

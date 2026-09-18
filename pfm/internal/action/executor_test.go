@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/compose"
+	"hostops/pfm/internal/obs"
 )
 
 type fakeActionTmux struct {
@@ -307,6 +308,40 @@ func TestSoloSkipsStraySweepWhenKeepSocketProbeFails(t *testing.T) {
 	}
 }
 
+// TestSoloRecordsATransition: Solo is a multi-state coordinator over the
+// state door — one comp=state record on completion, never the crumb or
+// process content it walked.
+func TestSoloRecordsATransition(t *testing.T) {
+	jailAction(t)
+	ctx, recorder := obs.Test(t)
+	executor, err := New(Dependencies{
+		Tmux:      &fakeActionTmux{alive: map[string]bool{}},
+		Processes: &fakeProcesses{},
+		Gate:      fixedGate(false),
+		Runner:    &captureRunner{},
+		Stderr:    io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.Solo(ctx, "99999999-9999-4999-8999-999999999999", "", true); err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "action" {
+			continue
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("Solo() wrote no comp=state record: %s", recorder.Raw())
+	}
+}
+
 // Open reaches Solo with no keep socket along two routes, but only a
 // ResumeClaude row is destructive: it is creating a fresh replacement seat,
 // so every matching Claude process is a competing stray. Agent rows describe
@@ -369,6 +404,56 @@ func TestOpenEmptyKeepSetIsDestructiveOnlyForResumeClaude(t *testing.T) {
 				)
 			}
 		})
+	}
+}
+
+// TestOpenRecordsATransition: Open walks the state door through
+// internal/obs (spec § Middleware, `state`) — requested to opened on a
+// successful open, comp=state, never the pane content it opened.
+func TestOpenRecordsATransition(t *testing.T) {
+	jailAction(t)
+	ctx, recorder := obs.Test(t)
+	id := "88888888-8888-4888-8888-888888888888"
+	executor, err := New(Dependencies{
+		Tmux:      &fakeActionTmux{alive: map[string]bool{}},
+		Processes: &fakeProcesses{},
+		Gate:      fixedGate(false),
+		Runner:    &captureRunner{},
+		Stderr:    io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := openWithTestConfig(executor, ctx, Request{
+		Row: compose.Row{
+			Kind: compose.Agent,
+			ID:   id,
+			CWD:  "/work/agent",
+		},
+		PrimaryAccount: 1,
+		Home:           "/home/test",
+		FreshSocket:    "cc-950-1-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if line == "" {
+		t.Fatal("Open() returned no line")
+	}
+	var found bool
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "action" {
+			continue
+		}
+		if next, _ := record.Field("next"); next == "opened" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Open() wrote no action->opened transition: %s", recorder.Raw())
 	}
 }
 

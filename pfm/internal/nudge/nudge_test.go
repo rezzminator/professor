@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/obs"
 )
 
 func TestBandStartsAtTheConfiguredPercentAndStepsFromThere(t *testing.T) {
@@ -76,6 +78,31 @@ func TestDecideKeepsSessionsApart(t *testing.T) {
 	}
 	if _, nudge, err := Decide(dir, "session-b", 50, 35, 10); err != nil || !nudge {
 		t.Fatalf("session-b must not inherit session-a's band: nudge=%t err=%v", nudge, err)
+	}
+}
+
+// TestDecideRecordsATransition: Decide walks the state door (spec §
+// Middleware, `state`) — comp=state, kind=nudge, watching to held or nudged —
+// never the percentage-derived reminder text itself.
+func TestDecideRecordsATransition(t *testing.T) {
+	_, recorder := obs.Test(t)
+	dir := t.TempDir()
+	if _, nudge, err := Decide(dir, "session-a", 50, 35, 10); err != nil || !nudge {
+		t.Fatalf("Decide() nudge=%t err=%v", nudge, err)
+	}
+	var next string
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "nudge" {
+			continue
+		}
+		value, _ := record.Field("next")
+		next, _ = value.(string)
+	}
+	if next != "nudged" {
+		t.Fatalf("Decide() next state = %q, want nudged: %s", next, recorder.Raw())
 	}
 }
 

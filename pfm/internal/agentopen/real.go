@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -152,8 +151,8 @@ type RealTmux struct {
 	Stderr io.Writer
 }
 
-func (tmux RealTmux) command(ctx context.Context, socket string, args ...string) *exec.Cmd {
-	return pfmtmux.Command(ctx, tmux.Binary, filepath.Join(tmux.Dir, socket), args...)
+func (tmux RealTmux) command(ctx context.Context, socket string, args ...string) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, tmux.Binary, filepath.Join(tmux.Dir, socket), args...)
 }
 
 func (tmux RealTmux) SocketForPID(ctx context.Context, pid int) (string, error) {

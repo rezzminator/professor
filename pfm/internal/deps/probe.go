@@ -75,6 +75,13 @@ type ProbeOptions struct {
 	// driving the self-doctor bound), and Timeout unset too falls back to
 	// DefaultSelfDoctorTimeout.
 	SelfDoctorTimeout time.Duration
+	// Runner is the deps.Runner seam every version and self-doctor probe
+	// child process launches through. obs cannot import deps (obs.Runner's
+	// own signature names deps.Runner), so this package cannot wrap its own
+	// default — a nil Runner falls back to a bare RealRunner{} here, and the
+	// production callers hand in obs.Runner(deps.RealRunner{}) themselves so
+	// the door is still observed end to end.
+	Runner Runner
 }
 
 // selfDoctorTimeout resolves the effective self-doctor bound: an explicit
@@ -146,7 +153,7 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 	}
 	result.Path = path
 	if len(entry.VersionArgs) != 0 {
-		output, runErr := boundedOutput(ctx, options.Timeout, path, entry.VersionArgs...)
+		output, runErr := boundedOutput(ctx, options.Timeout, options.Runner, path, entry.VersionArgs...)
 		result.Raw = string(output)
 		if verboseErr := writeVerbose(options.VerboseDir, entry.Name+"-version", output); verboseErr != nil {
 			result.VerboseErr = verboseErr.Error()
@@ -194,6 +201,7 @@ func probeOne(ctx context.Context, entry Entry, options ProbeOptions) Result {
 			entry,
 			options.VerboseDir,
 			selfDoctorTimeout(options),
+			options.Runner,
 		)
 		if err != nil {
 			result.VerboseErr = err.Error()
@@ -233,9 +241,10 @@ func probeSelfDoctor(
 	entry Entry,
 	verboseDir string,
 	timeout time.Duration,
+	runner Runner,
 ) (string, string, error) {
 	helpArgs := []string{entry.SelfDoctorArgs[0], "--help"}
-	help, helpErr := boundedOutputWithEnvironment(ctx, timeout, terminalEnvironment(), path, helpArgs...)
+	help, helpErr := boundedOutputWithEnvironment(ctx, timeout, terminalEnvironment(), runner, path, helpArgs...)
 	if err := writeVerbose(verboseDir, entry.Name+"-self-doctor-help", help); err != nil {
 		return "", "", err
 	}
@@ -246,13 +255,19 @@ func probeSelfDoctor(
 		if errors.Is(helpErr, context.DeadlineExceeded) {
 			return string(StateBroken), "", nil
 		}
-		var exitErr *exec.ExitError
+		var exitErr interface{ ExitCode() int }
 		if errors.As(helpErr, &exitErr) {
 			return "unavailable", "", nil
 		}
 		return string(StateBroken), "", nil
 	}
-	output, err := boundedOutputWithEnvironment(ctx, timeout, terminalEnvironment(), path, entry.SelfDoctorArgs...)
+	output, err := boundedOutputWithEnvironment(
+		ctx,
+		timeout,
+		terminalEnvironment(),
+		runner,
+		path,
+		entry.SelfDoctorArgs...)
 	if writeErr := writeVerbose(verboseDir, entry.Name+"-self-doctor", output); writeErr != nil {
 		return "", "", writeErr
 	}
@@ -305,33 +320,69 @@ func effectiveTimeout(timeout time.Duration) time.Duration {
 	return timeout
 }
 
-func boundedOutput(parent context.Context, timeout time.Duration, path string, args ...string) ([]byte, error) {
-	return boundedOutputWithEnvironment(parent, timeout, nil, path, args...)
+func boundedOutput(
+	parent context.Context,
+	timeout time.Duration,
+	runner Runner,
+	path string,
+	args ...string,
+) ([]byte, error) {
+	return boundedOutputWithEnvironment(parent, timeout, nil, runner, path, args...)
 }
 
+// boundedOutputWithEnvironment runs path+args through runner (nil defaults to
+// a bare RealRunner{} — see ProbeOptions.Runner's doc comment for why this
+// package cannot default to the observed door itself) and joins stdout with
+// stderr, the same shape exec.Cmd.CombinedOutput gave every caller before
+// this crossed the Runner seam. runner.Run folds an ordinary non-zero exit
+// into RunResult.ExitCode rather than an error (deps.Runner's documented
+// contract), so a completed-but-failing command is reported back here as a
+// runnerExitStatus — the *exec.ExitError-shaped signal probeOne and
+// probeSelfDoctor already classify on.
 func boundedOutputWithEnvironment(
 	parent context.Context,
 	timeout time.Duration,
 	environment []string,
+	runner Runner,
 	path string,
 	args ...string,
 ) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, effectiveTimeout(timeout))
 	defer cancel()
-	command := exec.CommandContext(ctx, path, args...)
-	command.Stdin = nil
-	if environment != nil {
-		command.Env = environment
+	if runner == nil {
+		runner = RealRunner{}
 	}
-	output, err := command.CombinedOutput()
+	result, err := runner.Run(ctx, append([]string{path}, args...), RunOptions{Env: environment})
+	output := append(result.Stdout, result.Stderr...)
 	if ctx.Err() != nil {
 		if parentErr := parent.Err(); parentErr != nil {
 			return output, probeContextError{err: parentErr}
 		}
 		return output, probeContextError{err: context.DeadlineExceeded, ownTimeout: true}
 	}
-	return output, err
+	if err != nil {
+		return output, err
+	}
+	if result.ExitCode != 0 {
+		return output, runnerExitStatus{exitCode: result.ExitCode}
+	}
+	return output, nil
 }
+
+// runnerExitStatus is a completed command's non-zero exit, carried back
+// through the Runner seam the same way probeOne and probeSelfDoctor already
+// read one off a bare exec.CommandContext's *exec.ExitError — via ExitCode(),
+// the "any error naming its own exit code" duck type internal/update and
+// internal/installer already use for the same reason.
+type runnerExitStatus struct {
+	exitCode int
+}
+
+func (status runnerExitStatus) Error() string {
+	return fmt.Sprintf("exit status %d", status.exitCode)
+}
+
+func (status runnerExitStatus) ExitCode() int { return status.exitCode }
 
 type probeContextError struct {
 	err        error
@@ -369,11 +420,17 @@ func terminalEnvironment() []string {
 
 // ExitCode reads a process exit code out of err, or -1 when err never
 // reached one (a lookup failure, timeout, or cancellation, none of which
-// ran the command to completion).
+// ran the command to completion). It reads both a bare exec.CommandContext's
+// *exec.ExitError and a Runner-crossed runnerExitStatus, so probeOne's own
+// VersionArgs branch reports the real code either way.
 func ExitCode(err error) int {
 	var exitErr *exec.ExitError
 	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode()
+	}
+	var coded interface{ ExitCode() int }
+	if errors.As(err, &coded) {
+		return coded.ExitCode()
 	}
 	return -1
 }

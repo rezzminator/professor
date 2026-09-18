@@ -15,6 +15,7 @@ import (
 
 	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // BrowserRuntimeRoot is the stable current pointer for the opt-in real-browser
@@ -55,7 +56,7 @@ func provisionBrowserWithTargets(
 		options.Cache = filepath.Join(options.Root, "cache")
 	}
 	if options.Runner == nil {
-		options.Runner = deps.RealRunner{}
+		options.Runner = obs.Runner(deps.RealRunner{})
 	}
 	if options.Clock == nil {
 		options.Clock = clock.Real

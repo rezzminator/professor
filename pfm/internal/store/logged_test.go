@@ -60,3 +60,44 @@ func TestStoreStatementsRecordUnderTheDBComponent(t *testing.T) {
 	}
 	_ = context.Background
 }
+
+// countUserVersionPragmaRecords counts comp=db, kind=store records for
+// "PRAGMA user_version" statementShape reads as op=pragma, table=user_version.
+func countUserVersionPragmaRecords(recorder *obs.Recorder) int {
+	count := 0
+	for _, record := range recorder.Records() {
+		if record.Message != "db.statement" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "store" {
+			continue
+		}
+		op, _ := record.Field("op")
+		table, _ := record.Field("table")
+		if op == "pragma" && table == "user_version" {
+			count++
+		}
+	}
+	return count
+}
+
+// TestUserVersionRecordsUnderTheDBComponent: UserVersion reads PRAGMA
+// user_version through the same logged door as its sibling reads
+// (killed.go's queries) — a comp=db record naming the pragma op and
+// user_version table, never the raw handle unlogged. Open()'s own migration
+// check already writes one such record before this ever runs, so the proof
+// is a NEW record appearing, not merely one existing.
+func TestUserVersionRecordsUnderTheDBComponent(t *testing.T) {
+	ctx, recorder := obs.Test(t)
+	store := openTestStore(t)
+	before := countUserVersionPragmaRecords(recorder)
+	if _, err := store.UserVersion(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if after := countUserVersionPragmaRecords(recorder); after <= before {
+		t.Fatalf(
+			"UserVersion() wrote no NEW comp=db pragma record: before=%d after=%d: %s",
+			before, after, recorder.Raw(),
+		)
+	}
+}

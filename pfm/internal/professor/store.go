@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 	pfmpaths "hostops/pfm/internal/paths"
 )
 
@@ -54,11 +55,11 @@ func ResolveStore(projectRoot, home string) (Store, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return Store{}, fmt.Errorf("UNREADABLE %s: %w", manifestPath, err)
 	}
-	return InspectStoreWithRunner(blueprintRoot, deps.RealRunner{})
+	return InspectStoreWithRunner(blueprintRoot, obs.Runner(deps.RealRunner{}))
 }
 
 func InspectStore(root string) (Store, error) {
-	return InspectStoreWithRunner(root, deps.RealRunner{})
+	return InspectStoreWithRunner(root, obs.Runner(deps.RealRunner{}))
 }
 
 func InspectStoreWithRunner(root string, runner deps.Runner) (Store, error) {
@@ -94,7 +95,7 @@ func InspectStoreWithRunner(root string, runner deps.Runner) (Store, error) {
 }
 
 func storeSHA(root string) (string, error) {
-	return storeSHAWithRunner(root, deps.RealRunner{})
+	return storeSHAWithRunner(root, obs.Runner(deps.RealRunner{}))
 }
 
 func storeSHAWithRunner(root string, runner deps.Runner) (string, error) {

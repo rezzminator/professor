@@ -5,6 +5,7 @@ import (
 
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/harvestpy"
+	"hostops/pfm/internal/obs"
 )
 
 // pinnedHarvestDoctor is the production conversion health check. Its Runner
@@ -33,7 +34,7 @@ type doctorBrowserSmokeRunnerKey struct{}
 var doctorBrowserSmoke = func(ctx context.Context, interpreter, script string) (map[string]any, error) {
 	runner, _ := ctx.Value(doctorBrowserSmokeRunnerKey{}).(deps.Runner)
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	worker := harvestpy.NewBrowserWorker(harvestpy.Runtime{Python: interpreter, Script: script, Runner: runner})
 	return worker.Smoke(ctx)
@@ -46,7 +47,7 @@ func runDoctorBrowserSmokeWithRunner(
 	runner deps.Runner,
 ) (map[string]any, error) {
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	return doctorBrowserSmoke(
 		context.WithValue(ctx, doctorBrowserSmokeRunnerKey{}, runner),

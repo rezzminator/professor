@@ -21,6 +21,7 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/spawn"
 	pfmtmux "hostops/pfm/internal/tmux"
@@ -117,7 +118,7 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintf(stderr, "pfm internal launch: build Claude command: %v\n", err)
 		return 1
 	}
-	tmuxBinary, err := deps.Resolve(pfmtmux.Binary)
+	tmuxBinary, err := obs.Runner(deps.RealRunner{}).LookPath(pfmtmux.Binary)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm internal launch: find tmux: %v\n", err)
 		return 1

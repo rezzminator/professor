@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -170,6 +171,47 @@ func applyLog(result *Config, raw *rawLog) error {
 		result.Sources["log.keepDays"] = SourceFile
 	}
 	return nil
+}
+
+// RedactSecrets preserves JSON shape while replacing secret-looking object
+// fields. It is intentionally generic so future credentials are safe by
+// default without another display-path audit.
+func RedactSecrets(content []byte) []byte {
+	var value any
+	if err := json.Unmarshal(content, &value); err != nil {
+		return content
+	}
+	redactJSON(value)
+	var encoded bytes.Buffer
+	encoder := json.NewEncoder(&encoded)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(value); err != nil {
+		return content
+	}
+	return encoded.Bytes()
+}
+
+func redactJSON(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for key, child := range typed {
+			lower := strings.ToLower(key)
+			if strings.Contains(lower, "token") || strings.Contains(lower, "secret") ||
+				strings.Contains(lower, "credential") ||
+				strings.Contains(lower, "password") ||
+				strings.Contains(lower, "passphrase") ||
+				strings.Contains(lower, "apikey") {
+				typed[key] = "<redacted>"
+				continue
+			}
+			redactJSON(child)
+		}
+	case []any:
+		for _, child := range typed {
+			redactJSON(child)
+		}
+	}
 }
 
 // canonicalLogLevel reads one level the file set through the one parser and

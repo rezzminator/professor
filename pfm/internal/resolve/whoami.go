@@ -323,7 +323,7 @@ func (namer CommandTmuxNamer) SessionName(
 		arguments = append(arguments, "-t", target)
 	}
 	arguments = append(arguments, "#{session_name}")
-	output, err := pfmtmux.Command(ctx, namer.Binary, socketPath, arguments...).Output()
+	output, err := pfmtmux.Exec(ctx, namer.Binary, socketPath, arguments...).Output()
 	if err != nil && target != "" {
 		// A stale pane id must not kill a live session: retry untargeted, the
 		// way chat.sh's bare `tmux display-message -p` does.
@@ -351,7 +351,7 @@ func (lister CommandPaneOwners) PaneOwners(
 	ctx context.Context,
 	socketPath string,
 ) ([]PaneOwner, error) {
-	output, err := pfmtmux.Command(ctx, lister.Binary, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
+	output, err := pfmtmux.Exec(ctx, lister.Binary, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
 		Output()
 	if err != nil {
 		return nil, err

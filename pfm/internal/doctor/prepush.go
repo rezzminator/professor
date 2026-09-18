@@ -12,6 +12,7 @@ import (
 
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/obs"
 )
 
 const (
@@ -33,7 +34,7 @@ type PrePushGate struct {
 var PrePushGateProbeOverride func(context.Context) PrePushGate
 
 func printPrePushDoctor(ctx context.Context, stdout io.Writer) int {
-	return printPrePushDoctorWithRunner(ctx, stdout, deps.RealRunner{})
+	return printPrePushDoctorWithRunner(ctx, stdout, obs.Runner(deps.RealRunner{}))
 }
 
 func printPrePushDoctorWithRunner(ctx context.Context, stdout io.Writer, runner deps.Runner) int {
@@ -79,7 +80,7 @@ func printPrePushDoctorWithRunner(ctx context.Context, stdout io.Writer, runner 
 }
 
 func inspectPrePushGate(ctx context.Context) PrePushGate {
-	return inspectPrePushGateWithRunner(ctx, deps.RealRunner{})
+	return inspectPrePushGateWithRunner(ctx, obs.Runner(deps.RealRunner{}))
 }
 
 func inspectPrePushGateWithRunner(ctx context.Context, runner deps.Runner) PrePushGate {

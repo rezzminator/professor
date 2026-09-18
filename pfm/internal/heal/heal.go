@@ -35,8 +35,13 @@ import (
 	"golang.org/x/sys/unix"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/sqlitedb"
 )
+
+// healKind names heal's two foreign SQLite stores to the db component's
+// records — heal never opens a database of its own, only Codex's.
+const healKind = "codex"
 
 // CodexProjectsPastAnomalies is the first Codex release whose projector skips a repeated,
 // regressed, or missing rollout ordinal instead of refusing the thread forever
@@ -197,11 +202,11 @@ func Sweep(ctx context.Context, stores Stores, only string) (report Report, retu
 		}
 	}()
 
-	rows, err := history.QueryContext(
-		ctx,
-		"SELECT thread_id, next_rollout_byte_offset, next_rollout_ordinal "+
-			"FROM thread_history_projection_state",
-	)
+	query := "SELECT thread_id, next_rollout_byte_offset, next_rollout_ordinal " +
+		"FROM thread_history_projection_state"
+	op := obs.SQL(ctx, healKind, query)
+	rows, err := history.QueryContext(ctx, query)
+	op.End(-1, err)
 	if err != nil {
 		return Report{}, fmt.Errorf(
 			"read the projection cursors in %q: %w",
@@ -525,7 +530,10 @@ func rolloutPaths(ctx context.Context, statePath string) (paths map[string]strin
 			returnErr = errors.Join(returnErr, fmt.Errorf("close state store %q: %w", statePath, err))
 		}
 	}()
-	rows, err := state.QueryContext(ctx, "SELECT id, rollout_path FROM threads")
+	const query = "SELECT id, rollout_path FROM threads"
+	op := obs.SQL(ctx, healKind, query)
+	rows, err := state.QueryContext(ctx, query)
+	op.End(-1, err)
 	if err != nil {
 		return nil, fmt.Errorf("read threads from %q: %w", statePath, err)
 	}
@@ -616,6 +624,12 @@ func Backup(stores Stores, now time.Time) (string, error) {
 // transaction: a projection state without its items is a thread that resumes
 // empty, which is the very failure this repairs.
 func Delete(ctx context.Context, stores Stores, threadID string) (returnErr error) {
+	// The state door: present → deleted for the thread this call removes,
+	// ERROR-shaped when the delete never committed.
+	defer func() {
+		obs.Transition(ctx, "heal", "present", "deleted", "operator delete")(returnErr)
+	}()
+
 	database, err := sqlitedb.OpenReadWrite(stores.History, 5*time.Second)
 	if err != nil {
 		return fmt.Errorf("open %q: %w", stores.History, err)
@@ -636,11 +650,11 @@ func Delete(ctx context.Context, stores Stores, threadID string) (returnErr erro
 		"thread_items",
 		"thread_turns",
 	} {
-		if _, err := transaction.ExecContext(
-			ctx,
-			"DELETE FROM "+table+" WHERE thread_id = ?",
-			threadID,
-		); err != nil {
+		query := "DELETE FROM " + table + " WHERE thread_id = ?"
+		op := obs.SQL(ctx, healKind, query)
+		result, err := transaction.ExecContext(ctx, query, threadID)
+		op.End(deletedRows(result, err), err)
+		if err != nil {
 			return fmt.Errorf("clear %s for %s: %w", table, threadID, err)
 		}
 	}
@@ -648,4 +662,17 @@ func Delete(ctx context.Context, stores Stores, threadID string) (returnErr erro
 		return fmt.Errorf("commit the heal for %s: %w", threadID, err)
 	}
 	return nil
+}
+
+// deletedRows reads a delete result's row count for the db door, or -1
+// (unknown) when there is none or the driver cannot say.
+func deletedRows(result sql.Result, err error) int64 {
+	if err != nil || result == nil {
+		return -1
+	}
+	affected, countErr := result.RowsAffected()
+	if countErr != nil {
+		return -1
+	}
+	return affected
 }

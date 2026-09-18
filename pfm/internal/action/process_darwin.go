@@ -10,6 +10,7 @@ import (
 
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/obs"
 )
 
 // nativeProcesses enumerates the process table on a kernel with no /proc.
@@ -47,7 +48,7 @@ func nativeProcesses(ctx context.Context) ([]Process, error) {
 // Linux reader gets this from /proc/<pid>/fd/0 and strips the /dev/ prefix; ps
 // already prints the short form, and "??" for a process with no terminal.
 func terminalByPID() map[int]string {
-	result, err := (deps.RealRunner{}).Run(
+	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
 		[]string{deps.Executable("ps"), "-A", "-o", "pid=,tty="},
 		deps.RunOptions{},

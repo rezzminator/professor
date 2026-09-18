@@ -66,58 +66,6 @@ func (r projectReport) reviewRequired() int {
 	return r.Counts[projectUpdated] + r.Counts[projectNew] + r.Counts[projectGoneUpstream] + r.Counts[projectLocalDeleted]
 }
 
-// RunProjectUpdate runs one project-baseline action.
-func RunProjectUpdate(action string, args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
-	switch action {
-	case "":
-		flags := cli.NewFlagSet("update", "usage: pfm update [--root DIR] [--json]", stderr)
-		rootFlag := flags.String("root", "", "project root")
-		jsonOutput := flags.Bool("json", false, "write one JSON object")
-		positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
-		if !ok {
-			return code
-		}
-		if len(positional) != 0 {
-			flags.Usage()
-			return 2
-		}
-		return runPostUpdate(*rootFlag, *jsonOutput, stdout, runtime)
-	case "check":
-		flags := cli.NewFlagSet("update check", "usage: pfm update check [--root DIR] [--json]", stderr)
-		rootFlag := flags.String("root", "", "project root")
-		jsonOutput := flags.Bool("json", false, "write one JSON object")
-		positional, code, ok := cli.ParseFlagsAnywhere(flags, args)
-		if !ok {
-			return code
-		}
-		if len(positional) != 0 {
-			flags.Usage()
-			return 2
-		}
-		root, found, err := resolveProjectRoot(*rootFlag)
-		if err != nil {
-			writeProjectFailure(stdout, *jsonOutput, err)
-			return 1
-		}
-		if !found {
-			writeProjectFailure(stdout, *jsonOutput, errBaselineNotFound)
-			return 1
-		}
-		return renderProjectCheck(root, runtime.Paths.Home, *jsonOutput, stdout)
-	case "pin":
-		return runProjectPin(args, stdout, stderr, runtime)
-	case "drop":
-		return runProjectDrop(args, stdout, stderr)
-	case "adopt":
-		return runProjectAdopt(args, stdout, stderr, runtime)
-	case "ignore":
-		return runProjectIgnore(args, stdout, stderr, runtime)
-	default:
-		fmt.Fprintf(stderr, "pfm update: unknown project action %q\n", action)
-		return 2
-	}
-}
-
 func renderProjectCheck(root, home string, jsonOutput bool, stdout io.Writer) int {
 	report, err := buildProjectReport(root, home)
 	if err != nil {

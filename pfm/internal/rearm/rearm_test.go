@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/agentrole"
+	"hostops/pfm/internal/obs"
 )
 
 // mustWriteFile is the one filesystem primitive every test below builds its
@@ -205,5 +206,38 @@ func TestCrumbLifecycleWriteThenRemove(t *testing.T) {
 
 	if err := RemoveCrumb(sidDir, socket, ""); err != nil {
 		t.Fatalf("RemoveCrumb() on an already-absent crumb error = %v, want nil", err)
+	}
+}
+
+// TestWriteAndRemoveCrumbRecordATransition: WriteCrumb and RemoveCrumb both
+// walk the state door (spec § Middleware, `state`), comp=state, kind=rearm —
+// never the role name or artifact path they carried.
+func TestWriteAndRemoveCrumbRecordATransition(t *testing.T) {
+	_, recorder := obs.Test(t)
+	sidDir := t.TempDir()
+	socket := "cc-1800000000-1-5"
+	artifact := filepath.Join(t.TempDir(), "dev.md")
+	mustWriteFile(t, artifact, "constitution\n")
+	crumb := Crumb{Role: "dev", ArtifactPath: artifact, TOMLKey: false}
+
+	if err := WriteCrumb(sidDir, socket, crumb); err != nil {
+		t.Fatalf("WriteCrumb() error = %v", err)
+	}
+	if err := RemoveCrumb(sidDir, socket, ""); err != nil {
+		t.Fatalf("RemoveCrumb() error = %v", err)
+	}
+	var nexts []string
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "rearm" {
+			continue
+		}
+		next, _ := record.Field("next")
+		nexts = append(nexts, next.(string))
+	}
+	if len(nexts) != 2 || nexts[0] != "armed" || nexts[1] != "disarmed" {
+		t.Fatalf("rearm state path = %v, want [armed disarmed]: %s", nexts, recorder.Raw())
 	}
 }

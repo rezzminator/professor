@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // Runtime identifies the pinned Python executable and worker script. The
@@ -92,6 +93,9 @@ type workerProcess struct {
 	stdout     *bufio.Reader
 	stdoutPipe io.ReadCloser
 	stderr     *lockedBuffer
+	// obs is the lifecycle recorder for this one sidecar: start, each
+	// request, stop, kill, exit and every stderr line, under comp=harvestpy.
+	obs *obs.Process
 }
 
 // lockedBuffer is the stderr sink a worker subprocess fills from os/exec's
@@ -195,13 +199,15 @@ func (converter *Converter) run(ctx context.Context, request Request) (Result, e
 // serialized so lazy imports and the Docling singleton persist exactly like
 // the old MCP process. A crash or cancellation discards the process; the next
 // request starts a clean worker with the original environment snapshot.
-func (converter *Converter) request(ctx context.Context, body []byte) ([]byte, string, error) {
+func (converter *Converter) request(ctx context.Context, body []byte) (line []byte, tail string, returnErr error) {
 	converter.mu.Lock()
 	defer converter.mu.Unlock()
 	worker, err := converter.ensureWorkerLocked()
 	if err != nil {
 		return nil, "", err
 	}
+	end := worker.obs.Request("convert")
+	defer func() { end(len(line), returnErr) }()
 	payload := append(append([]byte(nil), body...), '\n')
 	writeResult := make(chan error, 1)
 	go func() {
@@ -273,18 +279,21 @@ func (converter *Converter) ensureWorkerLocked() (*workerProcess, error) {
 	}
 	runner := converter.runtime.Runner
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
+	processObs := obs.NewProcess(context.Background(), "converter")
 	stderr := &lockedBuffer{}
 	process, err := runner.Start(context.Background(), []string{converter.runtime.Python, script}, deps.StartOptions{
 		Env:        workerEnv(os.Environ(), converter.runtime),
 		StdinPipe:  true,
 		StdoutPipe: true,
-		Stderr:     stderr,
+		Stderr:     processObs.Stderr(stderr),
 	})
 	if err != nil {
+		processObs.Started(0, err)
 		return nil, fmt.Errorf("start harvestpy worker: %w", err)
 	}
+	processObs.Started(process.Pid(), nil)
 	stdin, err := process.StdinPipe()
 	if err != nil {
 		_ = process.Kill()
@@ -304,6 +313,7 @@ func (converter *Converter) ensureWorkerLocked() (*workerProcess, error) {
 		stdout:     bufio.NewReader(stdout),
 		stdoutPipe: stdout,
 		stderr:     stderr,
+		obs:        processObs,
 	}
 	converter.worker = worker
 	return worker, nil
@@ -315,6 +325,7 @@ func (converter *Converter) stopWorkerLocked() error {
 	}
 	worker := converter.worker
 	converter.worker = nil
+	worker.obs.Stop("close")
 	var cleanupErr error
 	if err := worker.stdin.Close(); err != nil {
 		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close worker stdin: %w", err))
@@ -326,11 +337,14 @@ func (converter *Converter) stopWorkerLocked() error {
 	if errors.Is(killErr, os.ErrProcessDone) {
 		killErr = nil
 	}
+	worker.obs.Killed(killErr)
 	if killErr != nil {
 		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill worker: %w", killErr))
 	}
-	if err := worker.process.Wait(); err != nil && killErr != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for killed worker: %w", err))
+	waitErr := worker.process.Wait()
+	worker.obs.Exited(waitErr)
+	if waitErr != nil && killErr != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for killed worker: %w", waitErr))
 	}
 	return cleanupErr
 }

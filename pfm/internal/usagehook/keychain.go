@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // Only errSecItemNotFound means absence; cancellation and ACL failures do not.
@@ -17,7 +18,7 @@ const keychainNotFoundStatus = 44
 // runKeychain bounds both the process and inherited output pipes so a locked
 // keychain cannot stall a prompt hook or keep a cancelled sampler running.
 func runKeychain(ctx context.Context, binary, service string) ([]byte, error) {
-	return runKeychainWithRunner(ctx, binary, service, deps.RealRunner{})
+	return runKeychainWithRunner(ctx, binary, service, obs.Runner(deps.RealRunner{}))
 }
 
 func runKeychainWithRunner(ctx context.Context, binary, service string, runner deps.Runner) ([]byte, error) {

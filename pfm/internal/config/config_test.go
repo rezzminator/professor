@@ -820,6 +820,9 @@ func TestConfigInitJSONRoundTripsAndRedactsSecrets(t *testing.T) {
 	if strings.Contains(string(content), "//") {
 		t.Fatalf("default config contains comments: %s", content)
 	}
+	if !strings.Contains(string(content), "\"level\": \"info\"") {
+		t.Fatalf("default config carries no log.level default: %s", content)
+	}
 	if _, err := Load(path, home, nil); err != nil {
 		// The strict loader check below needs the bytes on disk; this assertion
 		// intentionally documents that MarshalDefault itself does not install.

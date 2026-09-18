@@ -10,12 +10,15 @@ import (
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/fleetdb"
 	"hostops/pfm/internal/gather"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
 // KillServer ends one chat's tmux server and removes its socket, crumbs, and
 // branch-seat marker.
-func KillServer(ctx context.Context, resolved paths.Values, socket string) error {
+func KillServer(ctx context.Context, resolved paths.Values, socket string) (err error) {
+	end := obs.Transition(ctx, "chat", "live", "ended", "KillServer")
+	defer func() { end(err) }()
 	tmux := action.TmuxExecutor{TmuxDir: resolved.TmuxDir}
 	if err := tmux.KillServer(ctx, socket); err != nil {
 		if tmux.SocketAlive(ctx, socket) {

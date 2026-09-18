@@ -14,6 +14,7 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/installer"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/ui"
 	"hostops/pfm/internal/updatecheck"
@@ -22,7 +23,7 @@ import (
 const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"
 
 var startProfessorUpdateCheck = func(ctx context.Context, argv []string, options deps.StartOptions) error {
-	_, err := (deps.RealRunner{}).Start(ctx, argv, options)
+	_, err := obs.Runner(deps.RealRunner{}).Start(ctx, argv, options)
 	return err
 }
 

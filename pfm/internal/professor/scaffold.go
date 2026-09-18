@@ -1,6 +1,7 @@
 package professor
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 
 	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/clock"
+	"hostops/pfm/internal/obs"
 )
 
 // ClaudeInstructionsFile is the project instructions file scaffolded from the blueprint.
@@ -44,7 +46,9 @@ type initCopy struct {
 }
 
 // Scaffold deploys the blueprint's mapped project templates and pins exactly the deployed set.
-func Scaffold(source, target string, force bool, stdout io.Writer) (int, error) {
+func Scaffold(source, target string, force bool, stdout io.Writer) (count int, err error) {
+	trail := obs.NewTrail(context.Background(), "professor", "requested")
+	defer func() { trail.End(err) }()
 	store, err := InspectStore(source)
 	if err != nil {
 		return 0, err
@@ -92,6 +96,7 @@ func Scaffold(source, target string, force bool, stdout io.Writer) (int, error) 
 	if err := Save(target, baseline); err != nil {
 		return 0, err
 	}
+	trail.Reach("scaffolded", "files pinned")
 	return len(baseline.Files), nil
 }
 

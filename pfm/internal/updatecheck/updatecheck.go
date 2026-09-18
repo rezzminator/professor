@@ -18,6 +18,7 @@ import (
 
 	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/clock"
+	"hostops/pfm/internal/obs"
 )
 
 const (
@@ -111,14 +112,14 @@ func CheckForUpdateWithClock(
 		return nil
 	}
 	if client == nil {
-		client = &http.Client{Timeout: 12 * time.Second}
+		client = obs.WrapClient(&http.Client{Timeout: 12 * time.Second})
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodHead, latestURL, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("build latest-release request: %w", err)
 	}
 	request.Header.Set("User-Agent", "pfm-update-check/"+normalizeVersion(current))
-	noFollow := *client
+	noFollow := *obs.WrapClient(client)
 	noFollow.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}

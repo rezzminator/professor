@@ -12,6 +12,7 @@ import (
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/obs"
 )
 
 // Purpose states WHY a Claude process is being started, and it is the only
@@ -222,7 +223,7 @@ func (spawn ClaudeSpawn) runner() deps.Runner {
 	if spawn.Runner != nil {
 		return spawn.Runner
 	}
-	return deps.RealRunner{}
+	return obs.Runner(deps.RealRunner{})
 }
 
 func (command *ProcessCommand) start(stdout, stderr io.Writer) (deps.Process, error) {

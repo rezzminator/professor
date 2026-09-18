@@ -27,6 +27,7 @@ import (
 	"hostops/pfm/internal/deps"
 	"hostops/pfm/internal/harvest"
 	"hostops/pfm/internal/harvestpy"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -110,7 +111,7 @@ func NewConfiguredHarvester(version string, runtime Runtime) (*Service, error) {
 		runtime.Clock = clock.Real
 	}
 	if runtime.Runner == nil {
-		runtime.Runner = deps.RealRunner{}
+		runtime.Runner = obs.Runner(deps.RealRunner{})
 	}
 	cacheDir, err := harvest.CacheRoot(runtime.CacheDir)
 	if err != nil {
@@ -165,7 +166,7 @@ func newHarvester(runtime Runtime) (*harvest.Harvester, *harvestpy.Converter, er
 		runtime.Clock = clock.Real
 	}
 	if runtime.Runner == nil {
-		runtime.Runner = deps.RealRunner{}
+		runtime.Runner = obs.Runner(deps.RealRunner{})
 	}
 	// A local CLI/stdin caller owns the machine. Preserve the oracle's
 	// unconfined local-read posture (apart from harvest's credential denylist);
@@ -484,14 +485,14 @@ func (service *Service) RunStdio(ctx context.Context, input io.Reader, output io
 // NewHTTPHandler exposes the same tool surface as stdio through streamable
 // HTTP. The process-level daemon supplies authentication and endpoint routing.
 func (service *Service) NewHTTPHandler() http.Handler {
-	return mcp.NewStreamableHTTPHandler(
+	return obs.Handler("harvester-mcp", mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server { return service.server },
 		&mcp.StreamableHTTPOptions{
 			JSONResponse:               true,
 			Stateless:                  false,
 			DisableLocalhostProtection: false,
 		},
-	)
+	))
 }
 
 // The SDK's IOTransport takes ownership of ReadCloser/WriteCloser values and
@@ -505,15 +506,22 @@ type nopWriterCloser struct{ io.Writer }
 
 func (nopWriterCloser) Close() error { return nil }
 
+// discardOutput adapts a handler that also returns a typed output to the untyped Out register() wants for five of its six tools: only result.Content ever reaches the wire (searchCache's own two-return shape keeps its inline handler below).
+func discardOutput[In, Out any](
+	handler func(context.Context, *mcp.CallToolRequest, In) (*mcp.CallToolResult, Out, error),
+) mcp.ToolHandlerFor[In, any] {
+	return func(ctx context.Context, request *mcp.CallToolRequest, input In) (*mcp.CallToolResult, any, error) {
+		result, _, err := handler(ctx, request, input)
+		return result, nil, err
+	}
+}
+
 func (service *Service) register() {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	mcp.AddTool(
 		service.server,
 		&mcp.Tool{Name: "fetch", Description: fetchDescription, InputSchema: fetchInputSchema(), Annotations: readOnly},
-		func(ctx context.Context, request *mcp.CallToolRequest, input FetchInput) (*mcp.CallToolResult, any, error) {
-			result, _, err := service.fetch(ctx, request, input)
-			return result, nil, err
-		},
+		obs.Tool("fetch", discardOutput(service.fetch)),
 	)
 	mcp.AddTool(
 		service.server,
@@ -523,10 +531,7 @@ func (service *Service) register() {
 			InputSchema: findInputSchema(),
 			Annotations: readOnly,
 		},
-		func(ctx context.Context, request *mcp.CallToolRequest, input FindInput) (*mcp.CallToolResult, any, error) {
-			result, _, err := service.findWorks(ctx, request, input)
-			return result, nil, err
-		},
+		obs.Tool("findWorks", discardOutput(service.findWorks)),
 	)
 	if runtimeSearchEnabled(service.runtime) {
 		mcp.AddTool(
@@ -537,10 +542,7 @@ func (service *Service) register() {
 				InputSchema: searchInputSchema(),
 				Annotations: readOnly,
 			},
-			func(ctx context.Context, request *mcp.CallToolRequest, input SearchInput) (*mcp.CallToolResult, any, error) {
-				result, _, err := service.search(ctx, request, input)
-				return result, nil, err
-			},
+			obs.Tool("search", discardOutput(service.search)),
 		)
 	}
 	mcp.AddTool(
@@ -551,10 +553,7 @@ func (service *Service) register() {
 			InputSchema: imageInputSchema(),
 			Annotations: readOnly,
 		},
-		func(ctx context.Context, request *mcp.CallToolRequest, input ImageInput) (*mcp.CallToolResult, any, error) {
-			result, _, err := service.fetchImage(ctx, request, input)
-			return result, nil, err
-		},
+		obs.Tool("fetchImage", discardOutput(service.fetchImage)),
 	)
 	mcp.AddTool(
 		service.server,
@@ -564,10 +563,7 @@ func (service *Service) register() {
 			InputSchema: archiveInputSchema(),
 			Annotations: readOnly,
 		},
-		func(ctx context.Context, request *mcp.CallToolRequest, input ArchiveInput) (*mcp.CallToolResult, any, error) {
-			result, _, err := service.archive(ctx, request, input)
-			return result, nil, err
-		},
+		obs.Tool("archive", discardOutput(service.archive)),
 	)
 	mcp.AddTool(
 		service.server,
@@ -577,10 +573,13 @@ func (service *Service) register() {
 			InputSchema: cacheInputSchema(),
 			Annotations: readOnly,
 		},
-		func(ctx context.Context, request *mcp.CallToolRequest, input CacheInput) (*mcp.CallToolResult, any, error) {
-			result, err := service.searchCache(ctx, request, input)
-			return result, nil, err
-		},
+		obs.Tool(
+			"searchCache",
+			func(ctx context.Context, request *mcp.CallToolRequest, input CacheInput) (*mcp.CallToolResult, any, error) {
+				result, err := service.searchCache(ctx, request, input)
+				return result, nil, err
+			},
+		),
 	)
 	service.server.AddPrompt(
 		&mcp.Prompt{
@@ -588,7 +587,7 @@ func (service *Service) register() {
 			Description: "Fetch a URL or local path and convert its contents to markdown",
 			Arguments:   []*mcp.PromptArgument{{Name: "url", Description: "URL or path to fetch", Required: true}},
 		},
-		service.fetchPrompt,
+		obs.Prompt("fetch", service.fetchPrompt),
 	)
 }
 

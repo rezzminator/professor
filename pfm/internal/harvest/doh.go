@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/clock"
+	"hostops/pfm/internal/obs"
 )
 
 // DNS-over-HTTPS resolution for every harvester dial.
@@ -197,7 +198,7 @@ func newDOHResolver() *dohResolver {
 	}
 	return &dohResolver{
 		endpoint: dohEndpoint,
-		client:   &http.Client{Transport: transport, Timeout: dohTimeout},
+		client:   obs.WrapClient(&http.Client{Transport: transport, Timeout: dohTimeout}),
 		clock:    clock.Real,
 		cache:    make(map[string]dohEntry),
 		warned:   make(map[string]bool),

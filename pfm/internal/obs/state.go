@@ -24,7 +24,7 @@ func Transition(ctx context.Context, comp, prior, next, cause string) func(err e
 }
 
 func recordTransition(ctx context.Context, comp, prior, next, cause string, started time.Time, err error) {
-	record(ctx, compState, "state.transition", errorLevel(err, slog.LevelInfo), started, err,
+	record(ctx, compState, "state.transition", errorLevel(err), started, err,
 		slog.String("kind", comp), slog.String("prior", prior), slog.String("next", next), slog.String("cause", cause))
 }
 

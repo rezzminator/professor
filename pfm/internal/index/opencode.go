@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/sqlitedb"
 	"hostops/pfm/internal/store"
@@ -242,7 +243,7 @@ func ReadOpenCodeSessions(ctx context.Context, root string) (
 			)
 		}
 	}()
-	read := obs.SQL(ctx, "opencode", openCodeSessionsQuery)
+	read := obs.SQL(ctx, pfmengine.MustLookup(pfmengine.OpenCode).LongName, openCodeSessionsQuery)
 	rows, err := db.QueryContext(ctx, openCodeSessionsQuery)
 	read.End(-1, err)
 	if err != nil {

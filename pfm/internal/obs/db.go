@@ -44,7 +44,7 @@ func (op *SQLOp) End(rows int64, err error) {
 	if op.Retries > 0 {
 		attrs = append(attrs, slog.Int("retries", op.Retries))
 	}
-	record(op.ctx, compDB, "db.statement", errorLevel(err, slog.LevelInfo), op.started, err, attrs...)
+	record(op.ctx, compDB, "db.statement", errorLevel(err), op.started, err, attrs...)
 }
 
 // SQLOpen is the record of one sqlitedb open: call it before the open with
@@ -53,7 +53,7 @@ func (op *SQLOp) End(rows int64, err error) {
 func SQLOpen(ctx context.Context, kind, path string) func(err error) {
 	started := current(ctx).timing.Now()
 	return func(err error) {
-		record(ctx, compDB, "db.open", errorLevel(err, slog.LevelInfo), started, err,
+		record(ctx, compDB, "db.open", errorLevel(err), started, err,
 			slog.String("kind", kind), slog.String("path", path))
 	}
 }

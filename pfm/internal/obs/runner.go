@@ -44,7 +44,7 @@ func (runner loggedRunner) Run(ctx context.Context, argv []string, opts deps.Run
 		exit = -1
 	}
 	attrs := append(argvShape(argv), slog.Int(FieldExit, exit))
-	record(ctx, compRunner, "runner.run", errorLevel(err, slog.LevelInfo), started, err, attrs...)
+	record(ctx, compRunner, "runner.run", errorLevel(err), started, err, attrs...)
 	return result, err
 }
 
@@ -55,7 +55,7 @@ func (runner loggedRunner) LookPath(name string) (string, error) {
 	ctx := context.Background()
 	started := current(ctx).timing.Now()
 	path, err := runner.next.LookPath(name)
-	record(ctx, compRunner, "runner.lookpath", errorLevel(err, slog.LevelInfo, slog.LevelWarn), started, err,
+	record(ctx, compRunner, "runner.lookpath", errorLevel(err, slog.LevelWarn), started, err,
 		slog.String("argv", name), slog.String("path", path))
 	return path, err
 }
@@ -105,7 +105,7 @@ func (process *loggedProcess) Wait() error {
 
 func (process *loggedProcess) Release() error {
 	err := process.next.Release()
-	process.terminal("runner.release", errorLevel(err, slog.LevelInfo), err)
+	process.terminal("runner.release", errorLevel(err), err)
 	return err
 }
 
@@ -130,7 +130,7 @@ func (process *loggedProcess) forwardKill(op string, forwardable bool, kill func
 	} else {
 		err = fmt.Errorf("obs: %s: process %d cannot be killed through this Runner", op, process.Pid())
 	}
-	process.terminal(op, errorLevel(err, slog.LevelInfo), err)
+	process.terminal(op, errorLevel(err), err)
 	return err
 }
 
@@ -149,11 +149,11 @@ func argvShape(argv []string) []slog.Attr {
 	return []slog.Attr{slog.String("argv", name), slog.Int("argc", len(argv))}
 }
 
-// errorLevel picks the level a record takes: ok when err is nil, else the
+// errorLevel picks the level a record takes: INFO when err is nil, else the
 // failure level (ERROR unless the caller names a softer one).
-func errorLevel(err error, ok slog.Level, failure ...slog.Level) slog.Level {
+func errorLevel(err error, failure ...slog.Level) slog.Level {
 	if err == nil {
-		return ok
+		return slog.LevelInfo
 	}
 	if len(failure) != 0 {
 		return failure[0]

@@ -64,7 +64,8 @@ func SQLOpen(ctx context.Context, kind, path string) func(err error) {
 // read. Nothing else in the text is kept.
 func statementShape(query string) (op, table string) {
 	fields := strings.FieldsFunc(query, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '(' || r == ')' || r == ',' || r == ';' || r == '='
+		return r == ' ' || r == '\t' || r == '\n' || r == '\r' || r == '(' || r == ')' || r == ',' || r == ';' ||
+			r == '='
 	})
 	if len(fields) == 0 {
 		return "", ""
@@ -81,7 +82,7 @@ func statementShape(query string) (op, table string) {
 			return op, unquote(afterExistsClause(fields[index+1:]))
 		case "INDEX":
 			for rest := index + 1; rest+1 < len(fields); rest++ {
-				if strings.ToUpper(fields[rest]) == "ON" {
+				if strings.EqualFold(fields[rest], "ON") {
 					return op, unquote(fields[rest+1])
 				}
 			}
@@ -93,7 +94,8 @@ func statementShape(query string) (op, table string) {
 
 // afterExistsClause skips an `IF NOT EXISTS` and returns the name that follows.
 func afterExistsClause(fields []string) string {
-	if len(fields) >= 4 && strings.EqualFold(fields[0], "IF") && strings.EqualFold(fields[1], "NOT") && strings.EqualFold(fields[2], "EXISTS") {
+	if len(fields) >= 4 && strings.EqualFold(fields[0], "IF") && strings.EqualFold(fields[1], "NOT") &&
+		strings.EqualFold(fields[2], "EXISTS") {
 		return fields[3]
 	}
 	if len(fields) != 0 {

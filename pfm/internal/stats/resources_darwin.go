@@ -146,7 +146,8 @@ func readDarwinHeader() (Header, error) {
 	if err != nil {
 		return Header{}, fmt.Errorf("read Darwin host memory size: %w", err)
 	}
-	result, err := obs.Runner(deps.RealRunner{}).Run(context.Background(), []string{deps.Executable("vm_stat")}, deps.RunOptions{})
+	result, err := obs.Runner(deps.RealRunner{}).
+		Run(context.Background(), []string{deps.Executable("vm_stat")}, deps.RunOptions{})
 	if err == nil && result.ExitCode != 0 {
 		err = fmt.Errorf("exit status %d", result.ExitCode)
 	}

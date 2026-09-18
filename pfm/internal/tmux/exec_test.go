@@ -149,7 +149,17 @@ func TestExecKeepsCommandsContract(t *testing.T) {
 // shaped from the tmux arguments, not the launcher's.
 func TestObserveRecordsALauncherAssembledCommand(t *testing.T) {
 	ctx, recorder := obs.Test(t)
-	launcher := exec.CommandContext(ctx, fakeTmux(t, 0), "--scope", "--", "tmux", "-S", "/sockets/cc-1", "new-session", "-d")
+	launcher := exec.CommandContext(
+		ctx,
+		fakeTmux(t, 0),
+		"--scope",
+		"--",
+		"tmux",
+		"-S",
+		"/sockets/cc-1",
+		"new-session",
+		"-d",
+	)
 	if _, err := Observe(ctx, launcher, "new-session", "-d").CombinedOutput(); err != nil {
 		t.Fatal(err)
 	}

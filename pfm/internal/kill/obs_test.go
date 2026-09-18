@@ -17,12 +17,18 @@ func TestManagerKillRecordsATransition(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	jail := newKillJail(t)
 	database := jail.open(t)
-	manager, err := New(database, Dependencies{Spawner: &captureSpawner{}, Now: func() time.Time { return time.Unix(600, 0) }})
+	manager, err := New(
+		database,
+		Dependencies{Spawner: &captureSpawner{}, Now: func() time.Time { return time.Unix(600, 0) }},
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	const id = "20202020-2020-4020-8020-202020202020"
-	if _, err := manager.Kill(ctx, Request{ID: id, Engine: pfmengine.Codex, Exit: true, SocketName: "probe-codex-self", PaneID: "%7"}); err != nil {
+	if _, err := manager.Kill(
+		ctx,
+		Request{ID: id, Engine: pfmengine.Codex, Exit: true, SocketName: "probe-codex-self", PaneID: "%7"},
+	); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := manager.Kill(ctx, Request{}); err == nil {

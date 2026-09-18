@@ -46,7 +46,7 @@ func TestReadCodexRateLimitsCommandRecordsTheAppServerProcess(t *testing.T) {
 
 func containsAny(text string, needles ...string) bool {
 	for _, needle := range needles {
-		if len(needle) != 0 && len(text) >= len(needle) && indexOf(text, needle) {
+		if needle != "" && len(text) >= len(needle) && indexOf(text, needle) {
 			return true
 		}
 	}

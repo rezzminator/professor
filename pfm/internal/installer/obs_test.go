@@ -25,7 +25,10 @@ func TestLedgerDoorsRecordUnderTheInstallerComponent(t *testing.T) {
 	}
 	installer.ok("shim current")
 	installer.skip("launchd not on this platform")
-	if err := installer.change("link ~/.claude/agents", func() error { return errors.New("read-only file system") }); err == nil {
+	if err := installer.change(
+		"link ~/.claude/agents",
+		func() error { return errors.New("read-only file system") },
+	); err == nil {
 		t.Fatal("the failing action's error was swallowed")
 	}
 	records := recorder.Records()
@@ -46,7 +49,11 @@ func TestLedgerDoorsRecordUnderTheInstallerComponent(t *testing.T) {
 		}
 	}
 	if records[3].Level != slog.LevelError.String() || records[0].Level != slog.LevelInfo.String() {
-		t.Fatalf("levels: failed change at %s (want ERROR), change at %s (want INFO)", records[3].Level, records[0].Level)
+		t.Fatalf(
+			"levels: failed change at %s (want ERROR), change at %s (want INFO)",
+			records[3].Level,
+			records[0].Level,
+		)
 	}
 	if got, _ := records[3].Field(obs.FieldErr); got != "read-only file system" {
 		t.Fatalf("err = %v", got)

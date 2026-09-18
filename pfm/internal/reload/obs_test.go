@@ -49,7 +49,13 @@ func TestRunRecordsEveryStateTransition(t *testing.T) {
 
 	refused := &fakeReloadTmux{}
 	_, err := Run(ctx, Request{
-		Engine: pfmengine.OpenCode, SocketPath: "/tmp/ox-session", Pane: "%7", PanePID: 700, Account: 1, AccountIDs: []int{1}, CWD: "/work",
+		Engine:     pfmengine.OpenCode,
+		SocketPath: "/tmp/ox-session",
+		Pane:       "%7",
+		PanePID:    700,
+		Account:    1,
+		AccountIDs: []int{1},
+		CWD:        "/work",
 	}, Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 1}, refused, nil, nil)
 	if err == nil {
 		t.Fatal("OpenCode reload was not refused")

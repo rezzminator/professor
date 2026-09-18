@@ -12,7 +12,11 @@ import (
 // text and every literal in it stay out of the file.
 func TestSQLRecordsShapeNeverText(t *testing.T) {
 	ctx, recorder := Test(t)
-	op := SQL(ctx, "fleet", "INSERT INTO hidden(uuid,hidden_at) VALUES(?, 'sk-PLANTED-literal') ON CONFLICT(uuid) DO UPDATE SET hidden_at=excluded.hidden_at")
+	op := SQL(
+		ctx,
+		"fleet",
+		"INSERT INTO hidden(uuid,hidden_at) VALUES(?, 'sk-PLANTED-literal') ON CONFLICT(uuid) DO UPDATE SET hidden_at=excluded.hidden_at",
+	)
 	op.Retries = 2
 	op.End(1, nil)
 	records := recorder.Records()
@@ -30,7 +34,8 @@ func TestSQLRecordsShapeNeverText(t *testing.T) {
 	requireField(t, record, "rows", float64(1))
 	requireField(t, record, "retries", float64(2))
 	requireDur(t, record)
-	if raw := recorder.Raw(); strings.Contains(raw, "PLANTED") || strings.Contains(raw, "VALUES") || strings.Contains(raw, "excluded") {
+	if raw := recorder.Raw(); strings.Contains(raw, "PLANTED") || strings.Contains(raw, "VALUES") ||
+		strings.Contains(raw, "excluded") {
 		t.Fatalf("SQL text reached the file: %s", raw)
 	}
 }

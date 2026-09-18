@@ -48,8 +48,11 @@ func TestTrailWalksACoordinatorsStates(t *testing.T) {
 	failing.End(errors.New("pane in copy-mode"))
 	records := recorder.Records()
 	want := []struct{ prior, next string }{
-		{"requested", "locked"}, {"locked", "exit-typed"}, {"exit-typed", "done"},
-		{"resolved", "typed"}, {"typed", "failed"},
+		{"requested", "locked"},
+		{"locked", "exit-typed"},
+		{"exit-typed", "done"},
+		{"resolved", "typed"},
+		{"typed", "failed"},
 	}
 	if len(records) != len(want) {
 		t.Fatalf("records = %d, want %d: %s", len(records), len(want), recorder.Raw())

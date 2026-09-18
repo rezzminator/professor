@@ -336,7 +336,10 @@ func Run(
 			// IS the answer: everything in-flight dies with the pane anyway.
 			if !dialogSeen {
 				dialogSeen = true
-				fmt.Fprintln(stderr, "pfm chat reload: confirming the exit dialog — background work stops with the chat")
+				fmt.Fprintln(
+					stderr,
+					"pfm chat reload: confirming the exit dialog — background work stops with the chat",
+				)
 			}
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("confirm exit dialog: %w", err)

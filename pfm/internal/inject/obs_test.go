@@ -49,9 +49,16 @@ func TestInjectAndSelfCompactRecordTheirOutcomeAsATransition(t *testing.T) {
 	}
 
 	engine.whoami = fakeSelf{identity: resolve.Identity{
-		Session: "self-session", SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-state-door"), Pane: "%1",
+		Session:    "self-session",
+		SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-state-door"),
+		Pane:       "%1",
 	}}
-	if result, err := engine.ScheduleSelfCompact(ctx, "line one\nPLANTED two", []string{"resume"}); err != nil || result.Code != CodeUndelivered {
+	if result, err := engine.ScheduleSelfCompact(
+		ctx,
+		"line one\nPLANTED two",
+		[]string{"resume"},
+	); err != nil ||
+		result.Code != CodeUndelivered {
 		t.Fatalf("ScheduleSelfCompact() = %+v, %v", result, err)
 	}
 	compact := stateRecords(recorder, "self-compact")

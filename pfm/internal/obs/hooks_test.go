@@ -51,7 +51,11 @@ func TestHookDecisionFromExitCodeAndPermissionShape(t *testing.T) {
 	_, finish = Hook(ctx, "then", &bytes.Buffer{})
 	finish(1)
 	tee, finish := Hook(ctx, "explore-deny", &bytes.Buffer{})
-	_, _ = tee.Write([]byte(`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Explore is read-only"}}`))
+	_, _ = tee.Write(
+		[]byte(
+			`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Explore is read-only"}}`,
+		),
+	)
 	finish(0)
 	records := recorder.Records()
 	if len(records) != 4 {

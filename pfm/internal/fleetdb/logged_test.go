@@ -48,7 +48,13 @@ func TestStoreOperationsRecordUnderTheDBComponent(t *testing.T) {
 		}
 	}
 	if kill.Message == "" || killed.Message == "" || meta.Message == "" {
-		t.Fatalf("missing statement records (kill=%v killed=%v meta=%v): %s", kill.Message != "", killed.Message != "", meta.Message != "", recorder.Raw())
+		t.Fatalf(
+			"missing statement records (kill=%v killed=%v meta=%v): %s",
+			kill.Message != "",
+			killed.Message != "",
+			meta.Message != "",
+			recorder.Raw(),
+		)
 	}
 	if rows, _ := kill.Field("rows"); rows != float64(1) {
 		t.Fatalf("kill rows = %v, want 1", rows)

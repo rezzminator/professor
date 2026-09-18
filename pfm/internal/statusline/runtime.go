@@ -36,7 +36,8 @@ func (commandRunner) Output(
 	name string,
 	args ...string,
 ) ([]byte, error) {
-	result, err := obs.Runner(deps.RealRunner{}).Run(ctx, append([]string{deps.Executable(name)}, args...), deps.RunOptions{})
+	result, err := obs.Runner(deps.RealRunner{}).
+		Run(ctx, append([]string{deps.Executable(name)}, args...), deps.RunOptions{})
 	if err == nil && result.ExitCode != 0 {
 		err = fmt.Errorf("exit status %d", result.ExitCode)
 	}

@@ -34,8 +34,12 @@ func TestRunRecordsTheSweepsStateTransitions(t *testing.T) {
 		}
 	}
 	runner, err := New(Dependencies{
-		Paths: values, Tmux: fakeClientIdleTmux{}, Proc: gather.NewProcFS(values.ProcRoot), Busy: quietBusy{},
-		KillServer: func(context.Context, string) error { return nil }, Now: func() time.Time { return time.Unix(600, 0) },
+		Paths:      values,
+		Tmux:       fakeClientIdleTmux{},
+		Proc:       gather.NewProcFS(values.ProcRoot),
+		Busy:       quietBusy{},
+		KillServer: func(context.Context, string) error { return nil },
+		Now:        func() time.Time { return time.Unix(600, 0) },
 	})
 	if err != nil {
 		t.Fatal(err)

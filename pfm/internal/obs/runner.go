@@ -181,7 +181,14 @@ func record(ctx context.Context, comp, op string, level slog.Level, started time
 // runner.exit records a wrapped Runner writes, so the census reads one shape.
 func Started(ctx context.Context, argv []string, pid int) func(waitErr error) {
 	started := current(ctx).timing.Now()
-	record(ctx, compRunner, "runner.start", slog.LevelInfo, started, nil, append(argvShape(argv), slog.Int(FieldPID, pid))...)
+	record(
+		ctx,
+		compRunner,
+		"runner.start",
+		slog.LevelInfo,
+		started,
+		nil,
+		append(argvShape(argv), slog.Int(FieldPID, pid))...)
 	process := &loggedProcess{ctx: ctx, next: waitedProcess{pid: pid}, started: started}
 	return func(waitErr error) {
 		process.next = waitedProcess{pid: pid, err: waitErr}

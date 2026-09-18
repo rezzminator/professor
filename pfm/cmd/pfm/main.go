@@ -512,7 +512,10 @@ func runInternal(
 	}
 	if len(args) == 0 {
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
-		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|tmux-title-renudge|update-check [options]")
+		fmt.Fprintln(
+			stderr,
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|tmux-title-renudge|update-check [options]",
+		)
 		return 2
 	}
 	if args[0] != "kill-exit" {

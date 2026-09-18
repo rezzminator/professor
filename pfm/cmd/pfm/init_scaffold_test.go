@@ -149,6 +149,59 @@ func TestInitCollisionSkipsWithoutPinAndForceOverwrites(t *testing.T) {
 	}
 }
 
+func TestInitRefusesASecondScaffoldWithoutForce(t *testing.T) {
+	source := newScaffoldStoreFixture(t)
+	home := t.TempDir()
+	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	var stdout, stderr bytes.Buffer
+	if code := runInit([]string{target}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runInit() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	baseline, err := professor.Load(target)
+	if err != nil {
+		t.Fatalf("load first baseline: %v", err)
+	}
+	pins := len(baseline.Files)
+	if pins == 0 {
+		t.Fatalf("first init pinned nothing: %#v", baseline.Files)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code := runInit([]string{target}, &stdout, &stderr, runtime)
+	if code != 2 {
+		t.Fatalf("second runInit() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "is already scaffolded") ||
+		!strings.Contains(stderr.String(), "pfm init --force") {
+		t.Fatalf("refusal stderr=%q", stderr.String())
+	}
+	baseline, err = professor.Load(target)
+	if err != nil {
+		t.Fatalf("load baseline after refused second init: %v", err)
+	}
+	if got := len(baseline.Files); got != pins {
+		t.Fatalf("pin count after refused second init=%d, want %d: %#v", got, pins, baseline.Files)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runInit([]string{"--force", target}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runInit(--force) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	baseline, err = professor.Load(target)
+	if err != nil {
+		t.Fatalf("load baseline after forced re-init: %v", err)
+	}
+	if got := len(baseline.Files); got == 0 {
+		t.Fatalf("forced re-init did not re-pin: %#v", baseline.Files)
+	}
+}
+
 func newScaffoldStoreFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()

@@ -68,6 +68,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 		" CLAUDE_CONFIG_DIR='/home/test/.cc/2'" +
 		" ENABLE_PROMPT_CACHING_1H=1" +
 		" " + webSearchBudgetName + "=" + Quote(webSearchBudgetValue) +
+		" " + truecolorName + "=" + Quote("1") +
 		" claude"
 	if !strings.HasPrefix(plan.Run, wantPrefix) {
 		t.Fatalf("resume run = %q, want prefix %q", plan.Run, wantPrefix)

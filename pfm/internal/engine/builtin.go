@@ -20,7 +20,15 @@ func init() {
 		// CLI accepts any digits-only integer >= 1 with no ceiling, and a
 		// malformed value silently reverts to 200 — so this is the largest
 		// integer JavaScript holds exactly, spelled as plain digits.
-		LaunchEnv: []string{"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=9007199254740991"},
+		//
+		// Claude Code drops to 256 colours whenever TMUX is set unless
+		// CLAUDE_CODE_TMUX_TRUECOLOR is present; every pfm chat lives in a
+		// tmux pane, so without it every theme colour is quantised. A
+		// headless run carries it too and ignores it: no TMUX, no downgrade.
+		LaunchEnv: []string{
+			"CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=9007199254740991",
+			"CLAUDE_CODE_TMUX_TRUECOLOR=1",
+		},
 		// pfm stages its own system prompt (--system-prompt-file); Claude
 		// Code's own output style (a project or user "outputStyle" setting,
 		// e.g. a checked-in .claude/settings.json) would otherwise apply a

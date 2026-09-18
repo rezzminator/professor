@@ -380,7 +380,8 @@ done
 printf 'claude ready\r\n❯ '
 [ -n "$prompt" ] && turn "$prompt"
 buf=""
-while IFS= read -r -N1 ch; do
+# -d '' -n1, never -N1: the darwin CI runner's /bin/bash is 3.2, whose read has no -N.
+while IFS= read -r -d '' -n1 ch; do
   case "$ch" in
     $'\n'|$'\r') [ -n "$buf" ] && turn "$buf"; buf=""; printf '❯ ' ;;
     $'\033') ;;

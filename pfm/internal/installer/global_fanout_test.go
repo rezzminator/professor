@@ -412,6 +412,56 @@ func TestGlobalAgentsDoctorNamesADanglingCodexLink(t *testing.T) {
 	}
 }
 
+// TestGlobalAgentsDoctorNamesBothDanglingAndConflictingCodexLinks pins F3: a
+// host can have one link dangling (its compiled .toml wiped) and another
+// pointed at a foreign file the installer must never touch, at the same
+// time. Both buckets are computed by the per-source loop above, so a doctor
+// line that renders only one of them is discarding a refusal-to-touch —
+// exactly the "renders as absence" failure this repo's CLAUDE.md names.
+func TestGlobalAgentsDoctorNamesBothDanglingAndConflictingCodexLinks(t *testing.T) {
+	home := t.TempDir()
+	repo := stageGlobalAgentSources(t, home)
+	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
+	linkGlobalAgents(t, repo, filepath.Join(home, ".cc", "2"), "rr", "walker")
+	linkGlobalCodexAgents(t, home, "rr", "walker")
+	// rr dangling: the generated twin behind its link is gone.
+	if err := os.Remove(filepath.Join(paths.GeneratedCodexAgentsDir(home), "rr.toml")); err != nil {
+		t.Fatal(err)
+	}
+	// walker conflicting: its registry entry is a symlink pointing at a
+	// foreign file OUTSIDE the generated directory — the classifier
+	// (codexgen.ClassifyGlobalLink) treats a same-kind regular file as a
+	// plain "Copy" (folded into missing on rerun), so the CONFLICT bucket
+	// this test targets is only reachable through a foreign symlink, the
+	// same shape TestGlobalAgentsDoctorConflictNamesTheForeignLink uses.
+	registry := filepath.Join(home, ".codex", "agents")
+	if err := os.Remove(filepath.Join(registry, "walker.toml")); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(home, "operator-walker.toml")
+	if err := os.WriteFile(elsewhere, []byte("# an operator's own file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(registry, "walker.toml")); err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if failures != 1 {
+		t.Fatalf(
+			"warnings=%d failures=%d, want failures=1 (a dangling codex link is a failure)\n%s",
+			warnings,
+			failures,
+			output.String(),
+		)
+	}
+	want := "doctor: global-agents source=" + registry + " state=DANGLING names=rr conflict=walker"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("output missing %q (conflict bucket dropped):\n%s", want, output.String())
+	}
+}
+
 // TestGlobalAgentsDoctorNoSourcesIsAWarningNotACleanBill is the
 // empty-enumeration law: a clone IS present (unlike a bare HOME, which is
 // NO-CLONE) but ships no agent sources, so every account would trivially
@@ -621,5 +671,43 @@ func TestUninstallLeavesAForeignCodexAgentUntouched(t *testing.T) {
 	}
 	if got := readFixture(t, foreign); got != "name = \"mine\"\n" {
 		t.Fatalf("uninstall touched an operator-owned Codex agent file: %q", got)
+	}
+}
+
+// TestUninstallRetiresAPreMigrationLegacyCodexAgentLink covers the
+// global_fanout.go:441 INFO gap: a host that upgraded to the generated-
+// directory layout without ever rerunning `pfm install`/`pfm codex agents`
+// in between can still carry a pre-migration ~/.codex/agents/<name>.toml
+// link aimed at the retired in-clone twin
+// (<blueprint>/templates/global/agents/<name>.toml). This installer wrote
+// that link too, so uninstall must retire it — not leave it behind as if it
+// were an operator's own file, the way TestUninstallLeavesAForeignCodexAgentUntouched
+// pins for a GENUINELY foreign link.
+func TestUninstallRetiresAPreMigrationLegacyCodexAgentLink(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "blueprint")
+	if err := os.MkdirAll(filepath.Join(repo, "templates", "global", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(home, ".codex", "agents")
+	if err := os.MkdirAll(registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyTwin := filepath.Join(repo, "templates", "global", "agents", "rr.toml")
+	legacyLink := filepath.Join(registry, "rr.toml")
+	if err := os.Symlink(legacyTwin, legacyLink); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(legacyLink); !os.IsNotExist(err) {
+		t.Fatalf("pre-migration legacy Codex agent link survived uninstall: %v", err)
 	}
 }

@@ -98,7 +98,12 @@ type GlobalAgentsStatus struct {
 	// line never hides the agents the account also lacks.
 	Names   []string
 	Missing []string
-	Error   string
+	// Conflicts carries the foreign-link bucket when it coexists with a
+	// higher-priority state (DANGLING): Names already names that state's own
+	// bucket, so a second bucket would otherwise be computed and discarded
+	// rather than rendered.
+	Conflicts []string
+	Error     string
 }
 
 // Describe renders the one operator-facing line every caller shows for a
@@ -115,6 +120,9 @@ func (status GlobalAgentsStatus) Describe() string {
 	}
 	if len(status.Missing) != 0 {
 		line += " missing=" + strings.Join(status.Missing, ",")
+	}
+	if len(status.Conflicts) != 0 {
+		line += " conflict=" + strings.Join(status.Conflicts, ",")
 	}
 	if status.Error != "" {
 		line += " error=" + status.Error
@@ -240,6 +248,11 @@ func inspectHostGlobalCodexAgents(home, repo string, sources []string) GlobalAge
 		status.State = GlobalAgentsDangling
 		status.Names = dangling
 		status.Missing = missing
+		// A conflicting link found by the SAME loop pass must never be
+		// dropped just because DANGLING outranks CONFLICT for State: a
+		// refusal to touch a foreign link is real regardless of what else
+		// the registry also has wrong.
+		status.Conflicts = conflicting
 	case len(conflicting) != 0:
 		status.State = GlobalAgentsConflict
 		status.Names = conflicting
@@ -410,10 +423,19 @@ func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error 
 // is decided by the link's TARGET, the same rule retireOrphanGlobalCommands
 // holds to: only a symlink resolving INSIDE the generated directory is ours
 // to remove — an operator's own agent file, or a link pointing anywhere
-// else, is left untouched.
+// else, is left untouched. A host that upgraded to the generated-directory
+// layout without ever rerunning `pfm install`/`pfm codex agents` in between
+// can still carry a pre-migration link aimed at the retired in-clone twin
+// (<blueprint>/templates/global/agents/<name>.toml) — this installer wrote
+// that link too, so it counts as owned and is retired the same way.
 func (installer *engine) unwireGeneratedCodexAgents() error {
 	generated := paths.GeneratedCodexAgentsDir(installer.options.Home)
 	registry := filepath.Join(installer.options.Home, ".codex", "agents")
+	repo, err := GlobalSourceRepo(installer.options.Home)
+	if err != nil {
+		return fmt.Errorf("resolve global source repository: %w", err)
+	}
+	legacyDir := filepath.Join(repo, "templates", "global", "agents")
 	entries, err := os.ReadDir(registry)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("inspect Codex global agents registry %s: %w", registry, err)
@@ -438,7 +460,9 @@ func (installer *engine) unwireGeneratedCodexAgents() error {
 			target = filepath.Join(filepath.Dir(path), target)
 		}
 		target = filepath.Clean(target)
-		if target != generated && !strings.HasPrefix(target, generated+string(filepath.Separator)) {
+		owned := target == generated || strings.HasPrefix(target, generated+string(filepath.Separator))
+		owned = owned || target == filepath.Clean(filepath.Join(legacyDir, entry.Name()))
+		if !owned {
 			continue
 		}
 		if err := installer.retire(path, "retired generated Codex agent link"); err != nil {

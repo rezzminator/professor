@@ -7,6 +7,7 @@ suites:
   unit:
     wall_s: 1174
     packages:
+      hostops/pfm/cmd/mock-engine: 10
       hostops/pfm/cmd/pfm: 498
       hostops/pfm/e2e: 2
       hostops/pfm/internal/action: 26
@@ -47,6 +48,7 @@ suites:
       hostops/pfm/internal/installer/shim: 2
       hostops/pfm/internal/kill: 14
       hostops/pfm/internal/mcpserv: 92
+      hostops/pfm/internal/mockengine: 16
       hostops/pfm/internal/naming: 2
       hostops/pfm/internal/nudge: 2
       hostops/pfm/internal/obs: 2

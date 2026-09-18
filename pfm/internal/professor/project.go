@@ -2,7 +2,6 @@
 package professor
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -10,15 +9,14 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
 )
 
 type projectStatus string
@@ -448,7 +446,7 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 			Template:     template,
 			TemplateHash: hash,
 			PinnedSHA:    report.Store.SHA,
-			PinnedAt:     time.Now().Format(time.DateOnly),
+			PinnedAt:     clock.Real.Now().Format(time.DateOnly),
 		}
 		report.Baseline.Ignored = removeIgnored(report.Baseline.Ignored, template)
 		selected[0] = local
@@ -475,7 +473,7 @@ func runProjectPin(args []string, stdout, stderr io.Writer, runtime config.Runti
 			}
 			pin.TemplateHash = hash
 			pin.PinnedSHA = report.Store.SHA
-			pin.PinnedAt = time.Now().Format(time.DateOnly)
+			pin.PinnedAt = clock.Real.Now().Format(time.DateOnly)
 			report.Baseline.Files[local] = pin
 			selected[i] = local
 		}
@@ -594,13 +592,13 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 			fmt.Fprintf(stderr, "pfm update adopt: --at requires a git blueprint clone; %s has no .git\n", store.Root)
 			return 1
 		}
-		shaOut, errText, gitErr := adoptGit(store.Root, "rev-parse", "--short", ref+"^{commit}")
+		shaOut, errText, gitErr := adoptGit(store.runner, store.Root, "rev-parse", "--short", ref+"^{commit}")
 		if gitErr != nil {
 			fmt.Fprintf(stderr, "pfm update adopt: %v\n", adoptGitFailure("resolve --at "+ref, gitErr, errText))
 			return 1
 		}
 		sha = strings.TrimSpace(shaOut)
-		versionOut, errText, gitErr := adoptGit(store.Root, "show", ref+":VERSION")
+		versionOut, errText, gitErr := adoptGit(store.runner, store.Root, "show", ref+":VERSION")
 		if gitErr != nil {
 			fmt.Fprintf(
 				stderr,
@@ -619,7 +617,7 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 		version = store.Version
 	}
 	kept, absent, absentAtRef, pinned := 0, 0, 0, 0
-	pinnedAt := time.Now().Format(time.DateOnly)
+	pinnedAt := clock.Real.Now().Format(time.DateOnly)
 	for _, entry := range plan {
 		if _, exists := baseline.Files[entry.local]; exists {
 			kept++
@@ -636,7 +634,7 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 		}
 		var hash string
 		if usingAt {
-			raw, missing, gitErr := adoptGitShowTemplate(store.Root, ref, entry.template)
+			raw, missing, gitErr := adoptGitShowTemplate(store.runner, store.Root, ref, entry.template)
 			if gitErr != nil {
 				fmt.Fprintf(stderr, "pfm update adopt: %v\n", gitErr)
 				return 1
@@ -692,34 +690,6 @@ func runProjectAdopt(args []string, stdout, stderr io.Writer, runtime config.Run
 	}
 	fmt.Fprintln(stdout, "next: pfm update check")
 	return 0
-}
-
-func adoptGit(root string, args ...string) (string, string, error) {
-	command := exec.Command(deps.Executable("git"), args...)
-	command.Dir = root
-	var stdout, stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
-	err := command.Run()
-	return stdout.String(), stderr.String(), err
-}
-
-func adoptGitFailure(action string, err error, stderrText string) error {
-	return fmt.Errorf("%s: %w: %s", action, err, strings.TrimSpace(stderrText))
-}
-
-func adoptGitShowTemplate(root, ref, template string) ([]byte, bool, error) {
-	stdout, stderrText, gitErr := adoptGit(root, "show", ref+":templates/"+template)
-	if gitErr == nil {
-		return []byte(stdout), false, nil
-	}
-	trimmed := strings.TrimSpace(stderrText)
-	var exitErr *exec.ExitError
-	if errors.As(gitErr, &exitErr) && exitErr.ExitCode() == 128 &&
-		(strings.Contains(trimmed, "does not exist in") || strings.Contains(trimmed, "exists on disk, but not in")) {
-		return nil, true, nil
-	}
-	return nil, false, adoptGitFailure(fmt.Sprintf("show %s at %s", template, ref), gitErr, stderrText)
 }
 
 func runProjectIgnore(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {

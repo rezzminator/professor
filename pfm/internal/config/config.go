@@ -399,15 +399,6 @@ func (raw *rawAsk) UnmarshalJSON(content []byte) error {
 	return nil
 }
 
-// ResolvePath applies pfm's XDG rule: only an absolute XDG_CONFIG_HOME wins.
-func ResolvePath(home string) string {
-	root := os.Getenv("XDG_CONFIG_HOME")
-	if !filepath.IsAbs(root) {
-		root = filepath.Join(home, ".config")
-	}
-	return filepath.Join(filepath.Clean(root), "pfm", FileName)
-}
-
 // resolveExistingPath is ResolvePath, except that a machine which still has
 // only the pre-split config.json reads that file until `pfm install`
 // migrates it — every command keeps working across the binary upgrade.

@@ -38,6 +38,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/agentrole"
+	"hostops/pfm/internal/atomicfile"
 )
 
 // crumbPrefix distinguishes a role re-arm crumb from the other files pfm
@@ -113,7 +114,7 @@ func WriteCrumb(sidDir, socket string, crumb Crumb) error {
 		return fmt.Errorf("role re-arm: encode crumb: %w", err)
 	}
 	path := filepath.Join(sidDir, crumbPrefix+socket)
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
+	if err := atomicfile.Write(path, raw, 0o600); err != nil {
 		return fmt.Errorf("role re-arm: write crumb %s: %w", path, err)
 	}
 	return nil

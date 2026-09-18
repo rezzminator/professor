@@ -3,11 +3,10 @@ package fleet
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
@@ -46,13 +45,18 @@ func SetPrimaryAccount(values paths.Values, machine pfmconfig.Config, account in
 	if _, found := machine.Account(account); !found {
 		return fmt.Errorf("primary account %d is not in the configured roster", account)
 	}
-	return fleetdb.SetClaudePrimaryAccount(context.Background(), values, account, time.Now().Unix())
+	return fleetdb.SetClaudePrimaryAccount(context.Background(), values, account, clock.Real.Now().Unix())
 }
 
 // CurrentSocket is the tmux socket name of the calling process's own server
 // ($TMUX), or "" outside tmux.
 func CurrentSocket() string {
-	value := os.Getenv("TMUX")
+	return CurrentSocketFrom(paths.OSEnv{})
+}
+
+// CurrentSocketFrom applies the TMUX parsing rule over an injected environment.
+func CurrentSocketFrom(env paths.Env) string {
+	value := env.Get("TMUX")
 	if comma := strings.IndexByte(value, ','); comma >= 0 {
 		value = value[:comma]
 	}

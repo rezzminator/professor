@@ -106,7 +106,7 @@ func Find(ctx context.Context, runtime *pfmconfig.Runtime, request FindRequest) 
 // (CLAUDE_CODE_SESSION_ID), or "" outside one — the Self a surface whose
 // process is the asking chat hands Find.
 func AskingSession() string {
-	return os.Getenv("CLAUDE_CODE_SESSION_ID")
+	return (paths.OSEnv{}).Get("CLAUDE_CODE_SESSION_ID")
 }
 
 // ExcerptNeedles splits an excerpt into the needles Find searches for: its

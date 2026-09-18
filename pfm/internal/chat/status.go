@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
@@ -37,7 +37,7 @@ func Status(
 	if err != nil {
 		return headless.Status{}, err
 	}
-	status, err := headless.Inspect(ctx, target, time.Now())
+	status, err := headless.Inspect(ctx, target, clock.Real.Now())
 	if err != nil {
 		return headless.Status{}, err
 	}

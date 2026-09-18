@@ -16,6 +16,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"hostops/pfm/internal/atomicfile"
 )
 
 func samplePath(sidDir, sessionID string) string {
@@ -96,7 +98,7 @@ func Text(percent, band, step int) string {
 }
 
 func writeInt(path string, value int) error {
-	if err := os.WriteFile(path, []byte(strconv.Itoa(value)+"\n"), 0o600); err != nil {
+	if err := atomicfile.Write(path, []byte(strconv.Itoa(value)+"\n"), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

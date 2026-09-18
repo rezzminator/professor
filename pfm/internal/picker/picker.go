@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"time"
 
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
@@ -163,7 +163,7 @@ func Run(
 		// Opening the picker IS an interaction, so the clock starts stamped
 		// and the first frames refresh at full cadence. Every keystroke
 		// restamps it; going quiet is what makes the stream back off.
-		activity := ui.NewActivityClock(time.Now())
+		activity := ui.NewActivityClock(clock.Real.Now())
 		scan.Snapshot.Activity = activity
 		go streamFleetRefreshes(
 			refreshContext,

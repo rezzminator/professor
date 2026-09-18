@@ -1,11 +1,12 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
 	"strings"
 
 	pfmconfig "hostops/pfm/internal/config"
@@ -96,6 +97,9 @@ type ClaudeSpawn struct {
 	// (Synthesize does) normalize BEFORE building the spawn: the door never
 	// substitutes defaults for a config a caller deliberately assembled.
 	Machine pfmconfig.Config
+	// Runner is the process seam used by direct Claude launches. Nil selects
+	// the real runner; tests can script argv, environment, and lifecycle.
+	Runner deps.Runner
 
 	// strip widens the hygiene list for the headless routes, which must also
 	// drop CODEX_THREAD_ID. nil means the fleet-wide hygieneNames.
@@ -175,7 +179,22 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 // environment minus the hygiene strip, plus the account's assignments, and the
 // argv the shell form would have produced. Stdout, Stderr and Dir belong to
 // the caller.
-func (spawn ClaudeSpawn) Command(ctx context.Context) (*exec.Cmd, error) {
+// ProcessCommand is the small command surface used by the direct Claude
+// callers. It keeps their stdio and directory controls while making process
+// creation cross the shared deps.Runner seam.
+type ProcessCommand struct {
+	ctx    context.Context
+	runner deps.Runner
+	Path   string
+	Args   []string
+	Env    []string
+	Dir    string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+func (spawn ClaudeSpawn) Command(ctx context.Context) (*ProcessCommand, error) {
 	if err := spawn.validate(); err != nil {
 		return nil, err
 	}
@@ -184,9 +203,51 @@ func (spawn ClaudeSpawn) Command(ctx context.Context) (*exec.Cmd, error) {
 	if value == "" {
 		value = pfmengine.MustLookup(pfmengine.Claude).Binary
 	}
-	command := exec.CommandContext(ctx, deps.Executable(value), spawn.argv(prefs)...)
-	command.Env = spawn.Environment(os.Environ())
-	return command, nil
+	path := deps.Executable(value)
+	return &ProcessCommand{
+		ctx:    ctx,
+		runner: spawn.runner(),
+		Path:   path,
+		Args:   append([]string{path}, spawn.argv(prefs)...),
+		Env:    spawn.Environment(os.Environ()),
+	}, nil
+}
+
+func (spawn ClaudeSpawn) runner() deps.Runner {
+	if spawn.Runner != nil {
+		return spawn.Runner
+	}
+	return deps.RealRunner{}
+}
+
+func (command *ProcessCommand) start(stdout, stderr io.Writer) (deps.Process, error) {
+	return command.runner.Start(command.ctx, command.Args, deps.StartOptions{
+		Env: command.Env, Dir: command.Dir, Stdin: command.Stdin,
+		Stdout: stdout, Stderr: stderr,
+	})
+}
+
+func (command *ProcessCommand) Run() error {
+	process, err := command.start(command.Stdout, command.Stderr)
+	if err != nil {
+		return err
+	}
+	return process.Wait()
+}
+
+func (command *ProcessCommand) Output() ([]byte, error) {
+	if command.Stdout != nil {
+		return nil, errors.New("action: ProcessCommand.Output called with Stdout already set")
+	}
+	var output bytes.Buffer
+	process, err := command.start(&output, command.Stderr)
+	if err != nil {
+		return nil, err
+	}
+	if err := process.Wait(); err != nil {
+		return output.Bytes(), err
+	}
+	return output.Bytes(), nil
 }
 
 // Environment applies the door's strip and assignments to one environment

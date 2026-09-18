@@ -1,4 +1,3 @@
-internal/archive/archive.go
 internal/config/harvester_write.go
 internal/harvest/cache.go
 internal/harvest/media.go

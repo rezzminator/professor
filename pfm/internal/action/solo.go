@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 )
@@ -177,12 +178,12 @@ func flockContext(ctx context.Context, file *os.File) error {
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			return fmt.Errorf("lock solo operation: %w", err)
 		}
-		timer := time.NewTimer(10 * time.Millisecond)
+		timer := clock.Real.NewTimer(10 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
 			return ctx.Err()
-		case <-timer.C:
+		case <-timer.C():
 		}
 	}
 }

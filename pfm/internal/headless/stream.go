@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/transcript"
 )
@@ -34,6 +35,8 @@ type StreamOptions struct {
 	// A stream that outlives its chat must END, not hang: silence is the one
 	// thing a dead chat and a thinking chat have in common.
 	Alive func() bool
+	// Clock controls polling in tests; nil uses the wall clock.
+	Clock clock.Clock
 	// Raw prints the entry's full text instead of the condensed line.
 	Raw bool
 }
@@ -105,7 +108,11 @@ func Stream(
 			}
 			return ErrChatGone
 		}
-		if err := waitForNextPoll(ctx, poll); err != nil {
+		pollClock := options.Clock
+		if pollClock == nil {
+			pollClock = clock.Real
+		}
+		if err := waitForNextPoll(ctx, pollClock, poll); err != nil {
 			return window.flush()
 		}
 	}

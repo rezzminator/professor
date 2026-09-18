@@ -4,11 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"hostops/pfm/internal/paths"
 )
 
 // DiscoverSourceRepo finds the source clone without invoking git and maps a linked worktree to its main checkout.
 func DiscoverSourceRepo() string {
-	if value := strings.TrimSpace(os.Getenv("PFM_SOURCE_REPO")); value != "" {
+	if value := strings.TrimSpace((paths.OSEnv{}).Get("PFM_SOURCE_REPO")); value != "" {
 		if absolute, err := filepath.Abs(value); err == nil {
 			return absolute
 		}

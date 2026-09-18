@@ -21,6 +21,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
@@ -83,6 +84,8 @@ type Request struct {
 	Stdout             io.Writer
 	Stderr             io.Writer
 	Native             bool
+	Clock              clock.Clock
+	Runner             deps.Runner
 	systemPromptFile   string
 	schemaFilePath     string
 	binaryPath         string
@@ -202,7 +205,6 @@ func Resolve(request Request) (Request, error) {
 		return Request{}, fmt.Errorf("resolve %s binary %q: %w", request.Engine, binary, err)
 	}
 	request.binaryPath = binaryPath
-
 	if !request.Native {
 		prefs := request.Config.Ask.PrefsFor(request.Engine)
 		if request.Model == "" {
@@ -266,6 +268,9 @@ func Resolve(request Request) (Request, error) {
 		if err := validateSchema(request.Schema); err != nil {
 			return Request{}, err
 		}
+	}
+	if request.Clock == nil {
+		request.Clock = clock.Real
 	}
 	return request, nil
 }
@@ -366,7 +371,8 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 	for _, option := range request.unsupportedOptions {
 		result.Diagnostics = append(result.Diagnostics, "unsupported control not applied for Codex: "+option)
 	}
-	started := time.Now()
+	runClock := request.Clock
+	started := runClock.Now()
 	ctx := parent
 	var cancel context.CancelFunc
 	if request.Timeout > 0 {
@@ -437,33 +443,28 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		}
 	}
 
-	argv, err := arguments(request)
+	args, err := arguments(request)
 	if err != nil {
 		return result, err
 	}
-	command := exec.CommandContext(ctx, request.binaryPath, argv...)
-	configureBoundedCommand(command)
-	if cwd != "" {
-		command.Dir = cwd
+	argv := append([]string{request.binaryPath}, args...)
+	environment := os.Environ()
+	if request.Env != nil {
+		environment = append([]string(nil), request.Env...)
 	}
-	if request.Env == nil {
-		command.Env = os.Environ()
-	} else {
-		command.Env = append([]string(nil), request.Env...)
-	}
-	setEnvironment(command.Env, request.Engine, request.ConfigDir, request.Env != nil, &command.Env)
-	if request.Stdin != nil {
-		command.Stdin = request.Stdin
-	} else {
-		command.Stdin = strings.NewReader(request.Prompt)
+	setEnvironment(environment, request.Engine, request.ConfigDir, request.Env != nil, &environment)
+	if request.Stdin == nil {
+		request.Stdin = strings.NewReader(request.Prompt)
 	}
 
 	stdout := boundedBuffer{limited: !request.Native}
 	stderr := boundedBuffer{limited: !request.Native}
-	command.Stdout = writerFor(request.Stdout, &stdout)
-	command.Stderr = writerFor(request.Stderr, &stderr)
-	runErr = command.Run()
-	result.Duration = time.Since(started)
+	runErr = runProcess(ctx, request.Runner, argv, deps.StartOptions{
+		Env: environment, Dir: cwd, Stdin: request.Stdin,
+		Stdout: writerFor(request.Stdout, &stdout), Stderr: writerFor(request.Stderr, &stderr),
+		ProcessGroup: true, WaitDelay: processWaitAfterCancel,
+	})
+	result.Duration = runClock.Now().Sub(started)
 	result.Stdout, result.Stderr = stdout.String(), stderr.String()
 	result.ExitCode = processExitCode(runErr)
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -667,11 +668,7 @@ func processExitCode(err error) int {
 	if err == nil {
 		return 0
 	}
-	var exitErr *exec.ExitError
-	if errors.As(err, &exitErr) {
-		return exitErr.ExitCode()
-	}
-	return -1
+	return deps.ExitCode(err)
 }
 
 type claudeEnvelope struct {

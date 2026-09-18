@@ -13,6 +13,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/fleet"
 	"hostops/pfm/internal/heal"
+	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/spawn"
 	"hostops/pfm/internal/store"
 )
@@ -112,7 +113,7 @@ func OpenRow(
 		Bunker:         fleet.CurrentSocket() == "vsct",
 		Home:           resolved.Home,
 		FreshSocket:    fresh,
-		CurrentTMUX:    os.Getenv("TMUX"),
+		CurrentTMUX:    (paths.OSEnv{}).Get("TMUX"),
 		Config:         effective.Config,
 	})
 	if err != nil {

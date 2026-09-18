@@ -79,8 +79,6 @@ internal/harvest/net.go
 internal/harvest/search.go
 internal/harvest/types.go
 internal/harvestmcp/auth.go
-internal/harvestpy/browserworker_unix.go
-internal/harvestpy/check.go
 internal/harvestpy/converter.go
 internal/harvestpy/digest.go
 internal/harvestpy/embed.go
@@ -120,7 +118,6 @@ internal/installer/scheduler_darwin.go
 internal/installer/scheduler_other.go
 internal/installer/settings.go
 internal/installer/settings_ownership.go
-internal/installer/types.go
 internal/kill/doc.go
 internal/kill/finisher.go
 internal/kill/lineage.go

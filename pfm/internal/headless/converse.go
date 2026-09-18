@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/transcript"
 )
 
@@ -40,13 +41,16 @@ type Turn struct {
 	Offset int64 `json:"-"`
 }
 
-func waitForNextPoll(ctx context.Context, duration time.Duration) error {
-	timer := time.NewTimer(duration)
+func waitForNextPoll(ctx context.Context, timerClock clock.Clock, duration time.Duration) error {
+	if timerClock == nil {
+		timerClock = clock.Real
+	}
+	timer := timerClock.NewTimer(duration)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-timer.C:
+	case <-timer.C():
 		return nil
 	}
 }
@@ -81,6 +85,7 @@ type AwaitOptions struct {
 	// a fleet-wide scan, the transcript read is one file.
 	ResolveEvery time.Duration
 	Now          func() time.Time
+	Clock        clock.Clock
 }
 
 func (options AwaitOptions) orDefaults() AwaitOptions {
@@ -94,7 +99,12 @@ func (options AwaitOptions) orDefaults() AwaitOptions {
 		options.ResolveEvery = 3 * time.Second
 	}
 	if options.Now == nil {
-		options.Now = time.Now
+		if options.Clock == nil {
+			options.Clock = clock.Real
+		}
+		options.Now = options.Clock.Now
+	} else if options.Clock == nil {
+		options.Clock = clock.Real
 	}
 	return options
 }
@@ -147,7 +157,7 @@ func Await(
 				turn.State = StateMissing
 				return finish(turn, answers, start, options.Now()), ErrAwaitTimeout
 			}
-			if err := waitForNextPoll(ctx, options.Poll); err != nil {
+			if err := waitForNextPoll(ctx, options.Clock, options.Poll); err != nil {
 				return finish(turn, answers, start, options.Now()), err
 			}
 			continue
@@ -219,7 +229,7 @@ func Await(
 			turn.State = StateWorking
 			return finish(turn, answers, start, options.Now()), ErrAwaitTimeout
 		}
-		if err := waitForNextPoll(ctx, options.Poll); err != nil {
+		if err := waitForNextPoll(ctx, options.Clock, options.Poll); err != nil {
 			return finish(turn, answers, start, options.Now()), err
 		}
 	}

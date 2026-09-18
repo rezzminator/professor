@@ -142,11 +142,16 @@ func NewWhoami(dependencies WhoamiDependencies) (*Whoami, error) {
 
 // CallerEnvironment snapshots the identity variables of this process.
 func CallerEnvironment() WhoamiEnvironment {
+	return CallerEnvironmentFrom(paths.OSEnv{})
+}
+
+// CallerEnvironmentFrom snapshots identity variables over an injected environment.
+func CallerEnvironmentFrom(env paths.Env) WhoamiEnvironment {
 	return WhoamiEnvironment{
-		TMUX:            os.Getenv("TMUX"),
-		TMUXPane:        os.Getenv("TMUX_PANE"),
-		ClaudeSessionID: os.Getenv(ClaudeSessionEnv),
-		CodexThreadID:   os.Getenv(CodexThreadEnv),
+		TMUX:            env.Get("TMUX"),
+		TMUXPane:        env.Get("TMUX_PANE"),
+		ClaudeSessionID: env.Get(ClaudeSessionEnv),
+		CodexThreadID:   env.Get(CodexThreadEnv),
 	}
 }
 

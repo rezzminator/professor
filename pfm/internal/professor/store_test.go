@@ -1,14 +1,120 @@
 package professor
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"hostops/pfm/internal/deps"
 	pfmpaths "hostops/pfm/internal/paths"
 )
+
+func TestStoreSHAWithRunnerUsesScriptedGit(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fake := &deps.FakeRunner{}
+	binary := deps.Executable("git")
+	fake.Script([]string{binary, "rev-parse", "--short", "HEAD"}, deps.RunResult{Stdout: []byte("scripted-sha\n")}, nil)
+	got, err := storeSHAWithRunner(root, fake)
+	if err != nil {
+		t.Fatalf("storeSHAWithRunner() error = %v", err)
+	}
+	if got != "scripted-sha" {
+		t.Fatalf("storeSHAWithRunner() = %q, want scripted-sha", got)
+	}
+	calls := fake.Calls()
+	if len(calls) != 1 || calls[0].Opts.Dir != root {
+		t.Fatalf("Git calls = %#v, want one call in %q", calls, root)
+	}
+}
+
+func TestStoreSHAWithRunnerReportsGitExitAndStartFailures(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	binary := deps.Executable("git")
+
+	t.Run("nonzero exit", func(t *testing.T) {
+		fake := &deps.FakeRunner{}
+		fake.Script(
+			[]string{binary, "rev-parse", "--short", "HEAD"},
+			deps.RunResult{ExitCode: 128, Stderr: []byte("fatal: no HEAD\n")},
+			nil,
+		)
+		_, err := storeSHAWithRunner(root, fake)
+		if err == nil || !strings.Contains(err.Error(), "status 128") ||
+			!strings.Contains(err.Error(), "fatal: no HEAD") {
+			t.Fatalf("storeSHAWithRunner() error = %v, want exit status and stderr", err)
+		}
+	})
+
+	t.Run("start failure", func(t *testing.T) {
+		fake := &deps.FakeRunner{}
+		fake.Script(
+			[]string{binary, "rev-parse", "--short", "HEAD"},
+			deps.RunResult{ExitCode: -1},
+			errors.New("git unavailable"),
+		)
+		_, err := storeSHAWithRunner(root, fake)
+		if err == nil || !strings.Contains(err.Error(), "UNREADABLE blueprint git state") ||
+			!strings.Contains(err.Error(), "git unavailable") {
+			t.Fatalf("storeSHAWithRunner() error = %v, want start failure context", err)
+		}
+	})
+}
+
+func TestStoreSHAWithRunnerPassesFenceGitEnvironment(t *testing.T) {
+	root := t.TempDir()
+	gitDir := filepath.Join(t.TempDir(), "git-common")
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(pfmpaths.EnvDevRepoWorkTree, root)
+	t.Setenv(pfmpaths.EnvDevRepoGitDir, gitDir)
+
+	fake := &deps.FakeRunner{}
+	binary := deps.Executable("git")
+	fake.Script(
+		[]string{binary, "rev-parse", "--short", "HEAD"},
+		deps.RunResult{Stdout: []byte("fenced-sha\n")},
+		nil,
+	)
+	got, err := storeSHAWithRunner(root, fake)
+	if err != nil {
+		t.Fatalf("storeSHAWithRunner() error = %v", err)
+	}
+	if got != "fenced-sha" {
+		t.Fatalf("storeSHAWithRunner() = %q, want fenced-sha", got)
+	}
+	calls := fake.Calls()
+	if len(calls) != 1 {
+		t.Fatalf("Git calls = %#v, want one call", calls)
+	}
+	if calls[0].Opts.Dir != root {
+		t.Fatalf("Git Dir = %q, want %q", calls[0].Opts.Dir, root)
+	}
+	if got := environmentValue(calls[0].Opts.Env, "GIT_DIR"); got != gitDir {
+		t.Fatalf("GIT_DIR = %q, want %q", got, gitDir)
+	}
+	if got := environmentValue(calls[0].Opts.Env, "GIT_WORK_TREE"); got != root {
+		t.Fatalf("GIT_WORK_TREE = %q, want %q", got, root)
+	}
+}
+
+func environmentValue(environment []string, name string) string {
+	for _, entry := range environment {
+		if key, value, found := strings.Cut(entry, "="); found && key == name {
+			return value
+		}
+	}
+	return ""
+}
 
 func TestHashTemplateUsesExactBytes(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "template.md")

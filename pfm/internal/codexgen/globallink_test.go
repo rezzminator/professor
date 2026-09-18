@@ -3,6 +3,7 @@ package codexgen
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -85,6 +86,24 @@ func TestClassifyGlobalLinkStates(t *testing.T) {
 		}
 		if state != GlobalLinkWrongTarget || found != stale {
 			t.Fatalf("state=%s found=%q, want wrong-target/%q", state, found, stale)
+		}
+	})
+
+	t.Run("dangling — link resolves to the desired source, but nothing exists there", func(t *testing.T) {
+		goneSource := filepath.Join(sourceRepo, "generated", "gone.toml")
+		target := filepath.Join(root, "dangling", "gone.toml")
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(goneSource, target); err != nil {
+			t.Fatal(err)
+		}
+		state, found, err := ClassifyGlobalLink(target, goneSource, sourceRepo, GlobalLinkFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state != GlobalLinkDangling || found != goneSource {
+			t.Fatalf("state=%s found=%q, want dangling/%q", state, found, goneSource)
 		}
 	})
 
@@ -188,6 +207,33 @@ func TestApplyGlobalLinkIsANoOpForCorrectAndConflict(t *testing.T) {
 	}
 }
 
+func TestApplyGlobalLinkRepointsADanglingLink(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "generated", "alpha.toml")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "codex-agents", "alpha.toml")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The link already resolves to the desired source, but nothing exists
+	// there yet — the shape ClassifyGlobalLink reports GlobalLinkDangling for.
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatal(err)
+	}
+	if err := ApplyGlobalLink(target, source, GlobalLinkDangling); err != nil {
+		t.Fatalf("ApplyGlobalLink(dangling): %v", err)
+	}
+	resolved, err := os.Readlink(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != source {
+		t.Fatalf("ApplyGlobalLink(dangling) = -> %s, want -> %s", resolved, source)
+	}
+}
+
 func TestDescribeGlobalLinkStateNamesConflictExactly(t *testing.T) {
 	got := DescribeGlobalLinkState(
 		GlobalLinkConflict,
@@ -198,5 +244,17 @@ func TestDescribeGlobalLinkStateNamesConflictExactly(t *testing.T) {
 	want := "CONFLICT /home/x/.claude/agents/alpha.md: not ours (points to /home/x/elsewhere.md)"
 	if got != want {
 		t.Fatalf("DescribeGlobalLinkState = %q, want %q", got, want)
+	}
+}
+
+func TestDescribeGlobalLinkStateNamesDanglingByLinkName(t *testing.T) {
+	got := DescribeGlobalLinkState(
+		GlobalLinkDangling,
+		"/home/x/.codex/agents/alpha.toml",
+		"/home/x/.local/state/pfm/generated/codex-agents/alpha.toml",
+		"/home/x/.local/state/pfm/generated/codex-agents/alpha.toml",
+	)
+	if !strings.Contains(got, "DANGLING") || !strings.Contains(got, "/home/x/.codex/agents/alpha.toml") {
+		t.Fatalf("DescribeGlobalLinkState(dangling) = %q, want it to name DANGLING and the link path", got)
 	}
 }

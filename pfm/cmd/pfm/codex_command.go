@@ -135,9 +135,9 @@ func printCodexUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --suffix-mode MODE [--suffix-prefix TEXT]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "usage: pfm codex agents [--home PATH]")
-	fmt.Fprintln(w, "  compiles every {home}/.professor/templates/global/agents/*.md into a sibling .toml,")
-	fmt.Fprintln(w, "  then symlinks {home}/.claude/agents to the .md sources and {home}/.codex/agents")
-	fmt.Fprintln(w, "  to the compiled .tomls — the global (host-level) agent registry.")
+	fmt.Fprintln(w, "  compiles every {home}/.professor/templates/global/agents/*.md into the pfm-owned")
+	fmt.Fprintln(w, "  generated directory, then symlinks {home}/.claude/agents to the .md sources and")
+	fmt.Fprintln(w, "  {home}/.codex/agents to the generated .tomls — the global (host-level) agent registry.")
 }
 
 // runCodexAgents is the command adapter for the global (host-level) Codex

@@ -2,6 +2,7 @@ package installer
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	pfmconfig "hostops/pfm/internal/config"
+	"hostops/pfm/internal/paths"
 )
 
 // stageGlobalFanoutSource writes the one source repository every global
@@ -210,6 +212,33 @@ func linkGlobalAgents(t *testing.T, repo, configDir string, names ...string) {
 	}
 }
 
+// linkGlobalCodexAgents wires the host-wide ~/.codex/agents/<name>.toml
+// registry: a compiled twin written into the pfm-owned generated directory,
+// symlinked from the registry — the "linked" shape ReportGlobalAgents'
+// host-wide codex check certifies, so tests exercising the per-account
+// .claude/agents/*.md report do not also pick up an unrelated codex-agents
+// failure/warning by accident.
+func linkGlobalCodexAgents(t *testing.T, home string, names ...string) {
+	t.Helper()
+	registry := filepath.Join(home, ".codex", "agents")
+	if err := os.MkdirAll(registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	generated := paths.GeneratedCodexAgentsDir(home)
+	if err := os.MkdirAll(generated, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range names {
+		target := filepath.Join(generated, name+".toml")
+		if err := os.WriteFile(target, []byte("name = \""+name+"\"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(registry, name+".toml")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func twoReportAccounts(home string) []pfmconfig.Account {
 	return []pfmconfig.Account{
 		{ID: 1, ConfigDir: filepath.Join(home, ".claude")},
@@ -226,6 +255,7 @@ func TestGlobalAgentsDoctorNamesTheAccountThatHasNoAgents(t *testing.T) {
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
+	linkGlobalCodexAgents(t, home, "rr", "walker")
 
 	var output bytes.Buffer
 	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
@@ -261,6 +291,7 @@ func TestGlobalAgentsDoctorReportsEveryLinkedAccountClean(t *testing.T) {
 	repo := stageGlobalAgentSources(t, home)
 	first := filepath.Join(home, ".claude")
 	linkGlobalAgents(t, repo, first, "rr", "walker")
+	linkGlobalCodexAgents(t, home, "rr", "walker")
 	second := filepath.Join(home, ".cc", "2")
 	if err := os.MkdirAll(second, 0o755); err != nil {
 		t.Fatal(err)
@@ -289,6 +320,7 @@ func TestGlobalAgentsDoctorDistinguishesUnreadableFromMissing(t *testing.T) {
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
+	linkGlobalCodexAgents(t, home, "rr", "walker")
 	second := filepath.Join(home, ".cc", "2")
 	if err := os.MkdirAll(second, 0o755); err != nil {
 		t.Fatal(err)
@@ -322,6 +354,7 @@ func TestGlobalAgentsDoctorConflictNamesTheForeignLink(t *testing.T) {
 	repo := stageGlobalAgentSources(t, home)
 	first := filepath.Join(home, ".claude")
 	linkGlobalAgents(t, repo, first, "rr", "walker")
+	linkGlobalCodexAgents(t, home, "rr", "walker")
 	second := filepath.Join(home, ".cc", "2")
 	linkGlobalAgents(t, repo, second, "walker")
 	elsewhere := filepath.Join(home, "mine.md")
@@ -340,6 +373,92 @@ func TestGlobalAgentsDoctorConflictNamesTheForeignLink(t *testing.T) {
 	want := "doctor: global-agents account=2 dir=" + second + " state=CONFLICT names=rr"
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("output missing %q:\n%s", want, output.String())
+	}
+}
+
+// TestGlobalAgentsDoctorNamesADanglingCodexLink is the fourth warning shape,
+// unique to the host-wide ~/.codex/agents registry: a link already resolves
+// to the pfm-owned generated directory BY NAME, but the compiled .toml behind
+// it is gone (a wiped state dir, a partial uninstall) — an error to look must
+// never render as absence, so this must be named DANGLING by the link's own
+// name, never folded into MISSING (which would read as "never installed").
+func TestGlobalAgentsDoctorNamesADanglingCodexLink(t *testing.T) {
+	home := t.TempDir()
+	repo := stageGlobalAgentSources(t, home)
+	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
+	linkGlobalAgents(t, repo, filepath.Join(home, ".cc", "2"), "rr", "walker")
+	linkGlobalCodexAgents(t, home, "rr", "walker")
+	// Simulate the generated directory getting wiped out from under a live
+	// link: the symlink under ~/.codex/agents still resolves to the right
+	// NAME, but nothing is there anymore.
+	if err := os.RemoveAll(paths.GeneratedCodexAgentsDir(home)); err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if failures != 1 {
+		t.Fatalf(
+			"warnings=%d failures=%d, want failures=1 (a dangling codex link is a failure)\n%s",
+			warnings,
+			failures,
+			output.String(),
+		)
+	}
+	registry := filepath.Join(home, ".codex", "agents")
+	want := "doctor: global-agents source=" + registry + " state=DANGLING names=rr,walker"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("output missing %q:\n%s", want, output.String())
+	}
+}
+
+// TestGlobalAgentsDoctorNamesBothDanglingAndConflictingCodexLinks pins F3: a
+// host can have one link dangling (its compiled .toml wiped) and another
+// pointed at a foreign file the installer must never touch, at the same
+// time. Both buckets are computed by the per-source loop above, so a doctor
+// line that renders only one of them is discarding a refusal-to-touch —
+// exactly the "renders as absence" failure this repo's CLAUDE.md names.
+func TestGlobalAgentsDoctorNamesBothDanglingAndConflictingCodexLinks(t *testing.T) {
+	home := t.TempDir()
+	repo := stageGlobalAgentSources(t, home)
+	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
+	linkGlobalAgents(t, repo, filepath.Join(home, ".cc", "2"), "rr", "walker")
+	linkGlobalCodexAgents(t, home, "rr", "walker")
+	// rr dangling: the generated twin behind its link is gone.
+	if err := os.Remove(filepath.Join(paths.GeneratedCodexAgentsDir(home), "rr.toml")); err != nil {
+		t.Fatal(err)
+	}
+	// walker conflicting: its registry entry is a symlink pointing at a
+	// foreign file OUTSIDE the generated directory — the classifier
+	// (codexgen.ClassifyGlobalLink) treats a same-kind regular file as a
+	// plain "Copy" (folded into missing on rerun), so the CONFLICT bucket
+	// this test targets is only reachable through a foreign symlink, the
+	// same shape TestGlobalAgentsDoctorConflictNamesTheForeignLink uses.
+	registry := filepath.Join(home, ".codex", "agents")
+	if err := os.Remove(filepath.Join(registry, "walker.toml")); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(home, "operator-walker.toml")
+	if err := os.WriteFile(elsewhere, []byte("# an operator's own file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(elsewhere, filepath.Join(registry, "walker.toml")); err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if failures != 1 {
+		t.Fatalf(
+			"warnings=%d failures=%d, want failures=1 (a dangling codex link is a failure)\n%s",
+			warnings,
+			failures,
+			output.String(),
+		)
+	}
+	want := "doctor: global-agents source=" + registry + " state=DANGLING names=rr conflict=walker"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("output missing %q (conflict bucket dropped):\n%s", want, output.String())
 	}
 }
 
@@ -495,5 +614,100 @@ func TestInspectGlobalAgentsSourceDirectoryStates(t *testing.T) {
 				t.Fatalf("state=%s, want %s: %+v", statuses[0].State, tt.want, statuses[0])
 			}
 		})
+	}
+}
+
+// TestUninstallRemovesGeneratedCodexAgentsDirectoryAndOwnedLinks is the
+// uninstall half of the pfm-owned generated directory: uninstall must remove
+// the whole generated directory AND the ~/.codex/agents/<name>.toml links
+// this installer owns, leaving neither the compiled twins nor the links that
+// resolved to them behind.
+func TestUninstallRemovesGeneratedCodexAgentsDirectoryAndOwnedLinks(t *testing.T) {
+	home := t.TempDir()
+	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	generated := paths.GeneratedCodexAgentsDir(home)
+	if _, err := os.Stat(filepath.Join(generated, "alpha.toml")); err != nil {
+		t.Fatalf("install did not compile into the generated directory: %v", err)
+	}
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(generated); !os.IsNotExist(err) {
+		t.Fatalf("uninstall left the generated Codex agents directory: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(home, ".codex", "agents", "alpha.toml")); !os.IsNotExist(err) {
+		t.Fatalf("uninstall left the owned ~/.codex/agents link: %v", err)
+	}
+}
+
+// TestUninstallLeavesAForeignCodexAgentUntouched pins the boundary the
+// ownership-by-target rule exists to hold: a regular file (or a link
+// pointing somewhere the generated directory never wrote) at
+// ~/.codex/agents/<name>.toml is an operator's own — uninstall must never
+// delete it.
+func TestUninstallLeavesAForeignCodexAgentUntouched(t *testing.T) {
+	home := t.TempDir()
+	registry := filepath.Join(home, ".codex", "agents")
+	if err := os.MkdirAll(registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreign := filepath.Join(registry, "mine.toml")
+	writeFixture(t, foreign, "name = \"mine\"\n")
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, foreign); got != "name = \"mine\"\n" {
+		t.Fatalf("uninstall touched an operator-owned Codex agent file: %q", got)
+	}
+}
+
+// TestUninstallRetiresAPreMigrationLegacyCodexAgentLink covers the
+// global_fanout.go:441 INFO gap: a host that upgraded to the generated-
+// directory layout without ever rerunning `pfm install`/`pfm codex agents`
+// in between can still carry a pre-migration ~/.codex/agents/<name>.toml
+// link aimed at the retired in-clone twin
+// (<blueprint>/templates/global/agents/<name>.toml). This installer wrote
+// that link too, so uninstall must retire it — not leave it behind as if it
+// were an operator's own file, the way TestUninstallLeavesAForeignCodexAgentUntouched
+// pins for a GENUINELY foreign link.
+func TestUninstallRetiresAPreMigrationLegacyCodexAgentLink(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, "blueprint")
+	if err := os.MkdirAll(filepath.Join(repo, "templates", "global", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSourceRepoMarker(home, repo); err != nil {
+		t.Fatal(err)
+	}
+	registry := filepath.Join(home, ".codex", "agents")
+	if err := os.MkdirAll(registry, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	legacyTwin := filepath.Join(repo, "templates", "global", "agents", "rr.toml")
+	legacyLink := filepath.Join(registry, "rr.toml")
+	if err := os.Symlink(legacyTwin, legacyLink); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(legacyLink); !os.IsNotExist(err) {
+		t.Fatalf("pre-migration legacy Codex agent link survived uninstall: %v", err)
 	}
 }

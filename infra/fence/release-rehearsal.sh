@@ -23,13 +23,13 @@ SNAPSHOT_VOLUME="$NAME-snapshot"
 SNAPSHOT=/snapshot/home.tar
 IMAGE=professor-pfm-dev
 UPSTREAM=/root/upstream.git
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 
 die() { echo "release-rehearsal: $*" >&2; exit 1; }
 
 usage() {
   cat >&2 <<'EOF'
-usage: infra/release-rehearsal.sh <command>
+usage: infra/fence/release-rehearsal.sh <command>
   up                             build the pfm-dev image, start the rehearsal container
   seed <stable-tag>              upstream = main at <stable-tag>, no newer tag or branch
   publish <tag> <commit>         fast-forward upstream main to <commit>, tag it <tag>
@@ -78,7 +78,7 @@ start_from() {
 
 cmd_up() {
   exists && die "container $NAME already exists — 'down' it or 'revert' to the snapshot"
-  docker build -q -t "$IMAGE" -f "$REPO_ROOT/infra/pfm-dev.Dockerfile" "$REPO_ROOT/infra" >/dev/null \
+  docker build -q -t "$IMAGE" -f "$REPO_ROOT/infra/fence/pfm-dev.Dockerfile" "$REPO_ROOT/infra/fence" >/dev/null \
     || die "build image $IMAGE failed"
   start_from
 }

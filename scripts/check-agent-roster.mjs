@@ -70,16 +70,34 @@ function compare(runtime, expected, actual, extension) {
     );
 }
 
+// Generated mirrors are never tracked (see .gitignore); a fresh clone has
+// neither directory until its compiler runs. That is the pre-generate state,
+// not a roster mismatch — reported by name, distinct exit code, so a
+// pipeline that forgot to generate fails loudly instead of drowning in a
+// wall of "source agent missing" lines for every role.
+const codexDir = join(ROOT, ".codex/agents");
+const openCodeDir = join(ROOT, ".opencode/agent");
+const missingDirs = [
+  !existsSync(codexDir) && "codex (.codex/agents/)",
+  !existsSync(openCodeDir) && "opencode (.opencode/agent/)",
+].filter(Boolean);
+if (missingDirs.length) {
+  console.error(
+    `agent-roster: NOT GENERATED — ${missingDirs.join(", ")} absent; run: cd pfm && go run ./cmd/pfm codex build .. && node .claude/scripts/build-opencode.mjs generate`,
+  );
+  process.exit(3);
+}
+
 const codexExpected = expectedAgents(
   CODEX_CONFIG.excludeProjects ?? [],
   CODEX_CONFIG.suffixMode ?? "project",
   CODEX_CONFIG.suffixPrefix ?? "",
 );
-const codexActual = generatedNames(join(ROOT, ".codex/agents"), ".toml");
+const codexActual = generatedNames(codexDir, ".toml");
 compare("codex", codexExpected, codexActual, ".toml");
 
 const openCodeExpected = expectedAgents(["templates"], "project");
-const openCodeActual = generatedNames(join(ROOT, ".opencode/agent"), ".md");
+const openCodeActual = generatedNames(openCodeDir, ".md");
 compare("opencode", openCodeExpected, openCodeActual, ".md");
 
 for (const runtime of ["codex", "opencode"]) {

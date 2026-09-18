@@ -3,8 +3,7 @@
 A REAL Professor install inside the dev-fence container: real Claude Code and
 Codex binaries, real seats (credentials copied in from this host), real pfm
 built from this checkout, real chats talking through the chat MCP. Nothing in
-the container is a stand-in — the readme-gif recorder keeps its own fake
-harness under `infra/readme-gif/` for the take that must never spend a token.
+the container is a stand-in.
 
 ## Tier B — wave-close only
 

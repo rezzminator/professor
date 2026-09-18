@@ -118,7 +118,7 @@ professor: /path/to/project  blueprint ff7460e → 1a2b3c4
 
 - The first adopter's own `.professor/manifest.json` `files`/`_note` cleanup and its baseline seeding — the adopter's session does that at its next `/pfm` pass, not this build.
 - `templates/refresh-map.json` / `scripts/refresh-scope.sh` — the blueprint's own release-time live↔template equalizer; untouched here.
-- Global `.toml` twins, opencode, themes, skills `sources.json` law — unchanged.
+- Global `.toml` twins, opencode, themes, skills `sources.json` law — unchanged here (Wave 9 later moved every generated mirror, twins included, out of version control entirely).
 - Any UI/interactive merge tool — the report is the UI.
 
 ## Stop and report when

@@ -6,13 +6,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/paths"
 )
 
 // TestCodexAgentsCommandCompilesAndInstalls exercises the "pfm codex agents"
 // CLI adapter end to end inside the path jail: it reads
 // {PFM_HOME}/.professor/templates/global/agents/*.md, writes a compiled
-// sibling .toml, and symlinks both shapes into the jailed home's
-// .claude/agents and .codex/agents — the same registries pfm install wires.
+// .toml into the pfm-owned generated directory (never beside the source
+// .md), and symlinks both shapes into the jailed home's .claude/agents and
+// .codex/agents — the same registries pfm install wires.
 func TestCodexAgentsCommandCompilesAndInstalls(t *testing.T) {
 	jailTest(t)
 	home := os.Getenv("PFM_HOME")
@@ -31,7 +34,7 @@ func TestCodexAgentsCommandCompilesAndInstalls(t *testing.T) {
 		t.Fatalf("codex agents did not report PASS: stdout=%q", stdout.String())
 	}
 
-	compiled := filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.toml")
+	compiled := filepath.Join(paths.GeneratedCodexAgentsDir(home), "quirky.toml")
 	want := "name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
 		"developer_instructions = \"\"\"\n" +
@@ -43,6 +46,11 @@ func TestCodexAgentsCommandCompilesAndInstalls(t *testing.T) {
 	}
 	if string(got) != want {
 		t.Fatalf("compiled toml =\n%q\nwant\n%q", string(got), want)
+	}
+
+	inClone := filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.toml")
+	if _, err := os.Lstat(inClone); !os.IsNotExist(err) {
+		t.Fatalf("expected no .toml written inside the source clone at %s, lstat err=%v", inClone, err)
 	}
 
 	for _, expect := range []struct{ target, source string }{

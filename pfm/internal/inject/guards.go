@@ -258,3 +258,19 @@ func messageVisible(capture, message string) bool {
 func CompactionReceipt(capture string) bool {
 	return compactReceipt.MatchString(capture)
 }
+
+// countCompactionReceipts counts the receipt LINES in a capture — the same
+// evidence CompactionReceipt tests for, as a quantity. Presence answers "a
+// receipt is on screen", which a stale receipt scrolling back into view
+// satisfies just as well as a fresh one; a count taken over the same window
+// twice answers "another compaction finished since", which only a receipt
+// that was actually printed can make true (waitForSettledTurn).
+func countCompactionReceipts(capture string) int {
+	count := 0
+	for _, line := range strings.Split(capture, "\n") {
+		if compactReceipt.MatchString(line) {
+			count++
+		}
+	}
+	return count
+}

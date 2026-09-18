@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"hostops/pfm/internal/cli"
@@ -41,6 +42,9 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		fmt.Fprintf(stderr, "pfm init: %v\n", err)
 		return 1
 	}
+	if code, refused := refuseRescaffold(*force, target, stderr); refused {
+		return code
+	}
 	deployed, err := professor.Scaffold(source, target, *force, stdout)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm init: %v\n", err)
@@ -54,4 +58,24 @@ func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		filepath.Join(source, "docs", "SETUP.md"),
 	)
 	return 0
+}
+
+func refuseRescaffold(force bool, target string, stderr io.Writer) (int, bool) {
+	switch _, statErr := os.Stat(professor.BaselinePath(target)); {
+	case force, os.IsNotExist(statErr):
+		return 0, false
+	case statErr != nil:
+		fmt.Fprintf(stderr, "pfm init: inspect baseline: %v\n", statErr)
+		return 1, true
+	}
+	pinned := ""
+	if baseline, err := professor.Load(target); err != nil {
+		pinned = fmt.Sprintf("could not be read: %v", err)
+	} else {
+		pinned = baseline.PinSummary()
+	}
+	fmt.Fprintf(stderr, "pfm init: %s is already scaffolded (%s exists, %s) — "+
+		"a second init would rewrite the baseline; run `pfm update check` to see upstream changes, "+
+		"or `pfm init --force` to re-scaffold and re-pin\n", target, professor.BaselinePath(target), pinned)
+	return 2, true
 }

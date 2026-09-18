@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +150,59 @@ func TestInitCollisionSkipsWithoutPinAndForceOverwrites(t *testing.T) {
 	}
 }
 
+func TestInitRefusesASecondScaffoldWithoutForce(t *testing.T) {
+	source := newScaffoldStoreFixture(t)
+	home := t.TempDir()
+	if err := installer.WriteSourceRepoMarker(home, source); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	var stdout, stderr bytes.Buffer
+	if code := runInit([]string{target}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runInit() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	baseline, err := professor.Load(target)
+	if err != nil {
+		t.Fatalf("load first baseline: %v", err)
+	}
+	pins := len(baseline.Files)
+	if pins == 0 {
+		t.Fatalf("first init pinned nothing: %#v", baseline.Files)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code := runInit([]string{target}, &stdout, &stderr, runtime)
+	if code != 2 {
+		t.Fatalf("second runInit() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "is already scaffolded") ||
+		!strings.Contains(stderr.String(), "pfm init --force") {
+		t.Fatalf("refusal stderr=%q", stderr.String())
+	}
+	baseline, err = professor.Load(target)
+	if err != nil {
+		t.Fatalf("load baseline after refused second init: %v", err)
+	}
+	if got := len(baseline.Files); got != pins {
+		t.Fatalf("pin count after refused second init=%d, want %d: %#v", got, pins, baseline.Files)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runInit([]string{"--force", target}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf("runInit(--force) code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	baseline, err = professor.Load(target)
+	if err != nil {
+		t.Fatalf("load baseline after forced re-init: %v", err)
+	}
+	if got := len(baseline.Files); got == 0 {
+		t.Fatalf("forced re-init did not re-pin: %#v", baseline.Files)
+	}
+}
+
 func newScaffoldStoreFixture(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -203,4 +257,66 @@ func newScaffoldStoreFixture(t *testing.T) string {
 	gitTemp(t, root, "add", ".")
 	gitTemp(t, root, "commit", "-qm", "fixture store")
 	return root
+}
+
+// TestInitRefusalNamesADeterministicPinDate pins F6: the refusal used to
+// range Baseline.Files — a map — for "the" date, so Go's randomized iteration
+// order made the reported date an arbitrary entry's as soon as two pins
+// disagreed, and a baseline that pinned NOTHING still claimed a date it never
+// had. The refusal now names the newest stamp, says so when the pins span
+// several dates, and gives the empty baseline its own message.
+func TestInitRefusalNamesADeterministicPinDate(t *testing.T) {
+	spread := professor.Baseline{
+		Version: professor.BaselineVersion,
+		Files: map[string]professor.FilePin{
+			"a.md": {PinnedAt: "2026-01-02"},
+			"b.md": {PinnedAt: "2026-03-04"},
+			"c.md": {PinnedAt: "2026-02-03"},
+		},
+	}
+	// Twenty refusals over the same baseline: one arbitrary-entry read is
+	// enough to make this flake, which is the defect stated as a test.
+	for range 20 {
+		target := writeBaselineFixture(t, spread)
+		var stderr bytes.Buffer
+		if code, refused := refuseRescaffold(false, target, &stderr); code != 2 || !refused {
+			t.Fatalf("refuseRescaffold() = (%d, %t), want (2, true)", code, refused)
+		}
+		got := stderr.String()
+		if !strings.Contains(got, "2026-03-04") || !strings.Contains(got, "pins span several dates") {
+			t.Fatalf("refusal over pins stamped on three dates=%q, want the newest (2026-03-04) named as a spread", got)
+		}
+		if strings.Contains(got, "2026-01-02") || strings.Contains(got, "2026-02-03") {
+			t.Fatalf("refusal named a pin date that is not the newest: %q", got)
+		}
+	}
+
+	target := writeBaselineFixture(t, professor.Baseline{Version: professor.BaselineVersion})
+	var stderr bytes.Buffer
+	if code, refused := refuseRescaffold(false, target, &stderr); code != 2 || !refused {
+		t.Fatalf("refuseRescaffold() over an empty baseline = (%d, %t), want (2, true)", code, refused)
+	}
+	if got := stderr.String(); !strings.Contains(got, "pinning no files at all") ||
+		strings.Contains(got, "pinned by pfm init on") {
+		t.Fatalf("refusal over a baseline that pins nothing=%q, want its own message and no date claim", got)
+	}
+}
+
+// writeBaselineFixture drops one baseline.json into a fresh directory and
+// returns that directory.
+func writeBaselineFixture(t *testing.T, baseline professor.Baseline) string {
+	t.Helper()
+	target := t.TempDir()
+	path := professor.BaselinePath(target)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(baseline)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return target
 }

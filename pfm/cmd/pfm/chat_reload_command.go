@@ -337,9 +337,19 @@ func runChatReloadWorkerWithRuntime(
 	}
 	// Keep the old id for a post-success --hide.
 	leftBehind := id
+	name := ""
 	if newSeat {
 		// Keep transcript for CWD, but clear the id so the run starts fresh.
 		id = ""
+		// The name follows the live pane: reload types /rename into the
+		// reborn chat and relabels the session left behind (reload.followName).
+		// Claude only — the custom title lives in its transcript; a Codex
+		// seat's name is its tmux window, which the respawn keeps.
+		if transcript != "" && engine == pfmengine.Claude {
+			if name, err = reload.TranscriptTitle(transcript); err != nil {
+				fmt.Fprintf(stderr, "pfm chat reload: %v — the reborn chat keeps its auto-name\n", err)
+			}
+		}
 		if hide {
 			fmt.Fprintln(
 				stdout,
@@ -422,6 +432,7 @@ func runChatReloadWorkerWithRuntime(
 			CodexYolo:   selected.CodexYolo,
 			Cache1H:     cache,
 			Then:        then,
+			Name:        name,
 			Model:       model,
 			Effort:      effort,
 			Home:        resolved.Home,

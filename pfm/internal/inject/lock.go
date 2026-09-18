@@ -95,6 +95,29 @@ func acquireTargetLock(
 	}
 }
 
+// lockTarget takes the pane's ONE inject lock — the same directory
+// engine.inject holds while it types, keyed by socket:pane — and returns the
+// refusal text for a caller to report when it could not be had. Both users of
+// the lock (a live inject, and ScheduleAfterCurrentTurn's check-and-arm) go
+// through here so the key, the timings and the wording cannot drift apart:
+// two schedules that observed the same unarmed pane is exactly the race the
+// armed record cannot close by itself.
+func (engine *Engine) lockTarget(ctx context.Context, target Target) (*targetLock, string) {
+	lock, err := acquireTargetLock(
+		ctx,
+		engine.options.Clock,
+		engine.options.LockRoot,
+		target.SocketPath+":"+target.Pane,
+		engine.options.LockTimeout,
+		engine.options.LockPoll,
+		engine.options.LockMaxHold,
+	)
+	if err != nil {
+		return nil, fmt.Sprintf("could not acquire inject lock for %q: %v", target.Pane, err)
+	}
+	return lock, ""
+}
+
 func (lock *targetLock) beat() error {
 	ownerPID, _, ok := readLockOwner(lock.path)
 	if ok && ownerPID != lock.pid {

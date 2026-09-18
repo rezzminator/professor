@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"time"
 
 	"hostops/pfm/internal/atomicfile"
 )
@@ -160,7 +159,7 @@ func (installer *engine) registerVSCodeExtension(extensionsDir string) (bool, er
 		},
 		"relativeLocation": vscodeExtensionLinkName,
 		"metadata": map[string]any{
-			"installedTimestamp": time.Now().UnixMilli(),
+			"installedTimestamp": installer.now().UnixMilli(),
 			"pinned":             false,
 			"source":             MCPClientPFM,
 		},

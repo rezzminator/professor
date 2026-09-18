@@ -11,6 +11,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"hostops/pfm/internal/chat"
+	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/headless"
@@ -59,6 +60,7 @@ type Service struct {
 // Runtime is the already-loaded machine policy the stdio server shares with
 // the command that started it. The server never re-reads machine config.
 type Runtime struct {
+	Clock        clock.Clock
 	Paths        paths.Values
 	Accounts     []pfmconfig.Account
 	ConfigPath   string
@@ -368,12 +370,12 @@ func (service *Service) chatKeys(
 	tmux := inject.TmuxInjector{}
 	for index, key := range input.Keys {
 		if index > 0 && delay > 0 {
-			timer := time.NewTimer(delay)
+			timer := service.backend.clock.NewTimer(delay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return nil, KeysOutput{}, ctx.Err()
-			case <-timer.C:
+			case <-timer.C():
 			}
 		}
 		var sendErr error

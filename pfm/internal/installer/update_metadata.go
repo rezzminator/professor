@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/deps"
 )
 
 const (
@@ -125,8 +125,15 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 		return fmt.Errorf("%s is not an executable regular file — refusing to arm a broken pre-push hook", hook)
 	}
 
-	git := deps.Executable("git")
-	toplevelBytes, err := exec.Command(git, "-C", repo, "rev-parse", "--show-toplevel").CombinedOutput()
+	runner := installer.options.Runner
+	if runner == nil {
+		runner = execCommandRunner{}
+	}
+	reader, ok := runner.(OutputRunner)
+	if !ok {
+		return fmt.Errorf("read git repository through installer runner: output seam unavailable")
+	}
+	toplevelBytes, err := reader.Output(context.Background(), "git", "-C", repo, "rev-parse", "--show-toplevel")
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			installer.skip("git unavailable — pre-push gate not armed in " + repo)
@@ -140,10 +147,18 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 		return fmt.Errorf("resolve %s as a git repository: %w: %s", repo, err, message)
 	}
 
-	actualBytes, configErr := exec.Command(git, "-C", repo, "config", "--get", "core.hooksPath").CombinedOutput()
+	actualBytes, configErr := reader.Output(
+		context.Background(),
+		"git",
+		"-C",
+		repo,
+		"config",
+		"--get",
+		"core.hooksPath",
+	)
 	actual := strings.TrimSpace(string(actualBytes))
 	if configErr != nil {
-		var exitErr *exec.ExitError
+		var exitErr interface{ ExitCode() int }
 		if !errors.As(configErr, &exitErr) || exitErr.ExitCode() != 1 || actual != "" {
 			return fmt.Errorf("read core.hooksPath in %s: %w: %s", repo, configErr, actual)
 		}
@@ -156,7 +171,7 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 	}
 
 	return installer.change("arm pre-push gate core.hooksPath=.githooks in "+repo, func() error {
-		out, err := exec.Command(git, "-C", repo, "config", "core.hooksPath", ".githooks").CombinedOutput()
+		out, err := reader.Output(context.Background(), "git", "-C", repo, "config", "core.hooksPath", ".githooks")
 		if err != nil {
 			return fmt.Errorf("set core.hooksPath in %s: %w: %s", repo, err, strings.TrimSpace(string(out)))
 		}

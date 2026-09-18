@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -46,7 +45,7 @@ func (service *Service) issueServicedesk(
 	}
 	reporter := service.issueReporter(ctx, request)
 	id, err := service.backend.sharedState.RecordIssue(ctx, fleetdb.Issue{
-		AtNS:            time.Now().UnixNano(),
+		AtNS:            service.backend.clock.Now().UnixNano(),
 		Title:           title,
 		Detail:          detail,
 		Severity:        severity,

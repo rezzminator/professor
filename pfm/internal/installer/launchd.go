@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/clock"
 )
 
 // launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry
@@ -240,7 +241,13 @@ func (installer *engine) pause(d time.Duration) {
 		installer.options.Sleep(d)
 		return
 	}
-	time.Sleep(d)
+	waiter := installer.options.Clock
+	if waiter == nil {
+		waiter = clock.Real
+	}
+	if err := waiter.Sleep(context.Background(), d); err != nil {
+		installer.say("installer: launchd retry sleep failed: %v", err)
+	}
 }
 
 // bootstrapWithRetry re-registers the job, retrying while launchd finishes a

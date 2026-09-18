@@ -8,6 +8,7 @@ import (
 	"sort"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/paths"
@@ -47,6 +48,16 @@ func printTmuxTitlesDoctor(
 	resolved paths.Values,
 	machine config.Config,
 ) {
+	printTmuxTitlesDoctorWithClock(ctx, stdout, resolved, machine, clock.Real)
+}
+
+func printTmuxTitlesDoctorWithClock(
+	ctx context.Context,
+	stdout io.Writer,
+	resolved paths.Values,
+	machine config.Config,
+	clk clock.Clock,
+) {
 	intended := titlesHostOwned
 	if machine.Tmux.Titles.Enabled {
 		intended = titlesPfmOwned
@@ -58,7 +69,10 @@ func printTmuxTitlesDoctor(
 	)
 
 	client := gather.TmuxProbe{TmuxTmpDir: filepath.Dir(resolved.TmuxDir)}
-	probe, err := gather.ProbeTmuxReadOnly(ctx, resolved.TmuxDir, client, time.Now())
+	if clk == nil {
+		clk = clock.Real
+	}
+	probe, err := gather.ProbeTmuxReadOnly(ctx, resolved.TmuxDir, client, clk.Now())
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: tmux titles sockets=unprobed error=%v\n", err)
 		return

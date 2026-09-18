@@ -2,9 +2,28 @@ package installer
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+)
+
+type missingGitOutputRunner struct{}
+
+func (missingGitOutputRunner) Run(context.Context, string, ...string) error {
+	return errors.New("Run not scripted")
+}
+
+func (missingGitOutputRunner) Output(context.Context, string, ...string) ([]byte, error) {
+	return nil, &exec.Error{Name: "git", Err: exec.ErrNotFound}
+}
+
+var (
+	_ CommandRunner = missingGitOutputRunner{}
+	_ OutputRunner  = missingGitOutputRunner{}
 )
 
 // TestReportSourceRepoMarkerPresentReportsOK pins the "marker present" branch:
@@ -102,5 +121,35 @@ func TestWriteUpdateMetadataWithNoSourceRepoReportsTheMarkerSkip(t *testing.T) {
 	want := "source repository not found — run pfm install from inside your Professor clone or set PFM_SOURCE_REPO; pfm init and pfm update read it"
 	if !strings.Contains(stdout.String(), want) {
 		t.Fatalf("stdout = %q, want the named skip diagnostic from writeUpdateMetadata", stdout.String())
+	}
+}
+
+// TestInstallSkipsPrePushGateWhenGitIsUnavailable is a REGRESSION test for
+// the install-time pre-push probe. A missing git binary is a graceful skip,
+// preserving install's documented behavior, even though the runner wraps the
+// process lookup failure in exec.ErrNotFound.
+func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
+	home := t.TempDir()
+	clone := t.TempDir()
+	hooks := filepath.Join(clone, ".githooks")
+	if err := os.MkdirAll(hooks, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-push"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	installer := &engine{options: Options{
+		Home:       home,
+		SourceRepo: clone,
+		Stdout:     &stdout,
+		Runner:     missingGitOutputRunner{},
+	}, apply: true}
+	if err := installer.writeUpdateMetadata(); err != nil {
+		t.Fatalf("writeUpdateMetadata() error = %v, want graceful git-unavailable skip", err)
+	}
+	want := "git unavailable — pre-push gate not armed in " + clone
+	if !strings.Contains(stdout.String(), want) {
+		t.Fatalf("stdout = %q, want named skip %q", stdout.String(), want)
 	}
 }

@@ -1,7 +1,7 @@
 {
   "name": "Professor Silver",
   "overrides": {
-    "promptBorder": "#d9e8f5",
+    "promptBorder": "#c8d9ff",
     "promptBorderShimmer": "#ffffff"
   }
 }

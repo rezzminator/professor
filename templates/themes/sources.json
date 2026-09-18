@@ -21,14 +21,14 @@
       "file": "professor-silver.json",
       "base": "tokyo-night",
       "target": "~/.claude/themes/professor-silver.json",
-      "activate": "/theme → \"Professor Silver\" — Tokyo Night with the 🥈 account 2 input bar (#d9e8f5); per account: \"theme\": \"custom:professor-silver\" in that account's settings.json",
+      "activate": "/theme → \"Professor Silver\" — Tokyo Night with the 🥈 account 2 input bar (#c8d9ff); per account: \"theme\": \"custom:professor-silver\" in that account's settings.json",
       "requires": "Claude Code v2.1.118+"
     },
     "professor-bronze": {
       "file": "professor-bronze.json",
       "base": "tokyo-night",
       "target": "~/.claude/themes/professor-bronze.json",
-      "activate": "/theme → \"Professor Bronze\" — Tokyo Night with the 🥉 account 3 input bar (#ff5e1a); per account: \"theme\": \"custom:professor-bronze\" in that account's settings.json",
+      "activate": "/theme → \"Professor Bronze\" — Tokyo Night with the 🥉 account 3 input bar (#ff7a1a); per account: \"theme\": \"custom:professor-bronze\" in that account's settings.json",
       "requires": "Claude Code v2.1.118+"
     }
   }

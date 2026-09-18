@@ -36,7 +36,7 @@ infra/
 | `.jscpd.json:2` comment/paths listing `infra/…` | verify | re-point |
 | `infra/check-self-hosted-manifest.sh` roster — does it enumerate `infra/` files? (grep) | verify | re-stamp `.professor/manifest.json` hashes if the roster covers moved files (`python3` sha256, indent 2, sorted — the way the train re-stamped) |
 | `docs/dev/isolated-dev-foundation.md` (the fence design doc) · `docs/RELEASE.md:48` · `docs/commands/pfm/references/release-rehearsal.md:5,47` | `infra/release-rehearsal.sh`, `infra/docker-compose.yml` | `infra/fence/…` |
-| `.claude/commands/pfm/release.md:14` + mirrors `.codex/skills/pfm-release/SKILL.md`, `.opencode/command/pfm-release.md` | `infra/release-rehearsal.sh` | GUARDED source → GOD; mirrors regenerate via `pfm codex build .` + `node .claude/scripts/build-opencode.mjs generate` |
+| `.claude/commands/pfm/release.md:14` + mirrors `.codex/skills/pfm-release/SKILL.md`, `.opencode/command/pfm-release.md` | `infra/release-rehearsal.sh` | GUARDED source → GOD; mirrors regenerate via `pfm codex build .` + `pfm opencode build .` |
 | `.claude/commands/readme-gif.md` + mirrors `.codex/skills/readme-gif/SKILL.md`, `.opencode/command/readme-gif.md` | the recorder command | DELETED (GOD, guarded) + mirrors regenerated (the mirror files disappear) |
 | `.professor/drift.md:468` (`/readme-gif` entry), `:465,:492` (`dev.sh iso` paths) | historical ledger lines | append one dated line: fence moved to `infra/fence/`, readme-gif retired; never rewrite history lines |
 | `README.md`, `INSTALL.md`, `docs/**` embeds of `docs/img/pfm-fleet.gif` (the recorded hero GIF) | grep | if nothing but readme-gif produced/used it and README no longer embeds it, delete the GIF; if README still embeds it, STOP and report (user decision) |

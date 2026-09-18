@@ -107,6 +107,42 @@ func TestCheckDependenciesAcceptsOnlyPinnedArm64SBSAFalsePositive(t *testing.T) 
 	}
 }
 
+func TestCheckDependenciesRejectsArm64PinAcrossLockRecords(t *testing.T) {
+	root := arm64DependencyFixture(t, true, "py3-none-manylinux2014_sbsa", minimalELF(elf.EM_AARCH64))
+	lock := `[[package]]
+name = "nvidia-cusparselt-cu13"
+version = "0.8.0"
+
+[[package]]
+name = "other-package"
+version = "0.8.1"
+
+[[package]]
+name = "another-package"
+url = "manylinux2014_aarch64"
+`
+	if err := os.WriteFile(filepath.Join(root, "project", "uv.lock"), []byte(lock), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &deps.FakeRunner{}
+	runner.Script(
+		[]string{filepath.Join(root, "uv"), "pip", "check"},
+		deps.RunResult{
+			ExitCode: 1,
+			Stderr:   []byte("The package nvidia-cusparselt-cu13 was built for a different platform"),
+		},
+		nil,
+	)
+	if err := checkDependencies(
+		context.Background(),
+		runner,
+		root,
+		Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+	); err == nil {
+		t.Fatal("arm64 false-positive accepted when lock fields came from separate package records")
+	}
+}
+
 func arm64DependencyFixture(t *testing.T, lockPin bool, wheelTag string, library []byte) string {
 	t.Helper()
 	root := t.TempDir()

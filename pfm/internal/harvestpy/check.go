@@ -310,9 +310,7 @@ func acceptPinnedArm64SBSAFailure(platform Platform, root string, checkErr error
 	if err != nil {
 		return false, fmt.Errorf("read lock while checking pinned arm64 wheel exception: %w", err)
 	}
-	if !strings.Contains(string(lock), "name = \"nvidia-cusparselt-cu13\"") ||
-		!strings.Contains(string(lock), "version = \"0.8.1\"") ||
-		!strings.Contains(string(lock), "manylinux2014_aarch64") {
+	if !hasPinnedArm64PackageRecord(string(lock)) {
 		return false, nil
 	}
 	pattern := filepath.Join(
@@ -365,6 +363,27 @@ func acceptPinnedArm64SBSAFailure(platform Platform, root string, checkErr error
 		return false, fmt.Errorf("close pinned arm64 wheel library %s: %w", libPath, err)
 	}
 	return machine == elf.EM_AARCH64, nil
+}
+
+func hasPinnedArm64PackageRecord(lock string) bool {
+	for _, record := range strings.Split(lock, "[[package]]") {
+		if !lockRecordHasLine(record, `name = "nvidia-cusparselt-cu13"`) ||
+			!lockRecordHasLine(record, `version = "0.8.1"`) ||
+			!strings.Contains(record, "manylinux2014_aarch64") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func lockRecordHasLine(record, want string) bool {
+	for _, line := range strings.Split(record, "\n") {
+		if strings.TrimSpace(line) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func checkInventory(ctx context.Context, runner deps.Runner, root string, expected EnvironmentDigest) error {

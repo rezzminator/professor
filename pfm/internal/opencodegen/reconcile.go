@@ -181,7 +181,11 @@ func isClaimable(path string, mirrorCopy bool) bool {
 		return false
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return true
+		target, err := os.Readlink(path)
+		if err != nil {
+			return false
+		}
+		return isClaudeSourceTarget(target)
 	}
 	if mirrorCopy {
 		return true
@@ -193,6 +197,20 @@ func isClaimable(path string, mirrorCopy bool) bool {
 	if info.IsDir() {
 		raw, err := os.ReadFile(filepath.Join(path, "SKILL.md"))
 		return err == nil && hasMarker(string(raw))
+	}
+	return false
+}
+
+func isClaudeSourceTarget(target string) bool {
+	parts := strings.Split(filepath.ToSlash(filepath.Clean(target)), "/")
+	for i, part := range parts[:len(parts)-1] {
+		if part != ".claude" {
+			continue
+		}
+		switch parts[i+1] {
+		case "agents", "commands", "skills":
+			return true
+		}
 	}
 	return false
 }

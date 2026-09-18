@@ -3,6 +3,7 @@ package obs
 import (
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -13,9 +14,24 @@ const redactedValue = "<redacted>"
 
 // secretMarkers are the substrings that make a value a credential no matter
 // which key carries it: an API key, an Authorization header (bearer or basic),
-// an OAuth blob. They are the LAST line, not the plan: a middleware logs the
-// SHAPE of an argument (argc, host, path, bytes), never the argument.
-var secretMarkers = []string{"sk-", "bearer ", "basic ", "authorization", "oauth"}
+// an OAuth blob, or a credential-shaped field regardless of scheme spelling —
+// a password/token/secret/api-key assignment, a cookie header. They are the
+// LAST line, not the plan: a middleware logs the SHAPE of an argument (argc,
+// host, path, bytes), never the argument. Matched against the lowered text,
+// so the spelling here is already lower case; a marker needing "=" (rather
+// than the bare word) is deliberate — "tokenizer" and "secretary" must not
+// trip it.
+var secretMarkers = []string{
+	"sk-", "bearer ", "basic ", "authorization", "oauth",
+	"password=", "passwd=", "token=", "secret=", "api_key=", "apikey=", "api-key",
+	"cookie:", "set-cookie", "x-api-key",
+}
+
+// jwtSegment matches a JSON Web Token's compact serialization: three
+// base64url segments separated by dots, the header segment starting "eyJ"
+// (base64 of `{"`). Matched against the untruncated, original-case text —
+// a JWT is case-sensitive.
+var jwtSegment = regexp.MustCompile(`eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+`)
 
 // declaredKeys is the activity log's allow-list: the only field keys a record
 // may carry a real value under. Everything else is refused at the handler, so
@@ -114,6 +130,9 @@ func scrubValue(value slog.Value) slog.Value {
 			if strings.Contains(lowered, marker) {
 				return slog.StringValue(redactedValue)
 			}
+		}
+		if jwtSegment.MatchString(text) {
+			return slog.StringValue(redactedValue)
 		}
 		return slog.StringValue(TruncateValue(text))
 	default:

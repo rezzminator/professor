@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
+
+	"hostops/pfm/internal/obs"
 )
 
 func TestBatchUsesFiveHundredRecordTransactions(t *testing.T) {
@@ -60,5 +63,53 @@ func TestImmediateTransactionRollsBack(t *testing.T) {
 	}
 	if _, found, err := store.Meta(ctx, "rolled_back"); err != nil || found {
 		t.Fatalf("Meta() after rollback found = %v, error = %v; want false, nil", found, err)
+	}
+}
+
+// TestImmediateTransactionRecordsRollbackFailure provokes a rollback that
+// itself fails (the connection is closed from inside fn, so the deferred
+// ROLLBACK cannot run) and asserts the db record obs.SQL writes for the
+// BEGIN IMMEDIATE op — and the error WithImmediateTx returns — both name the
+// rollback failure, not just fn's own error (F3).
+func TestImmediateTransactionRecordsRollbackFailure(t *testing.T) {
+	setStoreTestJail(t)
+	store := openTestStore(t)
+	t.Cleanup(func() { _ = store.Close() })
+	ctx, recorder := obs.Test(t)
+	sentinel := errors.New("stop")
+
+	err := store.WithImmediateTx(ctx, func(tx *ImmediateTx) error {
+		if closeErr := tx.conn.Close(); closeErr != nil {
+			t.Fatalf("close connection early: %v", closeErr)
+		}
+		return sentinel
+	})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("WithImmediateTx() error = %v, want to still wrap sentinel", err)
+	}
+	if !strings.Contains(err.Error(), "rollback immediate transaction") {
+		t.Fatalf("WithImmediateTx() error = %v, want rollback failure named", err)
+	}
+
+	var beginRecord obs.Record
+	found := false
+	for _, record := range recorder.Records() {
+		if record.Message != "db.statement" {
+			continue
+		}
+		if op, ok := record.Field("op"); ok && op == "begin" {
+			beginRecord = record
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no db.statement record for the begin op found in %q", recorder.Raw())
+	}
+	errField, ok := beginRecord.Field("err")
+	if !ok {
+		t.Fatalf("begin record has no err field: %+v", beginRecord.Fields)
+	}
+	if !strings.Contains(fmt.Sprint(errField), "rollback immediate transaction") {
+		t.Fatalf("begin record err = %v, want rollback failure named", errField)
 	}
 }

@@ -83,6 +83,66 @@ func TestScrubRefusesUndeclaredKeysAndCapsOversizeValues(t *testing.T) {
 	}
 }
 
+// TestScrubRefusesCredentialShapedTextRegardlessOfSpelling is the F4 table:
+// a credential planted in a declared key is refused whatever the scheme
+// spelling, or a bare JWT — the second gate is not just sk-/bearer-/oauth-
+// shaped.
+func TestScrubRefusesCredentialShapedTextRegardlessOfSpelling(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{"password=", "reason", "password=hunter2"},
+		{"passwd=", "path", "passwd=hunter2"},
+		{"token=", "argv", "token=abc123"},
+		{"secret=", "reason", "secret=abc123"},
+		{"api_key=", "path", "api_key=abc123"},
+		{"apikey=", "argv", "apikey=abc123"},
+		{"api-key", "reason", "the api-key rotated last night"},
+		{"cookie:", "path", "cookie: sessionid=abc123"},
+		{"set-cookie", "argv", "set-cookie: sessionid=abc123"},
+		{"x-api-key", "reason", "x-api-key: abc123"},
+		{
+			"jwt shape", "path",
+			"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Scrub(nil, slog.String(tt.key, tt.value))
+			if got.Value.String() != redactedValue {
+				t.Fatalf("Scrub(%s=%q) = %v, want refused", tt.key, tt.value, got.Value.String())
+			}
+		})
+	}
+}
+
+// TestScrubKeepsOrdinaryTextThatOnlyResemblesAMarker is F4's negative
+// control: the widened gate must not refuse a value merely for containing a
+// marker's bare word — token= needs the =, not the bare word.
+func TestScrubKeepsOrdinaryTextThatOnlyResemblesAMarker(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		value string
+	}{
+		{"tokenizer word", "reason", "the tokenizer split the input"},
+		{"secretary word", "path", "ask the secretary for the file"},
+		{"cookies filename", "path", "/var/lib/pfm/cache/cookies.txt"},
+		{"plain file path", "path", "/var/lib/pfm/internal/obs/scrub.go"},
+		{"normal argv", "argv", "git status --short"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Scrub(nil, slog.String(tt.key, tt.value))
+			if got.Value.String() != tt.value {
+				t.Fatalf("Scrub(%s=%q) = %v, want kept whole", tt.key, tt.value, got.Value.String())
+			}
+		})
+	}
+}
+
 func TestScrubRenamesTimeToTS(t *testing.T) {
 	ctx, recorder := Test(t)
 	Logger(ctx).Info("probe")

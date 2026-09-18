@@ -44,7 +44,7 @@ func Exec(ctx context.Context, binary, socketPath string, arguments ...string) *
 // the tmux arguments the shape is read from, never the launcher's own.
 func Observe(ctx context.Context, command *exec.Cmd, arguments ...string) *Cmd {
 	subcmd, target := shape(arguments)
-	return &Cmd{Cmd: command, ctx: ctx, subcmd: subcmd, target: target, clock: clock.Real}
+	return &Cmd{Cmd: command, ctx: ctx, subcmd: subcmd, target: target, clock: obs.Clock(ctx)}
 }
 
 // shape reads the subcommand (the first non-flag word) and the -t target

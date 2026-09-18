@@ -145,15 +145,16 @@ func (s *Store) WithImmediateTx(
 
 	committed := false
 	defer func() {
-		transaction.End(-1, err)
 		if committed {
+			transaction.End(-1, err)
 			return
 		}
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), rollbackTimeout)
 		defer cancel()
-		if _, rollbackErr := conn.ExecContext(rollbackCtx, "ROLLBACK"); err == nil && rollbackErr != nil {
-			err = fmt.Errorf("rollback immediate transaction: %w", rollbackErr)
+		if _, rollbackErr := conn.ExecContext(rollbackCtx, "ROLLBACK"); rollbackErr != nil {
+			err = errors.Join(err, fmt.Errorf("rollback immediate transaction: %w", rollbackErr))
 		}
+		transaction.End(-1, err)
 	}()
 
 	tx := &ImmediateTx{

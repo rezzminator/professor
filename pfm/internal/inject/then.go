@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/deps"
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // DeliverThen is the waiter half of chat.sh's __then subcommand
@@ -19,13 +21,14 @@ import (
 // confirmed delivery at a time: steer N+1 always waits out steer N's whole
 // turn. It runs in a DETACHED process because for a self-inject the waiter
 // waits on the very turn that spawned it.
-func (engine *Engine) DeliverThen(
-	ctx context.Context,
-	socketPath, target string,
-	steers []string,
-	selfTarget bool,
-) (Result, error) {
+//
+// The armed record beside the steer log (armed.go) names this waiter for as
+// long as the chain runs: claimed on entry, handed to the next hop when this
+// one delivered and armed it, removed on the chain's last delivery or on any
+// refusal — so ScheduleAfterCurrentTurn can refuse a second arming by name.
+func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Result, err error) {
 	ctx = withSender(ctx, engine.sender(ctx))
+	socketPath, target, steers := wait.SocketPath, wait.Target, wait.Steers
 	if target == "" || len(steers) == 0 || steers[0] == "" {
 		return refused(
 			1,
@@ -39,7 +42,29 @@ func (engine *Engine) DeliverThen(
 			return Result{}, err
 		}
 	}
-	observed := engine.waitForSettledTurn(ctx, socketPath, target, selfTarget)
+	armed := armedPathFor(engine.steerLogPath(Target{SocketPath: socketPath, Pane: target}))
+	engine.claimArmed(armed, steers[0])
+	defer func() {
+		engine.releaseArmed(armed, err == nil && result.Code == 0 && result.Steers > 0)
+	}()
+	observed := engine.waitForSettledTurn(ctx, socketPath, target, wait.SelfTarget)
+	if !observed && wait.Engine == string(pfmengine.Codex) {
+		// The steady-idle fallback below is a GUESS, and on a Codex pane it
+		// is the wrong one: the Claude busy regex does not know the Codex
+		// footer and the receipt regex does not know its compaction line
+		// (guards.go), so "never went busy" is what a Codex compaction in
+		// progress looks like, and the two 2026-09-18 sightings were steers
+		// typed into exactly that. A steer lost with a named cause beats one
+		// typed into a compacting pane; the spelling lands with Tier B E2.09.
+		return Result{
+			Status: statusUndelivered,
+			Code:   CodeUndelivered,
+			Message: fmt.Sprintf(
+				"then steer NOT delivered: no turn boundary observed on a Codex pane — the Codex busy/compaction footer is not yet pinned (Tier B beat E2.09 captures it); steer kept in the log: %q",
+				steers[0],
+			),
+		}, nil
+	}
 	if quiet, readErr := engine.waitForQuietTypist(ctx, socketPath, target); !quiet {
 		// Never deliver over a typing human, and never force: the waiter has
 		// no operator standing by to authorize force_now, and the whole point
@@ -52,7 +77,7 @@ func (engine *Engine) DeliverThen(
 		// anti-pattern this guard exists to police.
 		if readErr != nil {
 			return Result{
-				Status: "undelivered",
+				Status: statusUndelivered,
 				Code:   CodeUndelivered,
 				Message: fmt.Sprintf(
 					"then steer NOT delivered: could not read who is at %q for %s (last tmux error: %v); chain aborted with %d steer(s) undelivered",
@@ -74,7 +99,7 @@ func (engine *Engine) DeliverThen(
 			),
 		}, nil
 	}
-	result, err := engine.inject(ctx, Request{
+	result, err = engine.inject(ctx, Request{
 		Target:  target,
 		Message: steers[0],
 		Then:    steers[1:],
@@ -92,6 +117,10 @@ func (engine *Engine) DeliverThen(
 	}
 	return result, err
 }
+
+// statusUndelivered is the Result.Status of a waiter that gave up without
+// typing: the steer is in the log, nothing reached the pane.
+const statusUndelivered = "undelivered"
 
 // paneSample is one observation of the target pane. Busy alone cannot answer
 // "is the turn I was sent to ride out over yet" — it is true for ANY turn,
@@ -152,6 +181,22 @@ func (engine *Engine) samplePane(
 // when the waiter wakes up is scrollback from an EARLIER compaction and proves
 // nothing about this one.
 //
+// Step 3 has a second door, for the pane a background sub-agent keeps busy.
+// Its footer matches busyPattern for as long as the agent runs, so the pane
+// NEVER reads idle: step 1 cannot complete for a self-inject, and the
+// "receipt AND quiet" test never passes for anyone — the waiter burned its
+// whole budget (~10 min) and then delivered on the WARNING path (Wave 8 item
+// 5, beat E1.20). Sidechains are allowed — /compact works beside a background
+// agent — so the receipt is the boundary: a BASELINE capture before the loop
+// records whether a receipt was already on screen, and a receipt that appears
+// afterwards while the pane still reads busy is this turn's, footer or no
+// footer. A receipt already in the baseline stays scrollback and proves
+// nothing, exactly as before. A receipt that appears at an IDLE sample before
+// any turn was seen to start is still not taken as proof: that is also what a
+// stale receipt uncovered by the caller's footer clearing looks like
+// (TestCompactionReceiptNeedsToAppear), and the steady-idle path below still
+// delivers that shape — with the WARNING that says the guarantee is weaker.
+//
 // Step 3 cannot apply to a primary that prints no receipt — a reload steer, a
 // plain queued message, and (a NAMED gap) a Codex compaction, whose receipt
 // spelling nobody here has confirmed. Those fall back to steps 1-2 plus the
@@ -177,6 +222,9 @@ func (engine *Engine) waitForSettledTurn(
 	turnStarted := false
 	stable := 0
 	sinceYield := 0
+	// The baseline is the receipt's reference frame: only a receipt that was
+	// NOT here when the waiter woke can be this turn's.
+	baseline := engine.samplePane(ctx, socketPath, target)
 
 	tries := engine.options.ThenBusyTries + engine.options.ThenIdleTries
 	for attempt := 0; attempt < tries; attempt++ {
@@ -191,9 +239,10 @@ func (engine *Engine) waitForSettledTurn(
 		}
 
 		// Positive proof outranks the busy/idle dance: once this turn's own
-		// compaction receipt is on screen and the pane has gone quiet, the
-		// turn we were sent to ride out is provably over.
-		if turnStarted && sample.receipt && !sample.busy {
+		// compaction receipt is on screen and the pane has gone quiet — or
+		// has newly appeared while a background agent's footer keeps the pane
+		// reading busy — the turn we were sent to ride out is provably over.
+		if sample.receipt && ((turnStarted && !sample.busy) || (!baseline.receipt && sample.busy)) {
 			engine.sleepContext(ctx, engine.options.ThenSettle)
 			return true
 		}
@@ -294,6 +343,8 @@ type CommandThenSpawner struct {
 	// Runner is the deps.Runner seam Spawn launches the waiter through; nil
 	// defaults to deps.RealRunner{}.
 	Runner deps.Runner
+	// Clock stamps the armed record (armed.go); nil defaults to clock.Real.
+	Clock clock.Clock
 }
 
 // Spawn launches the detached waiter and returns as soon as it is running.
@@ -323,6 +374,9 @@ func (spawner CommandThenSpawner) Spawn(
 	)
 	if request.SelfTarget {
 		arguments = append(arguments, "--self")
+	}
+	if request.Engine != "" {
+		arguments = append(arguments, "--engine", request.Engine)
 	}
 	for _, steer := range request.Steers {
 		arguments = append(arguments, "--steer", steer)
@@ -388,8 +442,25 @@ func (spawner CommandThenSpawner) Spawn(
 		// on it exactly as it waited on command.Run() before this seam.
 		Detach: usingNohup,
 	}
+	// The armed record goes down BEFORE the waiter starts, so a schedule
+	// racing this one already sees the pane armed; a chain hop (Append) is
+	// the same arming and leaves the record to the hop that owns it.
+	if !request.Append && request.LogPath != "" && len(request.Steers) != 0 {
+		clk := spawner.Clock
+		if clk == nil {
+			clk = clock.Real
+		}
+		if err := armRecord(request, clk.Now()); err != nil {
+			return err
+		}
+	}
 	process, err := runner.Start(ctx, append([]string{launcher}, arguments...), opts)
 	if err != nil {
+		if !request.Append && request.LogPath != "" {
+			if removeErr := os.Remove(armedPathFor(request.LogPath)); removeErr != nil {
+				err = errors.Join(err, fmt.Errorf("remove armed steer record after a failed start: %w", removeErr))
+			}
+		}
 		if usingNohup {
 			return fmt.Errorf("start detached then waiter with nohup: %w", err)
 		}

@@ -180,9 +180,13 @@ type ThenSpawner interface {
 type SteerSpawn struct {
 	SocketPath string
 	Target     string
-	Steers     []string
-	LogPath    string
-	Append     bool
+	// Engine is the target's engine as the spawning chat resolved it
+	// (Target.Engine), handed to the waiter as `--engine` because a Codex
+	// pane's turn boundary is not readable yet (ThenWait.Engine).
+	Engine  string
+	Steers  []string
+	LogPath string
+	Append  bool
 	// Sender is the spawning chat's own identity, carried down because the
 	// waiter runs detached and can derive none of its own.
 	Sender Sender
@@ -193,6 +197,25 @@ type SteerSpawn struct {
 	// every other target the first busy IS the primary's turn, and waiting for
 	// an idle that already went by would delay the steer for nothing.
 	SelfTarget bool
+}
+
+// ThenWait is what the detached waiter (`pfm internal then`, hookentry.Then)
+// hands Engine.DeliverThen: the pane to ride out, the steers to deliver once
+// it settles, and the two facts about the pane the waiter cannot derive on
+// its own.
+type ThenWait struct {
+	SocketPath string
+	Target     string
+	Steers     []string
+	// SelfTarget: the pane being watched is the pane that asked for the
+	// wait, so the caller's own turn must end before any turn can be the
+	// primary's (SteerSpawn.SelfTarget).
+	SelfTarget bool
+	// Engine is Target.Engine as the spawning chat resolved it. On a Codex
+	// pane the busy/compaction footer is not pinned, so an unobserved turn
+	// boundary leaves the steer UNDELIVERED by name rather than typed into
+	// a compaction on the steady-idle guess (DeliverThen).
+	Engine string
 }
 
 // Options controls bounded retries. Zero values select chat.sh defaults.

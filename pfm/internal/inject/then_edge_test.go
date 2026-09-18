@@ -3,6 +3,7 @@ package inject
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -455,7 +456,7 @@ func TestDeliverThenHoldsForTypistThenDelivers(t *testing.T) {
 	counting := &countingClock{Clock: clock.Real, start: start}
 	engine.options.Clock = counting
 
-	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
+	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +505,7 @@ func TestDeliverThenRefusesWhenTypistNeverClears(t *testing.T) {
 	// sampled.
 	engine.options.Clock = fixedClock{Clock: clock.Real, now: start.Add(time.Second)}
 
-	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
+	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -629,7 +630,7 @@ func TestDeliverThenReportsUndeliveredWhenTmuxUnreadable(t *testing.T) {
 	start := time.Unix(1_700_000_000, 0)
 	engine.options.Clock = fixedClock{Clock: clock.Real, now: start}
 
-	result, err := engine.DeliverThen(context.Background(), "", "chat", []string{"resume"}, false)
+	result, err := engine.DeliverThen(context.Background(), ThenWait{Target: "chat", Steers: []string{"resume"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -660,5 +661,73 @@ func TestDeliverThenReportsUndeliveredWhenTmuxUnreadable(t *testing.T) {
 			fake.keys,
 			fake.literals,
 		)
+	}
+}
+
+// captureBusyReceipt is the pane a background sub-agent leaves behind: the
+// compaction receipt is on screen, the main turn is over, and the agent's
+// own footer keeps busyPattern matching for as long as it runs.
+const captureBusyReceipt = "Compacted (ctrl+o to see full summary)\n" +
+	"● Background agent running…\n  esc to interrupt\n❯ "
+
+// TestThenWaiterAcceptsTheReceiptWhileABackgroundAgentKeepsThePaneBusy is
+// Wave 8 item 5 (beat E1.20): a chat with a background sub-agent never reads
+// idle, so a waiter that insists on !busy before it trusts the receipt sits
+// out its whole budget and then delivers with the "no turn boundary" WARNING
+// — ten minutes late and unproven. The receipt is the boundary: a receipt
+// that was NOT on screen when the waiter woke and IS on screen now proves
+// this turn's compaction ran, whatever the footer says.
+func TestThenWaiterAcceptsTheReceiptWhileABackgroundAgentKeepsThePaneBusy(t *testing.T) {
+	for _, selfTarget := range []bool{true, false} {
+		t.Run(fmt.Sprintf("self=%t", selfTarget), func(t *testing.T) {
+			var frames []paneFrame
+			frames = append(frames, repeatFrame(phaseCaller, captureBusy, 3)...)
+			frames = append(frames, repeatFrame(phaseDone, captureBusyReceipt, 6)...)
+
+			engine, script := newScriptedEngine(t, frames)
+			engine.options.ThenBusyTries = 4
+			engine.options.ThenIdleTries = 8
+			observed := engine.waitForSettledTurn(context.Background(), "", "chat", selfTarget)
+
+			if !observed {
+				t.Fatal(
+					"waiter reported no turn boundary although this turn's own receipt " +
+						"appeared while it watched — it waited for an idle a background " +
+						"agent never grants and will deliver late WITH the WARNING",
+				)
+			}
+			if got := script.decidedIn(); got != phaseDone {
+				t.Fatalf("waiter released in phase %q, want %q", got, phaseDone)
+			}
+			// The baseline capture takes the first caller frame, the loop the
+			// other two, and the FIRST receipt frame decides: any later release
+			// rode the busy footer instead.
+			if script.served != 4 {
+				t.Fatalf("waiter sampled %d times, want 4 (baseline + 2 busy + the receipt frame)", script.served)
+			}
+		})
+	}
+}
+
+// TestThenWaiterIgnoresAReceiptThatWasAlreadyOnScreenWhenItWoke is the
+// stale-receipt trap of the rule above (the class reload_then_proof_test.go's
+// stale placeholder pins): a receipt already in the baseline capture and
+// never re-appearing proves nothing about THIS turn, footer or no footer.
+func TestThenWaiterIgnoresAReceiptThatWasAlreadyOnScreenWhenItWoke(t *testing.T) {
+	frames := repeatFrame(phaseLate, captureBusyReceipt, 12)
+
+	engine, script := newScriptedEngine(t, frames)
+	engine.options.ThenBusyTries = 3
+	engine.options.ThenIdleTries = 6
+	observed := engine.waitForSettledTurn(context.Background(), "", "chat", true)
+
+	if observed {
+		t.Fatal(
+			"waiter took a receipt that was already on screen in its baseline " +
+				"capture as proof this turn's compaction ran — a receipt must APPEAR",
+		)
+	}
+	if script.served < 3 {
+		t.Fatalf("waiter gave up after %d samples without exhausting its budget", script.served)
 	}
 }

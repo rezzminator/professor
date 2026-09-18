@@ -236,6 +236,15 @@ func (tmux TmuxInjector) ClientActivity(
 	return last, found, nil
 }
 
+// Display puts a transient notice on the pane's status line — the reload-hold
+// pattern (reload.go announcePane; cmd/pfm reloadCommandTmux.Display is the
+// real one there): the text travels as ONE argv element, unescaped, exactly
+// as that implementation passes it; -d 4000 holds it four seconds so the
+// operator has time to read what the waiter is waiting for.
+func (tmux TmuxInjector) Display(ctx context.Context, socketPath, target, text string) error {
+	return tmux.command(ctx, socketPath, "display-message", "-t", target, "-d", "4000", text).Run()
+}
+
 func (tmux TmuxInjector) command(
 	ctx context.Context,
 	socketPath string,

@@ -537,23 +537,29 @@ func (engine *Engine) ScheduleAfterCurrentTurn(
 	steers = append(steers, request.Message)
 	steers = append(steers, then...)
 	logPath := engine.steerLogPath(target)
+	if result, ok := engine.refuseIfArmed(target, request, logPath); !ok {
+		return result, nil
+	}
+	// Only the ORIGINAL self-compaction needs the caller's turn ridden
+	// out. A chained re-arm is typed into a pane this waiter already
+	// watched settle, so its next busy is the steer's own turn.
+	selfTarget := !request.Chain && isSelfTarget(request.Target)
 	if err := engine.spawner.Spawn(ctx, SteerSpawn{
 		SocketPath: target.SocketPath,
 		Target:     target.Pane,
+		Engine:     target.Engine,
 		Steers:     steers,
 		LogPath:    logPath,
 		Append:     request.Chain,
 		Sender:     engine.sender(ctx),
-		// Only the ORIGINAL self-compaction needs the caller's turn ridden
-		// out. A chained re-arm is typed into a pane this waiter already
-		// watched settle, so its next busy is the steer's own turn.
-		SelfTarget: !request.Chain && isSelfTarget(request.Target),
+		SelfTarget: selfTarget,
 	}); err != nil {
 		return refused(
 			CodeUndelivered,
 			fmt.Sprintf("could not schedule command after the current turn: %v", err),
 		), nil
 	}
+	engine.announceArmed(ctx, target, request, selfTarget)
 	message := fmt.Sprintf(
 		"scheduled COMMAND into %q after the current turn settles — %d post-command steer(s) armed (log: %s)",
 		target.Pane,
@@ -1215,6 +1221,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		if err := engine.spawner.Spawn(ctx, SteerSpawn{
 			SocketPath: target.SocketPath,
 			Target:     target.Pane,
+			Engine:     target.Engine,
 			Steers:     request.Then,
 			LogPath:    base.SteerLog,
 			Append:     request.Chain,
@@ -1784,40 +1791,6 @@ func (engine *Engine) senderLabel(
 		return ""
 	}
 	return strings.TrimSpace(window)
-}
-
-// steerLogPath mirrors chat.sh:940 — ${TMPDIR:-/tmp}/chat-then-<target>.log —
-// but scoped by SOCKET as well as pane. Every chat's own live pane is %0 on
-// its own dedicated socket, so a bare pane-derived name collided across
-// EVERY chat on the machine: a fresh chain on one chat truncated the exact
-// log file another chat's forensics depended on
-// (the 2026-09-03 self-compact that ate an operator's live draft). The path is now
-// ${TMPDIR:-/tmp}/chat-then-<sanitized base(SocketPath)>.<sanitized Pane>.log:
-// each component is sanitized SEPARATELY, every non-alphanumeric byte in it
-// (including a literal '-' inside the socket name itself) folded to '_',
-// BEFORE the two are joined with a '.' — a byte the sanitizer never emits.
-// Joining the raw components first (with '-') and sanitizing afterward let a
-// hyphen inside one component alias with the join delimiter: two distinct
-// (socket, pane) pairs whose hyphen boundary fell in different places could
-// sanitize to the identical path (this repo's own socket names are
-// hyphen-joined numeric triples — spawn.FreshSocket,
-// "%s%d-%d-%d"). Sanitizing first and joining on a delimiter the sanitizer
-// never produces makes that collision structurally impossible.
-func (engine *Engine) steerLogPath(target Target) string {
-	sanitize := func(component string) string {
-		return strings.Map(func(character rune) rune {
-			switch {
-			case character >= 'a' && character <= 'z',
-				character >= 'A' && character <= 'Z',
-				character >= '0' && character <= '9':
-				return character
-			default:
-				return '_'
-			}
-		}, component)
-	}
-	name := sanitize(filepath.Base(target.SocketPath)) + "." + sanitize(target.Pane)
-	return filepath.Join(engine.options.ThenLogRoot, "chat-then-"+name+".log")
 }
 
 func targetFromParts(socketPath, pane string, env paths.Env) Target {

@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -262,6 +261,6 @@ func readLaunchStatus(path string) (int, error) {
 	return status, nil
 }
 
-func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *exec.Cmd {
-	return pfmtmux.Command(ctx, binary, socketPath, args...)
+func launchTmuxCommand(ctx context.Context, binary, socketPath string, args ...string) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, binary, socketPath, args...)
 }

@@ -14,6 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // DarwinProcFS answers the same questions RealProcFS answers, on a kernel that
@@ -123,7 +124,7 @@ func (proc *DarwinProcFS) RSSKB(pid int) (int64, error) {
 }
 
 func (proc *DarwinProcFS) loadResident() {
-	result, err := deps.RealRunner{}.Run(
+	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
 		[]string{deps.Executable("ps"), "-A", "-o", "pid=,rss="},
 		deps.RunOptions{},
@@ -158,7 +159,7 @@ func (proc *DarwinProcFS) loadResident() {
 // transcript a live chat holds open, and "no open files" is a claim, not a
 // shrug — reporting it falsely would let archive evict a file still in use.
 func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
-	result, err := deps.RealRunner{}.Run(
+	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
 		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-p", strconv.Itoa(pid), "-F", "fn"},
 		deps.RunOptions{},
@@ -207,7 +208,7 @@ func (proc *DarwinProcFS) FDLinks(pid int) ([]FDLink, error) {
 // the one the process still holds after an install renamed a new file over
 // the path. A missing entry is an error, never a zero identity.
 func (proc *DarwinProcFS) Image(pid int) (FileID, error) {
-	result, err := deps.RealRunner{}.Run(
+	result, err := obs.Runner(deps.RealRunner{}).Run(
 		context.Background(),
 		[]string{deps.Executable("lsof"), "-w", "-n", "-P", "-a", "-p", strconv.Itoa(pid), "-d", "txt", "-F", "Di"},
 		deps.RunOptions{},

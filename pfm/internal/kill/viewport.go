@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // A chat is watched through a terminal, and that terminal is owned by a shell.
@@ -87,7 +88,7 @@ func (tmux TmuxKiller) ClientPIDs(
 type CommandProcessTable struct {
 	Binary string
 	// Runner is the deps.Runner seam Info reads ps through; nil defaults to
-	// deps.RealRunner{}.
+	// obs.Runner(deps.RealRunner{}).
 	Runner deps.Runner
 }
 
@@ -102,7 +103,7 @@ func (table CommandProcessTable) Info(
 	}
 	runner := table.Runner
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	result, err := runner.Run(
 		ctx,

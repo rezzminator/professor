@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"hostops/pfm/internal/obs"
 )
 
 const (
@@ -32,13 +34,18 @@ type ImmediateTx struct {
 	statements map[string]*sql.Stmt
 }
 
-// ExecContext executes a statement within the immediate transaction.
+// ExecContext executes a statement within the immediate transaction. Every
+// ImmediateTx statement writes one comp=db record (obs.SQL) around the
+// driver call — the transaction is the store's other statement door.
 func (tx *ImmediateTx) ExecContext(
 	ctx context.Context,
 	query string,
 	args ...any,
 ) (sql.Result, error) {
-	return tx.conn.ExecContext(ctx, query, args...)
+	op := obs.SQL(ctx, storeKind, query)
+	result, err := tx.conn.ExecContext(ctx, query, args...)
+	op.End(affectedRows(result, err), err)
+	return result, err
 }
 
 // QueryContext queries rows within the immediate transaction.
@@ -47,7 +54,10 @@ func (tx *ImmediateTx) QueryContext(
 	query string,
 	args ...any,
 ) (*sql.Rows, error) {
-	return tx.conn.QueryContext(ctx, query, args...)
+	op := obs.SQL(ctx, storeKind, query)
+	rows, err := tx.conn.QueryContext(ctx, query, args...)
+	op.End(-1, err)
+	return rows, err
 }
 
 // QueryRowContext queries one row within the immediate transaction.
@@ -56,7 +66,10 @@ func (tx *ImmediateTx) QueryRowContext(
 	query string,
 	args ...any,
 ) *sql.Row {
-	return tx.conn.QueryRowContext(ctx, query, args...)
+	op := obs.SQL(ctx, storeKind, query)
+	row := tx.conn.QueryRowContext(ctx, query, args...)
+	op.End(-1, row.Err())
+	return row
 }
 
 func (tx *ImmediateTx) execCachedContext(
@@ -64,16 +77,20 @@ func (tx *ImmediateTx) execCachedContext(
 	query string,
 	args ...any,
 ) (sql.Result, error) {
+	op := obs.SQL(ctx, storeKind, query)
 	statement := tx.statements[query]
 	if statement == nil {
 		var err error
 		statement, err = tx.conn.PrepareContext(ctx, query)
 		if err != nil {
+			op.End(-1, err)
 			return nil, err
 		}
 		tx.statements[query] = statement
 	}
-	return statement.ExecContext(ctx, args...)
+	result, err := statement.ExecContext(ctx, args...)
+	op.End(affectedRows(result, err), err)
+	return result, err
 }
 
 func (tx *ImmediateTx) closeStatements() error {
@@ -118,12 +135,17 @@ func (s *Store) WithImmediateTx(
 		}
 	}()
 
+	// One record spans the transaction: op=begin, ended with the commit's
+	// result or the failure that rolled it back.
+	transaction := obs.SQL(ctx, storeKind, "BEGIN IMMEDIATE")
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		transaction.End(-1, err)
 		return fmt.Errorf("begin immediate transaction: %w", err)
 	}
 
 	committed := false
 	defer func() {
+		transaction.End(-1, err)
 		if committed {
 			return
 		}

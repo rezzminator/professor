@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/resolve"
 	"hostops/pfm/internal/sqlitedb"
 )
@@ -292,7 +293,9 @@ func readCodexState(ctx context.Context, file string) (threads []CodexThread, re
 		codexStateColumn(columns, "recency_at", "0") + ", " +
 		codexStateColumn(columns, "tokens_used", "0") +
 		" FROM threads ORDER BY id"
+	read := obs.SQL(ctx, "codex", query)
 	rows, err := db.QueryContext(ctx, query)
+	read.End(-1, err)
 	if err != nil {
 		return nil, fmt.Errorf("query Codex state store %q: %w", file, err)
 	}
@@ -351,7 +354,10 @@ func readCodexState(ctx context.Context, file string) (threads []CodexThread, re
 // Codex grows the table over releases, so an older store is read through the
 // columns it carries instead of failing the whole pass.
 func codexStateColumns(ctx context.Context, db *sql.DB) (columns map[string]struct{}, returnErr error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info(threads)")
+	const columnsQuery = "PRAGMA table_info(threads)"
+	read := obs.SQL(ctx, "codex", columnsQuery)
+	rows, err := db.QueryContext(ctx, columnsQuery)
+	read.End(-1, err)
 	if err != nil {
 		return nil, err
 	}

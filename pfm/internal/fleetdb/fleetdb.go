@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"hostops/pfm/internal/atomicfile"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/sqlitedb"
 )
@@ -128,7 +129,10 @@ func openDatabase(ctx context.Context, path string) (*sql.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open shared state database: %w", err)
 	}
-	if _, err := db.ExecContext(ctx, schemaDDL); err != nil {
+	schema := obs.SQL(ctx, kind, schemaDDL)
+	_, err = db.ExecContext(ctx, schemaDDL)
+	schema.End(-1, err)
+	if err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize shared state schema: %w", err)
 	}
@@ -143,7 +147,7 @@ func (s *Store) SetBusyTimeout(ctx context.Context, milliseconds int) error {
 	if s.db == nil {
 		return nil
 	}
-	if _, err := s.db.ExecContext(
+	if _, err := s.exec(
 		ctx,
 		fmt.Sprintf("PRAGMA busy_timeout=%d", milliseconds),
 	); err != nil {
@@ -179,7 +183,7 @@ func (s *Store) Kill(ctx context.Context, id string, killedAt int64) error {
 	if s.db == nil {
 		return fmt.Errorf("record shared kill %q: %w", id, s.degraded)
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.exec(ctx, `
 INSERT INTO hidden(uuid,hidden_at,at_payload) VALUES(?,?,NULL)
 ON CONFLICT(uuid) DO UPDATE SET
   hidden_at=excluded.hidden_at,
@@ -203,7 +207,7 @@ func (s *Store) KillUntilPrompt(
 	if s.db == nil {
 		return fmt.Errorf("record shared clear kill %q: %w", id, s.degraded)
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.exec(ctx, `
 INSERT INTO hidden(uuid,hidden_at,at_payload) VALUES(?,?,?)
 ON CONFLICT(uuid) DO UPDATE SET
   hidden_at=CASE WHEN hidden.at_payload IS NULL THEN hidden.hidden_at ELSE excluded.hidden_at END,
@@ -226,7 +230,7 @@ func (s *Store) Unkill(ctx context.Context, id string) error {
 	if s.db == nil {
 		return fmt.Errorf("remove shared kill %q: %w", id, s.degraded)
 	}
-	if _, err := s.db.ExecContext(
+	if _, err := s.exec(
 		ctx,
 		"DELETE FROM hidden WHERE uuid=?",
 		id,
@@ -246,7 +250,7 @@ func (s *Store) UnkillIfPayload(
 	if s.db == nil {
 		return false, fmt.Errorf("expire shared clear kill %q: %w", id, s.degraded)
 	}
-	result, err := s.db.ExecContext(
+	result, err := s.exec(
 		ctx,
 		"DELETE FROM hidden WHERE uuid=? AND at_payload=?",
 		id,
@@ -268,7 +272,7 @@ func (s *Store) KilledRecords(ctx context.Context) (records map[string]KilledRec
 		return nil, fmt.Errorf("query shared kills: %w", s.degraded)
 	}
 	records = make(map[string]KilledRecord)
-	rows, err := s.db.QueryContext(
+	rows, err := s.query(
 		ctx,
 		"SELECT uuid, hidden_at, at_payload FROM hidden",
 	)
@@ -323,7 +327,7 @@ func (s *Store) Children(
 	if s.db == nil {
 		return nil, false, nil
 	}
-	rows, err := s.db.QueryContext(
+	rows, err := s.query(
 		ctx,
 		"SELECT val FROM children WHERE kind=? AND key=?",
 		kind,
@@ -361,7 +365,7 @@ func (s *Store) AddChild(
 	if s.db == nil {
 		return nil
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.exec(ctx, `
 INSERT OR IGNORE INTO children(kind,key,val,created_at) VALUES(?,?,?,?)`,
 		kind,
 		key,
@@ -378,7 +382,7 @@ func (s *Store) ClearChildren(ctx context.Context, kind, key string) error {
 	if s.db == nil {
 		return nil
 	}
-	if _, err := s.db.ExecContext(
+	if _, err := s.exec(
 		ctx,
 		"DELETE FROM children WHERE kind=? AND key=?",
 		kind,
@@ -395,7 +399,7 @@ func (s *Store) Meta(ctx context.Context, key string) (string, bool, error) {
 		return "", false, nil
 	}
 	var value string
-	err := s.db.QueryRowContext(
+	err := s.queryRow(
 		ctx,
 		"SELECT val FROM meta WHERE key=?",
 		key,
@@ -418,7 +422,7 @@ func (s *Store) SetMeta(
 	if s.db == nil {
 		return nil
 	}
-	if _, err := s.db.ExecContext(ctx, `
+	if _, err := s.exec(ctx, `
 INSERT INTO meta(key,val,updated_at) VALUES(?,?,?)
 ON CONFLICT(key) DO UPDATE SET val=excluded.val, updated_at=excluded.updated_at`,
 		key,
@@ -456,7 +460,7 @@ func (s *Store) BranchSeats(ctx context.Context) (result map[string]BranchSeat, 
 	if s.db == nil {
 		return result, nil
 	}
-	rows, err := s.db.QueryContext(
+	rows, err := s.query(
 		ctx,
 		"SELECT key,val,updated_at FROM meta WHERE key GLOB ? ORDER BY key",
 		branchSeatPrefix+"*",
@@ -501,7 +505,7 @@ func (s *Store) ClearBranchSeat(ctx context.Context, socket string) error {
 	if s.db == nil {
 		return nil
 	}
-	if _, err := s.db.ExecContext(
+	if _, err := s.exec(
 		ctx,
 		"DELETE FROM meta WHERE key=?",
 		branchSeatPrefix+socket,
@@ -585,11 +589,11 @@ func primaryFromDatabase(ctx context.Context, path string) (int, bool) {
 		}
 	}()
 	var value string
-	if err := db.QueryRowContext(
-		ctx,
-		"SELECT val FROM meta WHERE key=?",
-		PrimaryAccountKey,
-	).Scan(&value); err != nil {
+	const primaryQuery = "SELECT val FROM meta WHERE key=?"
+	read := obs.SQL(ctx, kind, primaryQuery)
+	err = db.QueryRowContext(ctx, primaryQuery, PrimaryAccountKey).Scan(&value)
+	read.End(-1, err)
+	if err != nil {
 		return 0, false
 	}
 	account, err := strconv.Atoi(strings.TrimSpace(value))

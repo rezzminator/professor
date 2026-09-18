@@ -19,6 +19,7 @@ import (
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/kill"
 	"hostops/pfm/internal/mcpserv"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/picker"
 	"hostops/pfm/internal/spawn"
@@ -417,6 +418,8 @@ func runInternal(
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
 ) (exitCode int) {
+	stdout, finishHook := obs.Hook(context.Background(), obs.Verb(args), stdout)
+	defer func() { finishHook(exitCode) }()
 	if len(args) != 0 && args[0] == "clear-kill" {
 		return hookentry.ClearKill(args[1:], os.Stdin, stderr, runtime)
 	}
@@ -488,11 +491,7 @@ func runInternal(
 		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, paths.OSEnv{})
 	}
 	if len(args) != 0 && args[0] == "primary-set" {
-		flags := cli.NewFlagSet(
-			"internal primary-set",
-			"usage: pfm internal primary-set <account>",
-			stderr,
-		)
+		flags := cli.NewFlagSet("internal primary-set", "usage: pfm internal primary-set <account>", stderr)
 		if code, ok := cli.ParseFlags(flags, args[1:]); !ok {
 			return code
 		}
@@ -513,10 +512,7 @@ func runInternal(
 	}
 	if len(args) == 0 {
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
-		fmt.Fprintln(
-			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|tmux-title-renudge|update-check [options]",
-		)
+		fmt.Fprintln(stderr, "usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|tmux-title-renudge|update-check [options]")
 		return 2
 	}
 	if args[0] != "kill-exit" {

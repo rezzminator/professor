@@ -79,7 +79,7 @@ func (s *Store) defaultTranscripts(
 	ctx context.Context,
 	limit int,
 ) (transcripts []Transcript, returnErr error) {
-	rows, err := s.db.QueryContext(ctx, `
+	rows, err := s.logged().QueryContext(ctx, `
 SELECT `+transcriptColumns+`
 FROM transcripts AS t
 LEFT JOIN `+effectiveKilled+` AS h ON h.uuid=t.uuid
@@ -144,7 +144,7 @@ func (s *Store) defaultCounts(
 	// A label-killed row counts as HIDDEN, not suppressed, and never as
 	// eligible — compose's countOmitted tests row.Killed first for the same
 	// reason: killed is dead, empty or not.
-	err := s.db.QueryRowContext(ctx, `
+	err := s.logged().QueryRowContext(ctx, `
 SELECT
   COALESCE(SUM(CASE
     WHEN h.uuid IS NOT NULL OR `+labelKilledSQL+`
@@ -307,7 +307,7 @@ func CodexThreads(rollouts []Rollout) []naming.CodexThread {
 
 // UpsertTranscript inserts or replaces all indexed fields for a transcript.
 func (s *Store) UpsertTranscript(ctx context.Context, transcript Transcript) error {
-	return upsertTranscript(ctx, s.db, transcript)
+	return upsertTranscript(ctx, s.logged(), transcript)
 }
 
 // UpsertTranscript inserts or replaces all indexed fields within tx.
@@ -359,7 +359,7 @@ func (s *Store) Transcript(
 	ctx context.Context,
 	uuid string,
 ) (Transcript, bool, error) {
-	transcript, err := scanTranscript(s.db.QueryRowContext(
+	transcript, err := scanTranscript(s.logged().QueryRowContext(
 		ctx,
 		"SELECT "+transcriptColumns+" FROM transcripts AS t WHERE t.uuid=?",
 		uuid,
@@ -377,7 +377,7 @@ func (s *Store) Transcript(
 func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
 	return queryRows(
 		ctx,
-		s.db,
+		s.logged(),
 		"SELECT "+transcriptColumns+" FROM transcripts AS t ORDER BY t.uuid",
 		"transcript",
 		scanTranscript,
@@ -408,7 +408,7 @@ func scanTranscript(row rowScanner) (Transcript, error) {
 
 // DeleteTranscript deletes a transcript by UUID.
 func (s *Store) DeleteTranscript(ctx context.Context, uuid string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM transcripts WHERE uuid=?", uuid); err != nil {
+	if _, err := s.logged().ExecContext(ctx, "DELETE FROM transcripts WHERE uuid=?", uuid); err != nil {
 		return fmt.Errorf("delete transcript %q: %w", uuid, err)
 	}
 	return nil
@@ -424,7 +424,7 @@ func (tx *ImmediateTx) DeleteTranscript(ctx context.Context, uuid string) error 
 
 // UpsertRollout inserts or replaces all indexed fields for a rollout.
 func (s *Store) UpsertRollout(ctx context.Context, rollout Rollout) error {
-	return upsertRollout(ctx, s.db, rollout)
+	return upsertRollout(ctx, s.logged(), rollout)
 }
 
 // UpsertRollout inserts or replaces all indexed fields within tx.
@@ -460,7 +460,7 @@ INSERT OR REPLACE INTO rollouts (
 
 // Rollout returns a rollout by ID.
 func (s *Store) Rollout(ctx context.Context, id string) (Rollout, bool, error) {
-	rollout, err := scanRollout(s.db.QueryRowContext(
+	rollout, err := scanRollout(s.logged().QueryRowContext(
 		ctx,
 		"SELECT "+rolloutColumns+" FROM rollouts WHERE id=?",
 		id,
@@ -478,7 +478,7 @@ func (s *Store) Rollout(ctx context.Context, id string) (Rollout, bool, error) {
 func (s *Store) Rollouts(ctx context.Context) ([]Rollout, error) {
 	return queryRows(
 		ctx,
-		s.db,
+		s.logged(),
 		"SELECT "+rolloutColumns+" FROM rollouts ORDER BY id",
 		"rollout",
 		scanRollout,
@@ -540,7 +540,7 @@ func scanRollout(row rowScanner) (Rollout, error) {
 
 // DeleteRollout deletes a rollout by ID.
 func (s *Store) DeleteRollout(ctx context.Context, id string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM rollouts WHERE id=?", id); err != nil {
+	if _, err := s.logged().ExecContext(ctx, "DELETE FROM rollouts WHERE id=?", id); err != nil {
 		return fmt.Errorf("delete rollout %q: %w", id, err)
 	}
 	return nil
@@ -556,7 +556,7 @@ func (tx *ImmediateTx) DeleteRollout(ctx context.Context, id string) error {
 
 // UpsertCxName inserts or replaces a Codex thread name.
 func (s *Store) UpsertCxName(ctx context.Context, name CxName) error {
-	return upsertCxName(ctx, s.db, name)
+	return upsertCxName(ctx, s.logged(), name)
 }
 
 // UpsertCxName inserts or replaces a Codex thread name within tx.
@@ -623,7 +623,7 @@ func (s *Store) CxNames(ctx context.Context) (map[string]string, error) {
 // including the provenance reconcileCodexNames needs to arbitrate a store
 // name against a session_index rename.
 func (s *Store) CxNameRecords(ctx context.Context) (records map[string]CxName, returnErr error) {
-	rows, err := s.db.QueryContext(
+	rows, err := s.logged().QueryContext(
 		ctx,
 		"SELECT id, thread_name, source, renamed_at FROM cx_names ORDER BY id",
 	)
@@ -657,7 +657,7 @@ func (s *Store) CxNameRecords(ctx context.Context) (records map[string]CxName, r
 
 // SetMeta inserts or replaces a metadata value.
 func (s *Store) SetMeta(ctx context.Context, key, value string) error {
-	return setMeta(ctx, s.db, key, value)
+	return setMeta(ctx, s.logged(), key, value)
 }
 
 // SetMeta inserts or replaces a metadata value within tx.
@@ -681,7 +681,7 @@ ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
 // Meta returns a metadata value by key.
 func (s *Store) Meta(ctx context.Context, key string) (string, bool, error) {
 	var value string
-	err := s.db.QueryRowContext(ctx, "SELECT value FROM meta WHERE key=?", key).Scan(&value)
+	err := s.logged().QueryRowContext(ctx, "SELECT value FROM meta WHERE key=?", key).Scan(&value)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
@@ -699,7 +699,7 @@ func (s *Store) MetaPrefix(ctx context.Context, prefix string) (values map[strin
 	if prefix == "" {
 		return nil, errors.New("meta prefix scan needs a prefix")
 	}
-	rows, err := s.db.QueryContext(
+	rows, err := s.logged().QueryContext(
 		ctx, "SELECT key, value FROM meta WHERE key LIKE ? ESCAPE '\\' ORDER BY key",
 		escapeLikePrefix(prefix)+"%",
 	)
@@ -734,7 +734,7 @@ func escapeLikePrefix(prefix string) string {
 
 // DeleteMeta deletes a metadata value by key.
 func (s *Store) DeleteMeta(ctx context.Context, key string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM meta WHERE key=?", key); err != nil {
+	if _, err := s.logged().ExecContext(ctx, "DELETE FROM meta WHERE key=?", key); err != nil {
 		return fmt.Errorf("delete meta %q: %w", key, err)
 	}
 	return nil
@@ -742,7 +742,7 @@ func (s *Store) DeleteMeta(ctx context.Context, key string) error {
 
 // IncrementMeta increments one decimal counter, creating it at one.
 func (s *Store) IncrementMeta(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.logged().ExecContext(ctx, `
 INSERT INTO meta (key, value) VALUES (?, '1')
 ON CONFLICT(key) DO UPDATE SET
   value=CAST(meta.value AS INTEGER)+1`,

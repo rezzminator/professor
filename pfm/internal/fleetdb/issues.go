@@ -49,7 +49,7 @@ func (s *Store) RecordIssue(ctx context.Context, issue Issue) (int64, error) {
 	if status == "" {
 		status = IssueStatusOpen
 	}
-	result, err := s.db.ExecContext(ctx, `
+	result, err := s.exec(ctx, `
 INSERT INTO issues(
   at_ns,title,detail,severity,area,
   reporter_session,reporter_label,reporter_uuid,reporter_cwd,reporter_engine,
@@ -95,7 +95,7 @@ FROM issues`
 		args = append(args, IssueStatusOpen)
 	}
 	query += " ORDER BY at_ns DESC, id DESC"
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := s.query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query issues: %w", err)
 	}

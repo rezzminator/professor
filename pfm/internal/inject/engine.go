@@ -110,10 +110,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 	options := withDefaults(dependencies.Options)
 	applyEnvironment(&options, dependencies.Env)
 	if options.BodyRoot == "" {
-		options.BodyRoot = filepath.Join(
-			resolved.Home,
-			".local", "state", "pfm", "inject-bodies",
-		)
+		options.BodyRoot = filepath.Join(resolved.Home, ".local", "state", "pfm", "inject-bodies")
 	}
 	// chat.sh:147 locks under ${TMPDIR:-/tmp}/chat-inject-locks. The Go engine
 	// shares that namespace so a Go inject and a chat.sh inject into the same
@@ -581,7 +578,9 @@ func (engine *Engine) ScheduleSelfCompact(
 	ctx context.Context,
 	focus string,
 	then []string,
-) (Result, error) {
+) (result Result, err error) {
+	states := trail(ctx, "self-compact")
+	defer func() { outcome(states, result, err) }()
 	focus = strings.TrimSpace(focus)
 	// The full control-character class, not just \r\n\x00: ESC, BEL, and
 	// the rest of C0/DEL are the same threat class (an injected control
@@ -722,7 +721,9 @@ const SelfCompactStopNotice = " — STOP NOW: end this turn without running " +
 // target's own turn to end first. The internal inject() this delegates to
 // still accepts a /compact primary when Chain is true — that is how
 // ScheduleAfterCurrentTurn's detached waiter (DeliverThen) delivers one.
-func (engine *Engine) Inject(ctx context.Context, request Request) (Result, error) {
+func (engine *Engine) Inject(ctx context.Context, request Request) (result Result, err error) {
+	states := trail(ctx, "inject")
+	defer func() { outcome(states, result, err) }()
 	ctx = withSender(ctx, engine.sender(ctx))
 	if isCompactCommand(request.Message) {
 		return refused(
@@ -733,7 +734,7 @@ func (engine *Engine) Inject(ctx context.Context, request Request) (Result, erro
 				"human. Nothing was typed.",
 		), nil
 	}
-	result, err := engine.inject(ctx, request)
+	result, err = engine.inject(ctx, request)
 	if err != nil || result.Code != 0 || !result.Typed || request.Origin != "" || engine.recorder == nil {
 		return result, err
 	}
@@ -814,11 +815,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		return base, nil
 	}
 	base.Busy = IsBusy(capture)
-	command, commandErr := engine.tmux.PaneCommand(
-		ctx,
-		target.SocketPath,
-		target.Pane,
-	)
+	command, commandErr := engine.tmux.PaneCommand(ctx, target.SocketPath, target.Pane)
 	verifiedEngine := ""
 	if commandErr == nil {
 		verifiedEngine = paneCommandEngine(command, engine.binaries)

@@ -14,6 +14,7 @@ import (
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/nudge"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/statusline"
 	"hostops/pfm/internal/usagehook"
@@ -41,11 +42,7 @@ func runStatuslineWithRuntime(
 ) int {
 	env = defaultEnv(env)
 	const statuslineHostEngine = pfmengine.Claude // pfm statusline is launched only by Claude Code's statusline hook; an environment that names no engine is that hook's
-	flags := cli.NewFlagSet(
-		"statusline",
-		"usage: pfm statusline [--refresh-gpt]",
-		stderr,
-	)
+	flags := cli.NewFlagSet("statusline", "usage: pfm statusline [--refresh-gpt]", stderr)
 	refreshCodex := flags.Bool("refresh-gpt", false, "refresh the GPT usage cache")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -101,7 +98,7 @@ func runStatuslineWithRuntime(
 		}
 	}
 	runtime.Spawn = func(kind statusline.RefreshKind) error {
-		return statusline.SpawnDetached(kind, deps.RealRunner{})
+		return statusline.SpawnDetached(kind, obs.Runner(deps.RealRunner{}))
 	}
 	rendered, err := statusline.Render(ctx, raw, runtime)
 	if err != nil {

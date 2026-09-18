@@ -13,6 +13,10 @@ import (
 	"time"
 )
 
+// appServerFixtureEnv marks the re-exec of this test binary that plays the
+// Codex App Server (TestCodexAppServerFixture).
+const appServerFixtureEnv = "PFM_GPT_APP_SERVER_FIXTURE"
+
 func TestAppServerHandshakeCarriesJSONRPCAndReadsIDOne(t *testing.T) {
 	command := exec.CommandContext(
 		context.Background(),
@@ -21,8 +25,8 @@ func TestAppServerHandshakeCarriesJSONRPCAndReadsIDOne(t *testing.T) {
 		"--",
 		"app-server",
 	)
-	command.Env = append(os.Environ(), "PFM_GPT_APP_SERVER_FIXTURE=1")
-	body, err := readCodexRateLimitsCommand(command)
+	command.Env = append(os.Environ(), appServerFixtureEnv+"=1")
+	body, err := readCodexRateLimitsCommand(context.Background(), command)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,14 +83,14 @@ while IFS= read -r line; do
   fi
 done
 `)
-	_, err := readCodexRateLimitsCommand(command)
+	_, err := readCodexRateLimitsCommand(context.Background(), command)
 	if err == nil || !strings.Contains(err.Error(), "no id=1 response") {
 		t.Fatalf("wrong-id App Server response error=%v, want named missing id=1 failure", err)
 	}
 }
 
 func TestCodexAppServerFixture(t *testing.T) {
-	if os.Getenv("PFM_GPT_APP_SERVER_FIXTURE") != "1" {
+	if os.Getenv(appServerFixtureEnv) != "1" {
 		t.Skip("Codex App Server fixture runs only as a helper process")
 	}
 	reader := bufio.NewReader(os.Stdin)

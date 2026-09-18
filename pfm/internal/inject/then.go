@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // DeliverThen is the waiter half of chat.sh's __then subcommand
@@ -24,7 +25,9 @@ func (engine *Engine) DeliverThen(
 	socketPath, target string,
 	steers []string,
 	selfTarget bool,
-) (Result, error) {
+) (result Result, err error) {
+	states := trail(ctx, "then")
+	defer func() { outcome(states, result, err) }()
 	ctx = withSender(ctx, engine.sender(ctx))
 	if target == "" || len(steers) == 0 || steers[0] == "" {
 		return refused(
@@ -74,7 +77,7 @@ func (engine *Engine) DeliverThen(
 			),
 		}, nil
 	}
-	result, err := engine.inject(ctx, Request{
+	result, err = engine.inject(ctx, Request{
 		Target:  target,
 		Message: steers[0],
 		Then:    steers[1:],
@@ -292,7 +295,7 @@ type CommandThenSpawner struct {
 	Setsid     string
 	Nohup      string
 	// Runner is the deps.Runner seam Spawn launches the waiter through; nil
-	// defaults to deps.RealRunner{}.
+	// defaults to obs.Runner(deps.RealRunner{}).
 	Runner deps.Runner
 }
 
@@ -376,7 +379,7 @@ func (spawner CommandThenSpawner) Spawn(
 	}
 	runner := spawner.Runner
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	opts := deps.StartOptions{
 		Env:    env,

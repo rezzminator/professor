@@ -23,6 +23,7 @@ import (
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
 	"hostops/pfm/internal/inject"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -197,7 +198,10 @@ func Run(
 	tmux Tmux,
 	proc Process,
 	stderr io.Writer,
-) (Result, error) {
+) (result Result, err error) {
+	// The state door: each phase below is one transition; a failure is attributed to its phase.
+	trail := obs.NewTrail(ctx, "reload", "requested")
+	defer func() { trail.End(err) }()
 	options.defaults()
 	if request.SocketPath == "" || request.Pane == "" {
 		return Result{}, errors.New("reload requires a socket and pane")
@@ -245,6 +249,7 @@ func Run(
 	if tmux == nil {
 		return Result{}, errors.New("reload requires a tmux client")
 	}
+	trail.Reach("locked", "pane mutex held")
 
 	if options.Delay > 0 {
 		if err := options.Clock.Sleep(ctx, options.Delay); err != nil {
@@ -275,14 +280,11 @@ func Run(
 	if err != nil {
 		return Result{}, err
 	}
+	trail.Reach("idle", "caller turn ended")
 	if selectorOpen(capture) {
 		cause := errors.New("open selector menu on the pane — refusing to /exit")
-		if displayErr := tmux.Display(
-			ctx,
-			request.SocketPath,
-			request.Pane,
-			"reload ABORTED — answer the open menu first, then reload again",
-		); displayErr != nil {
+		abort := "reload ABORTED — answer the open menu first, then reload again"
+		if displayErr := tmux.Display(ctx, request.SocketPath, request.Pane, abort); displayErr != nil {
 			return Result{}, errors.Join(cause, fmt.Errorf("display selector refusal: %w", displayErr))
 		}
 		return Result{}, cause
@@ -299,6 +301,7 @@ func Run(
 	if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 		return Result{}, fmt.Errorf("submit /exit: %w", err)
 	}
+	trail.Reach("exit-typed", "/exit submitted")
 
 	dead := false
 	empties := 0
@@ -333,10 +336,7 @@ func Run(
 			// IS the answer: everything in-flight dies with the pane anyway.
 			if !dialogSeen {
 				dialogSeen = true
-				fmt.Fprintln(
-					stderr,
-					"pfm chat reload: confirming the exit dialog — background work stops with the chat",
-				)
+				fmt.Fprintln(stderr, "pfm chat reload: confirming the exit dialog — background work stops with the chat")
 			}
 			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "Enter"); err != nil {
 				return Result{}, fmt.Errorf("confirm exit dialog: %w", err)
@@ -353,6 +353,7 @@ func Run(
 	if !dead {
 		return Result{}, exitIncomplete(ctx, request, options, tmux)
 	}
+	trail.Reach("dead", "pane exited")
 	if err := tmux.Respawn(ctx, request.SocketPath, request.Pane, request.CWD, run); err != nil {
 		return Result{}, fmt.Errorf("respawn pane: %w", err)
 	}
@@ -360,6 +361,7 @@ func Run(
 		return Result{}, fmt.Errorf("clear pane remain-on-exit: %w", err)
 	}
 	clearRemain = false
+	trail.Reach("respawned", "pane respawned")
 	if request.Then != "" {
 		if request.Transcript != "" {
 			if info, statErr := os.Stat(request.Transcript); statErr == nil {
@@ -373,11 +375,9 @@ func Run(
 			}
 		}
 		if err := deliverThen(ctx, request, options, tmux, proc, stderr); err != nil {
-			return Result{}, errors.Join(
-				err,
-				failThen(ctx, request, options.SIDDir, tmux, err.Error()),
-			)
+			return Result{}, errors.Join(err, failThen(ctx, request, options.SIDDir, tmux, err.Error()))
 		}
+		trail.Reach("then-delivered", "--then delivered")
 	}
 	return Result{Account: request.Account, Cache1H: request.Cache1H, New: request.SessionID == ""}, nil
 }

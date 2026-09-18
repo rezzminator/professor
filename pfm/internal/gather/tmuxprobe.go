@@ -63,12 +63,22 @@ type TmuxProbe struct {
 	TmuxTmpDir string
 }
 
-// ListPanes performs one list-panes -a call for socket.
-func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane, error) {
+// probeCommand is the one tmux invocation this probe makes: -L addressed
+// inside the caller's TMUX_TMPDIR (never internal/tmux.Command's -S socket
+// path), TMUX cleared, and completed through the tmux component's record
+// (pfmtmux.Observe) so each call writes its subcommand, target and exit once.
+func (tmux TmuxProbe) probeCommand(ctx context.Context, socket string, arguments ...string) *pfmtmux.Cmd {
 	binary := tmux.Binary
 	if binary == "" {
 		binary = deps.Executable("tmux")
 	}
+	command := exec.CommandContext(ctx, binary, append([]string{"-L", socket}, arguments...)...)
+	command.Env = append(os.Environ(), "TMUX=", "TMUX_TMPDIR="+tmux.TmuxTmpDir)
+	return pfmtmux.Observe(ctx, command, arguments...)
+}
+
+// ListPanes performs one list-panes -a call for socket.
+func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane, error) {
 	// pane_current_path is asked for WHOLE, never through tmux's b: basename
 	// modifier. Pane.CurrentPath is a directory: it becomes a row's CWD, and it
 	// is the directory the Codex thread resolver matches against the state
@@ -89,21 +99,7 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 		"#{pane_current_path}",
 		"#{pane_current_command}",
 	}, "\x1f")
-	command := exec.CommandContext(
-		ctx,
-		binary,
-		"-L",
-		socket,
-		"list-panes",
-		"-a",
-		"-F",
-		format,
-	)
-	command.Env = append(
-		os.Environ(),
-		"TMUX=",
-		"TMUX_TMPDIR="+tmux.TmuxTmpDir,
-	)
+	command := tmux.probeCommand(ctx, socket, "list-panes", "-a", "-F", format)
 	output, err := command.Output()
 	if err != nil {
 		// Match the legacy probe's older field set as a compatibility fallback.
@@ -121,17 +117,7 @@ func (tmux TmuxProbe) ListPanes(ctx context.Context, socket string) ([]ProbePane
 			"#{window_name}",
 			"#{pane_pid}",
 		}, "\t")
-		legacyCommand := exec.CommandContext(
-			ctx,
-			binary,
-			"-L",
-			socket,
-			"list-panes",
-			"-a",
-			"-F",
-			legacyFormat,
-		)
-		legacyCommand.Env = command.Env
+		legacyCommand := tmux.probeCommand(ctx, socket, "list-panes", "-a", "-F", legacyFormat)
 		legacyOutput, legacyErr := legacyCommand.Output()
 		if legacyErr != nil {
 			// Both probes agree there is nothing behind the socket: say so in a
@@ -251,26 +237,7 @@ func (tmux TmuxProbe) CapturePane(
 	ctx context.Context,
 	socket, paneID string,
 ) (string, error) {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	}
-	command := exec.CommandContext(
-		ctx,
-		binary,
-		"-L",
-		socket,
-		"capture-pane",
-		"-t",
-		paneID,
-		"-p",
-		"-J",
-	)
-	command.Env = append(
-		os.Environ(),
-		"TMUX=",
-		"TMUX_TMPDIR="+tmux.TmuxTmpDir,
-	)
+	command := tmux.probeCommand(ctx, socket, "capture-pane", "-t", paneID, "-p", "-J")
 	output, err := command.Output()
 	if err != nil {
 		return "", fmt.Errorf(
@@ -300,14 +267,8 @@ func (tmux TmuxProbe) RenameWindow(
 	ctx context.Context,
 	rename WindowRename,
 ) error {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	}
-	command := exec.CommandContext(
+	command := tmux.probeCommand(
 		ctx,
-		binary,
-		"-L",
 		rename.Socket,
 		"rename-window",
 		"-t",
@@ -319,11 +280,6 @@ func (tmux TmuxProbe) RenameWindow(
 		rename.WindowID,
 		"allow-rename",
 		"off",
-	)
-	command.Env = append(
-		os.Environ(),
-		"TMUX=",
-		"TMUX_TMPDIR="+tmux.TmuxTmpDir,
 	)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf(
@@ -348,16 +304,7 @@ func (tmux TmuxProbe) ShowGlobalOption(
 	ctx context.Context,
 	socket, name string,
 ) (string, error) {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	}
-	command := exec.CommandContext(ctx, binary, "-L", socket, "show", "-gv", name)
-	command.Env = append(
-		os.Environ(),
-		"TMUX=",
-		"TMUX_TMPDIR="+tmux.TmuxTmpDir,
-	)
+	command := tmux.probeCommand(ctx, socket, "show", "-gv", name)
 	output, err := command.Output()
 	if err != nil {
 		if serverGone(err) {
@@ -379,21 +326,8 @@ func (tmux TmuxProbe) ApplyGlobalOptions(
 	socket string,
 	options [][]string,
 ) error {
-	binary := tmux.Binary
-	if binary == "" {
-		binary = deps.Executable("tmux")
-	}
 	for _, arguments := range options {
-		command := exec.CommandContext(
-			ctx,
-			binary,
-			append([]string{"-L", socket}, arguments...)...,
-		)
-		command.Env = append(
-			os.Environ(),
-			"TMUX=",
-			"TMUX_TMPDIR="+tmux.TmuxTmpDir,
-		)
+		command := tmux.probeCommand(ctx, socket, arguments...)
 		if output, err := command.CombinedOutput(); err != nil {
 			return fmt.Errorf(
 				"apply tmux option %v on %s: %w: %s",

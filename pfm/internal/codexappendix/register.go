@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"hostops/pfm/internal/obs"
 )
 
 const (
@@ -123,9 +125,13 @@ func rpc(parent context.Context, binary, account, method string, params any) (js
 		return nil, err
 	}
 	if err = cmd.Start(); err != nil {
+		obs.StartFailed(ctx, cmd.Args, err)
 		return nil, fmt.Errorf("start appendix hook registration: %w", err)
 	}
-	defer func() { cancel(); _ = stdin.Close(); _ = stdout.Close(); _ = cmd.Wait() }()
+	// A direct process door (spec § Middleware, runner): recorded here until
+	// the helper migrates behind deps.Runner.
+	finish := obs.Started(ctx, cmd.Args, cmd.Process.Pid)
+	defer func() { cancel(); _ = stdin.Close(); _ = stdout.Close(); finish(cmd.Wait()) }()
 	type result struct {
 		data json.RawMessage
 		err  error

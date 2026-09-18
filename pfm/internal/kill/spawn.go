@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"hostops/pfm/internal/deps"
+	"hostops/pfm/internal/obs"
 )
 
 // CommandSpawner starts the binary's killed finisher under a new session.
@@ -16,7 +17,7 @@ type CommandSpawner struct {
 	Nohup      string
 	ConfigPath string
 	// Runner is the deps.Runner seam Spawn launches the finisher through;
-	// nil defaults to deps.RealRunner{}.
+	// nil defaults to obs.Runner(deps.RealRunner{}).
 	Runner deps.Runner
 }
 
@@ -68,7 +69,7 @@ func (spawner CommandSpawner) Spawn(
 	}()
 	runner := spawner.Runner
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	// !forked (the POSIX floor with no `setsid -f`) starts asynchronously and
 	// releases the process handle so the finisher outlives this caller —

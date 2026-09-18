@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -128,7 +127,7 @@ func (tmux TmuxSpawner) newSessionCommand(
 	ctx context.Context,
 	socket string,
 	arguments ...string,
-) (*exec.Cmd, error) {
+) (*pfmtmux.Cmd, error) {
 	binary, commandArguments, environment := pfmtmux.Invocation(
 		tmux.Binary,
 		filepath.Join(tmux.TmuxDir, socket),
@@ -137,7 +136,11 @@ func (tmux TmuxSpawner) newSessionCommand(
 	if env == nil {
 		env = paths.OSEnv{}
 	}
-	return serviceScopeCommand(ctx, binary, commandArguments, environment, env)
+	command, err := serviceScopeCommand(ctx, binary, commandArguments, environment, env)
+	if err != nil {
+		return nil, err
+	}
+	return pfmtmux.Observe(ctx, command, arguments...), nil
 }
 
 func (tmux TmuxSpawner) Capture(
@@ -174,6 +177,6 @@ func (tmux TmuxSpawner) command(
 	ctx context.Context,
 	socket string,
 	arguments ...string,
-) *exec.Cmd {
-	return pfmtmux.Command(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
+) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
 }

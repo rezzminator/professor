@@ -14,12 +14,13 @@ import (
 
 	"hostops/pfm/internal/deps"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/obs"
 )
 
 // SpawnDetached starts one refresher as a new session and releases the child.
 // The render path never waits for credentials, networks, or App Server
 // startup. runner is the deps.Runner seam (pfm/TESTPLAN.md § Seams); nil
-// defaults to deps.RealRunner{}.
+// defaults to obs.Runner(deps.RealRunner{}).
 func SpawnDetached(kind RefreshKind, runner deps.Runner) (returnErr error) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -33,7 +34,7 @@ func SpawnDetached(kind RefreshKind, runner deps.Runner) (returnErr error) {
 		return fmt.Errorf("unknown statusline refresher %q", kind)
 	}
 	if runner == nil {
-		runner = deps.RealRunner{}
+		runner = obs.Runner(deps.RealRunner{})
 	}
 	// Stdin/Stdout/Stderr left unset: a detached Start child defaults to the
 	// null device, the same /dev/null this refresher wired explicitly before
@@ -76,7 +77,7 @@ func ReadCodexRateLimitsWithBinaryAtHome(ctx context.Context, binary, codexHome 
 	if codexHome != "" {
 		command.Env = replaceCommandEnv(os.Environ(), "CODEX_HOME", codexHome)
 	}
-	return readCodexRateLimitsCommand(command)
+	return readCodexRateLimitsCommand(child, command)
 }
 
 func replaceCommandEnv(environment []string, name, value string) []string {
@@ -90,7 +91,7 @@ func replaceCommandEnv(environment []string, name, value string) []string {
 	return append(replaced, prefix+value)
 }
 
-func readCodexRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
+func readCodexRateLimitsCommand(ctx context.Context, command *exec.Cmd) ([]byte, error) {
 	stdin, err := command.StdinPipe()
 	if err != nil {
 		return nil, fmt.Errorf("open App Server stdin: %w", err)
@@ -102,8 +103,13 @@ func readCodexRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	if err := command.Start(); err != nil {
+		obs.StartFailed(ctx, command.Args, err)
 		return nil, fmt.Errorf("start Codex App Server: %w", err)
 	}
+	// The App Server is a direct process door until it migrates behind
+	// deps.Runner: its start and exit are recorded here, once each.
+	finish := obs.Started(ctx, command.Args, command.Process.Pid)
+	wait := func() error { err := command.Wait(); finish(err); return err }
 	payload := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"clientInfo":{"name":"statusline","version":"1.0.0"}}}`,
 		`{"jsonrpc":"2.0","method":"initialized","params":null}`,
@@ -112,7 +118,7 @@ func readCodexRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
 	if _, err := io.WriteString(stdin, payload); err != nil {
 		_ = stdin.Close()
 		_ = command.Process.Kill()
-		_ = command.Wait()
+		_ = wait()
 		return nil, fmt.Errorf("write App Server handshake: %w", err)
 	}
 
@@ -126,17 +132,17 @@ func readCodexRateLimitsCommand(command *exec.Cmd) ([]byte, error) {
 		if json.Unmarshal(line, &envelope) == nil && string(envelope.ID) == "1" {
 			_ = stdin.Close()
 			_ = command.Process.Kill()
-			_ = command.Wait()
+			_ = wait()
 			return append(line, '\n'), nil
 		}
 	}
 	_ = stdin.Close()
 	if err := scanner.Err(); err != nil {
 		_ = command.Process.Kill()
-		_ = command.Wait()
+		_ = wait()
 		return nil, fmt.Errorf("read App Server response: %w", err)
 	}
-	waitErr := command.Wait()
+	waitErr := wait()
 	return nil, fmt.Errorf(
 		"command from App Server returned no id=1 response: wait=%v stderr=%s",
 		waitErr,

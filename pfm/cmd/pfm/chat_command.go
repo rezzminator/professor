@@ -486,7 +486,7 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm chat end: %v\n", err)
 		return 1
 	}
-	command := pfmtmux.Command(context.Background(), "", socketPath, "kill-server")
+	command := pfmtmux.Exec(context.Background(), "", socketPath, "kill-server")
 	if output, err := command.CombinedOutput(); err != nil {
 		fmt.Fprintf(stderr, "pfm chat end: %v: %s\n", err, strings.TrimSpace(string(output)))
 		return 1
@@ -518,7 +518,7 @@ func renameChatWindow(ctx context.Context, socket, target, name string) error {
 	if target == "" {
 		target = socket
 	}
-	command := pfmtmux.Command(ctx, "", socketPath, "rename-window", "-t", target, name)
+	command := pfmtmux.Exec(ctx, "", socketPath, "rename-window", "-t", target, name)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("tmux rename-window: %w: %s", err, strings.TrimSpace(string(output)))
 	}

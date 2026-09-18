@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -240,6 +239,6 @@ func (tmux TmuxInjector) command(
 	ctx context.Context,
 	socketPath string,
 	arguments ...string,
-) *exec.Cmd {
-	return pfmtmux.Command(ctx, tmux.Binary, socketPath, arguments...)
+) *pfmtmux.Cmd {
+	return pfmtmux.Exec(ctx, tmux.Binary, socketPath, arguments...)
 }

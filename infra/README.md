@@ -17,6 +17,8 @@ Development must never destabilize the live box: code changes happen in a git wo
 
 `docker-compose.yml` + `pfm-dev.Dockerfile` build the image (Go pinned to `pfm/go.mod`, Node to the mirror compilers' minimum); `fence-env.sh` resolves the `PFM_DEV_*` mount contract every caller sources; `tools.env` + `tools.sh` pin the dev tools `make tools` installs on the host and bakes into the image; `release-rehearsal.sh` drives the fenced adopter machine `/pfm:release` rehearses updates on.
 
+`fence/lanes/` is the Tier B live suite over the same image: `run.sh` starts ONE container from the hash-keyed root image `root.sh` commits and runs the selected lanes in canonical order inside it (`O1 → E1 → E2 → E3 → F → M → A → O2`), each beat asserting from pfm's own reports and the pane. `lib.sh` is the beat library, `creds.sh` stages the seats, `check-map.sh` is the coverage gate over `docs/dev/testing/landscape.md`, `known-gaps.yml` + `budgets.yml` the ledgers, `tests/` the harness's own bash tests. How to run one lane, read a red row and extend the suite: `docs/dev/testing/lanes.md`.
+
 Entry point — from the worktree checkout:
 
 ```bash

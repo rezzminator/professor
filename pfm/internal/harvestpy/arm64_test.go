@@ -1,0 +1,172 @@
+package harvestpy
+
+import (
+	"context"
+	"debug/elf"
+	"encoding/binary"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"hostops/pfm/internal/deps"
+)
+
+func TestCheckDependenciesAcceptsOnlyPinnedArm64SBSAFalsePositive(t *testing.T) {
+	tests := []struct {
+		name         string
+		platform     Platform
+		lockPin      bool
+		wheelTag     string
+		library      []byte
+		message      string
+		wantAccepted bool
+	}{
+		{
+			name:         "exact pinned wheel",
+			platform:     Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+			lockPin:      true,
+			wheelTag:     "py3-none-manylinux2014_sbsa",
+			library:      minimalELF(elf.EM_AARCH64),
+			message:      "The package nvidia-cusparselt-cu13 was built for a different platform",
+			wantAccepted: true,
+		},
+		{
+			name:     "wrong platform",
+			platform: Platform{GOOS: goosLinux, GOARCH: goarchAMD64},
+			lockPin:  true,
+			wheelTag: "py3-none-manylinux2014_sbsa",
+			library:  minimalELF(elf.EM_AARCH64),
+			message:  "The package nvidia-cusparselt-cu13 was built for a different platform",
+		},
+		{
+			name:     "wrong package message",
+			platform: Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+			lockPin:  true,
+			wheelTag: "py3-none-manylinux2014_sbsa",
+			library:  minimalELF(elf.EM_AARCH64),
+			message:  "The package other-package was built for a different platform",
+		},
+		{
+			name:     "missing lock pin",
+			platform: Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+			wheelTag: "py3-none-manylinux2014_sbsa",
+			library:  minimalELF(elf.EM_AARCH64),
+			message:  "The package nvidia-cusparselt-cu13 was built for a different platform",
+		},
+		{
+			name:     "wrong wheel tag",
+			platform: Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+			lockPin:  true,
+			wheelTag: "py3-none-manylinux2014_aarch64",
+			library:  minimalELF(elf.EM_AARCH64),
+			message:  "The package nvidia-cusparselt-cu13 was built for a different platform",
+		},
+		{
+			name:     "missing library",
+			platform: Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+			lockPin:  true,
+			wheelTag: "py3-none-manylinux2014_sbsa",
+			message:  "The package nvidia-cusparselt-cu13 was built for a different platform",
+		},
+		{
+			name:     "wrong ELF machine",
+			platform: Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+			lockPin:  true,
+			wheelTag: "py3-none-manylinux2014_sbsa",
+			library:  minimalELF(elf.EM_X86_64),
+			message:  "The package nvidia-cusparselt-cu13 was built for a different platform",
+		},
+		{
+			name:     "invalid ELF",
+			platform: Platform{GOOS: goosLinux, GOARCH: goarchARM64},
+			lockPin:  true,
+			wheelTag: "py3-none-manylinux2014_sbsa",
+			library:  []byte("not an ELF"),
+			message:  "The package nvidia-cusparselt-cu13 was built for a different platform",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := arm64DependencyFixture(t, test.lockPin, test.wheelTag, test.library)
+			uv := filepath.Join(root, "uv")
+			runner := &deps.FakeRunner{}
+			runner.Script(
+				[]string{uv, "pip", "check"},
+				deps.RunResult{ExitCode: 1, Stderr: []byte(test.message)},
+				nil,
+			)
+			err := checkDependencies(context.Background(), runner, root, test.platform)
+			if test.wantAccepted {
+				if err != nil {
+					t.Fatalf("pinned arm64 SBSA metadata false-positive was rejected: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("non-exact pip-check failure was accepted")
+			}
+		})
+	}
+}
+
+func arm64DependencyFixture(t *testing.T, lockPin bool, wheelTag string, library []byte) string {
+	t.Helper()
+	root := t.TempDir()
+	wheelInfo := filepath.Join(
+		root,
+		"project",
+		".venv",
+		"lib",
+		"python3.11",
+		"site-packages",
+		"nvidia_cusparselt_cu13-0.8.1.dist-info",
+	)
+	if err := os.MkdirAll(wheelInfo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	lock := "name = \"other-package\"\nurl = \"manylinux2014_x86_64\"\n"
+	if lockPin {
+		lock = "name = \"nvidia-cusparselt-cu13\"\nversion = \"0.8.1\"\nurl = \"manylinux2014_aarch64\"\n"
+	}
+	if err := os.WriteFile(filepath.Join(root, "project", "uv.lock"), []byte(lock), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(wheelInfo, "WHEEL"),
+		[]byte("Wheel-Version: 1.0\nTag: "+wheelTag+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if library != nil {
+		lib := filepath.Join(
+			root,
+			"project",
+			".venv",
+			"lib",
+			"python3.11",
+			"site-packages",
+			"nvidia",
+			"cusparselt",
+			"lib",
+		)
+		if err := os.MkdirAll(lib, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(lib, "libcusparseLt.so.0"), library, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func minimalELF(machine elf.Machine) []byte {
+	header := make([]byte, 64)
+	copy(header, []byte{0x7f, 'E', 'L', 'F'})
+	header[4] = byte(elf.ELFCLASS64)
+	header[5] = byte(elf.ELFDATA2LSB)
+	header[6] = byte(elf.EV_CURRENT)
+	binary.LittleEndian.PutUint16(header[16:18], uint16(elf.ET_DYN))
+	binary.LittleEndian.PutUint16(header[18:20], uint16(machine))
+	binary.LittleEndian.PutUint32(header[20:24], uint32(elf.EV_CURRENT))
+	binary.LittleEndian.PutUint16(header[52:54], 64)
+	return header
+}

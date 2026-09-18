@@ -284,7 +284,19 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 		[]string{uvCommandPip, "check", uvFlagPython, venvPython},
 		project,
 	); err != nil {
-		return ProvisionResult{}, fmt.Errorf("harvestpy locked dependency check failed: %w", err)
+		allowed, inspectErr := acceptPinnedArm64SBSAFailure(platform, staging, err)
+		if inspectErr != nil {
+			return ProvisionResult{}, fmt.Errorf(
+				"harvestpy locked dependency check failed: %w",
+				errors.Join(err, inspectErr),
+			)
+		}
+		if allowed {
+			// The exact pinned arm64 wheel is verified by its lock, metadata,
+			// and library above; imports and conversion smoke still gate publish.
+		} else {
+			return ProvisionResult{}, fmt.Errorf("harvestpy locked dependency check failed: %w", err)
+		}
 	}
 	inventoryArgs := []string{uvCommandPip, uvCommandList, uvFlagFormat, uvListFormatFreeze, uvFlagPython, venvPython}
 	inventoryOutput, err := options.Run(ctx, uvPath, inventoryArgs, project)

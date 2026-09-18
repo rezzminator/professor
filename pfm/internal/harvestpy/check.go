@@ -3,6 +3,7 @@ package harvestpy
 import (
 	"bytes"
 	"context"
+	"debug/elf"
 	"errors"
 	"fmt"
 	"os"
@@ -120,7 +121,7 @@ func evaluateConversionEnvironment(
 		)
 		set("interpreter_build", checkPythonBuild(filepath.Join(current, "python", "BUILD"), digest.Python))
 		set("environment_shape", checkEnvironmentShape(current))
-		set("dependency_check", checkDependencies(ctx, runner, current))
+		set("dependency_check", checkDependencies(ctx, runner, current, platform))
 		set("lock_completeness", checkInventory(ctx, runner, current, digest))
 		if report.Checks["interpreter"].OK {
 			smokeConverter := NewConverter(Runtime{
@@ -269,7 +270,7 @@ func checkEnvironmentShape(root string) error {
 	return nil
 }
 
-func checkDependencies(ctx context.Context, runner deps.Runner, root string) error {
+func checkDependencies(ctx context.Context, runner deps.Runner, root string, platform Platform) error {
 	uv := filepath.Join(root, "uv")
 	python := filepath.Join(root, "project", ".venv", "bin", "python")
 	if _, err := runCommandWithRunner(
@@ -279,9 +280,91 @@ func checkDependencies(ctx context.Context, runner deps.Runner, root string) err
 		[]string{uvCommandPip, "check", uvFlagPython, python},
 		filepath.Join(root, "project"),
 	); err != nil {
+		allowed, inspectErr := acceptPinnedArm64SBSAFailure(platform, root, err)
+		if inspectErr != nil {
+			return errors.Join(fmt.Errorf("uv pip check failed: %w", err), inspectErr)
+		}
+		if allowed {
+			return nil
+		}
 		return fmt.Errorf("uv pip check failed: %w", err)
 	}
 	return nil
+}
+
+// acceptPinnedArm64SBSAFailure contains one upstream wheel metadata false-positive.
+// nvidia-cusparselt-cu13 0.8.1 ships an aarch64 shared library but labels its
+// wheel manylinux2014_sbsa, which uv reports as incompatible on linux-aarch64.
+// The package is accepted only when the exact pinned lock, wheel metadata, and
+// shared library are present; every other uv pip check failure remains fatal.
+func acceptPinnedArm64SBSAFailure(platform Platform, root string, checkErr error) (bool, error) {
+	if platform != (Platform{GOOS: goosLinux, GOARCH: goarchARM64}) {
+		return false, nil
+	}
+	message := strings.ToLower(checkErr.Error())
+	if !strings.Contains(message, "nvidia-cusparselt-cu13") ||
+		!strings.Contains(message, "built for a different platform") {
+		return false, nil
+	}
+	lock, err := os.ReadFile(filepath.Join(root, "project", "uv.lock"))
+	if err != nil {
+		return false, fmt.Errorf("read lock while checking pinned arm64 wheel exception: %w", err)
+	}
+	if !strings.Contains(string(lock), "name = \"nvidia-cusparselt-cu13\"") ||
+		!strings.Contains(string(lock), "version = \"0.8.1\"") ||
+		!strings.Contains(string(lock), "manylinux2014_aarch64") {
+		return false, nil
+	}
+	pattern := filepath.Join(
+		root,
+		"project",
+		".venv",
+		"lib",
+		"python*",
+		"site-packages",
+		"nvidia_cusparselt_cu13-0.8.1.dist-info",
+		"WHEEL",
+	)
+	wheels, err := filepath.Glob(pattern)
+	if err != nil {
+		return false, fmt.Errorf("find pinned arm64 wheel metadata: %w", err)
+	}
+	if len(wheels) != 1 {
+		return false, nil
+	}
+	wheel, err := os.ReadFile(wheels[0])
+	if err != nil {
+		return false, fmt.Errorf("read pinned arm64 wheel metadata %s: %w", wheels[0], err)
+	}
+	if !strings.Contains("\n"+string(wheel), "\nTag: py3-none-manylinux2014_sbsa\n") {
+		return false, nil
+	}
+	libPath := filepath.Join(
+		filepath.Dir(filepath.Dir(wheels[0])),
+		"nvidia",
+		"cusparselt",
+		"lib",
+		"libcusparseLt.so.0",
+	)
+	info, err := os.Stat(libPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect pinned arm64 wheel library %s: %w", libPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, nil
+	}
+	elfFile, err := elf.Open(libPath)
+	if err != nil {
+		return false, nil
+	}
+	machine := elfFile.Machine
+	if err := elfFile.Close(); err != nil {
+		return false, fmt.Errorf("close pinned arm64 wheel library %s: %w", libPath, err)
+	}
+	return machine == elf.EM_AARCH64, nil
 }
 
 func checkInventory(ctx context.Context, runner deps.Runner, root string, expected EnvironmentDigest) error {

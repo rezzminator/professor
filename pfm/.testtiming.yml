@@ -39,7 +39,7 @@ suites:
       hostops/pfm/internal/harvestpy: 2
       hostops/pfm/internal/headless: 8
       hostops/pfm/internal/headless/run: 2
-      hostops/pfm/internal/heal: 4
+      hostops/pfm/internal/heal: 10
       hostops/pfm/internal/hookentry: 2
       hostops/pfm/internal/hostfixture: 2
       hostops/pfm/internal/index: 56

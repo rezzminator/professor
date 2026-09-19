@@ -8,7 +8,9 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
+	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/index"
 	"hostops/pfm/internal/inject"
@@ -100,7 +102,25 @@ func writeLeftBehindTranscript(t *testing.T, claudeRoot, title string) string {
 
 func runNew(t *testing.T, tmux *renameTmux, home, transcript, name, then string, stderr *bytes.Buffer) Result {
 	t.Helper()
-	result, err := Run(
+	// Run's rename and --then proofs sleep fixed real intervals between polls;
+	// on the real clock these tests took 15-34 s each. The fake clock resolves
+	// every sleep at once and changes nothing the tests assert.
+	fakeClock := clock.NewFake(time.Unix(0, 0))
+	var result Result
+	var err error
+	driveFakeClock(t, fakeClock, func() {
+		result, err = runNewOnClock(tmux, home, transcript, name, then, stderr, t.TempDir(), fakeClock)
+	})
+	if err != nil {
+		t.Fatalf("Run(--new) = %v, want success — the reboot happened", err)
+	}
+	return result
+}
+
+func runNewOnClock(
+	tmux *renameTmux, home, transcript, name, then string, stderr *bytes.Buffer, sidDir string, clk clock.Clock,
+) (Result, error) {
+	return Run(
 		context.Background(),
 		Request{
 			Engine:     pfmengine.Claude,
@@ -117,22 +137,19 @@ func runNew(t *testing.T, tmux *renameTmux, home, transcript, name, then string,
 		},
 		Options{
 			Home:        home,
-			SIDDir:      t.TempDir(),
+			SIDDir:      sidDir,
 			ClaudeRoots: []string{filepath.Join(home, "projects")},
 			Delay:       -1,
 			Poll:        -1,
 			ExitTries:   2,
 			ThenTries:   2,
 			IdleTries:   4,
+			Clock:       clk,
 		},
 		tmux,
 		promptReadyProc{tmux: tmux.delayedThenTmux},
 		stderr,
 	)
-	if err != nil {
-		t.Fatalf("Run(--new) = %v, want success — the reboot happened", err)
-	}
-	return result
 }
 
 // indexedCustomTitle runs the REAL reader (internal/index) over claudeRoot and

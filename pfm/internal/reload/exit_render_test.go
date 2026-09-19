@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
+
+	"hostops/pfm/internal/clock"
 )
 
 // blindExitTmux never shows the typed /exit rendered — no context deadline
@@ -31,14 +34,20 @@ func (tmux *blindExitTmux) SendKey(ctx context.Context, socket, pane, key string
 // not leave that stray "/exit" sitting in the composer for a human to find.
 func TestRunClearsTypedExitWhenItNeverRenders(t *testing.T) {
 	tmux := &blindExitTmux{}
-	_, err := Run(
-		context.Background(),
-		reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-blind-render"),
-		Options{SIDDir: t.TempDir(), Delay: -1, Poll: -1, ExitTries: 2},
-		tmux,
-		nil,
-		nil,
-	)
+	// The render wait sleeps fixed real intervals; the fake clock resolves them.
+	fakeClock := clock.NewFake(time.Unix(0, 0))
+	sidDir := t.TempDir()
+	var err error
+	driveFakeClock(t, fakeClock, func() {
+		_, err = Run(
+			context.Background(),
+			reloadIdleWaitRequest("/tmp/tmux-1000/probe-reload-blind-render"),
+			Options{SIDDir: sidDir, Delay: -1, Poll: -1, ExitTries: 2, Clock: fakeClock},
+			tmux,
+			nil,
+			nil,
+		)
+	})
 	if err == nil || !strings.Contains(err.Error(), "refusing blind Enter") {
 		t.Fatalf("never-rendered /exit error=%v, want 'refusing blind Enter'", err)
 	}

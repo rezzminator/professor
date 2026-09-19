@@ -98,24 +98,26 @@ One daemon process (Task #8), two servers. Every tool is a thin adapter over the
 
 ### Server `chat` — `/mcp/chat` (stdio: `pfm mcp chat serve`)
 
+The Inputs columns below are a reading aid. The servers' own `tools/list` answer is the contract: where the two disagree, the table is the bug.
+
 | Tool | Status | Inputs | Returns |
 | --------------------------- | ------ | --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `chat_ls` | ● | `{all?, killed?, project?, limit?}` | Fleet rows (accounts, engines, sizes, liveness), including chats still booting. `project` filters case-insensitively on project label or directory; rows are capped (200 default, 1000 max) with `matched`/`truncated` reporting the cut. |
-| `chat_new` | ✚ | `{engine, account?, name?, cwd?}` | Spawned chat identity. |
+| `chat_new` | ✚ | `{name, prompt?, engine?, account?, model?, effort?, cwd?, 1h?, attach?, await?, progress?, settle?, timeout?}` | Spawned chat identity. |
 | `chat_open` | ✚ | `{target}` | Open result. |
-| `chat_read` | ◆ | `{target, excerpt?}` | Transcript text (converges onto CLI `read`). |
-| `chat_last` | ✚ | `{target, role?}` | Newest entry. |
+| `chat_read` | ◆ | `{source, last_n?, max_bytes?}` | Transcript text (converges onto CLI `read`). |
+| `chat_last` | ✚ | `{target}` | Newest entry. |
 | `chat_status` | ✚ | `{target, summary?, ask?, engine?, model?}` | Liveness/state. `summary` recaps the last exchange (cached); `ask` reports current state from the live pane (never cached). |
-| `chat_inject` | ● | `{target, text, then?}` | Delivery report (signing rules apply). |
+| `chat_inject` | ● | `{target, message, then?, force_now?}` | Delivery report (signing rules apply). |
 | `chat_self_compact` | ✚ | `{focus, then}` | Request-scoped `/compact <focus>`, scheduled after the caller's active turn settles; exactly ONE post-compact steer (a string, never a list) is mandatory. The only answer to "compact yourself"; the session survives. |
-| `chat_capture` | ● | `{target}` | Pane text. |
+| `chat_capture` | ● | `{target, tail_lines?, max_bytes?}` | Pane text. |
 | `chat_keys` | ✚ | `{target, keys: [string], literal?, delay_ms?, capture?}` | Press keys in the chat's pane — the model's hands on a TUI that swallowed a keystroke. Same validation as the CLI verb: an unknown key name is an error, never typed as text. |
 | `chat_name` | ✚ | `{target, name}` | Rename result. |
-| `chat_kill` / `chat_unkill` | ✚ | `{target}` | Kill-state result. A live target is really ended (its pane is closed by the exit finisher); the message names which happened — pane closed, or de-listed only. |
-| `chat_find` | ◆ | `{query}` | Matching transcripts (converges onto CLI `find`). |
+| `chat_kill` / `chat_unkill` | ✚ | `{target, exit?}` / `{target}` | Kill-state result. A live target is really ended (its pane is closed by the exit finisher); the message names which happened — pane closed, or de-listed only. |
+| `chat_find` | ◆ | `{excerpt, limit?, include_self?}` | Matching transcripts (converges onto CLI `find`). |
 | `chat_save` | ✚ | `{target, transcript?}` | Appends a transcript + environment snapshot to a FILE — `target` is a path, never a chat, and a bare word is refused. |
 | `chat_whoami` | ● | `{}` | Caller identity. |
-| `chat_resolve` | ● | `{ref}` | Resolved target. |
+| `chat_resolve` | ● | `{kind, name}` | Resolved target. |
 | `issue_servicedesk` | ✚ | `{title, detail, severity?, area?}` | Files a durable complaint about Professor itself for a human to triage later. Reporter identity is CAPTURED the same way `chat_inject` captures a sender, never accepted as tool input, so a model can complain but never forge who is complaining; a reporter that cannot be derived stores the `UNIDENTIFIED` sentinel rather than a blank column. Read the ledger back with `pfm issues`. |
 
 Deliberately NOT exposed: `end`, `modal`, `watch`, `stream`, `recover`, and `history` — interactive/plumbing; the absence is stated in the server docstring.
@@ -126,12 +128,12 @@ Settings come from `harvester.config.json`. `search` trusts exactly the configur
 
 | Tool | Status | Inputs | Returns |
 | ------------- | ------ | -------------------- | ----------------------- |
-| `fetch` | ● | `{source, refresh?}` | Markdown (cache + TTL). |
+| `fetch` | ● | `{sources: [string], refresh?, size_only?}` | Markdown (cache + TTL). |
 | `search` | ● | `{query, …}` | Web search results. |
-| `findWorks` | ● | `{query, …}` | Scholarly works. |
-| `fetchImage` | ● | `{source}` | Image fetch. |
-| `archive` | ● | `{source}` | Archive extraction. |
-| `searchCache` | ● | `{query}` | Cache search. |
+| `findWorks` | ● | `{query, limit?}` | Scholarly works. |
+| `fetchImage` | ● | `{sources: [string]}` | Image fetch. |
+| `archive` | ● | `{source, member?}` | Archive extraction. |
+| `searchCache` | ● | `{pattern, ignore_case?, max_results?}` | Cache search. |
 
 ## Shared engine `internal/ask`
 

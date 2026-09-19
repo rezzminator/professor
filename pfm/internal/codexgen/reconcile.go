@@ -258,17 +258,39 @@ func (r *reconcileResult) reconcileOrphans(dir string, wanted map[string]bool, m
 
 // markerClaimable is the stricter ownership rule used for host-global
 // reconciliation. A symlink cannot carry the compiler marker, so an unknown
-// symlink in ~/.codex is foreign and must survive. Repository reconciliation
-// retains its historical symlink ownership rule through claimable.
-func markerClaimable(path string) bool {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return os.IsNotExist(err)
+// symlink in ~/.codex is foreign and must survive — UNLESS its target names
+// it as one compileGlobalCommands itself would have written: a
+// skill-directory command (entry.skillDir in compiler.go) is mirrored into
+// .codex/skills/<flat> as a bare symlink into {home}/.claude/commands/<rel>,
+// never as a marker-carrying file, so ownership there is decided the same
+// way global_unwire.go's ownedGlobalLink decides it for the registry links —
+// by the link's TARGET, never a marker it structurally cannot hold. Without
+// this, an uninstall that had already removed the source directory
+// (unwireGlobalRegistries) left the .codex/skills mirror dangling: the
+// registry promise INSTALL.md § Uninstall makes for "every installer-owned
+// link" broke at exactly the one link shape a marker cannot reach. Repository
+// reconciliation retains its historical, more permissive symlink ownership
+// rule through claimable.
+func markerClaimable(home string) func(string) bool {
+	commandsRoot := filepath.Join(home, ".claude", "commands")
+	return func(path string) bool {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return os.IsNotExist(err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			target, readErr := os.Readlink(path)
+			if readErr != nil {
+				return false
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+			target = filepath.Clean(target)
+			return target == commandsRoot || strings.HasPrefix(target, commandsRoot+string(filepath.Separator))
+		}
+		return claimable(path)
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
-		return false
-	}
-	return claimable(path)
 }
 
 func claimable(path string) bool {

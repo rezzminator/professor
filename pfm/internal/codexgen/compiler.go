@@ -237,7 +237,7 @@ func RunGlobalCommands(options GlobalCommandsOptions) (Result, error) {
 	reconciled, err := reconcileManagedWithClaim(outputs, options.Mode, []string{
 		filepath.Join(home, ".codex", "skills"),
 		filepath.Join(home, ".codex", "prompts"),
-	}, markerClaimable)
+	}, markerClaimable(home))
 	if err != nil {
 		return Result{}, err
 	}

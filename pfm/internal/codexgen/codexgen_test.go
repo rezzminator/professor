@@ -148,6 +148,55 @@ func TestGlobalCommandsOnlyReconcilePreservesForeignFilesAndDeletesManagedOrphan
 	}
 }
 
+// TestGlobalCommandUninstallDeletesTheOrphanedSkillDirectorySymlink is the
+// regression for a dangling `pfm uninstall` leftover: compileGlobalCommands
+// mirrors a skill-directory global command (a {home}/.claude/commands/<name>
+// directory carrying its own SKILL.md, e.g. "tokens") into
+// {home}/.codex/skills/<name> as a bare SYMLINK into that source directory —
+// the one output shape this compiler writes that cannot carry the marker
+// generatedBytes looks for. When the installer tears the command down
+// (unwireGlobalRegistries in the installer package) and then reconciles the
+// Codex mirror against an intentionally empty source, the old markerClaimable
+// treated every symlink in the managed registry as foreign and left the now
+// pointing-nowhere .codex/skills/<name> link behind — INSTALL.md § Uninstall
+// promises every installer-owned link is removed. Ownership here is decided
+// by the symlink's TARGET the same way global_unwire.go's ownedGlobalLink
+// decides registry-link ownership: pointing inside {home}/.claude/commands
+// names it as this compiler's, whatever else sits there afterward.
+func TestGlobalCommandUninstallDeletesTheOrphanedSkillDirectorySymlink(t *testing.T) {
+	home := t.TempDir()
+	source := filepath.Join(home, ".claude", "commands", "tokens", "SKILL.md")
+	writeTestFile(t, source, "---\ndescription: tokens\n---\nUse /tokens.\n")
+
+	build, err := RunGlobalCommands(GlobalCommandsOptions{Home: home, Mode: ModeBuild})
+	if err != nil || !build.OK {
+		t.Fatalf("initial global build: result=%#v err=%v", build, err)
+	}
+	link := filepath.Join(home, ".codex", "skills", "tokens")
+	info, err := os.Lstat(link)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("expected %s to be a symlink after build: info=%#v err=%v", link, info, err)
+	}
+
+	// Simulate the uninstall order: the source command directory is gone
+	// (unwireGlobalRegistries already retired it) before the Codex mirror is
+	// reconciled against an intentionally empty SourceHome, the exact shape
+	// reconcileCodexCommands(nil) in installer.go uses for ModeUninstall.
+	if err := os.RemoveAll(filepath.Join(home, ".claude", "commands", "tokens")); err != nil {
+		t.Fatal(err)
+	}
+	emptySource := t.TempDir()
+	uninstallBuild, err := RunGlobalCommands(
+		GlobalCommandsOptions{Home: home, SourceHome: emptySource, Mode: ModeBuild},
+	)
+	if err != nil || !uninstallBuild.OK {
+		t.Fatalf("uninstall reconciliation: result=%#v err=%v", uninstallBuild, err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("uninstall left the dangling Codex skill symlink %s behind: %v", link, err)
+	}
+}
+
 func TestFullCheckAgreesWithInstallerGlobalReconciliation(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()

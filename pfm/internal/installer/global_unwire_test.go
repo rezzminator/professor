@@ -75,6 +75,54 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 	}
 }
 
+// TestUninstallRemovesGlobalAgentLinks is the regression for the one
+// registry unwireGlobalRegistries had not yet learned to visit: wireCodexAgents
+// (installer.go, via codexgen.RunGlobalAgents) links every
+// <clone>/templates/global/agents/<name>.md into {config}/agents/<name>.md
+// for every configured account, the same fan-out wireGlobalCommands and
+// wireGlobalSkills already get unwired — but unwireGlobalRegistries only
+// walked the commands/ and skills/ registries, so `pfm uninstall` left every
+// ~/.claude/agents/<name>.md symlink behind, against INSTALL.md § Uninstall's
+// promise that every installer-owned link is removed.
+func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
+	home := t.TempDir()
+	repo := filepath.Join(home, ".professor")
+	agentsSource := filepath.Join(repo, "templates", "global", "agents")
+	for _, name := range []string{"architect", "tracer"} {
+		body := "---\nname: " + name + "\ndescription: " + name + " role.\n---\n\nbody\n"
+		writeFixture(t, filepath.Join(agentsSource, name+".md"), body)
+	}
+	accounts := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "2")}
+	codexHomes := []string{filepath.Join(home, ".codex")}
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, config := range accounts {
+		for _, name := range []string{"architect", "tracer"} {
+			assertLink(t,
+				filepath.Join(config, "agents", name+".md"),
+				filepath.Join(repo, "templates", "global", "agents", name+".md"))
+		}
+	}
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, config := range accounts {
+		for _, name := range []string{"architect", "tracer"} {
+			path := filepath.Join(config, "agents", name+".md")
+			if _, err := os.Lstat(path); !os.IsNotExist(err) {
+				t.Fatalf("uninstall left the machine-global agent link %s: %v", path, err)
+			}
+		}
+	}
+}
+
 // TestUninstallKeepsAndNamesAForeignGlobalLink pins the boundary of the
 // ownership-by-target rule the sibling unwireGeneratedCodexAgents holds to: a
 // registry entry that is not a link into the recorded clone's

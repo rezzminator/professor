@@ -30,10 +30,17 @@ import (
 const (
 	globalCommandsRegistry = "commands"
 	globalSkillsRegistry   = "skills"
+	globalAgentsRegistry   = "agents"
 )
 
-// unwireGlobalRegistries removes the machine-global command and skill links
-// from every configured Claude account.
+// unwireGlobalRegistries removes the machine-global command, skill, and
+// agent links from every configured Claude account. Agents belong here
+// alongside commands and skills: wireCodexAgents (installer.go) links every
+// <clone>/templates/global/agents/<name>.md into {config}/agents/<name>.md
+// through the same ownership-by-target rule, and a run that skipped the
+// agents/ registry left `~/.claude/agents/*.md` symlinks behind after a
+// successful `pfm uninstall` — the same defect this file's commit fixed for
+// commands and skills, at the one registry this loop had not yet visited.
 func (installer *engine) unwireGlobalRegistries() error {
 	repos, err := installer.recordedProfessorSourceRepos()
 	if err != nil {
@@ -44,7 +51,7 @@ func (installer *engine) unwireGlobalRegistries() error {
 	// --repo nor a marker still has to find the links a normal install made.
 	repos = append(repos, filepath.Join(installer.options.Home, ".professor"))
 	for _, config := range installer.claudeConfigDirs() {
-		for _, registry := range []string{globalCommandsRegistry, globalSkillsRegistry} {
+		for _, registry := range []string{globalCommandsRegistry, globalSkillsRegistry, globalAgentsRegistry} {
 			if err := installer.unwireGlobalRegistry(filepath.Join(config, registry), registry, repos); err != nil {
 				return err
 			}

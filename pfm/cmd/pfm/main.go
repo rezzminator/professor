@@ -8,7 +8,6 @@ import (
 	"os"
 	"strconv"
 
-	"hostops/pfm/internal/binwatch"
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/clock"
@@ -295,15 +294,10 @@ func runMCP(
 		return 1
 	}
 	defer func() { cli.CloseResource(service, "pfm mcp: close service", stderr, &exitCode) }()
-	// A chat launches this server once and never closes it, so without a watch
-	// it answers from the build it started on for the whole session — days,
-	// across every install in between (binwatch.Guard).
-	ctx, wasReplaced, stopGuard := binwatch.Guard(context.Background(), stderr)
-	defer stopGuard()
-	err = service.RunStdio(ctx, os.Stdin, os.Stdout)
-	if wasReplaced() {
-		return binwatch.ExitReplaced
-	}
+	// This server answers from the build it started on until its chat ends:
+	// Claude Code does not relaunch a stdio server that exits, so ending it on
+	// an install would take the chat tools away from every running chat.
+	err = service.RunStdio(context.Background(), os.Stdin, os.Stdout)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm mcp: %v\n", err)
 		return 1

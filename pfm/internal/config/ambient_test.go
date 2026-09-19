@@ -81,3 +81,20 @@ func TestRefuseAmbientConfigHomeFromOptsOutWithRealHome(t *testing.T) {
 		t.Fatalf("RefuseAmbientConfigHomeFrom() with %s=1 = %v, want nil", paths.EnvRealHome, err)
 	}
 }
+
+// A test that moves PFM_HOME to its own directory still inherits the package
+// jail's XDG_CONFIG_HOME. That pin is a jailed path and must pass; naming a
+// jail home must not wave through any other config home.
+func TestRefuseAmbientConfigHomeFromAllowsThePackageJailPinAfterHomeMoved(t *testing.T) {
+	env := &paths.MapEnv{Values: map[string]string{
+		"XDG_CONFIG_HOME":     "/tmp/pfm-jail-home-1/.config",
+		paths.EnvTestJailHome: "/tmp/pfm-jail-home-1",
+	}}
+	if err := RefuseAmbientConfigHomeFrom(env, "/tmp/TestX/001"); err != nil {
+		t.Fatalf("the package jail's own pin was refused: %v", err)
+	}
+	env.Values["XDG_CONFIG_HOME"] = "/operators/real/config"
+	if err := RefuseAmbientConfigHomeFrom(env, "/tmp/TestX/001"); err == nil {
+		t.Fatal("a named jail home waved through an operator's config home")
+	}
+}

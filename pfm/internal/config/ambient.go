@@ -73,6 +73,12 @@ func RefuseAmbientConfigHomeFrom(env paths.Env, home string) error {
 	if filepath.Clean(root) == filepath.Clean(filepath.Join(home, ".config")) {
 		return nil
 	}
+	// The package jail's own pin: a test that moved PFM_HOME to a directory of
+	// its own still carries it, and it is a jailed path, never the operator's.
+	if jail := env.Get(paths.EnvTestJailHome); filepath.IsAbs(jail) &&
+		filepath.Clean(root) == filepath.Clean(filepath.Join(jail, ".config")) {
+		return nil
+	}
 	return fmt.Errorf(
 		"refusing ambient XDG_CONFIG_HOME %s inside a test: it does not derive from the jailed home %s "+
 			"(see internal/testjail), or set %s=1 if this test genuinely must read the host",

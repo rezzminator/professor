@@ -27,7 +27,11 @@ const (
 	// machine — building against the real module cache, probing a live
 	// config — opt back in by name. Everything else running under `go
 	// test` is refused the real home rather than handed it silently.
-	EnvRealHome        = "PFM_TEST_REAL_HOME"
+	EnvRealHome = "PFM_TEST_REAL_HOME"
+	// EnvTestJailHome names the package-wide jailed home internal/testjail
+	// built. A test that moves PFM_HOME to a directory of its own still
+	// inherits the jail's XDG_CONFIG_HOME, which is safe: it is this home's.
+	EnvTestJailHome    = "PFM_TEST_JAIL_HOME"
 	EnvProcRoot        = "PFM_PROC_ROOT"
 	EnvCgroupRoot      = "PFM_CGROUP_ROOT"
 	EnvDevRepoGitDir   = "PFM_DEV_REPO_GIT_DIR"

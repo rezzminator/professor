@@ -455,17 +455,22 @@ func TestArchiveRefusesToDecideWhenTheLiveReadingFails(t *testing.T) {
 }
 
 // L1-F2: a transcript lookup that could not run — here, the claude projects
-// root is unreadable — must land the killed id in Unresolved, reported and
+// root cannot be read as a directory — must land the killed id in Unresolved, reported and
 // never un-killed, instead of being classed an orphan and having its kill row
 // retired.
 func TestArchiveMarksUnresolvedWhenTheTranscriptLookupCannotRun(t *testing.T) {
 	values := archiveJail(t)
 	const id = "11111111-1111-4111-8111-111111111111"
 	root := values.Roots[pfmengine.Claude][0]
-	if err := os.Chmod(root, 0o000); err != nil {
+	// A regular file where the projects root should be: reading it as a
+	// directory fails with ENOTDIR for every user. chmod 000 would prove
+	// nothing under root, which is what the fence runs as.
+	if err := os.RemoveAll(root); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
+	if err := os.WriteFile(root, []byte("not a directory\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	kills := &fakeKills{rows: []KilledChat{{ID: id, Engine: "cc"}}}
 	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})

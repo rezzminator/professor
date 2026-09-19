@@ -139,6 +139,11 @@ func jailHome(base string) func() {
 	if err := os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")); err != nil {
 		warnSetup("set XDG_CONFIG_HOME under %s: %v", home, err)
 	}
+	// Named so config.RefuseAmbientConfigHome can tell this jail's own pin
+	// from an operator's ambient export after a test moves PFM_HOME.
+	if err := os.Setenv(paths.EnvTestJailHome, home); err != nil {
+		warnSetup("set %s to %s: %v", paths.EnvTestJailHome, home, err)
+	}
 	return func() {
 		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			warnSetup("remove jail home %s: %v", home, err)

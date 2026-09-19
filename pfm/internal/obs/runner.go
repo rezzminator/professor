@@ -23,6 +23,14 @@ const compRunner = "runner"
 // through untouched. What is recorded is the argument SHAPE — argv[0]'s
 // base name and argc — never an argument, so a token on a command line
 // cannot reach the file. nil next wraps deps.RealRunner.
+//
+// LookPath's records are UNSCOPED (L1-F15): deps.Runner's LookPath carries no
+// ctx (the interface's own contract), so a Runner built here has no context
+// to scope its runner.lookpath records to a chat — they always land on the
+// process logger's scope. The 22 construction sites across the tree
+// (`obs.Runner(deps.RealRunner{})`, one free function per name — C17) build
+// with no ctx in hand and stay exactly as they are; ScopedRunner is the door
+// for the caller that DOES have one.
 func Runner(next deps.Runner) deps.Runner {
 	if next == nil {
 		next = deps.RealRunner{}
@@ -30,8 +38,25 @@ func Runner(next deps.Runner) deps.Runner {
 	return loggedRunner{next: next}
 }
 
+// ScopedRunner is Runner with LookPath's scope bound at construction: every
+// runner.lookpath record it writes carries the fields ctx scoped in (chat,
+// seat, …) instead of falling back to the process logger. Run and Start
+// already take a ctx per call and stay scoped either way; only LookPath
+// needed this door. Named apart from internal/ask.RunnerFor (C17: one free
+// function per name across packages) — an unrelated ask-engine lookup.
+func ScopedRunner(ctx context.Context, next deps.Runner) deps.Runner {
+	if next == nil {
+		next = deps.RealRunner{}
+	}
+	return loggedRunner{next: next, lookupCtx: ctx}
+}
+
 type loggedRunner struct {
 	next deps.Runner
+	// lookupCtx is the ctx LookPath scopes its record to when the caller used
+	// ScopedRunner; nil (the Runner(next) default) falls back to
+	// context.Background(), which reads the unscoped process logger.
+	lookupCtx context.Context
 }
 
 // Run records runner.run: INFO with the exit code when the command ran
@@ -51,9 +76,14 @@ func (runner loggedRunner) Run(ctx context.Context, argv []string, opts deps.Run
 
 // LookPath records runner.lookpath: INFO with the resolved path, WARN with
 // err on a miss — an absent optional binary is an answer, not a failure of
-// the door, and the caller decides what it means.
+// the door, and the caller decides what it means. Scoped to ScopedRunner's ctx
+// when the wrapper was built with one, else the unscoped process logger (see
+// Runner's doc comment).
 func (runner loggedRunner) LookPath(name string) (string, error) {
-	ctx := context.Background()
+	ctx := runner.lookupCtx
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	started := current(ctx).timing.Now()
 	path, err := runner.next.LookPath(name)
 	record(ctx, compRunner, "runner.lookpath", errorLevel(err, slog.LevelWarn), started, err,

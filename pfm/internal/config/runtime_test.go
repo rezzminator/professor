@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"testing"
 
 	pfmengine "hostops/pfm/internal/engine"
@@ -66,6 +67,7 @@ func TestDisplayVersionPrefersLdflagsStamp(t *testing.T) {
 func brokenConfig(t *testing.T) string {
 	t.Helper()
 	t.Setenv(paths.EnvHome, t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 	path := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(path, []byte("this is [not a config\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -105,6 +107,7 @@ func TestLoadDiagnosticRuntimeRunsOnDefaultsAndCarriesTheError(t *testing.T) {
 // resolved roots are the configured accounts', not the host defaults.
 func TestLoadRuntimePointsTheEngineRootsAtTheRoster(t *testing.T) {
 	t.Setenv(paths.EnvHome, t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 	runtime, err := LoadRuntime(filepath.Join(t.TempDir(), "absent.toml"))
 	if err != nil {
 		t.Fatalf("LoadRuntime() = %v", err)
@@ -127,6 +130,7 @@ func TestLoadRuntimePointsTheEngineRootsAtTheRoster(t *testing.T) {
 // run.
 func TestLoadRuntimeRecordsWhetherConfigWasExplicit(t *testing.T) {
 	t.Setenv(paths.EnvHome, t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", "")
 	implicit, err := LoadRuntime("")
 	if err != nil {
 		t.Fatalf("LoadRuntime(\"\") = %v", err)
@@ -142,6 +146,43 @@ func TestLoadRuntimeRecordsWhetherConfigWasExplicit(t *testing.T) {
 	}
 	if !explicit.ConfigExplicit {
 		t.Fatalf("LoadRuntime(%q).ConfigExplicit = false, want true for a named path", explicitPath)
+	}
+}
+
+// TestConfigInitWritesInsideTheJailAndRefusesAnAmbientHome pins the write
+// half of L3-F9: `pfm config init` (cmd/pfm/config_command.go runConfigInit)
+// resolves its target through LoadRuntime before WriteDefault ever touches
+// disk, so a jailed PFM_HOME with a properly re-homed XDG_CONFIG_HOME writes
+// inside the jail, and the SAME jailed PFM_HOME with an ambient
+// XDG_CONFIG_HOME left pointing outside it is refused before WriteDefault
+// ever runs — never a silent write into the operator's real pfm/config.*.
+func TestConfigInitWritesInsideTheJailAndRefusesAnAmbientHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+
+	runtime, err := LoadRuntime("")
+	if err != nil {
+		t.Fatalf("LoadRuntime() over a properly jailed home = %v", err)
+	}
+	if err := WriteDefault(
+		runtime.Config.Path, runtime.Paths.Home, runtime.Paths.Roots[pfmengine.Claude], false,
+	); err != nil {
+		t.Fatalf("WriteDefault() = %v", err)
+	}
+	if !strings.HasPrefix(runtime.Config.Path, home) {
+		t.Fatalf("config init wrote %q, want it inside the jailed home %q", runtime.Config.Path, home)
+	}
+	if _, statErr := os.Stat(runtime.Config.Path); statErr != nil {
+		t.Fatalf("stat written config %q: %v", runtime.Config.Path, statErr)
+	}
+
+	// The same jailed PFM_HOME, but XDG_CONFIG_HOME now points somewhere
+	// that does not derive from it — the ambient leak L3-F9 names.
+	ambient := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", ambient)
+	if _, err := LoadRuntime(""); err == nil {
+		t.Fatal("LoadRuntime() accepted an ambient XDG_CONFIG_HOME outside the jailed home")
 	}
 }
 

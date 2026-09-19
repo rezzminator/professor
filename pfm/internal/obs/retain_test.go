@@ -1,6 +1,7 @@
 package obs
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +49,7 @@ func TestRetentionDeletesAgedGenerationsAtOpen(t *testing.T) {
 	plantGeneration(t, path+".1", 31*24*time.Hour, now)
 	plantGeneration(t, path+".2", 29*24*time.Hour, now)
 	plantGeneration(t, path+".3", 400*24*time.Hour, now)
-	writer, err := newRotator(path, 5, 8, 30, timing)
+	writer, err := newRotator(path, 5, 8, 30, timing, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +70,7 @@ func TestRetentionZeroKeepsEveryGeneration(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
 	plantGeneration(t, path+".1", 900*24*time.Hour, now)
-	writer, err := newRotator(path, 5, 8, 0, clock.NewFake(now))
+	writer, err := newRotator(path, 5, 8, 0, clock.NewFake(now), io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +86,7 @@ func TestRetentionPrunesAtEveryRotation(t *testing.T) {
 	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
 	timing := clock.NewFake(now)
 	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	writer, err := newRotator(path, 5, 1, 30, timing)
+	writer, err := newRotator(path, 5, 1, 30, timing, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func TestRetentionPrunesAtEveryRotation(t *testing.T) {
 // appended, the one that would carry the file past maxMB rotates first.
 func TestRotatorRotatesAtMaxMB(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "log", "pfm.jsonl")
-	writer, err := newRotator(path, 5, 1, 30, clock.NewFake(time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)))
+	writer, err := newRotator(path, 5, 1, 30, clock.NewFake(time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)), io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

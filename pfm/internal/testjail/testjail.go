@@ -130,6 +130,15 @@ func jailHome(base string) func() {
 		}
 		return func() {}
 	}
+	// XDG_CONFIG_HOME pinned alongside PFM_HOME (L3-F9): unpinned, an ambient
+	// XDG_CONFIG_HOME the operator's shell exported reaches
+	// config.LoadRuntime through internal/config/ambient.go regardless of how
+	// jailed PFM_HOME is, and a package that never builds a jail of its own
+	// would read the operator's real pfm/config.* the same way jailHome
+	// exists to stop it reading their real fleet.db.
+	if err := os.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config")); err != nil {
+		warnSetup("set XDG_CONFIG_HOME under %s: %v", home, err)
+	}
 	return func() {
 		if err := os.RemoveAll(home); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			warnSetup("remove jail home %s: %v", home, err)
@@ -220,6 +229,10 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	setenv(paths.EnvTmuxDir, filepath.Join(root, "tmux"))
 	setenv(paths.EnvHome, filepath.Join(root, "home"))
 	setenv("HOME", filepath.Join(root, "home"))
+	// Pinned alongside PFM_HOME/HOME (L3-F9): an ambient XDG_CONFIG_HOME the
+	// operator's shell exported would otherwise reach config.LoadRuntime
+	// through internal/config/ambient.go no matter how jailed PFM_HOME is.
+	setenv("XDG_CONFIG_HOME", filepath.Join(root, "home", ".config"))
 	setenv(paths.EnvProcRoot, filepath.Join(root, "proc"))
 	setenv(paths.EnvTmuxConf, "/dev/null")
 	return root
@@ -361,6 +374,9 @@ func CleanHome(t *testing.T) config.Runtime {
 
 	t.Setenv("HOME", home)
 	t.Setenv(paths.EnvHome, home)
+	// Pinned alongside HOME/PFM_HOME (L3-F9) — see the same comment in
+	// fleetSetenv.
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv(paths.EnvDB, filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
 	t.Setenv(paths.EnvFleetDB, filepath.Join(home, ".cc", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(home, "sid"))

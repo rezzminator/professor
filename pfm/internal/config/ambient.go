@@ -1,8 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
+	"testing"
 
 	"hostops/pfm/internal/paths"
 )
@@ -25,14 +27,55 @@ func AmbientClaudeConfigDirFrom(env paths.Env) string {
 	return filepath.Clean(value)
 }
 
-// ResolvePath applies pfm's XDG rule: only an absolute XDG_CONFIG_HOME wins.
+// ResolvePath applies pfm's XDG rule: only an absolute XDG_CONFIG_HOME wins,
+// through paths.ConfigHomeFrom — the single place that rule is computed, so
+// this and internal/testjail's own jail pin can never drift about which
+// .config a caller meant.
 func ResolvePath(home string) string { return ResolvePathFrom(paths.OSEnv{}, home) }
 
 // ResolvePathFrom applies pfm's XDG rule over an injected environment.
 func ResolvePathFrom(env paths.Env, home string) string {
+	return filepath.Join(paths.ConfigHomeFrom(env, home), "pfm", FileName)
+}
+
+// RefuseAmbientConfigHome is LoadRuntime and LoadDiagnosticRuntime's guard
+// against L3-F9's other half: a jailed test's PFM_HOME says nothing about
+// XDG_CONFIG_HOME, so an operator's own absolute XDG_CONFIG_HOME reaches
+// config.LoadRuntime("") regardless of how jailed home is, and resolves the
+// operator's REAL pfm/config.* — the accounts, MCP servers, theme a live
+// pfm reads.
+//
+// A properly jailed test rehomes XDG_CONFIG_HOME alongside home:
+// internal/testjail's jailHome, Fleet/FleetEnv and CleanHome all pin it to
+// exactly paths.ConfigHomeFrom's own HOME-derived fallback (home's
+// ".config" subdirectory), so comparing the two tells a jail's own
+// correctly re-homed XDG_CONFIG_HOME apart from an ambient leak without
+// reading any OS account record — no new host door, and no env-only
+// ambiguity, because a properly jailed test's XDG_CONFIG_HOME is not merely
+// "under home", it is byte-identical to the fallback home alone would have
+// produced.
+func RefuseAmbientConfigHome(home string) error {
+	return RefuseAmbientConfigHomeFrom(paths.OSEnv{}, home)
+}
+
+// RefuseAmbientConfigHomeFrom is RefuseAmbientConfigHome over an injected
+// environment, following paths.HomeFrom's own testing.Testing() shape:
+// refuse only inside a test, and PFM_TEST_REAL_HOME=1 opts back in the rare
+// test that genuinely must read the host's real config.
+func RefuseAmbientConfigHomeFrom(env paths.Env, home string) error {
+	if !testing.Testing() || env.Get(paths.EnvRealHome) != "" {
+		return nil
+	}
 	root := env.Get("XDG_CONFIG_HOME")
 	if !filepath.IsAbs(root) {
-		root = filepath.Join(home, ".config")
+		return nil
 	}
-	return filepath.Join(filepath.Clean(root), "pfm", FileName)
+	if filepath.Clean(root) == filepath.Clean(filepath.Join(home, ".config")) {
+		return nil
+	}
+	return fmt.Errorf(
+		"refusing ambient XDG_CONFIG_HOME %s inside a test: it does not derive from the jailed home %s "+
+			"(see internal/testjail), or set %s=1 if this test genuinely must read the host",
+		filepath.Clean(root), home, paths.EnvRealHome,
+	)
 }

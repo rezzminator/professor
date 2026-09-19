@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -199,6 +200,103 @@ func TestPromptRecordsAFailureAtErrorLevel(t *testing.T) {
 	}
 	wantField(t, record, FieldErr, "URL is required")
 	wantField(t, record, "args", "")
+}
+
+// TestToolRecoversAPanicIntoAnErrorRecordAndSurvives is L2-F1: a panicking
+// handler must not kill the process that serves every chat, the mcp.call
+// record must still be written (naming the tool), and the SDK must see an
+// error rather than a dropped connection.
+func TestToolRecoversAPanicIntoAnErrorRecordAndSurvives(t *testing.T) {
+	ctx, recorder := Test(t)
+	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "chat_boom"}, Tool("chat_boom",
+		func(context.Context, *mcp.CallToolRequest, toolInput) (*mcp.CallToolResult, toolOutput, error) {
+			var nilInput *toolInput
+			return nil, toolOutput{}, errors.New(nilInput.Target) // nil pointer deref panic
+		},
+	))
+	session := connectInProcess(t, server)
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "chat_boom", Arguments: map[string]any{"target": "cc-3", "message": "hi"},
+	})
+	if err != nil {
+		t.Fatalf("the panic reached the client as a transport error instead of a tool error: %v", err)
+	}
+	if result == nil || !result.IsError {
+		t.Fatalf("a panicking handler did not become a tool error: %+v", result)
+	}
+	record := onlyRecord(t, recorder)
+	if record.Level != slog.LevelError.String() || record.Message != "mcp.call" {
+		t.Fatalf("record = %s %s, want ERROR mcp.call", record.Level, record.Message)
+	}
+	wantField(t, record, "tool", "chat_boom")
+	got, _ := record.Field(FieldErr)
+	text, _ := got.(string)
+	if !strings.Contains(text, "chat_boom") || !strings.Contains(text, "nil pointer") {
+		t.Fatalf("panic record err = %q, want it to name the tool and the panic", text)
+	}
+	// A second, ordinary call on the SAME server proves the process — and the
+	// server — survived the panic rather than being torn down with it.
+	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "chat_boom", Arguments: map[string]any{"target": "cc-4", "message": "still alive"},
+	}); err != nil {
+		t.Fatalf("the server did not survive the panic: %v", err)
+	}
+}
+
+// TestPromptRecoversAPanicIntoAnErrorRecord is Tool's sibling test for
+// Prompt's own recover.
+func TestPromptRecoversAPanicIntoAnErrorRecord(t *testing.T) {
+	ctx, recorder := Test(t)
+	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
+	server.AddPrompt(&mcp.Prompt{Name: "boom"}, Prompt("boom",
+		func(context.Context, *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+			var messages []*mcp.PromptMessage
+			return &mcp.GetPromptResult{Messages: messages}, errors.New(string(messages[0].Role)) // index out of range
+		},
+	))
+	session := connectInProcess(t, server)
+	if _, err := session.GetPrompt(ctx, &mcp.GetPromptParams{Name: "boom"}); err == nil {
+		t.Fatal("the panic vanished instead of becoming a prompt error")
+	}
+	record := onlyRecord(t, recorder)
+	if record.Level != slog.LevelError.String() {
+		t.Fatalf("record level = %s, want ERROR", record.Level)
+	}
+	wantField(t, record, "tool", "boom")
+	got, _ := record.Field(FieldErr)
+	text, _ := got.(string)
+	if !strings.Contains(text, "boom") {
+		t.Fatalf("panic record err = %q, want it to name the prompt", text)
+	}
+}
+
+// TestToolNeverRecordsChatSaveTargetAsAChat is L2-F26: chat_save's Target is
+// a FILE PATH, not a chat — it must never land in the record's target field
+// (the field `pfm log --chat` filters on), only its SIZE through args' shape.
+func TestToolNeverRecordsChatSaveTargetAsAChat(t *testing.T) {
+	ctx, recorder := Test(t)
+	server := mcp.NewServer(&mcp.Implementation{Name: "fixture", Version: "test"}, nil)
+	mcp.AddTool(server, &mcp.Tool{Name: "chat_save"}, Tool("chat_save",
+		func(_ context.Context, _ *mcp.CallToolRequest, _ toolInput) (*mcp.CallToolResult, toolOutput, error) {
+			return nil, toolOutput{Status: "saved"}, nil
+		},
+	))
+	session := connectInProcess(t, server)
+	const path = "./notes/private-session-2026.md"
+	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "chat_save", Arguments: map[string]any{"target": path, "message": ""},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	record := onlyRecord(t, recorder)
+	if _, found := record.Field("target"); found {
+		t.Fatalf("chat_save's file path was recorded as a target: %v", record.Fields)
+	}
+	wantField(t, record, "args", "target:"+strconv.Itoa(len(path))+",message:0,then:4")
+	if strings.Contains(recorder.Raw(), "private-session") {
+		t.Fatalf("chat_save's file path leaked into the activity log: %s", recorder.Raw())
+	}
 }
 
 func TestArgumentShapeCoversStructsPointersMapsAndScalars(t *testing.T) {

@@ -88,6 +88,9 @@ func LoadRuntime(configPath string) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
 	}
+	if err := RefuseAmbientConfigHome(resolved.Home); err != nil {
+		return Runtime{}, err
+	}
 	effective, err := Load(
 		configPath,
 		resolved.Home,
@@ -118,6 +121,9 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	resolved, err := paths.Resolve()
 	if err != nil {
 		return Runtime{}, fmt.Errorf("resolve paths: %w", err)
+	}
+	if err := RefuseAmbientConfigHome(resolved.Home); err != nil {
+		return Runtime{}, err
 	}
 	effective, configErr := Load(
 		configPath,

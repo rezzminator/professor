@@ -353,7 +353,9 @@ func boundedOutputWithEnvironment(
 		runner = RealRunner{}
 	}
 	result, err := runner.Run(ctx, append([]string{path}, args...), RunOptions{Env: environment})
-	output := append(result.Stdout, result.Stderr...)
+	output := make([]byte, 0, len(result.Stdout)+len(result.Stderr))
+	output = append(output, result.Stdout...)
+	output = append(output, result.Stderr...)
 	if ctx.Err() != nil {
 		if parentErr := parent.Err(); parentErr != nil {
 			return output, probeContextError{err: parentErr}
@@ -383,6 +385,17 @@ func (status runnerExitStatus) Error() string {
 }
 
 func (status runnerExitStatus) ExitCode() int { return status.exitCode }
+
+// ExitStatus builds the duck-typed "command ran to completion and exited
+// code" error every completed-but-nonzero Runner.Run answers with
+// (runnerExitStatus above) — an error carrying only ExitCode() int, no
+// *exec.ExitError underneath. A caller elsewhere in the tree that classifies
+// on that duck type (internal/obs/process.go's Process.Exited among them)
+// builds its test fixture through here rather than a package-local copy of
+// the same two methods.
+func ExitStatus(code int) error {
+	return runnerExitStatus{exitCode: code}
+}
 
 type probeContextError struct {
 	err        error

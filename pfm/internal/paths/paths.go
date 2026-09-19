@@ -201,6 +201,22 @@ func HomeFrom(env Env) (string, error) {
 	return home, nil
 }
 
+// ConfigHomeFrom resolves the XDG config-home root pfm's own on-disk state
+// hangs from: an absolute XDG_CONFIG_HOME wins, else home's own .config
+// subdirectory. internal/config's ResolvePath composes pfm's config.json
+// path under this same root — the single place it is computed, so a config
+// resolver and a jail's own pin (internal/testjail) can never drift about
+// which .config a caller meant (L3-F9).
+func ConfigHomeFrom(env Env, home string) string {
+	if root := env.Get("XDG_CONFIG_HOME"); filepath.IsAbs(root) {
+		return filepath.Clean(root)
+	}
+	return filepath.Join(home, ".config")
+}
+
+// ConfigHome is ConfigHomeFrom over the real process environment.
+func ConfigHome(home string) string { return ConfigHomeFrom(OSEnv{}, home) }
+
 // Resolve returns the standard host paths with all K4 test-jail overrides
 // applied. It only computes pathnames; it does not access the filesystem.
 func Resolve() (Values, error) {

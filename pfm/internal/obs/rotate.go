@@ -2,10 +2,12 @@ package obs
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"sync"
+	"time"
 
 	"hostops/pfm/internal/clock"
 )
@@ -18,38 +20,63 @@ const (
 	DefaultMaxMB     = 8
 )
 
+// failureReportInterval rate-limits how often a write/rotate failure repeats
+// on stderr once OpenLog has already opened the file successfully: the first
+// failure after a healthy run is always reported, and after that at most
+// once per interval — a full disk must not turn every record's failed write
+// into its own stderr line.
+const failureReportInterval = 5 * time.Minute
+
 // rotator is the size-capped JSON-lines sink: it appends to path and, when the
 // next record would carry the file past maxBytes, renames pfm.jsonl to
 // pfm.jsonl.1 (shifting 1→2 … keep-1, dropping the oldest) and opens a fresh
 // one; prune (retain.go) then drops the generations past keepDays. Whichever
 // limit is reached first wins. In-tree on purpose — a rotation library would
 // be a dependency for twenty lines (§ Destinations and environments).
+//
+// A write or rotate failure AFTER open would otherwise vanish: slog.Handler's
+// Handle discards the error Write returns, so "no records" and "logging is
+// broken" would read identically. stderr, lastReported and failing exist so
+// that failure is surfaced once (rate-limited) instead — never breaking the
+// wrapped call — and a recovered state is announced once too.
 type rotator struct {
-	mutex    sync.Mutex
-	path     string
-	keep     int
-	maxBytes int64
-	keepDays int
-	timing   clock.Clock
-	file     *os.File
-	size     int64
+	mutex        sync.Mutex
+	path         string
+	keep         int
+	maxBytes     int64
+	keepDays     int
+	timing       clock.Clock
+	stderr       io.Writer
+	file         *os.File
+	size         int64
+	failing      bool
+	lastReported time.Time
 }
 
 // newRotator opens path for append, creating its directory, and reports the
 // size already on disk so the first write rotates when it must. keepDays is
-// the time limit (0 disables it), measured on timing.
-func newRotator(path string, keep, maxMB, keepDays int, timing clock.Clock) (*rotator, error) {
+// the time limit (0 disables it), measured on timing. A later write/rotate
+// failure is reported on stderr (nil defaults to os.Stderr).
+func newRotator(path string, keep, maxMB, keepDays int, timing clock.Clock, stderr io.Writer) (*rotator, error) {
 	if keep < 1 {
 		keep = DefaultKeepFiles
 	}
 	if maxMB < 1 {
 		maxMB = DefaultMaxMB
 	}
+	if stderr == nil {
+		stderr = os.Stderr
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create activity log directory %s: %w", filepath.Dir(path), err)
 	}
 	opened := &rotator{
-		path: path, keep: keep, maxBytes: int64(maxMB) * 1024 * 1024, keepDays: keepDays, timing: timing,
+		path:     path,
+		keep:     keep,
+		maxBytes: int64(maxMB) * 1024 * 1024,
+		keepDays: keepDays,
+		timing:   timing,
+		stderr:   stderr,
 	}
 	if err := opened.reopen(); err != nil {
 		return nil, err
@@ -80,21 +107,51 @@ func (writer *rotator) reopen() error {
 	return nil
 }
 
-// Write appends one record, rotating first when it would not fit.
+// Write appends one record, rotating first when it would not fit. A failure
+// is still returned to the caller (slog.Handler.Handle discards it, but the
+// contract here is "never silent," not "never returned") and is ALSO
+// surfaced on stderr, rate-limited by reportFailureLocked.
 func (writer *rotator) Write(record []byte) (int, error) {
 	writer.mutex.Lock()
 	defer writer.mutex.Unlock()
 	if writer.size > 0 && writer.size+int64(len(record)) > writer.maxBytes {
 		if err := writer.rotate(); err != nil {
+			writer.reportFailureLocked(err)
 			return 0, err
 		}
 	}
 	written, err := writer.file.Write(record)
 	writer.size += int64(written)
 	if err != nil {
-		return written, fmt.Errorf("write activity log %s: %w", writer.path, err)
+		wrapped := fmt.Errorf("write activity log %s: %w", writer.path, err)
+		writer.reportFailureLocked(wrapped)
+		return written, wrapped
 	}
+	writer.reportRecoveredLocked()
 	return written, nil
+}
+
+// reportFailureLocked surfaces err on stderr: always on the first failure
+// since the last healthy write, and after that at most once per
+// failureReportInterval. The caller holds writer.mutex.
+func (writer *rotator) reportFailureLocked(err error) {
+	now := writer.timing.Now()
+	if writer.failing && now.Sub(writer.lastReported) < failureReportInterval {
+		return
+	}
+	writer.failing = true
+	writer.lastReported = now
+	fmt.Fprintf(writer.stderr, "pfm: activity log: %v\n", err)
+}
+
+// reportRecoveredLocked announces a return to healthy writes exactly once,
+// only when a prior failure was reported. The caller holds writer.mutex.
+func (writer *rotator) reportRecoveredLocked() {
+	if !writer.failing {
+		return
+	}
+	writer.failing = false
+	fmt.Fprintf(writer.stderr, "pfm: activity log: writes to %s recovered\n", writer.path)
 }
 
 // Close releases the file handle.

@@ -9,36 +9,60 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"hostops/pfm/internal/clock"
 )
 
 // compMCP is the component every MCP tool and prompt record belongs to.
 const compMCP = "mcp"
 
+// nonChatTargetTools are the registered tool names whose Target field
+// addresses something other than a chat — chat_save's is a FILE PATH
+// (mcpserv.SaveInput's doc comment), the field `pfm log --chat` filters on —
+// so Tool never records their Target value as the log's target field. Their
+// path still reaches the log as a SIZE only, through args' shape
+// (argumentShape already reports target:<byte length> for every field).
+var nonChatTargetTools = map[string]bool{
+	"chat_save": true,
+}
+
 // Tool wraps a typed mcp.AddTool handler in the mcp middleware (spec
 // § Middleware): `mcp.AddTool(server, tool, obs.Tool("chat_ls", service.chatLS))`.
 // One record per call — tool, kind=tool, target (the input's Target or Chat
-// field when it has one), the argument SHAPE (field names and byte sizes,
-// never a value), the result's size in bytes, dur_ms and err — written after
-// the handler returned and returning exactly what it returned. Both
-// transports share the registration, so stdio and HTTP calls log once each.
-// A handler error logs at ERROR; a result the handler marked IsError at WARN.
+// field when it has one and the tool is not in nonChatTargetTools), the
+// argument SHAPE (field names and byte sizes, never a value), the result's
+// size in bytes, dur_ms and err — written after the handler returned and
+// returning exactly what it returned. Both transports share the
+// registration, so stdio and HTTP calls log once each. A handler error logs
+// at ERROR; a result the handler marked IsError at WARN.
+//
+// A panicking handler is recovered here, at the one chokepoint every
+// registered tool crosses: the MCP SDK runs each request on its own
+// goroutine with no recover of its own, so an unrecovered panic would kill
+// the machine-wide daemon. The recovered call is one ERROR record naming the
+// tool (op=call, kind=tool, tool=name) plus obs.Recovered's bounded,
+// scrubbed message, and an error returned to the SDK so the caller sees a
+// tool error — the daemon survives and the next request runs normally.
 func Tool[In, Out any](name string, handler mcp.ToolHandlerFor[In, Out]) mcp.ToolHandlerFor[In, Out] {
-	return func(ctx context.Context, request *mcp.CallToolRequest, input In) (*mcp.CallToolResult, Out, error) {
+	return func(ctx context.Context, request *mcp.CallToolRequest, input In) (result *mcp.CallToolResult, output Out, err error) {
 		timing := current(ctx).timing
 		started := timing.Now()
-		result, output, err := handler(ctx, request, input)
-		attrs := []slog.Attr{
-			slog.String("op", "call"),
-			slog.String("kind", "tool"),
-			slog.String("tool", name),
-			slog.String("args", argumentShape(input)),
-			slog.Int64(FieldDur, timing.Now().Sub(started).Milliseconds()),
-		}
-		if target := targetOf(input); target != "" {
-			attrs = append(attrs, slog.String("target", target))
-		}
+		defer func() {
+			recovered := recover()
+			if recovered == nil {
+				return
+			}
+			err = Recovered("tool "+name, recovered)
+			var zero Out
+			result, output = nil, zero
+			attrs := append(toolAttrs(name, input, started, timing), slog.String(FieldErr, err.Error()))
+			Logger(Component(ctx, compMCP)).LogAttrs(ctx, slog.LevelError, "mcp.call", attrs...)
+		}()
+		result, output, err = handler(ctx, request, input)
+		attrs := toolAttrs(name, input, started, timing)
 		level := slog.LevelInfo
 		switch {
 		case err != nil:
@@ -57,26 +81,51 @@ func Tool[In, Out any](name string, handler mcp.ToolHandlerFor[In, Out]) mcp.Too
 	}
 }
 
+// toolAttrs is the record shape every mcp.call for a tool carries before the
+// result/err-specific attrs: op, kind, tool, the argument shape and dur_ms,
+// plus target when the input has one and name is not a nonChatTargetTools
+// entry. Shared between the success path and the recovered-panic path so
+// both write the identical shape.
+func toolAttrs(name string, input any, started time.Time, timing clock.Clock) []slog.Attr {
+	attrs := []slog.Attr{
+		slog.String("op", "call"),
+		slog.String("kind", "tool"),
+		slog.String("tool", name),
+		slog.String("args", argumentShape(input)),
+		slog.Int64(FieldDur, timing.Now().Sub(started).Milliseconds()),
+	}
+	if target := targetOf(input); target != "" && !nonChatTargetTools[name] {
+		attrs = append(attrs, slog.String("target", target))
+	}
+	return attrs
+}
+
 // Prompt is Tool for a Server.AddPrompt callback — the harvester's prompt
 // door is not an unlogged side entrance. The record carries kind=prompt, the
 // prompt name under tool, the argument shape (name and byte size per prompt
-// argument), the result size and err.
+// argument), the result size and err. A panicking handler is recovered the
+// same way Tool's is: one ERROR record, an error returned to the SDK, the
+// daemon survives.
 func Prompt(name string, handler mcp.PromptHandler) mcp.PromptHandler {
-	return func(ctx context.Context, request *mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	return func(ctx context.Context, request *mcp.GetPromptRequest) (result *mcp.GetPromptResult, err error) {
 		timing := current(ctx).timing
 		started := timing.Now()
-		result, err := handler(ctx, request)
 		var arguments map[string]string
 		if request != nil && request.Params != nil {
 			arguments = request.Params.Arguments
 		}
-		attrs := []slog.Attr{
-			slog.String("op", "call"),
-			slog.String("kind", "prompt"),
-			slog.String("tool", name),
-			slog.String("args", argumentShape(arguments)),
-			slog.Int64(FieldDur, timing.Now().Sub(started).Milliseconds()),
-		}
+		defer func() {
+			recovered := recover()
+			if recovered == nil {
+				return
+			}
+			err = Recovered("prompt "+name, recovered)
+			result = nil
+			attrs := append(promptAttrs(name, arguments, started, timing), slog.String(FieldErr, err.Error()))
+			Logger(Component(ctx, compMCP)).LogAttrs(ctx, slog.LevelError, "mcp.call", attrs...)
+		}()
+		result, err = handler(ctx, request)
+		attrs := promptAttrs(name, arguments, started, timing)
 		level := slog.LevelInfo
 		if err != nil {
 			level = slog.LevelError
@@ -86,6 +135,18 @@ func Prompt(name string, handler mcp.PromptHandler) mcp.PromptHandler {
 		}
 		Logger(Component(ctx, compMCP)).LogAttrs(ctx, level, "mcp.call", attrs...)
 		return result, err
+	}
+}
+
+// promptAttrs is toolAttrs's Prompt-shaped sibling: kind=prompt, no target
+// (no registered prompt takes one today).
+func promptAttrs(name string, arguments map[string]string, started time.Time, timing clock.Clock) []slog.Attr {
+	return []slog.Attr{
+		slog.String("op", "call"),
+		slog.String("kind", "prompt"),
+		slog.String("tool", name),
+		slog.String("args", argumentShape(arguments)),
+		slog.Int64(FieldDur, timing.Now().Sub(started).Milliseconds()),
 	}
 }
 

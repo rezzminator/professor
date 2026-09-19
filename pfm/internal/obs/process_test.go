@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/clock"
+	"hostops/pfm/internal/deps"
 )
 
 // fakeTimed returns ctx with the same logger over a fake clock, so a
@@ -128,6 +129,61 @@ func TestProcessStderrLogsEachLineAsWarnAndPassesEveryByteThrough(t *testing.T) 
 	wantField(t, records[5], FieldErr, "signal: killed")
 }
 
+// TestProcessStderrCarriesClassAndBytesAlwaysButLineOnlyAtDebug is L2-F27: a
+// harvestpy stderr line is the only free-text content this middleware
+// carries (converter.py's exception text among it, which can hold a path or
+// URL) — at the default level the record carries only a bounded class token
+// and the line's size; the full line is added only when comp=harvestpy is
+// actually logging at DEBUG.
+func TestProcessStderrCarriesClassAndBytesAlwaysButLineOnlyAtDebug(t *testing.T) {
+	const line = "Traceback (most recent call last):"
+	warnOnly := &Recorder{}
+	warnCtx := context.WithValue(context.Background(), contextKey{}, &scope{
+		logger: slog.New(levelHandler{
+			next:   slog.NewJSONHandler(warnOnly, &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: Scrub}),
+			levels: Levels{Global: LevelInForce{Level: slog.LevelWarn}},
+		}),
+		timing: clock.Real,
+	})
+	process := NewProcess(warnCtx, "converter")
+	process.Started(7, nil)
+	if _, err := io.WriteString(process.Stderr(io.Discard), line+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	record := onlyRecord(t, warnOnly) // Started's INFO record is filtered by the WARN floor.
+	if record.Message != "harvestpy.stderr" {
+		t.Fatalf("record = %s, want harvestpy.stderr", record.Message)
+	}
+	wantField(t, record, "class", "Traceback")
+	wantField(t, record, "bytes", float64(len(line)))
+	if _, found := record.Field("line"); found {
+		t.Fatalf("the full stderr line reached a non-DEBUG record: %v", record.Fields)
+	}
+
+	debugRecorder := &Recorder{}
+	debugCtx := context.WithValue(context.Background(), contextKey{}, &scope{
+		logger: slog.New(levelHandler{
+			next: slog.NewJSONHandler(
+				debugRecorder,
+				&slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: Scrub},
+			),
+			levels: Levels{Global: LevelInForce{Level: slog.LevelDebug}},
+		}),
+		timing: clock.Real,
+	})
+	debugProcess := NewProcess(debugCtx, "converter")
+	debugProcess.Started(7, nil)
+	if _, err := io.WriteString(debugProcess.Stderr(io.Discard), line+"\n"); err != nil {
+		t.Fatal(err)
+	}
+	records := debugRecorder.Records()
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want start+stderr at DEBUG: %s", len(records), debugRecorder.Raw())
+	}
+	wantField(t, records[1], "class", "Traceback")
+	wantField(t, records[1], "line", line)
+}
+
 func TestProcessExitedReadsTheCodeFromAnExitErrorAndWarns(t *testing.T) {
 	ctx, recorder := Test(t)
 	command := exec.Command("sh", "-c", "exit 3")
@@ -143,6 +199,32 @@ func TestProcessExitedReadsTheCodeFromAnExitErrorAndWarns(t *testing.T) {
 	}
 	if records[1].Level != slog.LevelWarn.String() {
 		t.Fatalf("a non-zero exit logged at %s, want WARN", records[1].Level)
+	}
+	wantField(t, records[1], FieldExit, float64(3))
+	if _, found := records[1].Field(FieldErr); found {
+		t.Fatalf("an exit status is not an error of the wrapper: %v", records[1].Fields)
+	}
+}
+
+// TestProcessExitedReadsTheCodeFromADuckTypedExitStatusAndWarns is the
+// Runner-crossed sibling of TestProcessExitedReadsTheCodeFromAnExitErrorAndWarns:
+// a command run through the deps.Runner seam never surfaces a bare
+// *exec.ExitError (deps.RealRunner.Run folds one into RunResult.ExitCode),
+// so Exited must also read the duck type "any error naming its own exit
+// code" — deps.ExitStatus builds exactly that error — or a Runner-crossed
+// non-zero exit falls through to the generic ERROR branch instead of the
+// WARN-with-code branch a completed command deserves.
+func TestProcessExitedReadsTheCodeFromADuckTypedExitStatusAndWarns(t *testing.T) {
+	ctx, recorder := Test(t)
+	process := NewProcess(ctx, "check")
+	process.Started(321, nil)
+	process.Exited(deps.ExitStatus(3))
+	records := recorder.Records()
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want start+exit: %s", len(records), recorder.Raw())
+	}
+	if records[1].Level != slog.LevelWarn.String() {
+		t.Fatalf("a non-zero duck-typed exit logged at %s, want WARN", records[1].Level)
 	}
 	wantField(t, records[1], FieldExit, float64(3))
 	if _, found := records[1].Field(FieldErr); found {

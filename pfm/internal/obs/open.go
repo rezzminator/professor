@@ -146,7 +146,7 @@ func openDestination(
 		}
 		path = resolved.LogFile
 	}
-	writer, err := newRotator(path, settings.KeepFiles, settings.MaxMB, settings.KeepDays, timing)
+	writer, err := newRotator(path, settings.KeepFiles, settings.MaxMB, settings.KeepDays, timing, stderr)
 	if err != nil {
 		return mirrorOnly(mirror, stderr, options), nil, err
 	}

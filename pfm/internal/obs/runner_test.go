@@ -224,6 +224,74 @@ func TestRunnerStartFailureAndWaitExitError(t *testing.T) {
 	requireField(t, records[2], FieldExit, float64(-1))
 }
 
+// TestRunnerStartedProcessStdinStdoutPipesPassThroughUntouched is L1-T1: the
+// wrapper's doc comment says the bytes on StdinPipe/StdoutPipe are never the
+// log's business — pin that the wrapper hands back exactly the inner
+// process's pipes, and writes no record for them.
+func TestRunnerStartedProcessStdinStdoutPipesPassThroughUntouched(t *testing.T) {
+	ctx, recorder := Test(t)
+	fake := &deps.FakeRunner{}
+	stdin := &fakePipeWriter{}
+	stdout := io.NopCloser(strings.NewReader("inner stdout"))
+	fake.ScriptInteractive([]string{"harvestpy"}, deps.InteractiveScript{Pid: 55, Stdin: stdin, Stdout: stdout})
+	runner := Runner(fake)
+	process, err := runner.Start(
+		ctx, []string{"harvestpy", "serve"}, deps.StartOptions{StdinPipe: true, StdoutPipe: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotStdin, err := process.StdinPipe()
+	if err != nil || gotStdin != stdin {
+		t.Fatalf("StdinPipe() = %v, %v; want the inner pipe untouched", gotStdin, err)
+	}
+	gotStdout, err := process.StdoutPipe()
+	if err != nil || gotStdout != stdout {
+		t.Fatalf("StdoutPipe() = %v, %v; want the inner pipe untouched", gotStdout, err)
+	}
+	for _, record := range recorder.Records() {
+		if strings.HasPrefix(record.Message, "runner.stdin") || strings.HasPrefix(record.Message, "runner.stdout") {
+			t.Fatalf("a pipe access was logged: %s", record.Message)
+		}
+	}
+}
+
+// fakePipeWriter is a minimal io.WriteCloser identity: TestRunnerStarted…
+// only needs to prove the wrapper hands back this EXACT value, never that it
+// works as a pipe.
+type fakePipeWriter struct{}
+
+func (*fakePipeWriter) Write(p []byte) (int, error) { return len(p), nil }
+func (*fakePipeWriter) Close() error                { return nil }
+
+// TestScopedRunnerScopesLookPathToTheBoundContext is L1-F15: Runner(next)'s
+// LookPath has no ctx to scope with (the interface carries none), so its
+// records always land on the unscoped process logger — ScopedRunner's whole
+// point is to bind one at construction instead.
+func TestScopedRunnerScopesLookPathToTheBoundContext(t *testing.T) {
+	base, recorder := Test(t)
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath("tmux", "/usr/bin/tmux", nil)
+
+	unscoped := Runner(fake)
+	if _, err := unscoped.LookPath("tmux"); err != nil {
+		t.Fatal(err)
+	}
+	scoped := With(base, FieldChat, "cc-42")
+	if _, err := ScopedRunner(scoped, fake).LookPath("tmux"); err != nil {
+		t.Fatal(err)
+	}
+
+	records := recorder.Records()
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want 2: %s", len(records), recorder.Raw())
+	}
+	if _, found := records[0].Field(FieldChat); found {
+		t.Fatalf("Runner(next)'s LookPath carried a scope it was never given: %v", records[0].Fields)
+	}
+	requireField(t, records[1], FieldChat, "cc-42")
+}
+
 // TestRunnerNilNextIsTheRealRunner: Runner(nil) wraps deps.RealRunner so a
 // construction site can write obs.Runner(nil) for the default.
 func TestRunnerNilNextIsTheRealRunner(t *testing.T) {

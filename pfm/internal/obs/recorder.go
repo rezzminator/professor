@@ -75,14 +75,31 @@ func (recorder *Recorder) Records() []Record {
 	return decoded
 }
 
+// TestOption configures obs.Test beyond its defaults.
+type TestOption func(*scope)
+
+// WithTestClock overrides the clock obs.Test's installed scope carries — a
+// clock.Fake, so a door that reads its clock through ctx (obs.Clock, and
+// every middleware built on top of it, the tmux door among them: exec.go's
+// `clock: obs.Clock(ctx)`) advances on the test's own schedule instead of
+// the wall clock. Without this obs.Test hardcoded clock.Real, so no test
+// could ever tell the two apart. Named apart from store.WithClock (C17: one
+// free function per name across packages) — an unrelated sqlitedb.OpenOption.
+func WithTestClock(timing clock.Clock) TestOption {
+	return func(installed *scope) { installed.timing = timing }
+}
+
 // Test installs a Recorder as the process logger for the length of t and
 // returns the context carrying it. The previous process scope is restored on
 // cleanup, so one test's logger never leaks into the next.
-func Test(t *testing.T) (context.Context, *Recorder) {
+func Test(t *testing.T, opts ...TestOption) (context.Context, *Recorder) {
 	t.Helper()
 	recorder := &Recorder{}
 	handler := slog.NewJSONHandler(recorder, &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: Scrub})
 	installed := &scope{logger: slog.New(handler), timing: clock.Real}
+	for _, opt := range opts {
+		opt(installed)
+	}
 	processMutex.Lock()
 	previous := process
 	process = installed

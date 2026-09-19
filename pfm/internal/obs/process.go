@@ -6,7 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
-	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -64,16 +64,49 @@ func (process *Process) Request(subcmd string) func(size int, err error) {
 
 // Stderr returns the writer to hand the sidecar as its stderr: every byte
 // passes through to next unchanged, and every complete line is one WARN
-// record (op=stderr, line=...) — scrubbed and capped by the handler like any
-// field. A trailing partial line is flushed by Exited.
+// record (op=stderr, class=<leading word>, bytes=<line length>) — the only
+// free-text content this middleware would otherwise carry, converter.py's
+// exception text among it, which can hold a path or URL. At the default
+// level the line itself never reaches the record, only its bounded class
+// token and size; the full line=... is added only when comp=harvestpy is
+// actually logging at DEBUG (Enabled), so it is opt-in per pfm.config.json's
+// log.components, never on by default. A trailing partial line is flushed by
+// Exited.
 func (process *Process) Stderr(next io.Writer) io.Writer {
 	process.stderr = &lineWriter{next: next, emit: func(line string) {
-		process.logger.LogAttrs(process.ctx, slog.LevelWarn, "harvestpy.stderr",
+		attrs := []slog.Attr{
 			slog.String("op", "stderr"), slog.String("kind", process.kind), slog.Int(FieldPID, process.pid),
-			slog.String("line", line),
-		)
+			slog.Int("bytes", len(line)), slog.String("class", stderrLineClass(line)),
+		}
+		if Enabled(process.ctx, compHarvestpy, slog.LevelDebug) {
+			attrs = append(attrs, slog.String("line", line))
+		}
+		process.logger.LogAttrs(process.ctx, slog.LevelWarn, "harvestpy.stderr", attrs...)
 	}}
 	return process.stderr
+}
+
+// stderrClassCap bounds the class token: a leading word with no whitespace
+// could otherwise smuggle an entire unbroken line through the "shapes and
+// sizes only" field.
+const stderrClassCap = 40
+
+// stderrLineClass is the bounded class token a harvestpy.stderr record
+// carries at the default level in place of the free-text line: its leading
+// whitespace-delimited word (Traceback, ERROR, ValueError:, …) with any
+// trailing colon trimmed and capped at stderrClassCap — a shape, never the
+// line's content. An all-whitespace line classes as "empty".
+func stderrLineClass(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return "empty"
+	}
+	word, _, _ := strings.Cut(trimmed, " ")
+	word = strings.TrimRight(word, ":")
+	if len(word) > stderrClassCap {
+		word = word[:stderrClassCap]
+	}
+	return word
 }
 
 // Stop records the decision to end the sidecar and why (close, cancelled, a
@@ -97,7 +130,14 @@ func (process *Process) Exited(err error) {
 		process.stderr.flush()
 	}
 	elapsed := slog.Int64(FieldDur, process.timing.Now().Sub(process.started).Milliseconds())
-	var exitErr *exec.ExitError
+	// The duck type, not the concrete *exec.ExitError: a sidecar started
+	// through the deps.Runner seam never surfaces a bare *exec.ExitError
+	// (deps.RealRunner.Run folds a completed-but-nonzero exit into
+	// RunResult.ExitCode, then reports it back as the same "any error
+	// naming its own exit code" shape deps.ExitCode reads), so a caller
+	// that only matched *exec.ExitError silently fell through to the
+	// generic ERROR branch for a command that actually answered.
+	var exitErr interface{ ExitCode() int }
 	if errors.As(err, &exitErr) {
 		process.logger.LogAttrs(process.ctx, slog.LevelWarn, "harvestpy.exit",
 			slog.String("op", "exit"), slog.String("kind", process.kind), slog.Int(FieldPID, process.pid),

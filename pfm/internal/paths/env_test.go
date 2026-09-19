@@ -141,3 +141,40 @@ func TestHomeAndHomeFromOSEnvAgree(t *testing.T) {
 		t.Fatalf("Home() = %q but HomeFrom(OSEnv{}) = %q", fromHome, fromSeam)
 	}
 }
+
+// TestConfigHomeFromUsesAbsoluteXDGOrHomeConfig pins the one rule
+// internal/config's ResolvePath now composes over (L3-F9): an absolute
+// XDG_CONFIG_HOME wins outright, and anything else — unset, blank,
+// relative — falls back to home's own .config subdirectory.
+func TestConfigHomeFromUsesAbsoluteXDGOrHomeConfig(t *testing.T) {
+	home := "/jailed/home"
+	cases := []struct {
+		name string
+		xdg  string
+		want string
+	}{
+		{name: "absolute XDG wins", xdg: "/xdg/root", want: "/xdg/root"},
+		{name: "relative XDG falls back to home", xdg: "relative", want: "/jailed/home/.config"},
+		{name: "unset XDG falls back to home", xdg: "", want: "/jailed/home/.config"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := &MapEnv{Values: map[string]string{"XDG_CONFIG_HOME": tc.xdg}}
+			if got := ConfigHomeFrom(env, home); got != tc.want {
+				t.Fatalf("ConfigHomeFrom() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestConfigHomeAndConfigHomeFromOSEnvAgree is ConfigHomeFrom's own version
+// of TestHomeAndHomeFromOSEnvAgree: ConfigHome() and ConfigHomeFrom(OSEnv{})
+// must read the same ambient XDG_CONFIG_HOME identically, or the two would
+// silently drift the way HomeFrom's own seam was built to prevent.
+func TestConfigHomeAndConfigHomeFromOSEnvAgree(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "/an/xdg/root")
+	home := "/jailed/home"
+	if got, want := ConfigHome(home), ConfigHomeFrom(OSEnv{}, home); got != want {
+		t.Fatalf("ConfigHome() = %q but ConfigHomeFrom(OSEnv{}) = %q", got, want)
+	}
+}

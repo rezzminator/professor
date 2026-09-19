@@ -1,6 +1,8 @@
 package obs
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -132,6 +134,7 @@ func TestScrubKeepsOrdinaryTextThatOnlyResemblesAMarker(t *testing.T) {
 		{"cookies filename", "path", "/var/lib/pfm/cache/cookies.txt"},
 		{"plain file path", "path", "/var/lib/pfm/internal/obs/scrub.go"},
 		{"normal argv", "argv", "git status --short"},
+		{"monkey= is not key=", "path", "https://zoo.example/animals?monkey=1&turkey=roast"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -141,6 +144,75 @@ func TestScrubKeepsOrdinaryTextThatOnlyResemblesAMarker(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestScrubRefusesAnAnchoredAPIKeyQueryParameter is L2-F15's marker half: the
+// Google Books API key shape (books.go:249, "...&key="+url.QueryEscape(...))
+// is refused even though it carries none of the other marker substrings.
+func TestScrubRefusesAnAnchoredAPIKeyQueryParameter(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"leading ?key=", "https://www.googleapis.com/books/v1/volumes?q=x&key=AIzaPLANTEDKEY", redactedValue},
+		{"case-insensitive Key=", "https://example.test/?Key=PLANTEDKEY", redactedValue},
+		{"x-subscription-token header", "X-Subscription-Token: brave-planted-token", redactedValue},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Scrub(nil, slog.String("path", tt.value))
+			if got.Value.String() != tt.want {
+				t.Fatalf("Scrub(path=%q) = %v, want %s", tt.value, got.Value.String(), tt.want)
+			}
+		})
+	}
+}
+
+// TestScrubWalksNestedAnyValues is L1-F20/T-2: fmt.Sprint on a whole Any-kind
+// value never re-walks nested keys on its own, so scrubValue must — a
+// planted secret inside a []string, a map keyed by a secret-shaped name (not
+// a "key=value" shaped value), or a wrapped error must never survive.
+func TestScrubWalksNestedAnyValues(t *testing.T) {
+	t.Run("slice of strings", func(t *testing.T) {
+		ctx, recorder := Test(t)
+		Logger(ctx).Info("probe", "argv", []string{"ok", "Bearer sk-PLANTEDSLICE"})
+		if strings.Contains(recorder.Raw(), "PLANTEDSLICE") {
+			t.Fatalf("a secret inside a []string leaked: %s", recorder.Raw())
+		}
+	})
+	t.Run("map keyed by a secret-shaped name refuses the whole field", func(t *testing.T) {
+		ctx, recorder := Test(t)
+		// The value itself carries no "=" shape at all — only the key name
+		// "password" marks it: fmt.Sprint of the map renders
+		// "map[password:PLANTEDMAPVALUE]", never "password=PLANTEDMAPVALUE".
+		// The whole field is refused, the same all-or-nothing rule a planted
+		// secret inside a plain string already gets.
+		Logger(ctx).Info("probe", "argv", map[string]string{"password": "PLANTEDMAPVALUE", "region": "us-east"})
+		record := onlyRecord(t, recorder)
+		wantField(t, record, "argv", redactedValue)
+	})
+	t.Run("a map with nothing secret-shaped survives whole", func(t *testing.T) {
+		ctx, recorder := Test(t)
+		Logger(ctx).Info("probe", "argv", map[string]string{"region": "us-east"})
+		record := onlyRecord(t, recorder)
+		wantField(t, record, "argv", "map[region:us-east]")
+	})
+	t.Run("wrapped error", func(t *testing.T) {
+		ctx, recorder := Test(t)
+		inner := errors.New("token=PLANTEDWRAPPED")
+		wrapped := fmt.Errorf("harvester search failed: %w", inner)
+		Logger(ctx).Info("probe", "argv", wrapped)
+		if strings.Contains(recorder.Raw(), "PLANTEDWRAPPED") {
+			t.Fatalf("a secret inside a wrapped error leaked: %s", recorder.Raw())
+		}
+	})
+	t.Run("plain slice with nothing secret survives", func(t *testing.T) {
+		ctx, recorder := Test(t)
+		Logger(ctx).Info("probe", "argv", []string{"one", "two"})
+		record := onlyRecord(t, recorder)
+		wantField(t, record, "argv", "[one two]")
+	})
 }
 
 func TestScrubRenamesTimeToTS(t *testing.T) {

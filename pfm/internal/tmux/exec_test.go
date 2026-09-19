@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/obs"
 )
 
@@ -37,8 +39,14 @@ func oneRecord(t *testing.T, recorder *obs.Recorder) obs.Record {
 // TestExecOutputRecordsSubcommandTargetExitOnce: Output completes the
 // command and writes ONE comp=tmux record — subcmd, target, exit, dur_ms —
 // while the arguments (a send-keys body is a prompt) never reach the file.
+// The record's clock is pinned with obs.WithTestClock so dur_ms is asserted
+// on an EXACT value, not merely checked present: Cmd reads its clock through
+// ctx (obs.Clock) at both begin() and finish(), and a fake that never
+// advances between the two proves that — the previous "found" check would
+// have passed identically whether the wrapper read the fake clock or the
+// wall clock underneath it.
 func TestExecOutputRecordsSubcommandTargetExitOnce(t *testing.T) {
-	ctx, recorder := obs.Test(t)
+	ctx, recorder := obs.Test(t, obs.WithTestClock(clock.NewFake(time.Unix(1700000000, 0))))
 	output, err := Exec(ctx, fakeTmux(t, 0), "/sockets/cc-1", "send-keys", "-t", "%7", "PLANTED prompt body").Output()
 	if err != nil || !strings.Contains(string(output), "PLANTED") {
 		t.Fatalf("Output = %q, %v — the wrapper changed the command's result", output, err)
@@ -47,13 +55,14 @@ func TestExecOutputRecordsSubcommandTargetExitOnce(t *testing.T) {
 	if record.Message != "tmux.exec" || record.Level != slog.LevelInfo.String() {
 		t.Fatalf("record = %s at %s, want tmux.exec at INFO", record.Message, record.Level)
 	}
-	for key, want := range map[string]any{obs.FieldComp: "tmux", "subcmd": "send-keys", "target": "%7", obs.FieldExit: float64(0)} {
+	want := map[string]any{
+		obs.FieldComp: "tmux", "subcmd": "send-keys", "target": "%7",
+		obs.FieldExit: float64(0), obs.FieldDur: float64(0),
+	}
+	for key, want := range want {
 		if got, found := record.Field(key); !found || got != want {
 			t.Fatalf("%s = %v (found %t), want %v", key, got, found, want)
 		}
-	}
-	if _, found := record.Field(obs.FieldDur); !found {
-		t.Fatalf("no dur_ms: %v", record.Fields)
 	}
 	if strings.Contains(recorder.Raw(), "PLANTED") {
 		t.Fatalf("a send-keys body reached the file: %s", recorder.Raw())

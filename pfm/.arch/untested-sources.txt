@@ -128,7 +128,6 @@ internal/kill/types.go
 internal/mcpserv/daemon_status.go
 internal/mcpserv/read.go
 internal/mcpserv/search.go
-internal/mcpserv/stdio.go
 internal/mcpserv/types.go
 internal/naming/doc.go
 internal/professor/scaffold.go

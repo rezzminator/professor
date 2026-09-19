@@ -59,7 +59,13 @@ func (service *Service) RunStdio(
 		Writer: serialized,
 	})
 	_ = reader.Close()
-	<-done
+	// A client holds input open for the whole session, so the frame reader may
+	// never return; an ended context must not wait for it, or the
+	// replaced-executable guard cancels and the process still never exits.
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 	return err
 }
 

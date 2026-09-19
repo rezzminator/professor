@@ -114,7 +114,7 @@
     ".claude/commands/wave/refine.md": "7245bc0fbf26fc26fc2e5eaad8b0c019af69b809fdf77e98e119f430dd0800ea",
     ".claude/commands/wave/walker.md": "ef7fecb7d5246bef38f179560890204ad40d3fc0679a0429eb699692e9136ae2",
     ".claude/scripts/codex-sync.sh": "d36c47815f1c7cb56131a651a2c09eb49bc7cf830d291616820d6d45a9125f47",
-    ".claude/scripts/dev.sh": "bff1dae24861febf961a562a2ac2e311fd49a96f544dcb61927ffa0030b7337a",
+    ".claude/scripts/dev.sh": "6fa1930dc3d39bff5f440cda108b9ad45602f278533208c3ee347b1857c24fe1",
     ".claude/scripts/explore-deny.sh": "966d38099cd592963ef54b54fb7544d4d44437fd4e36faae0846219ab57b26b6",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
     ".claude/scripts/guard-stamp.sh": "837bce7d5846b7ed6172a5de579a642fe60fbf99cc27e73cfa235b935b14001e",
@@ -126,6 +126,6 @@
     "docs/commands/pcm/references/audit-scopes.md": "097778ecd0de202ae1f50261ef09e0e2ae3e772d7e04d06d77684ac3697aedb4",
     "docs/commands/pcm/references/refresh.md": "880cc3b998049271e03ea877951518a4551c842114719dbae1801b41af1d4617",
     "docs/commands/pfm/references/release-rehearsal.md": "4aab154533f734c8c7f2e5eb55a005666356eab433ca856bb2f3753b11c92c7b",
-    "pfm/CLAUDE.md": "a3aa5d47e1c2ed8ea431e43a89bb783dc4b1809712ac0bffd25b9819f0ba5ef1"
+    "pfm/CLAUDE.md": "22c6b80c1e4d5e3a32d111307c00bc47ddadeca053a13f7b15056bbc91ceee91"
   }
 }

@@ -154,7 +154,10 @@ def convert_json(path: pathlib.Path) -> str:
         value = json.loads(path.read_text(encoding="utf-8", errors="ignore"))
         pretty = json.dumps(value, indent=2, ensure_ascii=False)
     except Exception as exc:
-        print(f"JSON parse failed; passing through raw text: {exc}", file=sys.stderr)
+        # bounded_error, not the raw exception: an OSError here names the
+        # document's FULL path, and Go splices this stderr tail into the error
+        # a caller reads.
+        print(f"JSON parse failed; passing through raw text: {bounded_error(exc, path)}", file=sys.stderr)
         pretty = path.read_text(encoding="utf-8", errors="ignore")
     return "```json\n" + pretty.strip() + "\n```\n"
 
@@ -175,6 +178,26 @@ def _docling():
 
         _DOCLING = DocumentConverter()
     return _DOCLING
+
+
+# A conversion exception travels to a tool answer an agent reads, so the
+# message it carries is bounded before it leaves this process: library
+# exceptions routinely embed the document's FULL path (pymupdf, docling,
+# OSError) and can quote a slice of the document itself.
+_MAX_ERROR_CHARS = 300
+
+
+def bounded_error(exc: BaseException, path: pathlib.Path) -> str:
+    """Render one exception as "CLASS: message" with the document's directory
+    stripped back to its basename and the message truncated to
+    _MAX_ERROR_CHARS.  Never the document, never a path beyond the basename."""
+    message = " ".join(str(exc).split())
+    parent = str(path.parent)
+    if parent not in {"", ".", os.sep}:
+        message = message.replace(parent + os.sep, "").replace(parent, "")
+    if len(message) > _MAX_ERROR_CHARS:
+        message = message[:_MAX_ERROR_CHARS] + "…"
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
 def _kind(path: pathlib.Path, declared: str) -> str:
@@ -206,11 +229,22 @@ def convert(request: dict) -> dict:
         else:
             raise ValueError(f"unsupported conversion kind: {kind!r}")
     except Exception as exc:
-        # convert_local_file in the old Harvester catches converter failures
-        # and returns its clean EMPTY-text contract; never leak a library
-        # traceback as the protocol error.
-        print(f"conversion failed for kind={kind!r}: {type(exc).__name__}: {exc}", file=sys.stderr)
-        markdown, features = "", {}
+        # A crashed pipeline is a FAILED conversion, never an empty document.
+        # The old EMPTY-text contract answered ok:true here, so a docling/
+        # pymupdf/markitdown exception, an OOM, missing model weights and a
+        # corrupt input all rendered as "this document converted to nothing" —
+        # an error shown as absence. ok:false with the exception CLASS is the
+        # honest answer; a genuinely blank document still answers ok:true with
+        # empty markdown, which the Go side reports as its own EMPTY outcome.
+        # Never leak a library traceback as the protocol error.
+        summary = bounded_error(exc, path)
+        print(f"conversion failed for kind={kind!r}: {summary}", file=sys.stderr)
+        return {
+            "ok": False,
+            "kind": kind,
+            "error_class": type(exc).__name__,
+            "error": summary,
+        }
     markdown = tidy_markdown(markdown)
     return {"ok": True, "markdown": markdown, "kind": kind, "features": features}
 
@@ -249,7 +283,15 @@ def main() -> int:
             request = json.loads(line)
             result = smoke() if request.get("op") == "smoke" else convert(request)
         except Exception as exc:
-            print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}), flush=True)
+            # A malformed request or a crash outside convert() answers with the
+            # same named shape convert()'s own failure branch uses, so the Go
+            # side reads ONE failure contract rather than two.
+            print(
+                json.dumps(
+                    {"ok": False, "error_class": type(exc).__name__, "error": f"{type(exc).__name__}: {exc}"}
+                ),
+                flush=True,
+            )
             continue
         print(json.dumps(result, ensure_ascii=False), flush=True)
     return 0

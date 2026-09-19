@@ -142,7 +142,15 @@ func rawTerminal(stdin io.Reader, stderr io.Writer) (restore func(), err error) 
 }
 
 // readKeys pumps stdin into a channel of key events until stdin closes or ctx
-// ends. The channel closes on EOF so a TUI can tell "the pane went away".
+// ends. The channel closes on either, so a TUI can tell "the pane went away".
+//
+// ctx is honoured BETWEEN reads, never during one: stdin.Read has no deadline
+// here (the pane's pty is not a pollable *os.File in every host this mock
+// runs on), so the pump leaves at the first byte after cancellation, or at the
+// EOF the caller's own close of the write end delivers — whichever comes
+// first. Checking ctx only while handing an event over was not enough: a read
+// that decodes to NO events (a CSI arrow sequence, a split rune) went straight
+// back into Read and the pump outlived its context.
 func readKeys(ctx context.Context, stdin io.Reader) <-chan keyEvent {
 	keys := make(chan keyEvent, 64)
 	go func() {
@@ -151,6 +159,9 @@ func readKeys(ctx context.Context, stdin io.Reader) <-chan keyEvent {
 		buffer := make([]byte, 256)
 		for {
 			count, err := stdin.Read(buffer)
+			if ctx.Err() != nil {
+				return
+			}
 			for _, event := range decoder.feed(buffer[:count]) {
 				select {
 				case keys <- event:

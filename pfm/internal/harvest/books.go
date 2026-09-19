@@ -18,6 +18,24 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	ctx = resolverContext(ctx, r)
 	client := r.client()
 	var out []Candidate
+	// failures collects every provider's own error (F14): five of the six
+	// book providers used to drop theirs silently, so a total outage read as
+	// "no copy exists" — the exact same shape as a genuine empty shelf.
+	// hathitrust's own log line (below) keeps the operator-visible voice for
+	// its lookup; the C23 activity-log ratchet (arch-check.sh) refuses a
+	// SECOND bare log call here, so the other providers' failures
+	// travel with the RETURNED error only — still enough for the caller to
+	// tell "the lookup failed" from "nothing found" (F14's actual ask), and
+	// only an ALL-failed query becomes a returned error — a partial result
+	// keeps returning candidates, matching ResolveDOI's own precedent for a
+	// mixed success/failure fan-out.
+	var failures []doiMetadataFailure
+	noteFailure := func(provider string, err error) {
+		if err == nil {
+			return
+		}
+		failures = append(failures, doiMetadataFailure{provider: provider, err: err})
+	}
 	// OAPEN exposes direct ORIGINAL bitstreams for open academic books.
 	var search string
 	if isbn := NormalizeISBN(query); isbn != "" {
@@ -36,7 +54,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		client,
 		"https://library.oapen.org/rest/search?query="+url.QueryEscape(search)+"&limit=5",
 		&oapen,
-	); err == nil {
+	); err != nil {
+		noteFailure("oapen", err)
+	} else {
 		for _, item := range oapen {
 			if item.UUID == "" {
 				continue
@@ -76,7 +96,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 				Formats   map[string]string `json:"formats"`
 			} `json:"results"`
 		}
-		if err := getJSON(ctx, client, "https://gutendex.com/books?search="+url.QueryEscape(query), &data); err == nil {
+		if err := getJSON(ctx, client, "https://gutendex.com/books?search="+url.QueryEscape(query), &data); err != nil {
+			noteFailure(sourceGutenberg, err)
+		} else {
 			for _, book := range data.Results {
 				if book.Copyright {
 					continue
@@ -105,7 +127,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		var data struct {
 			OCAID string `json:"ocaid"`
 		}
-		if err := getJSON(ctx, client, "https://openlibrary.org/isbn/"+isbn+".json", &data); err == nil {
+		if err := getJSON(ctx, client, "https://openlibrary.org/isbn/"+isbn+".json", &data); err != nil {
+			noteFailure("openlibrary", err)
+		} else {
 			ocaid = data.OCAID
 		}
 	} else {
@@ -118,7 +142,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		searchURL := "https://openlibrary.org/search.json?q=" + url.QueryEscape(
 			query,
 		) + "&fields=ia,ebook_access,title&limit=5"
-		if err := getJSON(ctx, client, searchURL, &searchData); err == nil {
+		if err := getJSON(ctx, client, searchURL, &searchData); err != nil {
+			noteFailure("openlibrary", err)
+		} else {
 			for _, doc := range searchData.Docs {
 				if doc.Access == accessPublic && len(doc.IA) > 0 {
 					ocaid = doc.IA[0]
@@ -141,8 +167,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 			client,
 			"https://archive.org/metadata/"+url.PathEscape(ocaid),
 			&meta,
-		); err == nil &&
-			meta.Metadata.Restricted != "true" {
+		); err != nil {
+			noteFailure(sourceInternetArchive, err)
+		} else if meta.Metadata.Restricted != "true" {
 			for _, file := range meta.Files {
 				if strings.HasSuffix(strings.ToLower(file.Name), ".pdf") &&
 					!strings.HasSuffix(strings.ToLower(file.Name), "_encrypted.pdf") {
@@ -180,15 +207,18 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	if isbn != "" {
 		// DOAB's ISBN endpoint is a JSON POST; its search endpoint silently
 		// returns no ISBN matches for several catalogues.
-		_ = postJSON(
+		noteFailure("doab", postJSON(
 			ctx,
 			client,
 			"https://directory.doabooks.org/rest/items/find-by-metadata-field",
 			map[string]string{"key": "oapen.relation.isbn", "value": isbn},
 			&doab,
-		)
+		))
 	} else {
-		_ = getJSON(ctx, client, "https://directory.doabooks.org/rest/search?query="+url.QueryEscape(query), &doab)
+		noteFailure(
+			"doab",
+			getJSON(ctx, client, "https://directory.doabooks.org/rest/search?query="+url.QueryEscape(query), &doab),
+		)
 	}
 	for _, item := range doab[:min(len(doab), 5)] {
 		if item.UUID == "" {
@@ -228,7 +258,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		}
 	}
 	// HathiTrust full-view volumes (public domain) — rights-gated like IA.
-	out = append(out, r.hathitrust(ctx, client, query)...)
+	hathiOut, hathiErr := r.hathitrust(ctx, client, query)
+	out = append(out, hathiOut...)
+	noteFailure("hathitrust", hathiErr)
 	if key := strings.TrimSpace(r.GoogleBooksAPIKey); key != "" {
 		var data struct {
 			Items []struct {
@@ -244,12 +276,16 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 		if isbn := NormalizeISBN(query); isbn != "" {
 			bookQuery = "isbn:" + isbn
 		}
+		// The key rides this URL's query (safeURL/sanitizeTransportError,
+		// safeurl.go, strip it from every error/log site downstream — F15).
 		bookURL := "https://www.googleapis.com/books/v1/volumes?q=" + url.QueryEscape(
 			bookQuery,
 		) + "&country=US&key=" + url.QueryEscape(
 			key,
 		)
-		if err := getJSON(ctx, client, bookURL, &data); err == nil {
+		if err := getJSON(ctx, client, bookURL, &data); err != nil {
+			noteFailure("googlebooks", err)
+		} else {
 			for _, item := range data.Items {
 				if item.Access.Public && item.Access.PDF.Link != "" {
 					out = append(
@@ -259,6 +295,16 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 				}
 			}
 		}
+	}
+	if len(out) == 0 && len(failures) > 0 {
+		kind := errorKindConnect
+		for _, failure := range failures {
+			if candidateKind := doiMetadataFailureKind(failure.err); candidateKind != "" {
+				kind = candidateKind
+				break
+			}
+		}
+		return nil, &doiMetadataError{subject: "book", failures: failures, kind: kind}
 	}
 	return sortCandidates(out), nil
 }
@@ -365,10 +411,14 @@ func preferredTextFormat(formats map[string]string) (string, string) {
 // search-only/lending items are skipped (legality gate, mirrors
 // internetarchive's). Endpoint verified live 2026-08-22 — note the working form
 // is `/brief/isbn/{id}.json`, NOT `/brief/json/{isbn}` (that 400s).
-func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query string) []Candidate {
+// hathitrust returns (nil, nil) only for a non-ISBN query (nothing to look
+// up); a failed lookup returns (nil, err) — the error travels with the
+// result (F14) rather than being swallowed into the same nil the caller gets
+// for "no full-view volume exists".
+func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query string) ([]Candidate, error) {
 	isbn := NormalizeISBN(query)
 	if isbn == "" {
-		return nil
+		return nil, nil
 	}
 	var data struct {
 		Items []struct {
@@ -387,7 +437,7 @@ func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query st
 			isbn,
 			err,
 		)
-		return nil
+		return nil, err
 	}
 	out := []Candidate{}
 	for _, item := range data.Items {
@@ -405,5 +455,5 @@ func (r *Resolver) hathitrust(ctx context.Context, client *http.Client, query st
 			},
 		)
 	}
-	return out
+	return out, nil
 }

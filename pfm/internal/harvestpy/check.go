@@ -176,7 +176,7 @@ func checkInterpreter(ctx context.Context, runner deps.Runner, path, wanted stri
 	end := process.Request("version")
 	result, err := runner.Run(ctx, []string{path, "--version"}, deps.RunOptions{})
 	end(len(result.Stdout)+len(result.Stderr), err)
-	process.Exited(err)
+	process.Exited(recordedExitStatus(filepath.Base(path), result, err))
 	if err != nil {
 		return fmt.Errorf("run Python version: %w (output: %s)", err, interpreterOutput(result))
 	}
@@ -204,7 +204,7 @@ func checkInterpreter(ctx context.Context, runner deps.Runner, path, wanted stri
 
 func interpreterOutput(result deps.RunResult) string {
 	output := append(append([]byte(nil), result.Stdout...), result.Stderr...)
-	return strings.TrimSpace(string(output))
+	return stderrTail(string(output))
 }
 
 func checkPythonBuild(path, wanted string) error {

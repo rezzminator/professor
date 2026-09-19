@@ -79,6 +79,17 @@ type Result struct {
 	Features FeatureStatus `json:"features"`
 }
 
+// ErrConverterFailed is a conversion the sidecar could NOT complete: a
+// docling/pymupdf/markitdown exception, an OOM, missing model weights, a
+// corrupt input. It is deliberately distinct from ErrConverterEmpty — a
+// crashed pipeline and a blank document are two different answers, and a
+// ladder that cannot tell them apart shows the wall as the document.
+var ErrConverterFailed = errors.New("harvestpy conversion failed")
+
+// ErrConverterEmpty is a conversion that RAN and produced no text. The
+// message is the EMPTY-text contract the fetch ladder already reads.
+var ErrConverterEmpty = errors.New("harvestpy worker returned empty markdown (EMPTY-text conversion)")
+
 // Converter runs exactly one pinned Python worker path.  There is no Go
 // fallback converter: a worker or dependency failure is returned to the caller.
 type Converter struct {
@@ -118,6 +129,46 @@ func (buffer *lockedBuffer) String() string {
 	buffer.mu.Lock()
 	defer buffer.mu.Unlock()
 	return buffer.buf.String()
+}
+
+// stopWorkerProcess ends one sidecar: close its pipes, kill its process GROUP
+// — a worker whose library shells out (docling's model tooling, patchright's
+// Chrome) orphans those children when only the direct child is signalled —
+// falling back to the direct kill when the group signal is refused, then wait.
+// Both workers share it: two copies of a kill ladder is how one of them
+// quietly stops killing descendants.
+func stopWorkerProcess(worker *workerProcess, label string) error {
+	worker.obs.Stop("close")
+	var cleanupErr error
+	if err := worker.stdin.Close(); err != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close %s stdin: %w", label, err))
+	}
+	if err := worker.stdoutPipe.Close(); err != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close %s stdout: %w", label, err))
+	}
+	killErr := worker.process.KillGroup()
+	if errors.Is(killErr, os.ErrProcessDone) {
+		killErr = nil
+	}
+	if killErr != nil {
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill %s process group: %w", label, killErr))
+		if err := worker.process.Kill(); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill %s process: %w", label, err))
+			worker.obs.Killed(err)
+		} else {
+			worker.obs.Killed(nil)
+		}
+	} else {
+		worker.obs.Killed(nil)
+	}
+	waitErr := worker.process.Wait()
+	worker.obs.Exited(waitErr)
+	if waitErr != nil && cleanupErr != nil {
+		// A successful group kill normally makes Wait return the signal status;
+		// only report it when a kill itself failed, where it is diagnostic.
+		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for %s: %w", label, waitErr))
+	}
+	return cleanupErr
 }
 
 func NewConverter(runtime Runtime) *Converter {
@@ -174,25 +225,37 @@ func (converter *Converter) run(ctx context.Context, request Request) (Result, e
 		return Result{}, err
 	}
 	var response struct {
-		OK       bool          `json:"ok"`
-		Markdown string        `json:"markdown"`
-		Kind     string        `json:"kind"`
-		Features FeatureStatus `json:"features"`
-		Error    string        `json:"error"`
+		OK         bool          `json:"ok"`
+		Markdown   string        `json:"markdown"`
+		Kind       string        `json:"kind"`
+		Features   FeatureStatus `json:"features"`
+		Error      string        `json:"error"`
+		ErrorClass string        `json:"error_class"`
 	}
 	if err := json.Unmarshal(line, &response); err != nil {
 		return Result{}, fmt.Errorf("decode harvestpy response JSON: %w (stderr: %s)", err, stderr)
 	}
 	if !response.OK {
-		if response.Error == "" {
-			response.Error = "worker returned ok=false without error"
-		}
-		return Result{}, errors.New(response.Error)
+		return Result{}, converterFailure(response.ErrorClass, response.Error, stderr)
 	}
 	if response.Markdown == "" {
-		return Result{}, errors.New("harvestpy worker returned empty markdown (EMPTY-text conversion)")
+		return Result{}, ErrConverterEmpty
 	}
 	return Result{Markdown: response.Markdown, Kind: response.Kind, Features: response.Features}, nil
+}
+
+// converterFailure names one ok:false answer as ErrConverterFailed carrying
+// the sidecar's exception CLASS and the capped stderr tail — the same tail the
+// write/read/decode branches of request() splice in, so a failure that only
+// printed to stderr is still visible in the error a caller reads.
+func converterFailure(class, message, stderr string) error {
+	if class == "" {
+		class = "unknown"
+	}
+	if strings.TrimSpace(message) == "" {
+		message = "worker returned ok=false without error"
+	}
+	return fmt.Errorf("%w (%s): %s (stderr: %s)", ErrConverterFailed, class, message, stderrTail(stderr))
 }
 
 // request sends one JSON line through the long-lived worker. Requests are
@@ -217,7 +280,7 @@ func (converter *Converter) request(ctx context.Context, body []byte) (line []by
 	select {
 	case err := <-writeResult:
 		if err != nil {
-			stderr := strings.TrimSpace(worker.stderr.String())
+			stderr := stderrTail(worker.stderr.String())
 			cleanupErr := converter.stopWorkerLocked()
 			return nil, stderr, fmt.Errorf(
 				"harvestpy worker write failed: %w (stderr: %s; cleanup: %v)",
@@ -238,7 +301,7 @@ func (converter *Converter) request(ctx context.Context, body []byte) (line []by
 		err  error
 	}, 1)
 	go func() {
-		line, err := worker.stdout.ReadBytes('\n')
+		line, err := readLineBounded(worker.stdout, converterResponseLimit)
 		result <- struct {
 			line []byte
 			err  error
@@ -253,7 +316,7 @@ func (converter *Converter) request(ctx context.Context, body []byte) (line []by
 		return nil, "", fmt.Errorf("harvestpy worker request cancelled: %w", ctx.Err())
 	case response := <-result:
 		if response.err != nil {
-			stderr := strings.TrimSpace(worker.stderr.String())
+			stderr := stderrTail(worker.stderr.String())
 			cleanupErr := converter.stopWorkerLocked()
 			return nil, stderr, fmt.Errorf(
 				"harvestpy worker read failed: %w (stderr: %s; cleanup: %v)",
@@ -262,7 +325,7 @@ func (converter *Converter) request(ctx context.Context, body []byte) (line []by
 				cleanupErr,
 			)
 		}
-		return response.line, strings.TrimSpace(worker.stderr.String()), nil
+		return response.line, stderrTail(worker.stderr.String()), nil
 	}
 }
 
@@ -287,7 +350,11 @@ func (converter *Converter) ensureWorkerLocked() (*workerProcess, error) {
 		Env:        workerEnv(os.Environ(), converter.runtime),
 		StdinPipe:  true,
 		StdoutPipe: true,
-		Stderr:     processObs.Stderr(stderr),
+		// Its OWN process group, like the browser worker's: a conversion
+		// dependency that shells out (docling's model tooling) leaves orphans
+		// behind when only the direct child is signalled.
+		ProcessGroup: true,
+		Stderr:       processObs.Stderr(stderr),
 	})
 	if err != nil {
 		processObs.Started(0, err)
@@ -296,14 +363,14 @@ func (converter *Converter) ensureWorkerLocked() (*workerProcess, error) {
 	processObs.Started(process.Pid(), nil)
 	stdin, err := process.StdinPipe()
 	if err != nil {
-		_ = process.Kill()
+		_ = process.KillGroup()
 		_ = process.Wait()
 		return nil, fmt.Errorf("open harvestpy worker stdin: %w", err)
 	}
 	stdout, err := process.StdoutPipe()
 	if err != nil {
 		_ = stdin.Close()
-		_ = process.Kill()
+		_ = process.KillGroup()
 		_ = process.Wait()
 		return nil, fmt.Errorf("open harvestpy worker stdout: %w", err)
 	}
@@ -325,28 +392,7 @@ func (converter *Converter) stopWorkerLocked() error {
 	}
 	worker := converter.worker
 	converter.worker = nil
-	worker.obs.Stop("close")
-	var cleanupErr error
-	if err := worker.stdin.Close(); err != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close worker stdin: %w", err))
-	}
-	if err := worker.stdoutPipe.Close(); err != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close worker stdout: %w", err))
-	}
-	killErr := worker.process.Kill()
-	if errors.Is(killErr, os.ErrProcessDone) {
-		killErr = nil
-	}
-	worker.obs.Killed(killErr)
-	if killErr != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill worker: %w", killErr))
-	}
-	waitErr := worker.process.Wait()
-	worker.obs.Exited(waitErr)
-	if waitErr != nil && killErr != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for killed worker: %w", waitErr))
-	}
-	return cleanupErr
+	return stopWorkerProcess(worker, "converter worker")
 }
 
 // Close terminates the managed worker and is safe to call repeatedly.

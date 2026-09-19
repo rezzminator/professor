@@ -367,6 +367,7 @@ func (r *dohResolver) query(ctx context.Context, host string) ([]net.IP, error) 
 		wg.Add(1)
 		go func(i int, qtype string) {
 			defer wg.Done()
+			defer recoverItem(func(e error) { results[i].err = e })
 			ips, ttl, err := r.queryType(ctx, host, qtype)
 			results[i] = outcome{ips: ips, ttl: ttl, err: err}
 		}(i, qtype)

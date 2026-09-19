@@ -192,7 +192,10 @@ func (t *chromeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	freq := chromeFRequest(req)
 	fresp, err := client.Do(freq)
 	if err != nil {
-		return nil, fmt.Errorf("Chrome_146 request %s: %w", req.URL, err)
+		// safeURL, not req.URL directly: this transport also carries
+		// scholarly-provider requests whose query string holds an API key
+		// (books.go's Google Books lookup, for one) — see safeurl.go.
+		return nil, fmt.Errorf("Chrome_146 request %s: %w", safeURL(req.URL.String()), err)
 	}
 	return chromeResponse(req, fresp), nil
 }

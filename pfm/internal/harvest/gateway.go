@@ -197,7 +197,7 @@ func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatew
 		// caller renders the challenge diagnostic rather than a connect error.
 		return best, nil
 	}
-	return best, fmt.Errorf("%w for %s", errGatewayNoRung, req.url)
+	return best, fmt.Errorf("%w for %s", errGatewayNoRung, safeURL(req.url))
 }
 
 // chromeForGateway returns the Chrome-impersonation client to escalate to, or
@@ -245,7 +245,7 @@ func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, e
 		// for a trusted origin, matching the base client's own redirect
 		// policy. A nil client here is a caller bug, not a network failure —
 		// name it rather than let the dereference panic the process.
-		return out, fmt.Errorf("gateway: trusted-origin request to %s has no client configured", req.url)
+		return out, fmt.Errorf("gateway: trusted-origin request to %s has no client configured", safeURL(req.url))
 	}
 	method := req.method
 	if method == "" {
@@ -267,7 +267,13 @@ func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, e
 	}
 	resp, err := gatewayRequestClient(req).Do(httpReq)
 	if err != nil {
-		return out, err
+		// http.Client wraps a transport failure in *url.Error, which carries
+		// the full request URL — query string included, and with it any
+		// credential a provider puts there (books.go's Google Books key, for
+		// one). This is the ONE place that wrapping happens for every rung of
+		// every caller (see the package doc above), so sanitizing here covers
+		// the whole package rather than each caller's own error text.
+		return out, sanitizeTransportError(err, req.url)
 	}
 	body, status, contentType, err := gatewayReadBody(resp, req.max, req.oversizeTruncate)
 	out.status, out.contentType = status, contentType
@@ -323,14 +329,17 @@ func gatewayReadBody(resp *http.Response, maxBytes int64, truncate bool) ([]byte
 		return nil, status, contentType, errors.New("gateway received an empty response body")
 	}
 	decoded, closeBody, err := decodedResponseBody(resp)
-	if err != nil {
-		return nil, status, contentType, err
-	}
+	// decodedResponseBody returns a LIVE closer on every return path, including
+	// its unsupported-encoding error arm (net.go) — register the close before
+	// checking err, or that arm leaks the body and the connection (F5).
 	defer func() {
 		if closeErr := closeBody(); closeErr != nil {
 			log.Printf("harvest: closing gateway response body: %v", closeErr)
 		}
 	}()
+	if err != nil {
+		return nil, status, contentType, err
+	}
 	body, err := io.ReadAll(io.LimitReader(decoded, maxBytes+1))
 	if err != nil {
 		return nil, status, contentType, fmt.Errorf("read response: %w", err)
@@ -362,7 +371,7 @@ func (h *Harvester) gatewayBrowser(
 	if !ok {
 		log.Printf(
 			"harvest: gateway could not escalate %s to the browser rung: no BrowserFetcher adapter is wired into this Harvester",
-			req.url,
+			safeURL(req.url),
 		)
 		return gatewayResponse{}, false
 	}
@@ -376,10 +385,10 @@ func (h *Harvester) gatewayBrowser(
 	}
 	switch {
 	case errors.Is(outcome.err, ErrBrowserPolicyDenied):
-		log.Printf("harvest: gateway browser rung refused %s by policy: %v", req.url, outcome.err)
+		log.Printf("harvest: gateway browser rung refused %s by policy: %v", safeURL(req.url), outcome.err)
 		return gatewayResponse{}, false
 	case outcome.err != nil:
-		log.Printf("harvest: gateway browser rung could not run for %s: %v", req.url, outcome.err)
+		log.Printf("harvest: gateway browser rung could not run for %s: %v", safeURL(req.url), outcome.err)
 		return gatewayResponse{}, false
 	}
 	if outcome.html != "" && !outcome.wall {
@@ -387,7 +396,7 @@ func (h *Harvester) gatewayBrowser(
 	}
 	log.Printf(
 		"harvest: gateway browser rungs met a wall for %s (HTTP %d) — this wall is not passable unattended from this network",
-		req.url,
+		safeURL(req.url),
 		outcome.status,
 	)
 	return gatewayResponse{}, false

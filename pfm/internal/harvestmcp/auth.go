@@ -70,9 +70,17 @@ func tokenURLSafe(size int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
+// persistedClient's ClientSecret field is a READ-compatibility door only: a
+// state.json written before L2-F20's fix, or a /register request body
+// (register() below always clears whatever a caller supplies before
+// persisting). saveLocked never writes a non-empty ClientSecret — load
+// migrates one to ClientSecretHash the moment it is seen, atomically
+// rewriting the file — so the cleartext never survives past the first open
+// past this fix.
 type persistedClient struct {
 	ClientID                string   `json:"client_id"`
 	ClientSecret            string   `json:"client_secret,omitempty"`
+	ClientSecretHash        string   `json:"client_secret_hash,omitempty"`
 	ClientIDIssuedAt        int64    `json:"client_id_issued_at,omitempty"`
 	ClientSecretExpiresAt   int64    `json:"client_secret_expires_at"`
 	TokenEndpointAuthMethod string   `json:"token_endpoint_auth_method"`
@@ -147,6 +155,10 @@ type authStore struct {
 	codes      map[string]authorizationCode
 	access     map[string]accessToken
 	refresh    map[string]refreshToken
+	// limiter is the real bound on passphrase guessing (L2-F21):
+	// maxConsentAttempts above caps ONE transaction, but /authorize mints a
+	// fresh one on every request.
+	limiter *passphraseLimiter
 }
 
 func newAuthStore(issuer, resource, passphrase, staticToken, statePath string, clocks ...clock.Clock) *authStore {
@@ -159,6 +171,7 @@ func newAuthStore(issuer, resource, passphrase, staticToken, statePath string, c
 		statePath: statePath, clock: watch, clients: map[string]oauthClient{},
 		pending: map[string]pendingConsent{}, codes: map[string]authorizationCode{},
 		access: map[string]accessToken{}, refresh: map[string]refreshToken{},
+		limiter: newPassphraseLimiter(),
 	}
 	if staticToken != "" {
 		s.staticHash = digest(staticToken)
@@ -183,20 +196,39 @@ func (s *authStore) load() {
 		fmt.Fprintf(os.Stderr, "harvester auth: invalid state %s: %v\n", s.statePath, err)
 		return
 	}
+	migrated := false
 	for i := range state.Clients {
 		c := &state.Clients[i]
-		if c.ClientID != "" {
-			s.clients[c.ClientID] = oauthClient{persistedClient: *c}
+		if c.ClientID == "" {
+			continue
 		}
+		// L2-F20: a client secret written before this fix is cleartext.
+		// Migrate it to a digest and drop the plaintext the moment it is
+		// seen — the write below rewrites the file atomically, so the
+		// cleartext never lands on disk again past this load.
+		if c.ClientSecret != "" {
+			c.ClientSecretHash = digest(c.ClientSecret)
+			c.ClientSecret = ""
+			migrated = true
+		}
+		s.clients[c.ClientID] = oauthClient{persistedClient: *c}
 	}
 	for _, r := range state.Refresh {
 		if r.Hash == "" || r.ClientID == "" {
 			// A malformed refresh record invalidates the set, matching the old
-			// provider's fail-safe load behavior.
+			// provider's fail-safe load behavior — break, not return, so a
+			// client-secret migration below still persists.
 			s.refresh = map[string]refreshToken{}
-			return
+			break
 		}
 		s.refresh[r.Hash] = refreshToken{Hash: r.Hash, ClientID: r.ClientID, Scope: append([]string(nil), r.Scopes...)}
+	}
+	if migrated {
+		// s.refresh is fully populated above; saveLocked persists both maps
+		// together, so a migration never drops a live refresh token.
+		s.mu.Lock()
+		s.saveLocked()
+		s.mu.Unlock()
 	}
 }
 
@@ -244,6 +276,7 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 	// attempt to smuggle either into the registration document.
 	c.ClientID = ""
 	c.ClientSecret = ""
+	c.ClientSecretHash = ""
 	if c.TokenEndpointAuthMethod == "" {
 		c.TokenEndpointAuthMethod = tokenAuthClientSecretBasic
 	}
@@ -257,6 +290,15 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 			return persistedClient{}, "", "invalid_redirect_uri"
 		}
 	}
+	// L2-F21: /register was unthrottled and persisted every client forever.
+	// Refuse at the ceiling rather than silently evicting an
+	// oldest-but-still-used client — see maxRegisteredClients' doc comment.
+	s.mu.Lock()
+	full := len(s.clients) >= maxRegisteredClients
+	s.mu.Unlock()
+	if full {
+		return persistedClient{}, "", oauthErrorTooManyClients
+	}
 	id, err := tokenURLSafe(18)
 	if err != nil {
 		return persistedClient{}, "", oauthErrorServer
@@ -269,7 +311,10 @@ func (s *authStore) register(c persistedClient) (persistedClient, string, string
 		if err != nil {
 			return persistedClient{}, "", oauthErrorServer
 		}
-		c.ClientSecret = secret
+		// The plaintext is returned once, below, for the registration
+		// response (RFC 7591) — never stored. Only its digest is persisted
+		// (L2-F20); authenticateClient (remote.go) verifies against it.
+		c.ClientSecretHash = digest(secret)
 	}
 	c.ClientSecretExpiresAt = 0
 	if len(c.GrantTypes) == 0 {
@@ -366,7 +411,13 @@ func (s *authStore) begin(
 	return txn, nil
 }
 
-func (s *authStore) consent(txn, supplied string) (string, bool, bool) {
+// consent spends one passphrase guess against txn from source address addr.
+// addr is metered by passphraseLimiter independently of maxConsentAttempts:
+// that bound caps ONE transaction, this one caps every transaction addr (or
+// the whole gateway) can mint. A locked-out guess is refused the SAME way a
+// wrong passphrase is (alive=true, ok=false) — the caller never learns
+// whether it hit the lockout or just guessed wrong.
+func (s *authStore) consent(txn, supplied, addr string) (string, bool, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p, ok := s.pending[txn]
@@ -380,9 +431,15 @@ func (s *authStore) consent(txn, supplied string) (string, bool, bool) {
 		return "", false, false
 	}
 	s.pending[txn] = p
-	if !equalSecret(supplied, s.passphrase) {
+	now := s.clock.Now()
+	if !s.limiter.allowed(addr, now) {
 		return "", false, true
 	}
+	if !equalSecret(supplied, s.passphrase) {
+		s.limiter.recordFailure(addr, now)
+		return "", false, true
+	}
+	s.limiter.recordSuccess(addr)
 	delete(s.pending, txn)
 	code, err := tokenURLSafe(24)
 	if err != nil {

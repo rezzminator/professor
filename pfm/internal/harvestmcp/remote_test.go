@@ -211,6 +211,62 @@ func TestRemoteOAuthPKCEAndRefreshRotationInMemory(t *testing.T) {
 	}
 }
 
+// TestNewRemoteRefusesANonHTTPSPublicURL is L2-F6: the only publicURL check
+// used to be "has a hostname" — no scheme rule at all — while
+// validRedirectURI already demands https-or-loopback for client redirect
+// URIs. A plain http public_url would carry the passphrase and every bearer
+// and refresh token across the internet in cleartext.
+func TestNewRemoteRefusesANonHTTPSPublicURL(t *testing.T) {
+	base := t.TempDir()
+	_, err := NewRemote(RemoteOptions{
+		Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "http://harvester.example.com",
+		Passphrase: "pass",
+	})
+	if err == nil || !strings.Contains(err.Error(), "external.publicURL") || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("non-https public_url error = %v, want it to name external.publicURL and https", err)
+	}
+}
+
+// TestNewRemoteAllowsHTTPOnLoopbackAndHTTPSAnywhere is the positive control:
+// the exemption is loopback only, matching validRedirectURI, and never a
+// blanket http allowance.
+func TestNewRemoteAllowsHTTPOnLoopbackAndHTTPSAnywhere(t *testing.T) {
+	for _, publicURL := range []string{"https://harvester.example.test", "http://localhost:8080", "http://127.0.0.1:8080"} {
+		base := t.TempDir()
+		server, err := NewRemote(RemoteOptions{
+			Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: publicURL, Passphrase: "pass",
+		})
+		if err != nil {
+			t.Fatalf("NewRemote(%q) = %v, want it accepted", publicURL, err)
+		}
+		_ = server.Close()
+	}
+}
+
+// TestMCPRouteBoundsThePOSTBody is L2-F18: /mcp reached the SDK's
+// io.ReadAll(req.Body) with no bound at all (negative grep pre-fix); one
+// authenticated caller could exhaust memory with a single oversized POST.
+func TestMCPRouteBoundsThePOSTBody(t *testing.T) {
+	base := t.TempDir()
+	server, err := NewRemote(RemoteOptions{
+		Runtime: Runtime{Home: base, CacheDir: base + "/cache"}, PublicURL: "https://harvester.example.test",
+		StaticToken: "example-fixture-token",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oversized := strings.Repeat("x", mcpMaxBodyBytes+1024)
+	req := httptest.NewRequest(http.MethodPost, "https://harvester.example.test/mcp", strings.NewReader(oversized))
+	req.Host = "harvester.example.test"
+	req.Header.Set("Authorization", "Bearer example-fixture-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("an oversized /mcp body was accepted: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestRemoteResourceRules(t *testing.T) {
 	if ResourceMatches("HTTPS://Harvester.Example/mcp", "https://harvester.example/mcp") != true {
 		t.Fatal("scheme/host case should match")

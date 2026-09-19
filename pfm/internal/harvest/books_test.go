@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -143,16 +144,21 @@ func TestResolverHathitrustKeepsOnlyFullViewVolumes(t *testing.T) {
 		]}`), nil
 	})}
 	resolver := &Resolver{}
-	got := resolver.hathitrust(context.Background(), client, "978-0-306-40615-7")
+	got, err := resolver.hathitrust(context.Background(), client, "978-0-306-40615-7")
+	if err != nil {
+		t.Fatalf("hathitrust error = %v, want nil", err)
+	}
 	if len(got) != 1 || got[0].URL != "https://babel.hathitrust.org/cgi/pt?id=open.vol2" {
 		t.Fatalf("hathitrust candidates=%#v, want exactly the Full view volume", got)
 	}
 }
 
 // TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence pins the outage
-// gate: a non-2xx HathiTrust response returns (nil, nil) — no error bubbled
-// to the caller, and no candidate fabricated — matching the log comment
-// distinguishing "no full-view volume exists" from "the lookup failed".
+// gate: a non-2xx HathiTrust response never fabricates a candidate. Fixed for
+// F14: the lookup failure is no longer silently swallowed into the same nil
+// a genuine "no full-view volume exists" answer gets — the caller now gets
+// the error back too, distinguishing "the lookup failed" from "no copy
+// exists".
 func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -164,9 +170,12 @@ func TestResolverHathitrustTreatsFailedLookupAsNoCopyNotAbsence(t *testing.T) {
 		}, nil
 	})}
 	resolver := &Resolver{}
-	got := resolver.hathitrust(context.Background(), client, "9780306406157")
+	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
 	if got != nil {
-		t.Fatalf("hathitrust(failed lookup) = %#v, want nil", got)
+		t.Fatalf("hathitrust(failed lookup) candidates = %#v, want nil", got)
+	}
+	if err == nil {
+		t.Fatal("hathitrust(failed lookup) error = nil, want the lookup failure surfaced (F14)")
 	}
 }
 
@@ -185,16 +194,16 @@ func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
 		), nil
 	})}
 	resolver := &Resolver{}
-	got := resolver.hathitrust(context.Background(), client, "9780306406157")
+	got, err := resolver.hathitrust(context.Background(), client, "9780306406157")
 	if got != nil {
 		t.Fatalf("hathitrust(oversize) candidates = %#v, want nil", got)
 	}
-	// hathitrust treats every lookup failure (outage AND oversize alike) as
-	// "no copy" rather than bubbling an error — TestResolverHathitrustTreats
-	// FailedLookupAsNoCopyNotAbsence pins that contract. The byte-ceiling
-	// proof therefore lives at the shared helper directly: it fails outright,
-	// and its error must name the ceiling rather than describe a decode
-	// failure, whichever caller reaches it.
+	if err == nil {
+		t.Fatal("hathitrust(oversize) error = nil, want the lookup failure surfaced (F14)")
+	}
+	// The byte-ceiling proof lives at the shared helper directly: it fails
+	// outright, and its error must name the ceiling rather than describe a
+	// decode failure, whichever caller reaches it.
 	var data any
 	getErr := getJSONBody(
 		context.Background(),
@@ -220,14 +229,58 @@ func TestResolverHathitrustRefusesOversizeBodyByName(t *testing.T) {
 	}
 }
 
+// TestResolveBookAllProvidersDownReturnsError pins F14: five of the six book
+// providers used to drop their own error silently and ResolveBook always
+// returned a nil error, so a total outage rendered as an empty candidate
+// list — the exact shape the harvester's own server instructions promise
+// never happens for "nothing found" vs "the lookup failed". Watched FAILING
+// before the fix (err was nil for a query with zero live providers).
+func TestResolveBookAllProvidersDownReturnsError(t *testing.T) {
+	down := errors.New("provider unreachable")
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, down
+	})}
+	resolver := &Resolver{Client: client}
+	candidates, err := resolver.ResolveBook(context.Background(), "9780306406157")
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %#v, want none", candidates)
+	}
+	if err == nil {
+		t.Fatal("ResolveBook with every provider down returned a nil error (F14)")
+	}
+}
+
+// TestResolveBookPartialFailureStillReturnsCandidates guards the non-outage
+// path: one provider failing while another succeeds must still return that
+// provider's candidates with no error, matching ResolveDOI's own precedent.
+func TestResolveBookPartialFailureStillReturnsCandidates(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if strings.Contains(r.URL.Host, "gutendex.com") {
+			return jsonResponse(
+				r,
+				`{"results":[{"title":"A Public Domain Book","copyright":false,"formats":{"text/html":"https://gutendex.example/book.html"}}]}`,
+			), nil
+		}
+		return nil, errors.New("provider unreachable")
+	})}
+	resolver := &Resolver{Client: client}
+	candidates, err := resolver.ResolveBook(context.Background(), "A Public Domain Book")
+	if err != nil {
+		t.Fatalf("ResolveBook with a partial success returned an error: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Source != sourceGutenberg {
+		t.Fatalf("candidates = %#v, want the one gutendex candidate", candidates)
+	}
+}
+
 func TestResolverHathitrustSkipsNonISBNQueries(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		t.Fatalf("hathitrust must not make a network call for a non-ISBN query, requested %s", r.URL)
 		return nil, nil
 	})}
 	resolver := &Resolver{}
-	got := resolver.hathitrust(context.Background(), client, "not an isbn at all")
-	if got != nil {
-		t.Fatalf("hathitrust(non-ISBN) = %#v, want nil", got)
+	got, err := resolver.hathitrust(context.Background(), client, "not an isbn at all")
+	if got != nil || err != nil {
+		t.Fatalf("hathitrust(non-ISBN) = %#v, err=%v, want (nil, nil)", got, err)
 	}
 }

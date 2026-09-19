@@ -213,6 +213,7 @@ func (r *Resolver) ResolveDOI(ctx context.Context, doi string) ([]Candidate, err
 		wg.Add(1)
 		go func(i int, source string) {
 			defer wg.Done()
+			defer recoverItem(func(e error) { errorsBySource[i] = e })
 			var candidates []Candidate
 			var err error
 			switch source {
@@ -284,7 +285,7 @@ func (r *Resolver) ResolveTitle(ctx context.Context, title string) ([]Candidate,
 	}
 	ctx = resolverContext(ctx, r)
 	client := r.client()
-	doi := r.titleToDOI(ctx, client, title)
+	doi, titleErr := r.titleToDOI(ctx, client, title)
 	if doi != "" {
 		candidates, err := r.ResolveDOI(ctx, doi)
 		if err == nil && len(candidates) > 0 {
@@ -298,10 +299,26 @@ func (r *Resolver) ResolveTitle(ctx context.Context, title string) ([]Candidate,
 			return nil, err
 		}
 	}
-	return r.arxivByTitle(ctx, client, title), nil
+	fallback := r.arxivByTitle(ctx, client, title)
+	if len(fallback) > 0 {
+		return fallback, nil
+	}
+	if titleErr != nil {
+		// Both title-lookup providers were down (F13) and arXiv's own title
+		// search also found nothing: report the outage rather than an
+		// ordinary empty match — the caller could not otherwise tell "no such
+		// title" from "we could not look".
+		return nil, titleErr
+	}
+	return nil, nil
 }
 
-func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title string) string {
+// titleToDOI returns the confident title match's DOI, "" for an ordinary
+// no-match, and — when BOTH OpenAlex and Crossref failed to answer at all
+// (F13) — a non-nil error alongside "" so ResolveTitle can tell that outage
+// apart from "no title in either catalogue looked close enough", mirroring
+// ResolveDOI's own provider-failure aggregation above.
+func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title string) (string, error) {
 	var data struct {
 		Results []struct {
 			DOI   string `json:"doi"`
@@ -309,7 +326,7 @@ func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title st
 			Title string `json:"title"`
 		} `json:"results"`
 	}
-	_ = getJSON(
+	openAlexErr := getJSON(
 		ctx,
 		client,
 		r.withContact(
@@ -318,14 +335,16 @@ func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title st
 		),
 		&data,
 	)
-	for _, row := range data.Results {
-		name := row.Name
-		if name == "" {
-			name = row.Title
-		}
-		if titleSimilarity(title, name) >= .6 {
-			if doi := DOIFrom(row.DOI); doi != "" {
-				return doi
+	if openAlexErr == nil {
+		for _, row := range data.Results {
+			name := row.Name
+			if name == "" {
+				name = row.Title
+			}
+			if titleSimilarity(title, name) >= .6 {
+				if doi := DOIFrom(row.DOI); doi != "" {
+					return doi, nil
+				}
 			}
 		}
 	}
@@ -337,7 +356,7 @@ func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title st
 			} `json:"items"`
 		} `json:"message"`
 	}
-	if crossErr := getJSON(
+	crossErr := getJSON(
 		ctx,
 		client,
 		r.withContact(
@@ -345,7 +364,8 @@ func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title st
 			"mailto",
 		),
 		&crossref,
-	); crossErr == nil {
+	)
+	if crossErr == nil {
 		for _, item := range crossref.Message.Items {
 			name := ""
 			if len(item.Title) > 0 {
@@ -353,11 +373,28 @@ func (r *Resolver) titleToDOI(ctx context.Context, client *http.Client, title st
 			}
 			match := titleSimilarity(title, name)
 			if match >= .6 && DOIFrom(item.DOI) != "" {
-				return DOIFrom(item.DOI)
+				return DOIFrom(item.DOI), nil
 			}
 		}
 	}
-	return ""
+	var failures []doiMetadataFailure
+	if openAlexErr != nil && !doiMetadataAbsence(openAlexErr) {
+		failures = append(failures, doiMetadataFailure{provider: sourceOpenAlex, err: openAlexErr})
+	}
+	if crossErr != nil && !doiMetadataAbsence(crossErr) {
+		failures = append(failures, doiMetadataFailure{provider: sourceCrossref, err: crossErr})
+	}
+	if len(failures) != 2 {
+		return "", nil
+	}
+	kind := errorKindConnect
+	for _, failure := range failures {
+		if candidateKind := doiMetadataFailureKind(failure.err); candidateKind != "" {
+			kind = candidateKind
+			break
+		}
+	}
+	return "", &doiMetadataError{subject: "title lookup", failures: failures, kind: kind}
 }
 
 func (r *Resolver) arxivByTitle(ctx context.Context, client *http.Client, title string) []Candidate {

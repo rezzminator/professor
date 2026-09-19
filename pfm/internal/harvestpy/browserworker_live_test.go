@@ -58,7 +58,16 @@ func TestLiveBrowserWorkerFetch(t *testing.T) {
 	if chromePath == "" {
 		t.Skip("named gap: no system Chrome binary resolves on this host")
 	}
-	html, status, err := worker.Fetch(ctx, "https://example.com/", "", true, 45000, harvest.AssertFetchableStrict)
+	// The worker REFUSES to launch Chrome without the Go-side pinned proxy
+	// (browser.py PROXY_REQUIRED, L2-F7), so this live run starts the same
+	// proxy production starts — an empty string here would test nothing but
+	// the refusal.
+	proxyURL, stopProxy, err := harvest.StartBrowserProxy(ctx, harvest.ResolvePublicHost)
+	if err != nil {
+		t.Fatalf("start the browser rung's pinned proxy: %v", err)
+	}
+	defer stopProxy()
+	html, status, err := worker.Fetch(ctx, "https://example.com/", proxyURL, true, 45000, harvest.AssertFetchableStrict)
 	if err != nil {
 		t.Fatalf("live browser fetch failed: %v", err)
 	}

@@ -29,19 +29,26 @@ type browserAsk struct {
 	URL string `json:"url"`
 }
 
-// BrowserFetchRequest is one real-browser fetch request. Proxy may be empty
-// for a direct connection; it is threaded through verbatim, never configured
-// here — procuring an exit is a separate decision.
+// BrowserFetchRequest is one real-browser fetch request. It is threaded
+// through verbatim; nothing is configured here.
 type BrowserFetchRequest struct {
-	URL      string `json:"url"`
+	URL string `json:"url"`
+	// Proxy is the DIAL half of the browser rung's SSRF boundary, and the
+	// worker REFUSES to launch Chrome without it (browser.py PROXY_REQUIRED).
+	// Every URL Chrome touches is validated by Go through the ask protocol,
+	// but the connection that follows is Chrome's own: it resolves the host a
+	// second time, so a TTL-0 rebind reaches 127.0.0.1 / 169.254.169.254 with
+	// a public address on the record. Only a proxy Go owns — one that dials
+	// through the pinned dialer internal/harvest already uses for every other
+	// client — makes the address Go validated the address Chrome connects to.
 	Proxy    string `json:"proxy,omitempty"`
 	Headless bool   `json:"headless"`
 	// HostResolverRules pins Chrome's own DNS to the address the Go side
 	// already resolved and validated (a "MAP host ip" rule). Chrome otherwise
 	// resolves independently through the system resolver, which on a network
 	// that rewrites DNS answers would send the browser rung to a block page
-	// while every HTTP rung reached the real host. Empty leaves Chrome's
-	// resolution alone.
+	// while every HTTP rung reached the real host. Behind the proxy the worker
+	// appends its own catch-all so nothing else resolves at all.
 	HostResolverRules string `json:"host_resolver_rules,omitempty"`
 	TimeoutMS         int    `json:"timeout_ms,omitempty"`
 }
@@ -219,7 +226,7 @@ func (worker *BrowserWorker) requestInteractive(
 	read := make(chan readResult, 1)
 	for {
 		go func() {
-			line, err := browser.stdout.ReadBytes('\n')
+			line, err := readLineBounded(browser.stdout, browserResponseLimit)
 			read <- readResult{line: bytes.TrimSpace(line), err: err}
 		}()
 		select {
@@ -357,39 +364,7 @@ func (worker *BrowserWorker) stopWorkerLocked() error {
 	}
 	process := worker.worker
 	worker.worker = nil
-	process.obs.Stop("close")
-	var cleanupErr error
-	if err := process.stdin.Close(); err != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close browser worker stdin: %w", err))
-	}
-	if err := process.stdoutPipe.Close(); err != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("close browser worker stdout: %w", err))
-	}
-	killErr := process.process.KillGroup()
-	if errors.Is(killErr, os.ErrProcessDone) {
-		killErr = nil
-	}
-	if killErr != nil {
-		cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill browser worker process group: %w", killErr))
-		if err := process.process.Kill(); err != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("kill browser worker process: %w", err))
-			process.obs.Killed(err)
-		} else {
-			process.obs.Killed(nil)
-		}
-	} else {
-		process.obs.Killed(nil)
-	}
-	waitErr := process.process.Wait()
-	process.obs.Exited(waitErr)
-	if waitErr != nil {
-		// A successful group kill normally makes Wait return the signal status;
-		// only report it when the kill itself failed, where it is diagnostic.
-		if cleanupErr != nil {
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("wait for browser worker: %w", waitErr))
-		}
-	}
-	return cleanupErr
+	return stopWorkerProcess(process, "browser worker")
 }
 
 var _ io.Closer = (*BrowserWorker)(nil)

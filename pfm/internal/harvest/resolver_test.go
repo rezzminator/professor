@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -61,5 +62,64 @@ func TestGetJSONWithHeadersRefusesOversizeBodyByName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("getJSONWithHeaders error = %q, want it to name the byte ceiling", err)
+	}
+}
+
+// TestResolveTitleReportsOutageWhenBothProvidersFail pins F13: OpenAlex and
+// Crossref both failing to answer at all used to read as an ordinary
+// no-title-match (titleToDOI discarded both errors with `_ =` /
+// `crossErr == nil` with no else). Watched FAILING before the fix (err was
+// nil).
+func TestResolveTitleReportsOutageWhenBothProvidersFail(t *testing.T) {
+	withPublicDNSForProviderTest(t)
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case strings.Contains(r.URL.Host, "openalex.org"):
+			return nil, errors.New("openalex unreachable")
+		case strings.Contains(r.URL.Host, "crossref.org"):
+			return nil, errors.New("crossref unreachable")
+		case strings.Contains(r.URL.Host, "arxiv.org"):
+			return response(r, http.StatusOK, "application/atom+xml", "<feed></feed>"), nil
+		default:
+			t.Fatalf("unexpected host %s", r.URL.Host)
+			return nil, nil
+		}
+	})}
+	resolver := &Resolver{Client: client}
+	candidates, err := resolver.ResolveTitle(context.Background(), "A Title Nobody Indexed")
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %#v, want none", candidates)
+	}
+	if err == nil {
+		t.Fatal("ResolveTitle with both title-lookup providers down returned a nil error (F13)")
+	}
+}
+
+// TestResolveTitleOrdinaryNoMatchStaysNilError is the happy-path guard
+// alongside the outage test above: both providers answer fine and simply
+// have nothing close enough — that must still read as "nothing found", not
+// as an outage.
+func TestResolveTitleOrdinaryNoMatchStaysNilError(t *testing.T) {
+	withPublicDNSForProviderTest(t)
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch {
+		case strings.Contains(r.URL.Host, "openalex.org"):
+			return jsonResponse(r, `{"results":[]}`), nil
+		case strings.Contains(r.URL.Host, "crossref.org"):
+			return jsonResponse(r, `{"message":{"items":[]}}`), nil
+		case strings.Contains(r.URL.Host, "arxiv.org"):
+			return response(r, http.StatusOK, "application/atom+xml", "<feed></feed>"), nil
+		default:
+			t.Fatalf("unexpected host %s", r.URL.Host)
+			return nil, nil
+		}
+	})}
+	resolver := &Resolver{Client: client}
+	candidates, err := resolver.ResolveTitle(context.Background(), "A Title Nobody Indexed")
+	if len(candidates) != 0 {
+		t.Fatalf("candidates = %#v, want none", candidates)
+	}
+	if err != nil {
+		t.Fatalf("ResolveTitle with an ordinary no-match returned an error: %v", err)
 	}
 }

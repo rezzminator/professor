@@ -79,23 +79,11 @@ func (h *Harvester) fetchUnshared(ctx context.Context, source string, options Fe
 		// handled above.
 		if strings.HasPrefix(strings.ToLower(source), "title:") {
 			value := strings.Trim(strings.TrimSpace(source[len("title:"):]), "\"'")
-			result = Result{
-				Source: source,
-				Error: fmt.Sprintf(
-					"%q is a title — use the `findWorks` tool to list candidate works (it returns a fetch handle for each), then fetch the one you pick. `fetch` retrieves locations and UNAMBIGUOUS identifiers (URL, file path, DOI, ISBN), never a title.",
-					value,
-				),
-			}
+			result = titleGuessResult(source, value)
 		} else if parsed, parseErr := url.Parse(source); parseErr == nil && parsed.Scheme != "" && parsed.Host != "" {
 			result = h.fetchURL(ctx, source, options)
 		} else {
-			result = Result{
-				Source: source,
-				Error: fmt.Sprintf(
-					"%q is a title — use the `findWorks` tool to list candidate works (it returns a fetch handle for each), then fetch the one you pick. `fetch` retrieves locations and UNAMBIGUOUS identifiers (URL, file path, DOI, ISBN), never a title.",
-					source,
-				),
-			}
+			result = titleGuessResult(source, source)
 		}
 	}
 	if options.SizeOnly && result.Error == "" {
@@ -247,6 +235,7 @@ func (h *Harvester) fetchURLWithPolicy(
 	appShellText, _ := ctx.Value(appShellKey{}).(string)
 	appShellInherited := appShellText != ""
 	browserShellRender := false
+	staticConverterOutage := false
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
 	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, "7z", kindRAR:
@@ -327,6 +316,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		}
 		converted, err := h.convertFetchedContent(ctx, kind, source, body)
 		if err != nil {
+			staticConverterOutage = true // named a tool outage by convertOutageNote below (F12)
 			continue
 		}
 		if kind == kindPDF && strings.TrimSpace(converted) == "" {
@@ -436,6 +426,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		rungs = append(rungs, "defuddle")
 		target := "https://defuddle.md/" + source
 		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
+		lastErrorKind, lastStatus, lastErr = noteRungOutcome(err, status, lastErr, lastErrorKind, lastStatus)
 		if err == nil && status < 400 && !isChallenge(body, status) {
 			converted := stripDefuddleEnvelope(string(body))
 			longer := contentChars(converted) > lastContentChars || appShellText != ""
@@ -733,6 +724,14 @@ func (h *Harvester) fetchURLWithPolicy(
 	if providerFailure != nil {
 		message += " " + providerFailure.Error
 	}
+	message, lastErrorKind = convertOutageNote(
+		message,
+		lastErrorKind,
+		staticConverterOutage,
+		emptyPDFConvert,
+		wrongPDF,
+		appShellFailure,
+	)
 	message = withRungs(message, rungs)
 	return Result{
 		Source:       source,

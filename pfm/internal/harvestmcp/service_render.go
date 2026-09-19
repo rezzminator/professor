@@ -196,32 +196,6 @@ func renderFind(query string, candidates []harvest.Candidate) string {
 	return strings.Join(lines, "\n")
 }
 
-func renderArchiveListing(source string, members []harvest.Member) string {
-	lines := []string{
-		"# Archive: " + source,
-		"",
-		fmt.Sprintf(
-			"%d member(s). Fetch one with `archive(source=%q, member=\"<name>\")` — pick a name from the table below.",
-			len(members),
-			source,
-		),
-		"",
-		"| name | size (bytes) | type |",
-		"| --- | --- | --- |",
-	}
-	for _, member := range members {
-		typeName := "file"
-		if member.IsDir {
-			typeName = "dir"
-		} else if member.IsSymlink {
-			typeName = "symlink"
-		}
-		name := strings.ReplaceAll(member.Name, "|", "\\|")
-		lines = append(lines, fmt.Sprintf("| %s | %d | %s |", name, member.UncompressedSize, typeName))
-	}
-	return strings.Join(lines, "\n") + "\n"
-}
-
 func renderSearch(query string, results []harvest.SearchResult, _ string) string {
 	if len(results) == 0 {
 		return fmt.Sprintf("No results for %q. Try different terms or a broader query.", query)

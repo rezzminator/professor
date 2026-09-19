@@ -46,19 +46,6 @@ func idToPMCID(ctx context.Context, client *http.Client, id string, r *Resolver)
 	return data.Records[0].PMCID, nil
 }
 
-func EuropePMCPDF(ctx context.Context, client *http.Client, pmcid string) ([]byte, error) {
-	if client == nil {
-		client = safeHTTPClientTimeout(false, 60*time.Second)
-	}
-	for _, raw := range []string{"https://europepmc.org/articles/" + url.PathEscape(pmcid) + "?pdf=render", "https://europepmc.org/api/getPdf?pmcid=" + url.QueryEscape(pmcid)} {
-		body, status, _, err := getBody(ctx, client, raw, defaultUA, 50*1024*1024)
-		if err == nil && status < 400 && strings.HasPrefix(string(body), "%PDF") {
-			return body, nil
-		}
-	}
-	return nil, fmt.Errorf("no PDF returned by Europe PMC for %s", pmcid)
-}
-
 func EuropePMCFulltextXML(ctx context.Context, client *http.Client, pmcid string) (string, error) {
 	if client == nil {
 		client = safeHTTPClientTimeout(false, 30*time.Second)

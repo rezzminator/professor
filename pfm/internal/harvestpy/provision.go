@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"time"
 
 	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/deps"
@@ -126,10 +127,14 @@ func RuntimeRoot(root string, platform Platform) string {
 
 // Provision converges and smoke-tests a pinned environment before publishing it atomically.
 func Provision(ctx context.Context, options ProvisionOptions) (ProvisionResult, error) {
-	return provision(ctx, options, immutableTargets)
+	return provisionWithTargets(ctx, options, immutableTargets)
 }
 
-func provision(ctx context.Context, options ProvisionOptions, targets map[Platform]Target) (ProvisionResult, error) {
+func provisionWithTargets(
+	ctx context.Context,
+	options ProvisionOptions,
+	targets map[Platform]Target,
+) (result ProvisionResult, returnErr error) {
 	if options.Root == "" {
 		return ProvisionResult{}, errors.New("harvestpy provision root is empty")
 	}
@@ -170,6 +175,21 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 	desired := digestID(base)
 	base.Digest = desired
 	current := RuntimeRoot(options.Root, platform)
+	envRoot := filepath.Join(options.Root, "env", platform.String())
+	// Single-flight from here on: reuse check, downloads, build and swap all
+	// touch this root, and a second pfm converging it at the same time is how
+	// one of them reads a tree the other is halfway through replacing —
+	// ProvisionBrowser's own lock (provision_browser.go) guards its sibling
+	// root the same way.
+	release, err := lockProvisionRoot(envRoot)
+	if err != nil {
+		return ProvisionResult{}, err
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			returnErr = errors.Join(returnErr, releaseErr)
+		}
+	}()
 	if existing, err := ReadEnvironmentDigest(
 		filepath.Join(current, "environment.json"),
 	); err == nil && existing.Digest == desired &&
@@ -203,10 +223,6 @@ func provision(ctx context.Context, options ProvisionOptions, targets map[Platfo
 		options.Clock,
 	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("prepare harvestpy Python input: %w", err)
-	}
-	envRoot := filepath.Join(options.Root, "env", platform.String())
-	if err := os.MkdirAll(envRoot, 0o700); err != nil {
-		return ProvisionResult{}, fmt.Errorf("create harvestpy environment root: %w", err)
 	}
 	final := filepath.Join(envRoot, desired)
 	backup := ""
@@ -473,17 +489,42 @@ func ensureInputWithClock(ctx context.Context, path string, input Artifact, offl
 	return nil
 }
 
+// downloadCeiling bounds ONE pinned-artifact download end to end — connect,
+// headers and body. Nothing else in installer.Run → installHarvest →
+// Provision carries a deadline, so a server that stalls mid-body hung
+// `pfm install` forever. The largest pinned input is the ~31 MB standalone
+// CPython archive (assets/targets.json), which 20 minutes covers on a link as
+// slow as ~26 KB/s. A var so a test can shrink it; production never rewrites it.
+var downloadCeiling = 20 * time.Minute
+
+// downloadTimeoutError names the ceiling when the ceiling is what tripped, so
+// a stalled server reads as "we stopped waiting" rather than as an ordinary
+// transport error — and never as the caller's own cancellation.
+func downloadTimeoutError(parent, bounded context.Context, err error) error {
+	if bounded.Err() == nil || parent.Err() != nil {
+		return err
+	}
+	return fmt.Errorf(
+		"stopped after the %s harvestpy download ceiling (the server stalled or the link is too slow): %w",
+		downloadCeiling,
+		err,
+	)
+}
+
 func downloadFile(ctx context.Context, url, path string, expectedSize int64) (returnErr error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
+	bounded, cancelCeiling := context.WithTimeout(ctx, downloadCeiling)
+	defer cancelCeiling()
+	request, err := http.NewRequestWithContext(bounded, http.MethodGet, url, http.NoBody)
 	if err != nil {
 		return fmt.Errorf("create download request: %w", err)
 	}
 	// A zero-value client IS http.DefaultClient's policy; never mutate the
 	// global itself, since downloadFile is the ONE caller reaching outside
-	// harvestpy's Python-sidecar protocol onto the open network.
+	// harvestpy's Python-sidecar protocol onto the open network. The deadline
+	// rides on the request context so it bounds the BODY too, not just connect.
 	response, err := obs.WrapClient(&http.Client{}).Do(request)
 	if err != nil {
-		return fmt.Errorf("download request: %w", err)
+		return fmt.Errorf("download request: %w", downloadTimeoutError(ctx, bounded, err))
 	}
 	defer func() {
 		if err := response.Body.Close(); err != nil {
@@ -507,7 +548,7 @@ func downloadFile(ctx context.Context, url, path string, expectedSize int64) (re
 	written, err := io.Copy(output, reader)
 	if err != nil {
 		_ = output.Close()
-		return fmt.Errorf("copy download: %w", err)
+		return fmt.Errorf("copy download: %w", downloadTimeoutError(ctx, bounded, err))
 	}
 	if expectedSize > 0 && written != expectedSize {
 		_ = output.Close()
@@ -588,6 +629,38 @@ func atomicCurrentWithClock(root, desired string, now clock.Clock) (returnErr er
 	return nil
 }
 
+// commandExitStatus carries a completed command's NON-ZERO exit into the
+// obs.Process record. deps.Runner's contract puts an ordinary non-zero exit in
+// RunResult.ExitCode with a NIL error (internal/deps/runner.go), so handing
+// that nil to Exited() recorded exit=0 for a command that failed — a failure
+// rendered as success on the one surface built to read failures back. The
+// module has no shared constructor for this shape: internal/deps
+// (runnerExitStatus) and internal/installer (commandExitError) each spell it
+// privately, and `interface{ ExitCode() int }` is the contract they share.
+type commandExitStatus struct {
+	command  string
+	exitCode int
+}
+
+func (status commandExitStatus) Error() string {
+	return fmt.Sprintf("%s exited %d", status.command, status.exitCode)
+}
+
+func (status commandExitStatus) ExitCode() int { return status.exitCode }
+
+// recordedExitStatus is the error Exited() should see: the Runner's own
+// failure when there was one, otherwise the completed command's non-zero exit,
+// otherwise nil for a clean run.
+func recordedExitStatus(command string, result deps.RunResult, err error) error {
+	if err != nil {
+		return err
+	}
+	if result.ExitCode != 0 {
+		return commandExitStatus{command: command, exitCode: result.ExitCode}
+	}
+	return nil
+}
+
 func runCommandWithRunner(
 	ctx context.Context,
 	runner deps.Runner,
@@ -597,16 +670,17 @@ func runCommandWithRunner(
 ) ([]byte, error) {
 	process := obs.NewProcess(ctx, "provision")
 	process.Started(0, nil)
-	end := process.Request(filepath.Base(executable))
+	command := filepath.Base(executable)
+	end := process.Request(command)
 	result, err := runner.Run(ctx, append([]string{executable}, arguments...), deps.RunOptions{Dir: directory})
 	if len(result.Stderr) > 0 {
 		_, _ = process.Stderr(io.Discard).Write(result.Stderr)
 	}
 	end(len(result.Stdout), err)
-	process.Exited(err)
+	process.Exited(recordedExitStatus(command, result, err))
 	if err != nil {
 		return result.Stdout, fmt.Errorf("%s %s: %w (stderr: %s)", executable, strings.Join(arguments, " "), err,
-			strings.TrimSpace(string(result.Stderr)))
+			stderrTail(string(result.Stderr)))
 	}
 	if result.ExitCode != 0 {
 		return result.Stdout, fmt.Errorf(
@@ -614,7 +688,7 @@ func runCommandWithRunner(
 			executable,
 			strings.Join(arguments, " "),
 			result.ExitCode,
-			strings.TrimSpace(string(result.Stderr)),
+			stderrTail(string(result.Stderr)),
 		)
 	}
 	return result.Stdout, nil

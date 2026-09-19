@@ -24,6 +24,10 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 	ctx = resolverContext(ctx, r)
 	client := r.client()
 	parts := make([][]Candidate, 5)
+	// panics catches a fan-out goroutine's panic per item (F1): one bad
+	// provider response must not take FindWorks' other four gatherers, let
+	// alone the daemon calling it, down with it.
+	panics := make([]error, 5)
 	var wait sync.WaitGroup
 	for index, gather := range []func(context.Context, *http.Client, string, int) []Candidate{
 		r.findPapers,
@@ -35,11 +39,23 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 		wait.Add(1)
 		go func(index int, gather func(context.Context, *http.Client, string, int) []Candidate) {
 			defer wait.Done()
+			defer recoverItem(func(e error) { panics[index] = e })
 			parts[index] = gather(ctx, client, query, limit)
 		}(index, gather)
 	}
 	wait.Wait()
 	providerFailures := []string{}
+	// A recovered panic (F1) joins the SAME aggregate the ipfs/md5/scholar
+	// failures below already feed: no existing per-item log sink covers this
+	// fan-out (each gather func already answers nil-on-any-failure, silently,
+	// by design), and the C23 activity-log ratchet (arch-check.sh) refuses a
+	// new bare log call — the aggregate keeps the panic from vanishing
+	// without one.
+	for index, panicErr := range panics {
+		if panicErr != nil {
+			providerFailures = append(providerFailures, fmt.Sprintf("provider %d panicked: %v", index, panicErr))
+		}
+	}
 	if r.configuredProviderBase(sourceIPFSCatalog) != "" {
 		candidates, err := r.ipfsCatalogSearch(ctx, query, limit)
 		if err != nil {
@@ -136,6 +152,14 @@ func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query st
 		"mailto",
 	)
 	if err := getJSON(ctx, client, raw, &data); err != nil {
+		// An outage here still reads the same as "OpenAlex found nothing"
+		// (unlike findCrossref/findSemanticScholar below, which log their own
+		// failure): the C23 activity-log ratchet (arch-check.sh) refuses a
+		// new bare log call in this file, and FindWorks' own fan-out
+		// does not consume any individual gather function's error either way
+		// (verified: only the ipfs/md5/scholar calls below feed
+		// providerFailures) — so matching the siblings' logging voice here
+		// would have been cosmetic, not a behavior change.
 		return nil
 	}
 	out := make([]Candidate, 0, len(data.Results))

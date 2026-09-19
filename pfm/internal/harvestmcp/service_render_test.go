@@ -1,20 +1,71 @@
 package harvestmcp
 
 import (
+	"archive/zip"
+	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/harvest"
 )
 
-func TestOracleReceiptRenderers(t *testing.T) {
-	listing := renderArchiveListing("/tmp/sample.zip", []harvest.Member{{Name: "a|b.txt", UncompressedSize: 7}})
-	if want := `archive(source="/tmp/sample.zip", member="<name>")`; !contains(listing, want) {
-		t.Fatalf("archive listing does not teach archive member call: %q", listing)
+// writeTestZip creates a minimal zip archive at path for a redaction test to
+// list.
+func writeTestZip(t *testing.T, path string, files map[string]string) {
+	t.Helper()
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !contains(listing, `| a\|b.txt | 7 | file |`) {
-		t.Fatalf("archive listing does not escape table member: %q", listing)
+	defer func() { _ = file.Close() }()
+	writer := zip.NewWriter(file)
+	for name, body := range files {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestArchiveToolNeverEchoesALocalPathInItsListing is L2-F19 end to end: a
+// local archive the caller is permitted to list (inside LocalRoots) renders
+// its listing without the raw filesystem path — the same redaction
+// PublicResult already applies to the exported file's own source.
+func TestArchiveToolNeverEchoesALocalPathInItsListing(t *testing.T) {
+	root := t.TempDir()
+	zipPath := filepath.Join(root, "bundle.zip")
+	writeTestZip(t, zipPath, map[string]string{"a.txt": "hi"})
+	service, err := NewConfiguredHarvester(
+		"test",
+		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), LocalRoots: []string{root}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	result, _, err := service.archive(context.Background(), (*mcp.CallToolRequest)(nil), ArchiveInput{Source: zipPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("archive result content = %T, want *mcp.TextContent", result.Content[0])
+	}
+	if strings.Contains(text.Text, zipPath) || strings.Contains(text.Text, root) {
+		t.Fatalf("archive listing echoed the local path: %q", text.Text)
+	}
+	if !strings.Contains(text.Text, "requested archive") {
+		t.Fatalf("archive listing did not use the redacted display source: %q", text.Text)
 	}
 }
 

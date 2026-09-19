@@ -16,6 +16,54 @@ func setHarvestTestJail(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
 }
 
+// TestPublicArchiveListingRedactsSourceAndMatchesCanonicalFormat pins F19:
+// PublicArchiveListing is the exported, canonical, redaction-applied
+// renderer both surfaces should share (signature:
+// PublicArchiveListing(source string, members []Member) string). Its output
+// for a given display source is byte-identical to formatArchiveListing —
+// the pre-export path renamed, not rewritten.
+func TestPublicArchiveListingRedactsSourceAndMatchesCanonicalFormat(t *testing.T) {
+	withPublicDNSForProviderTest(t)
+	h := mustNew(t, Options{CacheDir: t.TempDir()})
+	members := []Member{{Name: "a.txt", UncompressedSize: 12}}
+
+	urlListing := h.PublicArchiveListing("https://example.test/archive.zip", members)
+	if strings.Contains(urlListing, "example.test") {
+		t.Fatalf("PublicArchiveListing leaked the raw URL: %q", urlListing)
+	}
+	if !strings.Contains(urlListing, publicHandlePrefix) {
+		t.Fatalf("PublicArchiveListing did not redact the URL to a harvest: handle: %q", urlListing)
+	}
+
+	localListing := h.PublicArchiveListing("/etc/some/archive.zip", members)
+	if !strings.Contains(localListing, "requested archive") {
+		t.Fatalf("PublicArchiveListing did not redact the local path: %q", localListing)
+	}
+	if strings.Contains(localListing, "/etc/some/archive.zip") {
+		t.Fatalf("PublicArchiveListing leaked the local path: %q", localListing)
+	}
+
+	// Moved here from harvestmcp's deleted near-copy (L2-F19): the table
+	// escaping a member name needs is now proved against the ONE renderer,
+	// not against whichever copy a surface happened to call.
+	escaped := h.PublicArchiveListing("/etc/some/archive.zip", []Member{{Name: "a|b.txt", UncompressedSize: 7}})
+	if !strings.Contains(escaped, `| a\|b.txt | 7 | file |`) {
+		t.Fatalf("PublicArchiveListing did not escape a pipe in a member name: %q", escaped)
+	}
+	if !strings.Contains(escaped, `archive(source="requested archive", member="<name>")`) {
+		t.Fatalf("PublicArchiveListing did not teach the archive member call: %q", escaped)
+	}
+
+	want := formatArchiveListing("requested archive", members)
+	if localListing != want {
+		t.Fatalf(
+			"PublicArchiveListing(local) = %q, want byte-identical to formatArchiveListing: %q",
+			localListing,
+			want,
+		)
+	}
+}
+
 func TestFetchPublicResolvesDOIIdentityAndISBNNamedLocalFile(t *testing.T) {
 	setHarvestTestJail(t)
 	cacheDir := t.TempDir()

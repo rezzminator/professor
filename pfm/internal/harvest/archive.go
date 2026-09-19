@@ -124,21 +124,29 @@ func archiveFormat(path string) string {
 // ListArchive performs a listing pass and enforces count, path, symlink, and
 // expansion limits before any member is read.
 func ListArchive(path string) ([]Member, error) {
+	return listArchiveContext(context.Background(), path)
+}
+
+// listArchiveContext is ListArchive's ctx-aware sibling (F24): the
+// *Harvester surface (archiveList below) has a caller's ctx to honor, and
+// ListArchive itself stays ctx-less so every existing caller and test keeps
+// its exact signature.
+func listArchiveContext(ctx context.Context, path string) ([]Member, error) {
 	switch archiveFormat(path) {
 	case kindZIP:
-		return listZip(path)
+		return listZip(ctx, path)
 	case kindTAR:
-		return listTar(path)
+		return listTar(ctx, path)
 	case "7z":
-		return list7z(path)
+		return list7z(ctx, path)
 	case kindRAR:
-		return listRAR(path)
+		return listRAR(ctx, path)
 	default:
 		return nil, fmt.Errorf("unsupported or unrecognized archive format: %s", path)
 	}
 }
 
-func listZip(path string) (members []Member, returnErr error) {
+func listZip(ctx context.Context, path string) (members []Member, returnErr error) {
 	f, e := zip.OpenReader(path)
 	if e != nil {
 		return nil, fmt.Errorf("open zip: %w", e)
@@ -151,6 +159,9 @@ func listZip(path string) (members []Member, returnErr error) {
 	out := make([]Member, 0, len(f.File))
 	var total int64
 	for _, entry := range f.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		name := normalizedMemberName(entry.Name)
 		if e := validateMemberName(name); e != nil {
 			return nil, e
@@ -217,7 +228,7 @@ func openTar(path string) (io.Reader, func() error, error) {
 	return f, f.Close, nil
 }
 
-func listTar(path string) (members []Member, returnErr error) {
+func listTar(ctx context.Context, path string) (members []Member, returnErr error) {
 	r, closeFn, e := openTar(path)
 	if e != nil {
 		return nil, e
@@ -231,6 +242,9 @@ func listTar(path string) (members []Member, returnErr error) {
 	out := []Member{}
 	var total int64
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		h, e := tr.Next()
 		if e == io.EOF {
 			break
@@ -265,7 +279,7 @@ func listTar(path string) (members []Member, returnErr error) {
 	return out, nil
 }
 
-func list7z(path string) (members []Member, returnErr error) {
+func list7z(ctx context.Context, path string) (members []Member, returnErr error) {
 	r, err := sevenzip.OpenReader(path)
 	if err != nil {
 		return nil, fmt.Errorf("open 7z: %w", err)
@@ -278,6 +292,9 @@ func list7z(path string) (members []Member, returnErr error) {
 	out := make([]Member, 0, len(r.File))
 	var total int64
 	for _, entry := range r.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		name := normalizedMemberName(entry.Name)
 		if err := validateMemberName(name); err != nil {
 			return nil, err
@@ -305,7 +322,7 @@ func list7z(path string) (members []Member, returnErr error) {
 	return out, nil
 }
 
-func read7z(path, name string) (body []byte, returnErr error) {
+func read7z(ctx context.Context, path, name string) (body []byte, returnErr error) {
 	name = normalizedMemberName(name)
 	if err := validateMemberName(name); err != nil {
 		return nil, err
@@ -320,6 +337,9 @@ func read7z(path, name string) (body []byte, returnErr error) {
 		}
 	}()
 	for _, entry := range r.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if normalizedMemberName(entry.Name) != name {
 			continue
 		}
@@ -336,7 +356,7 @@ func read7z(path, name string) (body []byte, returnErr error) {
 		if err != nil {
 			return nil, fmt.Errorf("open 7z member %q: %w", name, err)
 		}
-		body, readErr := io.ReadAll(io.LimitReader(rc, MaxArchiveFileBytes+1))
+		body, readErr := io.ReadAll(io.LimitReader(ctxReader{ctx: ctx, r: rc}, MaxArchiveFileBytes+1))
 		closeErr := rc.Close()
 		if readErr != nil {
 			return nil, readErr
@@ -352,7 +372,7 @@ func read7z(path, name string) (body []byte, returnErr error) {
 	return nil, fmt.Errorf("member not found: %s", name)
 }
 
-func listRAR(path string) ([]Member, error) {
+func listRAR(ctx context.Context, path string) ([]Member, error) {
 	entries, err := rardecode.List(path)
 	if err != nil {
 		return nil, fmt.Errorf("open RAR: %w", err)
@@ -360,6 +380,9 @@ func listRAR(path string) ([]Member, error) {
 	out := make([]Member, 0, len(entries))
 	var total int64
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		name := normalizedMemberName(entry.Name)
 		if err := validateMemberName(name); err != nil {
 			return nil, err
@@ -399,7 +422,7 @@ func listRAR(path string) ([]Member, error) {
 	return out, nil
 }
 
-func readRAR(path, name string) ([]byte, error) {
+func readRAR(ctx context.Context, path, name string) ([]byte, error) {
 	name = normalizedMemberName(name)
 	if err := validateMemberName(name); err != nil {
 		return nil, err
@@ -409,6 +432,9 @@ func readRAR(path, name string) ([]byte, error) {
 		return nil, fmt.Errorf("open RAR: %w", err)
 	}
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if normalizedMemberName(entry.Name) != name {
 			continue
 		}
@@ -425,7 +451,7 @@ func readRAR(path, name string) ([]byte, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open RAR member %q: %w", name, err)
 		}
-		body, readErr := io.ReadAll(io.LimitReader(rc, MaxArchiveFileBytes+1))
+		body, readErr := io.ReadAll(io.LimitReader(ctxReader{ctx: ctx, r: rc}, MaxArchiveFileBytes+1))
 		closeErr := rc.Close()
 		if readErr != nil {
 			return nil, fmt.Errorf("read RAR member %q: %w", name, readErr)
@@ -442,24 +468,48 @@ func readRAR(path, name string) ([]byte, error) {
 }
 
 func ReadArchiveMember(path, name string) ([]byte, error) {
+	return readArchiveMemberContext(context.Background(), path, name)
+}
+
+// readArchiveMemberContext is ReadArchiveMember's ctx-aware sibling (F24):
+// the *Harvester surface (Archive below) has a caller's ctx to honor, and
+// ReadArchiveMember itself stays ctx-less so every existing caller and test
+// keeps its exact signature.
+func readArchiveMemberContext(ctx context.Context, path, name string) ([]byte, error) {
 	if e := validateMemberName(name); e != nil {
 		return nil, e
 	}
 	switch archiveFormat(path) {
 	case kindZIP:
-		return readZip(path, name)
+		return readZip(ctx, path, name)
 	case kindTAR:
-		return readTar(path, name)
+		return readTar(ctx, path, name)
 	case "7z":
-		return read7z(path, name)
+		return read7z(ctx, path, name)
 	case kindRAR:
-		return readRAR(path, name)
+		return readRAR(ctx, path, name)
 	default:
 		return nil, fmt.Errorf("unsupported or unrecognized archive format: %s", path)
 	}
 }
 
-func readZip(path, name string) (body []byte, returnErr error) {
+// ctxReader stops a read once ctx is cancelled, so a caller that gave up
+// does not still wait out a full — though already capped — decompression
+// (F24). Wrapped around the member's own reader, inside the LimitReader that
+// already bounds the byte ceiling.
+type ctxReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (c ctxReader) Read(p []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return c.r.Read(p)
+}
+
+func readZip(ctx context.Context, path, name string) (body []byte, returnErr error) {
 	f, e := zip.OpenReader(path)
 	if e != nil {
 		return nil, e
@@ -474,6 +524,9 @@ func readZip(path, name string) (body []byte, returnErr error) {
 		return nil, e
 	}
 	for _, entry := range f.File {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if normalizedMemberName(entry.Name) != name {
 			continue
 		}
@@ -490,7 +543,7 @@ func readZip(path, name string) (body []byte, returnErr error) {
 			float64(entry.UncompressedSize64)/float64(entry.CompressedSize64) > float64(MaxArchiveRatio) {
 			return nil, fmt.Errorf("compression ratio exceeds limit")
 		}
-		body, e := readZipMember(entry, name)
+		body, e := readZipMember(ctx, entry, name)
 		if e != nil {
 			return nil, e
 		}
@@ -502,7 +555,7 @@ func readZip(path, name string) (body []byte, returnErr error) {
 	return nil, fmt.Errorf("member not found: %s", name)
 }
 
-func readZipMember(entry *zip.File, name string) (body []byte, returnErr error) {
+func readZipMember(ctx context.Context, entry *zip.File, name string) (body []byte, returnErr error) {
 	r, err := entry.Open()
 	if err != nil {
 		return nil, err
@@ -512,10 +565,10 @@ func readZipMember(entry *zip.File, name string) (body []byte, returnErr error) 
 			returnErr = errors.Join(returnErr, fmt.Errorf("close zip member %q: %w", name, err))
 		}
 	}()
-	return io.ReadAll(io.LimitReader(r, MaxArchiveFileBytes+1))
+	return io.ReadAll(io.LimitReader(ctxReader{ctx: ctx, r: r}, MaxArchiveFileBytes+1))
 }
 
-func readTar(path, name string) (body []byte, returnErr error) {
+func readTar(ctx context.Context, path, name string) (body []byte, returnErr error) {
 	r, closeFn, e := openTar(path)
 	if e != nil {
 		return nil, e
@@ -531,6 +584,9 @@ func readTar(path, name string) (body []byte, returnErr error) {
 	}
 	tr := tar.NewReader(r)
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		h, e := tr.Next()
 		if e == io.EOF {
 			break
@@ -550,7 +606,7 @@ func readTar(path, name string) (body []byte, returnErr error) {
 		if h.Size > MaxArchiveFileBytes {
 			return nil, fmt.Errorf("member exceeds file limit")
 		}
-		body, e := io.ReadAll(io.LimitReader(tr, MaxArchiveFileBytes+1))
+		body, e := io.ReadAll(io.LimitReader(ctxReader{ctx: ctx, r: tr}, MaxArchiveFileBytes+1))
 		if e != nil {
 			return nil, e
 		}
@@ -574,7 +630,7 @@ func (h *Harvester) Archive(ctx context.Context, source, member string) (Result,
 		if download.Error != "" {
 			return download, errors.New(download.Error)
 		}
-		data, e := ReadArchiveMember(path, parts[1])
+		data, e := readArchiveMemberContext(ctx, path, parts[1])
 		if e != nil {
 			return Result{Source: source, Error: e.Error()}, e
 		}
@@ -628,7 +684,7 @@ func (h *Harvester) archiveList(ctx context.Context, source string) (Result, err
 	if download.Error != "" {
 		return download, errors.New(download.Error)
 	}
-	members, e := ListArchive(path)
+	members, e := listArchiveContext(ctx, path)
 	if e != nil {
 		return Result{Source: source, Error: e.Error()}, e
 	}

@@ -50,7 +50,7 @@ func TestProvisionDefaultSmokePreservesRunner(t *testing.T) {
 		<-responsesDone
 	}()
 
-	result, err := provision(context.Background(), ProvisionOptions{
+	result, err := provisionWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
 		Runner: runner,
 		Run:    fakeProvisionRun(t, false),

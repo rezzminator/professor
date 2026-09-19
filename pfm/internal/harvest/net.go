@@ -189,35 +189,40 @@ func safeHTTPClientTimeoutWithResolver(
 	return client
 }
 
-// PinnedDialContext resolves once and dials only the validated public address;
-// the original hostname is retained for TLS SNI by the caller.
+// pinnedDialTimeout bounds one pinned connect attempt for the direct clients
+// and the browser proxy alike.
+const pinnedDialTimeout = 20 * time.Second
+
+// pinnedDialContext resolves once and dials only the validated public address;
+// the original hostname is retained for TLS SNI by the caller. The dial itself
+// is chromeDialer.dialPinned (net_chrome_transport.go): ONE pinned-dial
+// implementation serves the direct clients, the Chrome transport and the
+// browser proxy, so a change to the resolve-then-dial policy cannot land in
+// one copy and miss the other.
 func pinnedDialContext(
 	resolve func(context.Context, string) ([]net.IP, error),
 ) func(context.Context, string, string) (net.Conn, error) {
-	return func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := publicIPs(ctx, host, resolve)
-		if err != nil {
-			return nil, err
-		}
-		d := &net.Dialer{Timeout: 20 * time.Second}
-		var last error
-		for _, ip := range ips {
-			conn, e := d.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-			if e == nil {
-				return conn, nil
-			}
-			last = e
-		}
-		if last != nil {
-			return nil, last
-		}
-		return nil, fmt.Errorf("no public address for %s", host)
-	}
+	dialer := &chromeDialer{timeout: pinnedDialTimeout, resolve: resolve}
+	return dialer.dialPinned
 }
+
+// loopbackListener is the whole listener surface the browser proxy uses:
+// accept a connection, report the address to hand Chrome, close. Nothing in
+// this package listens for anything else, so the narrow interface — not the
+// full stdlib type — is what listenLoopback hands out, and browser_proxy.go
+// can be read (and its accept loop faked) without a second look at net/http.
+type loopbackListener interface {
+	Accept() (net.Conn, error)
+	Addr() net.Addr
+	Close() error
+}
+
+// listenLoopback opens the browser proxy's ephemeral loopback listener
+// (browser_proxy.go). The listen call lives HERE, beside pinnedDialContext,
+// because net.go is this package's network-primitive file: every socket the
+// harvester creates itself is opened in one place a reviewer can read at once.
+// 127.0.0.1 is not a default — nothing off this box may reach the proxy.
+func listenLoopback() (loopbackListener, error) { return net.Listen("tcp", "127.0.0.1:0") }
 
 func publicIPs(
 	ctx context.Context,
@@ -408,20 +413,6 @@ func IsPrivateHost(raw string) bool {
 		strings.HasSuffix(host, ".ts.net")
 }
 
-// RobotsURL is retained for callers that display the source's policy URL.
-// Harvester intentionally does not enforce robots.txt (matching the Python
-// server's documented --ignore-robots-txt compatibility flag).
-func RobotsURL(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return ""
-	}
-	u.Path = "/robots.txt"
-	u.RawQuery = ""
-	u.Fragment = ""
-	return u.String()
-}
-
 func privateIP(ip net.IP) bool {
 	if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() ||
 		ip.IsUnspecified() ||
@@ -442,6 +433,15 @@ func privateIP(ip net.IP) bool {
 		if n >= 0xf0000000 {
 			return true
 		}
+	}
+	// NAT64 (RFC 6052) and 6to4 (RFC 3056) fold an IPv4 address into an IPv6
+	// one; every check above judges the WRAPPER's own (public) prefix, never
+	// the address a NAT64/6to4 gateway actually dials (F28). A standard
+	// IPv4-mapped ::ffff:0:0/96 address needs no separate handling here:
+	// ip.To4() above already unwraps it, and every ip.IsXxx call at the top
+	// of this function does the same internally.
+	if embedded := embeddedIPv4(ip); embedded != nil {
+		return privateIP(embedded)
 	}
 	return false
 }

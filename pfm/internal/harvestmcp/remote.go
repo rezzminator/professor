@@ -1,7 +1,6 @@
 package harvestmcp
 
 import (
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -24,6 +23,13 @@ import (
 )
 
 const mcpPath = "/mcp"
+
+// mcpMaxBodyBytes bounds an authenticated /mcp POST body — unbounded before
+// this, the SDK's io.ReadAll(req.Body) let one token holder exhaust memory
+// with a single request. 1 MiB matches /register, /token and /revoke's own
+// cap (below) and comfortably fits the largest legitimate tool call: fetch
+// and fetchImage take up to 50 source URLs each, a few hundred bytes apiece.
+const mcpMaxBodyBytes = 1 << 20
 
 // RemoteOptions is the external gateway contract. The daemon (pfm mcp serve)
 // mounts it on its second, authenticated port; handler tests use it without
@@ -56,6 +62,15 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	parsed, err := url.Parse(publicURL)
 	if err != nil || parsed.Hostname() == "" {
 		return nil, fmt.Errorf("public_url must include a hostname, got %q", publicURL)
+	}
+	// validRedirectURI (auth.go) is the SAME https-or-loopback rule client
+	// redirect URIs must pass; reused rather than a second copy here. A plain
+	// http public_url would carry the passphrase, codes, and every bearer and
+	// refresh token in cleartext across the internet.
+	if !validRedirectURI(publicURL) {
+		return nil, fmt.Errorf(
+			"external.publicURL must be https (or http on loopback), got %q", publicURL,
+		)
 	}
 	if options.Passphrase == "" && options.StaticToken == "" {
 		return nil, errors.New(
@@ -125,6 +140,7 @@ func (r *RemoteServer) serveHTTP(w http.ResponseWriter, req *http.Request) {
 			r.unauthorized(w)
 			return
 		}
+		req.Body = http.MaxBytesReader(w, req.Body, mcpMaxBodyBytes)
 		r.mcp.ServeHTTP(w, req)
 	case "/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp":
 		if r.store == nil {
@@ -273,11 +289,20 @@ func (r *RemoteServer) register(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	var input persistedClient
-	if err := json.NewDecoder(io.LimitReader(req.Body, 1<<20)).Decode(&input); err != nil {
+	if err := json.NewDecoder(io.LimitReader(req.Body, mcpMaxBodyBytes)).Decode(&input); err != nil {
 		r.oauthError(w, http.StatusBadRequest, "invalid_client_metadata", "registration body is not valid JSON")
 		return
 	}
 	client, secret, code := r.store.register(input)
+	if code == oauthErrorTooManyClients {
+		r.oauthError(
+			w,
+			http.StatusTooManyRequests,
+			code,
+			"the harvester gateway has reached its registered-client limit; ask the operator to remove an unused client",
+		)
+		return
+	}
 	if code != "" {
 		r.oauthError(w, http.StatusBadRequest, code, "client metadata is not supported")
 		return
@@ -376,7 +401,7 @@ func (r *RemoteServer) consent(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		txn = req.Form.Get("txn")
-		code, ok, alive := r.store.consent(txn, req.Form.Get("passphrase"))
+		code, ok, alive := r.store.consent(txn, req.Form.Get("passphrase"), remoteAddr(req))
 		if !alive {
 			expiredConsent(w)
 			return
@@ -561,7 +586,11 @@ func (r *RemoteServer) authenticateClient(id, secret string, presented bool) boo
 	case tokenAuthNone:
 		return true
 	case tokenAuthClientSecretPost, tokenAuthClientSecretBasic:
-		return presented && subtle.ConstantTimeCompare([]byte(c.ClientSecret), []byte(secret)) == 1
+		// c.ClientSecret is a read-compatibility door only (auth.go's
+		// persistedClient doc comment) — verify by digest, the stored shape
+		// since L2-F20, via the same equalSecret constant-time compare a
+		// bare secret would have used.
+		return presented && c.ClientSecretHash != "" && equalSecret(digest(secret), c.ClientSecretHash)
 	default:
 		return false
 	}

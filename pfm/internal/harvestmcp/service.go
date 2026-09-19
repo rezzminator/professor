@@ -335,74 +335,6 @@ type pythonConverter struct {
 	proxyURL    string
 }
 
-// browserHardDeadline is the Go-side ceiling on one browser fetch. The
-// 45000ms timeout travels to Python and bounds page.goto only — launch, IPC,
-// the headed→headless retry, and close() answer to nobody else. Every other
-// transport in this file has a hard Go ceiling; the browser gets one too.
-const browserHardDeadline = 3 * time.Minute
-
-// FetchBrowser renders one URL in system Chrome through the opt-in Patchright
-// worker — the ladder's last wall-bypass rung. Go owns the SSRF decision:
-// every URL Chrome touches is validated here through
-// harvest.AssertFetchableStrict — strict, because Chrome re-resolves without a
-// pinning hop — and a refusal is re-wrapped as harvest.ErrBrowserPolicyDenied so callers can
-// tell POLICY from OUTAGE. Provisioning is lazy and only ever happens after
-// fetch.browser gated this method; a missing environment is an outage,
-// never a silent skip.
-func (converter pythonConverter) FetchBrowser(ctx context.Context, source string, headless bool) (string, int, error) {
-	runtime, err := converter.browserRuntime(ctx)
-	if err != nil {
-		return "", 0, err
-	}
-	browser := harvestpy.NewBrowserWorker(runtime)
-	defer func() { _ = browser.Close() }()
-
-	policyDenied := false
-	onAsk := func(requestURL string) error {
-		if askErr := harvest.AssertFetchableStrict(requestURL); askErr != nil {
-			// Only a refusal of the INITIAL address labels the whole fetch
-			// as POLICY. A denied tracker/subresource followed by an
-			// unrelated failure must stay an outage — retrying can help.
-			if requestURL == source {
-				policyDenied = true
-			}
-			return askErr
-		}
-		return nil
-	}
-
-	fetchCtx, cancel := context.WithTimeout(ctx, browserHardDeadline)
-	defer cancel()
-	// Pin Chrome to the address DoH resolved and the guard validated. Without
-	// this the browser rung resolves the host a second time through the system
-	// resolver — so on a network that rewrites DNS answers every HTTP rung
-	// would reach the real host while the browser rung alone landed on a block
-	// page, and the wall would look like the source's own.
-	hostResolverRules := harvest.BrowserHostResolverRule(fetchCtx, source)
-	html, status, fetchErr := browser.FetchPinned(
-		fetchCtx,
-		source,
-		converter.proxyURL,
-		hostResolverRules,
-		headless,
-		45000,
-		onAsk,
-	)
-	if fetchErr != nil && policyDenied {
-		return "", 0, fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, fetchErr)
-	}
-	return html, status, fetchErr
-}
-
-// browserRuntime resolves the browser worker's runtime, provisioning it first
-// when it is missing or was provisioned by an older pfm (harvestpy.EnsureBrowser).
-func (converter pythonConverter) browserRuntime(ctx context.Context) (harvestpy.Runtime, error) {
-	return harvestpy.EnsureBrowser(ctx, harvestpy.ProvisionOptions{
-		Root:   converter.browserRoot,
-		Runner: converter.runner,
-	})
-}
-
 func (converter pythonConverter) Convert(
 	ctx context.Context,
 	kind, source string,
@@ -816,28 +748,7 @@ func (service *Service) fetch(
 	semaphore := make(chan struct{}, 8)
 	for index, source := range input.Sources {
 		wait.Add(1)
-		go func(index int, source string) {
-			defer wait.Done()
-			select {
-			case semaphore <- struct{}{}:
-			case <-ctx.Done():
-				contents[index] = service.describeFetch(
-					source,
-					harvest.Result{Source: source, Error: "fetch cancelled: " + ctx.Err().Error()},
-					input.SizeOnly,
-				)
-				items[index] = FetchItem{Source: source, Error: "fetch cancelled: " + ctx.Err().Error()}
-				return
-			}
-			defer func() { <-semaphore }()
-			fetched := service.harvester.FetchPublic(
-				ctx,
-				source,
-				harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly},
-			)
-			items[index] = fetchItem(fetched)
-			contents[index] = service.describeFetch(source, fetched, input.SizeOnly)
-		}(index, source)
+		go service.fetchOne(ctx, semaphore, &wait, index, source, input, contents, items)
 	}
 	wait.Wait()
 	result := &mcp.CallToolResult{}
@@ -899,9 +810,17 @@ func (service *Service) search(
 		Count:         input.Count,
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "harvester search: %v\n", err)
+		// err.Error() is the FULL diagnostic (search.go:56-58) — may carry a
+		// backend URL with userinfo — so it goes through the scrubbed activity
+		// log, never raw to stderr; renderSearchFailure is the one safe
+		// rendering (SafeMessage() when it's a *SearchBackendError, the
+		// verbatim sentinel for a configuration state) both stderr and the
+		// tool result share.
+		obs.Logger(obs.Component(ctx, "mcp")).Warn("harvester.search.failed", obs.FieldErr, err.Error())
+		safe := renderSearchFailure(err)
+		fmt.Fprintln(os.Stderr, safe)
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: renderSearchFailure(err)}},
+			Content: []mcp.Content{&mcp.TextContent{Text: safe}},
 			IsError: true,
 		}, SearchOutput{}, nil
 	}
@@ -927,25 +846,7 @@ func (service *Service) fetchImage(
 	semaphore := make(chan struct{}, 8)
 	for index, source := range input.Sources {
 		wait.Add(1)
-		go func(index int, source string) {
-			defer wait.Done()
-			select {
-			case semaphore <- struct{}{}:
-			case <-ctx.Done():
-				items[index] = ImageItem{Source: source, Error: "fetch image cancelled: " + ctx.Err().Error()}
-				contents[index] = fmt.Sprintf("# %s\nERROR: %s", source, items[index].Error)
-				return
-			}
-			defer func() { <-semaphore }()
-			item := service.fetchOneImage(ctx, source)
-			items[index] = item
-			body, err := json.Marshal(item)
-			if err != nil {
-				contents[index] = fmt.Sprintf("image receipt encoding failed for %q: %v", source, err)
-				return
-			}
-			contents[index] = string(body)
-		}(index, source)
+		go service.imageOne(ctx, semaphore, &wait, index, source, items, contents)
 	}
 	wait.Wait()
 	result := &mcp.CallToolResult{}
@@ -974,7 +875,12 @@ func (service *Service) archive(
 	result = service.harvester.PublicResult(input.Source, result, false)
 	text := service.describeFetch(input.Source, result, false)
 	if err == nil && result.Error == "" && input.Member == "" {
-		text = renderArchiveListing(input.Source, result.Members)
+		// input.Source is raw (a local path, a file: URL); PublicArchiveListing
+		// applies the SAME redaction PublicResult above already applied to
+		// result's own source, and it is the one archive-listing renderer in
+		// the tree (L2-F19) — the live answer and the exported file cannot
+		// drift apart again.
+		text = service.harvester.PublicArchiveListing(input.Source, result.Members)
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},

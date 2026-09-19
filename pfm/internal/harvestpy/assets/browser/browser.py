@@ -8,8 +8,9 @@ hidden by Patchright.
 
 Protocol (JSON lines over stdin/stdout), one request serialized at a time:
 
-  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://…|null","headless":true,
+  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://127.0.0.1:PORT","headless":true,
                    "host_resolver_rules":"MAP host 1.2.3.4"|null,"timeout_ms":45000}
+                  ("proxy" is REQUIRED — it is the Go-owned dial; see PROXY_REQUIRED)
                   {"op":"smoke"}
   worker -> Go:   zero or more guard asks before the final line:
                   {"ask":"fetchable","url":"https://…"}
@@ -28,6 +29,14 @@ blocked at context creation (service_workers="block") — a page's own SW
 fetches would otherwise bypass the route interceptor entirely. Every path
 aborts (or closes, for WebSocket) blocked targets BEFORE Chrome ever
 connects.
+
+The ask is only the POLICY half. The connection that follows used to be
+Chrome's own: it re-resolved the host itself, a moment after Go validated an
+address, so a TTL-0 rebind put the browser on 127.0.0.1 / 169.254.169.254
+while the ask had seen a public IP — the check-vs-dial hole pinnedDialContext
+closes for every Go client. The DIAL half therefore belongs to Go too: this
+worker refuses to launch without the Go-side proxy (see PROXY_REQUIRED), and
+launch_arguments() makes that proxy the only way out of the browser.
 """
 
 import asyncio
@@ -35,6 +44,7 @@ import json
 import os.path
 import shutil
 import sys
+import urllib.parse
 
 
 # Only binaries `channel="chrome"` can actually launch — patchright's chrome
@@ -58,6 +68,70 @@ def chrome_binary():
         if found:
             return found
     return None
+
+
+# The refusal one missing proxy earns. Go validates every URL through the ask
+# protocol, but Chrome dials what CHROME resolves; only a proxy Go owns makes
+# the address Go validated the address Chrome connects to. Rendering a page
+# without it would re-open the SSRF hole the guards exist to close, so the
+# rung fails CLOSED and the ladder falls through to its other rungs.
+PROXY_REQUIRED = (
+    "browser rung requires the Go-side pinned proxy: without it Chrome resolves and dials "
+    "every host itself, so a DNS rebind reaches an address the SSRF guard refused"
+)
+
+# Chrome's own resolver must answer NOTHING. Every connection then has to go
+# through the proxy, which dials the address Go validated; DNS prefetch and
+# preconnect cannot leak a lookup or open an unproxied socket either.
+NO_LOCAL_DNS_RULE = "MAP * ~NOTFOUND"
+
+# WebRTC negotiates UDP straight to an ICE candidate: it crosses neither the
+# HTTP proxy nor the route guard, so a page could reach an internal address
+# every other path refuses. The switch is Chrome's own mechanism; the init
+# script below is the second layer, in case a build ignores it.
+WEBRTC_POLICY_ARG = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+
+WEBRTC_BLOCK_SCRIPT = """
+for (const name of ['RTCPeerConnection', 'webkitRTCPeerConnection', 'RTCDataChannel']) {
+  try {
+    Object.defineProperty(window, name, {configurable: false, writable: false, value: undefined});
+  } catch (error) {
+    console.error('harvester browser rung could not disable ' + name + ': ' + error);
+  }
+}
+"""
+
+
+def proxy_settings(proxy_url):
+    """Patchright's proxy option for one fetch, or None when there is nothing
+    to proxy through — the caller decides what an absent proxy means.
+
+    bypass="<-loopback>" REMOVES Chrome's implicit "never proxy localhost or
+    link-local" rule. Those are precisely the addresses an SSRF is after, and
+    a default build dials them directly, past the proxy Go owns."""
+    if not proxy_url:
+        return None
+    return {"server": proxy_url, "bypass": "<-loopback>"}
+
+
+def launch_arguments(proxy_url, host_resolver_rules=None):
+    """Chrome's launch switches for one fetch. Pure, so the rung's SSRF
+    posture is testable with no browser and no patchright."""
+    if not proxy_url:
+        raise ValueError(PROXY_REQUIRED)
+    rules = [host_resolver_rules] if host_resolver_rules else []
+    # The proxy's OWN host still has to resolve; NO_LOCAL_DNS_RULE would
+    # otherwise strand the browser with no way to reach its only exit. An
+    # EXCLUDE for an IP-literal proxy is a harmless no-op.
+    proxy_host = urllib.parse.urlsplit(proxy_url).hostname
+    if not proxy_host:
+        # A bare "host:port" has no scheme for urlsplit to key on; Chrome
+        # accepts that spelling, so read the host out of it directly.
+        proxy_host = proxy_url.rsplit(":", 1)[0].strip("[]")
+    if proxy_host:
+        rules.append(f"EXCLUDE {proxy_host}")
+    rules.append(NO_LOCAL_DNS_RULE)
+    return [f"--host-resolver-rules={','.join(rules)}", WEBRTC_POLICY_ARG]
 
 
 def browser_route_guard(ask_fetchable):
@@ -189,8 +263,13 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
     die at the route layer; a one-shot pre-check alone would let Chrome walk straight past
     it), a context.route_web_socket() interceptor re-checks every WebSocket the same way
     before it connects, and service workers are blocked at context creation so a page
-    cannot route around either interceptor via its own SW-originated fetches.
+    cannot route around either interceptor via its own SW-originated fetches. The DIAL
+    behind every one of those decisions belongs to Go as well: without *proxy_url* this
+    returns PROXY_REQUIRED and launches nothing, because Chrome resolving a validated
+    host a second time is the whole rebinding hole.
     """
+    if not proxy_url:
+        return "", None, headless, PROXY_REQUIRED
     try:
         from patchright.async_api import async_playwright  # type: ignore[import-not-found]
     except ImportError:
@@ -208,16 +287,8 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
     if not allowed:
         return "", None, False, reason or f"refused initial url {url}"
 
-    proxy = {"server": proxy_url} if proxy_url else None
-
-    # Chrome resolves DNS itself, with no pinning hop. On a network that
-    # rewrites DNS answers that would send the browser rung to a block page
-    # while every HTTP rung reached the real host. Go resolves over HTTPS and
-    # hands us the validated address as a "MAP host ip" rule; an absent rule
-    # leaves Chrome's own resolution in place.
-    launch_args = []
-    if host_resolver_rules:
-        launch_args.append(f"--host-resolver-rules={host_resolver_rules}")
+    proxy = proxy_settings(proxy_url)
+    launch_args = launch_arguments(proxy_url, host_resolver_rules)
 
     async def _render(headless: bool):
         async with async_playwright() as p:  # type: ignore[attr-defined]
@@ -226,6 +297,7 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
             try:
                 context = await browser.new_context(**CONTEXT_OPTIONS)
                 await install_route_guards(context, guarded_ask)
+                await context.add_init_script(WEBRTC_BLOCK_SCRIPT)
 
                 page = await context.new_page()
                 resp = await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")

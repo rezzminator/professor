@@ -52,6 +52,8 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 			}
 		}
 	}
+	var lastErr error
+	var lastStatus int
 	for _, rung := range []struct {
 		name   string
 		client *http.Client
@@ -60,7 +62,12 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 		{rungDirect, h.binaryDirectOrClient(), h.userAgent}, {rungChromeImpersonation, h.binaryChromeOrChrome(), chromeUA},
 	} {
 		body, status, contentType, err := getBody(ctx, rung.client, source, rung.ua, maxImageBytes+1)
-		if err != nil || status >= 400 || len(body) > maxImageBytes {
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		lastStatus = status
+		if status >= 400 || len(body) > maxImageBytes {
 			continue
 		}
 		kind := classifyKind(source, contentType, body)
@@ -69,7 +76,16 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 		}
 		return h.storeBinary(source, kind, rung.name, body, refreshValue(refresh))
 	}
-	return Result{Source: source, Error: "image could not be downloaded"}
+	// A transport failure on every rung is an outage, never "not an image"
+	// (F14) — the two must not collapse into the same fixed message.
+	if lastErr != nil {
+		return Result{
+			Source:    source,
+			Error:     "image could not be downloaded: " + lastErr.Error(),
+			ErrorKind: errorKind(lastErr),
+		}
+	}
+	return Result{Source: source, Error: "image could not be downloaded", HTTPStatus: lastStatus}
 }
 
 func (h *Harvester) binaryDirectOrClient() *http.Client {
@@ -180,6 +196,8 @@ func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refres
 			return path, Result{Source: source, Kind: kind, Path: path, Method: cacheLabel, CacheStatus: cacheStatusHit}
 		}
 	}
+	var lastErr error
+	var lastStatus int
 	for _, rung := range []struct {
 		name   string
 		client *http.Client
@@ -188,7 +206,12 @@ func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refres
 		{rungDirect, h.binaryDirectOrClient(), h.userAgent}, {rungChromeImpersonation, h.binaryChromeOrChrome(), chromeUA},
 	} {
 		body, status, contentType, err := getBody(ctx, rung.client, source, rung.ua, h.options.MaxBytes)
-		if err != nil || status >= 400 {
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		lastStatus = status
+		if status >= 400 {
 			continue
 		}
 		kind := classifyKind(source, contentType, body)
@@ -200,5 +223,14 @@ func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refres
 			return result.Path, result
 		}
 	}
-	return "", Result{Source: source, Error: "archive could not be downloaded"}
+	// A transport failure on every rung is an outage, never "not an archive"
+	// (F14) — the two must not collapse into the same fixed message.
+	if lastErr != nil {
+		return "", Result{
+			Source:    source,
+			Error:     "archive could not be downloaded: " + lastErr.Error(),
+			ErrorKind: errorKind(lastErr),
+		}
+	}
+	return "", Result{Source: source, Error: "archive could not be downloaded", HTTPStatus: lastStatus}
 }

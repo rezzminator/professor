@@ -221,7 +221,7 @@ func TestRunCommandWithRunnerRecordsProcessLifecycle(t *testing.T) {
 func TestDownloadFileWrapsTheClientForHTTPOut(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	body := "the pinned artifact bytes"
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		_, _ = writer.Write([]byte(body))
 	}))
 	defer server.Close()

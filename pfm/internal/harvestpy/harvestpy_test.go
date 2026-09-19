@@ -309,7 +309,7 @@ func TestProvisionKeepsAbsoluteVenvLinksAtTheirFinalPath(t *testing.T) {
 	targets, cache := fakeProvisionInputs(t, root, platform)
 	var smokePaths []string
 
-	result, err := provision(context.Background(), ProvisionOptions{
+	result, err := provisionWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
 		Run: fakeProvisionRun(t, false),
 		Smoke: func(_ context.Context, runtime Runtime) (map[string]any, error) {
@@ -359,7 +359,7 @@ func TestProvisionFailureRemovesIncompleteFinalPath(t *testing.T) {
 	targets, cache := fakeProvisionInputs(t, root, platform)
 	desired := desiredTestDigest(platform, targets[platform])
 
-	_, err := provision(context.Background(), ProvisionOptions{
+	_, err := provisionWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
 		Run: fakeProvisionRun(t, true),
 	}, targets)
@@ -394,7 +394,7 @@ func TestProvisionFailureRestoresQuarantinedEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := provision(context.Background(), ProvisionOptions{
+	_, err := provisionWithTargets(context.Background(), ProvisionOptions{
 		Root: root, Cache: cache, Platform: platform,
 		Run: fakeProvisionRun(t, true),
 	}, targets)
@@ -533,8 +533,8 @@ func TestConverterCancellationReleasesBlockedWrite(t *testing.T) {
 		t.Fatal("Convert() remained blocked after cancellation")
 	}
 	calls := fake.LifecycleCalls()
-	if len(calls) < 2 || calls[0].Action != "kill" || calls[1].Action != "wait" {
-		t.Fatalf("lifecycle calls = %+v, want kill then wait", calls)
+	if len(calls) < 2 || calls[0].Action != "kill-group" || calls[1].Action != "wait" {
+		t.Fatalf("lifecycle calls = %+v, want kill-group then wait", calls)
 	}
 }
 
@@ -1130,5 +1130,5 @@ var targetsForTest = Targets()
 
 func provisionWith(t *testing.T, options ProvisionOptions) (ProvisionResult, error) {
 	t.Helper()
-	return provision(context.Background(), options, targetsForTest)
+	return provisionWithTargets(context.Background(), options, targetsForTest)
 }

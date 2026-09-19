@@ -13,17 +13,28 @@ type doiMetadataFailure struct {
 	err      error
 }
 
+// doiMetadataError aggregates every provider's own failure for one lookup
+// that came back with nothing usable. subject names what was being looked up
+// ("DOI metadata" when unset, for ResolveDOI's original caller; "title
+// lookup" for ResolveTitle's F13 fix; "book" for ResolveBook's F14 fix) so
+// the rendered message never claims a DOI lookup failed when the query was
+// actually a book title.
 type doiMetadataError struct {
+	subject  string
 	failures []doiMetadataFailure
 	kind     string
 }
 
 func (e *doiMetadataError) Error() string {
+	subject := e.subject
+	if subject == "" {
+		subject = "DOI metadata"
+	}
 	details := make([]string, 0, len(e.failures))
 	for _, failure := range e.failures {
 		details = append(details, failure.provider+":"+doiMetadataFailureKind(failure.err))
 	}
-	return fmt.Sprintf("DOI metadata lookup failed; %s: providers %s", e.kind, strings.Join(details, ", "))
+	return fmt.Sprintf("%s lookup failed; %s: providers %s", subject, e.kind, strings.Join(details, ", "))
 }
 
 func (e *doiMetadataError) Unwrap() error {

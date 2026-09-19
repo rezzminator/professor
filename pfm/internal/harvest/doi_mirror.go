@@ -88,12 +88,39 @@ func gatewayClient(base *http.Client, jar http.CookieJar) *http.Client {
 		if err := validateFetchURL(next.URL.String(), false); err != nil {
 			return err
 		}
+		stripCrossHostCredentialHeaders(next, via)
 		if existingRedirect != nil {
 			return existingRedirect(next, via)
 		}
 		return nil
 	}
 	return clone
+}
+
+// crossHostRedirectCredentialHeaders lists request headers this package
+// sends that carry a provider credential, matching the gatewayRequest.headers
+// call sites (oa_sources.go's Semantic Scholar x-api-key, search.go's Brave
+// X-Subscription-Token). Go's stdlib already strips Authorization/Cookie-class
+// headers on a cross-host redirect (net/http's shouldCopyHeaderOnRedirect);
+// it does not know about these, so this policy extends the same protection to
+// them (F16).
+var crossHostRedirectCredentialHeaders = []string{"X-Api-Key", "X-Subscription-Token"}
+
+// stripCrossHostCredentialHeaders removes this package's own credential
+// headers from a redirected request when the hop leaves the ORIGINAL host: a
+// same-host redirect (http -> https on the same provider, a trailing slash)
+// keeps them, matching stdlib's own same-host behavior for Authorization.
+func stripCrossHostCredentialHeaders(next *http.Request, via []*http.Request) {
+	if len(via) == 0 || next == nil || next.URL == nil {
+		return
+	}
+	original := via[0].URL
+	if original == nil || strings.EqualFold(original.Host, next.URL.Host) {
+		return
+	}
+	for _, name := range crossHostRedirectCredentialHeaders {
+		next.Header.Del(name)
+	}
 }
 
 func doiMirrorMaxBytes(h *Harvester) int64 {
@@ -121,14 +148,19 @@ func readDOIMirrorResponse(
 		return nil, status, contentType, errors.New("gateway received an empty response body")
 	}
 	decoded, closeBody, err := decodedResponseBody(resp)
+	// decodedResponseBody returns a LIVE closer on every return path,
+	// including its unsupported-encoding error arm (net.go) — register the
+	// close before checking err, or that arm leaks the body and the
+	// connection (F5). A named return means `return ..., err` below already
+	// sets returnErr, so this defer sees the right value either way.
+	defer func() {
+		if closeErr := closeBody(); closeErr != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("close response: %w", closeErr))
+		}
+	}()
 	if err != nil {
 		return nil, status, contentType, err
 	}
-	defer func() {
-		if err := closeBody(); err != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("close response: %w", err))
-		}
-	}()
 	body, err = io.ReadAll(io.LimitReader(decoded, maxBytes+1))
 	if err != nil {
 		return nil, status, contentType, fmt.Errorf("read response: %w", err)

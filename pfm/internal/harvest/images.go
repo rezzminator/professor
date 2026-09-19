@@ -64,6 +64,13 @@ func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource str
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			// A recovered panic (F1) is swallowed exactly like every other
+			// failure this loop already answers silently (fetchErr, a bad
+			// status, a non-image kind — none of them log either): the C23
+			// activity-log ratchet (arch-check.sh) refuses a new bare
+			// log call, and this function has no per-item error
+			// report to attach one to either way.
+			defer recoverItem(func(error) {})
 			sem <- struct{}{}
 			defer func() { <-sem }()
 			body, status, contentType, fetchErr := getBody(ctx, h.client, full, h.userAgent, maxImageBytes+1)

@@ -132,6 +132,60 @@ func askAndRead(reader *bufio.Reader, url string) string {
 	return fmt.Sprintf("allow=%t reason=%q", reply.Allow, reply.Reason)
 }
 
+// TestBrowserFetchRequestCarriesTheGoOwnedDial is the Go half of L2-F7: the
+// worker refuses to launch Chrome without the proxy Go owns (browser.py
+// PROXY_REQUIRED), so the proxy and the validated resolver pin must BOTH reach
+// it verbatim on every fetch — a dropped field there is an unpinned browser.
+func TestBrowserFetchRequestCarriesTheGoOwnedDial(t *testing.T) {
+	requestReader, requestWriter := io.Pipe()
+	responseReader, responseWriter := io.Pipe()
+	runner := &deps.FakeRunner{}
+	runner.ScriptInteractive([]string{"fake-browser"}, deps.InteractiveScript{
+		Pid: 7004, Stdin: requestWriter, Stdout: responseReader,
+	})
+	sent := make(chan BrowserFetchRequest, 1)
+	go func() {
+		line, err := bufio.NewReader(requestReader).ReadString('\n')
+		if err != nil {
+			return
+		}
+		var request browserWorkerRequest
+		if err := json.Unmarshal([]byte(line), &request); err != nil {
+			return
+		}
+		sent <- request.BrowserFetchRequest
+		_, _ = fmt.Fprintln(responseWriter, `{"ok":true,"status":200,"html":"rendered"}`)
+	}()
+	t.Cleanup(func() {
+		_ = requestReader.Close()
+		_ = responseWriter.Close()
+	})
+	worker := NewBrowserWorker(Runtime{Python: "fake-browser", Script: "script", Runner: runner})
+	t.Cleanup(func() { _ = worker.Close() })
+	if _, _, err := worker.FetchPinned(
+		context.Background(),
+		"https://publisher.example.test/walled",
+		"http://127.0.0.1:8431",
+		"MAP publisher.example.test 93.184.216.34",
+		true,
+		45000,
+		func(string) error { return nil },
+	); err != nil {
+		t.Fatalf("FetchPinned() error = %v", err)
+	}
+	select {
+	case request := <-sent:
+		if request.Proxy != "http://127.0.0.1:8431" {
+			t.Fatalf("the Go-owned proxy did not reach the worker: %+v", request)
+		}
+		if request.HostResolverRules != "MAP publisher.example.test 93.184.216.34" {
+			t.Fatalf("the validated resolver pin did not reach the worker: %+v", request)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the worker never received a fetch request")
+	}
+}
+
 // TestNilAskHandlerFailsClosed pins that a missing SSRF handler refuses every
 // ask rather than allowing Chrome to connect unvalidated.
 func TestNilAskHandlerFailsClosed(t *testing.T) {

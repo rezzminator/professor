@@ -36,11 +36,60 @@ func ProvisionBrowser(ctx context.Context, options ProvisionOptions) (ProvisionR
 	return provisionBrowserWithTargets(ctx, options, immutableTargets)
 }
 
+// browserRebuildSuffix marks the sibling directory a rebuild of the LIVE
+// digest is staged in. It is never the published name unless the swap
+// succeeded, so a directory carrying it that `current` does not resolve to is
+// an abandoned attempt and is cleared on the next run.
+const browserRebuildSuffix = ".rebuild-"
+
+// browserBuildTarget answers where this run may build, and which tree the
+// successful swap replaces. uv records .venv/bin/python as an ABSOLUTE symlink
+// into the extracted interpreter, so the build directory can never be renamed
+// afterwards — the swap is the `current` pointer moving, never a rename. When
+// the digest path is the very tree `current` resolves to, the rebuild is
+// staged beside it: `current` keeps pointing at a working environment until
+// the pointer moves, so a crash in between leaves the old one live and a
+// concurrent fetch never reads a half-deleted tree. A leftover nothing points
+// at is unreachable and is cleared in place.
+func browserBuildTarget(envRoot, current, desired string, now clock.Clock) (build, replaced string, err error) {
+	want := filepath.Join(envRoot, desired)
+	live := ""
+	if resolved, resolveErr := filepath.EvalSymlinks(current); resolveErr == nil {
+		live = resolved
+	} else if !errors.Is(resolveErr, os.ErrNotExist) {
+		return "", "", fmt.Errorf("resolve browser current pointer %s: %w", current, resolveErr)
+	}
+	attempts, globErr := filepath.Glob(want + browserRebuildSuffix + "*")
+	if globErr != nil {
+		return "", "", fmt.Errorf("find abandoned browser rebuild directories under %s: %w", envRoot, globErr)
+	}
+	for _, attempt := range attempts {
+		if attempt == live {
+			continue
+		}
+		if err := os.RemoveAll(attempt); err != nil {
+			return "", "", fmt.Errorf("remove abandoned browser rebuild directory %s: %w", attempt, err)
+		}
+	}
+	if _, statErr := os.Stat(want); errors.Is(statErr, os.ErrNotExist) {
+		return want, "", nil
+	} else if statErr != nil {
+		return "", "", fmt.Errorf("inspect browser environment %s: %w", want, statErr)
+	}
+	if resolved, resolveErr := filepath.EvalSymlinks(want); resolveErr == nil && resolved == live {
+		return want + fmt.Sprintf("%s%d", browserRebuildSuffix, now.Now().UnixNano()), want, nil
+	}
+	if err := os.RemoveAll(want); err != nil {
+		return "", "", fmt.Errorf("clear stale browser environment %s: %w", want, err)
+	}
+	return want, "", nil
+}
+
 func provisionBrowserWithTargets(
 	ctx context.Context,
 	options ProvisionOptions,
 	targets map[Platform]Target,
-) (ProvisionResult, error) {
+) (result ProvisionResult, returnErr error) {
 	if options.Root == "" {
 		return ProvisionResult{}, errors.New("harvestpy provision root is empty")
 	}
@@ -82,6 +131,18 @@ func provisionBrowserWithTargets(
 	base.Digest = desired
 	current := BrowserRuntimeRoot(options.Root, platform)
 	envRoot := filepath.Join(options.Root, "env-browser", platform.String())
+	// Single-flight from here on: reuse check, downloads, build and swap all
+	// touch this root, and a second pfm converging it at the same time is how
+	// one of them reads a tree the other is halfway through replacing.
+	release, err := lockProvisionRoot(envRoot)
+	if err != nil {
+		return ProvisionResult{}, err
+	}
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			returnErr = errors.Join(returnErr, releaseErr)
+		}
+	}()
 	if existing, err := ReadEnvironmentDigest(
 		filepath.Join(current, "environment.json"),
 	); err == nil && existing.Digest == desired &&
@@ -117,25 +178,22 @@ func provisionBrowserWithTargets(
 	); err != nil {
 		return ProvisionResult{}, fmt.Errorf("prepare browser Python input: %w", err)
 	}
-	if err := os.MkdirAll(envRoot, 0o700); err != nil {
-		return ProvisionResult{}, fmt.Errorf("create browser environment root: %w", err)
+	final, replaced, err := browserBuildTarget(envRoot, current, desired, options.Clock)
+	if err != nil {
+		return ProvisionResult{}, err
 	}
-	final := filepath.Join(envRoot, desired)
-	if _, err := os.Stat(final); err == nil {
-		// A stale or broken environment at the exact digest path is replaced
-		// wholesale; there is nothing inside worth keeping.
-		if err := os.RemoveAll(final); err != nil {
-			return ProvisionResult{}, fmt.Errorf("clear stale browser environment: %w", err)
-		}
-	}
-	// Build DIRECTLY at the final path, like the conversion provisioner:
-	// uv records .venv/bin/python as an absolute symlink into the extracted
-	// interpreter, so a staging→final rename would dangle every link.
+	published := false
 	defer func() {
 		// A failed provision leaves nothing behind: honest absence
-		// (NOT_PROVISIONED) instead of a half-built tree.
-		if _, statErr := os.Stat(filepath.Join(final, "environment.json")); errors.Is(statErr, os.ErrNotExist) {
-			_ = os.RemoveAll(final)
+		// (NOT_PROVISIONED) instead of a half-built tree. Until the swap,
+		// final is never the directory `current` resolves to, so this can only
+		// remove a tree no reader can reach; AFTER the swap it is the live one
+		// and must survive even a failure on the way out.
+		if returnErr == nil || published {
+			return
+		}
+		if err := os.RemoveAll(final); err != nil {
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove failed browser environment %s: %w", final, err))
 		}
 	}()
 	if err := os.Mkdir(final, 0o700); err != nil {
@@ -225,8 +283,17 @@ func provisionBrowserWithTargets(
 	if err := writePrivate(filepath.Join(final, "environment.json"), append(marker, '\n')); err != nil {
 		return ProvisionResult{}, err
 	}
-	if err := atomicCurrentWithClock(envRoot, desired, options.Clock); err != nil {
+	// THE swap: until this line `current` still resolves to the previous,
+	// working environment.
+	if err := atomicCurrentWithClock(envRoot, filepath.Base(final), options.Clock); err != nil {
 		return ProvisionResult{}, err
+	}
+	published = true
+	if replaced != "" {
+		// Unreachable now that the pointer moved.
+		if err := os.RemoveAll(replaced); err != nil {
+			return ProvisionResult{}, fmt.Errorf("remove replaced browser environment %s: %w", replaced, err)
+		}
 	}
 	return ProvisionResult{Digest: desired, Environment: base, Runtime: Runtime{
 		Python: filepath.Join(current, "project", ".venv", "bin", "python"),

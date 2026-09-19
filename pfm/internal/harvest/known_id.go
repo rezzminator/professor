@@ -35,7 +35,10 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 	}
 	trace := []string{}
 	resolverFailureKind := ""
-	if err != nil && kind == IdentifierDOI {
+	if err != nil && (kind == IdentifierDOI || kind == IdentifierISBN) {
+		// doiMetadataError (F14) now also carries a book-lookup outage
+		// (ResolveBook); doiResolverErrorKind reads its generic kind field
+		// regardless of subject, so the same classifier applies here too.
 		resolverFailureKind = doiResolverErrorKind(err)
 	}
 	var doiMirrorFailure *Result

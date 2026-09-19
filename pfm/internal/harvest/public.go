@@ -116,7 +116,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 			body = result.Content
 			if strings.EqualFold(result.Kind, kindArchive) {
 				if len(result.Members) > 0 {
-					body = h.publicArchiveListing(source, result.Members)
+					body = h.PublicArchiveListing(source, result.Members)
 				} else {
 					body = h.rewriteArchiveSource(source, result.Source, body)
 				}
@@ -221,7 +221,15 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 	return out
 }
 
-func (h *Harvester) publicArchiveListing(source string, members []Member) string {
+// PublicArchiveListing is the canonical, redaction-applied archive-listing
+// renderer (F19): it wraps formatArchiveListing with the same source
+// redaction the file-export path always applied (a fetched URL becomes its
+// harvest: handle; a local path becomes "requested archive") so harvestmcp's
+// live MCP answer and the exported file never drift again from having two
+// renderers. Exported signature: PublicArchiveListing(source string, members
+// []Member) string. Output is byte-identical to the pre-export helper this
+// replaces -- only its name changed.
+func (h *Harvester) PublicArchiveListing(source string, members []Member) string {
 	display := h.publicArchiveDisplay(source)
 	return formatArchiveListing(display, members)
 }

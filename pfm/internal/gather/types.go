@@ -66,6 +66,26 @@ type LiveCodex struct {
 	IdentityError string
 }
 
+// LiveOpenCode maps a running OpenCode process onto the ox- pane hosting it.
+//
+// Unlike LiveCodex there is no rollout descriptor and no exported session
+// variable to key identity on (engine.Descriptor.SessionEnv is empty for
+// OpenCode), so SessionID is what the identification ladder in
+// DetectOpenCode resolved — and "" is a legitimate answer: the seat is live
+// and addressable by its socket even when no indexed session can be pinned to
+// it. PaneTitle is kept because OpenCode's own terminal title is the only
+// human name such a seat has.
+type LiveOpenCode struct {
+	Socket      string
+	SessionName string
+	PaneID      string
+	PID         int
+	PanePID     int
+	CWD         string
+	PaneTitle   string
+	SessionID   string
+}
+
 // ClaudeProcess maps one live Claude process onto its owning tmux pane.
 type ClaudeProcess struct {
 	PID     int
@@ -120,6 +140,7 @@ type Snapshot struct {
 	Panes           []ProbePane
 	Crumbs          []Crumb
 	Codex           []LiveCodex
+	OpenCode        []LiveOpenCode
 	ClaudeProcesses []ClaudeProcess
 	Agents          []Agent
 	Cache1HSockets  []string

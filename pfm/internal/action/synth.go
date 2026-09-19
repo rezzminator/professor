@@ -333,7 +333,7 @@ func routeForKind(kind compose.Kind) (Route, error) {
 		return NewCodex, nil
 	case compose.NewOpenCode:
 		return NewOpenCode, nil
-	case compose.LiveClaude, compose.LiveCodex, compose.LiveSplit:
+	case compose.LiveClaude, compose.LiveCodex, compose.LiveOpenCode, compose.LiveSplit:
 		return Live, nil
 	// A booting row carries no other identity than its socket, so Enter can
 	// only ever attach it — the same Live route an ordinary live row takes,

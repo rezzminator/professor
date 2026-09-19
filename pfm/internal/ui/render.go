@@ -896,7 +896,7 @@ func (model Model) renderGroupedRow(
 		return professorUpdateStyle.Render(line)
 	case compose.LiveCodex, compose.ResumeCodex, compose.NewCodex:
 		return codexStyle.Render(line)
-	case compose.ResumeOpenCode, compose.NewOpenCode:
+	case compose.LiveOpenCode, compose.ResumeOpenCode, compose.NewOpenCode:
 		return openCodeStyle.Render(line)
 	case compose.LiveClaude, compose.ResumeClaude, compose.NewClaude:
 		return statsClaudeStyle.Render(line)
@@ -958,7 +958,7 @@ func framePanel(title string, lines []string, width int) string {
 
 func rowMarker(kind compose.Kind) string {
 	switch kind {
-	case compose.LiveClaude, compose.LiveCodex, compose.LiveSplit:
+	case compose.LiveClaude, compose.LiveCodex, compose.LiveOpenCode, compose.LiveSplit:
 		return "●"
 	case compose.Booting:
 		return "◐"
@@ -980,7 +980,7 @@ func (model Model) rowBadges(row compose.Row) string {
 	switch row.Kind {
 	case compose.LiveCodex, compose.ResumeCodex, compose.NewCodex:
 		badges = append(badges, "⬢")
-	case compose.ResumeOpenCode, compose.NewOpenCode:
+	case compose.LiveOpenCode, compose.ResumeOpenCode, compose.NewOpenCode:
 		badges = append(badges, "◇")
 	case compose.Agent:
 		badges = append(badges, "⚙ agent")

@@ -1,6 +1,10 @@
 package inject
 
-import "testing"
+import (
+	"testing"
+
+	pfmengine "hostops/pfm/internal/engine"
+)
 
 func TestSelectorLineExactChatShGuards(t *testing.T) {
 	t.Parallel()
@@ -132,10 +136,10 @@ func TestDeliveryProvenPlaceholderOnlyCountsForPasteTransport(t *testing.T) {
 	before := "conversation\n❯ "
 	after := "conversation\n[Pasted text #1 +12 lines]\n❯ "
 	message := "the original long message body, never itself visible in the capture"
-	if !deliveryProven(before, after, message, false, true) {
+	if !deliveryProven(pfmengine.Claude, before, after, message, false, true) {
 		t.Fatalf("collapsed-paste placeholder did not count as proof for the paste transport")
 	}
-	if deliveryProven(before, after, message, false, false) {
+	if deliveryProven(pfmengine.Claude, before, after, message, false, false) {
 		t.Fatalf("collapsed-paste placeholder incorrectly counted as proof for the literal transport")
 	}
 }

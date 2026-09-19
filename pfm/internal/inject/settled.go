@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // SettledTurn is this package's ONE wait for "the turn the pane is running
@@ -21,6 +23,11 @@ type SettledTurn struct {
 	Sleep func(ctx context.Context, duration time.Duration)
 	// Pane names the target in the baseline error; nothing else reads it.
 	Pane string
+	// Engine is the target's engine, so the busy half of every sample reads
+	// the footer THIS TUI renders (IsBusyFor). Empty keeps the historical
+	// Claude/Codex rule, which is what a caller that could not resolve an
+	// engine has always used.
+	Engine pfmengine.ID
 	// SelfTarget marks the shape where the pane being watched is the pane
 	// that asked, so the CALLER's own turn must be seen to end first.
 	SelfTarget bool
@@ -81,7 +88,7 @@ func (wait SettledTurn) samplePane(ctx context.Context) (paneSample, error) {
 		return paneSample{}, err
 	}
 	return paneSample{
-		busy:     IsBusy(lastNonEmptyLines(capture, paneBusyTailLines)),
+		busy:     IsBusyFor(wait.Engine, lastNonEmptyLines(capture, paneBusyTailLines)),
 		receipts: countCompactionReceipts(capture),
 	}, nil
 }
@@ -263,8 +270,10 @@ func (engine *Engine) waitForSettledTurn(
 	ctx context.Context,
 	socketPath, target string,
 	selfTarget bool,
+	engineID pfmengine.ID,
 ) (bool, error) {
 	return SettledTurn{
+		Engine: engineID,
 		Capture: func(ctx context.Context) (string, error) {
 			return engine.tmux.Capture(ctx, socketPath, target, false, paneScrollbackLines)
 		},

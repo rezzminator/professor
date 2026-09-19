@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 var (
@@ -39,8 +41,46 @@ func isHarnessCommand(message string) bool {
 }
 
 // IsBusy mirrors chat.sh's live spinner-detail test.
+//
+// It is the CLAUDE/CODEX rule and only that. Every caller that knows which
+// engine it is looking at calls IsBusyFor instead; this stays for the callers
+// that genuinely do not (a raw pane whose engine never resolved), where the
+// historical rule is still the least wrong answer.
 func IsBusy(capture string) bool {
 	return busyPattern.MatchString(capture)
+}
+
+// openCodeBusyFooterLines is how much of the tail the OpenCode busy test sees.
+// The hint lives on the LAST rendered line of the pane; three lines of slack
+// covers a wrapped footer without letting a turn that ended long ago keep the
+// pane "busy" from scrollback forever.
+const openCodeBusyFooterLines = 3
+
+// openCodeBusyHint is the footer OpenCode 1.18.18 renders WHILE a turn runs:
+// the keybind label for session_interrupt followed by its hint word. Note the
+// missing "to" — `esc interrupt`, not Claude's `esc to interrupt` — which is
+// why busyPattern cannot see it.
+const openCodeBusyHint = "esc interrupt"
+
+// IsBusyFor is the engine-aware busy test.
+//
+// OpenCode needs its own rule in BOTH directions. busyPattern's `\d+ tokens`
+// arm matches OpenCode's permanently-rendered sidebar token counter, so every
+// OpenCode pane — idle or not — reads as busy under the Claude/Codex rule;
+// and OpenCode's own running-turn footer says `esc interrupt`, which none of
+// busyPattern's arms match. One rule for three engines was wrong in both
+// directions at once here.
+func IsBusyFor(engine pfmengine.ID, capture string) bool {
+	if engine != pfmengine.OpenCode {
+		return IsBusy(capture)
+	}
+	tail := lastNonEmptyLines(capture, openCodeBusyFooterLines)
+	for _, line := range strings.Split(tail, "\n") {
+		if strings.Contains(stripTerminalControl(line), openCodeBusyHint) {
+			return true
+		}
+	}
+	return false
 }
 
 // SelectorLine returns the selected numbered option for a real open menu.
@@ -204,7 +244,7 @@ func lastNonEmptyLines(capture string, limit int) string {
 // moved into the transcript/engine. A busy delivery needs queue-specific
 // evidence; the spinner was already present before we typed and proves only
 // the older turn.
-func deliveryProven(before, after, message string, queued, fileBacked bool) bool {
+func deliveryProven(engine pfmengine.ID, before, after, message string, queued, fileBacked bool) bool {
 	pastComposer := withoutLastComposerLine(after)
 	if messageVisible(pastComposer, message) ||
 		(fileBacked && HasPastePlaceholder(pastComposer)) {
@@ -214,7 +254,7 @@ func deliveryProven(before, after, message string, queued, fileBacked bool) bool
 		return queueProofPattern.MatchString(after) &&
 			!queueProofPattern.MatchString(before)
 	}
-	return !IsBusy(before) && IsBusy(after)
+	return !IsBusyFor(engine, before) && IsBusyFor(engine, after)
 }
 
 func proofExpectation(queued bool) string {

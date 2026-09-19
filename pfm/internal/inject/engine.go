@@ -834,7 +834,6 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		base.Message = "target pane is dead or unreadable"
 		return base, nil
 	}
-	base.Busy = IsBusy(capture)
 	command, commandErr := engine.tmux.PaneCommand(ctx, target.SocketPath, target.Pane)
 	verifiedEngine := ""
 	if commandErr == nil {
@@ -843,6 +842,10 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 			target.Engine = verifiedEngine
 		}
 	}
+	// Busy is read only AFTER the pane's own process names the engine: the
+	// three TUIs render three different footers (IsBusyFor).
+	paneEngine := pfmengine.ID(target.Engine)
+	base.Busy = IsBusyFor(paneEngine, capture)
 	// Both TUIs own a safe composer queue while a turn is running. A normal
 	// inject types there and submits without interrupting the active turn;
 	// force-now alone is allowed to send Escape. pane_current_command is NOT a
@@ -851,7 +854,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	queueing := base.Busy && !request.ForceNow
 	if base.Busy && request.ForceNow {
 		for attempt := 0; attempt < engine.options.InterruptTries; attempt++ {
-			if !IsBusy(capture) {
+			if !IsBusyFor(paneEngine, capture) {
 				break
 			}
 			if err := engine.tmux.SendKey(
@@ -880,7 +883,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 				base.Message = "target pane died while waiting for idle"
 				return base, nil
 			}
-			if !IsBusy(capture) {
+			if !IsBusyFor(paneEngine, capture) {
 				base.Busy = false
 				break
 			}
@@ -1370,13 +1373,7 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 		base.Message += " — WARNING: " + warning
 	}
 	base.Proof = lastNonEmptyLines(proof, engine.options.ProofLines)
-	if !deliveryProven(
-		preSubmitCapture,
-		proof,
-		message,
-		queueing,
-		pasteTransport,
-	) {
+	if !deliveryProven(paneEngine, preSubmitCapture, proof, message, queueing, pasteTransport) {
 		base.Status = "delivered_unproven"
 		base.Message = fmt.Sprintf(
 			"delivered-unproven into %q — input cleared, but the pane capture below shows neither the message past the input bar nor the expected %s",

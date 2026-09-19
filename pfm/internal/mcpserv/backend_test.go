@@ -16,6 +16,7 @@ func TestChatRowStateNamesTheKilledButLiveContradiction(t *testing.T) {
 	for _, kind := range []compose.Kind{
 		compose.LiveClaude,
 		compose.LiveCodex,
+		compose.LiveOpenCode,
 		compose.LiveSplit,
 		compose.Agent,
 		compose.Booting,
@@ -42,6 +43,7 @@ func TestChatRowStateKeepsEveryOtherVerdict(t *testing.T) {
 	}{
 		{"live claude", compose.Row{Kind: compose.LiveClaude}, "idle"},
 		{"live codex", compose.Row{Kind: compose.LiveCodex}, "idle"},
+		{"live opencode", compose.Row{Kind: compose.LiveOpenCode}, "idle"},
 		{"booting", compose.Row{Kind: compose.Booting}, "booting"},
 		{"resumable", compose.Row{Kind: compose.ResumeClaude}, "resumable"},
 		{

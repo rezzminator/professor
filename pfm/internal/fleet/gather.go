@@ -38,6 +38,24 @@ func KillDependencies(runtime pfmconfig.Runtime) kill.Dependencies {
 	}
 }
 
+// openCodeProbeSessions projects the indexed OpenCode sessions onto the probe
+// layer's own row shape. gather must not import store — the live probe has no
+// business opening a database — so the mapping happens here, at the one place
+// that already holds both.
+func openCodeProbeSessions(sessions []store.OpenCodeSession) []gather.OpenCodeSession {
+	probe := make([]gather.OpenCodeSession, 0, len(sessions))
+	for index := range sessions {
+		session := sessions[index]
+		probe = append(probe, gather.OpenCodeSession{
+			ID:            session.ID,
+			Title:         session.Title,
+			Directory:     session.Directory,
+			TimeCreatedMS: session.TimeCreatedMS,
+		})
+	}
+	return probe
+}
+
 // Gather probes every live tmux pane and engine process against the loaded
 // data. Unless readOnly, it also applies the window renames the probe asks
 // for; a rename failure is reported on stderr and never fails the pass.
@@ -77,11 +95,13 @@ func Gather(
 		CodexThread: store.NewCodexThreadResolverRoots(
 			ctx, env.Config.CodexHomes(), bindingManager.CodexPaneBound(ctx),
 		),
-		CodexHomes:   env.Config.CodexHomes(),
-		ClaudeBinary: env.Config.Claude.Binary,
-		CodexBinary:  env.Config.Codex.Binary,
-		LabelEmojis:  env.Config.LabelEmojis(),
-		ReadOnly:     readOnly,
+		CodexHomes:       env.Config.CodexHomes(),
+		ClaudeBinary:     env.Config.Claude.Binary,
+		CodexBinary:      env.Config.Codex.Binary,
+		OpenCodeBinary:   env.Config.OpenCode.Binary,
+		OpenCodeSessions: openCodeProbeSessions(data.OpenCodeSessions),
+		LabelEmojis:      env.Config.LabelEmojis(),
+		ReadOnly:         readOnly,
 	})
 	if err != nil {
 		return gather.Snapshot{}, err

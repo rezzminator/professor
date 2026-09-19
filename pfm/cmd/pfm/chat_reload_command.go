@@ -76,6 +76,13 @@ func runChatReloadWithRuntime(
 	if code != 0 {
 		return code
 	}
+	// Refused HERE, where the caller is still reading: the detached worker has
+	// no way to identify an OpenCode seat (no session env, no crumb), so
+	// scheduling one printed success and then failed where nobody looked.
+	if reloadEngine(socketPath) == pfmengine.OpenCode {
+		fmt.Fprintf(stderr, "pfm chat reload: OpenCode chats cannot be reloaded yet (%s)\n", filepath.Base(socketPath))
+		return 2
+	}
 	if err := os.MkdirAll(resolved.SIDDir, 0o700); err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: create worker log directory: %v\n", err)
 		return 1

@@ -31,6 +31,20 @@ func (manager *Manager) IdentifySelf(
 			environment.TMUXPane,
 		)
 	}
+	// OpenCode exports no session variable and pfm writes it no crumb, so
+	// there is nothing here to identify a seat BY. Falling through to the
+	// Claude path — which is what an implicit else did — reported an ox- seat
+	// as a Claude chat with a missing session id: an answer about the wrong
+	// engine entirely. A refusal that names the engine and the limit is the
+	// honest one.
+	if known && id == pfmengine.OpenCode {
+		return Target{}, fmt.Errorf(
+			"self-kill is not supported for OpenCode chats (socket %s): "+
+				"OpenCode exports no session id, so this pane cannot name itself — "+
+				"kill it by name or id from another chat",
+			socketName,
+		)
+	}
 	return manager.identifyClaudeSelf(
 		ctx,
 		socketPath,

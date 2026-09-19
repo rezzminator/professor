@@ -342,7 +342,7 @@ func BuildCosmos(rows []Row, events []fleetdb.CommsEvent, nowNS int64, live bool
 // chat the user is actively looking at.
 func liveRow(row Row) bool {
 	switch row.Kind {
-	case LiveClaude, LiveCodex, LiveSplit, Agent, Booting:
+	case LiveClaude, LiveCodex, LiveOpenCode, LiveSplit, Agent, Booting:
 		return true
 	default:
 		return false

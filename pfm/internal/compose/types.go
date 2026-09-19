@@ -43,6 +43,13 @@ const (
 	// a swallowed failure must never render identically to "no update
 	// available". Never emitted by Compose either, for the same reason.
 	ProfessorUpdateFailed
+	// LiveOpenCode is a RUNNING OpenCode TUI on an ox- socket, detected from
+	// the pane's own process tree (gather.DetectOpenCode) rather than read out
+	// of the session store. Appended last for the same compatibility reason
+	// ResumeOpenCode was. Before it existed, a running OpenCode chat could
+	// only ever be listed as its own resume row — "resume-opencode", dead to
+	// every chat verb, while its TUI sat there answering keystrokes.
+	LiveOpenCode
 )
 
 func (kind Kind) String() string {
@@ -73,6 +80,8 @@ func (kind Kind) String() string {
 		return "professor-update"
 	case ProfessorUpdateFailed:
 		return "professor-update-failed"
+	case LiveOpenCode:
+		return "live-opencode"
 	default:
 		return "unknown"
 	}
@@ -80,7 +89,29 @@ func (kind Kind) String() string {
 
 // IsLiveSeat reports whether kind is a running primary chat seat.
 func (kind Kind) IsLiveSeat() bool {
-	return kind == LiveClaude || kind == LiveCodex || kind == LiveSplit
+	return kind == LiveClaude || kind == LiveCodex || kind == LiveSplit ||
+		kind == LiveOpenCode
+}
+
+// ResumeKindFor is the ONE demotion a live seat takes when it stops being
+// live — its tmux server died under it (action.Executor.Open,
+// action.OpenDetached) or the picker deliberately killed it to reboot it
+// (picker.rebootRow). The answer is the resumable kind of the seat's OWN
+// engine: the if/else these three call sites each used to spell mapped
+// everything that was not Codex onto ResumeClaude, so an OpenCode seat came
+// back as somebody else's chat entirely. A non-live kind is returned
+// unchanged — there is nothing to demote.
+func ResumeKindFor(kind Kind) Kind {
+	switch kind {
+	case LiveCodex:
+		return ResumeCodex
+	case LiveOpenCode:
+		return ResumeOpenCode
+	case LiveClaude, LiveSplit:
+		return ResumeClaude
+	default:
+		return kind
+	}
 }
 
 // IsAddressable reports whether kind has a live process or pane that chat

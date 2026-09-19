@@ -974,6 +974,8 @@ func liveEngineCounts(rows []compose.Row) map[pfmengine.ID]int {
 		switch row.Kind {
 		case compose.LiveCodex:
 			counts[pfmengine.Codex]++
+		case compose.LiveOpenCode:
+			counts[pfmengine.OpenCode]++
 		case compose.LiveSplit:
 			counts[pfmengine.Claude] += maxInt(1, row.SplitCount)
 		case compose.LiveClaude, compose.Agent, compose.Booting:

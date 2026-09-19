@@ -185,7 +185,7 @@ func newScriptedEngine(t *testing.T, frames []paneFrame) (*Engine, *paneScript) 
 // scripted fixture here produces (settled_test.go covers that one on purpose).
 func mustSettle(t *testing.T, engine *Engine, selfTarget bool) bool {
 	t.Helper()
-	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", selfTarget)
+	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", selfTarget, pfmengine.Claude)
 	if err != nil {
 		t.Fatalf("waitForSettledTurn() baseline error: %v", err)
 	}

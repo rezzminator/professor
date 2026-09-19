@@ -65,7 +65,9 @@ func (engine *Engine) DeliverThen(ctx context.Context, wait ThenWait) (result Re
 	defer func() {
 		engine.releaseArmed(armed, err == nil && result.Code == 0 && result.Steers > 0)
 	}()
-	observed, baselineErr := engine.waitForSettledTurn(ctx, socketPath, target, wait.SelfTarget)
+	observed, baselineErr := engine.waitForSettledTurn(
+		ctx, socketPath, target, wait.SelfTarget, pfmengine.ID(wait.Engine),
+	)
 	if baselineErr != nil {
 		// Not one capture of the pane succeeded, so the waiter never had a
 		// reference frame to judge a compaction receipt against. Delivering

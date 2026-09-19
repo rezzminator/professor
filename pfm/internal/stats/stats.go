@@ -525,17 +525,25 @@ func chatTrees(
 
 func liveKind(kind compose.Kind) bool {
 	return kind == compose.LiveClaude || kind == compose.LiveCodex ||
-		kind == compose.LiveSplit || kind == compose.Agent || kind == compose.Booting
+		kind == compose.LiveOpenCode || kind == compose.LiveSplit ||
+		kind == compose.Agent || kind == compose.Booting
 }
 
+// statsEngineName names the engine a live row's resource usage is charged to.
+// Its fallback is CLAUDE, not "unknown", so a kind with no arm here does not
+// read as unidentified — it reads as somebody else's chat, which is why every
+// non-Claude live kind must be named explicitly.
 func statsEngineName(kind compose.Kind) string {
-	if kind == compose.LiveCodex {
+	switch kind {
+	case compose.LiveCodex:
 		return pfmengine.MustLookup(pfmengine.Codex).LongName
-	}
-	if kind == compose.LiveSplit {
+	case compose.LiveOpenCode:
+		return pfmengine.MustLookup(pfmengine.OpenCode).LongName
+	case compose.LiveSplit:
 		return "mixed"
+	default:
+		return pfmengine.MustLookup(pfmengine.Claude).LongName
 	}
-	return pfmengine.MustLookup(pfmengine.Claude).LongName
 }
 
 func engineCommand(command string) bool {

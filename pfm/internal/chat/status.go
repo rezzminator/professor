@@ -23,6 +23,10 @@ type StatusRequest struct {
 	// Engine and Model override the configured ask runner for Summary/Ask.
 	Engine pfmengine.ID
 	Model  string
+	// Capture overrides the tmux pane read Status falls back to when the
+	// transcript cannot decide working-vs-idle (statusFromPane). Nil is the
+	// real capture.
+	Capture PaneCapture
 }
 
 // Status inspects the target. A dead chat is a status, not an error: the
@@ -40,6 +44,16 @@ func Status(
 	status, err := headless.Inspect(ctx, target, clock.Real.Now())
 	if err != nil {
 		return headless.Status{}, err
+	}
+	// headless.Inspect stays pure — transcript and socket only. A live chat it
+	// could read no turn for (OpenCode writes no transcript this process
+	// reads; a fresh Claude or Codex seat has not taken a turn yet) gets its
+	// state from the one place the evidence exists: its own pane.
+	if needsPaneState(target, status) {
+		status, err = statusFromPane(ctx, target, status, request.Capture, runtime)
+		if err != nil {
+			return headless.Status{}, err
+		}
 	}
 	if !request.Summary && !request.Ask {
 		return status, nil

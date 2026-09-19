@@ -47,9 +47,7 @@ func (executor *Executor) OpenDetached(
 	if executor == nil {
 		return OpenResult{}, errors.New("action executor is nil")
 	}
-	if request.Row.Kind == compose.LiveClaude ||
-		request.Row.Kind == compose.LiveCodex ||
-		request.Row.Kind == compose.LiveSplit {
+	if request.Row.Kind.IsLiveSeat() {
 		if !executor.tmux.SocketAlive(ctx, request.Row.Socket) {
 			// Mirrors Open()'s own dead-socket fallback: a live row whose
 			// socket has disappeared resumes fresh rather than being reported
@@ -60,11 +58,7 @@ func (executor *Executor) OpenDetached(
 					request.Row.Socket,
 				)
 			}
-			if request.Row.Kind == compose.LiveCodex {
-				request.Row.Kind = compose.ResumeCodex
-			} else {
-				request.Row.Kind = compose.ResumeClaude
-			}
+			request.Row.Kind = compose.ResumeKindFor(request.Row.Kind)
 			request.Row.Socket = ""
 			request.Row.SessionName = ""
 			request.Row.WindowName = ""

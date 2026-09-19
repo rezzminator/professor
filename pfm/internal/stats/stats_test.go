@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hostops/pfm/internal/compose"
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 func uintString(value uint64) string { return strconv.FormatUint(value, 10) }
@@ -695,5 +696,19 @@ func TestSamplerCountsAMultiRecordAssistantMessageOnce(t *testing.T) {
 	// msg_A once (1000) + msg_B (100) + req_C once (5) + two id-less records (1 + 1).
 	if got := chatsBySocket(snapshot.Chats)["split-socket"]; !got.TokensKnown || got.TokenCount != 1107 {
 		t.Fatalf("split-message token accounting = %#v, want 1107 (each message counted once)", got)
+	}
+}
+
+// A live OpenCode seat is a live chat for counting, and its usage belongs to
+// OpenCode. The engine-name fallback returns CLAUDE for anything it does not
+// recognise, so a missing arm here does not read as "unknown" — it reads as
+// somebody else's chat.
+func TestLiveOpenCodeCountsAsItsOwnEngine(t *testing.T) {
+	if !liveKind(compose.LiveOpenCode) {
+		t.Fatal("liveKind(LiveOpenCode)=false, want true")
+	}
+	want := pfmengine.MustLookup(pfmengine.OpenCode).LongName
+	if got := statsEngineName(compose.LiveOpenCode); got != want {
+		t.Fatalf("statsEngineName(LiveOpenCode)=%q, want %q", got, want)
 	}
 }

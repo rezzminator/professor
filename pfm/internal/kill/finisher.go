@@ -121,13 +121,24 @@ func NewFinisher(
 	}, nil
 }
 
+// exitCommands is the graceful-close command each engine's TUI answers to,
+// and the set of engines this finisher knows how to close at all. OpenCode's
+// command palette lists "/exit — close OpenCode" (its parser also accepts
+// /quit and :q); Codex spells the same thing /quit.
+var exitCommands = map[pfmengine.ID]string{
+	pfmengine.Claude:   "/exit",
+	pfmengine.Codex:    "/quit",
+	pfmengine.OpenCode: "/exit",
+}
+
 // Run performs the delayed graceful close, fallback kill, cleanup, refresh,
 // post-exit kill, and teammate reap.
 func (finisher *Finisher) Run(
 	ctx context.Context,
 	args ExitArgs,
 ) error {
-	if args.Engine != pfmengine.Claude && args.Engine != pfmengine.Codex {
+	command, known := exitCommands[args.Engine]
+	if !known {
 		return fmt.Errorf("unknown kill-exit engine %q", args.Engine)
 	}
 	if args.ID == "" || args.SocketPath == "" || args.PaneID == "" {
@@ -141,10 +152,6 @@ func (finisher *Finisher) Run(
 	// and they are the only evidence of which panes were watching it.
 	viewports := finisher.viewportPanes(ctx, args.SocketPath)
 
-	command := "/exit"
-	if args.Engine == pfmengine.Codex {
-		command = "/quit"
-	}
 	_ = finisher.tmux.SendLine(ctx, args.SocketPath, args.PaneID, command)
 	landed, probeErr, err := pollPaneGone(
 		ctx, finisher.tmux, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,

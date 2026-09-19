@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/gather"
@@ -37,6 +36,7 @@ type composer struct {
 	cacheSockets     map[string]struct{}
 	liveTranscripts  map[string]struct{}
 	liveRollouts     map[string]struct{}
+	liveOpenCode     map[string]struct{}
 	claudeAccounts   accountMatcher
 	codexAccounts    accountMatcher
 	projectDirs      map[string]string
@@ -49,7 +49,10 @@ func Compose(input Input) Output {
 
 	liveClaude, splits := current.liveClaudeRows()
 	liveCodex := current.liveCodexRows()
-	liveRows := collapseLiveServers(append(liveClaude, liveCodex...))
+	liveOpenCode := current.liveOpenCodeRows()
+	liveRows := collapseLiveServers(
+		append(append(liveClaude, liveCodex...), liveOpenCode...),
+	)
 	liveRows = append(liveRows, splits...)
 	// Booting rows are already deduped by socket in gather (DetectCrumblessLive
 	// skips any socket a crumb resolves for), so they bypass
@@ -174,6 +177,12 @@ func Compose(input Input) Output {
 		// Subagent children and archived sessions never earn rows: a child is
 		// part of its parent's turn, an archived one the user filed away.
 		if session.ParentID != "" || session.TimeArchivedMS != 0 {
+			continue
+		}
+		// A session a live pane already claimed is that pane's row, not a
+		// second resumable one — the same suppression liveTranscripts and
+		// liveRollouts do for the other two engines.
+		if _, live := current.liveOpenCode[session.ID]; live {
 			continue
 		}
 		row := current.openCodeSessionRow(session)
@@ -325,6 +334,7 @@ func (current *composer) buildIndexes() {
 	}
 	current.liveTranscripts = make(map[string]struct{})
 	current.liveRollouts = make(map[string]struct{})
+	current.liveOpenCode = make(map[string]struct{})
 	// Account roots are the stable side of the prefix match. Resolve each one
 	// once, then match the ordinary row path lexically against both its
 	// configured and canonical spellings. The previous implementation called
@@ -892,35 +902,6 @@ func (current *composer) rolloutRow(rollout store.Rollout, kind Kind) Row {
 	}
 }
 
-// openCodeSessionRow renders one OpenCode session. The title is authoritative —
-// OpenCode names its sessions itself — with the first prompt as fallback for
-// sessions it never titled.
-func (current *composer) openCodeSessionRow(session store.OpenCodeSession) Row {
-	name := session.Title
-	if name == "" {
-		name = naming.DisplayName("", "", session.FirstPrompt)
-	}
-	return Row{
-		Kind:           ResumeOpenCode,
-		ID:             session.ID,
-		Name:           name,
-		Project:        projectName(session.ProjectDir),
-		CWD:            firstNonEmpty(session.Directory, session.ProjectDir),
-		PromptCount:    session.PromptCount,
-		AssistantCount: session.AssistantCount,
-		ActivityNS:     session.TimeUpdatedMS * int64(time.Millisecond),
-	}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func (current *composer) lineageRoot(rollout store.Rollout) string {
 	if root := current.lineageRootByID[rollout.ID]; root != "" {
 		return root
@@ -954,7 +935,12 @@ func (current *composer) applyKill(row Row, engine pfmengine.ID) Row {
 	// kill-eligibility test (ui/model.go's toggleKilled): neither side may let
 	// a kill land on an identity that stops meaning anything the moment the
 	// crumb appears and the row becomes an ordinary live one.
-	if row.Kind == LiveSplit || row.Kind == Booting || row.ID == "" {
+	// An unidentified live OpenCode row is keyed on its own SOCKET for exactly
+	// the reason Booting is, and needs the same guard: the moment the seat's
+	// session is finally pinned down, a tombstone written against the socket
+	// names nothing at all.
+	if row.Kind == LiveSplit || row.Kind == Booting || row.ID == "" ||
+		(row.Kind == LiveOpenCode && row.ID == row.Socket) {
 		return row
 	}
 	// Explicit kills carry no baseline and stay permanent. A /clear kill is a
@@ -1107,6 +1093,14 @@ func defaultEligible(row Row) bool {
 	if row.Kind == LiveCodex {
 		return !row.BG
 	}
+	// A LIVE OpenCode row is exempt for the same reason and one stronger: a
+	// seat no indexed session could be pinned to carries NO counters at all
+	// (liveOpenCodeRows), so every emptiness test below reads a running TUI
+	// the user is typing into as an abandoned spawn. The whole point of this
+	// Kind is that such a chat stops being reported as absent.
+	if row.Kind == LiveOpenCode {
+		return !row.BG
+	}
 	// An OpenCode session has no file size at all — it lives entirely inside
 	// its engine's SQLite store, so the size half of this test would suppress
 	// every one of them forever. Its reality signal is prompts AND an answer:
@@ -1181,31 +1175,16 @@ func collapseLiveServers(rows []Row) []Row {
 }
 
 func newerSocket(challenger, incumbent string) bool {
-	challengerEpoch := socketEpoch(challenger)
-	incumbentEpoch := socketEpoch(incumbent)
+	challengerEpoch := pfmengine.SocketBirth(challenger)
+	incumbentEpoch := pfmengine.SocketBirth(incumbent)
 	if challengerEpoch != incumbentEpoch {
 		return challengerEpoch > incumbentEpoch
 	}
 	return challenger > incumbent
 }
 
-func socketEpoch(socket string) int64 {
-	parts := strings.Split(socket, "-")
-	if len(parts) != 4 {
-		return 0
-	}
-	if _, ok := pfmengine.FromSocket(socket); !ok {
-		return 0
-	}
-	epoch, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || epoch < 0 {
-		return 0
-	}
-	return epoch
-}
-
 func socketEpochNS(socket string) int64 {
-	epoch := socketEpoch(socket)
+	epoch := pfmengine.SocketBirth(socket)
 	if epoch <= 0 || epoch > (1<<63-1)/1_000_000_000 {
 		return 0
 	}
@@ -1273,7 +1252,7 @@ func EngineForKindChecked(kind Kind) (pfmengine.ID, error) {
 	switch kind {
 	case LiveCodex, ResumeCodex, NewCodex:
 		return pfmengine.Codex, nil
-	case ResumeOpenCode, NewOpenCode:
+	case LiveOpenCode, ResumeOpenCode, NewOpenCode:
 		return pfmengine.OpenCode, nil
 	case LiveClaude, ResumeClaude, NewClaude, LiveSplit, Agent, Booting:
 		return pfmengine.Claude, nil

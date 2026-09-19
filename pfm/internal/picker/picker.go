@@ -494,11 +494,7 @@ func rebootRow(
 	if err := pfmchat.KillServer(ctx, resolved, row.Socket); err != nil {
 		fmt.Fprintf(stderr, "pfm: reboot kill-server %s: %v\n", row.Socket, err)
 	}
-	if row.Kind == compose.LiveCodex {
-		row.Kind = compose.ResumeCodex
-	} else {
-		row.Kind = compose.ResumeClaude
-	}
+	row.Kind = compose.ResumeKindFor(row.Kind)
 	row.Socket = ""
 	row.PaneID = ""
 	row.SessionName = ""

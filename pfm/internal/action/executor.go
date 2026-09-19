@@ -66,9 +66,7 @@ func (executor *Executor) Open(
 	if executor == nil {
 		return "", errors.New("action executor is nil")
 	}
-	if request.Row.Kind == compose.LiveClaude ||
-		request.Row.Kind == compose.LiveCodex ||
-		request.Row.Kind == compose.LiveSplit {
+	if request.Row.Kind.IsLiveSeat() {
 		if !executor.tmux.SocketAlive(ctx, request.Row.Socket) {
 			if request.Row.ID == "" {
 				return "", fmt.Errorf(
@@ -82,11 +80,7 @@ func (executor *Executor) Open(
 				request.Row.Socket,
 				request.Row.ID,
 			)
-			if request.Row.Kind == compose.LiveCodex {
-				request.Row.Kind = compose.ResumeCodex
-			} else {
-				request.Row.Kind = compose.ResumeClaude
-			}
+			request.Row.Kind = compose.ResumeKindFor(request.Row.Kind)
 			request.Row.Socket = ""
 			request.Row.SessionName = ""
 			request.Row.WindowName = ""
@@ -107,6 +101,7 @@ func (executor *Executor) Open(
 				request.Row.Socket,
 				request.Config.Claude.Binary,
 				request.Config.Codex.Binary,
+				request.Config.OpenCode.Binary,
 			) {
 				return "", nil
 			}

@@ -310,15 +310,8 @@ func runChatCapture(args []string, stdout, stderr io.Writer, runtimes ...command
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)
 		return 1
 	}
-	target := chat.Pane
-	if target == "" {
-		target = chat.Session
-	}
-	if target == "" {
-		target = chat.Socket
-	}
 	capture, err := (inject.TmuxInjector{}).Capture(
-		context.Background(), socketPath, target, true, inject.FullScrollback,
+		context.Background(), socketPath, pfmchat.PaneTarget(chat), true, inject.FullScrollback,
 	)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat capture: %v\n", err)

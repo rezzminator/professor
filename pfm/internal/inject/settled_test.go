@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	pfmengine "hostops/pfm/internal/engine"
 )
 
 // TestSettledTurnRetriesTheBaselineUntilThePaneWasReallyRead is F1. The
@@ -32,7 +34,7 @@ func TestSettledTurnRetriesTheBaselineUntilThePaneWasReallyRead(t *testing.T) {
 	engine, script := newScriptedEngine(t, frames)
 	engine.options.ThenBusyTries = 3
 	engine.options.ThenIdleTries = 6
-	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", true)
+	observed, err := engine.waitForSettledTurn(context.Background(), "", "chat", true, pfmengine.Claude)
 	if err != nil {
 		t.Fatalf("waitForSettledTurn() errored although a later capture succeeded: %v", err)
 	}

@@ -40,24 +40,33 @@ type Dependencies struct {
 	CodexHomes   []string
 	ClaudeBinary string
 	CodexBinary  string
-	LabelEmojis  []string
-	ReadOnly     bool
+	// OpenCodeBinary is the configured OpenCode launch command, used to
+	// recognise an OpenCode process whose executable is not the default name.
+	OpenCodeBinary string
+	// OpenCodeSessions is the indexed OpenCode session set DetectOpenCode
+	// names a live pane from. gather never opens opencode.db itself — the
+	// rows arrive already read (fleet.Gather).
+	OpenCodeSessions []OpenCodeSession
+	LabelEmojis      []string
+	ReadOnly         bool
 }
 
 // Gatherer creates immutable live-state snapshots.
 type Gatherer struct {
-	paths        paths.Values
-	proc         ProcFS
-	tmux         TmuxClient
-	now          func() time.Time
-	codexName    CodexNameResolver
-	codexIDName  CodexIDNameResolver
-	codexThread  CodexThreadResolver
-	codexHomes   []string
-	claudeBinary string
-	codexBinary  string
-	labelEmojis  []string
-	readOnly     bool
+	paths            paths.Values
+	proc             ProcFS
+	tmux             TmuxClient
+	now              func() time.Time
+	codexName        CodexNameResolver
+	codexIDName      CodexIDNameResolver
+	codexThread      CodexThreadResolver
+	codexHomes       []string
+	claudeBinary     string
+	codexBinary      string
+	openCodeBinary   string
+	openCodeSessions []OpenCodeSession
+	labelEmojis      []string
+	readOnly         bool
 }
 
 // New resolves paths and fills real implementations for omitted interfaces.
@@ -95,18 +104,21 @@ func New(dependencies Dependencies) (*Gatherer, error) {
 		codexHomes = append([]string{}, codexHomes...)
 	}
 	return &Gatherer{
-		paths:        resolved,
-		proc:         proc,
-		tmux:         tmux,
-		now:          now,
-		codexName:    dependencies.CodexName,
-		codexIDName:  dependencies.CodexIDName,
-		codexThread:  dependencies.CodexThread,
-		codexHomes:   codexHomes,
-		claudeBinary: dependencies.ClaudeBinary,
-		codexBinary:  dependencies.CodexBinary,
-		labelEmojis:  append([]string(nil), dependencies.LabelEmojis...),
-		readOnly:     dependencies.ReadOnly,
+		paths:          resolved,
+		proc:           proc,
+		tmux:           tmux,
+		now:            now,
+		codexName:      dependencies.CodexName,
+		codexIDName:    dependencies.CodexIDName,
+		codexThread:    dependencies.CodexThread,
+		codexHomes:     codexHomes,
+		claudeBinary:   dependencies.ClaudeBinary,
+		codexBinary:    dependencies.CodexBinary,
+		openCodeBinary: dependencies.OpenCodeBinary,
+		openCodeSessions: append(
+			[]OpenCodeSession(nil), dependencies.OpenCodeSessions...),
+		labelEmojis: append([]string(nil), dependencies.LabelEmojis...),
+		readOnly:    dependencies.ReadOnly,
 	}, nil
 }
 
@@ -146,6 +158,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 
 	var crumbs CrumbProbe
 	var codex []LiveCodex
+	var openCode []LiveOpenCode
 	var claudeProcesses []ClaudeProcess
 	var agents []Agent
 	var cacheSockets []string
@@ -177,6 +190,17 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 			tmuxProbe.Panes,
 			gatherer.codexThread,
 			gatherer.codexBinary,
+		)
+		return err
+	})
+	group.Go(func() error {
+		var err error
+		openCode, err = detectOpenCodeFrom(
+			cmdlines,
+			gatherer.proc,
+			tmuxProbe.Panes,
+			gatherer.openCodeSessions,
+			gatherer.openCodeBinary,
 		)
 		return err
 	})
@@ -221,6 +245,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		Panes:           append([]ProbePane(nil), tmuxProbe.Panes...),
 		Crumbs:          append([]Crumb(nil), crumbs.Crumbs...),
 		Codex:           append([]LiveCodex(nil), codex...),
+		OpenCode:        append([]LiveOpenCode(nil), openCode...),
 		ClaudeProcesses: append([]ClaudeProcess(nil), claudeProcesses...),
 		Agents:          append([]Agent(nil), agents...),
 		Cache1HSockets:  append([]string(nil), cacheSockets...),

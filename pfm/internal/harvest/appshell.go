@@ -73,7 +73,7 @@ func appShellProbeURL(source string) (string, bool) {
 	}
 	token := make([]byte, 8)
 	if _, err := rand.Read(token); err != nil {
-		log.Printf("harvest: app-shell probe token for %s: %v", source, err)
+		log.Printf("harvest: app-shell probe token for %s: %v", logSource(source), err)
 		return "", false
 	}
 	probe := &url.URL{
@@ -111,7 +111,7 @@ func (h *Harvester) probeAppShell(ctx context.Context, client *http.Client, ua, 
 	}
 	probeBody, status, _, err := getBody(ctx, client, probe, ua, h.options.MaxBytes)
 	if err != nil {
-		log.Printf("harvest: app-shell probe %s for %s could not run: %v", probe, source, err)
+		log.Printf("harvest: app-shell probe %s for %s could not run: %v", probe, logSource(source), err)
 		return false
 	}
 	if len(probeBody) == 0 || isChallenge(probeBody, status) {

@@ -431,7 +431,11 @@ func renderHeadlessFirst(ctx context.Context, fetcher BrowserFetcher, source str
 	}
 	headedHTML, headedStatus, headedErr := fetcher.FetchBrowser(ctx, source, false)
 	if headedErr != nil {
-		log.Printf("harvest: headed browser retry for %s could not run after a headless wall: %v", source, headedErr)
+		log.Printf(
+			"harvest: headed browser retry for %s could not run after a headless wall: %v",
+			logSource(source),
+			headedErr,
+		)
 		return browserRenderOutcome{html: html, status: status, wall: true}
 	}
 	return browserRenderOutcome{

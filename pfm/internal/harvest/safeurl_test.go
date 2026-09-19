@@ -55,3 +55,39 @@ func TestSanitizeTransportErrorLeavesNonURLErrorUntouched(t *testing.T) {
 		t.Fatal("sanitizeTransportError(nil, ...) != nil")
 	}
 }
+
+// D1 (hands-on stress test): a URL the caller wrote with credentials in it was
+// echoed whole into the MCP answer and into daemon stderr.
+func TestPublicSourceLabelDropsUserinfoAndKeepsWhatTellsSourcesApart(t *testing.T) {
+	for _, row := range []struct{ name, raw, want string }{
+		{"userinfo", "https://USER:PASSWORD@example.com/a?q=1", "https://example.com/a?q=1"},
+		{"plain url", "https://example.com/a?q=1", "https://example.com/a?q=1"},
+		{"doi", "10.1000/xyz123", "10.1000/xyz123"},
+		{"title", "A title: with a colon", "A title: with a colon"},
+		{"unparseable userinfo", "https://USER:PASS WORD@exa mple.com/", "<invalid-url>"},
+	} {
+		if got := PublicSourceLabel(row.raw); got != row.want {
+			t.Errorf("%s: PublicSourceLabel(%q) = %q, want %q", row.name, row.raw, got, row.want)
+		}
+	}
+}
+
+func TestPublicFailureNeverEchoesURLCredentialsAndNamesAPolicyRefusal(t *testing.T) {
+	const source = "https://USER:PASSWORD@example.com/?token=SECRET"
+	out := PublicFailure(source, Result{Source: source, Error: "URL userinfo is not allowed"})
+	if strings.Contains(out.Source, "PASSWORD") || strings.Contains(out.Source, "USER") {
+		t.Fatalf("public failure echoed the URL credentials: %q", out.Source)
+	}
+	for _, refusal := range []string{
+		"URL userinfo is not allowed",
+		"refusing private/internal host 169.254.169.254",
+		`Member name contains '..': "../escape.txt"`,
+		`Member name is absolute path: "/etc/passwd"`,
+	} {
+		got := PublicFailure("x", Result{Error: refusal})
+		if got.ErrorKind != errorKindRefused {
+			t.Errorf("%q classed %q, want %q — a policy refusal must never read as a retryable failure",
+				refusal, got.ErrorKind, errorKindRefused)
+		}
+	}
+}

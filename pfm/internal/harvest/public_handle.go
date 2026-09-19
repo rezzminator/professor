@@ -84,7 +84,7 @@ func (h *Harvester) PublicHandle(source string) (string, error) {
 		return "", errors.New("public handle requires a public HTTP(S) URL")
 	}
 	if err := validateFetchURL(source, false); err != nil {
-		log.Printf("harvest: public handle rejected %q: %v", source, err)
+		log.Printf("harvest: public handle rejected %q: %v", logSource(source), err)
 		return "", errors.New("public handle requires a public HTTP(S) URL")
 	}
 	root, err := h.resolvedCacheRoot()
@@ -100,11 +100,11 @@ func (h *Harvester) PublicHandle(source string) (string, error) {
 	path := filepath.Join(dir, hex.EncodeToString(key[:])+".json")
 	mapping, err := json.Marshal(publicHandleRecord{Target: source})
 	if err != nil {
-		log.Printf("harvest: public handle mapping encode failed for %q: %v", source, err)
+		log.Printf("harvest: public handle mapping encode failed for %q: %v", logSource(source), err)
 		return "", errors.New("could not create public source handle")
 	}
 	if err := h.writeAtomic(path, mapping, 0o600); err != nil {
-		log.Printf("harvest: public handle mapping write failed for %q: %v", source, err)
+		log.Printf("harvest: public handle mapping write failed for %q: %v", logSource(source), err)
 		return "", errors.New("could not create public source handle")
 	}
 	return handle, nil
@@ -123,7 +123,7 @@ func (h *Harvester) ResolvePublicSource(source string) (string, error) {
 			return "", err
 		}
 		if err := validateFetchURL(target, false); err != nil {
-			log.Printf("harvest: stored public handle target rejected %q: %v", target, err)
+			log.Printf("harvest: stored public handle target rejected %q: %v", logSource(target), err)
 			return "", errors.New("stored public source is no longer fetchable")
 		}
 		return target, nil
@@ -220,7 +220,7 @@ func (h *Harvester) readPublicHandle(source string) (string, error) {
 	}
 	data, err := readBoundedFile(path, 16*1024)
 	if err != nil {
-		log.Printf("harvest: public handle mapping read failed for %q: %v", source, err)
+		log.Printf("harvest: public handle mapping read failed for %q: %v", logSource(source), err)
 		return "", errors.New("public source handle is unavailable")
 	}
 	var record publicHandleRecord
@@ -243,7 +243,7 @@ func (h *Harvester) publicDisplayHandle(identity, exportedPath string) (string, 
 		return exportedPath, nil
 	}
 	if err := validateFetchURL(identity, false); err != nil {
-		log.Printf("harvest: cache identity is not a public URL %q: %v", identity, err)
+		log.Printf("harvest: cache identity is not a public URL %q: %v", logSource(identity), err)
 		return "", errors.New("cache match has no public identity")
 	}
 	return h.PublicHandle(identity)

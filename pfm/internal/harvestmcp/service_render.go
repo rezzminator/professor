@@ -26,6 +26,7 @@ func fetchItem(result harvest.Result) FetchItem {
 }
 
 func (service *Service) describeFetch(source string, result harvest.Result, sizeOnly bool) string {
+	source = harvest.PublicSourceLabel(source)
 	if result.Error != "" {
 		return "# " + source + "\nERROR: " + harvest.PublicFailureMessage(result)
 	}
@@ -226,7 +227,7 @@ func (service *Service) fetchOneImage(ctx context.Context, source string) ImageI
 		result = service.harvester.FetchImage(ctx, resolved)
 	}
 	result = service.harvester.PublicResult(source, result, true)
-	return ImageItem{Source: source, Path: result.Path, Bytes: result.Bytes, Error: result.Error}
+	return ImageItem{Source: result.Source, Path: result.Path, Bytes: result.Bytes, Error: result.Error}
 }
 
 // assertPublicURL delegates to harvest's own SSRF/scheme chokepoint

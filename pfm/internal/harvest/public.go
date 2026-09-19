@@ -41,7 +41,7 @@ type publicHandleRecord struct {
 func (h *Harvester) FetchPublic(ctx context.Context, source string, options FetchOptions) Result {
 	resolved, err := h.ResolvePublicSource(source)
 	if err != nil {
-		log.Printf("harvest: public source resolution failed for %q: %v", source, err)
+		log.Printf("harvest: public source resolution failed for %q: %v", logSource(source), err)
 		kind := errorKindInvalid
 		switch {
 		case strings.Contains(err.Error(), "does not exist"):
@@ -66,7 +66,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 	if result.Error != "" {
 		log.Printf(
 			"harvest: public result failure for %q: kind=%q status=%d challenge=%t error=%v",
-			source,
+			logSource(source),
 			result.ErrorKind,
 			result.HTTPStatus,
 			result.Challenge,
@@ -300,7 +300,7 @@ func stripGeneratedSourceMetadata(body string) string {
 
 func publicSuccessSkeleton(source string, result Result) Result {
 	return Result{
-		Source:      source,
+		Source:      PublicSourceLabel(source),
 		Kind:        publicKind(result.Kind),
 		CacheStatus: publicCacheStatus(result.CacheStatus),
 		HTTPStatus:  result.HTTPStatus,
@@ -424,7 +424,7 @@ func publicBinaryExtension(kind, path string, body []byte) (string, bool) {
 }
 
 func (h *Harvester) publicExportFailure(source string, result Result, operation string, err error) Result {
-	log.Printf("harvest: public export %s failed for %q (path=%q): %v", operation, source, result.Path, err)
+	log.Printf("harvest: public export %s failed for %q (path=%q): %v", operation, logSource(source), result.Path, err)
 	failure := Result{
 		Source:    source,
 		Kind:      publicKind(result.Kind),
@@ -438,7 +438,7 @@ func (h *Harvester) publicExportFailure(source string, result Result, operation 
 // Receipt writers use this boundary when a failure occurs after FetchPublic.
 func PublicFailure(source string, result Result) Result {
 	kind := publicErrorKind(result)
-	out := Result{Source: source, Error: PublicFailureMessage(result), ErrorKind: kind}
+	out := Result{Source: PublicSourceLabel(source), Error: PublicFailureMessage(result), ErrorKind: kind}
 	if result.HTTPStatus >= 400 && result.HTTPStatus < 600 {
 		out.HTTPStatus = result.HTTPStatus
 	}
@@ -491,6 +491,13 @@ func publicErrorKind(result Result) string {
 	}
 	err := strings.ToLower(result.Error)
 	switch {
+	// The package's own policy refusals (net.go): named as refusals, never as
+	// a failure the caller is told to retry.
+	case strings.Contains(err, "refusing private/internal host"),
+		strings.Contains(err, "userinfo is not allowed"),
+		strings.Contains(err, "member name is absolute path"),
+		strings.Contains(err, "member name contains '..'"):
+		return errorKindRefused
 	case strings.Contains(err, "context canceled"), strings.Contains(err, "context cancelled"):
 		return errorKindCancelled
 	case strings.Contains(err, "no such host"), strings.Contains(err, errorKindDNS):

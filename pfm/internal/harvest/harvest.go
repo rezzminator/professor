@@ -471,10 +471,10 @@ func (h *Harvester) fetchURLWithPolicy(
 				// The SSRF guard refused — a PERMANENT policy answer about
 				// this address, never an outage and never IP reputation.
 				browserPolicyRefused = true
-				log.Printf("harvest: browser rung refused %s by policy: %v", source, err)
+				log.Printf("harvest: browser rung refused %s by policy: %v", logSource(source), err)
 			case err != nil:
 				browserUnavailable = err.Error()
-				log.Printf("harvest: browser rung could not run for %s: %v", source, err)
+				log.Printf("harvest: browser rung could not run for %s: %v", logSource(source), err)
 			case html == "" || blankRenderPage(html):
 				// The render COMPLETED and found nothing — a real attempt with
 				// an empty result, never an outage. Chrome serialises at least
@@ -490,7 +490,7 @@ func (h *Harvester) fetchURLWithPolicy(
 					// The flag travels even when rung one saw no challenge: the
 					// browser surface is what identified the wall.
 					lastChallenge = true
-					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", source, status)
+					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", logSource(source), status)
 				} else {
 					converted, convErr := h.convertFetchedContent(ctx, kindHTML, source, []byte(html))
 					switch {
@@ -499,12 +499,12 @@ func (h *Harvester) fetchURLWithPolicy(
 						// a tool outage on this server — it must never read as
 						// "the wall won".
 						converterOutage = true
-						log.Printf("harvest: browser rung conversion failed for %s: %v", source, convErr)
+						log.Printf("harvest: browser rung conversion failed for %s: %v", logSource(source), convErr)
 					case sameAsShell(appShellText, converted):
 						// The bundle did not produce route content in a real
 						// browser either — the render is still the shell.
 						browserShellRender = true
-						log.Printf("harvest: browser rung rendered only the app shell for %s", source)
+						log.Printf("harvest: browser rung rendered only the app shell for %s", logSource(source))
 					case usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
 						(contentChars(converted) > lastContentChars || appShellText != "") && contentChars(converted) >= 500:
 						// Same thin-page floor as the HTML ladder above: a JS
@@ -609,7 +609,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			switch {
 			case ocrErr != nil:
 				ocrBackendFailed = true
-				log.Printf("harvest: OCR escalation backend failed for %s: %v", source, ocrErr)
+				log.Printf("harvest: OCR escalation backend failed for %s: %v", logSource(source), ocrErr)
 			case usableContent(ocrConverted, kindPDF):
 				return h.storeResult(
 					source,

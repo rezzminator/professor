@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 )
 
 // safeURL renders raw as scheme://host/path for an error or a log line: no
@@ -41,4 +42,29 @@ func sanitizeTransportError(err error, raw string) error {
 		return err
 	}
 	return fmt.Errorf("%s %s: %w", urlErr.Op, safeURL(raw), urlErr.Err)
+}
+
+// PublicSourceLabel is the caller's own source as it may be shown back to them:
+// a URL loses its userinfo, everything else is returned as written. The query
+// stays — it is what tells two requested URLs apart in one answer. A URL that
+// carries userinfo and cannot be parsed is never echoed at all.
+func PublicSourceLabel(raw string) string {
+	if !strings.Contains(raw, "://") || !strings.Contains(raw, "@") {
+		return raw
+	}
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Host == "" {
+		return "<invalid-url>"
+	}
+	parsed.User = nil
+	return parsed.String()
+}
+
+// logSource is a source as it may reach stderr: a URL is reduced to
+// scheme://host/path (safeURL), so neither userinfo nor a query is written.
+func logSource(raw string) string {
+	if strings.Contains(raw, "://") {
+		return safeURL(strings.TrimSpace(raw))
+	}
+	return raw
 }

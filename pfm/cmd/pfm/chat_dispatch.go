@@ -291,6 +291,14 @@ func runHeadlessTranscript(args []string, stdout, stderr io.Writer, runtimes ...
 			return renderNoSuchChat(names[0], stdout, stderr, *asJSON)
 		}
 		if errors.Is(err, pfmchat.ErrNoTranscript) {
+			if chat.Engine == pfmengine.OpenCode {
+				fmt.Fprintf(
+					stderr,
+					"pfm chat read: reading OpenCode session content is not supported (%q)\n",
+					chat.Name,
+				)
+				return 1
+			}
 			fmt.Fprintf(stderr, "pfm chat read: %q has not written a transcript yet\n", chat.Name)
 			return codeDeadChat
 		}
@@ -341,6 +349,14 @@ func runHeadlessLast(args []string, stdout, stderr io.Writer, runtimes ...comman
 	case errors.As(err, &targetErr):
 		return reportTargetError(err, names[0], stdout, stderr, false)
 	case errors.Is(err, pfmchat.ErrNoTranscript):
+		if result.Chat.Engine == pfmengine.OpenCode {
+			fmt.Fprintf(
+				stderr,
+				"pfm chat last: reading OpenCode session content is not supported (%q)\n",
+				result.Chat.Name,
+			)
+			return 1
+		}
 		fmt.Fprintf(stderr, "pfm chat last: %q has not written a transcript yet\n", result.Chat.Name)
 		return codeDeadChat
 	case errors.Is(err, pfmchat.ErrNoAnswer):

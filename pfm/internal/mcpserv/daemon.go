@@ -102,6 +102,14 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 	// door answered, and once by that server's own handler (route chat-mcp or
 	// harvester-mcp), for what the server inside it did.
 	return obs.Handler(daemonRoute, http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.ContentLength > maxDaemonBodyBytes {
+			http.Error(
+				writer,
+				fmt.Sprintf("request body is %d bytes; the limit is %d", request.ContentLength, maxDaemonBodyBytes),
+				http.StatusRequestEntityTooLarge,
+			)
+			return
+		}
 		request.Body = http.MaxBytesReader(writer, request.Body, maxDaemonBodyBytes)
 		// Browsers attach Origin even when script code targets loopback. Local
 		// MCP clients do not. Refuse browser-capable cross-origin requests before

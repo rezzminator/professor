@@ -159,9 +159,12 @@ func parseCodex(parsed record) (Entry, bool) {
 	case "user_message":
 		role = RoleUser
 		content = parsed.Payload.Message
-	case "agent_message":
-		role = RoleAssistant
-		content = parsed.Payload.Message
+	// "agent_message" is not handled here: it is an event_msg record that
+	// always pairs with a response_item message carrying the identical text
+	// (internal/mockengine/codex.go's recordAssistant writes both; real
+	// Codex rollouts do the same). internal/index/codex.go treats the
+	// response_item as the one canonical record for a turn already paired
+	// with an event — counting the event too reports the same reply twice.
 	case "message":
 		role = parsed.Payload.Role
 		content = parsed.Payload.Content

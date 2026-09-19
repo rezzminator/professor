@@ -25,7 +25,12 @@ var (
 	ErrNoTranscriptRegistry = errors.New("no transcript registry is available")
 	// ErrNoExcerptMatch: the registry was searched and no transcript holds the
 	// excerpt — an answer, distinct from a registry that could not be read.
-	ErrNoExcerptMatch = errors.New("no session contains the excerpt; try a longer or more distinctive chunk")
+	// It names its own scope: only Claude transcripts are searched, so a Codex
+	// or OpenCode chat holding the text is "not looked at", never "not there".
+	ErrNoExcerptMatch = errors.New(
+		"no session contains the excerpt in the Claude transcripts searched " +
+			"(Codex and OpenCode sessions are not searched); try a longer or more distinctive chunk",
+	)
 )
 
 // TranscriptMatch is one Claude transcript an excerpt was found in: how many

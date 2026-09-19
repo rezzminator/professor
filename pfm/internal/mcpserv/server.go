@@ -182,7 +182,7 @@ func (service *Service) register() {
 	}, obs.Tool("chat_whoami", service.chatWhoami))
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_find",
-		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_read. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
+		Description: "Finds indexed transcripts by a literal excerpt — \"which chat said X\", \"find the session where we discussed Y\". Call chat_find{excerpt:\"a distinctive line from it\"}. Returns ranked candidates (id, path, hits) — pass an id to chat_read. Only Claude transcripts are searched. A miss is the tool error \"no session contains the excerpt\" (try a longer, more distinctive chunk); any other error = the transcript index could not be read.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_find", service.chatFind))
 	mcp.AddTool(service.server, &mcp.Tool{

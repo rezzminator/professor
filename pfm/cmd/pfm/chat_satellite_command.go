@@ -200,9 +200,9 @@ func runChatSave(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 			return 1
 		}
 	}
-	entries, err := transcript.All(context.Background(), transcriptPath, string(pfmengine.Claude))
+	entries, err := transcriptEntriesForSave(context.Background(), transcriptPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat save: read transcript: %v\n", err)
+		fmt.Fprintf(stderr, "pfm chat save: %v\n", err)
 		return 1
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil && filepath.Dir(target) != "." {

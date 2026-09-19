@@ -353,3 +353,31 @@ func TestCodexContextPercentUsesLastWindowNotLifetimeTotal(t *testing.T) {
 		t.Fatalf("defensive context-percent cap = %f, want 100", percent)
 	}
 }
+
+// TestParseCodexSkipsAgentMessageEventPairedWithResponseItem pins the shape
+// internal/mockengine/codex.go's recordAssistant writes (and real Codex
+// rollouts carry too): a response_item message AND an event_msg agent_message
+// for the same turn. internal/index/codex.go treats the response_item as the
+// one canonical record for a turn already paired with an event — a reader
+// that also counts the event_msg reports the same reply twice.
+func TestParseCodexSkipsAgentMessageEventPairedWithResponseItem(t *testing.T) {
+	path := writeTranscript(
+		t,
+		"rollout.jsonl",
+		`{"timestamp":"t1","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"read the report"}]}}`+"\n"+
+			`{"timestamp":"t2","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the report is clean"}]}}`+"\n"+
+			`{"timestamp":"t3","type":"event_msg","payload":{"type":"agent_message","message":"the report is clean"}}`+"\n",
+	)
+	entries, _, err := Tail(context.Background(), path, "cx", 100, 0)
+	if err != nil {
+		t.Fatalf("Tail() error = %v", err)
+	}
+	got := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		got = append(got, Condensed(entry))
+	}
+	want := []string{"U read the report", "A the report is clean"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("entries\n got: %v\nwant: %v (agent_message event double-counted the reply)", got, want)
+	}
+}

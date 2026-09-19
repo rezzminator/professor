@@ -99,3 +99,33 @@ func TestClaudeUserRegistriesIncludeTheAmbientConfigDirTheLauncherPassesThrough(
 		t.Fatalf("registries[1].Reason=%q, want %q", registries[1].Reason, wantReason)
 	}
 }
+
+// TestWriteMCPClientJSONRefusesAnUnreadableOwnershipLedger pins the honesty
+// rule on the one ledger that says which MCP registrations are pfm's to
+// remove: a ledger that cannot be decoded — including the zero-byte file a
+// truncated write leaves — is an error naming it, never the empty ownership
+// that would silently disown every registration pfm has to clean up. The
+// inline reader this call site used to carry treated a zero-byte ledger as
+// "nothing owned"; it now shares loadMCPOwnership with the rest of the
+// package.
+func TestWriteMCPClientJSONRefusesAnUnreadableOwnershipLedger(t *testing.T) {
+	for name, ledger := range map[string]string{"empty": "", "malformed": "{not json"} {
+		t.Run(name, func(t *testing.T) {
+			home := t.TempDir()
+			installer := &engine{
+				options: Options{
+					Home: home, ConfigDir: filepath.Join(home, ".claude"), CodexHomes: []string{},
+					Mode: ModeApply, Stdout: io.Discard, MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377,
+				},
+				managedRoot: managedRootForHome(home),
+				apply:       true,
+			}
+			writeFixture(t, installer.mcpOwnershipPath(), ledger)
+			if _, err := installer.writeMCPClientJSON([]string{"chat"}); err == nil {
+				t.Fatal("an undecodable MCP ownership ledger read as an empty ownership")
+			} else if !strings.Contains(err.Error(), "MCP ownership") {
+				t.Fatalf("error did not name the MCP ownership ledger: %v", err)
+			}
+		})
+	}
+}

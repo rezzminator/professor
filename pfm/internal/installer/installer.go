@@ -31,6 +31,14 @@ type engine struct {
 	managedRoot string
 	outputErr   error
 	planErrors  []error
+	// removedPaths are the paths this pass removed, or — in a dry run, where
+	// nothing is removed at all — planned to remove. retireEmptyDir discounts
+	// them before refusing a non-empty directory (retire_empty_dir.go).
+	removedPaths map[string]bool
+	// reportedConfigDirs remembers the account config dirs whose physical
+	// path could not be resolved, so the one diagnostic is reported once per
+	// run instead of once per claudeConfigDirs() call (account_migrations.go).
+	reportedConfigDirs map[string]bool
 }
 
 type pinnedHarvestProvisioner struct{}
@@ -606,9 +614,32 @@ func (installer *engine) reconcileCodexCommands(assets []assetFile) error {
 	if !installer.apply {
 		return nil
 	}
+	sourceHome := ""
+	if installer.options.Mode == ModeUninstall {
+		// Uninstall must never WRITE a fresh Codex command mirror entry — only
+		// retire the ones this installer already owns. RunGlobalCommands derives
+		// its "wanted" set by scanning SourceHome/.claude/commands; pointing it
+		// at a fresh, guaranteed-empty directory makes that set unconditionally
+		// empty, so the ModeBuild call below can only ever delete managed
+		// entries, never create one for whatever still happens to sit in
+		// ~/.claude/commands at this point in the teardown — one of this
+		// installer's own not-yet-unwired commands, or a user's own foreign one
+		// sharing the directory.
+		empty, err := os.MkdirTemp("", "pfm-uninstall-codex-commands-")
+		if err != nil {
+			return fmt.Errorf("create empty Codex command source for uninstall: %w", err)
+		}
+		defer func() {
+			if removeErr := os.RemoveAll(empty); removeErr != nil {
+				installer.say("warning: remove temporary uninstall command source %s: %v", empty, removeErr)
+			}
+		}()
+		sourceHome = empty
+	}
 	result, err := codexgen.RunGlobalCommands(codexgen.GlobalCommandsOptions{
-		Home: installer.options.Home,
-		Mode: codexgen.ModeBuild,
+		Home:       installer.options.Home,
+		SourceHome: sourceHome,
+		Mode:       codexgen.ModeBuild,
 	})
 	if err != nil {
 		return fmt.Errorf("reconcile Codex global commands: %w", err)
@@ -796,6 +827,13 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.unwireSkills(assets); err != nil {
+		return err
+	}
+	// Before the Codex mirror is reconciled: that step's wanted set is
+	// derived from the Claude command registries this call just emptied, so
+	// unwiring first is what lets the mirror drop the same globals instead of
+	// recompiling them for an install that is going away.
+	if err := installer.unwireGlobalRegistries(); err != nil {
 		return err
 	}
 	if err := installer.reconcileCodexCommands(nil); err != nil {
@@ -1218,6 +1256,7 @@ func (installer *engine) retire(path, reason string) error {
 	if info.IsDir() && info.Mode()&os.ModeSymlink == 0 {
 		return fmt.Errorf("refuse to retire directory %s", path)
 	}
+	installer.markRemoved(path)
 	return installer.change("retire "+path+" ("+reason+")", func() error { return os.Remove(path) })
 }
 
@@ -1275,22 +1314,28 @@ func RawStatusLineCommand(home, command string) bool {
 	return command == "pfm statusline" || command == home+"/.local/bin/pfm statusline"
 }
 
-// ReadStatusLineCommand reads a Claude settings.json's statusLine.command,
-// empty when the file is absent, unreadable, malformed, or carries no
-// statusLine.command — so doctor can check a live host's actual wiring
-// without duplicating updateSettings' JSON shape.
-func ReadStatusLineCommand(path string) string {
+// ReadStatusLineCommand reads a Claude settings.json's statusLine.command, so
+// doctor can check a live host's actual wiring without duplicating
+// updateSettings' JSON shape. A settings file that does not exist is a
+// genuine "not configured" — empty command, nil error. A settings file that
+// exists but cannot be read or parsed is a DIFFERENT state: the command is
+// unknown, not absent, and is reported as an error rather than folded into
+// the same empty string a clean "not configured" returns.
+func ReadStatusLineCommand(path string) (string, error) {
 	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("read %s: %w", path, err)
 	}
 	var document map[string]any
 	if err := json.Unmarshal(raw, &document); err != nil {
-		return ""
+		return "", fmt.Errorf("decode %s: %w", path, err)
 	}
 	status, _ := document["statusLine"].(map[string]any)
 	command, _ := status["command"].(string)
-	return command
+	return command, nil
 }
 
 // HostOverlayState mirrors LauncherState for the two host-overlay scripts.
@@ -1659,29 +1704,6 @@ func (installer *engine) recordedProfessorSourceRepos() ([]string, error) {
 	return repos, nil
 }
 
-func (installer *engine) retireEmptyDir(path string) error {
-	info, err := os.Lstat(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("refuse to retire non-directory %s", path)
-	}
-	if installer.apply {
-		entries, readErr := os.ReadDir(path)
-		if readErr != nil {
-			return readErr
-		}
-		if len(entries) != 0 {
-			return fmt.Errorf("refuse to retire non-empty directory %s", path)
-		}
-	}
-	return installer.change("remove empty "+path, func() error { return os.Remove(path) })
-}
-
 // retireEmptyDirTolerant removes path only once it has actually turned out
 // empty. Unlike retireEmptyDir, a directory left non-empty is a
 // routine, visible skip rather than a hard failure — the same tolerant
@@ -2039,7 +2061,13 @@ func (installer *engine) wireCodexHooks() error {
 			if installer.options.Mode == ModeUninstall && len(ownership[physical]) > 0 {
 				return fmt.Errorf("refuse to strand owned hooks in invalid Codex hooks JSON at %s: %w", path, updateErr)
 			}
-			return fmt.Errorf("invalid Codex hooks JSON at %s: %w", path, updateErr)
+			// Same contract as the Claude sibling wireSettings (above): a
+			// hooks file the operator broke by hand is skipped loudly and the
+			// run continues. Only owned hooks that would be stranded justify
+			// stopping — one unparseable seat file must not cost the machine
+			// its MCP clients, log default, shell line and update metadata.
+			installer.skip("invalid Codex hooks JSON at " + path + ": " + updateErr.Error())
+			continue
 		}
 		if len(nextOwned) == 0 {
 			delete(ownership, physical)

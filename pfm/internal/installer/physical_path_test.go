@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path/filepath"
@@ -29,7 +30,14 @@ func TestInstallPhysicalPathStableAcrossCreation(t *testing.T) {
 	}
 }
 
-func TestDedupePhysicalDirsLogsBrokenSymlinkFallback(t *testing.T) {
+// TestDedupePhysicalDirsReportsBrokenSymlinkFallbackOnceInTheTranscript is a
+// REGRESSION test for the one installer diagnostic that wrote to raw
+// os.Stderr: it bypassed say/skip, the Report counts and the activity ledger,
+// and — because preflight plans the identical pass with its stdout discarded
+// while stderr is not — printed twice on every `--yes` run. It now goes
+// through the run's own transcript, exactly once per unresolvable directory
+// no matter how many times claudeConfigDirs() is called.
+func TestDedupePhysicalDirsReportsBrokenSymlinkFallbackOnceInTheTranscript(t *testing.T) {
 	root := t.TempDir()
 	broken := filepath.Join(root, "broken-config")
 	if err := os.Symlink(filepath.Join(root, "missing-target"), broken); err != nil {
@@ -40,30 +48,22 @@ func TestDedupePhysicalDirsLogsBrokenSymlinkFallback(t *testing.T) {
 		t.Fatal("broken symlink unexpectedly resolved")
 	}
 
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	previousStderr := os.Stderr
-	os.Stderr = writer
-	dirs := dedupePhysicalDirs([]string{broken})
-	os.Stderr = previousStderr
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	logged, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := reader.Close(); err != nil {
-		t.Fatal(err)
-	}
+	var transcript bytes.Buffer
+	installer := &engine{options: Options{Home: root, ConfigDir: broken, Stdout: &transcript}}
+	dirs := installer.claudeConfigDirs()
+	installer.claudeConfigDirs()
 
 	if len(dirs) != 1 || dirs[0] != broken {
-		t.Fatalf("dedupePhysicalDirs=%q, want fallback path %q", dirs, broken)
+		t.Fatalf("claudeConfigDirs=%q, want fallback path %q", dirs, broken)
 	}
-	if !strings.Contains(string(logged), broken) || !strings.Contains(string(logged), evalErr.Error()) {
-		t.Fatalf("stderr=%q, want path %q and full EvalSymlinks error %q", logged, broken, evalErr)
+	if !strings.Contains(transcript.String(), broken) || !strings.Contains(transcript.String(), evalErr.Error()) {
+		t.Fatalf("transcript=%q, want path %q and full EvalSymlinks error %q", transcript.String(), broken, evalErr)
+	}
+	if got := strings.Count(transcript.String(), "resolve config directory"); got != 1 {
+		t.Fatalf("the unresolvable config directory was reported %d times, want exactly 1", got)
+	}
+	if installer.report.Skipped != 1 {
+		t.Fatalf("report.Skipped = %d, want the unresolved directory counted once", installer.report.Skipped)
 	}
 }
 

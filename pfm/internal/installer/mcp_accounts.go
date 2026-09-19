@@ -73,15 +73,13 @@ func ClaudeUserRegistries(home string, accounts []pfmconfig.Account, ambientConf
 }
 
 func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
-	ownership := mcpOwnership{Registrations: map[string]map[string]any{}}
-	raw, err := os.ReadFile(installer.mcpOwnershipPath())
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	// One reader for this ledger: loadMCPOwnership (mcp.go) already renders a
+	// missing file as an empty ownership and every other failure — unreadable
+	// or undecodable — as a named error, which is exactly what this used to
+	// restate inline.
+	ownership, err := installer.loadMCPOwnership()
+	if err != nil {
 		return nil, err
-	}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &ownership); err != nil {
-			return nil, fmt.Errorf("decode MCP ownership: %w", err)
-		}
 	}
 	if ownership.Registrations == nil {
 		ownership.Registrations = map[string]map[string]any{}

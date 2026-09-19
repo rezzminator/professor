@@ -60,7 +60,7 @@ func reconcileOpenCodeLink(result *reconcileResult, output generatedFile, mode M
 		}
 	}
 	if mode != ModeBuild {
-		if err == nil && !isClaimable(output.Path, false) {
+		if err == nil && !isClaimable(output.Path) {
 			result.Problems = append(
 				result.Problems,
 				fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
@@ -78,7 +78,7 @@ func reconcileOpenCodeLink(result *reconcileResult, output generatedFile, mode M
 		result.Actions = append(result.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Link})
 		return
 	}
-	if err == nil && !isClaimable(output.Path, false) {
+	if err == nil && !isClaimable(output.Path) {
 		result.Problems = append(
 			result.Problems,
 			fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
@@ -102,9 +102,15 @@ func reconcileOpenCodeLink(result *reconcileResult, output generatedFile, mode M
 }
 
 func reconcileOpenCodeFile(result *reconcileResult, output generatedFile, mode Mode) {
+	wantMode := output.Mode
+	if wantMode == 0 {
+		wantMode = defaultGeneratedFileMode
+	}
 	info, err := os.Lstat(output.Path)
 	current := ""
+	haveMode := os.FileMode(0)
 	if err == nil && info.Mode().IsRegular() {
+		haveMode = info.Mode().Perm()
 		if raw, readErr := os.ReadFile(output.Path); readErr == nil {
 			current = string(raw)
 		} else {
@@ -112,15 +118,32 @@ func reconcileOpenCodeFile(result *reconcileResult, output generatedFile, mode M
 			return
 		}
 	}
-	if current == output.Content {
+	// A generated file whose content is already right but whose mode drifted
+	// (an operator's chmod, a restore from a permission-lossy archive) is not
+	// "Unchanged" (L3-F14) — check names it distinctly from STALE/MISSING
+	// content, and build fixes it with a chmod rather than rewriting content
+	// that was already correct.
+	modeOnlyDrift := current == output.Content && err == nil && info.Mode().IsRegular() && haveMode != wantMode
+	if current == output.Content && !modeOnlyDrift {
 		result.Unchanged++
 		return
 	}
 	if mode != ModeBuild {
-		if err == nil && !isClaimable(output.Path, output.MirrorCopy) {
+		if err == nil && !isClaimable(output.Path) {
 			result.Problems = append(
 				result.Problems,
 				fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
+			)
+			return
+		}
+		if modeOnlyDrift {
+			result.Problems = append(
+				result.Problems,
+				fmt.Sprintf("MODE %s (want %04o, have %04o)", output.Path, wantMode, haveMode),
+			)
+			result.Actions = append(
+				result.Actions,
+				Action{Kind: actionChmod, Path: output.Path, Target: fmt.Sprintf("%04o", wantMode)},
 			)
 			return
 		}
@@ -132,15 +155,27 @@ func reconcileOpenCodeFile(result *reconcileResult, output generatedFile, mode M
 		result.Actions = append(result.Actions, Action{Kind: actionWrite, Path: output.Path})
 		return
 	}
-	if err == nil && !isClaimable(output.Path, output.MirrorCopy) {
+	if err == nil && !isClaimable(output.Path) {
 		result.Problems = append(
 			result.Problems,
 			fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
 		)
 		return
 	}
+	if modeOnlyDrift {
+		result.Actions = append(
+			result.Actions,
+			Action{Kind: actionChmod, Path: output.Path, Target: fmt.Sprintf("%04o", wantMode)},
+		)
+		if err := os.Chmod(output.Path, wantMode); err != nil {
+			result.Problems = append(result.Problems, fmt.Sprintf("chmod %s: %v", output.Path, err))
+			return
+		}
+		result.Wrote++
+		return
+	}
 	result.Actions = append(result.Actions, Action{Kind: actionWrite, Path: output.Path})
-	if err := atomicfile.Write(output.Path, []byte(output.Content), 0o644); err != nil {
+	if err := atomicfile.Write(output.Path, []byte(output.Content), wantMode); err != nil {
 		result.Problems = append(result.Problems, fmt.Sprintf("write %s: %v", output.Path, err))
 		return
 	}
@@ -158,7 +193,7 @@ func reconcileOpenCodeOrphans(result *reconcileResult, dir string, wanted map[st
 	}
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
-		if wanted[path] || !isClaimable(path, false) {
+		if wanted[path] || !isClaimable(path) {
 			continue
 		}
 		if mode != ModeBuild {
@@ -175,7 +210,17 @@ func reconcileOpenCodeOrphans(result *reconcileResult, dir string, wanted map[st
 	}
 }
 
-func isClaimable(path string, mirrorCopy bool) bool {
+// isClaimable reports whether pfm-generated content already owns path: a
+// symlink into the Claude source tree, or a regular file/skill whose content
+// carries the compiler's own marker. A byte-for-byte MirrorCopy output
+// (.opencode/LICENSE, .opencode/SECURITY.md) can never carry that marker
+// without corrupting the copy, and there is no persisted manifest of what a
+// PRIOR pfm run wrote here — content equal to a past source revision is
+// unknowable without one (L3-F19). So MirrorCopy gets no ownership
+// shortcut: a pre-existing, content-differing file at its path is the same
+// CONFLICT an unrelated hand-placed file (a real `.opencode/LICENSE`) would
+// be — the smallest honest rule available without a manifest to consult.
+func isClaimable(path string) bool {
 	info, err := os.Lstat(path)
 	if err != nil {
 		return false
@@ -186,9 +231,6 @@ func isClaimable(path string, mirrorCopy bool) bool {
 			return false
 		}
 		return isClaudeSourceTarget(target)
-	}
-	if mirrorCopy {
-		return true
 	}
 	if info.Mode().IsRegular() {
 		raw, err := os.ReadFile(path)

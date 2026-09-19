@@ -31,7 +31,7 @@ func compileMCP(root string) (mcpResult, error) {
 	}
 	current := string(currentBytes)
 	hand := stripMCPFence(current)
-	result := mcpResult{Content: hand}
+	result := mcpResult{Content: hand, Problems: mcpFenceProblems(current, configPath)}
 	data, err := os.ReadFile(mcpPath)
 	if os.IsNotExist(err) {
 		result.Changed = result.Content != current
@@ -120,6 +120,58 @@ func compileMCP(root string) (mcpResult, error) {
 	}
 	result.Changed = result.Content != current
 	return result, nil
+}
+
+// mcpFenceProblems scans the untouched `.codex/config.toml` content for a
+// malformed mcp_servers fence: an unpaired BEGIN (no matching END), a lone
+// END (no preceding BEGIN), or more than one complete fence. stripMCPFence's
+// regexp only ever matches a well-formed BEGIN...END pair, so any of these
+// shapes previously passed through untouched as "hand" content and a second
+// fence got appended beside it with no Problem raised in either build or
+// check (L3-F11). Each is now a named Problem; compileMCP's caller already
+// skips writing .codex/config.toml whenever Problems is non-empty, so build
+// never appends a second fence over a malformed one.
+func mcpFenceProblems(current, configPath string) []string {
+	var problems []string
+	inFence := false
+	fences := 0
+	for _, line := range strings.Split(current, "\n") {
+		switch line {
+		case mcpBegin, legacyMCPBegin:
+			if inFence {
+				problems = append(problems, fmt.Sprintf(
+					"CONFLICT %s: a second mcp_servers BEGIN fence starts before the first one's END — hand-fix or remove the stale fence",
+					configPath,
+				))
+				continue
+			}
+			inFence = true
+		case mcpEnd:
+			if !inFence {
+				problems = append(problems, fmt.Sprintf(
+					"CONFLICT %s: an mcp_servers END fence has no matching BEGIN — hand-fix or remove the stale marker",
+					configPath,
+				))
+				continue
+			}
+			inFence = false
+			fences++
+		}
+	}
+	if inFence {
+		problems = append(problems, fmt.Sprintf(
+			"CONFLICT %s: an mcp_servers BEGIN fence has no matching END — hand-fix or remove the stale marker",
+			configPath,
+		))
+	}
+	if fences > 1 {
+		problems = append(problems, fmt.Sprintf(
+			"CONFLICT %s: %d mcp_servers fences found, want at most one",
+			configPath,
+			fences,
+		))
+	}
+	return problems
 }
 
 func stripMCPFence(current string) string {

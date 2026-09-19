@@ -12,10 +12,18 @@ func (installer *engine) claudeConfigDirs() []string {
 	dirs := make([]string, 0, len(installer.options.ConfigDirs)+1)
 	dirs = append(dirs, installer.options.ConfigDir)
 	dirs = append(dirs, installer.options.ConfigDirs...)
-	return dedupePhysicalDirs(dirs)
+	return installer.dedupePhysicalDirs(dirs)
 }
 
-func dedupePhysicalDirs(dirs []string) []string {
+// dedupePhysicalDirs collapses the configured account directories to one
+// entry per physical path, keeping the logical spelling. A directory whose
+// physical path cannot be resolved is KEPT under its logical name and the
+// failure is reported through this run's own transcript — once per directory,
+// not once per call: the diagnostic used to go to raw os.Stderr, which
+// bypassed the Report counts and the activity ledger entirely and printed
+// twice for every `--yes` run, because preflight plans the identical pass
+// with its stdout discarded.
+func (installer *engine) dedupePhysicalDirs(dirs []string) []string {
 	seen := make(map[string]bool, len(dirs))
 	result := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
@@ -26,8 +34,12 @@ func dedupePhysicalDirs(dirs []string) []string {
 		physical := dir
 		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
 			physical = filepath.Clean(resolved)
-		} else {
-			fmt.Fprintf(os.Stderr, "installer: resolve config directory %s: %v\n", dir, err)
+		} else if !installer.reportedConfigDirs[dir] {
+			if installer.reportedConfigDirs == nil {
+				installer.reportedConfigDirs = map[string]bool{}
+			}
+			installer.reportedConfigDirs[dir] = true
+			installer.skip("resolve config directory " + dir + ": " + err.Error())
 		}
 		if seen[physical] {
 			continue

@@ -56,3 +56,81 @@ func TestOpenCodeOrphanLinksOnlyClaimClaudeTargets(t *testing.T) {
 		t.Fatalf("operator symlink was reported as orphan: %#v", result.Problems)
 	}
 }
+
+// TestReconcileOpenCodeFileDetectsModeOnlyDriftCheckNamesItBuildFixesIt pins
+// L3-F14: content-only comparison read a generated file at the wrong mode
+// as "Unchanged". check must name the drift distinctly, and build must fix
+// it with a chmod rather than rewriting content that needed no rewrite.
+func TestReconcileOpenCodeFileDetectsModeOnlyDriftCheckNamesItBuildFixesIt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "generated.md")
+	content := newMarker + " from fixture\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := generatedFile{Path: path, Content: content, Mode: 0o644}
+
+	check := &reconcileResult{}
+	reconcileOpenCodeFile(check, output, ModeCheck)
+	if check.Unchanged != 0 {
+		t.Fatalf("check.Unchanged=%d, want 0 — mode drift must not read as Unchanged", check.Unchanged)
+	}
+	if len(check.Problems) != 1 || !strings.Contains(check.Problems[0], "MODE") ||
+		!strings.Contains(check.Problems[0], path) {
+		t.Fatalf("check.Problems=%#v, want exactly one MODE problem naming %s", check.Problems, path)
+	}
+	if got, err := os.Stat(path); err != nil || got.Mode().Perm() != 0o600 {
+		t.Fatalf("check mutated the file: mode=%v err=%v", got, err)
+	}
+
+	build := &reconcileResult{}
+	reconcileOpenCodeFile(build, output, ModeBuild)
+	if build.Wrote != 1 || len(build.Problems) != 0 {
+		t.Fatalf("build result Wrote=%d Problems=%#v, want Wrote=1 and no problems", build.Wrote, build.Problems)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o644 {
+		t.Fatalf("file mode after build=%v, want 0644", info.Mode().Perm())
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != content {
+		t.Fatalf("build rewrote content it did not need to: got=%q want=%q", got, content)
+	}
+}
+
+// TestIsClaimableRefusesAPreExistingDifferingMirrorCopy pins L3-F19: a
+// byte-for-byte MirrorCopy output (.opencode/LICENSE) used to be claimable
+// unconditionally, so a hand-placed file at that exact path was silently
+// overwritten with no CONFLICT the moment its content diverged from the
+// source. With no marker a byte-copy can carry and no manifest of prior pfm
+// output, isClaimable now treats any pre-existing content there exactly
+// like an unrelated hand-placed file: never silently claimed.
+func TestIsClaimableRefusesAPreExistingDifferingMirrorCopy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "LICENSE")
+	if err := os.WriteFile(path, []byte("an operator's own LICENSE, not ours\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if isClaimable(path) {
+		t.Fatalf("isClaimable(%s) = true, want false for unmarked pre-existing content", path)
+	}
+
+	result := &reconcileResult{}
+	reconcileOpenCodeFile(result, generatedFile{Path: path, Content: "the source LICENSE, different text\n"}, ModeBuild)
+	if len(result.Problems) != 1 || !strings.Contains(result.Problems[0], "CONFLICT") {
+		t.Fatalf("result.Problems=%#v, want exactly one CONFLICT", result.Problems)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "an operator's own LICENSE, not ours\n" {
+		t.Fatalf("build overwrote the pre-existing file: %q", got)
+	}
+}

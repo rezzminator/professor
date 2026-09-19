@@ -153,3 +153,102 @@ func TestInstallSkipsPrePushGateWhenGitIsUnavailable(t *testing.T) {
 		t.Fatalf("stdout = %q, want named skip %q", stdout.String(), want)
 	}
 }
+
+// TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone is a
+// REGRESSION test for one error shape serving two opposite answers: "no
+// install ever recorded a clone" and "a clone was recorded and it is gone or
+// malformed" both came back as an undifferentiated error, so every caller
+// (pfm init, pfm update, the install fallback, the picker row) had to guess
+// which one it held — and an error to LOOK read as the absence of anything to
+// look at. Each outcome now carries its own sentinel.
+func TestReadSourceRepoMarkerDistinguishesAbsenceFromAnUnusableClone(t *testing.T) {
+	t.Run("no marker recorded", func(t *testing.T) {
+		_, err := ReadSourceRepoMarker(t.TempDir())
+		if !errors.Is(err, ErrNoSourceRepoMarker) {
+			t.Fatalf("err = %v, want ErrNoSourceRepoMarker", err)
+		}
+		if errors.Is(err, ErrSourceRepoUnusable) {
+			t.Fatalf("an absent marker also claimed an unusable clone: %v", err)
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("err = %v, want the fs.ErrNotExist every existing caller still tests for", err)
+		}
+	})
+
+	t.Run("marker names a vanished clone", func(t *testing.T) {
+		home := t.TempDir()
+		clone := filepath.Join(t.TempDir(), "moved-away")
+		if err := os.MkdirAll(clone, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteSourceRepoMarker(home, clone); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(clone); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ReadSourceRepoMarker(home)
+		if !errors.Is(err, ErrSourceRepoUnusable) {
+			t.Fatalf("err = %v, want ErrSourceRepoUnusable", err)
+		}
+		if errors.Is(err, ErrNoSourceRepoMarker) {
+			t.Fatalf("a recorded-but-vanished clone reported as no marker at all: %v", err)
+		}
+		if !strings.Contains(err.Error(), clone) {
+			t.Fatalf("err = %v, want the recorded path %s named", err, clone)
+		}
+	})
+
+	t.Run("marker holds more than one path", func(t *testing.T) {
+		home := t.TempDir()
+		writeFixture(t, SourceRepoPath(home), "/one\n/two\n")
+		_, err := ReadSourceRepoMarker(home)
+		if !errors.Is(err, ErrSourceRepoUnusable) {
+			t.Fatalf("err = %v, want ErrSourceRepoUnusable", err)
+		}
+	})
+
+	t.Run("marker cannot be read at all", func(t *testing.T) {
+		home := t.TempDir()
+		if err := os.MkdirAll(SourceRepoPath(home), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ReadSourceRepoMarker(home)
+		if err == nil {
+			t.Fatal("a marker path that is a directory read clean")
+		}
+		if errors.Is(err, ErrNoSourceRepoMarker) || errors.Is(err, ErrSourceRepoUnusable) {
+			t.Fatalf("a failed look claimed one of the two answered states: %v", err)
+		}
+	})
+}
+
+// TestReportSourceRepoMarkerNamesAnUnusableCloneApartFromAbsence pins the
+// install transcript over the same distinction: a marker pointing at a clone
+// that is gone must not print the "source repository not found" line an
+// absent marker prints — that would tell an operator to record a clone they
+// already recorded, and hide that the recorded one moved.
+func TestReportSourceRepoMarkerNamesAnUnusableCloneApartFromAbsence(t *testing.T) {
+	home := t.TempDir()
+	clone := filepath.Join(t.TempDir(), "moved-away")
+	if err := os.MkdirAll(clone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSourceRepoMarker(home, clone); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(clone); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	installer := &engine{options: Options{Home: home, Stdout: &stdout}}
+	if err := installer.reportSourceRepoMarker(); err != nil {
+		t.Fatalf("reportSourceRepoMarker() error = %v, want a named skip", err)
+	}
+	if strings.Contains(stdout.String(), "source repository not found") {
+		t.Fatalf("a vanished recorded clone printed the absence diagnostic:\n%s", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), clone) {
+		t.Fatalf("stdout = %q, want the recorded clone %s named", stdout.String(), clone)
+	}
+}

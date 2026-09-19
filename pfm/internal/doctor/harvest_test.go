@@ -140,8 +140,8 @@ func TestDoctorHarvestDistinguishesBrokenEnvironmentAndSmoke(t *testing.T) {
 			Healthy: false,
 			Digest:  digest,
 			Checks: map[string]harvestpy.CheckStatus{
-				"lock_completeness": {Error: "installed inventory differs from provisioned lock"},
-				"live_smoke":        {Error: "harvestpy smoke subprocess: interpreter missing"},
+				"lock_hash":  {Error: "uv.lock does not match its recorded digest"},
+				"live_smoke": {Error: "harvestpy smoke subprocess: interpreter missing"},
 			},
 		},
 		checkErr: errors.New("harvestpy environment check failed"),
@@ -167,7 +167,7 @@ func TestDoctorHarvestDistinguishesBrokenEnvironmentAndSmoke(t *testing.T) {
 	// failed against a provision that DID finish, so the failure word is
 	// "broken" — "incomplete" is reserved for digest.State == "incomplete".
 	for _, want := range []string{
-		"doctor: harvestpy lock=(file) broken error=installed inventory differs from provisioned lock",
+		"doctor: harvestpy lock=(file) broken error=uv.lock does not match its recorded digest",
 		"doctor: harvestpy live_smoke=(file) broken error=harvestpy smoke subprocess: interpreter missing",
 	} {
 		if !strings.Contains(text, want) {
@@ -192,7 +192,7 @@ func TestDoctorHarvestLockIncompleteReflectsInterruptedProvisionState(t *testing
 			Healthy: false,
 			Digest:  digest,
 			Checks: map[string]harvestpy.CheckStatus{
-				"lock_completeness": {Error: "provision interrupted: lock file missing"},
+				"lock_hash": {Error: "provision interrupted: lock file missing"},
 			},
 		},
 		checkErr: errors.New("harvestpy environment check failed"),
@@ -225,6 +225,57 @@ func TestDoctorHarvestLockIncompleteReflectsInterruptedProvisionState(t *testing
 			"interrupted-provision doctor rendered the finished-provision word for a State==incomplete digest:\n%s",
 			text,
 		)
+	}
+}
+
+// TestDoctorHarvestUnnamedFailedCheckIsNotHiddenAsClean pins L3-F1: the doctor
+// section printed only interpreter, lock, inventory, and live-smoke rows,
+// but harvestpy.CheckConversionEnvironment computes 15 named checks and sets
+// report.Healthy=false when ANY of them fails — before this fix a check like
+// digest_integrity could fail while every printed row stayed healthy, and the
+// section reported zero warnings: a coincidence detector.
+func TestDoctorHarvestUnnamedFailedCheckIsNotHiddenAsClean(t *testing.T) {
+	digest := doctorHarvestDigest()
+	fake := harvestDoctorFake{
+		digest: digest,
+		check: harvestpy.CheckReport{
+			Healthy: false,
+			Digest:  digest,
+			Checks: map[string]harvestpy.CheckStatus{
+				"interpreter":           {OK: true},
+				"lock_hash":             {OK: true},
+				"lock_completeness":     {OK: true},
+				"live_smoke":            {OK: true},
+				"live_smoke_conversion": {OK: true},
+				// Not printed by any dedicated row above — the check the
+				// coincidence-detector hid before this fix.
+				"digest_integrity": {Error: "environment digest does not match its own recorded state"},
+			},
+		},
+		checkErr: errors.New("harvestpy environment check failed"),
+	}
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".local", "state", "pfm", "harvest-python"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	warnings := printHarvestPythonDoctor(
+		context.Background(),
+		&output,
+		home,
+		harvestpy.Platform{GOOS: "linux", GOARCH: "amd64"},
+		fake,
+		false,
+	)
+	if warnings == 0 {
+		t.Fatalf(
+			"digest_integrity failed but no printed row named it — the section stayed clean:\n%s",
+			output.String(),
+		)
+	}
+	if !strings.Contains(output.String(), "digest_integrity") ||
+		!strings.Contains(output.String(), "environment digest does not match its own recorded state") {
+		t.Fatalf("output does not name the failed check:\n%s", output.String())
 	}
 }
 

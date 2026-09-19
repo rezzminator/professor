@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
+
 	"hostops/pfm/internal/paths"
 )
 
@@ -180,7 +182,17 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 	}
 }
 
-func TestTrackedGlobalAgentTwinsMatchCompiler(t *testing.T) {
+// TestGlobalAgentSourcesCompileDeterministicallyToValidTOML replaces the old
+// tracked-twin comparison: wave 9b retired the tracked `.toml` twins from
+// git (root CLAUDE.md — "nothing generated is written into the clone"), so
+// there is no on-disk artifact left to diff against. What remains true and
+// worth pinning for every real `templates/global/agents/*.md` source: the
+// compiler succeeds, is deterministic (two renders byte-equal), the output
+// independently parses as TOML (via the same BurntSushi/toml parser
+// validateTOML already depends on — no new dependency), carries the
+// source frontmatter's name/description, and no `.toml` is ever written
+// beside the `.md` source (the clone stays clean).
+func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("locate codexgen test source")
@@ -195,20 +207,46 @@ func TestTrackedGlobalAgentTwinsMatchCompiler(t *testing.T) {
 	}
 	for _, source := range sources {
 		t.Run(strings.TrimSuffix(filepath.Base(source), ".md"), func(t *testing.T) {
-			generatedPath, generated, err := renderGlobalAgentTOML(source, t.TempDir())
+			raw, err := os.ReadFile(source)
 			if err != nil {
 				t.Fatal(err)
 			}
-			// The tracked twin still lives beside the .md source in this
-			// repo (9b retires it); the compiler itself no longer writes
-			// there — only content equivalence is asserted here.
-			trackedPath := filepath.Join(filepath.Dir(source), filepath.Base(generatedPath))
-			tracked, err := os.ReadFile(trackedPath)
+			fields, _, err := parseFrontmatter(string(raw))
 			if err != nil {
-				t.Fatalf("read tracked twin %s: %v", trackedPath, err)
+				t.Fatalf("parse frontmatter of %s: %v", source, err)
 			}
-			if generated != string(tracked) {
-				t.Fatalf("tracked twin %s differs from compiler output", trackedPath)
+			wantName := strings.TrimSpace(fields["name"])
+			wantDescription := strings.TrimSpace(fields["description"])
+
+			_, first, err := renderGlobalAgentTOML(source, t.TempDir())
+			if err != nil {
+				t.Fatalf("renderGlobalAgentTOML: %v", err)
+			}
+			_, second, err := renderGlobalAgentTOML(source, t.TempDir())
+			if err != nil {
+				t.Fatalf("renderGlobalAgentTOML (second render): %v", err)
+			}
+			if first != second {
+				t.Fatalf("renderGlobalAgentTOML is not deterministic:\nfirst:\n%q\nsecond:\n%q", first, second)
+			}
+
+			var document struct {
+				Name        string `toml:"name"`
+				Description string `toml:"description"`
+			}
+			if _, err := toml.Decode(first, &document); err != nil {
+				t.Fatalf("rendered TOML does not parse: %v\n%s", err, first)
+			}
+			if document.Name != wantName {
+				t.Fatalf("rendered TOML name = %q, want %q (frontmatter)", document.Name, wantName)
+			}
+			if document.Description != wantDescription {
+				t.Fatalf("rendered TOML description = %q, want %q (frontmatter)", document.Description, wantDescription)
+			}
+
+			besideSource := strings.TrimSuffix(source, ".md") + ".toml"
+			if _, err := os.Lstat(besideSource); !os.IsNotExist(err) {
+				t.Fatalf("expected no .toml written beside the source at %s, lstat err=%v", besideSource, err)
 			}
 		})
 	}

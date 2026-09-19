@@ -880,7 +880,8 @@ func (h *e2eHarness) requireSkippedHarvestDoctor(result commandResult) {
 		"doctor: harvestpy skipped",
 		"doctor: pre-push gate=armed core.hooksPath=.githooks",
 		"doctor: harness-prompt: matches baseline",
-		"doctor: warnings=2",
+		"doctor: service-manager=",
+		fmt.Sprintf("doctor: warnings=%d", 2+schedulerRowWarnings(output)),
 	} {
 		if !strings.Contains(output, want) {
 			h.t.Fatalf(

@@ -29,7 +29,6 @@ import (
 	"hostops/pfm/internal/index"
 	"hostops/pfm/internal/installer"
 	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/mcpserv"
 	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/professor"
@@ -137,29 +136,7 @@ func Run(
 	tally.warnings += PrintEngineCapabilities(stdout, dependencies)
 	tally.warnings += PrintMCPClientCutover(stdout, runtime)
 	if mcpConfigured(runtime) {
-		status, daemonErr := mcpserv.DaemonReachability(runtime)
-		if daemonErr != nil {
-			tally.warn()
-			fmt.Fprintf(stdout, "doctor: mcp daemon=unreachable error=%v\n", daemonErr)
-		} else {
-			fmt.Fprintf(
-				stdout,
-				"doctor: mcp daemon=running pid=%d since=%s endpoint=%s\n",
-				status.PID,
-				status.StartTime,
-				status.Endpoint,
-			)
-			tally.warnings += printHarvesterExternalDoctor(stdout, runtime.Config.Harvester, status.HarvesterExternal)
-			if status.PFMVersion != runtime.Version {
-				tally.warn()
-				fmt.Fprintf(
-					stdout,
-					"doctor: mcp daemon=version-skew daemon=%s client=%s\n",
-					status.PFMVersion,
-					runtime.Version,
-				)
-			}
-		}
+		tally.warnings += printMCPDaemonDoctor(stdout, runtime)
 	}
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
@@ -198,12 +175,17 @@ func Run(
 		verboseDir,
 		dependencies,
 	)
+	primaryAccount, primaryErr := fleet.PrimaryAccount(resolved, runtime.Config)
+	if primaryErr != nil {
+		tally.fail()
+		fmt.Fprintf(stdout, "doctor: read primary account: %v\n", primaryErr)
+	}
 	tally.warnings += printSpawnAuditDoctorWithClock(
 		context.Background(),
 		stdout,
 		resolved,
 		runtime.Config,
-		fleet.PrimaryAccount(resolved, runtime.Config),
+		primaryAccount,
 		dependencies.Clock,
 	)
 	// INFO only, and it adds no warnings: both title owners are legitimate.
@@ -938,31 +920,7 @@ func printHostOverlayDoctor(stdout io.Writer, home string, machine config.Config
 			)
 		}
 	}
-	overlayCommand := installer.StatusLineOverlayCommand(home)
-	seenSettingsFiles := map[string]bool{}
-	for _, account := range machine.Accounts {
-		path := filepath.Join(account.ConfigDir, "settings.json")
-		physical, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			physical = path
-		}
-		physical = filepath.Clean(physical)
-		if seenSettingsFiles[physical] {
-			continue
-		}
-		seenSettingsFiles[physical] = true
-		command := installer.ReadStatusLineCommand(path)
-		if command == "" || command == overlayCommand || !installer.RawStatusLineCommand(home, command) {
-			continue
-		}
-		failures++
-		fmt.Fprintf(
-			stdout,
-			"doctor: host_overlay statusline claude[%d] command=%q, want the overlay — run pfm install --yes\n",
-			account.ID,
-			command,
-		)
-	}
+	failures += printStatusLineOverlayDoctor(stdout, home, machine)
 	return warnings, failures
 }
 
@@ -1203,7 +1161,7 @@ func printHarvestPythonDoctorWithRunner(
 		harvestFailureWord = "incomplete"
 	}
 
-	lockOK, lockErr := harvestDoctorCheck(report, "lock_completeness", checkErr)
+	lockOK, lockErr := harvestDoctorCheck(report, "lock_hash", checkErr)
 	if lockOK && digest.LockSHA256 != "" {
 		fmt.Fprintf(stdout, "doctor: harvestpy lock=(file) complete digest=%s\n", digest.LockSHA256)
 	} else {
@@ -1244,6 +1202,7 @@ func printHarvestPythonDoctorWithRunner(
 		}
 		fmt.Fprintf(stdout, "doctor: harvestpy live_smoke=(file) broken error=%s\n", smokeErr)
 	}
+	warnings += printUnnamedHarvestChecks(stdout, report, harvestNamedDoctorChecks)
 	return appendHarvestBrowserDoctorRowWithRunner(
 		ctx,
 		stdout,

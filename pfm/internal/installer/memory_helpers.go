@@ -301,7 +301,7 @@ func (installer *engine) planMemoryHelperSettingsRewrites(
 
 func (installer *engine) memoryHelperConfigDirs() []string {
 	dirs := append([]string{filepath.Join(installer.options.Home, ".claude")}, installer.claudeConfigDirs()...)
-	return dedupePhysicalDirs(dirs)
+	return installer.dedupePhysicalDirs(dirs)
 }
 
 func normalizedMemoryHelperFingerprint(content []byte) (string, error) {

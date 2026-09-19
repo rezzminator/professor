@@ -219,14 +219,30 @@ func writeProjectHuman(stdout io.Writer, r projectReport) {
 			switch status {
 			case projectUpdated:
 				fmt.Fprintf(stdout, "    %s   %s  pinned @%s\n", item.Local, item.Template, item.Pin.PinnedSHA)
-				fmt.Fprintf(
-					stdout,
-					"      review: git -C %s diff %s..%s -- templates/%s\n",
-					r.Store.Root,
-					item.Pin.PinnedSHA,
-					r.Store.SHA,
-					item.Template,
-				)
+				if r.Store.SHA == UnknownSelfHostedSHA {
+					fmt.Fprintf(
+						stdout,
+						"      review: self-hosted store — no git history, so an exact %s..%s diff cannot run; "+
+							"comparing the current template against your local file instead:\n",
+						item.Pin.PinnedSHA,
+						r.Store.SHA,
+					)
+					fmt.Fprintf(
+						stdout,
+						"      review: diff %s %s\n",
+						filepath.Join(r.Root, filepath.FromSlash(item.Local)),
+						filepath.Join(r.Store.Templates, filepath.FromSlash(item.Template)),
+					)
+				} else {
+					fmt.Fprintf(
+						stdout,
+						"      review: git -C %s diff %s..%s -- templates/%s\n",
+						r.Store.Root,
+						item.Pin.PinnedSHA,
+						r.Store.SHA,
+						item.Template,
+					)
+				}
 				fmt.Fprintf(stdout, "      then apply by hand and: pfm update pin %s\n", item.Local)
 			case projectNew:
 				fmt.Fprintf(
@@ -793,13 +809,14 @@ func PrintDoctor(stdout io.Writer, start, home string) int {
 		fmt.Fprintf(stdout, "professor: UNREADABLE %v\n", err)
 		return 1
 	}
+	reviewRequired := report.reviewRequired()
 	fmt.Fprintf(
 		stdout,
 		"professor: current %d · review-required %d\n",
 		report.Counts[projectCurrent],
-		report.reviewRequired(),
+		reviewRequired,
 	)
-	return 0
+	return reviewRequired
 }
 
 func resolveProjectRoot(rootFlag string) (string, bool, error) {

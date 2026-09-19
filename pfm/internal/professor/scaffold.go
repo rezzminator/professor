@@ -75,19 +75,23 @@ func Scaffold(source, target string, force bool, stdout io.Writer) (count int, e
 			fmt.Fprintf(stdout, "CONFLICT %s: exists\n", entry.local)
 			continue
 		} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return 0, fmt.Errorf("inspect target %s: %w", entry.local, err)
+			return persistScaffoldFailure(target, baseline, fmt.Errorf("inspect target %s: %w", entry.local, err))
 		}
 		raw, err := os.ReadFile(entry.source)
 		if err != nil {
-			return 0, fmt.Errorf("read template %s: %w", entry.template, err)
+			return persistScaffoldFailure(target, baseline, fmt.Errorf("read template %s: %w", entry.template, err))
 		}
 		raw = addScaffoldMarker(entry.local, entry.template, store.SHA, raw)
 		if err := atomicfile.Write(targetPath, raw, entry.mode); err != nil {
-			return 0, fmt.Errorf("deploy %s to %s: %w", entry.template, entry.local, err)
+			return persistScaffoldFailure(
+				target,
+				baseline,
+				fmt.Errorf("deploy %s to %s: %w", entry.template, entry.local, err),
+			)
 		}
 		hash, err := HashTemplate(entry.source)
 		if err != nil {
-			return 0, err
+			return persistScaffoldFailure(target, baseline, err)
 		}
 		baseline.Files[entry.local] = FilePin{
 			Template: entry.template, TemplateHash: hash, PinnedSHA: store.SHA, PinnedAt: pinnedAt,
@@ -98,6 +102,24 @@ func Scaffold(source, target string, force bool, stdout io.Writer) (count int, e
 	}
 	trail.Reach("scaffolded", "files pinned")
 	return len(baseline.Files), nil
+}
+
+// persistScaffoldFailure saves the pins for every entry a failed Scaffold
+// pass already wrote durably to disk before returning cause (L3-F8): without
+// this, a per-entry failure orphaned earlier entries from the baseline
+// forever — a retry (`pfm init --force`) would hit `CONFLICT … exists` on
+// them and they would never be pinned, so `pfm update check` reported them
+// NEW forever with no hint they were pfm's own output. cause is always what
+// is returned; a Save failure here is reported alongside it, never in place
+// of it.
+func persistScaffoldFailure(target string, baseline Baseline, cause error) (int, error) {
+	if len(baseline.Files) == 0 {
+		return 0, cause
+	}
+	if err := Save(target, baseline); err != nil {
+		return 0, fmt.Errorf("%w (also failed to persist pins for already-written files: %v)", cause, err)
+	}
+	return 0, cause
 }
 
 func planInitCopies(store Store) ([]initCopy, error) {

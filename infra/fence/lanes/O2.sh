@@ -33,13 +33,10 @@
 # exit code, the first line of pfm's output, and — where two things could have
 # gone wrong — which one did, with the raw pane bytes beside it in the lane log.
 set -uo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
-cd /tmp 2>/dev/null || true
-
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+lane_preamble
 
 CONFIG="$HOME/.config/pfm/pfm.config.json"
 MANAGED="$HOME/.local/share/pfm/install"
@@ -60,18 +57,7 @@ PORT="$(jq -r '.mcp.http.port // 18377' "$CONFIG" 2>/dev/null || echo 18377)"
 lane_begin O2
 
 # ── prelude: what this lane needs, made when missing, no-op otherwise ───────
-[ -f "$CONFIG" ] || lane_abort "no pfm config at $CONFIG — this is not a lane root image"
-SEAT_DIR="$(jq -r --argjson want "$SEAT" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")"
-case "$SEAT_DIR" in "~"*) SEAT_DIR="$HOME${SEAT_DIR#\~}" ;; esac
-[ -n "$SEAT_DIR" ] || lane_abort "seat cc:$SEAT is not configured in $CONFIG (accounts: $(jq -c '[.accounts[].id]' "$CONFIG"))"
-SPARE="$(jq -r --argjson want "$SEAT" '[.accounts[].id | select(. != $want)] | first // empty' "$CONFIG")"
-SPARE_DIR=""
-if [ -n "$SPARE" ]; then
-  SPARE_DIR="$(jq -r --argjson want "$SPARE" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")"
-  case "$SPARE_DIR" in "~"*) SPARE_DIR="$HOME${SPARE_DIR#\~}" ;; esac
-fi
-CODEX_HOME="$(jq -r '.codex.homes[0].home // "~/.codex"' "$CONFIG")"
-case "$CODEX_HOME" in "~"*) CODEX_HOME="$HOME${CODEX_HOME#\~}" ;; esac
+lane_require_seat_ops "$CONFIG"
 
 need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it"

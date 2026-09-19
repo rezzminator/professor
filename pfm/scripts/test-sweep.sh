@@ -52,7 +52,6 @@ PFM="${PFM:-$(cd "$(dirname "$0")/.." && pwd)}"
 REPO="${REPO:-$(cd "$PFM/.." && pwd)}"
 GOCMD="${GOCMD:-go}"
 REPS=3
-SWEEP_FAILED=0
 REQUIRE_DOCKER=0
 JSON_DIR=""
 WAIT_QUIET=0
@@ -312,16 +311,13 @@ time_cmd() {
   if [ "${1:-}" = "--" ]; then shift; fi
   if [ "$#" -eq 0 ]; then
     echo "SWEEP-ERROR: $phase p=$p parallel=$parallel rep=$rep has no command" >&2
-    SWEEP_FAILED=1
     return 1
   fi
   if ! wait_quiet_before "$phase" "$p" "$parallel" "$rep"; then
-    SWEEP_FAILED=1
     return 2
   fi
   if ! tfile="$(mktemp "${TMPDIR:-/tmp}/pfm-sweep-time.XXXXXX")"; then
     echo "SWEEP-ERROR: could not create a timing capture for $phase p=$p parallel=$parallel rep=$rep" >&2
-    SWEEP_FAILED=1
     return 1
   fi
   (
@@ -331,16 +327,13 @@ time_cmd() {
   rc=$?
   if [ "$rc" -ne 0 ]; then
     status=FAIL
-    SWEEP_FAILED=1
   fi
   if ! record_load_after "$phase" "$p" "$parallel" "$rep"; then
     status=ERROR
-    SWEEP_FAILED=1
   fi
   if ! read -r real user sys < "$tfile"; then
     echo "SWEEP-ERROR: $phase p=$p parallel=$parallel rep=$rep produced no timing record" >&2
     status=ERROR
-    SWEEP_FAILED=1
   elif ! awk -v r="$real" -v u="$user" -v s="$sys" 'BEGIN {
       for (i = 1; i <= 3; i++) {
         value = (i == 1 ? r : (i == 2 ? u : s))
@@ -349,7 +342,6 @@ time_cmd() {
     }' </dev/null; then
     echo "SWEEP-ERROR: $phase p=$p parallel=$parallel rep=$rep produced invalid timing data" >&2
     status=ERROR
-    SWEEP_FAILED=1
   fi
   rm -f "$tfile"
   if [ -z "${real:-}" ] || [ -z "${user:-}" ] || [ -z "${sys:-}" ]; then
@@ -358,7 +350,6 @@ time_cmd() {
   cpu="$(awk -v u="$user" -v s="$sys" 'BEGIN{printf "%.3f", u+s}')"
   if ! printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$phase" "$p" "$parallel" "$rep" "$real" "$cpu" "$status" >> "$ROWFILE"; then
     echo "SWEEP-ERROR: could not append $phase p=$p parallel=$parallel rep=$rep to $ROWFILE" >&2
-    SWEEP_FAILED=1
     return 1
   fi
   echo "test-sweep: $phase p=$p parallel=$parallel rep=$rep wall=${real}s cpu=${cpu}s $status"

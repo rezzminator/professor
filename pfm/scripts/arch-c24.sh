@@ -27,6 +27,7 @@
 set -uo pipefail
 export LC_ALL=C
 PFM="${PFM:-$(cd "$(dirname "$0")/.." && pwd)}"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 BASE="$PFM/.arch"
 NAME=unwrapped-door
 ID=C24-unwrapped-door
@@ -47,14 +48,8 @@ trap 'rm -rf "$T"' EXIT
 # linked into the pfm binary — the same C22 exemption (arch-check.sh § C22)
 # applies here: the mock IS a host (exec, files, a fake sqlite-backed store),
 # so its doors are its purpose, not a leak this census tracks.
-repo_git() {
-  if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" && -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
-    git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" \
-      -c safe.directory="$PFM_DEV_REPO_WORK_TREE" "$@"
-  else
-    git "$@"
-  fi
-}
+# shellcheck source=repo-git.sh
+source "$SCRIPTS/repo-git.sh" || { say ERROR "cannot source $SCRIPTS/repo-git.sh"; exit 2; }
 repo_git ls-files -co --exclude-standard '*.go' 2>/dev/null \
   | while read -r f; do [ -f "$f" ] && echo "$f"; done \
   | grep -v '_test\.go$' \

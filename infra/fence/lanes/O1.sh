@@ -17,13 +17,10 @@
 # and could not put it back says so in its own ✗ line and the lane log carries
 # the command output.
 set -uo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
-cd /tmp 2>/dev/null || true
-
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+lane_preamble
 
 CONFIG="$HOME/.config/pfm/pfm.config.json"
 MANAGED="$HOME/.local/share/pfm/install"
@@ -34,18 +31,7 @@ SEAT="$(printf '%s\n' $LANE_SEATS | awk -F: '/^cc:/ { print $2; exit }')"
 lane_begin O1
 
 # ── prelude ─────────────────────────────────────────────────────────────────
-[ -f "$CONFIG" ] || lane_abort "no pfm config at $CONFIG — this is not a lane root image"
-SEAT_DIR="$(jq -r --argjson want "$SEAT" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")"
-case "$SEAT_DIR" in "~"*) SEAT_DIR="$HOME${SEAT_DIR#\~}" ;; esac
-[ -n "$SEAT_DIR" ] || lane_abort "seat cc:$SEAT is not configured in $CONFIG"
-SPARE="$(jq -r --argjson want "$SEAT" '[.accounts[].id | select(. != $want)] | first // empty' "$CONFIG")"
-SPARE_DIR=""
-if [ -n "$SPARE" ]; then
-  SPARE_DIR="$(jq -r --argjson want "$SPARE" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")"
-  case "$SPARE_DIR" in "~"*) SPARE_DIR="$HOME${SPARE_DIR#\~}" ;; esac
-fi
-CODEX_HOME="$(jq -r '.codex.homes[0].home // "~/.codex"' "$CONFIG")"
-case "$CODEX_HOME" in "~"*) CODEX_HOME="$HOME${CODEX_HOME#\~}" ;; esac
+lane_require_seat_ops "$CONFIG"
 
 need "the blueprint clone at $BLUEPRINT" "[ -e '$BLUEPRINT' ]" "ln -s /worktree '$BLUEPRINT'" ||
   lane_abort "no blueprint clone — pfm install cannot be re-run from it"
@@ -201,15 +187,17 @@ beat O1.06-dropped-seat I38
 spends none
 if [ -z "$SPARE" ]; then
   fail "only one Claude seat is configured — dropping it would take the lane's own seat with it"
+elif ! with_restored "$CONFIG"; then
+  fail "could not take a crash-safe backup of $CONFIG before dropping seat $SPARE — see the lane log"
 else
-  cp "$CONFIG" "$CONFIG.lane-backup"
   jq --argjson drop "$SPARE" '.accounts |= map(select(.id != $drop))' "$CONFIG" >"$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
   drop_out="$(install_again)"
   drop_rc=$?
   ledger_after="$(cat "$MANAGED/settings-hook-ownership.json" 2>/dev/null)"
   kept_hooks="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command // ""' "$SEAT_DIR/settings.json" 2>/dev/null | grep -c 'pfm')"
   spare_hooks="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command // ""' "$SPARE_DIR/settings.json" 2>/dev/null | grep -c 'pfm')"
-  mv "$CONFIG.lane-backup" "$CONFIG"
+  config_restore_rc=0
+  restore_now "$CONFIG" || config_restore_rc=1
   restore_out="$(install_again)"
   restore_rc=$?
   spare_hooks_back="$(jq -r '.hooks | to_entries[] | .value[] | .hooks[] | .command // ""' "$SPARE_DIR/settings.json" 2>/dev/null | grep -c 'pfm')"
@@ -219,6 +207,7 @@ else
   [ "$kept_hooks" -gt 0 ] || bad="$bad the KEPT seat $SEAT lost its hooks when $SPARE was dropped;"
   printf '%s' "$ledger_after" | grep -q "$SPARE_DIR" &&
     bad="$bad the ownership ledger still carries rows for the dropped $SPARE_DIR;"
+  [ "$config_restore_rc" -eq 0 ] || bad="$bad restoring $CONFIG from its crash-safe backup FAILED;"
   [ "$restore_rc" -eq 0 ] || bad="$bad the restoring install exited $restore_rc ($(one_line "$restore_out"));"
   [ "$spare_hooks_back" -gt 0 ] || bad="$bad seat $SPARE did not get its hooks back after the config was restored;"
   if [ -n "$bad" ]; then fail "$bad"; else
@@ -240,21 +229,24 @@ printf '%s' "$blue_doctor" | grep -qiE 'source.?repo.*(broken|missing|unreadable
   bad="$bad doctor reports the linked blueprint broken: $(one_line "$(printf '%s' "$blue_doctor" | grep -iE 'source.?repo' | head -2)");"
 rm -rf "$link"
 ln -s "$SEAT_DIR" "$link"
-cp "$CONFIG" "$CONFIG.lane-backup"
-jq --argjson want "$SEAT" --arg link "$link" '.accounts |= map(if .id == $want then .configDir = $link else . end)' \
-  "$CONFIG" >"$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
-linked_doctor="$(pfm doctor 2>&1)"
-linked_rc=$?
-linked_ls="$(pfm ls --plain 2>&1)"
-linked_ls_rc=$?
-mv "$CONFIG.lane-backup" "$CONFIG"
+if ! with_restored "$CONFIG"; then
+  bad="$bad could not take a crash-safe backup of $CONFIG before repointing seat $SEAT at $link;"
+else
+  jq --argjson want "$SEAT" --arg link "$link" '.accounts |= map(if .id == $want then .configDir = $link else . end)' \
+    "$CONFIG" >"$CONFIG.tmp" && mv "$CONFIG.tmp" "$CONFIG"
+  linked_doctor="$(pfm doctor 2>&1)"
+  linked_rc=$?
+  linked_ls="$(pfm ls --plain 2>&1)"
+  linked_ls_rc=$?
+  restore_now "$CONFIG" || bad="$bad restoring $CONFIG from its crash-safe backup FAILED;"
+  [ "$linked_rc" -le 1 ] || bad="$bad pfm doctor exited $linked_rc with the seat reached through a symlink: $(one_line "$(printf '%s\n' "$linked_doctor" | tail -3)");"
+  [ "$linked_ls_rc" -eq 0 ] || bad="$bad pfm ls exited $linked_ls_rc with a symlinked seat dir: $(one_line "$linked_ls");"
+  printf '%s' "$linked_doctor" | grep -qiE 'duplicate' &&
+    bad="$bad doctor called the symlinked seat a duplicate of its own target;"
+  [ "$(jq -r --argjson want "$SEAT" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")" != "$link" ] ||
+    bad="$bad the config still points seat $SEAT at the temporary link;"
+fi
 rm -f "$link"
-[ "$linked_rc" -le 1 ] || bad="$bad pfm doctor exited $linked_rc with the seat reached through a symlink: $(one_line "$(printf '%s\n' "$linked_doctor" | tail -3)");"
-[ "$linked_ls_rc" -eq 0 ] || bad="$bad pfm ls exited $linked_ls_rc with a symlinked seat dir: $(one_line "$linked_ls");"
-printf '%s' "$linked_doctor" | grep -qiE 'duplicate' &&
-  bad="$bad doctor called the symlinked seat a duplicate of its own target;"
-[ "$(jq -r --argjson want "$SEAT" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")" != "$link" ] ||
-  bad="$bad the config still points seat $SEAT at the temporary link;"
 if [ -n "$bad" ]; then fail "$bad"; else
   pass "the linked blueprint $BLUEPRINT resolves in doctor, and a seat reached through $link kept doctor and ls clean; config restored"
 fi
@@ -270,30 +262,34 @@ else
   SPARE_JSON="$SPARE_DIR/.claude.json"
   EMAIL="lane-o1.08-duplicate@example.invalid"
   bad=""
-  seat_had=0
-  spare_had=0
-  [ -f "$SEAT_JSON" ] && { cp "$SEAT_JSON" "$SEAT_JSON.lane-backup"; seat_had=1; }
-  [ -f "$SPARE_JSON" ] && { cp "$SPARE_JSON" "$SPARE_JSON.lane-backup"; spare_had=1; }
-  # printDuplicateSeatLogins (pfm/internal/doctor/config_checks.go) keys purely
-  # off each registry's own oauthAccount.emailAddress — the same field a real
-  # second login on the same account leaves behind — so planting the identical
-  # value into both seats' registries provokes the exact code path without a
-  # second real credential (TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin
-  # in config_checks_test.go does the same thing at the unit layer).
-  for json in "$SEAT_JSON" "$SPARE_JSON"; do
-    base="$([ -s "$json" ] && cat "$json" || echo '{}')"
-    printf '%s' "$base" | jq -c --arg email "$EMAIL" '(.oauthAccount //= {}) | .oauthAccount.emailAddress = $email' >"$json.lane-planted" 2>&1 &&
-      mv "$json.lane-planted" "$json" || bad="$bad could not plant the fixture email into $json: $(one_line "$(cat "$json.lane-planted" 2>/dev/null)");"
-  done
-  dup="$(pfm doctor 2>&1)"
-  if [ "$seat_had" -eq 1 ]; then mv "$SEAT_JSON.lane-backup" "$SEAT_JSON"; else rm -f "$SEAT_JSON"; fi
-  if [ "$spare_had" -eq 1 ]; then mv "$SPARE_JSON.lane-backup" "$SPARE_JSON"; else rm -f "$SPARE_JSON"; fi
-  line="$(printf '%s\n' "$dup" | grep -F 'duplicate-seat-login' | grep -F "$EMAIL" | head -1)"
-  seats_field="$(printf '%s' "$line" | grep -oE 'seats=[^ ]*')"
-  [ -n "$line" ] || bad="$bad pfm doctor did not name the planted duplicate: $(one_line "$(printf '%s\n' "$dup" | grep -iF duplicate | head -1)");"
-  printf '%s' "$seats_field" | grep -qF "$SEAT:" || bad="$bad the advisory's seats= field is missing seat $SEAT: $(one_line "$seats_field");"
-  printf '%s' "$seats_field" | grep -qF "$SPARE:" || bad="$bad the advisory's seats= field is missing seat $SPARE: $(one_line "$seats_field");"
-  printf '%s' "$line" | grep -qF "share one OAuth usage cap" || bad="$bad the advisory line dropped its remediation text: $(one_line "$line");"
+  if ! with_restored "$SEAT_JSON"; then
+    bad="$bad could not take a crash-safe backup of $SEAT_JSON — nothing was planted;"
+  elif ! with_restored "$SPARE_JSON"; then
+    bad="$bad could not take a crash-safe backup of $SPARE_JSON — nothing was planted;"
+    restore_now "$SEAT_JSON" || bad="$bad restoring $SEAT_JSON after that failure ALSO failed;"
+  else
+    # printDuplicateSeatLogins (pfm/internal/doctor/config_checks.go) keys
+    # purely off each registry's own oauthAccount.emailAddress — the same
+    # field a real second login on the same account leaves behind — so
+    # planting the identical value into both seats' registries provokes the
+    # exact code path without a second real credential
+    # (TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin in
+    # config_checks_test.go does the same thing at the unit layer).
+    for json in "$SEAT_JSON" "$SPARE_JSON"; do
+      base="$([ -s "$json" ] && cat "$json" || echo '{}')"
+      printf '%s' "$base" | jq -c --arg email "$EMAIL" '(.oauthAccount //= {}) | .oauthAccount.emailAddress = $email' >"$json.lane-planted" 2>&1 &&
+        mv "$json.lane-planted" "$json" || bad="$bad could not plant the fixture email into $json: $(one_line "$(cat "$json.lane-planted" 2>/dev/null)");"
+    done
+    dup="$(pfm doctor 2>&1)"
+    restore_now "$SEAT_JSON" || bad="$bad restoring $SEAT_JSON from its crash-safe backup FAILED;"
+    restore_now "$SPARE_JSON" || bad="$bad restoring $SPARE_JSON from its crash-safe backup FAILED;"
+    line="$(printf '%s\n' "$dup" | grep -F 'duplicate-seat-login' | grep -F "$EMAIL" | head -1)"
+    seats_field="$(printf '%s' "$line" | grep -oE 'seats=[^ ]*')"
+    [ -n "$line" ] || bad="$bad pfm doctor did not name the planted duplicate: $(one_line "$(printf '%s\n' "$dup" | grep -iF duplicate | head -1)");"
+    printf '%s' "$seats_field" | grep -qF "$SEAT:" || bad="$bad the advisory's seats= field is missing seat $SEAT: $(one_line "$seats_field");"
+    printf '%s' "$seats_field" | grep -qF "$SPARE:" || bad="$bad the advisory's seats= field is missing seat $SPARE: $(one_line "$seats_field");"
+    printf '%s' "$line" | grep -qF "share one OAuth usage cap" || bad="$bad the advisory line dropped its remediation text: $(one_line "$line");"
+  fi
   if [ -n "$bad" ]; then fail "$bad"; else
     pass "planting $EMAIL into $SEAT_JSON and $SPARE_JSON made pfm doctor emit: $(one_line "$line")"
   fi
@@ -324,16 +320,19 @@ spends none
 clean_rc=0
 pfm doctor >/dev/null 2>&1 || clean_rc=$?
 overlay="$HOME/.local/bin/pfm-statusline"
-saved=""
-if [ -e "$overlay" ]; then saved="$(readlink "$overlay" 2>/dev/null)"; rm -f "$overlay"; fi
-broken_out="$(pfm doctor 2>&1)"
-broken_rc=$?
-if [ -n "$saved" ]; then ln -sfn "$saved" "$overlay"; else install_again >/dev/null 2>&1; fi
+bad="" broken_out="" broken_rc=""
+if with_restored "$overlay"; then
+  rm -f "$overlay"
+  broken_out="$(pfm doctor 2>&1)"
+  broken_rc=$?
+  restore_now "$overlay" || bad="$bad restoring $overlay from its crash-safe backup FAILED;"
+else
+  bad="$bad could not take a crash-safe backup of $overlay before deleting it — nothing was mutated;"
+fi
 repaired_rc=0
 pfm doctor >/dev/null 2>&1 || repaired_rc=$?
-bad=""
 case "$clean_rc" in 0|1) ;; *) bad="$bad a healthy install made doctor exit $clean_rc (want 0 or 1);" ;; esac
-if [ "$broken_rc" -le "$clean_rc" ] && ! printf '%s' "$broken_out" | grep -qi 'pfm-statusline'; then
+if [ -n "$broken_rc" ] && [ "$broken_rc" -le "$clean_rc" ] && ! printf '%s' "$broken_out" | grep -qi 'pfm-statusline'; then
   bad="$bad with $overlay deleted doctor still exited $broken_rc and never named pfm-statusline — it cannot tell healthy from broken;"
 fi
 case "$repaired_rc" in 0|1) ;; *) bad="$bad after the repair doctor still exits $repaired_rc;" ;; esac

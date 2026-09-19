@@ -78,13 +78,10 @@
 # beat whose precondition beat failed reports `blocked-by`, and each ✗ carries
 # the raw pane bytes in the lane log beside its assertion.
 set -uo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
-cd /tmp 2>/dev/null || true
-
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+lane_preamble
 
 WANT_NAME="${E3_CHAT:-E3_MAIN}" # the label E3.03 attempts (and asserts refused) — see fact 3
 CWD="${E3_CWD:-/work/lumen}"
@@ -136,44 +133,9 @@ need "the OpenCode home at $OC_DB" "[ -f '$OC_DB' ]" 'make_oc_home' ||
   lane_abort "no OpenCode home — opencode.db never appeared at $OC_DB, so the picker's compose.Kind NewOpenCode row never renders (compose.go includeNewOpenCode requires len(OpenCodeAccountIDs) != 0) — no beat in this lane can reach a 'New OpenCode chat' row to press Enter on"
 
 # ─── helpers: the picker, driven headless in its own tmux server ───────────
-# Same shape as F.sh's tui_* helpers (its own lane-local copies, not shared via
-# lib.sh) — only the subset E3 needs: open the picker, read its pane, type into
-# its fuzzy search, press keys, read the highlighted row's label.
-
-TUI_WHY=""
-tui_close() { tmux -S "$TUI_SOCK" kill-server >/dev/null 2>&1; rm -f "$TUI_SOCK"; }
-tui_pane() { tmux -S "$TUI_SOCK" capture-pane -p -t tui 2>&1; }
-tui_keys() { tmux -S "$TUI_SOCK" send-keys -t tui "$@" 2>/dev/null; sleep 1; }
-tui_type() { tmux -S "$TUI_SOCK" send-keys -t tui -l -- "$1" 2>/dev/null; sleep 1; }
-tui_has() { tui_pane | grep -qF -- "$1"; }
-tui_wait() { # tui_wait <secs> <needle> — 0 once the pane shows the literal needle
-  local i=0
-  while [ "$i" -lt "$1" ]; do
-    tui_has "$2" && return 0
-    sleep 1
-    i=$((i + 1))
-  done
-  return 1
-}
-# tui_open <cols> <rows> <pfm args…> — the picker in its own tmux server on a
-# socket OUTSIDE pfm's tmux dir (the fleet scan never mistakes it for a chat).
-tui_open() {
-  local cols="$1" rows="$2" out
-  shift 2
-  tui_close
-  TUI_WHY=""
-  out="$(tmux -S "$TUI_SOCK" new-session -d -s tui -x "$cols" -y "$rows" -c "$CWD" \
-    "env TERM=xterm-256color COLORTERM=truecolor pfm $*" 2>&1)" || {
-    TUI_WHY="tmux new-session for the picker failed: $(one_line "$out")"
-    return 1
-  }
-  tui_wait 25 ' tabs ' && return 0
-  TUI_WHY="the picker (pfm $*) never painted its tabs line in 25s; pane: $(one_line "$(tui_pane)")"
-  return 1
-}
-# tui_selected — the highlighted row's name, columns after it (badges, size,
-# AGE) cut off, matching F.sh's own reader exactly.
-tui_selected() { tui_pane | grep -F '› ' | head -1 | sed -e 's/^.*› *//' -e 's/  .*//'; }
+# tui_close/tui_pane/tui_keys/tui_type/tui_has/tui_wait/tui_open/tui_selected
+# live once in lib.sh (F.sh's own subset, byte-identical here before this) —
+# only TUI_SOCK and CWD are this lane's own.
 
 # oc_tmux_dir / ox_sockets — the default tmux socket directory pfm's `-L`
 # attach resolves against (spawn.FreshSocket returns a BARE name like
@@ -298,34 +260,17 @@ else
 fi
 
 # ─── E3.02 — OpenCode MCP wiring: chat local + harvester remote, doctor row ─
-
-beat E3.02-mcp-registered M36
-spends none
-bad=""
-OC_CFG="$HOME/.config/opencode/opencode.jsonc"
-strip_jsonc() { sed 's#//.*$##' "$1"; }
 # The file pfm's OWN installer registers MCP into: pfm/internal/installer/
 # mcp.go writeMCPOpenCodeJSON, by the same fence discipline as Claude's
 # .claude.json (mcp_accounts.go) and Codex's config.toml (mcp.go wireMCP) —
 # root.sh's own `pfm install --yes` (setup.sh install) wrote this file before
-# this lane ran.
-if [ ! -f "$OC_CFG" ]; then
-  bad="$bad no OpenCode MCP config at $OC_CFG — pfm install --yes did not write it;"
-else
-  strip_jsonc "$OC_CFG" | jq -e --arg bin "$PFM_BIN" \
-    '.mcp.chat | .type == "local" and .command == [$bin, "mcp", "chat", "serve"] and .enabled == true' >/dev/null 2>&1 ||
-    bad="$bad M36: $OC_CFG mcp.chat is not the local shape {type local, command [$PFM_BIN mcp chat serve], enabled true}: $(one_line "$(strip_jsonc "$OC_CFG" | jq -c '.mcp.chat' 2>&1)");"
-  strip_jsonc "$OC_CFG" | jq -e --arg url "http://127.0.0.1:$PORT/mcp/harvester" \
-    '.mcp.harvester | .type == "remote" and .url == $url and .enabled == true' >/dev/null 2>&1 ||
-    bad="$bad M36: $OC_CFG mcp.harvester is not the remote shape {type remote, url http://127.0.0.1:$PORT/mcp/harvester, enabled true}: $(one_line "$(strip_jsonc "$OC_CFG" | jq -c '.mcp.harvester' 2>&1)");"
-fi
-oc_doctor_out="$(pfm doctor 2>&1)"
-oc_row="$(printf '%s\n' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
-printf '%s\n' "$oc_row" | grep -qE 'harvester=pfm chat=pfm state=pfm$' ||
-  bad="$bad M36: pfm doctor's opencode MCP row is not healthy: $(one_line "${oc_row:-no client=opencode row at all}");"
-if [ -n "$bad" ]; then fail "$bad"; else
-  pass "$OC_CFG: chat local ($PFM_BIN mcp chat serve) + harvester remote (:$PORT/mcp/harvester), both enabled; pfm doctor's opencode row reads harvester=pfm chat=pfm state=pfm"
-fi
+# this lane ran. The shared body (identical to M.03) lives once in lib.sh's
+# assert_opencode_mcp_registered — this lane and M must never drift apart on
+# what "MCP registered" means.
+
+beat E3.02-mcp-registered M36
+spends none
+assert_opencode_mcp_registered "$PFM_BIN" "$PORT"
 
 # ─── E3.03 — everything else: the shared CLI surface's REAL, sourced verdict
 #             against a chat that is structurally never "live" (fact 2/3) ───

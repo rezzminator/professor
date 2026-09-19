@@ -119,7 +119,24 @@ written_lane() { [ -f "$HERE/$1.sh" ]; }
 pending_lane() { grep -qx "$1" "$PENDING" 2>/dev/null; }
 
 lanes_in_map="$(awk -F'\t' 'NR > 1 { print $2 }' "$MAP" | sort -u)"
-for lane in $lanes_in_map; do
+# The lane universe is the scripts on disk UNION the map — never the map
+# alone, or a lane script whose rows a merge-conflict or a rename dropped from
+# map.tsv is simply never visited by the loop below and exits clean.
+NON_LANE_SCRIPTS=" lib.sh run.sh container.sh root.sh creds.sh check-map.sh "
+lanes_on_disk="$(
+  for f in "$HERE"/*.sh; do
+    [ -f "$f" ] || continue
+    b="$(basename "$f")"
+    case "$NON_LANE_SCRIPTS" in *" $b "*) continue ;; esac
+    printf '%s\n' "${b%.sh}"
+  done | sort -u
+)"
+lanes_union="$(printf '%s\n%s\n' "$lanes_in_map" "$lanes_on_disk" | sort -u | sed '/^$/d')"
+for lane in $lanes_union; do
+  if ! printf '%s\n' "$lanes_in_map" | grep -qxF "$lane"; then
+    red "ON-DISK-LANE-UNMAPPED: $lane.sh exists on disk but $(basename "$MAP") carries no row for lane $lane at all"
+    continue
+  fi
   n_beats="$(awk -F'\t' -v l="$lane" '$2 == l { print $3 }' "$MAP" | sort -u | grep -c .)"
   if written_lane "$lane"; then
     if pending_lane "$lane"; then
@@ -138,7 +155,13 @@ for lane in $lanes_in_map; do
     unmapped_beats=0
     for b in $(grep -oE '^[[:space:]]*beat [A-Za-z0-9_.-]+' "$HERE/$lane.sh" | awk '{ print $2 }' | sort -u); do
       awk -F'\t' -v l="$lane" -v b="$b" '$2 == l && $3 == b { f = 1 } END { exit(f ? 0 : 1) }' "$MAP" && continue
-      ids_field="$(grep -E "^- \`$b\`" "$BEATS" | sed -E 's/.* · ([^·]*)$/\1/')"
+      # The ids field is the 4th " · "-separated segment of the row
+      # (backtick-id · description · spends X · ids …) — read BY POSITION,
+      # never as "the last segment": a row with a trailing annotation after
+      # its ids (O2.01b's `blocked wave7-mock-engine` note) has a 5th
+      # segment, and the last-segment form would read the annotation as the
+      # ids field instead.
+      ids_field="$(grep -E "^- \`$b\`" "$BEATS" | awk -F' · ' '{ print $4 }')"
       [ "$ids_field" = "(none)" ] && continue
       red "UNMAPPED-BEAT: $b is in $lane.sh with no row in $(basename "$MAP") (beats.md does not mark it (none))"
       unmapped_beats=$((unmapped_beats + 1))

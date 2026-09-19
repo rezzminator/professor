@@ -1,0 +1,44 @@
+# The skips `dev.sh test pfm` accepts: package<TAB>test<TAB>class<TAB>reason.
+# scripts/skip-check.sh reds any skipped test this file does not name, so a new
+# t.Skip is a decision recorded here, never a quiet hole in a green gate.
+hostops/pfm/cmd/pfm	TestInternalLaunchPrintHelper	helper	re-exec fixture: runs only as the child of its parent test
+hostops/pfm/cmd/pfm	TestPFMAttachHelper	helper	re-exec fixture: runs only as the child of its parent test
+hostops/pfm/e2e	TestClaudeHarnessCaptureFixture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+hostops/pfm/e2e	TestCodexHookAPIFixture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+hostops/pfm/internal/agentrole	TestUnreadableDirectoryIsAnError	root-noop	the fence runs as root, where permission bits deny nothing
+hostops/pfm/internal/codexappendix	TestNativeHookDelivery	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+hostops/pfm/internal/codexgen	TestClassifyGlobalLinkUnreadableIsAnErrorNeverMissing	root-noop	the fence runs as root, where permission bits deny nothing
+hostops/pfm/internal/compose	TestCodexLineageStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+hostops/pfm/internal/compose	TestComposeStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+hostops/pfm/internal/deps	TestDetachLauncherOnDarwinIsRefusedByThePlatformGateNotAbsence	platform	darwin-only gate
+hostops/pfm/internal/doctor	TestHarnessPromptNativeRepeatedCapture	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+hostops/pfm/internal/gather	TestGatherStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+hostops/pfm/internal/harvest	TestLiveFetchRequestedDOI	opt-in-live	live network provider probe; opt-in
+hostops/pfm/internal/harvest	TestLiveProviderAnna	opt-in-live	live network provider probe; opt-in
+hostops/pfm/internal/harvest	TestLiveProviderDOIMirror	opt-in-live	live network provider probe; opt-in
+hostops/pfm/internal/harvest	TestLiveProviderDOIViewer	opt-in-live	live network provider probe; opt-in
+hostops/pfm/internal/harvest	TestLiveProviderMD5Catalog	opt-in-live	live network provider probe; opt-in
+hostops/pfm/internal/harvest	TestLiveProviderPMC	opt-in-live	live network provider probe; opt-in
+hostops/pfm/internal/harvest	TestLiveProviderScholar	opt-in-live	live network provider probe; opt-in
+hostops/pfm/internal/harvest	TestLiveProviderUnpaywall	opt-in-live	live network provider probe; opt-in
+hostops/pfm/internal/harvestpy	TestCSVAndJSONConversionPathsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+hostops/pfm/internal/harvestpy	TestCorpusPythonAcceptanceExactHTMLFixture	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+hostops/pfm/internal/harvestpy	TestCorpusPythonConversionOwnedPairsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+hostops/pfm/internal/harvestpy	TestPinnedPythonArchiveRetainsFullRuntimeAndStdlib	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+hostops/pfm/internal/hostfixture	TestReadOnlyHomeRefusesAWriteInsideIt	root-noop	the fence runs as root, where permission bits deny nothing
+hostops/pfm/internal/index	TestIndexStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+hostops/pfm/internal/index	TestIndexStressHelper	helper	re-exec fixture: runs only as the child of its parent test
+hostops/pfm/internal/inject	TestRealClaudeStashSemantics	opt-in-real-engine	spends a real engine login; opt-in by its own env switch
+hostops/pfm/internal/installer	TestGlobalAgentsDoctorUnreadableMarkerIsUnresolvedNotNoClone	root-noop	the fence runs as root, where permission bits deny nothing
+hostops/pfm/internal/installer	TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow	root-noop	the fence runs as root, where permission bits deny nothing
+hostops/pfm/internal/installer	TestLaunchAgentGateAnnouncesWhenItCannotProbe	platform	darwin-only gate
+hostops/pfm/internal/installer	TestLaunchAgentGateRefusesOnlyMidExecution	platform	darwin-only gate
+hostops/pfm/internal/installer	TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess	root-noop	the fence runs as root, where permission bits deny nothing
+hostops/pfm/internal/kill	TestKillStressProcessHelper	helper	re-exec fixture: runs only as the child of its parent test
+hostops/pfm/internal/naming	TestNamingStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+hostops/pfm/internal/statusline	TestCodexAppServerFixture	helper	re-exec fixture: runs only as the child of its parent test
+hostops/pfm/internal/store	TestKilledWriteHelperProcess	helper	re-exec fixture: runs only as the child of its parent test
+hostops/pfm/internal/store	TestSharedKillsNeedNoBridgeInEitherDirection	tool-absent	needs the sqlite3 CLI, absent from the fence image
+hostops/pfm/internal/store	TestStoreStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
+hostops/pfm/internal/store	TestStoreStressKilledHelper	helper	re-exec fixture: runs only as the child of its parent test
+hostops/pfm/internal/update	TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError	root-noop	the fence runs as root, where permission bits deny nothing

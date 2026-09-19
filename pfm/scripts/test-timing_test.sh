@@ -16,14 +16,9 @@ set -uo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SUT="$ROOT/scripts/test-timing.sh"
-T="$(mktemp -d "${TMPDIR:-/tmp}/pfm-test-timing-test.XXXXXX")"
-cleanup() { rm -rf -- "$T"; }
-trap cleanup EXIT
-
-PASS=0
-FAIL=0
-ok()  { printf 'PASS  %s\n' "$1"; PASS=$((PASS+1)); }
-bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n' "$@" >&2; FAIL=$((FAIL+1)); }
+SHTEST_TAG=pfm-test-timing-test
+# shellcheck source=/dev/null
+source "$ROOT/../scripts/shtest.sh"
 
 # ---- fixtures --------------------------------------------------------------
 
@@ -496,5 +491,4 @@ else
   fi
 fi
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+shtest_end

@@ -158,7 +158,7 @@ Runs LAST: it reaps the graveyard F's storm filled, archives a real history, and
 
 ## Coverage
 
-- ids mapped / total: **429/429** (`check-map.sh` is the gate, `map.tsv` the index)
+- ids mapped / total: **430/430** (`check-map.sh` is the gate, `map.tsv` the index)
 - ids mapped to ≥ 2 lanes: **18** — C1 (A+F), C22 (E1+F), C28 (E1+F), C32 (E1+E2+F), C39 (E1+E2), C40 (E1+E2), I23 (A+O1), I37 (A+O1), I38 (M+O1+O2), I63 (E2+O2), I96 (F+O1), K12 (E1+F), K23 (E1+O1), L5 (E1+F), L32 (E1+O2), M34 (E2+M), M36 (E3+M), T31 (E1+E2+E3)
 - beats per lane (total / carrying landscape ids): E1 26/26, E2 11/10, E3 3/2, F 18/18, M 15/14, A 15/13, O1 13/12, O2 11/11, R 6/0
 - written: all eight lanes (O1, E1, E2, E3, F, M, A, O2) — `pending.txt` is empty; a beat whose state only a scripted engine can provoke reports `blocked wave7-mock-engine` by name until Wave 7 lands (F.07 K31/K32/K37, F.11 L2/L3, O2.01b L14/L16/L20)

@@ -31,13 +31,10 @@
 # with what it needs from the mock spelled out — never a pass, never silence;
 # every ✗ carries the raw pane bytes in the lane log beside its assertion.
 set -uo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
-cd /tmp 2>/dev/null || true
-
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+lane_preamble
 
 CC="${F_CC_CHAT:-F_CC}"
 CX="${F_CX_CHAT:-F_CX}"
@@ -51,16 +48,12 @@ GOLDEN=/worktree/pfm/testdata/golden
 THEME_SRC=/worktree/pfm/internal/theme/theme.go
 OC_DB="$HOME/.local/share/opencode/opencode.db"
 TUI_SOCK="${TMPDIR:-/tmp}/f-lane-tui.sock"
-SEAT="$(printf '%s\n' $LANE_SEATS | awk -F: '/^cc:/ { print $2; exit }')"
-[ -n "$SEAT" ] || SEAT=1
-PORT="$(jq -r '.mcp.http.port // 18377' "$CONFIG" 2>/dev/null || echo 18377)"
+lane_seat_and_port "$CONFIG"
 
 lane_begin F
 
 # ── prelude: what this lane needs, made when it is missing, no-op otherwise ──
-[ -f "$CONFIG" ] || lane_abort "no pfm config at $CONFIG — the root image was not built by lanes/root.sh"
-jq -e --argjson want "$SEAT" '.accounts[] | select(.id == $want)' "$CONFIG" >/dev/null 2>&1 ||
-  lane_abort "seat cc:$SEAT is not configured in $CONFIG (accounts: $(jq -c '[.accounts[].id]' "$CONFIG"))"
+lane_require_seat "$CONFIG"
 ACCOUNT_IDS="$(jq -r '.accounts[].id' "$CONFIG" 2>/dev/null | tr '\n' ' ')"
 # The seat's medal, from pfm's own resolved config (`config accounts=1:<dir>:🥇 (default),…`).
 MEDAL="$(pfm config show 2>/dev/null | sed -n 's/^config accounts=//p' | tr ',' '\n' |
@@ -122,45 +115,11 @@ default_engine_word() {
   esac
 }
 
-TUI_WHY=""
-tui_close() { tmux -S "$TUI_SOCK" kill-server >/dev/null 2>&1; rm -f "$TUI_SOCK"; }
-tui_pane() { tmux -S "$TUI_SOCK" capture-pane -p -t tui 2>&1; }
+# tui_close/tui_pane/tui_keys/tui_type/tui_has/tui_wait/tui_open/tui_selected
+# live once in lib.sh (E3 shares this exact subset) — only the extra readers
+# below (this lane alone needs them) and TUI_SOCK/CWD are F's own.
 tui_pane_e() { tmux -S "$TUI_SOCK" capture-pane -e -p -t tui 2>&1; }
-tui_keys() { tmux -S "$TUI_SOCK" send-keys -t tui "$@" 2>/dev/null; sleep 1; }
-tui_type() { tmux -S "$TUI_SOCK" send-keys -t tui -l -- "$1" 2>/dev/null; sleep 1; }
 tui_cmd() { tmux -S "$TUI_SOCK" display -p -t tui '#{pane_current_command}' 2>/dev/null; }
-tui_has() { tui_pane | grep -qF -- "$1"; }
-tui_wait() { # tui_wait <secs> <needle> — 0 once the pane shows the literal needle
-  local i=0
-  while [ "$i" -lt "$1" ]; do
-    tui_has "$2" && return 0
-    sleep 1
-    i=$((i + 1))
-  done
-  return 1
-}
-# tui_open <cols> <rows> <pfm args…> — the picker in its own tmux server on a
-# socket OUTSIDE pfm's tmux dir (the fleet scan never mistakes it for a chat),
-# truecolor negotiated so a palette assertion has bytes to read. 0 once the
-# tabs line has painted; 1 with TUI_WHY naming which of the two steps failed.
-tui_open() {
-  local cols="$1" rows="$2" out
-  shift 2
-  tui_close
-  TUI_WHY=""
-  out="$(tmux -S "$TUI_SOCK" new-session -d -s tui -x "$cols" -y "$rows" -c "$CWD" \
-    "env TERM=xterm-256color COLORTERM=truecolor pfm $*" 2>&1)" || {
-    TUI_WHY="tmux new-session for the picker failed: $(one_line "$out")"
-    return 1
-  }
-  tui_wait 25 ' tabs ' && return 0
-  TUI_WHY="the picker (pfm $*) never painted its tabs line in 25s; pane: $(one_line "$(tui_pane)")"
-  return 1
-}
-# tui_selected — the selected row's marker and name (`● F_CC`): the columns
-# after the name (badges, prompts, size, AGE) are cut, because the age ticks
-# between two captures and would make an unmoved cursor read as moved.
-tui_selected() { tui_pane | grep -F '› ' | head -1 | sed -e 's/^.*› *//' -e 's/  .*//'; }
 tui_cache() { tui_pane | grep -oE '⚡ 1h|🪫 5m' | head -1; }
 tui_account() { tui_pane | sed -n 's/.*account \([0-9][0-9]*\) ·.*/\1/p' | head -1; }
 # tui_left — the picker has left the pane (exit or exec): 0 when the pane's

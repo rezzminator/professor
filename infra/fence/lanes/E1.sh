@@ -20,29 +20,22 @@
 # precondition beat failed reports `blocked-by`, and each ✗ carries the raw pane
 # bytes in the lane log beside its assertion.
 set -uo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
-cd /tmp 2>/dev/null || true
-
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+lane_preamble
 
 CHAT="${E1_CHAT:-E1_MAIN}"
 ROLE_CHAT="${CHAT}_ROLE"
 CWD="${E1_CWD:-/work/orbit}"
 CONFIG="$HOME/.config/pfm/pfm.config.json"
 SID_DIR="${PFM_SID_DIR:-${TMPDIR:-/tmp}/cc-sid}"
-SEAT="$(printf '%s\n' $LANE_SEATS | awk -F: '/^cc:/ { print $2; exit }')"
-[ -n "$SEAT" ] || SEAT=1
-PORT="$(jq -r '.mcp.http.port // 18377' "$CONFIG" 2>/dev/null || echo 18377)"
+lane_seat_and_port "$CONFIG"
 
 lane_begin E1
 
 # ── prelude: what this lane needs, made when it is missing, no-op otherwise ──
-[ -f "$CONFIG" ] || lane_abort "no pfm config at $CONFIG — the root image was not built by lanes/root.sh"
-jq -e --argjson want "$SEAT" '.accounts[] | select(.id == $want)' "$CONFIG" >/dev/null 2>&1 ||
-  lane_abort "seat cc:$SEAT is not configured in $CONFIG (accounts: $(jq -c '[.accounts[].id]' "$CONFIG"))"
+lane_require_seat "$CONFIG"
 ALT="$(jq -r --argjson want "$SEAT" '[.accounts[].id | select(. != $want)] | first // empty' "$CONFIG")"
 SEAT_DIR="$(jq -r --argjson want "$SEAT" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")"
 case "$SEAT_DIR" in "~"*) SEAT_DIR="$HOME${SEAT_DIR#\~}" ;; esac

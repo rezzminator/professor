@@ -10,12 +10,9 @@ set -uo pipefail
 
 SUT_DIR="${LANE_SUT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 SUT="$SUT_DIR/creds.sh"
-T="$(mktemp -d "${TMPDIR:-/tmp}/lane-creds-test.XXXXXX")"
-trap 'rm -rf -- "$T"' EXIT
-
-PASS=0 FAIL=0
-ok() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n' "$@" >&2; FAIL=$((FAIL + 1)); }
+SHTEST_TAG=lane-creds-test
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 [ -f "$SUT" ] || { echo "creds_test: no creds.sh at $SUT" >&2; exit 2; }
 
 TOKEN='sk-ant-oat01-LANE-FIXTURE-TOKEN-NEVER-PRINT'
@@ -209,5 +206,4 @@ else
   bad "missing config" "rc=$RC" "$OUT"
 fi
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+shtest_end

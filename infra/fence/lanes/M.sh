@@ -32,13 +32,10 @@
 # things could have gone wrong (dead daemon vs empty list, transport refused vs
 # tool refused) the message says which.
 set -uo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
-cd /tmp 2>/dev/null || true
-
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+lane_preamble
 
 CHAT="${M_CHAT:-M_MAIN}"
 NEW_CHAT="${CHAT}_NEW"
@@ -51,9 +48,7 @@ HARVESTER_CFG="$CFG_DIR/harvester.config.json"
 MANAGED="$HOME/.local/share/pfm/install"
 BLUEPRINT="$HOME/.professor"
 PFM_BIN="$HOME/.local/bin/pfm"
-SEAT="$(printf '%s\n' $LANE_SEATS | awk -F: '/^cc:/ { print $2; exit }')"
-[ -n "$SEAT" ] || SEAT=1
-PORT="$(jq -r '.mcp.http.port // 18377' "$CONFIG" 2>/dev/null || echo 18377)"
+lane_seat_and_port "$CONFIG"
 MCP_PROTO=2025-06-18
 INIT_FRAME='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"lane-M","version":"0"}}}'
 INITIALIZED_FRAME='{"jsonrpc":"2.0","method":"notifications/initialized"}'
@@ -71,9 +66,7 @@ SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/lane-m.XXXXXX")"
 lane_begin M
 
 # ── prelude: what this lane needs, made when it is missing, no-op otherwise ──
-[ -f "$CONFIG" ] || lane_abort "no pfm config at $CONFIG — the root image was not built by lanes/root.sh"
-jq -e --argjson want "$SEAT" '.accounts[] | select(.id == $want)' "$CONFIG" >/dev/null 2>&1 ||
-  lane_abort "seat cc:$SEAT is not configured in $CONFIG (accounts: $(jq -c '[.accounts[].id]' "$CONFIG"))"
+lane_require_seat "$CONFIG"
 SEAT_DIR="$(jq -r --argjson want "$SEAT" '.accounts[] | select(.id == $want) | .configDir' "$CONFIG")"
 case "$SEAT_DIR" in "~"*) SEAT_DIR="$HOME${SEAT_DIR#\~}" ;; esac
 SPARE="$(jq -r --argjson want "$SEAT" '[.accounts[].id | select(. != $want)] | first // empty' "$CONFIG")"
@@ -410,29 +403,13 @@ else
 fi
 
 # ─── M.03 — OpenCode registration: chat local + harvester remote, doctor row ─
+# The shared body (identical to E3.02) lives once in lib.sh's
+# assert_opencode_mcp_registered — this lane and E3 must never drift apart on
+# what "MCP registered" means.
 
 beat M.03-register-opencode M36
 spends none
-bad=""
-OC_CFG="$HOME/.config/opencode/opencode.jsonc"
-strip_jsonc() { sed 's#//.*$##' "$1"; }
-if [ ! -f "$OC_CFG" ]; then
-  bad="$bad no OpenCode MCP config at $OC_CFG — pfm install --yes did not write it;"
-else
-  strip_jsonc "$OC_CFG" | jq -e --arg bin "$PFM_BIN" \
-    '.mcp.chat | .type == "local" and .command == [$bin, "mcp", "chat", "serve"] and .enabled == true' >/dev/null 2>&1 ||
-    bad="$bad M36: $OC_CFG mcp.chat is not the local shape {type local, command [$PFM_BIN mcp chat serve], enabled true}: $(one_line "$(strip_jsonc "$OC_CFG" | jq -c '.mcp.chat' 2>&1)");"
-  strip_jsonc "$OC_CFG" | jq -e --arg url "http://127.0.0.1:$PORT/mcp/harvester" \
-    '.mcp.harvester | .type == "remote" and .url == $url and .enabled == true' >/dev/null 2>&1 ||
-    bad="$bad M36: $OC_CFG mcp.harvester is not the remote shape {type remote, url http://127.0.0.1:$PORT/mcp/harvester, enabled true}: $(one_line "$(strip_jsonc "$OC_CFG" | jq -c '.mcp.harvester' 2>&1)");"
-fi
-oc_doctor_out="$(pfm doctor 2>&1)"
-oc_row="$(printf '%s\n' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
-printf '%s\n' "$oc_row" | grep -qE 'harvester=pfm chat=pfm state=pfm$' ||
-  bad="$bad M36: pfm doctor's opencode MCP row is not healthy: $(one_line "${oc_row:-no client=opencode row at all}");"
-if [ -n "$bad" ]; then fail "$bad"; else
-  pass "$OC_CFG: chat local ($PFM_BIN mcp chat serve) + harvester remote (:$PORT/mcp/harvester), both enabled; pfm doctor's opencode row reads harvester=pfm chat=pfm state=pfm"
-fi
+assert_opencode_mcp_registered "$PFM_BIN" "$PORT"
 
 # ─── M.04 — doctor: registration classes, Codex + project cutover, daemon ───
 

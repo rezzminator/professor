@@ -64,10 +64,68 @@ LANE_LIB_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 : "${LANE_SEATS:=cc:1}"
 : "${LANE_PFM_LOG:=${PFM_HOME:-$HOME/.local/state/pfm}/log/pfm.jsonl}"
 : "${LANE_TODAY:=$(date +%Y-%m-%d)}"
+# The lane scripts gaps_validate cross-checks a ledger `beat:` id against — the
+# real lane directory by default; a test points this at a fixture directory so
+# a fixture ledger is never judged against this tree's own beats.
+: "${LANE_SCRIPTS_DIR:=$LANE_LIB_DIR}"
 # Every lane runs pfm at debug (Wave 4 ruling, 2026-09-18): the activity log
 # (Wave 6) is judged per beat, and a thinner level would hide the records a
 # slice is judged on. Forced over any caller's own level, never defaulted.
 export PFM_LOG_LEVEL=debug
+
+# lane_preamble — the fence plumbing every LANE script (never run.sh, which
+# runs on the host outside any container) needs before its own vars: the
+# Claude root-fence bypass flag, local bin on PATH, and a stable cwd. Call
+# once, right after sourcing lib.sh — this is what used to be an 8-line
+# identical block copy-pasted at the top of every lane script (the jscpd
+# clone the gate flagged).
+lane_preamble() {
+  export PATH="$HOME/.local/bin:$PATH"
+  export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
+  cd /tmp 2>/dev/null || true
+}
+
+# lane_seat_and_port <config> — sets SEAT (this run's first cc seat, from
+# $LANE_SEATS, or 1) and PORT (the daemon's loopback port from <config>, or
+# the installer's own default 18377) — the two values every Claude-seat lane
+# resolves identically before its own prelude (another jscpd-flagged clone
+# across A/E1/F/M before this).
+lane_seat_and_port() {
+  SEAT="$(printf '%s\n' "$LANE_SEATS" | awk -F: '/^cc:/ { print $2; exit }')"
+  [ -n "$SEAT" ] || SEAT=1
+  PORT="$(jq -r '.mcp.http.port // 18377' "$1" 2>/dev/null || echo 18377)"
+}
+
+# lane_require_seat <config> — the two-line abort every Claude-seat lane's
+# prelude opens with: no config at all, or $SEAT (lane_seat_and_port's own
+# output) missing from it. Calls lane_abort, so it must run AFTER lane_begin.
+lane_require_seat() {
+  [ -f "$1" ] || lane_abort "no pfm config at $1 — the root image was not built by lanes/root.sh"
+  jq -e --argjson want "$SEAT" '.accounts[] | select(.id == $want)' "$1" >/dev/null 2>&1 ||
+    lane_abort "seat cc:$SEAT is not configured in $1 (accounts: $(jq -c '[.accounts[].id]' "$1"))"
+}
+
+# lane_require_seat_ops <config> — O1 and O2's own prelude (both "ops & host"
+# lanes, both needing MORE than lane_require_seat's plain existence check):
+# SEAT_DIR the config actually resolves $SEAT to, SPARE/SPARE_DIR the second
+# seat if this run has one, and CODEX_HOME. Calls lane_abort, so it must run
+# after lane_begin; $SEAT itself is each caller's own (O1/O2 have no PORT to
+# share the resolution of, so lane_seat_and_port does not fit them).
+lane_require_seat_ops() {
+  local config="$1"
+  [ -f "$config" ] || lane_abort "no pfm config at $config — this is not a lane root image"
+  SEAT_DIR="$(jq -r --argjson want "$SEAT" '.accounts[] | select(.id == $want) | .configDir' "$config")"
+  case "$SEAT_DIR" in "~"*) SEAT_DIR="$HOME${SEAT_DIR#\~}" ;; esac
+  [ -n "$SEAT_DIR" ] || lane_abort "seat cc:$SEAT is not configured in $config (accounts: $(jq -c '[.accounts[].id]' "$config"))"
+  SPARE="$(jq -r --argjson want "$SEAT" '[.accounts[].id | select(. != $want)] | first // empty' "$config")"
+  SPARE_DIR=""
+  if [ -n "$SPARE" ]; then
+    SPARE_DIR="$(jq -r --argjson want "$SPARE" '.accounts[] | select(.id == $want) | .configDir' "$config")"
+    case "$SPARE_DIR" in "~"*) SPARE_DIR="$HOME${SPARE_DIR#\~}" ;; esac
+  fi
+  CODEX_HOME="$(jq -r '.codex.homes[0].home // "~/.codex"' "$config")"
+  case "$CODEX_HOME" in "~"*) CODEX_HOME="$HOME${CODEX_HOME#\~}" ;; esac
+}
 
 LANE_ID="" LANE_LOG="" LANE_TIMELINE="" LANE_T0=0
 LANE_BEATS=0 LANE_FAILED=0 LANE_KNOWN=0 LANE_BLOCKED=0
@@ -145,14 +203,28 @@ gap_applies() {
 }
 
 # gaps_validate — every entry needs `expires:` and must not be past it (Wave 8's
-# law). Prints one named red line per offender; exit 1 when any fired.
+# law), and every entry's `beat:` id must exist as a real `beat <id>` line in
+# SOME script under $LANE_SCRIPTS_DIR (a renamed/deleted beat left behind in
+# the ledger is a stale entry, named here rather than silently ignored).
+# Prints one named red line per offender; exit 1 when any fired.
+#
+# Non-comment content that parses to ZERO `- beat:` entries is UNPARSEABLE
+# (exit 2), never the same clean answer as a genuinely empty ledger (nothing
+# but comments and a bare `gaps:`): a re-indented or differently-shaped YAML
+# file must never read as "nothing to judge".
 gaps_validate() {
-  local beat expires bad=0
+  local beat expires bad=0 beats_found non_comment
   if [ ! -f "$LANE_GAPS" ]; then
     echo "known-gaps: UNREADABLE — $LANE_GAPS does not exist (the ledger cannot be judged)" >&2
     return 2
   fi
-  for beat in $(awk -F'beat:' '/^[ \t]*-[ \t]*beat:/ { gsub(/[ \t"]/, "", $2); print $2 }' "$LANE_GAPS"); do
+  beats_found="$(awk -F'beat:' '/^[ \t]*-[ \t]*beat:/ { gsub(/[ \t"]/, "", $2); print $2 }' "$LANE_GAPS")"
+  non_comment="$(grep -vE '^[ \t]*(#|$)' "$LANE_GAPS" | grep -vxE '[ \t]*gaps:[ \t]*' || true)"
+  if [ -z "$beats_found" ] && [ -n "$non_comment" ]; then
+    echo "known-gaps: UNPARSEABLE — $LANE_GAPS has non-comment content but the parser matched zero '- beat:' entries (a re-indented or differently-shaped ledger must never read as a clean empty one)" >&2
+    return 2
+  fi
+  for beat in $beats_found; do
     expires="$(gap_field "$beat" expires)"
     if [ -z "$expires" ]; then
       echo "known-gaps: ✗ $beat — no expires: (an entry without an expiry is forbidden)" >&2
@@ -164,8 +236,99 @@ gaps_validate() {
       echo "known-gaps: ✗ $beat — expired $expires (today $LANE_TODAY): fix the gap or re-date the entry" >&2
       bad=1
     fi
+    if ! grep -qE "^[[:space:]]*beat $beat( |\$)" "$LANE_SCRIPTS_DIR"/*.sh 2>/dev/null; then
+      echo "known-gaps: ✗ $beat — no lane script under $LANE_SCRIPTS_DIR has a 'beat $beat' line (a stale ledger entry for a renamed or deleted beat)" >&2
+      bad=1
+    fi
   done
   [ "$bad" -eq 0 ]
+}
+
+# ─── crash-safe plant/restore (a beat that mutates a real file) ────────────
+#
+# A beat that plants a fixture into a real file (a config, a seat registry, an
+# overlay symlink) can be interrupted — a timeout, ^C, the container dying —
+# between the plant and its own restore. `with_restored <path>` takes a
+# crash-safe backup BEFORE the first byte of <path> is touched and registers
+# the restore on EVERY exit path via one shared EXIT/INT/TERM trap that
+# COMPOSES with whatever trap the caller already had (chained, never
+# clobbered) and with every other `with_restored` still open in the same beat
+# (O1.08 plants two seats at once). The caller still calls `restore_now
+# <path>` in its own normal fall-through so a healthy beat restores promptly;
+# the trap is the guarantee for the path that never gets there.
+LANE_RESTORE_PENDING="" LANE_RESTORE_TRAP_ARMED=0
+
+_lane_restore_one() { # _lane_restore_one <path> — idempotent: a no-op once done
+  local path="$1" backup rc=0
+  backup="$path.lane-backup" # a SEPARATE assignment: `local a=$1 b=$a` never sees a's new value
+  if [ -e "$backup" ]; then
+    mv -f "$backup" "$path" 2>/dev/null || {
+      echo "lane: RESTORE-FAILED — could not move $backup back onto $path" >&2
+      rc=1
+    }
+  elif [ -e "$backup.absent" ]; then
+    rm -f "$backup.absent"
+    if [ -e "$path" ]; then
+      rm -f "$path" 2>/dev/null || {
+        echo "lane: RESTORE-FAILED — could not remove the planted $path (it did not exist before this beat)" >&2
+        rc=1
+      }
+    fi
+  fi
+  return $rc
+}
+
+_lane_restore_trap() {
+  local p
+  for p in $LANE_RESTORE_PENDING; do _lane_restore_one "$p"; done
+}
+
+_lane_restore_arm_trap() { # composes with any trap already registered
+  [ "$LANE_RESTORE_TRAP_ARMED" -eq 1 ] && return 0
+  LANE_RESTORE_TRAP_ARMED=1
+  local sig prior
+  for sig in EXIT INT TERM; do
+    prior="$(trap -p "$sig" | sed -E "s/^trap -- '(.*)' $sig\$/\\1/")"
+    trap "${prior:+$prior; }_lane_restore_trap" "$sig"
+  done
+}
+
+# with_restored <path> — 0: <path> is backed up and safe to mutate now. 1: the
+# caller must NOT mutate <path> — either the backup itself could not be taken
+# (nothing was touched; the caller closes the beat FAIL) or a pre-existing
+# "<path>.lane-backup" was found, which means a PRIOR run crashed mid-beat: it
+# is restored onto <path> at once (never overwritten with a fresh backup that
+# would erase the true original) and this call still refuses, so the caller
+# reports the recovery rather than mutating on top of a corrupted image.
+with_restored() {
+  local path="$1" backup
+  backup="$path.lane-backup" # a SEPARATE assignment: `local a=$1 b=$a` never sees a's new value
+  if [ -e "$backup" ] || [ -e "$backup.absent" ]; then
+    _lane_restore_one "$path"
+    echo "lane: with_restored $path — a pre-existing $backup(.absent) was found (a prior run crashed mid-beat); restored and refusing this beat's own mutation" >&2
+    return 1
+  fi
+  if [ -e "$path" ]; then
+    if ! cp -a "$path" "$backup" 2>/dev/null; then
+      rm -f "$backup"
+      echo "lane: with_restored $path — the backup copy failed; nothing was mutated" >&2
+      return 1
+    fi
+  elif ! : >"$backup.absent" 2>/dev/null; then
+    echo "lane: with_restored $path — could not record the file's absence; nothing was mutated" >&2
+    return 1
+  fi
+  LANE_RESTORE_PENDING="$LANE_RESTORE_PENDING $path"
+  _lane_restore_arm_trap
+  return 0
+}
+
+# restore_now <path> — the beat's own prompt restore in its normal
+# fall-through path. Idempotent with the exit trap: whichever runs first wins,
+# the other is a no-op. Returns 1 on a restore failure, which the caller folds
+# into its own `bad=` line — a restore failure is a beat failure, never silent.
+restore_now() {
+  _lane_restore_one "$1"
 }
 
 # ─── the lane ───────────────────────────────────────────────────────────────
@@ -187,6 +350,15 @@ lane_begin() { # lane_begin <lane-id>
   printf '%s\n' "$LANE_LOG_STATE" >"$LANE_OUT_DIR/$LANE_ID.logstate"
   _lane_say "$LANE_ID · start · mode $LANE_MODE${LANE_PRIOR:+ · after $LANE_PRIOR} · seats $LANE_SEATS · $(date -u +%H:%M:%SZ)"
   _lane_log_only "$LANE_ID · activity log $LANE_PFM_LOG: $LANE_LOG_STATE"
+  # Wave 6 (the activity log) HAS landed: every root image runs pfm — and
+  # pfm's own process entry writes cmd.start before anything else — well
+  # before it is committed, so the log must already exist by the time ANY
+  # lane container begins. ABSENT here is therefore a broken state, not an
+  # excused gap, and it is named at once — counted at lane_end (never here:
+  # bumping LANE_BEATS/LANE_FAILED this early would hide a genuinely
+  # zero-beat lane from lane_end's own ZERO-BEATS guard below).
+  [ "$LANE_LOG_STATE" = ABSENT ] &&
+    _lane_say "$LANE_ID ✗ PRELUDE-LOG — activity log ABSENT at lane start ($LANE_PFM_LOG); the root image already ran pfm before it was committed, so this is a broken state, not an excused gap — log assertions could not be enforced for this whole lane"
 }
 
 lane_abort() { # lane_abort <why> — a prelude that could not build its preconditions
@@ -209,11 +381,23 @@ lane_end() {
   local wall
   [ -n "$LANE_CUR" ] && fail "beat left open — the lane reached its end with no verdict"
   wall=$(( $(_lane_now) - LANE_T0 ))
+  # A lane that ran no beats at all, and a lane whose every beat was blocked,
+  # is a named red — not the same exit-0 shape as a lane that actually
+  # asserted something and held.
+  if [ "$LANE_BEATS" -eq 0 ]; then
+    _lane_say "$LANE_ID ✗ ZERO-BEATS — the lane ran no beats at all; nothing was asserted, and a lane with nothing to show is not a pass"
+    LANE_FAILED=$((LANE_FAILED + 1))
+  elif [ "$LANE_BLOCKED" -eq "$LANE_BEATS" ]; then
+    _lane_say "$LANE_ID ✗ ALL-BLOCKED — every one of this lane's $LANE_BEATS beat(s) was blocked; nothing was actually asserted"
+    LANE_FAILED=$((LANE_FAILED + 1))
+  fi
+  if [ "$LANE_LOG_STATE" = ABSENT ]; then
+    LANE_FAILED=$((LANE_FAILED + 1))
+    _lane_say "$LANE_ID · activity log: ABSENT at lane start ($LANE_PFM_LOG) — Wave 6 has landed, so this is a red (see PRELUDE-LOG above), not an excused gap"
+  fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$LANE_ID" "$wall" "$LANE_BEATS" "$LANE_FAILED" "$LANE_KNOWN" "$LANE_BLOCKED" \
     >"$LANE_OUT_DIR/$LANE_ID.row.tsv"
-  [ "$LANE_LOG_STATE" = ABSENT ] &&
-    _lane_say "$LANE_ID · activity log: ABSENT (Wave 6 not landed) — log assertions not enforced"
   _lane_say "$LANE_ID · end · ${wall}s · $LANE_BEATS beats · $LANE_FAILED failed · $LANE_KNOWN known · $LANE_BLOCKED blocked"
   [ "$LANE_FAILED" -eq 0 ]
 }
@@ -246,8 +430,15 @@ beat() { # beat <id> [landscape-ids…]
     LANE_CUR_OFFSET="$LANE_NEXT_OFFSET"
     LANE_NEXT_OFFSET=""
   elif [ -f "$LANE_PFM_LOG" ]; then
+    # `wc -c` on a file it CAN read always prints a number, even "0" for an
+    # empty file — an empty result here only ever means the read itself
+    # failed (permission, a race with the file vanishing). That must stay
+    # empty, never coerced to "0", or a read failure and a genuinely fresh
+    # log at byte 0 become the same offset and `_lane_close`'s SKIPPED guard
+    # below can no longer tell them apart.
     LANE_CUR_OFFSET="$(wc -c <"$LANE_PFM_LOG" 2>/dev/null | tr -d ' ')"
-    [ -n "$LANE_CUR_OFFSET" ] || LANE_CUR_OFFSET=0
+    [ -n "$LANE_CUR_OFFSET" ] ||
+      _lane_log_only "   activity log: wc -c could not read $LANE_PFM_LOG at beat start — this beat's slice will be judged UNREADABLE, not empty"
   else
     LANE_CUR_OFFSET=""
   fi
@@ -398,12 +589,20 @@ _lane_raw_dump() { # the failed beat's pane, escapes included (zellij's rule)
 }
 
 # _lane_log_slice — the activity-log records written during this beat. Prints
-# the unexpected `"level":"error"` ones; returns 1 when any exist.
+# the unexpected `"level":"error"` ones; returns 1 when any exist. A `tail`
+# that cannot read the file (a race between the offset check above and here,
+# a permission change mid-run) prints the sentinel LANE-LOG-READ-FAILED and
+# also returns 1 — a read failure is a FAIL distinct from an empty slice
+# (which means "nothing new," not "we could not look"), and the caller below
+# tells the two apart by that sentinel.
 _lane_log_slice() {
   local slice errors pattern kept
   [ -n "$LANE_CUR_OFFSET" ] || return 0
   [ -f "$LANE_PFM_LOG" ] || return 0
-  slice="$(tail -c "+$((LANE_CUR_OFFSET + 1))" "$LANE_PFM_LOG" 2>/dev/null)"
+  if ! slice="$(tail -c "+$((LANE_CUR_OFFSET + 1))" "$LANE_PFM_LOG" 2>/dev/null)"; then
+    printf 'LANE-LOG-READ-FAILED\n'
+    return 1
+  fi
   [ -n "$slice" ] || return 0
   errors="$(printf '%s\n' "$slice" | grep '"level":"error"' || true)"
   [ -n "$errors" ] || return 0
@@ -441,10 +640,16 @@ _lane_close() { # _lane_close <verdict> <glyph> <detail>
   fi
   if [ "$verdict" != fail ]; then
     unexpected="$(_lane_log_slice)" || {
-      _lane_log_only "   activity log: unexpected error record(s) in this beat's slice:"
-      _lane_log_only "$unexpected"
-      verdict=fail glyph="✗"
-      detail="$detail; activity log carried $(printf '%s\n' "$unexpected" | grep -c . ) unexpected error record(s) — slice in $LANE_LOG"
+      if [ "$unexpected" = LANE-LOG-READ-FAILED ]; then
+        _lane_log_only "   activity log: tail could not read $LANE_PFM_LOG for this beat's slice — a read failure, never a clean log"
+        verdict=fail glyph="✗"
+        detail="$detail; activity-log sweep FAILED — could not read $LANE_PFM_LOG for this beat's slice"
+      else
+        _lane_log_only "   activity log: unexpected error record(s) in this beat's slice:"
+        _lane_log_only "$unexpected"
+        verdict=fail glyph="✗"
+        detail="$detail; activity log carried $(printf '%s\n' "$unexpected" | grep -c . ) unexpected error record(s) — slice in $LANE_LOG"
+      fi
     }
   fi
   LANE_BEATS=$((LANE_BEATS + 1))
@@ -552,6 +757,80 @@ need() {
   _lane_say "$LANE_ID need: $name · UNMET — the make command exited 0 but the check still fails: $(one_line "$out")"
   return 1
 }
+
+# assert_opencode_mcp_registered <pfm-bin> <port> — M.03 and E3.02 are the
+# same assertion body (OpenCode's opencode.jsonc carries chat local + harvester
+# remote, and doctor's opencode row reads healthy): one shared beat body so the
+# two lanes can never drift apart on what "MCP registered" means (M.sh:412-435
+# was byte-identical to E3.sh:300-328 before this).
+assert_opencode_mcp_registered() {
+  local bin="$1" port="$2" oc_cfg="$HOME/.config/opencode/opencode.jsonc" bad="" oc_doctor_out oc_row
+  _strip_jsonc() { sed 's#//.*$##' "$1"; }
+  if [ ! -f "$oc_cfg" ]; then
+    bad="$bad no OpenCode MCP config at $oc_cfg — pfm install --yes did not write it;"
+  else
+    _strip_jsonc "$oc_cfg" | jq -e --arg bin "$bin" \
+      '.mcp.chat | .type == "local" and .command == [$bin, "mcp", "chat", "serve"] and .enabled == true' >/dev/null 2>&1 ||
+      bad="$bad M36: $oc_cfg mcp.chat is not the local shape {type local, command [$bin mcp chat serve], enabled true}: $(one_line "$(_strip_jsonc "$oc_cfg" | jq -c '.mcp.chat' 2>&1)");"
+    _strip_jsonc "$oc_cfg" | jq -e --arg url "http://127.0.0.1:$port/mcp/harvester" \
+      '.mcp.harvester | .type == "remote" and .url == $url and .enabled == true' >/dev/null 2>&1 ||
+      bad="$bad M36: $oc_cfg mcp.harvester is not the remote shape {type remote, url http://127.0.0.1:$port/mcp/harvester, enabled true}: $(one_line "$(_strip_jsonc "$oc_cfg" | jq -c '.mcp.harvester' 2>&1)");"
+  fi
+  oc_doctor_out="$(pfm doctor 2>&1)"
+  oc_row="$(printf '%s\n' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
+  printf '%s\n' "$oc_row" | grep -qE 'harvester=pfm chat=pfm state=pfm$' ||
+    bad="$bad M36: pfm doctor's opencode MCP row is not healthy: $(one_line "${oc_row:-no client=opencode row at all}");"
+  if [ -n "$bad" ]; then
+    fail "$bad"
+  else
+    pass "$oc_cfg: chat local ($bin mcp chat serve) + harvester remote (:$port/mcp/harvester), both enabled; pfm doctor's opencode row reads harvester=pfm chat=pfm state=pfm"
+  fi
+}
+
+# ─── the TUI driver (F and E3 both drive the real picker headlessly) ───────
+# Every caller sets TUI_SOCK (a tmux socket OUTSIDE pfm's own tmux dir, so the
+# fleet scan never mistakes the picker for a chat) and CWD (tui_open's launch
+# directory) before calling any of these. E3 used to carry its own byte-
+# identical copy of this subset ("Same shape as F.sh's tui_* helpers... not
+# shared via lib.sh") — the jscpd clone the gate flagged; F.sh keeps the extra
+# readers (tui_pane_e, tui_cmd, tui_cache, tui_account, tui_left) it alone needs.
+TUI_WHY=""
+tui_close() { tmux -S "$TUI_SOCK" kill-server >/dev/null 2>&1; rm -f "$TUI_SOCK"; }
+tui_pane() { tmux -S "$TUI_SOCK" capture-pane -p -t tui 2>&1; }
+tui_keys() { tmux -S "$TUI_SOCK" send-keys -t tui "$@" 2>/dev/null; sleep 1; }
+tui_type() { tmux -S "$TUI_SOCK" send-keys -t tui -l -- "$1" 2>/dev/null; sleep 1; }
+tui_has() { tui_pane | grep -qF -- "$1"; }
+tui_wait() { # tui_wait <secs> <needle> — 0 once the pane shows the literal needle
+  local i=0
+  while [ "$i" -lt "$1" ]; do
+    tui_has "$2" && return 0
+    sleep 1
+    i=$((i + 1))
+  done
+  return 1
+}
+# tui_open <cols> <rows> <pfm args…> — the picker in its own tmux server on a
+# socket OUTSIDE pfm's tmux dir (the fleet scan never mistakes it for a chat),
+# truecolor negotiated so a palette assertion has bytes to read. 0 once the
+# tabs line has painted; 1 with TUI_WHY naming which of the two steps failed.
+tui_open() {
+  local cols="$1" rows="$2" out
+  shift 2
+  tui_close
+  TUI_WHY=""
+  out="$(tmux -S "$TUI_SOCK" new-session -d -s tui -x "$cols" -y "$rows" -c "$CWD" \
+    "env TERM=xterm-256color COLORTERM=truecolor pfm $*" 2>&1)" || {
+    TUI_WHY="tmux new-session for the picker failed: $(one_line "$out")"
+    return 1
+  }
+  tui_wait 25 ' tabs ' && return 0
+  TUI_WHY="the picker (pfm $*) never painted its tabs line in 25s; pane: $(one_line "$(tui_pane)")"
+  return 1
+}
+# tui_selected — the selected row's marker and name (`● F_CC`): the columns
+# after the name (badges, prompts, size, AGE) are cut, because the age ticks
+# between two captures and would make an unmoved cursor read as moved.
+tui_selected() { tui_pane | grep -F '› ' | head -1 | sed -e 's/^.*› *//' -e 's/  .*//'; }
 
 # ─── shared assertions every lane uses ──────────────────────────────────────
 

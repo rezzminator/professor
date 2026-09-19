@@ -40,7 +40,6 @@ HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
 CANONICAL="O1 E1 E2 E3 F M A O2"
 BUDGETS="$HERE/budgets.yml"
-MAP="$HERE/map.tsv"
 PENDING="$HERE/pending.txt"
 ROOT_SH="${LANE_ROOT_SH:-$HERE/root.sh}"
 OUT_ROOT="${LANE_OUT_ROOT:-$ROOT/tmp/lanes}"
@@ -285,16 +284,14 @@ while IFS=$'\t' read -r l wall beats failed known blocked; do
   total_failed=$((total_failed + failed)) total_known=$((total_known + known)) total_blocked=$((total_blocked + blocked))
 done < <(tail -n +2 "$OUT/lanes.tsv")
 
-# Every landscape id a beat declared must have its row in map.tsv — the beat
-# side of the map gate (check-map.sh walks the landscape side).
+# The beat↔map contract is check-map.sh's own gate (direction 2, both ways) —
+# never a second, partial copy of the same walk here: run.sh spends ONE call
+# on the real gate after every run instead.
+map_check_out="$(bash "$HERE/check-map.sh" --no-derive 2>&1)"
+map_check_rc=$?
+printf '%s\n' "$map_check_out" >"$OUT/check-map.log"
 unmapped=""
-while IFS=$'\t' read -r l beat _t _v _d _s ids _detail; do
-  for id in $ids; do
-    awk -F'\t' -v i="$id" -v l="$l" -v b="$beat" \
-      '$1 == i && $2 == l && $3 == b { found = 1 } END { exit(found ? 0 : 1) }' "$MAP" && continue
-    unmapped="$unmapped $id($l/$beat)"
-  done
-done < <(tail -n +2 "$OUT/timeline.tsv")
+[ "$map_check_rc" -ne 0 ] && unmapped="check-map.sh --no-derive exited $map_check_rc — see $OUT/check-map.log"
 
 budget_reds=0 budget_lines=""
 for l in $ORDER; do
@@ -331,10 +328,10 @@ done
   tail -n +2 "$OUT/lanes.tsv" | awk -F'\t' '{ printf "| %s | %s | %s | %s | %s | %s |\n", $1, $2, $3, $4, $5, $6 }'
   printf '\n'
   printf '%s' "$budget_lines"
-  [ -n "$unmapped" ] && printf 'map: ✗ unmapped landscape id(s):%s\n' "$unmapped"
+  [ -n "$unmapped" ] && printf 'map: ✗ %s\n' "$unmapped"
   [ -n "$missing_rows" ] && printf 'run: ✗ lane(s) with no result row:%s\n' "$missing_rows"
   if [ -n "$log_absent" ]; then
-    printf 'activity log: ABSENT (Wave 6 not landed) — log assertions not enforced [lanes:%s]\n' "$log_absent"
+    printf 'activity log: ✗ ABSENT at lane start [lanes:%s] — Wave 6 has landed, so this is a red for each lane named (see its own PRELUDE-LOG line)\n' "$log_absent"
   else
     printf 'activity log: present — every beat judged on its slice as well as its assertion\n'
   fi
@@ -342,9 +339,9 @@ done
 } >"$OUT/summary.md"
 
 printf '%s' "$budget_lines"
-[ -n "$unmapped" ] && say "map: ✗ unmapped landscape id(s):$unmapped — every id a beat declares needs a map.tsv row"
+[ -n "$unmapped" ] && say "map: ✗ $unmapped"
 if [ -n "$log_absent" ]; then
-  say "activity log: ABSENT (Wave 6 not landed) — log assertions not enforced"
+  say "activity log: ✗ ABSENT at lane start [lanes:$log_absent] — see each lane's own PRELUDE-LOG failure"
 fi
 say "run: $total_beats beats · $total_failed failed · $total_known known-gap · $total_blocked blocked · ${total_wall}s · $OUT/summary.md"
 
@@ -352,5 +349,6 @@ status=0
 [ -n "$failed_lanes" ] && { say "run: ✗ lane(s) with a failing beat:$failed_lanes"; status=1; }
 [ -n "$missing_rows" ] && { say "run: ✗ lane(s) with no result row:$missing_rows"; status=1; }
 [ -n "$unmapped" ] && status=1
+[ -n "$log_absent" ] && status=1
 [ "$budget_reds" -gt 0 ] && { say "run: ✗ $budget_reds budget verdict(s) red"; status=1; }
 exit "$status"

@@ -25,13 +25,10 @@
 # opened; every later beat whose precondition failed reports `blocked-by`, and
 # each ✗ carries the raw pane bytes in the lane log beside its assertion.
 set -uo pipefail
-export PATH="$HOME/.local/bin:$PATH"
-export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it
-cd /tmp 2>/dev/null || true
-
 LANES_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 # shellcheck source=lib.sh
 . "$LANES_DIR/lib.sh"
+lane_preamble
 
 CHAT="${E2_CHAT:-E2_MAIN}"
 CWD="${E2_CWD:-/work/orbit}"

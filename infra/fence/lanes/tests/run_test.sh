@@ -9,12 +9,9 @@
 set -uo pipefail
 
 SUT_DIR="${LANE_SUT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
-T="$(mktemp -d "${TMPDIR:-/tmp}/lane-run-test.XXXXXX")"
-trap 'rm -rf -- "$T"' EXIT
-
-PASS=0 FAIL=0
-ok() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n' "$@" >&2; FAIL=$((FAIL + 1)); }
+SHTEST_TAG=lane-run-test
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 
 # A COPY of the lanes directory: the budget and ledger fixtures are edited in
 # place, and run.sh resolves every sibling from its own location. Nested under
@@ -24,8 +21,15 @@ bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n'
 # $ROOT/infra/fence/fence-env.sh and a real git repo to read.
 LANES="$T/infra/fence/lanes"
 mkdir -p "$LANES" "$T/infra/fence"
-cp "$SUT_DIR"/*.sh "$SUT_DIR"/*.yml "$SUT_DIR"/*.tsv "$SUT_DIR"/pending.txt "$LANES/" 2>/dev/null
+cp "$SUT_DIR"/*.sh "$SUT_DIR"/*.yml "$SUT_DIR"/*.tsv "$SUT_DIR"/*.md "$SUT_DIR"/pending.txt "$LANES/" 2>/dev/null
 cp "$SUT_DIR/../fence-env.sh" "$T/infra/fence/fence-env.sh" 2>/dev/null
+# The real landscape.md too — run.sh now delegates its own map gate to
+# check-map.sh (F7), and check-map.sh reads $ROOT/docs/dev/testing/landscape.md
+# (ROOT resolves to $T here); without it every non-dry-run invocation would
+# report LANDSCAPE-UNREADABLE regardless of what this suite is actually
+# testing.
+mkdir -p "$T/docs/dev/testing"
+cp "$SUT_DIR/../../../docs/dev/testing/landscape.md" "$T/docs/dev/testing/landscape.md" 2>/dev/null
 (cd "$T" && git init -q && git config user.email t@t && git config user.name t && git commit -q --allow-empty -m fixture)
 RUN="$LANES/run.sh"
 [ -f "$RUN" ] || { echo "run_test: no run.sh at $RUN" >&2; exit 2; }
@@ -269,5 +273,39 @@ else
   bad "missing row exit code" "rc=$RC" "$OUT"
 fi
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+# ---- 16: run.sh delegates its own beat↔map contract to check-map.sh (F7) --
+# The old inline "unmapped" walk at run.sh:289 was a partial near-copy of
+# check-map.sh's own direction-2 check — removed; run.sh now calls the real
+# gate once per run and writes its full output to $OUT/check-map.log, never a
+# second, partial re-implementation of the same walk.
+
+rm -rf "$T/out"
+run_sut --lanes E1 --root reuse
+RUNOUT_DIR="$(find "$T/out" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+if [ -n "$RUNOUT_DIR" ] && [ -f "$RUNOUT_DIR/check-map.log" ] &&
+  grep -q '^check-map: clean' "$RUNOUT_DIR/check-map.log"; then
+  ok "run.sh calls the real check-map.sh --no-derive once per run and keeps its full output at check-map.log (clean, against the real fixtures)"
+else
+  bad "check-map delegation" "runout=[$RUNOUT_DIR]" "$(cat "$RUNOUT_DIR/check-map.log" 2>&1)"
+fi
+
+# ---- 17: a broken map.tsv (one beat's row gone) fails the run and is NAMED -
+# Never absorbed into the same "no result row" red as test 15 above — this is
+# specifically the static map contract, read from check-map.sh's own verdict
+# (removing E1.01-open-seat1's only row leaves the beat itself in E1.sh with
+# no map row at all: direction (b), UNMAPPED-BEAT).
+
+cp "$LANES/map.tsv" "$T/map.tsv.bak"
+grep -vF "$(printf 'K1\tE1\tE1.01-open-seat1')" "$LANES/map.tsv" >"$LANES/map.tsv.tmp" && mv "$LANES/map.tsv.tmp" "$LANES/map.tsv"
+rm -rf "$T/out"
+run_sut --lanes E1 --root reuse
+RUNOUT_DIR2="$(find "$T/out" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -1)"
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q '^map: ✗' &&
+  [ -n "$RUNOUT_DIR2" ] && grep -q 'UNMAPPED-BEAT: E1.01-open-seat1' "$RUNOUT_DIR2/check-map.log" 2>/dev/null; then
+  ok "a map.tsv with a beat's row removed fails the run (map: ✗) and check-map.log names UNMAPPED-BEAT"
+else
+  bad "broken map fails run" "rc=$RC" "$OUT" "$(cat "$RUNOUT_DIR2/check-map.log" 2>&1)"
+fi
+mv "$T/map.tsv.bak" "$LANES/map.tsv"
+
+shtest_end

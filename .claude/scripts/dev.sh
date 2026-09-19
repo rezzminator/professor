@@ -70,13 +70,21 @@ run() { # run <label> -- <cmd...>
   if "$@"; then ok "$label"; else fail_step "$label (exit $?)"; fi
 }
 
-repo_git() {
-  if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" && -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
-    git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" \
-      -c safe.directory="$PFM_DEV_REPO_WORK_TREE" "$@"
-  else
-    git "$@"
-  fi
+# repo_git: the one fence-aware git reader, shared with the arch ratchets.
+# shellcheck source=../../pfm/scripts/repo-git.sh
+source "$REPO_ROOT/pfm/scripts/repo-git.sh" || { echo "dev.sh: cannot source pfm/scripts/repo-git.sh" >&2; exit 2; }
+
+# skip_gate <label> <go-test.json>: every skipped test must be named in
+# pfm/scripts/known-skips.tsv (scripts/skip-check.sh). An unlisted skip is a
+# GAP and non-zero; a skip list that could not be read is a FAIL, never a pass.
+skip_gate() {
+  local label="$1" rc=0
+  bash "$REPO_ROOT/pfm/scripts/skip-check.sh" "$2" || rc=$?
+  case "$rc" in
+    0) ok "$label" ;;
+    1) gap_step "$label — unlisted skipped test(s) named above" ;;
+    *) fail_step "$label — the skips could not be read (exit $rc)" ;;
+  esac
 }
 
 # ─── status ──────────────────────────────────────────────────────────────────
@@ -141,6 +149,11 @@ act_templates() { # the shipped product: mechanical gates, no build
       # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
       # broken state is `CLONES ERROR` and rc 2, never a PASS.
       run "templates: clone ratchet (jscpd)" -- bash "$REPO_ROOT/scripts/clone-check.sh"
+      # The lane↔landscape map gate (infra/fence/lanes/check-map.sh). --no-derive
+      # skips the command/tool surface derive, which needs a built pfm; its own
+      # broken state is a named red line and rc 1/2, never a silent pass.
+      run "templates: lane↔landscape map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
+      run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
       head_ "templates — leak gate"
       # EVERY tracked file in this repo is published, so the changed set is the
       # whole working tree — not a `templates scripts README INSTALL CHANGELOG
@@ -331,7 +344,10 @@ act_pfm() {
       run "pfm: lint-new (golangci-lint, changed lines)" -- make -C "$d" --no-print-directory lint-new
       # The architecture ratchet (C1–C21 vs pfm/.arch/). Its own broken state
       # is rc 2 (an enumerator or grep that could not run), never a PASS.
-      run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh" ;;
+      run "pfm: architecture ratchet" -- bash "$d/scripts/arch-check.sh"
+      # The gate scripts' own fixture suites: a ratchet nobody tests is trusted
+      # on faith. Each prints "N passed, M failed" and is non-zero on any FAIL.
+      run "pfm: gate-script self-tests" -- bash -c 'for t in "$1"/scripts/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$d" ;;
     # -count=1 is not optional: without it a package whose inputs are unchanged
     # reports `ok  (cached)`, and this gate would call a run it never watched a
     # pass. -timeout is measured, not guessed — internal/index's OpenCode WAL
@@ -353,9 +369,9 @@ act_pfm() {
         go -C "$1" test "${@:3}" -count=1 -timeout 25m -json ./... >"$2"
         rc=$?
         if (( rc != 0 )); then cat "$2"; fi
-        jq -r "select(.Action == \"skip\" and .Test != null) | \"GAP skipped test: \" + .Package + \" \" + .Test" "$2" || exit 2
         exit "$rc"
       ' _ "$d" "$timing_run/unit.json" "${testflags[@]}"
+      skip_gate "pfm: skipped tests are all listed (unit)" "$timing_run/unit.json"
       run "pfm: test timing (budget)" -- bash "$d/scripts/test-timing.sh" \
         --check --suite unit --out "$timing_run/unit.tsv" "$timing_run/unit.json"
       # Tagged Tier A runs serially and has its own budget and artifact.
@@ -363,9 +379,9 @@ act_pfm() {
         go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
         rc=$?
         if (( rc != 0 )); then cat "$2"; fi
-        jq -r "select(.Action == \"skip\" and .Test != null) | \"GAP skipped test: \" + .Package + \" \" + .Test" "$2" || exit 2
         exit "$rc"
       ' _ "$d" "$timing_run/e2e.json"
+      skip_gate "pfm: skipped tests are all listed (e2e)" "$timing_run/e2e.json"
       run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
         --check --suite e2e --out "$timing_run/e2e.tsv" "$timing_run/e2e.json" ;;
     # Cross-package unit coverage merged with any e2e GOCOVERDIR run, thresholded
@@ -475,13 +491,11 @@ EOF
 
 CMD="${1:-status}"
 TARGET="${2:-all}"
-SWEEP_ALL=0
 
 case "$CMD" in
   status) cmd_status "$TARGET" ;;
   install|build|test|typecheck|verify|cover|all)
     if [[ "$TARGET" == "all" ]]; then
-      SWEEP_ALL=1
       for p in "${PROJECTS[@]}"; do head_ "$p :: $CMD"; dispatch "$p" "$CMD"; done
     else
       proj_dir "$TARGET" >/dev/null 2>&1 || { echo "unknown project: $TARGET" >&2; usage; }

@@ -14,12 +14,9 @@ set -uo pipefail
 
 SUT_DIR="${LANE_SUT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
 LIB="$SUT_DIR/lib.sh"
-T="$(mktemp -d "${TMPDIR:-/tmp}/lane-lib-test.XXXXXX")"
-trap 'rm -rf -- "$T"' EXIT
-
-PASS=0 FAIL=0
-ok() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n' "$@" >&2; FAIL=$((FAIL + 1)); }
+SHTEST_TAG=lane-lib-test
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 
 [ -f "$LIB" ] || { echo "lib_test: no lib.sh at $LIB" >&2; exit 2; }
 
@@ -122,9 +119,30 @@ run_lane() {
 
 gaps_file "$T/gaps.yml"
 
+# A log that EXISTS (empty is fine) — the default `run_lane` fixture is
+# $T/absent.jsonl, which is never created (LANE_LOG_STATE=ABSENT), and that
+# is now its own red (F13, below). Any test whose own subject is unrelated to
+# the log's presence uses this fixture instead, so the two concerns stay apart.
+PRESENT_LOG="$T/present.jsonl"
+: >"$PRESENT_LOG"
+
+# gaps_validate's stale-beat-id check reads `beat <id>` lines from real lane
+# scripts under $LANE_SCRIPTS_DIR — a fixture directory here, never this
+# tree's own lanes/*.sh, so a fixture ledger is judged only against fixture
+# beats.
+GAPS_SCRIPTS_DIR="$T/gap-fixture-scripts"
+mkdir -p "$GAPS_SCRIPTS_DIR"
+cat >"$GAPS_SCRIPTS_DIR/TL.sh" <<'SH'
+beat TL.05-ledgered Z1
+beat TL.06-noexpiry Z2
+beat TL.07-expired Z3
+beat TL.08-arch Z4
+beat X.01 Z9
+SH
+
 # ---- 1: pass, fail and the blocked chain ----------------------------------
 
-run_lane basic \
+LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" run_lane basic \
   'lane_begin TL' \
   'beat TL.01-ok Z1; spends cc:1; pass "held"' \
   'beat TL.02-bad Z2; target TL_CHAT; fail "did not hold"' \
@@ -163,7 +181,7 @@ fi
 
 # ---- 4: a ledgered beat reports known and does not fail the lane ----------
 
-run_lane known \
+LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" run_lane known \
   'lane_begin TL' \
   'beat TL.05-ledgered Z1; known TL.05-ledgered' \
   'lane_end'
@@ -221,7 +239,7 @@ else
   bad "arch-scoped known" "rc=$RC" "$OUT"
 fi
 
-run_lane archpass \
+LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" run_lane archpass \
   'lane_begin TL' \
   'beat TL.08-arch Z4; pass "works on this arch"' \
   'lane_end'
@@ -233,7 +251,7 @@ fi
 
 # ---- 8: gaps_validate names every offender before a run ------------------
 
-OUT="$(LANE_GAPS="$T/gaps.yml" LANE_TODAY=2026-09-17 bash -c ". '$LIB'; gaps_validate" 2>&1)"
+OUT="$(LANE_GAPS="$T/gaps.yml" LANE_TODAY=2026-09-17 LANE_SCRIPTS_DIR="$GAPS_SCRIPTS_DIR" bash -c ". '$LIB'; gaps_validate" 2>&1)"
 RC=$?
 if [ "$RC" -ne 0 ] &&
   printf '%s' "$OUT" | grep -q 'TL.06-noexpiry — no expires:' &&
@@ -267,10 +285,56 @@ gaps:
     date: 2026-09-17
     expires: 2099-01-01
 YML
-if LANE_GAPS="$T/clean-gaps.yml" LANE_TODAY=2026-09-17 bash -c ". '$LIB'; gaps_validate" >/dev/null 2>&1; then
+if LANE_GAPS="$T/clean-gaps.yml" LANE_TODAY=2026-09-17 LANE_SCRIPTS_DIR="$GAPS_SCRIPTS_DIR" bash -c ". '$LIB'; gaps_validate" >/dev/null 2>&1; then
   ok "gaps_validate: a ledger where every entry is dated and current exits 0"
 else
   bad "gaps_validate clean" "a valid ledger was rejected"
+fi
+
+# ---- 8c: a ledger beat: id with no matching 'beat <id>' line anywhere is a
+# named stale entry (a renamed/deleted beat left behind) ---------------------
+
+cat >"$T/stale-gaps.yml" <<'YML'
+gaps:
+  - beat: TL.99-ghost-beat
+    landscape_id: Z1
+    why: "the beat this entry named was renamed or deleted"
+    owner: FIXTURE
+    date: 2026-09-17
+    expires: 2099-01-01
+YML
+OUT="$(LANE_GAPS="$T/stale-gaps.yml" LANE_TODAY=2026-09-17 LANE_SCRIPTS_DIR="$GAPS_SCRIPTS_DIR" bash -c ". '$LIB'; gaps_validate" 2>&1)"
+RC=$?
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q "TL.99-ghost-beat — no lane script under .* has a 'beat TL.99-ghost-beat' line"; then
+  ok "gaps_validate: a ledger beat id with no matching 'beat <id>' line anywhere is named stale"
+else
+  bad "gaps_validate stale beat" "rc=$RC" "$OUT"
+fi
+
+# ---- 8d: non-comment content that parses to ZERO entries is UNPARSEABLE, --
+# never the same clean answer as a genuinely empty ledger --------------------
+
+cat >"$T/garbage-gaps.yml" <<'YML'
+gaps:
+    beat: TL.05-ledgered
+    why: "differently indented — no leading '- ' before beat:, so the parser matches nothing"
+YML
+OUT="$(LANE_GAPS="$T/garbage-gaps.yml" LANE_TODAY=2026-09-17 LANE_SCRIPTS_DIR="$GAPS_SCRIPTS_DIR" bash -c ". '$LIB'; gaps_validate" 2>&1)"
+RC=$?
+if [ "$RC" -eq 2 ] && printf '%s' "$OUT" | grep -q 'UNPARSEABLE'; then
+  ok "gaps_validate: non-comment content that parses to zero '- beat:' entries is UNPARSEABLE (exit 2), never a silent clean"
+else
+  bad "gaps_validate unparseable" "rc=$RC" "$OUT"
+fi
+
+cat >"$T/truly-empty-gaps.yml" <<'YML'
+# nothing ledgered yet — comments and the bare key only
+gaps:
+YML
+if LANE_GAPS="$T/truly-empty-gaps.yml" LANE_TODAY=2026-09-17 LANE_SCRIPTS_DIR="$GAPS_SCRIPTS_DIR" bash -c ". '$LIB'; gaps_validate" >/dev/null 2>&1; then
+  ok "gaps_validate: a genuinely empty ledger (comments + bare 'gaps:' only) is NOT unparseable — it exits 0"
+else
+  bad "gaps_validate genuinely empty" "a genuinely empty ledger was rejected"
 fi
 
 # ---- 9: need — satisfied, made, UNMET ------------------------------------
@@ -330,13 +394,23 @@ else
   bad "orphan at end" "rc=$RC" "$OUT"
 fi
 
-# ---- 12: the activity log — ABSENT is named ------------------------------
+# ---- 12: the activity log — ABSENT at lane start is a RED (F13) -----------
+# Wave 6 has landed: every root image already ran pfm before it was
+# committed, so ABSENT here is a broken state, not an excused gap — named at
+# lane_begin (PRELUDE-LOG) and failing the lane, not just a quiet advisory.
 
-if printf '%s' "$OUT" | grep -q 'TL · activity log: ABSENT (Wave 6 not landed) — log assertions not enforced' &&
+run_lane logabsent \
+  'lane_begin TL' \
+  'beat TL.13-ok Z1; pass "held"' \
+  'lane_end'
+if [ "$RC" -ne 0 ] &&
+  printf '%s' "$OUT" | grep -q 'TL ✗ PRELUDE-LOG — activity log ABSENT at lane start' &&
+  printf '%s' "$OUT" | grep -q 'TL · activity log: ABSENT at lane start' &&
+  ! printf '%s' "$OUT" | grep -q 'Wave 6 not landed' &&
   [ "$(cat "$LANE_DIR/TL.logstate" 2>/dev/null)" = ABSENT ]; then
-  ok "activity log: the ABSENT line is printed by name and recorded in <lane>.logstate"
+  ok "activity log: ABSENT at lane start is a named red (PRELUDE-LOG), the stale 'Wave 6 not landed' wording is gone, and it is still recorded in <lane>.logstate"
 else
-  bad "absent log line" "$OUT" "$(cat "$LANE_DIR/TL.logstate" 2>&1)"
+  bad "absent log line" "rc=$RC" "$OUT" "$(cat "$LANE_DIR/TL.logstate" 2>&1)"
 fi
 
 # ---- 13: an unexpected error record in the slice fails the beat ----------
@@ -514,6 +588,128 @@ else
   bad "failure evidence" "$log"
 fi
 
+# ---- 22: a lane that ran ZERO beats is a named red (F6) -------------------
+
+run_lane zerobeats \
+  'lane_begin TL' \
+  'lane_end'
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'TL ✗ ZERO-BEATS — the lane ran no beats at all'; then
+  ok "F6: a lane with zero beats is a named red (ZERO-BEATS), not a silent pass"
+else
+  bad "zero beats" "rc=$RC" "$OUT"
+fi
+
+# ---- 23: a lane whose EVERY beat is blocked is a named red (F6) -----------
+
+run_lane allblocked \
+  'lane_begin TL' \
+  'beat TL.60-b1 Z1; blocked "seats cc:1" "no second seat in this run"' \
+  'beat TL.61-b2 Z2; blocked "seats cc:1" "no second seat in this run"' \
+  'lane_end'
+if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "TL ✗ ALL-BLOCKED — every one of this lane's 2 beat(s) was blocked"; then
+  ok "F6: an all-blocked lane is a named red (ALL-BLOCKED), naming its beat count"
+else
+  bad "all blocked" "rc=$RC" "$OUT"
+fi
+
+# A lane that is a MIX of pass/blocked (not every beat blocked) must stay
+# clean of the ALL-BLOCKED line — the guard is "every beat", never "any beat".
+run_lane mixedblocked \
+  'lane_begin TL' \
+  'beat TL.62-ok Z1; pass "held"' \
+  'beat TL.63-blocked Z2; blocked "seats cc:1" "no second seat in this run"' \
+  'lane_end'
+if ! printf '%s' "$OUT" | grep -q 'ALL-BLOCKED'; then
+  ok "F6: a lane with at least one non-blocked beat is never ALL-BLOCKED"
+else
+  bad "mixed blocked wrongly flagged" "$OUT"
+fi
+
+# ---- 24: a read failure of a PRESENT log is a FAIL distinct from an empty
+# slice (F13) — never the same "clean" answer -------------------------------
+
+# The read is failed by a `tail` stub, not by chmod 000: permission bits deny
+# nothing to root, which is what the fence runs as.
+FAILBIN="$T/failbin"
+mkdir -p "$FAILBIN"
+printf '#!/bin/sh\nexit 1\n' >"$FAILBIN/tail"
+chmod +x "$FAILBIN/tail"
+READLOG="$T/pfm-readfail.jsonl"
+printf '{"level":"info","msg":"before the lane"}\n' >"$READLOG"
+LANE_PFM_LOG_FIXTURE="$READLOG" run_lane logreadfail \
+  'lane_begin TL' \
+  "beat TL.25-unreadable Z1; PATH='$FAILBIN':\$PATH; pass 'the assertion held'" \
+  'lane_end'
+if [ "$RC" -ne 0 ] &&
+  printf '%s' "$OUT" | grep -q 'activity-log sweep FAILED' &&
+  ! printf '%s' "$OUT" | grep -q 'activity-log sweep SKIPPED'; then
+  ok "F13: a read failure on a PRESENT log (tail cannot read it) is its own FAIL, distinct from an empty slice or the SKIPPED case"
+else
+  bad "log read failure" "rc=$RC" "$OUT"
+fi
+
+# ---- 25: with_restored — the crash-safe plant/restore contract (F4) -------
+
+# 25a: SIGTERM mid-beat still restores the file via the exit trap.
+printf 'original content\n' >"$T/wr-target.txt"
+MARKER="$T/wr-marker"
+rm -f "$MARKER"
+cat >"$T/wr-interrupt.sh" <<SCRIPT
+#!/usr/bin/env bash
+. "$LIB"
+with_restored "$T/wr-target.txt" || exit 9
+printf 'mutated\n' >"$T/wr-target.txt"
+: >"$MARKER"
+sleep 30
+SCRIPT
+chmod +x "$T/wr-interrupt.sh"
+"$T/wr-interrupt.sh" &
+wr_pid=$!
+waited=0
+while [ ! -e "$MARKER" ] && [ "$waited" -lt 100 ]; do
+  sleep 0.1
+  waited=$((waited + 1))
+done
+kill -TERM "$wr_pid" 2>/dev/null
+wait "$wr_pid" 2>/dev/null
+wr_content="$(cat "$T/wr-target.txt" 2>/dev/null)"
+if [ -e "$MARKER" ] && [ "$wr_content" = "original content" ]; then
+  ok "with_restored: a SIGTERM mid-beat still restores the file via the composed exit trap"
+else
+  bad "with_restored interrupt" "marker=[$([ -e "$MARKER" ] && echo yes || echo no)] content=[$wr_content]"
+fi
+
+# 25b: a pre-existing "<path>.lane-backup" is a crashed prior run — restored
+# onto the file at once, and NEVER overwritten with a fresh backup.
+printf 'corrupted-by-crash\n' >"$T/wr-target2.txt"
+printf 'crashed-original\n' >"$T/wr-target2.txt.lane-backup"
+wr_out2="$(bash -c ". '$LIB'; with_restored '$T/wr-target2.txt'; echo RC=\$?" 2>&1)"
+wr_content2="$(cat "$T/wr-target2.txt" 2>/dev/null)"
+if printf '%s' "$wr_out2" | grep -q 'RC=1' &&
+  printf '%s' "$wr_out2" | grep -q 'a prior run crashed mid-beat' &&
+  [ "$wr_content2" = "crashed-original" ] && [ ! -e "$T/wr-target2.txt.lane-backup" ]; then
+  ok "with_restored: a pre-existing backup is a crashed prior run — restored onto the file, never overwritten, and this call refuses"
+else
+  bad "with_restored pre-existing backup" "$wr_out2" "content=[$wr_content2]"
+fi
+
+# 25c: a backup-copy failure aborts BEFORE any mutation — the file is untouched.
+mkdir -p "$T/wr-nowrite"
+printf 'keepme\n' >"$T/wr-nowrite/target3.txt"
+# A failing `cp` stub, not a read-only directory: root writes through chmod 555.
+printf '#!/bin/sh\nexit 1\n' >"$FAILBIN/cp"
+chmod +x "$FAILBIN/cp"
+wr_out3="$(PATH="$FAILBIN:$PATH" bash -c ". '$LIB'; with_restored '$T/wr-nowrite/target3.txt'; echo RC=\$?" 2>&1)"
+rm -f "$FAILBIN/cp"
+wr_content3="$(cat "$T/wr-nowrite/target3.txt" 2>/dev/null)"
+if printf '%s' "$wr_out3" | grep -q 'RC=1' &&
+  printf '%s' "$wr_out3" | grep -q 'the backup copy failed' &&
+  [ "$wr_content3" = "keepme" ] && [ ! -e "$T/wr-nowrite/target3.txt.lane-backup" ]; then
+  ok "with_restored: a backup-copy failure aborts before any mutation — the caller's beat fails and the file is untouched"
+else
+  bad "with_restored backup failure" "$wr_out3" "content=[$wr_content3]"
+fi
+
 # ── the debug ruling: every lane runs pfm at PFM_LOG_LEVEL=debug ─────────────
 # Forced, not defaulted: a caller's own level would leave the activity log
 # (Wave 6) too thin for a beat's slice to be judged on.
@@ -524,5 +720,4 @@ else
   bad "PFM_LOG_LEVEL ruling" "got '$level', want 'debug'"
 fi
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+shtest_end

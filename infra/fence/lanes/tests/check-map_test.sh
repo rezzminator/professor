@@ -11,12 +11,9 @@
 set -uo pipefail
 
 SUT_DIR="${LANE_SUT_DIR:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)}"
-T="$(mktemp -d "${TMPDIR:-/tmp}/lane-checkmap-test.XXXXXX")"
-trap 'rm -rf -- "$T"' EXIT
-
-PASS=0 FAIL=0
-ok() { printf 'PASS  %s\n' "$1"; PASS=$((PASS + 1)); }
-bad() { printf 'FAIL  %s\n' "$1" >&2; shift; [ $# -gt 0 ] && printf '      %s\n' "$@" >&2; FAIL=$((FAIL + 1)); }
+SHTEST_TAG=lane-checkmap-test
+# shellcheck source=/dev/null
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../../../scripts/shtest.sh"
 
 LANES="$T/lanes"
 mkdir -p "$LANES"
@@ -234,5 +231,39 @@ else
   bad "unmapped beat marked none" "rc=$RC" "$OUT"
 fi
 
-printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
-[ "$FAIL" -eq 0 ]
+# ---- 12: ON-DISK-LANE-UNMAPPED — a lane script the map never mentions at
+# all (F7). The lane universe is the scripts on disk UNION the map, never the
+# map alone: a merge-conflict deletion or a rename that dropped a lane's rows
+# from map.tsv must never leave that lane script simply unvisited.
+
+map 'Z1\tE1\tE1.01-fixture\nZ2\tO1\tO1.01-fixture\nZ3\tE1\tE1.01-fixture\n'
+beats '- `O1.02-codeonly` · fixture code-only beat, deliberately unmapped · spends none · (none)\n'
+cat >"$LANES/Q2.sh" <<'LANE'
+#!/usr/bin/env bash
+beat Q2.01-fixture Z9
+LANE
+run_sut --no-derive
+if [ "$RC" -eq 1 ] && printf '%s' "$OUT" | grep -q 'ON-DISK-LANE-UNMAPPED: Q2.sh exists on disk but map.tsv carries no row for lane Q2'; then
+  ok "ON-DISK-LANE-UNMAPPED: a lane script on disk with ZERO map.tsv rows is its own red line (the lane universe is scripts ∪ map, never the map alone)"
+else
+  bad "on-disk lane unmapped" "rc=$RC" "$OUT"
+fi
+rm -f "$LANES/Q2.sh"
+
+# ---- 13: the ids field is read BY POSITION, not "the last · segment" ------
+# A 4-segment row (id · description · spends · ids) with a TRAILING 5th
+# annotation segment (O2.01b's real shape: `blocked wave7-mock-engine` until
+# Wave 7 lands) must still read its OWN ids field ("(none)") correctly — a
+# last-segment parse would read the annotation instead and wrongly flag a
+# genuinely (none) beat as unmapped.
+
+map 'Z1\tE1\tE1.01-fixture\nZ2\tO1\tO1.01-fixture\nZ3\tE1\tE1.01-fixture\n'
+beats '- `O1.02-codeonly` · fixture description · spends none · (none) · `blocked wave7-mock-engine` until Wave 7 lands\n'
+run_sut --no-derive
+if [ "$RC" -eq 0 ] && ! printf '%s' "$OUT" | grep -q 'UNMAPPED-BEAT'; then
+  ok "ids field parsed by position: a row with a trailing annotation segment still reads (none) correctly, not the annotation"
+else
+  bad "ids field position parse" "rc=$RC" "$OUT"
+fi
+
+shtest_end

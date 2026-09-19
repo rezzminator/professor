@@ -19,6 +19,7 @@ set -uo pipefail
 # them whatever locale the caller's shell carries.
 export LC_ALL=C
 PFM="${PFM:-$(cd "$(dirname "$0")/.." && pwd)}"
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 BASE="$PFM/.arch"
 CEIL_SRC="${CEIL_SRC:-800}"; CEIL_TEST="${CEIL_TEST:-1000}"
 # A baselined over-ceiling file may carry CEIL_SLACK lines of move churn (an
@@ -32,17 +33,8 @@ say() { printf 'CHECK %-22s %-7s %s\n' "$1" "$2" "$3"; case $2 in FAIL) [ "$rc" 
 cd "$PFM" || { say setup ERROR "cannot cd $PFM"; exit 2; }
 T=$(mktemp -d) || { say setup ERROR "mktemp failed"; exit 2; }
 trap 'rm -rf "$T"' EXIT
-# repo_git reads the worktree's own index. Inside the dev fence a linked
-# worktree's .git names a host path the container cannot see, so dev.sh iso
-# hands over the mounted git dir and work tree instead.
-repo_git() {
-  if [[ -n "${PFM_DEV_REPO_GIT_DIR:-}" && -n "${PFM_DEV_REPO_WORK_TREE:-}" ]]; then
-    git --git-dir="$PFM_DEV_REPO_GIT_DIR" --work-tree="$PFM_DEV_REPO_WORK_TREE" \
-      -c safe.directory="$PFM_DEV_REPO_WORK_TREE" "$@"
-  else
-    git "$@"
-  fi
-}
+# shellcheck source=repo-git.sh
+source "$SCRIPTS/repo-git.sh" || { say setup ERROR "cannot source $SCRIPTS/repo-git.sh"; exit 2; }
 # The file lists include untracked files (a wave's new package exists before its
 # commit) and exclude deleted ones (a wave's removed file is gone before its commit).
 repo_git ls-files -co --exclude-standard '*.go' | while read -r f; do [ -f "$f" ] && echo "$f"; done | sort -u > "$T/all.list"

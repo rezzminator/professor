@@ -3,13 +3,26 @@ package mcpserv
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"hostops/pfm/internal/fleetdb"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/resolve"
 )
+
+// compMCP is the component mcpserv's own records belong to, the same one
+// obs.Tool scopes every tool call with.
+const compMCP = "mcp"
+
+// reporterLookupFailed marks an issue whose reporter lookup could not RUN —
+// the fleet scan behind a presented _meta.threadId failed. It is distinct
+// from fleetdb.UnidentifiedSender on purpose: that sentinel promises the
+// reporter was looked for and none could be proven, which is a different
+// fact from "the search itself broke."
+const reporterLookupFailed = fleetdb.UnidentifiedSender + "-LOOKUP-FAILED"
 
 // issueServicedesk files one agent complaint into the shared operator ledger.
 // It never refuses for want of identity: a complaint from a process whose
@@ -92,6 +105,19 @@ func (service *Service) issueReporter(
 			CWD:     caller.row.Dir,
 			Engine:  caller.identity.Engine,
 		}
+	}
+	if err != nil {
+		// The scan that would have named this reporter could not run. Filing
+		// under UNIDENTIFIED here would say "we looked and found nobody" about
+		// a lookup that never completed, so the issue keeps a sentinel of its
+		// own and the cause is recorded rather than dropped on the floor.
+		scoped := obs.Component(ctx, compMCP)
+		obs.Logger(scoped).LogAttrs(scoped, slog.LevelError, "mcp.caller",
+			slog.String("op", "resolve"),
+			slog.String("tool", "issue_servicedesk"),
+			slog.String(obs.FieldErr, err.Error()),
+		)
+		return issueReporter{Session: reporterLookupFailed}
 	}
 	if !service.backend.allowAmbientIdentity {
 		return issueReporter{Session: fleetdb.UnidentifiedSender}

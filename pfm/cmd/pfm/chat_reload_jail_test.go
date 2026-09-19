@@ -422,6 +422,13 @@ func TestChatReloadWorkerFreshDropsSessionButKeepsTranscriptCWD(t *testing.T) {
 	t.Setenv("PFM_RELOAD_DELAY_MS", "0")
 	t.Setenv("PFM_RELOAD_POLL_MS", "20")
 	t.Setenv("PFM_RELOAD_EXIT_TRIES", "50")
+	// The 20ms poll keeps the test quick, and it also shrinks the worker's
+	// wait for the pane to show a composer (IdleTries × poll) to 2.4s at the
+	// default 120 tries. On a loaded box python3 itself takes longer than
+	// that to reach its first prompt, so the BUDGET, not the worker, would be
+	// what ran out. 500 × 20ms = 10s of readiness wait, the same seconds the
+	// default 120 × 1s gives a real chat.
+	t.Setenv("PFM_RELOAD_IDLE_TRIES", "500")
 
 	runtime, err := pfmconfig.LoadRuntime(configPath)
 	if err != nil {

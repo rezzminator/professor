@@ -116,7 +116,7 @@ func runInstall(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintln(stderr, "pfm install: required dependency preflight failed")
 		return 1
 	}
-	options := newInstallerOptions(mode, *configDir, *skipHarvest, stdout, runtime)
+	options := newInstallerOptions(mode, *configDir, *skipHarvest, stdout, stderr, runtime)
 	options.VSCode = *vscode
 	options.InstallThemes = !*skipThemes
 	options.ThemeManifestURL = professorThemeManifestURL(version)
@@ -198,7 +198,7 @@ func newInstallerOptions(
 	mode installer.Mode,
 	configDir string,
 	skipHarvest bool,
-	stdout io.Writer,
+	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
 ) installer.Options {
 	options := installer.Options{
@@ -248,7 +248,7 @@ func newInstallerOptions(
 			}
 		}
 	}
-	options.SourceRepo = resolveInstallSourceRepo(options.Home)
+	options.SourceRepo = resolveInstallSourceRepo(options.Home, stderr)
 	return options
 }
 
@@ -259,15 +259,27 @@ func newInstallerOptions(
 // preferredUpdateSourceRepo. `pfm install --yes` run outside the source
 // checkout (a cron job, a different cwd) must still find its own clone
 // rather than falling through empty to the release manifest URL.
-func resolveInstallSourceRepo(home string) string {
+//
+// Both misses end in the same fallback, and only one of them is ordinary: no
+// marker at all is a first install and stays silent, while a marker naming a
+// clone that has moved, vanished or become unreadable is named on stderr
+// first — install would otherwise fetch from GitHub without a word, an error
+// rendered as absence. `pfm init` (init_command.go) reports the same failure.
+func resolveInstallSourceRepo(home string, stderr io.Writer) string {
 	if repo := professor.DiscoverSourceRepo(); repo != "" {
 		return repo
 	}
 	if strings.TrimSpace(home) == "" {
 		return ""
 	}
+	// No marker at all is a first install and stays silent; every other miss
+	// (a recorded clone that moved, vanished or became unreadable) is named.
 	recorded, err := installer.ReadSourceRepoMarker(home)
+	if errors.Is(err, installer.ErrNoSourceRepoMarker) {
+		return ""
+	}
 	if err != nil {
+		fmt.Fprintf(stderr, "pfm install: %v; falling back to the release manifest\n", err)
 		return ""
 	}
 	return recorded

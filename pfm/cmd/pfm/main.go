@@ -324,7 +324,7 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		stderr,
 	)
 	self := flags.Bool("self", false, "kill the calling tmux chat")
-	exit := flags.Bool("exit", false, "gracefully close after killing")
+	exit := flags.Bool("exit", false, "require a live pane (a live chat is closed either way)")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
 	}
@@ -465,7 +465,12 @@ func runInternal(
 		return hookentry.UpdateCheck(args[1:], stderr)
 	}
 	if len(args) != 0 && args[0] == "primary-get" {
-		fmt.Fprintln(stdout, fleet.PrimaryAccount(runtime.Paths, runtime.Config))
+		primary, err := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm internal primary-get: %v\n", err)
+			return 1
+		}
+		fmt.Fprintln(stdout, primary)
 		return 0
 	}
 	if len(args) != 0 && args[0] == "chat-server" {

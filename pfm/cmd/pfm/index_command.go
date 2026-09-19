@@ -50,17 +50,25 @@ func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime, c
 		return 1
 	}
 	if *full {
-		_ = database.SetMeta(
+		// The counters below say the reparse ran; this row is what makes the
+		// NEXT run able to tell "fully indexed at T" from "never fully
+		// indexed". A dropped write leaves the command claiming a completed
+		// full index it cannot prove, so it is reported and exits non-zero —
+		// the counters still print, because the scan itself did happen.
+		if err := database.SetMeta(
 			context.Background(),
 			"last_full_index_at",
 			strconv.FormatInt(clk.Now().Unix(), 10),
-		)
+		); err != nil {
+			fmt.Fprintf(stderr, "pfm index: record the full-index timestamp: %v\n", err)
+			exitCode = 1
+		}
 	}
 	fmt.Fprintln(stdout, formatCounters(counters))
 	if *progress {
 		fmt.Fprintf(stderr, "pfm index: done in %s\n", clk.Now().Sub(started).Round(time.Millisecond))
 	}
-	return 0
+	return exitCode
 }
 
 func formatCounters(counters fleetindex.Counters) string {

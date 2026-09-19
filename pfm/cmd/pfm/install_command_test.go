@@ -33,7 +33,7 @@ func TestInstallerOptionsCarryEachEngineRosterIndependently(t *testing.T) {
 			},
 		},
 	}
-	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, runtime)
+	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
 	if !reflect.DeepEqual(options.ConfigDirs, []string{runtime.Config.Accounts[0].ConfigDir}) ||
 		!reflect.DeepEqual(
 			options.CodexHomes,
@@ -68,7 +68,7 @@ func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtime := commandRuntime{Paths: paths.Values{Home: home}}
-	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, runtime)
+	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
 	got, err := filepath.EvalSymlinks(options.SourceRepo)
 	if err != nil {
 		t.Fatalf("options.SourceRepo = %q: %v", options.SourceRepo, err)
@@ -82,6 +82,51 @@ func TestInstallOptionsSourceRepoFallsBackToTheRecordedClone(t *testing.T) {
 	}
 }
 
+// TestInstallOptionsNameAnUnusableRecordedCloneBeforeFallingBack pins the
+// difference between "no clone was ever recorded" and "the recorded clone is
+// gone": both leave SourceRepo empty and send install to the release
+// manifest, but only one of them is normal. The vanished-clone case must say
+// so on stderr — silently fetching from GitHub while a marker points at a
+// directory that no longer exists is an error rendered as absence. `pfm init`
+// (init_command.go) already names the same failure.
+func TestInstallOptionsNameAnUnusableRecordedCloneBeforeFallingBack(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	t.Setenv("PFM_SOURCE_REPO", "")
+	t.Chdir(t.TempDir()) // no repo markers here — discoverSourceRepo() finds nothing
+	home := t.TempDir()
+	vanished := filepath.Join(t.TempDir(), "clone")
+	if err := os.MkdirAll(vanished, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := installer.WriteSourceRepoMarker(home, vanished); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(vanished); err != nil {
+		t.Fatal(err)
+	}
+	runtime := commandRuntime{Paths: paths.Values{Home: home}}
+	var stderr bytes.Buffer
+	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, &stderr, runtime)
+	if options.SourceRepo != "" {
+		t.Fatalf("options.SourceRepo = %q, want empty for a clone that is gone", options.SourceRepo)
+	}
+	if !strings.Contains(stderr.String(), "source repository") || !strings.Contains(stderr.String(), vanished) {
+		t.Fatalf("stderr = %q, want the unusable recorded clone %q named", stderr.String(), vanished)
+	}
+
+	// The control arm: a home that never recorded a clone is the ordinary
+	// first install, and must stay silent.
+	var quiet bytes.Buffer
+	fresh := commandRuntime{Paths: paths.Values{Home: t.TempDir()}}
+	if options := newInstallerOptions(
+		installer.ModeDryRun, "", true, io.Discard, &quiet, fresh,
+	); options.SourceRepo != "" || quiet.Len() != 0 {
+		t.Fatalf("a home with no marker reported %q on stderr (SourceRepo=%q)", quiet.String(), options.SourceRepo)
+	}
+}
+
 func TestInstallerAndDoctorUseImplicitClaudeRegistry(t *testing.T) {
 	home := t.TempDir()
 	runtime := commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{
@@ -91,7 +136,7 @@ func TestInstallerAndDoctorUseImplicitClaudeRegistry(t *testing.T) {
 		},
 		CodexAccounts: []pfmconfig.CodexAccount{},
 	}}
-	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, runtime)
+	options := newInstallerOptions(installer.ModeDryRun, "", true, io.Discard, io.Discard, runtime)
 	want := []string{filepath.Join(home, ".claude.json"), filepath.Join(home, ".cc", "2", ".claude.json")}
 	if !reflect.DeepEqual(options.ClaudeRegistries, want) {
 		t.Fatalf("registries=%q want=%q", options.ClaudeRegistries, want)

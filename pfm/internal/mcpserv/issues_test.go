@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"hostops/pfm/internal/fleetdb"
+	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/paths"
 )
 
@@ -119,6 +122,59 @@ func TestIssueServicedeskRecordsUnidentifiedSenderWhenNoCallerIdentity(t *testin
 	}
 	if row.ReporterSession != fleetdb.UnidentifiedSender {
 		t.Fatalf("reporter_session = %q, want the literal sentinel %q", row.ReporterSession, fleetdb.UnidentifiedSender)
+	}
+}
+
+// TestIssueReporterSeparatesAFailedIdentityLookupFromNoIdentity pins the
+// root law on the reporter capture path: a caller that PRESENTED a thread id
+// whose lookup could not run (here the fleet scan itself fails, because the
+// chat verb layer is not configured) must not be filed under the same
+// sentinel as a caller that presented no identity at all — "we failed to
+// look" is not "nobody was there" — and the failure must leave a record
+// naming it, never fall through silently.
+func TestIssueReporterSeparatesAFailedIdentityLookupFromNoIdentity(t *testing.T) {
+	service := newIssuesTestService(t)
+	if service.backend.chat != nil {
+		t.Fatal("fixture must leave the chat verb layer unconfigured so the caller scan fails")
+	}
+	ctx, recorder := obs.Test(t)
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": "thread-a"}}}
+	_, output, err := service.issueServicedesk(ctx, request, IssueInput{
+		Title: "filed while the fleet could not be read", Detail: "the scan itself failed",
+	})
+	if err != nil {
+		t.Fatalf("issueServicedesk: %v", err)
+	}
+	stored, err := service.backend.sharedState.Issues(ctx, true)
+	if err != nil {
+		t.Fatalf("Issues: %v", err)
+	}
+	var row *fleetdb.Issue
+	for index := range stored {
+		if stored[index].ID == output.ID {
+			row = &stored[index]
+		}
+	}
+	if row == nil {
+		t.Fatalf("filed issue id %d not found in %+v", output.ID, stored)
+	}
+	if row.ReporterSession == fleetdb.UnidentifiedSender {
+		t.Fatalf(
+			"reporter_session = %q for a lookup that FAILED, the same sentinel a caller with no identity gets — the two states are indistinguishable",
+			row.ReporterSession,
+		)
+	}
+	if row.ReporterSession == "" {
+		t.Fatalf("reporter_session is empty; a failed lookup must be marked, never blank")
+	}
+	var named bool
+	for _, record := range recorder.Records() {
+		if strings.Contains(record.Message, "caller") && record.Level != "INFO" {
+			named = true
+		}
+	}
+	if !named {
+		t.Fatalf("a failed MCP caller lookup left no record naming it: %s", recorder.Raw())
 	}
 }
 

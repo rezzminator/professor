@@ -22,7 +22,7 @@ import (
 )
 
 func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
-	handler := newMCPDaemonHandler(mcpDaemonOptions{
+	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Version:   "test-version",
 		StartedAt: time.Unix(123, 0).UTC(),
 		Endpoint:  "http://127.0.0.1:8377",
@@ -56,7 +56,7 @@ func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 
 func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 	dispatched := 0
-	handler := newMCPDaemonHandler(mcpDaemonOptions{
+	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Chat: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			dispatched++
 			w.WriteHeader(http.StatusNoContent)
@@ -105,7 +105,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 		}
 	}()
 
-	handler := newMCPDaemonHandler(mcpDaemonOptions{
+	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Version: "test", StartedAt: time.Now(), Endpoint: "http://127.0.0.1:8377",
 		Chat: chat.NewHTTPHandler(), Harvester: harvester.NewHTTPHandler(),
 	})
@@ -160,7 +160,7 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 // cannot be mistaken for either a live server or a route that never existed.
 // Before the fix, enabled=false and "fully live" were indistinguishable.
 func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *testing.T) {
-	handler := newMCPDaemonHandler(mcpDaemonOptions{
+	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Chat: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
 		// Harvester left nil: mcp.servers.harvester.enabled=false never
 		// constructs a handler for it to mount.
@@ -214,7 +214,7 @@ func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 		{"harvester only mounted", nil, noop, []string{"harvester"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			handler := newMCPDaemonHandler(mcpDaemonOptions{Chat: test.chat, Harvester: test.harvester})
+			handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{Chat: test.chat, Harvester: test.harvester})
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
 			var status mcpserv.DaemonStatus
@@ -263,7 +263,7 @@ func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
 					t.Errorf("close harvester: %v", err)
 				}
 			}()
-			handler := newMCPDaemonHandler(mcpDaemonOptions{
+			handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 				Harvester:      harvester.NewHTTPHandler(),
 				HarvesterTools: harvestmcp.RegisteredToolNames(test.runtime),
 			})
@@ -341,7 +341,7 @@ func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
 	}
 	portText := listener.Addr().(*net.TCPAddr).Port
 	port := strconv.Itoa(portText)
-	server := &http.Server{Handler: newMCPDaemonHandler(mcpDaemonOptions{
+	server := &http.Server{Handler: mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Version: "test", StartedAt: time.Unix(5, 0), Endpoint: "http://127.0.0.1:" + port,
 		Chat: http.NotFoundHandler(), Harvester: http.NotFoundHandler(),
 	})}
@@ -365,6 +365,54 @@ func TestMCPServeRefusesHealthySecondInstance(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "already running (pid") || !strings.Contains(stderr.String(), "since") {
 		t.Fatalf("second serve stderr=%q", stderr.String())
+	}
+}
+
+// TestMCPServeRefusesAPortHeldByAForeignService pins the other half of the
+// single-instance gate: a port answering with something that is NOT pfm's
+// status document must stop the start with a message naming the conflict.
+// Before the fix the probe reported that case exactly as it reported "nothing
+// is listening", so serve walked on to bind a port it could not have.
+func TestMCPServeRefusesAPortHeldByAForeignService(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := &http.Server{
+		Handler: http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+			writer.Header().Set("Content-Type", "text/html")
+			if _, err := writer.Write([]byte("<html>not pfm</html>")); err != nil {
+				t.Errorf("write foreign body: %v", err)
+			}
+		}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- foreign.Serve(listener) }()
+	defer func() {
+		if err := foreign.Close(); err != nil {
+			t.Errorf("close foreign server: %v", err)
+		}
+		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			t.Errorf("serve foreign service: %v", err)
+		}
+	}()
+
+	runtime := commandRuntime{Config: config.Defaults(t.TempDir(), nil)}
+	runtime.Config.MCP.HTTP.Port = listener.Addr().(*net.TCPAddr).Port
+	runtime.Config.MCPServers["chat"] = config.MCPServer{Enabled: true}
+	var stdout, stderr bytes.Buffer
+	if code := runMCPServe(&stdout, &stderr, runtime, nil); code != 1 {
+		t.Fatalf("serve over a foreign service code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "already running") {
+		t.Fatalf("a foreign service was reported as pfm's own daemon: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "held by something that is not pfm") {
+		t.Fatalf("serve stderr = %q, want the port conflict named", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("serve printed a startup line for a port it never bound: %q", stdout.String())
 	}
 }
 

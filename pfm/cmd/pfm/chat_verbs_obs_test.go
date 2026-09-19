@@ -139,6 +139,112 @@ func TestChatKillOfAnUnknownTargetRecordsAFailedChatStateTransition(t *testing.T
 	}
 }
 
+// TestChatEndRecordsAChatStateTransition closes the coverage hole the lane-1
+// review named (T-6): "end" is one of the five verbs chat.RecordVerb shapes
+// (internal/chat/state.go's verbTransitions), and nothing asserted its door
+// anywhere. The unknown-target path is the whole verb's cheapest complete
+// walk — runChatEnd's deferred RecordVerb covers every return — and it pins
+// the failure shape too: a live->ended transition at ERROR whose err names
+// only the verb and its exit code, never the target string.
+func TestChatEndRecordsAChatStateTransition(t *testing.T) {
+	newKillCLIJail(t)
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, recorder := obs.Test(t)
+	var stdout, stderr strings.Builder
+	code := runChatEnd([]string{"no-such-chat-at-all"}, &stdout, &stderr, runtime)
+	if code == 0 {
+		t.Fatalf("chat end of an unknown target exited 0: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	var found bool
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "chat" {
+			continue
+		}
+		if next, _ := record.Field("next"); next != "ended" {
+			continue
+		}
+		if prior, _ := record.Field("prior"); prior != "live" {
+			t.Fatalf("chat end transition prior = %v, want live: %s", prior, recorder.Raw())
+		}
+		if record.Level != "ERROR" {
+			t.Fatalf("failed chat end record level = %q, want ERROR: %s", record.Level, recorder.Raw())
+		}
+		errField, hasErr := record.Field(obs.FieldErr)
+		if !hasErr || errField != "chat end exited "+strconv.Itoa(code) {
+			t.Fatalf(
+				"chat end failure err = %v (found=%v), want %q",
+				errField,
+				hasErr,
+				"chat end exited "+strconv.Itoa(code),
+			)
+		}
+		if strings.Contains(recorder.Raw(), "no-such-chat-at-all") {
+			t.Fatalf("the requested target reached the activity log: %s", recorder.Raw())
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("chat end wrote no chat->ended transition: %s", recorder.Raw())
+	}
+}
+
+// TestChatNewRecordsAChatStateTransition is T-6's other half: "new" is the
+// absent->registered pair in the same table, recorded by chat_new_command.go
+// once the spawn reports whether the chat was named. It drives the verb
+// directly rather than through run(), whose own openActivityLog would replace
+// obs.Test's recorder, over the same real tmux + stub engine jail the other
+// chat new tests use.
+func TestChatNewRecordsAChatStateTransition(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, recorder := obs.Test(t)
+	var stdout, stderr bytes.Buffer
+	code := runRun([]string{
+		"--name", "state door worker",
+		"--cwd", filepath.Join(jail.root, "work"),
+		"audit the firewall",
+	}, &stdout, &stderr, runtime, paths.OSEnv{}, nil)
+	if code != 0 {
+		t.Fatalf("chat new exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	var found bool
+	for _, record := range recorder.Records() {
+		if record.Message != "state.transition" {
+			continue
+		}
+		if kind, _ := record.Field("kind"); kind != "chat" {
+			continue
+		}
+		prior, _ := record.Field("prior")
+		if next, _ := record.Field("next"); next != "registered" || prior != "absent" {
+			continue
+		}
+		if record.Level != "INFO" {
+			t.Fatalf("a named spawn recorded level %q, want INFO: %s", record.Level, recorder.Raw())
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("chat new wrote no absent->registered transition: %s", recorder.Raw())
+	}
+	if strings.Contains(recorder.Raw(), "audit the firewall") {
+		t.Fatalf("the launch prompt reached the activity log: %s", recorder.Raw())
+	}
+}
+
 // TestApplyChatNameRecordsAChatStateTransition: the "name" verb
 // (cmd/pfm/chat_command.go's applyChatName) walks the state door on a
 // delivered rename — comp=state, kind=chat, never the delivered name text

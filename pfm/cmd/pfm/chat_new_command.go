@@ -92,13 +92,12 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 1
 	}
-	engineName, selectedAccount, err := resolveRunEngineAccount(
-		*engine,
-		*account,
-		runtime.Config,
-		fleet.PrimaryAccount(resolved, runtime.Config),
-		env,
-	)
+	fleetPrimary, err := fleet.PrimaryAccount(resolved, runtime.Config)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat new: read primary account: %v\n", err)
+		return 1
+	}
+	engineName, selectedAccount, err := resolveRunEngineAccount(*engine, *account, runtime.Config, fleetPrimary, env)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2

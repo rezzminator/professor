@@ -424,6 +424,49 @@ func TestHeadlessExecFilesValidationNeverLaunches(t *testing.T) {
 	}
 }
 
+// TestHeadlessExecReceiptOfAFailedRunCarriesNoEngineOutput pins the promise
+// --receipt makes in its own flag help ("content-free"): on a failed run,
+// headlessrun.Run's error text splices in up to a KiB each of the engine's
+// stdout and stderr tails (run.go's "stderr tail %q; stdout tail %q"), and
+// failureDiagnostics repeats both into Result.Diagnostics. Copied verbatim
+// into the receipt, that is the model's own answer persisted in the one file
+// a lab keeps. The failure must still be visible — on stderr, and as a class
+// plus the exit codes in the receipt — but never as engine text.
+func TestHeadlessExecReceiptOfAFailedRunCarriesNoEngineOutput(t *testing.T) {
+	headlessCLIJail(t)
+	const answer = "MODELANSWERLEAK"
+	const diagnostic = "ENGINESTDERRLEAK"
+	binary := writeHeadlessCLIStub(t, "printf '%s' '"+answer+"'\nprintf '%s' '"+diagnostic+"' >&2\nexit 7")
+	commandEnv := headlessCLIRuntime(t, binary)
+	receipt := filepath.Join(t.TempDir(), "receipt.jsonl")
+	var stdout, stderr bytes.Buffer
+	code := runHeadlessExec([]string{
+		"--engine", "claude", "--prompt", "leak check", "--output-format", "json", "--receipt", receipt,
+	}, strings.NewReader(""), &stdout, &stderr, commandEnv)
+	if code != 4 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q, want the engine failure", code, stdout.String(), stderr.String())
+	}
+	body := mustReadCLI(t, receipt)
+	for _, leak := range []string{answer, diagnostic} {
+		if bytes.Contains(body, []byte(leak)) {
+			t.Fatalf("content-free receipt carries engine output %q: %s", leak, body)
+		}
+	}
+	var receiptValue map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(body), &receiptValue); err != nil {
+		t.Fatalf("receipt is not JSON: %v", err)
+	}
+	if value, _ := receiptValue["error"].(string); value == "" {
+		t.Fatalf("receipt of a FAILED run names no failure: %s", body)
+	}
+	if value, _ := receiptValue["engine_exit"].(float64); value != 7 {
+		t.Fatalf("receipt engine_exit = %v, want the engine's own 7: %s", receiptValue["engine_exit"], body)
+	}
+	if !strings.Contains(stderr.String(), answer) {
+		t.Fatalf("the full diagnosis left stderr as well as the receipt: %q", stderr.String())
+	}
+}
+
 func TestHeadlessExecFailureAndTimeoutDoNotWriteOut(t *testing.T) {
 	headlessCLIJail(t)
 	t.Run("failure", func(t *testing.T) {

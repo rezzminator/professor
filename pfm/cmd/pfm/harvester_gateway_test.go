@@ -140,7 +140,7 @@ func TestMCPDaemonStatusReportsHarvesterExternalState(t *testing.T) {
 	var state atomic.Pointer[string]
 	failed := "failed: listen 127.0.0.1:18378: address already in use"
 	state.Store(&failed)
-	handler := newMCPDaemonHandler(mcpDaemonOptions{Version: "test", External: &state})
+	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{Version: "test", External: &state})
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
 	var status mcpserv.DaemonStatus
@@ -240,6 +240,7 @@ func TestInstallMigratesPreSplitConfigBeforeWiring(t *testing.T) {
 		installer.ModeApply,
 		"",
 		true,
+		io.Discard,
 		io.Discard,
 		applied,
 	); options.MCPPort != config.DefaultMCPPort {

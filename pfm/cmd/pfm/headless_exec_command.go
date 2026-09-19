@@ -283,8 +283,8 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 			EngineExit  int                     `json:"engine_exit"`
 			Timeout     bool                    `json:"timeout"`
 			Error       string                  `json:"error,omitempty"`
-			Diagnostics []string                `json:"diagnostics,omitempty"`
-		}{result.Engine, result.Model, result.Effort, result.Duration.Seconds(), result.TotalCostUSD, result.Usage, code, result.ExitCode, result.TimedOut, errorText(runErr), result.Diagnostics})
+			Diagnostics int                     `json:"diagnostics_count,omitempty"`
+		}{result.Engine, result.Model, result.Effort, result.Duration.Seconds(), result.TotalCostUSD, result.Usage, code, result.ExitCode, result.TimedOut, receiptError(runErr), len(result.Diagnostics)})
 		if err == nil {
 			var file *os.File
 			file, err = os.OpenFile(*receipt, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o600)
@@ -301,12 +301,29 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 	return code
 }
 
-// errorText is the run error as the receipt records it — empty when the run succeeded.
-func errorText(err error) string {
-	if err == nil {
+// receiptError is the run failure as the CONTENT-FREE receipt records it:
+// one word from a closed vocabulary, never the error's own text. A failed
+// headless run reports itself with up to a KiB each of the engine's stdout
+// and stderr tails spliced into the message (internal/headless/run/run.go),
+// and for a normalized run that stdout tail IS the model's answer — content
+// the one file a caller keeps must not carry. Nothing is lost: the whole
+// message goes to stderr above, the diagnostics print there one per line,
+// and the receipt still carries this class, both exit codes and the timeout
+// flag. The count of diagnostics travels for the same reason — their text is
+// engine-authored, their number is not.
+func receiptError(err error) string {
+	switch {
+	case err == nil:
 		return ""
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, headlessrun.ErrStructuredOutput):
+		return "structured-output"
+	default:
+		return "run-failed"
 	}
-	return err.Error()
 }
 
 // Expand the lab's multi-value file options into stdlib flag's repeatable form.

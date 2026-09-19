@@ -21,7 +21,7 @@ func runUninstall(args []string, stdout, stderr io.Writer, runtimes ...commandRu
 		flags.Usage()
 		return 2
 	}
-	options := newInstallerOptions(installer.ModeUninstall, *configDir, false, stdout, runtimes...)
+	options := newInstallerOptions(installer.ModeUninstall, *configDir, false, stdout, stderr, runtimes...)
 	options.InstallThemes = true
 	return runInstallerCommand(
 		"uninstall",

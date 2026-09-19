@@ -437,7 +437,11 @@ func runChatBranch(
 	if requestedAccount == 0 && parentFound && parent.Account != 0 {
 		requestedAccount = parent.Account
 	}
-	primary := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+	if primaryErr != nil {
+		fmt.Fprintf(stderr, "pfm chat branch: read primary account: %v\n", primaryErr)
+		return 1
+	}
 	engine, selectedAccount, err := resolveRunEngineIDAccount(engine, requestedAccount, runtime.Config, primary)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat branch: %v\n", err)

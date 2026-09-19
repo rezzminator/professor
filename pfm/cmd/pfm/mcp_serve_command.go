@@ -1,13 +1,11 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
@@ -20,111 +18,6 @@ import (
 	"hostops/pfm/internal/harvestmcp"
 	"hostops/pfm/internal/mcpserv"
 )
-
-const (
-	mcpProtocolVersion = "2025-06-18"
-)
-
-var chatMCPTools = mcpserv.ToolNames()
-
-type mcpDaemonOptions struct {
-	Version   string
-	StartedAt time.Time
-	Endpoint  string
-	Chat      http.Handler
-	Harvester http.Handler
-	// HarvesterTools is the runtime-dependent registered surface from
-	// harvestmcp.RegisteredToolNames — the search gate rules out a package var.
-	HarvesterTools []string
-	// External reports the external gateway state at request time.
-	External *atomic.Pointer[string]
-	// Clock defaults StartedAt when it is left zero; nil reads the wall
-	// clock exactly as an unset StartedAt always has.
-	Clock clock.Clock
-}
-
-func newMCPDaemonHandler(options mcpDaemonOptions) http.Handler {
-	if options.Clock == nil {
-		options.Clock = clock.Real
-	}
-	if options.StartedAt.IsZero() {
-		options.StartedAt = options.Clock.Now().UTC()
-	}
-	// Servers reports only what is actually mounted below, never the full
-	// registered set: mcp.servers.<name>.enabled=false means the handler was
-	// never constructed, and /status must not claim a tool surface the
-	// daemon cannot serve.
-	servers := map[string][]string{}
-	if options.Chat != nil {
-		servers[config.MCPServerChat] = append([]string(nil), chatMCPTools...)
-	}
-	if options.Harvester != nil {
-		servers[config.MCPServerHarvester] = append([]string(nil), options.HarvesterTools...)
-	}
-	status := mcpserv.DaemonStatus{
-		PFMVersion:      options.Version,
-		ProtocolVersion: mcpProtocolVersion,
-		Servers:         servers,
-		PID:             os.Getpid(),
-		StartTime:       options.StartedAt.UTC().Format(time.RFC3339Nano),
-		Endpoint:        options.Endpoint,
-	}
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		// Browsers attach Origin even when script code targets loopback. Local
-		// MCP clients do not. Refuse browser-capable cross-origin requests before
-		// they can reach chat_inject or any other mounted tool.
-		if request.Header.Get("Origin") != "" {
-			http.Error(writer, "browser-origin requests are forbidden", http.StatusForbidden)
-			return
-		}
-		switch request.URL.Path {
-		case "/status":
-			if request.Method != http.MethodGet {
-				writer.WriteHeader(http.StatusMethodNotAllowed)
-				return
-			}
-			current := status
-			if options.External != nil {
-				if state := options.External.Load(); state != nil {
-					current.HarvesterExternal = *state
-				}
-			}
-			writeMCPJSON(writer, current)
-		case "/mcp/chat":
-			serveMCPDaemonRoute(writer, request, options.Chat, config.MCPServerChat)
-		case "/mcp/harvester":
-			serveMCPDaemonRoute(writer, request, options.Harvester, config.MCPServerHarvester)
-		default:
-			http.NotFound(writer, request)
-		}
-	})
-}
-
-// serveMCPDaemonRoute dispatches to a mounted server's handler. handler is
-// nil exactly when mcp.servers.<name>.enabled is false, in which case a
-// plain 404 would be indistinguishable from the daemon not running at all;
-// answer with an explicit refusal instead so a disabled route reads as
-// disabled, not broken.
-func serveMCPDaemonRoute(writer http.ResponseWriter, request *http.Request, handler http.Handler, name string) {
-	if handler == nil {
-		http.Error(
-			writer,
-			fmt.Sprintf("pfm mcp: %s is disabled by config; enable it with: pfm mcp %s enable", name, name),
-			http.StatusServiceUnavailable,
-		)
-		return
-	}
-	handler.ServeHTTP(writer, request)
-}
-
-func writeMCPJSON(writer http.ResponseWriter, value any) {
-	writer.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(writer).Encode(value); err != nil {
-		// The response may already be committed. There is no useful second
-		// response to write, but retain the error in the server's normal log.
-		fmt.Fprintf(os.Stderr, "pfm mcp: encode status: %v\n", err)
-	}
-}
 
 func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clock) (exitCode int) {
 	clk = defaultClock(clk)
@@ -144,8 +37,17 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 		return 1
 	}
 	address := "127.0.0.1:" + strconv.Itoa(port)
-	if existing, ok := mcpserv.ProbeDaemon(address); ok {
+	// Three outcomes, three answers: pfm's own daemon is already up; the port
+	// is held by something that is not it (binding would either fail or, worse,
+	// look like it worked while clients keep reaching the squatter); or nothing
+	// is listening, which is the only case that goes on to bind.
+	existing, probeErr := mcpserv.ProbeDaemon(address)
+	switch {
+	case probeErr == nil:
 		fmt.Fprintf(stderr, "pfm mcp serve: already running (pid %d, since %s)\n", existing.PID, existing.StartTime)
+		return 1
+	case !errors.Is(probeErr, mcpserv.ErrDaemonAbsent):
+		fmt.Fprintf(stderr, "pfm mcp serve: port %d is held by something that is not pfm: %v\n", port, probeErr)
 		return 1
 	}
 	listener, err := net.Listen("tcp", address)
@@ -163,7 +65,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 	// Gate at construction: a server whose config is off is never built, let
 	// alone mounted, so there is no live handler for a disabled route to
 	// accidentally reach.
-	options := mcpDaemonOptions{Version: version, Endpoint: "http://" + address}
+	options := mcpserv.DaemonOptions{Version: version, Endpoint: "http://" + address, Warnings: stderr}
 	if chatEnabled {
 		chat, err := mcpserv.NewConfigured(version, stderr, mcpRuntime(runtime, false))
 		if err != nil {
@@ -210,9 +112,8 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 	options.External = external
 	options.Clock = clk
 	options.StartedAt = clk.Now().UTC()
-	handler := newMCPDaemonHandler(options)
 	server := &http.Server{
-		Handler:           handler,
+		Handler:           mcpserv.NewDaemonHandler(options),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      5 * time.Minute,

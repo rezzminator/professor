@@ -29,6 +29,11 @@ const (
 	maxCaptureBytes     = 4 << 20
 	statusNotFound      = "not_found"
 	statusAmbiguous     = "ambiguous"
+	// statusDead is the answer for a target that RESOLVED and then could not
+	// be driven or read — inject.CodeDead. It is deliberately not
+	// statusNotFound: a chat that exists and whose pane vanished mid-call is
+	// not a chat nobody has ever heard of.
+	statusDead = "dead"
 )
 
 // selfCompactDescription is a named const so the registered text and the test
@@ -167,7 +172,7 @@ func (service *Service) register() {
 	}, obs.Tool("chat_keys", service.chatKeys))
 	mcp.AddTool(service.server, &mcp.Tool{
 		Name:        "chat_capture",
-		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call chat_capture{target:\"my-chat\"} or chat_capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text (truncated flags a cut, most recent kept); not_found = no such chat; ambiguous = several match; a tool error = the capture itself failed. For the last answer only, chat_last; for a killed or old chat, chat_read.",
+		Description: "Captures a live chat's screen text — \"what is on chat X's screen\", \"show me its scrollback\". Call chat_capture{target:\"my-chat\"} or chat_capture{target:\"my-chat\", tail_lines:200}. Returns status ok with text (truncated flags a cut, most recent kept); not_found = no such chat; ambiguous = several match; dead = the chat resolved but its pane could not be read; error = the capture failed some other way, message says how. For the last answer only, chat_last; for a killed or old chat, chat_read.",
 		Annotations: readOnly,
 	}, obs.Tool("chat_capture", service.chatCapture))
 	mcp.AddTool(service.server, &mcp.Tool{
@@ -387,7 +392,7 @@ func (service *Service) chatKeys(
 		}
 		if sendErr != nil {
 			return nil, KeysOutput{
-				Status: "dead", Code: inject.CodeDead, SocketPath: target.SocketPath,
+				Status: statusDead, Code: inject.CodeDead, SocketPath: target.SocketPath,
 				Pane: target.Pane, Count: index, Keys: append([]string(nil), input.Keys...),
 			}, fmt.Errorf("send %q: %w", key, sendErr)
 		}
@@ -675,11 +680,32 @@ func (service *Service) chatCapture(
 		input.Target,
 		lines,
 	)
+	// One status per engine code, never a catch-all: inject.Engine.Capture
+	// answers CodeDead for a pane it resolved and could not read, and folding
+	// that into not_found reported a live chat as one that does not exist.
+	// An unregistered code is a capture that FAILED for a reason this surface
+	// has not been taught yet (statusError) — still never an absence.
 	status := "ok"
-	if code == inject.CodeAmbiguous {
+	switch code {
+	case 0:
+	case inject.CodeAmbiguous:
 		status = statusAmbiguous
-	} else if code != 0 {
+	case inject.CodeUnknown:
 		status = statusNotFound
+	case inject.CodeDead:
+		status = statusDead
+	case inject.CodeCaptureFailed:
+		// Every other case above describes the TARGET pane and stays a
+		// legitimate soft answer (err untouched, nil). CodeCaptureFailed
+		// means Engine.Capture's tmux call never ran at all
+		// (pfmtmux.CouldNotRun) — this tool's OWN execution failed, so it
+		// surfaces as a real Go error the way chatOpenDetached and
+		// cliAction (actions.go) already return one for their statusError
+		// outcomes, instead of asking the caller to notice a JSON field.
+		status = statusError
+		err = fmt.Errorf("chat_capture: %s", detail)
+	default:
+		status = statusError
 	}
 	// The engine captures the WHOLE scrollback; the byte bound is applied here,
 	// after the capture, keeping the most recent screen when it has to cut.

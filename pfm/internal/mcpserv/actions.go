@@ -293,14 +293,17 @@ func (service *Service) cliTargetForRequest(
 	if err != nil {
 		return "", err
 	}
-	if !caller.present {
-		if !service.backend.allowAmbientIdentity {
-			return "", fmt.Errorf("resolve MCP self: %s", noAmbientCallerRemedy)
-		}
-		return target, nil
+	// The present/valid/ambient tri-state is decided in exactly one place —
+	// selfCallerRefusal (server.go) — so this door and every handler that
+	// refuses "self" can never drift apart on what counts as identity.
+	if refused, detail := service.selfCallerRefusal(caller); refused {
+		return "", fmt.Errorf("resolve MCP self: %s", detail)
 	}
 	if !caller.valid {
-		return "", fmt.Errorf("resolve MCP self: %s", caller.detail)
+		// Not refused and not valid is the stdio server's ambient case: the
+		// word "self" travels on to the CLI, which derives the identity from
+		// the process that launched this server.
+		return target, nil
 	}
 	return caller.identity.ID, nil
 }

@@ -238,6 +238,9 @@ func fleetSetenv(t *testing.T, setenv func(string, string)) string {
 	// operator's shell exported would otherwise reach config.LoadRuntime
 	// through internal/config/ambient.go no matter how jailed PFM_HOME is.
 	setenv("XDG_CONFIG_HOME", filepath.Join(root, "home", ".config"))
+	// Every jail that pins XDG_CONFIG_HOME names its home too, so the pin
+	// stays recognisable after a test moves PFM_HOME (config.RefuseAmbientConfigHome).
+	setenv(paths.EnvTestJailHome, filepath.Join(root, "home"))
 	setenv(paths.EnvProcRoot, filepath.Join(root, "proc"))
 	setenv(paths.EnvTmuxConf, "/dev/null")
 	return root
@@ -382,6 +385,7 @@ func CleanHome(t *testing.T) config.Runtime {
 	// Pinned alongside HOME/PFM_HOME (L3-F9) — see the same comment in
 	// fleetSetenv.
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	t.Setenv(paths.EnvTestJailHome, home)
 	t.Setenv(paths.EnvDB, filepath.Join(home, ".local", "state", "pfm", "fleet.db"))
 	t.Setenv(paths.EnvFleetDB, filepath.Join(home, ".cc", "fleet.db"))
 	t.Setenv(paths.EnvSIDDir, filepath.Join(home, "sid"))

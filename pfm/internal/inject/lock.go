@@ -118,10 +118,17 @@ func (engine *Engine) lockTarget(ctx context.Context, target Target) (*targetLoc
 	return lock, ""
 }
 
+// errLockLost is what beat reports when the lock directory's owner file now
+// names another pid: this holder's lock was stolen out from under it — the
+// hold ran past maxHold and a contender took it, or it lost the settle/
+// re-read race in acquireTargetLock — and it must stop rather than silently
+// keep refreshing a lock it no longer holds.
+var errLockLost = errors.New("inject lock lost: owner file now names another pid")
+
 func (lock *targetLock) beat() error {
 	ownerPID, _, ok := readLockOwner(lock.path)
 	if ok && ownerPID != lock.pid {
-		return nil
+		return errLockLost
 	}
 	content := fmt.Sprintf("%d %d\n", lock.pid, lock.clock.Now().Unix())
 	return os.WriteFile(filepath.Join(lock.path, "owner"), []byte(content), 0o600)

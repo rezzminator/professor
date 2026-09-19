@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -134,5 +135,47 @@ func TestResolveSelectedRowAttachesALiveChatInsteadOfResumingAStaleCachedRow(t *
 			"resolveSelectedRow(stale ResumeClaude)=%#v, want a LIVE row on socket %q pane %q: stderr=%q",
 			resolved, socket, paneID, stderr.String(),
 		)
+	}
+}
+
+// TestResolveSelectedRowNamesAChatGoneFromASuccessfulRescan (L1-F8): the
+// rescan itself succeeds — no tmux failure, no store error — and simply
+// answers without this id: the chat was killed or resumed elsewhere between
+// the picker's paint and this Enter. Opening the stale cached row anyway is
+// the exact second-seat hazard resolveSelectedRow's own doc comment names;
+// only the id-present branch had a test before this one.
+func TestResolveSelectedRowNamesAChatGoneFromASuccessfulRescan(t *testing.T) {
+	jailTest(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := database.Close(); err != nil {
+			t.Errorf("close database: %v", err)
+		}
+	}()
+
+	staleRow := compose.Row{
+		ID:   "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+		Kind: compose.ResumeClaude,
+		Name: "ghost-chat",
+	}
+
+	var stderr bytes.Buffer
+	resolved, err := resolveSelectedRow(
+		context.Background(), database, staleRow, &pfmconfig.Runtime{Paths: jailPaths(t)}, &stderr,
+	)
+	if err == nil {
+		t.Fatalf(
+			"resolveSelectedRow() opened a row absent from a successful rescan: %#v",
+			resolved,
+		)
+	}
+	if !strings.Contains(err.Error(), "ghost-chat") || !strings.Contains(err.Error(), "no longer exists") {
+		t.Fatalf("error = %v, want it to name the vanished row", err)
+	}
+	if !reflect.DeepEqual(resolved, compose.Row{}) {
+		t.Fatalf("resolved row = %#v, want the zero value alongside the error", resolved)
 	}
 }

@@ -851,7 +851,8 @@ func (model Model) renderGroupedRow(
 			name = strings.Join(labels, " ")
 		}
 	}
-	if row.Kind == compose.ProfessorUpdate {
+	switch row.Kind {
+	case compose.ProfessorUpdate:
 		sparkle := "✦"
 		if (model.nowNS/int64(500*time.Millisecond))%2 != 0 {
 			sparkle = "✧"
@@ -862,6 +863,8 @@ func (model Model) renderGroupedRow(
 			return professorUpdateSelectedStyle.Render(line)
 		}
 		return professorUpdateStyle.Render(line)
+	case compose.ProfessorUpdateFailed:
+		return renderProfessorUpdateFailedRow(pointer, name, selected, width)
 	}
 	name = fixedDisplayColumn(name, 30)
 	marker := rowMarker(row.Kind)

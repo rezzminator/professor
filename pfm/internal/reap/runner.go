@@ -244,11 +244,21 @@ func (runner *Runner) Run(
 	decisions := Plan(input)
 	trail.Reach("planned", "decisions planned")
 	if options.Apply {
-		report.AvailBefore = runner.availableKB()
 		var warnings []string
-		decisions, warnings = runner.apply(ctx, decisions)
+		if avail, err := runner.availableKB(); err != nil {
+			warnings = append(warnings, fmt.Sprintf("read available memory before reap: %v", err))
+		} else {
+			report.AvailBefore = avail
+		}
+		var applyWarnings []string
+		decisions, applyWarnings = runner.apply(ctx, decisions)
+		warnings = append(warnings, applyWarnings...)
+		if avail, err := runner.availableKB(); err != nil {
+			warnings = append(warnings, fmt.Sprintf("read available memory after reap: %v", err))
+		} else {
+			report.AvailAfter = avail
+		}
 		report.Warnings = warnings
-		report.AvailAfter = runner.availableKB()
 		trail.Reach("applied", "decisions applied")
 	}
 	report.Decisions = decisions
@@ -620,11 +630,20 @@ func removeRoleCrumb(sidDir, socket string) (removed bool, err error) {
 
 // availableKB reads the machine's own available memory, which is the only
 // honest measure of what a reap reclaimed — summed RSS double-counts the
-// runtime pages several node processes share.
-func (runner *Runner) availableKB() int64 {
-	content, err := os.ReadFile(filepath.Join(runner.paths.ProcRoot, "meminfo"))
+// runtime pages several node processes share. meminfo not existing at all —
+// no /proc on this platform, or a jail fixture that never staged one — is a
+// genuine absence: (0, nil). Any other read or parse failure is returned,
+// never folded into that same 0: a probe that could not run must not render
+// identically to "0 KB available", the one number here that would itself be
+// alarming.
+func (runner *Runner) availableKB() (int64, error) {
+	path := filepath.Join(runner.paths.ProcRoot, "meminfo")
+	content, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
 	if err != nil {
-		return 0
+		return 0, fmt.Errorf("read %s: %w", path, err)
 	}
 	for _, line := range strings.Split(string(content), "\n") {
 		if !strings.HasPrefix(line, "MemAvailable:") {
@@ -632,15 +651,15 @@ func (runner *Runner) availableKB() int64 {
 		}
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
-			return 0
+			return 0, fmt.Errorf("parse MemAvailable line %q in %s", line, path)
 		}
 		value, err := strconv.ParseInt(fields[1], 10, 64)
 		if err != nil {
-			return 0
+			return 0, fmt.Errorf("parse MemAvailable value in %s: %w", path, err)
 		}
-		return value
+		return value, nil
 	}
-	return 0
+	return 0, fmt.Errorf("no MemAvailable line in %s", path)
 }
 
 // sessionIDFromPath reads the session id out of a transcript pathname.

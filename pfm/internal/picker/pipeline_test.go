@@ -549,8 +549,8 @@ func TestPrimaryAccountSetGetDirectly(t *testing.T) {
 	if err := fleet.SetPrimaryAccount(rt.Paths, rt.Config, 2); err != nil {
 		t.Fatalf("SetPrimaryAccount(2): %v", err)
 	}
-	if got := fleet.PrimaryAccount(rt.Paths, rt.Config); got != 2 {
-		t.Fatalf("PrimaryAccount() = %d, want the persisted account 2", got)
+	if got, err := fleet.PrimaryAccount(rt.Paths, rt.Config); err != nil || got != 2 {
+		t.Fatalf("PrimaryAccount() = %d, %v, want the persisted account 2, nil", got, err)
 	}
 
 	// An off-roster account is refused, and refused BEFORE anything
@@ -559,8 +559,8 @@ func TestPrimaryAccountSetGetDirectly(t *testing.T) {
 	if err := fleet.SetPrimaryAccount(rt.Paths, rt.Config, 9); err == nil {
 		t.Fatal("SetPrimaryAccount(9) accepted an off-roster account")
 	}
-	if got := fleet.PrimaryAccount(rt.Paths, rt.Config); got != 2 {
-		t.Fatalf("PrimaryAccount() after refused switch = %d, want 2", got)
+	if got, err := fleet.PrimaryAccount(rt.Paths, rt.Config); err != nil || got != 2 {
+		t.Fatalf("PrimaryAccount() after refused switch = %d, %v, want 2, nil", got, err)
 	}
 }
 
@@ -618,7 +618,11 @@ func TestPrimaryWritebackSentinelNeverHitsTheRosterCheck(t *testing.T) {
 		t.Fatal("fleet.SetPrimaryAccount(0) accepted the sentinel — roster check regressed")
 	}
 
-	if _, should := primaryWriteback(ui.OutcomeSelected, 0, fleet.PrimaryAccount(values, machine)); should {
+	current, err := fleet.PrimaryAccount(values, machine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, should := primaryWriteback(ui.OutcomeSelected, 0, current); should {
 		t.Fatal("primaryWriteback let the unset sentinel through — runLS would still crash")
 	}
 }

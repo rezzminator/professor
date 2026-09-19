@@ -10,6 +10,8 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
+
+	"hostops/pfm/internal/obs"
 )
 
 // ReaderGate is the injectable open-gate core. Reader and Writer must be the
@@ -76,9 +78,17 @@ func (DeviceGate) Confirm(
 ) (confirmed bool, returnErr error) {
 	terminal, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, os.ErrPermission) {
+		// No controlling terminal at all, or this process cannot open its
+		// own — the ordinary shape of a detached/service invocation. Not
+		// worth a line: every such caller hits this every time.
 		return false, nil
 	}
 	if err != nil {
+		// Anything else (ENXIO from a process with no ctty despite a
+		// resolvable /dev/tty entry, a transient device error) is a probe
+		// that could not run, not the ordinary "no terminal" case above —
+		// name it so a gate that silently never fires is diagnosable.
+		obs.Logger(ctx).WarnContext(ctx, "device gate: open /dev/tty failed", "err", err)
 		return false, nil
 	}
 	defer func() {
@@ -88,6 +98,7 @@ func (DeviceGate) Confirm(
 	}()
 	settings, err := unix.IoctlGetTermios(int(terminal.Fd()), getTermios)
 	if err != nil {
+		obs.Logger(ctx).WarnContext(ctx, "device gate: read terminal settings failed", "err", err)
 		return false, nil
 	}
 	oneKey := *settings
@@ -99,6 +110,7 @@ func (DeviceGate) Confirm(
 		setTermios,
 		&oneKey,
 	); err != nil {
+		obs.Logger(ctx).WarnContext(ctx, "device gate: set raw terminal mode failed", "err", err)
 		return false, nil
 	}
 	defer func() {

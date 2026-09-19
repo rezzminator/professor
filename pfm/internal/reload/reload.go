@@ -9,12 +9,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-	"unicode"
 
 	"hostops/pfm/internal/action"
 	"hostops/pfm/internal/clock"
@@ -399,7 +397,34 @@ func waitExitRendered(ctx context.Context, request Request, clk clock.Clock, tmu
 			return err
 		}
 	}
-	return errors.New("typed /exit never rendered — refusing blind Enter")
+	cause := errors.New("typed /exit never rendered — refusing blind Enter")
+	if err := clearTypedExit(ctx, request, tmux); err != nil {
+		return errors.Join(cause, err)
+	}
+	return cause
+}
+
+// clearTypedExit backspaces the "/exit" this worker itself just typed
+// (SendLiteral, over a composer C-s had already stashed empty) back out of
+// the composer, so a refusal to reboot never leaves that stray text sitting
+// there for a human to notice — or, worse, accidentally submit — then
+// confirms the composer actually cleared. Shared by waitExitRendered (never
+// confirmed rendering, so pressing Enter would be blind) and exitIncomplete
+// (rendered, then the pane never died on it).
+func clearTypedExit(ctx context.Context, request Request, tmux Tmux) error {
+	for range len("/exit") {
+		if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "BSpace"); err != nil {
+			return fmt.Errorf("the typed /exit could NOT be cleared from the composer — clear it by hand: %w", err)
+		}
+	}
+	capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
+	if err != nil {
+		return fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err)
+	}
+	if composerShowsExit(capture) {
+		return errors.New("the typed /exit could NOT be cleared from the composer — clear it by hand")
+	}
+	return nil
 }
 
 // waitCallerIdle holds the /exit until the pane's current turn has ended.
@@ -419,12 +444,16 @@ func waitCallerIdle(
 ) (string, error) {
 	stable := 0
 	announced := false
+	sawComposer := false
 	for attempt := 0; attempt < options.IdleTries; attempt++ {
 		capture, err := tmux.Capture(ctx, request.SocketPath, request.Pane)
 		if err != nil {
 			return "", fmt.Errorf("capture pane before /exit: %w", err)
 		}
-		if inject.IsBusy(capture) {
+		showsComposer := composerDrawn(capture)
+		sawComposer = sawComposer || showsComposer
+		switch {
+		case inject.IsBusy(capture):
 			stable = 0
 			if !announced {
 				announced = true
@@ -433,7 +462,16 @@ func waitCallerIdle(
 					ctx, request, tmux, stderr, "pfm reload: waiting for this turn to end, then rebooting this chat",
 				)
 			}
-		} else {
+		case !showsComposer:
+			// A pane with no input box on it is not an idle chat — it is a
+			// chat whose TUI has not drawn one yet, and it cannot be typed
+			// into at all. The pane is still in cooked mode, so /exit sent now
+			// is echoed by the line discipline and then DISCARDED by the
+			// raw-mode switch the TUI makes as it starts: the chat never reads
+			// a byte, nothing in the composer ever says /exit, and every exit
+			// try is spent on a chat nobody asked to quit.
+			stable = 0
+		default:
 			stable++
 			if stable >= 2 {
 				if announced {
@@ -445,6 +483,12 @@ func waitCallerIdle(
 		if err := sleepPoll(ctx, options.Clock, options.Poll); err != nil {
 			return "", err
 		}
+	}
+	if !sawComposer {
+		return "", fmt.Errorf(
+			"the pane never showed a chat input box in %d polls — /exit was not typed, nothing changed",
+			options.IdleTries,
+		)
 	}
 	return "", fmt.Errorf("chat still busy after %d polls — /exit was not typed, nothing changed", options.IdleTries)
 }
@@ -502,24 +546,8 @@ func exitIncomplete(ctx context.Context, request Request, options Options, tmux 
 		}
 		return errors.Join(cause, errors.New("the exit dialog would not confirm; dismissed it (Esc)"))
 	case composerShowsExit(capture):
-		for range len("/exit") {
-			if err := tmux.SendKey(ctx, request.SocketPath, request.Pane, "BSpace"); err != nil {
-				return errors.Join(
-					cause,
-					fmt.Errorf("the typed /exit could NOT be cleared from the composer — clear it by hand: %w", err),
-				)
-			}
-		}
-		if capture, err = tmux.Capture(ctx, request.SocketPath, request.Pane); err != nil {
-			return errors.Join(
-				cause,
-				fmt.Errorf("sent backspaces over the typed /exit but could not confirm the composer is clear: %w", err),
-			)
-		} else if composerShowsExit(capture) {
-			return errors.Join(
-				cause,
-				errors.New("the typed /exit could NOT be cleared from the composer — clear it by hand"),
-			)
+		if err := clearTypedExit(ctx, request, tmux); err != nil {
+			return errors.Join(cause, err)
 		}
 		return errors.Join(cause, errors.New("cleared the typed /exit from the composer"))
 	}
@@ -530,32 +558,9 @@ func sleepPoll(ctx context.Context, clk clock.Clock, poll time.Duration) error {
 	return clk.Sleep(ctx, poll)
 }
 
-func composerShowsExit(capture string) bool {
-	return strings.Contains(strings.Join(strings.Fields(lastReloadComposerLine(capture)), " "), "/exit")
-}
-
-// exitDialogPattern is the selected row of Claude Code's background-work
-// exit confirmation ("❯ 1. Exit and stop tasks"). The marker has to sit on
-// the Exit row: a human who moved it to "Stay" gets that choice respected.
-var exitDialogPattern = regexp.MustCompile(`❯[\s\v]*\d+\.[\s\v]*Exit`)
-
-func exitDialogOpen(capture string) bool {
-	return exitDialogPattern.MatchString(capture)
-}
-
 func rosterContains(accounts []int, wanted int) bool {
 	for _, account := range accounts {
 		if account == wanted {
-			return true
-		}
-	}
-	return false
-}
-
-func selectorOpen(capture string) bool {
-	selector := regexp.MustCompile(`❯[\s\v]*\d+\.`)
-	for _, line := range strings.Split(capture, "\n") {
-		if selector.MatchString(line) {
 			return true
 		}
 	}
@@ -583,9 +588,9 @@ func claudeRun(request Request) (string, error) {
 	}
 	effort, err := action.ClaudeEffort(request.Effort)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve claude respawn effort: %w", err)
 	}
-	return action.ClaudeSpawn{
+	run, err := action.ClaudeSpawn{
 		Purpose: action.PurposeResume,
 		Account: request.Account,
 		Cache1H: request.Cache1H,
@@ -595,6 +600,10 @@ func claudeRun(request Request) (string, error) {
 		Model:   request.Model,
 		Effort:  effort,
 	}.ShellCommand()
+	if err != nil {
+		return "", fmt.Errorf("render claude respawn command: %w", err)
+	}
+	return run, nil
 }
 
 func engineRun(request Request) (string, error) {
@@ -611,7 +620,7 @@ func engineRun(request Request) (string, error) {
 func codexRun(request Request) (string, error) {
 	effort, err := action.CodexEffort(request.Effort)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("resolve codex respawn effort: %w", err)
 	}
 	parts := []string{
 		"env", "-u", "CODEX_THREAD_ID", "-u", "CLAUDE_CODE_SESSION_ID",
@@ -673,7 +682,7 @@ func deliverThen(
 			if trustPrompt {
 				continue
 			}
-			if lastReloadComposerLine(capture) != "" {
+			if composerDrawn(capture) {
 				goto ready
 			}
 		}
@@ -841,83 +850,6 @@ func currentPanePID(ctx context.Context, socket, wanted string, tmux Tmux) (int,
 		return pane.PID, nil
 	}
 	return 0, errors.New("reborn pane disappeared")
-}
-
-// composerText returns the ACTIVE composer's WHOLE draft: the marker line plus
-// every wrapped continuation line beneath it, up to the box's closing rule.
-//
-// A one-line read was the bug this replaces. Claude and Codex both wrap a long
-// draft inside the input box and print the ❯/› marker on the FIRST line only,
-// so a check that scanned the marker line alone saw the draft's head and never
-// its tail — and deliverThen proves delivery by the TAIL, which is the half
-// that proves nothing was truncated in transit. Every steer worth sending after
-// a reload is long enough to wrap, so the proof could never be satisfied and
-// the follow-up sat in the composer waiting for a human finger.
-//
-// The block ends at the box's horizontal rule. When a render carries no closing
-// rule the block runs to the end of the capture: the callers only ever ask
-// whether their OWN text is present, so trailing status rows cost nothing,
-// while a missing continuation line costs the whole delivery.
-func composerText(capture string) string {
-	lines := strings.Split(capture, "\n")
-	start := -1
-	for index := len(lines) - 1; index >= 0; index-- {
-		if strings.Contains(lines[index], "❯") || strings.Contains(lines[index], "›") {
-			start = index
-			break
-		}
-	}
-	if start < 0 {
-		return ""
-	}
-	block := lines[start : start+1]
-	for index := start + 1; index < len(lines); index++ {
-		if composerBoxRule(lines[index]) {
-			break
-		}
-		block = lines[start : index+1]
-	}
-	return strings.Join(block, "\n")
-}
-
-// composerBoxRule reports whether a captured line is one of the input box's
-// horizontal rules — visible content that is nothing but box-drawing glyphs.
-// Matching the CLASS (U+2500-U+257F) rather than one theme's glyph keeps a
-// restyled border from silently reopening the wrap bug.
-func composerBoxRule(line string) bool {
-	drawn := false
-	for _, character := range line {
-		switch {
-		case unicode.IsSpace(character):
-		case character >= 0x2500 && character <= 0x257F:
-			drawn = true
-		default:
-			return false
-		}
-	}
-	return drawn
-}
-
-// squashSpace drops every space so a comparison survives the composer's line
-// wrapping. Collapsing to single spaces survives a wrap at a word boundary and
-// NOT one inside a word, and a token wider than the box — a long path or URL,
-// the substance of most steers — is wrapped mid-word.
-func squashSpace(value string) string {
-	return strings.Join(strings.Fields(value), "")
-}
-
-func lastReloadComposerLine(capture string) string {
-	lines := strings.Split(capture, "\n")
-	for index := len(lines) - 1; index >= 0; index-- {
-		if strings.Contains(lines[index], "❯") || strings.Contains(lines[index], "›") {
-			return lines[index]
-		}
-	}
-	return ""
-}
-
-func claudeLive(proc Process, panePID int) (bool, error) {
-	return engineLive(proc, panePID, pfmengine.Claude, "", "")
 }
 
 func engineLabel(id pfmengine.ID) string {

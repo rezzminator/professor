@@ -513,6 +513,9 @@ func (model Model) updateKey(message tea.KeyMsg) (tea.Model, tea.Cmd) {
 				model.outcomeEngine = model.newChatEngine
 				return model, tea.Quit
 			}
+			if row.Kind == compose.ProfessorUpdateFailed {
+				return model, nil // notice only, no chat to open — see professor_update_failed_row.go
+			}
 			if model.mergeNewChat && isNewChatActionKind(row.Kind) {
 				switch model.newChatEngine {
 				case pfmengine.Codex:

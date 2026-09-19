@@ -69,7 +69,10 @@ type ExitArgs struct {
 // TmuxClient abstracts all tmux mutation behind a jailed implementation.
 type TmuxClient interface {
 	PanePID(ctx context.Context, socketPath, paneID string) (int, error)
-	PaneExists(ctx context.Context, socketPath, paneID string) bool
+	// PaneExists distinguishes "could not ask" from "gone": a transient tmux
+	// failure returns a non-nil error and an unspecified bool, never a bare
+	// false a caller could mistake for a confirmed exit.
+	PaneExists(ctx context.Context, socketPath, paneID string) (bool, error)
 	SendLine(ctx context.Context, socketPath, paneID, line string) error
 	KillPane(ctx context.Context, socketPath, paneID string) error
 	KillServer(ctx context.Context, socketPath string) error

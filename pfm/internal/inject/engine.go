@@ -21,6 +21,7 @@ import (
 	"hostops/pfm/internal/paths"
 	"hostops/pfm/internal/rearm"
 	"hostops/pfm/internal/resolve"
+	pfmtmux "hostops/pfm/internal/tmux"
 )
 
 // SenderSessionEnv, SenderLabelEnv, and SenderIDEnv are how a chat states its
@@ -481,6 +482,17 @@ func (engine *Engine) Capture(
 		FullScrollback,
 	)
 	if err != nil {
+		if pfmtmux.CouldNotRun(err) {
+			// tmux itself never started (missing binary, bad configured
+			// socket dir) — a probe that could not run, never a pane that
+			// answered dead. Folding this into CodeDead would tell the
+			// caller a live chat's pane is gone when the truth is "could
+			// not look"; the cause rides in detail since this door's err
+			// return stays nil for every prior caller (mcpserv among them).
+			return target, "", CodeCaptureFailed, fmt.Sprintf(
+				"could not run tmux to capture %q: %v", target.Pane, err,
+			), nil
+		}
 		return target, "", CodeDead, "target pane is dead or unreadable", nil
 	}
 	if tailLines > 0 {
@@ -1138,7 +1150,9 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	normalized := normalizeSpace(message)
 	needle := tailRunes(normalized, 40)
 	for attempt := 0; attempt < engine.options.SettleTries; attempt++ {
-		_ = lock.beat()
+		if beatErr := lock.beat(); beatErr != nil {
+			return lockLost(base, target.Pane, beatErr), nil
+		}
 		capture, err = engine.capture(ctx, target, 0)
 		if err == nil && (strings.Contains(normalizeSpace(capture), needle) ||
 			(pasteTransport && HasPastePlaceholder(capture))) {
@@ -1156,7 +1170,9 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	submitted := false
 	for attempt := 1; attempt <= engine.options.EnterTries; attempt++ {
 		base.SubmitRetries = attempt
-		_ = lock.beat()
+		if beatErr := lock.beat(); beatErr != nil {
+			return lockLost(base, target.Pane, beatErr), nil
+		}
 		if err := engine.tmux.SendKey(
 			ctx,
 			target.SocketPath,
@@ -1838,6 +1854,21 @@ func rawPane(value string) bool {
 
 func refused(code int, message string) Result {
 	return Result{Status: "refused", Code: code, Message: message}
+}
+
+// lockLost fills base for a delivery whose heartbeat could no longer prove
+// it still holds the target's lock (F9): it stops typing rather than risk
+// interleaving keystrokes with whoever stole the lock, and reports the loss
+// under its own code instead of the generic CodeUndelivered.
+func lockLost(base Result, pane string, err error) Result {
+	base.Status = "lock_lost"
+	base.Code = CodeLockLost
+	base.Message = fmt.Sprintf(
+		"stopped delivering into %q: %v",
+		pane,
+		err,
+	)
+	return base
 }
 
 func normalizeSpace(value string) string {

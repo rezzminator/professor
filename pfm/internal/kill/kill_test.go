@@ -65,13 +65,13 @@ func (proc *fakeProc) Stat(pid int) (gather.ProcStat, error) {
 }
 
 type fakeTmux struct {
-	mutex         sync.Mutex
-	panePID       int
-	existsFor     int
-	existsCalls   int
-	sent          []string
-	killedPanes   []string
-	killedServers []string
+	mutex                     sync.Mutex
+	panePID, existsFor        int
+	existsErrFor, existsCalls int // existsErrFor: leading calls that error, before existsFor answers
+	killPaneErr               error
+	sent                      []string
+	killedPanes               []string
+	killedServers             []string
 	// viewport wiring: which terminals watch the chat, and which pane each of
 	// those terminals is. Both empty means nothing is watching it.
 	clientTTYs []string
@@ -110,14 +110,14 @@ func (tmux *fakeTmux) PanePID(
 	return tmux.panePID, nil
 }
 
-func (tmux *fakeTmux) PaneExists(
-	_ context.Context,
-	_, _ string,
-) bool {
+func (tmux *fakeTmux) PaneExists(_ context.Context, _, _ string) (bool, error) {
 	tmux.mutex.Lock()
 	defer tmux.mutex.Unlock()
 	tmux.existsCalls++
-	return tmux.existsCalls <= tmux.existsFor
+	if tmux.existsCalls <= tmux.existsErrFor {
+		return false, errors.New("tmux probe failed")
+	}
+	return tmux.existsCalls-tmux.existsErrFor <= tmux.existsFor, nil
 }
 
 func (tmux *fakeTmux) SendLine(
@@ -141,7 +141,7 @@ func (tmux *fakeTmux) KillPane(
 		tmux.killedPanes,
 		filepath.Base(socketPath)+"\t"+paneID,
 	)
-	return nil
+	return tmux.killPaneErr
 }
 
 func (tmux *fakeTmux) KillServer(

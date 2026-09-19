@@ -35,6 +35,14 @@ const (
 	// cmd/pfm ahead of the merged new-chat row. It is deliberately not emitted
 	// by Compose, so plain and TSV output retain their stable row contracts.
 	ProfessorUpdate
+	// ProfessorUpdateFailed is ProfessorUpdate's failure twin: the detached
+	// update checker has been failing on every attempt instead of finding (or
+	// ruling out) a release. It gets its own row for the same reason
+	// ProfessorUpdate does — a stderr line printed before the interactive
+	// picker takes the terminal is gone the instant the alt screen opens, and
+	// a swallowed failure must never render identically to "no update
+	// available". Never emitted by Compose either, for the same reason.
+	ProfessorUpdateFailed
 )
 
 func (kind Kind) String() string {
@@ -63,6 +71,8 @@ func (kind Kind) String() string {
 		return "new-opencode"
 	case ProfessorUpdate:
 		return "professor-update"
+	case ProfessorUpdateFailed:
+		return "professor-update-failed"
 	default:
 		return "unknown"
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/compose"
@@ -50,6 +51,84 @@ func cachedProfessorUpdateRow(runtime pfmconfig.Runtime) (compose.Row, bool) {
 		Project: filepath.Base(repo),
 		CWD:     repo,
 	}, true
+}
+
+// cachedProfessorUpdateFailureRow is cachedProfessorUpdateRow's failure twin:
+// where that one turns a successful check that found a release into its own
+// row, this turns a detached checker that has been failing on every attempt
+// into one — the state professorUpdateCheckNotice could previously only
+// report as a stderr line printed before the interactive picker takes the
+// terminal, gone the instant the alt screen opens. hasUpdate wins outright: a
+// successful check that DID find a release makes any earlier failure history
+// moot, exactly as professorUpdateCheckNotice already treats it.
+func cachedProfessorUpdateFailureRow(runtime pfmconfig.Runtime, hasUpdate bool) (compose.Row, bool) {
+	if !runtime.IsRelease() || hasUpdate {
+		return compose.Row{}, false
+	}
+	cachePath := professorUpdateCachePath(runtime)
+	marker, failing, err := updatecheck.ReadFailure(cachePath)
+	if err != nil || !failing {
+		return compose.Row{}, false
+	}
+	repo, err := installer.ReadSourceRepoMarker(runtime.Paths.Home)
+	if err != nil {
+		return compose.Row{}, false
+	}
+	return compose.Row{
+		Kind: compose.ProfessorUpdateFailed,
+		ID:   "pfm-update-check-failed-" + marker.At.UTC().Format(time.RFC3339),
+		Name: fmt.Sprintf(
+			"failing since %s (%s): %s",
+			marker.At.Local().Format("2006-01-02 15:04"),
+			marker.Class,
+			marker.Reason,
+		),
+		Project: filepath.Base(repo),
+		CWD:     repo,
+	}, true
+}
+
+// professorUpdateCheckNotice names an update-check state cachedProfessorUpdateRow
+// itself cannot show: it only ever answers ("", false) for three very
+// different situations — a genuine "no update available" (updatecheck.Read
+// found nothing AND the detached checker has been succeeding), the cache
+// file itself being unreadable, and a detached checker that has been failing
+// every run for days while Read keeps answering found=false. Folding all
+// three into silence is exactly "an error rendering as absence"; this
+// returns a one-line stderr notice for the second and third, "" for the
+// first (and whenever the release gate does not apply).
+//
+// It is safe to call and print BEFORE the interactive picker takes the
+// terminal (mirrors the flag-validation stderr writes already at the top of
+// Run) — never mid-frame, which is why triggerProfessorUpdateCheck's own
+// detached child stays silent instead of writing here itself.
+func professorUpdateCheckNotice(runtime pfmconfig.Runtime) string {
+	if !runtime.IsRelease() {
+		return ""
+	}
+	cachePath := professorUpdateCachePath(runtime)
+	_, found, err := updatecheck.Read(cachePath, runtime.Version)
+	if err != nil {
+		return fmt.Sprintf("pfm ls: could not read the Professor update cache: %v", err)
+	}
+	if found {
+		// An update IS available — cachedProfessorUpdateRow already renders
+		// it as its own picker row; a second notice would only repeat it.
+		return ""
+	}
+	marker, failing, err := updatecheck.ReadFailure(cachePath)
+	if err != nil {
+		return fmt.Sprintf("pfm ls: could not read the Professor update-check failure marker: %v", err)
+	}
+	if !failing {
+		return ""
+	}
+	return fmt.Sprintf(
+		"pfm ls: Professor update check failing since %s (%s): %s",
+		marker.At.Local().Format("2006-01-02 15:04"),
+		marker.Class,
+		marker.Reason,
+	)
 }
 
 // triggerProfessorUpdateCheck is intentionally fire-and-forget and silent.

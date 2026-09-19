@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -84,14 +83,14 @@ func (tmux TmuxExecutor) KillPane(
 	ctx context.Context,
 	socket, paneID string,
 ) error {
-	return tmux.command(ctx, socket, "kill-pane", "-t", paneID).Run()
+	return tmux.socket().KillPane(ctx, socket, paneID)
 }
 
 func (tmux TmuxExecutor) KillServer(
 	ctx context.Context,
 	socket string,
 ) error {
-	return tmux.command(ctx, socket, "kill-server").Run()
+	return tmux.socket().KillServer(ctx, socket)
 }
 
 func (tmux TmuxExecutor) SetWindowSizeLatest(
@@ -139,12 +138,17 @@ func (tmux TmuxExecutor) CreateChatServer(
 	})
 }
 
+// socket is the one tmux-addressing wrapper (internal/tmux.Socket).
+func (tmux TmuxExecutor) socket() pfmtmux.Socket {
+	return pfmtmux.Socket{Binary: tmux.Binary, Dir: tmux.TmuxDir}
+}
+
 func (tmux TmuxExecutor) command(
 	ctx context.Context,
 	socket string,
 	arguments ...string,
 ) *pfmtmux.Cmd {
-	return pfmtmux.Exec(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
+	return tmux.socket().Command(ctx, socket, arguments...)
 }
 
 type ExecRunner struct {

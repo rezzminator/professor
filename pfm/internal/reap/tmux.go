@@ -65,8 +65,15 @@ func (tmux TmuxReaper) Sessions(
 		format,
 	).Output()
 	if err != nil {
-		// No bunker socket at all is the ordinary state on a machine that
-		// never opened one; it is not a sweep failure.
+		if pfmtmux.CouldNotRun(err) {
+			// tmux itself never started (missing binary, bad configured
+			// path): the sweep could not look, so it must not report the
+			// bunker as empty.
+			return nil, fmt.Errorf("list bunker sessions on %s: %w", socket, err)
+		}
+		// tmux ran and answered no server on this socket — the ordinary
+		// state on a machine that never opened a bunker. Not a sweep
+		// failure.
 		return nil, nil
 	}
 	now := tmux.Now
@@ -180,10 +187,15 @@ func (tmux TmuxReaper) KillSession(
 	return nil
 }
 
+// socket is the one tmux-addressing wrapper (internal/tmux.Socket).
+func (tmux TmuxReaper) socket() pfmtmux.Socket {
+	return pfmtmux.Socket{Binary: tmux.Binary, Dir: tmux.TmuxDir}
+}
+
 func (tmux TmuxReaper) command(
 	ctx context.Context,
 	socket string,
 	arguments ...string,
 ) *pfmtmux.Cmd {
-	return pfmtmux.Exec(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
+	return tmux.socket().Command(ctx, socket, arguments...)
 }

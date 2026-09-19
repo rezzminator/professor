@@ -64,6 +64,12 @@ func Run(
 	// Read first, then arm the detached lookup: a network result from THIS
 	// invocation is deliberately eligible only for the NEXT `pfm ls`.
 	updateRow, hasUpdate := cachedProfessorUpdateRow(runtime)
+	failureRow, hasFailure := cachedProfessorUpdateFailureRow(runtime, hasUpdate)
+	// Nothing has touched the terminal yet — safe to print here, unlike from
+	// inside the interactive picker's own alt-screen session.
+	if notice := professorUpdateCheckNotice(runtime); notice != "" {
+		fmt.Fprintln(stderr, notice)
+	}
 	triggerProfessorUpdateCheck(runtime)
 	if killed {
 		if flags.NArg() != 0 || all || *plain {
@@ -133,6 +139,8 @@ func Run(
 		}
 		if hasUpdate {
 			scan.Snapshot.Rows = append([]compose.Row{updateRow}, scan.Snapshot.Rows...)
+		} else if hasFailure {
+			scan.Snapshot.Rows = append([]compose.Row{failureRow}, scan.Snapshot.Rows...)
 		}
 		applier, applierErr := killApplier(ctx, database, runtime)
 		if applierErr != nil {
@@ -199,11 +207,12 @@ func Run(
 	if claudePrimary == 0 && compose.EngineForKind(outcome.Row.Kind) != pfmengine.Codex {
 		claudePrimary = outcome.PrimaryAccount
 	}
-	if account, should := primaryWriteback(
-		outcome.Kind,
-		claudePrimary,
-		fleet.PrimaryAccount(scan.Paths, runtime.Config),
-	); should {
+	currentPrimary, err := fleet.PrimaryAccount(scan.Paths, runtime.Config)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm ls: read primary account: %v\n", err)
+		return 1
+	}
+	if account, should := primaryWriteback(outcome.Kind, claudePrimary, currentPrimary); should {
 		if err := fleet.SetPrimaryAccount(scan.Paths, runtime.Config, account); err != nil {
 			fmt.Fprintf(stderr, "pfm ls: save primary account: %v\n", err)
 			return 1
@@ -296,7 +305,19 @@ func resolveSelectedRow(
 			return scan.Output.Rows[index], nil
 		}
 	}
-	return row, nil
+	// The rescan RAN and came back without this id — not a failure to look,
+	// a real answer: the chat was killed or resumed elsewhere between the
+	// picker's paint and this Enter. Opening the stale row here is exactly
+	// the second-seat hazard this function exists to close, so the picker
+	// names the miss instead of acting on it.
+	name := row.Name
+	if name == "" {
+		name = row.ID
+	}
+	return compose.Row{}, fmt.Errorf(
+		"%s no longer exists — it was killed or resumed elsewhere before you pressed Enter",
+		name,
+	)
 }
 
 // isResumeRowKind reports whether kind is one of the resumable-only kinds

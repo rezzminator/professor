@@ -63,3 +63,44 @@ func TestTmuxReaperRecordsEveryInvocation(t *testing.T) {
 	requireTmuxRecord(t, recorder, 1, "list-clients", "")
 	_ = context.Background
 }
+
+// TestTmuxReaperSessionsNoServerIsAbsence: tmux itself ran and answered "no
+// server on this socket" (an ordinary exit failure) — the common, expected
+// state of a bunker socket that was never opened. That reads as absence, not
+// a sweep failure.
+func TestTmuxReaperSessionsNoServerIsAbsence(t *testing.T) {
+	binary := filepath.Join(t.TempDir(), "tmux")
+	if err := os.WriteFile(
+		binary,
+		[]byte("#!/bin/sh\necho 'no server running on vsct' >&2\nexit 1\n"),
+		0o700,
+	); err != nil {
+		t.Fatal(err)
+	}
+	tmux := TmuxReaper{Binary: binary, TmuxDir: t.TempDir()}
+	sessions, err := tmux.Sessions(context.Background(), "vsct")
+	if err != nil {
+		t.Fatalf("Sessions() = %v, want nil error for an unopened bunker", err)
+	}
+	if len(sessions) != 0 {
+		t.Fatalf("sessions = %v, want none", sessions)
+	}
+}
+
+// TestTmuxReaperSessionsCouldNotRunIsAnError (L1-F7): a probe that could not
+// even run tmux — the binary itself absent — must not collapse into "no
+// bunker sessions". The runner's abort path (runner.go's "list bunker
+// sessions" wrap) depends on this error reaching it.
+func TestTmuxReaperSessionsCouldNotRunIsAnError(t *testing.T) {
+	tmux := TmuxReaper{
+		Binary:  filepath.Join(t.TempDir(), "tmux-does-not-exist"),
+		TmuxDir: t.TempDir(),
+	}
+	sessions, err := tmux.Sessions(context.Background(), "vsct")
+	if err == nil {
+		t.Fatal("Sessions() succeeded with a tmux binary that cannot run")
+	}
+	if sessions != nil {
+		t.Fatalf("sessions = %v, want nil alongside the error", sessions)
+	}
+}

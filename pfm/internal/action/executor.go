@@ -165,6 +165,15 @@ func (executor *Executor) verifiedCodexWindow(
 	}
 	panes, err := executor.tmux.ListPanes(ctx, socket)
 	if err != nil {
+		// A failed probe is not proof the cached window name is stale — it
+		// is a probe that could not run. Falling back to unverified (the
+		// caller attaches without naming a window, tmux picks its own last-
+		// active one) stays the conservative choice; only the silence was
+		// wrong.
+		obs.Logger(ctx).WarnContext(
+			ctx, "verify codex window: list panes failed",
+			"err", err, "socket", socket,
+		)
 		return ""
 	}
 	for _, pane := range panes {
@@ -250,6 +259,16 @@ func (executor *Executor) SelfSwitch(
 	}
 	panes, err := executor.tmux.ListPanes(ctx, targetSocket)
 	if err != nil || len(panes) == 0 {
+		if err != nil {
+			// A probe failure folds into the same "refuse to nest" outcome a
+			// genuinely empty pane list gets — refusing is the conservative
+			// choice either way — but the cause is never the same thing as
+			// "no panes" and must not vanish silently.
+			obs.Logger(ctx).WarnContext(
+				ctx, "self-switch: list panes failed",
+				"err", err, "socket", targetSocket,
+			)
+		}
 		fmt.Fprintln(
 			executor.stderr,
 			"pfm: already inside this chat's tmux — refusing to nest it inside itself; switch windows yourself (prefix + w)",

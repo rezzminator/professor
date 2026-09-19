@@ -146,15 +146,38 @@ func (finisher *Finisher) Run(
 		command = "/quit"
 	}
 	_ = finisher.tmux.SendLine(ctx, args.SocketPath, args.PaneID, command)
+	landed := false
+	var probeErr error
 	for attempt := 0; attempt < finisher.pollAttempts; attempt++ {
-		if !finisher.tmux.PaneExists(ctx, args.SocketPath, args.PaneID) {
+		exists, err := finisher.tmux.PaneExists(ctx, args.SocketPath, args.PaneID)
+		switch {
+		case err != nil:
+			// Could not ask, never read as gone: a transient tmux failure
+			// must not cut the grace window short and force-kill a pane
+			// that was still exiting cleanly.
+			probeErr = err
+		case !exists:
+			landed = true
+		}
+		if landed {
 			break
 		}
 		if err := waitContext(ctx, finisher.pollEvery); err != nil {
 			return err
 		}
 	}
-	_ = finisher.tmux.KillPane(ctx, args.SocketPath, args.PaneID)
+	// The fallback kill always runs, matching the graceful-close-then-
+	// fallback-kill choreography regardless of what the grace window saw —
+	// but its error only MATTERS when the loop itself never confirmed the
+	// pane gone: against an already-confirmed-gone pane a forced kill is
+	// expected to fail ("can't find pane") and that is not itself evidence
+	// of anything. A kill the finisher has not seen land either way is
+	// never the one it records.
+	if killErr := finisher.tmux.KillPane(ctx, args.SocketPath, args.PaneID); killErr == nil {
+		landed = true
+	} else if !landed {
+		probeErr = errors.Join(probeErr, killErr)
+	}
 	finisher.closeViewports(ctx, viewports)
 
 	var cleanupErrors []error
@@ -169,8 +192,15 @@ func (finisher *Finisher) Run(
 
 	if err := finisher.refresher.Refresh(ctx); err != nil {
 		cleanupErrors = append(cleanupErrors, fmt.Errorf("refresh post-exit index: %w", err))
-	} else if err := finisher.recordPostExitKill(ctx, args); err != nil {
-		cleanupErrors = append(cleanupErrors, err)
+	} else if landed {
+		if err := finisher.recordPostExitKill(ctx, args); err != nil {
+			cleanupErrors = append(cleanupErrors, err)
+		}
+	} else {
+		cleanupErrors = append(cleanupErrors, fmt.Errorf(
+			"kill-exit for %s: pane %s was never confirmed gone: %w",
+			args.ID, args.PaneID, probeErr,
+		))
 	}
 	if err := finisher.reapTeammates(ctx, args.ID); err != nil {
 		cleanupErrors = append(cleanupErrors, err)

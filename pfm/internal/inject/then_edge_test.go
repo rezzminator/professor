@@ -693,6 +693,69 @@ func TestDeliverThenReportsUndeliveredWhenTmuxUnreadable(t *testing.T) {
 	}
 }
 
+// TestDeliverThenReturnsPromptlyWhenCtxIsCancelledMidWait (L1-T3): no
+// existing test ever cancels the ctx DeliverThen is given, so a regression
+// that silently swapped it for context.Background() anywhere along the wait
+// chain (waitForSettledTurn's Sleep/Capture calls) would still pass every
+// other test in this package. Each configured wait step here is 2 seconds
+// (6 poll/min/settle steps deep); a ctx that is genuinely threaded through
+// returns almost instantly once cancelled — a wait that dropped it would
+// still be sleeping when the bounded select below times out.
+func TestDeliverThenReturnsPromptlyWhenCtxIsCancelledMidWait(t *testing.T) {
+	fake := &fakeTmux{capture: captureIdle}
+	engine := newTestEngine(t, "cc-then-cancel", fake)
+	// Every capture answers the way a real tmux exec does once its ctx is
+	// already done: a failure, not a reading — see settled_test.go's own
+	// baseline-retry fixture for the sibling shape.
+	script := &paneScript{
+		fakeTmux: fake,
+		frames:   []paneFrame{{phase: phaseCaller, err: context.Canceled}},
+	}
+	engine.tmux = script
+	engine.options.ThenMin = 2 * time.Second
+	engine.options.ThenIdlePoll = 2 * time.Second
+	engine.options.ThenSettle = 2 * time.Second
+	engine.options.ThenBusyTries = 3
+	engine.options.ThenIdleTries = 3
+	engine.options.ThenIdleStable = 1
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	type outcome struct {
+		result Result
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := engine.DeliverThen(ctx, ThenWait{
+			SocketPath: filepath.Join(string(filepath.Separator), "tmp", "tmux-jail", "cc-then-cancel"),
+			Target:     "%1",
+			Steers:     []string{"resume the wave"},
+		})
+		done <- outcome{result, err}
+	}()
+
+	select {
+	case out := <-done:
+		if out.err != nil {
+			t.Fatalf(
+				"DeliverThen() returned a Go error %v, want the cancellation named on the Result instead",
+				out.err,
+			)
+		}
+		if !strings.Contains(out.result.Message, context.Canceled.Error()) {
+			t.Fatalf("Message = %q, want it to name the cancelled context", out.result.Message)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal(
+			"DeliverThen did not return promptly after its ctx was cancelled — " +
+				"each configured wait step is 2s across a 6-step budget, so an " +
+				"honoured cancellation must land well inside this 3s bound",
+		)
+	}
+}
+
 // captureBusyReceipt is the pane a background sub-agent leaves behind: the
 // compaction receipt is on screen, the main turn is over, and the agent's
 // own footer keeps busyPattern matching for as long as it runs.

@@ -29,6 +29,20 @@ const (
 	// was working, so nothing was typed. It is internal retry telemetry; the
 	// CLI maps it to CodeUndelivered and never exposes rc 7.
 	CodeBusy = 7
+	// CodeLockLost means the delivery's own heartbeat found the lock
+	// directory now naming another owner mid-delivery — this holder cannot
+	// prove it still owns the pane, so it stopped rather than risk
+	// interleaving keystrokes with whoever stole it. The CLI has no named
+	// case for it and falls to its CodeUndelivered default.
+	CodeLockLost = 8
+	// CodeCaptureFailed means Engine.Capture's tmux call could not even run
+	// (pfmtmux.CouldNotRun) — the probe failed to look, distinct from
+	// CodeDead's "tmux ran and the pane answered gone". Every existing
+	// caller (mcpserv's chat_keys and chat_capture tools among them) already
+	// falls through an unrecognised code to its own generic failure branch,
+	// so this is additive: a caller that wants to tell the two apart can
+	// switch on it explicitly.
+	CodeCaptureFailed = 9
 	// ClaudeInlineMax and CodexInlineMax are 10% below the earliest
 	// empirically observed composer failure for each engine. Claude's smaller
 	// bracketed-paste edge is 801 characters; Codex's inline and paste edge is

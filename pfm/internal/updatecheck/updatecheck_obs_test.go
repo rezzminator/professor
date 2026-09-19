@@ -17,7 +17,7 @@ import (
 // never the query string. hookentry's own caller is proved separately by
 // TestUpdateCheckWritesAnHTTPOutRecord in internal/hookentry/update_check_test.go.
 func TestCheckForUpdateWritesAnHTTPOutRecord(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v0.61.2")
 		writer.WriteHeader(http.StatusFound)
 	}))

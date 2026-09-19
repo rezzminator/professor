@@ -261,12 +261,13 @@ func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
 	writeActionFile(t, crumb, "/tx/"+id+".jsonl", 0o600)
 
 	tmux := &fakeActionTmux{alive: map[string]bool{socket: false}}
+	var stderr bytes.Buffer
 	executor, err := New(Dependencies{
 		Tmux:      tmux,
 		Processes: &fakeProcesses{},
 		Gate:      fixedGate(false),
 		Runner:    &captureRunner{},
-		Stderr:    io.Discard,
+		Stderr:    &stderr,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -276,6 +277,11 @@ func TestSoloPreservesCrumbWhenPaneProbeFails(t *testing.T) {
 	}
 	if _, err := os.Stat(crumb); err != nil {
 		t.Fatalf("Solo() removed crumb after a failed pane probe: %v", err)
+	}
+	// L1-F14: the pane probe failure has a sibling 30 lines below (the
+	// keep-socket probe) that already logs; this one was silent.
+	if !strings.Contains(stderr.String(), socket) || !strings.Contains(stderr.String(), "dead socket") {
+		t.Fatalf("Solo() did not log the failed pane probe: stderr=%q", stderr.String())
 	}
 }
 
@@ -631,6 +637,74 @@ func TestExecutorCodexWindowVerificationAndDeadFallback(t *testing.T) {
 	}
 	if born := tmux.created[len(tmux.created)-1]; born.Socket != "cx-fresh" || born.Window != "Codex" {
 		t.Fatalf("dead fallback server = %#v", born)
+	}
+}
+
+// TestVerifiedCodexWindowLogsAListPanesFailure (L1-F19): a tmux failure here
+// folds into the same "" a genuinely absent window gets — falling back to an
+// unverified attach stays the conservative choice either way — but the
+// probe failure itself must not vanish silently.
+func TestVerifiedCodexWindowLogsAListPanesFailure(t *testing.T) {
+	jailAction(t)
+	ctx, recorder := obs.Test(t)
+	tmux := &fakeActionTmux{alive: map[string]bool{"cx-unreadable": false}}
+	executor, err := New(Dependencies{
+		Tmux:      tmux,
+		Processes: &fakeProcesses{},
+		Gate:      fixedGate(false),
+		Runner:    &captureRunner{},
+		Stderr:    io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := executor.verifiedCodexWindow(ctx, "cx-unreadable", "Expected")
+	if got != "" {
+		t.Fatalf("verifiedCodexWindow() = %q, want \"\" on a probe failure", got)
+	}
+	found := false
+	for _, record := range recorder.Records() {
+		if record.Message == "verify codex window: list panes failed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no log record for the list-panes failure: %s", recorder.Raw())
+	}
+}
+
+// TestSelfSwitchLogsAListPanesFailure (L1-F19): SelfSwitch already refuses to
+// nest — the conservative outcome — on either a genuinely empty pane list or
+// a probe failure; only the failure's own cause was silently dropped before.
+func TestSelfSwitchLogsAListPanesFailure(t *testing.T) {
+	jailAction(t)
+	ctx, recorder := obs.Test(t)
+	tmux := &fakeActionTmux{alive: map[string]bool{"cc-unreadable": false}}
+	var stderr bytes.Buffer
+	executor, err := New(Dependencies{
+		Tmux:      tmux,
+		Processes: &fakeProcesses{},
+		Gate:      fixedGate(false),
+		Runner:    &captureRunner{},
+		Stderr:    &stderr,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !executor.SelfSwitch(ctx, "/tmp/jail/cc-unreadable,1,0", "cc-unreadable") {
+		t.Fatal("SelfSwitch() did not recognize its own socket")
+	}
+	if !strings.Contains(stderr.String(), "refusing to nest") {
+		t.Fatalf("stderr = %q, want the refuse-to-nest message", stderr.String())
+	}
+	found := false
+	for _, record := range recorder.Records() {
+		if record.Message == "self-switch: list panes failed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("no log record for the list-panes failure: %s", recorder.Raw())
 	}
 }
 

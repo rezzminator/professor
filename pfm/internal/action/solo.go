@@ -94,6 +94,12 @@ func (executor *Executor) Solo(
 			// A failed probe is not an empty server. The socket may still be
 			// live but temporarily unreadable; leave its crumb so a later
 			// pass does not mistake a working chat for an unowned one.
+			fmt.Fprintf(
+				executor.stderr,
+				"cc: solo — pane probe on %s failed; leaving its crumb: %v\n",
+				socket,
+				err,
+			)
 			continue
 		}
 		if len(panes) == 0 {

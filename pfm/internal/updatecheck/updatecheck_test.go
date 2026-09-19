@@ -242,6 +242,69 @@ func TestFailedRefreshPreservesLastSuccessfulNotice(t *testing.T) {
 	}
 }
 
+// TestFailedCheckWritesADurableFailureMarker (Lane-2 §5): a check that
+// cannot reach the network must leave a durable trace beside the cache — Read
+// alone answers found=false identically for "no update" and "the checker has
+// been failing for a week", and a picker that trusts Read alone reads a
+// permanently broken checker as "up to date" forever.
+func TestFailedCheckWritesADurableFailureMarker(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer failing.Close()
+
+	cache := filepath.Join(t.TempDir(), "update.json")
+	before := time.Now()
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", failing.URL, failing.Client()); err == nil {
+		t.Fatal("CheckForUpdate() against a failing server returned nil error")
+	}
+	marker, found, err := ReadFailure(cache)
+	if err != nil {
+		t.Fatalf("ReadFailure() error = %v", err)
+	}
+	if !found {
+		t.Fatal("ReadFailure() found nothing after a failed check")
+	}
+	if marker.Class != failureNetwork {
+		t.Fatalf("marker.Class = %q, want %q", marker.Class, failureNetwork)
+	}
+	if marker.Reason == "" {
+		t.Fatal("marker.Reason is empty, want the cause named")
+	}
+	if marker.At.Before(before.Add(-time.Second)) {
+		t.Fatalf("marker.At = %s, want it stamped around %s", marker.At, before)
+	}
+}
+
+// TestSuccessfulCheckClearsAPriorFailureMarker: the marker exists only to
+// name an ONGOING failure, so a check that recovers must remove it — a
+// picker warning that never clears is as dishonest as one that never fires.
+func TestSuccessfulCheckClearsAPriorFailureMarker(t *testing.T) {
+	failing := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	cache := filepath.Join(t.TempDir(), "update.json")
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", failing.URL, failing.Client()); err == nil {
+		t.Fatal("CheckForUpdate() against a failing server returned nil error")
+	}
+	failing.Close()
+	if _, found, err := ReadFailure(cache); err != nil || !found {
+		t.Fatalf("ReadFailure() before recovery: found=%t err=%v, want a marker", found, err)
+	}
+
+	good := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Location", "/mreza0100/professor/releases/tag/v0.61.2")
+		writer.WriteHeader(http.StatusFound)
+	}))
+	defer good.Close()
+	if err := CheckForUpdate(context.Background(), cache, "v0.61.1", good.URL, good.Client()); err != nil {
+		t.Fatalf("CheckForUpdate() after recovery: %v", err)
+	}
+	if _, found, err := ReadFailure(cache); err != nil || found {
+		t.Fatalf("ReadFailure() after recovery: found=%t err=%v, want the marker cleared", found, err)
+	}
+}
+
 func TestRecentSuccessfulCheckSuppressesRedundantNetworkLookup(t *testing.T) {
 	hits := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

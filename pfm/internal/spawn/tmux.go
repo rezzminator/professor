@@ -111,17 +111,39 @@ func (tmux TmuxSpawner) NewSession(
 			options...,
 		).CombinedOutput(); err != nil {
 			// A server that vanished between creation and configuration died
-			// with its only pane — name the pane's command, because that is
-			// where the death almost always started.
+			// with its only pane — name the pane command's SHAPE, because
+			// that is where the death almost always started. spec.Run can
+			// carry a prompt body (action.HeadlessRun appends it to the
+			// launch line), so the error names the binary and word count,
+			// never the command line itself.
 			return fmt.Errorf(
 				"configure chat server: %w: %s — the server died before it could be configured; its pane command likely exited at launch (%s)",
 				err,
 				output,
-				spec.Run,
+				runShape(spec),
 			)
 		}
 	}
 	return nil
+}
+
+// runShape is the pane command's SHAPE for an error message: the binary's
+// base name and how many whitespace-separated words the launch line carries
+// — the same "argv, never argv content" law obs/runner.go's argvShape
+// applies to every logged process door. spec.Run itself never reaches an
+// error string, because it can carry a prompt body.
+func runShape(spec SessionSpec) string {
+	binary := spec.Binary
+	if binary == "" {
+		if fields := strings.Fields(spec.Run); len(fields) > 0 {
+			binary = fields[0]
+		}
+	}
+	name := "?"
+	if binary != "" {
+		name = filepath.Base(binary)
+	}
+	return fmt.Sprintf("%s argc=%d", name, len(strings.Fields(spec.Run)))
 }
 
 func (tmux TmuxSpawner) newSessionCommand(
@@ -174,10 +196,15 @@ func (tmux TmuxSpawner) SendKey(
 	return tmux.command(ctx, socket, "send-keys", "-t", target, key).Run()
 }
 
+// socket is the one tmux-addressing wrapper (internal/tmux.Socket).
+func (tmux TmuxSpawner) socket() pfmtmux.Socket {
+	return pfmtmux.Socket{Binary: tmux.Binary, Dir: tmux.TmuxDir}
+}
+
 func (tmux TmuxSpawner) command(
 	ctx context.Context,
 	socket string,
 	arguments ...string,
 ) *pfmtmux.Cmd {
-	return pfmtmux.Exec(ctx, tmux.Binary, filepath.Join(tmux.TmuxDir, socket), arguments...)
+	return tmux.socket().Command(ctx, socket, arguments...)
 }

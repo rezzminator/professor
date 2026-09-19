@@ -40,6 +40,29 @@ type Notice struct {
 	CheckedAt  time.Time `json:"checked_at"`
 }
 
+// failureClass is a short, stable, machine-readable reason a check failed —
+// never prose, so a marker's class can be switched on without parsing an
+// error string whose wording is free to change between versions.
+type failureClass string
+
+const (
+	failureLock    failureClass = "lock"
+	failureCache   failureClass = "cache"
+	failureNetwork failureClass = "network"
+)
+
+// FailureMarker is the durable "last check failed" record written beside the
+// cache whenever a check does not end in a fresh success. Read alone cannot
+// tell a permanently failing checker from a machine that genuinely has no
+// update — both answer found=false — so a caller that wants to warn about a
+// checker that has been failing needs this file too. Cleared the next time a
+// check actually succeeds (including a "still fresh" short-circuit).
+type FailureMarker struct {
+	At     time.Time    `json:"at"`
+	Class  failureClass `json:"class"`
+	Reason string       `json:"reason"`
+}
+
 type semanticVersion struct {
 	major      int
 	minor      int
@@ -82,6 +105,11 @@ func CheckForUpdate(ctx context.Context, path, current, latestURL string, client
 
 // CheckForUpdateWithClock is CheckForUpdate with the repository clock injected
 // for callers that must make lock expiry and cache freshness deterministic.
+//
+// Every path that does not end in a confirmed-fresh cache writes a durable
+// FailureMarker beside path first; every path that does clears it. A checker
+// that has been failing for days must never look identical, through Read
+// alone, to a machine that genuinely has no update — see ReadFailure.
 func CheckForUpdateWithClock(
 	ctx context.Context,
 	path, current, latestURL string,
@@ -96,27 +124,50 @@ func CheckForUpdateWithClock(
 	}
 	release, err := acquire(path+".lock", clk.Now())
 	if err != nil {
-		return err
+		return recordFailure(path, clk.Now().UTC(), failureLock, err)
 	}
 	if release == nil {
+		// Another invocation already holds the lock: THIS call performed no
+		// check of its own, so the durable marker is left exactly as it was
+		// — neither written nor cleared on its behalf.
 		return nil
 	}
 	defer release()
 
 	now := clk.Now().UTC()
-	recent, err := checkedRecently(path, current, now)
-	if err != nil {
+	class, checkErr := performCheck(ctx, path, current, latestURL, client, now)
+	if checkErr != nil {
+		return recordFailure(path, now, class, checkErr)
+	}
+	if err := clearFailure(path); err != nil {
 		return err
 	}
+	return nil
+}
+
+// performCheck is CheckForUpdateWithClock's body once the lock is held: the
+// freshness short-circuit, the network lookup, and the cache write. Its
+// failureClass return is "" on success — recordFailure is never called with
+// a nil error, so the class is never read in that case.
+func performCheck(
+	ctx context.Context,
+	path, current, latestURL string,
+	client *http.Client,
+	now time.Time,
+) (failureClass, error) {
+	recent, err := checkedRecently(path, current, now)
+	if err != nil {
+		return failureCache, err
+	}
 	if recent {
-		return nil
+		return "", nil
 	}
 	if client == nil {
 		client = obs.WrapClient(&http.Client{Timeout: 12 * time.Second})
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodHead, latestURL, http.NoBody)
 	if err != nil {
-		return fmt.Errorf("build latest-release request: %w", err)
+		return failureNetwork, fmt.Errorf("build latest-release request: %w", err)
 	}
 	request.Header.Set("User-Agent", "pfm-update-check/"+normalizeVersion(current))
 	noFollow := *obs.WrapClient(client)
@@ -125,25 +176,28 @@ func CheckForUpdateWithClock(
 	}
 	resolved, location, err := follow(&noFollow, request)
 	if err != nil {
-		return err
+		return failureNetwork, err
 	}
 	if hop := renameHopURL(request.URL, resolved); hop != "" {
 		hopRequest, err := http.NewRequestWithContext(ctx, http.MethodHead, hop, http.NoBody)
 		if err != nil {
-			return fmt.Errorf("build renamed Professor release request: %w", err)
+			return failureNetwork, fmt.Errorf("build renamed Professor release request: %w", err)
 		}
 		hopRequest.Header.Set("User-Agent", request.Header.Get("User-Agent"))
 		resolved, location, err = follow(&noFollow, hopRequest)
 		if err != nil {
-			return err
+			return failureNetwork, err
 		}
 		if second := renameHopURL(hopRequest.URL, resolved); second != "" {
-			return fmt.Errorf("renamed Professor release redirect %q renamed again to %q", hop, second)
+			return failureNetwork, fmt.Errorf("renamed Professor release redirect %q renamed again to %q", hop, second)
 		}
 	}
 	latest := pathVersion(resolved)
 	if _, ok := parseReleaseVersion(latest); !ok {
-		return fmt.Errorf("latest Professor release redirect %q has no vMAJOR.MINOR.PATCH tag", location)
+		return failureNetwork, fmt.Errorf(
+			"latest Professor release redirect %q has no vMAJOR.MINOR.PATCH tag",
+			location,
+		)
 	}
 	notice := Notice{
 		Current:    normalizeVersion(current),
@@ -152,9 +206,61 @@ func CheckForUpdateWithClock(
 		CheckedAt:  now,
 	}
 	if err := writeNotice(path, notice); err != nil {
-		return fmt.Errorf("write update cache: %w", err)
+		return failureCache, fmt.Errorf("write update cache: %w", err)
+	}
+	return "", nil
+}
+
+// recordFailure writes the durable failure marker beside path and returns
+// the ORIGINAL cause — a marker write that itself fails is joined in, never
+// allowed to swallow the check failure it exists to report.
+func recordFailure(path string, at time.Time, class failureClass, cause error) error {
+	if markErr := writeFailure(path, FailureMarker{At: at, Class: class, Reason: cause.Error()}); markErr != nil {
+		return errors.Join(cause, fmt.Errorf("record update check failure: %w", markErr))
+	}
+	return cause
+}
+
+// failurePath is where the durable failure marker lives, beside the cache
+// itself and its own ".lock" file.
+func failurePath(path string) string { return path + ".failure" }
+
+func writeFailure(path string, marker FailureMarker) error {
+	encoded, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode update check failure marker: %w", err)
+	}
+	return atomicfile.Write(failurePath(path), append(encoded, '\n'), 0o600)
+}
+
+// clearFailure removes the failure marker on a confirmed success. A marker
+// that was never there is not an error — the ordinary state after the very
+// first successful check.
+func clearFailure(path string) error {
+	if err := os.Remove(failurePath(path)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("clear update check failure marker: %w", err)
 	}
 	return nil
+}
+
+// ReadFailure reports the durable "last check failed" marker beside path, if
+// one exists. Absent is an ordinary state (no failure since the last
+// success, or the checker has never run) — but a marker that exists and
+// cannot be read or decoded is reported as an error, never folded into
+// absence, the same rule Read applies to the cache itself.
+func ReadFailure(path string) (FailureMarker, bool, error) {
+	raw, err := os.ReadFile(failurePath(path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return FailureMarker{}, false, nil
+	}
+	if err != nil {
+		return FailureMarker{}, false, fmt.Errorf("read update check failure marker: %w", err)
+	}
+	var marker FailureMarker
+	if err := json.Unmarshal(raw, &marker); err != nil {
+		return FailureMarker{}, false, fmt.Errorf("decode update check failure marker: %w", err)
+	}
+	return marker, true, nil
 }
 
 // checkedRecently recognizes only a complete, successful notice. Malformed

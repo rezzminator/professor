@@ -232,7 +232,9 @@ func TestJailedKillExitFlushesAndSweeps(t *testing.T) {
 	if err := finisher.Run(ctx, spawner.args[0]); err != nil {
 		t.Fatal(err)
 	}
-	if (TmuxKiller{}).PaneExists(ctx, socketPath, paneID) {
+	if exists, err := (TmuxKiller{}).PaneExists(ctx, socketPath, paneID); err != nil {
+		t.Fatalf("probe pane after kill-exit: %v", err)
+	} else if exists {
 		t.Fatal("target pane survived kill-exit")
 	}
 	for _, path := range []string{
@@ -331,11 +333,13 @@ func TestStressTenSimultaneousKillExits(t *testing.T) {
 		if runErr != nil {
 			t.Fatalf("finisher %d: %v", position, runErr)
 		}
-		if (TmuxKiller{}).PaneExists(
+		if exists, err := (TmuxKiller{}).PaneExists(
 			context.Background(),
 			args[position].SocketPath,
 			args[position].PaneID,
-		) {
+		); err != nil {
+			t.Fatalf("probe pane %d after kill-exit: %v", position, err)
+		} else if exists {
 			t.Fatalf("pane %d survived", position)
 		}
 		for _, crumb := range []string{

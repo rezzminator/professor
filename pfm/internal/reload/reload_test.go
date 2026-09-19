@@ -615,13 +615,6 @@ func TestDeliverThenRecognizesTheCodexComposerMarker(t *testing.T) {
 	}
 }
 
-func TestLastComposerLineFindsCodexCommandAbovePopupWhitespace(t *testing.T) {
-	capture := "Codex\n› /exit\n" + strings.Repeat("\n", 30)
-	if got := lastReloadComposerLine(capture); !strings.Contains(got, "/exit") {
-		t.Fatalf("lastComposerLine()=%q, want the visible Codex command", got)
-	}
-}
-
 func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
 	tmux := &respawnPIDTmux{oldPID: 700, newPID: 900}
 	_, err := Run(
@@ -650,28 +643,28 @@ func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
 	}
 }
 
-func TestClaudeLiveUsesThePaneProcessPIDNotTheTmuxPaneID(t *testing.T) {
+func TestEngineLiveUsesThePaneProcessPIDNotTheTmuxPaneID(t *testing.T) {
 	proc := fakeReloadProc{
 		pids: []int{801},
 		argv: map[int][]string{801: {"claude"}},
 		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
 	}
-	live, err := claudeLive(proc, 700)
+	live, err := engineLive(proc, 700, pfmengine.Claude, "", "")
 	if err != nil || !live {
-		t.Fatalf("claudeLive() = %v, %v", live, err)
+		t.Fatalf("engineLive() = %v, %v", live, err)
 	}
 }
 
-func TestClaudeLiveIgnoresAProcessThatExitsDuringTheProcScan(t *testing.T) {
+func TestEngineLiveIgnoresAProcessThatExitsDuringTheProcScan(t *testing.T) {
 	proc := fakeReloadProc{
 		pids:   []int{800, 801},
 		argv:   map[int][]string{801: {"claude"}},
 		cmdErr: map[int]error{800: os.ErrNotExist},
 		stat:   map[int]gather.ProcStat{801: {ParentPID: 700}},
 	}
-	live, err := claudeLive(proc, 700)
+	live, err := engineLive(proc, 700, pfmengine.Claude, "", "")
 	if err != nil || !live {
-		t.Fatalf("claudeLive() = %v, %v", live, err)
+		t.Fatalf("engineLive() = %v, %v", live, err)
 	}
 }
 
@@ -731,30 +724,6 @@ func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
 	}
 	if !tmux.submitted {
 		t.Fatal("a wrapped --then prompt was never submitted — Enter was withheld from a prompt that had fully landed")
-	}
-}
-
-// TestComposerTextReadsAWrappedDraftAndStopsAtTheBoxRule pins the render taken
-// from a live pane at the moment of a refusal: marker plus non-breaking space
-// on line one, continuations indented beneath, the box rule closing the block,
-// status rows below it that must stay OUT of the read.
-func TestComposerTextReadsAWrappedDraftAndStopsAtTheBoxRule(t *testing.T) {
-	rule := strings.Repeat("─", 40)
-	capture := strings.Join([]string{
-		"Chat",
-		rule,
-		"❯ \u00a0Continue the reload-then reproduction. This prompt is",
-		"  deliberately long enough to wrap across several rendered",
-		"  composer lines. END OF REPRO PROMPT MARKER.",
-		rule,
-		"  bypass permissions on (shift+tab to cycle)",
-	}, "\n")
-	got := composerText(capture)
-	if !strings.Contains(got, "END OF REPRO PROMPT MARKER.") {
-		t.Fatalf("composerText lost the wrapped tail: %q", got)
-	}
-	if strings.Contains(got, "bypass permissions") {
-		t.Fatalf("composerText read past the box rule into the status rows: %q", got)
 	}
 }
 

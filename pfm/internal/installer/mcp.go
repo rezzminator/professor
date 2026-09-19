@@ -413,16 +413,24 @@ func (installer *engine) removeMCPOpenCodeJSON() error {
 }
 
 func (installer *engine) loadMCPOwnership() (mcpOwnership, error) {
+	return readMCPOwnership(installer.mcpOwnershipPath())
+}
+
+// readMCPOwnership reads the install's record of every MCP registration it
+// wrote. A ledger that is not there records nothing yet and is no error; one
+// that cannot be read or decoded names the failure, so no caller reads "could
+// not look" as "pfm owns nothing here".
+func readMCPOwnership(path string) (mcpOwnership, error) {
 	ownership := mcpOwnership{}
-	raw, err := os.ReadFile(installer.mcpOwnershipPath())
+	raw, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return ownership, nil
 	}
 	if err != nil {
-		return ownership, fmt.Errorf("read MCP ownership: %w", err)
+		return ownership, fmt.Errorf("read MCP ownership %s: %w", path, err)
 	}
 	if err := json.Unmarshal(raw, &ownership); err != nil {
-		return ownership, fmt.Errorf("decode MCP ownership: %w", err)
+		return ownership, fmt.Errorf("decode MCP ownership %s: %w", path, err)
 	}
 	return ownership, nil
 }

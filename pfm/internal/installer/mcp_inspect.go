@@ -102,24 +102,9 @@ func InspectOpenCodeServers(path, home string, port int, names ...string) []MCPC
 		}
 		return reports
 	}
-	raw, err := os.ReadFile(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return uniform(MCPClientAbsent, nil)
-	}
+	servers, err := openCodeServers(path)
 	if err != nil {
-		return uniform(MCPClientUnreadable, fmt.Errorf("read %s: %w", path, err))
-	}
-	document, err := decodeJSONCObject(raw)
-	if err != nil {
-		return uniform(MCPClientUnreadable, fmt.Errorf("parse %s: %w", path, err))
-	}
-	servers := map[string]any{}
-	if value, present := document["mcp"]; present {
-		var ok bool
-		servers, ok = value.(map[string]any)
-		if !ok || servers == nil {
-			return uniform(MCPClientUnreadable, fmt.Errorf("parse %s: mcp must be an object", path))
-		}
+		return uniform(MCPClientUnreadable, err)
 	}
 	reports := make([]MCPClientCutover, 0, len(names))
 	for _, name := range names {
@@ -137,6 +122,65 @@ func InspectOpenCodeServers(path, home string, port int, names ...string) []MCPC
 		reports = append(reports, report)
 	}
 	return reports
+}
+
+// openCodeServers reads path's top-level `mcp` object. A file that is not
+// there holds no registration, which is an empty roster and no error; a file
+// that cannot be read or parsed — or whose `mcp` is not an object — is an
+// error naming the file, never an empty roster.
+func openCodeServers(path string) (map[string]any, error) {
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return map[string]any{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	document, err := decodeJSONCObject(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	value, present := document["mcp"]
+	if !present {
+		return map[string]any{}, nil
+	}
+	servers, ok := value.(map[string]any)
+	if !ok || servers == nil {
+		return nil, fmt.Errorf("parse %s: mcp must be an object", path)
+	}
+	return servers, nil
+}
+
+// OpenCodeUnownedEntries names, of the servers given, every one registered in
+// path that pfm install did NOT write: install records each registration it
+// owns in its ownership ledger and preserves any entry that ledger does not
+// match (writeMCPOpenCodeJSON's "preserve conflicting manual OpenCode MCP
+// client"), so a rerun of `pfm install --yes` can never fix one of these.
+// It is doctor's ground for naming a user-owned entry instead of prescribing
+// a reinstall that would silently leave it in place. An unreadable config or
+// ledger is an error — never an empty answer that reads as "all pfm's".
+func OpenCodeUnownedEntries(home, path string, names ...string) ([]string, error) {
+	servers, err := openCodeServers(path)
+	if err != nil {
+		return nil, err
+	}
+	ownership, err := readMCPOwnership(filepath.Join(managedRootForHome(home), mcpOwnershipName))
+	if err != nil {
+		return nil, err
+	}
+	owned := ownership.OpenCodeRegistrations[physicalSettingsPath(path)]
+	unowned := []string{}
+	for _, name := range names {
+		current, present := servers[name]
+		if !present {
+			continue
+		}
+		if recorded, claimed := owned[name]; claimed && sameJSONValue(current, recorded) {
+			continue
+		}
+		unowned = append(unowned, name)
+	}
+	return unowned, nil
 }
 
 func classifyOpenCodeRegistration(name string, registration map[string]any, home string, port int) string {

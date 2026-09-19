@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"io"
+	"strings"
 
 	"hostops/pfm/internal/config"
 	"hostops/pfm/internal/installer"
@@ -106,8 +107,33 @@ func printOpenCodeRows(stdout io.Writer, home string, port int) int {
 		fmt.Fprintln(stdout, base)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "%s remediation=run pfm install --yes\n", base)
+		fmt.Fprintf(stdout, "%s %s\n", base, openCodeRemediation(home, path))
 		return 1
+	}
+}
+
+// openCodeRemediation names what the operator can actually do about an
+// unhealthy OpenCode registration. `pfm install --yes` rewrites an entry
+// install itself wrote, and PRESERVES one it did not — so an entry the
+// ownership ledger does not claim is named as user-owned with its file and
+// key; prescribing the reinstall there would be advice that can never fix
+// what it named. A ledger that could not be read says so rather than passing
+// for "no user-owned entry here".
+func openCodeRemediation(home, path string) string {
+	const reinstall = "remediation=run pfm install --yes"
+	unowned, err := installer.OpenCodeUnownedEntries(home, path, config.MCPServerHarvester, config.MCPServerChat)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("ownership=unreadable error=%v %s", err, reinstall)
+	case len(unowned) > 0:
+		return fmt.Sprintf(
+			"remediation=%s in %s is a user-owned entry pfm install will not replace — remove or rename it, "+
+				"then run pfm install --yes",
+			strings.Join(unowned, " and "),
+			path,
+		)
+	default:
+		return reinstall
 	}
 }
 

@@ -45,6 +45,57 @@ func TestInspectHarvesterClientCutoverRefusesANilRegistryList(t *testing.T) {
 	}
 }
 
+// TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace pins the
+// distinction doctor's remediation rests on: install records every OpenCode
+// registration it writes in its ownership ledger and preserves any entry that
+// ledger does not match (writeMCPOpenCodeJSON's "preserve conflicting manual
+// OpenCode MCP client"), so a user-written `harvester` entry is named while a
+// pfm-written one with a stale port is not — it is the one `pfm install --yes`
+// still rewrites.
+func TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace(t *testing.T) {
+	home := t.TempDir()
+	path := OpenCodeConfigPath(home)
+	writeFixture(
+		t,
+		path,
+		`{"mcp":{"chat":{"type":"local","command":["`+filepath.Join(home, ".local", "bin", "pfm")+
+			`","mcp","chat","serve"],"enabled":true},`+
+			`"harvester":{"type":"local","command":["uv","--directory","/srv/harvester","run","harvester"]}}}`,
+	)
+	writeFixture(t, filepath.Join(managedRootForHome(home), mcpOwnershipName),
+		`{"opencodeRegistrations":{"`+path+`":{"chat":{"type":"local","command":["`+
+			filepath.Join(home, ".local", "bin", "pfm")+`","mcp","chat","serve"],"enabled":true}}}}`)
+
+	unowned, err := OpenCodeUnownedEntries(home, path, chatName, mcpServerHarvester)
+	if err != nil {
+		t.Fatalf("OpenCodeUnownedEntries() error = %v", err)
+	}
+	if len(unowned) != 1 || unowned[0] != mcpServerHarvester {
+		t.Fatalf("unowned=%q, want only the user-written harvester entry", unowned)
+	}
+
+	// No ledger at all: every present entry is one install did not write.
+	bare := t.TempDir()
+	barePath := OpenCodeConfigPath(bare)
+	writeFixture(t, barePath, `{"mcp":{"harvester":{"type":"remote","url":"https://operator.invalid"}}}`)
+	unowned, err = OpenCodeUnownedEntries(bare, barePath, chatName, mcpServerHarvester)
+	if err != nil || len(unowned) != 1 || unowned[0] != mcpServerHarvester {
+		t.Fatalf("unowned=%q, err=%v; want the harvester entry named with no ledger present", unowned, err)
+	}
+
+	// An absent config names nothing and is not an error.
+	if unowned, err := OpenCodeUnownedEntries(bare, filepath.Join(bare, "gone.jsonc"), chatName); err != nil ||
+		len(unowned) != 0 {
+		t.Fatalf("absent config = %q, %v; want no entries and no error", unowned, err)
+	}
+
+	// A malformed ledger is an error, never a silent "everything is pfm's".
+	writeFixture(t, filepath.Join(managedRootForHome(bare), mcpOwnershipName), `{`)
+	if _, err := OpenCodeUnownedEntries(bare, barePath, chatName); err == nil {
+		t.Fatal("OpenCodeUnownedEntries() over a malformed ownership ledger = nil error, want the decode failure")
+	}
+}
+
 func TestInspectOpenCodeServersReportsHealthyPartialForeignAndUnreadable(t *testing.T) {
 	home := t.TempDir()
 	path := OpenCodeConfigPath(home)

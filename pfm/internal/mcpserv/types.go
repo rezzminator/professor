@@ -207,10 +207,14 @@ type ReadInput struct {
 	MaxBytes int    `json:"max_bytes,omitempty" jsonschema:"maximum returned text bytes, default 65536 and maximum 1048576"`
 }
 
-// Turn is one visible user, assistant, or summary transcript record.
+// Turn is one visible user, assistant, tool, or summary transcript record.
+// A tool call carries the tool's name in Tool and its condensed input as Text
+// — the transcript records no prose for it, and a turn with an empty Text
+// reads as a chat that said nothing rather than one that called a tool.
 type Turn struct {
 	Role      string `json:"role"`
 	Text      string `json:"text"`
+	Tool      string `json:"tool,omitempty"`
 	Timestamp string `json:"timestamp,omitempty"`
 }
 

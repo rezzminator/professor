@@ -20,6 +20,39 @@ type fakeProcTree struct {
 	environments map[int]map[string]string
 }
 
+// erroringNamer always fails the tmux exec — a socket that answered wrong,
+// not one that never existed.
+type erroringNamer struct{ err error }
+
+func (namer erroringNamer) SessionName(context.Context, string, string) (string, error) {
+	return "", namer.err
+}
+
+// L1-F5: a tmux exec failure on an already-resolved socket must surface as
+// its own error, never as ErrNoTmux — the caller IS inside tmux, the exec
+// just could not run.
+func TestIdentifySurfacesATmuxExecFailureOnAResolvedSocket(t *testing.T) {
+	sentinel := errors.New("tmux exec boom")
+	identifier, err := NewWhoami(WhoamiDependencies{
+		Environment: &WhoamiEnvironment{TMUX: "/tmp/tmux-1000/cc-1-2-3,42,0"},
+		Namer:       erroringNamer{err: sentinel},
+		TmuxDir:     t.TempDir(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = identifier.Identify(context.Background())
+	if err == nil {
+		t.Fatal("Identify() with a failing tmux exec returned no error")
+	}
+	if errors.Is(err, ErrNoTmux) {
+		t.Fatalf("Identify() error = %v, want the exec failure, not ErrNoTmux", err)
+	}
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("Identify() error = %v, want it to wrap %v", err, sentinel)
+	}
+}
+
 func TestEngineForUnknownSocketIsExplicit(t *testing.T) {
 	if got := engineForSocket("unmanaged"); got != "unknown" {
 		t.Fatalf("engineForSocket(unmanaged)=%q, want explicit unknown", got)

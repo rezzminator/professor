@@ -33,3 +33,34 @@ func TestExploreDenyFailsOpenAndSteersExploreToTracer(t *testing.T) {
 		})
 	}
 }
+
+// TestExploreDenyLogsAMalformedPayloadInsteadOfSwallowingIt pins L3-F18:
+// fail-open is right for a PreToolUse hook, but the missing stderr line
+// left a malformed payload indistinguishable from "nothing to deny" — every
+// sibling (ExitClose, CompactNudge, EpicInject, ReloadIntercept,
+// ExitIntercept) logs its decode error in the same
+// "pfm internal <hook>: decode hook payload (fail-open): %v" voice;
+// ExploreDeny now does too.
+func TestExploreDenyLogsAMalformedPayloadInsteadOfSwallowingIt(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := ExploreDeny(strings.NewReader("not-json"), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("ExploreDeny() = %d, want 0 (fail-open)", code)
+	}
+	if !strings.Contains(stderr.String(), "decode hook payload") {
+		t.Fatalf("stderr = %q, want it to name the decode failure instead of swallowing it", stderr.String())
+	}
+}
+
+// TestExploreDenyReadFailureIsLoggedToo pins the same fail-open-but-loud
+// contract for a stdin read error, not just a decode error.
+func TestExploreDenyReadFailureIsLoggedToo(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := ExploreDeny(failingReader{}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("ExploreDeny() = %d, want 0 (fail-open)", code)
+	}
+	if !strings.Contains(stderr.String(), "read hook payload") {
+		t.Fatalf("stderr = %q, want it to name the read failure instead of swallowing it", stderr.String())
+	}
+}

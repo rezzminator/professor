@@ -26,8 +26,8 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	if err := SetPrimaryAccount(values, machine, 3); err != nil {
 		t.Fatalf("SetPrimaryAccount() = %v", err)
 	}
-	if got := PrimaryAccount(values, machine); got != 3 {
-		t.Fatalf("PrimaryAccount() = %d", got)
+	if got, err := PrimaryAccount(values, machine); got != 3 || err != nil {
+		t.Fatalf("PrimaryAccount() = %d, %v", got, err)
 	}
 	content, err := os.ReadFile(filepath.Join(home, ".claude-primary"))
 	if err != nil {
@@ -55,8 +55,8 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	if err := SetPrimaryAccount(bareValues, machine, 2); err != nil {
 		t.Fatalf("fallback SetPrimaryAccount() = %v", err)
 	}
-	if got := PrimaryAccount(bareValues, machine); got != 2 {
-		t.Fatalf("fallback PrimaryAccount() = %d", got)
+	if got, err := PrimaryAccount(bareValues, machine); got != 2 || err != nil {
+		t.Fatalf("fallback PrimaryAccount() = %d, %v", got, err)
 	}
 	// A stale file naming a retired account reads back as the first account.
 	if err := os.WriteFile(
@@ -66,8 +66,8 @@ func TestPrimaryAccountGoesThroughTheStateStore(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	if got := PrimaryAccount(bareValues, machine); got != 1 {
-		t.Fatalf("off-roster file PrimaryAccount() = %d", got)
+	if got, err := PrimaryAccount(bareValues, machine); got != 1 || err != nil {
+		t.Fatalf("off-roster file PrimaryAccount() = %d, %v", got, err)
 	}
 }
 

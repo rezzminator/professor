@@ -22,21 +22,29 @@ import (
 // account from the one the launchers used: primary-set writes both, but a
 // database restored without the file, or a file left behind by a rollback,
 // makes them disagree, and only one of the two is authoritative.
-func PrimaryAccount(values paths.Values, configs ...pfmconfig.Config) int {
+//
+// A lookup failure (the database exists but cannot be read) is returned, not
+// folded into "no primary set": that fallback silently answered a shared-db
+// outage with the roster's first configured account, which reads identically
+// to an operator who never set one.
+func PrimaryAccount(values paths.Values, configs ...pfmconfig.Config) (int, error) {
 	machine := pfmconfig.Defaults(values.Home, values.Roots[pfmengine.Claude])
 	if len(configs) != 0 {
 		machine = configs[0]
 	}
-	account, found := fleetdb.ClaudePrimaryAccount(context.Background(), values)
+	account, found, err := fleetdb.ClaudePrimaryAccount(context.Background(), values)
+	if err != nil {
+		return 0, fmt.Errorf("read primary account: %w", err)
+	}
 	if found {
 		if _, exists := machine.Account(account); exists {
-			return account
+			return account, nil
 		}
 	}
 	if len(machine.Accounts) != 0 {
-		return machine.Accounts[0].ID
+		return machine.Accounts[0].ID, nil
 	}
-	return 1
+	return 1, nil
 }
 
 // SetPrimaryAccount validates the operator-facing roster before committing

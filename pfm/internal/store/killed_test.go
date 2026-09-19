@@ -195,6 +195,43 @@ func TestKilledBusyPolicyWarnsAndRejectsTheChange(t *testing.T) {
 	release()
 }
 
+// L1-F18: the busy-warning counter write is fire-and-forget by design (it
+// must never mask the real busy error), but its own failure must not be
+// silent — it is logged with context, the same way the busy rejection itself
+// is.
+func TestKilledWriteLogsWhenTheBusyWarningCounterCannotBeWritten(t *testing.T) {
+	setStoreTestJail(t)
+
+	var warnings bytes.Buffer
+	writer := openTestStore(t, WithWarningWriter(&warnings))
+	t.Cleanup(func() { _ = writer.Close() })
+	ctx := context.Background()
+
+	if err := writer.Kill(ctx, Killed{ID: "seed", KilledAt: 1}); err != nil {
+		t.Fatalf("seed Kill() error = %v", err)
+	}
+	if err := writer.state.SetBusyTimeout(ctx, 1); err != nil {
+		t.Fatalf("shorten shared busy timeout: %v", err)
+	}
+	release := holdSharedWriteLock(t, writer.SharedPath())
+	defer release()
+
+	// The busy-warning counter lives in this Store's OWN local index db,
+	// never the shared store the busy retry above targets — closing it here
+	// fails only the counter write, not the kill/unkill path under test.
+	if err := writer.db.Close(); err != nil {
+		t.Fatalf("close local index db: %v", err)
+	}
+
+	if err := writer.Kill(ctx, Killed{ID: "busy-kill", KilledAt: 2}); err == nil {
+		t.Fatal("Kill() under persistent SQLITE_BUSY reported success")
+	}
+	got := warnings.String()
+	if !strings.Contains(got, "WARNING:") || !strings.Contains(got, "busy-warning counter") {
+		t.Fatalf("warnings = %q, want the counter write failure named", got)
+	}
+}
+
 // holdSharedWriteLock takes the shared database's write lock from a separate
 // connection and keeps it until the returned function runs.
 func holdSharedWriteLock(t *testing.T, path string) func() {

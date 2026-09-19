@@ -91,20 +91,23 @@ func TestImmediateTransactionRecordsRollbackFailure(t *testing.T) {
 		t.Fatalf("WithImmediateTx() error = %v, want rollback failure named", err)
 	}
 
-	var beginRecord obs.Record
-	found := false
+	var beginRecords []obs.Record
 	for _, record := range recorder.Records() {
 		if record.Message != "db.statement" {
 			continue
 		}
 		if op, ok := record.Field("op"); ok && op == "begin" {
-			beginRecord = record
-			found = true
+			beginRecords = append(beginRecords, record)
 		}
 	}
-	if !found {
-		t.Fatalf("no db.statement record for the begin op found in %q", recorder.Raw())
+	// Exactly one: the transaction's op=begin record must be ended exactly
+	// once — a double End (one on the begin-failed path, one from the
+	// deferred rollback) would silently double the terminal record instead
+	// of failing loudly.
+	if len(beginRecords) != 1 {
+		t.Fatalf("db.statement op=begin records = %d, want exactly 1: %s", len(beginRecords), recorder.Raw())
 	}
+	beginRecord := beginRecords[0]
 	errField, ok := beginRecord.Field("err")
 	if !ok {
 		t.Fatalf("begin record has no err field: %+v", beginRecord.Fields)

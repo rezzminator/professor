@@ -46,7 +46,11 @@ func OpenID(
 	for index := range scan.Output.Rows {
 		row := &scan.Output.Rows[index]
 		if row.ID == id {
-			primary := fleet.PrimaryAccount(scan.Env.Paths, effective.Config)
+			primary, primaryErr := fleet.PrimaryAccount(scan.Env.Paths, effective.Config)
+			if primaryErr != nil {
+				fmt.Fprintf(stderr, "pfm chat open: read primary account: %v\n", primaryErr)
+				return 1
+			}
 			return OpenRow(
 				ctx,
 				*row,
@@ -88,10 +92,11 @@ func OpenDetachedID(
 		if row.ID != id {
 			continue
 		}
-		primary := effective.Config.PrimaryAccountFor(
-			compose.EngineForKind(row.Kind),
-			fleet.PrimaryAccount(effective.Paths, effective.Config),
-		)
+		fleetPrimary, err := fleet.PrimaryAccount(effective.Paths, effective.Config)
+		if err != nil {
+			return action.OpenResult{}, fmt.Errorf("read primary account: %w", err)
+		}
+		primary := effective.Config.PrimaryAccountFor(compose.EngineForKind(row.Kind), fleetPrimary)
 		return openDetachedRow(ctx, row, primary, stderr, effective)
 	}
 	return action.OpenResult{}, fmt.Errorf("chat %q is not indexed", id)

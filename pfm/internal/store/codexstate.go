@@ -154,15 +154,26 @@ func codexStateGeneration(name string) (int, bool) {
 // CodexStateFiles orders newest generation first: a thread id recorded by
 // several generations keeps the newest generation's row. A store that cannot
 // be opened or whose threads table is too old to classify is skipped, because
-// one unreadable generation must never blank the Codex half of the fleet.
+// one unreadable generation must never blank the Codex half of the fleet —
+// but skipping every generation is not the same as there being nothing to
+// read, so each skip is logged and an all-skipped run is an error, never a
+// silent empty list.
 func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error) {
 	threadByID := make(map[string]CodexThread)
+	skipped := 0
 	for _, file := range files {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
 		threads, err := readCodexState(ctx, file)
 		if err != nil {
+			skipped++
+			fmt.Fprintf(
+				os.Stderr,
+				"store: skip unusable Codex state generation %s: %v\n",
+				file,
+				err,
+			)
 			continue
 		}
 		for index := range threads {
@@ -172,6 +183,12 @@ func ReadCodexThreads(ctx context.Context, files []string) ([]CodexThread, error
 			}
 			threadByID[thread.ID] = *thread
 		}
+	}
+	if len(files) > 0 && skipped == len(files) {
+		return nil, fmt.Errorf(
+			"read Codex state: all %d generation(s) were unreadable",
+			skipped,
+		)
 	}
 	threads := make([]CodexThread, 0, len(threadByID))
 	for threadID := range threadByID {

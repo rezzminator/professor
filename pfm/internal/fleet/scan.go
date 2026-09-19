@@ -231,11 +231,15 @@ func ResolveEnv(request Request) (Env, error) {
 		}
 		nowNS = parsed
 	}
+	primary, err := PrimaryAccount(resolved, machine)
+	if err != nil {
+		return Env{}, fmt.Errorf("resolve primary account: %w", err)
+	}
 	return Env{
 		Paths:      resolved,
 		CurrentDir: currentDir,
 		NowNS:      nowNS,
-		Primary:    PrimaryAccount(resolved, machine),
+		Primary:    primary,
 		Config:     machine,
 	}, nil
 }

@@ -35,13 +35,14 @@ import (
 	"golang.org/x/sys/unix"
 
 	"hostops/pfm/internal/atomicfile"
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/obs"
 	"hostops/pfm/internal/sqlitedb"
 )
 
 // healKind names heal's two foreign SQLite stores to the db component's
 // records — heal never opens a database of its own, only Codex's.
-const healKind = "codex"
+var healKind = pfmengine.MustLookup(pfmengine.Codex).LongName
 
 // CodexProjectsPastAnomalies is the first Codex release whose projector skips a repeated,
 // regressed, or missing rollout ordinal instead of refusing the thread forever

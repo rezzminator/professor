@@ -104,7 +104,11 @@ func Launch(args []string, stdout, stderr io.Writer, runtime config.Runtime, env
 		fmt.Fprintln(stderr, "pfm internal launch: --cwd must be an absolute path")
 		return 2
 	}
-	primary := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+	primary, primaryErr := fleet.PrimaryAccount(runtime.Paths, runtime.Config)
+	if primaryErr != nil {
+		fmt.Fprintf(stderr, "pfm internal launch: read primary account: %v\n", primaryErr)
+		return 1
+	}
 	configDir := config.AmbientClaudeConfigDir()
 	if configDir == "" {
 		if account, found := runtime.Config.AccountByID(primary); found && !account.Implicit {

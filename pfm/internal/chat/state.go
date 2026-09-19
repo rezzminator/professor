@@ -7,15 +7,19 @@ import (
 	"hostops/pfm/internal/obs"
 )
 
+// liveState is the chat state door's "live" state, named once because every
+// registered verb below either starts or ends there.
+const liveState = "live"
+
 // verbTransitions is the prior -> next pair each CLI verb walks through the
 // chat state door (obs.Transition, kind "chat") when it runs to completion —
 // read straight off cmd/pfm/chat_command.go's own calls, which this table
 // replaces. A verb absent from it is not one RecordVerb knows how to shape.
 var verbTransitions = map[string]struct{ from, to string }{
-	"kill":   {"live", "killed"},
-	"end":    {"live", "ended"},
-	"name":   {"live", "renamed"},
-	"unkill": {"killed", "live"},
+	"kill":   {liveState, "killed"},
+	"end":    {liveState, "ended"},
+	"name":   {liveState, "renamed"},
+	"unkill": {"killed", liveState},
 	"new":    {"absent", "registered"},
 }
 

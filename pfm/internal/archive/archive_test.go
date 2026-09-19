@@ -36,9 +36,20 @@ func (kills *fakeKills) Unkill(_ context.Context, id string) error {
 
 // emptyProc reports no processes: the fixtures declare liveness through the
 // sid crumbs instead, which is the reading that does not need a fake /proc.
-type emptyProc struct{}
+//
+// failPIDs lets a test drive the "process table unreadable" reading a real
+// jailed or denied /proc can produce — the case LiveSessions must report as
+// an error rather than silently reading as "no live processes".
+type emptyProc struct {
+	failPIDs bool
+}
 
-func (emptyProc) PIDs() ([]int, error)                   { return nil, nil }
+func (proc emptyProc) PIDs() ([]int, error) {
+	if proc.failPIDs {
+		return nil, errors.New("process table unreadable")
+	}
+	return nil, nil
+}
 func (emptyProc) Cmdline(int) ([]string, error)          { return nil, nil }
 func (emptyProc) Environ(int) (map[string]string, error) { return nil, nil }
 func (emptyProc) FDLinks(int) ([]gather.FDLink, error)   { return nil, nil }
@@ -413,5 +424,66 @@ func TestArchiveSubagentsSkipsLiveTranscripts(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the live transcript is gone: %v", err)
+	}
+}
+
+// L1-F1: when the live-session reading itself could not run — an unreadable
+// process table — Run must refuse to decide anything at all rather than treat
+// the failure as "no chats are live". Nothing on disk moves and no kill is
+// retired.
+func TestArchiveRefusesToDecideWhenTheLiveReadingFails(t *testing.T) {
+	values := archiveJail(t)
+	const id = "11111111-1111-4111-8111-111111111111"
+	transcripts := filepath.Join(values.Roots[pfmengine.Claude][0], "-p")
+	original := filepath.Join(transcripts, id+".jsonl")
+	writeFile(t, original, "{}\n")
+	kills := &fakeKills{rows: []KilledChat{{ID: id, Engine: "cc"}}}
+	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{failPIDs: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := runner.Run(context.Background(), Options{Apply: true}); err == nil {
+		t.Fatal("Run() with an unreadable process table returned no error")
+	}
+	if _, err := os.Stat(original); err != nil {
+		t.Fatalf("Run() moved a transcript despite a failed live reading: %v", err)
+	}
+	if len(kills.unkilled) != 0 {
+		t.Fatalf("Run() retired a kill despite a failed live reading: %v", kills.unkilled)
+	}
+}
+
+// L1-F2: a transcript lookup that could not run — here, the claude projects
+// root is unreadable — must land the killed id in Unresolved, reported and
+// never un-killed, instead of being classed an orphan and having its kill row
+// retired.
+func TestArchiveMarksUnresolvedWhenTheTranscriptLookupCannotRun(t *testing.T) {
+	values := archiveJail(t)
+	const id = "11111111-1111-4111-8111-111111111111"
+	root := values.Roots[pfmengine.Claude][0]
+	if err := os.Chmod(root, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(root, 0o700) })
+
+	kills := &fakeKills{rows: []KilledChat{{ID: id, Engine: "cc"}}}
+	runner, err := New(Dependencies{Paths: values, Kills: kills, Proc: emptyProc{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Run(context.Background(), Options{Apply: true})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(report.Orphans) != 0 {
+		t.Fatalf("a lookup that could not run was classed an orphan: %#v", report)
+	}
+	if len(report.Unresolved) != 1 || report.Unresolved[0] != id {
+		t.Fatalf("Unresolved = %v, want [%s]", report.Unresolved, id)
+	}
+	if len(kills.unkilled) != 0 {
+		t.Fatalf("an unresolved lookup's kill was retired: %v", kills.unkilled)
 	}
 }

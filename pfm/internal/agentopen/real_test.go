@@ -53,3 +53,21 @@ func TestRealTmuxRecordsEveryInvocation(t *testing.T) {
 	}
 	_ = context.Background
 }
+
+// L1-F10: tmux never starting (a configured binary that does not exist) must
+// surface as an error, not be folded into "this socket has no such pane" —
+// the split resolve.Resolver already makes via pfmtmux.CouldNotRun.
+func TestSocketForPIDErrorsWhenTmuxCouldNotRun(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "cc-dead-one"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tmux := RealTmux{Binary: filepath.Join(t.TempDir(), "absent", "tmux"), Dir: directory}
+	socket, err := tmux.SocketForPID(context.Background(), 46)
+	if err == nil {
+		t.Fatalf("SocketForPID() with a missing tmux binary returned no error; socket=%q", socket)
+	}
+	if socket != "" {
+		t.Fatalf("SocketForPID() socket = %q, want empty on a tmux-could-not-run error", socket)
+	}
+}

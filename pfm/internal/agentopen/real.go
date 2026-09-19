@@ -166,6 +166,12 @@ func (tmux RealTmux) SocketForPID(ctx context.Context, pid int) (string, error) 
 		}
 		output, err := tmux.command(ctx, entry.Name(), "list-panes", "-a", "-F", "#{pane_pid}").Output()
 		if err != nil {
+			// tmux itself never starting is not "this socket has no such
+			// pane" — the caller would report an OutsidePFMError telling the
+			// operator to kill a pid that was never actually checked.
+			if pfmtmux.CouldNotRun(err) {
+				return "", fmt.Errorf("tmux could not run to list panes on %s: %w", entry.Name(), err)
+			}
 			continue
 		}
 		for _, line := range strings.Split(string(output), "\n") {

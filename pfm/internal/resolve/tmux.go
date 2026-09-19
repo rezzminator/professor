@@ -82,5 +82,8 @@ func (tmux TmuxResolver) command(
 	socketPath string,
 	arguments ...string,
 ) *pfmtmux.Cmd {
-	return pfmtmux.Exec(ctx, tmux.Binary, socketPath, arguments...)
+	// Dir stays empty: socketPath here is already the full pathname (kill's
+	// shape, per Socket's own doc comment), and filepath.Join("", full)
+	// returns full unchanged.
+	return pfmtmux.Socket{Binary: tmux.Binary}.Command(ctx, socketPath, arguments...)
 }

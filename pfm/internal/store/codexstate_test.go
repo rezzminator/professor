@@ -3,9 +3,11 @@ package store
 import (
 	"context"
 	"database/sql"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -284,6 +286,56 @@ CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT, created_at INTEGER)`); err 
 	}
 	if len(threads) != 1 || threads[0].ID != "live" {
 		t.Fatalf("ReadCodexThreads() = %#v, want only the readable generation", threads)
+	}
+}
+
+// L1-F4: skipping every generation is not the same as there being nothing to
+// read — an all-unusable state store must be reported as an error, never as
+// an empty Codex fleet, and each skip is visible on stderr.
+func TestReadCodexThreadsErrorsWhenEveryGenerationIsUnreadable(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"state_1.sqlite", "state_2.sqlite"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("not a database"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files, err := CodexStateFiles(root)
+	if err != nil {
+		t.Fatalf("CodexStateFiles() error = %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("CodexStateFiles() = %v, want 2 generations", files)
+	}
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	previousStderr := os.Stderr
+	os.Stderr = writer
+	threads, err := ReadCodexThreads(context.Background(), files)
+	os.Stderr = previousStderr
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	logged, readErr := io.ReadAll(reader)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err == nil {
+		t.Fatalf("ReadCodexThreads() with every generation unreadable returned no error; threads=%#v", threads)
+	}
+	if threads != nil {
+		t.Fatalf("ReadCodexThreads() threads = %#v, want nil on the all-failed error", threads)
+	}
+	for _, file := range files {
+		if !strings.Contains(string(logged), file) {
+			t.Fatalf("stderr = %q, want each skipped generation named, missing %s", logged, file)
+		}
 	}
 }
 

@@ -213,8 +213,8 @@ func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
 	state, values := openTestStore(t)
 	ctx := context.Background()
 
-	if account, found := ClaudePrimaryAccount(ctx, values); found {
-		t.Fatalf("PrimaryAccount() with nothing recorded = %d, %v", account, found)
+	if account, found, err := ClaudePrimaryAccount(ctx, values); found || err != nil {
+		t.Fatalf("PrimaryAccount() with nothing recorded = %d, %v, %v", account, found, err)
 	}
 
 	mirror := filepath.Join(values.Home, ".claude-primary")
@@ -224,19 +224,49 @@ func TestPrimaryAccountPrefersTheDatabaseOverTheMirror(t *testing.T) {
 	if err := os.WriteFile(mirror, []byte("1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if account, found := ClaudePrimaryAccount(ctx, values); !found || account != 1 {
-		t.Fatalf("PrimaryAccount() from the mirror = %d, %v", account, found)
+	if account, found, err := ClaudePrimaryAccount(ctx, values); !found || account != 1 || err != nil {
+		t.Fatalf("PrimaryAccount() from the mirror = %d, %v, %v", account, found, err)
 	}
 
 	if err := state.SetMeta(ctx, PrimaryAccountKey, "2", 99); err != nil {
 		t.Fatal(err)
 	}
-	if account, found := ClaudePrimaryAccount(ctx, values); !found || account != 2 {
+	if account, found, err := ClaudePrimaryAccount(ctx, values); !found || account != 2 || err != nil {
 		t.Fatalf(
-			"PrimaryAccount() = %d, %v; want 2 — the database outranks a stale mirror",
+			"PrimaryAccount() = %d, %v, %v; want 2,true,nil — the database outranks a stale mirror",
 			account,
 			found,
+			err,
 		)
+	}
+}
+
+// TestClaudePrimaryAccountSurfacesAQueryFailureNotNotFound is item 4's
+// regression: a database that IS present and opens fine but whose query
+// fails for a reason other than sql.ErrNoRows (here, a corrupted schema —
+// the meta table itself is gone) used to fold into found=false the same way
+// "nothing recorded yet" does, so a caller checking only found silently
+// treated a broken shared store as an operator who never set a primary
+// account, and answered every query with the roster's first configured
+// account instead of surfacing the outage.
+func TestClaudePrimaryAccountSurfacesAQueryFailureNotNotFound(t *testing.T) {
+	state, values := openTestStore(t)
+	ctx := context.Background()
+	if err := state.SetMeta(ctx, PrimaryAccountKey, "2", 99); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.db.ExecContext(ctx, "DROP TABLE meta"); err != nil {
+		t.Fatalf("corrupt fixture schema: %v", err)
+	}
+	if err := state.Close(); err != nil {
+		t.Fatal(err)
+	}
+	account, found, err := ClaudePrimaryAccount(ctx, values)
+	if err == nil {
+		t.Fatalf("ClaudePrimaryAccount() over a broken schema returned no error (account=%d, found=%v)", account, found)
+	}
+	if found {
+		t.Fatalf("ClaudePrimaryAccount() reported found=true alongside an error: %v", err)
 	}
 }
 
@@ -271,8 +301,8 @@ func TestPrimaryAccountNeverCreatesTheDatabase(t *testing.T) {
 		FleetDB: filepath.Join(root, "state", "fleet.db"),
 		Home:    filepath.Join(root, "home"),
 	}
-	if account, found := ClaudePrimaryAccount(context.Background(), values); found {
-		t.Fatalf("PrimaryAccount() = %d, %v, want not found", account, found)
+	if account, found, err := ClaudePrimaryAccount(context.Background(), values); found || err != nil {
+		t.Fatalf("PrimaryAccount() = %d, %v, %v, want not found, nil", account, found, err)
 	}
 	if _, err := os.Stat(values.FleetDB); !os.IsNotExist(err) {
 		t.Fatalf("reading the primary account created %s: %v", values.FleetDB, err)
@@ -288,8 +318,8 @@ func TestSetPrimaryAccountKeepsDatabaseAndMirrorInLockstep(t *testing.T) {
 	if err := SetClaudePrimaryAccount(context.Background(), values, 2, 123); err != nil {
 		t.Fatal(err)
 	}
-	if account, found := ClaudePrimaryAccount(context.Background(), values); !found || account != 2 {
-		t.Fatalf("PrimaryAccount()=%d,%v, want 2,true", account, found)
+	if account, found, err := ClaudePrimaryAccount(context.Background(), values); !found || account != 2 || err != nil {
+		t.Fatalf("PrimaryAccount()=%d,%v,%v, want 2,true,nil", account, found, err)
 	}
 	content, err := os.ReadFile(filepath.Join(root, ".claude-primary"))
 	if err != nil {

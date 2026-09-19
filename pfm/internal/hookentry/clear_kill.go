@@ -24,6 +24,7 @@ func ClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...con
 	}
 	payload, err := io.ReadAll(stdin)
 	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal clear-kill: read hook payload (fail-open): %v\n", err)
 		return 0
 	}
 	var hook struct {
@@ -31,7 +32,11 @@ func ClearKill(args []string, stdin io.Reader, stderr io.Writer, runtimes ...con
 		Reason    string `json:"reason"`
 		SessionID string `json:"session_id"`
 	}
-	if json.Unmarshal(payload, &hook) != nil || hook.SessionID == "" {
+	if err := json.Unmarshal(payload, &hook); err != nil {
+		fmt.Fprintf(stderr, "pfm internal clear-kill: decode hook payload (fail-open): %v\n", err)
+		return 0
+	}
+	if hook.SessionID == "" {
 		return 0
 	}
 	if hook.Event != "SessionEnd" || hook.Reason != "clear" {

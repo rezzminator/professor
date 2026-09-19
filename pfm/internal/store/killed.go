@@ -97,7 +97,15 @@ func (s *Store) killedWrite(
 	)
 	counterCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	_ = s.IncrementMeta(counterCtx, "busy_"+action+"_warnings")
+	if counterErr := s.IncrementMeta(counterCtx, "busy_"+action+"_warnings"); counterErr != nil {
+		s.warningf(
+			"WARNING: pfm could not record the busy-warning counter for %s %q in %s: %v\n",
+			action,
+			id,
+			s.state.Path(),
+			counterErr,
+		)
+	}
 	return err
 }
 

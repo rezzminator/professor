@@ -523,19 +523,34 @@ func (s *Store) ClearBranchSeat(ctx context.Context, socket string) error {
 //
 // It opens the database read-only and never creates it: reading the primary
 // account must not be the act that brings a state store into existence.
-func ClaudePrimaryAccount(ctx context.Context, values paths.Values) (int, bool) {
-	if account, found := primaryFromDatabase(ctx, values.FleetDB); found {
-		return account, true
+//
+// The three-value return is value, found, failed-to-look: a database that
+// cannot be read (a corrupt file, a permission error, a real query failure —
+// distinct from sql.ErrNoRows, which is a legitimate "nothing set yet") is
+// reported as an error, never folded into found=false. A caller that only
+// checked found used to read "the lookup itself failed" as "no primary
+// account", which then quietly answered every query with the roster's first
+// configured account instead of surfacing the outage.
+func ClaudePrimaryAccount(ctx context.Context, values paths.Values) (int, bool, error) {
+	account, found, err := primaryFromDatabase(ctx, values.FleetDB)
+	if err != nil {
+		return 0, false, err
+	}
+	if found {
+		return account, true, nil
 	}
 	content, err := os.ReadFile(filepath.Join(values.Home, ".claude-primary"))
 	if err != nil {
-		return 0, false
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("read primary account mirror: %w", err)
 	}
-	account, err := strconv.Atoi(strings.TrimSpace(string(content)))
+	account, err = strconv.Atoi(strings.TrimSpace(string(content)))
 	if err != nil {
-		return 0, false
+		return 0, false, fmt.Errorf("parse primary account mirror: %w", err)
 	}
-	return account, true
+	return account, true, nil
 }
 
 // SetClaudePrimaryAccount updates the authoritative shared row and its statusline
@@ -575,13 +590,23 @@ func SetClaudePrimaryAccount(
 	return nil
 }
 
-func primaryFromDatabase(ctx context.Context, path string) (int, bool) {
+func primaryFromDatabase(ctx context.Context, path string) (int, bool, error) {
+	// A stat failure of ANY kind (missing, or a path component that is not a
+	// directory) keeps its original degrade-to-mirror answer: the mirror file
+	// exists precisely so a whole-store outage never blocks reading who the
+	// primary account is (TestPrimaryAccountGoesThroughTheStateStore). The
+	// distinction item 4 exists for is narrower and starts once the database
+	// is confirmed present: an open or query failure from THERE is this
+	// lookup failing to look, never folded into "nothing recorded".
 	if _, err := os.Stat(path); err != nil {
-		return 0, false
+		return 0, false, nil
 	}
-	db, err := sqlitedb.OpenReadWrite(path, sqlitedb.StoreBusyTimeout)
+	// Read-only, matching the doc above: this reader must never need write
+	// access to a database it does not own, on a path that runs on nearly
+	// every ls/statusline.
+	db, err := sqlitedb.OpenReadOnly(path, sqlitedb.StoreBusyTimeout)
 	if err != nil {
-		return 0, false
+		return 0, false, fmt.Errorf("open shared fleet database %s: %w", path, err)
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
@@ -590,17 +615,24 @@ func primaryFromDatabase(ctx context.Context, path string) (int, bool) {
 	}()
 	var value string
 	const primaryQuery = "SELECT val FROM meta WHERE key=?"
+	// The query error still reaches the db activity log unconditionally (obs
+	// is this package's designated door for that, C23) AND is now returned:
+	// sql.ErrNoRows is the legitimate "nothing set yet" absence, everything
+	// else is this lookup failing to look.
 	read := obs.SQL(ctx, kind, primaryQuery)
 	err = db.QueryRowContext(ctx, primaryQuery, PrimaryAccountKey).Scan(&value)
 	read.End(-1, err)
 	if err != nil {
-		return 0, false
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, false, nil
+		}
+		return 0, false, fmt.Errorf("query primary account: %w", err)
 	}
 	account, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil {
-		return 0, false
+		return 0, false, fmt.Errorf("parse primary account value %q: %w", value, err)
 	}
-	return account, true
+	return account, true, nil
 }
 
 // SortedIDs returns the keys of a killed set in stable order.

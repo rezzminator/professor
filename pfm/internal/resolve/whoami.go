@@ -3,6 +3,7 @@ package resolve
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -208,7 +209,14 @@ func (identifier *Whoami) Identify(ctx context.Context) (Identity, error) {
 		identity.Engine = engineForSocket(identity.SocketName)
 	}
 	session, err := identifier.namer.SessionName(ctx, socketPath, pane)
-	if err != nil || session == "" {
+	if err != nil {
+		// The socket already resolved — this is a tmux exec that could not
+		// run, not "no tmux here". Reporting it as ErrNoTmux would make
+		// self/me target resolution read a transient tmux failure as the
+		// caller never being inside tmux at all.
+		return identity, fmt.Errorf("read the tmux session name on %s: %w", socketPath, err)
+	}
+	if session == "" {
 		return identity, ErrNoTmux
 	}
 	identity.Session = session
@@ -323,7 +331,10 @@ func (namer CommandTmuxNamer) SessionName(
 		arguments = append(arguments, "-t", target)
 	}
 	arguments = append(arguments, "#{session_name}")
-	output, err := pfmtmux.Exec(ctx, namer.Binary, socketPath, arguments...).Output()
+	// Dir stays empty: socketPath is already the full pathname, and
+	// filepath.Join("", full) returns full unchanged (Socket's own doc
+	// comment, "kill's shape").
+	output, err := pfmtmux.Socket{Binary: namer.Binary}.Command(ctx, socketPath, arguments...).Output()
 	if err != nil && target != "" {
 		// A stale pane id must not kill a live session: retry untargeted, the
 		// way chat.sh's bare `tmux display-message -p` does.
@@ -351,7 +362,11 @@ func (lister CommandPaneOwners) PaneOwners(
 	ctx context.Context,
 	socketPath string,
 ) ([]PaneOwner, error) {
-	output, err := pfmtmux.Exec(ctx, lister.Binary, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
+	// Dir stays empty: socketPath is already the full pathname (lister.TmuxDir
+	// addresses a directory to SCAN for sockets, in paneOwners above — never a
+	// join prefix here), and filepath.Join("", full) returns full unchanged.
+	output, err := pfmtmux.Socket{Binary: lister.Binary}.
+		Command(ctx, socketPath, "list-panes", "-a", "-F", "#{pane_pid} #{pane_id}").
 		Output()
 	if err != nil {
 		return nil, err

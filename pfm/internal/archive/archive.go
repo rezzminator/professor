@@ -101,6 +101,11 @@ type Report struct {
 	Unsupported []string
 	// Young counts sidechain transcripts left alone as too new.
 	Young int
+	// Unresolved are killed ids whose transcript lookup could not run — a
+	// directory that could not be read or scanned, never "nothing found
+	// there." They are reported and their kill row is left standing: a
+	// lookup that failed to look is not proof the chat is gone.
+	Unresolved []string
 	// Bytes is the total planned or moved.
 	Bytes int64
 	// Unkilled counts kill rows retired by this run.
@@ -175,12 +180,18 @@ func (runner *Runner) Run(
 ) (report Report, err error) {
 	trail := obs.NewTrail(ctx, "archive", "requested")
 	defer func() { trail.End(err) }()
-	live := LiveSessions(
+	live, err := LiveSessions(
 		runner.proc,
 		firstEngineRoot(runner.paths.Roots[pfmengine.Codex]),
 		runner.paths.SIDDir,
 		runner.codexBinary,
 	)
+	if err != nil {
+		// A reading that could not run is not "no chats are live" — refuse
+		// the whole decision rather than move a transcript out from under a
+		// chat this run never proved was dead.
+		return Report{}, fmt.Errorf("determine which chats are live: %w", err)
+	}
 	if options.Subagents {
 		report, err = runner.runSubagents(options, live)
 	} else {
@@ -220,26 +231,37 @@ func (runner *Runner) runKilled(
 	}
 	// decided is every id this run resolved one way or another — moved,
 	// orphaned, or skipped as live. Those three leave the killed list;
-	// unsupported engines remain killed and are reported separately.
+	// unsupported engines and unresolved lookups remain killed and are
+	// reported separately.
 	decided := make([]string, 0, len(killed))
 	for _, chat := range killed {
 		if chat.Engine == pfmengine.OpenCode {
 			report.Unsupported = append(report.Unsupported, chat.ID)
 			continue
 		}
-		decided = append(decided, chat.ID)
 		if _, running := live[strings.ToLower(chat.ID)]; running {
 			report.Live = append(report.Live, chat.ID)
+			decided = append(decided, chat.ID)
 			continue
 		}
-		source, engine := runner.findTranscript(chat)
+		source, engine, err := runner.findTranscript(chat)
+		if err != nil {
+			// The lookup could not run — a directory it needed to read or
+			// scan failed for a reason other than "nothing there." Report it
+			// and leave the kill standing: retiring it here is how a killed
+			// chat whose transcript exists gets reported an orphan.
+			report.Unresolved = append(report.Unresolved, chat.ID)
+			continue
+		}
 		if source == "" {
 			report.Orphans = append(report.Orphans, chat.ID)
+			decided = append(decided, chat.ID)
 			continue
 		}
 		info, err := os.Stat(source)
 		if err != nil {
 			report.Orphans = append(report.Orphans, chat.ID)
+			decided = append(decided, chat.ID)
 			continue
 		}
 		move := Move{
@@ -251,6 +273,7 @@ func (runner *Runner) runKilled(
 		}
 		report.Moves = append(report.Moves, move)
 		report.Bytes += move.Bytes
+		decided = append(decided, chat.ID)
 	}
 	if !options.Apply {
 		return report, nil
@@ -370,28 +393,48 @@ func (runner *Runner) runSubagents(
 // findTranscript resolves a killed chat to the file that holds it. The store's
 // engine is the hint, never the authority: a kill written before the lineage
 // was indexed carries no engine at all.
-func (runner *Runner) findTranscript(chat KilledChat) (string, pfmengine.ID) {
+//
+// A non-nil error means the lookup could not run — a directory it needed to
+// read or scan failed for a reason other than the ordinary "it isn't there" —
+// and is distinct from an empty path, which means the lookup ran to
+// completion and genuinely found nothing.
+func (runner *Runner) findTranscript(chat KilledChat) (string, pfmengine.ID, error) {
 	if chat.Engine != pfmengine.Codex {
-		if path := runner.findClaudeTranscript(chat.ID); path != "" {
-			return path, pfmengine.Claude
+		path, err := runner.findClaudeTranscript(chat.ID)
+		if err != nil {
+			return "", "", err
+		}
+		if path != "" {
+			return path, pfmengine.Claude, nil
 		}
 	}
-	if path := runner.findCodexRollout(chat.ID); path != "" {
-		return path, pfmengine.Codex
+	path, err := runner.findCodexRollout(chat.ID)
+	if err != nil {
+		return "", "", err
+	}
+	if path != "" {
+		return path, pfmengine.Codex, nil
 	}
 	if chat.Engine == pfmengine.Codex {
-		if path := runner.findClaudeTranscript(chat.ID); path != "" {
-			return path, pfmengine.Claude
+		path, err := runner.findClaudeTranscript(chat.ID)
+		if err != nil {
+			return "", "", err
+		}
+		if path != "" {
+			return path, pfmengine.Claude, nil
 		}
 	}
-	return "", ""
+	return "", "", nil
 }
 
-func (runner *Runner) findClaudeTranscript(id string) string {
+func (runner *Runner) findClaudeTranscript(id string) (string, error) {
 	for _, root := range runner.claudeRoots() {
 		entries, err := os.ReadDir(root)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("read %s for a claude transcript: %w", root, err)
 		}
 		for _, entry := range entries {
 			if !entry.IsDir() {
@@ -399,22 +442,28 @@ func (runner *Runner) findClaudeTranscript(id string) string {
 			}
 			candidate := filepath.Join(root, entry.Name(), id+".jsonl")
 			if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-				return candidate
+				return candidate, nil
 			}
 		}
 	}
-	return ""
+	return "", nil
 }
 
-func (runner *Runner) findCodexRollout(id string) string {
+func (runner *Runner) findCodexRollout(id string) (string, error) {
 	found := ""
 	root := filepath.Join(firstEngineRoot(runner.paths.Roots[pfmengine.Codex]), "sessions")
-	_ = filepath.WalkDir(root, func(
+	err := filepath.WalkDir(root, func(
 		path string,
 		entry fs.DirEntry,
 		err error,
 	) error {
-		if err != nil || entry.IsDir() || found != "" {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
+			return err
+		}
+		if entry.IsDir() || found != "" {
 			return nil
 		}
 		if strings.HasSuffix(entry.Name(), ".jsonl") &&
@@ -423,7 +472,10 @@ func (runner *Runner) findCodexRollout(id string) string {
 		}
 		return nil
 	})
-	return found
+	if err != nil {
+		return "", fmt.Errorf("scan %s for a codex rollout: %w", root, err)
+	}
+	return found, nil
 }
 
 // claudeRoots is every account's projects directory, plus the default account

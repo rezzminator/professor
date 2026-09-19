@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"hostops/pfm/internal/clock"
 	pfmengine "hostops/pfm/internal/engine"
@@ -55,6 +56,14 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 	} else {
 		codexHomes = append([]string{}, codexHomes...)
 	}
+	confirmEvery := dependencies.ConfirmEvery
+	if confirmEvery == 0 {
+		confirmEvery = defaultConfirmEvery
+	}
+	confirmAttempts := dependencies.ConfirmAttempts
+	if confirmAttempts == 0 {
+		confirmAttempts = defaultConfirmAttempts
+	}
 	return &Manager{
 		database: database,
 		proc:     proc,
@@ -67,7 +76,80 @@ func New(database *store.Store, dependencies Dependencies) (*Manager, error) {
 			codexHomes: codexHomes,
 			tmuxDir:    resolved.TmuxDir,
 		},
+		confirmEvery:    confirmEvery,
+		confirmAttempts: confirmAttempts,
 	}, nil
+}
+
+// ConfirmExit must never race the detached finisher it verifies: that process
+// waits defaultExitDelay, types the engine's exit command, then gives the chat
+// defaultPollAttempts x defaultPollEvery to save its session and close before
+// its own fallback kill. The first confirm stage therefore outlasts that whole
+// window (it returns the moment the pane is gone, so a healthy kill is still
+// prompt); only a pane that outlived the finisher is escalated, and each
+// escalation stage then waits defaultEscalateAttempts polls.
+const (
+	defaultConfirmEvery     = 500 * time.Millisecond
+	defaultConfirmAttempts  = int((defaultExitDelay+defaultPollAttempts*defaultPollEvery)/defaultConfirmEvery) + 6
+	defaultEscalateAttempts = 6
+)
+
+// ConfirmExit verifies a killed live target's pane is actually gone within a
+// bounded wait instead of trusting that the detached finisher landed it.
+//
+// The detached finisher is spawned through `setsid -f`, which forks and
+// returns almost immediately — CommandSpawner.Spawn's own Wait() only
+// observes that harmless immediate return, never the finisher's real
+// completion, so nothing upstream of this call has ever verified the pane
+// actually closed. That is the defect this method exists to end: a caller
+// that reports "killed" the instant Kill() returns is reporting the spawn of
+// a detached process, not the state of the pane.
+//
+// When the pane is still there after the bounded wait, ConfirmExit escalates
+// exactly the way Finisher.Run's own fallback does — kill-pane, then (one
+// rung further, since the finisher's own kill-pane may itself be the thing
+// that never landed) kill-server of THIS target's own socket, never any
+// other. Only once every escalation has also failed to clear the pane does
+// it return a named error; a caller must never print success past that
+// point.
+func (manager *Manager) ConfirmExit(ctx context.Context, target Target) error {
+	if target.SocketPath == "" || target.PaneID == "" {
+		return nil
+	}
+	landed, probeErr, err := pollPaneGone(
+		ctx, manager.tmux, target.SocketPath, target.PaneID, manager.confirmAttempts, manager.confirmEvery,
+	)
+	if err != nil {
+		return err
+	}
+	for _, escalate := range []func() error{
+		func() error { return manager.tmux.KillPane(ctx, target.SocketPath, target.PaneID) },
+		func() error { return manager.tmux.KillServer(ctx, target.SocketPath) },
+	} {
+		if landed {
+			break
+		}
+		if killErr := escalate(); killErr != nil {
+			probeErr = errors.Join(probeErr, killErr)
+		}
+		var stageErr error
+		var pollErr error
+		landed, pollErr, stageErr = pollPaneGone(
+			ctx, manager.tmux, target.SocketPath, target.PaneID,
+			min(manager.confirmAttempts, defaultEscalateAttempts), manager.confirmEvery,
+		)
+		probeErr = errors.Join(probeErr, pollErr)
+		if stageErr != nil {
+			return stageErr
+		}
+	}
+	if landed {
+		return nil
+	}
+	if probeErr != nil {
+		return fmt.Errorf("pane %s still alive after kill: %w", target.PaneID, probeErr)
+	}
+	return fmt.Errorf("pane %s still alive after kill", target.PaneID)
 }
 
 // Environment reads the three caller values used by --self, through env

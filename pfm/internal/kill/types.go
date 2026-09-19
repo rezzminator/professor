@@ -105,16 +105,23 @@ type Dependencies struct {
 	PollEvery    time.Duration
 	PollAttempts int
 	Refresher    Refresher
+	// ConfirmEvery and ConfirmAttempts bound Manager.ConfirmExit's own
+	// caller-side wait — short, because unlike the finisher's detached grace
+	// window this one blocks the interactive/MCP kill call.
+	ConfirmEvery    time.Duration
+	ConfirmAttempts int
 }
 
 // Manager performs public kill operations.
 type Manager struct {
-	database *store.Store
-	proc     gather.ProcFS
-	tmux     TmuxClient
-	spawner  ExitSpawner
-	now      func() time.Time
-	paths    resolvedPaths
+	database        *store.Store
+	proc            gather.ProcFS
+	tmux            TmuxClient
+	spawner         ExitSpawner
+	now             func() time.Time
+	paths           resolvedPaths
+	confirmEvery    time.Duration
+	confirmAttempts int
 }
 
 // Finisher performs the detached graceful-exit phase.

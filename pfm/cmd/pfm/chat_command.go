@@ -203,6 +203,15 @@ func runResolvedChatKill(
 	// that was merely de-listed, and that ambiguity is the whole defect this
 	// path exists to end.
 	if exit && target.SocketName != "" && target.PaneID != "" {
+		// Kill() only SPAWNS the detached exit finisher; its `setsid -f`
+		// launcher forks and returns almost instantly, so nothing above this
+		// point has ever confirmed the pane actually closed. Reporting
+		// "killed" on Kill()'s return alone is exactly the defect this
+		// verifies against — a live chat kept running behind a printed "ok".
+		if err := manager.ConfirmExit(context.Background(), target); err != nil {
+			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
+			return 1
+		}
 		fmt.Fprintf(
 			stdout,
 			"killed %s\tclosing pane %s on socket %s\n",

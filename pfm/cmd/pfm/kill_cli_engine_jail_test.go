@@ -31,31 +31,44 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 	jail := newKillCLIJail(t)
 
 	socket := "probe-killcli-" + strconv.Itoa(os.Getpid())
-	session := exec.Command(
-		"tmux", "-L", socket, "-f", "/dev/null",
-		"new-session", "-d", "-s", "bg", "sleep", "120",
-	)
-	if output, err := session.CombinedOutput(); err != nil {
-		t.Fatalf("start background pane: %v: %s", err, output)
-	}
 	t.Cleanup(func() {
 		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
 	})
-	paneOutput, err := exec.Command(
-		"tmux", "-L", socket, "list-panes", "-F", "#{pane_pid}",
-	).Output()
-	if err != nil {
-		t.Fatal(err)
+	// Two SEPARATE sessions, one per fake chat: a real kill now really closes
+	// the pane it targets (runResolvedChatKill's ConfirmExit verifies and, if
+	// needed, force-closes it), and two independent live chats never actually
+	// share one pane — sharing one here would have the first kill's pane
+	// close take the second fixture's socket down with it.
+	panePID := func(session string) int {
+		t.Helper()
+		start := exec.Command(
+			"tmux", "-L", socket, "-f", "/dev/null",
+			"new-session", "-d", "-s", session, "sleep", "120",
+		)
+		if output, err := start.CombinedOutput(); err != nil {
+			t.Fatalf("start background pane %s: %v: %s", session, err, output)
+		}
+		paneOutput, err := exec.Command(
+			"tmux", "-L", socket, "list-panes", "-t", session, "-F", "#{pane_pid}",
+		).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(string(paneOutput)))
+		if err != nil {
+			t.Fatalf("parse pane pid %q: %v", paneOutput, err)
+		}
+		return pid
 	}
-	panePID, err := strconv.Atoi(strings.TrimSpace(string(paneOutput)))
-	if err != nil {
-		t.Fatalf("parse pane pid %q: %v", paneOutput, err)
-	}
+	agentPanePID := panePID("bg-agent")
+	codexPanePID := panePID("bg-codex")
+	codexSelfPanePID := panePID("bg-codex-self")
 
 	const (
-		agentID = "b3333333-3333-4333-8333-333333333333"
-		codexID = "c4444444-4444-4444-8444-444444444444"
-		unknown = "d5555555-5555-4555-8555-555555555555"
+		agentID     = "b3333333-3333-4333-8333-333333333333"
+		codexID     = "c4444444-4444-4444-8444-444444444444"
+		codexSelfID = "c6666666-6666-4666-8666-666666666666"
+		unknown     = "d5555555-5555-4555-8555-555555555555"
 	)
 	// A live agent: a Claude process on a non-primary config dir, naming
 	// itself outright in argv. Its transcript is not indexed — often not even
@@ -63,7 +76,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 	// knows it exists.
 	writeFakeProcess(t, jail.procRoot, fakeProcessSpec{
 		pid:       90101,
-		parentPID: panePID,
+		parentPID: agentPanePID,
 		comm:      "claude",
 		cmdline:   []string{"/opt/claude", "--session-id", agentID},
 		environ: map[string]string{
@@ -75,10 +88,22 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 	// the CODEX_THREAD_ID it exports into its own environment.
 	writeFakeProcess(t, jail.procRoot, fakeProcessSpec{
 		pid:       90102,
-		parentPID: panePID,
+		parentPID: codexPanePID,
 		comm:      "codex",
 		cmdline:   []string{"/usr/local/bin/codex"},
 		environ:   map[string]string{"CODEX_THREAD_ID": codexID},
+		withFD:    true,
+	})
+	// A second, SEPARATE Codex fixture for the self-kill assertion below: a
+	// real kill now really closes its pane, so the self-kill case needs a
+	// pane of its own instead of reusing codexID's — which this test's
+	// earlier loop has, by then, genuinely closed.
+	writeFakeProcess(t, jail.procRoot, fakeProcessSpec{
+		pid:       90103,
+		parentPID: codexSelfPanePID,
+		comm:      "codex",
+		cmdline:   []string{"/usr/local/bin/codex"},
+		environ:   map[string]string{"CODEX_THREAD_ID": codexSelfID},
 		withFD:    true,
 	})
 
@@ -114,14 +139,10 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 	// A Codex tool shell has the thread id but no tmux environment. It still
 	// resolves `self` to the live composed row instead of falling into the
 	// tmux-only self identifier used by Claude hooks.
-	var unkillOut, unkillErr bytes.Buffer
-	if code := run([]string{"chat", "unkill", codexID}, &unkillOut, &unkillErr); code != 0 {
-		t.Fatalf("unkill Codex fixture code=%d stderr=%q", code, unkillErr.String())
-	}
 	t.Setenv("TMUX", "")
 	t.Setenv("TMUX_PANE", "")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
-	t.Setenv("CODEX_THREAD_ID", codexID)
+	t.Setenv("CODEX_THREAD_ID", codexSelfID)
 	var selfOut, selfErr bytes.Buffer
 	if code := run([]string{"chat", "kill", "self"}, &selfOut, &selfErr); code != 0 {
 		t.Fatalf(
@@ -131,7 +152,7 @@ func TestKillCLIVouchesEngineForUnindexedButVisibleRows(t *testing.T) {
 			selfErr.String(),
 		)
 	}
-	if got, want := selfOut.String(), "killed "+codexID+"\tde-listed only, no live pane closed\n"; got != want {
+	if got, want := selfOut.String(), "killed "+codexSelfID+"\tde-listed only, no live pane closed\n"; got != want {
 		t.Fatalf("Codex app-server kill self stdout=%q, want %q", got, want)
 	}
 

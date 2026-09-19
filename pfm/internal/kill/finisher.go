@@ -146,25 +146,11 @@ func (finisher *Finisher) Run(
 		command = "/quit"
 	}
 	_ = finisher.tmux.SendLine(ctx, args.SocketPath, args.PaneID, command)
-	landed := false
-	var probeErr error
-	for attempt := 0; attempt < finisher.pollAttempts; attempt++ {
-		exists, err := finisher.tmux.PaneExists(ctx, args.SocketPath, args.PaneID)
-		switch {
-		case err != nil:
-			// Could not ask, never read as gone: a transient tmux failure
-			// must not cut the grace window short and force-kill a pane
-			// that was still exiting cleanly.
-			probeErr = err
-		case !exists:
-			landed = true
-		}
-		if landed {
-			break
-		}
-		if err := waitContext(ctx, finisher.pollEvery); err != nil {
-			return err
-		}
+	landed, probeErr, err := pollPaneGone(
+		ctx, finisher.tmux, args.SocketPath, args.PaneID, finisher.pollAttempts, finisher.pollEvery,
+	)
+	if err != nil {
+		return err
 	}
 	// The fallback kill always runs, matching the graceful-close-then-
 	// fallback-kill choreography regardless of what the grace window saw —
@@ -402,4 +388,35 @@ func readChildFile(path string) (values []string, returnErr error) {
 
 func waitContext(ctx context.Context, duration time.Duration) error {
 	return clock.Real.Sleep(ctx, duration)
+}
+
+// pollPaneGone asks tmux up to attempts times, waiting every between checks,
+// whether paneID is still on socketPath. probeErr carries the last "could not
+// ask" failure — never folded into landed, because a transient tmux error
+// must not be read as a pane that already closed (the same distinction
+// TmuxClient.PaneExists documents). Both Finisher.Run's graceful-close window
+// and Manager.ConfirmExit's bounded caller-side check share this one loop so
+// "is it actually gone yet" has exactly one implementation.
+func pollPaneGone(
+	ctx context.Context,
+	tmux TmuxClient,
+	socketPath, paneID string,
+	attempts int,
+	every time.Duration,
+) (landed bool, probeErr, waitErr error) {
+	for attempt := 0; attempt < attempts; attempt++ {
+		exists, err := tmux.PaneExists(ctx, socketPath, paneID)
+		switch {
+		case err != nil:
+			probeErr = err
+		case !exists:
+			return true, nil, nil
+		}
+		if attempt < attempts-1 {
+			if err := waitContext(ctx, every); err != nil {
+				return false, probeErr, err
+			}
+		}
+	}
+	return false, probeErr, nil
 }

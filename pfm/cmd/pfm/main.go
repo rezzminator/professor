@@ -180,7 +180,7 @@ func printUsage(w io.Writer) {
 		"usage: pfm [--config PATH] <command> [options]", "", "operator commands:",
 		"  ls        list or pick fleet chats",
 		"  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end",
-		"  headless  run Claude or Codex through one isolated process interface",
+		"  headless  run Claude or OpenCode through one isolated process interface",
 		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path",
 		"  index     refresh the transcript index",
 		"  whoami    print this chat's own tmux session name",

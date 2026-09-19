@@ -27,7 +27,7 @@ const (
 
 func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, runtime commandRuntime) int {
 	flags := cli.NewFlagSet("headless exec", "usage: pfm headless exec [options] [-- ENGINE_ARGS...]\n"+
-		"  --engine claude|codex --model MODEL --effort EFFORT --account ID\n"+
+		"  --engine claude|codex|opencode --model MODEL --effort EFFORT --account ID\n"+
 		"  --prompt TEXT | --prompt-file FILE | stdin\n"+
 		"  --files FILE... --labels LABEL... --task TEXT | --task-file FILE\n"+
 		"  --system TEXT | --system-file FILE --schema FILE | --json-schema JSON\n"+
@@ -132,13 +132,9 @@ func runHeadlessExec(args []string, stdin io.Reader, stdout, stderr io.Writer, r
 		AllowUnsupported: *allowUnsupported,
 		Args:             append([]string(engineArgs), tail...),
 	}
-	if *engine != "" {
-		id, err := pfmengine.Parse(*engine)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm headless: %v\n", err)
-			return 2
-		}
-		request.Engine = id
+	if err := headlessrun.ApplyEngineSelector(&request, *engine); err != nil {
+		fmt.Fprintf(stderr, "pfm headless: %v\n", err)
+		return 2
 	}
 	read := func(path string) (string, error) {
 		body, err := os.ReadFile(path)

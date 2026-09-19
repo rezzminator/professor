@@ -25,6 +25,9 @@ const (
 	engineKeyBinary = "binary"
 	engineKeyYolo   = "yolo"
 	jsonKeyPort     = "port"
+	// defaultAskEffort is the reasoning effort every engine's ask defaults
+	// carry until an operator sets one.
+	defaultAskEffort = "low"
 )
 
 type Source string
@@ -463,8 +466,13 @@ func defaultsWithMCPServers(
 		codexAccounts = []CodexAccount{{ID: 1, Home: codexHome, Emoji: DefaultEmoji(1)}}
 	}
 	var openCodeAccounts []OpenCodeAccount
-	openCodeHome := pfmengine.MustLookup(pfmengine.OpenCode).DefaultRoots(home)[0]
-	if _, err := os.Stat(filepath.Join(openCodeHome, "opencode.db")); err == nil {
+	openCodeHome := openCodeAccountHome(home)
+	if exists, openCodeErr := openCodeStoreExists(openCodeHome); openCodeErr != nil {
+		accountSkips = append(accountSkips, AccountSkip{
+			ConfigDir: openCodeHome,
+			Reason:    fmt.Sprintf("OpenCode discovery failed: %v", openCodeErr),
+		})
+	} else if exists {
 		openCodeAccounts = []OpenCodeAccount{{ID: 1, Home: openCodeHome}}
 	}
 	sources := map[string]Source{
@@ -529,8 +537,9 @@ func defaultsWithMCPServers(
 		Ask: AskConfig{
 			Engine: pfmengine.Codex,
 			Prefs: map[pfmengine.ID]EnginePrefs{
-				pfmengine.Codex:  {Model: "gpt-5.6-luna", Effort: "low"},
-				pfmengine.Claude: {Model: "claude-haiku-4-5", Effort: "low"},
+				pfmengine.Codex:    {Model: "gpt-5.6-luna", Effort: defaultAskEffort},
+				pfmengine.OpenCode: {Model: "gpt-5.6-luna", Effort: defaultAskEffort},
+				pfmengine.Claude:   {Model: "claude-haiku-4-5", Effort: defaultAskEffort},
 			},
 		},
 		Sources: sources,
@@ -641,31 +650,6 @@ func hasValidAccountCredentials(configDir string) bool {
 	return json.Unmarshal(body, &marker) == nil && strings.TrimSpace(marker.OAuth.AccessToken) != ""
 }
 
-// hasValidCodexCredentials reports whether home/auth.json is the real Codex
-// CLI shape: access_token and account_id both live INSIDE tokens. An absent
-// file is the ordinary "no account here" case (ok=false, err=nil). Any other
-// read failure (permission denied, etc.) is NOT folded into that silence —
-// it comes back as a non-nil error the caller must surface, never swallow.
-func hasValidCodexCredentials(home string) (bool, error) {
-	body, err := os.ReadFile(filepath.Join(home, "auth.json"))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	var marker struct {
-		Tokens struct {
-			AccessToken string `json:"access_token"`
-			AccountID   string `json:"account_id"`
-		} `json:"tokens"`
-	}
-	valid := json.Unmarshal(body, &marker) == nil &&
-		strings.TrimSpace(marker.Tokens.AccessToken) != "" &&
-		strings.TrimSpace(marker.Tokens.AccountID) != ""
-	return valid, nil
-}
-
 func skipsOutsideDir(skips []AccountSkip, root string) []AccountSkip {
 	filtered := make([]AccountSkip, 0, len(skips))
 	for _, skip := range skips {
@@ -691,6 +675,10 @@ func loadWithMCPServers(
 	registered map[string]MCPServer,
 	codexHomes ...string,
 ) (Config, error) {
+	openCodeHome := openCodeAccountHome(home)
+	if _, err := openCodeStoreExists(openCodeHome); err != nil {
+		return Config{}, fmt.Errorf("discover OpenCode account data %s: %w", openCodeHome, err)
+	}
 	result := defaultsWithMCPServers(home, projectRoots, registered, codexHomes...)
 	if path == "" {
 		path = resolveExistingPath(home)

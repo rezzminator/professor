@@ -18,8 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/jsonschema-go/jsonschema"
-
 	"hostops/pfm/internal/atomicfile"
 	"hostops/pfm/internal/clock"
 	pfmconfig "hostops/pfm/internal/config"
@@ -32,6 +30,10 @@ import (
 const (
 	maxCapturedOutput = 8 << 20
 	jsonNull          = "null"
+	// One spelling per JSON literal the engine event parsers read and write.
+	jsonKeyType    = "type"
+	jsonEventText  = "text"
+	jsonEventError = "error"
 )
 
 // ErrStructuredOutput means that a requested schema was not satisfied by the
@@ -80,17 +82,18 @@ type Request struct {
 	// WithoutAccount is reserved for controlled diagnostic/native captures.
 	// It requires a complete explicit Env and never derives identity from a
 	// configured roster; ordinary callers must resolve a roster account.
-	WithoutAccount     bool
-	Stdin              io.Reader
-	Stdout             io.Writer
-	Stderr             io.Writer
-	Native             bool
-	Clock              clock.Clock
-	Runner             deps.Runner
-	systemPromptFile   string
-	schemaFilePath     string
-	binaryPath         string
-	unsupportedOptions []string
+	WithoutAccount      bool
+	Stdin               io.Reader
+	Stdout              io.Writer
+	Stderr              io.Writer
+	Native              bool
+	Clock               clock.Clock
+	Runner              deps.Runner
+	systemPromptFile    string
+	schemaFilePath      string
+	binaryPath          string
+	unsupportedOptions  []string
+	openCodePluginReady string
 }
 
 // TokenUsage is every way an engine can bill one call. Claude's usage block splits the input
@@ -145,10 +148,6 @@ func Resolve(request Request) (Request, error) {
 	if _, err := pfmengine.Lookup(request.Engine); err != nil {
 		return Request{}, err
 	}
-	if request.Engine == pfmengine.OpenCode {
-		return Request{}, fmt.Errorf("OpenCode does not support headless runs")
-	}
-
 	binary, accounts := configuredEngineAccounts(request)
 	rosterPresent := !request.WithoutAccount && (request.Account != 0 || len(accounts) > 0)
 	if !request.WithoutAccount && request.Account == 0 && len(accounts) > 0 {
@@ -191,6 +190,16 @@ func Resolve(request Request) (Request, error) {
 				request.ConfigDir = value
 			}
 		}
+		// OpenCode exports no home variable of its own: its data home is
+		// XDG_DATA_HOME/opencode, so that is where a without-account run's
+		// explicit environment names the account directory.
+		if request.Engine == pfmengine.OpenCode && request.ConfigDir == "" {
+			for _, entry := range request.Env {
+				if value, ok := strings.CutPrefix(entry, "XDG_DATA_HOME="); ok && value != "" {
+					request.ConfigDir = filepath.Join(value, openCodeDataDirName())
+				}
+			}
+		}
 	} else if !rosterPresent {
 		return Request{}, fmt.Errorf("%s account roster is empty; configure an account", request.Engine)
 	}
@@ -206,14 +215,31 @@ func Resolve(request Request) (Request, error) {
 		return Request{}, fmt.Errorf("resolve %s binary %q: %w", request.Engine, binary, err)
 	}
 	request.binaryPath = binaryPath
-	if !request.Native {
+	// OpenCode needs a model even for a native pass-through: its `run` has no
+	// configured default the way Claude's and Codex's CLIs do.
+	if !request.Native || request.Engine == pfmengine.OpenCode {
 		prefs := request.Config.Ask.PrefsFor(request.Engine)
+		if request.Engine == pfmengine.OpenCode {
+			codexPrefs := request.Config.Ask.PrefsFor(pfmengine.Codex)
+			if prefs.Model == "" {
+				prefs.Model = codexPrefs.Model
+			}
+			if prefs.Effort == "" {
+				prefs.Effort = codexPrefs.Effort
+			}
+		}
 		if request.Model == "" {
 			request.Model = prefs.Model
 		}
 		if request.Effort == "" {
 			request.Effort = prefs.Effort
 		}
+	}
+	if request.Engine == pfmengine.OpenCode && request.Effort != "" && !openCodeEffortSupported(request.Effort) {
+		return Request{}, fmt.Errorf(
+			"OpenCode does not support reasoning effort %q (want none, minimal, low, medium, high, or xhigh)",
+			request.Effort,
+		)
 	}
 	if request.Sealed {
 		if request.SystemPrompt == nil {
@@ -306,6 +332,12 @@ func configuredEngineAccounts(request Request) (string, []configuredEngineAccoun
 				binary:    strings.TrimSpace(request.Config.EffectiveCodex(account.ID).Binary),
 			})
 		}
+	case pfmengine.OpenCode:
+		binary = strings.TrimSpace(request.Config.OpenCode.Binary)
+		accounts = make([]configuredEngineAccount, 0, len(request.Config.OpenCodeAccounts))
+		for _, account := range request.Config.OpenCodeAccounts {
+			accounts = append(accounts, configuredEngineAccount{id: account.ID, configDir: account.Home})
+		}
 	}
 	if binary == "" {
 		binary = pfmengine.MustLookup(request.Engine).Binary
@@ -380,6 +412,16 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		ctx, cancel = context.WithTimeout(parent, request.Timeout)
 		defer cancel()
 	}
+	// The engine process is not always the last thing a run waits on: an
+	// OpenCode run reads the persisted assistant message after `run --attach`
+	// returns. Stamping the duration here, last, keeps the receipt honest
+	// instead of reporting only the part that happened to be a subprocess.
+	defer func() {
+		result.Duration = runClock.Now().Sub(started)
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			result.TimedOut = true
+		}
+	}()
 
 	cwd := request.CWD
 	cleanup := func() error { return nil }
@@ -411,7 +453,9 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 			}
 		}
 	}()
-	if request.SystemPrompt != nil && (request.Engine == pfmengine.Claude || request.Engine == pfmengine.Codex) {
+	if request.SystemPrompt != nil &&
+		(request.Engine == pfmengine.Claude || request.Engine == pfmengine.Codex ||
+			request.Engine == pfmengine.OpenCode) {
 		name, removePrompt, fileErr := writeHeadlessScratch(
 			request.TempDir,
 			"pfm-headless-system-*.txt",
@@ -427,7 +471,7 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 			return previousCleanup()
 		}
 	}
-	if request.Schema != nil && request.Engine == pfmengine.Codex {
+	if request.Schema != nil && (request.Engine == pfmengine.Codex || request.Engine == pfmengine.OpenCode) {
 		name, removeSchema, fileErr := writeHeadlessScratch(
 			request.TempDir,
 			"pfm-headless-schema-*.json",
@@ -448,12 +492,28 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 	if err != nil {
 		return result, err
 	}
-	argv := append([]string{request.binaryPath}, args...)
 	environment := os.Environ()
 	if request.Env != nil {
 		environment = append([]string(nil), request.Env...)
 	}
 	setEnvironment(environment, request.Engine, request.ConfigDir, request.Env != nil, &environment)
+	var openCode openCodeRun
+	if request.Engine == pfmengine.OpenCode {
+		openCode, err = startOpenCode(ctx, &request, environment, cwd)
+		if err != nil {
+			return result, err
+		}
+		previousCleanup := cleanup
+		cleanup = func() error { return openCode.stop(previousCleanup) }
+		environment = openCode.environment
+		args = attachOpenCodeRun(args, openCode.address)
+		if request.Schema != nil {
+			if err := primeOpenCodeSchema(ctx, openCode.address, cwd, environment, request); err != nil {
+				return result, err
+			}
+		}
+	}
+	argv := append([]string{request.binaryPath}, args...)
 	if request.Stdin == nil {
 		request.Stdin = strings.NewReader(request.Prompt)
 	}
@@ -465,9 +525,11 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 		Stdout: writerFor(request.Stdout, &stdout), Stderr: writerFor(request.Stderr, &stderr),
 		ProcessGroup: true, WaitDelay: processWaitAfterCancel,
 	})
-	result.Duration = runClock.Now().Sub(started)
 	result.Stdout, result.Stderr = stdout.String(), stderr.String()
 	result.ExitCode = processExitCode(runErr)
+	if request.Engine == pfmengine.OpenCode && runErr == nil {
+		runErr = applyOpenCodeRunOutput(ctx, openCode.address, cwd, environment, &result, request)
+	}
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		result.TimedOut = true
 		result.IsError = true
@@ -488,6 +550,10 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 				boundedTail(result.Stderr, 1024),
 			)
 		}
+		if err := verifyOpenCodePluginFor(request); err != nil {
+			result.IsError = true
+			return result, err
+		}
 		return result, nil
 	}
 	if stdout.truncated || stderr.truncated {
@@ -506,6 +572,10 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 			boundedTail(result.Stderr, 1024),
 			boundedTail(result.Stdout, 1024),
 		)
+	}
+	if err := verifyOpenCodePluginFor(request); err != nil {
+		result.IsError = true
+		return result, err
 	}
 	if err := parseOutput(&result, request); err != nil {
 		result.IsError = true
@@ -581,6 +651,22 @@ func arguments(request Request) ([]string, error) {
 		}
 		if !request.Native {
 			args = append(args, "--skip-git-repo-check", "--color", "never")
+		}
+	case pfmengine.OpenCode:
+		if len(request.Args) != 0 {
+			if err := validateOpenCodeArgs(request.Args, request); err != nil {
+				return nil, err
+			}
+		}
+		args = append(args, "run")
+		if request.Model != "" {
+			args = append(args, "--model", openCodeModel(request.Model))
+		}
+		if request.Effort != "" {
+			args = append(args, "--variant", request.Effort)
+		}
+		if !request.Native {
+			args = append(args, "--format", "json")
 		}
 	default:
 		return nil, fmt.Errorf("engine %s does not support headless runs", request.Engine)
@@ -671,287 +757,4 @@ func processExitCode(err error) int {
 		return 0
 	}
 	return deps.ExitCode(err)
-}
-
-type claudeEnvelope struct {
-	Result     json.RawMessage `json:"result"`
-	Structured json.RawMessage `json:"structured_output"`
-	Usage      json.RawMessage `json:"usage"`
-	ModelUsage json.RawMessage `json:"modelUsage"`
-	TotalCost  json.RawMessage `json:"total_cost_usd"`
-	IsError    bool            `json:"is_error"`
-}
-
-// parseModelUsage sums Claude's per-model `modelUsage` totals — the whole session, every API
-// turn. The envelope's `usage` block is the LAST turn only, while `total_cost_usd` is the sum: a
-// seat that took a second turn (a structured-output retry, a tool call) reported ~2k input tokens
-// against a cost that says 60k. Nil when the block is absent or empty.
-func parseModelUsage(raw json.RawMessage) (*TokenUsage, error) {
-	if len(raw) == 0 || string(raw) == jsonNull {
-		return nil, nil
-	}
-	var models map[string]struct {
-		Input         int `json:"inputTokens"`
-		Output        int `json:"outputTokens"`
-		CacheRead     int `json:"cacheReadInputTokens"`
-		CacheCreation int `json:"cacheCreationInputTokens"`
-	}
-	if err := json.Unmarshal(raw, &models); err != nil {
-		return nil, err
-	}
-	if len(models) == 0 {
-		return nil, nil
-	}
-	usage := &TokenUsage{}
-	for name, m := range models {
-		if m.Input < 0 || m.Output < 0 || m.CacheRead < 0 || m.CacheCreation < 0 {
-			return nil, fmt.Errorf("modelUsage %s: negative token count", name)
-		}
-		usage.Input += m.Input
-		usage.Output += m.Output
-		usage.CachedInput += m.CacheRead
-		usage.CacheCreation += m.CacheCreation
-	}
-	return usage, nil
-}
-
-func parseOutput(result *Result, request Request) error {
-	switch request.Engine {
-	case pfmengine.Claude:
-		var envelope claudeEnvelope
-		if err := json.Unmarshal([]byte(result.Stdout), &envelope); err != nil {
-			return fmt.Errorf("parse Claude JSON envelope: %w", err)
-		}
-		result.IsError = envelope.IsError
-		if len(envelope.Result) > 0 && string(envelope.Result) != jsonNull {
-			if err := json.Unmarshal(envelope.Result, &result.Answer); err != nil {
-				return fmt.Errorf("parse Claude result: %w", err)
-			}
-		}
-		result.StructuredOutput = append(json.RawMessage(nil), envelope.Structured...)
-		var err error
-		result.Usage, err = parseTokenUsage(envelope.Usage)
-		if err != nil {
-			return fmt.Errorf("parse Claude usage: %w", err)
-		}
-		if whole, err := parseModelUsage(envelope.ModelUsage); err != nil {
-			return fmt.Errorf("parse Claude modelUsage: %w", err)
-		} else if whole != nil {
-			result.Usage = whole // every turn, not the last one
-		}
-		result.TotalCostUSD, err = parseCost(envelope.TotalCost)
-		if err != nil {
-			return fmt.Errorf("parse Claude cost: %w", err)
-		}
-		if result.IsError {
-			return fmt.Errorf("headless envelope reported an error for Claude")
-		}
-	case pfmengine.Codex:
-		if err := parseCodexJSONL(result, request); err != nil {
-			return err
-		}
-	default:
-		return fmt.Errorf("engine %s does not support normalized output", request.Engine)
-	}
-	if request.Schema != nil {
-		if len(result.StructuredOutput) == 0 {
-			return fmt.Errorf("%w: engine did not return structured_output", ErrStructuredOutput)
-		}
-		if err := validateInstance(request.Schema, result.StructuredOutput); err != nil {
-			return fmt.Errorf("%w: %v", ErrStructuredOutput, err)
-		}
-		if result.Answer == "" {
-			result.Answer = string(result.StructuredOutput)
-		}
-	} else if strings.TrimSpace(result.Answer) == "" {
-		return fmt.Errorf("%s headless output contains no answer", request.Engine)
-	}
-	return nil
-}
-
-func parseCodexJSONL(result *Result, request Request) error {
-	var terminal bool
-	for lineNo, line := range strings.Split(result.Stdout, "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		var event struct {
-			Type    string          `json:"type"`
-			Message string          `json:"message"`
-			Item    json.RawMessage `json:"item"`
-			Usage   json.RawMessage `json:"usage"`
-			Error   json.RawMessage `json:"error"`
-		}
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			return fmt.Errorf("parse Codex JSONL event %d: %w", lineNo+1, err)
-		}
-		if event.Type == "" {
-			return fmt.Errorf("event %d from Codex has no type", lineNo+1)
-		}
-		switch event.Type {
-		case "error":
-			// Codex uses error events for retries as well as failures. Only a
-			// subsequent terminal success proves that the engine recovered.
-			if terminal {
-				result.Answer = ""
-			}
-			terminal = false
-			message := event.Message
-			if message == "" {
-				message = "Codex reported an error"
-			}
-			result.Diagnostics = append(result.Diagnostics, message)
-		case "turn.failed", "thread.failed":
-			return fmt.Errorf("headless event %s from Codex: %s", event.Type, event.Error)
-		case "turn.started":
-			terminal = false
-			result.Answer = ""
-		case "turn.completed":
-			if len(event.Error) != 0 && string(event.Error) != jsonNull {
-				return fmt.Errorf("turn.completed event from Codex contains an error")
-			}
-			terminal = true
-			var err error
-			result.Usage, err = parseTokenUsage(event.Usage)
-			if err != nil {
-				return fmt.Errorf("parse Codex usage: %w", err)
-			}
-		case "item.completed":
-			var item struct {
-				Type    string `json:"type"`
-				Text    string `json:"text"`
-				Message string `json:"message"`
-			}
-			if err := json.Unmarshal(event.Item, &item); err != nil {
-				return fmt.Errorf("parse Codex completed item: %w", err)
-			}
-			if item.Type == "agent_message" {
-				result.Answer = item.Text
-			} else if item.Type == "error" && item.Message != "" {
-				result.Diagnostics = append(result.Diagnostics, item.Message)
-			}
-		}
-	}
-	if !terminal {
-		return fmt.Errorf("missing terminal success event in headless output from Codex")
-	}
-	if strings.TrimSpace(result.Answer) == "" {
-		return fmt.Errorf("headless output from Codex contains no completed answer")
-	}
-	if request.Schema != nil {
-		result.StructuredOutput = json.RawMessage(result.Answer)
-	}
-	return nil
-}
-
-func parseTokenUsage(raw json.RawMessage) (*TokenUsage, error) {
-	if len(raw) == 0 || string(raw) == jsonNull {
-		return nil, nil
-	}
-	var values map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &values); err != nil {
-		return nil, err
-	}
-	usage := &TokenUsage{}
-	known := false
-	for _, field := range []struct {
-		names  []string
-		target *int
-	}{
-		{[]string{"input_tokens", "prompt_tokens"}, &usage.Input},
-		{[]string{"cached_input_tokens", "cache_read_input_tokens", "cached_tokens"}, &usage.CachedInput},
-		{[]string{"cache_creation_input_tokens", "cache_write_input_tokens"}, &usage.CacheCreation},
-		{[]string{"output_tokens", "completion_tokens"}, &usage.Output},
-	} {
-		for _, name := range field.names {
-			value, present := values[name]
-			if !present || string(value) == jsonNull {
-				continue
-			}
-			if err := json.Unmarshal(value, field.target); err != nil {
-				return nil, fmt.Errorf("%s: %w", name, err)
-			}
-			if *field.target < 0 {
-				return nil, fmt.Errorf("%s must be nonnegative", name)
-			}
-			known = true
-			break
-		}
-	}
-	if !known {
-		return nil, nil
-	}
-	return usage, nil
-}
-
-func parseCost(raw json.RawMessage) (*float64, error) {
-	if len(raw) == 0 || string(raw) == jsonNull {
-		return nil, nil
-	}
-	var cost float64
-	if err := json.Unmarshal(raw, &cost); err != nil {
-		return nil, err
-	}
-	if cost < 0 {
-		return nil, fmt.Errorf("cost must be nonnegative")
-	}
-	return &cost, nil
-}
-
-func validateSchema(raw json.RawMessage) error {
-	if strings.TrimSpace(string(raw)) == jsonNull {
-		return fmt.Errorf("invalid output schema: null is not a JSON Schema")
-	}
-	var schema jsonschema.Schema
-	if err := json.Unmarshal(raw, &schema); err != nil {
-		return fmt.Errorf("invalid output schema: %w", err)
-	}
-	if _, err := schema.Resolve(nil); err != nil {
-		return fmt.Errorf("invalid output schema: %w", err)
-	}
-	return nil
-}
-
-func validateInstance(schemaRaw, instanceRaw json.RawMessage) error {
-	var schema jsonschema.Schema
-	if err := json.Unmarshal(schemaRaw, &schema); err != nil {
-		return err
-	}
-	resolved, err := schema.Resolve(nil)
-	if err != nil {
-		return err
-	}
-	var instance any
-	if err := json.Unmarshal(instanceRaw, &instance); err != nil {
-		return err
-	}
-	return resolved.Validate(instance)
-}
-
-// failureDiagnostics is what a failed engine run leaves in the receipt: the stderr and stdout
-// tails, and — for a Claude envelope on stdout — the error line the envelope carried.
-func failureDiagnostics(result Result) []string {
-	var lines []string
-	if tail := boundedTail(result.Stderr, 1024); tail != "" {
-		lines = append(lines, "stderr: "+tail)
-	}
-	if tail := boundedTail(result.Stdout, 1024); tail != "" {
-		lines = append(lines, "stdout: "+tail)
-	}
-	var envelope claudeEnvelope
-	if err := json.Unmarshal([]byte(result.Stdout), &envelope); err == nil && envelope.IsError {
-		var text string
-		if json.Unmarshal(envelope.Result, &text) == nil && text != "" {
-			lines = append(lines, "engine error: "+boundedTail(text, 512))
-		}
-	}
-	return lines
-}
-
-func boundedTail(value string, limit int) string {
-	value = strings.TrimSpace(value)
-	if len(value) <= limit {
-		return value
-	}
-	return value[len(value)-limit:]
 }

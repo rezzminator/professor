@@ -33,6 +33,91 @@ func writeHeadlessCLIStub(t *testing.T, body string) string {
 	return path
 }
 
+// writeHeadlessOpenCodeStub is the fake `opencode` binary the CLI tests drive:
+// `serve` is a Node loopback server answering the real endpoints pfm calls,
+// and `run` is the attached invocation. No real OpenCode binary, no network,
+// no model — the same seam every other engine stub in this file uses.
+func writeHeadlessOpenCodeStub(t *testing.T, runBody string) string {
+	t.Helper()
+	return writeHeadlessCLIStub(t, `if [ "${1:-}" = "serve" ]; then
+  node --input-type=module - "$@" <<'NODE'
+import fs from "node:fs"
+import http from "node:http"
+
+const args = process.argv.slice(2)
+const portIndex = args.indexOf("--port")
+const port = portIndex < 0 ? 0 : Number(args[portIndex + 1])
+if (!Number.isInteger(port) || port < 0) throw new Error("fake OpenCode server did not receive a port")
+const server = http.createServer((request, response) => {
+  const url = new URL(request.url ?? "/", "http://127.0.0.1")
+  if (request.method === "GET" && url.pathname === "/global/health") {
+    response.setHeader("content-type", "application/json")
+    response.end(JSON.stringify({healthy: true}))
+    return
+  }
+  if (request.method === "GET" && url.pathname === "/experimental/tool/ids") {
+    fs.writeFileSync(process.env.PFM_OPENCODE_PLUGIN_READY, "pfm-opencode-plugin-ready\n")
+    response.setHeader("content-type", "application/json")
+    response.end("[]")
+    return
+  }
+  if (request.method === "POST" && url.pathname === "/session") {
+    response.setHeader("content-type", "application/json")
+    response.end(JSON.stringify({id: "seed"}))
+    return
+  }
+  if (request.method === "POST" && url.pathname === "/session/seed/message") {
+    let body = ""
+    request.on("data", (chunk) => body += chunk)
+    request.on("end", () => {
+      try {
+        const payload = JSON.parse(body)
+        if (payload.format?.type === "json_schema" && process.env.PFM_OPENCODE_SCHEMA_READY) fs.writeFileSync(process.env.PFM_OPENCODE_SCHEMA_READY, "pfm-opencode-schema-ready\n")
+        response.setHeader("content-type", "application/json")
+        response.end(JSON.stringify({id: "seed-message"}))
+      } catch (error) {
+        response.statusCode = 400
+        response.end(String(error))
+      }
+    })
+    return
+  }
+  if (request.method === "DELETE" && url.pathname === "/session/seed") {
+    response.statusCode = 204
+    response.end()
+    return
+  }
+  if (request.method === "GET" && url.pathname.endsWith("/message/assistant-1")) {
+    const schema = Boolean(process.env.PFM_OPENCODE_SCHEMA_FILE)
+    const message = schema ? {
+      info: {role: "assistant", parentID: "user", finish: "stop", structured: {ok: true}},
+      parts: [{type: "tool", tool: "StructuredOutput", state: {status: "completed", input: {ok: true}}}, {type: "step-finish", reason: "stop"}],
+    } : {
+      info: {role: "assistant", parentID: "user", finish: "stop"},
+      parts: [{type: "text", text: "opencode answer", time: {end: 1}}, {type: "step-finish", reason: "stop"}],
+    }
+    response.setHeader("content-type", "application/json")
+    response.end(JSON.stringify(message))
+    return
+  }
+  response.statusCode = 404
+  response.end("not found")
+})
+server.listen(port, "127.0.0.1", () => console.log("opencode server listening on http://127.0.0.1:" + server.address().port))
+NODE
+  exit 0
+fi
+if [ "${1:-}" = "run" ]; then
+`+runBody+`
+  if [ -n "${PFM_OPENCODE_ASSISTANTS_FILE:-}" ]; then
+    printf '%s\n' '{"sessionID":"run","userMessageID":"user","assistantIDs":["assistant-1"]}' > "$PFM_OPENCODE_ASSISTANTS_FILE"
+  fi
+  exit 0
+fi
+echo "unexpected fake OpenCode invocation: $*" >&2
+exit 2`)
+}
+
 func headlessCLIRuntime(t *testing.T, binary string) commandRuntime {
 	return headlessCLIRuntimeFor(t, binary, pfmengine.Claude)
 }
@@ -44,6 +129,10 @@ func headlessCLIRuntimeFor(t *testing.T, binary string, engine pfmengine.ID) com
 	if engine == pfmengine.Codex {
 		config.Codex = pfmconfig.CodexPrefs{Binary: binary}
 		config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: configDir}}
+	} else if engine == pfmengine.OpenCode {
+		configDir = filepath.Join(t.TempDir(), "opencode")
+		config.OpenCode = pfmconfig.OpenCodePrefs{Binary: binary}
+		config.OpenCodeAccounts = []pfmconfig.OpenCodeAccount{{ID: 1, Home: configDir}}
 	} else {
 		config.Claude = pfmconfig.ClaudePrefs{Binary: binary}
 		config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: configDir}}
@@ -134,61 +223,11 @@ func TestHeadlessExecHelpNamesSharedInterface(t *testing.T) {
 		t.Fatalf("help exit = %d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	for _, phrase := range []string{
-		"--engine claude|codex", "--system TEXT | --system-file FILE", "--sealed",
+		"--engine claude|codex|opencode", "--system TEXT | --system-file FILE", "--sealed",
 		"--allow-unsupported", "--env KEY=VALUE", "--engine-arg ARG", "--output-format text|json|native",
 	} {
 		if !strings.Contains(stderr.String(), phrase) {
 			t.Fatalf("help omitted %q: %q", phrase, stderr.String())
-		}
-	}
-}
-
-func TestHeadlessExecCodexUnsupportedControlsRequireOptIn(t *testing.T) {
-	headlessCLIJail(t)
-	marker := filepath.Join(t.TempDir(), "started")
-	binary := writeHeadlessCLIStub(
-		t,
-		"printf started > \""+marker+"\"\nif [ -n \"${CAPTURE_DIR:-}\" ]; then printf '%s\\n' \"$@\" > \"$CAPTURE_DIR/args\"; fi\nprintf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"ok\"}}' '{\"type\":\"turn.completed\"}'",
-	)
-	commandEnv := headlessCLIRuntimeFor(t, binary, pfmengine.Codex)
-	baseArgs := []string{
-		"--engine", "codex", "--prompt", "hello", "--output-format", "json",
-		"--tools", "none", "--setting-sources", "", "--strict-mcp-config",
-	}
-	var stdout, stderr bytes.Buffer
-	code := runHeadlessExec(baseArgs, strings.NewReader(""), &stdout, &stderr, commandEnv)
-	if code != 4 || !strings.Contains(stderr.String(), "--allow-unsupported") {
-		t.Fatalf("default refusal exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("default Codex capability refusal launched engine; stat err=%v", err)
-	}
-
-	capture := t.TempDir()
-	commandEnv = headlessCLIRuntimeFor(t, binary, pfmengine.Codex)
-	stdout.Reset()
-	stderr.Reset()
-	args := append(append([]string(nil), baseArgs...), "--allow-unsupported", "--env", "CAPTURE_DIR="+capture)
-	code = runHeadlessExec(args, strings.NewReader(""), &stdout, &stderr, commandEnv)
-	if code != 0 {
-		t.Fatalf("opted-in run exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
-	}
-	var normalized map[string]any
-	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &normalized); err != nil {
-		t.Fatalf("opted-in output is not JSON: %v (%q)", err, stdout.String())
-	}
-	diagnostics, ok := normalized["diagnostics"].([]any)
-	if !ok || len(diagnostics) != 3 {
-		t.Fatalf("opted-in diagnostics = %#v", normalized["diagnostics"])
-	}
-	for _, want := range []string{"--tools", "--setting-sources", "--strict-mcp-config"} {
-		if cliHas(cliLines(t, filepath.Join(capture, "args")), want) {
-			t.Fatalf("unsupported option reached Codex argv: %s", want)
-		}
-	}
-	for _, want := range []string{"--tools", "--setting-sources", "--strict-mcp-config"} {
-		if !strings.Contains(stderr.String(), "engine diagnostic") || !strings.Contains(stderr.String(), want) {
-			t.Fatalf("stderr omitted diagnostic %s: %q", want, stderr.String())
 		}
 	}
 }
@@ -246,19 +285,21 @@ func TestHeadlessExecLabInvocationBothEngines(t *testing.T) {
 		id   pfmengine.ID
 	}{
 		{name: "claude", id: pfmengine.Claude},
-		{name: "codex", id: pfmengine.Codex},
+		{name: "opencode", id: pfmengine.OpenCode},
 	} {
 		t.Run(engine.name, func(t *testing.T) {
 			capture := t.TempDir()
-			binary := writeHeadlessCLIStub(t, strings.Join([]string{
-				"cat > \"$CAPTURE_DIR/prompt\"",
-				"printf '%s\n' \"$@\" > \"$CAPTURE_DIR/args\"",
-				"if [ \"$ENGINE_KIND\" = codex ]; then",
-				"  printf '%s\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"{\\\"ok\\\":true}\"}}' '{\"type\":\"turn.completed\"}'",
-				"else",
-				"  printf '%s\n' '{\"result\":\"ok\",\"structured_output\":{\"ok\":true},\"total_cost_usd\":null}'",
-				"fi",
-			}, "\n"))
+			var binary string
+			if engine.id == pfmengine.OpenCode {
+				binary = writeHeadlessOpenCodeStub(t, "cat > \"$CAPTURE_DIR/prompt\"\n"+
+					"printf '%s\n' \"$@\" > \"$CAPTURE_DIR/args\"")
+			} else {
+				binary = writeHeadlessCLIStub(t, strings.Join([]string{
+					"cat > \"$CAPTURE_DIR/prompt\"",
+					"printf '%s\n' \"$@\" > \"$CAPTURE_DIR/args\"",
+					"printf '%s\n' '{\"result\":\"ok\",\"structured_output\":{\"ok\":true},\"total_cost_usd\":null}'",
+				}, "\n"))
+			}
 			commandEnv := headlessCLIRuntimeFor(t, binary, engine.id)
 			first := filepath.Join(t.TempDir(), "prompt.md")
 			second := filepath.Join(t.TempDir(), "input.md")
@@ -290,14 +331,13 @@ func TestHeadlessExecLabInvocationBothEngines(t *testing.T) {
 				"--schema", schema,
 				"--output-format", "json",
 				"--out", out,
-				"--model", "model-x",
+				"--model", "gpt-model-x",
 				"--effort", "high",
-				"--timeout", "5",
+				"--timeout", "20",
 				"--config-dir", cliConfigDir(commandEnv, engine.id),
 				"--system-file", system,
 				"--receipt", receipt,
 				"--env", "CAPTURE_DIR=" + capture,
-				"--env", "ENGINE_KIND=" + engine.name,
 			}
 			if engine.id == pfmengine.Claude {
 				args = append(args, "--sealed")
@@ -340,8 +380,8 @@ func TestHeadlessExecLabInvocationBothEngines(t *testing.T) {
 						t.Fatalf("sealed Claude argv missing %q: %#v", want, argsSeen)
 					}
 				}
-			} else if !cliHas(argsSeen, "model_reasoning_effort=\"high\"") {
-				t.Fatalf("Codex effort mapping missing: %#v", argsSeen)
+			} else if !cliHas(argsSeen, "--variant") || !cliHas(argsSeen, "high") {
+				t.Fatalf("OpenCode effort mapping missing: %#v", argsSeen)
 			}
 		})
 	}
@@ -566,9 +606,152 @@ func TestHeadlessExecConcurrentCallsKeepInputsIndependent(t *testing.T) {
 	}
 }
 
+func TestHeadlessExecCodexSelectorRoutesToOpenCode(t *testing.T) {
+	headlessCLIJail(t)
+	for _, testCase := range []struct {
+		name       string
+		selector   string
+		wantModel  string
+		wantEffort string
+	}{
+		{name: "codex compatibility selector", selector: "codex", wantModel: "codex-model", wantEffort: "high"},
+		{name: "opencode selector", selector: "opencode", wantModel: "opencode-model", wantEffort: "medium"},
+		{name: "configured default", selector: "", wantModel: "codex-model", wantEffort: "high"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			capture := t.TempDir()
+			binary := writeHeadlessOpenCodeStub(t, `printf '%s\n' "$@" > "$CAPTURE_DIR/args"`)
+			configDir := filepath.Join(t.TempDir(), "opencode")
+			config := pfmconfig.Config{
+				OpenCode:         pfmconfig.OpenCodePrefs{Binary: binary},
+				OpenCodeAccounts: []pfmconfig.OpenCodeAccount{{ID: 1, Home: configDir}},
+				Ask: pfmconfig.AskConfig{
+					Engine: pfmengine.Codex,
+					Prefs: map[pfmengine.ID]pfmconfig.EnginePrefs{
+						pfmengine.Codex:    {Model: "codex-model", Effort: "high"},
+						pfmengine.OpenCode: {Model: "opencode-model", Effort: "medium"},
+					},
+				},
+			}
+			if testCase.selector == "" {
+				config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(t.TempDir(), "codex")}}
+			}
+			commandEnv := commandRuntime{
+				Config: config,
+				Paths:  paths.Values{SIDDir: filepath.Join(t.TempDir(), "sid")},
+			}
+			args := []string{
+				"--prompt", "hello", "--output-format", "json",
+				"--timeout", "20", "--env", "CAPTURE_DIR=" + capture,
+			}
+			if testCase.selector != "" {
+				args = append(args, "--engine", testCase.selector)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := runHeadlessExec(args, strings.NewReader(""), &stdout, &stderr, commandEnv); code != 0 {
+				t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+			var normalized map[string]any
+			if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &normalized); err != nil {
+				t.Fatalf("normalized output is not JSON: %v (%q)", err, stdout.String())
+			}
+			if normalized["engine"] != "ox" || normalized["result"] != "opencode answer" {
+				t.Fatalf("normalized result = %#v, want the OpenCode ox answer", normalized)
+			}
+			seen := cliLines(t, filepath.Join(capture, "args"))
+			if len(seen) < 3 || seen[0] != "run" || seen[1] != "--attach" ||
+				!strings.HasPrefix(seen[2], "http://127.0.0.1:") {
+				t.Fatalf("OpenCode argv missing the attached server = %#v", seen)
+			}
+			want := []string{"--model", testCase.wantModel, "--variant", testCase.wantEffort, "--format", "json"}
+			modelIndex := cliIndex(seen, "--model")
+			if modelIndex < 0 {
+				t.Fatalf("OpenCode argv omitted --model: %#v", seen)
+			}
+			for index, value := range want {
+				if modelIndex+index >= len(seen) || seen[modelIndex+index] != value {
+					t.Fatalf("OpenCode argv = %#v, want mapped controls %#v", seen, want)
+				}
+			}
+			if cliHas(seen, "exec") {
+				t.Fatalf("the codex compatibility selector launched the native Codex CLI: %#v", seen)
+			}
+		})
+	}
+}
+
+func TestHeadlessExecOpenCodeMapsCommonControlsToPrivateEnvironment(t *testing.T) {
+	headlessCLIJail(t)
+	capture := t.TempDir()
+	binary := writeHeadlessOpenCodeStub(t, `printf '%s\n' "$@" > "$CAPTURE_DIR/args"
+cat "$PFM_OPENCODE_SYSTEM_FILE" > "$CAPTURE_DIR/system"
+cat "$PFM_OPENCODE_SCHEMA_FILE" > "$CAPTURE_DIR/schema"
+printf '%s\n' "$PFM_OPENCODE_ALLOWED_TOOLS_JSON" > "$CAPTURE_DIR/permission"
+printf '%s\n' "$OPENCODE_CONFIG_CONTENT" > "$CAPTURE_DIR/config"
+printf '%s\n' "$XDG_DATA_HOME" > "$CAPTURE_DIR/data-home"`)
+	commandEnv := headlessCLIRuntimeFor(t, binary, pfmengine.OpenCode)
+	system := filepath.Join(t.TempDir(), "system.txt")
+	schema := filepath.Join(t.TempDir(), "schema.json")
+	if err := os.WriteFile(system, []byte("replacement"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	schemaBody := `{"type":"object","required":["ok"],"properties":{"ok":{"type":"boolean"}}}`
+	if err := os.WriteFile(schema, []byte(schemaBody), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := runHeadlessExec([]string{
+		"--engine", "codex", "--prompt", "hello", "--output-format", "json",
+		"--model", "gpt-5.6-luna", "--effort", "high", "--system-file", system,
+		"--schema", schema, "--tools", "bash,read", "--setting-sources", "user",
+		"--strict-mcp-config", "--no-session-persistence", "--cwd", t.TempDir(),
+		"--timeout", "20", "--env", "CAPTURE_DIR=" + capture,
+	}, strings.NewReader(""), &stdout, &stderr, commandEnv)
+	if code != 0 {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	args := cliLines(t, filepath.Join(capture, "args"))
+	for _, want := range []string{"run", "--model", "openai/gpt-5.6-luna", "--variant", "high", "--format", "json"} {
+		if !cliHas(args, want) {
+			t.Fatalf("OpenCode common argv mapping omitted %q: %#v", want, args)
+		}
+	}
+	for _, unwanted := range []string{
+		"exec", "--tools", "--setting-sources", "--strict-mcp-config", "--no-session-persistence",
+	} {
+		if cliHas(args, unwanted) {
+			t.Fatalf("a Claude/Codex-only flag leaked into OpenCode argv: %q in %#v", unwanted, args)
+		}
+	}
+	if got := string(mustReadCLI(t, filepath.Join(capture, "system"))); got != "replacement" {
+		t.Fatalf("system prompt = %q", got)
+	}
+	if got := string(mustReadCLI(t, filepath.Join(capture, "schema"))); got != schemaBody {
+		t.Fatalf("schema = %q", got)
+	}
+	var permission []string
+	if err := json.Unmarshal(
+		bytes.TrimSpace(mustReadCLI(t, filepath.Join(capture, "permission"))),
+		&permission,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(permission) != 3 || !cliHas(permission, "bash") || !cliHas(permission, "read") ||
+		!cliHas(permission, "StructuredOutput") {
+		t.Fatalf("tool permission mapping = %#v", permission)
+	}
+	accountDataHome := filepath.Dir(commandEnv.Config.OpenCodeAccounts[0].Home)
+	if got := strings.TrimSpace(string(mustReadCLI(t, filepath.Join(capture, "data-home")))); got == accountDataHome {
+		t.Fatalf("no-session persistence reused the configured data home %q", got)
+	}
+}
+
 func cliConfigDir(commandEnv commandRuntime, engine pfmengine.ID) string {
 	if engine == pfmengine.Codex {
 		return commandEnv.Config.CodexAccounts[0].Home
+	}
+	if engine == pfmengine.OpenCode {
+		return commandEnv.Config.OpenCodeAccounts[0].Home
 	}
 	return commandEnv.Config.Accounts[0].ConfigDir
 }
@@ -589,6 +772,15 @@ func cliHas(values []string, wanted string) bool {
 		}
 	}
 	return false
+}
+
+func cliIndex(values []string, wanted string) int {
+	for index, value := range values {
+		if value == wanted {
+			return index
+		}
+	}
+	return -1
 }
 
 func mustReadCLI(t *testing.T, path string) []byte {

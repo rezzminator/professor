@@ -66,10 +66,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 	}
 	sharedState := fleetdb.OpenSharedState(context.Background(), runtime.Paths)
 	resolver, err := resolve.New(nil, resolve.Binaries{
-		Values: map[pfmengine.ID]string{
-			pfmengine.Claude: runtime.ClaudeBinary,
-			pfmengine.Codex:  runtime.CodexBinary,
-		},
+		Values:        engineBinaries(runtime),
 		AccountEmojis: accountEmojis(runtime.Accounts),
 	})
 	if err != nil {
@@ -109,6 +106,20 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 
 func (current *backend) close() error {
 	return errors.Join(current.database.Close(), current.sharedState.Close())
+}
+
+// engineBinaries is the MCP process's configured engine executables, one entry
+// per REGISTERED engine. The shared resolver and the inject engine read the
+// same map: the resolver used to be built from a Claude+Codex literal while
+// inject.New built its own from all three, so an OpenCode pane was resolved
+// here against a table that did not know the engine existed — and the next
+// engine would land half-configured the same way.
+func engineBinaries(runtime Runtime) map[pfmengine.ID]string {
+	return map[pfmengine.ID]string{
+		pfmengine.Claude:   runtime.ClaudeBinary,
+		pfmengine.Codex:    runtime.CodexBinary,
+		pfmengine.OpenCode: runtime.OpenCodeBinary,
+	}
 }
 
 func accountEmojis(accounts []pfmconfig.Account) []string {

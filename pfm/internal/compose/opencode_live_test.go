@@ -100,6 +100,33 @@ func TestUnidentifiedLiveOpenCodeRowUsesItsPaneTitle(t *testing.T) {
 	}
 }
 
+// An unidentified seat whose pane title is NOT OpenCode's own (a fresh TUI
+// still wearing the terminal's title — on a live host, the machine hostname)
+// is listed under its socket name: the row's ID. A row wearing a name that
+// resolves to nothing is a chat nobody can address, which is the original
+// defect wearing a new costume.
+func TestUnidentifiedLiveOpenCodeRowWithoutTheOCPrefixIsNamedForItsSocket(t *testing.T) {
+	socket := "ox-1700000000-42-11"
+	output := Compose(openCodeLiveInput(
+		[]gather.LiveOpenCode{{
+			Socket: socket, SessionName: "ox-session", PaneID: "%3",
+			PID: 201, PanePID: 200, CWD: "/work/z",
+			PaneTitle: "my-host-01",
+		}},
+		[]gather.ProbePane{openCodePane(socket, "%3", "/work/z", 200)},
+	))
+	for _, row := range output.Rows {
+		if row.Kind != LiveOpenCode {
+			continue
+		}
+		if row.Name != socket || row.ID != socket {
+			t.Fatalf("row = %+v, want the socket name for both ID and Name", row)
+		}
+		return
+	}
+	t.Fatalf("no live-opencode row in %#v", output.Rows)
+}
+
 // A running TUI the user is typing into must never be suppressed as "empty":
 // an unidentified seat carries no counters at all, and even an identified one
 // is only as full as the engine's own store has caught up to.

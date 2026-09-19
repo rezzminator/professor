@@ -396,7 +396,11 @@ func TestCommandThenSpawnerFallsBackToNohup(t *testing.T) {
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		raw, readErr := os.ReadFile(dump)
-		if readErr == nil {
+		// The stub's `> dump` redirect CREATES the file before printf writes a
+		// byte into it, so an empty read is "not yet", never "the stub ran and
+		// passed no arguments" — under a loaded parallel suite that race is the
+		// whole difference between this test and a false red.
+		if readErr == nil && len(raw) > 0 {
 			arguments := string(raw)
 			if !strings.Contains(arguments, "pfm-candidate internal then") ||
 				strings.Contains(arguments, "-f ") {
@@ -405,7 +409,9 @@ func TestCommandThenSpawnerFallsBackToNohup(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("nohup stub never ran: %v", readErr)
+			// Name which of the two happened: no dump file at all (the stub
+			// never ran) or an empty one (it ran and wrote nothing).
+			t.Fatalf("nohup stub wrote no arguments within the deadline: read error %v, bytes %d", readErr, len(raw))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

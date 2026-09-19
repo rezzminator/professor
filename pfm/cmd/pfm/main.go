@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 
+	"hostops/pfm/internal/binwatch"
+	pfmchat "hostops/pfm/internal/chat"
 	"hostops/pfm/internal/cli"
 	"hostops/pfm/internal/clock"
 	"hostops/pfm/internal/config"
@@ -293,11 +295,16 @@ func runMCP(
 		return 1
 	}
 	defer func() { cli.CloseResource(service, "pfm mcp: close service", stderr, &exitCode) }()
-	if err := service.RunStdio(
-		context.Background(),
-		os.Stdin,
-		os.Stdout,
-	); err != nil {
+	// A chat launches this server once and never closes it, so without a watch
+	// it answers from the build it started on for the whole session — days,
+	// across every install in between (binwatch.Guard).
+	ctx, wasReplaced, stopGuard := binwatch.Guard(context.Background(), stderr)
+	defer stopGuard()
+	err = service.RunStdio(ctx, os.Stdin, os.Stdout)
+	if wasReplaced() {
+		return binwatch.ExitReplaced
+	}
+	if err != nil {
 		fmt.Fprintf(stderr, "pfm mcp: %v\n", err)
 		return 1
 	}
@@ -374,7 +381,10 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "killed %s\n", target.ID)
+	fmt.Fprintln(stdout, pfmchat.KillOutcome(
+		target.ID, target.SocketName, target.PaneID,
+		!pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName),
+	))
 	return 0
 }
 

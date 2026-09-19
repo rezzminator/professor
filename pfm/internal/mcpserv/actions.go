@@ -333,5 +333,17 @@ func (service *Service) cliAction(ctx context.Context, args ...string) (*mcp.Cal
 		output := ActionOutput{Status: statusError, Code: code, Message: message}
 		return nil, output, fmt.Errorf("pfm %s exited %d: %s", strings.Join(args, " "), code, message)
 	}
-	return nil, ActionOutput{Status: "ok", Code: 0, Message: strings.TrimSpace(stdout.String())}, nil
+	// A verb that exited 0 can still have written a warning — `pfm chat kill`
+	// says on stderr when it only de-listed a row. Dropping it here is how the
+	// caller came to read a bare "killed <id>" for a chat nothing was closed
+	// for: an incomplete answer that reads like a complete one.
+	message := strings.TrimSpace(stdout.String())
+	if warning := strings.TrimSpace(stderr.String()); warning != "" {
+		if message == "" {
+			message = warning
+		} else {
+			message += "\n" + warning
+		}
+	}
+	return nil, ActionOutput{Status: "ok", Code: 0, Message: message}, nil
 }

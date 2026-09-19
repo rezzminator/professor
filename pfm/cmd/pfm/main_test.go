@@ -169,7 +169,9 @@ func TestKillKilledUnkillCLI(t *testing.T) {
 	if code := run([]string{"chat", "kill", id}, &stdout, &stderr); code != 0 {
 		t.Fatalf("kill code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if stdout.String() != "killed "+id+"\n" || stderr.Len() != 0 {
+	// The kill names its own mechanism (chat.KillOutcome): this fixture has no
+	// live pane, so it de-lists and says so.
+	if stdout.String() != "killed "+id+"\tde-listed only, no live pane closed\n" || stderr.Len() != 0 {
 		t.Fatalf("kill stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 
@@ -305,7 +307,9 @@ func TestKillSelfResolveAndInternalCLI(t *testing.T) {
 	if code := run([]string{"chat", "kill", "self"}, &stdout, &stderr); code != 0 {
 		t.Fatalf("kill --self code=%d stderr=%q", code, stderr.String())
 	}
-	if stdout.String() != "killed "+id+"\n" {
+	// A self-kill DOES carry a tmux address, so its line names the pane it is
+	// closing rather than a de-listing.
+	if stdout.String() != "killed "+id+"\tclosing pane %1 on socket cc-1-1-1\n" {
 		t.Fatalf("kill --self stdout=%q", stdout.String())
 	}
 

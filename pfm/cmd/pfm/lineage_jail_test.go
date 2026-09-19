@@ -66,7 +66,7 @@ func TestJailedCodexLineageCollapseKillSiblingStaysKilled(t *testing.T) {
 	assertOneWEBLineage(t, rows, rootID, 3)
 
 	killOutput := runLineageCLI(t, "chat", "kill", childTwo)
-	if killOutput != "killed "+rootID+"\n" {
+	if killOutput != "killed "+rootID+"\tde-listed only, no live pane closed\n" {
 		t.Fatalf("kill child output = %q", killOutput)
 	}
 	if rows := runLineageCLI(t, "ls", "--tsv"); strings.Contains(rows, "\tWEB\t") {

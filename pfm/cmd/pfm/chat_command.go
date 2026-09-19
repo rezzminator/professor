@@ -199,9 +199,10 @@ func runResolvedChatKill(
 		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 		return 1
 	}
-	// Name the mechanism: "killed" alone cannot tell a closed pane from a row
-	// that was merely de-listed, and that ambiguity is the whole defect this
-	// path exists to end.
+	// Name the mechanism (pfmchat.KillOutcome): "killed" alone cannot tell a
+	// closed pane from a row that was merely de-listed, and that ambiguity is
+	// the whole defect this path exists to end.
+	recorded := !pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName)
 	if exit && target.SocketName != "" && target.PaneID != "" {
 		// Kill() only SPAWNS the detached exit finisher; its `setsid -f`
 		// launcher forks and returns almost instantly, so nothing above this
@@ -212,14 +213,10 @@ func runResolvedChatKill(
 			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 			return 1
 		}
-		fmt.Fprintf(
-			stdout,
-			"killed %s\tclosing pane %s on socket %s\n",
-			target.ID, target.PaneID, target.SocketName,
-		)
+		fmt.Fprintln(stdout, pfmchat.KillOutcome(target.ID, target.SocketName, target.PaneID, recorded))
 		return 0
 	}
-	fmt.Fprintf(stdout, "killed %s\tde-listed only, no live pane closed\n", target.ID)
+	fmt.Fprintln(stdout, pfmchat.KillOutcome(target.ID, "", "", recorded))
 	return 0
 }
 

@@ -207,12 +207,19 @@ func (manager *Manager) Kill(
 	}
 	live := target.SocketPath != "" && target.PaneID != ""
 
-	if err := manager.database.Kill(ctx, store.Killed{
-		ID:       target.ID,
-		Engine:   target.Engine,
-		KilledAt: manager.now().Unix(),
-	}); err != nil {
-		return Target{}, err
+	// A seat keyed on its own socket name has no identity to tombstone: the
+	// key names where the chat is, not which chat it is, and it stops meaning
+	// anything the moment the seat's session is pinned down. The composer
+	// already refuses to apply such a kill (compose.applyKill), so writing one
+	// only leaves a row nobody can unkill. The pane still closes below.
+	if !pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName) {
+		if err := manager.database.Kill(ctx, store.Killed{
+			ID:       target.ID,
+			Engine:   target.Engine,
+			KilledAt: manager.now().Unix(),
+		}); err != nil {
+			return Target{}, err
+		}
 	}
 
 	if request.Exit || live {

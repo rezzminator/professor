@@ -121,9 +121,18 @@ func IsOpenCodeCommand(cmdline []string, binaries ...string) bool {
 }
 
 // OpenCodePaneName is the session name a live OpenCode pane title carries:
-// the title minus OpenCode's own "OC | " prefix. A title without the prefix is
-// returned whole — the prefix is the engine's convention, not a guarantee.
+// the title minus OpenCode's own "OC | " prefix.
+//
+// The prefix is the whole test. A pane whose TUI has not written its title
+// escape yet still wears whatever the terminal put there — on a real host that
+// is the MACHINE HOSTNAME — and that string names the box, not the chat.
+// Returning it whole named a running chat after the machine and let the title
+// rung below claim a session for a hostname that merely matched its title.
+// No prefix, no name: the caller falls back to the seat's socket.
 func OpenCodePaneName(title string) string {
+	if !strings.HasPrefix(title, OpenCodePaneTitlePrefix) {
+		return ""
+	}
 	return strings.TrimPrefix(title, OpenCodePaneTitlePrefix)
 }
 

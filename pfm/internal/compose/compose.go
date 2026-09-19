@@ -940,7 +940,7 @@ func (current *composer) applyKill(row Row, engine pfmengine.ID) Row {
 	// session is finally pinned down, a tombstone written against the socket
 	// names nothing at all.
 	if row.Kind == LiveSplit || row.Kind == Booting || row.ID == "" ||
-		(row.Kind == LiveOpenCode && row.ID == row.Socket) {
+		pfmengine.SocketKeyedID(engine, row.ID, row.Socket) {
 		return row
 	}
 	// Explicit kills carry no baseline and stay permanent. A /clear kill is a

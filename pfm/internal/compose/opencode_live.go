@@ -96,11 +96,11 @@ func (current *composer) liveOpenCodeRow(
 		row.Project = projectName(row.CWD)
 	}
 	if row.Name == "" {
-		row.Name = firstNonEmpty(
-			gather.OpenCodePaneName(seat.PaneTitle),
-			pane.SessionName,
-			seat.Socket,
-		)
+		// The pane title names the chat only while it carries OpenCode's own
+		// prefix (gather.OpenCodePaneName); otherwise the row wears its socket
+		// name — the one handle this seat provably answers to, and its ID.
+		// Anything else shows the operator a name that resolves to nothing.
+		row.Name = firstNonEmpty(gather.OpenCodePaneName(seat.PaneTitle), seat.Socket)
 	}
 	if row.ActivityNS == 0 {
 		row.ActivityNS = socketEpochNS(seat.Socket)

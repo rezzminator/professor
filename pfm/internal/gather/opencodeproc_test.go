@@ -198,16 +198,47 @@ func TestDetectOpenCodeHonoursConfiguredBinary(t *testing.T) {
 	}
 }
 
-func TestOpenCodePaneNameStripsTheTitlePrefix(t *testing.T) {
+// A pane title is the chat's name ONLY while it carries OpenCode's own
+// prefix. Until the TUI writes its first title escape the pane wears whatever
+// the terminal put there — on a live host that is the MACHINE HOSTNAME — and
+// returning that whole named a running chat after the box it runs on.
+func TestOpenCodePaneNameAnswersOnlyForAPrefixedTitle(t *testing.T) {
 	tests := map[string]string{
 		"OC | P:OPENCODE": "P:OPENCODE",
 		"OC | ":           "",
-		"P:OPENCODE":      "P:OPENCODE",
+		"P:OPENCODE":      "",
+		"my-host-01":      "",
 		"":                "",
 	}
 	for title, want := range tests {
 		if got := OpenCodePaneName(title); got != want {
 			t.Fatalf("OpenCodePaneName(%q) = %q, want %q", title, got, want)
 		}
+	}
+}
+
+// The title rung reads the same prefix rule: an unprefixed title is the
+// terminal's, not OpenCode's, so it may never claim a session — a hostname
+// that happened to equal a session title would otherwise pin the wrong chat
+// to the pane. The birth rung still answers for this seat.
+func TestDetectOpenCodeTitleRungIgnoresAnUnprefixedTitle(t *testing.T) {
+	proc := &fakeProcFS{processes: map[int]fakeProcess{
+		100: openCodeProc(1, "/bin/zsh"),
+		101: openCodeProc(100, "opencode", "/work/api"),
+	}}
+	panes := []ProbePane{oxPane("ox-1700000000-1-1", "%0", "my-host-01", "/work/api", 100)}
+	sessions := []OpenCodeSession{
+		{ID: "ses_title", Title: "my-host-01", Directory: "/work/api", TimeCreatedMS: 1_600_000_000_000},
+		{ID: "ses_birth", Title: "another", Directory: "/work/api", TimeCreatedMS: 1_700_000_001_000},
+	}
+	live, err := DetectOpenCode(proc, panes, sessions)
+	if err != nil {
+		t.Fatalf("DetectOpenCode: %v", err)
+	}
+	if len(live) != 1 {
+		t.Fatalf("live = %#v, want exactly one seat", live)
+	}
+	if live[0].SessionID != "ses_birth" {
+		t.Fatalf("SessionID = %q, want ses_birth: the pane title was the terminal's, not OpenCode's", live[0].SessionID)
 	}
 }

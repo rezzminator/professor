@@ -78,14 +78,16 @@ grep -q 'pfm.zsh' "$HOME/.zshrc" 2>/dev/null || missing="$missing I11 (no pfm.zs
 # The assets whose destination the installer computes are SEARCHED, and the
 # roots searched are named on failure — "nothing there" is never "failed to look".
 ROOTS="$HOME/.local/share/pfm $HOME/.local/bin $SEAT_DIR $CODEX_HOME $HOME/.claude"
-find_asset() { # find_asset <id> <what> <glob>
+# The glob is a PATH suffix, not a bare name: the composed harness prompts are
+# told apart from any other claude.md/codex.md by the directory above them.
+find_asset() { # find_asset <id> <what> <path-suffix-glob>
   local hit
-  hit="$(find $ROOTS -maxdepth 4 -name "$3" 2>/dev/null | head -1)"
-  [ -n "$hit" ] || missing="$missing $1 ($2: no '$3' under $ROOTS);"
+  hit="$(find $ROOTS -maxdepth 6 -path "*/$3" 2>/dev/null | head -1)"
+  [ -n "$hit" ] || missing="$missing $1 ($2: no '*/$3' under $ROOTS);"
 }
-find_asset I7 "codex appendix hook file" 'codex-appendix.md'
-find_asset I9 "professor system-prompt file" 'professor-prompt*.md'
-find_asset I8 "harness-prompt baseline" 'harness-prompt*'
+find_asset I7 "codex appendix hook file" 'harness-prompts/codex.md'
+find_asset I9 "professor system-prompt file" 'harness-prompts/claude.md'
+find_asset I8 "harness-prompt baseline" 'harness-prompts/claude/baselines/harness-original.sha256'
 find_asset I15 "Claude Code professor theme" 'professor-*.json'
 find_asset I16 "harvestpy runtime marker" 'harvestpy*'
 find_asset I14 "VS Code extension asset" 'pfm*.vsix'

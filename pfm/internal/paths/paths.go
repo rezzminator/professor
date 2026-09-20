@@ -277,6 +277,31 @@ func GeneratedClaudeAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
 }
 
+// HarnessPromptsDir is where `pfm install` stages the fleet's system-prompt
+// layer: one composed prompt per engine, beside the parts it was composed
+// from and the Claude drift baselines.
+func HarnessPromptsDir(home string) string {
+	return filepath.Join(home, ".local", "share", "pfm", "install", "harness-prompts")
+}
+
+// HarnessPromptPath is the staged prompt ONE engine reads — claude.md,
+// codex.md, opencode.md — composed at stage time from the shared head, that
+// engine's middle and the shared tail. Claude takes it as
+// --system-prompt-file, Codex as its SessionStart appendix, OpenCode through
+// its config's `instructions` array. Three readers in three packages; one
+// spelling of where the file is.
+func HarnessPromptPath(home string, id pfmengine.ID) string {
+	return filepath.Join(HarnessPromptsDir(home), pfmengine.MustLookup(id).LongName+".md")
+}
+
+// HarnessBaselineDir is the one staged location the harness-prompt drift
+// doctor reads its pins, bodies and model provenance from. The baselines are
+// captures of Claude Code's own built-in prompt, so they live under the
+// Claude engine's directory rather than beside the shared parts.
+func HarnessBaselineDir(home string) string {
+	return filepath.Join(HarnessPromptsDir(home), pfmengine.MustLookup(pfmengine.Claude).LongName, "baselines")
+}
+
 // SocketPath resolves a chat's tmux socket to an absolute path: an absolute
 // socket is returned unchanged, a bare name resolves under the private tmux
 // directory. It lives here because both cmd/pfm and internal/headless need it

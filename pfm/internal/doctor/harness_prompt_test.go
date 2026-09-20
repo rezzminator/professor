@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/config"
+	"hostops/pfm/internal/paths"
 )
 
 func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
@@ -21,19 +22,19 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 	sum := sha256.Sum256([]byte(captured))
 	matching := hex.EncodeToString(sum[:])
 
-	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.257.md", captured, nil)
-	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.257.md") {
+	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.278.md", captured, nil)
+	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.278.md") {
 		t.Fatalf("match outcome = (%q, %v), want an ok line", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.257.md", captured, nil)
+	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.278.md", captured, nil)
 	if !warn || !strings.Contains(line, "DRIFT") {
 		t.Fatalf("drift outcome = (%q, %v), want a DRIFT warning", line, warn)
 	}
 
 	line, warn = harnessPromptVerdict(
 		matching,
-		"harness-original-v2.1.257.md",
+		"harness-original-v2.1.278.md",
 		"",
 		errors.New("no API request reached the capture sink"),
 	)
@@ -42,7 +43,7 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 		t.Fatalf("capture-failure outcome = (%q, %v), want a distinct CHECK FAILED warning", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.257.md", "", errClaudeAbsent)
+	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.278.md", "", errClaudeAbsent)
 	if warn || line != "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare" {
 		t.Fatalf("absence outcome = (%q, %v), want the named skip with no warning", line, warn)
 	}
@@ -171,7 +172,7 @@ func TestPrintHarnessPromptDoctorHonorsCaptureOverride(t *testing.T) {
 		{
 			name: "malformed baseline is distinct from missing and never captures",
 			setup: func(t *testing.T, home string) {
-				path := filepath.Join(home, ".local", "share", "pfm", "install", "prompts", "harness-original.sha256")
+				path := filepath.Join(paths.HarnessBaselineDir(home), "harness-original.sha256")
 				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 					t.Fatal(err)
 				}

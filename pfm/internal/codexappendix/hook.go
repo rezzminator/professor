@@ -6,16 +6,20 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/paths"
 )
 
 const marker = "# Professor Codex appendix"
 
-// PromptPath is the installer's staged, model-independent appendix.
+// PromptPath is the installer's staged, model-independent appendix. Codex
+// can only take an appendix to its own prompt, so the composed Codex file —
+// shared head, Codex middle, shared tail — IS that appendix.
 func PromptPath(home string) string {
-	return filepath.Join(home, ".local", "share", "pfm", "install", "prompts", "codex-appendix.md")
+	return paths.HarnessPromptPath(home, pfmengine.Codex)
 }
 
 // Run answers Codex's snake_case hook input with its camelCase output contract.

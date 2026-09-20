@@ -1061,13 +1061,13 @@ func TestWireCodexAgentsReportsAndPreservesAForeignConflict(t *testing.T) {
 
 // TestWireGlobalCommandsLinksFilesAndDirectories covers both shapes bullet 2
 // of the global-commands behavior spec names: a file entry links as a single
-// file symlink, a directory entry (wave/) links as ONE whole-directory
+// file symlink, a directory entry (tools/) links as ONE whole-directory
 // symlink — never a copy of its contents.
 func TestWireGlobalCommandsLinksFilesAndDirectories(t *testing.T) {
 	home := t.TempDir()
 	source := filepath.Join(home, ".professor", "templates", "global", "commands")
 	writeFixture(t, filepath.Join(source, "git.md"), "# git command\n")
-	writeFixture(t, filepath.Join(source, "wave", "refine.md"), "# wave refine\n")
+	writeFixture(t, filepath.Join(source, "tools", "refine.md"), "# tools refine\n")
 
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
@@ -1076,7 +1076,7 @@ func TestWireGlobalCommandsLinksFilesAndDirectories(t *testing.T) {
 	}
 
 	assertLink(t, filepath.Join(home, ".claude", "commands", "git.md"), filepath.Join(source, "git.md"))
-	assertLink(t, filepath.Join(home, ".claude", "commands", "wave"), filepath.Join(source, "wave"))
+	assertLink(t, filepath.Join(home, ".claude", "commands", "tools"), filepath.Join(source, "tools"))
 }
 
 // TestWireGlobalCommandsSkipsAnAbsentOrEmptySource pins the spec's explicit

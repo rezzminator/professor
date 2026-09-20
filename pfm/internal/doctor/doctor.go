@@ -283,9 +283,6 @@ func Run(
 		fmt.Fprintf(stdout, "doctor: unhealthy row counts: %v\n", err)
 		return 3
 	}
-	if counts.OrphanedKills != 0 {
-		tally.warn()
-	}
 	fmt.Fprintf(
 		stdout,
 		"doctor: rows transcripts=%d rollouts=%d cx_names=%d killed=%d orphaned_killed=%d\n",
@@ -295,6 +292,23 @@ func Run(
 		counts.Killed,
 		counts.OrphanedKills,
 	)
+	// The census row above counts orphans; it never calls one a defect. A
+	// warning nobody can read is the same as no warning at all — worse, it
+	// inflates `doctor: warnings=N` past every line the reader can point at —
+	// so the counted state names itself here.
+	if counts.OrphanedKills != 0 {
+		tally.warn()
+		fmt.Fprintf(
+			stdout,
+			"doctor: warning orphaned_killed=%d kills whose chat resolves to no transcript, rollout, or OpenCode session\n",
+			counts.OrphanedKills,
+		)
+		fmt.Fprintln(
+			stdout,
+			"doctor: remediation: list them with `pfm archive --prune-orphans`, then delete them with "+
+				"`pfm archive --prune-orphans --yes` (a deleted kill does not come back)",
+		)
+	}
 
 	walBytes := int64(0)
 	if info, err := os.Stat(database.Path() + "-wal"); err == nil {

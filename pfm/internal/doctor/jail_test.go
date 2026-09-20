@@ -179,6 +179,49 @@ func TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone(t *te
 	})
 }
 
+// TestDoctorNamesTheOrphanedKillsItCounts pins the law "every check names what
+// its own broken state reports": an orphaned kill was counted into
+// `doctor: warnings=N` while the only line mentioning it was the neutral
+// `doctor: rows ... orphaned_killed=1` census — a warning no printed line
+// called a defect, which reads to a host operator as a phantom count. Unfixed,
+// doctor still exits 1 and still prints the census row, so only the
+// `doctor: warning orphaned_killed=` assertion fails.
+func TestDoctorNamesTheOrphanedKillsItCounts(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	database, err := store.Open(store.WithWarningWriter(io.Discard))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A kill whose id resolves to no transcript, rollout, or OpenCode session
+	// is exactly store's definition of an orphaned kill (health.go).
+	killErr := database.Kill(context.Background(), store.Killed{ID: "orphan-kill-fixture", KilledAt: 1})
+	if closeErr := database.Close(); closeErr != nil {
+		t.Fatalf("kill fixture chat: %v; close database: %v", killErr, closeErr)
+	}
+	if killErr != nil {
+		t.Fatal(killErr)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(nil, &stdout, &stderr, runtime)
+	output := stdout.String()
+	if code != 1 {
+		t.Fatalf("orphaned-kill doctor code=%d, want 1\nstdout=%s", code, output)
+	}
+	if !strings.Contains(output, "orphaned_killed=1") {
+		t.Fatalf("doctor output missing the orphaned_killed census count:\n%s", output)
+	}
+	if !strings.Contains(output, "doctor: warning orphaned_killed=1") {
+		t.Fatalf("doctor counted an orphaned kill but no printed line named it as a warning:\n%s", output)
+	}
+	if !strings.Contains(output, "doctor: remediation: list them with `pfm archive --prune-orphans`") {
+		t.Fatalf("doctor named the orphaned kill without its remediation:\n%s", output)
+	}
+	if !strings.Contains(output, "doctor: warnings=1") {
+		t.Fatalf("orphaned-kill doctor warning tally is not 1:\n%s", output)
+	}
+}
+
 func TestPFMPathWarningsIgnoreHostShimsOutsideTargetHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("PFM_HOME", home)

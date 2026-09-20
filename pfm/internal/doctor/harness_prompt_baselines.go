@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	config "hostops/pfm/internal/config"
+	"hostops/pfm/internal/paths"
 )
 
 // StateUnknown is the stable diagnostic state for a value a probe could not determine.
@@ -88,7 +89,7 @@ func printModelHarnessPromptDoctorWithDeps(
 	dependencies Dependencies,
 ) int {
 	fmt.Fprintf(stdout, "doctor: harness-prompt requested=%s\n", model.Alias)
-	baselinePath := filepath.Join(home, ".local", "share", "pfm", "install", "prompts", model.Stem+".sha256")
+	baselinePath := filepath.Join(paths.HarnessBaselineDir(home), model.Stem+".sha256")
 	raw, err := os.ReadFile(baselinePath)
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: harness-prompt: baseline unreadable (%v) — run pfm install\n", err)

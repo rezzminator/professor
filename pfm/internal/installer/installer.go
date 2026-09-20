@@ -212,6 +212,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	if err := installer.stageHarnessPrompts(); err != nil {
+		return err
+	}
 	if err := installer.wireClaudeLauncher(); err != nil {
 		return err
 	}
@@ -330,6 +333,9 @@ func (installer *engine) install(ctx context.Context) error {
 	}
 	if mcpErr != nil {
 		return mcpErr
+	}
+	if err := installer.wireOpenCodeInstructions(); err != nil {
+		return err
 	}
 	if err := installer.wireLogDefault(); err != nil {
 		return err
@@ -893,6 +899,12 @@ func (installer *engine) uninstall(ctx context.Context) error {
 		return err
 	}
 	if err := installer.wireMCP(); err != nil {
+		return err
+	}
+	if err := installer.wireOpenCodeInstructions(); err != nil {
+		return err
+	}
+	if err := installer.removeStagedHarnessPrompts(); err != nil {
 		return err
 	}
 	if err := installer.wireShell(true); err != nil {
@@ -2322,6 +2334,17 @@ func (installer *engine) retirePredecessors() error {
 				return err
 			}
 		}
+	}
+	// The per-engine harness-prompts tree replaced the flat staged prompts/
+	// directory; a host installed before the move still carries its files.
+	if err := installer.retireGlob(
+		filepath.Join(installer.managedRoot, "prompts", "*"),
+		"harness prompts moved to harness-prompts/",
+	); err != nil {
+		return err
+	}
+	if err := installer.retireEmptyDirTolerant(filepath.Join(installer.managedRoot, "prompts")); err != nil {
+		return err
 	}
 	carrier := filepath.Join(installer.options.Home, ".claude", ".cc-ls-hidden")
 	for _, path := range []string{carrier, carrier + ".at", carrier + ".lock"} {

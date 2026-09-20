@@ -9,6 +9,7 @@ import (
 	"hostops/pfm/internal/compose"
 	pfmconfig "hostops/pfm/internal/config"
 	pfmengine "hostops/pfm/internal/engine"
+	"hostops/pfm/internal/paths"
 )
 
 // hygiene is the launch-environment strip every fleet-born process carries
@@ -394,11 +395,11 @@ func claudeCommandWith(
 	}.ShellCommand()
 }
 
-// ProfessorPromptPath is the staged professor system prompt `pfm install`
-// writes under the managed root; claude.systemPrompt "professor" points every
+// ProfessorPromptPath is the composed Claude prompt `pfm install` stages
+// under the managed root; claude.systemPrompt "professor" points every
 // managed launch at it via --system-prompt-file.
 func ProfessorPromptPath(home string) string {
-	return filepath.Join(home, ".local", "share", "pfm", "install", "prompts", "professor-prompt.md")
+	return paths.HarnessPromptPath(home, pfmengine.Claude)
 }
 
 // continuityBanner is the first thing a resumed Codex pane prints, above

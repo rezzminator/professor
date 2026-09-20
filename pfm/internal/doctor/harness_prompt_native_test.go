@@ -23,7 +23,9 @@ func TestHarnessPromptNativeRepeatedCapture(t *testing.T) {
 	machine := config.Config{}
 	machine.Claude.Binary = binary
 	for _, model := range harnessPromptModels {
-		baselineDir := filepath.Join("..", "..", "internal", "installer", "assets", "prompts")
+		baselineDir := filepath.Join(
+			"..", "..", "internal", "installer", "assets", "harness-prompts", "claude", "baselines",
+		)
 		pin, err := os.ReadFile(filepath.Join(baselineDir, model.Stem+".sha256"))
 		if err != nil {
 			t.Fatal(err)

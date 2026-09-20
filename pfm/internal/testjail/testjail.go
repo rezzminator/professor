@@ -302,7 +302,7 @@ func StageHarnessPromptBaseline(t *testing.T, home, alias, stem, captured, name 
 	t.Helper()
 	sum := sha256.Sum256([]byte(captured))
 	pin := hex.EncodeToString(sum[:]) + "  " + name + "\n"
-	dir := filepath.Join(home, ".local", "share", "pfm", "install", "prompts")
+	dir := paths.HarnessBaselineDir(home)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}

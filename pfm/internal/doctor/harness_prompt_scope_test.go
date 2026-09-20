@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"hostops/pfm/internal/config"
+	"hostops/pfm/internal/paths"
 )
 
 func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T) {
@@ -32,7 +33,7 @@ func TestHarnessDoctorDistinguishesModelCoverageAndCaptureFailures(t *testing.T)
 			stageHarnessPromptBaseline(t, home)
 			if tc.missing != "" {
 				if err := os.Remove(
-					filepath.Join(home, ".local", "share", "pfm", "install", "prompts", tc.missing),
+					filepath.Join(paths.HarnessBaselineDir(home), tc.missing),
 				); err != nil {
 					t.Fatal(err)
 				}

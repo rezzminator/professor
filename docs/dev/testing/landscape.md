@@ -36,9 +36,9 @@ I3 · `tmux-title-renudge` overlay staged + symlinked · needs:tmux · today:U �
 I4 · `handoff.skill.md` symlinked per Claude account · needs:seat:cc · today:NONE ⚠ known-gap (no doctor probe for skill-link health) · install.md:27 · lane(s):O1
 I5 · launchd name-sync plist wiring (macOS only) · needs:systemd/launchd · today:NONE ⚠ known-gap (no doctor row found; unverified on Linux) · install.md:28 · lane(s):O1
 I6 · launchd MCP plist wiring (macOS only, MCP-enabled gate) · needs:systemd/launchd,network · today:U · install.md:29 · lane(s):O1
-I7 · `codex-appendix.md` staged, consumed as Codex SessionStart hook file · needs:seat:cx · today:U · install.md:30 · lane(s):O1
+I7 · `harness-prompts/codex.md` staged, consumed as Codex SessionStart hook file · needs:seat:cx · today:U · install.md:30 · lane(s):O1
 I8 · harness-prompt baseline files (opus + original) for drift doctor · needs:none · today:U · install.md:31 · lane(s):O1
-I9 · `professor-prompt.md` system-prompt file (`claude.systemPrompt="professor"`) · needs:seat:cc · today:NONE ⚠ known-gap (no dedicated doctor row) · install.md:32 · lane(s):O1
+I9 · `harness-prompts/claude.md` system-prompt file (`claude.systemPrompt="professor"`) · needs:seat:cc · today:NONE ⚠ known-gap (no dedicated doctor row) · install.md:32 · lane(s):O1
 I10 · `reload.command.md` installed command file (Claude + Codex mirror) · needs:seat:cc · today:NONE ⚠ known-gap (no doctor row for command-link health) · install.md:33 · lane(s):O1
 I11 · `pfm.zsh` shim sourced from `~/.zshrc` (defines `cc`/`cx`/`co`/`pfm` launchers) · needs:none · today:U (indirect via `pfmPathWarnings`) · install.md:34 · lane(s):O1
 I12 · systemd `pfm-mcp.service` unit (Linux, MCP-enabled gate) · needs:systemd/launchd,network · today:U · install.md:35 · lane(s):O1
@@ -605,7 +605,7 @@ not re-listed here).
 - install.md:28 — "UNKNOWN — no dedicated launch-agent doctor row found (host under test is Linux;
   could not verify a macOS doctor path)" (name-sync launchd plist).
 - install.md:32 — "UNKNOWN — no dedicated doctor row for this file's presence (selection is by
-  config, not by wiring state)" (`professor-prompt.md`).
+  config, not by wiring state)" (`harness-prompts/claude.md`).
 - install.md:33 — "UNKNOWN — not part of `ReportHooks`/`ReportGlobalAgents`; no dedicated
   command-link doctor row found" (`reload.command.md`).
 - install.md:36 — "UNKNOWN — no dedicated systemd-unit doctor row found; `printTmuxTitlesDoctor`
@@ -615,7 +615,7 @@ not re-listed here).
 - install.md:40 — "UNKNOWN — no dedicated doctor row for command-link health" (global commands).
 - install.md:41 — "UNKNOWN — no dedicated doctor row for skill-link health" (global skills).
 - install.md:384-390 (Coverage § UNKNOWN list, items 1-3): doctor probes for `handoff.skill.md`
-  link health; the macOS launch-agent plist state; `professor-prompt.md` presence — restated
+  link health; the macOS launch-agent plist state; `harness-prompts/claude.md` presence — restated
   verbatim as the file's own closing UNKNOWN roll-up.
 - install.md:391 — "Doctor probe for `reload.command.md` link health (Claude or Codex side)."
 - install.md:392-394 — "Doctor probe for Linux systemd unit health (`pfm-mcp.service`,

@@ -518,8 +518,11 @@ func TestDefaultUnknownCacheWindowRendersInfinity(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	// Env is pinned empty on purpose: a chat spawned by the fleet carries
+	// FORCE_PROMPT_CACHING_5M=1, and reading the ambient environment made this
+	// assertion depend on where the suite was run rather than on the default.
 	segment := cacheWindowSegment(
-		Runtime{Home: root, CacheDir: filepath.Join(root, "cache")},
+		Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}},
 		time.Now(),
 		transcriptPath,
 	)

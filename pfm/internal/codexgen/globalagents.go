@@ -140,26 +140,52 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	// Phase 1: compile and validate every TOML twin before touching disk —
 	// a failed compile or an unparseable TOML aborts before any install, the
 	// same fail-loud order the host script used.
+	//
+	// mdContent is nil for an original agent (Claude links straight to the
+	// clone's .md) and carries the rendered bytes for a variant, whose
+	// mdSource is its file in the generated Claude directory: a variant is
+	// the Claude -> Claude step, and from there it takes the same two links
+	// and the same TOML twin as any original.
 	type compiledAgent struct {
 		mdSource    string
+		mdContent   []byte
 		tomlOutput  string
 		tomlContent []byte
 	}
-	compiledAgents := make([]compiledAgent, 0, len(sources))
+	type agentSource struct {
+		path    string
+		content []byte
+	}
+	agentSources := make([]agentSource, 0, len(sources))
 	for _, src := range sources {
-		out, content, err := renderGlobalAgentTOML(src, outputDir)
+		agentSources = append(agentSources, agentSource{path: src})
+	}
+	variants, err := LoadGlobalAgentVariants(agentsDir, paths.GeneratedClaudeAgentsDir(home))
+	if err != nil {
+		return GlobalAgentsResult{}, err
+	}
+	for _, variant := range variants {
+		agentSources = append(agentSources, agentSource{path: variant.Path, content: variant.Content})
+	}
+	compiledAgents := make([]compiledAgent, 0, len(agentSources))
+	for _, src := range agentSources {
+		raw := src.content
+		if raw == nil {
+			raw, err = os.ReadFile(src.path)
+			if err != nil {
+				return GlobalAgentsResult{}, fmt.Errorf("read %s: %w", src.path, err)
+			}
+		}
+		out, content, err := renderGlobalAgentTOML(src.path, string(raw), outputDir)
 		if err != nil {
 			return GlobalAgentsResult{}, err
 		}
 		if parseErr := validateTOML(content); parseErr != nil {
 			return GlobalAgentsResult{}, fmt.Errorf("%s: does not parse: %w", out, parseErr)
 		}
-		if _, err := os.Stat(src); err != nil {
-			return GlobalAgentsResult{}, fmt.Errorf("inspect %s: %w", src, err)
-		}
 		compiledAgents = append(
 			compiledAgents,
-			compiledAgent{mdSource: src, tomlOutput: out, tomlContent: []byte(content)},
+			compiledAgent{mdSource: src.path, mdContent: src.content, tomlOutput: out, tomlContent: []byte(content)},
 		)
 	}
 
@@ -187,6 +213,19 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		}
 		if !same {
 			result.Actions = append(result.Actions, GlobalAgentAction{Kind: actionWrite, Path: agent.tomlOutput})
+		}
+		if agent.mdContent != nil {
+			result.Compiled = append(
+				result.Compiled,
+				GlobalAgentCompiled{Path: agent.mdSource, Size: int64(len(agent.mdContent))},
+			)
+			same, err := sameGlobalAgentFile(agent.mdSource, agent.mdContent)
+			if err != nil {
+				return GlobalAgentsResult{}, err
+			}
+			if !same {
+				result.Actions = append(result.Actions, GlobalAgentAction{Kind: actionWrite, Path: agent.mdSource})
+			}
 		}
 		for _, config := range claudeConfigDirs {
 			links = append(
@@ -236,15 +275,27 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 
 	for _, agent := range compiledAgents {
-		same, err := sameGlobalAgentFile(agent.tomlOutput, agent.tomlContent)
-		if err != nil {
-			return GlobalAgentsResult{}, err
+		artifacts := []struct {
+			path    string
+			content []byte
+		}{{agent.tomlOutput, agent.tomlContent}}
+		if agent.mdContent != nil {
+			artifacts = append(artifacts, struct {
+				path    string
+				content []byte
+			}{agent.mdSource, agent.mdContent})
 		}
-		if same {
-			continue
-		}
-		if err := writeGlobalAgentFile(agent.tomlOutput, agent.tomlContent); err != nil {
-			return GlobalAgentsResult{}, err
+		for _, artifact := range artifacts {
+			same, err := sameGlobalAgentFile(artifact.path, artifact.content)
+			if err != nil {
+				return GlobalAgentsResult{}, err
+			}
+			if same {
+				continue
+			}
+			if err := writeGlobalAgentFile(artifact.path, artifact.content); err != nil {
+				return GlobalAgentsResult{}, err
+			}
 		}
 	}
 	for _, installed := range result.Installed {
@@ -304,12 +355,11 @@ func writeGlobalAgentFile(path string, content []byte) error {
 	return nil
 }
 
-func renderGlobalAgentTOML(mdPath, outputDir string) (string, string, error) {
-	raw, err := os.ReadFile(mdPath)
-	if err != nil {
-		return "", "", fmt.Errorf("read %s: %w", mdPath, err)
-	}
-	fields, body, err := parseFrontmatter(string(raw))
+// renderGlobalAgentTOML compiles one agent's Markdown into its TOML twin.
+// raw is passed in rather than read here because a variant's Markdown exists
+// only in memory until the build phase writes it; mdPath labels errors.
+func renderGlobalAgentTOML(mdPath, raw, outputDir string) (string, string, error) {
+	fields, body, err := parseFrontmatter(raw)
 	if err != nil {
 		return "", "", fmt.Errorf("parse %s: %w", mdPath, err)
 	}

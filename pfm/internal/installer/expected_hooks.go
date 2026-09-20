@@ -17,9 +17,12 @@ import (
 const (
 	hookEventUserPromptSubmit = "UserPromptSubmit"
 	hookExploreMatcher        = "Agent|Task"
-	stateBroken               = "broken"
-	stateDrift                = "drift"
-	stateStale                = "stale"
+	// hookRRDirMatcher names the agents whose prompt reads the RR-DIR line:
+	// templates/global/agents/rr.md and the variants declared from it.
+	hookRRDirMatcher = "rr|super-rr"
+	stateBroken      = "broken"
+	stateDrift       = "drift"
+	stateStale       = "stale"
 )
 
 // ExpectedHook is one hook the installer converges and owns.
@@ -96,6 +99,12 @@ func claudeHookTemplates(home string) []ExpectedHook {
 			Matcher: hookExploreMatcher,
 			Command: binary + " internal explore-deny",
 			Name:    "explore-deny",
+		},
+		{
+			Event:   "SubagentStart",
+			Matcher: hookRRDirMatcher,
+			Command: binary + " internal rr-dir",
+			Name:    "rr-dir",
 		},
 		{Event: hookEventUserPromptSubmit, Command: binary + " internal epic-inject", Name: "epic-inject"},
 		{Event: hookEventUserPromptSubmit, Command: binary + " internal reload-intercept", Name: "reload-intercept"},

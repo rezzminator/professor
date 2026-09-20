@@ -195,6 +195,17 @@ func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent
 		return []GlobalAgentsStatus{{Dir: agentsDir, State: GlobalAgentsNoSources}}
 	}
 	sort.Strings(sources)
+	// A declared variant is an agent the install owes every account exactly
+	// like an original; its link source is the rendered file in the pfm-owned
+	// generated directory. A declaration that cannot be read or rendered is
+	// UNREADABLE with its error — never a roster quietly short of variants.
+	variants, err := codexgen.LoadGlobalAgentVariants(agentsDir, paths.GeneratedClaudeAgentsDir(home))
+	if err != nil {
+		return []GlobalAgentsStatus{{Dir: agentsDir, State: GlobalAgentsUnreadable, Error: err.Error()}}
+	}
+	for _, variant := range variants {
+		sources = append(sources, variant.Path)
+	}
 
 	statuses := make([]GlobalAgentsStatus, 0, len(accounts)+1)
 	for _, account := range accounts {
@@ -429,6 +440,9 @@ func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error 
 // (<blueprint>/templates/global/agents/<name>.toml) — this installer wrote
 // that link too, so it counts as owned and is retired the same way.
 func (installer *engine) unwireGeneratedCodexAgents() error {
+	if err := installer.unwireGeneratedClaudeAgents(); err != nil {
+		return err
+	}
 	generated := paths.GeneratedCodexAgentsDir(installer.options.Home)
 	registry := filepath.Join(installer.options.Home, ".codex", "agents")
 	repo, err := GlobalSourceRepo(installer.options.Home)
@@ -477,6 +491,25 @@ func (installer *engine) unwireGeneratedCodexAgents() error {
 	return installer.change("remove "+generated, func() error {
 		if err := os.RemoveAll(generated); err != nil {
 			return fmt.Errorf("remove generated Codex agents directory %s: %w", generated, err)
+		}
+		return nil
+	})
+}
+
+// unwireGeneratedClaudeAgents removes the pfm-owned directory the rendered
+// Claude agent variants live in (paths.GeneratedClaudeAgentsDir). The links
+// into it are unwireGlobalRegistry's to retire, which runs first and owns
+// them by target; this removes what those links pointed at.
+func (installer *engine) unwireGeneratedClaudeAgents() error {
+	generated := paths.GeneratedClaudeAgentsDir(installer.options.Home)
+	if _, err := os.Lstat(generated); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("inspect generated Claude agents directory %s: %w", generated, err)
+	}
+	return installer.change("remove "+generated, func() error {
+		if err := os.RemoveAll(generated); err != nil {
+			return fmt.Errorf("remove generated Claude agents directory %s: %w", generated, err)
 		}
 		return nil
 	})

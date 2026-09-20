@@ -64,7 +64,7 @@ var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-appendix", "codex-launch", "compact-nudge", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
-	"launcher-repair", "primary-get", "primary-set", "reload-intercept",
+	"launcher-repair", "primary-get", "primary-set", "reload-intercept", "rr-dir",
 	reloadRunCommand, "stale", statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
 }
 
@@ -438,6 +438,16 @@ func runInternal(
 	if len(args) != 0 && args[0] == "explore-deny" {
 		return hookentry.ExploreDeny(os.Stdin, stdout, stderr)
 	}
+	if len(args) != 0 && args[0] == "rr-dir" {
+		// An unresolvable home is not fatal here: RRDir needs it only for the
+		// fallback ledger and reports its absence on that path by name.
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm internal rr-dir: resolve home directory: %v\n", err)
+			home = ""
+		}
+		return hookentry.RRDir(os.Stdin, stdout, stderr, home)
+	}
 	if len(args) != 0 && args[0] == "epic-inject" {
 		return hookentry.EpicInject(os.Stdin, stdout, stderr)
 	}
@@ -510,7 +520,7 @@ func runInternal(
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

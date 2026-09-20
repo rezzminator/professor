@@ -711,3 +711,39 @@ func TestUninstallRetiresAPreMigrationLegacyCodexAgentLink(t *testing.T) {
 		t.Fatalf("pre-migration legacy Codex agent link survived uninstall: %v", err)
 	}
 }
+
+// TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed: a variant is an agent
+// the install owes every account; a host linked for the originals alone is
+// MISSING the variant by name, and a declaration that cannot render is
+// UNREADABLE with its error — never a roster quietly short of variants.
+func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
+	home := t.TempDir()
+	repo := stageGlobalAgentSources(t, home)
+	declaration := filepath.Join(repo, "templates", "global", "agents", "variants.json")
+	if err := os.WriteFile(declaration, []byte(`{"super-rr":{"from":"rr","description":"deep rr."}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range twoReportAccounts(home) {
+		linkGlobalAgents(t, repo, account.ConfigDir, "rr", "walker")
+	}
+	linkGlobalCodexAgents(t, home, "rr", "walker")
+
+	var output bytes.Buffer
+	_, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if failures != 3 {
+		t.Fatalf("failures=%d, want 3 (both accounts and the Codex registry lack super-rr)\n%s", failures, output.String())
+	}
+	if !strings.Contains(output.String(), "state=MISSING names=super-rr") {
+		t.Fatalf("the missing variant was not named:\n%s", output.String())
+	}
+
+	if err := os.WriteFile(declaration, []byte(`{"super-rr":{"from":"ghost"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	_, failures = ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if failures != 1 || !strings.Contains(output.String(), "state=UNREADABLE") ||
+		!strings.Contains(output.String(), "super-rr") {
+		t.Fatalf("failures=%d; a broken declaration must be UNREADABLE naming the variant:\n%s", failures, output.String())
+	}
+}

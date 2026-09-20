@@ -267,6 +267,16 @@ func GeneratedCodexAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "codex-agents")
 }
 
+// GeneratedClaudeAgentsDir is where pfm renders the machine-global Claude
+// agent VARIANTS templates/global/agents/variants.json declares
+// (codexgen.RunGlobalAgents) — one source agent re-emitted under another name
+// with overridden frontmatter. An original agent is linked straight from the
+// clone and never lands here; only a variant's `{config}/agents/<name>.md`
+// link points into this directory, and uninstall removes it with those links.
+func GeneratedClaudeAgentsDir(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "generated", "claude-agents")
+}
+
 // SocketPath resolves a chat's tmux socket to an absolute path: an absolute
 // socket is returned unchanged, a bare name resolves under the private tmux
 // directory. It lives here because both cmd/pfm and internal/headless need it

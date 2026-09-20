@@ -10,7 +10,7 @@ Tracer report, 2026-09-13, HEAD `00da35b5`, clean tree. Raw map, no verdicts. Te
 |---|---|
 | `professor.md` | the Professor system prompt. `"systemPrompt": "professor"` makes every managed Claude launch inject it via `--system-prompt-file`. Byte-identical to the embedded installer asset `prompts/professor-prompt.md`; a Go test enforces the pairing. (README:5-8) |
 | `codex-appendix.md` | a model-independent developer message from Codex's native SessionStart `additionalContext` hook. `pfm install` registers and individually trusts the owned handler in each configured account. (README:9-11) |
-| `harness-original-v2.1.257.md`, `harness-opus-v2.1.261.md` | reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic sections excluded. Each has a `.sha256` pin and `.model` provenance file. (README:29-32) |
+| `harness-original-v2.1.278.md`, `harness-opus-v2.1.278.md` | reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic sections excluded. Each has a `.sha256` pin and `.model` provenance file. (README:29-32) |
 | `harness-{original,opus}.model` / `.sha256` | provenance + hash pins (A.5) |
 | `README.md` | the manifest for the directory |
 
@@ -51,9 +51,9 @@ Verify (`pfm doctor`):
 
 ```
 harness-opus.model      claude-opus-5
-harness-opus.sha256     0794cbe49f59312f365711d73c7a05597c84c6b7121c0bddad2bb713c66a93ea  harness-opus-v2.1.261.md
+harness-opus.sha256     00ab0f4eedd5b8a29f273929310b6711613a8a37d90b3e7f97029137de3f63db  harness-opus-v2.1.278.md
 harness-original.model  claude-sonnet-5
-harness-original.sha256 a1ce97ec1c7e67375fe1c31a33a2243ca34b160c7a4c10102b59638aeb801554  harness-original-v2.1.257.md
+harness-original.sha256 b0cce46877ebcfb974d87cdfdda9686d31a97b738368de0a84b272f95cb6a746  harness-original-v2.1.278.md
 ```
 
 `.model` = resolved model ID of the capture (informational — README:35: model changes alone never report drift). `.sha256` = normalized hash of the named baseline. Embedded twins under `pfm/internal/installer/assets/prompts/` enforced by `prompts_asset_test.go:35-40` `TestHarnessBaselineAssetPairIsCoherent`.

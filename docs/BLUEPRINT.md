@@ -68,7 +68,7 @@ Every command, agent, and rule sorts into one of three tiers:
 
 ### The plumbing (Tier C — invisible)
 
-- `gitter` — root agent; `tracer`, `scheduler`, `architect`, `reviewer`, and `rr` are machine-global originals under `templates/global/agents/`, linked by `pfm install`. Role-defined, not character-defined.
+- `gitter` — root agent; `tracer`, `scheduler`, `architect`, `reviewer`, `rr`, and `sub-rr` (the digger only `rr` spawns) are machine-global originals under `templates/global/agents/`, linked by `pfm install`; `variants.json` beside them declares agents rendered from an original with overridden frontmatter (`super-rr` = `rr` at medium effort), which `pfm install` writes to its own generated directory and links the same way. Role-defined, not character-defined.
 - `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh` — scripts.
 - `pfm statusline` — native status bar with model, fleet counts, context, git, cost, spend, and rate limits. Wired in the host settings by `pfm install`.
 - `.rumdl.toml` — the markdown policy: one config whose `[per-file-ignores]` table decides which rules each path category obeys (prompt, doc, public; generated and record paths excluded). Read by `/quality:md-forlint` and by the `format-md.sh` hook.

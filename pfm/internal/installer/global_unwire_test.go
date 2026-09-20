@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"hostops/pfm/internal/paths"
 )
 
 // stageGlobalSource writes one recorded clone's machine-global sources: two
@@ -164,5 +166,44 @@ func TestUninstallKeepsAndNamesAForeignGlobalLink(t *testing.T) {
 	}
 	if !strings.Contains(transcript.String(), foreign) {
 		t.Fatalf("uninstall kept the foreign link %s without naming it:\n%s", foreign, transcript.String())
+	}
+}
+
+// TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory: a
+// variant's link resolves into the pfm-owned generated directory, not the
+// clone, so the ownership-by-target rule has to know that directory too —
+// otherwise uninstall leaves a working super-* agent in every account.
+func TestUninstallRemovesGlobalAgentVariantLinksAndTheirGeneratedDirectory(t *testing.T) {
+	home := t.TempDir()
+	agentsSource := filepath.Join(home, ".professor", "templates", "global", "agents")
+	writeFixture(t, filepath.Join(agentsSource, "lead.md"),
+		"---\nname: lead\ndescription: lead role.\neffort: low\n---\n\nbody\n")
+	writeFixture(t, filepath.Join(agentsSource, "variants.json"), `{"super-lead":{"from":"lead","effort":"medium"}}`)
+	accounts := []string{filepath.Join(home, ".claude"), filepath.Join(home, ".cc", "2")}
+	codexHomes := []string{filepath.Join(home, ".codex")}
+	generated := paths.GeneratedClaudeAgentsDir(home)
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, config := range accounts {
+		assertLink(t, filepath.Join(config, "agents", "super-lead.md"), filepath.Join(generated, "super-lead.md"))
+	}
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeUninstall, Home: home, ConfigDirs: accounts, Runner: &fakeRunner{}, CodexHomes: codexHomes,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, config := range accounts {
+		path := filepath.Join(config, "agents", "super-lead.md")
+		if _, err := os.Lstat(path); !os.IsNotExist(err) {
+			t.Fatalf("uninstall left the variant agent link %s: %v", path, err)
+		}
+	}
+	if _, err := os.Lstat(generated); !os.IsNotExist(err) {
+		t.Fatalf("uninstall left the generated Claude agents directory %s: %v", generated, err)
 	}
 }

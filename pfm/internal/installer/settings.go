@@ -25,6 +25,7 @@ func updateSettings(
 	overlayStatusCommand := StatusLineOverlayCommand(home)
 	usageCommand := commandByName(expected, "usage")
 	exploreDenyCommand := commandByName(expected, "explore-deny")
+	rrDirCommand := commandByName(expected, "rr-dir")
 	epicInjectCommand := commandByName(expected, "epic-inject")
 	reloadInterceptCommand := commandByName(expected, "reload-intercept")
 	exitInterceptCommand := commandByName(expected, "exit-intercept")
@@ -185,6 +186,10 @@ func updateSettings(
 		}
 		if !hasHookCommandWithMatcher(hookEntries(document, "PreToolUse", true), exploreDenyCommand, "Agent|Task") {
 			appendHookWithMatcher(document, "PreToolUse", "Agent|Task", exploreDenyCommand)
+			changed = true
+		}
+		if !hasHookCommandWithMatcher(hookEntries(document, "SubagentStart", true), rrDirCommand, hookRRDirMatcher) {
+			appendHookWithMatcher(document, "SubagentStart", hookRRDirMatcher, rrDirCommand)
 			changed = true
 		}
 		if !hasHookCommandWithMatcher(hookEntries(document, "UserPromptSubmit", true), epicInjectCommand, "") {

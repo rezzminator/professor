@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"hostops/pfm/internal/paths"
 )
 
 // This file is the uninstall half of the machine-global fan-out in
@@ -88,7 +90,14 @@ func (installer *engine) unwireGlobalRegistry(registryDir, registry string, repo
 			target = filepath.Join(filepath.Dir(path), target)
 		}
 		target = filepath.Clean(target)
-		if ownedGlobalLink(repos, registry, entry.Name(), target) {
+		owned := ownedGlobalLink(repos, registry, entry.Name(), target)
+		// A variant agent's link resolves into the pfm-owned generated
+		// directory, never the clone — the install wrote it all the same.
+		if registry == globalAgentsRegistry &&
+			withinGlobalSource(target, paths.GeneratedClaudeAgentsDir(installer.options.Home)) {
+			owned = true
+		}
+		if owned {
 			if err := installer.retire(path, "machine-global "+registry+" link"); err != nil {
 				return err
 			}

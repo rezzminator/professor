@@ -218,11 +218,11 @@ func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
 			wantName := strings.TrimSpace(fields["name"])
 			wantDescription := strings.TrimSpace(fields["description"])
 
-			_, first, err := renderGlobalAgentTOML(source, t.TempDir())
+			_, first, err := renderGlobalAgentTOML(source, string(raw), t.TempDir())
 			if err != nil {
 				t.Fatalf("renderGlobalAgentTOML: %v", err)
 			}
-			_, second, err := renderGlobalAgentTOML(source, t.TempDir())
+			_, second, err := renderGlobalAgentTOML(source, string(raw), t.TempDir())
 			if err != nil {
 				t.Fatalf("renderGlobalAgentTOML (second render): %v", err)
 			}

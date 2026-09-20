@@ -1,6 +1,5 @@
 // Package obs is pfm's activity log: one structured destination for every
-// corner of the engine, per pfm home
-// (docs/dev/trains/testing-foundation/waves/6-activity-log/spec.md).
+// corner of the engine, per pfm home.
 //
 // OpenLog installs the process logger once, at process entry, over a
 // JSON-lines file under the resolved home — so a fence, a test jail, a lane

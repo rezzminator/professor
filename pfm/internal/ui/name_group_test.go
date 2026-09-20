@@ -136,7 +136,7 @@ func TestNonMemberRowSharingAPrefixIsNeverDropped(t *testing.T) {
 func TestProseColonsAreNotGroupDeclarations(t *testing.T) {
 	for _, name := range []string{
 		"fix: the bug",
-		"wave 3: rework",
+		"flight 3: rework",
 		"note:",
 		":BUILDER",
 		"P: BUILDER",

@@ -39,8 +39,7 @@ type RunResult struct {
 }
 
 // Runner is the one seam every exec.Command*/exec.LookPath outside the
-// internal/tmux façade crosses (docs/dev/trains/testing-foundation/waves/
-// 3-unit-law/spec.md § Three seams item 2): git, claude, codex, opencode,
+// internal/tmux façade crosses (the unit-test law's three seams, item 2): git, claude, codex, opencode,
 // systemctl, launchctl, security, docker, uv, python, node, jq. RealRunner
 // drives the real process table exactly as a bare os/exec call always has;
 // FakeRunner scripts a call ledger for tests.

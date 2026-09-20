@@ -85,6 +85,11 @@ type ClaudePrefs struct {
 	// TTL. Defaults true — see decodeClaudePrefs and defaultsWithMCPServers.
 	Cache1H      bool
 	NativeCursor bool
+	// MaxSubagentSpawnDepth and MaxConcurrentSubagents lift Claude Code's
+	// sub-agent ceilings on every managed launch — see subagents.go. Zero is
+	// the unset sentinel on both.
+	MaxSubagentSpawnDepth  int
+	MaxConcurrentSubagents int
 	// CompactNudge governs the UserPromptSubmit reminder that a self-compact
 	// is due at a context milestone — see decodeClaudePrefs for the defaults.
 	CompactNudge CompactNudge
@@ -323,6 +328,9 @@ type rawClaude struct {
 	NativeCursor   *bool            `json:"nativeCursor,omitempty"`
 	SystemPrompt   *string          `json:"systemPrompt,omitempty"`
 	CompactNudge   *rawCompactNudge `json:"compactNudge,omitempty"`
+	// The sub-agent ceilings — see subagents.go.
+	MaxSubagentSpawnDepth  *int `json:"maxSubagentSpawnDepth,omitempty"`
+	MaxConcurrentSubagents *int `json:"maxConcurrentSubagents,omitempty"`
 }
 
 type rawCompactNudge struct {
@@ -484,6 +492,8 @@ func defaultsWithMCPServers(
 		engineConfigKey(pfmengine.Claude, "theme"):           SourceDefault,
 		engineConfigKey(pfmengine.Claude, "cache1h"):         SourceDefault,
 		engineConfigKey(pfmengine.Claude, "nativeCursor"):    SourceDefault,
+		engineConfigKey(pfmengine.Claude, spawnDepthKey):     SourceDefault,
+		engineConfigKey(pfmengine.Claude, concurrencyKey):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyYolo):      SourceDefault,
 		engineConfigKey(pfmengine.Codex, engineKeyBinary):    SourceDefault,
 		engineConfigKey(pfmengine.Codex, "homes"):            SourceDefault,
@@ -525,6 +535,8 @@ func defaultsWithMCPServers(
 			Binary:         pfmengine.MustLookup(pfmengine.Claude).Binary,
 			Cache1H:        true,
 			CompactNudge:   DefaultCompactNudge(),
+
+			MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
 		},
 		Codex:      Codex{Yolo: true, Binary: pfmengine.MustLookup(pfmengine.Codex).Binary},
 		OpenCode:   OpenCode{Binary: pfmengine.MustLookup(pfmengine.OpenCode).Binary},
@@ -763,6 +775,11 @@ func loadWithMCPServers(
 		}
 		result.Claude.CompactNudge = applied
 		recordCompactNudgeSources(result.Sources, name, raw.Claude.CompactNudge)
+		if err := applySubagentCaps(
+			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
+		); err != nil {
+			return Config{}, err
+		}
 	}
 	if raw.Accounts != nil {
 		accounts, err := validateAccounts(*raw.Accounts, home)
@@ -815,6 +832,11 @@ func loadWithMCPServers(
 				prefs.CompactNudge = applied
 				key := fmt.Sprintf("accounts[%d].claude", index)
 				recordCompactNudgeSources(result.Sources, key, value.Claude.CompactNudge)
+				if err := applySubagentCaps(
+					&prefs, *value.Claude, result.Claude, result.Path, "accounts", index, result.Sources,
+				); err != nil {
+					return Config{}, err
+				}
 				result.Accounts[index].Claude = &prefs
 			}
 			if value.Codex != nil {
@@ -1307,6 +1329,10 @@ func (config Config) EffectiveClaude(id int) ClaudePrefs {
 		// there is no false-zero ambiguity left to guard against here.
 		result.Cache1H, result.NativeCursor = account.Claude.Cache1H, account.Claude.NativeCursor
 		result.CompactNudge = account.Claude.CompactNudge
+		// Zero is unset on both caps, so Load's inheritance already put the
+		// resolved top-level value here — same unconditional copy as Cache1H.
+		result.MaxSubagentSpawnDepth = account.Claude.MaxSubagentSpawnDepth
+		result.MaxConcurrentSubagents = account.Claude.MaxConcurrentSubagents
 		if account.Claude.SystemPrompt != "" {
 			result.SystemPrompt = account.Claude.SystemPrompt
 		}

@@ -18,7 +18,7 @@ import (
 func stageGlobalSource(t *testing.T, repo string) {
 	t.Helper()
 	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "tokens.md"), "# tokens command\n")
-	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "wave", "live.md"), "# live command\n")
+	writeFixture(t, filepath.Join(repo, "templates", "global", "commands", "tools", "go.md"), "# go command\n")
 	writeFixture(t, filepath.Join(repo, "templates", "global", "skills", "pcm", "SKILL.md"), "# pcm skill\n")
 	writeFixture(t, filepath.Join(repo, "workflows", "deep-rr", "SKILL.md"), "# deep-rr skill\n")
 }
@@ -28,7 +28,7 @@ func stageGlobalSource(t *testing.T, repo string) {
 // state that shipped before it: `pfm uninstall` unwired pfm's own /reload and
 // handoff links and the Codex agent twins, but left every machine-global
 // command and skill link behind, so a removed install still resolved
-// /wave:*, /quality:* and the global skills into the clone from every
+// /flights:*, /quality:* and the global skills into the clone from every
 // account — against INSTALL.md's promise that uninstall removes the
 // installer-owned links.
 func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
@@ -47,8 +47,8 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 			filepath.Join(config, "commands", "tokens.md"),
 			filepath.Join(repo, "templates", "global", "commands", "tokens.md"))
 		assertLink(t,
-			filepath.Join(config, "commands", "wave"),
-			filepath.Join(repo, "templates", "global", "commands", "wave"))
+			filepath.Join(config, "commands", "tools"),
+			filepath.Join(repo, "templates", "global", "commands", "tools"))
 		assertLink(t,
 			filepath.Join(config, "skills", "pcm"),
 			filepath.Join(repo, "templates", "global", "skills", "pcm"))
@@ -65,7 +65,7 @@ func TestUninstallRemovesEveryMachineGlobalCommandAndSkillLink(t *testing.T) {
 	for _, config := range accounts {
 		for _, relative := range []string{
 			filepath.Join("commands", "tokens.md"),
-			filepath.Join("commands", "wave"),
+			filepath.Join("commands", "tools"),
 			filepath.Join("skills", "pcm"),
 			filepath.Join("skills", "deep-rr"),
 		} {
@@ -90,7 +90,7 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 	home := t.TempDir()
 	repo := filepath.Join(home, ".professor")
 	agentsSource := filepath.Join(repo, "templates", "global", "agents")
-	for _, name := range []string{"architect", "tracer"} {
+	for _, name := range []string{"mapper", "tracer"} {
 		body := "---\nname: " + name + "\ndescription: " + name + " role.\n---\n\nbody\n"
 		writeFixture(t, filepath.Join(agentsSource, name+".md"), body)
 	}
@@ -103,7 +103,7 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, config := range accounts {
-		for _, name := range []string{"architect", "tracer"} {
+		for _, name := range []string{"mapper", "tracer"} {
 			assertLink(t,
 				filepath.Join(config, "agents", name+".md"),
 				filepath.Join(repo, "templates", "global", "agents", name+".md"))
@@ -116,7 +116,7 @@ func TestUninstallRemovesGlobalAgentLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, config := range accounts {
-		for _, name := range []string{"architect", "tracer"} {
+		for _, name := range []string{"mapper", "tracer"} {
 			path := filepath.Join(config, "agents", name+".md")
 			if _, err := os.Lstat(path); !os.IsNotExist(err) {
 				t.Fatalf("uninstall left the machine-global agent link %s: %v", path, err)

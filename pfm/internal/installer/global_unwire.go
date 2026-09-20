@@ -17,7 +17,7 @@ import (
 // global skill directory — plus the in-tree workflows/deep-rr skill — into
 // the commands/ and skills/ registry of EVERY configured Claude account.
 // Uninstall used to remove none of them, so a removed install still resolved
-// /wave:*, /quality:* and the global skills into the clone from every
+// /flights:*, /quality:* and the global skills into the clone from every
 // account, against INSTALL.md's promise that uninstall removes the
 // installer-owned links.
 //

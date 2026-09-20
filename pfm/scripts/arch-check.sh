@@ -291,8 +291,7 @@ else say C21-test-jail ERROR "grep could not read tests"; fi
 # LookupEnv/UserHomeDir/user.Current/exec.Command/exec.CommandContext/
 # exec.LookPath/time.Now/Sleep/After/NewTimer/NewTicker/Tick/net.Dial/
 # net.Listen in non-test code outside internal/{clock,deps,paths,tmux} is a
-# door the unit-test-law wave (docs/dev/trains/testing-foundation/waves/
-# 3-unit-law/spec.md § Three seams item 4) has not seamed yet; the baseline
+# door the unit-test law (§ Three seams item 4) has not seamed yet; the baseline
 # only shrinks as later batches migrate a package onto clock.Clock,
 # deps.Runner, tmux.Fake or paths.Env. internal/mockengine + cmd/mock-engine
 # are the fifth seam: the mock IS a host (exec, env, files, clock) — the thing
@@ -305,8 +304,7 @@ else say C22-host-doors ERROR "grep could not read sources"; fi
 # C23 one activity log: a bare log.Print*/log.Fatal* or a hand-rolled
 # fmt.Fprint*(os.Stderr in non-test code writes where nothing can read it back
 # — no level, no fields, no destination a field report or a lane beat can
-# attach (docs/dev/trains/testing-foundation/waves/6-activity-log/spec.md).
-# internal/obs IS the destination and cmd/pfm's stderr IS a verb's user-facing
+# attach. internal/obs IS the destination and cmd/pfm's stderr IS a verb's user-facing
 # output, so both are outside the count; every other package moves onto
 # obs.Logger/obs.Span as part B migrates it, and this baseline only shrinks.
 grep -vE '^(internal/obs/|cmd/pfm/)' "$T/src.list" > "$T/noobs.list"

@@ -496,7 +496,9 @@ func Run(parent context.Context, request Request) (result Result, runErr error) 
 	if request.Env != nil {
 		environment = append([]string(nil), request.Env...)
 	}
-	setEnvironment(environment, request.Engine, request.ConfigDir, request.Env != nil, &environment)
+	setEnvironment(
+		environment, request.Engine, request.ConfigDir, request.Env != nil, &environment, subagentCaps(request)...,
+	)
 	var openCode openCodeRun
 	if request.Engine == pfmengine.OpenCode {
 		openCode, err = startOpenCode(ctx, &request, environment, cwd)
@@ -687,7 +689,25 @@ func arguments(request Request) ([]string, error) {
 	return args, nil
 }
 
-func setEnvironment(environment []string, id pfmengine.ID, configDir string, explicit bool, target *[]string) {
+// subagentCaps is the headless door's share of the sub-agent capacity policy.
+// A headless run spawns sub-agents like any other Claude chat, so it carries
+// the same caps the tmux-borne launches get from action.ClaudeSpawn; Codex and
+// OpenCode never read these names and get nothing.
+func subagentCaps(request Request) []string {
+	if request.Engine != pfmengine.Claude {
+		return nil
+	}
+	return request.Config.EffectiveClaude(request.Account).SubagentEnv()
+}
+
+func setEnvironment(
+	environment []string,
+	id pfmengine.ID,
+	configDir string,
+	explicit bool,
+	target *[]string,
+	extra ...string,
+) {
 	dropped := map[string]struct{}{
 		"CLAUDE_CODE_SESSION_ID": {}, "CLAUDECODE": {}, "CLAUDE_CODE_CHILD_SESSION": {},
 		"CLAUDE_CONFIG_DIR": {}, "CODEX_THREAD_ID": {}, "TMUX": {}, "TMUX_PANE": {},
@@ -719,6 +739,7 @@ func setEnvironment(environment []string, id pfmengine.ID, configDir string, exp
 		filtered = append(filtered, name+"="+configDir)
 	}
 	filtered = append(filtered, pfmengine.MustLookup(id).LaunchEnv...)
+	filtered = append(filtered, extra...)
 	*target = filtered
 }
 

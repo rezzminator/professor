@@ -73,7 +73,14 @@ func TestDefaultsWithDiscoveryRoots(t *testing.T) {
 	if !reflect.DeepEqual(got.Accounts, wantAccounts) {
 		t.Fatalf("Accounts = %#v, want %#v", got.Accounts, wantAccounts)
 	}
-	if got.Claude != (Claude{PermissionMode: PermissionBypass, Binary: "claude", Cache1H: true, CompactNudge: DefaultCompactNudge()}) {
+	if got.Claude != (Claude{
+		PermissionMode: PermissionBypass,
+		Binary:         "claude",
+		Cache1H:        true,
+		CompactNudge:   DefaultCompactNudge(),
+
+		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
+	}) {
 		t.Fatalf("Claude = %#v, want bypass/claude defaults", got.Claude)
 	}
 	if got.Codex != (Codex{Yolo: true, Binary: "codex"}) {
@@ -240,7 +247,14 @@ func TestLoadConfiguredAccountsExpandHomeAndPreserveIDs(t *testing.T) {
 	if got.AccountIDs() == nil || !reflect.DeepEqual(got.AccountIDs(), []int{9, 2, 17}) {
 		t.Fatalf("AccountIDs = %#v, want [9 2 17]", got.AccountIDs())
 	}
-	if got.Claude != (Claude{PermissionMode: PermissionPrompt, Binary: "claude-custom", Cache1H: true, CompactNudge: DefaultCompactNudge()}) {
+	if got.Claude != (Claude{
+		PermissionMode: PermissionPrompt,
+		Binary:         "claude-custom",
+		Cache1H:        true,
+		CompactNudge:   DefaultCompactNudge(),
+
+		MaxSubagentSpawnDepth: DefaultSubagentSpawnDepth,
+	}) {
 		t.Fatalf("Claude = %#v, want configured values", got.Claude)
 	}
 	if got.Codex != (Codex{Yolo: false, Binary: "codex-custom"}) {

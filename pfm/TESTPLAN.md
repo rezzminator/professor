@@ -814,8 +814,7 @@ Ranked by identity resolution across resume/store/fork edges, kill-store integri
 
 ## Activity log
 
-One structured destination for every corner of the engine
-(`docs/dev/trains/testing-foundation/waves/6-activity-log/spec.md`).
+One structured destination for every corner of the engine.
 `internal/obs` is that destination: `obs.OpenLog` installs the process logger
 at `cmd/pfm` entry and brackets the verb with `cmd.start`/`cmd.exit`,
 `obs.Logger(ctx)` reads it, `obs.With(ctx, ...)` scopes it, `obs.Span(ctx,
@@ -841,7 +840,7 @@ files) holds the line while part B migrates each corner.
 
 ## Seams
 
-The unit-test law (`docs/dev/trains/testing-foundation/waves/3-unit-law/spec.md`): a unit under test has every dependency on the host, the account, an API or another process MOCKED at its seam. Four packages carry that seam for the whole module; the rule is the same in each — production code calls the real implementation, a test scripts the fake, and nothing outside these four packages talks to the bare host directly (ratchet C22, `pfm/scripts/arch-check.sh`, `pfm/.arch/host-doors.txt`).
+The unit-test law: a unit under test has every dependency on the host, the account, an API or another process MOCKED at its seam. Four packages carry that seam for the whole module; the rule is the same in each — production code calls the real implementation, a test scripts the fake, and nothing outside these four packages talks to the bare host directly (ratchet C22, `pfm/scripts/arch-check.sh`, `pfm/.arch/host-doors.txt`).
 
 | Package | Seam | Real | Fake |
 | --- | --- | --- | --- |

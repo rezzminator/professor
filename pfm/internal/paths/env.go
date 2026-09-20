@@ -8,8 +8,7 @@ import (
 // Env abstracts a host's environment and identity reads — os.Getenv/
 // LookupEnv/UserHomeDir/user.Current/os.Hostname — the seam every PFM_*
 // override and host probe crosses instead of calling the os package
-// directly (docs/dev/trains/testing-foundation/waves/3-unit-law/spec.md §
-// Three seams item 3). OSEnv is the identity implementation EnvOr and Home
+// directly (the unit-test law's three seams, item 3). OSEnv is the identity implementation EnvOr and Home
 // already ran against before this existed; MapEnv is its in-memory twin for
 // tests and hostfixture.
 type Env interface {

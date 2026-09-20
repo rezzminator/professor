@@ -17,7 +17,7 @@ func TestOpenCodeCommandBuildCheckDoctorAndUsage(t *testing.T) {
 	writeCodexCLIFile(t, filepath.Join(repo, "CLAUDE.md"), "# Fixture\n")
 	writeCodexCLIFile(
 		t,
-		filepath.Join(repo, ".claude", "commands", "wave", "review.md"),
+		filepath.Join(repo, ".claude", "commands", "tools", "review.md"),
 		"---\ndescription: Review.\n---\nReview.\n",
 	)
 
@@ -25,7 +25,7 @@ func TestOpenCodeCommandBuildCheckDoctorAndUsage(t *testing.T) {
 	if code := run([]string{"opencode", "build", "--home", home, repo}, &stdout, &stderr); code != 0 {
 		t.Fatalf("opencode build code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".opencode", "command", "wave-review.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(repo, ".opencode", "command", "tools-review.md")); err != nil {
 		t.Fatalf("opencode build did not write command: %v", err)
 	}
 	stdout.Reset()

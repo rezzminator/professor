@@ -698,9 +698,9 @@ func TestFailedThenWritesTheRecoverableSentinel(t *testing.T) {
 // draft, so the tail of any prompt longer than one row was unreachable and the
 // proof could never be satisfied. Every real steer is longer than one row.
 func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
-	const then = "Continue the wave: read the refine checkpoint end to end, " +
-		"execute the remaining round, and write the zero-gap spec to the queue " +
-		"path before presenting the user gate."
+	const then = "Continue the flight: read the run ledger end to end, " +
+		"execute the remaining tasks, and write the zero-gap task file to the " +
+		"flight directory before presenting the user gate."
 	tmux := &delayedThenTmux{}
 	tmux.respawn = "claude"
 	proc := fakeReloadProc{

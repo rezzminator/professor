@@ -142,13 +142,8 @@ func (spawn ClaudeSpawn) ShellCommand() (string, error) {
 	if prefs.NativeCursor {
 		command.WriteString(" " + nativeCursorEnv)
 	}
-	for _, assignment := range pfmengine.MustLookup(pfmengine.Claude).LaunchEnv {
-		name, value, _ := strings.Cut(assignment, "=")
-		command.WriteByte(' ')
-		command.WriteString(name)
-		command.WriteByte('=')
-		command.WriteString(Quote(value))
-	}
+	writeAssignments(&command, pfmengine.MustLookup(pfmengine.Claude).LaunchEnv)
+	writeAssignments(&command, prefs.SubagentEnv())
 	command.WriteByte(' ')
 	value, quote := spawn.binaryWord(prefs)
 	command.WriteString(binaryWord(value, pfmengine.MustLookup(pfmengine.Claude).Binary, quote))
@@ -284,7 +279,23 @@ func (spawn ClaudeSpawn) Environment(environ []string) []string {
 	if prefs.NativeCursor {
 		result = append(result, nativeCursorEnv)
 	}
-	return append(result, pfmengine.MustLookup(pfmengine.Claude).LaunchEnv...)
+	result = append(result, pfmengine.MustLookup(pfmengine.Claude).LaunchEnv...)
+	// Last duplicate wins at exec, so the door's caps land after anything the
+	// caller's own environment already carried.
+	return append(result, prefs.SubagentEnv()...)
+}
+
+// writeAssignments appends one NAME=value list to a shell command, each value
+// quoted. Both renderers' assignment lists go through it so a second list can
+// never be spelled a second way.
+func writeAssignments(command *strings.Builder, assignments []string) {
+	for _, assignment := range assignments {
+		name, value, _ := strings.Cut(assignment, "=")
+		command.WriteByte(' ')
+		command.WriteString(name)
+		command.WriteByte('=')
+		command.WriteString(Quote(value))
+	}
 }
 
 // argv is the executable's argument list — the unquoted twin of the tail

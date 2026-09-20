@@ -1,8 +1,6 @@
 // Package hostfixture holds the ten host edge cases every unit test needs
 // to jail against instead of assuming a clean, writable, English, tmux-
-// equipped, logged-in host
-// (docs/dev/trains/testing-foundation/waves/3-unit-law/spec.md § The ten
-// host edge cases). Each fixture builds on testjail (the jailed fleet
+// equipped, logged-in host. Each fixture builds on testjail (the jailed fleet
 // root), paths.MapEnv (an injectable environment mirror), deps.FakeRunner
 // (scripted external commands) and clock.Fake (a deterministic clock), and
 // returns a Base — or a small struct embedding one — plus whatever extra

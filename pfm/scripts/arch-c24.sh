@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# C24-unwrapped-door — the activity log's production census
-# (docs/dev/trains/testing-foundation/waves/6-activity-log/spec.md § Proof).
+# C24-unwrapped-door — the activity log's production census.
 # Invoked by arch-check.sh with the same MODE (check | --measure); it prints
 # exactly one `CHECK C24-unwrapped-door PASS|FAIL|ERROR|MEASURE <detail>`
 # line and exits 0 PASS · 1 FAIL · 2 ERROR, the contract arch-check.sh folds

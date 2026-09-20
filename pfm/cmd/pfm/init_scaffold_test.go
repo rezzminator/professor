@@ -49,7 +49,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		".claude/skills/legal/SKILL.md",
 		"docs/epics/TEMPLATE.md",
 		".codex/config.toml",
-		"docs/commands/wave/references/fix-core.md",
+		"docs/commands/git/references/gitter-history.md",
 		"docs/agents/_index.md",
 	} {
 		if _, err := os.Stat(filepath.Join(target, filepath.FromSlash(relative))); err != nil {
@@ -237,10 +237,10 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			content: "---\nname: legal\n---\nbody\n",
 			mode:    0o600,
 		},
-		"templates/project/epics/TEMPLATE.md":                         {content: "# Epic\n", mode: 0o600},
-		"templates/project/codex/config.toml":                         {content: "model = \"{TOKEN}\"\n", mode: 0o600},
-		"templates/project/docs-commands/wave/references/fix-core.md": {content: "# Fix Core\n", mode: 0o600},
-		"templates/project/docs-agents/_index.md":                     {content: "# Agents\n", mode: 0o600},
+		"templates/project/epics/TEMPLATE.md":                              {content: "# Epic\n", mode: 0o600},
+		"templates/project/codex/config.toml":                              {content: "model = \"{TOKEN}\"\n", mode: 0o600},
+		"templates/project/docs-commands/git/references/gitter-history.md": {content: "# Gitter History\n", mode: 0o600},
+		"templates/project/docs-agents/_index.md":                          {content: "# Agents\n", mode: 0o600},
 	}
 	for relative, fixture := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))

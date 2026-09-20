@@ -21,8 +21,7 @@ func TestHookRunnerEmptyCommandBuildsNoHook(t *testing.T) {
 }
 
 // TestHookRunnerRunsThroughTheRunnerSeam pins the door this file exists to
-// close (docs/dev/trains/testing-foundation/waves/3-unit-law/spec.md § Three
-// seams item 2): the hook launches through deps.Runner.Start instead of a
+// close (the unit-test law's three seams, item 2): the hook launches through deps.Runner.Start instead of a
 // bare exec.Command, and its argv/env carry the chat's own facts.
 func TestHookRunnerRunsThroughTheRunnerSeam(t *testing.T) {
 	t.Parallel()

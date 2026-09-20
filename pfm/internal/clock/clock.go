@@ -1,7 +1,6 @@
 // Package clock is the one time seam: every bare time.Now/time.Sleep/
 // time.After/time.NewTimer/time.NewTicker in non-test code routes through a
-// Clock instead (docs/dev/trains/testing-foundation/waves/3-unit-law/spec.md
-// § Three seams). Real drives the wall clock exactly as the standard
+// Clock instead (the unit-test law's three seams). Real drives the wall clock exactly as the standard
 // library always has; Fake drives a deterministic one a test advances by
 // hand, so a sleep, a timer or a ticker fires on the test's own schedule
 // instead of the real one.

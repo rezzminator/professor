@@ -14,11 +14,11 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, ".claude", "agents", "worker.md"),
-		"---\ndescription: Worker role.\nmodel: sonnet\n---\nUse /wave:review.\n",
+		"---\ndescription: Worker role.\nmodel: sonnet\n---\nUse /tools:review.\n",
 	)
 	writeTestFile(
 		t,
-		filepath.Join(root, ".claude", "commands", "wave", "review.md"),
+		filepath.Join(root, ".claude", "commands", "tools", "review.md"),
 		"---\ndescription: Review.\n---\nReview the change.\n",
 	)
 	writeTestFile(
@@ -45,7 +45,7 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	}
 	for _, path := range []string{
 		filepath.Join(root, ".opencode", "agent", "worker.md"),
-		filepath.Join(root, ".opencode", "command", "wave-review.md"),
+		filepath.Join(root, ".opencode", "command", "tools-review.md"),
 		filepath.Join(root, ".opencode", "skills", "context-meter"),
 		filepath.Join(root, ".opencode", "opencode.jsonc"),
 		filepath.Join(root, ".opencode", "LICENSE"),
@@ -58,11 +58,11 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	}
 	worker, _ := os.ReadFile(filepath.Join(root, ".opencode", "agent", "worker.md"))
 	if !strings.Contains(string(worker), "mode: subagent") || strings.Contains(string(worker), "model:") ||
-		!strings.Contains(string(worker), "/wave-review") ||
+		!strings.Contains(string(worker), "/tools-review") ||
 		!strings.Contains(string(worker), "Model tier: sonnet") {
 		t.Fatalf("agent projection did not follow OpenCode shape: %s", worker)
 	}
-	command, _ := os.ReadFile(filepath.Join(root, ".opencode", "command", "wave-review.md"))
+	command, _ := os.ReadFile(filepath.Join(root, ".opencode", "command", "tools-review.md"))
 	commandText := string(command)
 	if !strings.Contains(commandText, "description: \"Review.\"") || strings.Contains(commandText, "name:") ||
 		strings.Contains(commandText, "allowed-tools:") ||

@@ -60,10 +60,21 @@ func rrDirLine(input io.Reader, home string) (string, error) {
 		return "", fmt.Errorf("hook payload cwd %q is not an absolute path", hook.Cwd)
 	}
 	cwd := filepath.Clean(hook.Cwd)
+	// The blueprint clone conventionally lives at {home}/.professor — a
+	// directory NAMED like a ledger that is not one: {clone}/RR is the clone's
+	// repo root. Resolved up front so the walk can step over it; a clone that
+	// cannot be resolved only matters once the walk needs the fallback.
+	clone, cloneErr := "", error(nil)
+	if home == "" {
+		cloneErr = fmt.Errorf("no home directory to resolve the blueprint clone from")
+	} else {
+		clone, cloneErr = installer.GlobalSourceRepo(home)
+	}
 	for dir := cwd; ; dir = filepath.Dir(dir) {
 		ledger := filepath.Join(dir, ".professor")
 		info, err := os.Stat(ledger)
 		switch {
+		case err == nil && info.IsDir() && cloneErr == nil && ledger == clone:
 		case err == nil && info.IsDir():
 			return fmt.Sprintf(rrDirFound, filepath.Join(ledger, "RR")), nil
 		case err != nil && !errors.Is(err, fs.ErrNotExist):
@@ -73,12 +84,8 @@ func rrDirLine(input io.Reader, home string) (string, error) {
 			break
 		}
 	}
-	if home == "" {
-		return "", fmt.Errorf("no .professor/ above %s and no home directory to resolve the blueprint clone from", cwd)
-	}
-	clone, err := installer.GlobalSourceRepo(home)
-	if err != nil {
-		return "", fmt.Errorf("no .professor/ above %s; resolve the blueprint clone: %w", cwd, err)
+	if cloneErr != nil {
+		return "", fmt.Errorf("no .professor/ above %s; resolve the blueprint clone: %w", cwd, cloneErr)
 	}
 	return fmt.Sprintf(rrDirFallback, filepath.Join(clone, ".professor", "RR"), cwd), nil
 }

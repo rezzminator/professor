@@ -1,5 +1,16 @@
 # {PROJECT_NAME} — {PROJECT_TAGLINE}
 
+## Spawned as a sub-agent? Your first move
+
+Before your first tool call, count the tasks in your brief. A task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
+
+- A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
+- One task you can see how to do — the brief plus one look at the target tells you which files change and how: do it yourself, start to finish.
+- Anything else — a task you cannot see how to do (a failure with an unknown cause, a design to choose, files you cannot name) or a batch of several tasks: your first tool call spawns `speker` (Agent tool, `subagent_type: speker`), handing it the work, everything you already hold and a directory under `tmp/specs/`. Its return is your orders: a directory of one task file you execute yourself; of several, you execute none and spawn one fresh agent per task file as its DISPATCH line says. Below opus you never write a spec yourself.
+- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no `speker`, no spawn.
+- ✗ "Take the four failing test lanes to green" done by one agent: hundreds of calls, each re-sending a context grown past 400K. ✓ `speker` first, then one agent per task file.
+- Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
+
 > **Domain Scope (optional):** Add domain-specific scope/safety disclaimers here, or delete the block. _Example:_ "{DOMAIN_ADJ} assistant tool. No {FORBIDDEN_DOMAIN_OUTPUTS}. {USER_NOUN} retains full {DOMAIN_ADJ} responsibility."
 
 **Architecture:** {PROJECT_NAME} is a roster of 1..N projects connected by {the project's integration boundaries, if any}.

@@ -113,3 +113,36 @@ func TestRRDirReportsAFailedLookAsAnErrorLineNeverSilence(t *testing.T) {
 		}
 	})
 }
+
+// The blueprint clone is conventionally {home}/.professor — itself a directory
+// named .professor. Walking up from an unmanaged directory under home must not
+// mistake the clone for a ledger: {clone}/RR is the clone's repo root, never
+// where an answer is saved.
+func TestRRDirNeverMistakesTheBlueprintCloneForALedger(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "home")
+	cwd := filepath.Join(home, "work", "unmanaged")
+	for _, dir := range []string{cwd, filepath.Join(home, ".professor", ".professor")} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := runRRDir(t, rrDirPayload(t, cwd), home)
+	want := "RR-DIR: " + filepath.Join(home, ".professor", ".professor", "RR") +
+		" (fallback: no .professor/ above " + cwd + ")"
+	if got != want {
+		t.Fatalf("context = %q, want %q", got, want)
+	}
+	// Inside the clone, its own ledger is the nearest one and is found as such.
+	inside := filepath.Join(home, ".professor", "pfm")
+	if err := os.MkdirAll(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = runRRDir(t, rrDirPayload(t, inside), home)
+	if want := "RR-DIR: " + filepath.Join(home, ".professor", ".professor", "RR"); got != want {
+		t.Fatalf("inside the clone: context = %q, want %q", got, want)
+	}
+}

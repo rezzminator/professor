@@ -80,3 +80,27 @@ Resolved:
 Observed: each chat launches `pfm mcp chat serve` once over stdio and holds it for the whole session; `pfm install` replaces the binary underneath and the server keeps answering from the deleted build (nine such processes on one host, the oldest two days stale — a kill by session id answered "killed" from a build that predated the live OpenCode seat and closed nothing). A guard that ended the server on replacement was built, proven in a real chat, and withdrawn the same day: Claude Code does not relaunch a stdio server that exits ("configured MCP server failed to connect: chat"), so the guard trades a stale answer for no chat tools at all in every running chat, self-compact and inject included. Kept from that work: `RunStdio` returns when its context ends even while the client holds stdin open (it used to wait on the blocked reader forever, which is why the guard first looked like it worked in tests and did nothing on a host).
 Amend: a refined spec under `docs/dev/` — CHATS REACH pfm THROUGH THE DAEMON. The loopback HTTP daemon (`pfm mcp serve`) already restarts on install and already serves `/mcp/chat`; decide whether installed chats register the chat server as an HTTP MCP entry instead of stdio (identity then has to travel in the request, since the daemon has no chat ancestry — the open design question), or whether the stdio process becomes a thin proxy to the daemon that carries its own identity. Until then `pfm doctor` names every `pfm mcp … serve` process running a replaced executable, with its chat, so a stale server is visible instead of silent.
 Resolved:
+
+## 2026-09-20 — headless exec: `--engine codex` must run the Codex CLI again (user ruling)
+Observed: the headless-OpenCode port (89db9254) made `--engine codex` and `cx` aliases that route through OpenCode, so a caller asking for Codex silently gets a different engine.
+Amend: `pfm/internal/headless/run/engine_selector.go` (+ `internal/headless/README.md`, `docs/dev/pfm-surface.md`) — RULED by the user: `--engine codex|cx` runs the Codex CLI. Every common control Codex cannot honour (`--system` replacement, `--json-schema` / `--schema`, `--tools`, `--sealed`, and any other flag the OpenCode plugin alone implements — enumerate them from the code, closed-world) is a named pre-launch refusal that says the flag is not supported for Codex and to use `--engine opencode`; never a silent drop, never a reroute. Tests watched red first.
+Resolved:
+
+## 2026-09-20 — headless OpenCode control flags are unverified on a real model (test authorized)
+Observed: `--system`, `--json-schema` and `--tools` on `--engine opencode` were never proven end to end: the free model `opencode/big-pickle` refuses a replaced system prompt and the plugin controls ("free tier can only be used from within OpenCode"); pfm surfaces that cleanly (exit 4, no server left behind) but the controls themselves are untested.
+Amend: no file — a verification job. The user AUTHORIZED spending paid-model prompts for it without asking again: one run per control on a paid OpenCode model (not the OpenAI quota while it is near its cap), asserting the system prompt is really replaced, the output validates against the schema, and a tool outside the allowlist is refused. A failure becomes its own entry.
+Resolved:
+
+## 2026-09-20 — open defects and parked jobs carried out of the OpenCode close-out
+Observed: found during the live tests and the SPEC-C build, none fixed:
+- `fleet.ResolveRow` (`fleet/scan.go`) renders its own errors as absence — a failed look reads as "no chat named".
+- `pfm chat resolve` answers from a different resolver ladder than every other chat verb.
+- `kill/obs.go` `requestShape` cannot tell an id target from a socket target.
+- One `chat_inject` into an idle OpenCode pane answered "queued, busy"; never reproduced, cause unknown.
+- A fresh Claude chat with 0 prompts is missing from `pfm ls`.
+- WARN-level log noise (uv stderr) on ordinary runs.
+- `scripts/check-opencode-writer.mjs` exists with zero invocation sites — wire it into a gate or delete it.
+- `chat new --engine opencode` is refused: no OpenCode launcher is registered (belongs to the engine-parity train).
+Parked, unstarted: the chat-ownership train (entry above); the bind-mount lane test; the 24 unmerged old branches (triage: merge, port, or delete each); the untracked `engines/` directory (track it or remove it); the themes eye-check.
+Amend: judgment — each bullet is folded into the train that owns it (resolver bullets and the launcher → engine parity; the rest → a small fixes wave) when that train is refined.
+Resolved:

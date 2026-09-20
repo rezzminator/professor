@@ -1,0 +1,7 @@
+{
+  "super-rr": {
+    "from": "rr",
+    "description": "Maps a query's knowledge area, deeper — delegate for \"super rr\", \"super-rr X\" when the stakes outrun rr's quick pass and deep-rr is overkill; quick → rr. Returns the saved .professor/RR/{slug}-{date}.md path first, then the cited map and the rabbit holes left open.",
+    "effort": "medium"
+  }
+}

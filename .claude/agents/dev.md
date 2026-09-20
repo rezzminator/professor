@@ -1,7 +1,7 @@
 ---
 name: dev
 description: Implements ONE scoped task in a roster project from a brief naming the change and its files — delegate for bounded build work with a spec; qa writes the tests. Returns files touched plus the verification command and verdict. Not for .claude/**, CLAUDE.md or templates/** → /pcm.
-tools: Read, Write, Edit, Bash, Glob, Grep
+tools: Read, Write, Edit, Bash, Glob, Grep, Skill
 model: sonnet
 ---
 

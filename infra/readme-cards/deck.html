@@ -1017,7 +1017,7 @@
   ▝▝ ▝▝</pre><div><div><b>Claude Code</b> <span class="dim">v2.1.270</span></div><div class="dim">Opus 5 with xhigh effort · Claude Max</div><div class="dim">~/.professor</div></div></div></div>
       <div class="tbody" id="cmpB"></div>
       <div class="tfoot">
-        <div class="ccrule"><span></span><em>WAVE-TRAIN</em><span class="short"></span></div>
+        <div class="ccrule"><span></span><em>FLIGHT-RUN</em><span class="short"></span></div>
         <div class="ccin"><span class="cp">❯</span><span id="cmpIn"></span><span class="caret" id="cmpCaret"></span></div>
         <div class="ccrule"><span></span></div>
         <div class="sl" id="cmpSl"></div>
@@ -1025,30 +1025,30 @@
       <div class="sweep" id="cmpSweep"></div>
     </div>
   </section>
-  <section class="wavex" id="wavex" data-slide="The wave">
-    <div class="chainhead"><h2>A wave: one feature, spec to merge</h2></div>
+  <section class="wavex" id="wavex" data-slide="The flight">
+    <div class="chainhead"><h2>A flight: one feature, spec to merge</h2></div>
     <div class="pwh">
       <div class="prob"><span class="k">Problem</span><p>One big chat building a feature drifts from what you asked — by the end it has built something else.</p></div>
-      <div class="what"><span class="k"><b>Professor</b></span><p>A wave: the feature broken into small tasks, built step by step, each one closed before the next.</p></div>
+      <div class="what"><span class="k"><b>Professor</b></span><p>A flight: the feature broken into small tasks, built step by step, each one closed before the next.</p></div>
       <div class="why"><span class="k">Why</span><p>Zero gap at every step — so what comes out the other end is <b>exactly</b> what you refined and asked for.</p></div>
-      <div class="how"><span class="k">How</span><p><code>/wave:refine</code> → architect → scheduler → <code>/wave:live</code> runs the build cycle per task → <code>/wave:walker</code> walks the landed wave against the spec.</p></div>
+      <div class="how"><span class="k">How</span><p><code>/flights:spec</code> → flights-speccer reconciles → an orchestrate command runs the build cycle per task → <code>/flights:audit</code> walks the landed flight against the spec.</p></div>
     </div>
-    <div class="cue"><code>/wave:refine</code> → architect passes until <code>NO MORE GAPS</code> → scheduler cuts the train → <code>/wave:live</code> → <code>/wave:walker</code> conformance walk</div>
+    <div class="cue"><code>/flights:spec</code> → flights-speccer writes the index → an orchestrate command dispatches → <code>/flights:audit</code> conformance walk</div>
     <div class="wtrack"><div class="wline"></div><div class="wpkt" id="wPkt"></div></div>
     <div class="wvgrid" id="wgrid">
-      <div class="wst" data-i="0"><div class="wsh"><span class="wsn">1</span><b>Refine</b><code>/wave:refine</code></div></div>
-      <div class="wst" data-i="1"><div class="wsh"><span class="wsn">2</span><b>Architect</b><code>passes until NO MORE GAPS</code></div></div>
-      <div class="wst" data-i="2"><div class="wsh"><span class="wsn">3</span><b>Schedule</b><code>train.md · disjoint lanes</code></div></div>
-      <div class="wst" data-i="3"><div class="wsh"><span class="wsn">4</span><b>Orchestrate</b><code>/wave:live</code></div></div>
+      <div class="wst" data-i="0"><div class="wsh"><span class="wsn">1</span><b>Specify</b><code>/flights:spec</code></div></div>
+      <div class="wst" data-i="1"><div class="wsh"><span class="wsn">2</span><b>Reconcile</b><code>flights-speccer · five checks</code></div></div>
+      <div class="wst" data-i="2"><div class="wsh"><span class="wsn">3</span><b>Index</b><code>index.md · order · dependencies</code></div></div>
+      <div class="wst" data-i="3"><div class="wsh"><span class="wsn">4</span><b>Orchestrate</b><code>/flights:orchestrate-*</code></div></div>
       <div class="wst" data-i="4"><div class="wsh"><span class="wsn">5</span><b>Build</b><code>the cycle, per task ↓</code></div></div>
-      <div class="wst" data-i="5"><div class="wsh"><span class="wsn">6</span><b>Conform</b><code>/wave:walker</code></div></div>
+      <div class="wst" data-i="5"><div class="wsh"><span class="wsn">6</span><b>Audit</b><code>/flights:audit</code></div></div>
     </div>
     <div class="wlife vz" id="wlife">
       <button class="btn rp" id="waveReplay" type="button">Replay</button>
-      <div class="wq"><span class="lbl">tasks from the train</span><div id="wQueue"></div></div>
+      <div class="wq"><span class="lbl">tasks from the flight</span><div id="wQueue"></div></div>
       <div class="wring">
         <svg id="wRing" viewBox="0 0 760 300" aria-hidden="true"></svg>
-        <div class="wcenter"><b id="wcTask">—</b><span id="wcStage">waiting for the train</span></div>
+        <div class="wcenter"><b id="wcTask">—</b><span id="wcStage">waiting for the flight</span></div>
       </div>
       <div class="wq"><span class="lbl">landed on develop</span><div id="wLanded"></div><div class="wconf" id="wConf">◇ conformance walk</div></div>
     </div>
@@ -1179,7 +1179,7 @@
       <div class="why"><span class="k">Why</span><p>The order of authority decides who wins at 2 a.m. — your discipline sits on top.</p></div>
       <div class="how"><span class="k">How</span><p><code>pfm</code> launches every Claude chat with <code>--system-prompt-file professor.md</code>; Codex and OpenCode get compiled mirrors.</p></div>
     </div>
-    <div class="cue"><code>cat ~/.professor/templates/prompts/professor.md</code> — pfm hands it to every Claude chat as <code>--system-prompt-file</code>, above the harness's own prose</div>
+    <div class="cue"><code>cat ~/.local/share/pfm/install/harness-prompts/claude.md</code> — pfm hands it to every Claude chat as <code>--system-prompt-file</code>, above the harness's own prose</div>
     <div class="towers">
       <div class="axis"><span class="lbl">high</span><div class="axisbar"><i class="axisdot"></i></div><span class="lbl">low</span></div>
 
@@ -1790,18 +1790,18 @@
     var sc = scene(), box = document.getElementById('cmpB'), term = document.getElementById('cmpTerm');
     var inp = document.getElementById('cmpIn'), caret = document.getElementById('cmpCaret'), sl = document.getElementById('cmpSl'), sweep = document.getElementById('cmpSweep');
     var chips = {}; document.querySelectorAll('#cmpx .cchip').forEach(function (c) { chips[c.dataset.k] = c; });
-    var KEEP = 'keep the wave-3 spec at tmp/wave3.md, merge sha a66c690d, the two open review issues';
-    var DROP = 'drop the wave-1/2 build logs, grep dumps, and the resolved debugging';
-    var STEER = 'Continue wave 3 from tmp/wave3.md: dispatch dev on step 1, keep both review issues open.';
+    var KEEP = 'keep the flight-3 spec at tmp/flights/flight-3/, merge sha a66c690d, the two open review issues';
+    var DROP = 'drop the flight-1/2 build logs, grep dumps, and the resolved debugging';
+    var STEER = 'Continue flight 3 from tmp/flights/flight-3/: dispatch dev on step 1, keep both review issues open.';
     var HIST = [
-      ['u', '❯', 'Run the wave train: waves 1 to 3, merge each one to develop.'],
-      ['say', '⏺', 'Wave 1 built in the fence, QA green, merged.'],
+      ['u', '❯', 'Run flights 1 to 3, merge each one to develop.'],
+      ['say', '⏺', 'Flight 1 built in the fence, QA green, merged.'],
       ['called', null, '⎿ 412 lines of go test output · 38 grep hits · 3 build logs'],
-      ['say', '⏺', 'Wave 2: fixed the nil-map panic in the resolver after two dead ends.'],
+      ['say', '⏺', 'Flight 2: fixed the nil-map panic in the resolver after two dead ends.'],
       ['called', null, '⎿ stack traces, a reverted attempt, 1,900 lines of tool output'],
-      ['say', '⏺', 'Wave 2 merged to develop as a66c690d. Two review issues stay open for wave 3.']
+      ['say', '⏺', 'Flight 2 merged to develop as a66c690d. Two review issues stay open for flight 3.']
     ];
-    function meter(pct) { sl.innerHTML = '🥈 ✦ Opus 5 │ 🔖 WAVE-TRAIN │ 🔹 xhigh │ <span class="meter' + (pct < 30 ? ' low' : '') + '">ctx ' + pct + '%</span>'; }
+    function meter(pct) { sl.innerHTML = '🥈 ✦ Opus 5 │ 🔖 FLIGHT-RUN │ 🔹 xhigh │ <span class="meter' + (pct < 30 ? ' low' : '') + '">ctx ' + pct + '%</span>'; }
     function chip(k, on) { chips[k].classList.toggle('on', on); }
     function reset() {
       box.innerHTML = ''; HIST.forEach(function (h) { ln(box, h[0], h[1], h[2]); });
@@ -1812,16 +1812,16 @@
       var my = sc.next(); reset();
       if (!(await sc.wait(700, my))) return;
       chip('mile', true);
-      ln(box, 'say', '⏺', 'Milestone: wave 2 is merged. Checkpointed the plan to tmp/wave3.md; compacting before wave 3.');
+      ln(box, 'say', '⏺', 'Milestone: flight 2 is merged. Checkpointed the plan to tmp/flights/flight-3/; compacting before flight 3.');
       if (!(await sc.wait(1000, my))) return;
-      ln(box, 'say', '⏺', '<b>chat - chat_self_compact</b> (MCP)(focus: "Wave 2 done; keep … drop …", then: ["Continue wave 3 …"])');
+      ln(box, 'say', '⏺', '<b>chat - chat_self_compact</b> (MCP)(focus: "Flight 2 done; keep … drop …", then: ["Continue flight 3 …"])');
       if (!(await sc.wait(500, my))) return;
       ln(box, 'called', null, '⎿ queued · /compact fires when this turn ends, the steer lands after it settles');
       if (!(await sc.wait(900, my))) return;
       ln(box, 'baked', '✻', 'Baked for 3m 41s');
       if (!(await sc.wait(700, my))) return;
       caret.style.display = 'none';
-      if (!(await typeInto(null, inp, '/compact Wave 2 done; ', sc, my, 30))) return;
+      if (!(await typeInto(null, inp, '/compact Flight 2 done; ', sc, my, 30))) return;
       chip('keep', true); var keep = document.createElement('span'); keep.className = 'kw'; inp.appendChild(keep);
       if (!(await typeInto(null, keep, KEEP + '; ', sc, my, 34))) return;
       chip('drop', true); var drop = document.createElement('span'); drop.className = 'dw'; inp.appendChild(drop);
@@ -1833,7 +1833,7 @@
       if (!(await sc.wait(1100, my))) return;
       box.innerHTML = ''; term.classList.remove('boot');
       ln(box, 'div', null, '✻ Conversation compacted · ctrl+o for history');
-      ln(box, 'called', null, '⎿ kept: <span class="kw">tmp/wave3.md · a66c690d · 2 open review issues</span>');
+      ln(box, 'called', null, '⎿ kept: <span class="kw">tmp/flights/flight-3/ · a66c690d · 2 open review issues</span>');
       meter(9);
       if (!(await sc.wait(1100, my))) return;
       chip('steer', true);
@@ -1844,7 +1844,7 @@
       ln(box, 'u', '❯', '<span class="sw">' + STEER + '</span>');
       if (!(await sc.wait(900, my))) return;
       var d = ln(box, 'say', '⏺', ''), t = d.querySelector('.t');
-      if (!(await typeInto(box, t, 'Resuming wave 3, step 1: dispatching dev with the spec from tmp/wave3.md.', sc, my, 60))) return;
+      if (!(await typeInto(box, t, 'Resuming flight 3, step 1: dispatching dev with the spec from tmp/flights/flight-3/.', sc, my, 60))) return;
     }
     document.getElementById('cmpReplay').addEventListener('click', play);
     onView(document.getElementById('cmpx'), play);
@@ -1890,7 +1890,7 @@
       if (!(await sc.wait(500, my))) return;
       lit(tO, true);
       var u = ln(O, 'u', '❯', ''), ut = u.querySelector('.t');
-      if (!(await typeInto(O, ut, 'Wave 3 is merged. Fan out: REVIEW checks the diff read-only, DOCS updates the command card, TESTS runs the harvest suite in the container. One verdict line each, back here.', sc, my, 70))) return;
+      if (!(await typeInto(O, ut, 'Flight 3 is merged. Fan out: REVIEW checks the diff read-only, DOCS updates the command card, TESTS runs the harvest suite in the container. One verdict line each, back here.', sc, my, 70))) return;
       if (!(await sc.wait(600, my))) return;
       ln(O, 'say', '⏺', 'Three independent jobs, three engines. Dispatching all in one pass.');
       for (var i = 0; i < W.length; i++) {
@@ -1935,7 +1935,7 @@
     onView(document.getElementById('duo'), play);
   })();
 
-  // ---------- the wave: six stations, then the per-task build cycle ----------
+  // ---------- the flight: six stations, then the per-task build cycle ----------
   (function () {
     var sc = scene(), sts = document.querySelectorAll('#wgrid .wst'), pkt = document.getElementById('wPkt');
     var svg = document.getElementById('wRing'), Q = document.getElementById('wQueue'), L = document.getElementById('wLanded'), conf = document.getElementById('wConf');
@@ -1979,7 +1979,7 @@
       sts.forEach(function (st) { st.classList.remove('on', 'done'); }); pkt.style.left = '0%';
       Q.innerHTML = ''; L.innerHTML = ''; TASKS.forEach(function (t) { Q.appendChild(chip(t)); });
       light(-1); tok.classList.remove('ok'); place(lenAt(0)); conf.classList.remove('on'); conf.textContent = '◇ conformance walk';
-      cT.textContent = '—'; cS.textContent = 'waiting for the train';
+      cT.textContent = '—'; cS.textContent = 'waiting for the flight';
     }
     reset();
     async function glide(from, to, ms, my) {
@@ -2013,7 +2013,7 @@
         cS.textContent = 'landed · ' + (t + 1) + ' of ' + TASKS.length;
         if (!(await sc.wait(320, my))) return;
       }
-      light(-1); cT.textContent = 'wave complete'; cS.textContent = TASKS.length + ' tasks · same cycle each time';
+      light(-1); cT.textContent = 'flight complete'; cS.textContent = TASKS.length + ' tasks · same cycle each time';
       sts.forEach(function (st, k) { st.classList.toggle('on', k === 5); if (k < 5) st.classList.add('done'); }); pkt.style.left = '100%';
       if (!(await sc.wait(500, my))) return;
       conf.classList.add('on'); conf.textContent = '✓ conformance walk · every changed flow walked to its terminal · matches the refined spec';
@@ -2253,7 +2253,7 @@
       ['HARV_ORCH', 'claude', 3], ['HARV_REVIEW', 'codex', 0], ['Fix the Crossref receipt in the h…', 'claude', 2], ['ATLAS_ORCH', 'codex', 4],
       ['ATLAS_DOCS', 'claude', 0], ['LUMEN_REVIEW', 'codex', 1], ['Migrate the ledger table to v7', 'claude', 5], ['ORBIT_QA', 'opencode', 0],
       ['DEMO', 'claude', 2], ['Research: AI crawler block rates', 'claude', 6], ['ORBIT_ORCH', 'codex', 2], ['LUMEN_DOCS', 'opencode', 0],
-      ['README', 'claude', 3], ['DESIGN_PASS', 'claude', 1], ['DEPLOY_PROD', 'codex', 0], ['WAVE_WALKER', 'claude', 8]
+      ['README', 'claude', 3], ['DESIGN_PASS', 'claude', 1], ['DEPLOY_PROD', 'codex', 0], ['FLIGHT_AUDIT', 'claude', 8]
     ];
     var rows = CH.map(function (c, i) {
       var working = i % 3 !== 2;
@@ -2376,7 +2376,7 @@
       ['webapp', '●', 'ORCHESTRATOR', '🥇 ⇄ ←here', '37p', '2.7M', '1m', 'claude'],
       ['webapp', '⚙', 'DESIGN_PASS', '⚙ agent 🥇', '18p', '1.9M', '58m', 'claude'],
       ['webapp', '↻', 'DEPLOY_PROD', '🥇', '59p', '8.6M', '2d', 'claude'],
-      ['ops', '●', 'FLEET_BUILDER', '⬢ ⇄', '77p', '94M', '0s', 'codex'],
+      ['ops', '●', 'FLEET_EXECUTOR', '⬢ ⇄', '77p', '94M', '0s', 'codex'],
       ['ops', '↻', 'CCC', '🥈', '452p', '32M', '54m', 'claude'],
       ['ops', '↻', 'RELEASE_NOTES', '🥇 ⚡', '31p', '9.1M', '4d', 'claude'],
       ['ops', '↻', 'DOCS_SWEEP', '⬢ 🥇', '3p', '2.1M', '11d', 'codex']

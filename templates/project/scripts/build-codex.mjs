@@ -27,14 +27,14 @@
 //   verbatim copy + model-alias swap (opus/sonnet/haiku → Codex model names,
 //   lowercase word-boundary tokens only, hyphen-guarded so full model IDs survive)
 //   + Claude command references rewritten to Codex's own syntax (/name → $name,
-//     /wave:orchestrator → $wave-orchestrator); the roster is every name backed by
+//     /flights:orchestrate-nested → $flights-orchestrate-nested); the roster is every name backed by
 //     a real .md file under .claude/commands/** — never a hand-written list, never
 //     a generic /\w+ rewrite (that would also corrupt path fragments like /scripts,
-//     /src, /commands) — so a directory with no {name}.md (e.g. wave/) never yields
-//     a bare $wave
+//     /src, /commands) — so a directory with no {name}.md (e.g. flights/) never yields
+//     a bare $flights
 //   + in-body CLAUDE.md → AGENTS.md rewrite for the AGENTS.md compile step only
 //     (marker line and appended adapter constant keep their own CLAUDE.md wording)
-//   + nested command names flattened (wave/orchestrator → wave-orchestrator, name: rewritten)
+//   + nested command names flattened (flights/orchestrate-nested → flights-orchestrate-nested, name: rewritten)
 //   + one constant preamble per agent TOML (Codex subagents receive ONLY
 //     developer_instructions — the preamble routes them to AGENTS.md for the law).
 // Every generated file carries a marker line; the script only ever overwrites or
@@ -86,7 +86,7 @@ This file is compiled verbatim from CLAUDE.md by ${SELF}; Claude model aliases a
 - Agent / Task spawn / \`subagent_type\` → \`spawn_agent\` with the matching \`.codex/agents/*.toml\` role
 - AskUserQuestion → ask the user in prose and end your turn
 - Workflow() scripts → no equivalent: decompose sequentially or fan out \`spawn_agent\` calls
-- Skills / slash commands → \`.codex/skills/{name}/SKILL.md\`, invoked as \`$name\` — Codex has no \`/name\` syntax, so every \`/name\` reference below is already rewritten to \`$name\` (nested Claude names flatten: \`/wave:orchestrator\` → \`$wave-orchestrator\`)
+- Skills / slash commands → \`.codex/skills/{name}/SKILL.md\`, invoked as \`$name\` — Codex has no \`/name\` syntax, so every \`/name\` reference below is already rewritten to \`$name\` (nested Claude names flatten: \`/flights:orchestrate-nested\` → \`$flights-orchestrate-nested\`)
 - PreToolUse hooks (guarded files) → Codex has NO hook layer, so the guard is absolute: never edit \`.claude/**\`, any \`CLAUDE.md\`, any \`AGENTS.md\` (generated — change CLAUDE.md and re-run the build) — stop and report instead
 - \`make -C {project}\` (the roster entry whose Makefile owns infra) and gitter's git monopoly bind unchanged; \`.codex/rules\` enforces the shell subset
 `;
@@ -158,13 +158,13 @@ const tomlMultiline = (s) => {
 };
 
 // Codex command-prefix roster — Claude invokes `.claude/commands/**` as `/name`
-// (nested dirs join with `:`, e.g. /wave:orchestrator); Codex has no such syntax,
+// (nested dirs join with `:`, e.g. /flights:orchestrate-nested); Codex has no such syntax,
 // it invokes the compiled skill as `$name` (nested names flatten with flatName,
 // matching the skill dir the command compiles to). The roster is the exact set of
 // names backed by a real .md file on disk — never a hand-written list, never a
 // generic /\w+ rewrite (that would also mangle path fragments like /scripts, /src,
-// /commands). A directory alone (e.g. wave/, no wave.md) contributes no entry, so
-// bare /wave must never transform; only its real children (/wave:orchestrator, …) do.
+// /commands). A directory alone (e.g. flights/, no flights.md) contributes no entry, so
+// bare /flights must never transform; only its real children (/flights:orchestrate-nested, …) do.
 const commandRoster = new Map(); // "name:form" (no leading /) -> "$flat-form"
 const commandsRoot = join(ROOT, '.claude/commands');
 if (isDir(commandsRoot)) {

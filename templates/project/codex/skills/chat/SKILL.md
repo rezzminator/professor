@@ -6,7 +6,7 @@ description: Messages the tmux agent chats through `pfm chat` — `pfm chat inje
 <!--
 HAND-WRITTEN CARD — no generated marker. `pfm codex build` preserves it because
 chat is a host-level MCP/CLI surface with no project-local Claude command source.
-This card carries the one page a Codex lane actually needs mid-wave.
+This card carries the one page a Codex lane actually needs mid-flight.
 -->
 
 # pfm chat essentials (Codex shape)
@@ -17,7 +17,7 @@ Canonical tool: `$HOME/.local/bin/pfm chat`.
 
 `$HOME/.local/bin/pfm chat inject {target} '{one-line message}'`
 
-- `{target}` = exact tmux session name or a pane label; resolution scans every socket. Builder lanes get the orchestrator's address from the BRIEF / `$WAVES/lanes.md`.
+- `{target}` = exact tmux session name or a pane label; resolution scans every socket. Executor lanes get the orchestrator's address from the BRIEF.
 - ONE line per message — send N injects for N lines. Plain text is auto-signed with your reply address; a `/`-prefixed harness command travels unsigned.
 - Success prints `injected LIVE … Enter confirmed` plus a delivery-proof screen capture — read it; that is your receipt. Queued-on-busy is normal (a busy pane queues your turn).
 - exit 3 = the target chat is dead.

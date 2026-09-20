@@ -195,7 +195,7 @@ cmd_remove() {
     echo "No worktree found: $worktree_dir"
   fi
 
-  # Branch survives by default — it is the merged wave's revert path and can still
+  # Branch survives by default — it is the merged flight's revert path and can still
   # be LIVE (boundary GATE-2) when cleanup runs; deletion is a separate, explicit
   # act, never bundled into worktree teardown.
   if [ -n "$delete_branch" ]; then

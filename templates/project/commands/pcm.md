@@ -21,7 +21,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 ### How the pieces connect
 
 - `CLAUDE.md` — request routing + guards; routes non-obvious requests to commands, names mandatory-load obligations; carries no rosters (§ Authoring conventions, no-rosters law)
-- `.claude/commands/*.md` — project slash commands (/wave:orchestrator, /pcm, …); machine-global commands (`/wave:builder`, `/quality:*`, `/context-meter`, `/pfm`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
+- `.claude/commands/*.md` — project slash commands (/pcm, /dev, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/pfm`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
 - `.claude/agents/*.md` — root pipeline agents (gitter) + {proj}-qa wrappers, one per project (registered QA gates that read the child protocol and carry the test-output filter hook)
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set)
 - `.claude/scripts/*.{sh,mjs}` — worktree.sh, alloc-ports.sh, dev.sh, pfm-guard.sh + guard-stamp.sh (the framework-edit gate), codex-sync.sh (the `pfm codex` hook bridge)
@@ -30,8 +30,8 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 
 ### Critical invariants
 
-- **Path variables** — agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the wave command that spawns them (`/wave:builder`, `/wave:live`) defines them in the brief.
-- **Pipeline flow lives in the wave commands** (`/wave:refine` → `/wave:orchestrator` → `/wave:builder` → `/wave:walker`; `/wave:live` for the direct-to-main path) — CLAUDE.md just redirects. Don't duplicate.
+- **Path variables** — agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
+- **Pipeline flow lives in the flights commands** (`/flights:spec` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
 - **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
@@ -45,7 +45,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 <!-- INSTALL: this section is derive-only by design — no fixed counts to fill in. The bash commands below run against the actual roster/filesystem every time, so a single-project install and a ten-project install both get correct answers from the same text. -->
 
 - **Projects:** derive with `ls -d {project}*/`; each child CLAUDE.md § Quick Start names its package manager
-- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every agent is registered at root on the `{proj}-{role}` convention (`{proj}-qa`, `{proj}-developer`, …), plus the project-neutral `gitter`; the machine-global cast (`architect`, `reviewer`, `tracer`, `scheduler`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per CLAUDE.md § Model Selection
+- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every agent is registered at root on the `{proj}-{role}` convention (`{proj}-qa`, `{proj}-developer`, …), plus the project-neutral `gitter`; the machine-global cast (`flights-speccer`, `flights-orchestrator`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per CLAUDE.md § Model Selection
 - Commands and skills: `ls .claude/commands/ .claude/skills/ ~/.claude/commands/ ~/.claude/skills/`
 
 ---
@@ -68,7 +68,7 @@ Above threshold = split into a referenced file (one level deep, with a Table of 
 
 ### Voice location
 
-Voice lives in the fleet prompt (`{BLUEPRINT_CLONE_PATH}/templates/prompts/professor.md`), injected by `pfm` when `claude.systemPrompt` is `professor` (`pfm config show`). CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
+Voice lives in the fleet prompt (`{BLUEPRINT_CLONE_PATH}/templates/harness-prompts/`), injected by `pfm` when `claude.systemPrompt` is `professor` (`pfm config show`). CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
 
 ### Hooks vs prompts
 
@@ -107,7 +107,7 @@ There is no local-stopgap-to-regeneration ceremony. A framework fix and a projec
 
 **Standalone-skill special case:** a change to a `sources.json` skill bumps the skill's `version:` frontmatter — the framework repo's release flow ships the substance to the skill's own public repo; the Professor changelog carries only the version pointer + re-pull note.
 
-**Retro inbox — `.professor/retro.md`:** the main-loop steering-conscience ledger (sessions append per its header; wave retros archive with their wave) — an inbox `/pcm` consumes, never a change log. The `retro` dispatch sweeps entries lacking `Resolved:`, folds each `Amend:` into the named file through the normal change flow (or rules it `judgment` — no text fix), stamps `Resolved: {date} — {where}` under the entry in place, and classifies every fold per the list above.
+**Retro inbox — `.professor/retro.md`:** the main-loop steering-conscience ledger (sessions append per its header; a flight's own notes die with its directory) — an inbox `/pcm` consumes, never a change log. The `retro` dispatch sweeps entries lacking `Resolved:`, folds each `Amend:` into the named file through the normal change flow (or rules it `judgment` — no text fix), stamps `Resolved: {date} — {where}` under the entry in place, and classifies every fold per the list above.
 
 ---
 
@@ -128,13 +128,13 @@ Before ANY changes, read all affected files. Grep every reference across `.claud
 - Project dir names in CLAUDE.md match actual directories
 - Agent frontmatter matches actual behavior and tools needed
 - worktree.sh project resolution matches directory names
-- Wave-command references (`/wave:orchestrator`, `/wave:live`, `/wave:walker`) match agent names and doc paths
+- Flights-command references (`/flights:spec`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
 - Tech stack descriptions match package.json/pyproject.toml deps
-- Pipeline flow in the wave commands matches agent ordering constraints
+- Pipeline flow in the flights commands matches agent ordering constraints
 
 ### Step 3 — Plan
 
-Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Count the tasks per the fleet prompt § Orchestration: more than one ⇒ `speker` writes the spec directory and one agent executes each task file; edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here from those task files.
+Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Count the tasks per the fleet prompt § Orchestration: more than one ⇒ `flights-speccer` writes the flight directory and one agent executes each task file; edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here from those task files.
 
 ### Step 4 — Execute
 
@@ -154,7 +154,7 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 
 **Command rules:**
 
-- Step names stay consistent across the wave commands and the agents they cite
+- Step names stay consistent across the flights commands and the agents they cite
 - Port reading instructions must match what gitter writes to ports.md
 
 **Script rules:**
@@ -166,7 +166,7 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 
 1. Grep for stale references to old names/paths
 2. Cross-reference agent tools lists
-3. Pipeline completeness — every agent a wave command spawns has a definition
+3. Pipeline completeness — every agent a flights command spawns has a definition
 4. Command completeness — every command referenced in CLAUDE.md (Request Routing) has a file; every `.claude/commands/*.md` has a `description:`
 5. Script references exist at stated paths
 6. Directory name consistency across all files
@@ -243,16 +243,16 @@ Files: every SKILL.md under `.claude/` (`find .claude -name 'SKILL.md'` — incl
 - **Skill registration:** every skill dir under `.claude/skills/` has a `description` frontmatter (auto-surfaced in the available-skills list) that names every mode/trigger the body defines; CLAUDE.md keeps only the one-line Skills pointer, not a per-skill table
 - **Registry, not roster:** the skill's `description:` carries its triggers (CLAUDE.md lists no skills — the harness indexes them); a CLAUDE.md mention exists only for a guard or a mandatory-load obligation
 
-### `pipeline` — Walk the wave chain end-to-end
+### `pipeline` — Walk the flight chain end-to-end
 
-Files: `.claude/commands/wave/*.md` (project: refine, orchestrator, live, walker), `~/.claude/commands/wave/*.md` (machine-global: builder, ccc), all agents they reference
+Files: `~/.claude/commands/flights/*.md` (machine-global: spec, orchestrate-nested, orchestrate-live, orchestrate-cross-harness, audit), all agents they reference
 
 - **Reference resolution:** every "Read and follow" path → target file exists
 - **Agent spawn validity:** every `subagent_type` referenced → matches a registered agent name/description in `.claude/agents/`, child agents, or `~/.claude/agents/`
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
-- **Step ↔ prose match:** step labels the commands cite (`O0`–`O3`, `W1`–`W8`) exist in the file that owns them
+- **Verdict tokens ↔ the manual:** every token a command cites (`CLAIMED`, `DONE`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `STALE`) is one `flights-orchestrator` writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
-- **Flow integrity:** refine → orchestrator → builder → walker across commands; developer → QA → reviewer → gitter within a wave — no step references an agent from a later phase
+- **Flow integrity:** spec → orchestrate → land across commands; executor → reviewer → gitter within a flight — no step references an agent from a later phase
 
 ### `scripts` — Walk each script
 
@@ -294,7 +294,7 @@ Catches what no single-domain audit can see. Reads across ALL domains simultaneo
 
 ## Special Operations
 
-**Full rename:** Grep ALL occurrences → update agents → update CLAUDE.md → update the wave commands → final grep for zero stale refs.
+**Full rename:** Grep ALL occurrences → update agents → update CLAUDE.md → update the flights commands → final grep for zero stale refs.
 
 **New agent:** Create `.claude/agents/{name}.md` → update pipeline if needed (the Inventory derives; nothing to count).
 
@@ -358,7 +358,7 @@ If anything is stale, update this file before completing the report. This comman
 - **Routing-gate every fan-out** — spawn agents only for declared scope; the consolidator may demand additions; fall back to full fan-out only when scope is undeclared
 - **Every pipeline artifact names its consumer** — before adding a report/file an agent writes, name who reads it downstream; write-only artifacts are banned
 - **Delta-structure repeatedly-rewritten state files** — rewritten resume brief on top, append-only archive below a marker; never full-file rewrites
-- **Exact-slice agent inputs** — when carving a manifest for parallel agents, each gets its exact slice + a thin shared header; a shared contract lives once in a shared file every brief that needs it names (a `0-` file in a `speker` directory), never copied per agent
+- **Exact-slice agent inputs** — when carving a manifest for parallel agents, each gets its exact slice + a thin shared header; a shared contract lives once in a shared file every brief that needs it names (a `0-` file in a flight directory), never copied per agent
 - **Exact per-role read lists in spawn briefs** — "read ALL docs in {dir}/" licenses every agent to read everything; name each role's exact read list
 - **One common spawn contract per orchestrator** — hoist rules shared across spawn blocks into a single contract each block references, never restated per block
 - **Every check names what its OWN broken state reports** — authoring or editing any instrument that returns a verdict (probe, health check, gate, audit, walker, lint), ask what it reports when IT is broken rather than when the world is clean. Same answer both ways = not a check but a coincidence detector, and it will bless the failure it exists to catch (`kill -0` cannot distinguish a healthy waiter from a reparented deaf one; `PPID ≠ 1` can — a pane capture on the wrong socket returns silence identical to a quiet chat; a capture that cannot reach its target exits non-zero). Build the distinguishing signal INTO the instrument: a law forbidding the mistake is strictly weaker than a check detecting it

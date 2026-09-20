@@ -31,18 +31,18 @@ Every command, agent, and rule sorts into one of three tiers:
 
 ### The cast (Tier A — universal)
 
-- **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator voice and root persona. Lives in `templates/prompts/professor.md`, selected by the Claude launch policy.
+- **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator voice and root persona. Lives in `templates/harness-prompts/`, composed per engine and selected by the Claude launch policy.
 - **/pcm** — Professor Change Manager: edits the pipeline at the source. Surgery, not journaling. `/pcm audit [scope]` (`agents`, `commands`, `skills`, `pipeline`, `scripts`, `structure`, `cross-refs`, or `all`) walks the pipeline's own files against a checklist per scope; `/context-meter` audits the framework's own context budget.
-- **/wave:{orchestrator,builder,refine,walker,live,ccc}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the opt-in chat MCP server the same binary registers.
+- **/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the opt-in chat MCP server the same binary registers.
 
 > The Tier A persona ships as ONE version: `professor.md` (the harness replacement) — lean voice plus the behavioral contract (concise delivery, the Verdict, the Analysis Protocol).
 
 **Bundled commands (ship with the blueprint):**
 
 - **the framework bus** — the framework repo's release flow publishes the blueprint; project installs are scaffolded once and adopt later template deltas by reviewed diff.
-- **/wave:refine** — wave task refinement into a zero-gap spec.
-- **/wave:walker** — end-to-end functional and hygiene walk. The reviewer report gates the merge; a walker is an additional audit when the train protocol requests it.
-- **/wave:ccc** — the Control & Command Center: the standing command seat over a running train. Full audit from ground truth on arrival, then holds command until the train closes — verifies claims against the tree, rules scope-allocation escalations, dispatches through the orchestrator.
+- **/flights:spec** — maps the area, asks only what the code cannot answer, hands `flights-speccer` the decisions, and presents the index it wrote.
+- **/flights:orchestrate-{nested,live,cross-harness}** — one manual in three containers: a `flights-orchestrator` sub-agent, the main chat running the flight itself, or chat seats on three engines as the executors.
+- **/flights:audit** — the skeptic over a flight, running or landed: every claim checked against its artifact — `run.md`, git, the executor transcripts, the checks' own output — and an artifact it cannot read is a finding, never an absence.
 - **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, executing the run itself.
 - **/tokens** — per-agent/per-workflow token spend attribution parsed from local transcripts, ranked by estimated cost.
 - **/quality:doc** / **/quality:prompt** / **/quality:description** / **/quality:md-forlint** — the quality gates: reference-doc shape, prompt prose, the `description:` routing field, and markdown lint/format mechanics.
@@ -68,7 +68,7 @@ Every command, agent, and rule sorts into one of three tiers:
 
 ### The plumbing (Tier C — invisible)
 
-- `gitter` — root agent; `tracer`, `scheduler`, `architect`, `reviewer`, `rr`, and `sub-rr` (the digger only `rr` spawns) are machine-global originals under `templates/global/agents/`, linked by `pfm install`; `variants.json` beside them declares agents rendered from an original with overridden frontmatter (`super-rr` = `rr` at medium effort), which `pfm install` writes to its own generated directory and links the same way. Role-defined, not character-defined.
+- `gitter` — root agent; `tracer`, `mapper`, `flights-speccer` (writes a flight's task files), `flights-orchestrator` (runs them), `reviewer`, `rr`, `sub-rr` (the digger only `rr` spawns), and `scribe` (the reader only `tracer` and `mapper` spawn, over the `ledger` skill's script) are machine-global originals under `templates/global/agents/`, linked by `pfm install`; `variants.json` beside them declares agents rendered from an original with overridden frontmatter (`super-rr` = `rr` at medium effort), which `pfm install` writes to its own generated directory and links the same way. Role-defined, not character-defined.
 - `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh` — scripts.
 - `pfm statusline` — native status bar with model, fleet counts, context, git, cost, spend, and rate limits. Wired in the host settings by `pfm install`.
 - `.rumdl.toml` — the markdown policy: one config whose `[per-file-ignores]` table decides which rules each path category obeys (prompt, doc, public; generated and record paths excluded). Read by `/quality:md-forlint` and by the `format-md.sh` hook.
@@ -111,18 +111,18 @@ Agents receive paths as variables:
 | `$RESEARCH` | Research docs subdir | `research` |
 | `$RESOURCES` | Static resources subdir | `resources` |
 
-Agents NEVER hardcode `docs/dev/tasks/...` — they use what `/wave:builder` passes them. Path conventions can change without rewriting every agent.
+Agents NEVER hardcode `docs/dev/tasks/...` — they use what the brief that spawned them passes. Path conventions can change without rewriting every agent.
 
 ### 4. Worktree isolation per pipeline
 
-Every `/wave:builder` invocation creates:
+Every code pipeline creates:
 
 - A git branch: `pipeline/{name}`
 - A worktree checkout: `.worktrees/{name}/` (full repo)
 - A unique port allocation (whatever ports your stack needs)
 - Pipeline docs: `docs/dev/tasks/{name}/`
 
-This means you can run **multiple pipelines in parallel on the same machine** without port collisions or git state corruption. When the pipeline completes, gitter merges to main, the worktree is removed, and the docs are archived.
+This means you can run **multiple pipelines in parallel on the same machine** without port collisions or git state corruption. A flight that builds code is briefed with the worktree it works in, so every executor it dispatches lands in the same isolated checkout. When the pipeline completes, gitter merges to main, the worktree is removed, and the docs are archived.
 
 ### 5. Self-improvement at the source
 
@@ -149,72 +149,40 @@ These rules appear in `CLAUDE.md` and are referenced by every agent. They are th
 
 ## Pipeline architecture
 
+The unit of work is a **flight**: one spec directory, one orchestration, one landing.
+
+```text
+  /flights:spec          map the area · ask what the code cannot answer ·
+                         hand the decisions to flights-speccer · present
+                                     │
+                                     ▼
+  flights-speccer        tmp/flights/{flight}/ — index.md, one self-contained
+                         task file per executor, shared 0-{topic}.md files
+                                     │
+                                     ▼
+  the orchestration      one manual, three containers — the user picks one:
+                         /flights:orchestrate-nested         a flights-orchestrator sub-agent
+                         /flights:orchestrate-live           the main chat runs the manual itself
+                         /flights:orchestrate-cross-harness  chat seats as the executors
+                                     │
+                                     ▼
+  the run                every ready task dispatched together, one FRESH
+                         executor per task file; each return verified against
+                         the diff before run.md records it; SPEC-DRIFT and
+                         FAILED go back to flights-speccer, never to a guess
+                                     │
+                                     ▼
+  the landing (once)     the standing checks watched printing · reviewer over
+                         each hard task's diff, cold · gitter commits when the
+                         brief asked for a commit
+                                     │
+                                     ▼
+  /flights:audit         at any time, by the user: run.md, git, the task files,
+                         the executor transcripts, the checks' own output —
+                         artifacts, never a report
 ```
-                              ┌─────────────────┐
-                              │  /wave:builder  │
-                              └────────┬────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  child planners     │ (parallel — one per affected project)
-                          │  analyze codebase   │
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  main-loop session  │ → docs/dev/tasks/{name}/1-plan.md
-                          │  consolidates plan  │
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  gitter SETUP       │ → worktree, branch, ports
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  main-loop session  │ → 3-architecture.md
-                          │  cross-project      │   (contracts, shared types, inline research)
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  child architects   │ (parallel — per project)
-                          │  + library research │
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  child developers   │ (parallel — implements code)
-                          │  + happy-path tests │
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  child QAs          │ (parallel — adversarial tests)
-                          │  + bug reports      │
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  fix loop           │ (developer fixes QA bugs;
-                          │                     │   capped iterations, hard timeouts)
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  gitter MERGE       │ → squash to main
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  POST-MERGE QA      │ (run on main, catches merge bugs)
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  /audit:* + /officer   │ (parallel — code audit + compliance audit)
-                          │  (officer optional) │   if /officer is opted in
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  main-loop session  │ → updates permanent docs
-                          │                     │   archives pipeline dir
-                          └──────────┬──────────┘
-                                     ▼
-                          ┌─────────────────────┐
-                          │  gitter DOCS-COMMIT │
-                          └─────────────────────┘
-```
+
+The executor is whatever agent the project registers — a `developer`, a `qa`, a general-purpose agent, or a seat on another engine; the orchestration brief names the type. Specifying and running are two decisions: approving an index never starts a run, and the user picks the container.
 
 Meta path: `/pcm {request}` → edits the agent definitions at the source.
 
@@ -233,8 +201,8 @@ your-project/
 │   ├── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
 │   └── drift.md                       ← local customization notes (human-readable)
 ├── .claude/
-│   ├── agents/                        ← root agents (gitter; tracer/scheduler/architect are machine-global)
-│   ├── commands/                      ← /wave:{orchestrator,builder,refine,walker,live,ccc}, /pcm, /pfm (the CLI guide), /context-meter, /dev, /audit:{code-hygiene,security}, /quality:{prompt,doc}, /rnd, /tokens + opt-in Tier B (`/reload` is NOT here — `pfm install` installs it host-level)
+│   ├── agents/                        ← root agents (gitter; tracer, flights-speccer, flights-orchestrator are machine-global)
+│   ├── commands/                      ← /pcm, /pfm (the CLI guide), /context-meter, /dev, /audit:{code-hygiene,security}, /quality:{prompt,doc}, /rnd, /tokens + opt-in Tier B (`/flights:*` and `/reload` are NOT here — `pfm install` installs them host-level)
 │   ├── scripts/                       ← worktree.sh, alloc-ports.sh, dev.sh, notify.sh, format-md.sh, filter-test-output.sh, checkpoint.sh, git-lock.sh, guard-stamp.sh, drain-wait.sh
 │   ├── skills/                        ← bundled legal shelf + project source registry; machine-global skills live under templates/global/skills/ (its sources.json declares the fetched ones)
 │   └── settings.json                  ← permissions, env vars, hooks (notify, formatter, statusline)
@@ -257,8 +225,9 @@ your-project/
 │   │   └── resources/                 ← static assets
 │   └── dev/
 │       ├── tasks/{pipeline}/          ← temp pipeline docs
-│       ├── tasks/archive/             ← completed pipelines
-│       └── waves/                     ← wave runner artifacts
+│       └── tasks/archive/             ← completed pipelines
+├── tmp/                               ← gitignored scratch
+│   └── flights/{flight}/              ← one flight: index.md, its task files, run.md, audit.md
 └── .worktrees/                        ← git worktree checkouts (gitignored)
     ├── {pipeline}/                    ← per-pipeline checkout
     └── .ports                         ← port allocation registry
@@ -273,9 +242,9 @@ For a single-project repo, drop the `{project-a}/`, `{project-b}/` layer — age
 A `.claude/` infrastructure — a **transplantable nervous system** — that turns Claude Code from "an AI that writes code when you ask" into **a self-disciplined engineering team with character**. Built by the Professor (the grandfatherly polymath behind the glass).
 
 - **Worktree isolation** — every feature gets its own git worktree branch + a unique port allocation. Multiple parallel pipelines on the same repo without collisions.
-- **A pipeline that refuses cowboy coding** — `planner → architect → developer → QA → merge`. QA gates block bad code from reaching `main`.
+- **A pipeline that refuses cowboy coding** — one task file per executor, every return verified against its diff, `reviewer` over each hard task, QA gates blocking bad code from reaching `main`.
 - **One agent owns git** — only `gitter` runs `git add` / `commit` / `merge`. Centralized, auditable, safe.
-- **Cross-disciplinary analysis** — the Professor brings 15+ PhDs to bear on architecture, design, and safety/correctness questions. The Analysis Protocol lives in the fleet prompt (`templates/prompts/professor.md`), injected via `pfm` `claude.systemPrompt = "professor"`.
+- **Cross-disciplinary analysis** — the Professor brings 15+ PhDs to bear on architecture, design, and safety/correctness questions. The Analysis Protocol lives in the fleet prompt's shared head (`templates/harness-prompts/share/head.md`), injected via `pfm` `claude.systemPrompt = "professor"`.
 - **Self-improvement** — `/pcm` is the change manager that edits its own pipeline rules at the source.
 - **Optional dual-runtime** — Codex (OpenAI) can mirror the Claude pipeline as a cheaper implementation layer. Same manuals, different runtime. Everything works without it.
 - **Path conventions that scale** — `$DOCS`, `$WORKTREE`, `$CDOCS` so agents never hardcode paths.
@@ -290,7 +259,7 @@ A `.claude/` infrastructure — a **transplantable nervous system** — that tur
 
 - The `gitter` agent (with project list adjusted at install)
 - The `worktree.sh` and `alloc-ports.sh` scripts (with port ranges adjusted)
-- The pipeline flow in `/wave:builder`
+- The flight lifecycle in the `/flights:*` commands — specify, orchestrate, land
 - The path variable conventions
 - The five load-bearing walls
 - The non-negotiable rules

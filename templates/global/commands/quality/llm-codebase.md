@@ -1,6 +1,6 @@
 ---
 name: quality:llm-codebase
-description: Lays out an agent-maintained tree — `/quality:llm-codebase <feature|LLM call|project|path>`, "where should X live", "set up lint/format/clone/naming gates", before /wave:refine on a feature touching 3+ directories, every new LLM call; greenfield designs, brownfield measures then migrates. Returns a design document with its gates; edits no code. Integration tests → /quality:integration-suite.
+description: Lays out an agent-maintained tree — `/quality:llm-codebase <feature|LLM call|project|path>`, "where should X live", "set up lint/format/clone/naming gates", before `/flights:spec` on a feature touching 3+ directories, every new LLM call; greenfield designs, brownfield measures then migrates. Returns a design document with its gates; edits no code. Integration tests → /quality:integration-suite.
 argument-hint: <feature|LLM call|project|path>
 ---
 
@@ -159,4 +159,4 @@ Adapt the globs, patterns and parsers to the tree; a check that cannot be expres
 
 ## Hand-off
 
-The design document is reviewed before anything is built: placement law, literal lists shadowing derived constants, coupled edits, checks whose broken state would read as PASS. In a project installed from this blueprint, `architect` performs that review, a design that changes what an LLM receives or returns goes through the project's RND gate, and code moves through /wave:refine and the project's builder. Elsewhere, the owner assigns the review and the build; this command writes the design only.
+The design document is reviewed before anything is built: placement law, literal lists shadowing derived constants, coupled edits, checks whose broken state would read as PASS. In a project installed from this blueprint, `flights-speccer`'s reconcile phase performs that review, a design that changes what an LLM receives or returns goes through the project's RND gate, and code moves through `/flights:spec` and the project's executor. Elsewhere, the owner assigns the review and the build; this command writes the design only.

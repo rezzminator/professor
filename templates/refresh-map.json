@@ -31,16 +31,10 @@
     ".claude/scripts/prod-deploy-watch.sh"
   ],
   "templates": {
-    "global/agents/architect.md": {
-      "curated": true
-    },
     "global/agents/reviewer.md": {
       "curated": true
     },
     "global/agents/rr.md": {
-      "curated": true
-    },
-    "global/agents/scheduler.md": {
       "curated": true
     },
     "global/agents/tracer.md": {
@@ -85,12 +79,6 @@
     "global/commands/tokens/token-ledger.mjs": {
       "curated": true
     },
-    "global/commands/wave/builder.md": {
-      "curated": true
-    },
-    "global/commands/wave/ccc.md": {
-      "curated": true
-    },
     "global/skills/sources.json": {
       "curated": true
     },
@@ -129,11 +117,6 @@
     },
     "project/codex/skills/chat/SKILL.md": {
       "curated": true
-    },
-    "project/codex/skills/wave-builder/SKILL.md": {
-      "sources": {
-        ".codex/skills/wave-builder/SKILL.md": "776c14673101e27791d1a28a55ac1bd6b4fa5d3db140a129e2f2fa048fc9f747"
-      }
     },
     "project/commands/audit/code-hygiene.md": {
       "sources": {
@@ -175,18 +158,6 @@
         ".claude/commands/rnd.md": "398a09d18a16b286d5552dd1b3ebb57fb908368107b5daa2da3e1d5425cc8506"
       }
     },
-    "project/commands/wave/live.md": {
-      "curated": true
-    },
-    "project/commands/wave/orchestrator.md": {
-      "curated": true
-    },
-    "project/commands/wave/refine.md": {
-      "curated": true
-    },
-    "project/commands/wave/walker.md": {
-      "curated": true
-    },
     "project/docs-agents/_index.md": {
       "curated": true
     },
@@ -224,19 +195,6 @@
     "project/docs-commands/git/references/gitter-phase-setup.md": {
       "sources": {
         "docs/references/gitter-phase-setup.md": "0ad4ff2e1d174e8db9fcb652fd6bd42d4fd7679395cba7205f90e6a1bbe1502c"
-      }
-    },
-    "project/docs-commands/git/references/gitter-phase-wave.md": {
-      "sources": {
-        "docs/references/gitter-phase-wave.md": "e0b7c87896655c25f50a84c28b0cf51b3217aafa067c4bb74f12b468c3fc7cb5"
-      }
-    },
-    "project/docs-commands/wave/references/debug-discipline.md": {
-      "curated": true
-    },
-    "project/docs-commands/wave/references/fix-core.md": {
-      "sources": {
-        "docs/references/fix-core.md": "80c9996a46fe51ba2d96d42c00ee6f47ddb4aae3d501d2f2d29c601234658ea0"
       }
     },
     "project/epics/TEMPLATE.md": {

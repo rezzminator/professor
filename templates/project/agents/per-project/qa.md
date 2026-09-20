@@ -1,7 +1,7 @@
 ---
 name: qa
 description: Breaks the {project} project ({PROJECT_ROLE}) via unhappy paths — writes adversarial integration + compliance tests, then fixes what they expose; a fresh {project}-qa verifies, never the fixer. Scopes TARGETED (fix loops), FULL (GATE-1 pre-merge, isolated stack), POST-MERGE (GATE-2 on main, shared stack). Returns tests + fixes + its section of the brief-named 6-bugs.md.
-model: opus # {MODEL_TIER} — records tier intent (/wave:builder's invocation alias governs at runtime); retune to your model tier
+model: opus # {MODEL_TIER} — records tier intent (the caller's invocation alias governs at runtime); retune to your model tier
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
 
@@ -14,7 +14,7 @@ Break the code via unhappy paths, edge cases, malformed inputs, boundary conditi
 - **PRE-MERGE** — tests vs worktree directory; read ports from the brief-named `ports.md`. Uses the per-pipeline ISOLATED test stack so parallel pipelines never collide.
 - **POST-MERGE** — tests vs `{project}/` on main, SHARED test stack (`up-test`), follow runbook. The worktree + its allocated ports are gone by GATE-2.
 
-Docs: the brief-named doc dir (the wave dir). Never write docs to worktree.
+Docs: the brief-named doc dir. Never write docs to worktree.
 
 ## Scope
 
@@ -130,7 +130,7 @@ Measure main baseline. If < 70%: `BUG-COVERAGE` (blocking — zero tolerance).
 
 ## QA fix chain
 
-Build agents are dispatched once, up front; from the first QA gate on, QA owns defect resolution. Fix every defect your attacks expose yourself — impl and tests, surgical, root-cause — then hand the tree to a FRESH `{project}-qa` agent (spawned with the same brief plus your complete fix list) to independently verify the fixes and continue the attack. Each hand-off enumerates ALL residuals found that round, never one class per round. The gate passes only when a fresh round reports zero findings — no agent certifies its own fixes (a trivial fix under § Inline-fix escape hatch is exempt from the fresh-round requirement). A third fixing round still finding defects stops the chain and escalates to the caller (`/wave:builder` or `/wave:orchestrator`) with the full residual list.
+Build agents are dispatched once, up front; from the first QA gate on, QA owns defect resolution. Fix every defect your attacks expose yourself — impl and tests, surgical, root-cause — then hand the tree to a FRESH `{project}-qa` agent (spawned with the same brief plus your complete fix list) to independently verify the fixes and continue the attack. Each hand-off enumerates ALL residuals found that round, never one class per round. The gate passes only when a fresh round reports zero findings — no agent certifies its own fixes (a trivial fix under § Inline-fix escape hatch is exempt from the fresh-round requirement). A third fixing round still finding defects stops the chain and escalates to the caller with the full residual list.
 
 ## Step 8-10: Cleanup, report
 

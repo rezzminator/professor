@@ -1,7 +1,6 @@
 # pfm: architecture for agent maintainers
 
-**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `hostops/pfm`). Nothing here is built yet. Code moves through `/wave:refine` and the fenced builder, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`.
-**Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
+**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `hostops/pfm`). Nothing here is built yet. Code moves through `/flights:spec` and the fenced executor, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
 
 ## Contents
 
@@ -339,8 +338,6 @@ The picker half of `pipeline.go` stays in `cmd/pfm` until step 6's loop half.
 
 **What dies:** `mcpserv.Dispatch` and its argv adapters; `runChatSatellite`; the `run()` switch, `printUsage` and `diagnosticCommand` as three hand lists; the `runInternal` if-chain and its usage string; `reloadCommandTmux` and 7 more tmux runners; resolve's procfs; 5 atomic-write helpers; 2 pragma sets; `engine/matchutil`; the package name `shared`; the duplicate `fleet.db`; the package table and subcommand list in `pfm/CLAUDE.md`; and migration steps past their sunset.
 
-**Queued specs** (`docs/dev/trains/queue/2026-08-2*`) touch `reap`, `mcp enable`, Codex rebind, spawn cgroups and same-name resolution. None conflicts. A step that moves a file a queued spec cites re-anchors that spec in the same wave, which is a coupled edit.
-
 ## 9. Brief template
 
 Every task on this tree carries the following. A pointer to a ledger or evidence directory in place of a fact is a gap.
@@ -357,7 +354,7 @@ Commands:        .claude/scripts/dev.sh iso test pfm
 Acceptance:      <observable behavior> · C3 budget lowered to <N>
 ```
 
-Work-tree anatomy for each wave: `docs/dev/trains/<train>/waves/<n>-<slug>/{spec.md,STATE.md,receipts/,evidence/}`, at most three levels deep. Evidence a later wave needs is quoted into its spec.
+Work-tree anatomy for each flight: `tmp/flights/<flight>/{index.md,<level>-<letter>.md,run.md,audit.md}`, at most three levels deep. Evidence a later task needs is quoted into its task file.
 
 ## 10. Open rulings
 

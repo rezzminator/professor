@@ -146,9 +146,9 @@ Written to the path the request names; absent one, `<the project's design-doc di
 
 ## Hand-off to the build and test hands
 
-The design document is reviewed before anything is built: unmapped capabilities, crossings asserted from one side only, checks whose broken state would read as PASS. In a project installed from this blueprint, `architect` performs that review, the build goes through /wave:refine and the project's builder, and the suite is built and kept by the per-project agents under `{project}/.claude/agents/`:
+The design document is reviewed before anything is built: unmapped capabilities, crossings asserted from one side only, checks whose broken state would read as PASS. In a project installed from this blueprint, `flights-speccer`'s reconcile phase performs that review, the build goes through `/flights:spec` and the project's executor, and the suite is built and kept by the per-project agents under `{project}/.claude/agents/`:
 
-- `developer.md` builds the harness, the mocks and the lanes from the wave specs of Build order.
+- `developer.md` builds the harness, the mocks and the lanes from the flight's task files of Build order.
 - `qa.md` runs them: § Scope maps onto lanes — TARGETED runs the solo lanes owning the touched area, FULL and POST-MERGE run the sequence; Step 6 compliance checks and § QA fix chain apply to a defect a lane exposes.
 - `docs/commands/build/references/qa-commons.md` §§ Test validity, Run verdicts, Integration lanes carry the rules both hands share with this command.
 

@@ -67,7 +67,7 @@ Above threshold = split into a referenced file (one level deep, with a Table of 
 
 ### Voice location
 
-Voice lives in the fleet prompt (`templates/prompts/professor.md`, injected by `pfm` `claude.systemPrompt = "professor"`) — main-loop only; subagents never receive it. CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
+Voice lives in the fleet prompt (`templates/harness-prompts/`: `share/head.md` + the engine's `professor.md` + `share/tail.md`, composed by `pfm install`; Claude injects it under `claude.systemPrompt = "professor"`) — main-loop only; subagents never receive it. CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
 
 ### Hooks vs prompts
 
@@ -78,7 +78,7 @@ For things that must happen every time (formatting, validation, secret-scanning)
 - Behavioral rules → prompt files (CLAUDE.md, agents, commands, skills)
 - Incident narratives ("on 2026-XX-XX...") → commit message / epic manifest (`docs/epics/{name}/`) — never prompt files
 - Architectural decisions / why-this-design → epic manifest or `docs/commands/{cmd}/references/` — prompts encode the rule, not the rationale
-- Voice / character flavor → the fleet prompt (`templates/prompts/professor.md`) — zero voice in CLAUDE.md, agents, skills, commands
+- Voice / character flavor → the fleet prompt (`templates/harness-prompts/share/head.md`) — zero voice in CLAUDE.md, agents, skills, commands
 - Project-specific tooling → child CLAUDE.md only — never per-project agents (they inherit via parent)
 - Cross-cutting templates (report format, plan shape) → one canonical reference file — never duplicated per-project
 
@@ -100,7 +100,7 @@ Release notes are never written during development. A framework change (one any 
 
 **Standalone-skill special case:** a change to a `sources.json` skill bumps the skill's `version:` frontmatter — release step 7b ships the substance to the skill's own public repo; the Professor changelog carries only the version pointer + re-pull note.
 
-**Retro inbox — `.professor/retro.md`:** the main-loop steering-conscience ledger (sessions append per its header; wave retros archive with their wave) — an inbox `/pcm` consumes, never a change log. The `retro` dispatch sweeps entries lacking `Resolved:`, folds each `Amend:` into the named file through the normal change flow (or rules it `judgment` — no text fix), stamps `Resolved: {date} — {where}` under the entry in place, and logs a local-only fold to `drift.md` as usual.
+**Retro inbox — `.professor/retro.md`:** the main-loop steering-conscience ledger (sessions append per its header) — an inbox `/pcm` consumes, never a change log. The `retro` dispatch sweeps entries lacking `Resolved:`, folds each `Amend:` into the named file through the normal change flow (or rules it `judgment` — no text fix), stamps `Resolved: {date} — {where}` under the entry in place, and logs a local-only fold to `drift.md` as usual.
 
 ---
 
@@ -126,7 +126,7 @@ Before ANY changes, read all affected files. Grep every reference across `.claud
 
 ### Step 3 — Plan
 
-Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Count the tasks per the fleet prompt § Orchestration: more than one ⇒ `speker` writes the spec directory and one agent executes each task file; edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here from those task files.
+Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Count the tasks per the fleet prompt § Orchestration: more than one ⇒ `flights-speccer` writes the flight directory and `flights-orchestrator` runs one executor per task file; edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here from those task files.
 
 ### Step 4 — Execute
 
@@ -278,7 +278,7 @@ If anything is stale, update this file before completing the report. This comman
 - **Routing-gate every fan-out** — spawn agents only for declared scope; the consolidator may demand additions; fall back to full fan-out only when scope is undeclared
 - **Every pipeline artifact names its consumer** — before adding a report/file an agent writes, name who reads it downstream; write-only artifacts are banned
 - **Delta-structure repeatedly-rewritten state files** — rewritten resume brief on top, append-only archive below a marker; never full-file rewrites
-- **Exact-slice agent inputs** — when carving a manifest for parallel agents, each gets its exact slice + a thin shared header; a shared contract lives once in a shared file every brief that needs it names (a `0-` file in a `speker` directory), never copied per agent
+- **Exact-slice agent inputs** — when carving a manifest for parallel agents, each gets its exact slice + a thin shared header; a shared contract lives once in a shared file every brief that needs it names (a `0-` file in a flight directory), never copied per agent
 - **Exact per-role read lists in spawn briefs** — "read ALL docs in {dir}/" licenses every agent to read everything; name each role's exact read list
 - **One common spawn contract per orchestrator** — hoist rules shared across spawn blocks into a single contract each block references, never restated per block
 - **Every check names what its OWN broken state reports** — authoring or editing any instrument that returns a verdict (probe, health check, gate, audit, walker, lint), ask what it reports when IT is broken rather than when the world is clean. Same answer both ways = not a check but a coincidence detector, and it will bless the failure it exists to catch (`kill -0` cannot distinguish a healthy waiter from a reparented deaf one; `PPID ≠ 1` can — a pane capture on the wrong socket returns silence identical to a quiet chat; a capture that cannot reach its target exits non-zero). Build the distinguishing signal INTO the instrument: a law forbidding the mistake is strictly weaker than a check detecting it

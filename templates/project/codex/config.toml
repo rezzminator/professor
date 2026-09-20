@@ -1,6 +1,6 @@
 # Repo-level Codex config — loads only when this project is trusted in
 # ~/.codex/config.toml (Codex asks for trust once, per repo). Scope: sandbox
-# reach for builder lanes and for any Codex session started inside this repo.
+# reach for executor lanes and for any Codex session started inside this repo.
 #
 # LANE LAUNCH FLAGS DO NOT BELONG HERE. `-s workspace-write -a never` and the
 # rest of the per-launch policy live with the LAUNCHER (the tmux command that
@@ -21,7 +21,7 @@ model_reasoning_effort = "{CODEX_REASONING_EFFORT}"
 
 [sandbox_workspace_write]
 # The test tier lives on localhost ({DB_PORT_TEST} / {QUEUE_PORT_TEST}, plus any
-# per-pipeline allocated ports) — a builder lane must reach it from INSIDE
+# per-pipeline allocated ports) — an executor lane must reach it from INSIDE
 # workspace-write or every integration test fails at connect. Unix-socket
 # connects (tmux among them) stay blocked by the sandbox regardless of this
 # flag, which is why lane pings go through the events.log spool and not tmux.
@@ -33,7 +33,7 @@ network_access = true
 # anything outside it — no `.mcp.json`, no fence, nothing generated. Hand-add
 # a table below this comment only for a server that must NOT be driven by
 # `.mcp.json`. PIN the version: an unpinned server changes under you between
-# sessions, and a protocol that changed shape mid-wave gets blamed on your
+# sessions, and a protocol that changed shape mid-flight gets blamed on your
 # own code first.
 #
 # [mcp_servers.{server-name}]

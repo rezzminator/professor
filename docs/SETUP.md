@@ -102,7 +102,7 @@ For each roster entry, Claude needs:
 - Tech: language, framework, package manager, test runner, build tool, dev server port(s)
 - Ownership facts, each answered by naming at most one entry: which owns the shared infra/orchestration (`Makefile`, containers, DB, queue); which owns the migrations dir; which holds the LLM-calling code, if any; which serves the public site, if any
 
-**Single-project repo (roster of one):** the worktree is the repo root (no per-project subdir), there are no cross-project/integration steps, routing is trivially that one project, and the multi-project framing collapses to "the project." Skip child `CLAUDE.md` files (nothing to consolidate). All agents live flat at `.claude/agents/`; the orchestrator runs `planner → architect → developer → qa` directly; `/wave:builder` drops the parallel fan-out.
+**Single-project repo (roster of one):** the worktree is the repo root (no per-project subdir), there are no cross-project/integration steps, routing is trivially that one project, and the multi-project framing collapses to "the project." Skip child `CLAUDE.md` files (nothing to consolidate). All agents live flat at `.claude/agents/`; a flight's task files name those agents as its executors, with no per-project fan-out.
 
 **Multi-project repo (roster of 2+):** the main-loop session consolidates the child planners' plans and designs cross-project contracts directly (no dedicated consolidation agent). For each entry, create `{project}/CLAUDE.md` and `{project}/.claude/agents/`.
 
@@ -111,7 +111,7 @@ Example rosters (two possible shapes — yours may have one entry or seven; the 
 - Roster of one: `.` — the whole repo: Go, `go test`, port 8080; owns its own infra (`Makefile` + compose)
 - Roster of three: `a` — the HTTP service: TypeScript, pnpm, vitest, port 3000 · `b` — the queue consumer: Python, uv, pytest, no port · `c` — owns the shared infra: `Makefile` + Docker Compose for PostgreSQL + Redis, no port
 
-**Specialist agents:** beyond the standard four (`planner`, `architect`, `developer`, `qa`), add a specialist when a narrow concern justifies it:
+**Specialist agents:** beyond `developer` and `qa`, add a specialist when a narrow concern justifies it:
 
 | When to add one | What it owns |
 | ---------------------------------------- | --------------------------------------------------- |
@@ -120,7 +120,7 @@ Example rosters (two possible shapes — yours may have one entry or seven; the 
 | Deployment configs are real code | Infra configs, environment promotion (`devops`) |
 | Prompt engineering is its own discipline | Prompts, evals, knowledge ingestion (`ai-engineer`) |
 
-Slot specialists into `/wave:builder` between architect and QA.
+A specialist is an executor like any other: the orchestration brief names the agent type that runs each task file.
 
 ### 4. Tech stack details
 
@@ -219,17 +219,17 @@ Claude shows you a summary of all answers + a list of files that will be written
 
 ## Phase 2 — Customization
 
-> **Materialization — how the roster expands.** Several templates carry per-project **PATTERN blocks**, written once with generic `{project}` tokens: the per-project pipeline stages in `wave/builder.md`/`wave/live.md`, the per-project agent files under `{project}/.claude/agents/{planner,architect,developer,qa}.md` (plus any specialists), and the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh`. For each roster entry, Claude **expands every pattern block once**, substituting that entry's directory, role, stack, package manager, test runner, and port — then fills the `PROJECTS=()` arrays so the scripts iterate the real roster. A roster of one expands each block once; a roster of seven expands it seven times. **Never carry a pattern block for a project the roster does not list** — `/wave:builder` must not reference a planner/architect/dev/qa agent or pipeline stage for a project that does not exist, and no `{project}` placeholder may remain unexpanded. **Single-project install:** the worktree is the repo root, the `PROJECTS=()` array holds the single entry (or the scripts drop the loop entirely), and cross-project consolidation steps are omitted.
+> **Materialization — how the roster expands.** Several templates carry per-project **PATTERN blocks**, written once with generic `{project}` tokens: the per-project agent files under `{project}/.claude/agents/{developer,qa}.md` (plus any specialists), and the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh`. For each roster entry, Claude **expands every pattern block once**, substituting that entry's directory, role, stack, package manager, test runner, and port — then fills the `PROJECTS=()` arrays so the scripts iterate the real roster. A roster of one expands each block once; a roster of seven expands it seven times. **Never carry a pattern block for a project the roster does not list** — no installed file may reference a dev/qa agent for a project that does not exist, and no `{project}` placeholder may remain unexpanded. **Single-project install:** the worktree is the repo root, the `PROJECTS=()` array holds the single entry (or the scripts drop the loop entirely), and cross-project consolidation steps are omitted.
 
 Claude takes your answers and:
 
 1. **Writes root `CLAUDE.md`** — fills in `{PROJECT_NAME}`, `{PROJECT_PITCH}`, the Professor persona section, and the non-negotiable rules. Emits `{PROJECT_ROSTER}` (one Architecture bullet per roster entry) and `{PROJECT_AGENT_ROSTER}` (one Agents line per entry, listing only that project's installed agents); a single-project install collapses the multi-project framing to "the project." Strict-typing and infra rules emitted per roster entry (one typing rule per typed stack; the infra rule only if a roster entry owns infra, with that entry's directory as `{PROJECT}` in `make -C {PROJECT}`).
 2. **Writes per-project `CLAUDE.md` files** (roster of 2+) — one per entry, with that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
-3. **Writes Tier A command files** — `/pcm`, `/dev`, `/wave:{refine,orchestrator,live,walker}`, `/rnd`, `/audit:*` (the machine-global `/wave:builder`, `/pfm`, `/quality:*` arrive by `pfm install`). Voice intact, domain content filled.
+3. **Writes Tier A command files** — `/pcm`, `/dev`, `/rnd`, `/audit:*` (the machine-global `/flights:*`, `/pfm`, `/quality:*` arrive by `pfm install`). Voice intact, domain content filled.
 4. **Writes Tier B command files** for each opt-in — `/officer`, `/mentor`, `/marketer`. Archetype skeletons with your placeholders filled. The leading `>`-quoted "Required placeholders (fill at install)" meta-block from each template is stripped before save — that block is install-time scaffolding, not runtime content. A correctly-installed Tier B command starts with the H1 heading and goes straight to the `$ARGUMENTS` line. A declined archetype that `pfm init` already scaffolded is deleted, its pin forgotten with `pfm update drop <local>`, then its template silenced with `pfm update ignore <template>`; see [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes).
-5. **Writes root agents** — `gitter` always (`tracer`, `architect`, `scheduler`, `reviewer`, and `rr` are machine-global, linked into `~/.claude/agents/` by `pfm install`, never copied into the project). Cross-project consolidation for a roster of 2+ runs in the main-loop session, not a dedicated agent.
+5. **Writes root agents** — `gitter` always (`tracer`, `flights-speccer`, `flights-orchestrator`, `reviewer`, and `rr` are machine-global, linked into `~/.claude/agents/` by `pfm install`, never copied into the project). Cross-project consolidation for a roster of 2+ runs in the main-loop session, not a dedicated agent.
 6. **Writes per-project agents** — for each roster entry, instantiates that project's `developer` and `qa` from `templates/project/agents/per-project/` (plus any specialists from Q3) under `{project}/.claude/agents/`, with its test/lint/build commands pinned. One set per entry; none for projects not in the roster. No per-project `planner` or `architect` template ships and no shipped command spawns one by name; write one only when the project wants it.
-7. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh`. Fills the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh` from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop). 7a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; every registry skill is **source-fetched** from its canonical public repo (listed in `templates/project/skills/sources.json`) into `.claude/skills/{name}/`, so those external skills cannot silently drift inside the blueprint. The installer copies the bundled shelf, clones each registry skill, parameterizes where needed, and removes each clone's `.git/` directory so the installed skills are plain files. The reasoning protocols that once shipped as bundled skills — `/rnd`, `/wave:refine`, `/wave:walker`, `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. `/rnd` is project-scope: the command owns the RND lifecycle and executes its own run. The table records each subject's source path and its parameterization.
+7. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh`. Fills the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh` from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop). 7a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; every registry skill is **source-fetched** from its canonical public repo (listed in `templates/project/skills/sources.json`) into `.claude/skills/{name}/`, so those external skills cannot silently drift inside the blueprint. The installer copies the bundled shelf, clones each registry skill, parameterizes where needed, and removes each clone's `.git/` directory so the installed skills are plain files. The reasoning protocols that once shipped as bundled skills — `/rnd`, `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. `/rnd` is project-scope: the command owns the RND lifecycle and executes its own run. The table records each subject's source path and its parameterization.
 
 | Skill / command | Source | Parameterization |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -238,8 +238,7 @@ Claude takes your answers and:
 | `ghostwriter` | host-global source-fetched (`templates/global/skills/sources.json`) <https://github.com/rezzminator/ghost-writer> | None |
 | `vision-factory` | host-global source-fetched (`templates/global/skills/sources.json`) <https://github.com/rezzminator/vision-factory> | None |
 | `/rnd` | Command `templates/project/commands/rnd.md` | Replace `{PROJECT}` (the entry holding the LLM-calling code), `{AI_SERVICE_NAME}`, `{ai_module}`, `{LLM_PROVIDER}`, `{SECONDARY_LANG}` |
-| `/wave:refine` | Command `templates/project/commands/wave/refine.md` | None (pipeline-coupled) |
-| `/wave:walker` | Command `templates/project/commands/wave/walker.md` | None (pipeline-coupled) |
+| `/flights:*` | Commands `templates/global/commands/flights/*.md` — host-global, linked by `pfm install` | None (pipeline-coupled) |
 | `/quality:prompt` | Command `templates/global/commands/quality/prompt.md` | Replace `{DOMAIN_ADJ}`, `{SENSITIVE_DATA}` |
 | `/quality:doc` | Command `templates/global/commands/quality/doc.md` | Replace `{DATABASE}`, `{ORM}`, `{API_PROTOCOL}` in examples |
 | `/quality:description` | Command `templates/global/commands/quality/description.md` | None |
@@ -319,7 +318,7 @@ Claude takes your answers and:
 
 7h. **Installs themes** — places each Claude Code theme listed in `templates/themes/sources.json` into `~/.claude/themes/`: `source_fetched` entries are fetched from their canonical public repo (the blueprint never vendors a copy, so it can't drift); `bundled` entries ship beside the manifest — today three overlays merged onto the fetched Tokyo Night, `professor-gold` / `professor-silver` / `professor-bronze`, one per fleet account medal (🥇🥈🥉), each changing only the input bar (`promptBorder` + `promptBorderShimmer`) — selected per account with `"theme": "custom:professor-gold"` in that account's `settings.json`. For `tokyo-night`: `mkdir -p ~/.claude/themes && curl -fsSL https://raw.githubusercontent.com/rezzminator/claude-code-tokyo-night/main/tokyo-night.json -o ~/.claude/themes/tokyo-night.json`. Activate with `/theme` → "Tokyo Night" (requires Claude Code v2.1.118+). Themes install to the user's home, so they are shared across all the user's projects. To match the terminal's own base background to the theme (VS Code `terminal.background`, or the profile background in iTerm2/Apple Terminal/Ghostty/Kitty/WezTerm), follow the theme repo README: <https://github.com/rezzminator/claude-code-tokyo-night#match-your-terminal-background-optional>.
 
-8. **Creates directory structure** — `docs/agents/`, `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `docs/dev/waves/`, `.worktrees/` (gitignored).
+8. **Creates directory structure** — `docs/agents/`, `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` (gitignored). Flight directories are scratch: `tmp/flights/{flight}/` is created by the run itself, under the gitignored `tmp/`.
 
 8a. **Installs command reference docs** — copies `templates/project/docs-commands/` into `docs/commands/` verbatim; the template tree mirrors `$CDOCS` exactly (e.g. `docs-commands/build/references/build-reference.md` → `docs/commands/build/references/build-reference.md`), so commands that cite a reference doc find it on disk.
 
@@ -329,7 +328,7 @@ Claude takes your answers and:
 10. **Maintains `.professor/` state** — `manifest.json` holds the user-owned interview answers, while `baseline.json` holds pfm-owned per-file template pins. `drift.md` remains the local customization ledger.
 11. **Writes `.professor/manifest.json`** — created here (`pfm init` leaves only `baseline.json`); on a re-run replace its `interview` object with the confirmed answers while preserving every non-interview field. Format:
 
-**Build roster validation:** `/wave:builder` is not allowed to carry blueprint example projects that the target repo does not have. The installer must generate developer/QA (and any specialist) blocks only for roster entries, fail if any `{project}` pattern token remains unexpanded, and then verify every referenced `*/.claude/agents/*.md` path exists. A roster of `a` and `b` leaves no block for a `c` the repo does not have.
+**Build roster validation:** no installed file is allowed to carry blueprint example projects that the target repo does not have. The installer must generate developer/QA (and any specialist) blocks only for roster entries, fail if any `{project}` pattern token remains unexpanded, and then verify every referenced `*/.claude/agents/*.md` path exists. A roster of `a` and `b` leaves no block for a `c` the repo does not have.
 
 ```json
 {
@@ -393,7 +392,7 @@ The `interview` field records the choices needed to understand the install; it i
 
 ### 2.7 Documentation scaffold (`docs/agents/`)
 
-The main-loop session (the fix-core card § Step 6) and every architect read a documentation hub that must exist on disk, or their references dangle. Seed it from the shipped skeletons:
+The main-loop session and every executor read a documentation hub that must exist on disk, or their references dangle. Seed it from the shipped skeletons:
 
 1. Copy `templates/project/docs-agents/_index.md` → `docs/agents/_index.md` and `templates/project/docs-agents/standards.md` → `docs/agents/standards.md`, substituting `{PROJECT_NAME}` and roster tokens like every other template.
 2. **If the project has enough code to document** → the main-loop session builds the clusters (architecture, api, map, features) from the codebase under `/quality:doc`, each with its own `_index.md`, and runs the Approval gate over each.
@@ -502,7 +501,7 @@ Same for adding a new Tier A archetype if you build one — `/pcm` copies the te
 - Read `BLUEPRINT.md` § "The five load-bearing walls" — these don't change, ever.
 - Verify the statusline shows in your terminal (you should see model, fleet counts, context %, and git branch). If not, check `~/.claude/settings.json` runs `~/.local/bin/pfm statusline` and that the binary is executable.
 - Verify notifications work — start a task that takes 30+ seconds and check you get the macOS notification when the turn completes.
-- Run `/wave:builder` for new features. Run `/pcm` to evolve the pipeline. Run the Professor analysis for cross-disciplinary analysis.
+- Run `/flights:spec` for new features, then one of the `/flights:orchestrate-*` commands to fly it. Run `/pcm` to evolve the pipeline. Run the Professor analysis for cross-disciplinary analysis.
 
 **When something feels wrong** after a few real pipelines:
 

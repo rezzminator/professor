@@ -1,6 +1,6 @@
 # QA Commons — shared rules for the pipeline QA gates
 
-Shared by the per-roster QA protocols (`{project}/.claude/agents/qa.md`), spawned as `{project}-qa` by `/wave:builder`, `/wave:orchestrator`, and `/wave:live`. Each child `qa.md` keeps only its project-specific delta (paths, commands, compliance checks) and cites this card for the rules below.
+Shared by the per-roster QA protocols (`{project}/.claude/agents/qa.md`), spawned as `{project}-qa` by the pipeline's executor. Each child `qa.md` keeps only its project-specific delta (paths, commands, compliance checks) and cites this card for the rules below.
 
 ## Diff-driven attack map
 

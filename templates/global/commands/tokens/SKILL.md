@@ -1,7 +1,7 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: tokens
-description: Attributes runtime token spend, heaviest first — Claude Code sub-agents and Workflow runs, or Codex CLI threads with `--codex`. Flags `--all`, `--by-workflow`, `--filter <substr>`, `--detail <id>`, `--by-day`, `--since <date>`, `--top N`, `--session <id>`; `--help` lists all. Triggers "token ledger", "which agent burned the most", "what did the wave cost". Static context size → /context-meter.
+description: Attributes runtime token spend, heaviest first — Claude Code sub-agents and Workflow runs, or Codex CLI threads with `--codex`. Flags `--all`, `--by-workflow`, `--filter <substr>`, `--detail <id>`, `--by-day`, `--since <date>`, `--top N`, `--session <id>`; `--help` lists all. Triggers "token ledger", "which agent burned the most", "what did the flight cost". Static context size → /context-meter.
 ---
 
 # Token Ledger
@@ -18,13 +18,13 @@ node ~/.claude/commands/tokens/token-ledger.mjs [flags]
 
 - Heaviest burner: `--all` — the per-agent table sorts by est cost descending, so the top row is the answer.
 - One Workflow run's cost: `--all --by-workflow`, the run's `wf_*` row.
-- One wave, pipeline, or feature: `--all --filter <label>` — sums every agent row whose label carries it.
+- One flight, pipeline, or feature: `--all --filter <label>` — sums every agent row whose label carries it.
 - A whole chat's spend: `--by-workflow` in that chat (default scope) — `TOTAL` is the chat, `wf_*` rows are its Workflow runs, `(non-workflow agents)` is everything else.
 - One agent's individual calls: `--detail <id|label-substr>`.
 
 ## What gets a `wf_*` row
 
-Only a Workflow-engine run — a script under the repo's `workflows/` or a skill-embedded engine (`/deep-rr`). An orchestrated wave is not one: `/wave:orchestrator` and `/wave:builder` run in their chats' main sessions and spawn session-level sub-agents, which land in `(non-workflow agents)`; total a wave with `--filter <wave-label>` instead. `/wave:walker` spawns session-level agents too, so it lands under the same filter. A dual-chat wave spans two chats — sum default scope in the orchestrator chat with `--session {builder-session}` for the builder.
+Only a Workflow-engine run — a script under the repo's `workflows/` or a skill-embedded engine (`/deep-rr`). An orchestrated flight is not one: `/flights:orchestrate-live` spawns executors as session-level sub-agents and `/flights:orchestrate-nested` runs them under one sub-agent; both land in `(non-workflow agents)`; total a flight with `--filter <flight-label>` instead.
 
 ## Codex sessions — `--codex`
 

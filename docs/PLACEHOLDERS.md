@@ -40,7 +40,7 @@ A roster carries no fixed roles. The only per-entry attributes beyond the fields
 
 ### Materialization (how SETUP expands the roster)
 
-Templates carry per-project **PATTERN blocks** written once with the generic `{project}` tokens. At install SETUP **expands each pattern block once per roster entry**, substituting that entry's fields — so a 1-project and a 7-project adopter get correctly-sized files from the same template. Pattern sites: the `wave/builder.md`/`wave/live.md` per-project pipeline stages, `agents/per-project/{developer,qa}.md` (instantiated per entry), and `worktree.sh`/`dev.sh` (which hold a `PROJECTS=(…)` array SETUP fills and iterate it).
+Templates carry per-project **PATTERN blocks** written once with the generic `{project}` tokens. At install SETUP **expands each pattern block once per roster entry**, substituting that entry's fields — so a 1-project and a 7-project adopter get correctly-sized files from the same template. Pattern sites: `agents/per-project/{developer,qa}.md` (instantiated per entry) and `worktree.sh`/`dev.sh` (which hold a `PROJECTS=(…)` array SETUP fills and iterate it).
 
 ### Single-project collapse
 
@@ -147,7 +147,7 @@ A roster entry's whole stack, package manager and test runner are the per-entry 
 
 ## The PhDs (persona qualification)
 
-The Professor's qualification is fixed prose — "15+ PhDs, one in whatever area the work touches" — shipped verbatim in the fleet prompt (`templates/prompts/professor.md`); no per-install discipline slots exist and SETUP collects none. `{PHD_DISCIPLINE_1..10}` (prose form `{PHD_DISCIPLINE_N}`) and `{PHD_DOMAIN_DISCIPLINE_1..5}` are dead tokens — retired, never re-add them; a refresh pass finding a discipline roster in a live persona genericizes it to the fixed line.
+The Professor's qualification is fixed prose — "15+ PhDs, one in whatever area the work touches" — shipped verbatim in the fleet prompt (`templates/harness-prompts/share/head.md`); no per-install discipline slots exist and SETUP collects none. `{PHD_DISCIPLINE_1..10}` (prose form `{PHD_DISCIPLINE_N}`) and `{PHD_DOMAIN_DISCIPLINE_1..5}` are dead tokens — retired, never re-add them; a refresh pass finding a discipline roster in a live persona genericizes it to the fixed line.
 
 ## Regulation / compliance
 
@@ -176,7 +176,7 @@ A named regulator, competitor, conference, or association surviving in one of th
 
 ## Paths (mostly generic pipeline paths — KEEP unchanged)
 
-Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,waves,backlog.md}`, `.worktrees/`, `tmp/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
+Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,backlog.md}`, `tmp/flights/`, `.worktrees/`, `tmp/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
 
 ## Model pins
 
@@ -194,11 +194,11 @@ This makes the codex-touched files a 3-way merge — read all three:
 2. **Current blueprint template** (re-inject the Codex sections/lines/refs that live deleted).
 3. **This map** (apply placeholders).
 
-Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), the wave command dir `commands/wave/{builder,orchestrator}.md` (keep the dual-runtime paragraph), the codex mirror's own wave wrappers under `codex/` (`skills/wave/SKILL.md`, `skills/wave-build/SKILL.md`, `agents/{wave,wave-build}.toml` — keep the dual Skill/Agent runtime block, and keep their read-target pointers aimed at `commands/wave/orchestrator.md` and `commands/wave/builder.md`), `commands/pcm.md` (keep ALL Codex-management: invariants stay at 10, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` in the allow-list; its body is curated upstream on `rumdl` + the repo-root `.rumdl.toml` — a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
+Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), `commands/pcm.md` (keep ALL Codex-management: invariants stay at 10, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` in the allow-list; its body is curated upstream on `rumdl` + the repo-root `.rumdl.toml` — a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
 
 ## Ignored artifacts (do NOT ship, drop references)
 
-A live-source command, script or rule the blueprint does not ship (`ignore_sources` in `templates/refresh-map.json`) is **out of scope**. When a shipped template (root `CLAUDE.md`, `dev`, `wave`, `pcm`, `settings.json`) references one, drop that row/rule/line so the blueprint has no dangling pointers.
+A live-source command, script or rule the blueprint does not ship (`ignore_sources` in `templates/refresh-map.json`) is **out of scope**. When a shipped template (root `CLAUDE.md`, `dev`, `pcm`, `settings.json`) references one, drop that row/rule/line so the blueprint has no dangling pointers.
 
 ## Tokens (additional canonical entries)
 
@@ -233,9 +233,7 @@ They are listed because the template token gate (`dev.sh verify templates`) FAIL
 | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
 | `{SHA}` | `epics/TEMPLATE.md` | a commit sha |
 | `{MB}` | `docs-commands/git/references/gitter-history.md` | a file size in megabytes |
-| `{PID}` | `commands/wave/live.md` | the lock holder's process id |
 | `{SCOPE}` | `commands/pcm.md` | the audit scope being run |
 | `{CALLER}` | `commands/quality/description.md` and every description carrying a `{CALLER}-ONLY` token | the name of the only entity allowed to invoke the entry |
-| `{SESSION_ID}` | `codex/skills/wave-builder/SKILL.md` | the Codex session id to resume |
 | `{STATUS_LITERAL}` | `commands/audit/code-hygiene.md` | an example status string literal in the code being audited |
 | `{SEED_INSERTED}` / `{SEED_EXPECTED}` / `{SEED_STATUS}` / `{SEED_DETAIL}` | `commands/dev.md` | the seed progress row's counts, state, and detail |

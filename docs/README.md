@@ -74,7 +74,7 @@ claude
 > Conduct the interview before touching any files.
 ```
 
-> Replace `/path/to/professor` with a permanent clone path, conventionally `~/.professor`. Keep it: installed Wave callers execute the engine in this clone, and `pfm update` updates the same authority in place.
+> Replace `/path/to/professor` with a permanent clone path, conventionally `~/.professor`. Keep it: installed machine-global callers execute the engine in this clone, and `pfm update` updates the same authority in place.
 
 `pfm init` scaffolds the project; Claude interviews you and adapts those local files. The install verification checks the selected project tooling and runtime mirrors.
 
@@ -100,9 +100,9 @@ See `SETUP.md` for the install interview and adaptation guidance.
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator and root identity — lives in CLAUDE.md, not a separate command.
 - **/pcm** — Professor Change Manager. Edits pipeline rules at the source; `/pfm` (machine-global) is the CLI guide.
-- **/wave:{orchestrator,builder,refine,walker,live,schedule,watcher}, /dev** — pipeline mechanics with light Professor voice.
+- **/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/wave:refine`, `/wave:walker`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/rnd` is project-scope and executes its own research run.
+**Bundled commands (ship with the blueprint):** `/flights:spec`, `/flights:audit`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/rnd` is project-scope and executes its own research run.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `deep-rr` lives in `workflows/deep-rr/`; `legal` is bundled under `templates/project/skills/`.
 

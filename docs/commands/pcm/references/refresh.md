@@ -33,7 +33,7 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 ### Tier assignments
 
-**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/wave:builder`, `/dev`, `/wave:orchestrator`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project agents (planner, architect, developer, qa, ui-ux, db-admin, devops, ai-engineer)
+**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project agents (planner, architect, developer, qa, ui-ux, db-admin, devops, ai-engineer)
 
 ### Preservation (untouchable across tiers)
 
@@ -62,7 +62,7 @@ Character names (Professor, and any persona the install adds) ship as **default 
 
 From the project repo:
 
-- `CLAUDE.md` (root), `.claude/agents/*.md`, `.claude/commands/*.md` (Tier A+B, including command directories like `.claude/commands/pfm/`, `.claude/commands/wave/`, `.claude/commands/audit/`, `.claude/commands/quality/`), `.claude/skills/*/SKILL.md` (bundled + domain-hydrated only — see next bullet), `.claude/scripts/*.sh`
+- `CLAUDE.md` (root), `.claude/agents/*.md`, `.claude/commands/*.md` (Tier A+B, including command directories like `.claude/commands/pfm/`, `.claude/commands/audit/`, `.claude/commands/quality/`), `.claude/skills/*/SKILL.md` (bundled + domain-hydrated only — see next bullet), `.claude/scripts/*.sh`
 - **Source-fetched skills** (`360`, `ghostwriter`, `vision-factory`) — never vendor a `SKILL.md` copy for these; they live in their own canonical repos and a stale copy is the exact drift this avoids. Refresh maintains only `templates/project/skills/sources.json` (name → repo); SETUP clones each at install. `deep-rr` lives in-tree at `workflows/deep-rr/` (ships with the blueprint clone) — not source-fetched; it updates when the blueprint clone updates, not independently.
 - `docs/epics/` structure — Epics section of CLAUDE.md, manifest format, lifecycle, ownership rules
 - `docs/agents/` scaffold — the hub `_index.md` format, the `standards.md` skeleton, and the cluster convention (structure only, NEVER doc content — every adopter's documentation body is their own)
@@ -112,7 +112,7 @@ Exports an interview Claude conducts before touching files. Structure:
 6. Tier B opt-ins: Officer (regulations?), KM (domain?), PM (persona?), Mentor (market+jurisdiction?), Marketer (channels+language?)
 7. Sacred ground ("do no harm" in your domain)
 
-**Phase 2 — Customization:** Rewrite every template replacing placeholders with interview answers. `/wave:builder` MUST be materialized from the actual project roster; delete planner/architect/developer/QA/db/devops blocks for missing projects and fail if any referenced agent path does not exist.
+**Phase 2 — Customization:** Rewrite every template replacing placeholders with interview answers. The per-project pipeline blocks MUST be materialized from the actual project roster; delete planner/architect/developer/QA/db/devops blocks for missing projects and fail if any referenced agent path does not exist.
 
 **Phase 2.5 — Skill Knowledge Hydration (domain-hydrated skills):**
 
@@ -120,7 +120,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 | Skill | What's universal (ships) | What's project-specific (hydrated by RR) |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Analysis Protocol (in the fleet prompt, `templates/prompts/professor.md`) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
+| Analysis Protocol (in the fleet prompt, `templates/harness-prompts/share/head.md`) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
 | `audit:code-hygiene` | Category structure (ghost fields, dead code, stale deps, arch smells, type safety, naming, quality) | Per-category detection patterns, file paths, known hotspots, linter coverage gaps, project-specific report examples |
 | `audit:security` | OWASP category structure (8A-8I), severity guide, report format | Domain-specific PHI/data sensitivity rules, external API checks, framework-specific vulnerabilities, compliance-driven sub-categories |
 
@@ -144,7 +144,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 **Phase 2.6 — Host tooling probe (git-host bridge):** Check the install machine for `gh` and `glab` (`command -v`). For each present, write a one-file host command at `.claude/commands/h/{gh|glab}.md` (the `h:` host namespace) whose `description` records that the CLI is available on this host for {GitHub|GitLab} operations. It carries no procedure — it is the bridge that tells the Professor which CLI to drive: an adopter on GitLab forks + releases professor through `/h:glab`, a GitHub adopter through `/h:gh`, and `/pfm:release` and gitter read this marker to target the right host. These host-local bridges are KEEP-LOCAL — excluded from the portable blueprint. Absent tools get no command. Then resolve the blueprint repo target: if the user has push access to the canonical repo, set `{BLUEPRINT_REPO}`/`{GH_USER}`/`{BLUEPRINT_CLONE_PATH}` to it; otherwise have them fork it and use the fork.
 
-**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `/wave:live` task and watch its project checks.
+**Phase 3 — Smoke test:** Run `/dev status`, then one tiny `/flights:orchestrate-live` task and watch its project checks.
 
 ## 5. Public README
 
@@ -172,7 +172,7 @@ One-paragraph pitch: portable .claude/ that turns Claude Code into a self-discip
 install pfm, cd your-project, `pfm init .`, claude → follow the printed SETUP.md install interview → customize → smoke test
 
 ## The cast — Tier A
-Professor, /pfm, /wave:builder, /dev, /wave:orchestrator
+Professor, /pfm, /flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev
 
 ## Tier B (opt-in)
 /officer, /mentor, /marketer

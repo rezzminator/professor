@@ -334,7 +334,7 @@ function firstUserSnippet(file) {
 }
 
 // meta.json sidecar (agent-{id}.meta.json) carries {agentType, description?}.
-// description is the richest label for /wave:builder sub-agents ("BE developer", "gitter SETUP").
+// description is the richest label for flight-executor sub-agents ("BE developer", "gitter SETUP").
 function readMeta(agentFile) {
   const metaFile = agentFile.replace(/\.jsonl$/, ".meta.json");
   try {
@@ -1027,7 +1027,7 @@ function printDetail(rows, query) {
 }
 
 // Group rows by their wf_* run dir → one row per workflow run. Rows not under a
-// wf_* dir (session-level /wave:builder agents, MAIN loops) fold into one trailing summary
+// wf_* dir (session-level flight-executor agents, MAIN loops) fold into one trailing summary
 // row labeled "(non-workflow agents)" — never silently dropped.
 function printByWorkflow(rows) {
   const groups = new Map(); // wf id -> { wf, conv, agentCount, agg, mtime }
@@ -1069,9 +1069,9 @@ function printByWorkflow(rows) {
   console.log(
     "\nFRESH = in+out+cache-write (the harness's subagent_tokens definition); GRAND TOTAL adds cache-read." +
       "\nA wf_* row exists only for a Workflow-engine run — a script under the repo's workflows/ or a skill-embedded" +
-      "\nengine (/deep-rr). /wave:orchestrator, /wave:builder and /wave:walker run in their chats' main" +
-      "\nsessions and land in (non-workflow agents) instead. The TOTAL row sums both —" +
-      "\na wave's end-to-end chat cost. Total a wave with --filter <wave-label>."
+      "\nengine (/deep-rr). A flight's executors (/flights:orchestrate-live, /flights:orchestrate-nested) run as" +
+      "\nsession-level sub-agents and land in (non-workflow agents) instead. The TOTAL row sums both —" +
+      "\na flight's end-to-end chat cost. Total a flight with --filter <flight-label>."
   );
 }
 
@@ -1104,9 +1104,9 @@ Usage: node token-ledger.mjs [options]
   --by-workflow          group by workflow run (wf_*) instead of by agent — one row
                          per run + a "(non-workflow agents)" summary row + TOTAL.
                          wf_* = a Workflow-engine run (workflows/* or /deep-rr).
-                         /wave:orchestrator, /wave:builder and /wave:walker land in
-                         (non-workflow agents) instead — total a wave with
-                         --filter <wave-label>.
+                         a flight's executors (session-level sub-agents) land in
+                         (non-workflow agents) instead — total a flight with
+                         --filter <flight-label>.
   --filter <substr>      restrict the per-agent table + totals to rows whose label or
                          model id contains <substr> (case-insensitive); prints match
                          count. Composes with --all / --session / --json.

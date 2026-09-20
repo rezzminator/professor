@@ -6,7 +6,7 @@ First pipeline stage — creates the worktree before planning and architecture r
 
 ## 1. Validate preconditions
 
-- Confirm the brief names the wave spec (exists on disk) and the residue dir (the wave dir `docs/dev/trains/{train}/waves/{N}-{slug}/`).
+- Confirm the brief names the task file(s) (exists on disk) and the residue dir (the flight directory `tmp/flights/{flight}/`).
 - Confirm no leftover worktree: `./.claude/scripts/worktree.sh list $PIPELINE`. If it exists, warn and stop — never overwrite.
 - **Uncommitted changes on main** — handle per the orchestrator's `CarryWIP` directive (`commit` | `leave`, default `leave`). Run only when `git status --porcelain` is non-empty:
   - `commit` — commit main's WIP (untracked included) so the branch inherits it as a shared ancestor:
@@ -15,7 +15,7 @@ First pipeline stage — creates the worktree before planning and architecture r
     git add -A && git commit -m "chore(wip): carry into pipeline/$PIPELINE"
     ```
 
-  - `leave` — leave main's WIP exactly in place, NO stash: `git worktree add` cuts the branch from the COMMITTED ref, so a dirty main never blocks or contaminates worktree creation. A stash+pop window makes live-lane ledgers vanish from sibling readers mid-window, and an aborted phase orphans the stash; `docs/dev/waves/**` is never stashed on a live train.
+  - `leave` — leave main's WIP exactly in place, NO stash: `git worktree add` cuts the branch from the COMMITTED ref, so a dirty main never blocks or contaminates worktree creation. A stash+pop window makes live-lane ledgers vanish from sibling readers mid-window, and an aborted phase orphans the stash; a live flight's residue dir is never stashed.
 - **Orphan check** — a `pre-pipeline stash: *` entry in `git stash list` is an ABORTED prior SETUP's orphan: stop and report it before any new work (never stack a second; gitter.md § Aborted phase).
 
 ## 2. Create worktree

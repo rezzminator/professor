@@ -12,7 +12,7 @@ An RND takes a measurable goal against ONE {AI_SERVICE_NAME} call and reaches it
 
 ## Boundaries (inviolable)
 
-- Sandbox only: every artifact lives in the run dir. An RND never edits a project file; its deliverable is `PROPOSED_DIFF.md`, landed by hand or via `/wave:builder` only after the user ratifies the completed result. An authorization to research ("RND this", "fix it via RND") never authorizes landing.
+- Sandbox only: every artifact lives in the run dir. An RND never edits a project file; its deliverable is `PROPOSED_DIFF.md`, landed by hand or via `/flights:orchestrate-nested` only after the user ratifies the completed result. An authorization to research ("RND this", "fix it via RND") never authorizes landing.
 - Independent of {AI_SERVICE_NAME}: the run imports or points at nothing under the {AI_SERVICE_NAME} source tree (`{PROJECT}/src/{ai_module}/**`); production enters twice, as a black box — the baseline (invoked whole) and the final in-process monkey-patch validation of `PROPOSED_DIFF.md`.
 - Sensitive-data discipline: reports, ledgers, logs, agent messages carry ids, counts, enums — never transcript text. Corpus transcripts are synthetic seeds; the rule holds anyway. {SECONDARY_LANG} evidence surfaced to the user is translated.
 - Money: hard caps for the model under test and for judges, frozen in `STATE.md` before the first paid call; provider keys come from the environment.
@@ -54,7 +54,7 @@ Performed on disk, never asserted:
 
 ### `land <call>/<run>`
 
-Only on the user's explicit ratification of that run's `PROPOSED_DIFF.md` in the current turn. Land the change by hand or route it to `/wave:builder` (cross-project) with the monkey-patch validation evidence and the report's numbers; after merge, `WINNER.md` status → shipped, with the SHA.
+Only on the user's explicit ratification of that run's `PROPOSED_DIFF.md` in the current turn. Land the change by hand or route it to `/flights:orchestrate-nested` (cross-project) with the monkey-patch validation evidence and the report's numbers; after merge, `WINNER.md` status → shipped, with the SHA.
 
 ## Run protocol (binds every run, spawned or inline)
 

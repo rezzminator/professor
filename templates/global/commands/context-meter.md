@@ -25,7 +25,7 @@ Flag a file when:
 
 - `CLAUDE.md`, root or child: over 200 lines; a child that restates root rules rather than holding only its delta
 - `.claude/agents/*.md` and `{project}/.claude/agents/*.md`: over 15 KB, or `description` over 30 words — every agent description loads into every spawn
-- `.claude/commands/**/*.md`, nested command dirs included (`pfm/`, `wave/`, `quality/`, `audit/`, `rnd/`, `h/`): over 35 KB
+- `.claude/commands/**/*.md`, nested command dirs included (`pfm/`, `flights/`, `quality/`, `audit/`, `rnd/`, `h/`): over 35 KB
 - `SKILL.md`, under `.claude/skills/*/` and embedded in command dirs: over 500 lines, or `description` plus when-to-use over 1,536 chars combined
 - The injected fleet prompt bills against the always-loaded floor (main-loop only; subagents never receive it)
 - `.mcp.json`: a server wrapping a CLI already on PATH (`gh`) — schemas are deferred, so tool count costs little until fetched

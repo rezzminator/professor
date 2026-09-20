@@ -1,5 +1,5 @@
 # {PROJECT_NAME} repo law at the execpolicy layer — loads for EVERY trusted Codex
-# session in this repo (builder lanes AND interactive use; the law binds both).
+# session in this repo (executor lanes AND interactive use; the law binds both).
 # Mirrors the CLAUDE.md infra law; {PROJECT} is the roster entry whose Makefile
 # owns the infra targets. Validate after every edit:
 #

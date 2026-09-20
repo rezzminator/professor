@@ -1,6 +1,6 @@
 ---
 name: audit:code-hygiene
-description: Scans AI-authored code for duplication, ghost fields, dead code, deps, architecture, types, naming, quality, magic numbers — scopes `all`, `dup`, `ghosts`, `dead`, `deps`, `arch`, `types`, `naming`, `quality`, `magic`, `{project}` per roster entry, `diff` (a changed-file set, /wave:walker's), `sweep [{project}|all]` — the one scope that removes dead code, gated by approval; else report-only.
+description: Scans AI-authored code for duplication, ghost fields, dead code, deps, architecture, types, naming, quality, magic numbers — scopes `all`, `dup`, `ghosts`, `dead`, `deps`, `arch`, `types`, `naming`, `quality`, `magic`, `{project}` per roster entry, `diff` (a changed-file set, e.g. a landed flight's), `sweep [{project}|all]` — the one scope that removes dead code, gated by approval; else report-only.
 argument-hint: [scope]
 ---
 
@@ -10,7 +10,7 @@ argument-hint: [scope]
 
 **Scopes:** `all`, `dup`, `ghosts`, `dead`, `deps`, `arch`, `types`, `naming`, `quality`, `magic`, `diff`, `sweep`, plus a per-project scope for each `{project}` in the roster (a single-project repo has just one).
 
-Each category is independent — run only applicable ones based on scope. Scope `diff` restricts every category to a provided changed-file set (e.g., a wave's merged diff) plus the call-sites and imports that touch those files — used by `/wave:walker`.
+Each category is independent — run only applicable ones based on scope. Scope `diff` restricts every category to a provided changed-file set (e.g., a flight's merged diff) plus the call-sites and imports that touch those files — for reviewing a landed flight's diff.
 
 **This codebase is largely AI-authored — weight the checks accordingly.** Each category marks the LLM-characteristic failure it catches.
 

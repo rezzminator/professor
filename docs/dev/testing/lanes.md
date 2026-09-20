@@ -1,6 +1,6 @@
 # Tier B lanes — the live DFS suite: one root, one container, lanes in sequence
 
-**Home:** `infra/fence/lanes/`. **Spec:** `docs/dev/trains/testing-foundation/waves/4-integration-dfs/spec.md`. **Coverage index:** `infra/fence/lanes/beats.md` (per-lane beats) + `infra/fence/lanes/map.tsv` (`landscape-id · lane · beat`) over `docs/dev/testing/landscape.md`.
+**Home:** `infra/fence/lanes/`. **Coverage index:** `infra/fence/lanes/beats.md` (per-lane beats) + `infra/fence/lanes/map.tsv` (`landscape-id · lane · beat`) over `docs/dev/testing/landscape.md`.
 
 Tier B drives the REAL binary against REAL engines: real Claude Code, Codex and OpenCode processes, real tmux panes, real seats, real model turns. It is the release gate and the on-demand suite, never a per-commit one — Tier U (unit) and Tier A (e2e, jailed) run at every commit. Tier B runs on linux containers only; darwin has no Tier B.
 

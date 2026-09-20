@@ -18,7 +18,7 @@ node .claude/commands/tokens/token-ledger.mjs --all
 # What did each workflow run cost? (one row per wf_* run, sorted by cost):
 node .claude/commands/tokens/token-ledger.mjs --all --by-workflow
 
-# Total one /wave:builder pipeline or /wave feature (by label substring):
+# Total one flight or feature (by label substring):
 node .claude/commands/tokens/token-ledger.mjs --all --filter my-feature
 
 # A specific conversation (by id or by path to its dir / main .jsonl):
@@ -51,9 +51,9 @@ node .claude/commands/tokens/token-ledger.mjs --root /some/other/.claude --proje
 
 ### `--by-workflow` honesty caveat
 
-`--by-workflow` groups every agent file under each distinct `wf_*` run directory. It captures **Workflow-engine runs** (e.g. `/deep-rr`, or the wave-build engine when it runs as a Workflow) **exactly**.
+`--by-workflow` groups every agent file under each distinct `wf_*` run directory. It captures **Workflow-engine runs** (e.g. `/deep-rr`) **exactly**.
 
-It does **NOT** total a plain `/wave:orchestrator`. A `/wave:orchestrator` runs each `/wave:builder` in the **main session**, and `/wave:builder` spawns its plan/arch/dev/QA agents as **session-level** sub-agents — not as `wf_*` workflow runs. Those land in the `(non-workflow agents)` summary row. To total one `/wave:builder` pipeline or one `/wave:orchestrator` feature, use `--filter <feature-label>` (e.g. `--filter my-feature`), which sums every agent row carrying that feature name.
+It does **NOT** total a flight. `/flights:orchestrate-live` spawns each executor as a **session-level** sub-agent and `/flights:orchestrate-nested` runs them under one sub-agent — neither is a `wf_*` workflow run. Those land in the `(non-workflow agents)` summary row. To total one flight, use `--filter <flight-label>`.
 
 Default scope is the most recent session **that has sub-agents** for the current project. The project is identified by slugifying the cwd (every `/` → `-`), matching Claude Code's own `projects/{slug}` naming.
 
@@ -70,14 +70,14 @@ Within a session:
 
 - `{conversationId}.jsonl` — the **MAIN** conversation loop → its own row.
 - `{conversationId}/subagents/agent-*.jsonl` — each sub-agent → one row.
-- `{conversationId}/subagents/workflows/wf_*/agent-*.jsonl` — nested workflow sub-agents (a Workflow-engine run, e.g. `/deep-rr`) → one row each. See the `--by-workflow` honesty caveat above: a plain orchestrated wave is NOT a `wf_*` run.
+- `{conversationId}/subagents/workflows/wf_*/agent-*.jsonl` — nested workflow sub-agents (a Workflow-engine run, e.g. `/deep-rr`) → one row each. See the `--by-workflow` honesty caveat above: a plain orchestrated flight is NOT a `wf_*` run.
 
 ## Schema notes (verified against real files)
 
 - **Usage** lives on every `assistant` line at `message.usage`: `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`. Model is `message.model`.
 - **Dedup is mandatory.** Streaming writes multiple `assistant` lines per API call, all sharing one `message.id` (verified: 43 raw lines → 18 distinct calls in one file). The tool keys on `(message.id, requestId)` and keeps the **last** occurrence — the final line carries complete cumulative usage. Summing raw lines overcounts ~2-3x.
 - **Agent label** is resolved in priority order:
-  1. `agent-{id}.meta.json` → `description` (the richest — e.g. `"BE developer"`, `"gitter SETUP"`, `"FE QA pre-merge"`; present for `/wave:builder`/`/wave:orchestrator` sub-agents).
+  1. `agent-{id}.meta.json` → `description` (the richest — e.g. `"BE developer"`, `"gitter SETUP"`, `"FE QA pre-merge"`; present for sub-agents spawned with a description, flight executors included).
   2. `agent-{id}.meta.json` → `agentType` (e.g. `"workflow-subagent"`, `"general-purpose"`).
   3. `attributionAgent` on the assistant line.
   4. First-user-message prompt snippet (the agent's task brief).

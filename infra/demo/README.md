@@ -5,10 +5,10 @@ Codex binaries, real seats (credentials copied in from this host), real pfm
 built from this checkout, real chats talking through the chat MCP. Nothing in
 the container is a stand-in.
 
-## Tier B — wave-close only
+## Tier B — flight-landing only
 
-Tier B is the live end-to-end gate at wave close, not a per-commit check. It
-uses real seats and spends real tokens. The wave closer runs these exact
+Tier B is the live end-to-end gate at flight landing, not a per-commit check. It
+uses real seats and spends real tokens. Whoever lands the flight runs these exact
 commands, in order:
 
 ```bash

@@ -47,5 +47,5 @@ spawn LUMEN_DOCS cx lumen 1 "You are LUMEN_DOCS, docs writer on the lumen projec
 spawn ORBIT_ORCH cc orbit "$SEAT_A" "You are ORBIT_ORCH, orchestrator of the orbit project. $READY"
 spawn ORBIT_QA cx orbit 1 "You are ORBIT_QA, QA on the orbit project. $READY"
 spawn MIGRATION cc atlas "$SEAT_A" "We are migrating the ledger table to the v7 schema step by step. The table is ledger(id, account_id, amount_cents, posted_at). Step 1: write migrations/v7_ledger.sql adding a refund_reason text column and an index on (account_id, posted_at). Do step 1 now, report in two lines, then stop and wait — I will tell you when to continue."
-spawn WAVE_TRAIN cc lumen "$SEAT_B" "You are WAVE_TRAIN, running a three-wave build train on the lumen project. $READY"
+spawn FLIGHT_RUN cc lumen "$SEAT_B" "You are FLIGHT_RUN, running a three-task flight on the lumen project. $READY"
 pfm ls --plain

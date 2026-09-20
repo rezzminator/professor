@@ -1,6 +1,6 @@
 # Documentation Hub
 
-Entry point for {PROJECT_NAME}'s documentation. This **Reference tier** records the current state of the system; the **Narrative tier** (`docs/epics/`) records why decisions were made; **Raw build artifacts** (`docs/dev/builds/`, `docs/dev/waves/`) preserve per-pipeline notes. Reference docs are clustered — read a cluster's `_index.md` (cheap), then open the one topic file you need.
+Entry point for {PROJECT_NAME}'s documentation. This **Reference tier** records the current state of the system; the **Narrative tier** (`docs/epics/`) records why decisions were made; **Raw build artifacts** (`docs/dev/builds/`) preserve per-pipeline notes. Reference docs are clustered — read a cluster's `_index.md` (cheap), then open the one topic file you need.
 
 Cross-project docs live under `docs/agents/`; single-project internals live under each `{project}/docs/`.
 
@@ -34,4 +34,4 @@ Cross-project docs live under `docs/agents/`; single-project internals live unde
 
 - **Narrative — Epics** ([`docs/epics/`](../epics/)): initiative-level context; each has a `manifest.md` (Vision & Scope, Key Decisions, Progress Log, Discoveries).
 - **Command / tooling references** (`docs/commands/{cmd}/references/`): per-command protocol + resource docs.
-- **Raw build artifacts** (`docs/dev/builds/`, `docs/dev/waves/`): per-pipeline working notes from `/wave:builder` and `/wave:orchestrator` runs.
+- **Raw build artifacts** (`docs/dev/builds/`): per-pipeline working notes from a build run.

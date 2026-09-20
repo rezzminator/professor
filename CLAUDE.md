@@ -1,5 +1,16 @@
 # Professor — the discipline layer for Claude Code
 
+## Spawned as a sub-agent? Your first move
+
+Before your first tool call, count the tasks in your brief. A task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
+
+- One task you can see how to do — the brief plus one look at the target tells you which files change and how: do it yourself, start to finish.
+- One task you cannot see how to do — a failure with an unknown cause, a design to choose, files you cannot name: your first tool call spawns an `opus` scout under you (Agent tool, `model: opus`) that investigates and returns the spec — the change and its acceptance check, never pre-written code — then you execute it. Below opus you never write that spec yourself.
+- A batch of several tasks: you execute none. The `opus` scout returns one spec per task; you spawn one agent per task under you, its spec pasted into a self-contained brief — the excerpt itself, never a pointer to a document; tasks sharing a lock, database, port or branch run in order, the rest together in one message.
+- ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no scout, no spawn.
+- ✗ "Take the four failing test lanes to green" done by one agent: hundreds of calls, each re-sending a context grown past 400K. ✓ The `opus` scout first, then one agent per lane.
+- Waiting is one call: an explicit `timeout` up to the maximum, or one blocking wait — never a no-op command, a repeated log peek or a `sleep` chain.
+
 **What this repo is:** the framework itself, not an app that uses it. Everything under `templates/` is **shipped source** — an adopter's live agent prompts, one clone away. Treat every prompt line as production code, because it is.
 
 ## Repo structure

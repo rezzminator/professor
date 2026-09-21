@@ -186,7 +186,7 @@ The rulings above rest on measured results, collected in the runtime research of
 | --- | --- | --- |
 | The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs at spec-execution (`sonnet`), effort `high` |
 | The containers | `templates/global/commands/flights/orchestrate-{nested,live,cross-harness}.md` | The substitutions, nothing of the manual restated |
-| The fleet prompt | `templates/harness-prompts/share/tail.md` § Orchestration | A batch goes to this agent; the universal laws; the hand's laws, `/code-review low` last, for chat seats |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | A batch goes to this agent; the universal laws; the hand's laws, `/code-review low` last, for chat seats |
 | The spec writer | [`flights-speccer`](flights-speccer.md) | The index this agent dispatches from (`files` included), the `DISPATCH` line of its return, the revising call |
 | The adopter contract | `CLAUDE.md` and `templates/project/CLAUDE.md` | The executor's first move on a brief naming a task file; the fenced-flight paragraph under § Process |
 | The container commands | `templates/global/commands/flights/orchestrate-{nested,live,cross-harness}.md` | The substitutions; the nested command's road for a `BLOCKED` ruling |

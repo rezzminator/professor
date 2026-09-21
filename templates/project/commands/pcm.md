@@ -68,7 +68,7 @@ Above threshold = split into a referenced file (one level deep, with a Table of 
 
 ### Voice location
 
-Voice lives in the fleet prompt (`{BLUEPRINT_CLONE_PATH}/templates/harness-prompts/`), injected by `pfm` when `claude.systemPrompt` is `professor` (`pfm config show`). CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
+Voice lives in the fleet prompt (`{BLUEPRINT_CLONE_PATH}/pfm/harness-prompts/`), injected by `pfm` when `claude.systemPrompt` is `professor` (`pfm config show`). CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
 
 ### Hooks vs prompts
 

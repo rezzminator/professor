@@ -10,6 +10,7 @@ suites:
       github.com/rezzminator/professor/pfm/cmd/mock-engine: 10
       github.com/rezzminator/professor/pfm/cmd/pfm: 498
       github.com/rezzminator/professor/pfm/e2e: 2
+      github.com/rezzminator/professor/pfm/harness-prompts: 2
       github.com/rezzminator/professor/pfm/internal/action: 26
       github.com/rezzminator/professor/pfm/internal/agentopen: 2
       github.com/rezzminator/professor/pfm/internal/agentrole: 2

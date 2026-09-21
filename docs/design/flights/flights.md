@@ -100,14 +100,14 @@ A rule lives at the highest layer every reader who needs it reads, and nowhere e
 
 | Layer | Reader | Holds |
 | --- | --- | --- |
-| `templates/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | The universal laws: cost = calls × context; a batch goes to `flights-orchestrator`, unspecified work to `flights-speccer`; report once, plus a real question or blocker, never a diff or a log in a message; waiting is one call or none; only `flights-speccer` changes a task file; the hand's own laws, `/code-review low` as its last step among them |
+| `pfm/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | The universal laws: cost = calls × context; a batch goes to `flights-orchestrator`, unspecified work to `flights-speccer`; report once, plus a real question or blocker, never a diff or a log in a message; waiting is one call or none; only `flights-speccer` changes a task file; the hand's own laws, `/code-review low` as its last step among them |
 | `CLAUDE.md` / `AGENTS.md` | every sub-agent and seat | The executor's first move on a brief naming a task file: open it with the shared files named beside it, in the first message, and execute it |
 | The agent file | the agent | The protocol of one role |
 | The brief | one executor | The task file path, its `reads`, the `run.md` lines of its `needs`, the standing rules, the worktree, the cap, the tests it writes, the review order, the open hand and `SPEC-DRIFT` with its cause line, the cadence and return shape, git read-only |
 
 Standing rules are what the project contract does not carry: the worktree, the fenced build command, the checks by command, the cap, and anything the caller adds for this flight. The `CLAUDE.md` / `AGENTS.md` contract reaches every sub-agent and seat from the harness and is never pasted or named in a brief: pasted, it bills every executor twice for the same text.
 
-The harness prompt lives in `templates/harness-prompts/`; `share/tail.md` § Orchestration carries the laws for every engine, and the per-engine file carries only that engine's mechanics.
+The harness prompt lives in `pfm/harness-prompts/`; `share/tail.md` § Orchestration carries the laws for every engine, and the per-engine file carries only that engine's mechanics.
 
 ## Names
 
@@ -138,7 +138,7 @@ Claude Code stops the Agent tool three levels below the main chat and caps concu
 | --- | --- | --- |
 | The agents | `templates/global/agents/flights-speccer.md`, `flights-orchestrator.md` | The two protocols |
 | The commands | `templates/global/commands/flights/*.md` | The five commands, machine-global |
-| The fleet prompt | `templates/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names, the hand's laws for chat seats |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names, the hand's laws for chat seats |
 | The adopter contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The executor's first move; the pipeline paragraph under § Process |
 | The executor's card | `dev` and any project executor | The Skill tool, so `/code-review low` can run; the brief's ask for the covering tests overrides a card that leaves tests to `qa` |
 | The engine | `pfm` settings and launcher | The two harness settings |

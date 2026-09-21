@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
-	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -16,102 +15,35 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
-// templateHarnessPromptsDir is the shipped tree the embedded assets are cut
-// from, relative to this package.
-func templateHarnessPromptsDir() string {
-	return filepath.Join("..", "..", "..", "templates", harnessPromptsDirName)
-}
-
-// The shipped template tree and the embedded asset tree are the same source
-// by contract — file for file, byte for byte, in BOTH directions. A template
-// part with no embedded twin ships nothing; an embedded part with no template
-// twin is a file no adopter can read or review.
-func TestHarnessPromptTreeMatchesShippedTemplate(t *testing.T) {
-	root := templateHarnessPromptsDir()
-	template := map[string]bool{}
-	if err := filepath.WalkDir(root, func(name string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		relative, err := filepath.Rel(root, name)
-		if err != nil {
-			return err
-		}
-		slashed := filepath.ToSlash(relative)
-		if slashed == "README.md" {
-			// Human-facing, never staged: the assets carry no README.
-			return nil
-		}
-		template[slashed] = true
-		assertHarnessPromptPair(t, slashed)
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if len(template) == 0 {
-		t.Fatalf("no shipped harness-prompt templates found under %s", root)
-	}
-	embedded := 0
-	if err := fs.WalkDir(embeddedAssets, path.Join("assets", harnessPromptsDirName), func(
-		name string,
-		entry fs.DirEntry,
-		err error,
-	) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		relative := strings.TrimPrefix(name, path.Join("assets", harnessPromptsDirName)+"/")
-		embedded++
-		if !template[relative] {
-			t.Errorf("embedded asset %s has no shipped template twin", relative)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if embedded != len(template) {
-		t.Fatalf("embedded harness-prompt files=%d, shipped templates=%d", embedded, len(template))
-	}
-}
-
-func assertHarnessPromptPair(t *testing.T, relative string) []byte {
+// readHarnessPromptPart reads one part of the embedded tree through the same
+// door the installer uses. There is exactly one copy of the tree — the
+// pfm/harness-prompts package — so a part is read here, never compared
+// against a second on-disk twin.
+func readHarnessPromptPart(t *testing.T, relative string) []byte {
 	t.Helper()
-	embedded, err := readAsset(path.Join(harnessPromptsDirName, relative))
+	content, err := readAsset(path.Join(harnessPromptsDirName, relative))
 	if err != nil {
-		t.Fatalf("embedded %s: %v", relative, err)
+		t.Fatalf("read harness prompt part %s: %v", relative, err)
 	}
-	template, err := os.ReadFile(filepath.Join(templateHarnessPromptsDir(), filepath.FromSlash(relative)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(embedded, template) {
-		t.Fatalf("embedded harness-prompts/%s differs from its shipped template", relative)
-	}
-	return embedded
+	return content
 }
 
 func TestHarnessBaselineAssetPairIsCoherent(t *testing.T) {
 	for _, stem := range []string{"harness-original", "harness-opus"} {
 		t.Run(stem, func(t *testing.T) {
 			baselines := path.Join("claude", "baselines")
-			pin := assertHarnessPromptPair(t, path.Join(baselines, stem+".sha256"))
+			pin := readHarnessPromptPart(t, path.Join(baselines, stem+".sha256"))
 			fields := bytes.Fields(pin)
 			if len(fields) != 2 {
 				t.Fatalf("malformed baseline pin: %q", pin)
 			}
 			name := string(fields[1])
-			prompt := assertHarnessPromptPair(t, path.Join(baselines, name))
+			prompt := readHarnessPromptPart(t, path.Join(baselines, name))
 			sum := sha256.Sum256(prompt)
 			if hex.EncodeToString(sum[:]) != string(fields[0]) {
 				t.Fatal("baseline body does not match pinned hash")
 			}
-			model := assertHarnessPromptPair(t, path.Join(baselines, stem+".model"))
+			model := readHarnessPromptPart(t, path.Join(baselines, stem+".model"))
 			if len(bytes.TrimSpace(model)) == 0 {
 				t.Fatal("baseline model provenance missing")
 			}
@@ -119,9 +51,35 @@ func TestHarnessBaselineAssetPairIsCoherent(t *testing.T) {
 	}
 }
 
+// The tree's README is embedded so doctor can compare both trees whole, and
+// must never reach an operator's managed root as a staged asset.
+func TestHarnessPromptReadmeIsEmbeddedButNeverStaged(t *testing.T) {
+	if _, err := readAsset(path.Join(harnessPromptsDirName, harnessPromptReadme)); err != nil {
+		t.Fatalf("read embedded %s: %v", harnessPromptReadme, err)
+	}
+	assets, err := assetFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := path.Join(harnessPromptsDirName, harnessPromptReadme)
+	parts := 0
+	for _, asset := range assets {
+		if _, isPart := harnessPromptAssetName(asset.path); !isPart {
+			continue
+		}
+		parts++
+		if asset.path == staged {
+			t.Fatalf("%s is listed as a staged asset", staged)
+		}
+	}
+	if parts == 0 {
+		t.Fatal("no harness prompt parts listed among the staged assets")
+	}
+}
+
 // A fresh apply stages one prompt per engine, and each one is its three parts
 // with exactly one blank line at each seam. The expectation is spelled out
-// here from the SHIPPED templates rather than taken from composeHarnessPrompt,
+// here from the embedded parts rather than taken from composeHarnessPrompt,
 // so a change to the joining rule has to be made twice to pass.
 func TestInstallStagesComposedHarnessPrompts(t *testing.T) {
 	home := t.TempDir()
@@ -130,20 +88,12 @@ func TestInstallStagesComposedHarnessPrompts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	root := templateHarnessPromptsDir()
-	read := func(parts ...string) string {
-		t.Helper()
-		raw, err := os.ReadFile(filepath.Join(append([]string{root}, parts...)...))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(raw)
-	}
-	head, tail := read("share", "head.md"), read("share", "tail.md")
+	head := string(readHarnessPromptPart(t, path.Join("share", "head.md")))
+	tail := string(readHarnessPromptPart(t, path.Join("share", "tail.md")))
 	for _, id := range harnessPromptEngines {
 		long := pfmengine.MustLookup(id).LongName
 		t.Run(long, func(t *testing.T) {
-			middle := read(long, "professor.md")
+			middle := string(readHarnessPromptPart(t, path.Join(long, "professor.md")))
 			staged := filepath.Join(home, ".local", "share", "pfm", "install", harnessPromptsDirName, long+".md")
 			actual, err := os.ReadFile(staged)
 			if err != nil {

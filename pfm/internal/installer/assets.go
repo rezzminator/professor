@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
@@ -22,8 +23,11 @@ type assetFile struct {
 }
 
 func assetFiles() ([]assetFile, error) {
-	var files []assetFile
-	err := fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
+	files, err := harnessPromptAssetFiles()
+	if err != nil {
+		return nil, err
+	}
+	err = fs.WalkDir(embeddedAssets, "assets", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -173,6 +177,14 @@ func sortedBoolKeys(values map[int]bool) []int {
 	return keys
 }
 
+// readAsset reads one embedded asset by the managed-root-relative path it
+// stages to. The harness-prompt parts are embedded by their own package —
+// pfm/harness-prompts, the ONE copy of that tree — and reached through the
+// same name, so staging, composition and the command preview all keep one
+// door.
 func readAsset(name string) ([]byte, error) {
+	if relative, isHarnessPrompt := harnessPromptAssetName(name); isHarnessPrompt {
+		return harnessprompts.ReadPart(relative)
+	}
 	return embeddedAssets.ReadFile(path.Join("assets", name))
 }

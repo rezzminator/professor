@@ -175,6 +175,7 @@ func Run(
 		verboseDir,
 		dependencies,
 	)
+	tally.warnings += printHarnessPromptEmbedDoctor(stdout, resolved.Home)
 	primaryAccount, primaryErr := fleet.PrimaryAccount(resolved, runtime.Config)
 	if primaryErr != nil {
 		tally.fail()

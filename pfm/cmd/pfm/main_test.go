@@ -611,8 +611,9 @@ const harnessPromptFixtureCaptured = "pfm jail fixture harness prompt\n"
 
 // stageHarnessPromptBaseline writes the managed baseline pin a wired machine
 // carries after `pfm install` —
-// internal/installer/assets/harness-prompts/claude/baselines/harness-original.sha256,
-// staged verbatim by stageAssets — so a hand-built "wired" doctor fixture can
+// harness-prompts/claude/baselines/harness-original.sha256, embedded by the
+// pfm/harness-prompts package and staged verbatim by stageAssets — so a
+// hand-built "wired" doctor fixture can
 // reach the same matches-baseline verdict a real install produces, without
 // re-deriving or re-pinning the real embedded asset.
 func stageHarnessPromptBaseline(t *testing.T, home string) {

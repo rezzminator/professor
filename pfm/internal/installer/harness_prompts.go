@@ -2,24 +2,65 @@ package installer
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"path/filepath"
+	"strings"
 
+	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
-// harnessPromptsDirName is the embedded asset tree the parts come from and
-// the managed-root directory the composed prompts stage into — one name, so
-// a template part and its staged prompt always sit in the same place.
-const harnessPromptsDirName = "harness-prompts"
+// harnessPromptsDirName is the asset-path prefix the parts come from and the
+// managed-root directory the composed prompts stage into — the embedding
+// package's own name, so a template part and its staged prompt always sit in
+// the same place.
+const harnessPromptsDirName = harnessprompts.DirName
+
+// harnessPromptReadme is the tree's human-facing page. It is embedded with
+// the parts so doctor can compare the binary's tree against the clone's
+// whole, and held back HERE so it never stages into an operator's managed
+// root — the one place that rule is written.
+const harnessPromptReadme = "README.md"
+
+// harnessPromptAssetName splits a harness-prompt asset path into its
+// tree-relative name; anything else is an asset of this package's own
+// embedded tree.
+func harnessPromptAssetName(asset string) (string, bool) {
+	return strings.CutPrefix(asset, harnessPromptsDirName+"/")
+}
+
+// harnessPromptAssetFiles lists the embedded harness-prompt parts as staged
+// assets. The tree lives in its own package, so assetFiles' walk over
+// embeddedAssets cannot see it — without this the parts would never stage,
+// and both doctor's baseline row and the Codex hook file read a staged part.
+func harnessPromptAssetFiles() ([]assetFile, error) {
+	var files []assetFile
+	if err := fs.WalkDir(harnessprompts.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk embedded harness prompts at %s: %w", name, err)
+		}
+		if entry.IsDir() || name == harnessPromptReadme {
+			return nil
+		}
+		files = append(files, assetFile{path: path.Join(harnessPromptsDirName, name), mode: 0o644})
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	if len(files) == 0 {
+		return nil, errors.New("embedded harness prompt tree holds no parts")
+	}
+	return files, nil
+}
 
 // harnessPromptEngines is the closed set of engines the fleet composes a
-// system prompt for. An engine's middle is
-// assets/harness-prompts/<long name>/professor.md and its composed prompt
-// stages as <long name>.md, which is exactly what paths.HarnessPromptPath
-// hands the three readers.
+// system prompt for. An engine's middle is <long name>/professor.md in the
+// embedded tree and its composed prompt stages as <long name>.md, which is
+// exactly what paths.HarnessPromptPath hands the three readers.
 var harnessPromptEngines = []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.OpenCode}
 
 // harnessPromptParts names the three embedded assets one engine's prompt is

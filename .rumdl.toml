@@ -37,10 +37,11 @@ unfixable = ["MD018", "MD020", "MD056", "MD075"]
 # A wave train under `docs/dev/trains/` is a per-run append-log whose prose cites
 # waves as `#20` — line-initial, which MD018 reads as a heading missing its space.
 # `testdata/` holds byte-exact conversion oracles. A staged or embedded prompt
-# asset is byte-pinned by the Go suite — `harness_prompts_test.go` asserts the
-# embedded `harness-prompts` tree equals its `templates/harness-prompts/` twin
-# file by file, and that each staged engine prompt equals the composition of
-# its three parts — so a format pass turns the suite red, and a
+# asset is byte-pinned by the Go suite — `pfm/harness-prompts/` is the ONE copy
+# of that tree, embedded into the binary, and `harness_prompts_test.go` asserts
+# that each staged engine prompt equals the composition of its three parts
+# while `pfm doctor` hashes a binary's copy against this directory — so a
+# format pass turns the suite red, and a
 # `harness-*.md` is a verbatim capture of another system's prompt that a reformat
 # falsifies outright (measured: MD046 added 8 fences, reflow merged two
 # IMPORTANT lines). A file whose bytes another test asserts is not prose.
@@ -54,7 +55,7 @@ exclude = [
   ".professor",
   "**/testdata/**",
   "docs/dev/trains",
-  "templates/harness-prompts",
+  "pfm/harness-prompts",
   "pfm/internal/installer/assets",
   "**/*.prompt.md",
   "tmp",

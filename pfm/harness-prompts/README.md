@@ -51,18 +51,22 @@ and the two seams.
   array of files whose content it appends to the system prompt, and `pfm install` names the staged
   file there, preserving every other key and every entry the operator wrote.
 
-The embedded installer assets under `pfm/internal/installer/assets/harness-prompts/` are
-byte-identical to this tree (README excluded); a Go test enforces the pairing file by file, and a
-second test enforces that each staged file equals the composition of its three parts. Edit a part
-here and its matching installer asset, then rebuild and install to deploy.
+This tree is the ONLY copy. `harnessprompts.go` beside it embeds it into the binary at build
+time (`//go:embed`), the installer composes and stages from that embedded tree, and a Go test
+enforces that each staged file equals the composition of its three parts. Edit a part here, then
+rebuild and install to deploy — and until you do, `pfm doctor`'s `harness-prompts embed=` row
+hashes the binary's copy against this directory and reports `MISMATCH`, naming every file that
+differs, so a binary carrying other prompts than this tree is never silent. The row states both
+directions and prescribes neither: a hash difference says the two disagree, not which one is
+newer — a clone checked out to an older revision than the binary is the binary being ahead.
 
 ## The Claude drift baseline
 
 - `claude/baselines/harness-original-v2.1.278.md` and `claude/baselines/harness-opus-v2.1.278.md`
   are reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic
   sections excluded. Each has a `.sha256` pin and `.model` provenance file under its
-  `harness-original` or `harness-opus` stem; the template and embedded installer assets stay
-  byte-identical.
+  `harness-original` or `harness-opus` stem; they are embedded with the parts and staged beside
+  the composed prompts.
 - `pfm doctor` checks both stable aliases, `sonnet` and `opus`, against their respective baselines.
   It records the requested alias, resolved model ID, CLI version, baseline filename, and original
   model ID. Model names and versions are informational: changing those alone never reports drift.

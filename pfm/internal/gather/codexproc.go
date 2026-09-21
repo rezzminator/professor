@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	pfmengine "hostops/pfm/internal/engine"
 	"hostops/pfm/internal/resolve"
 )
 
@@ -211,7 +212,7 @@ func codexResumeArgv(cmdline []string) string {
 		if cmdline[index] != "resume" {
 			continue
 		}
-		if candidate := cmdline[index+1]; isUUID(candidate) {
+		if candidate := cmdline[index+1]; pfmengine.IsUUID(candidate) {
 			return candidate
 		}
 	}

@@ -53,6 +53,16 @@ type Transcript struct {
 	LastPrompt   string
 	PromptCount  int64
 	IsBG         bool
+	// ContinuedIn is the session Claude Code moved this conversation into —
+	// the `continued-in` record it appends when a chat is sent to the
+	// background and resumes under a new session id. It is the raw recorded
+	// value and round-trips through the indexer untouched.
+	ContinuedIn string
+	// Superseded is read-only and derived by the store: ContinuedIn names a
+	// transcript that is itself indexed, so this one is an earlier segment of
+	// that chat, not a chat of its own. A successor that was never indexed
+	// leaves the predecessor standing, so no conversation drops out of view.
+	Superseded bool
 }
 
 // EffectiveActivityNS is the latest meaningful user-prompt timestamp. Older

@@ -53,7 +53,7 @@ func TestConfiguredBinaryBasenamesReachLiveDetectors(t *testing.T) {
 		t.Fatalf("DetectClaudeProcesses() = %#v, want %#v", claudeProcesses, wantClaude)
 	}
 
-	agents, err := DetectAgents(proc, "/jail/home", panes, customClaude)
+	agents, _, err := DetectAgents(proc, "/jail/home", panes, customClaude)
 	if err != nil {
 		t.Fatalf("DetectAgents() error = %v", err)
 	}

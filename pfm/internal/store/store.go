@@ -219,17 +219,25 @@ func (s *Store) migrate(ctx context.Context) error {
 		// Bumping user_version for it would instead lock every older pfm on
 		// this machine out of the whole store the moment one binary ran it —
 		// including the very binary pfm update's rollback restores.
-		if err := ensureOpenCodeSessionsAssistantCount(ctx, tx); err != nil {
+		if err := ensureColumn(
+			ctx, tx, "oc_sessions", "assistant_count", "INTEGER NOT NULL DEFAULT 0",
+		); err != nil {
 			return err
 		}
-		return nil
+		// continued_in is ensured the same way and for the same reason: an
+		// older binary's explicit transcript column list never names it, and
+		// its upsert leaves it alone. The claude parser version bump that ships
+		// with it is what backfills the rows indexed before it existed.
+		return ensureColumn(ctx, tx, "transcripts", "continued_in", "TEXT NOT NULL DEFAULT ''")
 	})
 }
 
-func ensureOpenCodeSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) error {
-	rows, err := tx.QueryContext(ctx, "PRAGMA table_info(oc_sessions)")
+// ensureColumn adds one additive column when the table lacks it. table,
+// column and definition are compile-time constants, never user input.
+func ensureColumn(ctx context.Context, tx *ImmediateTx, table, column, definition string) error {
+	rows, err := tx.QueryContext(ctx, "PRAGMA table_info("+table+")")
 	if err != nil {
-		return fmt.Errorf("inspect oc_sessions columns: %w", err)
+		return fmt.Errorf("inspect %s columns: %w", table, err)
 	}
 	present := false
 	for rows.Next() {
@@ -238,26 +246,26 @@ func ensureOpenCodeSessionsAssistantCount(ctx context.Context, tx *ImmediateTx) 
 		var notNull, pk int
 		var dflt sql.NullString
 		if err := rows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); err != nil {
-			return errors.Join(fmt.Errorf("scan oc_sessions column: %w", err), rows.Close())
+			return errors.Join(fmt.Errorf("scan %s column: %w", table, err), rows.Close())
 		}
-		if name == "assistant_count" {
+		if name == column {
 			present = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return errors.Join(fmt.Errorf("iterate oc_sessions columns: %w", err), rows.Close())
+		return errors.Join(fmt.Errorf("iterate %s columns: %w", table, err), rows.Close())
 	}
 	if err := rows.Close(); err != nil {
-		return fmt.Errorf("close oc_sessions columns: %w", err)
+		return fmt.Errorf("close %s columns: %w", table, err)
 	}
 	if present {
 		return nil
 	}
 	if _, err := tx.ExecContext(
 		ctx,
-		"ALTER TABLE oc_sessions ADD COLUMN assistant_count INTEGER NOT NULL DEFAULT 0",
+		"ALTER TABLE "+table+" ADD COLUMN "+column+" "+definition,
 	); err != nil {
-		return fmt.Errorf("ensure oc_sessions.assistant_count: %w", err)
+		return fmt.Errorf("ensure %s.%s: %w", table, column, err)
 	}
 	return nil
 }

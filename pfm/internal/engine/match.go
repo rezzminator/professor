@@ -42,3 +42,27 @@ func MatchCommand(id ID, argv []string, versionNamed bool, binaries ...string) b
 	}
 	return true
 }
+
+// IsUUID reports whether value has the 8-4-4-4-12 hex shape of a Claude
+// session id or a Codex thread id — the one spelling every package that
+// validates an engine-written id shares.
+func IsUUID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for index, character := range value {
+		switch index {
+		case 8, 13, 18, 23:
+			if character != '-' {
+				return false
+			}
+		default:
+			if (character < '0' || character > '9') &&
+				(character < 'a' || character > 'f') &&
+				(character < 'A' || character > 'F') {
+				return false
+			}
+		}
+	}
+	return true
+}

@@ -247,6 +247,7 @@ func ResolveEnv(request Request) (Env, error) {
 // Compose classifies, merges and sorts one view's rows from the loaded data
 // and the live snapshot. It never writes.
 func ComposeFleet(env Env, view compose.View, data Data, live gather.Snapshot) compose.Output {
+	data, live = followContinuations(data, live)
 	output := compose.Compose(compose.Input{
 		Snapshot:         live,
 		Transcripts:      data.Transcripts,

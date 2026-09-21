@@ -145,7 +145,7 @@ func TestDetectAgentsAndCache1H(t *testing.T) {
 	}}
 	panes := []ProbePane{{Socket: "cc-1-2-3", PaneID: "%5", PID: 500}}
 
-	agents, err := DetectAgents(proc, home, panes)
+	agents, _, err := DetectAgents(proc, home, panes)
 	if err != nil {
 		t.Fatalf("DetectAgents() error = %v", err)
 	}

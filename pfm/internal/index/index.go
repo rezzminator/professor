@@ -17,7 +17,7 @@ const (
 	codexParserVersion    = "4"
 
 	claudeParserVersionKey = "claude_parser_version"
-	claudeParserVersion    = "3"
+	claudeParserVersion    = "4"
 	messageRoleUser        = "user"
 )
 

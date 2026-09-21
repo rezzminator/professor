@@ -105,4 +105,4 @@ Test knobs outside `internal/paths`: the scan clock `PFM_TEST_NOW_NS` (`internal
 
 - The engine reads and writes the user's real chat state. A destructive operation on a live socket is not recoverable by a rerun — verify the target resolves before acting, and prefer refusing to guessing.
 - `pfm.dev` is a local build artifact, never the shipped path. The host mirror build is `make host-install` — it stamps `-ldflags "-X main.version=$(cat VERSION)"`, so a bare `go build -o ~/.local/bin/pfm ./cmd/pfm` is never the documented command (it reports `--version` as `dev`, not the release).
-- The installer lives in `internal/installer/`, and every staged host asset (shim, units, command cards) comes from `internal/installer/assets/` — the binary is the single source of truth; no external template dir exists.
+- The installer lives in `internal/installer/`, and every staged host asset (shim, units, command cards) comes from `internal/installer/assets/`, the fleet prompt parts from the embedded `harness-prompts/` package — the binary is the single source of truth; no external template dir exists.

@@ -67,7 +67,7 @@ Above threshold = split into a referenced file (one level deep, with a Table of 
 
 ### Voice location
 
-Voice lives in the fleet prompt (`templates/harness-prompts/`: `share/head.md` + the engine's `professor.md` + `share/tail.md`, composed by `pfm install`; Claude injects it under `claude.systemPrompt = "professor"`) — main-loop only; subagents never receive it. CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
+Voice lives in the fleet prompt (`pfm/harness-prompts/`: `share/head.md` + the engine's `professor.md` + `share/tail.md`, composed by `pfm install`; Claude injects it under `claude.systemPrompt = "professor"`) — main-loop only; subagents never receive it. CLAUDE.md and every agent/skill/command carry zero voice. Cross-file dedup targets: child CLAUDE.md keeps only its delta vs root CLAUDE.md; a project agent keeps only its delta vs the project CLAUDE.md it reads at start.
 
 ### Hooks vs prompts
 
@@ -78,7 +78,7 @@ For things that must happen every time (formatting, validation, secret-scanning)
 - Behavioral rules → prompt files (CLAUDE.md, agents, commands, skills)
 - Incident narratives ("on 2026-XX-XX...") → commit message / epic manifest (`docs/epics/{name}/`) — never prompt files
 - Architectural decisions / why-this-design → epic manifest or `docs/commands/{cmd}/references/` — prompts encode the rule, not the rationale
-- Voice / character flavor → the fleet prompt (`templates/harness-prompts/share/head.md`) — zero voice in CLAUDE.md, agents, skills, commands
+- Voice / character flavor → the fleet prompt (`pfm/harness-prompts/share/head.md`) — zero voice in CLAUDE.md, agents, skills, commands
 - Project-specific tooling → child CLAUDE.md only — never per-project agents (they inherit via parent)
 - Cross-cutting templates (report format, plan shape) → one canonical reference file — never duplicated per-project
 

@@ -44,7 +44,7 @@ This project runs two AI runtimes as a team. Full protocol: `.codex/README.md`
 
 ## Persona
 
-Voice and delivery law live in Professor's harness prompts under `templates/harness-prompts/`: `share/head.md` and `share/tail.md` wrap each engine's own `{claude,codex,opencode}/professor.md`, and `pfm install` composes one prompt per engine. Claude's `production` mode uses its native prompt.
+Voice and delivery law live in Professor's harness prompts under `pfm/harness-prompts/`: `share/head.md` and `share/tail.md` wrap each engine's own `{claude,codex,opencode}/professor.md`, and `pfm install` composes one prompt per engine. Claude's `production` mode uses its native prompt.
 
 ## Path vars
 

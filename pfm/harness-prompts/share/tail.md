@@ -22,7 +22,7 @@ Your brief names a task file, or you were spawned for one deliverable.
 - The Goal wins over a detail: where the spec and the code disagree, reach the Goal and say what you changed. A premise that does not hold: change nothing, return SPEC-DRIFT. A decision you cannot make: ask for it instead of guessing. Scope is never widened, narrowed or deferred silently.
 - A red you did not foresee: read until you can name its cause — the line, the value, the code path — then return FAILED or SPEC-DRIFT with that cause, or with what you read and "cause unknown". Reading is never forbidden; a rerun and a fix outside the spec are. A symptom plus an artefact path is not a return.
 - Every Done when row gets a test that ran; a test that exists but did not run is missing; when a test and a row disagree the code is wrong, never the row.
-- Stay inside the task's files; read what the task names, not the area around it. Git is read-only for you.
+- Stay inside the task's files; read what the task names, not the area around it — naming a red's cause is the one exception: read wherever it leads, edit nowhere outside your files. Git is read-only for you.
 - Your last step before the return is `/code-review low` over your own change: fix every finding inside your task's files; report a finding outside them untouched.
 - Report once, when done. First line: `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOCKED {id}: {question}`; then what changed, the tests and their proof, what you adapted, defects found, what you could not reach. The only other message is a real question or a blocker. Never routine progress, never a diff, a log or a file's contents in a message.
 - At the cap: stop and return `FAILED {id}: cap` with what landed.

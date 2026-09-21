@@ -25,7 +25,7 @@ func TestClaudeSpawnStripsInheritedProjectDir(t *testing.T) {
 		if want := " -u " + projectDirName + " "; !strings.Contains(shell, want) {
 			t.Fatalf("%s shell spawn %q lacks %q", purpose, shell, want)
 		}
-		environment := spawn.Environment([]string{projectDirName + "=/Users/tester/.professor", "PATH=/usr/bin"})
+		environment := spawn.Environment([]string{projectDirName + "=/srv/tester/.professor", "PATH=/usr/bin"})
 		if got := lastEnvironmentValue(environment, projectDirName); got != "" {
 			t.Fatalf("%s spawn environment %q kept %s=%q, want it stripped",
 				purpose, environment, projectDirName, got)

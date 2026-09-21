@@ -99,11 +99,34 @@ func TestInstallStagesComposedHarnessPrompts(t *testing.T) {
 			if err != nil {
 				t.Fatalf("staged %s prompt: %v", long, err)
 			}
+			if id == pfmengine.Codex {
+				// Codex's prompt is the same three parts with one mapping
+				// applied at compose time: Claude's /code-review names a
+				// command no Codex seat has, and an unmapped seat falls
+				// through to Codex's whole-branch review. Head and middle
+				// carry no invocation, so the seams are still asserted
+				// byte-for-byte and only the tail is allowed to differ.
+				prefix := strings.TrimRight(head, "\n") + "\n\n" + strings.TrimRight(middle, "\n") + "\n\n"
+				if !strings.HasPrefix(string(actual), prefix) {
+					t.Fatalf("staged %s.md is not head + middle + a tail", long)
+				}
+				mappedTail := strings.TrimPrefix(string(actual), prefix)
+				if strings.Contains(mappedTail, "/code-review") {
+					t.Fatalf("staged %s.md still spells /code-review:\n%s", long, mappedTail)
+				}
+				if !strings.Contains(mappedTail, `codex review -c model="`) {
+					t.Fatalf("staged %s.md carries no scoped codex review command:\n%s", long, mappedTail)
+				}
+				return
+			}
 			want := strings.TrimRight(head, "\n") + "\n\n" +
 				strings.TrimRight(middle, "\n") + "\n\n" +
 				strings.TrimRight(tail, "\n") + "\n"
 			if string(actual) != want {
 				t.Fatalf("staged %s.md is not head + middle + tail", long)
+			}
+			if !strings.Contains(string(actual), "/code-review low") {
+				t.Fatalf("staged %s.md lost /code-review low — its engine runs the Claude command", long)
 			}
 			// The parts each end in a single newline today, so the seams are
 			// also plain concatenation — a second, independent reading of

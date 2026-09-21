@@ -218,7 +218,10 @@ func TestGlobalAgentSourcesCompileDeterministicallyToValidTOML(t *testing.T) {
 				t.Fatalf("parse frontmatter of %s: %v", source, err)
 			}
 			wantName := strings.TrimSpace(fields["name"])
-			wantDescription := strings.TrimSpace(fields["description"])
+			// The description reaches the compiled role verbatim but for the
+			// one rewrite a Codex lead needs: Claude's /code-review names a
+			// command no Codex seat has (review.go).
+			wantDescription := rewriteCodeReview(strings.TrimSpace(fields["description"]), nil)
 
 			_, first, err := renderGlobalAgentTOML(source, string(raw), t.TempDir())
 			if err != nil {

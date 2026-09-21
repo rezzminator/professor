@@ -375,6 +375,14 @@ func renderGlobalAgentTOML(mdPath, raw, outputDir string) (string, string, error
 
 	body = strings.ReplaceAll(body, globalAgentBodyOld, globalAgentBodyNew)
 
+	// A global role never passes through transformMarkdown — this compiler
+	// applies the literal substitutions a global role needs and nothing else
+	// — so the /code-review rewrite is applied here too, to the description a
+	// lead routes on as much as to the body the role runs (review.go). The
+	// tier map is the compiler's default: this path loads no project config.
+	description = rewriteCodeReview(description, nil)
+	body = rewriteCodeReview(body, nil)
+
 	withFleetPrompt, err := fleetRoleInstructions(body)
 	if err != nil {
 		return "", "", fmt.Errorf("%s: %w", mdPath, err)

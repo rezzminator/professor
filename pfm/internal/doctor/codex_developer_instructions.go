@@ -10,8 +10,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 )
 
 // The Codex fleet prompt reaches a session through config.toml's
@@ -40,7 +39,11 @@ type codexInstructionsReport struct {
 // account whose config carries something else is a state `pfm install --yes`
 // owns and did not produce, so it is a FAILURE, never a warning.
 func PrintCodexDeveloperInstructions(stdout io.Writer, homes []string) int {
-	prompt, err := harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Codex).LongName)
+	// codexgen is the one door that composes this prompt: it applies the Codex
+	// mappings (review.go) the shared parts do not carry on disk, so comparing
+	// a config against the raw parts would read a correctly installed account
+	// as a mismatch.
+	prompt, err := codexgen.FleetPrompt()
 	if err != nil {
 		fmt.Fprintf(
 			stdout,
@@ -56,7 +59,7 @@ func PrintCodexDeveloperInstructions(stdout io.Writer, homes []string) int {
 	}
 	failures := 0
 	for _, home := range homes {
-		failures += printCodexInstructionsReport(stdout, inspectCodexInstructions(home, string(prompt)))
+		failures += printCodexInstructionsReport(stdout, inspectCodexInstructions(home, prompt))
 	}
 	return failures
 }

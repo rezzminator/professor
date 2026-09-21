@@ -668,11 +668,13 @@ func compileCommandFile(
 	// The incumbent compilers only rewrite command references in command
 	// frontmatter. Model names there are descriptive metadata, not executable
 	// model selections; rewriting them changes user-facing skill descriptions.
+	// A /code-review written there IS a command reference, and a Codex seat
+	// reading the Claude spelling reviews the whole branch (review.go).
 	generated := "---\n# " + generatedLine(
 		relSource,
-	) + "\nname: " + flat + "\n" + swapCommands(
-		strings.Join(fm, "\n"),
-		options.Commands,
+	) + "\nname: " + flat + "\n" + rewriteCodeReviewFrontmatter(
+		swapCommands(strings.Join(fm, "\n"), options.Commands),
+		options.ModelMap,
 	) + "\n---\n" + transformMarkdown(
 		body,
 		options,

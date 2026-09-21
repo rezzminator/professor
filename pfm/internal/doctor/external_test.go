@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -21,11 +21,11 @@ import (
 // row, which is a different failure than the one under test.
 func installedCodexConfig(t *testing.T, rest string) string {
 	t.Helper()
-	prompt, err := harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Codex).LongName)
+	prompt, err := codexgen.FleetPrompt()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return "developer_instructions = '''\n" + string(prompt) + "'''\n" + rest
+	return "developer_instructions = '''\n" + prompt + "'''\n" + rest
 }
 
 func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {

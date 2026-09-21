@@ -114,6 +114,10 @@ func unquoteFrontmatterScalar(value string) (string, error) {
 func transformMarkdown(text string, options TransformOptions) string {
 	text = swapModels(text, options.ModelMap)
 	text = swapCommands(text, options.Commands)
+	// swapCommands only knows the discovered roster, and /code-review is a
+	// Claude built-in that is in no roster — see review.go for why leaving it
+	// spelled costs a Codex seat the whole branch diff.
+	text = rewriteCodeReview(text, options.ModelMap)
 	if options.ReplaceClaudeFile {
 		text = strings.ReplaceAll(text, "CLAUDE.md", "AGENTS.md")
 	}

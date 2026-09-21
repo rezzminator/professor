@@ -7,8 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
-	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 )
 
 // Each broken state of the Codex fleet-prompt channel names ITSELF: absent,
@@ -16,7 +15,7 @@ import (
 // different lines, and only the installed prompt earns "ok". A check that
 // answered the same way for all of them would be a coincidence detector.
 func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
-	prompt, err := harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Codex).LongName)
+	prompt, err := codexgen.FleetPrompt()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +28,7 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 	}{
 		{
 			name:     "installed",
-			config:   "developer_instructions = '''\n" + string(prompt) + "'''\n",
+			config:   "developer_instructions = '''\n" + prompt + "'''\n",
 			want:     "developer_instructions=ok",
 			failures: 0,
 		},
@@ -47,7 +46,7 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 		},
 		{
 			name:     "an older prompt",
-			config:   "developer_instructions = '''\n" + strings.TrimSuffix(string(prompt), "\n") + "'''\n",
+			config:   "developer_instructions = '''\n" + strings.TrimSuffix(prompt, "\n") + "'''\n",
 			want:     "developer_instructions=MISMATCH",
 			failures: 1,
 		},

@@ -10,6 +10,7 @@ import (
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -64,9 +65,25 @@ var harnessPromptEngines = []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfm
 
 // codexHarnessPrompt is the composed Codex fleet prompt — the same bytes
 // staged as harness-prompts/codex.md, written into every Codex home's
-// developer_instructions and prepended to every compiled Codex role.
+// developer_instructions and prepended to every compiled Codex role. It comes
+// from codexgen, the one door that composes it AND applies the Codex mappings
+// the shared parts deliberately do not carry on disk; composing it here from
+// the parts would stage a file doctor reads as drift.
 func codexHarnessPrompt() ([]byte, error) {
-	return harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Codex).LongName)
+	prompt, err := codexgen.FleetPrompt()
+	if err != nil {
+		return nil, err
+	}
+	return []byte(prompt), nil
+}
+
+// composedHarnessPrompt returns one engine's composed prompt: Codex's through
+// codexgen, every other engine's straight from the embedded parts.
+func composedHarnessPrompt(id pfmengine.ID) ([]byte, error) {
+	if id == pfmengine.Codex {
+		return codexHarnessPrompt()
+	}
+	return harnessprompts.Composed(pfmengine.MustLookup(id).LongName)
 }
 
 // stagedHarnessPromptPath is where one engine's composed prompt lands under
@@ -81,7 +98,7 @@ func (installer *engine) stageHarnessPrompts() error {
 	installer.say("harness prompts -> %s", filepath.Join(installer.managedRoot, harnessPromptsDirName))
 	for _, id := range harnessPromptEngines {
 		long := pfmengine.MustLookup(id).LongName
-		content, err := harnessprompts.Composed(long)
+		content, err := composedHarnessPrompt(id)
 		if err != nil {
 			return err
 		}

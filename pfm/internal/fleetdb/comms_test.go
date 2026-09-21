@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestCommsRoundTripIsNewestFirstAndBounded(t *testing.T) {

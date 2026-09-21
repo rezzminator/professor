@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // claudeProjectSlug is the projects/<dir> Claude Code files a cwd's transcripts

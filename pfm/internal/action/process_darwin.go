@@ -8,9 +8,9 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // nativeProcesses enumerates the process table on a kernel with no /proc.

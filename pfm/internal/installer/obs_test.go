@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestLedgerDoorsRecordUnderTheInstallerComponent: engine.change/ok/skip are

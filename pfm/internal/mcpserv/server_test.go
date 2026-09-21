@@ -21,10 +21,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 var originalTestHome = os.Getenv("HOME")

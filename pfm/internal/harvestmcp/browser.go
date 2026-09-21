@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/harvest"
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 // browserHardDeadline is the Go-side ceiling on one browser fetch. The

@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 func TestDeliverThenDoesNotRecordExcludedHandoffEdge(t *testing.T) {

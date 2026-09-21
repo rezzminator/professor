@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // CredsFixture is ExpiredCreds's result: the jailed Base plus the

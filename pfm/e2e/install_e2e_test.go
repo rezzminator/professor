@@ -21,7 +21,7 @@ import (
 	"testing"
 	"time"
 
-	pfmpaths "hostops/pfm/internal/paths"
+	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (

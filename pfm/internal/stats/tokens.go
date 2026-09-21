@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 const (

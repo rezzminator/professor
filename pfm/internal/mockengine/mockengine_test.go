@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // helperEnv makes THIS test binary the engine: a symlink named claude, codex

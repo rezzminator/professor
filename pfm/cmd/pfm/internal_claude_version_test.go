@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestInternalClaudeVersionCommandNeverConstructsAProcessTable is DEFECT 1's

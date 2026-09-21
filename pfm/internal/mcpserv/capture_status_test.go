@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"hostops/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // captureCodeInjector answers Capture with one pinned engine code and detail,

@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 // PrintMCPClientCutover reports three disjoint surfaces: every user-scope

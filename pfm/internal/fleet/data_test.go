@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // TestRolloutIDFromPathStripsTheTimestampPrefix pins the rollout file name

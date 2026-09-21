@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/spawn"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // TmuxExecutor invokes tmux only through the configured jailed socket directory.

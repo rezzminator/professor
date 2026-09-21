@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestKillServerRecordsAChatStateTransition: KillServer walks the state door

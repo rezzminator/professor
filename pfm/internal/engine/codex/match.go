@@ -1,6 +1,6 @@
 package codex
 
-import pfmengine "hostops/pfm/internal/engine"
+import pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 
 type Matcher struct{}
 

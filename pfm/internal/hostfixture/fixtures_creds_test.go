@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func TestExpiredCredsWritesACredentialsFileWhoseExpiresAtIsInThePast(t *testing.T) {

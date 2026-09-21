@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // renameTmux is delayedThenTmux plus a record of EVERY literal typed, in

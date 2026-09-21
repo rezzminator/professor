@@ -6,8 +6,8 @@ import (
 	"context"
 	"fmt"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // readKeychain uses the registry's absolute system command; pfm builds without cgo.

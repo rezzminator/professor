@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // mcpProtocolVersion is the MCP revision the daemon reports on /status.

@@ -1,6 +1,6 @@
 package kill
 
-import "hostops/pfm/internal/codexmeta"
+import "github.com/rezzminator/professor/pfm/internal/codexmeta"
 
 // Unindexed lineage uses the same bounded metadata reader as live identity.
 // A failed read leaves the existing indexed fallback responsible for resolution.

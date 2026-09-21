@@ -18,13 +18,13 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/clock"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (

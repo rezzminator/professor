@@ -6,16 +6,16 @@ import (
 	"io"
 	"os"
 
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/heal"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/spawn"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/heal"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // OpenID resolves an indexed chat ID through a read-only fleet scan and opens it.

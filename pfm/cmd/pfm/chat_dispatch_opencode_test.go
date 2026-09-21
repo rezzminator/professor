@@ -10,8 +10,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // seedOpenCodeSessionWithAReply builds the smallest OpenCode v1.14.30 store

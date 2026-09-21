@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 // harvestProvisionerFake is deliberately small: installer tests must be able

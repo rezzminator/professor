@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/sqlitedb"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // The OpenCode mirror. OpenCode keeps its sessions in a SQLite database at

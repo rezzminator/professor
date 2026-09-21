@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // mustMkdir and mustWrite are the two filesystem primitives every test below

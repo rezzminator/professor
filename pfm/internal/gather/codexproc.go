@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // CodexThreadResolver names the conversation behind a live codex process that

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 // TestUpdateRollbackResidueNamesTheStrandedHookCommands extends

@@ -15,12 +15,12 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/codexappendix"
-	"hostops/pfm/internal/codexgen"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/harvestpy"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type engine struct {

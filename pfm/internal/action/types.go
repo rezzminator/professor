@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // Route is the legacy picker action letter.

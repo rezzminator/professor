@@ -13,9 +13,9 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // prepareOpenCode creates the private plugin/config and maps the configured

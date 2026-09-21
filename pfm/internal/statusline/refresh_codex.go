@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // CodexOptions describes the detached Codex App Server cache refresh.

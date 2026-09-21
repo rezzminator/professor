@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // DetectAgents returns strict session identities for Claude processes using a

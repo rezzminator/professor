@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestFreshSocketHonorsTestOverride(t *testing.T) {

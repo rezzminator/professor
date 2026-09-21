@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/inject"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // PaneCapture reads one live chat's pane. It is the seam Status crosses to

@@ -14,7 +14,7 @@ import (
 	"context"
 	"log/slog"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // Field names every record carries, and the scoped ones a caller adds. They

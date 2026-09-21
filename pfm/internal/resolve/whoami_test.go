@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // fakeProcTree is a jailed process chain: no test ever reads live /proc.

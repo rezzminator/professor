@@ -34,10 +34,10 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // healKind names heal's two foreign SQLite stores to the db component's

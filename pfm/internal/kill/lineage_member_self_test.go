@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // THE BUG. A resumed Codex lineage member's rollout file lands on disk the

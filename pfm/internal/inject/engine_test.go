@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 type fakeResolver struct {

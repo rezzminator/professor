@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // readJailLog decodes every record the jail's activity file holds.

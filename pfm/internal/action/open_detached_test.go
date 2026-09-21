@@ -5,8 +5,8 @@ import (
 	"io"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func TestOpenDetachedResumableSpawnsThroughTheSpawnDoor(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // TestManagerConfirmExitFailsWhenPaneOutlivesEscalation reproduces the live

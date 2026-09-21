@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	config "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/professor"
+	config "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
 func TestUpdateCheckReportsEveryProjectStatusAndIsSideEffectFree(t *testing.T) {
@@ -1024,14 +1024,17 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			content: "#!/usr/bin/env bash\nset -euo pipefail\n",
 			mode:    0o755,
 		},
-		"templates/project/skills/legal/SKILL.md": {
-			content: "---\nname: legal\n---\nbody\n",
+		"templates/project/skills/legal/SKILL.md": {content: "---\nname: legal\n---\nbody\n", mode: 0o600},
+		"templates/project/epics/TEMPLATE.md":     {content: "# Epic\n", mode: 0o600},
+		"templates/project/codex/config.toml": {
+			content: "model = \"{TOKEN}\"\n",
 			mode:    0o600,
 		},
-		"templates/project/epics/TEMPLATE.md":                              {content: "# Epic\n", mode: 0o600},
-		"templates/project/codex/config.toml":                              {content: "model = \"{TOKEN}\"\n", mode: 0o600},
-		"templates/project/docs-commands/git/references/gitter-history.md": {content: "# Gitter History\n", mode: 0o600},
-		"templates/project/docs-agents/_index.md":                          {content: "# Agents\n", mode: 0o600},
+		"templates/project/docs-commands/git/references/gitter-history.md": {
+			content: "# Gitter History\n",
+			mode:    0o600,
+		},
+		"templates/project/docs-agents/_index.md": {content: "# Agents\n", mode: 0o600},
 	}
 	for relative, fixture := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // readCodexThreads loads the Codex CLI's own view of its conversations, newest

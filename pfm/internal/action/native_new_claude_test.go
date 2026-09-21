@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // stageProfessorPrompt writes the staged professor prompt file a

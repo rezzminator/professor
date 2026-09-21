@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 const (

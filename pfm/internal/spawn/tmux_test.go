@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // fakeTmuxBinary plays tmux: exits 0 and prints nothing.

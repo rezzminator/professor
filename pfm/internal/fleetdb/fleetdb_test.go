@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The schema is a compatibility surface for existing fleet databases, so its

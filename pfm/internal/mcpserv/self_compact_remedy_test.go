@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // chat_self_compact's ambient-identity remedy must name its actual CLI twin

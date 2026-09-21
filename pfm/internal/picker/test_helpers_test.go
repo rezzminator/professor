@@ -10,14 +10,14 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	claudeengine "hostops/pfm/internal/engine/claude"
-	codexengine "hostops/pfm/internal/engine/codex"
-	opencodeengine "hostops/pfm/internal/engine/opencode"
-	"hostops/pfm/internal/gather"
-	fleetindex "hostops/pfm/internal/index"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/testjail"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
+	codexengine "github.com/rezzminator/professor/pfm/internal/engine/codex"
+	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func init() {

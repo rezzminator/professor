@@ -9,10 +9,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"hostops/pfm/internal/clock"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // CodexNameResolver resolves the indexed display name for a rollout path.

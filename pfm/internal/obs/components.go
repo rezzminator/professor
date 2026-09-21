@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // FieldComp names the component a record belongs to (spec § Middleware): the

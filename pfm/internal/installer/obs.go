@@ -4,7 +4,7 @@ import (
 	"context"
 	"log/slog"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // comp is the activity-log component the installer's ledger doors record

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const injectCLIUI = `import os, sys, tty

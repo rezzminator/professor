@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 // ClaudeVersion chooses the newest parsed Claude version for the launcher shim.

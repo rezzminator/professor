@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // writeScript writes an executable shell fixture named name inside dir,

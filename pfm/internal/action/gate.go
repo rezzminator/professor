@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // ReaderGate is the injectable open-gate core. Reader and Writer must be the

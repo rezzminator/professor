@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"hostops/pfm/internal/cli"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
 func runInit(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {

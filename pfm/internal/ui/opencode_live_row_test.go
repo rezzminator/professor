@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // A live OpenCode seat renders as a live chat (●) in OpenCode's own colour and

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // The exact footers an OpenCode 1.18.18 pane renders. The sidebar's token

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-	pfmstats "hostops/pfm/internal/stats"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 )
 
 func TestLimitAccountsKeepCodexIndependentFromClaudeRoster(t *testing.T) {

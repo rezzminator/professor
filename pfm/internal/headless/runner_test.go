@@ -1,9 +1,9 @@
 package headless
 
 import (
-	"hostops/pfm/internal/ask"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 type headlessTestRunner struct{ id pfmengine.ID }

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 )
 
 func runHeadlessWatch(args []string, stdout, stderr io.Writer, runner deps.Runner, runtimes ...commandRuntime) int {

@@ -8,15 +8,15 @@ import (
 	"net/http"
 	"strings"
 
-	"hostops/pfm/internal/cli"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/doctor"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/professor"
-	"hostops/pfm/internal/updatecheck"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
 // installHarvestProvisioner is nil in production and resolves to the real

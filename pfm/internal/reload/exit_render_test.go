@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // blindExitTmux never shows the typed /exit rendered — no context deadline

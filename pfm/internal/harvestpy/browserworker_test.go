@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 // TestAskProtocolRoundTrip pins the interactive stdio protocol: a fake worker

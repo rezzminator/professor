@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // TestPassphraseLimiterLocksOutAcrossTransactionsThenRecovers is L2-F21's

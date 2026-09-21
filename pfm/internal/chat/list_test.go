@@ -3,7 +3,7 @@ package chat
 import (
 	"testing"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 // TestListNeverListsThePickerPlaceholders pins which rows chat_ls drops: only

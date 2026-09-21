@@ -9,9 +9,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type tmuxTitleRenudger interface {

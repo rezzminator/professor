@@ -9,9 +9,9 @@ import (
 	"os"
 	"strings"
 
-	"hostops/pfm/internal/cli"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func runConfig(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {

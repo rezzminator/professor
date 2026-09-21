@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // serviceManagerUnitState is one supervised unit's probed state under

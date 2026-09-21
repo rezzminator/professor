@@ -10,8 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	config "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	config "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // StateUnknown is the stable diagnostic state for a value a probe could not determine.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestCommandRunnerOutputRecordsTheCommand proves statusline's production

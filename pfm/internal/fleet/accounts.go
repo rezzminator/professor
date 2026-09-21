@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // PrimaryAccount resolves the fleet DB's meta row first, then the

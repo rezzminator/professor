@@ -11,9 +11,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"hostops/pfm/internal/chat"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // TestChatWhoamiReportsIdentityOrStatesItsAbsence covers chat.sh:482-484 over

@@ -7,7 +7,7 @@ import (
 	"io/fs"
 	"os"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 func (installer *engine) reconcileUnvisitedSettingsOwnership(

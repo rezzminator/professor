@@ -3,8 +3,8 @@ package opencode
 import (
 	"context"
 
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type Source struct{}

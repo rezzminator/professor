@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // An UNIDENTIFIED live OpenCode seat answers to its socket name and nothing

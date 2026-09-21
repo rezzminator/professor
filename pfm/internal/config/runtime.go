@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"runtime/debug"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const DevelopmentVersion = "dev"

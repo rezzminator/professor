@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestRealClaudeStashSemantics pins Claude Code's Ctrl+S ("chat:stash")

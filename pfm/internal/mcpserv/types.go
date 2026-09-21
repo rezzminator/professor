@@ -2,7 +2,7 @@
 package mcpserv
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // LSInput selects the fleet view returned by chat_ls.

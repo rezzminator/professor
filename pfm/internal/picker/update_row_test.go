@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/updatecheck"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
 func TestProfessorUpdatePromptExplainsThenAsksBeforeUpdating(t *testing.T) {

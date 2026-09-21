@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // A knob nobody can read is a knob nobody has: both new keys must show up in

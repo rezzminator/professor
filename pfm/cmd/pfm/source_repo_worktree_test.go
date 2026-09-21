@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
 // TestDiscoverSourceRepoMapsALinkedWorktreeToItsMainCheckout pins the source

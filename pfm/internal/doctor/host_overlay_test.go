@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // stageHostOverlayManagedCopies writes both contracted overlay scripts into

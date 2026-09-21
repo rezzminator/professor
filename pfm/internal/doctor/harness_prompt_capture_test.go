@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // writeFakeHarnessClaude stages a shell `claude` stand-in used ONLY by the

@@ -12,10 +12,10 @@ import (
 	"syscall"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // Solo closes every competing tmux host and stray Claude process for a

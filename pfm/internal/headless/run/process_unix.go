@@ -8,8 +8,8 @@ import (
 	"fmt"
 	"time"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const processWaitAfterCancel = 500 * time.Millisecond

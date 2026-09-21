@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // stageGlobalFanoutSource writes the one source repository every global
@@ -720,7 +720,11 @@ func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	declaration := filepath.Join(repo, "templates", "global", "agents", "variants.json")
-	if err := os.WriteFile(declaration, []byte(`{"super-rr":{"from":"rr","description":"deep rr."}}`), 0o644); err != nil {
+	if err := os.WriteFile(
+		declaration,
+		[]byte(`{"super-rr":{"from":"rr","description":"deep rr."}}`),
+		0o644,
+	); err != nil {
 		t.Fatal(err)
 	}
 	for _, account := range twoReportAccounts(home) {
@@ -731,7 +735,11 @@ func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
 	var output bytes.Buffer
 	_, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if failures != 3 {
-		t.Fatalf("failures=%d, want 3 (both accounts and the Codex registry lack super-rr)\n%s", failures, output.String())
+		t.Fatalf(
+			"failures=%d, want 3 (both accounts and the Codex registry lack super-rr)\n%s",
+			failures,
+			output.String(),
+		)
 	}
 	if !strings.Contains(output.String(), "state=MISSING names=super-rr") {
 		t.Fatalf("the missing variant was not named:\n%s", output.String())
@@ -744,6 +752,10 @@ func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
 	_, failures = ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if failures != 1 || !strings.Contains(output.String(), "state=UNREADABLE") ||
 		!strings.Contains(output.String(), "super-rr") {
-		t.Fatalf("failures=%d; a broken declaration must be UNREADABLE naming the variant:\n%s", failures, output.String())
+		t.Fatalf(
+			"failures=%d; a broken declaration must be UNREADABLE naming the variant:\n%s",
+			failures,
+			output.String(),
+		)
 	}
 }

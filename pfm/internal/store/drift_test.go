@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // TestSharedKillsNeedNoBridgeInEitherDirection pins the shared-state boundary:

@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // Hook events the mock fires. pfm registers handlers on exactly these four

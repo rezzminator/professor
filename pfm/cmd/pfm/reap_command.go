@@ -6,10 +6,10 @@ import (
 	"io"
 	"time"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/reap"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/reap"
 )
 
 // runReap sweeps the chat socket graveyard: the tmux servers (and their

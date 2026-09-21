@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // EventKind labels a fleet event the caller observed.

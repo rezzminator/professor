@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/usagehook"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 // Both adapters use real HTTP and real shared-cache files, with invented

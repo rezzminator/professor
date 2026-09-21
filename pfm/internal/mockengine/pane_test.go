@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 func TestPaneRendersWhatInjectMatches(t *testing.T) {

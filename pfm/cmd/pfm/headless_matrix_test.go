@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/action"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestHeadlessCompatibilityAliasExposesPublicHelp(t *testing.T) {

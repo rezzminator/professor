@@ -19,7 +19,7 @@ import (
 	"strings"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // The engine names are argv[0] spellings: each descriptor's Binary

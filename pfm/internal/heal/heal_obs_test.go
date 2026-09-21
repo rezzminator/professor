@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestHealRecordsEveryForeignStatement: Sweep's reads against the state and

@@ -9,7 +9,7 @@ import (
 	"context"
 	"os"
 
-	"hostops/pfm/internal/mockengine"
+	"github.com/rezzminator/professor/pfm/internal/mockengine"
 )
 
 func main() {

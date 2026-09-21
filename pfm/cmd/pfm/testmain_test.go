@@ -12,12 +12,12 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/doctor"
-	"hostops/pfm/internal/harvestpy"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/testjail"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 var testPFMBinary string

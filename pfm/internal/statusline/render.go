@@ -15,12 +15,12 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/sky"
-	"hostops/pfm/internal/usagehook"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/sky"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 const (

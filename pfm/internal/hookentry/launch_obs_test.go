@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestLaunchTmuxCommandRecordsUnderTheTmuxComponent: the hook launcher's

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/doctor"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func clearRetiredHarvesterEnv(t *testing.T) {

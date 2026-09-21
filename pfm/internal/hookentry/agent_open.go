@@ -7,10 +7,10 @@ import (
 	"io"
 	"os"
 
-	"hostops/pfm/internal/agentopen"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/agentopen"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
 )
 
 // AgentOpen is deliberately absent from operator help. It is the argv target

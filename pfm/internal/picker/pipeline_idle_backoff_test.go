@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/ui"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 func TestRefreshCadenceGrowsWhileUntouched(t *testing.T) {

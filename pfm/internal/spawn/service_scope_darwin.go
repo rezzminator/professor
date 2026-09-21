@@ -6,7 +6,7 @@ import (
 	"context"
 	"os/exec"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func serviceScopeCommand(

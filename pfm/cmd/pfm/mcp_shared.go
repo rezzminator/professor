@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/mcpserv"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
 // mcpRuntime is the one bridge from the command package into MCP: the typed

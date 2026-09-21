@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // TestAccountProjectionsFollowTheRoster pins every per-engine projection of the

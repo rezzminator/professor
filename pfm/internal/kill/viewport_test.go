@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // A chat is watched THROUGH a bunker pane. Ending the chat has to end that pane

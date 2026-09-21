@@ -3,7 +3,7 @@ package run
 import (
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // ApplyEngineSelector resolves the headless CLI's `--engine` selector onto

@@ -14,14 +14,14 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"hostops/pfm/internal/clock"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/rearm"
-	"hostops/pfm/internal/resolve"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/rearm"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // SenderSessionEnv, SenderLabelEnv, and SenderIDEnv are how a chat states its

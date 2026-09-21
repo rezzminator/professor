@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // openCodeInstructionsKey is the machine-scope config array OpenCode reads

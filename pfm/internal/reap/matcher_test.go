@@ -3,9 +3,9 @@ package reap
 import (
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	opencodeengine "hostops/pfm/internal/engine/opencode"
-	"hostops/pfm/internal/gather"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type reapTestMatcher struct{ id pfmengine.ID }

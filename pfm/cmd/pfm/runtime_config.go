@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/clock"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // commandRuntime is the process runtime every command branch consumes; the

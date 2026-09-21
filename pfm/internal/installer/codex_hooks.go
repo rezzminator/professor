@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"hostops/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 )
 
 // codexClearMatcher is the matcher the retired Codex SessionStart clear-kill

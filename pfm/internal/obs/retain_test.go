@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // plantGeneration writes a rotated file and dates its last write age ago.

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestNewHTTPHandlerServesStreamableMCP(t *testing.T) {

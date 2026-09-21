@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // stubRecorder is the half of a stub engine that makes it a CHAT rather than a

@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 const (

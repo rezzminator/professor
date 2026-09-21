@@ -8,13 +8,13 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/cli"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/gather"
-	fleetindex "hostops/pfm/internal/index"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // runNameSync converges every live chat's tmux WINDOW name — the fleet's DNS

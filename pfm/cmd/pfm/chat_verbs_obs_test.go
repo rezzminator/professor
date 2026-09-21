@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestChatKillAndUnkillRecordChatStateTransitions: the CLI kill/unkill verbs

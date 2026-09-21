@@ -17,8 +17,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // Roles an Entry can carry.

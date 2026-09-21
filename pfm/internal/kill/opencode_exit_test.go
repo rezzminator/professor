@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // A live OpenCode chat gets the same graceful-close-then-fallback-kill

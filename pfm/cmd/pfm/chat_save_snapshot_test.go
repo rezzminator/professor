@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func TestWriteRepositorySnapshotReportsOutsideAGitRepository(t *testing.T) {

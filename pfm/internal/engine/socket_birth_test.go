@@ -3,7 +3,7 @@ package engine_test
 import (
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestSocketBirthParsesFreshSocketNames(t *testing.T) {

@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
-	pfmpaths "hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const UnknownSelfHostedSHA = "self-hosted@unknown"

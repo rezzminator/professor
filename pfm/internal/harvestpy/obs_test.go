@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // wantField fails unless record carries key with exactly want.

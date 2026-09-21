@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 const (

@@ -13,8 +13,8 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func readHostResources(root string, now int64, cpuCount int) (hostResources, error) {

@@ -10,9 +10,9 @@ import (
 	"regexp"
 	"strings"
 
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 var epicNamePattern = regexp.MustCompile(`^E_([A-Za-z0-9][A-Za-z0-9-]*)_`)

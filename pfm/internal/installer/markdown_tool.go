@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 // rumdlPinnedVersion is the rumdl release pfm provisions via `uv tool

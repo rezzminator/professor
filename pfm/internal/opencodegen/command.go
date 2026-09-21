@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/cli"
 )
 
 // RunCommand is the operator-facing adapter for the compiler. The cmd/pfm

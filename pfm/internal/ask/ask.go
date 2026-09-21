@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	headlessrun "hostops/pfm/internal/headless/run"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
 )
 
 const engineTimeout = 60 * time.Second

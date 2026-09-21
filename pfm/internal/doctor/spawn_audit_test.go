@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {

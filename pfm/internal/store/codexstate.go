@@ -14,10 +14,10 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/engine"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // CodexThread is one conversation as the Codex CLI's own SQLite state store

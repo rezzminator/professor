@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // jailSelfCompactEnv points every path pfm's engine construction reads at a

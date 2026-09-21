@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // Options are one heal run's knobs.

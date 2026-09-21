@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 type reconcileResult struct {

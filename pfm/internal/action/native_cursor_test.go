@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 const nativeCursorAssignment = "CLAUDE_CODE_NATIVE_CURSOR=1"

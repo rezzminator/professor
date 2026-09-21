@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmconfig "hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // ClaudeRegistry is one user-scope Claude Code registry (.claude.json) a

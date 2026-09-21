@@ -3,9 +3,9 @@ package compose
 import (
 	"time"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // openCodeSessionRow renders one OpenCode session. The title is authoritative —

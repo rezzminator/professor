@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/inject"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 const chatKeysUsage = "usage: pfm chat keys [--delay ms] [--literal] [--capture] <target> <key>..."

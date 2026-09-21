@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // A 60 KB attachment is billed almost entirely as cache WRITE on its first call. When

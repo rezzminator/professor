@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // TmuxKiller invokes tmux only through an explicit socket pathname.

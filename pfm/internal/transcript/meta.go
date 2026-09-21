@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"os"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // metaMaxLine bounds memory while leaving room for large tool and prompt

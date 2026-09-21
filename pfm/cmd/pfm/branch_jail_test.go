@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/paths"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestChatBranchCreatesADetachedSeatWithoutTouchingTheCaller is the hard

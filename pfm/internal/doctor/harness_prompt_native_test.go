@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // Explicit REAL-SESSION opt-in: a loopback sink rejects the request before any

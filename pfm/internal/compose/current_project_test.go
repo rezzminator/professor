@@ -24,7 +24,7 @@ func TestTheProjectYouOpenedInLeadsTheList(t *testing.T) {
 	rows := []Row{
 		projectRow("proja", "STM", 900),
 		projectRow("projc", "DEPLOY", 100),
-		projectRow("host-ops", "CC_FLEET", 500),
+		projectRow("projd", "MAINT", 500),
 	}
 	sorted, order := sortProjectRows(rows)
 	if order[0] != "proja" {
@@ -41,7 +41,7 @@ func TestTheProjectYouOpenedInLeadsTheList(t *testing.T) {
 		t.Fatalf("opened in projc, list leads with %q", got)
 	}
 	// Everything else keeps its activity ranking behind the current project.
-	if got := orderOf(output); got[1] != "proja" || got[2] != "host-ops" {
+	if got := orderOf(output); got[1] != "proja" || got[2] != "projd" {
 		t.Fatalf("activity order lost behind the current project: %q", got)
 	}
 	if output.Rows[0].Project != "projc" {
@@ -73,7 +73,7 @@ func TestTheProjectYouOpenedInLeadsTheList(t *testing.T) {
 func TestAProjectWithNoChatsStillLeadsAndLosesNothing(t *testing.T) {
 	rows := []Row{
 		projectRow("proja", "STM", 900),
-		projectRow("host-ops", "CC_FLEET", 500),
+		projectRow("projd", "MAINT", 500),
 	}
 	sorted, order := sortProjectRows(rows)
 

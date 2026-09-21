@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // read is chat_read: chat.ReadEntries under the tool's turn and byte bounds.

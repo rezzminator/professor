@@ -12,7 +12,7 @@ import (
 	"runtime"
 	"sort"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 const (

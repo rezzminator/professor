@@ -15,10 +15,10 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Run points TMPDIR at a base that is both SHORT and CANONICAL, then runs the

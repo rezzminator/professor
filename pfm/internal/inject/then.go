@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // DeliverThen is the waiter half of chat.sh's __then subcommand

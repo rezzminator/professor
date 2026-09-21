@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 // TestResolverClientIsPinned pins newHTTPClient (spec doh-seams-spec.md,

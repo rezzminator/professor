@@ -4,8 +4,8 @@ import (
 	"context"
 	"sync"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // labelCaptureLimit bounds how many capture-pane forks run at once. Every live

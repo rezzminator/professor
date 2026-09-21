@@ -1,8 +1,8 @@
 package compose
 
 import (
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // Kind identifies the action and visual treatment for a row.

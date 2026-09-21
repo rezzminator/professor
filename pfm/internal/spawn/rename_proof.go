@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"hostops/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 // renameProof reports whether Codex itself recorded a rename of a thread to

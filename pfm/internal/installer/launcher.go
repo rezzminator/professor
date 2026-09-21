@@ -10,9 +10,9 @@ import (
 	"strings"
 	"syscall"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 type LauncherState string

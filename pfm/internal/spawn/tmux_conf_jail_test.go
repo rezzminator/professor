@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // A chat is a terminal the user LIVES in, so its tmux server has to load their

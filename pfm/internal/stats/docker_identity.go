@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const dockerIdentityResponseLimit = 4 << 20

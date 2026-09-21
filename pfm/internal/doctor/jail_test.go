@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // buildCleanDoctorHome stages the fixture a healthy target HOME carries —

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // AskReply is one answer from the SSRF authority for a worker guard ask.

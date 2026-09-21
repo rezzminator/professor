@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
 // TestMCPListProjectFilterIsASubstringNotAQuery is the F4 regression:

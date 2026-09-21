@@ -6,10 +6,10 @@ import (
 	"io"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 const (

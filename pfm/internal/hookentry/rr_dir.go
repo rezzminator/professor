@@ -9,7 +9,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 type rrDirHookInput struct {

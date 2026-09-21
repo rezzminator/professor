@@ -10,7 +10,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 // writeTestZip creates a minimal zip archive at path for a redaction test to

@@ -7,10 +7,10 @@ import (
 	"io"
 	"strings"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // ListRequest selects fleet rows: one compose view, an optional Project filter

@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/reload"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 type reloadTargetTmux struct {

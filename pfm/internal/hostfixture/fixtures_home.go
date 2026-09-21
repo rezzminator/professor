@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // NoHome jails a fleet, then unsets HOME and PFM_HOME — the state

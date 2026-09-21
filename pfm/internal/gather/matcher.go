@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // Matcher recognizes one engine's process command.

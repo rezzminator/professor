@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 // fakeBrowserWorker is an in-memory stand-in for the Patchright worker: the

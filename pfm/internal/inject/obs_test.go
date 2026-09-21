@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // stateRecords returns the comp=state records for coordinator kind.

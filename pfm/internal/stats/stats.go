@@ -16,9 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 type Header struct {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // TestRotatorCapsOneHomeAtKeepFiles pins the in-tree rotation: the current

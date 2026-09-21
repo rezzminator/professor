@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // OpenKillManager opens the fleet store and constructs its kill manager.

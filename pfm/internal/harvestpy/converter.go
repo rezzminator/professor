@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // Runtime identifies the pinned Python executable and worker script. The

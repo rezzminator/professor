@@ -6,7 +6,7 @@ import (
 	"io"
 	"strings"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // writeRepositorySnapshot's git calls: a start failure wins over a nonzero

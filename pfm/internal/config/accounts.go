@@ -3,7 +3,7 @@ package config
 import (
 	"path/filepath"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // Account projections: the per-engine views of the roster that the fleet scan,

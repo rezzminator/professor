@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/printer"
@@ -14,13 +16,71 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/doctor"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/spawn"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
+
+func TestRRDirEntryUsesInjectedHome(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(root, "unmanaged")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]string{"cwd": cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(root, "injected-home")
+
+	var stdout, stderr bytes.Buffer
+	if code := runRRDirEntry(bytes.NewReader(payload), &stdout, &stderr, &paths.MapEnv{HomeDir: home}); code != 0 {
+		t.Fatalf("runRRDirEntry code = %d, want fail-open 0; stderr = %q", code, stderr.String())
+	}
+	want := filepath.Join(home, ".professor", ".professor", "RR")
+	if got := stdout.String(); !strings.Contains(got, want) {
+		t.Fatalf("runRRDirEntry stdout = %q, want injected fallback %q", got, want)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("runRRDirEntry stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestRRDirEntryReportsHomeErrorAndContinues(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]string{"cwd": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := runRRDirEntry(
+		bytes.NewReader(payload),
+		&stdout,
+		&stderr,
+		&paths.MapEnv{HomeErr: errors.New("home unavailable")},
+	); code != 0 {
+		t.Fatalf("runRRDirEntry code = %d, want fail-open 0; stderr = %q", code, stderr.String())
+	}
+	if got := stderr.String(); !strings.Contains(
+		got,
+		"pfm internal rr-dir: resolve home directory: home unavailable\n",
+	) {
+		t.Fatalf("runRRDirEntry stderr = %q, want visible home error", got)
+	}
+	if got := stdout.String(); !strings.Contains(got, "RR-DIR-ERROR:") || !strings.Contains(got, "no home directory") {
+		t.Fatalf("runRRDirEntry stdout = %q, want fail-open hook response for empty home", got)
+	}
+}
 
 func TestVersion(t *testing.T) {
 	jailTest(t)

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestStoreStatementsRecordUnderTheDBComponent: the transcript store's

@@ -96,7 +96,11 @@ func LoadGlobalAgentVariants(agentsDir, outputDir string) ([]GlobalAgentVariant,
 			return nil, fmt.Errorf("inspect %s: %w", filepath.Join(agentsDir, name+".md"), err)
 		}
 		if _, reserved := overrides["name"]; reserved {
-			return nil, fmt.Errorf("%s: variant %q: \"name\" is the variant's own key, never an override", declPath, name)
+			return nil, fmt.Errorf(
+				"%s: variant %q: \"name\" is the variant's own key, never an override",
+				declPath,
+				name,
+			)
 		}
 		sourcePath := filepath.Join(agentsDir, from+".md")
 		source, err := os.ReadFile(sourcePath)

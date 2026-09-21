@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // applyTheme resolves claude.theme for one scope. Present means override —

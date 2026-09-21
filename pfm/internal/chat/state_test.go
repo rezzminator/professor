@@ -3,7 +3,7 @@ package chat
 import (
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestRecordVerbRecordsSuccessAndFailure: RecordVerb walks the chat state

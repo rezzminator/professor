@@ -1,6 +1,6 @@
 # pfm: architecture for agent maintainers
 
-**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `hostops/pfm`). Nothing here is built yet. Code moves through `/flights:spec` and the fenced executor, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
+**Status:** DESIGN, brownfield. Measured on `develop @ ea312fe` (2026-09-12). Every citation is `pfm/`-relative (module `github.com/rezzminator/professor/pfm`). Nothing here is built yet. Code moves through `/flights:spec` and the fenced executor, and prompt files (`pfm/CLAUDE.md`, `.claude/**`) move through `/pfm`. **Companion designs:** `docs/dev/pfmd-spec.md` (the daemon, owner-settled) and `docs/dev/pfm-surface.md` (the operator surface). This document changes where code lives, not what pfm does. § Migration shows where pfmd phases land on the new tree.
 
 ## Contents
 

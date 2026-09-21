@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
-	pfmpaths "hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmpaths "github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestStoreSHAWithRunnerUsesScriptedGit(t *testing.T) {

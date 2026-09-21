@@ -24,28 +24,28 @@ source "$ROOT/../scripts/shtest.sh"
 
 good_json() {
   cat <<'JSON'
-{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"hostops/pfm/internal/quick","Test":"TestOK"}
-{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}
-{"Time":"2024-01-01T00:00:00.110000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Elapsed":0.1}
+{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK"}
+{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}
+{"Time":"2024-01-01T00:00:00.110000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Elapsed":0.1}
 JSON
 }
 
 over_budget_json() {
   cat <<'JSON'
-{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"hostops/pfm/internal/quick","Test":"TestOK"}
-{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}
-{"Time":"2024-01-01T00:00:00.110000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Elapsed":0.1}
-{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"hostops/pfm/internal/slow","Test":"TestSlow"}
-{"Time":"2024-01-01T00:00:09.000000000Z","Action":"pass","Package":"hostops/pfm/internal/slow","Test":"TestSlow","Elapsed":9.0}
-{"Time":"2024-01-01T00:00:09.010000000Z","Action":"pass","Package":"hostops/pfm/internal/slow","Elapsed":9.0}
+{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK"}
+{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}
+{"Time":"2024-01-01T00:00:00.110000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Elapsed":0.1}
+{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/slow","Test":"TestSlow"}
+{"Time":"2024-01-01T00:00:09.000000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/slow","Test":"TestSlow","Elapsed":9.0}
+{"Time":"2024-01-01T00:00:09.010000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/slow","Elapsed":9.0}
 JSON
 }
 
 unbudgeted_json() {
   cat <<'JSON'
-{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"hostops/pfm/internal/mystery","Test":"TestM"}
-{"Time":"2024-01-01T00:00:00.200000000Z","Action":"pass","Package":"hostops/pfm/internal/mystery","Test":"TestM","Elapsed":0.2}
-{"Time":"2024-01-01T00:00:00.210000000Z","Action":"pass","Package":"hostops/pfm/internal/mystery","Elapsed":0.2}
+{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/mystery","Test":"TestM"}
+{"Time":"2024-01-01T00:00:00.200000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/mystery","Test":"TestM","Elapsed":0.2}
+{"Time":"2024-01-01T00:00:00.210000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/mystery","Elapsed":0.2}
 JSON
 }
 
@@ -53,12 +53,12 @@ JSON
 # a failing run must never read as "within budget".
 failing_json() {
   cat <<'JSON'
-{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"hostops/pfm/internal/quick","Test":"TestOK"}
-{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}
-{"Time":"2024-01-01T00:00:00.110000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Elapsed":0.1}
-{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"hostops/pfm/internal/slow","Test":"TestSlow"}
-{"Time":"2024-01-01T00:00:00.500000000Z","Action":"fail","Package":"hostops/pfm/internal/slow","Test":"TestSlow","Elapsed":0.5}
-{"Time":"2024-01-01T00:00:00.510000000Z","Action":"fail","Package":"hostops/pfm/internal/slow","Elapsed":0.5}
+{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK"}
+{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}
+{"Time":"2024-01-01T00:00:00.110000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Elapsed":0.1}
+{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/slow","Test":"TestSlow"}
+{"Time":"2024-01-01T00:00:00.500000000Z","Action":"fail","Package":"github.com/rezzminator/professor/pfm/internal/slow","Test":"TestSlow","Elapsed":0.5}
+{"Time":"2024-01-01T00:00:00.510000000Z","Action":"fail","Package":"github.com/rezzminator/professor/pfm/internal/slow","Elapsed":0.5}
 JSON
 }
 
@@ -73,8 +73,8 @@ suites:
   u:
     wall_s: 5
     packages:
-      hostops/pfm/internal/quick: 5
-      hostops/pfm/internal/slow: 2
+      github.com/rezzminator/professor/pfm/internal/quick: 5
+      github.com/rezzminator/professor/pfm/internal/slow: 2
 YML
 }
 
@@ -101,8 +101,8 @@ if over_budget_json | run_sut --check --yml "$yml" --suite u --out "$T/1.tsv" >"
   bad "check-over-budget: expected exit 1" "$(cat "$out")"
 else
   rc=$?
-  if [ "$rc" -eq 1 ] && grep -q 'FAIL hostops/pfm/internal/slow' "$out"; then
-    ok "check-over-budget: exit 1, names hostops/pfm/internal/slow"
+  if [ "$rc" -eq 1 ] && grep -q 'FAIL github.com/rezzminator/professor/pfm/internal/slow' "$out"; then
+    ok "check-over-budget: exit 1, names github.com/rezzminator/professor/pfm/internal/slow"
   else
     bad "check-over-budget: rc=$rc" "$(cat "$out")"
   fi
@@ -115,8 +115,8 @@ if unbudgeted_json | run_sut --check --yml "$yml" --suite u --out "$T/2.tsv" >"$
   bad "check-unbudgeted: expected exit 1" "$(cat "$out")"
 else
   rc=$?
-  if [ "$rc" -eq 1 ] && grep -q 'UNBUDGETED hostops/pfm/internal/mystery' "$out"; then
-    ok "check-unbudgeted: exit 1, UNBUDGETED names hostops/pfm/internal/mystery"
+  if [ "$rc" -eq 1 ] && grep -q 'UNBUDGETED github.com/rezzminator/professor/pfm/internal/mystery' "$out"; then
+    ok "check-unbudgeted: exit 1, UNBUDGETED names github.com/rezzminator/professor/pfm/internal/mystery"
   else
     bad "check-unbudgeted: rc=$rc" "$(cat "$out")"
   fi
@@ -124,7 +124,7 @@ fi
 
 # ---- 3: --check on a clean, COMPLETE run exits 0 and confirms the SUITE ---
 
-full_json() { good_json; printf '{"Time":"2024-01-01T00:00:00.510000000Z","Action":"run","Package":"hostops/pfm/internal/slow","Test":"TestSlow"}\n{"Time":"2024-01-01T00:00:01.510000000Z","Action":"pass","Package":"hostops/pfm/internal/slow","Test":"TestSlow","Elapsed":1.0}\n{"Time":"2024-01-01T00:00:01.520000000Z","Action":"pass","Package":"hostops/pfm/internal/slow","Elapsed":1.0}\n'; }
+full_json() { good_json; printf '{"Time":"2024-01-01T00:00:00.510000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/slow","Test":"TestSlow"}\n{"Time":"2024-01-01T00:00:01.510000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/slow","Test":"TestSlow","Elapsed":1.0}\n{"Time":"2024-01-01T00:00:01.520000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/slow","Elapsed":1.0}\n'; }
 out="$T/3.out"
 if full_json | run_sut --check --yml "$yml" --suite u --out "$T/3.tsv" >"$out" 2>"$T/3.err"; then
   if grep -q 'SUITE(u) within budget' "$out"; then
@@ -156,7 +156,7 @@ out="$T/5.tsv"
 if good_json | run_sut --suite fixture5 --out "$out" >"$T/5.log" 2>&1; then
   header="$(head -1 "$out")"
   suite_row="$(grep '^SUITE' "$out" || true)"
-  pkg_row="$(grep 'hostops/pfm/internal/quick' "$out" || true)"
+  pkg_row="$(grep 'github.com/rezzminator/professor/pfm/internal/quick' "$out" || true)"
   if [ "$header" = "$(printf 'package\twall_s\ttests\tparallel_tests\tslowest_test\tslowest_s\tstatus')" ] \
     && [ -n "$suite_row" ] && [ -n "$pkg_row" ]; then
     ok "default: TSV header + package row + SUITE row present"
@@ -201,21 +201,21 @@ sample_yml > "$meas_yml"
 out="$T/7.out"
 if run_sut --yml "$meas_yml" --suite u --measure \
     <(good_json) <(good_json) <(good_json) >"$out" 2>&1; then
-  new_budget="$(awk -F': ' '/hostops\/pfm\/internal\/quick:/{print $2}' "$meas_yml")"
-  if [ "$new_budget" = "1" ] && grep -q 'TIMING MEASURE hostops/pfm/internal/quick 5s -> 1s' "$out"; then
-    ok "measure: ratchets hostops/pfm/internal/quick down to its ceil(median)"
+  new_budget="$(awk -F': ' '/github.com\/rezzminator\/professor\/pfm\/internal\/quick:/{print $2}' "$meas_yml")"
+  if [ "$new_budget" = "1" ] && grep -q 'TIMING MEASURE github.com/rezzminator/professor/pfm/internal/quick 5s -> 1s' "$out"; then
+    ok "measure: ratchets github.com/rezzminator/professor/pfm/internal/quick down to its ceil(median)"
   else
     bad "measure: expected quick ratcheted to 1s, got [$new_budget]" "$(cat "$out")" "$(cat "$meas_yml")"
   fi
 else
   bad "measure: expected exit 0" "$(cat "$out")"
 fi
-# hostops/pfm/internal/slow was NOT in any of these 3 runs — its budget must
+# github.com/rezzminator/professor/pfm/internal/slow was NOT in any of these 3 runs — its budget must
 # survive untouched, never dropped or zeroed.
-if grep -q 'hostops/pfm/internal/slow: 2' "$meas_yml"; then
+if grep -q 'github.com/rezzminator/professor/pfm/internal/slow: 2' "$meas_yml"; then
   ok "measure: untouched package keeps its existing budget"
 else
-  bad "measure: hostops/pfm/internal/slow budget changed or vanished" "$(cat "$meas_yml")"
+  bad "measure: github.com/rezzminator/professor/pfm/internal/slow budget changed or vanished" "$(cat "$meas_yml")"
 fi
 
 # ---- 8: --measure never RAISES a budget, and leaves OTHER suites alone ----
@@ -227,21 +227,21 @@ suites:
   u:
     wall_s: 5
     packages:
-      hostops/pfm/internal/quick: 1
+      github.com/rezzminator/professor/pfm/internal/quick: 1
   e2e:
     wall_s: 99
     packages:
-      hostops/pfm/e2e: 99
+      github.com/rezzminator/professor/pfm/e2e: 99
 YML
 out="$T/8.out"
 run_sut --yml "$raise_yml" --suite u --measure <(good_json) <(good_json) <(good_json) >"$out" 2>&1
-after="$(awk -F': ' '/hostops\/pfm\/internal\/quick:/{print $2}' "$raise_yml")"
+after="$(awk -F': ' '/github.com\/rezzminator\/professor\/pfm\/internal\/quick:/{print $2}' "$raise_yml")"
 if [ "$after" = "1" ]; then
   ok "measure: never raises an existing budget (stayed at 1s)"
 else
   bad "measure: budget was raised to [$after]" "$(cat "$out")"
 fi
-if grep -q 'hostops/pfm/e2e: 99' "$raise_yml"; then
+if grep -q 'github.com/rezzminator/professor/pfm/e2e: 99' "$raise_yml"; then
   ok "measure: an unmeasured sibling suite (e2e) survives untouched"
 else
   bad "measure: sibling suite e2e was dropped or changed" "$(cat "$raise_yml")"
@@ -252,7 +252,7 @@ fi
 boot_yml="$T/bootstrap.yml"
 out="$T/9.out"
 if run_sut --yml "$boot_yml" --suite u --measure <(good_json) <(good_json) <(good_json) >"$out" 2>&1; then
-  if [ -f "$boot_yml" ] && grep -q 'hostops/pfm/internal/quick: 1' "$boot_yml" && grep -q '^tolerance:' "$boot_yml"; then
+  if [ -f "$boot_yml" ] && grep -q 'github.com/rezzminator/professor/pfm/internal/quick: 1' "$boot_yml" && grep -q '^tolerance:' "$boot_yml"; then
     ok "measure: bootstraps a fresh budget file"
   else
     bad "measure: bootstrap file missing or malformed" "$(cat "$boot_yml" 2>&1)"
@@ -265,8 +265,8 @@ fi
 
 incomplete_json() {
   cat <<'JSON'
-{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"hostops/pfm/internal/quick","Test":"TestOK"}
-{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}
+{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK"}
+{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}
 JSON
 }
 out="$T/10.out"
@@ -340,7 +340,7 @@ suites:
   u:
     wall_s: 5
     packages:
-      hostops/pfm/internal/quick: -1
+      github.com/rezzminator/professor/pfm/internal/quick: -1
 YML
 out="$T/14.out"
 if good_json | run_sut --check --yml "$bad_numeric_yml" --suite u --out "$T/14.tsv" >"$out" 2>&1; then
@@ -391,7 +391,7 @@ suites:
   e2e:
     wall_s: 99
     packages:
-      hostops/pfm/e2e: 99
+      github.com/rezzminator/professor/pfm/e2e: 99
 YML
 cp "$absent_suite_yml" "$T/16.before"
 out="$T/16.out"
@@ -436,10 +436,10 @@ fi
 
 out="$T/18.out"
 if {
-  printf '{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"hostops/pfm/internal/quick","Test":"TestOK"}\n'
-  printf '{"Time":"2024-01-01T00:00:00.050bad","Action":"output","Package":"hostops/pfm/internal/quick","Output":"fixture"}\n'
-  printf '{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}\n'
-  printf '{"Time":"2024-01-01T00:00:00.110000000Z","Action":"pass","Package":"hostops/pfm/internal/quick","Elapsed":0.1}\n'
+  printf '{"Time":"2024-01-01T00:00:00.000000000Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK"}\n'
+  printf '{"Time":"2024-01-01T00:00:00.050bad","Action":"output","Package":"github.com/rezzminator/professor/pfm/internal/quick","Output":"fixture"}\n'
+  printf '{"Time":"2024-01-01T00:00:00.100000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestOK","Elapsed":0.1}\n'
+  printf '{"Time":"2024-01-01T00:00:00.110000000Z","Action":"pass","Package":"github.com/rezzminator/professor/pfm/internal/quick","Elapsed":0.1}\n'
 } | run_sut --check --yml "$yml" --suite u --out "$T/18.tsv" >"$out" 2>&1; then
   bad "interior-timestamp: expected non-zero exit" "$(cat "$out")"
 else
@@ -460,12 +460,12 @@ suites:
   u:
     wall_s: 1
     packages:
-      hostops/pfm/internal/empty: 1
+      github.com/rezzminator/professor/pfm/internal/empty: 1
 YML
 out="$T/19.out"
-if printf '{"Time":"2024-01-01T00:00:00Z","Action":"skip","Package":"hostops/pfm/internal/empty","Elapsed":0}\n' \
+if printf '{"Time":"2024-01-01T00:00:00Z","Action":"skip","Package":"github.com/rezzminator/professor/pfm/internal/empty","Elapsed":0}\n' \
     | run_sut --check --yml "$skip_yml" --suite u --out "$T/19.tsv" >"$out" 2>&1; then
-  if grep -q $'hostops/pfm/internal/empty\t0\t0\t' "$T/19.tsv" && grep -q 'SUITE(u) within budget' "$out" \
+  if grep -q $'github.com/rezzminator/professor/pfm/internal/empty\t0\t0\t' "$T/19.tsv" && grep -q 'SUITE(u) within budget' "$out" \
       && ! grep -q 'TIMING TESTS-FAILED' "$out"; then
     ok "skip-no-tests: no-test package skip is a passing zero-cost row"
   else
@@ -477,14 +477,14 @@ fi
 
 out="$T/20.out"
 if {
-  printf '{"Time":"2024-01-01T00:00:00Z","Action":"run","Package":"hostops/pfm/internal/quick","Test":"TestSkipped"}\n'
-  printf '{"Time":"2024-01-01T00:00:00Z","Action":"skip","Package":"hostops/pfm/internal/quick","Test":"TestSkipped","Elapsed":0}\n'
-  printf '{"Time":"2024-01-01T00:00:00Z","Action":"skip","Package":"hostops/pfm/internal/quick","Elapsed":0}\n'
+  printf '{"Time":"2024-01-01T00:00:00Z","Action":"run","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestSkipped"}\n'
+  printf '{"Time":"2024-01-01T00:00:00Z","Action":"skip","Package":"github.com/rezzminator/professor/pfm/internal/quick","Test":"TestSkipped","Elapsed":0}\n'
+  printf '{"Time":"2024-01-01T00:00:00Z","Action":"skip","Package":"github.com/rezzminator/professor/pfm/internal/quick","Elapsed":0}\n'
 } | run_sut --check --yml "$yml" --suite u --out "$T/20.tsv" >"$out" 2>&1; then
   bad "skip-test: expected non-zero exit" "$(cat "$out")"
 else
   rc=$?
-  if [ "$rc" -eq 1 ] && grep -q 'TIMING TESTS-FAILED' "$out" && grep -q 'hostops/pfm/internal/quick (skip)' "$out"; then
+  if [ "$rc" -eq 1 ] && grep -q 'TIMING TESTS-FAILED' "$out" && grep -q 'github.com/rezzminator/professor/pfm/internal/quick (skip)' "$out"; then
     ok "skip-test: skipped test is named and cannot pass the timing gate"
   else
     bad "skip-test: rc=$rc or skipped test was not named" "$(cat "$out")"

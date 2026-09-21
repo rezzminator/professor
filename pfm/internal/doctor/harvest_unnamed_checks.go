@@ -5,7 +5,7 @@ import (
 	"io"
 	"sort"
 
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 // harvestNamedDoctorChecks lists the harvestpy check keys that already get

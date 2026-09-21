@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // DiscoverSourceRepo finds the source clone without invoking git and maps a linked worktree to its main checkout.

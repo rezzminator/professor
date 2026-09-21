@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // Claude Code stops a sub-agent from spawning sub-agents past 3 levels and

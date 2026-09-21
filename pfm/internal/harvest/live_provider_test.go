@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 const (

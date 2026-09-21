@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // liveState is the chat state door's "live" state, named once because every

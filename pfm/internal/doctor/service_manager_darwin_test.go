@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func launchdPrintArgv(label string) []string {

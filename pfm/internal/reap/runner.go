@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (

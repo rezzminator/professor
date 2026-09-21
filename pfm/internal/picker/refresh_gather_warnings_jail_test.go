@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/ui"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 // createDeadSocket fabricates a real orphaned unix socket special file: a

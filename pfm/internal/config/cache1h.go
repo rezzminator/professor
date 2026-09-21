@@ -1,6 +1,6 @@
 package config
 
-import "hostops/pfm/internal/paths"
+import "github.com/rezzminator/professor/pfm/internal/paths"
 
 // InitialCache1H resolves the prompt-cache TTL for a newly launched chat.
 func (config Config) InitialCache1H(account int) bool {

@@ -8,9 +8,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // compMCP is the component mcpserv's own records belong to, the same one

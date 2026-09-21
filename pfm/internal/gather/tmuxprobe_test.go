@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func TestShowGlobalOptionAndIdentityNudgeClassifyGoneServer(t *testing.T) {

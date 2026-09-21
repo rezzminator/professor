@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // fakeTmux writes a shell script that plays tmux: it prints its arguments

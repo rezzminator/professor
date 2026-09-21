@@ -6,12 +6,12 @@ import (
 	"io"
 	"path/filepath"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/store"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // Warn reports one tmux probe warning raised during a gather pass. One-shot

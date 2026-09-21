@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 const (

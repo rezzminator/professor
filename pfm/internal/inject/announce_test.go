@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // announcingTmux is the shared fakeTmux plus a Display recorder — a wrapper

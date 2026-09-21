@@ -12,8 +12,8 @@ import (
 	"sync"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 type fakeActionTmux struct {

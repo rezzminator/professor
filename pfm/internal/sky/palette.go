@@ -3,7 +3,7 @@ package sky
 import (
 	lipgloss "charm.land/lipgloss/v2"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // styleClass enumerates every color role a cell can take. Each engine gets

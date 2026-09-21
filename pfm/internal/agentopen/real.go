@@ -10,11 +10,11 @@ import (
 	"strings"
 	"syscall"
 
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // ExecCommands is the production command boundary. Every Claude invocation it

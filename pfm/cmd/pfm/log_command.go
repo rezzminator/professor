@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // openActivityLog is the process entry of the activity log: it names the verb

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // Log is the activity log's machine policy (docs/dev/trains/testing-foundation/

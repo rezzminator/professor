@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/index"
 )
 
 const fixtureOpenCodeSession = "ses_fixture0001"

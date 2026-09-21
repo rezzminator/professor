@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // ClaudeLaunch resolves the real Claude binary before entering the managed

@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func prioritizeClaudeFiles(

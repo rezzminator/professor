@@ -6,10 +6,10 @@ import (
 	"io"
 	"sort"
 
-	"hostops/pfm/internal/cli"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/heal"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/heal"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // runHeal reports, and on request repairs, Codex thread-history projections.

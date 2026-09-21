@@ -16,7 +16,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // driverName is the pure-Go SQLite driver the whole engine uses.

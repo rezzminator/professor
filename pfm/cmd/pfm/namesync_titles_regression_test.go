@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/gather"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 func TestNameSyncTitlesReportsAnUnreadableServerAsUnverified(t *testing.T) {

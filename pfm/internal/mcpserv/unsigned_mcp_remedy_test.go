@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // fakeUnsignedInjector reproduces the exact refusal shape inject.Engine

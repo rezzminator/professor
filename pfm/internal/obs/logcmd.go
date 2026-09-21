@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // LogUsage is `pfm log`'s one-line usage.

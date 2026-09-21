@@ -15,16 +15,16 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/spawn"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // LaunchExec is the process-replacing seam used by launch and codex-launch.

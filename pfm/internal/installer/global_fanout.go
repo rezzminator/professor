@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/codexgen"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // This file holds the machine-global wiring that fans out across EVERY

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 // TestServerInstructionsNameSearchOnlyWhenConfigured pins both shapes of the

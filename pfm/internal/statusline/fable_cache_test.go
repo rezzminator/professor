@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/usagehook"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 // fableRuntime builds a jailed Runtime for account, with an explicit

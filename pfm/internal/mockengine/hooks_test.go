@@ -11,12 +11,12 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/hookentry"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/statusline"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/statusline"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // installHooks writes the settings.json pfm's installer would converge

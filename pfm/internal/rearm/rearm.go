@@ -38,9 +38,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/agentrole"
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // crumbPrefix distinguishes a role re-arm crumb from the other files pfm

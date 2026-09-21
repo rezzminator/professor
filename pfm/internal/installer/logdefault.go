@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmconfig "hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // wireLogDefault writes the activity log's safe default visibly (spec

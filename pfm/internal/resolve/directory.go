@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // This file is the fleet's chat DNS: you DIAL a chat by an address and you

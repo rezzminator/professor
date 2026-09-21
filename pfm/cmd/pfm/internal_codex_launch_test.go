@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"testing"
 
-	"hostops/pfm/internal/hookentry"
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
 )
 
 func TestCodexLaunchCompatibilityForAlreadyLoadedShells(t *testing.T) {

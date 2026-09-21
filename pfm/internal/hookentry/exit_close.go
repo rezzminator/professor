@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/reload"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 var (

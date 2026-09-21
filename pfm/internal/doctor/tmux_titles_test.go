@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The check exists so a reader can tell "pfm owns this title" from "the host

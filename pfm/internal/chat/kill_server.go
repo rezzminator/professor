@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // KillServer ends one chat's tmux server and removes its socket, crumbs, and

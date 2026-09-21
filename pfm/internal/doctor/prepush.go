@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (

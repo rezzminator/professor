@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/obs"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestCommandSpawnerDefaultRunnerRecordsTheFinisherLaunch proves the nil

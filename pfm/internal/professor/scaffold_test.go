@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // newScaffoldFixtureStore lays down the smallest self-hosted blueprint clone

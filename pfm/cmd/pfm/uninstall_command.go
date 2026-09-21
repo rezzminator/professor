@@ -3,8 +3,8 @@ package main
 import (
 	"io"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 func runUninstall(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {

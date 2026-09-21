@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // blockingWaiter never returns until released — the shape of the real waiter

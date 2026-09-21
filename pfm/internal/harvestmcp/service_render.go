@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 func fetchItem(result harvest.Result) FetchItem {

@@ -5,8 +5,8 @@ import (
 	"io"
 	"path/filepath"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 // printStatusLineOverlayDoctor checks every configured Claude account's

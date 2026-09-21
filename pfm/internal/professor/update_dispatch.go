@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // RunProjectUpdate runs one project-baseline action. It walks the state door

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestLastReadsTheNewestAnswerPastLaterToolCalls pins what `last` means: the

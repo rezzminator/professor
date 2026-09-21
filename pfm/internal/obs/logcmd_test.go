@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // fixtureLog writes a small activity file and returns its path.

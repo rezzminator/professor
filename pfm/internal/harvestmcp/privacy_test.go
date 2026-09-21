@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 func TestDescribeFetchRedactsProviderDiagnosticsAtMCPBoundary(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestSearXNGSearchWritesAnHTTPOutRecordAndStillRefusesRedirects pins the

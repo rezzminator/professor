@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // killableProcess is the Process shape the sibling's Runner grows into:

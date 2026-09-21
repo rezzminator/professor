@@ -14,7 +14,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"hostops/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 // mcpTimeout bounds the mock's own MCP handshake against a dead or hanging

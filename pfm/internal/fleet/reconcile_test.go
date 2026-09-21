@@ -3,7 +3,7 @@ package fleet
 import (
 	"testing"
 
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // TestCodexRolloutFingerprintsCaptureIdentityPerPID pins the shape the

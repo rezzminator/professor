@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestAmbientClaudeConfigDirCleansOrReportsUnset pins the one rule the

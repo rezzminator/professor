@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // ClaudeInstructionsFile is the project instructions file scaffolded from the blueprint.

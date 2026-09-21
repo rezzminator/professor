@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/semver"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/semver"
 )
 
 // ClaudeVersionKeepCount is the retention window PlanClaudeVersionPrune uses

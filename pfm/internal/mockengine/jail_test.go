@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 func TestJailBindingsAreWhatGatherAndReloadRead(t *testing.T) {

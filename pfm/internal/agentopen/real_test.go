@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // fakeAgentopenTmuxBinary plays tmux: list-panes answers a fixed pid.

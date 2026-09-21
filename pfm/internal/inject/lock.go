@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 type targetLock struct {

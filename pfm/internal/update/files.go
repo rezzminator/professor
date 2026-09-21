@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 // updateFileSnapshot is one installer-owned file captured around the

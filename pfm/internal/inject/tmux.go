@@ -9,7 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 var pasteSequence atomic.Uint64

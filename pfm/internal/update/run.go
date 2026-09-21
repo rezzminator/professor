@@ -11,13 +11,13 @@ import (
 	"slices"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/professor"
-	"hostops/pfm/internal/semver"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/semver"
 )
 
 const (

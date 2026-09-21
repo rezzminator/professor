@@ -5,7 +5,7 @@ package doctor
 import (
 	"context"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 const (

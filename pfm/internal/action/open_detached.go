@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // OpenResult is what OpenDetached hands back to a caller with no terminal:

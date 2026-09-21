@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestExcerptNeedlesStripsDecorationAndKeepsTheFiveLongest pins the needle

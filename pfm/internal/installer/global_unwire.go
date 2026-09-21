@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // This file is the uninstall half of the machine-global fan-out in

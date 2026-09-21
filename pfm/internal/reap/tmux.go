@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/gather"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // Tmux is the reaper's whole tmux surface.

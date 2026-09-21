@@ -4,7 +4,7 @@ import (
 	"context"
 	"strconv"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // outcome closes a coordinator's state trail (spec § Middleware, `state`)

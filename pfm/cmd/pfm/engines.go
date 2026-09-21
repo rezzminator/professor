@@ -1,16 +1,16 @@
 package main
 
 import (
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/ask"
-	pfmengine "hostops/pfm/internal/engine"
-	claudeengine "hostops/pfm/internal/engine/claude"
-	codexengine "hostops/pfm/internal/engine/codex"
-	opencodeengine "hostops/pfm/internal/engine/opencode"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/spawn"
-	"hostops/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
+	codexengine "github.com/rezzminator/professor/pfm/internal/engine/codex"
+	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/stats"
 )
 
 // registerEngines is the single composition root for engine capabilities.

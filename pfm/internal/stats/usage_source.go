@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/usagehook"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 type limitsSamplerContextKey struct{}

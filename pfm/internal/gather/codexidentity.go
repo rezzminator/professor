@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // CodexIdentity is one live codex pane's own observed thread identity, read

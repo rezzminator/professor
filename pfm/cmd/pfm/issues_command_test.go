@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestRunIssuesDefaultsToOpenOnlyAndJSONAllReturnsEverything pins the read

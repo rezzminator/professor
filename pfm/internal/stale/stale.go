@@ -22,9 +22,9 @@ import (
 	"syscall"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Process is one pfm process running a replaced binary.

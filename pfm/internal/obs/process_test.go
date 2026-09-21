@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // fakeTimed returns ctx with the same logger over a fake clock, so a

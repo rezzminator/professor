@@ -3,7 +3,7 @@ package gather
 import (
 	"sort"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // DetectCrumblessLive finds every live Claude pane on a valid cc-* socket

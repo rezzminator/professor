@@ -16,10 +16,10 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/sqlitedb"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 const (

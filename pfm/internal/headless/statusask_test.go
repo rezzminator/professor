@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // assertNoLeakedTempFiles is Ask's cleanup pin (see the package doc comment

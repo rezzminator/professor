@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/ui"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 // codexJailPanePID returns the real pid tmux reports for the sole pane on

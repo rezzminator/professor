@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"strings"
 
-	"hostops/pfm/internal/ask"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const askPrompt = "State this chat's CURRENT status in <= 40 words: what it is doing right now, and whether it is working, waiting on input, blocked, finished, or errored. Ground the answer in the live pane capture; use the last human exchange only as background context."

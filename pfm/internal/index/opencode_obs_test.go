@@ -3,7 +3,7 @@ package index
 import (
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestReadOpenCodeSessionsRecordsTheForeignRead: OpenCode's store is read

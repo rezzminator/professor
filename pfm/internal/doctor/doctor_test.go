@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/nudge"
+	"github.com/rezzminator/professor/pfm/internal/nudge"
 )
 
 func TestDoctorCrumbHealthAcceptsNudgeMetadataAndRejectsAnEmptyIdentity(t *testing.T) {

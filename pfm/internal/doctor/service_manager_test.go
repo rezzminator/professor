@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // TestPrintServiceManagerDoctorReportsThreeStates watches the three states

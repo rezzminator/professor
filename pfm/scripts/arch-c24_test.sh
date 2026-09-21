@@ -28,7 +28,7 @@ import (
 	"net/http"
 	"os/exec"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 func Bare() *http.Client   { return &http.Client{} }

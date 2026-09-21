@@ -16,12 +16,12 @@ import (
 	"sync"
 	"time"
 
-	config "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	headlessrun "hostops/pfm/internal/headless/run"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/paths"
+	config "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 var harnessCaptureSinkGrace = 2 * time.Second
@@ -402,11 +402,20 @@ func harnessSinkHandler(bodies chan<- []byte) http.HandlerFunc {
 // never leaks through even if this pin were ever omitted.
 func harnessCaptureEnv(environ []string, sinkURL, configDir string) []string {
 	stripped := map[string]bool{
-		"CLAUDE_CODE_SESSION_ID": true, "CLAUDECODE": true, "CLAUDE_CODE_CHILD_SESSION": true,
-		"CLAUDE_CONFIG_DIR": true, "CLAUDE_PROJECT_DIR": true, "ENABLE_PROMPT_CACHING_1H": true, "FORCE_PROMPT_CACHING_5M": true,
-		"ANTHROPIC_BASE_URL": true, "ANTHROPIC_AUTH_TOKEN": true, "ANTHROPIC_API_KEY": true,
-		"ANTHROPIC_MODEL": true, "ANTHROPIC_SMALL_FAST_MODEL": true,
-		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": true, "CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT": true,
+		"CLAUDE_CODE_SESSION_ID":           true,
+		"CLAUDECODE":                       true,
+		"CLAUDE_CODE_CHILD_SESSION":        true,
+		"CLAUDE_CONFIG_DIR":                true,
+		"CLAUDE_PROJECT_DIR":               true,
+		"ENABLE_PROMPT_CACHING_1H":         true,
+		"FORCE_PROMPT_CACHING_5M":          true,
+		"ANTHROPIC_BASE_URL":               true,
+		"ANTHROPIC_AUTH_TOKEN":             true,
+		"ANTHROPIC_API_KEY":                true,
+		"ANTHROPIC_MODEL":                  true,
+		"ANTHROPIC_SMALL_FAST_MODEL":       true,
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW":  true,
+		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT": true,
 	}
 	result := make([]string, 0, len(environ)+6)
 	for _, entry := range environ {

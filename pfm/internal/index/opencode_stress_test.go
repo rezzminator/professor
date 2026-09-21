@@ -14,8 +14,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // seedOpenCodeStress builds a large, hostile session store: hundreds of

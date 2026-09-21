@@ -8,24 +8,24 @@ import (
 	"os"
 	"strconv"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/doctor"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/hookentry"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/mcpserv"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/picker"
-	"hostops/pfm/internal/spawn"
-	"hostops/pfm/internal/stale"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/update"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/hookentry"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/picker"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/stale"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/update"
 )
 
 const (
@@ -404,11 +404,7 @@ func runUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRunti
 	return 0
 }
 
-func runInternal(
-	args []string,
-	stdout, stderr io.Writer,
-	runtime commandRuntime,
-) (exitCode int) {
+func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 	stdout, finishHook := obs.Hook(context.Background(), obs.Verb(args), stdout)
 	defer func() { finishHook(exitCode) }()
 	if len(args) != 0 && args[0] == "clear-kill" {
@@ -439,14 +435,7 @@ func runInternal(
 		return hookentry.ExploreDeny(os.Stdin, stdout, stderr)
 	}
 	if len(args) != 0 && args[0] == "rr-dir" {
-		// An unresolvable home is not fatal here: RRDir needs it only for the
-		// fallback ledger and reports its absence on that path by name.
-		home, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm internal rr-dir: resolve home directory: %v\n", err)
-			home = ""
-		}
-		return hookentry.RRDir(os.Stdin, stdout, stderr, home)
+		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
 	}
 	if len(args) != 0 && args[0] == "epic-inject" {
 		return hookentry.EpicInject(os.Stdin, stdout, stderr)
@@ -588,4 +577,13 @@ func runInternal(
 		return 1
 	}
 	return 0
+}
+
+func runRRDirEntry(input io.Reader, stdout, stderr io.Writer, env paths.Env) int {
+	home, err := env.Home()
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm internal rr-dir: resolve home directory: %v\n", err)
+		home = ""
+	}
+	return hookentry.RRDir(input, stdout, stderr, home)
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // TmuxResolver invokes tmux with an explicit socket pathname.

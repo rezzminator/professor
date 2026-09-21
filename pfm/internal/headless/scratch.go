@@ -7,9 +7,9 @@ import (
 	"os"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 type exchangeSnapshot struct {

@@ -7,7 +7,7 @@ import (
 	"io"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 type scriptedUpdateProcess struct{ waitErr error }

@@ -3,7 +3,7 @@ package main
 import (
 	"io"
 
-	"hostops/pfm/internal/opencodegen"
+	"github.com/rezzminator/professor/pfm/internal/opencodegen"
 )
 
 func runOpenCode(args []string, stdout, stderr io.Writer, runtime commandRuntime) int {

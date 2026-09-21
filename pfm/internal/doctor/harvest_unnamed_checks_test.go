@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 func TestPrintUnnamedHarvestChecksSkipsNamedAndHealthy(t *testing.T) {

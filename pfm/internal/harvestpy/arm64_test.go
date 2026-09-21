@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func TestCheckDependenciesAcceptsOnlyPinnedArm64SBSAFalsePositive(t *testing.T) {

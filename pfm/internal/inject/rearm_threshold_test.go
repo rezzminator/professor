@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/rearm"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/rearm"
 )
 
 // TestRearmThresholdBytesUnderBothSpillLinesAndDefault pins behaviour 3 (the

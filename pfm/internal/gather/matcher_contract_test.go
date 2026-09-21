@@ -3,8 +3,8 @@ package gather_test
 import (
 	"testing"
 
-	claudeengine "hostops/pfm/internal/engine/claude"
-	"hostops/pfm/internal/gather"
+	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 func TestClaudeMatcherAndAgentScanUseOneCommandRule(t *testing.T) {

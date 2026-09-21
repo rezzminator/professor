@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 // seat is the mock's presence on a jailed host: the /proc entry

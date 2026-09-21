@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const (

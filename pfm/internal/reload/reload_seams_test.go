@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"testing"
 
-	"hostops/pfm/internal/clock"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/hostfixture"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 )
 
 // TestRunRefusesWithNoTmuxClientOnAHostWithoutTmux pins hostfixture case 4

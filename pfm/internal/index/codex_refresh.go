@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // RefreshCodexLineage catches up only the known rollout files about to be

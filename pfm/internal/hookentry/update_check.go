@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"time"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/updatecheck"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/updatecheck"
 )
 
 const professorLatestReleaseURL = "https://github.com/" + updatecheck.ProfessorRepo + "/releases/latest"

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/compose"
-	pfmconfig "hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestActionStress(t *testing.T) {

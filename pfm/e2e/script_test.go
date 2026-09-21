@@ -18,8 +18,8 @@ import (
 
 	"github.com/rogpeppe/go-internal/testscript"
 
-	"hostops/pfm/internal/mockengine"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/mockengine"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 const (

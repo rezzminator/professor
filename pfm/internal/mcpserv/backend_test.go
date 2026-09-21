@@ -3,7 +3,7 @@ package mcpserv
 import (
 	"testing"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 // TestChatRowStateNamesTheKilledButLiveContradiction is the honesty half of the

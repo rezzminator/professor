@@ -11,12 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"hostops/pfm/internal/binwatch"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/harvestmcp"
-	"hostops/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/binwatch"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
 func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clock) (exitCode int) {

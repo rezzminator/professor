@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 func TestUsageParsesScopedFableAndDropsUnknownWindows(t *testing.T) {

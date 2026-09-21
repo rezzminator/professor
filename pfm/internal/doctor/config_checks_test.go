@@ -10,9 +10,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestDoctorAdvisesWhenConfiguredSeatsShareOAuthLogin(t *testing.T) {

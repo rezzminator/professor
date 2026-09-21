@@ -1,8 +1,8 @@
 package main
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/resolve"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // callerEngine reports the engine of the chat that is CALLING pfm right now,

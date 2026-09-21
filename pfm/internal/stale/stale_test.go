@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/hostfixture"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 )
 
 // fixture is a process table on disk — <root>/<pid>/{cmdline,exe} — the

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 )
 
 // TestSupersededAnswerIsNotAClean0: when a second message reached the chat

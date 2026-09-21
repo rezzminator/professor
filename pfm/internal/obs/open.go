@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // AlphaSuffix marks a pre-release build. A build carrying it logs at debug by

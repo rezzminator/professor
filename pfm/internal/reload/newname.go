@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // LeftBehindSuffix is appended to the abandoned session's custom title by a

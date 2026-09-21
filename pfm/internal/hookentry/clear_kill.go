@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/index"
 )
 
 // ClearKill is the fail-open /clear hook for Claude's SessionEnd event.

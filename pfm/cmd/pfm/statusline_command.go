@@ -9,15 +9,15 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/cli"
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/nudge"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/statusline"
-	"hostops/pfm/internal/usagehook"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/nudge"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/statusline"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 var statuslineCodexOptions = func() statusline.CodexOptions {

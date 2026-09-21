@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // uuidPattern matches a session id wherever one appears — an argv, a

@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 func readMCPFile(path string) ([]byte, bool, error) {

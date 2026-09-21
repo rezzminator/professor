@@ -17,9 +17,9 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 var ErrOfflineUnavailable = errors.New("harvestpy input is unavailable offline")

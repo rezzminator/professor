@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	fleetindex "hostops/pfm/internal/index"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/testjail"
+	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func TestSessionIndexRenameConvergesAProbeWindow(t *testing.T) {

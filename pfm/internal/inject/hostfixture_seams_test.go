@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/hostfixture"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 )
 
 // TestAcquireTargetLockUnderAnOddCharacteredRoot pins hostfixture case 7

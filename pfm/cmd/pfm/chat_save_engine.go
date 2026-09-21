@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/transcript"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // transcriptEntriesForSave tries transcript.All under both engines an

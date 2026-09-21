@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/nudge"
-	"hostops/pfm/internal/statusline"
+	"github.com/rezzminator/professor/pfm/internal/nudge"
+	"github.com/rezzminator/professor/pfm/internal/statusline"
 )
 
 func TestStatuslineCommandRendersFromJailedInput(t *testing.T) {

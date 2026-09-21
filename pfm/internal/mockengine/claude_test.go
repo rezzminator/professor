@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/headless/run"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/transcript"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless/run"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const fixtureSession = "b1111111-1111-4111-8111-111111111111"

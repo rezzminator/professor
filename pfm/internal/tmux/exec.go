@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // comp is the activity-log component every tmux invocation records under.

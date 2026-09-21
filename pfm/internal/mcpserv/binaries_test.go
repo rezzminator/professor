@@ -3,7 +3,7 @@ package mcpserv
 import (
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // The MCP process hands its configured engine executables to TWO consumers —

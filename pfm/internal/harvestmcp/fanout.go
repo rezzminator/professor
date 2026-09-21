@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"hostops/pfm/internal/harvest"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // fetchOne runs one fetch-tool source in its own goroutine (service.fetch's

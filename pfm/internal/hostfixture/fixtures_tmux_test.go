@@ -6,7 +6,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func TestNoTmuxAnswersENOENTFromLookPath(t *testing.T) {

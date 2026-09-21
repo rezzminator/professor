@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func TestTargetsPinEveryRequestedPlatformAndVerifyableInputs(t *testing.T) {

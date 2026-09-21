@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 )
 
 // TestHookRunnerEmptyCommandBuildsNoHook proves an unset --on-idle/--on-exit

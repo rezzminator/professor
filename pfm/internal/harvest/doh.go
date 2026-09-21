@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // DNS-over-HTTPS resolution for every harvester dial.

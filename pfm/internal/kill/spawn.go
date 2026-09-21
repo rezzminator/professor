@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // CommandSpawner starts the binary's killed finisher under a new session.

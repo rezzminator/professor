@@ -3,8 +3,8 @@ package run
 import (
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // TestArgumentsCarriesThemedSettingsForAnAccountWithATheme pins arguments()

@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"testing"
 
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // fakeVersionsProcFS serves a hand-built process table with real

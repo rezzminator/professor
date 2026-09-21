@@ -11,8 +11,8 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
-	"hostops/pfm/internal/deps"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // OutputIsTerminal is the terminal-detection seam used by Dispatch.

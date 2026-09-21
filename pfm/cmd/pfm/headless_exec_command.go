@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
-	"hostops/pfm/internal/cli"
-	pfmengine "hostops/pfm/internal/engine"
-	headlessrun "hostops/pfm/internal/headless/run"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	headlessrun "github.com/rezzminator/professor/pfm/internal/headless/run"
 )
 
 const (

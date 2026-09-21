@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The reaper KILLS things, so its fixtures run against real tmux servers on

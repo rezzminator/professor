@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // epoch anchors every fixture's Fake clock to the same fixed instant, so a

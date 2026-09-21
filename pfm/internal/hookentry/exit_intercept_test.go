@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestRunExitIntercept(t *testing.T) {

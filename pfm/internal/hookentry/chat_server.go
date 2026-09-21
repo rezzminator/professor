@@ -6,9 +6,9 @@ import (
 	"io"
 	"path/filepath"
 
-	"hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // ChatServer is the shim's door to the one chat-server creator.

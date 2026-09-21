@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // ErrAwaitTimeout ends a wait that ran out of patience. It is not a failure of

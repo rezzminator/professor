@@ -16,9 +16,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"hostops/pfm/internal/deps"
-	pfmengine "hostops/pfm/internal/engine"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // TmuxClient probes one named tmux socket.

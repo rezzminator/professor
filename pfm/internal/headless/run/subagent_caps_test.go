@@ -3,8 +3,8 @@ package run
 import (
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // A headless Claude run is a door of its own — it never renders through
@@ -14,8 +14,10 @@ import (
 func TestSubagentCapsCarryOnlyForClaude(t *testing.T) {
 	const depthName, concurrencyName = "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH", "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS"
 	machine := pfmconfig.Config{
-		Claude:   pfmconfig.Claude{MaxSubagentSpawnDepth: 9},
-		Accounts: []pfmconfig.Account{{ID: 2, Claude: &pfmconfig.ClaudePrefs{MaxSubagentSpawnDepth: 5, MaxConcurrentSubagents: 32}}},
+		Claude: pfmconfig.Claude{MaxSubagentSpawnDepth: 9},
+		Accounts: []pfmconfig.Account{
+			{ID: 2, Claude: &pfmconfig.ClaudePrefs{MaxSubagentSpawnDepth: 5, MaxConcurrentSubagents: 32}},
+		},
 	}
 	for _, explicit := range []bool{false, true} {
 		var claude []string
@@ -46,7 +48,13 @@ func TestSubagentCapsCarryOnlyForClaude(t *testing.T) {
 		)
 		for _, name := range []string{depthName, concurrencyName} {
 			if got := lastEnvironmentValue(codex, name); got != "" {
-				t.Fatalf("codex headless environment (explicit=%t) %q carries Claude's %s=%q", explicit, codex, name, got)
+				t.Fatalf(
+					"codex headless environment (explicit=%t) %q carries Claude's %s=%q",
+					explicit,
+					codex,
+					name,
+					got,
+				)
 			}
 		}
 	}

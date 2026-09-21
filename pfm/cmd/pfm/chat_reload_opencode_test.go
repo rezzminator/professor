@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // `pfm chat reload --sock ox-…` used to print "reload scheduled in place" and

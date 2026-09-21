@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // transcriptColumns is alias-qualified because every transcript query joins

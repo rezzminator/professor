@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 func writeKeychainFixture(t *testing.T, body string, exitCode int) string {

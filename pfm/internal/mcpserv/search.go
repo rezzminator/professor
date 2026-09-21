@@ -5,8 +5,8 @@ import (
 	"errors"
 	"fmt"
 
-	"hostops/pfm/internal/chat"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/chat"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // find is chat_find: chat.Find under the tool's candidate limit (default 10,

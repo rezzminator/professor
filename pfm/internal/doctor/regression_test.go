@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 func TestHarnessCaptureUsesInjectedListener(t *testing.T) {

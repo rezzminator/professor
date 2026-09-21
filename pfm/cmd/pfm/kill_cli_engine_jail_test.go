@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestKillCLIVouchesEngineForUnindexedButVisibleRows reproduces the CLI kill

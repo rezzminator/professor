@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"io"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/resolve"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // runWhoami prints THIS chat's own tmux session name — its identity, and the

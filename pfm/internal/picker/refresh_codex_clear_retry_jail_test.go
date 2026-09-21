@@ -13,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/fleet"
-	"hostops/pfm/internal/gather"
-	fleetindex "hostops/pfm/internal/index"
-	"hostops/pfm/internal/kill"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/ui"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/ui"
 )
 
 func TestCodexClearRefreshesBaselineAndRetainsFailedRetirement(t *testing.T) {

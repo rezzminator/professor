@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestJailPinsClaudeConfigDir(t *testing.T) {

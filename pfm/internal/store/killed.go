@@ -10,9 +10,9 @@ import (
 
 	modernsqlite "modernc.org/sqlite"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/obs"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const sameNameTarget = "COSMOS:ORCHESTRATOR"

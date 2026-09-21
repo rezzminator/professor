@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestEveryClaudeSettingsFileGetsCompleteHookWiring(t *testing.T) {

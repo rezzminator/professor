@@ -11,7 +11,7 @@ import (
 	"strings"
 	"sync"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // The browser rung's DIAL half (L2-F7). Every URL Chrome touches is validated

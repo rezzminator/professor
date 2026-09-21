@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestOpenMigratesAndReopensIdempotently(t *testing.T) {

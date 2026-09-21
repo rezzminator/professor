@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/codexappendix"
-	pfmconfig "hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 const (

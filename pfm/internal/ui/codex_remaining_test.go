@@ -7,8 +7,8 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	pfmengine "hostops/pfm/internal/engine"
-	pfmstats "hostops/pfm/internal/stats"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 )
 
 // TestCodexLimitsShareTheClaudeScale pins one scale for the whole Limits

@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // The fetch gateway: the ONE function every harvester HTTP egress goes through.

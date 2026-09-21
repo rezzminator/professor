@@ -9,7 +9,7 @@ import (
 	"syscall"
 	"testing"
 
-	"hostops/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/kill"
 )
 
 func TestRunExitCloseLeavesTheTerminalWhileAReloadIsInFlight(t *testing.T) {

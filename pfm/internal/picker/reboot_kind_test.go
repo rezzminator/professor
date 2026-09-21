@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The picker's reboot kills the seat's server and reopens the SAME chat. The

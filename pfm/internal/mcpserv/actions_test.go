@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/chat"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/chat"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // fakeChatVerbs is the MCP tests' stand-in for chat.Verbs: it records every

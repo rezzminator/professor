@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 func TestTestRecorderCapturesFieldsAndRestoresTheProcessLogger(t *testing.T) {

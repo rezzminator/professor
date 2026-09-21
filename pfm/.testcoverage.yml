@@ -2,7 +2,7 @@
 # They ratchet like .arch/: raise only after merged coverage reaches the next
 # integer. The gate reads `make cover`'s merged unit + e2e binary profile.
 profile: tmp/cover/merged.out
-local-prefix: hostops/pfm
+local-prefix: github.com/rezzminator/professor/pfm
 threshold:
   file: 0
   package: 52

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestRunProjectUpdateRecordsATransition: RunProjectUpdate walks the state

@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/naming"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 func TestLoadEmbeddedPalettes(t *testing.T) {

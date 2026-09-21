@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // SettledTurn is this package's ONE wait for "the turn the pane is running

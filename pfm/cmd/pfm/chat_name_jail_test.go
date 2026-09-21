@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 )
 
 func TestChatNameConvergesTheWindowInlineOnAProbeSocket(t *testing.T) {

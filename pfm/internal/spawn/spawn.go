@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 )
 
 // The Codex rename markers below are read from the codex binary's own strings

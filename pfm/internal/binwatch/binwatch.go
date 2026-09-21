@@ -20,7 +20,7 @@ import (
 	"os"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // ExitReplaced is the server's exit status when its binary was replaced under

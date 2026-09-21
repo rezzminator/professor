@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestEngineForKindCheckedRejectsUnknown(t *testing.T) {

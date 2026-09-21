@@ -13,9 +13,9 @@ import (
 	"runtime"
 	"strings"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // BrowserRuntimeRoot is the stable current pointer for the opt-in real-browser

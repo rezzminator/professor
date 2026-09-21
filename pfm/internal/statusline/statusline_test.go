@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func TestEngineFromEnvironmentRefusesMissingEngine(t *testing.T) {

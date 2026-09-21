@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"os"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/inject"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 type codexSeatIdentifier struct{ runtime *config.Runtime }

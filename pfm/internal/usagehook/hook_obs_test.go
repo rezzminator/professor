@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestFetchWritesAnHTTPOutRecord proves options.Client is wrapped with

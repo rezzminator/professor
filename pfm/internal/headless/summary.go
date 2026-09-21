@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"strings"
 
-	"hostops/pfm/internal/ask"
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/ask"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const summaryPrompt = "Summarize this exchange in ≤ 40 words: what was asked, what was delivered or is still in flight."

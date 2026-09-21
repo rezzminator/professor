@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/agentrole"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // mustWriteFile is the one filesystem primitive every test below builds its

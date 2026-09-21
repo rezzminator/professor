@@ -10,7 +10,7 @@ import (
 	"sort"
 	"sync"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 // vscodeExtensionManifestInfo is the two fields registerVSCodeExtension and

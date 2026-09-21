@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestOpenersRecordUnderTheDBComponent: the three openers are the db door's

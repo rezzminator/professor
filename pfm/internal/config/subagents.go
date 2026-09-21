@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // Claude Code lets a sub-agent spawn sub-agents only 3 levels deep and runs at

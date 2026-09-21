@@ -74,11 +74,11 @@ formatters:
   enable: [gofumpt, gci, golines]
   settings:
     gofumpt:
-      module-path: hostops/pfm
+      module-path: github.com/rezzminator/professor/pfm
       extra:
         group-params: true
     gci:
-      sections: [standard, default, prefix(hostops/pfm)]
+      sections: [standard, default, prefix(github.com/rezzminator/professor/pfm)]
     golines:
       max-len: 120
       tab-len: 4

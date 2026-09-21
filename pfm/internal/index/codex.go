@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 
-	"hostops/pfm/internal/codexmeta"
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type codexRecord struct {

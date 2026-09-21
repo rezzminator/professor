@@ -11,14 +11,14 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/codexappendix"
-	"hostops/pfm/internal/codexmeta"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/mcpserv"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 const fixtureThread = "019ff700-0000-7000-8000-000000000001"

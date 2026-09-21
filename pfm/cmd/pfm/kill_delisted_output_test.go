@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // A kill that only wrote a tombstone must SAY it only wrote a tombstone.

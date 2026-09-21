@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/semver"
+	"github.com/rezzminator/professor/pfm/internal/semver"
 )
 
 // ReleaseNotes filters releaseFiles (the names `git ls-tree --name-only

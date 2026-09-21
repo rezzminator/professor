@@ -12,7 +12,7 @@ import (
 	"os/exec"
 	"strings"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // Binary is the executable name shared by every tmux caller.

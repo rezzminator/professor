@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/naming"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/naming"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type claudeRecord struct {

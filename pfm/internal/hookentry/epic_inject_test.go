@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 func TestEpicInjectDedupeFollowsSessionAndEpicRename(t *testing.T) {

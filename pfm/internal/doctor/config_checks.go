@@ -9,9 +9,9 @@ import (
 	"sort"
 	"strings"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func PrintConfig(stdout io.Writer, runtime config.Runtime) {

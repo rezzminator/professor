@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 )
 
 var errHeldSubagents = errors.New("held rollouts identify only subagents")

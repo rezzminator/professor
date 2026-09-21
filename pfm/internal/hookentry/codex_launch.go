@@ -5,8 +5,8 @@ import (
 	"io"
 	"os"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // CodexLaunch keeps older sourced shims and rendered tmux commands compatible.

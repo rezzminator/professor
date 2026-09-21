@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // fakeProc is a process table with parents, argv and resident memory — the

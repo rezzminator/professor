@@ -10,8 +10,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // seedOpenCodeStore builds the OpenCode v1.14.30 store shape from its published

@@ -3,7 +3,7 @@ package harvest
 import (
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestNewDOHResolverWrapsItsClient proves newDOHResolver's client is wrapped

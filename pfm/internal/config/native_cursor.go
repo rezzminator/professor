@@ -3,7 +3,7 @@ package config
 import (
 	"fmt"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // applyNativeCursor resolves claude.nativeCursor for one scope. When true,

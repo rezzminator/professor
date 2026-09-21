@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // RealProcesses reads the small /proc subset needed by the stray sweep.

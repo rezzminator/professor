@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 const missingState = "missing"

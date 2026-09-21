@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestRegisteredToolsRecordUnderTheMCPComponent proves every mcp.AddTool

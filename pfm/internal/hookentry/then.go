@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"io"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/inject"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/inject"
 )
 
 // thenWaiter is the one engine verb Then drives, behind a seam so the start

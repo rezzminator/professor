@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // DefaultKeepFiles and DefaultMaxMB are the rotation the fleet ships with when

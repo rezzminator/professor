@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // storeKind names the transcript store to the db component's records.

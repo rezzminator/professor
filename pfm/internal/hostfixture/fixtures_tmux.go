@@ -4,7 +4,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // NoTmux jails a fleet whose FakeRunner answers ENOENT for tmux — the state

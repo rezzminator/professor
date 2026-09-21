@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // TestFreshSocketEnv fixes generated socket names in jailed tests.

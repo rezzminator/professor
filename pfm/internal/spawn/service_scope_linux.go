@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // serviceScopeCommand escapes a chat server from the user service that

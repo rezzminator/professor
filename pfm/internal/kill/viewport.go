@@ -9,8 +9,8 @@ import (
 	"strings"
 	"syscall"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // A chat is watched through a terminal, and that terminal is owned by a shell.

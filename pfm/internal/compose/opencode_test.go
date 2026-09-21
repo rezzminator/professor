@@ -3,7 +3,7 @@ package compose
 import (
 	"testing"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func openCodeFixture() []store.OpenCodeSession {

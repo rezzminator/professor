@@ -7,10 +7,10 @@ import (
 	"strconv"
 	"time"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/clock"
-	fleetindex "hostops/pfm/internal/index"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	fleetindex "github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func runIndex(args []string, stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clock) (exitCode int) {

@@ -15,10 +15,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/harvestmcp"
-	"hostops/pfm/internal/mcpserv"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {

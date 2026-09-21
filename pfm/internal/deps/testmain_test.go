@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestMain jails PFM_HOME for the whole package, so a test that never builds a

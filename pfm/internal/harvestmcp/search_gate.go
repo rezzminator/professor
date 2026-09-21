@@ -8,7 +8,7 @@ package harvestmcp
 import (
 	"errors"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 // searchEnabled is the one place a Runtime's search configuration turns into

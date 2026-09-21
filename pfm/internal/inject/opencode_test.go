@@ -3,8 +3,8 @@ package inject
 import (
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestPaneCommandEngineRecognizesOpenCode(t *testing.T) {

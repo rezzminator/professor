@@ -8,10 +8,10 @@ import (
 	"sort"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // The two states a live tmux server can be in for the tmux.titles concept.

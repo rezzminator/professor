@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/paths"
-	pfmstatusline "hostops/pfm/internal/statusline"
-	"hostops/pfm/internal/usagehook"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	pfmstatusline "github.com/rezzminator/professor/pfm/internal/statusline"
+	"github.com/rezzminator/professor/pfm/internal/usagehook"
 )
 
 func TestLimitsSamplerUsesIdentityMatchedStatuslineQuotaWithoutCredentialFile(t *testing.T) {

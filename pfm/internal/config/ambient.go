@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // AmbientClaudeConfigDir returns the CLAUDE_CONFIG_DIR the invoking shell has

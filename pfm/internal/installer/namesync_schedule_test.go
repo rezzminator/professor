@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // One value, two schedulers. A host that lowers nameSync.interval and later

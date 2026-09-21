@@ -1,6 +1,6 @@
 package store
 
-import "hostops/pfm/internal/engine"
+import "github.com/rezzminator/professor/pfm/internal/engine"
 
 // OpenCodeSession is one indexed OpenCode session, read from OpenCode's own SQLite
 // store (opencode.db). It is the OpenCode twin of Transcript/Rollout: every

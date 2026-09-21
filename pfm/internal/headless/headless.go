@@ -25,8 +25,8 @@ import (
 	"path/filepath"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/transcript"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // The states a chat can be in, as reported by status and watch.

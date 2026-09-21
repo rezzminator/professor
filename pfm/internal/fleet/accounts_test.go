@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestPrimaryAccountGoesThroughTheStateStore fixtures the OUTCOME of a picker

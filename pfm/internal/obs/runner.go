@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // compRunner is the component every process door records under.

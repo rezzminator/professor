@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // StaleArtifactsFixture is StaleArtifacts's result: the jailed Base plus

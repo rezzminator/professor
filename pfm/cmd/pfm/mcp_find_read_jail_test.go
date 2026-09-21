@@ -12,8 +12,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"hostops/pfm/internal/mcpserv"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // callChatTool drives one tool of the production MCP surface — mcpRuntime over

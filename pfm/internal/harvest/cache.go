@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"hostops/pfm/internal/clock"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // Cache is a type-partitioned markdown cache. Images and archives do not

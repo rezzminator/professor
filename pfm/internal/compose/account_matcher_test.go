@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestAccountAttributionUsesThirdAliasAndLongestNestedRoot(t *testing.T) {

@@ -8,11 +8,11 @@ import (
 	"strconv"
 	"strings"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // TmuxSpawner invokes tmux only through the configured socket directory, the

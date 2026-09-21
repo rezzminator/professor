@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // OddPathsFixture is OddPaths's result: the jailed Base, now re-homed under

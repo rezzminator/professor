@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/codexappendix"
-	"hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
+	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func CodexAppendix(input io.Reader, output, stderr io.Writer, runtime config.Runtime) int {

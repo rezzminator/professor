@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
 // printMCPDaemonDoctor reports the local MCP HTTP daemon's reachability: a

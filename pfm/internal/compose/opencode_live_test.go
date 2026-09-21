@@ -3,8 +3,8 @@ package compose
 import (
 	"testing"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func openCodeLiveInput(seats []gather.LiveOpenCode, panes []gather.ProbePane) Input {

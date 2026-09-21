@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
 func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
@@ -237,10 +237,16 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			content: "---\nname: legal\n---\nbody\n",
 			mode:    0o600,
 		},
-		"templates/project/epics/TEMPLATE.md":                              {content: "# Epic\n", mode: 0o600},
-		"templates/project/codex/config.toml":                              {content: "model = \"{TOKEN}\"\n", mode: 0o600},
-		"templates/project/docs-commands/git/references/gitter-history.md": {content: "# Gitter History\n", mode: 0o600},
-		"templates/project/docs-agents/_index.md":                          {content: "# Agents\n", mode: 0o600},
+		"templates/project/epics/TEMPLATE.md": {content: "# Epic\n", mode: 0o600},
+		"templates/project/codex/config.toml": {
+			content: "model = \"{TOKEN}\"\n",
+			mode:    0o600,
+		},
+		"templates/project/docs-commands/git/references/gitter-history.md": {
+			content: "# Gitter History\n",
+			mode:    0o600,
+		},
+		"templates/project/docs-agents/_index.md": {content: "# Agents\n", mode: 0o600},
 	}
 	for relative, fixture := range files {
 		path := filepath.Join(root, filepath.FromSlash(relative))

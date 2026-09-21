@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestComponentsPinsTheSpecRegistry: the eleven comp names of spec § Middleware,

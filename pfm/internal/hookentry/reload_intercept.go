@@ -7,8 +7,8 @@ import (
 	"io"
 	"strings"
 
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // ReloadFront is the in-process reload command front injected by runInternal.

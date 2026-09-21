@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmchat "hostops/pfm/internal/chat"
-	"hostops/pfm/internal/paths"
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // TestMCPRuntimeBindsTheVerbLayerToTheCommandsRuntime pins the one bridge into

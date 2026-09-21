@@ -1,4 +1,4 @@
-module hostops/pfm
+module github.com/rezzminator/professor/pfm
 
 go 1.24.13
 

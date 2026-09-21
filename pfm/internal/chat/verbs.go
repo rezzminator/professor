@@ -4,9 +4,9 @@ import (
 	"context"
 	"io"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/transcript"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // Verbs binds the verb functions to one process's runtime, for a surface that

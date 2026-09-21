@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // DaemonStatus is the stable local health document consumed by doctor and the

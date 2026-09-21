@@ -1,11 +1,11 @@
 package kill
 
 import (
-	pfmengine "hostops/pfm/internal/engine"
-	claudeengine "hostops/pfm/internal/engine/claude"
-	codexengine "hostops/pfm/internal/engine/codex"
-	opencodeengine "hostops/pfm/internal/engine/opencode"
-	"hostops/pfm/internal/index"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	claudeengine "github.com/rezzminator/professor/pfm/internal/engine/claude"
+	codexengine "github.com/rezzminator/professor/pfm/internal/engine/codex"
+	opencodeengine "github.com/rezzminator/professor/pfm/internal/engine/opencode"
+	"github.com/rezzminator/professor/pfm/internal/index"
 )
 
 // The composition root (cmd/pfm/engines.go) wires the engines in production;

@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/codexgen"
-	"hostops/pfm/internal/professor"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
+	"github.com/rezzminator/professor/pfm/internal/professor"
 )
 
 const agentsCommand = "agents"

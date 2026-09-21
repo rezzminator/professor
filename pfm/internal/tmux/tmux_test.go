@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"hostops/pfm/internal/hostfixture"
+	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 )
 
 // TestCommandAddressesTheSocketAndClearsTMUX pins the runner's contract: the

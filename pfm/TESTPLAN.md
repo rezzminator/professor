@@ -73,7 +73,7 @@ The compiler is one static-binary surface. `build` may write only generated arti
 | global `--config PATH` loads once before dispatch; malformed present files name their path and JSON byte | JAIL | `runtime_config.go`, `config_cli_test.go`, `internal/config/config_test.go` | |
 | configured account roots are the exact transcript boundary; absent config preserves the three-account discovery | JAIL | `runtime_config.go`, `config_cli_test.go`, `internal/config/config_test.go` | |
 | configured Claude/Codex binary and permission policy reach actual launch argv; absent config preserves current argv | JAIL+tmux | `run_jail_test.go`, `internal/action/*_test.go`, `internal/reload/reload_test.go` | |
-| local `pfm.dev` is absent or carries the current `hostops/pfm/cmd/pfm` build path | JAIL | `cmd/pfm/dev_binary_test.go` | |
+| local `pfm.dev` is absent or carries the current `github.com/rezzminator/professor/pfm/cmd/pfm` build path | JAIL | `cmd/pfm/dev_binary_test.go` | |
 | `ls` (interactive) → BubblePicker on `/dev/tty`, cached first frame then streamed refresh | JAIL+tmux | `internal/picker/picker.go`, `ui/picker.go` | |
 | routine picker refreshes every 4s and indexes only the priority project; it never walks the full transcript corpus | JAIL | `internal/picker/pipeline.go`, `internal/picker/pipeline_test.go` | live defect: three pickers each sustained ~60% CPU for 4h+ |
 | `ls --plain` → PlainPicker, one pass, rc 0 | JAIL | `internal/picker/picker.go` | |

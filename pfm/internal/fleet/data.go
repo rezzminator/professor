@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // Data is the index DB's side of one scan: every indexed chat the view can

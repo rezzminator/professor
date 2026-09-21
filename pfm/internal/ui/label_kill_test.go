@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"hostops/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 )
 
 // TestKillKeyRefusesALabelKilledRow pins the one place the two kill kinds must

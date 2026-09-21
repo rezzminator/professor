@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // A Codex session that writes no rollout file holds no rollout descriptor

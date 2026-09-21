@@ -7,9 +7,9 @@ import (
 	"sort"
 	"testing"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestComposeCanonicalizesSymlinkedAccountRoots(t *testing.T) {
@@ -156,7 +156,7 @@ func TestLiveEnrichmentJoinsByIdentityAcrossPathAliases(t *testing.T) {
 		},
 		Options: Options{
 			View:       AllView,
-			CurrentDir: "/work/host-ops",
+			CurrentDir: "/work/projd",
 		},
 	}
 	output := Compose(input)
@@ -191,7 +191,7 @@ func TestLiveProjectFallsBackToPaneCurrentPath(t *testing.T) {
 				TranscriptPath: "/missing/zero-prompt.jsonl",
 			}},
 		},
-		Options: Options{View: AllView, CurrentDir: "/work/host-ops"},
+		Options: Options{View: AllView, CurrentDir: "/work/projd"},
 	})
 	row, found := rowByID(output.Rows, "zero-prompt")
 	if !found || row.Kind != LiveClaude || row.Project != "proja" ||
@@ -404,7 +404,7 @@ func TestBootingRowSurfacesFromCrumblessLiveAndResistsHiding(t *testing.T) {
 			}},
 		},
 		Killed:  []store.Killed{{ID: "cc-new-fixture-1", Engine: "cc"}},
-		Options: Options{View: DefaultView, CurrentDir: "/work/host-ops"},
+		Options: Options{View: DefaultView, CurrentDir: "/work/projd"},
 	}
 
 	output := Compose(input)

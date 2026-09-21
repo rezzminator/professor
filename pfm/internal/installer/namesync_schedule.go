@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // nameSyncTimerUnit is the systemd timer whose OnUnitInactiveSec carries the

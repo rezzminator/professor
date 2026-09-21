@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 func TestLiveBrowserWorkerFetch(t *testing.T) {

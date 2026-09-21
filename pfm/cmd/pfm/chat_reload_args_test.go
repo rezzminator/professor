@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 // The exact call that failed on a real host: a caller told "reload the cache

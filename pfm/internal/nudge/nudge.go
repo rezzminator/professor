@@ -18,8 +18,8 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func samplePath(sidDir, sessionID string) string {

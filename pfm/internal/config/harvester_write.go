@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 // writeAtomic is the harvester's config writer (harvester.go, migration.go), kept verbatim:

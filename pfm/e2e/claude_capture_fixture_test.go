@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestClaudeHarnessCaptureFixture(t *testing.T) {

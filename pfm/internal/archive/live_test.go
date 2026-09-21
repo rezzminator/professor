@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/gather"
 )
 
 // failingProc reports a specific process-table error, so a test can prove

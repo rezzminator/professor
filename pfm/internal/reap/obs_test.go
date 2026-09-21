@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/obs"
-	"hostops/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 type quietBusy struct{}

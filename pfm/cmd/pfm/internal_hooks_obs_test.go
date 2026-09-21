@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestRunInternalRecordsEveryDispatchUnderTheHooksComponent: the internal

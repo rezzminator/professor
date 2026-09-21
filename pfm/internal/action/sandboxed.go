@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // SandboxedCodexRequest is the launch-only portion of a Codex seat. The

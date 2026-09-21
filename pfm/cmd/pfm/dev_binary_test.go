@@ -21,9 +21,9 @@ func TestDevBinaryIsAbsentOrBuiltFromCurrentModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s build info: %v", path, err)
 	}
-	if info.Path != "hostops/pfm/cmd/pfm" {
+	if info.Path != "github.com/rezzminator/professor/pfm/cmd/pfm" {
 		t.Fatalf(
-			"%s was built from %q, want hostops/pfm/cmd/pfm; remove the stale binary",
+			"%s was built from %q, want github.com/rezzminator/professor/pfm/cmd/pfm; remove the stale binary",
 			path,
 			info.Path,
 		)

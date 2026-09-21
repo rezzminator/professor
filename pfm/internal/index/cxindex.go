@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strconv"
 
-	"hostops/pfm/internal/codexmeta"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func reloadCxNamesFromRoots(

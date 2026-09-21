@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 func TestEpicInjectionDedupeIsKeyedBySessionAndSlug(t *testing.T) {

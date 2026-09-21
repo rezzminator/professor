@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func TestHarvestRuntimeCarriesConfiguredScholarlyProviders(t *testing.T) {

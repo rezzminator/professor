@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // TestLockBeatReportsALostLock (L1-F9): beat must not silently succeed when

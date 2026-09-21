@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/action"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // fakeOpenTmux is action.TmuxClient for the open doors' jailed tests: it

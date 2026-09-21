@@ -11,7 +11,7 @@ import (
 	"syscall"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // armedRecord is the ONE post-command steer armed on a pane, kept beside the

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // lineRunner scripts a stdio worker that answers every request line with one

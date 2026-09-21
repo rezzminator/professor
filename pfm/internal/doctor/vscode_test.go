@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // TestDoctorReportsEachVSCodeProductLinkAndIndexState pins issue #24 9b: no

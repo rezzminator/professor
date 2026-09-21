@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // WatchOptions controls a blocking watch.

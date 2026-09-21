@@ -3,9 +3,9 @@ package gather
 import (
 	"context"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/index"
-	"hostops/pfm/internal/store"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/index"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 type gatherIndexSource struct{ id pfmengine.ID }

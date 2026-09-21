@@ -9,9 +9,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/fleetdb"
-	"hostops/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 // U1: TestChronoscopeScrubCutsThePastFromTheSameEvents pins the chronoscope's

@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/reload"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 )
 
 //go:embed assets

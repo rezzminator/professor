@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/compose"
-	"hostops/pfm/internal/headless"
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/resolve"
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 // TestMatchPrefersTheLiveSeat covers resolution: a name, an id, a socket, the

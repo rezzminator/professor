@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 func uintString(value uint64) string { return strconv.FormatUint(value, 10) }

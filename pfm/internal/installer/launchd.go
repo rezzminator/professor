@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/atomicfile"
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry

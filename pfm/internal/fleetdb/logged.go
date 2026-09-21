@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // kind names this database to the db component's records.

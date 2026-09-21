@@ -3,9 +3,9 @@ package doctor
 import (
 	"context"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/harvestpy"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // pinnedHarvestDoctor is the production conversion health check. Its Runner

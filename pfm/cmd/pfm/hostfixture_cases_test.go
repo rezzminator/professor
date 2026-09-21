@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	pfmconfig "hostops/pfm/internal/config"
-	"hostops/pfm/internal/hostfixture"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/hostfixture"
 )
 
 // TestRunRefusesRealHomeUnderNoHomeFixture pins hostfixture case 1 (NoHome)

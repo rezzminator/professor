@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
 // TestChatOpenScansReadOnly is the regression for chat.OpenID's fleet.Scan call: it

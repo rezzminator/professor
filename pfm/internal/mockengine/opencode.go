@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/sqlitedb"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/sqlitedb"
 )
 
 // openCodeInvocation is the OpenCode command line the mock understands:

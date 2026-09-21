@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"hostops/pfm/internal/deps"
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // openCodeProbeTimeout bounds ONE startup probe, never the wait for the

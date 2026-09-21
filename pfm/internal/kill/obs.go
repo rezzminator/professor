@@ -3,7 +3,7 @@ package kill
 import (
 	"context"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // killTrail opens the kill coordinator's state trail: a chat is `live`

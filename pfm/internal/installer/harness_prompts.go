@@ -6,8 +6,8 @@ import (
 	"path"
 	"path/filepath"
 
-	"hostops/pfm/internal/atomicfile"
-	pfmengine "hostops/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // harnessPromptsDirName is the embedded asset tree the parts come from and

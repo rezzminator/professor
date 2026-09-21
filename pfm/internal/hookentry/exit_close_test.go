@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/kill"
+	"github.com/rezzminator/professor/pfm/internal/kill"
 )
 
 func TestRunExitCloseGuards(t *testing.T) {

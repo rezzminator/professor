@@ -3,7 +3,7 @@ package mcpserv
 import (
 	"testing"
 
-	"hostops/pfm/internal/transcript"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // TestBoundTurnsCarriesToolCalls is a REGRESSION test for chat_read over a

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/obs"
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // fakeActionTmuxBinary plays tmux: exits 0 and prints nothing.

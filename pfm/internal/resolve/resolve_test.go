@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	pfmtmux "hostops/pfm/internal/tmux"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 type fakeTmux struct {

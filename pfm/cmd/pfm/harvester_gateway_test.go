@@ -14,9 +14,9 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"hostops/pfm/internal/config"
-	"hostops/pfm/internal/installer"
-	"hostops/pfm/internal/mcpserv"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
 func freeLoopbackPort(t *testing.T) int {

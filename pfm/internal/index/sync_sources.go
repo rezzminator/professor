@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // SyncClaude runs Claude's complete incremental transcript pass. It is

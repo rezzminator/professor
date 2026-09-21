@@ -1,6 +1,6 @@
 # pfmd — one long-running daemon behind every pfm surface
 
-**Status:** DESIGN — decisions below are the owner's and are settled; phases 1-5 are the delivery order. Every citation is `pfm/`-relative (module `hostops/pfm`).
+**Status:** DESIGN — decisions below are the owner's and are settled; phases 1-5 are the delivery order. Every citation is `pfm/`-relative (module `github.com/rezzminator/professor/pfm`).
 
 ## Contents
 

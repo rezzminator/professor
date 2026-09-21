@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/ask"
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/doctor"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/harvest"
-	"hostops/pfm/internal/harvestmcp"
+	"github.com/rezzminator/professor/pfm/internal/ask"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/doctor"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
+	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 )
 
 // retiredHarvesterServeFlags maps every flag the pre-config `pfm mcp harvester

@@ -7,7 +7,7 @@ import (
 	"io"
 	"strings"
 
-	"hostops/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // KillFront is the in-process kill command front injected by runInternal.

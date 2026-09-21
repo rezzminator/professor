@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/rearm"
+	"github.com/rezzminator/professor/pfm/internal/rearm"
 )
 
 // TestChatEndRemovesRoleCrumbOnKill pins T1 re-arm's cleanup half (behaviour

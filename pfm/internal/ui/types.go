@@ -4,10 +4,10 @@ import (
 	"context"
 	"io"
 
-	"hostops/pfm/internal/compose"
-	pfmengine "hostops/pfm/internal/engine"
-	"hostops/pfm/internal/fleetdb"
-	pfmstats "hostops/pfm/internal/stats"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	pfmstats "github.com/rezzminator/professor/pfm/internal/stats"
 )
 
 // Tab is one top-level picker body. Chats preserves the original picker and

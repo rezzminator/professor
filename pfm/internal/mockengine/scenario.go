@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
 // Environment the mock reads. MOCK_ENGINE_* is the only namespace it owns:

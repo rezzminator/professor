@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestRefreshCodexLineageFullDeltaAndUnrelatedFiles(t *testing.T) {

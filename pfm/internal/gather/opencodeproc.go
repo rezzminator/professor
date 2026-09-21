@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // OpenCodePaneTitlePrefix is what OpenCode's own terminal-title escape puts in

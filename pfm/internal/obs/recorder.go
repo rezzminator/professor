@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"hostops/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/clock"
 )
 
 // Record is one decoded activity line: the level and message slog wrote, and

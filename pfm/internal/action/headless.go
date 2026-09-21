@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	pfmconfig "hostops/pfm/internal/config"
-	pfmengine "hostops/pfm/internal/engine"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // HeadlessWidth and HeadlessHeight are the geometry a detached chat is born

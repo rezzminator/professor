@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
-	"hostops/pfm/internal/cli"
-	"hostops/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/cli"
+	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 )
 
 // runIssues lists the servicedesk complaint box agents file through the

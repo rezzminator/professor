@@ -3,7 +3,7 @@ package action
 import (
 	"context"
 
-	pfmconfig "hostops/pfm/internal/config"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 func testMachineConfig(home string) pfmconfig.Config {

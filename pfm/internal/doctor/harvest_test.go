@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/harvestpy"
+	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
 // writeProvisionedBrowserEnv materialises an environment directory whose

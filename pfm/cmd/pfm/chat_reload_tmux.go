@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"hostops/pfm/internal/reload"
-	pfmtmux "hostops/pfm/internal/tmux"
+	"github.com/rezzminator/professor/pfm/internal/reload"
+	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
 )
 
 // reloadCommandTmux is cmd/pfm's reload.Tmux implementation: every pane

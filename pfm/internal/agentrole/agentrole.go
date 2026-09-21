@@ -23,7 +23,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 // artifactKind is which subdirectory and file extension carry a role's

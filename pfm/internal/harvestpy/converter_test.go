@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // realPythonConverter runs the EMBEDDED converter.py under the host's own

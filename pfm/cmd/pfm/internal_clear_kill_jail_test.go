@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 func TestClaudeClearKillHookOwnsOnlySessionEndClear(t *testing.T) {

@@ -15,7 +15,7 @@ import (
 	"syscall"
 	"time"
 
-	pfmengine "hostops/pfm/internal/engine"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 var ErrBusy = errors.New("another agent open is already in flight")

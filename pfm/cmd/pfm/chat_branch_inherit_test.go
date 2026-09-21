@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"hostops/pfm/internal/testjail"
+	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
 func clearBranchCache1HEnv(t *testing.T) {

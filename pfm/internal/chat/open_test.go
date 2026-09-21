@@ -9,6 +9,10 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	"github.com/rezzminator/professor/pfm/internal/config"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -166,5 +170,100 @@ func TestOpenDetachedIDFallsBackToHomeWhenCWDIsGone(t *testing.T) {
 	}
 	if !strings.Contains(result.Detail, home) {
 		t.Fatalf("result detail = %q, want it to name the directory the chat was opened in", result.Detail)
+	}
+}
+
+func TestOpenDetachedTargetKeepsTheResolvedLiveSeat(t *testing.T) {
+	testjail.Fleet(t)
+	tmux := &fakeOpenTmux{alive: map[string]bool{"cc-shared": true}}
+	stubOpenExecutor(t, tmux)
+	target := headless.Chat{
+		Name: "second", ID: "split-second", Engine: pfmengine.Claude,
+		Path: "/jail/second.jsonl", CWD: "/work/second",
+		Socket: "cc-shared", Session: "renamed", Pane: "%8", Live: true,
+	}
+	result, err := OpenDetachedTarget(context.Background(), target, io.Discard, nil)
+	if err != nil {
+		t.Fatalf("OpenDetachedTarget() error = %v", err)
+	}
+	if result.State != "live" || result.Name != target.Name || result.Socket != target.Socket {
+		t.Fatalf("OpenDetachedTarget() = %+v, want exact live target %+v", result, target)
+	}
+	if len(tmux.created) != 0 {
+		t.Fatalf("OpenDetachedTarget() spawned %d chats for an already-live pane", len(tmux.created))
+	}
+}
+
+func TestOpenDetachedTargetChecksTheResolvedSocketBeforeReportingLive(t *testing.T) {
+	testjail.Fleet(t)
+	tmux := &fakeOpenTmux{alive: map[string]bool{}}
+	stubOpenExecutor(t, tmux)
+	target := headless.Chat{
+		Name: "gone", ID: "a1111111-1111-4111-8111-111111111111", Engine: pfmengine.Claude,
+		CWD: t.TempDir(), Socket: "cc-gone", Session: "renamed", Pane: "%8", Live: true,
+	}
+	result, err := OpenDetachedTarget(context.Background(), target, io.Discard, nil)
+	if err != nil {
+		t.Fatalf("OpenDetachedTarget() error = %v", err)
+	}
+	if result.State != "opened" || len(tmux.created) != 1 {
+		t.Fatalf("dead resolved socket returned %+v and spawned %d chats", result, len(tmux.created))
+	}
+}
+
+func TestExactAgentRowRetainsOwningConfiguration(t *testing.T) {
+	target := headless.Chat{
+		Name: "agent", ID: "a1111111-1111-4111-8111-111111111111",
+		Engine: pfmengine.Claude, CWD: "/work", Live: true,
+	}
+	want := compose.Row{
+		Kind: compose.Agent, ID: target.ID, Name: target.Name, CWD: target.CWD,
+		ConfigDir: "/accounts/secondary",
+	}
+	got, found := exactAgentRow([]compose.Row{
+		{Kind: compose.ResumeClaude, ID: target.ID},
+		want,
+	}, target)
+	if !found || got.ConfigDir != want.ConfigDir {
+		t.Fatalf("exactAgentRow() = %+v found=%t, want config dir %q", got, found, want.ConfigDir)
+	}
+}
+
+type openAgentProcesses struct {
+	id     string
+	killed []int
+}
+
+func (processes *openAgentProcesses) Processes(context.Context) ([]action.Process, error) {
+	return []action.Process{{PID: 4242, Argv: []string{"claude", "--session-id", processes.id}}}, nil
+}
+
+func (processes *openAgentProcesses) Terminate(pid int) error {
+	processes.killed = append(processes.killed, pid)
+	return nil
+}
+
+func TestOpenDetachedTargetKeepsAgentRouterSemantics(t *testing.T) {
+	testjail.Fleet(t)
+	const id = "a1111111-1111-4111-8111-111111111111"
+	tmux := &fakeOpenTmux{alive: map[string]bool{}}
+	processes := &openAgentProcesses{id: id}
+	previous := newOpenExecutor
+	t.Cleanup(func() { newOpenExecutor = previous })
+	newOpenExecutor = func(dependencies action.Dependencies) (*action.Executor, error) {
+		dependencies.Tmux = tmux
+		dependencies.Processes = processes
+		return previous(dependencies)
+	}
+	effective, err := config.RuntimeOrDefault(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := compose.Row{Kind: compose.Agent, Name: "agent", ID: id, CWD: t.TempDir()}
+	if _, err := openDetachedResolvedRow(context.Background(), row, io.Discard, effective); err != nil {
+		t.Fatal(err)
+	}
+	if len(processes.killed) != 0 {
+		t.Fatalf("opening the live agent terminated pids %v", processes.killed)
 	}
 }

@@ -2,6 +2,7 @@ package testjail
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -36,6 +37,84 @@ func TestRunPinsGoCacheOutsideTheJail(t *testing.T) {
 			strings.HasPrefix(value, home+string(filepath.Separator)) {
 			t.Fatalf("%s %q sits under the jail (root %s, home %s)", name, value, root, home)
 		}
+	}
+}
+
+func TestPinGoDirsPinsTelemetryOutsideTheJail(t *testing.T) {
+	t.Setenv("TEST_TELEMETRY_DIR", "")
+	t.Setenv("GOMODCACHE", "")
+	if code := pinGoDirs(); code != 0 {
+		t.Fatalf("pin Go directories code=%d", code)
+	}
+
+	root := Fleet(t)
+	telemetryDirectory := os.Getenv("TEST_TELEMETRY_DIR")
+	if telemetryDirectory == "" {
+		t.Fatal("TEST_TELEMETRY_DIR is unset after pinGoDirs")
+	}
+	if !filepath.IsAbs(telemetryDirectory) {
+		t.Fatalf("TEST_TELEMETRY_DIR %q is not absolute", telemetryDirectory)
+	}
+	wantTelemetry := filepath.Join(os.Getenv("GOCACHE"), "telemetry")
+	if telemetryDirectory != wantTelemetry {
+		t.Fatalf("TEST_TELEMETRY_DIR=%q, want %q under GOCACHE", telemetryDirectory, wantTelemetry)
+	}
+	if os.Getenv("GOMODCACHE") == "" {
+		t.Fatal("GOMODCACHE is unset after pinGoDirs")
+	}
+	if strings.HasPrefix(telemetryDirectory, root+string(filepath.Separator)) {
+		t.Fatalf("TEST_TELEMETRY_DIR %q sits under the fleet root %q", telemetryDirectory, root)
+	}
+	assertGoTelemetryDirectory(t, telemetryDirectory, root)
+}
+
+func TestPinGoDirsPreservesConfiguredGoCacheDirectories(t *testing.T) {
+	configured := map[string]string{
+		"GOCACHE":    filepath.Join(string(filepath.Separator), "configured", "build-cache"),
+		"GOPATH":     filepath.Join(string(filepath.Separator), "configured", "go-path"),
+		"GOMODCACHE": filepath.Join(string(filepath.Separator), "configured", "module-cache"),
+	}
+	for name, value := range configured {
+		t.Setenv(name, value)
+	}
+	t.Setenv("TEST_TELEMETRY_DIR", filepath.Join(string(filepath.Separator), "configured", "telemetry"))
+	if code := pinGoDirs(); code != 0 {
+		t.Fatalf("pin Go directories code=%d", code)
+	}
+	for name, want := range configured {
+		if got := os.Getenv(name); got != want {
+			t.Errorf("%s=%q, want configured directory %q", name, got, want)
+		}
+	}
+}
+
+func TestPinGoDirsPreservesConfiguredTelemetryDirectory(t *testing.T) {
+	configured := filepath.Join(os.Getenv("GOCACHE"), "configured-telemetry")
+	t.Setenv("TEST_TELEMETRY_DIR", configured)
+	if code := pinGoDirs(); code != 0 {
+		t.Fatalf("pin Go directories code=%d", code)
+	}
+
+	root := Fleet(t)
+	if got := os.Getenv("TEST_TELEMETRY_DIR"); got != configured {
+		t.Fatalf("TEST_TELEMETRY_DIR=%q, want configured directory %q", got, configured)
+	}
+	assertGoTelemetryDirectory(t, configured, root)
+}
+
+func assertGoTelemetryDirectory(t *testing.T, want, root string) {
+	t.Helper()
+	command := exec.Command("go", "env", "GOTELEMETRYDIR")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("query Go telemetry directory: %v: %s", err, output)
+	}
+	if got := strings.TrimSpace(string(output)); got != want {
+		t.Fatalf("go env GOTELEMETRYDIR=%q, want inherited TEST_TELEMETRY_DIR %q", got, want)
+	}
+	jailedTelemetry := filepath.Join(root, "home", ".config", "go", "telemetry")
+	if _, err := os.Stat(jailedTelemetry); !os.IsNotExist(err) {
+		t.Fatalf("jailed Go telemetry directory %q exists or could not be checked: %v", jailedTelemetry, err)
 	}
 }
 

@@ -163,7 +163,7 @@ gate: fmt-check lint-new vet arch test iso ## Everything a change must pass befo
 
 # -------------------------------------------------------------- install ----
 
-install: ## Swap in a new build atomically, restart the daemon, then sweep stale processes — any failure rolls back and sweeps nothing
+install: ## Swap in a new build, restart the daemon, sweep obsolete processes, and keep compatible stdio proxies
 	@$(MAKE) --no-print-directory host-install
 	@if ! $(MAKE) --no-print-directory mcp-restart; then \
 	  echo "install: FAILED at the MCP restart — rolling back to $(BIN).prev; no process was touched" >&2; \
@@ -172,7 +172,7 @@ install: ## Swap in a new build atomically, restart the daemon, then sweep stale
 	fi
 	@$(MAKE) --no-print-directory sweep-stale
 	@echo
-	@echo "install: complete — binary swapped, MCP daemon restarted, stale processes swept."
+	@echo "install: complete — binary swapped, MCP daemon restarted, obsolete processes swept; compatible stdio proxies kept."
 	@# Order is the safety: nothing is killed until the new binary is in place
 	@# AND the daemon is serving it. A failed build or smoke test changes
 	@# nothing; a failed restart restores the previous binary. Only a fully
@@ -266,7 +266,7 @@ stale: ## List pfm processes still running a replaced binary (Linux and macOS)
 	@# macOS — is not the file now at $(BIN), by device and inode. "none" and
 	@# "could not look" print differently and the latter exits non-zero.
 
-sweep-stale: ## Kill every pfm process still running a replaced binary, then prove none is left
+sweep-stale: ## Kill obsolete pfm processes running a replaced binary, keep compatible stdio proxies, then prove none obsolete remain
 	@"$(BIN)" internal stale --sweep --binary "$(BIN)"
 	@# TERM, KILL after 3s, then a re-scan that fails loudly on a survivor. It
 	@# signals only images that are not $(BIN), so the binary just installed —

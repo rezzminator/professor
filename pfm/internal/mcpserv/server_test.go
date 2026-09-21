@@ -132,7 +132,7 @@ func (resolveGateInjector) ScheduleSelfCompact(context.Context, string, []string
 	return inject.Result{}, nil
 }
 
-func TestChatResolveCxWindowUsesTheInjectionResolutionGate(t *testing.T) {
+func TestChatResolveEveryKindUsesTheInjectionResolutionGate(t *testing.T) {
 	t.Setenv("PFM_TMUX_DIR", t.TempDir())
 	t.Setenv("PFM_SID_DIR", t.TempDir())
 	raw, err := resolve.New(nil)
@@ -145,12 +145,14 @@ func TestChatResolveCxWindowUsesTheInjectionResolutionGate(t *testing.T) {
 		injector: resolveGateInjector{target: want},
 	})
 	protocol := connectInMemory(t, service.Server())
-	resolved := callTool[ResolveOutput](t, protocol.clientSession, "chat_resolve", ResolveInput{
-		Kind: "cxwin", Name: "same name",
-	})
-	if resolved.Status != "ok" || resolved.Code != 0 ||
-		resolved.SocketPath != want.SocketPath || resolved.Pane != want.Pane {
-		t.Fatalf("chat_resolve=%+v, want injection gate target %+v", resolved, want)
+	for _, kind := range []string{"label", "session", "cxwin"} {
+		resolved := callTool[ResolveOutput](t, protocol.clientSession, "chat_resolve", ResolveInput{
+			Kind: kind, Name: "same name",
+		})
+		if resolved.Status != "ok" || resolved.Code != 0 ||
+			resolved.SocketPath != want.SocketPath || resolved.Pane != want.Pane {
+			t.Fatalf("chat_resolve kind %s=%+v, want injection gate target %+v", kind, resolved, want)
+		}
 	}
 }
 

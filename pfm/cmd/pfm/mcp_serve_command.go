@@ -112,19 +112,20 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 	options.External = external
 	options.Clock = clk
 	options.StartedAt = clk.Now().UTC()
-	server := &http.Server{
-		Handler:           mcpserv.NewDaemonHandler(options),
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      5 * time.Minute,
-		IdleTimeout:       2 * time.Minute,
-	}
+	server := newLoopbackMCPServer(mcpserv.NewDaemonHandler(options))
 	fmt.Fprintf(
 		stdout, "pfm mcp serve\thttp://%s\tchat=%s\tharvester=%s\tharvester_external=%s\n",
 		address, enabledState(chatEnabled), enabledState(harvesterEnabled), *external.Load(),
 	)
 	listenerOwned = false // http.Server.Serve closes its listener before returning.
 	return binwatch.Serve(server, listener, stderr)
+}
+
+func newLoopbackMCPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler: handler, ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute,
+	}
 }
 
 // startHarvesterExternal opens the authenticated external harvester gateway on

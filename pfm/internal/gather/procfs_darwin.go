@@ -77,6 +77,25 @@ func (proc *DarwinProcFS) Environ(pid int) (map[string]string, error) {
 	return environment, nil
 }
 
+// ProcessIdentity returns metadata the kernel exposes without protected argv.
+func (proc *DarwinProcFS) ProcessIdentity(pid int) (ProcessIdentity, error) {
+	process, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+	if err != nil {
+		return ProcessIdentity{}, fmt.Errorf("read process identity for pid %d via kern.proc.pid: %w", pid, err)
+	}
+	command := make([]byte, 0, len(process.Proc.P_comm))
+	for _, character := range process.Proc.P_comm {
+		if character == 0 {
+			break
+		}
+		command = append(command, byte(character))
+	}
+	return ProcessIdentity{
+		EffectiveUID: process.Eproc.Ucred.Uid,
+		Command:      string(command),
+	}, nil
+}
+
 // Stat returns the parent pid and a birth stamp.
 //
 // StartTime is NOT the same unit as Linux's: there it is kernel ticks since

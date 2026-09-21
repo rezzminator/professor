@@ -489,6 +489,49 @@ type errNoSession struct{}
 
 func (errNoSession) Error() string { return "no server running on socket" }
 
+// cancelledCapturePane models the context-bound tmux capture process: it
+// blocks until cancellation kills the command, then reports the process error.
+type cancelledCapturePane struct {
+	fakeCodex
+	started chan struct{}
+}
+
+func (fake *cancelledCapturePane) Capture(ctx context.Context, _, _ string) (string, error) {
+	close(fake.started)
+	<-ctx.Done()
+	return "", errors.New("signal: killed")
+}
+
+func TestChatCancellationWinsKilledBootCapture(t *testing.T) {
+	fake := &cancelledCapturePane{started: make(chan struct{})}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	runDone := make(chan error, 1)
+	go func() {
+		_, err := Run(ctx, fake, codexRequest())
+		runDone <- err
+	}()
+
+	select {
+	case <-fake.started:
+		cancel()
+	case <-time.After(time.Second):
+		t.Fatal("boot capture did not start")
+	}
+
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run() error = %v, want context.Canceled", err)
+		}
+		if strings.Contains(err.Error(), "died at birth") {
+			t.Fatalf("Run() misclassified cancellation as chat death: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not return after cancellation")
+	}
+}
+
 func TestChatThatDiesAtBirthIsReportedAsSuch(t *testing.T) {
 	fake := &deadPane{}
 	_, err := Run(context.Background(), fake, codexRequest())

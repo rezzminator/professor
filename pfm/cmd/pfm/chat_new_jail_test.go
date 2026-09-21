@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,9 +14,17 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
+	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // stubRecorder is the half of a stub engine that makes it a CHAT rather than a
@@ -629,4 +639,240 @@ func TestMachineConfigChangesTheActualLaunchCommands(t *testing.T) {
 			}
 		})
 	}
+}
+
+type chatNewCallerVerbs struct {
+	row compose.Row
+}
+
+func (verbs chatNewCallerVerbs) Last(context.Context, pfmchat.LastRequest) (pfmchat.LastResult, error) {
+	return pfmchat.LastResult{}, errors.New("unexpected chat last")
+}
+
+func (verbs chatNewCallerVerbs) Status(context.Context, pfmchat.StatusRequest) (headless.Status, error) {
+	return headless.Status{}, errors.New("unexpected chat status")
+}
+
+func (verbs chatNewCallerVerbs) List(context.Context, pfmchat.ListRequest) (pfmchat.ListResult, error) {
+	return pfmchat.ListResult{Rows: []compose.Row{verbs.row}, Matched: 1}, nil
+}
+
+func (verbs chatNewCallerVerbs) Find(context.Context, pfmchat.FindRequest) ([]pfmchat.TranscriptMatch, error) {
+	return nil, errors.New("unexpected chat find")
+}
+
+func (verbs chatNewCallerVerbs) Read(
+	context.Context,
+	string,
+	int,
+) (headless.Chat, []transcript.Entry, bool, error) {
+	return headless.Chat{}, nil, false, errors.New("unexpected chat read")
+}
+
+func callJailedChatNew(
+	t *testing.T,
+	runtime commandRuntime,
+	row compose.Row,
+	input mcpserv.NewInput,
+) {
+	t.Helper()
+	bridge := mcpRuntime(runtime, false)
+	bridge.Chat = chatNewCallerVerbs{row: row}
+	service, err := mcpserv.NewConfigured("test", io.Discard, bridge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = service.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := service.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Meta: mcp.Meta{"pfmProxy": map[string]any{
+			"v": mcpserv.ProxyWireVersion, "session": row.SessionName, "socketName": row.Socket,
+			"socketPath": filepath.Join(runtime.Paths.TmuxDir, row.Socket), "pane": row.PaneID,
+			"engine": "claude", "id": row.ID,
+		}}, Name: "chat_new", Arguments: input,
+	})
+	if err != nil {
+		t.Fatalf("chat_new: %v", err)
+	}
+	if result.IsError {
+		content, marshalErr := json.Marshal(result.Content)
+		if marshalErr != nil {
+			t.Fatalf("chat_new returned tool error %#v (encode error: %v)", result.Content, marshalErr)
+		}
+		t.Fatalf("chat_new returned tool error: %s", content)
+	}
+}
+
+func assertJailedSpawnLineage(t *testing.T, jail *runJail, parent, forbiddenParent, wantCWD string) {
+	t.Helper()
+	entries, err := os.ReadDir(jail.tmuxDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("jailed socket count=%d err=%v", len(entries), err)
+	}
+	socket := entries[0].Name()
+	state := fleetdb.OpenSharedState(context.Background(), paths.Values{
+		FleetDB: filepath.Join(jail.root, "home", ".cc", "fleet.db"),
+	})
+	t.Cleanup(func() { _ = state.Close() })
+	children, found, err := state.Children(context.Background(), fleetdb.KindNew, parent)
+	if err != nil || !found || len(children) != 1 || children[0] != socket {
+		t.Fatalf("children[%q] = %q found=%v err=%v, want %q", parent, children, found, err, socket)
+	}
+	if forbiddenParent != "" {
+		children, _, err = state.Children(context.Background(), fleetdb.KindNew, forbiddenParent)
+		if err != nil || len(children) != 0 {
+			t.Fatalf("children[%q] = %q err=%v, want none", forbiddenParent, children, err)
+		}
+	}
+	events, err := state.CommsSince(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].SenderSession != parent {
+		t.Fatalf("spawn events = %#v, want request parent %q", events, parent)
+	}
+	transcriptText := jail.await(t, filepath.Join("claude", "stub", filepath.Base(jail.transcript)), "lineage")
+	if !strings.Contains(transcriptText, `"cwd":"`+wantCWD+`"`) {
+		t.Fatalf("spawn transcript = %q, want cwd %q", transcriptText, wantCWD)
+	}
+}
+
+func TestMCPChatNewResolvesRelativeCWDAndUsesRequestParent(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	callerDir := filepath.Join(jail.root, "work")
+	childDir := filepath.Join(callerDir, "child")
+	if err := os.MkdirAll(childDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const requestParent = "request-caller"
+	const daemonParent = "daemon-caller"
+	t.Setenv("CLAUDE_CODE_SESSION_ID", daemonParent)
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callJailedChatNew(t, runtime, compose.Row{
+		Kind: compose.LiveClaude, ID: requestParent, CWD: callerDir,
+		SessionName: "caller-seat", Socket: "caller-socket", PaneID: "%1",
+	}, mcpserv.NewInput{
+		Name: "relative child", Engine: "claude", CWD: "child", Prompt: "lineage prompt",
+	})
+	assertJailedSpawnLineage(t, jail, requestParent, daemonParent, childDir)
+}
+
+func TestDirectChatNewKeepsAmbientParent(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+	const parent = "ambient-caller"
+	t.Setenv("CLAUDE_CODE_SESSION_ID", parent)
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"chat", "new", "--engine", "claude", "--name", "direct child",
+		"--cwd", filepath.Join(jail.root, "work"), "lineage prompt",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("chat new exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	assertJailedSpawnLineage(t, jail, parent, "", filepath.Join(jail.root, "work"))
+}
+
+func TestParentChatIDUsesScopedCallerIncludingEmptyID(t *testing.T) {
+	env := &paths.MapEnv{Values: map[string]string{
+		"CLAUDE_CODE_SESSION_ID": "daemon-caller",
+		"CODEX_THREAD_ID":        "daemon-codex",
+	}}
+	if got := parentChatID(context.Background(), env); got != "daemon-caller" {
+		t.Fatalf("direct CLI parent = %q, want daemon environment parent", got)
+	}
+	ctx := pfmchat.WithResolvedSelf(context.Background(), headless.Chat{ID: "request-caller"})
+	if got := parentChatID(ctx, env); got != "request-caller" {
+		t.Fatalf("request parent = %q, want request caller", got)
+	}
+	ctx = pfmchat.WithResolvedSelf(context.Background(), headless.Chat{})
+	if got := parentChatID(ctx, env); got != "" {
+		t.Fatalf("empty scoped parent = %q, want no ambient fallback", got)
+	}
+}
+
+func TestChatNewCancellationReachesSpawnAndAwait(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	t.Run("before spawn", func(t *testing.T) {
+		jail := newRunJail(t)
+		defer jail.killSockets(t)
+		runtime, err := pfmconfig.LoadRuntime("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(pfmchat.WithResolvedSelf(
+			context.Background(), headless.Chat{ID: "request-caller", CWD: filepath.Join(jail.root, "work")},
+		))
+		cancel()
+		var stdout, stderr bytes.Buffer
+		code := runChatWithRuntime([]string{
+			"new", "--engine", "claude", "--name", "cancelled child",
+			"--cwd", filepath.Join(jail.root, "work"),
+		}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
+		if code != 1 || !strings.Contains(stderr.String(), context.Canceled.Error()) {
+			t.Fatalf("cancelled spawn exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+		if entries, readErr := os.ReadDir(jail.tmuxDir); readErr != nil || len(entries) != 0 {
+			t.Fatalf("cancelled spawn sockets=%v err=%v", entries, readErr)
+		}
+	})
+
+	t.Run("during await", func(t *testing.T) {
+		jail := newRunJail(t)
+		defer jail.killSockets(t)
+		t.Setenv("CC_STUB_MUTE", "1")
+		runtime, err := pfmconfig.LoadRuntime("")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithCancel(pfmchat.WithResolvedSelf(
+			context.Background(), headless.Chat{ID: "request-caller", CWD: filepath.Join(jail.root, "work")},
+		))
+		defer cancel()
+		go func() {
+			deadline := time.Now().Add(5 * time.Second)
+			for time.Now().Before(deadline) {
+				content, readErr := os.ReadFile(jail.transcript)
+				if readErr == nil && strings.Contains(string(content), "cancel await") {
+					cancel()
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+		var stdout, stderr bytes.Buffer
+		code := runChatWithRuntime([]string{
+			"new", "--engine", "claude", "--name", "await child",
+			"--cwd", filepath.Join(jail.root, "work"), "--await", "--timeout", "1", "cancel await",
+		}, strings.NewReader(""), &stdout, &stderr, runtime, ctx)
+		if code != 1 || !strings.Contains(stderr.String(), context.Canceled.Error()) ||
+			strings.Contains(stderr.String(), "died at birth") {
+			t.Fatalf("cancelled await exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		}
+	})
 }

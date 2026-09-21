@@ -16,9 +16,19 @@ func runtimeForPort(port int) pfmconfig.Runtime {
 	return pfmconfig.Runtime{
 		Version: "v1.0.0",
 		Config: pfmconfig.Config{
-			MCP: pfmconfig.MCPConfig{HTTP: pfmconfig.MCPHTTP{Port: port}},
+			MCP:        pfmconfig.MCPConfig{HTTP: pfmconfig.MCPHTTP{Port: port}},
+			MCPServers: map[string]pfmconfig.MCPServer{"chat": {Enabled: true}},
 		},
 	}
+}
+
+func runtimeForDisabledMCPPort(port int) pfmconfig.Runtime {
+	runtime := runtimeForPort(port)
+	runtime.Config.MCPServers = map[string]pfmconfig.MCPServer{
+		"chat":                       {Enabled: false},
+		pfmconfig.MCPServerHarvester: {Enabled: false},
+	}
+	return runtime
 }
 
 // TestMCPDaemonDoctorNamesUnreachableWhenNothingListens is the "our daemon
@@ -103,5 +113,77 @@ func TestMCPDaemonDoctorReportsRunningWithNoWarnings(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "doctor: mcp daemon=running pid=1234") {
 		t.Fatalf("output = %q, want the running row", output.String())
+	}
+}
+
+func TestMCPDaemonDoctorReportsDisabledConfigWhenNothingListens(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	warnings := printMCPDaemonDoctor(&output, runtimeForDisabledMCPPort(port))
+	if warnings != 0 {
+		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	}
+	if !strings.Contains(output.String(), "doctor: mcp daemon=unreachable disabled-in-config") {
+		t.Fatalf("output = %q, want the disabled-in-config unreachable row", output.String())
+	}
+}
+
+func TestMCPDaemonDoctorReportsRunningWhenConfigIsDisabled(t *testing.T) {
+	healthy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(
+			`{"pfmVersion":"v1.0.0","protocolVersion":"1","pid":1234,"startTime":"now","endpoint":"http://127.0.0.1"}`,
+		))
+	}))
+	defer healthy.Close()
+	_, portStr, err := net.SplitHostPort(strings.TrimPrefix(healthy.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	warnings := printMCPDaemonDoctor(&output, runtimeForDisabledMCPPort(port))
+	if warnings != 0 {
+		t.Fatalf("warnings=%d, want 0\n%s", warnings, output.String())
+	}
+	if !strings.Contains(output.String(), "doctor: mcp daemon=running pid=1234") {
+		t.Fatalf("output = %q, want the running row despite disabled config", output.String())
+	}
+}
+
+func TestDoctorPrintsDaemonAndServeRowsWhenMCPConfigIsDisabled(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runtime := buildCleanDoctorHome(t)
+	runtime.Config.MCP.HTTP.Port = port
+	runtime.Config.MCPServers = runtimeForDisabledMCPPort(port).Config.MCPServers
+
+	var stdout, stderr bytes.Buffer
+	runDoctor(nil, &stdout, &stderr, runtime)
+	for _, want := range []string{
+		"doctor: mcp daemon=unreachable disabled-in-config",
+		"doctor: mcp-serve clean checked=0",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
+		}
 	}
 }

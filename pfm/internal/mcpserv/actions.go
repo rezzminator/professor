@@ -12,6 +12,8 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
 const chatCommand = "chat"
@@ -33,7 +35,7 @@ func (service *Service) chatLast(
 	if service.backend.chat == nil {
 		return nil, LastOutput{}, fmt.Errorf("chat_last verb is not configured")
 	}
-	target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, LastOutput{}, err
 	}
@@ -70,7 +72,7 @@ func (service *Service) chatStatus(
 	if service.backend.chat == nil {
 		return nil, StatusOutput{}, fmt.Errorf("chat_status verb is not configured")
 	}
-	target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, StatusOutput{}, err
 	}
@@ -94,25 +96,48 @@ func (service *Service) chatNew(
 		return nil, ActionOutput{}, fmt.Errorf("name is required")
 	}
 	args := []string{chatCommand, "new", "--name", input.Name}
+	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
+	if err != nil {
+		return nil, ActionOutput{}, err
+	}
+	if !caller.valid && caller.present {
+		if refused, detail := service.selfCallerRefusal(caller); refused {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: resolve caller: %s", detail)
+		}
+	}
+	var self headless.Chat
+	if caller.valid {
+		self, err = service.resolvedSelf(ctx, caller)
+		if err != nil {
+			return nil, ActionOutput{}, fmt.Errorf("chat_new: resolve caller: %w", err)
+		}
+		ctx = chat.WithResolvedSelf(ctx, self)
+	}
 	if input.Engine != "" {
 		args = append(args, "--engine", input.Engine)
+	} else if caller.valid && caller.row.Engine != "" {
+		args = append(args, "--engine", string(caller.row.Engine))
 	}
 	if input.CWD != "" {
-		args = append(args, "--cwd", input.CWD)
-	} else {
-		// Canonical dir: a chat spawned over MCP is born in its CALLER's
-		// project directory, not wherever the MCP server process happens to
-		// sit — the same request-scoped identity every caller-bound tool
-		// resolves from. An
-		// unresolvable caller keeps the explicit-only behaviour (no --cwd)
-		// rather than guessing a home.
-		caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
-		if err != nil {
-			return nil, ActionOutput{}, err
+		directory := input.CWD
+		if caller.valid && !filepath.IsAbs(directory) {
+			if strings.TrimSpace(self.CWD) == "" {
+				return nil, ActionOutput{}, fmt.Errorf(
+					"chat_new: caller working directory is required to resolve relative cwd %q",
+					directory,
+				)
+			}
+			if !filepath.IsAbs(self.CWD) {
+				return nil, ActionOutput{}, fmt.Errorf(
+					"chat_new: caller working directory %q is not absolute",
+					self.CWD,
+				)
+			}
+			directory = filepath.Join(self.CWD, directory)
 		}
-		if caller.valid && strings.TrimSpace(caller.row.Dir) != "" {
-			args = append(args, "--cwd", caller.row.Dir)
-		}
+		args = append(args, "--cwd", directory)
+	} else if caller.valid && strings.TrimSpace(self.CWD) != "" {
+		args = append(args, "--cwd", self.CWD)
 	}
 	if input.Account != 0 {
 		args = append(args, "--account", fmt.Sprint(input.Account))
@@ -159,7 +184,7 @@ func (service *Service) chatOpen(
 	request *mcp.CallToolRequest,
 	input TargetInput,
 ) (*mcp.CallToolResult, ActionOutput, error) {
-	target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
@@ -196,7 +221,7 @@ func (service *Service) chatOpenDetached(
 		output := ActionOutput{Status: status, Code: code, Message: err.Error()}
 		return nil, output, fmt.Errorf("chat_open: %w", err)
 	}
-	result, err := chat.OpenDetachedID(ctx, resolved.ID, service.backend.warnings, &effective)
+	result, err := chat.OpenDetachedTarget(ctx, resolved, service.backend.warnings, &effective)
 	if err != nil {
 		output := ActionOutput{Status: statusError, Code: 1, Message: err.Error()}
 		return nil, output, fmt.Errorf("chat_open: %w", err)
@@ -216,7 +241,7 @@ func (service *Service) chatName(
 	if strings.TrimSpace(input.Name) == "" || strings.ContainsAny(input.Name, "\r\n\x00") {
 		return nil, ActionOutput{}, fmt.Errorf("name must be one non-empty line")
 	}
-	target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
@@ -228,7 +253,7 @@ func (service *Service) chatKill(
 	request *mcp.CallToolRequest,
 	input KillInput,
 ) (*mcp.CallToolResult, ActionOutput, error) {
-	target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
@@ -244,7 +269,7 @@ func (service *Service) chatUnkill(
 	request *mcp.CallToolRequest,
 	input TargetInput,
 ) (*mcp.CallToolResult, ActionOutput, error) {
-	target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	ctx, target, err := service.cliTargetForRequest(ctx, request, input.Target)
 	if err != nil {
 		return nil, ActionOutput{}, err
 	}
@@ -266,46 +291,133 @@ func (service *Service) chatSave(
 			input.Target, strings.TrimSpace(input.Target),
 		)
 	}
-	target, err := service.cliTargetForRequest(ctx, request, input.Target)
+	target := input.Target
+	transcriptPath := input.Transcript
+	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
-		return nil, ActionOutput{}, err
+		return nil, ActionOutput{}, fmt.Errorf("chat_save: resolve caller: %w", err)
+	}
+	needsCaller := !filepath.IsAbs(target) || transcriptPath == "" || !filepath.IsAbs(transcriptPath)
+	if !caller.valid {
+		if refused, detail := service.selfCallerRefusal(caller); needsCaller && refused {
+			return nil, ActionOutput{}, fmt.Errorf("chat_save: resolve caller: %s", detail)
+		}
+	} else {
+		self, resolveErr := service.resolvedSelf(ctx, caller)
+		if resolveErr != nil {
+			return nil, ActionOutput{}, fmt.Errorf("chat_save: resolve caller: %w", resolveErr)
+		}
+		ctx = chat.WithResolvedSelf(ctx, self)
+		if !filepath.IsAbs(target) || (transcriptPath != "" && !filepath.IsAbs(transcriptPath)) {
+			if strings.TrimSpace(self.CWD) == "" {
+				return nil, ActionOutput{}, fmt.Errorf(
+					"chat_save: caller working directory is required to resolve relative paths",
+				)
+			}
+			if !filepath.IsAbs(self.CWD) {
+				return nil, ActionOutput{}, fmt.Errorf(
+					"chat_save: caller working directory %q is not absolute",
+					self.CWD,
+				)
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(self.CWD, target)
+			}
+			if transcriptPath != "" && !filepath.IsAbs(transcriptPath) {
+				transcriptPath = filepath.Join(self.CWD, transcriptPath)
+			}
+		}
+		if transcriptPath == "" {
+			if strings.TrimSpace(self.Path) == "" {
+				return nil, ActionOutput{}, fmt.Errorf(
+					"chat_save: caller transcript path is required when transcript is omitted",
+				)
+			}
+			transcriptPath = self.Path
+		}
 	}
 	args := []string{chatCommand, "save", target}
-	if input.Transcript != "" {
-		args = append(args, input.Transcript)
+	if transcriptPath != "" {
+		args = append(args, transcriptPath)
 	}
 	return service.cliAction(ctx, args...)
 }
 
-// cliTargetForRequest translates a request-scoped Codex self into the stable
-// thread id understood by the in-process CLI dispatcher. The HTTP daemon has
-// no tmux ancestry of its own, so forwarding the literal word "self" asks the
-// daemon who it is and necessarily resolves nothing.
+// cliTargetForRequest binds a validated request caller to context while
+// preserving the literal self/me or raw-pane target consumed by typed verbs
+// and the in-process CLI dispatcher. The HTTP daemon has no caller identity of
+// its own, so the context carries the exact socket, pane and transcript instead.
 func (service *Service) cliTargetForRequest(
 	ctx context.Context,
 	request *mcp.CallToolRequest,
 	target string,
-) (string, error) {
-	if !selfTarget(target) {
-		return target, nil
+) (context.Context, string, error) {
+	normalized := resolve.NormalizeTarget(target)
+	isSelf := selfTarget(normalized)
+	if !isSelf && !resolve.IsRawPane(normalized) {
+		return ctx, target, nil
 	}
 	caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
 	if err != nil {
-		return "", err
+		return ctx, "", err
 	}
 	// The present/valid/ambient tri-state is decided in exactly one place —
 	// selfCallerRefusal (server.go) — so this door and every handler that
 	// refuses "self" can never drift apart on what counts as identity.
 	if refused, detail := service.selfCallerRefusal(caller); refused {
-		return "", fmt.Errorf("resolve MCP self: %s", detail)
+		if !isSelf {
+			return ctx, "", fmt.Errorf("resolve MCP raw pane: %s", detail)
+		}
+		return ctx, "", fmt.Errorf("resolve MCP self: %s", detail)
 	}
 	if !caller.valid {
 		// Not refused and not valid is the stdio server's ambient case: the
 		// word "self" travels on to the CLI, which derives the identity from
 		// the process that launched this server.
-		return target, nil
+		return ctx, target, nil
 	}
-	return caller.identity.ID, nil
+	self, err := service.resolvedSelf(ctx, caller)
+	if err != nil {
+		return ctx, "", err
+	}
+	return chat.WithResolvedSelf(ctx, self), target, nil
+}
+
+func (service *Service) resolvedSelf(ctx context.Context, caller callerIdentity) (headless.Chat, error) {
+	path := caller.row.transcriptPath
+	engine := caller.row.Engine
+	if parsed, err := pfmengine.Parse(caller.identity.Engine); err == nil {
+		engine = parsed
+	}
+	if service.backend.database != nil && caller.identity.ID != "" {
+		switch engine {
+		case pfmengine.Claude:
+			transcript, found, err := service.backend.database.Transcript(ctx, caller.identity.ID)
+			if err != nil {
+				return headless.Chat{}, fmt.Errorf("resolve MCP self transcript %q: %w", caller.identity.ID, err)
+			}
+			if found && strings.TrimSpace(transcript.Path) != "" {
+				path = transcript.Path
+			}
+		case pfmengine.Codex:
+			lineage, found, err := service.backend.database.CodexLineage(ctx, caller.identity.ID)
+			if err != nil {
+				return headless.Chat{}, fmt.Errorf("resolve MCP self rollout %q: %w", caller.identity.ID, err)
+			}
+			if found && strings.TrimSpace(lineage.Newest.Path) != "" {
+				path = lineage.Newest.Path
+			}
+		}
+	}
+	socket := caller.identity.SocketName
+	if socket == "" {
+		socket = filepath.Base(caller.identity.SocketPath)
+	}
+	return headless.Chat{
+		Name: caller.row.Name, ID: caller.identity.ID,
+		Engine: engine, Path: path, CWD: caller.row.Dir,
+		Socket: socket, Session: caller.identity.Session, Pane: caller.identity.Pane, Live: true,
+	}, nil
 }
 
 func (service *Service) cliTargetAction(

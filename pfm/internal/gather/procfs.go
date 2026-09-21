@@ -33,6 +33,18 @@ type ProcFS interface {
 	Stat(pid int) (ProcStat, error)
 }
 
+// ProcessIdentity is process metadata available without reading argv.
+type ProcessIdentity struct {
+	EffectiveUID uint32
+	Command      string
+}
+
+// ProcIdentity is the optional ProcFS extension that identifies a process
+// without reading its protected command line.
+type ProcIdentity interface {
+	ProcessIdentity(pid int) (ProcessIdentity, error)
+}
+
 // ProcBirth is the optional ProcFS extension that reports when a process was
 // created, in epoch seconds. Only Codex thread identification needs a wall
 // clock, so a ProcFS that cannot supply one stays usable everywhere else.
@@ -103,6 +115,9 @@ func FileIDOf(path string) (FileID, error) {
 func NewProcFS(root string) ProcFS {
 	if root != "" {
 		if info, err := os.Stat(root); err == nil && info.IsDir() {
+			if filepath.Clean(root) == "/proc" {
+				return nativeProcFS()
+			}
 			return RealProcFS{Root: root}
 		}
 	}

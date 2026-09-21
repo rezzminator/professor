@@ -6,18 +6,25 @@ import (
 	"io"
 	"strings"
 
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+func runChatSave(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (exitCode int) {
+	return runChatSaveContext(context.Background(), args, stdout, stderr, env, runtimes...)
+}
 
 // writeRepositorySnapshot's git calls: a start failure wins over a nonzero
 // exit, exactly as the bare subprocess error it replaces reported only one
 // cause per command.
-func writeRepositorySnapshot(writer io.Writer, runner deps.Runner) {
+func writeRepositorySnapshot(ctx context.Context, writer io.Writer, runner deps.Runner) {
+	self, _ := pfmchat.ScopedSelf(ctx)
 	git := func(args ...string) (result deps.RunResult, err error) {
 		result, err = runner.Run(
-			context.Background(),
+			ctx,
 			append([]string{deps.Executable("git")}, args...),
-			deps.RunOptions{},
+			deps.RunOptions{Dir: self.CWD},
 		)
 		if err == nil && result.ExitCode != 0 {
 			err = fmt.Errorf("exit status %d", result.ExitCode)

@@ -2,9 +2,11 @@ package mcpserv
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
@@ -286,6 +289,167 @@ func TestChatFindOnTheSharedDaemonExcludesNoAmbientSelf(t *testing.T) {
 	output := callTool[FindOutput](t, client.clientSession, "chat_find", FindInput{Excerpt: line})
 	if output.SelfID != "" || output.Count != 1 || output.Candidates[0].ID != "launcher" {
 		t.Fatalf("daemon chat_find = %+v; want the launcher's transcript found and no self_id", output)
+	}
+}
+
+func TestChatFindOnTheSharedDaemonExcludesProxyClaudeCaller(t *testing.T) {
+	const callerID = "claude-session"
+	verbs := &fakeChatVerbs{
+		listed: chat.ListResult{Rows: []compose.Row{{
+			SessionName: "cc-seat", ID: callerID, Kind: compose.LiveClaude,
+			Socket: "cc-seat", PaneID: "%1",
+		}}, Matched: 1},
+	}
+	service := newService("test", &backend{chat: verbs, allowAmbientIdentity: false})
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
+		"pfmProxy": map[string]any{
+			"v": ProxyWireVersion, "session": "cc-seat", "socketName": "cc-seat",
+			"pane": "%1", "engine": "claude", "id": callerID,
+		},
+	}}}
+	_, output, err := service.chatFind(context.Background(), request, FindInput{Excerpt: "caller excerpt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []chat.FindRequest{{Excerpt: "caller excerpt", Self: callerID}}
+	if !reflect.DeepEqual(verbs.finds, want) || output.SelfID != callerID {
+		t.Fatalf("proxied chat_find requests = %+v output = %+v, want request %+v and self_id %q",
+			verbs.finds, output, want, callerID)
+	}
+}
+
+func TestChatFindIncludeSelfSkipsCallerResolution(t *testing.T) {
+	valid := mcp.Meta{"pfmProxy": map[string]any{
+		"v": ProxyWireVersion, "session": "cc-seat", "engine": "claude", "id": "claude-session",
+	}}
+	malformed := mcp.Meta{"pfmProxy": map[string]any{
+		"v": ProxyWireVersion + 1, "session": "cc-seat",
+	}}
+	for name, meta := range map[string]mcp.Meta{"valid": valid, "malformed": malformed} {
+		t.Run(name, func(t *testing.T) {
+			verbs := &fakeChatVerbs{
+				listed: chat.ListResult{Rows: []compose.Row{{
+					SessionName: "cc-seat", ID: "claude-session", Kind: compose.LiveClaude,
+				}}, Matched: 1},
+				found: []chat.TranscriptMatch{{ID: "claude-session", Path: "/transcripts/claude-session.jsonl"}},
+			}
+			service := newService("test", &backend{chat: verbs, allowAmbientIdentity: false})
+			request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: meta}}
+			_, output, err := service.chatFind(
+				context.Background(), request, FindInput{Excerpt: "caller excerpt", IncludeSelf: true},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []chat.FindRequest{{Excerpt: "caller excerpt"}}
+			if len(verbs.lists) != 0 || !reflect.DeepEqual(verbs.finds, want) ||
+				output.SelfID != "" || output.Count != 1 {
+				t.Fatalf("include_self lists = %+v finds = %+v output = %+v, want no caller probe and %+v",
+					verbs.lists, verbs.finds, output, want)
+			}
+		})
+	}
+}
+
+func TestChatFindNonClaudeCallerDoesNotExcludeClaudeCollision(t *testing.T) {
+	tests := []struct {
+		name   string
+		engine string
+		kind   compose.Kind
+	}{
+		{name: "codex", engine: "codex", kind: compose.LiveCodex},
+		{name: "opencode", engine: "opencode", kind: compose.LiveOpenCode},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			const sharedID = "shared-id"
+			verbs := &fakeChatVerbs{
+				listed: chat.ListResult{Rows: []compose.Row{{
+					SessionName: test.name + "-seat", ID: sharedID, Kind: test.kind,
+					Socket: test.name + "-seat", PaneID: "%1",
+				}}, Matched: 1},
+				found: []chat.TranscriptMatch{{ID: sharedID, Path: "/claude/shared-id.jsonl"}},
+			}
+			service := newService("test", &backend{chat: verbs, allowAmbientIdentity: false})
+			request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
+				"pfmProxy": map[string]any{
+					"v": ProxyWireVersion, "session": test.name + "-seat",
+					"engine": test.engine, "id": sharedID,
+				},
+			}}}
+			_, output, err := service.chatFind(context.Background(), request, FindInput{Excerpt: "collision"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []chat.FindRequest{{Excerpt: "collision"}}
+			if !reflect.DeepEqual(verbs.finds, want) || output.SelfID != "" ||
+				output.Count != 1 || output.Candidates[0].ID != sharedID {
+				t.Fatalf("%s caller finds = %+v output = %+v, want Claude collision retained",
+					test.name, verbs.finds, output)
+			}
+		})
+	}
+}
+
+func TestChatFindInvalidMetadataDoesNotFallBackToAmbientIdentity(t *testing.T) {
+	tests := []struct {
+		name string
+		meta mcp.Meta
+	}{
+		{name: "malformed", meta: mcp.Meta{"pfmProxy": "not an object"}},
+		{name: "unmatched", meta: mcp.Meta{"pfmProxy": map[string]any{
+			"v": ProxyWireVersion, "session": "missing-seat", "engine": "claude", "id": "ambient-session",
+		}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv(resolve.ClaudeSessionEnv, "ambient-session")
+			verbs := &fakeChatVerbs{found: []chat.TranscriptMatch{{
+				ID: "ambient-session", Path: "/claude/ambient-session.jsonl",
+			}}}
+			service := newService("test", &backend{chat: verbs, allowAmbientIdentity: true})
+			request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: test.meta}}
+			_, output, err := service.chatFind(context.Background(), request, FindInput{Excerpt: "ambient collision"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []chat.FindRequest{{Excerpt: "ambient collision"}}
+			if !reflect.DeepEqual(verbs.finds, want) || output.SelfID != "" || output.Count != 1 {
+				t.Fatalf("%s metadata finds = %+v output = %+v, want search without ambient exclusion",
+					test.name, verbs.finds, output)
+			}
+		})
+	}
+}
+
+func TestChatFindCallerProbeFailureIsAToolError(t *testing.T) {
+	verbs := &fakeChatVerbs{err: errors.New("fleet database busy")}
+	service := newService("test", &backend{chat: verbs, allowAmbientIdentity: false})
+	client := connectInMemory(t, service.Server())
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	result, err := client.clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Meta: mcp.Meta{"pfmProxy": map[string]any{
+			"v": ProxyWireVersion, "session": "cc-seat", "engine": "claude", "id": "claude-session",
+		}},
+		Name: "chat_find", Arguments: FindInput{Excerpt: "caller excerpt"},
+	})
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	if result != nil && len(result.Content) > 0 {
+		content, ok := result.Content[0].(*mcp.TextContent)
+		if !ok {
+			t.Fatalf("caller probe content = %T, want text", result.Content[0])
+		}
+		message += content.Text
+	}
+	if (err == nil && (result == nil || !result.IsError)) ||
+		!strings.Contains(message, `resolve MCP proxy session "cc-seat": list live chats: fleet database busy`) ||
+		len(verbs.finds) != 0 {
+		t.Fatalf("caller probe result = %+v err = %v finds = %+v, want wrapped tool error before search",
+			result, err, verbs.finds)
 	}
 }
 

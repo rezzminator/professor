@@ -113,7 +113,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	case "ls":
 		return picker.Run(args[1:], stdout, stderr, runtime)
 	case "chat":
-		return runChatWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime)
+		return runChatWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, context.Background())
 	case "harvest":
 		return runHarvest(args[1:], stdout, stderr, runtime)
 	case "headless":
@@ -359,7 +359,15 @@ func runKill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime
 		// for exactly the ids the picker would let you ⌃X, and nothing else.
 		// The same pass hands back the row's live tmux address so a kill of
 		// a live-but-unindexed row still ends it, not just hides it.
-		engine, rolloutPath, socket, paneID = fleet.ResolveRow(ctx, database, id, stderr, &runtime)
+		address, _, lookupErr := fleet.ResolveRow(ctx, database, id, stderr, &runtime)
+		if lookupErr != nil {
+			fmt.Fprintf(stderr, "pfm chat kill: lookup failed: %v\n", lookupErr)
+			return 1
+		}
+		engine = address.Engine
+		rolloutPath = address.RolloutPath
+		socket = address.Socket
+		paneID = address.PaneID
 	}
 	target, err := manager.Kill(ctx, kill.Request{
 		ID:          id,

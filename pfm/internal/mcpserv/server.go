@@ -59,8 +59,9 @@ func ToolNames() []string {
 
 // Service owns one MCP server and its long-lived SQLite handle.
 type Service struct {
-	server  *mcp.Server
-	backend *backend
+	server        *mcp.Server
+	backend       *backend
+	daemonAddress string
 }
 
 // Runtime is the already-loaded machine policy the stdio server shares with
@@ -75,6 +76,7 @@ type Runtime struct {
 	// OpenCodeBinary is the configured OpenCode launch command; empty means
 	// the registered OpenCode descriptor's default binary.
 	OpenCodeBinary string
+	DaemonAddress  string
 	// Chat is the typed verb layer (production: chat.Verbs over the command's
 	// runtime). Verbs not yet on it still reach package main through Dispatch.
 	Chat ChatVerbs
@@ -112,7 +114,9 @@ func NewConfigured(version string, warnings io.Writer, runtime Runtime) (*Servic
 	if err != nil {
 		return nil, err
 	}
-	return newService(version, backend), nil
+	service := newService(version, backend)
+	service.daemonAddress = runtime.DaemonAddress
+	return service, nil
 }
 
 func newService(version string, backend *backend) *Service {
@@ -250,6 +254,16 @@ func requestMeta(request *mcp.CallToolRequest) mcp.Meta {
 
 func selfTarget(target string) bool {
 	return target == "self" || target == "me"
+}
+
+func relativeResolveTarget(target string) bool {
+	if selfTarget(target) {
+		return true
+	}
+	if len(target) < 2 || target[0] != '%' {
+		return false
+	}
+	return strings.Trim(target[1:], "0123456789") == ""
 }
 
 // noAmbientCallerRemedy explains a missing-identity refusal in terms an MCP
@@ -425,7 +439,7 @@ func (service *Service) chatLS(
 
 func (service *Service) chatResolve(
 	ctx context.Context,
-	_ *mcp.CallToolRequest,
+	request *mcp.CallToolRequest,
 	input ResolveInput,
 ) (*mcp.CallToolResult, ResolveOutput, error) {
 	kind := resolve.Kind(input.Kind)
@@ -434,48 +448,53 @@ func (service *Service) chatResolve(
 			"kind must be label, session, or cxwin",
 		)
 	}
-	if kind == resolve.CxWindow {
-		target, code, detail, err := service.backend.injector.ResolveEngine(
-			ctx, input.Name, string(pfmengine.Codex),
-		)
-		if err != nil {
-			return nil, ResolveOutput{}, err
-		}
-		status := "ok"
-		switch code {
-		case 0:
-		case inject.CodeUnknown:
-			status, code = statusNotFound, 1
-		case inject.CodeAmbiguous:
-			status, code = statusAmbiguous, 2
-		default:
-			return nil, ResolveOutput{}, fmt.Errorf(
-				"resolve target %q failed with code %d: %s", input.Name, code, detail,
-			)
-		}
-		return nil, ResolveOutput{
-			Status: status, Code: code, SocketPath: target.SocketPath,
-			Pane: target.Pane, Candidates: detail,
-		}, nil
+	name := strings.TrimSpace(input.Name)
+	if len(name) >= 2 && strings.HasPrefix(name, `"`) && strings.HasSuffix(name, `"`) {
+		name = strings.TrimSpace(name[1 : len(name)-1])
 	}
-	namespace, err := service.backend.resolver.Resolve(ctx, kind, input.Name)
+	relative := relativeResolveTarget(name)
+	requiredEngine := ""
+	if kind == resolve.CxWindow && !relative {
+		requiredEngine = string(pfmengine.Codex)
+	}
+	injector, caller, err := service.injectorForRequest(ctx, request)
+	if err != nil {
+		return nil, ResolveOutput{}, err
+	}
+	if refused, detail := service.selfCallerRefusal(caller); relative && refused {
+		return nil, ResolveOutput{Status: statusNotFound, Code: 1, Candidates: detail}, nil
+	}
+	type kindResolver interface {
+		ResolveKind(context.Context, string, resolve.Kind, string) (inject.Target, int, string, error)
+	}
+	var target inject.Target
+	var code int
+	var detail string
+	if resolver, ok := injector.(kindResolver); ok {
+		target, code, detail, err = resolver.ResolveKind(ctx, name, kind, requiredEngine)
+	} else if requiredEngine != "" {
+		target, code, detail, err = injector.ResolveEngine(ctx, name, requiredEngine)
+	} else {
+		target, code, detail, err = injector.Resolve(ctx, name)
+	}
 	if err != nil {
 		return nil, ResolveOutput{}, err
 	}
 	status := "ok"
-	switch namespace.Code {
-	case 1:
-		status = statusNotFound
-	case 2:
-		status = statusAmbiguous
+	switch code {
+	case 0:
+	case inject.CodeUnknown:
+		status, code = statusNotFound, 1
+	case inject.CodeAmbiguous:
+		status, code = statusAmbiguous, 2
+	default:
+		return nil, ResolveOutput{}, fmt.Errorf(
+			"resolve target %q failed with code %d: %s", input.Name, code, detail,
+		)
 	}
-	socket, pane := parseResolved(namespace.Stdout)
 	return nil, ResolveOutput{
-		Status:     status,
-		Code:       namespace.Code,
-		SocketPath: socket,
-		Pane:       pane,
-		Candidates: namespace.Stderr,
+		Status: status, Code: code, SocketPath: target.SocketPath,
+		Pane: target.Pane, Candidates: detail,
 	}, nil
 }
 
@@ -740,26 +759,36 @@ func tailBytes(text string, budget int) string {
 
 func (service *Service) chatFind(
 	ctx context.Context,
-	_ *mcp.CallToolRequest,
+	request *mcp.CallToolRequest,
 	input FindInput,
 ) (*mcp.CallToolResult, FindOutput, error) {
-	output, err := service.backend.find(ctx, input)
+	self := ""
+	if !input.IncludeSelf {
+		caller, err := service.backend.callerForRequest(ctx, requestMeta(request))
+		if err != nil {
+			return nil, FindOutput{}, err
+		}
+		switch {
+		case caller.valid && caller.row.Engine == pfmengine.Claude && caller.identity.ID != "":
+			self = caller.identity.ID
+		case !caller.present && service.backend.allowAmbientIdentity:
+			self = chat.AskingSession()
+		}
+	}
+	output, err := service.backend.find(ctx, input, self)
 	return nil, output, err
 }
 
 func (service *Service) chatRead(
 	ctx context.Context,
-	_ *mcp.CallToolRequest,
+	request *mcp.CallToolRequest,
 	input ReadInput,
 ) (*mcp.CallToolResult, ReadOutput, error) {
+	var err error
+	ctx, input.Source, err = service.cliTargetForRequest(ctx, request, input.Source)
+	if err != nil {
+		return nil, ReadOutput{}, err
+	}
 	output, err := service.backend.read(ctx, input)
 	return nil, output, err
-}
-
-func parseResolved(value string) (string, string) {
-	fields := strings.Split(strings.TrimSpace(value), "\t")
-	if len(fields) != 2 {
-		return "", ""
-	}
-	return fields[0], fields[1]
 }

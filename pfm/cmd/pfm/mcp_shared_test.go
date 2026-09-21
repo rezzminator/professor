@@ -15,7 +15,12 @@ import (
 // runtime — the same one, never a second load — and the argv dispatcher left
 // for the stateful verbs refuses anything but chat argv.
 func TestMCPRuntimeBindsTheVerbLayerToTheCommandsRuntime(t *testing.T) {
-	bridged := mcpRuntime(commandRuntime{Paths: paths.Values{TmuxDir: "/jail/tmux"}}, false)
+	runtime := commandRuntime{Paths: paths.Values{TmuxDir: "/jail/tmux"}}
+	runtime.Config.MCP.HTTP.Port = 43117
+	bridged := mcpRuntime(runtime, false)
+	if bridged.DaemonAddress != "127.0.0.1:43117" {
+		t.Fatalf("DaemonAddress = %q, want selected command runtime port", bridged.DaemonAddress)
+	}
 	verbs, ok := bridged.Chat.(pfmchat.Verbs)
 	if !ok || verbs.Runtime == nil || verbs.Runtime.Paths.TmuxDir != "/jail/tmux" {
 		t.Fatalf("Chat = %#v, want chat.Verbs over the command's runtime", bridged.Chat)

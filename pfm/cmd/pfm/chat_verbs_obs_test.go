@@ -212,7 +212,7 @@ func TestChatNewRecordsAChatStateTransition(t *testing.T) {
 	}
 	_, recorder := obs.Test(t)
 	var stdout, stderr bytes.Buffer
-	code := runRun([]string{
+	code := runRun(context.Background(), []string{
 		"--name", "state door worker",
 		"--cwd", filepath.Join(jail.root, "work"),
 		"audit the firewall",

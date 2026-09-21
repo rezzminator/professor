@@ -210,7 +210,8 @@ func Run(
 // waitForBoot returns once the pane has drawn something and stopped changing,
 // which is the only readiness signal both engines share. A capture error means
 // the session is gone — the chat died at birth, and saying so beats reporting
-// a socket nothing is listening on.
+// a socket nothing is listening on. Cancellation still takes precedence when
+// it kills the context-bound capture command.
 func waitForBoot(
 	ctx context.Context,
 	tmux Tmux,
@@ -223,6 +224,9 @@ func waitForBoot(
 	for {
 		capture, err := tmux.Capture(ctx, socket, target)
 		if err != nil {
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return "", ctxErr
+			}
 			return "", fmt.Errorf(
 				"the chat died at birth on socket %s: %w",
 				socket,

@@ -135,9 +135,8 @@ func Run(
 	tally.warnings += printOpenCodeStoreDoctor(context.Background(), stdout, runtime.Config)
 	tally.warnings += PrintEngineCapabilities(stdout, dependencies)
 	tally.warnings += PrintMCPClientCutover(stdout, runtime)
-	if mcpConfigured(runtime) {
-		tally.warnings += printMCPDaemonDoctor(stdout, runtime)
-	}
+	tally.warnings += printMCPDaemonDoctor(stdout, runtime)
+	tally.warnings += printMCPServeProcessesDoctor(stdout, runtime, gather.NewProcFS(resolved.ProcRoot))
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
 		fmt.Fprintf(stdout, "doctor: unhealthy database: %v\n", err)

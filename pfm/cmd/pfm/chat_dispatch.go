@@ -65,7 +65,7 @@ func runHeadless(
 			args[0] = "read"
 		}
 	}
-	return runChatWithRuntime(args, os.Stdin, stdout, stderr, runtime)
+	return runChatWithRuntime(args, os.Stdin, stdout, stderr, runtime, context.Background())
 }
 
 func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -74,7 +74,7 @@ func runChat(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm: config: %v\n", err)
 		return 1
 	}
-	return runChatWithRuntime(args, stdin, stdout, stderr, runtime)
+	return runChatWithRuntime(args, stdin, stdout, stderr, runtime, context.Background())
 }
 
 func runChatWithRuntime(
@@ -82,6 +82,7 @@ func runChatWithRuntime(
 	stdin io.Reader,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
+	ctx context.Context,
 ) int {
 	if len(args) == 0 {
 		printChatUsage(stderr)
@@ -90,7 +91,7 @@ func runChatWithRuntime(
 	verb, rest := args[0], args[1:]
 	switch verb {
 	case newAction:
-		return runRun(rest, stdout, stderr, runtime, paths.OSEnv{}, clock.Real)
+		return runRun(ctx, rest, stdout, stderr, runtime, paths.OSEnv{}, clock.Real)
 	case "open":
 		return runChatOpen(rest, stdout, stderr, runtime)
 	case "read":
@@ -116,11 +117,11 @@ func runChatWithRuntime(
 	case "recover":
 		return runChatRecover(rest, stdout, stderr, runtime)
 	case "name":
-		return runChatName(rest, stdout, stderr, runtime)
+		return runChatNameContext(ctx, rest, stdout, stderr, runtime)
 	case "kill":
-		return runChatKill(rest, stdout, stderr, paths.OSEnv{}, runtime)
+		return runChatKillContext(ctx, rest, stdout, stderr, paths.OSEnv{}, runtime)
 	case "unkill":
-		return runChatUnkill(rest, stdout, stderr, runtime)
+		return runChatUnkillContext(ctx, rest, stdout, stderr, runtime)
 	case "end":
 		return runChatEnd(rest, stdout, stderr, runtime)
 	case "reload":
@@ -128,7 +129,9 @@ func runChatWithRuntime(
 	case whoamiCommand:
 		// Compatibility alias for the public `pfm whoami` command.
 		return runWhoami(rest, stdout, stderr, runtime)
-	case "find", "save", branchAction, "history", "ls":
+	case "save":
+		return runChatSaveContext(ctx, rest, stdout, stderr, paths.OSEnv{}, runtime)
+	case "find", branchAction, "history", "ls":
 		return runChatSatellite(verb, rest, stdin, stdout, stderr, paths.OSEnv{}, clock.Real, runtime)
 	case "modal":
 		return runChatModal(rest, stdout, stderr, clock.Real)

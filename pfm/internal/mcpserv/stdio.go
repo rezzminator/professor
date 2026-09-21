@@ -7,8 +7,6 @@ import (
 	"io"
 	"log"
 	"sync"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 var parseErrorFrame = []byte(
@@ -54,10 +52,7 @@ func (service *Service) RunStdio(
 			}
 		}
 	}()
-	err := service.Run(ctx, &mcp.IOTransport{
-		Reader: reader,
-		Writer: serialized,
-	})
+	err := service.runStdioTransport(ctx, reader, serialized)
 	_ = reader.Close()
 	// A client holds input open for the whole session, so the frame reader may
 	// never return; an ended context must not wait for it, or the

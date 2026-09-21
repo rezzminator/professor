@@ -145,18 +145,26 @@ func ScanCached(
 	return Result{Output: ComposeFleet(env, request.View, data, gather.Snapshot{}), Env: env}, nil
 }
 
+// RowAddress is the engine, transcript, and live tmux address carried by one
+// composed fleet row.
+type RowAddress struct {
+	Engine      pfmengine.ID
+	RolloutPath string
+	Socket      string
+	PaneID      string
+}
+
 // ResolveRow looks id up in a compose pass over CURRENT database state
 // plus a live gather — the picker's own source of truth for what exists right
 // now — and reports the engine, rollout path, and live tmux address (socket
 // name, pane id) of the row that carries it. It finds exactly the ids the
 // picker displays, including a live agent row and a live Codex pane the
-// index has not caught up with; an id nothing composes returns all empty
-// strings, which leaves an ordinary kill free to refuse it as unindexed.
-// Errors from the pass itself are swallowed the same way: a failed vouch
-// attempt falls through to that same refusal rather than replacing the
-// kill's own error. A row with no live socket returns an empty socket and
-// pane, which is how kill.Manager tells a hide of a resumable-only chat from
-// a hide of a live one — the latter also ends it.
+// index has not caught up with; an id nothing composes returns found=false,
+// which leaves an ordinary kill free to refuse it as unindexed. A failed pass
+// returns an error instead of reading as that genuine absence. A row with no
+// live socket returns an empty socket and pane, which is how kill.Manager tells
+// a hide of a resumable-only chat from a hide of a live one — the latter also
+// ends it.
 //
 // The rollout path lets kill.Manager resolve an UNINDEXED Codex lineage
 // member to its root through the file's own session_meta header
@@ -174,28 +182,33 @@ func ResolveRow(
 	id string,
 	stderr io.Writer,
 	runtime *pfmconfig.Runtime,
-) (engine pfmengine.ID, rolloutPath, socket, paneID string) {
+) (RowAddress, bool, error) {
 	request := Request{View: compose.AllView, Runtime: runtime}
 	env, err := ResolveEnv(request)
 	if err != nil {
-		return "", "", "", ""
+		return RowAddress{}, false, fmt.Errorf("resolve row %q: resolve env: %w", id, err)
 	}
 	data, err := LoadData(ctx, database)
 	if err != nil {
-		return "", "", "", ""
+		return RowAddress{}, false, fmt.Errorf("resolve row %q: load data: %w", id, err)
 	}
 	live, err := Gather(ctx, database, env, data, false, PrintWarn(stderr), stderr)
 	if err != nil {
-		return "", "", "", ""
+		return RowAddress{}, false, fmt.Errorf("resolve row %q: gather: %w", id, err)
 	}
 	rows := ComposeFleet(env, request.View, data, live).Rows
 	for index := range rows {
 		row := rows[index]
 		if row.ID == id {
-			return compose.EngineForKind(row.Kind), row.Path, row.Socket, row.PaneID
+			return RowAddress{
+				Engine:      compose.EngineForKind(row.Kind),
+				RolloutPath: row.Path,
+				Socket:      row.Socket,
+				PaneID:      row.PaneID,
+			}, true, nil
 		}
 	}
-	return "", "", "", ""
+	return RowAddress{}, false, nil
 }
 
 // ResolveEnv reads the machine state a scan composes against: the request's

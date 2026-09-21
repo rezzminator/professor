@@ -10,9 +10,13 @@ import (
 // until the kill lands (spec § Middleware, `state`).
 func killTrail(ctx context.Context) *obs.Trail { return obs.NewTrail(ctx, "kill", "live") }
 
-// requestShape names how the kill was addressed — never the id or a path.
+// requestShape names an id, socket, or --self addressed kill — never the id,
+// socket name, pane id, or a path.
 func requestShape(request Request) string {
 	cause := "id"
+	if request.SocketName != "" || request.PaneID != "" {
+		cause = "socket"
+	}
 	if request.Self {
 		cause = "--self"
 	}

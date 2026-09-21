@@ -9,15 +9,17 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
-// printMCPDaemonDoctor reports the local MCP HTTP daemon's reachability: a
-// clean "running" row when it answers as itself (with its own version-skew
-// warning when the build differs from this binary's), an "unreachable" row
-// when nothing answered at all (mcpserv.ErrDaemonAbsent — the address is
-// genuinely free), and a distinct "foreign-service" row when SOMETHING
-// answered on the configured port but not as pfm's daemon (wrong status
-// body, wrong pid, a non-200). The last two are different faults — ours
-// being down vs. someone else holding the port — and must never render as
-// the same "unreachable" line.
+// printMCPDaemonDoctor always reports the local MCP HTTP daemon's
+// reachability: a clean "running" row when it answers as itself (with its own
+// version-skew warning when the build differs from this binary's), an
+// "unreachable" row when nothing answered at all (mcpserv.ErrDaemonAbsent —
+// the address is genuinely free), and a distinct "foreign-service" row when
+// SOMETHING answered on the configured port but not as pfm's daemon (wrong
+// status body, wrong pid, a non-200). The last two are different faults — ours
+// being down vs. someone else holding the port — and must never render as the
+// same "unreachable" line. A disabled configuration makes an absent daemon a
+// reported fact rather than a warning; a running or foreign service is still
+// reported normally.
 func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings int) {
 	status, daemonErr := mcpserv.DaemonReachability(runtime)
 	switch {
@@ -40,6 +42,10 @@ func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings in
 			)
 		}
 	case errors.Is(daemonErr, mcpserv.ErrDaemonAbsent):
+		if !mcpConfigured(runtime) {
+			fmt.Fprintf(stdout, "doctor: mcp daemon=unreachable disabled-in-config error=%v\n", daemonErr)
+			break
+		}
 		warnings++
 		fmt.Fprintf(stdout, "doctor: mcp daemon=unreachable error=%v\n", daemonErr)
 	default:

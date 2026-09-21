@@ -16,7 +16,9 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/inject"
+	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -44,6 +46,9 @@ type backend struct {
 }
 
 func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error) {
+	if runtime.Paths.TmuxDir == "" {
+		return nil, fmt.Errorf("configure chat MCP backend: tmux directory is empty")
+	}
 	if runtime.Clock == nil {
 		runtime.Clock = clock.Real
 	}
@@ -143,6 +148,21 @@ const (
 // list is chat_ls: chat.List under the tool's payload contract, projected
 // onto the wire row.
 func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, error) {
+	return current.listProjected(ctx, input, true)
+}
+
+// listUnbounded projects every row for an internal identity lookup. Public
+// chat_ls keeps its payload cap; resolving a caller must not turn a row beyond
+// that presentation boundary into an absence.
+func (current *backend) listUnbounded(ctx context.Context, input LSInput) (LSOutput, error) {
+	return current.listProjected(ctx, input, false)
+}
+
+func (current *backend) listProjected(
+	ctx context.Context,
+	input LSInput,
+	defaultLimit bool,
+) (LSOutput, error) {
 	if current.chat == nil {
 		return LSOutput{}, fmt.Errorf("chat_ls verb is not configured")
 	}
@@ -150,10 +170,10 @@ func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, erro
 		return LSOutput{}, fmt.Errorf("all and killed are mutually exclusive")
 	}
 	limit := input.Limit
-	if limit == 0 {
+	if limit == 0 && defaultLimit {
 		limit = defaultChatLSLimit
 	}
-	if limit < 1 || limit > maxChatLSLimit {
+	if limit < 0 || limit > maxChatLSLimit {
 		return LSOutput{}, fmt.Errorf("limit must be between 1 and %d", maxChatLSLimit)
 	}
 	view := compose.DefaultView
@@ -181,7 +201,7 @@ func (current *backend) list(ctx context.Context, input LSInput) (LSOutput, erro
 			Session: session, ID: row.ID, Engine: compose.EngineForKind(row.Kind),
 			State: chatRowState(*row), Dir: row.CWD, Project: row.Project, Name: row.Name,
 			Account: account, Kind: row.Kind.String(), Killed: row.Killed,
-			Socket: row.Socket, Pane: row.PaneID,
+			Socket: row.Socket, Pane: row.PaneID, transcriptPath: row.Path,
 		})
 	}
 	return LSOutput{
@@ -222,13 +242,289 @@ type callerIdentity struct {
 	detail   string
 }
 
+func (current *backend) proxySeatMatches(proxy ProxyIdentity, row ChatRow) (selected bool, detail string) {
+	if row.Kind == compose.LiveSplit.String() {
+		return current.proxySocketMatches(proxy, row)
+	}
+	conflicts := make([]string, 0, 4)
+	if proxy.ID != "" && row.ID != "" {
+		if row.ID == proxy.ID {
+			selected = true
+		} else {
+			conflicts = append(conflicts, fmt.Sprintf("id %q does not match live id %q", proxy.ID, row.ID))
+		}
+	}
+	if proxy.Pane != "" && row.Pane != "" {
+		if row.Pane == proxy.Pane {
+			selected = true
+		} else {
+			conflicts = append(conflicts, fmt.Sprintf("pane %q does not match live pane %q", proxy.Pane, row.Pane))
+		}
+	}
+	socketSelected, socketDetail := current.proxySocketMatches(proxy, row)
+	selected = selected || socketSelected
+	if socketDetail != "" {
+		conflicts = append(conflicts, socketDetail)
+	}
+	return selected, strings.Join(conflicts, "; ")
+}
+
+func (current *backend) proxySocketMatches(proxy ProxyIdentity, row ChatRow) (selected bool, detail string) {
+	if row.Socket == "" {
+		return false, ""
+	}
+	conflicts := make([]string, 0, 2)
+	if proxy.SocketName != "" {
+		if row.Socket == proxy.SocketName {
+			selected = true
+		} else {
+			conflicts = append(conflicts, fmt.Sprintf(
+				"socketName %q does not match live socket %q",
+				proxy.SocketName,
+				row.Socket,
+			))
+		}
+	}
+	if proxy.SocketPath != "" {
+		// Production backends enter through newBackendConfigured, which requires
+		// a trusted tmux directory. Package tests also build deliberately partial
+		// backends around fake verbs; retain their basename-only fixture seam
+		// without making it reachable from the configured server.
+		if current.paths.TmuxDir == "" {
+			pathSocket := filepath.Base(proxy.SocketPath)
+			if row.Socket == pathSocket {
+				selected = true
+			} else {
+				conflicts = append(conflicts, fmt.Sprintf(
+					"socketPath basename %q does not match live socket %q",
+					pathSocket,
+					row.Socket,
+				))
+			}
+			return selected, strings.Join(conflicts, "; ")
+		}
+		rowSocketPath, err := current.paths.SocketUnder(row.Socket)
+		switch {
+		case err != nil:
+			conflicts = append(conflicts, fmt.Sprintf(
+				"socketPath %q cannot be verified against live socket %q: %v",
+				proxy.SocketPath,
+				row.Socket,
+				err,
+			))
+		case filepath.Clean(proxy.SocketPath) == filepath.Clean(rowSocketPath):
+			selected = true
+		default:
+			conflicts = append(conflicts, fmt.Sprintf(
+				"socketPath %q does not match live socket path %q",
+				proxy.SocketPath,
+				rowSocketPath,
+			))
+		}
+	}
+	return selected, strings.Join(conflicts, "; ")
+}
+
+func (current *backend) proxySessionMatches(
+	proxy ProxyIdentity,
+	proxyEngine pfmengine.ID,
+	row ChatRow,
+) (matched bool, detail string) {
+	seatSelected, seatDetail := current.proxySeatMatches(proxy, row)
+	sessionSelected := row.Session != "" && row.Session == proxy.Session
+	targeted := sessionSelected || seatSelected
+	if row.Kind == compose.LiveSplit.String() && (proxy.SocketName != "" || proxy.SocketPath != "") {
+		targeted = true
+	}
+	if !targeted {
+		return false, ""
+	}
+	conflicts := make([]string, 0, 2)
+	if seatDetail != "" {
+		conflicts = append(conflicts, seatDetail)
+	}
+	if proxyEngine != "" && row.Engine != "" && row.Engine != proxyEngine {
+		conflicts = append(conflicts, fmt.Sprintf(
+			"engine %q does not match live engine %q",
+			proxy.Engine,
+			row.Engine,
+		))
+	}
+	if len(conflicts) > 0 {
+		return false, "MCP _meta.pfmProxy conflicts with live chat: " + strings.Join(conflicts, "; ")
+	}
+	if row.Kind == compose.LiveSplit.String() {
+		return seatSelected, ""
+	}
+	return true, ""
+}
+
 func (current *backend) callerForRequest(
 	ctx context.Context,
 	meta map[string]any,
 ) (callerIdentity, error) {
 	raw, present := meta["threadId"]
 	if !present {
-		return callerIdentity{}, nil
+		proxyRaw, proxyPresent := meta["pfmProxy"]
+		if !proxyPresent {
+			return callerIdentity{}, nil
+		}
+		proxy, detail, err := parseProxyIdentity(proxyRaw)
+		if err != nil {
+			return callerIdentity{}, err
+		}
+		caller := callerIdentity{present: true, detail: detail}
+		if detail != "" {
+			return caller, nil
+		}
+		var proxyEngine pfmengine.ID
+		if proxy.Engine != "" {
+			parsedEngine, parseErr := pfmengine.Parse(proxy.Engine)
+			if parseErr != nil {
+				caller.detail = fmt.Sprintf("MCP _meta.pfmProxy engine %q is invalid: %v", proxy.Engine, parseErr)
+				return caller, nil
+			}
+			proxyEngine = parsedEngine
+		}
+		listed, err := current.listUnbounded(ctx, LSInput{All: true})
+		if err != nil {
+			return caller, fmt.Errorf(
+				"resolve MCP proxy session %q: list live chats: %w",
+				proxy.Session,
+				err,
+			)
+		}
+		matches := make([]ChatRow, 0, 1)
+		conflictDetail := ""
+		for index := range listed.Rows {
+			row := &listed.Rows[index]
+			if row.Killed || (row.State != "idle" && row.State != "booting") {
+				continue
+			}
+			matched, rowDetail := current.proxySessionMatches(proxy, proxyEngine, *row)
+			if rowDetail != "" && conflictDetail == "" {
+				conflictDetail = rowDetail
+			}
+			if !matched {
+				continue
+			}
+			matches = append(matches, *row)
+		}
+		if len(matches) == 0 {
+			if conflictDetail != "" {
+				caller.detail = conflictDetail
+			} else {
+				caller.detail = fmt.Sprintf("MCP _meta.pfmProxy session %q matched no live chat", proxy.Session)
+			}
+			return caller, nil
+		}
+		if len(matches) != 1 {
+			caller.detail = fmt.Sprintf(
+				"MCP _meta.pfmProxy session %q matched %d live chats",
+				proxy.Session,
+				len(matches),
+			)
+			return caller, nil
+		}
+		caller.row = matches[0]
+		if caller.row.Kind == compose.LiveSplit.String() {
+			if proxy.ID == "" {
+				caller.row = ChatRow{}
+				caller.detail = fmt.Sprintf(
+					"MCP _meta.pfmProxy session %q is split and requires a transcript id",
+					proxy.Session,
+				)
+				return caller, nil
+			}
+			if proxy.Pane == "" {
+				caller.row = ChatRow{}
+				caller.detail = fmt.Sprintf(
+					"MCP _meta.pfmProxy session %q is split and requires an exact pane binding",
+					proxy.Session,
+				)
+				return caller, nil
+			}
+			if !filepath.IsAbs(current.paths.SIDDir) {
+				return caller, fmt.Errorf(
+					"resolve MCP proxy split pane %q: breadcrumb directory is not absolute",
+					proxy.Pane,
+				)
+			}
+			boundID, _, bindErr := reload.SessionFromPaneCrumb(
+				current.paths.SIDDir,
+				caller.row.Socket,
+				proxy.Pane,
+			)
+			if bindErr != nil {
+				if errors.Is(bindErr, reload.ErrInvalidPaneCrumb) {
+					caller.row = ChatRow{}
+					caller.detail = fmt.Sprintf(
+						"MCP _meta.pfmProxy split pane %q has an invalid exact breadcrumb binding",
+						proxy.Pane,
+					)
+					return caller, nil
+				}
+				return caller, fmt.Errorf(
+					"resolve MCP proxy split pane %q breadcrumb: %w",
+					proxy.Pane,
+					bindErr,
+				)
+			}
+			if boundID == "" {
+				caller.row = ChatRow{}
+				caller.detail = fmt.Sprintf(
+					"MCP _meta.pfmProxy split pane %q has no exact transcript binding",
+					proxy.Pane,
+				)
+				return caller, nil
+			}
+			if boundID != proxy.ID {
+				caller.row = ChatRow{}
+				caller.detail = fmt.Sprintf(
+					"MCP _meta.pfmProxy split pane %q is bound to transcript %q, not %q",
+					proxy.Pane,
+					boundID,
+					proxy.ID,
+				)
+				return caller, nil
+			}
+			if current.database == nil {
+				return caller, fmt.Errorf("resolve MCP proxy split transcript %q: store is not configured", proxy.ID)
+			}
+			transcript, found, err := current.database.Transcript(ctx, proxy.ID)
+			if err != nil {
+				return caller, fmt.Errorf("resolve MCP proxy split transcript %q: %w", proxy.ID, err)
+			}
+			if !found || strings.TrimSpace(transcript.CWD) == "" {
+				caller.row = ChatRow{}
+				caller.detail = fmt.Sprintf(
+					"MCP _meta.pfmProxy split transcript %q has no indexed working directory",
+					proxy.ID,
+				)
+				return caller, nil
+			}
+			caller.row.ID = transcript.UUID
+			caller.row.Session = proxy.Session
+			caller.row.Dir = transcript.CWD
+			caller.row.Name = naming.LiveFallback(
+				naming.DisplayName(transcript.CustomTitle, transcript.AITitle, transcript.FirstPrompt),
+				"",
+				"",
+				transcript.LastPrompt,
+				true,
+			)
+			caller.row.Pane = proxy.Pane
+		}
+		caller.identity = proxy.callerIdentity()
+		if caller.identity.ID == "" {
+			// OpenCode currently supplies no engine conversation id through
+			// whoami. The matched live row still has the stable target that
+			// caller-bound CLI verbs need; every other seat field remains the
+			// proxy's explicit assertion.
+			caller.identity.ID = caller.row.ID
+		}
+		caller.valid = true
+		return caller, nil
 	}
 	caller := callerIdentity{present: true}
 	threadID, ok := raw.(string)

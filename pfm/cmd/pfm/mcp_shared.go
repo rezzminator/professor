@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
@@ -25,15 +26,16 @@ func mcpRuntime(runtime commandRuntime, ambient bool) mcpserv.Runtime {
 		ClaudeBinary:         runtime.Config.Claude.Binary,
 		CodexBinary:          runtime.Config.Codex.Binary,
 		OpenCodeBinary:       runtime.Config.OpenCode.Binary,
+		DaemonAddress:        "127.0.0.1:" + strconv.Itoa(runtime.Config.MCP.HTTP.Port),
 		Chat:                 pfmchat.Verbs{Runtime: &runtime, Warnings: os.Stderr},
 		Names:                pfmchat.NameResolver{Runtime: &runtime},
 		AllowAmbientIdentity: ambient,
-		Dispatch: func(_ context.Context, args []string, stdout, stderr io.Writer) int {
+		Dispatch: func(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			if len(args) == 0 || args[0] != config.MCPServerChat {
 				fmt.Fprintln(stderr, "pfm: MCP dispatch requires chat argv")
 				return 2
 			}
-			return runChatWithRuntime(args[1:], strings.NewReader(""), stdout, stderr, runtime)
+			return runChatWithRuntime(args[1:], strings.NewReader(""), stdout, stderr, runtime, ctx)
 		},
 	}
 }

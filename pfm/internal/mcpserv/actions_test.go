@@ -2,44 +2,70 @@ package mcpserv
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/compose"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/transcript"
 )
 
 // fakeChatVerbs is the MCP tests' stand-in for chat.Verbs: it records every
 // typed call and answers from its fields.
 type fakeChatVerbs struct {
-	lasts    []chat.LastRequest
-	statuses []chat.StatusRequest
-	lists    []chat.ListRequest
-	finds    []chat.FindRequest
-	reads    []string
-	last     chat.LastResult
-	status   headless.Status
-	listed   chat.ListResult
-	found    []chat.TranscriptMatch
-	read     []transcript.Entry
-	err      error
+	lasts             []chat.LastRequest
+	statuses          []chat.StatusRequest
+	lists             []chat.ListRequest
+	finds             []chat.FindRequest
+	reads             []string
+	last              chat.LastResult
+	status            headless.Status
+	listed            chat.ListResult
+	found             []chat.TranscriptMatch
+	read              []transcript.Entry
+	err               error
+	resolveScopedSelf bool
+	resolvedSelfIDs   []string
+	resolvedSelfPaths []string
+	resolvedStatusIDs []string
 }
 
-func (fake *fakeChatVerbs) Last(_ context.Context, request chat.LastRequest) (chat.LastResult, error) {
+func (fake *fakeChatVerbs) Last(ctx context.Context, request chat.LastRequest) (chat.LastResult, error) {
 	fake.lasts = append(fake.lasts, request)
+	if fake.resolveScopedSelf && (request.Target == "self" || request.Target == "me") {
+		resolved, err := chat.Target(ctx, request.Target, nil)
+		if err != nil {
+			return chat.LastResult{}, err
+		}
+		fake.resolvedSelfIDs = append(fake.resolvedSelfIDs, resolved.ID)
+		fake.resolvedSelfPaths = append(fake.resolvedSelfPaths, resolved.Path)
+	}
 	return fake.last, fake.err
 }
 
-func (fake *fakeChatVerbs) Status(_ context.Context, request chat.StatusRequest) (headless.Status, error) {
+func (fake *fakeChatVerbs) Status(ctx context.Context, request chat.StatusRequest) (headless.Status, error) {
 	fake.statuses = append(fake.statuses, request)
+	if fake.resolveScopedSelf && (request.Target == "self" || request.Target == "me") {
+		resolved, err := chat.Target(ctx, request.Target, nil)
+		if err != nil {
+			return headless.Status{}, err
+		}
+		fake.resolvedStatusIDs = append(fake.resolvedStatusIDs, resolved.ID)
+	}
 	return fake.status, fake.err
 }
 
@@ -106,6 +132,455 @@ func TestChatLastAndStatusReachTheTypedVerbs(t *testing.T) {
 	}
 	if want := []chat.StatusRequest{{Target: "MCP_HAMMER_A"}}; !reflect.DeepEqual(verbs.statuses, want) {
 		t.Fatalf("Status calls = %+v, want %+v", verbs.statuses, want)
+	}
+}
+
+func TestCallerScopedSelfIsolatedAcrossRequests(t *testing.T) {
+	rows := []compose.Row{
+		{Kind: compose.LiveCodex, ID: "thread-a", Name: "a", Socket: "cx-a", SessionName: "renamed-a", PaneID: "%1"},
+		{Kind: compose.LiveCodex, ID: "thread-b", Name: "b", Socket: "cx-b", SessionName: "renamed-b", PaneID: "%2"},
+	}
+	verbs := &fakeChatVerbs{
+		listed: chat.ListResult{Rows: rows, Matched: len(rows)},
+		last:   chat.LastResult{Text: "answer"}, resolveScopedSelf: true,
+	}
+	service := newService("test", &backend{
+		chat: verbs, paths: paths.Values{TmuxDir: t.TempDir()},
+	})
+	request := func(id string) *mcp.CallToolRequest {
+		return &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": id}}}
+	}
+	for _, id := range []string{"thread-a", "thread-b", "thread-a"} {
+		if _, _, err := service.chatLast(context.Background(), request(id), LastInput{Target: "self"}); err != nil {
+			t.Fatalf("chatLast(self, %s): %v", id, err)
+		}
+	}
+	if want := []string{"thread-a", "thread-b", "thread-a"}; !reflect.DeepEqual(verbs.resolvedSelfIDs, want) {
+		t.Fatalf("resolved self ids = %v, want isolated sequence %v", verbs.resolvedSelfIDs, want)
+	}
+	for _, call := range verbs.lasts {
+		if call.Target != "self" {
+			t.Fatalf("valid scoped self rewritten to %q", call.Target)
+		}
+	}
+}
+
+func TestCallerScopedSelfReachesMutationDispatchWithoutRedirectingExplicitTargets(t *testing.T) {
+	rows := []compose.Row{
+		{
+			Kind:        compose.LiveClaude,
+			ID:          "first",
+			Name:        "first",
+			Socket:      "cc-shared",
+			SessionName: "renamed",
+			PaneID:      "%1",
+		},
+		{
+			Kind:        compose.LiveClaude,
+			ID:          "second",
+			Name:        "second",
+			Socket:      "cc-shared",
+			SessionName: "renamed",
+			PaneID:      "%2",
+		},
+	}
+	var calls [][]string
+	var scopedIDs []string
+	service := newService("test", &backend{
+		chat: &fakeChatVerbs{listed: chat.ListResult{Rows: rows, Matched: len(rows)}},
+		dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
+			calls = append(calls, append([]string(nil), args...))
+			if scoped, ok := chat.ScopedSelf(ctx); ok {
+				scopedIDs = append(scopedIDs, scoped.ID)
+			} else {
+				scopedIDs = append(scopedIDs, "")
+			}
+			return 0
+		},
+	})
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
+		"pfmProxy": map[string]any{
+			"v": ProxyWireVersion, "session": "renamed", "socketName": "cc-shared",
+			"socketPath": "/tmp/tmux/cc-shared", "pane": "%2", "engine": "claude", "id": "second",
+		},
+	}}}
+	if _, _, err := service.chatName(
+		context.Background(),
+		request,
+		NameInput{Target: "self", Name: "chosen"},
+	); err != nil {
+		t.Fatalf("chatName(self): %v", err)
+	}
+	if _, _, err := service.chatKill(context.Background(), request, KillInput{Target: "me", Exit: true}); err != nil {
+		t.Fatalf("chatKill(me): %v", err)
+	}
+	if _, _, err := service.chatUnkill(context.Background(), request, TargetInput{Target: "self"}); err != nil {
+		t.Fatalf("chatUnkill(self): %v", err)
+	}
+	if _, _, err := service.chatKill(context.Background(), request, KillInput{Target: "first"}); err != nil {
+		t.Fatalf("chatKill(first): %v", err)
+	}
+	wantCalls := [][]string{
+		{"chat", "name", "self", "chosen"},
+		{"chat", "kill", "me", "--exit"},
+		{"chat", "unkill", "self"},
+		{"chat", "kill", "first"},
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("dispatch calls = %q, want %q", calls, wantCalls)
+	}
+	if want := []string{"second", "second", "second", ""}; !reflect.DeepEqual(scopedIDs, want) {
+		t.Fatalf("dispatch scoped ids = %v, want %v", scopedIDs, want)
+	}
+}
+
+func TestCallerScopedRawPaneReachesMutationDispatchOnTheCallerSocket(t *testing.T) {
+	setupBackendFixture(t)
+	values, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	callerSocket := filepath.Join(values.TmuxDir, "cx-caller")
+	daemonSocket := filepath.Join(values.TmuxDir, "cc-daemon")
+	t.Setenv("CHAT_INJECT_SOCKET", "")
+	t.Setenv("TMUX", daemonSocket+",123,0")
+
+	row := compose.Row{
+		Kind: compose.LiveCodex, ID: "thread-caller", Name: "caller",
+		Socket: "cx-caller", SessionName: "caller-session", PaneID: "%1",
+	}
+	var resolved headless.Chat
+	service := newService("test", &backend{
+		paths: values,
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
+			resolved, err = chat.Target(ctx, args[2], nil)
+			if err != nil {
+				return 1
+			}
+			return 0
+		},
+	})
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
+		"pfmProxy": map[string]any{
+			"v": ProxyWireVersion, "session": row.SessionName, "socketName": row.Socket,
+			"socketPath": callerSocket, "pane": row.PaneID, "engine": "codex", "id": row.ID,
+		},
+	}}}
+	for _, target := range []string{"%0", " %0 ", `"%0"`} {
+		resolved = headless.Chat{}
+		if _, _, err := service.chatName(
+			context.Background(), request, NameInput{Target: target, Name: "chosen"},
+		); err != nil {
+			t.Fatalf("chatName(%q): %v", target, err)
+		}
+		if resolved.Socket != filepath.Base(callerSocket) || resolved.Pane != "%0" {
+			t.Fatalf(
+				"raw action %q resolved to socket %q pane %q, want caller socket %q pane %%0 (daemon socket %q)",
+				target,
+				resolved.Socket,
+				resolved.Pane,
+				filepath.Base(callerSocket),
+				filepath.Base(daemonSocket),
+			)
+		}
+		if resolved.ID != "" || resolved.Session != "" {
+			t.Fatalf("raw action %q inherited caller identity: %+v", target, resolved)
+		}
+	}
+}
+
+func TestResolvedCodexSelfUsesTheNewestLineageRollout(t *testing.T) {
+	setupBackendFixture(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	root := store.Rollout{ID: "root", Path: "/root.jsonl", UserThread: true, SessionID: "root", MTimeNS: 100}
+	child := store.Rollout{ID: "child", Path: "/child.jsonl", UserThread: true, SessionID: "root", MTimeNS: 200}
+	for _, rollout := range []store.Rollout{root, child} {
+		if err := database.UpsertRollout(context.Background(), rollout); err != nil {
+			t.Fatal(err)
+		}
+	}
+	service := newService("test", &backend{database: database})
+	self, err := service.resolvedSelf(context.Background(), callerIdentity{
+		valid: true,
+		identity: resolve.Identity{
+			ID: "root", Engine: string(pfmengine.Codex), SocketName: "cx-seat", Session: "cx-seat", Pane: "%0",
+		},
+	})
+	if err != nil || self.Path != child.Path {
+		t.Fatalf("resolved self path = %q err=%v, want newest lineage path %q", self.Path, err, child.Path)
+	}
+}
+
+func TestReviewScopedSelfKeepsUnindexedTranscript(t *testing.T) {
+	root := setupBackendFixture(t)
+	transcriptPath := filepath.Join(root, "claude", "project-alpha", "unindexed.jsonl")
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"assistant","message":{"content":"unindexed answer"}}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	row := compose.Row{
+		Kind: compose.LiveClaude, ID: "unindexed", Path: transcriptPath, CWD: "/work/alpha",
+		SessionName: "cc-unindexed", Socket: "cc-unindexed", PaneID: "%1",
+	}
+	verbs := &fakeChatVerbs{
+		listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
+		last:   chat.LastResult{Text: "unindexed answer"}, resolveScopedSelf: true,
+	}
+	service := newService("test", &backend{chat: verbs})
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
+		"pfmProxy": map[string]any{
+			"v": ProxyWireVersion, "session": row.SessionName, "socketName": row.Socket,
+			"pane": row.PaneID, "engine": "claude", "id": row.ID,
+		},
+	}}}
+	if _, _, err := service.chatLast(context.Background(), request, LastInput{Target: "self"}); err != nil {
+		t.Fatalf("chatLast(self): %v", err)
+	}
+	if want := []string{transcriptPath}; !reflect.DeepEqual(verbs.resolvedSelfPaths, want) {
+		t.Fatalf("scoped self paths = %q, want composed transcript %q", verbs.resolvedSelfPaths, want)
+	}
+	encoded, err := json.Marshal(ChatRow{ID: row.ID, transcriptPath: transcriptPath})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), transcriptPath) || strings.Contains(string(encoded), "transcriptPath") {
+		t.Fatalf("private transcript path leaked onto chat row wire: %s", encoded)
+	}
+}
+
+func TestChatNewDefaultsEngineFromValidatedCaller(t *testing.T) {
+	tests := []struct {
+		name   string
+		kind   compose.Kind
+		engine string
+	}{
+		{name: "claude", kind: compose.LiveClaude, engine: "cc"},
+		{name: "codex", kind: compose.LiveCodex, engine: "cx"},
+		{name: "opencode", kind: compose.LiveOpenCode, engine: "ox"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			row := compose.Row{
+				Kind: test.kind, ID: test.name + "-id", CWD: "/caller/" + test.name,
+				SessionName: test.name + "-seat", Socket: test.name + "-socket", PaneID: "%1",
+			}
+			var calls [][]string
+			service := newService("test", &backend{
+				chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+				dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
+					calls = append(calls, append([]string(nil), args...))
+					return 0
+				},
+			})
+			request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
+				"pfmProxy": map[string]any{
+					"v": ProxyWireVersion, "session": row.SessionName, "socketName": row.Socket,
+					"pane": row.PaneID, "engine": test.name, "id": row.ID,
+				},
+			}}}
+			if _, _, err := service.chatNew(
+				context.Background(), request, NewInput{Name: "child", CWD: "/explicit"},
+			); err != nil {
+				t.Fatal(err)
+			}
+			want := [][]string{{
+				"chat", "new", "--name", "child", "--engine", test.engine, "--cwd", "/explicit",
+			}}
+			if !reflect.DeepEqual(calls, want) {
+				t.Fatalf("chat_new calls = %q, want %q", calls, want)
+			}
+		})
+	}
+}
+
+func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
+	row := compose.Row{
+		Kind: compose.LiveClaude, ID: "caller-id", CWD: "/caller",
+		SessionName: "caller-seat", Socket: "caller-socket", PaneID: "%1",
+	}
+	meta := mcp.Meta{"pfmProxy": map[string]any{
+		"v": ProxyWireVersion, "session": row.SessionName, "socketName": row.Socket,
+		"pane": row.PaneID, "engine": "claude", "id": row.ID,
+	}}
+	var calls [][]string
+	var scopedIDs []string
+	service := newService("test", &backend{
+		chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
+			calls = append(calls, append([]string(nil), args...))
+			if self, ok := chat.ScopedSelf(ctx); ok {
+				scopedIDs = append(scopedIDs, self.ID)
+			} else {
+				scopedIDs = append(scopedIDs, "")
+			}
+			return 0
+		},
+	})
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: meta}}
+	if _, _, err := service.chatNew(
+		context.Background(), request, NewInput{Name: "override", Engine: "opencode"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.chatNew(
+		context.Background(), request, NewInput{Name: "relative", Engine: "codex", CWD: "child"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.chatNew(
+		context.Background(), request, NewInput{Name: "explicit", Engine: "codex", CWD: "/chosen"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := service.chatNew(context.Background(), nil, NewInput{Name: "ambient"}); err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"chat", "new", "--name", "override", "--engine", "opencode", "--cwd", "/caller"},
+		{"chat", "new", "--name", "relative", "--engine", "codex", "--cwd", "/caller/child"},
+		{"chat", "new", "--name", "explicit", "--engine", "codex", "--cwd", "/chosen"},
+		{"chat", "new", "--name", "ambient"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("chat_new calls = %q, want %q", calls, want)
+	}
+	if wantIDs := []string{"caller-id", "caller-id", "caller-id", ""}; !reflect.DeepEqual(scopedIDs, wantIDs) {
+		t.Fatalf("chat_new scoped caller ids = %q, want %q", scopedIDs, wantIDs)
+	}
+
+	failing := newService("test", &backend{
+		chat: &fakeChatVerbs{err: errors.New("must not list")},
+	})
+	if _, _, err := failing.chatNew(
+		context.Background(), request,
+		NewInput{Name: "explicit", Engine: "codex", CWD: "/chosen"},
+	); err == nil || !strings.Contains(err.Error(), "must not list") {
+		t.Fatalf("fully explicit chat_new caller lookup error = %v", err)
+	}
+	for _, test := range []struct {
+		name string
+		cwd  string
+	}{
+		{name: "missing caller directory"},
+		{name: "relative caller directory", cwd: "caller"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			invalidRow := row
+			invalidRow.CWD = test.cwd
+			refusing := newService("test", &backend{
+				chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{invalidRow}, Matched: 1}},
+			})
+			_, _, err := refusing.chatNew(
+				context.Background(), request, NewInput{Name: "child", CWD: "relative"},
+			)
+			if err == nil || !strings.Contains(err.Error(), "caller working directory") {
+				t.Fatalf("chat_new relative cwd error = %v", err)
+			}
+		})
+	}
+}
+
+func TestChatNewRefusesPresentInvalidCallerMetadata(t *testing.T) {
+	var calls int
+	service := newService("test", &backend{
+		chat: &fakeChatVerbs{listed: chat.ListResult{}},
+		dispatch: func(_ context.Context, _ []string, _, _ io.Writer) int {
+			calls++
+			return 0
+		},
+	})
+	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{"threadId": "missing"}}}
+	_, _, err := service.chatNew(
+		context.Background(), request, NewInput{Name: "must-not-launch", Engine: "codex", CWD: "/chosen"},
+	)
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("chat_new invalid metadata error = %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("chat_new invalid metadata dispatched %d calls", calls)
+	}
+}
+
+func TestResolvedSelfPathFallbacksAndIndexedPrecedence(t *testing.T) {
+	setupBackendFixture(t)
+	database, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+	if err := database.UpsertTranscript(context.Background(), store.Transcript{
+		UUID: "indexed", Path: "/indexed.jsonl", CWD: "/work/indexed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpsertTranscript(context.Background(), store.Transcript{
+		UUID: "indexed-empty", CWD: "/work/indexed-empty",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.UpsertRollout(context.Background(), store.Rollout{
+		ID: "codex-indexed", SessionID: "codex-indexed", Path: "/indexed-rollout.jsonl",
+		UserThread: true, MTimeNS: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := newService("test", &backend{database: database})
+	tests := []struct {
+		name   string
+		engine pfmengine.ID
+		id     string
+		row    string
+		want   string
+	}{
+		{
+			name: "unindexed claude", engine: pfmengine.Claude, id: "missing",
+			row: "/composed.jsonl", want: "/composed.jsonl",
+		},
+		{name: "indexed claude", engine: pfmengine.Claude, id: "indexed", row: "/stale.jsonl", want: "/indexed.jsonl"},
+		{
+			name: "empty indexed claude", engine: pfmengine.Claude, id: "indexed-empty",
+			row: "/composed-empty.jsonl", want: "/composed-empty.jsonl",
+		},
+		{
+			name: "unindexed codex", engine: pfmengine.Codex, id: "codex-missing",
+			row: "/rollout.jsonl", want: "/rollout.jsonl",
+		},
+		{
+			name: "indexed codex", engine: pfmengine.Codex, id: "codex-indexed",
+			row: "/stale-rollout.jsonl", want: "/indexed-rollout.jsonl",
+		},
+		{name: "no path", engine: pfmengine.Claude, id: "none", want: ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			self, resolveErr := service.resolvedSelf(context.Background(), callerIdentity{
+				valid:    true,
+				identity: resolve.Identity{ID: test.id, Engine: string(test.engine)},
+				row:      ChatRow{Engine: test.engine, transcriptPath: test.row},
+			})
+			if resolveErr != nil || self.Path != test.want {
+				t.Fatalf("resolved path = %q err=%v, want %q", self.Path, resolveErr, test.want)
+			}
+		})
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.resolvedSelf(context.Background(), callerIdentity{
+		valid:    true,
+		identity: resolve.Identity{ID: "lookup-error", Engine: string(pfmengine.Claude)},
+		row:      ChatRow{Engine: pfmengine.Claude, transcriptPath: "/composed.jsonl"},
+	})
+	if err == nil || !strings.Contains(err.Error(), `resolve MCP self transcript "lookup-error"`) {
+		t.Fatalf("lookup error collapsed into composed fallback: %v", err)
 	}
 }
 

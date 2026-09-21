@@ -47,7 +47,7 @@ func TestManagerKillRecordsATransition(t *testing.T) {
 	if len(kill) != 3 {
 		t.Fatalf("kill transitions = %d, want 3: %s", len(kill), recorder.Raw())
 	}
-	for key, want := range map[string]any{obs.FieldComp: "state", "prior": "live", "next": "killed", "cause": "id --exit"} {
+	for key, want := range map[string]any{obs.FieldComp: "state", "prior": "live", "next": "killed", "cause": "socket --exit"} {
 		if got, _ := kill[0].Field(key); got != want {
 			t.Fatalf("%s = %v, want %v", key, got, want)
 		}
@@ -62,4 +62,32 @@ func TestManagerKillRecordsATransition(t *testing.T) {
 		t.Fatalf("KillCleared on an unindexed id = %v, want skipped", next)
 	}
 	_ = context.Background
+}
+
+func TestRequestShapeNamesTheAddressingMode(t *testing.T) {
+	tests := []struct {
+		name    string
+		request Request
+		want    string
+	}{
+		{
+			name: "socket addressed with exit",
+			request: Request{
+				ID: "20202020-2020-4020-8020-202020202020", SocketName: "probe-codex-self", PaneID: "%7", Exit: true,
+			},
+			want: "socket --exit",
+		},
+		{name: "socket name only", request: Request{SocketName: "probe-codex-self"}, want: "socket"},
+		{name: "pane id only", request: Request{PaneID: "%7"}, want: "socket"},
+		{name: "self", request: Request{Self: true}, want: "--self"},
+		{name: "self with exit", request: Request{Self: true, Exit: true}, want: "--self --exit"},
+		{name: "bare id", request: Request{ID: "20202020-2020-4020-8020-202020202020"}, want: "id"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := requestShape(test.request); got != test.want {
+				t.Fatalf("requestShape() = %q, want %q", got, test.want)
+			}
+		})
+	}
 }

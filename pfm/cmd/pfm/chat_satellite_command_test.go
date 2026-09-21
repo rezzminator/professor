@@ -11,7 +11,10 @@ import (
 	"testing"
 	"time"
 
+	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
+	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -55,6 +58,76 @@ func TestChatSaveUsesConfiguredImplicitAccountRoot(t *testing.T) {
 	}
 	if !strings.Contains(string(saved), "Source: "+transcriptPath) {
 		t.Fatalf("saved transcript source=%q, want %q", string(saved), transcriptPath)
+	}
+}
+
+func TestChatSaveDispatchUsesScopedCallerRepository(t *testing.T) {
+	root := t.TempDir()
+	transcriptPath := filepath.Join(root, "caller.jsonl")
+	if err := os.WriteFile(
+		transcriptPath,
+		[]byte(`{"type":"user","message":{"content":"scoped save"}}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "saved.md")
+	callerCWD := filepath.Join(root, "caller-repository")
+	if err := os.MkdirAll(callerCWD, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	result, err := (deps.RealRunner{}).Run(context.Background(), []string{
+		deps.Executable("git"), "init", "-b", "caller-snapshot", callerCWD,
+	}, deps.RunOptions{})
+	if err != nil || result.ExitCode != 0 {
+		t.Fatalf("initialize caller repository: result=%+v err=%v", result, err)
+	}
+	ctx := pfmchat.WithResolvedSelf(context.Background(), headless.Chat{CWD: callerCWD})
+	var stdout, stderr bytes.Buffer
+	if code := runChatWithRuntime(
+		[]string{"save", target, transcriptPath},
+		strings.NewReader(""),
+		&stdout,
+		&stderr,
+		commandRuntime{},
+		ctx,
+	); code != 0 {
+		t.Fatalf("save code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	saved, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), "Branch: caller-snapshot\n") {
+		t.Fatalf("saved snapshot = %q, want caller repository branch from %q", saved, callerCWD)
+	}
+}
+
+func TestChatSaveContextKeepsExplicitTranscriptReadFailuresVisible(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "saved.md")
+	missingTranscript := filepath.Join(root, "missing.jsonl")
+	ctx := pfmchat.WithResolvedSelf(context.Background(), headless.Chat{CWD: root})
+	var stdout, stderr bytes.Buffer
+
+	code := runChatSaveContext(
+		ctx,
+		[]string{target, missingTranscript},
+		&stdout,
+		&stderr,
+		nil,
+		commandRuntime{},
+	)
+	if code != 1 || !strings.Contains(stderr.String(), missingTranscript) {
+		t.Fatalf(
+			"save code=%d stdout=%q stderr=%q, want named transcript read failure",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("target stat error = %v, want no output after transcript read failure", err)
 	}
 }
 

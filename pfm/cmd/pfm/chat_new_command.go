@@ -41,6 +41,7 @@ const spawnTraceEnv = "PFM_SPAWN_TRACE"
 // No terminal is attached and nothing is eval'd by the caller's shell, so it
 // works from a script, a cron job, or another chat's Bash tool.
 func runRun(
+	ctx context.Context,
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
@@ -145,7 +146,7 @@ func runRun(
 		trace = stderr
 	}
 	titles := runtime.Config.Tmux.Titles
-	result, err := spawn.Run(context.Background(), spawn.TmuxSpawner{
+	result, err := spawn.Run(ctx, spawn.TmuxSpawner{
 		TmuxDir: resolved.TmuxDir,
 		Titles:  &titles,
 	}, spawn.Request{
@@ -183,7 +184,7 @@ func runRun(
 	}
 	pfmchat.RecordVerb(context.Background(), "new", 0)
 	spawnedAt := clk.Now()
-	parent := parentChatID(env)
+	parent := parentChatID(ctx, env)
 	state := fleetdb.OpenSharedState(context.Background(), resolved)
 	if parent != "" {
 		if err := registerDetachedChild(state, parent, result.Socket, spawnedAt.Unix()); err != nil {
@@ -247,7 +248,7 @@ func runRun(
 		progressOut = stderr
 	}
 	code := awaitLaunch(
-		context.Background(),
+		ctx,
 		*name,
 		*await,
 		headless.AwaitOptions{
@@ -330,7 +331,10 @@ func resolveRunEngineIDAccount(
 	return id, account, nil
 }
 
-func parentChatID(env paths.Env) string {
+func parentChatID(ctx context.Context, env paths.Env) string {
+	if self, ok := pfmchat.ScopedSelf(ctx); ok {
+		return self.ID
+	}
 	if id := env.Get("CLAUDE_CODE_SESSION_ID"); id != "" {
 		return id
 	}

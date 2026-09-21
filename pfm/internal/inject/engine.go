@@ -47,6 +47,10 @@ type Engine struct {
 	accountEmojis []string
 	recorder      func(context.Context, fleetdb.CommsEvent) error
 	warningWriter io.Writer
+	// requestIdentity is present only on an engine scoped to one validated
+	// request caller. Raw pane ids use its socket instead of daemon ambient
+	// state because pane ids are unique only within one tmux server.
+	requestIdentity *resolve.Identity
 	// env is Dependencies.Env, defaulting to paths.OSEnv{}.
 	env paths.Env
 	// sidDir is where T1 role re-arm crumbs live (paths.Values.SIDDir) —
@@ -155,6 +159,7 @@ func New(dependencies Dependencies) (*Engine, error) {
 // is a sync.Once and may already have been used by the shared engine. The
 // scoped copy starts with a fresh sender cache and an explicit sender.
 func (engine *Engine) WithIdentity(identity resolve.Identity, label string) *Engine {
+	requestIdentity := identity
 	sender := &Sender{
 		Session: identity.Session,
 		Label:   strings.TrimSpace(label),
@@ -163,18 +168,19 @@ func (engine *Engine) WithIdentity(identity resolve.Identity, label string) *Eng
 	options := engine.options
 	options.Sender = sender
 	return &Engine{
-		resolver:      engine.resolver,
-		names:         engine.names,
-		tmux:          engine.tmux,
-		spawner:       engine.spawner,
-		options:       options,
-		whoami:        fixedIdentifier{identity: identity},
-		binaries:      cloneEngineBinaries(engine.binaries),
-		accountEmojis: append([]string(nil), engine.accountEmojis...),
-		recorder:      engine.recorder,
-		warningWriter: engine.warningWriter,
-		env:           engine.env,
-		sidDir:        engine.sidDir,
+		resolver:        engine.resolver,
+		names:           engine.names,
+		tmux:            engine.tmux,
+		spawner:         engine.spawner,
+		options:         options,
+		whoami:          fixedIdentifier{identity: identity},
+		binaries:        cloneEngineBinaries(engine.binaries),
+		accountEmojis:   append([]string(nil), engine.accountEmojis...),
+		recorder:        engine.recorder,
+		warningWriter:   engine.warningWriter,
+		requestIdentity: &requestIdentity,
+		env:             engine.env,
+		sidDir:          engine.sidDir,
 	}
 }
 
@@ -356,109 +362,62 @@ func (engine *Engine) ResolveEngine(
 	return engine.resolve(ctx, name, requiredEngine)
 }
 
+// ResolveKind applies the shared ladder while restricting the raw fallback to
+// one requested namespace. The roster rung still runs first for every kind.
+func (engine *Engine) ResolveKind(
+	ctx context.Context,
+	name string,
+	kind resolve.Kind,
+	requiredEngine string,
+) (Target, int, string, error) {
+	return engine.resolveWithOptions(ctx, name, resolve.LadderOptions{
+		RequiredEngine: requiredEngine,
+		Kinds:          []resolve.Kind{kind},
+	})
+}
+
 func (engine *Engine) resolve(
 	ctx context.Context,
 	name, requiredEngine string,
 ) (Target, int, string, error) {
-	name = unquoteTarget(name)
-	if name == "" {
-		return Target{}, CodeUnknown, "empty target", nil
-	}
-	if requiredEngine == "" && (name == "self" || name == "me") {
-		identity, err := engine.whoami.Identify(ctx)
-		if (err != nil || identity.Session == "") &&
-			engine.codexSeat != nil &&
-			engine.env.Get(resolve.CodexThreadEnv) != "" {
-			identity, err = engine.codexSeat.Identify(ctx)
-		}
-		if err != nil || identity.Session == "" || identity.SocketPath == "" {
-			return Target{}, CodeUnknown, "self target has no live tmux seat", nil
-		}
-		pane := identity.Session
-		if identity.Pane != "" {
-			pane = identity.Pane
-		}
-		target := targetFromParts(identity.SocketPath, pane, engine.env)
-		if identity.Engine == string(pfmengine.Codex) {
-			target.Engine = string(pfmengine.Codex)
-		}
-		return target, 0, "", nil
-	}
-	if requiredEngine == "" && rawPane(name) {
-		// chat.sh:549 — pane ids are unique per tmux SERVER, not globally, so a
-		// bare %id needs its socket from CHAT_INJECT_SOCKET (set by the __then
-		// waiter re-delivering to the pane it watched) or from our own $TMUX.
-		socket := engine.env.Get("CHAT_INJECT_SOCKET")
-		if socket == "" {
-			socket = currentSocketPath(engine.env)
-		}
-		if socket == "" {
-			return Target{}, CodeUnknown, "raw pane target requires TMUX", nil
-		}
-		return targetFromParts(socket, name, engine.env), 0, "", nil
-	}
-	if engine.names != nil {
-		target, code, detail, err := engine.names.ResolveName(ctx, name, requiredEngine)
-		if err != nil {
-			return Target{}, CodeUndelivered, "", err
-		}
-		switch code {
-		case 0:
-			return target, 0, detail, nil
-		case CodeAmbiguous:
-			return Target{}, CodeAmbiguous, detail, nil
-		case CodeUnknown:
-			// A fresh Codex spawn may not have written the rollout needed to
-			// compose a roster row. Raw session/label/window resolution is the
-			// required catch-up fallback for that window.
-		default:
-			return Target{}, CodeUndelivered, "", fmt.Errorf(
-				"roster resolver returned unsupported code %d", code,
-			)
-		}
-	}
+	return engine.resolveWithOptions(ctx, name, resolve.LadderOptions{RequiredEngine: requiredEngine})
+}
 
-	kinds := []resolve.Kind{
-		resolve.Session,
-		resolve.Label,
-		resolve.CxWindow,
+func (engine *Engine) resolveWithOptions(
+	ctx context.Context,
+	name string,
+	options resolve.LadderOptions,
+) (Target, int, string, error) {
+	var roster resolve.RosterResolver
+	if engine.names != nil {
+		roster = resolve.RosterFunc(func(
+			ctx context.Context,
+			name, requiredEngine string,
+		) (resolve.Seat, int, string, error) {
+			target, code, detail, err := engine.names.ResolveName(ctx, name, requiredEngine)
+			return seatFromTarget(target), code, detail, err
+		})
 	}
-	if requiredEngine != "" {
-		if requiredEngine != string(pfmengine.Codex) {
-			return Target{}, CodeUndelivered, "", fmt.Errorf(
-				"unsupported engine-scoped resolver %q", requiredEngine,
-			)
-		}
-		kinds = []resolve.Kind{resolve.CxWindow}
+	seat, code, detail, err := (resolve.Ladder{
+		Roster: roster, Raw: engine.resolver, Self: engine.whoami,
+		CodexSelf: engine.codexSeat, RequestIdentity: engine.requestIdentity,
+		Env: engine.env, Session: engine.tmux,
+	}).Resolve(ctx, name, options)
+	return targetFromSeat(seat), code, detail, err
+}
+
+func seatFromTarget(target Target) resolve.Seat {
+	return resolve.Seat{
+		SocketPath: target.SocketPath, Pane: target.Pane, Engine: target.Engine,
+		Name: target.Name, ID: target.ID, Session: target.Session,
 	}
-	for _, kind := range kinds {
-		outcome, err := engine.resolver.Resolve(ctx, kind, name)
-		if err != nil {
-			return Target{}, CodeUndelivered, "", err
-		}
-		switch outcome.Code {
-		case 0:
-			socket, pane, ok := parseTargetLine(outcome.Stdout)
-			if !ok {
-				return Target{}, CodeUndelivered, "", fmt.Errorf(
-					"resolver %s returned malformed target",
-					kind,
-				)
-			}
-			target := targetFromParts(socket, pane, engine.env)
-			target.Name = name
-			if session, sessionErr := engine.tmux.CurrentSession(ctx, socket); sessionErr == nil {
-				target.Session = session
-			}
-			if kind == resolve.CxWindow {
-				target.Engine = string(pfmengine.Codex)
-			}
-			return target, 0, outcome.Stderr, nil
-		case 2:
-			return Target{}, CodeAmbiguous, outcome.Stderr, nil
-		}
+}
+
+func targetFromSeat(seat resolve.Seat) Target {
+	return Target{
+		SocketPath: seat.SocketPath, Pane: seat.Pane, Engine: seat.Engine,
+		Name: seat.Name, ID: seat.ID, Session: seat.Session,
 	}
-	return Target{}, CodeUnknown, fmt.Sprintf("target %q matched no live chat", name), nil
 }
 
 // Capture resolves and captures a pane without mutating it.
@@ -754,6 +713,25 @@ const SelfCompactStopNotice = " — STOP NOW: end this turn without running " +
 // still accepts a /compact primary when Chain is true — that is how
 // ScheduleAfterCurrentTurn's detached waiter (DeliverThen) delivers one.
 func (engine *Engine) Inject(ctx context.Context, request Request) (result Result, err error) {
+	return engine.injectRequest(ctx, request, nil)
+}
+
+// InjectTarget performs one delivery against an already-resolved immutable
+// seat. Context-scoped MCP mutations use it so a split pane is never resolved
+// again through an aggregate session or name.
+func (engine *Engine) InjectTarget(
+	ctx context.Context,
+	target Target,
+	request Request,
+) (result Result, err error) {
+	return engine.injectRequest(ctx, request, &target)
+}
+
+func (engine *Engine) injectRequest(
+	ctx context.Context,
+	request Request,
+	resolved *Target,
+) (result Result, err error) {
 	states := trail(ctx, "inject")
 	defer func() { outcome(states, result, err) }()
 	ctx = withSender(ctx, engine.sender(ctx))
@@ -766,7 +744,17 @@ func (engine *Engine) Inject(ctx context.Context, request Request) (result Resul
 				"human. Nothing was typed.",
 		), nil
 	}
-	result, err = engine.inject(ctx, request)
+	if resolved == nil {
+		result, err = engine.inject(ctx, request)
+	} else {
+		if request.Message == "" {
+			return refused(CodeUndelivered, "refusing to inject an empty message"), nil
+		}
+		if checked, ok := engine.checkSteerChain(request); !ok {
+			return checked, nil
+		}
+		result, err = engine.injectResolved(ctx, request, *resolved, "")
+	}
 	if err != nil || result.Code != 0 || !result.Typed || request.Origin != "" || engine.recorder == nil {
 		return result, err
 	}
@@ -814,6 +802,15 @@ func (engine *Engine) inject(ctx context.Context, request Request) (Result, erro
 	if code != 0 {
 		return refused(code, detail), nil
 	}
+	return engine.injectResolved(ctx, request, target, detail)
+}
+
+func (engine *Engine) injectResolved(
+	ctx context.Context,
+	request Request,
+	target Target,
+	detail string,
+) (Result, error) {
 	base := Result{
 		Status:         "refused",
 		SocketPath:     target.SocketPath,
@@ -1806,47 +1803,7 @@ func (engine *Engine) senderLabel(
 }
 
 func targetFromParts(socketPath, pane string, env paths.Env) Target {
-	base := filepath.Base(socketPath)
-	id, ok := pfmengine.FromSocket(base)
-	if !ok && env.Get("PFM_TEST_PROBE_SOCKETS") == "1" {
-		id, ok = pfmengine.FromSocket(strings.TrimPrefix(base, "probe-"))
-	}
-	if !ok {
-		return Target{SocketPath: socketPath, Pane: pane, Engine: "unknown"}
-	}
-	return Target{SocketPath: socketPath, Pane: pane, Engine: string(id)}
-}
-
-func parseTargetLine(line string) (string, string, bool) {
-	fields := strings.Split(strings.TrimSpace(line), "\t")
-	return firstTwo(fields)
-}
-
-func firstTwo(fields []string) (string, string, bool) {
-	if len(fields) != 2 || fields[0] == "" || fields[1] == "" {
-		return "", "", false
-	}
-	return fields[0], fields[1], true
-}
-
-func currentSocketPath(env paths.Env) string {
-	value := env.Get("TMUX")
-	if comma := strings.IndexByte(value, ','); comma >= 0 {
-		value = value[:comma]
-	}
-	return value
-}
-
-func rawPane(value string) bool {
-	if len(value) < 2 || value[0] != '%' {
-		return false
-	}
-	for _, character := range value[1:] {
-		if character < '0' || character > '9' {
-			return false
-		}
-	}
-	return true
+	return targetFromSeat(resolve.SeatFromParts(socketPath, pane, env))
 }
 
 func refused(code int, message string) Result {

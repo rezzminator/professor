@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -33,7 +34,8 @@ type Process struct {
 	Command string
 	// MCP is true for a chat MCP server (`pfm … mcp …`): sweeping one drops
 	// its session's chat tools until that session reconnects.
-	MCP bool
+	MCP                      bool
+	compatibleProxyCandidate bool
 }
 
 // Scan is one pass over the process table: the stale processes, and every
@@ -88,11 +90,109 @@ func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
 		if image != current {
 			scan.Stale = append(
 				scan.Stale,
-				Process{PID: pid, Command: clipCommand(command), MCP: slices.Contains(argv, "mcp")},
+				Process{
+					PID: pid, Command: clipCommand(command), MCP: slices.Contains(argv, "mcp"),
+					compatibleProxyCandidate: len(argv) >= 4 &&
+						slices.Equal(argv[len(argv)-3:], []string{"mcp", "chat", "serve"}),
+				},
 			)
 		}
 	}
 	return scan, nil
+}
+
+func compatibleProxyMarker(home string) string {
+	return filepath.Join(home, ".local", "state", "pfm", "mcp-proxy-compatible")
+}
+
+func compatibleProxyMarkerTarget(home string) (string, error) {
+	marker := compatibleProxyMarker(home)
+	target, err := filepath.EvalSymlinks(marker)
+	if errors.Is(err, os.ErrNotExist) {
+		return filepath.Clean(marker), nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("resolve compatible proxy marker %s: %w", marker, err)
+	}
+	return filepath.Clean(target), nil
+}
+
+// HoldCompatibleProxy marks this process as a stdio proxy that can reconnect
+// after the daemon and installed binary are replaced.
+func HoldCompatibleProxy(home string) (*os.File, error) {
+	marker := compatibleProxyMarker(home)
+	if err := os.MkdirAll(filepath.Dir(marker), 0o700); err != nil {
+		return nil, fmt.Errorf("create compatible proxy marker parent for %s: %w", marker, err)
+	}
+	handle, err := os.OpenFile(marker, os.O_CREATE|os.O_RDONLY, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open compatible proxy marker %s: %w", marker, err)
+	}
+	return handle, nil
+}
+
+func partitionSweep(
+	table gather.ProcFS,
+	procRoot string,
+	home string,
+	signal Signaler,
+	processes []Process,
+) ([]Process, []Process, error) {
+	marker, err := compatibleProxyMarkerTarget(home)
+	if err != nil {
+		return nil, nil, err
+	}
+	var sweepable, kept []Process
+	for _, process := range processes {
+		if !process.compatibleProxyCandidate {
+			sweepable = append(sweepable, process)
+			continue
+		}
+		links, err := table.FDLinks(process.PID)
+		if err != nil {
+			if errors.Is(signal(process.PID, 0), syscall.ESRCH) {
+				continue
+			}
+			return nil, nil, fmt.Errorf(
+				"inspect descriptors for pid=%d %s against marker %s: %w",
+				process.PID, process.Command, marker, err,
+			)
+		}
+		if _, rootErr := os.Stat(procRoot); rootErr == nil {
+			entries, readErr := os.ReadDir(filepath.Join(procRoot, strconv.Itoa(process.PID), "fd"))
+			if readErr != nil {
+				if errors.Is(signal(process.PID, 0), syscall.ESRCH) {
+					continue
+				}
+				return nil, nil, fmt.Errorf(
+					"verify descriptor census for pid=%d %s: %w", process.PID, process.Command, readErr,
+				)
+			}
+			read := make(map[int]bool, len(links))
+			for _, link := range links {
+				read[link.FD] = true
+			}
+			for _, entry := range entries {
+				fd, parseErr := strconv.Atoi(entry.Name())
+				if parseErr == nil && fd >= 0 && !read[fd] {
+					return nil, nil, fmt.Errorf(
+						"inspect descriptors for pid=%d %s: descriptor %d was not readable",
+						process.PID, process.Command, fd,
+					)
+				}
+			}
+		} else if !errors.Is(rootErr, os.ErrNotExist) {
+			return nil, nil, fmt.Errorf("inspect descriptor root %s: %w", procRoot, rootErr)
+		}
+		if slices.ContainsFunc(links, func(link gather.FDLink) bool {
+			return filepath.Clean(link.Target) == marker
+		}) {
+			kept = append(kept, process)
+		} else {
+			sweepable = append(sweepable, process)
+		}
+	}
+	return sweepable, kept, nil
 }
 
 // Sweep TERMs every stale process, KILLs any still there after wait, then
@@ -102,6 +202,8 @@ func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
 func SweepStaleProcesses(
 	table gather.ProcFS,
 	binary string,
+	procRoot string,
+	home string,
 	signal Signaler,
 	stdout io.Writer,
 	wait time.Duration,
@@ -118,17 +220,24 @@ func SweepStaleProcesses(
 			strings.Join(scan.Unreadable, "; "),
 		)
 	}
-	if len(scan.Stale) == 0 {
-		fmt.Fprintln(stdout, "sweep: none — every running pfm process uses the binary now on disk")
+	sweepable, kept, err := partitionSweep(table, procRoot, home, signal, scan.Stale)
+	if err != nil {
+		return err
+	}
+	for _, process := range kept {
+		fmt.Fprintf(stdout, "sweep: KEEP pid=%d compatible stdio proxy\n", process.PID)
+	}
+	if len(sweepable) == 0 {
+		fmt.Fprintln(stdout, "sweep: none — no obsolete pfm process runs a replaced binary")
 		return nil
 	}
 	mcp := false
-	for _, process := range scan.Stale {
+	for _, process := range sweepable {
 		mcp = mcp || process.MCP
 		fmt.Fprintf(stdout, "sweep: TERM pid=%d  %s\n", process.PID, process.Command)
 		deliver(signal, process.PID, syscall.SIGTERM)
 	}
-	survivors, err := awaitExit(table, binary, signal, wait, clk)
+	survivors, err := awaitExit(table, binary, procRoot, home, signal, wait, clk)
 	if err != nil {
 		return err
 	}
@@ -137,7 +246,7 @@ func SweepStaleProcesses(
 		deliver(signal, process.PID, syscall.SIGKILL)
 	}
 	if len(survivors) != 0 {
-		if survivors, err = awaitExit(table, binary, signal, wait, clk); err != nil {
+		if survivors, err = awaitExit(table, binary, procRoot, home, signal, wait, clk); err != nil {
 			return err
 		}
 	}
@@ -151,7 +260,7 @@ func SweepStaleProcesses(
 	if mcp {
 		fmt.Fprintln(stdout, "sweep: a session whose chat MCP server was swept reconnects it with /mcp")
 	}
-	fmt.Fprintln(stdout, "sweep: done — no pfm process runs a replaced binary")
+	fmt.Fprintln(stdout, "sweep: done — no obsolete pfm process runs a replaced binary")
 	return nil
 }
 
@@ -161,6 +270,8 @@ func SweepStaleProcesses(
 func awaitExit(
 	table gather.ProcFS,
 	binary string,
+	procRoot string,
+	home string,
 	signal Signaler,
 	wait time.Duration,
 	clk clock.Clock,
@@ -171,11 +282,15 @@ func awaitExit(
 		if err != nil {
 			return nil, fmt.Errorf("re-scan after signalling: %w", err)
 		}
-		if len(scan.Stale) == 0 || clk.Now().After(deadline) {
-			return scan.Stale, nil
+		sweepable, _, partitionErr := partitionSweep(table, procRoot, home, signal, scan.Stale)
+		if partitionErr != nil {
+			return nil, fmt.Errorf("re-scan compatible proxy descriptors: %w", partitionErr)
+		}
+		if len(sweepable) == 0 || clk.Now().After(deadline) {
+			return sweepable, nil
 		}
 		if err := clk.Sleep(context.Background(), wait/10); err != nil {
-			return scan.Stale, nil
+			return sweepable, nil
 		}
 	}
 }
@@ -210,7 +325,17 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "pfm internal stale: %v\n", err)
 		return 1
 	}
-	return runStale(args, stdout, stderr, gather.NewProcFS(resolved.ProcRoot), binary, syscall.Kill, clock.Real)
+	return runStale(
+		args,
+		stdout,
+		stderr,
+		gather.NewProcFS(resolved.ProcRoot),
+		binary,
+		resolved.ProcRoot,
+		resolved.Home,
+		syscall.Kill,
+		clock.Real,
+	)
 }
 
 func runStale(
@@ -218,6 +343,8 @@ func runStale(
 	stdout, stderr io.Writer,
 	table gather.ProcFS,
 	installed string,
+	procRoot string,
+	home string,
 	signal Signaler,
 	clk clock.Clock,
 ) int {
@@ -234,7 +361,7 @@ func runStale(
 	}
 	binary := *binaryFlag
 	if *sweep {
-		if err := SweepStaleProcesses(table, binary, signal, stdout, 3*time.Second, clk); err != nil {
+		if err := SweepStaleProcesses(table, binary, procRoot, home, signal, stdout, 3*time.Second, clk); err != nil {
 			fmt.Fprintf(stderr, "pfm internal stale: %v\n", err)
 			return 1
 		}

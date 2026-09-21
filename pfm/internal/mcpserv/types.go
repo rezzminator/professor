@@ -15,18 +15,19 @@ type LSInput struct {
 
 // ChatRow is one structured live or resumable fleet row.
 type ChatRow struct {
-	Session string       `json:"session"`
-	ID      string       `json:"id"`
-	Engine  pfmengine.ID `json:"engine"`
-	State   string       `json:"state"`
-	Dir     string       `json:"dir"`
-	Project string       `json:"project"`
-	Name    string       `json:"name"`
-	Account int          `json:"account,omitempty"`
-	Kind    string       `json:"kind"`
-	Killed  bool         `json:"killed,omitempty"`
-	Socket  string       `json:"socket,omitempty"`
-	Pane    string       `json:"pane,omitempty"`
+	Session        string       `json:"session"`
+	ID             string       `json:"id"`
+	Engine         pfmengine.ID `json:"engine"`
+	State          string       `json:"state"`
+	Dir            string       `json:"dir"`
+	Project        string       `json:"project"`
+	Name           string       `json:"name"`
+	Account        int          `json:"account,omitempty"`
+	Kind           string       `json:"kind"`
+	Killed         bool         `json:"killed,omitempty"`
+	Socket         string       `json:"socket,omitempty"`
+	Pane           string       `json:"pane,omitempty"`
+	transcriptPath string
 }
 
 // LSOutput is chat_ls's structured response.

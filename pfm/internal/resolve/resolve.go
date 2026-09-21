@@ -24,6 +24,13 @@ import (
 type Kind string
 
 const (
+	// CodeAmbiguous means more than one live target matched.
+	CodeAmbiguous = 2
+	// CodeUnknown means no live target matched the requested namespace.
+	CodeUnknown = 4
+	// CodeUndelivered means resolution could not complete because a probe failed.
+	CodeUndelivered = 6
+
 	Label    Kind = "label"
 	Session  Kind = "session"
 	CxWindow Kind = "cxwin"

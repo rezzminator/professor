@@ -62,14 +62,14 @@ func Run(m *testing.M) int {
 			return 1
 		}
 	}
-	// A `go` child (internal/update's rebuild, a `go run`) derives GOCACHE,
-	// GOPATH and GOMODCACHE from HOME when they are unset, and every jail below
-	// rehomes HOME — so the build cache and the module download cache would
-	// land INSIDE the jail, and a child still writing at teardown makes
+	// A `go` child (internal/update's rebuild, a `go run`) derives its cache and
+	// telemetry directories from HOME/XDG_CONFIG_HOME when they are unset, and
+	// every jail below rehomes both — so those directories would land INSIDE
+	// the jail, and a child still writing at teardown makes
 	// RemoveAll fail with "directory not empty" (measured: TestKillSelfResolve-
-	// AndInternalCLI, 5/6 red under load). Pin all three to the real user's
-	// locations here, while HOME is still the real one. A missing home or
-	// cache dir is reported, never silently left to the jail.
+	// AndInternalCLI, 5/6 red under load). Pin the Go directories outside the
+	// jail here, before HOME/XDG_CONFIG_HOME move. A missing home or cache dir
+	// is reported, never silently left to the jail.
 	if code := pinGoDirs(); code != 0 {
 		return code
 	}
@@ -429,11 +429,11 @@ func PTYCommand(argv ...string) *exec.Cmd {
 	return exec.Command(scriptBinary, append([]string{"-qe", "/dev/null"}, argv...)...)
 }
 
-// pinGoDirs sets GOCACHE, GOPATH and GOMODCACHE — each only when unset — to the
-// defaults Go itself would derive from the REAL home, so a `go` child spawned
-// under a jailed HOME never writes into the jail. Returns a non-zero exit code
-// when a value cannot be set; a missing user cache/home dir is reported and the
-// variable left as it was.
+// pinGoDirs sets GOCACHE, GOPATH, GOMODCACHE and TEST_TELEMETRY_DIR — each only
+// when unset — outside the jail, so a `go` child spawned under a jailed
+// HOME/XDG_CONFIG_HOME never writes into the jail. Returns a non-zero exit code
+// when a required value cannot be chosen or set; a missing user cache/home dir
+// is reported and the variable left as it was.
 func pinGoDirs() int {
 	set := func(name, value string) int {
 		if err := os.Setenv(name, value); err != nil {
@@ -442,15 +442,33 @@ func pinGoDirs() int {
 		}
 		return 0
 	}
-	// One door for all three lookups: paths.OSEnv wraps the same process
+	// One door for all four lookups: paths.OSEnv wraps the same process
 	// environment and home-directory reads this jail would otherwise call
-	// directly, three times over.
+	// directly.
 	env := paths.OSEnv{}
 	unset := func(name string) bool { return env.Get(name) == "" }
-	if unset("GOCACHE") {
+	goCache := env.Get("GOCACHE")
+	if goCache == "" {
 		if cache, err := os.UserCacheDir(); err != nil {
 			warnSetup("GOCACHE left unpinned — user cache dir: %v", err)
-		} else if code := set("GOCACHE", filepath.Join(cache, "go-build")); code != 0 {
+		} else {
+			goCache = filepath.Join(cache, "go-build")
+			if code := set("GOCACHE", goCache); code != 0 {
+				return code
+			}
+		}
+	}
+	if unset("TEST_TELEMETRY_DIR") {
+		if goCache == "" {
+			warnSetup("TEST_TELEMETRY_DIR left unpinned — GOCACHE is unavailable")
+			return 1
+		}
+		telemetryDirectory, err := filepath.Abs(filepath.Join(goCache, "telemetry"))
+		if err != nil {
+			warnSetup("TEST_TELEMETRY_DIR left unpinned — resolve under GOCACHE: %v", err)
+			return 1
+		}
+		if code := set("TEST_TELEMETRY_DIR", telemetryDirectory); code != 0 {
 			return code
 		}
 	}
@@ -467,7 +485,9 @@ func pinGoDirs() int {
 		}
 	}
 	if unset("GOMODCACHE") {
-		return set("GOMODCACHE", filepath.Join(filepath.SplitList(gopath)[0], "pkg", "mod"))
+		if code := set("GOMODCACHE", filepath.Join(filepath.SplitList(gopath)[0], "pkg", "mod")); code != 0 {
+			return code
+		}
 	}
 	return 0
 }

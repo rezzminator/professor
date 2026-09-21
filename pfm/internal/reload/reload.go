@@ -928,22 +928,51 @@ func failThen(ctx context.Context, request Request, sidDir string, tmux Tmux, re
 
 func SessionFromCrumb(sidDir, socket, pane string) (string, string, error) {
 	for _, name := range []string{socket + "." + pane, socket} {
-		path := filepath.Join(sidDir, name)
-		content, err := os.ReadFile(path)
+		id, transcript, found, err := readSessionCrumb(filepath.Join(sidDir, name))
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return "", "", fmt.Errorf("read reload breadcrumb %q: %w", path, err)
+			return "", "", err
 		}
-		transcript := strings.TrimSpace(string(content))
-		if transcript == "" {
+		if !found {
 			continue
 		}
-		id := strings.TrimSuffix(filepath.Base(transcript), filepath.Ext(transcript))
 		return id, transcript, nil
 	}
 	return "", "", nil
+}
+
+// ErrInvalidPaneCrumb reports a socket/pane pair that cannot name one exact
+// pane breadcrumb under gather's strict filename grammar.
+var ErrInvalidPaneCrumb = errors.New("invalid pane breadcrumb name")
+
+// SessionFromPaneCrumb reads only the exact pane binding. It deliberately has
+// no socket-level fallback: split callers must prove which pane owns an ID.
+func SessionFromPaneCrumb(sidDir, socket, pane string) (string, string, error) {
+	if !filepath.IsAbs(sidDir) {
+		return "", "", fmt.Errorf("reload breadcrumb directory %q is not absolute", sidDir)
+	}
+	name := socket + "." + pane
+	parsedSocket, parsedPane, ok := gather.ParseCrumbName(name)
+	if pane == "" || !ok || parsedSocket != socket || parsedPane != pane {
+		return "", "", fmt.Errorf("%w: socket %q pane %q", ErrInvalidPaneCrumb, socket, pane)
+	}
+	id, transcript, _, err := readSessionCrumb(filepath.Join(sidDir, name))
+	return id, transcript, err
+}
+
+func readSessionCrumb(path string) (id, transcript string, found bool, err error) {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", "", false, nil
+		}
+		return "", "", false, fmt.Errorf("read reload breadcrumb %q: %w", path, err)
+	}
+	transcript = strings.TrimSpace(string(content))
+	if transcript == "" {
+		return "", "", false, nil
+	}
+	id = strings.TrimSuffix(filepath.Base(transcript), filepath.Ext(transcript))
+	return id, transcript, true, nil
 }
 
 // ParseIntEnv reads name through env and returns fallback when it is unset

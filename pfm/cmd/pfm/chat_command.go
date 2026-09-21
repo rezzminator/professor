@@ -18,7 +18,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/inject"
-	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/rearm"
 	"github.com/rezzminator/professor/pfm/internal/recovery"
@@ -85,7 +84,17 @@ func runChatOpen(
 }
 
 func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (code int) {
-	defer func() { pfmchat.RecordVerb(context.Background(), "kill", code) }()
+	return runChatKillContext(context.Background(), args, stdout, stderr, env, runtimes...)
+}
+
+func runChatKillContext(
+	ctx context.Context,
+	args []string,
+	stdout, stderr io.Writer,
+	env paths.Env,
+	runtimes ...commandRuntime,
+) (code int) {
+	defer func() { pfmchat.RecordVerb(ctx, "kill", code) }()
 	env = defaultEnv(env)
 	flags := cli.NewFlagSet("chat kill", "usage: pfm chat kill <target> [--exit]", stderr)
 	exit := flags.Bool("exit", false, "gracefully close after killing")
@@ -98,11 +107,12 @@ func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 		return 2
 	}
 	if targets[0] == "self" || targets[0] == "me" {
-		// Codex tool shells are served by app-server and carry no TMUX. Resolve
-		// their CODEX_THREAD_ID through the fleet store, then preserve the live
-		// row's immutable socket and pane for the detached exit finisher.
+		if chat, scoped := pfmchat.ScopedSelf(ctx); scoped {
+			confirm := *exit || (chat.Live && chat.Socket != "" && chat.Pane != "")
+			return runResolvedChatKillContext(ctx, chat, confirm, stdout, stderr, runtimes...)
+		}
 		if env.Get("TMUX") == "" && env.Get(resolve.CodexThreadEnv) != "" {
-			chat, found, err := pfmchat.Resolve(context.Background(), "self", io.Discard, firstRuntime(runtimes))
+			chat, found, err := pfmchat.Resolve(ctx, targets[0], io.Discard, firstRuntime(runtimes))
 			if err != nil {
 				fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
 				return 1
@@ -111,7 +121,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 				fmt.Fprintln(stderr, "pfm chat kill: this Codex chat has no live fleet seat")
 				return codeUnknownChat
 			}
-			return runResolvedChatKill(chat, *exit, stdout, stderr, runtimes...)
+			return runResolvedChatKillContext(ctx, chat, *exit, stdout, stderr, runtimes...)
 		}
 		killArgs := []string{"--self"}
 		if *exit {
@@ -121,12 +131,8 @@ func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 	}
 	target := targets[0]
 	id := target
-	// Resolving FIRST is what makes a named kill a real kill: the resolved row
-	// carries the live socket and pane, and dropping them is why this command
-	// used to answer "killed" for a chat whose engine was still running. A
-	// target that resolves to nothing still reaches runKill below, which is
-	// the only path that can tombstone an id the composer no longer lists.
-	chat, found, err := pfmchat.Resolve(context.Background(), target, io.Discard, firstRuntime(runtimes))
+	// Resolve before killing so a live target retains its exact socket and pane.
+	chat, found, err := pfmchat.Resolve(ctx, target, io.Discard, firstRuntime(runtimes))
 	if err != nil {
 		if !fleet.ChatIDPattern.MatchString(target) {
 			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
@@ -146,7 +152,7 @@ func runChatKill(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 	case found:
 		id = chat.ID
 		if chat.Live && chat.Socket != "" && chat.Pane != "" {
-			return runResolvedChatKill(chat, true, stdout, stderr, runtimes...)
+			return runResolvedChatKillContext(ctx, chat, true, stdout, stderr, runtimes...)
 		}
 		if chat.Live {
 			// Live with no address to close: say so instead of letting the
@@ -182,46 +188,30 @@ func runResolvedChatKill(
 	stdout, stderr io.Writer,
 	runtimes ...commandRuntime,
 ) (exitCode int) {
-	database, manager, code := fleet.OpenKillManager(stderr, runtimes...)
-	if code != 0 {
-		return code
-	}
-	defer func() { cli.CloseResource(database, "pfm chat kill: close database", stderr, &exitCode) }()
-	target, err := manager.Kill(context.Background(), kill.Request{
-		ID:          chat.ID,
-		Engine:      chat.Engine,
-		RolloutPath: chat.Path,
-		SocketName:  chat.Socket,
-		PaneID:      chat.Pane,
-		Exit:        exit,
-	})
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
-		return 1
-	}
-	// Name the mechanism (pfmchat.KillOutcome): "killed" alone cannot tell a
-	// closed pane from a row that was merely de-listed, and that ambiguity is
-	// the whole defect this path exists to end.
-	recorded := !pfmengine.SocketKeyedID(target.Engine, target.ID, target.SocketName)
-	if exit && target.SocketName != "" && target.PaneID != "" {
-		// Kill() only SPAWNS the detached exit finisher; its `setsid -f`
-		// launcher forks and returns almost instantly, so nothing above this
-		// point has ever confirmed the pane actually closed. Reporting
-		// "killed" on Kill()'s return alone is exactly the defect this
-		// verifies against — a live chat kept running behind a printed "ok".
-		if err := manager.ConfirmExit(context.Background(), target); err != nil {
-			fmt.Fprintf(stderr, "pfm chat kill: %v\n", err)
-			return 1
-		}
-		fmt.Fprintln(stdout, pfmchat.KillOutcome(target.ID, target.SocketName, target.PaneID, recorded))
-		return 0
-	}
-	fmt.Fprintln(stdout, pfmchat.KillOutcome(target.ID, "", "", recorded))
-	return 0
+	return pfmchat.KillResolved(context.Background(), chat, exit, stdout, stderr, firstRuntime(runtimes))
+}
+
+func runResolvedChatKillContext(
+	ctx context.Context,
+	chat headless.Chat,
+	exit bool,
+	stdout, stderr io.Writer,
+	runtimes ...commandRuntime,
+) (exitCode int) {
+	return pfmchat.KillResolved(ctx, chat, exit, stdout, stderr, firstRuntime(runtimes))
 }
 
 func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) (code int) {
-	defer func() { pfmchat.RecordVerb(context.Background(), "unkill", code) }()
+	return runChatUnkillContext(context.Background(), args, stdout, stderr, runtimes...)
+}
+
+func runChatUnkillContext(
+	ctx context.Context,
+	args []string,
+	stdout, stderr io.Writer,
+	runtimes ...commandRuntime,
+) (code int) {
+	defer func() { pfmchat.RecordVerb(ctx, "unkill", code) }()
 	flags := cli.NewFlagSet("chat unkill", "usage: pfm chat unkill <target>", stderr)
 	if parseCode, ok := cli.ParseFlags(flags, args); !ok {
 		return parseCode
@@ -232,7 +222,7 @@ func runChatUnkill(args []string, stdout, stderr io.Writer, runtimes ...commandR
 	}
 	target := flags.Arg(0)
 	if !fleet.ChatIDPattern.MatchString(target) {
-		chat, found, err := pfmchat.Resolve(context.Background(), target, io.Discard, firstRuntime(runtimes))
+		chat, found, err := pfmchat.Resolve(ctx, target, io.Discard, firstRuntime(runtimes))
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat unkill: %v\n", err)
 			return 1
@@ -364,10 +354,19 @@ func runChatRecover(args []string, stdout, stderr io.Writer, runtimes ...command
 }
 
 func runChatName(args []string, stdout, stderr io.Writer, runtimes ...commandRuntime) int {
+	return runChatNameContext(context.Background(), args, stdout, stderr, runtimes...)
+}
+
+func runChatNameContext(
+	ctx context.Context,
+	args []string,
+	stdout, stderr io.Writer,
+	runtimes ...commandRuntime,
+) int {
 	deliver := func(ctx context.Context, chat headless.Chat, name string) (int, string, error) {
 		return deliverChatNameWithRuntime(ctx, chat, name, runtimes...)
 	}
-	return runChatNameWith(args, stdout, stderr, deliver, runtimes...)
+	return runChatNameWithContext(ctx, args, stdout, stderr, deliver, runtimes...)
 }
 
 type chatNameDelivery func(
@@ -382,29 +381,11 @@ func deliverChatNameWithRuntime(
 	name string,
 	runtimes ...commandRuntime,
 ) (int, string, error) {
-	engine, err := pfmchat.NewInjectEngine(false, firstRuntime(runtimes))
-	if err != nil {
-		return 1, "", err
-	}
-	// Inject through the live tmux namespace, not the transcript UUID. A newly
-	// spawned Codex seat can be addressable before its rollout has been indexed;
-	// converting that seat to its UUID makes the subsequent /rename miss it.
-	target := chatNameInjectTarget(chat)
-	result, err := engine.Inject(ctx, inject.Request{
-		Target:  target,
-		Message: "/rename " + name,
-	})
-	return result.Code, result.Message, err
+	return pfmchat.DeliverName(ctx, chat, name, firstRuntime(runtimes))
 }
 
-func chatNameInjectTarget(chat headless.Chat) string {
-	if chat.Session != "" {
-		return chat.Session
-	}
-	return chat.Socket
-}
-
-func runChatNameWith(
+func runChatNameWithContext(
+	ctx context.Context,
 	args []string,
 	stdout, stderr io.Writer,
 	deliver chatNameDelivery,
@@ -423,7 +404,7 @@ func runChatNameWith(
 		fmt.Fprintln(stderr, "pfm chat name: name must be one non-empty line")
 		return 2
 	}
-	chat, code := headlessTarget(context.Background(), flags.Arg(0), stdout, stderr, false, runtimes...)
+	chat, code := headlessTarget(ctx, flags.Arg(0), stdout, stderr, false, runtimes...)
 	if code != 0 {
 		return code
 	}
@@ -431,7 +412,7 @@ func runChatNameWith(
 		fmt.Fprintf(stderr, "pfm chat name: %q is not running\n", chat.Name)
 		return codeDeadChat
 	}
-	code = applyChatName(context.Background(), chat, name, deliver, stderr)
+	code = applyChatName(ctx, chat, name, deliver, stderr)
 	if code != 0 {
 		return code
 	}

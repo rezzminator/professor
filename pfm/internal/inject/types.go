@@ -16,15 +16,15 @@ const (
 	// CodeAmbiguous means more than one live target matched. It stays distinct
 	// from CodeUnknown so callers never report "not found" while listing the
 	// conflicting candidates in the same receipt.
-	CodeAmbiguous = 2
+	CodeAmbiguous = resolve.CodeAmbiguous
 	// CodeDead means the target resolved to a live pane that disappeared or
 	// became unreadable before delivery could complete.
 	CodeDead = 3
 	// CodeUnknown means no live target matched the requested namespace.
-	CodeUnknown = 4
+	CodeUnknown = resolve.CodeUnknown
 	// CodeUndelivered means the target exists but the guarded transaction did
 	// not put a turn into its model input.
-	CodeUndelivered = 6
+	CodeUndelivered = resolve.CodeUndelivered
 	// CodeBusy is the verdict a caller retries rather than escalates: the pane
 	// was working, so nothing was typed. It is internal retry telemetry; the
 	// CLI maps it to CodeUndelivered and never exposes rc 7.

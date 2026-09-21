@@ -268,6 +268,39 @@ func TestSessionFromCrumbUsesPaneSpecificIdentity(t *testing.T) {
 	}
 }
 
+func TestSessionFromPaneCrumbRequiresExactValidatedBinding(t *testing.T) {
+	dir := t.TempDir()
+	const socket = "cc-1-2-3"
+	if err := os.WriteFile(filepath.Join(dir, socket+".%7"), []byte("/transcripts/pane.jsonl\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, socket), []byte("/transcripts/socket.jsonl\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id, path, err := SessionFromPaneCrumb(dir, socket, "%7")
+	if err != nil || id != "pane" || path != "/transcripts/pane.jsonl" {
+		t.Fatalf("exact pane identity = %q/%q err=%v", id, path, err)
+	}
+	id, path, err = SessionFromPaneCrumb(dir, socket, "%8")
+	if err != nil || id != "" || path != "" {
+		t.Fatalf("missing pane borrowed socket fallback = %q/%q err=%v", id, path, err)
+	}
+	if _, _, err := SessionFromPaneCrumb(dir, socket, "bad"); !errors.Is(err, ErrInvalidPaneCrumb) {
+		t.Fatalf("invalid pane error = %v, want ErrInvalidPaneCrumb", err)
+	}
+	if _, _, err := SessionFromPaneCrumb("relative", socket, "%7"); err == nil ||
+		!strings.Contains(err.Error(), "not absolute") {
+		t.Fatalf("relative breadcrumb directory error = %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, socket+".%9"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := SessionFromPaneCrumb(dir, socket, "%9"); err == nil ||
+		!strings.Contains(err.Error(), "read reload breadcrumb") {
+		t.Fatalf("pane breadcrumb read error = %v", err)
+	}
+}
+
 func TestTranscriptCWDReadsARecordBeforeTheSummary(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.jsonl")
 	content := `{"type":"summary","message":"not a cwd"}` + "\n" + `{"cwd":"/jail/project","message":"start"}` + "\n"

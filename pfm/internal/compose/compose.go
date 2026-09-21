@@ -1111,6 +1111,9 @@ func defaultEligible(row Row) bool {
 	if row.Kind == ResumeOpenCode {
 		return !row.BG && row.PromptCount > 0 && row.AssistantCount > 0
 	}
+	// A resumable Claude transcript with a file but no parsed prompts is a
+	// spawn that was never used, so the default view suppresses it on purpose.
+	// The all view remains the way to reach that row.
 	return !row.BG && row.Size > 0 && row.PromptCount > 0
 }
 

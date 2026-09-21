@@ -173,48 +173,47 @@ func lastTranscriptLines(value string, count int) string {
 	return strings.Join(lines, "\n")
 }
 
-func runChatSave(args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime) (exitCode int) {
+func runChatSaveContext(
+	ctx context.Context, args []string, stdout, stderr io.Writer, env paths.Env, runtimes ...commandRuntime,
+) (exitCode int) {
 	env = defaultEnv(env)
+	fail := func(format string, args ...any) int {
+		fmt.Fprintf(stderr, "pfm chat save: "+format+"\n", args...)
+		return 1
+	}
 	if len(args) < 1 || len(args) > 2 {
 		fmt.Fprintln(stderr, "usage: pfm chat save <target-file> [transcript-jsonl]")
 		return 2
 	}
-	target := args[0]
-	transcriptPath := ""
+	target, transcriptPath := args[0], ""
 	if len(args) == 2 {
 		transcriptPath = args[1]
 	} else {
 		id := env.Get("CLAUDE_CODE_SESSION_ID")
 		if id == "" {
-			fmt.Fprintln(stderr, "pfm chat save: CLAUDE_CODE_SESSION_ID is not set and no transcript path was given")
-			return 1
+			return fail("CLAUDE_CODE_SESSION_ID is not set and no transcript path was given")
 		}
 		cwd, err := os.Getwd()
 		if err != nil {
-			fmt.Fprintf(stderr, "pfm chat save: current directory: %v\n", err)
-			return 1
+			return fail("current directory: %v", err)
 		}
 		transcriptPath = currentClaudeTranscriptPath(id, cwd, env, runtimes...)
 		if transcriptPath == "" {
-			fmt.Fprintln(stderr, "pfm chat save: could not resolve the current Claude transcript")
-			return 1
+			return fail("could not resolve the current Claude transcript")
 		}
 	}
-	entries, err := transcriptEntriesForSave(context.Background(), transcriptPath)
+	entries, err := transcriptEntriesForSave(ctx, transcriptPath)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat save: %v\n", err)
-		return 1
+		return fail("%v", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil && filepath.Dir(target) != "." {
-		fmt.Fprintf(stderr, "pfm chat save: create target directory: %v\n", err)
-		return 1
+		return fail("create target directory: %v", err)
 	}
 	file, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat save: open target: %v\n", err)
-		return 1
+		return fail("open target: %v", err)
 	}
-	closed := false
+	closed, users := false, 0
 	defer func() {
 		if !closed {
 			cli.CloseResource(file, "pfm chat save: close target", stderr, &exitCode)
@@ -226,21 +225,17 @@ func runChatSave(args []string, stdout, stderr io.Writer, env paths.Env, runtime
 		transcriptPath,
 		renderTranscript(entries),
 	); err != nil {
-		fmt.Fprintf(stderr, "pfm chat save: write transcript: %v\n", err)
-		return 1
+		return fail("write transcript: %v", err)
 	}
-	writeRepositorySnapshot(file, obs.Runner(deps.RealRunner{}))
+	writeRepositorySnapshot(ctx, file, obs.Runner(deps.RealRunner{}))
 	closed = true
 	if err := file.Close(); err != nil {
-		fmt.Fprintf(stderr, "pfm chat save: close target: %v\n", err)
-		return 1
+		return fail("close target: %v", err)
 	}
 	info, err := os.Stat(target)
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm chat save: stat target: %v\n", err)
-		return 1
+		return fail("stat target: %v", err)
 	}
-	users := 0
 	for _, entry := range entries {
 		if entry.Role == transcript.RoleUser {
 			users++

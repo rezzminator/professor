@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -20,6 +21,215 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
+
+type deadlineScalingListener struct {
+	net.Listener
+	readDuration  time.Duration
+	writeDuration time.Duration
+}
+
+func (listener deadlineScalingListener) Accept() (net.Conn, error) {
+	connection, err := listener.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return deadlineScalingConn{
+		Conn: connection, readDuration: listener.readDuration, writeDuration: listener.writeDuration,
+	}, nil
+}
+
+type deadlineScalingConn struct {
+	net.Conn
+	readDuration  time.Duration
+	writeDuration time.Duration
+}
+
+func (connection deadlineScalingConn) SetReadDeadline(deadline time.Time) error {
+	if !deadline.IsZero() && connection.readDuration > 0 {
+		deadline = time.Now().Add(connection.readDuration)
+	}
+	return connection.Conn.SetReadDeadline(deadline)
+}
+
+func (connection deadlineScalingConn) SetWriteDeadline(deadline time.Time) error {
+	if !deadline.IsZero() && connection.writeDuration > 0 {
+		deadline = time.Now().Add(connection.writeDuration)
+	}
+	return connection.Conn.SetWriteDeadline(deadline)
+}
+
+func TestLoopbackMCPServerDeliversResponseAfterOldWriteDeadline(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := newLoopbackMCPServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		if _, writeErr := writer.Write([]byte("complete")); writeErr != nil {
+			t.Errorf("write delayed response: %v", writeErr)
+		}
+	}))
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(deadlineScalingListener{
+			Listener: listener, writeDuration: 25 * time.Millisecond,
+		})
+	}()
+	t.Cleanup(func() {
+		if closeErr := server.Close(); closeErr != nil {
+			t.Errorf("close loopback server: %v", closeErr)
+		}
+		if runErr := <-serveErr; runErr != nil && !errors.Is(runErr, http.ErrServerClosed) {
+			t.Errorf("serve loopback server: %v", runErr)
+		}
+	})
+
+	response, err := http.Get("http://" + listener.Addr().String()) //nolint:gosec // loopback test server
+	if err != nil {
+		t.Fatalf("get delayed response: %v", err)
+	}
+	defer func() {
+		if closeErr := response.Body.Close(); closeErr != nil {
+			t.Errorf("close delayed response: %v", closeErr)
+		}
+	}()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read delayed response: %v", err)
+	}
+	if got := string(body); got != "complete" {
+		t.Fatalf("delayed response body = %q, want complete", got)
+	}
+}
+
+func TestLoopbackMCPServerPropagatesClientCancellation(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handlerStarted := make(chan struct{})
+	handlerCancelled := make(chan struct{})
+	server := newLoopbackMCPServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		close(handlerStarted)
+		<-request.Context().Done()
+		close(handlerCancelled)
+	}))
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- server.Serve(listener) }()
+	t.Cleanup(func() {
+		if closeErr := server.Close(); closeErr != nil {
+			t.Errorf("close cancellation server: %v", closeErr)
+		}
+		if runErr := <-serveErr; runErr != nil && !errors.Is(runErr, http.ErrServerClosed) {
+			t.Errorf("serve cancellation server: %v", runErr)
+		}
+	})
+
+	requestContext, cancel := context.WithCancel(context.Background())
+	request, err := http.NewRequestWithContext(
+		requestContext, http.MethodGet, "http://"+listener.Addr().String(), http.NoBody,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseErr := make(chan error, 1)
+	go func() {
+		response, requestErr := http.DefaultClient.Do(request)
+		if response != nil {
+			if closeErr := response.Body.Close(); closeErr != nil {
+				requestErr = errors.Join(requestErr, closeErr)
+			}
+		}
+		responseErr <- requestErr
+	}()
+	select {
+	case <-handlerStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("request handler did not start")
+	}
+	cancel()
+	select {
+	case <-handlerCancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("client cancellation did not cancel the request context")
+	}
+	select {
+	case requestErr := <-responseErr:
+		if !errors.Is(requestErr, context.Canceled) {
+			t.Fatalf("cancelled request error = %v, want context.Canceled", requestErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("client request did not return after cancellation")
+	}
+}
+
+func TestLoopbackMCPServerRetainsSlowHeaderBound(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dispatched := make(chan struct{}, 1)
+	server := newLoopbackMCPServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		dispatched <- struct{}{}
+	}))
+	if server.ReadHeaderTimeout != 5*time.Second || server.ReadTimeout != 30*time.Second ||
+		server.IdleTimeout != 2*time.Minute {
+		t.Fatalf(
+			"loopback read policy = header %s/read %s/idle %s, want 5s/30s/2m",
+			server.ReadHeaderTimeout,
+			server.ReadTimeout,
+			server.IdleTimeout,
+		)
+	}
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.Serve(deadlineScalingListener{
+			Listener: listener, readDuration: 25 * time.Millisecond,
+		})
+	}()
+	t.Cleanup(func() {
+		if closeErr := server.Close(); closeErr != nil {
+			t.Errorf("close slow-header server: %v", closeErr)
+		}
+		if runErr := <-serveErr; runErr != nil && !errors.Is(runErr, http.ErrServerClosed) {
+			t.Errorf("serve slow-header server: %v", runErr)
+		}
+	})
+
+	connection, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if closeErr := connection.Close(); closeErr != nil {
+			t.Errorf("close slow-header connection: %v", closeErr)
+		}
+	}()
+	if err := connection.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(connection, "GET / HTTP/1.1\r\nHost: loopback"); err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 256)
+	count, err := connection.Read(buffer)
+	if count == 0 && err != nil {
+		if networkErr, ok := err.(net.Error); ok && networkErr.Timeout() {
+			t.Fatalf("slow headers remained open until the client deadline: %v", err)
+		}
+		if !errors.Is(err, io.EOF) {
+			t.Fatalf("read slow-header refusal: %v", err)
+		}
+	}
+	if got := string(buffer[:count]); count > 0 && !strings.HasPrefix(got, "HTTP/1.1 4") {
+		t.Fatalf("slow-header response = %q, want an HTTP 4xx refusal", got)
+	}
+	select {
+	case <-dispatched:
+		t.Fatal("slow incomplete headers reached the handler")
+	default:
+	}
+}
 
 func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{

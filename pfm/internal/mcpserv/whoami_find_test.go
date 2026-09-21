@@ -300,7 +300,9 @@ func TestChatFindOnTheSharedDaemonExcludesProxyClaudeCaller(t *testing.T) {
 			Socket: "cc-seat", PaneID: "%1",
 		}}, Matched: 1},
 	}
-	service := newService("test", &backend{chat: verbs, allowAmbientIdentity: false})
+	service := newService("test", &backend{
+		paths: paths.Values{TmuxDir: t.TempDir()}, chat: verbs, allowAmbientIdentity: false,
+	})
 	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
 		"pfmProxy": map[string]any{
 			"v": ProxyWireVersion, "session": "cc-seat", "socketName": "cc-seat",
@@ -370,7 +372,9 @@ func TestChatFindNonClaudeCallerDoesNotExcludeClaudeCollision(t *testing.T) {
 				}}, Matched: 1},
 				found: []chat.TranscriptMatch{{ID: sharedID, Path: "/claude/shared-id.jsonl"}},
 			}
-			service := newService("test", &backend{chat: verbs, allowAmbientIdentity: false})
+			service := newService("test", &backend{
+				paths: paths.Values{TmuxDir: t.TempDir()}, chat: verbs, allowAmbientIdentity: false,
+			})
 			request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
 				"pfmProxy": map[string]any{
 					"v": ProxyWireVersion, "session": test.name + "-seat",

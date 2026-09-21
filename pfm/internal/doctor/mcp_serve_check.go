@@ -57,18 +57,33 @@ func printMCPServeProcessesDoctorWithSignalerAndUID(
 		return 1
 	}
 
-	for _, process := range scan.Stale {
-		if !candidates[process.PID] {
-			continue
-		}
-		fmt.Fprintf(
-			stdout,
-			"doctor: mcp-serve STALE pid=%d chat=%s command=%s\n",
-			process.PID,
-			mcpServeChat(table, process.PID),
-			process.Command,
-		)
+	obsolete, compatible, classifyErr := stale.ClassifyCompatibleProxies(
+		snapshot,
+		runtime.Paths.ProcRoot,
+		runtime.Paths.Home,
+		signal,
+		scan.Stale,
+	)
+	renderedCandidate := false
+	if classifyErr != nil {
+		fmt.Fprintf(stdout, "doctor: mcp-serve UNREAD — %v\n", classifyErr)
 		warnings++
+	} else {
+		for _, process := range obsolete {
+			if !candidates[process.PID] {
+				continue
+			}
+			printMCPServeProcess(stdout, table, "STALE", process)
+			renderedCandidate = true
+			warnings++
+		}
+		for _, process := range compatible {
+			if !candidates[process.PID] {
+				continue
+			}
+			printMCPServeProcess(stdout, table, "COMPATIBLE", process)
+			renderedCandidate = true
+		}
 	}
 	for _, unreadable := range scan.Unreadable {
 		for pid := range candidates {
@@ -84,10 +99,21 @@ func printMCPServeProcessesDoctorWithSignalerAndUID(
 			warnings++
 		}
 	}
-	if warnings == 0 {
+	if warnings == 0 && !renderedCandidate {
 		fmt.Fprintf(stdout, "doctor: mcp-serve clean checked=%d\n", len(candidates))
 	}
 	return warnings
+}
+
+func printMCPServeProcess(stdout io.Writer, table gather.ProcFS, status string, process stale.Process) {
+	fmt.Fprintf(
+		stdout,
+		"doctor: mcp-serve %s pid=%d chat=%s command=%s\n",
+		status,
+		process.PID,
+		mcpServeChat(table, process.PID),
+		process.Command,
+	)
 }
 
 type mcpServeProcessSnapshot struct {

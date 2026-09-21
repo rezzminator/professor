@@ -13,6 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
+	"github.com/rezzminator/professor/pfm/internal/stale"
 )
 
 type mcpServeProcTable struct {
@@ -24,6 +25,8 @@ type mcpServeProcTable struct {
 	environErr map[int]error
 	images     map[int]gather.FileID
 	imageErr   map[int]error
+	fdLinks    map[int][]gather.FDLink
+	fdLinkErr  map[int]error
 }
 
 func (table mcpServeProcTable) PIDs() ([]int, error) { return table.pids, table.pidsErr }
@@ -36,7 +39,9 @@ func (table mcpServeProcTable) Environ(pid int) (map[string]string, error) {
 	return table.environs[pid], table.environErr[pid]
 }
 
-func (mcpServeProcTable) FDLinks(int) ([]gather.FDLink, error) { return nil, nil }
+func (table mcpServeProcTable) FDLinks(pid int) ([]gather.FDLink, error) {
+	return table.fdLinks[pid], table.fdLinkErr[pid]
+}
 
 func (mcpServeProcTable) Stat(int) (gather.ProcStat, error) { return gather.ProcStat{}, nil }
 
@@ -271,6 +276,110 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 				runtime,
 				test.table,
 				func(int, syscall.Signal) error { return nil },
+			)
+			if warnings != test.wantWarnings {
+				t.Fatalf("warnings=%d, want %d\n%s", warnings, test.wantWarnings, output.String())
+			}
+			for _, want := range test.want {
+				if !strings.Contains(output.String(), want) {
+					t.Fatalf("output missing %q:\n%s", want, output.String())
+				}
+			}
+			for _, notWant := range test.notWant {
+				if strings.Contains(output.String(), notWant) {
+					t.Fatalf("output unexpectedly contains %q:\n%s", notWant, output.String())
+				}
+			}
+		})
+	}
+}
+
+func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
+	runtime, _, replaced := newMCPServeDoctorFixture(t)
+	handle, err := stale.HoldCompatibleProxy(runtime.Paths.Home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if closeErr := handle.Close(); closeErr != nil {
+			t.Errorf("close compatibility marker: %v", closeErr)
+		}
+	})
+	marker, err := filepath.EvalSymlinks(handle.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name         string
+		table        mcpServeProcTable
+		signalErr    map[int]error
+		wantWarnings int
+		want         []string
+		notWant      []string
+	}{
+		{
+			name: "compatible only",
+			table: mcpServeProcTable{
+				pids:     []int{211},
+				cmdlines: map[int][]string{211: {"pfm", "mcp", "chat", "serve"}},
+				images:   map[int]gather.FileID{211: replaced},
+				fdLinks:  map[int][]gather.FDLink{211: {{FD: 9, Target: marker}}},
+			},
+			want:    []string{"doctor: mcp-serve COMPATIBLE pid=211 chat=UNRESOLVED command=pfm mcp chat serve"},
+			notWant: []string{"STALE", "clean"},
+		},
+		{
+			name: "mixed compatible and obsolete",
+			table: mcpServeProcTable{
+				pids: []int{212, 213},
+				cmdlines: map[int][]string{
+					212: {"pfm", "mcp", "chat", "serve"},
+					213: {"pfm", "mcp", "chat", "serve"},
+				},
+				images:  map[int]gather.FileID{212: replaced, 213: replaced},
+				fdLinks: map[int][]gather.FDLink{212: {{FD: 9, Target: marker}}},
+			},
+			wantWarnings: 1,
+			want:         []string{"COMPATIBLE pid=212", "STALE pid=213"},
+			notWant:      []string{"clean"},
+		},
+		{
+			name: "descriptor unreadable",
+			table: mcpServeProcTable{
+				pids:      []int{214},
+				cmdlines:  map[int][]string{214: {"pfm", "mcp", "chat", "serve"}},
+				images:    map[int]gather.FileID{214: replaced},
+				fdLinkErr: map[int]error{214: errors.New("descriptor denied")},
+			},
+			wantWarnings: 1,
+			want: []string{
+				"doctor: mcp-serve UNREAD — inspect descriptors for pid=214",
+				marker,
+				"descriptor denied",
+			},
+			notWant: []string{"STALE", "COMPATIBLE", "clean"},
+		},
+		{
+			name: "candidate exits during classification",
+			table: mcpServeProcTable{
+				pids:      []int{215},
+				cmdlines:  map[int][]string{215: {"pfm", "mcp", "chat", "serve"}},
+				images:    map[int]gather.FileID{215: replaced},
+				fdLinkErr: map[int]error{215: errors.New("process vanished")},
+			},
+			signalErr: map[int]error{215: syscall.ESRCH},
+			want:      []string{"doctor: mcp-serve clean checked=1"},
+			notWant:   []string{"pid=215", "STALE", "COMPATIBLE", "UNREAD"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			warnings := printMCPServeProcessesDoctorWithSignaler(
+				&output,
+				runtime,
+				test.table,
+				func(pid int, _ syscall.Signal) error { return test.signalErr[pid] },
 			)
 			if warnings != test.wantWarnings {
 				t.Fatalf("warnings=%d, want %d\n%s", warnings, test.wantWarnings, output.String())

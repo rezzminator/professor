@@ -519,9 +519,26 @@ func (current *backend) callerForRequest(
 		if caller.identity.ID == "" {
 			// OpenCode currently supplies no engine conversation id through
 			// whoami. The matched live row still has the stable target that
-			// caller-bound CLI verbs need; every other seat field remains the
-			// proxy's explicit assertion.
+			// caller-bound CLI verbs need.
 			caller.identity.ID = caller.row.ID
+		}
+		if caller.identity.SocketName == "" {
+			caller.identity.SocketName = caller.row.Socket
+		}
+		if caller.identity.SocketPath == "" {
+			socketPath, socketErr := current.paths.SocketUnder(caller.row.Socket)
+			if socketErr != nil {
+				return caller, fmt.Errorf(
+					"resolve MCP proxy session %q matched socket %q: %w",
+					proxy.Session,
+					caller.row.Socket,
+					socketErr,
+				)
+			}
+			caller.identity.SocketPath = socketPath
+		}
+		if caller.identity.Pane == "" {
+			caller.identity.Pane = caller.row.Pane
 		}
 		caller.valid = true
 		return caller, nil

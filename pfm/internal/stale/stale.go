@@ -131,7 +131,10 @@ func HoldCompatibleProxy(home string) (*os.File, error) {
 	return handle, nil
 }
 
-func partitionSweep(
+// ClassifyCompatibleProxies separates obsolete replaced-binary processes from
+// compatible stdio proxies that hold the canonical marker descriptor. It only
+// reads descriptors and liveness; it does not signal or filter the scan.
+func ClassifyCompatibleProxies(
 	table gather.ProcFS,
 	procRoot string,
 	home string,
@@ -220,7 +223,7 @@ func SweepStaleProcesses(
 			strings.Join(scan.Unreadable, "; "),
 		)
 	}
-	sweepable, kept, err := partitionSweep(table, procRoot, home, signal, scan.Stale)
+	sweepable, kept, err := ClassifyCompatibleProxies(table, procRoot, home, signal, scan.Stale)
 	if err != nil {
 		return err
 	}
@@ -282,7 +285,7 @@ func awaitExit(
 		if err != nil {
 			return nil, fmt.Errorf("re-scan after signalling: %w", err)
 		}
-		sweepable, _, partitionErr := partitionSweep(table, procRoot, home, signal, scan.Stale)
+		sweepable, _, partitionErr := ClassifyCompatibleProxies(table, procRoot, home, signal, scan.Stale)
 		if partitionErr != nil {
 			return nil, fmt.Errorf("re-scan compatible proxy descriptors: %w", partitionErr)
 		}

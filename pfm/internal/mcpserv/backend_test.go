@@ -246,35 +246,115 @@ func TestReviewProxySocketPathRejectsForeignNamespace(t *testing.T) {
 }
 
 func TestCallerForRequestKeepsSessionFallbackAndEngineAliases(t *testing.T) {
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
 	row := compose.Row{
 		SessionName: "oc-seat", ID: "opencode-id", CWD: "/work/opencode",
 		Kind: compose.LiveOpenCode, Socket: "ox-seat", PaneID: "%7",
 	}
 	tests := []struct {
-		name  string
-		proxy map[string]any
+		name           string
+		proxy          map[string]any
+		wantSocketName string
+		wantSocketPath string
+		wantPane       string
 	}{
 		{
-			name:  "session only",
-			proxy: map[string]any{"v": ProxyWireVersion, "session": "oc-seat"},
+			name: "session only", proxy: map[string]any{"v": ProxyWireVersion, "session": "oc-seat"},
+			wantSocketName: "ox-seat", wantSocketPath: filepath.Join(resolved.TmuxDir, "ox-seat"), wantPane: "%7",
 		},
 		{
 			name: "long engine alias",
 			proxy: map[string]any{
 				"v": ProxyWireVersion, "session": "oc-seat", "engine": "OpenCode",
 			},
+			wantSocketName: "ox-seat", wantSocketPath: filepath.Join(resolved.TmuxDir, "ox-seat"), wantPane: "%7",
+		},
+		{
+			name: "keeps supplied socket name",
+			proxy: map[string]any{
+				"v": ProxyWireVersion, "session": "oc-seat", "socketName": "ox-seat",
+			},
+			wantSocketName: "ox-seat", wantSocketPath: filepath.Join(resolved.TmuxDir, "ox-seat"), wantPane: "%7",
+		},
+		{
+			name: "keeps supplied socket path and pane",
+			proxy: map[string]any{
+				"v": ProxyWireVersion, "session": "oc-seat",
+				"socketPath": filepath.Join(resolved.TmuxDir, "ox-seat"), "pane": "%7",
+			},
+			wantSocketName: "ox-seat", wantSocketPath: filepath.Join(resolved.TmuxDir, "ox-seat"), wantPane: "%7",
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			current := &backend{chat: &fakeChatVerbs{
+			current := &backend{paths: resolved, chat: &fakeChatVerbs{
 				listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
 			}}
 			caller, err := current.callerForRequest(context.Background(), mcp.Meta{"pfmProxy": test.proxy})
 			if err != nil || !caller.present || !caller.valid || caller.row.ID != "opencode-id" {
 				t.Fatalf("fallback caller = %+v err=%v, want the unique session row", caller, err)
 			}
+			if caller.identity.SocketName != test.wantSocketName ||
+				caller.identity.SocketPath != test.wantSocketPath || caller.identity.Pane != test.wantPane {
+				t.Fatalf("fallback identity = %+v, want socket %q path %q pane %q",
+					caller.identity, test.wantSocketName, test.wantSocketPath, test.wantPane)
+			}
 		})
+	}
+}
+
+func TestCallerForRequestSessionFallbackReachesResolvedSelf(t *testing.T) {
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := compose.Row{
+		SessionName: "oc-seat", ID: "opencode-id", CWD: "/work/opencode",
+		Kind: compose.LiveOpenCode, Socket: "ox-seat", PaneID: "%7",
+	}
+	current := &backend{
+		paths: resolved,
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+	}
+	meta := mcp.Meta{"pfmProxy": map[string]any{"v": ProxyWireVersion, "session": "oc-seat"}}
+	caller, err := current.callerForRequest(context.Background(), meta)
+	if err != nil || !caller.valid {
+		t.Fatalf("session-only caller = %+v err=%v, want valid caller", caller, err)
+	}
+	self, err := newService("test", current).resolvedSelf(context.Background(), caller)
+	if err != nil || self.Socket != "ox-seat" || self.Pane != "%7" {
+		t.Fatalf("resolved self = %+v err=%v, want row socket and pane", self, err)
+	}
+	ctx, target, err := newService("test", current).cliTargetForRequest(
+		context.Background(), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: meta}}, "self",
+	)
+	requestSelf, resolveErr := chat.Target(ctx, target, nil)
+	if err != nil || resolveErr != nil || requestSelf.Socket != "ox-seat" || requestSelf.Pane != "%7" {
+		t.Fatalf("request self = %+v target=%q err=%v resolveErr=%v, want row socket and pane",
+			requestSelf, target, err, resolveErr)
+	}
+}
+
+func TestCallerForRequestRejectsInvalidFallbackSocket(t *testing.T) {
+	row := compose.Row{
+		SessionName: "oc-seat", ID: "opencode-id", Kind: compose.LiveOpenCode,
+		Socket: "../outside", PaneID: "%7",
+	}
+	current := &backend{
+		paths: paths.Values{TmuxDir: "/jail/tmux"},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+	}
+	caller, err := current.callerForRequest(context.Background(), mcp.Meta{
+		"pfmProxy": map[string]any{"v": ProxyWireVersion, "session": "oc-seat"},
+	})
+	if err == nil || caller.valid || !strings.Contains(err.Error(), `session "oc-seat"`) ||
+		!strings.Contains(err.Error(), `socket "../outside"`) {
+		t.Fatalf("invalid row socket caller = %+v err=%v, want contextual error", caller, err)
 	}
 }
 
@@ -628,17 +708,22 @@ func TestCallerForRequestUsesProxyPaneToDisambiguateSession(t *testing.T) {
 }
 
 func TestCallerForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
 	rows := make([]compose.Row, defaultChatLSLimit+1)
 	for index := range defaultChatLSLimit {
 		rows[index] = compose.Row{ID: "historical", Kind: compose.ResumeClaude}
 	}
 	rows[defaultChatLSLimit] = compose.Row{
-		SessionName: "cc-seat", ID: "session-id", Kind: compose.LiveClaude,
+		SessionName: "cc-seat", ID: "session-id", Kind: compose.LiveClaude, Socket: "cc-seat", PaneID: "%7",
 	}
 	verbs := &cappedProxyChat{fakeChatVerbs: &fakeChatVerbs{
 		listed: chat.ListResult{Rows: rows, Matched: len(rows)},
 	}}
-	caller, err := (&backend{chat: verbs}).callerForRequest(context.Background(), mcp.Meta{
+	caller, err := (&backend{paths: resolved, chat: verbs}).callerForRequest(context.Background(), mcp.Meta{
 		"pfmProxy": map[string]any{"v": ProxyWireVersion, "session": "cc-seat", "id": "session-id"},
 	})
 	if err != nil || !caller.valid || caller.row.Session != "cc-seat" {
@@ -647,8 +732,18 @@ func TestCallerForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
 }
 
 func TestCallerForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) {
-	row := compose.Row{SessionName: "oc-seat", ID: "opencode-id", Kind: compose.LiveOpenCode}
-	current := &backend{chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}}}
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := compose.Row{
+		SessionName: "oc-seat", ID: "opencode-id", Kind: compose.LiveOpenCode, Socket: "ox-seat", PaneID: "%7",
+	}
+	current := &backend{
+		paths: resolved,
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+	}
 	meta := mcp.Meta{"pfmProxy": map[string]any{
 		"v": ProxyWireVersion, "session": "oc-seat", "engine": "opencode",
 	}}
@@ -665,9 +760,9 @@ func TestCallerForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) {
 	if err != nil || target != "self" {
 		t.Fatalf("proxy self target = %q err=%v, want self with scoped identity", target, err)
 	}
-	resolved, err := chat.Target(ctx, target, nil)
-	if err != nil || resolved.ID != "opencode-id" || resolved.Session != "oc-seat" {
-		t.Fatalf("proxy self context resolved %+v err=%v, want matched OpenCode row", resolved, err)
+	resolvedSelf, err := chat.Target(ctx, target, nil)
+	if err != nil || resolvedSelf.ID != "opencode-id" || resolvedSelf.Session != "oc-seat" {
+		t.Fatalf("proxy self context resolved %+v err=%v, want matched OpenCode row", resolvedSelf, err)
 	}
 }
 

@@ -269,6 +269,80 @@ func TestSweepKeepsMarkedProxyAndTermsUnmarkedServer(t *testing.T) {
 	}
 }
 
+func TestClassifyCompatibleProxies(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(313, fixture.old, fixture.binary, "mcp", "chat", "serve")
+	fixture.markProxy(313, 9)
+	fixture.process(314, fixture.old, fixture.binary, "mcp", "chat", "serve")
+	var sent []string
+	table := gather.NewProcFS(fixture.root)
+	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	obsolete, compatible, err := ClassifyCompatibleProxies(
+		table, fixture.root, fixture.home, fixture.signaler(nil, nil, &sent), scan.Stale,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(obsolete) != 1 || obsolete[0].PID != 314 || len(compatible) != 1 || compatible[0].PID != 313 {
+		t.Fatalf("obsolete=%+v compatible=%+v, want 314 obsolete and 313 compatible", obsolete, compatible)
+	}
+}
+
+func TestClassifyCompatibleProxiesFailsClosedWhenDescriptorsAreUnreadable(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(315, fixture.old, fixture.binary, "mcp", "chat", "serve")
+	var sent []string
+	table := gather.NewProcFS(fixture.root)
+	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	probeErr := errors.New("descriptor probe denied")
+	obsolete, compatible, err := ClassifyCompatibleProxies(
+		unreadableDescriptors{ProcFS: table, err: probeErr},
+		fixture.root,
+		fixture.home,
+		fixture.signaler(nil, nil, &sent),
+		scan.Stale,
+	)
+	if err == nil || !errors.Is(err, probeErr) || !strings.Contains(err.Error(), "pid=315") {
+		t.Fatalf("err=%v, want pid and descriptor cause", err)
+	}
+	if obsolete != nil || compatible != nil {
+		t.Fatalf("obsolete=%+v compatible=%+v, want no asserted partition on error", obsolete, compatible)
+	}
+}
+
+func TestClassifyCompatibleProxiesOmitsVanishedCandidate(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(316, fixture.old, fixture.binary, "mcp", "chat", "serve")
+	var sent []string
+	table := gather.NewProcFS(fixture.root)
+	scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	obsolete, compatible, err := ClassifyCompatibleProxies(
+		unreadableDescriptors{ProcFS: table, err: errors.New("process vanished")},
+		fixture.root,
+		fixture.home,
+		func(int, syscall.Signal) error { return syscall.ESRCH },
+		scan.Stale,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(obsolete) != 0 || len(compatible) != 0 {
+		t.Fatalf("obsolete=%+v compatible=%+v, want vanished candidate omitted", obsolete, compatible)
+	}
+}
+
 func TestSweepDoesNotKeepMarkerFileWithoutHolder(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)

@@ -334,7 +334,10 @@ func TestReviewScopedSelfKeepsUnindexedTranscript(t *testing.T) {
 		listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1},
 		last:   chat.LastResult{Text: "unindexed answer"}, resolveScopedSelf: true,
 	}
-	service := newService("test", &backend{chat: verbs})
+	service := newService("test", &backend{
+		paths: paths.Values{TmuxDir: t.TempDir()},
+		chat:  verbs,
+	})
 	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{
 		"pfmProxy": map[string]any{
 			"v": ProxyWireVersion, "session": row.SessionName, "socketName": row.Socket,
@@ -374,7 +377,8 @@ func TestChatNewDefaultsEngineFromValidatedCaller(t *testing.T) {
 			}
 			var calls [][]string
 			service := newService("test", &backend{
-				chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+				paths: paths.Values{TmuxDir: t.TempDir()},
+				chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
 				dispatch: func(_ context.Context, args []string, _, _ io.Writer) int {
 					calls = append(calls, append([]string(nil), args...))
 					return 0
@@ -413,7 +417,8 @@ func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
 	var calls [][]string
 	var scopedIDs []string
 	service := newService("test", &backend{
-		chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
+		paths: paths.Values{TmuxDir: t.TempDir()},
+		chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{row}, Matched: 1}},
 		dispatch: func(ctx context.Context, args []string, _, _ io.Writer) int {
 			calls = append(calls, append([]string(nil), args...))
 			if self, ok := chat.ScopedSelf(ctx); ok {
@@ -457,7 +462,8 @@ func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
 	}
 
 	failing := newService("test", &backend{
-		chat: &fakeChatVerbs{err: errors.New("must not list")},
+		paths: paths.Values{TmuxDir: t.TempDir()},
+		chat:  &fakeChatVerbs{err: errors.New("must not list")},
 	})
 	if _, _, err := failing.chatNew(
 		context.Background(), request,
@@ -476,7 +482,8 @@ func TestChatNewCarriesValidatedCallerContextAndPaths(t *testing.T) {
 			invalidRow := row
 			invalidRow.CWD = test.cwd
 			refusing := newService("test", &backend{
-				chat: &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{invalidRow}, Matched: 1}},
+				paths: paths.Values{TmuxDir: t.TempDir()},
+				chat:  &fakeChatVerbs{listed: chat.ListResult{Rows: []compose.Row{invalidRow}, Matched: 1}},
 			})
 			_, _, err := refusing.chatNew(
 				context.Background(), request, NewInput{Name: "child", CWD: "relative"},

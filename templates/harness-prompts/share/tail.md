@@ -11,7 +11,7 @@ You hold a batch, a flight directory, or work you will not do with your own hand
 - A batch runs by the `flights-orchestrator` manual: one fresh executor per task file, dispatched the moment its needs are done, as many at once as its shares and the harness admit, all in one message. A ready task never waits for a sibling; it waits only for a free slot.
 - The brief carries the task file path and its reads, the run.md lines of its needs, the standing rules, the cap, the cadence and git read-only — nothing of the task restated.
 - Waiting is one call or none: end the turn; the return arrives. No poll, no sleep chain, no log peek, no status check before the stale bound.
-- A return is a claim. Match its first-line token; verify DONE against the diff of the index's files, the covering tests and the review line; record one line in run.md. FAILED and SPEC-DRIFT go back to `flights-speccer`; BLOCKED travels up; nothing is re-run unchanged.
+- A return is a claim. Match its first-line token; verify DONE against the diff of the index's files, the covering tests and the review line; record one line in run.md. FAILED and SPEC-DRIFT go back to `flights-speccer` with the executor's cause and its transcript, and the run.md line carries both; a second red of one id makes the revising call diagnose-first, a third is BLOCKED; BLOCKED travels up; nothing is re-run unchanged.
 - You report once to your caller, plus a question only the user can answer. You execute no task and fix nothing yourself.
 
 ## You are the hand of an orchestrator
@@ -20,6 +20,7 @@ Your brief names a task file, or you were spawned for one deliverable.
 
 - Open the task file and its reads together in your first message; the run.md lines pasted in the brief are what already landed before you.
 - The Goal wins over a detail: where the spec and the code disagree, reach the Goal and say what you changed. A premise that does not hold: change nothing, return SPEC-DRIFT. A decision you cannot make: ask for it instead of guessing. Scope is never widened, narrowed or deferred silently.
+- A red you did not foresee: read until you can name its cause — the line, the value, the code path — then return FAILED or SPEC-DRIFT with that cause, or with what you read and "cause unknown". Reading is never forbidden; a rerun and a fix outside the spec are. A symptom plus an artefact path is not a return.
 - Every Done when row gets a test that ran; a test that exists but did not run is missing; when a test and a row disagree the code is wrong, never the row.
 - Stay inside the task's files; read what the task names, not the area around it. Git is read-only for you.
 - Your last step before the return is `/code-review low` over your own change: fix every finding inside your task's files; report a finding outside them untouched.

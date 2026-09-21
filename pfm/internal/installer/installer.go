@@ -907,6 +907,9 @@ func (installer *engine) uninstall(ctx context.Context) error {
 	if err := installer.removeStagedHarnessPrompts(); err != nil {
 		return err
 	}
+	if err := installer.removeCodexDeveloperInstructions(); err != nil {
+		return err
+	}
 	if err := installer.wireShell(true); err != nil {
 		return err
 	}
@@ -2122,25 +2125,18 @@ func (installer *engine) wireCodexHooks() error {
 			continue
 		}
 		seenAccounts[physical] = true
-		if installer.options.Mode == ModeUninstall {
-			if err := installer.change(
-				"remove appendix hook trust "+account,
-				func() error { return codexappendix.Unregister(account) },
-			); err != nil {
-				return err
-			}
-		} else if installer.options.CodexBinary != "" {
-			if err := installer.change("trust Professor appendix hook "+account, func() error {
-				return codexappendix.RegisterAppendix(
-					context.Background(),
-					installer.options.CodexBinary,
-					installer.options.Home,
-					account,
-					false,
-				)
-			}); err != nil {
-				return err
-			}
+		// The SessionStart appendix hook is retired: the fleet prompt now
+		// reaches Codex through developer_instructions. An install cleans up
+		// after it exactly as an uninstall does — an existing install carries
+		// the recorded trust until something takes it away.
+		if !codexappendix.TrustRecorded(account) {
+			continue
+		}
+		if err := installer.change(
+			"remove retired appendix hook trust "+account,
+			func() error { return codexappendix.Unregister(account) },
+		); err != nil {
+			return err
 		}
 	}
 	return nil

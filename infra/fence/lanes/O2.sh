@@ -968,8 +968,8 @@ n_backups_after="$(find "$SEAT_DIR" -maxdepth 1 -name 'settings.json.pre-profess
 [ "$n_backups_after" -gt "$n_backups_before" ] || bad="$bad no new settings.json.pre-professor-<stamp> backup beside the rewritten $SEAT_DIR/settings.json ($n_backups_before before, $n_backups_after after);"
 # I75/I78/I79: the Codex side — command mirror, hooks.json, config.toml.
 if [ -f "$CODEX_HOME/config.toml" ]; then
-  grep -qE 'codex-appendix|mcp_servers\.chat|mcp_servers\.harvester' "$CODEX_HOME/config.toml" &&
-    bad="$bad $CODEX_HOME/config.toml still carries pfm's hook/MCP wiring: $(one_line "$(grep -E 'codex-appendix|mcp_servers' "$CODEX_HOME/config.toml" | head -1)");"
+  grep -qE 'BEGIN pfm developer_instructions|mcp_servers\.chat|mcp_servers\.harvester' "$CODEX_HOME/config.toml" &&
+    bad="$bad $CODEX_HOME/config.toml still carries pfm's prompt/MCP wiring: $(one_line "$(grep -E 'BEGIN pfm developer_instructions|mcp_servers' "$CODEX_HOME/config.toml" | head -1)");"
 fi
 if [ -f "$CODEX_HOME/hooks.json" ]; then
   grep -qF 'pfm internal' "$CODEX_HOME/hooks.json" && bad="$bad $CODEX_HOME/hooks.json still carries a pfm hook entry;"

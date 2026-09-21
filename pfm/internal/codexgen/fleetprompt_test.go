@@ -1,0 +1,82 @@
+package codexgen
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
+)
+
+// fleetPromptMarkers are lines from each of the composed prompt's three parts
+// — shared head, Codex middle, shared tail — so a role carrying only one part
+// is as loud a failure as a role carrying none.
+var fleetPromptMarkers = []string{"# Model Selection", "NEVER change the active account", "cause unknown"}
+
+// A role's developer_instructions REPLACES the config-level value rather than
+// extending it, so every compiled role has to carry the fleet prompt itself,
+// ahead of its own body. Both compilers — project roles and machine-global
+// roles — are asserted from the file they wrote.
+func TestEveryCompiledCodexRoleCarriesTheFleetPromptAheadOfItsBody(t *testing.T) {
+	prompt, err := codexFleetPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, marker := range fleetPromptMarkers {
+		if !strings.Contains(prompt, marker) {
+			t.Fatalf("the composed Codex prompt does not carry %q, so this test cannot pin it", marker)
+		}
+	}
+	root := t.TempDir()
+	home := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "# Fixture\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "dev.md"),
+		"---\nname: dev\ndescription: Project role.\ntools: Read\nmodel: sonnet\n---\n\nPROJECT-ROLE-BODY\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "agents", "gamma.md"),
+		"---\nname: gamma\ndescription: Global role.\ntools: Read\nmodel: sonnet\n---\n\nGLOBAL-ROLE-BODY\n",
+	)
+	if result, err := Run(Options{Root: root, Home: home, Mode: ModeBuild}); err != nil || !result.OK {
+		t.Fatalf("build: result=%#v err=%v", result, err)
+	}
+	if _, err := RunGlobalAgents(GlobalAgentsOptions{Home: home}); err != nil {
+		t.Fatalf("RunGlobalAgents: %v", err)
+	}
+	cases := []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "project role", path: filepath.Join(root, ".codex", "agents", "dev.toml"), body: "PROJECT-ROLE-BODY"},
+		{
+			name: "global role",
+			path: filepath.Join(paths.GeneratedCodexAgentsDir(home), "gamma.toml"),
+			body: "GLOBAL-ROLE-BODY",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			got := string(mustReadTestFile(t, testCase.path))
+			for _, marker := range fleetPromptMarkers {
+				if !strings.Contains(got, marker) {
+					t.Fatalf("%s carries no %q — the role would run with no fleet prompt", testCase.path, marker)
+				}
+			}
+			promptAt := strings.Index(got, fleetPromptMarkers[0])
+			bodyAt := strings.Index(got, testCase.body)
+			if bodyAt < 0 {
+				t.Fatalf("%s lost its own body", testCase.path)
+			}
+			if promptAt > bodyAt {
+				t.Fatalf("%s carries the fleet prompt AFTER its own body", testCase.path)
+			}
+			if err := validateTOML(got); err != nil {
+				t.Fatalf("%s does not parse as TOML with the prompt embedded: %v", testCase.path, err)
+			}
+		})
+	}
+}

@@ -525,7 +525,7 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 		return "", false
 	}
 	home := filepath.Dir(filepath.Dir(filepath.Dir(pfmBinary)))
-	for _, hook := range append(claudeHookTemplates(home), codexHookTemplate(home)) {
+	for _, hook := range claudeHookTemplates(home) {
 		if _, hookRest, ok := strings.Cut(hook.Command, " "); ok && hookRest == rest {
 			return "", false
 		}

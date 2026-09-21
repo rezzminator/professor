@@ -1,7 +1,6 @@
 package mockengine
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http/httptest"
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/index"
@@ -180,143 +178,6 @@ func TestCodexTurnWritesARolloutPfmIndexesAndRenamesThroughSessionIndex(t *testi
 	}
 	if _, names = fix.indexedRollouts(); names[fixtureThread] != "_KILL codex worker" {
 		t.Fatalf("indexed Codex names = %v", names)
-	}
-}
-
-// stageAppendix writes the Professor appendix where codexappendix.Run reads it.
-func (fix *fixture) stageAppendix() {
-	fix.t.Helper()
-	path := codexappendix.PromptPath(fix.home)
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		fix.t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("Fixture appendix body.\n"), 0o600); err != nil {
-		fix.t.Fatal(err)
-	}
-}
-
-// appendixAnswer runs pfm's own appendix hook over a payload and returns its
-// stdout — the answer a real `pfm internal codex-appendix` would print.
-func (fix *fixture) appendixAnswer(payload string) string {
-	fix.t.Helper()
-	var out bytes.Buffer
-	if err := codexappendix.Run(strings.NewReader(payload), &out, fix.home); err != nil {
-		fix.t.Fatalf("codexappendix.Run(%s): %v", payload, err)
-	}
-	return out.String()
-}
-
-// wireCodexAppendixHook stages pfm's own appendix and a hook.json SessionStart
-// entry that replays pfm's handler answer for a fresh thread — the same
-// choreography both the found and absent presentInHistory tests start from.
-func (fix *fixture) wireCodexAppendixHook() {
-	fix.t.Helper()
-	fix.stageAppendix()
-	// The hook command replays what pfm's handler answers to a fresh thread;
-	// the recorder keeps the payload the mock sent it.
-	answer := fix.appendixAnswer(`{"hook_event_name":"SessionStart","source":"startup"}`)
-	hook := filepath.Join(fix.root, "appendix-hook.sh")
-	if err := os.WriteFile(
-		hook,
-		[]byte("#!/bin/sh\ncat >> \""+fix.recordDir+"/CodexSessionStart.jsonl\"\nprintf '%s' '"+
-			strings.ReplaceAll(strings.TrimSpace(answer), "'", `'"'"'`)+"'\n"),
-		0o700,
-	); err != nil {
-		fix.t.Fatal(err)
-	}
-	document := map[string]any{"hooks": map[string]any{"SessionStart": []any{map[string]any{
-		"matcher": codexappendix.Matcher,
-		"hooks":   []any{map[string]any{"type": "command", "command": hook, "timeout": 10}},
-	}}}}
-	content, err := json.Marshal(document)
-	if err != nil {
-		fix.t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(fix.codexHome, "hooks.json"), content, 0o600); err != nil {
-		fix.t.Fatal(err)
-	}
-}
-
-func TestCodexSessionStartHookIsAnsweredByPfmsAppendixAndLandsInHistory(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.wireCodexAppendixHook()
-	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0)})
-	session := fix.startTUI("codex", codexArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "›") })
-	payload := fix.waitRecorded("CodexSessionStart", 1)[0]
-	var request struct {
-		Event      string `json:"hook_event_name"`
-		Source     string `json:"source"`
-		Transcript string `json:"transcript_path"`
-	}
-	if err := json.Unmarshal([]byte(payload), &request); err != nil {
-		t.Fatal(err)
-	}
-	rollout := fix.rolloutPath()
-	if request.Event != "SessionStart" || request.Source != "startup" || request.Transcript != rollout {
-		t.Fatalf("appendix hook payload = %+v, want SessionStart/startup naming %s", request, rollout)
-	}
-	session.typeLine("first")
-	session.waitFrame("the reply", func(frame string) bool { return strings.Contains(frame, DefaultReply) })
-	// pfm's handler over the REAL rollout: the appendix the mock injected as a
-	// developer message is found, so nothing is re-injected and no warning is
-	// raised — the only reader of the history shape the mock wrote.
-	settled := fix.appendixAnswer(
-		`{"hook_event_name":"SessionStart","source":"resume","transcript_path":"` + rollout + `"}`,
-	)
-	if strings.TrimSpace(settled) != "{}" {
-		t.Fatalf("codexappendix.Run over the mock's rollout = %s, want {} (appendix present, no warning)", settled)
-	}
-	session.typeLine("/compact")
-	session.waitFrame("the supplied compacted shape", func(frame string) bool {
-		return strings.Contains(frame, codexShapes.Compacted)
-	})
-	compacted := fix.appendixAnswer(
-		`{"hook_event_name":"SessionStart","source":"compact","transcript_path":"` + rollout + `"}`,
-	)
-	if strings.Contains(compacted, "systemMessage") || !strings.Contains(compacted, "additionalContext") {
-		t.Fatalf(
-			"after compaction codexappendix.Run = %s, want a clean re-injection (replacement_history read, no warning)",
-			compacted,
-		)
-	}
-}
-
-// TestCodexCompactPreservesAppendixReachesTheFoundBranch exercises the other
-// half of presentInHistory's "compacted" case (history.go:119-125): when the
-// scenario's compact step re-emits the still-live developer message in
-// replacement_history, codexappendix must find it there and skip re-injection
-// — the found==true branch the F1 review finding named unreachable.
-func TestCodexCompactPreservesAppendixReachesTheFoundBranch(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
-	fix.wireCodexAppendixHook()
-	fix.write(Scenario{
-		SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0),
-		Steps: []Step{
-			{Type: StepTurn, Reply: "ok"},
-			{Type: StepCompact, PreserveAppendix: true},
-		},
-	})
-	session := fix.startTUI("codex", codexArgs(), nil)
-	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "›") })
-	rollout := fix.rolloutPath()
-	session.typeLine("first")
-	session.waitFrame("the reply", func(frame string) bool { return strings.Contains(frame, "ok") })
-	session.typeLine("/compact")
-	session.waitFrame("the supplied compacted shape", func(frame string) bool {
-		return strings.Contains(frame, codexShapes.Compacted)
-	})
-	compacted := fix.appendixAnswer(
-		`{"hook_event_name":"SessionStart","source":"compact","transcript_path":"` + rollout + `"}`,
-	)
-	if strings.TrimSpace(compacted) != "{}" {
-		t.Fatalf(
-			"after a compact step that preserves the appendix, codexappendix.Run = %s, want {} (found in "+
-				"replacement_history, no re-injection)",
-			compacted,
-		)
 	}
 }
 

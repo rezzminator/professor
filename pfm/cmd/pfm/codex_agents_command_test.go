@@ -35,17 +35,19 @@ func TestCodexAgentsCommandCompilesAndInstalls(t *testing.T) {
 	}
 
 	compiled := filepath.Join(paths.GeneratedCodexAgentsDir(home), "quirky.toml")
-	want := "name = \"quirky\"\n" +
+	head := "name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
-		"developer_instructions = \"\"\"\n" +
-		"Body has a literal triple quote \\\"\\\"\\\" and a backslash \\\\ standalone.\n" +
+		"developer_instructions = \"\"\"\n"
+	// The fleet prompt is prepended to every compiled role, so the role's own
+	// body is the TAIL of the value — escaped byte for byte, as before.
+	body := "Body has a literal triple quote \\\"\\\"\\\" and a backslash \\\\ standalone.\n" +
 		"\"\"\"\n"
 	got, err := os.ReadFile(compiled)
 	if err != nil {
 		t.Fatalf("read compiled toml: %v", err)
 	}
-	if string(got) != want {
-		t.Fatalf("compiled toml =\n%q\nwant\n%q", string(got), want)
+	if !strings.HasPrefix(string(got), head) || !strings.HasSuffix(string(got), body) {
+		t.Fatalf("compiled toml =\n%q\nwant %q ... %q", string(got), head, body)
 	}
 
 	inClone := filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.toml")

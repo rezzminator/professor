@@ -8,6 +8,7 @@
 package harnessprompts
 
 import (
+	"bytes"
 	"embed"
 	"fmt"
 	"io/fs"
@@ -46,4 +47,29 @@ func ReadPart(name string) ([]byte, error) {
 		return nil, fmt.Errorf("read embedded harness prompt %s: %w", name, err)
 	}
 	return content, nil
+}
+
+// composeParts names the three embedded files one engine's prompt is composed
+// from, head first and tail last. Embedded paths are always slash paths.
+func composeParts(engineLongName string) [3]string {
+	return [3]string{"share/head.md", engineLongName + "/professor.md", "share/tail.md"}
+}
+
+// Composed joins the shared head, one engine's middle and the shared tail.
+// Each part's trailing newlines are trimmed and the three are joined by a
+// single blank line, so a part that gains or loses a trailing newline cannot
+// move the seams — a composed prompt is the three parts and the two seams,
+// and nothing else. Composition lives HERE because more than one caller needs
+// the same bytes: the installer stages them per engine, writes Codex's copy
+// into config.toml, and codexgen prepends Codex's copy to every compiled role.
+func Composed(engineLongName string) ([]byte, error) {
+	var sections [3][]byte
+	for index, name := range composeParts(engineLongName) {
+		raw, err := ReadPart(name)
+		if err != nil {
+			return nil, err
+		}
+		sections[index] = bytes.TrimRight(raw, "\n")
+	}
+	return append(bytes.Join(sections[:], []byte("\n\n")), '\n'), nil
 }

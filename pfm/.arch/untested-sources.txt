@@ -34,8 +34,6 @@ internal/chat/inject_engine.go
 internal/chat/keys.go
 internal/chat/kill_server.go
 internal/chat/open.go
-internal/codexappendix/history.go
-internal/codexappendix/register.go
 internal/codexgen/compiler.go
 internal/codexgen/config.go
 internal/codexgen/mcp.go

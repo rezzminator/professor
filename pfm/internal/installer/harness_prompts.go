@@ -1,7 +1,6 @@
 package installer
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -63,43 +62,11 @@ func harnessPromptAssetFiles() ([]assetFile, error) {
 // exactly what paths.HarnessPromptPath hands the three readers.
 var harnessPromptEngines = []pfmengine.ID{pfmengine.Claude, pfmengine.Codex, pfmengine.OpenCode}
 
-// harnessPromptParts names the three embedded assets one engine's prompt is
-// composed from, head first and tail last.
-func harnessPromptParts(long string) [3]string {
-	return [3]string{
-		path.Join(harnessPromptsDirName, "share", "head.md"),
-		path.Join(harnessPromptsDirName, long, "professor.md"),
-		path.Join(harnessPromptsDirName, "share", "tail.md"),
-	}
-}
-
-// composeHarnessPrompt joins the shared head, one engine's middle and the
-// shared tail. Each part's trailing newlines are trimmed and the three are
-// joined by a single blank line, so a part that gains or loses a trailing
-// newline cannot move the seams — the staged file is the three parts and the
-// two seams, and nothing else.
-func composeHarnessPrompt(head, middle, tail []byte) []byte {
-	parts := [][]byte{
-		bytes.TrimRight(head, "\n"),
-		bytes.TrimRight(middle, "\n"),
-		bytes.TrimRight(tail, "\n"),
-	}
-	return append(bytes.Join(parts, []byte("\n\n")), '\n')
-}
-
-// composeHarnessPromptAsset composes one engine's prompt from the embedded
-// parts. Composition happens HERE, at stage time — an engine reads a file on
-// disk, never an assembly its launcher had to get right.
-func composeHarnessPromptAsset(long string) ([]byte, error) {
-	var parts [3][]byte
-	for index, name := range harnessPromptParts(long) {
-		raw, err := readAsset(name)
-		if err != nil {
-			return nil, fmt.Errorf("read harness prompt part %s: %w", name, err)
-		}
-		parts[index] = raw
-	}
-	return composeHarnessPrompt(parts[0], parts[1], parts[2]), nil
+// codexHarnessPrompt is the composed Codex fleet prompt — the same bytes
+// staged as harness-prompts/codex.md, written into every Codex home's
+// developer_instructions and prepended to every compiled Codex role.
+func codexHarnessPrompt() ([]byte, error) {
+	return harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Codex).LongName)
 }
 
 // stagedHarnessPromptPath is where one engine's composed prompt lands under
@@ -114,7 +81,7 @@ func (installer *engine) stageHarnessPrompts() error {
 	installer.say("harness prompts -> %s", filepath.Join(installer.managedRoot, harnessPromptsDirName))
 	for _, id := range harnessPromptEngines {
 		long := pfmengine.MustLookup(id).LongName
-		content, err := composeHarnessPromptAsset(long)
+		content, err := harnessprompts.Composed(long)
 		if err != nil {
 			return err
 		}

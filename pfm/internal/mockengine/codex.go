@@ -91,10 +91,6 @@ type codexSession struct {
 	hooks     hookSet
 	environ   []string
 	seat      *seat
-	// devContext is the live SessionStart additionalContext folded into history
-	// as a developer message, when one was — /compact re-emits it so
-	// codexappendix's presentInHistory can find it in replacement_history too.
-	devContext string
 }
 
 func serveCodex(proc *process) int {
@@ -144,8 +140,7 @@ func (session *codexSession) busyLine(time.Duration, Tokens) string {
 
 func (session *codexSession) compactedLine() string { return session.proc.script.Pane.Compacted }
 
-// Rollout record types internal/index/codex.go:82-113 and
-// internal/codexappendix/history.go:101-136 read.
+// Rollout record types internal/index/codex.go:82-113 reads.
 const (
 	recordResponseItem = "response_item"
 	recordEventMsg     = "event_msg"
@@ -256,7 +251,7 @@ func (session *codexSession) start(resumed bool) error {
 		return err
 	}
 	session.seat = seat
-	// hooks.json SessionStart, stdin per internal/codexappendix/hook.go:32-35.
+	// hooks.json SessionStart, stdin per Codex's own hook input contract.
 	payload := map[string]any{
 		"hook_event_name": hookSessionStart, "source": source, "transcript_path": session.rollout,
 		"session_id": session.threadID, keyCWD: session.proc.cwd,
@@ -277,8 +272,7 @@ func (session *codexSession) start(resumed bool) error {
 		if additional == "" {
 			continue
 		}
-		// Codex folds additionalContext into history as a developer message
-		// — the record internal/codexappendix/history.go:81-93 looks for.
+		// Codex folds additionalContext into history as a developer message.
 		if err := session.write(codexRecord{Type: recordResponseItem, Payload: codexMessage{
 			Type:    payloadMessage,
 			Role:    roleDeveloper,
@@ -286,7 +280,6 @@ func (session *codexSession) start(resumed bool) error {
 		}}); err != nil {
 			return err
 		}
-		session.devContext = additional
 	}
 	return nil
 }
@@ -352,22 +345,13 @@ func (session *codexSession) tool(step Step) (string, error) {
 	return "", nil
 }
 
-// compact writes the `compacted` record internal/codexappendix/history.go:109
-// reads: the replacement history is the summary, plus the still-live
-// developer message (if any) it started with — so both the found and absent
-// branches of codexappendix's presentInHistory stay reachable, rather than
-// the mock guessing a shape that permanently biases one branch away.
+// compact writes the `compacted` record a reader of the rollout sees: the
+// replacement history is the summary the fixture supplies.
 func (session *codexSession) compact(step Step) error {
 	history := []codexMessage{{
 		Type: payloadMessage, Role: roleUser,
 		Content: []codexContent{{Type: blockInputText, Text: "Summary of the thread so far (fixture)."}},
 	}}
-	if step.PreserveAppendix && session.devContext != "" {
-		history = append(history, codexMessage{
-			Type: payloadMessage, Role: roleDeveloper,
-			Content: []codexContent{{Type: blockInputText, Text: session.devContext}},
-		})
-	}
 	return session.write(codexRecord{Type: "compacted", Payload: map[string]any{
 		payloadMessage:        "Summary of the thread so far (fixture).",
 		"replacement_history": history,

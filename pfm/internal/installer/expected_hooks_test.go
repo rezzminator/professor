@@ -193,7 +193,10 @@ func TestClaudeHookTemplatesIncludesReloadIntercept(t *testing.T) {
 	}
 }
 
-func TestExpectedHooksIncludesCodexAppendixAcrossAccounts(t *testing.T) {
+// pfm owns no Codex hook any more: the fleet prompt reaches a session through
+// config.toml's developer_instructions, so a Codex account contributes no
+// expected hook and doctor has no Codex hook row to converge.
+func TestExpectedHooksExpectNoCodexHook(t *testing.T) {
 	home := t.TempDir()
 	machine := pfmconfig.Config{
 		CodexAccounts: []pfmconfig.CodexAccount{
@@ -201,14 +204,8 @@ func TestExpectedHooksIncludesCodexAppendixAcrossAccounts(t *testing.T) {
 			{ID: 2, Home: filepath.Join(home, ".codex-2")},
 		},
 	}
-	hooks := ExpectedHooks(home, machine)
-	if len(hooks) != 2 {
-		t.Fatalf("hooks=%#v", hooks)
-	}
-	for _, hook := range hooks {
-		if hook.Name != "codex-appendix" || hook.Event != "SessionStart" {
-			t.Fatalf("hook=%#v", hook)
-		}
+	if hooks := ExpectedHooks(home, machine); len(hooks) != 0 {
+		t.Fatalf("Codex accounts still expect hooks: %#v", hooks)
 	}
 }
 
@@ -234,8 +231,8 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	if !changed {
 		t.Fatal("Codex hook wiring did not strip the leftover clear-kill hook")
 	}
-	if len(owned) != 1 {
-		t.Fatalf("appendix ownership=%#v", owned)
+	if len(owned) != 0 {
+		t.Fatalf("Codex hook ownership=%#v, want none owned", owned)
 	}
 	if got := hookCommandCount(t, string(updated), "SessionStart", canonical); got != 0 {
 		t.Fatalf("canonical clear-kill count=%d, want zero:\n%s", got, updated)
@@ -243,8 +240,8 @@ func TestCodexHookWiringStripsALeftoverClearKillHookInEveryShape(t *testing.T) {
 	if got := hookCommandCount(t, string(updated), "SessionStart", legacyParent); got != 0 {
 		t.Fatalf("shell-parent clear-kill count=%d, want zero:\n%s", got, updated)
 	}
-	if hookCommandCount(t, string(updated), "SessionStart", codexHookTemplate(home).Command) != 1 {
-		t.Fatalf("missing appendix: %s", updated)
+	if strings.Contains(string(updated), "SessionStart") {
+		t.Fatalf("SessionStart survived with nothing left to hold: %s", updated)
 	}
 
 	// Idempotent: a second pass over the already-converged file changes

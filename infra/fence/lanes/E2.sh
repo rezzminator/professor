@@ -347,66 +347,49 @@ if requires E2.01-open-seat; then
   fi
 fi
 
-# ─── E2.05 — the appendix hook, present in the first turn ───────────────────
+# ─── E2.05 — the fleet prompt, present in the first turn ────────────────────
 
-beat E2.05-appendix-hook X23
+beat E2.05-fleet-prompt X23
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
-  hooks="$CODEX_HOME/hooks.json"
-  receipt="$CODEX_HOME/.professor-appendix-trust.json"
-  # The registration pfm wrote (internal/installer/codex_hooks.go): SessionStart,
-  # matcher startup|resume|clear|compact, command '…/pfm' internal codex-appendix.
-  if [ ! -f "$hooks" ]; then
-    bad="$bad no $hooks — the installer wires the appendix hook there;"
-  elif ! jq -e '.hooks.SessionStart[]? | select(.matcher == "startup|resume|clear|compact") | .hooks[]? | select((.command | endswith("internal codex-appendix")) and .type == "command" and .timeout == 10)' "$hooks" >/dev/null 2>&1; then
-    bad="$bad $hooks carries no SessionStart hook {matcher startup|resume|clear|compact, command *internal codex-appendix, type command, timeout 10}: $(one_line "$(jq -c '.hooks.SessionStart // "no SessionStart"' "$hooks" 2>&1)");"
+  config="$CODEX_HOME/config.toml"
+  staged="$HOME/.local/share/pfm/install/harness-prompts/codex.md"
+  # pfm writes the composed Codex prompt into developer_instructions
+  # (internal/installer/codex_developer_instructions.go); the retired
+  # SessionStart appendix hook must be gone from hooks.json.
+  if [ ! -f "$config" ]; then
+    bad="$bad no $config — the installer writes the fleet prompt there;"
+  elif ! grep -q '^# BEGIN pfm developer_instructions — installer-owned$' "$config"; then
+    bad="$bad $config carries no pfm developer_instructions fence;"
   fi
-  [ -s "$receipt" ] || bad="$bad no trust receipt at $receipt (codexappendix.RegisterAppendix writes it at install; without trust Codex never runs the hook);"
+  if [ -f "$CODEX_HOME/hooks.json" ] && grep -q 'internal codex-appendix' "$CODEX_HOME/hooks.json"; then
+    bad="$bad $CODEX_HOME/hooks.json still carries the retired SessionStart appendix hook;"
+  fi
+  [ -f "$staged" ] || bad="$bad no staged Codex prompt at $staged to compare the config against;"
+  marker="$(head -1 "$staged" 2>/dev/null)"
   id="$(live_field "$CHAT" 2)"
   rollout="$(rollout_of "$id")"
   if [ -z "$rollout" ]; then
     bad="$bad no rollout for thread $id under $CODEX_HOME/sessions — the first turn cannot be read;"
-  else
-    # First turn: the developer message carrying the appendix marker must come
-    # BEFORE the first assistant message in the rollout (line order).
-    appendix_at="$(grep -n '"role":"developer"' "$rollout" | grep -F '# Professor Codex appendix' | head -1 | cut -d: -f1)"
+  elif [ -n "$marker" ]; then
+    # First turn: the developer message carrying the prompt must come BEFORE
+    # the first assistant message in the rollout (line order).
+    prompt_at="$(grep -n '"role":"developer"' "$rollout" | grep -F "$marker" | head -1 | cut -d: -f1)"
     assistant_at="$(grep -n '"role":"assistant"' "$rollout" | head -1 | cut -d: -f1)"
-    if [ -z "$appendix_at" ]; then
-      bad="$bad the rollout $(basename "$rollout") carries no developer message with '# Professor Codex appendix' — the hook did not run at SessionStart;"
+    if [ -z "$prompt_at" ]; then
+      bad="$bad the rollout $(basename "$rollout") carries no developer message with the prompt's first line — developer_instructions never reached the session;"
     elif [ -z "$assistant_at" ]; then
-      bad="$bad the rollout carries the appendix (line $appendix_at) but no assistant message at all — the first turn never happened;"
-    elif [ "$appendix_at" -gt "$assistant_at" ]; then
-      bad="$bad the appendix landed at rollout line $appendix_at, AFTER the first assistant message (line $assistant_at) — not in the first turn;"
+      bad="$bad the rollout carries the fleet prompt (line $prompt_at) but no assistant message at all — the first turn never happened;"
+    elif [ "$prompt_at" -gt "$assistant_at" ]; then
+      bad="$bad the fleet prompt landed at rollout line $prompt_at, AFTER the first assistant message (line $assistant_at) — not in the first turn;"
     fi
-    # X23: the hook body itself, driven on stdin/stdout the way Codex drives it.
-    # Against the real rollout the appendix is already in history → no
-    # additionalContext; against a transcript with no history → the appendix,
-    # marker first. Two inputs, two different answers, or the body is a coin.
-    present="$(printf '{"hook_event_name":"SessionStart","source":"startup","transcript_path":"%s"}' "$rollout" | pfm internal codex-appendix 2>&1)"
-    present_rc=$?
-    if [ "$present_rc" -ne 0 ]; then
-      bad="$bad pfm internal codex-appendix exited $present_rc against the live rollout ($(one_line "$present"));"
-    elif ! printf '%s' "$present" | jq -e . >/dev/null 2>&1; then
-      bad="$bad codex-appendix did not answer JSON against the live rollout: $(one_line "$present");"
-    elif [ "$(printf '%s' "$present" | jq -r '.hookSpecificOutput.additionalContext // empty' | head -c 1)" != "" ]; then
-      bad="$bad codex-appendix re-injected the appendix although the rollout already carries it (additionalContext present) — the history check did not see it;"
-    fi
-    fresh=/tmp/e2-empty-rollout.jsonl
-    printf '{"type":"session_meta","payload":{}}\n' >"$fresh"
-    absent="$(printf '{"hook_event_name":"SessionStart","source":"startup","transcript_path":"%s"}' "$fresh" | pfm internal codex-appendix 2>&1)"
-    absent_rc=$?
-    if [ "$absent_rc" -ne 0 ]; then
-      bad="$bad codex-appendix exited $absent_rc against a transcript with no history ($(one_line "$absent"));"
-    elif [ "$(printf '%s' "$absent" | jq -r '.hookSpecificOutput.hookEventName // empty')" != SessionStart ]; then
-      bad="$bad against a transcript with no history codex-appendix returned no hookSpecificOutput.hookEventName=SessionStart: $(one_line "$absent");"
-    elif ! printf '%s' "$absent" | jq -r '.hookSpecificOutput.additionalContext // empty' | head -1 | grep -qF '# Professor Codex appendix'; then
-      bad="$bad the injected additionalContext does not start with the marker '# Professor Codex appendix': $(one_line "$absent" | cut -c1-200);"
-    fi
+    grep -qF 'Warning: truncated output' "$rollout" &&
+      bad="$bad the rollout carries a truncated hook-output block — something is still delivering context through a capped hook;"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "hooks.json SessionStart hook + trust receipt present; appendix at rollout line $appendix_at before the first assistant line $assistant_at; the hook body answers 'already present' on the live rollout and injects the marker-first appendix on an empty one"
+    pass "config.toml carries the pfm-owned developer_instructions fence, no appendix hook remains, and the prompt is at rollout line $prompt_at before the first assistant line $assistant_at"
   fi
 fi
 

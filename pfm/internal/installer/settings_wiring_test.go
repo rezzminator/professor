@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -83,9 +84,10 @@ func TestEveryClaudeSettingsFileGetsCompleteHookWiring(t *testing.T) {
 		t.Fatalf("second apply report=%#v err=%v\n%s", report, err, second.String())
 	}
 
-	raw := readFixture(t, filepath.Join(home, ".codex", "hooks.json"))
-	if hookCommandCount(t, raw, "SessionStart", codexHookTemplate(home).Command) != 1 {
-		t.Fatalf("missing appendix: %s", raw)
+	// pfm writes no Codex hook, so an install over a Codex home with none
+	// leaves no hooks.json behind at all.
+	if _, err := os.Stat(filepath.Join(home, ".codex", "hooks.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("install wrote a Codex hooks file it owns nothing in: %v", err)
 	}
 }
 

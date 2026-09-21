@@ -117,15 +117,15 @@ else
     done
     printf '%s' "$hooks" | grep -q 'usage-hook' || missing="$missing usage-hook;"
     if [ -f "$CODEX_HOME/config.toml" ]; then
-      grep -q 'codex-appendix' "$CODEX_HOME/config.toml" ||
-        missing="$missing codex SessionStart appendix hook absent from $CODEX_HOME/config.toml;"
+      grep -q '^developer_instructions = ' "$CODEX_HOME/config.toml" ||
+        missing="$missing codex fleet prompt absent from developer_instructions in $CODEX_HOME/config.toml;"
     else
-      missing="$missing no $CODEX_HOME/config.toml to carry the Codex SessionStart hook;"
+      missing="$missing no $CODEX_HOME/config.toml to carry the Codex fleet prompt;"
     fi
     if [ -n "$missing" ]; then
       fail "hook(s) not installed:$missing enumerated $(printf '%s\n' "$hooks" | grep -c . ) command hook(s)"
     else
-      pass "$(printf '%s\n' "$hooks" | grep -c . ) Claude command hooks wired (every pfm internal verb + usage-hook) and the Codex appendix hook present"
+      pass "$(printf '%s\n' "$hooks" | grep -c . ) Claude command hooks wired (every pfm internal verb + usage-hook) and the Codex fleet prompt present in developer_instructions"
     fi
   fi
 fi

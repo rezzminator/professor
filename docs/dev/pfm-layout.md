@@ -111,7 +111,6 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 | 33 | `cmd/pfm/chat_server_command.go` | `cmd/pfm/internal_chat_server.go` | `pfm internal chat-server` |
 | 34 | `cmd/pfm/claude_version_command.go` | `cmd/pfm/internal_claude_version.go` | `pfm internal claude-version` |
 | 35 | `cmd/pfm/clear_kill_command.go` | `cmd/pfm/internal_clear_kill.go` | `pfm internal clear-kill` |
-| 36 | `cmd/pfm/codex_appendix_command.go` | `cmd/pfm/internal_codex_appendix.go` | `pfm internal codex-appendix` |
 | 37 | `cmd/pfm/codex_launch_compat.go` | `cmd/pfm/internal_codex_launch.go` | `pfm internal codex-launch` |
 | 38 | `cmd/pfm/compact_nudge_command.go` | `cmd/pfm/internal_compact_nudge.go` | `pfm internal compact-nudge` |
 | 39 | `cmd/pfm/epic_inject_command.go` | `cmd/pfm/internal_epic_inject.go` | `pfm internal epic-inject` |
@@ -160,7 +159,7 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 | `internal/engine/{claude,codex,opencode}/` | per-engine adapters, one importer (`cmd/pfm/engines.go`); grep-true already |
 | `internal/store/` → `indexdb` | architecture open ruling 4; a rename with a user-visible file rename attached (`fleet.db` → `index.db`), not layout |
 | `testdata/`, `e2e/`, `internal/installer/assets/**`, `internal/harvestpy/**` | § (a) |
-| `internal/codexgen`, `codexappendix`, `codexmeta` | three Codex concerns at three layers (installer compiler, hook appendix, rollout reader); folding them would create a `codex/` umbrella with no unit of change |
+| `internal/codexgen`, `codexappendix`, `codexmeta` | three Codex concerns at three layers (installer compiler, retired-appendix cleanup, rollout reader); folding them would create a `codex/` umbrella with no unit of change |
 
 ## (d) Import rules after the move
 
@@ -201,7 +200,7 @@ Rules the executor and every later wave keep:
 | C13 `untested-sources` | every renamed source without a same-stem test: `cmd/pfm/{agent_open_command,chat_keys_command,commands,harness_prompt_baselines,inject_resume,launcher_repair_command,pipeline,prepush_doctor,prompt_block,run_command,then_command}.go` → their new names; `internal/chatkeys/keys.go` → `internal/chat/keys.go`; `internal/engine/matchutil/match.go` → `internal/engine/match.go` | meaningful; #4 (`fleetdb_test.go`) keeps `fleetdb.go` mirrored |
 | C14 / C15 | none (parse `main.go`, unchanged) | meaningful |
 | C16 `env-outside-paths` | `cmd/pfm/commands.go 1` → `ls_command.go`; `launch_command.go 1` → `internal_launch.go`; `update_notice_command.go 1` → `internal_update_check.go`; `run_command.go 1` → `chat_new_command.go` | meaningful |
-| C17 `dup-functions` | value strings carry paths: `command:` loses `internal/engine/matchutil/match.go` (entry becomes `command: internal/codexappendix/register.go internal/tmux/tmux.go`); `open:` → `internal/fleetdb/fleetdb.go internal/store/store.go`; `containsstring:` → `cmd/pfm/update_command.go internal/harvestmcp/remote.go` after P2b; `lastlines:` unchanged (`chat_satellite_command.go` keeps its name); `livesockets:` → `cmd/pfm/namesync_command.go internal/ui/model.go` unchanged | meaningful; the `command:` entry shrinks (P4 #8 owns the rest) |
+| C17 `dup-functions` | value strings carry paths: `command:` loses `internal/engine/matchutil/match.go` (entry becomes `command: internal/codexappendix/codexappendix.go internal/tmux/tmux.go`); `open:` → `internal/fleetdb/fleetdb.go internal/store/store.go`; `containsstring:` → `cmd/pfm/update_command.go internal/harvestmcp/remote.go` after P2b; `lastlines:` unchanged (`chat_satellite_command.go` keeps its name); `livesockets:` → `cmd/pfm/namesync_command.go internal/ui/model.go` unchanged | meaningful; the `command:` entry shrinks (P4 #8 owns the rest) |
 | C18 `engine-spellings` | `cmd/pfm/commands.go 7` → `ls_command.go`; `pipeline.go 2` → `ls_pipeline.go`; `reload_command.go 3` → `chat_reload_command.go`; `run_command.go 4` → `chat_new_command.go`; `update_notice_command.go 2` → `internal_update_check.go`; `reload_engine_roster_test.go 5`, `run_engine_roster_test.go 4` → their `chat_` names; `internal/engine/opencode/match.go` unchanged | meaningful (P3 #2 shrinks it) |
 | C19 `env-namespace` | `cmd/pfm/commands.go 1` → `ls_command.go` | meaningful |
 | C20 `codex-home` | `cmd/pfm/reload_command.go 1` → `chat_reload_command.go` | meaningful (P3 #1 shrinks it) |

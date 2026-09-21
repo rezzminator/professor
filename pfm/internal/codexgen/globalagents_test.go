@@ -142,13 +142,15 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 	got := string(
 		mustReadTestFile(t, filepath.Join(paths.GeneratedCodexAgentsDir(home), "quirky.toml")),
 	)
-	want := "name = \"quirky\"\n" +
+	head := "name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
-		"developer_instructions = \"\"\"\n" +
-		"Body has a literal triple quote \\\"\\\"\\\" and a backslash \\\\ standalone.\n" +
+		"developer_instructions = \"\"\"\n"
+	// The fleet prompt is prepended to every role, so the role's own body is
+	// the TAIL of the value — escaped byte for byte, as before.
+	body := "Body has a literal triple quote \\\"\\\"\\\" and a backslash \\\\ standalone.\n" +
 		"\"\"\"\n"
-	if got != want {
-		t.Fatalf("quirky.toml =\n%q\nwant\n%q", got, want)
+	if !strings.HasPrefix(got, head) || !strings.HasSuffix(got, body) {
+		t.Fatalf("quirky.toml =\n%q\nwant %q ... %q", got, head, body)
 	}
 	if err := validateTOML(got); err != nil {
 		t.Fatalf(
@@ -174,11 +176,11 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 		t,
 		filepath.Join(paths.GeneratedCodexAgentsDir(home), "quoted.toml"),
 	))
-	want := "name = \"quoted\"\n" +
+	head := "name = \"quoted\"\n" +
 		"description = \"a: b, \\\"c\\\"\"\n" +
-		"developer_instructions = \"\"\"\nBody.\n\"\"\"\n"
-	if got != want {
-		t.Fatalf("quoted.toml =\n%q\nwant\n%q", got, want)
+		"developer_instructions = \"\"\"\n"
+	if !strings.HasPrefix(got, head) || !strings.HasSuffix(got, "\nBody.\n\"\"\"\n") {
+		t.Fatalf("quoted.toml =\n%q\nwant %q ... %q", got, head, "Body.")
 	}
 }
 

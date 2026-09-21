@@ -50,7 +50,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `E2.02-statusline` · statusline renders the Codex usage segment · spends cx · T31,T32
 - `E2.03-reload-matrix` · `/reload` matrix as far as Codex supports it (no UserPromptSubmit hook — the beat asserts the model-relay path) · spends cx · (none)
 - `E2.04-recover` · `recover` rebuilds a chat from a rollout · spends cx · C43
-- `E2.05-appendix-hook` · the appendix hook (`codex-appendix`) is present in the first turn · spends cx · X23
+- `E2.05-fleet-prompt` · the fleet prompt reaches the first turn through `developer_instructions` · spends cx · X23
 - `E2.06-mcp-http` · MCP over HTTP: `chat_*` tools are listed in the Codex session · spends cx · M34
 - `E2.07-inject-ask-watch` · inject/ask/watch on the Codex home · spends cx · C32,C39,C40
 - `E2.08-kill-self` · `chat kill self/me` alias incl. the tmux-less Codex tool-shell (`CODEX_THREAD_ID`) · spends cx · C47

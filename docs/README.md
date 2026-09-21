@@ -49,7 +49,7 @@ templates/
 ├── refresh-map.json      ← template-to-source tracking
 ├── project/              ← scaffolded rules, agents, commands, hooks, and engine adapters
 ├── global/               ← machine-global commands, agents, and skill source registry
-├── prompts/              ← Claude replacement and Codex appendix
+├── prompts/              ← Claude replacement and the Codex fleet prompt
 └── themes/               ← source-fetched theme registry
 workflows/deep-rr/         ← bundled research skill
 ```

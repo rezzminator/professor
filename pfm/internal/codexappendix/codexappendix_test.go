@@ -1,6 +1,7 @@
 package codexappendix
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,9 +19,7 @@ func TestOfflineUnregisterPreservesPersonalConfigAndSymlink(t *testing.T) {
 	if err := os.Symlink(physical, path); err != nil {
 		t.Fatal(err)
 	}
-	if err := saveReceipt(account, hook{Key: "owned.path:key", CurrentHash: "sha256:owned"}); err != nil {
-		t.Fatal(err)
-	}
+	writeReceipt(t, account, `{"owned.path:key": "sha256:owned"}`)
 	if err := Unregister(account); err != nil {
 		t.Fatal(err)
 	}
@@ -47,12 +46,24 @@ func TestTrustCleanupRejectsUnsafeInlineLayout(t *testing.T) {
 	}
 }
 
+// A receipt holding JSON null decodes to a nil map. The cleanup must read it
+// as "nothing recorded" and retire the receipt, never panic on it.
 func TestNullReceiptFailsWithoutPanic(t *testing.T) {
 	account := t.TempDir()
-	if err := os.WriteFile(receiptPath(account), []byte("null"), 0o600); err != nil {
-		t.Fatal(err)
+	writeReceipt(t, account, "null")
+	if err := Unregister(account); err != nil {
+		t.Fatalf("cleanup over a null receipt: %v", err)
 	}
-	if err := saveReceipt(account, hook{Key: "key", CurrentHash: "hash"}); err == nil {
-		t.Fatal("null receipt accepted")
+	if _, err := os.Stat(receiptPath(account)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("null receipt survived cleanup: %v", err)
+	}
+}
+
+// writeReceipt stages the trust receipt the retired registration wrote, which
+// is the only input the cleanup reads.
+func writeReceipt(t *testing.T, account, body string) {
+	t.Helper()
+	if err := os.WriteFile(receiptPath(account), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

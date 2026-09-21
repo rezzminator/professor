@@ -176,6 +176,7 @@ func Run(
 		dependencies,
 	)
 	tally.warnings += printHarnessPromptEmbedDoctor(stdout, resolved.Home)
+	tally.failures += PrintCodexDeveloperInstructions(stdout, runtime.Config.CodexHomes())
 	primaryAccount, primaryErr := fleet.PrimaryAccount(resolved, runtime.Config)
 	if primaryErr != nil {
 		tally.fail()

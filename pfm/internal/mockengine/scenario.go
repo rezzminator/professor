@@ -96,12 +96,8 @@ type Step struct {
 	// menu: the numbered options and the 1-based preselected row.
 	Options  []string `json:"options,omitempty"`
 	Selected int      `json:"selected,omitempty"`
-	// compact: the postTokens the compact_boundary record carries. Codex's
-	// PreserveAppendix re-emits the still-live SessionStart developer message
-	// in replacement_history, so codexappendix's found==true branch is
-	// reachable; the default omits it, exercising the absent branch instead.
-	PostTokens       int64 `json:"post_tokens,omitempty"`
-	PreserveAppendix bool  `json:"preserve_appendix,omitempty"`
+	// compact: the postTokens the compact_boundary record carries.
+	PostTokens int64 `json:"post_tokens,omitempty"`
 	// crash / exit: the process exit code.
 	ExitCode int `json:"exit_code,omitempty"`
 	// mcp: the [mcp_servers.<server>] block of config.toml to connect to.

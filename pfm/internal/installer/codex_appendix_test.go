@@ -1,10 +1,13 @@
 package installer
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 )
 
 func TestCodexAppendixRejectsInvalidShapeBeforeMutation(t *testing.T) {
@@ -15,10 +18,29 @@ func TestCodexAppendixRejectsInvalidShapeBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestCodexAppendixPreservesSharedHookSymlinks(t *testing.T) {
+// An EXISTING install carries the retired SessionStart appendix hook. An
+// apply must take it away — not merely stop writing it — while an operator's
+// own handler in the same shared, symlinked file is untouched.
+func TestCodexApplyRetiresTheAppendixHookAndKeepsSharedSymlinks(t *testing.T) {
 	home := t.TempDir()
 	shared := filepath.Join(home, "shared-hooks.json")
-	writeFixture(t, shared, `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"echo personal"}]}]}}`)
+	appendix, err := json.Marshal(map[string]any{
+		"hooks": map[string]any{
+			"Stop": []any{map[string]any{
+				"hooks": []any{map[string]any{"type": "command", "command": "echo personal"}},
+			}},
+			"SessionStart": []any{map[string]any{
+				"matcher": codexappendix.Matcher,
+				"hooks": []any{map[string]any{
+					"type": "command", "command": codexappendix.Command(home), "timeout": 10,
+				}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, shared, string(appendix))
 	homes := []string{filepath.Join(home, "account-a"), filepath.Join(home, "account-b")}
 	for _, account := range homes {
 		if err := os.MkdirAll(account, 0o700); err != nil {
@@ -42,25 +64,13 @@ func TestCodexAppendixPreservesSharedHookSymlinks(t *testing.T) {
 		if err != nil || info.Mode()&os.ModeSymlink == 0 {
 			t.Fatalf("symlink replaced: %s", path)
 		}
-		if count := hookCommandCount(
-			t,
-			readFixture(t, path),
-			"SessionStart",
-			codexHookTemplate(home).Command,
-		); count != 1 {
-			t.Fatalf("account appendix count=%d", count)
+		raw := readFixture(t, path)
+		if count := hookCommandCount(t, raw, "SessionStart", codexappendix.Command(home)); count != 0 {
+			t.Fatalf("retired appendix hook count=%d in %s:\n%s", count, path, raw)
 		}
-	}
-	installer.options.Mode = ModeUninstall
-	if err := installer.wireCodexHooks(); err != nil {
-		t.Fatal(err)
-	}
-	raw := readFixture(t, shared)
-	if count := hookCommandCount(t, raw, "Stop", "echo personal"); count != 1 {
-		t.Fatalf("personal hook lost: %s", raw)
-	}
-	if count := hookCommandCount(t, raw, "SessionStart", codexHookTemplate(home).Command); count != 0 {
-		t.Fatalf("owned hook retained: %s", raw)
+		if count := hookCommandCount(t, raw, "Stop", "echo personal"); count != 1 {
+			t.Fatalf("personal hook lost from %s:\n%s", path, raw)
+		}
 	}
 }
 

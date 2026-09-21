@@ -62,7 +62,7 @@ var topLevelSubcommands = []string{
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
 	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
-	"codex-appendix", "codex-launch", "compact-nudge", "epic-inject",
+	"codex-launch", "compact-nudge", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
 	"launcher-repair", "primary-get", "primary-set", "reload-intercept", "rr-dir",
 	reloadRunCommand, "stale", statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
@@ -416,9 +416,6 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "codex-launch" {
 		return hookentry.CodexLaunch(args[1:], stderr)
 	}
-	if len(args) != 0 && args[0] == "codex-appendix" {
-		return hookentry.CodexAppendix(os.Stdin, stdout, stderr, runtime)
-	}
 	if len(args) != 0 && args[0] == "claude-launch" {
 		return hookentry.ClaudeLaunch(args[1:], stdout, stderr, runtime, nil)
 	}
@@ -509,7 +506,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-appendix|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

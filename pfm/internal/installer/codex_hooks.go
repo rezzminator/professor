@@ -13,7 +13,9 @@ import (
 // current ownership path recognizes or writes this retired shape.
 const codexClearMatcher = "startup|resume|clear"
 
-// updateCodexHooks preserves personal handlers, retires clear-kill, and owns the appendix.
+// updateCodexHooks preserves personal handlers and retires pfm's own: the
+// clear-kill hook, and the SessionStart appendix hook whose truncated,
+// compaction-dropped delivery developer_instructions replaced.
 func updateCodexHooks(
 	raw []byte,
 	home string,
@@ -58,7 +60,8 @@ func updateCodexHooks(
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
 			command, _ := hook[configCommandKey].(string)
-			if isRetiredHookCommand(command, pfmBinary) || retiredCommands[command] {
+			if isRetiredHookCommand(command, pfmBinary) || retiredCommands[command] ||
+				command == codexappendix.Command(home) {
 				changed = true
 				continue
 			}
@@ -73,33 +76,6 @@ func updateCodexHooks(
 		}
 	}
 
-	if !uninstall &&
-		!hasHookCommandWithMatcher(
-			hookEntries(document, "SessionStart", false),
-			codexappendix.Command(home),
-			codexappendix.Matcher,
-		) {
-		appendHookWithMatcher(document, "SessionStart", codexappendix.Matcher, codexappendix.Command(home))
-		changed = true
-	}
-	if !uninstall {
-		for _, entry := range hookEntries(document, "SessionStart", false) {
-			if entry["matcher"] != codexappendix.Matcher {
-				continue
-			}
-			handlers, _ := entry["hooks"].([]any)
-			for _, value := range handlers {
-				handler, _ := value.(map[string]any)
-				if handler[configCommandKey] == codexappendix.Command(home) {
-					if handler[configTypeKey] != commandType || !jsonNumberIs(handler["timeout"], 10) {
-						handler[configTypeKey] = commandType
-						handler["timeout"] = float64(10)
-						changed = true
-					}
-				}
-			}
-		}
-	}
 	nextOwned := nextSettingsHookOwnership(
 		before,
 		countSettingsHookCommands(document),

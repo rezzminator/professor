@@ -657,8 +657,12 @@ func TestMCPInstallCodexChatStaysOnHTTPDespiteClaudeStdio(t *testing.T) {
 		!strings.Contains(codexConfig, `url = "http://127.0.0.1:8377/mcp/chat"`) {
 		t.Fatalf("Codex chat registration lost its HTTP shape:\n%s", codexConfig)
 	}
-	if strings.Contains(codexConfig, "command") || strings.Contains(codexConfig, "stdio") {
-		t.Fatalf("Codex chat registration picked up the Claude-only stdio shape:\n%s", codexConfig)
+	// Only pfm's own MCP block is under test: the rest of the config carries
+	// the fleet prompt, whose prose says "command" often enough.
+	_, fenced, _ := strings.Cut(codexConfig, mcpFenceBegin)
+	registration, _, _ := strings.Cut(fenced, mcpFenceEnd)
+	if strings.Contains(registration, "command") || strings.Contains(registration, "stdio") {
+		t.Fatalf("Codex chat registration picked up the Claude-only stdio shape:\n%s", registration)
 	}
 	clientJSON := readFixture(t, filepath.Join(home, ".claude.json"))
 	if !strings.Contains(clientJSON, `"type": "stdio"`) {

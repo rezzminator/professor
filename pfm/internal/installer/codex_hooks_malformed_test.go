@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 )
 
 // TestMalformedCodexHooksSkipsLoudlyAndFinishesTheRun is a REGRESSION test
@@ -59,17 +61,25 @@ func TestMalformedCodexHooksStillRefusesToStrandOwnedHooksOnUninstall(t *testing
 	codexHome := filepath.Join(home, ".codex")
 	hooks := filepath.Join(codexHome, "hooks.json")
 
-	if _, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{codexHome},
-	}); err != nil {
+	// pfm writes no Codex hook any more — the appendix hook is retired — so
+	// the ownership an uninstall must not strand is one an OLDER install
+	// recorded, which is exactly what this ledger says.
+	ledger, err := encodeSettingsHookOwnership(map[string]settingsHookCounts{
+		physicalSettingsPath(hooks): {
+			settingsHookKey{
+				Event:   "SessionStart",
+				Matcher: codexappendix.Matcher,
+				Command: codexappendix.Command(home),
+			}: 1,
+		},
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(hooks); err != nil {
-		t.Fatalf("install wrote no Codex hooks file to own: %v", err)
-	}
+	writeFixture(t, settingsHookOwnershipPath(managedRootForHome(home)), string(ledger))
 	writeFixture(t, hooks, "{ broken after the install that owns it\n")
 
-	_, err := Run(context.Background(), Options{
+	_, err = Run(context.Background(), Options{
 		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{}, CodexHomes: []string{codexHome},
 	})
 	if err == nil {

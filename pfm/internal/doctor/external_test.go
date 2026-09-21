@@ -9,10 +9,24 @@ import (
 	"strings"
 	"testing"
 
+	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+// installedCodexConfig is a Codex config carrying what `pfm install` writes
+// into it — the fleet prompt — plus whatever the fixture is really about. A
+// fixture that left it out would also trip doctor's developer_instructions
+// row, which is a different failure than the one under test.
+func installedCodexConfig(t *testing.T, rest string) string {
+	t.Helper()
+	prompt, err := harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Codex).LongName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "developer_instructions = '''\n" + string(prompt) + "'''\n" + rest
+}
 
 func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	root := jailTest(t)
@@ -31,9 +45,10 @@ func TestDoctorWarnsWhenLegacyHarvesterClientsStillOwnTheRoute(t *testing.T) {
 	}
 	if err := os.WriteFile(
 		filepath.Join(home, ".codex", "config.toml"),
-		[]byte(
+		[]byte(installedCodexConfig(
+			t,
 			"[mcp_servers.harvester]\ncommand = \"uv\"\nargs = [\"--directory\", \"/fixture/legacy-harvester\", \"run\", \"harvester\"]\n",
-		),
+		)),
 		0o600,
 	); err != nil {
 		t.Fatal(err)
@@ -68,6 +83,9 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 	}
 	write := func(path, content string) {
 		t.Helper()
+		if path == codexPath {
+			content = installedCodexConfig(t, content)
+		}
 		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -191,16 +209,24 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		}
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
-		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 {
+		// The same unparseable file is also the one the fleet prompt lives
+		// in, so doctor exits on that failure; the harvester row must still
+		// say "unreadable" rather than "absent", which is what is under test.
+		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 3 {
 			t.Fatalf(
-				"doctor code=%d stdout=%q stderr=%q, want unreadable warning",
+				"doctor code=%d stdout=%q stderr=%q, want the failure exit an unparseable Codex config earns",
 				code,
 				stdout.String(),
 				stderr.String(),
 			)
 		}
-		if !strings.Contains(stdout.String(), "doctor: mcp client=codex harvester=unreadable error=") {
-			t.Fatalf("malformed Codex TOML was not distinguished from absence:\n%s", stdout.String())
+		for _, want := range []string{
+			"doctor: mcp client=codex harvester=unreadable error=",
+			"doctor: codex developer_instructions=CHECK FAILED",
+		} {
+			if !strings.Contains(stdout.String(), want) {
+				t.Fatalf("malformed Codex TOML was not distinguished from absence (%s):\n%s", want, stdout.String())
+			}
 		}
 	})
 }

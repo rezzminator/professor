@@ -375,9 +375,13 @@ func renderGlobalAgentTOML(mdPath, raw, outputDir string) (string, string, error
 
 	body = strings.ReplaceAll(body, globalAgentBodyOld, globalAgentBodyNew)
 
+	withFleetPrompt, err := fleetRoleInstructions(body)
+	if err != nil {
+		return "", "", fmt.Errorf("%s: %w", mdPath, err)
+	}
 	content := "name = \"" + globalAgentEscape(name) + "\"\n" +
 		"description = \"" + globalAgentEscape(description) + "\"\n" +
-		"developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
+		"developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(withFleetPrompt) + "\n\"\"\"\n"
 
 	out := filepath.Join(outputDir, name+".toml")
 	return out, content, nil

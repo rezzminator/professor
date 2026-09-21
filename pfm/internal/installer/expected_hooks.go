@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/rezzminator/professor/pfm/internal/codexappendix"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
@@ -72,18 +71,9 @@ func ExpectedHooks(home string, config pfmconfig.Config) []ExpectedHook {
 			result = append(result, hook)
 		}
 	}
-	for _, account := range config.CodexAccounts {
-		file := filepath.Join(account.Home, "hooks.json")
-		physical := physicalSettingsPath(file)
-		if seen[physical] {
-			continue
-		}
-		seen[physical] = true
-		hook := codexHookTemplate(home)
-		hook.Target = fmt.Sprintf("codex[%d]", account.ID)
-		hook.File = file
-		result = append(result, hook)
-	}
+	// Codex accounts carry no expected hook: the fleet prompt reaches a Codex
+	// session through config.toml's developer_instructions, and the
+	// SessionStart appendix hook pfm used to own is retired.
 	return result
 }
 
@@ -392,15 +382,6 @@ func inspectExpectedHookDocument(
 		}
 	}
 	return typed, all, "", issues
-}
-
-func codexHookTemplate(home string) ExpectedHook {
-	return ExpectedHook{
-		Event:   "SessionStart",
-		Matcher: codexappendix.Matcher,
-		Command: codexappendix.Command(home),
-		Name:    "codex-appendix",
-	}
 }
 
 // HookProbeOverride is nil in production; a fleet test main may swap it for

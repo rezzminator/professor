@@ -17,13 +17,14 @@ import (
 // DaemonStatus is the stable local health document consumed by doctor and the
 // single-instance probe.
 type DaemonStatus struct {
-	PFMVersion        string              `json:"pfmVersion"`
-	ProtocolVersion   string              `json:"protocolVersion"`
-	Servers           map[string][]string `json:"servers"`
-	PID               int                 `json:"pid"`
-	StartTime         string              `json:"startTime"`
-	Endpoint          string              `json:"endpoint"`
-	HarvesterExternal string              `json:"harvesterExternal,omitempty"`
+	PFMVersion          string              `json:"pfmVersion"`
+	ProtocolVersion     string              `json:"protocolVersion"`
+	Servers             map[string][]string `json:"servers"`
+	PID                 int                 `json:"pid"`
+	StartTime           string              `json:"startTime"`
+	Endpoint            string              `json:"endpoint"`
+	HarvesterExternal   string              `json:"harvesterExternal,omitempty"`
+	ChatRuntimeIdentity string              `json:"chatRuntimeIdentity,omitempty"`
 }
 
 // ErrDaemonAbsent means nothing answered on the probed address at all: the

@@ -58,6 +58,7 @@ type stdioProxy struct {
 	requestMutex            sync.Mutex
 	requests                map[string]*proxyRequestState
 	requestTails            map[string]*proxyRequestState
+	expectedRuntimeIdentity string
 }
 
 type proxyFrame struct {
@@ -239,7 +240,8 @@ func (service *Service) runStdioTransport(
 	}
 	status, probeErr := ProbeDaemon(address)
 	if probeErr == nil {
-		if _, mounted := status.Servers[pfmconfig.MCPServerChat]; mounted {
+		if _, mounted := status.Servers[pfmconfig.MCPServerChat]; mounted &&
+			status.ChatRuntimeIdentity != "" && status.ChatRuntimeIdentity == service.RuntimeIdentity() {
 			marker, markerErr := stale.HoldCompatibleProxy(service.backend.paths.Home)
 			if markerErr != nil {
 				return fmt.Errorf("protect selected daemon stdio proxy: %w", markerErr)
@@ -253,8 +255,18 @@ func (service *Service) runStdioTransport(
 				}
 			}()
 			proxy := newStdioProxy(ctx, address, warnings)
+			proxy.expectedRuntimeIdentity = service.RuntimeIdentity()
 			proxy.sidDir = service.backend.paths.SIDDir
 			return proxy.run(ctx, reader, serialized)
+		}
+		if _, mounted := status.Servers[pfmconfig.MCPServerChat]; mounted {
+			fmt.Fprintf(
+				warnings,
+				"pfm mcp stdio: runtime mismatch with daemon at %s; using in-process MCP; %s\n",
+				address,
+				consequence,
+			)
+			return service.Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
 		}
 		fmt.Fprintf(
 			warnings,
@@ -422,6 +434,17 @@ func (proxy *stdioProxy) sendWithRetry(ctx context.Context, frame []byte, isInit
 	for attempt := 0; ; attempt++ {
 		var result proxyPostResult
 		var err error
+		if proxy.expectedRuntimeIdentity != "" {
+			status, probeErr := ProbeDaemon(proxy.address)
+			if probeErr != nil {
+				err = fmt.Errorf("verify daemon runtime before replay: %w", probeErr)
+			} else if status.ChatRuntimeIdentity == "" || status.ChatRuntimeIdentity != proxy.expectedRuntimeIdentity {
+				return nil, fmt.Errorf(
+					"pfm MCP daemon %s runtime mismatch during recovery; request was not replayed",
+					proxy.address,
+				)
+			}
+		}
 		if attempt > 0 && !isInitialize && needsReinitialize {
 			result.generation, err = proxy.reinitializeCurrent(retryCtx, recoveryGeneration)
 		}

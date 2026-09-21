@@ -48,6 +48,29 @@ func TestProbeDaemonWritesAnHTTPOutRecord(t *testing.T) {
 	}
 }
 
+func TestProbeDaemonPreservesOpaqueChatRuntimeIdentity(t *testing.T) {
+	server := httptest.NewServer(NewDaemonHandler(DaemonOptions{
+		Version: "test", Chat: http.NotFoundHandler(), ChatRuntimeIdentity: "sha256:opaque",
+	}))
+	defer server.Close()
+	status, err := ProbeDaemon(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ChatRuntimeIdentity != "sha256:opaque" {
+		t.Fatalf("chat runtime identity = %q, want opaque digest", status.ChatRuntimeIdentity)
+	}
+}
+
+func TestDaemonStatusOmitsChatRuntimeIdentityWithoutChat(t *testing.T) {
+	handler := NewDaemonHandler(DaemonOptions{ChatRuntimeIdentity: "sha256:must-not-leak"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
+	if strings.Contains(response.Body.String(), "chatRuntimeIdentity") {
+		t.Fatalf("status without mounted chat exposed identity: %s", response.Body.String())
+	}
+}
+
 // TestProbeDaemonUnreachableIsAbsentAndAnErrorRecord: a refused probe reports
 // ErrDaemonAbsent — nothing is listening, the one state in which binding the
 // port is the right next move — and the log says the request failed rather

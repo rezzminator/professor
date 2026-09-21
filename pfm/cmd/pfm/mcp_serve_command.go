@@ -74,6 +74,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 		}
 		defer func() { cli.CloseResource(chat, "pfm mcp serve: close chat service", stderr, &exitCode) }()
 		options.Chat = chat.NewHTTPHandler()
+		options.ChatRuntimeIdentity = chat.RuntimeIdentity()
 	}
 	if harvesterEnabled {
 		harvester, err := harvestmcp.NewConfiguredHarvester(version, harvestRuntime(runtime))

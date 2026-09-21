@@ -37,11 +37,12 @@ const maxDaemonBodyBytes = 1 << 20
 // front door. A nil Chat or Harvester means that server is disabled by config
 // and was never constructed.
 type DaemonOptions struct {
-	Version   string
-	StartedAt time.Time
-	Endpoint  string
-	Chat      http.Handler
-	Harvester http.Handler
+	Version             string
+	StartedAt           time.Time
+	Endpoint            string
+	Chat                http.Handler
+	Harvester           http.Handler
+	ChatRuntimeIdentity string
 	// HarvesterTools is the runtime-dependent registered surface from
 	// harvestmcp.RegisteredToolNames — the search gate rules out a package var.
 	HarvesterTools []string
@@ -82,17 +83,20 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 	servers := map[string][]string{}
 	if options.Chat != nil {
 		servers[pfmconfig.MCPServerChat] = ToolNames()
+	} else {
+		options.ChatRuntimeIdentity = ""
 	}
 	if options.Harvester != nil {
 		servers[pfmconfig.MCPServerHarvester] = append([]string(nil), options.HarvesterTools...)
 	}
 	status := DaemonStatus{
-		PFMVersion:      options.Version,
-		ProtocolVersion: mcpProtocolVersion,
-		Servers:         servers,
-		PID:             os.Getpid(),
-		StartTime:       options.StartedAt.UTC().Format(time.RFC3339Nano),
-		Endpoint:        options.Endpoint,
+		PFMVersion:          options.Version,
+		ProtocolVersion:     mcpProtocolVersion,
+		Servers:             servers,
+		PID:                 os.Getpid(),
+		StartTime:           options.StartedAt.UTC().Format(time.RFC3339Nano),
+		Endpoint:            options.Endpoint,
+		ChatRuntimeIdentity: options.ChatRuntimeIdentity,
 	}
 	// obs.Handler wraps the OUTER handler, so /status, a disabled route's 503,
 	// an unknown path's 404 and the Origin refusal — the answers the daemon

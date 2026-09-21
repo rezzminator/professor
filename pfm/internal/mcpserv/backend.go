@@ -43,6 +43,7 @@ type backend struct {
 	paths                paths.Values
 	warnings             io.Writer
 	allowAmbientIdentity bool
+	runtimeIdentity      string
 }
 
 func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error) {
@@ -64,6 +65,10 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 	}
 	if runtime.OpenCodeBinary == "" {
 		runtime.OpenCodeBinary = pfmengine.MustLookup(pfmengine.OpenCode).Binary
+	}
+	runtimeIdentity, err := deriveChatRuntimeIdentity(runtime)
+	if err != nil {
+		return nil, fmt.Errorf("configure chat MCP backend: %w", err)
 	}
 	database, err := store.Open(store.WithWarningWriter(warnings))
 	if err != nil {
@@ -106,6 +111,7 @@ func newBackendConfigured(warnings io.Writer, runtime Runtime) (*backend, error)
 		paths:                runtime.Paths,
 		warnings:             warnings,
 		allowAmbientIdentity: runtime.AllowAmbientIdentity,
+		runtimeIdentity:      runtimeIdentity,
 	}, nil
 }
 

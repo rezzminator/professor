@@ -107,7 +107,7 @@ func stdioTestPort(t *testing.T, server *httptest.Server) int {
 
 func stdioTestService(marker string, warnings io.Writer) *Service {
 	return newService(marker, &backend{
-		warnings: warnings,
+		warnings: warnings, runtimeIdentity: "sha256:stdio-test",
 		dispatch: func(_ context.Context, _ []string, stdout, _ io.Writer) int {
 			_, _ = io.WriteString(stdout, marker+"\n")
 			return 0
@@ -206,6 +206,48 @@ func TestRunStdioUsesHealthyDaemonProxy(t *testing.T) {
 	for _, link := range links {
 		if link.Target == markerTarget {
 			t.Fatalf("proxy marker descriptor %d remained open after proxy returned", link.FD)
+		}
+	}
+}
+
+func TestRunStdioFallsBackWhenDaemonRuntimeDiffers(t *testing.T) {
+	var routeRequests atomic.Int32
+	daemon := proxyTestDaemon(stdioTestService("daemon", io.Discard))
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/status" {
+			writer.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(writer).Encode(map[string]any{
+				"pid": 1, "servers": map[string][]string{pfmconfig.MCPServerChat: ToolNames()},
+				"chatRuntimeIdentity": "sha256:different",
+			}); err != nil {
+				t.Errorf("encode status: %v", err)
+			}
+			return
+		}
+		routeRequests.Add(1)
+		daemon.ServeHTTP(writer, request)
+	}))
+	defer server.Close()
+
+	var warnings bytes.Buffer
+	local := stdioTestService("local", &warnings)
+	testjail.Fleet(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.backend.paths = resolved
+	local.daemonAddress = proxyTestAddress(server)
+	if marker := stdioTestRun(t, local).Message; marker != "local" {
+		t.Fatalf("mismatched daemon marker = %q, want in-process local marker", marker)
+	}
+	if routeRequests.Load() != 0 {
+		t.Fatalf("mismatched daemon received %d route requests, want none", routeRequests.Load())
+	}
+	assertNoProxyMarker(t, local)
+	for _, part := range []string{"runtime mismatch", local.daemonAddress, "using in-process MCP"} {
+		if !strings.Contains(warnings.String(), part) {
+			t.Errorf("mismatch warning %q does not name %q", warnings.String(), part)
 		}
 	}
 }

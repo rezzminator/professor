@@ -125,6 +125,7 @@ func proxyTestAddress(server *httptest.Server) string {
 func proxyTestDaemon(service *Service) http.Handler {
 	return NewDaemonHandler(DaemonOptions{
 		Version: "test", Endpoint: "test", Chat: service.NewHTTPHandler(),
+		ChatRuntimeIdentity: service.RuntimeIdentity(),
 	})
 }
 
@@ -134,7 +135,7 @@ func proxyTestService(marker string, rows []compose.Row, calls *[][]string) *Ser
 		last:   chat.LastResult{Text: marker + " self answer\n"}, resolveScopedSelf: true,
 	}
 	return newService(marker, &backend{
-		chat: verbs,
+		chat: verbs, runtimeIdentity: "sha256:proxy-test",
 		dispatch: func(_ context.Context, args []string, stdout, _ io.Writer) int {
 			*calls = append(*calls, append([]string(nil), args...))
 			_, _ = io.WriteString(stdout, marker+"\n")
@@ -176,6 +177,7 @@ func TestStdioProxyReinitializesAfterDaemonReplacement(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
 	proxy.identity = nil
 	harness := startProxyTestHarness(t, proxy)
 	harness.write(t, proxyTestInitialize)
@@ -615,6 +617,7 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
 	proxy.identity = nil
 	proxy.retryWindow = 500 * time.Millisecond
 	proxy.retryDelay = 10 * time.Millisecond
@@ -638,6 +641,44 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 		t.Fatalf("call after retry-window recovery = %v, want returned", got)
 	}
 	<-restored
+}
+
+func TestStdioProxyRefusesReplayIntoDifferentRuntime(t *testing.T) {
+	var routeCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/status" {
+			identity := "sha256:selected"
+			if routeCalls.Load() > 0 {
+				identity = "sha256:replacement"
+			}
+			if err := json.NewEncoder(writer).Encode(DaemonStatus{
+				PID: 1, Servers: map[string][]string{"chat": ToolNames()}, ChatRuntimeIdentity: identity,
+			}); err != nil {
+				t.Errorf("encode status: %v", err)
+			}
+			return
+		}
+		routeCalls.Add(1)
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	proxy.expectedRuntimeIdentity = "sha256:selected"
+	proxy.sessionID = "old-session"
+	proxy.protocol = "2025-06-18"
+	proxy.retryDelay = time.Millisecond
+	proxy.retryWindow = time.Second
+	proxy.storeHandshake(proxyInitializeMethod, []byte(proxyTestInitialize))
+	_, err := proxy.sendWithRetry(
+		context.Background(), []byte(proxyTestToolCall(8, "chat_new", `{"name":"wrong-fleet"}`)), false,
+	)
+	if err == nil || !strings.Contains(err.Error(), "runtime mismatch") ||
+		!strings.Contains(err.Error(), "not replayed") {
+		t.Fatalf("mismatched replacement error = %v, want contextual no-replay error", err)
+	}
+	if routeCalls.Load() != 1 {
+		t.Fatalf("mismatched replacement received %d route posts, want only failed original", routeCalls.Load())
+	}
 }
 
 func TestStdioProxyDropsUndeliverableNotification(t *testing.T) {

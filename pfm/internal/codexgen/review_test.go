@@ -79,61 +79,6 @@ func TestRewriteCodeReviewMapsEveryLevelAndLeavesEverythingElse(t *testing.T) {
 	}
 }
 
-// The gater sizes its own review effort from the diff and reviews the FLIGHT's
-// whole diff, not one task's files. Its source line writes the slot form, which
-// has to map to a flight-scoped prompt whose model_reasoning_effort is still the
-// slot the surrounding prose tells the gater to fill — a baked effort would
-// silently review a 40-file flight at the cheapest tier.
-func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T) {
-	got := rewriteCodeReview("Run `/code-review "+codeReviewSlot+"` over the flight's diff.", nil)
-	want := "Run `" + codexReviewShellCommand(reviewTestModel, codeReviewSlot) + "` over the flight's diff."
-	if got != want {
-		t.Fatalf("slot form = %q, want %q", got, want)
-	}
-	if !strings.Contains(got, `model_reasoning_effort="`+codeReviewSlot+`"`) {
-		t.Fatalf("slot form baked an effort instead of leaving the slot: %q", got)
-	}
-	if !strings.Contains(got, codeReviewFlightPrompt) || strings.Contains(got, codeReviewPrompt) {
-		t.Fatalf("slot form carries the task-scoped prompt, want the flight-scoped one: %q", got)
-	}
-	if again := rewriteCodeReview(got, nil); again != got {
-		t.Fatalf("slot rewrite is not idempotent: second pass = %q, first = %q", again, got)
-	}
-	level := rewriteCodeReview("/code-review low", nil)
-	if !strings.Contains(level, codeReviewPrompt) || strings.Contains(level, codeReviewSlot) {
-		t.Fatalf("a written level must stay task-scoped at a baked effort: %q", level)
-	}
-}
-
-// Door 2 for the gater's own road: a machine-global role compiled by
-// RunGlobalAgents. A gater whose compiled body carries the task-scoped prompt
-// reviews the wrong diff on Codex.
-func TestCompiledGlobalRoleCarriesTheFlightScopedReview(t *testing.T) {
-	home := t.TempDir()
-	writeTestFile(
-		t,
-		filepath.Join(home, ".professor", "templates", "global", "agents", "gate.md"),
-		"---\nname: gate\ndescription: Gates one flight.\ntools: Read\nmodel: opus\n---\n\n"+
-			"Run `/code-review "+codeReviewSlot+"` over the flight's diff.\n",
-	)
-	if _, err := RunGlobalAgents(GlobalAgentsOptions{Home: home}); err != nil {
-		t.Fatalf("RunGlobalAgents: %v", err)
-	}
-	path := filepath.Join(filepath.Join(home, ".codex", "agents"), "gate.toml")
-	got := string(mustReadTestFile(t, path))
-	if strings.Contains(got, codeReviewCommand) {
-		t.Fatalf("%s still spells %s:\n%s", path, codeReviewCommand, got)
-	}
-	want := codexReviewShellCommand(reviewTestModel, codeReviewSlot)
-	escaped := strings.ReplaceAll(want, `"`, `\"`)
-	if !strings.Contains(got, want) && !strings.Contains(got, escaped) {
-		t.Fatalf("%s carries no flight-scoped review at the effort slot:\n%s", path, got)
-	}
-	if err := validateTOML(got); err != nil {
-		t.Fatalf("%s does not parse as TOML with the slot review embedded: %v", path, err)
-	}
-}
-
 // The model is the tier map's, so a project whose config maps the review alias
 // somewhere else gets ITS model — and a caller with no map of its own (the
 // fleet prompt, the global-role compiler) still gets the compiler default

@@ -60,7 +60,7 @@ Derive the journey from the references, never from this file: the stage table in
 - Before Mode A (CREATE): read `docs/business/founder-mentality.md` for the cognitive moves that shape the Socratic interview, plus `docs/business/startup-strategy.md` for market context
 - Before Mode B (RESEARCH): `docs/business/competitive-intelligence.md` and `startup-strategy.md` are the "available knowledge" the cross-check runs against
 - Before Mode C (STRESS-TEST): read the whole mentor cluster — REGULATORY, COMPETITION, and BUSINESS MODEL score against the knowledge base, not generic assumptions
-- Artifacts save to the active epic dir (`docs/epics/{name}/`), otherwise `tmp/`
+- Artifacts save to the active epic dir (`docs/epics/{name}/`)
 - Mode A narrative and Mode C hardened vision run through the ghostwriter on the `mentor` profile
 
 ## Ghostwriter

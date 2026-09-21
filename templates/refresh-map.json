@@ -211,11 +211,6 @@
     "project/scripts/alloc-ports.sh": {
       "curated": true
     },
-    "project/scripts/baseline-sync.sh": {
-      "sources": {
-        ".claude/scripts/baseline-sync.sh": "8ce527b738a3a406f06a0407f06f2aa541df4b3073716ac75c31bcc9bae2bc68"
-      }
-    },
     "project/scripts/build-codex.mjs": {
       "curated": true
     },

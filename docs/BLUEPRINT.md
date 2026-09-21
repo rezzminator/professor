@@ -198,8 +198,7 @@ your-project/
 ├── .professor/
 │   ├── VERSION                        ← installed blueprint version (e.g., vX.Y.Z)
 │   ├── manifest.json                  ← interview answers (user-owned install record)
-│   ├── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
-│   └── drift.md                       ← local customization notes (human-readable)
+│   └── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
 ├── .claude/
 │   ├── agents/                        ← root agents (gitter; tracer, flights-speccer, flights-orchestrator are machine-global)
 │   ├── commands/                      ← /pcm, /pfm (the CLI guide), /context-meter, /dev, /audit:{code-hygiene,security}, /quality:{prompt,doc}, /rnd, /tokens + opt-in Tier B (`/flights:*` and `/reload` are NOT here — `pfm install` installs them host-level)
@@ -226,7 +225,7 @@ your-project/
 │   └── dev/
 │       ├── tasks/{pipeline}/          ← temp pipeline docs
 │       └── tasks/archive/             ← completed pipelines
-├── tmp/                               ← gitignored scratch
+├── tmp/                               ← gitignored; fixed protocol directories (tmp/flights/, tmp/dev/)
 │   └── flights/{flight}/              ← one flight: index.md, its task files, run.md, audit.md
 └── .worktrees/                        ← git worktree checkouts (gitignored)
     ├── {pipeline}/                    ← per-pipeline checkout

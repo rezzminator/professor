@@ -13,8 +13,7 @@ Resolved:            ← /pfm retro stamps this in place: `Resolved: {date} — 
 ```
 
 Entries without a `Resolved:` line are the open queue. `/pfm retro` folds each `Amend:` into the
-named file through the normal change flow, stamps the entry, and logs a local-only fold to `drift.md`
-like any other change.
+named file through the normal change flow and stamps the entry.
 
 ## Entries
 
@@ -114,7 +113,7 @@ Resolved:
 - `internal/statusline` `TestDefaultUnknownCacheWindowRendersInfinity` read the ambient environment, so it failed inside any fleet-spawned chat (which carries `FORCE_PROMPT_CACHING_5M=1`) and passed everywhere else — pinned `Env: map[string]string{}`. Worth a sweep: any test reading `os.Getenv` through a `Runtime` that accepts an `Env` map is an ambient-coupling bug of the same shape.
 
 ## 2026-09-20 — pfm doctor never checks the machine-global registry links
-Observed: `pfm install` links every `templates/global/{agents,commands,skills}` original into `~/.claude/` (and the generated variants, e.g. `super-rr`, from pfm's generated dir), but `pfm doctor` has no check over those links — `grep -n "symlink\|Lstat\|EvalSymlinks" pfm/internal/doctor/*.go` finds only the statusline and overlay checks. A missing link (a new original such as `sub-rr` / `sub-tracer` never linked), a dangling one, a link pointing outside the blueprint clone, or a real file shadowing the original (the hand-symlinked `tracer` case already in `drift.md`) all read as a healthy install; the first symptom is an `Agent type not found` mid-run.
+Observed: `pfm install` links every `templates/global/{agents,commands,skills}` original into `~/.claude/` (and the generated variants, e.g. `super-rr`, from pfm's generated dir), but `pfm doctor` has no check over those links — `grep -n "symlink\|Lstat\|EvalSymlinks" pfm/internal/doctor/*.go` finds only the statusline and overlay checks. A missing link (a new original such as `sub-rr` / `sub-tracer` never linked), a dangling one, a link pointing outside the blueprint clone, or a real file shadowing the original (the hand-symlinked `tracer` case) all read as a healthy install; the first symptom is an `Agent type not found` mid-run.
 Amend: `pfm/internal/doctor` — a registry-links check: enumerate the originals plus `variants.json` closed-world, and for each report `OK` / `MISSING` / `DANGLING` / `WRONG-TARGET {where it points}` / `SHADOWED (real file)`; a registry dir that cannot be read reports `UNREAD — {error}`, never a clean pass. Same walk for `~/.codex/agents/` twins.
 Resolved:
 

@@ -19,12 +19,12 @@ Before your first tool call, count the tasks in your brief. A task is one delive
 - `pfm/`: fleet engine — Go 1.24, `cmd/pfm` + `internal/*`. Owns its staged host assets under `pfm/internal/installer/assets/`; `pfm install` stages them. Also owns the only harvester under `internal/harvest` + `internal/harvestmcp`, over a pinned Python conversion sidecar in `internal/harvestpy/`.
 - `workflows/`: in-tree engines — `deep-rr/` (the USER-ONLY research workflow), linked into `~/.claude/skills/` by `pfm install`.
 - `infra/`: `fence/` (`docker-compose.yml`, the `pfm-dev` image, `release-rehearsal.sh`) — `dev.sh iso` and `/pfm:release` drive it; `demo/` is the live-demo fence for presentations; `check-self-hosted-manifest.sh` stays at the top level, a repo gate, not fence-only.
-- `docs/`: the specs — `BLUEPRINT.md` (philosophy), `SETUP.md` (generation), `PLACEHOLDERS.md` (substitution law) — plus `commands/` reference cards, `dev/` engineering notes and `design/` the design docs (the flights family under `design/flights/`, the rr family under `design/RR/`).
+- `docs/`: the specs — `BLUEPRINT.md` (philosophy), `SETUP.md` (generation), `PLACEHOLDERS.md` (substitution law) — plus `commands/` reference cards, `dev/` engineering notes and `design/` the design docs (the flights family under `design/flights/`, the rr family under `design/RR/`, tracer and mapper under `design/tracing/`).
 - `scripts/`: repo-level gates (`leak-check.sh`, `refresh-scope.sh`); `.githooks/` runs the leak gate `pre-push`.
 - `releases/` + root `README.md` / `INSTALL.md` / `CHANGELOG.md` / `VERSION`: the public face — edited with template-grade care.
-- `.claude/`: this repo's own project-tier install — the commands, agents, skills, and scripts THIS repo uses, the source of truth for its mirrors. Machine-global originals reach it through `~/.claude/` symlinks; where one needs this repo's anchors (`tracer`, `quality/*`) a rewired local variant lives here, logged in `drift.md`. `.codex/` and `.opencode/`: pointer layers compiled over it, never a restatement; their generated files are untracked (only the hand-written keeper `.codex/config.toml` lives in git).
-- `.professor/`: ledgers — `drift.md` (this install's keep-local customizations; never consumed), `retro.md` (steering inbox; `/pcm retro` folds it). Release notes are never written during development: `/pfm:release` derives them from `develop`'s diff against `main`.
-- `tmp/`: gitignored scratch — every generated artifact lands here, never in a tracked dir.
+- `.claude/`: this repo's own project-tier install — the commands, agents, skills, and scripts THIS repo uses, the source of truth for its mirrors. Machine-global originals reach it through `~/.claude/` symlinks; where one needs this repo's anchors (`tracer`, `quality/*`) a rewired local variant lives here. `.codex/` and `.opencode/`: pointer layers compiled over it, never a restatement; their generated files are untracked (only the hand-written keeper `.codex/config.toml` lives in git).
+- `.professor/`: ledgers — `retro.md` (steering inbox; `/pcm retro` folds it). Release notes are never written during development: `/pfm:release` derives them from `develop`'s diff against `main`.
+- `tmp/`: gitignored — holds only the fixed directories a named protocol owns (`tmp/flights/`, `tmp/timing/`, `tmp/lanes/`, the guard markers).
 
 Build/test through `.claude/scripts/dev.sh {status|install|build|typecheck|verify|test} {templates|pfm}`.
 
@@ -70,7 +70,7 @@ pfm opencode build . && pfm opencode doctor .
 - **The judge is never the thing being judged:** read the artifact from disk, never trust a verdict asserted in a brief; an empty enumeration is clean only once the enumerator provably ran.
 - Surgical changes: every changed line traces to the task; fix broken things you hit; dead code/references/deps — remove entirely, end to end (including `README.md`, `BLUEPRINT.md`, `SETUP.md`, `refresh-map.json`).
 - NO duplication: grep for the existing rule/section/script and reference it; never keep a near-copy that will drift.
-- **Twins move together:** a `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pass, its commit message carrying the adopter-facing change; a customization only this repo wants logs to `drift.md`. Unsure → ask.
+- **Twins move together:** a `.claude/**` change any adopter could use lands in its `templates/project/**` twin in the same pass, its commit message carrying the adopter-facing change; a customization only this repo wants stays local. Unsure → ask.
 - Right-size and finish: simplest thing that works, no speculative abstractions, no stubs or deferred TODOs.
 
 ### Engine code (Go / TS / JS / Python)
@@ -86,7 +86,7 @@ pfm opencode build . && pfm opencode doctor .
 - **Never commit broken code** — tests pass before the commit.
 - **Code flights build inside the fence** — a git worktree under `.worktrees/{flight}/`, every build/test through `dev.sh iso` (the `infra/` container: fresh machine, own HOME, worktree mounted; design: `docs/dev/isolated-dev-foundation.md`). The live checkout, the host's `~/.local/bin`, and the real `$HOME` are never dev targets. Markdown-only flights (templates/docs/prompts) land on `develop` directly. A fenced flight closes in order: each executor's own `/code-review low` pass, findings inside its files fixed → the landing's checks → authorized Git writer commits to `develop` → the host mirror build (`make host-install` from `pfm/` + `pfm install --yes`). The flights commands (`/flights:spec`, `/flights:orchestrate-nested`, `/flights:orchestrate-live`, `/flights:orchestrate-cross-harness`, `/flights:audit`) run here with this cast — `dev` builds, `qa` tests, `gitter` commits; a task touching `.claude/**`, any `CLAUDE.md`, or `templates/**` routes to `/pcm`.
 - **Guarded files:** a PreToolUse hook gates `.claude/**` and every `CLAUDE.md` behind `/pcm` plus a session that has read `.claude/commands/quality/prompt.md`; the deny message carries the unlock steps. Never route around it by disabling the hook.
-- **Milestone = compact point:** at every milestone, checkpoint the plan to a `tmp/` file, then give yourself a compact before the next phase (a held turn arms an idle-fired self-inject instead).
+- **Milestone = compact point:** at every milestone, checkpoint the plan to a file, then give yourself a compact before the next phase (a held turn arms an idle-fired self-inject instead).
 - **AskUserQuestion is the user's whole screen** — context travels inside the question text; each round simpler and more concrete, never a rephrase.
 - When in doubt, do the right thing — correct over convenient, even at re-architecting cost.
 

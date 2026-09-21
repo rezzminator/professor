@@ -94,13 +94,13 @@ For things that must happen every time (formatting, validation, secret-scanning)
 
 ---
 
-## Logging — `drift.md` only
+## Logging
 
-Release notes are never written during development. A framework change (one any Professor adopter could use) lands with its `templates/**` twin in the same pass and is described in its commit message — `/pfm:release` reviewers derive the changelog and every adopter instruction from `develop`'s diff and commits. A **customization only this repo wants** (a rule about publishing the blueprint, a roster fact, a gate that only makes sense upstream) is recorded as the final step of the work in `.professor/drift.md`, which also holds the install history. **Unsure which? Ask the user — never guess.**
+Release notes are never written during development. A framework change (one any Professor adopter could use) lands with its `templates/**` twin in the same pass and is described in its commit message — `/pfm:release` reviewers derive the changelog and every adopter instruction from `develop`'s diff and commits. A **customization only this repo wants** (a rule about publishing the blueprint, a roster fact, a gate that only makes sense upstream) lands without a twin; its commit message is its record. **Unsure which? Ask the user — never guess.**
 
 **Standalone-skill special case:** a change to a `sources.json` skill bumps the skill's `version:` frontmatter — release step 7b ships the substance to the skill's own public repo; the Professor changelog carries only the version pointer + re-pull note.
 
-**Retro inbox — `.professor/retro.md`:** the main-loop steering-conscience ledger (sessions append per its header) — an inbox `/pcm` consumes, never a change log. The `retro` dispatch sweeps entries lacking `Resolved:`, folds each `Amend:` into the named file through the normal change flow (or rules it `judgment` — no text fix), stamps `Resolved: {date} — {where}` under the entry in place, and logs a local-only fold to `drift.md` as usual.
+**Retro inbox — `.professor/retro.md`:** the main-loop steering-conscience ledger (sessions append per its header) — an inbox `/pcm` consumes, never a change log. The `retro` dispatch sweeps entries lacking `Resolved:`, folds each `Amend:` into the named file through the normal change flow (or rules it `judgment` — no text fix), and stamps `Resolved: {date} — {where}` under the entry in place.
 
 ---
 
@@ -167,9 +167,7 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 
 ### Step 6 — Report
 
-Report, in order: "Infrastructure updated, N files changed" — the changes (what and why) — consistency verified (stale references none/N-fixed; agent definitions consistent; Codex mirror `check` clean) — "Logged to: drift.md — {one-line entry}" or "release-bound: {commit-message line}" — whether the upstream twin under `templates/**` changed too, or why it must not — trees touched beyond this repo (`$HOME/.claude/`, `$HOME/.codex/`) with their uncommitted state, or "none" — manual verification needed (list, or "none").
-
-Record the `drift.md` line (§ Logging) before reporting a local-only change.
+Report, in order: "Infrastructure updated, N files changed" — the changes (what and why) — consistency verified (stale references none/N-fixed; agent definitions consistent; Codex mirror `check` clean) — "local-only" or "release-bound: {commit-message line}" — whether the upstream twin under `templates/**` changed too, or why it must not — trees touched beyond this repo (`$HOME/.claude/`, `$HOME/.codex/`) with their uncommitted state, or "none" — manual verification needed (list, or "none").
 
 ---
 

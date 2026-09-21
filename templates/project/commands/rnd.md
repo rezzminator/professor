@@ -46,7 +46,7 @@ Read `<call>/WINNER.md` and the latest run's `REPORT.md` residuals (R-items); th
 
 Performed on disk, never asserted:
 
-- Deliverables present: `BRIEF.md`, `STATE.md` (gates frozen before the first ledger timestamp), `REPORT.md`, `PROPOSED_DIFF.md` or an explicit no-diff section, `results/ledger.jsonl`, `judge_receipts.jsonl`, `stats.json`, `report.md`, `test_*.py` for harness code with a logged run (`tmp/<run>.log`, rc captured — the run is re-executed here).
+- Deliverables present: `BRIEF.md`, `STATE.md` (gates frozen before the first ledger timestamp), `REPORT.md`, `PROPOSED_DIFF.md` or an explicit no-diff section, `results/ledger.jsonl`, `judge_receipts.jsonl`, `stats.json`, `report.md`, `test_*.py` for harness code with a logged run (`/tmp/<run>.log`, rc captured — the run is re-executed here).
 - Instrument before science: recompute one gate row from the ledger; confirm every judge call carried the whole transcript and the Reader ran before the Adjudicator (receipts); confirm no denominator was thinned; confirm every arm's calls are receipted and within budget.
 - Verdict rule: PROVEN only when every frozen gate passes; otherwise Best Effort. Residuals by signature (input id, exact fault, rate) as R-items.
 - Report to the user in plain words: what the call does, what was measured, one line per gate with the number and the bar, cost, residuals, what needs the user's ruling. Every label (G1, t4, R2) is defined where it appears.

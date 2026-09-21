@@ -64,7 +64,7 @@ Files: project dirs, CLAUDE.md files, permanent docs, lock files
 - **Permanent docs:** `docs/commands/` exists with the reference dirs its commands name
 - **Stale names:** grep `CLAUDE.md`, agents, and commands for old/renamed project names or typos
 - **Manifests:** each roster project's manifest is present (`pfm/go.mod`) and its stack description in `CLAUDE.md` matches it
-- **Install state:** `.professor/{VERSION,manifest.json,drift.md}` exist and `VERSION` agrees with the root `VERSION` file
+- **Install state:** `.professor/{VERSION,manifest.json}` exist and `VERSION` agrees with the root `VERSION` file
 - **Codex mirror:** `pfm codex check .` exits 0 — report its output verbatim; a non-zero exit names each generated Codex artifact (AGENTS.md, `.codex/`, `$HOME/.codex/`) that is MISSING, STALE, ORPHANed, or CONFLICTing with an unmarked file
 
 ## `cross-refs` — The glue between domains

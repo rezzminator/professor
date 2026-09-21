@@ -63,7 +63,6 @@ Voice and delivery law live in Professor's harness prompts under `templates/harn
 - **AI-generated content is marked at the RENDERED SURFACE** — verify the component that displays it, never the data hop that carries the flag; a fetched-but-unrendered marker is unmarked AI prose in a {USER_NOUN}'s hands.
 - Never assert by only the existence or count of data, read it: ("{SUBJECT_NOUN} stated:" over a quote whose `speakerRole` says {USER_NOUN} puts the {USER_NOUN}'s words in the {SUBJECT_NOUN}'s mouth, in the {RECORD_NOUN}). The type system cannot see it: the field is present, typed, and simply never read.
 - Validate at the entry of data, never `as`-cast it — jsonb columns, LLM output, external payloads are parsed/validated (Zod, pydantic) where they enter; an `as` cast blinds `tsc` to the exact nullability mismatch that crashes at the first real row.
-- Generated artifacts → `ROOT/tmp/`
 
 <!-- KEEP the next rule only if the roster has a project with its own SQL/migrations directory; drop it for a roster with no database. -->
 

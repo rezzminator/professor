@@ -90,7 +90,7 @@ For things that must happen every time (formatting, validation, secret-scanning)
 - Commands: `.claude/commands/*.md`; skills: `.claude/skills/*/SKILL.md`
 - Scripts: `.claude/scripts/*.{sh,mjs}`; settings: `.claude/settings.json`
 - Codex mirror: `.codex/` + `AGENTS.md` files + `$HOME/.codex/` — generated from the local Claude sources by `pfm codex build`; `pfm codex check` gates drift. The `codex-sync.sh` hooks run both after a Claude-source edit. Hand-written keepers: `.codex/config.toml` (except its generated `mcp_servers` fence, compiled from `.mcp.json`), `.codex/rules`
-- Ledgers: `.professor/drift.md` (keep-local customization notes + update history), `.professor/retro.md` (steering inbox)
+- Ledger: `.professor/retro.md` (steering inbox)
 
 ---
 
@@ -99,7 +99,7 @@ For things that must happen every time (formatting, validation, secret-scanning)
 Classify FIRST — before any edit. The classification decides the source of truth. **Unsure? Ask the user — never guess.**
 
 - **Framework change** (an improvement any Professor adopter could use) → edit the canonical blueprint template at `{BLUEPRINT_CLONE_PATH}` under that repo's own law and gates; its commit message names the adopter-facing change — the blueprint's release reviewers write the notes from the diff. Never put project-specific behavior into the blueprint.
-- **Project customization** → edit this project's local file directly. That local file is the source of truth; it is not regenerated from the template. Add a `.professor/drift.md` line (`- {Tier/scope} — {what changed}`) only when a human-readable keep-local note is useful, never as merge machinery.
+- **Project customization** → edit this project's local file directly. That local file is the source of truth; it is not regenerated from the template.
 - **Engine mirror** → never edit the generated output by hand. Change its local Claude source, then run `pfm codex build` and `pfm codex check` (or the owning compiler for another engine).
 - **Upstream project-template delta** → `/pfm` § Adopter update flow: `pfm update check` prints per file the exact `git diff` to read; hand-apply the parts that belong locally through this command's change flow, then `pfm update pin <local>` (accept), `pfm update ignore <template>` (never adopt), or `pfm update drop <local>` (forget). No baseline yet (the install predates `pfm init`): `pfm update adopt [--at <ref>]` once.
 
@@ -173,7 +173,7 @@ Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independ
 
 ### Step 6 — Report
 
-Report, in order: "Infrastructure updated, N files changed" — the changes (what and why) — consistency verified (stale references none/N-fixed; pipeline flow valid; agent definitions consistent) — for a framework change, "Blueprint changed: {commit-message line}"; for a project customization, "Local source changed directly" plus the `drift.md` line when one was written — repos touched beyond this one ({BLUEPRINT_CLONE_PATH}, $HOME) with their uncommitted state, or "none" — manual verification needed (list, or "none").
+Report, in order: "Infrastructure updated, N files changed" — the changes (what and why) — consistency verified (stale references none/N-fixed; pipeline flow valid; agent definitions consistent) — for a framework change, "Blueprint changed: {commit-message line}"; for a project customization, "Local source changed directly" — repos touched beyond this one ({BLUEPRINT_CLONE_PATH}, $HOME) with their uncommitted state, or "none" — manual verification needed (list, or "none").
 
 ---
 

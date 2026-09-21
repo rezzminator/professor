@@ -325,7 +325,7 @@ Claude takes your answers and:
 8b. **(If Codex opted in)** Creates `.codex/` as a pointer layer over `.claude/` — never a restatement of it. Writes `config.toml` (sandbox reach + the `{CODEX_MODEL}`/`{CODEX_REASONING_EFFORT}` pins) and `rules/repo-law.rules` (the execpolicy door lock for non-gitter roles). Runs `pfm codex build` to compile every root and per-project Claude source into the Codex mirrors, then `pfm codex check` to verify them. Registry changes require a new or reloaded Codex session. If Codex was NOT opted in, this step is skipped entirely.
 
 9. **Updates `.gitignore`** — adds `.worktrees/`, `tmp/`.
-10. **Maintains `.professor/` state** — `manifest.json` holds the user-owned interview answers, while `baseline.json` holds pfm-owned per-file template pins. `drift.md` remains the local customization ledger.
+10. **Maintains `.professor/` state** — `manifest.json` holds the user-owned interview answers, while `baseline.json` holds pfm-owned per-file template pins.
 11. **Writes `.professor/manifest.json`** — created here (`pfm init` leaves only `baseline.json`); on a re-run replace its `interview` object with the confirmed answers while preserving every non-interview field. Format:
 
 **Build roster validation:** no installed file is allowed to carry blueprint example projects that the target repo does not have. The installer must generate developer/QA (and any specialist) blocks only for roster entries, fail if any `{project}` pattern token remains unexpanded, and then verify every referenced `*/.claude/agents/*.md` path exists. A roster of `a` and `b` leaves no block for a `c` the repo does not have.

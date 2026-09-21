@@ -285,7 +285,7 @@ Every dispatch carries all five briefing fields (root `CLAUDE.md` § Subagent di
 
 > Re-derive ONE blueprint template from its live source. Read at most these 2 files: the template `templates/{key}` and the live source `{live-root}/{source}`. Read nothing else.
 >
-> 1. Stage and run the deterministic pass first: copy the LIVE source to a `tmp/` scratch path, `bash scripts/genericize.sh -i {scratch}`. It applies `scripts/placeholder-map.tsv` longest-search-first. Never hand-substitute a value that map already covers.
+> 1. Stage and run the deterministic pass first: copy the LIVE source to a scratch path, `bash scripts/genericize.sh -i {scratch}`. It applies `scripts/placeholder-map.tsv` longest-search-first. Never hand-substitute a value that map already covers.
 > 2. `diff -u templates/{key} {scratch}` — the hunks are the whole job.
 > 3. Classify EVERY hunk as exactly one of:
 >    - **SYNC** — a framework change: a mechanism, rule, gate, threshold, structure, or correction any adopter of this blueprint would want. Apply it to the template.
@@ -314,7 +314,7 @@ Reconcile telemetry per batch: workers dispatched vs reports received, and the c
 ### Step 5 — Close
 
 1. `bash scripts/refresh-scope.sh regen {live-project-root}` — fresh hashes are the next release's baseline. Only after every ruling from Step 2 has landed; regen over an unruled MISSING-SOURCE re-baselines a zombie.
-2. A change this repo alone wants logs to `drift.md` (§ Logging in `/pfm`); a SYNC set needs no ledger — the release reviewers write its note from the diff.
+2. A SYNC set needs no ledger — the release reviewers write its note from the diff.
 3. Report: templates re-derived / skipped-unchanged / ruled, the per-verdict hunk totals, every UNRULED hunk and how it was ruled, workers dispatched vs reports received, leak-check status, and what a reader must verify by hand.
 
 ### Rules

@@ -61,7 +61,7 @@ The brief carries, and nothing more:
 - the cap: "about {n} tool calls or {m} minutes; past either, stop and return `FAILED {id}: cap` with what landed";
 - the tests: "write the covering tests yourself, one per `Done when` row, whatever your agent card says about who writes tests; this brief is the ask";
 - the review: "your last step before the return is `/code-review low` over your own change; fix every finding inside your task's files, and report a finding outside them untouched";
-- the cadence: "Report once, when done: first line `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOCKED {id}: {question}`; then the files changed, the test that covers each `Done when` row and the proof they ran, the review's findings and what you fixed, what you adapted, defects found, what you could not reach. The only other message is a real question or a blocker. Never routine progress, never a diff, a log or a file's contents in a message.";
+- the cadence: "Report once, when done: first line `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOCKED {id}: {question}`; then the files changed, the test that covers each `Done when` row and the proof they ran, the review's findings and what you fixed, what you adapted, defects found, what you could not reach. A `FAILED` or `SPEC-DRIFT` names its cause — the line, the value and the code path that produced the red — or names what you read and says the cause is unknown; reading is never forbidden, a rerun and a fix outside the spec are. The only other message is a real question or a blocker. Never routine progress, never a diff, a log or a file's contents in a message.";
 - "Where the spec and the code disagree on a detail, reach the Goal and say what you changed; where you cannot proceed without a decision, ask for it instead of guessing.";
 - "Git is read-only for you."
 
@@ -72,8 +72,9 @@ Nothing else: the task file is the spec, and the brief never restates it. The ex
 An executor's return is a claim. The orchestrator matches the first line's token and then verifies:
 
 - `DONE`: the return names what changed, a covering test per `Done when` row and the proof they ran, the review's findings and what was fixed, and `git diff {baseline} --stat -- {the index's files}` shows a change: the files come from the index row, never from the return, so the judge is never the judged. A return that claims done with no proof, or with nothing changed, gets one question back to the same executor; a second such return is recorded `FAILED`.
-- `FAILED`, `SPEC-DRIFT`, `BLOCKED`: recorded as returned; the reaction is in [Situations](#situations).
-- No token on the first line: one question back asking for the return in shape; a second shapeless return is `FAILED`.
+- `FAILED`, `SPEC-DRIFT`: the return names a cause, or names what was read and says the cause is unknown; a red with neither is shapeless. Recorded as returned with the executor's transcript named on the line; the reaction is in [Situations](#situations).
+- `BLOCKED`: recorded as returned; the reaction is in [Situations](#situations).
+- No token on the first line, or a red with no cause and no reading named: one question back asking for the return in shape; a second shapeless return is `FAILED`.
 
 The baseline is the commit recorded in the `run.md` header, so a resumed flight judges against the same tree the flight started from.
 
@@ -85,8 +86,10 @@ Every situation the manual answers, with who acts. The orchestrator fixes nothin
 | --- | --- |
 | `DONE`, verified | `run.md` line names what was adapted or `as specified`; dispatch what it unblocked |
 | `DONE` without proof or without a change in git | one question back to the same executor; a second such return → `FAILED` |
-| `FAILED` (including a cap) | start nothing that needs it; send `flights-speccer` the report, what already landed and the completed ids; its rewritten index cuts the task smaller or re-approaches it; dispatch from the new index. The same task file is never re-run unchanged |
+| `FAILED` (including a cap) | start nothing that needs it; send `flights-speccer` the report, what already landed, the completed ids and the executor's transcript — nested and live: the sub-agent transcript path (`$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl`, the id from the spawn's task id); cross-harness: the seat's name and its transcript id; its rewritten index cuts the task smaller or re-approaches it; dispatch from the new index. The same task file is never re-run unchanged |
 | `SPEC-DRIFT` | the same road as `FAILED`, with the drift report as the reason |
+| A second `FAILED` or `SPEC-DRIFT` of the same id | the revising call is marked diagnose-first and carries every transcript of that id; `flights-speccer` names the cause in the task file before rewriting (its § Drift). The `run.md` line carries the round: `{id} SPEC-DRIFT · round 2 · …` |
+| A third red of the same id | `{id} BLOCKED · {the executor's cause line}`; no third revising call. The question travels in the return like any `BLOCKED`; the flight lands without the task |
 | `BLOCKED` with a question only the user can answer | record `BLOCKED`; every other task continues; the question travels in the return. The ruling comes back as a revising `flights-speccer` call: the live container makes it on the answer; the nested container's caller makes it after the return, then resumes the run naming the revised ids |
 | A question from an executor the index or the brief can answer | answer it by message to the same executor |
 | A question from an executor nobody but the user can answer | `BLOCKED` for that task, as above |
@@ -109,7 +112,7 @@ The review is each executor's last step, not the orchestrator's. The brief order
 
 ## `run.md`
 
-One file, `{flight directory}/run.md`. A header line on creation — `flight {directory} · baseline {sha} · {date}` — then one line per event: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED} · {one line}`; the cross-harness container adds `STALE` as a substitution, and the manual never names it. A `CLAIMED` line names the executor and the time; a `DONE` line names what the executor adapted, or `as specified`, and is what downstream briefs carry; a `FAILED` or `SPEC-DRIFT` line names the reason and the revising round it triggered. The file is the resume point and the ledger an audit reads. Nothing else is written by the orchestrator: no reports, no per-step lines, no rulings.
+One file, `{flight directory}/run.md`. A header line on creation — `flight {directory} · baseline {sha} · {date}` — then one line per event: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED} · {one line}`; the cross-harness container adds `STALE` as a substitution, and the manual never names it. A `CLAIMED` line names the executor and the time; a `DONE` line names what the executor adapted, or `as specified`, and is what downstream briefs carry; a `FAILED` or `SPEC-DRIFT` line names the round for that id, the cause the executor gave and the executor's transcript, so the revising call and the audit can read how it got where it got. The file is the resume point and the ledger an audit reads. Nothing else is written by the orchestrator: no reports, no per-step lines, no rulings.
 
 ## Landing
 

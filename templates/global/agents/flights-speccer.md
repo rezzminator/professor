@@ -87,7 +87,7 @@ files: [src/accounts/repository.ts, src/accounts/repository.test.ts, src/api/rou
 
 - Goal: the deliverable and why it exists, two sentences at most; then `Never:` what is out of scope and which approaches are forbidden.
 - Done when: a matrix `scenario · input or state · expected behaviour · error handling`, one row per case including the failures, then `Given … when … then …` lines for what the matrix cannot hold; behaviour only, never a command. It closes with this line in every task file — "Each row and line is covered by a test that ran and passed; a test that exists but did not run counts as missing; a test that disagrees with a row means the code is wrong, never the row; a row you can read two ways returns `SPEC-DRIFT {id}`."
-- Progress dependency: opens with this line in every task file — "Check these before step 1. If one does not hold, change nothing and return `SPEC-DRIFT {id}: {what you found}`. Anything else that differs from this spec: reach the Goal your own way and say what you changed in your return. If the Goal itself cannot be reached, stop and return `SPEC-DRIFT {id}` with what you found and what already landed." Below it, what the needed tasks must have landed for this task to make sense: only facts whose absence breaks the rest of the directory. A detail the executor can adapt to stays out.
+- Progress dependency: opens with this line in every task file — "Check these before step 1. If one does not hold, change nothing and return `SPEC-DRIFT {id}: {what you found}`. Anything else that differs from this spec: reach the Goal your own way and say what you changed in your return. If the Goal itself cannot be reached, stop and return `SPEC-DRIFT {id}` with what you found and what already landed. A `SPEC-DRIFT` or `FAILED` return names its cause — the line, the value and the code path that produced the red — or names what you read and says the cause is unknown; reading is never forbidden, a rerun and a fix outside this spec are." Below it, what the needed tasks must have landed for this task to make sense: only facts whose absence breaks the rest of the directory. A detail the executor can adapt to stays out.
 - Files: every file the task creates, edits or deletes, each with its action; the same paths, actions stripped, are the frontmatter's `files`. A rename or a deletion lists every reference, docs and tests included.
 - Decisions: every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text.
 - Shapes: `EXISTING` is what the executor types against (table columns, types, signatures of helpers to reuse, API fields, the target directory's conventions), quoted with its file path. `NEW` is what the task creates, by name, inputs, outputs and behaviour.
@@ -101,6 +101,7 @@ Pin what crosses a boundary; describe what stays inside one.
 - Pinned exactly: existing shapes; what another task consumes (name, inputs, outputs); what crosses a layer or a project; what the user sees; where things live.
 - Described as behaviour: function bodies, queries, control flow, local names, how the outcome is proven. The executor writes them.
 - A place is a file path plus a quoted line of code; the path is the executor's fallback when the quote has moved.
+- A value a run printed about its data — a count, a selection size, an id — is evidence for the return, never a Done when row: the state a run sees is dynamic, and a row written from one run is a coincidence written as a contract.
 
 ## Examples
 
@@ -128,6 +129,11 @@ A task you cannot specify (the input contradicts itself, or a fact lives in neit
 
 Given an existing spec directory and a reason (a `SPEC-DRIFT` report, a `FAILED` report, a failing check's output, a ruling on a `BLOCKED` question, a refinement ask), the caller names the completed tasks and what already landed. Their task files stay as they are. Rewrite, add or remove the remaining ones so the fix lives in the task files themselves: a `FAILED` task is cut smaller or re-approached and never goes out again unchanged. Rebuild the index and return as usual with the changed ids in NOTES. When the directory is not your own work, it is still your map: read the index and the task files the reason names, and probe only for what the reason requires; the shapes already quoted were collected once.
 
+- The caller names the executor's transcript with every `FAILED` or `SPEC-DRIFT` report. The report is the executor's conclusion; the transcript is how it got there — what it read, what it ran, what each run printed. Read it before rewriting a line.
+- The second red of one id means the cause is unknown, whatever the reports say. Before any rewrite: read the whole unit the task changes — the entire test, beat or module, never the window around the failing line — and the runtime path it exercises (one `tracer` probe when the path leaves the unit), with every transcript of that id; write the cause as a `Decisions` line in the task file. A rewrite without a named cause is the previous round again with new words. The caller returns a third red as `BLOCKED`; you never see one.
+- A red in production code the flight forbids fixing (a report-only flight, a fenced module) is not a spec fault and does not cycle: record it where the project keeps known defects (a registry row, an owed line), narrow the task's Done when to what the executor may prove, and name the defect in NOTES.
+- Leave the task files of `CLAIMED` tasks untouched: their executors have read them, and a file rewritten under a live executor is two specs for one task.
+
 ## Return
 
 Exactly this shape, nothing around it:
@@ -135,7 +141,7 @@ Exactly this shape, nothing around it:
 ```
 SPEC {spec directory}
 {the index table, verbatim}
-DISPATCH A task starts the moment every id in its needs is done, as many at once as its shares admit; holding a ready task for a sibling is a violation. One fresh executor per task file, briefed with that file and its reads files to open together in its first message. The executor's agent-type model pin wins; with none, mechanical runs at spec-execution (sonnet) and hard at frontier-judgment (opus). A DONE is verified against the index row's files, never against the return's own list. On SPEC-DRIFT or FAILED: start nothing that needs that task, send the report, what already landed and the completed ids back to this flights-speccer, then dispatch from the rewritten index. Only this flights-speccer changes a task file.
+DISPATCH A task starts the moment every id in its needs is done, as many at once as its shares admit; holding a ready task for a sibling is a violation. One fresh executor per task file, briefed with that file and its reads files to open together in its first message. The executor's agent-type model pin wins; with none, mechanical runs at spec-execution (sonnet) and hard at frontier-judgment (opus). A DONE is verified against the index row's files, never against the return's own list. On SPEC-DRIFT or FAILED: start nothing that needs that task, send the report, the executor's transcript, what already landed and the completed ids back to this flights-speccer, then dispatch from the rewritten index; the second red of one id is diagnose-first, the third is BLOCKED. Only this flights-speccer changes a task file.
 RECONCILED {n} changes in {m} tasks, {k} blocked, {c} file collisions, largest read {x} chars
 BLOCKED {id or item}: {what is missing} · {the one question} | none
 NOTES {up to five lines} | none

@@ -36,19 +36,21 @@ Spawn `Agent(subagent_type: {executor type}, model: {its pin; with none, mechani
 - "Cap: about {n} tool calls or {m} minutes; past either, stop and return `FAILED {id}: cap` with what landed.";
 - "Write the covering tests yourself, one per Done when row, whatever your agent card says about who writes tests; this brief is the ask.";
 - "Your last step before the return: `/code-review low` over your own change. Fix every finding inside your task's files; report a finding outside them untouched.";
-- "Report once, when done. First line: `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOCKED {id}: {question}`. Then: files changed; the test that covers each Done when row and the proof they ran; the review's findings and what you fixed; what you adapted; defects found; what you could not reach. The only other message is a real question or a blocker. Never routine progress, never a diff, a log or a file's contents in a message.";
+- "Report once, when done. First line: `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOCKED {id}: {question}`. Then: files changed; the test that covers each Done when row and the proof they ran; the review's findings and what you fixed; what you adapted; defects found; what you could not reach. A `FAILED` or `SPEC-DRIFT` names its cause — the line, the value and the code path that produced the red — or names what you read and says the cause is unknown; reading is never forbidden, a rerun and a fix outside the spec are. The only other message is a real question or a blocker. Never routine progress, never a diff, a log or a file's contents in a message.";
 - "Where the spec and the code disagree on a detail, reach the Goal and say what you changed. Where you cannot proceed without a decision, ask for it instead of guessing.";
 - "Git is read-only for you."
 
-Verify before recording. Match the first line's token, never the prose. `DONE`: the return names what changed, a covering test per `Done when` row and the proof they ran, the review's findings and what was fixed, and `git diff {baseline} --stat -- {the index row's files}` shows a change — the files come from the index, never from the return you are judging. Missing any of these, or a first line without a token: one question back by `SendMessage` to the same executor; a second such return is recorded `FAILED`.
+Verify before recording. Match the first line's token, never the prose. `DONE`: the return names what changed, a covering test per `Done when` row and the proof they ran, the review's findings and what was fixed, and `git diff {baseline} --stat -- {the index row's files}` shows a change — the files come from the index, never from the return you are judging. `FAILED` or `SPEC-DRIFT`: the return names a cause, or names what was read and says the cause is unknown. Missing any of these, a red with neither, or a first line without a token: one question back by `SendMessage` to the same executor; a second such return is recorded `FAILED`.
 
 ## Situations
 
 | Situation | Reaction |
 | --- | --- |
 | `DONE`, verified | `{id} DONE · {what it adapted, or as specified}`; dispatch what it unblocked |
-| `FAILED`, including a cap | `{id} FAILED · {why}`; start nothing that needs it; a revising call to `flights-speccer` (§ Revising); the same task file never goes out again unchanged |
-| `SPEC-DRIFT` | `{id} SPEC-DRIFT · {what}`; the same road as `FAILED` |
+| `FAILED`, including a cap | `{id} FAILED · round {n} · {the executor's cause} · transcript {path}`; start nothing that needs it; a revising call to `flights-speccer` (§ Revising); the same task file never goes out again unchanged |
+| `SPEC-DRIFT` | `{id} SPEC-DRIFT · round {n} · {the executor's cause} · transcript {path}`; the same road as `FAILED` |
+| A second `FAILED` or `SPEC-DRIFT` of the same id | the revising call is marked diagnose-first and carries every transcript of that id; `flights-speccer` names the cause in the task file before it rewrites |
+| A third red of the same id | `{id} BLOCKED · {the executor's cause line}`; no third revising call; the question travels in your return and the flight lands without the task |
 | `BLOCKED`, a question only the user can answer | `{id} BLOCKED · {question}`; every other task continues; the question travels in your return. The ruling comes back to `flights-speccer` as a revising call made by your caller, who re-runs you naming the revised ids |
 | A question the index or the brief answers | answer it by `SendMessage` to the same executor |
 | The cap on executors in flight is reached | hold that task; it goes out as the next return lands. The harness never reports its own cap: your count is the only guard |
@@ -57,7 +59,7 @@ Verify before recording. Match the first line's token, never the prose. `DONE`: 
 | A review finding in a return outside the task's files | `NOTES`; never a fix by you |
 | A spec fault you can see (two decisions contradict, an index row without a file) | a revising call; never a patch, never a ruling written beside the directory |
 
-Revising: send the report, what already landed and the completed ids to `flights-speccer` — the one you spawned, by `SendMessage`; otherwise a fresh `Agent(subagent_type: "flights-speccer", model: "opus")` handed the directory and the reason. Its return is the new index; continue from it and count the round.
+Revising: send the report, what already landed, the completed ids and the executor's transcript to `flights-speccer` — the one you spawned, by `SendMessage`; otherwise a fresh `Agent(subagent_type: "flights-speccer", model: "opus")` handed the directory and the reason. The transcript is `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl` (default `~/.claude`), the id being the task id the spawn returned; the report is the executor's conclusion, the transcript is how it got there, and the speccer reads it before rewriting. Its return is the new index; continue from it and count the round per id.
 
 ## Review
 
@@ -65,7 +67,7 @@ The review is the executor's last step, ordered by its brief: `/code-review low`
 
 ## run.md
 
-`{flight directory}/run.md`: the header on creation, then one line per event, appended as it happens: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED} · {one line}`. Nothing else is written.
+`{flight directory}/run.md`: the header on creation, then one line per event, appended as it happens: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED} · {one line}`. A `FAILED` or `SPEC-DRIFT` line carries the round for that id, the cause the executor gave, and its transcript path — the audit and the next revising call read the ledger, not your memory. Nothing else is written.
 
 ## Landing
 

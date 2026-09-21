@@ -63,8 +63,8 @@ One vocabulary for the executor's return, the orchestrator's ledger and the audi
 | --- | --- | --- |
 | `CLAIMED` | orchestrator, at dispatch | An executor holds this task; a resume treats it as in flight until a verdict lands |
 | `DONE` | executor → orchestrator, after verification | The Goal is reached and proven; the line names what was adapted, or `as specified` |
-| `FAILED` | executor, or orchestrator after a second unproven return or a cap | The spec stands but the executor could not reach the Goal; goes to `flights-speccer` to be cut smaller or re-approached |
-| `SPEC-DRIFT` | executor | The world moved or the spec contradicts itself; the executor changed nothing (or says what already landed); goes to `flights-speccer` |
+| `FAILED` | executor, or orchestrator after a second unproven return or a cap | The spec stands but the executor could not reach the Goal; the return names the cause or what was read; goes to `flights-speccer` with the executor's transcript, to be cut smaller or re-approached |
+| `SPEC-DRIFT` | executor | The world moved or the spec contradicts itself; the executor changed nothing (or says what already landed) and names the cause or what it read; goes to `flights-speccer` with the executor's transcript |
 | `BLOCKED` | executor or `flights-speccer` | A question only the user can answer; carried in the return, the other tasks continue |
 | `STALE` | orchestrator, cross-harness only | A claimed seat silent past the bound; named, never auto-failed, never re-dispatched blind |
 
@@ -87,6 +87,7 @@ The manual is the `flights-orchestrator` agent body. It is written for the neste
 | The review | `/code-review low` is the executor's last step, ordered by the brief | the same | the engine's own review command, ordered by the brief: `/code-review low` on Claude, `/review` on Codex; a seat without one says so in its return |
 | Liveness | the harness reports a stopped agent; a lost one is seen only when something else wakes the loop | the same; the user is the wake-up | `chat_status` once past the stale bound, on any wake-up; a full-screen pane capture judges from process evidence, never from rendered text |
 | A spawn that does not happen | the harness reports nothing at its concurrency cap: the loop counts its in-flight executors and never exceeds the cap | the same | `chat_new` returns an error: no seat, no `CLAIMED` line; one retry, then the task holds and the return names it |
+| The executor's transcript, sent with every `FAILED` and `SPEC-DRIFT` | `$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl` — the id is the spawn's task id, the file is flat whatever the depth | the same | the seat's name and its transcript id (`chat_find` by name; `pfm chat save` when the reader needs a file) |
 | Question only the user can answer | `BLOCKED` in the return; the caller asks, sends the ruling to `flights-speccer` as a revising call, and re-runs the container naming the revised ids | `AskUserQuestion` now; the run continues on the answer | `AskUserQuestion` now |
 | Stop an executor | not possible from inside; named in `DISPATCHED` | the same | `chat_kill` after the verdict is recorded |
 | Cost profile | the loop stays out of the main chat | the main chat's context carries the loop; paid for the user's steering | seat cold starts on three engines; paid for engine choice |
@@ -102,7 +103,7 @@ A rule lives at the highest layer every reader who needs it reads, and nowhere e
 | `templates/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | The universal laws: cost = calls × context; a batch goes to `flights-orchestrator`, unspecified work to `flights-speccer`; report once, plus a real question or blocker, never a diff or a log in a message; waiting is one call or none; only `flights-speccer` changes a task file; the hand's own laws, `/code-review low` as its last step among them |
 | `CLAUDE.md` / `AGENTS.md` | every sub-agent and seat | The executor's first move on a brief naming a task file: open it with the shared files named beside it, in the first message, and execute it |
 | The agent file | the agent | The protocol of one role |
-| The brief | one executor | The task file path, its `reads`, the `run.md` lines of its `needs`, the standing rules, the worktree, the cap, the tests it writes, the review order, the open hand and `SPEC-DRIFT`, the cadence and return shape, git read-only |
+| The brief | one executor | The task file path, its `reads`, the `run.md` lines of its `needs`, the standing rules, the worktree, the cap, the tests it writes, the review order, the open hand and `SPEC-DRIFT` with its cause line, the cadence and return shape, git read-only |
 
 Standing rules are what the project contract does not carry: the worktree, the fenced build command, the checks by command, the cap, and anything the caller adds for this flight. The `CLAUDE.md` / `AGENTS.md` contract reaches every sub-agent and seat from the harness and is never pasted or named in a brief: pasted, it bills every executor twice for the same text.
 

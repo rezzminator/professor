@@ -92,13 +92,26 @@ func Find(table gather.ProcFS, binary string, signal Signaler) (Scan, error) {
 				scan.Stale,
 				Process{
 					PID: pid, Command: clipCommand(command), MCP: slices.Contains(argv, "mcp"),
-					compatibleProxyCandidate: len(argv) >= 4 &&
-						slices.Equal(argv[len(argv)-3:], []string{"mcp", "chat", "serve"}),
+					compatibleProxyCandidate: compatibleProxyCommand(argv),
 				},
 			)
 		}
 	}
 	return scan, nil
+}
+
+func compatibleProxyCommand(argv []string) bool {
+	if len(argv) == 0 || filepath.Base(argv[0]) != "pfm" {
+		return false
+	}
+	args := argv[1:]
+	if len(args) >= 2 && args[0] == "--config" && strings.TrimSpace(args[1]) != "" {
+		args = args[2:]
+	} else if len(args) >= 1 && strings.HasPrefix(args[0], "--config=") &&
+		strings.TrimSpace(strings.TrimPrefix(args[0], "--config=")) != "" {
+		args = args[1:]
+	}
+	return slices.Equal(args, []string{"mcp"}) || slices.Equal(args, []string{"mcp", "chat", "serve"})
 }
 
 func compatibleProxyMarker(home string) string {

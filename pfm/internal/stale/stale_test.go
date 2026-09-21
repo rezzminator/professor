@@ -269,6 +269,37 @@ func TestSweepKeepsMarkedProxyAndTermsUnmarkedServer(t *testing.T) {
 	}
 }
 
+func TestSweepKeepsMarkedBareLegacyProxy(t *testing.T) {
+	t.Parallel()
+	fixture := newFixture(t)
+	fixture.process(313, fixture.old, fixture.binary, "mcp")
+	fixture.markProxy(313, 9)
+	var sent []string
+	var stdout bytes.Buffer
+	err := SweepStaleProcesses(
+		gather.NewProcFS(fixture.root),
+		fixture.binary,
+		fixture.root,
+		fixture.home,
+		fixture.signaler(nil, nil, &sent),
+		&stdout,
+		10*time.Millisecond,
+		clock.Real,
+	)
+	if err != nil {
+		t.Fatalf("sweep: %v\n%s", err, stdout.String())
+	}
+	if len(sent) != 0 {
+		t.Fatalf("signals = %v, want marked bare legacy proxy preserved", sent)
+	}
+	if _, err := os.Stat(filepath.Join(fixture.root, "313")); err != nil {
+		t.Fatalf("marked bare legacy proxy was swept: %v", err)
+	}
+	if output := stdout.String(); !strings.Contains(output, "sweep: KEEP pid=313 compatible stdio proxy") {
+		t.Fatalf("output = %q, want KEEP notice", output)
+	}
+}
+
 func TestClassifyCompatibleProxies(t *testing.T) {
 	t.Parallel()
 	fixture := newFixture(t)
@@ -289,6 +320,85 @@ func TestClassifyCompatibleProxies(t *testing.T) {
 	}
 	if len(obsolete) != 1 || obsolete[0].PID != 314 || len(compatible) != 1 || compatible[0].PID != 313 {
 		t.Fatalf("obsolete=%+v compatible=%+v, want 314 obsolete and 313 compatible", obsolete, compatible)
+	}
+}
+
+func TestClassifyCompatibleProxyCommandForms(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		argv       []string
+		compatible bool
+	}{
+		{name: "legacy", argv: []string{"pfm", "mcp"}, compatible: true},
+		{name: "legacy split config", argv: []string{"/opt/pfm", "--config", "/tmp/pfm.json", "mcp"}, compatible: true},
+		{name: "legacy joined config", argv: []string{"pfm", "--config=/tmp/pfm.json", "mcp"}, compatible: true},
+		{name: "named", argv: []string{"pfm", "mcp", "chat", "serve"}, compatible: true},
+		{
+			name:       "named split config",
+			argv:       []string{"pfm", "--config", "/tmp/pfm.json", "mcp", "chat", "serve"},
+			compatible: true,
+		},
+		{
+			name:       "named joined config",
+			argv:       []string{"pfm", "--config=/tmp/pfm.json", "mcp", "chat", "serve"},
+			compatible: true,
+		},
+		{name: "daemon", argv: []string{"pfm", "mcp", "serve"}},
+		{name: "daemon split config", argv: []string{"pfm", "--config", "/tmp/pfm.json", "mcp", "serve"}},
+		{name: "daemon joined config", argv: []string{"pfm", "--config=/tmp/pfm.json", "mcp", "serve"}},
+		{name: "list", argv: []string{"pfm", "mcp", "ls"}},
+		{name: "chat enable", argv: []string{"pfm", "mcp", "chat", "enable"}},
+		{name: "harvester", argv: []string{"pfm", "mcp", "harvester", "serve"}},
+		{name: "trailing argument", argv: []string{"pfm", "mcp", "chat", "serve", "extra"}},
+		{name: "config after mcp", argv: []string{"pfm", "mcp", "--config", "/tmp/pfm.json"}},
+		{
+			name: "repeated split config",
+			argv: []string{"pfm", "--config", "/tmp/one.json", "--config", "/tmp/two.json", "mcp"},
+		},
+		{
+			name: "repeated joined config",
+			argv: []string{"pfm", "--config=/tmp/one.json", "--config=/tmp/two.json", "mcp"},
+		},
+		{name: "empty split config", argv: []string{"pfm", "--config", "", "mcp"}},
+		{name: "whitespace split config", argv: []string{"pfm", "--config", "   ", "mcp"}},
+		{name: "missing split config", argv: []string{"pfm", "--config"}},
+		{name: "empty joined config", argv: []string{"pfm", "--config=", "mcp"}},
+		{name: "whitespace joined config", argv: []string{"pfm", "--config=   ", "mcp"}},
+		{name: "unrelated leading flag", argv: []string{"pfm", "--verbose", "mcp"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newFixture(t)
+			fixture.process(401, fixture.old, test.argv...)
+			fixture.markProxy(401, 9)
+			if test.compatible {
+				fixture.process(402, fixture.old, test.argv...)
+			}
+			var sent []string
+			table := gather.NewProcFS(fixture.root)
+			scan, err := Find(table, fixture.binary, fixture.signaler(nil, nil, &sent))
+			if err != nil {
+				t.Fatal(err)
+			}
+			obsolete, compatible, err := ClassifyCompatibleProxies(
+				table, fixture.root, fixture.home, fixture.signaler(nil, nil, &sent), scan.Stale,
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.compatible {
+				if len(compatible) != 1 || compatible[0].PID != 401 || len(obsolete) != 1 || obsolete[0].PID != 402 {
+					t.Fatalf(
+						"obsolete=%+v compatible=%+v, want unmarked 402 obsolete and marked 401 compatible",
+						obsolete,
+						compatible,
+					)
+				}
+			} else if len(compatible) != 0 || len(obsolete) != 1 || obsolete[0].PID != 401 {
+				t.Fatalf("obsolete=%+v compatible=%+v, want marked invalid command 401 obsolete", obsolete, compatible)
+			}
+		})
 	}
 }
 

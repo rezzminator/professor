@@ -135,9 +135,9 @@ func printCodexUsage(w io.Writer) {
 	fmt.Fprintln(w, "  --suffix-mode MODE [--suffix-prefix TEXT]")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "usage: pfm codex agents [--home PATH]")
-	fmt.Fprintln(w, "  compiles every {home}/.professor/templates/global/agents/*.md into the pfm-owned")
-	fmt.Fprintln(w, "  generated directory, then symlinks {home}/.claude/agents to the .md sources and")
-	fmt.Fprintln(w, "  {home}/.codex/agents to the generated .tomls — the global (host-level) agent registry.")
+	fmt.Fprintln(w, "  compiles every {home}/.professor/templates/global/agents/*.md, symlinks")
+	fmt.Fprintln(w, "  {home}/.claude/agents to the .md sources, and writes {home}/.codex/agents/*.toml as")
+	fmt.Fprintln(w, "  regular files — Codex refuses to load a role through a symlink.")
 }
 
 // runCodexAgents is the command adapter for the global (host-level) Codex
@@ -180,6 +180,9 @@ func runCodexAgents(args []string, stdout, stderr io.Writer, runtime commandRunt
 			installed.State,
 			codexgen.DescribeGlobalLinkState(installed.State, installed.Path, installed.Source, installed.Found),
 		)
+	}
+	for _, role := range result.Roles {
+		fmt.Fprintf(stdout, "%s %s\n", role.State, role.Describe())
 	}
 	for _, problem := range result.Problems {
 		fmt.Fprintf(stderr, "pfm codex agents: %s\n", problem)

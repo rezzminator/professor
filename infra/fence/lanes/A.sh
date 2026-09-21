@@ -243,10 +243,10 @@ expected=0
 for single in CLAUDE.md settings.json rumdl-policy.toml; do
   [ -f "$STORE_T/project/$single" ] && expected=$((expected + 1))
 done
-expected=$((expected + $(find "$STORE_T/project/commands" "$STORE_T/project/scripts" "$STORE_T/project/skills" \
+expected=$((expected + $(find "$STORE_T/project/agents" "$STORE_T/project/scripts" "$STORE_T/project/skills" \
   "$STORE_T/project/epics" "$STORE_T/project/codex" "$STORE_T/project/docs-commands" "$STORE_T/project/docs-agents" \
   -type f 2>/dev/null | wc -l | tr -d ' ')))
-expected=$((expected + $(find "$STORE_T/project/agents" -type f -not -path "$STORE_T/project/agents/per-project/*" 2>/dev/null | wc -l | tr -d ' ')))
+expected=$((expected + $(find "$STORE_T/project/commands" -type f -not -path "$STORE_T/project/commands/per-project/*" 2>/dev/null | wc -l | tr -d ' ')))
 out="$(cd "$INIT_DIR" && pfm init . 2>&1)"
 rc=$?
 [ "$rc" -eq 0 ] || bad="$bad pfm init exited $rc ($(one_line "$out"));"
@@ -264,7 +264,7 @@ done
 for dir in .claude/commands .claude/scripts .claude/skills docs/epics .codex docs/commands docs/agents; do
   [ -d "$INIT_DIR/$dir" ] || bad="$bad $dir/ not deployed;"
 done
-[ -e "$INIT_DIR/.claude/agents/per-project" ] && bad="$bad .claude/agents/per-project was deployed (P5: only gitter.md ships);"
+[ -e "$INIT_DIR/.claude/commands/per-project" ] && bad="$bad .claude/commands/per-project was deployed (P5: the testing manual is interview-deployed, one per roster entry);"
 grep -q 'notify.sh' "$INIT_DIR/.claude/settings.json" 2>/dev/null && grep -q 'format-md.sh' "$INIT_DIR/.claude/settings.json" 2>/dev/null ||
   bad="$bad .claude/settings.json does not ship the notify.sh/format-md.sh hooks (P2);"
 [ -x "$INIT_DIR/.claude/scripts/dev.sh" ] || bad="$bad .claude/scripts/dev.sh lost its executable mode (P6);"
@@ -293,11 +293,11 @@ beat A.02-phase2-never-deployed P12 P13 P14 P15
 spends none
 if requires A.01-scaffold; then
   bad=""
-  for never in .claude/agents/per-project/developer.md .claude/agents/per-project/qa.md .claude/agents/developer.md .claude/agents/qa.md \
+  for never in .claude/commands/per-project/testing-manual.md .claude/commands/testing-manual.md \
     .claude/settings-global.json settings-global.json .claude/skills/host-gh/SKILL.md .claude/skills/host-glab/SKILL.md; do
     [ -e "$INIT_DIR/$never" ] && bad="$bad $never exists after a bare pfm init;"
   done
-  for tmpl in project/per-project/CLAUDE.md project/agents/per-project/developer.md project/agents/per-project/qa.md project/settings-global.json; do
+  for tmpl in project/per-project/CLAUDE.md project/commands/per-project/testing-manual.md project/settings-global.json; do
     [ -f "$STORE_T/$tmpl" ] || bad="$bad the store has no $tmpl (the never-deployed template this beat asserts on is gone);"
     jq -e --arg t "$tmpl" '.files | to_entries[] | select(.value.template == $t)' "$INIT_DIR/.professor/baseline.json" >/dev/null 2>&1 &&
       bad="$bad $tmpl is PINNED by a bare pfm init;"
@@ -309,7 +309,7 @@ if requires A.01-scaffold; then
   chk="$(cd "$INIT_DIR" && pfm update check 2>&1)"
   chk_rc=$?
   [ "$chk_rc" -eq 3 ] || bad="$bad pfm update check in the bare init exited $chk_rc, want 3 (the never-deployed templates are NEW);"
-  for tmpl in project/per-project/CLAUDE.md project/agents/per-project/developer.md project/agents/per-project/qa.md project/settings-global.json; do
+  for tmpl in project/per-project/CLAUDE.md project/commands/per-project/testing-manual.md project/settings-global.json; do
     printf '%s\n' "$chk" | grep -qF "    $tmpl — adopt: copy/adapt it locally, then pfm update pin --template $tmpl <local> — or ignore" ||
       bad="$bad check does not list $tmpl as NEW with its adopt line;"
   done
@@ -318,7 +318,7 @@ if requires A.01-scaffold; then
   [ "$(count_of "$chk" NEW)" = "$unmapped" ] ||
     bad="$bad check counts NEW $(count_of "$chk" NEW), want $unmapped (every store file outside the init mapping);"
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "a bare pfm init deployed none of per-project/CLAUDE.md, agents/per-project/{developer,qa}.md, settings-global.json or a host git-bridge skill; check lists exactly those $unmapped unmapped templates as NEW (exit 3)"
+    pass "a bare pfm init deployed none of per-project/CLAUDE.md, commands/per-project/testing-manual.md, settings-global.json or a host git-bridge skill; check lists exactly those $unmapped unmapped templates as NEW (exit 3)"
   fi
 fi
 rm -rf "$INIT_DIR"
@@ -708,20 +708,24 @@ second_rc=$?
 [ "$first_rc" -eq 0 ] && [ "$second_rc" -eq 0 ] || bad="$bad pfm codex agents exited $first_rc then $second_rc ($(one_line "$(cat /tmp/lane-a-codex-agents.err)"));"
 [ "$(printf '%s\n' "$second" | tail -1)" = 'CODEX AGENTS PASS' ] || bad="$bad no CODEX AGENTS PASS terminal: $(one_line "$second" | cut -c1-160);"
 n_clean="$(printf '%s\n' "$second" | grep -c '\.toml: [0-9]* B, parses clean$')"
-[ "$n_clean" -eq "$n_md" ] || bad="$bad $n_clean '.toml: N B, parses clean' line(s) for $n_md agent source(s);"
-not_correct="$(printf '%s\n' "$second" | grep -E '^(missing|copy|wrong-target|conflict) ' | head -3)"
-[ -z "$not_correct" ] || bad="$bad on the second run a registry link is still not 'correct': $(one_line "$not_correct");"
+[ "$n_clean" -ge "$n_md" ] || bad="$bad $n_clean '.toml: N B, parses clean' line(s) for $n_md agent source(s);"
+not_correct="$(printf '%s\n' "$second" | grep -E '^(missing|copy|wrong-target|conflict|stale|owned-link|foreign) ' | head -3)"
+[ -z "$not_correct" ] || bad="$bad on the second run a registry entry is still not settled: $(one_line "$not_correct");"
 [ -s /tmp/lane-a-codex-agents.err ] && bad="$bad problem line(s) on stderr: $(one_line "$(cat /tmp/lane-a-codex-agents.err)" | cut -c1-200);"
+# A role must be a REGULAR FILE: Codex opens it with O_NOFOLLOW and rejects a
+# symlink as "agent type is currently not available", so a linked registry
+# passes every stat-shaped check while no global agent can spawn at all.
 for src in "$BLUEPRINT"/templates/global/agents/*.md; do
   name="$(basename "$src" .md)"
-  link="$HOME/.codex/agents/$name.toml"
-  [ -L "$link" ] || { bad="$bad $link is not a symlink;"; continue; }
-  [ "$(readlink -f "$link")" = "$(readlink -f "$BLUEPRINT/templates/global/agents/$name.toml")" ] ||
-    bad="$bad $link → $(readlink "$link"), not the compiled twin beside $src;"
+  role="$HOME/.codex/agents/$name.toml"
+  [ -L "$role" ] && { bad="$bad $role is a symlink — Codex refuses to load it;"; continue; }
+  [ -f "$role" ] || { bad="$bad $role is not a regular role file;"; continue; }
+  head -1 "$role" | grep -q '^# Generated by pfm codex build from ' ||
+    bad="$bad $role carries no generated marker, so pfm cannot prove it owns the file;"
 done
 rm -f /tmp/lane-a-codex-agents.err
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "$n_md global agents compiled to parsing .toml twins, every registry link 'correct' on the second run, $HOME/.codex/agents/*.toml → the twins beside their sources, no problem on stderr"
+  pass "$n_md global agents compiled to parsing .toml roles, every registry entry settled on the second run, $HOME/.codex/agents/*.toml regular marker-owned files Codex can load, no problem on stderr"
 fi
 
 # ─── A.10 — a blueprint reached through a symlink (P10.1, update side) ──────

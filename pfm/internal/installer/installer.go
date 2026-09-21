@@ -368,6 +368,7 @@ func (installer *engine) wireCodexAgents() error {
 		Home:             installer.options.Home,
 		SourceRepo:       sourceRepo,
 		ClaudeConfigDirs: installer.claudeConfigDirs(),
+		CodexHomes:       installer.codexHomes(),
 		Mode:             codexgen.ModeCheck,
 	})
 	if err != nil {
@@ -385,6 +386,11 @@ func (installer *engine) wireCodexAgents() error {
 	for _, problem := range plan.Problems {
 		installer.skip(problem)
 	}
+	// Before the early dry-run return, so the preview IS the apply's plan:
+	// installer.retire only removes when this run applies.
+	if err := installer.retireOrphanCodexRoles(sourceRepo, plan.Roles); err != nil {
+		return err
+	}
 	if !installer.apply {
 		return nil
 	}
@@ -392,6 +398,7 @@ func (installer *engine) wireCodexAgents() error {
 		Home:             installer.options.Home,
 		SourceRepo:       sourceRepo,
 		ClaudeConfigDirs: installer.claudeConfigDirs(),
+		CodexHomes:       installer.codexHomes(),
 		Mode:             codexgen.ModeBuild,
 	})
 	if err != nil {

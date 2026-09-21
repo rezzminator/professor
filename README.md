@@ -110,7 +110,7 @@ $ pfm codex check .
 CODEX CHECK PASS
 ```
 
-`CLAUDE.md` compiles to `AGENTS.md`; `.claude/**` compiles to `.codex/**` and `.opencode/**`; global agents' `.toml` twins compile into pfm's own generated directory under the pfm home, linked into `~/.codex/agents/`. Every mirror is generated, never tracked — a fresh clone has none of them until its compiler runs. The Stop hook recompiles the mirrors and a drifted mirror fails the check, so the three harnesses can never disagree about the law. Even the verification engine is one TypeScript source compiled for both the Claude Workflow runtime and the Codex SDK.
+`CLAUDE.md` compiles to `AGENTS.md`; `.claude/**` compiles to `.codex/**` and `.opencode/**`; global agents' `.toml` roles compile straight into `~/.codex/agents/` as regular files — Codex opens a role with `O_NOFOLLOW` and refuses a symlink, so a link there is a role that cannot spawn. Every mirror is generated, never tracked — a fresh clone has none of them until its compiler runs. The Stop hook recompiles the mirrors and a drifted mirror fails the check, so the three harnesses can never disagree about the law. Even the verification engine is one TypeScript source compiled for both the Claude Workflow runtime and the Codex SDK.
 
 ### 6. Reload without losing the conversation
 

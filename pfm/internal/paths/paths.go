@@ -263,7 +263,7 @@ func Resolve() (Values, error) {
 // any host can never rewrite a tracked file. A `~/.codex/agents/<name>.toml`
 // link points here; uninstall removes this whole directory along with the
 // links it owns.
-func GeneratedCodexAgentsDir(home string) string {
+func LegacyGeneratedCodexAgentsDir(home string) string {
 	return filepath.Join(home, ".local", "state", "pfm", "generated", "codex-agents")
 }
 

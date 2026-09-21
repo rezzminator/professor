@@ -1,6 +1,7 @@
 package installer
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -77,12 +78,21 @@ const (
 	// registry on a host with no Claude Code binary (ClaudeAbsent), so
 	// finding it unlinked there is not a defect either — named, not warned.
 	GlobalAgentsNoClaude GlobalAgentsState = "NO-CLAUDE"
-	// GlobalAgentsDangling: a ~/.codex/agents/<name>.toml link resolves to
-	// the pfm-owned generated directory by name, but nothing is there
-	// anymore — codexgen.GlobalLinkDangling surfaced by name, never silently
-	// folded into MISSING, because a rerun of `pfm codex agents`/`pfm
-	// install` self-heals it by recompiling first.
-	GlobalAgentsDangling GlobalAgentsState = "DANGLING"
+	// GlobalAgentsInstalled is the clean state of a Codex agents/ registry:
+	// every role is a regular file whose bytes match what this binary
+	// compiles. It is spelled apart from "linked" because the two registries
+	// hold different shapes — Claude a symlink, Codex a real file — and one
+	// word for both would hide exactly the drift this whole check exists for.
+	GlobalAgentsInstalled GlobalAgentsState = "installed"
+	// GlobalAgentsSymlink: a Codex role is a symlink. Codex opens a role with
+	// O_NOFOLLOW and rejects one outright, reporting only "agent type is
+	// currently not available", so every spawn of that role fails while the
+	// registry looks populated.
+	GlobalAgentsSymlink GlobalAgentsState = "SYMLINK"
+	// GlobalAgentsMismatch: a Codex role file exists and is readable, but its
+	// bytes are not the ones this binary compiles — a stale install, or an
+	// edit to the registry copy instead of the source.
+	GlobalAgentsMismatch GlobalAgentsState = "MISMATCH"
 )
 
 // GlobalAgentsStatus is one reported line's worth of facts: either one
@@ -128,8 +138,11 @@ func (status GlobalAgentsStatus) Describe() string {
 		line += " error=" + status.Error
 	}
 	switch status.State {
-	case GlobalAgentsLinked:
+	case GlobalAgentsLinked, GlobalAgentsInstalled:
 		return line
+	case GlobalAgentsSymlink:
+		return line + ` note="Codex refuses a symlinked role and reports only 'agent type is currently not available'"` +
+			` hint="run pfm install --yes"`
 	case GlobalAgentsNoClone:
 		return line + ` note="no Professor clone recorded or at the default path — global agents install from a clone (INSTALL.md § Build from source)"`
 	case GlobalAgentsNoClaude:
@@ -153,7 +166,12 @@ func (status GlobalAgentsStatus) Describe() string {
 // status says why nothing was checked instead of quietly certifying a host
 // that was never a Professor clone to begin with. Any other Lstat failure on
 // either path is UNRESOLVED with its error — a failed look is never absence.
-func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent bool) []GlobalAgentsStatus {
+func InspectGlobalAgents(
+	home string,
+	accounts []pfmconfig.Account,
+	claudeAbsent bool,
+	codexHomes ...string,
+) []GlobalAgentsStatus {
 	if claudeAbsent {
 		statuses := make([]GlobalAgentsStatus, 0, len(accounts))
 		for _, account := range accounts {
@@ -207,66 +225,77 @@ func InspectGlobalAgents(home string, accounts []pfmconfig.Account, claudeAbsent
 		sources = append(sources, variant.Path)
 	}
 
-	statuses := make([]GlobalAgentsStatus, 0, len(accounts)+1)
+	statuses := make([]GlobalAgentsStatus, 0, len(accounts)+len(codexHomes)+1)
 	for _, account := range accounts {
 		statuses = append(statuses, inspectAccountGlobalAgents(account, repo, sources))
 	}
-	// The compiled Codex .toml twins are host-wide — one ~/.codex/agents
-	// registry, never per-account — so this check runs once, not fanned
-	// across accounts the way the .claude/agents/*.md check above is.
-	statuses = append(statuses, inspectHostGlobalCodexAgents(home, repo, sources))
+	// One row per Codex home, against the bytes this binary compiles. A
+	// compile failure is UNREADABLE for the whole check rather than a per-home
+	// verdict: with nothing to compare against, no registry can be judged at
+	// all, and saying so is the only honest answer.
+	roles, err := codexgen.CompileGlobalRoles(home, repo)
+	if err != nil {
+		return append(statuses, GlobalAgentsStatus{Dir: agentsDir, State: GlobalAgentsUnreadable, Error: err.Error()})
+	}
+	if len(codexHomes) == 0 {
+		codexHomes = []string{filepath.Join(home, ".codex")}
+	}
+	for _, codexHome := range codexHomes {
+		statuses = append(statuses, inspectCodexRoleRegistry(filepath.Join(codexHome, "agents"), roles))
+	}
 	return statuses
 }
 
-// inspectHostGlobalCodexAgents classifies every ~/.codex/agents/<name>.toml
-// link against the pfm-owned generated directory (paths.GeneratedCodexAgentsDir)
-// the compiler writes into. Account is 0 and Dir names the registry itself —
-// the same host-wide shape GlobalAgentsStatus.Describe already renders for
-// NO-CLONE/NO-SOURCES — because this registry is not scoped to one Claude
-// account.
-func inspectHostGlobalCodexAgents(home, repo string, sources []string) GlobalAgentsStatus {
-	registry := filepath.Join(home, ".codex", "agents")
-	generated := paths.GeneratedCodexAgentsDir(home)
-	status := GlobalAgentsStatus{Dir: registry, State: GlobalAgentsLinked}
-	var conflicting, dangling, missing []string
-	for _, source := range sources {
-		name := strings.TrimSuffix(filepath.Base(source), ".md")
-		target := filepath.Join(registry, name+".toml")
-		desired := filepath.Join(generated, name+".toml")
-		state, _, err := codexgen.ClassifyGlobalLink(target, desired, repo, codexgen.GlobalLinkFile)
-		if err != nil {
-			status.State = GlobalAgentsUnreadable
-			status.Error = err.Error()
-			return status
-		}
-		switch state {
-		case codexgen.GlobalLinkCorrect:
-		case codexgen.GlobalLinkConflict:
-			conflicting = append(conflicting, name)
-		case codexgen.GlobalLinkDangling:
-			// An error to look must never render as ABSENCE: the link
-			// itself resolves to the right generated path by name, but
-			// the compiled file behind it is gone — named DANGLING, never
-			// folded into "missing" (a state that would read as never
-			// having been installed at all).
-			dangling = append(dangling, name)
-		default:
-			missing = append(missing, name)
+// inspectCodexRoleRegistry opens every pfm role in one Codex home's agents/
+// registry THE WAY CODEX DOES — O_NOFOLLOW, regular files only — and compares
+// what it read against the bytes this binary compiles. Nothing else can
+// certify the registry: a doctor that merely stat'ed the path, or that read it
+// with os.ReadFile, blesses exactly the symlinks Codex refuses to load. Account
+// is 0 and Dir names the registry itself, the same host-wide shape
+// GlobalAgentsStatus.Describe already renders for NO-CLONE/NO-SOURCES.
+//
+// The outcomes are deliberately distinct. A symlink is SYMLINK, never
+// "missing": the file is there and Codex still will not spawn it. Content that
+// differs from the compiler is MISMATCH, never "installed": the role that
+// spawns is not the role this binary ships. A registry that cannot be read is
+// UNREADABLE — we failed to look, which is not the same as nothing being there.
+func inspectCodexRoleRegistry(registry string, roles []codexgen.GlobalRole) GlobalAgentsStatus {
+	status := GlobalAgentsStatus{Dir: registry, State: GlobalAgentsInstalled}
+	var symlinked, mismatched, missing, unreadable []string
+	for _, role := range roles {
+		target := filepath.Join(registry, role.Name+".toml")
+		found, err := codexgen.ReadGlobalRoleFile(target)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			missing = append(missing, role.Name)
+		case errors.Is(err, codexgen.ErrGlobalRoleNotRegular) && isSymlink(target):
+			symlinked = append(symlinked, role.Name)
+		case err != nil:
+			unreadable = append(unreadable, role.Name)
+			if status.Error == "" {
+				status.Error = err.Error()
+			}
+		case !bytes.Equal(found, role.Content):
+			mismatched = append(mismatched, role.Name)
 		}
 	}
+	// One state per line, worst first, with every other bucket still named:
+	// a registry that is half symlinked and half absent must report both, or
+	// the operator fixes one and believes the job done.
 	switch {
-	case len(dangling) != 0:
-		status.State = GlobalAgentsDangling
-		status.Names = dangling
+	case len(unreadable) != 0:
+		status.State = GlobalAgentsUnreadable
+		status.Names = unreadable
 		status.Missing = missing
-		// A conflicting link found by the SAME loop pass must never be
-		// dropped just because DANGLING outranks CONFLICT for State: a
-		// refusal to touch a foreign link is real regardless of what else
-		// the registry also has wrong.
-		status.Conflicts = conflicting
-	case len(conflicting) != 0:
-		status.State = GlobalAgentsConflict
-		status.Names = conflicting
+		status.Conflicts = append(append([]string(nil), symlinked...), mismatched...)
+	case len(symlinked) != 0:
+		status.State = GlobalAgentsSymlink
+		status.Names = symlinked
+		status.Missing = missing
+		status.Conflicts = mismatched
+	case len(mismatched) != 0:
+		status.State = GlobalAgentsMismatch
+		status.Names = mismatched
 		status.Missing = missing
 	case len(missing) != 0:
 		status.State = GlobalAgentsMissing
@@ -281,22 +310,27 @@ func inspectHostGlobalCodexAgents(home, repo string, sources []string) GlobalAge
 // install` wiring the primary account only. Linked, NoClone and NoClaude
 // count neither: NoClone means pfm was never given a clone to check agents
 // against, and NoClaude means the account has no Claude Code binary to wire
-// agents for at all — neither is a defect. Missing and Unreadable are a
-// state `pfm install --yes` owns and did not produce, so they are FAILURES;
-// Conflict, NoSources and Unresolved are advisory and stay warnings. The
-// classification and its wording live in InspectGlobalAgents / Describe, so
-// the checker can never drift from the installer it checks.
+// agents for at all — neither is a defect. Missing, Unreadable, Symlink and
+// Mismatch are a state `pfm install --yes` owns and did not produce, so they
+// are FAILURES — Symlink most of all: it is the shape that makes every spawn
+// of that role fail while the registry looks full. Conflict, NoSources and
+// Unresolved are advisory and stay warnings. The classification and its
+// wording live in InspectGlobalAgents / Describe, so the checker can never
+// drift from the installer it checks.
 func ReportGlobalAgents(
 	w io.Writer,
 	home string,
 	accounts []pfmconfig.Account,
 	claudeAbsent bool,
+	codexHomes ...string,
 ) (warnings, failures int) {
-	for _, status := range InspectGlobalAgents(home, accounts, claudeAbsent) {
+	statuses := InspectGlobalAgents(home, accounts, claudeAbsent, codexHomes...)
+	for index := range statuses {
+		status := &statuses[index]
 		fmt.Fprintf(w, "doctor: global-agents %s\n", status.Describe())
 		switch status.State {
-		case GlobalAgentsLinked, GlobalAgentsNoClone, GlobalAgentsNoClaude:
-		case GlobalAgentsMissing, GlobalAgentsUnreadable, GlobalAgentsDangling:
+		case GlobalAgentsLinked, GlobalAgentsInstalled, GlobalAgentsNoClone, GlobalAgentsNoClaude:
+		case GlobalAgentsMissing, GlobalAgentsUnreadable, GlobalAgentsSymlink, GlobalAgentsMismatch:
 			failures++
 		default:
 			warnings++
@@ -428,58 +462,32 @@ func (installer *engine) wireGlobalSkill(sourceRepo, source, name string) error 
 	return nil
 }
 
-// unwireGeneratedCodexAgents removes the pfm-owned generated directory the
-// compiled Codex global agent .toml twins live in (paths.GeneratedCodexAgentsDir)
-// and every ~/.codex/agents/<name>.toml link this installer owns. Ownership
-// is decided by the link's TARGET, the same rule retireOrphanGlobalCommands
-// holds to: only a symlink resolving INSIDE the generated directory is ours
-// to remove — an operator's own agent file, or a link pointing anywhere
-// else, is left untouched. A host that upgraded to the generated-directory
-// layout without ever rerunning `pfm install`/`pfm codex agents` in between
-// can still carry a pre-migration link aimed at the retired in-clone twin
-// (<blueprint>/templates/global/agents/<name>.toml) — this installer wrote
-// that link too, so it counts as owned and is retired the same way.
+// unwireGeneratedCodexAgents removes every pfm-owned Codex global role from
+// each configured Codex home's agents/ registry, plus the retired generated
+// directory earlier installs used as the role store
+// (paths.LegacyGeneratedCodexAgentsDir).
+//
+// Two ownership proofs, because two layouts exist on real hosts. A REGULAR
+// FILE is ours when it carries the generated marker as its first line — the
+// proof pfm stamps on every role it writes, and the same one
+// retireRenamedCodexAgents tests. A SYMLINK is ours when its TARGET resolves
+// inside the retired generated directory or at the even older in-clone twin
+// (<blueprint>/templates/global/agents/<name>.toml); this installer wrote both
+// shapes, so both are retired here. Anything else — an operator's own role
+// file, a link pointing somewhere pfm never wrote — is left untouched.
 func (installer *engine) unwireGeneratedCodexAgents() error {
 	if err := installer.unwireGeneratedClaudeAgents(); err != nil {
 		return err
 	}
-	generated := paths.GeneratedCodexAgentsDir(installer.options.Home)
-	registry := filepath.Join(installer.options.Home, ".codex", "agents")
+	generated := paths.LegacyGeneratedCodexAgentsDir(installer.options.Home)
 	repo, err := GlobalSourceRepo(installer.options.Home)
 	if err != nil {
 		return fmt.Errorf("resolve global source repository: %w", err)
 	}
 	legacyDir := filepath.Join(repo, "templates", "global", "agents")
-	entries, err := os.ReadDir(registry)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("inspect Codex global agents registry %s: %w", registry, err)
-	}
-	for _, entry := range entries {
-		path := filepath.Join(registry, entry.Name())
-		info, err := os.Lstat(path)
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return fmt.Errorf("inspect Codex global agent link %s: %w", path, err)
-		}
-		if info.Mode()&os.ModeSymlink == 0 {
-			continue
-		}
-		target, err := os.Readlink(path)
-		if err != nil {
-			return fmt.Errorf("read Codex global agent link %s: %w", path, err)
-		}
-		if !filepath.IsAbs(target) {
-			target = filepath.Join(filepath.Dir(path), target)
-		}
-		target = filepath.Clean(target)
-		owned := target == generated || strings.HasPrefix(target, generated+string(filepath.Separator))
-		owned = owned || target == filepath.Clean(filepath.Join(legacyDir, entry.Name()))
-		if !owned {
-			continue
-		}
-		if err := installer.retire(path, "retired generated Codex agent link"); err != nil {
+	for _, codexHome := range installer.codexHomes() {
+		registry := filepath.Join(codexHome, "agents")
+		if err := installer.retireCodexRoles(registry, generated, legacyDir, nil); err != nil {
 			return err
 		}
 	}
@@ -494,6 +502,102 @@ func (installer *engine) unwireGeneratedCodexAgents() error {
 		}
 		return nil
 	})
+}
+
+// retireOrphanCodexRoles removes the pfm-owned role files and pre-migration
+// links left in each Codex registry by agents this clone no longer ships. The
+// install that wrote them is the install that owes their removal: a role whose
+// source is gone still occupies its agent_type, and a stale symlink among them
+// is one Codex refuses to load at all.
+func (installer *engine) retireOrphanCodexRoles(sourceRepo string, roles []codexgen.GlobalRoleInstalled) error {
+	keep := make(map[string]bool, len(roles))
+	for _, role := range roles {
+		keep[strings.TrimSuffix(filepath.Base(role.Path), ".toml")] = true
+	}
+	generated := paths.LegacyGeneratedCodexAgentsDir(installer.options.Home)
+	legacyDir := filepath.Join(sourceRepo, "templates", "global", "agents")
+	for _, codexHome := range installer.codexHomes() {
+		if err := installer.retireCodexRoles(
+			filepath.Join(codexHome, "agents"), generated, legacyDir, keep,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// retireCodexRoles removes the pfm-owned roles in one registry that `keep`
+// does not name. Uninstall passes a nil roster and takes them all; install
+// passes the roster it just compiled, so a role the clone stopped shipping
+// (a rename, a retired agent) leaves the registry with it — its file removed
+// exactly as its link used to be. A registry that cannot be read is an error,
+// never an empty sweep: "we failed to look" must not leave an operator
+// believing the retirement happened.
+func (installer *engine) retireCodexRoles(registry, generated, legacyDir string, keep map[string]bool) error {
+	entries, err := os.ReadDir(registry)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("inspect Codex global agents registry %s: %w", registry, err)
+	}
+	for _, entry := range entries {
+		if keep[strings.TrimSuffix(entry.Name(), ".toml")] {
+			continue
+		}
+		path := filepath.Join(registry, entry.Name())
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("inspect Codex global agent %s: %w", path, err)
+		}
+		owned := false
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(path)
+			if err != nil {
+				return fmt.Errorf("read Codex global agent link %s: %w", path, err)
+			}
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(path), target)
+			}
+			target = filepath.Clean(target)
+			owned = target == generated || strings.HasPrefix(target, generated+string(filepath.Separator))
+			owned = owned || target == filepath.Clean(filepath.Join(legacyDir, entry.Name()))
+		case info.Mode().IsRegular():
+			owned, err = pfmGeneratedCodexRole(path)
+			if err != nil {
+				return err
+			}
+		}
+		if !owned {
+			continue
+		}
+		if err := installer.retire(path, "retired generated Codex agent"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// isSymlink separates the two ways a role path can be unloadable. Codex
+// refuses a symlink and a directory alike, but the operator's fix differs —
+// a symlink is the migration `pfm install --yes` performs, a directory is
+// something only they can explain — so the two never share one verdict line.
+func isSymlink(path string) bool {
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode()&os.ModeSymlink != 0
+}
+
+// pfmGeneratedCodexRole reports whether a role file carries pfm's generated
+// marker — the one proof that a regular file at a pfm role's name is pfm's own
+// and not an operator's. A file that cannot be read is an error, never a quiet
+// "not ours": that answer would silently skip a role uninstall owes removal.
+func pfmGeneratedCodexRole(path string) (bool, error) {
+	content, err := codexgen.ReadGlobalRoleFile(path)
+	if err != nil {
+		return false, fmt.Errorf("inspect Codex global agent %s: %w", path, err)
+	}
+	return codexgen.GeneratedGlobalRole(content), nil
 }
 
 // unwireGeneratedClaudeAgents removes the pfm-owned directory the rendered

@@ -13,12 +13,11 @@ import (
 
 // GlobalAgentsOptions selects the host HOME whose global Codex agents get
 // (re)compiled and installed. The source directory is always
-// {SourceRepo}/templates/global/agents; the compiled .toml twins land in the
-// pfm-owned generated directory (paths.GeneratedCodexAgentsDir), never
-// inside the source clone. Installs land at {ClaudeConfigDir}/agents for
-// every configured Claude account (a symlink to the raw .md, Claude reads it
-// directly) and {Home}/.codex/agents (a symlink to the generated .toml,
-// Codex reads it directly).
+// {SourceRepo}/templates/global/agents. Installs land at
+// {ClaudeConfigDir}/agents for every configured Claude account (a symlink to
+// the raw .md, Claude reads it directly) and at {CodexHome}/agents for every
+// configured Codex home — there as a REGULAR FILE holding the compiled TOML,
+// because Codex refuses to load a role through a symlink (globalrole.go).
 type GlobalAgentsOptions struct {
 	Home string
 	// SourceRepo is the clone the symlink targets and the source-repo
@@ -33,12 +32,16 @@ type GlobalAgentsOptions struct {
 	// Nil or empty means {Home}/.claude alone: the legacy single-account
 	// behavior every caller that never learned about accounts still gets.
 	ClaudeConfigDirs []string
-	Mode             Mode
+	// CodexHomes are the Codex homes whose agents/ registry receives one role
+	// FILE per global agent — every account the host has configured. Nil or
+	// empty means {Home}/.codex alone.
+	CodexHomes []string
+	Mode       Mode
 }
 
-// GlobalAgentCompiled is one desired TOML in the pfm-owned generated
-// directory. Build writes changed bytes; check reports the same desired
-// artifact without writing it.
+// GlobalAgentCompiled is one desired role file or rendered variant source.
+// Build writes changed bytes; check reports the same desired artifact without
+// writing it.
 type GlobalAgentCompiled struct {
 	Path string
 	Size int64
@@ -60,8 +63,21 @@ type GlobalAgentInstalled struct {
 type GlobalAgentsResult struct {
 	Compiled  []GlobalAgentCompiled
 	Installed []GlobalAgentInstalled
-	Actions   []GlobalAgentAction
-	Problems  []string
+	// Roles is one desired {CodexHome}/agents/<name>.toml per role per Codex
+	// home, with the shape check found there before this run wrote anything.
+	Roles    []GlobalRoleInstalled
+	Actions  []GlobalAgentAction
+	Problems []string
+}
+
+// GlobalRoleInstalled is one desired Codex role file and the shape check found
+// at its path — the classification GlobalRoleState names, so a symlinked,
+// drifted, or foreign role can never certify itself as installed. Found
+// carries a symlink's resolved target and is empty otherwise.
+type GlobalRoleInstalled struct {
+	Path  string
+	State GlobalRoleState
+	Found string
 }
 
 // GlobalAgentAction is one exact path a build would replace. Check mode emits
@@ -85,19 +101,23 @@ const (
 
 // RunGlobalAgents is the Go port of the retired host script
 // ~/.professor/templates/global/agents/build-global-agents.py: it compiles
-// every {SourceRepo}/templates/global/agents/*.md into the pfm-owned
-// generated directory (paths.GeneratedCodexAgentsDir(home)), validates every
-// compiled TOML parses, then SYMLINKS every configured Claude agents
-// registry (ClaudeConfigDirs, {Home}/.claude by default) to the .md sources
-// and {Home}/.codex/agents to the generated .toml files — updates to the
-// source repo propagate through the link, no reinstall required. A
-// regular-file copy already at a desired target (the shape the old
-// copy-based installer left behind) is replaced with the link; a symlink
-// pointing outside the source repository is a conflict this never touches —
-// see ClassifyGlobalLink/ApplyGlobalLink in globallink.go. A link still
-// pointing at the old in-clone {SourceRepo}/templates/global/agents/{name}.toml
-// resolves inside the source repository, so it classifies WrongTarget and is
-// re-pointed here on the next run.
+// every {SourceRepo}/templates/global/agents/*.md, validates every compiled
+// TOML parses, then installs each agent twice.
+//
+// Claude gets a SYMLINK: every configured Claude agents registry
+// (ClaudeConfigDirs, {Home}/.claude by default) points at the clone's .md, so
+// an edit to the source propagates with no reinstall. A regular-file copy
+// already at a desired target (the shape the old copy-based installer left
+// behind) is replaced with the link; a symlink pointing outside the source
+// repository is a conflict this never touches — see
+// ClassifyGlobalLink/ApplyGlobalLink in globallink.go.
+//
+// Codex gets a REGULAR FILE: {CodexHome}/agents/<name>.toml holds the compiled
+// bytes outright, because Codex's role loader opens a role with O_NOFOLLOW and
+// rejects a symlink as "agent type is currently not available". A role file
+// pfm wrote is recognised by its generated marker and rewritten when it
+// drifts; a pre-migration pfm symlink is replaced by the real file; anything
+// else of that name is a conflict this never touches — see globalrole.go.
 //
 // TOML escaping mirrors build-codex.mjs:151-153 exactly — see
 // globalAgentEscape / globalAgentEscapeMultiline — because a raw `"` in an
@@ -126,67 +146,13 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		)
 	}
 	sourceRepo = filepath.Clean(sourceRepo)
-	agentsDir := filepath.Join(sourceRepo, "templates", "global", "agents")
-	outputDir := paths.GeneratedCodexAgentsDir(home)
 
-	sources, err := globSorted(filepath.Join(agentsDir, "*.md"))
-	if err != nil {
-		return GlobalAgentsResult{}, fmt.Errorf("glob %s: %w", agentsDir, err)
-	}
-	if len(sources) == 0 {
-		return GlobalAgentsResult{}, fmt.Errorf("no agent .md files in %s", agentsDir)
-	}
-
-	// Phase 1: compile and validate every TOML twin before touching disk —
+	// Phase 1: compile and validate every role's TOML before touching disk —
 	// a failed compile or an unparseable TOML aborts before any install, the
 	// same fail-loud order the host script used.
-	//
-	// mdContent is nil for an original agent (Claude links straight to the
-	// clone's .md) and carries the rendered bytes for a variant, whose
-	// mdSource is its file in the generated Claude directory: a variant is
-	// the Claude -> Claude step, and from there it takes the same two links
-	// and the same TOML twin as any original.
-	type compiledAgent struct {
-		mdSource    string
-		mdContent   []byte
-		tomlOutput  string
-		tomlContent []byte
-	}
-	type agentSource struct {
-		path    string
-		content []byte
-	}
-	agentSources := make([]agentSource, 0, len(sources))
-	for _, src := range sources {
-		agentSources = append(agentSources, agentSource{path: src})
-	}
-	variants, err := LoadGlobalAgentVariants(agentsDir, paths.GeneratedClaudeAgentsDir(home))
+	compiledAgents, err := compileGlobalAgents(home, sourceRepo)
 	if err != nil {
 		return GlobalAgentsResult{}, err
-	}
-	for _, variant := range variants {
-		agentSources = append(agentSources, agentSource{path: variant.Path, content: variant.Content})
-	}
-	compiledAgents := make([]compiledAgent, 0, len(agentSources))
-	for _, src := range agentSources {
-		raw := src.content
-		if raw == nil {
-			raw, err = os.ReadFile(src.path)
-			if err != nil {
-				return GlobalAgentsResult{}, fmt.Errorf("read %s: %w", src.path, err)
-			}
-		}
-		out, content, err := renderGlobalAgentTOML(src.path, string(raw), outputDir)
-		if err != nil {
-			return GlobalAgentsResult{}, err
-		}
-		if parseErr := validateTOML(content); parseErr != nil {
-			return GlobalAgentsResult{}, fmt.Errorf("%s: does not parse: %w", out, parseErr)
-		}
-		compiledAgents = append(
-			compiledAgents,
-			compiledAgent{mdSource: src.path, mdContent: src.content, tomlOutput: out, tomlContent: []byte(content)},
-		)
 	}
 
 	// One Claude agents/ registry per configured account; an installer that
@@ -196,23 +162,39 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 		claudeConfigDirs = []string{filepath.Join(home, ".claude")}
 	}
 
+	// One Codex agents/ registry per configured Codex home; an installer that
+	// never names its accounts keeps the single {Home}/.codex registry.
+	codexHomes := options.CodexHomes
+	if len(codexHomes) == 0 {
+		codexHomes = []string{filepath.Join(home, ".codex")}
+	}
+	// The registries a pre-migration role symlink is allowed to point into —
+	// the retired generated store, and the even older in-clone twin. A link
+	// resolving anywhere else was never written by pfm.
+	ownedLinkDirs := []string{
+		paths.LegacyGeneratedCodexAgentsDir(home),
+		filepath.Join(sourceRepo, "templates", "global", "agents"),
+	}
+
 	type desiredLink struct {
 		target string
 		source string
 	}
+	type desiredRole struct {
+		target  string
+		content []byte
+	}
 	result := GlobalAgentsResult{}
-	links := make([]desiredLink, 0, len(compiledAgents)*2)
+	links := make([]desiredLink, 0, len(compiledAgents)*len(claudeConfigDirs))
+	roles := make([]desiredRole, 0, len(compiledAgents)*len(codexHomes))
 	for _, agent := range compiledAgents {
-		result.Compiled = append(
-			result.Compiled,
-			GlobalAgentCompiled{Path: agent.tomlOutput, Size: int64(len(agent.tomlContent))},
-		)
-		same, err := sameGlobalAgentFile(agent.tomlOutput, agent.tomlContent)
-		if err != nil {
-			return GlobalAgentsResult{}, err
-		}
-		if !same {
-			result.Actions = append(result.Actions, GlobalAgentAction{Kind: actionWrite, Path: agent.tomlOutput})
+		for _, codexHome := range codexHomes {
+			target := filepath.Join(codexHome, "agents", agent.name+".toml")
+			roles = append(roles, desiredRole{target: target, content: agent.tomlContent})
+			result.Compiled = append(
+				result.Compiled,
+				GlobalAgentCompiled{Path: target, Size: int64(len(agent.tomlContent))},
+			)
 		}
 		if agent.mdContent != nil {
 			result.Compiled = append(
@@ -236,16 +218,29 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 				},
 			)
 		}
-		links = append(
-			links,
-			desiredLink{
-				target: filepath.Join(home, ".codex", "agents", filepath.Base(agent.tomlOutput)),
-				source: agent.tomlOutput,
-			},
-		)
 	}
 
-	// Phase 2: classify every desired registry symlink against what is
+	// Phase 2a: classify every desired role file against what is actually on
+	// disk. A foreign file is a Problem and never an Action — it stays exactly
+	// as the operator left it.
+	for _, role := range roles {
+		state, foundAt, err := ClassifyGlobalRole(role.target, role.content, ownedLinkDirs)
+		if err != nil {
+			return GlobalAgentsResult{}, fmt.Errorf("inspect global role %s: %w", role.target, err)
+		}
+		found := GlobalRoleInstalled{Path: role.target, State: state, Found: foundAt}
+		result.Roles = append(result.Roles, found)
+		switch state {
+		case GlobalRoleForeign:
+			result.Problems = append(result.Problems, found.Describe())
+			continue
+		case GlobalRoleCurrent:
+			continue
+		}
+		result.Actions = append(result.Actions, GlobalAgentAction{Kind: actionWrite, Path: role.target})
+	}
+
+	// Phase 2b: classify every desired registry symlink against what is
 	// actually on disk. A stat failure other than "not found" bubbles up as
 	// a genuine error — an unreadable target is never reported as absent.
 	for _, link := range links {
@@ -275,27 +270,30 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 
 	for _, agent := range compiledAgents {
-		artifacts := []struct {
-			path    string
-			content []byte
-		}{{agent.tomlOutput, agent.tomlContent}}
-		if agent.mdContent != nil {
-			artifacts = append(artifacts, struct {
-				path    string
-				content []byte
-			}{agent.mdSource, agent.mdContent})
+		if agent.mdContent == nil {
+			continue
 		}
-		for _, artifact := range artifacts {
-			same, err := sameGlobalAgentFile(artifact.path, artifact.content)
-			if err != nil {
-				return GlobalAgentsResult{}, err
-			}
-			if same {
-				continue
-			}
-			if err := writeGlobalAgentFile(artifact.path, artifact.content); err != nil {
-				return GlobalAgentsResult{}, err
-			}
+		same, err := sameGlobalAgentFile(agent.mdSource, agent.mdContent)
+		if err != nil {
+			return GlobalAgentsResult{}, err
+		}
+		if same {
+			continue
+		}
+		if err := writeGlobalAgentFile(agent.mdSource, agent.mdContent); err != nil {
+			return GlobalAgentsResult{}, err
+		}
+	}
+	for _, role := range roles {
+		// Re-classify against disk for the same reason the link loop below
+		// does: two configured Codex homes can alias one physical registry,
+		// so a role an earlier iteration wrote already satisfies this target.
+		state, _, err := ClassifyGlobalRole(role.target, role.content, ownedLinkDirs)
+		if err != nil {
+			return GlobalAgentsResult{}, fmt.Errorf("re-inspect global role %s: %w", role.target, err)
+		}
+		if err := ApplyGlobalRole(role.target, role.content, state); err != nil {
+			return GlobalAgentsResult{}, fmt.Errorf("install global role %s: %w", role.target, err)
 		}
 	}
 	for _, installed := range result.Installed {
@@ -316,6 +314,101 @@ func RunGlobalAgents(options GlobalAgentsOptions) (GlobalAgentsResult, error) {
 	}
 
 	return result, nil
+}
+
+// compiledAgent is one global agent rendered for both engines. mdContent is
+// nil for an original agent (Claude links straight to the clone's .md) and
+// carries the rendered bytes for a variant, whose mdSource is its file in the
+// generated Claude directory: a variant is the Claude -> Claude step, and from
+// there it takes the same link and the same role file as any original.
+type compiledAgent struct {
+	name        string
+	mdSource    string
+	mdContent   []byte
+	tomlContent []byte
+}
+
+// compileGlobalAgents renders every machine-global agent — originals plus the
+// variants variants.json declares — and validates that each one's TOML parses
+// before any caller touches disk. An emitter that ships an unparseable
+// artifact has done nothing useful, so this returns an error rather than a
+// partial roster.
+func compileGlobalAgents(home, sourceRepo string) ([]compiledAgent, error) {
+	agentsDir := filepath.Join(sourceRepo, "templates", "global", "agents")
+	sources, err := globSorted(filepath.Join(agentsDir, "*.md"))
+	if err != nil {
+		return nil, fmt.Errorf("glob %s: %w", agentsDir, err)
+	}
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no agent .md files in %s", agentsDir)
+	}
+	type agentSource struct {
+		path    string
+		content []byte
+	}
+	agentSources := make([]agentSource, 0, len(sources))
+	for _, src := range sources {
+		agentSources = append(agentSources, agentSource{path: src})
+	}
+	variants, err := LoadGlobalAgentVariants(agentsDir, paths.GeneratedClaudeAgentsDir(home))
+	if err != nil {
+		return nil, err
+	}
+	for _, variant := range variants {
+		agentSources = append(agentSources, agentSource{path: variant.Path, content: variant.Content})
+	}
+	compiled := make([]compiledAgent, 0, len(agentSources))
+	for _, src := range agentSources {
+		raw := src.content
+		if raw == nil {
+			raw, err = os.ReadFile(src.path)
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", src.path, err)
+			}
+		}
+		name, content, err := renderGlobalAgentTOML(src.path, string(raw), agentsDir)
+		if err != nil {
+			return nil, err
+		}
+		if parseErr := validateTOML(content); parseErr != nil {
+			return nil, fmt.Errorf("%s: does not parse: %w", src.path, parseErr)
+		}
+		compiled = append(compiled, compiledAgent{
+			name:        name,
+			mdSource:    src.path,
+			mdContent:   src.content,
+			tomlContent: []byte(content),
+		})
+	}
+	return compiled, nil
+}
+
+// GlobalRole is one machine-global role as THIS binary compiles it: the name
+// its registry file takes and the exact bytes that file must hold. The doctor
+// reads it to compare disk against the compiler that owns it — a role file is
+// correct only when it matches what a reinstall would write, never merely
+// because something exists at the path.
+type GlobalRole struct {
+	Name    string
+	Content []byte
+}
+
+// CompileGlobalRoles is the read-only half of RunGlobalAgents' compile phase,
+// for callers that need the desired bytes without installing anything.
+func CompileGlobalRoles(home, sourceRepo string) ([]GlobalRole, error) {
+	resolvedHome, err := resolveHome(home)
+	if err != nil {
+		return nil, err
+	}
+	compiled, err := compileGlobalAgents(resolvedHome, filepath.Clean(sourceRepo))
+	if err != nil {
+		return nil, err
+	}
+	roles := make([]GlobalRole, 0, len(compiled))
+	for _, agent := range compiled {
+		roles = append(roles, GlobalRole{Name: agent.name, Content: agent.tomlContent})
+	}
+	return roles, nil
 }
 
 func sameGlobalAgentFile(path string, content []byte) (bool, error) {
@@ -355,10 +448,12 @@ func writeGlobalAgentFile(path string, content []byte) error {
 	return nil
 }
 
-// renderGlobalAgentTOML compiles one agent's Markdown into its TOML twin.
-// raw is passed in rather than read here because a variant's Markdown exists
-// only in memory until the build phase writes it; mdPath labels errors.
-func renderGlobalAgentTOML(mdPath, raw, outputDir string) (string, string, error) {
+// renderGlobalAgentTOML compiles one agent's Markdown into the role name and
+// the exact TOML bytes its registry file holds. raw is passed in rather than
+// read here because a variant's Markdown exists only in memory until the build
+// phase writes it; mdPath labels errors and, against agentsDir, names the
+// source the generated marker credits.
+func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error) {
 	fields, body, err := parseFrontmatter(raw)
 	if err != nil {
 		return "", "", fmt.Errorf("parse %s: %w", mdPath, err)
@@ -387,12 +482,25 @@ func renderGlobalAgentTOML(mdPath, raw, outputDir string) (string, string, error
 	if err != nil {
 		return "", "", fmt.Errorf("%s: %w", mdPath, err)
 	}
-	content := "name = \"" + globalAgentEscape(name) + "\"\n" +
+	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
+		"name = \"" + globalAgentEscape(name) + "\"\n" +
 		"description = \"" + globalAgentEscape(description) + "\"\n" +
 		"developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(withFleetPrompt) + "\n\"\"\"\n"
 
-	out := filepath.Join(outputDir, name+".toml")
-	return out, content, nil
+	return name, content, nil
+}
+
+// globalAgentMarkerSource names what the generated marker credits: the clone
+// path of an original agent, or variants.json for a variant, whose Markdown
+// only ever existed in the pfm-owned generated directory. It is deliberately
+// clone-relative — a host-absolute path in a marker says nothing an operator
+// on another machine can act on.
+func globalAgentMarkerSource(mdPath, agentsDir string) string {
+	const relDir = "templates/global/agents/"
+	if filepath.Dir(mdPath) == filepath.Clean(agentsDir) {
+		return relDir + filepath.Base(mdPath)
+	}
+	return relDir + GlobalAgentVariantsFile
 }
 
 // globalAgentEscape is for a TOML basic string — build-codex.mjs:151.

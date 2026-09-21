@@ -238,6 +238,7 @@ func Run(
 		resolved.Home,
 		runtime.Config.Accounts,
 		claudeAbsent,
+		runtime.Config.CodexHomes()...,
 	)
 	tally.warnings += globalAgentsWarnings
 	tally.failures += globalAgentsFailures

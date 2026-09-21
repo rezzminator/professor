@@ -7,7 +7,6 @@ import (
 
 	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // reviewTestModel is the model every rewrite below is pinned to: the tier
@@ -77,6 +76,61 @@ func TestRewriteCodeReviewMapsEveryLevelAndLeavesEverythingElse(t *testing.T) {
 				t.Fatalf("rewriteCodeReview is not idempotent: second pass = %q, first = %q", again, got)
 			}
 		})
+	}
+}
+
+// The gater sizes its own review effort from the diff and reviews the FLIGHT's
+// whole diff, not one task's files. Its source line writes the slot form, which
+// has to map to a flight-scoped prompt whose model_reasoning_effort is still the
+// slot the surrounding prose tells the gater to fill — a baked effort would
+// silently review a 40-file flight at the cheapest tier.
+func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T) {
+	got := rewriteCodeReview("Run `/code-review "+codeReviewSlot+"` over the flight's diff.", nil)
+	want := "Run `" + codexReviewShellCommand(reviewTestModel, codeReviewSlot) + "` over the flight's diff."
+	if got != want {
+		t.Fatalf("slot form = %q, want %q", got, want)
+	}
+	if !strings.Contains(got, `model_reasoning_effort="`+codeReviewSlot+`"`) {
+		t.Fatalf("slot form baked an effort instead of leaving the slot: %q", got)
+	}
+	if !strings.Contains(got, codeReviewFlightPrompt) || strings.Contains(got, codeReviewPrompt) {
+		t.Fatalf("slot form carries the task-scoped prompt, want the flight-scoped one: %q", got)
+	}
+	if again := rewriteCodeReview(got, nil); again != got {
+		t.Fatalf("slot rewrite is not idempotent: second pass = %q, first = %q", again, got)
+	}
+	level := rewriteCodeReview("/code-review low", nil)
+	if !strings.Contains(level, codeReviewPrompt) || strings.Contains(level, codeReviewSlot) {
+		t.Fatalf("a written level must stay task-scoped at a baked effort: %q", level)
+	}
+}
+
+// Door 2 for the gater's own road: a machine-global role compiled by
+// RunGlobalAgents. A gater whose compiled body carries the task-scoped prompt
+// reviews the wrong diff on Codex.
+func TestCompiledGlobalRoleCarriesTheFlightScopedReview(t *testing.T) {
+	home := t.TempDir()
+	writeTestFile(
+		t,
+		filepath.Join(home, ".professor", "templates", "global", "agents", "gate.md"),
+		"---\nname: gate\ndescription: Gates one flight.\ntools: Read\nmodel: opus\n---\n\n"+
+			"Run `/code-review "+codeReviewSlot+"` over the flight's diff.\n",
+	)
+	if _, err := RunGlobalAgents(GlobalAgentsOptions{Home: home}); err != nil {
+		t.Fatalf("RunGlobalAgents: %v", err)
+	}
+	path := filepath.Join(filepath.Join(home, ".codex", "agents"), "gate.toml")
+	got := string(mustReadTestFile(t, path))
+	if strings.Contains(got, codeReviewCommand) {
+		t.Fatalf("%s still spells %s:\n%s", path, codeReviewCommand, got)
+	}
+	want := codexReviewShellCommand(reviewTestModel, codeReviewSlot)
+	escaped := strings.ReplaceAll(want, `"`, `\"`)
+	if !strings.Contains(got, want) && !strings.Contains(got, escaped) {
+		t.Fatalf("%s carries no flight-scoped review at the effort slot:\n%s", path, got)
+	}
+	if err := validateTOML(got); err != nil {
+		t.Fatalf("%s does not parse as TOML with the slot review embedded: %v", path, err)
 	}
 }
 
@@ -159,7 +213,7 @@ func TestEveryCompiledCodexArtifactCarriesTheShellReview(t *testing.T) {
 		},
 		{
 			name:    "global role",
-			path:    filepath.Join(paths.GeneratedCodexAgentsDir(home), "gamma.toml"),
+			path:    filepath.Join(filepath.Join(home, ".codex", "agents"), "gamma.toml"),
 			efforts: []string{"low", "xhigh"},
 		},
 	}
@@ -171,7 +225,9 @@ func TestEveryCompiledCodexArtifactCarriesTheShellReview(t *testing.T) {
 					testCase.path, codeReviewCommand, got)
 			}
 			for _, effort := range testCase.efforts {
-				if !strings.Contains(got, reviewWant(effort)) {
+				// A role's description is a TOML basic string: its quotes arrive escaped.
+				escaped := strings.ReplaceAll(reviewWant(effort), `"`, `\"`)
+				if !strings.Contains(got, reviewWant(effort)) && !strings.Contains(got, escaped) {
 					t.Fatalf("%s carries no %s review at effort %q:\n%s", testCase.path, "codex review -c", effort, got)
 				}
 			}
@@ -225,8 +281,10 @@ func TestCompiledCommandFrontmatterStaysParseableAroundTheReview(t *testing.T) {
 
 // Door 3: the composed Codex fleet prompt — the bytes the installer stages,
 // writes into developer_instructions and prepends to every compiled role, and
-// the bytes doctor compares a config against. The shared tail stays
-// engine-neutral ON DISK, which is what the Claude prompt proves.
+// the bytes doctor compares a config against. The shared parts name no review
+// today (the flight's gater reviews, not the executor), so the door is proven
+// on a fixture tail: whatever the parts spell, the composed Codex prompt never
+// carries Claude's command, and the parts ON DISK never carry Codex's.
 func TestComposedCodexFleetPromptCarriesTheShellReview(t *testing.T) {
 	prompt, err := FleetPrompt()
 	if err != nil {
@@ -235,20 +293,15 @@ func TestComposedCodexFleetPromptCarriesTheShellReview(t *testing.T) {
 	if strings.Contains(prompt, codeReviewCommand) {
 		t.Fatalf("the composed Codex fleet prompt still spells %s", codeReviewCommand)
 	}
-	if !strings.Contains(prompt, reviewWant("low")) {
-		t.Fatalf("the composed Codex fleet prompt carries no scoped shell review:\n%s", prompt)
+	mapped := rewriteCodeReview("- Your last step is `"+codeReviewCommand+" low` over your own change.\n", nil)
+	if strings.Contains(mapped, codeReviewCommand) || !strings.Contains(mapped, reviewWant("low")) {
+		t.Fatalf("the compose-time mapping left a fixture tail unmapped:\n%s", mapped)
 	}
 	claude, err := harnessprompts.Composed(pfmengine.MustLookup(pfmengine.Claude).LongName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(claude), codeReviewCommand+" low") {
-		t.Fatalf(
-			"the Claude fleet prompt lost %s low — the shared parts are no longer engine-neutral",
-			codeReviewCommand,
-		)
-	}
 	if strings.Contains(string(claude), "codex review -c") {
-		t.Fatal("the Claude fleet prompt carries the Codex shell review — the mapping leaked into the shared parts")
+		t.Fatal("the Claude fleet prompt spells Codex's review — the shared parts are no longer engine-neutral")
 	}
 }

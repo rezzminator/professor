@@ -994,11 +994,11 @@ func TestInstallReconcilesGlobalCodexCommands(t *testing.T) {
 	}
 }
 
-// TestWireCodexAgentsInstallsSymlinksNotCopies is the RED-then-GREEN pin on
-// the copy-to-symlink conversion at the pfm install call site: both
-// {Home}/.claude/agents and {Home}/.codex/agents must resolve to the exact
-// source-repo originals, never a byte-for-byte copy install used to leave.
-func TestWireCodexAgentsInstallsSymlinksNotCopies(t *testing.T) {
+// TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads pins the install call
+// site's two promises apart: Claude's agent is a symlink to the clone, while
+// Codex — whose loader opens a role with O_NOFOLLOW — gets a REGULAR FILE
+// carrying the generated marker that proves pfm owns it.
+func TestWireCodexAgentsInstallsTheTwoShapesEachEngineLoads(t *testing.T) {
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
@@ -1012,9 +1012,7 @@ func TestWireCodexAgentsInstallsSymlinksNotCopies(t *testing.T) {
 	assertLink(t,
 		filepath.Join(home, ".claude", "agents", "alpha.md"),
 		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
-	assertLink(t,
-		filepath.Join(home, ".codex", "agents", "alpha.toml"),
-		filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml"))
+	assertOwnedCodexRole(t, filepath.Join(home, ".codex", "agents", "alpha.toml"))
 	twin := filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.toml")
 	if _, err := os.Lstat(twin); !os.IsNotExist(err) {
 		t.Fatalf("install wrote a .toml twin inside the source clone, lstat err=%v", err)
@@ -1512,7 +1510,6 @@ Read only.
 	}
 	for _, path := range []string{
 		conflict,
-		filepath.Join(paths.GeneratedCodexAgentsDir(home), "tracer.toml"),
 		filepath.Join(home, ".claude", "agents", "tracer.md"),
 		filepath.Join(home, ".codex", "agents", "tracer.toml"),
 	} {
@@ -1529,7 +1526,6 @@ Read only.
 	}
 	for _, path := range []string{
 		filepath.Join(home, ".professor", "templates", "global", "agents", "tracer.toml"),
-		filepath.Join(paths.GeneratedCodexAgentsDir(home), "tracer.toml"),
 		filepath.Join(home, ".claude", "agents", "tracer.md"),
 		filepath.Join(home, ".codex", "agents", "tracer.toml"),
 	} {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -212,30 +213,57 @@ func linkGlobalAgents(t *testing.T, repo, configDir string, names ...string) {
 	}
 }
 
-// linkGlobalCodexAgents wires the host-wide ~/.codex/agents/<name>.toml
-// registry: a compiled twin written into the pfm-owned generated directory,
-// symlinked from the registry — the "linked" shape ReportGlobalAgents'
-// host-wide codex check certifies, so tests exercising the per-account
-// .claude/agents/*.md report do not also pick up an unrelated codex-agents
-// failure/warning by accident.
-func linkGlobalCodexAgents(t *testing.T, home string, names ...string) {
+// installGlobalCodexRoles writes the {home}/.codex/agents/<name>.toml role
+// FILES in the exact shape a clean install leaves: regular files holding the
+// bytes this binary compiles. It goes through CompileGlobalRoles rather than
+// hand-rolling content, because doctor compares disk against that compiler —
+// a fixture that merely looked plausible would certify a state no install
+// produces. Tests exercising the per-account .claude/agents/*.md report call
+// it so they do not pick up an unrelated codex-agents failure by accident.
+func installGlobalCodexRoles(t *testing.T, home, repo string, names ...string) {
 	t.Helper()
 	registry := filepath.Join(home, ".codex", "agents")
 	if err := os.MkdirAll(registry, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	generated := paths.GeneratedCodexAgentsDir(home)
-	if err := os.MkdirAll(generated, 0o755); err != nil {
-		t.Fatal(err)
+	roles, err := codexgen.CompileGlobalRoles(home, repo)
+	if err != nil {
+		t.Fatalf("CompileGlobalRoles: %v", err)
 	}
+	wanted := make(map[string]bool, len(names))
 	for _, name := range names {
-		target := filepath.Join(generated, name+".toml")
-		if err := os.WriteFile(target, []byte("name = \""+name+"\"\n"), 0o644); err != nil {
+		wanted[name] = true
+	}
+	installed := 0
+	for _, role := range roles {
+		if !wanted[role.Name] {
+			continue
+		}
+		if err := os.WriteFile(filepath.Join(registry, role.Name+".toml"), role.Content, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.Symlink(target, filepath.Join(registry, name+".toml")); err != nil {
-			t.Fatal(err)
-		}
+		installed++
+	}
+	if installed != len(names) {
+		t.Fatalf(
+			"staged %d of %d requested roles — the fixture names an agent the clone does not ship",
+			installed,
+			len(names),
+		)
+	}
+}
+
+// assertOwnedCodexRole fails the test unless path is the shape Codex loads and
+// pfm owns: a regular file — never the symlink the loader refuses — whose
+// first line is the generated marker.
+func assertOwnedCodexRole(t *testing.T, path string) {
+	t.Helper()
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		t.Fatalf("%s is not the regular file Codex loads (info=%v err=%v)", path, info, err)
+	}
+	if !codexgen.GeneratedGlobalRole([]byte(readFixture(t, path))) {
+		t.Fatalf("%s carries no generated marker — pfm cannot prove it owns the file", path)
 	}
 }
 
@@ -255,7 +283,7 @@ func TestGlobalAgentsDoctorNamesTheAccountThatHasNoAgents(t *testing.T) {
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
-	linkGlobalCodexAgents(t, home, "rr", "walker")
+	installGlobalCodexRoles(t, home, repo, "rr", "walker")
 
 	var output bytes.Buffer
 	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
@@ -291,7 +319,7 @@ func TestGlobalAgentsDoctorReportsEveryLinkedAccountClean(t *testing.T) {
 	repo := stageGlobalAgentSources(t, home)
 	first := filepath.Join(home, ".claude")
 	linkGlobalAgents(t, repo, first, "rr", "walker")
-	linkGlobalCodexAgents(t, home, "rr", "walker")
+	installGlobalCodexRoles(t, home, repo, "rr", "walker")
 	second := filepath.Join(home, ".cc", "2")
 	if err := os.MkdirAll(second, 0o755); err != nil {
 		t.Fatal(err)
@@ -320,7 +348,7 @@ func TestGlobalAgentsDoctorDistinguishesUnreadableFromMissing(t *testing.T) {
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
-	linkGlobalCodexAgents(t, home, "rr", "walker")
+	installGlobalCodexRoles(t, home, repo, "rr", "walker")
 	second := filepath.Join(home, ".cc", "2")
 	if err := os.MkdirAll(second, 0o755); err != nil {
 		t.Fatal(err)
@@ -354,7 +382,7 @@ func TestGlobalAgentsDoctorConflictNamesTheForeignLink(t *testing.T) {
 	repo := stageGlobalAgentSources(t, home)
 	first := filepath.Join(home, ".claude")
 	linkGlobalAgents(t, repo, first, "rr", "walker")
-	linkGlobalCodexAgents(t, home, "rr", "walker")
+	installGlobalCodexRoles(t, home, repo, "rr", "walker")
 	second := filepath.Join(home, ".cc", "2")
 	linkGlobalAgents(t, repo, second, "walker")
 	elsewhere := filepath.Join(home, "mine.md")
@@ -376,22 +404,30 @@ func TestGlobalAgentsDoctorConflictNamesTheForeignLink(t *testing.T) {
 	}
 }
 
-// TestGlobalAgentsDoctorNamesADanglingCodexLink is the fourth warning shape,
-// unique to the host-wide ~/.codex/agents registry: a link already resolves
-// to the pfm-owned generated directory BY NAME, but the compiled .toml behind
-// it is gone (a wiped state dir, a partial uninstall) — an error to look must
-// never render as absence, so this must be named DANGLING by the link's own
-// name, never folded into MISSING (which would read as "never installed").
-func TestGlobalAgentsDoctorNamesADanglingCodexLink(t *testing.T) {
+// TestGlobalAgentsDoctorNamesASymlinkedCodexRole is the regression for the
+// defect that made every machine-global role unspawnable: Codex opens a role
+// with O_NOFOLLOW and rejects a symlink as "agent type is currently not
+// available", and the doctor that shipped before this reported exactly that
+// registry as "linked" — a verdict that read the same whether the roles worked
+// or none of them did. SYMLINK is its own outcome, never MISSING: the file is
+// there, and that is precisely why the operator cannot see what is wrong.
+func TestGlobalAgentsDoctorNamesASymlinkedCodexRole(t *testing.T) {
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
 	linkGlobalAgents(t, repo, filepath.Join(home, ".cc", "2"), "rr", "walker")
-	linkGlobalCodexAgents(t, home, "rr", "walker")
-	// Simulate the generated directory getting wiped out from under a live
-	// link: the symlink under ~/.codex/agents still resolves to the right
-	// NAME, but nothing is there anymore.
-	if err := os.RemoveAll(paths.GeneratedCodexAgentsDir(home)); err != nil {
+	installGlobalCodexRoles(t, home, repo, "rr", "walker")
+	registry := filepath.Join(home, ".codex", "agents")
+	// The pre-migration shape: the role's bytes live in the retired generated
+	// store and the registry entry is a link to them.
+	legacy := filepath.Join(paths.LegacyGeneratedCodexAgentsDir(home), "rr.toml")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(registry, "rr.toml"), legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(legacy, filepath.Join(registry, "rr.toml")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -399,66 +435,74 @@ func TestGlobalAgentsDoctorNamesADanglingCodexLink(t *testing.T) {
 	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
 	if failures != 1 {
 		t.Fatalf(
-			"warnings=%d failures=%d, want failures=1 (a dangling codex link is a failure)\n%s",
+			"warnings=%d failures=%d, want failures=1 (a symlinked role cannot spawn)\n%s",
 			warnings,
 			failures,
 			output.String(),
 		)
 	}
-	registry := filepath.Join(home, ".codex", "agents")
-	want := "doctor: global-agents source=" + registry + " state=DANGLING names=rr,walker"
+	want := "doctor: global-agents source=" + registry + " state=SYMLINK names=rr"
 	if !strings.Contains(output.String(), want) {
 		t.Fatalf("output missing %q:\n%s", want, output.String())
 	}
+	if !strings.Contains(output.String(), `hint="run pfm install --yes"`) {
+		t.Fatalf("a SYMLINK row carried no remediation:\n%s", output.String())
+	}
 }
 
-// TestGlobalAgentsDoctorNamesBothDanglingAndConflictingCodexLinks pins F3: a
-// host can have one link dangling (its compiled .toml wiped) and another
-// pointed at a foreign file the installer must never touch, at the same
-// time. Both buckets are computed by the per-source loop above, so a doctor
-// line that renders only one of them is discarding a refusal-to-touch —
-// exactly the "renders as absence" failure this repo's CLAUDE.md names.
-func TestGlobalAgentsDoctorNamesBothDanglingAndConflictingCodexLinks(t *testing.T) {
+// TestGlobalAgentsDoctorNamesMismatchedMissingAndUnreadableCodexRoles pins the
+// remaining three outcomes, and pins that one bucket never hides another: a
+// role whose bytes drifted from the compiler is MISMATCH, an absent one is
+// still named in the same line, and a role file that cannot be read at all is
+// UNREADABLE — "we failed to look" is not "nothing there".
+func TestGlobalAgentsDoctorNamesMismatchedMissingAndUnreadableCodexRoles(t *testing.T) {
 	home := t.TempDir()
 	repo := stageGlobalAgentSources(t, home)
 	linkGlobalAgents(t, repo, filepath.Join(home, ".claude"), "rr", "walker")
 	linkGlobalAgents(t, repo, filepath.Join(home, ".cc", "2"), "rr", "walker")
-	linkGlobalCodexAgents(t, home, "rr", "walker")
-	// rr dangling: the generated twin behind its link is gone.
-	if err := os.Remove(filepath.Join(paths.GeneratedCodexAgentsDir(home), "rr.toml")); err != nil {
-		t.Fatal(err)
-	}
-	// walker conflicting: its registry entry is a symlink pointing at a
-	// foreign file OUTSIDE the generated directory — the classifier
-	// (codexgen.ClassifyGlobalLink) treats a same-kind regular file as a
-	// plain "Copy" (folded into missing on rerun), so the CONFLICT bucket
-	// this test targets is only reachable through a foreign symlink, the
-	// same shape TestGlobalAgentsDoctorConflictNamesTheForeignLink uses.
 	registry := filepath.Join(home, ".codex", "agents")
-	if err := os.Remove(filepath.Join(registry, "walker.toml")); err != nil {
+
+	// rr drifted, walker absent.
+	installGlobalCodexRoles(t, home, repo, "rr")
+	if err := os.WriteFile(filepath.Join(registry, "rr.toml"), []byte("name = \"rr\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	elsewhere := filepath.Join(home, "operator-walker.toml")
-	if err := os.WriteFile(elsewhere, []byte("# an operator's own file\n"), 0o644); err != nil {
-		t.Fatal(err)
+	var output bytes.Buffer
+	_, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
+	if failures != 1 {
+		t.Fatalf("failures=%d, want 1\n%s", failures, output.String())
 	}
-	if err := os.Symlink(elsewhere, filepath.Join(registry, "walker.toml")); err != nil {
-		t.Fatal(err)
+	want := "doctor: global-agents source=" + registry + " state=MISMATCH names=rr missing=walker"
+	if !strings.Contains(output.String(), want) {
+		t.Fatalf("output missing %q — one bucket hid the other:\n%s", want, output.String())
 	}
 
-	var output bytes.Buffer
-	warnings, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
-	if failures != 1 {
-		t.Fatalf(
-			"warnings=%d failures=%d, want failures=1 (a dangling codex link is a failure)\n%s",
-			warnings,
-			failures,
-			output.String(),
-		)
+	// Both absent: MISSING names them, and nothing claims a mismatch.
+	if err := os.RemoveAll(registry); err != nil {
+		t.Fatal(err)
 	}
-	want := "doctor: global-agents source=" + registry + " state=DANGLING names=rr conflict=walker"
-	if !strings.Contains(output.String(), want) {
-		t.Fatalf("output missing %q (conflict bucket dropped):\n%s", want, output.String())
+	output.Reset()
+	if _, failures = ReportGlobalAgents(&output, home, twoReportAccounts(home), false); failures != 1 {
+		t.Fatalf("failures=%d, want 1\n%s", failures, output.String())
+	}
+	if !strings.Contains(output.String(), "source="+registry+" state=MISSING names=rr,walker") {
+		t.Fatalf("an absent registry was not reported MISSING:\n%s", output.String())
+	}
+
+	// A role file that is a directory cannot be read as a role at all: the
+	// check FAILED, which must not render as the absence just proven above.
+	if err := os.MkdirAll(filepath.Join(registry, "rr.toml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if _, failures = ReportGlobalAgents(&output, home, twoReportAccounts(home), false); failures != 1 {
+		t.Fatalf("failures=%d, want 1\n%s", failures, output.String())
+	}
+	if !strings.Contains(output.String(), "source="+registry+" state=UNREADABLE names=rr missing=walker") {
+		t.Fatalf("an unloadable role file was not distinguished from an absent one:\n%s", output.String())
+	}
+	if !strings.Contains(output.String(), "error=") {
+		t.Fatalf("an UNREADABLE row carried no error — a failed look that names no failure:\n%s", output.String())
 	}
 }
 
@@ -617,12 +661,11 @@ func TestInspectGlobalAgentsSourceDirectoryStates(t *testing.T) {
 	}
 }
 
-// TestUninstallRemovesGeneratedCodexAgentsDirectoryAndOwnedLinks is the
-// uninstall half of the pfm-owned generated directory: uninstall must remove
-// the whole generated directory AND the ~/.codex/agents/<name>.toml links
-// this installer owns, leaving neither the compiled twins nor the links that
-// resolved to them behind.
-func TestUninstallRemovesGeneratedCodexAgentsDirectoryAndOwnedLinks(t *testing.T) {
+// TestUninstallRemovesOwnedCodexRolesAndTheLegacyGeneratedDirectory is the
+// uninstall half of role ownership: the marker-carrying role files this
+// installer wrote go, and so does the retired generated directory an earlier
+// layout used as the role store — leaving neither behind.
+func TestUninstallRemovesOwnedCodexRolesAndTheLegacyGeneratedDirectory(t *testing.T) {
 	home := t.TempDir()
 	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
@@ -632,21 +675,22 @@ func TestUninstallRemovesGeneratedCodexAgentsDirectoryAndOwnedLinks(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	generated := paths.GeneratedCodexAgentsDir(home)
-	if _, err := os.Stat(filepath.Join(generated, "alpha.toml")); err != nil {
-		t.Fatalf("install did not compile into the generated directory: %v", err)
-	}
+	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
+	assertOwnedCodexRole(t, role)
+	// A leftover from the retired layout, which uninstall owes removal too.
+	legacy := paths.LegacyGeneratedCodexAgentsDir(home)
+	writeFixture(t, filepath.Join(legacy, "alpha.toml"), "name = \"alpha\"\n")
 
 	if _, err := Run(context.Background(), Options{
 		Mode: ModeUninstall, Home: home, Runner: &fakeRunner{},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Lstat(generated); !os.IsNotExist(err) {
-		t.Fatalf("uninstall left the generated Codex agents directory: %v", err)
+	if _, err := os.Lstat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("uninstall left the retired generated Codex agents directory: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(home, ".codex", "agents", "alpha.toml")); !os.IsNotExist(err) {
-		t.Fatalf("uninstall left the owned ~/.codex/agents link: %v", err)
+	if _, err := os.Lstat(role); !os.IsNotExist(err) {
+		t.Fatalf("uninstall left the owned Codex role file: %v", err)
 	}
 }
 
@@ -730,7 +774,7 @@ func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
 	for _, account := range twoReportAccounts(home) {
 		linkGlobalAgents(t, repo, account.ConfigDir, "rr", "walker")
 	}
-	linkGlobalCodexAgents(t, home, "rr", "walker")
+	installGlobalCodexRoles(t, home, repo, "rr", "walker")
 
 	var output bytes.Buffer
 	_, failures := ReportGlobalAgents(&output, home, twoReportAccounts(home), false)
@@ -758,4 +802,47 @@ func TestGlobalAgentsDoctorCountsADeclaredVariantAsOwed(t *testing.T) {
 			output.String(),
 		)
 	}
+}
+
+// TestInstallRetiresACodexRoleTheCloneNoLongerShips is the live-host defect
+// this sweep closes: three roles removed from the roster left their registry
+// entries behind — stale symlinks Codex refuses to load, still occupying their
+// agent_type. The install that wrote a role owes its removal; a file the
+// operator wrote under a retired name is still never touched.
+func TestInstallRetiresACodexRoleTheCloneNoLongerShips(t *testing.T) {
+	home := t.TempDir()
+	writeFixture(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
+	registry := filepath.Join(home, ".codex", "agents")
+	// A role pfm wrote for a source that is gone, and a pre-migration link to
+	// the retired store for another.
+	orphan := filepath.Join(registry, "retired.toml")
+	writeFixture(
+		t,
+		orphan,
+		"# Generated by pfm codex build from templates/global/agents/retired.md\nname = \"retired\"\n",
+	)
+	legacy := filepath.Join(paths.LegacyGeneratedCodexAgentsDir(home), "gone.toml")
+	writeFixture(t, legacy, "name = \"gone\"\n")
+	orphanLink := filepath.Join(registry, "gone.toml")
+	if err := os.Symlink(legacy, orphanLink); err != nil {
+		t.Fatal(err)
+	}
+	mine := filepath.Join(registry, "mine.toml")
+	writeFixture(t, mine, "name = \"mine\"\n")
+
+	if _, err := Run(context.Background(), Options{
+		Mode: ModeApply, Home: home, Runner: &fakeRunner{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, retired := range []string{orphan, orphanLink} {
+		if _, err := os.Lstat(retired); !os.IsNotExist(err) {
+			t.Fatalf("install left a role the clone no longer ships at %s: %v", retired, err)
+		}
+	}
+	if got := readFixture(t, mine); got != "name = \"mine\"\n" {
+		t.Fatalf("the sweep touched an operator's own role file: %q", got)
+	}
+	assertOwnedCodexRole(t, filepath.Join(registry, "alpha.toml"))
 }

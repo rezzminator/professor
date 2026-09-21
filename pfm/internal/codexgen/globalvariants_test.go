@@ -132,8 +132,8 @@ func TestGlobalAgentsRenderLinkAndCompileAVariant(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(home, ".claude", "agents", GlobalAgentVariantsFile)); !os.IsNotExist(err) {
 		t.Fatalf("the declaration itself was linked as an agent (err=%v)", err)
 	}
-	toml := filepath.Join(paths.GeneratedCodexAgentsDir(home), "super-lead.toml")
-	assertGlobalSymlink(t, filepath.Join(home, ".codex", "agents", "super-lead.toml"), toml)
+	toml := filepath.Join(home, ".codex", "agents", "super-lead.toml")
+	assertGlobalRoleFile(t, toml)
 	content := string(mustReadTestFile(t, toml))
 	if !strings.Contains(content, `name = "super-lead"`) || !strings.Contains(content, `description = "Deep lead."`) ||
 		!strings.Contains(content, "Lead body, byte for byte.") {

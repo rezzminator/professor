@@ -36,12 +36,20 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	if len(result.Compiled) != 2 {
 		t.Fatalf("compiled = %#v, want 2 entries", result.Compiled)
 	}
-	if len(result.Installed) != 4 {
-		t.Fatalf("installed = %#v, want 4 entries (2 md + 2 toml)", result.Installed)
+	if len(result.Installed) != 2 {
+		t.Fatalf("installed = %#v, want 2 Claude link entries", result.Installed)
 	}
 	for _, installed := range result.Installed {
 		if installed.State != GlobalLinkMissing {
 			t.Fatalf("installed %s classified %s before install ran, want missing", installed.Path, installed.State)
+		}
+	}
+	if len(result.Roles) != 2 {
+		t.Fatalf("roles = %#v, want 2 Codex role files", result.Roles)
+	}
+	for _, role := range result.Roles {
+		if role.State != GlobalRoleMissing {
+			t.Fatalf("role %s classified %s before install ran, want missing", role.Path, role.State)
 		}
 	}
 	if len(result.Problems) != 0 {
@@ -49,7 +57,7 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	}
 
 	alphaTOML := string(
-		mustReadTestFile(t, filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml")),
+		mustReadTestFile(t, filepath.Join(filepath.Join(home, ".codex", "agents"), "alpha.toml")),
 	)
 	if strings.Contains(alphaTOML, "children are Explore+haiku") {
 		t.Fatalf("alpha.toml: substitution did not fire:\n%s", alphaTOML)
@@ -61,16 +69,11 @@ func TestGlobalAgentsCompilesInstallsAndAppliesSpawnAgentSubstitution(t *testing
 	for _, expect := range []struct{ target, source string }{
 		{filepath.Join(home, ".claude", "agents", "alpha.md"), filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md")},
 		{filepath.Join(home, ".claude", "agents", "beta.md"), filepath.Join(home, ".professor", "templates", "global", "agents", "beta.md")},
-		{
-			filepath.Join(home, ".codex", "agents", "alpha.toml"),
-			filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml"),
-		},
-		{
-			filepath.Join(home, ".codex", "agents", "beta.toml"),
-			filepath.Join(paths.GeneratedCodexAgentsDir(home), "beta.toml"),
-		},
 	} {
 		assertGlobalSymlink(t, expect.target, expect.source)
+	}
+	for _, name := range []string{"alpha.toml", "beta.toml"} {
+		assertGlobalRoleFile(t, filepath.Join(home, ".codex", "agents", name))
 	}
 
 	// No .toml is ever written beside the .md source inside the clone —
@@ -140,9 +143,11 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 	}
 
 	got := string(
-		mustReadTestFile(t, filepath.Join(paths.GeneratedCodexAgentsDir(home), "quirky.toml")),
+		mustReadTestFile(t, filepath.Join(filepath.Join(home, ".codex", "agents"), "quirky.toml")),
 	)
-	head := "name = \"quirky\"\n" +
+	head := globalRoleMarkerPrefix + "templates/global/agents/quirky.md" +
+		"; do not edit — edit the source, then re-run: pfm codex build\n" +
+		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
 		"developer_instructions = \"\"\"\n"
 	// The fleet prompt is prepended to every role, so the role's own body is
@@ -174,9 +179,11 @@ func TestGlobalAgentsUnquotesYAMLQuotedDescription(t *testing.T) {
 	}
 	got := string(mustReadTestFile(
 		t,
-		filepath.Join(paths.GeneratedCodexAgentsDir(home), "quoted.toml"),
+		filepath.Join(filepath.Join(home, ".codex", "agents"), "quoted.toml"),
 	))
-	head := "name = \"quoted\"\n" +
+	head := globalRoleMarkerPrefix + "templates/global/agents/quoted.md" +
+		"; do not edit — edit the source, then re-run: pfm codex build\n" +
+		"name = \"quoted\"\n" +
 		"description = \"a: b, \\\"c\\\"\"\n" +
 		"developer_instructions = \"\"\"\n"
 	if !strings.HasPrefix(got, head) || !strings.HasSuffix(got, "\nBody.\n\"\"\"\n") {
@@ -323,13 +330,18 @@ func TestGlobalAgentsCheckReportsMissingBeforeInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Installed) != 2 {
-		t.Fatalf("installed rows=%#v, want two desired targets", result.Installed)
+	if len(result.Installed) != 1 || len(result.Roles) != 1 {
+		t.Fatalf("installed=%#v roles=%#v, want one of each desired target", result.Installed, result.Roles)
 	}
-	for _, installed := range result.Installed {
-		if installed.State != GlobalLinkMissing {
-			t.Fatalf("check mode classified an absent target as %s, not missing: %#v", installed.State, installed)
-		}
+	if result.Installed[0].State != GlobalLinkMissing {
+		t.Fatalf(
+			"check mode classified an absent link as %s, not missing: %#v",
+			result.Installed[0].State,
+			result.Installed[0],
+		)
+	}
+	if result.Roles[0].State != GlobalRoleMissing {
+		t.Fatalf("check mode classified an absent role as %s, not missing: %#v", result.Roles[0].State, result.Roles[0])
 	}
 	for _, path := range []string{
 		filepath.Join(home, ".claude", "agents", "alpha.md"),
@@ -341,10 +353,11 @@ func TestGlobalAgentsCheckReportsMissingBeforeInstall(t *testing.T) {
 	}
 }
 
-// TestGlobalAgentsInstallSymlinksTheDesiredTargets is the RED-then-GREEN pin
-// on the copy-to-symlink conversion itself: install must leave a symlink
-// resolving to the source-repo original, never a regular-file copy.
-func TestGlobalAgentsInstallSymlinksTheDesiredTargets(t *testing.T) {
+// TestGlobalAgentsInstallLinksClaudeAndWritesTheCodexRole pins the two shapes
+// apart: Claude's registry entry must be a symlink resolving to the
+// source-repo original, and Codex's must be the regular role file its loader
+// can actually open.
+func TestGlobalAgentsInstallLinksClaudeAndWritesTheCodexRole(t *testing.T) {
 	home := t.TempDir()
 	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
@@ -356,9 +369,7 @@ func TestGlobalAgentsInstallSymlinksTheDesiredTargets(t *testing.T) {
 	assertGlobalSymlink(t,
 		filepath.Join(home, ".claude", "agents", "alpha.md"),
 		filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"))
-	assertGlobalSymlink(t,
-		filepath.Join(home, ".codex", "agents", "alpha.toml"),
-		filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml"))
+	assertGlobalRoleFile(t, filepath.Join(home, ".codex", "agents", "alpha.toml"))
 }
 
 // TestGlobalAgentsInstallReplacesALegacyCopyWithASymlink covers the exact
@@ -417,11 +428,10 @@ func TestGlobalAgentsInstallRepointsAStaleInRepoSymlink(t *testing.T) {
 // TestGlobalAgentsRepointsALinkStillTargetingTheOldInCloneTOML is the
 // migration case this wave exists for: an existing ~/.codex/agents/alpha.toml
 // symlink still points at the retired in-clone
-// {SourceRepo}/templates/global/agents/alpha.toml. That target resolves
-// INSIDE the source repository, so it classifies WrongTarget — still ours —
-// and a run re-points it at the pfm-owned generated directory instead of
+// {SourceRepo}/templates/global/agents/alpha.toml. pfm wrote that link, so it
+// is ours to migrate: the run replaces it with the real role file instead of
 // reporting a conflict.
-func TestGlobalAgentsRepointsALinkStillTargetingTheOldInCloneTOML(t *testing.T) {
+func TestGlobalAgentsMigratesALinkStillTargetingTheOldInCloneTOML(t *testing.T) {
 	home := t.TempDir()
 	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
 		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nbody\n")
@@ -442,9 +452,23 @@ func TestGlobalAgentsRepointsALinkStillTargetingTheOldInCloneTOML(t *testing.T) 
 	if len(result.Problems) != 0 {
 		t.Fatalf("a link still targeting the old in-clone twin was reported as a conflict: %#v", result.Problems)
 	}
-	assertGlobalSymlink(t,
-		filepath.Join(home, ".codex", "agents", "alpha.toml"),
-		filepath.Join(paths.GeneratedCodexAgentsDir(home), "alpha.toml"))
+	assertGlobalRoleFile(t, filepath.Join(home, ".codex", "agents", "alpha.toml"))
+}
+
+// assertGlobalRoleFile fails the test unless target is a regular file carrying
+// pfm's generated marker — the shape Codex loads and the proof pfm owns it.
+func assertGlobalRoleFile(t *testing.T, target string) {
+	t.Helper()
+	info, err := os.Lstat(target)
+	if err != nil {
+		t.Fatalf("expected a role file at %s: %v", target, err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("%s mode=%v — Codex refuses anything but a regular file", target, info.Mode())
+	}
+	if !GeneratedGlobalRole(mustReadTestFile(t, target)) {
+		t.Fatalf("%s carries no generated marker", target)
+	}
 }
 
 // TestGlobalAgentsInstallLeavesAForeignSymlinkAlone is the conflict-law pin:
@@ -586,4 +610,90 @@ func hasGlobalAgentLinkAction(actions []GlobalAgentAction, path, target string) 
 		}
 	}
 	return false
+}
+
+// TestGlobalAgentsInstallsCodexRoleAsRegularFile is the regression for the
+// defect that made every machine-global role unspawnable on Codex ≥0.154:
+// the role loader reads a role file through read_sensitive_file_to_string
+// (codex-rs/exec-server/src/regular_file.rs), which opens with O_NOFOLLOW and
+// rejects a symlink outright, and codex-rs/core/src/agent/role.rs renders that
+// rejection as the single vague line "agent type is currently not available".
+// A symlink at {codex home}/agents/<name>.toml is therefore not an installed
+// role at all — it is a role Codex refuses to load.
+func TestGlobalAgentsInstallsCodexRoleAsRegularFile(t *testing.T) {
+	home := t.TempDir()
+	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nAlpha body.\n")
+
+	if _, err := RunGlobalAgents(GlobalAgentsOptions{Home: home}); err != nil {
+		t.Fatalf("RunGlobalAgents: %v", err)
+	}
+
+	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
+	info, err := os.Lstat(role)
+	if err != nil {
+		t.Fatalf("expected an installed role at %s: %v", role, err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("%s mode=%v — Codex rejects anything but a regular file", role, info.Mode())
+	}
+	assertTestFileContains(t, role, globalRoleMarkerPrefix, `name = "alpha"`)
+}
+
+// TestGlobalAgentsMigratesOwnedCodexRoleLinkToRegularFile covers the upgrade
+// path every host that ever ran the symlinking installer is on: the link is
+// pfm's own, so it is replaced by the real file rather than reported as a
+// conflict.
+func TestGlobalAgentsMigratesOwnedCodexRoleLinkToRegularFile(t *testing.T) {
+	home := t.TempDir()
+	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nAlpha body.\n")
+	legacy := filepath.Join(paths.LegacyGeneratedCodexAgentsDir(home), "alpha.toml")
+	writeTestFile(t, legacy, "name = \"alpha\"\n")
+	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
+	if err := os.MkdirAll(filepath.Dir(role), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(legacy, role); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := RunGlobalAgents(GlobalAgentsOptions{Home: home})
+	if err != nil {
+		t.Fatalf("RunGlobalAgents: %v", err)
+	}
+	info, err := os.Lstat(role)
+	if err != nil {
+		t.Fatalf("expected a migrated role at %s: %v", role, err)
+	}
+	if !info.Mode().IsRegular() {
+		t.Fatalf("%s mode=%v — the pfm-owned link was not migrated to a regular file", role, info.Mode())
+	}
+	if len(result.Problems) != 0 {
+		t.Fatalf("problems = %#v, want none: a pfm-owned link is ours to migrate", result.Problems)
+	}
+}
+
+// TestGlobalAgentsRefusesForeignCodexRoleFile is the other half of ownership:
+// a regular file of the same name that pfm did not write carries no generated
+// marker, so it is reported and left byte-for-byte alone. Overwriting it
+// would destroy an operator's own role.
+func TestGlobalAgentsRefusesForeignCodexRoleFile(t *testing.T) {
+	home := t.TempDir()
+	writeTestFile(t, filepath.Join(home, ".professor", "templates", "global", "agents", "alpha.md"),
+		"---\nname: alpha\ndescription: Alpha role for testing.\n---\n\nAlpha body.\n")
+	role := filepath.Join(home, ".codex", "agents", "alpha.toml")
+	const foreign = "name = \"alpha\"\ndescription = \"hand-written by the operator\"\n"
+	writeTestFile(t, role, foreign)
+
+	result, err := RunGlobalAgents(GlobalAgentsOptions{Home: home})
+	if err != nil {
+		t.Fatalf("RunGlobalAgents: %v", err)
+	}
+	if got := string(mustReadTestFile(t, role)); got != foreign {
+		t.Fatalf("%s was overwritten:\n%s", role, got)
+	}
+	if len(result.Problems) == 0 {
+		t.Fatalf("a foreign role file was silently accepted: problems = %#v", result.Problems)
+	}
 }

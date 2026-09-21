@@ -4,8 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // fleetPromptMarkers are lines from each of the composed prompt's three parts
@@ -54,7 +52,7 @@ func TestEveryCompiledCodexRoleCarriesTheFleetPromptAheadOfItsBody(t *testing.T)
 		{name: "project role", path: filepath.Join(root, ".codex", "agents", "dev.toml"), body: "PROJECT-ROLE-BODY"},
 		{
 			name: "global role",
-			path: filepath.Join(paths.GeneratedCodexAgentsDir(home), "gamma.toml"),
+			path: filepath.Join(filepath.Join(home, ".codex", "agents"), "gamma.toml"),
 			body: "GLOBAL-ROLE-BODY",
 		},
 	}

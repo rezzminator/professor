@@ -164,7 +164,7 @@ func Run(
 	tally.warnings += printPrePushDoctorWithRunner(context.Background(), stdout, dependencies.Runner)
 	verboseDir := ""
 	if *verbose {
-		abs, err := filepath.Abs(filepath.Join(resolved.SIDDir, "pfm-doctor"))
+		abs, err := filepath.Abs(filepath.Join(resolved.SIDDir, paths.SIDScratchDoctor))
 		if err != nil {
 			fmt.Fprintf(stdout, "doctor: verbose output dir unresolved error=%v\n", err)
 			tally.fail()

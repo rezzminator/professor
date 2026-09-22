@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
@@ -60,7 +62,9 @@ func crumbHealthWith(
 			continue
 		}
 		if entry.IsDir() {
-			invalid++
+			if !slices.Contains(paths.SIDScratchDirs(), name) {
+				invalid++
+			}
 			continue
 		}
 		if _, _, ok := gather.ParseCrumbName(name); ok {

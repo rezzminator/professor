@@ -735,28 +735,28 @@ func ooxmlExtensionKind(source string) (string, bool) {
 
 func isChallenge(body []byte, status int) bool {
 	low := strings.ToLower(string(body))
-	// Strong, specific bot-wall phrases (mirrors the retired Python net.py's
-	// _CHALLENGE_PHRASES) flag at any body length — plus copy that list lacks:
-	// Cloudflare's "Sorry, you have been blocked" (error 1020) page and the
-	// forum reCAPTCHA wall ("prove your humanity", "blocked by network …").
-	for _, marker := range []string{"just a moment", "checking your browser", "checking your browser before", "cf-browser-verification", "cf-chl-", "are you a robot", "confirm you are a human", "enable javascript and cookies", "captcha challenge", "completing the captcha", "verify you are human", "verifying you are human", "sorry, you have been blocked", "why have i been blocked", "attention required! | cloudflare", "prove your humanity", "blocked by network security", "blocked due to a network policy"} {
+	// Strong bot-wall phrases (net.py's _CHALLENGE_PHRASES plus Cloudflare's
+	// "blocked" page) flag at any length; forum phrases below need corroboration.
+	for _, marker := range []string{"just a moment", "checking your browser", "checking your browser before", "cf-browser-verification", "cf-chl-", "are you a robot", "confirm you are a human", "enable javascript and cookies", "captcha challenge", "completing the captcha", "verify you are human", "verifying you are human", "sorry, you have been blocked", "why have i been blocked", "attention required! | cloudflare"} {
 		if strings.Contains(low, marker) {
 			return true
 		}
 	}
-	weakMarkers := []string{challengeMarkerCaptcha, challengeMarkerCloudflare, "turnstile", "attention required"}
-	if contentChars(string(body)) <= 4000 {
-		for _, marker := range weakMarkers {
+	short := contentChars(string(body)) <= 4000
+	cf403 := status == http.StatusForbidden || status == http.StatusServiceUnavailable
+	// A Cloudflare interstitial can ship KBs of CSS past the short gate.
+	if short || cf403 {
+		for _, marker := range []string{challengeMarkerCaptcha, challengeMarkerCloudflare, "turnstile", "attention required"} {
 			if strings.Contains(low, marker) {
 				return true
 			}
 		}
-	} else if status == http.StatusForbidden || status == http.StatusServiceUnavailable {
-		// A real Cloudflare interstitial ships several KB of inline CSS, well
-		// past the short-body heuristic above — but a 403/503 carrying ANY
-		// Cloudflare marker is never a legitimate long article, so the length
-		// gate does not apply for these two status codes.
-		for _, marker := range weakMarkers {
+	}
+	// Forum phrases ("prove your humanity", "blocked by network security",
+	// "blocked due to a network policy") need a 403/429/503, a short body, or a captcha widget.
+	if cf403 || status == http.StatusTooManyRequests || contentChars(string(body)) < 4000 ||
+		hasCaptchaWidgetMarkup(low) {
+		for _, marker := range []string{"prove your humanity", "blocked by network security", "blocked due to a network policy"} {
 			if strings.Contains(low, marker) {
 				return true
 			}

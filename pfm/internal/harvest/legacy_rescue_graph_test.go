@@ -282,19 +282,94 @@ func forumWallFixture(phrase string) string {
 		"<div class=\"g-recaptcha\" data-sitekey=\"fixture\"></div></body></html>"
 }
 
-func TestForumWallPhrasesAreAChallengeAtAnyLength(t *testing.T) {
+// forumArticleFixture reproduces a long real page (a Reddit thread, a news
+// article) that merely quotes or discusses a bot-wall phrase in passing —
+// HTTP 200, well past the 4000-char short-body gate, no captcha widget. A
+// page like this is content, never a wall, even though it contains the exact
+// phrase text.
+func forumArticleFixture(phrase string) string {
+	return "<html><head><title>Forum thread</title></head><body><h1>Outage megathread</h1>" +
+		"<p>Yesterday several members reported seeing the message \"" + phrase + "\" when the site's edge provider had a bad rollout. " +
+		strings.Repeat("Replies debated the outage at length, sharing screenshots, timestamps and workarounds. ", 80) +
+		"</p></body></html>"
+}
+
+// forumArticleCaptchaWordFixture reproduces a long real page that discusses
+// the wall AND uses the plain prose word "captcha" ("they made me solve a
+// captcha to prove your humanity...") — no actual widget markup, so it must
+// stay content: the corroboration check requires widget MARKUP, never the
+// bare word, or this exact case (a Reddit thread describing the wall) would
+// still be misflagged.
+func forumArticleCaptchaWordFixture(phrase string) string {
+	return "<html><head><title>Forum thread</title></head><body><h1>Outage megathread</h1>" +
+		"<p>One reply read: \"they made me solve a captcha to " + strings.ToLower(phrase) + " before it let me post.\" " +
+		strings.Repeat("Other replies debated the outage at length, sharing screenshots and workarounds. ", 80) +
+		"</p></body></html>"
+}
+
+// TestForumWallPhrasesNeedCorroboration pins isChallenge's rule for the forum
+// wall phrases ("prove your humanity", "blocked by network security",
+// "blocked due to a network policy"): unlike the length-independent strong
+// phrases, these three are ALSO the exact words a long real page uses when it
+// merely quotes or discusses the wall (a Reddit thread, a news article) — so
+// they only count as a challenge when something else corroborates it: a
+// 403/429/503 status, a short body, or an actual captcha widget in the
+// markup. A long HTTP-200 page that merely quotes a phrase is content.
+func TestForumWallPhrasesNeedCorroboration(t *testing.T) {
+	type row struct {
+		name          string
+		body          string
+		status        int
+		wantChallenge bool
+	}
+	var rows []row
 	for _, phrase := range []string{
 		"Prove your humanity",
 		"You've been blocked by network security.",
 		"Your request has been blocked due to a network policy.",
 	} {
-		t.Run(phrase, func(t *testing.T) {
-			wall := forumWallFixture(phrase)
-			if contentChars(wall) <= 4000 {
-				t.Fatalf("fixture must exceed the 4000-char weak-marker gate, got %d", contentChars(wall))
-			}
+		article := forumArticleFixture(phrase)
+		if contentChars(article) <= 4000 {
+			t.Fatalf("%q: article fixture must exceed the 4000-char gate, got %d", phrase, contentChars(article))
+		}
+		rows = append(rows, row{
+			name: phrase + "/long 200 article quoting it", body: article, status: http.StatusOK, wantChallenge: false,
+		})
+	}
+	// One representative phrase covers the corroborating-signal rows; the
+	// per-phrase loop above is what pins the false-positive fix itself.
+	const phrase = "Prove your humanity"
+	shortWall := "<html><head><title>Forum</title></head><body><h1>" + phrase + "</h1></body></html>"
+	if contentChars(shortWall) >= 4000 {
+		t.Fatalf("short wall fixture must be under the 4000-char gate, got %d", contentChars(shortWall))
+	}
+	widgetWall := forumWallFixture(phrase) // carries a g-recaptcha div
+	if contentChars(widgetWall) <= 4000 {
+		t.Fatalf("widget wall fixture must exceed the 4000-char gate, got %d", contentChars(widgetWall))
+	}
+	longArticle := forumArticleFixture(phrase)
+	captchaWordArticle := forumArticleCaptchaWordFixture(phrase)
+	if contentChars(captchaWordArticle) <= 4000 {
+		t.Fatalf(
+			"captcha-word article fixture must exceed the 4000-char gate, got %d",
+			contentChars(captchaWordArticle),
+		)
+	}
+	rows = append(rows,
+		row{name: "short 200 wall page", body: shortWall, status: http.StatusOK, wantChallenge: true},
+		row{name: "long 403", body: longArticle, status: http.StatusForbidden, wantChallenge: true},
+		row{name: "long 429", body: longArticle, status: http.StatusTooManyRequests, wantChallenge: true},
+		row{name: "long 200 with a reCAPTCHA widget", body: widgetWall, status: http.StatusOK, wantChallenge: true},
+		row{
+			name: "long 200 thread quoting the phrase and the plain word captcha", body: captchaWordArticle,
+			status: http.StatusOK, wantChallenge: false,
+		},
+	)
+
+	for _, tc := range rows {
+		t.Run(tc.name, func(t *testing.T) {
 			wallTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-				return response(request, http.StatusOK, "text/html", wall), nil
+				return response(request, tc.status, "text/html", tc.body), nil
 			})
 			missingTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 				return response(request, http.StatusNotFound, "application/json", `{}`), nil
@@ -311,12 +386,6 @@ func TestForumWallPhrasesAreAChallengeAtAnyLength(t *testing.T) {
 				BrowserRung: browserOff(),
 			})
 			result := h.Fetch(context.Background(), "https://forum.example.test/r/thread/1")
-			if result.Error == "" {
-				t.Fatalf("forum wall returned as a SUCCESS: method=%q rungs=%v", result.Method, result.Rungs)
-			}
-			if !result.Challenge || !strings.Contains(strings.ToLower(result.Error), "challenge") {
-				t.Fatalf("forum wall not reported as a challenge failure: %#v", result)
-			}
 			var artifacts []string
 			_ = filepath.Walk(h.options.CacheDir, func(path string, info os.FileInfo, err error) error {
 				if err == nil && info != nil && !info.IsDir() && filepath.Base(path) != "stats.jsonl" {
@@ -324,8 +393,27 @@ func TestForumWallPhrasesAreAChallengeAtAnyLength(t *testing.T) {
 				}
 				return nil
 			})
-			if len(artifacts) != 0 {
-				t.Fatalf("forum wall entered the positive cache: %#v", artifacts)
+			if tc.wantChallenge {
+				if result.Error == "" {
+					t.Fatalf(
+						"wanted a challenge failure, got a SUCCESS: method=%q rungs=%v",
+						result.Method,
+						result.Rungs,
+					)
+				}
+				if !result.Challenge || !strings.Contains(strings.ToLower(result.Error), "challenge") {
+					t.Fatalf("wanted a challenge failure: %#v", result)
+				}
+				if len(artifacts) != 0 {
+					t.Fatalf("challenge entered the positive cache: %#v", artifacts)
+				}
+			} else {
+				if result.Error != "" || result.Challenge {
+					t.Fatalf("wanted plain content, got a challenge failure: %#v", result)
+				}
+				if len(artifacts) == 0 {
+					t.Fatalf("real content never entered the cache: %#v", result)
+				}
 			}
 		})
 	}

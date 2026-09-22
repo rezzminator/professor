@@ -138,6 +138,27 @@ const (
 	resultDetailError          = "error"
 )
 
+// forumWallWidgetMarkers are markup signals for an actual captcha widget — a
+// reCAPTCHA/hCaptcha/Turnstile script src or class attribute — never a prose
+// word like "captcha" alone, which a real article discussing a wall can use
+// in passing without embedding the widget itself.
+var forumWallWidgetMarkers = []string{
+	"g-recaptcha", "recaptcha/api.js",
+	"h-captcha", "hcaptcha.com/1/api.js",
+	"cf-turnstile", "challenges.cloudflare.com/turnstile",
+}
+
+// hasCaptchaWidgetMarkup reports whether low (an already-lowercased body)
+// embeds an actual captcha widget, by its script src or class markup.
+func hasCaptchaWidgetMarkup(low string) bool {
+	for _, marker := range forumWallWidgetMarkers {
+		if strings.Contains(low, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 // ProvenanceReferer is the Referer every page-facing request sends — the web
 // ladder's direct and chrome rungs, the browser rung's navigation, the image
 // loop and the app-shell probe: a visitor arriving from a search result. Some

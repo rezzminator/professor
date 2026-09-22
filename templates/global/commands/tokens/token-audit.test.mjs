@@ -98,6 +98,47 @@ test("--flight: a ledger row with no transcript AND a transcript with no ledger 
   assert.match(f.md, /## unmatched/);
 });
 
+test("--flight: an UNMATCHED transcript carries its price, and the total names the unledgered spend", () => {
+  const f = flight("flight");
+  const d4 = f.json.unmatched.find((u) => u.startsWith("TRANSCRIPT") && u.includes("d4"));
+  assert.match(d4 || "", /\$\d+\.\d{2}/, `the unmatched d4 line must carry its dollars: ${d4}`);
+  assert.ok(f.json.unledgered && f.json.unledgered.n >= 1 && f.json.unledgered.usd > 0, `unledgered spend missing from the JSON: ${JSON.stringify(f.json.unledgered)}`);
+  assert.match(f.md, /unledgered \d+ transcript\(s\) under this flight's session · \$\d+\.\d{2} — the flight's spend is \$\d+\.\d{2}/);
+});
+
+// A sub-agent that spins on `true` while Claude Code writes a total_tokens_reminder attachment
+// after every tool result: the attachment must never hide the Bash call that triggered the next one.
+function attachmentPollFlight() {
+  const root = fs.mkdtempSync(path.join(TMP, "att-root-")), sub = path.join(root, "-tmp-att-proj", "sess-att", "subagents");
+  fs.mkdirSync(sub, { recursive: true });
+  fs.writeFileSync(path.join(root, "-tmp-att-proj", "sess-att.jsonl"), JSON.stringify({ type: "user", timestamp: "2026-09-20T09:00:00.000Z", cwd: "/tmp/att-proj", message: { content: "run the flight" } }) + "\n");
+  fs.writeFileSync(path.join(sub, "agent-p1.meta.json"), JSON.stringify({ agentType: "executor", description: "task 1-p", spawnDepth: 1 }));
+  const at = (s) => new Date(Date.parse("2026-09-20T09:01:00.000Z") + s * 1000).toISOString();
+  const lines = [{ type: "user", timestamp: at(0), cwd: "/tmp/att-proj", message: { content: "task 1-p brief" } }];
+  for (let i = 0; i < 10; i++) {
+    const cmd = i === 0 ? "go -C pfm test ./internal/doctor/ -run TestX" : "true";
+    lines.push({ type: "assistant", timestamp: at(10 + i * 2), cwd: "/tmp/att-proj", requestId: `rq${i}`, message: { id: `m${i}`, model: "claude-sonnet-5",
+      content: [{ type: "tool_use", id: `t${i}`, name: "Bash", input: { command: cmd } }],
+      usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 5000 + i * 100, cache_creation_input_tokens: 100, cache_creation: { ephemeral_5m_input_tokens: 100, ephemeral_1h_input_tokens: 0 } } } });
+    lines.push({ type: "user", timestamp: at(11 + i * 2), cwd: "/tmp/att-proj", message: { content: [{ type: "tool_result", tool_use_id: `t${i}`, content: "", is_error: false }] } });
+    lines.push({ type: "attachment", timestamp: at(11 + i * 2), cwd: "/tmp/att-proj", attachment: { type: "total_tokens_reminder", content: "tokens left" } });
+  }
+  fs.writeFileSync(path.join(sub, "agent-p1.jsonl"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const dir = fs.mkdtempSync(path.join(TMP, "att-flight-"));
+  fs.writeFileSync(path.join(dir, "agents.tsv"), "1-p\texecutor\tp1\t1\t2026-09-20T09:01:00.000Z\tclaude\n");
+  return { root, dir };
+}
+
+test("--flight: a Bash poll is counted even when a harness attachment follows every tool result", () => {
+  const { root, dir } = attachmentPollFlight();
+  const f = flight(dir, ["--root", root]);
+  assert.equal(f.code, 0, f.err);
+  const p = rowOf(f.json, "1-p");
+  assert.ok(p, `1-p must match its transcript: ${JSON.stringify(f.json.unmatched)}`);
+  // a poll is billed on the call its result triggers: nine `true` results, the last one ends the run
+  assert.equal(p.pollN, 8, `the eight calls triggered by a repeated \`true\` are polls, got pollN ${p.pollN}`);
+});
+
 test("--flight: the call cap comes from the agent type name — executor 80, gater 150", () => {
   const j = flight("flight").json;
   const d = rowOf(j, "1-d"), e = rowOf(j, "1-e");

@@ -1,7 +1,7 @@
 ---
 name: flights-speccer
 description: Turns one flight's unspecified work into an execution-ready spec directory — one self-contained task file per executor plus an index of order, dependencies, contention and difficulty. Delegate when work arrives without specs (a batch, a failure with an unknown cause, a design to choose), or to rewrite the rest of a spec directory after a SPEC-DRIFT or FAILED report. Pass what needs doing and where (required), plus whatever you hold: requirements, acceptance criteria, rulings already made, maps and findings, boundaries, the standing rules the executors work under, the directory to write into under /tmp/{project}/flights/. Pass content, never a format — its output shape is fixed. A small flight (a few tasks, no unknown cause, no design to choose) passes `model: "opus"` on the spawn. Returns the directory path, the index table and any BLOCKED task with its one question. Changes no code.
-model: fable # apex default — retune to your model tier
+model: fable
 effort: high
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent
 ---
@@ -89,7 +89,7 @@ files: [src/accounts/repository.ts, src/accounts/repository.test.ts, src/api/rou
 ```
 
 - Goal: the deliverable and why it exists, two sentences at most; then `Never:` what is out of scope and which approaches are forbidden.
-- Done when: a matrix `scenario · input or state · expected behaviour · error handling`, one row per case including the failures, then `Given … when … then …` lines for what the matrix cannot hold; behaviour only, never a command; a row the project's manual places in a tier names that tier, and a floor the manual sets is a row. How a row is proven is the executor's law and is never written here.
+- Done when: a matrix `scenario · input or state · expected behaviour · error handling`, one row per case including the failures, then `Given … when … then …` lines for what the matrix cannot hold; behaviour only, never a command; a row the project's manual places in a tier names that tier, and a floor the manual sets is a row. How a row is proven is the executor's law and is never written here. The flight's own checks — the full suite, the static gate, "the flight green" — belong to the gate: never a task, never a row.
 - Progress dependency: what the needed tasks must have landed for this task to make sense — only facts whose absence breaks the rest of the directory; the executor checks them before step 1. A detail the executor can adapt to stays out.
 - Files: every file the task creates, edits or deletes, each with its action; the same paths, actions stripped, are the frontmatter's `files`. A rename or a deletion lists every reference, docs and tests included. The test home the manual assigns (the owning test file, extended before a new one is added) and every lane or registry file it demands in the same change are listed.
 - Decisions: every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text.

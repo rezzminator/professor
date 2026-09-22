@@ -805,6 +805,30 @@ func (engine *Engine) injectResolved(
 		}
 	}
 
+	// Claude's agents panel can hold the keyboard under an empty composer. One
+	// Escape hands focus back without touching the turn; a panel that keeps it is
+	// refused by name, never typed into.
+	if agentPanelFocused(capture) {
+		if err := engine.tmux.SendKey(ctx, target.SocketPath, target.Pane, "Escape"); err != nil {
+			return Result{}, err
+		}
+		engine.sleepContext(ctx, engine.options.Poll)
+		capture, err = engine.capture(ctx, target, 0)
+		if err != nil {
+			base.Code = CodeDead
+			base.Message = "target pane died while leaving the agents panel"
+			return base, nil
+		}
+		if agentPanelFocused(capture) {
+			base.Code = CodeUndelivered
+			base.Message = fmt.Sprintf(
+				"ABORT: %q has its agents panel focused and Escape did not return focus to the composer; nothing was typed",
+				target.Pane,
+			)
+			return base, nil
+		}
+	}
+
 	// A human at the keyboard is not a safe queue surface, busy or idle: C-s
 	// below protects a PARKED draft, never a live keystroke, and the second
 	// Enter this engine used to send is exactly what let an operator's next

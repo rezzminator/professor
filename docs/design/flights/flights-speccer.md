@@ -146,7 +146,7 @@ Frontmatter carries `id`, `title`, `rating`, `needs`, `shares`, `reads` and `fil
 | Section | Holds | Prevents |
 | --- | --- | --- |
 | `Goal` | The deliverable and why it exists, two sentences at most, then a `Never:` line: what is out of scope and which approaches are forbidden | An executor wandering before it knows the finish line, or past the fence |
-| `Done when` | A matrix of scenarios (scenario · input or state · expected behaviour · error handling), then Given/When/Then lines for what the matrix cannot hold; behaviour only, never a command; closed by the fixed audit line | A task with no finish line; an acceptance command predicted for code that does not exist yet |
+| `Done when` | A matrix of scenarios (scenario · input or state · expected behaviour · error handling), then Given/When/Then lines for what the matrix cannot hold; behaviour only, never a command; closed by the fixed audit line; the flight's own checks (the full suite, the static gate, "the flight green") are the gate's, never a task's | A task with no finish line; an acceptance command predicted for code that does not exist yet; a "make the whole flight green" task that runs the gate's checks a second time |
 | `Progress dependency` | The drift instruction, then what the needed tasks must have landed | A whole directory drifting on a false premise |
 | `Files` | Every file created, edited or deleted, with its action; a rename or deletion lists every reference, docs and tests included | Out-of-scope edits, half-finished renames and deletions |
 | `Decisions` | Every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text | The executor re-deciding the design |

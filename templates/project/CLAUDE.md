@@ -5,6 +5,7 @@
 Before your first tool call, count the tasks in your brief. A task is one deliverable with its own files and its own acceptance check; items landing in the same file or the same small module are one task, however many bullets list them.
 
 - A brief naming a task file: open it together with the shared files named beside it, in your first message, and execute it.
+- A brief carrying the user's ruling to skip the ceremony (no `flights-speccer`, no orchestrator): do it yourself, start to finish, whatever its size.
 - One task you can see how to do — the brief plus one look at the target tells you which files change and how: do it yourself, start to finish.
 - Anything else — a task you cannot see how to do (a failure with an unknown cause, a design to choose, files you cannot name) or a batch of several tasks: your first tool call spawns `flights-speccer` (Agent tool, `subagent_type: flights-speccer`), handing it the work, everything you already hold and a directory under `/tmp/{project}/flights/`. Its return is your orders: a directory of one task file you execute yourself; of several, you execute none and hand the directory to `flights-orchestrator` (Agent tool, `subagent_type: flights-orchestrator`), which runs one fresh executor per task file and returns once. Below opus you never write a spec yourself.
 - ✓ "Fix these five things in `ledger.mjs` and update its README" is one task: read it, fix it, test it — no `flights-speccer`, no spawn.

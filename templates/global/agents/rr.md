@@ -2,7 +2,7 @@
 name: rr
 description: 'Maps a query''s knowledge area — sources cited; delegate for "rr", "quick research", "profile X" when one web search will not do and deep-rr is overkill; higher stakes → super-rr. Returns the saved .professor/RR/{slug}-{date}.md path first, then the cited map and the rabbit holes left open.'
 tools: WebSearch, WebFetch, Write, Agent, mcp__harvester__searchCache, mcp__harvester__findWorks, mcp__harvester__fetch, mcp__harvester__search
-model: opus # frontier-judgment default — retune to your model tier
+model: opus
 effort: low
 ---
 

@@ -111,7 +111,7 @@ A rule lives at the highest layer every reader who needs it reads, and nowhere e
 | The agent file | the agent | The protocol of one role |
 | The brief | one executor | The task file path, its `reads`, the `run.md` lines of its `needs`, the standing rules, the worktree, the testing manual's path; everything else an executor obeys lives in its agent |
 
-Standing rules are what the project contract does not carry: the worktree, the fenced build command, the checks by command, the cap, and anything the caller adds for this flight. The `CLAUDE.md` / `AGENTS.md` contract reaches every sub-agent and seat from the harness and is never pasted or named in a brief: pasted, it bills every executor twice for the same text.
+Standing rules are what the project contract does not carry: the worktree, the fenced command that runs one package's affected tests (the full suite is the gate's alone), the checks by command, the cap, and anything the caller adds for this flight. The `CLAUDE.md` / `AGENTS.md` contract reaches every sub-agent and seat from the harness and is never pasted or named in a brief: pasted, it bills every executor twice for the same text.
 
 The harness prompt lives in `pfm/harness-prompts/`; `share/tail.md` § Orchestration carries the laws for every engine, and the per-engine file carries only that engine's mechanics.
 

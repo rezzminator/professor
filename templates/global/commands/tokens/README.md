@@ -129,7 +129,13 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
   lines are the fallback and every row is marked `window`. A header with no parseable instant is
   a hard error — the tool never invents a window.
 - A ledger row with no transcript, and a transcript inside the window under this flight's parent
-  with no ledger row, are both listed under `UNMATCHED`. Neither is dropped.
+  with no ledger row, are both listed under `UNMATCHED`. Neither is dropped: each unmatched
+  transcript carries its price, and the flight total adds an `unledgered` line — their count, their
+  dollars and the flight's whole spend — so a speccer, an orchestrator or a skill-spawned review
+  missing from `agents.tsv` never halves the headline.
+- A poll is a Bash call repeated 8 or more times in one run, or a `sleep` / `wait` / `tail -f`,
+  counted on the call its result triggers; a harness attachment written after a tool result
+  (`total_tokens_reminder`) is never the trigger.
 - The call cap comes from the agent type name: a `gater` is capped at 150, everything else at 80.
 
 ## Tests

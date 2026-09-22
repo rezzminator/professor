@@ -234,7 +234,8 @@ function auditFile(file) {
         if (rest > 0 && tot > 0) for (const p of pending) { const t = rest * p.chars / tot; push(p.cat, t); if (p.tool && t > 8000) landed.push({ tool: p.tool, target: p.target, tok: t, at: R.calls, m }); }
         else if (rest > 0) push(C_UNEXPL, rest); } }
     compactPending = false;
-    const trigger = pending.length ? pending[pending.length - 1] : null, longest = pending.reduce((a, p) => (p.dur > (a?.dur || 0) ? p : a), null);
+    // a harness attachment (total_tokens_reminder) lands after most tool results: context, never the trigger
+    const trigger = pending.findLast((p) => !p.att) || null, longest = pending.reduce((a, p) => (p.dur > (a?.dur || 0) ? p : a), null);
     const pendChars = pending.reduce((a, p) => a + p.chars, 0), onlyTools = pending.length > 0 && pending.every((p) => p.tool || p.att);
     pending = []; prevOut = out;
     if (ts < SINCE) { prev = { ctx, ts, m }; continue; }
@@ -589,13 +590,16 @@ if (FLIGHT) {
     if (!run) { unmatched.push(`LEDGER ROW ${led.taskId} · ${led.agentType || "?"} · id ${led.agentId || "(none)"} · engine ${led.engine} · no transcript found in the window`); continue; }
     rows.push({ led, run, how });
   }
-  // A transcript inside the window with no ledger row is a hole in the ledger, never a drop.
-  const parents = new Set(rows.map((x) => x.run.sid).filter(Boolean));
-  for (const r of claudeAgents) if (!takenClaude.has(r.agentId) && parents.has(r.sid) && r.t0 >= SINCE) unmatched.push(`TRANSCRIPT ${r.agentType || "agent"} · claude · ${r.agentId.slice(0, 12)} · ${new Date(r.t0).toISOString().slice(0, 16)} · ran under this flight's session with no ledger row`);
-  for (const c of cxCand) if (!takenCodex.has(c.file) && parents.has(String(c.meta?.parent_thread_id || c.meta?.session_id || "")) ) unmatched.push(`TRANSCRIPT ${c.role || "codex"} · codex · ${String(c.ids[0]).slice(-12)} · ${new Date(c.at).toISOString().slice(0, 16)} · ran under this flight's thread with no ledger row`);
-
   const K = (v) => (v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1000 ? Math.round(v / 1000) + "K" : String(Math.round(v)));
   const cash = (r) => (r.unpriced ? "n/a" : "$" + r.usd.toFixed(2));
+  // A transcript inside the window with no ledger row is a hole in the ledger, never a drop:
+  // it is priced, so a speccer, an orchestrator or a skill-spawned review never vanishes from the spend.
+  const parents = new Set(rows.map((x) => x.run.sid).filter(Boolean)), unledgered = [];
+  for (const r of claudeAgents) if (!takenClaude.has(r.agentId) && parents.has(r.sid) && r.t0 >= SINCE) { unledgered.push(r);
+    unmatched.push(`TRANSCRIPT ${r.agentType || "agent"} · claude · ${r.agentId.slice(0, 12)} · ${new Date(r.t0).toISOString().slice(0, 16)} · ${cash(r)} · ran under this flight's session with no ledger row`); }
+  for (const c of cxCand) if (!takenCodex.has(c.file) && parents.has(String(c.meta?.parent_thread_id || c.meta?.session_id || "")) ) { const r = auditCx(c); unledgered.push(r);
+    unmatched.push(`TRANSCRIPT ${c.role || "codex"} · codex · ${String(c.ids[0]).slice(-12)} · ${new Date(c.at).toISOString().slice(0, 16)} · ${cash(r)} · ran under this flight's thread with no ledger row`); }
+  const U = { n: unledgered.length, usd: unledgered.reduce((a, r) => a + (r.unpriced ? 0 : r.usd), 0), unpriced: unledgered.filter((r) => r.unpriced).length };
   const mins = (r) => (r.t1 && r.t0 ? Math.round((r.t1 - r.t0) / 60e3) + "m" : "?");
   const growth = (r) => (r.calls ? K(Math.max(0, r.ctxPeak - r.ctxFirst) / r.calls) : "?");
   const out = [];
@@ -622,7 +626,8 @@ if (FLIGHT) {
   const T = fold(rows);
   out.push("", "## flight total", "",
     `${T.n} agents · ${T.calls} calls · peak context ${K(T.peak)} · input ${K(T.in)} · cached ${K(T.cr)} · output ${K(T.out)} · **$${T.usd.toFixed(2)}**${T.unpriced ? ` + ${T.unpriced} unpriced agent(s) at "n/a" (their tokens ARE above, their dollars are NOT)` : ""}`,
-    `failed commands ${T.fail} · poll calls ${T.poll} · re-reads ${T.reread} · contract-file reads ${T.contract} · compactions ${T.compact} · over cap ${T.over} of ${T.n}`, "",
+    `failed commands ${T.fail} · poll calls ${T.poll} · re-reads ${T.reread} · contract-file reads ${T.contract} · compactions ${T.compact} · over cap ${T.over} of ${T.n}`,
+    ...(U.n ? [`unledgered ${U.n} transcript(s) under this flight's session · $${U.usd.toFixed(2)}${U.unpriced ? ` + ${U.unpriced} n/a` : ""} — the flight's spend is $${(T.usd + U.usd).toFixed(2)} (see the unmatched section)`] : []), "",
     "## three most expensive agents", "");
   for (const { led, run } of sorted.slice(0, 3)) out.push(`- ${cash(run)} · ${led.taskId} · ${led.agentType || run.agentType || "?"} · ${run.engine} · ${run.calls} calls · peak ${K(run.ctxPeak)} · ${mins(run)}`);
   out.push("", "## unmatched", "");
@@ -645,7 +650,7 @@ if (FLIGHT) {
     fs.writeFileSync(OUT, JSON.stringify({ v: 1, flight: path.basename(dir), source: FLIGHT_PLAN.source, baseline: FLIGHT_PLAN.baseline, window: [startISO, endISO], scan: SCAN, total: T,
       rows: sorted.map(({ led, run, how }) => ({ ...led, how, engine: run.engine, model: run.model, calls: run.calls, wallMs: run.t1 - run.t0, ctxFirst: run.ctxFirst, ctxPeak: run.ctxPeak,
         tok: run.tok, usd: run.unpriced ? null : +run.usd.toFixed(4), failedCmds: run.failedCmds, pollN: run.pollN, rereadN: run.rereadN, contractReads: run.contractReads, compactions: run.resets,
-        overCap: run.calls > capFor(led.agentType || run.agentType) })), unmatched }, null, 1));
+        overCap: run.calls > capFor(led.agentType || run.agentType) })), unmatched, unledgered: { n: U.n, usd: +U.usd.toFixed(4), unpriced: U.unpriced } }, null, 1));
     console.log(`full data → ${OUT}`); }
   // UNMATCHED is a reported condition, not a failure. A read error is: it means we failed
   // to LOOK, and a report built over a root we could not read must not read as success.

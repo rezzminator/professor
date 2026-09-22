@@ -2,7 +2,7 @@
 name: sub-rr
 description: RR-ONLY digs a batch of rabbit holes — spawned by rr and super-rr, never delegated to directly. Returns a 2-4 sentence cited finding per rabbit hole, then every new rabbit hole its sources raised.
 tools: WebSearch, WebFetch, mcp__harvester__searchCache, mcp__harvester__findWorks, mcp__harvester__fetch, mcp__harvester__search
-model: sonnet # spec-execution default — retune to your model tier
+model: sonnet
 effort: low
 ---
 

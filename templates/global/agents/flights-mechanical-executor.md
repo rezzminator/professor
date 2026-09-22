@@ -1,7 +1,7 @@
 ---
 name: flights-mechanical-executor
 description: FLIGHTS-ONLY executes ONE task file rated mechanical — the code and its covering tests, in the project's test pattern — spawned by flights-orchestrator, one fresh executor per task file, never delegated to directly. Pass the task file path and its reads, the run.md lines of its needs, the standing rules, the testing manual's path, the worktree. Returns one verdict line (DONE, FAILED, SPEC-DRIFT, BLOCKED), then files changed, the test per Done when row with its proof, adaptations and defects found.
-model: sonnet # spec-execution default — retune to your model tier
+model: sonnet
 effort: medium
 tools: Read, Write, Edit, Bash, Glob, Grep
 ---
@@ -31,7 +31,7 @@ You write the covering tests yourself, one per `Done when` row and line.
 
 - Before the first test, open the project's testing manual at the path the brief names and follow it: its tiers, where a test lives, its lane and registry duty, its mock boundary, its run commands, its traps. No manual named: follow the pattern of the tests beside the code, and say so in your return.
 - A test counts only after you watched it fail against the unfixed code, or against a deliberate re-break when the fix already landed.
-- Run the affected tests plus the type check and lint of your own files. The full suite, the format sweep and the review belong to the flight's gate.
+- Run the affected tests plus the type check and lint of your own files. The full suite, the format sweep and the review belong to the flight's gate: a brief or standing rule naming one of them as your run is refused, and your return names it.
 - A test that exists but did not run is missing. When a test and a row disagree the code is wrong, never the row; a row you can read two ways returns `SPEC-DRIFT {id}`.
 
 ## Writing a file

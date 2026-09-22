@@ -124,7 +124,7 @@ go_test_report() {
   if [[ -z "$(jq -r 'select(.Test != null) | .Test' "$json" 2>/dev/null | head -1)" ]]; then
     fail_step "test report: NO TEST EVENTS — the stream holds no test event; the run crashed, was killed, or failed to build"
     jq -r 'select(.Action=="output") | .Output' "$json" 2>/dev/null \
-      | grep -vE '^[[:space:]]*$' | tail -n "$cap" | trim_line "$chars" | sed 's/^/        /'
+      | grep -vE '^[[:space:]]*$' | tail -n "$cap" | trim_line "$chars" | sed 's/^/        /' || true
     info "log: $abs"; return
   fi
   local failed failpkgs pkg test body total n=0
@@ -140,7 +140,7 @@ go_test_report() {
         | grep -vE '^(=== (RUN|PAUSE|CONT)|( *)--- (PASS|FAIL|SKIP))|^[[:space:]]*$' || true)"
       if [[ -n "$body" ]]; then
         total=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
-        printf '%s\n' "$body" | head -n "$cap" | trim_line "$chars" | sed 's/^/        /'
+        printf '%s\n' "$body" | head -n "$cap" | trim_line "$chars" | sed 's/^/        /' || true
         (( total > cap )) && printf '        (+%d more output line(s) in the log)\n' "$((total - cap))"
       fi
     done <<< "$failed"
@@ -151,7 +151,7 @@ go_test_report() {
     n=$((n + 1))
     printf '  FAIL  %s — the package failed with no failing test (build or setup error)\n' "$pkg"
     jq -r --arg p "$pkg" 'select(.Action=="output" and .Package==$p and .Test==null) | .Output' "$json" \
-      | grep -vE '^(ok|FAIL|PASS)|^[[:space:]]*$' | head -n "$cap" | trim_line "$chars" | sed 's/^/        /'
+      | grep -vE '^(ok|FAIL|PASS)|^[[:space:]]*$' | head -n "$cap" | trim_line "$chars" | sed 's/^/        /' || true
   done <<< "$failpkgs"
   (( n > 0 )) && info "$n failing test(s)/package(s) summarised above, capped at $cap output line(s) each"
   info "log: $abs"
@@ -404,6 +404,13 @@ act_templates() { # the shipped product: mechanical gates, no build
         ok "codex-sync names unavailable compiler and retains dirty flag"
       else
         fail_step "codex-sync regression FAILED — unavailable compiler must be named and dirty flag retained"
+      fi
+
+      head_ "templates — go test report under pipefail"
+      if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then
+        ok "go_test_report reaches its log line on filtered and over-cap failure output"
+      else
+        fail_step "go_test_report regression FAILED — a failing stream aborted the report before its verdict (see output)"
       fi
 
       head_ "templates — native opencode mirror"

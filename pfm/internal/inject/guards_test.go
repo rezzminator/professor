@@ -105,6 +105,22 @@ func TestLastComposerLineUsesStructuralScreenOrder(t *testing.T) {
 			want:    "❯ ",
 		},
 		{
+			name: "the agents panel's selected main row is not the composer",
+			capture: "──────── OPUS ─\n❯ \n────────\n  ↑/↓ to select · Enter to view\n❯ ⏺ main\n" +
+				"  ◯ general-purpose (+3)  T1: port the pieces      12m 59s · ↓ 60.4k tokens",
+			want: "❯ ",
+		},
+		{
+			name:    "a selected agent row carrying a count is not the composer",
+			capture: "❯ \n❯ ◯ general-purpose (+3)  T1: port the pieces",
+			want:    "❯ ",
+		},
+		{
+			name:    "a draft that opens with a bullet stays a draft",
+			capture: "❯ \n❯ ⏺ mainly a typed note",
+			want:    "❯ ⏺ mainly a typed note",
+		},
+		{
 			name:    "mixed markers follow screen order",
 			capture: "❯ old output\n\x1b[2m› \x1b[0m",
 			want:    "\x1b[2m› \x1b[0m",

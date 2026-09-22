@@ -19,11 +19,16 @@ var (
 	// NAMED GAP: the Codex receipt spelling is unconfirmed, so a Codex
 	// compaction falls back to the turn-boundary path in waitForSettledTurn
 	// rather than being silently treated as proven.
-	compactReceipt    = regexp.MustCompile(`(?i)compacted \(|(?:context|conversation) compacted`)
-	menuHintPattern   = regexp.MustCompile(`(?i)enter to (confirm|continue|select)|esc to (cancel|go back)`)
-	ansiPattern       = regexp.MustCompile(`\x1b\[[0-?]*[\x20-\x2f]*[\x40-\x7e]`)
-	oscPattern        = regexp.MustCompile("\x1b\\][^\x07]*(\x07|\x1b\\\\)")
-	claudeAgentRow    = regexp.MustCompile(`^❯[[:space:]]+●[[:space:]]+[^[:space:]]+[[:space:]]{2,}[^[:space:]]`)
+	compactReceipt  = regexp.MustCompile(`(?i)compacted \(|(?:context|conversation) compacted`)
+	menuHintPattern = regexp.MustCompile(`(?i)enter to (confirm|continue|select)|esc to (cancel|go back)`)
+	ansiPattern     = regexp.MustCompile(`\x1b\[[0-?]*[\x20-\x2f]*[\x40-\x7e]`)
+	oscPattern      = regexp.MustCompile("\x1b\\][^\x07]*(\x07|\x1b\\\\)")
+	// A row of Claude's agents panel under the cursor: a status bullet, then the
+	// bare main row, or a name (a count such as "(+3)" may follow) and a
+	// two-space gap before its status.
+	claudeAgentRow = regexp.MustCompile(
+		`^❯[[:space:]]+[●⏺◯○][[:space:]]+(main[[:space:]]*$|[^[:space:]].*?[^[:space:]][[:space:]]{2,}[^[:space:]])`,
+	)
 	compactPattern    = regexp.MustCompile(`^[\s\v]*/compact([\s\v]|$)`)
 	queueProofPattern = regexp.MustCompile(
 		`(?i)press up to edit queued messages|queued messages?|pending messages?|message (will be|was) (queued|submitted)|submitted after (the )?next tool call`,

@@ -1,12 +1,16 @@
 package harvest
 
 import (
+	"context"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // Per-site tree extractors. A generic main-content extractor reduces a page
@@ -16,11 +20,13 @@ import (
 // states. Every other site keeps the generic path. To add a site, add one
 // entry here: the hosts it owns and an extract function that answers false
 // for any page that is not the shape it knows (a listing, a wall), so that
-// page falls through to the generic path.
+// page falls through to the generic path — and, when its pages hold loaders
+// for the rest of the tree, a loaders function Go follows them by
+// (loaders.go) before the extract function reads the page.
 
 // siteExtraction is one structure-aware rendering of a page. partial names
-// what the page could not supply (unexpanded loaders, a count mismatch); ""
-// when the rendering is complete.
+// what the page could not supply (loaders still unexpanded and what they
+// hide); "" when the rendering is complete.
 // renderMayComplete is set when at least one gap is a loader a browser render
 // presses, so the browser rung can close it.
 type siteExtraction struct {
@@ -33,12 +39,21 @@ type siteExtractor struct {
 	name    string
 	hosts   []string
 	extract func(doc *html.Node, source *url.URL) (siteExtraction, bool)
+	// loaders names the loaders still in a page of this site (loaders.go),
+	// in DOM order; nil when the site has none Go can follow.
+	loaders func(doc *html.Node, source *url.URL) []pageLoader
 	// pressLoaders: the browser rung may press this site's load-more buttons.
 	pressLoaders bool
 }
 
 var siteExtractors = []siteExtractor{
-	{name: "reddit-thread", hosts: []string{"reddit.com"}, extract: extractRedditThread, pressLoaders: true},
+	{
+		name:         "reddit-thread",
+		hosts:        []string{"reddit.com"},
+		extract:      extractRedditThread,
+		loaders:      redditLoaders,
+		pressLoaders: true,
+	},
 }
 
 // ownsHost reports whether extractor owns host (lowercased): the host itself
@@ -68,6 +83,36 @@ func SitePressesLoaders(source string) bool {
 		}
 	}
 	return false
+}
+
+// followForSite follows, in doc, the loaders of the extractor registered for
+// source's host (loaders.go). A nil budget (a conversion outside the web
+// ladder) and a host no extractor names loaders for leave doc as it is.
+func (h *Harvester) followForSite(ctx context.Context, source string, doc *html.Node, budget *loaderBudget) {
+	if budget == nil {
+		return
+	}
+	parsed, err := url.Parse(source)
+	if err != nil || parsed.Host == "" {
+		return
+	}
+	host := strings.ToLower(parsed.Hostname())
+	for _, extractor := range siteExtractors {
+		if extractor.loaders != nil && extractor.ownsHost(host) {
+			before := budget.requests
+			h.followLoaders(ctx, doc, parsed, extractor, budget)
+			if budget.requests > before || budget.stopped != "" {
+				state := fmt.Sprintf("%d followed, %d failed in the fetch", len(budget.followed), len(budget.failures))
+				obs.Logger(ctx).Info("harvest: loaders followed",
+					"kind", extractor.name,
+					"target", logSource(source),
+					"count", budget.requests-before,
+					"state", state,
+					"reason", budget.stopped)
+			}
+			return
+		}
+	}
 }
 
 // extractForSite runs the extractor registered for source's host. ok is false

@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	schemeHTTP    = "http"
-	schemeHTTPS   = "https"
-	headerAccept  = "Accept"
-	headerReferer = "Referer"
+	schemeHTTP        = "http"
+	schemeHTTPS       = "https"
+	headerAccept      = "Accept"
+	headerReferer     = "Referer"
+	headerContentType = "Content-Type"
 
 	extension7Z   = ".7z"
 	extensionBMP  = ".bmp"

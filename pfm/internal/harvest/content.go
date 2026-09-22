@@ -16,7 +16,7 @@ import (
 )
 
 func (h *Harvester) convertFetchedContent(ctx context.Context, kind, source string, body []byte) (string, error) {
-	converted, _, err := h.convertFetchedDocument(ctx, kind, source, body)
+	converted, _, err := h.convertFetchedDocument(ctx, kind, source, body, nil)
 	return converted, err
 }
 
@@ -30,11 +30,13 @@ type convertedPage struct {
 }
 
 // convertFetchedDocument is convertFetchedContent that also returns the
-// convertedPage of an HTML page.
+// convertedPage of an HTML page. budget is the web ladder's loader following
+// for this fetch (loaders.go); nil converts the page as it is.
 func (h *Harvester) convertFetchedDocument(
 	ctx context.Context,
 	kind, source string,
 	body []byte,
+	budget *loaderBudget,
 ) (string, convertedPage, error) {
 	if kind == kindTXT {
 		return string(body), convertedPage{}, nil
@@ -46,15 +48,21 @@ func (h *Harvester) convertFetchedDocument(
 		converted, err := h.options.Converter.Convert(ctx, kind, source, body)
 		return converted, convertedPage{}, err
 	}
-	return h.convertHTML(ctx, source, body)
+	return h.convertHTML(ctx, source, body, budget)
 }
 
 // convertHTML is the HTML half of the converter boundary: a per-site tree
-// extractor when one owns the page (site_extract.go); otherwise the inert-
+// extractor when one owns the page (site_extract.go), after the loaders of
+// that site were followed into the page (loaders.go); otherwise the inert-
 // container pre-pass (inert.go), the injected main-content converter, and the
 // recall gate over its output (recall.go). Every incompleteness it can see
 // travels as the partial marker on the content — never only as a log line.
-func (h *Harvester) convertHTML(ctx context.Context, source string, body []byte) (string, convertedPage, error) {
+func (h *Harvester) convertHTML(
+	ctx context.Context,
+	source string,
+	body []byte,
+	budget *loaderBudget,
+) (string, convertedPage, error) {
 	// generic is every generic-path answer: the recall gate or lazy loading
 	// flags what a browser render may complete.
 	generic := convertedPage{renderMayComplete: true}
@@ -71,10 +79,17 @@ func (h *Harvester) convertHTML(ctx context.Context, source string, body []byte)
 		return withPartial(converted, "recall unmeasured: the page could not be parsed ("+err.Error()+")"), generic, nil
 	}
 	lazy := lazyLoadIncomplete(doc)
+	h.followForSite(ctx, source, doc, budget)
 	if extraction, extractor, ok := extractForSite(source, doc); ok {
-		return withPartial(extraction.markdown, joinReasons(extraction.partial, lazy)), convertedPage{
-			extractor:         extractor,
-			renderMayComplete: extraction.renderMayComplete,
+		reason := extraction.partial
+		if reason != "" {
+			reason = joinReasons(reason, budget.note())
+		}
+		return withPartial(extraction.markdown, joinReasons(reason, lazy)), convertedPage{
+			extractor: extractor,
+			// A rate limit or the request cap ends the fetch's following; a
+			// browser render pressing the same loaders would work around it.
+			renderMayComplete: extraction.renderMayComplete && (budget == nil || !budget.policyStop),
 		}, nil
 	}
 	input := body

@@ -59,12 +59,14 @@ func inertSkippingConverter() Converter {
 }
 
 // pageHarvester serves page at every direct/chrome request (a sibling path
-// that cannot exist is a 404, as on a real server-rendered site) and answers
-// every reader rung with a 404.
+// that cannot exist is a 404, as on a real server-rendered site, and so is a
+// Reddit loader or "Continue this thread" request: the fixture page holds no
+// answer to one) and answers every reader rung with a 404.
 func pageHarvester(t *testing.T, page string, converter Converter, browserRung *bool) *Harvester {
 	t.Helper()
 	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if strings.Contains(request.URL.Path, appShellProbePrefix) {
+		if strings.Contains(request.URL.Path, appShellProbePrefix) ||
+			strings.HasPrefix(request.URL.Path, "/svc/") || strings.Contains(request.URL.Path, "/comment/") {
 			return response(
 				request,
 				http.StatusNotFound,
@@ -85,6 +87,7 @@ func pageHarvester(t *testing.T, page string, converter Converter, browserRung *
 		OA:          &http.Client{Transport: missing},
 		Converter:   converter,
 		BrowserRung: browserRung,
+		Clock:       newPacingClock(),
 	})
 }
 

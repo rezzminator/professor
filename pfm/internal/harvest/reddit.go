@@ -1,7 +1,9 @@
 package harvest
 
 import (
+	"bytes"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -15,16 +17,26 @@ import (
 // the browser rung) carries the post as <shreddit-post> and every comment as a
 // nested <shreddit-comment> whose attributes hold its author, score, depth and
 // id, and whose slot="comment" child holds its body. Branches the page did not
-// load sit behind <faceplate-partial src=".../more-comments/..."> loaders
-// ("N more replies", "View more comments"), and a reply chain past the page's
-// depth limit behind a visible "Continue this thread" link to a separate page
-// (every comment also carries a hidden copy of that link for its folded
-// state, which is not a gap). The extractor renders the post and
-// the tree in DOM order and reconciles the comments it rendered against the
-// count the thread states, naming every gap — deleted and removed stubs,
-// unexpanded loaders, and comments that are not in the page at all.
+// load sit behind <faceplate-partial src="/svc/shreddit/more-comments/...">
+// loaders ("N more replies", "View more comments"), and a reply chain past the
+// page's depth limit behind a visible "Continue this thread" link to the
+// comment's own page (every comment also carries a hidden copy of that link
+// for its folded state, which is not a gap). redditLoaders names both kinds
+// for Go to follow (loaders.go): a loader is POSTed its own form with the
+// thread as Referer and answers a fragment of the tree, grafted in the
+// loader's place; a link's page holds the comment again, and its replies are
+// grafted in the link's place. The extractor then renders the post and the
+// tree in DOM order and reconciles the comments it rendered against the count
+// the thread states. The stated count includes comments Reddit does not
+// serve (removed by its filters, deleted without a placeholder): with no
+// loader or link left in the page, the remainder is named as that; while one
+// is left, the page is partial and every gap is named.
 
 var redditReplyCountRe = regexp.MustCompile(`(\d[\d,]*)\s+more\s+repl`)
+
+// redditPartialAccept asks a loader for its fragment of the tree alone, as the
+// page's own loader element does; without it Reddit answers the whole page.
+const redditPartialAccept = "text/vnd.reddit.partial+html, text/html;q=0.9"
 
 // redditComment is one rendered comment line block.
 type redditComment struct {
@@ -41,7 +53,7 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 	if post == nil {
 		return siteExtraction{}, false
 	}
-	base := &url.URL{Scheme: schemeHTTPS, Host: "www.reddit.com"}
+	base := redditBase()
 	// Reddit links highlighted terms in comments to a search page whose URL
 	// carries per-render session ids and whose choice of term varies between
 	// renders; kept, they make one thread two different artifacts.
@@ -69,12 +81,11 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 			if child.Type != html.ElementNode {
 				continue
 			}
-			childHidden := hidden || hasClass(child, "hidden")
+			childHidden := hidden || redditHiddenCopy(child)
 			switch {
 			case isElement(child, "head"):
 				continue
-			case child.DataAtom == atom.A && !childHidden &&
-				strings.Contains(strings.ToLower(nodeText(child)), "continue this thread"):
+			case redditContinueLink(child, childHidden):
 				continueLinks[nodeAttr(child, "href")] = true
 				continue
 			case isElement(child, "shreddit-comment"):
@@ -87,11 +98,8 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 				}
 				walk(child, level+1, childHidden)
 				continue
-			case isElement(child, "faceplate-partial") && strings.Contains(nodeAttr(child, "src"), "/more-comments/"):
-				key := nodeAttr(child, "src")
-				if cursor := firstWithAttr(child, "name", "cursor", nil); cursor != nil {
-					key += "#" + nodeAttr(cursor, "value")
-				}
+			case redditMoreComments(child):
+				key := redditLoaderKey(child)
 				if seenLoaders[key] {
 					continue
 				}
@@ -134,15 +142,21 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 			len(continueLinks),
 		))
 	}
-	notInPage := 0
+	// unserved is the part of the stated count no loader or link in the page
+	// leads to — derived only once none is left, never while one could still
+	// load comments of an unknown number.
+	unserved := 0
 	if statedKnown {
-		notInPage = stated - len(comments) - hiddenReplies
-	}
-	if notInPage > 0 {
-		gaps = append(gaps, fmt.Sprintf(
-			"%d not in the page (behind a loader or link of unknown size, or deleted/removed without a stub)",
-			notInPage,
-		))
+		rest := stated - len(comments)
+		switch {
+		case len(gaps) == 0:
+			unserved = max(rest, 0)
+		case rest-hiddenReplies > 0:
+			gaps = append(gaps, fmt.Sprintf(
+				"%d not in the page (behind a loader or link of unknown size, or deleted/removed without a stub)",
+				rest-hiddenReplies,
+			))
+		}
 	}
 
 	statedText := "unstated"
@@ -150,12 +164,18 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 		statedText = strconv.Itoa(stated)
 	}
 	countLine := fmt.Sprintf(
-		"**Comments:** %s stated · %d in this page (%d deleted, %d removed)",
+		"**Comments:** %s stated · %d loaded (%d deleted, %d removed)",
 		statedText,
 		len(comments),
 		deleted,
 		removed,
 	)
+	if unserved > 0 {
+		countLine += fmt.Sprintf(
+			" · %d not served by Reddit (removed by its filters, or deleted without a placeholder)",
+			unserved,
+		)
+	}
 	if len(gaps) > 0 {
 		countLine += " · gaps: " + strings.Join(gaps, "; ")
 	}
@@ -208,7 +228,7 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 	partial := ""
 	if len(gaps) > 0 {
 		partial = fmt.Sprintf(
-			"reddit thread: %d of %s comments in the page — %s",
+			"reddit thread: %d of %s comments loaded — %s",
 			len(comments),
 			statedText,
 			strings.Join(gaps, "; "),
@@ -334,4 +354,240 @@ func redditDate(raw string) string {
 		return raw[:len("2006-01-02")]
 	}
 	return raw
+}
+
+// redditBase resolves the thread's relative links and loader URLs.
+func redditBase() *url.URL {
+	return &url.URL{Scheme: schemeHTTPS, Host: "www.reddit.com"}
+}
+
+// redditHiddenCopy reports an element holding what a reader does not see in
+// the thread: a hidden subtree, or the copy of a comment's own permalink its
+// folded state shows.
+func redditHiddenCopy(node *html.Node) bool {
+	return hasClass(node, "hidden") || nodeAttr(node, "slot") == "more-comments-permalink"
+}
+
+// redditContinueLink reports a visible "Continue this thread" link.
+func redditContinueLink(node *html.Node, hidden bool) bool {
+	return node.DataAtom == atom.A && !hidden &&
+		strings.Contains(strings.ToLower(nodeText(node)), "continue this thread")
+}
+
+// redditMoreComments reports a more-comments loader element.
+func redditMoreComments(node *html.Node) bool {
+	return isElement(node, "faceplate-partial") && strings.Contains(nodeAttr(node, "src"), "/more-comments/")
+}
+
+// redditLoaderKey identifies a loader: its URL and its cursor.
+func redditLoaderKey(node *html.Node) string {
+	key := nodeAttr(node, "src")
+	if cursor := firstWithAttr(node, "name", "cursor", nil); cursor != nil {
+		key += "#" + nodeAttr(cursor, "value")
+	}
+	return key
+}
+
+// redditLoaders names, in DOM order, every loader and visible "Continue this
+// thread" link still in a thread page — the site's loaders for loaders.go. A
+// link is followable only from inside the comment whose replies it leads to.
+func redditLoaders(doc *html.Node, page *url.URL) []pageLoader {
+	post := redditThreadPost(doc)
+	if post == nil {
+		return nil
+	}
+	base := redditBase()
+	referer := page.String()
+	if permalink := nodeAttr(post, "permalink"); permalink != "" {
+		if parsed, err := url.Parse(permalink); err == nil {
+			referer = base.ResolveReference(parsed).String()
+		}
+	}
+	var loaders []pageLoader
+	var walk func(node *html.Node, comment string, hidden bool)
+	walk = func(node *html.Node, comment string, hidden bool) {
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			if child.Type != html.ElementNode {
+				continue
+			}
+			childHidden := hidden || redditHiddenCopy(child)
+			switch {
+			case isElement(child, "head"):
+				continue
+			case isElement(child, "shreddit-comment"):
+				walk(child, nodeAttr(child, "thingid"), childHidden)
+				continue
+			case redditMoreComments(child):
+				if loader, ok := redditMoreCommentsLoader(child, base, referer); ok {
+					loaders = append(loaders, loader)
+				}
+				continue
+			case redditContinueLink(child, childHidden):
+				if loader, ok := redditContinueLoader(child, comment, base, referer); ok {
+					loaders = append(loaders, loader)
+				}
+				continue
+			}
+			walk(child, comment, childHidden)
+		}
+	}
+	walk(doc, "", false)
+	return loaders
+}
+
+// redditMoreCommentsLoader is one more-comments loader: its form (the cursor)
+// POSTed to its src, answered by a fragment of the tree grafted in its place.
+func redditMoreCommentsLoader(node *html.Node, base *url.URL, referer string) (pageLoader, bool) {
+	src, err := url.Parse(nodeAttr(node, "src"))
+	if err != nil {
+		return pageLoader{}, false
+	}
+	form := url.Values{}
+	var inputs func(*html.Node)
+	inputs = func(current *html.Node) {
+		for child := current.FirstChild; child != nil; child = child.NextSibling {
+			if child.Type == html.ElementNode && child.DataAtom == atom.Input && nodeAttr(child, "name") != "" {
+				form.Add(nodeAttr(child, "name"), nodeAttr(child, "value"))
+			}
+			inputs(child)
+		}
+	}
+	inputs(node)
+	label := `"View more comments" loader`
+	if match := redditReplyCountRe.FindStringSubmatch(strings.ToLower(nodeText(node))); match != nil {
+		label = fmt.Sprintf(`"%s more replies" loader`, match[1])
+		if match[1] == "1" {
+			label = `"1 more reply" loader`
+		}
+	}
+	return pageLoader{
+		key:    redditLoaderKey(node),
+		label:  label,
+		method: http.MethodPost,
+		target: base.ResolveReference(src).String(),
+		form:   form,
+		headers: map[string]string{
+			headerReferer:     referer,
+			headerAccept:      redditPartialAccept,
+			"Origin":          base.Scheme + "://" + base.Host,
+			headerContentType: "application/x-www-form-urlencoded",
+		},
+		graft: func(body []byte, contentType string) error {
+			container := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
+			nodes, err := html.ParseFragment(bytes.NewReader(body), container)
+			if err != nil {
+				return fmt.Errorf("parse the loader's answer: %w", err)
+			}
+			items := redditTreeItems(nodes)
+			if len(items) == 0 && !strings.Contains(contentType, "partial") {
+				// An empty fragment is a loader whose comments are gone; a
+				// whole page with none is not an answer to it.
+				return fmt.Errorf(
+					"answered by a page (%s, titled %q) holding no comments",
+					contentType,
+					redditPageTitle(body),
+				)
+			}
+			spliceInPlace(node, items)
+			return nil
+		},
+		drop: func() { detach(node) },
+	}, true
+}
+
+// redditContinueLoader is one "Continue this thread" link inside comment:
+// its page holds the comment again with the replies this page did not reach,
+// grafted in the link's place.
+func redditContinueLoader(link *html.Node, comment string, base *url.URL, referer string) (pageLoader, bool) {
+	href, err := url.Parse(nodeAttr(link, "href"))
+	if err != nil || comment == "" || nodeAttr(link, "href") == "" {
+		return pageLoader{}, false
+	}
+	target := base.ResolveReference(href).String()
+	return pageLoader{
+		key:     "continue " + target,
+		label:   fmt.Sprintf(`"Continue this thread" link below %s`, comment),
+		method:  http.MethodGet,
+		target:  target,
+		headers: map[string]string{headerReferer: referer},
+		graft: func(body []byte, _ string) error {
+			page, err := html.Parse(bytes.NewReader(body))
+			if err != nil {
+				return fmt.Errorf("parse the continued thread: %w", err)
+			}
+			root := redditCommentByID(page, comment)
+			if root == nil {
+				if tree := firstWithAttr(page, "thingid", comment, nil); isElement(tree, "shreddit-comment-tree") &&
+					firstElement(tree, "shreddit-comment") == nil {
+					// The comment's own tree, served empty: Reddit serves
+					// none of the replies the link stood for.
+					detach(link)
+					return nil
+				}
+				return fmt.Errorf("the continued thread's page (titled %q) does not hold comment %s",
+					redditTitle(page), comment)
+			}
+			var children []*html.Node
+			for child := root.FirstChild; child != nil; child = child.NextSibling {
+				children = append(children, child)
+			}
+			spliceInPlace(link, redditTreeItems(children))
+			return nil
+		},
+		drop: func() { detach(link) },
+	}, true
+}
+
+// redditTreeItems returns, in order, the comments and loaders under nodes that
+// are not inside another comment: the top of a fragment of the tree.
+func redditTreeItems(nodes []*html.Node) []*html.Node {
+	var items []*html.Node
+	var collect func(*html.Node)
+	collect = func(node *html.Node) {
+		if node.Type != html.ElementNode || isElement(node, "head") {
+			return
+		}
+		if isElement(node, "shreddit-comment") || redditMoreComments(node) {
+			items = append(items, node)
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			collect(child)
+		}
+	}
+	for _, node := range nodes {
+		collect(node)
+	}
+	return items
+}
+
+// redditCommentByID returns the <shreddit-comment> whose thingid is id.
+func redditCommentByID(node *html.Node, id string) *html.Node {
+	if isElement(node, "shreddit-comment") && nodeAttr(node, "thingid") == id {
+		return node
+	}
+	for child := node.FirstChild; child != nil; child = child.NextSibling {
+		if found := redditCommentByID(child, id); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// redditPageTitle is the <title> of an HTML answer, "" when it has none; an
+// answer that cannot be parsed says so in its place.
+func redditPageTitle(body []byte) string {
+	page, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		return "unparsable: " + err.Error()
+	}
+	return redditTitle(page)
+}
+
+// redditTitle is the text of the first <title> under node, "" when none.
+func redditTitle(node *html.Node) string {
+	if title := firstElement(node, "title"); title != nil {
+		return nodeText(title)
+	}
+	return ""
 }

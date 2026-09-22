@@ -220,6 +220,9 @@ func (h *Harvester) fetchURLWithPolicy(
 	lastChallenge := false
 	lastContentChars := 0
 	var providerFailure *Result
+	// loaders is this fetch's loader following (loaders.go), shared by every
+	// conversion of the page so its cap holds across rungs.
+	loaders := newLoaderBudget(ctx)
 	emptyPDFConvert := false
 	var emptyPDFBody []byte
 	wrongPDF := false
@@ -327,7 +330,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				}
 			}
 		}
-		converted, page, err := h.convertFetchedDocument(ctx, kind, source, body)
+		converted, page, err := h.convertFetchedDocument(ctx, kind, source, body, loaders)
 		if err != nil {
 			staticConverterOutage = true // named a tool outage by convertOutageNote below (F12)
 			continue
@@ -516,7 +519,10 @@ func (h *Harvester) fetchURLWithPolicy(
 					lastChallenge = true
 					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", logSource(source), status)
 				} else {
-					converted, convErr := h.convertFetchedContent(ctx, kindHTML, source, []byte(html))
+					converted, page, convErr := h.convertFetchedDocument(ctx, kindHTML, source, []byte(html), loaders)
+					// A render a per-site extractor recognised is that site's content
+					// by construction, as on the HTTP rungs: never a shell or a wall.
+					extracted := page.extractor != ""
 					switch {
 					case convErr != nil:
 						// The render SUCCEEDED; the conversion step failing is
@@ -531,13 +537,16 @@ func (h *Harvester) fetchURLWithPolicy(
 						log.Printf("harvest: browser rung rendered only the app shell for %s", logSource(source))
 					case usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
 						(contentChars(partialBody(converted)) > lastContentChars || appShellText != "" ||
-							partialPage != nil && partialReason(converted) == "") &&
-						contentChars(partialBody(converted)) >= 500:
+							partialPage != nil && partialReason(converted) == "" || extracted && partialPage == nil) &&
+						(extracted || contentChars(partialBody(converted)) >= 500):
 						// Same thin-page floor as the HTML ladder above: a JS
 						// paywall overlay converting to a few hundred chars is
-						// a shell, not the article. A render with no partial
-						// marker beats a flagged HTTP page even when shorter:
-						// the flagged page's length includes its gap list.
+						// a shell, not the article — unless an extractor claimed
+						// the render. A render with no partial marker beats a
+						// flagged HTTP page even when shorter: the flagged page's
+						// length includes its gap list. With no HTTP page kept, a
+						// claimed render beats whatever the earlier rungs
+						// converted: a wall's text is not the site's content.
 						return h.storeResult(
 							source,
 							kindHTML,

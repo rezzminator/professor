@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 
 	"golang.org/x/net/html"
@@ -29,7 +32,7 @@ func TestRedditThreadExtractorRendersTheTreeAndNamesEveryGap(t *testing.T) {
 		"**Subreddit:** r/examplesub · **Author:** u/op_placeholder · **Score:** 321 · **Posted:** 2026-09-01",
 		"[an example tool](https://example.org/tool)",
 		"- Second listed question with `inline_code()`",
-		"**Comments:** 12 stated · 8 in this page (1 deleted, 1 removed)",
+		"**Comments:** 12 stated · 8 loaded (1 deleted, 1 removed)",
 		`3 behind 1 unexpanded "more replies"`,
 		`1 unexpanded "View more comments" loader(s)`,
 		`1 "Continue this thread" link(s) not followed`,
@@ -54,7 +57,7 @@ func TestRedditThreadExtractorRendersTheTreeAndNamesEveryGap(t *testing.T) {
 			t.Fatalf("thread markdown carries page chrome %q:\n%s", unwanted, md)
 		}
 	}
-	if !strings.Contains(extraction.partial, "8 of 12 comments in the page") {
+	if !strings.Contains(extraction.partial, "8 of 12 comments loaded") {
 		t.Fatalf("an incomplete thread was not flagged partial: %q", extraction.partial)
 	}
 }
@@ -114,7 +117,7 @@ func TestRedditPartialPageIsKeptAndFlaggedWhenTheBrowserCannotDoBetter(t *testin
 			if got := strings.Join(result.Rungs, ","); got != tc.rungs {
 				t.Fatalf("rungs=%s, want %s", got, tc.rungs)
 			}
-			if !strings.Contains(result.Partial, "3 of 12 comments in the page") ||
+			if !strings.Contains(result.Partial, "3 of 12 comments loaded") ||
 				!strings.HasPrefix(result.Content, partialMarkerPrefix) {
 				t.Fatalf("partial thread reported as complete: partial=%q", result.Partial)
 			}
@@ -218,11 +221,11 @@ func TestRedditSearchLinkFilterKeepsOtherDomainsLinks(t *testing.T) {
 }
 
 // TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap: a render presses
-// loaders but never follows a "Continue this thread" link and cannot conjure
-// comments missing from the page, so a thread whose only gaps are those is
-// stored at the HTTP rung, flagged, without spending the browser or the
-// readers. A thread with a loader, and a generic page the recall gate flags,
-// still escalate.
+// loaders but never follows a "Continue this thread" link, so a thread whose
+// only gap is a link Go could not follow (here one outside any comment, so
+// no comment's page holds its replies) is stored at the HTTP rung, flagged,
+// without spending the browser or the readers. A thread with a loader Go
+// failed to follow, and a generic page the recall gate flags, still escalate.
 func TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap(t *testing.T) {
 	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
 	bodies := []string{long, long, long}
@@ -241,10 +244,6 @@ func TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap(t *testing.T) {
 		{
 			"continue link only", withContinue(redditThreadPage(3, bodies, false)), thread,
 			`"Continue this thread" link(s) not followed`, "direct", nil, 0,
-		},
-		{
-			"comments not in the page only", redditThreadPage(5, bodies, false), thread,
-			"2 not in the page", "direct", nil, 0,
 		},
 		{
 			"continue link and comments not in the page", withContinue(redditThreadPage(5, bodies, false)), thread,
@@ -310,6 +309,360 @@ func TestAShortCompleteRedditThreadIsStoredFromTheExtractor(t *testing.T) {
 			if !strings.Contains(result.Content, "# Loader thread") ||
 				!strings.Contains(result.Content, "Same here, thanks.") {
 				t.Fatalf("the extractor's artifact was not stored: %q", result.Content)
+			}
+		})
+	}
+}
+
+// TestAShortCompleteRedditThreadRenderedByTheBrowserIsStored: the HTTP rungs
+// meet a wall whose text is longer than the thread, and the browser renders
+// a complete thread under the 500-char thin-page floor. The floor and the
+// "longer than the earlier rungs" test catch JS shells and walls; a render
+// the Reddit extractor claimed is neither, so it is stored, never dropped.
+func TestAShortCompleteRedditThreadRenderedByTheBrowserIsStored(t *testing.T) {
+	wallText := strings.Repeat("Your request has been blocked by network security. ", 12)
+	spy := &browserSpyConverter{
+		html:   redditThreadPage(1, []string{"Same here, thanks."}, false),
+		status: http.StatusOK,
+		convertFn: func(_ context.Context, _, _ string, _ []byte) (string, error) {
+			return wallText, nil
+		},
+	}
+	h := wallHarvester(t, spy, browserOn())
+	result := h.Fetch(context.Background(), "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/")
+	if result.Error != "" || result.Method != "browser-chrome" || result.Partial != "" {
+		t.Fatalf("short complete browser-rendered thread not stored: method=%q rungs=%v partial=%q error=%q",
+			result.Method, result.Rungs, result.Partial, result.Error)
+	}
+	if !strings.Contains(result.Content, "# Loader thread") || !strings.Contains(result.Content, "Same here, thanks.") {
+		t.Fatalf("the extractor's artifact was not stored: %q", result.Content)
+	}
+}
+
+const loaderThread = "https://www.reddit.com/r/examplesub/comments/ddd444/loader_walk/"
+
+// Reddit markup builders, shaped like the server-rendered thread and its
+// loader answers: a comment's replies nest inside it, a loader carries its
+// cursor as a hidden input, a comment's folded state carries a copy of its own
+// permalink, and a chain past the page's depth ends in a visible link.
+func threadComment(id, author, body string, children ...string) string {
+	return fmt.Sprintf(`<shreddit-comment thingid="t1_%s" author="%s" score="3" `+
+		`permalink="/r/examplesub/comments/ddd444/comment/%s/">`+
+		`<div slot="comment"><p>%s</p></div>`+
+		`<div slot="more-comments-permalink"><a href="/r/examplesub/comments/ddd444/comment/%s/?force-legacy-sct=1">`+
+		`Continue this thread</a></div>`+
+		`<div id="comment-children">%s</div></shreddit-comment>`,
+		id, author, id, body, id, strings.Join(children, ""))
+}
+
+func moreRepliesLoader(cursor string, replies int) string {
+	return fmt.Sprintf(`<faceplate-partial loading="action" method="post" slot="children" `+
+		`src="/svc/shreddit/more-comments/examplesub/t3_ddd444?sort=CONFIDENCE&amp;at=%s">`+
+		`<input type="hidden" name="cursor" value="%s"><button>%d more replies</button></faceplate-partial>`,
+		cursor, cursor, replies)
+}
+
+func viewMoreLoader(cursor string) string {
+	return fmt.Sprintf(`<faceplate-partial loading="lazy" method="post" `+
+		`src="/svc/shreddit/more-comments/examplesub/t3_ddd444?top-level=1&amp;at=%s">`+
+		`<input type="hidden" name="cursor" value="%s"></faceplate-partial>`, cursor, cursor)
+}
+
+func continueThreadLink(id string) string {
+	return fmt.Sprintf(`<div class="more-comments-link" slot="children">`+
+		`<a href="/r/examplesub/comments/ddd444/comment/%s/?force-legacy-sct=1">Continue this thread</a></div>`, id)
+}
+
+func loaderThreadPage(stated int, tree ...string) string {
+	return fmt.Sprintf(`<html><head><title>Loader walk</title></head><body><main>`+
+		`<shreddit-post permalink="/r/examplesub/comments/ddd444/loader_walk/" comment-count="%d" `+
+		`post-title="Loader walk" author="op_placeholder" subreddit-prefixed-name="r/examplesub">`+
+		`<div slot="text-body"><p>Opening post.</p></div></shreddit-post>`+
+		`<shreddit-comment-tree>%s</shreddit-comment-tree></main></body></html>`, stated, strings.Join(tree, ""))
+}
+
+// redditSite answers a thread page, its loaders (by cursor) and its
+// "Continue this thread" pages (by comment id), recording every request.
+type redditSite struct {
+	mu        sync.Mutex
+	page      string
+	fragments map[string]string // cursor -> fragment
+	threads   map[string]string // comment id -> continued page
+	status    map[string]int    // cursor or comment id -> an error status to answer instead
+	walls     map[string]string // cursor -> a page to answer instead
+	requests  []redditRequest
+}
+
+type redditRequest struct {
+	method, path, referer, accept, origin, cookie, cursor string
+}
+
+func (site *redditSite) roundTrip(request *http.Request) (*http.Response, error) {
+	cursor := ""
+	if request.Method == http.MethodPost {
+		body, err := io.ReadAll(request.Body)
+		if err != nil {
+			return nil, err
+		}
+		form, err := url.ParseQuery(string(body))
+		if err != nil {
+			return nil, err
+		}
+		cursor = form.Get("cursor")
+	}
+	site.mu.Lock()
+	site.requests = append(site.requests, redditRequest{
+		method:  request.Method,
+		path:    request.URL.Path,
+		referer: request.Header.Get("Referer"),
+		accept:  request.Header.Get("Accept"),
+		origin:  request.Header.Get("Origin"),
+		cookie:  request.Header.Get("Cookie"),
+		cursor:  cursor,
+	})
+	site.mu.Unlock()
+	path := request.URL.Path
+	switch {
+	case strings.HasPrefix(path, "/svc/shreddit/more-comments/"):
+		if status := site.status[cursor]; status != 0 {
+			return response(request, status, "text/html", "<html><body>refused</body></html>"), nil
+		}
+		if wall, ok := site.walls[cursor]; ok {
+			return response(request, http.StatusOK, "text/html; charset=utf-8", wall), nil
+		}
+		if fragment, ok := site.fragments[cursor]; ok {
+			answer := response(request, http.StatusOK, "text/vnd.reddit.partial+html; charset=utf-8", fragment)
+			answer.Header.Set("Set-Cookie", "loid=placeholder-session; Path=/; Domain=.reddit.com; Secure")
+			return answer, nil
+		}
+	case strings.Contains(path, "/comment/"):
+		id := strings.TrimSuffix(path[strings.LastIndex(strings.TrimSuffix(path, "/"), "/")+1:], "/")
+		if status := site.status[id]; status != 0 {
+			return response(request, status, "text/html", "<html><body>refused</body></html>"), nil
+		}
+		if page, ok := site.threads[id]; ok {
+			return response(request, http.StatusOK, "text/html; charset=utf-8", page), nil
+		}
+	case path == "/r/examplesub/comments/ddd444/loader_walk/":
+		return response(request, http.StatusOK, "text/html; charset=utf-8", site.page), nil
+	}
+	return response(request, http.StatusNotFound, "text/html", "<html><body>not found</body></html>"), nil
+}
+
+func (site *redditSite) harvester(
+	t *testing.T,
+	spy *browserSpyConverter,
+	browserRung *bool,
+) (*Harvester, *pacingClock) {
+	t.Helper()
+	missing := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(request, http.StatusNotFound, "application/json", `{}`), nil
+	})
+	pacing := newPacingClock()
+	return mustNew(t, Options{
+		CacheDir:    t.TempDir(),
+		Client:      &http.Client{Transport: roundTripFunc(site.roundTrip)},
+		Chrome:      &http.Client{Transport: roundTripFunc(site.roundTrip)},
+		Jina:        &http.Client{Transport: missing},
+		OA:          &http.Client{Transport: missing},
+		Converter:   spy,
+		BrowserRung: browserRung,
+		Clock:       pacing,
+	}), pacing
+}
+
+// walkedThread is a thread whose 14 stated comments are served as: two in
+// the page with a "2 more replies" loader, a chain past the page's depth
+// behind "Continue this thread" (whose page holds a loader of its own), two
+// "View more comments" pages, one deleted and one removed placeholder, and
+// one comment Reddit does not serve at all.
+func walkedThread() *redditSite {
+	echo := func(children ...string) string {
+		return threadComment("c5", "echo_placeholder", "Echo, deep in the chain.", children...)
+	}
+	page := loaderThreadPage(14,
+		threadComment("c1", "alpha_placeholder", "Alpha top comment.",
+			threadComment("c2", "bravo_placeholder", "Bravo reply."),
+			moreRepliesLoader("cur-a", 2)),
+		threadComment("c3", "charlie_placeholder", "Charlie top comment.",
+			threadComment("c4", "delta_placeholder", "Delta reply.", echo(continueThreadLink("c5")))),
+		viewMoreLoader("cur-top"),
+	)
+	foxtrot := threadComment("c6", "foxtrot_placeholder", "Just a moment: checking your browser settings fixed it.")
+	deleted := threadComment("c7", "[deleted]", "[deleted]",
+		threadComment("c8", "golf_placeholder", "Golf answering a deleted comment."))
+	hotel := threadComment("c9", "hotel_placeholder", "Hotel, past the depth limit.", moreRepliesLoader("cur-b", 1))
+	juliet := threadComment("c11", "juliet_placeholder", "Juliet, second page of top comments.")
+	kilo := threadComment("c12", "kilo_placeholder", "Kilo, last page.")
+	lima := threadComment("c13", "lima_placeholder", "[removed]")
+	return &redditSite{
+		page: page,
+		fragments: map[string]string{
+			"cur-a":    foxtrot + deleted,
+			"cur-b":    threadComment("c10", "india_placeholder", "India, loaded on the continued page."),
+			"cur-top":  juliet + viewMoreLoader("cur-top2"),
+			"cur-top2": kilo + lima,
+		},
+		threads: map[string]string{"c5": loaderThreadPage(14, echo(hotel))},
+	}
+}
+
+// commentHeaders are the comment header lines of a rendered thread, in order.
+func commentHeaders(markdown string) []string {
+	var headers []string
+	for _, line := range strings.Split(markdown, "\n") {
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "- **") {
+			if cut := strings.Index(line, " · "); cut >= 0 {
+				line = line[:cut]
+			}
+			headers = append(headers, line)
+		}
+	}
+	return headers
+}
+
+// TestRedditLoadersAreFollowedIntoTheTree: every "more replies" and "View
+// more comments" loader is requested from Go (its cursor POSTed with the
+// thread as Referer), every "Continue this thread" page is fetched, loaders
+// inside what they load are followed too, and each answer lands where its
+// loader stood — so the thread renders whole, in thread order and nesting,
+// with the one comment Reddit does not serve named rather than flagged.
+func TestRedditLoadersAreFollowedIntoTheTree(t *testing.T) {
+	site := walkedThread()
+	h, pacing := site.harvester(t, &browserSpyConverter{}, browserOff())
+	result := h.FetchWithOptions(context.Background(), loaderThread, FetchOptions{Refresh: true})
+	if result.Error != "" || result.Partial != "" || result.Method != rungDirect {
+		t.Fatalf("the followed thread is not complete at the direct rung: method=%q partial=%q error=%q",
+			result.Method, result.Partial, result.Error)
+	}
+	want := []string{
+		"- **u/alpha_placeholder**",
+		"  - **u/bravo_placeholder**",
+		"  - **u/foxtrot_placeholder**",
+		"  - **[deleted]**",
+		"    - **u/golf_placeholder**",
+		"- **u/charlie_placeholder**",
+		"  - **u/delta_placeholder**",
+		"    - **u/echo_placeholder**",
+		"      - **u/hotel_placeholder**",
+		"        - **u/india_placeholder**",
+		"- **u/juliet_placeholder**",
+		"- **u/kilo_placeholder**",
+		"- **u/lima_placeholder**",
+	}
+	if got := commentHeaders(result.Content); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("thread order or nesting is wrong:\n got %q\nwant %q\n%s", got, want, result.Content)
+	}
+	countLine := "**Comments:** 14 stated · 13 loaded (1 deleted, 1 removed) · 1 not served by Reddit"
+	if !strings.Contains(result.Content, countLine) || strings.Contains(result.Content, "gaps:") {
+		t.Fatalf("the count does not reconcile to the stated 14: %.700q", result.Content)
+	}
+	wantRequests := []string{
+		"GET /r/examplesub/comments/ddd444/loader_walk/",
+		"POST /svc/shreddit/more-comments/examplesub/t3_ddd444 cur-a",
+		"GET /r/examplesub/comments/ddd444/comment/c5/",
+		"POST /svc/shreddit/more-comments/examplesub/t3_ddd444 cur-top",
+		"POST /svc/shreddit/more-comments/examplesub/t3_ddd444 cur-b",
+		"POST /svc/shreddit/more-comments/examplesub/t3_ddd444 cur-top2",
+	}
+	var got []string
+	for index, request := range site.requests {
+		got = append(got, strings.TrimSpace(request.method+" "+request.path+" "+request.cursor))
+		if index == 0 {
+			continue
+		}
+		if request.referer != loaderThread {
+			t.Fatalf("loader request %d carried Referer %q, want the thread %q", index, request.referer, loaderThread)
+		}
+		if request.method == http.MethodPost && (!strings.HasPrefix(request.accept, "text/vnd.reddit.partial+html") ||
+			request.origin != "https://www.reddit.com") {
+			t.Fatalf("loader request %d asked for %q from origin %q, not the partial from Reddit",
+				index, request.accept, request.origin)
+		}
+		if index >= 2 && !strings.Contains(request.cookie, "loid=placeholder-session") {
+			t.Fatalf("loader request %d left the cookie session the first answer set: Cookie %q", index, request.cookie)
+		}
+	}
+	if strings.Join(got, "\n") != strings.Join(wantRequests, "\n") {
+		t.Fatalf("requests:\n%s\nwant (a folded comment's own permalink is never fetched):\n%s",
+			strings.Join(got, "\n"), strings.Join(wantRequests, "\n"))
+	}
+	if len(pacing.sleeps) != len(wantRequests)-1 {
+		t.Fatalf("paced %d times for %d loader requests: %v", len(pacing.sleeps), len(wantRequests)-1, pacing.sleeps)
+	}
+	for _, pause := range pacing.sleeps {
+		if pause != loaderPace {
+			t.Fatalf("a loader request was paced %v, want %v", pause, loaderPace)
+		}
+	}
+	again := h.FetchWithOptions(context.Background(), loaderThread, FetchOptions{Refresh: true})
+	if again.Content != result.Content {
+		t.Fatalf("a second harvest of the same thread differs:\n%s\n---\n%s", result.Content, again.Content)
+	}
+}
+
+// TestRedditRemainderWithNoLoaderLeftIsNamedNotFlagged: a thread whose page
+// holds no loader and no link states more comments than it serves. Nothing
+// could load them, so the remainder is Reddit's unserved comments, named in
+// the count line — the artifact is not flagged partial for them.
+func TestRedditRemainderWithNoLoaderLeftIsNamedNotFlagged(t *testing.T) {
+	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
+	spy := &browserSpyConverter{}
+	h := pageHarvester(t, redditThreadPage(5, []string{long, long, long}, false), spy, browserOn())
+	result := h.Fetch(context.Background(), "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/")
+	if result.Error != "" || result.Method != rungDirect || result.Partial != "" || spy.browserCalls != 0 {
+		t.Fatalf("a thread with nothing left to load was flagged or escalated: method=%q rungs=%v partial=%q",
+			result.Method, result.Rungs, result.Partial)
+	}
+	if !strings.Contains(result.Content, "**Comments:** 5 stated · 3 loaded (0 deleted, 0 removed) · "+
+		"2 not served by Reddit (removed by its filters, or deleted without a placeholder)") {
+		t.Fatalf("the unserved remainder is not named: %.600q", result.Content)
+	}
+}
+
+// TestRedditContinuedThreadServedEmptyIsNotAGap: a "Continue this thread"
+// link leads to the comment's own page, and Reddit serves that page with the
+// comment's tree empty (it holds none of the replies the count includes).
+// The link was followed and answered, so it is no gap: the replies are part
+// of what Reddit does not serve. A page that is not that comment's tree at
+// all is still a failed link, flagged.
+func TestRedditContinuedThreadServedEmptyIsNotAGap(t *testing.T) {
+	empty := `<html><head><title>Reddit - The heart of the internet</title></head><body>` +
+		`<shreddit-post permalink="/r/examplesub/comments/ddd444/loader_walk/" comment-count="4"></shreddit-post>` +
+		`<shreddit-comment-tree-stats total-comments="0"></shreddit-comment-tree-stats>` +
+		`<shreddit-comment-tree thingid="t1_c2"></shreddit-comment-tree></body></html>`
+	for _, tc := range []struct {
+		name, continued, partial string
+	}{
+		{"served empty", empty, ""},
+		{
+			"another page", `<html><head><title>Elsewhere</title></head><body><p>Not a thread.</p></body></html>`,
+			`"Continue this thread" link(s) not followed`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			site := &redditSite{
+				page: loaderThreadPage(4, threadComment("c1", "alpha_placeholder", "Alpha.",
+					threadComment("c2", "bravo_placeholder", "Bravo, deep.", continueThreadLink("c2")))),
+				threads: map[string]string{"c2": tc.continued},
+			}
+			h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+			result := h.Fetch(context.Background(), loaderThread)
+			if result.Error != "" || result.Method != rungDirect || len(site.requests) != 2 {
+				t.Fatalf("thread not kept after one link request: method=%q requests=%+v error=%q",
+					result.Method, site.requests, result.Error)
+			}
+			if tc.partial == "" {
+				if result.Partial != "" || !strings.Contains(result.Content, "2 loaded (0 deleted, 0 removed) · "+
+					"2 not served by Reddit") {
+					t.Fatalf("an empty continuation was flagged or not reconciled: partial=%q %.500q",
+						result.Partial, result.Content)
+				}
+				return
+			}
+			if !strings.Contains(result.Partial, tc.partial) ||
+				!strings.Contains(result.Partial, `titled "Elsewhere"`) {
+				t.Fatalf("a failed continuation is not flagged: %q", result.Partial)
 			}
 		})
 	}

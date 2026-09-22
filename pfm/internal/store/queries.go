@@ -16,7 +16,15 @@ import (
 // the effective-killed mirror, whose key column is also named uuid.
 const transcriptColumns = `
 t.uuid, t.path, t.size, t.mtime_ns, t.activity_ns, t.parsed_offset, t.cwd, t.custom_title,
-t.ai_title, t.first_prompt, t.last_prompt, t.prompt_count, t.is_bg`
+t.ai_title, t.first_prompt, t.last_prompt, t.prompt_count, t.is_bg, t.continued_in,
+` + transcriptSupersededSQL
+
+// transcriptSupersededSQL is the one spelling of Transcript.Superseded. The
+// cached first frame filters on it and fleet.followContinuations drops the
+// segments whose field it fills, so the two frames cannot disagree about
+// which segment is the chat.
+const transcriptSupersededSQL = `(t.continued_in!='' AND t.continued_in!=t.uuid AND EXISTS (
+  SELECT 1 FROM transcripts AS successor WHERE successor.uuid=t.continued_in))`
 
 const rolloutColumns = `
 id, path, size, mtime_ns, parsed_offset, cwd, user_thread, session_id,
@@ -85,6 +93,7 @@ FROM transcripts AS t
 LEFT JOIN `+effectiveKilled+` AS h ON h.uuid=t.uuid
 WHERE t.is_bg=0 AND t.size>0 AND t.prompt_count>0 AND h.uuid IS NULL
   AND NOT `+labelKilledSQL+`
+  AND NOT `+transcriptSupersededSQL+`
 ORDER BY CASE WHEN t.activity_ns>0 THEN t.activity_ns ELSE t.mtime_ns END DESC, t.uuid
 LIMIT ?`, limit)
 	if err != nil {
@@ -147,14 +156,15 @@ func (s *Store) defaultCounts(
 	err := s.logged().QueryRowContext(ctx, `
 SELECT
   COALESCE(SUM(CASE
+    WHEN `+transcriptSupersededSQL+` THEN 0
     WHEN h.uuid IS NOT NULL OR `+labelKilledSQL+`
     THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE
-    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+`
+    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+` AND NOT `+transcriptSupersededSQL+`
       AND (t.is_bg!=0 OR t.size<=0 OR t.prompt_count<=0)
     THEN 1 ELSE 0 END), 0),
   COALESCE(SUM(CASE
-    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+`
+    WHEN h.uuid IS NULL AND NOT `+labelKilledSQL+` AND NOT `+transcriptSupersededSQL+`
       AND t.is_bg=0 AND t.size>0 AND t.prompt_count>0
     THEN 1 ELSE 0 END), 0)
 FROM transcripts AS t
@@ -319,8 +329,8 @@ func upsertTranscript(ctx context.Context, db queryExecer, transcript Transcript
 	_, err := execWrite(ctx, db, `
 INSERT INTO transcripts (
   uuid, path, size, mtime_ns, activity_ns, parsed_offset, cwd, custom_title, ai_title,
-  first_prompt, last_prompt, prompt_count, is_bg
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  first_prompt, last_prompt, prompt_count, is_bg, continued_in
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(uuid) DO UPDATE SET
   path=excluded.path,
   size=excluded.size,
@@ -333,7 +343,8 @@ ON CONFLICT(uuid) DO UPDATE SET
   first_prompt=excluded.first_prompt,
   last_prompt=excluded.last_prompt,
   prompt_count=excluded.prompt_count,
-  is_bg=excluded.is_bg`,
+  is_bg=excluded.is_bg,
+  continued_in=excluded.continued_in`,
 		transcript.UUID,
 		transcript.Path,
 		transcript.Size,
@@ -347,6 +358,7 @@ ON CONFLICT(uuid) DO UPDATE SET
 		transcript.LastPrompt,
 		transcript.PromptCount,
 		boolInteger(transcript.IsBG),
+		transcript.ContinuedIn,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert transcript %q: %w", transcript.UUID, err)
@@ -386,7 +398,7 @@ func (s *Store) Transcripts(ctx context.Context) ([]Transcript, error) {
 
 func scanTranscript(row rowScanner) (Transcript, error) {
 	var transcript Transcript
-	var isBG int
+	var isBG, superseded int
 	err := row.Scan(
 		&transcript.UUID,
 		&transcript.Path,
@@ -401,8 +413,11 @@ func scanTranscript(row rowScanner) (Transcript, error) {
 		&transcript.LastPrompt,
 		&transcript.PromptCount,
 		&isBG,
+		&transcript.ContinuedIn,
+		&superseded,
 	)
 	transcript.IsBG = isBG != 0
+	transcript.Superseded = superseded != 0
 	return transcript, err
 }
 

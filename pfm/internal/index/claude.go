@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/store"
 )
@@ -20,7 +21,10 @@ type claudeRecord struct {
 	PromptSource     string `json:"promptSource"`
 	IsCompactSummary bool   `json:"isCompactSummary"`
 	Timestamp        string `json:"timestamp"`
-	Message          struct {
+	// ContinuedIn is set on the `continued-in` record Claude Code appends to
+	// a session it moved into a background job under a new session id.
+	ContinuedIn string `json:"continuedInSessionId"`
+	Message     struct {
 		Content borrowedRawMessage `json:"content"`
 	} `json:"message"`
 }
@@ -68,6 +72,12 @@ func parseClaudeTranscriptFile(
 			}
 		case "ai-title":
 			transcript.AITitle = record.AITitle
+		case claudeContinuedInRecord:
+			// The newest handoff wins: a chat parked twice continues in the
+			// session named last. A malformed id is not a handoff.
+			if id := strings.TrimSpace(record.ContinuedIn); pfmengine.IsUUID(id) && id != file.ID {
+				transcript.ContinuedIn = id
+			}
 		case messageRoleUser:
 			if record.IsCompactSummary {
 				return
@@ -84,6 +94,10 @@ func parseClaudeTranscriptFile(
 			}
 			transcript.LastPrompt = prompt
 			transcript.PromptCount++
+			// A real prompt written after the handoff means this session was
+			// resumed under its own id and is a live chat again, not a
+			// finished segment of its successor.
+			transcript.ContinuedIn = ""
 			if stamp, err := time.Parse(time.RFC3339Nano, record.Timestamp); err == nil &&
 				stamp.UnixNano() > transcript.ActivityNS {
 				transcript.ActivityNS = stamp.UnixNano()
@@ -119,8 +133,13 @@ func sdkSpawned(record claudeRecord) bool {
 		strings.HasPrefix(record.Entrypoint, "sdk-")
 }
 
+// claudeContinuedInRecord is the record type Claude Code writes when it moves
+// a running chat into a background job that continues under a new session id.
+const claudeContinuedInRecord = "continued-in"
+
 func relevantClaudeLine(line []byte) bool {
-	return bytes.Contains(line, []byte(`"custom-title"`)) ||
+	return bytes.Contains(line, []byte(`"continued-in"`)) ||
+		bytes.Contains(line, []byte(`"custom-title"`)) ||
 		bytes.Contains(line, []byte(`"agent-name"`)) ||
 		bytes.Contains(line, []byte(`"ai-title"`)) ||
 		bytes.Contains(line, []byte(`"type":"user"`)) ||

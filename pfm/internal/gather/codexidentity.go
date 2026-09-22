@@ -97,7 +97,7 @@ func parseCodexIdentity(capture string) (name, threadID string) {
 	if field == "" {
 		return "", ""
 	}
-	if isUUID(field) {
+	if pfmengine.IsUUID(field) {
 		return "", field
 	}
 	return field, ""

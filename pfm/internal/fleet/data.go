@@ -94,10 +94,10 @@ func EnrichLive(
 	data Data,
 	live gather.Snapshot,
 ) (Data, error) {
-	transcriptIDs := make(map[string]struct{}, len(data.Transcripts))
+	transcriptIDs := make(map[string]int, len(data.Transcripts))
 	for index := range data.Transcripts {
 		transcript := data.Transcripts[index]
-		transcriptIDs[transcript.UUID] = struct{}{}
+		transcriptIDs[transcript.UUID] = index
 	}
 	wantedTranscripts := make(map[string]struct{})
 	for _, crumb := range live.Crumbs {
@@ -114,17 +114,32 @@ func EnrichLive(
 			wantedTranscripts[agent.SessionID] = struct{}{}
 		}
 	}
+	// Each live chat's whole continued-in chain is loaded, not just the id
+	// its crumb or agent names: Claude moves a running chat into a background
+	// job under a new session id while the host keeps the old one, and
+	// followContinuations can only follow the handoff to a successor it was
+	// given.
 	for id := range wantedTranscripts {
-		if _, found := transcriptIDs[id]; found {
-			continue
-		}
-		transcript, found, err := database.Transcript(ctx, id)
-		if err != nil {
-			return Data{}, err
-		}
-		if found {
-			data.Transcripts = append(data.Transcripts, transcript)
-			transcriptIDs[id] = struct{}{}
+		seen := make(map[string]struct{})
+		for id != "" {
+			if _, cycle := seen[id]; cycle {
+				break
+			}
+			seen[id] = struct{}{}
+			index, found := transcriptIDs[id]
+			if !found {
+				transcript, stored, err := database.Transcript(ctx, id)
+				if err != nil {
+					return Data{}, err
+				}
+				if !stored {
+					break
+				}
+				data.Transcripts = append(data.Transcripts, transcript)
+				index = len(data.Transcripts) - 1
+				transcriptIDs[id] = index
+			}
+			id = data.Transcripts[index].ContinuedIn
 		}
 	}
 

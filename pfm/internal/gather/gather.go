@@ -161,6 +161,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 	var openCode []LiveOpenCode
 	var claudeProcesses []ClaudeProcess
 	var agents []Agent
+	var agentWarnings []string
 	var cacheSockets []string
 	var paneLabels []PaneLabel
 	group, _ := errgroup.WithContext(ctx)
@@ -206,7 +207,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 	})
 	group.Go(func() error {
 		var err error
-		agents, err = detectAgentsFrom(
+		agents, agentWarnings, err = detectAgentsFrom(
 			cmdlines,
 			gatherer.proc,
 			gatherer.paths.Home,
@@ -259,7 +260,7 @@ func (gatherer *Gatherer) Gather(ctx context.Context) (Snapshot, error) {
 		CrumblessLive: append([]CrumblessLive(nil), crumblessLive...),
 		CorpseSwept:   append([]string(nil), tmuxProbe.CorpseSwept...),
 		StaleSwept:    append([]string(nil), crumbs.StaleSwept...),
-		Warnings:      append([]string(nil), tmuxProbe.ProbeWarnings...),
+		Warnings:      append(append([]string(nil), tmuxProbe.ProbeWarnings...), agentWarnings...),
 	}, nil
 }
 

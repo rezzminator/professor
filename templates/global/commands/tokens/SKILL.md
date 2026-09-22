@@ -43,7 +43,7 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 - Codex rows match `{agent-id}` against the rollout's own `session_meta` (`id`, `context_window.window_id`, or the id in the filename); an id starting with `/` is an agent path and matches `session_meta.agent_path`, marked `matched: path`.
 - A row whose id form cannot be matched falls back to **that row's** spawn time plus its agent type and is marked `matched: window`; a spawn time without a clock never opens a window.
 - With no `agents.tsv` at all, `run.md`'s header instant and its `{id} CLAIMED · {agent} · {time}` lines are the fallback and **every** row is marked `window`.
-- A ledger row with no transcript and a transcript inside the window with no ledger row are both listed under `UNMATCHED` — never dropped.
+- A ledger row with no transcript and a transcript inside the window with no ledger row are both listed under `UNMATCHED` — never dropped; each unmatched transcript carries its price, and the `unledgered` line gives their sum and the flight's whole spend.
 
 ## Reading the output
 

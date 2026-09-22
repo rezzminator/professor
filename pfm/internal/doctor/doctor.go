@@ -113,7 +113,7 @@ func Run(
 		"usage: pfm doctor [--verbose] [--skip-harvest]   exit 0 clean, 1 warnings, 3 failures",
 		stderr,
 	)
-	verbose := flags.Bool("verbose", false, "write raw dependency probe output under tmp/")
+	verbose := flags.Bool("verbose", false, "write raw probe output under the pfm scratch dir (path printed)")
 	skipHarvest := flags.Bool("skip-harvest", false, "exclude the optional harvestpy runtime from health")
 	if code, ok := cli.ParseFlags(flags, args); !ok {
 		return code
@@ -164,7 +164,14 @@ func Run(
 	tally.warnings += printPrePushDoctorWithRunner(context.Background(), stdout, dependencies.Runner)
 	verboseDir := ""
 	if *verbose {
-		verboseDir = filepath.Join("tmp", "pfm-doctor")
+		abs, err := filepath.Abs(filepath.Join(resolved.SIDDir, "pfm-doctor"))
+		if err != nil {
+			fmt.Fprintf(stdout, "doctor: verbose output dir unresolved error=%v\n", err)
+			tally.fail()
+		} else {
+			verboseDir = abs
+			fmt.Fprintf(stdout, "doctor: verbose output dir=%s\n", verboseDir)
+		}
 	}
 	tally.warnings += printHarnessPromptDoctorWithDeps(
 		context.Background(),

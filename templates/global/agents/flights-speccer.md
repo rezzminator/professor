@@ -1,6 +1,6 @@
 ---
 name: flights-speccer
-description: Turns one flight's unspecified work into an execution-ready spec directory — one self-contained task file per executor plus an index of order, dependencies, contention and difficulty. Delegate when work arrives without specs (a batch, a failure with an unknown cause, a design to choose), or to rewrite the rest of a spec directory after a SPEC-DRIFT or FAILED report. Pass what needs doing and where (required), plus whatever you hold: requirements, acceptance criteria, rulings already made, maps and findings, boundaries, the standing rules the executors work under, the directory to write into under /tmp/{project}/flights/. Pass content, never a format — its output shape is fixed. A small flight (a few tasks, no unknown cause, no design to choose) passes `model: "opus"` on the spawn. Returns the directory path, the index table and any BLOCKED task with its one question. Changes no code.
+description: 'Writes executor task files — delegate for work without specs (a batch, an unknown-cause failure, a design to choose) or to revise a spec directory after SPEC-DRIFT or FAILED. Pass the work, everything you hold and a /tmp/{project}/flights/ directory; small flight: model "opus". /flights:spec → here → flights-orchestrator. Returns the directory, index, any BLOCKED question.'
 model: fable
 effort: high
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent

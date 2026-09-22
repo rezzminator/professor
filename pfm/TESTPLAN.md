@@ -152,6 +152,8 @@ The compiler is one static-binary surface. `build` may write only generated arti
 | `killed` → `id\tengine\tkilled_at` per row | JAIL | `main.go:207-215` | B3 |
 | `killed --prune-orphans` → dry-run report; `--yes` deletes; `--yes` alone → rc 2 | JAIL | `main.go`, `cmd/pfm/archive_command.go` | |
 | `chat resolve <target>` → socket/session/id tuple; missing target rc 4 | JAIL+tmux | `chat_command.go`, `resolve/resolve.go` | |
+| chat target self/ambient resolution keeps the caller's exact pane across a split, and enriches ambient self from its own socket without an exported session id | JAIL+tmux | `internal/chat/target.go`; `internal/chat/tmux_jail_test.go` (`TestAmbientClaudeSplitSelfRetainsItsExactPane`, `TestAmbientSelfWithoutExportedIDEnrichesFromItsExactSocket`) | |
+| review-split rename keeps its ambiguity guard across split panes and a supplied runtime tmux directory | JAIL+tmux | `internal/chat/target.go`; `internal/chat/tmux_jail_test.go` (`TestReviewSplitRenameRetainsAmbiguityGuard`) | |
 | `resolve` with a bad kind → rc 2 | JAIL | `resolve/resolve.go:92-93`, `main.go:241-244` | |
 | `whoami` → this process's own tmux session name | JAIL+tmux | `main.go:53`, `resolve/whoami.go:165-213` | |
 | `doctor` → db + jail health; exit 0 clean, 1 warnings-only, 2 usage, 3 at least one failure (a state `pfm install --yes` owns and did not produce, or a required non-harvestpy dependency); `doctor: failures=M` prints only when M>0, `doctor: warnings=N` only when N>0, `doctor: clean` only when both are zero | LIVE-READ | `main.go`; `internal/store/health.go`; `internal/doctor/jail_test.go` (`TestDoctorExitsThreeOnARequiredDependencyMissingAndOneOnWarningsAlone`) | issue #24 finding 1 |

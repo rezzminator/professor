@@ -1,6 +1,6 @@
 ---
 name: flights:orchestrate-live
-description: Runs one flight in this chat — the chat reads the flights-orchestrator agent body and acts as it, executors as sub-agents, the user watching and ruling as it goes. Costs this chat's context for the whole run; use it when the user wants to steer. /flights:orchestrate-live {directory} [worktree {path}] [commit]
+description: 'Steered run in this chat — /flights:orchestrate-live {directory} [worktree {path}] [commit]: this chat acts as flights-orchestrator with executor sub-agents, the user ruling as it goes; costs this chat''s context. /flights:spec → here → flights-*-executor.'
 argument-hint: <flight directory> [worktree <path>] [commit]
 ---
 

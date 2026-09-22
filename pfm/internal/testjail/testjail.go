@@ -21,6 +21,15 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
+// KeepAmbientIdentity, set by a TestMain before Run, leaves the ambient
+// identity Run otherwise scrubs in place. cmd/pfm's re-exec'd attach-helper
+// process sets it: that process stands in for the real pfm binary running
+// inside a LIVE tmux pane on purpose — a real tmux server sets its
+// TMUX/TMUX_PANE for it exactly as it would for the shipped binary, which is
+// never jailed at all. Scrubbing them would defeat the one fixture built to
+// prove that real-tmux behavior.
+var KeepAmbientIdentity bool
+
 // Run points TMPDIR at a base that is both SHORT and CANONICAL, then runs the
 // package's tests. Every t.TempDir() in the package inherits it, which is why
 // this is one call per package instead of an edit at hundreds of call sites.
@@ -49,6 +58,26 @@ func Run(m *testing.M) int {
 	if err := os.Setenv("CLAUDE_CONFIG_DIR", ""); err != nil {
 		warnSetup("clear CLAUDE_CONFIG_DIR: %v", err)
 		return 1
+	}
+	// The fence has none of these — no tmux pane, no chat socket, no host
+	// Claude/Codex session — and a jail must not inherit a live seat from the
+	// executor's own shell. A test that needs one sets it with t.Setenv.
+	// Literal names: testjail cannot import internal/resolve (import cycle).
+	//
+	// Exception: KeepAmbientIdentity (see its declaration).
+	if !KeepAmbientIdentity {
+		for _, name := range []string{
+			"TMUX",
+			"TMUX_PANE",
+			"CHAT_INJECT_SOCKET",
+			"CLAUDE_CODE_SESSION_ID",
+			"CODEX_THREAD_ID",
+		} {
+			if err := os.Setenv(name, ""); err != nil {
+				warnSetup("clear %s: %v", name, err)
+				return 1
+			}
+		}
 	}
 	// Git fixtures must read only repository-local configuration. A developer's
 	// global identity, aliases, hooks, signing policy, or system configuration

@@ -50,7 +50,7 @@ func TestEveryClaudeSettingsFileGetsCompleteHookWiring(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	wantedProbe := "systemctl --user is-active --quiet pfm-name-sync.service"
+	wantedProbe := nameSyncStateProbe
 	if schedulerIsLaunchd {
 		wantedProbe = "launchctl print gui/" + strconv.Itoa(os.Getuid()) + "/" + launchdLabel
 	}

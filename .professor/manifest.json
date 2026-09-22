@@ -66,22 +66,16 @@
   },
   "installed": {
     "agents": [
-      "dev",
       "gitter",
-      "qa",
-      "scheduler",
       "tracer"
     ],
     "commands": [
       "dev",
       "pcm",
+      "pfm-testing-manual",
       "pfm:release",
       "quality:doc",
-      "quality:prompt",
-      "wave:ccc",
-      "wave:live",
-      "wave:refine",
-      "wave:walker"
+      "quality:prompt"
     ],
     "scripts": [
       "codex-sync.sh",
@@ -98,34 +92,28 @@
     }
   },
   "file_hashes": {
-    ".claude/agents/dev.md": "42e10746417ad181f42636ba47048cd8ee296ceb4223fcefeaf4839faf399f9e",
-    ".claude/agents/gitter.md": "9654ccceec7100a151702856005f8366485ca0ca3d9108e3efdc800886dda0c1",
-    ".claude/agents/qa.md": "a66f2c1befba11961be624d964dc893ffffed8654c62f978f825df8a08935b44",
-    ".claude/agents/scheduler.md": "72ae34d5f256e35faad25bb97f9b4bd93cd5a6b12b440b828bd18f86998c5d4c",
-    ".claude/agents/tracer.md": "a7a187046acd9217f2f93f498fb593328a3925782fb5e15abec5aaa26ba986a6",
-    ".claude/codex-build.json": "0836a21662a9dc0f6f328ac15274e68dff4574d0ccb18ea17ad6a66b2e3d617a",
+    ".claude/agents/gitter.md": "f057c05b9852a5c4d13159451747606b952e1789a5efaddebc47047639271deb",
+    ".claude/agents/tracer.md": "e260e73f90fc7f5f9758bc5bf4dcf08325c8f8d6724068396c7fa7bffc544705",
+    ".claude/codex-build.json": "3dc5b9151a6f11f30cc3cab7a49b32055b5b4a255d0367722194b822d083b37f",
     ".claude/commands/dev.md": "b7b86c57a5ed91328abb834f64553ccf67a0ac58c7ad631251f4b9c7c8e50e96",
-    ".claude/commands/pcm.md": "ecf2bb3ea81f72e87e36a19c1eb46be2c0e95125f9a64c4ca6bda42af0427767",
-    ".claude/commands/pfm/release.md": "0d0bde1eba206be999f8ee4727b6d3e3df68bba51ed09434214a9ea3e311dafa",
+    ".claude/commands/pcm.md": "87124a829afd1ffb85c3c5a33c8e3d9ada98f6df7ec72c4a087adc02a3573ad5",
+    ".claude/commands/pfm-testing-manual.md": "90eda8b9ef4060722231a69cbcea0f226b1de7edcaca65e6f3c77057cd2ed14a",
+    ".claude/commands/pfm/release.md": "55b6429a5a8e58fe953819622752ce1adba0cbd28825d644b16b94a157799b06",
     ".claude/commands/quality/doc.md": "dd3f01c84d9eaace7b45df52a8501c2137b5daa7556049df1980e1183705f67d",
     ".claude/commands/quality/prompt.md": "5b778fbdf56339f572f3e9595291ff6c83d628557ed7b907639f483593825870",
-    ".claude/commands/wave/ccc.md": "18175d2bf883b82069c53dacd4d11947f79d47df40cb3e6ce01817207535eb46",
-    ".claude/commands/wave/live.md": "57e15381f22f5d1d1e0ac14670b03d97b9f165898f7783411ec68ec769549350",
-    ".claude/commands/wave/refine.md": "7245bc0fbf26fc26fc2e5eaad8b0c019af69b809fdf77e98e119f430dd0800ea",
-    ".claude/commands/wave/walker.md": "ef7fecb7d5246bef38f179560890204ad40d3fc0679a0429eb699692e9136ae2",
-    ".claude/scripts/codex-sync.sh": "d36c47815f1c7cb56131a651a2c09eb49bc7cf830d291616820d6d45a9125f47",
-    ".claude/scripts/dev.sh": "6fa1930dc3d39bff5f440cda108b9ad45602f278533208c3ee347b1857c24fe1",
+    ".claude/scripts/codex-sync.sh": "60cf7284a6b5164fe0edeb0fc9bd52f36b033b4cb9ba27f831adff470ed627a5",
+    ".claude/scripts/dev.sh": "023c75b4f64899855e1bc8e93a80b460480b02d8ea679e36ec0cf86949cd689a",
     ".claude/scripts/explore-deny.sh": "966d38099cd592963ef54b54fb7544d4d44437fd4e36faae0846219ab57b26b6",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
-    ".claude/scripts/guard-stamp.sh": "837bce7d5846b7ed6172a5de579a642fe60fbf99cc27e73cfa235b935b14001e",
-    ".claude/scripts/pfm-guard.sh": "f24944633549fcd9829f8271374f47a41ec6274984694e263ea5c13c8201617d",
+    ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
+    ".claude/scripts/pfm-guard.sh": "1fdaecfc779371a8bd68a59b695cd807c9739d196c3ef881c51cc9e991f97069",
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "03a28d625b249ce0798c37a9cd25f38924dc2692b616045ba9ab935d3e8ca505",
-    "CLAUDE.md": "bea46c32864499de7f258463514ef12ffe8380d092acb6ee52b9a37a7a2a0c18",
-    "docs/commands/pcm/references/audit-scopes.md": "097778ecd0de202ae1f50261ef09e0e2ae3e772d7e04d06d77684ac3697aedb4",
-    "docs/commands/pcm/references/refresh.md": "880cc3b998049271e03ea877951518a4551c842114719dbae1801b41af1d4617",
+    "CLAUDE.md": "cbfe53cdf7bff287cf7801efad7e18c59ab62269c5bedd781fa3dd1b121fbeba",
+    "docs/commands/pcm/references/audit-scopes.md": "225cff332853a5bbed24a7f49529a34a1294c473b1049051eadecdef73b34243",
+    "docs/commands/pcm/references/refresh.md": "5601e888f091d7ffcbdc2ffb08c14063f67b8607ae9a5237fd4b0dfa8cff2796",
     "docs/commands/pfm/references/release-rehearsal.md": "4aab154533f734c8c7f2e5eb55a005666356eab433ca856bb2f3753b11c92c7b",
-    "pfm/CLAUDE.md": "22c6b80c1e4d5e3a32d111307c00bc47ddadeca053a13f7b15056bbc91ceee91"
+    "pfm/CLAUDE.md": "bb3645b429c62d91dadf07fd2efd19ef869a81e429c1b54377e5ad76767bb526"
   }
 }

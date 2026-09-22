@@ -4,7 +4,7 @@
 // have no ambient types here; ts-nocheck keeps that a test-file-local concern.
 //
 // midrun.js resolves its repo root via `git rev-parse --show-toplevel` from process.cwd() first
-// (falling back to __dirname, then cwd) and writes its report under {repoRoot}/tmp/rr-midrun/. Each
+// (falling back to __dirname, then cwd) and writes its report under /tmp/<basename of repoRoot>/rr-midrun/. Each
 // test copies midrun.js verbatim into a fresh throwaway git repo under os.tmpdir() and runs THAT
 // copy with cwd set to the throwaway repo, so every write lands there instead of the real repo.
 import { describe, it, expect, afterEach } from 'vitest';

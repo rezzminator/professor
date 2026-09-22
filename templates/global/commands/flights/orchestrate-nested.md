@@ -1,6 +1,6 @@
 ---
 name: flights:orchestrate-nested
-description: Runs one flight in a flights-orchestrator sub-agent — the chat assembles the brief (directory, standing rules, projects and their testing manuals, worktree, cap, landing), spawns the orchestrator, ends its turn, and presents the one return. The default way to run a flight. /flights:orchestrate-nested {directory} [worktree {path}] [commit] [revised {ids}]
+description: 'The default run — /flights:orchestrate-nested {directory} [worktree {path}] [commit] [revised {ids}]: briefs one flights-orchestrator sub-agent and presents its one return, keeping this chat''s context small. /flights:spec → here → flights-orchestrator.'
 argument-hint: <flight directory> [worktree <path>] [commit] [revised <ids>]
 ---
 

@@ -163,7 +163,7 @@ When a run crashes, wedges, or gets killed mid-crawl, find the checkpoint: each 
 node <skill-base-dir>/midrun.js [status|findings] [run-dir]
 ```
 
-The task output file stays empty until the run completes — mid-run, the only truth is the workflow transcript dir (`journal.jsonl` + per-agent files). `status` (default) reports progress, pipeline shape, and derived health flags — a dead agent is inferred from a dispatch with no completion plus a stale transcript, never from error text (there isn't any). `findings` reports what the run has learned so far — the latest brainer coord's memory, or (on a degraded run with no coord) a reconstruction from the finalize agents. Path omitted auto-discovers the newest live run. Reports land in `tmp/rr-midrun/`.
+The task output file stays empty until the run completes — mid-run, the only truth is the workflow transcript dir (`journal.jsonl` + per-agent files). `status` (default) reports progress, pipeline shape, and derived health flags — a dead agent is inferred from a dispatch with no completion plus a stale transcript, never from error text (there isn't any). `findings` reports what the run has learned so far — the latest brainer coord's memory, or (on a degraded run with no coord) a reconstruction from the finalize agents. Path omitted auto-discovers the newest live run. Reports land in `/tmp/<project>/rr-midrun/` (`<project>` = the repo directory name, leading dot stripped); the JSON summary prints the absolute path.
 
 ## Writing the query
 

@@ -96,49 +96,93 @@ var (
 		`^ - You are powered by the model named [A-Za-z0-9 _-]+(?:\.[0-9]+[A-Za-z0-9 _-]*)*\. The exact model ID is [A-Za-z0-9._:-]+\.$`,
 	)
 	harnessKnowledgeCutoff = regexp.MustCompile(`^ - Assistant knowledge cutoff is [A-Za-z]+ \d{4}\.$`)
+	// harnessModelCatalog is the whole model-catalog line: every Claude release
+	// adds or drops an entry, so the line is masked to one placeholder — its
+	// trailing "default to the latest models" sentence included, by ruling.
+	// The line vanishing still changes the hash.
+	harnessModelCatalog = regexp.MustCompile(`^ - The most recent Claude models are .*Model IDs — .*$`)
 )
 
-// normalizeHarnessPrompt excludes only CLI identity metadata. Claude may omit
-// these two Environment lines even with dynamic sections excluded. Instructions
-// in that section, and matching text elsewhere, remain part of the drift hash.
+// Model and release tokens change with every Claude catalog update without
+// changing an instruction, so normalizeHarnessPrompt masks them on every kept
+// line, fenced lines included, in this order: a model ID (`claude-<family>`
+// then one or more `-<digits>` groups, a date suffix being one more group —
+// `claude-code` has none and stays), a display name (`Opus 5.5`), then a
+// dotted version (`2.1.280`, `2.1.280-beta.1`).
+var (
+	harnessModelID       = regexp.MustCompile(`\bclaude-[a-z]+(?:-\d+)+`)
+	harnessModelName     = regexp.MustCompile(`\b(?:Claude|Opus|Sonnet|Haiku|Fable)\s+\d+(?:\.\d+)*`)
+	harnessDottedVersion = regexp.MustCompile(`\b\d+\.\d+\.\d+(?:[.-][A-Za-z0-9]+)*`)
+)
+
+// harnessFence tracks Markdown code fences line by line, so a `#` or metadata
+// line inside a fence is never read as a heading or as removable metadata.
+type harnessFence struct {
+	char  byte
+	width int
+}
+
+// advance consumes one line and reports whether it belongs to a fence — its
+// opening, its body, or its closing line.
+func (fence *harnessFence) advance(line string) bool {
+	trimmed := strings.TrimLeft(line, " ")
+	width := 0
+	if len(line)-len(trimmed) <= 3 && trimmed != "" && (trimmed[0] == '`' || trimmed[0] == '~') {
+		for width < len(trimmed) && trimmed[width] == trimmed[0] {
+			width++
+		}
+	}
+	if fence.width > 0 {
+		if width >= fence.width && trimmed[0] == fence.char && strings.TrimSpace(trimmed[width:]) == "" {
+			fence.width = 0
+		}
+		return true
+	}
+	if width >= 3 {
+		fence.char = trimmed[0]
+		fence.width = width
+		return true
+	}
+	return false
+}
+
+// harnessPromptHeading reports whether a non-fenced line opens a section.
+func harnessPromptHeading(line string) bool {
+	return strings.HasPrefix(line, "#") || line == "=== SYSTEM BLOCK ==="
+}
+
+// normalizeHarnessPrompt is the single canonical form of a harness prompt. It
+// excludes CLI identity metadata — Claude may omit these two Environment lines
+// even with dynamic sections excluded — and masks model IDs, model display
+// names and dotted versions everywhere, and replaces the whole model-catalog
+// line with one placeholder, so a catalog or release change alone is never
+// drift. Instructions in that section, and matching text elsewhere,
+// remain part of the drift hash.
 func normalizeHarnessPrompt(prompt string) string {
 	lines := strings.Split(prompt, "\n")
 	kept := lines[:0]
 	inEnvironment := false
-	var fence byte
-	fenceWidth := 0
+	var fence harnessFence
 	for index, line := range lines {
-		trimmed := strings.TrimLeft(line, " ")
-		width := 0
-		if len(line)-len(trimmed) <= 3 && trimmed != "" && (trimmed[0] == '`' || trimmed[0] == '~') {
-			for width < len(trimmed) && trimmed[width] == trimmed[0] {
-				width++
+		if !fence.advance(line) {
+			if index == 0 && len(lines) > 2 && lines[1] == "" && lines[2] == "=== SYSTEM BLOCK ===" &&
+				strings.HasPrefix(line, "x-anthropic-billing-header: ") {
+				line = harnessBuildStamp.ReplaceAllLiteralString(line, "cc_version=*;")
+			}
+			if harnessPromptHeading(line) {
+				inEnvironment = line == "# Environment"
+			}
+			if inEnvironment && (harnessModelIdentity.MatchString(line) || harnessKnowledgeCutoff.MatchString(line)) {
+				continue
+			}
+			if harnessModelCatalog.MatchString(line) {
+				kept = append(kept, " - <model-catalog>")
+				continue
 			}
 		}
-		if fenceWidth > 0 {
-			kept = append(kept, line)
-			if width >= fenceWidth && trimmed[0] == fence && strings.TrimSpace(trimmed[width:]) == "" {
-				fenceWidth = 0
-			}
-			continue
-		}
-		if width >= 3 {
-			fence = trimmed[0]
-			fenceWidth = width
-			kept = append(kept, line)
-			continue
-		}
-		if index == 0 && len(lines) > 2 && lines[1] == "" && lines[2] == "=== SYSTEM BLOCK ===" &&
-			strings.HasPrefix(line, "x-anthropic-billing-header: ") {
-			line = harnessBuildStamp.ReplaceAllLiteralString(line, "cc_version=*;")
-		}
-		if strings.HasPrefix(line, "#") || line == "=== SYSTEM BLOCK ===" {
-			inEnvironment = line == "# Environment"
-		}
-		if inEnvironment && (harnessModelIdentity.MatchString(line) || harnessKnowledgeCutoff.MatchString(line)) {
-			continue
-		}
-		kept = append(kept, line)
+		line = harnessModelID.ReplaceAllLiteralString(line, "<model-id>")
+		line = harnessModelName.ReplaceAllLiteralString(line, "<model-name>")
+		kept = append(kept, harnessDottedVersion.ReplaceAllLiteralString(line, "<version>"))
 	}
 	return strings.Join(kept, "\n")
 }
@@ -166,6 +210,122 @@ func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr
 		baselineSHA[:16],
 		baselineName,
 	), true
+}
+
+// harnessPromptDetailLimit caps the section lines one DRIFT verdict prints.
+const harnessPromptDetailLimit = 20
+
+type harnessPromptSection struct {
+	key  string
+	body string
+}
+
+// harnessPromptSections splits a canonical prompt at every non-fenced heading
+// line. The heading is the key; text before the first heading is
+// "(preamble)"; a repeated heading is keyed "<heading> (2)", "(3)", in order.
+func harnessPromptSections(canonical string) []harnessPromptSection {
+	var sections []harnessPromptSection
+	seen := map[string]int{}
+	var body []string
+	key, open := "(preamble)", false
+	flush := func() {
+		if open {
+			// The prompt's final newline belongs to whichever section is last; it
+			// is never an instruction, so trailing blank lines do not count.
+			sections = append(
+				sections,
+				harnessPromptSection{key: key, body: strings.TrimRight(strings.Join(body, "\n"), "\n")},
+			)
+		}
+	}
+	var fence harnessFence
+	for _, line := range strings.Split(canonical, "\n") {
+		if !fence.advance(line) && harnessPromptHeading(line) {
+			flush()
+			seen[line]++
+			key, open, body = line, true, nil
+			if seen[line] > 1 {
+				key = fmt.Sprintf("%s (%d)", line, seen[line])
+			}
+			continue
+		}
+		open = true
+		body = append(body, line)
+	}
+	flush()
+	return sections
+}
+
+// harnessPromptDetail explains a verdict: a model line when the resolved model
+// differs from the baseline's, then — on DRIFT only — each removed and changed
+// section in baseline order and each added section in live order (or, when no
+// section text differs, the reorder or blank-line change), capped at
+// harnessPromptDetailLimit. A failed capture explains nothing: its verdict
+// already says drift is unknown.
+func harnessPromptDetail(
+	alias, baselineModel string,
+	baseline string,
+	captured HarnessCapture,
+	captureErr error,
+	drift bool,
+) []string {
+	if captureErr != nil {
+		return nil
+	}
+	var detail []string
+	if captured.ResolvedModel != "" && captured.ResolvedModel != baselineModel {
+		detail = append(detail, fmt.Sprintf(
+			"doctor: harness-prompt:   model changed %s: %s → %s",
+			alias,
+			baselineModel,
+			captured.ResolvedModel,
+		))
+	}
+	if !drift {
+		return detail
+	}
+	baselineSections := harnessPromptSections(normalizeHarnessPrompt(baseline))
+	liveSections := harnessPromptSections(normalizeHarnessPrompt(captured.Prompt))
+	live := make(map[string]string, len(liveSections))
+	for _, section := range liveSections {
+		live[section.key] = section.body
+	}
+	inBaseline := make(map[string]bool, len(baselineSections))
+	var sections []string
+	for _, section := range baselineSections {
+		inBaseline[section.key] = true
+		body, present := live[section.key]
+		switch {
+		case !present:
+			sections = append(sections, "section removed: "+section.key)
+		case body != section.body:
+			sections = append(sections, "section changed: "+section.key)
+		}
+	}
+	for _, section := range liveSections {
+		if !inBaseline[section.key] {
+			sections = append(sections, "section added: "+section.key)
+		}
+	}
+	// Same keys, same bodies, different hash: the sections moved, or only the
+	// blank lines trimmed from each body did. A DRIFT always names its cause.
+	if len(sections) == 0 {
+		sections = append(sections, "blank lines changed (no section text differs)")
+		for index := range baselineSections {
+			if baselineSections[index].key != liveSections[index].key {
+				sections[0] = "section order changed"
+				break
+			}
+		}
+	}
+	for index, section := range sections {
+		if index == harnessPromptDetailLimit {
+			detail = append(detail, fmt.Sprintf("doctor: harness-prompt:   … and %d more", len(sections)-index))
+			break
+		}
+		detail = append(detail, "doctor: harness-prompt:   "+section)
+	}
+	return detail
 }
 
 // captureHarnessPrompt uses the shared headless runner with the unmodified

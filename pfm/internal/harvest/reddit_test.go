@@ -343,16 +343,33 @@ const loaderThread = "https://www.reddit.com/r/examplesub/comments/ddd444/loader
 
 // Reddit markup builders, shaped like the server-rendered thread and its
 // loader answers: a comment's replies nest inside it, a loader carries its
-// cursor as a hidden input, a comment's folded state carries a copy of its own
-// permalink, and a chain past the page's depth ends in a visible link.
+// cursor as a hidden input, and every comment carries a "Continue this thread"
+// link to its own page in a fold-more block. The block is hidden while the
+// comment's replies are in the page; a comment at the page's depth limit (the
+// fold) shows it instead of its replies.
 func threadComment(id, author, body string, children ...string) string {
 	return fmt.Sprintf(`<shreddit-comment thingid="t1_%s" author="%s" score="3" `+
 		`permalink="/r/examplesub/comments/ddd444/comment/%s/">`+
 		`<div slot="comment"><p>%s</p></div>`+
-		`<div slot="more-comments-permalink"><a href="/r/examplesub/comments/ddd444/comment/%s/?force-legacy-sct=1">`+
-		`Continue this thread</a></div>`+
-		`<div id="comment-children">%s</div></shreddit-comment>`,
-		id, author, id, body, id, strings.Join(children, ""))
+		`<div id="comment-children">%s</div>`+
+		`<div class="fold-more hidden">%s</div></shreddit-comment>`,
+		id, author, id, body, strings.Join(children, ""), foldLink(id))
+}
+
+// foldedComment is a comment at the fold: its replies are not in the page,
+// its fold-more block is shown, and its link leads to them.
+func foldedComment(id, author, body string) string {
+	return fmt.Sprintf(`<shreddit-comment thingid="t1_%s" author="%s" score="3" `+
+		`permalink="/r/examplesub/comments/ddd444/comment/%s/">`+
+		`<div slot="comment"><p>%s</p></div>`+
+		`<div id="comment-children" class="hidden"></div>`+
+		`<div class="fold-more">%s</div></shreddit-comment>`,
+		id, author, id, body, foldLink(id))
+}
+
+func foldLink(id string) string {
+	return fmt.Sprintf(`<div data-more-replies-link><div class="more-comments-link" slot="more-comments-permalink">`+
+		`<a href="/r/examplesub/comments/ddd444/comment/%s/?force-legacy-sct=1">Continue this thread</a></div></div>`, id)
 }
 
 func moreRepliesLoader(cursor string, replies int) string {
@@ -368,9 +385,18 @@ func viewMoreLoader(cursor string) string {
 		`<input type="hidden" name="cursor" value="%s"></faceplate-partial>`, cursor, cursor)
 }
 
+// deepThreadLink is how a continued page links a reply chain past its own
+// depth: an "N more replies" link to the comment's page in the comment's
+// children, the fold-more copy of it hidden.
+func deepThreadLink(id string, replies int) string {
+	return fmt.Sprintf(`<a class="more-comments-link" slot="children" `+
+		`href="/r/examplesub/comments/ddd444/comment/%s/?force-legacy-sct=1">`+
+		`<faceplate-number number="%d"></faceplate-number> more replies</a>`, id, replies)
+}
+
+// continueThreadLink is a shown fold-more block standing for id's replies.
 func continueThreadLink(id string) string {
-	return fmt.Sprintf(`<div class="more-comments-link" slot="children">`+
-		`<a href="/r/examplesub/comments/ddd444/comment/%s/?force-legacy-sct=1">Continue this thread</a></div>`, id)
+	return `<div class="fold-more">` + foldLink(id) + `</div>`
 }
 
 func loaderThreadPage(stated int, tree ...string) string {
@@ -598,6 +624,63 @@ func TestRedditLoadersAreFollowedIntoTheTree(t *testing.T) {
 	again := h.FetchWithOptions(context.Background(), loaderThread, FetchOptions{Refresh: true})
 	if again.Content != result.Content {
 		t.Fatalf("a second harvest of the same thread differs:\n%s\n---\n%s", result.Content, again.Content)
+	}
+}
+
+// TestRedditFoldedRepliesInLoadedBranchesAreFollowed: a loader's answer and a
+// "Continue this thread" page each render only a few levels of the tree. A
+// comment at a loader answer's fold shows its fold-more block — the same slot
+// every comment hides a copy of its permalink in — instead of its replies; a
+// continued page links a chain past its depth as "N more replies" to the
+// comment's page. Both are followed, page after page, until the deepest live
+// reply is in the tree; the hidden copies are never fetched.
+func TestRedditFoldedRepliesInLoadedBranchesAreFollowed(t *testing.T) {
+	charlie := "Charlie, at the loader answer's fold."
+	delta := "Delta, past the continued page's depth."
+	site := &redditSite{
+		page: loaderThreadPage(5, threadComment("c1", "alpha_placeholder", "Alpha top comment.",
+			moreRepliesLoader("cur-deep", 4))),
+		fragments: map[string]string{
+			"cur-deep": threadComment("c2", "bravo_placeholder", "Bravo, in the loaded branch.",
+				foldedComment("c3", "charlie_placeholder", charlie)),
+		},
+		threads: map[string]string{
+			"c3": loaderThreadPage(5, threadComment("c3", "charlie_placeholder", charlie,
+				threadComment("c4", "delta_placeholder", delta, deepThreadLink("c4", 1)))),
+			"c4": loaderThreadPage(5, threadComment("c4", "delta_placeholder", delta,
+				threadComment("c5", "echo_placeholder", "Echo, the deepest live reply."))),
+		},
+	}
+	h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+	result := h.FetchWithOptions(context.Background(), loaderThread, FetchOptions{Refresh: true})
+	want := []string{
+		"- **u/alpha_placeholder**",
+		"  - **u/bravo_placeholder**",
+		"    - **u/charlie_placeholder**",
+		"      - **u/delta_placeholder**",
+		"        - **u/echo_placeholder**",
+	}
+	if got := commentHeaders(result.Content); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("the folded chain did not reach its deepest reply:\n got %q\nwant %q\n%s", got, want, result.Content)
+	}
+	if result.Error != "" || result.Partial != "" ||
+		!strings.Contains(result.Content, "**Comments:** 5 stated · 5 loaded (0 deleted, 0 removed)\n") {
+		t.Fatalf("the thread does not reconcile to its stated 5: partial=%q error=%q %.600q",
+			result.Partial, result.Error, result.Content)
+	}
+	wantRequests := []string{
+		"GET /r/examplesub/comments/ddd444/loader_walk/",
+		"POST /svc/shreddit/more-comments/examplesub/t3_ddd444 cur-deep",
+		"GET /r/examplesub/comments/ddd444/comment/c3/",
+		"GET /r/examplesub/comments/ddd444/comment/c4/",
+	}
+	var got []string
+	for _, request := range site.requests {
+		got = append(got, strings.TrimSpace(request.method+" "+request.path+" "+request.cursor))
+	}
+	if strings.Join(got, "\n") != strings.Join(wantRequests, "\n") {
+		t.Fatalf("requests:\n%s\nwant (a hidden fold-more copy is never fetched):\n%s",
+			strings.Join(got, "\n"), strings.Join(wantRequests, "\n"))
 	}
 }
 

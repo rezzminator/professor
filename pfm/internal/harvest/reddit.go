@@ -19,10 +19,12 @@ import (
 // id, and whose slot="comment" child holds its body. Branches the page did not
 // load sit behind <faceplate-partial src="/svc/shreddit/more-comments/...">
 // loaders ("N more replies", "View more comments"), and a reply chain past the
-// page's depth limit behind a visible "Continue this thread" link to the
-// comment's own page (every comment also carries a hidden copy of that link
-// for its folded state, which is not a gap). redditLoaders names both kinds
-// for Go to follow (loaders.go): a loader is POSTed its own form with the
+// page's depth limit behind a link to the comment's own page ("Continue this
+// thread"; "N more replies" in a continued page). Every comment carries that
+// link in a fold-more block, hidden (class "hidden") while its replies are in
+// the page — not a gap; a comment at the fold of a loader's answer shows it
+// instead of its replies, and a shown link is a gap. redditLoaders names both
+// kinds for Go to follow (loaders.go): a loader is POSTed its own form with the
 // thread as Referer and answers a fragment of the tree, grafted in the
 // loader's place; a link's page holds the comment again, and its replies are
 // grafted in the link's place. The extractor then renders the post and the
@@ -362,16 +364,22 @@ func redditBase() *url.URL {
 }
 
 // redditHiddenCopy reports an element holding what a reader does not see in
-// the thread: a hidden subtree, or the copy of a comment's own permalink its
-// folded state shows.
+// the thread: a hidden subtree, such as the fold-more block of a comment whose
+// replies are in the page. The block's slot="more-comments-permalink" does not
+// make it a copy — at the fold, the same slot holds the only link to the
+// comment's replies.
 func redditHiddenCopy(node *html.Node) bool {
-	return hasClass(node, "hidden") || nodeAttr(node, "slot") == "more-comments-permalink"
+	return hasClass(node, "hidden")
 }
 
-// redditContinueLink reports a visible "Continue this thread" link.
+// redditContinueLink reports a visible link to the page of a reply chain past
+// the page's depth: "Continue this thread" in a thread page or a loader's
+// answer, an "N more replies" link classed more-comments-link in a continued
+// page.
 func redditContinueLink(node *html.Node, hidden bool) bool {
 	return node.DataAtom == atom.A && !hidden &&
-		strings.Contains(strings.ToLower(nodeText(node)), "continue this thread")
+		(hasClass(node, "more-comments-link") ||
+			strings.Contains(strings.ToLower(nodeText(node)), "continue this thread"))
 }
 
 // redditMoreComments reports a more-comments loader element.

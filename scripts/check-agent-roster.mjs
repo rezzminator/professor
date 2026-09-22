@@ -129,6 +129,34 @@ if (openCodeExpected.includes("gitter")) {
   }
 }
 
+// Claude Code sends an agent's frontmatter `model:` value to the API verbatim —
+// an inline `# comment` included — so `fable # …` is a 404 model_not_found.
+// Every agent source's model value is one bare alias or id.
+const agentSourceDirs = [
+  ".claude/agents",
+  "templates/global/agents",
+  "templates/project/agents",
+];
+let modelLinesRead = 0;
+for (const dir of agentSourceDirs) {
+  for (const name of markdownNames(join(ROOT, dir))) {
+    const text = readFileSync(join(ROOT, dir, `${name}.md`), "utf8");
+    const front = text.startsWith("---\n") ? text.slice(4, text.indexOf("\n---", 4)) : "";
+    const line = front.split("\n").find((l) => /^model:/.test(l));
+    if (!line) continue;
+    modelLinesRead++;
+    const value = line.slice("model:".length).trim();
+    if (!/^[A-Za-z0-9._\[\]-]+$/.test(value))
+      failures.push(
+        `${dir}/${name}.md: frontmatter model "${value}" is not one bare alias — the harness sends it to the API verbatim`,
+      );
+  }
+}
+if (!modelLinesRead)
+  failures.push(
+    `agent model check read no model line in ${agentSourceDirs.join(", ")} — the check did not run`,
+  );
+
 if (failures.length) {
   for (const failure of failures) console.error(`agent-roster: ${failure}`);
   console.error(

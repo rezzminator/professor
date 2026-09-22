@@ -87,6 +87,71 @@ skip_gate() {
   esac
 }
 
+# go_test_report <go-test.json>: the failure-biased read of a `go test -json`
+# stream — the whole stream is megabytes of frames a caller cannot hold, so this
+# prints one block per FAILING test (package, test name, that test's own output
+# capped at GO_TEST_OUTPUT_LINES lines and GO_TEST_LINE_CHARS characters each —
+# a single assertion that embeds a whole captured stdout is one 6 KB line, so a
+# line count alone caps nothing), then packages that failed without a failing
+# test, then the artifact's ABSOLUTE path on every path, pass or fail, so the
+# caller never reconstructs it. What it reports when IT is broken: no jq is
+# TOOLCHAIN-MISSING, an absent or empty stream is REPORT-UNREADABLE, and a
+# stream holding no test event at all is NO TEST EVENTS (crash, kill, or build
+# failure) — never an empty summary that reads the same as a green run.
+# trim_line <chars>: cap each line, naming the cut so a truncated assertion is
+# never mistaken for the whole message.
+trim_line() {
+  awk -v n="$1" '{ if (length($0) > n) print substr($0, 1, n) " …[line truncated, full text in the log]"; else print }'
+}
+
+go_test_report() {
+  local json="$1" cap="${GO_TEST_OUTPUT_LINES:-25}" chars="${GO_TEST_LINE_CHARS:-400}" abs dir
+  dir="$(cd "$(dirname "$json")" 2>/dev/null && pwd)" || dir="$(dirname "$json")"
+  abs="$dir/$(basename "$json")"
+  if ! command -v jq >/dev/null 2>&1; then
+    fail_step "test report: TOOLCHAIN-MISSING — 'jq' not on PATH; the failure summary could not be built"
+    info "log: $abs"; return
+  fi
+  if [[ ! -s "$json" ]]; then
+    fail_step "test report: REPORT-UNREADABLE — $abs is absent or empty; the run left no stream to read"
+    info "log: $abs"; return
+  fi
+  if [[ -z "$(jq -r 'select(.Test != null) | .Test' "$json" 2>/dev/null | head -1)" ]]; then
+    fail_step "test report: NO TEST EVENTS — the stream holds no test event; the run crashed, was killed, or failed to build"
+    jq -r 'select(.Action=="output") | .Output' "$json" 2>/dev/null \
+      | grep -vE '^[[:space:]]*$' | tail -n "$cap" | trim_line "$chars" | sed 's/^/        /'
+    info "log: $abs"; return
+  fi
+  local failed failpkgs pkg test body total n=0
+  failed="$(jq -r 'select(.Action=="fail" and .Test != null) | .Package + "\t" + .Test' "$json" | sort -u)"
+  failpkgs="$(jq -r 'select(.Action=="fail" and .Test == null) | .Package' "$json" | sort -u)"
+  if [[ -n "$failed" ]]; then
+    while IFS=$'\t' read -r pkg test; do
+      [[ -z "$pkg" ]] && continue
+      n=$((n + 1))
+      printf '  FAIL  %s %s\n' "$pkg" "$test"
+      body="$(jq -r --arg p "$pkg" --arg t "$test" \
+        'select(.Action=="output" and .Package==$p and .Test==$t) | .Output' "$json" \
+        | grep -vE '^(=== (RUN|PAUSE|CONT)|( *)--- (PASS|FAIL|SKIP))|^[[:space:]]*$' || true)"
+      if [[ -n "$body" ]]; then
+        total=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
+        printf '%s\n' "$body" | head -n "$cap" | trim_line "$chars" | sed 's/^/        /'
+        (( total > cap )) && printf '        (+%d more output line(s) in the log)\n' "$((total - cap))"
+      fi
+    done <<< "$failed"
+  fi
+  while read -r pkg; do
+    [[ -z "$pkg" ]] && continue
+    awk -F'\t' -v p="$pkg" '$1==p {found=1} END {exit !found}' <<< "$failed" && continue
+    n=$((n + 1))
+    printf '  FAIL  %s — the package failed with no failing test (build or setup error)\n' "$pkg"
+    jq -r --arg p "$pkg" 'select(.Action=="output" and .Package==$p and .Test==null) | .Output' "$json" \
+      | grep -vE '^(ok|FAIL|PASS)|^[[:space:]]*$' | head -n "$cap" | trim_line "$chars" | sed 's/^/        /'
+  done <<< "$failpkgs"
+  (( n > 0 )) && info "$n failing test(s)/package(s) summarised above, capped at $cap output line(s) each"
+  info "log: $abs"
+}
+
 # ─── status ──────────────────────────────────────────────────────────────────
 
 cmd_status() { # cmd_status [project|all]
@@ -374,20 +439,16 @@ act_pfm() {
       # The JSON is retained even on failure; timing is a separate verdict.
       run "pfm: go test" -- bash -c '
         go -C "$1" test "${@:3}" -count=1 -timeout 25m -json ./... >"$2"
-        rc=$?
-        if (( rc != 0 )); then cat "$2"; fi
-        exit "$rc"
       ' _ "$d" "$timing_run/unit.json" "${testflags[@]}"
+      go_test_report "$timing_run/unit.json"
       skip_gate "pfm: skipped tests are all listed (unit)" "$timing_run/unit.json"
       run "pfm: test timing (budget)" -- bash "$d/scripts/test-timing.sh" \
         --check --suite unit --out "$timing_run/unit.tsv" "$timing_run/unit.json"
       # Tagged Tier A runs serially and has its own budget and artifact.
       run "pfm: e2e (tagged)" -- bash -c '
         go -C "$1" test -tags e2e -p 1 -count=1 -timeout 25m -json ./e2e/... >"$2"
-        rc=$?
-        if (( rc != 0 )); then cat "$2"; fi
-        exit "$rc"
       ' _ "$d" "$timing_run/e2e.json"
+      go_test_report "$timing_run/e2e.json"
       skip_gate "pfm: skipped tests are all listed (e2e)" "$timing_run/e2e.json"
       run "pfm: e2e timing (budget)" -- bash "$d/scripts/test-timing.sh" \
         --check --suite e2e --out "$timing_run/e2e.tsv" "$timing_run/e2e.json" ;;

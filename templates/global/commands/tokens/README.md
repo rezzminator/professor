@@ -1,166 +1,147 @@
-# token-ledger
+# token-audit
 
-Token attribution for both local agent harnesses — per-agent / per-operation for Claude Code sessions, per-session-thread for the Codex CLI (`--codex`) — parsed straight from the JSONL each harness writes locally. Zero dependencies (node: builtins only), READ-ONLY over transcripts, no network. Node 20+. Full human reference — Claude's own routing/invocation entry point is `SKILL.md`.
-
-This is the "WHICH agent / WHICH operation burned the tokens" view that Claude Code's native OpenTelemetry **metrics cannot give** — `agent.name` is redacted to `"custom"` for user-defined sub-agents, so the JSONL files are the only local source of per-agent truth. (See the RR report that produced this tool.)
-
-## Usage
-
-Run from the repo root (the project slug is derived from the cwd):
+One read-only script over both engines' transcripts, one pricing table: **where did the tokens go?**
+Zero dependencies (node: builtins only), no network, nothing written outside `--out` / `--metrics-out` /
+a flight's own `metrics.md`.
 
 ```bash
-# Most recent session for the current project (cwd-derived):
-node .claude/commands/tokens/token-ledger.mjs
-
-# Every session for this project (heaviest token burner = top row, sorted by cost):
-node .claude/commands/tokens/token-ledger.mjs --all
-
-# What did each workflow run cost? (one row per wf_* run, sorted by cost):
-node .claude/commands/tokens/token-ledger.mjs --all --by-workflow
-
-# Total one flight or feature (by label substring):
-node .claude/commands/tokens/token-ledger.mjs --all --filter my-feature
-
-# A specific conversation (by id or by path to its dir / main .jsonl):
-node .claude/commands/tokens/token-ledger.mjs --session <session-id>
-
-# Drill into one agent's individual API calls (by agentId OR label substring):
-node .claude/commands/tokens/token-ledger.mjs --detail "BE developer"
-node .claude/commands/tokens/token-ledger.mjs --session <id> --detail a26fc4c505ee2af1b
-
-# Machine output:
-node .claude/commands/tokens/token-ledger.mjs --json
-
-# Extra root / project override:
-node .claude/commands/tokens/token-ledger.mjs --root /some/other/.claude --project -Users-you-work-project
+node .claude/commands/tokens/token-audit.mjs            # last 24h, every project
+node .claude/commands/tokens/token-audit.mjs --since 3d --project <substr>
+node .claude/commands/tokens/token-audit.mjs --codex    # Codex CLI threads
+node .claude/commands/tokens/token-audit.mjs --flight tmp/flights/<name>
 ```
 
-### Flags
+A RUN is one transcript file: one main chat loop, one sub-agent, or one Codex rollout thread.
+A FAMILY is a main chat plus every sub-agent it spawned.
+
+## Flags
 
 | Flag | Purpose |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--all` | Every session for this project (default is the most recent with sub-agents). |
-| `--session <id\|path>` | One conversation, by id or by path to its dir / main `.jsonl`. |
-| `--project <slug>` | Project slug override (default: slugified cwd). |
-| `--root <dir>` | Extra transcript root (repeatable). |
-| `--detail <id\|substr>` | List one agent's individual API calls in order. |
-| `--by-workflow` | Group by workflow run (`wf_*`) — one row per run + a `(non-workflow agents)` summary row + TOTAL. |
-| `--filter <substr>` | Restrict the per-agent table + totals to rows whose label or model id contains `<substr>` (case-insensitive); prints the match count. Composes with `--all` / `--session` / `--json`. |
-| `--since <YYYY-MM-DD>` | Drop sessions older than that calendar day. |
-| `--json` | Machine-readable output. |
+| --- | --- |
+| `--since 24h\|3d` | Window (default `24h`). Cuts per call **and** skips files older than the window. |
+| `--root <dir>` | Extra Claude transcript root (repeatable). A root that will not resolve is a hard error. |
+| `--project <substr>` | Keep runs whose cwd contains the substring. |
+| `--family <substr>` | Drill into one family — matches a chat title, an agent type, a sub-agent's spawn description, or a session-id prefix. |
+| `--session <sid-prefix>` | Restrict every section to one session. The selector a sub-agent-orchestrated run has, where a chat title does not exist. |
+| `--top <n>` | Rows per section (default 12). |
+| `--out <file>` | Full JSON dataset. |
+| `--codex` | Read Codex rollouts instead of Claude transcripts. |
+| `--codex-root <dir>` | Override `~/.codex`. |
+| `--flight <dir>` | Per-flight metrics report (below). |
+| `--metrics-out <file>` | Write the flight report here instead of `<dir>/metrics.md`. |
+| `--view <file>` / `--briefs <file>` | Compact per-project page data / the briefs-and-behaviour dataset. |
 
-### `--by-workflow` honesty caveat
-
-`--by-workflow` groups every agent file under each distinct `wf_*` run directory. It captures **Workflow-engine runs** (e.g. `/deep-rr`) **exactly**.
-
-It does **NOT** total a flight. `/flights:orchestrate-live` spawns each executor as a **session-level** sub-agent and `/flights:orchestrate-nested` runs them under one sub-agent — neither is a `wf_*` workflow run. Those land in the `(non-workflow agents)` summary row. To total one flight, use `--filter <flight-label>`.
-
-Default scope is the most recent session **that has sub-agents** for the current project. The project is identified by slugifying the cwd (every `/` → `-`), matching Claude Code's own `projects/{slug}` naming.
+Discovery order for Claude roots when `--root` is absent: `$CLAUDE_CONFIG_DIR/projects`,
+`~/.claude/projects`, then every `~/.cc/*/projects`. Roots are resolved through symlinks and
+de-duplicated, and each file is de-duplicated by its last three path segments — one project
+tree shared by several accounts is never double-counted.
 
 ## What it reads
 
-Two transcript roots, auto-discovered:
+**Claude Code.** `{root}/{projectSlug}/{conversationId}.jsonl` (the main loop) and
+`{conversationId}/subagents/agent-{agentId}.jsonl` (+ `.meta.json` for `agentType`,
+`description`, `spawnDepth`), including nested `subagents/workflows/wf_*/agent-*.jsonl`.
 
-1. `~/.claude/projects/{slug}/` — standard layout.
-2. `~/.claude-sessions/s*/projects/{slug}/` — an optional multi-account session layout.
+- Usage rides on every `assistant` line at `message.usage`; the model is `message.model`.
+- **Dedup is mandatory**: streaming writes several lines per API call sharing one `message.id`.
+  The tool keys on `(message.id, requestId)` and keeps the last — summing raw lines overcounts 2-3x.
+- `tool_use` blocks are paired with their `tool_result` so every tool call, its size, its
+  duration and its `is_error` are known — that is what makes the per-agent measures possible.
+- A `system`/`compact_boundary` line, or a context that shrinks below 60% of what is carried,
+  resets the replay: that is a compaction.
 
-Where both roots are **hardlinks to the same inodes**, the tool de-duplicates sessions by `(dev, inode)` of the main file — it never double-counts a session seen under both roots.
+**Codex CLI.** `~/.codex/sessions/**/rollout-*.jsonl` and `~/.codex/archived_sessions/**`.
+The `~/.codex/` root itself is deliberately not scanned — it holds `rollout-backup-*.jsonl`
+copies that would double-count a thread.
 
-Within a session:
+- Line 1 is `session_meta`: `id` (thread), `session_id` / `parent_thread_id` (the parent thread),
+  `context_window.window_id`, `cwd`, `thread_source`, and `source.subagent` (the role) for a
+  sub-agent thread. A Codex sub-agent writes its **own** rollout, so it is attributed individually.
+- `turn_context` carries the model; `token_count` carries the counters; `custom_tool_call` /
+  `function_call` and their `*_output` carry the tools, their output size and their failures.
+- For the `--codex` table only matching lines are decoded (rollouts reach 110 MB); `--flight`
+  decodes the few matched rollouts in full.
 
-- `{conversationId}.jsonl` — the **MAIN** conversation loop → its own row.
-- `{conversationId}/subagents/agent-*.jsonl` — each sub-agent → one row.
-- `{conversationId}/subagents/workflows/wf_*/agent-*.jsonl` — nested workflow sub-agents (a Workflow-engine run, e.g. `/deep-rr`) → one row each. See the `--by-workflow` honesty caveat above: a plain orchestrated flight is NOT a `wf_*` run.
+## Counting and pricing
 
-## Schema notes (verified against real files)
+- **Codex counters reset.** `info.total_token_usage` is cumulative but restarts on resume and on
+  compaction, and duplicate events re-emit an identical cumulative. So: dedupe on the cumulative,
+  split the thread wherever it drops, sum **each segment's peak**. The final counter alone
+  undercounts a long thread by orders of magnitude; summing per-turn deltas double-counts.
+  Cached input is a subset of input and bills at the cached rate; output already includes reasoning.
+- **Claude cache writes** split 5-minute (1.25x input) from 1-hour (2x input) via
+  `cache_creation.ephemeral_1h_input_tokens`; cache reads bill at the per-model rate in `PRICING`
+  (0.025x input on Fable/Mythos 5.1, 0.1x elsewhere).
+- **Every dollar is traced to the context that caused it**: the replay charges `[0, cache_read)`
+  at the read rate, `[cache_read, +cache_write)` at the write rate and the tail at 1x, then
+  attributes each slice to the category that put it there.
+- `PRICING` at the top of `token-audit.mjs` is an **editable** table, matched by substring on the
+  lowercased model id, first match wins — keep specific ids above broader ones. Columns 5 and 6
+  are the >200K long-context multipliers, an **estimate** that feeds the CROSS-CHECK line only.
+  `scripts/check-token-pricing.mjs` resolves published ids against the table; a row no published
+  id reaches is dead code and it says so.
 
-- **Usage** lives on every `assistant` line at `message.usage`: `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`. Model is `message.model`.
-- **Dedup is mandatory.** Streaming writes multiple `assistant` lines per API call, all sharing one `message.id` (verified: 43 raw lines → 18 distinct calls in one file). The tool keys on `(message.id, requestId)` and keeps the **last** occurrence — the final line carries complete cumulative usage. Summing raw lines overcounts ~2-3x.
-- **Agent label** is resolved in priority order:
-  1. `agent-{id}.meta.json` → `description` (the richest — e.g. `"BE developer"`, `"gitter SETUP"`, `"FE QA pre-merge"`; present for sub-agents spawned with a description, flight executors included).
-  2. `agent-{id}.meta.json` → `agentType` (e.g. `"workflow-subagent"`, `"general-purpose"`).
-  3. `attributionAgent` on the assistant line.
-  4. First-user-message prompt snippet (the agent's task brief).
-  5. The raw `agentId`.
+## Honesty rules
 
-## Codex mode (`--codex`)
+- **`data gaps:`** prints on every report: malformed lines, calls with no timestamp, dropped
+  synthetic/zero-usage calls, unpriced calls with their models, cache writes with no tier split,
+  duplicate files, and read errors. `data gaps: none` means the scan was clean.
+- **An unpriced model renders `n/a`, never `$0`.** Its tokens stay in every token total; its
+  dollars stay out of every dollar total; the gaps line names the model.
+- **A read error is a failure to look, not an empty result.** It is named in the gaps line and the
+  process exits non-zero; an unresolvable `--root` is a hard error before anything is reported.
+- **`CROSS-CHECK`** compares the estimate against the harness's own `cost-state` line for chats
+  wholly inside the window, and prints a second number at the long-context premium. When no chat
+  qualifies it says the estimate is UNCHECKED on this host.
 
-Same script, same `PRICING` table, different truth source: the Codex CLI writes one JSONL rollout per session thread.
+## `--flight <dir>`
 
-```bash
-# This repo's Codex sessions since a date, heaviest first:
-node .claude/commands/tokens/token-ledger.mjs --codex --since <YYYY-MM-DD>
+Writes `<dir>/metrics.md` (or `--metrics-out FILE`) and prints it; `--out FILE` adds JSON.
+The window comes from the flight, not from `--since`. Bounded: the text stays under ~200 lines
+whatever the flight's size.
 
-# Daily spend rollup:
-node .claude/commands/tokens/token-ledger.mjs --codex --since <YYYY-MM-DD> --by-day
+One row per agent — task id, agent type, engine, model, calls, wall time, start context, peak
+context, growth per call, input / cached / output tokens, price, failed commands, poll calls,
+re-reads, contract-file reads (`CLAUDE.md` / `AGENTS.md`), compactions, over cap, matched —
+then totals per agent type, the flight total, the three most expensive agents, the gaps line
+and the cross-check line.
 
-# Every project, every row, machine-readable:
-node .claude/commands/tokens/token-ledger.mjs --codex --all --top 0 --json
+The join key is `<dir>/agents.tsv`, append-only, tab-separated, one row per spawn, header optional:
 
-# One agent role, or one session:
-node .claude/commands/tokens/token-ledger.mjs --codex --filter developer
-node .claude/commands/tokens/token-ledger.mjs --codex --all --filter <thread-id>
+```text
+task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
+1-a	flights-mechanical-executor	a1b2c3	1	2026-09-20T09:01:00Z	claude
+2-b	flights-mechanical-executor	01a0…f302	2	2026-09-20T09:40:00Z	codex
 ```
 
-| Flag | Purpose |
-| ---------------------- | ------------------------------------------------------------------------------------ |
-| `--codex` | Read Codex rollouts instead of Claude transcripts. |
-| `--since <YYYY-MM-DD>` | Keep rollouts stamped on or after that day (the filename stamp is **local** time). |
-| `--all` | Span every project (default: the repo you are standing in) and add a PROJECT column. |
-| `--by-day` | One row per calendar day instead of per session. |
-| `--top <n>` | Cap the session table (default 25; `0` = every row). |
-| `--filter <substr>` | Match on label, model, project, cwd, or session id. |
-| `--codex-root <dir>` | Override `~/.codex`. |
+- `engine` is `claude`, `codex` or `seat` (a seat is tried on both).
+- Claude rows resolve to `…/subagents/agent-{agent-id}.jsonl` under any discovered root.
+- Codex rows match `{agent-id}` against the rollout's own `session_meta` — `id`,
+  `context_window.window_id`, or the id in the filename — never `session_id` /
+  `parent_thread_id`, which name the parent on a sub-agent thread.
+- A Codex `{agent-id}` starting with `/` is an agent path (`/root/fix_1a`), the only handle a
+  Codex orchestrator holds: it matches `session_meta.agent_path`, the spawn nearest the row's
+  time winning when a path repeats, and the row is marked `matched: path`.
+- A row whose id form cannot be matched falls back to **that row's** spawn time plus its agent
+  type, and the row is marked `matched: window`. A spawn time without a clock (`2026-09-20`)
+  never opens a window: the row matches by id or path, or is `UNMATCHED`.
+- With no `agents.tsv` at all, `run.md`'s header instant and its `{id} CLAIMED · {agent} · {time}`
+  lines are the fallback and every row is marked `window`. A header with no parseable instant is
+  a hard error — the tool never invents a window.
+- A ledger row with no transcript, and a transcript inside the window under this flight's parent
+  with no ledger row, are both listed under `UNMATCHED`. Neither is dropped.
+- The call cap comes from the agent type name: a `gater` is capped at 150, everything else at 80.
 
-### What it reads
+## Tests
 
-`~/.codex/sessions/YYYY/MM/DD/rollout-<local-ISO-ts>-<threadId>.jsonl` and `~/.codex/archived_sessions/rollout-*.jsonl`. The `~/.codex/` root itself is deliberately **not** scanned — it holds `rollout-backup-*.jsonl` copies that would double-count a session. Sessions are de-duplicated by thread id.
+```bash
+node --test .claude/commands/tokens/
+```
 
-Per rollout: line 1 is `{type:"session_meta"}` (cwd, thread id, and for a subagent thread its `agent_role`/`agent_nickname`); `{type:"turn_context"}` carries the model; token accounting rides on `{type:"event_msg", payload:{type:"token_count", info:{…}}}`, where `info` is `null` on older/idle events.
-
-Because a Codex subagent writes its **own** rollout, per-session rows already give per-subagent attribution — the LABEL column shows the role (`{project}-developer (Nickname)`) or `main` for a top-level thread.
-
-### Counting rule (verified against a local corpus)
-
-`info.total_token_usage` is **cumulative**, and the tool sums the **peak of each segment**:
-
-- Cumulative within a segment — a cumulative of 19,575 plus a 22,531 `last_token_usage` delta is followed by a cumulative of 42,106.
-- It **resets to ~0 on resume/compaction**. One 110 MB rollout resets 3×; its four segment peaks are 108.1M / 77.2M / 353.2M / 384K. Reading only the final counter reports **384,439** instead of **538,898,717** — a 1400× undercount.
-- Duplicate `token_count` events re-emit an **identical** cumulative total, so summing `last_token_usage` deltas **overcounts** (observed exactly 2× on a 2-event rollout).
-
-Invariants that held on every event sampled, and that the arithmetic relies on: `total = input + output`; `cached_input ⊆ input`; `reasoning_output ⊆ output`; `cache_write = 0`.
-
-### Performance
-
-Rollouts reach 110 MB, mostly tool output. The scanner reads 4 MB windows (64 KB overlap, longer than any `token_count`/`turn_context` line, so every match lands whole in some window) and JSON-decodes **only** matching lines. On a 110 MB file that is ~0.35 s versus ~5.3 s for a plain readline pass, with byte-identical results; a 3.1 GB / 1500-rollout corpus scans in ~12 s.
-
-## Cost model
-
-Per-MTok rates are **EDITABLE constants** at the top of `token-ledger.mjs` (`PRICING`), matched by substring on the lowercased model id; first match wins, so keep specific ids above broader ones. **Update these rates when prices change** — they are best-effort defaults, not authoritative billing.
-
-- **Claude models** (`opus`, `sonnet`, `haiku`, `fable`, `mythos`): cache-write = 1.25× input rate, cache-read = 0.1× input rate (standard Anthropic prompt-caching multipliers).
-- **Codex models** (`gpt-6-astra`, `gpt-5.6-sol`, `gpt-5.6-luna`): a 4th `PRICING` column carries the cached-input rate, billed separately because Codex reports `cached_input_tokens` as a subset of `input_tokens`. Output already includes reasoning. All three rows are the vendor's published standard-tier input / cached-input / output rates (source and read date in the `PRICING` comment); Fast mode and Batch/Flex multipliers are not modelled. The vendor's higher long-context tier (>272K input) never applies — the Codex context window is smaller.
-
-A model with **no** `PRICING` row reports cost **`n/a`**, not `$0`: its tokens still count toward the totals, its dollars do not, and the footer says how many sessions are affected. A session that spans more than one model is priced at the last model seen, with a warning naming every model it used.
-
-## Token-definition calibration (read this to interpret the harness's numbers)
-
-The Claude Code workflow harness reports a `subagent_tokens` figure. Validated against a known run (`wf_2c1d0117-cad`: harness reported **31 agents / 1,268,238 subagent_tokens / 579 tool_uses**), this tool's 31-agent totals were:
-
-| definition | value | vs 1,268,238 |
-| ----------------------------------------------------- | ------------- | ------------ |
-| output-only | 131,933 | 10% |
-| input + output (no cache) | 207,996 | 16% |
-| **input + output + cache-write ("fresh"/billed-new)** | **1,382,232** | **109%** |
-| + cache-read (grand total) | 10,231,459 | 807% |
-
-So the harness's `subagent_tokens` maps to the **fresh / billed-new** definition — `input + output + cache_creation`, i.e. everything **except** the 8.8M cache-read tokens. It is NOT output-only, NOT input+output, and NOT the grand total. The ~9% gap (the harness reads ~1.27M; this tool sums 1.38M) is a flush-timing artifact: the harness fired its report before the last one or two streaming agents flushed their final usage lines — one agent's fresh-token total (113,452) almost exactly equals the gap (113,994).
-
-The table footer prints all four definitions on every run so you can read whichever the context calls for.
-
-## Caveats
-
-- Read-only by design. `--detail` content hints are truncated at ~80 chars — but these transcripts can contain sensitive prompt content, so treat `--detail` output as sensitive and do not pipe it anywhere it would be retained.
-- `attributionAgent`/`attributionSkill` are generic for workflow sub-agents (`"workflow-subagent"`/`"deep-rr"`); the real per-worker identity for those lives only in the task prompt (first user line), which the label falls back to when meta has no `description`.
-- Cost is an **estimate**. Verify against the provider's actual billing before trusting absolute dollar figures; the relative ranking is what's reliable.
-- Malformed JSONL lines are skipped silently and counted (reported on stderr).
+`token-audit.test.mjs` runs the CLI as a child process over the synthetic JSONL under
+`fixtures/` — a Claude main chat with four sub-agents (a re-read, a failed Bash, a compaction,
+85 calls, an unpriced model, a synthetic call, a lone `sleep`), a Codex rollout whose counter
+resets after a compaction with three empty `write_stdin` polls, and a flight ledger exercising
+an id match, a window match and a row with no transcript. Set `TOKEN_AUDIT_BIN` to point the
+suite at another build. No fixture is markdown: every `.md` below the commands tree would
+compile into a slash command.

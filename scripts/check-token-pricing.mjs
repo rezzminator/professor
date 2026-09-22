@@ -19,11 +19,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const LEDGER = path.join("templates", "global", "commands", "tokens", "token-ledger.mjs");
+const AUDIT = path.join("templates", "global", "commands", "tokens", "token-audit.mjs");
 
 // Published ids -> the rate the shipped table intends for them, per the comments
 // in PRICING itself. Add a row here whenever a tier is added or re-priced.
 const EXPECT = [
+  ["gpt-6-astra", 10.0, 50.0],
+  ["gpt-5.6-sol", 4.0, 20.0],
+  ["gpt-5.6-luna", 0.2, 1.2],
   ["claude-opus-4-1-20250805", 15.0, 75.0],
   ["claude-opus-4-20250514", 15.0, 75.0],
   ["claude-opus-4-5-20260101", 5.0, 25.0],
@@ -39,15 +42,15 @@ const EXPECT = [
 
 let source;
 try {
-  source = fs.readFileSync(LEDGER, "utf8");
+  source = fs.readFileSync(AUDIT, "utf8");
 } catch (error) {
-  console.error(`PRICING-UNREADABLE cannot read ${LEDGER}: ${error.message}`);
+  console.error(`PRICING-UNREADABLE cannot read ${AUDIT}: ${error.message}`);
   process.exit(2);
 }
 
 const block = source.match(/const PRICING = \[([\s\S]*?)\n\];/);
 if (!block) {
-  console.error(`PRICING-UNREADABLE no "const PRICING = [...]" block in ${LEDGER} — the table moved or was renamed; this check verified NOTHING`);
+  console.error(`PRICING-UNREADABLE no "const PRICING = [...]" block in ${AUDIT} — the table moved or was renamed; this check verified NOTHING`);
   process.exit(2);
 }
 

@@ -1,47 +1,55 @@
 ---
 # professor: SOURCE TEMPLATE — edit here for a framework change (routes through /pcm); project-scaffold customization belongs in its installed local source; engine mirrors are never hand-edited.
 name: tokens
-description: Attributes runtime token spend, heaviest first — Claude Code sub-agents and Workflow runs, or Codex CLI threads with `--codex`. Flags `--all`, `--by-workflow`, `--filter <substr>`, `--detail <id>`, `--by-day`, `--since <date>`, `--top N`, `--session <id>`; `--help` lists all. Triggers "token ledger", "which agent burned the most", "what did the flight cost". Static context size → /context-meter.
+description: Attributes runtime token spend, heaviest first — Claude Code chats and sub-agents, Codex CLI threads with `--codex`, one flight's agents with `--flight <dir>`. Flags `--since 24h|3d`, `--project`, `--family`, `--session`, `--top N`, `--out FILE`, `--metrics-out FILE`. Triggers "token audit", "which agent burned the most", "what did the flight cost". Static context size → /context-meter.
 ---
 
-# Token Ledger
+# Token Audit
 
-Run from the repo root (the project slug derives from cwd); read-only over transcripts, no network:
+One script reads both engines' transcripts against one pricing table. Read-only, no network:
 
 ```bash
-node ~/.claude/commands/tokens/token-ledger.mjs [flags]
+node ~/.claude/commands/tokens/token-audit.mjs [flags]
 ```
 
-`--help` prints the full flag list; `~/.claude/commands/tokens/README.md` carries the mechanics and schema notes.
+`~/.claude/commands/tokens/README.md` carries the mechanics, the schema notes and the counting rules.
 
 ## Which invocation answers which question
 
-- Heaviest burner: `--all` — the per-agent table sorts by est cost descending, so the top row is the answer.
-- One Workflow run's cost: `--all --by-workflow`, the run's `wf_*` row.
-- One flight, pipeline, or feature: `--all --filter <label>` — sums every agent row whose label carries it.
-- A whole chat's spend: `--by-workflow` in that chat (default scope) — `TOTAL` is the chat, `wf_*` rows are its Workflow runs, `(non-workflow agents)` is everything else.
-- One agent's individual calls: `--detail <id|label-substr>`.
+- Where did the last day go: no flags — the default report, bounded, with `data gaps:` and `CROSS-CHECK` lines.
+- A longer window, one repo: `--since 3d --project <substr>`.
+- Heaviest single runs: section `9 · TOP SINGLE RUNS`; heaviest agent groups: section `8`.
+- One chat and its agents: `--family <title|agent-type|session-id-prefix>`, or `--session <sid-prefix>` when a sub-agent orchestrated the work and no chat title exists.
+- Codex threads: `--codex` — one row per rollout thread, sub-agents attributed from `session_meta.source`.
+- One flight's agents: `--flight <dir>` — see below.
+- The full dataset for a page or a diff: `--out FILE` (JSON).
 
-## What gets a `wf_*` row
-
-Only a Workflow-engine run — a script under the repo's `workflows/` or a skill-embedded engine (`/deep-rr`). An orchestrated flight is not one: `/flights:orchestrate-live` spawns executors as session-level sub-agents and `/flights:orchestrate-nested` runs them under one sub-agent; both land in `(non-workflow agents)`; total a flight with `--filter <flight-label>` instead.
-
-## Codex sessions — `--codex`
-
-Same script, same PRICING table, reading `~/.codex/sessions/**/rollout-*.jsonl` plus `archived_sessions/`. One row per session thread; because a Codex subagent writes its own rollout, subagents are attributed individually by their agent role.
+## One flight — `--flight <dir>`
 
 ```bash
-node ~/.claude/commands/tokens/token-ledger.mjs --codex --since <YYYY-MM-DD>            # this repo, per session
-node ~/.claude/commands/tokens/token-ledger.mjs --codex --since <YYYY-MM-DD> --by-day   # daily spend
-node ~/.claude/commands/tokens/token-ledger.mjs --codex --all --top 0                   # every project, every row
+node ~/.claude/commands/tokens/token-audit.mjs --flight tmp/flights/<name>
 ```
 
-Scope defaults to the repo you are standing in; `--all` spans every project and adds a PROJECT column. `--since` reads the rollout filename stamp (local time). The session table caps at 25 rows — `--top 0` prints all.
+Writes `<dir>/metrics.md` (override with `--metrics-out FILE`; `--out FILE` adds the JSON) and prints the same report. One row per agent: task id, agent type, engine, model, calls, wall time, start and peak context, growth per call, input/cached/output tokens, price, failed commands, poll calls, re-reads, contract-file reads, compactions, over-cap, and how the row was matched. Then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line. The text stays under ~200 lines whatever the flight's size.
 
-Codex counting differs from Claude's per-call dedup: `total_token_usage` is cumulative but **resets on resume/compaction**, so the tool sums each segment's peak. Reading only the final counter undercounts a long session by orders of magnitude, and summing the per-turn deltas overcounts (duplicate events re-emit an identical cumulative). Cached input is a subset of input, billed at the cached rate; output already includes reasoning.
+The join key is `<dir>/agents.tsv` — append-only, tab-separated, one row per spawn, header line optional:
+
+```text
+task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
+1-a	flights-mechanical-executor	a1b2c3	1	2026-09-20T09:01:00Z	claude
+```
+
+- Claude rows match `…/subagents/agent-{agent-id}.jsonl` under any discovered root.
+- Codex rows match `{agent-id}` against the rollout's own `session_meta` (`id`, `context_window.window_id`, or the id in the filename); an id starting with `/` is an agent path and matches `session_meta.agent_path`, marked `matched: path`.
+- A row whose id form cannot be matched falls back to **that row's** spawn time plus its agent type and is marked `matched: window`; a spawn time without a clock never opens a window.
+- With no `agents.tsv` at all, `run.md`'s header instant and its `{id} CLAIMED · {agent} · {time}` lines are the fallback and **every** row is marked `window`.
+- A ledger row with no transcript and a transcript inside the window with no ledger row are both listed under `UNMATCHED` — never dropped.
 
 ## Reading the output
 
-- Claude footer totals: output-only, in+out, fresh (in+out+cache-write), grand total (+cache-read). The harness's `subagent_tokens` is the fresh number — it excludes cache-read, usually the largest component of real spend.
-- Costs are estimates from the editable `PRICING` table atop `token-ledger.mjs`: trust the ranking, verify absolute dollars against the provider's billing, update the rates when prices change. A model with no PRICING row reports cost `n/a` with its tokens still counted — never a silent $0.
-- `--detail` content hints can carry sensitive prompt text — read it, never pipe or retain it.
+- The `data gaps:` line is the report's own honesty: malformed lines, dropped synthetic calls, unpriced calls, cache writes with no 5m/1h split, duplicate files, read errors. `data gaps: none` means the scan was clean, not that nothing was checked. A read error exits non-zero.
+- A model with no `PRICING` row renders **`n/a`**, never `$0`: its tokens stay in every token total, its dollars stay out of every dollar total, and the gaps line names it.
+- Costs are list-price estimates from the editable `PRICING` table atop `token-audit.mjs`. Trust the ranking; verify absolute dollars against the provider's billing; update the rates when prices change. `scripts/check-token-pricing.mjs` resolves published model ids against that table.
+- `CROSS-CHECK` compares the estimate to the harness's own `cost-state` line for chats wholly inside the window, and prints a second number at the >200K long-context premium (a per-model rate in `PRICING`, and an estimate).
+- Codex counts differently: `total_token_usage` is cumulative and **resets on resume and compaction**, so each segment's peak is summed. Cached input is a subset of input, billed at the cached rate; output already includes reasoning.
+- Transcript content can carry sensitive prompt text — read the report, never pipe or retain transcript bodies.

@@ -321,10 +321,43 @@ act_templates() { # the shipped product: mechanical gates, no build
         excluded=$(printf '%s\n' "$all_hits" | grep -cE "$exclude" || true)
         info "scratch-path scan: $excluded historical-record path(s) excluded by name (release notes, retro ledger, mirrors, measurement records)"
         if [[ -z "$strays" ]]; then
-          ok "no tracked file writes a repo-local tmp/ (scratch lives under /tmp/<project>/)"
+          ok "no tracked file names a migrated scratch purpose under a repo-local tmp/"
         else
           fail_step "$(wc -l <<<"$strays" | tr -d ' ') tracked file(s) still name a repo-local tmp/ path — repoint them at /tmp/<project>/<purpose>"
           while read -r f; do [[ -n "$f" ]] && info "  $f"; done <<< "$strays"
+        fi
+
+        # The sweep above only knows the purposes one migration moved. The policy
+        # itself is checked on CODE (prose that merely mentions a path is not a
+        # write): (A) a repo-rooted tmp/ — `$ROOT/tmp/`, `path.join(repoRoot, 'tmp')`,
+        # Go's cwd-relative `filepath.Join("tmp", …)`; (B) a fixed-name bare
+        # `/tmp/<name>` a host run shares with every other checkout. Allowed: the
+        # derived `/tmp/$PROJECT/…` forms, anonymous `mktemp` templates (XXXXXX),
+        # and tmux's own `/tmp/tmux-<uid>` socket dir. Container-only code (the
+        # fence and demo lanes, the e2e docker run) and test fixtures are excluded
+        # BY NAME and counted, never filtered in silence; zero code files scanned
+        # is a broken scan, not a clean tree. A comment line names a path, it does
+        # not write one, so hits whose text opens with #, // or * are dropped.
+        local code_ext='\.(sh|bash|mjs|js|ts|py|go)$'
+        local code_skip='^(infra/(fence|demo)/|scripts/e2e-linux\.sh$)|(_test\.go|\.test\.(mjs|js|ts))$|/testdata/'
+        local code_z="$TMP_BASE/templates/tracked-code.z" code_n code_skipped repo_local bare
+        grep -zE "$code_ext" < "$TMP_BASE/templates/tracked.z" | grep -zvE "$code_skip" > "$code_z" || true
+        code_n=$(tr -cd '\0' < "$code_z" | wc -c | tr -d ' ')
+        code_skipped=$(grep -zE "$code_ext" < "$TMP_BASE/templates/tracked.z" | grep -zcE "$code_skip" || true)
+        if [[ "$code_n" -eq 0 ]]; then
+          fail_step "scratch-path policy: NO tracked code file was scanned — the SCAN is broken, not the tree"
+        else
+          repo_local=$(xargs -0 grep -nE '(\$\{?(ROOT|REPO_ROOT|repo_root|repoRoot|WORKTREE)\}?|\{repo-root\})/tmp/|path\.join\([A-Za-z_]+, *['"'"'"]tmp['"'"'"]|filepath\.Join\("tmp"' \
+            /dev/null < "$code_z" 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' || true)
+          bare=$(xargs -0 grep -nE '(^|[^A-Za-z0-9_}.-])/tmp/[A-Za-z0-9_.-]' /dev/null < "$code_z" 2>/dev/null \
+            | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(#|//|\*)' | grep -vE 'XXXXXX|/tmp/tmux-' || true)
+          info "scratch-path policy: $code_n code file(s) scanned; $code_skipped excluded by name (container-only lanes, the e2e docker run, test fixtures)"
+          if [[ -z "$repo_local$bare" ]]; then
+            ok "no tracked code writes a repo-local tmp/ or a fixed-name bare /tmp path"
+          else
+            fail_step "$(printf '%s\n%s\n' "$repo_local" "$bare" | grep -c . | tr -d ' ') scratch write(s) outside /tmp/<project>/<purpose> — derive the project dir, or use an anonymous mktemp"
+            while read -r hit; do info "  $hit"; done < <(printf '%s\n%s\n' "$repo_local" "$bare" | grep .)
+          fi
         fi
       fi
 
@@ -393,10 +426,21 @@ act_templates() { # the shipped product: mechanical gates, no build
       fi
 
       head_ "templates — token-audit tests"
-      if node --test templates/global/commands/tokens/; then
-        ok "token-audit reads Claude and Codex transcripts and selects a flight's agents"
-      else
+      # node --test exits 0 when it finds no tests, so a moved or renamed suite
+      # would read as a pass: enumerate the files and count the passes instead.
+      local token_tests=(templates/global/commands/tokens/*.test.mjs)
+      local token_out="$TMP_BASE/templates/token-audit.tap"
+      mkdir -p "$TMP_BASE/templates"
+      if [[ ! -f "${token_tests[0]}" ]]; then
+        fail_step "token-audit tests NOT RUN — templates/global/commands/tokens/*.test.mjs matched no file; the suite was never executed"
+      elif ! node --test --test-reporter=tap "${token_tests[@]}" >"$token_out" 2>&1; then
+        cat "$token_out"
         fail_step "token-audit tests FAILED — a measure, the flight selection, or an error path regressed, or node could not run the suite (see output)"
+      elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$token_out"; then
+        cat "$token_out"
+        fail_step "token-audit tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
+      else
+        ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
       fi
 
       head_ "templates — codex-sync missing compiler"
@@ -410,10 +454,15 @@ act_templates() { # the shipped product: mechanical gates, no build
       # Build the source-under-test inside the fence; verification must never
       # depend on or install a host binary. The ignored artifact also gives this
       # repo's Stop hook a current compiler while develop remains uninstalled.
-      local opencode_bin="/pfm-timing/pfm-dev-bin"
-      if need_tool go templates && go -C pfm build -o "$opencode_bin" ./cmd/pfm \
-        && "$opencode_bin" opencode check "$REPO_ROOT" --home "/pfm-timing/opencode-verify-home" \
-        && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "/pfm-timing/opencode-verify-home"; then
+      # /pfm-timing exists only as the fence's bind mount; on the host the same
+      # scratch is $TMP_BASE/timing, so resolve it the way the timing ledger does.
+      local opencode_scratch="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
+      local opencode_bin="$opencode_scratch/pfm-dev-bin"
+      local opencode_home="$opencode_scratch/opencode-verify-home"
+      if need_tool go templates && mkdir -p "$opencode_scratch" \
+        && go -C pfm build -o "$opencode_bin" ./cmd/pfm \
+        && "$opencode_bin" opencode check "$REPO_ROOT" --home "$opencode_home" \
+        && "$opencode_bin" opencode doctor "$REPO_ROOT" --home "$opencode_home"; then
         ok "opencode mirror current and parseable"
       else
         fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"

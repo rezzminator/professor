@@ -1,6 +1,6 @@
 ---
 name: flights:spec
-description: Specifies one flight with the user in the loop — maps the area with tracer and mapper probes, asks the technical and product questions the code cannot answer, hands flights-speccer the rulings, puts its one BLOCKED question to the user, presents the index. Writes nothing itself. /flights:spec [tasks | file]; running the flight is a separate command.
+description: 'User-in-the-loop planning — /flights:spec [tasks | file]: maps the area, asks what the code cannot answer, hands the rulings to flights-speccer. /flights:spec → flights-speccer → /flights:orchestrate-{nested|live|cross-harness} → flights-orchestrator → flights-*-executor → flights-gater → /flights:audit. Returns the index; running is a separate command.'
 argument-hint: [tasks | task file]
 ---
 

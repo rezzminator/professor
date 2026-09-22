@@ -1,6 +1,6 @@
 ---
 name: flights-gater
-description: FLIGHTS-ONLY gates ONE project of a landed flight — runs format, lint, type check and the full suite, reviews the flight's whole diff once, maps an attack per changed hunk, writes tests meant to break the change, and fixes what it finds itself — spawned by flights-orchestrator as the landing's first step, one per project, never delegated to directly. Pass the flight directory, the project and its testing manual's path, the standing rules, the worktree. Returns PASS, FIXED or FAIL for the project, the two full-run verdict lines, the review counts and any residual.
+description: 'FLIGHTS-ONLY — spawned by flights-orchestrator once per project of a landed flight: checks, one whole-diff review, adversarial tests, its own fixes. Pass the flight directory, the project, its testing manual path, standing rules, worktree. flights-*-executor → here → the landing. Returns PASS, FIXED or FAIL, two full-run verdict lines, any residual.'
 model: opus # frontier-judgment default — retune to your model tier
 effort: high
 tools: Read, Write, Edit, Bash, Glob, Grep, Skill

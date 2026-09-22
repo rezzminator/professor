@@ -1,6 +1,6 @@
 ---
 name: flights:orchestrate-cross-harness
-description: Runs one flight with chat seats as executors — the chat reads the flights-orchestrator agent body and acts as it, spawning one Codex, OpenCode or Claude seat per task file through the chat MCP instead of a sub-agent, briefing it by inject, and recording its injected return. Use it when a task file should run on a different engine. /flights:orchestrate-cross-harness {directory} [engine claude|codex|opencode] [worktree {path}] [commit]
+description: 'Executors on another engine — /flights:orchestrate-cross-harness {directory} [engine claude|codex|opencode] [worktree {path}] [commit]: this chat acts as flights-orchestrator, one chat seat per task file instead of a sub-agent, default engine codex. /flights:spec → here → executor seats.'
 argument-hint: <flight directory> [engine <claude|codex|opencode>] [worktree <path>] [commit]
 ---
 

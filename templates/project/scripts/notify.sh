@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-STAMP_BASE="/tmp/professor_turn_start"
+NOTIFY_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+NOTIFY_PROJECT="$(basename "${NOTIFY_ROOT:-$PWD}")"; NOTIFY_PROJECT="${NOTIFY_PROJECT#.}"
+STAMP_BASE="/tmp/$NOTIFY_PROJECT/guard/turn_start"
 THRESHOLD=30  # seconds — only notify for turns this long or longer
 
 notify() {
@@ -31,6 +33,7 @@ case "${1:-stop}" in
     HOOK_INPUT=$(cat 2>/dev/null || true)
     SID=$(printf '%s' "$HOOK_INPUT" | sed -n 's/.*"session_id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
     STAMP="${STAMP_BASE}${SID:+.$SID}"
+    mkdir -p "$(dirname "$STAMP")"
     [ -f "$STAMP" ] || date +%s > "$STAMP"
     ;;
   stop)

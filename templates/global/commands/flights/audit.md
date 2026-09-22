@@ -1,6 +1,6 @@
 ---
 name: flights:audit
-description: USER-ONLY — /flights:audit {directory}, default the newest under /tmp/{project}/flights/. The skeptic over a flight, running or landed — every DONE, check, review and commit claim verified against run.md, git, the task files, the executor transcripts and the seats; findings routed, nothing fixed. Writes {directory}/audit.md and nothing else.
+description: 'USER-ONLY — /flights:audit [directory], default the newest under /tmp/{project}/flights/: checks every DONE, check, gate and commit claim of a running or landed flight against run.md, git, the task files and transcripts; routes findings, fixes nothing. flights-orchestrator → here. Writes {directory}/audit.md.'
 disable-model-invocation: true
 ---
 

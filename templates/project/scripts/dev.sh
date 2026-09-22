@@ -19,7 +19,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-DEV_DIR="${ROOT}/tmp/dev"
+# Scratch lives outside the tree: /tmp/<project>/dev, <project> = the repo
+# directory name with any leading dot stripped.
+DEV_PROJECT="$(basename "$ROOT")"; DEV_PROJECT="${DEV_PROJECT#.}"
+DEV_DIR="/tmp/${DEV_PROJECT}/dev"
 PID_FILE="${DEV_DIR}/dev-servers.pid"
 ARCHIVE_DIR="${DEV_DIR}/archive"
 
@@ -43,7 +46,7 @@ DEV_TMUX_SOCKET="{PROJECT_NAME_LOWER}-dev"
 #                 (the roster entry's name, e.g. a, b, c). Must be unique.
 #   label       — human label for report lines (the entry's {PROJECT_ROLE}).
 #   dir         — project dir relative to repo root; "." for a single-project repo.
-#   log         — log basename under tmp/dev/ (e.g. a.log).
+#   log         — log basename under $DEV_DIR (e.g. a.log).
 #   port_var    — name of the port variable this server binds — the entry's
 #                 `{PROJECT}_PORT` (A_PORT, B_PORT …), the same name alloc-ports.sh
 #                 emits for it. Resolved indirectly at runtime.
@@ -482,7 +485,7 @@ report_statuses() {
 cmd_kill() {
   header "Stopping dev servers"
 
-  # Logs stay in tmp/dev/ after kill — user may want to inspect them.
+  # Logs stay in $DEV_DIR after kill — user may want to inspect them.
   # Archival happens at next server start (cmd_up) so fresh logs begin clean.
 
   if [ -f "$PID_FILE" ]; then

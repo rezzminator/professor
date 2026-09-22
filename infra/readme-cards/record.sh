@@ -30,7 +30,8 @@ set -euo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 HERE="$ROOT/infra/readme-cards"
-WORK="$ROOT/tmp/readme-cards"
+PROJECT="$(basename "$ROOT")"; PROJECT="${PROJECT#.}"
+WORK="/tmp/$PROJECT/readme-cards"
 MOTION=0 SECS=24 FPS="${FPS:-10}" QUALITY="${QUALITY:-78}" # FPS / QUALITY from the environment: a canvas scene (every frame distinct) wants fewer, lighter frames
 if [ "${1:-}" = --motion ]; then
   MOTION=1; shift

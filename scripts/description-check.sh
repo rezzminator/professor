@@ -59,20 +59,50 @@ if ! python3 -c 'import yaml' >/dev/null 2>&1; then
   exit 2
 fi
 
+if ! list_file="$(mktemp)"; then
+  echo "description-check: SCAN-BROKEN — mktemp failed; no frontmatter was parsed" >&2
+  exit 4
+fi
+trap 'rm -f "$list_file"' EXIT
+
 if [[ "${1:-}" == "--files" ]]; then
   shift
-  printf '%s\n' "$@" > /tmp/desc-check-files.$$
+  printf '%s\n' "$@" > "$list_file"
 else
-  if ! repo_git ls-files '*.md' > /tmp/desc-check-files.$$; then
+  if ! repo_git ls-files '*.md' > "$list_file"; then
     echo "description-check: SCAN-BROKEN — git ls-files failed; no frontmatter was parsed" >&2
-    rm -f /tmp/desc-check-files.$$
     exit 4
   fi
 fi
-trap 'rm -f /tmp/desc-check-files.$$' EXIT
 
-python3 - "/tmp/desc-check-files.$$" <<'PY'
-import pathlib, sys, yaml
+python3 - "$list_file" <<'PY'
+import pathlib, re, sys, yaml
+
+# A template's frontmatter still carries its install placeholders, and a token in
+# value position ({project}-testing-manual) opens a YAML flow mapping that the
+# adopter's substituted file never contains. Parse the raw text first; only when
+# THAT fails do we retry with the tokens filled, so this stays strict for every
+# file that has no placeholder to blame. docs/PLACEHOLDERS.md rules which tokens
+# are legal; the placeholder-registry gate enforces that, not this one.
+TOKEN = re.compile(r"\{[A-Za-z][A-Za-z0-9_]*\}")
+
+
+def parse_front(front):
+    """Return (mapping, error, substituted). error is None when it parsed."""
+    try:
+        return yaml.safe_load(front), None, False
+    except yaml.YAMLError as raw_err:
+        if not TOKEN.search(front):
+            return None, str(raw_err).split("\n")[0], False
+        try:
+            filled = yaml.safe_load(TOKEN.sub("placeholder", front))
+        except yaml.YAMLError as filled_err:
+            return None, (
+                f"{str(filled_err).split(chr(10))[0]} (still unparseable with its "
+                "placeholders filled — not a placeholder artifact)"
+            ), True
+        return filled, None, True
+
 
 listing = pathlib.Path(sys.argv[1]).read_text().split()
 scanned = withfront = 0
@@ -91,10 +121,9 @@ for name in listing:
         continue
     withfront += 1
     front = text[4:end + 1]
-    try:
-        parsed = yaml.safe_load(front)
-    except yaml.YAMLError as err:
-        broken.append((name, str(err).split("\n")[0]))
+    parsed, err, _ = parse_front(front)
+    if err is not None:
+        broken.append((name, err))
         continue
     if not isinstance(parsed, dict):
         broken.append((name, "frontmatter is not a mapping"))

@@ -37,7 +37,8 @@
  * (plain fs.readdirSync walk, no glob dependency) and print which run was picked (to stderr,
  * so stdout stays clean JSON).
  *
- * Output: a markdown report written to {repo-root}/tmp/rr-midrun/<runId>-<mode>-<HHMMSS>.md
+ * Output: a markdown report written to /tmp/<project>/rr-midrun/<runId>-<mode>-<HHMMSS>.md
+ *         (<project> = the repo root's basename, leading dot stripped)
  * (repo-root = `git rev-parse --show-toplevel` from process.cwd(), falling back to __dirname's
  * repo, then to cwd); mkdir -p'd. A compact JSON summary is also printed to stdout:
  *   { report, run, mode, agents: { completed, inFlight, staleDead },
@@ -543,7 +544,7 @@ function main() {
   const headline = buildHeadline(ctx)
 
   const repoRoot = getRepoRoot()
-  const outDir = path.join(repoRoot, 'tmp', 'rr-midrun')
+  const outDir = path.join('/tmp', path.basename(repoRoot).replace(/^\./, ''), 'rr-midrun')
   fs.mkdirSync(outDir, { recursive: true })
   const reportPath = path.join(outDir, `${runId}-${mode}-${hhmmss(new Date())}.md`)
   fs.writeFileSync(reportPath, reportMd)

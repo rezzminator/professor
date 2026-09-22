@@ -13,13 +13,16 @@ source "$ROOT/../scripts/shtest.sh"
 
 printf 'p/a\tTestListed\thelper\tfixture\n' > "$T/list.tsv"
 ev() { printf '{"Action":"%s","Package":"%s","Test":"%s"}\n' "$1" "$2" "$3"; }
-check() { # check <name> <want-rc> <want-grep> <json>
+check() { # check <name> <want-rc> <want-grep> <json>   (PFM_SKIP_CHECK_VERBOSE passes through)
   local out rc; out=$(PFM_KNOWN_SKIPS="$T/list.tsv" bash "$SUT" "$4" 2>&1); rc=$?
   if [ "$rc" -eq "$2" ] && grep -q -- "$3" <<< "$out"; then ok "$1"; else bad "$1" "rc=$rc want $2" "$out"; fi
 }
 
 { ev pass p/a TestRan; ev skip p/a TestListed; } > "$T/listed.json"
-check "listed skip passes, named" 0 'GAP skipped test: p/a TestListed \[helper\]' "$T/listed.json"
+PFM_SKIP_CHECK_VERBOSE=1 check "listed skip passes, named when verbose" 0 'GAP skipped test: p/a TestListed \[helper\]' "$T/listed.json"
+out=$(PFM_KNOWN_SKIPS="$T/list.tsv" bash "$SUT" "$T/listed.json" 2>&1); rc=$?
+if [ "$rc" -eq 0 ] && ! grep -q 'GAP skipped test' <<< "$out"; then ok "listed skip is counted, not printed, by default"
+else bad "listed skip is counted, not printed, by default" "rc=$rc" "$out"; fi
 check "listed skip verdict" 0 'SKIPS PASS 1 skipped' "$T/listed.json"
 
 { ev pass p/a TestRan; ev skip p/a TestNew; } > "$T/unlisted.json"
@@ -29,7 +32,7 @@ check "unlisted skip is red, named" 1 'SKIP-UNLISTED p/a TestNew' "$T/unlisted.j
 check "same test name in another package is unlisted" 1 'SKIP-UNLISTED p/b TestListed' "$T/otherpkg.json"
 
 { ev pass p/a TestRan; ev skip p/a TestListed/sub; } > "$T/sub.json"
-check "subtest rides its parent row" 0 'TestListed/sub \[helper\]' "$T/sub.json"
+PFM_SKIP_CHECK_VERBOSE=1 check "subtest rides its parent row" 0 'TestListed/sub \[helper\]' "$T/sub.json"
 
 { ev pass p/a TestRan; } > "$T/none.json"
 check "no skips passes with zero" 0 'SKIPS PASS 0 skipped' "$T/none.json"

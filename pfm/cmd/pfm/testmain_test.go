@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
 
@@ -109,6 +111,9 @@ func TestMain(m *testing.M) {
 	installHarvestProvisionerOverride = noNetworkHarvestProvisioner{}
 	installThemeHTTPClientOverride = &http.Client{Transport: noNetworkThemeTransport{}}
 	doctor.HarvestOverride = noNetworkHarvestDoctor{}
+	doctor.DaemonReachabilityOverride = func(pfmconfig.Runtime) (mcpserv.DaemonStatus, error) {
+		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
+	}
 	doctor.PrePushGateProbeOverride = func(context.Context) doctor.PrePushGate {
 		return doctor.PrePushGate{State: "outside-repository"}
 	}
@@ -155,6 +160,7 @@ func TestMain(m *testing.M) {
 			CLIVersion:    "fixture",
 		}, nil
 	}
+	testjail.KeepAmbientIdentity = os.Getenv(attachHelperEnv) == "1"
 	code := testjail.Run(m)
 	if binaryDir != "" {
 		if err := os.RemoveAll(binaryDir); err != nil && code == 0 {

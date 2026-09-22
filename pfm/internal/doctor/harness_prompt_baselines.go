@@ -138,6 +138,16 @@ func printModelHarnessPromptDoctorWithDeps(
 	canonicalBaseline := sha256.Sum256([]byte(normalizeHarnessPrompt(string(baseline))))
 	line, warn := harnessPromptVerdict(hex.EncodeToString(canonicalBaseline[:]), fields[1], captured.Prompt, captureErr)
 	fmt.Fprintln(stdout, line)
+	for _, detail := range harnessPromptDetail(
+		model.Alias,
+		baselineModel,
+		string(baseline),
+		captured,
+		captureErr,
+		warn && strings.Contains(line, "DRIFT"),
+	) {
+		fmt.Fprintln(stdout, detail)
+	}
 	if warn {
 		return 1
 	}

@@ -235,7 +235,7 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 
 	t.Run("idle reachable manager applies with yes", func(t *testing.T) {
 		home := t.TempDir()
-		script := "if [ \"$*\" = \"--user is-active --quiet pfm-name-sync.service\" ]; then exit 1; fi\nexit 0\n"
+		script := "case \"$*\" in *ActiveState*) echo inactive;; esac\nexit 0\n"
 		binDir, logPath := writeManagerFakes(t, script, launchctlIdle)
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)
@@ -248,7 +248,9 @@ func TestInstallGateScopesDryRunIdleAndRunningService(t *testing.T) {
 
 	t.Run("running service refuses actionably", func(t *testing.T) {
 		home := t.TempDir()
-		binDir, logPath := writeManagerFakes(t, "exit 0\n", launchctlRunning)
+		// A oneshot mid-run: `show` names it activating (is-active would exit 3).
+		script := "case \"$*\" in *ActiveState*) echo activating;; esac\nexit 0\n"
+		binDir, logPath := writeManagerFakes(t, script, launchctlRunning)
 		t.Setenv("HOME", home)
 		t.Setenv("PATH", binDir)
 

@@ -156,8 +156,9 @@ The unit of work is a **flight**: one spec directory, one orchestration, one lan
                          hand the decisions to flights-speccer · present
                                      │
                                      ▼
-  flights-speccer        tmp/flights/{flight}/ — index.md, one self-contained
-                         task file per executor, shared 0-{topic}.md files
+  flights-speccer        /tmp/{project}/flights/{flight}/ — index.md, one
+                         self-contained task file per executor, shared
+                         0-{topic}.md files
                                      │
                                      ▼
   the orchestration      one manual, three containers — the user picks one:
@@ -225,11 +226,15 @@ your-project/
 │   └── dev/
 │       ├── tasks/{pipeline}/          ← temp pipeline docs
 │       └── tasks/archive/             ← completed pipelines
-├── tmp/                               ← gitignored; fixed protocol directories (tmp/flights/, tmp/dev/)
-│   └── flights/{flight}/              ← one flight: index.md, task files, run.md, gate-{project}.md, audit.md
 └── .worktrees/                        ← git worktree checkouts (gitignored)
     ├── {pipeline}/                    ← per-pipeline checkout
     └── .ports                         ← port allocation registry
+
+Scratch protocol state (flight specs, lane/timing artifacts, doctor captures)
+lives outside the repo, at `/tmp/{project}/` (`{project}` = this repo's
+directory name, leading dot stripped) — never under a repo-local `tmp/`.
+A flight's own layout: `/tmp/{project}/flights/{flight}/` — index.md, task
+files, run.md, gate-{project}.md, audit.md.
 ```
 
 For a single-project repo, drop the `{project-a}/`, `{project-b}/` layer — agents live in `.claude/agents/` only, no child CLAUDE.md files.

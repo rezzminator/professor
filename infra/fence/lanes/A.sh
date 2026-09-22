@@ -802,8 +802,11 @@ else
   if [ -n "$bad" ]; then fail "$bad"; else
     target_live "$CHAT"
     sid="$(live_field "$CHAT" 2)"
-    ACTIVE="$EXPRESS/tmp/professor_pfm_active.$sid"
-    QUALITY="$EXPRESS/tmp/professor_quality_loaded.$sid"
+    EXPRESS_PROJECT="$(basename "$EXPRESS")"; EXPRESS_PROJECT="${EXPRESS_PROJECT#.}"
+    GUARD_DIR="/tmp/$EXPRESS_PROJECT/guard"
+    mkdir -p "$GUARD_DIR"
+    ACTIVE="$GUARD_DIR/pfm_active.$sid"
+    QUALITY="$GUARD_DIR/quality_loaded.$sid"
     rm -f "$ACTIVE" "$QUALITY"
     guard_before="$(sha256sum "$EXPRESS/$GUARD_FILE" | cut -d' ' -f1)"
     agents_before="$(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1)"
@@ -842,15 +845,15 @@ else
       bad="$bad the Stop hook did not recompile AGENTS.md from the edited CLAUDE.md within 180s (${LANE_WAIT_WHY:-no wait reason}); AGENTS.md hash $(sha256sum "$EXPRESS/AGENTS.md" 2>/dev/null | cut -d' ' -f1 | cut -c1-12) vs before ${agents_before:0:12};"
     fi
     sleep 5 # the Stop hook clears its flag right after the check that follows the build
-    [ -f "$EXPRESS/tmp/professor_codex_dirty" ] && bad="$bad tmp/professor_codex_dirty is still set after the turn — codex-sync.sh sync did not clear it (build or check failed on the pane);"
+    [ -f "$GUARD_DIR/codex_dirty" ] && bad="$bad the codex_dirty flag is still set after the turn — codex-sync.sh sync did not clear it (build or check failed on the pane);"
     # Restore express: the committed files back, the mirror rebuilt from them,
     # the session markers gone.
     git -C "$EXPRESS" checkout -q -- "$GUARD_FILE" "$ROOT_FILE" 2>/dev/null || bad="$bad git checkout of $GUARD_FILE/$ROOT_FILE failed;"
     in_express pfm codex build . >/dev/null || bad="$bad the mirror could not be rebuilt after the restore;"
-    rm -f "$ACTIVE" "$QUALITY" "$EXPRESS/tmp/professor_codex_dirty"
+    rm -f "$ACTIVE" "$QUALITY" "$GUARD_DIR/codex_dirty"
     if ! after="$(restore_check)"; then bad="$bad express differs from its lane-start state after restore: $(one_line "$after");"; fi
     if [ -n "$bad" ]; then fail "$bad"; else
-      pass "without the stamp the Edit of $GUARD_FILE was denied ($deny_seen carried '$deny_needle', file unchanged); with tmp/professor_pfm_active.<sid> + professor_quality_loaded.<sid> fresh both edits landed and the Stop hook recompiled AGENTS.md with the CLAUDE.md line; express restored"
+      pass "without the stamp the Edit of $GUARD_FILE was denied ($deny_seen carried '$deny_needle', file unchanged); with /tmp/<project>/guard/pfm_active.<sid> + quality_loaded.<sid> fresh both edits landed and the Stop hook recompiled AGENTS.md with the CLAUDE.md line; express restored"
     fi
   fi
 fi

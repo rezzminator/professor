@@ -103,8 +103,9 @@ func TestHarnessCaptureRunsTheCLIInAThrowawayConfigDir(t *testing.T) {
 }
 
 // TestDoctorVerboseKeepsTheHarnessRunOutput pins change A: --verbose keeps
-// the harness run's own stdout/stderr under tmp/pfm-doctor/ — today that
-// evidence is discarded and a timeout renders as bare prose no one can act on.
+// the harness run's own stdout/stderr under /tmp/{project}/doctor/ — today
+// that evidence is discarded and a timeout renders as bare prose no one can
+// act on.
 func TestDoctorVerboseKeepsTheHarnessRunOutput(t *testing.T) {
 	shortenHarnessCaptureSinkGrace(t)
 	binary := writeFakeHarnessClaude(t, "printf 'diagnostic-stderr-line\\n' 1>&2\nexit 1\n")

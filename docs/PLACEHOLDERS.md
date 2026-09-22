@@ -174,7 +174,7 @@ A named regulator, competitor, conference, or association surviving in one of th
 
 ## Paths (mostly generic pipeline paths — KEEP unchanged)
 
-Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,backlog.md}`, `tmp/flights/`, `.worktrees/`, `tmp/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
+Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,backlog.md}`, `/tmp/{project}/flights/`, `.worktrees/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
 
 ## Model pins
 

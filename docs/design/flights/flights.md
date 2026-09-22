@@ -45,7 +45,7 @@ Specifying and running are two decisions. Approval of an index never starts a ru
 ## The flight directory
 
 ```text
-tmp/flights/{flight}/
+/tmp/{project}/flights/{flight}/
   index.md        one row per task              written by flights-speccer
   0-{topic}.md    shared content, when needed   written by flights-speccer
   {level}-{letter}.md  one task, one executor   written by flights-speccer
@@ -57,7 +57,7 @@ tmp/flights/{flight}/
   audit.md        the last audit's report       written by /flights:audit
 ```
 
-- The directory lives under the project's `tmp/` (gitignored). It is scratch with a reader: the run resumes from it, the audit reads it, and it dies with the branch.
+- The directory lives outside the repo, under `/tmp/{project}/` (`{project}` = the repo directory's basename, leading dot stripped). It is scratch with a reader: the run resumes from it, the audit reads it, and it dies with the branch.
 - Four writers, one file each: `flights-speccer` writes the spec files and nothing else; the orchestrator writes `run.md`, appends `agents.tsv`, writes one file per spawn under `briefs/`, runs the script that writes `metrics.md`, and nothing else; each gater writes its `gate-{project}.md` and nothing else; the audit writes `audit.md` and nothing else. Nobody edits another writer's file. A task file changes only through a `flights-speccer` revising call.
 - The `{flight}` name is short kebab-case chosen by whoever creates the directory: the user through `/flights:spec`, or the caller that hands a batch to `flights-speccer`.
 
@@ -117,7 +117,7 @@ The harness prompt lives in `pfm/harness-prompts/`; `share/tail.md` § Orchestra
 
 ## Names
 
-- The unit is a flight; the family is `flights`; a directory is `tmp/flights/{flight}/`.
+- The unit is a flight; the family is `flights`; a directory is `/tmp/{project}/flights/{flight}/`.
 - Agent names carry no namespace (an agent name is lowercase letters, digits and hyphens), so the agents are `flights-speccer` and `flights-orchestrator`; commands carry the namespace as `/flights:{verb}`.
 
 ## Harness settings the family needs

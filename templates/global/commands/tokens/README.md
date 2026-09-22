@@ -8,7 +8,7 @@ a flight's own `metrics.md`.
 node .claude/commands/tokens/token-audit.mjs            # last 24h, every project
 node .claude/commands/tokens/token-audit.mjs --since 3d --project <substr>
 node .claude/commands/tokens/token-audit.mjs --codex    # Codex CLI threads
-node .claude/commands/tokens/token-audit.mjs --flight tmp/flights/<name>
+node .claude/commands/tokens/token-audit.mjs --flight /tmp/{project}/flights/<name>
 ```
 
 A RUN is one transcript file: one main chat loop, one sub-agent, or one Codex rollout thread.

@@ -6,7 +6,7 @@ Creates the worktree a flight runs in, before its first task file is dispatched.
 
 ## 1. Validate preconditions
 
-- Confirm the brief names the task file(s) (exists on disk) and the residue dir (the flight directory `tmp/flights/{flight}/`).
+- Confirm the brief names the task file(s) (exists on disk) and the residue dir (the flight directory `/tmp/{project}/flights/{flight}/`).
 - Confirm no leftover worktree: `./.claude/scripts/worktree.sh list $PIPELINE`. If it exists, warn and stop — never overwrite.
 - **Uncommitted changes on main** — handle per the orchestrator's `CarryWIP` directive (`commit` | `leave`, default `leave`). Run only when `git status --porcelain` is non-empty:
   - `commit` — commit main's WIP (untracked included) so the branch inherits it as a shared ancestor:

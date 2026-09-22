@@ -7,9 +7,11 @@ set -euo pipefail
 # the harness at runtime, so a careless edit breaks the pipeline. Allowed only
 # when BOTH of THIS session's markers are fresh (session-keyed — concurrent
 # sessions on one repo never share or clear each other's gate):
-#   tmp/professor_pfm_active.<sid>      — /pcm is active (stamped per the deny message)
-#   tmp/professor_quality_loaded.<sid>  — quality/prompt.md was READ this session
-#                                         (stamped automatically by guard-stamp.sh)
+#   /tmp/<project>/guard/pfm_active.<sid>      — /pcm is active (stamped per the deny message)
+#   /tmp/<project>/guard/quality_loaded.<sid>  — quality/prompt.md was READ this session
+#                                                (stamped automatically by guard-stamp.sh)
+# <project> is the repo directory's basename with any leading dot stripped, so
+# gate state lives outside the working tree and never dirties a checkout.
 # Sliding expiry: every ALLOWED edit re-touches both markers, so an active session
 # never expires mid-batch; the TTL reaps only abandoned sessions (guard-stamp.sh's
 # Stop pass reaps >1h leftovers; markers SURVIVE turn ends — stamp once per session).
@@ -32,8 +34,10 @@ case "$REL_PATH" in
 esac
 
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty')
-ACTIVE="$REPO_ROOT/tmp/professor_pfm_active${SID:+.$SID}"
-QUALITY="$REPO_ROOT/tmp/professor_quality_loaded${SID:+.$SID}"
+PROJECT="$(basename "$REPO_ROOT")"; PROJECT="${PROJECT#.}"
+GUARD_DIR="/tmp/$PROJECT/guard"
+ACTIVE="$GUARD_DIR/pfm_active${SID:+.$SID}"
+QUALITY="$GUARD_DIR/quality_loaded${SID:+.$SID}"
 TTL=1500
 NOW=$(date +%s)
 
@@ -55,7 +59,7 @@ if ! fresh "$QUALITY"; then
   REASON+=" DENIED — prompt-file edits require /quality:prompt loaded this session: Read ~/.claude/commands/quality/prompt.md (the machine-global law; the Read auto-stamps your session), then retry."
 fi
 if ! fresh "$ACTIVE"; then
-  REASON+=" DENIED — infra edits route through /pcm: open this session's gate from the repo root: date +%s > \"tmp/professor_pfm_active${SID:+.$SID}\" — run the stamp UNSANDBOXED (a sandboxed write never lands on the filesystem this hook reads; a denied retry after stamping means the stamp ran sandboxed), then retry."
+  REASON+=" DENIED — infra edits route through /pcm: open this session's gate: mkdir -p \"$GUARD_DIR\" && date +%s > \"$ACTIVE\" — run the stamp UNSANDBOXED (a sandboxed write never lands on the filesystem this hook reads; a denied retry after stamping means the stamp ran sandboxed), then retry."
 fi
 REASON+=" Markers slide on every allowed edit and expire by TTL only — no turn-end clearing; stamp once per session. Do NOT route around this by disabling the hook or editing infra outside /pcm."
 

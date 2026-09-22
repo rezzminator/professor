@@ -13,7 +13,7 @@
 # lane-level concurrency: concurrency is a scripted beat (storm, two writers),
 # never a scheduling strategy, or every red row becomes order-dependent.
 #
-# Written per run, under tmp/lanes/<stamp>/:
+# Written per run, under /tmp/{project}/lanes/<stamp>/:
 #   <lane>.log     every beat line, the failed beats' raw pane bytes, log slices
 #   timeline.tsv   lane · beat · t+s · verdict · dur · seat · ids · detail
 #   lanes.tsv      lane · wall_s · beats · failed · known · blocked (Wave 2 shape)
@@ -42,7 +42,8 @@ CANONICAL="O1 E1 E2 E3 F M A O2"
 BUDGETS="$HERE/budgets.yml"
 PENDING="$HERE/pending.txt"
 ROOT_SH="${LANE_ROOT_SH:-$HERE/root.sh}"
-OUT_ROOT="${LANE_OUT_ROOT:-$ROOT/tmp/lanes}"
+PROJECT="$(basename "$ROOT")"; PROJECT="${PROJECT#.}"
+OUT_ROOT="${LANE_OUT_ROOT:-/tmp/$PROJECT/lanes}"
 
 WANT="" ROOT_MODE=reuse SEATS="cc:1" DRY=0 CHECK_BUDGET=""
 while [ $# -gt 0 ]; do

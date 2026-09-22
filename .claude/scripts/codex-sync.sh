@@ -7,7 +7,8 @@ set -euo pipefail
 #   OpenCode — `pfm opencode build` + `check`
 #   mark — PostToolUse(Edit|Write): when the edited file is a Claude source either
 #          mirror compiles from (.claude/**, any CLAUDE.md, $HOME/.claude/commands/**),
-#          drop the repo-scoped dirty flag tmp/professor_codex_dirty.
+#          drop the repo-scoped dirty flag /tmp/<project>/guard/codex_dirty
+#          (<project> = the repo directory's basename, leading dot stripped).
 #   sync — Stop: if the flag is present, run both mirrors' build+check; success
 #          clears the flag silently. Failure blocks the stop ONCE: exit 0 with
 #          JSON {decision: block, reason} so the reason reaches the model, which
@@ -44,14 +45,16 @@ case "$MODE" in
     REPO_ROOT=$(git -C "$(dirname "$FILE_PATH")" rev-parse --show-toplevel 2>/dev/null) \
       || REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
     command -v pfm >/dev/null 2>&1 || exit 0
-    mkdir -p "$REPO_ROOT/tmp"
-    touch "$REPO_ROOT/tmp/professor_codex_dirty"
+    PROJECT="$(basename "$REPO_ROOT")"; PROJECT="${PROJECT#.}"
+    mkdir -p "/tmp/$PROJECT/guard"
+    touch "/tmp/$PROJECT/guard/codex_dirty"
     ;;
   sync)
     REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-    FLAG="$REPO_ROOT/tmp/professor_codex_dirty"
+    PROJECT="$(basename "$REPO_ROOT")"; PROJECT="${PROJECT#.}"
+    FLAG="/tmp/$PROJECT/guard/codex_dirty"
     [[ -f "$FLAG" ]] || exit 0
-    PFM_BIN="$REPO_ROOT/tmp/timing/pfm-dev-bin"
+    PFM_BIN="/tmp/$PROJECT/timing/pfm-dev-bin"
     [[ -x "$PFM_BIN" ]] || PFM_BIN=$(command -v pfm 2>/dev/null || true)
     if [[ -z "$PFM_BIN" || ! -x "$PFM_BIN" ]]; then
       jq -n --arg m 'codex-sync WARNING: compiler unavailable — mirrors were not checked; dirty flag retained' '{systemMessage: $m}'

@@ -50,6 +50,8 @@ export LC_ALL=C
 
 PFM="${PFM:-$(cd "$(dirname "$0")/.." && pwd)}"
 REPO="${REPO:-$(cd "$PFM/.." && pwd)}"
+PROJECT="$(basename "$REPO")"; PROJECT="${PROJECT#.}"
+TMP_BASE="/tmp/$PROJECT"
 GOCMD="${GOCMD:-go}"
 REPS=3
 REQUIRE_DOCKER=0
@@ -383,7 +385,7 @@ if [ "$MODE" = run ]; then
   case "$LABEL" in fence|host) ;; *) echo "test-sweep: --label must be fence or host" >&2; usage ;; esac
   check_fence_free || exit $?
   command -v "$GOCMD" >/dev/null 2>&1 || { echo "test-sweep: TOOLCHAIN-MISSING — \$GOCMD ($GOCMD) not found" >&2; exit 2; }
-  [ -n "$OUT" ] || OUT="$REPO/tmp/timing/sweep-${LABEL}-$(date -u +%Y%m%dT%H%M%SZ).tsv"
+  [ -n "$OUT" ] || OUT="$TMP_BASE/timing/sweep-${LABEL}-$(date -u +%Y%m%dT%H%M%SZ).tsv"
   mkdir -p "$(dirname "$OUT")" || { echo "SWEEP-ERROR: could not create output directory for $OUT" >&2; exit 2; }
   ROWFILE="$OUT"
   printf 'phase\tp\tparallel\trep\twall_s\tcpu_s\tstatus\n' > "$ROWFILE" || { echo "SWEEP-ERROR: could not write TSV header to $ROWFILE" >&2; exit 2; }

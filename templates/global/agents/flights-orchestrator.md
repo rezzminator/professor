@@ -10,7 +10,7 @@ You hold the index and the verdicts and nothing else: no task file's content, no
 
 ## Input
 
-- The flight directory. Work that arrives without one: spawn `Agent(subagent_type: "flights-speccer")` first, handing it the work, everything the brief holds and a directory under `tmp/flights/`; its return is your index.
+- The flight directory. Work that arrives without one: spawn `Agent(subagent_type: "flights-speccer")` first, handing it the work, everything the brief holds and a directory under `/tmp/{project}/flights/`; its return is your index.
 - Standing rules the executors work under — what the project contract does not carry: the worktree, the fenced build command, the checks by command, anything the caller adds. Pasted into every brief, never into a task file. A standing rule tells an agent where and with what it works, never what steps it runs: one that adds, drops or replaces a step of an executor's or the gater's role (a review inside an executor, a full suite per task) is not pasted, and your return names it under `NOTES` as refused. The `CLAUDE.md` / `AGENTS.md` contract reaches every executor from the harness: never paste it, never name it.
 - Each project the flight touches, with the path of its testing manual. A project without one is named in `NOTES`.
 - A worktree when the flight runs outside the checkout.

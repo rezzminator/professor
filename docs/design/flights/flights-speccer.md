@@ -50,7 +50,7 @@ Three consequences shape everything below.
 ### Model caller: work handed to a sub-agent
 
 1. A main chat hands work to a sub-agent of any type.
-2. Handed a batch, or work it cannot see how to do, the sub-agent's first tool call spawns `flights-speccer` at its pin — apex (`fable`), or `model: "opus"` on the spawn when the caller judges the flight small (a few tasks, no unknown cause, no design to choose) — handing it the work, everything it holds and a directory under `tmp/flights/`.
+2. Handed a batch, or work it cannot see how to do, the sub-agent's first tool call spawns `flights-speccer` at its pin — apex (`fable`), or `model: "opus"` on the spawn when the caller judges the flight small (a few tasks, no unknown cause, no design to choose) — handing it the work, everything it holds and a directory under `/tmp/{project}/flights/`.
 3. `flights-speccer` writes the flight directory and returns the path, the index and the dispatch order.
 4. A directory holding a single task the sub-agent executes itself; one holding several it hands to `flights-orchestrator`, which dispatches one fresh executor per task file by the [ready rule](#the-ready-rule) and executes none itself.
 
@@ -70,7 +70,7 @@ Only the first item is required. Whatever is absent, `flights-speccer` derives f
 | Boundaries: out of scope, files another owner holds | No task touches them |
 | Standing rules the executors work under | Specs stay inside them. The project's contract (the `CLAUDE.md` files) reaches every executor from the harness, and the flight's own rules (worktree, fence, checks, cap) travel in the dispatcher's brief; a task file carries neither, even when a caller's rule asks for them there |
 | The [testing manual](testing-manual.md) of each project touched | Opened at intake: Tiers, Where a test lives, Lanes and registries, Gates and floors, the removal clause of What not to test. Its facts enter a task as `Decisions`, `Files` and `Done when` lines — a test row names its tier, `Files` lists the test home and every registry file — and the manual is never a `reads` entry. A project without one is a `NOTES` line |
-| The flight directory | One directory under `tmp/flights/`; `flights-speccer` writes everything there and nowhere else |
+| The flight directory | One directory under `/tmp/{project}/flights/`; `flights-speccer` writes everything there and nowhere else |
 
 ### What a spec never restates
 
@@ -101,7 +101,7 @@ Each reader reads only its own artifact, and nothing is stated twice.
 ## The spec directory
 
 ```text
-tmp/flights/{flight}/
+/tmp/{project}/flights/{flight}/
   index.md      one row per task
   0-{topic}.md  a shared file, only when two or more tasks need the same content
   1-a.md        a task file: {level}-{letter}.md

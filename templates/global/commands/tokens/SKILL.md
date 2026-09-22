@@ -27,7 +27,7 @@ node ~/.claude/commands/tokens/token-audit.mjs [flags]
 ## One flight — `--flight <dir>`
 
 ```bash
-node ~/.claude/commands/tokens/token-audit.mjs --flight tmp/flights/<name>
+node ~/.claude/commands/tokens/token-audit.mjs --flight /tmp/{project}/flights/<name>
 ```
 
 Writes `<dir>/metrics.md` (override with `--metrics-out FILE`; `--out FILE` adds the JSON) and prints the same report. One row per agent: task id, agent type, engine, model, calls, wall time, start and peak context, growth per call, input/cached/output tokens, price, failed commands, poll calls, re-reads, contract-file reads, compactions, over-cap, and how the row was matched. Then totals per agent type, the flight total, the three most expensive agents, the gaps line and the cross-check line. The text stays under ~200 lines whatever the flight's size.

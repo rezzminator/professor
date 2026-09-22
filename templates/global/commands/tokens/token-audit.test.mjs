@@ -34,7 +34,7 @@ const flight = (dir, extra = [], codexRoot = CODEX_ROOT) => {
 function runMdFlight() {
   const dir = fs.mkdtempSync(path.join(TMP, "runmd-"));
   fs.writeFileSync(path.join(dir, "run.md"), [
-    "flight tmp/flights/demo · baseline 0000000000000000000000000000000000000000 · 2026-09-20T09:00:00.000Z",
+    "flight /tmp/professor/flights/demo · baseline 0000000000000000000000000000000000000000 · 2026-09-20T09:00:00.000Z",
     "1-a CLAIMED · executor · requested model claude-sonnet-5 · 2026-09-20T09:01:00.000Z",
     "1-a DONE · executor returned",
   ].join("\n") + "\n");

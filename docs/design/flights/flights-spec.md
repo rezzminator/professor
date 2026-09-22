@@ -17,7 +17,7 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 ## Input
 
-`/flights:spec {tasks | a file path}`: an inline task list, or a file holding one. Empty means the user is asked what the flight is for. The command chooses the flight name (short kebab-case) and the directory `tmp/flights/{flight}/`; a collision appends `-v2`.
+`/flights:spec {tasks | a file path}`: an inline task list, or a file holding one. Empty means the user is asked what the flight is for. The command chooses the flight name (short kebab-case) and the directory `/tmp/{project}/flights/{flight}/`; a collision appends `-v2`.
 
 ## S1 — Walk the code
 

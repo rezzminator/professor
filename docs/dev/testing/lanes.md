@@ -24,7 +24,7 @@ infra/fence/lanes/run.sh --lanes E1 --dry-run     # the plan: hash, image decisi
 infra/fence/lanes/run.sh --lanes E1                # solo, one Claude seat, from the root image
 ```
 
-`--dry-run` executes nothing — no container, no model turn — and is the cheap way to see what a run would cost. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `tmp/lanes/<stamp>/`:
+`--dry-run` executes nothing — no container, no model turn — and is the cheap way to see what a run would cost. A run prints `✓ / ✗ / known / blocked` per beat with the lane prefix and writes `/tmp/{project}/lanes/<stamp>/`:
 
 | file | what it carries |
 | --- | --- |

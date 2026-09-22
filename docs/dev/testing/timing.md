@@ -10,7 +10,7 @@ From the worktree root:
 .claude/scripts/dev.sh iso test pfm
 ```
 
-The source mount stays read-only. Generated JSON and TSV artifacts go to the worktree's ignored `tmp/timing/` directory through a separate writable mount. Each invocation gets its own `run.*` directory containing `unit.json`, `unit.tsv`, `e2e.json`, and `e2e.tsv`. Failed test output remains available for diagnosis.
+The source mount stays read-only. Generated JSON and TSV artifacts go to `/tmp/{project}/timing/` through a separate writable mount. Each invocation gets its own `run.*` directory containing `unit.json`, `unit.tsv`, `e2e.json`, and `e2e.tsv`. Failed test output remains available for diagnosis.
 
 The gate reports test execution and timing checks as separate rows. Unit tests use the Makefile's `TESTFLAGS`; tagged e2e tests use `-p 1`. Environment overrides reach the container. `make timing` prints the newest unit or e2e TSV. CI retains the JSON and TSV files even after failure.
 
@@ -63,7 +63,7 @@ The initial shared-host ratchet is explicitly provisional: one successful serial
 
 The target enables `--wait-quiet`, which prefers load below 4 before each capture. The wait is outside the timed command and capped at five minutes; sustained load emits a warning and proceeds with high-load evidence. The raw TSV records each result; its sibling `.load.log` records capture identity and dated uptime before and after, including failed captures. Unreadable load probes fail explicitly.
 
-Conservative `-p 1 -parallel 1` flags remain in effect until W5 supplies a successful sweep recommendation. The output report is `docs/dev/testing/concurrency-sweep.md`; raw runs and failure output live under `tmp/timing/`.
+Conservative `-p 1 -parallel 1` flags remain in effect until W5 supplies a successful sweep recommendation. The output report is `docs/dev/testing/concurrency-sweep.md`; raw runs and failure output live under `/tmp/{project}/timing/`.
 
 ## Accepted measurements
 

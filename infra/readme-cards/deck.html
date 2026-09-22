@@ -979,7 +979,7 @@
       <div class="chook" id="chook">
         <div class="hk" data-h="edit"><b>Edit</b><span>you save the file</span></div>
         <div class="hk" data-h="post"><b>PostToolUse</b><span>codex-sync.sh mark</span></div>
-        <div class="hk flag" data-h="flag"><b>● dirty</b><span>tmp/professor_codex_dirty</span></div>
+        <div class="hk flag" data-h="flag"><b>● dirty</b><span>/tmp/{project}/guard/codex_dirty</span></div>
         <div class="hk" data-h="stop"><b>Stop</b><span>codex-sync.sh sync</span></div>
         <div class="hk st" data-h="b1"><b>pfm codex build</b><span id="hkB1">…</span></div>
         <div class="hk st" data-h="b2"><b>pfm codex check</b><span id="hkB2">…</span></div>
@@ -1790,9 +1790,9 @@
     var sc = scene(), box = document.getElementById('cmpB'), term = document.getElementById('cmpTerm');
     var inp = document.getElementById('cmpIn'), caret = document.getElementById('cmpCaret'), sl = document.getElementById('cmpSl'), sweep = document.getElementById('cmpSweep');
     var chips = {}; document.querySelectorAll('#cmpx .cchip').forEach(function (c) { chips[c.dataset.k] = c; });
-    var KEEP = 'keep the flight-3 spec at tmp/flights/flight-3/, merge sha a66c690d, the two open review issues';
+    var KEEP = 'keep the flight-3 spec at /tmp/{project}/flights/flight-3/, merge sha a66c690d, the two open review issues';
     var DROP = 'drop the flight-1/2 build logs, grep dumps, and the resolved debugging';
-    var STEER = 'Continue flight 3 from tmp/flights/flight-3/: dispatch dev on step 1, keep both review issues open.';
+    var STEER = 'Continue flight 3 from /tmp/{project}/flights/flight-3/: dispatch dev on step 1, keep both review issues open.';
     var HIST = [
       ['u', '❯', 'Run flights 1 to 3, merge each one to develop.'],
       ['say', '⏺', 'Flight 1 built in the fence, QA green, merged.'],
@@ -1812,7 +1812,7 @@
       var my = sc.next(); reset();
       if (!(await sc.wait(700, my))) return;
       chip('mile', true);
-      ln(box, 'say', '⏺', 'Milestone: flight 2 is merged. Checkpointed the plan to tmp/flights/flight-3/; compacting before flight 3.');
+      ln(box, 'say', '⏺', 'Milestone: flight 2 is merged. Checkpointed the plan to /tmp/{project}/flights/flight-3/; compacting before flight 3.');
       if (!(await sc.wait(1000, my))) return;
       ln(box, 'say', '⏺', '<b>chat - chat_self_compact</b> (MCP)(focus: "Flight 2 done; keep … drop …", then: ["Continue flight 3 …"])');
       if (!(await sc.wait(500, my))) return;
@@ -1833,7 +1833,7 @@
       if (!(await sc.wait(1100, my))) return;
       box.innerHTML = ''; term.classList.remove('boot');
       ln(box, 'div', null, '✻ Conversation compacted · ctrl+o for history');
-      ln(box, 'called', null, '⎿ kept: <span class="kw">tmp/flights/flight-3/ · a66c690d · 2 open review issues</span>');
+      ln(box, 'called', null, '⎿ kept: <span class="kw">/tmp/{project}/flights/flight-3/ · a66c690d · 2 open review issues</span>');
       meter(9);
       if (!(await sc.wait(1100, my))) return;
       chip('steer', true);
@@ -1844,7 +1844,7 @@
       ln(box, 'u', '❯', '<span class="sw">' + STEER + '</span>');
       if (!(await sc.wait(900, my))) return;
       var d = ln(box, 'say', '⏺', ''), t = d.querySelector('.t');
-      if (!(await typeInto(box, t, 'Resuming flight 3, step 1: dispatching dev with the spec from tmp/flights/flight-3/.', sc, my, 60))) return;
+      if (!(await typeInto(box, t, 'Resuming flight 3, step 1: dispatching dev with the spec from /tmp/{project}/flights/flight-3/.', sc, my, 60))) return;
     }
     document.getElementById('cmpReplay').addEventListener('click', play);
     onView(document.getElementById('cmpx'), play);

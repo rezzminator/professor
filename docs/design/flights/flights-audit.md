@@ -16,7 +16,7 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 ## Input
 
-`/flights:audit {flight directory}`; absent, the newest directory under `tmp/flights/`. The audit runs in the main chat at the chat's model: its judgment is the product.
+`/flights:audit {flight directory}`; absent, the newest directory under `/tmp/{project}/flights/`. The audit runs in the main chat at the chat's model: its judgment is the product.
 
 ## The anchors
 

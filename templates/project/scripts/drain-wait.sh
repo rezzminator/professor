@@ -41,7 +41,8 @@ set -euo pipefail
 # stall, never as a trigger.
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-LOG="${WORKER_LOG:-$REPO_ROOT/tmp/dev/worker.log}"
+PROJECT="$(basename "$REPO_ROOT")"; PROJECT="${PROJECT#.}"
+LOG="${WORKER_LOG:-/tmp/$PROJECT/dev/worker.log}"
 HEALTH_URL="http://localhost:${A_PORT:-{PROJECT_PORT}}/health"   # A_PORT → the health-serving project's {PROJECT}_PORT
 
 POLL_INTERVAL="${POLL_INTERVAL:-15}"   # seconds between polls

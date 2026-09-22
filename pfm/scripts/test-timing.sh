@@ -45,6 +45,8 @@ export LC_ALL=C
 
 PFM="${PFM:-$(cd "$(dirname "$0")/.." && pwd)}"
 REPO="${REPO:-$(cd "$PFM/.." && pwd)}"
+PROJECT="$(basename "$REPO")"; PROJECT="${PROJECT#.}"
+TMP_BASE="/tmp/$PROJECT"
 YML="$PFM/.testtiming.yml"
 SUITE_NAME="unit"
 OUT=""
@@ -433,7 +435,7 @@ check_timing() {
 
 default_out() {
   local stamp; stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-  echo "$REPO/tmp/timing/${SUITE_NAME}-${stamp}.tsv"
+  echo "$TMP_BASE/timing/${SUITE_NAME}-${stamp}.tsv"
 }
 
 INPUT="${POSITIONAL[0]:-}"

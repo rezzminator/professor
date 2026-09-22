@@ -9,16 +9,27 @@ set -euo pipefail
 #                    removed: markers survive turn ends and die by TTL alone
 #                    (pfm-guard's sliding 1500s freshness + the 1h reap here), so a
 #                    live multi-turn session stamps once, not once per turn.
-# Both modes reap abandoned markers (age > 1h) so tmp/ never accumulates stale keys.
+# Both modes reap abandoned markers (age > 1h) so the guard directory never
+# accumulates stale keys. Markers live in /tmp/<project>/guard/, where <project>
+# is the repo directory's basename with any leading dot stripped — gate state
+# stays out of the working tree, and pfm-guard.sh derives the identical path.
 
 MODE="${1:-read}"
 INPUT=$(cat 2>/dev/null || true)
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null || true)
 
+# guard_dir <repo-root>: the one derivation both this script and pfm-guard.sh use.
+guard_dir() {
+  local project
+  project="$(basename "$1")"
+  printf '/tmp/%s/guard' "${project#.}"
+}
+
 reap() {
-  local root="$1" now
+  local root="$1" now dir
+  dir="$(guard_dir "$root")"
   now=$(date +%s)
-  for m in "$root"/tmp/professor_pfm_active* "$root"/tmp/professor_quality_loaded*; do
+  for m in "$dir"/pfm_active* "$dir"/quality_loaded*; do
     [[ -f "$m" ]] || continue
     local age=$(( now - $(cat "$m" 2>/dev/null || echo 0) ))
     (( age > 3600 )) && rm -f "$m"
@@ -57,8 +68,9 @@ case "$MODE" in
       exit 0
     fi
     for root in "${ROOTS[@]}"; do
-      mkdir -p "$root/tmp"
-      date +%s > "$root/tmp/professor_quality_loaded${SID:+.$SID}"
+      dir="$(guard_dir "$root")"
+      mkdir -p "$dir"
+      date +%s > "$dir/quality_loaded${SID:+.$SID}"
       reap "$root"
     done
     ;;

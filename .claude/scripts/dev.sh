@@ -14,6 +14,11 @@ set -euo pipefail
 #   - every command's own exit status propagates; nothing is swallowed with `|| true`.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Scratch artifacts live outside the working tree: /tmp/<project>/<purpose>,
+# where <project> is the repo directory's basename with any leading dot stripped.
+# A run never dirties the checkout, and every artifact path printed is absolute.
+PROJECT_NAME="$(basename "$REPO_ROOT")"; PROJECT_NAME="${PROJECT_NAME#.}"
+TMP_BASE="/tmp/$PROJECT_NAME"
 cd "$REPO_ROOT"
 
 PROJECTS=(templates pfm)
@@ -276,8 +281,8 @@ act_templates() { # the shipped product: mechanical gates, no build
           if [[ -n "${PFM_DEV_FENCE:-}" ]]; then
             out="$(mktemp)"
           else
-            out="tmp/templates-unregistered-tokens.txt"
-            mkdir -p tmp
+            out="$TMP_BASE/templates/unregistered-tokens.txt"
+            mkdir -p "$TMP_BASE/templates"
           fi
           printf '%s\n' "$unregistered" > "$out"
           fail_step "$(wc -l <<<"$unregistered") of $(wc -l <<<"$used") markdown-template tokens are absent from PLACEHOLDERS.md — register each as an install placeholder or under § Runtime metavariables"
@@ -285,6 +290,41 @@ act_templates() { # the shipped product: mechanical gates, no build
           grep -rhoE '\{[A-Z][A-Z0-9_]+\}' --include='*.md' templates \
             | grep -xFf "$out" | sort | uniq -c | sort -rn | head -10 \
             | while read -r n tok; do info "  ${n}x  $tok"; done
+        fi
+      fi
+
+      head_ "templates — scratch-path policy"
+      # Scratch artifacts belong in /tmp/<project>/<purpose>, never in a repo-local
+      # tmp/. This catches the straggler an edit pass missed, which is the whole
+      # point: it enumerates tracked files rather than trusting that the sweep was
+      # complete. Its own broken state is distinct — a git listing that cannot be
+      # read is a FAIL naming git, never an empty sweep reported clean.
+      # NUL-delimited through a file: a command substitution drops NUL bytes, so
+      # capturing `ls-files -z` into a variable silently collapses the list into
+      # one blob and the scan reports clean because it scanned nothing.
+      mkdir -p "$TMP_BASE/templates"
+      if ! repo_git ls-files -z > "$TMP_BASE/templates/tracked.z" 2>/dev/null; then
+        fail_step "scratch-path policy: the tracked-file list could not be read from git — nothing was scanned"
+      else
+        # Excluded, and SAID so rather than filtered in silence: shipped release
+        # notes, the retro ledger, generated mirrors, and the two measurement
+        # records that name where a past capture actually landed — rewriting
+        # those would misstate history. An exclusion that hides its own work is
+        # the next bug, so the count and the list are printed on every run.
+        local exclude='^(releases/|CHANGELOG\.md|\.codex/|\.opencode/|AGENTS\.md|\.professor/retro\.md$|docs/dev/testing/timing\.md$|pfm/\.testtiming\.yml$)'
+        # grep needs /dev/null as a second operand: BSD xargs runs the utility
+        # even on empty input, and a bare `grep PATTERN` then reads stdin and
+        # hangs the gate forever instead of reporting an empty sweep.
+        all_hits=$(xargs -0 grep -lE '(^|[^/[:alnum:]_.-])tmp/(timing|flights|lanes|guard|professor_)' /dev/null \
+          < "$TMP_BASE/templates/tracked.z" 2>/dev/null || true)
+        strays=$(printf '%s\n' "$all_hits" | grep -vE "$exclude" | grep -v '^$' || true)
+        excluded=$(printf '%s\n' "$all_hits" | grep -cE "$exclude" || true)
+        info "scratch-path scan: $excluded historical-record path(s) excluded by name (release notes, retro ledger, mirrors, measurement records)"
+        if [[ -z "$strays" ]]; then
+          ok "no tracked file writes a repo-local tmp/ (scratch lives under /tmp/<project>/)"
+        else
+          fail_step "$(wc -l <<<"$strays" | tr -d ' ') tracked file(s) still name a repo-local tmp/ path — repoint them at /tmp/<project>/<purpose>"
+          while read -r f; do [[ -n "$f" ]] && info "  $f"; done <<< "$strays"
         fi
       fi
 
@@ -432,7 +472,7 @@ act_pfm() {
         fail_step "pfm: TESTFLAGS could not be read from Makefile"; return
       fi
       read -r -a testflags <<< "$flags_text"
-      timing_base="${PFM_TEST_TIMING_DIR:-$REPO_ROOT/tmp/timing}"
+      timing_base="${PFM_TEST_TIMING_DIR:-$TMP_BASE/timing}"
       mkdir -p "$timing_base"
       timing_run="$(mktemp -d "$timing_base/run.XXXXXX")"
       # Positional arguments keep flags and output paths out of shell code.
@@ -508,8 +548,8 @@ cmd_iso() { # cmd_iso <action> [project]
   # The worktree mount is read-only; coverage profiles land in container HOME.
   extra+=(-e COVER_DIR=/root/cover)
   # Only generated timing artifacts are writable; the source mount stays read-only.
-  mkdir -p "$REPO_ROOT/tmp/timing"
-  extra+=(-v "$REPO_ROOT/tmp/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing)
+  mkdir -p "$TMP_BASE/timing"
+  extra+=(-v "$TMP_BASE/timing:/pfm-timing" -e PFM_TEST_TIMING_DIR=/pfm-timing)
   if [[ -n "${TESTFLAGS+x}" ]]; then extra+=(-e "TESTFLAGS=$TESTFLAGS"); fi
   local proof='echo "fence: container=$(hostname) HOME=$HOME work=$(pwd)"'
   case "$action" in

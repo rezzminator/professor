@@ -129,6 +129,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Mirrors `.claude/scripts/dev.sh`'s own derivation: scratch artifacts land
+      # outside the checkout at /tmp/<project>, <project> = the checkout
+      # directory's basename with any leading dot stripped. Computed once here
+      # (the runner's checkout name is not $REPO_ROOT's basename on this host)
+      # so the upload-artifact step below references the same path dev.sh wrote.
+      - name: Derive the scratch base directory
+        run: |
+          set -euo pipefail
+          name="$(basename "$GITHUB_WORKSPACE")"; name="${name#.}"
+          echo "TMP_BASE=/tmp/$name" >> "$GITHUB_ENV"
+
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -182,8 +193,8 @@ jobs:
         with:
           name: pfm-test-timing
           path: |
-            tmp/timing/**/*.tsv
-            tmp/timing/**/*.json
+            ${{ env.TMP_BASE }}/timing/**/*.tsv
+            ${{ env.TMP_BASE }}/timing/**/*.json
           if-no-files-found: warn
           retention-days: 14
 

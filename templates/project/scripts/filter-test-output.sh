@@ -4,7 +4,7 @@ set -euo pipefail
 # Failure-biased filter for test-runner output — keeps failures, errors, tracebacks,
 # the summary block, and coverage totals; drops passing noise. TWO entry modes:
 #
-#   PIPE:  <test cmd> > /tmp/run.log 2>&1; rc=$?; filter-test-output.sh -p < /tmp/run.log
+#   PIPE:  log=$(mktemp); <test cmd> > "$log" 2>&1; rc=$?; filter-test-output.sh -p < "$log"
 #     Reads RAW test output on stdin, prints the filtered subset to stdout. Run a suite
 #     in this shape so the runner's own rc is captured before filtering.
 #

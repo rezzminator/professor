@@ -62,7 +62,7 @@ newer — a clone checked out to an older revision than the binary is the binary
 
 ## The Claude drift baseline
 
-- `claude/baselines/harness-original-v2.1.278.md` and `claude/baselines/harness-opus-v2.1.278.md`
+- `claude/baselines/harness-original-v2.1.280.md` and `claude/baselines/harness-opus-v2.1.280.md`
   are reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic
   sections excluded. Each has a `.sha256` pin and `.model` provenance file under its
   `harness-original` or `harness-opus` stem; they are embedded with the parts and staged beside
@@ -72,11 +72,21 @@ newer — a clone checked out to an older revision than the binary is the binary
   model ID. Model names and versions are informational: changing those alone never reports drift.
   A changed prompt behind an alias still requires review, even if the resolved model name also changed.
 - Normalization masks `cc_version` only in the leading billing system block and removes only complete known
-  model-identity and month/year knowledge-cutoff lines inside `# Environment`. Instructions appended
-  to those lines, similar text elsewhere, fenced examples, and model-specific behavioral sections remain checked.
-  Recognizing a text pattern alone is insufficient reason to discard it.
+  model-identity and month/year knowledge-cutoff lines inside `# Environment`. On every line, fenced
+  examples included, it then masks three token kinds: model IDs (`claude-opus-5-5`,
+  `claude-haiku-4-5-20251001`; `claude-code` stays) to `<model-id>`, display names (`Opus 5.5`, `Claude 5`)
+  to `<model-name>`, and dotted versions (`2.1.280`) to `<version>`. The model-catalog line
+  (` - The most recent Claude models are … Model IDs — …`) is replaced whole by ` - <model-catalog>`,
+  its trailing sentence included, so a catalog entry added or dropped is never drift; the line
+  disappearing still is. A change in a masked token alone — a CLI release number — is never drift. Instructions appended to the
+  identity lines, similar text elsewhere, fenced examples, and model-specific behavioral sections
+  remain checked. Recognizing a text pattern alone is insufficient reason to discard it.
 - `DRIFT` means normalized instruction text changed: review the upstream additions, deletions, or
-  rewording before re-pinning. Failed capture and missing or inconsistent baseline files report
+  rewording before re-pinning. Below the verdict, doctor names each `section removed:`,
+  `section changed:` and `section added:` heading (at most 20, then `… and N more`; when no section's
+  text differs, `section order changed` or `blank lines changed (no section text differs)`), and a
+  `model changed <alias>: <baseline> → <resolved>` line whenever the resolved model differs from
+  `.model` — that line alone never warns. Failed capture and missing or inconsistent baseline files report
   separate coverage warnings; they never count as drift or a match. Failure of one model's check
   does not suppress the other. These checks do not validate the active chat, Fable, Codex, or the
   Professor replacement.

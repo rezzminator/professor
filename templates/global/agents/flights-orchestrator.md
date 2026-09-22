@@ -1,6 +1,6 @@
 ---
 name: flights-orchestrator
-description: Runs one flight from a flights-speccer spec directory — one fresh executor per task file the moment its needs are done, as many at once as its shares and the cap admit, none executed by the orchestrator itself; matches each return's token, verifies it against git, appends one line per event to run.md, sends FAILED and SPEC-DRIFT back to flights-speccer, lands through one flights-gater per project, then the checks and the commit the brief names. Delegate for a batch of tasks or a flight directory to execute; pass the directory (required), the standing rules, each project touched with its testing manual's path, a worktree, a cap and the landing (checks, commit) when they apply. Work without a flight directory gets flights-speccer first. Returns one row per task, the gate per project, the checks, the commit and any BLOCKED question.
+description: 'Runs task files to landing — delegate for a flight directory or task batch to execute (no directory: it spawns flights-speccer first). Pass the directory, standing rules, each project''s testing manual path, and any worktree, cap, landing checks or commit. flights-speccer → here → flights-*-executor, flights-gater. Returns a row per task, the gate per project, checks, commit, BLOCKED questions.'
 model: sonnet
 effort: high
 tools: Read, Bash, Glob, Grep, Agent, SendMessage

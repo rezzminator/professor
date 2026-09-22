@@ -113,8 +113,9 @@ func TestHarnessBillingExampleRemainsBehavioral(t *testing.T) {
 
 func TestHarnessFencedIdentityExampleRemainsBehavioral(t *testing.T) {
 	for _, fence := range []string{"```", "~~~~"} {
-		first := "# Instructions\n" + fence + "text\n# Environment\n - You are powered by the model named Opus 5. The exact model ID is claude-opus-5.\n" + fence + "\n"
-		second := strings.ReplaceAll(first, "Opus 5", "Opus 6")
+		identity := " - You are powered by the model named Opus 5. The exact model ID is claude-opus-5.\n"
+		first := "# Instructions\n" + fence + "text\n# Environment\n" + identity + fence + "\n"
+		second := strings.Replace(first, identity, "", 1)
 		if normalizeHarnessPrompt(first) == normalizeHarnessPrompt(second) {
 			t.Fatalf("%s fenced identity example change hidden", fence)
 		}

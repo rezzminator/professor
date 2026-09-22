@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	goRuntime "runtime"
@@ -19,6 +20,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 	"github.com/rezzminator/professor/pfm/internal/index"
 	"github.com/rezzminator/professor/pfm/internal/installer"
+	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 	"github.com/rezzminator/professor/pfm/internal/stats"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -115,6 +117,9 @@ func registerTestEngines() {
 func TestMain(m *testing.M) {
 	registerTestEngines()
 	HarvestOverride = noNetworkHarvestDoctor{}
+	DaemonReachabilityOverride = func(config.Runtime) (mcpserv.DaemonStatus, error) {
+		return mcpserv.DaemonStatus{}, fmt.Errorf("%w: jailed test never probes a live daemon", mcpserv.ErrDaemonAbsent)
+	}
 	PrePushGateProbeOverride = func(context.Context) PrePushGate { return PrePushGate{State: "outside-repository"} }
 	DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
 		results := make([]deps.Result, 0, len(entries))

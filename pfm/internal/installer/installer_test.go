@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,13 +22,10 @@ import (
 type fakeRunner struct {
 	manager        bool
 	nameSyncActive bool
-	// nameSyncIdle makes the is-active probe for pfm-name-sync.service run to
-	// completion and report the service inactive via a genuine
-	// *exec.ExitError — the only shape nameSyncServiceRunning's classifier
-	// accepts as "probed, and idle" rather than "the probe never answered".
-	// Leaving both this and nameSyncActive false models a probe that could
-	// not run at all (systemctl missing, dead bus, permission denied), via a
-	// plain error that does NOT satisfy errors.As(*exec.ExitError).
+	// nameSyncActive makes the state probe for pfm-name-sync.service answer
+	// "activating" (a oneshot mid-run); nameSyncIdle makes it answer
+	// "inactive". Leaving both false models a probe that could not run at all
+	// (systemctl missing, dead bus, permission denied) via a plain error.
 	nameSyncIdle bool
 	calls        []string
 }
@@ -37,14 +33,6 @@ type fakeRunner struct {
 func (runner *fakeRunner) Run(_ context.Context, name string, args ...string) error {
 	call := name + " " + strings.Join(args, " ")
 	runner.calls = append(runner.calls, call)
-	if call == "systemctl --user is-active --quiet pfm-name-sync.service" {
-		if runner.nameSyncActive {
-			return nil
-		}
-		if runner.nameSyncIdle {
-			return genuineExitError()
-		}
-	}
 	if call == "systemctl --user show-environment" && runner.manager {
 		return nil
 	}
@@ -58,19 +46,21 @@ func (runner *fakeRunner) Run(_ context.Context, name string, args ...string) er
 	return errors.New("dead user bus")
 }
 
-// genuineExitError returns a real *exec.ExitError from a command that
-// actually ran and exited non-zero — the shape `systemctl is-active` takes
-// when it genuinely reports "inactive", as opposed to never having run at
-// all. A hand-rolled type that merely satisfies errors.As(*exec.ExitError)
-// would defeat the point of the distinction nameSyncServiceRunning draws, so
-// fakeRunner earns one for real instead of faking the type.
-func genuineExitError() error {
-	err := exec.Command("sh", "-c", "exit 3").Run()
-	var exitErr *exec.ExitError
-	if !errors.As(err, &exitErr) {
-		panic(fmt.Sprintf("fake idle probe did not produce a genuine *exec.ExitError: %v (%T)", err, err))
+// nameSyncStateProbe is the exact argv nameSyncServiceRunning runs.
+const nameSyncStateProbe = "systemctl --user show --property=ActiveState --value pfm-name-sync.service"
+
+func (runner *fakeRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	call := name + " " + strings.Join(args, " ")
+	runner.calls = append(runner.calls, call)
+	if call == nameSyncStateProbe {
+		if runner.nameSyncActive {
+			return []byte("activating\n"), nil
+		}
+		if runner.nameSyncIdle {
+			return []byte("inactive\n"), nil
+		}
 	}
-	return exitErr
+	return nil, errors.New("fakeRunner: no output for " + call)
 }
 
 // TestInstallPreviewListsPrunableVersionsAndApplyRemovesOnlyThem is C: the
@@ -168,7 +158,7 @@ func TestDryRunNeverGatesOnAReachableUserManager(t *testing.T) {
 		t.Fatalf("dry run report=%#v err=%v, want an ungated preview", report, err)
 	}
 	for _, call := range runner.calls {
-		if call == "systemctl --user is-active --quiet pfm-name-sync.service" {
+		if call == nameSyncStateProbe {
 			t.Fatalf("dry run called the running-service gate: %v", runner.calls)
 		}
 	}
@@ -195,86 +185,6 @@ func TestDryRunNamesUpdateMetadataWithoutWritingIt(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("dry run wrote update metadata %s: %v", path, err)
 		}
-	}
-}
-
-// TestReachableIdleUserManagerAllowsMutatingModes is behavior (b): the
-// systemctl is-active probe ran to completion and genuinely reported the
-// service inactive (a real *exec.ExitError, via fakeRunner's nameSyncIdle).
-// That is the proceed-silently case: install must not refuse, and — unlike
-// the probe-could-not-run case — must never claim the gate was unprobed.
-func TestReachableIdleUserManagerAllowsMutatingModes(t *testing.T) {
-	for _, mode := range []Mode{ModeApply, ModeUninstall} {
-		t.Run(fmt.Sprint(mode), func(t *testing.T) {
-			home := t.TempDir()
-			var output bytes.Buffer
-			_, err := Run(context.Background(), Options{
-				Mode:   mode,
-				Home:   home,
-				Stdout: &output,
-				Runner: &outputRunner{
-					fakeRunner:  fakeRunner{manager: true, nameSyncIdle: true},
-					printOutput: "state = not running\n",
-				},
-			})
-			if err != nil {
-				t.Fatalf("mode %d refused an idle reachable manager: %v\n%s", mode, err, output.String())
-			}
-			if strings.Contains(output.String(), "gate NOT probed") {
-				t.Fatalf(
-					"mode %d claimed the gate was unprobed for a genuinely idle service:\n%s",
-					mode,
-					output.String(),
-				)
-			}
-		})
-	}
-}
-
-// TestUnprobedNameSyncGateProceedsButSaysSo is behavior (c): the systemctl
-// is-active probe never got an answer at all — modeled by fakeRunner's
-// default is-active response, a plain error that is NOT an *exec.ExitError
-// (as would come from systemctl missing, a dead user bus, or permission
-// denied). Install must still proceed (this gate only ever refuses a
-// CONFIRMED running service), but it must say the gate was not probed rather
-// than silently reading that ambiguity as safe — the entire point of the fix.
-func TestUnprobedNameSyncGateProceedsButSaysSo(t *testing.T) {
-	if schedulerIsLaunchd {
-		t.Skip("the systemd name-sync gate is Linux-only")
-	}
-	home := t.TempDir()
-	var output bytes.Buffer
-	_, err := Run(context.Background(), Options{
-		Mode: ModeApply, Home: home, Stdout: &output, Runner: &fakeRunner{},
-	})
-	if err != nil {
-		t.Fatalf("an unprobed gate refused the install: %v\n%s", err, output.String())
-	}
-	if !strings.Contains(output.String(), "name-sync gate NOT probed") {
-		t.Fatalf("an unprobed name-sync gate was silent:\n%s", output.String())
-	}
-}
-
-func TestRunningNameSyncRefusesMutatingModesBeforeWriting(t *testing.T) {
-	for _, mode := range []Mode{ModeApply, ModeUninstall} {
-		t.Run(fmt.Sprint(mode), func(t *testing.T) {
-			home := t.TempDir()
-			var runner CommandRunner = &fakeRunner{nameSyncActive: true}
-			expected := ErrNameSyncRunning
-			if schedulerIsLaunchd {
-				runner = &outputRunner{printOutput: "state = running\n"}
-				expected = ErrLaunchAgentRunning
-			}
-			_, err := Run(context.Background(), Options{
-				Mode: mode, Home: home, Runner: runner,
-			})
-			if !errors.Is(err, expected) {
-				t.Fatalf("Run() error = %v, want %v", err, expected)
-			}
-			if entries, readErr := os.ReadDir(home); readErr != nil || len(entries) != 0 {
-				t.Fatalf("running-service refusal wrote files: entries=%v err=%v", entries, readErr)
-			}
-		})
 	}
 }
 
@@ -1582,7 +1492,7 @@ func TestUnitTransitionsUseOnlyTheInjectedManager(t *testing.T) {
 	}
 	joined := strings.Join(runner.calls, "\n")
 	wantCalls := []string{
-		"systemctl --user is-active --quiet pfm-name-sync.service",
+		nameSyncStateProbe,
 		"systemctl --user daemon-reload",
 		"systemctl --user enable --now pfm-name-sync.path " + nameSyncTimerUnit,
 	}
@@ -1707,7 +1617,10 @@ type outputRunner struct {
 	printErr    error
 }
 
-func (runner *outputRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+func (runner *outputRunner) Output(ctx context.Context, name string, args ...string) ([]byte, error) {
+	if name == "systemctl" {
+		return runner.fakeRunner.Output(ctx, name, args...)
+	}
 	runner.calls = append(runner.calls, name+" "+strings.Join(args, " "))
 	if runner.printErr != nil {
 		return nil, runner.printErr

@@ -1,6 +1,6 @@
 ---
 name: flights-mechanical-executor
-description: FLIGHTS-ONLY executes ONE task file rated mechanical — the code and its covering tests, in the project's test pattern — spawned by flights-orchestrator, one fresh executor per task file, never delegated to directly. Pass the task file path and its reads, the run.md lines of its needs, the standing rules, the testing manual's path, the worktree. Returns one verdict line (DONE, FAILED, SPEC-DRIFT, BLOCKED), then files changed, the test per Done when row with its proof, adaptations and defects found.
+description: 'FLIGHTS-ONLY — spawned by flights-orchestrator, one fresh executor per task file rated mechanical: its code and covering tests. Pass the brief file, the task file and its reads paths. flights-orchestrator → here → flights-gater. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the watched-failing test per Done when row, adaptations, RETRO.'
 model: sonnet
 effort: medium
 tools: Read, Write, Edit, Bash, Glob, Grep

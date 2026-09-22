@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	harnessprompts "github.com/rezzminator/professor/pfm/harness-prompts"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -22,19 +24,19 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 	sum := sha256.Sum256([]byte(captured))
 	matching := hex.EncodeToString(sum[:])
 
-	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.278.md", captured, nil)
-	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.278.md") {
+	line, warn := harnessPromptVerdict(matching, "harness-original-v2.1.280.md", captured, nil)
+	if warn || !strings.Contains(line, "matches baseline harness-original-v2.1.280.md") {
 		t.Fatalf("match outcome = (%q, %v), want an ok line", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.278.md", captured, nil)
+	line, warn = harnessPromptVerdict(strings.Repeat("0", 64), "harness-original-v2.1.280.md", captured, nil)
 	if !warn || !strings.Contains(line, "DRIFT") {
 		t.Fatalf("drift outcome = (%q, %v), want a DRIFT warning", line, warn)
 	}
 
 	line, warn = harnessPromptVerdict(
 		matching,
-		"harness-original-v2.1.278.md",
+		"harness-original-v2.1.280.md",
 		"",
 		errors.New("no API request reached the capture sink"),
 	)
@@ -43,7 +45,7 @@ func TestHarnessPromptVerdictThreeOutcomes(t *testing.T) {
 		t.Fatalf("capture-failure outcome = (%q, %v), want a distinct CHECK FAILED warning", line, warn)
 	}
 
-	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.278.md", "", errClaudeAbsent)
+	line, warn = harnessPromptVerdict(matching, "harness-original-v2.1.280.md", "", errClaudeAbsent)
 	if warn || line != "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare" {
 		t.Fatalf("absence outcome = (%q, %v), want the named skip with no warning", line, warn)
 	}
@@ -305,5 +307,299 @@ func TestKnownSIDMetadataIncludesNudgeRecords(t *testing.T) {
 		if knownSIDMetadata(name) {
 			t.Errorf("invalid nudge record %q accepted", name)
 		}
+	}
+}
+
+const (
+	harnessCatalogLineA = " - The most recent Claude models are the Claude 5 family and Haiku 4.5. Model IDs — Fable 5.1: 'claude-fable-5-1', Opus 5: 'claude-opus-5', Sonnet 5: 'claude-sonnet-5', Haiku 4.5: 'claude-haiku-4-5-20251001'. When building AI applications, default to the latest and most capable Claude models."
+	harnessCatalogLineB = " - The most recent Claude models are the Claude 5 family and Haiku 4.5. Model IDs — Fable 5.1: 'claude-fable-5-1', Opus 5.5: 'claude-opus-5-5', Sonnet 5: 'claude-sonnet-5', Haiku 4.5: 'claude-haiku-4-5-20251001'. When building AI applications, default to the latest and most capable Claude models."
+	harnessDetailPrefix = "doctor: harness-prompt:   "
+)
+
+// harnessDetailFixture is a small opus-shaped prompt: the heading order ends
+// `# Environment`, `# Context management`, `# Delivering work`, `# Corrections`,
+// as the 2.1.278 opus baseline does.
+const harnessDetailFixture = "x-anthropic-billing-header: cc_version=2.1.278.a1b; cc_entrypoint=sdk-cli;\n\n" +
+	"=== SYSTEM BLOCK ===\n\nYou are Claude Code, Anthropic's official CLI for Claude.\n\n" +
+	"# Doing tasks\n - Read the code before you change it.\n - Keep changes surgical.\n" +
+	"```text\nexample: run the tests\n# not a heading inside a fence\n```\n" +
+	"# Environment\n - This build is Claude Code version 2.1.278.\n" + harnessCatalogLineA + "\n" +
+	"# Context management\n - Summarize when the context runs long.\n" +
+	"# Delivering work\n - Report what landed and what did not.\n" +
+	"# Corrections\nDo not use the Agent tool, workflows, or deep-research unless the user, a CLAUDE.md file, or a skill asks for it.\n"
+
+func TestHarnessPromptDriftDetail(t *testing.T) {
+	sectionsRemoved, _, _ := strings.Cut(harnessDetailFixture, "# Delivering work\n")
+	var manyBaseline, manyCaptured strings.Builder
+	var manyDetail []string
+	for index := 1; index <= 25; index++ {
+		fmt.Fprintf(&manyBaseline, "# S%02d\nKeep rule %d.\n", index, index)
+		fmt.Fprintf(&manyCaptured, "# S%02d\nDrop rule %d.\n", index, index)
+		if index <= 20 {
+			manyDetail = append(manyDetail, fmt.Sprintf("%ssection changed: # S%02d", harnessDetailPrefix, index))
+		}
+	}
+	manyDetail = append(manyDetail, harnessDetailPrefix+"… and 5 more")
+	modelLine := harnessDetailPrefix + "model changed opus: claude-opus-5 → claude-opus-5-5"
+
+	for _, testCase := range []struct {
+		name       string
+		baseline   string
+		captured   HarnessCapture
+		captureErr error
+		wantWarn   bool
+		wantLine   string
+		wantDetail []string
+	}{
+		{
+			name:     "catalog-only change",
+			captured: HarnessCapture{Prompt: strings.Replace(harnessDetailFixture, harnessCatalogLineA, harnessCatalogLineB, 1)},
+			wantLine: "doctor: harness-prompt: matches baseline fixture.md",
+		},
+		{
+			name: "catalog entry added",
+			captured: HarnessCapture{
+				Prompt: strings.Replace(harnessDetailFixture, "Sonnet 5: 'claude-sonnet-5',", "Sonnet 5: 'claude-sonnet-5', Haiku 5: 'claude-haiku-5',", 1),
+			},
+			wantLine: "doctor: harness-prompt: matches baseline fixture.md",
+		},
+		{
+			name: "catalog entry dropped",
+			captured: HarnessCapture{
+				Prompt: strings.Replace(harnessDetailFixture, " Fable 5.1: 'claude-fable-5-1',", "", 1),
+			},
+			wantLine: "doctor: harness-prompt: matches baseline fixture.md",
+		},
+		{
+			name:       "catalog line removed",
+			captured:   HarnessCapture{Prompt: strings.Replace(harnessDetailFixture, harnessCatalogLineA+"\n", "", 1)},
+			wantWarn:   true,
+			wantLine:   "doctor: harness-prompt: DRIFT",
+			wantDetail: []string{harnessDetailPrefix + "section changed: # Environment"},
+		},
+		{
+			name:     "model display name swapped in prose",
+			captured: HarnessCapture{Prompt: strings.Replace(harnessDetailFixture, "Opus 5:", "Opus 6:", 1)},
+			wantLine: "doctor: harness-prompt: matches baseline fixture.md",
+		},
+		{
+			name: "model ID swapped in prose",
+			captured: HarnessCapture{
+				Prompt: strings.Replace(harnessDetailFixture, "'claude-opus-5'", "'claude-opus-6-1-20260101'", 1),
+			},
+			wantLine: "doctor: harness-prompt: matches baseline fixture.md",
+		},
+		{
+			name:     "CLI version string changed",
+			captured: HarnessCapture{Prompt: strings.ReplaceAll(harnessDetailFixture, "2.1.278", "2.1.280")},
+			wantLine: "doctor: harness-prompt: matches baseline fixture.md",
+		},
+		{
+			name:     "sections removed plus model change",
+			captured: HarnessCapture{Prompt: sectionsRemoved, ResolvedModel: "claude-opus-5-5"},
+			wantWarn: true,
+			wantLine: "doctor: harness-prompt: DRIFT",
+			wantDetail: []string{
+				modelLine,
+				harnessDetailPrefix + "section removed: # Delivering work",
+				harnessDetailPrefix + "section removed: # Corrections",
+			},
+		},
+		{
+			name:       "one instruction sentence edited",
+			captured:   HarnessCapture{Prompt: strings.Replace(harnessDetailFixture, "Keep changes surgical.", "Keep changes broad.", 1)},
+			wantWarn:   true,
+			wantLine:   "doctor: harness-prompt: DRIFT",
+			wantDetail: []string{harnessDetailPrefix + "section changed: # Doing tasks"},
+		},
+		{
+			name:       "section added",
+			captured:   HarnessCapture{Prompt: harnessDetailFixture + "# X\nA new instruction.\n"},
+			wantWarn:   true,
+			wantLine:   "doctor: harness-prompt: DRIFT",
+			wantDetail: []string{harnessDetailPrefix + "section added: # X"},
+		},
+		{
+			name: "fenced example changed",
+			captured: HarnessCapture{
+				Prompt: strings.Replace(harnessDetailFixture, "example: run the tests", "example: skip the tests", 1),
+			},
+			wantWarn:   true,
+			wantLine:   "doctor: harness-prompt: DRIFT",
+			wantDetail: []string{harnessDetailPrefix + "section changed: # Doing tasks"},
+		},
+		{
+			name:       "model differs, prompt same",
+			captured:   HarnessCapture{Prompt: harnessDetailFixture, ResolvedModel: "claude-opus-5-5"},
+			wantLine:   "doctor: harness-prompt: matches baseline fixture.md",
+			wantDetail: []string{modelLine},
+		},
+		{
+			name:       "capture fails",
+			captured:   HarnessCapture{ResolvedModel: "claude-opus-5-5", CLIVersion: "2.1.280"},
+			captureErr: errors.New("no API request reached the capture sink"),
+			wantWarn:   true,
+			wantLine:   "doctor: harness-prompt: CHECK FAILED to run (no API request reached the capture sink) — drift unknown",
+		},
+		{
+			name:       "claude absent",
+			captured:   HarnessCapture{ResolvedModel: "claude-opus-5-5"},
+			captureErr: errClaudeAbsent,
+			wantLine:   "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare",
+		},
+		{
+			name: "sections reordered",
+			captured: HarnessCapture{Prompt: strings.Replace(
+				harnessDetailFixture,
+				"# Context management\n - Summarize when the context runs long.\n# Delivering work\n - Report what landed and what did not.\n",
+				"# Delivering work\n - Report what landed and what did not.\n# Context management\n - Summarize when the context runs long.\n",
+				1,
+			)},
+			wantWarn:   true,
+			wantLine:   "doctor: harness-prompt: DRIFT",
+			wantDetail: []string{harnessDetailPrefix + "section order changed"},
+		},
+		{
+			name: "blank line added at a section end",
+			captured: HarnessCapture{Prompt: strings.Replace(
+				harnessDetailFixture,
+				" - Summarize when the context runs long.\n",
+				" - Summarize when the context runs long.\n\n",
+				1,
+			)},
+			wantWarn:   true,
+			wantLine:   "doctor: harness-prompt: DRIFT",
+			wantDetail: []string{harnessDetailPrefix + "blank lines changed (no section text differs)"},
+		},
+		{
+			name:       "many sections differ",
+			baseline:   manyBaseline.String(),
+			captured:   HarnessCapture{Prompt: manyCaptured.String()},
+			wantWarn:   true,
+			wantLine:   "doctor: harness-prompt: DRIFT",
+			wantDetail: manyDetail,
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			baseline := testCase.baseline
+			if baseline == "" {
+				baseline = harnessDetailFixture
+			}
+			sum := sha256.Sum256([]byte(normalizeHarnessPrompt(baseline)))
+			line, warn := harnessPromptVerdict(
+				hex.EncodeToString(sum[:]),
+				"fixture.md",
+				testCase.captured.Prompt,
+				testCase.captureErr,
+			)
+			detail := harnessPromptDetail(
+				"opus",
+				"claude-opus-5",
+				baseline,
+				testCase.captured,
+				testCase.captureErr,
+				warn && strings.Contains(line, "DRIFT"),
+			)
+			if warn != testCase.wantWarn || !strings.HasPrefix(line, testCase.wantLine) {
+				t.Fatalf("verdict = (%q, %v), want prefix %q warn=%v", line, warn, testCase.wantLine, testCase.wantWarn)
+			}
+			if strings.Join(detail, "\n") != strings.Join(testCase.wantDetail, "\n") {
+				t.Fatalf("detail =\n%s\nwant\n%s", strings.Join(detail, "\n"), strings.Join(testCase.wantDetail, "\n"))
+			}
+		})
+	}
+}
+
+func TestHarnessPromptSectionsKeyHeadings(t *testing.T) {
+	canonical := "intro\n# A\none\n```\n# fenced\n```\n=== SYSTEM BLOCK ===\ntwo\n# A\nthree\n=== SYSTEM BLOCK ===\n"
+	var keys []string
+	for _, section := range harnessPromptSections(canonical) {
+		keys = append(keys, section.key)
+	}
+	want := "(preamble)|# A|=== SYSTEM BLOCK ===|# A (2)|=== SYSTEM BLOCK === (2)"
+	if strings.Join(keys, "|") != want {
+		t.Fatalf("section keys = %q, want %q", strings.Join(keys, "|"), want)
+	}
+}
+
+func TestPrintModelHarnessPromptDoctorPrintsDriftDetail(t *testing.T) {
+	saved := HarnessCaptureOverride
+	t.Cleanup(func() { HarnessCaptureOverride = saved })
+	home := t.TempDir()
+	opus := harnessPromptModels[1]
+	stageModelHarnessPromptBaseline(t, home, opus, harnessDetailFixture, "opus-fixture.md")
+	sectionsRemoved, _, _ := strings.Cut(harnessDetailFixture, "# Delivering work\n")
+	HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+		return HarnessCapture{
+			Prompt:        sectionsRemoved,
+			ResolvedModel: "claude-opus-5-5",
+			CLIVersion:    "2.1.280",
+		}, nil
+	}
+	var stdout bytes.Buffer
+	if code := printModelHarnessPromptDoctor(
+		context.Background(),
+		&stdout,
+		home,
+		config.Config{},
+		opus,
+		"",
+	); code != 1 {
+		t.Fatalf("code=%d, want 1\n%s", code, &stdout)
+	}
+	want := "\n" + harnessDetailPrefix + "model changed opus: claude-opus-5 → claude-opus-5-5\n" +
+		harnessDetailPrefix + "section removed: # Delivering work\n" +
+		harnessDetailPrefix + "section removed: # Corrections\n"
+	output := stdout.String()
+	drift := strings.Index(output, "doctor: harness-prompt: DRIFT")
+	if drift < 0 || !strings.HasSuffix(output, want) || strings.Index(output, want) < drift {
+		t.Fatalf("output=%s\nwant the DRIFT line followed by%s", output, want)
+	}
+}
+
+// TestHarnessDoctorSonnetBaselineCatalogOnlyChangeIsSilent reads the shipped
+// sonnet baseline and pins its catalog line to A on the baseline side and to B
+// on the capture side, so the case survives a re-pin of the baseline file.
+func TestHarnessDoctorSonnetBaselineCatalogOnlyChangeIsSilent(t *testing.T) {
+	sonnet := harnessPromptModels[0]
+	pin, err := harnessprompts.ReadPart("claude/baselines/" + sonnet.Stem + ".sha256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields := strings.Fields(string(pin))
+	if len(fields) != 2 {
+		t.Fatalf("malformed shipped pin %q", pin)
+	}
+	shipped, err := harnessprompts.ReadPart("claude/baselines/" + fields[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(string(shipped), "\n")
+	catalog := -1
+	for index, line := range lines {
+		if strings.Contains(line, "Model IDs — ") {
+			catalog = index
+		}
+	}
+	if catalog < 0 {
+		t.Fatalf("shipped sonnet baseline %s carries no catalog line", fields[1])
+	}
+	lines[catalog] = harnessCatalogLineA
+	baseline := strings.Join(lines, "\n")
+	lines[catalog] = harnessCatalogLineB
+	captured := strings.Join(lines, "\n")
+
+	saved := HarnessCaptureOverride
+	t.Cleanup(func() { HarnessCaptureOverride = saved })
+	home := t.TempDir()
+	stageModelHarnessPromptBaseline(t, home, sonnet, baseline, fields[1])
+	HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+		return HarnessCapture{Prompt: captured, ResolvedModel: "claude-sonnet-5", CLIVersion: "2.1.280"}, nil
+	}
+	var stdout bytes.Buffer
+	code := printModelHarnessPromptDoctor(context.Background(), &stdout, home, config.Config{}, sonnet, "")
+	if code != 0 || !strings.Contains(stdout.String(), "doctor: harness-prompt: matches baseline "+fields[1]) ||
+		strings.Contains(stdout.String(), "DRIFT") {
+		t.Fatalf("catalog-only change warned: code=%d\n%s", code, &stdout)
 	}
 }

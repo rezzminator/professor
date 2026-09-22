@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"hostops/pfm/internal/gather"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/gather"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 // followContinuations makes one chat of every Claude conversation that moved

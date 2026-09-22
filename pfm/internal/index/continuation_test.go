@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"hostops/pfm/internal/paths"
-	"hostops/pfm/internal/store"
+	"github.com/rezzminator/professor/pfm/internal/paths"
+	"github.com/rezzminator/professor/pfm/internal/store"
 )
 
 const (

@@ -29,10 +29,14 @@ var headlessHygiene = envStripWords(headlessHygieneNames)
 
 // HeadlessRequest is one detached, named chat to start.
 type HeadlessRequest struct {
-	Engine         pfmengine.ID
-	Name           string
-	CWD            string
-	Prompt         string
+	Engine pfmengine.ID
+	Name   string
+	CWD    string
+	Prompt string
+	// PromptChannel is already composed for the selected engine: a per-seat
+	// system-prompt file path for Claude, or the complete developer
+	// instructions value for Codex. Empty preserves the ordinary launch.
+	PromptChannel  string
 	Home           string
 	PrimaryAccount int
 	Cache1H        bool
@@ -95,6 +99,15 @@ func CodexEffort(effort string) (string, error) {
 // spelling lives in one place.
 func CodexEffortArg(effort string) []string {
 	return []string{"-c", `model_reasoning_effort="` + effort + `"`}
+}
+
+// CodexDeveloperInstructionsArg renders one complete developer-instructions
+// override. Both a fresh role seat and its reload use this door so escaping
+// cannot drift between the two launch paths.
+func CodexDeveloperInstructionsArg(prompt string) []string {
+	escaped := strings.ReplaceAll(prompt, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
+	return []string{"-c", "developer_instructions=\"\"\"\n" + escaped + "\"\"\""}
 }
 
 // HeadlessPlan is the pure result: the command the tmux session runs, and
@@ -213,7 +226,7 @@ func validateHeadlessRequest(request HeadlessRequest) error {
 	if request.CWD == "" {
 		return errors.New("a headless chat requires a project directory")
 	}
-	if hasNUL(request.Name, request.CWD, request.Prompt, request.Home) {
+	if hasNUL(request.Name, request.CWD, request.Prompt, request.PromptChannel, request.Home) {
 		return errors.New("action values cannot contain NUL")
 	}
 	return nil
@@ -242,14 +255,11 @@ func PlanClaude(request HeadlessRequest) (HeadlessPlan, error) {
 	if request.Prompt != "" {
 		arguments = append(arguments, request.Prompt)
 	}
-	run, err := claudeCommandWith(
-		PurposeInteractive,
-		headlessHygieneNames,
-		request.Home,
-		request.PrimaryAccount,
-		request.Cache1H,
-		machine,
-		arguments...)
+	run, err := (ClaudeSpawn{
+		Purpose: PurposeInteractive, Account: request.PrimaryAccount,
+		Cache1H: request.Cache1H, Args: arguments, Home: request.Home,
+		Machine: machine, PromptFile: request.PromptChannel, strip: headlessHygieneNames,
+	}).ShellCommand()
 	if err != nil {
 		return HeadlessPlan{}, err
 	}
@@ -276,12 +286,15 @@ func PlanCodex(request HeadlessRequest) (HeadlessPlan, error) {
 	if err != nil {
 		return HeadlessPlan{}, err
 	}
-	arguments := make([]string, 0, 4)
+	arguments := make([]string, 0, 6)
 	if request.Model != "" {
 		arguments = append(arguments, "--model", request.Model)
 	}
 	if effort != "" {
 		arguments = append(arguments, CodexEffortArg(effort)...)
+	}
+	if request.PromptChannel != "" {
+		arguments = append(arguments, CodexDeveloperInstructionsArg(request.PromptChannel)...)
 	}
 	return HeadlessPlan{
 		Run:    codexCommandWithAccount(headlessHygiene, machine, request.PrimaryAccount, arguments...),

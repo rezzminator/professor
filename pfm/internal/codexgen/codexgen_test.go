@@ -335,6 +335,24 @@ func TestFrontmatterUnquotesYAMLScalars(t *testing.T) {
 	}
 }
 
+func TestFrontmatterStripsPlainScalarCommentAndPreservesQuotedHash(t *testing.T) {
+	raw := "---\nmodel: opus # pinned\nquoted: 'keep # this'\n---\nbody\n"
+	fields, _, err := parseFrontmatter(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fields["model"]; got != "opus" {
+		t.Fatalf("model = %q, want %q", got, "opus")
+	}
+	if got := fields["quoted"]; got != "keep # this" {
+		t.Fatalf("quoted = %q, want %q", got, "keep # this")
+	}
+	if _, _, err := parseFrontmatter("---\nbad: \"invalid\\x\"\n---\nbody\n"); err == nil ||
+		!strings.Contains(err.Error(), "frontmatter field bad") {
+		t.Fatalf("malformed quoted scalar error = %v", err)
+	}
+}
+
 func TestDanglingGlobalCommandIsHonestAndCheckWritesNothing(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
@@ -375,7 +393,7 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	home := t.TempDir()
 	writeTestFile(t, filepath.Join(root, ".claude", "codex-build.json"), `{
   "version": 1,
-  "modelMap": {"sonnet":"gpt-fixture"},
+  "modelMap": {"sonnet":"gpt-fixture","opus":"gpt-5.6-sol"},
   "rootAdapter": "\n## Fixture adapter\n",
   "agentPreamble": "Role ${name} starts here.\n\n",
   "excludeDirs": ["references"],
@@ -396,7 +414,17 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, ".claude", "agents", "reviewer.md"),
-		"---\ndescription: >-\n  Review \\\"quoted\\\" output\nmodel: sonnet\ntools: Read, Grep\n---\nFollow /tools:go.\n",
+		"---\ndescription: >-\n  Review \\\"quoted\\\" output\nmodel: opus # pinned\neffort: high\ntools: Read, Grep\n---\nFollow /tools:go.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "unmapped.md"),
+		"---\ndescription: unmapped model\nmodel: something-else\n---\nunmapped\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "escaped.md"),
+		"---\ndescription: escaped values\nmodel: 'model\\path\"quoted'\neffort: 'effort\\path\"quoted'\n---\nescaped\n",
 	)
 	writeTestFile(t, filepath.Join(root, ".claude", "agents", "private.md"), "---\ndescription: private\n---\nno\n")
 	writeTestFile(
@@ -441,11 +469,39 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 		t,
 		filepath.Join(root, ".codex", "agents", "reviewer.toml"),
 		`description = "Review \\\"quoted\\\" output"`,
-		`sandbox_mode = "read-only"`,
+		`model = "gpt-5.6-sol"`,
+		`model_reasoning_effort = "high"`,
 		"Role reviewer starts here.",
 		"$tools-go",
 	)
-	assertTestFileContains(t, filepath.Join(root, ".codex", "agents", "worker-api.toml"), `name = "worker_api"`)
+	reviewer := string(mustReadTestFile(t, filepath.Join(root, ".codex", "agents", "reviewer.toml")))
+	ordered := []string{
+		`name = "reviewer"`,
+		`description = "Review \\\"quoted\\\" output"`,
+		`model = "gpt-5.6-sol"`,
+		`model_reasoning_effort = "high"`,
+		`developer_instructions = """`,
+	}
+	last := -1
+	for _, needle := range ordered {
+		index := strings.Index(reviewer, needle)
+		if index <= last {
+			t.Fatalf("reviewer.toml key %q at %d after prior key at %d:\n%s", needle, index, last, reviewer)
+		}
+		last = index
+	}
+	assertTestFileContains(t, filepath.Join(root, ".codex", "agents", "unmapped.toml"), `model = "something-else"`)
+	assertTestFileContains(
+		t,
+		filepath.Join(root, ".codex", "agents", "escaped.toml"),
+		`model = "model\\path\"quoted"`,
+		`model_reasoning_effort = "effort\\path\"quoted"`,
+	)
+	worker := string(mustReadTestFile(t, filepath.Join(root, ".codex", "agents", "worker-api.toml")))
+	if !strings.Contains(worker, `name = "worker_api"`) || strings.Contains(worker, "\nmodel =") ||
+		strings.Contains(worker, "\nmodel_reasoning_effort =") {
+		t.Fatalf("worker-api.toml must omit absent model and effort keys:\n%s", worker)
+	}
 	if _, err := os.Stat(filepath.Join(root, ".codex", "agents", "private.toml")); !os.IsNotExist(err) {
 		t.Fatalf("never-register agent exists: %v", err)
 	}

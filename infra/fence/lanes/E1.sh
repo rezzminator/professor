@@ -381,9 +381,9 @@ if requires E1.01-open-seat1; then
   fi
 fi
 
-# ─── E1.11 — the role re-arm crumb ──────────────────────────────────────────
+# ─── E1.11 — a role seat keeps its role through reload ───────────────────────────
 
-beat E1.11-role-rearm K22 L38
+beat E1.11-role-reload C67
 spends "cc:$SEAT"
 target "$ROLE_CHAT"
 if requires E1.01-open-seat1; then
@@ -391,32 +391,22 @@ if requires E1.01-open-seat1; then
   cat >"$CWD/.claude/agents/lane-role.md" <<'ROLE'
 ---
 name: lane-role
-description: the constitution a Tier B lane re-arms
+description: the constitution a Tier B role seat keeps through reload
 ---
 You are the lane role. Whenever you are asked who you are, answer with exactly: LANE-ROLE.
 ROLE
-  out="$(pfm chat new --name "$ROLE_CHAT" --engine cc --account "$SEAT" --cwd "$CWD" --role lane-role \
+  out="$(pfm chat new --name "$ROLE_CHAT" --engine cc --account "$SEAT" --cwd "$CWD" --agent-role lane-role \
     --await --timeout 300 "Reply with one word: ready." 2>&1)"
   rc=$?
-  sock="$(live_field "$ROLE_CHAT" 11)"
-  crumb=""
-  for candidate in "$SID_DIR"/role-*; do
-    [ -f "$candidate" ] || continue
-    case "$candidate" in *"${sock##*/}"*) crumb="$candidate"; break ;; esac
-  done
   if [ "$rc" -ne 0 ]; then
-    fail "pfm chat new --role lane-role exited $rc: $(one_line "$out")"
-  elif [ -z "$crumb" ]; then
-    fail "no role re-arm crumb for socket ${sock:-<none>} in $SID_DIR (role-<socket>); crumbs present: $(one_line "$(printf '%s ' "$SID_DIR"/role-*)")"
-  elif ! grep -q 'lane-role' "$crumb"; then
-    fail "the crumb $crumb does not name the lane-role artifact: $(one_line "$(cat "$crumb")")"
+    fail "pfm chat new --agent-role lane-role exited $rc: $(one_line "$out")"
   else
     if ! pfm chat inject --allow-unsigned "$ROLE_CHAT" "/reload --then \"answer who you are\"" >/dev/null 2>&1; then
-      fail "the crumb was written ($crumb) but the /reload that must re-arm it was refused"
+      fail "the role seat's /reload request was refused"
     elif ! wait_last "$ROLE_CHAT" LANE-ROLE 300; then
-      fail "after the reload the chat did not answer LANE-ROLE — the role constitution was not re-applied; last: $(one_line "$(pfm chat last "$ROLE_CHAT" 2>&1)")"
+      fail "after the reload the chat did not answer LANE-ROLE — the role prompt channel was not preserved; last: $(one_line "$(pfm chat last "$ROLE_CHAT" 2>&1)")"
     else
-      pass "crumb $crumb re-applied the lane-role constitution after the reboot"
+      pass "the reloaded seat still answered under lane-role"
     fi
   fi
 fi

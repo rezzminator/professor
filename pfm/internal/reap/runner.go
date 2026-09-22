@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/fleetdb"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/obs"
@@ -124,9 +125,8 @@ type Report struct {
 	AvailBefore int64
 	AvailAfter  int64
 	// Warnings are non-fatal apply-time failures that never affect the exit
-	// code — today, only an orphaned role- crumb (internal/rearm's format)
-	// that could not be removed. Reported so the failure is visible; never
-	// swallowed, never made destructive.
+	// code — today, only a role-seat prompt that could not be removed.
+	// Reported so the failure is visible; never swallowed, never destructive.
 	Warnings []string
 }
 
@@ -543,9 +543,9 @@ func (runner *Runner) apply(
 				decision.Failed = true
 				break
 			}
-			if _, err := removeRoleCrumb(runner.paths.SIDDir, decision.Socket); err != nil {
+			if err := removeRoleSeatPrompt(runner.paths.SIDDir, decision.Socket); err != nil {
 				warnings = append(warnings, fmt.Sprintf(
-					"%s: remove role crumb: %v", decision.Socket, err,
+					"%s: remove role prompt: %v", decision.Socket, err,
 				))
 			}
 		case ActionKillServer:
@@ -578,9 +578,9 @@ func (runner *Runner) apply(
 				break
 			}
 			decision.State = StateKilled
-			if _, err := removeRoleCrumb(runner.paths.SIDDir, decision.Socket); err != nil {
+			if err := removeRoleSeatPrompt(runner.paths.SIDDir, decision.Socket); err != nil {
 				warnings = append(warnings, fmt.Sprintf(
-					"%s: remove role crumb: %v", decision.Socket, err,
+					"%s: remove role prompt: %v", decision.Socket, err,
 				))
 			}
 		case ActionKillSession:
@@ -599,33 +599,11 @@ func (runner *Runner) apply(
 	return applied, warnings
 }
 
-// roleCrumbPath is the socket-scoped role crumb the T1 seat re-arm wave
-// writes into SIDDir as "role-<socket>" for a `--role` seat — a sibling
-// worktree, internal/rearm there, owns that format and this branch does not
-// import it (it does not exist here and this branch must build alone). T1
-// removes its own crumb on the canonical kill path; every OTHER path that
-// ends a chat's server, including every one below, orphans it, so clearing
-// it here is this sweep's job. Match by filename only; reconcile the two at
-// merge if the shape moves.
-func roleCrumbPath(sidDir, socket string) string {
-	return filepath.Join(sidDir, "role-"+socket)
-}
-
-// removeRoleCrumb is best-effort: a missing crumb is the ordinary case (most
-// seats carry no --role), never a warning. A removal that fails for any
-// other reason IS a warning — never swallowed, never turned into a non-zero
-// exit, since it holds up nothing this sweep's own exit code answers for.
-func removeRoleCrumb(sidDir, socket string) (removed bool, err error) {
-	if sidDir == "" {
-		return false, nil
+func removeRoleSeatPrompt(sidDir, socket string) error {
+	if sidDir == "" || socket == "" {
+		return nil
 	}
-	if err := os.Remove(roleCrumbPath(sidDir, socket)); err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+	return agentrole.RemoveSeatPrompt(sidDir, socket, "")
 }
 
 // availableKB reads the machine's own available memory, which is the only

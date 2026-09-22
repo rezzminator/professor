@@ -102,7 +102,7 @@ pfm/
       migrations/                   # NEW. v<version>_<slug>.go per step + steps.go ordered slice
     unchanged: action agentopen agentrole archive ask codexappendix codexgen codexmeta compose config deps
                gather harvest harvestmcp harvestpy headless headless/run heal index inject kill
-               mcpserv naming nudge paths rearm recovery reap reload resolve sky spawn stats statusline
+               mcpserv naming nudge paths recovery reap reload resolve sky spawn stats statusline
                testjail theme transcript ui updatecheck usagehook
 ```
 

@@ -1,6 +1,7 @@
 package opencodegen
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -14,7 +15,12 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	writeTestFile(
 		t,
 		filepath.Join(root, ".claude", "agents", "worker.md"),
-		"---\ndescription: Worker role.\nmodel: sonnet\n---\nUse /tools:review.\n",
+		"---\ndescription: Worker role.\nmodel: sonnet # tier comment\ntools: Read, Bash, Agent\n---\nUse /tools:review.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "unconfigured.md"),
+		"---\ndescription: Unconfigured role.\n---\nUse the defaults.\n",
 	)
 	writeTestFile(
 		t,
@@ -57,10 +63,21 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 		}
 	}
 	worker, _ := os.ReadFile(filepath.Join(root, ".opencode", "agent", "worker.md"))
-	if !strings.Contains(string(worker), "mode: subagent") || strings.Contains(string(worker), "model:") ||
+	if !strings.Contains(string(worker), "mode: all") ||
+		!strings.Contains(string(worker), "model: openai/gpt-5.6-sol-fast") ||
+		!strings.Contains(string(worker), "tools:\n") ||
+		!strings.Contains(string(worker), "  edit: false\n") ||
+		strings.Contains(string(worker), "  read: false\n") ||
+		strings.Contains(string(worker), "  bash: false\n") ||
+		strings.Contains(string(worker), "  task: false\n") ||
 		!strings.Contains(string(worker), "/tools-review") ||
-		!strings.Contains(string(worker), "Model tier: sonnet") {
+		strings.Contains(string(worker), "Model tier:") {
 		t.Fatalf("agent projection did not follow OpenCode shape: %s", worker)
+	}
+	unconfigured, _ := os.ReadFile(filepath.Join(root, ".opencode", "agent", "unconfigured.md"))
+	unconfiguredFrontmatter := strings.SplitN(string(unconfigured), "---", 3)[1]
+	if strings.Contains(unconfiguredFrontmatter, "\nmodel:") || strings.Contains(unconfiguredFrontmatter, "\ntools:") {
+		t.Fatalf("agent without source model/tools acquired policy keys: %s", unconfigured)
 	}
 	command, _ := os.ReadFile(filepath.Join(root, ".opencode", "command", "tools-review.md"))
 	commandText := string(command)
@@ -83,6 +100,109 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	}
 	doctor, err := Compile(Options{Root: root, Home: home, Mode: ModeDoctor})
 	if err != nil || !doctor.OK {
+		t.Fatalf("doctor result=%#v err=%v", doctor, err)
+	}
+}
+
+func TestOpenCodeAgentModelOverrideWinsOverDefault(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "worker.md"),
+		"---\ndescription: Worker role.\nmodel: sonnet\n---\nWork.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, openCodeBuildConfigPath),
+		`{"modelMap":{"sonnet":"openai/other"}}`,
+	)
+
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("build result=%#v err=%v", result, err)
+	}
+	worker, err := os.ReadFile(filepath.Join(root, ".opencode", "agent", "worker.md"))
+	if err != nil || !strings.Contains(string(worker), "model: openai/other\n") {
+		t.Fatalf("override was not emitted: worker=%q err=%v", worker, err)
+	}
+}
+
+func TestOpenCodeUnmappedModelIsAProblemInEveryMode(t *testing.T) {
+	for _, action := range []string{"build", "check", "doctor"} {
+		t.Run(action, func(t *testing.T) {
+			root := t.TempDir()
+			home := filepath.Join(root, "home")
+			source := filepath.Join(root, ".claude", "agents", "worker.md")
+			writeTestFile(
+				t,
+				source,
+				"---\ndescription: Worker role.\nmodel: nonesuch\n---\nWork.\n",
+			)
+
+			var stdout, stderr bytes.Buffer
+			code := RunCommand(
+				[]string{action, root, "--home", home},
+				func() (string, error) { return root, nil },
+				home,
+				&stdout,
+				&stderr,
+			)
+			if code != 1 || !strings.Contains(stderr.String(), "nonesuch") ||
+				!strings.Contains(stderr.String(), source) || strings.Contains(stdout.String(), "PASS") {
+				t.Fatalf(
+					"%s unmapped result: code=%d stdout=%q stderr=%q",
+					action,
+					code,
+					stdout.String(),
+					stderr.String(),
+				)
+			}
+			if action == "build" {
+				if _, err := os.Stat(filepath.Join(root, ".opencode", "agent", "worker.md")); !os.IsNotExist(err) {
+					t.Fatalf("build wrote an agent despite unmapped model: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestOpenCodeMalformedModelOverrideIsAProblem(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	path := filepath.Join(root, openCodeBuildConfigPath)
+	writeTestFile(t, path, `{"modelMap":`)
+
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeCheck})
+	if err != nil || result.OK || !containsProblem(result.Problems, path) ||
+		!containsProblem(result.Problems, "parse") {
+		t.Fatalf("malformed override result=%#v err=%v", result, err)
+	}
+}
+
+func TestOpenCodeDoctorRejectsGeneratedAgentModeDrift(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "worker.md"),
+		"---\ndescription: Worker role.\nmodel: sonnet\n---\nWork.\n",
+	)
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("build result=%#v err=%v", result, err)
+	}
+	path := filepath.Join(root, ".opencode", "agent", "worker.md")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, path, strings.Replace(string(raw), "mode: all", "mode: subagent", 1))
+
+	doctor, err := Compile(Options{Root: root, Home: home, Mode: ModeDoctor})
+	joined := strings.Join(doctor.Problems, "\n")
+	if err != nil || doctor.OK || !strings.Contains(joined, "INVALID "+path) ||
+		!strings.Contains(joined, `mode "subagent"`) {
 		t.Fatalf("doctor result=%#v err=%v", doctor, err)
 	}
 }

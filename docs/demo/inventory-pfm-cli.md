@@ -4,7 +4,7 @@ Scope: `pfm/cmd/pfm/commands.go`, `pfm/cmd/pfm/*_command.go` (non-test), `pfm/cm
 
 Git stamp: HEAD `00da35b5`, 0 dirty lines (clean working tree) at trace start.
 
-Method: 6 parallel Explore/haiku tracers (chat core verbs; reload+satellite; mcp/harvest/headless; doctor family; install/update/codex lifecycle; misc top-level+internal), 1 conditional mop-up tracer closing 5 named gaps (`name-sync` disposition, 8 headless-dispatched chat verbs, `run_command.go` role, exact `install` flag spellings, `goal`/`kill-exit` absence checks). Telemetry: 7 tracers dispatched, 7 reports received (reconciled).
+Method: 6 parallel Explore/haiku tracers (chat core verbs; reload+satellite; mcp/harvest/headless; doctor family; install/update/codex lifecycle; misc top-level+internal), 1 conditional mop-up tracer closing 5 named gaps (`name-sync` disposition, 8 headless-dispatched chat verbs, `chat_new_command.go` role, exact `install` flag spellings, `goal`/`kill-exit` absence checks). Telemetry: 7 tracers dispatched, 7 reports received (reconciled).
 
 Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the top-level command registry. `pfm chat <verb>` fans out through `pfm/cmd/pfm/chat_command.go`'s `runChatWithRuntime`, which for some verbs dispatches directly and for others forwards into `pfm/cmd/pfm/headless_command.go`'s own verb switch (lines ~73–140) — both switches were read by tracers; the exact boundary between the two switches (which verbs chat_command.go handles inline vs. forwards) was not fully re-derived byte-for-byte and is flagged AMBIGUOUS below where relevant, never asserted past what was grepped.
 
@@ -15,7 +15,7 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 ### Top-level commands (`pfm <cmd>`) — registry: `pfm/cmd/pfm/main.go:55-111`
 
 | Command | What it does | Evidence | Unique/Novel |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `pfm version` / `pfm --version` | Prints resolved pfm version, falling back to VCS-embedded revision when unstamped | `pfm/cmd/pfm/main.go:56-57`, `main.go:213-224` (`func runVersion`) | No — standard CLI version flag |
 | `pfm ls` | Interactive TUI to list/pick every live and resumable Claude/Codex chat across the fleet | `pfm/cmd/pfm/main.go:58`, `pfm/cmd/pfm/commands.go:31` (`func runLS`) | Yes — cross-engine (Claude+Codex+Opencode) live fleet picker in one TUI |
 | `pfm ls -a` / `--all` | Include killed, background, and uncapped rows in the listing | `pfm/cmd/pfm/commands.go:43-44` | No — flag variant of `ls` |
@@ -84,7 +84,7 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 ### `pfm internal <verb>` — hook/wiring plumbing, not typed by a human in normal use (registry: `pfm/cmd/pfm/main.go:382-529`, `runInternal`)
 
 | Command | What it does | Evidence | Unique/Novel |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `pfm internal clear-kill` | Forgets killed sessions on unclean shutdown (stdin-driven) | `pfm/cmd/pfm/main.go:387-389`, `pfm/cmd/pfm/clear_kill_command.go` | No — recovery utility, hook-only |
 | `pfm internal agent-open --id --cwd [--config]` | Opens an agent thread in an IDE; resolves account list + session metadata | `pfm/cmd/pfm/main.go:390-391`, `pfm/cmd/pfm/agent_open_command.go` | Yes — CLI-to-IDE handoff protocol for a live agent session |
 | `pfm internal codex-launch BINARY [args...]` | Back-compat shim: execs the Codex launcher via the deps registry | `pfm/cmd/pfm/main.go:393-395`, `pfm/cmd/pfm/codex_launch_compat.go:13-28` | No — deprecated compatibility shim |
@@ -109,7 +109,7 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 ### `pfm chat <verb>` family — dispatcher entry `pfm/cmd/pfm/chat_command.go` (`runChatWithRuntime`), some verbs forwarded into `pfm/cmd/pfm/headless_command.go`'s own switch (~lines 73-140)
 
 | Verb | What it does | Evidence | Unique/Novel |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `pfm chat open <id\|name\|socket>` | Opens a chat by name, socket, or id | `pfm/cmd/pfm/chat_command.go:88` (`case "open"`) | No |
 | `pfm chat read [--tail] [--condensed] [--json]` | Reads the chat's transcript | `pfm/cmd/pfm/chat_command.go:90` (`case "read"`) | No |
 | `pfm chat kill [self\|id] [--exit]` | Kills (hides) a chat; live chats also run the exit choreography | `pfm/cmd/pfm/chat_command.go:114` (`case "kill"`), `pfm/cmd/pfm/main.go:270-329` (`func runKill`) | No — see `internal kill-exit` for the novel version-safety detail |
@@ -127,7 +127,7 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 | `pfm chat ask -p/--prompt [--timeout] [--settle] [--now] [--json] [--progress]` | Delivers a message to a chat and polls/waits for its answer | `pfm/cmd/pfm/ask_command.go:31`, forwarded via `pfm/cmd/pfm/headless_command.go:102` | Yes — synchronous two-way poll-until-answered, eliminating manual inject+poll loops |
 | `pfm chat keys [--delay] [--literal] [--capture]` | Presses literal keys into a live chat's tmux pane | `pfm/cmd/pfm/chat_keys_command.go:27`, forwarded via `headless_command.go:108` | No — tmux key automation |
 | `pfm chat reload [--new] [--hide] [--then TEXT] [--sock ADDR] [--model M] [--effort E] [--1h on\|off] [--account N] [--pane ID]` | Reboots a Claude seat in place inside its tmux pane, with fresh/hide/continuation/model/effort/account/cache overrides | `pfm/cmd/pfm/chat_reload_command.go` (`runChatReloadWithRuntime`, `runChatReloadWorkerWithRuntime`) | Yes — in-place session reboot with a rich override surface (model/effort/cache/account) unusual for a CLI reload primitive |
-| `pfm chat new` | Spawns a fresh chat with the fleet's full launch ceremony (env strip, account config dir, cache mode, autonomy flags, own tmux server) then detaches | `pfm/cmd/pfm/headless_command.go:85` (`case "new"`) → `pfm/cmd/pfm/run_command.go:35` (`func runRun`) | Yes — native fleet spawn that walks away without an eval/attach step |
+| `pfm chat new [--agent-role ROLE]` | Spawns a fresh chat with the fleet's full launch ceremony, optionally carrying a registered role through the seat's prompt channel while the caller prompt remains the first user message, then detaches | `pfm/cmd/pfm/chat_command.go` (`case "new"`) → `pfm/cmd/pfm/chat_new_command.go` (`func runRun`) | Yes — native fleet spawn with an engine-native role channel that walks away without an eval/attach step |
 | `pfm chat last` | Retrieves the chat's latest answer | `pfm/cmd/pfm/headless_command.go:91` (`case "last"`) → `runHeadlessLast` | No |
 | `pfm chat status` | Probes a chat's live state (idle/busy/dead) | `pfm/cmd/pfm/headless_command.go:93` (`case "status"`) → `runHeadlessStatus` | No |
 | `pfm chat stream` | Streams a chat's responses live | `pfm/cmd/pfm/headless_command.go:95` (`case "stream"`) → `runHeadlessStream` | No |
@@ -142,7 +142,7 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 ### `pfm mcp chat serve` — MCP tools exposed (registry: `pfm/internal/mcpserv/server.go:2-6`, `chatToolNames`)
 
 | MCP tool | What it does | Evidence | Unique/Novel |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `chat_capture` | Screen-capture a live chat's scrollback | `pfm/internal/mcpserv/server.go` `chatToolNames` list; registered via `mcp.AddTool(..., Name: "chat_capture", ...)` | Yes — tmux pane capture exposed as an agent-callable tool |
 | `chat_find` | Search transcripts by excerpt | same registry | Yes — indexed transcript search as an MCP tool |
 | `chat_inject` | Types a message into another chat | same registry | Yes — cross-chat agent-to-agent messaging |
@@ -165,7 +165,7 @@ Registry finding: `pfm/cmd/pfm/main.go`'s `run()` switch (lines 55–111) is the
 ### `pfm mcp harvester serve` — MCP tools (registered in `pfm/internal/harvestmcp`, cross-referenced via `pfm/cmd/pfm/mcp_serve_command.go:25-27`; internals out of scope)
 
 | MCP tool | What it does | Evidence | Documented in `pfm/internal/harvest/README.md` |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `fetch` | Fetch URL/DOI/ISBN/PMID/PMCID/local file | `mcp_serve_command.go:25-27`, `mcp.AddTool(..., Name: "fetch", ...)` | Yes (line ~23) |
 | `findWorks` | Find papers/works by title, bibliographic candidates | same | Yes (line ~23) |
 | `search` | Ranked web search with snippets | same | Implicit |
@@ -182,7 +182,7 @@ Every spelling checked and found ABSENT, with the grep that proved it:
 - `pfm chat goal` — `grep -n '"goal"' pfm/cmd/pfm/chat_dispatch.go` and `pfm/cmd/pfm/chat_command.go`: zero hits.
 - `pfm chat kill-exit` — `grep -n '"kill-exit"' pfm/cmd/pfm/chat_command.go`: zero hits. `kill-exit` exists only as `pfm internal kill-exit`.
 - `pfm/README.md` — does not exist in this repo (`ls` confirmed; `pfm/internal/harvest/README.md` and `pfm/internal/headless/README.md` do exist and were read).
-- `doc.go` for all 21 named `internal/*` packages in the boundary (chat, inject, reload, spawn, sky, fleet, headless, mcpserv, heal, reap, archive, updatecheck, installer, codexgen, statusline, stats, usagehook, nudge, agentopen, agentrole, recovery, rearm) — none exist (`ls pfm/internal/$p/doc.go` returned "No such file or directory" for all 21); the eponymous main file's top comment was used instead per the brief's fallback.
+- `doc.go` for all 21 named `internal/*` packages in the boundary (chat, inject, reload, spawn, sky, fleet, headless, mcpserv, heal, reap, archive, updatecheck, installer, codexgen, statusline, stats, usagehook, nudge, agentopen, agentrole, recovery) — none exist (`ls pfm/internal/$p/doc.go` returned "No such file or directory" for all 21); the eponymous main file's top comment was used instead per the brief's fallback.
 
 ## Named gaps / not fully resolved (never silently dropped)
 
@@ -239,7 +239,7 @@ EDGE = contains one or more capabilities, quoted by a tracer. NOT-MINE = in scop
 - pfm/cmd/pfm/reap_command.go — EDGE (`pfm reap`)
 - pfm/cmd/pfm/chat_reload_command.go — EDGE (`pfm chat reload`; `runChatReloadWithRuntime` schedules `runChatReloadWorkerWithRuntime`)
 - pfm/cmd/pfm/reload_intercept_command.go — EDGE (`pfm internal reload-intercept`)
-- pfm/cmd/pfm/run_command.go — EDGE (`pfm chat new` via `runRun`)
+- pfm/cmd/pfm/chat_new_command.go — EDGE (`pfm chat new` via `runRun`)
 - pfm/cmd/pfm/runtime_config.go — NOT-MINE (no capability found)
 - pfm/cmd/pfm/spawn_audit_doctor.go — EDGE (doctor's spawn-audit check helper, no independent CLI verb)
 - pfm/cmd/pfm/statusline_command.go — EDGE (`pfm statusline`, `pfm usage-hook`)
@@ -255,6 +255,7 @@ EDGE = contains one or more capabilities, quoted by a tracer. NOT-MINE = in scop
 - pfm/internal/headless/README.md — EDGE (read fully; cross-referenced headless exec flags)
 
 FRONTIER (not walked to completion by any tracer, named rather than dropped):
+
 - `pfm/internal/stale/*` — the `stale` package's own subcommand surface behind `pfm internal stale` was never opened.
 - `runChatModal`'s body (behind `pfm chat modal`) — dispatch line confirmed, body not read.
 - The precise line-by-line boundary of which verbs `chat_command.go` vs. `headless_command.go` each own natively (both files were read, but not cross-diffed exhaustively for this specific question).
@@ -263,7 +264,7 @@ FRONTIER (not walked to completion by any tracer, named rather than dropped):
 
 - Git stamp: HEAD `00da35b5`, working tree clean (0 dirty lines), at trace start.
 - Tracers dispatched: 7 (6 primary threads + 1 mop-up). Reports received: 7. Reconciled: yes, no missing report.
-- Mop-up: run (not skipped) — closed 5 named gaps: `name-sync` disposition, 8 headless-forwarded chat verbs (new/last/status/stream/inject/self-compact/watch/modal), `run_command.go`'s role (`chat new`), exact `install` flag spellings (verbatim-verified), and `goal`/`kill-exit` absence checks (verbatim grep, zero hits).
+- Mop-up: run (not skipped) — closed 5 named gaps: `name-sync` disposition, 8 headless-forwarded chat verbs (new/last/status/stream/inject/self-compact/watch/modal), `chat_new_command.go`'s role (`chat new`), exact `install` flag spellings (verbatim-verified), and `goal`/`kill-exit` absence checks (verbatim grep, zero hits).
 - Files in boundary read or dispositioned: 55 of 56 `pfm/cmd/pfm/*.go` non-test files (all except none knowingly skipped; `pipeline.go` read only enough to disposition NOT-MINE, not deep-walked for a hidden capability — named above), plus `main.go`, `commands.go`, `pfm/internal/harvest/README.md`, `pfm/internal/headless/README.md` (`pfm/README.md` does not exist), plus the eponymous main file of all 21 named `internal/*` packages for top-comment context (no `doc.go` exists in any of them, confirmed by directory listing).
 - Commands/subcommands/flags found: **~90 distinct user-facing entries** across top-level commands (≈60 rows counting flag variants), `pfm internal` hook plumbing (19 verbs), `pfm chat` verbs (24 verbs), MCP chat tools (18), and MCP harvester tools (6) — see per-section tables above for the exact enumerated set; this total is a rollup of the tables, not a substitute for them.
 - Never claimed "clean" from a partial read: `doctor.go` (54k, partial-read but its 30-check dispatch fully enumerated via targeted grep+read of the dispatch body, lines 59-303); `chat_reload_command.go` (`runChatReloadWithRuntime` and `runChatReloadWorkerWithRuntime` covered, worker internals not); `chat_satellite_command.go` (32k, ~250/~950 lines read, all 6 dispatched verbs covered).

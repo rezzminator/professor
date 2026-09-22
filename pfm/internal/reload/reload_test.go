@@ -152,17 +152,7 @@ func (tmux *delayedThenTmux) Capture(context.Context, string, string) (string, e
 	return "Chat\n" + wrapComposer(marker, draft, 60), nil
 }
 
-// wrapComposer renders a draft the way Claude and Codex actually draw one: the
-// ❯/› marker on the FIRST line only, continuation lines indented beneath it,
-// the block framed by the input box's horizontal rules.
-//
-// The fixture this replaced echoed one hardcoded 17-character prompt onto a
-// single line, so it read the same whether the composer reader handled wrapping
-// or not — green against correct code and against the one-line reader that
-// could never confirm a real steer. It breaks lines at a fixed width, MID-word,
-// which is the harsher of the two real shapes (Claude breaks at word boundaries
-// until a single token is wider than the box — a path or a URL, the substance
-// of most steers).
+// wrapComposer renders a multiline TUI draft with its marker only on row one.
 func wrapComposer(marker, text string, width int) string {
 	rule := strings.Repeat("─", width)
 	runes := []rune(text)
@@ -369,8 +359,6 @@ func TestClaudeRunUnsetsInheritedIdentity(t *testing.T) {
 	}
 }
 
-// reloadTestMachine is a two-account roster whose account 2 is explicit, so a
-// reload line has a config dir to state.
 func reloadTestMachine(systemPrompt, home string) pfmconfig.Config {
 	return pfmconfig.Config{
 		Claude: pfmconfig.ClaudePrefs{PermissionMode: pfmconfig.PermissionBypass, SystemPrompt: systemPrompt},
@@ -381,10 +369,6 @@ func reloadTestMachine(systemPrompt, home string) pfmconfig.Config {
 	}
 }
 
-// A reloaded chat is a RESUME, and a resume carries the same prompt material a
-// fresh launch would: the reload constructor used to be a fourth independent
-// spawn site with no idea the fleet had a configured system prompt, so a
-// rebooted seat silently reverted to the CLI's own.
 func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 	home := t.TempDir()
 	promptPath := action.ProfessorPromptPath(home)
@@ -409,6 +393,15 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 	}
 	if !strings.Contains(professor, "--dangerously-skip-permissions") {
 		t.Fatalf("reloaded chat lost the configured autonomy posture: %q", professor)
+	}
+	rolePrompt := filepath.Join(home, "sid", "role-prompt-cc-reviewer.md")
+	roleRun, err := claudeRun(Request{
+		Account: 2, Home: home, Machine: reloadTestMachine(pfmconfig.SystemPromptProfessor, home),
+		SessionID: "11111111-1111-4111-8111-111111111111", PromptChannel: rolePrompt,
+	})
+	if err != nil || !strings.Contains(roleRun, " --system-prompt-file "+action.Quote(rolePrompt)) ||
+		strings.Contains(roleRun, action.Quote(action.ProfessorPromptPath(home))) {
+		t.Fatalf("Claude role reload did not replace the ordinary prompt file: run=%q error=%v", roleRun, err)
 	}
 
 	lean, err := claudeRun(Request{
@@ -443,16 +436,24 @@ func TestClaudeRunCarriesTheConfiguredSystemPrompt(t *testing.T) {
 }
 
 func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
+	prompt := strings.Repeat("0123456789abcdef", 820) + ` a triple quote """ and slash \\ survive`
 	run, err := engineRun(Request{
-		Engine:      "cx",
-		Account:     9,
-		CodexHome:   "/jail/codex/9",
-		CodexBinary: "/opt/codex safe",
-		CodexYolo:   false,
-		SessionID:   "019ff700-0000-7000-8000-000000000001",
+		Engine:        "cx",
+		Account:       9,
+		CodexHome:     "/jail/codex/9",
+		CodexBinary:   "/opt/codex safe",
+		CodexYolo:     false,
+		SessionID:     "019ff700-0000-7000-8000-000000000001",
+		PromptChannel: prompt,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	escaped := strings.ReplaceAll(prompt, `\`, `\\`)
+	escaped = strings.ReplaceAll(escaped, `"""`, `\"\"\"`)
+	developerInstructions := action.Quote("developer_instructions=\"\"\"\n" + escaped + "\"\"\"")
+	if !strings.Contains(run, " -c "+developerInstructions+" resume ") {
+		t.Fatalf("Codex role reload does not carry one complete developer-instructions value before resume: %q", run)
 	}
 	for _, want := range []string{
 		"CODEX_HOME='/jail/codex/9'",
@@ -465,6 +466,10 @@ func TestCodexRunUsesTheSelectedHomeAndRosterPolicy(t *testing.T) {
 	}
 	if strings.Contains(run, "CLAUDE_CONFIG_DIR=") {
 		t.Fatalf("Codex reload inherited a Claude config assignment: %q", run)
+	}
+	roleless, err := codexRun(Request{SessionID: "019ff700-0000-7000-8000-000000000001"})
+	if err != nil || strings.Contains(roleless, "developer_instructions") {
+		t.Fatalf("roleless Codex reload changed: run=%q error=%v", roleless, err)
 	}
 }
 
@@ -721,15 +726,8 @@ func TestFailedThenWritesTheRecoverableSentinel(t *testing.T) {
 	}
 }
 
-// TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines reproduces the
-// defect the operator hit on every account switch: the steer landed in the
-// composer and pfm refused to press Enter, so a human had to.
-//
-// deliverThen proves delivery by the prompt's TAIL — the half that proves
-// nothing was truncated in transit — and read that proof off the composer's
-// MARKER line alone. Claude prints the marker on the first line of a wrapped
-// draft, so the tail of any prompt longer than one row was unreachable and the
-// proof could never be satisfied. Every real steer is longer than one row.
+// A wrapped prompt's tail must prove delivery even though the marker is only
+// on the first composer row.
 func TestDeliverThenSubmitsAPromptThatWrapsAcrossComposerLines(t *testing.T) {
 	const then = "Continue the flight: read the run ledger end to end, " +
 		"execute the remaining tasks, and write the zero-gap task file to the " +

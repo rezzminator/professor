@@ -73,6 +73,7 @@ C63	F	F.15-addressing
 C64	F	F.15-addressing
 C65	O1	O1.13-misc-ops
 C66	E1	E1.24-exit-contract
+C67	E1	E1.11-role-reload
 H1	O2	O2.09-harvester
 H2	O2	O2.09-harvester
 H3	O2	O2.09-harvester
@@ -211,7 +212,6 @@ K18	F	F.05-storm
 K19	F	F.05-storm
 K20	F	F.02-new-label-role
 K21	F	F.02-new-label-role
-K22	E1	E1.11-role-rearm
 K23	E1	E1.10-reload-credential
 K23	O1	O1.05-credential
 K24	F	F.03-new-account-1h-model
@@ -270,7 +270,6 @@ L34	E1	E1.09-reload-while-busy
 L35	E1	E1.20-self-compact
 L36	E2	E2.09-self-compact
 L37	E1	E1.20-self-compact
-L38	E1	E1.11-role-rearm
 L39	F	F.14-kill-storm
 L40	F	F.13-name-sync
 L41	F	F.13-name-sync
@@ -433,7 +432,7 @@ X19	F	F.16-picker-plumbing
 X20	E1	E1.23-launcher
 X21	O2	O2.05-internal-plumbing
 X22	O2	O2.05-internal-plumbing
-X23	E2	E2.05-appendix-hook
+X23	E2	E2.05-fleet-prompt
 X24	E2	E2.10-codex-launch
 X25	E1	E1.21-exit-close
 X26	O2	O2.05-internal-plumbing

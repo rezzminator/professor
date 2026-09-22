@@ -79,7 +79,7 @@ The manual is the `flights-orchestrator` agent body. It is written for the neste
 | Step in the manual | Nested (`/flights:orchestrate-nested`) | Live (`/flights:orchestrate-live`) | Cross-harness (`/flights:orchestrate-cross-harness`) |
 | --- | --- | --- | --- |
 | Who runs the loop | a `flights-orchestrator` sub-agent | the main chat, as the agent | the main chat, as the agent |
-| Spawn an executor | `Agent(subagent_type, model)` | the same | a seat of the chosen engine, named `{flight}-{id}`, in the project directory or the worktree: `chat_new` with the engine and the directory; when the executor type is a registered role, the shell `pfm chat new … --role {role}` instead, because the MCP verb carries no role |
+| Spawn an executor | `Agent(subagent_type, model)` | the same | a seat of the chosen engine, named `{flight}-{id}`, in the project directory or the worktree: `chat_new` with the engine and the directory; when the executor type is a registered role, the shell `pfm chat new … --agent-role {role}` instead, because the MCP verb carries no role |
 | The model | `model:` from the executor type's pin, else the rating | the same | `chat_new`'s `model` and `effort`, in the engine's own names; unset, the engine's default |
 | Deliver the brief | the spawn prompt | the same | `chat_inject` one message, the brief verbatim; the transport pastes any size. The brief closes with the way home: the seat writes its return to a file under `/tmp/` and sends it with `pfm chat inject {orchestrator} --file {path}`, because a seat's plain inject carries one line |
 | Wait | end the message with one line and no tool call; the return arrives | the same | the same; the seat's report arrives as an inject into this chat |

@@ -84,7 +84,13 @@ func parseFrontmatter(text string) (map[string]string, string, error) {
 			// would make a valid Claude agent impossible to mirror.
 			continue
 		}
-		value, err := unquoteFrontmatterScalar(match[2])
+		rawValue := match[2]
+		if rawValue == "" || rawValue[0] != '\'' && rawValue[0] != '"' {
+			if comment := strings.Index(rawValue, " #"); comment >= 0 {
+				rawValue = strings.TrimSpace(rawValue[:comment])
+			}
+		}
+		value, err := unquoteFrontmatterScalar(rawValue)
 		if err != nil {
 			return nil, "", fmt.Errorf("frontmatter field %s: %w", match[1], err)
 		}

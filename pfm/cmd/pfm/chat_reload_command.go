@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
@@ -21,7 +22,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/kill"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/rearm"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -232,24 +232,6 @@ func runChatReloadWorkerWithRuntime(
 	if code != 0 {
 		return code
 	}
-	// Re-arm a remembered role in the same flattened steer as --then.
-	if roleCrumb, ok, err := rearm.ReadCrumb(resolved.SIDDir, filepath.Base(socketPath), pane); err != nil {
-		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
-		return 1
-	} else if ok {
-		// This literal tmux channel supports DefaultThresholdBytes without spill.
-		pointer := flattenThenLine(rearm.Pointer(roleCrumb, rearm.DefaultThresholdBytes))
-		if then == "" {
-			then = pointer
-		} else {
-			then = then + " " + pointer
-		}
-		fmt.Fprintf(
-			stdout,
-			"pfm chat reload: role %q remembered — re-arm pointer appended to the reborn chat's follow-up\n",
-			roleCrumb.Role,
-		)
-	}
 	engine := reloadEngine(socketPath)
 	id, transcript, err := resolveReloadSession(resolved, runtime.Config, socketPath, pane, sock == "", env)
 	if err != nil {
@@ -296,6 +278,14 @@ func runChatReloadWorkerWithRuntime(
 	if info, statErr := os.Stat(cwd); statErr != nil || !info.IsDir() {
 		cwd, _ = os.Getwd()
 	}
+	promptChannel := ""
+	promptChannel, err = agentrole.RefreshSeatPrompt(
+		engine, resolved.SIDDir, filepath.Base(socketPath), pane, cwd, resolved.Home,
+	)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
+		return 1
+	}
 	birthAccount, birthCache, err := reloadBirth(resolved, runtime.Config, socketPath, paneState, stderr, env)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat reload: %v\n", err)
@@ -339,25 +329,26 @@ func runChatReloadWorkerWithRuntime(
 	result, err := reload.Run(
 		context.Background(),
 		reload.Request{
-			Engine:      engine,
-			SocketPath:  socketPath,
-			Pane:        pane,
-			PanePID:     paneState.PID,
-			SessionID:   id,
-			Transcript:  transcript,
-			CWD:         cwd,
-			Account:     acct,
-			AccountIDs:  selected.IDs,
-			CodexHome:   selected.CodexHome,
-			CodexBinary: selected.CodexBinary,
-			CodexYolo:   selected.CodexYolo,
-			Cache1H:     cache,
-			Then:        then,
-			Name:        name,
-			Model:       model,
-			Effort:      effort,
-			Home:        resolved.Home,
-			Machine:     runtime.Config,
+			Engine:        engine,
+			SocketPath:    socketPath,
+			Pane:          pane,
+			PanePID:       paneState.PID,
+			SessionID:     id,
+			Transcript:    transcript,
+			CWD:           cwd,
+			Account:       acct,
+			AccountIDs:    selected.IDs,
+			CodexHome:     selected.CodexHome,
+			CodexBinary:   selected.CodexBinary,
+			CodexYolo:     selected.CodexYolo,
+			Cache1H:       cache,
+			Then:          then,
+			Name:          name,
+			Model:         model,
+			Effort:        effort,
+			PromptChannel: promptChannel,
+			Home:          resolved.Home,
+			Machine:       runtime.Config,
 		},
 		options,
 		tmux,
@@ -499,9 +490,8 @@ func validateReloadArgs(args []string) error {
 // request.Then into the reborn pane with a single literal tmux send-keys -l
 // call (reload.go); a raw newline byte in that stream lands in the pane
 // exactly like an Enter keypress, submitting the composer mid-prompt. Both
-// an operator's own --then value and the T1 role re-arm pointer this file
-// appends to it go through this same flattening, so the two can never
-// diverge on what "one line" means to this delivery channel.
+// Every operator-supplied --then value goes through this flattening, so the
+// command has one definition of "one line" for this delivery channel.
 func flattenThenLine(text string) string {
 	return strings.NewReplacer("\n", " ", "\r", " ").Replace(text)
 }

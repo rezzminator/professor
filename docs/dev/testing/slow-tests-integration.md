@@ -320,11 +320,11 @@ startCodexStatusPane; temp SQLite rollouts/bindings; ReconcileCodexPanesWith; co
 
 A — current process status line is supplied by real tmux.
 
-### TestChatEndSucceedsDespiteCrumbRemovalFailure
+### TestChatEndWarnsButSucceedsWhenRolePromptRemovalFails
 
-**Source:** [pfm/cmd/pfm/chat_end_rearm_test.go](../../../pfm/cmd/pfm/chat_end_rearm_test.go) line 83 · **Observed:** 1.18s · **Class:** process/tmux/filesystem
+**Source:** [pfm/cmd/pfm/chat_reload_command_test.go](../../../pfm/cmd/pfm/chat_reload_command_test.go) line 166 · **Observed:** 1.18s · **Class:** process/tmux/filesystem
 
-newRunJail; real run chat new/end; sabotaged non-empty crumb directory; tmux kill and warning check.
+newRunJail; real run chat new/end; sabotaged non-empty per-seat prompt path; tmux kill and warning check.
 
 A — chat end and warning behavior depend on the real jailed chat process.
 
@@ -336,11 +336,11 @@ startCodexStatusPane; temp SQLite names/rollouts; fleet.ReconcileCodexPanes; bin
 
 A — duplicate-name handling is driven by a live tmux status pane.
 
-### TestChatEndRemovesRoleCrumbOnKill
+### TestChatEndRemovesTheRoleSeatPrompt
 
-**Source:** [pfm/cmd/pfm/chat_end_rearm_test.go](../../../pfm/cmd/pfm/chat_end_rearm_test.go) line 24 · **Observed:** 1.08s · **Class:** process/tmux/filesystem
+**Source:** [pfm/cmd/pfm/chat_reload_command_test.go](../../../pfm/cmd/pfm/chat_reload_command_test.go) line 122 · **Observed:** 1.08s · **Class:** process/tmux/filesystem
 
-newRunJail; real run chat new/end; rearm.WriteCrumb; tmux socket and crumb removal.
+newRunJail; real run chat new/end; agentrole.WriteSeatPrompt; tmux socket and per-seat prompt removal.
 
 A — lifecycle and crumb cleanup are asserted after a real jailed chat kill.
 

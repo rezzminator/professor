@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -19,7 +20,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/headless"
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/rearm"
 	"github.com/rezzminator/professor/pfm/internal/recovery"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	pfmtmux "github.com/rezzminator/professor/pfm/internal/tmux"
@@ -476,17 +476,13 @@ func runChatEnd(args []string, stdout, stderr io.Writer, runtimes ...commandRunt
 		fmt.Fprintf(stderr, "pfm chat end: %v: %s\n", err, strings.TrimSpace(string(output)))
 		return 1
 	}
-	// T1 re-arm cleanup: this socket is dead, so any role crumb it carried
-	// (cmd/pfm/chat_new_command.go's WriteCrumb) is litter — nothing on this kill
-	// path, or any other, will ever read it again. Best-effort: SIDDir
-	// accumulating one un-removed crumb per --role seat ever launched is
-	// exactly what this exists to prevent, but the chat is dead either way,
-	// so a removal failure is a visible WARNING here, never a reason to
-	// report `pfm chat end` itself as failed.
+	// The seat is dead, so its prompt file is litter. Cleanup is best-effort:
+	// the end itself succeeded and a prompt-file failure must remain visible
+	// without changing that result.
 	if endRuntime, err := pfmconfig.OptionalRuntime(runtimes); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not resolve paths to remove its role re-arm crumb: %v\n", err)
-	} else if err := rearm.RemoveCrumb(endRuntime.Paths.SIDDir, filepath.Base(chat.Socket), chat.Pane); err != nil {
-		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not remove role re-arm crumb: %v\n", err)
+		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not resolve paths to remove its role prompt: %v\n", err)
+	} else if err := agentrole.RemoveSeatPrompt(endRuntime.Paths.SIDDir, chat.Socket, chat.Pane); err != nil {
+		fmt.Fprintf(stderr, "pfm chat end: WARNING: could not remove role prompt: %v\n", err)
 	}
 	fmt.Fprintf(stdout, "ended %s\n", chat.ID)
 	return 0

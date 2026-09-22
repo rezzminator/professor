@@ -3,6 +3,7 @@ package doctor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -35,6 +37,21 @@ const (
 	// bypassed the door.
 	spawnViolation spawnVerdict = "VIOLATION"
 )
+
+type rolePromptOutcome string
+
+const (
+	rolePromptOK          rolePromptOutcome = "ROLE-OK"
+	rolePromptMismatch    rolePromptOutcome = "ROLE-MISMATCH"
+	rolePromptCheckFailed rolePromptOutcome = "ROLE-CHECK-FAILED"
+)
+
+type rolePromptRead struct {
+	role   string
+	prompt string
+	found  bool
+	err    error
+}
 
 // spawnObservation is everything the classifier is allowed to see: one live
 // pane's Claude process as /proc reports it.
@@ -120,6 +137,96 @@ func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVer
 		)
 	}
 	return spawnViolation, "fresh launch with no prompt material — some spawn site bypassed the door"
+}
+
+// classifyRolePrompt separates a readable-but-invalid role channel from a
+// channel that could not be read. The distinction is visible because a role
+// mismatch is a finding about bytes we saw, while a failed check proves
+// nothing about what the seat carries.
+func classifyRolePrompt(path string, read rolePromptRead) (rolePromptOutcome, string) {
+	if !read.found {
+		return rolePromptCheckFailed, fmt.Sprintf("%s does not exist", path)
+	}
+	if read.err != nil {
+		var pathErr *os.PathError
+		if errors.As(read.err, &pathErr) {
+			return rolePromptCheckFailed, fmt.Sprintf("could not read %s (%v)", path, read.err)
+		}
+		return rolePromptMismatch, fmt.Sprintf("%s does not match the role prompt format: %v", path, read.err)
+	}
+	if read.role == "" {
+		return rolePromptMismatch, fmt.Sprintf("%s has an empty role marker", path)
+	}
+	if strings.TrimSpace(read.prompt) == "" {
+		return rolePromptMismatch, fmt.Sprintf("%s has role=%s but an empty prompt channel", path, read.role)
+	}
+	return rolePromptOK, fmt.Sprintf("%s carries role=%s and a non-empty prompt channel", path, read.role)
+}
+
+// roleSeatPromptPath finds the prompt file named by this process's own argv.
+// It recognizes the filename through agentrole's canonical path constructor,
+// so doctor does not invent a second role-file shape.
+func roleSeatPromptPath(argv []string) (string, bool) {
+	for index, argument := range argv {
+		var candidate string
+		switch {
+		case argument == "--system-prompt-file" && index+1 < len(argv):
+			candidate = argv[index+1]
+		case strings.HasPrefix(argument, "--system-prompt-file="):
+			candidate = strings.TrimPrefix(argument, "--system-prompt-file=")
+		default:
+			continue
+		}
+		if !agentrole.IsSeatPromptPath(candidate) {
+			continue
+		}
+		return candidate, true
+	}
+	return "", false
+}
+
+// printSpawnRoleAudit emits the additional role-channel audit. Ordinary
+// staged-prompt seats are deliberately silent here; without a role seat there
+// is no role-fleet claim to make and therefore no summary line.
+func printSpawnRoleAudit(stdout io.Writer, observations []spawnObservation) int {
+	counts := map[rolePromptOutcome]int{}
+	roleSeats := 0
+	for _, observation := range observations {
+		path, ok := roleSeatPromptPath(observation.Argv)
+		if !ok {
+			continue
+		}
+		roleSeats++
+		role, prompt, found, err := agentrole.ReadSeatPromptFile(path)
+		outcome, reason := classifyRolePrompt(path, rolePromptRead{
+			role: role, prompt: prompt, found: found, err: err,
+		})
+		counts[outcome]++
+		fmt.Fprintf(
+			stdout,
+			"doctor: spawn-audit: %s %s pid=%d file=%s — %s\n",
+			outcome,
+			observation.Socket,
+			observation.PID,
+			path,
+			reason,
+		)
+	}
+	if roleSeats == 0 {
+		return 0
+	}
+	fmt.Fprintf(
+		stdout,
+		"doctor: spawn-audit: role-seats=%d ok=%d mismatched=%d unreadable=%d\n",
+		roleSeats,
+		counts[rolePromptOK],
+		counts[rolePromptMismatch],
+		counts[rolePromptCheckFailed],
+	)
+	if counts[rolePromptMismatch] != 0 || counts[rolePromptCheckFailed] != 0 {
+		return 1
+	}
+	return 0
 }
 
 // predatesLayer reports how long before the current spawn door went live this
@@ -240,6 +347,7 @@ func printSpawnAuditDoctorWithClock(
 			reason,
 		)
 	}
+	roleWarnings := printSpawnRoleAudit(stdout, observations)
 	fmt.Fprintf(
 		stdout,
 		"doctor: spawn-audit: policy=%s chats=%d injected=%d predates-layer=%d violations=%d (age signal: %s)\n",
@@ -254,6 +362,7 @@ func printSpawnAuditDoctorWithClock(
 	if counts[spawnViolation] != 0 {
 		warnings++
 	}
+	warnings += roleWarnings
 	return warnings
 }
 

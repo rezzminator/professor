@@ -111,7 +111,11 @@ func compileOpenCode(options Options) (Result, error) {
 		discoverOpenCodeCommandRoster(source, roster, problem)
 	}
 	projects := discoverOpenCodeProjects(root, problem)
-	compileOpenCodeAgents(root, projects, roster, add, problem, warn)
+	modelMap, modelMapErr := loadOpenCodeModelMap(root)
+	if modelMapErr != nil {
+		problem("%v", modelMapErr)
+	}
+	compileOpenCodeAgents(root, projects, roster, modelMap, add, problem, warn)
 	compileOpenCodeCommands(
 		filepath.Join(root, ".claude", "commands"),
 		".claude/commands",
@@ -295,6 +299,7 @@ func compileOpenCodeAgents(
 	root string,
 	projects []string,
 	roster map[string]string,
+	modelMap map[string]string,
 	add func(generatedFile),
 	problem, warn func(string, ...any),
 ) {
@@ -329,13 +334,27 @@ func compileOpenCodeAgents(
 				filepath.ToSlash(rel),
 			) + "\ndescription: " + quoteOpenCodeYAML(
 				description,
-			) + "\nmode: subagent\n"
+			) + "\nmode: " + openCodeAgentMode + "\n"
+			alias := strings.TrimSpace(fields["model"])
+			if comment := strings.Index(alias, " #"); comment >= 0 {
+				alias = strings.TrimSpace(alias[:comment])
+			}
+			if alias != "" {
+				model, ok := modelMap[alias]
+				if !ok || strings.TrimSpace(model) == "" {
+					problem("unmapped OpenCode model alias %q in %s", alias, entry.Path)
+				} else {
+					content += "model: " + strings.TrimSpace(model) + "\n"
+				}
+			}
+			if tools, ok := fields["tools"]; ok {
+				content += renderOpenCodeToolsBlock(tools)
+			}
 			if name == "gitter" {
 				content += "permission:\n  bash:\n    \"git *\": allow\n"
 			}
 			content += "---\n" + agentPreamble(
 				name,
-				fields["model"],
 			) + swapOpenCodeCommands(
 				strings.TrimSpace(body),
 				roster,
@@ -345,16 +364,10 @@ func compileOpenCodeAgents(
 	}
 }
 
-func agentPreamble(name, model string) string {
-	tier := ""
-	if strings.TrimSpace(model) != "" {
-		tier = "Model tier: " + strings.TrimSpace(
-			model,
-		) + " per the fleet prompt § Model Selection — run this host's matching model.\n\n"
-	}
+func agentPreamble(name string) string {
 	return "You are the " + name + " role in the Professor repo, running as a native OpenCode subagent.\n" +
 		"First action: read the repo root AGENTS.md in full — its laws bind you (only gitter may write Git; guarded files are read-only for every subagent) and its § OpenCode adapter maps any Claude-harness mechanic named below. Then execute the protocol below exactly; your mode/task comes from the dispatch prompt.\n" +
-		"Stamp every deliverable, report, or verdict you produce with: Executor: opencode-subagent/" + name + "\n\n" + tier
+		"Stamp every deliverable, report, or verdict you produce with: Executor: opencode-subagent/" + name + "\n\n"
 }
 
 func compileOpenCodeCommands(
@@ -488,13 +501,15 @@ func validateDoctorSurfaces(root, home string, result *Result) {
 					),
 				)
 			}
-			if filepath.Base(dir) == "agent" && fields["mode"] != "subagent" {
+			if filepath.Base(dir) == "agent" && fields["mode"] != openCodeAgentMode {
 				result.Problems = append(
 					result.Problems,
 					fmt.Sprintf(
-						"INVALID %s — mode %q is not subagent; the compiler only emits subagent roles",
+						"INVALID %s — mode %q is not %s; the compiler only emits %s roles",
 						path,
 						fields["mode"],
+						openCodeAgentMode,
+						openCodeAgentMode,
 					),
 				)
 			}

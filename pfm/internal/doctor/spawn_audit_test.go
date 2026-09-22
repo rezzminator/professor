@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -187,6 +189,185 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 				t.Fatalf("reason %q does not name the deciding signal %q", reason, testCase.wantReason)
 			}
 		})
+	}
+}
+
+func TestClassifyRolePromptSeparatesSoundMismatchAndUnreadable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "role-prompt-cc-reviewer.md")
+	for _, testCase := range []struct {
+		name       string
+		read       rolePromptRead
+		want       rolePromptOutcome
+		wantReason string
+	}{
+		{
+			name:       "sound role seat",
+			read:       rolePromptRead{role: "reviewer", prompt: "fleet and role", found: true},
+			want:       rolePromptOK,
+			wantReason: "reviewer",
+		},
+		{
+			name: "marker missing",
+			read: rolePromptRead{
+				found: true,
+				err:   errors.New("agent role: seat prompt has no valid role marker"),
+			},
+			want:       rolePromptMismatch,
+			wantReason: "no valid role marker",
+		},
+		{
+			name: "empty role",
+			read: rolePromptRead{
+				found: true,
+				err:   errors.New("agent role: seat prompt has an empty role marker"),
+			},
+			want:       rolePromptMismatch,
+			wantReason: "empty role marker",
+		},
+		{
+			name:       "empty channel",
+			read:       rolePromptRead{role: "reviewer", found: true},
+			want:       rolePromptMismatch,
+			wantReason: "empty prompt channel",
+		},
+		{
+			name: "file unreadable",
+			read: rolePromptRead{
+				found: true,
+				err: &os.PathError{
+					Op:   "open",
+					Path: path,
+					Err:  errors.New("permission denied"),
+				},
+			},
+			want:       rolePromptCheckFailed,
+			wantReason: "permission denied",
+		},
+		{
+			name:       "file deleted",
+			read:       rolePromptRead{},
+			want:       rolePromptCheckFailed,
+			wantReason: "does not exist",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			outcome, reason := classifyRolePrompt(path, testCase.read)
+			if outcome != testCase.want {
+				t.Fatalf("classifyRolePrompt = %s (%s), want %s", outcome, reason, testCase.want)
+			}
+			if !strings.Contains(reason, path) || !strings.Contains(reason, testCase.wantReason) {
+				t.Fatalf("reason %q does not name path %q and deciding signal %q", reason, path, testCase.wantReason)
+			}
+		})
+	}
+}
+
+func TestPrintSpawnRoleAuditReportsRowsCountsAndWarnings(t *testing.T) {
+	sidDir := t.TempDir()
+	soundPath := mustDoctorSeatPromptPath(t, sidDir, "cc-sound", "%2")
+	if err := agentrole.WriteSeatPrompt(
+		sidDir, "cc-sound", "%2", "<!-- pfm agent-role: reviewer -->\nrole prompt",
+	); err != nil {
+		t.Fatal(err)
+	}
+	mismatchPath := mustDoctorSeatPromptPath(t, sidDir, "cc-mismatch", "")
+	if err := os.WriteFile(mismatchPath, []byte("not a role marker\nrole prompt"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unreadablePath := mustDoctorSeatPromptPath(t, sidDir, "cc-deleted", "")
+	stagedPath := action.ProfessorPromptPath(t.TempDir())
+
+	proc := fakeProcFS{
+		cmdlines: map[int][]string{
+			101: {"claude", "--system-prompt-file", soundPath},
+			102: {"claude", "--system-prompt-file=" + mismatchPath},
+			103: {"claude", "--system-prompt-file", unreadablePath},
+			104: {"claude", "--system-prompt-file", stagedPath},
+		},
+		parents: map[int]int{},
+	}
+	observations := make([]spawnObservation, 0, len(proc.cmdlines))
+	for pid := 101; pid <= 104; pid++ {
+		resolvedPID, argv, found, err := resolveClaudeProcess(proc, pid, "claude")
+		if err != nil || !found {
+			t.Fatalf("resolve pid %d = pid %d found %v err %v", pid, resolvedPID, found, err)
+		}
+		observations = append(observations, spawnObservation{
+			Socket: fmt.Sprintf("cc-role-%d", pid),
+			PID:    resolvedPID,
+			Argv:   argv,
+		})
+	}
+
+	var stdout bytes.Buffer
+	if warnings := printSpawnRoleAudit(&stdout, observations); warnings != 1 {
+		t.Fatalf("role audit warnings = %d, want 1: %q", warnings, stdout.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"ROLE-OK cc-role-101 pid=101",
+		"role=reviewer",
+		soundPath,
+		"ROLE-MISMATCH cc-role-102 pid=102",
+		mismatchPath,
+		"no valid role marker",
+		"ROLE-CHECK-FAILED cc-role-103 pid=103",
+		unreadablePath,
+		"does not exist",
+		"role-seats=3 ok=1 mismatched=1 unreadable=1",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("role audit output missing %q: %q", want, output)
+		}
+	}
+	if strings.Contains(output, stagedPath) || strings.Contains(output, "cc-role-104") {
+		t.Fatalf("ordinary staged prompt produced a role row: %q", output)
+	}
+}
+
+func TestPrintSpawnRoleAuditSoundSeatDoesNotWarn(t *testing.T) {
+	sidDir := t.TempDir()
+	path := mustDoctorSeatPromptPath(t, sidDir, "cc-sound", "")
+	if err := agentrole.WriteSeatPrompt(
+		sidDir, "cc-sound", "", "<!-- pfm agent-role: reviewer -->\nrole prompt",
+	); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	warnings := printSpawnRoleAudit(&stdout, []spawnObservation{{
+		Socket: "cc-sound",
+		PID:    101,
+		Argv:   []string{"claude", "--system-prompt-file", path},
+	}})
+	if warnings != 0 {
+		t.Fatalf("sound role seat changed the warning count by %d: %q", warnings, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "role-seats=1 ok=1 mismatched=0 unreadable=0") {
+		t.Fatalf("sound role seat counts = %q", stdout.String())
+	}
+}
+
+func mustDoctorSeatPromptPath(t *testing.T, sidDir, socket, pane string) string {
+	t.Helper()
+	path, err := agentrole.SeatPromptPath(sidDir, socket, pane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestPrintSpawnRoleAuditSaysNothingWithoutRoleSeats(t *testing.T) {
+	var stdout bytes.Buffer
+	observations := []spawnObservation{{
+		Socket: "cc-ordinary",
+		PID:    41,
+		Argv:   []string{"claude", "--system-prompt-file", action.ProfessorPromptPath(t.TempDir())},
+	}}
+	if warnings := printSpawnRoleAudit(&stdout, observations); warnings != 0 {
+		t.Fatalf("ordinary seats warned %d times", warnings)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("ordinary seats produced role audit output: %q", stdout.String())
 	}
 }
 

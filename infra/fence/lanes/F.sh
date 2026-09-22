@@ -261,7 +261,7 @@ else
   pass "$cc_note (live-claude, $CWD, seat $SEAT, socket $(sock_base "$CC")) · $cx_note (live-codex, socket $(sock_base "$CX")) · --engine oc/ox, no --name, account 999 (default → $want, caller → Claude), unknown prefix, (unnamed): each refused by name"
 fi
 
-# ─── F.02 — {name}:{group}, _KILL/_HIDE, --role, --prompt-file ──────────────
+# ─── F.02 — {name}:{group}, _KILL/_HIDE, --agent-role, --prompt-file ────────
 
 beat F.02-new-label-role K12 K13 K14 K20 K21 C17 C18
 spends "cc:$SEAT"
@@ -288,7 +288,7 @@ if live_chat "$GRP"; then
   grp_note="$GRP already live"
 else
   pfm chat new --name "$GRP" --engine cc --account "$SEAT" --cwd "$CWD" --model sonnet --effort low \
-    --role f-role --prompt-file /tmp/f-grp.prompt --attach >/tmp/f-grp.launch.out 2>/tmp/f-grp.launch.err
+    --agent-role f-role --prompt-file /tmp/f-grp.prompt --attach >/tmp/f-grp.launch.out 2>/tmp/f-grp.launch.err
   rc=$?
   [ "$rc" -eq 0 ] || bad="$bad chat new $GRP exited $rc: $(one_line "$(cat /tmp/f-grp.launch.out /tmp/f-grp.launch.err)");"
   grp_note="$GRP spawned"
@@ -301,28 +301,25 @@ else
   [ "$(live_field "$GRP" 5)" = "$GRP" ] || bad="$bad K12 the row's name is '$(live_field "$GRP" 5)', want '$GRP';"
   window="$(tmux -S "$sock" list-windows -F '#{window_name}' 2>&1 | head -1)"
   case "$window" in *F_GRP*) ;; *) bad="$bad K12 tmux window '$(one_line "$window")' does not carry the label's name part;" ;; esac
-  # K20/C18: the role crumb, and the constitution ahead of the prompt in the transcript.
-  crumb=""
-  for candidate in "$SID_DIR"/role-*; do
-    [ -f "$candidate" ] || continue
-    case "$candidate" in *"${sock##*/}"*) crumb="$candidate"; break ;; esac
-  done
-  if [ -z "$crumb" ]; then
-    bad="$bad K20 no role crumb for socket ${sock##*/} in $SID_DIR (role-<socket>); present: $(one_line "$(printf '%s ' "$SID_DIR"/role-*)");"
-  elif ! grep -q 'f-role' "$crumb"; then
-    bad="$bad K20 the crumb $crumb does not name f-role: $(one_line "$(cat "$crumb")");"
+  # K20/C18: the role lives in the per-seat prompt channel, not the first user message.
+  socket_name="${sock##*/}"
+  role_prompt="$SID_DIR/role-prompt-$socket_name.md"
+  if [ ! -f "$role_prompt" ]; then
+    bad="$bad K20 no per-seat role prompt at $role_prompt; present: $(one_line "$(printf '%s ' "$SID_DIR"/role-prompt-*)");"
+  elif [ "$(sed -n '1p' "$role_prompt")" != '<!-- pfm agent-role: f-role -->' ]; then
+    bad="$bad K20 the first line of $role_prompt does not name f-role: $(one_line "$(sed -n '1p' "$role_prompt")");"
+  elif ! grep -q 'F-ROLE-CONSTITUTION' "$role_prompt"; then
+    bad="$bad K20 $role_prompt names f-role but does not carry its constitution;"
   fi
   first_user="$(pfm chat read "$GRP" --tail 200 --json 2>/dev/null |
     jq -r '[.entries[] | select(.role == "user")][0].text // ""' | tr '\n' ' ')"
   if [ -z "$first_user" ]; then
     bad="$bad C18/C17 the transcript's first user record could not be read (pfm chat read --json);"
   else
-    role_at="$(printf '%s' "$first_user" | awk '{ print index($0, "F-ROLE-CONSTITUTION") }')"
     prompt_at="$(printf '%s' "$first_user" | awk '{ print index($0, "F-PROMPT-FILE") }')"
     [ "$prompt_at" -gt 0 ] || bad="$bad C17 the prompt file's text never reached the first user record;"
-    [ "$role_at" -gt 0 ] || bad="$bad C18 the role constitution is not in the first user record;"
-    [ "$role_at" -gt 0 ] && [ "$prompt_at" -gt 0 ] && [ "$role_at" -ge "$prompt_at" ] &&
-      bad="$bad K20 the constitution (offset $role_at) does not precede the prompt (offset $prompt_at);"
+    printf '%s' "$first_user" | grep -q 'F-ROLE-CONSTITUTION' &&
+      bad="$bad C18 the role constitution leaked into the first user record instead of staying in its prompt channel;"
   fi
   # K14: the store-based kill — a row in the killed ledger, out of the default view, back on unkill.
   pfm chat kill "$GRP" >/dev/null 2>&1 || bad="$bad K14 chat kill exited non-zero;"
@@ -345,7 +342,7 @@ else
   live_chat "$GRP" || bad="$bad K13 after the renames '$GRP' has no live row in the default view;"
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "$grp_note: label '$GRP' in row + window, role crumb $crumb, constitution ahead of the prompt-file text, store kill/unkill, _KILL_F and _hide_f hide by name and the rename back unhides"
+  pass "$grp_note: label '$GRP' in row + window, role prompt $role_prompt names f-role while the first user record contains only the prompt-file text, store kill/unkill, _KILL_F and _hide_f hide by name and the rename back unhides"
 fi
 
 # ─── F.03 — --account / --1h / --model --effort, read off the launch pfm made ─

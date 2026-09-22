@@ -51,7 +51,7 @@ pfm/
     headless/ README.md                # MOVED from pfm/HEADLESS.md; run/ is the one-shot process boundary
     harvestmcp/ harvestpy/             # unchanged (harvestpy is the pinned Python sidecar)
     action agentopen agentrole archive ask binwatch codexappendix codexgen codexmeta compose fleet gather heal
-    index inject kill mcpserv naming nudge professor reap rearm recovery reload resolve sky spawn stale stats
+    index inject kill mcpserv naming nudge professor reap recovery reload resolve sky spawn stale stats
     statusline testjail theme transcript ui update updatecheck usagehook     # unchanged
 ```
 
@@ -167,7 +167,7 @@ Layering, top to bottom; a package imports only downward. This is today's graph 
 
 1. `cmd/pfm` — imports anything under `internal/`; nothing imports it (C10 keeps `mcpserv` off argv into it).
 2. surfaces and orchestration: `mcpserv`, `harvestmcp`, `ui`, `installer`, `fleet`, `chat`, `headless`, `reload`, `reap`, `heal`, `archive`, `stats`, `statusline`, `agentopen`, `engine/{claude,codex,opencode}`.
-3. mechanisms over the fleet: `action`, `spawn`, `inject`, `kill`, `index`, `compose`, `gather`, `resolve`, `store`, `fleetdb`, `recovery`, `transcript`, `codexmeta`, `naming`, `usagehook`, `harvest`, `harvestpy`, `professor`, `update`, `updatecheck`, `stale`, `binwatch`, `nudge`, `rearm`, `agentrole`, `codexgen`, `codexappendix`, `ask`, `headless/run`.
+3. mechanisms over the fleet: `action`, `spawn`, `inject`, `kill`, `index`, `compose`, `gather`, `resolve`, `store`, `fleetdb`, `recovery`, `transcript`, `codexmeta`, `naming`, `usagehook`, `harvest`, `harvestpy`, `professor`, `update`, `updatecheck`, `stale`, `binwatch`, `nudge`, `agentrole`, `codexgen`, `codexappendix`, `ask`, `headless/run`.
 4. façades and leaves: `tmux` (imports `deps` only), `sqlitedb`, `atomicfile`, `paths` (imports `engine`), `deps` (imports `engine`), `config`, `engine` (imports nothing in-module), `theme`, `sky`, `testjail`.
 
 Rules the executor and every later wave keep:

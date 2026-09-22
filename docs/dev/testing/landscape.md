@@ -214,7 +214,7 @@ P37 · `pfm opencode build|check|doctor [repo-root] [--home PATH]` compiles and 
 
 ---
 
-## C — Chat verbs (66)
+## C — Chat verbs (67)
 
 C1 · `pfm ls` interactive fleet picker (cosmos TUI over `fleet.Scan`) · needs:tmux · today:U · cli.md:29 · lane(s):F,A
 C2 · `pfm ls --plain` · needs:tmux · today:U · cli.md:29 · lane(s):F
@@ -233,7 +233,7 @@ C14 · `pfm chat new --1h` · needs:tmux · today:U · cli.md:42 · lane(s):F
 C15 · `pfm chat new --model M` · needs:tmux · today:U · cli.md:42 · lane(s):F
 C16 · `pfm chat new --effort E` · needs:tmux · today:U · cli.md:42 · lane(s):F
 C17 · `pfm chat new --prompt-file PATH` · needs:tmux · today:U · cli.md:42 · lane(s):F
-C18 · `pfm chat new --role ROLE` · needs:tmux · today:U · cli.md:42 · lane(s):F
+C18 · `pfm chat new --agent-role ROLE` · needs:tmux · today:U · cli.md:42 · lane(s):F
 C19 · `pfm chat new --await [--timeout S] [--settle S] [--progress]` · needs:tmux · today:U · cli.md:42 · lane(s):F
 C20 · `pfm chat new --attach` · needs:tmux · today:U · cli.md:42 · lane(s):F
 C21 · `pfm chat open <target>` · needs:tmux · today:U · cli.md:43 · lane(s):F
@@ -282,6 +282,7 @@ C63 · `pfm chat modal <tmux-session> deny <down-count>` · needs:tmux · today:
 C64 · `pfm chat resolve <target>` · needs:tmux · today:U · cli.md:66 · lane(s):F
 C65 · `pfm chat whoami` (alias of `pfm whoami`) · needs:tmux · today:U · cli.md:67 · lane(s):O1
 C66 · Shared headless-verb exit contract (0/2/3/4/5/6/7 across ask/status/read/last/stream/inject/watch/self-compact) · needs:none · today:U · cli.md:34-38 · lane(s):E1
+C67 · `pfm chat reload` preserves a role seat through its per-seat prompt channel · needs:tmux,seat:cc · today:U+B · cli.md:59 · lane(s):E1
 
 ---
 
@@ -306,9 +307,8 @@ K16 · `--attach` opt-in interactive tmux-attach line · needs:tmux · today:U �
 K17 · `pfm headless exec`/`run` scripting front (`run`→`new`, `transcript`→`read` aliases) · needs:seat:cc/cx/oc,network · today:U · fleet.md:102-104 · lane(s):O2
 K18 · Storm chats — NOT a `pfm` CLI verb; `infra/demo/storm.sh` wraps ordinary `chat new`/`end`/`kill` · needs:tmux,network · today:B (`check_storm`) · fleet.md:106-124 · lane(s):F
 K19 · `pfm storm`/`pfm idle` confirmed NOT to exist as subcommands (documented absence, not a failed search) · needs:none · today:NONE · fleet.md:118-124,252-255 · lane(s):F
-K20 · Role/prompt-file: `--role ROLE` composes a registered agent constitution ahead of the prompt · needs:tmux · today:U · fleet.md:128-131 · lane(s):F
+K20 · Role/prompt-file: `--agent-role ROLE` carries a registered agent constitution through the seat's prompt channel (`--system-prompt-file` for Claude, `developer_instructions` for Codex), separate from the first user message · needs:tmux · today:U · fleet.md:128-131 · lane(s):F
 K21 · Role/prompt-file: `--prompt-file PATH` (mutually exclusive with inline prompt) · needs:tmux · today:U · fleet.md:131-134 · lane(s):F
-K22 · Role re-arm crumb write so `reload`/`self-compact` can re-apply the role after a reset · needs:tmux · today:U · fleet.md:134-137 · lane(s):E1
 K23 · Account/seat: `--account N` on `chat new`/`reload`/`branch`, hard error on unconfigured id · needs:tmux · today:U · fleet.md:141-146 · lane(s):O1,E1
 K24 · Account medal-emoji identity (🥇🥈🥉, retired 🍀) across label/statusline/TUI · needs:tmux · today:U · fleet.md:146-149 · lane(s):F
 K25 · 1h cache mode: `--1h` on `chat new` · needs:tmux,seat:cc · today:U · fleet.md:153 · lane(s):F
@@ -483,7 +483,6 @@ L34 · Reload worker: detached scheduling via `pfm internal reload-run` · needs
 L35 · Self-compact scheduling: `ScheduleSelfCompact` validates one control-char-free focus line · needs:tmux · today:U · fleet.md:498-502 · lane(s):E1
 L36 · Self-compact scheduling composes `"/compact "+focus` (Codex: bare `/compact` — an unverified assumption, named "held, not disproved") ⚠ known-gap · needs:tmux,seat:cx · today:U · fleet.md:500-502 · lane(s):E2
 L37 · Self-compact scheduling queued via `ScheduleAfterCurrentTurn` (never races a live `/compact`) · needs:tmux · today:U · fleet.md:502-503 · lane(s):E1
-L38 · Self-compact: `rolePointer` re-attaches a `--role` seat's remembered constitution post-reset · needs:tmux · today:U · fleet.md:506-508 · lane(s):E1
 L39 · Kill-storm — NOT a `pfm` mechanism; `infra/demo/kill-storm.sh` wraps ordinary `chat end`+`chat kill` on `STORM_[0-9]+` names · needs:tmux,network · today:B (`check_storm`) · fleet.md:510-517 · lane(s):F
 L40 · `pfm name-sync [--apply] [--dry-run]` converges tmux window names (Codex thread name / Claude 🔖 label) · needs:tmux · today:U+A (`name-sync.txtar`) · cli.md:124 · lane(s):F
 L41 · `pfm name-sync --apply` also converges tmux global title options, re-verifies every rename · needs:tmux · today:U+A · cli.md:124 · lane(s):F

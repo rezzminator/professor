@@ -515,14 +515,6 @@ func compileAgents(
 			if mapped, ok := cfg.ModelMap[modelAlias]; ok {
 				model = mapped
 			}
-			tools := strings.Split(fields["tools"], ",")
-			readOnly := strings.TrimSpace(fields["tools"]) != ""
-			for _, tool := range tools {
-				tool = strings.TrimSpace(tool)
-				if tool == "Write" || tool == "Edit" || tool == "MultiEdit" || tool == "NotebookEdit" {
-					readOnly = false
-				}
-			}
 			tomlName := strings.ReplaceAll(name, "-", "_")
 			instructions := strings.ReplaceAll(cfg.AgentPreamble, "${name}", tomlName)
 			instructions += transformMarkdown(strings.TrimSpace(body), options)
@@ -536,8 +528,11 @@ func compileAgents(
 			}
 			description := transformMarkdown(fields["description"], options)
 			toml += "name = " + tomlString(tomlName) + "\ndescription = " + tomlString(description) + "\n"
-			if readOnly {
-				toml += "sandbox_mode = \"read-only\"\n"
+			if model != "" {
+				toml += "model = " + tomlString(model) + "\n"
+			}
+			if effort := strings.TrimSpace(fields["effort"]); effort != "" {
+				toml += "model_reasoning_effort = " + tomlString(effort) + "\n"
 			}
 			withFleetPrompt, err := fleetRoleInstructions(instructions)
 			if err != nil {

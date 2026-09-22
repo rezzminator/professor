@@ -95,6 +95,10 @@ type Request struct {
 	// because only there is the engine known.
 	Model  string
 	Effort string
+	// PromptChannel is already composed for the selected engine: a per-seat
+	// system-prompt file path for Claude, or the complete developer
+	// instructions value for Codex. Empty preserves an ordinary reload.
+	PromptChannel string
 	// Home and Machine are the Claude respawn's whole policy: the account's
 	// config dir, its autonomy posture and its system-prompt choice all come
 	// from them through action.ClaudeSpawn. A reload used to synthesize its
@@ -591,14 +595,15 @@ func claudeRun(request Request) (string, error) {
 		return "", fmt.Errorf("resolve claude respawn effort: %w", err)
 	}
 	run, err := action.ClaudeSpawn{
-		Purpose: action.PurposeResume,
-		Account: request.Account,
-		Cache1H: request.Cache1H,
-		Args:    arguments,
-		Home:    request.Home,
-		Machine: request.Machine,
-		Model:   request.Model,
-		Effort:  effort,
+		Purpose:    action.PurposeResume,
+		Account:    request.Account,
+		Cache1H:    request.Cache1H,
+		Args:       arguments,
+		Home:       request.Home,
+		Machine:    request.Machine,
+		Model:      request.Model,
+		Effort:     effort,
+		PromptFile: request.PromptChannel,
 	}.ShellCommand()
 	if err != nil {
 		return "", fmt.Errorf("render claude respawn command: %w", err)
@@ -647,6 +652,10 @@ func codexRun(request Request) (string, error) {
 	}
 	if effort != "" {
 		flag := action.CodexEffortArg(effort)
+		parts = append(parts, flag[0], action.Quote(flag[1]))
+	}
+	if request.PromptChannel != "" {
+		flag := action.CodexDeveloperInstructionsArg(request.PromptChannel)
 		parts = append(parts, flag[0], action.Quote(flag[1]))
 	}
 	if request.SessionID != "" {

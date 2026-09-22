@@ -477,6 +477,11 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	// tier map is the compiler's default: this path loads no project config.
 	description = rewriteCodeReview(description, nil)
 	body = rewriteCodeReview(body, nil)
+	model := strings.TrimSpace(fields["model"])
+	if mapped, ok := defaultConfig().ModelMap[model]; ok {
+		model = mapped
+	}
+	effort := strings.TrimSpace(fields["effort"])
 
 	withFleetPrompt, err := fleetRoleInstructions(body)
 	if err != nil {
@@ -484,8 +489,14 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	}
 	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
 		"name = \"" + globalAgentEscape(name) + "\"\n" +
-		"description = \"" + globalAgentEscape(description) + "\"\n" +
-		"developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(withFleetPrompt) + "\n\"\"\"\n"
+		"description = \"" + globalAgentEscape(description) + "\"\n"
+	if effort != "" {
+		if model != "" {
+			content += "model = \"" + globalAgentEscape(model) + "\"\n"
+		}
+		content += "model_reasoning_effort = \"" + globalAgentEscape(effort) + "\"\n"
+	}
+	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(withFleetPrompt) + "\n\"\"\"\n"
 
 	return name, content, nil
 }

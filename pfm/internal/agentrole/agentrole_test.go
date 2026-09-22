@@ -369,13 +369,9 @@ func TestRepoLocalBeatsHostGlobal(t *testing.T) {
 	}
 }
 
-// Test 11 — Resolve's Artifact: Path is always ABSOLUTE, and TOMLKey
-// matches the engine that resolved it (cc -> false, the whole .md file; cx
-// -> true, the developer_instructions value inside the .toml). T1 re-arm
-// persists exactly this bit alongside the role name so a later reload or
-// self-compact re-reads the SAME rung birth used.
-func TestResolveArtifactPathIsAbsoluteAndTOMLKeyMatchesEngine(t *testing.T) {
-	t.Run("cc: RELATIVE cwd still resolves an absolute .md path, TOMLKey false", func(t *testing.T) {
+// Resolve reports an absolute artifact path for either engine.
+func TestResolveArtifactPathIsAbsolute(t *testing.T) {
+	t.Run("cc: relative cwd still resolves an absolute md path", func(t *testing.T) {
 		// t.TempDir() itself already returns an absolute path, which would
 		// make Artifact.Path absolute by inheritance alone and prove
 		// nothing about Resolve's own filepath.Abs step. t.Chdir into the
@@ -402,12 +398,9 @@ func TestResolveArtifactPathIsAbsoluteAndTOMLKeyMatchesEngine(t *testing.T) {
 		if artifact.Path != wantPath {
 			t.Fatalf("Artifact.Path = %q, want %q", artifact.Path, wantPath)
 		}
-		if artifact.TOMLKey {
-			t.Fatal("Artifact.TOMLKey = true for a cc (.md) seat, want false")
-		}
 	})
 
-	t.Run("cx: RELATIVE cwd still resolves an absolute .toml path, TOMLKey true", func(t *testing.T) {
+	t.Run("cx: relative cwd still resolves an absolute toml path", func(t *testing.T) {
 		repo := t.TempDir()
 		home := t.TempDir()
 		tomlPath := filepath.Join(repo, ".codex", "agents", "reviewer.toml")
@@ -427,9 +420,6 @@ func TestResolveArtifactPathIsAbsoluteAndTOMLKeyMatchesEngine(t *testing.T) {
 		}
 		if artifact.Path != wantPath {
 			t.Fatalf("Artifact.Path = %q, want %q", artifact.Path, wantPath)
-		}
-		if !artifact.TOMLKey {
-			t.Fatal("Artifact.TOMLKey = false for a cx (.toml) seat, want true")
 		}
 	})
 }

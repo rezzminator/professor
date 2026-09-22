@@ -130,7 +130,7 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 	writeTestFile(
 		t,
 		filepath.Join(home, ".professor", "templates", "global", "agents", "quirky.md"),
-		"---\nname: quirky\ndescription: Uses \"walker fast\" and \"map it now\" verbatim.\ntools: Read\nmodel: sonnet\n---\n\n"+
+		"---\nname: quirky\ndescription: Uses \"walker fast\" and \"map it now\" verbatim.\ntools: Read\nmodel: opus # pinned\neffort: high\n---\n\n"+
 			"Body has a literal triple quote \"\"\" and a backslash \\ standalone.\n",
 	)
 
@@ -149,6 +149,8 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		"; do not edit — edit the source, then re-run: pfm codex build\n" +
 		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
+		"model = \"gpt-5.6-sol\"\n" +
+		"model_reasoning_effort = \"high\"\n" +
 		"developer_instructions = \"\"\"\n"
 	// The fleet prompt is prepended to every role, so the role's own body is
 	// the TAIL of the value — escaped byte for byte, as before.

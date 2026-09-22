@@ -58,7 +58,6 @@ suites:
       github.com/rezzminator/professor/pfm/internal/picker: 16
       github.com/rezzminator/professor/pfm/internal/professor: 2
       github.com/rezzminator/professor/pfm/internal/reap: 2
-      github.com/rezzminator/professor/pfm/internal/rearm: 2
       github.com/rezzminator/professor/pfm/internal/recovery: 2
       github.com/rezzminator/professor/pfm/internal/reload: 6
       github.com/rezzminator/professor/pfm/internal/resolve: 40

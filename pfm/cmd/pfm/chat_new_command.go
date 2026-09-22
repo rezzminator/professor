@@ -23,7 +23,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/inject"
 	"github.com/rezzminator/professor/pfm/internal/naming"
 	"github.com/rezzminator/professor/pfm/internal/paths"
-	"github.com/rezzminator/professor/pfm/internal/rearm"
 	"github.com/rezzminator/professor/pfm/internal/spawn"
 )
 
@@ -53,7 +52,7 @@ func runRun(
 	flags := cli.NewFlagSet(
 		"chat new",
 		"usage: pfm chat new --name NAME [--engine cc|cx] [--cwd DIR] "+
-			"[--account N] [--1h] [--model M] [--effort E] [--prompt-file PATH] [--role ROLE] "+
+			"[--account N] [--1h] [--model M] [--effort E] [--prompt-file PATH] [--agent-role ROLE] "+
 			"[--await [--timeout SECS] [--settle SECS] [--progress]] [--attach] [prompt]",
 		stderr,
 	)
@@ -69,7 +68,7 @@ func runRun(
 	model := flags.String("model", "", "model the seat is born with")
 	effort := flags.String("effort", "", "reasoning effort the seat is born with")
 	promptFile := flags.String("prompt-file", "", "read the launch prompt from a file")
-	role := flags.String("role", "", "registered agent role whose constitution the seat reads first, before any prompt")
+	role := flags.String("agent-role", "", "registered agent role carried by the seat's prompt channel")
 	await := flags.Bool("await", false, "wait for the first answer and print it (the launch summary moves to stderr)")
 	timeout := flags.Int("timeout", askTimeoutSeconds, "with --await: seconds to wait (0 waits forever)")
 	settle := flags.Int("settle", askSettleSeconds, "with --await: seconds of quiet before an answer is finished")
@@ -93,6 +92,11 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 1
 	}
+	requestedEngine, _ := pfmengine.Parse(*engine)
+	if *role != "" && requestedEngine == pfmengine.OpenCode {
+		fmt.Fprintf(stderr, "pfm chat new: %v\n", agentrole.ValidateSeatPromptPolicy(requestedEngine, ""))
+		return 2
+	}
 	fleetPrimary, err := fleet.PrimaryAccount(resolved, runtime.Config)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: read primary account: %v\n", err)
@@ -103,29 +107,73 @@ func runRun(
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
+	socket := spawn.FreshSocket(engineName)
+	if *role != "" {
+		policy := runtime.Config.EffectiveClaude(selectedAccount).SystemPrompt
+		if policyErr := agentrole.ValidateSeatPromptPolicy(engineName, policy); policyErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", policyErr)
+			return 2
+		}
+	}
 	prompt, err := runPrompt(*promptFile, positional)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 		return 2
 	}
-	// roleArtifact stays the zero value when --role was not given; the crumb
-	// write below is itself gated on *role != "", so a zero Artifact there
-	// is never reached.
-	var roleArtifact agentrole.Artifact
+	var promptChannel string
+	rolePromptWritten := false
+	defer func() {
+		if rolePromptWritten {
+			if removeErr := agentrole.RemoveSeatPrompt(resolved.SIDDir, socket, ""); removeErr != nil {
+				fmt.Fprintf(stderr, "pfm chat new: clean up unused role prompt: %v\n", removeErr)
+			}
+		}
+	}()
 	if *role != "" {
-		constitution, artifact, err := agentrole.Resolve(engineName, *role, directory, resolved.Home)
+		constitution, _, err := agentrole.Resolve(engineName, *role, directory, resolved.Home)
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm chat new: %v\n", err)
 			return 2
 		}
-		roleArtifact = artifact
-		prompt = composeRolePrompt(constitution, prompt)
+		var stagedFleetPrompt string
+		if engineName == pfmengine.Claude {
+			stagedPath := action.ProfessorPromptPath(resolved.Home)
+			raw, readErr := os.ReadFile(stagedPath)
+			if readErr != nil {
+				fmt.Fprintf(stderr, "pfm chat new: read staged Claude prompt %s: %v\n", stagedPath, readErr)
+				return 2
+			}
+			stagedFleetPrompt = string(raw)
+		}
+		seatPrompt, composeErr := agentrole.ComposeSeatPrompt(
+			engineName, *role, constitution, stagedFleetPrompt,
+		)
+		if composeErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", composeErr)
+			return 2
+		}
+		seatPromptPath, pathErr := agentrole.SeatPromptPath(resolved.SIDDir, socket, "")
+		if pathErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", pathErr)
+			return 2
+		}
+		if writeErr := agentrole.WriteSeatPrompt(resolved.SIDDir, socket, "", seatPrompt); writeErr != nil {
+			fmt.Fprintf(stderr, "pfm chat new: %v\n", writeErr)
+			return 2
+		}
+		rolePromptWritten = true
+		if engineName == pfmengine.Claude {
+			promptChannel = seatPromptPath
+		} else {
+			promptChannel = constitution
+		}
 	}
 	plan, err := action.HeadlessRun(action.HeadlessRequest{
 		Engine:         engineName,
 		Name:           *name,
 		CWD:            directory,
 		Prompt:         prompt,
+		PromptChannel:  promptChannel,
 		Model:          *model,
 		Effort:         *effort,
 		Home:           resolved.Home,
@@ -153,7 +201,7 @@ func runRun(
 		Trace:               trace,
 		Engine:              engineName,
 		Name:                *name,
-		Socket:              spawn.FreshSocket(engineName),
+		Socket:              socket,
 		CWD:                 directory,
 		Run:                 plan.Run,
 		Binary:              plan.Binary,
@@ -182,6 +230,7 @@ func runRun(
 		pfmchat.RecordVerb(context.Background(), "new", 1)
 		return 1
 	}
+	rolePromptWritten = false
 	pfmchat.RecordVerb(context.Background(), "new", 0)
 	spawnedAt := clk.Now()
 	parent := parentChatID(ctx, env)
@@ -191,33 +240,6 @@ func runRun(
 			fmt.Fprintf(
 				stderr,
 				"pfm chat new: WARNING: chat is live but could not be registered for parent-close cleanup: %v\n",
-				err,
-			)
-		}
-	}
-	// T1 re-arm: remember this seat's role, and the exact artifact birth
-	// read it from, so `pfm chat reload` and chat_self_compact can re-arm it
-	// after a reset. Keyed the bare-socket way (see internal/rearm) — a
-	// crumb write failure never fails the launch itself, since the seat is
-	// already live and born with its constitution either way; it only means
-	// this one seat cannot re-arm later.
-	if *role != "" {
-		if err := os.MkdirAll(resolved.SIDDir, 0o700); err != nil {
-			fmt.Fprintf(
-				stderr,
-				"pfm chat new: WARNING: chat is live but could not remember its role %q for re-arm: %v\n",
-				*role,
-				err,
-			)
-		} else if err := rearm.WriteCrumb(resolved.SIDDir, result.Socket, rearm.Crumb{
-			Role:         *role,
-			ArtifactPath: roleArtifact.Path,
-			TOMLKey:      roleArtifact.TOMLKey,
-		}); err != nil {
-			fmt.Fprintf(
-				stderr,
-				"pfm chat new: WARNING: chat is live but could not remember its role %q for re-arm: %v\n",
-				*role,
 				err,
 			)
 		}
@@ -520,21 +542,6 @@ func runPrompt(path string, args []string) (string, error) {
 		return "", fmt.Errorf("prompt file %s is empty", path)
 	}
 	return prompt, nil
-}
-
-// rolePromptSeparator marks where a --role seat's constitution ends and the
-// caller's own prompt begins, the same "\n\n---\n\n" section rule
-// internal/recovery uses between its own prompt sections.
-const rolePromptSeparator = "\n\n---\n\n"
-
-// composeRolePrompt puts the role constitution first, before any goal — the
-// seat is the role from birth. --role alone (no caller prompt) is legal and
-// launches a seat that has read its constitution and nothing else.
-func composeRolePrompt(constitution, prompt string) string {
-	if prompt == "" {
-		return constitution
-	}
-	return constitution + rolePromptSeparator + prompt
 }
 
 func runDir(requested string) (string, error) {

@@ -94,6 +94,9 @@ type ClaudeSpawn struct {
 	Args []string
 	// Home is the managed root the staged professor prompt lives under.
 	Home string
+	// PromptFile overrides the staged professor prompt for an interactive or
+	// resumed role seat. The caller writes it before planning the launch.
+	PromptFile string
 	// Machine is the resolved machine config. Callers that normalize it
 	// (Synthesize does) normalize BEFORE building the spawn: the door never
 	// substitutes defaults for a config a caller deliberately assembled.
@@ -406,6 +409,9 @@ func (spawn ClaudeSpawn) leanEnvironment(prefs pfmconfig.ClaudePrefs) bool {
 func (spawn ClaudeSpawn) promptFile(prefs pfmconfig.ClaudePrefs) string {
 	switch spawn.Purpose {
 	case PurposeInteractive, PurposeResume:
+		if spawn.PromptFile != "" {
+			return spawn.PromptFile
+		}
 		if prefs.SystemPrompt != pfmconfig.SystemPromptProfessor {
 			return ""
 		}

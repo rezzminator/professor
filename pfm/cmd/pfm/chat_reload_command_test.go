@@ -3,13 +3,238 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
+
+func TestRefreshReloadRolePromptReResolvesAndRewritesBothEngineChannels(t *testing.T) {
+	for _, testCase := range []struct {
+		name       string
+		engine     pfmengine.ID
+		agentDir   string
+		agentFile  string
+		agentBody  string
+		wantPrompt string
+		wantPath   bool
+	}{
+		{
+			name: "claude", engine: pfmengine.Claude,
+			agentDir: ".claude/agents", agentFile: "reviewer.md",
+			agentBody:  "---\nname: reviewer\n---\nCURRENT CLAUDE ROLE\n",
+			wantPrompt: "FLEET PROMPT\n\n---\n\nCURRENT CLAUDE ROLE\n", wantPath: true,
+		},
+		{
+			name: "codex", engine: pfmengine.Codex,
+			agentDir: ".codex/agents", agentFile: "reviewer.toml",
+			agentBody:  "name = \"reviewer\"\ndeveloper_instructions = \"\"\"\nCURRENT CODEX ROLE\n\"\"\"\n",
+			wantPrompt: "CURRENT CODEX ROLE\n",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			repo, home, sidDir := t.TempDir(), t.TempDir(), t.TempDir()
+			const socket, pane = "cc-seat", "%2"
+			writePane := pane
+			if testCase.engine == pfmengine.Claude {
+				writePane = ""
+			}
+			agentPath := filepath.Join(repo, filepath.FromSlash(testCase.agentDir), testCase.agentFile)
+			if err := os.MkdirAll(filepath.Dir(agentPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(agentPath, []byte(testCase.agentBody), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if testCase.engine == pfmengine.Claude {
+				fleetPrompt := action.ProfessorPromptPath(home)
+				if err := os.MkdirAll(filepath.Dir(fleetPrompt), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(fleetPrompt, []byte("FLEET PROMPT"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := agentrole.WriteSeatPrompt(
+				sidDir,
+				socket,
+				writePane,
+				"<!-- pfm agent-role: reviewer -->\nSTALE ROLE",
+			); err != nil {
+				t.Fatal(err)
+			}
+
+			channel, err := agentrole.RefreshSeatPrompt(testCase.engine, sidDir, socket, pane, repo, home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			role, prompt, _, found, err := agentrole.ReadSeatPrompt(sidDir, socket, pane)
+			if err != nil || !found || role != "reviewer" || prompt != testCase.wantPrompt {
+				t.Fatalf("refreshed seat prompt = role %q prompt %q found %v error %v", role, prompt, found, err)
+			}
+			wantChannel := testCase.wantPrompt
+			if testCase.wantPath {
+				wantChannel = mustReloadSeatPromptPath(t, sidDir, socket, writePane)
+			}
+			if channel != wantChannel {
+				t.Fatalf("prompt channel = %q, want %q", channel, wantChannel)
+			}
+		})
+	}
+}
+
+func TestRefreshReloadRolePromptTreatsMissingAsRolelessAndRejectsBadOrGoneRoles(t *testing.T) {
+	repo, home, sidDir := t.TempDir(), t.TempDir(), t.TempDir()
+	if channel, err := agentrole.RefreshSeatPrompt(
+		pfmengine.Claude,
+		sidDir,
+		"cc-missing",
+		"%1",
+		repo,
+		home,
+	); err != nil ||
+		channel != "" {
+		t.Fatalf("missing role seat = channel %q error %v", channel, err)
+	}
+	path := mustReloadSeatPromptPath(t, sidDir, "cc-broken", "%1")
+	if err := os.WriteFile(path, []byte("not a role marker\nbody"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentrole.RefreshSeatPrompt(pfmengine.Claude, sidDir, "cc-broken", "%1", repo, home); err == nil {
+		t.Fatal("malformed seat prompt refreshed without an error")
+	}
+	if err := agentrole.WriteSeatPrompt(sidDir, "cc-gone", "%1", "<!-- pfm agent-role: vanished -->\nOLD"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentrole.RefreshSeatPrompt(
+		pfmengine.Claude,
+		sidDir,
+		"cc-gone",
+		"%1",
+		repo,
+		home,
+	); err == nil ||
+		!strings.Contains(err.Error(), "vanished") {
+		t.Fatalf("gone role error = %v, want the role name", err)
+	}
+}
+
+func TestChatEndRemovesTheRoleSeatPrompt(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+
+	const launchName = "EndRoleWorker"
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"chat", "new", "--engine", "cc", "--name", launchName,
+		"--cwd", filepath.Join(jail.root, "work"), "audit the firewall",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("chat new exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	entries, err := os.ReadDir(jail.tmuxDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("jailed tmux sockets=%v err=%v", entries, err)
+	}
+	target, targetCode := headlessTarget(
+		context.Background(), entries[0].Name(), &stdout, &stderr, false,
+	)
+	if targetCode != 0 {
+		t.Fatalf("resolve spawned seat code=%d stdout=%q stderr=%q", targetCode, stdout.String(), stderr.String())
+	}
+	sidDir := filepath.Join(jail.root, "sid")
+	if err := agentrole.WriteSeatPrompt(
+		sidDir, target.Socket, target.Pane, "<!-- pfm agent-role: reviewer -->\nROLE",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := agentrole.WriteSeatPrompt(
+		sidDir, target.Socket, "", "<!-- pfm agent-role: reviewer -->\nFALLBACK",
+	); err != nil {
+		t.Fatal(err)
+	}
+	promptPaths := []string{
+		mustReloadSeatPromptPath(t, sidDir, target.Socket, target.Pane),
+		mustReloadSeatPromptPath(t, sidDir, target.Socket, ""),
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"chat", "end", entries[0].Name()}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("chat end exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for _, promptPath := range promptPaths {
+		if _, err := os.Stat(promptPath); !os.IsNotExist(err) {
+			t.Fatalf("role prompt %s outlived chat end: %v", promptPath, err)
+		}
+	}
+}
+
+func TestChatEndWarnsButSucceedsWhenRolePromptRemovalFails(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not installed")
+	}
+	jail := newRunJail(t)
+	defer jail.killSockets(t)
+
+	const launchName = "SabotagedRoleWorker"
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"chat", "new", "--engine", "cc", "--name", launchName,
+		"--cwd", filepath.Join(jail.root, "work"), "audit the firewall",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("chat new exit=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	entries, err := os.ReadDir(jail.tmuxDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("jailed tmux sockets=%v err=%v", entries, err)
+	}
+	target, targetCode := headlessTarget(
+		context.Background(), entries[0].Name(), &stdout, &stderr, false,
+	)
+	if targetCode != 0 {
+		t.Fatalf("resolve spawned seat code=%d stdout=%q stderr=%q", targetCode, stdout.String(), stderr.String())
+	}
+	promptPath := mustReloadSeatPromptPath(t, filepath.Join(jail.root, "sid"), target.Socket, target.Pane)
+	if err := os.MkdirAll(filepath.Join(promptPath, "litter"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptPath, "litter", "x"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"chat", "end", entries[0].Name()}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("chat end exit=%d, want 0; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "WARNING") || !strings.Contains(stderr.String(), "role prompt") {
+		t.Fatalf("chat end stderr=%q, want role-prompt WARNING", stderr.String())
+	}
+}
+
+func mustReloadSeatPromptPath(t *testing.T, sidDir, socket, pane string) string {
+	t.Helper()
+	path, err := agentrole.SeatPromptPath(sidDir, socket, pane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 type reloadTargetTmux struct {
 	panes []reload.Pane

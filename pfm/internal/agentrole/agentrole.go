@@ -23,8 +23,42 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
+
+// RefreshSeatPrompt re-resolves the marker role, atomically rewrites its
+// prompt file, and returns the engine-ready prompt channel.
+func RefreshSeatPrompt(engine pfmengine.ID, sidDir, socket, pane, cwd, home string) (string, error) {
+	role, _, path, found, err := ReadSeatPrompt(sidDir, socket, pane)
+	if err != nil || !found {
+		return "", err
+	}
+	constitution, _, err := Resolve(engine, role, cwd, home)
+	if err != nil {
+		return "", err
+	}
+	var stagedFleetPrompt string
+	if engine == pfmengine.Claude {
+		path := action.ProfessorPromptPath(home)
+		raw, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return "", fmt.Errorf("agent role: read staged Claude prompt %s: %w", path, readErr)
+		}
+		stagedFleetPrompt = string(raw)
+	}
+	body, err := ComposeSeatPrompt(engine, role, constitution, stagedFleetPrompt)
+	if err != nil {
+		return "", err
+	}
+	if err := writeSeatPromptFile(sidDir, path, body); err != nil {
+		return "", err
+	}
+	if engine == pfmengine.Claude {
+		return path, nil
+	}
+	return constitution, nil
+}
 
 // artifactKind is which subdirectory and file extension carry a role's
 // constitution for one engine.
@@ -33,28 +67,11 @@ type artifactKind struct {
 	ext    string
 }
 
-// Artifact is exactly which file — and which part of it — a role's
-// constitution was read from. T1 re-arm persists this alongside the role
-// name so a later reload or self-compact can point at the SAME rung birth
-// used, instead of re-resolving the ladder independently and risking a
-// different rung if the search path changed under it.
+// Artifact is exactly which file a role's constitution was read from.
 type Artifact struct {
 	// Path is the absolute path of the file Resolve actually read.
 	Path string
-	// TOMLKey is true when the constitution is the DeveloperInstructionsKey
-	// value inside that TOML file, not the whole file — a re-arm pointer at
-	// a TOML artifact must name the key as well as the file, or a seat told
-	// to "read the whole file" has to work out on its own which part binds
-	// it (name and description sit beside developer_instructions).
-	TOMLKey bool
 }
-
-// DeveloperInstructionsKey is the one TOML key readTOMLConstitution reads a
-// Codex seat's constitution out of. It is exported so a re-arm pointer can
-// name the exact key a TOML seat's binding lives under without duplicating
-// the string — the struct tag below must keep the same literal, since a Go
-// struct tag cannot itself reference a constant.
-const DeveloperInstructionsKey = "developer_instructions"
 
 func kindFor(engineID pfmengine.ID) (artifactKind, error) {
 	switch engineID {
@@ -126,7 +143,7 @@ func Resolve(engineID pfmengine.ID, role, cwd, home string) (string, Artifact, e
 			if err != nil {
 				return "", Artifact{}, fmt.Errorf("agent role: resolve absolute path for %s: %w", path, err)
 			}
-			return text, Artifact{Path: absPath, TOMLKey: engineID == pfmengine.Codex}, nil
+			return text, Artifact{Path: absPath}, nil
 		}
 		if statErr != nil && !os.IsNotExist(statErr) {
 			return "", Artifact{}, fmt.Errorf("agent role: inspect %s: %w", path, statErr)
@@ -153,25 +170,12 @@ func Resolve(engineID pfmengine.ID, role, cwd, home string) (string, Artifact, e
 func readArtifact(engineID pfmengine.ID, path string) (string, error) {
 	switch engineID {
 	case pfmengine.Claude:
-		return ReadArtifact(path, false)
+		return readMarkdownConstitution(path)
 	case pfmengine.Codex:
-		return ReadArtifact(path, true)
+		return readTOMLConstitution(path)
 	default:
 		return "", fmt.Errorf("agent role: engine %q has no registered agent artifact ladder", engineID)
 	}
-}
-
-// ReadArtifact re-reads path exactly as birth read it: the whole file, minus
-// frontmatter, for a .md constitution when tomlKey is false; just the
-// DeveloperInstructionsKey value for a compiled Codex .toml when tomlKey is
-// true. It is exported so a re-arm can re-read the CURRENT text of the same
-// artifact Resolve found at birth — using the TOMLKey bit Resolve returned
-// on its Artifact — without re-walking the ladder or re-deriving an engine.
-func ReadArtifact(path string, tomlKey bool) (string, error) {
-	if tomlKey {
-		return readTOMLConstitution(path)
-	}
-	return readMarkdownConstitution(path)
 }
 
 func readMarkdownConstitution(path string) (string, error) {

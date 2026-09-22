@@ -36,7 +36,7 @@ I3 · `tmux-title-renudge` overlay staged + symlinked · needs:tmux · today:U �
 I4 · `handoff.skill.md` symlinked per Claude account · needs:seat:cc · today:NONE ⚠ known-gap (no doctor probe for skill-link health) · install.md:27 · lane(s):O1
 I5 · launchd name-sync plist wiring (macOS only) · needs:systemd/launchd · today:NONE ⚠ known-gap (no doctor row found; unverified on Linux) · install.md:28 · lane(s):O1
 I6 · launchd MCP plist wiring (macOS only, MCP-enabled gate) · needs:systemd/launchd,network · today:U · install.md:29 · lane(s):O1
-I7 · `harness-prompts/codex.md` staged, consumed as Codex SessionStart hook file · needs:seat:cx · today:U · install.md:30 · lane(s):O1
+I7 · `harness-prompts/codex.md` staged, composed into Codex's `developer_instructions` · needs:seat:cx · today:U · install.md:30 · lane(s):O1
 I8 · harness-prompt baseline files (opus + original) for drift doctor · needs:none · today:U · install.md:31 · lane(s):O1
 I9 · `harness-prompts/claude.md` system-prompt file (`claude.systemPrompt="professor"`) · needs:seat:cc · today:NONE ⚠ known-gap (no dedicated doctor row) · install.md:32 · lane(s):O1
 I10 · `reload.command.md` installed command file (Claude + Codex mirror) · needs:seat:cc · today:NONE ⚠ known-gap (no doctor row for command-link health) · install.md:33 · lane(s):O1
@@ -65,7 +65,7 @@ I29 · Claude `UserPromptSubmit` → `pfm internal epic-inject` · needs:seat:cc
 I30 · Claude `UserPromptSubmit` → `pfm internal reload-intercept` · needs:seat:cc,tmux · today:U · install.md:70 · lane(s):O1
 I31 · Claude `UserPromptSubmit` → `pfm internal exit-intercept` · needs:seat:cc,tmux · today:U · install.md:71 · lane(s):O1
 I32 · Claude `UserPromptSubmit` → `pfm internal compact-nudge` · needs:seat:cc · today:U · install.md:72 · lane(s):O1
-I33 · Codex `SessionStart` (`startup|resume|clear`) → codex-appendix injection · needs:seat:cx · today:U · install.md:73 · lane(s):O1
+I33 · Codex fleet prompt carried by `developer_instructions` in `config.toml`, with any recorded SessionStart appendix registration removed · needs:seat:cx · today:U · install.md:73 · lane(s):O1
 
 ### Seats
 
@@ -156,8 +156,8 @@ I98 · `pfm doctor [--verbose] [--skip-harvest]` command itself (exit 0/1/2/3 co
 P1 · `project/CLAUDE.md` → `CLAUDE.md` · needs:project · today:U+A (`install-init.txtar`) · install.md:145 · lane(s):A
 P2 · `project/settings.json` → `.claude/settings.json` (ships `notify.sh`/`format-md.sh` hooks) · needs:project · today:U+A · install.md:146 · lane(s):A
 P3 · `project/rumdl-policy.toml` → `.rumdl.toml` · needs:project · today:U · install.md:147 · lane(s):A
-P4 · `project/commands` → `.claude/commands` · needs:project · today:U · install.md:148 · lane(s):A
-P5 · `project/agents` (skip `per-project`) → `.claude/agents`, only `gitter.md` ships · needs:project · today:U · install.md:149 · lane(s):A
+P4 · `project/commands` (skip `per-project`) → `.claude/commands` · needs:project · today:U · install.md:148 · lane(s):A
+P5 · `project/agents` → `.claude/agents`, only `gitter.md` ships · needs:project · today:U · install.md:149 · lane(s):A
 P6 · `project/scripts` → `.claude/scripts` · needs:project · today:U · install.md:150 · lane(s):A
 P7 · `project/skills` → `.claude/skills` · needs:project · today:U · install.md:151 · lane(s):A
 P8 · `project/epics` → `docs/epics` · needs:project · today:U · install.md:152 · lane(s):A
@@ -168,7 +168,7 @@ P11 · `project/docs-agents` → `docs/agents` · needs:project · today:U · in
 ### Never deployed by `pfm` (Phase-2 Claude-session territory)
 
 P12 · `project/per-project/CLAUDE.md` (roster child CLAUDE.md) never deployed ⚠ known-gap · needs:project · today:NONE · install.md:160 · lane(s):A
-P13 · `project/agents/per-project/{developer,qa}.md` never deployed ⚠ known-gap · needs:project · today:NONE · install.md:161 · lane(s):A
+P13 · `project/commands/per-project/testing-manual.md` never deployed ⚠ known-gap · needs:project · today:NONE · install.md:161 · lane(s):A
 P14 · `project/settings-global.json` never deployed — Phase-2 hand key-merge only ⚠ known-gap · needs:project,seat:cc · today:NONE · install.md:162-165 · lane(s):A
 P15 · host git-bridge skill `.claude/skills/host-{gh,glab}/SKILL.md` never deployed — Phase-2 generated ⚠ known-gap · needs:project,git · today:NONE · install.md:166-168 · lane(s):A
 
@@ -531,7 +531,7 @@ X19 · `pfm internal chat-server <socket> <cwd> <run>` (shim's tmux-session crea
 X20 · `pfm internal claude-launch -- [claude args]` · needs:tmux · today:U · cli.md:206 · lane(s):E1
 X21 · `pfm internal claude-version` · needs:none · today:U · cli.md:207 · lane(s):O2
 X22 · `pfm internal clear-kill < payload.json` (SessionEnd hook body) · needs:none · today:U · cli.md:208 · lane(s):O2
-X23 · `pfm internal codex-appendix` (stdin/stdout hook rewrite) — no test found by name ⚠ known-gap · needs:none · today:NONE · cli.md:209 · lane(s):E2
+X23 · `codexappendix.Unregister` strips the recorded trust of the retired SessionStart appendix handler, leaving no such hook in `hooks.json` · needs:none · today:U+B · cli.md:209 · lane(s):E2
 X24 · `pfm internal codex-launch BINARY [args...]` (process-replacing exec) · needs:tmux,seat:cx · today:U · cli.md:210 · lane(s):E2
 X25 · `pfm internal compact-nudge` (UserPromptSubmit hook body) · needs:none · today:U · cli.md:211 · lane(s):E1
 X26 · `pfm internal epic-inject` (UserPromptSubmit hook body, epic manifest via window name) · needs:tmux · today:U · cli.md:212 · lane(s):O2
@@ -572,10 +572,10 @@ None — every row read across the five inventories converted into an atomic ite
 | M — MCP | 55 | 11 |
 | L — Lifecycle mechanics | 42 | 0 |
 | H — Harvester | 12 | 1 |
-| X — Misc CLI | 42 | 6 |
-| **Total** | **430** | **39** |
+| X — Misc CLI | 42 | 5 |
+| **Total** | **430** | **38** |
 
-`today=NONE` breakdown by id: I4,I5,I9,I10,I13,I15,I17,I18,I40,I89,I90,I92 (12) · P12,P13,P14,P15 (4) · C31,C40,C41 (3) · K19 (1) · T37 (1) · M15,M16,M17,M18,M21,M22,M25,M26,M28,M29,M48 (11) · H12 (1) · X18,X23,X32,X33,X34,X41 (6).
+`today=NONE` breakdown by id: I4,I5,I9,I10,I13,I15,I17,I18,I40,I89,I90,I92 (12) · P12,P13,P14,P15 (4) · C31,C40,C41 (3) · K19 (1) · T37 (1) · M15,M16,M17,M18,M21,M22,M25,M26,M28,M29,M48 (11) · H12 (1) · X18,X32,X33,X34,X41 (5).
 
 ---
 
@@ -589,7 +589,7 @@ not re-listed here).
 
 - Coverage §, line 235: "UNKNOWN cells: **none marked**" — cli.md declares zero literal UNKNOWN
   cells in its own tables; the "no test file found" residuals it does name (line 236) are folded
-  into items C31, C40, C41, C45(note), X18, X23, X32, X33, X34, X41 above, not re-listed as UNKNOWN.
+  into items C31, C40, C41, C45(note), X18, X32, X33, X34, X41 above, not re-listed as UNKNOWN.
 
 ### `mcp.md`
 

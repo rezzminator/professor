@@ -22,7 +22,8 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 
 - `CLAUDE.md` — request routing + guards; routes non-obvious requests to commands, names mandatory-load obligations; carries no rosters (§ Authoring conventions, no-rosters law)
 - `.claude/commands/*.md` — project slash commands (/pcm, /dev, …); machine-global commands (`/flights:*`, `/quality:*`, `/context-meter`, `/pfm`) live in `~/.claude/commands/`, symlinked to the blueprint clone by `pfm install`
-- `.claude/agents/*.md` — root pipeline agents (gitter) + {proj}-qa wrappers, one per project (registered QA gates that read the child protocol and carry the test-output filter hook)
+- `.claude/agents/*.md` — root pipeline agents (gitter) + any `{proj}-{role}` specialist wrappers the project wrote
+- `.claude/commands/{project}-testing-manual.md` — one per project: its testing law, read by the flights agents
 - `.claude/skills/*/SKILL.md` — reusable skills (`ls .claude/skills/` for the current set)
 - `.claude/scripts/*.{sh,mjs}` — worktree.sh, alloc-ports.sh, dev.sh, pfm-guard.sh + guard-stamp.sh (the framework-edit gate), codex-sync.sh (the `pfm codex` hook bridge)
 - `{project}/.claude/agents/*.md` — child project agents; `{project}/CLAUDE.md` — child project conventions. A `{project}` held as a git submodule lands its commits in the child repo, and the root repo pins a pointer (gitter-owned)
@@ -36,7 +37,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 - **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
 - **Never hardcode names, counts, or rosters that change** — table names, enum values, chain names, agent/queue/chain tallies evolve. Tell agents WHERE to discover (`ls`, a registry file, the owning script), not WHAT the values are.
-- **Frontmatter features need registration** — `hooks:`/`model:`/`effort:` load ONLY when an agent is spawned as a registered type via its `subagent_type`; a protocol file read by a general-purpose agent never loads frontmatter. A child agent needing frontmatter features needs a thin root wrapper (the `{proj}-qa` pattern: registration shell at root, protocol stays in the child file).
+- **Frontmatter features need registration** — `hooks:`/`model:`/`effort:` load ONLY when an agent is spawned as a registered type via its `subagent_type`; a protocol file read by a general-purpose agent never loads frontmatter. A child agent needing frontmatter features needs a thin root wrapper (the `{proj}-{role}` pattern: registration shell at root, protocol stays in the child file).
 - **Registries read at session start** — agent types, settings.json hooks, and the injected fleet prompt load at session start; mid-session file changes land at natural boundaries (next spawn, next pipeline, next session). When a long-running session will consume an edited orchestrator file, add a transitional fallback clause (brief-wins, registry-fallback) rather than assuming hot reload.
 - **Workflow scripts are schedulers** — workflow sub-agents carry NO Agent tool (no nesting) and no Skill tool; a saved workflow script must call every role directly via `agent()` — `agentType` resolves registered types (frontmatter model/hooks intact). A script's flow graph is a declared copy of its command file — update both in the same change. **One-level nesting only** (`workflow()` inside a child throws): when a workflow can't be nested at a call site, that site inlines the same `agent()` fan-out as a second declared copy. Sync set today: `doc-approval.md` ↔ `quality/doc.md` § Approval.
 
@@ -45,7 +46,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 <!-- INSTALL: this section is derive-only by design — no fixed counts to fill in. The bash commands below run against the actual roster/filesystem every time, so a single-project install and a ten-project install both get correct answers from the same text. -->
 
 - **Projects:** derive with `ls -d {project}*/`; each child CLAUDE.md § Quick Start names its package manager
-- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every agent is registered at root on the `{proj}-{role}` convention (`{proj}-qa`, `{proj}-developer`, …), plus the project-neutral `gitter`; the machine-global cast (`flights-speccer`, `flights-orchestrator`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per CLAUDE.md § Model Selection
+- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every project specialist is registered at root on the `{proj}-{role}` convention, plus the project-neutral `gitter`; the machine-global cast (`flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-hard-executor`, `flights-gater`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per CLAUDE.md § Model Selection
 - Commands and skills: `ls .claude/commands/ .claude/skills/ ~/.claude/commands/ ~/.claude/skills/`
 
 ---
@@ -252,7 +253,7 @@ Files: `~/.claude/commands/flights/*.md` (machine-global: spec, orchestrate-nest
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
 - **Verdict tokens ↔ the manual:** every token a command cites (`CLAIMED`, `DONE`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `STALE`) is one `flights-orchestrator` writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
-- **Flow integrity:** spec → orchestrate → land across commands; executor → reviewer → gitter within a flight — no step references an agent from a later phase
+- **Flow integrity:** spec → orchestrate → land across commands; executor → `flights-gater` → gitter within a flight — no step references an agent from a later phase
 
 ### `scripts` — Walk each script
 

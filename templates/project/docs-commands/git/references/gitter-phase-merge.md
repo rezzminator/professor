@@ -2,8 +2,6 @@
 
 Gitter phase card — every core `gitter.md` rule (Remote Publication Boundary, Scoped-commit discipline, BANNED commands, commit convention) binds here. Gitter owns § Gotchas and self-updates it.
 
-Invoked **after QA** reports `Status: NONE` in `$DOCS/6-bugs.md`.
-
 ## 0. Acquire the merge lock + check for concurrent merges
 
 The advisory lock guards `main` against two pipelines merging at once; busy = another pipeline is mid-merge — report busy, retry shortly. Released in Step 6b. Then check concurrency:
@@ -18,8 +16,7 @@ If another pipeline is actively merging, wait and retry.
 
 ## 1. Validate preconditions
 
-- Read `$DOCS/6-bugs.md` from disk and confirm it contains `Status: NONE` — file absent or status not NONE → refuse and report which. The dispatch brief's own verdict text never substitutes for the file — a merge validated against an in-brief claim is ungated.
-- **Flight mode** (the brief names a REPORT_PATH): that path must exist ON DISK with every `F{n}` finding `status: resolved @sha` or `waived — {ruling}` — file absent (the merge-gating review never ran) or any `open` finding → refuse and name it. Same law: the brief's verdict text never substitutes for the file.
+- The REPORT_PATH the brief names must exist ON DISK with every `F{n}` finding `status: resolved @sha` or `waived — {ruling}` — file absent (the merge-gating review never ran) or any `open` finding → refuse and name which. The dispatch brief's own verdict text never substitutes for the file — a merge validated against an in-brief claim is ungated.
 - Confirm worktree exists: `./.claude/scripts/worktree.sh list $PIPELINE`
 
 ## 2. Commit all worktree changes

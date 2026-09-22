@@ -33,7 +33,7 @@ Cross-conversation context persists via **Epics** — initiative-level manifest 
 
 ### Tier assignments
 
-**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project agents (planner, architect, developer, qa, ui-ux, db-admin, devops, ai-engineer)
+**Tier A** — `Professor` (persona), `/pfm` (with its `update` and `release` subcommands), `/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}`, `/dev`, `/save` **Tier B** — `/officer` `{REGULATION}`, `/mentor` `{MARKET_SEGMENT}`, `/marketer` `{CHANNEL_LANDSCAPE}` **Tier C** — root agents (gitter), scripts (worktree.sh, alloc-ports.sh, dev.sh), per-project testing manuals (`/{project}-testing-manual`) and the optional per-project specialists (ui-ux, db-admin, devops, ai-engineer)
 
 ### Preservation (untouchable across tiers)
 
@@ -112,7 +112,7 @@ Exports an interview Claude conducts before touching files. Structure:
 6. Tier B opt-ins: Officer (regulations?), KM (domain?), PM (persona?), Mentor (market+jurisdiction?), Marketer (channels+language?)
 7. Sacred ground ("do no harm" in your domain)
 
-**Phase 2 — Customization:** Rewrite every template replacing placeholders with interview answers. The per-project pipeline blocks MUST be materialized from the actual project roster; delete planner/architect/developer/QA/db/devops blocks for missing projects and fail if any referenced agent path does not exist.
+**Phase 2 — Customization:** Rewrite every template replacing placeholders with interview answers. The per-project blocks MUST be materialized from the actual project roster: one testing manual per entry, a specialist block only where that project wants one; delete every block for a project the roster does not list, and fail if any referenced agent or manual path does not exist.
 
 **Phase 2.5 — Skill Knowledge Hydration (domain-hydrated skills):**
 

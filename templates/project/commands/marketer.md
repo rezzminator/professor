@@ -204,7 +204,7 @@ Marketing dev tasks for the flight pipeline.
 
 - Read first: `{PROJECT}/CLAUDE.md`, `app/`, `messages/*.json`, `src/components/`, Officer posture, positioning, competitive intel. Tasks written without that context are guesses.
 - Ask the user: goal (waitlist, conference, awareness)? audience priority? social proof available? web-only or broader? deadlines? new certifications to market?
-- Each task states what, why, key behaviors, and boundaries; group by category (SEO & Technical, Content & Copy, Conversion, Analytics, i18n), number sequentially, and flag compliance inline as `[WATCH: ...]` or `[BLOCKED: ...]`. Routing, size and pipeline names stay out — the planner decides those.
+- Each task states what, why, key behaviors, and boundaries; group by category (SEO & Technical, Content & Copy, Conversion, Analytics, i18n), number sequentially, and flag compliance inline as `[WATCH: ...]` or `[BLOCKED: ...]`. Routing, size and flight names stay out — `flights-speccer` decides those.
 - Produce the task list as `# Tasks`, then `## {Category} ({N} tasks)`, then one numbered line per task carrying its file refs and flags; save it to `/tmp/marketer-flight-{YYYY-MM-DD}.md` as the record — the flight directory belongs to `flights-speccer` alone, and spec's input is a task-list argument, never a direct flight-directory write.
 - Report the path and task count, then hand the same task list to `/flights:spec {task list}` (spec's bare `<tasks>` inline-argument form) — the flight continues `/flights:spec` → `flights-speccer` (which writes the flight directory) → an orchestrate command.
 

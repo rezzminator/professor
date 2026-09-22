@@ -56,13 +56,13 @@ This section is the runnable handoff from `pfm init`; no install slash command e
 2. Fill registered tokens directly in the scaffolded local files. These files are now the project's source of truth; do not regenerate them from templates or rewrite `.professor/baseline.json`. Files skipped by `pfm init` as `CONFLICT` stay unpinned and unchanged unless the user explicitly includes them in the plan.
 3. Materialize the roster-only sources that `pfm init` deliberately skips:
    - `templates/project/per-project/CLAUDE.md` → `{project}/CLAUDE.md` for each child project that needs one.
-   - Every file under `templates/project/agents/per-project/` → the corresponding local per-project agent path for each roster entry. A single-project install places its instantiated agents in `.claude/agents/`; a multi-project install places them in `{project}/.claude/agents/`. Create only the roster entries and roles the interview selected.
+   - `templates/project/commands/per-project/testing-manual.md` → `.claude/commands/{project}-testing-manual.md`, one per roster entry (`testing-manual.md` for a single-project install), its eleven sections filled from that project's real test layout and commands.
 4. Write `.professor/manifest.json` with the confirmed answers in its `interview` object, including `blueprint_clone_path`, roster, tool commands, ports, optional roles, and engine choices — `pfm init` writes only `.professor/baseline.json`, so the interview creates `manifest.json` in the format step 11 shows; on a re-run, preserve every non-interview field. `manifest.json` is the user-owned install record; `.professor/baseline.json` remains pfm-owned provenance.
 5. Verify that no required token remains, every generated agent reference resolves, and scripts preserve executable mode. If Codex is enabled, run `pfm codex build` and `pfm codex check` from the target project after the local Claude files are final.
 6. **Close by pinning every file deployed by the interview.** For each local created from a roster-only template, run:
 
    ```bash
-   pfm update pin --template project/agents/per-project/<t>.md <local>
+   pfm update pin --template project/commands/per-project/testing-manual.md <local>
    ```
 
    Use the matching template path for `project/per-project/CLAUDE.md` and any other interview-deployed template. Many local files may pin the same template. Do not re-pin files scaffolded by `pfm init`; their template-byte pins already exist and local token filling does not invalidate them.
@@ -102,16 +102,16 @@ For each roster entry, Claude needs:
 - Tech: language, framework, package manager, test runner, build tool, dev server port(s)
 - Ownership facts, each answered by naming at most one entry: which owns the shared infra/orchestration (`Makefile`, containers, DB, queue); which owns the migrations dir; which holds the LLM-calling code, if any; which serves the public site, if any
 
-**Single-project repo (roster of one):** the worktree is the repo root (no per-project subdir), there are no cross-project/integration steps, routing is trivially that one project, and the multi-project framing collapses to "the project." Skip child `CLAUDE.md` files (nothing to consolidate). All agents live flat at `.claude/agents/`; a flight's task files name those agents as its executors, with no per-project fan-out.
+**Single-project repo (roster of one):** the worktree is the repo root (no per-project subdir), there are no cross-project/integration steps, routing is trivially that one project, and the multi-project framing collapses to "the project." Skip child `CLAUDE.md` files (nothing to consolidate). Any project agent lives flat at `.claude/agents/`; a flight's executors and gater are machine-global and picked by the index row's `rating`, with no per-project fan-out.
 
-**Multi-project repo (roster of 2+):** the main-loop session consolidates the child planners' plans and designs cross-project contracts directly (no dedicated consolidation agent). For each entry, create `{project}/CLAUDE.md` and `{project}/.claude/agents/`.
+**Multi-project repo (roster of 2+):** the main-loop session designs cross-project contracts directly (no dedicated consolidation agent). For each entry, create `{project}/CLAUDE.md` and `{project}/.claude/agents/`.
 
 Example rosters (two possible shapes — yours may have one entry or seven; the names are yours):
 
 - Roster of one: `.` — the whole repo: Go, `go test`, port 8080; owns its own infra (`Makefile` + compose)
 - Roster of three: `a` — the HTTP service: TypeScript, pnpm, vitest, port 3000 · `b` — the queue consumer: Python, uv, pytest, no port · `c` — owns the shared infra: `Makefile` + Docker Compose for PostgreSQL + Redis, no port
 
-**Specialist agents:** beyond `developer` and `qa`, add a specialist when a narrow concern justifies it:
+**Specialist agents:** the flights agents build and gate every project; add a specialist when a narrow concern justifies it:
 
 | When to add one | What it owns |
 | ---------------------------------------- | --------------------------------------------------- |
@@ -133,7 +133,7 @@ For each subproject, Claude pins these into the agents and scripts:
 - Dev server start command
 - Dependency install command (`pnpm install`, `uv sync`, `cargo build`, etc.)
 
-These go into `worktree.sh`, `dev.sh`, and the developer + qa agent files.
+These go into `worktree.sh`, `dev.sh`, and each project's testing manual.
 
 ### 5. (retired)
 
@@ -219,7 +219,7 @@ Claude shows you a summary of all answers + a list of files that will be written
 
 ## Phase 2 — Customization
 
-> **Materialization — how the roster expands.** Several templates carry per-project **PATTERN blocks**, written once with generic `{project}` tokens: the per-project agent files under `{project}/.claude/agents/{developer,qa}.md` (plus any specialists), and the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh`. For each roster entry, Claude **expands every pattern block once**, substituting that entry's directory, role, stack, package manager, test runner, and port — then fills the `PROJECTS=()` arrays so the scripts iterate the real roster. A roster of one expands each block once; a roster of seven expands it seven times. **Never carry a pattern block for a project the roster does not list** — no installed file may reference a dev/qa agent for a project that does not exist, and no `{project}` placeholder may remain unexpanded. **Single-project install:** the worktree is the repo root, the `PROJECTS=()` array holds the single entry (or the scripts drop the loop entirely), and cross-project consolidation steps are omitted.
+> **Materialization — how the roster expands.** Several templates carry per-project **PATTERN blocks**, written once with generic `{project}` tokens: the per-project testing manuals `.claude/commands/{project}-testing-manual.md` (plus any specialist agents), and the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh`. For each roster entry, Claude **expands every pattern block once**, substituting that entry's directory, role, stack, package manager, test runner, and port — then fills the `PROJECTS=()` arrays so the scripts iterate the real roster. A roster of one expands each block once; a roster of seven expands it seven times. **Never carry a pattern block for a project the roster does not list** — no installed file may reference a testing manual or an agent for a project that does not exist, and no `{project}` placeholder may remain unexpanded. **Single-project install:** the worktree is the repo root, the `PROJECTS=()` array holds the single entry (or the scripts drop the loop entirely), and cross-project consolidation steps are omitted.
 
 Claude takes your answers and:
 
@@ -227,8 +227,8 @@ Claude takes your answers and:
 2. **Writes per-project `CLAUDE.md` files** (roster of 2+) — one per entry, with that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
 3. **Writes Tier A command files** — `/pcm`, `/dev`, `/rnd`, `/audit:*` (the machine-global `/flights:*`, `/pfm`, `/quality:*` arrive by `pfm install`). Voice intact, domain content filled.
 4. **Writes Tier B command files** for each opt-in — `/officer`, `/mentor`, `/marketer`. Archetype skeletons with your placeholders filled. The leading `>`-quoted "Required placeholders (fill at install)" meta-block from each template is stripped before save — that block is install-time scaffolding, not runtime content. A correctly-installed Tier B command starts with the H1 heading and goes straight to the `$ARGUMENTS` line. A declined archetype that `pfm init` already scaffolded is deleted, its pin forgotten with `pfm update drop <local>`, then its template silenced with `pfm update ignore <template>`; see [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes).
-5. **Writes root agents** — `gitter` always (`tracer`, `flights-speccer`, `flights-orchestrator`, `reviewer`, and `rr` are machine-global, linked into `~/.claude/agents/` by `pfm install`, never copied into the project). Cross-project consolidation for a roster of 2+ runs in the main-loop session, not a dedicated agent.
-6. **Writes per-project agents** — for each roster entry, instantiates that project's `developer` and `qa` from `templates/project/agents/per-project/` (plus any specialists from Q3) under `{project}/.claude/agents/`, with its test/lint/build commands pinned. One set per entry; none for projects not in the roster. No per-project `planner` or `architect` template ships and no shipped command spawns one by name; write one only when the project wants it.
+5. **Writes root agents** — `gitter` always (`tracer`, `flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-hard-executor`, `flights-gater`, `reviewer`, and `rr` are machine-global, linked into `~/.claude/agents/` by `pfm install`, never copied into the project). Cross-project consolidation for a roster of 2+ runs in the main-loop session, not a dedicated agent.
+6. **Writes the per-project testing manuals** — for each roster entry, instantiates `.claude/commands/{project}-testing-manual.md` from `templates/project/commands/per-project/testing-manual.md` with that project's tiers, test homes, run commands, gates and traps; the flights agents read it, so no per-project `developer` or `qa` agent ships. Specialists from Q3 are written under `{project}/.claude/agents/` only when the project wants them; no shipped command spawns one by name.
 7. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh`. Fills the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh` from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop). 7a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; every registry skill is **source-fetched** from its canonical public repo (listed in `templates/project/skills/sources.json`) into `.claude/skills/{name}/`, so those external skills cannot silently drift inside the blueprint. The installer copies the bundled shelf, clones each registry skill, parameterizes where needed, and removes each clone's `.git/` directory so the installed skills are plain files. The reasoning protocols that once shipped as bundled skills — `/rnd`, `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. `/rnd` is project-scope: the command owns the RND lifecycle and executes its own run. The table records each subject's source path and its parameterization.
 
 | Skill / command | Source | Parameterization |
@@ -320,7 +320,7 @@ Claude takes your answers and:
 
 8. **Creates directory structure** — `docs/agents/`, `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` (gitignored). Flight directories are scratch: `tmp/flights/{flight}/` is created by the run itself, under the gitignored `tmp/`.
 
-8a. **Installs command reference docs** — copies `templates/project/docs-commands/` into `docs/commands/` verbatim; the template tree mirrors `$CDOCS` exactly (e.g. `docs-commands/build/references/build-reference.md` → `docs/commands/build/references/build-reference.md`), so commands that cite a reference doc find it on disk.
+8a. **Installs command reference docs** — copies `templates/project/docs-commands/` into `docs/commands/` verbatim; the template tree mirrors `$CDOCS` exactly (e.g. `docs-commands/build/references/qa-commons.md` → `docs/commands/build/references/qa-commons.md`), so commands that cite a reference doc find it on disk.
 
 8b. **(If Codex opted in)** Creates `.codex/` as a pointer layer over `.claude/` — never a restatement of it. Writes `config.toml` (sandbox reach + the `{CODEX_MODEL}`/`{CODEX_REASONING_EFFORT}` pins) and `rules/repo-law.rules` (the execpolicy door lock for non-gitter roles). Runs `pfm codex build` to compile every root and per-project Claude source into the Codex mirrors, then `pfm codex check` to verify them. Registry changes require a new or reloaded Codex session. If Codex was NOT opted in, this step is skipped entirely.
 
@@ -328,7 +328,7 @@ Claude takes your answers and:
 10. **Maintains `.professor/` state** — `manifest.json` holds the user-owned interview answers, while `baseline.json` holds pfm-owned per-file template pins.
 11. **Writes `.professor/manifest.json`** — created here (`pfm init` leaves only `baseline.json`); on a re-run replace its `interview` object with the confirmed answers while preserving every non-interview field. Format:
 
-**Build roster validation:** no installed file is allowed to carry blueprint example projects that the target repo does not have. The installer must generate developer/QA (and any specialist) blocks only for roster entries, fail if any `{project}` pattern token remains unexpanded, and then verify every referenced `*/.claude/agents/*.md` path exists. A roster of `a` and `b` leaves no block for a `c` the repo does not have.
+**Build roster validation:** no installed file is allowed to carry blueprint example projects that the target repo does not have. The installer must generate testing manuals (and any specialist blocks) only for roster entries, fail if any `{project}` pattern token remains unexpanded, and then verify every referenced `*/.claude/agents/*.md` path exists. A roster of `a` and `b` leaves no block for a `c` the repo does not have.
 
 ```json
 {

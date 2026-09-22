@@ -2,7 +2,7 @@
 
 Gitter phase card — every core `gitter.md` rule (Remote Publication Boundary, Scoped-commit discipline, BANNED commands, commit convention) binds here.
 
-First pipeline stage — creates the worktree before planning and architecture run.
+Creates the worktree a flight runs in, before its first task file is dispatched.
 
 ## 1. Validate preconditions
 

@@ -146,10 +146,11 @@ Written to the path the request names; absent one, `<the project's design-doc di
 
 ## Hand-off to the build and test hands
 
-The design document is reviewed before anything is built: unmapped capabilities, crossings asserted from one side only, checks whose broken state would read as PASS. In a project installed from this blueprint, `flights-speccer`'s reconcile phase performs that review, the build goes through `/flights:spec` and the project's executor, and the suite is built and kept by the per-project agents under `{project}/.claude/agents/`:
+The design document is reviewed before anything is built: unmapped capabilities, crossings asserted from one side only, checks whose broken state would read as PASS. In a project installed from this blueprint, `flights-speccer`'s reconcile phase performs that review, the build goes through `/flights:spec`, and the suite is built and kept by the flights agents:
 
-- `developer.md` builds the harness, the mocks and the lanes from the flight's task files of Build order.
-- `qa.md` runs them: § Scope maps onto lanes — TARGETED runs the solo lanes owning the touched area, FULL and POST-MERGE run the sequence; Step 6 compliance checks and § QA fix chain apply to a defect a lane exposes.
+- a flight executor builds the harness, the mocks and the lanes from the flight's task files of Build order.
+- `flights-gater` runs them at the landing: the solo lanes owning the touched area while it fixes, the sequence at the gate's open and close; a defect a lane exposes is its to fix.
+- The project's testing manual, § Lanes and registries, states the duty this design leaves on every change: the landscape row, the map row and the beat in the same commit.
 - `docs/commands/build/references/qa-commons.md` §§ Test validity, Run verdicts, Integration lanes carry the rules both hands share with this command.
 
 Elsewhere, the owner assigns the review, the build and the runs; Law 4 is the run policy (a solo lane while working, the sequence at close and release) and Laws 7–9 are the verdict rules.

@@ -114,9 +114,6 @@ func TestInstallStagesComposedHarnessPrompts(t *testing.T) {
 				if strings.Contains(mappedTail, "/code-review") {
 					t.Fatalf("staged %s.md still spells /code-review:\n%s", long, mappedTail)
 				}
-				if !strings.Contains(mappedTail, `codex review -c model="`) {
-					t.Fatalf("staged %s.md carries no scoped codex review command:\n%s", long, mappedTail)
-				}
 				return
 			}
 			want := strings.TrimRight(head, "\n") + "\n\n" +
@@ -124,9 +121,6 @@ func TestInstallStagesComposedHarnessPrompts(t *testing.T) {
 				strings.TrimRight(tail, "\n") + "\n"
 			if string(actual) != want {
 				t.Fatalf("staged %s.md is not head + middle + tail", long)
-			}
-			if !strings.Contains(string(actual), "/code-review low") {
-				t.Fatalf("staged %s.md lost /code-review low — its engine runs the Claude command", long)
 			}
 			// The parts each end in a single newline today, so the seams are
 			// also plain concatenation — a second, independent reading of

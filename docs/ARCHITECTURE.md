@@ -70,7 +70,7 @@ A render manifest records the hash of every rendered artifact. An artifact whose
 | --------------- | -------------------------------------------------------------- | ---------------------------------- | --------------------- |
 | Host executable | `pfm` | built binary | runtime config only |
 | Host assets | `pfm/internal/installer/assets/` | embedded, staged, then symlinked | none |
-| Repo files | per-project agents, QA protocols, Codex TOMLs, child CLAUDE.md | rendered from the adopter's values | roster, stack, models |
+| Repo files | per-project testing manuals, project agents, Codex TOMLs, child CLAUDE.md | rendered from the adopter's values | roster, stack, models |
 
 The host tiers are value-free by construction — proven by inspection: their templates contain only harness conditionals, no host variables. That is what makes committed renders possible for them. The repo tier genuinely depends on the adopter's roster, so it renders on the adopter's machine at setup and update. Which rows are shipping versus designed is the [Migration state](#migration-state) table's job — this one describes the target shape.
 

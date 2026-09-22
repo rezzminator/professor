@@ -36,7 +36,7 @@ The spawn brief names a **Phase**. Card phases: `Read` the named card in `docs/c
 | ------------------- | ------------------------------------------------------------------------- |
 | SETUP | card `gitter-phase-setup.md` — create worktree branch, ports, audit trail |
 | COMMIT | inline below — a code change landing directly on `main` |
-| MERGE | card `gitter-phase-merge.md` — QA-gated merge to main, conflicts, cleanup |
+| MERGE | card `gitter-phase-merge.md` — review-gated merge to main, conflicts, cleanup |
 | DOCS-COMMIT | card `gitter-phase-docs.md` — commit docs on main, archive dirs to tmp |
 | PUSH | card `gitter-phase-push.md` — hard-gated by § Remote Publication Boundary |
 | PULL | inline below |

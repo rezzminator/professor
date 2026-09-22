@@ -196,8 +196,8 @@ cmd_remove() {
   fi
 
   # Branch survives by default — it is the merged flight's revert path and can still
-  # be LIVE (boundary GATE-2) when cleanup runs; deletion is a separate, explicit
-  # act, never bundled into worktree teardown.
+  # be LIVE (a post-merge gate still running) when cleanup runs; deletion is a
+  # separate, explicit act, never bundled into worktree teardown.
   if [ -n "$delete_branch" ]; then
     git branch -d "$branch" 2>/dev/null || true
     echo "Branch deleted: $branch"

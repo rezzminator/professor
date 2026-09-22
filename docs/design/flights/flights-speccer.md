@@ -50,7 +50,7 @@ Three consequences shape everything below.
 ### Model caller: work handed to a sub-agent
 
 1. A main chat hands work to a sub-agent of any type.
-2. Handed a batch, or work it cannot see how to do, the sub-agent's first tool call spawns `flights-speccer` at frontier-judgment (`opus`), handing it the work, everything it holds and a directory under `tmp/flights/`.
+2. Handed a batch, or work it cannot see how to do, the sub-agent's first tool call spawns `flights-speccer` at its pin — apex (`fable`), or `model: "opus"` on the spawn when the caller judges the flight small (a few tasks, no unknown cause, no design to choose) — handing it the work, everything it holds and a directory under `tmp/flights/`.
 3. `flights-speccer` writes the flight directory and returns the path, the index and the dispatch order.
 4. A directory holding a single task the sub-agent executes itself; one holding several it hands to `flights-orchestrator`, which dispatches one fresh executor per task file by the [ready rule](#the-ready-rule) and executes none itself.
 
@@ -69,7 +69,20 @@ Only the first item is required. Whatever is absent, `flights-speccer` derives f
 | What the caller already knows: maps, findings, names | The starting point; `flights-speccer` reads only what they leave out |
 | Boundaries: out of scope, files another owner holds | No task touches them |
 | Standing rules the executors work under | Specs stay inside them. The project's contract (the `CLAUDE.md` files) reaches every executor from the harness, and the flight's own rules (worktree, fence, checks, cap) travel in the dispatcher's brief; a task file carries neither, even when a caller's rule asks for them there |
+| The [testing manual](testing-manual.md) of each project touched | Opened at intake: Tiers, Where a test lives, Lanes and registries, Gates and floors, the removal clause of What not to test. Its facts enter a task as `Decisions`, `Files` and `Done when` lines — a test row names its tier, `Files` lists the test home and every registry file — and the manual is never a `reads` entry. A project without one is a `NOTES` line |
 | The flight directory | One directory under `tmp/flights/`; `flights-speccer` writes everything there and nowhere else |
+
+### What a spec never restates
+
+Anything the [executor](flights-executors.md) or the [gater](flights-gater.md) agent holds is never written into a task file or a `0-` file: how to run or wait for a command in general, read discipline, the watched-failing proof, the return format, the review, the cap, the layout laws, the testing manual's content. A `0-` file carries project facts several tasks need; an instruction every executor follows on every task belongs to the executor agent, and a project testing rule belongs to the testing manual — finding one missing is a `NOTES` line, never a paragraph in the spec. The task file's fixed lines went the same way: the closing line of `Done when` and the opening line of `Progress dependency` restated executor rules and now live in the executor's body; a task file keeps only what is a fact about this task. Reconcile's restatement check enforces it. The measured cost of the old way: 4.3 KB and 12.3 KB of generic instruction per executor in two audited flights, rewritten every revising round.
+
+### Layout laws at design time
+
+Four laws of `/quality:llm-codebase` bind when tasks are cut, and live in the Design phase: a task cuts along a unit of change, never across one; the unit's fixed file set decides `Files`; no new hand-kept parallel list and no directory named by negation, a registry being a hot file; a change crossing a wire boundary starts at the contract package's consumer index, and `needs` follows it. The laws that bind while a file is written live in the executor.
+
+### The model by round
+
+The first spec of a flight runs at the agent's pin (`fable`), or on `opus` when the caller judged the flight small. Every revising round runs on `opus`, spawned fresh by the orchestrator, and reads the `RETRO` lines of `run.md` with the executor's transcript.
 
 With `/flights:spec` the fourth row arrives full, because the user answered the questions. From a model caller it arrives thin, and `flights-speccer` decides.
 
@@ -173,7 +186,7 @@ The rating is computed from `Execution judgments`, not asserted.
 - Any judgment that is a diagnosis of an unknown cause: `hard`, whatever the count.
 - Otherwise: `mechanical`.
 
-The dispatcher uses the rating only where the executor's agent type pins no model: `mechanical` runs at spec-execution (`sonnet`), `hard` at frontier-judgment (`opus`). A pinned model always wins.
+The rating picks the executor: `mechanical` → `flights-mechanical-executor` (`sonnet`), `hard` → `flights-hard-executor` (`opus`); the spawn carries no model override.
 
 ## The run
 
@@ -185,7 +198,7 @@ Seven phases, each producing one thing. The order keeps `flights-speccer`'s own 
 4. Form tasks, as laid out below. It follows design because `needs` edges come from who creates and who consumes each contract.
 5. Collect shapes, probe round two. Only now is it known which existing shapes each executor types against, which is why the rounds are two: quoting before designing means quoting everything. One message of collector agents (`haiku`) carries exact extraction orders for the shapes the design calls for: these columns, this signature, the line after which the insert goes. A shape in a task file comes only from this round; the caller's maps give direction, never a quote.
 6. Write. Shared files first, then each task file inside a budget computed before it is written (16,000 characters minus the measured size of its `reads`), then the index, all files of a level in one message. Several writes in one message are one model call, so the context is re-sent once; writing over budget and trimming afterwards costs a call per trim at the run's largest context.
-7. Reconcile. Five checks only `flights-speccer` is placed to make, each with a definite answer, fixed before returning. Coverage: every numbered change from intake, and every mention of a removed or renamed thing, lands in exactly one task or in `BLOCKED`; a dropped change is invisible downstream, because an executor sees one file and the dispatcher opens none. Collision: no file appears in two tasks unless one needs the other. Size: the reading budget, measured. Sense: given its decisions, each task's outcome can come true; no two decisions contradict; nothing a task changes breaks something outside its `Files` that runs or reads it. Names: of the files `flights-speccer` writes, the directory holds `index.md`, `0-*.md` and `{level}-{letter}.md` and nothing else, whatever the caller asked for; `run.md` and `audit.md` belong to other writers and are never touched. The numbers travel in the return's `RECONCILED` line, so the caller sees that the checks ran.
+7. Reconcile. Six checks only `flights-speccer` is placed to make, each with a definite answer, fixed before returning. Restatement: no task file or `0-` file carries an instruction the executor or the gater agent already holds, or a rule of the testing manual ([What a spec never restates](#what-a-spec-never-restates)). Coverage: every numbered change from intake, and every mention of a removed or renamed thing, lands in exactly one task or in `BLOCKED`; a dropped change is invisible downstream, because an executor sees one file and the dispatcher opens none. Collision: no file appears in two tasks unless one needs the other. Size: the reading budget, measured. Sense: given its decisions, each task's outcome can come true; no two decisions contradict; nothing a task changes breaks something outside its `Files` that runs or reads it. Names: of the files `flights-speccer` writes, the directory holds `index.md`, `0-*.md` and `{level}-{letter}.md` and nothing else, whatever the caller asked for; `run.md` and `audit.md` belong to other writers and are never touched. The numbers travel in the return's `RECONCILED` line, so the caller sees that the checks ran.
 
 A look smaller than a probe (one file, a listing, a search) `flights-speccer` does itself; mapping a whole area is what the first round's tracers are for. The template names each probe by its literal spawn parameters (`subagent_type: "tracer"`; `subagent_type: "general-purpose"` with `model: "haiku"`): named only by role, a model reaches for the harness's default search agent.
 
@@ -210,9 +223,9 @@ A flight whose parts cannot run side by side stays one task or a short chain. A 
 
 ## Drift: adapt, or `SPEC-DRIFT`
 
-An executor keeps the work moving. The first line of every `Progress dependency` section tells it how:
+An executor keeps the work moving. The rule lives in the executor's body, never in a task file:
 
-> Check these before step 1. If one does not hold, change nothing and return `SPEC-DRIFT {id}: {what you found}`. Anything else that differs from this spec: reach the Goal your own way and say what you changed in your return. If the Goal itself cannot be reached, stop and return `SPEC-DRIFT {id}` with what you found and what already landed. A `SPEC-DRIFT` or `FAILED` return names its cause — the line, the value and the code path that produced the red — or names what you read and says the cause is unknown; reading is never forbidden, a rerun and a fix outside this spec are.
+> Check the task's `Progress dependency` before step 1. If one does not hold, change nothing and return `SPEC-DRIFT {id}: {what you found}`. Anything else that differs from this spec: reach the Goal your own way and say what you changed in your return. If the Goal itself cannot be reached, stop and return `SPEC-DRIFT {id}` with what you found and what already landed. A `SPEC-DRIFT` or `FAILED` return names its cause — the line, the value and the code path that produced the red — or names what you read and says the cause is unknown; reading is never forbidden, a rerun and a fix outside this spec are.
 
 - `Progress dependency` lists only facts whose absence breaks the rest of the directory. A detail the executor can adapt to stays out of it.
 - The cause line exists because the executor is the one agent standing at the red with the logs open. A return that hands back a symptom and an artefact path moves the whole diagnosis to a reader who was not there. Measured once: five rounds on one task, each round's spec cut from the previous round's red line, 180 executor calls and four hours, because the executor's stop rule was read as "do not look" and nobody downstream looked either.
@@ -266,7 +279,7 @@ NOTES {up to five lines} | none
 | Reasons, rejected options and history in a task file | The executor needs none of them and re-reads them on every call |
 | A format chosen by the caller or copied from the repository's older specs | One shape everywhere is what the dispatcher and the tooling rely on |
 | Rulings written by the dispatcher beside the directory | A second spec over the first; a spec fault goes back to `flights-speccer` |
-| Recursive review passes inside `flights-speccer` | A quoted shape checks itself at execution time; the reconcile phase's five checks are the review |
+| Recursive review passes inside `flights-speccer` | A quoted shape checks itself at execution time; the reconcile phase's six checks are the review |
 | Scheduling between flights | The main chat runs flights one after another |
 | Proof-of-concept and research modes | A task that needs a proof is rated `hard` and goes to a frontier-judgment executor |
 
@@ -288,7 +301,7 @@ A spec is judged from the transcript of the executor that ran it.
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-speccer.md` | The executable protocol, the only place the format is spelled out for a model; its `description` is the caller's input contract. It runs at frontier-judgment (`opus`), effort `high` |
+| The agent | `templates/global/agents/flights-speccer.md` | The executable protocol, the only place the format is spelled out for a model; its `description` is the caller's input contract. It is pinned at apex (`fable`), effort `high`, and a small flight's caller passes `model: "opus"` on the spawn |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The outer contract: unspecified work goes to `flights-speccer` with content and never a format; the flight directory, the index and the ready rule; only `flights-speccer` changes a task file |
 | The command | `/flights:spec` | The human-in-the-loop front end: the maps, the user's answers, the hand-off, the one question, the presentation. It never restates the format |
 | The adopter contract | `CLAUDE.md` and `templates/project/CLAUDE.md`, `/pcm` | Wording that names the spec writer and how a spec travels |

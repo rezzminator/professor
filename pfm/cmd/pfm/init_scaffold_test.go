@@ -33,7 +33,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 	if got, want := len(baseline.Files), 11; got != want {
 		t.Fatalf("pin count=%d, want %d: %#v", got, want, baseline.Files)
 	}
-	if _, ok := baseline.Files[".claude/agents/per-project/developer.md"]; ok {
+	if _, ok := baseline.Files[".claude/commands/per-project/testing-manual.md"]; ok {
 		t.Fatal("per-project interview template was deployed and pinned")
 	}
 	if _, err := os.Stat(filepath.Join(target, "AGENTS.md")); !os.IsNotExist(err) {
@@ -94,7 +94,7 @@ func TestInitDeploysMappedTemplatesAndPinsExactlyTheDeployedSet(t *testing.T) {
 		source,
 		"docs",
 		"SETUP.md",
-	) + " § Install interview — it fills tokens and deploys per-project agents"
+	) + " § Install interview — it fills tokens and deploys the per-project files"
 	if !strings.Contains(stdout.String(), "deployed 11 project files") || !strings.Contains(stdout.String(), handoff) {
 		t.Fatalf("init output=%q", stdout.String())
 	}
@@ -225,8 +225,8 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			content: "---\nname: gitter\n---\nbody\n",
 			mode:    0o600,
 		},
-		"templates/project/agents/per-project/developer.md": {
-			content: "---\nname: developer\n---\nbody\n",
+		"templates/project/commands/per-project/testing-manual.md": {
+			content: "---\nname: testing-manual\n---\nbody\n",
 			mode:    0o600,
 		},
 		"templates/project/scripts/dev.sh": {

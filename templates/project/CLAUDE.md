@@ -75,9 +75,9 @@ Voice and delivery law live in Professor's harness prompts under `pfm/harness-pr
 
 ### Process
 
-- NEVER edit code on `main`: worktree branches only, gitter-merged after QA, unless with explicit command which QA will always come afterwards to cover the tests
+- NEVER edit code on `main`: worktree branches only, gitter-merged after the flight's gate passes; a change made on `main` by explicit command still gets its gate pass afterwards
 - Only gitter WRITES git — commit/merge/checkout/branch/stash/reset/push and any other state-changing git are gitter-only for every agent; read-only git (status/diff/log/show/rev-parse) is open to all.
-- NEVER commit broken code or merge before QA passes
+- NEVER commit broken code or merge before the gate passes
 - Only the main-loop session writes permanent docs (`docs/agents/`, each project's `docs/`), under the `/quality:doc` Approval gate; `docs/epics/legal/` belongs to `/officer`; `docs/business/` to `/mentor` and `/marketer` (`marketing/`); `docs/facts/` — main loop only, solely on the user's explicit ruling
 - Never install unvalidated libraries
 

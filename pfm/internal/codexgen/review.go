@@ -25,6 +25,16 @@ const (
 	codeReviewModelAlias = "opus"
 	codeReviewPrompt     = "Review the uncommitted changes only in your task's own files (name them, space " +
 		"separated). Ignore every other path. Report correctness bugs only, most severe first."
+	// codeReviewSlot is the second source form: written in place of a level, it
+	// says the caller decides both the scope and the effort at run time. The
+	// flight gater is its one caller — it sizes the effort from the diff it is
+	// about to review, so a level baked at compile time would review a whole
+	// flight at whatever tier the prompt happened to spell.
+	codeReviewSlot = "{effort}"
+	// codeReviewFlightPrompt is the slot form's scope: the whole flight's diff,
+	// which spans every task's files, against codeReviewPrompt's one task.
+	codeReviewFlightPrompt = "Review the uncommitted changes only in the flight's files (name them, space " +
+		"separated). Ignore every other path. Report correctness bugs only, most severe first."
 	// codeReviewBareEffort is what a bare /code-review — no level written
 	// after it — runs at: the cheapest, which is what the fleet's own prompts
 	// ask for wherever they do name a level.
@@ -140,7 +150,12 @@ func codeReviewInvocationAt(text string, index int) (int, string, bool) {
 		return 0, "", false
 	}
 	effort := codeReviewBareEffort
-	if level, found := codeReviewWord(text[index+width:]); found {
+	if strings.HasPrefix(text[index+width:], " "+codeReviewSlot) {
+		// The slot is not a word codeReviewWord can read — it opens with a
+		// brace — and it is not a level, so it never enters codeReviewEfforts.
+		effort = codeReviewSlot
+		width += 1 + len(codeReviewSlot)
+	} else if level, found := codeReviewWord(text[index+width:]); found {
 		if mapped, known := codeReviewEfforts[level]; known {
 			effort = mapped
 			width += 1 + len(level)
@@ -186,8 +201,14 @@ func codeReviewModel(modelMap map[string]string) string {
 }
 
 // codexReviewShellCommand is the one spelling of the replacement: a
-// prompt-only `codex review` pinned to the review model and effort.
+// prompt-only `codex review` pinned to the review model and effort. The effort
+// carries the scope: the slot form emits the flight-scoped prompt and keeps the
+// slot in model_reasoning_effort, so the reader fills both at run time.
 func codexReviewShellCommand(model, effort string) string {
+	prompt := codeReviewPrompt
+	if effort == codeReviewSlot {
+		prompt = codeReviewFlightPrompt
+	}
 	return `codex review -c model="` + model + `" -c review_model="` + model +
-		`" -c model_reasoning_effort="` + effort + `" "` + codeReviewPrompt + `"`
+		`" -c model_reasoning_effort="` + effort + `" "` + prompt + `"`
 }

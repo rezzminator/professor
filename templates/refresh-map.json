@@ -76,7 +76,10 @@
     "global/commands/tokens/SKILL.md": {
       "curated": true
     },
-    "global/commands/tokens/token-ledger.mjs": {
+    "global/commands/tokens/token-audit.mjs": {
+      "curated": true
+    },
+    "global/commands/tokens/token-audit.test.mjs": {
       "curated": true
     },
     "global/skills/sources.json": {
@@ -90,16 +93,6 @@
     "project/agents/gitter.md": {
       "sources": {
         ".claude/agents/gitter.md": "58fb69d44305534f7eef5a61dbf3b9fac3b8a42f8a6b0bb47874f8900ab2fbb2"
-      }
-    },
-    "project/agents/per-project/developer.md": {
-      "sources": {
-        ".claude/agents/be-developer.md": "d507a0cff8ba2d3737cb115f02bda64aeee07958c45c328867d8dbb0c4e33dc8"
-      }
-    },
-    "project/agents/per-project/qa.md": {
-      "sources": {
-        ".claude/agents/be-qa.md": "3cb8487ed18216b615fa5b97c144a5e2d31ef1e1d6957ca9242957374234c82c"
       }
     },
     "project/codex/README.md": {
@@ -153,6 +146,9 @@
         ".claude/commands/pfm.md": "9f9c8f4f0ff398468d4625c247caa7806f8d0c29127b0b47c488ba694a473b95"
       }
     },
+    "project/commands/per-project/testing-manual.md": {
+      "curated": true
+    },
     "project/commands/rnd.md": {
       "sources": {
         ".claude/commands/rnd.md": "398a09d18a16b286d5552dd1b3ebb57fb908368107b5daa2da3e1d5425cc8506"
@@ -163,11 +159,6 @@
     },
     "project/docs-agents/standards.md": {
       "curated": true
-    },
-    "project/docs-commands/build/references/build-reference.md": {
-      "sources": {
-        "docs/commands/build/references/build-reference.md": "9cc61f03f7c3d9bd4161d4f6886749a77f263c11d299db02eeb561a9c3b7911f"
-      }
     },
     "project/docs-commands/build/references/qa-commons.md": {
       "curated": true

@@ -38,7 +38,7 @@ Ask nothing derivable from code. Loop until every task is clear or disposed; pro
 
 ## S3 — Hand off
 
-Spawn `Agent(subagent_type: "flights-speccer", model: "opus")` with content, never a format: the numbered tasks, the rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), and the directory. End the message; the return arrives with the index.
+Spawn `Agent(subagent_type: "flights-speccer")` — adding `model: "opus"` for a small flight — with content, never a format: the numbered tasks, the rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), and the directory. End the message; the return arrives with the index.
 
 ## S4 — The one question
 
@@ -54,7 +54,7 @@ The index table as returned, one line per task naming its key decisions (the `De
 | --- | --- |
 | Writing the spec in the chat | `flights-speccer` writes it, fresh and cheap; the chat holds only the maps and the rulings |
 | Architect passes over the written spec | `flights-speccer`'s reconcile phase is the review; a fault found later is a revising call |
-| A refining pass by a nested `flights-speccer` | The five reconcile checks replaced it |
+| A refining pass by a nested `flights-speccer` | The six reconcile checks replaced it |
 | `poc` and research modes | `/rnd` and the RND ledger own them; a task that needs a proof is rated `hard` |
 | Merge mode over several specs | There is no scheduler; a flight is one directory |
 | The legal fence and the officer pass | Project rules, carried by the project's `CLAUDE.md` into every brief |

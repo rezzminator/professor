@@ -5,11 +5,10 @@ set -euo pipefail
 # the summary block, and coverage totals; drops passing noise. TWO entry modes:
 #
 #   PIPE:  <test cmd> > /tmp/run.log 2>&1; rc=$?; filter-test-output.sh -p < /tmp/run.log
-#     Reads RAW test output on stdin, prints the filtered subset to stdout. The QA
-#     protocols use this shape so the runner's own rc is captured before filtering.
+#     Reads RAW test output on stdin, prints the filtered subset to stdout. Run a suite
+#     in this shape so the runner's own rc is captured before filtering.
 #
-#   HOOK (default, no args):  wired in settings.json PostToolUse(Bash) and re-declared
-#     in the {project}-qa agents' frontmatter. Reads the hook JSON envelope on stdin and
+#   HOOK (default, no args):  wired in settings.json PostToolUse(Bash). Reads the hook JSON envelope on stdin and
 #     returns updatedToolOutput — fires for the main loop AND for sub-agents. It acts
 #     ONLY when the Bash command itself invokes a test runner (a `grep pytest` or a
 #     `pip install pytest` is left alone), and it only ever REMOVES lines: when nothing
@@ -44,7 +43,7 @@ _is_test_cmd() {
 
 # --- PIPE mode ---
 # Exit status is DEFENSE-IN-DEPTH, never the run verdict — the runner's own rc,
-# captured per /test § Run mechanics, is the verdict. 3 = no pass/fail summary
+# captured per the project's testing manual § Run commands, is the verdict. 3 = no pass/fail summary
 # recognized (runner crashed/killed), 1 = a failure indicator recognized, 0 = green
 # summary seen. A wrapper keying on this exit can no longer read a failing or
 # absent run as success.

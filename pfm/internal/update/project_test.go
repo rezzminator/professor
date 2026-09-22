@@ -230,7 +230,7 @@ func TestUpdateAdoptPinsExistingInstall(t *testing.T) {
 	stdout.Reset()
 	stderr.Reset()
 	// The fixture's raw template tree (walked by check's NEW pass) also
-	// carries templates/project/agents/per-project/developer.md — a file
+	// carries templates/project/commands/per-project/testing-manual.md — a file
 	// planInitCopies deliberately skips, so it is never in plan and is
 	// never absent, but check still counts it NEW: NEW = plan size - 2 + 1.
 	if code := Run([]string{"check", "--root", project}, &stdout, &stderr, runtime); code != 3 {
@@ -1016,8 +1016,8 @@ func newScaffoldStoreFixture(t *testing.T) string {
 			content: "---\nname: gitter\n---\nbody\n",
 			mode:    0o600,
 		},
-		"templates/project/agents/per-project/developer.md": {
-			content: "---\nname: developer\n---\nbody\n",
+		"templates/project/commands/per-project/testing-manual.md": {
+			content: "---\nname: testing-manual\n---\nbody\n",
 			mode:    0o600,
 		},
 		"templates/project/scripts/dev.sh": {

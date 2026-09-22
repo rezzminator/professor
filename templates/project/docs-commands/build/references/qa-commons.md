@@ -1,6 +1,6 @@
-# QA Commons — shared rules for the pipeline QA gates
+# QA Commons — shared rules for a project's test gates
 
-Shared by the per-roster QA protocols (`{project}/.claude/agents/qa.md`), spawned as `{project}-qa` by the pipeline's executor. Each child `qa.md` keeps only its project-specific delta (paths, commands, compliance checks) and cites this card for the rules below.
+The generic test law beside each project's testing manual (`.claude/commands/{project}-testing-manual.md`): the manual holds the project-specific delta (paths, commands, compliance checks); this card holds the rules every project shares.
 
 ## Diff-driven attack map
 
@@ -42,7 +42,7 @@ Applies when the project's integration suite is lane-shaped (designed with `/qua
 - TARGETED runs the solo lanes that own the touched area; FULL and POST-MERGE run the whole sequence in its canonical order.
 - A new capability lands with its landscape row, its map row and its beat in the same change; the map gate is part of the FULL gate.
 - A beat is green on its asserted result plus a clean activity log; a red beat's report carries the stored evidence path, never a paraphrase.
-- A defect a lane exposes is fixed through the QA agent's § QA fix chain; the known-gap list takes only what this repo cannot fix, each entry with an owner and an expiry.
+- A defect a lane exposes is the gate's own to fix; the known-gap list takes only what this repo cannot fix, each entry with an owner and an expiry.
 
 ## Affected-first
 

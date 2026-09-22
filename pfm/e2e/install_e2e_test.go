@@ -1124,8 +1124,8 @@ func (h *e2eHarness) assertInit(project, source string) {
 		)
 	}
 	for _, mapping := range []struct{ source, target, skip string }{
-		{"commands", ".claude/commands", ""},
-		{"agents", ".claude/agents", "per-project"},
+		{"commands", ".claude/commands", "per-project"},
+		{"agents", ".claude/agents", ""},
 		{"scripts", ".claude/scripts", ""},
 		{"skills", ".claude/skills", ""},
 		{"epics", "docs/epics", ""},

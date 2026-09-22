@@ -1,4 +1,9 @@
 {
+  "flights-hard-executor": {
+    "from": "flights-mechanical-executor",
+    "description": "FLIGHTS-ONLY executes ONE task file rated hard — the code and its covering tests, in the project's test pattern — spawned by flights-orchestrator, one fresh executor per task file, never delegated to directly. Pass the task file path and its reads, the run.md lines of its needs, the standing rules, the testing manual's path, the worktree. Returns one verdict line (DONE, FAILED, SPEC-DRIFT, BLOCKED), then files changed, the test per Done when row with its proof, adaptations and defects found.",
+    "model": "opus"
+  },
   "super-rr": {
     "from": "rr",
     "description": "Stronger rr, higher reasoning — delegate for \"super rr\", \"super-rr X\". Returns the saved RR path, then the cited map.",

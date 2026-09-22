@@ -40,7 +40,7 @@ A roster carries no fixed roles. The only per-entry attributes beyond the fields
 
 ### Materialization (how SETUP expands the roster)
 
-Templates carry per-project **PATTERN blocks** written once with the generic `{project}` tokens. At install SETUP **expands each pattern block once per roster entry**, substituting that entry's fields — so a 1-project and a 7-project adopter get correctly-sized files from the same template. Pattern sites: `agents/per-project/{developer,qa}.md` (instantiated per entry) and `worktree.sh`/`dev.sh` (which hold a `PROJECTS=(…)` array SETUP fills and iterate it).
+Templates carry per-project **PATTERN blocks** written once with the generic `{project}` tokens. At install SETUP **expands each pattern block once per roster entry**, substituting that entry's fields — so a 1-project and a 7-project adopter get correctly-sized files from the same template. Pattern sites: `commands/per-project/testing-manual.md` (instantiated per entry) and `worktree.sh`/`dev.sh` (which hold a `PROJECTS=(…)` array SETUP fills and iterate it).
 
 ### Single-project collapse
 
@@ -55,8 +55,6 @@ These are **NOT hand-filled.** SETUP renders them by expanding the per-project P
 | `{PROJECT_AGENT_ROSTER}` | rendered list of every per-project agent across the roster |
 | `{PROJECT_PLANNER_ROSTER}` | per-roster list of planner agents |
 | `{PROJECT_ARCHITECT_ROSTER}` | per-roster list of architect agents |
-| `{PROJECT_DEVELOPER_ROSTER}` | per-roster list of developer agents |
-| `{PROJECT_QA_ROSTER}` | per-roster list of QA agents |
 | `{PROJECT_ANALYSIS_REPORT_LIST}` | per-roster analysis-report paths |
 | `{PROJECT_ARCHITECTURE_REPORT_LIST}` | per-roster architecture-report paths |
 | `{PROJECT_DEV_REPORT_LIST}` | per-roster dev-report paths |
@@ -211,7 +209,7 @@ These slot into the concept families above — registered here to close prior ga
 | transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`) | `{RECORD_NOUN}` | Domain nouns |
 | illustrative persona examples — a tech artifact, a domain artifact, a domain risk (Professor opening + Model Selection examples) | `{TECH_EXAMPLE_A}` / `{DOMAIN_EXAMPLE_A}` / `{DOMAIN_RISK_EXAMPLE}` | Persona |
 | the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`) | `{CODEX_MODEL}` | Model pins |
-| the Codex model id named per tier in the token-ledger `PRICING` notes (frontier / spec-execution / collector) | `{CODEX_MODEL_FRONTIER}` / `{CODEX_MODEL_SPEC}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
+| the Codex model id named per tier in the token-audit `PRICING` notes (frontier / spec-execution / collector) | `{CODEX_MODEL_FRONTIER}` / `{CODEX_MODEL_SPEC}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
 | the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`) | `{CODEX_REASONING_EFFORT}` | Model pins |
 | the database CLI forbidden at the execpolicy layer (e.g. `psql`) | `{DB_CLI}` | Tech stack |
 | the container runtime forbidden at the execpolicy layer (e.g. `docker`) | `{CONTAINER_RUNTIME}` | Tech stack |

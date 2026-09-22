@@ -22,7 +22,7 @@ Ask nothing derivable from code. Loop until every task is clear or disposed; pro
 
 ## S3 — Hand off
 
-Spawn `Agent(subagent_type: "flights-speccer", model: "opus")` with content, never a format: the numbered tasks, the rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), and the directory `tmp/flights/{flight}/`. End your message; the return arrives with the index.
+Spawn `Agent(subagent_type: "flights-speccer")` — adding `model: "opus"` for a small flight (a few tasks, no unknown cause, no design to choose) — with content, never a format: the numbered tasks, the rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), the testing manual of each project touched, and the directory `tmp/flights/{flight}/`. End your message; the return arrives with the index.
 
 ## S4 — The one question
 

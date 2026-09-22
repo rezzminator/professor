@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 const (
@@ -164,14 +165,30 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 	if !ok {
 		return fmt.Errorf("read git repository through installer runner: output seam unavailable")
 	}
-	toplevelBytes, err := reader.Output(context.Background(), "git", "-C", repo, "rev-parse", "--show-toplevel")
+	// Inside the fence a linked worktree's .git file names a host path the
+	// container never mounts, so git is reached through the mounted git
+	// directory, exactly as the store reads it (paths.DevRepoGitDir).
+	gitDir, fenced := paths.DevRepoGitDir(repo)
+	gitArgs := func(args ...string) []string {
+		base := []string{"-C", repo}
+		if fenced {
+			base = append(base, "--git-dir", gitDir, "--work-tree", repo)
+		}
+		return append(base, args...)
+	}
+	toplevelBytes, err := reader.Output(context.Background(), "git", gitArgs("rev-parse", "--show-toplevel")...)
 	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			installer.skip("git unavailable — pre-push gate not armed in " + repo)
 			return nil
 		}
 		message := strings.TrimSpace(string(toplevelBytes))
-		if strings.Contains(strings.ToLower(message), "not a git repository") {
+		// git names a non-repository on stderr, which the runner carries in err.
+		// Only discovery's own refusal ("not a git repository (or any of the
+		// parent directories)" / "(or any parent up to mount point …)") is an
+		// absence; "not a git repository: <path>" is a repository git could
+		// not reach (a pruned linked worktree, an unmounted fence git dir).
+		if strings.Contains(strings.ToLower(message+" "+err.Error()), "not a git repository (or any ") {
 			installer.skip(repo + " is not a git repository — pre-push gate not armed")
 			return nil
 		}
@@ -181,12 +198,7 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 	actualBytes, configErr := reader.Output(
 		context.Background(),
 		"git",
-		"-C",
-		repo,
-		"config",
-		"--get",
-		"core.hooksPath",
-	)
+		gitArgs("config", "--get", "core.hooksPath")...)
 	actual := strings.TrimSpace(string(actualBytes))
 	if configErr != nil {
 		var exitErr interface{ ExitCode() int }
@@ -201,8 +213,16 @@ func (installer *engine) armSourceRepoPrePushGate(repo string) error {
 		return nil
 	}
 
+	if fenced {
+		// The fence mounts the git directory read-only by law, so arming here
+		// could only fail; the host install writes core.hooksPath.
+		installer.skip(
+			"pre-push gate not armed in " + repo + " — the fence mounts git read-only; the host install arms it",
+		)
+		return nil
+	}
 	return installer.change("arm pre-push gate core.hooksPath=.githooks in "+repo, func() error {
-		out, err := reader.Output(context.Background(), "git", "-C", repo, "config", "core.hooksPath", ".githooks")
+		out, err := reader.Output(context.Background(), "git", gitArgs("config", "core.hooksPath", ".githooks")...)
 		if err != nil {
 			return fmt.Errorf("set core.hooksPath in %s: %w: %s", repo, err, strings.TrimSpace(string(out)))
 		}

@@ -252,3 +252,177 @@ func TestReportSourceRepoMarkerNamesAnUnusableCloneApartFromAbsence(t *testing.T
 		t.Fatalf("stdout = %q, want the recorded clone %s named", stdout.String(), clone)
 	}
 }
+
+// fenceGitOutputRunner answers the pre-push gate's git probes the way a fenced
+// linked worktree does: `git -C <repo>` alone cannot resolve the worktree's
+// `.git` file (it names a host path the container never mounts), so only a
+// call carrying the fence-mounted --git-dir succeeds. An empty gitDir inverts
+// it: only a call carrying NO --git-dir succeeds (an unfenced clone). A call
+// that does not resolve fails as git does, exit 128 with refusal on stderr.
+type fenceGitOutputRunner struct {
+	gitDir  string
+	refusal string
+	unarmed bool // core.hooksPath unset: `config --get` exits 1, a write hits the read-only mount
+	calls   []string
+}
+
+const (
+	brokenGitFileRefusal = "fatal: not a git repository: /host/only/.git/worktrees/flight\n"
+	nonRepositoryRefusal = "fatal: not a git repository (or any of the parent directories): .git\n"
+)
+
+func (runner *fenceGitOutputRunner) Run(context.Context, string, ...string) error {
+	return errors.New("Run not scripted")
+}
+
+func (runner *fenceGitOutputRunner) Output(_ context.Context, name string, args ...string) ([]byte, error) {
+	call := name + " " + strings.Join(args, " ")
+	runner.calls = append(runner.calls, call)
+	resolves := !strings.Contains(call, "--git-dir")
+	if runner.gitDir != "" {
+		resolves = strings.Contains(call, "--git-dir "+runner.gitDir+" ")
+	}
+	if !resolves {
+		return nil, commandExitError{name: name, code: 128, text: runner.refusal}
+	}
+	switch {
+	case strings.Contains(call, "rev-parse --show-toplevel"):
+		return []byte("/worktree\n"), nil
+	case strings.Contains(call, "config --get core.hooksPath") && runner.unarmed:
+		return nil, commandExitError{name: name, code: 1}
+	case strings.Contains(call, "config --get core.hooksPath"):
+		return []byte(".githooks\n"), nil
+	case strings.Contains(call, "config core.hooksPath .githooks") && runner.unarmed:
+		return nil, commandExitError{
+			name: name,
+			code: 255,
+			text: "error: could not lock config file /pfm-git-common/config: Read-only file system\n",
+		}
+	}
+	return nil, errors.New("unscripted git call: " + call)
+}
+
+func armWithRunner(t *testing.T, clone string, runner *fenceGitOutputRunner) (string, error) {
+	t.Helper()
+	var stdout bytes.Buffer
+	installer := &engine{
+		options: Options{Home: t.TempDir(), SourceRepo: clone, Stdout: &stdout, Runner: runner},
+		apply:   true,
+	}
+	err := installer.armSourceRepoPrePushGate(clone)
+	return stdout.String(), err
+}
+
+// TestInstallArmsPrePushGateThroughTheFenceGitDir is a REGRESSION test for
+// `pfm install` inside the fence from a LINKED worktree: the gate's bare
+// `git -C <repo>` could not resolve the worktree's .git file (a host path),
+// so install died with "resolve … as a git repository". Inside the fence the
+// gate must reach git through the mounted directory, as the store does.
+func TestInstallArmsPrePushGateThroughTheFenceGitDir(t *testing.T) {
+	clone := buildSourceCloneWithPrePushHook(t)
+	gitDir := "/pfm-git-common/worktrees/flight"
+	t.Setenv("PFM_DEV_REPO_WORK_TREE", clone)
+	t.Setenv("PFM_DEV_REPO_GIT_DIR", gitDir)
+	runner := &fenceGitOutputRunner{gitDir: gitDir, refusal: brokenGitFileRefusal}
+	stdout, err := armWithRunner(t, clone, runner)
+	if err != nil {
+		t.Fatalf("armSourceRepoPrePushGate() error = %v (git calls: %q)", err, runner.calls)
+	}
+	if !strings.Contains(stdout, "pre-push gate armed") {
+		t.Fatalf("stdout = %q, want the armed gate reported", stdout)
+	}
+}
+
+// TestInstallArmsPrePushGateBareWhenTheFenceNamesAnotherWorkTree pins the
+// other side of the fence switch: the fence's git directory belongs to the
+// fenced worktree only. Arming any other clone (a --source elsewhere) through
+// it would read and write the wrong repository's config.
+func TestInstallArmsPrePushGateBareWhenTheFenceNamesAnotherWorkTree(t *testing.T) {
+	clone := buildSourceCloneWithPrePushHook(t)
+	t.Setenv("PFM_DEV_REPO_WORK_TREE", t.TempDir())
+	t.Setenv("PFM_DEV_REPO_GIT_DIR", "/pfm-git-common/worktrees/other")
+	runner := &fenceGitOutputRunner{refusal: brokenGitFileRefusal}
+	stdout, err := armWithRunner(t, clone, runner)
+	if err != nil {
+		t.Fatalf("armSourceRepoPrePushGate() error = %v (git calls: %q)", err, runner.calls)
+	}
+	if !strings.Contains(stdout, "pre-push gate armed") {
+		t.Fatalf("stdout = %q (git calls: %q), want the armed gate reported", stdout, runner.calls)
+	}
+}
+
+// TestInstallSkipsPrePushGateWhenTheCloneIsNotAGitRepository is a REGRESSION
+// test for a skip branch real git could never reach: git prints "not a git
+// repository" on stderr, which the runner carries in the error, while the
+// branch read only stdout — so the named skip was dead and install failed.
+func TestInstallSkipsPrePushGateWhenTheCloneIsNotAGitRepository(t *testing.T) {
+	clone := buildSourceCloneWithPrePushHook(t)
+	t.Setenv("PFM_DEV_REPO_WORK_TREE", "")
+	t.Setenv("PFM_DEV_REPO_GIT_DIR", "")
+	runner := &fenceGitOutputRunner{gitDir: "/never/matched", refusal: nonRepositoryRefusal}
+	stdout, err := armWithRunner(t, clone, runner)
+	if err != nil {
+		t.Fatalf("armSourceRepoPrePushGate() error = %v, want the named not-a-repository skip", err)
+	}
+	want := clone + " is not a git repository — pre-push gate not armed"
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("stdout = %q, want named skip %q", stdout, want)
+	}
+}
+
+// TestInstallFailsPrePushGateWhenTheRepositoryCannotBeReached pins the error
+// apart from the absence: git also says "not a git repository: <path>" when a
+// linked worktree's gitdir is gone, or the fence's mounted git directory is.
+// That repository exists and could not be read — install must fail naming it,
+// never report "is not a git repository" and carry on unarmed.
+func TestInstallFailsPrePushGateWhenTheRepositoryCannotBeReached(t *testing.T) {
+	for _, tc := range []struct {
+		name, fenceGitDir, refusal string
+	}{
+		{"broken linked worktree", "", brokenGitFileRefusal},
+		{
+			"unreadable fence git dir",
+			"/pfm-git-common/worktrees/gone",
+			"fatal: not a git repository: '/pfm-git-common/worktrees/gone'\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clone := buildSourceCloneWithPrePushHook(t)
+			t.Setenv("PFM_DEV_REPO_WORK_TREE", clone)
+			t.Setenv("PFM_DEV_REPO_GIT_DIR", tc.fenceGitDir)
+			stdout, err := armWithRunner(t, clone, &fenceGitOutputRunner{gitDir: "/never/matched", refusal: tc.refusal})
+			if err == nil || !strings.Contains(err.Error(), "resolve "+clone+" as a git repository") {
+				t.Fatalf("armSourceRepoPrePushGate() error = %v (stdout %q), want the repository named", err, stdout)
+			}
+			if strings.Contains(stdout, "is not a git repository") {
+				t.Fatalf("stdout = %q, an unreachable repository reported as absent", stdout)
+			}
+		})
+	}
+}
+
+// TestInstallSkipsArmingInsideTheFenceWhenTheGateIsUnarmed pins the fence's
+// read-only git mount: arming writes core.hooksPath into the git directory,
+// which the fence mounts read-only by law, so a fenced install on an unarmed
+// clone died with "could not lock config file". Inside the fence the gate is
+// a named skip (the host install arms it), and no write is attempted.
+func TestInstallSkipsArmingInsideTheFenceWhenTheGateIsUnarmed(t *testing.T) {
+	clone := buildSourceCloneWithPrePushHook(t)
+	gitDir := "/pfm-git-common/worktrees/flight"
+	t.Setenv("PFM_DEV_REPO_WORK_TREE", clone)
+	t.Setenv("PFM_DEV_REPO_GIT_DIR", gitDir)
+	runner := &fenceGitOutputRunner{gitDir: gitDir, refusal: brokenGitFileRefusal, unarmed: true}
+	stdout, err := armWithRunner(t, clone, runner)
+	if err != nil {
+		t.Fatalf("armSourceRepoPrePushGate() error = %v, want the named fence skip (calls %q)", err, runner.calls)
+	}
+	want := "pre-push gate not armed in " + clone + " — the fence mounts git read-only; the host install arms it"
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("stdout = %q, want %q", stdout, want)
+	}
+	for _, call := range runner.calls {
+		if strings.Contains(call, "config core.hooksPath .githooks") {
+			t.Fatalf("a write was attempted on the read-only fence mount: %q", call)
+		}
+	}
+}

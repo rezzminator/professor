@@ -7,6 +7,9 @@ services:
     build:
       context: .
       dockerfile: pfm-dev.Dockerfile
+      # Named explicitly, never left to stage order: pfm-sim shares this
+      # Dockerfile, and a dev lane handed the Chrome image tests the wrong machine.
+      target: pfm-dev
     image: professor-pfm-dev
     # A real machine has an init that reaps orphans; a bare container does
     # not, so a double-forked descendant lingers as a zombie and the
@@ -31,6 +34,29 @@ services:
       GOFLAGS: "-buildvcs=false"
       PFM_DEV_REPO_GIT_DIR: /pfm-git-common/${PFM_DEV_GIT_DIR_REL:?set by dev.sh iso — relative active gitdir}
       PFM_DEV_REPO_WORK_TREE: /worktree
+
+  # The real-simulation fence (`dev.sh iso sim`): pfm-dev's mounts and law plus
+  # a real Google Chrome, an Xvfb display and the shared memory Chrome needs
+  # (Docker's 64 MB /dev/shm default crashes renderers on heavy pages).
+  # sim-entry.sh starts the display, builds and installs pfm from the fenced
+  # worktree, and turns the harvester's browser rung on. dev.sh mounts the
+  # harvester state per worktree (pfm-sim-harvest-<key>), so one worktree's
+  # provisioned sidecar never flips under another's.
+  pfm-sim:
+    extends:
+      service: pfm-dev
+    build:
+      target: pfm-sim
+    image: professor-pfm-sim
+    shm_size: "2gb"
+    entrypoint: ["/worktree/infra/fence/sim-entry.sh"]
+    environment:
+      DISPLAY: ":99"
+      # uv's cache lives INSIDE the per-worktree harvest volume: one filesystem,
+      # so uv hardlinks. Every sidecar-script edit publishes a new environment
+      # (the script is in its digest); hardlinked, that costs seconds, where a
+      # cross-volume copy would cost the environment's full size per edit.
+      UV_CACHE_DIR: /root/.local/state/pfm/harvest-python/.uv-cache
 
 volumes:
   pfm-dev-gocache:

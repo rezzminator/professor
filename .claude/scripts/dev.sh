@@ -520,7 +520,16 @@ dispatch() { # dispatch <project> <action>
 # probed explicitly: an installed `docker` binary with nothing behind it is the
 # common failure, and it must be named as TOOLCHAIN-MISSING here rather than
 # surfacing later as an opaque compose connect error.
-cmd_iso() { # cmd_iso <action> [project]
+# sim_volume — this worktree's harvester volume for `iso sim`: the basename,
+# folded to docker's volume-name alphabet, plus a checksum of the full path so
+# two checkouts with one basename never share a sidecar.
+sim_volume() {
+  local wt
+  wt="$(basename "$REPO_ROOT" | tr -c 'A-Za-z0-9_.\n-' '-')"; wt="${wt#.}"
+  printf 'pfm-sim-harvest-%s-%s' "$wt" "$(printf '%s' "$REPO_ROOT" | cksum | cut -d' ' -f1)"
+}
+
+cmd_iso() { # cmd_iso <action> [project | command…]
   local action="${1:-}" target="${2:-pfm}"
   need_tool docker iso || exit 1
   need_tool git iso || exit 1
@@ -566,8 +575,29 @@ cmd_iso() { # cmd_iso <action> [project]
       local cmd="${*:2}"
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
+    sim)
+      # The real-simulation fence: `run` on the pfm-sim service — Google Chrome,
+      # an Xvfb display, and pfm built + installed from this worktree with the
+      # harvester's browser rung on (infra/fence/sim-entry.sh prints its own
+      # `sim:` proof line or BOOTSTRAP-FAILED). The harvester state persists in
+      # a volume keyed by this worktree's path, so a second run skips
+      # provisioning and two worktrees never share a sidecar.
+      local cmd="${*:2}"
+      [[ -z "$cmd" ]] && { echo "usage: dev.sh iso sim <command…>" >&2; exit 2; }
+      extra+=(-v "$(sim_volume):/root/.local/state/pfm/harvest-python")
+      docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-sim bash -c "$proof; $cmd" ;;
+    sim-reset)
+      # Drops this worktree's harvester volume (several GB of provisioned
+      # sidecars); the next `iso sim` provisions from scratch. An absent volume
+      # is reported as absent, a failed removal fails.
+      local volume; volume="$(sim_volume)"
+      if ! docker volume inspect "$volume" >/dev/null 2>&1; then
+        info "iso sim-reset: $volume does not exist — nothing to drop"; return 0
+      fi
+      docker volume rm "$volume" >/dev/null || { fail_step "iso sim-reset: could not drop $volume (in use by a running sim?)"; exit 1; }
+      ok "iso sim-reset: dropped $volume" ;;
     *)
-      echo "usage: dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project] | iso run <command…>" >&2; exit 2 ;;
+      echo "usage: dev.sh iso {install|build|typecheck|verify|test|cover|all|status|e2e|shell} [project] | iso {run|sim} <command…> | iso sim-reset" >&2; exit 2 ;;
   esac
 }
 
@@ -588,6 +618,9 @@ commands:
   all                    verify + build + test for the project
   iso <cmd> [project]    run any command above — plus e2e | shell — inside the
                          pfm-dev container fence (infra/), worktree mounted
+  iso sim <command…>     run a command in the real-simulation fence: Google Chrome,
+                         an X display, pfm installed from the worktree, browser rung on
+  iso sim-reset          drop this worktree's sim harvester volume
 
 projects: ${PROJECTS[*]} | all (default)
 
@@ -610,7 +643,7 @@ case "$CMD" in
       head_ "$TARGET :: $CMD"
       dispatch "$TARGET" "$CMD"
     fi ;;
-  iso) cmd_iso "${2:-}" "${3:-pfm}" ;;
+  iso) cmd_iso "${@:2}" ;;
   -h|--help|help) usage ;;
   *) echo "unknown command: $CMD" >&2; usage ;;
 esac

@@ -2,7 +2,11 @@
 # testing Professor's compiled projects inside the fence
 # (docs/dev/isolated-dev-foundation.md).
 # The worktree is edited on the HOST; this container only builds and tests it.
-FROM ubuntu:24.04
+# Two targets over one base: `pfm-sim` (the real-simulation fence: the base plus
+# a real Google Chrome and a display) and `pfm-dev` (build, test, e2e). pfm-dev
+# is the LAST stage, so an untargeted `docker build` of this file
+# (release-rehearsal.sh) still produces pfm-dev, never the Chrome image.
+FROM ubuntu:24.04 AS pfm-base
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git jq make zsh tmux python3 python3-yaml xz-utils \
  && rm -rf /var/lib/apt/lists/*
@@ -30,3 +34,25 @@ ENV HOME=/root \
 COPY tools.env tools.sh /opt/pfm-tools/
 RUN TOOLS_BIN=/usr/local/bin bash /opt/pfm-tools/tools.sh
 WORKDIR /worktree
+
+# pfm-sim — the real-simulation fence: the base plus what a real
+# desktop brings to live traffic — Google Chrome (patchright's `chrome` channel
+# launches only Google Chrome; Chromium reports MISSING by design), an X
+# display for the headed retry after a wall (Xvfb, started by sim-entry.sh),
+# and real fonts so pages render as they do for a person. `dev.sh iso sim`
+# is the entry point. Google's apt repo serves amd64 and arm64 and keeps only
+# the current release, so Chrome is the one unpinned tool here: the image
+# prints its version at build time and every sim run prints it in the proof line.
+FROM pfm-base AS pfm-sim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    xvfb xauth fonts-liberation fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
+ && install -d -m 0755 /etc/apt/keyrings \
+ && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc \
+ && echo "deb [signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" \
+      > /etc/apt/sources.list.d/google-chrome.list \
+ && apt-get update && apt-get install -y --no-install-recommends google-chrome-stable \
+ && rm -rf /var/lib/apt/lists/* \
+ && google-chrome-stable --version
+
+# pfm-dev — the default target: the base as it is.
+FROM pfm-base AS pfm-dev

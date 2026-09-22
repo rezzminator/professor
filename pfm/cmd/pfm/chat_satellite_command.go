@@ -133,7 +133,7 @@ func runChatReadExcerpt(args []string, stdout, stderr io.Writer, runtimes ...com
 		}
 		sidDir = resolved.SIDDir
 	}
-	chatLoadsDir, err := filepath.Abs(filepath.Join(sidDir, "chat-loads"))
+	chatLoadsDir, err := filepath.Abs(filepath.Join(sidDir, paths.SIDScratchChatLoads))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm chat read: resolve output directory: %v\n", err)
 		return 1

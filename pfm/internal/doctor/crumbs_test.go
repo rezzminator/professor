@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestDoctorRecognizesThenFailedAsSatelliteMetadata(t *testing.T) {
@@ -50,5 +52,26 @@ func TestDoctorIgnoresBunkerCrumbsAndOpenLockDirectories(t *testing.T) {
 	}
 	if entries != 6 || invalid != 2 {
 		t.Fatalf("crumbHealth() entries=%d invalid=%d, want 6 and 2", entries, invalid)
+	}
+}
+
+// TestDoctorCrumbsAcceptPfmScratchDirectories pins the SID dir's own scratch
+// purposes: `pfm doctor --verbose` and `pfm chat read` write under
+// <SIDDir>/{pfm-doctor,chat-loads}, so those directories are pfm's, never rot —
+// while any other directory there still is.
+func TestDoctorCrumbsAcceptPfmScratchDirectories(t *testing.T) {
+	root := jailTest(t)
+	sidDir := filepath.Join(root, "sid")
+	for _, directory := range append(paths.SIDScratchDirs(), "rotten-directory") {
+		if err := os.Mkdir(filepath.Join(sidDir, directory), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, invalid, err := crumbHealth(sidDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries != 3 || invalid != 1 {
+		t.Fatalf("crumbHealth() entries=%d invalid=%d, want 3 and 1 (only rotten-directory)", entries, invalid)
 	}
 }

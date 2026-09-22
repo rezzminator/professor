@@ -12,6 +12,19 @@ import (
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
+// SID-dir scratch purposes: pfm's own raw output lives in these
+// subdirectories of Values.SIDDir, never in a cwd-relative tmp/.
+const (
+	// SIDScratchDoctor holds `pfm doctor --verbose` raw probe output.
+	SIDScratchDoctor = "pfm-doctor"
+	// SIDScratchChatLoads holds the transcripts `pfm chat read` extracts.
+	SIDScratchChatLoads = "chat-loads"
+)
+
+// SIDScratchDirs lists every SID-dir scratch purpose, so a check that
+// audits the SID dir can tell pfm's own directories from rot.
+func SIDScratchDirs() []string { return []string{SIDScratchDoctor, SIDScratchChatLoads} }
+
 const (
 	EnvDB          = "PFM_DB"
 	EnvFleetDB     = "PFM_FLEET_DB"

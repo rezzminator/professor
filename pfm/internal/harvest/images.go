@@ -73,7 +73,18 @@ func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource str
 			defer recoverItem(func(error) {})
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			body, status, contentType, fetchErr := getBody(ctx, h.client, full, h.userAgent, maxImageBytes+1)
+			// This image was REACHED from baseSource — the harvested page — so
+			// it carries that page's own URL as Referer (F-referer), never the
+			// Google provenance one: a hotlink-protected host allows a same-site
+			// Referer and 403s a foreign one.
+			body, status, contentType, fetchErr := getBodyWithHeaders(
+				ctx,
+				h.client,
+				full,
+				h.userAgent,
+				map[string]string{headerReferer: baseSource},
+				maxImageBytes+1,
+			)
 			if fetchErr != nil || status >= 400 || len(body) == 0 || len(body) > maxImageBytes {
 				return
 			}

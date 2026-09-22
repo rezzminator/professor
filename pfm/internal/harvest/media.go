@@ -61,12 +61,16 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 	}{
 		{rungDirect, h.binaryDirectOrClient(), h.userAgent}, {rungChromeImpersonation, h.binaryChromeOrChrome(), chromeUA},
 	} {
+		// A direct FetchImage call has no harvested page behind it — the caller
+		// handed this image URL itself — so it carries no Referer (F-referer):
+		// a hotlink-protected host allows an empty Referer and 403s a foreign
+		// one, and the Google provenance Referer is exactly that here.
 		body, status, contentType, err := getBodyWithHeaders(
 			ctx,
 			rung.client,
 			source,
 			rung.ua,
-			map[string]string{headerReferer: ProvenanceReferer},
+			nil,
 			maxImageBytes+1,
 		)
 		if err != nil {
@@ -212,12 +216,15 @@ func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refres
 	}{
 		{rungDirect, h.binaryDirectOrClient(), h.userAgent}, {rungChromeImpersonation, h.binaryChromeOrChrome(), chromeUA},
 	} {
+		// A direct fetchArchiveBytes call has no harvested page behind it — the
+		// caller handed this archive URL itself (the `archive` tool) — so it
+		// carries no Referer (F-referer), same rationale as FetchImage above.
 		body, status, contentType, err := getBodyWithHeaders(
 			ctx,
 			rung.client,
 			source,
 			rung.ua,
-			map[string]string{headerReferer: ProvenanceReferer},
+			nil,
 			h.options.MaxBytes,
 		)
 		if err != nil {

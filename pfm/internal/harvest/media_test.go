@@ -55,39 +55,43 @@ func TestFetchImageNonImageResponseStillReadsAsNotAnImage(t *testing.T) {
 	}
 }
 
-// TestFetchImageSendsTheProvenanceReferer: an image host behind the same
-// Referer-gated wall as its pages answers a Referer-less request with the
-// wall, so the image loop arrives the way the page ladder does.
-func TestFetchImageSendsTheProvenanceReferer(t *testing.T) {
+// TestFetchImageSendsNoReferer: a direct image request (the caller handed the
+// image URL itself, no harvested page in play) must carry no Referer at all.
+// The fake host is hotlink-protected the REAL way — it 403s any foreign
+// Referer (the old Google provenance one included) and only allows an empty
+// one — so a lingering ProvenanceReferer send would read as a wall, not a
+// pass.
+func TestFetchImageSendsNoReferer(t *testing.T) {
 	png := "\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 64)
 	var referers []string
-	gated := func(r *http.Request) (*http.Response, error) {
-		referers = append(referers, r.Header.Get("Referer"))
-		if r.Header.Get("Referer") == "" {
-			return response(r, http.StatusForbidden, "text/html", "<html>Prove your humanity</html>"), nil
+	hotlinkProtected := func(r *http.Request) (*http.Response, error) {
+		referer := r.Header.Get("Referer")
+		referers = append(referers, referer)
+		if referer != "" {
+			return response(r, http.StatusForbidden, "text/html", "<html>hotlinking forbidden</html>"), nil
 		}
 		return response(r, http.StatusOK, "image/png", png), nil
 	}
 	h := mustNew(t, Options{
 		CacheDir: t.TempDir(),
-		Client:   &http.Client{Transport: roundTripFunc(gated)},
-		Chrome:   &http.Client{Transport: roundTripFunc(gated)},
+		Client:   &http.Client{Transport: roundTripFunc(hotlinkProtected)},
+		Chrome:   &http.Client{Transport: roundTripFunc(hotlinkProtected)},
 	})
 	got := h.FetchImage(context.Background(), "https://203.0.113.10/figure.png")
 	if got.Error != "" || got.Method != rungDirect {
-		t.Fatalf("Referer-gated image not fetched at the direct rung: method=%q error=%q referers=%q",
+		t.Fatalf("direct image request was walled: method=%q error=%q referers=%q",
 			got.Method, got.Error, referers)
 	}
-	if len(referers) == 0 || referers[0] != ProvenanceReferer {
-		t.Fatalf("image request Referer = %q, want %q", referers, ProvenanceReferer)
+	if len(referers) == 0 || referers[0] != "" {
+		t.Fatalf("direct image request Referer = %q, want empty", referers)
 	}
 }
 
-// TestFetchArchiveSendsTheProvenanceReferer pins the archive sibling of the
-// image Referer: a host that answers 403 to a Referer-less request must be
-// fetched at the direct rung, and the chrome-impersonation rung must send the
-// same Referer when the direct rung fails.
-func TestFetchArchiveSendsTheProvenanceReferer(t *testing.T) {
+// TestFetchArchiveSendsNoReferer is the archive sibling of
+// TestFetchImageSendsNoReferer: a directly requested archive URL carries no
+// Referer, on both the direct and the chrome-impersonation rung, against a
+// host that 403s any foreign Referer and only allows an empty one.
+func TestFetchArchiveSendsNoReferer(t *testing.T) {
 	var zipBody bytes.Buffer
 	zw := zip.NewWriter(&zipBody)
 	member, err := zw.Create("paper.txt")
@@ -101,10 +105,11 @@ func TestFetchArchiveSendsTheProvenanceReferer(t *testing.T) {
 		t.Fatal(err)
 	}
 	var referers []string
-	gated := func(r *http.Request) (*http.Response, error) {
-		referers = append(referers, r.Header.Get("Referer"))
-		if r.Header.Get("Referer") == "" {
-			return response(r, http.StatusForbidden, "text/html", "<html>Prove your humanity</html>"), nil
+	hotlinkProtected := func(r *http.Request) (*http.Response, error) {
+		referer := r.Header.Get("Referer")
+		referers = append(referers, referer)
+		if referer != "" {
+			return response(r, http.StatusForbidden, "text/html", "<html>hotlinking forbidden</html>"), nil
 		}
 		return response(r, http.StatusOK, "application/zip", zipBody.String()), nil
 	}
@@ -114,7 +119,7 @@ func TestFetchArchiveSendsTheProvenanceReferer(t *testing.T) {
 		direct func(*http.Request) (*http.Response, error)
 		method string
 	}{
-		{"direct rung", gated, rungDirect},
+		{"direct rung", hotlinkProtected, rungDirect},
 		{"impersonation rung", down, rungChromeImpersonation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,15 +127,15 @@ func TestFetchArchiveSendsTheProvenanceReferer(t *testing.T) {
 			h := mustNew(t, Options{
 				CacheDir: t.TempDir(),
 				Client:   &http.Client{Transport: roundTripFunc(tc.direct)},
-				Chrome:   &http.Client{Transport: roundTripFunc(gated)},
+				Chrome:   &http.Client{Transport: roundTripFunc(hotlinkProtected)},
 			})
 			path, got := h.fetchArchiveBytes(context.Background(), "https://203.0.113.10/bundle.zip", false)
 			if got.Error != "" || path == "" || got.Method != tc.method {
-				t.Fatalf("Referer-gated archive not fetched at the %s: method=%q error=%q referers=%q",
+				t.Fatalf("direct archive request was walled at the %s: method=%q error=%q referers=%q",
 					tc.method, got.Method, got.Error, referers)
 			}
-			if len(referers) == 0 || referers[0] != ProvenanceReferer {
-				t.Fatalf("archive request Referer = %q, want %q", referers, ProvenanceReferer)
+			if len(referers) == 0 || referers[0] != "" {
+				t.Fatalf("direct archive request Referer = %q, want empty", referers)
 			}
 		})
 	}

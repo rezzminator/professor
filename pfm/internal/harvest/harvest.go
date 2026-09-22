@@ -250,6 +250,8 @@ func (h *Harvester) fetchURLWithPolicy(
 	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, "7z", kindRAR:
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
 	}
+	directMediaFetch := guess == kindPDF || guess == kindDOCX || guess == kindXLSX || guess == kindPPTX ||
+		guess == kindCSV || guess == kindZIP || guess == kindTAR || guess == "7z" || guess == kindRAR || guess == kindImage
 	directRung, chromeRung := rungDirect, rungChromeImpersonation
 	if googleDriveFile {
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
@@ -270,13 +272,12 @@ func (h *Harvester) fetchURLWithPolicy(
 		{chromeRung, chromeClient, fetchTarget, chromeUA},
 	} {
 		rungs = append(rungs, rung.name)
+		headers := map[string]string{headerReferer: ProvenanceReferer}
+		if directMediaFetch {
+			headers = nil
+		}
 		body, status, contentType, err := getBodyWithHeaders(
-			ctx,
-			rung.client,
-			rung.target,
-			rung.ua,
-			map[string]string{headerReferer: ProvenanceReferer},
-			h.options.MaxBytes,
+			ctx, rung.client, rung.target, rung.ua, headers, h.options.MaxBytes,
 		)
 		if err != nil {
 			lastErr = err

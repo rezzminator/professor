@@ -13,6 +13,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
 // launchdBootstrapAttempts and launchdBootstrapRetryInterval bound the retry
@@ -303,12 +304,26 @@ func (installer *engine) unwireMCPLaunchAgent(ctx context.Context) error {
 	return installer.change("remove "+path, func() error { return os.Remove(path) })
 }
 
+// probeAnswered reports whether err came from a probe that ran to completion
+// and reported a status, rather than one that never got an answer at all
+// (the tool missing from PATH, permission denied, or a signal). A positive
+// coded exit means the tool ran and answered; deps.ExitCode reports -1 for
+// anything else, including the production runner's plain errors and a
+// signal-killed *exec.ExitError.
+func probeAnswered(err error) bool {
+	return deps.ExitCode(err) > 0
+}
+
 // launchAgentRunning reports whether the name-sync job is executing right now,
 // and whether the question could be asked at all.
 //
 // "state = not running" contains "running", so the state line is compared whole
 // rather than searched — a substring match here would refuse every install on a
-// perfectly idle agent.
+// perfectly idle agent. An `Output` error is inspected the same way the systemd
+// gate's is: a positive coded exit means launchctl ran and answered (a label it
+// does not know is not an error to report — nothing is installed yet, so
+// nothing can be mid-execution); anything else means the probe never got an
+// answer at all.
 func launchAgentRunning(ctx context.Context, runner CommandRunner) (running, probed bool) {
 	reader, ok := runner.(OutputRunner)
 	if !ok {
@@ -318,9 +333,12 @@ func launchAgentRunning(ctx context.Context, runner CommandRunner) (running, pro
 		ctx, "launchctl", "print", "gui/"+strconv.Itoa(os.Getuid())+"/"+launchdLabel,
 	)
 	if err != nil {
-		// A label launchd does not know is not an error to report: nothing is
-		// installed yet, so nothing can be mid-execution.
-		return false, true
+		if probeAnswered(err) {
+			// A label launchd does not know is not an error to report: nothing is
+			// installed yet, so nothing can be mid-execution.
+			return false, true
+		}
+		return false, false
 	}
 	for _, line := range strings.Split(string(output), "\n") {
 		if strings.TrimSpace(line) == "state = running" {

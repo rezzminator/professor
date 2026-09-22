@@ -9,6 +9,23 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 )
 
+// DaemonReachabilityOverride replaces mcpserv.DaemonReachability under test,
+// the way HarvestOverride replaces the harvest doctor: nil in production, set
+// once by a jailed TestMain so no unit test probes a live daemon on the
+// host's loopback port. A test that means to exercise the real probe against
+// its own listener sets this back to nil and restores it in t.Cleanup.
+var DaemonReachabilityOverride func(config.Runtime) (mcpserv.DaemonStatus, error)
+
+// configuredDaemonReachability returns the override when one is set and
+// mcpserv.DaemonReachability otherwise — the same shape as
+// configuredHarvestDoctor for HarvestOverride.
+func configuredDaemonReachability(runtime config.Runtime) (mcpserv.DaemonStatus, error) {
+	if DaemonReachabilityOverride != nil {
+		return DaemonReachabilityOverride(runtime)
+	}
+	return mcpserv.DaemonReachability(runtime)
+}
+
 // printMCPDaemonDoctor always reports the local MCP HTTP daemon's
 // reachability: a clean "running" row when it answers as itself (with its own
 // version-skew warning when the build differs from this binary's), an
@@ -21,7 +38,7 @@ import (
 // reported fact rather than a warning; a running or foreign service is still
 // reported normally.
 func printMCPDaemonDoctor(stdout io.Writer, runtime config.Runtime) (warnings int) {
-	status, daemonErr := mcpserv.DaemonReachability(runtime)
+	status, daemonErr := configuredDaemonReachability(runtime)
 	switch {
 	case daemonErr == nil:
 		fmt.Fprintf(

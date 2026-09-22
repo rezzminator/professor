@@ -18,7 +18,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/ask: 2
       github.com/rezzminator/professor/pfm/internal/atomicfile: 2
       github.com/rezzminator/professor/pfm/internal/binwatch: 2
-      github.com/rezzminator/professor/pfm/internal/chat: 2
+      github.com/rezzminator/professor/pfm/internal/chat: 4
       github.com/rezzminator/professor/pfm/internal/cli: 2
       github.com/rezzminator/professor/pfm/internal/clock: 2
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2

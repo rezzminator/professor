@@ -10,7 +10,7 @@ Tracer report, 2026-09-13, HEAD `00da35b5`, clean tree. Raw map, no verdicts. Te
 |---|---|
 | `professor.md` | the Professor system prompt. `"systemPrompt": "professor"` makes every managed Claude launch inject it via `--system-prompt-file`. Byte-identical to the embedded installer asset `prompts/professor-prompt.md`; a Go test enforces the pairing. (README:5-8) |
 | `codex-appendix.md` | a model-independent developer message from Codex's native SessionStart `additionalContext` hook. `pfm install` registers and individually trusts the owned handler in each configured account. (README:9-11) |
-| `harness-original-v2.1.278.md`, `harness-opus-v2.1.278.md` | reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic sections excluded. Each has a `.sha256` pin and `.model` provenance file. (README:29-32) |
+| `harness-original-v2.1.280.md`, `harness-opus-v2.1.280.md` | reviewed Sonnet and Opus built-in prompt baselines, captured in print mode with dynamic sections excluded. Each has a `.sha256` pin and `.model` provenance file. (README:29-32) |
 | `harness-{original,opus}.model` / `.sha256` | provenance + hash pins (A.5) |
 | `README.md` | the manifest for the directory |
 
@@ -28,7 +28,7 @@ Tracer report, 2026-09-13, HEAD `00da35b5`, clean tree. Raw map, no verdicts. Te
 
 ### A.3 How professor.md relates to the baselines
 
-`professor.md` is a full replacement prompt (7 sections), structurally unrelated to either vendor baseline. The baselines (`harness-opus-v2.1.261.md`, 233 lines; `harness-original-v2.1.257.md`, 219 lines; headings `# System`, `# Doing tasks`, `# Executing actions with care`, `# Using your tools`, `# Tone and style`, `# auto memory`, `# Text output…`, `# Session-specific guidance`, `# Environment`, `# Context management`, plus `# Delivering work` / `# Corrections` on opus) are drift sentinels for the vendor's built-in prompt under the `production`/`lean` modes — never professor.md's edit source. `docs/PLACEHOLDERS.md:157`, `docs/BLUEPRINT.md:34,281`: professor.md ships verbatim.
+`professor.md` is a full replacement prompt (7 sections), structurally unrelated to either vendor baseline. The baselines (`harness-opus-v2.1.280.md`, 220 lines; `harness-original-v2.1.280.md`, 220 lines; headings `# System`, `# Doing tasks`, `# Executing actions with care`, `# Using your tools`, `# Tone and style`, `# auto memory`, `# Text output…`, `# Session-specific guidance`, `# Environment`, `# Context management` — the prior `# Delivering work` / `# Corrections` sections on opus are gone as of this re-pin) are drift sentinels for the vendor's built-in prompt under the `production`/`lean` modes — never professor.md's edit source. `docs/PLACEHOLDERS.md:157`, `docs/BLUEPRINT.md:34,281`: professor.md ships verbatim.
 
 ### A.4 Install / verify mechanism
 
@@ -50,10 +50,10 @@ Verify (`pfm doctor`):
 ### A.5 What `.model` / `.sha256` pin (hash re-verified live: both MATCH)
 
 ```
-harness-opus.model      claude-opus-5
-harness-opus.sha256     00ab0f4eedd5b8a29f273929310b6711613a8a37d90b3e7f97029137de3f63db  harness-opus-v2.1.278.md
+harness-opus.model      claude-opus-5-5
+harness-opus.sha256     c4b047adc046f9876eae713f12a7f75482f1fd017bfbffe9c47320d29efeac84  harness-opus-v2.1.280.md
 harness-original.model  claude-sonnet-5
-harness-original.sha256 b0cce46877ebcfb974d87cdfdda9686d31a97b738368de0a84b272f95cb6a746  harness-original-v2.1.278.md
+harness-original.sha256 5a536ce68612dff2d3407ceaa25366ece1f675f6d8a84e4998c21eb88db1e0fb  harness-original-v2.1.280.md
 ```
 
 `.model` = resolved model ID of the capture (informational — README:35: model changes alone never report drift). `.sha256` = normalized hash of the named baseline. Embedded twins under `pfm/internal/installer/assets/prompts/` enforced by `prompts_asset_test.go:35-40` `TestHarnessBaselineAssetPairIsCoherent`.

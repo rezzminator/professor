@@ -117,15 +117,32 @@ func runChatReadExcerpt(args []string, stdout, stderr io.Writer, runtimes ...com
 		fmt.Fprintf(stderr, "pfm chat read: %v\n", err)
 		return 1
 	}
-	body := renderTranscript(entries)
+	body := transcript.Markdown(entries)
 	if limit > 0 {
-		body = lastTranscriptLines(body, limit)
+		body = transcript.LastLines(body, limit)
 	}
-	if err := os.MkdirAll(filepath.Join("tmp", "chat-loads"), 0o700); err != nil {
+	sidDir := ""
+	if len(runtimes) > 0 {
+		sidDir = runtimes[0].Paths.SIDDir
+	}
+	if sidDir == "" {
+		resolved, err := paths.Resolve()
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm chat read: resolve output directory: %v\n", err)
+			return 1
+		}
+		sidDir = resolved.SIDDir
+	}
+	chatLoadsDir, err := filepath.Abs(filepath.Join(sidDir, "chat-loads"))
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm chat read: resolve output directory: %v\n", err)
+		return 1
+	}
+	if err := os.MkdirAll(chatLoadsDir, 0o700); err != nil {
 		fmt.Fprintf(stderr, "pfm chat read: create output directory: %v\n", err)
 		return 1
 	}
-	out := filepath.Join("tmp", "chat-loads", match.ID+".md")
+	out := filepath.Join(chatLoadsDir, match.ID+".md")
 	var document strings.Builder
 	fmt.Fprintf(
 		&document,
@@ -146,31 +163,6 @@ func runChatReadExcerpt(args []string, stdout, stderr io.Writer, runtimes ...com
 	}
 	fmt.Fprintf(stdout, "Extracted -> %s (%d lines)\n", out, strings.Count(document.String(), "\n"))
 	return 0
-}
-
-func renderTranscript(entries []transcript.Entry) string {
-	var output strings.Builder
-	for _, entry := range entries {
-		switch entry.Role {
-		case transcript.RoleUser:
-			fmt.Fprintf(&output, "## USER\n\n%s\n\n", entry.Text)
-		case transcript.RoleAssistant:
-			fmt.Fprintf(&output, "## ASSISTANT\n\n%s\n\n", entry.Text)
-		case transcript.RoleSummary:
-			fmt.Fprintf(&output, "## [COMPACTION SUMMARY]\n\n%s\n\n", entry.Text)
-		case transcript.RoleTool:
-			fmt.Fprintf(&output, "> [tools: %s]\n\n", entry.Tool)
-		}
-	}
-	return output.String()
-}
-
-func lastTranscriptLines(value string, count int) string {
-	lines := strings.Split(value, "\n")
-	if len(lines) > count {
-		lines = lines[len(lines)-count:]
-	}
-	return strings.Join(lines, "\n")
 }
 
 func runChatSaveContext(
@@ -223,7 +215,7 @@ func runChatSaveContext(
 		file,
 		"\n---\n\n# FULL TRANSCRIPT (script-dumped, verbatim)\n\nVisible chat text only — thinking and tool outputs are not recorded here.\nSource: %s\n\n%s---\n\n# ENVIRONMENT SNAPSHOT (script-dumped)\n\n",
 		transcriptPath,
-		renderTranscript(entries),
+		transcript.Markdown(entries),
 	); err != nil {
 		return fail("write transcript: %v", err)
 	}

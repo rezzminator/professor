@@ -292,6 +292,122 @@ func TestChatFindSearchesEveryConfiguredTranscriptRegistry(t *testing.T) {
 	}
 }
 
+// TestChatReadExcerptWritesUnderSIDDirNotCWDTmp is 1-c's regression test:
+// unfixed, `pfm chat read <excerpt-file>` writes to the cwd-relative
+// "tmp/chat-loads" — this test's cwd is a fresh temp dir unrelated to
+// PFM_SID_DIR, so a stray tmp/ appears there and the printed path is
+// cwd-relative, not the absolute SIDDir-rooted one.
+func TestChatReadExcerptWritesUnderSIDDirNotCWDTmp(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	registry := filepath.Join(root, "registry")
+	project := filepath.Join(registry, "project")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const id = "50505050-5050-4050-8050-505050505050"
+	line := `{"type":"user","timestamp":"2026-01-02T03:04:05Z","message":{"content":"a long distinctive sentence carried for chat read"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(project, id+".jsonl"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	excerpt := filepath.Join(root, "excerpt.txt")
+	if err := os.WriteFile(
+		excerpt,
+		[]byte("a long distinctive sentence carried for chat read\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	sidDir := filepath.Join(root, "sid")
+	t.Setenv("PFM_HOME", home)
+	t.Setenv("PFM_CLAUDE_ROOTS", registry)
+	t.Setenv("PFM_SID_DIR", sidDir)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"chat", "read", excerpt}, &stdout, &stderr); code != 0 {
+		t.Fatalf("chat read code=%d stderr=%q", code, stderr.String())
+	}
+	wantOut := filepath.Join(sidDir, "chat-loads", id+".md")
+	if !strings.Contains(stdout.String(), "Extracted -> "+wantOut+" (") {
+		t.Fatalf("stdout=%q, want the absolute SIDDir-rooted path %q", stdout.String(), wantOut)
+	}
+	content, err := os.ReadFile(wantOut)
+	if err != nil {
+		t.Fatalf("excerpt not written under SIDDir/chat-loads: %v", err)
+	}
+	if !strings.Contains(string(content), "# Loaded chat — session "+id) {
+		t.Fatalf("excerpt content=%q, missing header", content)
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "tmp")); !os.IsNotExist(err) {
+		t.Fatalf("chat read left a cwd-relative tmp/: err=%v", err)
+	}
+}
+
+// TestChatReadExcerptResolveFailureNeverFallsBackToCWD pins the named-error
+// path: an empty runtime.Paths.SIDDir sends chat read to paths.Resolve() —
+// when that resolution itself fails (here, the test-jail refusal to touch a
+// real operator HOME), chat read names the failure and writes nothing,
+// rather than silently falling back to a cwd-relative tmp/.
+func TestChatReadExcerptResolveFailureNeverFallsBackToCWD(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	registry := filepath.Join(root, "registry")
+	project := filepath.Join(registry, "project")
+	if err := os.MkdirAll(project, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const id = "60606060-6060-4060-8060-606060606060"
+	line := `{"type":"user","timestamp":"2026-01-02T03:04:05Z","message":{"content":"a distinctive sentence for a resolve failure"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(project, id+".jsonl"), []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	excerpt := filepath.Join(root, "excerpt.txt")
+	if err := os.WriteFile(
+		excerpt,
+		[]byte("a distinctive sentence for a resolve failure\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	// The package jail already pins PFM_HOME for the whole test binary
+	// (internal/testjail.jailHome); override it back to empty here so
+	// paths.Resolve() (reached because the runtime below carries no SIDDir)
+	// hits the test-jail refusal to touch a real operator HOME
+	// (internal/paths.HomeFrom) and returns an error.
+	t.Setenv("PFM_HOME", "")
+	runtime := commandRuntime{
+		Paths: paths.Values{
+			Home:  home,
+			Roots: map[pfmengine.ID][]string{pfmengine.Claude: {registry}},
+		},
+	}
+
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+
+	var stdout, stderr bytes.Buffer
+	code := runChatReadExcerpt([]string{excerpt}, &stdout, &stderr, runtime)
+	if code != 1 {
+		t.Fatalf(
+			"code=%d, want 1 on an unresolvable scratch root; stdout=%q stderr=%q",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
+	}
+	if !strings.Contains(stderr.String(), "pfm chat read: resolve output directory:") {
+		t.Fatalf("stderr=%q, want the named resolve-output-directory error", stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(cwd, "tmp")); !os.IsNotExist(err) {
+		t.Fatalf("chat read left a cwd-relative tmp/ after a resolve failure: err=%v", err)
+	}
+}
+
 // TestChatLoadVerbIsRetired pins that `pfm chat load` is gone: the verb must
 // fail as an unknown command, never enumerate files.
 func TestChatLoadVerbIsRetired(t *testing.T) {

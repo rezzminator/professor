@@ -142,6 +142,24 @@ func TestRunPinsXDGConfigHomeInsideTheJail(t *testing.T) {
 	}
 }
 
+// TestRunScrubsAmbientIdentity pins the jail's own scrub: an executor's shell
+// carries a live tmux pane, chat socket, or host Claude/Codex session id, and
+// none of it may reach a jailed test — a test that needs one sets it back
+// with t.Setenv.
+func TestRunScrubsAmbientIdentity(t *testing.T) {
+	for _, name := range []string{
+		"TMUX",
+		"TMUX_PANE",
+		"CHAT_INJECT_SOCKET",
+		"CLAUDE_CODE_SESSION_ID",
+		"CODEX_THREAD_ID",
+	} {
+		if value := os.Getenv(name); value != "" {
+			t.Fatalf("%s=%q after Run — ambient identity leaked into the jail", name, value)
+		}
+	}
+}
+
 // TestFleetPinsXDGConfigHomeInsideTheJail pins the per-test-fleet door.
 func TestFleetPinsXDGConfigHomeInsideTheJail(t *testing.T) {
 	root := Fleet(t)

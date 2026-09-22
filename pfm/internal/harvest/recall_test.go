@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -75,7 +76,7 @@ func TestRecallGateFlagsATruncatedPageWhereTheReaderSeesIt(t *testing.T) {
 		{"full-DOM conversion fails", &fullDOMSpy{
 			Converter: leadOnlyConverter(),
 			full:      func([]byte) (string, error) { return "", errors.New("markitdown exploded") },
-		}, "the full-DOM conversion failed: markitdown exploded"},
+		}, "the full-DOM conversion failed: conversion error"},
 		{"full-DOM conversion no better", &fullDOMSpy{
 			Converter: leadOnlyConverter(),
 			full:      func([]byte) (string, error) { return "Field guide", nil },
@@ -90,6 +91,9 @@ func TestRecallGateFlagsATruncatedPageWhereTheReaderSeesIt(t *testing.T) {
 			if !strings.Contains(result.Partial, "main-content extraction kept") ||
 				!strings.Contains(result.Partial, tc.reason) {
 				t.Fatalf("a truncated page was reported as a clean success: partial=%q", result.Partial)
+			}
+			if strings.Contains(result.Partial, "markitdown exploded") {
+				t.Fatalf("the converter's own raw error text reached the partial reason: partial=%q", result.Partial)
 			}
 			if !strings.HasPrefix(result.Content, partialMarkerPrefix) {
 				t.Fatalf("the partial flag is not visible in the content: %.200q", result.Content)
@@ -195,4 +199,108 @@ func TestAMarkerNeverPassesForContent(t *testing.T) {
 				contentChars(result.Content), result.Partial)
 		}
 	})
+}
+
+// exitErrorForTest runs a tiny subprocess that exits with code and returns
+// the *exec.ExitError it produces — the real type errorReasonClass detects,
+// not a hand-built stand-in.
+func exitErrorForTest(t *testing.T, code int) *exec.ExitError {
+	t.Helper()
+	err := exec.Command("sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("sh did not produce an *exec.ExitError: %v", err)
+	}
+	return exitErr
+}
+
+// TestErrorReasonClassNeverRepeatsRawErrorText: the ONE place a partial
+// reason is built from an error (recall.go) never hands back what the error
+// itself says — a scratch path, a worker's stderr tail, a raw Go error chain
+// — only a short, stable class, or the caller's own fallback for anything it
+// does not recognise.
+func TestErrorReasonClassNeverRepeatsRawErrorText(t *testing.T) {
+	pathBearing := &os.PathError{
+		Op:   "open",
+		Path: "/tmp/pfm-harvest-fulldom-829172/input.html",
+		Err:  errors.New("no such file or directory"),
+	}
+	stderrBearing := fmt.Errorf(
+		"%w (RuntimeError): worker crashed (stderr: Traceback (most recent call last):\n"+
+			"  File \"/opt/harvestpy/worker.py\", line 42, in convert\n    raise RuntimeError(\"boom\"))",
+		errors.New("harvestpy conversion failed"),
+	)
+	for _, tc := range []struct {
+		name     string
+		err      error
+		fallback string
+		want     string
+	}{
+		{"nil error", nil, "conversion error", ""},
+		{"a path-bearing error", pathBearing, "conversion error", "conversion error"},
+		{"a stderr-bearing worker error", stderrBearing, "conversion error", "conversion error"},
+		{"a timeout", context.DeadlineExceeded, "conversion error", "timeout"},
+		{"a cancellation", context.Canceled, "conversion error", "cancelled"},
+		{
+			"an HTTP status embedded in the wording",
+			fmt.Errorf("DoH query for example.test returned HTTP 429"),
+			"conversion error",
+			"HTTP 429",
+		},
+		{"a worker exit code", exitErrorForTest(t, 3), "conversion error", "worker exited 3"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := errorReasonClass(tc.err, tc.fallback)
+			if got != tc.want {
+				t.Fatalf("errorReasonClass(%v, %q) = %q, want %q", tc.err, tc.fallback, got, tc.want)
+			}
+			if strings.Contains(got, "/") {
+				t.Fatalf("the class itself carries a path segment: %q", got)
+			}
+		})
+	}
+}
+
+// TestFetchPublicNeverRepeatsAScratchPathFromAPartialReason: a full-DOM
+// conversion failure whose own wording names a scratch-file path and a
+// worker's stderr tail — the shape harvestmcp's convertScratch produces
+// under $TMPDIR when the harvestpy worker fails — must never reach the
+// public result: not its Partial header, not the cached artifact a public
+// caller reads. Watched FAILING on HEAD before the fix (see the red log).
+func TestFetchPublicNeverRepeatsAScratchPathFromAPartialReason(t *testing.T) {
+	const scratchDir = "/private/tmp/pfm-harvest-fulldom-829172"
+	scratchErr := fmt.Errorf(
+		"remove full-DOM conversion scratch: RemoveAll %s: harvestpy conversion failed "+
+			"(RuntimeError): worker crashed (stderr: Traceback (most recent call last):\n"+
+			"  File \"%s/worker.py\", line 42, in convert\n    raise RuntimeError(\"boom\"))",
+		scratchDir, scratchDir,
+	)
+	spy := &fullDOMSpy{Converter: leadOnlyConverter(), full: func([]byte) (string, error) { return "", scratchErr }}
+	h := pageHarvester(t, catalogPage(), spy, browserOff())
+	source := "https://guide.example.test/birds"
+
+	result := h.FetchPublic(context.Background(), source, FetchOptions{Refresh: true})
+	if result.Error != "" {
+		t.Fatalf("public fetch failed: %q", result.Error)
+	}
+	if !strings.Contains(result.Partial, "the full-DOM conversion failed") {
+		t.Fatalf("the public result lost the partial flag: partial=%q", result.Partial)
+	}
+	for _, leaked := range []string{scratchDir, "pfm-harvest-fulldom", "Traceback", "worker.py", "RuntimeError", "RemoveAll"} {
+		if strings.Contains(result.Partial, leaked) {
+			t.Fatalf("the public PARTIAL reason repeats raw error text (%q): %q", leaked, result.Partial)
+		}
+	}
+	if result.Path == "" {
+		t.Fatalf("public fetch produced no cached artifact to check")
+	}
+	body, err := os.ReadFile(result.Path)
+	if err != nil {
+		t.Fatalf("read the public artifact: %v", err)
+	}
+	for _, leaked := range []string{scratchDir, "pfm-harvest-fulldom", "Traceback", "worker.py", "RuntimeError", "RemoveAll"} {
+		if strings.Contains(string(body), leaked) {
+			t.Fatalf("the public artifact repeats raw error text (%q): %.400q", leaked, string(body))
+		}
+	}
 }

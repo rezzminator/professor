@@ -76,7 +76,10 @@ func (h *Harvester) convertHTML(
 		if convertErr != nil {
 			return "", convertedPage{}, convertErr
 		}
-		return withPartial(converted, "recall unmeasured: the page could not be parsed ("+err.Error()+")"), generic, nil
+		return withPartial(
+			converted,
+			"recall unmeasured: the page could not be parsed ("+errorReasonClass(err, "parse error")+")",
+		), generic, nil
 	}
 	lazy := lazyLoadIncomplete(doc)
 	h.followForSite(ctx, source, doc, budget)
@@ -118,7 +121,8 @@ func (h *Harvester) convertHTML(
 	fullMeasure := measureRecall(visible, full)
 	switch {
 	case fullErr != nil:
-		reason += "; the full-DOM conversion failed: " + fullErr.Error()
+		obs.Logger(ctx).Warn("harvest: full-DOM conversion failed", obs.FieldErr, fullErr.Error())
+		reason += "; the full-DOM conversion failed: " + errorReasonClass(fullErr, "conversion error")
 	case fullMeasure.low():
 		reason += "; the full-DOM conversion kept only " + fullMeasure.String()
 	default:

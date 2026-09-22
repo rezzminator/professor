@@ -175,7 +175,9 @@ func (h *Harvester) followLoader(
 		return false
 	}
 	if err := h.nowClock().Sleep(ctx, budget.pace); err != nil {
-		budget.stopped = "the fetch was cancelled: " + err.Error()
+		obs.Logger(ctx).Debug("harvest: loader following stopped: fetch cancelled",
+			"kind", loader.label, obs.FieldErr, err.Error())
+		budget.stopped = "the fetch was cancelled: " + errorReasonClass(err, "cancelled")
 		return false
 	}
 	budget.requests++
@@ -197,25 +199,29 @@ func (h *Harvester) followLoader(
 	response, err := gatewayAttempt(ctx, request)
 	switch {
 	case err != nil:
-		return budget.fail(ctx, loader, err.Error())
+		return budget.fail(ctx, loader, err.Error(), errorReasonClass(err, "request failed"))
 	case response.status == http.StatusTooManyRequests:
 		budget.stopped = fmt.Sprintf("the site answered HTTP 429 (rate limited) after %d request(s); not retried",
 			budget.requests)
 		budget.policyStop = true
 		return false
 	case response.status >= 400:
-		return budget.fail(ctx, loader, fmt.Sprintf("HTTP %d", response.status))
+		status := fmt.Sprintf("HTTP %d", response.status)
+		return budget.fail(ctx, loader, status, status)
 	}
 	if err := loader.graft(response.body, response.contentType); err != nil {
+		// The graft's own error names what the site's page held (its title,
+		// its content type) — content already public on the wire, never a
+		// local path or a worker's stderr, so it passes through unclassified.
 		if isChallenge(response.body, response.status) {
 			// Judged only on an answer that held nothing to graft: a comment
 			// can quote a wall's phrase.
-			budget.fail(ctx, loader, err.Error())
+			budget.fail(ctx, loader, err.Error(), err.Error())
 			budget.stopped = fmt.Sprintf("the site answered a bot wall after %d request(s); not retried",
 				budget.requests)
 			return false
 		}
-		return budget.fail(ctx, loader, err.Error())
+		return budget.fail(ctx, loader, err.Error(), err.Error())
 	}
 	budget.followed[loader.key] = true
 	budget.consecutive = 0
@@ -223,14 +229,17 @@ func (h *Harvester) followLoader(
 }
 
 // fail records one failed loader request; false once loaderFailureStop
-// requests in a row have failed.
-func (budget *loaderBudget) fail(ctx context.Context, loader pageLoader, cause string) bool {
+// requests in a row have failed. detail is the full diagnostic that reaches
+// the log (obs); class is the short, sanitized reason a partial artifact and
+// the public result may repeat — errorReasonClass's output for an error the
+// caller does not already know to be safe, detail itself otherwise.
+func (budget *loaderBudget) fail(ctx context.Context, loader pageLoader, detail, class string) bool {
 	obs.Logger(ctx).Warn("harvest: loader request failed",
-		"kind", loader.label, "target", safeURL(loader.target), obs.FieldErr, cause)
-	budget.failures = append(budget.failures, fmt.Sprintf("%s (%s): %s", loader.label, safeURL(loader.target), cause))
+		"kind", loader.label, "target", safeURL(loader.target), obs.FieldErr, detail)
+	budget.failures = append(budget.failures, fmt.Sprintf("%s (%s): %s", loader.label, safeURL(loader.target), class))
 	budget.consecutive++
 	if ctx.Err() != nil {
-		budget.stopped = "the fetch was cancelled: " + ctx.Err().Error()
+		budget.stopped = "the fetch was cancelled: " + errorReasonClass(ctx.Err(), "cancelled")
 		return false
 	}
 	if budget.consecutive >= loaderFailureStop {

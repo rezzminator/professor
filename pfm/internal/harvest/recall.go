@@ -1,7 +1,11 @@
 package harvest
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
+	"os/exec"
 	"regexp"
 	"strings"
 
@@ -81,6 +85,45 @@ func joinReasons(reasons ...string) string {
 		}
 	}
 	return strings.Join(kept, "; ")
+}
+
+// errorReasonHTTPStatusRe pulls a bare "HTTP <code>" out of an error's own
+// wording — the one fragment of it safe to keep verbatim.
+var errorReasonHTTPStatusRe = regexp.MustCompile(`\bHTTP (\d{3})\b`)
+
+// errorReasonClass is the ONE place a partial reason is built from an error:
+// every producer of a gap (content.go's converters, loaders.go's requests)
+// calls it instead of err.Error(). A local converter's error chain can carry
+// a scratch-file path (harvestmcp's convertScratch input under $TMPDIR), a
+// worker's stderr tail, or another host's filesystem layout — none of which
+// may reach a partial artifact, the PARTIAL receipt header, or the cache. The
+// class keeps only what is safe to repeat: cancelled, timeout, the worker's
+// exit code, an HTTP status already embedded in the wording, or fallback —
+// the caller's own short name for the step that failed. The error's full
+// text still reaches the log (obs.FieldErr) at the call site; this function
+// never sees or needs it to do that.
+func errorReasonClass(err error, fallback string) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return fmt.Sprintf("worker exited %d", exitErr.ExitCode())
+	}
+	if m := errorReasonHTTPStatusRe.FindStringSubmatch(err.Error()); m != nil {
+		return "HTTP " + m[1]
+	}
+	return fallback
 }
 
 // lazyLoadIncomplete returns the browser worker's incomplete-lazy-load note

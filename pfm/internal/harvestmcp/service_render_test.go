@@ -151,3 +151,49 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 		t.Fatalf("search-off describe receipt missing findWorks fallback: %q", got)
 	}
 }
+
+// TestDescribeFetchNamesAPartialArtifact pins the MCP receipt header: a
+// known-incomplete artifact says so after `path: …` on the header line, and a
+// complete one carries no PARTIAL notice.
+func TestDescribeFetchNamesAPartialArtifact(t *testing.T) {
+	service, err := NewConfiguredHarvester(
+		"test",
+		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = service.Close() }()
+	path := filepath.Join(t.TempDir(), "source.md")
+	result := harvest.Result{
+		HTTPStatus:  200,
+		CacheStatus: "miss",
+		Bytes:       9,
+		Tokens:      3,
+		Path:        path,
+		Content:     "body text",
+	}
+	complete := service.describeFetch("https://fixture.example/source", result, false)
+	if !strings.Contains(complete, "path: "+path) || strings.Contains(complete, "PARTIAL:") {
+		t.Fatalf("complete receipt missing its header or naming a PARTIAL notice:\n%s", complete)
+	}
+	result.Partial = "page 3 of 9 failed to convert"
+	got := service.describeFetch("https://fixture.example/source", result, false)
+	want := "path: " + path + " / PARTIAL: page 3 of 9 failed to convert\n\nbody text"
+	if !strings.Contains(got, want) {
+		t.Fatalf("partial receipt:\n%s\nwant it to contain:\n%s", got, want)
+	}
+	// The size probe is a receipt too: a caller budgeting a read must learn
+	// the artifact is incomplete before it reads it.
+	if size := service.describeFetch("https://fixture.example/source", result, true); !strings.Contains(
+		size,
+		`"partial":"page 3 of 9 failed to convert"`,
+	) {
+		t.Fatalf("size-only receipt hides the partial reason:\n%s", size)
+	}
+	result.Partial = ""
+	complete = service.describeFetch("https://fixture.example/source", result, true)
+	if strings.Contains(complete, "partial") {
+		t.Fatalf("complete size-only receipt names a partial reason:\n%s", complete)
+	}
+}

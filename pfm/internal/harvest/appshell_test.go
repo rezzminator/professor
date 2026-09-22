@@ -329,3 +329,49 @@ func TestAppShellWaybackSnapshotOfShellIsRejected(t *testing.T) {
 		t.Fatalf("Wayback snapshot of the shell entered the positive cache: %#v", artifacts)
 	}
 }
+
+// TestAppShellProbeSendsTheProvenanceReferer: on a Referer-gated host the
+// page arrives (the ladder sends the provenance Referer) but a Referer-less
+// sibling probe meets the wall, so the probe "could not compare" and the shell
+// was stored as the route's content. The probe arrives the way the page did.
+func TestAppShellProbeSendsTheProvenanceReferer(t *testing.T) {
+	shell := appShellFixture()
+	var probeReferer []string
+	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if strings.Contains(request.URL.Path, appShellProbePrefix) {
+			probeReferer = append(probeReferer, request.Header.Get("Referer"))
+		}
+		if request.Header.Get("Referer") == "" {
+			return response(
+				request,
+				http.StatusForbidden,
+				"text/html",
+				"<html><h1>Prove your humanity</h1></html>",
+			), nil
+		}
+		return response(request, http.StatusOK, "text/html", shell), nil
+	})
+	jina := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(request, http.StatusOK, "text/plain", renderedEventsMarkdown), nil
+	})
+	missing := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(request, http.StatusNotFound, "application/json", `{}`), nil
+	})
+	h := mustNew(t, Options{
+		CacheDir:    t.TempDir(),
+		Client:      &http.Client{Transport: site},
+		Chrome:      &http.Client{Transport: site},
+		Jina:        &http.Client{Transport: jina},
+		OA:          &http.Client{Transport: missing},
+		Converter:   tagStripConverter(),
+		BrowserRung: browserOff(),
+	})
+	result := h.Fetch(context.Background(), "https://club.example.test/events")
+	if len(probeReferer) == 0 || probeReferer[0] != ProvenanceReferer {
+		t.Fatalf("app-shell probe Referer = %q, want %q", probeReferer, ProvenanceReferer)
+	}
+	if result.Error != "" || result.Method != "jina" {
+		t.Fatalf("shell on a Referer-gated host was not detected: method=%q rungs=%v error=%q",
+			result.Method, result.Rungs, result.Error)
+	}
+}

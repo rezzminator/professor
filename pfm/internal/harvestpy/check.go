@@ -113,6 +113,12 @@ func evaluateConversionEnvironment(
 		}())
 		set("lock_hash", VerifySHA256(filepath.Join(current, "project", "uv.lock"), digest.LockSHA256))
 		set("source_hash", VerifySHA256(filepath.Join(current, "project", "converter.py"), digest.SourceSHA256))
+		// source_hash proves the record and the on-disk worker agree with
+		// each other; source_current proves they are THIS pfm's. An upgrade
+		// leaves an older environment fully self-consistent, and without this
+		// comparison the installer's Check fast-path keeps the old
+		// converter.py in service under a binary that embeds a new one.
+		set("source_current", conversionEnvironmentStale(digest))
 		set("project_metadata", compareFile(filepath.Join(current, "project", "pyproject.toml"), ProjectMetadata()))
 		set("digest_integrity", verifyDigestIntegrity(digest))
 		set("current_target", verifyCurrentTarget(current, digest))
@@ -452,4 +458,24 @@ func checkInventory(ctx context.Context, runner deps.Runner, root string, expect
 		)
 	}
 	return nil
+}
+
+// conversionEnvironmentStale names why a ready conversion environment was
+// built from a different converter source or lock than this binary embeds,
+// or returns nil when it is current (the sibling of BrowserEnvironmentStale).
+func conversionEnvironmentStale(digest EnvironmentDigest) error {
+	var drift []string
+	if digest.SourceSHA256 != sourceSHA256() {
+		drift = append(drift, "converter source")
+	}
+	if digest.LockSHA256 != lockSHA256() {
+		drift = append(drift, "dependency lock")
+	}
+	if len(drift) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"provisioned from a different %s than this pfm embeds; `pfm install` re-provisions it",
+		strings.Join(drift, " and "),
+	)
 }

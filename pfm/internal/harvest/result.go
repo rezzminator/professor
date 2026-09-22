@@ -42,6 +42,7 @@ func (h *Harvester) storeResult(
 		Tokens:       EstimateTokens(content),
 		HTTPStatus:   statusCode,
 		Rungs:        rungs,
+		Partial:      partialReason(content),
 	}
 }
 
@@ -103,6 +104,7 @@ func (h *Harvester) resultFromCache(source, kind, content string, meta map[strin
 		ContentChars: chars,
 		Tokens:       tokens,
 		Rungs:        rungs,
+		Partial:      partialReason(content),
 	}
 }
 

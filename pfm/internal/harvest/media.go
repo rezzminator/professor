@@ -61,7 +61,14 @@ func (h *Harvester) FetchImage(ctx context.Context, source string, refresh ...bo
 	}{
 		{rungDirect, h.binaryDirectOrClient(), h.userAgent}, {rungChromeImpersonation, h.binaryChromeOrChrome(), chromeUA},
 	} {
-		body, status, contentType, err := getBody(ctx, rung.client, source, rung.ua, maxImageBytes+1)
+		body, status, contentType, err := getBodyWithHeaders(
+			ctx,
+			rung.client,
+			source,
+			rung.ua,
+			map[string]string{headerReferer: ProvenanceReferer},
+			maxImageBytes+1,
+		)
 		if err != nil {
 			lastErr = err
 			continue
@@ -205,7 +212,14 @@ func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refres
 	}{
 		{rungDirect, h.binaryDirectOrClient(), h.userAgent}, {rungChromeImpersonation, h.binaryChromeOrChrome(), chromeUA},
 	} {
-		body, status, contentType, err := getBody(ctx, rung.client, source, rung.ua, h.options.MaxBytes)
+		body, status, contentType, err := getBodyWithHeaders(
+			ctx,
+			rung.client,
+			source,
+			rung.ua,
+			map[string]string{headerReferer: ProvenanceReferer},
+			h.options.MaxBytes,
+		)
 		if err != nil {
 			lastErr = err
 			continue

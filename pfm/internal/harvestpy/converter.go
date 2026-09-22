@@ -70,6 +70,10 @@ type Request struct {
 	Source string `json:"source,omitempty"`
 	OCR    bool   `json:"ocr,omitempty"`
 	Layout bool   `json:"layout,omitempty"`
+	// FullDOM asks for an HTML page's WHOLE DOM converted, boilerplate
+	// included, instead of its extracted main content — the recall gate's
+	// fallback (harvest.FullDOMConverter).
+	FullDOM bool `json:"full_dom,omitempty"`
 }
 
 // Result is one successful conversion result and its optional feature prices.

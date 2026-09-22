@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 	"github.com/rezzminator/professor/pfm/internal/harvestpy"
 )
 
@@ -138,5 +139,33 @@ func TestFetchBrowserKeepsTheOperatorsOwnProxy(t *testing.T) {
 	request := worker.request(t)
 	if proxy, _ := request["proxy"].(string); proxy != converter.proxyURL {
 		t.Fatalf("browser proxy = %q, want the configured %q", proxy, converter.proxyURL)
+	}
+}
+
+// TestFetchBrowserSendsTheProvenanceReferer: the browser rung arrives the way
+// every HTTP rung of the ladder does — from a search result. A Referer-less
+// navigation meets the forum wall the HTTP rungs already pass.
+func TestFetchBrowserSendsTheProvenanceReferer(t *testing.T) {
+	converter, worker := newFakeBrowserWorker(t)
+	if _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7", true); err != nil {
+		t.Fatalf("FetchBrowser() error = %v", err)
+	}
+	request := worker.request(t)
+	if referer, _ := request["referer"].(string); referer != harvest.ProvenanceReferer {
+		t.Fatalf("browser fetch referer = %q, want %q: %v", referer, harvest.ProvenanceReferer, request)
+	}
+}
+
+// TestFetchBrowserNeverAsksAnUnregisteredPageToPress: pressing a load-more
+// button can fire requests or navigation, so a page no registered site owns is
+// rendered read-only — its request carries no press_loaders true.
+func TestFetchBrowserNeverAsksAnUnregisteredPageToPress(t *testing.T) {
+	converter, worker := newFakeBrowserWorker(t)
+	if _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7", true); err != nil {
+		t.Fatalf("FetchBrowser() error = %v", err)
+	}
+	request := worker.request(t)
+	if press, present := request["press_loaders"]; present && press != false {
+		t.Fatalf("an unregistered page was asked to press load-more buttons: %v", request)
 	}
 }

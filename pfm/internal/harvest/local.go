@@ -1,6 +1,7 @@
 package harvest
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/url"
@@ -136,4 +137,46 @@ func insideAny(path string, roots []string) bool {
 		}
 	}
 	return false
+}
+
+func (h *Harvester) fetchLocal(ctx context.Context, source string, options FetchOptions) Result {
+	path := source
+	if strings.HasPrefix(strings.ToLower(path), "file://") {
+		decoded, err := fileURLPath(path)
+		if err != nil {
+			return Result{Source: source, Error: err.Error()}
+		}
+		path = decoded
+	}
+	if reason := DenyLocalPath(path, h.options.LocalRoots); reason != "" {
+		return Result{Source: source, Error: reason}
+	}
+	body, err := os.ReadFile(filepath.Clean(path))
+	if err != nil {
+		return Result{Source: source, Error: fmt.Sprintf("read local file %s: %v", path, err)}
+	}
+	kind := classifyFetchedKind(path, "", body)
+	if kindFromName(path) == kindPDF && !strings.HasPrefix(string(body), "%PDF-") {
+		return Result{
+			Source: source,
+			Kind:   kindPDF,
+			Error: fmt.Sprintf(
+				"%s has a .pdf extension but is not a PDF file — check its actual contents before fetching it again.",
+				source,
+			),
+		}
+	}
+	if !options.Refresh {
+		if cached, meta, cachePath, ok := h.cache.load(source, kind); ok {
+			return h.resultFromCache(source, kind, cached, meta, cachePath)
+		}
+	}
+	converted, err := h.convertFetchedContent(ctx, kind, source, body)
+	if err != nil {
+		return Result{Source: source, Kind: kind, Error: err.Error()}
+	}
+	if !usableContent(converted, kind) {
+		return Result{Source: source, Kind: kind, Error: "conversion produced no usable content"}
+	}
+	return h.storeResult(source, kind, localLabel, converted, int64(len(body)), 0, []string{localLabel}, options)
 }

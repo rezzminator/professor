@@ -14,7 +14,8 @@ source "$ROOT/../scripts/shtest.sh"
 printf 'p/a\tTestListed\thelper\tfixture\n' > "$T/list.tsv"
 ev() { printf '{"Action":"%s","Package":"%s","Test":"%s"}\n' "$1" "$2" "$3"; }
 check() { # check <name> <want-rc> <want-grep> <json>
-  local out rc; out=$(PFM_KNOWN_SKIPS="$T/list.tsv" bash "$SUT" "$4" 2>&1); rc=$?
+  # VERBOSE on: the per-skip GAP line is the audit trail these cases assert.
+  local out rc; out=$(PFM_KNOWN_SKIPS="$T/list.tsv" PFM_SKIP_CHECK_VERBOSE=1 bash "$SUT" "$4" 2>&1); rc=$?
   if [ "$rc" -eq "$2" ] && grep -q -- "$3" <<< "$out"; then ok "$1"; else bad "$1" "rc=$rc want $2" "$out"; fi
 }
 

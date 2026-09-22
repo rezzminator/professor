@@ -620,80 +620,8 @@ func TestInstalledInventoryDigestIsStableAndRejectsTampering(t *testing.T) {
 func TestCheckRejectsAChangedInstalledInventory(t *testing.T) {
 	root := t.TempDir()
 	platform := Platform{GOOS: "linux", GOARCH: "amd64"}
-	envRoot := filepath.Join(root, "env", platform.String())
-	final := filepath.Join(envRoot, "versioned")
-	project := filepath.Join(final, "project")
-	venv := filepath.Join(project, ".venv")
-	if err := os.MkdirAll(filepath.Join(venv, "lib", "python3.11", "site-packages"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	write := func(path, body string, mode os.FileMode) {
-		t.Helper()
-		if err := os.WriteFile(path, []byte(body), mode); err != nil {
-			t.Fatal(err)
-		}
-	}
-	uv := filepath.Join(final, "uv")
-	write(
-		uv,
-		"#!/bin/sh\nif [ \"$2\" = \"check\" ]; then exit 0; fi\nif [ -f \"$PWD/.venv/lib/python3.11/site-packages/removed.dist-info\" ]; then printf 'docling==2.107.0\\ntrafilatura==2.1.0\\n'; else printf 'docling==2.107.0\\n'; fi\n",
-		0o700,
-	)
-	if err := os.MkdirAll(filepath.Join(final, "python"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	write(filepath.Join(final, "python", "BUILD"), "20260610\n", 0o600)
-	python := filepath.Join(venv, "bin", "python")
-	if err := os.MkdirAll(filepath.Dir(python), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	write(
-		python,
-		"#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'Python 3.11.15'; else while IFS= read -r _line; do printf '{\"ok\":true,\"imports\":{},\"conversion\":{\"ok\":true}}\\n'; done; fi\n",
-		0o700,
-	)
-	write(filepath.Join(project, "converter.py"), string(ConverterSource()), 0o600)
-	write(filepath.Join(project, "pyproject.toml"), string(ProjectMetadata()), 0o600)
-	write(filepath.Join(project, "uv.lock"), string(LockMetadata()), 0o600)
-	markerInventory, markerCount, err := inventoryDigest([]byte("docling==2.107.0\ntrafilatura==2.1.0\n"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	target := Targets()[platform]
-	canonical := EnvironmentDigest{
-		Schema:       1,
-		Target:       platform.String(),
-		Python:       "3.11.15+20260610",
-		UV:           "0.11.32",
-		PythonSHA256: target.Python.SHA256,
-		UVSHA256:     target.UV.SHA256,
-		LockSHA256:   lockSHA256(),
-		SourceSHA256: sourceSHA256(),
-		Features:     FeatureStatus{OCR: "disabled", Layout: "disabled", Models: "not-requested"},
-	}
-	digest := digestID(canonical)
-	oldFinal := final
-	final = filepath.Join(envRoot, digest)
-	if err := os.Rename(oldFinal, final); err != nil {
-		t.Fatal(err)
-	}
-	project = filepath.Join(final, "project")
-	venv = filepath.Join(project, ".venv")
-	marker := canonical
-	marker.Digest, marker.State, marker.Environment = digest, "ready", final
-	marker.InventorySHA256, marker.InventoryCount = markerInventory, markerCount
-	body, err := json.Marshal(marker)
-	if err != nil {
-		t.Fatal(err)
-	}
-	write(filepath.Join(final, "environment.json"), string(body), 0o600)
-	if err := os.MkdirAll(envRoot, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(digest, filepath.Join(envRoot, "current")); err != nil {
-		t.Fatal(err)
-	}
-	write(filepath.Join(venv, "lib", "python3.11", "site-packages", "removed.dist-info"), "present", 0o600)
+	final := readyFixtureEnvironment(t, root, platform, ConverterSource())
+	venv := filepath.Join(final, "project", ".venv")
 	report, err := CheckConversionEnvironment(context.Background(), root, platform)
 	if err != nil || !report.Healthy {
 		t.Fatalf("healthy fixture rejected: %#v %v", report, err)

@@ -305,6 +305,9 @@ func publicSuccessSkeleton(source string, result Result) Result {
 		CacheStatus: publicCacheStatus(result.CacheStatus),
 		HTTPStatus:  result.HTTPStatus,
 		Members:     append([]Member(nil), result.Members...),
+		// Partial is part of what the artifact IS, not how it was acquired:
+		// a public caller must see a truncated page as truncated.
+		Partial: result.Partial,
 	}
 }
 

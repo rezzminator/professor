@@ -64,7 +64,9 @@ func (converter pythonConverter) FetchBrowser(ctx context.Context, source string
 		source,
 		proxyURL,
 		hostResolverRules,
+		harvest.ProvenanceReferer,
 		headless,
+		harvest.SitePressesLoaders(source),
 		45000,
 		onAsk,
 	)

@@ -137,6 +137,13 @@ const (
 	resultDetailError          = "error"
 )
 
+// ProvenanceReferer is the Referer every page-facing request sends — the web
+// ladder's direct and chrome rungs, the browser rung's navigation, the image
+// loop and the app-shell probe: a visitor arriving from a search result. Some
+// anti-bot walls open for a plain GET that carries ANY Referer and refuse a
+// Referer-less one.
+const ProvenanceReferer = "https://www.google.com/"
+
 // ErrBrowserPolicyDenied marks a browser fetch the SSRF guard refused — a
 // private or internal address. It is POLICY, not an outage: the terminal
 // message must never tell the caller to retry a permanent refusal, and it
@@ -155,6 +162,15 @@ type Converter interface {
 // layer converts empty). Optional: a plain Converter simply never escalates.
 type OCRConverter interface {
 	ConvertOCR(ctx context.Context, kind, source string, body []byte) (string, error)
+}
+
+// FullDOMConverter is implemented by converters that can convert an HTML
+// page's WHOLE DOM, boilerplate included, instead of extracting its main
+// content — the recall gate's fallback when main-content extraction kept too
+// little of the page's visible text (recall.go). Optional: without it a
+// low-recall conversion is flagged partial instead.
+type FullDOMConverter interface {
+	ConvertFullDOM(ctx context.Context, source string, body []byte) (string, error)
 }
 
 // BrowserFetcher is implemented by adapters that can render one URL in a real
@@ -290,6 +306,12 @@ type Result struct {
 	Challenge    bool     `json:"challenge,omitempty"`
 	HTTPStatus   int      `json:"http_status,omitempty"`
 	Members      []Member `json:"members,omitempty"`
+	// Partial names why the artifact is known to be INCOMPLETE — a recall gate
+	// below its floor, lazy-loaded content still arriving when the browser
+	// rung's scroll cap hit, a thread whose comments are only partly in the
+	// page. It mirrors the marker line the content itself opens with
+	// (partialMarkerPrefix), so every surface that shows the content shows it.
+	Partial string `json:"partial,omitempty"`
 }
 
 // Harvester owns transport, policy and cache state.

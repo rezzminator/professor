@@ -1,24 +1,116 @@
 package harvest
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"path/filepath"
 	"regexp"
 	"strings"
 
 	"golang.org/x/net/html"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 func (h *Harvester) convertFetchedContent(ctx context.Context, kind, source string, body []byte) (string, error) {
+	converted, _, err := h.convertFetchedDocument(ctx, kind, source, body)
+	return converted, err
+}
+
+// convertedPage is what the converter learned about an HTML page beyond its
+// markdown: the per-site extractor that rendered it ("" for the generic path)
+// and whether a browser render could close a gap it flagged. Non-HTML kinds
+// carry the zero value.
+type convertedPage struct {
+	extractor         string
+	renderMayComplete bool
+}
+
+// convertFetchedDocument is convertFetchedContent that also returns the
+// convertedPage of an HTML page.
+func (h *Harvester) convertFetchedDocument(
+	ctx context.Context,
+	kind, source string,
+	body []byte,
+) (string, convertedPage, error) {
 	if kind == kindTXT {
-		return string(body), nil
+		return string(body), convertedPage{}, nil
 	}
 	if h.options.Converter == nil {
-		return "", errors.New("no injected converter configured for " + kind)
+		return "", convertedPage{}, errors.New("no injected converter configured for " + kind)
 	}
-	return h.options.Converter.Convert(ctx, kind, source, body)
+	if kind != kindHTML {
+		converted, err := h.options.Converter.Convert(ctx, kind, source, body)
+		return converted, convertedPage{}, err
+	}
+	return h.convertHTML(ctx, source, body)
+}
+
+// convertHTML is the HTML half of the converter boundary: a per-site tree
+// extractor when one owns the page (site_extract.go); otherwise the inert-
+// container pre-pass (inert.go), the injected main-content converter, and the
+// recall gate over its output (recall.go). Every incompleteness it can see
+// travels as the partial marker on the content — never only as a log line.
+func (h *Harvester) convertHTML(ctx context.Context, source string, body []byte) (string, convertedPage, error) {
+	// generic is every generic-path answer: the recall gate or lazy loading
+	// flags what a browser render may complete.
+	generic := convertedPage{renderMayComplete: true}
+	doc, err := html.Parse(bytes.NewReader(body))
+	if err != nil {
+		// x/net/html recovers from any malformed markup; an error here is a
+		// reader failure. Convert the bytes as they are and flag the artifact
+		// unmeasured rather than dropping the pre-pass silently.
+		obs.Logger(ctx).Warn("harvest: HTML could not be parsed for the recall gate", obs.FieldErr, err.Error())
+		converted, convertErr := h.options.Converter.Convert(ctx, kindHTML, source, body)
+		if convertErr != nil {
+			return "", convertedPage{}, convertErr
+		}
+		return withPartial(converted, "recall unmeasured: the page could not be parsed ("+err.Error()+")"), generic, nil
+	}
+	lazy := lazyLoadIncomplete(doc)
+	if extraction, extractor, ok := extractForSite(source, doc); ok {
+		return withPartial(extraction.markdown, joinReasons(extraction.partial, lazy)), convertedPage{
+			extractor:         extractor,
+			renderMayComplete: extraction.renderMayComplete,
+		}, nil
+	}
+	input := body
+	if unwrapInertContainers(ctx, doc) > 0 {
+		var rendered bytes.Buffer
+		if renderErr := html.Render(&rendered, doc); renderErr != nil {
+			return "", convertedPage{}, fmt.Errorf("render the page with its inert containers surfaced: %w", renderErr)
+		}
+		input = rendered.Bytes()
+	}
+	converted, err := h.options.Converter.Convert(ctx, kindHTML, source, input)
+	if err != nil {
+		return "", convertedPage{}, err
+	}
+	visible := len(visibleWords(doc))
+	measure := measureRecall(visible, converted)
+	if !measure.low() {
+		return withPartial(converted, lazy), generic, nil
+	}
+	reason := "main-content extraction kept " + measure.String()
+	fullDOM, ok := h.options.Converter.(FullDOMConverter)
+	if !ok {
+		return withPartial(converted, joinReasons(reason+"; no full-DOM converter is wired", lazy)), generic, nil
+	}
+	full, fullErr := fullDOM.ConvertFullDOM(ctx, source, input)
+	fullMeasure := measureRecall(visible, full)
+	switch {
+	case fullErr != nil:
+		reason += "; the full-DOM conversion failed: " + fullErr.Error()
+	case fullMeasure.low():
+		reason += "; the full-DOM conversion kept only " + fullMeasure.String()
+	default:
+		// The whole DOM, boilerplate included, is the complete artifact.
+		return withPartial(full, lazy), generic, nil
+	}
+	return withPartial(converted, joinReasons(reason, lazy)), generic, nil
 }
 
 func classifyFetchedKind(source, contentType string, body []byte) string {

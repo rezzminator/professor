@@ -355,23 +355,29 @@ func renderHarvestCLI(result harvest.Result, sizeOnly bool) string {
 	if result.Error != "" {
 		return fmt.Sprintf("# %s\nERROR: %s", result.Source, result.Error)
 	}
+	partial := "" // a known-incomplete artifact says so in every receipt, the size probe's too
+	if result.Partial != "" {
+		partial = " / PARTIAL: " + result.Partial
+	}
 	if sizeOnly {
 		return fmt.Sprintf(
-			"source: %s\nsize: %d tokens / chars: %d / path: %s / cache_status: %s",
+			"source: %s\nsize: %d tokens / chars: %d / path: %s / cache_status: %s%s",
 			result.Source,
 			result.Tokens,
 			result.Chars,
 			result.Path,
 			result.CacheStatus,
+			partial,
 		)
 	}
 	return fmt.Sprintf(
-		"# %s\ncache_status: %s / bytes: %d / tokens: %d / path: %s\n\n%s",
+		"# %s\ncache_status: %s / bytes: %d / tokens: %d / path: %s%s\n\n%s",
 		result.Source,
 		result.CacheStatus,
 		result.Bytes,
 		result.Tokens,
 		result.Path,
+		partial,
 		strings.TrimSpace(result.Content),
 	)
 }

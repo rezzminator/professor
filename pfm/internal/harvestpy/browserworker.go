@@ -51,6 +51,15 @@ type BrowserFetchRequest struct {
 	// appends its own catch-all so nothing else resolves at all.
 	HostResolverRules string `json:"host_resolver_rules,omitempty"`
 	TimeoutMS         int    `json:"timeout_ms,omitempty"`
+	// Referer is the provenance Referer the navigation carries (the same one
+	// the ladder's HTTP rungs send): some anti-bot walls open for a visitor
+	// arriving with ANY Referer and refuse a Referer-less one.
+	Referer string `json:"referer,omitempty"`
+	// PressLoaders lets the render press the page's load-more buttons while it
+	// scrolls. Pressing can fire requests or navigation, so only a registered
+	// site's render presses (harvest.SitePressesLoaders); false is omitted and
+	// the worker scrolls read-only.
+	PressLoaders bool `json:"press_loaders,omitempty"`
 }
 
 // browserWorkerRequest is the wire shape of one worker op.
@@ -90,16 +99,18 @@ func (worker *BrowserWorker) Fetch(
 	timeoutMS int,
 	onAsk func(url string) error,
 ) (string, int, error) {
-	return worker.FetchPinned(ctx, source, proxy, "", headless, timeoutMS, onAsk)
+	return worker.FetchPinned(ctx, source, proxy, "", "", headless, false, timeoutMS, onAsk)
 }
 
 // FetchPinned is Fetch with Chrome's resolver pinned to an already-validated
-// address (see BrowserFetchRequest.HostResolverRules). An empty rule behaves
-// exactly like Fetch.
+// address (see BrowserFetchRequest.HostResolverRules) and the navigation
+// carrying referer (see BrowserFetchRequest.Referer), pressing the page's
+// load-more buttons only when pressLoaders (see BrowserFetchRequest.PressLoaders).
+// An empty rule, an empty referer and a false pressLoaders behave exactly like Fetch.
 func (worker *BrowserWorker) FetchPinned(
 	ctx context.Context,
-	source, proxy, hostResolverRules string,
-	headless bool,
+	source, proxy, hostResolverRules, referer string,
+	headless, pressLoaders bool,
 	timeoutMS int,
 	onAsk func(url string) error,
 ) (string, int, error) {
@@ -115,6 +126,8 @@ func (worker *BrowserWorker) FetchPinned(
 				Headless:          headless,
 				HostResolverRules: hostResolverRules,
 				TimeoutMS:         timeoutMS,
+				Referer:           referer,
+				PressLoaders:      pressLoaders,
 			},
 		},
 	)

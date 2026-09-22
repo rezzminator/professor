@@ -78,6 +78,18 @@ def convert_html(path: pathlib.Path) -> str:
     return tidy_markdown(html_metadata(raw) + body)
 
 
+def convert_html_full(path: pathlib.Path) -> str:
+    """The WHOLE DOM as Markdown, boilerplate included: the recall gate's
+    fallback (Go's harvest.FullDOMConverter) when main-content extraction kept
+    too little of the page's visible text."""
+    from markitdown import MarkItDown
+
+    raw = path.read_bytes().decode("utf-8", errors="ignore")
+    with _quiet_stdout():
+        body = MarkItDown().convert(str(path)).text_content or ""
+    return tidy_markdown(html_metadata(raw) + body)
+
+
 def tidy_markdown(markdown: str) -> str:
     lines = [line.rstrip() for line in markdown.splitlines()]
     output: list[str] = []
@@ -215,7 +227,8 @@ def convert(request: dict) -> dict:
     kind = _kind(path, declared)
     try:
         if kind in {"html", "htm"}:
-            markdown, features = convert_html(path), {}
+            markdown = convert_html_full(path) if request.get("full_dom") else convert_html(path)
+            features = {}
         elif kind == "pdf":
             markdown, features = convert_pdf(path, request)
         elif kind in {"docx", "xlsx", "pptx"}:

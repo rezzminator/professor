@@ -271,3 +271,114 @@ func TestLegacySelfReferentialOACandidateCannotRecurse(t *testing.T) {
 		t.Fatalf("recursive OA trace=%#v", result.Rungs)
 	}
 }
+
+// forumWallFixture reproduces a forum anti-bot interstitial served as HTTP 200:
+// the wall copy sits beside several KB of ordinary page chrome, so neither
+// the status code nor the 4000-byte weak-marker gate flags it — only the wall
+// phrase itself can.
+func forumWallFixture(phrase string) string {
+	return "<html><head><title>Forum</title></head><body><h1>" + phrase + "</h1>" +
+		"<p>" + strings.Repeat("Community discussion threads, member profiles and weekly digests. ", 80) + "</p>" +
+		"<div class=\"g-recaptcha\" data-sitekey=\"fixture\"></div></body></html>"
+}
+
+func TestForumWallPhrasesAreAChallengeAtAnyLength(t *testing.T) {
+	for _, phrase := range []string{
+		"Prove your humanity",
+		"You've been blocked by network security.",
+		"Your request has been blocked due to a network policy.",
+	} {
+		t.Run(phrase, func(t *testing.T) {
+			wall := forumWallFixture(phrase)
+			if contentChars(wall) <= 4000 {
+				t.Fatalf("fixture must exceed the 4000-char weak-marker gate, got %d", contentChars(wall))
+			}
+			wallTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return response(request, http.StatusOK, "text/html", wall), nil
+			})
+			missingTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return response(request, http.StatusNotFound, "application/json", `{}`), nil
+			})
+			h := mustNew(t, Options{
+				CacheDir: t.TempDir(),
+				Client:   &http.Client{Transport: wallTransport},
+				Chrome:   &http.Client{Transport: wallTransport},
+				Jina:     &http.Client{Transport: wallTransport},
+				OA:       &http.Client{Transport: missingTransport},
+				Converter: legacyConverterFunc(
+					func(_ context.Context, _, _ string, raw []byte) (string, error) { return string(raw), nil },
+				),
+				BrowserRung: browserOff(),
+			})
+			result := h.Fetch(context.Background(), "https://forum.example.test/r/thread/1")
+			if result.Error == "" {
+				t.Fatalf("forum wall returned as a SUCCESS: method=%q rungs=%v", result.Method, result.Rungs)
+			}
+			if !result.Challenge || !strings.Contains(strings.ToLower(result.Error), "challenge") {
+				t.Fatalf("forum wall not reported as a challenge failure: %#v", result)
+			}
+			var artifacts []string
+			_ = filepath.Walk(h.options.CacheDir, func(path string, info os.FileInfo, err error) error {
+				if err == nil && info != nil && !info.IsDir() && filepath.Base(path) != "stats.jsonl" {
+					artifacts = append(artifacts, path)
+				}
+				return nil
+			})
+			if len(artifacts) != 0 {
+				t.Fatalf("forum wall entered the positive cache: %#v", artifacts)
+			}
+		})
+	}
+}
+
+// TestDirectRungSendsProvenanceReferer pins the cheapest way past a wall that
+// opens for any Referer: the direct rung itself carries one, so the real page
+// arrives on the first request instead of the wall being escalated (or cached).
+func TestDirectRungSendsProvenanceReferer(t *testing.T) {
+	page := "<html><body><h1>Thread title</h1>" + strings.Repeat("original post and replies ", 60) + "</body></html>"
+	var directReferer atomic.Value
+	directReferer.Store("")
+	direct := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		referer := request.Header.Get("Referer")
+		directReferer.Store(referer)
+		if referer == "" {
+			return response(request, http.StatusOK, "text/html", forumWallFixture("Prove your humanity")), nil
+		}
+		return response(request, http.StatusOK, "text/html", page), nil
+	})
+	missingTransport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(request, http.StatusNotFound, "application/json", `{}`), nil
+	})
+	h := mustNew(t, Options{
+		CacheDir: t.TempDir(),
+		Client:   &http.Client{Transport: direct},
+		Chrome:   &http.Client{Transport: missingTransport},
+		Jina:     &http.Client{Transport: missingTransport},
+		OA:       &http.Client{Transport: missingTransport},
+		Converter: legacyConverterFunc(
+			func(_ context.Context, _, _ string, raw []byte) (string, error) { return string(raw), nil },
+		),
+		BrowserRung: browserOff(),
+	})
+	result := h.Fetch(context.Background(), "https://forum.example.test/r/thread/2")
+	if got := directReferer.Load().(string); got == "" {
+		t.Fatalf(
+			"direct rung sent no Referer; method=%q rungs=%v error=%q",
+			result.Method,
+			result.Rungs,
+			result.Error,
+		)
+	}
+	if result.Error != "" || result.Method != rungDirect || strings.Join(result.Rungs, ",") != rungDirect {
+		t.Fatalf(
+			"Referer-gated page not fetched at the direct rung: method=%q rungs=%v error=%q",
+			result.Method,
+			result.Rungs,
+			result.Error,
+		)
+	}
+	if !strings.Contains(result.Content, "original post and replies") ||
+		strings.Contains(result.Content, "Prove your humanity") {
+		t.Fatalf("direct rung content is not the real page: %q", result.Content)
+	}
+}

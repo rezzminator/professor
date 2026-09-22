@@ -109,7 +109,17 @@ func (h *Harvester) probeAppShell(ctx context.Context, client *http.Client, ua, 
 	if !ok {
 		return false
 	}
-	probeBody, status, _, err := getBody(ctx, client, probe, ua, h.options.MaxBytes)
+	// The probe arrives the way the page itself did — with the provenance
+	// Referer — or a Referer-gated host answers it with its wall, and the
+	// shell is never recognised.
+	probeBody, status, _, err := getBodyWithHeaders(
+		ctx,
+		client,
+		probe,
+		ua,
+		map[string]string{headerReferer: ProvenanceReferer},
+		h.options.MaxBytes,
+	)
 	if err != nil {
 		log.Printf("harvest: app-shell probe %s for %s could not run: %v", probe, logSource(source), err)
 		return false

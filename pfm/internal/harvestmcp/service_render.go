@@ -22,6 +22,7 @@ func fetchItem(result harvest.Result) FetchItem {
 		Chars:       result.Chars,
 		Path:        result.Path,
 		Error:       result.Error,
+		Partial:     result.Partial,
 	}
 }
 
@@ -44,17 +45,21 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 				),
 			)
 		}
-		body, err := json.Marshal(
-			map[string]any{
-				jsonPropertySource: source,
-				"size":             result.Tokens,
-				"tokens":           result.Tokens,
-				"token_count":      result.Tokens,
-				"chars":            result.Chars,
-				"path":             result.Path,
-				"cache_status":     result.CacheStatus,
-			},
-		)
+		receipt := map[string]any{
+			jsonPropertySource: source,
+			"size":             result.Tokens,
+			"tokens":           result.Tokens,
+			"token_count":      result.Tokens,
+			"chars":            result.Chars,
+			"path":             result.Path,
+			"cache_status":     result.CacheStatus,
+		}
+		if result.Partial != "" {
+			// A caller budgeting a read learns the artifact is incomplete
+			// before it reads it.
+			receipt["partial"] = result.Partial
+		}
+		body, err := json.Marshal(receipt)
 		if err != nil {
 			return fmt.Sprintf("# %s\nERROR: encode size receipt: %v", source, err)
 		}
@@ -107,6 +112,11 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 		fetchedAt,
 		result.Path,
 	)
+	if result.Partial != "" {
+		// A known-incomplete artifact says so in the receipt, not only in
+		// the marker line the content opens with.
+		header += " / PARTIAL: " + result.Partial
+	}
 
 	inlineCap := service.inlineCap()
 	if inlineCap > 0 && len([]rune(body)) > inlineCap {

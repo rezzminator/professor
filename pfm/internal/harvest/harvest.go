@@ -236,6 +236,12 @@ func (h *Harvester) fetchURLWithPolicy(
 	appShellInherited := appShellText != ""
 	browserShellRender := false
 	staticConverterOutage := false
+	// partialPage stores an HTML page an HTTP rung converted but KNOWS is
+	// incomplete (its partial marker) where a render can close a gap. Only a real
+	// browser loads more of the same page, so the ladder goes straight to the
+	// browser rung and stores this page when the browser cannot do better. Nil
+	// unless the browser rung is on.
+	var partialPage func() Result
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
 	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, "7z", kindRAR:
@@ -261,7 +267,14 @@ func (h *Harvester) fetchURLWithPolicy(
 		{chromeRung, chromeClient, fetchTarget, chromeUA},
 	} {
 		rungs = append(rungs, rung.name)
-		body, status, contentType, err := getBody(ctx, rung.client, rung.target, rung.ua, h.options.MaxBytes)
+		body, status, contentType, err := getBodyWithHeaders(
+			ctx,
+			rung.client,
+			rung.target,
+			rung.ua,
+			map[string]string{headerReferer: ProvenanceReferer},
+			h.options.MaxBytes,
+		)
 		if err != nil {
 			lastErr = err
 			lastErrorKind = errorKind(err)
@@ -314,7 +327,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				}
 			}
 		}
-		converted, err := h.convertFetchedContent(ctx, kind, source, body)
+		converted, page, err := h.convertFetchedDocument(ctx, kind, source, body)
 		if err != nil {
 			staticConverterOutage = true // named a tool outage by convertOutageNote below (F12)
 			continue
@@ -325,7 +338,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				emptyPDFBody = append([]byte(nil), body...)
 			}
 		}
-		lastContentChars = contentChars(converted)
+		lastContentChars = contentChars(partialBody(converted))
 		binary4xxOK := status >= 400 && kind == kindPDF && strings.HasPrefix(string(body), "%PDF-")
 		if len(body) == 0 || isChallenge(body, status) ||
 			(status >= 400 && kind != kindHTML && kind != kindTXT && !binary4xxOK) {
@@ -349,11 +362,15 @@ func (h *Harvester) fetchURLWithPolicy(
 		// The HTML ladder escalates thin extraction results. A short page is
 		// commonly a JS shell or bot wall even when the HTTP status is 200;
 		// plain text and converted binary documents are not subject to this
-		// threshold because their bytes are already the requested artifact.
-		if kind == kindHTML && contentChars(converted) < 500 {
+		// threshold because their bytes are already the requested artifact,
+		// nor is a page a per-site extractor recognised (a short thread is
+		// still that site's content, never a shell).
+		if kind == kindHTML && page.extractor == "" && contentChars(partialBody(converted)) < 500 {
 			continue
 		}
-		if kind == kindHTML && !googleDriveFile {
+		// A page a per-site extractor recognised is that site's content by
+		// construction — never an app shell, so it never pays for the probe.
+		if kind == kindHTML && !googleDriveFile && page.extractor == "" {
 			if appShellText != "" {
 				if sameAsShell(appShellText, converted) {
 					continue
@@ -371,6 +388,13 @@ func (h *Harvester) fetchURLWithPolicy(
 		method := rung.name
 		if kind == kindTXT {
 			method = "plain-text"
+		}
+		if kind == kindHTML && partialReason(converted) != "" && h.settings.browser && !isPrivateURL(source) &&
+			!googleDriveFile && guess != kindPDF && page.renderMayComplete {
+			partialPage = func() Result {
+				return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
+			}
+			break
 		}
 		return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
 	}
@@ -395,7 +419,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			Rungs:      rungs,
 		}
 	}
-	if !isPrivateURL(source) && guess != kindPDF {
+	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil {
 		rungs = append(rungs, "jina")
 		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
 		body, status, _, err := getBody(ctx, h.jina, target, h.userAgent, h.options.MaxBytes)
@@ -422,7 +446,7 @@ func (h *Harvester) fetchURLWithPolicy(
 	}
 	// defuddle.md — a second keyless reader beside Jina (different infra,
 	// different blocks), tried before the legal mirror pivot.
-	if !isPrivateURL(source) && guess != kindPDF {
+	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil {
 		rungs = append(rungs, "defuddle")
 		target := "https://defuddle.md/" + source
 		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
@@ -506,10 +530,14 @@ func (h *Harvester) fetchURLWithPolicy(
 						browserShellRender = true
 						log.Printf("harvest: browser rung rendered only the app shell for %s", logSource(source))
 					case usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
-						(contentChars(converted) > lastContentChars || appShellText != "") && contentChars(converted) >= 500:
+						(contentChars(partialBody(converted)) > lastContentChars || appShellText != "" ||
+							partialPage != nil && partialReason(converted) == "") &&
+						contentChars(partialBody(converted)) >= 500:
 						// Same thin-page floor as the HTML ladder above: a JS
 						// paywall overlay converting to a few hundred chars is
-						// a shell, not the article.
+						// a shell, not the article. A render with no partial
+						// marker beats a flagged HTTP page even when shorter:
+						// the flagged page's length includes its gap list.
 						return h.storeResult(
 							source,
 							kindHTML,
@@ -524,6 +552,11 @@ func (h *Harvester) fetchURLWithPolicy(
 				}
 			}
 		}
+	}
+	if partialPage != nil {
+		// The browser rung loaded no more than the HTTP rung did (walled,
+		// failed, or no longer): the partial page, still flagged, is the answer.
+		return partialPage()
 	}
 	// A publisher wall often leaves citation_pdf_url/citation_doi metadata in
 	// the HTML error body. Reuse that body before giving up; this is the same
@@ -781,48 +814,6 @@ func isPubMedSearchURL(raw string) bool {
 	}
 	return strings.Contains(strings.ToLower(u.Path), "/search") ||
 		strings.Contains(strings.ToLower(u.RawQuery), "term=")
-}
-
-func (h *Harvester) fetchLocal(ctx context.Context, source string, options FetchOptions) Result {
-	path := source
-	if strings.HasPrefix(strings.ToLower(path), "file://") {
-		decoded, err := fileURLPath(path)
-		if err != nil {
-			return Result{Source: source, Error: err.Error()}
-		}
-		path = decoded
-	}
-	if reason := DenyLocalPath(path, h.options.LocalRoots); reason != "" {
-		return Result{Source: source, Error: reason}
-	}
-	body, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return Result{Source: source, Error: fmt.Sprintf("read local file %s: %v", path, err)}
-	}
-	kind := classifyFetchedKind(path, "", body)
-	if kindFromName(path) == kindPDF && !strings.HasPrefix(string(body), "%PDF-") {
-		return Result{
-			Source: source,
-			Kind:   kindPDF,
-			Error: fmt.Sprintf(
-				"%s has a .pdf extension but is not a PDF file — check its actual contents before fetching it again.",
-				source,
-			),
-		}
-	}
-	if !options.Refresh {
-		if cached, meta, cachePath, ok := h.cache.load(source, kind); ok {
-			return h.resultFromCache(source, kind, cached, meta, cachePath)
-		}
-	}
-	converted, err := h.convertFetchedContent(ctx, kind, source, body)
-	if err != nil {
-		return Result{Source: source, Kind: kind, Error: err.Error()}
-	}
-	if !usableContent(converted, kind) {
-		return Result{Source: source, Kind: kind, Error: "conversion produced no usable content"}
-	}
-	return h.storeResult(source, kind, localLabel, converted, int64(len(body)), 0, []string{localLabel}, options)
 }
 
 func isPrivateURL(source string) bool {

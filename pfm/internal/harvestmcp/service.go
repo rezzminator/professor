@@ -339,29 +339,15 @@ func (converter pythonConverter) Convert(
 	ctx context.Context,
 	kind, source string,
 	body []byte,
-) (markdown string, returnErr error) {
-	directory, err := os.MkdirTemp("", "pfm-harvest-input-")
-	if err != nil {
-		return "", fmt.Errorf("create conversion scratch: %w", err)
-	}
-	defer func() {
-		if cleanupErr := os.RemoveAll(directory); cleanupErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("remove conversion scratch: %w", cleanupErr))
-		}
-	}()
+) (string, error) {
 	extension := strings.TrimPrefix(filepath.Ext(source), ".")
 	if extension == "" || extension == source {
 		extension = kind
 	}
-	path := filepath.Join(directory, "input."+extension)
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		return "", fmt.Errorf("write conversion scratch: %w", err)
-	}
-	result, convertErr := converter.worker.Convert(ctx, harvestpy.Request{Path: path, Kind: kind, Source: source})
-	if convertErr != nil {
-		return "", convertErr
-	}
-	return result.Markdown, nil
+	return converter.convertScratch(
+		ctx, "conversion", "pfm-harvest-input-", extension, body,
+		harvestpy.Request{Kind: kind, Source: source},
+	)
 }
 
 // ConvertOCR forces ONE Tesseract pass for this document only — the dispatch's
@@ -370,29 +356,57 @@ func (converter pythonConverter) ConvertOCR(
 	ctx context.Context,
 	kind, source string,
 	body []byte,
+) (string, error) {
+	return converter.convertScratch(
+		ctx, "OCR", "pfm-harvest-ocr-", strings.TrimPrefix(filepath.Ext(source), "."), body,
+		harvestpy.Request{Kind: kind, Source: source, OCR: true},
+	)
+}
+
+// ConvertFullDOM converts an HTML page's whole DOM, boilerplate included —
+// the recall gate's fallback when main-content extraction kept too little of
+// the page (harvest.FullDOMConverter).
+func (converter pythonConverter) ConvertFullDOM(
+	ctx context.Context,
+	source string,
+	body []byte,
+) (string, error) {
+	return converter.convertScratch(
+		ctx, "full-DOM conversion", "pfm-harvest-fulldom-", "html", body,
+		harvestpy.Request{Kind: "html", Source: source, FullDOM: true},
+	)
+}
+
+// convertScratch writes body to a private scratch file input.{extension},
+// hands the worker request with that path, and removes the scratch; label
+// names the scratch in every error, a failed cleanup included.
+func (converter pythonConverter) convertScratch(
+	ctx context.Context,
+	label, prefix, extension string,
+	body []byte,
+	request harvestpy.Request,
 ) (markdown string, returnErr error) {
-	directory, err := os.MkdirTemp("", "pfm-harvest-ocr-")
+	directory, err := os.MkdirTemp("", prefix)
 	if err != nil {
-		return "", fmt.Errorf("create OCR scratch: %w", err)
+		return "", fmt.Errorf("create %s scratch: %w", label, err)
 	}
 	defer func() {
 		if cleanupErr := os.RemoveAll(directory); cleanupErr != nil {
-			returnErr = errors.Join(returnErr, fmt.Errorf("remove OCR scratch: %w", cleanupErr))
+			returnErr = errors.Join(returnErr, fmt.Errorf("remove %s scratch: %w", label, cleanupErr))
 		}
 	}()
-	path := filepath.Join(directory, "input."+strings.TrimPrefix(filepath.Ext(source), "."))
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		return "", fmt.Errorf("write OCR scratch: %w", err)
+	request.Path = filepath.Join(directory, "input."+extension)
+	if err := os.WriteFile(request.Path, body, 0o600); err != nil {
+		return "", fmt.Errorf("write %s scratch: %w", label, err)
 	}
-	result, convertErr := converter.worker.Convert(
-		ctx,
-		harvestpy.Request{Path: path, Kind: kind, Source: source, OCR: true},
-	)
+	result, convertErr := converter.worker.Convert(ctx, request)
 	if convertErr != nil {
 		return "", convertErr
 	}
 	return result.Markdown, nil
 }
+
+var _ harvest.FullDOMConverter = pythonConverter{}
 
 // Server exposes the SDK server for in-memory protocol tests.
 func (service *Service) Server() *mcp.Server { return service.server }
@@ -701,6 +715,9 @@ type FetchItem struct {
 	Error       string   `json:"error,omitempty"`
 	Rungs       []string `json:"-"`
 	FetchedAt   string   `json:"fetched_at,omitempty"`
+	// Partial names why the artifact is known to be incomplete (the content
+	// opens with the same note); empty for a complete artifact.
+	Partial string `json:"partial,omitempty"`
 }
 type FetchOutput struct {
 	Items []FetchItem `json:"items"`

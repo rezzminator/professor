@@ -9,8 +9,10 @@ hidden by Patchright.
 Protocol (JSON lines over stdin/stdout), one request serialized at a time:
 
   Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://127.0.0.1:PORT","headless":true,
-                   "host_resolver_rules":"MAP host 1.2.3.4"|null,"timeout_ms":45000}
-                  ("proxy" is REQUIRED — it is the Go-owned dial; see PROXY_REQUIRED)
+                   "host_resolver_rules":"MAP host 1.2.3.4"|null,"timeout_ms":45000,
+                   "referer":"https://www.google.com/"|null,"press_loaders":true}
+                  ("proxy" is REQUIRED — it is the Go-owned dial; see PROXY_REQUIRED;
+                   "press_loaders" absent = read-only scrolling, no button pressed)
                   {"op":"smoke"}
   worker -> Go:   zero or more guard asks before the final line:
                   {"ask":"fetchable","url":"https://…"}
@@ -41,6 +43,7 @@ launch_arguments() makes that proxy the only way out of the browser.
 
 import asyncio
 import json
+from html import escape as html_escape
 import os.path
 import shutil
 import sys
@@ -190,6 +193,219 @@ def browser_websocket_guard(ask_fetchable):
 # only way the route guard sees every request the page causes.
 CONTEXT_OPTIONS = {"service_workers": "block"}
 
+# The platform token a stock desktop Chrome puts in its (reduced) User-Agent.
+# Chrome freezes the Linux token to x86_64 on every architecture.
+UA_PLATFORM_TOKENS = (
+    ("linux", "X11; Linux x86_64"),
+    ("darwin", "Macintosh; Intel Mac OS X 10_15_7"),
+    ("win", "Windows NT 10.0; Win64; x64"),
+)
+
+
+def stock_user_agent(browser_version, platform=None):
+    """The User-Agent a stock desktop Chrome of *browser_version* sends.
+
+    Headless Chrome announces itself as `HeadlessChrome/<v>` — a token forum
+    anti-bot walls refuse outright, so the headless render would meet the wall
+    the headed one does not. The rung sends the reduced UA a visible Chrome of
+    the SAME major version sends, so the UA never contradicts the engine that
+    renders. An unreadable version raises: guessing one would ship a UA that
+    disagrees with the browser's own client hints."""
+    major = str(browser_version or "").split(".", 1)[0]
+    if not major.isdigit():
+        raise ValueError(f"unreadable Chrome version {browser_version!r}")
+    platform = platform or sys.platform
+    token = next((value for prefix, value in UA_PLATFORM_TOKENS if platform.startswith(prefix)),
+                 UA_PLATFORM_TOKENS[0][1])
+    return f"Mozilla/5.0 ({token}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+
+
+def context_options(user_agent=None):
+    """new_context() options for one fetch: the SSRF posture of CONTEXT_OPTIONS,
+    plus the stock User-Agent when one is given (the headless render). None
+    keeps Chrome's own UA — the headed render's, which is already stock."""
+    if user_agent is None:
+        return dict(CONTEXT_OPTIONS)
+    return {**CONTEXT_OPTIONS, "user_agent": user_agent}
+
+
+# The engine's own client-hint metadata, read in the headless render's engine
+# so the UA override's hints are that engine's, never synthesised. about:blank
+# is not a secure context, so it exposes no navigator.userAgentData (measured on
+# Chrome 153); ENGINE_INFO_URL is a secure page the engine serves itself, so
+# opening it makes no network request.
+ENGINE_INFO_URL = "chrome://version"
+UA_DATA_JS = """async (hints) => {
+  const data = navigator.userAgentData;
+  if (!data) return null;
+  const high = await data.getHighEntropyValues(hints);
+  return {brands: data.brands, mobile: data.mobile, platform: data.platform, ...high};
+}"""
+UA_HIGH_ENTROPY_HINTS = ["architecture", "bitness", "fullVersionList", "model", "platformVersion", "wow64"]
+HEADLESS_BRAND = "HeadlessChrome"
+STOCK_BRAND = "Google Chrome"
+
+
+def ua_metadata(data):
+    """CDP userAgentMetadata from navigator.userAgentData as the engine
+    reported it, every HeadlessChrome brand renamed Google Chrome (brands and
+    full version list) and everything else kept. No brand list raises."""
+    if not isinstance(data, dict) or not data.get("brands"):
+        raise ValueError(f"the engine's navigator.userAgentData is unreadable (no brand list): {data!r}")
+
+    def renamed(entries):
+        return [{**entry, "brand": STOCK_BRAND if entry.get("brand") == HEADLESS_BRAND else entry.get("brand")}
+                for entry in entries]
+
+    metadata = dict(data)
+    metadata["brands"] = renamed(data["brands"])
+    if data.get("fullVersionList"):
+        metadata["fullVersionList"] = renamed(data["fullVersionList"])
+    return metadata
+
+
+async def engine_ua_metadata(browser, guarded_ask):
+    """Read the running engine's client-hint metadata from ENGINE_INFO_URL —
+    a page the engine serves itself, never the web — in its own guarded
+    context closed before the render context opens."""
+    context = await browser.new_context(**context_options(None))
+    try:
+        await install_route_guards(context, guarded_ask)
+        page = await context.new_page()
+        await page.goto(ENGINE_INFO_URL)
+        return ua_metadata(await page.evaluate(UA_DATA_JS, UA_HIGH_ENTROPY_HINTS))
+    finally:
+        await context.close()
+
+
+# Scroll-until-stable: a lazy-loaded page (an infinite feed, a comment thread,
+# a gallery) holds only its first screen after load; the rest arrives as the
+# reader scrolls, or as the reader presses its "load more" control. Each round
+# scrolls to the bottom, presses the visible load-more buttons (EXPAND_JS) —
+# only when Go asks for a registered site ("press_loaders"; pressing can fire
+# requests or navigation, so every other page is scrolled read-only) — and
+# waits for the page to settle; the loop stops once the rendered text
+# stopped growing for SCROLL_STABLE_ROUNDS rounds — or at a round or time cap,
+# so a page that never stops growing cannot hold the rung.
+SCROLL_MAX_ROUNDS = 60
+SCROLL_MAX_SECONDS = 60.0
+SCROLL_SETTLE_MS = 1500
+SCROLL_STABLE_ROUNDS = 3
+
+# The rendered-content size the loop watches: the length of the visible text.
+MEASURE_JS = "() => (document.body ? document.body.innerText.length : 0)"
+SCROLL_JS = "() => window.scrollTo(0, Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement.scrollHeight))"
+
+# The load-more controls a round presses: a visible, enabled <button> (never a
+# link, never a form submit — neither may navigate away) whose whole label is a
+# load-more phrase: "View more comments", "Load more", "Show 12 more replies",
+# "3 more replies", "1 more reply". Each is pressed once; at most EXPAND_MAX_CLICKS per round.
+EXPAND_MAX_CLICKS = 10
+EXPAND_JS = r"""(limit) => {
+  const phrase = /^(?:(?:view|load|show|see)\s+(?:\d[\d,]*\s+)?more(?:\s+(?:comments?|replies|answers|posts|results|items))?|\d[\d,]*\s+more\s+(?:comments?|repl(?:y|ies)|answers?))\s*…?$/i;
+  let clicked = 0;
+  for (const button of document.querySelectorAll('button')) {
+    if (clicked >= limit) break;
+    if (button.dataset.harvesterPressed || button.disabled || button.closest('form')) continue;
+    if (button.getAttribute('aria-hidden') === 'true') continue;
+    const label = (button.innerText || '').replace(/\s+/g, ' ').trim();
+    if (!phrase.test(label)) continue;
+    const box = button.getBoundingClientRect();
+    if (!box.width || !box.height) continue;
+    button.dataset.harvesterPressed = '1';
+    button.click();
+    clicked++;
+  }
+  return clicked;
+}"""
+
+
+async def scroll_until_stable(measure, scroll, settle, clock, expand=None, max_rounds=SCROLL_MAX_ROUNDS,
+                              max_seconds=SCROLL_MAX_SECONDS, stable_rounds=SCROLL_STABLE_ROUNDS):
+    """Scroll (and expand) until the measured content stops growing, or a cap
+    is reached.
+
+    measure/scroll/settle/expand are awaitables over the page (expand returns
+    how many controls it pressed); clock returns seconds. Pure over those, so
+    the loop is testable with no browser. Returns {"rounds", "size",
+    "initial", "expanded", "stopped", "growing"}: stopped is "stable",
+    "round-cap" or "time-cap", and growing is True when a cap stopped a page
+    that grew and never went SCROLL_STABLE_ROUNDS rounds without growing —
+    content still arriving, the render then INCOMPLETE."""
+    start = clock()
+    initial = size = await measure()
+    rounds = unchanged = expanded = 0
+    stopped = "stable"
+    while True:
+        if unchanged >= stable_rounds:
+            stopped = "stable"
+            break
+        if rounds >= max_rounds:
+            stopped = "round-cap"
+            break
+        if clock() - start >= max_seconds:
+            stopped = "time-cap"
+            break
+        await scroll()
+        if expand is not None:
+            expanded += await expand()
+        await settle()
+        rounds += 1
+        current = await measure()
+        if current > size:
+            size, unchanged = current, 0
+        else:
+            unchanged += 1
+    return {
+        "rounds": rounds,
+        "size": size,
+        "initial": initial,
+        "expanded": expanded,
+        "stopped": stopped,
+        # A cap stop never proved stability; the content grew in some round
+        # (unchanged counts the quiet rounds since the last growth), so it may
+        # still be arriving even when the very last round brought nothing.
+        "growing": stopped != "stable" and unchanged < rounds,
+    }
+
+
+# The navigation guard's window sentinel: planted in the document render_page
+# scrolls, checked after scrolling. A document that no longer carries it was
+# replaced (a navigation or a reload), not merely re-addressed by pushState.
+DOCUMENT_PLANT_JS = "(token) => { window.__harvesterDocument = token; }"
+DOCUMENT_CHECK_JS = "(token) => window.__harvesterDocument === token"
+
+# The name of the marker an incomplete lazy-load leaves in the returned HTML.
+# Go reads it (harvest's lazyLoadIncomplete) and flags the artifact partial at
+# the visible surface — the HTML is the one channel every caller already reads.
+LAZY_LOAD_MARKER = "harvester-lazy-load"
+
+
+def mark_incomplete(html, outcome):
+    """Stamp *html* with the lazy-load marker when a cap stopped a page that
+    was still growing, when scrolling failed (stopped "error"), or when the
+    page navigated away while scrolling (stopped "navigated"); otherwise
+    return it unchanged."""
+    if outcome.get("stopped") == "error":
+        reason = html_escape(f'incomplete: scrolling failed: {outcome.get("error", "")}', quote=True)
+        meta = f'<meta name="{LAZY_LOAD_MARKER}" content="{reason}">'
+    elif outcome.get("stopped") == "navigated":
+        reason = html_escape(f'incomplete: the page navigated away to {outcome.get("navigated_to", "")} while '
+                             'scrolling; kept as it was before scrolling', quote=True)
+        meta = f'<meta name="{LAZY_LOAD_MARKER}" content="{reason}">'
+    elif outcome.get("growing"):
+        meta = (f'<meta name="{LAZY_LOAD_MARKER}" content="incomplete: content was still loading when the '
+                f'{outcome["stopped"]} stopped scrolling after {outcome["rounds"]} rounds">')
+    else:
+        return html
+    lower = html.lower()
+    index = lower.find("<head")
+    if index >= 0:
+        close = lower.find(">", index)
+        if close >= 0:
+            return html[:close + 1] + meta + html[close + 1:]
+    return meta + html
+
 
 async def install_route_guards(context, guarded_ask):
     """Register both SSRF chokepoints on *context*, at CONTEXT scope (every
@@ -247,13 +463,106 @@ def serialized_ask(raw_ask):
     return guarded_ask
 
 
+async def render_page(context, url, timeout_ms, referer=None, clock=None, press_loaders=False,
+                      ua_override=None):
+    """Open *url* in *context*, let it settle, scroll it until stable and
+    return (html, status, scroll outcome). The navigation carries *referer*
+    (a provenance Referer: some anti-bot walls open for any Referer and refuse
+    a Referer-less arrival); subresources keep Chrome's own. Load-more buttons
+    are pressed only when *press_loaders* (Go asks for a registered site). A
+    scroll that fails (the page navigated, its context died) keeps the page as
+    rendered, stamped incomplete with the reason. A page whose document was
+    replaced by one at another origin or path while scrolling (a login or
+    consent redirect) returns the page as it stood when scrolling began,
+    stamped incomplete — never the document it navigated to. *ua_override*
+    (the headless render's UA and client hints) is sent to the page over CDP
+    before it navigates; a failed send raises."""
+    page = await context.new_page()
+    if ua_override is not None:
+        session = await context.new_cdp_session(page)
+        await session.send("Emulation.setUserAgentOverride", ua_override)
+    resp = await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded", referer=referer or None)
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15_000)
+    except Exception as e:  # noqa: BLE001 — best-effort quiet-period wait
+        print(f"browser networkidle wait ended early for {redact(url)}: {e}", file=sys.stderr)
+    clock = clock or asyncio.get_event_loop().time
+    start_url = page.url
+    before_scrolling = await page.content()
+    token = os.urandom(8).hex()
+    try:
+        await page.evaluate(DOCUMENT_PLANT_JS, token)
+    except Exception as e:  # noqa: BLE001 — an unplanted sentinel reads as a replaced document below
+        print(f"browser document sentinel not planted for {redact(start_url)}: {e}", file=sys.stderr)
+    expand = (lambda: page.evaluate(EXPAND_JS, EXPAND_MAX_CLICKS)) if press_loaders else None
+    try:
+        outcome = await scroll_until_stable(
+            lambda: page.evaluate(MEASURE_JS),
+            lambda: page.evaluate(SCROLL_JS),
+            lambda: page.wait_for_timeout(SCROLL_SETTLE_MS),
+            clock,
+            expand=expand,
+        )
+    except Exception as e:  # noqa: BLE001 — a failed scroll keeps the render, stamped incomplete
+        print(f"browser scroll failed for {redact(url)}: {e}; keeping the page as rendered", file=sys.stderr)
+        outcome = {"stopped": "error", "error": str(e), "growing": False}
+    else:
+        print(f"browser scroll {redact(url)}: {outcome['initial']} -> {outcome['size']} chars in "
+              f"{outcome['rounds']} rounds, {outcome['expanded']} load-more presses, stopped={outcome['stopped']}",
+              file=sys.stderr)
+    status = resp.status if resp else None
+    # The final snapshot is taken BEFORE the document check: a navigation still
+    # in flight at the check could otherwise commit between the two, and its
+    # document would be returned as the source. A document that passes the
+    # check after the snapshot is the one the snapshot read. A snapshot that
+    # raises (a navigation destroying the document) is retaken only when the
+    # page did not navigate away.
+    try:
+        after_scrolling = await page.content()
+    except Exception as e:  # noqa: BLE001 — decided by the document check below
+        print(f"browser snapshot after scrolling raised for {redact(start_url)}: {e}", file=sys.stderr)
+        after_scrolling = None
+    if await document_replaced(page, token) and not same_page(start_url, page.url):
+        outcome = {"stopped": "navigated", "navigated_to": redact(page.url), "growing": False}
+        print(f"browser render {redact(start_url)} navigated away to {redact(page.url)} while scrolling; "
+              f"keeping the page as it was before scrolling", file=sys.stderr)
+        return mark_incomplete(before_scrolling, outcome), status, outcome
+    if after_scrolling is None:
+        after_scrolling = await page.content()
+    html = mark_incomplete(after_scrolling, outcome)
+    return html, status, outcome
+
+
+async def document_replaced(page, token):
+    """Whether the document render_page planted *token* in is gone. A check
+    that raises (the navigation destroyed its context) counts as replaced."""
+    try:
+        return not await page.evaluate(DOCUMENT_CHECK_JS, token)
+    except Exception as e:  # noqa: BLE001 — a destroyed context is a replaced document
+        print(f"browser document check raised for {redact(page.url)}: {e}; counting it replaced", file=sys.stderr)
+        return True
+
+
+def same_page(first, second):
+    """Whether two URLs name the same page: scheme, host and path equal;
+    query and fragment ignored."""
+    a, b = urllib.parse.urlsplit(first), urllib.parse.urlsplit(second)
+    return (a.scheme, a.netloc.lower(), a.path) == (b.scheme, b.netloc.lower(), b.path)
+
+
 async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True,
-                        host_resolver_rules=None):
+                        host_resolver_rules=None, referer=None, press_loaders=False):
     """Render *url* in a real system Chrome via Patchright; return (html, status, headless, error).
 
     Opt-in rung — Go gates it behind fetch.browser because a browser launch is ~100ms+ and
     needs Chrome installed. It renders in exactly the mode Go asks for: headless unless Go
     is spending the one headed (visible-window) retry on a wall the headless render met.
+    It renders as a visitor would arrive: headless, a stock Chrome User-Agent
+    (never HeadlessChrome) whose client hints agree with it (the engine's own,
+    HeadlessChrome renamed Google Chrome); headed, Chrome's own UA; the provenance *referer* on the navigation, and the page
+    scrolled until it stops growing — render_page(). Its load-more controls are
+    pressed only when Go asks for a registered site (*press_loaders*); every
+    other page is scrolled read-only.
     patchright is an OPTIONAL dependency; when absent this returns
     ("", None, False, "patchright not installed") and the ladder falls through, never raises.
 
@@ -295,18 +604,19 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
             browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy,
                                               args=launch_args)
             try:
-                context = await browser.new_context(**CONTEXT_OPTIONS)
+                ua_override = None
+                if headless:
+                    metadata = await engine_ua_metadata(browser, guarded_ask)
+                    user_agent = stock_user_agent(browser.version)
+                    ua_override = {"userAgent": user_agent, "userAgentMetadata": metadata}
+                    context = await browser.new_context(**context_options(user_agent))
+                else:
+                    context = await browser.new_context(**context_options(None))
                 await install_route_guards(context, guarded_ask)
                 await context.add_init_script(WEBRTC_BLOCK_SCRIPT)
 
-                page = await context.new_page()
-                resp = await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded")
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=15_000)
-                except Exception as e:  # noqa: BLE001 — best-effort quiet-period wait
-                    print(f"browser networkidle wait ended early for {redact(url)}: {e}", file=sys.stderr)
-                html = await page.content()
-                status = resp.status if resp else None
+                html, status, _ = await render_page(context, url, timeout_ms, referer=referer,
+                                                press_loaders=press_loaders, ua_override=ua_override)
                 print(f"browser rung {redact(url)} -> HTTP {status} ({len(html)} chars, headless={headless})",
                       file=sys.stderr)
                 return html, status, headless
@@ -348,6 +658,8 @@ async def handle_fetch(request):
         timeout_ms=int(request.get("timeout_ms") or 45_000),
         headless=bool(request.get("headless", True)),
         host_resolver_rules=request.get("host_resolver_rules") or None,
+        referer=request.get("referer") or None,
+        press_loaders=bool(request.get("press_loaders", False)),
     )
     if error is not None and not html:
         return {"ok": False, "error": error}

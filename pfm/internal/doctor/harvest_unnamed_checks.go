@@ -12,7 +12,7 @@ import (
 // their own dedicated row in printHarvestPythonDoctorWithRunner (interpreter,
 // lock, inventory, live smoke). harvestpy.CheckConversionEnvironment computes
 // more checks than that — current_pointer, marker, marker_state, source_hash,
-// project_metadata, digest_integrity, current_target, interpreter_build,
+// source_current, project_metadata, digest_integrity, current_target, interpreter_build,
 // environment_shape, dependency_check — and report.Healthy goes false when
 // ANY of them fails. Without printUnnamedHarvestChecks below, one of those
 // could fail while every printed row still reads healthy: a coincidence

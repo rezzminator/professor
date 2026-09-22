@@ -736,10 +736,10 @@ func ooxmlExtensionKind(source string) (string, bool) {
 func isChallenge(body []byte, status int) bool {
 	low := strings.ToLower(string(body))
 	// Strong, specific bot-wall phrases (mirrors the retired Python net.py's
-	// _CHALLENGE_PHRASES) flag at any body length — plus the real Cloudflare
-	// "Sorry, you have been blocked" (error 1020) block-page copy, which the
-	// Python oracle's list also lacks.
-	for _, marker := range []string{"just a moment", "checking your browser", "checking your browser before", "cf-browser-verification", "cf-chl-", "are you a robot", "confirm you are a human", "enable javascript and cookies", "captcha challenge", "completing the captcha", "verify you are human", "verifying you are human", "sorry, you have been blocked", "why have i been blocked", "attention required! | cloudflare"} {
+	// _CHALLENGE_PHRASES) flag at any body length — plus copy that list lacks:
+	// Cloudflare's "Sorry, you have been blocked" (error 1020) page and the
+	// forum reCAPTCHA wall ("prove your humanity", "blocked by network …").
+	for _, marker := range []string{"just a moment", "checking your browser", "checking your browser before", "cf-browser-verification", "cf-chl-", "are you a robot", "confirm you are a human", "enable javascript and cookies", "captcha challenge", "completing the captcha", "verify you are human", "verifying you are human", "sorry, you have been blocked", "why have i been blocked", "attention required! | cloudflare", "prove your humanity", "blocked by network security", "blocked due to a network policy"} {
 		if strings.Contains(low, marker) {
 			return true
 		}

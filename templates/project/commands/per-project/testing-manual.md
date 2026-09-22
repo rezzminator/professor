@@ -33,8 +33,8 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 ## Run commands
 
-- Affected: `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
-- Full: {the one command of the full suite} — timeout {n} s.
+- Affected, a flight executor's only run: `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
+- Full, the flight gate's run and never an executor's: {the one command of the full suite} — timeout {n} s.
 - Type check `{PROJECT_TYPECHECK}` · lint `{PROJECT_LINT}` · format `{PROJECT_FORMAT}`.
 
 ## Concurrency

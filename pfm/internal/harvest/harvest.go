@@ -443,7 +443,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			// Jina Reader already returns clean Markdown. Feeding it back into an
 			// HTML converter loses headings and code blocks, so preserve it as the
 			// original HTML-source kind for cache/type semantics.
-			converted, convErr := pageText(stripJinaEnvelope(string(body))), error(nil)
+			converted, convErr := quoraReaderPage(source, pageText(stripJinaEnvelope(string(body)))), error(nil)
 			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) {
 				stored := readerPage(source, converted).withGaps(converted, gaps, loaders)

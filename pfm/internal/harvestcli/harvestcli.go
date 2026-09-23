@@ -53,11 +53,16 @@ func harvesterRuntime(runtime config.Runtime) harvestmcp.Runtime {
 func runRead(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	flags := cli.NewFlagSet(
 		"harvest",
-		"usage: pfm harvest [--refresh] [--size-only] [--json] [--header 'Name: value']... <url|doi|path>...",
+		"usage: pfm harvest [--refresh] [--size-only] [--ocr-lang latin|zh|ja|ar|ru|he] [--json] [--header 'Name: value']... <url|doi|path>...",
 		stderr,
 	)
 	refresh := flags.Bool("refresh", false, "bypass the cache and fetch fresh content")
 	sizeOnly := flags.Bool("size-only", false, "fetch and cache content but print only size and cache path")
+	ocrLangFlag := flags.String(
+		"ocr-lang",
+		"",
+		"script to OCR a scanned document in (latin, zh, ja, ar, ru, he); a fresh read",
+	)
 	jsonOutput := flags.Bool(jsonFlag, false, "print machine-readable result objects")
 	headers := harvest.HeaderFlag(flags)
 	sources, code, ok := cli.ParseFlagsAnywhere(flags, args)
@@ -68,6 +73,11 @@ func runRead(args []string, stdout, stderr io.Writer, runtime config.Runtime) in
 		flags.Usage()
 		return 2
 	}
+	ocrLang, err := harvest.ParseOCRLang(*ocrLangFlag)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm harvest: %v\n", err)
+		return 2
+	}
 	harvester, err := newHarvester(harvesterRuntime(runtime))
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm harvest: configure: %v\n", err)
@@ -76,7 +86,10 @@ func runRead(args []string, stdout, stderr io.Writer, runtime config.Runtime) in
 	results := make([]harvest.Result, 0, len(sources))
 	for _, source := range sources {
 		result := headers.Fetch(
-			context.Background(), harvester, source, harvest.FetchOptions{Refresh: *refresh, SizeOnly: *sizeOnly},
+			context.Background(),
+			harvester,
+			source,
+			harvest.FetchOptions{Refresh: *refresh, SizeOnly: *sizeOnly, OCRLang: ocrLang},
 		)
 		results = append(results, result)
 		if !*jsonOutput {

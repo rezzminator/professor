@@ -682,7 +682,7 @@ def convert_pdf(path: pathlib.Path, request: dict) -> tuple[str, dict]:
                 "layout": "enabled" if layout else "disabled",
                 "models": "not-requested",
             }
-        script, reason = choose_ocr_script(document)
+        script, reason = choose_ocr_script(document, str(request.get("ocr_lang") or ""))
         ocr_pages, limits = _ocr_pages(document, flagged, script)
         page_count = document.page_count
     parts = [_note(f"OCR read page(s) {_page_list(flagged)} of {page_count} as {_SCRIPT_NAMES[script]} ({reason})")]
@@ -733,6 +733,12 @@ _LANG_SCRIPTS = {
     "ru": "ru", "uk": "ru", "be": "ru", "he": "he", "iw": "he", "yi": "he",
 }
 OCR_CONTROL_SHARE = 0.02
+# The Latin default's reason: the document stated no script. The harvester
+# matches this phrase (harvest.ocrAssumption) to flag the result partial.
+OCR_LATIN_ASSUMED = (
+    "the document names no language; Latin by default — pass ocr_lang to read it in another script"
+    " (script detection before OCR is unmeasured)"
+)
 
 
 class OCRUnavailable(RuntimeError):
@@ -812,12 +818,18 @@ def _script_of_text(text: str) -> str | None:
     return best if counts[best] >= 2 else None
 
 
-def choose_ocr_script(document) -> tuple[str, str]:
+def choose_ocr_script(document, requested: str = "") -> tuple[str, str]:
     """One script per conversion (RapidOCR loads one language). Detection
     before OCR is unmeasured, so the choice comes from what the PDF states:
     its text layer, then its /Lang, then its title/subject/keywords — else
-    Latin. The reason travels into the output."""
-    layer = "".join(page.get_text() for page in document)
+    Latin. The caller's ocr_lang (one of OCR_SCRIPTS) overrides all of it.
+    The reason travels into the output; the Latin default's reason is the
+    note the harvester raises to the result's partial flag."""
+    if requested:
+        if requested not in OCR_SCRIPTS:
+            raise OCRUnavailable(f"ocr_lang {requested!r} is not one of {', '.join(OCR_SCRIPTS)}")
+        return requested, f"ocr_lang {requested!r} was requested"
+    layer ="".join(page.get_text() for page in document)
     script = _script_of_text(layer)
     if script and sum(ch.isalpha() for ch in layer) >= 20:
         return script, f"script of the PDF's text layer"
@@ -836,7 +848,7 @@ def choose_ocr_script(document) -> tuple[str, str]:
     script = _script_of_text(stated)
     if script:
         return script, "script of the PDF's title/subject metadata"
-    return "latin", "no text layer or metadata names a script; Latin by default — script detection before OCR is unmeasured"
+    return "latin", OCR_LATIN_ASSUMED
 
 
 def ocr_timeout(flagged_pages: int) -> float:
@@ -877,6 +889,14 @@ def require_staged(root: pathlib.Path, name: str) -> None:
             f"the OCR models for {name} are not staged (missing {missing}) — run `pfm install` to stage them"
             " (the first run downloads about 1.06 GB); the harvester never downloads a model mid-read"
         )
+
+
+def _is_staged(root: pathlib.Path, name: str) -> bool:
+    try:
+        require_staged(root, name)
+    except OCRModelsNotStaged:
+        return False
+    return True
 
 
 def _ocr_options(script: str, root: pathlib.Path):
@@ -1029,15 +1049,26 @@ def stage_models(root: pathlib.Path) -> dict:
             if _script_limit(script):
                 staged[script] = {"skipped": _script_limit(script)}
                 continue
+            # A set an earlier run staged keeps its marker: re-staging it would
+            # record an empty file list (its files predate `before`) over the
+            # real one. Only the sets missing a marker (Arabic, once python-bidi
+            # was pinned) are converted — plus one, if docling's marker is gone.
+            was_staged = _is_staged(root, script)
+            if was_staged and (_is_staged(root, "docling") or "docling" in staged):
+                staged[script] = {"status": "already staged"}
+                continue
             before = files_under(root / "rapidocr")
             with _quiet_stdout():
                 result = _docling_ocr_converter(script, root, None).convert(str(sample), raises_on_error=True)
             files = sorted(files_under(root / "rapidocr") - before)
-            if script == OCR_SCRIPTS[0]:
+            if "docling" not in staged:
                 # The first conversion also fetched docling's layout+table models.
                 docling_files = sorted(files_under(root / "hf"))
                 _staged_marker(root, "docling").write_text(json.dumps({"files": docling_files}), encoding="utf-8")
                 staged["docling"] = len(docling_files)
+            if was_staged:
+                staged[script] = {"status": "already staged"}
+                continue
             _staged_marker(root, script).write_text(json.dumps({"files": files}), encoding="utf-8")
             staged[script] = {"files": len(files), "status": str(getattr(result.status, "value", result.status))}
     # The hub cache links snapshots to blobs: count each real file once.

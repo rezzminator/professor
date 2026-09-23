@@ -16,28 +16,22 @@ func TestTitleGuessResultEchoesGivenValue(t *testing.T) {
 	}
 }
 
-func TestNoteRungOutcomeOnErrorOverwritesKindButKeepsLastKnownStatus(t *testing.T) {
+func TestNoteRungOutcomeOnErrorNamesItsKind(t *testing.T) {
 	err := errors.New("connection refused")
-	gotKind, gotStatus, gotErr := noteRungOutcome(err, 0, nil, "", 403)
+	gotKind, gotErr := noteRungOutcome(err, nil, "")
 	if gotErr != err {
 		t.Fatalf("err = %v, want %v", gotErr, err)
 	}
 	if gotKind != errorKind(err) {
 		t.Fatalf("kind = %q, want %q", gotKind, errorKind(err))
 	}
-	if gotStatus != 403 {
-		t.Fatalf("status = %d, want the prior status preserved (getBody reports 0 on every transport error)", gotStatus)
-	}
 }
 
-func TestNoteRungOutcomeOnSuccessUpdatesStatusAndKeepsPriorErr(t *testing.T) {
+func TestNoteRungOutcomeOnAnswerKeepsPriorErr(t *testing.T) {
 	priorErr := errors.New("earlier failure")
-	gotKind, gotStatus, gotErr := noteRungOutcome(nil, 200, priorErr, "connect", 500)
+	gotKind, gotErr := noteRungOutcome(nil, priorErr, "connect")
 	if gotErr != priorErr || gotKind != "connect" {
-		t.Fatalf("err/kind = %v/%q, want the prior values preserved on a successful rung", gotErr, gotKind)
-	}
-	if gotStatus != 200 {
-		t.Fatalf("status = %d, want the new status", gotStatus)
+		t.Fatalf("err/kind = %v/%q, want the prior values preserved on a reader's answer", gotErr, gotKind)
 	}
 }
 

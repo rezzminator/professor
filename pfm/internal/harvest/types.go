@@ -314,10 +314,13 @@ const (
 )
 
 // FetchOptions controls one fetch. Refresh bypasses both positive and
-// negative caches; SizeOnly still fetches/caches the complete artifact.
+// negative caches; SizeOnly still fetches/caches the complete artifact;
+// OCRLang (ParseOCRLang) names the script a scan is OCR'd in, overriding
+// what the document states, and forces a fresh read (withOCRLang).
 type FetchOptions struct {
 	Refresh  bool
 	SizeOnly bool
+	OCRLang  string
 }
 
 // Result is deliberately JSON-friendly so the MCP adapter can return it

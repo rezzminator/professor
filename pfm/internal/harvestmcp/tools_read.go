@@ -27,6 +27,7 @@ const (
 type ReadPageInput struct {
 	Sources  []string          `json:"sources" jsonschema:"1–50 web page URLs (http or https), each read as Markdown in the same order. A DOI, arXiv id, PMID, PMCID, ISBN or findWorks handle goes to readWork; a local path goes to parseLocalDocuments."`
 	Refresh  bool              `json:"refresh,omitempty" jsonschema:"Bypass the cache: read the page again and overwrite the cached artifact."`
+	OCRLang  string            `json:"ocr_lang,omitempty" jsonschema:"Optional script for OCR of a scanned document: latin, zh, ja, ar, ru or he. By default the document's text layer, /Lang or metadata names it, else Latin; set it when a scan's result is flagged partial as read in Latin. Always a fresh read."`
 	SizeOnly bool              `json:"size_only,omitempty" jsonschema:"Read and cache the full content but return no body: only its size and where it is."`
 	Headers  map[string]string `json:"headers,omitempty" jsonschema:"Optional request headers (name → value) sent only to the target's own origin; reader services, archives and resolver APIs never receive them. At most 32 headers, 8 KiB; no Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Trailer, Keep-Alive or Proxy-*. A caller header overrides the default of its name."`
 }
@@ -35,12 +36,14 @@ type ReadPageInput struct {
 type ParseLocalInput struct {
 	Paths    []string `json:"paths" jsonschema:"1–50 local document paths (or file:// URLs), each parsed to Markdown in the same order."`
 	SizeOnly bool     `json:"size_only,omitempty" jsonschema:"Parse and cache the full content but return no body: only its size and path."`
+	OCRLang  string   `json:"ocr_lang,omitempty" jsonschema:"Optional script for OCR of a scanned document: latin, zh, ja, ar, ru or he. By default the document's text layer, /Lang or metadata names it, else Latin; set it when a scan's result is flagged partial as read in Latin. Always a fresh read."`
 }
 
 // ReadWorkInput is readWork's input.
 type ReadWorkInput struct {
 	Works    []string          `json:"works" jsonschema:"1–20 works: a DOI, arXiv id, PMID, PMCID, ISBN, a paper or book landing URL, or a findWorks handle."`
 	Refresh  bool              `json:"refresh,omitempty" jsonschema:"Bypass the cache: read the work again and overwrite the cached artifact."`
+	OCRLang  string            `json:"ocr_lang,omitempty" jsonschema:"Optional script for OCR of a scanned document: latin, zh, ja, ar, ru or he. By default the document's text layer, /Lang or metadata names it, else Latin; set it when a scan's result is flagged partial as read in Latin. Always a fresh read."`
 	SizeOnly bool              `json:"size_only,omitempty" jsonschema:"Read and cache the full content but return no body: only its size and where it is."`
 	Headers  map[string]string `json:"headers,omitempty" jsonschema:"Optional request headers (name → value) sent only to the target's own origin; reader services, archives and resolver APIs never receive them. At most 32 headers, 8 KiB; no Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Trailer, Keep-Alive or Proxy-*. A caller header overrides the default of its name."`
 }
@@ -84,13 +87,17 @@ func (service *Service) readPage(
 	if len(input.Sources) < 1 || len(input.Sources) > maxPageSources {
 		return nil, PagesOutput{}, fmt.Errorf("sources must contain 1-%d items", maxPageSources)
 	}
+	ocrLang, err := harvest.ParseOCRLang(input.OCRLang)
+	if err != nil {
+		return nil, PagesOutput{}, err
+	}
 	headers, err := harvest.ParseCallerHeaders(input.Headers)
 	if err != nil {
 		return nil, PagesOutput{}, err
 	}
 	return service.readMany(ctx, input.Sources, readRequest{
 		headers:  headers,
-		options:  harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly},
+		options:  harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly, OCRLang: ocrLang},
 		misroute: pageMisroute,
 	})
 }
@@ -101,8 +108,12 @@ func (service *Service) parseLocalDocuments(
 	if len(input.Paths) < 1 || len(input.Paths) > maxPageSources {
 		return nil, PagesOutput{}, fmt.Errorf("paths must contain 1-%d items", maxPageSources)
 	}
+	ocrLang, err := harvest.ParseOCRLang(input.OCRLang)
+	if err != nil {
+		return nil, PagesOutput{}, err
+	}
 	return service.readMany(ctx, input.Paths, readRequest{
-		options:  harvest.FetchOptions{SizeOnly: input.SizeOnly},
+		options:  harvest.FetchOptions{SizeOnly: input.SizeOnly, OCRLang: ocrLang},
 		misroute: localMisroute,
 	})
 }
@@ -113,13 +124,17 @@ func (service *Service) readWork(
 	if len(input.Works) < 1 || len(input.Works) > maxWorks {
 		return nil, PagesOutput{}, fmt.Errorf("works must contain 1-%d items", maxWorks)
 	}
+	ocrLang, err := harvest.ParseOCRLang(input.OCRLang)
+	if err != nil {
+		return nil, PagesOutput{}, err
+	}
 	headers, err := harvest.ParseCallerHeaders(input.Headers)
 	if err != nil {
 		return nil, PagesOutput{}, err
 	}
 	return service.readMany(ctx, input.Works, readRequest{
 		headers:  headers,
-		options:  harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly},
+		options:  harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly, OCRLang: ocrLang},
 		misroute: workMisroute,
 		work:     true,
 	})

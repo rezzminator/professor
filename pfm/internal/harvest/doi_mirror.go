@@ -525,7 +525,7 @@ func (h *Harvester) fetchDOIMirror(ctx context.Context, identifier string, optio
 		pdfSource,
 		kindPDF,
 		sourceDOIMirror,
-		pageText(converted), // the OCR rescue above bypasses convertFetchedContent
+		convertedDocument(converted), // the OCR rescue above bypasses convertFetchedContent
 		int64(len(pdfBody)),
 		pdfStatus,
 		rungs,

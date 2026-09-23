@@ -356,7 +356,7 @@ func (h *Harvester) fetchProviderArtifactWithPolicy(
 		fileURL,
 		kind,
 		provider,
-		pageText(converted), // the OCR rescue above bypasses convertFetchedContent
+		convertedDocument(converted), // the OCR rescue above bypasses convertFetchedContent
 		int64(len(response.body)),
 		response.status,
 		rungs,

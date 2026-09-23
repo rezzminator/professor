@@ -17,18 +17,15 @@ func titleGuessResult(source, echoed string) Result {
 	}
 }
 
-// noteRungOutcome mirrors the Jina rung's own failure bookkeeping
-// (fetchURLWithPolicy, harvest.go) for a sibling ladder rung that previously
-// updated neither lastErr nor lastErrorKind on a transport failure (F11):
-// getBody returns status=0 on every transport-error path, so only a genuine
-// HTTP response updates lastStatus — letting a later transport error clobber
-// it would make the terminal receipt report HTTPStatus 0 for what was really
-// an earlier walled 403.
-func noteRungOutcome(err error, status int, lastErr error, lastErrorKind string, lastStatus int) (string, int, error) {
+// noteRungOutcome is a reader rung's failure bookkeeping (Jina, defuddle.md):
+// a transport error names its kind, a genuine answer keeps the prior error.
+// A reader never reports the target's HTTP status — its own 429 or 502 is
+// the reader's answer, not the site's — so lastStatus is never its to set.
+func noteRungOutcome(err, lastErr error, lastErrorKind string) (string, error) {
 	if err != nil {
-		return errorKind(err), lastStatus, err
+		return errorKind(err), err
 	}
-	return lastErrorKind, status, lastErr
+	return lastErrorKind, lastErr
 }
 
 // convertOutageNote appends a tool-outage addendum to message, and fills

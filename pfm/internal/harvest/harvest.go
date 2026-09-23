@@ -424,16 +424,10 @@ func (h *Harvester) fetchURLWithPolicy(
 	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
 		rungs = append(rungs, "jina")
 		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
-		body, status, _, err := getBody(ctx, h.jina, target, h.userAgent, h.options.MaxBytes)
-		if err != nil {
-			lastErr = err
-			lastErrorKind = errorKind(err)
-			// getBody returns status=0 on every transport-error path; letting
-			// that clobber a genuine earlier HTTP status would make the
-			// receipt report HTTPStatus 0 for a walled 403.
-		} else {
-			lastStatus = status
-		}
+		// A reader rung speaks to the reader, not the target: its status and
+		// Retry-After are never the site's (noteRungOutcome, retry_after.go).
+		body, status, _, err := getBody(withoutRetryAfterNote(ctx), h.jina, target, h.userAgent, h.options.MaxBytes)
+		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
 		if err == nil && status < 400 && !isChallenge(body, status) && jinaTargetError(body) == 0 {
 			// Jina Reader already returns clean Markdown. Feeding it back into an
 			// HTML converter loses headings and code blocks, so preserve it as the
@@ -451,8 +445,8 @@ func (h *Harvester) fetchURLWithPolicy(
 	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
 		rungs = append(rungs, "defuddle")
 		target := "https://defuddle.md/" + source
-		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
-		lastErrorKind, lastStatus, lastErr = noteRungOutcome(err, status, lastErr, lastErrorKind, lastStatus)
+		body, status, _, err := getBody(withoutRetryAfterNote(ctx), h.client, target, h.userAgent, h.options.MaxBytes)
+		lastErrorKind, lastErr = noteRungOutcome(err, lastErr, lastErrorKind)
 		if err == nil && status < 400 && !isChallenge(body, status) {
 			converted := pageText(stripDefuddleEnvelope(string(body)))
 			longer := contentChars(converted) > lastContentChars || appShellText != ""
@@ -619,8 +613,8 @@ func (h *Harvester) fetchURLWithPolicy(
 	// landing page. Avoid recursing when the snapshot itself fails.
 	if !strings.Contains(strings.ToLower(source), "web.archive.org") && !isPrivateURL(source) && !originGone {
 		rungs = append(rungs, "wayback")
-		if snapshot, wbErr := WaybackRawURL(ctx, h.oa, source); wbErr == nil && snapshot != "" {
-			snapshotCtx := ctx
+		if snapshot, wbErr := WaybackRawURL(withoutRetryAfterNote(ctx), h.oa, source); wbErr == nil && snapshot != "" {
+			snapshotCtx := withoutRetryAfterNote(ctx) // an archive's wait is not the site's
 			if appShellText != "" {
 				// A snapshot of a client-rendered route is the same shell; the
 				// recursion rejects it before it is stored.
@@ -643,7 +637,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			rungs = append(rungs, "ocr")
 			ocrRan = true
 			ocrConverted, ocrErr := ocrConverter.ConvertOCR(ctx, kindPDF, source, emptyPDFBody)
-			ocrConverted = pageText(ocrConverted)
+			ocrConverted = convertedDocument(ocrConverted)
 			switch {
 			case ocrErr != nil:
 				ocrBackendFailed = true

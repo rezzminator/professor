@@ -35,7 +35,7 @@ func noteRetryAfter(resp *http.Response) {
 		return
 	}
 	note, ok := resp.Request.Context().Value(retryAfterKey{}).(*retryAfterNote)
-	if !ok {
+	if !ok || note == nil { // nil: a reader or archive rung (withoutRetryAfterNote)
 		return
 	}
 	if value := retryAfterValue(resp.Header.Get("Retry-After")); value != "" {
@@ -84,4 +84,11 @@ func withRetryAfterText(text, value string) string {
 		return text
 	}
 	return strings.TrimSpace(text) + " The server said: " + clause + "."
+}
+
+// withoutRetryAfterNote is ctx for a rung that speaks to a reader or an
+// archive instead of the target (Jina, defuddle.md, Wayback): their own rate
+// limits are never recorded as the site's wait.
+func withoutRetryAfterNote(ctx context.Context) context.Context {
+	return context.WithValue(ctx, retryAfterKey{}, (*retryAfterNote)(nil))
 }

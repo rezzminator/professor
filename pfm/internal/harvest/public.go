@@ -58,6 +58,7 @@ func (h *Harvester) FetchPublic(ctx context.Context, source string, options Fetc
 			options.SizeOnly,
 		)
 	}
+	ctx, options = withOCRLang(ctx, options)
 	ctx, note := withRetryAfterNote(ctx)
 	return h.PublicResult(source, note.apply(h.FetchWithOptions(ctx, resolved, options)), options.SizeOnly)
 }

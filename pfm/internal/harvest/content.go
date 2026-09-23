@@ -219,7 +219,7 @@ func (h *Harvester) convertFetchedDocument(
 	}
 	if kind != kindHTML {
 		converted, err := h.options.Converter.Convert(ctx, kind, source, body)
-		return pageText(converted), convertedPage{}, err
+		return convertedDocument(converted), convertedPage{}, err
 	}
 	return h.convertHTML(ctx, source, body, budget)
 }

@@ -13,8 +13,9 @@ import (
 
 // OCRModelDownloadBytes is the first-run OCR model download as staged: the
 // models directory after a cold `pfm install` on linux-arm64 held 555 MB
-// (docling layout+table plus the latin, zh, ja and ru RapidOCR models). The
-// bake-off's 1.06 GB counted its whole hub cache, other engines included.
+// (docling layout+table plus the latin, zh, ja and ru RapidOCR models, before
+// Arabic joined them). The bake-off's 1.06 GB counted its whole hub cache,
+// other engines included.
 const OCRModelDownloadBytes int64 = 555_000_000
 
 // ocrStagingTimeout bounds the whole staging run (a cold 1.06 GB download
@@ -23,9 +24,10 @@ const ocrStagingTimeout = 45 * time.Minute
 
 // ocrStagedSets are the staging markers converter.py's stage_models writes
 // (staged-<set>.json) and its require_staged checks before every OCR read.
-// Arabic is absent: its RapidOCR model needs python-bidi, which the pinned
-// environment does not carry, so converter.py names it instead of staging it.
-var ocrStagedSets = []string{"docling", "latin", "zh", "ja", "ru"}
+// Arabic is one of them now that python-bidi is pinned: a root staged before
+// the pin (its Arabic recorded as skipped, no marker) is re-staged, never
+// answered "already staged" while the reader asks for `pfm install`.
+var ocrStagedSets = []string{"docling", "latin", "zh", "ja", "ar", "ru"}
 
 // ErrOCRModelsOffline names an offline install whose OCR models were never
 // staged: scanned PDFs fail by name until an install runs with network.
@@ -124,10 +126,14 @@ func StageOCRModels(ctx context.Context, options OCRStageOptions) (OCRStaging, e
 		}
 	}
 	if still := missingOCRMarkers(modelRoot); len(still) > 0 {
-		return staging, fmt.Errorf(
-			"stage OCR models: staging answered ok but left no marker for %s",
-			strings.Join(still, ", "),
-		)
+		named := make([]string, 0, len(still))
+		for _, set := range still {
+			if reason := staging.Skipped[set]; reason != "" {
+				set += " (skipped: " + reason + ")"
+			}
+			named = append(named, set)
+		}
+		return staging, fmt.Errorf("stage OCR models: no marker was written for %s", strings.Join(named, "; "))
 	}
 	return staging, nil
 }

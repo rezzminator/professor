@@ -99,7 +99,10 @@ type Request struct {
 	Kind   string `json:"kind"`
 	Source string `json:"source,omitempty"`
 	OCR    bool   `json:"ocr,omitempty"`
-	Layout bool   `json:"layout,omitempty"`
+	// OCRLang is the caller's script for a scan (harvest.OCRLangFrom); ""
+	// lets the document's text layer, /Lang or metadata decide.
+	OCRLang string `json:"ocr_lang,omitempty"`
+	Layout  bool   `json:"layout,omitempty"`
 	// FullDOM asks for an HTML page's WHOLE DOM converted, boilerplate
 	// included, instead of its extracted main content — the recall gate's
 	// fallback (harvest.FullDOMConverter).

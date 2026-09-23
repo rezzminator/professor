@@ -404,6 +404,7 @@ func (converter pythonConverter) convertScratch(
 		}
 	}()
 	request.Path = filepath.Join(directory, "input."+extension)
+	request.OCRLang = harvest.OCRLangFrom(ctx)
 	if err := os.WriteFile(request.Path, body, 0o600); err != nil {
 		return "", fmt.Errorf("write %s scratch: %w", label, err)
 	}

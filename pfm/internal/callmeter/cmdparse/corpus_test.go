@@ -13,7 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
 
-// corpusFixture holds real Bash commands from a 30-day transcript backfill,
+// corpusFixture holds real Bash commands from Claude sessions,
 // each with the parse the spec requires (docs/design/hooks/callmeter.md,
 // "Test corpora" item 1). Every path in it is rewritten under corpusRoot.
 const (

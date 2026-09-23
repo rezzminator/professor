@@ -11,7 +11,7 @@ import (
 // stages are every fault stage, always listed so a zero is visible.
 var stages = []string{
 	callmeter.StagePayload, callmeter.StageStore, callmeter.StageTranscript,
-	callmeter.StageParse, callmeter.StageBackfill,
+	callmeter.StageParse,
 }
 
 // Faults counts faults by stage and command parts by parse status, then lists

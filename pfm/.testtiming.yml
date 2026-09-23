@@ -19,11 +19,8 @@ suites:
       github.com/rezzminator/professor/pfm/internal/atomicfile: 2
       github.com/rezzminator/professor/pfm/internal/binwatch: 2
       github.com/rezzminator/professor/pfm/internal/callmeter: 2
-      github.com/rezzminator/professor/pfm/internal/callmeter/backfill: 2
       github.com/rezzminator/professor/pfm/internal/callmeter/cmdparse: 2
       github.com/rezzminator/professor/pfm/internal/callmeter/command: 2
-      github.com/rezzminator/professor/pfm/internal/callmeter/corpussan: 2
-      github.com/rezzminator/professor/pfm/internal/callmeter/corpussan/cmd/corpussan: 2
       github.com/rezzminator/professor/pfm/internal/callmeter/report: 2
       github.com/rezzminator/professor/pfm/internal/chat: 4
       github.com/rezzminator/professor/pfm/internal/cli: 2

@@ -9,11 +9,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/callmeter"
+	"github.com/rezzminator/professor/pfm/internal/callmeter/cmdparse"
+	"github.com/rezzminator/professor/pfm/internal/callmeter/report"
 	"github.com/rezzminator/professor/pfm/internal/clock"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
@@ -402,6 +405,60 @@ func TestCallmeterBatchBeforePostToolUse(t *testing.T) {
 			t.Errorf("column %s: PostToolUse first = %q, PostToolBatch first = %q", column, value, rows[1][column])
 		}
 	}
+}
+
+// TestCallmeterHookRowsReachTheReports: the reports read only what the hook
+// stored. probe5 fed whole records its Bash calls; EnsureParsed parses every
+// one of them, and fixture.go's BASH BYTES is the delivered bytes of the two
+// calls that read it (each credits that one file, so its share is all of it).
+func TestCallmeterHookRowsReachTheReports(t *testing.T) {
+	lab := newCallmeterLab(t)
+	fixture := filepath.Join(lab.proj, "fixture.go")
+	lab.write(fixture, []byte(strings.Repeat("package demo\n", 100)))
+	lab.feed(lab.payloads("probe5.jsonl")...)
+	store := lab.db()
+	bash := lab.count("SELECT COUNT(*) FROM calls WHERE tool = 'Bash'")
+	if bash != 3 {
+		t.Fatalf("the hook stored %d Bash calls, want probe5's 3", bash)
+	}
+	summary, err := report.EnsureParsed(lab.ctx, store, lab.home, nil)
+	if err != nil {
+		t.Fatalf("EnsureParsed: %v", err)
+	}
+	if summary.Parsed != bash || summary.SkippedRelative != 0 || summary.SkippedNoInput != 0 {
+		t.Fatalf("EnsureParsed = %+v, want all %d hook-recorded Bash calls parsed", summary, bash)
+	}
+	if unparsed := lab.count(`SELECT COUNT(*) FROM calls c WHERE c.tool = 'Bash' AND NOT EXISTS
+		(SELECT 1 FROM command_parts p WHERE p.tool_use_id = c.tool_use_id AND p.parser = ?)`, cmdparse.Version); unparsed != 0 {
+		t.Fatalf("%d Bash calls have no parts from this parser", unparsed)
+	}
+	var want int64
+	for _, id := range []string{"toolu_014w33S7y4Hmv2iQj3NzzEWV", "toolu_01LV57SCFxiU1LaMWZm3ixg6"} {
+		stored := lab.call(id)["bytes_delivered"]
+		delivered, err := strconv.ParseInt(stored, 10, 64)
+		if err != nil || delivered == 0 {
+			t.Fatalf("call %s bytes_delivered = %q (%v), want the hook's count", id, stored, err)
+		}
+		want += delivered
+	}
+	table, err := report.Files(lab.ctx, store, report.Filter{}, nil)
+	if err != nil {
+		t.Fatalf("report.Files: %v", err)
+	}
+	column := map[string]int{}
+	for i, name := range table.Header {
+		column[name] = i
+	}
+	for _, row := range table.Rows {
+		if row[column["FILE"]] != fixture {
+			continue
+		}
+		if got := row[column["BASH BYTES"]]; got != strconv.FormatInt(want, 10) {
+			t.Fatalf("fixture.go BASH BYTES = %s, want %d: the hook's bytes of the two calls that read it", got, want)
+		}
+		return
+	}
+	t.Fatalf("report.Files has no row for %s: %v", fixture, table.Rows)
 }
 
 func TestCallmeterGarbagePayload(t *testing.T) {

@@ -142,16 +142,16 @@ fi
 # ---- 9: the callmeter store package is a db door; its subpackages are not ---
 CM="$T/callmeter"
 if fixture "$CM"; then
-  mkdir -p "$CM/internal/callmeter/backfill"
+  mkdir -p "$CM/internal/callmeter/report"
   printf 'package callmeter\n\nimport "database/sql"\n\nvar _ sql.DB\n' > "$CM/internal/callmeter/store.go"
-  printf 'package backfill\n\nimport "database/sql"\n\nvar _ sql.DB\n' > "$CM/internal/callmeter/backfill/backfill.go"
+  printf 'package report\n\nimport "database/sql"\n\nvar _ sql.DB\n' > "$CM/internal/callmeter/report/report.go"
   git -C "$CM" -c user.email=t@example.invalid -c user.name=t add -A 2>/dev/null
   line=$(c24 "$CM" --measure)
   baseline="$(cat "$CM/.arch/unwrapped-door.txt")"
   if [[ "$line" == *MEASURE* ]] \
     && ! grep -q '^sql:internal/callmeter/store.go ' <<<"$baseline" \
-    && grep -q '^sql:internal/callmeter/backfill/backfill.go 1$' <<<"$baseline"; then
-    ok "C24: a database/sql import in internal/callmeter/ is exempt while one in internal/callmeter/backfill/ still counts"
+    && grep -q '^sql:internal/callmeter/report/report.go 1$' <<<"$baseline"; then
+    ok "C24: a database/sql import in internal/callmeter/ is exempt while one in internal/callmeter/report/ still counts"
   else
     bad "C24: expected internal/callmeter/store.go exempt and its subpackage counted" "$baseline"
   fi

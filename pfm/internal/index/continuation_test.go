@@ -155,11 +155,11 @@ func TestClaudeContinuedInIgnoresIDsThatNameNoSession(t *testing.T) {
 	}
 }
 
-// TestClaudeContinuationBackfillsRowsAPreviousParserIndexed pins the upgrade
+// TestClaudeContinuationFillsRowsAPreviousParserIndexed pins the upgrade
 // path: a database an older pfm indexed already holds the parked chat's rows
 // with no continuation, their files unchanged since. The parser version bump
 // is the only thing that makes this pfm read them again.
-func TestClaudeContinuationBackfillsRowsAPreviousParserIndexed(t *testing.T) {
+func TestClaudeContinuationFillsRowsAPreviousParserIndexed(t *testing.T) {
 	project, database, indexer := continuationJail(t)
 	ctx := context.Background()
 	rewriteJSONLines(t, filepath.Join(project, continuedPredecessor+".jsonl"), []any{
@@ -189,10 +189,10 @@ func TestClaudeContinuationBackfillsRowsAPreviousParserIndexed(t *testing.T) {
 	if _, err := indexer.Run(ctx, Options{}); err != nil {
 		t.Fatalf("upgrade Run() = %v", err)
 	}
-	backfilled := mustTranscript(t, database, continuedPredecessor)
-	if backfilled.ContinuedIn != continuedSuccessor || !backfilled.Superseded {
-		t.Fatalf("predecessor after upgrade = {continuedIn=%q superseded=%t}, want the handoff backfilled "+
+	filled := mustTranscript(t, database, continuedPredecessor)
+	if filled.ContinuedIn != continuedSuccessor || !filled.Superseded {
+		t.Fatalf("predecessor after upgrade = {continuedIn=%q superseded=%t}, want the handoff filled "+
 			"— claudeParserVersion must move past %q so rows indexed before continued-in was read are reparsed",
-			backfilled.ContinuedIn, backfilled.Superseded, preContinuationParserVersion)
+			filled.ContinuedIn, filled.Superseded, preContinuationParserVersion)
 	}
 }

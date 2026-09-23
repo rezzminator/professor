@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -82,7 +83,7 @@ func TestOpenSetsPragmasAndVersion(t *testing.T) {
 		"journal_mode": "wal",
 		"busy_timeout": "5000",
 		"foreign_keys": "0",
-		"user_version": "1",
+		"user_version": "2",
 	} {
 		var got string
 		if err := store.DB().QueryRow("PRAGMA " + pragma).Scan(&got); err != nil {
@@ -101,7 +102,7 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
-	if _, err := store.DB().Exec("PRAGMA user_version=2"); err != nil {
+	if _, err := store.DB().Exec("PRAGMA user_version=3"); err != nil {
 		t.Fatalf("raise version: %v", err)
 	}
 	if err := store.Close(); err != nil {
@@ -110,9 +111,9 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	reopened, err := OpenDB(ctx, path)
 	if err == nil {
 		_ = reopened.Close()
-		t.Fatal("OpenDB of a version-2 store succeeded, want a refusal")
+		t.Fatal("OpenDB of a version-3 store succeeded, want a refusal")
 	}
-	for _, want := range []string{"version 2", "version 1"} {
+	for _, want := range []string{"version 3", "version 2"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}
@@ -131,8 +132,360 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	if err := raw.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 2 {
-		t.Fatalf("user_version after refusal = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("user_version after refusal = %d, want 3", version)
+	}
+}
+
+// rawStore opens path with the bare driver, bypassing OpenDB's migration.
+func rawStore(t *testing.T, path string) *sql.DB {
+	t.Helper()
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("raw open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := raw.Close(); err != nil {
+			t.Errorf("close raw handle: %v", err)
+		}
+	})
+	return raw
+}
+
+func rawExec(t *testing.T, raw *sql.DB, statements ...string) {
+	t.Helper()
+	for _, statement := range statements {
+		if _, err := raw.Exec(statement); err != nil {
+			t.Fatalf("exec %q: %v", statement, err)
+		}
+	}
+}
+
+func rawVersion(t *testing.T, raw *sql.DB) int {
+	t.Helper()
+	var version int
+	if err := raw.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+	return version
+}
+
+// writeV1Store writes a version-1 store holding one hook row and one
+// transcript row in calls, requests and agents, the command parts of both
+// calls and, unless brokenFaults, the faults a transcript replay left: backfill,
+// store and parse on its call, parse on the hook call. brokenFaults gives
+// faults no stage column, so the purge's fault statement fails.
+func writeV1Store(t *testing.T, brokenFaults bool) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "callmeter.db")
+	raw := rawStore(t, path)
+	rawExec(t, raw, schema,
+		`INSERT INTO calls (tool_use_id, tool, source) VALUES ('toolu_hook', 'Bash', 'hook'),
+			('toolu_replay', 'Bash', 'transcript')`,
+		`INSERT INTO requests (request_id, source) VALUES ('msg_hook', 'hook'), ('msg_replay', 'transcript')`,
+		`INSERT INTO agents (agent_id, source) VALUES ('agent_hook', 'hook'), ('agent_replay', 'transcript')`,
+		`INSERT INTO command_parts (tool_use_id, seq, program) VALUES ('toolu_hook', 0, 'wc'),
+			('toolu_replay', 0, 'head')`,
+	)
+	if brokenFaults {
+		rawExec(t, raw, "DROP TABLE faults",
+			"CREATE TABLE faults (ts INTEGER, session_id TEXT, tool_use_id TEXT, error TEXT)")
+	} else {
+		rawExec(t, raw, `INSERT INTO faults (tool_use_id, stage, error) VALUES
+			('toolu_replay', 'backfill', 'replay'), ('toolu_replay', 'store', 'disk full'),
+			('toolu_replay', 'parse', 'bad quote'), ('toolu_hook', 'parse', 'bad quote')`)
+	}
+	rawExec(t, raw, "PRAGMA user_version=1")
+	return path
+}
+
+// keys lists one column of a table, sorted, as "a,b".
+func keys(t *testing.T, db *sql.DB, query string) string {
+	t.Helper()
+	rows, err := db.Query(query)
+	if err != nil {
+		t.Fatalf("query %q: %v", query, err)
+	}
+	defer func() {
+		if err := rows.Close(); err != nil {
+			t.Errorf("close rows: %v", err)
+		}
+	}()
+	var out []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			t.Fatalf("scan %q: %v", query, err)
+		}
+		out = append(out, key)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read %q: %v", query, err)
+	}
+	return strings.Join(out, ",")
+}
+
+func TestOpenMigratesV1StoreToHookRowsOnly(t *testing.T) {
+	path := writeV1Store(t, false)
+	store, err := OpenDB(context.Background(), path)
+	if err != nil {
+		t.Fatalf("OpenDB of a v1 store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	for query, want := range map[string]string{
+		"SELECT tool_use_id FROM calls ORDER BY 1":                   "toolu_hook",
+		"SELECT request_id FROM requests ORDER BY 1":                 "msg_hook",
+		"SELECT agent_id FROM agents ORDER BY 1":                     "agent_hook",
+		"SELECT tool_use_id FROM command_parts ORDER BY 1":           "toolu_hook",
+		"SELECT stage || ':' || tool_use_id FROM faults ORDER BY 1":  "parse:toolu_hook,store:toolu_replay",
+		"SELECT CAST(user_version AS TEXT) FROM pragma_user_version": "2",
+	} {
+		if got := keys(t, store.DB(), query); got != want {
+			t.Errorf("%s = %q, want %q", query, got, want)
+		}
+	}
+}
+
+// TestOpenMigrationNullsReferencesToPurgedRows: a transcript replay filled a
+// hook call's empty request_id with a request it wrote itself, so a v1 store
+// holds hook rows pointing at transcript calls, requests and agents. The purge
+// deletes every transcript row all the same and nulls only a kept call's
+// request_id that names a deleted request; a request_id that named no row, or
+// was NULL, stays, and agent_id and parent_tool_use_id, the hook's own payload
+// values, stay even when the row they name is deleted.
+func TestOpenMigrationNullsReferencesToPurgedRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "callmeter.db")
+	raw := rawStore(t, path)
+	rawExec(t, raw, schema,
+		`INSERT INTO calls (tool_use_id, session_id, tool, request_id, agent_id, source) VALUES
+			('toolu_hook', 'sess_demo', 'Bash', 'msg_filled', 'agent_filled', 'hook'),
+			('toolu_bare', 'sess_demo', 'Read', NULL, NULL, 'hook'),
+			('toolu_unresolved', 'sess_demo', 'Grep', 'msg_never_held', NULL, 'hook'),
+			('toolu_replay', 'sess_demo', 'Bash', 'msg_replay', 'agent_replay', 'transcript')`,
+		`INSERT INTO requests (request_id, agent_id, context_tokens, source) VALUES
+			('msg_filled', 'agent_filled', 900, 'transcript'), ('msg_replay', 'agent_replay', 5, 'transcript'),
+			('msg_hook', 'agent_of_request', 7, 'hook')`,
+		`INSERT INTO agents (agent_id, parent_tool_use_id, source) VALUES ('agent_filled', NULL, 'transcript'),
+			('agent_replay', NULL, 'transcript'), ('agent_of_request', NULL, 'transcript'),
+			('agent_child', 'toolu_replay', 'hook')`,
+		"PRAGMA user_version=1",
+	)
+	before := row(t, &Store{db: raw, path: path}, "calls", "tool_use_id = ?", "toolu_hook")
+	store, err := OpenDB(context.Background(), path)
+	if err != nil {
+		t.Fatalf("OpenDB of a v1 store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	for query, want := range map[string]string{
+		"SELECT tool_use_id FROM calls ORDER BY 1":                      "toolu_bare,toolu_hook,toolu_unresolved",
+		"SELECT request_id FROM requests ORDER BY 1":                    "msg_hook",
+		"SELECT agent_id FROM agents ORDER BY 1":                        "agent_child",
+		"SELECT tool_use_id FROM calls WHERE source IS NOT 'hook'":      "",
+		"SELECT request_id FROM requests WHERE source IS NOT 'hook'":    "",
+		"SELECT agent_id FROM agents WHERE source IS NOT 'hook'":        "",
+		"SELECT request_id FROM calls WHERE request_id NOT NULL":        "msg_never_held",
+		"SELECT agent_id FROM calls WHERE agent_id NOT NULL":            "agent_filled",
+		"SELECT agent_id FROM requests WHERE agent_id NOT NULL":         "agent_of_request",
+		"SELECT agent_id FROM agents WHERE parent_tool_use_id NOT NULL": "agent_child",
+	} {
+		if got := keys(t, store.DB(), query); got != want {
+			t.Errorf("%s = %q, want %q", query, got, want)
+		}
+	}
+	after := row(t, store, "calls", "tool_use_id = ?", "toolu_hook")
+	if after == nil {
+		t.Fatal("toolu_hook is gone, want the hook call kept")
+	}
+	for column, value := range before {
+		want := value
+		if column == "request_id" {
+			want = nil
+		}
+		if !reflect.DeepEqual(after[column], want) {
+			t.Errorf("toolu_hook %s = %v, want %v", column, after[column], want)
+		}
+	}
+	got := row(t, store, "requests", "request_id = ?", "msg_hook")
+	if got == nil || got["agent_id"] != "agent_of_request" {
+		t.Errorf("msg_hook = %v, want kept with agent_id agent_of_request", got)
+	}
+	agent := row(t, store, "agents", "agent_id = ?", "agent_child")
+	if agent == nil || agent["parent_tool_use_id"] != "toolu_replay" {
+		t.Errorf("agent_child = %v, want kept with parent_tool_use_id toolu_replay", agent)
+	}
+}
+
+// TestOpenMigrationPurgesRowsWithNoSource: the replay's task-notice path wrote an
+// agents row holding only agent_id and stopped, with no source at all, and
+// the hook always sets its source, so a v1 row whose source is NULL is a
+// replay's. The purge deletes it like a transcript row and nulls a kept call's
+// request_id to a deleted row, while a kept agent_id naming it and a kept
+// agent's parent_tool_use_id naming a NULL-source call stay; a NULL source in
+// calls or requests goes the same way.
+func TestOpenMigrationPurgesRowsWithNoSource(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "callmeter.db")
+	raw := rawStore(t, path)
+	rawExec(t, raw, schema,
+		`INSERT INTO calls (tool_use_id, tool, request_id, agent_id, source) VALUES
+			('toolu_hook', 'Bash', 'msg_unsourced', 'agent_notice', 'hook'),
+			('toolu_unsourced', 'Read', NULL, NULL, NULL)`,
+		`INSERT INTO requests (request_id, agent_id, source) VALUES
+			('msg_hook', 'agent_notice', 'hook'), ('msg_unsourced', NULL, NULL)`,
+		`INSERT INTO agents (agent_id, parent_tool_use_id, stopped, source) VALUES
+			('agent_notice', NULL, 1700000000000, NULL), ('agent_child', 'toolu_unsourced', NULL, 'hook')`,
+		"PRAGMA user_version=1",
+	)
+	store, err := OpenDB(context.Background(), path)
+	if err != nil {
+		t.Fatalf("OpenDB of a v1 store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	for query, want := range map[string]string{
+		"SELECT tool_use_id FROM calls ORDER BY 1":                      "toolu_hook",
+		"SELECT request_id FROM requests ORDER BY 1":                    "msg_hook",
+		"SELECT agent_id FROM agents ORDER BY 1":                        "agent_child",
+		"SELECT tool_use_id FROM calls WHERE request_id NOT NULL":       "",
+		"SELECT agent_id FROM calls WHERE agent_id NOT NULL":            "agent_notice",
+		"SELECT agent_id FROM requests WHERE agent_id NOT NULL":         "agent_notice",
+		"SELECT agent_id FROM agents WHERE parent_tool_use_id NOT NULL": "agent_child",
+		"SELECT tool_use_id FROM calls WHERE source IS NOT 'hook'":      "",
+		"SELECT request_id FROM requests WHERE source IS NOT 'hook'":    "",
+		"SELECT agent_id FROM agents WHERE source IS NOT 'hook'":        "",
+	} {
+		if got := keys(t, store.DB(), query); got != want {
+			t.Errorf("%s = %q, want %q", query, got, want)
+		}
+	}
+	agent := row(t, store, "agents", "agent_id = ?", "agent_child")
+	if agent == nil || agent["parent_tool_use_id"] != "toolu_unsourced" {
+		t.Errorf("agent_child = %v, want kept with parent_tool_use_id toolu_unsourced", agent)
+	}
+}
+
+// TestOpenMigrationKeepsHookPayloadIDs: the hook takes a call's and a
+// request's agent_id from its own payload, beside agent_type, and a sub-agent's
+// parent_tool_use_id from the Agent or Task call whose result carries it, so
+// the purge leaves both as the hook wrote them even when the row they name is
+// deleted, whether that row came from a transcript replay or carried no source
+// at all.
+func TestOpenMigrationKeepsHookPayloadIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "callmeter.db")
+	raw := rawStore(t, path)
+	rawExec(t, raw, schema,
+		`INSERT INTO calls (tool_use_id, session_id, tool, request_id, agent_id, agent_type, source) VALUES
+			('toolu_sub', 'sess_demo', 'Bash', 'msg_replayed', 'agent_replayed', 'Explore', 'hook'),
+			('toolu_spawn', 'sess_demo', 'Agent', NULL, NULL, NULL, 'transcript')`,
+		`INSERT INTO requests (request_id, agent_id, source) VALUES
+			('msg_replayed', NULL, 'transcript'), ('msg_sub', 'agent_unsourced', 'hook')`,
+		`INSERT INTO agents (agent_id, parent_tool_use_id, source) VALUES ('agent_replayed', NULL, 'transcript'),
+			('agent_unsourced', NULL, NULL), ('agent_spawned', 'toolu_spawn', 'hook')`,
+		"PRAGMA user_version=1",
+	)
+	store, err := OpenDB(context.Background(), path)
+	if err != nil {
+		t.Fatalf("OpenDB of a v1 store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	call := row(t, store, "calls", "tool_use_id = ?", "toolu_sub")
+	if call == nil {
+		t.Fatal("toolu_sub is gone, want the hook call kept")
+	}
+	if call["agent_id"] != "agent_replayed" || call["agent_type"] != "Explore" || call["request_id"] != nil {
+		t.Errorf("toolu_sub = %v, want agent_id agent_replayed, agent_type Explore, request_id NULL", call)
+	}
+	request := row(t, store, "requests", "request_id = ?", "msg_sub")
+	if request == nil || request["agent_id"] != "agent_unsourced" {
+		t.Errorf("msg_sub = %v, want kept with agent_id agent_unsourced", request)
+	}
+	for query, want := range map[string]string{
+		"SELECT agent_id FROM agents ORDER BY 1":                     "agent_spawned",
+		"SELECT request_id FROM requests ORDER BY 1":                 "msg_sub",
+		"SELECT tool_use_id FROM calls ORDER BY 1":                   "toolu_sub",
+		"SELECT tool_use_id FROM calls WHERE source IS NOT 'hook'":   "",
+		"SELECT request_id FROM requests WHERE source IS NOT 'hook'": "",
+		"SELECT agent_id FROM agents WHERE source IS NOT 'hook'":     "",
+	} {
+		if got := keys(t, store.DB(), query); got != want {
+			t.Errorf("%s = %q, want %q", query, got, want)
+		}
+	}
+	agent := row(t, store, "agents", "agent_id = ?", "agent_spawned")
+	if agent == nil || agent["parent_tool_use_id"] != "toolu_spawn" {
+		t.Errorf("agent_spawned = %v, want kept with parent_tool_use_id toolu_spawn", agent)
+	}
+}
+
+func TestOpenPurgesV1StoreOnlyOnce(t *testing.T) {
+	ctx := context.Background()
+	path := writeV1Store(t, false)
+	store, err := OpenDB(ctx, path)
+	if err != nil {
+		t.Fatalf("OpenDB of a v1 store: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	rawExec(t, rawStore(t, path), "INSERT INTO calls (tool_use_id, source) VALUES ('toolu_later', 'transcript')")
+	reopened, err := OpenDB(ctx, path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := reopened.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	if got := row(t, reopened, "calls", "tool_use_id = ?", "toolu_later"); got == nil {
+		t.Fatal("reopening a version-2 store purged a transcript row, want the purge to run only at version 1")
+	}
+}
+
+func TestOpenFreshStoreIsEmptyAtCurrentVersion(t *testing.T) {
+	store := openTestStore(t)
+	if got := keys(t, store.DB(), "SELECT CAST(user_version AS TEXT) FROM pragma_user_version"); got != "2" {
+		t.Errorf("user_version = %s, want 2", got)
+	}
+	for _, table := range []string{"calls", "requests", "agents", "command_parts", "faults"} {
+		if n := count(t, store, table); n != 0 {
+			t.Errorf("fresh %s holds %d rows, want 0", table, n)
+		}
+	}
+}
+
+func TestOpenFailedPurgeRollsBackAtV1(t *testing.T) {
+	path := writeV1Store(t, true)
+	store, err := OpenDB(context.Background(), path)
+	if err == nil {
+		_ = store.Close()
+		t.Fatal("OpenDB over a failing purge succeeded, want an error")
+	}
+	for _, want := range []string{path, "stage = 'backfill'"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+	raw := rawStore(t, path)
+	if version := rawVersion(t, raw); version != 1 {
+		t.Errorf("user_version after a failed purge = %d, want 1", version)
+	}
+	if got := keys(t, raw, "SELECT tool_use_id FROM calls ORDER BY 1"); got != "toolu_hook,toolu_replay" {
+		t.Errorf("calls after a failed purge = %q, want both rows back: the purge rolls back whole", got)
 	}
 }
 

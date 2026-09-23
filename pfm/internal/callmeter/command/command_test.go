@@ -138,42 +138,11 @@ func TestCallmeterCLIConfigDirNarrowsAndRejectsUnknown(t *testing.T) {
 	}
 }
 
-func TestCallmeterCLIBackfillSummarizesAndIsIdempotent(t *testing.T) {
-	fixture := newLab(t)
-	now := time.Now().UTC()
-	stamp := func(offset time.Duration) string { return now.Add(offset).Format("2006-01-02T15:04:05.000Z") }
-	lines := []string{
-		`{"type":"assistant","message":{"model":"m","id":"msg_1","type":"message","role":"assistant",` +
-			`"content":[{"type":"tool_use","id":"toolu_A","name":"Read","input":{"file_path":"/work/proj/notes.md"}}],` +
-			`"usage":{"input_tokens":10,"cache_read_input_tokens":100,"cache_creation_input_tokens":10,"output_tokens":5}},` +
-			`"timestamp":"` + stamp(-time.Minute) + `","cwd":"/work/proj","sessionId":"sess-bf"}`,
-		`{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_A","type":"tool_result",` +
-			`"content":"1\tnotes\n"}]},"timestamp":"` + stamp(-50*time.Second) + `","cwd":"/work/proj","sessionId":"sess-bf"}`,
-	}
-	transcript := filepath.Join(fixture.accounts[0], "projects", "-work-proj", "sess-bf.jsonl")
-	if err := os.MkdirAll(filepath.Dir(transcript), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(transcript, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	code, stdout, stderr := fixture.run("backfill")
-	if code != 0 || !strings.Contains(stdout, "1 transcripts read") || !strings.Contains(stdout, "calls: 1 inserted") {
-		t.Fatalf("first backfill = %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
-	}
-	code, stdout, stderr = fixture.run("backfill")
-	if code != 0 || !strings.Contains(stdout, "calls: 0 inserted, 0 filled") {
-		t.Fatalf("second backfill = %d, want nothing inserted\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
-	}
-	if code, _, stderr = fixture.run("backfill", "extra"); code != 2 {
-		t.Fatalf("backfill with an argument = %d, want 2\nstderr:\n%s", code, stderr)
-	}
-}
-
 // TestCallmeterCLIAccountsSharingProjectsAreOneHistory: accounts whose
 // projects/ is one directory (a symlink, as on this machine) hold one copy of
-// every chat. Backfill reads it once, and a report narrowed to either account
-// shows the same chat: a chat's history stays consistent across accounts.
+// every chat. The hook names that chat's config dir once
+// (callmeter.ProjectsHome), and a report narrowed to either account shows the
+// same chat: a chat's history stays consistent across accounts.
 func TestCallmeterCLIAccountsSharingProjectsAreOneHistory(t *testing.T) {
 	fixture := newLab(t)
 	shared := filepath.Join(fixture.accounts[1], "projects")
@@ -186,26 +155,9 @@ func TestCallmeterCLIAccountsSharingProjectsAreOneHistory(t *testing.T) {
 	if err := os.Symlink(filepath.Join(fixture.accounts[0], "projects"), shared); err != nil {
 		t.Fatal(err)
 	}
-	stamp := time.Now().UTC().Add(-time.Minute).Format("2006-01-02T15:04:05.000Z")
-	line := `{"type":"assistant","message":{"model":"m","id":"msg_1","type":"message","role":"assistant",` +
-		`"content":[{"type":"tool_use","id":"toolu_S","name":"Read","input":{"file_path":"/work/proj/shared.md"}}],` +
-		`"usage":{"input_tokens":1,"output_tokens":1}},"timestamp":"` + stamp + `","cwd":"/work/proj","sessionId":"sess-sh"}`
-	transcript := filepath.Join(shared, "-work-proj", "sess-sh.jsonl")
-	if err := os.MkdirAll(filepath.Dir(transcript), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(transcript, []byte(line+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	code, stdout, stderr := fixture.run("backfill")
-	if code != 0 || !strings.Contains(stdout, "1 transcripts read in 1 config dirs") {
-		t.Fatalf(
-			"backfill over two accounts sharing projects/ = %d, want one read in one dir\nstdout:\n%s\nstderr:\n%s",
-			code, stdout, stderr,
-		)
-	}
-	for _, account := range fixture.accounts[:2] {
-		code, stdout, stderr = fixture.run("report", "files", "--config-dir", account)
+	fixture.seedRead(t, "toolu_S", "/work/proj/shared.md", callmeter.ProjectsHome(fixture.accounts[0]))
+	for _, account := range fixture.accounts {
+		code, stdout, stderr := fixture.run("report", "files", "--config-dir", account)
 		if code != 0 || !strings.Contains(stdout, "/work/proj/shared.md") {
 			t.Fatalf("report narrowed to %s = %d, want the shared chat\nstdout:\n%s\nstderr:\n%s",
 				account, code, stdout, stderr)

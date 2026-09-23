@@ -227,7 +227,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		// continued_in is ensured the same way and for the same reason: an
 		// older binary's explicit transcript column list never names it, and
 		// its upsert leaves it alone. The claude parser version bump that ships
-		// with it is what backfills the rows indexed before it existed.
+		// with it is what fills the rows indexed before it existed.
 		return ensureColumn(ctx, tx, "transcripts", "continued_in", "TEXT NOT NULL DEFAULT ''")
 	})
 }

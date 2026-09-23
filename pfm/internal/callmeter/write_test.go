@@ -69,14 +69,14 @@ func TestFillEmptyNeverOverwrites(t *testing.T) {
 	if err := store.UpsertCall(ctx, postToolUse(), Overwrite); err != nil {
 		t.Fatal(err)
 	}
-	backfill := Call{
+	fill := Call{
 		ToolUseID:      "toolu_1",
 		TS:             Ptr(int64(999)),
 		Tool:           Ptr("Read"),
 		BytesDelivered: Ptr(int64(42)),
-		Source:         Ptr(SourceTranscript),
+		Source:         Ptr(SourceHook),
 	}
-	if err := store.UpsertCall(ctx, backfill, FillEmpty); err != nil {
+	if err := store.UpsertCall(ctx, fill, FillEmpty); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpsertCall(ctx, Call{ToolUseID: "toolu_2", Tool: Ptr("Grep")}, FillEmpty); err != nil {

@@ -1,8 +1,8 @@
 // Package callmeter owns the callmeter store: one SQLite file recording every
 // tool call a Claude chat or sub-agent makes, the model request that grouped
 // it and the sub-agent that made it (docs/design/hooks/callmeter.md § The
-// store), plus the input sanitizer and the transcript readers the hook entry,
-// backfill and reports share.
+// store), plus the input sanitizer and the transcript readers the hook entry
+// and the reports share. Every row comes from a hook event.
 package callmeter
 
 import (
@@ -11,7 +11,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"strings"
 	"time"
 
 	modernsqlite "modernc.org/sqlite"
@@ -22,16 +21,13 @@ import (
 
 // SchemaVersion is the store schema this binary writes and reads, kept in
 // PRAGMA user_version.
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // BusyTimeout is how long a statement waits on a concurrent async writer.
 const BusyTimeout = 5 * time.Second
 
-// Source values: which path wrote (or last touched) a row.
-const (
-	SourceHook       = "hook"
-	SourceTranscript = "transcript"
-)
+// SourceHook is the source every write sets: the hook wrote the row.
+const SourceHook = "hook"
 
 // Fault stages: where a failure to record or parse happened.
 const (
@@ -39,7 +35,6 @@ const (
 	StageStore      = "store"
 	StageTranscript = "transcript"
 	StageParse      = "parse"
-	StageBackfill   = "backfill"
 )
 
 const schema = `
@@ -198,15 +193,38 @@ func prepare(ctx context.Context, db *sql.DB, path string) error {
 	if version == SchemaVersion {
 		return nil // current: an open writes nothing, so concurrent hooks never collide here
 	}
-	return createSchema(ctx, db, path)
+	return createSchema(ctx, db, path, version)
+}
+
+// purgeV1 is the one-time schema v2 migration of a store read at version 1, in
+// this order: it sets to NULL a kept call's request_id that names a request no
+// hook wrote, before the deletes because it selects the requests about to go;
+// that id came from the replay's resolution, and it is the only column the
+// purge nulls. A kept call's or request's agent_id and a kept agent's
+// parent_tool_use_id are never touched: the hook took both from its own
+// payload. Then it deletes every row no hook wrote, then the retired faults and
+// the command parts and parse faults of the calls it removed. A row no hook
+// wrote is one whose source is not hook: a transcript replay's, or one it left
+// with no source at all (the replay's task-notice agents), since the hook
+// always sets it.
+var purgeV1 = []string{
+	"UPDATE calls SET request_id = NULL WHERE request_id IN (SELECT request_id FROM requests WHERE source IS NOT 'hook')",
+	"DELETE FROM calls WHERE source IS NOT 'hook'",
+	"DELETE FROM requests WHERE source IS NOT 'hook'",
+	"DELETE FROM agents WHERE source IS NOT 'hook'",
+	"DELETE FROM faults WHERE stage = 'backfill'",
+	"DELETE FROM command_parts WHERE tool_use_id NOT IN (SELECT tool_use_id FROM calls)",
+	"DELETE FROM faults WHERE stage = 'parse' AND tool_use_id NOT IN (SELECT tool_use_id FROM calls)",
 }
 
 // createSchema writes the schema and its version in one transaction that takes
 // the write lock at BEGIN IMMEDIATE, so a concurrent writer is waited out by
 // the busy timeout. A deferred transaction would read first and then fail with
 // SQLITE_BUSY at its first write, no busy wait, whenever another async hook
-// wrote in between — the store open that lost a hook's whole record.
-func createSchema(ctx context.Context, db *sql.DB, path string) (err error) {
+// wrote in between — the store open that lost a hook's whole record. A store
+// read at version 1 is purged by purgeV1 in the same transaction, so a failed
+// purge leaves it at version 1.
+func createSchema(ctx context.Context, db *sql.DB, path string, version int) (err error) {
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("callmeter store %s: take a connection for the schema: %w", path, err)
@@ -227,6 +245,13 @@ func createSchema(ctx context.Context, db *sql.DB, path string) (err error) {
 	}
 	if _, err := conn.ExecContext(ctx, schema); err != nil {
 		return rollback(fmt.Errorf("callmeter store %s: create schema: %w", path, err))
+	}
+	if version == 1 {
+		for _, statement := range purgeV1 {
+			if _, err := conn.ExecContext(ctx, statement); err != nil {
+				return rollback(fmt.Errorf("callmeter store %s: migrate to version 2 (%s): %w", path, statement, err))
+			}
+		}
 	}
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
 		return rollback(fmt.Errorf("callmeter store %s: set schema version: %w", path, err))
@@ -306,43 +331,6 @@ func (s *Store) Prune(ctx context.Context, before time.Time) (removed int64, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("callmeter store %s: commit prune: %w", s.path, err)
-	}
-	return removed, nil
-}
-
-// RetireRequests deletes the requests and calls rows of requestIDs, in one
-// transaction (backfill's orphan retirement, docs/design/hooks/callmeter.md §
-// Backfill): an untyped internal sub-agent's pending request the hook can
-// never resolve and backfill can never find in a transcript. The count
-// returned is the requests rows removed; a requestID absent from either
-// table is simply not touched.
-func (s *Store) RetireRequests(ctx context.Context, requestIDs []string) (removed int64, err error) {
-	if len(requestIDs) == 0 {
-		return 0, nil
-	}
-	marks := make([]string, len(requestIDs))
-	args := make([]any, len(requestIDs))
-	for i, id := range requestIDs {
-		marks[i], args[i] = "?", id
-	}
-	inClause := "(" + strings.Join(marks, ", ") + ")"
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("callmeter store %s: begin retire: %w", s.path, err)
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM calls WHERE request_id IN "+inClause, args...); err != nil {
-		return 0, errors.Join(fmt.Errorf("callmeter store %s: retire calls: %w", s.path, err), tx.Rollback())
-	}
-	result, err := tx.ExecContext(ctx, "DELETE FROM requests WHERE request_id IN "+inClause, args...)
-	if err != nil {
-		return 0, errors.Join(fmt.Errorf("callmeter store %s: retire requests: %w", s.path, err), tx.Rollback())
-	}
-	removed, err = result.RowsAffected()
-	if err != nil {
-		return 0, errors.Join(fmt.Errorf("callmeter store %s: retire count: %w", s.path, err), tx.Rollback())
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("callmeter store %s: commit retire: %w", s.path, err)
 	}
 	return removed, nil
 }

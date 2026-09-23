@@ -198,7 +198,7 @@ func printUsage(w io.Writer) {
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
-		"  callmeter report which files, commands and calls filled agent contexts; backfill from transcripts",
+		"  callmeter report which files, commands and calls filled agent contexts",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
 		"  statusline render the native Claude status line",

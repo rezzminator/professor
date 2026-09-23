@@ -1,5 +1,5 @@
-// Package command owns `pfm callmeter`: the report and backfill actions over
-// the call store, their flags, the config-dir resolution and the chat-name
+// Package command owns `pfm callmeter`: the report action over the call
+// store, its flags, the config-dir resolution and the chat-name
 // lookup; cmd/pfm only hands it argv and the runtime it resolved.
 package command
 
@@ -16,7 +16,6 @@ import (
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/callmeter"
-	"github.com/rezzminator/professor/pfm/internal/callmeter/backfill"
 	"github.com/rezzminator/professor/pfm/internal/callmeter/report"
 	pfmcli "github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -25,10 +24,8 @@ import (
 
 const usage = `usage: pfm callmeter report {files|writes|commands|context|sequences|faults} [--since D] [--project P]
                      [--agent-type T] [--session S] [--config-dir DIR] [--limit N]
-       pfm callmeter backfill [--since D] [--config-dir DIR]
   --since D         a duration (7d, 24h) or a date (2026-09-01); default and floor: the 30-day retention window
-  --config-dir DIR  one configured Claude config dir; default: every one the machine config names
-  backfill exits 1 only when the store fails; an unreadable transcript is a summary line and a fault`
+  --config-dir DIR  one configured Claude config dir; default: every one the machine config names`
 
 type topicFunc func(context.Context, *callmeter.Store, report.Filter, report.NameOf) (*report.Table, error)
 
@@ -37,17 +34,14 @@ var topics = map[string]topicFunc{
 	"context": report.Context, "sequences": report.Sequences, "faults": report.Faults,
 }
 
-// CLI is `pfm callmeter {args}`: the reports over the call store and the
-// transcript backfill that fills it, over the home, transcript index and
-// Claude config dirs runtime names. It returns the process exit code.
+// CLI is `pfm callmeter {args}`: the reports over the call store the hook
+// fills, over the home, transcript index and Claude config dirs runtime names. It returns the process exit code.
 func CLI(args []string, stdout, stderr io.Writer, runtime pfmconfig.Runtime) int {
 	ctx := context.Background()
 	if len(args) > 0 {
 		switch args[0] {
 		case "report":
 			return reportAction(ctx, args[1:], stdout, stderr, runtime)
-		case "backfill":
-			return backfillAction(ctx, args[1:], stdout, stderr, runtime)
 		case "help", "-h", "--help":
 			fmt.Fprintln(stdout, usage)
 			return 0
@@ -63,17 +57,15 @@ type flagValues struct {
 	limit                                         int
 }
 
-func newFlags(name string, stderr io.Writer, withReport bool) (*flag.FlagSet, *flagValues) {
+func newFlags(name string, stderr io.Writer) (*flag.FlagSet, *flagValues) {
 	flags := pfmcli.NewFlagSet(name, usage, stderr)
 	values := &flagValues{}
 	flags.StringVar(&values.since, "since", "", "a duration (7d, 24h) or a date (2026-09-01)")
 	flags.StringVar(&values.configDir, "config-dir", "", "one configured Claude config dir")
-	if withReport {
-		flags.StringVar(&values.project, "project", "", "calls whose cwd is this dir or under it")
-		flags.StringVar(&values.agentType, "agent-type", "", "calls made by this agent type")
-		flags.StringVar(&values.session, "session", "", "calls in this session")
-		flags.IntVar(&values.limit, "limit", report.DefaultLimit, "rows per table")
-	}
+	flags.StringVar(&values.project, "project", "", "calls whose cwd is this dir or under it")
+	flags.StringVar(&values.agentType, "agent-type", "", "calls made by this agent type")
+	flags.StringVar(&values.session, "session", "", "calls in this session")
+	flags.IntVar(&values.limit, "limit", report.DefaultLimit, "rows per table")
 	return flags, values
 }
 
@@ -83,7 +75,7 @@ func reportAction(
 	stdout, stderr io.Writer,
 	runtime pfmconfig.Runtime,
 ) (exitCode int) {
-	flags, values := newFlags("callmeter report", stderr, true)
+	flags, values := newFlags("callmeter report", stderr)
 	positional, code, ok := pfmcli.ParseFlagsAnywhere(flags, args)
 	if !ok {
 		return code
@@ -129,46 +121,6 @@ func reportAction(
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "callmeter: report %s: %v\n", positional[0], err)
-		return 1
-	}
-	return 0
-}
-
-func backfillAction(
-	ctx context.Context,
-	args []string,
-	stdout, stderr io.Writer,
-	runtime pfmconfig.Runtime,
-) (exitCode int) {
-	flags, values := newFlags("callmeter backfill", stderr, false)
-	if code, ok := pfmcli.ParseFlags(flags, args); !ok {
-		return code
-	}
-	if flags.NArg() != 0 {
-		flags.Usage()
-		return 2
-	}
-	now := clock.Real.Now()
-	filter, code, ok := buildFilter(values, runtime.Config, now, stderr)
-	if !ok {
-		return code
-	}
-	path := callmeter.DefaultPath(runtime.Paths.Home)
-	db, err := callmeter.OpenDB(ctx, path)
-	if err != nil {
-		fmt.Fprintf(stderr, "callmeter: cannot open store %s: %v\n", path, err)
-		return 1
-	}
-	defer pfmcli.CloseResource(db, "callmeter: close store", stderr, &exitCode)
-	if _, err := report.PruneExpired(ctx, db, now); err != nil {
-		fmt.Fprintf(stderr, "callmeter: %v\n", err)
-		return 1
-	}
-	logf := func(format string, args ...any) { fmt.Fprintf(stderr, "callmeter backfill: "+format+"\n", args...) }
-	summary, err := backfill.FromTranscripts(ctx, db, filter.ConfigDirs, filter.Since, logf)
-	fmt.Fprint(stdout, summary.String())
-	if err != nil {
-		fmt.Fprintf(stderr, "callmeter: backfill: %v\n", err)
 		return 1
 	}
 	return 0
@@ -241,9 +193,8 @@ func configuredDirs(config pfmconfig.Config, narrow string) ([]string, error) {
 
 // physicalDir is the config dir the store names for dir
 // (callmeter.ProjectsHome): accounts sharing one projects/ are one dir, so
-// backfill reads each chat once and --config-dir with either account shows
-// the same history. A dir not created yet keeps its absolute path (backfill
-// then names it as holding no projects/).
+// --config-dir with either account shows the same history the hook recorded.
+// A dir not created yet keeps its absolute path.
 func physicalDir(dir string) (string, error) {
 	if dir == "" {
 		return "", nil

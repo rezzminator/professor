@@ -493,7 +493,7 @@ func (run *callmeterRun) recordAgent(stopped bool) {
 	}
 	agent.TranscriptPath = callmeter.Ptr(transcript)
 	// The totals are the agent's own transcript summed at its latest stop:
-	// every turn it ran, the same sum backfill reads. They overwrite what an
+	// every turn it ran, read from that transcript. They overwrite what an
 	// earlier stop or the Agent result wrote; the model only fills, so the
 	// Agent result's resolved model stays.
 	var totals, model *callmeter.Agent

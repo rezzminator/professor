@@ -50,7 +50,7 @@ func ConfigDirOf(transcriptPath string) string {
 // transcripts: dir/projects resolved through symlinks, then its parent.
 // Accounts that share one projects/ (a symlink, one file per chat) are one
 // config dir, so a chat keeps one history and one set of metrics whichever
-// account runs it — the hook, backfill and a report's --config-dir all name
+// account runs it — the hook and a report's --config-dir both name
 // the same dir. With no resolvable projects/ it is dir resolved, or dir
 // cleaned when dir is not on disk.
 func ProjectsHome(dir string) string {

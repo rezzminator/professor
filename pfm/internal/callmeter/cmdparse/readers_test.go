@@ -206,8 +206,8 @@ func TestMissingFiles(t *testing.T) {
 	}
 }
 
-// TestTildeAndPlaceholders covers the false missing files a 30-day backfill
-// found: a `~` joined to the cwd as a literal directory (756 rows), and text
+// TestTildeAndPlaceholders covers the false missing files real Claude
+// sessions showed: a `~` joined to the cwd as a literal directory (756 rows), and text
 // the shell never expanded taken as a path — a `$X` inside a Python string,
 // xargs's `{}`, a Python glob pattern.
 func TestTildeAndPlaceholders(t *testing.T) {

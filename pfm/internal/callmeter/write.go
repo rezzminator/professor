@@ -16,7 +16,9 @@ const (
 	// Overwrite replaces the stored value with every provided column (the hook).
 	Overwrite Mode = iota
 	// FillEmpty writes a provided column only where the stored value is NULL
-	// (backfill); a missing row is inserted.
+	// (the hook events that only fill: a call's cwd after PostToolUse, a
+	// call's or sub-agent's start, a sub-agent's totals and its model); a
+	// missing row is inserted.
 	FillEmpty
 )
 

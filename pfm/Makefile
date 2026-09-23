@@ -179,7 +179,12 @@ install: ## Swap in a new build, restart the daemon, sweep obsolete processes, a
 	@# successful install sweeps, so a failure never leaves the host with the
 	@# old processes gone and no working replacement.
 
-host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap it in atomically (previous kept as pfm.prev)
+host-install: ## Build + smoke-test a new pfm beside ~/.local/bin/pfm, then swap it in atomically (previous kept as pfm.prev); refuses a downgrade unless FORCE=1
+	@bash "$(REPO)/pfm/scripts/install-downgrade-guard.sh" "$(BIN)" "$(REPO)"
+	@# A refusal above (exit 1) or an ERROR (exit 2) stops here, before the
+	@# build even starts — $(BIN) is never touched. FORCE=1 in the
+	@# environment (`FORCE=1 make host-install`) passes straight through to
+	@# the guard and prints a FORCED line instead of refusing.
 	@mkdir -p "$$(dirname "$(BIN)")"; \
 	tmp="$$(mktemp "$(BIN).new.XXXXXX")"; \
 	trap 'rm -f "$$tmp"' EXIT; \

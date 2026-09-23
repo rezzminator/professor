@@ -209,14 +209,15 @@ func checkIMDb(body []byte, contentType, id string) error {
 }
 
 // imdbPosts maps the kept review pages to socialPosts under the title, each
-// review once (a cursor page may repeat one the previous page served).
-func imdbPosts(state *imdbPage) []socialPost {
-	var out []socialPost
+// review once (a cursor page may repeat one the previous page served), and
+// how many served reviews were such repeats.
+func imdbPosts(state *imdbPage) (out []socialPost, repeated int) {
 	seen := map[string]bool{}
 	for index := range state.pages {
 		for _, edge := range state.pages[index].Data.Title.Reviews.Edges {
 			review := edge.Node
 			if seen[review.ID] {
+				repeated++
 				continue
 			}
 			seen[review.ID] = true
@@ -248,7 +249,7 @@ func imdbPosts(state *imdbPage) []socialPost {
 			out = append(out, post)
 		}
 	}
-	return out
+	return out, repeated
 }
 
 // extractIMDbReviews renders a title's user reviews from the review pages
@@ -267,6 +268,7 @@ func extractIMDbReviews(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 	if first.TitleText != nil && first.TitleText.Text != "" {
 		title = first.TitleText.Text
 	}
+	replies, repeated := imdbPosts(&state)
 	thread := socialThread{
 		kind:  "imdb reviews",
 		title: title + " — user reviews",
@@ -276,16 +278,27 @@ func extractIMDbReviews(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 		},
 		repliesRead: true,
 		notServed:   "IMDb's GraphQL API ended its review list (no further page) before its stated total",
-		replies:     imdbPosts(&state),
+		replies:     replies,
+	}
+	// served states what the pages held; a review a later page repeated is
+	// named and counted once, so served, loaded and the stated rest reconcile.
+	served := fmt.Sprintf("%d reviews served", state.loaded())
+	if repeated > 0 {
+		served += fmt.Sprintf(", %d repeated across pages and counted once: %d loaded", repeated, len(replies))
 	}
 	last := state.pages[len(state.pages)-1].Data.Title.Reviews.PageInfo
 	switch {
 	case len(state.pages) >= imdbReviewPages && last.HasNextPage:
-		thread.notServed = fmt.Sprintf("the harvester reads the first %d reviews (%d pages of %d from IMDb's "+
-			"GraphQL API); the rest were not requested", imdbReviewPages*imdbPageSize, imdbReviewPages, imdbPageSize)
+		thread.notServed = fmt.Sprintf("the harvester reads %d pages of %d from IMDb's GraphQL API (%s); "+
+			"the rest were not requested", imdbReviewPages, imdbPageSize, served)
 	case last.HasNextPage:
 		// The list names a next page the budget did not load (its note says why).
 		thread.notServed = "a further review page of IMDb's GraphQL API was not loaded"
+		fallthrough
+	default:
+		if repeated > 0 {
+			thread.notServed += " (" + served + ")"
+		}
 	}
 	markdown, partial := thread.render()
 	return siteExtraction{markdown: markdown, partial: partial, apiRecord: true}, true

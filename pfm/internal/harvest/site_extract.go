@@ -65,6 +65,10 @@ type siteExtractor struct {
 	// loaders names the loaders still in a page of this site (loaders.go),
 	// in DOM order; nil when the site has none Go can follow.
 	loaders func(doc *html.Node, source *url.URL) []pageLoader
+	// loaderCap, when set, raises the fetch's loader request cap for this
+	// site past loaderRequestCap (a site whose loaders each answer only a
+	// few items); the pace and the 429 and wall stops hold as they are.
+	loaderCap int
 	// pressLoaders: the browser rung may press this site's load-more buttons.
 	pressLoaders bool
 	// readsSiteAPI: the extractor renders the thread from its site's API, never
@@ -80,6 +84,7 @@ var siteExtractors = []siteExtractor{
 		hosts:        []string{"reddit.com"},
 		extract:      extractRedditThread,
 		loaders:      redditLoaders,
+		loaderCap:    redditLoaderCap,
 		pressLoaders: true,
 	},
 	{
@@ -264,20 +269,22 @@ func (h *Harvester) followForSite(
 		return loaderRemainder{}
 	}
 	for _, extractor := range siteExtractors {
-		if extractor.loaders != nil && extractor.claims(parsed, doc) {
-			before := budget.requests
-			rest := h.followLoaders(ctx, doc, parsed, extractor, budget)
-			if budget.requests > before || budget.stopped != "" {
-				state := fmt.Sprintf("%d followed, %d failed in the fetch", len(budget.followed), len(budget.failures))
-				obs.Logger(ctx).Info("harvest: loaders followed",
-					"kind", extractor.name,
-					"target", logSource(source),
-					"count", budget.requests-before,
-					"state", state,
-					"reason", budget.stopped)
-			}
-			return rest
+		if extractor.loaders == nil || !extractor.claims(parsed, doc) {
+			continue
 		}
+		before := budget.requests
+		budget.limit = max(budget.limit, extractor.loaderCap)
+		rest := h.followLoaders(ctx, doc, parsed, extractor, budget)
+		if budget.requests > before || budget.stopped != "" {
+			state := fmt.Sprintf("%d followed, %d failed in the fetch", len(budget.followed), len(budget.failures))
+			obs.Logger(ctx).Info("harvest: loaders followed",
+				"kind", extractor.name,
+				"target", logSource(source),
+				"count", budget.requests-before,
+				"state", state,
+				"reason", budget.stopped)
+		}
+		return rest
 	}
 	return loaderRemainder{}
 }

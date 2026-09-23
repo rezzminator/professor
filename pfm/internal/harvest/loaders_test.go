@@ -63,33 +63,38 @@ func TestLoaderFollowingStopsAtARateLimit(t *testing.T) {
 	}
 }
 
-// TestLoaderFollowingStopsAtTheCap: a thread with one loader more than
-// the per-page cap. Exactly the cap is requested, the last loader stays a
-// named gap, and the cap is named as the reason.
+// TestLoaderFollowingStopsAtTheCap: a Reddit thread with one loader more
+// than Reddit's own cap, past the default one. Every loader up to Reddit's
+// cap is requested, each paced, the last stays a named gap, and the cap is
+// named as the reason. (The default cap: the Discourse test.)
 func TestLoaderFollowingStopsAtTheCap(t *testing.T) {
 	site := &redditSite{fragments: map[string]string{}}
 	var tree []string
-	for index := range loaderRequestCap + 1 {
+	for index := range redditLoaderCap + 1 {
 		cursor := fmt.Sprintf("cur-%d", index)
 		tree = append(tree, threadComment(fmt.Sprintf("p%d", index), "poster_placeholder", "A top comment.",
 			moreRepliesLoader(cursor, 1)))
 		site.fragments[cursor] = threadComment(fmt.Sprintf("r%d", index), "replier_placeholder", "A reply.")
 	}
-	site.page = loaderThreadPage(2*(loaderRequestCap+1), tree...)
+	site.page = loaderThreadPage(2*(redditLoaderCap+1), tree...)
 	spy := &browserSpyConverter{html: site.page, status: http.StatusOK}
-	h, _ := site.harvester(t, spy, browserOn())
+	h, pacing := site.harvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), loaderThread)
+	if len(pacing.sleeps) != redditLoaderCap || pacing.sleeps[0] != loaderPace {
+		t.Fatalf("paced %d times for %d loader requests, want each paced %v", len(pacing.sleeps),
+			redditLoaderCap, loaderPace)
+	}
 	if result.Error != "" || result.Method != rungDirect || spy.browserCalls != 0 {
 		t.Fatalf("a capped thread was not kept at the direct rung: method=%q rungs=%v browser=%d error=%q",
 			result.Method, result.Rungs, spy.browserCalls, result.Error)
 	}
-	if loaderRequests := len(site.requests) - 1; loaderRequests != loaderRequestCap {
-		t.Fatalf("%d loader requests, want the cap of %d", loaderRequests, loaderRequestCap)
+	if loaderRequests := len(site.requests) - 1; loaderRequests != redditLoaderCap {
+		t.Fatalf("%d loader requests, want the cap of %d", loaderRequests, redditLoaderCap)
 	}
 	for _, want := range []string{
-		fmt.Sprintf("the cap of %d loader requests", loaderRequestCap),
+		fmt.Sprintf("the cap of %d loader requests", redditLoaderCap),
 		`1 behind 1 unexpanded "more replies"`,
-		fmt.Sprintf("%d of %d comments loaded", 2*loaderRequestCap+1, 2*(loaderRequestCap+1)),
+		fmt.Sprintf("%d of %d comments loaded", 2*redditLoaderCap+1, 2*(redditLoaderCap+1)),
 	} {
 		if !strings.Contains(result.Partial, want) {
 			t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)

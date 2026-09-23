@@ -34,6 +34,14 @@ import (
 // loader or link left in the page, the remainder is named as that; while one
 // is left, the page is partial and every gap is named.
 
+// redditLoaderCap raises the loader requests one Reddit fetch may spend past
+// loaderRequestCap: each loader answers one cursor's page of the tree (a few
+// comments; the old-Reddit morechildren batch API asks for a login, the JSON
+// API refuses), so a thread of a few thousand comments needs several hundred.
+// At the kept loaderPace plus Reddit's answer time (about 1.3 s a request)
+// the cap bounds one fetch's following at about 22 minutes.
+const redditLoaderCap = 1000
+
 var redditReplyCountRe = regexp.MustCompile(`(\d[\d,]*)\s+more\s+repl`)
 
 // redditPartialAccept asks a loader for its fragment of the tree alone, as the

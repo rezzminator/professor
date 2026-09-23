@@ -24,7 +24,8 @@ import (
 // then renders the whole tree in thread order. It is deterministic (DOM order,
 // one request at a time, in one cookie session like a reader's), polite
 // (loaderPace between requests; a 429 or a bot wall ends the following and is
-// never retried) and bounded (loaderRequestCap per fetch).
+// never retried) and bounded (loaderRequestCap per fetch, or the claiming
+// extractor's own loaderCap where that is higher).
 // Whatever is still unfollowed stays in the page, where the extractor counts
 // it as a gap, and the budget's note names why. A later conversion of the same
 // fetch (the next rung's page, the browser's render) gets every answer already

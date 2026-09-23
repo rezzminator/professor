@@ -1,0 +1,312 @@
+package harvest
+
+import (
+	"bytes"
+	"fmt"
+	"net/http"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"unicode/utf8"
+)
+
+// The failure classes a public result names beyond the transport kinds in
+// types.go. Each is one line of the public failure table (publicFailureTable).
+const (
+	errorKindUnsupported = "unsupported"
+	errorKindTLS         = "tls"
+	errorKindForbidden   = "forbidden"
+	errorKindRateLimited = "rate_limited"
+	errorKindServer      = "server_error"
+	errorKindEmpty       = "empty"
+	errorKindAppShell    = "app_shell"
+	errorKindNoOpenCopy  = "no_open_copy"
+	errorKindLogin       = "login"
+	errorKindPaywall     = "paywall"
+)
+
+// anotherCopy is the next step every class that a different copy can cure
+// names, in the current tools only; anotherCopyLead opens a sentence with it.
+const (
+	anotherCopyRest = "another copy at another URL (webSearch, when configured) and read it with readPage, " +
+		"or with findWorks and readWork if it is a scholarly work"
+	anotherCopy     = "find " + anotherCopyRest
+	anotherCopyLead = "Find " + anotherCopyRest
+)
+
+// failureStatusKind classifies an HTTP status the result carries without a
+// named kind; "" when the status names no class.
+func failureStatusKind(status int) string {
+	switch {
+	case status == http.StatusNotFound || status == http.StatusGone:
+		return errorKindMissing
+	case status == http.StatusRequestTimeout || status == http.StatusGatewayTimeout:
+		return errorKindTimeout
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return errorKindForbidden
+	case status == http.StatusTooManyRequests:
+		return errorKindRateLimited
+	case status >= 500 && status < 600:
+		return errorKindServer
+	}
+	return ""
+}
+
+// failureTextKind classifies an unnamed failure by the wording the core's
+// own error builders use; "" when the text names no class.
+func failureTextKind(err string) string {
+	switch {
+	case strings.Contains(err, "x509:"), strings.Contains(err, "tls:"), strings.Contains(err, "certificate"):
+		return errorKindTLS
+	case strings.Contains(err, "login wall"), strings.Contains(err, "sign-in"), strings.Contains(err, "sign in"):
+		return errorKindLogin
+	case strings.Contains(err, "open-access"), strings.Contains(err, "oa chain exhausted"):
+		return errorKindNoOpenCopy
+	case strings.Contains(err, "paywall"):
+		return errorKindPaywall
+	case strings.Contains(err, "no usable content"), strings.Contains(err, "no readable content"),
+		strings.Contains(err, "empty page"), strings.Contains(err, "empty body"):
+		return errorKindEmpty
+	case strings.Contains(err, "app shell"):
+		return errorKindAppShell
+	case strings.Contains(err, "is disabled"):
+		return errorKindDisabled
+	}
+	return ""
+}
+
+// challengeVendors are the challenge vendors a failure can name, matched in
+// the lowered error text.
+var challengeVendors = []struct{ marker, name string }{
+	{"cloudflare", "Cloudflare"},
+	{"datadome", "DataDome"},
+	{"perimeterx", "PerimeterX"},
+	{"akamai", "Akamai"},
+	{"incapsula", "Imperva"},
+	{"imperva", "Imperva"},
+	{"kasada", "Kasada"},
+	{"aws waf", "AWS WAF"},
+	{"captcha", "a CAPTCHA"},
+}
+
+// rungsRunNote names the rungs that were tried, by public class: a provider or
+// mirror name never reaches a caller.
+func rungsRunNote(rungs []string) string {
+	public := make([]string, 0, len(rungs))
+	for _, rung := range rungs {
+		name := rung
+		if !strings.HasPrefix(rung, "oa:") {
+			name = PublicMethod(rung)
+		}
+		if len(public) > 0 && public[len(public)-1] == name {
+			continue
+		}
+		public = append(public, name)
+	}
+	if len(public) == 0 {
+		return ""
+	}
+	return " Rungs tried: " + rungsPhrase(public) + "."
+}
+
+var (
+	failureURLPattern  = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://\S+`)
+	failurePathPattern = regexp.MustCompile(`(^|[\s"'=(])(/[^\s"')]+)`)
+	failureIPPattern   = regexp.MustCompile(`\b\d{1,3}(\.\d{1,3}){3}(:\d+)?\b`)
+)
+
+// redactFailureText keeps an unclassified error's own wording for the caller
+// while removing what may identify a provider or a private file: URLs,
+// absolute paths and addresses.
+func redactFailureText(text string) string {
+	text = failureURLPattern.ReplaceAllString(text, "<url>")
+	text = failurePathPattern.ReplaceAllString(text, "$1<path>")
+	text = failureIPPattern.ReplaceAllString(text, "<address>")
+	text = strings.Join(strings.Fields(text), " ")
+	if runes := []rune(text); len(runes) > 300 {
+		text = string(runes[:300]) + "…"
+	}
+	return strings.TrimRight(text, ". ")
+}
+
+func isLocalFailureSource(source string) bool {
+	return strings.HasPrefix(strings.ToLower(source), "file://") || filepath.IsAbs(source)
+}
+
+// publicFailureTable is the public failure table: the named cause, the rungs that
+// ran, and what the caller can do. Result.Source and Result.Error are never
+// quoted except through redactFailureText for an unclassified error.
+func publicFailureTable(result Result, kind string) string {
+	rungs := rungsRunNote(result.Rungs)
+	status := result.HTTPStatus
+	switch kind {
+	case errorKindTimeout:
+		return "The source timed out: it did not answer in time." + rungs + " Retry later; if it keeps timing out, " + anotherCopy + "."
+	case errorKindDNS:
+		return "The source's host name does not resolve (DNS lookup failed: no such host)." + rungs +
+			" Check the URL for a typo; if it is right, the site is down or gone — " + anotherCopy + "."
+	case errorKindTLS:
+		return "The secure connection to the source failed (TLS handshake or certificate error)." + rungs +
+			" The harvester never skips certificate checks; " + anotherCopy + "."
+	case errorKindConnect:
+		return "The connection failed: the source refused, reset or could not be reached." + rungs + " Retry later, or " + anotherCopy + "."
+	case errorKindChallenge:
+		vendor := ""
+		low := strings.ToLower(result.Error + " " + result.ErrorKind)
+		for _, candidate := range challengeVendors {
+			if strings.Contains(low, candidate.marker) {
+				vendor = " (" + candidate.name + ")"
+				break
+			}
+		}
+		return "The source is behind an access challenge" + vendor + "; the harvester never solves a challenge." + rungs +
+			" Retrying will meet the same wall: " + anotherCopy + "."
+	case errorKindLogin:
+		return "The source shows only a sign-in wall; sign-in is required and the harvester never signs in." + rungs +
+			" Read a public copy instead: " + anotherCopy + "."
+	case errorKindPaywall:
+		return "The source is behind a paywall; the harvester never signs in or pays." + rungs + " " + anotherCopyLead + "."
+	case errorKindNoOpenCopy:
+		return "No open copy of this work could be retrieved: every open-access source and mirror tried failed, " +
+			"so the work is likely paywalled, and the harvester never signs in." + rungs +
+			" Search for an author preprint with findWorks, or read the publisher's landing page with readPage."
+	case errorKindForbidden:
+		return fmt.Sprintf("The source refused the harvester (HTTP %d %s): a bot block or an access rule, "+
+			"which the harvester cannot tell apart, and it never signs in.%s %s.", status, http.StatusText(status), rungs, anotherCopyLead)
+	case errorKindRateLimited:
+		return "The source is rate-limiting the harvester (HTTP 429 Too Many Requests)." + rungs + " Retry later, or " + anotherCopy + "."
+	case errorKindServer:
+		return fmt.Sprintf("The source answered a server error (HTTP %d %s).%s Retry later, or %s.",
+			status, http.StatusText(status), rungs, anotherCopy)
+	case errorKindMissing:
+		return missingMessage(result, rungs)
+	case errorKindOversized:
+		return "The document is larger than the harvester's page limit." + rungs + " Save the file with download instead, or choose a smaller copy."
+	case errorKindUnsupported:
+		if strings.HasPrefix(result.Error, unsupportedFormatPrefix) {
+			return result.Error
+		}
+		return unsupportedFormatText(safeFormatLabel(result.Kind), "")
+	case errorKindEmpty:
+		return "The source was retrieved but yielded no readable content (empty after extraction)." + rungs + " " + anotherCopyLead + "."
+	case errorKindConversion:
+		return "The document was retrieved but could not be converted to text (converter or OCR error)." + rungs +
+			" Save the file with download, or " + anotherCopy + "."
+	case errorKindAppShell:
+		return "The page is a JavaScript app shell: no rung, a real browser included, rendered this route's content." + rungs + " " + anotherCopyLead + "."
+	case errorKindDisabled:
+		return "The provider this read needs is disabled on this harvester." + rungs + " Choose another record with findWorks and read it with readWork, or read a landing page with readPage."
+	}
+	return fmt.Sprintf(
+		"Retrieval failed for a reason the harvester could not classify: %s.%s Retry once; if it repeats, %s.",
+		redactFailureText(result.Error),
+		rungs,
+		anotherCopy,
+	)
+}
+
+func missingMessage(result Result, rungs string) string {
+	status := result.HTTPStatus
+	switch {
+	case isLocalFailureSource(result.Source):
+		return "The local file does not exist at that path, or cannot be read. Check the path; parseLocalDocuments reads existing files inside the directories this harvester may read."
+	case status == http.StatusGone:
+		return "The source answered HTTP 410 Gone: the page was removed." + rungs + " " + anotherCopyLead + "."
+	case status == http.StatusNotFound:
+		return "The source answered HTTP 404 Not Found to every rung that ran: the page was not found, or the site serves 404 to automated clients." + rungs +
+			" The harvester cannot tell a missing page from a refusal served as 404." +
+			" Check the URL; if it is right, " + anotherCopy + "."
+	}
+	return "The requested document was not found." + rungs + " Choose a record with findWorks and read it with readWork, or check the URL."
+}
+
+// unsupportedFormatPrefix starts every unsupported-format failure the core
+// builds itself; the text carries no path, so the public result repeats it.
+const unsupportedFormatPrefix = "Unsupported format: a ."
+
+func unsupportedFormatText(format, container string) string {
+	detected := ""
+	if container != "" {
+		detected = " (detected: " + container + ")"
+	}
+	return unsupportedFormatPrefix + format + " file" + detected + ", which the harvester does not read yet. " +
+		"The file exists at its path, unchanged. parseLocalDocuments reads PDF, DOCX, XLSX, PPTX, EPUB, HTML, CSV, JSON, Markdown and plain text: " +
+		"convert or extract it to one of those and read that copy."
+}
+
+var formatLabelPattern = regexp.MustCompile(`^[a-z0-9]{1,12}$`)
+
+func safeFormatLabel(label string) string {
+	label = strings.ToLower(strings.TrimPrefix(label, "."))
+	if !formatLabelPattern.MatchString(label) {
+		return "binary"
+	}
+	return label
+}
+
+// unsupportedLocalFormat reports a local body no converter reads: an archive
+// container (a zip-based format the classifier did not recognise included)
+// or binary bytes classified as text. It names the extension and the detected
+// container.
+func unsupportedLocalFormat(path, kind string, body []byte) (Result, bool) {
+	container := ""
+	switch {
+	case bytes.HasPrefix(body, []byte("PK\x03\x04")):
+		container = "zip container"
+	case bytes.HasPrefix(body, []byte("bplist")):
+		container = "binary property list"
+	case bytes.HasPrefix(body, []byte("7z\xbc\xaf\x27\x1c")):
+		container = "7z archive"
+	case bytes.HasPrefix(body, []byte("Rar!")):
+		container = "rar archive"
+	}
+	switch strings.ToLower(kind) {
+	case kindZIP, kindTAR, kind7Z, kindRAR, kindArchive:
+		if container == "" {
+			container = strings.ToLower(kind) + " archive"
+		}
+	case kindTXT, "":
+		head := body[:min(len(body), 8192)]
+		if bytes.IndexByte(head, 0) < 0 && utf8.Valid(head) {
+			return Result{}, false
+		}
+		if container == "" {
+			container = "binary data"
+		}
+	default:
+		return Result{}, false
+	}
+	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	if !formatLabelPattern.MatchString(format) {
+		format = strings.Fields(container)[0]
+	}
+	return Result{Kind: format, ErrorKind: errorKindUnsupported, Error: unsupportedFormatText(format, container)}, true
+}
+
+// browserRanNote is the ladder's sentence for a browser rung that ran and did
+// not return the page: a wall only when a challenge was seen, the status
+// otherwise — never a 404 described as a wall.
+func browserRanNote(challenge bool, status int) string {
+	switch {
+	case challenge:
+		return " The real-browser rung (Patchright + system Chrome) DID run against this wall and still could not pass it."
+	case status == http.StatusNotFound || status == http.StatusGone:
+		return fmt.Sprintf(" The real-browser rung (Patchright + system Chrome) DID run and got the same HTTP %d: "+
+			"the harvester cannot tell a page that is really missing from a refusal the site serves as %d to automated clients.", status, status)
+	case status >= 400:
+		return fmt.Sprintf(
+			" The real-browser rung (Patchright + system Chrome) DID run and got the same HTTP %d.",
+			status,
+		)
+	}
+	return " The real-browser rung (Patchright + system Chrome) DID run and still returned no usable page."
+}
+
+// browserRefusedNote is the ladder's sentence for a browser rung its SSRF
+// guard stopped: a host that does not resolve is not a private address.
+func browserRefusedNote(kind string) string {
+	if kind == errorKindDNS {
+		return " The real-browser rung did not run: the host name does not resolve, so there is no address to load."
+	}
+	return " The real-browser rung did not run because this server's SSRF guard refused the address (private or internal network). That is policy working as designed, not an outage."
+}

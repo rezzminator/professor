@@ -43,7 +43,7 @@ func TestSearchFailureRendersEachBackend(t *testing.T) {
 	text := renderSearchFailure(
 		errors.Join(errors.New("searxng http://127.0.0.1:8888: HTTP 502"), errors.New("brave: HTTP 401")),
 	)
-	if !strings.Contains(text, "Web search failed") || !strings.Contains(text, "Retrieval failed") {
+	if !strings.Contains(text, "Web search failed") || !strings.Contains(text, "could not classify") {
 		t.Fatalf("search failure lost safe public message: %q", text)
 	}
 	for _, secret := range []string{"searxng", "127.0.0.1", "HTTP 502", "brave: HTTP 401", "harvester.config.json"} {

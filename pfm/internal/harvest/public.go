@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -491,7 +490,10 @@ func publicErrorKind(result Result) string {
 		return errorKindOversized
 	case errorKindCancelled, "canceled":
 		return errorKindCancelled
-	case errorKindInvalid, errorKindWrongKind, "unsupported":
+	case errorKindUnsupported, errorKindTLS, errorKindForbidden, errorKindRateLimited, errorKindServer,
+		errorKindEmpty, errorKindAppShell, errorKindNoOpenCopy, errorKindLogin, errorKindPaywall, errorKindDisabled:
+		return low
+	case errorKindInvalid, errorKindWrongKind:
 		if low == errorKindWrongKind {
 			return errorKindWrongKind
 		}
@@ -504,16 +506,13 @@ func publicErrorKind(result Result) string {
 	if result.Challenge {
 		return errorKindChallenge
 	}
-	if result.HTTPStatus == 404 || result.HTTPStatus == 410 {
-		return errorKindMissing
-	}
-	if result.HTTPStatus == 408 || result.HTTPStatus == 504 {
-		return errorKindTimeout
-	}
-	if result.HTTPStatus == 401 || result.HTTPStatus == 403 {
-		return errorKindRefused
+	if kind := failureStatusKind(result.HTTPStatus); kind != "" {
+		return kind
 	}
 	err := strings.ToLower(result.Error)
+	if kind := failureTextKind(err); kind != "" {
+		return kind
+	}
 	switch {
 	// The package's own policy refusals (net.go): named as refusals, never as
 	// a failure the caller is told to retry.
@@ -556,34 +555,17 @@ func publicErrorKind(result Result) string {
 // does not include Result.Source or Result.Error: both can contain a provider
 // URL, private path, or a provider's internal wording.
 func PublicFailureMessage(result Result) string {
-	switch publicErrorKind(result) {
-	case errorKindTimeout:
-		return "The source timed out. Retry later or choose another work."
-	case errorKindDNS:
-		return "The source could not be resolved. Retry later or choose another work."
-	case errorKindConnect:
-		return "The connection failed. Retry later or choose another work."
-	case errorKindChallenge:
-		return "The source is protected by an access challenge. Choose another copy."
+	kind := publicErrorKind(result)
+	switch kind {
 	case errorKindRefused:
-		return "The request was refused by access policy. Use a public URL or choose another copy."
-	case errorKindMissing:
-		if result.HTTPStatus == http.StatusNotFound || result.HTTPStatus == http.StatusGone {
-			return fmt.Sprintf(
-				"The requested document was not found: the source answered HTTP %d %s. Check the URL, or use findWorks to choose another copy.",
-				result.HTTPStatus,
-				http.StatusText(result.HTTPStatus),
-			)
+		if isLocalFailureSource(result.Source) {
+			return "This local path is outside the directories this harvester may read. parseLocalDocuments reads only files inside its permitted roots; move or copy the file there."
 		}
-		return "The requested document was not found. Use findWorks, select a result, and read it with readWork."
-	case errorKindConversion:
-		return "The document could not be converted or OCR'd. Try another copy."
-	case errorKindOversized:
-		return "The document is too large to process. Choose a smaller copy."
+		return "The request was refused by access policy: the harvester reads only public internet addresses. Use the resource's public URL, or " + anotherCopy + "."
 	case errorKindCancelled:
-		return "The request was cancelled."
+		return "The request was cancelled before it finished. Send it again."
 	case errorKindInvalid:
-		return "The input is invalid. Use findWorks, select a result, and read it with readWork."
+		return "The input is invalid. Give readPage a web URL, parseLocalDocuments a local path, or readWork a DOI, arXiv id, PMID, PMCID, ISBN or a findWorks handle."
 	case "ambiguous":
 		return "The title is ambiguous. Use findWorks, select a result, and read it with readWork."
 	case errorKindWrongKind:
@@ -599,9 +581,8 @@ func PublicFailureMessage(result Result) string {
 			"Harvester cannot publish its stored result: the %q step refuses it, and the failure repeats on every retry. Choose another copy.",
 			step,
 		)
-	default:
-		return "Retrieval failed. Retry or choose another work."
 	}
+	return publicFailureTable(result, kind)
 }
 
 // JSONResult is one `pfm harvest --json` object: the public result with

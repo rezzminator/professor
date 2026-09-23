@@ -64,5 +64,8 @@ func renderSearchFailure(err error) string {
 	if errors.As(err, &backendErr) {
 		return "Web search failed: " + backendErr.SafeMessage()
 	}
-	return "Web search failed. " + harvest.PublicFailureMessage(harvest.Result{Error: err.Error()})
+	// An unclassified backend error keeps its text in the log only: it can
+	// carry a backend URL, and this surface may serve a remote client.
+	return "Web search failed: the configured search backends failed for a reason the harvester could not classify " +
+		"(the details are in its log). Retry later; readPage, findWorks and readWork do not depend on web search."
 }

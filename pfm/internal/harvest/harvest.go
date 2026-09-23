@@ -738,7 +738,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		case !h.settings.browser:
 			message += " No real-browser bypass was attempted: this server's Patchright + system-Chrome rung is DISABLED (opt-in) — set fetch.browser=true in harvester.config.json to enable it."
 		case browserPolicyRefused:
-			message += " The real-browser rung did not run because this server's SSRF guard refused the address (private or internal network). That is policy working as designed, not an outage."
+			message += browserRefusedNote(lastErrorKind)
 		case converterOutage:
 			message += " The real-browser rung DID run and got real content past the wall, but the conversion step then failed on this server — a tool outage, not proof of IP reputation: " + SearchHint(
 				h.settings.searchAvailable,
@@ -755,7 +755,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		case browserShellRender:
 			message += " The real-browser rung DID run and rendered only the shell — the app's JavaScript produced no route content in a real browser either."
 		case browserRan:
-			message += " The real-browser rung (Patchright + system Chrome) DID run against this wall and still could not pass it."
+			message += browserRanNote(lastChallenge, lastStatus)
 		}
 	}
 	if lastContentChars == 0 && len(lastPage) > 0 {

@@ -137,5 +137,5 @@ func withRungs(message string, rungs []string) string {
 	if len(rungs) <= 1 {
 		return message
 	}
-	return message + " Rungs tried: " + rungsPhrase(rungs) + " — re-fetching will not help."
+	return message + " Rungs tried: " + rungsPhrase(rungs) + "."
 }

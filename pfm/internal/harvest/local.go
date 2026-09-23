@@ -156,6 +156,10 @@ func (h *Harvester) fetchLocal(ctx context.Context, source string, options Fetch
 		return Result{Source: source, Error: fmt.Sprintf("read local file %s: %v", path, err)}
 	}
 	kind := classifyFetchedKind(path, "", body)
+	if unsupported, ok := unsupportedLocalFormat(path, kind, body); ok {
+		unsupported.Source = source
+		return unsupported
+	}
 	if kindFromName(path) == kindPDF && !strings.HasPrefix(string(body), "%PDF-") {
 		return Result{
 			Source: source,

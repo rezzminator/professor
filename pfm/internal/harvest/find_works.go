@@ -112,11 +112,21 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 		"bronze":     true,
 		accessPublic: true,
 	}
+	// Equal title matches rank an open record first, then the earliest dated
+	// one: a re-registration, a reprint or a repository copy of a work carries
+	// the original's title under a later date, and listing order is provider
+	// order.
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Match != out[j].Match {
 			return out[i].Match > out[j].Match
 		}
-		return free[strings.ToLower(out[i].Free)] && !free[strings.ToLower(out[j].Free)]
+		if fi, fj := free[strings.ToLower(out[i].Free)], free[strings.ToLower(out[j].Free)]; fi != fj {
+			return fi
+		}
+		if yi, yj := out[i].Year, out[j].Year; yi != yj {
+			return yj == 0 || (yi != 0 && yi < yj) // an undated record after the dated ones
+		}
+		return false
 	})
 	if len(out) > limit {
 		out = out[:limit]
@@ -225,18 +235,28 @@ func bestScholarlyLocationHandle(locations []scholarlyLocation) string {
 	return ""
 }
 
+// findArxiv ranks an arXiv hit by its own title and dates it by its
+// identifier (YYMM.NNNNN): a flat discount and the query as its title ranked
+// the original below any later record carrying the same title.
 func (r *Resolver) findArxiv(ctx context.Context, client *http.Client, query string, _ int) []Candidate {
 	candidates := r.arxivByTitle(ctx, client, query)
 	out := make([]Candidate, 0, len(candidates))
 	for _, candidate := range candidates {
 		candidate.Kind = kindPaper
-		candidate.Title = query
+		if candidate.Title == "" {
+			candidate.Title = query
+		}
 		candidate.Free = accessGreen
-		candidate.Match = .9
+		candidate.Match = roundMatch(titleMatch(query, candidate.Title))
+		if id := arxivNewStyleID.FindStringSubmatch(candidate.URL); id != nil {
+			candidate.Year = 2000 + int(id[1][0]-'0')*10 + int(id[1][1]-'0')
+		}
 		out = append(out, candidate)
 	}
 	return out
 }
+
+var arxivNewStyleID = regexp.MustCompile(`/(\d{2})(0[1-9]|1[012])\.\d{4,5}(v\d+)?$`)
 
 func formatAuthors(names []string) string {
 	filtered := names[:0]

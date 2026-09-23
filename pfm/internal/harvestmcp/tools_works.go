@@ -18,7 +18,7 @@ const (
 	workKindAny          = "any"
 	workKindPaper        = "paper"
 	workKindBook         = "book"
-	findWorksDescription = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call findWorks{query:"Attention Is All You Need"}; kind:"paper" or "book" narrows it. Returns ranked candidates (title, authors, year, kind, identifiers, open access) each with a handle — pass that value unchanged to readWork. ` + "`sources`" + ` names each discovery source's status (answered, partial, failed): empty candidates with every source answered = nothing matched (give the exact title); a failed source is named, never read as an empty answer; a tool error = every source failed, retry later or read an exact identifier with readWork.`
+	findWorksDescription = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call findWorks{query:"Attention Is All You Need"}; kind:"paper" or "book" narrows it. Returns ranked candidates (title, authors, year, kind, identifiers, open access) each with a handle — pass that value unchanged to readWork. ` + "`sources`" + ` names each discovery source's status (answered, partial, failed, timed_out = still running at the 20 s deadline and cancelled): empty candidates with every source answered = nothing matched (give the exact title); a failed source is named, never read as an empty answer; a tool error = every source failed, retry later or read an exact identifier with readWork.`
 )
 
 // FindInput is findWorks' input.
@@ -43,7 +43,7 @@ type WorkCandidate struct {
 // that failed is named apart from one that answered with nothing.
 type FindSource struct {
 	Source  string `json:"source"`
-	Status  string `json:"status" jsonschema:"answered, partial (some of its requests failed) or failed."`
+	Status  string `json:"status" jsonschema:"answered, partial (some of its requests failed), failed, or timed_out (still running at the findWorks deadline, cancelled)."`
 	Results int    `json:"results"`
 	Error   string `json:"error,omitempty"`
 }

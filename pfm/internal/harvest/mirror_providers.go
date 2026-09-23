@@ -627,7 +627,7 @@ func (r *Resolver) ipfsCatalogSearch(ctx context.Context, query string, limit in
 	providerCtx, cancel := providerContext(ctx)
 	defer cancel()
 	endpoint := base + "/search?q=" + url.QueryEscape(query)
-	response, err := r.providerHarvester().providerGet(providerCtx, endpoint, nil)
+	response, err := r.providerHarvester().providerSearch(providerCtx, endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -652,7 +652,7 @@ func (r *Resolver) md5CatalogSearch(ctx context.Context, query string, limit int
 	var lastErr error
 	cleanMiss := false
 	for _, endpoint := range endpoints {
-		response, err := r.providerHarvester().providerGet(providerCtx, endpoint, nil)
+		response, err := r.providerHarvester().providerSearch(providerCtx, endpoint)
 		if err != nil {
 			lastErr = err
 			continue

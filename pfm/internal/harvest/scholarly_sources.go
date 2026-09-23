@@ -107,7 +107,14 @@ func (h *Harvester) providerGet(
 	rawURL string,
 	headers http.Header,
 ) (providerResponse, error) {
-	return h.providerFetch(ctx, rawURL, headers, providerHTMLMaxBody, false)
+	return h.providerFetch(ctx, rawURL, headers, providerHTMLMaxBody, false, false)
+}
+
+// providerSearch fetches a provider SEARCH page for findWorks: the ladder of
+// providerGet without the browser rungs, so a challenge page fails the search
+// as soon as it arrives.
+func (h *Harvester) providerSearch(ctx context.Context, rawURL string) (providerResponse, error) {
+	return h.providerFetch(ctx, rawURL, nil, providerHTMLMaxBody, false, true)
 }
 
 // providerDownload fetches a provider ARTIFACT (the PDF/EPUB bytes). It climbs
@@ -119,7 +126,7 @@ func (h *Harvester) providerDownload(
 	headers http.Header,
 	maxBytes int64,
 ) (providerResponse, error) {
-	return h.providerFetch(ctx, rawURL, headers, maxBytes, true)
+	return h.providerFetch(ctx, rawURL, headers, maxBytes, true, false)
 }
 
 func (h *Harvester) providerFetch(
@@ -128,6 +135,7 @@ func (h *Harvester) providerFetch(
 	headers http.Header,
 	maxBytes int64,
 	binary bool,
+	noBrowser bool,
 ) (providerResponse, error) {
 	jar, _ := ctx.Value(providerCookieJarKey{}).(http.CookieJar)
 	if jar == nil {
@@ -142,13 +150,14 @@ func (h *Harvester) providerFetch(
 		want = WantFile // the browser rungs render HTML and never run for a file
 	}
 	request := retrieveRequest{target: rawURL, want: want, policy: PolicyGateway, gateway: gatewayRequest{
-		url:     rawURL,
-		client:  h.binaryDirectOrClient(),
-		ua:      h.userAgent,
-		headers: headers,
-		max:     maxBytes,
-		jar:     jar,
-		policy:  gatewayEscalate,
+		url:       rawURL,
+		client:    h.binaryDirectOrClient(),
+		ua:        h.userAgent,
+		headers:   headers,
+		max:       maxBytes,
+		jar:       jar,
+		policy:    gatewayEscalate,
+		noBrowser: noBrowser,
 	}}
 	response, err := h.retrieveWith(ctx, request)
 	if err != nil {

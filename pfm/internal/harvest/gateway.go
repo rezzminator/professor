@@ -82,6 +82,10 @@ type gatewayRequest struct {
 	// binary marks a request whose BYTES are the artifact (a PDF, an EPUB).
 	// The browser rungs return rendered HTML and can never satisfy one.
 	binary bool
+	// noBrowser keeps a discovery search off the browser rungs: a search answers
+	// inside the findWorks deadline, and a walled search page is reported as a
+	// challenge the moment its body arrives, not after a browser waits on it.
+	noBrowser bool
 	// trustedOrigin marks a URL the OPERATOR configured (a self-hosted SearXNG,
 	// which is legitimately allowed to be on loopback). The generic SSRF
 	// assertion refuses private hosts, which is right for attacker-supplied
@@ -325,6 +329,9 @@ func (h *Harvester) gatewayBrowser(
 ) (gatewayResponse, bool) {
 	if req.binary {
 		return gatewayResponse{}, false // the rung renders HTML; it has no bytes to give.
+	}
+	if req.noBrowser {
+		return gatewayResponse{}, false
 	}
 	if !h.settings.browser {
 		return gatewayResponse{}, false // opt-in (fetch.browser); off means never launched.

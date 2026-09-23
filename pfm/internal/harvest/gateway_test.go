@@ -261,3 +261,34 @@ func TestGatewayBothRungsFailingReportsBothErrors(t *testing.T) {
 		}
 	}
 }
+
+// TestProviderSearchFailsAtTheChallengeBody: a findWorks search page behind a
+// wall is reported the moment the walled body arrives. The browser rungs are
+// never spent on it — they held the call about 60 s and still met the wall.
+func TestProviderSearchFailsAtTheChallengeBody(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	withPublicDNSForProviderTest(t)
+	walled := func(r *http.Request) (*http.Response, error) {
+		return response(r, http.StatusForbidden, "text/html", gatewayWallBody), nil
+	}
+	browser := &browserConverter{reply: func(bool) (string, int, error) {
+		return "<html><body>a browser render</body></html>", http.StatusOK, nil
+	}}
+	h := mustNew(t, Options{
+		CacheDir:    t.TempDir(),
+		Client:      &http.Client{Transport: roundTripFunc(walled)},
+		Chrome:      &http.Client{Transport: roundTripFunc(walled)},
+		Converter:   browser,
+		BrowserRung: enabled(),
+	})
+	got, err := h.providerSearch(context.Background(), "https://ipfs-catalog.test/search?q=deep")
+	if err != nil {
+		t.Fatalf("providerSearch error = %v, want the walled answer", err)
+	}
+	if got.status != http.StatusForbidden || !providerChallenge(got.body, got.status) {
+		t.Fatalf("providerSearch = %d %q, want the walled 403 body", got.status, got.body)
+	}
+	if flags := browser.headlessFlags(); len(flags) != 0 {
+		t.Fatalf("browser calls = %v, want none for a discovery search", flags)
+	}
+}

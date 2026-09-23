@@ -35,7 +35,7 @@ func (r *Resolver) googleScholar(ctx context.Context, query string, limit int) (
 	providerCtx, cancel := providerContext(ctx)
 	defer cancel()
 	endpoint := base + "/scholar?hl=en&q=" + url.QueryEscape(`"`+query+`"`)
-	response, err := r.providerHarvester().providerGet(providerCtx, endpoint, nil)
+	response, err := r.providerHarvester().providerSearch(providerCtx, endpoint)
 	if err != nil {
 		return nil, err
 	}

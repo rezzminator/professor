@@ -309,7 +309,10 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	return sortCandidates(out), nil
 }
 
-func (r *Resolver) findBooks(ctx context.Context, client *http.Client, query string, limit int) []Candidate {
+// findOpenLibrary and findGutendex are two findWorks sources, not one: Gutendex
+// often answers in 25-45 s, and sharing one source with it cost Open Library's
+// one-second answer at every findWorks deadline.
+func (r *Resolver) findOpenLibrary(ctx context.Context, client *http.Client, query string, limit int) []Candidate {
 	var openLibrary struct {
 		Docs []struct {
 			Title   string   `json:"title"`
@@ -345,6 +348,11 @@ func (r *Resolver) findBooks(ctx context.Context, client *http.Client, query str
 			)
 		}
 	}
+	return out
+}
+
+func (r *Resolver) findGutendex(ctx context.Context, client *http.Client, query string, _ int) []Candidate {
+	out := []Candidate{}
 	var gutendex struct {
 		Results []struct {
 			Title     string `json:"title"`

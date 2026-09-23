@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // The status a discovery source ends a FindWorks call with. A source that
@@ -19,6 +20,9 @@ const (
 	SourceAnswered = "answered"
 	SourcePartial  = "partial"
 	SourceFailed   = "failed"
+	// SourceTimedOut: the source was still running when the FindWorks
+	// deadline came; it was cancelled, and its Error names the time it had.
+	SourceTimedOut = "timed_out"
 )
 
 // WorkSource is one discovery source's answer to a FindWorks call: its public
@@ -161,4 +165,59 @@ func sourceStatus(name string, results int, failure string) WorkSource {
 // errNoSourceAnswered is FindWorksReport's error when every source failed.
 func errNoSourceAnswered(found WorksFound) error {
 	return fmt.Errorf("every discovery source failed: %s", FailedText(found.Failed()))
+}
+
+// workSearch is one discovery source of a FindWorks call: its public name and
+// a search that answers its candidates and, when a request failed, what failed.
+type workSearch struct {
+	name string
+	run  func(context.Context) ([]Candidate, string)
+}
+
+// gatherWorks runs every search at once and waits until each answered or ctx
+// ended. A search still running then is named timed_out with the deadline it
+// was given (or cancelled, when the caller cancelled), never dropped; it is
+// left to see ctx's cancellation and exit on its own.
+func gatherWorks(ctx context.Context, searches []workSearch, deadline time.Duration) ([][]Candidate, []WorkSource) {
+	type answer struct {
+		index      int
+		candidates []Candidate
+		source     WorkSource
+	}
+	answers := make(chan answer, len(searches)) // a late answer never blocks its goroutine
+	for index, search := range searches {
+		go func() {
+			// A recovered panic (F1) fails its own source by name: one bad
+			// provider response must not take the other sources, let alone
+			// the daemon calling FindWorks, down with it.
+			defer recoverItem(func(e error) {
+				answers <- answer{index, nil, sourceStatus(
+					search.name, 0, "its answer could not be processed: "+redactFailureText(e.Error()),
+				)}
+			})
+			candidates, failure := search.run(ctx)
+			answers <- answer{index, candidates, sourceStatus(search.name, len(candidates), failure)}
+		}()
+	}
+	parts := make([][]Candidate, len(searches))
+	sources := make([]WorkSource, len(searches))
+	answered := make([]bool, len(searches))
+	for range searches {
+		select {
+		case got := <-answers:
+			parts[got.index], sources[got.index], answered[got.index] = got.candidates, got.source, true
+		case <-ctx.Done():
+			failure := fmt.Sprintf("no answer within the %s findWorks deadline; cancelled", deadline)
+			if errors.Is(ctx.Err(), context.Canceled) {
+				failure = "cancelled by the caller before it answered"
+			}
+			for index, search := range searches {
+				if !answered[index] {
+					sources[index] = WorkSource{Name: search.name, Status: SourceTimedOut, Error: failure}
+				}
+			}
+			return parts, sources
+		}
+	}
+	return parts, sources
 }

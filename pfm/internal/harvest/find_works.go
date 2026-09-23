@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
+	"time"
 )
 
 // FindWorks is FindWorksReport's ranked candidates. With no candidate and a
@@ -31,6 +31,22 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 // source's status beside the ranked candidates; it is an error only when no
 // source answered.
 func (r *Resolver) FindWorksReport(ctx context.Context, query string, limit int) (WorksFound, error) {
+	return r.findWorksWithin(ctx, query, limit, findWorksTimeout)
+}
+
+// findWorksTimeout is the whole findWorks call's deadline: an MCP client gives a
+// tool call about 60 s, and the sources that run long are the ones that fail.
+const findWorksTimeout = 20 * time.Second
+
+// findWorksWithin is FindWorksReport under a deadline: every source runs at
+// once, and when the deadline comes the call ranks what answered; a source
+// still running is cancelled and named timed_out with the time it was given.
+func (r *Resolver) findWorksWithin(
+	ctx context.Context,
+	query string,
+	limit int,
+	deadline time.Duration,
+) (WorksFound, error) {
 	query = strings.TrimSpace(strings.Trim(query, "\"'"))
 	if query == "" {
 		return WorksFound{Candidates: []Candidate{}, Sources: []WorkSource{}}, nil
@@ -38,9 +54,11 @@ func (r *Resolver) FindWorksReport(ctx context.Context, query string, limit int)
 	if limit <= 0 {
 		limit = 8
 	}
-	ctx = resolverContext(ctx, r)
+	ctx, cancel := context.WithTimeout(resolverContext(ctx, r), deadline)
+	defer cancel()
 	client := r.client()
-	gatherers := []struct {
+	searches := []workSearch{}
+	for _, gatherer := range []struct {
 		name   string
 		hosts  int
 		gather func(context.Context, *http.Client, string, int) []Candidate
@@ -49,31 +67,15 @@ func (r *Resolver) FindWorksReport(ctx context.Context, query string, limit int)
 		{"arXiv", 1, r.findArxiv},
 		{"Crossref", 1, r.findCrossref},
 		{"Semantic Scholar", 1, r.findSemanticScholar},
-		{"Open Library and Gutendex", 2, r.findBooks},
-	}
-	parts := make([][]Candidate, len(gatherers))
-	sources := make([]WorkSource, len(gatherers))
-	var wait sync.WaitGroup
-	for index, gatherer := range gatherers {
-		wait.Add(1)
-		go func(index int) {
-			defer wait.Done()
+		{"Open Library", 1, r.findOpenLibrary},
+		{"Gutendex", 1, r.findGutendex},
+	} {
+		searches = append(searches, workSearch{gatherer.name, func(ctx context.Context) ([]Candidate, string) {
 			probe, probed := newSourceProbe(client)
-			// A recovered panic (F1) fails its own source by name: one bad
-			// provider response must not take FindWorks' other gatherers, let
-			// alone the daemon calling it, down with it.
-			defer recoverItem(func(e error) {
-				sources[index] = sourceStatus(
-					gatherer.name,
-					0,
-					"its answer could not be processed: "+redactFailureText(e.Error()),
-				)
-			})
-			parts[index] = gatherer.gather(ctx, probed, query, limit)
-			sources[index] = sourceStatus(gatherer.name, len(parts[index]), probe.failure(gatherer.hosts))
-		}(index)
+			candidates := gatherer.gather(ctx, probed, query, limit)
+			return candidates, probe.failure(gatherer.hosts)
+		}})
 	}
-	wait.Wait()
 	for _, optional := range []struct {
 		name, label string
 		enabled     bool
@@ -86,15 +88,16 @@ func (r *Resolver) FindWorksReport(ctx context.Context, query string, limit int)
 		if !optional.enabled {
 			continue
 		}
-		candidates, err := optional.search(ctx, query, limit)
-		if err != nil {
-			log.Printf("harvest: %s discovery failed for %s: %v", optional.label, query, err)
-			sources = append(sources, sourceStatus(optional.name, 0, redactFailureText(err.Error())))
-			continue
-		}
-		parts = append(parts, candidates)
-		sources = append(sources, sourceStatus(optional.name, len(candidates), ""))
+		searches = append(searches, workSearch{optional.name, func(ctx context.Context) ([]Candidate, string) {
+			candidates, err := optional.search(ctx, query, limit)
+			if err != nil {
+				log.Printf("harvest: %s discovery failed for %s: %v", optional.label, query, err)
+				return nil, redactFailureText(err.Error())
+			}
+			return candidates, ""
+		}})
 	}
+	parts, sources := gatherWorks(ctx, searches, deadline)
 	best := map[string]Candidate{}
 	order := make([]string, 0)
 	for _, part := range parts {

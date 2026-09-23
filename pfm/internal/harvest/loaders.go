@@ -86,6 +86,10 @@ type pageLoader struct {
 	graft func(body []byte, contentType string) error
 	// drop removes a copy of a loader whose answer is already in the page.
 	drop func()
+	// rateLimited, when set, reads an error answer as the site's rate limit
+	// (a site that refuses with 403 and says so in its body, not with 429);
+	// such an answer ends the following like a 429.
+	rateLimited func(status int, body []byte) bool
 }
 
 // loaderBudget is one fetch's loader following, shared by every conversion of
@@ -319,6 +323,14 @@ func (h *Harvester) followLoader(
 	case response.status == http.StatusTooManyRequests:
 		budget.stopped = fmt.Sprintf("the site answered HTTP 429 (rate limited) after %d request(s); not retried",
 			budget.requests)
+		budget.policyStop = true
+		return false
+	case response.status >= 400 && loader.rateLimited != nil && loader.rateLimited(response.status, response.body):
+		budget.stopped = fmt.Sprintf(
+			"the site answered HTTP %d (rate limit exhausted) after %d request(s); not retried",
+			response.status,
+			budget.requests,
+		)
 		budget.policyStop = true
 		return false
 	case response.status >= 400:

@@ -36,6 +36,10 @@ type siteExtraction struct {
 	renderMayComplete bool
 }
 
+// unknownAuthor stands, in every extractor's rendering, for a post or comment
+// that names no author.
+const unknownAuthor = "[unknown]"
+
 type siteExtractor struct {
 	name  string
 	hosts []string
@@ -64,6 +68,12 @@ var siteExtractors = []siteExtractor{
 		hosts:   []string{hnHost},
 		extract: extractHNThread,
 		loaders: hnLoaders,
+	},
+	{
+		name:    "github-issue",
+		hosts:   []string{githubHost},
+		extract: extractGitHubIssue,
+		loaders: githubLoaders,
 	},
 	{
 		name:    "discourse-topic",

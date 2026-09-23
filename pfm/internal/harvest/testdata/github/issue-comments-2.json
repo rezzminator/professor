@@ -1,0 +1,1052 @@
+[
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5234163632",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5234163632",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5234163632,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-08-09T22:26:43Z",
+  "updated_at": "2026-08-09T22:26:43Z",
+  "author_association": "NONE",
+  "body": "Comment 101 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5234298897",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5234298897",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5234298897,
+  "user": {
+   "login": "user-6",
+   "type": "User"
+  },
+  "created_at": "2026-08-09T23:02:10Z",
+  "updated_at": "2026-08-09T23:02:19Z",
+  "author_association": "NONE",
+  "body": "Comment 102 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5235732079",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5235732079",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5235732079,
+  "user": {
+   "login": "user-27",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T04:04:57Z",
+  "updated_at": "2026-08-10T04:04:57Z",
+  "author_association": "MEMBER",
+  "body": "Comment 103 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5235926773",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5235926773",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5235926773,
+  "user": {
+   "login": "user-29",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T04:37:22Z",
+  "updated_at": "2026-08-10T04:54:02Z",
+  "author_association": "NONE",
+  "body": "Comment 104 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5237447985",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5237447985",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5237447985,
+  "user": {
+   "login": "user-24",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T07:57:44Z",
+  "updated_at": "2026-08-10T07:57:44Z",
+  "author_association": "NONE",
+  "body": "Comment 105 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5245216893",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5245216893",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5245216893,
+  "user": {
+   "login": "user-27",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T19:52:10Z",
+  "updated_at": "2026-08-10T19:52:10Z",
+  "author_association": "MEMBER",
+  "body": "Comment 106 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5245471880",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5245471880",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5245471880,
+  "user": {
+   "login": "user-30",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T20:17:06Z",
+  "updated_at": "2026-08-10T20:17:06Z",
+  "author_association": "NONE",
+  "body": "Comment 107 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5245803338",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5245803338",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5245803338,
+  "user": {
+   "login": "user-1",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T20:49:26Z",
+  "updated_at": "2026-08-10T20:49:26Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 108 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5246050621",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5246050621",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5246050621,
+  "user": {
+   "login": "user-31",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T21:07:44Z",
+  "updated_at": "2026-08-10T21:07:44Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 109 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5246633023",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5246633023",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5246633023,
+  "user": {
+   "login": "user-32",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T22:13:50Z",
+  "updated_at": "2026-08-10T22:13:50Z",
+  "author_association": "NONE",
+  "body": "Comment 110 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5247320921",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5247320921",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5247320921,
+  "user": {
+   "login": "user-8",
+   "type": "User"
+  },
+  "created_at": "2026-08-10T23:44:58Z",
+  "updated_at": "2026-08-10T23:44:58Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 111 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5247734049",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5247734049",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5247734049,
+  "user": {
+   "login": "user-1",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T00:44:18Z",
+  "updated_at": "2026-08-11T00:44:18Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 112 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5248610090",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5248610090",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5248610090,
+  "user": {
+   "login": "user-27",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T03:21:27Z",
+  "updated_at": "2026-08-11T03:21:27Z",
+  "author_association": "MEMBER",
+  "body": "Comment 113 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5249045545",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5249045545",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5249045545,
+  "user": {
+   "login": "user-8",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T04:38:46Z",
+  "updated_at": "2026-08-11T04:38:46Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 114 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5249921656",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5249921656",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5249921656,
+  "user": {
+   "login": "user-7",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T06:45:47Z",
+  "updated_at": "2026-08-11T06:45:47Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 115 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5254905583",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5254905583",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5254905583,
+  "user": {
+   "login": "user-14",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T15:00:37Z",
+  "updated_at": "2026-08-11T15:02:11Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 116 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5254954357",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5254954357",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5254954357,
+  "user": {
+   "login": "user-14",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T15:04:43Z",
+  "updated_at": "2026-08-11T15:04:43Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 117 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5255114882",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5255114882",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5255114882,
+  "user": {
+   "login": "user-1",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T15:18:27Z",
+  "updated_at": "2026-08-11T15:18:27Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 118 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5255143350",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5255143350",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5255143350,
+  "user": {
+   "login": "user-1",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T15:20:46Z",
+  "updated_at": "2026-08-11T15:20:46Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 119 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5256335211",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5256335211",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5256335211,
+  "user": {
+   "login": "user-12",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T17:06:48Z",
+  "updated_at": "2026-08-11T17:06:48Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 120 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5257191743",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5257191743",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5257191743,
+  "user": {
+   "login": "user-32",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T18:25:35Z",
+  "updated_at": "2026-08-11T18:25:35Z",
+  "author_association": "NONE",
+  "body": "Comment 121 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5257971151",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5257971151",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5257971151,
+  "user": {
+   "login": "user-31",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T19:40:26Z",
+  "updated_at": "2026-08-11T19:40:26Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 122 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5258111316",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5258111316",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5258111316,
+  "user": {
+   "login": "user-25",
+   "type": "User"
+  },
+  "created_at": "2026-08-11T19:53:14Z",
+  "updated_at": "2026-08-11T19:54:20Z",
+  "author_association": "MEMBER",
+  "body": "Comment 123 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5299731907",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5299731907",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5299731907,
+  "user": {
+   "login": "user-27",
+   "type": "User"
+  },
+  "created_at": "2026-08-15T01:10:14Z",
+  "updated_at": "2026-08-15T01:10:14Z",
+  "author_association": "MEMBER",
+  "body": "Comment 124 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5310309424",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5310309424",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5310309424,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-08-16T23:50:33Z",
+  "updated_at": "2026-08-17T04:07:20Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 125 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5310414105",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5310414105",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5310414105,
+  "user": {
+   "login": "user-32",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T00:12:26Z",
+  "updated_at": "2026-08-17T00:12:26Z",
+  "author_association": "NONE",
+  "body": "Comment 126 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5311422108",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5311422108",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5311422108,
+  "user": {
+   "login": "user-33",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T03:26:55Z",
+  "updated_at": "2026-08-17T03:26:55Z",
+  "author_association": "NONE",
+  "body": "Comment 127 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5311656683",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5311656683",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5311656683,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T04:07:49Z",
+  "updated_at": "2026-08-17T04:07:49Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 128 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5311672256",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5311672256",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5311672256,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T04:10:18Z",
+  "updated_at": "2026-08-17T04:10:18Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 129 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5312907556",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5312907556",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5312907556,
+  "user": {
+   "login": "user-8",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T07:05:18Z",
+  "updated_at": "2026-08-17T07:05:18Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 130 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5316959032",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5316959032",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5316959032,
+  "user": {
+   "login": "user-5",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T14:09:15Z",
+  "updated_at": "2026-08-17T14:09:15Z",
+  "author_association": "NONE",
+  "body": "Comment 131 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5318180325",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5318180325",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5318180325,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T17:27:36Z",
+  "updated_at": "2026-08-18T20:40:25Z",
+  "author_association": "NONE",
+  "body": "Comment 132 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5318417676",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5318417676",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5318417676,
+  "user": {
+   "login": "user-14",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T18:01:22Z",
+  "updated_at": "2026-08-17T18:01:22Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 133 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5318650409",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5318650409",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5318650409,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T18:31:32Z",
+  "updated_at": "2026-08-17T18:31:32Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 134 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5318841545",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5318841545",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5318841545,
+  "user": {
+   "login": "user-6",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T18:50:52Z",
+  "updated_at": "2026-08-18T16:27:49Z",
+  "author_association": "NONE",
+  "body": "Comment 135 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5318858400",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5318858400",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5318858400,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T18:52:24Z",
+  "updated_at": "2026-08-17T18:52:24Z",
+  "author_association": "NONE",
+  "body": "Comment 136 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5318947184",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5318947184",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5318947184,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T19:00:18Z",
+  "updated_at": "2026-08-17T19:00:18Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 137 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5318972619",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5318972619",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5318972619,
+  "user": {
+   "login": "user-34",
+   "type": "User"
+  },
+  "created_at": "2026-08-17T19:02:34Z",
+  "updated_at": "2026-08-17T19:02:34Z",
+  "author_association": "NONE",
+  "body": "Comment 138 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5329104263",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5329104263",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5329104263,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-08-18T13:48:03Z",
+  "updated_at": "2026-08-18T13:48:03Z",
+  "author_association": "NONE",
+  "body": "Comment 139 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5333502088",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5333502088",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5333502088,
+  "user": {
+   "login": "user-30",
+   "type": "User"
+  },
+  "created_at": "2026-08-18T20:11:43Z",
+  "updated_at": "2026-08-18T20:11:43Z",
+  "author_association": "NONE",
+  "body": "Comment 140 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5333618139",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5333618139",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5333618139,
+  "user": {
+   "login": "user-26",
+   "type": "User"
+  },
+  "created_at": "2026-08-18T20:22:38Z",
+  "updated_at": "2026-08-18T20:22:38Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 141 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5333698129",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5333698129",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5333698129,
+  "user": {
+   "login": "user-25",
+   "type": "User"
+  },
+  "created_at": "2026-08-18T20:30:42Z",
+  "updated_at": "2026-08-18T20:41:57Z",
+  "author_association": "MEMBER",
+  "body": "Comment 142 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5333783000",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5333783000",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5333783000,
+  "user": {
+   "login": "user-26",
+   "type": "User"
+  },
+  "created_at": "2026-08-18T20:39:07Z",
+  "updated_at": "2026-08-18T20:39:07Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 143 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5342129723",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5342129723",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5342129723,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-08-19T12:31:13Z",
+  "updated_at": "2026-08-19T15:16:40Z",
+  "author_association": "NONE",
+  "body": "Comment 144 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5343620725",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5343620725",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5343620725,
+  "user": {
+   "login": "user-30",
+   "type": "User"
+  },
+  "created_at": "2026-08-19T14:33:26Z",
+  "updated_at": "2026-08-19T14:33:26Z",
+  "author_association": "NONE",
+  "body": "Comment 145 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5344011163",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5344011163",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5344011163,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-08-19T15:04:51Z",
+  "updated_at": "2026-08-19T15:11:11Z",
+  "author_association": "NONE",
+  "body": "Comment 146 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5348165901",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5348165901",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5348165901,
+  "user": {
+   "login": "user-35",
+   "type": "User"
+  },
+  "created_at": "2026-08-19T21:23:16Z",
+  "updated_at": "2026-08-19T21:49:31Z",
+  "author_association": "NONE",
+  "body": "Comment 147 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5349274333",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5349274333",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5349274333,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-08-19T23:34:02Z",
+  "updated_at": "2026-08-19T23:34:02Z",
+  "author_association": "NONE",
+  "body": "Comment 148 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5349688130",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5349688130",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5349688130,
+  "user": {
+   "login": "user-35",
+   "type": "User"
+  },
+  "created_at": "2026-08-20T00:30:45Z",
+  "updated_at": "2026-08-20T00:30:45Z",
+  "author_association": "NONE",
+  "body": "Comment 149 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5355985523",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5355985523",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5355985523,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-08-20T12:37:55Z",
+  "updated_at": "2026-08-20T12:37:55Z",
+  "author_association": "NONE",
+  "body": "Comment 150 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5434816101",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5434816101",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5434816101,
+  "user": {
+   "login": "user-36",
+   "type": "User"
+  },
+  "created_at": "2026-08-27T05:33:11Z",
+  "updated_at": "2026-08-27T05:33:11Z",
+  "author_association": "NONE",
+  "body": "Comment 151 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5485853274",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5485853274",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5485853274,
+  "user": {
+   "login": "user-37",
+   "type": "User"
+  },
+  "created_at": "2026-08-31T22:52:41Z",
+  "updated_at": "2026-08-31T22:52:41Z",
+  "author_association": "NONE",
+  "body": "Comment 152 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5486099203",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5486099203",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5486099203,
+  "user": {
+   "login": "user-36",
+   "type": "User"
+  },
+  "created_at": "2026-08-31T23:19:07Z",
+  "updated_at": "2026-08-31T23:19:07Z",
+  "author_association": "NONE",
+  "body": "Comment 153 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5609168609",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5609168609",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5609168609,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-09-09T21:44:37Z",
+  "updated_at": "2026-09-09T21:44:37Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 154 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5609201897",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5609201897",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5609201897,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-09-09T21:47:51Z",
+  "updated_at": "2026-09-09T21:47:51Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 155 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5610091538",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5610091538",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5610091538,
+  "user": {
+   "login": "user-38",
+   "type": "User"
+  },
+  "created_at": "2026-09-09T23:20:34Z",
+  "updated_at": "2026-09-09T23:20:34Z",
+  "author_association": "NONE",
+  "body": "Comment 156 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5610306227",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5610306227",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5610306227,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-09-09T23:41:19Z",
+  "updated_at": "2026-09-09T23:41:19Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 157 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5610667518",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5610667518",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5610667518,
+  "user": {
+   "login": "user-38",
+   "type": "User"
+  },
+  "created_at": "2026-09-10T00:20:13Z",
+  "updated_at": "2026-09-10T00:20:13Z",
+  "author_association": "NONE",
+  "body": "Comment 158 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5613570577",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5613570577",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5613570577,
+  "user": {
+   "login": "user-7",
+   "type": "User"
+  },
+  "created_at": "2026-09-10T05:17:52Z",
+  "updated_at": "2026-09-10T05:17:52Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 159 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5621335810",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5621335810",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5621335810,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-09-10T15:39:20Z",
+  "updated_at": "2026-09-10T15:39:20Z",
+  "author_association": "NONE",
+  "body": "Comment 160 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5622589325",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5622589325",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5622589325,
+  "user": {
+   "login": "user-1",
+   "type": "User"
+  },
+  "created_at": "2026-09-10T17:15:23Z",
+  "updated_at": "2026-09-10T17:15:23Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 161 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5625195957",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5625195957",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5625195957,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-09-10T20:45:12Z",
+  "updated_at": "2026-09-10T20:45:12Z",
+  "author_association": "NONE",
+  "body": "Comment 162 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5625249482",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5625249482",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5625249482,
+  "user": {
+   "login": "user-7",
+   "type": "User"
+  },
+  "created_at": "2026-09-10T20:49:51Z",
+  "updated_at": "2026-09-10T20:49:51Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 163 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5625654188",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5625654188",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5625654188,
+  "user": {
+   "login": "user-32",
+   "type": "User"
+  },
+  "created_at": "2026-09-10T21:25:30Z",
+  "updated_at": "2026-09-10T21:25:30Z",
+  "author_association": "NONE",
+  "body": "Comment 164 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5625745917",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5625745917",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5625745917,
+  "user": {
+   "login": "user-8",
+   "type": "User"
+  },
+  "created_at": "2026-09-10T21:34:03Z",
+  "updated_at": "2026-09-10T21:36:12Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 165 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5627201580",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5627201580",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5627201580,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-09-11T00:03:04Z",
+  "updated_at": "2026-09-11T00:03:04Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 166 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5627213476",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5627213476",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5627213476,
+  "user": {
+   "login": "user-4",
+   "type": "User"
+  },
+  "created_at": "2026-09-11T00:04:21Z",
+  "updated_at": "2026-09-11T00:04:21Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 167 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5630100815",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5630100815",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5630100815,
+  "user": {
+   "login": "user-7",
+   "type": "User"
+  },
+  "created_at": "2026-09-11T05:49:54Z",
+  "updated_at": "2026-09-11T05:57:15Z",
+  "author_association": "CONTRIBUTOR",
+  "body": "Comment 168 text:\n\n```go\nfmt.Println(\"x\")\n```\n\n> quoted line",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5637003242",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5637003242",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5637003242,
+  "user": {
+   "login": "user-21",
+   "type": "User"
+  },
+  "created_at": "2026-09-11T15:48:01Z",
+  "updated_at": "2026-09-11T15:48:01Z",
+  "author_association": "NONE",
+  "body": "Comment 169 text.",
+  "minimized": null
+ },
+ {
+  "url": "https://api.github.com/repos/example-org/example-lang/issues/comments/5770498541",
+  "html_url": "https://github.com/example-org/example-lang/issues/76920#issuecomment-5770498541",
+  "issue_url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+  "id": 5770498541,
+  "user": {
+   "login": "user-39",
+   "type": "User"
+  },
+  "created_at": "2026-09-22T02:46:46Z",
+  "updated_at": "2026-09-22T02:49:14Z",
+  "author_association": "MEMBER",
+  "body": "Comment 170 text.",
+  "minimized": null
+ }
+]

@@ -1,0 +1,20 @@
+{
+ "url": "https://api.github.com/repos/example-org/example-lang/issues/76920",
+ "repository_url": "https://api.github.com/repos/example-org/example-lang",
+ "html_url": "https://github.com/example-org/example-lang/issues/76920",
+ "id": 3745009056,
+ "number": 76920,
+ "title": "Example issue",
+ "state": "open",
+ "locked": false,
+ "comments": 170,
+ "created_at": "2025-12-18T22:03:48Z",
+ "updated_at": "2026-09-22T02:49:14Z",
+ "closed_at": null,
+ "author_association": "CONTRIBUTOR",
+ "user": {
+  "login": "user-1",
+  "type": "User"
+ },
+ "body": "The report.\n\n```\n$ example run\nfailure\n```"
+}

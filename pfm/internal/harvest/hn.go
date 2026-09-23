@@ -35,9 +35,6 @@ import (
 
 const hnHost = "news.ycombinator.com"
 
-// hnUnknownAuthor stands for a comment row naming no author.
-const hnUnknownAuthor = "[unknown]"
-
 // hnIndentWidth is the spacer width HN gives one level of nesting, the depth
 // read when a row's td.ind carries no indent attribute.
 const hnIndentWidth = 40
@@ -489,7 +486,7 @@ func (comment hnComment) markdown() string {
 	indent := strings.Repeat("  ", comment.level)
 	author := comment.author
 	if author == "" {
-		author = hnUnknownAuthor
+		author = unknownAuthor
 	}
 	header := indent + "- **" + author + "**"
 	if comment.posted != "" {

@@ -660,7 +660,7 @@ func discourseRenderPost(post *html.Node, renderer markdownRenderer) string {
 	}
 	walk(post)
 	if author == "" {
-		author = "[unknown]"
+		author = unknownAuthor
 	}
 	header += " · " + author
 	if date != "" {

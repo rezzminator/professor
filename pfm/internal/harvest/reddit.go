@@ -314,7 +314,7 @@ func (comment redditComment) markdown() string {
 	indent := strings.Repeat("  ", comment.level)
 	author := comment.author
 	if author == "" {
-		author = "[unknown]"
+		author = unknownAuthor
 	} else if !strings.HasPrefix(author, "[") {
 		author = "u/" + author
 	}

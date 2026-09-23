@@ -446,7 +446,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			converted, convErr := quoraReaderPage(source, pageText(stripJinaEnvelope(string(body)))), error(nil)
 			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) {
-				stored := readerPage(source, converted).withGaps(converted, gaps, loaders)
+				stored := h.readerPageChecked(ctx, source, converted).withGaps(converted, gaps, loaders)
 				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
 			}
 		}
@@ -467,7 +467,7 @@ func (h *Harvester) fetchURLWithPolicy(
 					source,
 					kindHTML,
 					"defuddle-reader",
-					readerPage(source, converted).withGaps(converted, gaps, loaders),
+					h.readerPageChecked(ctx, source, converted).withGaps(converted, gaps, loaders),
 					int64(len(body)),
 					status,
 					rungs,

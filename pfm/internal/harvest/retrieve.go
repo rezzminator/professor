@@ -18,8 +18,10 @@ import (
 // bytes) and the policy: which rungs it may climb.
 //
 //   - PolicyPage: the page ladder (fetchURLWithPolicy), unchanged.
-//   - PolicyFile: direct → Chrome impersonation → the Wayback raw copy (id_).
-//     Reader rungs never run: they return text, not bytes.
+//   - PolicyFile: direct → Chrome impersonation → the Wayback raw copy (id_)
+//     → browser download (browserFileRung: the browser's download, or the
+//     navigation's own response body; headless first). Reader rungs never
+//     run: they return text, not bytes.
 //   - PolicyInlineImage: direct → Chrome impersonation, with the page as
 //     Referer. It never starts a browser: a page with 60 images must not start
 //     60 browsers.
@@ -146,9 +148,9 @@ func (h *Harvester) maxDownloadBytes() int64 {
 	return defaultMaxDownloadBytes
 }
 
-// retrieveFile runs the file rungs. The browser download rung the spec names
-// is not here: the BrowserFetcher adapter returns rendered HTML and has no way
-// to hand back a download's bytes.
+// retrieveFile runs the file rungs; the browser download (browser_download.go)
+// is the file policy's last. A browser that ran and ended without the file is
+// named in the failure, never an empty success.
 func (h *Harvester) retrieveFile(ctx context.Context, req retrieveRequest) (Retrieved, error) {
 	var out Retrieved
 	if err := validateFetchURL(req.target, false); err != nil {
@@ -207,15 +209,25 @@ func (h *Harvester) retrieveFile(ctx context.Context, req retrieveRequest) (Retr
 			}
 		}
 	}
+	kept, browserErr := h.browserFileRung(ctx, req, limit, &out)
+	if kept || errors.Is(browserErr, errDownloadTooLarge) {
+		return out, browserErr
+	}
+	var err error
 	switch {
 	case lastErr != nil && waybackErr != nil:
-		return out, fmt.Errorf("%w; wayback lookup failed: %v", lastErr, waybackErr)
+		err = fmt.Errorf("%w; wayback lookup failed: %v", lastErr, waybackErr)
 	case lastErr != nil:
-		return out, lastErr
+		err = lastErr
 	case waybackErr != nil:
-		return out, fmt.Errorf("%w (wayback lookup failed: %v)", errNoFileRung, waybackErr)
+		err = fmt.Errorf("%w (wayback lookup failed: %v)", errNoFileRung, waybackErr)
+	default:
+		err = errNoFileRung
 	}
-	return out, errNoFileRung
+	if browserErr != nil {
+		return out, fmt.Errorf("%w; %v", err, browserErr)
+	}
+	return out, err
 }
 
 // fileAttempt is one streamed file rung: the body goes from the response into

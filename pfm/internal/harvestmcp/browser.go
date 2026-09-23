@@ -2,6 +2,7 @@ package harvestmcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -30,9 +31,93 @@ func (converter pythonConverter) FetchBrowser(
 	source string,
 	headless bool,
 ) (string, int, string, error) {
-	runtime, err := converter.browserRuntime(ctx)
+	var html, finalURL string
+	var status int
+	err := converter.inBrowser(ctx, source, func(fetchCtx context.Context, session browserSession) error {
+		var fetchErr error
+		html, status, finalURL, fetchErr = session.worker.FetchPinned(
+			fetchCtx,
+			source,
+			session.proxyURL,
+			session.hostResolverRules,
+			harvest.ProvenanceReferer,
+			harvest.BrowserMarkerToken(),
+			headless,
+			harvest.SitePressesLoaders(source),
+			45000,
+			session.onAsk,
+		)
+		return fetchErr
+	})
 	if err != nil {
 		return "", 0, "", err
+	}
+	return html, status, finalURL, nil
+}
+
+// DownloadBrowser downloads one URL's bytes in system Chrome — the file
+// policy's last rung — under the same SSRF boundary as FetchBrowser. The
+// worker streams the file into dest, capped at maxBytes; a named worker
+// failure becomes a harvest.BrowserDownloadError carrying its reason.
+func (converter pythonConverter) DownloadBrowser(
+	ctx context.Context,
+	source, dest string,
+	maxBytes int64,
+	headless bool,
+) (harvest.BrowserFile, error) {
+	var file harvest.BrowserFile
+	err := converter.inBrowser(ctx, source, func(fetchCtx context.Context, session browserSession) error {
+		got, downloadErr := session.worker.Download(fetchCtx, harvestpy.BrowserDownloadRequest{
+			BrowserFetchRequest: harvestpy.BrowserFetchRequest{
+				URL:               source,
+				Proxy:             session.proxyURL,
+				Headless:          headless,
+				HostResolverRules: session.hostResolverRules,
+				TimeoutMS:         45000,
+				Referer:           harvest.ProvenanceReferer,
+			},
+			Path:     dest,
+			MaxBytes: maxBytes,
+		}, session.onAsk)
+		var failure *harvestpy.BrowserDownloadFailure
+		if errors.As(downloadErr, &failure) {
+			return &harvest.BrowserDownloadError{
+				Reason: failure.Reason, Status: failure.Status, Head: failure.Head, Detail: failure.Message,
+			}
+		}
+		file = harvest.BrowserFile{
+			ContentType: got.ContentType, Bytes: got.Bytes, FinalURL: got.FinalURL, Status: got.Status,
+		}
+		return downloadErr
+	})
+	if err != nil {
+		return harvest.BrowserFile{}, err
+	}
+	return file, nil
+}
+
+// browserSession is one browser worker behind its pinned proxy and resolver
+// rule, with the SSRF ask handler every URL Chrome touches goes through.
+type browserSession struct {
+	worker            *harvestpy.BrowserWorker
+	proxyURL          string
+	hostResolverRules string
+	onAsk             func(string) error
+}
+
+// inBrowser runs one worker op for source inside the browser rung's SSRF
+// boundary (see FetchBrowser): the strict fetchable check on every ask, the
+// Go-owned proxy, Chrome's resolver pinned, the hard Go deadline. A failure
+// after the guard refused source itself is re-wrapped as
+// harvest.ErrBrowserPolicyDenied: POLICY, not an outage.
+func (converter pythonConverter) inBrowser(
+	ctx context.Context,
+	source string,
+	op func(context.Context, browserSession) error,
+) error {
+	runtime, err := converter.browserRuntime(ctx)
+	if err != nil {
+		return err
 	}
 	browser := harvestpy.NewBrowserWorker(runtime)
 	defer func() { _ = browser.Close() }()
@@ -55,7 +140,7 @@ func (converter pythonConverter) FetchBrowser(
 	defer cancel()
 	proxyURL, stopProxy, err := converter.browserProxy(fetchCtx)
 	if err != nil {
-		return "", 0, "", err
+		return err
 	}
 	defer stopProxy()
 	// Pin Chrome to the address DoH resolved and the guard validated. Without
@@ -63,23 +148,16 @@ func (converter pythonConverter) FetchBrowser(
 	// resolver — so on a network that rewrites DNS answers every HTTP rung
 	// would reach the real host while the browser rung alone landed on a block
 	// page, and the wall would look like the source's own.
-	hostResolverRules := harvest.BrowserHostResolverRule(fetchCtx, source)
-	html, status, finalURL, fetchErr := browser.FetchPinned(
-		fetchCtx,
-		source,
-		proxyURL,
-		hostResolverRules,
-		harvest.ProvenanceReferer,
-		harvest.BrowserMarkerToken(),
-		headless,
-		harvest.SitePressesLoaders(source),
-		45000,
-		onAsk,
-	)
-	if fetchErr != nil && policyDenied {
-		return "", 0, "", fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, fetchErr)
+	opErr := op(fetchCtx, browserSession{
+		worker:            browser,
+		proxyURL:          proxyURL,
+		hostResolverRules: harvest.BrowserHostResolverRule(fetchCtx, source),
+		onAsk:             onAsk,
+	})
+	if opErr != nil && policyDenied {
+		return fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, opErr)
 	}
-	return html, status, finalURL, fetchErr
+	return opErr
 }
 
 // browserProxy answers with the proxy Chrome is launched behind, and the

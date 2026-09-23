@@ -51,6 +51,15 @@ Every tool returns typed output: `discardOutput` goes, each handler returns its 
 - `RegisteredToolNames` (`toolnames.go`) changes in the same edit as the registration; the daemon's `/status` reads it.
 - `service.go` (979 lines, baseline 1052) is split by tool family so no file crosses its ceiling: `tools_read.go`, `tools_download.go`, `tools_works.go`, `tools_search.go`, each with its `_test.go`.
 
+## Caller headers (user request, after R2)
+
+`readPage`, `download` and `readWork` take an optional `headers` object (name → value) that extends the request headers sent to the target. `findWorks` and `webSearch` do not: their requests go to metadata and search APIs, not to a target.
+
+- Scope: the headers go only to the target's origin — direct, Chrome impersonation and the browser (scoped by a route to that origin, never to subresources or redirects on another origin). Reader services (jina, defuddle), Wayback and resolver APIs never receive them: a header may carry a credential. A result the ladder reached through a rung that ran without the caller's headers says so in `partial`.
+- Validation at entry, a named error per breach: names are HTTP tokens; values carry no CR or LF; at most 32 headers and 8 KiB in total; hop-by-hop and framing headers (`Host`, `Content-Length`, `Transfer-Encoding`, `Connection`, `Upgrade`, `TE`, `Trailer`, `Keep-Alive`, `Proxy-*`) are refused. A caller header overrides the harvester's default of the same name (User-Agent, Accept-Language, Referer).
+- Cache: the cache key includes a hash of the sorted header set, so a page read with a credential is never served to a call without it, nor the other way round. Values never appear in logs, receipts, errors or the typed output; names may.
+- CLI: `pfm harvest --header 'Name: value'` (repeatable), and on `pfm harvest download`.
+
 ## Remote: only MCP
 
 - The remote gateway (`remote.go`) registers `readPage`, `download`, `findWorks`, `readWork` and `webSearch` (when configured); never `parseLocalDocuments`, and no tool returns a server path.

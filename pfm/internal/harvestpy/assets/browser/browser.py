@@ -20,6 +20,8 @@ Protocol (JSON lines over stdin/stdout), one request serialized at a time:
                   ("proxy" is REQUIRED — it is the Go-owned dial; see PROXY_REQUIRED;
                    "press_loaders" absent = read-only scrolling, no button pressed;
                    "marker_token" is carried by the lazy-load marker — see mark_incomplete)
+                  {"op":"download", …the fetch fields…, "path":"/cache/.browser-download-x","max_bytes":2147483648}
+                  ("path" is where the file is written, streamed and capped at "max_bytes" — see capture_download)
                   {"op":"smoke"}
   worker -> Go:   zero or more guard asks before the final line:
                   {"ask":"fetchable","url":"https://…"}
@@ -28,6 +30,8 @@ Protocol (JSON lines over stdin/stdout), one request serialized at a time:
   worker -> Go:   exactly one final line:
                   {"ok":true,"html":"…","status":403,"headless":false,"final_url":"https://…"}
                   ("final_url" is the address of the document "html" holds, after every redirect)
+                  {"ok":true,"via":"download"|"response","bytes":123,"content_type":"application/pdf","final_url":"https://…","status":200}
+                  {"ok":false,"reason":"no-download"|"too-large"|"timeout","error":"…","status":403,"head":"<html>…"}
                   {"ok":false,"error":"patchright not installed"}
 
 SSRF: Go owns the fetchable decision (harvest.AssertFetchable) — the route
@@ -50,6 +54,8 @@ launch_arguments() makes that proxy the only way out of the browser.
 """
 
 import asyncio
+import base64
+import io
 import json
 from html import escape as html_escape
 import os.path
@@ -894,22 +900,9 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
     """
     if not proxy_url:
         return "", None, headless, PROXY_REQUIRED
-    try:
-        from patchright.async_api import async_playwright  # type: ignore[import-not-found]
-    except ImportError:
-        return "", None, False, "patchright not installed"
-    loop = asyncio.get_event_loop()
-
-    async def ask(target):
-        return await loop.run_in_executor(None, ask_fetchable, target)
-
-    # One lock for BOTH the initial ask and every route-handler ask: a single
-    # in-flight stdin/stdout exchange, no matter how handlers interleave.
-    guarded_ask = serialized_ask(ask)
-
-    allowed, reason = await guarded_ask(url)
-    if not allowed:
-        return "", None, False, reason or f"refused initial url {url}"
+    async_playwright, guarded_ask, error = await open_rung(url, ask_fetchable)
+    if error is not None:
+        return "", None, False, error
 
     proxy = proxy_settings(proxy_url)
     launch_args = launch_arguments(proxy_url, host_resolver_rules)
@@ -919,16 +912,7 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
             browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy,
                                               args=launch_args)
             try:
-                ua_override = None
-                if headless:
-                    metadata = await engine_ua_metadata(browser, guarded_ask)
-                    user_agent = stock_user_agent(browser.version)
-                    ua_override = {"userAgent": user_agent, "userAgentMetadata": metadata}
-                    context = await browser.new_context(**context_options(user_agent))
-                else:
-                    context = await browser.new_context(**context_options(None))
-                await install_route_guards(context, guarded_ask)
-                await context.add_init_script(WEBRTC_BLOCK_SCRIPT)
+                context, ua_override = await guarded_context(browser, headless, guarded_ask)
 
                 html, status, outcome = await render_page(context, url, timeout_ms, referer=referer,
                                                           press_loaders=press_loaders, ua_override=ua_override,
@@ -947,6 +931,267 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
     except Exception as e:  # noqa: BLE001 — the rung never raises past this boundary
         print(f"browser rung failed for {redact(url)} (headless={headless}): {e}", file=sys.stderr)
         return "", None, headless, str(e)
+
+
+async def open_rung(url, ask_fetchable):
+    """The start every browser op shares: import patchright and ask Go about
+    the initial *url*. Returns (async_playwright, guarded_ask, None), or
+    (None, None, error) when patchright is absent or Go refused the url.
+    guarded_ask is ONE lock for both the initial ask and every route-handler
+    ask: a single in-flight stdin/stdout exchange, however handlers interleave."""
+    try:
+        from patchright.async_api import async_playwright  # type: ignore[import-not-found]
+    except ImportError:
+        return None, None, "patchright not installed"
+    loop = asyncio.get_event_loop()
+
+    async def ask(target):
+        return await loop.run_in_executor(None, ask_fetchable, target)
+
+    guarded_ask = serialized_ask(ask)
+    allowed, reason = await guarded_ask(url)
+    if not allowed:
+        return None, None, reason or f"refused initial url {url}"
+    return async_playwright, guarded_ask, None
+
+
+async def guarded_context(chrome, headless, guarded_ask, **extra):
+    """A new context on *chrome* as a visitor arrives (fetch_browser's doc):
+    headless, the stock User-Agent and its client hints, returned as the
+    ua_override render_page sends over CDP; headed, Chrome's own. Both SSRF
+    route guards and the WebRTC block are installed before any page opens.
+    *extra* goes to new_context (accept_downloads for a download)."""
+    ua_override = None
+    if headless:
+        metadata = await engine_ua_metadata(chrome, guarded_ask)
+        user_agent = stock_user_agent(chrome.version)
+        ua_override = {"userAgent": user_agent, "userAgentMetadata": metadata}
+        context = await chrome.new_context(**context_options(user_agent), **extra)
+    else:
+        context = await chrome.new_context(**context_options(None), **extra)
+    await install_route_guards(context, guarded_ask)
+    await context.add_init_script(WEBRTC_BLOCK_SCRIPT)
+    return context, ua_override
+
+
+# --- download: the file policy's last rung ----------------------------------
+
+# How long a navigation that showed a page is watched for a download to start
+# (a passive challenge that clears reloads into the file), within timeout_ms.
+DOWNLOAD_GRACE_MS = 15_000
+DOWNLOAD_HEAD_CHARS = 2048
+PAGE_CONTENT_TYPES = ("text/html", "application/xhtml+xml")
+
+
+class DownloadFailure(Exception):
+    """A download that ran and ended without the file, for a named *reason*:
+    "no-download" (the navigation showed a page; *status* and *head* are that
+    page, for Go to judge whether it is a challenge), "too-large" (past the
+    cap) or "timeout"."""
+
+    def __init__(self, reason, message, status=None, head=""):
+        super().__init__(message)
+        self.reason = reason
+        self.status = status
+        self.head = head
+
+
+def copy_capped(source, dest, max_bytes, chunk=1 << 16):
+    """Stream the binary file object *source* into *dest*, at most *max_bytes*;
+    return the size. One byte past the cap is a "too-large" failure and
+    *dest* is removed — never a truncated file."""
+    size = 0
+    with open(dest, "wb") as out:
+        while True:
+            block = source.read(chunk)
+            if not block:
+                break
+            size += len(block)
+            if size > max_bytes:
+                break
+            out.write(block)
+    if size > max_bytes:
+        os.remove(dest)
+        raise DownloadFailure("too-large", f"the file ran past the {max_bytes}-byte cap")
+    return size
+
+
+def is_page_response(response):
+    content_type = (response.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    return content_type in PAGE_CONTENT_TYPES
+
+
+def declared_over(headers, max_bytes):
+    declared = (headers or {}).get("content-length") or ""
+    return declared.isdigit() and int(declared) > max_bytes
+
+
+def declared_matches(headers, size):
+    declared = (headers or {}).get("content-length") or ""
+    return not declared.isdigit() or int(declared) == size
+
+
+# The in-page refetch: Chrome's own network (route guards, proxy, cookies),
+# the body streamed and stopped one chunk past the cap.
+REFETCH_JS = """async ([url, max]) => {
+  const response = await fetch(url, {credentials: 'include'});
+  const reader = response.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > max) { await reader.cancel(); return {over: true, size}; }
+    chunks.push(value);
+  }
+  let text = '';
+  for (const chunk of chunks) {
+    for (let i = 0; i < chunk.length; i += 0x8000) text += String.fromCharCode.apply(null, chunk.subarray(i, i + 0x8000));
+  }
+  return {over: false, size, status: response.status, body: btoa(text)};
+}"""
+
+
+async def refetch_in_page(page, url, max_bytes, status):
+    """The file at *url* fetched by the page itself, capped at *max_bytes*."""
+    got = await page.evaluate(REFETCH_JS, [url, max_bytes])
+    if got["over"]:
+        raise DownloadFailure("too-large", f"the file ran past the {max_bytes}-byte cap", status=status)
+    if got["status"] >= 400:
+        raise DownloadFailure("no-download", f"the in-page refetch answered HTTP {got['status']}", status=got["status"])
+    return base64.b64decode(got["body"])
+
+
+async def capture_download(context, url, dest, max_bytes, timeout_ms, referer=None, ua_override=None,
+                           grace_ms=DOWNLOAD_GRACE_MS):
+    """Navigate to *url* in *context* and capture the file into *dest*, capped
+    at *max_bytes*: the browser's download event (an attachment, or a type
+    Chrome does not display), else the navigation's own response body (a type
+    Chrome displays: an image, a PDF in its viewer). A navigation that shows a
+    page is watched for *grace_ms* for a download or a navigation to the file.
+    Returns {"via","bytes","content_type","final_url","status"}; raises
+    DownloadFailure for a named failure."""
+    page = await context.new_page()
+    if ua_override is not None:
+        session = await context.new_cdp_session(page)
+        await session.send("Emulation.setUserAgentOverride", ua_override)
+    downloads, documents = [], []
+    page.on("download", lambda download: downloads.append(download))
+    page.on("response", lambda response: documents.append(response)
+            if response.frame == page.main_frame and response.request.is_navigation_request() else None)
+    navigation_error = None
+    try:
+        await page.goto(url, timeout=timeout_ms, wait_until="load", referer=referer or None)
+    except Exception as e:  # noqa: BLE001 — a download aborts the navigation; judged below
+        navigation_error = e
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + min(grace_ms, timeout_ms) / 1000
+    while not downloads and loop.time() < deadline:
+        if documents and not is_page_response(documents[-1]):
+            break
+        await asyncio.sleep(0.2)
+    response = documents[-1] if documents else None
+    body = None
+    if not downloads and response is not None and not is_page_response(response):
+        if declared_over(response.headers, max_bytes):
+            raise DownloadFailure("too-large", f"the server declared {response.headers['content-length']} bytes, "
+                                               f"over the {max_bytes}-byte cap", status=response.status)
+        try:
+            body = await response.body()
+        except Exception as e:  # noqa: BLE001 — a response Chrome handed to its download manager has no body here
+            print(f"browser download {redact(url)}: no response body ({e}); waiting for the download event",
+                  file=sys.stderr)
+            while not downloads and loop.time() < deadline + 1:
+                await asyncio.sleep(0.2)
+            if not downloads:
+                raise DownloadFailure("no-download", f"the response body was unavailable ({e}) and no download "
+                                                     "started", status=response.status) from e
+        else:
+            if not declared_matches(response.headers, len(body)):
+                # Chrome's PDF viewer answers the navigation with its own
+                # wrapper document: the file is refetched inside the page,
+                # through the route guards and the proxy, cookies included.
+                print(f"browser download {redact(url)}: the response body ({len(body)} bytes) is not the declared "
+                      "file; refetching it inside the page", file=sys.stderr)
+                body = await refetch_in_page(page, response.url, max_bytes, response.status)
+    if downloads:
+        download = downloads[0]
+        headers = response.headers if response is not None and response.url == download.url else {}
+        if declared_over(headers, max_bytes):
+            await download.cancel()
+            raise DownloadFailure("too-large", f"the server declared {headers['content-length']} bytes, "
+                                               f"over the {max_bytes}-byte cap")
+        failure = await download.failure()
+        if failure:
+            raise DownloadFailure("no-download", f"the browser's download failed: {failure}")
+        with open(await download.path(), "rb") as handle:
+            size = copy_capped(handle, dest, max_bytes)
+        content_type = (headers.get("content-type") or "").split(";", 1)[0].strip()
+        print(f"browser download {redact(url)} -> {size} bytes by the download event", file=sys.stderr)
+        return {"via": "download", "bytes": size, "content_type": content_type, "final_url": download.url,
+                "status": response.status if headers else 200}
+    if body is not None:
+        size = copy_capped(io.BytesIO(body), dest, max_bytes)
+        print(f"browser download {redact(url)} -> {size} bytes from the navigation's response", file=sys.stderr)
+        return {"via": "response", "bytes": size,
+                "content_type": (response.headers.get("content-type") or "").split(";", 1)[0].strip(),
+                "final_url": response.url, "status": response.status}
+    if navigation_error is not None and response is None:
+        reason = "timeout" if type(navigation_error).__name__ == "TimeoutError" else "no-download"
+        raise DownloadFailure(reason, f"the navigation failed: {navigation_error}")
+    try:
+        head = (await page.content())[:DOWNLOAD_HEAD_CHARS]
+    except Exception as e:  # noqa: BLE001 — the failure still names the missing download
+        print(f"browser download could not read the page it showed for {redact(url)}: {e}", file=sys.stderr)
+        head = ""
+    raise DownloadFailure("no-download", "the navigation showed a page and no download started",
+                          status=response.status if response is not None else None, head=head)
+
+
+async def download_browser(url, ask_fetchable, dest, max_bytes, proxy_url=None, timeout_ms=45_000, headless=True,
+                           host_resolver_rules=None, referer=None):
+    """Download *url* into *dest* in a real system Chrome, under fetch_browser's
+    SSRF boundary (the Go-owned proxy is REQUIRED, every URL asks Go). Returns
+    capture_download's dict, or an error string when the rung could not start;
+    raises DownloadFailure for a named failure."""
+    if not proxy_url:
+        return PROXY_REQUIRED
+    async_playwright, guarded_ask, error = await open_rung(url, ask_fetchable)
+    if error is not None:
+        return error
+    async with async_playwright() as p:  # type: ignore[attr-defined]
+        chrome = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy_settings(proxy_url),
+                                         args=launch_arguments(proxy_url, host_resolver_rules))
+        try:
+            context, ua_override = await guarded_context(chrome, headless, guarded_ask, accept_downloads=True)
+            return await capture_download(context, url, dest, max_bytes, timeout_ms, referer=referer,
+                                          ua_override=ua_override)
+        finally:
+            await chrome.close()
+
+
+async def handle_download(request):
+    try:
+        info = await download_browser(
+            request.get("url", ""),
+            lambda target: _blocking_ask(target),
+            request.get("path", ""),
+            int(request.get("max_bytes") or 0),
+            proxy_url=request.get("proxy"),
+            timeout_ms=int(request.get("timeout_ms") or 45_000),
+            headless=bool(request.get("headless", True)),
+            host_resolver_rules=request.get("host_resolver_rules") or None,
+            referer=request.get("referer") or None,
+        )
+    except DownloadFailure as failure:
+        print(f"browser download {redact(request.get('url', ''))} failed ({failure.reason}): {failure}",
+              file=sys.stderr)
+        return {"ok": False, "reason": failure.reason, "error": str(failure), "status": failure.status,
+                "head": failure.head}
+    if isinstance(info, str):
+        return {"ok": False, "error": info}
+    return {"ok": True, **info}
 
 
 def smoke():
@@ -1014,6 +1259,13 @@ def main():
             try:
                 response = smoke()
             except Exception as e:  # noqa: BLE001 — a broken patchright install is an answer, not a crash
+                response = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+            print(json.dumps(response), flush=True)
+            continue
+        if op == "download":
+            try:
+                response = asyncio.run(handle_download(request))
+            except Exception as e:  # noqa: BLE001 — a crash discards only this response
                 response = {"ok": False, "error": f"{type(e).__name__}: {e}"}
             print(json.dumps(response), flush=True)
             continue

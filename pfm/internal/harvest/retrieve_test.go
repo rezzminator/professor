@@ -95,6 +95,13 @@ func (b *countingBrowser) FetchBrowser(context.Context, string, bool) (string, i
 	return "<html><body>rendered</body></html>", http.StatusOK, "", nil
 }
 
+func (b *countingBrowser) DownloadBrowser(context.Context, string, string, int64, bool) (BrowserFile, error) {
+	b.mu.Lock()
+	b.starts++
+	b.mu.Unlock()
+	return BrowserFile{}, errors.New("the inline-image policy must never start a browser download")
+}
+
 // TestRetrieveInlineImagePolicyFallsToChromeAndNeverStartsABrowser: an inline
 // image the direct rung is refused falls to Chrome impersonation, both with
 // the page as Referer, and no rung ever starts a browser. Watched FAILING

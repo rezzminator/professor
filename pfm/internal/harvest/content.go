@@ -54,6 +54,11 @@ type convertedPage struct {
 	pager             bool
 }
 
+// movedNotePrefix opens the note line a stored page carries for a fact about
+// where it was answered from that is no gap (carriedGaps.moved): distinct from
+// partialMarkerPrefix, it never flags the artifact partial.
+const movedNotePrefix = "> **Note:** "
+
 // carriedGaps are what an earlier rung of this fetch learned the page lacks,
 // from its HTML even when the rung refused that page (for its status or a
 // wall): a site-API record's gap (api) and the page's un-followed next page
@@ -62,6 +67,8 @@ type convertedPage struct {
 // whether any rung saw the page's pager. redirect names the last rung's
 // landing on another page, and refused its landing on a page that is no page
 // at all — a login, the site's home — which no rung stores (landing.go).
+// moved names the last rung's landing on the requested page moved permanently
+// (movedPage): a note, never a gap.
 type carriedGaps struct {
 	api, next string
 	pager     bool
@@ -69,6 +76,7 @@ type carriedGaps struct {
 	wall      string
 	redirect  string
 	refused   string
+	moved     string
 }
 
 // carry is gaps with this page's conversion's gaps filled in where no earlier
@@ -114,8 +122,12 @@ func readerPage(source, markdown string) convertedPage {
 // later pages (pagedListing). page is the conversion
 // content came from (readerPage for a reader rung's markdown); a gap content
 // already names is not repeated. A wall the page or an earlier rung showed
-// is named unless an API record built the page (siteAPI).
+// is named unless an API record built the page (siteAPI). A permanent move of
+// the page (gaps.moved) is a note line under the partial marker
+// (movedNotePrefix) that flags nothing. No link keeps a session id
+// (withoutSessionIDs).
 func (page convertedPage) withGaps(content string, gaps carriedGaps, budget *loaderBudget) string {
+	content = withoutSessionIDs(content)
 	stored := partialReason(content)
 	reason := stored
 	if gaps.api != "" && !page.siteAPI {
@@ -152,10 +164,16 @@ func (page convertedPage) withGaps(content string, gaps carriedGaps, budget *loa
 	if next != "" && page.extractor == "" && !strings.Contains(reason, next) {
 		reason = joinReasons(reason, next)
 	}
-	if reason == stored {
+	body := partialBody(content)
+	moved := gaps.moved != "" && strings.TrimSpace(body) != "" && !strings.Contains(body, movedNotePrefix+gaps.moved)
+	if reason == stored && !moved {
 		return content
 	}
-	return withPartial(partialBody(content), reason)
+	if moved {
+		// under the partial marker, which must open the artifact, and never inside it
+		body = movedNotePrefix + gaps.moved + "\n\n" + pageText(body)
+	}
+	return withPartial(body, reason)
 }
 
 // hashRouteShell reports whether source names a hash route (#/… or #!…) of a

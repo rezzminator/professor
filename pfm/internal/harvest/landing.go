@@ -17,7 +17,8 @@ import (
 // or the reader rendered wherever the site sent it (the reader's page names
 // its canonical address). A redirect to the same page — http to https, a
 // trailing slash, www, a locale prefix, tracking parameters, a slug added to
-// the address — is the page. A redirect to another page of the site (a
+// the address, a same-host permanent move keeping the page's name
+// (movedPage) — is the page. A redirect to another page of the site (a
 // search, a listing) is stored under the requested address only with that
 // named; a redirect to a login or the site's home page is no page at all
 // (carriedGaps.refused). A rung that cannot tell where it landed says so,
@@ -32,19 +33,76 @@ func fetchPage(
 	headers map[string]string,
 	maxBytes int64,
 ) (body []byte, status int, contentType, final string, err error) {
+	response, _, err := fetchPageHops(ctx, client, rawURL, ua, headers, maxBytes)
+	return response.body, response.status, response.contentType, response.finalURL, err
+}
+
+// fetchPageHops is fetchPage's answer with the status of every redirect it came
+// through, in order: the client's own redirect policy still decides each hop
+// (gatewayClient chains it).
+func fetchPageHops(
+	ctx context.Context,
+	client *http.Client,
+	rawURL, ua string,
+	headers map[string]string,
+	maxBytes int64,
+) (response gatewayResponse, hops []int, err error) {
 	header := make(http.Header, len(headers))
 	for key, value := range headers {
 		header.Set(key, value)
 	}
-	response, err := gatewayAttempt(ctx, gatewayRequest{
+	var recording http.Client // a copy: the shared client's policy is never rewritten
+	if client != nil {
+		recording = *client
+	}
+	policy := recording.CheckRedirect
+	recording.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if next.Response != nil {
+			hops = append(hops, next.Response.StatusCode)
+		}
+		if policy != nil {
+			return policy(next, via)
+		}
+		return nil
+	}
+	response, err = gatewayAttempt(ctx, gatewayRequest{
 		url:              rawURL,
-		client:           client,
+		client:           &recording,
 		ua:               ua,
 		headers:          header,
 		max:              maxBytes,
 		oversizeTruncate: true,
 	})
-	return response.body, response.status, response.contentType, response.finalURL, err
+	return response, hops, err
+}
+
+// movedPage reports whether final is the requested page moved: every redirect
+// hop was permanent (301 or 308), the host is the same (www aside), and the
+// landing keeps the requested address's last path segment (its file or slug
+// name, an index document aside). A temporary hop, another host or another
+// name is not evidence of a move.
+func movedPage(requested, final string, hops []int) bool {
+	if len(hops) == 0 {
+		return false
+	}
+	for _, hop := range hops {
+		if hop != http.StatusMovedPermanently && hop != http.StatusPermanentRedirect {
+			return false
+		}
+	}
+	want, wantErr := url.Parse(requested)
+	got, gotErr := url.Parse(final)
+	if wantErr != nil || gotErr != nil {
+		return false
+	}
+	host := func(address *url.URL) string {
+		return strings.TrimPrefix(strings.ToLower(address.Hostname()), "www.")
+	}
+	last := func(address *url.URL) string {
+		path := landingPath(address)
+		return path[strings.LastIndex(path, "/")+1:]
+	}
+	return host(want) == host(got) && last(want) != "" && last(want) == last(got)
 }
 
 // landingKind is what a rung's final address is to the requested page.
@@ -124,12 +182,26 @@ func classifyLanding(ctx context.Context, requested, final string) landingKind {
 // answered from final learned, replacing an earlier rung's: the page this rung
 // stores is its own landing's. A rung that failed (err) learned nothing.
 func (gaps carriedGaps) landed(ctx context.Context, requested, final string, err error) carriedGaps {
+	return gaps.landedThrough(ctx, requested, final, nil, err)
+}
+
+// landedThrough is landed with the statuses of the redirect hops the rung
+// followed (fetchPageHops): a same-host permanent move of the page (movedPage)
+// is the page, noted as moved (carriedGaps.moved), never a different page.
+func (gaps carriedGaps) landedThrough(ctx context.Context, requested, final string, hops []int, err error) carriedGaps {
 	if err != nil {
 		return gaps
 	}
-	gaps.redirect, gaps.refused = "", ""
+	gaps.redirect, gaps.refused, gaps.moved = "", "", ""
 	where := "the site redirected " + safeURL(requested) + " to " + safeURL(final)
-	switch classifyLanding(ctx, requested, final) {
+	landing := classifyLanding(ctx, requested, final)
+	if landing == landedElsewhere && movedPage(requested, final, hops) {
+		gaps.moved = safeURL(requested) + " moved permanently to " + safeURL(final)
+		obs.Logger(ctx).Info("harvest: "+gaps.moved,
+			"target", logSource(requested), "landed", logSource(final))
+		landing = landedSame
+	}
+	switch landing {
 	case landedUnknown:
 		gaps.redirect = "the rung did not report the address it was answered from: " +
 			"a redirect to another page could not be ruled out"
@@ -202,7 +274,7 @@ func (h *Harvester) fetchRung(
 	headers map[string]string,
 	gaps *carriedGaps,
 ) ([]byte, int, string, error) {
-	body, status, contentType, final, err := fetchPage(ctx, client, target, ua, headers, h.options.MaxBytes)
-	*gaps = gaps.landed(ctx, target, final, err)
-	return body, status, contentType, err
+	response, hops, err := fetchPageHops(ctx, client, target, ua, headers, h.options.MaxBytes)
+	*gaps = gaps.landedThrough(ctx, target, response.finalURL, hops, err)
+	return response.body, response.status, response.contentType, err
 }

@@ -10,7 +10,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -60,8 +62,8 @@ func (h *Harvester) FetchPublic(ctx context.Context, source string, options Fetc
 	return h.PublicResult(source, h.FetchWithOptions(ctx, resolved, options), options.SizeOnly)
 }
 
-// PublicResult publishes a core result without exposing acquisition method,
-// rung traces, cache metadata, or private filesystem paths.
+// PublicResult publishes a core result without exposing a provider (the
+// method is its rung class, PublicMethod), rung traces, cache metadata, or private filesystem paths.
 func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Result {
 	if result.Error != "" {
 		log.Printf(
@@ -308,7 +310,21 @@ func publicSuccessSkeleton(source string, result Result) Result {
 		// Partial is part of what the artifact IS, not how it was acquired:
 		// a public caller must see a truncated page as truncated.
 		Partial: result.Partial,
+		Method:  PublicMethod(result.Method),
 	}
+}
+
+// PublicMethod names the rung that stored a page (direct, jina,
+// browser-chrome, …) without its provider: a mirror provider's method, or any
+// method carrying an address after its colon, is published as its class alone.
+func PublicMethod(method string) string {
+	if isMirrorProviderMethod(method) {
+		return "mirror"
+	}
+	if class, detail, ok := strings.Cut(method, ":"); ok && strings.ContainsAny(detail, "/.") {
+		return class
+	}
+	return method
 }
 
 func publicCacheStatus(status string) string {
@@ -550,6 +566,13 @@ func PublicFailureMessage(result Result) string {
 	case errorKindRefused:
 		return "The request was refused by access policy. Use a public URL or choose another copy."
 	case errorKindMissing:
+		if result.HTTPStatus == http.StatusNotFound || result.HTTPStatus == http.StatusGone {
+			return fmt.Sprintf(
+				"The requested document was not found: the source answered HTTP %d %s. Check the URL, or use findWorks to choose another copy.",
+				result.HTTPStatus,
+				http.StatusText(result.HTTPStatus),
+			)
+		}
 		return "The requested document was not found. Use findWorks, select a result, and fetch it again."
 	case errorKindConversion:
 		return "The document could not be converted or OCR'd. Try another copy."
@@ -568,4 +591,24 @@ func PublicFailureMessage(result Result) string {
 	default:
 		return "Retrieval failed. Retry or choose another work."
 	}
+}
+
+// JSONResult is one `pfm harvest --json` object: the public result with
+// `partial` (the reason the artifact is incomplete, empty when complete) and
+// `method` (the rung that stored the page) always present, so a caller reads
+// completeness and provenance from fields, never from the markdown marker.
+type JSONResult struct {
+	Result
+	Method  string `json:"method"`
+	Partial string `json:"partial"`
+}
+
+// JSONResults renders results for `pfm harvest --json`.
+func JSONResults(results []Result) []JSONResult {
+	out := make([]JSONResult, 0, len(results))
+	for i := range results {
+		r := &results[i]
+		out = append(out, JSONResult{Result: *r, Method: r.Method, Partial: r.Partial})
+	}
+	return out
 }

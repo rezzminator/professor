@@ -259,11 +259,8 @@ func (h *Harvester) fetchURLWithPolicy(
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
 		directRung, chromeRung = "google-drive-download", "google-drive-download-chrome"
 	}
-	// Ladder note: the Python reference also carried this defuddle.md reader
-	// rung and an opt-in real-browser rung (Patchright + system Chrome); both
-	// are wired below. Chrome impersonation here remains tls-client at the
-	// wire level — no JS, no real browser surface — which is why the opt-in
-	// browser rung exists as the ladder's last wall-bypass step.
+	// Chrome impersonation is tls-client at the wire level — no JS, no real browser
+	// surface — which is why the opt-in browser rung below is the last wall-bypass step.
 	for _, rung := range []struct {
 		name   string
 		client *http.Client
@@ -347,10 +344,10 @@ func (h *Harvester) fetchURLWithPolicy(
 		}
 		lastContentChars = contentChars(partialBody(converted))
 		binary4xxOK := status >= 400 && kind == kindPDF && strings.HasPrefix(string(body), "%PDF-")
-		// A wall is no content — unless an extractor that readsSiteAPI rendered
-		// the page from an API record it proved (page.siteAPI), the wall unread.
+		// A wall or the origin's error page is no content — unless an extractor that readsSiteAPI
+		// rendered the page from an API record it proved (page.siteAPI), the wall unread.
 		if len(body) == 0 || (isChallenge(body, status) && !page.siteAPI) ||
-			(status >= 400 && kind != kindHTML && kind != kindTXT && !binary4xxOK) {
+			(status >= 400 && !binary4xxOK && !page.siteAPI) {
 			continue
 		}
 		if !usableContent(converted, kind) {
@@ -426,7 +423,8 @@ func (h *Harvester) fetchURLWithPolicy(
 			Rungs:      rungs,
 		}
 	}
-	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil {
+	originGone := originMissing(lastStatus, lastChallenge, source) // no reader or archive copy stands in for it
+	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
 		rungs = append(rungs, "jina")
 		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
 		body, status, _, err := getBody(ctx, h.jina, target, h.userAgent, h.options.MaxBytes)
@@ -439,7 +437,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		} else {
 			lastStatus = status
 		}
-		if err == nil && status < 400 && !isChallenge(body, status) {
+		if err == nil && status < 400 && !isChallenge(body, status) && jinaTargetError(body) == 0 {
 			// Jina Reader already returns clean Markdown. Feeding it back into an
 			// HTML converter loses headings and code blocks, so preserve it as the
 			// original HTML-source kind for cache/type semantics.
@@ -453,7 +451,7 @@ func (h *Harvester) fetchURLWithPolicy(
 	}
 	// defuddle.md — a second keyless reader beside Jina (different infra,
 	// different blocks), tried before the legal mirror pivot.
-	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil {
+	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
 		rungs = append(rungs, "defuddle")
 		target := "https://defuddle.md/" + source
 		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
@@ -537,16 +535,16 @@ func (h *Harvester) fetchURLWithPolicy(
 						browserShellRender = true
 						log.Printf("harvest: browser rung rendered only the app shell for %s", logSource(source))
 					case usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
-						browserRenderWins(ctx, browserCandidate{
-							source:        source,
-							finalURL:      outcome.finalURL,
-							converted:     converted,
-							extractor:     page.extractor,
-							earlierChars:  lastContentChars,
-							appShell:      appShellText != "",
-							kept:          partialPage != nil,
-							keptExtractor: keptExtractor,
-						}):
+						!originMissing(status, false, source) && browserRenderWins(ctx, browserCandidate{
+						source:        source,
+						finalURL:      outcome.finalURL,
+						converted:     converted,
+						extractor:     page.extractor,
+						earlierChars:  lastContentChars,
+						appShell:      appShellText != "",
+						kept:          partialPage != nil,
+						keptExtractor: keptExtractor,
+					}):
 						return h.storeResult(
 							source,
 							kindHTML,
@@ -622,7 +620,7 @@ func (h *Harvester) fetchURLWithPolicy(
 	}
 	// Any public source may have a legal Wayback snapshot, not only a DOI
 	// landing page. Avoid recursing when the snapshot itself fails.
-	if !strings.Contains(strings.ToLower(source), "web.archive.org") && !isPrivateURL(source) {
+	if !strings.Contains(strings.ToLower(source), "web.archive.org") && !isPrivateURL(source) && !originGone {
 		rungs = append(rungs, "wayback")
 		if snapshot, wbErr := WaybackRawURL(ctx, h.oa, source); wbErr == nil && snapshot != "" {
 			snapshotCtx := ctx

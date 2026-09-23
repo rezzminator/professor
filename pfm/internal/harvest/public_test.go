@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -173,7 +174,7 @@ func TestPublicResultKeepsCompleteArtifactAndFetchedAtWithoutProvenance(t *testi
 	if got.Error != "" {
 		t.Fatalf("PublicResult() error = %q", got.Error)
 	}
-	if got.Method != "" || len(got.Rungs) != 0 || strings.Contains(got.Content, "mirror.secret.example") ||
+	if got.Method != "mirror" || len(got.Rungs) != 0 || strings.Contains(got.Content, "mirror.secret.example") ||
 		strings.Contains(got.Content, cacheDir) {
 		t.Fatalf("public result leaked private fields: %#v", got)
 	}
@@ -245,5 +246,32 @@ func TestPublicResultDoesNotAcceptNonHarvesterProvenanceArtifact(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(got.Error), "not found") {
 		t.Fatalf("foreign artifact was misreported missing: %q", got.Error)
+	}
+}
+
+// TestJSONResultsCarriesPartialAndMethod pins the `pfm harvest --json`
+// object: `partial` and `method` are always present, so a caller reads
+// completeness and the storing rung from fields, never from the markdown
+// marker.
+func TestJSONResultsCarriesPartialAndMethod(t *testing.T) {
+	complete := Result{Source: "https://fixture.example/a", Kind: "html", Method: "browser-chrome"}
+	partial := complete
+	partial.Partial = "page 3 of 9 failed to convert"
+	encoded, err := json.Marshal(JSONResults([]Result{complete, partial}))
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("decode %s: %v", encoded, err)
+	}
+	for index, want := range []string{"", partial.Partial} {
+		got, ok := decoded[index]["partial"]
+		if !ok || got != want {
+			t.Fatalf("result %d partial=%v (present=%t), want %q: %s", index, got, ok, want, encoded)
+		}
+		if decoded[index]["method"] != "browser-chrome" {
+			t.Fatalf("result %d method=%v, want browser-chrome: %s", index, decoded[index]["method"], encoded)
+		}
 	}
 }

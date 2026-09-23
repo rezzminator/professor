@@ -378,8 +378,15 @@ func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {
 			t.Errorf("plain JSON omitted %q:\n%s", want, stdout.String())
 		}
 	}
-	if strings.Contains(stdout.String(), `"method"`) || strings.Contains(stdout.String(), `"rungs"`) {
+	// The storing rung's class and the partial reason are public fields; the
+	// rung trace stays private.
+	if strings.Contains(stdout.String(), `"rungs"`) {
 		t.Fatalf("plain JSON exposed private acquisition fields:\n%s", stdout.String())
+	}
+	for _, want := range []string{`"method": "local"`, `"partial": ""`} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("plain JSON omitted %s:\n%s", want, stdout.String())
+		}
 	}
 }
 

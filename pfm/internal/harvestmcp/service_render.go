@@ -23,6 +23,7 @@ func fetchItem(result harvest.Result) FetchItem {
 		Path:        result.Path,
 		Error:       result.Error,
 		Partial:     result.Partial,
+		Method:      harvest.PublicMethod(result.Method),
 	}
 }
 

@@ -1,6 +1,7 @@
 package harvestmcp
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -38,5 +39,19 @@ func TestFetchItemCarriesOnlyPublicResultFields(t *testing.T) {
 	}
 	if strings.Contains(item.Path, "mirror.secret.example") || strings.Contains(item.Content, "mirror.secret.example") {
 		t.Fatalf("fetch item exposed provider details: %#v", item)
+	}
+}
+
+// TestFetchItemNamesTheRungAndAlwaysCarriesPartial: the fetch item names the
+// rung class that stored the page (a mirror provider only as "mirror") and
+// always carries `partial`, empty for a complete artifact.
+func TestFetchItemNamesTheRungAndAlwaysCarriesPartial(t *testing.T) {
+	t.Setenv("TMUX_TMPDIR", t.TempDir())
+	encoded, err := json.Marshal(fetchItem(harvest.Result{Source: "https://fixture.example/a", Method: "doi-mirror"}))
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"method":"mirror"`) || !strings.Contains(string(encoded), `"partial":""`) {
+		t.Fatalf("fetch item lacks method or partial: %s", encoded)
 	}
 }

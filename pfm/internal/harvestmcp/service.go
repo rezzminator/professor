@@ -707,7 +707,7 @@ type FetchItem struct {
 	Source      string   `json:"source"`
 	Content     string   `json:"content,omitempty"`
 	CacheStatus string   `json:"cache_status,omitempty"`
-	Method      string   `json:"-"`
+	Method      string   `json:"method"` // the rung class that stored the page (harvest.PublicMethod)
 	Bytes       int64    `json:"bytes,omitempty"`
 	Tokens      int      `json:"tokens,omitempty"`
 	Chars       int      `json:"chars,omitempty"`
@@ -717,7 +717,7 @@ type FetchItem struct {
 	FetchedAt   string   `json:"fetched_at,omitempty"`
 	// Partial names why the artifact is known to be incomplete (the content
 	// opens with the same note); empty for a complete artifact.
-	Partial string `json:"partial,omitempty"`
+	Partial string `json:"partial"`
 }
 type FetchOutput struct {
 	Items []FetchItem `json:"items"`

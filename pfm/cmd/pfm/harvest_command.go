@@ -128,7 +128,7 @@ func runHarvest(args []string, stdout, stderr io.Writer, runtime commandRuntime)
 		}
 	}
 	if *jsonOutput {
-		encoded, err := json.MarshalIndent(results, "", "  ")
+		encoded, err := json.MarshalIndent(harvest.JSONResults(results), "", "  ")
 		if err != nil {
 			fmt.Fprintf(stderr, "pfm harvest: encode results: %v\n", err)
 			return 1

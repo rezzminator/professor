@@ -6,59 +6,44 @@
 
 ## What is Free Software?
 
-“Free software” means software that respects users'
-freedom and community.  Roughly, it means that **the users have the
-freedom to run, copy, distribute, study, change and improve the
-software**.  Thus, “free software” is a matter of
-liberty, not price.  To understand the concept, you should think of
-“free” as in “free speech,” not as in
-“free beer.”  We sometimes call it “libre
-software,” borrowing the French or Spanish word for
-“free” as in freedom, to show we do not mean the software
-is gratis.
+“Free software” means software that respects users' freedom and community. Roughly, it means that **the users have the freedom to run, copy, distribute, study, change and improve the software**. Thus, “free software” is a matter of liberty, not price. To understand the concept, you should think of “free” as in “free speech,” not as in “free beer.” We sometimes call it “libre software,” borrowing the French or Spanish word for “free” as in freedom, to show we do not mean the software is gratis.
 
-You may have paid money to get copies of a free program, or you may
-have obtained copies at no charge.  But regardless of how you got your
-copies, you always have the freedom to copy and change the software,
-even to [sell copies](/philosophy/selling.html).
+You may have paid money to get copies of a free program, or you may have obtained copies at no charge. But regardless of how you got your copies, you always have the freedom to copy and change the software, even to [sell copies](/philosophy/selling.html).
 
-We campaign for these freedoms because everyone deserves them.  With
-these freedoms, the users (both individually and collectively) control
-the program and what it does for them.  When users don't control the
-program, we call it a “nonfree” or
-“proprietary” program.  The nonfree program controls the
-users, and the developer controls the program; this makes the
-program [
-an instrument of unjust power](/philosophy/free-software-even-more-important.html).
+We campaign for these freedoms because everyone deserves them. With these freedoms, the users (both individually and collectively) control the program and what it does for them. When users don't control the program, we call it a “nonfree” or “proprietary” program. The nonfree program controls the users, and the developer controls the program; this makes the program [an instrument of unjust power](/philosophy/free-software-even-more-important.html).
 
-“Open source” is something different: it has a very
-different philosophy based on different values.  Its practical
-definition is different too, but nearly all open source programs are
-in fact free.  We explain the
-difference in [
-Why “Open Source” misses the point of Free Software](/philosophy/open-source-misses-the-point.html).
+“Open source” is something different: it has a very different philosophy based on different values. Its practical definition is different too, but nearly all open source programs are in fact free. We explain the difference in [Why “Open Source” misses the point of Free Software](/philosophy/open-source-misses-the-point.html).
 
 ### Table of contents
 
-Have a question about free software licensing not answered here?
-See our other [licensing resources](http://www.fsf.org/licensing),
-and if necessary contact the FSF Compliance Lab
-at [licensing@fsf.org](mailto:licensing@fsf.org).
+- [The Free Software Definition](#fs-definition)
+  - [The four essential freedoms](#four-freedoms)
+  - [Free software](#selling)*can*be commercial
+- [Clarifying the Boundary Between Free and Nonfree](#clarifying)
+  - [The freedom to run the program as you wish](#run-the-program)
+  - [The freedom to study the source code and make changes](#make-changes)
+  - [The freedom to redistribute if you wish: basic requirements](#redistribute)
+  - [Copyleft](#copyleft)
+  - [Rules about packaging and distribution details](#packaging)
+  - [Export regulations](#exportcontrol)
+  - [Legal considerations](#legal-details)
+  - [Contract-based licenses](#contracts)
+- [The Free Software Definition in Practice](#in-practice)
+  - [How we interpret these criteria](#interpretation)
+  - [Get help with free licenses](#get-help)
+  - [Use the right words when talking about free software](#terminology)
+- [Beyond Software](#beyond-software)
+- [History](#History)
+
+Have a question about free software licensing not answered here? See our other [licensing resources](http://www.fsf.org/licensing), and if necessary contact the FSF Compliance Lab at [licensing@fsf.org](mailto:licensing@fsf.org).
 
 ### The Free Software Definition
 
-The free software definition presents the criteria for whether a
-particular software program qualifies as free software.  From time to
-time we revise this definition, to clarify it or to resolve questions
-about subtle issues.  See the [History section](#History)
-below for a list of changes that affect the definition of free
-software.
+The free software definition presents the criteria for whether a particular software program qualifies as free software. From time to time we revise this definition, to clarify it or to resolve questions about subtle issues. See the [History section](#History) below for a list of changes that affect the definition of free software.
 
 #### The four essential freedoms
 
-A program is free software if the program's users (referred to
-individually here as “you”) have the four essential
-freedoms: [[1]](#f1)
+A program is free software if the program's users (referred to individually here as “you”) have the four essential freedoms: [[1]](#f1)
 
 - The freedom to run the program as you wish, for any purpose (freedom 0).
 - The freedom to study how the program works, and change it so it does your computing as you wish (freedom 1). Access to the source code is a precondition for this.
@@ -85,14 +70,7 @@ In the rest of this article we explain more precisely how far the various freedo
 
 #### The freedom to run the program as you wish
 
-The freedom to run the program means the freedom for any kind of person
-or organization to use it on any kind of computer system, for any kind of
-overall job and purpose, without being required to communicate about it
-with the developer or any other specific entity.  In this freedom, it is
-the *user's* purpose that matters, not the *developer's*
-purpose; you as a user are free to run the program for your purposes,
-and if you distribute it to other people, they are then free to run it for
-their purposes, but you are not entitled to impose your purposes on them.
+The freedom to run the program means the freedom for any kind of person or organization to use it on any kind of computer system, for any kind of overall job and purpose, without being required to communicate about it with the developer or any other specific entity. In this freedom, it is the *user's* purpose that matters, not the *developer's* purpose; you as a user are free to run the program for your purposes, and if you distribute it to other people, they are then free to run it for their purposes, but you are not entitled to impose your purposes on them.
 
 The freedom to run the program as you wish means that you are not forbidden or stopped from making it run. This has nothing to do with what functionality the program has, whether it is technically capable of functioning in any given environment, or whether it is useful for any particular computing activity.
 
@@ -118,44 +96,19 @@ One special case of freedom 1 is to delete the program's code so it returns afte
 
 #### The freedom to redistribute if you wish: basic requirements
 
-Freedom to distribute (freedoms 2 and 3) means you are free to
-redistribute copies, either with or without modifications, either
-gratis or charging a fee for distribution, to
-[anyone anywhere](#exportcontrol).  Being free to do these
-things means (among other things) that you do not have to ask or pay
-for permission to do so.
+Freedom to distribute (freedoms 2 and 3) means you are free to redistribute copies, either with or without modifications, either gratis or charging a fee for distribution, to [anyone anywhere](#exportcontrol). Being free to do these things means (among other things) that you do not have to ask or pay for permission to do so.
 
 You should also have the freedom to make modifications and use them privately in your own work or play, without even mentioning that they exist. If you do publish your changes, you should not be required to notify anyone in particular, or in any particular way.
 
-Freedom 3 includes the freedom to release your modified versions
-as free software.  A free license may also permit other ways of
-releasing them; in other words, it does not have to be
-a [copyleft](/licenses/copyleft.html) license.  However, a
-license that requires modified versions to be nonfree does not qualify
-as a free license.
+Freedom 3 includes the freedom to release your modified versions as free software. A free license may also permit other ways of releasing them; in other words, it does not have to be a [copyleft](/licenses/copyleft.html) license. However, a license that requires modified versions to be nonfree does not qualify as a free license.
 
 The freedom to redistribute copies must include binary or executable forms of the program, as well as source code, for both modified and unmodified versions. (Distributing programs in runnable form is necessary for conveniently installable free operating systems.) It is OK if there is no way to produce a binary or executable form for a certain program (since some languages don't support that feature), but you must have the freedom to redistribute such forms should you find or develop a way to make them.
 
 #### Copyleft
 
-Certain kinds of rules about the manner of distributing free
-software are acceptable, when they don't conflict with the central
-freedoms.  For example, [copyleft](/licenses/copyleft.html)
-(very simply stated) is the rule that when redistributing the program,
-you cannot add restrictions to deny other people the central freedoms.
-This rule does not conflict with the central freedoms; rather it
-protects them.
+Certain kinds of rules about the manner of distributing free software are acceptable, when they don't conflict with the central freedoms. For example, [copyleft](/licenses/copyleft.html) (very simply stated) is the rule that when redistributing the program, you cannot add restrictions to deny other people the central freedoms. This rule does not conflict with the central freedoms; rather it protects them.
 
-In the GNU project, we use copyleft to protect the four freedoms
-legally for everyone.  We believe there are important reasons why
-[it is better to use
-copyleft](/philosophy/pragmatic.html).  However,
-[
-noncopylefted free software](/philosophy/categories.html#Non-CopyleftedFreeSoftware) is ethical
-too.  See [Categories of Free
-Software](/philosophy/categories.html) for a description of how “free software,”
-“copylefted software” and other categories of software
-relate to each other.
+In the GNU project, we use copyleft to protect the four freedoms legally for everyone. We believe there are important reasons why [it is better to use copyleft](/philosophy/pragmatic.html). However, [noncopylefted free software](/philosophy/categories.html#Non-CopyleftedFreeSoftware) is ethical too. See [Categories of Free Software](/philosophy/categories.html) for a description of how “free software,” “copylefted software” and other categories of software relate to each other.
 
 #### Rules about packaging and distribution details
 
@@ -193,11 +146,7 @@ Note that criteria such as those stated in this free software definition require
 
 #### Get help with free licenses
 
-If you are interested in whether a specific license qualifies as a free
-software license, see our [list
-of licenses](/licenses/license-list.html).  If the license you are concerned with is not
-listed there, you can ask us about it by sending us email at
-[<licensing@gnu.org>](mailto:licensing@gnu.org).
+If you are interested in whether a specific license qualifies as a free software license, see our [list of licenses](/licenses/license-list.html). If the license you are concerned with is not listed there, you can ask us about it by sending us email at [<licensing@gnu.org>](mailto:licensing@gnu.org).
 
 If you are contemplating writing a new license, please contact the Free Software Foundation first by writing to that address. The proliferation of different free software licenses means increased work for users in understanding the licenses; we may be able to help you find an existing free software license that meets your needs.
 
@@ -205,32 +154,17 @@ If that isn't possible, if you really need a new license, with our help you can 
 
 #### Use the right words when talking about free software
 
-When talking about free software, it is best to avoid using terms
-like “give away” or “for free,” because those terms imply that
-the issue is about price, not freedom.  Some common terms such
-as “piracy” embody opinions we hope you won't endorse.  See
-[Confusing Words and Phrases that
-are Worth Avoiding](/philosophy/words-to-avoid.html) for a discussion of these terms.  We also have
-a list of proper [translations of
-“free software”](/philosophy/fs-translations.html) into various languages.
+When talking about free software, it is best to avoid using terms like “give away” or “for free,” because those terms imply that the issue is about price, not freedom. Some common terms such as “piracy” embody opinions we hope you won't endorse. See [Confusing Words and Phrases that are Worth Avoiding](/philosophy/words-to-avoid.html) for a discussion of these terms. We also have a list of proper [translations of “free software”](/philosophy/fs-translations.html) into various languages.
 
 Another group uses the term “open source” to mean something close (but not identical) to “free software.” We prefer the term “free software” because, once you have heard that it refers to freedom rather than price, it calls to mind freedom. The word “open” never refers to freedom.
 
 ### Beyond Software
 
-[Software manuals must be free](/philosophy/free-doc.html),
-for the same reasons that software must be free, and because the
-manuals are in effect part of the software.
+[Software manuals must be free](/philosophy/free-doc.html), for the same reasons that software must be free, and because the manuals are in effect part of the software.
 
-The same arguments also make sense for other kinds of works of
-practical use—that is to say, works that embody useful knowledge,
-such as educational works and reference
-works.  [Wikipedia](https://wikipedia.org) is the best-known
-example.
+The same arguments also make sense for other kinds of works of practical use—that is to say, works that embody useful knowledge, such as educational works and reference works. [Wikipedia](https://wikipedia.org) is the best-known example.
 
-Any kind of work *can* be free, and the definition of free software
-has been extended to a definition of [
-free cultural works](http://freedomdefined.org/) applicable to any kind of works.
+Any kind of work *can* be free, and the definition of free software has been extended to a definition of [free cultural works](http://freedomdefined.org/) applicable to any kind of works.
 
 ### History
 
@@ -257,8 +191,7 @@ From time to time we revise this Free Software Definition. Here is the list of s
 - [Version 1.118](/philosophy/free-sw-history/118.html)
 - Clarification: the issue is limits on your right to modify, not on what modifications you have made. And modifications are not limited to “improvements”
 - [Version 1.111](/philosophy/free-sw-history/111.html)
-- Clarify 1.77 by saying that only
-retroactive *restrictions*are unacceptable. The copyright holders can always grant additional*permission*for use of the work by releasing the work in another way in parallel.
+- Clarify 1.77 by saying that only retroactive *restrictions*are unacceptable. The copyright holders can always grant additional*permission*for use of the work by releasing the work in another way in parallel.
 - [Version 1.105](/philosophy/free-sw-history/105.html)
 - Reflect, in the brief statement of freedom 1, the point (already stated in version 1.80) that it includes really using your modified version for your computing.
 - [Version 1.92](/philosophy/free-sw-history/92.html)
@@ -272,13 +205,11 @@ retroactive *restrictions*are unacceptable. The copyright holders can always gra
 - [Version 1.77](/philosophy/free-sw-history/77.html)
 - Clarify that all retroactive changes to the license are unacceptable, even if it's not described as a complete replacement.
 - [Version 1.74](/philosophy/free-sw-history/74.html)
-- Four clarifications of points not explicit enough, or stated
-in some places but not reflected everywhere:
-- “Improvements” does not mean the license can substantively limit what kinds of modified versions you can release. Freedom 3 includes distributing modified versions, not just changes.
-- The right to merge in existing modules refers to those that are suitably licensed.
-- Explicitly state the conclusion of the point about export controls.
-- Imposing a license change constitutes revoking the old license.
-
+- Four clarifications of points not explicit enough, or stated in some places but not reflected everywhere:
+  - “Improvements” does not mean the license can substantively limit what kinds of modified versions you can release. Freedom 3 includes distributing modified versions, not just changes.
+  - The right to merge in existing modules refers to those that are suitably licensed.
+  - Explicitly state the conclusion of the point about export controls.
+  - Imposing a license change constitutes revoking the old license.
 - [Version 1.57](/philosophy/free-sw-history/57.html)
 - Add “Beyond Software” section.
 - [Version 1.46](/philosophy/free-sw-history/46.html)
@@ -298,14 +229,8 @@ in some places but not reflected everywhere:
 - [Version 1.11](/philosophy/free-sw-history/11.html)
 - Note that a free license may require you to send a copy of versions you distribute to previous developers on request.
 
-There are gaps in the version numbers shown above because there are
-other changes in this page that do not affect the definition or its
-interpretations.  For instance, the list does not include changes in
-asides, formatting, spelling, punctuation, or other parts of the page.
-You can review the complete list of changes to the page through
-the [cvsweb
-interface](//web.cvs.savannah.gnu.org/viewvc/www/philosophy/free-sw.html?root=www&view=log).
+There are gaps in the version numbers shown above because there are other changes in this page that do not affect the definition or its interpretations. For instance, the list does not include changes in asides, formatting, spelling, punctuation, or other parts of the page. You can review the complete list of changes to the page through the [cvsweb interface](//web.cvs.savannah.gnu.org/viewvc/www/philosophy/free-sw.html?root=www&view=log).
 
 ### Footnote
 
-- The reason they are numbered 0, 1, 2 and 3 is historical. Around 1990 there were three freedoms, numbered 1, 2 and 3. Then we realized that the freedom to run the program needed to be mentioned explicitly. It was clearly more basic than the other three, so it properly should precede them. Rather than renumber the others, we made it freedom 0.
+1. The reason they are numbered 0, 1, 2 and 3 is historical. Around 1990 there were three freedoms, numbered 1, 2 and 3. Then we realized that the freedom to run the program needed to be mentioned explicitly. It was clearly more basic than the other three, so it properly should precede them. Rather than renumber the others, we made it freedom 0.

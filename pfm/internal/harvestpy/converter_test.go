@@ -253,3 +253,125 @@ func fakeLineConverter(t *testing.T, response string) *Converter {
 	t.Cleanup(func() { _ = converter.Close() })
 	return converter
 }
+
+// TestHTMLConversionKeepsBlockStructure: pages cut from the harvests that lost
+// their structure — a wikitable after a heading that follows a citation link,
+// MDN headings whose text sits in a permalink anchor with a spec table and a
+// See also list, a GitHub README's div-wrapped headings and link lists, a
+// docsify anchor heading after a code block. Every heading stays a "#" line,
+// every table row a "|" line, every bullet a "- " line; a site nav bar
+// outside the main content is still dropped. It needs the pinned
+// interpreter (HARVESTPY_CORPUS_PYTHON): trafilatura runs for real.
+func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
+	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
+	if python == "" {
+		t.Skip("HARVESTPY_CORPUS_PYTHON is not set; block-structure fixtures need the pinned interpreter")
+	}
+	t.Setenv("PYTHONDONTWRITEBYTECODE", "1")
+	cases := []struct {
+		fixture              string
+		heads, rows, bullets []string
+		code, absent         []string
+	}{
+		{
+			fixture: "wikitable.html",
+			heads:   []string{"## Prize", "## List of laureates", "## 50-year secrecy rule"},
+			rows:    []string{"Wilhelm Röntgen", "Hendrik Lorentz", "Marie Curie", "Lord Rayleigh", "Robert Koch"},
+		},
+		{
+			fixture: "mdn.html",
+			heads: []string{
+				"## Description",
+				"### Array indices",
+				"#### Normalization of the length property",
+				"## Specifications",
+				"## See also",
+			},
+			rows:    []string{"ECMAScript® 2027 Language Specification"},
+			bullets: []string{"Indexed collections", "TypedArray", "ArrayBuffer"},
+		},
+		{
+			fixture: "awesome.html",
+			heads:   []string{"# Awesome Python", "## Categories", "## Science", "### Type Checkers", "## Podcasts"},
+			bullets: []string{
+				"HTTP Clients",
+				"Web Scraping",
+				"Email",
+				"ORM",
+				"Caching",
+				"Core",
+				"numpy",
+				"scipy",
+				"Symbolic Mathematics",
+				"sympy",
+				"mypy",
+				"pyright",
+				"Talk Python To Me",
+				"Python Bytes",
+			},
+		},
+		{
+			fixture: "docsify.html",
+			heads:   []string{"# Quick start", "## Initialize", "## Writing content"},
+			code:    []string{"npm i docsify-cli -g", "docsify init ./docs"},
+		},
+		{
+			fixture: "sitenav.html",
+			heads:   []string{"# Field notes on river gauges", "## Related reading"},
+			bullets: []string{"Stilling wells", "Staff gauges"},
+			absent:  []string{"Careers", "Pricing", "Contact us"},
+		},
+	}
+	converter := testConverter(t, python)
+	t.Cleanup(func() { _ = converter.Close() })
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			result, err := converter.Convert(
+				context.Background(),
+				Request{Path: filepath.Join("testdata", "blocks", tc.fixture), Kind: "html"},
+			)
+			if err != nil {
+				t.Fatalf("convert: %v", err)
+			}
+			lines := strings.Split(result.Markdown, "\n")
+			has := func(match func(string) bool) bool {
+				for _, line := range lines {
+					if match(line) {
+						return true
+					}
+				}
+				return false
+			}
+			for _, head := range tc.heads {
+				if !has(func(line string) bool { return line == head }) {
+					t.Errorf("heading %q is not its own line", head)
+				}
+			}
+			for _, row := range tc.rows {
+				if !has(func(line string) bool { return strings.HasPrefix(line, "|") && strings.Contains(line, row) }) {
+					t.Errorf("table row holding %q is missing", row)
+				}
+			}
+			for _, bullet := range tc.bullets {
+				if !has(func(line string) bool {
+					return strings.HasPrefix(strings.TrimLeft(line, " "), "- ") && strings.Contains(line, bullet)
+				}) {
+					t.Errorf("bullet %q is missing", bullet)
+				}
+			}
+			for _, code := range tc.code {
+				if !has(func(line string) bool { return line == code }) {
+					t.Errorf("code line %q is not its own line", code)
+				}
+			}
+			for _, word := range tc.absent {
+				if strings.Contains(result.Markdown, word) {
+					t.Errorf("site navigation %q leaked into the content", word)
+				}
+			}
+			if t.Failed() {
+				t.Logf("markdown:\n%s", result.Markdown)
+			}
+		})
+	}
+}

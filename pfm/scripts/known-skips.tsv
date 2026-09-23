@@ -24,6 +24,7 @@ github.com/rezzminator/professor/pfm/internal/harvest	TestLiveProviderUnpaywall	
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCSVAndJSONConversionPathsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCorpusPythonAcceptanceExactHTMLFixture	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestCorpusPythonConversionOwnedPairsAreByteExact	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLConversionKeepsBlockStructure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestPinnedPythonArchiveRetainsFullRuntimeAndStdlib	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/hostfixture	TestReadOnlyHomeRefusesAWriteInsideIt	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/index	TestIndexStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1

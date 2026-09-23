@@ -64,18 +64,212 @@ def html_metadata(raw: str) -> str:
 def convert_html(path: pathlib.Path) -> str:
     import trafilatura
 
+    _keep_linked_blocks()
     # Local HTML follows the old dispatch path, which decodes malformed bytes
     # with errors ignored before trafilatura sees the document.
     raw = path.read_bytes().decode("utf-8", errors="ignore")
     with _quiet_stdout():
-        body = trafilatura.extract(
+        document = trafilatura.bare_extraction(
             raw,
-            output_format="markdown",
             favor_recall=True,
+            include_formatting=True,
             include_links=True,
             include_images=True,
-        ) or ""
+            with_metadata=False,
+        )
+    body = ""
+    if document is not None:
+        part = document.get if isinstance(document, dict) else lambda name: getattr(document, name, None)
+        blocks = [_render_blocks(part("body")), _render_blocks(part("commentsbody"))]
+        body = "\n\n".join(block for block in blocks if block)
     return tidy_markdown(html_metadata(raw) + body)
+
+
+# trafilatura prunes the main-content subtree it selected by link density:
+# a div, list or table whose text is mostly links is deleted as boilerplate.
+# Inside the main content that is the content itself — an awesome list, a See
+# also list, a wikitable of linked names, a GitHub heading wrapper whose only
+# link is a textless permalink anchor. Site navigation is dropped before this
+# point (tree cleaning and the discard XPaths), so only paragraphs keep the
+# link-density test.
+_LINKED_BLOCKS_KEPT = False
+
+
+def _keep_linked_blocks() -> None:
+    global _LINKED_BLOCKS_KEPT
+    if _LINKED_BLOCKS_KEPT:
+        return
+    from trafilatura import main_extractor
+
+    prune = main_extractor.delete_by_link_density
+
+    def delete_by_link_density(tree, tagname, backtracking=False, favor_precision=False):
+        if tagname in ("div", "list"):
+            return tree
+        return prune(tree, tagname, backtracking=backtracking, favor_precision=favor_precision)
+
+    main_extractor.delete_by_link_density = delete_by_link_density
+    main_extractor.link_density_test_tables = lambda element: False
+    _LINKED_BLOCKS_KEPT = True
+
+
+# trafilatura's own markdown writer loses block boundaries: a heading after a
+# trailing inline link is glued onto that line, a heading whose text sits in a
+# link child gets no "#", and a block inside a table cell breaks its row. The
+# writer below renders its extracted tree block by block, each block on its own
+# line with a blank line between blocks.
+_HI = {"#b": "**", "#i": "*", "#u": "__", "#t": "`"}
+_BLOCK_TAGS = frozenset({"head", "p", "list", "table", "quote", "code", "div", "graphic", "main", "body", "doc", "comments"})
+
+
+def _render_blocks(element) -> str:
+    if element is None:
+        return ""
+    return "\n\n".join(_blocks(element))
+
+
+def _blocks(element) -> list[str]:
+    """The children of element as markdown blocks; loose inline content
+    between block children becomes a paragraph of its own."""
+    out: list[str] = []
+    run: list[str] = [element.text or ""]
+
+    def flush() -> None:
+        text = " ".join("".join(run).split())
+        if text:
+            out.append(text)
+        run.clear()
+
+    for child in element:
+        if child.tag in _BLOCK_TAGS and not (child.tag == "code" and _inline_code(child)):
+            flush()
+            block = _block(child)
+            if block:
+                out.append(block)
+            run.append(child.tail or "")
+        else:
+            run.append(_inline(child, False))
+    flush()
+    return out
+
+
+def _inline_code(element) -> bool:
+    return "\n" not in (element.text or "") and element.find(".//lb") is None and element.getparent() is not None and element.getparent().tag not in {"main", "body", "div", "doc", "quote"}
+
+
+def _block(element) -> str:
+    tag = element.tag
+    if tag == "head":
+        text = _inline_content(element, True)
+        if not text:
+            return ""
+        rend = element.get("rend") or ""
+        level = int(rend[1]) if len(rend) == 2 and rend[1].isdigit() else 2
+        return "#" * min(max(level, 1), 6) + " " + text
+    if tag == "p":
+        if any(child.tag in _BLOCK_TAGS for child in element):
+            return "\n\n".join(_blocks(element))
+        return _inline_content(element, False)
+    if tag == "list":
+        return _list(element)
+    if tag == "table":
+        return _table(element)
+    if tag == "quote":
+        inner = "\n\n".join(_blocks(element))
+        return "\n".join(("> " + line).rstrip() for line in inner.splitlines())
+    if tag == "code":
+        return "```\n" + _code_text(element).strip("\n") + "\n```"
+    if tag == "graphic":
+        return _graphic(element)
+    return "\n\n".join(_blocks(element))
+
+
+def _list(element) -> str:
+    ordered = (element.get("rend") or "").lower() in {"ol", "#ol"}
+    lines: list[str] = []
+    number = 0
+    for item in element:
+        if item.tag != "item":
+            continue
+        number += 1
+        marker = f"{number}. " if ordered else "- "
+        body = "\n".join(_blocks(item)).splitlines() or [""]
+        lines.append((marker + body[0]).rstrip())
+        lines.extend(("   " if ordered else "  ") + line if line else "" for line in body[1:])
+    return "\n".join(lines)
+
+
+def _table(element) -> str:
+    rows: list[list[str]] = []
+    header = False
+    for row in element.iter("row"):
+        cells = [_inline_content(cell, False).replace("|", "\\|") for cell in row if cell.tag == "cell"]
+        if not cells:
+            continue
+        if not rows and any(cell.get("role") == "head" for cell in row if cell.tag == "cell"):
+            header = True
+        rows.append(cells)
+    if not rows:
+        return ""
+    width = max(len(row) for row in rows)
+    rows = [row + [""] * (width - len(row)) for row in rows]
+    if not header:
+        rows.insert(0, [""] * width)
+    lines = ["| " + " | ".join(row) + " |" for row in rows]
+    lines.insert(1, "|" + "---|" * width)
+    return "\n".join(lines)
+
+
+def _graphic(element) -> str:
+    alt = " ".join(f"{element.get('title', '')} {element.get('alt', '')}".split())
+    src = element.get("src", "")
+    return f"![{alt}]({src})" if src else ""
+
+
+def _code_text(element) -> str:
+    parts = [element.text or ""]
+    for child in element:
+        parts.append("\n" if child.tag == "lb" else _code_text(child))
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
+def _inline_content(element, in_head: bool) -> str:
+    """element's text and inline children on one line; a block nested where
+    only inline content fits (a paragraph inside a cell) joins with a space."""
+    parts = [element.text or ""]
+    for child in element:
+        parts.append(_inline(child, in_head))
+    return " ".join("".join(parts).split())
+
+
+def _inline(element, in_head: bool) -> str:
+    tag = element.tag
+    tail = element.tail or ""
+    if tag == "lb":
+        return " " + tail
+    if tag == "graphic":
+        return " " + _graphic(element) + " " + tail
+    if tag == "code":
+        return "`" + " ".join(_code_text(element).split()) + "`" + tail
+    inner = _inline_content(element, in_head)
+    if tag == "ref":
+        target = element.get("target") or ""
+        if not inner:
+            return tail
+        # A heading's own permalink is the heading text, not a link; a
+        # permalink glyph beside the text ("#", "¶") is dropped.
+        if in_head and target.startswith("#"):
+            return (inner if any(char.isalnum() for char in inner) else "") + tail
+        if not target:
+            return inner + tail
+        return f"[{inner}]({target})" + tail
+    if tag == "hi" and inner:
+        mark = _HI.get(element.get("rend") or "", "")
+        return f"{mark}{inner}{mark}" + tail
+    if tag == "del" and inner:
+        return f"~~{inner}~~" + tail
+    return " " + inner + " " + tail
 
 
 def convert_html_full(path: pathlib.Path) -> str:

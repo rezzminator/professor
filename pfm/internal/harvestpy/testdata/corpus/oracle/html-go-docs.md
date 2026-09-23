@@ -45,7 +45,7 @@ Building a simple web application.
 
 ### [How to write Go code](code.html)
 
-This doc explains how to develop a simple set of Go packages inside a module, and it shows how to use the [go command](/cmd/go/) to build and test packages.
+This doc explains how to develop a simple set of Go packages inside a module, and it shows how to use the [`go` command](/cmd/go/) to build and test packages.
 
 ### [A Tour of Go](/tour/)
 

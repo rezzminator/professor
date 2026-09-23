@@ -43,7 +43,7 @@
   - [Iterable Streams API](stream_iter.html)
   - [Modules: CommonJS modules](modules.html)
   - [Modules: ECMAScript modules](esm.html)
-  - [Modules:](module.html)`node:module`API
+  - [Modules: `node:module` API](module.html)
   - [Modules: Packages](packages.html)
   - [Modules: TypeScript](typescript.html)
   - [Net](net.html)
@@ -145,7 +145,7 @@
 - [Iterable Streams API](stream_iter.html)
 - [Modules: CommonJS modules](modules.html)
 - [Modules: ECMAScript modules](esm.html)
-- [Modules:](module.html)`node:module`API
+- [Modules: `node:module` API](module.html)
 - [Modules: Packages](packages.html)
 - [Modules: TypeScript](typescript.html)
 - [Net](net.html)

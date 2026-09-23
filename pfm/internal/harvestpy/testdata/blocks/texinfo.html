@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Installation Names (Bash Reference Manual)</title>
+</head>
+<body>
+<div class="section-level-extent" id="Installation-Names">
+<h3 class="section" id="Installation-Names-1"><span>10.4 Installation Names<a class="copiable-link" href="#Installation-Names-1"> &para;</a></span></h3>
+
+<p>By default, &lsquo;<samp class="samp">make install</samp>&rsquo; will install into
+<samp class="file">/usr/local/bin</samp>, <samp class="file">/usr/local/man</samp>, etc.;
+that is, the <em class="dfn">installation prefix</em> defaults to <samp class="file">/usr/local</samp>.
+You can specify an installation prefix other than <samp class="file">/usr/local</samp> by
+giving <code class="code">configure</code> the option <samp class="option">--prefix=<var class="var">PATH</var></samp>,
+or by specifying a value for the <code class="env">prefix</code> &lsquo;<samp class="samp">make</samp>&rsquo;
+variable when running &lsquo;<samp class="samp">make install</samp>&rsquo;
+(e.g., &lsquo;<samp class="samp">make install prefix=<var class="var">PATH</var></samp>&rsquo;).
+The <code class="env">prefix</code> variable provides a default for <code class="env">exec_prefix</code> and
+other variables used when installing Bash.
+</p>
+<p>You can specify separate installation prefixes for
+architecture-specific files and architecture-independent files.
+If you give <code class="code">configure</code> the option
+<samp class="option">--exec-prefix=<var class="var">PATH</var></samp>, &lsquo;<samp class="samp">make install</samp>&rsquo; will use
+<var class="var">PATH</var> as the prefix for installing programs and libraries.
+Documentation and other data files will still use the regular prefix.
+</p>
+</div>
+<div class="section-level-extent" id="sample-depth-scaling">
+<h3 class="section">Sample depth rescaling</h3>
+<p>The input samples range from 0 to <code>MAXINSAMPLE</code> and the outputs range from 0 to
+<code>MAXOUTSAMPLE</code>, which is the largest value representable in the desired sample depth.</p>
+<p>where</p>
+<p><code>MAXINSAMPLE = (2<sup>sampledepth</sup>)-1</code><br>
+<code>MAXOUTSAMPLE = (2<sup>desired_sampledepth</sup>)-1</code>
+</p>
+</div>
+</body>
+</html>

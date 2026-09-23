@@ -67,6 +67,7 @@ def convert_html(path: pathlib.Path) -> str:
 
     _keep_linked_blocks()
     _extract_comments_as_content()
+    _keep_share_word_headings()
     # Local HTML follows the old dispatch path, which decodes malformed bytes
     # with errors ignored before trafilatura sees the document.
     raw = path.read_bytes().decode("utf-8", errors="ignore")
@@ -74,6 +75,9 @@ def convert_html(path: pathlib.Path) -> str:
     if tree is not None:
         _drop_hidden(tree)
         _unwrap_layout_tables(tree)
+        _flatten_code_lines(tree)
+        _phrasing_paragraphs_as_text(tree)
+        _inline_code_as_text(tree)
     with _quiet_stdout():
         document = trafilatura.bare_extraction(
             tree if tree is not None else raw,
@@ -200,9 +204,12 @@ def _extract_comments_as_content() -> None:
 # <template> tag but keeps the inert markup inside, and the HTML `hidden`
 # attribute is in neither — GitHub's "Uh oh! There was an error while loading"
 # box beside every comment. hidden="until-found" is text a find-in-page
-# reveals: kept.
+# reveals: kept, and so is a tab set's inactive panel (role="tabpanel" — a
+# docs page's TypeScript beside its JavaScript), one click away.
 def _drop_hidden(tree) -> None:
     for element in tree.xpath("//template|//*[@hidden]"):
+        if element.tag != "template" and element.get("role") == "tabpanel":
+            continue
         if element.tag == "template" or (element.get("hidden") or "").strip().casefold() != "until-found":
             element.drop_tree()
 
@@ -221,6 +228,181 @@ def _unwrap_layout_tables(tree) -> None:
         for row in rows:
             for cell in row.xpath("./td|./th"):
                 cell.tag = "div"
+
+
+# trafilatura drops any text node that reads as a share button — "Email",
+# "Print", "PDF", "Twitter" alone on its line. A heading with that text is a
+# section title (an awesome list's "Email" category), not a button: kept.
+_SHARE_WORD_HEADINGS_KEPT = False
+
+
+def _keep_share_word_headings() -> None:
+    global _SHARE_WORD_HEADINGS_KEPT
+    if _SHARE_WORD_HEADINGS_KEPT:
+        return
+    from trafilatura import htmlprocessing
+
+    if not callable(getattr(htmlprocessing, "textfilter", None)):
+        raise RuntimeError("trafilatura's htmlprocessing no longer calls textfilter; re-check the heading hook")
+    textfilter = htmlprocessing.textfilter
+
+    def keep_headings(element) -> bool:
+        if element.tag == "head" and element.text and not element.text.isspace():
+            return False
+        return textfilter(element)
+
+    htmlprocessing.textfilter = keep_headings
+    _SHARE_WORD_HEADINGS_KEPT = True
+
+
+# A line-per-element highlighter writes each code line as its own element
+# inside the <pre>: Prism (Docusaurus) a <div class="token-line"> ending in
+# <br>, Expressive Code a <div class="ec-line">, highlight.js line numbers a
+# table row. trafilatura keeps only the first such line, so a <pre> holding a
+# block element is reduced to its rendered text first — a <br> and the end of
+# each line element are a newline, all other whitespace kept — inside one
+# <code> carrying the original's attributes.
+_CODE_LINE_TAGS = frozenset({"div", "p", "li", "tr", "table", "tbody", "thead", "ol", "ul"})
+
+
+def _flatten_code_lines(tree) -> None:
+    for pre in list(tree.iter("pre")):
+        if not any(element.tag in _CODE_LINE_TAGS for element in pre.iterdescendants()):
+            continue
+        code = pre.find(".//code")
+        parts: list[str] = []
+        _pre_lines(pre, parts)
+        text = "".join(parts).strip("\n")
+        for child in list(pre):
+            pre.remove(child)
+        pre.text = None
+        flat = pre.makeelement("code", dict(code.attrib) if code is not None else {})
+        flat.text = text
+        pre.append(flat)
+
+
+def _pre_lines(element, parts: list[str]) -> None:
+    parts.append(element.text or "")
+    for child in element:
+        if isinstance(child.tag, str):
+            if child.tag == "br":
+                parts.append("\n")
+            else:
+                _pre_lines(child, parts)
+                if child.tag in _CODE_LINE_TAGS and not next((part for part in reversed(parts) if part), "\n").endswith("\n"):
+                    parts.append("\n")
+        parts.append(child.tail or "")
+
+
+# One-line inline code (MDN's <a><code>slice()</code></a>, Sphinx's
+# <a><code><span>-E</span></code></a>, a <code> in a paragraph whose link
+# holds an <em>) is lifted out by trafilatura: the paragraph splits there, the
+# code lands after it as its own fenced block and the link takes the following
+# words as its text. Code outside a <pre> on one line is written as its
+# markdown text in place, so it stays inline at its place in the sentence.
+# Texinfo's <samp>, <kbd> and <tt> are the same literal: left to trafilatura, a
+# <var> inside one nests a second code span and the paragraph's words after it
+# can vanish. An exponent (<sup>) inside a literal keeps a visible "^".
+def _inline_code_as_text(tree) -> None:
+    for code in list(tree.iter(*_CODE_PHRASING)):
+        ancestors = [ancestor.tag for ancestor in code.iterancestors()]
+        if code.getparent() is None or "pre" in ancestors or _CODE_PHRASING.intersection(ancestors):
+            continue
+        text = _literal_text(code)
+        if "\n" in text.strip():
+            continue
+        text = " ".join(text.split())
+        if text:
+            _replace_with_text(code, _code_literal(text))
+
+
+def _literal_text(element) -> str:
+    parts = [element.text or ""]
+    for child in element:
+        if isinstance(child.tag, str):
+            inner = _literal_text(child)
+            if child.tag == "sup" and inner.strip():
+                power = " ".join(inner.split())
+                inner = f"^({power})" if " " in power else f"^{power}"
+            parts.append(inner)
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
+def _code_literal(text: str) -> str:
+    longest = max((len(run) for run in "".join(c if c == "`" else " " for c in text).split()), default=0)
+    ticks = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{ticks}{pad}{text}{pad}{ticks}"
+
+
+def _replace_with_text(element, literal: str) -> None:
+    parent = element.getparent()
+    previous = element.getprevious()
+    if previous is not None:
+        previous.tail = (previous.tail or "") + literal + (element.tail or "")
+    else:
+        parent.text = (parent.text or "") + literal + (element.tail or "")
+    parent.remove(element)
+
+
+# trafilatura writes a list item's paragraph child by child and trims every
+# text and tail: inside an <li>, <dt> or <dd> (Sphinx's function definitions)
+# the spaces around a link or code vanish ("variable[`PYTHONCASEOK`](…)is
+# now"), and a link holding <strong> loses its text to the item's end. Any
+# paragraph whose link holds markup (MDN's <a><em>array-like object</em></a>)
+# is split the same way: its later inline code becomes fenced blocks. Such a
+# paragraph holding only phrasing content is written as its markdown
+# text in place — links, code and emphasis inline, every space kept.
+_LIST_ITEM_TAGS = frozenset({"li", "dt", "dd"})
+_PHRASING = frozenset(
+    {"a", "abbr", "b", "br", "cite", "code", "del", "dfn", "em", "i", "ins", "kbd", "label", "mark", "q", "s", "samp"}
+    | {"small", "span", "strong", "sub", "sup", "tt", "u", "var", "wbr"}
+)
+_EMPHASIS = {"b": "**", "strong": "**", "i": "*", "em": "*", "var": "*"}
+_CODE_PHRASING = frozenset({"code", "kbd", "samp", "tt"})
+
+
+def _phrasing_paragraphs_as_text(tree) -> None:
+    for paragraph in list(tree.iter("p")):
+        in_item = any(ancestor.tag in _LIST_ITEM_TAGS for ancestor in paragraph.iterancestors())
+        if not in_item and not any(len(link) for link in paragraph.iter("a")):
+            continue
+        if any(isinstance(node.tag, str) and node.tag not in _PHRASING for node in paragraph.iterdescendants()):
+            continue
+        text = _phrasing_markdown(paragraph)
+        for child in list(paragraph):
+            paragraph.remove(child)
+        paragraph.text = text
+
+
+def _phrasing_markdown(element) -> str:
+    parts = [element.text or ""]
+    for child in element:
+        if isinstance(child.tag, str):
+            parts.append(_phrasing_child(child))
+        parts.append(child.tail or "")
+    return "".join(parts)
+
+
+def _phrasing_child(element) -> str:
+    if element.tag == "br":
+        return " "
+    if element.tag in _CODE_PHRASING:
+        text = " ".join(_literal_text(element).split())
+        return _code_literal(text) if text else ""
+    inner = _phrasing_markdown(element)
+    text = " ".join(inner.split())
+    if not text:
+        return inner
+    lead = " " if inner[:1].isspace() else ""
+    trail = " " if inner[-1:].isspace() else ""
+    if element.tag == "a" and element.get("href"):
+        return f"{lead}[{text}]({element.get('href')}){trail}"
+    mark = _EMPHASIS.get(element.tag, "")
+    if element.tag == "sup":
+        return f"{lead}^{text}{trail}"
+    return f"{lead}{mark}{text}{mark}{trail}"
 
 
 # trafilatura's own markdown writer loses block boundaries: a heading after a

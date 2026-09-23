@@ -14,9 +14,7 @@
 
 **Useful links**: [Binary Installers](https://pypi.org/project/pandas) | [Source Repository](https://github.com/pandas-dev/pandas) | [Issues & Ideas](https://github.com/pandas-dev/pandas/issues) | [Q&A Support](https://stackoverflow.com/questions/tagged/pandas) | [Mailing List](https://groups.google.com/g/pydata)
 
-[pandas](#module-pandas) is an open source, BSD-licensed library providing high-performance, easy-to-use data structures and data analysis tools for the
-
-[Python](https://www.python.org/)programming language.
+[`pandas`](#module-pandas) is an open source, BSD-licensed library providing high-performance, easy-to-use data structures and data analysis tools for the [Python](https://www.python.org/) programming language.
 
 New to *pandas*? Check out the getting started guides. They contain an introduction to *pandas’* main concepts and links to additional tutorials.
 

@@ -24,11 +24,11 @@
 - Authors:
 - Feedback:
 - [GitHub w3c/png](https://github.com/w3c/png/)([pull requests](https://github.com/w3c/png/pulls/),[new issue](https://github.com/w3c/png/issues/new/choose),[open issues](https://github.com/w3c/png/issues/))
-- [public-png@w3.org](mailto:public-png@w3.org?subject=%5Bpng-3%5D%20YOUR%20TOPIC%20HERE)with subject line`[png-3]`(*… message topic …*[archives](https://lists.w3.org/Archives/Public/public-png))
+- [public-png@w3.org](mailto:public-png@w3.org?subject=%5Bpng-3%5D%20YOUR%20TOPIC%20HERE)with subject line `[png-3] … message topic …` ([archives](https://lists.w3.org/Archives/Public/public-png))
 - Errata:
 - [https://www.w3.org/2025/06/REC-PNG-20250624-errata](https://www.w3.org/2025/06/REC-PNG-20250624-errata)
 
-See also [translations](https://www.w3.org/Translations/?technology=png-3).
+See also [**translations**](https://www.w3.org/Translations/?technology=png-3).
 
 [Copyright](https://www.w3.org/policies/#copyright) © 1996-2025 [World Wide Web Consortium](https://www.w3.org/). W3C® [liability](https://www.w3.org/policies/#Legal_Disclaimer), [trademark](https://www.w3.org/policies/#W3C_Trademarks) and [permissive document license](https://www.w3.org/copyright/software-license-2023/) rules apply.
 
@@ -38,7 +38,7 @@ PNG is designed to work well in online viewing applications, such as the World W
 
 This specification defines two Internet Media Types, image/png and image/apng.
 
-*This section describes the status of this document at the time of its publication. A list of current W3C publications and the latest revision of this technical report can be found in the W3C standards and drafts index at https://www.w3.org/TR/.*
+*This section describes the status of this document at the time of its publication. A list of current W3C publications and the latest revision of this technical report can be found in the [W3C standards and drafts index](https://www.w3.org/TR/) at https://www.w3.org/TR/.*
 
 This specification is intended to become an International Standard, but is not yet one. It is inappropriate to refer to this specification as an International Standard.
 
@@ -81,20 +81,17 @@ For the purposes of this specification the following definitions apply.
   Chromaticity is a measure of the quality of a color regardless of its luminance.
 - composite (verb)
 - form an image by merging a foreground image and a background image, using transparency information to determine where and to what extent the background should be visible. Note
-  The foreground image is said to be
-  [composited](#dfn-composited)against the background.
+  The foreground image is said to be [composited](#dfn-composited) against the background.
 - datastream
 - sequence of [bytes](#dfn-byte).
 - deflate
 - member of the [LZ77](#3LZ77)family of compression methods.
-  SOURCE: [
-  [RFC1951](#bib-rfc1951)]
+  SOURCE: [[RFC1951](#bib-rfc1951)]
 - frame
 - For static PNG, the [static image](#dfn-static-image)is considered to be the first (and only) frame. For animated PNG, each image that forms part of the[frame-based animation](#apng-frame-based-animation)sequence is a frame. Thus, for animated PNG, when the static image is not the first frame, the static image is not considered to be a frame.
 - frame buffer
 - the final digital storage area for the image shown by most types of computer display. Note
-  Software causes an image to appear on screen by loading the image into the
-  [frame buffer](#dfn-frame-buffer).
+  Software causes an image to appear on screen by loading the image into the [frame buffer](#dfn-frame-buffer).
 - fully transparent black
 - pixel where the red, green, blue and alpha components are all equal to zero.
 - gamma value
@@ -106,7 +103,7 @@ For the purposes of this specification the following definitions apply.
 - hybrid log-gamma (HLG)
 - [transfer function](#dfn-transfer-function)defined in [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] Table 5. (A relative scene-referred system.)
 - full-range image
-- image where reference black and white correspond, respectively, to sample values `0`and`2`.bit depth- 1
+- image where reference black and white correspond, respectively, to sample values `0` and `2`.bit depth- 1
 - image data
 - 1-dimensional array of [scanlines](#dfn-scanline)within an image.
 - interlaced PNG image
@@ -115,12 +112,11 @@ For the purposes of this specification the following definitions apply.
 - method of data compression that permits reconstruction of the original data exactly, bit-for-bit.
 - luminance
 - an objective measurement of the visible light intensity, taking into account the sensitivity of the human eye to different wavelengths. Note
-  Luminance and
-  [chromaticity](#dfn-chromaticity)together fully define a measured color. For a formal definition, see [[COLORIMETRY](#bib-colorimetry)].
+  Luminance and [chromaticity](#dfn-chromaticity) together fully define a measured color. For a formal definition, see [[COLORIMETRY](#bib-colorimetry)].
 - LZ77
 - data compression algorithm described in [[Ziv-Lempel](#bib-ziv-lempel)].
 - narrow-range image
-- Image where reference black and white do not correspond, respectively, to sample values `0`and`2`.bit depth- 1
+- Image where reference black and white do not correspond, respectively, to sample values `0` and `2^(bit depth) - 1`.
 - network byte order
 - [byte order](#dfn-byte-order)in which the most significant byte comes first, then the less significant bytes in descending order of significance (MSB LSB for two-byte integers, MSB B2 B1 LSB for four-byte integers).
 - perceptual quantizer (PQ)
@@ -135,8 +131,8 @@ For the purposes of this specification the following definitions apply.
 - PNG file
 - [PNG datastream](#3PNGdatastream)stored as a file.
 - PNG four-byte unsigned integer
-- a four-byte unsigned integer limited to the range 0 to 2
-  31-1.Note
+- a four-byte unsigned integer limited to the range 0 to 2^31-1.
+  Note
   The restriction is imposed in order to accommodate languages that have difficulty with unsigned four-byte values.
 - PNG two-byte unsigned integer
 - a two-byte unsigned integer in network byte order.
@@ -148,8 +144,7 @@ For the purposes of this specification the following definitions apply.
 - row of [pixels](#3pixel)within an image or[interlaced PNG image](#dfn-interlaced-png-image).
 - standard dynamic range (SDR)
 - an image format capable of storing images with a relatively low dynamic range of 5-8 [stops](#dfn-stop). Examples include [[SRGB](#bib-srgb)], [[Display-P3](#bib-display-p3)], [[ITU-R-BT.709](#bib-itu-r-bt.709)].Note
-  Standard dynamic range is independent of the primaries and hence, gamut. Wide color gamut
-  [SDR](#dfn-sdr)formats are supported by PNG.
+  Standard dynamic range is independent of the primaries and hence, gamut. Wide color gamut [SDR](#dfn-sdr) formats are supported by PNG.
 - stop
 - a change in scene light luminance of a factor of 2.
 - transfer function
@@ -158,8 +153,8 @@ For the purposes of this specification the following definitions apply.
 - [chromaticity](#dfn-chromaticity)of a computer display's nominal white value.
 - zlib
 - [deflate](#dfn-deflate)-style compression method.
-  SOURCE: [
-  [rfc1950](#bib-rfc1950)]Note
+  SOURCE: [[rfc1950](#bib-rfc1950)]
+  Note
   Also refers to the name of a library containing a sample implementation of this method.
 - Cyclic Redundancy Code
 - CRC
@@ -458,7 +453,7 @@ CRC fields are calculated using standardized CRC methods with pre and post condi
 
 x32 + x26 + x23 + x22 + x16 + x12 + x11 + x10 + x8 + x7 + x5 + x4 + x2 + x + 1
 
-In PNG, the 32-bit CRC is initialized to all 1's, and then the data from each byte is processed from the least significant bit (1) to the most significant bit (128). After all the data bytes are processed, the CRC is inverted (its ones complement is taken). This value is transmitted (stored in the datastream) MSB first. For the purpose of separating into bytes and ordering, the least significant bit of the 32-bit CRC is defined to be the coefficient of the `x` term.31
+In PNG, the 32-bit CRC is initialized to all 1's, and then the data from each byte is processed from the least significant bit (1) to the most significant bit (128). After all the data bytes are processed, the CRC is inverted (its ones complement is taken). This value is transmitted (stored in the datastream) MSB first. For the purpose of separating into bytes and ordering, the least significant bit of the 32-bit CRC is defined to be the coefficient of the `x^31` term.
 
 Practical calculation of the CRC often employs a precalculated table to accelerate the computation. See [D. Sample CRC implementation](#D-CRCAppendix).
 
@@ -1462,8 +1457,8 @@ Note that for the first frame, the two blend modes are functionally equivalent d
 
 The fcTL chunk corresponding to the default image, if it exists, has these restrictions:
 
-- The `x_offset`and`y_offset`fields must be 0.
-- The `width`and`height`fields must equal the corresponding fields from the[IHDR](#11IHDR)chunk.
+- The `x_offset` and `y_offset` fields must be 0.
+- The `width` and `height` fields must equal the corresponding fields from the [IHDR](#11IHDR)chunk.
 
 As noted earlier, the output buffer must be completely initialized to fully transparent black at the beginning of each play. This is to ensure that each play of the animation will be identical. Decoders are free to avoid an explicit clear step as long as the result is guaranteed to be identical. For example, if the default image is included in the animation, and uses a `blend_op` of `APNG_BLEND_OP_SOURCE`, clearing is not necessary because the entire output buffer will be overwritten.
 
@@ -1513,7 +1508,7 @@ The value to write in the [gAMA](#11gAMA) chunk is that value which causes a PNG
 
 The transform to be applied depends on the nature of the image samples and their precision. If the samples represent light intensity in floating-point or high precision integer form (perhaps from a computer graphics renderer), the encoder may perform gamma encoding (applying a power function with exponent less than 1) before quantizing the data to integer values for inclusion in the PNG datastream. This results in fewer banding artifacts at a given sample depth, or allows smaller samples while retaining the same visual quality. An intensity level expressed as a floating-point value in the range 0 to 1 can be converted to a datastream image sample by:
 
-`integer_sample = floor((2` sampledepth-1) * intensityencoding_exponent + 0.5)
+`integer_sample = floor((2^sampledepth-1) * intensity^encoding_exponent + 0.5)`
 
 If the intensity in the equation is the desired output intensity, the encoding exponent is the [gamma value](#dfn-gamma-value) to be used in the [gAMA](#11gAMA) chunk.
 
@@ -1868,7 +1863,7 @@ A simple, fast method for color quantization is to reduce the image to a fixed p
 
 The quality of rendering can be improved substantially by using a palette chosen specifically for the image, since a color cube usually has numerous entries that are unused in any particular image. This approach requires more work, first in choosing the palette, and second in mapping individual pixels to the closest available color. PNG allows the encoder to supply suggested palettes, but not all encoders will do so, and the suggested palettes may be unsuitable in any case (they may have too many or too few colors). Therefore, high-quality viewers will need to have a palette selection routine at hand. A large lookup table is usually the most feasible way of mapping individual pixels to palette entries with adequate speed.
 
-Numerous implementations of color quantization are available. The PNG sample implementation, libpng ([http://www.libpng.org/pub/png/libpng.html](http://www.libpng.org/pub/png/libpng.html)), includes code for the purpose.
+Numerous implementations of color quantization are available. The PNG sample implementation, libpng ([`http://www.libpng.org/pub/png/libpng.html`](http://www.libpng.org/pub/png/libpng.html)), includes code for the purpose.
 
 Decoders may wish to scale PNG data to a lesser sample depth (data precision) for display. For example, 16-bit data will need to be reduced to 8-bit depth for use on most present-day display hardware. Reduction of 8-bit data to 5-bit depth is also common.
 
@@ -1878,7 +1873,7 @@ The most accurate scaling is achieved by the linear equation
 
 where
 
-`MAXINSAMPLE = (2`sampledepth)-1 `MAXOUTSAMPLE = (2` desired_sampledepth)-1
+`MAXINSAMPLE = (2^sampledepth)-1` `MAXOUTSAMPLE = (2^desired_sampledepth)-1`
 
 A slightly less accurate conversion is achieved by simply shifting right by
 
@@ -1909,7 +1904,7 @@ A step could be inserted between the second and third to adjust `display_output`
 
 The display [transfer function](#dfn-transfer-function) can typically be approximated by a power function with exponent `display_exponent`, in which case the second and third lines can be merged into:
 
-`display_input = sample` 1.0/(gamma * display_exponent) = sampledecoding_exponent
+`display_input = sample^(1.0/(gamma * display_exponent)) = sample^decoding_exponent`
 
 so as to perform only one power calculation. For color images, the entire calculation is performed separately for R, G, and B values.
 
@@ -2210,8 +2205,7 @@ This updates the existing image/png Internet Media type, under the image top lev
 - Security considerations:
 - A PNG document is composed of a collection of explicitly typed "chunks". For each of the chunk types defined in the PNG specification (except for gIFx), the only effect associated with those chunks is to cause an image to be rendered on the recipient's display or printer.
   The gIFx chunk type is used to encapsulate Application Extension data, and some use of that data might present security risks, though no risks are known. Likewise, the security risks associated with future chunk types cannot be evaluated, particularly unregistered chunks. However, it is the intention of the PNG Working Group to disallow chunks containing "executable" data to become registered chunks.
-  The text chunks,
-  [tEXt](#11tEXt),[iTXT](#11iTXt)and[zTXt](#11zTXt), contain data that can be displayed in the form of comments, etc. Some operating systems or terminals might allow the display of textual data with embedded control characters to perform operations such as re-mapping of keys, creation of files, etc. For this reason, the specification recommends that the text chunks be filtered for control characters before direct display.
+  The text chunks, [tEXt](#11tEXt), [iTXT](#11iTXt) and [zTXt](#11zTXt), contain data that can be displayed in the form of comments, etc. Some operating systems or terminals might allow the display of textual data with embedded control characters to perform operations such as re-mapping of keys, creation of files, etc. For this reason, the specification recommends that the text chunks be filtered for control characters before direct display.
   The PNG format is specifically designed to facilitate early detection of file transmission errors, and makes use of cyclical redundancy checks to ensure the integrity of the data contained in its chunks.
 - Interoperability considerations:
 - Network byte order used throughout.
@@ -2266,8 +2260,7 @@ This appendix is in conformance with [BCP 13](https://www.rfc-editor.org/info/bc
 - Security considerations:
 - An APNG document is composed of a collection of explicitly typed "chunks". For each of the chunk types defined in the PNG specification (except for gIFx), the only effect associated with those chunks is to cause an animated image to be rendered on the recipient's display.
   The gIFx chunk type is used to encapsulate Application Extension data, and some use of that data might present security risks, though no risks are known. Likewise, the security risks associated with future chunk types cannot be evaluated, particularly unregistered chunks. However, it is the intention of the PNG Working Group to disallow chunks containing "executable" data to become registered chunks.
-  The text chunks,
-  [tEXt](#11tEXt),[iTXt](#11iTXt)and[zTXt](#11zTXt), contain data that can be displayed in the form of comments, etc. Some operating systems or terminals might allow the display of textual data with embedded control characters to perform operations such as re-mapping of keys, creation of files, etc. For this reason, the specification recommends that the text chunks be filtered for control characters before direct display.
+  The text chunks, [tEXt](#11tEXt), [iTXt](#11iTXt) and [zTXt](#11zTXt), contain data that can be displayed in the form of comments, etc. Some operating systems or terminals might allow the display of textual data with embedded control characters to perform operations such as re-mapping of keys, creation of files, etc. For this reason, the specification recommends that the text chunks be filtered for control characters before direct display.
   The PNG format is specifically designed to facilitate early detection of file transmission errors, and makes use of cyclical redundancy checks to ensure the integrity of the data contained in its chunks.
   If one creates an APNG file with unrelated static image and animated image chunks, somebody using a tool not supporting the APNG format would only see the static image and be unaware of the additional content. This could be used e.g. to bypass moderation.
 - Interoperability considerations:
@@ -2318,7 +2311,7 @@ The following specifies guidelines for the definition of private chunks:
 
 A [gamma value](#dfn-gamma-value) is a numerical parameter used to describe approximations to certain non-linear [transfer functions](#dfn-transfer-function) encountered in image capture and reproduction. The [gamma value](#dfn-gamma-value) is the exponent in a power law function. For example the function:
 
-`intensity = (voltage + constant)` exponent
+`intensity = (voltage + constant)^exponent`
 
 which is used to model the non-linearity of CRT displays. It is often assumed, as in this International Standard, that the constant is zero.
 
@@ -2336,8 +2329,8 @@ It is convenient to define some additional entities that describe some composite
 
 |  |  |
 |---|---|
-| display_exponent | exponent of the [transfer function](#dfn-transfer-function) applied between the [frame buffer](#dfn-frame-buffer) and the display surface of the display device.`display_exponent = LUT_exponent * output_exponent` |
-| gamma | exponent of the function mapping display output intensity to samples in the PNG datastream.`gamma = 1.0 / (decoding_exponent * display_exponent)` |
+| display_exponent | exponent of the [transfer function](#dfn-transfer-function) applied between the [frame buffer](#dfn-frame-buffer) and the display surface of the display device. `display_exponent = LUT_exponent * output_exponent` |
+| gamma | exponent of the function mapping display output intensity to samples in the PNG datastream. `gamma = 1.0 / (decoding_exponent * display_exponent)` |
 | end_to_end_exponent | the exponent of the function mapping image sensor input intensity to display output intensity. This is generally a value in the range 1.0 to 1.5. |
 
 The PNG [gAMA](#11gAMA) chunk is used to record the [gamma value](#dfn-gamma-value). This information may be used by decoders together with additional information about the display environment in order to achieve, or approximate, the desired display output.
@@ -2419,17 +2412,13 @@ unsigned long crc(unsigned char *buf, int len)
 
 This annex gives the locations of some Internet resources for PNG software developers. By the nature of the Internet, the list is incomplete and subject to change.
 
-ICC profile specifications are available at: `https://www.color.org/`
+ICC profile specifications are available at: [`https://www.color.org/`](https://www.color.org/)
 
-There is a World Wide Web site for PNG at [http://www.libpng.org/pub/png/](http://www.libpng.org/pub/png/). This page is a central location for current information about PNG and PNG-related tools.
+There is a World Wide Web site for PNG at [`http://www.libpng.org/pub/png/`](http://www.libpng.org/pub/png/). This page is a central location for current information about PNG and PNG-related tools.
 
-Additional documentation and portable C code for [deflate](#dfn-deflate), and an optimized implementation of the CRC algorithm are available from the zlib web site, [https://www.zlib.net/](https://www.zlib.net/).
+Additional documentation and portable C code for [deflate](#dfn-deflate), and an optimized implementation of the CRC algorithm are available from the zlib web site, [`https://www.zlib.net/`](https://www.zlib.net/).
 
-A sample implementation in portable C, **libpng**, is available at [http://www.libpng.org/pub/png/libpng.html](http://www.libpng.org/pub/png/libpng.html). Sample viewer and encoder applications of libpng are available at
-
-```
-http://www.libpng.org/pub/png/book/sources.html
-```
+A sample implementation in portable C, **libpng**, is available at [`http://www.libpng.org/pub/png/libpng.html`](http://www.libpng.org/pub/png/libpng.html). Sample viewer and encoder applications of libpng are available at [`http://www.libpng.org/pub/png/book/sources.html`](http://www.libpng.org/pub/png/book/sources.html) and are described in detail in *PNG: The Definitive Guide* [[ROELOFS](#bib-roelofs)]. Test images can also be accessed from the PNG web site.
 
 *This section is non-normative.*
 
@@ -2540,19 +2529,14 @@ http://www.libpng.org/pub/png/book/sources.html
   - [fcTL](#fcTL-chunk)Frame Control Chunk
   - [fdAT](#fdAT-chunk)Frame Data Chunk
   This brings the PNG specification into alignment with widely deployed industry practice.
-- Added the
-  [cICP](#cICP-chunk)chunk, Coding-independent code points for video signal type identification, to contain image format metadata defined in [[ITU-T-H.273](#bib-itu-t-h.273)] which enables PNG to contain [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] High Dynamic Range ([HDR](#dfn-hdr)) and Wide Color Gamut (WCG) images.
+- Added the [cICP](#cICP-chunk) chunk, Coding-independent code points for video signal type identification, to contain image format metadata defined in [[ITU-T-H.273](#bib-itu-t-h.273)] which enables PNG to contain [[ITU-R-BT.2100](#bib-itu-r-bt.2100)] High Dynamic Range ([HDR](#dfn-hdr)) and Wide Color Gamut (WCG) images.
 - For chunks which define the image color space, the order of precedence is clearly defined, if more than one is present.
-- The previously defined
-  [eXIf](#eXIf)chunk has been moved from the PNG-Extensions document [[PNG-EXTENSIONS](#bib-png-extensions)] into the main body of this specification, to reflect its increasing use.
-- To help with tonemapping HDR content, added the
-  [mDCV](#mDCV-chunk)chunk, which contains metadata about the display used in mastering, and[cLLI](#cLLI-chunk), which contains metadata about peak and average light levels. This enabled more accurate color matching on heterogeneous platforms
-- Clarified that the
-  [iCCP](#11iCCP)chunk, which contains an ICC profile, can contain profiles conforming to any version of the ICC.1 specification. PNG Second Edition only referenced the then-current v2 of ICC.1, although it has since become industry practice to also used higher versions.
+- The previously defined [eXIf](#eXIf) chunk has been moved from the PNG-Extensions document [[PNG-EXTENSIONS](#bib-png-extensions)] into the main body of this specification, to reflect its increasing use.
+- To help with tonemapping HDR content, added the [mDCV](#mDCV-chunk) chunk, which contains metadata about the display used in mastering, and [cLLI](#cLLI-chunk), which contains metadata about peak and average light levels. This enabled more accurate color matching on heterogeneous platforms
+- Clarified that the [iCCP](#11iCCP) chunk, which contains an ICC profile, can contain profiles conforming to any version of the ICC.1 specification. PNG Second Edition only referenced the then-current v2 of ICC.1, although it has since become industry practice to also used higher versions.
 - Clarified handling of out-of-range indexes, for indexed-color PNG
 - Clarified error recovery for unknown and invalid ancillary chunks
-- Incorporation of all
-  [PNG Second Edition Errata](https://www.w3.org/2003/11/REC-PNG-20031110-errata). Notably, clarified that PNG images with unknown gamma value, when embedded in formats such as HTML or SVG, must be treated as[untagged images](https://drafts.csswg.org/css-color-4/#untagged)
+- Incorporation of all [PNG Second Edition Errata](https://www.w3.org/2003/11/REC-PNG-20031110-errata). Notably, clarified that PNG images with unknown gamma value, when embedded in formats such as HTML or SVG, must be treated as [untagged images](https://drafts.csswg.org/css-color-4/#untagged)
 - Various editorial clarifications in response to community feedback
 - References updated to latest versions
 - Markup corrections and link fixes

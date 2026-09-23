@@ -25,38 +25,32 @@ The [HTTP guides](/en-US/docs/Web/HTTP/Guides) are listed in order from general 
 - [HTTP messages](/en-US/docs/Web/HTTP/Guides/Messages)
 - HTTP messages transmitted as requests and responses have a defined structure. This article describes this general structure, its purpose, and the different types of messages.
 - [MIME types](/en-US/docs/Web/HTTP/Guides/MIME_types)
-- Since HTTP/1.0, different types of content can be transmitted. This article explains how this is accomplished using the
-  header and the MIME standard. A shortlist of common types used by web developers can be found in`Content-Type`[Common MIME types](/en-US/docs/Web/HTTP/Guides/MIME_types/Common_types).
+- Since HTTP/1.0, different types of content can be transmitted. This article explains how this is accomplished using the [`Content-Type`](/en-US/docs/Web/HTTP/Reference/Headers/Content-Type) header and the MIME standard. A shortlist of common types used by web developers can be found in [Common MIME types](/en-US/docs/Web/HTTP/Guides/MIME_types/Common_types).
 - [Compression in HTTP](/en-US/docs/Web/HTTP/Guides/Compression)
 - Browsers and servers compress their messages before sending them over the network to reduce the amount of data that needs to be transmitted, improving transfer speed and bandwidth utilization.
 - [HTTP caching](/en-US/docs/Web/HTTP/Guides/Caching)
 - Caching is a highly important mechanism for delivering fast experiences on the Web and for efficient use of resources. This article describes different methods of caching and how to use HTTP headers to control them.
 - [HTTP authentication](/en-US/docs/Web/HTTP/Guides/Authentication)
 - Authentication is a way to verify the identity of a client when making requests to a server. It ensures that only authorized users or systems can access certain resources.
-- Although HTTP is a stateless protocol, a server can send a
-  header with the response. The client then returns the cookie's value with every subsequent request to the server in the form of a`Set-Cookie`request header. This adds the ability to store and exchange a small amount of data which effectively adds state to some client-server interactions.`Cookie`
+- Although HTTP is a stateless protocol, a server can send a [`Set-Cookie`](/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie) header with the response. The client then returns the cookie's value with every subsequent request to the server in the form of a [`Cookie`](/en-US/docs/Web/HTTP/Reference/Headers/Cookie) request header. This adds the ability to store and exchange a small amount of data which effectively adds state to some client-server interactions.
 - [Redirections in HTTP](/en-US/docs/Web/HTTP/Guides/Redirections)
 - URL redirection, also known as URL forwarding, is a technique to give more than one URL address to a page, a form, a whole website, or a web application. HTTP has a special kind of response, called an HTTP redirect, for this operation.
 - [HTTP conditional requests](/en-US/docs/Web/HTTP/Guides/Conditional_requests)
-- In conditional requests, the outcome of a request depends on the value of a validator in the request. This method is used heavily in
-  [caching](/en-US/docs/Web/HTTP/Guides/Caching)and use cases such as resuming a download, preventing lost updates when modifying a document on the server, and more.
+- In conditional requests, the outcome of a request depends on the value of a validator in the request. This method is used heavily in [caching](/en-US/docs/Web/HTTP/Guides/Caching) and use cases such as resuming a download, preventing lost updates when modifying a document on the server, and more.
 - [HTTP range requests](/en-US/docs/Web/HTTP/Guides/Range_requests)
 - A range request asks the server to send a specific part (or parts) of a resource back to a client instead of the full resource. Range requests are useful for cases when a client knows they need only part of a large file, or for cases where an application allows the user to pause and resume a download.
 - [Content negotiation](/en-US/docs/Web/HTTP/Guides/Content_negotiation)
-- HTTP defines a set of message headers, starting with
-  as a way for a browser to announce the format, language, or encoding it prefers. This article explains how this advertisement happens, how the server is expected to react, and how it chooses the most adequate response to a request.`Accept`
+- HTTP defines a set of message headers, starting with [`Accept`](/en-US/docs/Web/HTTP/Reference/Headers/Accept) as a way for a browser to announce the format, language, or encoding it prefers. This article explains how this advertisement happens, how the server is expected to react, and how it chooses the most adequate response to a request.
 - [Connection management in HTTP/1.x](/en-US/docs/Web/HTTP/Guides/Connection_management_in_HTTP_1.x)
 - HTTP/1.1 was the first version of HTTP to support persistent connections and pipelining. This article explains both concepts, including the pros and cons of each.
 - [Protocol upgrade mechanism](/en-US/docs/Web/HTTP/Guides/Protocol_upgrade_mechanism)
-- HTTP/1.1 provides a mechanism to upgrade an already-established connection to a different protocol using the
-  header. A client can upgrade a connection from HTTP/1.1 to HTTP/2, or an HTTP(S) connection to a`Upgrade`[WebSocket](/en-US/docs/Web/API/WebSocket)(`ws`/`wss`).
+- HTTP/1.1 provides a mechanism to upgrade an already-established connection to a different protocol using the [`Upgrade`](/en-US/docs/Web/HTTP/Reference/Headers/Upgrade) header. A client can upgrade a connection from HTTP/1.1 to HTTP/2, or an HTTP(S) connection to a [WebSocket](/en-US/docs/Web/API/WebSocket) (`ws` / `wss`).
 - [Proxy servers and tunneling](/en-US/docs/Web/HTTP/Guides/Proxy_servers_and_tunneling)
 - A proxy can be on the user's local computer, or anywhere between the user's computer and a destination server on the Internet. This page outlines some basics about proxies and introduces a few configuration options.
 - [HTTP Client hints](/en-US/docs/Web/HTTP/Guides/Client_hints)
 - Client Hints are a set of response headers that a server can use to proactively request information from a client about the device, network, user, and user-agent-specific preferences. The server can then determine which resources to send, based on the information that the client chooses to provide.
 - [Network Error Logging](/en-US/docs/Web/HTTP/Guides/Network_Error_Logging)
-- Network Error Logging is a mechanism that can be configured via the
-  `NEL`HTTP response header. This experimental header allows websites and applications to opt-in to receive reports about failed (or even successful) network fetches from supporting browsers.
+- Network Error Logging is a mechanism that can be configured via the `NEL` HTTP response header. This experimental header allows websites and applications to opt-in to receive reports about failed (or even successful) network fetches from supporting browsers.
 - [Browser detection using the user agent](/en-US/docs/Web/HTTP/Guides/Browser_detection_using_the_user_agent)
 - It's very rarely a good idea to use user agent sniffing to detect a browser, but there are edge cases that require it. This document will guide you in doing this as correctly as possible when this is necessary, with an emphasis on considerations to make before embarking on this route.
 
@@ -65,14 +59,11 @@ The [HTTP guides](/en-US/docs/Web/HTTP/Guides) are listed in order from general 
 - [Permissions Policy](/en-US/docs/Web/HTTP/Guides/Permissions_Policy)
 - Permissions Policy provides mechanisms for web developers to explicitly declare what functionality can and cannot be used on a website. You define a set of "policies" that restrict what APIs the site's code can access or modify the browser's default behavior for certain features.
 - [Cross-Origin Resource Sharing (CORS)](/en-US/docs/Web/HTTP/Guides/CORS)
-- Cross-site HTTP requests are requests for resources from a different domain than that of the resource making the request. Web pages today very commonly load cross-site resources, for example, a page 'Domain A' (
-  `http://domaina.example/`) requests an image on 'Domain B' (`http://domainb.foo/image.jpg`) via the`img`element. CORS allows web developers to control how their site reacts to cross-site requests.
+- Cross-site HTTP requests are requests for resources from a different domain than that of the resource making the request. Web pages today very commonly load cross-site resources, for example, a page 'Domain A' (`http://domaina.example/`) requests an image on 'Domain B' (`http://domainb.foo/image.jpg`) via the `img` element. CORS allows web developers to control how their site reacts to cross-site requests.
 - [Content Security Policy (CSP)](/en-US/docs/Web/HTTP/Guides/CSP)
-- CSP allows website administrators to use the
-  response header to control which resources the client is allowed to load for a given page. The CSP guide describes the overall Content Security Policy mechanism which helps detect and mitigate certain types of attacks, including Cross-Site Scripting (XSS) and data injection attacks.`Content-Security-Policy`
+- CSP allows website administrators to use the [`Content-Security-Policy`](/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy) response header to control which resources the client is allowed to load for a given page. The CSP guide describes the overall Content Security Policy mechanism which helps detect and mitigate certain types of attacks, including Cross-Site Scripting (XSS) and data injection attacks.
 - [Cross-Origin Resource Policy (CORP)](/en-US/docs/Web/HTTP/Guides/Cross-Origin_Resource_Policy)
-- CORP lets websites and applications opt in to protection against specific requests from other origins (such as those issued with elements like
-  `<script>`and`<img>`), to mitigate speculative side-channel attacks.
+- CORP lets websites and applications opt in to protection against specific requests from other origins (such as those issued with elements like `<script>` and `<img>`), to mitigate speculative side-channel attacks.
 - [Mozilla web security guidelines](https://infosec.mozilla.org/guidelines/web_security)
 - A collection of tips to help operational teams with creating secure web applications.
 
@@ -107,8 +98,7 @@ The [HTTP reference](/en-US/docs/Web/HTTP/Reference) documentation contains deta
 - [HTTP headers](/en-US/docs/Web/HTTP/Reference/Headers)
 - Message headers are used to send metadata about a resource or an HTTP message, and to describe the behavior of the client or the server.
 - [HTTP request methods](/en-US/docs/Web/HTTP/Reference/Methods)
-- Request methods indicate the purpose of the request and what is expected if the request is successful. The most common methods are
-  and`GET`for retrieving and sending data to servers, respectively, but there are other methods which serve different purposes.`POST`
+- Request methods indicate the purpose of the request and what is expected if the request is successful. The most common methods are [`GET`](/en-US/docs/Web/HTTP/Reference/Methods/GET) and [`POST`](/en-US/docs/Web/HTTP/Reference/Methods/POST) for retrieving and sending data to servers, respectively, but there are other methods which serve different purposes.
 - [HTTP response status codes](/en-US/docs/Web/HTTP/Reference/Status)
 - Response status codes indicate the outcome of a specific HTTP request. Responses are grouped in five classes: informational, successful, redirections, client errors, and server errors.
 - [HTTP resources and specifications](/en-US/docs/Web/HTTP/Reference/Resources_and_specifications)
@@ -117,8 +107,6 @@ The [HTTP reference](/en-US/docs/Web/HTTP/Reference) documentation contains deta
 The following subsections are also notable:
 
 - [CSP directives](/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy#directives)
-- The
-  (CSP) response header allows website administrators to specify which resources the user agent is allowed to load for a given page. This section lists directives that can be used in a CSP header, with individual documentation pages that describe how the directives work and how to use them.`Content-Security-Policy`
+- The [`Content-Security-Policy`](/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy) (CSP) response header allows website administrators to specify which resources the user agent is allowed to load for a given page. This section lists directives that can be used in a CSP header, with individual documentation pages that describe how the directives work and how to use them.
 - [Permissions-Policy directives](/en-US/docs/Web/HTTP/Reference/Headers/Permissions-Policy#directives)
-- The
-  response header provides a mechanism to allow or deny the use of browser features in a document or within any`Permissions-Policy`element in the document. This section lists directives that can be used in a Permissions-Policy header, with individual documentation pages that describe how the directives work and how to use them.`<iframe>`
+- The [`Permissions-Policy`](/en-US/docs/Web/HTTP/Reference/Headers/Permissions-Policy) response header provides a mechanism to allow or deny the use of browser features in a document or within any [`<iframe>`](/en-US/docs/Web/HTML/Reference/Elements/iframe) element in the document. This section lists directives that can be used in a Permissions-Policy header, with individual documentation pages that describe how the directives work and how to use them.

@@ -84,15 +84,15 @@ ARIA info:
 
 ### Audio and Video
 
-- [WebVTT: The Web Video Text Tracks Format](https://www.w3.org/TR/webvtt/)is a format for captions, text video descriptions, and other metadata that is time-aligned with audio or video content.
-- [Timed Text Markup Language (TTML)](https://www.w3.org/TR/ttml/)is intended to be used for transcoding or exchanging timed text information among legacy distribution content formats for subtitling and captioning.
+- [WebVTT: The Web Video Text Tracks Format](https://www.w3.org/TR/webvtt/) is a format for captions, text video descriptions, and other metadata that is time-aligned with audio or video content.
+- [Timed Text Markup Language (TTML)](https://www.w3.org/TR/ttml/) is intended to be used for transcoding or exchanging timed text information among legacy distribution content formats for subtitling and captioning.
 
 ### Evaluation
 
 The following resources support development of accessibility evaluation methods and tools:
 
-- [Accessibility Conformance Testing (ACT) Overview](/WAI/standards-guidelines/act/)— ACT establishes and documents rules for testing the conformance of web content to accessibility standards. The[WCAG 2 Test Rules](/WAI/standards-guidelines/act/rules/about/)use the ACT rules format.
-- [Evaluation and Report Language (EARL) Overview](/WAI/standards-guidelines/earl/)— EARL is a machine-readable format for expressing test results.
+- [Accessibility Conformance Testing (ACT) Overview](/WAI/standards-guidelines/act/) — ACT establishes and documents rules for testing the conformance of web content to accessibility standards. The [WCAG 2 Test Rules](/WAI/standards-guidelines/act/rules/about/) use the ACT rules format.
+- [Evaluation and Report Language (EARL) Overview](/WAI/standards-guidelines/earl/) — EARL is a machine-readable format for expressing test results.
 
 Additional resources related to evaluation are listed in the [Evaluating Web Accessibility Overview](/WAI/test-evaluate/), including:
 
@@ -114,10 +114,10 @@ Additional resources related to evaluation are listed in the [Evaluating Web Acc
 ## Additional Information
 
 - [List of all W3C accessibility-related Standards (“W3C Recommendations”) and Working Group Notes](https://www.w3.org/TR/?tag=accessibility)
-- [Web Accessibility Laws & Policies](/WAI/policies/)lists governmental laws and policies relating to web accessibility in countries and regions around the world. Many of these reference W3C accessibility standards.
+- [Web Accessibility Laws & Policies](/WAI/policies/) lists governmental laws and policies relating to web accessibility in countries and regions around the world. Many of these reference W3C accessibility standards.
 - [Why Standards Harmonization is Essential to Web Accessibility](/WAI/standards-guidelines/harmonization/)
 - [Referencing and Linking to WAI Guidelines and Technical Documents](/WAI/standards-guidelines/linking/)
-- [How WAI Develops Accessibility Guidelines through the W3C Process: Milestones and](/WAI/standards-guidelines/w3c-process/)**Opportunities to Contribute**
+- [How WAI Develops Accessibility Guidelines through the W3C Process: Milestones and **Opportunities to Contribute**](/WAI/standards-guidelines/w3c-process/)
 
 ![Illustration showing the guidelines for the different components](/WAI/content-images/components/specs.png)
 

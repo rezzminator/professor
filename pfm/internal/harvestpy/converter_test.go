@@ -281,6 +281,7 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 		fixture              string
 		heads, rows, bullets []string
 		code, absent, text   []string
+		fences               []string
 	}{
 		{
 			fixture: "wikitable.html",
@@ -394,6 +395,95 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			},
 			absent: []string{"Uh oh!", "There was an error while loading", "|---|"},
 		},
+		{
+			// Prism (Docusaurus) writes each code line as a <div class="token-line">,
+			// Shiki (VitePress) as a <span class="line">: every line stays, in order,
+			// its indentation and the blank line kept. A Docusaurus tab set's
+			// inactive panel (role="tabpanel" hidden) is one click away: its
+			// TypeScript block is kept beside the JavaScript one.
+			fixture: "codelines.html",
+			heads:   []string{"## `expect(value)`", "### Config file"},
+			fences: []string{
+				"test('the best flavor is grapefruit', () => {\n  expect(bestLaCroixFlavor()).toBe('grapefruit');\n});",
+				"export class Volume {\n  constructor(amount, unit) {",
+				"export class Volume {\n  public amount: number;\n  public unit: 'L' | 'mL';",
+				"export default {\n  // site-level options\n  title: 'VitePress',\n  description: 'Just playing around.',\n\n" +
+					"  themeConfig: {\n    // theme-level options\n  }\n}",
+			},
+			absent: []string{"Privacy", "Careers"},
+		},
+		{
+			// MDN's <a><code>slice()</code></a> and Sphinx's
+			// <a><code><span class="pre">-E</span></code></a>: the code stays inline,
+			// inside its link, at its place in the sentence.
+			fixture: "inlinecode.html",
+			text: []string{
+				"A JavaScript array's [`length`](/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length)" +
+					" property and numerical properties are connected.",
+				"Several of the built-in array methods (e.g., [`join()`](/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/join)," +
+					" [`slice()`](/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/slice)," +
+					" [`indexOf()`](/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/indexOf), etc.)" +
+					" take into account the value of an array's" +
+					" [`length`](/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length) property when they're called.",
+				"The term [*array-like object*](/en-US/docs/Web/JavaScript/Guide/Indexed_collections#working_with_array-like_objects)" +
+					" refers to any object that doesn't throw during the `length` conversion process described above. In practice," +
+					" such object is expected to actually have a `length` property and to have indexed elements in the range `0`" +
+					" to `length - 1`. (If it doesn't have all indices, it will be functionally equivalent to a" +
+					" [sparse array](#array_methods_and_empty_slots).) Any integer index less than zero or greater than" +
+					" `length - 1` is ignored when an array method operates on an array-like object.",
+				// Sphinx's version notes sit inside the definition (<dd>): continuation lines of its item.
+				"  Changed in version 3.12: The behaviour of `locals()` in a comprehension has been updated as described in" +
+					" [**PEP 709**](https://peps.python.org/pep-0709/).",
+				"  Changed in version 3.9: When the command line options [`-E`](../using/cmdline.html#cmdoption-E) or" +
+					" [`-I`](../using/cmdline.html#cmdoption-I) are being used, the environment variable" +
+					" [`PYTHONCASEOK`](../using/cmdline.html#envvar-PYTHONCASEOK) is now ignored.",
+			},
+			bullets: []string{
+				"Return the absolute value of a number. The argument may be an integer, a floating-point number, or an object" +
+					" implementing [`__abs__()`](../reference/datamodel.html#object.__abs__). If the argument is a complex number," +
+					" its magnitude is returned.",
+				"Here, the `spam.ham` module is returned from `__import__()`. From this object, the names to import are" +
+					" retrieved and assigned to their respective names.",
+			},
+			absent: []string{
+				"```\nslice()",
+				"```\nlength",
+				"```\n0\n",
+				"```\n-I",
+				"```\nPYTHONCASEOK",
+				"returned.`",
+				"in.**PEP",
+				"variable[",
+				")is now",
+			},
+		},
+		{
+			// A heading whose whole text is a share-button word ("Email") after a
+			// nested list is a section title, not a share button.
+			fixture: "nested-list-heading.html",
+			heads:   []string{"### HTTP Clients", "### Web Scraping", "### Email", "### ORM"},
+			bullets: []string{
+				"[trafilatura](https://github.com/adbar/trafilatura)",
+				"[yagmail](https://github.com/kootenpv/yagmail)",
+			},
+			absent: []string{"Pricing", "Contact"},
+		},
+		{
+			// Texinfo (the Bash manual) marks literals with <samp> and placeholders
+			// with <var>, and the PNG spec writes an exponent as <sup> inside <code>:
+			// the paragraph keeps every word after its <samp>s, a <var> inside a
+			// literal stays in it, and the exponent keeps a visible "^".
+			fixture: "texinfo.html",
+			text: []string{
+				"By default, ‘`make install`’ will install into `/usr/local/bin`, `/usr/local/man`, etc.; that is, the" +
+					" *installation prefix* defaults to `/usr/local`. You can specify an installation prefix other than" +
+					" `/usr/local` by giving `configure` the option `--prefix=PATH`, or by specifying a value for the" +
+					" `prefix` ‘`make`’ variable when running ‘`make install`’ (e.g., ‘`make install prefix=PATH`’)." +
+					" The `prefix` variable provides a default for `exec_prefix` and other variables used when installing Bash.",
+			},
+			code:   []string{"`MAXINSAMPLE = (2^sampledepth)-1` `MAXOUTSAMPLE = (2^desired_sampledepth)-1`"},
+			absent: []string{"2sampledepth", "--prefix= PATH"},
+		},
 	}
 	converter := testConverter(t, python)
 	t.Cleanup(func() { _ = converter.Close() })
@@ -440,6 +530,11 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			for _, line := range tc.text {
 				if !has(func(got string) bool { return got == line }) {
 					t.Errorf("paragraph %q is missing", line)
+				}
+			}
+			for _, fence := range tc.fences {
+				if !strings.Contains(result.Markdown, "```\n"+fence+"\n```") {
+					t.Errorf("code block %q is not one fence with every line in order", fence)
 				}
 			}
 			for _, word := range tc.absent {

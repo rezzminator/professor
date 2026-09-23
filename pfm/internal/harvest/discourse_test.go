@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -146,8 +148,19 @@ type discourseSite struct {
 	qa        bool
 	status    map[string]int    // request URI -> an error status to answer instead
 	answers   map[string]string // request URI -> a page to answer instead
+	// redirects: an absolute request URL -> the Location a 302 answers with.
+	redirects map[string]string
+	// countJSON, when set, is the topic's JSON as served.
+	countJSON string
+	// anonymous serves every page without the topic's address (no canonical
+	// link, no itemprop url).
+	anonymous bool
 	requests  []string
 }
+
+// discourseTopicAddressRe matches a crawler page's two statements of its
+// topic's address.
+var discourseTopicAddressRe = regexp.MustCompile(`<link (?:rel="canonical"|itemprop='url') [^>]*>`)
 
 func newDiscourseSite(stated int) *discourseSite {
 	return &discourseSite{pages: discourseFixturePosts(), stated: stated, generator: true}
@@ -161,6 +174,11 @@ func (site *discourseSite) roundTrip(request *http.Request) (*http.Response, err
 		site.requests = append(site.requests, request.Method+" "+uri)
 		site.mu.Unlock()
 	}
+	if location := site.redirects[request.URL.String()]; location != "" {
+		moved := response(request, http.StatusFound, "text/html", "")
+		moved.Header.Set("Location", location)
+		return moved, nil
+	}
 	if status := site.status[uri]; status != 0 {
 		return response(request, status, "text/html", "<html><body>refused</body></html>"), nil
 	}
@@ -168,9 +186,29 @@ func (site *discourseSite) roundTrip(request *http.Request) (*http.Response, err
 		return response(request, http.StatusOK, "text/html; charset=utf-8", answer), nil
 	}
 	if request.URL.Path == "/t/placeholder-topic/4242.json" {
-		return response(request, http.StatusOK, "application/json; charset=utf-8",
-			fmt.Sprintf(`{"id":4242,"posts_count":%d,"post_stream":{"posts":[]}}`, site.stated)), nil
+		body := fmt.Sprintf(`{"id":4242,"posts_count":%d,"post_stream":{"posts":[]}}`, site.stated)
+		if site.countJSON != "" {
+			body = site.countJSON
+		}
+		return response(request, http.StatusOK, "application/json; charset=utf-8", body), nil
 	}
+	if site.anonymous {
+		answer, err := site.page(request)
+		if err == nil && answer.StatusCode == http.StatusOK {
+			raw, readErr := io.ReadAll(answer.Body)
+			if readErr != nil {
+				return nil, readErr
+			}
+			return response(request, http.StatusOK, "text/html; charset=utf-8",
+				discourseTopicAddressRe.ReplaceAllString(string(raw), "")), nil
+		}
+		return answer, err
+	}
+	return site.page(request)
+}
+
+// page answers a request for one of the topic's pages.
+func (site *discourseSite) page(request *http.Request) (*http.Response, error) {
 	if request.URL.Path == "/t/placeholder-topic/4242" || request.URL.Path == "/t/placeholder-topic/4242/6" {
 		page := 1
 		if raw := request.URL.Query().Get("page"); raw != "" {
@@ -363,7 +401,7 @@ func TestDiscourseFollowingStopsAreNamedPartials(t *testing.T) {
 		}
 		for _, want := range []string{
 			"3 of 7 posts loaded",
-			"the posts after #3 are not loaded (next page, page 2, not followed)",
+			"the posts after #3 are not loaded (next page, page 2)",
 			"HTTP 429",
 			"not retried",
 		} {
@@ -380,7 +418,7 @@ func TestDiscourseFollowingStopsAreNamedPartials(t *testing.T) {
 		result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
 		for _, want := range []string{
 			"5 of 7 posts loaded",
-			"the posts after #6 are not loaded (next page, page 3, not followed)",
+			"the posts after #6 are not loaded (next page, page 3)",
 			`titled "Log in - Example Forum"`,
 		} {
 			if !strings.Contains(result.Partial, want) {
@@ -424,7 +462,7 @@ func TestDiscourseFollowingStopsAreNamedPartials(t *testing.T) {
 		for _, want := range []string{
 			fmt.Sprintf("the cap of %d loader requests", loaderRequestCap),
 			fmt.Sprintf("%d of %d posts loaded", loaderRequestCap, loaderRequestCap+1),
-			fmt.Sprintf("next page, page %d, not followed", loaderRequestCap+1),
+			fmt.Sprintf("next page, page %d)", loaderRequestCap+1),
 		} {
 			if !strings.Contains(result.Partial, want) {
 				t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
@@ -486,5 +524,231 @@ func TestFollowedLoaderAnswersAreReplayedIntoALaterConversion(t *testing.T) {
 	}
 	if rendered[0] != rendered[1] {
 		t.Fatalf("the replayed conversion differs:\n%s\n---\n%s", rendered[0], rendered[1])
+	}
+}
+
+// TestDiscourseUnreadCountFlagsTheTopicPartial: every page of the topic loads,
+// but its stated count is not read — its JSON refused, or answered without a
+// posts_count. Without the count, posts no page links cannot be ruled out, so
+// the artifact is partial and names why; a page naming no topic address, whose
+// count could never be requested, is named apart from one whose read failed.
+func TestDiscourseUnreadCountFlagsTheTopicPartial(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(site *discourseSite)
+		want  []string
+		// requested is whether the topic's JSON was asked for.
+		requested bool
+	}{
+		{
+			"the JSON refused",
+			func(site *discourseSite) {
+				site.status = map[string]int{"/t/placeholder-topic/4242.json": http.StatusInternalServerError}
+			},
+			[]string{
+				"7 posts loaded, the stated count not read", "the stated post count was not read",
+				"the topic's post count", "HTTP 500",
+			},
+			true,
+		},
+		{
+			"the JSON without posts_count",
+			func(site *discourseSite) { site.countJSON = `{"id":4242,"post_stream":{"posts":[]}}` },
+			[]string{"the stated post count was not read", "not the topic's JSON"},
+			true,
+		},
+		{
+			"no topic address",
+			func(site *discourseSite) { site.anonymous, site.pages = true, site.pages[:1] },
+			[]string{"3 posts loaded, the stated count not read", "could not be requested"},
+			false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			site := newDiscourseSite(7)
+			tc.setup(site)
+			h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+			result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+			if result.Error != "" {
+				t.Fatalf("fetch failed: %q", result.Error)
+			}
+			posts := 0
+			for _, page := range site.pages {
+				posts += len(page)
+			}
+			if got := len(discoursePostHeaders(result.Content)); got != posts {
+				t.Fatalf("%d posts loaded, want every page's %d:\n%.700s", got, posts, result.Content)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(result.Partial, want) {
+					t.Fatalf("an unread count left the partial marker without %q: %q", want, result.Partial)
+				}
+			}
+			requested := strings.Contains(strings.Join(site.requests, "\n"), ".json")
+			if requested != tc.requested {
+				t.Fatalf("the topic's JSON requested = %v, want %v: %v", requested, tc.requested, site.requests)
+			}
+		})
+	}
+}
+
+// TestDiscourseAnswersNotProvedThisTopicAreNotMerged: a next page whose request
+// a redirect took to another host is refused as off the site, and a page of
+// unknown identity (no topic address on either side) merges nothing — neither
+// grafts a foreign topic's posts in as this one's; each is named.
+func TestDiscourseAnswersNotProvedThisTopicAreNotMerged(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(site *discourseSite)
+		want  string
+	}{
+		{
+			"redirected off the page's host",
+			func(site *discourseSite) {
+				site.redirects = map[string]string{
+					discourseTopicURL + "?page=2": "https://foreign.example.test" + discoursePageURL(2),
+				}
+			},
+			"answered from off the site (https://foreign.example.test/t/placeholder-topic/4242)",
+		},
+		{
+			"of unknown identity",
+			func(site *discourseSite) { site.anonymous = true },
+			"not verifiable as this topic",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			site := newDiscourseSite(7)
+			tc.setup(site)
+			h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+			result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+			if result.Error != "" {
+				t.Fatalf("fetch failed: %q", result.Error)
+			}
+			if got := discoursePostHeaders(result.Content); len(got) != 3 {
+				t.Fatalf("posts of an unproved answer were merged: %q\n%.700s", got, result.Content)
+			}
+			if !strings.Contains(result.Partial, tc.want) ||
+				!strings.Contains(result.Partial, "the posts after #3 are not loaded") {
+				t.Fatalf("the refused answer is not named: %q", result.Partial)
+			}
+		})
+	}
+}
+
+// TestDiscourseLoopingNextPagesEndBounded: a next page linking back to the
+// first page, and a page linking itself as next, each end after one request
+// per address — the answer holding no new post is a named failure, never a
+// loop.
+func TestDiscourseLoopingNextPagesEndBounded(t *testing.T) {
+	loopTo := func(site *discourseSite, page, next int) string {
+		return strings.ReplaceAll(discourseCrawlerPage(site.pages, page, true),
+			`href="`+discoursePageURL(page+1)+`"`, `href="`+discoursePageURL(next)+`"`)
+	}
+	for _, tc := range []struct {
+		name     string
+		setup    func(site *discourseSite)
+		requests int
+	}{
+		{"back to the first page", func(site *discourseSite) {
+			site.answers = map[string]string{discoursePageURL(2): loopTo(site, 2, 1)}
+		}, 4},
+		{"to itself", func(site *discourseSite) {
+			site.answers = map[string]string{discoursePageURL(1): loopTo(site, 1, 1)}
+		}, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			site := newDiscourseSite(7)
+			tc.setup(site)
+			h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+			result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+			if result.Error != "" || len(site.requests) != tc.requests {
+				t.Fatalf("the loop was not bounded: requests=%v error=%q", site.requests, result.Error)
+			}
+			if !strings.Contains(result.Partial, "holding no post not already loaded") {
+				t.Fatalf("the looping link is not named: %q", result.Partial)
+			}
+		})
+	}
+}
+
+// discourseConvertTwice converts the topic's first page, then second — as
+// the ladder converts a page once per rung — with one loader budget, returning
+// each conversion's partial reason.
+func discourseConvertTwice(
+	t *testing.T,
+	site *discourseSite,
+	budget *loaderBudget,
+	second string,
+) (string, string) {
+	t.Helper()
+	h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+	var reasons []string
+	for _, body := range []string{discourseCrawlerPage(site.pages, 1, true), second} {
+		converted, _, err := h.convertHTML(context.Background(), discourseTopicURL, []byte(body), budget)
+		if err != nil {
+			t.Fatalf("conversion failed: %v", err)
+		}
+		reasons = append(reasons, partialReason(converted))
+	}
+	return reasons[0], reasons[1]
+}
+
+// TestDiscourseAnswersALaterConversionCannotTakeAreNamed: a later conversion
+// of the fetch gets the followed answers replayed from the budget, never
+// requested again. An answer that would not graft into that page, and one the
+// replay store's bound left out, are each named as followed-but-unreplayed —
+// never as not followed, and never dropped silently.
+func TestDiscourseAnswersALaterConversionCannotTakeAreNamed(t *testing.T) {
+	t.Run("would not graft", func(t *testing.T) {
+		site := newDiscourseSite(7)
+		// The later page already holds page two's posts: its answer adds none.
+		holding := [][]discoursePost{append(append([]discoursePost{}, site.pages[0]...), site.pages[1]...)}
+		holding = append(holding, site.pages[1:]...)
+		first, second := discourseConvertTwice(t, site, newLoaderBudget(context.Background()),
+			discourseCrawlerPage(holding, 1, true))
+		if first != "" || len(site.requests) != 3 {
+			t.Fatalf("the first conversion: partial=%q requests=%v", first, site.requests)
+		}
+		if !strings.Contains(second, "next page (page 2) was followed, but its answer would not graft into "+
+			"this page") || strings.Contains(second, "not followed") {
+			t.Fatalf("the unreplayed answer is not named as followed: %q", second)
+		}
+	})
+	t.Run("past the replay bound", func(t *testing.T) {
+		site := newDiscourseSite(7)
+		budget := newLoaderBudget(context.Background())
+		budget.replayLimit = 256 // the count's JSON fits; a page does not
+		first, second := discourseConvertTwice(t, site, budget, discourseCrawlerPage(site.pages, 1, true))
+		if first != "" || len(site.requests) != 3 {
+			t.Fatalf("the first conversion: partial=%q requests=%v", first, site.requests)
+		}
+		if !strings.Contains(second, "next page (page 2) was followed, but its answer was not kept for replay") {
+			t.Fatalf("the answer left out of replay is not named: %q", second)
+		}
+		if strings.Contains(second, "stated count not read") {
+			t.Fatalf("the count's answer, within the bound, was not replayed: %q", second)
+		}
+	})
+}
+
+// TestDiscourseUnparsableLikeCountRendersUnread: a like count stated but not a
+// number renders as unread, never as no likes.
+func TestDiscourseUnparsableLikeCountRendersUnread(t *testing.T) {
+	site := newDiscourseSite(3)
+	body := strings.Replace(discourseCrawlerPage(site.pages[:1], 1, true),
+		`itemprop="userInteractionCount" content="12"`, `itemprop="userInteractionCount" content="twelve"`, 1)
+	doc, err := html.Parse(strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := url.Parse(discourseTopicURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extraction, ok := extractDiscourseTopic(doc, page)
+	want := "## #1 · opener_placeholder · 2026-03-01 10:01 UTC · likes unread\n"
+	if !ok || !strings.Contains(extraction.markdown, want) {
+		t.Fatalf("an unparsable like count is not rendered unread:\n%.600s", extraction.markdown)
 	}
 }

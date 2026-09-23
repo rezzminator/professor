@@ -28,10 +28,12 @@ import (
 // (/t/slug/id/N carries post N alone, unlinked), and the topic's JSON
 // (/t/slug/id.json), whose posts_count is the count the topic states — the
 // crawler view states none. A page's answer is merged into the topic by post
-// number and its own links replace the ones it was reached by, so following
-// ends when no page is left. The extractor then reconciles the posts it
-// rendered against the stated count: a page link left unfollowed, and a stated
-// post no page served, each flag the artifact partial and are named.
+// number — only once both it and the page name the same topic, so a page of
+// unknown identity merges nothing — and its own links replace the ones it was
+// reached by, so following ends when no page is left. The extractor then
+// reconciles the posts it rendered against the stated count: a page link left
+// unfollowed, a stated post no page served, and a count not read each flag the
+// artifact partial and are named.
 
 // discourseCountMeta carries the topic's stated post count into the page once
 // its JSON is read; discourseFollowedMeta marks a synthetic loader (the count,
@@ -336,7 +338,7 @@ func discourseLoaders(doc *html.Node, page *url.URL) []pageLoader {
 func discourseCountLoader(doc *html.Node, topic discourseTopic, key, target, referer string) pageLoader {
 	return pageLoader{
 		key:     key,
-		label:   "the topic's post count (" + safeURL(target) + ")",
+		label:   "the topic's post count",
 		method:  http.MethodGet,
 		target:  target,
 		headers: map[string]string{headerReferer: referer, headerAccept: "application/json"},
@@ -351,7 +353,10 @@ func discourseCountLoader(doc *html.Node, topic discourseTopic, key, target, ref
 					discourseContentType(contentType),
 				)
 			}
-			if answer.ID != "" && topic.id != "" && answer.ID.String() != topic.id {
+			switch {
+			case answer.ID == "":
+				return fmt.Errorf("answered by JSON naming no topic id, not verifiable as topic %s", topic.id)
+			case answer.ID.String() != topic.id:
 				return fmt.Errorf("answered by the JSON of topic %s, not topic %s", answer.ID, topic.id)
 			}
 			discourseMark(doc, discourseCountMeta, strconv.Itoa(*answer.PostsCount))
@@ -414,7 +419,13 @@ func discoursePageLoader(
 				return fmt.Errorf("answered by a page (%s, titled %q) that is not a Discourse topic page",
 					discourseContentType(contentType), pageTitle(answer))
 			}
-			if answered.id != "" && topic.id != "" && answered.id != topic.id {
+			switch {
+			case topic.id == "" || answered.id == "":
+				// Unknown identity fails closed: posts merged in are
+				// presented as this topic's.
+				return fmt.Errorf("answered by a page (titled %q) not verifiable as this topic: "+
+					"a page names no topic address", pageTitle(answer))
+			case answered.id != topic.id:
 				return fmt.Errorf("answered by a page of another topic (titled %q)", pageTitle(answer))
 			}
 			if discourseMerge(topic.root, answered.posts) == 0 {
@@ -521,22 +532,25 @@ func extractDiscourseTopic(doc *html.Node, page *url.URL) (siteExtraction, bool)
 
 	var gaps []string
 	for _, target := range discoursePageLinks(doc, page, relPrev) {
-		gaps = append(gaps, fmt.Sprintf("the posts before #%d are not loaded (previous page, %s, not followed)",
+		gaps = append(gaps, fmt.Sprintf("the posts before #%d are not loaded (previous page, %s)",
 			first, discoursePageLabel(target)))
 	}
 	if topic.url != nil && len(relElements(doc, relPrev)) == 0 && !topic.hasPost(1) &&
 		!discourseMarked(doc, "discourse-page "+topic.url.String()) {
-		gaps = append(gaps, fmt.Sprintf("the posts before #%d are not loaded (the topic's first page not followed)",
-			first))
+		gaps = append(gaps, fmt.Sprintf("the posts before #%d are not loaded (the topic's first page)", first))
 	}
 	for _, target := range discoursePageLinks(doc, page, relNext) {
-		gaps = append(gaps, fmt.Sprintf("the posts after #%d are not loaded (next page, %s, not followed)",
+		gaps = append(gaps, fmt.Sprintf("the posts after #%d are not loaded (next page, %s)",
 			last, discoursePageLabel(target)))
 	}
+	// Without the stated count, posts no page links cannot be ruled out: an
+	// unread count is a gap, and an unrequestable one (no topic address to
+	// read it from) is named apart from one whose read failed.
 	stated, statedKnown := discourseStated(doc)
 	statedText := "count not read (the topic's JSON was not fetched or not readable)"
 	countLine := ""
-	if statedKnown {
+	switch {
+	case statedKnown:
 		statedText = strconv.Itoa(stated)
 		rest := stated - loaded
 		switch {
@@ -548,6 +562,11 @@ func extractDiscourseTopic(doc *html.Node, page *url.URL) (siteExtraction, bool)
 		case rest < 0:
 			countLine = fmt.Sprintf(" · %d more loaded than stated (posted while the pages were read)", -rest)
 		}
+	case topic.url == nil:
+		statedText = "count not read (the page names no topic address to read it from)"
+		gaps = append(gaps, "the stated post count could not be requested (the page names no topic address)")
+	default:
+		gaps = append(gaps, "the stated post count was not read")
 	}
 	countLine = fmt.Sprintf("**Posts:** %s stated · %d loaded", statedText, loaded) + countLine
 	if len(gaps) > 0 {
@@ -604,7 +623,9 @@ func discourseRenderPost(post *html.Node, renderer markdownRenderer) string {
 	header := "## #" + strconv.Itoa(discoursePostNumber(post))
 	var body *html.Node
 	var author, date string
-	likes := -1
+	// likes is -1 until a like count is read; likesUnread marks one stated
+	// but not a number, rendered as such rather than as no likes.
+	likes, likesUnread := -1, false
 	var walk func(*html.Node)
 	walk = func(node *html.Node) {
 		for child := node.FirstChild; child != nil; child = child.NextSibling {
@@ -621,11 +642,15 @@ func discourseRenderPost(post *html.Node, renderer markdownRenderer) string {
 				}
 			case date == "" && child.DataAtom == atom.Time && hasClass(child, "post-time"):
 				date = discourseDate(nodeAttr(child, "datetime"))
-			case likes < 0 && nodeAttr(child, "itemprop") == "interactionStatistic":
+			case likes < 0 && !likesUnread && nodeAttr(child, "itemprop") == "interactionStatistic":
 				if kind := firstWithAttr(child, "itemprop", "interactionType", nil); kind != nil &&
 					strings.HasSuffix(nodeAttr(kind, "content"), "LikeAction") {
 					if count := firstWithAttr(child, "itemprop", "userInteractionCount", nil); count != nil {
-						likes, _ = redditCount(nodeAttr(count, "content"))
+						if read, ok := redditCount(nodeAttr(count, "content")); ok {
+							likes = read
+						} else {
+							likesUnread = true
+						}
 					}
 				}
 				continue
@@ -642,6 +667,8 @@ func discourseRenderPost(post *html.Node, renderer markdownRenderer) string {
 		header += " · " + date
 	}
 	switch {
+	case likesUnread:
+		header += " · likes unread"
 	case likes == 1:
 		header += " · 1 like"
 	case likes > 1:

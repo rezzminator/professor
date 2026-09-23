@@ -83,11 +83,16 @@ func (h *Harvester) convertHTML(
 		), unparsed, nil
 	}
 	lazy := lazyLoadIncomplete(doc)
-	h.followForSite(ctx, source, doc, budget)
+	rest := h.followForSite(ctx, source, doc, budget)
 	if extraction, extractor, ok := extractForSite(source, doc); ok {
-		reason := extraction.partial
-		if reason != "" {
+		// A loader still in the page is a gap whatever the extractor counts;
+		// the budget's note names why it was not loaded.
+		reason := joinReasons(extraction.partial, rest.reason())
+		if reason != "" || rest.left > 0 {
 			reason = joinReasons(reason, budget.note())
+		}
+		if reason == "" && rest.left > 0 {
+			reason = fmt.Sprintf("%d loader(s) left in the page, not followed", rest.left)
 		}
 		return withPartial(extraction.markdown, joinReasons(reason, lazy)), convertedPage{
 			extractor: extractor,

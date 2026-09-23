@@ -54,6 +54,19 @@ func TestSitePressesLoadersOnlyForARegisteredSite(t *testing.T) {
 	}
 }
 
+// TestNoMarkupClaimedExtractorPressesLoaders: SitePressesLoaders decides by
+// host alone, before any markup is read, so an extractor claiming pages by
+// their markup (detect) that set pressLoaders would silently never press —
+// the registry holds no such entry.
+func TestNoMarkupClaimedExtractorPressesLoaders(t *testing.T) {
+	for _, extractor := range siteExtractors {
+		if extractor.detect != nil && extractor.pressLoaders {
+			t.Errorf("extractor %q claims pages by markup and sets pressLoaders, which SitePressesLoaders "+
+				"(host only) never honours", extractor.name)
+		}
+	}
+}
+
 // TestSiteExtractParseFailuresAreLogged pins F13: a value this file's
 // fallbacks could not parse at all — not merely one with no host — is
 // logged with the value and the error, never silently swallowed as though

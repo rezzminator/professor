@@ -98,7 +98,10 @@ func (extractor siteExtractor) mayRequest(page, target *url.URL) bool {
 // SitePressesLoaders reports whether the browser rung may press source's
 // load-more buttons: true only when a registered extractor owning the host
 // asks for it. Pressing can fire requests or navigation, so every other page
-// (and an unparsable URL) is rendered read-only.
+// (and an unparsable URL) is rendered read-only. The rule is the host alone:
+// the rung asks before any markup is read, so an extractor that claims pages
+// by their markup (detect) may not set pressLoaders — a registry test refuses
+// that entry, which would otherwise never press.
 func SitePressesLoaders(source string) bool {
 	parsed, err := url.Parse(source)
 	if err != nil {
@@ -119,25 +122,31 @@ func SitePressesLoaders(source string) bool {
 }
 
 // followForSite follows, in doc, the loaders of the extractor that claims the
-// page (loaders.go). A nil budget (a conversion outside the web ladder) and a
-// page no extractor names loaders for leave doc as it is.
-func (h *Harvester) followForSite(ctx context.Context, source string, doc *html.Node, budget *loaderBudget) {
+// page (loaders.go), and returns what the following left in doc. A nil
+// budget (a conversion outside the web ladder) and a page no extractor names
+// loaders for leave doc as it is, with nothing reported left.
+func (h *Harvester) followForSite(
+	ctx context.Context,
+	source string,
+	doc *html.Node,
+	budget *loaderBudget,
+) loaderRemainder {
 	if budget == nil {
-		return
+		return loaderRemainder{}
 	}
 	parsed, err := url.Parse(source)
 	if err != nil {
 		obs.Logger(ctx).Warn("harvest: a fetch source could not be parsed; no loaders followed",
 			"source", logSource(source), obs.FieldErr, err.Error())
-		return
+		return loaderRemainder{}
 	}
 	if parsed.Host == "" {
-		return
+		return loaderRemainder{}
 	}
 	for _, extractor := range siteExtractors {
 		if extractor.loaders != nil && extractor.claims(parsed, doc) {
 			before := budget.requests
-			h.followLoaders(ctx, doc, parsed, extractor, budget)
+			rest := h.followLoaders(ctx, doc, parsed, extractor, budget)
 			if budget.requests > before || budget.stopped != "" {
 				state := fmt.Sprintf("%d followed, %d failed in the fetch", len(budget.followed), len(budget.failures))
 				obs.Logger(ctx).Info("harvest: loaders followed",
@@ -147,9 +156,10 @@ func (h *Harvester) followForSite(ctx context.Context, source string, doc *html.
 					"state", state,
 					"reason", budget.stopped)
 			}
-			return
+			return rest
 		}
 	}
+	return loaderRemainder{}
 }
 
 // extractForSite runs the extractor that claims the page. ok is false when no

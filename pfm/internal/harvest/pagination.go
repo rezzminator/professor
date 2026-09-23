@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 
 	"golang.org/x/net/html"
@@ -16,18 +17,30 @@ import (
 // pagination follows it (discourse.go). Every other page's continuation is
 // named on the artifact as a partial reason, never dropped silently. Only a
 // link continuing the page's OWN address counts: the same path with another
-// query (?page=2, &start=20), or the path — less any page suffix of its own —
-// with a page segment (/2/, /page/2/, /page-2); a blog's link to the
-// adjacent post is another page, not this one continued.
+// value of a pagination key (?page=2, &start=20); the page's path with a page
+// segment (/2/, /page/2/, /page-2); or, for a page naming its own page
+// (/page/2), its path less that segment with another. A link to a
+// complete page next to this one is another page, not this one continued: a
+// blog's adjacent post, the same path with another post id (?p=146) — and a
+// numbered sibling (/archives/145 → /archives/146, /docs/3/ → /docs/4/), since
+// a bare trailing number is as often an id as a page, so /guide/2/ →
+// /guide/3/ goes unflagged too.
 
-// paginationSegmentRe is a trailing page segment of a path: /2, /page/2,
-// /page-2, with or without a trailing slash.
-var paginationSegmentRe = regexp.MustCompile(`(?i)/(?:page[-/]?)?\d+/?$`)
+var (
+	// paginationSegmentRe is a trailing page segment of a path: /2, /page/2,
+	// /page-2, with or without a trailing slash.
+	paginationSegmentRe = regexp.MustCompile(`(?i)/(?:page[-/]?)?\d+/?$`)
+	// paginationNamedSegmentRe is a trailing page segment that names itself
+	// a page: /page/2, /page-2, /page2.
+	paginationNamedSegmentRe = regexp.MustCompile(`(?i)/page[-/]?\d+$`)
+)
 
-// paginationQueryKeys are the query keys a continuation label shows with
-// their value; any other key's value is not repeated (it may be a token).
+// paginationQueryKeys are the query keys that page through content: a link
+// differing from the page in one continues it, and a continuation label shows
+// their value; any other key's value is not repeated (it may be a token). p
+// is not one: it is WordPress's post id.
 var paginationQueryKeys = map[string]bool{
-	"page": true, "p": true, "pg": true, "paged": true, "start": true,
+	"page": true, "pg": true, "paged": true, "start": true,
 	"offset": true, "from": true, "skip": true,
 }
 
@@ -62,11 +75,32 @@ func continuesPage(page, target *url.URL) bool {
 	pagePath := strings.TrimSuffix(page.EscapedPath(), "/")
 	targetPath := strings.TrimSuffix(target.EscapedPath(), "/")
 	if targetPath == pagePath {
-		return target.RawQuery != page.RawQuery
+		return paginationKeyDiffers(page.Query(), target.Query())
 	}
-	base := paginationSegmentRe.ReplaceAllString(pagePath, "")
+	if pageSegmentFollows(pagePath, targetPath) {
+		return true
+	}
+	named := paginationNamedSegmentRe.FindString(pagePath)
+	return named != "" && pageSegmentFollows(strings.TrimSuffix(pagePath, named), targetPath)
+}
+
+// pageSegmentFollows reports whether targetPath is base with one page segment.
+func pageSegmentFollows(base, targetPath string) bool {
 	rest, ok := strings.CutPrefix(targetPath, base)
 	return ok && rest != "" && paginationSegmentRe.FindString(rest) == rest
+}
+
+// paginationKeyDiffers reports whether a pagination key's values differ
+// between the two queries.
+func paginationKeyDiffers(page, target url.Values) bool {
+	for _, query := range []url.Values{page, target} {
+		for key := range query {
+			if paginationQueryKeys[strings.ToLower(key)] && !slices.Equal(page[key], target[key]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // paginationLabel is target as a partial reason shows it: scheme, host and

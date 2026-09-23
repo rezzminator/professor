@@ -11,7 +11,9 @@ import (
 // claims links its own next page. The artifact is flagged partial naming the
 // continuation — never silently the first page alone — and no browser render
 // is spent on it (a render is the same page). A rel="next" to a different
-// page (a blog's adjacent post) is not a continuation.
+// complete page — a blog's adjacent post, the next post id, a numbered sibling
+// — is not a continuation, nor is a link differing only in a query key that
+// does not page.
 func TestAnUnfollowedNextPageFlagsAGenericPagePartial(t *testing.T) {
 	article := strings.Repeat("A long paragraph of the article's own text, with enough words to count. ", 20)
 	for _, tc := range []struct {
@@ -20,7 +22,16 @@ func TestAnUnfollowedNextPageFlagsAGenericPagePartial(t *testing.T) {
 		{"query page", "https://blog.example.test/guide", "/guide?page=2&session=s3cr3t", "guide?page=2&session=…"},
 		{"path page", "https://blog.example.test/guide/", "/guide/2/", "https://blog.example.test/guide/2/"},
 		{"second page", "https://blog.example.test/threads/t.12/page-2", "/threads/t.12/page-3", "page-3"},
+		{"listing page", "https://blog.example.test/blog/", "/blog/page/2/", "https://blog.example.test/blog/page/2/"},
+		{"listing second page", "https://blog.example.test/blog/page/2/", "/blog/page/3/", "blog/page/3/"},
+		{"a post's second page", "https://blog.example.test/archives/145", "/archives/145/2", "archives/145/2"},
 		{"adjacent post", "https://blog.example.test/2026/03/guide/", "/2026/03/another-guide/", ""},
+		{"numbered sibling", "https://blog.example.test/archives/145", "/archives/146", ""},
+		{"numbered chapter", "https://blog.example.test/docs/3/", "/docs/4/", ""},
+		{"next lesson", "https://blog.example.test/course/lesson/1", "/course/lesson/2", ""},
+		{"next post id", "https://blog.example.test/?p=145", "/?p=146", ""},
+		{"next photo", "https://blog.example.test/gallery?photo=101", "/gallery?photo=102", ""},
+		{"tracking only", "https://blog.example.test/guide", "/guide?utm_source=feed", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			page := `<html><head><title>Guide</title><link rel="next" title="Next" href="` + tc.next + `"></head>` +

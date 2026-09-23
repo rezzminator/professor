@@ -29,7 +29,10 @@ import (
 // it as a gap, and the budget's note names why. A later conversion of the same
 // fetch (the next rung's page, the browser's render) gets every answer already
 // followed replayed into its page from the budget, never requested again and
-// never silently lost.
+// never silently lost: an answer the store's bound left out, or one that will
+// not graft into the later page, is named on that page as a gap. An answer
+// that came from off the site through a redirect is refused like a loader
+// pointing there.
 
 const (
 	// loaderRequestCap bounds the loader requests one fetch spends, across
@@ -46,6 +49,10 @@ const (
 	// short, but a future extractor's graft could wrap something longer —
 	// this caps what any graft failure may repeat into a partial artifact.
 	graftErrorReasonMaxLen = 200
+	// loaderReplayCap bounds the bytes of followed answers one fetch keeps
+	// for replay into a later conversion: loaderRequestCap answers of up to
+	// Options.MaxBytes each would otherwise stay resident together.
+	loaderReplayCap = 32 << 20
 )
 
 // graftErrorClass is the ONE named exception to errorReasonClass
@@ -92,6 +99,8 @@ type loaderBudget struct {
 	attempted   map[string]bool
 	failures    []string
 	consecutive int
+	// failed holds the loaders whose request failed or was refused.
+	failed map[string]bool
 	// jar carries the cookies the site sets across the fetch's requests.
 	jar http.CookieJar
 	// stopped is why following ended before every loader was requested; ""
@@ -101,8 +110,10 @@ type loaderBudget struct {
 	// limited us, or the cap was reached.
 	policyStop bool
 	// answers holds each followed loader's answer, replayed into a later
-	// conversion's page.
-	answers map[string]loaderAnswer
+	// conversion's page, up to replayLimit bytes in all (replayBytes kept).
+	answers     map[string]loaderAnswer
+	replayLimit int
+	replayBytes int
 }
 
 // loaderAnswer is one followed loader's answer as the site sent it.
@@ -113,11 +124,13 @@ type loaderAnswer struct {
 
 func newLoaderBudget(ctx context.Context) *loaderBudget {
 	budget := &loaderBudget{
-		limit:     loaderRequestCap,
-		pace:      loaderPace,
-		followed:  map[string]bool{},
-		attempted: map[string]bool{},
-		answers:   map[string]loaderAnswer{},
+		limit:       loaderRequestCap,
+		pace:        loaderPace,
+		followed:    map[string]bool{},
+		attempted:   map[string]bool{},
+		failed:      map[string]bool{},
+		answers:     map[string]loaderAnswer{},
+		replayLimit: loaderReplayCap,
 	}
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -150,36 +163,82 @@ func (budget *loaderBudget) note() string {
 	return strings.Join(parts, "; ")
 }
 
+// loaderRemainder is what following left in one conversion's page: left, the
+// loaders still named in it — each a gap, whatever the extractor counts — and
+// unreplayed, one reason per answer this fetch followed that the page could
+// not take, named apart from a loader never followed.
+type loaderRemainder struct {
+	left       int
+	unreplayed []string
+}
+
+// reason names the unreplayed answers for the partial marker; "" when none.
+func (rest loaderRemainder) reason() string {
+	return strings.Join(rest.unreplayed, "; ")
+}
+
 // followLoaders requests every loader extractor names in doc and splices each
-// answer in, re-reading the page after each round because an answer can hold
-// loaders of its own. A loader this fetch followed already is answered from
-// the budget: dropped when its answer is in doc (a copy of it), replayed into
-// doc otherwise. It returns when no loader is left to request, or when the
-// budget stops it.
+// answer in, then reports what is left in doc (loaderRemainder).
 func (h *Harvester) followLoaders(
 	ctx context.Context,
 	doc *html.Node,
 	page *url.URL,
 	extractor siteExtractor,
 	budget *loaderBudget,
+) loaderRemainder {
+	unreplayed := map[string]string{}
+	h.followRounds(ctx, doc, page, extractor, budget, unreplayed)
+	var rest loaderRemainder
+	named := map[string]bool{}
+	for _, loader := range extractor.loaders(doc, page) {
+		if named[loader.key] {
+			continue
+		}
+		named[loader.key] = true
+		rest.left++
+		if why, ok := unreplayed[loader.key]; ok {
+			rest.unreplayed = append(rest.unreplayed, loader.label+" was followed, but "+why)
+		}
+	}
+	return rest
+}
+
+// followRounds re-reads the page after each round because an answer can hold
+// loaders of its own. A loader this fetch followed already is answered from
+// the budget: dropped when its answer is in doc (a copy of it), replayed into
+// doc otherwise; unreplayed collects why an answer could not be. It returns
+// when no loader is left to request, or when the budget stops it.
+func (h *Harvester) followRounds(
+	ctx context.Context,
+	doc *html.Node,
+	page *url.URL,
+	extractor siteExtractor,
+	budget *loaderBudget,
+	unreplayed map[string]string,
 ) {
-	// grafted: the loaders whose answer is in doc; unreplayable: followed
-	// answers that would not graft into doc, left in it as gaps.
-	grafted, unreplayable := map[string]bool{}, map[string]bool{}
+	// grafted: the loaders whose answer is in doc.
+	grafted := map[string]bool{}
 	for budget.stopped == "" {
 		progressed := false
 		for _, loader := range extractor.loaders(doc, page) {
+			if _, done := unreplayed[loader.key]; done {
+				continue
+			}
 			switch {
 			case grafted[loader.key]:
 				loader.drop()
-			case unreplayable[loader.key]:
-				continue
 			case budget.followed[loader.key]:
-				answer := budget.answers[loader.key]
+				answer, kept := budget.answers[loader.key]
+				if !kept {
+					unreplayed[loader.key] = fmt.Sprintf(
+						"its answer was not kept for replay (the fetch's replay store is bounded at %d bytes)",
+						budget.replayLimit)
+					continue
+				}
 				if err := loader.graft(answer.body, answer.contentType); err != nil {
 					obs.Logger(ctx).Warn("harvest: a followed loader's answer did not graft into this page; "+
 						"it stays a gap", "kind", loader.label, "target", safeURL(loader.target), obs.FieldErr, err.Error())
-					unreplayable[loader.key] = true
+					unreplayed[loader.key] = "its answer would not graft into this page: " + graftErrorClass(err)
 					continue
 				}
 				grafted[loader.key] = true
@@ -216,6 +275,7 @@ func (h *Harvester) followLoader(
 		obs.Logger(ctx).Warn("harvest: a loader pointing off the site was not followed",
 			"kind", loader.label, "target", safeURL(loader.target))
 		budget.failures = append(budget.failures, loader.label+" points off the site: "+safeURL(loader.target))
+		budget.failed[loader.key] = true
 		return true
 	}
 	if budget.requests >= budget.limit {
@@ -246,9 +306,16 @@ func (h *Harvester) followLoader(
 		request.body = []byte(loader.form.Encode())
 	}
 	response, err := gatewayAttempt(ctx, request)
-	switch {
-	case err != nil:
+	if err != nil {
 		return budget.fail(ctx, loader, err.Error(), errorReasonClass(err, "request failed"))
+	}
+	if final, parseErr := url.Parse(response.finalURL); parseErr != nil || !extractor.mayRequest(page, final) {
+		// A redirect took the request off the site: its answer is not the
+		// site's, whatever it holds.
+		offSite := "answered from off the site (" + safeURL(response.finalURL) + ")"
+		return budget.fail(ctx, loader, offSite, offSite)
+	}
+	switch {
 	case response.status == http.StatusTooManyRequests:
 		budget.stopped = fmt.Sprintf("the site answered HTTP 429 (rate limited) after %d request(s); not retried",
 			budget.requests)
@@ -273,8 +340,15 @@ func (h *Harvester) followLoader(
 		return budget.fail(ctx, loader, err.Error(), graftErrorClass(err))
 	}
 	budget.followed[loader.key] = true
-	budget.answers[loader.key] = loaderAnswer{body: response.body, contentType: response.contentType}
 	budget.consecutive = 0
+	if budget.replayBytes+len(response.body) > budget.replayLimit {
+		obs.Logger(ctx).Warn("harvest: a followed loader's answer is past the replay bound; a later conversion "+
+			"names it a gap", "kind", loader.label, "target", safeURL(loader.target),
+			"bytes", len(response.body), "kept", budget.replayBytes, "limit", budget.replayLimit)
+		return true
+	}
+	budget.replayBytes += len(response.body)
+	budget.answers[loader.key] = loaderAnswer{body: response.body, contentType: response.contentType}
 	return true
 }
 
@@ -286,6 +360,7 @@ func (h *Harvester) followLoader(
 func (budget *loaderBudget) fail(ctx context.Context, loader pageLoader, detail, class string) bool {
 	obs.Logger(ctx).Warn("harvest: loader request failed",
 		"kind", loader.label, "target", safeURL(loader.target), obs.FieldErr, detail)
+	budget.failed[loader.key] = true
 	budget.failures = append(budget.failures, fmt.Sprintf("%s (%s): %s", loader.label, safeURL(loader.target), class))
 	budget.consecutive++
 	if ctx.Err() != nil {

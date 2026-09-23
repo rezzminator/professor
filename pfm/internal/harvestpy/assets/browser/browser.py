@@ -243,7 +243,8 @@ UA_DATA_JS = """async (hints) => {
   const high = await data.getHighEntropyValues(hints);
   return {brands: data.brands, mobile: data.mobile, platform: data.platform, ...high};
 }"""
-UA_HIGH_ENTROPY_HINTS = ["architecture", "bitness", "fullVersionList", "model", "platformVersion", "wow64"]
+UA_HIGH_ENTROPY_HINTS = ["architecture", "bitness", "formFactors", "fullVersionList", "model", "platformVersion",
+                        "uaFullVersion", "wow64"]
 HEADLESS_BRAND = "HeadlessChrome"
 STOCK_BRAND = "Google Chrome"
 
@@ -537,7 +538,14 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
         outcome["url"] = start_url
         return mark_incomplete(before_scrolling, outcome, marker_token), status, outcome
     if after_scrolling is None:
-        after_scrolling = await page.content()
+        try:
+            after_scrolling = await page.content()
+        except Exception as e:  # noqa: BLE001 — a lost retake keeps the pre-scroll snapshot, stamped incomplete
+            print(f"browser retake snapshot raised for {redact(start_url)}: {e}; keeping the pre-scroll snapshot",
+                  file=sys.stderr)
+            outcome = {"stopped": "error", "error": str(e), "growing": False}
+            outcome["url"] = start_url
+            return mark_incomplete(before_scrolling, outcome, marker_token), status, outcome
     outcome["url"] = start_url
     html = mark_incomplete(after_scrolling, outcome, marker_token)
     return html, status, outcome

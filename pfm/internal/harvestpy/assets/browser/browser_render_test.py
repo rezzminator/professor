@@ -548,6 +548,24 @@ def test_render_page_never_returns_a_document_that_committed_after_the_check():
     assert outcome["stopped"] == "stable" and html.count("x") == 3 * 500, (outcome, html[:300])
 
 
+def test_render_page_keeps_the_pre_scroll_snapshot_when_the_retake_also_raises():
+    """F3: a renderer crash during scrolling can leave the first post-scroll
+    content() read raising (caught, after_scrolling = None) with the page
+    never having navigated, so the retake at the end of render_page runs. If
+    the retake ALSO raises, the render must not be lost to it — it falls back
+    to the good pre-scroll snapshot, stamped incomplete with an error
+    outcome, instead of letting the exception escape render_page."""
+    page = FeedPage(batches=2, content_raises=2)
+    html, status, outcome = run(render_page(FakeContext(page), "https://forum.example.test/t/1", 45_000,
+                                            clock=fake_clock()))
+    assert status == 200, status
+    body = html.split("<body>", 1)[1].split("</body>", 1)[0]
+    assert body == "x" * 500, f"the render did not fall back to the pre-scroll snapshot: {html[:300]}"
+    assert outcome["stopped"] == "error" and outcome["error"] == SCROLL_FAILURE, outcome
+    assert outcome["url"] == "https://forum.example.test/t/1", outcome
+    assert f'<meta name="{LAZY_LOAD_MARKER}"' in html and "scrolling failed" in html, html[:300]
+
+
 def test_render_page_keeps_a_same_document_url_change():
     page = FeedPage(batches=4, navigate_on_scroll=(2, "https://forum.example.test/t/1/page-2", False))
     html, status, outcome, _ = render_navigating(page)
@@ -585,6 +603,19 @@ def fetch_with(page, headless):
         result = run(fetch_browser("https://forum.example.test/t/lazy-thread", lambda target: (True, None),
                                    proxy_url="http://127.0.0.1:8431", headless=headless))
     return fake, result
+
+
+def test_high_entropy_hints_request_every_client_hint_the_stock_engine_reports():
+    """F6: the UA override must carry every client hint a stock Chrome reports
+    for itself. formFactors and the legacy uaFullVersion were never requested
+    from the engine, so getHighEntropyValues(['formFactors']) and
+    Sec-CH-UA-Form-Factors come back empty under the override where a stock
+    Chrome of the same version answers ["Desktop"] — a fingerprint
+    inconsistency."""
+    for hint in ("formFactors", "uaFullVersion"):
+        assert hint in browser.UA_HIGH_ENTROPY_HINTS, (
+            f"{hint} is never requested from the engine: {browser.UA_HIGH_ENTROPY_HINTS!r}"
+        )
 
 
 def test_headless_render_overrides_the_ua_and_its_client_hints_together():

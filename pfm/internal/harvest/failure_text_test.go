@@ -59,12 +59,11 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 				Rungs:     ladder,
 			},
 			[]string{
-				"Cloudflare",
 				"never solves",
 				"Rungs tried: direct, chrome-impersonation, browser",
 				"another copy",
 			},
-			nil,
+			[]string{"Cloudflare"}, // the harvester's own words are no vendor evidence
 		},
 		{
 			"login",

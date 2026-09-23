@@ -77,18 +77,14 @@ func failureTextKind(err string) string {
 	return ""
 }
 
-// challengeVendors are the challenge vendors a failure can name, matched in
-// the lowered error text.
-var challengeVendors = []struct{ marker, name string }{
-	{"cloudflare", "Cloudflare"},
-	{"datadome", "DataDome"},
-	{"perimeterx", "PerimeterX"},
-	{"akamai", "Akamai"},
-	{"incapsula", "Imperva"},
-	{"imperva", "Imperva"},
-	{"kasada", "Kasada"},
-	{"aws waf", "AWS WAF"},
-	{"captcha", "a CAPTCHA"},
+// browserRan reports whether the real-browser rung was among the rungs tried.
+func browserRan(rungs []string) bool {
+	for _, rung := range rungs {
+		if rung == "browser" || strings.HasPrefix(rung, "browser-") {
+			return true
+		}
+	}
+	return false
 }
 
 // rungsRunNote names the rungs that were tried, by public class: a provider or
@@ -184,16 +180,15 @@ func publicFailureTable(result Result, kind string) string {
 	case errorKindConnect:
 		return "The connection failed: the source refused, reset or could not be reached." + rungs + " Retry later, or " + anotherCopy + "."
 	case errorKindChallenge:
-		vendor := ""
-		low := strings.ToLower(result.Error + " " + result.ErrorKind)
-		for _, candidate := range challengeVendors {
-			if strings.Contains(low, candidate.marker) {
-				vendor = " (" + candidate.name + ")"
-				break
-			}
+		// No vendor is named: the result carries nothing the site sent (headers,
+		// cookies, markup), and the harvester's own challenge text names
+		// Cloudflare for every wall (net.go FailureMessage).
+		lead := "The source is behind an access challenge; the harvester never solves a challenge." + rungs
+		if browserRan(result.Rungs) {
+			return lead + " The real-browser rung met the wall too, but such walls come and go: a retry later may pass. " +
+				"If it does not, " + anotherCopy + "."
 		}
-		return "The source is behind an access challenge" + vendor + "; the harvester never solves a challenge." + rungs +
-			" Retrying will meet the same wall: " + anotherCopy + "."
+		return lead + " Retrying will meet the same wall: " + anotherCopy + "."
 	case errorKindLogin:
 		if strings.Contains(result.Error, shareSignInText) {
 			return result.Error // a share link names its service and the way out (share_links.go); the text carries no URL

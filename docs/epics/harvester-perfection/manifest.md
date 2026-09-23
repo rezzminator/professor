@@ -65,9 +65,9 @@ The harvester gets every target — page, document, paper, file — by every tec
 4. G1 reader-rung checks: the wall, paywall and stated-gap checks run on reader-service output too (Bloomberg: 2 paragraphs of a paywalled article with no flag; Quora).
 5. G2 stated against loaded on every rung, when the page states a count (Glassdoor: 1 of 103, silent).
 6. G3 a redirect to a different page is named (a dead Booking hotel slug stored a city search page under the hotel's URL).
-7. Failure messages (user ruling: hard-site testing is closed): every target the harvester cannot get ends in a meaningful, named error — what blocked it (challenge, login wall, paywall, rate limit, not found, unsupported format) and what the caller can do — never an empty or generic "retrieval failed".
-8. Bake-offs close (Office, OCR, ebook and web formats): winners recorded here.
-9. The surface redesign: spec first, then the central retrieval function, the six tools, removals, the remote form, the callers.
+7. The surface redesign, built from `surface-spec.md` in five tasks (R1 central retrieval, R2 tools, R3 docs lanes CLI, R4 deep-rr, R5 templates). Moved ahead of the failure messages: R2 rewrites every error string that names an old tool, so F7 works on the new names once.
+8. Failure messages (user ruling: hard-site testing is closed): every target the harvester cannot get ends in a meaningful, named error — what blocked it (challenge, login wall, paywall, rate limit, not found, unsupported format) and what the caller can do — never an empty or generic "retrieval failed".
+9. Bake-offs: closed, winners recorded above.
 10. Formats: the binary guard and file results, then the parsed formats with the bake-off winners, OCR, share links.
 11. Final sweep (lanes A, B, C) and the report.
 
@@ -80,3 +80,4 @@ The harvester gets every target — page, document, paper, file — by every tec
 - Amazon answered 404 to a product page; unproven whether it is a real 404 or a disguised refusal.
 - Glassdoor served in Dutch for the fetching location; its page states "103 reviews" beside other companies' review counters and carries no countable review ids, so the stated-count check stays silent there (G2 rule: a noun whose labels disagree is not a stated count).
 - Notion external-object mentions render as a placeholder.
+- A reader-rung page whose HTML names no canonical address carries "a redirect to another page could not be ruled out" (the reader never reports where it landed); a shortlink that rewrites its path (`/q/123` to `/questions/123/slug`) on a site without an extractor is named as a different page.

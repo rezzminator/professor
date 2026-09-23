@@ -281,7 +281,7 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 		fixture              string
 		heads, rows, bullets []string
 		code, absent, text   []string
-		fences               []string
+		fences, once         []string
 	}{
 		{
 			fixture: "wikitable.html",
@@ -497,6 +497,26 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			absent: []string{"Previous topic", "Built-in Exceptions"},
 		},
 		{
+			// A Tildes comment header carries a collapsed-state excerpt of the
+			// comment's own first line, shown only when the thread is collapsed
+			// (stylesheet): written once, from the comment body.
+			fixture: "comment-excerpt.html",
+			once: []string{
+				"Just other Linux users telling me to use Nix! If it ain’t the Debian way I ain’t doing it.",
+				"Debian is love. Debian is life. I'm reminded of an old bash.org quote:",
+			},
+		},
+		{
+			// A PyPI README ends in a row of two linked logos served through
+			// PyPI's image proxy, whose URLs carry no file extension: each logo
+			// is written as an image with its alt text.
+			fixture: "camo-image.html",
+			once: []string{
+				"![Kenneth Reitz](https://pypi-camo.",
+				"![Python Software Foundation](https://pypi-camo.",
+			},
+		},
+		{
 			// A news article's last paragraph, its correction note, sits in the
 			// article's own <footer>: written after the body; the newsletter
 			// promotion inside the article and the site footer stay out.
@@ -562,6 +582,11 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			for _, fence := range tc.fences {
 				if !strings.Contains(result.Markdown, "```\n"+fence+"\n```") {
 					t.Errorf("code block %q is not one fence with every line in order", fence)
+				}
+			}
+			for _, text := range tc.once {
+				if count := strings.Count(result.Markdown, text); count != 1 {
+					t.Errorf("%q is written %d times, want once", text, count)
 				}
 			}
 			for _, word := range tc.absent {

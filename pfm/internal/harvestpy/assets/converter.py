@@ -72,12 +72,14 @@ def convert_html(path: pathlib.Path) -> str:
     _keep_linked_blocks()
     _extract_comments_as_content()
     _keep_share_word_headings()
+    _keep_extensionless_images()
     # Local HTML follows the old dispatch path, which decodes malformed bytes
     # with errors ignored before trafilatura sees the document.
     raw = path.read_bytes().decode("utf-8", errors="ignore")
     tree = load_html(raw)
     if tree is not None:
         _drop_hidden(tree)
+        _drop_repeated_excerpts(tree)
         _unwrap_layout_tables(tree)
         _keep_notes(tree)
         _flatten_code_lines(tree)
@@ -217,6 +219,84 @@ def _drop_hidden(tree) -> None:
             continue
         if element.tag == "template" or (element.get("hidden") or "").strip().casefold() != "until-found":
             element.drop_tree()
+
+
+# A comment or card that shows its text in full may also carry an excerpt of
+# that same text, which the stylesheet shows only in the collapsed state
+# (Tildes' <div class="comment-excerpt"> in every comment header). Without the
+# stylesheet both are on the page and the first line is written twice. An
+# excerpt whose text is repeated within its nearest enclosing blocks is that
+# preview and is dropped; an excerpt standing alone (a blog index teaser) is
+# the only copy and stays.
+_EXCERPT_CLASS = "//*[contains(@class, 'excerpt')]"
+_EXCERPT_ANCESTORS = 4
+
+
+def _drop_repeated_excerpts(tree) -> None:
+    for element in tree.xpath(_EXCERPT_CLASS):
+        if not any("excerpt" in token for token in (element.get("class") or "").split()):
+            continue
+        text = " ".join(element.text_content().split()).rstrip(".… ")
+        if len(text) < 20:
+            continue
+        ancestor = element.getparent()
+        for _ in range(_EXCERPT_ANCESTORS):
+            if ancestor is None:
+                break
+            if " ".join(ancestor.text_content().split()).count(text) >= 2:
+                element.drop_tree()
+                break
+            ancestor = ancestor.getparent()
+
+
+# trafilatura keeps an <img> only when its src ends in an image file extension
+# (utils.is_image_file), tested twice: the text-node probe
+# (htmlprocessing.is_image_element) and the image handler
+# (main_extractor.handle_image). An image served through a proxy or a CDN
+# endpoint has none — PyPI rewrites every README image to a pypi-camo URL — so
+# a README's badges and its closing row of linked logos were dropped whole. An
+# image the author described (a non-empty alt) with a web src passes both; an
+# undescribed extensionless src (a tracking pixel) still does not.
+_EXTENSIONLESS_IMAGES_KEPT = False
+_WEB_SRC = re.compile(r"^(?:https?:)?//\S+$")
+
+
+def _described_web_src(element) -> str:
+    if element is None or not " ".join((element.get("alt") or "").split()):
+        return ""
+    return next((element.get(attr, "") for attr in ("data-src", "src") if _WEB_SRC.match(element.get(attr, ""))), "")
+
+
+def _keep_extensionless_images() -> None:
+    global _EXTENSIONLESS_IMAGES_KEPT
+    if _EXTENSIONLESS_IMAGES_KEPT:
+        return
+    from lxml.etree import Element
+    from trafilatura import htmlprocessing, main_extractor
+
+    keep = main_extractor.handle_image
+    probe = getattr(htmlprocessing, "is_image_element", None)
+    if "is_image_file" not in keep.__code__.co_names:
+        raise RuntimeError("trafilatura's handle_image no longer tests is_image_file; re-check the image hook")
+    if probe is None or "is_image_element" not in htmlprocessing.handle_textnode.__code__.co_names:
+        raise RuntimeError("trafilatura's handle_textnode no longer tests is_image_element; re-check the image hook")
+
+    def handle_image(element, options=None):
+        kept = keep(element, options)
+        src = _described_web_src(element)
+        if kept is not None or not src:
+            return kept
+        graphic = Element(element.tag)
+        graphic.set("src", "https:" + src if src.startswith("//") else src)
+        graphic.set("alt", " ".join(element.get("alt").split()))
+        if title := element.get("title"):
+            graphic.set("title", title)
+        graphic.tail = element.tail
+        return graphic
+
+    main_extractor.handle_image = handle_image
+    htmlprocessing.is_image_element = lambda element: probe(element) or bool(_described_web_src(element))
+    _EXTENSIONLESS_IMAGES_KEPT = True
 
 
 # A table whose role is presentation or none is layout by its author's own
@@ -618,6 +698,7 @@ def convert_html_full(path: pathlib.Path) -> str:
         source = raw
     else:
         _drop_hidden(tree)
+        _drop_repeated_excerpts(tree)
         source = lxml.html.tostring(tree, encoding="unicode")
     with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8") as visible:
         visible.write(source)

@@ -265,7 +265,7 @@ func (h *Harvester) convertHTML(
 		return "", convertedPage{}, nil // never content; the fetch's failure names the wall
 	}
 	visible := visibleWords(doc)
-	measure := measureRecall(len(visible), converted)
+	measure := measureContentRecall(visible, converted)
 	if !measure.low() {
 		return done(converted, lazy)
 	}

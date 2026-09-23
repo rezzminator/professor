@@ -25,9 +25,12 @@ import (
 
 const (
 	// recallFloorPercent is the share of the visible words an extraction must
-	// keep. Visible text already excludes navigation, asides, footers and
-	// forms, so an article extraction keeps well over half of what remains.
-	recallFloorPercent = 25
+	// keep, counting only its words the reader sees (measureContentRecall).
+	// Visible text already excludes navigation, asides, footers and forms, so
+	// an article extraction keeps well over half of what remains; a comment
+	// timeline cut to each comment's header and first fragment (a GitHub
+	// Discussions page: 25% of its visible words) is below it.
+	recallFloorPercent = 40
 	// recallMinVisibleWords keeps the gate off short pages, where a few words
 	// of chrome swing the ratio and there is little to lose anyway.
 	recallMinVisibleWords = 300
@@ -260,15 +263,13 @@ type recallMeasure struct {
 	visible   int
 }
 
-func measureRecall(visible int, markdown string) recallMeasure {
-	return recallMeasure{extracted: len(markdownWords(markdown)), visible: visible}
-}
-
-// measureContentRecall measures a WHOLE-DOM conversion: only its words that
-// are the page's visible words count, each at most as often as the page shows
-// it. A full-DOM conversion carries the page chrome the visible words exclude
-// (navigation, footers, forms); counted by length, that chrome stands in for
-// content the conversion dropped, and the fallback always reads complete.
+// measureContentRecall measures a conversion, main-content or whole-DOM: only
+// its words that are the page's visible words count, each at most as often as
+// the page shows it. A conversion carries text the visible words exclude — a
+// full-DOM one the page chrome (navigation, footers, forms), a main-content
+// one a hidden block the extractor kept (GitHub's "Uh oh!" error slate beside
+// every comment); counted by length, that text stands in for content the
+// conversion dropped, and a truncated page reads complete.
 func measureContentRecall(visible []string, markdown string) recallMeasure {
 	remaining := make(map[string]int, len(visible))
 	for _, word := range visible {

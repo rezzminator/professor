@@ -408,3 +408,86 @@ func TestAPageCannotFlagItselfPartial(t *testing.T) {
 		})
 	}
 }
+
+// githubDiscussionComment is one comment of a GitHub Discussions timeline, cut
+// from the real page's markup (usernames scrubbed): the author header, the
+// hidden "Uh oh!" error slate GitHub ships with every comment, and the body in
+// a role="presentation" layout table, with a link mid-paragraph.
+const githubDiscussionComment = `<div class="js-timeline-item js-timeline-progressive-focus-container">` +
+	`<div class="timeline-comment-group"><h3 class="f5 text-normal">` +
+	`<a class="Link--primary text-bold" href="/user-%02[1]d">user-%02[1]d</a> ` +
+	`<relative-time datetime="2022-10-25T19:28:22Z" class="no-wrap">Oct 25, 2022</relative-time></h3>` +
+	`<a href="/user-%02[1]d">user-%02[1]d</a> <a href="#discussioncomment-%[1]d">Oct 25, 2022</a>` +
+	`<div data-show-on-forbidden-error hidden><div class="Box"><div class="blankslate-container">` +
+	`<h3 class="blankslate-heading">Uh oh!</h3><p>There was an error while loading. Please reload this page.</p>` +
+	`</div></div></div>` +
+	`<div class="edit-comment-hide"><task-lists disabled sortable>` +
+	`<table class="d-block" role="presentation" data-paste-markdown-skip><tr class="d-block">` +
+	`<td class="d-block comment-body markdown-body js-comment-body">` +
+	`<p>%[2]s (currently using <a href="https://runtime.example.test/intro" rel="nofollow">a runtime</a> %[3]s ` +
+	`closing-remark-%02[1]d.</p><p>%[4]s</p></td></tr></table></task-lists></div></div></div>`
+
+// githubDiscussionPage is a discussion of n comments; lead is each body's text
+// before its link — all a main-content extractor keeps of it.
+func githubDiscussionPage(n int) (page, lead string) {
+	lead = strings.TrimSpace(strings.Repeat("the form posts are handled by progressive enhancement on the server ", 2))
+	after := strings.TrimSpace(
+		strings.Repeat("to get a remix like experience which we hoped would be front and center ", 3),
+	)
+	more := strings.TrimSpace(
+		strings.Repeat("server actions and mutations still need a documented story for forms ", 3),
+	)
+	var b strings.Builder
+	b.WriteString(`<html><head><title>[Feedback] Router Beta · Discussion #1</title></head><body>` +
+		`<nav><a href="/">Home</a></nav><main><h1>[Feedback] Router Beta #1</h1>` +
+		`<h2>Replies: 30 comments</h2>`)
+	for index := 1; index <= n; index++ {
+		fmt.Fprintf(&b, githubDiscussionComment, index, lead, after, more)
+	}
+	b.WriteString(`</main><footer>Footer</footer></body></html>`)
+	return b.String(), lead
+}
+
+// timelineHeadersConverter is what the main-content extractor made of the
+// real discussion: every comment's header, its hidden "Uh oh!" slate and the
+// body cut at its first link — the words it kept that the reader never sees
+// (the hidden slate) standing in for the bodies it dropped.
+func timelineHeadersConverter(n int, lead string) Converter {
+	return legacyConverterFunc(func(_ context.Context, kind, _ string, raw []byte) (string, error) {
+		if kind != kindHTML {
+			return string(raw), nil
+		}
+		var b strings.Builder
+		b.WriteString("# [Feedback] Router Beta #1\n\n## Replies: 30 comments\n\n")
+		for index := 1; index <= n; index++ {
+			fmt.Fprintf(&b, "### Uh oh!\n\nThere was an error while loading. Please reload this page.\n\n"+
+				"### [user-%02[1]d](/user-%02[1]d) Oct 25, 2022\n\n[user-%02[1]d](/user-%02[1]d)\n\n"+
+				"[Oct 25, 2022](#discussioncomment-%[1]d)\n\n|  |\n|---|\n| %[2]s (currently using |\n\n", index, lead)
+		}
+		return b.String(), nil
+	})
+}
+
+// TestRecallGateCountsOnlyVisibleWordsOfAMainContentExtraction: a GitHub
+// Discussions page whose extraction kept each comment's header and first
+// fragment falls back to the full DOM, so every comment body survives. Words
+// the extraction kept that the reader never sees (a hidden error slate) do not
+// count toward its recall.
+func TestRecallGateCountsOnlyVisibleWordsOfAMainContentExtraction(t *testing.T) {
+	const comments = 30
+	page, lead := githubDiscussionPage(comments)
+	spy := &fullDOMSpy{Converter: timelineHeadersConverter(comments, lead), full: func(body []byte) (string, error) {
+		return tagStripConverter().Convert(context.Background(), kindHTML, "", body)
+	}}
+	h := pageHarvester(t, page, spy, browserOff())
+	result := h.Fetch(context.Background(), "https://github.com/example-org/example-repo/discussions/1")
+	if result.Error != "" || spy.calls != 1 {
+		t.Fatalf("a comment timeline cut to its headers was stored as the page: calls=%d error=%q partial=%q",
+			spy.calls, result.Error, result.Partial)
+	}
+	for index := 1; index <= comments; index++ {
+		if want := fmt.Sprintf("closing-remark-%02d", index); !strings.Contains(result.Content, want) {
+			t.Fatalf("comment %d's body is missing from the stored page (%s): %.400q", index, want, result.Content)
+		}
+	}
+}

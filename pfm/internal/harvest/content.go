@@ -52,20 +52,21 @@ func (h *Harvester) convertFetchedDocument(
 }
 
 // convertHTML is the HTML half of the converter boundary: a per-site tree
-// extractor when one owns the page (site_extract.go), after the loaders of
+// extractor when one claims the page (site_extract.go), after the loaders of
 // that site were followed into the page (loaders.go); otherwise the inert-
-// container pre-pass (inert.go), the injected main-content converter, and the
-// recall gate over its output (recall.go). Every incompleteness it can see
-// travels as the partial marker on the content — never only as a log line.
+// container pre-pass (inert.go), the injected main-content converter, the
+// recall gate over its output (recall.go) and the pagination guard
+// (pagination.go). Every incompleteness it can see travels as the partial
+// marker on the content — never only as a log line.
 func (h *Harvester) convertHTML(
 	ctx context.Context,
 	source string,
 	body []byte,
 	budget *loaderBudget,
 ) (string, convertedPage, error) {
-	// generic is every generic-path answer: the recall gate or lazy loading
-	// flags what a browser render may complete.
-	generic := convertedPage{renderMayComplete: true}
+	// unparsed is the answer for a page that could not be parsed: its
+	// recall is unmeasured, which a browser render may complete.
+	unparsed := convertedPage{renderMayComplete: true}
 	doc, err := html.Parse(bytes.NewReader(body))
 	if err != nil {
 		// x/net/html recovers from any malformed markup; an error here is a
@@ -79,7 +80,7 @@ func (h *Harvester) convertHTML(
 		return withPartial(
 			converted,
 			"recall unmeasured: the page could not be parsed ("+errorReasonClass(err, "parse error")+")",
-		), generic, nil
+		), unparsed, nil
 	}
 	lazy := lazyLoadIncomplete(doc)
 	h.followForSite(ctx, source, doc, budget)
@@ -94,6 +95,16 @@ func (h *Harvester) convertHTML(
 			// browser render pressing the same loaders would work around it.
 			renderMayComplete: extraction.renderMayComplete && (budget == nil || !budget.policyStop),
 		}, nil
+	}
+	// The generic path converts this page alone: a next page it links is
+	// named, and a browser render — the same page — cannot close that gap, so
+	// only the other reasons (lazy loading, low recall) escalate to one.
+	nextPage := ""
+	if parsed, parseErr := url.Parse(source); parseErr == nil {
+		nextPage = paginationContinuation(doc, parsed)
+	}
+	done := func(content, reason string) (string, convertedPage, error) {
+		return withPartial(content, joinReasons(reason, nextPage)), convertedPage{renderMayComplete: reason != ""}, nil
 	}
 	input := body
 	if unwrapInertContainers(ctx, doc) > 0 {
@@ -110,12 +121,12 @@ func (h *Harvester) convertHTML(
 	visible := len(visibleWords(doc))
 	measure := measureRecall(visible, converted)
 	if !measure.low() {
-		return withPartial(converted, lazy), generic, nil
+		return done(converted, lazy)
 	}
 	reason := "main-content extraction kept " + measure.String()
 	fullDOM, ok := h.options.Converter.(FullDOMConverter)
 	if !ok {
-		return withPartial(converted, joinReasons(reason+"; no full-DOM converter is wired", lazy)), generic, nil
+		return done(converted, joinReasons(reason+"; no full-DOM converter is wired", lazy))
 	}
 	full, fullErr := fullDOM.ConvertFullDOM(ctx, source, input)
 	fullMeasure := measureRecall(visible, full)
@@ -127,9 +138,9 @@ func (h *Harvester) convertHTML(
 		reason += "; the full-DOM conversion kept only " + fullMeasure.String()
 	default:
 		// The whole DOM, boilerplate included, is the complete artifact.
-		return withPartial(full, lazy), generic, nil
+		return done(full, lazy)
 	}
-	return withPartial(converted, joinReasons(reason, lazy)), generic, nil
+	return done(converted, joinReasons(reason, lazy))
 }
 
 func classifyFetchedKind(source, contentType string, body []byte) string {

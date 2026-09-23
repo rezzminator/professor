@@ -18,7 +18,8 @@ import (
 // post and nested comments — a structure-aware extractor renders the tree
 // instead, and reconciles what it rendered against the count the page itself
 // states. Every other site keeps the generic path. To add a site, add one
-// entry here: the hosts it owns and an extract function that answers false
+// entry here: the hosts it owns — or, for software any domain runs, a detect
+// function that knows its pages by their markup — and an extract function that answers false
 // for any page that is not the shape it knows (a listing, a wall), so that
 // page falls through to the generic path — and, when its pages hold loaders
 // for the rest of the tree, a loaders function Go follows them by
@@ -36,8 +37,12 @@ type siteExtraction struct {
 }
 
 type siteExtractor struct {
-	name    string
-	hosts   []string
+	name  string
+	hosts []string
+	// detect, when set, claims a page on any host by its markup (a forum
+	// engine's generator meta); such an extractor's loaders may only request
+	// the page's own host.
+	detect  func(doc *html.Node) bool
 	extract func(doc *html.Node, source *url.URL) (siteExtraction, bool)
 	// loaders names the loaders still in a page of this site (loaders.go),
 	// in DOM order; nil when the site has none Go can follow.
@@ -54,6 +59,12 @@ var siteExtractors = []siteExtractor{
 		loaders:      redditLoaders,
 		pressLoaders: true,
 	},
+	{
+		name:    "discourse-topic",
+		detect:  isDiscourse,
+		extract: extractDiscourseTopic,
+		loaders: discourseLoaders,
+	},
 }
 
 // ownsHost reports whether extractor owns host (lowercased): the host itself
@@ -65,6 +76,23 @@ func (extractor siteExtractor) ownsHost(host string) bool {
 		}
 	}
 	return false
+}
+
+// claims reports whether extractor owns page: by its host, or by its markup.
+func (extractor siteExtractor) claims(page *url.URL, doc *html.Node) bool {
+	return extractor.ownsHost(strings.ToLower(page.Hostname())) || extractor.detect != nil && extractor.detect(doc)
+}
+
+// mayRequest reports whether a loader of page may request target: a host the
+// extractor owns, or — for an extractor that knows pages by their markup —
+// the page's own host.
+func (extractor siteExtractor) mayRequest(page, target *url.URL) bool {
+	host := strings.ToLower(target.Hostname())
+	if extractor.ownsHost(host) {
+		return true
+	}
+	return extractor.detect != nil && (target.Scheme == schemeHTTPS || target.Scheme == schemeHTTP) &&
+		host == strings.ToLower(page.Hostname())
 }
 
 // SitePressesLoaders reports whether the browser rung may press source's
@@ -85,9 +113,9 @@ func SitePressesLoaders(source string) bool {
 	return false
 }
 
-// followForSite follows, in doc, the loaders of the extractor registered for
-// source's host (loaders.go). A nil budget (a conversion outside the web
-// ladder) and a host no extractor names loaders for leave doc as it is.
+// followForSite follows, in doc, the loaders of the extractor that claims the
+// page (loaders.go). A nil budget (a conversion outside the web ladder) and a
+// page no extractor names loaders for leave doc as it is.
 func (h *Harvester) followForSite(ctx context.Context, source string, doc *html.Node, budget *loaderBudget) {
 	if budget == nil {
 		return
@@ -96,9 +124,8 @@ func (h *Harvester) followForSite(ctx context.Context, source string, doc *html.
 	if err != nil || parsed.Host == "" {
 		return
 	}
-	host := strings.ToLower(parsed.Hostname())
 	for _, extractor := range siteExtractors {
-		if extractor.loaders != nil && extractor.ownsHost(host) {
+		if extractor.loaders != nil && extractor.claims(parsed, doc) {
 			before := budget.requests
 			h.followLoaders(ctx, doc, parsed, extractor, budget)
 			if budget.requests > before || budget.stopped != "" {
@@ -115,16 +142,15 @@ func (h *Harvester) followForSite(ctx context.Context, source string, doc *html.
 	}
 }
 
-// extractForSite runs the extractor registered for source's host. ok is false
-// when no extractor owns the host or the page is not the shape it knows.
+// extractForSite runs the extractor that claims the page. ok is false when no
+// extractor claims it or the page is not the shape it knows.
 func extractForSite(source string, doc *html.Node) (siteExtraction, string, bool) {
 	parsed, err := url.Parse(source)
 	if err != nil || parsed.Host == "" {
 		return siteExtraction{}, "", false
 	}
-	host := strings.ToLower(parsed.Hostname())
 	for _, extractor := range siteExtractors {
-		if !extractor.ownsHost(host) {
+		if !extractor.claims(parsed, doc) {
 			continue
 		}
 		if extraction, ok := extractor.extract(doc, parsed); ok {

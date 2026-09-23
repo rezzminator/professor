@@ -1,0 +1,490 @@
+package harvest
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"sync"
+	"testing"
+
+	"golang.org/x/net/html"
+)
+
+// A Discourse forum on a domain that is not meta.discourse.org: the extractor
+// knows it by its generator meta alone.
+const (
+	discourseHost     = "forum.example.test"
+	discourseTopicURL = "https://" + discourseHost + "/t/placeholder-topic/4242"
+)
+
+// discoursePost is one crawler post of a fixture topic.
+type discoursePost struct {
+	number int
+	author string
+	body   string
+	likes  int
+}
+
+// discourseFixturePosts is a topic of seven posts over three crawler pages,
+// numbered as Discourse numbers them: post 5 (a small action the crawler view
+// leaves out) is missing from the numbering.
+func discourseFixturePosts() [][]discoursePost {
+	return [][]discoursePost{
+		{
+			{1, "opener_placeholder", `<p>Opening post <img src="https://emoji.example.test/wave.png" ` +
+				`title=":wave:" class="emoji" alt=":wave:"> of the topic.</p>`, 12},
+			{2, "alpha_placeholder", `<aside class="quote"><div class="title"><img class="avatar" ` +
+				`src="/avatar.png"> opener_placeholder:</div><blockquote><p>Opening post</p></blockquote></aside>` +
+				`<p>A reply quoting the opener.</p>`, 1},
+			{3, "bravo_placeholder", `<p>Third post, with an image:</p><p><div class="lightbox-wrapper">` +
+				`<a class="lightbox" href="/uploads/big.png"><img src="/uploads/small.png" alt="diagram">` +
+				`<div class="meta"><span class="filename">diagram</span><span class="informations">800×600 12 KB` +
+				`</span></div></a></div></p>`, 0},
+		},
+		{
+			{4, "charlie_placeholder", "<p>Fourth post, first on page two.</p>", 0},
+			{6, "delta_placeholder", "<p>Sixth post; five was a small action.</p>", 2},
+		},
+		{
+			{7, "echo_placeholder", "<p>Seventh post.</p>", 0},
+			{8, "foxtrot_placeholder", "<p>Eighth and last post.</p>", 0},
+		},
+	}
+}
+
+// discoursePageURL is the path (and query) of a topic page: page 1 is the
+// topic's own address.
+func discoursePageURL(page int) string {
+	if page <= 1 {
+		return "/t/placeholder-topic/4242"
+	}
+	return "/t/placeholder-topic/4242?page=" + strconv.Itoa(page)
+}
+
+// discourseCrawlerPage renders one crawler-view page as Discourse serves it to
+// a client without JavaScript. generator false drops the generator meta.
+func discourseCrawlerPage(pages [][]discoursePost, page int, generator bool) string {
+	return discourseCrawlerPageAs(pages, page, generator, false)
+}
+
+// discourseCrawlerPageAs is discourseCrawlerPage; qa renders the topic as a
+// forum running the solved plugin does: a schema.org QAPage whose Question
+// holds the posts, in place of a DiscussionForumPosting.
+func discourseCrawlerPageAs(pages [][]discoursePost, page int, generator, qa bool) string {
+	var b strings.Builder
+	b.WriteString(`<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">` +
+		`<title>Placeholder topic - Support - Example Forum</title>`)
+	if generator {
+		b.WriteString(`<meta name="generator" content="Discourse 2026.10.0-latest - ` +
+			`https://github.com/discourse/discourse version 0000000000000000000000000000000000000000">`)
+	}
+	fmt.Fprintf(&b, `<link rel="canonical" href="https://%s%s" />`, discourseHost, discoursePageURL(page))
+	if page > 1 {
+		fmt.Fprintf(&b, `<link rel="prev" href="%s">`, discoursePageURL(page-1))
+	}
+	if page < len(pages) {
+		fmt.Fprintf(&b, `<link rel="next" href="%s">`, discoursePageURL(page+1))
+	}
+	b.WriteString(`</head><body class="crawler"><header><a href="/">Example Forum</a></header>` +
+		`<div id="main-outlet" class="wrap" role="main"><div id="topic-title"><h1>` +
+		`<a href="/t/placeholder-topic/4242">Placeholder topic</a></h1></div>`)
+	if qa {
+		b.WriteString(`<div itemscope="itemscope" itemtype="https://schema.org/QAPage">` +
+			`<meta itemprop='name' content='Placeholder topic'>` +
+			`<link itemprop='url' href='https://` + discourseHost + `/t/placeholder-topic/4242'>` +
+			`<div itemprop="mainEntity" itemscope="itemscope" itemtype="https://schema.org/Question">` +
+			`<meta itemprop='answerCount' content='6'>`)
+	} else {
+		b.WriteString(`<div itemscope="itemscope" itemtype="http://schema.org/DiscussionForumPosting">` +
+			`<meta itemprop='headline' content='Placeholder topic'>` +
+			`<link itemprop='url' href='https://` + discourseHost + `/t/placeholder-topic/4242'>` +
+			`<meta itemprop='articleSection' content='Support'>`)
+	}
+	for _, post := range pages[page-1] {
+		fmt.Fprintf(&b, `<div id='post_%d' itemprop="comment" itemscope="itemscope" `+
+			`itemtype="http://schema.org/Comment" class='topic-body crawler-post'>`+
+			`<div class='crawler-post-meta'><span class="creator" itemprop="author" itemscope="itemscope" `+
+			`itemtype="http://schema.org/Person"><a rel='nofollow' href='https://%s/u/%s'>`+
+			`<span itemprop="name">%s</span></a></span><span class="crawler-post-infos">`+
+			`<time itemprop="datePublished" datetime='2026-03-%02dT10:%02d:00Z' class='post-time'>March %d, 2026`+
+			`</time><span itemprop="position">%d</span></span></div>`+
+			`<div class='post' itemprop="text">%s</div>`+
+			`<div itemprop="interactionStatistic" itemscope="itemscope" itemtype="http://schema.org/InteractionCounter">`+
+			`<meta itemprop="interactionType" content="http://schema.org/LikeAction"/>`+
+			`<meta itemprop="userInteractionCount" content="%d" /><span class='post-likes'>%d Likes</span></div>`+
+			`</div>`,
+			post.number, discourseHost, post.author, post.author, post.number, post.number, post.number,
+			post.number, post.body, post.likes, post.likes)
+	}
+	b.WriteString(`</div>`)
+	if qa {
+		b.WriteString(`</div>`)
+	}
+	if page < len(pages) {
+		fmt.Fprintf(&b, `<div role='navigation' itemscope itemtype='http://schema.org/SiteNavigationElement' `+
+			`class="topic-body crawler-post"><span itemprop='name'><b><a rel="next" itemprop="url" href="%s">`+
+			`next page →</a></b></span></div>`, discoursePageURL(page+1))
+	}
+	b.WriteString(`<div id="related-topics" role="complementary"><h3>Related topics</h3><table><tr>` +
+		`<td><a href="/t/another-topic/99">Another topic</a></td><td>7</td></tr></table></div>` +
+		`</div><footer class="container"><nav class='crawler-nav'><a href='/'>Home</a></nav></footer>` +
+		`</body></html>`)
+	return b.String()
+}
+
+// discourseSite serves a fixture topic's crawler pages, its JSON, and any
+// scripted refusal, recording every request.
+type discourseSite struct {
+	mu        sync.Mutex
+	pages     [][]discoursePost
+	stated    int
+	generator bool
+	qa        bool
+	status    map[string]int    // request URI -> an error status to answer instead
+	answers   map[string]string // request URI -> a page to answer instead
+	requests  []string
+}
+
+func newDiscourseSite(stated int) *discourseSite {
+	return &discourseSite{pages: discourseFixturePosts(), stated: stated, generator: true}
+}
+
+func (site *discourseSite) roundTrip(request *http.Request) (*http.Response, error) {
+	uri := request.URL.RequestURI()
+	if strings.HasPrefix(request.URL.Path, "/t/") {
+		// The topic's own requests; the images the artifact localizes are not.
+		site.mu.Lock()
+		site.requests = append(site.requests, request.Method+" "+uri)
+		site.mu.Unlock()
+	}
+	if status := site.status[uri]; status != 0 {
+		return response(request, status, "text/html", "<html><body>refused</body></html>"), nil
+	}
+	if answer, ok := site.answers[uri]; ok {
+		return response(request, http.StatusOK, "text/html; charset=utf-8", answer), nil
+	}
+	if request.URL.Path == "/t/placeholder-topic/4242.json" {
+		return response(request, http.StatusOK, "application/json; charset=utf-8",
+			fmt.Sprintf(`{"id":4242,"posts_count":%d,"post_stream":{"posts":[]}}`, site.stated)), nil
+	}
+	if request.URL.Path == "/t/placeholder-topic/4242" || request.URL.Path == "/t/placeholder-topic/4242/6" {
+		page := 1
+		if raw := request.URL.Query().Get("page"); raw != "" {
+			page, _ = strconv.Atoi(raw)
+		}
+		if request.URL.Path == "/t/placeholder-topic/4242/6" {
+			// A post's own address: its crawler view holds that post alone.
+			single := [][]discoursePost{{site.pages[1][1]}}
+			return response(request, http.StatusOK, "text/html; charset=utf-8",
+				discourseCrawlerPage(single, 1, site.generator)), nil
+		}
+		if page >= 1 && page <= len(site.pages) {
+			return response(request, http.StatusOK, "text/html; charset=utf-8",
+				discourseCrawlerPageAs(site.pages, page, site.generator, site.qa)), nil
+		}
+	}
+	return response(request, http.StatusNotFound, "text/html", "<html><body>not found</body></html>"), nil
+}
+
+func (site *discourseSite) harvester(t *testing.T, converter Converter, browserRung *bool) (*Harvester, *pacingClock) {
+	t.Helper()
+	missing := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return response(request, http.StatusNotFound, "application/json", `{}`), nil
+	})
+	pacing := newPacingClock()
+	return mustNew(t, Options{
+		CacheDir:    t.TempDir(),
+		Client:      &http.Client{Transport: roundTripFunc(site.roundTrip)},
+		Chrome:      &http.Client{Transport: roundTripFunc(site.roundTrip)},
+		Jina:        &http.Client{Transport: missing},
+		OA:          &http.Client{Transport: missing},
+		Converter:   converter,
+		BrowserRung: browserRung,
+		Clock:       pacing,
+	}), pacing
+}
+
+// discoursePostHeaders returns the "## #N · author" part of every post
+// heading in content, in order.
+func discoursePostHeaders(content string) []string {
+	var headers []string
+	for _, line := range strings.Split(content, "\n") {
+		if !strings.HasPrefix(line, "## #") {
+			continue
+		}
+		parts := strings.SplitN(line, " · ", 3)
+		headers = append(headers, strings.Join(parts[:min(2, len(parts))], " · "))
+	}
+	return headers
+}
+
+var discourseAllPosts = []string{
+	"## #1 · opener_placeholder",
+	"## #2 · alpha_placeholder",
+	"## #3 · bravo_placeholder",
+	"## #4 · charlie_placeholder",
+	"## #6 · delta_placeholder",
+	"## #7 · echo_placeholder",
+	"## #8 · foxtrot_placeholder",
+}
+
+// TestDiscourseTopicIsFollowedAcrossItsPagesAndReconciles: a topic over three
+// crawler pages. Its JSON is read for the stated count, every next page is
+// followed in order at the loader pace, each post renders once in number
+// order with its author, date and likes, and the count reconciles — the
+// artifact is complete, not partial. A second harvest is identical.
+func TestDiscourseTopicIsFollowedAcrossItsPagesAndReconciles(t *testing.T) {
+	site := newDiscourseSite(7)
+	h, pacing := site.harvester(t, &browserSpyConverter{}, browserOn())
+	result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+	if result.Error != "" || result.Partial != "" || result.Method != rungDirect {
+		t.Fatalf("the followed topic is not complete at the direct rung: method=%q rungs=%v partial=%q error=%q",
+			result.Method, result.Rungs, result.Partial, result.Error)
+	}
+	if got := discoursePostHeaders(result.Content); strings.Join(got, "\n") != strings.Join(discourseAllPosts, "\n") {
+		t.Fatalf("posts or their order are wrong:\n got %q\nwant %q\n%s", got, discourseAllPosts, result.Content)
+	}
+	for _, want := range []string{
+		"# Placeholder topic",
+		"**Category:** Support",
+		"**Topic:** " + discourseTopicURL,
+		"**Posts:** 7 stated · 7 loaded\n",
+		"## #1 · opener_placeholder · 2026-03-01 10:01 UTC · 12 likes",
+		"## #2 · alpha_placeholder · 2026-03-02 10:02 UTC · 1 like",
+		"Opening post :wave: of the topic.",
+		"> Opening post",
+		"![diagram](https://" + discourseHost + "/uploads/small.png)",
+	} {
+		if !strings.Contains(result.Content, want) {
+			t.Fatalf("the artifact lacks %q:\n%s", want, result.Content)
+		}
+	}
+	for _, unwanted := range []string{"800×600", "Related topics", "Another topic", "next page →", "avatar.png"} {
+		if strings.Contains(result.Content, unwanted) {
+			t.Fatalf("the artifact carries page furniture %q:\n%s", unwanted, result.Content)
+		}
+	}
+	wantRequests := []string{
+		"GET /t/placeholder-topic/4242",
+		"GET /t/placeholder-topic/4242.json",
+		"GET /t/placeholder-topic/4242?page=2",
+		"GET /t/placeholder-topic/4242?page=3",
+	}
+	if strings.Join(site.requests, "\n") != strings.Join(wantRequests, "\n") {
+		t.Fatalf("requests:\n%s\nwant:\n%s", strings.Join(site.requests, "\n"), strings.Join(wantRequests, "\n"))
+	}
+	if len(pacing.sleeps) != len(wantRequests)-1 {
+		t.Fatalf("paced %d times for %d loader requests", len(pacing.sleeps), len(wantRequests)-1)
+	}
+	again := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+	if again.Content != result.Content {
+		t.Fatalf("a second harvest of the same topic differs:\n%s\n---\n%s", result.Content, again.Content)
+	}
+}
+
+// TestDiscourseIsRecognisedByItsGeneratorOnAnyDomain: the same crawler page on
+// a domain no extractor names is claimed by the Discourse extractor through
+// its generator meta — the injected converter never sees it — whether the
+// topic is a DiscussionForumPosting or, on a forum running the solved plugin,
+// a QAPage; without that meta it is a page like any other: the generic path
+// converts it.
+func TestDiscourseIsRecognisedByItsGeneratorOnAnyDomain(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		generator, qa bool
+		conversion    int
+	}{
+		{"with the generator meta", true, false, 0},
+		{"a solved-plugin QAPage", true, true, 0},
+		{"without the generator meta", false, false, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			site := newDiscourseSite(7)
+			site.generator, site.qa = tc.generator, tc.qa
+			converter := &fakeConverter{}
+			h, _ := site.harvester(t, converter, browserOff())
+			result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+			if result.Error != "" {
+				t.Fatalf("fetch failed: %q", result.Error)
+			}
+			if converter.calls != tc.conversion {
+				t.Fatalf("the injected converter ran %d times, want %d", converter.calls, tc.conversion)
+			}
+			claimed := strings.Contains(result.Content, "**Posts:** 7 stated · 7 loaded")
+			if claimed != tc.generator {
+				t.Fatalf(
+					"claimed by the Discourse extractor = %v, want %v:\n%.600s",
+					claimed,
+					tc.generator,
+					result.Content,
+				)
+			}
+		})
+	}
+}
+
+// TestDiscourseStatedPostsInNoPageAreNamed: the topic states two posts more
+// than any page serves, and no page link is left. The remainder is named on
+// the count line and flags the artifact partial.
+func TestDiscourseStatedPostsInNoPageAreNamed(t *testing.T) {
+	site := newDiscourseSite(9)
+	h, _ := site.harvester(t, &browserSpyConverter{}, browserOn())
+	result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+	if result.Error != "" || result.Method != rungDirect || len(discoursePostHeaders(result.Content)) != 7 {
+		t.Fatalf("topic not kept whole at the direct rung: method=%q rungs=%v error=%q", result.Method, result.Rungs,
+			result.Error)
+	}
+	for _, want := range []string{"7 of 9 posts loaded", "2 stated post(s) in no page served"} {
+		if !strings.Contains(result.Partial, want) {
+			t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
+		}
+	}
+	if !strings.Contains(result.Content, "**Posts:** 9 stated · 7 loaded · gaps: 2 stated post(s)") {
+		t.Fatalf("the count line does not name the remainder:\n%.900s", result.Content)
+	}
+}
+
+// TestDiscourseFollowingStopsAreNamedPartials: a rate limit, a page answered
+// by something that is not the topic, the request cap and an unread count
+// each leave the artifact partial with the posts not loaded and why.
+func TestDiscourseFollowingStopsAreNamedPartials(t *testing.T) {
+	t.Run("rate limited", func(t *testing.T) {
+		site := newDiscourseSite(7)
+		site.status = map[string]int{discoursePageURL(2): http.StatusTooManyRequests}
+		h, _ := site.harvester(t, &browserSpyConverter{}, browserOn())
+		result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+		if result.Error != "" || result.Method != rungDirect || len(site.requests) != 3 {
+			t.Fatalf("a rate-limited topic: method=%q rungs=%v requests=%v error=%q",
+				result.Method, result.Rungs, site.requests, result.Error)
+		}
+		for _, want := range []string{
+			"3 of 7 posts loaded",
+			"the posts after #3 are not loaded (next page, page 2, not followed)",
+			"HTTP 429",
+			"not retried",
+		} {
+			if !strings.Contains(result.Partial, want) {
+				t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
+			}
+		}
+	})
+	t.Run("answered by a login page", func(t *testing.T) {
+		site := newDiscourseSite(7)
+		site.answers = map[string]string{discoursePageURL(3): `<html><head><title>Log in - Example Forum</title>` +
+			`<meta name="generator" content="Discourse 2026.10.0"></head><body><h1>Log in</h1></body></html>`}
+		h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+		result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+		for _, want := range []string{
+			"5 of 7 posts loaded",
+			"the posts after #6 are not loaded (next page, page 3, not followed)",
+			`titled "Log in - Example Forum"`,
+		} {
+			if !strings.Contains(result.Partial, want) {
+				t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
+			}
+		}
+	})
+	t.Run("the count unread", func(t *testing.T) {
+		site := newDiscourseSite(7)
+		site.status = map[string]int{"/t/placeholder-topic/4242.json": http.StatusForbidden, discoursePageURL(2): 500}
+		h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+		result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+		for _, want := range []string{"3 posts loaded, the stated count not read", "HTTP 403", "HTTP 500"} {
+			if !strings.Contains(result.Partial, want) {
+				t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
+			}
+		}
+		if !strings.Contains(result.Content, "**Posts:** count not read (the topic's JSON was not fetched") {
+			t.Fatalf("an unread count renders as absence:\n%.700s", result.Content)
+		}
+	})
+	t.Run("the cap", func(t *testing.T) {
+		site := newDiscourseSite(loaderRequestCap + 1)
+		site.pages = nil
+		for number := 1; number <= loaderRequestCap+1; number++ {
+			site.pages = append(site.pages, []discoursePost{{number, "poster_placeholder", "<p>A post.</p>", 0}})
+		}
+		h, _ := site.harvester(t, &browserSpyConverter{}, browserOn())
+		result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
+		if result.Error != "" || result.Method != rungDirect {
+			t.Fatalf(
+				"a capped topic was not kept: method=%q rungs=%v error=%q",
+				result.Method,
+				result.Rungs,
+				result.Error,
+			)
+		}
+		if loaderRequests := len(site.requests) - 1; loaderRequests != loaderRequestCap {
+			t.Fatalf("%d loader requests, want the cap of %d", loaderRequests, loaderRequestCap)
+		}
+		for _, want := range []string{
+			fmt.Sprintf("the cap of %d loader requests", loaderRequestCap),
+			fmt.Sprintf("%d of %d posts loaded", loaderRequestCap, loaderRequestCap+1),
+			fmt.Sprintf("next page, page %d, not followed", loaderRequestCap+1),
+		} {
+			if !strings.Contains(result.Partial, want) {
+				t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
+			}
+		}
+	})
+}
+
+// TestDiscourseSinglePostPageLoadsTheWholeTopic: a post's own address serves
+// that post alone, with no page link; the topic's first page is followed from
+// it, then every next page, and the whole topic renders in number order.
+func TestDiscourseSinglePostPageLoadsTheWholeTopic(t *testing.T) {
+	site := newDiscourseSite(7)
+	h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+	result := h.FetchWithOptions(context.Background(), discourseTopicURL+"/6", FetchOptions{Refresh: true})
+	if result.Error != "" || result.Partial != "" {
+		t.Fatalf("the topic from a post's address is not complete: partial=%q error=%q", result.Partial, result.Error)
+	}
+	if got := discoursePostHeaders(result.Content); strings.Join(got, "\n") != strings.Join(discourseAllPosts, "\n") {
+		t.Fatalf("posts or their order are wrong:\n got %q\nwant %q", got, discourseAllPosts)
+	}
+}
+
+// TestFollowedLoaderAnswersAreReplayedIntoALaterConversion: a second
+// conversion of the same fetch (the next rung's page) gets every answer the
+// first one followed replayed into its own page — none is requested again,
+// and none is dropped from it.
+func TestFollowedLoaderAnswersAreReplayedIntoALaterConversion(t *testing.T) {
+	site := newDiscourseSite(7)
+	h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+	page, err := url.Parse(discourseTopicURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extractor := siteExtractors[len(siteExtractors)-1]
+	if extractor.name != "discourse-topic" {
+		t.Fatalf("the last registered extractor is %q, not the Discourse one", extractor.name)
+	}
+	budget := newLoaderBudget(context.Background())
+	var rendered []string
+	for conversion := range 2 {
+		doc, err := html.Parse(bytes.NewReader([]byte(discourseCrawlerPage(site.pages, 1, true))))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h.followLoaders(context.Background(), doc, page, extractor, budget)
+		extraction, ok := extractDiscourseTopic(doc, page)
+		if !ok {
+			t.Fatalf("conversion %d: the page is not read as a topic", conversion)
+		}
+		rendered = append(rendered, extraction.markdown)
+		if got := discoursePostHeaders(extraction.markdown); len(got) != 7 || extraction.partial != "" {
+			t.Fatalf("conversion %d holds %d posts, partial %q:\n%s", conversion, len(got), extraction.partial,
+				extraction.markdown)
+		}
+	}
+	if len(site.requests) != 3 {
+		t.Fatalf("%d requests over two conversions, want the 3 of the first: %v", len(site.requests), site.requests)
+	}
+	if rendered[0] != rendered[1] {
+		t.Fatalf("the replayed conversion differs:\n%s\n---\n%s", rendered[0], rendered[1])
+	}
+}

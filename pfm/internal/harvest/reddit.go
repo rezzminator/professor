@@ -533,7 +533,7 @@ func redditContinueLoader(link *html.Node, comment string, base *url.URL, refere
 					return nil
 				}
 				return fmt.Errorf("the continued thread's page (titled %q) does not hold comment %s",
-					redditTitle(page), comment)
+					pageTitle(page), comment)
 			}
 			var children []*html.Node
 			for child := root.FirstChild; child != nil; child = child.NextSibling {
@@ -589,11 +589,11 @@ func redditPageTitle(body []byte) string {
 	if err != nil {
 		return "unparsable: " + err.Error()
 	}
-	return redditTitle(page)
+	return pageTitle(page)
 }
 
-// redditTitle is the text of the first <title> under node, "" when none.
-func redditTitle(node *html.Node) string {
+// pageTitle is the text of the first <title> under node, "" when none.
+func pageTitle(node *html.Node) string {
 	if title := firstElement(node, "title"); title != nil {
 		return nodeText(title)
 	}

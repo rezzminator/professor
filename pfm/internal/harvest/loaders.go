@@ -26,7 +26,10 @@ import (
 // (loaderPace between requests; a 429 or a bot wall ends the following and is
 // never retried) and bounded (loaderRequestCap per fetch).
 // Whatever is still unfollowed stays in the page, where the extractor counts
-// it as a gap, and the budget's note names why.
+// it as a gap, and the budget's note names why. A later conversion of the same
+// fetch (the next rung's page, the browser's render) gets every answer already
+// followed replayed into its page from the budget, never requested again and
+// never silently lost.
 
 const (
 	// loaderRequestCap bounds the loader requests one fetch spends, across
@@ -78,6 +81,15 @@ type loaderBudget struct {
 	// policyStop marks a stop no other rung may work around: the site rate
 	// limited us, or the cap was reached.
 	policyStop bool
+	// answers holds each followed loader's answer, replayed into a later
+	// conversion's page.
+	answers map[string]loaderAnswer
+}
+
+// loaderAnswer is one followed loader's answer as the site sent it.
+type loaderAnswer struct {
+	body        []byte
+	contentType string
 }
 
 func newLoaderBudget(ctx context.Context) *loaderBudget {
@@ -86,6 +98,7 @@ func newLoaderBudget(ctx context.Context) *loaderBudget {
 		pace:      loaderPace,
 		followed:  map[string]bool{},
 		attempted: map[string]bool{},
+		answers:   map[string]loaderAnswer{},
 	}
 	jar, err := cookiejar.New(nil)
 	if err != nil {
@@ -120,8 +133,10 @@ func (budget *loaderBudget) note() string {
 
 // followLoaders requests every loader extractor names in doc and splices each
 // answer in, re-reading the page after each round because an answer can hold
-// loaders of its own. It returns when no loader is left to request, or when
-// the budget stops it.
+// loaders of its own. A loader this fetch followed already is answered from
+// the budget: dropped when its answer is in doc (a copy of it), replayed into
+// doc otherwise. It returns when no loader is left to request, or when the
+// budget stops it.
 func (h *Harvester) followLoaders(
 	ctx context.Context,
 	doc *html.Node,
@@ -129,19 +144,33 @@ func (h *Harvester) followLoaders(
 	extractor siteExtractor,
 	budget *loaderBudget,
 ) {
+	// grafted: the loaders whose answer is in doc; unreplayable: followed
+	// answers that would not graft into doc, left in it as gaps.
+	grafted, unreplayable := map[string]bool{}, map[string]bool{}
 	for budget.stopped == "" {
 		progressed := false
 		for _, loader := range extractor.loaders(doc, page) {
 			switch {
-			case budget.followed[loader.key]:
+			case grafted[loader.key]:
 				loader.drop()
-				progressed = true
+			case unreplayable[loader.key]:
 				continue
+			case budget.followed[loader.key]:
+				answer := budget.answers[loader.key]
+				if err := loader.graft(answer.body, answer.contentType); err != nil {
+					obs.Logger(ctx).Warn("harvest: a followed loader's answer did not graft into this page; "+
+						"it stays a gap", "kind", loader.label, "target", safeURL(loader.target), obs.FieldErr, err.Error())
+					unreplayable[loader.key] = true
+					continue
+				}
+				grafted[loader.key] = true
 			case budget.attempted[loader.key]:
 				continue
-			}
-			if !h.followLoader(ctx, loader, extractor, budget) {
-				return
+			default:
+				if !h.followLoader(ctx, loader, page, extractor, budget) {
+					return
+				}
+				grafted[loader.key] = budget.followed[loader.key]
 			}
 			progressed = true
 		}
@@ -156,12 +185,13 @@ func (h *Harvester) followLoaders(
 func (h *Harvester) followLoader(
 	ctx context.Context,
 	loader pageLoader,
+	page *url.URL,
 	extractor siteExtractor,
 	budget *loaderBudget,
 ) bool {
 	budget.attempted[loader.key] = true
 	target, err := url.Parse(loader.target)
-	if err != nil || !extractor.ownsHost(strings.ToLower(target.Hostname())) {
+	if err != nil || !extractor.mayRequest(page, target) {
 		// A loader pointing off the site is never requested: the page does
 		// not get to choose where the harvester sends a request.
 		obs.Logger(ctx).Warn("harvest: a loader pointing off the site was not followed",
@@ -224,6 +254,7 @@ func (h *Harvester) followLoader(
 		return budget.fail(ctx, loader, err.Error(), err.Error())
 	}
 	budget.followed[loader.key] = true
+	budget.answers[loader.key] = loaderAnswer{body: response.body, contentType: response.contentType}
 	budget.consecutive = 0
 	return true
 }

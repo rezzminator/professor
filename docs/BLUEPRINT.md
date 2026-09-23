@@ -47,7 +47,7 @@ Every command, agent, and rule sorts into one of three tiers:
 - **/tokens** — per-agent/per-workflow token spend attribution parsed from local transcripts, ranked by estimated cost.
 - **/quality:doc** / **/quality:prompt** / **/quality:description** / **/quality:md-forlint** — the quality gates: reference-doc shape, prompt prose, the `description:` routing field, and markdown lint/format mechanics.
 - **/quality:llm-codebase** — source-tree layout designed for agent maintainers: one directory per unit of change, a fixed file anatomy, grep-true names, façades for the cross-cutting calls, and the brief anchors a build hand reads; greenfield designs a tree, brownfield measures the existing one and writes the migration.
-- **/quality:integration-suite** — a project's integration tests designed as lanes over one shared state: landscape derived from code, a research pass over neighbour projects and literature, crossings asserted from two sides, a machine-derived map gate, and the harness contract.
+- **/quality:integration-suite** — a project's whole test suite designed, every tier's validity law and the live tier's lanes over one shared state: landscape derived from code, a research pass over neighbour projects and literature, crossings asserted from two sides, a machine-derived map gate, and the harness contract.
 - **/audit:code-hygiene** / **/audit:security** — code-hygiene and security audit scopes. Code-hygiene additionally has a Sweep Mode (`code-hygiene sweep`) that promotes a report-only run to actively removing confirmed-dead code and unused dependencies, end-to-end behind QA.
 
 **Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones and the in-tree links):**

@@ -102,7 +102,7 @@ See `SETUP.md` for the install interview and adaptation guidance.
 - **/pcm** — Professor Change Manager. Edits pipeline rules at the source; `/pfm` (machine-global) is the CLI guide.
 - **/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics with light Professor voice.
 
-**Bundled commands (ship with the blueprint):** `/flights:spec`, `/flights:audit`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/rnd` is project-scope and executes its own research run.
+**Bundled commands (ship with the blueprint):** `/flights:spec`, `/flights:audit`, `/rnd`, `/quality:doc`, `/quality:prompt`, `/quality:description`, `/quality:md-forlint`, `/quality:llm-codebase`, `/quality:integration-suite`, `/audit:code-hygiene`, `/audit:security`. `/rnd` is project-scope and executes its own research run. `/quality:integration-suite` designs a project's whole test suite: every tier's validity, and the live tier's lanes.
 
 **Skill sources:** machine-global fetches are declared in `templates/global/skills/sources.json`; project fetches in `templates/project/skills/sources.json`. `deep-rr` lives in `workflows/deep-rr/`; `legal` is bundled under `templates/project/skills/`.
 

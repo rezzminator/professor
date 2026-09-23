@@ -6,8 +6,8 @@ internal/harvestpy/harvestpy_test.go 1134
 internal/index/codexstate_test.go 1073
 internal/index/index_test.go 1025
 internal/inject/engine_test.go 1798
-internal/installer/installer_test.go 1798
-internal/installer/settings_wiring_test.go 1057
+internal/installer/installer_test.go 1712
+internal/installer/settings_wiring_test.go 1034
 internal/kill/kill_test.go 1378
 internal/mcpserv/server_test.go 1080
 internal/stats/limits_test.go 1980

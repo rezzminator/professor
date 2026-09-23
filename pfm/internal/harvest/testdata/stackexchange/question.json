@@ -1,0 +1,188 @@
+{
+ "items": [
+  {
+   "tags": [
+    "git",
+    "example-tag"
+   ],
+   "owner": {
+    "display_name": "user-1",
+    "user_id": 1001,
+    "link": "https://stackoverflow.com/u/1001"
+   },
+   "comment_count": 13,
+   "is_answered": true,
+   "accepted_answer_id": 927386,
+   "answer_count": 105,
+   "score": 27239,
+   "creation_date": 1243620554,
+   "question_id": 927358,
+   "link": "https://stackoverflow.com/questions/927358/example-question",
+   "title": "Example question about &quot;undo&quot;",
+   "body": "<p>Placeholder question body.</p>\n<ul>\n<li>point one</li>\n<li>point two</li>\n</ul>\n",
+   "comments": [
+    {
+     "owner": {
+      "display_name": "user-2",
+      "user_id": 1002,
+      "link": "https://stackoverflow.com/u/1002"
+     },
+     "score": 7,
+     "post_id": 927358,
+     "creation_date": 1488167599,
+     "comment_id": 72095415,
+     "body": "Try <code>git log --oneline</code> first; see <a href=\"https://example.com/doc\" rel=\"nofollow noreferrer\">the doc</a>."
+    },
+    {
+     "owner": {
+      "display_name": "user-3",
+      "user_id": 1003,
+      "link": "https://stackoverflow.com/u/1003"
+     },
+     "score": 211,
+     "post_id": 927358,
+     "creation_date": 1554725740,
+     "comment_id": 97845110,
+     "body": "Placeholder comment 2."
+    },
+    {
+     "owner": {
+      "display_name": "user-4",
+      "user_id": 1004,
+      "link": "https://stackoverflow.com/u/1004"
+     },
+     "score": 6,
+     "post_id": 927358,
+     "creation_date": 1642613986,
+     "comment_id": 125120131,
+     "body": "Placeholder comment 3."
+    },
+    {
+     "owner": {
+      "display_name": "user-5",
+      "user_id": 1005,
+      "link": "https://stackoverflow.com/u/1005"
+     },
+     "score": 3,
+     "post_id": 927358,
+     "creation_date": 1669945301,
+     "comment_id": 131764043,
+     "body": "Placeholder comment 4."
+    },
+    {
+     "owner": {
+      "display_name": "user-6",
+      "user_id": 1006,
+      "link": "https://stackoverflow.com/u/1006"
+     },
+     "score": 6,
+     "post_id": 927358,
+     "creation_date": 1678324210,
+     "comment_id": 133512250,
+     "body": "Placeholder comment 5."
+    },
+    {
+     "owner": {
+      "display_name": "user-7 &amp; co",
+      "user_id": 1007,
+      "link": "https://stackoverflow.com/u/1007"
+     },
+     "score": 1,
+     "post_id": 927358,
+     "creation_date": 1714640986,
+     "comment_id": 138248768,
+     "body": "Placeholder comment 6."
+    },
+    {
+     "owner": {
+      "display_name": "user-8",
+      "user_id": 1008,
+      "link": "https://stackoverflow.com/u/1008"
+     },
+     "score": 1,
+     "post_id": 927358,
+     "creation_date": 1729880914,
+     "comment_id": 139525050,
+     "body": "Placeholder comment 7."
+    },
+    {
+     "owner": {
+      "display_name": "user-9",
+      "user_id": 1009,
+      "link": "https://stackoverflow.com/u/1009"
+     },
+     "score": 1,
+     "post_id": 927358,
+     "creation_date": 1730183040,
+     "comment_id": 139541372,
+     "body": "Placeholder comment 8."
+    },
+    {
+     "owner": {
+      "display_name": "user-10",
+      "user_id": 1010,
+      "link": "https://stackoverflow.com/u/1010"
+     },
+     "score": 1,
+     "post_id": 927358,
+     "creation_date": 1738476662,
+     "comment_id": 140036952,
+     "body": "Placeholder comment 9."
+    },
+    {
+     "owner": {
+      "display_name": "user-11",
+      "user_id": 1011,
+      "link": "https://stackoverflow.com/u/1011"
+     },
+     "score": 1,
+     "post_id": 927358,
+     "creation_date": 1753000738,
+     "comment_id": 140603503,
+     "body": "Placeholder comment 10."
+    },
+    {
+     "owner": {
+      "display_name": "user-12",
+      "user_id": 1012,
+      "link": "https://stackoverflow.com/u/1012"
+     },
+     "score": 0,
+     "post_id": 927358,
+     "creation_date": 1756802397,
+     "comment_id": 140708616,
+     "body": "Placeholder comment 11."
+    },
+    {
+     "owner": {
+      "display_name": "user-13",
+      "user_id": 1013,
+      "link": "https://stackoverflow.com/u/1013"
+     },
+     "score": 0,
+     "post_id": 927358,
+     "creation_date": 1770448109,
+     "comment_id": 140973564,
+     "body": "Placeholder comment 12."
+    },
+    {
+     "owner": {
+      "display_name": "user-14",
+      "user_id": 1014,
+      "link": "https://stackoverflow.com/u/1014"
+     },
+     "score": 0,
+     "post_id": 927358,
+     "creation_date": 1780779222,
+     "comment_id": 141076643,
+     "body": "Placeholder comment 13."
+    }
+   ]
+  }
+ ],
+ "has_more": false,
+ "quota_max": 300,
+ "quota_remaining": 293,
+ "page": 1,
+ "page_size": 30
+}

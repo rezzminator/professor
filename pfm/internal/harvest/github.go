@@ -194,7 +194,7 @@ func githubThreadOf(doc *html.Node, page *url.URL) (githubThread, bool) {
 		return githubThread{}, false
 	}
 	thread := githubThread{item: item, pages: map[string]map[int][]githubEntry{}, dropped: map[string]bool{}}
-	for _, node := range githubAnswers(doc) {
+	for _, node := range keptAnswers(doc, githubAnswerTag) {
 		if nodeAttr(node, "dropped") != "" {
 			thread.dropped[nodeAttr(node, "key")] = true
 			continue
@@ -232,47 +232,6 @@ func githubThreadOf(doc *html.Node, page *url.URL) (githubThread, bool) {
 		}
 	}
 	return thread, true
-}
-
-// githubAnswers returns the harvester-github-answer elements in doc.
-func githubAnswers(doc *html.Node) []*html.Node {
-	var found []*html.Node
-	var walk func(*html.Node)
-	walk = func(node *html.Node) {
-		if isElement(node, githubAnswerTag) {
-			found = append(found, node)
-			return
-		}
-		for child := node.FirstChild; child != nil; child = child.NextSibling {
-			walk(child)
-		}
-	}
-	walk(doc)
-	return found
-}
-
-// githubKeep appends one API answer (or, with body nil, a dropped loader's
-// mark) to doc's body.
-func githubKeep(doc *html.Node, key, kind string, number int, body []byte) {
-	parent := firstElement(doc, "body")
-	if parent == nil {
-		parent = doc
-	}
-	node := &html.Node{
-		Type: html.ElementNode,
-		Data: githubAnswerTag,
-		Attr: []html.Attribute{
-			{Key: "key", Val: key},
-			{Key: "kind", Val: kind},
-			{Key: "page", Val: strconv.Itoa(number)},
-		},
-	}
-	if body == nil {
-		node.Attr = append(node.Attr, html.Attribute{Key: "dropped", Val: "true"})
-	} else {
-		node.AppendChild(&html.Node{Type: html.TextNode, Data: string(body)})
-	}
-	parent.AppendChild(node)
 }
 
 // githubPageCount is how many pages of githubPerPage list count entries.
@@ -392,10 +351,10 @@ func githubLoader(doc *html.Node, thread githubThread, want githubWanted) pageLo
 			if err := thread.check(want, body, contentType); err != nil {
 				return err
 			}
-			githubKeep(doc, key, want.kind, want.number, body)
+			keepAnswer(doc, githubAnswerTag, key, want.kind, want.number, body)
 			return nil
 		},
-		drop: func() { githubKeep(doc, key, want.kind, want.number, nil) },
+		drop: func() { keepAnswer(doc, githubAnswerTag, key, want.kind, want.number, nil) },
 	}
 }
 

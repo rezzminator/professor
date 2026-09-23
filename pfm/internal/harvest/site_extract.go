@@ -76,6 +76,12 @@ var siteExtractors = []siteExtractor{
 		loaders: githubLoaders,
 	},
 	{
+		name:    "stackexchange-question",
+		hosts:   stackExchangeHosts,
+		extract: extractStackExchangeQuestion,
+		loaders: stackExchangeLoaders,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,
@@ -199,6 +205,50 @@ func extractForSite(source string, doc *html.Node) (siteExtraction, string, bool
 		}
 	}
 	return siteExtraction{}, "", false
+}
+
+// keptAnswers returns the elements named tag in doc: the API answers an
+// extractor that reads its site's API keeps in the page (keepAnswer).
+func keptAnswers(doc *html.Node, tag string) []*html.Node {
+	var found []*html.Node
+	var walk func(*html.Node)
+	walk = func(node *html.Node) {
+		if isElement(node, tag) {
+			found = append(found, node)
+			return
+		}
+		for child := node.FirstChild; child != nil; child = child.NextSibling {
+			walk(child)
+		}
+	}
+	walk(doc)
+	return found
+}
+
+// keepAnswer appends one API answer to doc's body as a tag element carrying
+// the loader's key, the answer's kind and page number — or, with body nil, a
+// dropped loader's mark — so a later conversion replays it like any followed
+// loader.
+func keepAnswer(doc *html.Node, tag, key, kind string, number int, body []byte) {
+	parent := firstElement(doc, "body")
+	if parent == nil {
+		parent = doc
+	}
+	node := &html.Node{
+		Type: html.ElementNode,
+		Data: tag,
+		Attr: []html.Attribute{
+			{Key: "key", Val: key},
+			{Key: "kind", Val: kind},
+			{Key: "page", Val: strconv.Itoa(number)},
+		},
+	}
+	if body == nil {
+		node.Attr = append(node.Attr, html.Attribute{Key: "dropped", Val: "true"})
+	} else {
+		node.AppendChild(&html.Node{Type: html.TextNode, Data: string(body)})
+	}
+	parent.AppendChild(node)
 }
 
 // isElement reports an element node with the given (custom) tag name.

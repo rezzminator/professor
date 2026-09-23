@@ -53,6 +53,11 @@ const (
 	// for replay into a later conversion: loaderRequestCap answers of up to
 	// Options.MaxBytes each would otherwise stay resident together.
 	loaderReplayCap = 32 << 20
+	// loaderBackoffCap is the longest back-off a site may ask of the next
+	// request (an API's backoff field) that the following waits out; a
+	// longer one ends the following, the site's request honoured by never
+	// asking again in this fetch.
+	loaderBackoffCap = 30 * time.Second
 )
 
 // graftErrorClass is the ONE named exception to errorReasonClass
@@ -90,6 +95,9 @@ type pageLoader struct {
 	// (a site that refuses with 403 and says so in its body, not with 429);
 	// such an answer ends the following like a 429.
 	rateLimited func(status int, body []byte) bool
+	// backoff, when set, reads from a followed answer how long the site asks
+	// the next request to wait; a wait longer than the pace replaces it.
+	backoff func(body []byte) time.Duration
 }
 
 // loaderBudget is one fetch's loader following, shared by every conversion of
@@ -103,6 +111,9 @@ type loaderBudget struct {
 	attempted   map[string]bool
 	failures    []string
 	consecutive int
+	// hold is the back-off the last followed answer asked of the next
+	// request; 0 when it asked none.
+	hold time.Duration
 	// failed holds the loaders whose request failed or was refused.
 	failed map[string]bool
 	// jar carries the cookies the site sets across the fetch's requests.
@@ -287,7 +298,15 @@ func (h *Harvester) followLoader(
 		budget.policyStop = true
 		return false
 	}
-	if err := h.nowClock().Sleep(ctx, budget.pace); err != nil {
+	wait := max(budget.pace, budget.hold)
+	if budget.hold > loaderBackoffCap {
+		budget.stopped = fmt.Sprintf("the site asked for a %s back-off before its next request, past the %s "+
+			"a fetch waits; not requested", budget.hold, loaderBackoffCap)
+		budget.policyStop = true
+		return false
+	}
+	budget.hold = 0
+	if err := h.nowClock().Sleep(ctx, wait); err != nil {
 		obs.Logger(ctx).Debug("harvest: loader following stopped: fetch cancelled",
 			"kind", loader.label, obs.FieldErr, err.Error())
 		budget.stopped = "the fetch was cancelled: " + errorReasonClass(err, "cancelled")
@@ -353,6 +372,9 @@ func (h *Harvester) followLoader(
 	}
 	budget.followed[loader.key] = true
 	budget.consecutive = 0
+	if loader.backoff != nil {
+		budget.hold = loader.backoff(response.body)
+	}
 	if budget.replayBytes+len(response.body) > budget.replayLimit {
 		obs.Logger(ctx).Warn("harvest: a followed loader's answer is past the replay bound; a later conversion "+
 			"names it a gap", "kind", loader.label, "target", safeURL(loader.target),

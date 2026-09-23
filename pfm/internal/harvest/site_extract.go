@@ -218,6 +218,12 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:    "lobsters-story",
+		hosts:   []string{lobstersHost},
+		paths:   isLobstersStory,
+		extract: extractLobstersStory,
+	},
+	{
 		name:    "booking-reviews",
 		hosts:   []string{"booking.com"},
 		paths:   isBookingHotel,

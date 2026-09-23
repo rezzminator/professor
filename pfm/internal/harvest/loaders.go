@@ -81,10 +81,13 @@ type pageLoader struct {
 	// copy of its tree) is requested once.
 	key string
 	// label names the loader to a reader: "\"3 more replies\" loader".
-	label   string
-	method  string
-	target  string // absolute URL
-	form    url.Values
+	label  string
+	method string
+	target string // absolute URL
+	form   url.Values
+	// body, when set, is the request's raw body (a JSON API call); form wins
+	// over it.
+	body    []byte
 	headers map[string]string
 	// graft splices the answer into the page in the loader's place; an error
 	// leaves the loader where it was, a gap.
@@ -212,7 +215,9 @@ func (h *Harvester) followLoaders(
 	h.followRounds(ctx, doc, page, extractor, budget, unreplayed)
 	var rest loaderRemainder
 	named := map[string]bool{}
-	for _, loader := range extractor.loaders(doc, page) {
+	loaders := extractor.loaders(doc, page)
+	for index := range loaders {
+		loader := &loaders[index]
 		if named[loader.key] {
 			continue
 		}
@@ -242,7 +247,9 @@ func (h *Harvester) followRounds(
 	grafted := map[string]bool{}
 	for budget.stopped == "" {
 		progressed := false
-		for _, loader := range extractor.loaders(doc, page) {
+		loaders := extractor.loaders(doc, page)
+		for index := range loaders {
+			loader := &loaders[index]
 			if _, done := unreplayed[loader.key]; done {
 				continue
 			}
@@ -267,7 +274,7 @@ func (h *Harvester) followRounds(
 			case budget.attempted[loader.key]:
 				continue
 			default:
-				if !h.followLoader(ctx, loader, page, extractor, budget) {
+				if !h.followLoader(ctx, *loader, page, extractor, budget) {
 					return
 				}
 				grafted[loader.key] = budget.followed[loader.key]
@@ -335,6 +342,7 @@ func (h *Harvester) followLoader(
 	for key, value := range loader.headers {
 		request.headers.Set(key, value)
 	}
+	request.body = loader.body
 	if loader.form != nil {
 		request.body = []byte(loader.form.Encode())
 	}

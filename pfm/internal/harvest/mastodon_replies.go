@@ -187,9 +187,9 @@ func (state mastodonPage) replyLoaders(doc *html.Node) []pageLoader {
 		}
 	}
 	var fresh []pageLoader
-	for _, loader := range loaders {
-		if !state.dropped[loader.key] && !state.kept[loader.key] {
-			fresh = append(fresh, loader)
+	for index := range loaders {
+		if key := loaders[index].key; !state.dropped[key] && !state.kept[key] {
+			fresh = append(fresh, loaders[index])
 		}
 	}
 	return fresh

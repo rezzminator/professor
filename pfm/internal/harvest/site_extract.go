@@ -151,6 +151,14 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:         "youtube-video",
+		hosts:        []string{youtubeHost},
+		paths:        isYouTubeWatch,
+		extract:      extractYouTubeVideo,
+		loaders:      youtubeLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,

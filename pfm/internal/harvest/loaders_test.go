@@ -34,8 +34,8 @@ func (c *pacingClock) Sleep(ctx context.Context, d time.Duration) error {
 }
 
 // TestLoaderFollowingStopsAtARateLimit: the site answers 429 to one
-// loader request. Following ends there — no later loader is requested, the
-// 429 is never retried, and no browser render is spent working around it —
+// loader request, and again to its one retry. Following ends there — no later
+// loader is requested, and no browser render is spent working around it —
 // and the artifact is flagged partial naming the rate limit and the gaps.
 func TestLoaderFollowingStopsAtARateLimit(t *testing.T) {
 	site := walkedThread()
@@ -47,8 +47,8 @@ func TestLoaderFollowingStopsAtARateLimit(t *testing.T) {
 		t.Fatalf("a rate-limited thread was not kept at the direct rung: method=%q rungs=%v browser=%d error=%q",
 			result.Method, result.Rungs, spy.browserCalls, result.Error)
 	}
-	if len(site.requests) != 3 {
-		t.Fatalf("%d requests after a 429, want 3 (page, one loader, the rate-limited one): %+v",
+	if len(site.requests) != 4 {
+		t.Fatalf("%d requests after a 429, want 4 (page, one loader, the rate-limited one and its retry): %+v",
 			len(site.requests), site.requests)
 	}
 	for _, want := range []string{

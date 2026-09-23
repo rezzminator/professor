@@ -394,8 +394,9 @@ func TestDiscourseFollowingStopsAreNamedPartials(t *testing.T) {
 		site := newDiscourseSite(7)
 		site.status = map[string]int{discoursePageURL(2): http.StatusTooManyRequests}
 		h, _ := site.harvester(t, &browserSpyConverter{}, browserOn())
+		// page 1, page 2 answered 429, one retry after the default wait, a second 429
 		result := h.FetchWithOptions(context.Background(), discourseTopicURL, FetchOptions{Refresh: true})
-		if result.Error != "" || result.Method != rungDirect || len(site.requests) != 3 {
+		if result.Error != "" || result.Method != rungDirect || len(site.requests) != 4 {
 			t.Fatalf("a rate-limited topic: method=%q rungs=%v requests=%v error=%q",
 				result.Method, result.Rungs, site.requests, result.Error)
 		}

@@ -23,8 +23,9 @@ import (
 // the page in the loader's place, until no loader is left, so the extractor
 // then renders the whole tree in thread order. It is deterministic (DOM order,
 // one request at a time, in one cookie session like a reader's), polite
-// (loaderPace between requests; a 429 or a bot wall ends the following and is
-// never retried) and bounded (loaderRequestCap per fetch, or the claiming
+// (loaderPace between requests; a 429 is waited out and retried once within
+// loader_retry.go's caps, a second 429 or a bot wall ends the following) and
+// bounded (loaderRequestCap per fetch, or the claiming
 // extractor's own loaderCap where that is higher).
 // Whatever is still unfollowed stays in the page, where the extractor counts
 // it as a gap, and the budget's note names why. A later conversion of the same
@@ -123,6 +124,9 @@ type loaderBudget struct {
 	// hold is the back-off the last followed answer asked of the next
 	// request; 0 when it asked none.
 	hold time.Duration
+	// rateLimitWaited is the time this fetch already spent waiting out 429s
+	// (loader_retry.go), bounded by loaderRetryBudget.
+	rateLimitWaited time.Duration
 	// failed holds the loaders whose request failed or was refused.
 	failed map[string]bool
 	// jar carries the cookies the site sets across the fetch's requests.
@@ -347,7 +351,7 @@ func (h *Harvester) followLoader(
 	if loader.form != nil {
 		request.body = []byte(loader.form.Encode())
 	}
-	response, err := gatewayAttempt(ctx, request)
+	response, rateStop, err := h.loaderAttempt(ctx, loader, request, budget)
 	if err != nil {
 		return budget.fail(ctx, loader, err.Error(), errorReasonClass(err, "request failed"))
 	}
@@ -367,8 +371,7 @@ func (h *Harvester) followLoader(
 	}
 	switch {
 	case response.status == http.StatusTooManyRequests:
-		budget.stopped = fmt.Sprintf("the site answered HTTP 429 (rate limited) after %d request(s); not retried",
-			budget.requests)
+		budget.stopped = rateStop
 		budget.policyStop = true
 		return false
 	case response.status >= 400 && loader.rateLimited != nil && loader.rateLimited(response.status, response.body):

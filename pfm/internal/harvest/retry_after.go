@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,6 +22,9 @@ type retryAfterKey struct{}
 type retryAfterNote struct {
 	mu    sync.Mutex
 	value string
+	// raw is the header as the server sent it, for a caller that waits it
+	// out (loader_retry.go); "" when the last rate-limit answer carried none.
+	raw string
 }
 
 func withRetryAfterNote(ctx context.Context) (context.Context, *retryAfterNote) {
@@ -38,27 +42,70 @@ func noteRetryAfter(resp *http.Response) {
 	if !ok || note == nil { // nil: a reader or archive rung (withoutRetryAfterNote)
 		return
 	}
-	if value := retryAfterValue(resp.Header.Get("Retry-After")); value != "" {
-		note.mu.Lock()
-		note.value = value
-		note.mu.Unlock()
+	raw := resp.Header.Get("Retry-After")
+	value := retryAfterValue(raw)
+	note.mu.Lock()
+	note.raw = ""
+	if value != "" {
+		note.value, note.raw = value, raw
 	}
+	note.mu.Unlock()
+}
+
+// retryAfterParts reads a Retry-After header: delay-seconds, or an HTTP date;
+// ok false for an absent or unparseable header.
+func retryAfterParts(raw string) (seconds int64, when time.Time, ok bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, time.Time{}, false
+	}
+	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds >= 0 {
+		return seconds, time.Time{}, true
+	}
+	if when, err := http.ParseTime(raw); err == nil {
+		return 0, when, true
+	}
+	return 0, time.Time{}, false
 }
 
 // retryAfterValue renders a Retry-After header: delay-seconds as "N s", an
 // HTTP date as its UTC time; "" for an absent or unparseable header.
 func retryAfterValue(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
+	seconds, when, ok := retryAfterParts(raw)
+	switch {
+	case !ok:
 		return ""
-	}
-	if seconds, err := strconv.ParseInt(raw, 10, 64); err == nil && seconds >= 0 {
+	case when.IsZero():
 		return strconv.FormatInt(seconds, 10) + " s"
-	}
-	if when, err := http.ParseTime(raw); err == nil {
+	default:
 		return when.UTC().Format(time.RFC1123)
 	}
-	return ""
+}
+
+// retryAfterWait is the wait a Retry-After header asks from now: its
+// delay-seconds, or the time until its date (0 once the date is past); ok
+// false for an absent or unparseable header.
+func retryAfterWait(raw string, now time.Time) (time.Duration, bool) {
+	seconds, when, ok := retryAfterParts(raw)
+	switch {
+	case !ok:
+		return 0, false
+	case when.IsZero():
+		if seconds > int64(time.Duration(math.MaxInt64)/time.Second) {
+			return time.Duration(math.MaxInt64), true
+		}
+		return time.Duration(seconds) * time.Second, true
+	default:
+		return max(when.Sub(now), 0), true
+	}
+}
+
+// lastRetryAfter is the raw Retry-After of the last rate-limit answer the
+// note saw; "" when it carried none (or no note was on the request).
+func (note *retryAfterNote) lastRetryAfter() string {
+	note.mu.Lock()
+	defer note.mu.Unlock()
+	return note.raw
 }
 
 // apply names the recorded wait on a rate-limited failure.

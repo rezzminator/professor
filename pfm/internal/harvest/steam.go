@@ -276,7 +276,7 @@ func extractSteamApp(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 		kind:  "steam app",
 		title: steamText(doc, "id", "appHubAppName"),
 		post: socialPost{
-			id: state.id, author: unknownAuthor, posted: "[unknown]",
+			id: state.id, author: unknownAuthor, posted: unknownPosted,
 			link: "https://" + steamHost + page.Path, stated: stated,
 		},
 		repliesRead: read,

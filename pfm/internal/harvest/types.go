@@ -46,6 +46,7 @@ const (
 	mediaTypePlain    = "text/plain"
 	mediaTypePDF      = "application/pdf"
 	mediaTypeJSON     = "application/json"
+	mediaTypeForm     = "application/x-www-form-urlencoded"
 	mediaTypeXHTML    = "application/xhtml+xml"
 	mediaTypeXML      = "application/xml"
 	mediaTypeTextXML  = "text/xml"

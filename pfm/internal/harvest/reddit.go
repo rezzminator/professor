@@ -478,7 +478,7 @@ func redditMoreCommentsLoader(node *html.Node, base *url.URL, referer string) (p
 			headerReferer:     referer,
 			headerAccept:      redditPartialAccept,
 			"Origin":          base.Scheme + "://" + base.Host,
-			headerContentType: "application/x-www-form-urlencoded",
+			headerContentType: mediaTypeForm,
 		},
 		graft: func(body []byte, contentType string) error {
 			container := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}

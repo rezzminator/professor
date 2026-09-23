@@ -197,7 +197,7 @@ func (h *Harvester) doiMirrorLookup(
 		client: h.client,
 		ua:     h.userAgent,
 		headers: http.Header{
-			"Content-Type": {"application/x-www-form-urlencoded"},
+			"Content-Type": {mediaTypeForm},
 			headerAccept:   {"text/html,application/xhtml+xml,application/pdf;q=0.9,*/*;q=0.8"},
 		},
 		max:    doiMirrorMaxBytes(h),

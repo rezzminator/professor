@@ -47,6 +47,9 @@ type siteExtraction struct {
 // that names no author.
 const unknownAuthor = "[unknown]"
 
+// unknownPosted stands for the date of a post or comment that names none.
+const unknownPosted = unknownAuthor
+
 type siteExtractor struct {
 	name  string
 	hosts []string
@@ -165,6 +168,13 @@ var siteExtractors = []siteExtractor{
 		extract:      extractSteamApp,
 		loaders:      steamLoaders,
 		readsSiteAPI: true,
+	},
+	{
+		name:    "slashdot-story",
+		hosts:   []string{slashdotHost},
+		paths:   isSlashdotStory,
+		extract: extractSlashdotStory,
+		loaders: slashdotLoaders,
 	},
 	{
 		name:    "discourse-topic",

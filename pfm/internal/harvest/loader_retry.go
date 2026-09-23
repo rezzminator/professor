@@ -24,6 +24,11 @@ const (
 	loaderRetryWaitCap = 60 * time.Second
 	// loaderRetryBudget bounds every rate-limit wait of one fetch together.
 	loaderRetryBudget = 120 * time.Second
+	// loaderPacingBudget bounds every wait one fetch spends pacing itself by a
+	// site's reported request quota (loader_quota.go), the pace included:
+	// past it the following stops and names when the rest may be read, so one
+	// fetch ends within what an MCP client waits for a tool call.
+	loaderPacingBudget = 180 * time.Second
 	// loaderRetryDefault is the wait before the retry when the 429 carried no
 	// usable Retry-After.
 	loaderRetryDefault = 10 * time.Second

@@ -45,6 +45,8 @@ type siteExtraction struct {
 	apiRecord         bool
 	unrendered        string
 	stated            func(content string) string
+	// comments, when set, is the thread's comment count: loaded of stated.
+	comments *commentCount
 }
 
 // unknownAuthor stands, in every extractor's rendering, for a post or comment

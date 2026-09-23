@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
@@ -41,8 +42,12 @@ import (
 // At the kept loaderPace plus Reddit's answer time (about 1.3 s a request)
 // the first ~150 requests take about 3 minutes; past them Reddit's quota
 // (200 requests a 10-minute window, loader_quota.go) paces the rest to about
-// 3 s each, so the cap bounds one fetch's following at about 50 minutes.
+// 3 s each, within loaderPacingBudget: past it the following stops and the
+// partial names when the rest may be read.
 const redditLoaderCap = 1000
+
+// redditQuota is the request quota Reddit states for its comment loaders.
+var redditQuota = siteQuota{site: "Reddit", requests: 200, window: 10 * time.Minute}
 
 var redditReplyCountRe = regexp.MustCompile(`(\d[\d,]*)\s+more\s+repl`)
 
@@ -237,6 +242,10 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 		out.WriteString(comment.markdown())
 	}
 
+	var counted *commentCount
+	if statedKnown {
+		counted = &commentCount{loaded: len(comments), stated: stated}
+	}
 	partial := ""
 	if len(gaps) > 0 {
 		partial = fmt.Sprintf(
@@ -249,6 +258,7 @@ func extractRedditThread(doc *html.Node, _ *url.URL) (siteExtraction, bool) {
 	return siteExtraction{
 		markdown:          out.String(),
 		partial:           partial,
+		comments:          counted,
 		renderMayComplete: replyLoaders+commentLoaders > 0,
 	}, true
 }
@@ -493,6 +503,7 @@ func redditMoreCommentsLoader(node *html.Node, base *url.URL, referer string) (p
 		// Reddit answers each loader with its quota: x-ratelimit-remaining
 		// "199.0", x-ratelimit-reset in seconds, 200 requests a window.
 		quotaHeaders: true,
+		quotaRate:    &redditQuota,
 		graft: func(body []byte, contentType string) error {
 			container := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
 			nodes, err := html.ParseFragment(bytes.NewReader(body), container)

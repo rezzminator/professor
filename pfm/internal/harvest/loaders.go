@@ -112,6 +112,9 @@ type pageLoader struct {
 	// and x-ratelimit-reset (seconds until its window resets), as Reddit does;
 	// the following is paced by it (loader_quota.go).
 	quotaHeaders bool
+	// quotaRate, when set, is the request quota the site states, named when
+	// the pacing budget ends the following (loader_quota.go).
+	quotaRate *siteQuota
 }
 
 // loaderBudget is one fetch's loader following, shared by every conversion of
@@ -134,6 +137,15 @@ type loaderBudget struct {
 	// quota is the site's request quota as last reported (loader_quota.go);
 	// nil while no answer reported one.
 	quota *loaderQuota
+	// pacedFrom is when this fetch's first request paced by a reported quota
+	// was due (zero before it): from then every wait and answer counts toward
+	// loaderPacingBudget. lastAnswer is how long the last loader answer took,
+	// the estimate of the next. pacingStop marks the following ended at the
+	// budget, quotaRate the quota the stopped loader's site documents.
+	pacedFrom  time.Time
+	lastAnswer time.Duration
+	pacingStop bool
+	quotaRate  *siteQuota
 	// failed holds the loaders whose request failed or was refused.
 	failed map[string]bool
 	// jar carries the cookies the site sets across the fetch's requests.
@@ -340,6 +352,22 @@ func (h *Harvester) followLoader(
 		return false
 	}
 	wait := max(budget.pace, budget.hold, quotaWait)
+	if loader.quotaHeaders && budget.quota != nil {
+		now := h.nowClock().Now()
+		if budget.pacedFrom.IsZero() {
+			budget.pacedFrom = now
+		}
+		if elapsed := now.Sub(budget.pacedFrom); elapsed+wait+budget.lastAnswer > loaderPacingBudget {
+			budget.stopped = fmt.Sprintf("the %s a fetch may spend following loaders paced by the site's request "+
+				"quota ran out after %d request(s) and %s of it; the next wait %s and answer about %s would pass it; "+
+				"not requested", waitSeconds(loaderPacingBudget), budget.requests, waitSeconds(elapsed),
+				waitSeconds(wait), waitSeconds(budget.lastAnswer))
+			budget.policyStop = true
+			budget.pacingStop = true
+			budget.quotaRate = loader.quotaRate
+			return false
+		}
+	}
 	budget.hold = 0
 	if err := h.nowClock().Sleep(ctx, wait); err != nil {
 		obs.Logger(ctx).Debug("harvest: loader following stopped: fetch cancelled",
@@ -364,7 +392,9 @@ func (h *Harvester) followLoader(
 	if loader.form != nil {
 		request.body = []byte(loader.form.Encode())
 	}
+	asked := h.nowClock().Now()
 	response, rateStop, err := h.loaderAttempt(ctx, loader, request, budget)
+	budget.lastAnswer = h.nowClock().Now().Sub(asked)
 	if err != nil {
 		return budget.fail(ctx, loader, err.Error(), errorReasonClass(err, "request failed"))
 	}

@@ -22,13 +22,34 @@ type pacingClock struct {
 	clock.Clock
 	mu     sync.Mutex
 	sleeps []time.Duration
+	// stepping, when set, makes the clock fake: Now is at, which a Sleep and
+	// an answer (advance) move on.
+	stepping bool
+	at       time.Time
 }
 
 func newPacingClock() *pacingClock { return &pacingClock{Clock: clock.Real} }
 
+func (c *pacingClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.stepping {
+		return c.Clock.Now()
+	}
+	return c.at
+}
+
+// advance moves a stepping clock on by d: the time an answer took.
+func (c *pacingClock) advance(d time.Duration) {
+	c.mu.Lock()
+	c.at = c.at.Add(d)
+	c.mu.Unlock()
+}
+
 func (c *pacingClock) Sleep(ctx context.Context, d time.Duration) error {
 	c.mu.Lock()
 	c.sleeps = append(c.sleeps, d)
+	c.at = c.at.Add(d)
 	c.mu.Unlock()
 	return ctx.Err()
 }

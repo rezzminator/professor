@@ -283,7 +283,12 @@ func (h *Harvester) convertHTML(
 	if ok {
 		// A loader still in the page is a gap whatever the extractor counts;
 		// the budget's note names why it was not loaded.
-		reason := joinReasons(extraction.partial, rest.reason())
+		// A stop at the pacing budget leads with when the rest may be read.
+		pacing := ""
+		if extraction.comments != nil {
+			pacing = budget.pacingLeft(*extraction.comments, h.nowClock().Now())
+		}
+		reason := joinReasons(pacing, extraction.partial, rest.reason())
 		if reason != "" || rest.left > 0 {
 			reason = joinReasons(reason, budget.note())
 		}

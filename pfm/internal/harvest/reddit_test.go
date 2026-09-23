@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/net/html"
 )
@@ -416,7 +417,14 @@ type redditSite struct {
 	threads   map[string]string // comment id -> continued page
 	status    map[string]int    // cursor or comment id -> an error status to answer instead
 	walls     map[string]string // cursor -> a page to answer instead
-	requests  []redditRequest
+	// quota, when set, is the x-ratelimit-used, -remaining and -reset every
+	// loader answer carries, as Reddit sends them.
+	quota [3]string
+	// answer, when set, is how long every answer takes on the fetch's
+	// stepping clock.
+	answer   time.Duration
+	clock    *pacingClock
+	requests []redditRequest
 }
 
 type redditRequest struct {
@@ -424,6 +432,9 @@ type redditRequest struct {
 }
 
 func (site *redditSite) roundTrip(request *http.Request) (*http.Response, error) {
+	if site.answer > 0 && site.clock != nil {
+		site.clock.advance(site.answer)
+	}
 	cursor := ""
 	if request.Method == http.MethodPost {
 		body, err := io.ReadAll(request.Body)
@@ -459,6 +470,11 @@ func (site *redditSite) roundTrip(request *http.Request) (*http.Response, error)
 		if fragment, ok := site.fragments[cursor]; ok {
 			answer := response(request, http.StatusOK, "text/vnd.reddit.partial+html; charset=utf-8", fragment)
 			answer.Header.Set("Set-Cookie", "loid=placeholder-session; Path=/; Domain=.reddit.com; Secure")
+			if site.quota[1] != "" {
+				answer.Header.Set("X-Ratelimit-Used", site.quota[0])
+				answer.Header.Set("X-Ratelimit-Remaining", site.quota[1])
+				answer.Header.Set("X-Ratelimit-Reset", site.quota[2])
+			}
 			return answer, nil
 		}
 	case strings.Contains(path, "/comment/"):
@@ -485,6 +501,10 @@ func (site *redditSite) harvester(
 		return response(request, http.StatusNotFound, "application/json", `{}`), nil
 	})
 	pacing := newPacingClock()
+	if site.answer > 0 {
+		pacing.stepping, pacing.at = true, time.Date(2026, 9, 23, 21, 0, 0, 0, time.UTC)
+	}
+	site.clock = pacing
 	return mustNew(t, Options{
 		CacheDir:    t.TempDir(),
 		Client:      &http.Client{Transport: roundTripFunc(site.roundTrip)},

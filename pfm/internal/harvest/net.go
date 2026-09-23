@@ -742,6 +742,7 @@ func isChallenge(body []byte, status int) bool {
 			return true
 		}
 	}
+	// short is shared by both gates below so they cannot disagree at the boundary.
 	short := contentChars(string(body)) <= 4000
 	cf403 := status == http.StatusForbidden || status == http.StatusServiceUnavailable
 	// A Cloudflare interstitial can ship KBs of CSS past the short gate.
@@ -754,8 +755,7 @@ func isChallenge(body []byte, status int) bool {
 	}
 	// Forum phrases ("prove your humanity", "blocked by network security",
 	// "blocked due to a network policy") need a 403/429/503, a short body, or a captcha widget.
-	if cf403 || status == http.StatusTooManyRequests || contentChars(string(body)) < 4000 ||
-		hasCaptchaWidgetMarkup(low) {
+	if cf403 || status == http.StatusTooManyRequests || short || hasCaptchaWidgetMarkup(low) {
 		for _, marker := range []string{"prove your humanity", "blocked by network security", "blocked due to a network policy"} {
 			if strings.Contains(low, marker) {
 				return true

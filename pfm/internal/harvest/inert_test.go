@@ -244,3 +244,120 @@ func TestANestedDeferredTemplateSurfacesWithItsParent(t *testing.T) {
 		t.Fatalf("a short UI stub template was surfaced: %.300q", shown)
 	}
 }
+
+// TestANestedShortDeferredTemplateSurfacesWithItsParent (F2): a nested
+// <template> under inertMinWords, inside a surfaced parent, must still
+// surface — the comment above this block promises "a nested container of
+// content surfaces with it", whatever its own word count.
+func TestANestedShortDeferredTemplateSurfacesWithItsParent(t *testing.T) {
+	words := func(prefix string) string {
+		var b strings.Builder
+		for word := 0; word < 40; word++ {
+			fmt.Fprintf(&b, "%s%d ", prefix, word)
+		}
+		return b.String()
+	}
+	markup := `<html><body><p>The visible lede of the page.</p><template><div><p>` + words("tree") +
+		`</p><template><p>a short deferred reply</p></template></div></template></body></html>`
+	doc, err := html.Parse(strings.NewReader(markup))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unwrapInertContainers(context.Background(), doc); got != 2 {
+		t.Fatalf("surfaced %d containers, want the tree and its short nested reply (2)", got)
+	}
+	shown := strings.Join(visibleWords(doc), " ")
+	if !strings.Contains(shown, "a short deferred reply") {
+		t.Fatalf("the nested under-30-word reply never surfaced: %.300q", shown)
+	}
+}
+
+// TestShadowRootWordsJoinShown (F4): a shadow root is always unwrapped, but
+// its words must join shown too — otherwise a later container repeating the
+// same text (a JSON-LD articleBody, a <noscript> fallback) is not recognised
+// as already shown and the body is duplicated in the stored artifact.
+func TestShadowRootWordsJoinShown(t *testing.T) {
+	body := strings.Repeat("the shadow rendered article text about a harbour and its lighthouse keeper ", 4)
+	page := `<html><body><div><template shadowrootmode="open"><p>` + body + `</p></template></div>` +
+		`<script type="application/ld+json">{"@type":"Article","articleBody":"` + body + `"}</script>` +
+		`</body></html>`
+	doc, err := html.Parse(strings.NewReader(page))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unwrapInertContainers(context.Background(), doc); got != 1 {
+		t.Fatalf("surfaced %d containers, want 1 (the shadow root only; the JSON-LD repeats it)", got)
+	}
+	out := strings.Join(visibleWords(doc), " ")
+	if strings.Count(out, "harbour") != 4 {
+		t.Fatalf("the JSON-LD duplicate of the shadow root's own text was surfaced: %d copies of %q",
+			strings.Count(out, "harbour"), "harbour")
+	}
+}
+
+// TestNoInertContainerSkipsTheWindowScan (F12): the initial probe-window
+// scan (addWindows(0) over the whole page) is deferred to the first
+// candidate container found — a page with none must not pay for it. The
+// overhead unwrapInertContainers adds beyond visibleWords alone (which it
+// always calls) must stay roughly constant as the page grows, not scale with
+// its word count.
+func TestNoInertContainerSkipsTheWindowScan(t *testing.T) {
+	buildDoc := func(t *testing.T, words int) *html.Node {
+		t.Helper()
+		var b strings.Builder
+		b.WriteString(`<html><body><p>`)
+		for i := 0; i < words; i++ {
+			fmt.Fprintf(&b, "w%d ", i)
+		}
+		b.WriteString(`</p></body></html>`)
+		doc, err := html.Parse(strings.NewReader(b.String()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	extra := func(t *testing.T, words int) float64 {
+		doc := buildDoc(t, words)
+		baseline := testing.AllocsPerRun(20, func() { _ = visibleWords(doc) })
+		total := testing.AllocsPerRun(20, func() {
+			if got := unwrapInertContainers(context.Background(), doc); got != 0 {
+				t.Fatalf("surfaced %d containers on a page with none", got)
+			}
+		})
+		return total - baseline
+	}
+	small, large := extra(t, 50), extra(t, 5000)
+	if large > small+50 {
+		t.Fatalf("unwrapInertContainers' cost beyond visibleWords grew with page size on a container-free page "+
+			"(50 words: +%.0f allocs, 5000 words: +%.0f allocs): the initial probe-window scan ran "+
+			"though nothing needed probing", small, large)
+	}
+}
+
+// TestATeaserSharingOnlyItsPrefixLetsTheFullBodySurface (F14): a visible
+// teaser and a full-text container (a JSON-LD articleBody, a <noscript>
+// fallback) can share their opening words — the teaser is often the full
+// body's lede, repeated verbatim — without the container being a duplicate.
+// Suppressing it on the shared prefix alone loses the rest of the body; this
+// pins the chosen fix: a candidate surfaces whenever its OWN words extend
+// past the run that matches, whatever its opening shares with shown text.
+func TestATeaserSharingOnlyItsPrefixLetsTheFullBodySurface(t *testing.T) {
+	prefix := strings.Repeat("shared ", 15) // >= inertProbeWords, shared with the teaser
+	teaser := prefix + "teaser ends here"
+	tail := strings.Repeat("unique tail word only in the full body ", 6) // >= inertProbeWords, unique
+	full := prefix + tail
+	page := `<html><head><script type="application/ld+json">{"@type":"Article","articleBody":"` + full + `"}</script>` +
+		`</head><body><article><p>` + teaser + `</p></article></body></html>`
+	doc, err := html.Parse(strings.NewReader(page))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := unwrapInertContainers(context.Background(), doc); got != 1 {
+		t.Fatalf("surfaced %d containers, want 1 (the full body, despite sharing the teaser's opening words)", got)
+	}
+	shown := strings.Join(visibleWords(doc), " ")
+	if !strings.Contains(shown, "unique tail word") {
+		t.Fatalf("the full body's unique tail never surfaced, though it shares only a prefix with the teaser: %.300q",
+			shown)
+	}
+}

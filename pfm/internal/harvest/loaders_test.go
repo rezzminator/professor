@@ -160,3 +160,33 @@ func TestLoaderFollowingStopsAtABotWall(t *testing.T) {
 		t.Fatalf("a comment quoting a wall phrase was not grafted: %.900q", result.Content)
 	}
 }
+
+// TestLoaderGraftFailuresAreBoundedNotRawErrorText pins F5: a loader graft
+// failure's PUBLIC class stays bounded, so a page whose title is
+// arbitrarily long — or any future extractor's graft wrapping something
+// longer than expected — cannot leak past graftErrorReasonMaxLen into the
+// partial marker, the PARTIAL receipt or the cache. An ordinary short title
+// (TestLoaderFollowingStopsAtABotWall's ""Reddit - Prove your humanity"")
+// still passes through whole; only a pathologically long one is capped.
+func TestLoaderGraftFailuresAreBoundedNotRawErrorText(t *testing.T) {
+	longTitle := "Reddit - " + strings.Repeat("x", 400)
+	site := walkedThread()
+	site.walls = map[string]string{"cur-top": `<html><head><title>` + longTitle + `</title></head>` +
+		`<body><h1>` + longTitle + `</h1></body></html>`}
+	h, _ := site.harvester(t, &browserSpyConverter{}, browserOff())
+	result := h.Fetch(context.Background(), loaderThread)
+	if result.Error != "" || result.Method != rungDirect {
+		t.Fatalf("a walled thread was not kept: method=%q error=%q", result.Method, result.Error)
+	}
+	if strings.Contains(result.Partial, longTitle) {
+		t.Fatalf("the full %d-char page title leaked into the partial marker unbounded: %.400q",
+			len(longTitle), result.Partial)
+	}
+	// A generous bound well under the 400 'x's the title carries and clear of
+	// the production 200-char cap either side of a rename or retune.
+	const wantBoundedUnder = 300
+	if got := strings.Count(result.Partial, "x"); got > wantBoundedUnder {
+		t.Fatalf("the partial marker repeats %d characters of the page title, over the %d-char bound: %.400q",
+			got, wantBoundedUnder, result.Partial)
+	}
+}

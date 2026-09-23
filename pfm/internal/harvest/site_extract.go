@@ -101,7 +101,12 @@ func (extractor siteExtractor) mayRequest(page, target *url.URL) bool {
 // (and an unparsable URL) is rendered read-only.
 func SitePressesLoaders(source string) bool {
 	parsed, err := url.Parse(source)
-	if err != nil || parsed.Host == "" {
+	if err != nil {
+		obs.Logger(context.Background()).Warn("harvest: a fetch source could not be parsed; loader pressing left off",
+			"source", logSource(source), obs.FieldErr, err.Error())
+		return false
+	}
+	if parsed.Host == "" {
 		return false
 	}
 	host := strings.ToLower(parsed.Hostname())
@@ -121,7 +126,12 @@ func (h *Harvester) followForSite(ctx context.Context, source string, doc *html.
 		return
 	}
 	parsed, err := url.Parse(source)
-	if err != nil || parsed.Host == "" {
+	if err != nil {
+		obs.Logger(ctx).Warn("harvest: a fetch source could not be parsed; no loaders followed",
+			"source", logSource(source), obs.FieldErr, err.Error())
+		return
+	}
+	if parsed.Host == "" {
 		return
 	}
 	for _, extractor := range siteExtractors {
@@ -146,7 +156,12 @@ func (h *Harvester) followForSite(ctx context.Context, source string, doc *html.
 // extractor claims it or the page is not the shape it knows.
 func extractForSite(source string, doc *html.Node) (siteExtraction, string, bool) {
 	parsed, err := url.Parse(source)
-	if err != nil || parsed.Host == "" {
+	if err != nil {
+		obs.Logger(context.Background()).Warn("harvest: a fetch source could not be parsed; no site extractor tried",
+			"source", logSource(source), obs.FieldErr, err.Error())
+		return siteExtraction{}, "", false
+	}
+	if parsed.Host == "" {
 		return siteExtraction{}, "", false
 	}
 	for _, extractor := range siteExtractors {
@@ -352,6 +367,8 @@ func (renderer markdownRenderer) resolve(href string) string {
 	}
 	parsed, err := url.Parse(href)
 	if err != nil {
+		obs.Logger(context.Background()).Warn("harvest: a link's href could not be parsed; left unresolved",
+			"href", logSource(href), obs.FieldErr, err.Error())
 		return href
 	}
 	if renderer.base != nil {

@@ -131,7 +131,10 @@ var errorReasonHTTPStatusRe = regexp.MustCompile(`\bHTTP (\d{3})\b`)
 // exit code, an HTTP status already embedded in the wording, or fallback —
 // the caller's own short name for the step that failed. The error's full
 // text still reaches the log (obs.FieldErr) at the call site; this function
-// never sees or needs it to do that.
+// never sees or needs it to do that. The ONE named exception is
+// loaders.go's graftErrorClass: a loader's graft failure already names page
+// content read off the wire, safe to repeat rather than classify away, and
+// bounded there so it can never leak more than graftErrorReasonMaxLen.
 func errorReasonClass(err error, fallback string) string {
 	if err == nil {
 		return ""

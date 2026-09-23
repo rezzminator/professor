@@ -1,11 +1,14 @@
 package harvest
 
 import (
+	"log/slog"
 	"net/url"
 	"strings"
 	"testing"
 
 	"golang.org/x/net/html"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // TestSiteExtractorLeavesOtherSitesOnTheGenericPath: the same markup on a
@@ -49,6 +52,70 @@ func TestSitePressesLoadersOnlyForARegisteredSite(t *testing.T) {
 			t.Errorf("SitePressesLoaders(%q) = %v, want %v", tc.source, got, tc.want)
 		}
 	}
+}
+
+// TestSiteExtractParseFailuresAreLogged pins F13: a value this file's
+// fallbacks could not parse at all — not merely one with no host — is
+// logged with the value and the error, never silently swallowed as though
+// nothing were there (root CLAUDE.md's "never swallow exceptions"). A
+// control character makes url.Parse itself fail (net/url rejects it), which
+// a bare hostless string does not.
+func TestSiteExtractParseFailuresAreLogged(t *testing.T) {
+	bad := "http://example.test/\nbad"
+	warnLogged := func(t *testing.T, recorder *obs.Recorder, want string) {
+		t.Helper()
+		for _, record := range recorder.Records() {
+			if record.Level != slog.LevelWarn.String() {
+				continue
+			}
+			if _, ok := record.Field(obs.FieldErr); !ok {
+				continue
+			}
+			if strings.Contains(record.Message, want) {
+				return
+			}
+		}
+		t.Fatalf("no WARN record naming %q logged the parse error: %s", want, recorder.Raw())
+	}
+
+	t.Run("SitePressesLoaders", func(t *testing.T) {
+		_, recorder := obs.Test(t)
+		if got := SitePressesLoaders(bad); got {
+			t.Fatalf("SitePressesLoaders(%q) = true, want false", bad)
+		}
+		warnLogged(t, recorder, "loader pressing left off")
+	})
+
+	t.Run("extractForSite", func(t *testing.T) {
+		_, recorder := obs.Test(t)
+		doc, err := html.Parse(strings.NewReader(`<html><body></body></html>`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, ok := extractForSite(bad, doc); ok {
+			t.Fatal("extractForSite claimed an unparsable source")
+		}
+		warnLogged(t, recorder, "no site extractor tried")
+	})
+
+	t.Run("followForSite", func(t *testing.T) {
+		ctx, recorder := obs.Test(t)
+		doc, err := html.Parse(strings.NewReader(`<html><body></body></html>`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := mustNew(t, Options{CacheDir: t.TempDir()})
+		h.followForSite(ctx, bad, doc, newLoaderBudget(ctx))
+		warnLogged(t, recorder, "no loaders followed")
+	})
+
+	t.Run("resolve", func(t *testing.T) {
+		_, recorder := obs.Test(t)
+		if got := (markdownRenderer{}).resolve(bad); got != bad {
+			t.Fatalf("resolve(%q) = %q, want the href unresolved", bad, got)
+		}
+		warnLogged(t, recorder, "left unresolved")
+	})
 }
 
 // TestMarkdownRendererKeepsRichTextStructure pins the rich-text renderer the

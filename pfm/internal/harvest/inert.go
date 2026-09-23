@@ -50,23 +50,47 @@ func unwrapInertContainers(ctx context.Context, doc *html.Node) int {
 	// run of shown words — the word-boundary substring test, in linear time.
 	shown := visibleWords(doc)
 	windows := map[string]bool{}
+	windowsBuilt := false
 	addWindows := func(from int) {
 		for end := max(from, inertProbeWords-1); end < len(shown); end++ {
 			windows[strings.Join(shown[end-inertProbeWords+1:end+1], " ")] = true
 		}
 	}
-	addWindows(0)
+	// addShown joins words into shown and indexes their windows, whether or
+	// not they passed surface's own gate — the always-rendered shadow-root
+	// branch below calls it directly, so its words are recognised as already
+	// shown by a later container repeating them.
+	addShown := func(words []string) {
+		start := len(shown)
+		shown = append(shown, words...)
+		addWindows(start)
+	}
+	// surface reports whether words are new content worth retagging: long
+	// enough to be more than a UI stub, and not already shown. A candidate
+	// whose FIRST run matches shown text but whose LAST run does not is not a
+	// duplicate — it shares an opening (a teaser's lede repeated verbatim at
+	// the top of a full body) but carries more past it, so it surfaces; one
+	// whose last run also matches is the same passage twice and stays inert.
+	// The full-page window scan (addWindows(0)) is deferred to the first
+	// candidate that reaches here, so a page with nothing to probe never pays
+	// for it.
 	surface := func(words []string) bool {
 		if len(words) < inertMinWords {
 			return false
 		}
-		if windows[strings.Join(words[:inertProbeWords], " ")] {
-			return false
+		if !windowsBuilt {
+			addWindows(0)
+			windowsBuilt = true
 		}
-		start := len(shown)
-		shown = append(shown, words...)
-		addWindows(start)
-		return true
+		if !windows[strings.Join(words[:inertProbeWords], " ")] {
+			addShown(words)
+			return true
+		}
+		if !windows[strings.Join(words[len(words)-inertProbeWords:], " ")] {
+			addShown(words)
+			return true
+		}
+		return false
 	}
 	count := 0
 	// inSurfaced is set below a surfaced template: its words, a nested
@@ -82,11 +106,19 @@ func unwrapInertContainers(ctx context.Context, doc *html.Node) int {
 			switch child.DataAtom {
 			case atom.Template:
 				if hasAttr(child, "shadowrootmode") {
+					// Always rendered content: retagged unconditionally, and
+					// its words join shown so a later container repeating
+					// them is recognised as already shown.
+					addShown(textWords(child))
 					retagUnwrapped(child, "template")
 					count++
 					break
 				}
-				if words := textWords(child); inSurfaced && len(words) >= inertMinWords || surface(words) {
+				// inSurfaced: the parent template's own words, this nested
+				// one's included, already joined shown when the parent
+				// surfaced — so a nested container surfaces with it whatever
+				// its own word count.
+				if words := textWords(child); inSurfaced || surface(words) {
 					retagUnwrapped(child, "template")
 					count++
 					childSurfaced = true

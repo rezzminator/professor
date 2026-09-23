@@ -41,7 +41,26 @@ const (
 	// loaderFailureStop ends the following after this many failed requests
 	// in a row: the site is refusing them, and more would only repeat it.
 	loaderFailureStop = 3
+	// graftErrorReasonMaxLen bounds graftErrorClass's answer: today's only
+	// graft (reddit.go) wraps a page title read off the wire, naturally
+	// short, but a future extractor's graft could wrap something longer —
+	// this caps what any graft failure may repeat into a partial artifact.
+	graftErrorReasonMaxLen = 200
 )
+
+// graftErrorClass is the ONE named exception to errorReasonClass
+// (recall.go): a loader's graft failure already names page content read off
+// the wire — a title, a content type — never a local path or a worker's
+// stderr, so it is safe to repeat rather than classify away. Bounded to
+// graftErrorReasonMaxLen so a future extractor's graft can never leak more
+// than that into Partial, the PARTIAL receipt or the cache.
+func graftErrorClass(err error) string {
+	text := err.Error()
+	if len(text) > graftErrorReasonMaxLen {
+		return text[:graftErrorReasonMaxLen] + "…"
+	}
+	return text
+}
 
 // pageLoader is one loader in a page: the request that answers it and how its
 // answer is spliced in.
@@ -246,12 +265,12 @@ func (h *Harvester) followLoader(
 		if isChallenge(response.body, response.status) {
 			// Judged only on an answer that held nothing to graft: a comment
 			// can quote a wall's phrase.
-			budget.fail(ctx, loader, err.Error(), err.Error())
+			budget.fail(ctx, loader, err.Error(), graftErrorClass(err))
 			budget.stopped = fmt.Sprintf("the site answered a bot wall after %d request(s); not retried",
 				budget.requests)
 			return false
 		}
-		return budget.fail(ctx, loader, err.Error(), err.Error())
+		return budget.fail(ctx, loader, err.Error(), graftErrorClass(err))
 	}
 	budget.followed[loader.key] = true
 	budget.answers[loader.key] = loaderAnswer{body: response.body, contentType: response.contentType}

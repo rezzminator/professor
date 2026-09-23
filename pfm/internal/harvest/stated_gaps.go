@@ -38,16 +38,18 @@ func threadGap(ctx context.Context, doc *html.Node) string {
 }
 
 // threadCounts is what a page's schema.org JSON-LD states of its thread and
-// the Comment and Review items it carries.
+// the Comment, Review and Answer items it carries.
 type threadCounts struct {
-	statedComments, statedReviews int
-	comments, reviews             int
+	statedComments, statedReviews, statedAnswers int
+	comments, reviews, answers                   int
 }
 
 // statedThreadGap reads the page's schema.org JSON-LD: commentCount or a
 // CommentAction interaction count against its Comment items; reviewCount or a
 // ReviewAction interaction count against its Review items, on a page that
-// shows reviews. With no item to count, it never guesses how many loaded.
+// shows reviews; answerCount against its Answer items. A count the structured
+// data does not state is read from a count label tied to the page's list
+// (stated_labels.go). With no item to count, it never guesses how many loaded.
 func statedThreadGap(ctx context.Context, doc *html.Node) string {
 	var counts threadCounts
 	var walk func(*html.Node)
@@ -71,21 +73,29 @@ func statedThreadGap(ctx context.Context, doc *html.Node) string {
 		}
 	}
 	walk(doc)
-	gaps := []string{statedGap(counts.statedComments, counts.comments, "comments")}
+	labels := readThreadLabels(doc)
+	gaps := []string{
+		statedOrLabelled(counts.statedComments, counts.comments, threadComments, labels),
+		statedOrLabelled(counts.statedAnswers, counts.answers, threadAnswers, labels),
+	}
 	if counts.reviews > 0 || showsReviews(doc) {
-		gaps = append(gaps, statedGap(counts.statedReviews, counts.reviews, "reviews"))
+		gaps = append(gaps, statedOrLabelled(counts.statedReviews, counts.reviews, threadReviews, labels))
 	}
 	return joinReasons(gaps...)
 }
 
+// statedGap is the house reconciliation of a stated count against the items
+// the page carries; with no item to count (carried 0) it names no number it
+// did not read.
 func statedGap(stated, carried int, noun string) string {
 	switch {
 	case stated <= carried:
 		return ""
 	case carried == 0:
-		return fmt.Sprintf("the page states %d %s; not all are loaded", stated, noun)
+		return fmt.Sprintf("%d %s stated; the stored page holds only what the first view serves", stated, noun)
 	default:
-		return fmt.Sprintf("the page states %d %s; %d appear in the page", stated, noun, carried)
+		return fmt.Sprintf("%d %s stated · %d loaded — the rest are not on the served page (paged or loaded on demand)",
+			stated, noun, carried)
 	}
 }
 
@@ -102,9 +112,12 @@ func (counts *threadCounts) add(value any) {
 			counts.comments++
 		case schemaTyped(typed["@type"], "Review"):
 			counts.reviews++
+		case schemaTyped(typed["@type"], "Answer"):
+			counts.answers++
 		}
 		counts.statedComments = max(counts.statedComments, statedNumber(typed["commentCount"]))
 		counts.statedReviews = max(counts.statedReviews, statedNumber(typed["reviewCount"]))
+		counts.statedAnswers = max(counts.statedAnswers, statedNumber(typed["answerCount"]))
 		if interaction, ok := typed["userInteractionCount"]; ok {
 			switch {
 			case schemaTyped(typed["interactionType"], "CommentAction"):
@@ -120,7 +133,7 @@ func (counts *threadCounts) add(value any) {
 }
 
 // addMicrodata counts one element's schema.org microdata: an itemscope typed
-// Comment or Review is an item; an itemprop commentCount or reviewCount states
+// Comment, Review or Answer is an item; an itemprop commentCount, reviewCount or answerCount states
 // a total, in its content attribute or its text.
 func (counts *threadCounts) addMicrodata(node *html.Node) {
 	if itemType := nodeAttr(node, "itemtype"); itemType != "" {
@@ -132,6 +145,8 @@ func (counts *threadCounts) addMicrodata(node *html.Node) {
 		prop = "commentCount"
 	case "reviewcount":
 		prop = "reviewCount"
+	case "answercount":
+		prop = "answerCount"
 	default:
 		return
 	}

@@ -32,7 +32,7 @@ func TestGenericThreadGapsAreNamed(t *testing.T) {
 			page: `<html><head><script type="application/ld+json">{"@context":"https://schema.org",` +
 				`"@type":"DiscussionForumPosting","headline":"How teams use AI","commentCount":237,"comment":[` +
 				commentItems(38) + `]}</script></head><body><article>` + articlePreview + `</article></body></html>`,
-			partial: []string{"the page states 237 comments; 38 appear in the page"},
+			partial: []string{"237 comments stated · 38 loaded — the rest are not on the served page"},
 		},
 		{
 			name: "a thread with a Load more button and a hidden-items button",
@@ -53,7 +53,7 @@ func TestGenericThreadGapsAreNamed(t *testing.T) {
 				`"reviewCount":"173878"}}</script></head><body><article>` + articlePreview +
 				`<div class="user_reviews"><p>Very Positive: 98% of the 173,878 user reviews for this game are positive.</p>` +
 				`</div></article></body></html>`,
-			partial: []string{"the page states 173878 reviews; not all are loaded"},
+			partial: []string{"173878 reviews stated; the stored page holds only what the first view serves"},
 		},
 		{
 			name: "a store page stating its reviews in microdata",
@@ -62,7 +62,7 @@ func TestGenericThreadGapsAreNamed(t *testing.T) {
 				`<span>Very Positive</span><span>- 98% of the 173,878 user reviews for this game are positive.</span>` +
 				`<meta itemprop="reviewCount" content="173878"><meta itemprop="ratingValue" content="10"></a>` +
 				`</article></body></html>`,
-			partial: []string{"the page states 173878 reviews; not all are loaded"},
+			partial: []string{"173878 reviews stated; the stored page holds only what the first view serves"},
 		},
 		{
 			name: "a story whose comments load by a Load All Comments link",

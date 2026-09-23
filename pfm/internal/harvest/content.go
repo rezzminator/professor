@@ -36,7 +36,10 @@ func (h *Harvester) convertFetchedContent(ctx context.Context, kind, source stri
 // value. stated is the extractor's reader of the stated count of what it could
 // not load (siteExtraction.stated), carried with unrendered. wall is the wall
 // the page's markup shows (pageWall) — a reader page's from the reader's HTML
-// (readerPageChecked) — carried to whatever rung stores the page.
+// (readerPageChecked) — carried to whatever rung stores the page. checks is
+// what a reader page's own HTML shows beyond its wall: the thread it states
+// above what it carries and a markdown keeping little of its text
+// (readerPageChecked), or why that HTML could not be checked.
 type convertedPage struct {
 	extractor         string
 	renderMayComplete bool
@@ -44,6 +47,7 @@ type convertedPage struct {
 	unrendered        string
 	stated            func(content string) string
 	wall              string
+	checks            string
 	nextPage          string
 	listing           string
 	pager             bool
@@ -127,7 +131,7 @@ func (page convertedPage) withGaps(content string, gaps carriedGaps, budget *loa
 			reason = joinReasons(reason, stated)
 		}
 	}
-	for _, wall := range []string{page.wall, gaps.wall} { // a wall the stored page or an earlier rung showed
+	for _, wall := range []string{page.wall, gaps.wall, page.checks} { // a wall the stored page or an earlier rung showed
 		if wall != "" && !page.siteAPI && !strings.Contains(reason, wall) {
 			reason = joinReasons(reason, wall)
 		}

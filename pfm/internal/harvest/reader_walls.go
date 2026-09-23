@@ -23,18 +23,18 @@ import (
 const readerHTMLFormat = "X-Return-Format"
 
 // readerPageChecked is the convertedPage of a reader rung's markdown of source
-// (readerPage), with the wall the page's markup shows. The reader's HTML is
-// asked for only when the markdown asks for a subscription or a sign-in
-// (paywallCallPattern), or source is an app site that gates signed-out
-// readers: prose alone never names a wall, and a page asking for neither has
-// none to name. A check asked for that could not run is named on the page
-// (wallCheckFailed), never stored as a page with no wall. A wall an earlier
-// rung saw travels in the carried gaps (carriedGaps.wall) either way.
+// (readerPage), checked on the reader's HTML of the page as an HTTP rung's
+// page is: the thread its markup states above what it carries (threadGap) and
+// the recall gate on the markdown (measureContentRecall) always; the wall the
+// page's markup shows where the markdown asks for a subscription or a sign-in
+// (paywallCallPattern) or source is an app site that gates signed-out
+// readers — prose alone never names a wall, and a page asking for neither has
+// none to name. A check that could not run is named on the page
+// (wallCheckFailed, readerChecksFailed), never stored as a clean page. A wall
+// an earlier rung saw travels in the carried gaps (carriedGaps.wall) either way.
 func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown string) convertedPage {
 	page := readerPage(source, markdown)
-	if !paywallCallPattern.MatchString(markdown) && !loginWalledHost(source) {
-		return page
-	}
+	wallAsked := paywallCallPattern.MatchString(markdown) || loginWalledHost(source)
 	target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
 	body, status, _, err := getBodyWithHeaders(ctx, h.jina, target, h.userAgent,
 		map[string]string{readerHTMLFormat: "html"}, h.options.MaxBytes)
@@ -49,25 +49,41 @@ func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown stri
 	case isChallenge(body, status):
 		why = "the reader was served a challenge"
 	}
+	var doc *html.Node
+	if why == "" {
+		if doc, err = html.Parse(bytes.NewReader(body)); err != nil {
+			why = "unparseable HTML"
+		}
+	}
 	if why != "" {
 		logged := why
 		if err != nil {
 			logged = err.Error()
 		}
-		obs.Logger(ctx).Warn("harvest: the reader's HTML of the page could not be read; its wall check did not run",
+		obs.Logger(ctx).Warn("harvest: the reader's HTML of the page could not be read; its checks did not run",
 			"target", logSource(source), obs.FieldErr, logged)
-		page.wall = wallCheckFailed(why)
+		if wallAsked {
+			page.wall = wallCheckFailed(why)
+		}
+		page.checks = readerChecksFailed(why)
 		return page
 	}
-	doc, err := html.Parse(bytes.NewReader(body))
-	if err != nil {
-		obs.Logger(ctx).Warn("harvest: the reader's HTML of the page could not be parsed; its wall check did not run",
-			"target", logSource(source), obs.FieldErr, err.Error())
-		page.wall = wallCheckFailed("unparseable HTML")
-		return page
+	if wallAsked {
+		page.wall = pageWall(source, doc)
 	}
-	page.wall = pageWall(source, doc)
+	recall := ""
+	if measure := measureContentRecall(visibleWords(doc), markdown); measure.low() {
+		recall = "the reader's markdown kept " + measure.String()
+	}
+	page.checks = joinReasons(threadGap(ctx, doc), recall)
 	return page
+}
+
+// readerChecksFailed is the partial reason of a reader page whose own HTML
+// could not be checked, for the error class why.
+func readerChecksFailed(why string) string {
+	return "the reader's HTML of the page could not be read (" + why +
+		"): its stated-count and recall checks did not run"
 }
 
 // wallCheckFailed is the partial reason of a reader page whose wall check was

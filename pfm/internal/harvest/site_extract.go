@@ -183,6 +183,14 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:         "producthunt-reviews",
+		hosts:        []string{"producthunt.com"},
+		paths:        isProductHuntReviews,
+		extract:      extractProductHuntReviews,
+		loaders:      productHuntLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:         "notion-page",
 		hosts:        notionHosts,
 		paths:        isNotionPage,

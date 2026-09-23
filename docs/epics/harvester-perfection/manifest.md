@@ -48,7 +48,7 @@ The harvester gets every target — page, document, paper, file — by every tec
 - MHTML: stdlib `email`. EPUB: markitdown (already pinned; ties docling on content, adds metadata, 6x less memory). BibTeX: bibtexparser 2.0.1, the only new dependency (1.4 aborts a whole file on one bad macro).
 - Named follow-ups: JATS MathML flattens to linear text; feedparser as a fallback on a broken feed is unmeasured; RIS and BibTeX untested on messy exports.
 - OCR: docling + RapidOCR (onnxruntime) is the default, one model per script (Latin, Chinese, Japanese, Arabic, Cyrillic; Cyrillic and Arabic need the PP-OCRv5 mobile models passed by hand); Hebrew goes through a system Tesseract when installed, otherwise "no Hebrew OCR" is named; EasyOCR rejected. A page is sent to OCR when it has no usable text layer or its text is over 2% control characters (fonts with no Unicode map); docling's document_timeout stops a long run and the process kill stays. First run stages 1.06 GB of layout and table models. Vertical CJK fails on every engine (named). Detail: the OCR bake-off report in the bench directory.
-- Office: pending.
+- Office: legacy DOC through legacy-doc (given the bytes; a size-ratio guard catches its silent truncation, and a named fallback keeps structure through a LibreOffice conversion where installed); XLS through xlrd; RTF through striprtf (CJK code pages right; tables lost, named); ODT through odfdo; ODP through docling; ODS needs a clamp on LibreOffice's million-row padding before any parser (docling and odfdo hang on it); macro and template variants through markitdown with mammoth, and a content-type rewrite for docling; encrypted files detected first with msoffcrypto-tool and named. New dependencies: legacy-doc, xlrd, striprtf, odfdo, msoffcrypto-tool, mammoth. Files are routed by their magic bytes, not their extension. Word files go through docling today, so the pinned environment's missing mammoth breaks nothing yet; it is needed before markitdown takes the macro and template variants.
 
 ## Landed
 
@@ -78,5 +78,5 @@ The harvester gets every target — page, document, paper, file — by every tec
 - phpBB and Invision forum pages after the first are named, not followed.
 - Tripadvisor answers with a challenge (a clear failure, correct).
 - Amazon answered 404 to a product page; unproven whether it is a real 404 or a disguised refusal.
-- Glassdoor served in Dutch for the fetching location.
+- Glassdoor served in Dutch for the fetching location; its page states "103 reviews" beside other companies' review counters and carries no countable review ids, so the stated-count check stays silent there (G2 rule: a noun whose labels disagree is not a stated count).
 - Notion external-object mentions render as a placeholder.

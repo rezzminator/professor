@@ -159,6 +159,14 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:         "steam-app",
+		hosts:        []string{steamHost},
+		paths:        isSteamApp,
+		extract:      extractSteamApp,
+		loaders:      steamLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,

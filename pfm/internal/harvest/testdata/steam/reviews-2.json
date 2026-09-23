@@ -1,0 +1,73 @@
+{
+ "success": 1,
+ "query_summary": {
+  "num_reviews": 2
+ },
+ "reviews": [
+  {
+   "recommendationid": "100000004",
+   "author": {
+    "steamid": "76561198000000004",
+    "personaname": "user-4",
+    "persona_status": "offline",
+    "profile_url": "https://steamcommunity.com/profiles/76561198000000004/",
+    "num_games_owned": 64,
+    "num_reviews": 9,
+    "playtime_forever": 42925,
+    "playtime_last_two_weeks": 641,
+    "playtime_at_review": 42925,
+    "last_played": 1789873541,
+    "avatar": "0000000000000000000000000000000000000000"
+   },
+   "language": "english",
+   "review": "[b]A bold opening[/b] of review 4.\n\n[list]\n[*] a first point\n[*] a second point\n[/list]\nA closing [i]line[/i].",
+   "timestamp_created": 1789959079,
+   "timestamp_updated": 1789959079,
+   "voted_up": true,
+   "votes_up": 0,
+   "votes_funny": 0,
+   "weighted_vote_score": 0.5,
+   "comment_count": 0,
+   "steam_purchase": true,
+   "received_for_free": false,
+   "refunded": false,
+   "written_during_early_access": false,
+   "primarily_steam_deck": false,
+   "app_release_date": "1303186800",
+   "reactions": []
+  },
+  {
+   "recommendationid": "100000005",
+   "author": {
+    "steamid": "76561198000000005",
+    "personaname": "user-5",
+    "persona_status": "offline",
+    "profile_url": "https://steamcommunity.com/profiles/76561198000000005/",
+    "num_games_owned": 0,
+    "num_reviews": 1,
+    "playtime_forever": 752,
+    "playtime_last_two_weeks": 118,
+    "playtime_at_review": 747,
+    "last_played": 1789956329,
+    "avatar": "0000000000000000000000000000000000000000"
+   },
+   "language": "english",
+   "review": "Placeholder review text 5.",
+   "timestamp_created": 1789956299,
+   "timestamp_updated": 1789956299,
+   "voted_up": true,
+   "votes_up": 0,
+   "votes_funny": 0,
+   "weighted_vote_score": 0.5,
+   "comment_count": 0,
+   "steam_purchase": true,
+   "received_for_free": false,
+   "refunded": false,
+   "written_during_early_access": false,
+   "primarily_steam_deck": false,
+   "app_release_date": "1303186800",
+   "reactions": []
+  }
+ ],
+ "cursor": "AoJwPAGETWO="
+}

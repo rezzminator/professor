@@ -45,6 +45,9 @@ type socialSite struct {
 	answers  map[string]string
 	status   map[string]int
 	apiHosts map[string]bool
+	// apiPath, when set, is a path prefix served as an API answer on any host
+	// (a site whose API shares the page's host outside /api/).
+	apiPath  string
 	requests []string
 	headers  []http.Header
 }
@@ -53,7 +56,8 @@ func (site *socialSite) roundTrip(request *http.Request) (*http.Response, error)
 	key := request.URL.Host + request.URL.RequestURI()
 	contentType := "text/html; charset=utf-8"
 	activity := strings.HasSuffix(request.URL.Path, "/replies")
-	if site.apiHosts[request.URL.Host] || strings.HasPrefix(request.URL.Path, "/api/") || activity {
+	if site.apiHosts[request.URL.Host] || strings.HasPrefix(request.URL.Path, "/api/") || activity ||
+		(site.apiPath != "" && strings.HasPrefix(request.URL.Path, site.apiPath)) {
 		contentType = "application/json; charset=utf-8"
 		if activity {
 			contentType = "application/activity+json; charset=utf-8"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -35,8 +36,31 @@ func (h *Harvester) localizedImages(ctx context.Context, kind, converted, source
 	return localized
 }
 
+// pageRelativeLink is imagePath as a link relative to the directory of the
+// HTML page stored for source (Cache.path; an alias of that page lands in the
+// same kind directory), so the stored page names no server path and its
+// images resolve from wherever the file is opened. ok is false when no
+// relative form exists; the caller then keeps the remote link.
+func (h *Harvester) pageRelativeLink(source, imagePath string) (string, bool) {
+	root := h.options.CacheDir
+	if h.cache != nil {
+		root = h.cache.root
+	}
+	pageDir := filepath.Dir(filepath.Join(root, CacheKey(source, kindHTML)))
+	rel, err := filepath.Rel(pageDir, imagePath)
+	if err != nil || filepath.IsAbs(rel) {
+		return "", false
+	}
+	rel = filepath.ToSlash(rel)
+	if !strings.HasPrefix(rel, ".") {
+		rel = "./" + rel // publicImagePath reads a dot-led link as page-relative
+	}
+	return rel, true
+}
+
 // LocalizeImages downloads article images referenced by Markdown and rewrites
-// successful links to immutable cache paths. It intentionally skips data URIs,
+// successful links to immutable cache files, each linked relative to the page
+// stored for baseSource (pageRelativeLink). It intentionally skips data URIs,
 // favicons, sprites, non-image responses, and anything beyond the oracle's
 // fifty-image/ten-megabyte limits. Failed links remain untouched.
 func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource string) (string, error) {
@@ -107,8 +131,12 @@ func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource str
 				maxBytes: maxImageBytes,
 			})
 			if fetchErr == nil && got.Result.Path != "" {
+				link, ok := h.pageRelativeLink(baseSource, got.Result.Path)
+				if !ok {
+					return // the remote link stays: a server path never enters stored content
+				}
 				mu.Lock()
-				replacements[remote] = got.Result.Path
+				replacements[remote] = link
 				mu.Unlock()
 			}
 		}()

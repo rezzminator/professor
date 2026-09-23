@@ -104,14 +104,14 @@ func TestRewritePublicImagesCopiesLocalImageIntoPublicNamespace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(rewritten, publicRoot) {
-		t.Fatalf("rewritePublicImages did not rewrite into the public namespace: %q (root=%q)", rewritten, publicRoot)
+	if !strings.Contains(rewritten, "](./") || strings.Contains(rewritten, publicRoot) {
+		t.Fatalf("rewritePublicImages did not rewrite to a public-relative link: %q (root=%q)", rewritten, publicRoot)
 	}
 
-	// Extract the rewritten path and verify the bytes were actually copied.
+	// Extract the rewritten link and verify the bytes were actually copied.
 	start := strings.Index(rewritten, "](") + 2
 	end := strings.Index(rewritten[start:], ")")
-	publicPath := rewritten[start : start+end]
+	publicPath := filepath.Join(publicRoot, rewritten[start:start+end])
 	data, err := os.ReadFile(publicPath)
 	if err != nil {
 		t.Fatalf("reading copied public artifact: %v", err)
@@ -240,7 +240,7 @@ func TestPublicResultRelocatesHebrewAndPercentEncodedImages(t *testing.T) {
 	if strings.Contains(got.Content, hebrew) || strings.Contains(got.Content, encoded) {
 		t.Fatalf("a cached image link was not relocated: %q", got.Content)
 	}
-	if n := strings.Count(got.Content, "]("+publicRoot); n != 2 {
+	if n := strings.Count(got.Content, "](./"); n != 2 || strings.Contains(got.Content, publicRoot) {
 		t.Fatalf("relocated image links = %d, want 2: %q", n, got.Content)
 	}
 	if !strings.Contains(got.Content, "![תחנה]("+remote+")") || got.Partial != "" {

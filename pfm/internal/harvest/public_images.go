@@ -69,7 +69,8 @@ func (h *Harvester) rewritePublicImages(source, body, basePath string) (string, 
 			continue
 		}
 		canonical, reason := h.publishableImage(path, root, cacheRoot, publicRoot)
-		if reason == "" && isPathInside(canonical, publicRoot) {
+		if reason == "" && filepath.Dir(canonical) == publicRoot {
+			replacements[raw] = publicRelativeLink(canonical)
 			continue
 		}
 		var data []byte
@@ -90,7 +91,7 @@ func (h *Harvester) rewritePublicImages(source, body, basePath string) (string, 
 		if err := h.writePublicFile(publicPath, data); err != nil {
 			return "", 0, err
 		}
-		replacements[raw] = publicPath
+		replacements[raw] = publicRelativeLink(publicPath)
 	}
 	if len(replacements) == 0 && len(refused) == 0 {
 		return body, 0, nil
@@ -115,6 +116,14 @@ func (h *Harvester) rewritePublicImages(source, body, basePath string) (string, 
 		rewritten = strings.ReplaceAll(rewritten, original, "")
 	}
 	return rewritten, len(refused), nil
+}
+
+// publicRelativeLink is the link to a file in public/ from a document in
+// public/: every public artifact lives flat in that one directory
+// (publicArtifactPath), so the published page names no server path and the
+// link resolves from wherever the page is opened.
+func publicRelativeLink(publicPath string) string {
+	return "./" + filepath.Base(publicPath)
 }
 
 // publishableImage is path resolved for publication, or the reason it may not

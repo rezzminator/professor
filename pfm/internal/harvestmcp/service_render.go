@@ -32,7 +32,6 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 		}
 		receipt := map[string]any{
 			jsonPropertySource: source,
-			"size":             result.Tokens,
 			"tokens":           result.Tokens,
 			"token_count":      result.Tokens,
 			"chars":            result.Chars,

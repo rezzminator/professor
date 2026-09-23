@@ -22,7 +22,7 @@ func TestFetchPublicResolvesDOIIdentityAndISBNNamedLocalFile(t *testing.T) {
 	cacheDir := t.TempDir()
 	h := mustNew(t, Options{CacheDir: cacheDir})
 	article := strings.Repeat("cached DOI article body ", 30)
-	cachedPath, err := h.cache.save(publicTestDOI, "html", "oa:fixture", article, []string{"oa:fixture"})
+	cachedPath, err := h.cache.save(publicTestDOI, "html", "oa:fixture", article, 0, []string{"oa:fixture"})
 	if err != nil {
 		t.Fatal(err)
 	}

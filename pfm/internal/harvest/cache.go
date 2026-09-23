@@ -119,7 +119,10 @@ func (c *Cache) stale(path, kind string, meta map[string]string) bool {
 	return c.clock.Now().Sub(stamp) > c.ttl
 }
 
-func (c *Cache) save(source, kind, method, body string, rungs []string) (path string, returnErr error) {
+// save stores body with its provenance. status is the HTTP status of the rung
+// that delivered it; 0 (a local document, or a status never learned) writes no
+// status line, so a later hit reports none rather than a made-up one.
+func (c *Cache) save(source, kind, method, body string, status int, rungs []string) (path string, returnErr error) {
 	path = c.path(source, kind)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return path, fmt.Errorf("create cache directory: %w", err)
@@ -131,6 +134,9 @@ func (c *Cache) save(source, kind, method, body string, rungs []string) (path st
 	}
 	meta := fmt.Sprintf("---\nurl: %s\nfetched_at: %s\nsource: harvester\nmethod: %s\ntoken_count: %d\n",
 		safe(source), c.clock.Now().UTC().Format(time.RFC3339), safe(method), EstimateTokens(body))
+	if status > 0 {
+		meta += fmt.Sprintf("http_status: %d\n", status)
+	}
 	if len(rungs) > 0 {
 		meta += "rungs: " + strings.Join(rungs, ", ") + "\n"
 	}

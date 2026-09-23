@@ -344,6 +344,7 @@ func TestGoogleDriveFileViewFetchesCompleteDownloadInsteadOfPreviewHTML(t *testi
 		"html",
 		"jina",
 		strings.Repeat("Drive preview page 1 through page 4 only\n", 20),
+		0,
 		[]string{"direct", "chrome-impersonation", "jina"},
 	); err != nil {
 		t.Fatal(err)
@@ -516,7 +517,7 @@ func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 		t.Fatalf("redirect result=%#v", result)
 	}
 	path := filepath.Join(t.TempDir(), "meta.txt")
-	if _, err := h.cache.save("https://example.test/a\nmethod: injected", "txt", "direct", "body", nil); err != nil {
+	if _, err := h.cache.save("https://example.test/a\nmethod: injected", "txt", "direct", "body", 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(

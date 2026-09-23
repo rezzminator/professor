@@ -2,6 +2,7 @@ package harvestmcp
 
 import (
 	"archive/zip"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,6 +115,47 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	}
 	if !strings.Contains(got, "`findWorks`") {
 		t.Fatalf("search-off describe receipt missing findWorks fallback: %q", got)
+	}
+}
+
+// TestSizeOnlyReceiptNamesTokensNotSize: the size probe names its token
+// count `tokens`; no `size` key holds it, so nothing reads it as bytes.
+func TestSizeOnlyReceiptNamesTokensNotSize(t *testing.T) {
+	service := newTestService(t, Runtime{})
+	result := harvest.Result{
+		HTTPStatus:  200,
+		CacheStatus: "hit",
+		Chars:       40,
+		Bytes:       90,
+		Tokens:      12,
+		Path:        filepath.Join(t.TempDir(), "source.md"),
+		Content:     "body",
+	}
+	text := service.describeFetch("https://fixture.example/source", result, true)
+	var receipt map[string]any
+	if err := json.Unmarshal([]byte(text), &receipt); err != nil {
+		t.Fatalf("size-only receipt is not JSON: %v\n%s", err, text)
+	}
+	if _, found := receipt["size"]; found {
+		t.Fatalf("size-only receipt carries a `size` key: %s", text)
+	}
+	if receipt["tokens"] != float64(12) || receipt["chars"] != float64(40) {
+		t.Fatalf("size-only receipt tokens/chars = %v/%v, want 12/40: %s", receipt["tokens"], receipt["chars"], text)
+	}
+}
+
+// TestPageItemCarriesStatusOnEveryRead: a cached and a fresh result, read as
+// a page or a work, both carry their status on the typed item.
+func TestPageItemCarriesStatusOnEveryRead(t *testing.T) {
+	service := newTestService(t, Runtime{})
+	for _, cache := range []string{"hit", "miss"} {
+		for _, work := range []bool{false, true} {
+			item := service.pageItem("https://fixture.example/source",
+				harvest.Result{HTTPStatus: 200, CacheStatus: cache, Kind: "html", Content: "body"}, work)
+			if item.Status != 200 {
+				t.Fatalf("cache %s work %v: item status = %d, want 200", cache, work, item.Status)
+			}
+		}
 	}
 }
 

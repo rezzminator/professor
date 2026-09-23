@@ -14,7 +14,7 @@ func (h *Harvester) storeResult(
 	rungs []string,
 	options FetchOptions,
 ) Result {
-	path, err := h.cache.save(source, kind, method, content, rungs)
+	path, err := h.cache.save(source, kind, method, content, statusCode, rungs)
 	if err != nil {
 		return Result{Source: source, Kind: kind, Error: err.Error(), Rungs: rungs}
 	}
@@ -91,6 +91,12 @@ func (h *Harvester) resultFromCache(source, kind, content string, meta map[strin
 	if stored, parseErr := strconv.Atoi(meta["token_count"]); parseErr == nil && stored >= 0 {
 		tokens = stored
 	}
+	// The delivering rung's status travels with the entry; an entry stored
+	// without one (a local document, an older cache) reports none, never 200.
+	status := 0
+	if stored, parseErr := strconv.Atoi(meta["http_status"]); parseErr == nil && stored >= 100 && stored < 600 {
+		status = stored
+	}
 	chars := contentChars(content)
 	return Result{
 		Source:       source,
@@ -103,6 +109,7 @@ func (h *Harvester) resultFromCache(source, kind, content string, meta map[strin
 		Chars:        chars,
 		ContentChars: chars,
 		Tokens:       tokens,
+		HTTPStatus:   status,
 		Rungs:        rungs,
 		Partial:      partialReason(content),
 	}

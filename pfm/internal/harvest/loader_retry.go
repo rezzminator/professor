@@ -11,8 +11,9 @@ import (
 )
 
 // A loader request the site answers with HTTP 429 gets one wait and one
-// retry: the wait is the server's Retry-After (retry_after.go), or
-// loaderRetryDefault when it gave none, never shorter than the pace. One wait
+// retry: the wait is the server's Retry-After (retry_after.go), else the
+// reset of the request quota the site reports (loader_quota.go), or
+// loaderRetryDefault when it gave neither, never shorter than the pace. One wait
 // is at most loaderRetryWaitCap, and every wait of one fetch together at most
 // loaderRetryBudget — a request the server asks to wait longer than either
 // allows is not waited for, and the stop names the wait the server asked. A
@@ -40,15 +41,25 @@ func (h *Harvester) loaderAttempt(
 ) (response gatewayResponse, rateStop string, err error) {
 	attemptCtx, note := withRetryAfterNote(ctx)
 	response, err = gatewayAttempt(attemptCtx, request)
+	if loader.quotaHeaders {
+		budget.noteQuota(note.lastQuota(), h.nowClock().Now())
+	}
 	if err != nil || response.status != http.StatusTooManyRequests {
 		return response, "", err
 	}
 	raw := note.lastRetryAfter()
 	asked := "gave no Retry-After"
-	wait, given := retryAfterWait(raw, h.nowClock().Now())
-	if given {
+	now := h.nowClock().Now()
+	wait, given := retryAfterWait(raw, now)
+	switch {
+	case given:
 		asked = "asked to retry after " + retryAfterValue(raw)
-	} else {
+	case loader.quotaHeaders && budget.quota != nil && budget.quota.resetAt.After(now):
+		// No Retry-After, but the quota's reset (Reddit's 429): the wait
+		// the site asks is until then.
+		asked = "reported its request quota resets in " + budget.quota.resetText(now)
+		wait = budget.quota.resetIn(now) + loaderQuotaSlack
+	default:
 		wait = loaderRetryDefault
 	}
 	wait = max(wait, budget.pace)
@@ -78,6 +89,9 @@ func (h *Harvester) loaderAttempt(
 	budget.requests++
 	attemptCtx, note = withRetryAfterNote(ctx)
 	response, err = gatewayAttempt(attemptCtx, request)
+	if loader.quotaHeaders {
+		budget.noteQuota(note.lastQuota(), h.nowClock().Now())
+	}
 	if err != nil || response.status != http.StatusTooManyRequests {
 		return response, "", err
 	}

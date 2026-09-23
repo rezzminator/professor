@@ -25,6 +25,10 @@ type retryAfterNote struct {
 	// raw is the header as the server sent it, for a caller that waits it
 	// out (loader_retry.go); "" when the last rate-limit answer carried none.
 	raw string
+	// quota is the request quota the last answer reported in its
+	// x-ratelimit-* headers, whatever its status (loader_quota.go); zero
+	// when no answer of this fetch carried them.
+	quota quotaHeaders
 }
 
 func withRetryAfterNote(ctx context.Context) (context.Context, *retryAfterNote) {
@@ -32,14 +36,22 @@ func withRetryAfterNote(ctx context.Context) (context.Context, *retryAfterNote) 
 	return context.WithValue(ctx, retryAfterKey{}, note), note
 }
 
-// noteRetryAfter records a rate-limit answer's Retry-After on the fetch's note.
+// noteRetryAfter records a rate-limit answer's Retry-After on the fetch's
+// note, and any answer's reported request quota.
 func noteRetryAfter(resp *http.Response) {
-	if resp == nil || resp.Request == nil ||
-		(resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable) {
+	if resp == nil || resp.Request == nil {
 		return
 	}
 	note, ok := resp.Request.Context().Value(retryAfterKey{}).(*retryAfterNote)
 	if !ok || note == nil { // nil: a reader or archive rung (withoutRetryAfterNote)
+		return
+	}
+	if quota, reported := readQuotaHeaders(resp.Header); reported {
+		note.mu.Lock()
+		note.quota = quota
+		note.mu.Unlock()
+	}
+	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable {
 		return
 	}
 	raw := resp.Header.Get("Retry-After")
@@ -106,6 +118,13 @@ func (note *retryAfterNote) lastRetryAfter() string {
 	note.mu.Lock()
 	defer note.mu.Unlock()
 	return note.raw
+}
+
+// lastQuota is the request quota the last answer that reported one carried.
+func (note *retryAfterNote) lastQuota() quotaHeaders {
+	note.mu.Lock()
+	defer note.mu.Unlock()
+	return note.quota
 }
 
 // apply names the recorded wait on a rate-limited failure.

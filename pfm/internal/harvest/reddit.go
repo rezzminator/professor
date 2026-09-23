@@ -39,7 +39,9 @@ import (
 // comments; the old-Reddit morechildren batch API asks for a login, the JSON
 // API refuses), so a thread of a few thousand comments needs several hundred.
 // At the kept loaderPace plus Reddit's answer time (about 1.3 s a request)
-// the cap bounds one fetch's following at about 22 minutes.
+// the first ~150 requests take about 3 minutes; past them Reddit's quota
+// (200 requests a 10-minute window, loader_quota.go) paces the rest to about
+// 3 s each, so the cap bounds one fetch's following at about 50 minutes.
 const redditLoaderCap = 1000
 
 var redditReplyCountRe = regexp.MustCompile(`(\d[\d,]*)\s+more\s+repl`)
@@ -488,6 +490,9 @@ func redditMoreCommentsLoader(node *html.Node, base *url.URL, referer string) (p
 			"Origin":          base.Scheme + "://" + base.Host,
 			headerContentType: mediaTypeForm,
 		},
+		// Reddit answers each loader with its quota: x-ratelimit-remaining
+		// "199.0", x-ratelimit-reset in seconds, 200 requests a window.
+		quotaHeaders: true,
 		graft: func(body []byte, contentType string) error {
 			container := &html.Node{Type: html.ElementNode, Data: "div", DataAtom: atom.Div}
 			nodes, err := html.ParseFragment(bytes.NewReader(body), container)

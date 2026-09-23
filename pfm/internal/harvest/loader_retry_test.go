@@ -20,6 +20,9 @@ import (
 type rateLimitAnswer struct {
 	status     int
 	retryAfter string
+	// quota is x-ratelimit-used, -remaining and -reset as Reddit sends
+	// them; unset for none.
+	quota [3]string
 }
 
 // followRateLimited follows one loader per path on api.example.test, in
@@ -51,6 +54,11 @@ func followRateLimited(
 		if answer.retryAfter != "" {
 			reply.Header.Set("Retry-After", answer.retryAfter)
 		}
+		if answer.quota[1] != "" {
+			reply.Header.Set("X-Ratelimit-Used", answer.quota[0])
+			reply.Header.Set("X-Ratelimit-Remaining", answer.quota[1])
+			reply.Header.Set("X-Ratelimit-Reset", answer.quota[2])
+		}
 		return reply, nil
 	})
 	h := mustNew(t, Options{
@@ -69,8 +77,9 @@ func followRateLimited(
 				if !gone[path] {
 					left = append(left, pageLoader{
 						key: path, label: path, method: http.MethodGet, target: "https://" + host + path,
-						graft: func([]byte, string) error { gone[path] = true; return nil },
-						drop:  func() { gone[path] = true },
+						quotaHeaders: true,
+						graft:        func([]byte, string) error { gone[path] = true; return nil },
+						drop:         func() { gone[path] = true },
 					})
 				}
 			}

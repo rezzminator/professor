@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"net/url"
 	"strings"
 
@@ -29,8 +28,8 @@ import (
 // content HTML becomes Markdown; the thread renders as a tree (social_thread.go)
 // and reconciles each loaded post's stated replies against the replies loaded.
 // An instance serves an unauthenticated reader a bounded context (60
-// descendants on current releases) and never a reply that is not public:
-// what it did not serve is named.
+// descendants on current releases) and never a reply that is not public;
+// mastodon_replies.go reaches past the cap, and what no answer held is named.
 
 const (
 	mastodonAnswerTag  = "harvester-mastodon-answer"
@@ -76,9 +75,13 @@ func isMastodon(doc *html.Node) bool {
 }
 
 // mastodonStatusID reads a status address: /@<account>/<id> (the account may
-// name a remote instance) or /users/<name>/statuses/<id>.
+// name a remote instance), /users/<name>/statuses/<id>, or the uri form of
+// accounts created on current releases, /ap/users/<account id>/statuses/<id>.
 func mastodonStatusID(path string) (string, bool) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) == 5 && parts[0] == "ap" {
+		parts = parts[1:]
+	}
 	var id string
 	switch {
 	case len(parts) == 2 && strings.HasPrefix(parts[0], "@") && len(parts[0]) > 1:
@@ -96,10 +99,17 @@ func mastodonStatusID(path string) (string, bool) {
 
 // mastodonPage is what a status page holds of its API answers.
 type mastodonPage struct {
-	origin  string
-	id      string
-	status  *mastodonStatus
-	context *mastodonContext
+	origin string
+	id     string
+	status *mastodonStatus
+	// contexts are the kept context answers by the id of their status.
+	contexts map[string]*mastodonContext
+	// found are the replies the answers hold, in answer order (a reply may
+	// recur: a context of a reply repeats part of its parent's).
+	found []mastodonStatus
+	// pages are the kept replies collection pages by their address.
+	pages   map[string]apRepliesPage
+	kept    map[string]bool
 	dropped map[string]bool
 }
 
@@ -108,12 +118,18 @@ func mastodonPageOf(doc *html.Node, page *url.URL) (mastodonPage, bool) {
 	if !ok || !isMastodon(doc) || (page.Scheme != schemeHTTPS && page.Scheme != schemeHTTP) {
 		return mastodonPage{}, false
 	}
-	state := mastodonPage{origin: page.Scheme + "://" + page.Host, id: id, dropped: map[string]bool{}}
+	state := mastodonPage{
+		origin: page.Scheme + "://" + page.Host, id: id, contexts: map[string]*mastodonContext{},
+		pages: map[string]apRepliesPage{}, kept: map[string]bool{}, dropped: map[string]bool{},
+	}
+	statusesAPI := mastodonKey(state.origin + "/api/v1/statuses/")
 	for _, node := range keptAnswers(doc, mastodonAnswerTag) {
+		key := nodeAttr(node, "key")
 		if nodeAttr(node, "dropped") != "" {
-			state.dropped[nodeAttr(node, "key")] = true
+			state.dropped[key] = true
 			continue
 		}
+		state.kept[key] = true
 		body := []byte(rawText(node))
 		var err error
 		switch kind := nodeAttr(node, "kind"); kind {
@@ -125,7 +141,22 @@ func mastodonPageOf(doc *html.Node, page *url.URL) (mastodonPage, bool) {
 		case mastodonKindCtx:
 			var answer mastodonContext
 			if err = json.Unmarshal(body, &answer); err == nil {
-				state.context = &answer
+				subject := strings.TrimSuffix(strings.TrimPrefix(key, statusesAPI), "/context")
+				state.contexts[subject] = &answer
+				state.found = append(state.found, answer.Descendants...)
+			}
+		case mastodonKindReply:
+			var reply mastodonStatus
+			if err = json.Unmarshal(body, &reply); err == nil {
+				state.found = append(state.found, reply)
+			}
+		case mastodonKindReplies:
+			var answer apRepliesPage
+			if err = json.Unmarshal(body, &answer); err == nil {
+				state.pages[strings.TrimPrefix(key, mastodonKey(""))] = answer
+				if first, embedded := answer.firstPage(); embedded != nil {
+					state.pages[first] = *embedded
+				}
 			}
 		}
 		if err != nil {
@@ -147,71 +178,58 @@ func (state mastodonPage) target(kind string) string {
 func mastodonKey(target string) string { return "mastodon-api " + target }
 
 // mastodonLoaders names the API answers the status page still lacks: its
-// record, then its context.
+// record, then its context, then what reaches past the context's cap
+// (mastodon_replies.go).
 func mastodonLoaders(doc *html.Node, page *url.URL) []pageLoader {
 	state, ok := mastodonPageOf(doc, page)
 	if !ok {
 		return nil
 	}
-	var loaders []pageLoader
-	for _, want := range []struct {
-		kind, label string
-		kept        bool
-	}{
-		{mastodonKindStatus, "the status's API record", state.status != nil},
-		{mastodonKindCtx, "the status's context (its replies)", state.context != nil},
-	} {
-		target := state.target(want.kind)
-		key := mastodonKey(target)
-		if want.kind == mastodonKindCtx && state.status == nil {
-			// The context of a status whose record never proved it is not asked.
-			break
-		}
-		if want.kept || state.dropped[key] {
-			continue
-		}
-		kind := want.kind
-		loaders = append(loaders, pageLoader{
-			key:     key,
-			label:   want.label,
-			method:  http.MethodGet,
-			target:  target,
-			headers: map[string]string{headerAccept: mediaTypeJSON},
-			graft: func(body []byte, contentType string) error {
-				if err := state.check(kind, body, contentType); err != nil {
-					return err
-				}
-				keepAnswer(doc, mastodonAnswerTag, key, kind, 0, body)
-				return nil
-			},
-			drop: func() { keepAnswer(doc, mastodonAnswerTag, key, kind, 0, nil) },
-		})
+	root := &mastodonStatus{ID: state.id}
+	var loader pageLoader
+	switch {
+	case state.status == nil:
+		loader = state.loader(doc, mastodonKindStatus, root, state.target(mastodonKindStatus),
+			"the status's API record", mediaTypeJSON)
+	case state.contexts[state.id] == nil:
+		loader = state.loader(doc, mastodonKindCtx, root, state.target(mastodonKindCtx),
+			"the status's context (its replies)", mediaTypeJSON)
+	default:
+		return state.replyLoaders(doc)
 	}
-	return loaders
-}
-
-// check proves an API answer is this status's record or context.
-func (state mastodonPage) check(kind string, body []byte, contentType string) error {
-	notJSON := fmt.Errorf("answered by a %s body that is not the API's JSON for status %s",
-		discourseContentType(contentType), state.id)
-	if kind == mastodonKindStatus {
-		var status mastodonStatus
-		if err := json.Unmarshal(body, &status); err != nil || status.ID == "" {
-			return notJSON
-		}
-		if status.ID != state.id {
-			return fmt.Errorf("answered by the record of status %s, not %s", status.ID, state.id)
-		}
-		if status.RepliesCount == nil {
-			return fmt.Errorf("answered by a record of status %s stating no reply count", status.ID)
-		}
+	if state.dropped[loader.key] {
+		// The context of a status whose record never proved it is not asked,
+		// and a status whose context failed reaches no further.
 		return nil
 	}
+	return []pageLoader{loader}
+}
+
+// checkStatus proves an API answer is the record of status id.
+func checkStatus(id string, body []byte, contentType string) error {
+	var status mastodonStatus
+	if err := json.Unmarshal(body, &status); err != nil || status.ID == "" {
+		return fmt.Errorf("answered by a %s body that is not the API's JSON for status %s",
+			discourseContentType(contentType), id)
+	}
+	if status.ID != id {
+		return fmt.Errorf("answered by the record of status %s, not %s", status.ID, id)
+	}
+	if status.RepliesCount == nil {
+		return fmt.Errorf("answered by a record of status %s stating no reply count", status.ID)
+	}
+	return nil
+}
+
+// checkContext proves an API answer is the context of status id: every
+// descendant answers id or another descendant.
+func checkContext(id string, body []byte, contentType string) error {
 	var answer mastodonContext
 	if err := json.Unmarshal(body, &answer); err != nil || !bytesHasKey(body, "descendants") {
-		return notJSON
+		return fmt.Errorf("answered by a %s body that is not the API's JSON for status %s",
+			discourseContentType(contentType), id)
 	}
-	known := map[string]bool{state.id: true}
+	known := map[string]bool{id: true}
 	for index := range answer.Descendants {
 		known[answer.Descendants[index].ID] = true
 	}
@@ -282,24 +300,27 @@ func extractMastodonStatus(doc *html.Node, page *url.URL) (siteExtraction, bool)
 	thread := socialThread{
 		kind: "mastodon status",
 		post: mastodonPost(state.status),
-		notServed: "the instance's public context answer did not hold them (it serves an unauthenticated " +
-			"reader a bounded number of descendants, and no reply that is not public)",
+		notServed: "neither the instance's public context answers nor its replies collections held them " +
+			"(it serves an unauthenticated reader a bounded number of descendants per context, no reply that " +
+			"is not public, and a remote reply's own replies only as far as it knows them)",
 	}
 	name := thread.post.author
 	if state.status.Account != nil && state.status.Account.DisplayName != "" {
 		name = state.status.Account.DisplayName + " (" + thread.post.author + ")"
 	}
 	thread.title = name + " on " + page.Hostname()
-	if state.context == nil {
+	if own := state.contexts[state.id]; own == nil {
 		thread.gaps = append(thread.gaps, "the status's context API answer was not loaded")
 	} else {
 		thread.repliesRead = true
-		for index := range state.context.Ancestors {
-			thread.ancestors = append(thread.ancestors, mastodonPost(&state.context.Ancestors[index]))
+		for index := range own.Ancestors {
+			thread.ancestors = append(thread.ancestors, mastodonPost(&own.Ancestors[index]))
 		}
-		for index := range state.context.Descendants {
-			thread.replies = append(thread.replies, mastodonPost(&state.context.Descendants[index]))
+		tree := state.tree()
+		for _, reply := range tree.replies {
+			thread.replies = append(thread.replies, mastodonPost(reply))
 		}
+		thread.replies = append(thread.replies, state.remoteReplies(tree)...)
 	}
 	markdown, partial := thread.render()
 	return siteExtraction{markdown: markdown, partial: partial, apiRecord: true}, true

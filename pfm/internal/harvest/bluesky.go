@@ -310,7 +310,8 @@ func extractBlueskyPost(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 		repliesRead: true,
 		notServed: "the public AppView's thread did not hold them (it leaves out for a logged-out reader the " +
 			"replies deleted, hidden by the author's thread gate or by moderation, and those of accounts that " +
-			"limit logged-out viewing)",
+			"limit logged-out viewing, labelled !no-unauthenticated; its unspecced getPostThreadV2 and " +
+			"getPostThreadOtherV2 serve a logged-out reader no more)",
 	}
 	name := thread.post.author
 	if root.Post.Author != nil && root.Post.Author.DisplayName != "" {

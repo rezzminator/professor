@@ -1,0 +1,24 @@
+{
+ "id": "117117378316307585",
+ "created_at": "2026-08-18T16:09:31.512Z",
+ "in_reply_to_id": "117117221397911074",
+ "sensitive": false,
+ "spoiler_text": "",
+ "visibility": "public",
+ "language": "en",
+ "replies_count": 1,
+ "reblogs_count": 0,
+ "favourites_count": 2,
+ "edited_at": null,
+ "media_attachments": [],
+ "uri": "https://social.example/@user-11/117117378316307585",
+ "url": "https://social.example/@user-11/117117378316307585",
+ "content": "<p>A local reply the context did not serve.</p>",
+ "account": {
+  "id": "1011",
+  "username": "user-11",
+  "acct": "user-11",
+  "display_name": "User 11",
+  "url": "https://social.example/@user-11"
+ }
+}

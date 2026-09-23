@@ -52,8 +52,12 @@ type socialSite struct {
 func (site *socialSite) roundTrip(request *http.Request) (*http.Response, error) {
 	key := request.URL.Host + request.URL.RequestURI()
 	contentType := "text/html; charset=utf-8"
-	if site.apiHosts[request.URL.Host] || strings.HasPrefix(request.URL.Path, "/api/") {
+	activity := strings.HasSuffix(request.URL.Path, "/replies")
+	if site.apiHosts[request.URL.Host] || strings.HasPrefix(request.URL.Path, "/api/") || activity {
 		contentType = "application/json; charset=utf-8"
+		if activity {
+			contentType = "application/activity+json; charset=utf-8"
+		}
 		site.mu.Lock()
 		site.requests = append(site.requests, key)
 		site.headers = append(site.headers, request.Header.Clone())
@@ -249,5 +253,25 @@ func TestMastodonOtherPagesTakeTheGenericPath(t *testing.T) {
 	}
 	if len(site.requests) != 0 {
 		t.Fatalf("a page that is not a Mastodon status requested %v", site.requests)
+	}
+}
+
+// TestMastodonStatusIDReadsEveryURIForm: a status's id is read from each form
+// an instance names it by — the web address, the classic uri and the uri of
+// an account created on a current release (the form a replies collection
+// lists such an account's reply by) — and nothing else.
+func TestMastodonStatusIDReadsEveryURIForm(t *testing.T) {
+	accounts := "users" // the uri segment, spelled apart from the placeholder names
+	for path, want := range map[string]string{
+		"/@user-0/117117221397911074":                                           "117117221397911074",
+		"/" + accounts + "/user-0/statuses/117117221397911074":                  "117117221397911074",
+		"/ap/" + accounts + "/117112258603022665/statuses/117117467155130968":   "117117467155130968",
+		"/ap/" + accounts + "/117112258603022665/statuses/117117467155130968/x": "",
+		"/ap/" + accounts + "/117112258603022665/replies/117117467155130968":    "",
+		"/@user-0": "",
+	} {
+		if got, _ := mastodonStatusID(path); got != want {
+			t.Errorf("mastodonStatusID(%q) = %q, want %q", path, got, want)
+		}
 	}
 }

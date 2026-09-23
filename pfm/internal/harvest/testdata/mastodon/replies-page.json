@@ -1,0 +1,25 @@
+{
+ "@context": "https://www.w3.org/ns/activitystreams",
+ "id": "https://social.example/@user-0/117117221397911074/replies?only_other_accounts=true&page=true",
+ "type": "CollectionPage",
+ "next": "https://social.example/@user-0/117117221397911074/replies?min_id=117117378316307585&only_other_accounts=true&page=true",
+ "partOf": "https://social.example/@user-0/117117221397911074/replies",
+ "items": [
+  "https://remote.example/@user-1/117117243837071506",
+  {
+   "id": "https://social.example/@user-11/117117378316307585",
+   "type": "Note",
+   "summary": null,
+   "inReplyTo": "https://social.example/@user-0/117117221397911074",
+   "published": "2026-08-18T16:09:31Z",
+   "url": "https://social.example/@user-11/117117378316307585",
+   "attributedTo": "https://social.example/@user-11",
+   "to": ["https://www.w3.org/ns/activitystreams#Public"],
+   "sensitive": false,
+   "content": "<p>A local reply the context did not serve.</p>",
+   "attachment": [],
+   "tag": []
+  },
+  "https://remote.example/@user-12/117117390641172839"
+ ]
+}

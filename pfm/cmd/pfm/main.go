@@ -47,6 +47,7 @@ const (
 	doctorCommand     = "doctor"
 	checkAction       = "check"
 	statuslineCommand = "statusline"
+	callmeterCommand  = "callmeter"
 )
 
 var version = config.DevelopmentVersion
@@ -57,8 +58,7 @@ var topLevelSubcommands = []string{
 	configCommand, "reap", archiveCommand, "heal", "name-sync", statuslineCommand,
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
-	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
-	callmeterCommand,
+	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log", callmeterCommand,
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.

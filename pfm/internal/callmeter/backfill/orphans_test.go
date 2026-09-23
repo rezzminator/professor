@@ -17,7 +17,10 @@ var orphanNow = time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 // seedPending upserts one pending request with one call carrying it, agentID
 // and agentType as given (agentType "" leaves the column NULL), ts age before
 // orphanNow.
-func seedPending(t *testing.T, store *callmeter.Store, requestID, sessionID, agentID, agentType string, age time.Duration) {
+func seedPending(
+	t *testing.T, store *callmeter.Store, requestID, sessionID, agentID, agentType string,
+	age time.Duration,
+) {
 	t.Helper()
 	ctx := context.Background()
 	ts := orphanNow.Add(-age).UnixMilli()

@@ -95,9 +95,14 @@ type pageLoader struct {
 	// (a site that refuses with 403 and says so in its body, not with 429);
 	// such an answer ends the following like a 429.
 	rateLimited func(status int, body []byte) bool
-	// backoff, when set, reads from a followed answer how long the site asks
-	// the next request to wait; a wait longer than the pace replaces it.
+	// backoff, when set, reads from a followed answer — kept or refused — how
+	// long the site asks the next request to wait; a wait longer than the pace
+	// replaces it.
 	backoff func(body []byte) time.Duration
+	// quotaSpent, when set, reads from a followed answer that the site's
+	// request quota is spent: the answer is still taken, and the following
+	// ends, named, before another request.
+	quotaSpent func(body []byte) bool
 }
 
 // loaderBudget is one fetch's loader following, shared by every conversion of
@@ -282,6 +287,9 @@ func (h *Harvester) followLoader(
 	extractor siteExtractor,
 	budget *loaderBudget,
 ) bool {
+	if budget.stopped != "" {
+		return false
+	}
 	budget.attempted[loader.key] = true
 	target, err := url.Parse(loader.target)
 	if err != nil || !extractor.mayRequest(page, target) {
@@ -338,6 +346,14 @@ func (h *Harvester) followLoader(
 		offSite := "answered from off the site (" + safeURL(response.finalURL) + ")"
 		return budget.fail(ctx, loader, offSite, offSite)
 	}
+	if loader.backoff != nil {
+		budget.hold = loader.backoff(response.body)
+	}
+	if loader.quotaSpent != nil && loader.quotaSpent(response.body) {
+		// Deferred so the answer is taken first; the guard at the top of
+		// followLoader then refuses every later request of this fetch.
+		defer budget.stopAtQuota()
+	}
 	switch {
 	case response.status == http.StatusTooManyRequests:
 		budget.stopped = fmt.Sprintf("the site answered HTTP 429 (rate limited) after %d request(s); not retried",
@@ -372,9 +388,6 @@ func (h *Harvester) followLoader(
 	}
 	budget.followed[loader.key] = true
 	budget.consecutive = 0
-	if loader.backoff != nil {
-		budget.hold = loader.backoff(response.body)
-	}
 	if budget.replayBytes+len(response.body) > budget.replayLimit {
 		obs.Logger(ctx).Warn("harvest: a followed loader's answer is past the replay bound; a later conversion "+
 			"names it a gap", "kind", loader.label, "target", safeURL(loader.target),
@@ -406,6 +419,17 @@ func (budget *loaderBudget) fail(ctx context.Context, loader pageLoader, detail,
 		return false
 	}
 	return true
+}
+
+// stopAtQuota ends the following after an answer reporting the site's request
+// quota spent — a stop no other rung may work around — unless an earlier
+// reason already ended it.
+func (budget *loaderBudget) stopAtQuota() {
+	if budget.stopped == "" {
+		budget.stopped = fmt.Sprintf("the site reported its request quota spent after %d request(s); "+
+			"not requested again", budget.requests)
+	}
+	budget.policyStop = true
 }
 
 // spliceInPlace puts nodes where at is, in order, and removes at. Each node is

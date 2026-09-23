@@ -276,7 +276,7 @@ func TestGitHubPullRequestLoadsCommentsReviewCommentsAndReviews(t *testing.T) {
 // the artifact does not hold is named and flags it partial — a comment page
 // refused, the API's rate limit (which ends the following, never retried,
 // and repeats nothing of the API's message), stated comments the API did not
-// list, a page of another thread's comments, and a record never loaded.
+// list, and a page of another thread's comments.
 func TestGitHubUnloadedCommentsFlagThePartial(t *testing.T) {
 	page2 := ghIssueAPI + "/comments?per_page=100&page=2"
 	for _, tc := range []struct {
@@ -305,18 +305,6 @@ func TestGitHubUnloadedCommentsFlagThePartial(t *testing.T) {
 				"the site answered HTTP 403 (rate limit exhausted) after 3 request(s); not retried",
 			},
 			"",
-		},
-		{
-			"the rate limit before the record",
-			func(site *ghSite) {
-				site.status = map[string]int{ghIssueAPI: http.StatusForbidden}
-				site.bodies = map[string]string{ghIssueAPI: ghRateLimited}
-			},
-			[]string{
-				"github issue: no comments loaded, the stated count not read",
-				"the issue's API record was not loaded", "rate limit exhausted",
-			},
-			ghIssueAPI + "/comments?per_page=100&page=1",
 		},
 		{
 			"stated comments not listed",
@@ -381,5 +369,41 @@ func TestGitHubNonThreadPagesTakeTheGenericPath(t *testing.T) {
 		if _, name, ok := extractForSite(tc.source, doc); ok {
 			t.Fatalf("%s was claimed by %q", tc.source, name)
 		}
+	}
+}
+
+// TestGitHubRecordNotLoadedServesThePage: when the rate limit refuses the
+// thread's own API record, the extractor does not claim the page with an
+// empty stub: the page GitHub served is stored through the generic path, the
+// record's gap and the rate limit named in its partial marker, and no comment
+// page is requested after the limit.
+func TestGitHubRecordNotLoadedServesThePage(t *testing.T) {
+	site := ghIssueSite(t)
+	site.status = map[string]int{ghIssueAPI: http.StatusForbidden}
+	site.bodies = map[string]string{ghIssueAPI: ghRateLimited}
+	h, _ := site.harvester(t)
+	served := "SERVED ISSUE PAGE " + strings.Repeat("a comment the page itself renders ", 30)
+	h.options.Converter = &browserSpyConverter{
+		convertFn: func(context.Context, string, string, []byte) (string, error) {
+			return served, nil
+		},
+	}
+	result := h.FetchWithOptions(context.Background(), ghIssueURL, FetchOptions{Refresh: true})
+	if result.Error != "" || result.Method != rungDirect {
+		t.Fatalf("the served page was not stored: method=%q error=%q", result.Method, result.Error)
+	}
+	if !strings.Contains(result.Content, "SERVED ISSUE PAGE") || strings.Contains(result.Content, "nothing of the") {
+		t.Fatalf("the artifact is not the served page:\n%.800s", result.Content)
+	}
+	for _, want := range []string{"the issue's API record was not loaded", "rate limit exhausted"} {
+		if !strings.Contains(result.Partial, want) {
+			t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
+		}
+	}
+	if strings.Contains(result.Partial, "203.0.113.7") {
+		t.Fatalf("the artifact repeats the API's message: %q", result.Partial)
+	}
+	if strings.Join(site.requests, ",") != ghIssueAPI {
+		t.Fatalf("API requests %v, want the record alone", site.requests)
 	}
 }

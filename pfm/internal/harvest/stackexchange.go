@@ -41,8 +41,12 @@ import (
 // harvester-stackexchange-answer element, so a later conversion replays it.
 // The API allows 300 requests a day per address without a key, answers its
 // exhaustion with HTTP 400 and error_id 502 (throttle_violation) — which ends
-// the following, named, never retried — and may ask for a back-off, which the
-// following honours (loaders.go). The extractor renders the question and its
+// the following, named, never retried — reports the quota left on every
+// answer (quota_remaining: at 0 the following ends, named, before another
+// request), and may ask for a back-off, which the following honours
+// (loaders.go). A question whose own record never loaded is not claimed: the
+// walled page goes on down the ladder to the browser rung, the record's gap
+// named in whatever it renders. The extractor renders the question and its
 // answers by score, and reconciles what it loaded against the stated counts:
 // an answer page not loaded, a stated answer or comment the API did not list,
 // and a count not read each flag the artifact partial and are named.
@@ -53,8 +57,8 @@ const (
 	seAPI      = "https://api.stackexchange.com/2.3"
 	sePageSize = 100
 	// seFilter is the API filter (created once by /filters/create, immutable)
-	// naming the fields read: the wrapper's items, has_more, page, backoff
-	// and error fields; a question's id, title, link, body, score, date,
+	// naming the fields read: the wrapper's items, has_more, page, backoff,
+	// quota and error fields; a question's id, title, link, body, score, date,
 	// owner, tags, closed reason, accepted answer, answer and comment counts
 	// and comments; an answer's id, question id, body, score, date, owner,
 	// accepted mark, comment count and comments; a comment's id, post id,
@@ -180,14 +184,16 @@ type seQuestion struct {
 
 // seWrapper is the API's common answer: its items and, on an error, the
 // error's id and name; backoff asks the next request to wait that many
-// seconds.
+// seconds; quota_remaining is the requests the address has left today (nil
+// when the answer states none).
 type seWrapper struct {
-	Items     json.RawMessage `json:"items"`
-	HasMore   bool            `json:"has_more"`
-	Page      int             `json:"page"`
-	Backoff   int             `json:"backoff"`
-	ErrorID   int             `json:"error_id"`
-	ErrorName string          `json:"error_name"`
+	Items          json.RawMessage `json:"items"`
+	HasMore        bool            `json:"has_more"`
+	Page           int             `json:"page"`
+	Backoff        int             `json:"backoff"`
+	QuotaRemaining *int            `json:"quota_remaining"`
+	ErrorID        int             `json:"error_id"`
+	ErrorName      string          `json:"error_name"`
 }
 
 // seAnswersPage is one kept page of the question's answers.
@@ -314,6 +320,13 @@ func seBackoff(body []byte) time.Duration {
 	return time.Duration(wrapper.Backoff) * time.Second
 }
 
+// seQuotaSpent reads an answer stating the address's daily quota spent
+// (quota_remaining 0); an answer stating no quota is not spent.
+func seQuotaSpent(body []byte) bool {
+	var wrapper seWrapper
+	return json.Unmarshal(body, &wrapper) == nil && wrapper.QuotaRemaining != nil && *wrapper.QuotaRemaining <= 0
+}
+
 // stackExchangeLoader requests one API answer and keeps it in the page once
 // it proves itself this question's.
 func stackExchangeLoader(doc *html.Node, thread seThread, want seWanted) pageLoader {
@@ -326,6 +339,7 @@ func stackExchangeLoader(doc *html.Node, thread seThread, want seWanted) pageLoa
 		headers:     map[string]string{headerAccept: "application/json"},
 		rateLimited: seRateLimited,
 		backoff:     seBackoff,
+		quotaSpent:  seQuotaSpent,
 		graft: func(body []byte, contentType string) error {
 			if err := thread.check(want, body, contentType); err != nil {
 				return err
@@ -453,19 +467,15 @@ func extractStackExchangeQuestion(doc *html.Node, page *url.URL) (siteExtraction
 	if !ok {
 		return siteExtraction{}, false
 	}
-	var out strings.Builder
 	question := thread.question
 	if question == nil {
-		gap := "the question's API record was not loaded (its body, answers, comments and stated counts not read)"
-		out.WriteString("# Stack Exchange question #" + strconv.FormatInt(thread.ref.id, 10) + "\n\n")
-		out.WriteString("**Question:** " + thread.ref.questionURL() + "  \n")
-		out.WriteString("**Answers:** count not read · 0 loaded · gaps: " + gap + "\n\n")
-		out.WriteString("*The question's API record was not loaded; nothing of the question is rendered.*\n")
-		return siteExtraction{
-			markdown: out.String(),
-			partial:  "stackexchange question: no answers loaded, the stated counts not read — " + gap,
-		}, true
+		// Nothing of the question is proved without its record: the page goes
+		// on down the ladder (a wall is refused, the browser rung may pass it),
+		// this gap named in whatever path renders it.
+		return siteExtraction{unrendered: "stackexchange question: the question's API record was not loaded " +
+			"(its answers, comments and stated counts not read from the API; the page is stored as rendered)"}, false
 	}
+	var out strings.Builder
 	base, err := url.Parse(thread.ref.questionURL())
 	if err != nil {
 		base = page
@@ -508,13 +518,18 @@ func extractStackExchangeQuestion(doc *html.Node, page *url.URL) (siteExtraction
 	if gap := seCommentGap("the question", *question.CommentCount, len(question.Comments)); gap != "" {
 		gaps = append(gaps, gap)
 	}
+	// The stated and loaded totals cover the same posts: an answer whose count
+	// was not read is left out of both, its comments counted apart.
+	uncountedPosts, uncountedComments := 0, 0
 	for _, answer := range answers {
 		post := "answer #" + strconv.FormatInt(answer.AnswerID, 10)
-		commentsLoaded += len(answer.Comments)
 		if answer.CommentCount == nil {
 			gaps = append(gaps, post+": the stated comment count was not read")
+			uncountedPosts++
+			uncountedComments += len(answer.Comments)
 			continue
 		}
+		commentsLoaded += len(answer.Comments)
 		commentsStated += *answer.CommentCount
 		if gap := seCommentGap(post, *answer.CommentCount, len(answer.Comments)); gap != "" {
 			gaps = append(gaps, gap)
@@ -522,6 +537,10 @@ func extractStackExchangeQuestion(doc *html.Node, page *url.URL) (siteExtraction
 	}
 	countLine := "**Answers:** " + answerLine + " · **Comments:** " +
 		fmt.Sprintf("%d stated · %d loaded, on the question and the answers loaded", commentsStated, commentsLoaded)
+	if uncountedPosts > 0 {
+		countLine += fmt.Sprintf(" (and %d loaded on %d answer(s) whose count was not read)",
+			uncountedComments, uncountedPosts)
+	}
 	if len(gaps) > 0 {
 		countLine += " · gaps: " + strings.Join(gaps, "; ")
 	}
@@ -585,5 +604,5 @@ func extractStackExchangeQuestion(doc *html.Node, page *url.URL) (siteExtraction
 		partial = fmt.Sprintf("stackexchange question: %d of %d answers, %d of %d stated comments loaded — %s",
 			len(answers), stated, commentsLoaded, commentsStated, strings.Join(gaps, "; "))
 	}
-	return siteExtraction{markdown: out.String(), partial: partial}, true
+	return siteExtraction{markdown: out.String(), partial: partial, apiRecord: true}, true
 }

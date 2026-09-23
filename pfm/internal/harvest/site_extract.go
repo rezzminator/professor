@@ -29,11 +29,18 @@ import (
 // what the page could not supply (loaders still unexpanded and what they
 // hide); "" when the rendering is complete.
 // renderMayComplete is set when at least one gap is a loader a browser render
-// presses, so the browser rung can close it.
+// presses, so the browser rung can close it. apiRecord is set when the
+// rendering holds at least one record the site's API answered and the
+// extractor proved this thread's (honoured only for an extractor that
+// readsSiteAPI). unrendered, answered with ok false, is what an extractor
+// that knows the page but could not render it leaves out (its API record did
+// not load): the page falls through to another path, which names it.
 type siteExtraction struct {
 	markdown          string
 	partial           string
 	renderMayComplete bool
+	apiRecord         bool
+	unrendered        string
 }
 
 // unknownAuthor stands, in every extractor's rendering, for a post or comment
@@ -53,6 +60,11 @@ type siteExtractor struct {
 	loaders func(doc *html.Node, source *url.URL) []pageLoader
 	// pressLoaders: the browser rung may press this site's load-more buttons.
 	pressLoaders bool
+	// readsSiteAPI: the extractor renders the thread from its site's API, never
+	// from the page's markup, so a page it renders from an API record is
+	// content even where the site served a wall in its place (harvest.go).
+	// Every markup extractor leaves it unset and keeps the wall guard.
+	readsSiteAPI bool
 }
 
 var siteExtractors = []siteExtractor{
@@ -70,16 +82,18 @@ var siteExtractors = []siteExtractor{
 		loaders: hnLoaders,
 	},
 	{
-		name:    "github-issue",
-		hosts:   []string{githubHost},
-		extract: extractGitHubIssue,
-		loaders: githubLoaders,
+		name:         "github-issue",
+		hosts:        []string{githubHost},
+		extract:      extractGitHubIssue,
+		loaders:      githubLoaders,
+		readsSiteAPI: true,
 	},
 	{
-		name:    "stackexchange-question",
-		hosts:   stackExchangeHosts,
-		extract: extractStackExchangeQuestion,
-		loaders: stackExchangeLoaders,
+		name:         "stackexchange-question",
+		hosts:        stackExchangeHosts,
+		extract:      extractStackExchangeQuestion,
+		loaders:      stackExchangeLoaders,
+		readsSiteAPI: true,
 	},
 	{
 		name:    "discourse-topic",
@@ -185,7 +199,9 @@ func (h *Harvester) followForSite(
 }
 
 // extractForSite runs the extractor that claims the page. ok is false when no
-// extractor claims it or the page is not the shape it knows.
+// extractor claims it or the page is not the shape it knows; the extraction
+// then carries, in unrendered, what an extractor that knew the page could not
+// render. apiRecord survives only from an extractor that readsSiteAPI.
 func extractForSite(source string, doc *html.Node) (siteExtraction, string, bool) {
 	parsed, err := url.Parse(source)
 	if err != nil {
@@ -196,15 +212,19 @@ func extractForSite(source string, doc *html.Node) (siteExtraction, string, bool
 	if parsed.Host == "" {
 		return siteExtraction{}, "", false
 	}
+	unrendered := ""
 	for _, extractor := range siteExtractors {
 		if !extractor.claims(parsed, doc) {
 			continue
 		}
-		if extraction, ok := extractor.extract(doc, parsed); ok {
+		extraction, ok := extractor.extract(doc, parsed)
+		if ok {
+			extraction.apiRecord = extraction.apiRecord && extractor.readsSiteAPI
 			return extraction, extractor.name, true
 		}
+		unrendered = joinReasons(unrendered, extraction.unrendered)
 	}
-	return siteExtraction{}, "", false
+	return siteExtraction{unrendered: unrendered}, "", false
 }
 
 // keptAnswers returns the elements named tag in doc: the API answers an

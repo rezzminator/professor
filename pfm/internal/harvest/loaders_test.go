@@ -2,12 +2,16 @@ package harvest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/html"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
 )
@@ -188,5 +192,68 @@ func TestLoaderGraftFailuresAreBoundedNotRawErrorText(t *testing.T) {
 	if got := strings.Count(result.Partial, "x"); got > wantBoundedUnder {
 		t.Fatalf("the partial marker repeats %d characters of the page title, over the %d-char bound: %.400q",
 			got, wantBoundedUnder, result.Partial)
+	}
+}
+
+// TestABackoffOnAnErrorAnswerDelaysTheNextRequest: a back-off the site asks
+// for on an answer that failed is honoured like one on an answer kept — the
+// next request waits it out, not the plain pace.
+func TestABackoffOnAnErrorAnswerDelaysTheNextRequest(t *testing.T) {
+	const host = "api.example.test"
+	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.URL.Path == "/refused" {
+			return response(request, http.StatusInternalServerError, "application/json", `{"backoff": 7}`), nil
+		}
+		return response(request, http.StatusOK, "application/json", `{}`), nil
+	})
+	pacing := newPacingClock()
+	h := mustNew(t, Options{
+		CacheDir:  t.TempDir(),
+		Client:    &http.Client{Transport: site},
+		Converter: &browserSpyConverter{},
+		Clock:     pacing,
+	})
+	gone := map[string]bool{}
+	loader := func(path string) pageLoader {
+		return pageLoader{
+			key: path, label: path, method: http.MethodGet, target: "https://" + host + path,
+			graft: func([]byte, string) error { gone[path] = true; return nil },
+			drop:  func() { gone[path] = true },
+			backoff: func(body []byte) time.Duration {
+				var answer struct {
+					Backoff int `json:"backoff"`
+				}
+				if err := json.Unmarshal(body, &answer); err != nil {
+					t.Errorf("the answer is not JSON: %v", err)
+				}
+				return time.Duration(answer.Backoff) * time.Second
+			},
+		}
+	}
+	extractor := siteExtractor{
+		name:  "backoff-test",
+		hosts: []string{host},
+		loaders: func(*html.Node, *url.URL) []pageLoader {
+			var left []pageLoader
+			for _, path := range []string{"/refused", "/next"} {
+				if !gone[path] {
+					left = append(left, loader(path))
+				}
+			}
+			return left
+		},
+	}
+	doc, err := html.Parse(strings.NewReader("<html><body></body></html>"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := url.Parse("https://" + host + "/thread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.followLoaders(context.Background(), doc, page, extractor, newLoaderBudget(context.Background()))
+	want := []time.Duration{loaderPace, 7 * time.Second}
+	if fmt.Sprint(pacing.sleeps) != fmt.Sprint(want) {
+		t.Fatalf("requests waited %v, want %v", pacing.sleeps, want)
 	}
 }

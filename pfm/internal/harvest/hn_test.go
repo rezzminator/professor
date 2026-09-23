@@ -212,8 +212,9 @@ func TestHNMorePagesAreFollowedAndMerged(t *testing.T) {
 
 // TestHNUnloadedCommentsFlagThePartial: whatever the page advertises and the
 // artifact does not hold is named and flags it partial — a "More" page that
-// failed, one answered by another item's page, stated comments the page does
-// not serve, and a count the subline does not state.
+// failed, one answered by another item's page, one whose address does not
+// parse, stated comments the page does not serve, and a count the subline
+// does not state.
 func TestHNUnloadedCommentsFlagThePartial(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -248,6 +249,15 @@ func TestHNUnloadedCommentsFlagThePartial(t *testing.T) {
 			},
 			0,
 			[]string{"53 of 60 comments loaded", "7 stated comment(s) not in the page"},
+		},
+		{
+			"a \"More\" link whose address does not parse",
+			func(page string) []string {
+				first, _ := hnSplit(page, 30)
+				return []string{strings.Replace(first, `href='item?id=`, `href='%zz/item?id=`, 1)}
+			},
+			0,
+			[]string{"30 of 53 comments loaded", "1 \"More\" link(s) whose address does not parse"},
 		},
 		{
 			"no stated count",

@@ -21,12 +21,15 @@ func (h *Harvester) convertFetchedContent(ctx context.Context, kind, source stri
 }
 
 // convertedPage is what the converter learned about an HTML page beyond its
-// markdown: the per-site extractor that rendered it ("" for the generic path)
-// and whether a browser render could close a gap it flagged. Non-HTML kinds
-// carry the zero value.
+// markdown: the per-site extractor that rendered it ("" for the generic path),
+// whether a browser render could close a gap it flagged, and siteAPI — the
+// extractor reads its site's API (readsSiteAPI) and rendered the page from at
+// least one API record, so a wall the site served in its place is not what is
+// stored. Non-HTML kinds carry the zero value.
 type convertedPage struct {
 	extractor         string
 	renderMayComplete bool
+	siteAPI           bool
 }
 
 // convertFetchedDocument is convertFetchedContent that also returns the
@@ -84,7 +87,8 @@ func (h *Harvester) convertHTML(
 	}
 	lazy := lazyLoadIncomplete(doc)
 	rest := h.followForSite(ctx, source, doc, budget)
-	if extraction, extractor, ok := extractForSite(source, doc); ok {
+	extraction, extractor, ok := extractForSite(source, doc)
+	if ok {
 		// A loader still in the page is a gap whatever the extractor counts;
 		// the budget's note names why it was not loaded.
 		reason := joinReasons(extraction.partial, rest.reason())
@@ -99,17 +103,23 @@ func (h *Harvester) convertHTML(
 			// A rate limit or the request cap ends the fetch's following; a
 			// browser render pressing the same loaders would work around it.
 			renderMayComplete: extraction.renderMayComplete && (budget == nil || !budget.policyStop),
+			siteAPI:           extraction.apiRecord,
 		}, nil
 	}
 	// The generic path converts this page alone: a next page it links is
 	// named, and a browser render — the same page — cannot close that gap, so
-	// only the other reasons (lazy loading, low recall) escalate to one.
-	nextPage := ""
+	// only the other reasons (lazy loading, low recall) escalate to one. Nor
+	// can it load what an extractor that knew the page could not (its API
+	// record refused), named with why the following failed.
+	unclosed := ""
 	if parsed, parseErr := url.Parse(source); parseErr == nil {
-		nextPage = paginationContinuation(doc, parsed)
+		unclosed = paginationContinuation(doc, parsed)
+	}
+	if extraction.unrendered != "" {
+		unclosed = joinReasons(extraction.unrendered, rest.reason(), budget.note(), unclosed)
 	}
 	done := func(content, reason string) (string, convertedPage, error) {
-		return withPartial(content, joinReasons(reason, nextPage)), convertedPage{renderMayComplete: reason != ""}, nil
+		return withPartial(content, joinReasons(reason, unclosed)), convertedPage{renderMayComplete: reason != ""}, nil
 	}
 	input := body
 	if unwrapInertContainers(ctx, doc) > 0 {

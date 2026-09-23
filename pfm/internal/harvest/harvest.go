@@ -345,9 +345,9 @@ func (h *Harvester) fetchURLWithPolicy(
 		}
 		lastContentChars = contentChars(partialBody(converted))
 		binary4xxOK := status >= 400 && kind == kindPDF && strings.HasPrefix(string(body), "%PDF-")
-		// A wall is no content — unless a site extractor rendered the page's
-		// thread from the site's own API (stackexchange.go), the wall unread.
-		if len(body) == 0 || (isChallenge(body, status) && page.extractor == "") ||
+		// A wall is no content — unless an extractor that readsSiteAPI rendered
+		// the page from an API record it proved (page.siteAPI), the wall unread.
+		if len(body) == 0 || (isChallenge(body, status) && !page.siteAPI) ||
 			(status >= 400 && kind != kindHTML && kind != kindTXT && !binary4xxOK) {
 			continue
 		}

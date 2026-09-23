@@ -37,7 +37,9 @@ import (
 // conversion (the browser rung's page) replays it like any followed loader.
 // The unauthenticated API allows 60 requests an hour per address and answers
 // its exhaustion with 403 (or 429) and "rate limit" in the body: that ends
-// the following, named, never retried. The extractor then renders the thread
+// the following, named, never retried. A thread whose own record never loaded
+// is not claimed: the page GitHub served goes the generic path, the record's
+// gap named in its partial marker. The extractor otherwise renders the thread
 // in time order — comments, review comments and reviews merged — and
 // reconciles what it loaded against the stated counts: a page not loaded, a
 // stated comment the API did not list, and a count not read each flag the
@@ -530,26 +532,15 @@ func extractGitHubIssue(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 	if thread.item.pull {
 		noun = "pull request"
 	}
-	var gaps []string
-	var out strings.Builder
 	issue := thread.issue
 	if issue == nil {
-		gaps = append(
-			gaps,
-			"the "+noun+"'s API record was not loaded (its title, body and stated comment count not read)",
-		)
-		out.WriteString("# " + pageTitle(doc) + "\n\n")
-		out.WriteString("**Thread:** " + thread.item.threadURL() + "  \n")
-		out.WriteString("**Comments:** count not read · 0 loaded · gaps: " + strings.Join(gaps, "; ") + "\n\n")
-		out.WriteString("*The " + noun + "'s API record was not loaded; nothing of the thread is rendered.*\n")
-		return siteExtraction{
-			markdown: out.String(),
-			partial: "github " + noun + ": no comments loaded, the stated count not read — " + strings.Join(
-				gaps,
-				"; ",
-			),
-		}, true
+		// Nothing of the thread is proved without its record: the page GitHub
+		// served goes the generic path, this gap named in its partial marker.
+		return siteExtraction{unrendered: "github " + noun + ": the " + noun + "'s API record was not loaded " +
+			"(its comments not read from the API; the page is stored as GitHub served it)"}, false
 	}
+	var gaps []string
+	var out strings.Builder
 	if issue.PullRequest != nil {
 		noun = "pull request"
 	}
@@ -685,5 +676,5 @@ func extractGitHubIssue(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 		partial = fmt.Sprintf("github %s: %d of %d comments loaded — %s", noun, len(comments), *issue.Comments,
 			strings.Join(gaps, "; "))
 	}
-	return siteExtraction{markdown: out.String(), partial: partial}, true
+	return siteExtraction{markdown: out.String(), partial: partial, apiRecord: true}, true
 }

@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -12,6 +13,8 @@ import (
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 // The Hacker News thread extractor. An item page (news.ycombinator.com/
@@ -30,8 +33,9 @@ import (
 // page's answer is merged in by comment id — only once it proves itself the
 // same story — its own "More" link replacing the one it was reached by. The
 // extractor then reconciles the comments it rendered against the stated
-// count: a "More" link left unfollowed, a stated comment the page did not
-// serve, and a count not read each flag the artifact partial and are named.
+// count: a "More" link left unfollowed or whose address does not parse, a
+// stated comment the page did not serve, and a count not read each flag the
+// artifact partial and are named.
 
 const hnHost = "news.ycombinator.com"
 
@@ -111,16 +115,23 @@ func hnRows(tree *html.Node) []*html.Node {
 }
 
 // hnMoreLinks returns the "More" links of doc that lead to another page of
-// the thread (item?id=<id>&p=N), each with its target resolved against page.
-func hnMoreLinks(doc *html.Node, page *url.URL, id string) ([]*html.Node, []*url.URL) {
+// the thread (item?id=<id>&p=N), each with its target resolved against page,
+// and unreadable — the "More" links whose address does not parse (logged), a
+// gap no loader can close.
+func hnMoreLinks(doc *html.Node, page *url.URL, id string) ([]*html.Node, []*url.URL, int) {
 	var nodes []*html.Node
 	var targets []*url.URL
+	unreadable := 0
 	for _, node := range relElements(doc, relNext) {
 		if node.DataAtom != atom.A || !hasClass(node, "morelink") {
 			continue
 		}
-		parsed, err := url.Parse(strings.TrimSpace(nodeAttr(node, "href")))
+		href := strings.TrimSpace(nodeAttr(node, "href"))
+		parsed, err := url.Parse(href)
 		if err != nil {
+			obs.Logger(context.Background()).Warn("harvest: a Hacker News \"More\" link's address does not parse; "+
+				"the comments past it are not loaded", "href", logSource(href), obs.FieldErr, err.Error())
+			unreadable++
 			continue
 		}
 		target := page.ResolveReference(parsed)
@@ -131,7 +142,7 @@ func hnMoreLinks(doc *html.Node, page *url.URL, id string) ([]*html.Node, []*url
 		nodes = append(nodes, node)
 		targets = append(targets, target)
 	}
-	return nodes, targets
+	return nodes, targets, unreadable
 }
 
 // hnPageLabel names a thread page to a reader: "page 2".
@@ -149,7 +160,7 @@ func hnLoaders(doc *html.Node, page *url.URL) []pageLoader {
 	if !ok {
 		return nil
 	}
-	_, targets := hnMoreLinks(doc, page, thread.id)
+	_, targets, _ := hnMoreLinks(doc, page, thread.id)
 	loaders := make([]pageLoader, 0, len(targets))
 	for _, target := range targets {
 		loaders = append(loaders, hnPageLoader(doc, page, thread, target))
@@ -163,7 +174,7 @@ func hnLoaders(doc *html.Node, page *url.URL) []pageLoader {
 func hnPageLoader(doc *html.Node, page *url.URL, thread hnThread, target *url.URL) pageLoader {
 	matching := func() []*html.Node {
 		var found []*html.Node
-		nodes, targets := hnMoreLinks(doc, page, thread.id)
+		nodes, targets, _ := hnMoreLinks(doc, page, thread.id)
 		for index, node := range nodes {
 			if targets[index].String() == target.String() {
 				found = append(found, node)
@@ -195,7 +206,7 @@ func hnPageLoader(doc *html.Node, page *url.URL, thread hnThread, target *url.UR
 				return fmt.Errorf("answered by a page (titled %q) holding no comment not already loaded",
 					pageTitle(answer))
 			}
-			_, next := hnMoreLinks(answer, target, thread.id)
+			_, next, _ := hnMoreLinks(answer, target, thread.id)
 			for _, node := range matching() {
 				if len(next) > 0 {
 					hnSetAttr(node, "href", next[0].String())
@@ -382,9 +393,13 @@ func extractHNThread(doc *html.Node, page *url.URL) (siteExtraction, bool) {
 	}
 
 	var gaps []string
-	_, more := hnMoreLinks(doc, page, thread.id)
+	_, more, unreadable := hnMoreLinks(doc, page, thread.id)
 	for _, target := range more {
 		gaps = append(gaps, fmt.Sprintf("the comments on %s are not loaded (\"More\" link)", hnPageLabel(target)))
+	}
+	if unreadable > 0 {
+		gaps = append(gaps, fmt.Sprintf("%d \"More\" link(s) whose address does not parse (the comments past "+
+			"it not loaded)", unreadable))
 	}
 	stated, statedKnown := hnStated(thread)
 	statedText := "count not read (the story's subline states no comment count)"

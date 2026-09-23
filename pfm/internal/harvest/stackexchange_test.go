@@ -278,8 +278,8 @@ func TestStackExchangeQuestionLoadsEveryAnswerAndComment(t *testing.T) {
 
 // TestStackExchangeGapsFlagThePartial: whatever the question advertises that
 // was not loaded — an answer page refused or throttled, stated answers or
-// comments the API did not list, another question's answers, the record
-// itself — flags the artifact partial and is named.
+// comments the API did not list, another question's answers, an answer
+// stating no comment count — flags the artifact partial and is named.
 func TestStackExchangeGapsFlagThePartial(t *testing.T) {
 	page2 := seQuestionAPI + "/answers#2"
 	for _, tc := range []struct {
@@ -310,18 +310,6 @@ func TestStackExchangeGapsFlagThePartial(t *testing.T) {
 			"",
 		},
 		{
-			"the throttle before the record",
-			func(site *seSite) {
-				site.status = map[string]int{seQuestionAPI: http.StatusBadRequest}
-				site.bodies = map[string]string{seQuestionAPI: seThrottled}
-			},
-			[]string{
-				"stackexchange question: no answers loaded, the stated counts not read",
-				"the question's API record was not loaded", "rate limit exhausted",
-			},
-			seQuestionAPI + "/answers#1",
-		},
-		{
 			"stated answers not listed",
 			func(site *seSite) {
 				site.api[seQuestionAPI] = strings.Replace(site.api[seQuestionAPI], `"answer_count": 105`,
@@ -345,6 +333,14 @@ func TestStackExchangeGapsFlagThePartial(t *testing.T) {
 				site.api[page2] = strings.ReplaceAll(site.api[page2], `"question_id": 927358`, `"question_id": 1`)
 			},
 			[]string{"100 of 105 answers", "of another question (#1)"},
+			"",
+		},
+		{
+			"an answer stating no comment count",
+			func(site *seSite) {
+				site.api[page2] = strings.Replace(site.api[page2], `"comment_count": 3,`, "", 1)
+			},
+			[]string{"140 of 140 stated comments loaded", ": the stated comment count was not read"},
 			"",
 		},
 	} {
@@ -455,5 +451,84 @@ func TestStackExchangeClaimsQuestionsOnEveryNetworkSite(t *testing.T) {
 	}
 	if !strings.Contains(result.Content, "[#927386](https://superuser.com/a/927386)") {
 		t.Fatalf("answers do not link to their own site:\n%.800s", result.Content)
+	}
+}
+
+// TestStackExchangeRecordNotLoadedFallsToTheBrowser: when the throttle
+// refuses the question's own API record, the extractor does not claim the
+// walled page with an empty stub: the ladder goes on to the browser rung,
+// which stores the page it renders with the record's gap and the throttle
+// named in its partial marker, the record never asked again and no answer page
+// requested. With the browser rung off, the wall is a failed fetch, never
+// stored.
+func TestStackExchangeRecordNotLoadedFallsToTheBrowser(t *testing.T) {
+	rendered := "RENDERED QUESTION " + strings.Repeat("an answer the browser rendered ", 30)
+	for _, browser := range []bool{true, false} {
+		site := seQuestionSite(t)
+		site.status = map[string]int{seQuestionAPI: http.StatusBadRequest}
+		site.bodies = map[string]string{seQuestionAPI: seThrottled}
+		h, _ := site.harvester(t)
+		spy := &browserSpyConverter{
+			html:   "<html><head><title>Example question</title></head><body><p>question page</p></body></html>",
+			status: http.StatusOK,
+			convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
+				if isChallenge(body, http.StatusForbidden) {
+					return "Just a moment...", nil
+				}
+				return rendered, nil
+			},
+		}
+		h.options.Converter = spy
+		h.settings.browser = browser
+		result := h.FetchWithOptions(context.Background(), seQuestionURL, FetchOptions{Refresh: true})
+		if strings.Join(site.requests, ",") != seQuestionAPI {
+			t.Fatalf("browser=%v: API requests %v, want the record alone", browser, site.requests)
+		}
+		if !browser {
+			if result.Error == "" || strings.Contains(result.Content, "nothing of the question") {
+				t.Fatalf("the wall was stored with the browser rung off (method %q):\n%.600s", result.Method,
+					result.Content)
+			}
+			continue
+		}
+		if result.Error != "" || result.Method != "browser-chrome" || spy.browserCalls == 0 {
+			t.Fatalf("the browser render was not stored: method=%q browser=%d error=%q", result.Method,
+				spy.browserCalls, result.Error)
+		}
+		if !strings.Contains(result.Content, "RENDERED QUESTION") {
+			t.Fatalf("the artifact is not the browser's render:\n%.600s", result.Content)
+		}
+		for _, want := range []string{"the question's API record was not loaded", "rate limit exhausted"} {
+			if !strings.Contains(result.Partial, want) {
+				t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
+			}
+		}
+		if strings.Contains(result.Partial, "80000") {
+			t.Fatalf("the artifact repeats the API's message: %q", result.Partial)
+		}
+	}
+}
+
+// TestStackExchangeSpentQuotaEndsTheFollowing: an answer reporting the
+// address's daily quota spent (quota_remaining 0) ends the following, named,
+// before another request is sent — the answer it came with still kept.
+func TestStackExchangeSpentQuotaEndsTheFollowing(t *testing.T) {
+	site := seQuestionSite(t)
+	site.api[seQuestionAPI+"/answers#1"] = strings.Replace(site.api[seQuestionAPI+"/answers#1"],
+		`"quota_remaining": 293`, `"quota_remaining": 0`, 1)
+	h, _ := site.harvester(t)
+	result := h.FetchWithOptions(context.Background(), seQuestionURL, FetchOptions{Refresh: true})
+	if result.Error != "" {
+		t.Fatalf("fetch failed: %q", result.Error)
+	}
+	for _, want := range []string{"100 of 105 answers", "answers page 2 not loaded", "quota"} {
+		if !strings.Contains(result.Partial, want) {
+			t.Fatalf("the partial marker lacks %q: %q", want, result.Partial)
+		}
+	}
+	for _, sent := range site.requests {
+		if sent == seQuestionAPI+"/answers#2" {
+			t.Fatalf("page 2 was requested after the quota was spent: %v", site.requests)
+		}
 	}
 }

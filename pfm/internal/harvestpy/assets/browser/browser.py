@@ -302,6 +302,18 @@ SCROLL_MAX_SECONDS = 60.0
 SCROLL_SETTLE_MS = 1500
 SCROLL_STABLE_ROUNDS = 3
 
+# A hash route (#/… or #!…) of an app shell is written by the app's router
+# after the page loads, often after the network went idle: before scrolling,
+# the render waits until the page's text left the shell's and held still for
+# ROUTE_QUIET_ROUNDS pauses of ROUTE_PAUSE_MS, or ROUTE_SETTLE_MAX_SECONDS. A
+# page whose text at load is longer than ROUTE_SHELL_TEXT_MAX is no empty
+# shell: its fragment is an anchor, and it is not waited on.
+ROUTE_SETTLE_MAX_SECONDS = 20.0
+ROUTE_PAUSE_MS = 250
+ROUTE_QUIET_ROUNDS = 4
+ROUTE_SHELL_TEXT_MAX = 200
+TEXT_JS = "() => (document.body ? document.body.innerText : '')"
+
 # The rendered-content size the loop watches: the length of the visible text.
 MEASURE_JS = "() => (document.body ? document.body.innerText.length : 0)"
 # One scroll round: the window to the bottom of the document, and the page's
@@ -728,11 +740,16 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
         session = await context.new_cdp_session(page)
         await session.send("Emulation.setUserAgentOverride", ua_override)
     resp = await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded", referer=referer or None)
+    shell_text = await page.evaluate(TEXT_JS) if is_hash_route(url) else None
     try:
         await page.wait_for_load_state("networkidle", timeout=15_000)
     except Exception as e:  # noqa: BLE001 — best-effort quiet-period wait
         print(f"browser networkidle wait ended early for {redact(url)}: {e}", file=sys.stderr)
     clock = clock or asyncio.get_event_loop().time
+    if shell_text is not None and len(shell_text.strip()) <= ROUTE_SHELL_TEXT_MAX:
+        settled = await settle_route(lambda: page.evaluate(TEXT_JS), lambda: page.wait_for_timeout(ROUTE_PAUSE_MS),
+                                     clock, shell_text)
+        print(f"browser hash route {redact(url)}: {settled}", file=sys.stderr)
     start_url = page.url
     try:
         consent = await dismiss_consent(page)
@@ -799,6 +816,32 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
     outcome["url"] = start_url
     html = mark_incomplete(after_scrolling, outcome, marker_token)
     return html, status, outcome
+
+
+def is_hash_route(url):
+    """Whether *url*'s fragment is a client router's route (#/… or #!…), not an anchor."""
+    return urllib.parse.urlsplit(url).fragment.startswith(("/", "!"))
+
+
+async def settle_route(text, pause, clock, shell, max_seconds=ROUTE_SETTLE_MAX_SECONDS,
+                       quiet_rounds=ROUTE_QUIET_ROUNDS):
+    """Wait for a hash route's view: until the page's text (the awaitable
+    *text*) differs from *shell*, the text at load, and held unchanged for
+    *quiet_rounds* pauses — "settled" — or *max_seconds* passed — "timeout",
+    the page then captured as it stands. Pure over text/pause/clock."""
+    start = clock()
+    last, quiet = None, 0
+    while clock() - start < max_seconds:
+        current = await text()
+        if current.strip() != shell.strip() and current == last:
+            quiet += 1
+            if quiet >= quiet_rounds:
+                return "settled"
+        else:
+            quiet = 0
+        last = current
+        await pause()
+    return "timeout"
 
 
 async def document_replaced(page, token):

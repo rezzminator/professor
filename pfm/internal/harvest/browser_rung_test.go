@@ -35,8 +35,10 @@ type browserSpyConverter struct {
 	err          error
 	// modes records the headless flag of every call, in order; render, when
 	// set, answers per mode instead of html/status/err.
-	modes  []bool
-	render func(headless bool) (string, int, error)
+	modes []bool
+	// sources records the address of every render, fragment included.
+	sources []string
+	render  func(headless bool) (string, int, error)
 	// landed, when set, is the address every render lands on; unset, the
 	// render lands on the page requested.
 	landed *string
@@ -56,6 +58,7 @@ func (spy *browserSpyConverter) FetchBrowser(
 ) (string, int, string, error) {
 	spy.browserCalls++
 	spy.modes = append(spy.modes, headless)
+	spy.sources = append(spy.sources, source)
 	if spy.landed != nil {
 		source = *spy.landed
 	}

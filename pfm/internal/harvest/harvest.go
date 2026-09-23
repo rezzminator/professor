@@ -245,8 +245,8 @@ func (h *Harvester) fetchURLWithPolicy(
 	// browser rung and stores this page when the browser cannot do better. Nil
 	// unless the browser rung is on.
 	var partialPage func() Result
-	keptExtractor := "" // the extractor that claimed partialPage's page
-	apiGap := ""        // a site-API record's gap; every rung that stores names it (withAPIGap)
+	keptExtractor := ""  // the extractor that claimed partialPage's page
+	var gaps carriedGaps // a site-API gap and the next page; every rung that stores names them (withGaps)
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
 	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, kind7Z, kindRAR:
@@ -331,7 +331,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			}
 		}
 		converted, page, err := h.convertFetchedDocument(ctx, kind, source, body, loaders)
-		apiGap = page.firstAPIGap(apiGap)
+		gaps = page.carry(gaps)
 		if err != nil {
 			staticConverterOutage = true // named a tool outage by convertOutageNote below (F12)
 			continue
@@ -393,13 +393,13 @@ func (h *Harvester) fetchURLWithPolicy(
 		if kind == kindHTML && partialReason(converted) != "" && h.settings.browser && !isPrivateURL(source) &&
 			!googleDriveFile && guess != kindPDF && page.renderMayComplete {
 			partialPage = func() Result {
-				stored := page.withAPIGap(h.localizedImages(ctx, kind, converted, source), apiGap, loaders)
+				stored := page.withGaps(h.localizedImages(ctx, kind, converted, source), gaps, loaders)
 				return h.storeResult(source, kind, method, stored, int64(len(body)), status, rungs, options)
 			}
 			keptExtractor = page.extractor
 			break
 		}
-		converted = page.withAPIGap(h.localizedImages(ctx, kind, converted, source), apiGap, loaders)
+		converted = page.withGaps(h.localizedImages(ctx, kind, converted, source), gaps, loaders)
 		return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
 	}
 	if googleDriveFile {
@@ -423,7 +423,8 @@ func (h *Harvester) fetchURLWithPolicy(
 			Rungs:      rungs,
 		}
 	}
-	originGone := originMissing(lastStatus, lastChallenge, source) // no reader or archive copy stands in for it
+	// No reader or archive copy stands in for a missing origin, nor for a hash route's view (hashRouteShell).
+	originGone := originMissing(lastStatus, lastChallenge, source) || hashRouteShell(ctx, source, lastPage)
 	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
 		rungs = append(rungs, "jina")
 		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
@@ -444,7 +445,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			converted, convErr := pageText(stripJinaEnvelope(string(body))), error(nil)
 			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) {
-				stored := convertedPage{}.withAPIGap(converted, apiGap, loaders)
+				stored := readerPage(source, converted).withGaps(converted, gaps, loaders)
 				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
 			}
 		}
@@ -465,7 +466,7 @@ func (h *Harvester) fetchURLWithPolicy(
 					source,
 					kindHTML,
 					"defuddle-reader",
-					convertedPage{}.withAPIGap(converted, apiGap, loaders),
+					readerPage(source, converted).withGaps(converted, gaps, loaders),
 					int64(len(body)),
 					status,
 					rungs,
@@ -549,7 +550,7 @@ func (h *Harvester) fetchURLWithPolicy(
 							source,
 							kindHTML,
 							"browser-chrome",
-							page.withAPIGap(converted, apiGap, loaders),
+							page.withGaps(converted, gaps, loaders),
 							int64(len(html)),
 							status,
 							rungs,

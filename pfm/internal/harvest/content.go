@@ -27,41 +27,120 @@ func (h *Harvester) convertFetchedContent(ctx context.Context, kind, source stri
 // least one API record, so a wall the site served in its place is not what is
 // stored. unrendered is what an extractor that knew the page could not load
 // (its API record refused, siteExtraction.unrendered): the fetch ladder names
-// it in whatever a later rung stores (withAPIGap). Non-HTML kinds carry the
-// zero value.
+// it in whatever a later rung stores (withGaps). nextPage is the page's own
+// next page the pagination guard named (pagination.go) — a generic page's, or
+// a reader's markdown's (readerPage) — carried the same way. listing names
+// the unread later pages of an address naming its own page (pagedListing),
+// and pager is whether the page showed a pager of that address, which answers
+// whether a next page exists (pagination.go). Non-HTML kinds carry the zero
+// value.
 type convertedPage struct {
 	extractor         string
 	renderMayComplete bool
 	siteAPI           bool
 	unrendered        string
+	nextPage          string
+	listing           string
+	pager             bool
 }
 
-// firstAPIGap is gap, the API gap an earlier rung of this fetch saw, or else
-// the one this page's conversion saw.
-func (page convertedPage) firstAPIGap(gap string) string {
-	if gap != "" {
-		return gap
+// carriedGaps are what an earlier rung of this fetch learned the page lacks,
+// from its HTML even when the rung refused that page (for its status or a
+// wall): a site-API record's gap (api) and the page's un-followed next page
+// (next). Whatever rung stores the page names them (withGaps). pager is
+// whether any rung saw the page's pager.
+type carriedGaps struct {
+	api, next string
+	pager     bool
+}
+
+// carry is gaps with this page's conversion's gaps filled in where no earlier
+// rung saw one.
+func (page convertedPage) carry(gaps carriedGaps) carriedGaps {
+	if gaps.api == "" {
+		gaps.api = page.unrendered
 	}
-	return page.unrendered
+	if gaps.next == "" {
+		gaps.next = page.nextPage
+	}
+	gaps.pager = gaps.pager || page.pager
+	return gaps
 }
 
-// withAPIGap is content as a rung stores it after a site-API extractor's
-// record failed to load (gap, from firstAPIGap): the gap and why the fetch's
-// following failed (budget.note) joined into its partial marker, so a page
-// that shows only what the site renders is never stored as complete. page is
-// the conversion content came from (the zero value for a reader rung's
-// markdown): one built from an API record (siteAPI) closed the gap, and
-// content that already names it is kept as it is.
-func (page convertedPage) withAPIGap(content, gap string, budget *loaderBudget) string {
-	reason := partialReason(content)
-	if gap == "" || page.siteAPI || strings.Contains(reason, gap) {
+// readerPage is the convertedPage of a reader rung's markdown of source: its
+// own next page and whether it shows a pager, read from the markdown
+// (markdownContinuation, pagerShown).
+func readerPage(source, markdown string) convertedPage {
+	page, err := url.Parse(source)
+	if err != nil || page.Host == "" {
+		return convertedPage{}
+	}
+	_, targets := markdownLinks(markdown, page)
+	return convertedPage{
+		nextPage: markdownContinuation(markdown, page),
+		listing:  pagedListing(source),
+		pager:    pagerShown(page, targets),
+	}
+}
+
+// withGaps is content as a rung stores it, the fetch's carried gaps joined
+// into its partial marker. A site-API record's gap travels with why the
+// fetch's following failed (budget.note), so a page that shows only what the
+// site renders is never stored as complete; one built from an API record
+// (siteAPI) closed it. The next page travels unless the stored content
+// provably followed it: a site extractor rendered it (an extractor that knows
+// its site's pagination follows it, discourse.go); with no next page named,
+// an address naming its own page whose pager no rung saw names its unread
+// later pages (pagedListing). page is the conversion
+// content came from (readerPage for a reader rung's markdown); a gap content
+// already names is not repeated.
+func (page convertedPage) withGaps(content string, gaps carriedGaps, budget *loaderBudget) string {
+	stored := partialReason(content)
+	reason := stored
+	if gaps.api != "" && !page.siteAPI && !strings.Contains(reason, gaps.api) {
+		note := budget.note()
+		if strings.Contains(reason, note) {
+			note = "" // the conversion content came from named it already
+		}
+		reason = joinReasons(reason, gaps.api, note)
+	}
+	next := gaps.next
+	if next == "" || (page.nextPage != "" && strings.Contains(reason, page.nextPage)) {
+		next = page.nextPage // the stored page names its own next page
+	}
+	if next == "" && !gaps.pager && !page.pager {
+		next = page.listing // no rung saw the paged address's pager
+	}
+	if next != "" && page.extractor == "" && !strings.Contains(reason, next) {
+		reason = joinReasons(reason, next)
+	}
+	if reason == stored {
 		return content
 	}
-	note := budget.note()
-	if strings.Contains(reason, note) {
-		note = "" // the conversion content came from named it already
+	return withPartial(partialBody(content), reason)
+}
+
+// hashRouteShell reports whether source names a hash route (#/… or #!…) of a
+// page whose raw HTML (raw, the last page an HTTP rung saw) is an empty app
+// shell: only a browser running the app's router renders that route. A reader
+// or an archive is sent the address less its fragment — a fragment never
+// travels in a request — and would store the app's home view as the route. An
+// anchor on a server-rendered page is not one: its HTML holds the page.
+func hashRouteShell(ctx context.Context, source string, raw []byte) bool {
+	parsed, err := url.Parse(source)
+	if err != nil {
+		obs.Logger(ctx).Warn("harvest: the address could not be parsed for its fragment", obs.FieldErr, err.Error())
+		return false
 	}
-	return withPartial(partialBody(content), joinReasons(reason, gap, note))
+	if !strings.HasPrefix(parsed.Fragment, "/") && !strings.HasPrefix(parsed.Fragment, "!") {
+		return false
+	}
+	markup := string(raw)
+	if !strings.Contains(strings.ToLower(markup), "<script") {
+		return false
+	}
+	text := htmlTagRe.ReplaceAllString(styleRe.ReplaceAllString(scriptRe.ReplaceAllString(markup, " "), " "), " ")
+	return contentChars(text) < 100
 }
 
 // convertFetchedDocument is convertFetchedContent that also returns the
@@ -119,6 +198,9 @@ func (h *Harvester) convertHTML(
 	}
 	lazy := lazyLoadIncomplete(doc)
 	rest := h.followForSite(ctx, source, doc, budget)
+	// pager: the page shows its own address's pager (pagination.go).
+	parsed, parseErr := url.Parse(source)
+	pager := parseErr == nil && parsed.Host != "" && htmlPagerShown(doc, parsed)
 	extraction, extractor, ok := extractForSite(source, doc)
 	if ok {
 		// A loader still in the page is a gap whatever the extractor counts;
@@ -136,6 +218,7 @@ func (h *Harvester) convertHTML(
 			// browser render pressing the same loaders would work around it.
 			renderMayComplete: extraction.renderMayComplete && (budget == nil || !budget.policyStop),
 			siteAPI:           extraction.apiRecord,
+			pager:             pager,
 		}, nil
 	}
 	// The generic path converts this page alone: a next page it links is
@@ -143,10 +226,11 @@ func (h *Harvester) convertHTML(
 	// only the other reasons (lazy loading, low recall) escalate to one. Nor
 	// can it load what an extractor that knew the page could not (its API
 	// record refused), named with why the following failed.
-	unclosed := ""
-	if parsed, parseErr := url.Parse(source); parseErr == nil {
-		unclosed = paginationContinuation(doc, parsed)
+	nextPage := ""
+	if parseErr == nil {
+		nextPage = paginationContinuation(doc, parsed)
 	}
+	unclosed := nextPage
 	if extraction.unrendered != "" {
 		unclosed = joinReasons(extraction.unrendered, rest.reason(), budget.note(), unclosed)
 	}
@@ -154,6 +238,9 @@ func (h *Harvester) convertHTML(
 		return withPartial(content, joinReasons(reason, unclosed)), convertedPage{
 			renderMayComplete: reason != "",
 			unrendered:        extraction.unrendered,
+			nextPage:          nextPage,
+			listing:           pagedListing(source),
+			pager:             pager,
 		}, nil
 	}
 	input := body

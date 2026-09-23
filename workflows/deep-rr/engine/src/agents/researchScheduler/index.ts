@@ -1,7 +1,7 @@
 // RESEARCH SCHEDULER — inserted AFTER the brainer picks the wave's lanes (resolveLookupNext), BEFORE the
 // readers spawn. It owns discovery: per brainer lane (the rabbit-hole + its steering `note`), it picks the
 // HIGHEST-VALUE sources — MULTIPLE per lane, no cap — by batching ALL lane searches in one parallel round,
-// then sizing every candidate via mcp__harvester__readPage / readWork size_only (returns {size, path, chars}) in a second
+// then sizing every candidate via mcp__harvester__readPage / readWork size_only (returns {tokens, path, chars}) in a second
 // parallel round; it returns the chosen sources grouped per lane id. Code (engine.ts) then bin-packs each
 // lane's content into RESEARCHER_TOKEN_BUDGET reader-units and spawns the sequential per-lane reader threads.
 // Tier: sonnet — judging source value + driving batched tool I/O is a mid-weight job, above a worker but below

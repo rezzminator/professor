@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+
+	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
 const (
@@ -15,6 +17,23 @@ const (
 )
 
 var markdownImageRE = regexp.MustCompile(`!\[[^\]]*\]\(\s*([^\s)]+)`)
+
+// localizedImages is converted with its images localized (LocalizeImages) when
+// kind is HTML. The web ladder calls it for the page it stores and no other, so
+// a page the browser rung then supersedes never spends a fetch per image. A
+// localization that fails keeps the remote links, and says so in the log.
+func (h *Harvester) localizedImages(ctx context.Context, kind, converted, source string) string {
+	if kind != kindHTML {
+		return converted
+	}
+	localized, err := h.LocalizeImages(ctx, converted, source)
+	if err != nil {
+		obs.Logger(ctx).Warn("harvest: images were not localized; the remote links stay",
+			"target", logSource(source), obs.FieldErr, err.Error())
+		return converted
+	}
+	return localized
+}
 
 // LocalizeImages downloads article images referenced by Markdown and rewrites
 // successful links to immutable cache paths. It intentionally skips data URIs,

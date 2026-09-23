@@ -39,14 +39,14 @@ func (h *Harvester) convertFetchedDocument(
 	budget *loaderBudget,
 ) (string, convertedPage, error) {
 	if kind == kindTXT {
-		return string(body), convertedPage{}, nil
+		return pageText(string(body)), convertedPage{}, nil
 	}
 	if h.options.Converter == nil {
 		return "", convertedPage{}, errors.New("no injected converter configured for " + kind)
 	}
 	if kind != kindHTML {
 		converted, err := h.options.Converter.Convert(ctx, kind, source, body)
-		return converted, convertedPage{}, err
+		return pageText(converted), convertedPage{}, err
 	}
 	return h.convertHTML(ctx, source, body, budget)
 }
@@ -118,8 +118,8 @@ func (h *Harvester) convertHTML(
 	if err != nil {
 		return "", convertedPage{}, err
 	}
-	visible := len(visibleWords(doc))
-	measure := measureRecall(visible, converted)
+	visible := visibleWords(doc)
+	measure := measureRecall(len(visible), converted)
 	if !measure.low() {
 		return done(converted, lazy)
 	}
@@ -129,15 +129,19 @@ func (h *Harvester) convertHTML(
 		return done(converted, joinReasons(reason+"; no full-DOM converter is wired", lazy))
 	}
 	full, fullErr := fullDOM.ConvertFullDOM(ctx, source, input)
-	fullMeasure := measureRecall(visible, full)
+	fullMeasure := measureContentRecall(visible, full)
 	switch {
 	case fullErr != nil:
 		obs.Logger(ctx).Warn("harvest: full-DOM conversion failed", obs.FieldErr, fullErr.Error())
 		reason += "; the full-DOM conversion failed: " + errorReasonClass(fullErr, "conversion error")
 	case fullMeasure.low():
 		reason += "; the full-DOM conversion kept only " + fullMeasure.String()
+		if other := len(markdownWords(full)) - fullMeasure.extracted; other > 0 {
+			reason += fmt.Sprintf(", and %d more of its words are not the page's visible text", other)
+		}
 	default:
-		// The whole DOM, boilerplate included, is the complete artifact.
+		// The whole DOM, boilerplate included, is the complete artifact: it
+		// holds the page's visible words, measured without its chrome.
 		return done(full, lazy)
 	}
 	return done(converted, joinReasons(reason, lazy))

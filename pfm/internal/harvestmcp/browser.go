@@ -23,11 +23,16 @@ const browserHardDeadline = 3 * time.Minute
 // pinning hop — and a refusal is re-wrapped as harvest.ErrBrowserPolicyDenied so callers can
 // tell POLICY from OUTAGE. Provisioning is lazy and only ever happens after
 // fetch.browser gated this method; a missing environment is an outage,
-// never a silent skip.
-func (converter pythonConverter) FetchBrowser(ctx context.Context, source string, headless bool) (string, int, error) {
+// never a silent skip. The worker stamps an incomplete render with
+// harvest.BrowserMarkerToken and reports the address the render landed on.
+func (converter pythonConverter) FetchBrowser(
+	ctx context.Context,
+	source string,
+	headless bool,
+) (string, int, string, error) {
 	runtime, err := converter.browserRuntime(ctx)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	browser := harvestpy.NewBrowserWorker(runtime)
 	defer func() { _ = browser.Close() }()
@@ -50,7 +55,7 @@ func (converter pythonConverter) FetchBrowser(ctx context.Context, source string
 	defer cancel()
 	proxyURL, stopProxy, err := converter.browserProxy(fetchCtx)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	defer stopProxy()
 	// Pin Chrome to the address DoH resolved and the guard validated. Without
@@ -59,21 +64,22 @@ func (converter pythonConverter) FetchBrowser(ctx context.Context, source string
 	// would reach the real host while the browser rung alone landed on a block
 	// page, and the wall would look like the source's own.
 	hostResolverRules := harvest.BrowserHostResolverRule(fetchCtx, source)
-	html, status, fetchErr := browser.FetchPinned(
+	html, status, finalURL, fetchErr := browser.FetchPinned(
 		fetchCtx,
 		source,
 		proxyURL,
 		hostResolverRules,
 		harvest.ProvenanceReferer,
+		harvest.BrowserMarkerToken(),
 		headless,
 		harvest.SitePressesLoaders(source),
 		45000,
 		onAsk,
 	)
 	if fetchErr != nil && policyDenied {
-		return "", 0, fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, fetchErr)
+		return "", 0, "", fmt.Errorf("%w: %v", harvest.ErrBrowserPolicyDenied, fetchErr)
 	}
-	return html, status, fetchErr
+	return html, status, finalURL, fetchErr
 }
 
 // browserProxy answers with the proxy Chrome is launched behind, and the

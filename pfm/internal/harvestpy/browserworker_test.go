@@ -154,7 +154,10 @@ func TestBrowserFetchRequestCarriesTheGoOwnedDial(t *testing.T) {
 			return
 		}
 		sent <- request.BrowserFetchRequest
-		_, _ = fmt.Fprintln(responseWriter, `{"ok":true,"status":200,"html":"rendered"}`)
+		_, _ = fmt.Fprintln(
+			responseWriter,
+			`{"ok":true,"status":200,"html":"rendered","final_url":"https://publisher.example.test/landed"}`,
+		)
 	}()
 	t.Cleanup(func() {
 		_ = requestReader.Close()
@@ -162,18 +165,23 @@ func TestBrowserFetchRequestCarriesTheGoOwnedDial(t *testing.T) {
 	})
 	worker := NewBrowserWorker(Runtime{Python: "fake-browser", Script: "script", Runner: runner})
 	t.Cleanup(func() { _ = worker.Close() })
-	if _, _, err := worker.FetchPinned(
+	_, _, finalURL, err := worker.FetchPinned(
 		context.Background(),
 		"https://publisher.example.test/walled",
 		"http://127.0.0.1:8431",
 		"MAP publisher.example.test 93.184.216.34",
 		"https://www.google.com/",
+		"t0k",
 		true,
 		true,
 		45000,
 		func(string) error { return nil },
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("FetchPinned() error = %v", err)
+	}
+	if finalURL != "https://publisher.example.test/landed" {
+		t.Fatalf("the address the render landed on did not come back: %q", finalURL)
 	}
 	select {
 	case request := <-sent:
@@ -188,6 +196,9 @@ func TestBrowserFetchRequestCarriesTheGoOwnedDial(t *testing.T) {
 		}
 		if !request.PressLoaders {
 			t.Fatalf("the registered site's press_loaders did not reach the worker: %+v", request)
+		}
+		if request.MarkerToken != "t0k" {
+			t.Fatalf("the lazy-load marker token did not reach the worker: %+v", request)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("the worker never received a fetch request")

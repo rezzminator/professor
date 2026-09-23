@@ -342,7 +342,7 @@ func publicKind(kind string) string {
 		kindImage,
 		kindZIP,
 		kindTAR,
-		"7z",
+		kind7Z,
 		kindRAR,
 		kindArchive,
 		kindArchiveMember:
@@ -354,7 +354,7 @@ func publicKind(kind string) string {
 
 func publicBinaryResult(kind, path string, body []byte) bool {
 	low := strings.ToLower(strings.TrimSpace(kind))
-	if isImageKind(low) || low == kindArchive || low == kindZIP || low == kindTAR || low == "7z" || low == kindRAR {
+	if isImageKind(low) || low == kindArchive || low == kindZIP || low == kindTAR || low == kind7Z || low == kindRAR {
 		return true
 	}
 	if low == kindArchiveMember {

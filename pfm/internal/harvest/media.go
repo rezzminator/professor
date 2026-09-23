@@ -124,7 +124,7 @@ func isImageKind(kind string) bool {
 func refreshValue(v []bool) bool { return len(v) > 0 && v[0] }
 
 func (h *Harvester) binaryCachePath(source string) (string, string) {
-	for _, kind := range []string{kindJPG, kindPNG, kindGIF, kindWebP, kindBMP, kindTIFF, kindSVG, kindImage, kindZIP, kindTAR, "7z", kindRAR} {
+	for _, kind := range []string{kindJPG, kindPNG, kindGIF, kindWebP, kindBMP, kindTIFF, kindSVG, kindImage, kindZIP, kindTAR, kind7Z, kindRAR} {
 		path := filepath.Join(h.options.CacheDir, CacheKey(source, kind))
 		ext := filepath.Ext(path)
 		bin := strings.TrimSuffix(path, ext)
@@ -236,7 +236,7 @@ func (h *Harvester) fetchArchiveBytes(ctx context.Context, source string, refres
 			continue
 		}
 		kind := classifyKind(source, contentType, body)
-		if kind != kindZIP && kind != kindTAR && kind != "7z" && kind != kindRAR {
+		if kind != kindZIP && kind != kindTAR && kind != kind7Z && kind != kindRAR {
 			continue
 		}
 		result := h.storeBinary(source, kind, rung.name, body, refresh)

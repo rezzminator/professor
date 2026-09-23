@@ -245,13 +245,14 @@ func (h *Harvester) fetchURLWithPolicy(
 	// browser rung and stores this page when the browser cannot do better. Nil
 	// unless the browser rung is on.
 	var partialPage func() Result
+	keptExtractor := "" // the extractor that claimed partialPage's page
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
-	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, "7z", kindRAR:
+	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, kind7Z, kindRAR:
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
 	}
 	directMediaFetch := guess == kindPDF || guess == kindDOCX || guess == kindXLSX || guess == kindPPTX ||
-		guess == kindCSV || guess == kindZIP || guess == kindTAR || guess == "7z" || guess == kindRAR || guess == kindImage
+		guess == kindCSV || guess == kindZIP || guess == kindTAR || guess == kind7Z || guess == kindRAR || guess == kindImage
 	directRung, chromeRung := rungDirect, rungChromeImpersonation
 	if googleDriveFile {
 		directClient, chromeClient = h.binaryDirectOrClient(), h.binaryChromeOrChrome()
@@ -315,7 +316,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				ErrorKind:  errorKindWrongKind,
 			}
 		}
-		if kind == kindZIP || kind == kindTAR || kind == "7z" || kind == kindRAR {
+		if kind == kindZIP || kind == kindTAR || kind == kind7Z || kind == kindRAR {
 			// An EPUB is zip-SHAPED but is a book; OA book sources (OAPEN/DOAB/
 			// Gutenberg/Zenodo) serve EPUB constantly. Detect it by its uncompressed
 			// `mimetype` member and convert it instead of throwing the found book away.
@@ -384,11 +385,6 @@ func (h *Harvester) fetchURLWithPolicy(
 				continue
 			}
 		}
-		if kind == kindHTML {
-			if localized, localizeErr := h.LocalizeImages(ctx, converted, source); localizeErr == nil {
-				converted = localized
-			}
-		}
 		method := rung.name
 		if kind == kindTXT {
 			method = "plain-text"
@@ -396,10 +392,13 @@ func (h *Harvester) fetchURLWithPolicy(
 		if kind == kindHTML && partialReason(converted) != "" && h.settings.browser && !isPrivateURL(source) &&
 			!googleDriveFile && guess != kindPDF && page.renderMayComplete {
 			partialPage = func() Result {
-				return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
+				stored := h.localizedImages(ctx, kind, converted, source)
+				return h.storeResult(source, kind, method, stored, int64(len(body)), status, rungs, options)
 			}
+			keptExtractor = page.extractor
 			break
 		}
+		converted = h.localizedImages(ctx, kind, converted, source)
 		return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
 	}
 	if googleDriveFile {
@@ -441,7 +440,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			// HTML converter loses headings and code blocks, so preserve it as the
 			// original HTML-source kind for cache/type semantics.
 			kind := kindHTML
-			converted, convErr := stripJinaEnvelope(string(body)), error(nil)
+			converted, convErr := pageText(stripJinaEnvelope(string(body))), error(nil)
 			if convErr == nil && usableContent(converted, kind) && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) {
 				return h.storeResult(source, kind, "jina", converted, int64(len(body)), status, rungs, options)
@@ -456,7 +455,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		body, status, _, err := getBody(ctx, h.client, target, h.userAgent, h.options.MaxBytes)
 		lastErrorKind, lastStatus, lastErr = noteRungOutcome(err, status, lastErr, lastErrorKind, lastStatus)
 		if err == nil && status < 400 && !isChallenge(body, status) {
-			converted := stripDefuddleEnvelope(string(body))
+			converted := pageText(stripDefuddleEnvelope(string(body)))
 			longer := contentChars(converted) > lastContentChars || appShellText != ""
 			if usableContent(converted, kindHTML) && longer && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) {
@@ -521,9 +520,6 @@ func (h *Harvester) fetchURLWithPolicy(
 					log.Printf("harvest: browser rung hit a challenge wall for %s (HTTP %d)", logSource(source), status)
 				} else {
 					converted, page, convErr := h.convertFetchedDocument(ctx, kindHTML, source, []byte(html), loaders)
-					// A render a per-site extractor recognised is that site's content
-					// by construction, as on the HTTP rungs: never a shell or a wall.
-					extracted := page.extractor != ""
 					switch {
 					case convErr != nil:
 						// The render SUCCEEDED; the conversion step failing is
@@ -537,17 +533,16 @@ func (h *Harvester) fetchURLWithPolicy(
 						browserShellRender = true
 						log.Printf("harvest: browser rung rendered only the app shell for %s", logSource(source))
 					case usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
-						(contentChars(partialBody(converted)) > lastContentChars || appShellText != "" ||
-							partialPage != nil && partialReason(converted) == "" || extracted && partialPage == nil) &&
-						(extracted || contentChars(partialBody(converted)) >= 500):
-						// Same thin-page floor as the HTML ladder above: a JS
-						// paywall overlay converting to a few hundred chars is
-						// a shell, not the article — unless an extractor claimed
-						// the render. A render with no partial marker beats a
-						// flagged HTTP page even when shorter: the flagged page's
-						// length includes its gap list. With no HTTP page kept, a
-						// claimed render beats whatever the earlier rungs
-						// converted: a wall's text is not the site's content.
+						browserRenderWins(ctx, browserCandidate{
+							source:        source,
+							finalURL:      outcome.finalURL,
+							converted:     converted,
+							extractor:     page.extractor,
+							earlierChars:  lastContentChars,
+							appShell:      appShellText != "",
+							kept:          partialPage != nil,
+							keptExtractor: keptExtractor,
+						}):
 						return h.storeResult(
 							source,
 							kindHTML,
@@ -649,6 +644,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			rungs = append(rungs, "ocr")
 			ocrRan = true
 			ocrConverted, ocrErr := ocrConverter.ConvertOCR(ctx, kindPDF, source, emptyPDFBody)
+			ocrConverted = pageText(ocrConverted)
 			switch {
 			case ocrErr != nil:
 				ocrBackendFailed = true

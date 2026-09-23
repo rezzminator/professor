@@ -73,7 +73,7 @@ func SniffKind(contentType string, head []byte) string {
 	case ct == "application/zip", ct == "application/x-zip-compressed", ct == "application/x-zip":
 		return kindZIP
 	case ct == "application/x-7z-compressed":
-		return "7z"
+		return kind7Z
 	case ct == "application/x-rar-compressed", ct == "application/vnd.rar":
 		return kindRAR
 	case ct == "application/x-tar",
@@ -121,7 +121,7 @@ func SniffMagic(head []byte) string {
 	case bytes.HasPrefix(head, []byte("PK\x03\x04")):
 		return kindZIP
 	case bytes.HasPrefix(head, []byte("7z\xbc\xaf\x27\x1c")):
-		return "7z"
+		return kind7Z
 	case bytes.HasPrefix(head, []byte("Rar!\x1a\x07")):
 		return kindRAR
 	case bytes.HasPrefix(head, []byte("\x1f\x8b")),

@@ -10,16 +10,18 @@ Protocol (JSON lines over stdin/stdout), one request serialized at a time:
 
   Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://127.0.0.1:PORT","headless":true,
                    "host_resolver_rules":"MAP host 1.2.3.4"|null,"timeout_ms":45000,
-                   "referer":"https://www.google.com/"|null,"press_loaders":true}
+                   "referer":"https://www.google.com/"|null,"press_loaders":true,"marker_token":"…"}
                   ("proxy" is REQUIRED — it is the Go-owned dial; see PROXY_REQUIRED;
-                   "press_loaders" absent = read-only scrolling, no button pressed)
+                   "press_loaders" absent = read-only scrolling, no button pressed;
+                   "marker_token" is carried by the lazy-load marker — see mark_incomplete)
                   {"op":"smoke"}
   worker -> Go:   zero or more guard asks before the final line:
                   {"ask":"fetchable","url":"https://…"}
   Go -> worker:   {"allow":true}
                   {"allow":false,"reason":"refusing private/internal host …"}
   worker -> Go:   exactly one final line:
-                  {"ok":true,"html":"…","status":403,"headless":false}
+                  {"ok":true,"html":"…","status":403,"headless":false,"final_url":"https://…"}
+                  ("final_url" is the address of the document "html" holds, after every redirect)
                   {"ok":false,"error":"patchright not installed"}
 
 SSRF: Go owns the fetchable decision (harvest.AssertFetchable) — the route
@@ -379,25 +381,29 @@ DOCUMENT_CHECK_JS = "(token) => window.__harvesterDocument === token"
 # Go reads it (harvest's lazyLoadIncomplete) and flags the artifact partial at
 # the visible surface — the HTML is the one channel every caller already reads.
 LAZY_LOAD_MARKER = "harvester-lazy-load"
+# The attribute carrying the request's marker_token on that marker. Go reads
+# back only a marker holding its own token, so a page that ships a meta of the
+# same name in its markup never flags itself partial.
+MARKER_TOKEN_ATTR = "data-harvester-token"
 
 
-def mark_incomplete(html, outcome):
-    """Stamp *html* with the lazy-load marker when a cap stopped a page that
-    was still growing, when scrolling failed (stopped "error"), or when the
-    page navigated away while scrolling (stopped "navigated"); otherwise
-    return it unchanged."""
+def mark_incomplete(html, outcome, marker_token):
+    """Stamp *html* with the lazy-load marker, carrying *marker_token*, when a
+    cap stopped a page that was still growing, when scrolling failed (stopped
+    "error"), or when the page navigated away while scrolling (stopped
+    "navigated"); otherwise return it unchanged."""
     if outcome.get("stopped") == "error":
         reason = html_escape(f'incomplete: scrolling failed: {outcome.get("error", "")}', quote=True)
-        meta = f'<meta name="{LAZY_LOAD_MARKER}" content="{reason}">'
     elif outcome.get("stopped") == "navigated":
         reason = html_escape(f'incomplete: the page navigated away to {outcome.get("navigated_to", "")} while '
                              'scrolling; kept as it was before scrolling', quote=True)
-        meta = f'<meta name="{LAZY_LOAD_MARKER}" content="{reason}">'
     elif outcome.get("growing"):
-        meta = (f'<meta name="{LAZY_LOAD_MARKER}" content="incomplete: content was still loading when the '
-                f'{outcome["stopped"]} stopped scrolling after {outcome["rounds"]} rounds">')
+        reason = (f'incomplete: content was still loading when the {outcome["stopped"]} stopped scrolling after '
+                  f'{outcome["rounds"]} rounds')
     else:
         return html
+    token = html_escape(marker_token or "", quote=True)
+    meta = f'<meta name="{LAZY_LOAD_MARKER}" content="{reason}" {MARKER_TOKEN_ATTR}="{token}">'
     lower = html.lower()
     index = lower.find("<head")
     if index >= 0:
@@ -464,7 +470,7 @@ def serialized_ask(raw_ask):
 
 
 async def render_page(context, url, timeout_ms, referer=None, clock=None, press_loaders=False,
-                      ua_override=None):
+                      ua_override=None, marker_token=""):
     """Open *url* in *context*, let it settle, scroll it until stable and
     return (html, status, scroll outcome). The navigation carries *referer*
     (a provenance Referer: some anti-bot walls open for any Referer and refuse
@@ -476,7 +482,9 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
     consent redirect) returns the page as it stood when scrolling began,
     stamped incomplete — never the document it navigated to. *ua_override*
     (the headless render's UA and client hints) is sent to the page over CDP
-    before it navigates; a failed send raises."""
+    before it navigates; a failed send raises. The incomplete stamp carries
+    *marker_token* (mark_incomplete), and the outcome's "url" is the address of
+    the document returned — the page as it stood when scrolling began."""
     page = await context.new_page()
     if ua_override is not None:
         session = await context.new_cdp_session(page)
@@ -526,10 +534,12 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
         outcome = {"stopped": "navigated", "navigated_to": redact(page.url), "growing": False}
         print(f"browser render {redact(start_url)} navigated away to {redact(page.url)} while scrolling; "
               f"keeping the page as it was before scrolling", file=sys.stderr)
-        return mark_incomplete(before_scrolling, outcome), status, outcome
+        outcome["url"] = start_url
+        return mark_incomplete(before_scrolling, outcome, marker_token), status, outcome
     if after_scrolling is None:
         after_scrolling = await page.content()
-    html = mark_incomplete(after_scrolling, outcome)
+    outcome["url"] = start_url
+    html = mark_incomplete(after_scrolling, outcome, marker_token)
     return html, status, outcome
 
 
@@ -551,8 +561,12 @@ def same_page(first, second):
 
 
 async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True,
-                        host_resolver_rules=None, referer=None, press_loaders=False):
+                        host_resolver_rules=None, referer=None, press_loaders=False, marker_token="",
+                        report=None):
     """Render *url* in a real system Chrome via Patchright; return (html, status, headless, error).
+    A render also records, in the *report* dict when one is passed, "final_url": the address
+    of the document html holds (render_page's outcome "url"); the incomplete stamp carries
+    *marker_token*.
 
     Opt-in rung — Go gates it behind fetch.browser because a browser launch is ~100ms+ and
     needs Chrome installed. It renders in exactly the mode Go asks for: headless unless Go
@@ -615,10 +629,13 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
                 await install_route_guards(context, guarded_ask)
                 await context.add_init_script(WEBRTC_BLOCK_SCRIPT)
 
-                html, status, _ = await render_page(context, url, timeout_ms, referer=referer,
-                                                press_loaders=press_loaders, ua_override=ua_override)
+                html, status, outcome = await render_page(context, url, timeout_ms, referer=referer,
+                                                          press_loaders=press_loaders, ua_override=ua_override,
+                                                          marker_token=marker_token)
                 print(f"browser rung {redact(url)} -> HTTP {status} ({len(html)} chars, headless={headless})",
                       file=sys.stderr)
+                if report is not None:
+                    report["final_url"] = outcome.get("url", "")
                 return html, status, headless
             finally:
                 await browser.close()
@@ -651,6 +668,7 @@ def smoke():
 
 
 async def handle_fetch(request):
+    report = {}
     html, status, headless, error = await fetch_browser(
         request.get("url", ""),
         lambda target: _blocking_ask(target),
@@ -660,10 +678,13 @@ async def handle_fetch(request):
         host_resolver_rules=request.get("host_resolver_rules") or None,
         referer=request.get("referer") or None,
         press_loaders=bool(request.get("press_loaders", False)),
+        marker_token=request.get("marker_token") or "",
+        report=report,
     )
     if error is not None and not html:
         return {"ok": False, "error": error}
-    return {"ok": True, "html": html, "status": status, "headless": headless}
+    return {"ok": True, "html": html, "status": status, "headless": headless,
+            "final_url": report.get("final_url", "")}
 
 
 def _blocking_ask(target):

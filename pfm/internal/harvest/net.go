@@ -587,7 +587,7 @@ func classifyKind(source, contentType string, body []byte) string {
 	case "application/x-zip":
 		return kindZIP
 	case "application/x-7z-compressed":
-		return "7z"
+		return kind7Z
 	case "application/x-rar-compressed", "application/vnd.rar":
 		return kindRAR
 	case "application/x-tar", "application/gzip", "application/x-gzip", "application/x-bzip2", "application/x-xz":
@@ -646,7 +646,7 @@ func classifyKind(source, contentType string, body []byte) string {
 		return kindZIP
 	}
 	if len(body) >= 6 && string(body[:6]) == "7z\xbc\xaf\x27\x1c" {
-		return "7z"
+		return kind7Z
 	}
 	if len(body) >= 7 && string(body[:7]) == "Rar!\x1a\x07" {
 		return kindRAR

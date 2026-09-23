@@ -406,11 +406,12 @@ func (h *Harvester) gatewayBrowser(
 // separately from an OUTAGE and from an empty render, so a caller never has to
 // re-derive which of the three it got.
 type browserRenderOutcome struct {
-	html   string
-	status int
-	headed bool  // a VISIBLE window was spent
-	wall   bool  // the render completed and is still a challenge page
-	err    error // the rung could not run at all
+	html     string
+	status   int
+	finalURL string // the address of the document html holds; "" when unknown
+	headed   bool   // a VISIBLE window was spent
+	wall     bool   // the render completed and is still a challenge page
+	err      error  // the rung could not run at all
 }
 
 // renderHeadlessFirst is the ONE implementation of the headless-first /
@@ -422,27 +423,28 @@ type browserRenderOutcome struct {
 // headless render actually met, and a headed launch that fails (a display-less
 // host) leaves the completed headless verdict standing rather than masking it.
 func renderHeadlessFirst(ctx context.Context, fetcher BrowserFetcher, source string) browserRenderOutcome {
-	html, status, err := fetcher.FetchBrowser(ctx, source, true)
+	html, status, finalURL, err := fetcher.FetchBrowser(ctx, source, true)
 	if err != nil {
 		return browserRenderOutcome{err: err}
 	}
 	if html == "" || !isChallenge([]byte(html), status) {
-		return browserRenderOutcome{html: html, status: status}
+		return browserRenderOutcome{html: html, status: status, finalURL: finalURL}
 	}
-	headedHTML, headedStatus, headedErr := fetcher.FetchBrowser(ctx, source, false)
+	headedHTML, headedStatus, headedFinalURL, headedErr := fetcher.FetchBrowser(ctx, source, false)
 	if headedErr != nil {
 		log.Printf(
 			"harvest: headed browser retry for %s could not run after a headless wall: %v",
 			logSource(source),
 			headedErr,
 		)
-		return browserRenderOutcome{html: html, status: status, wall: true}
+		return browserRenderOutcome{html: html, status: status, finalURL: finalURL, wall: true}
 	}
 	return browserRenderOutcome{
-		html:   headedHTML,
-		status: headedStatus,
-		headed: true,
-		wall:   headedHTML != "" && isChallenge([]byte(headedHTML), headedStatus),
+		html:     headedHTML,
+		status:   headedStatus,
+		finalURL: headedFinalURL,
+		headed:   true,
+		wall:     headedHTML != "" && isChallenge([]byte(headedHTML), headedStatus),
 	}
 }
 

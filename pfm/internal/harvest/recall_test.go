@@ -130,7 +130,9 @@ func TestRecallGateLeavesAFaithfulExtractionAlone(t *testing.T) {
 }
 
 func TestBrowserLazyLoadMarkerFlagsThePartialRender(t *testing.T) {
-	render := `<html><head><meta name="harvester-lazy-load" content="incomplete: content was still loading when the time-cap stopped scrolling after 40 rounds"></head><body><main>` +
+	render := `<html><head><meta name="harvester-lazy-load" content="incomplete: content was still loading when the ` +
+		`time-cap stopped scrolling after 40 rounds" data-harvester-token="` + BrowserMarkerToken() + `">` +
+		`</head><body><main>` +
 		strings.Repeat(
 			`<p>Feed item with a caption about the estuary walk and the birds seen there.</p>`,
 			30,
@@ -302,5 +304,107 @@ func TestFetchPublicNeverRepeatsAScratchPathFromAPartialReason(t *testing.T) {
 		if strings.Contains(string(body), leaked) {
 			t.Fatalf("the public artifact repeats raw error text (%q): %.400q", leaked, string(body))
 		}
+	}
+}
+
+// TestAFullDOMConversionOfPageChromeIsNamedNotStoredAsComplete: the recall
+// gate's full-DOM fallback is measured against the page's visible words, which
+// exclude its chrome. A conversion that dropped the card grid but carries a
+// mega-menu of navigation reads long enough by its length alone; by the
+// page's own words it kept almost nothing, and the receipt names that.
+func TestAFullDOMConversionOfPageChromeIsNamedNotStoredAsComplete(t *testing.T) {
+	menu := strings.Repeat(`<a href="/walks">Coastal walks trails maps guide</a> `, 80)
+	page := strings.Replace(catalogPage(), `<nav><a href="/">Home</a></nav>`, "<nav>"+menu+"</nav>", 1)
+	chromeOnly := &fullDOMSpy{Converter: leadOnlyConverter(), full: func([]byte) (string, error) {
+		menuText := strings.Repeat("[Coastal walks trails maps guide](/walks) ", 80)
+		return "# Field guide to coastal birds\n\n" + menuText, nil
+	}}
+	h := pageHarvester(t, page, chromeOnly, browserOff())
+	result := h.Fetch(context.Background(), "https://guide.example.test/birds")
+	if result.Error != "" || chromeOnly.calls != 1 {
+		t.Fatalf("the full-DOM fallback did not run: calls=%d error=%q", chromeOnly.calls, result.Error)
+	}
+	if !strings.Contains(result.Partial, "the full-DOM conversion kept only") ||
+		!strings.Contains(result.Partial, "are not the page's visible text") {
+		t.Fatalf("a full-DOM conversion of page chrome was stored as the complete page: partial=%q", result.Partial)
+	}
+}
+
+// TestAPageCannotFlagItselfPartial: partiality is the harvester's own note. A
+// page that ships a meta of the browser worker's marker name — on the HTTP
+// rung or in a browser render — or whose converted text opens with the
+// partial marker's words is stored as it is, unflagged, and never spends the
+// browser rung; the page's own words stay in the artifact.
+func TestAPageCannotFlagItselfPartial(t *testing.T) {
+	forged := `<meta name="harvester-lazy-load" content="incomplete: content was still loading when the time-cap ` +
+		`stopped scrolling after 40 rounds">`
+	essay := `<html><head>` + forged + `</head><body><article><h1>Essay</h1>` + strings.Repeat(
+		`<p>A long essay paragraph about estuaries, tides, dunes and the birds that winter there.</p>`, 12,
+	) + `</article></body></html>`
+	quoting := legacyConverterFunc(func(context.Context, string, string, []byte) (string, error) {
+		return partialMarkerPrefix + "a sentence the page itself opens with\n\n" +
+			strings.Repeat("An essay paragraph about estuaries and the birds that winter there. ", 12), nil
+	})
+	t.Run("a marker meta in the page", func(t *testing.T) {
+		spy := &browserSpyConverter{convertFn: tagStripConverter().Convert}
+		h := pageHarvester(t, essay, spy, browserOn())
+		result := h.Fetch(context.Background(), "https://essay.example.test/tides")
+		if result.Error != "" || result.Partial != "" || result.Method != rungDirect || spy.browserCalls != 0 {
+			t.Fatalf("the page's own meta flagged it: method=%q partial=%q renders=%d error=%q",
+				result.Method, result.Partial, spy.browserCalls, result.Error)
+		}
+	})
+	t.Run("a marker meta in a browser render", func(t *testing.T) {
+		spy := &browserSpyConverter{html: essay, status: http.StatusOK, convertFn: tagStripConverter().Convert}
+		result := wallHarvester(t, spy, browserOn()).Fetch(context.Background(), "https://essay.example.test/tides")
+		if result.Error != "" || result.Method != "browser-chrome" || result.Partial != "" {
+			t.Fatalf("the rendered page's own meta flagged it: method=%q partial=%q error=%q",
+				result.Method, result.Partial, result.Error)
+		}
+	})
+	t.Run("the marker's words opening the page text", func(t *testing.T) {
+		spy := &browserSpyConverter{convertFn: quoting.Convert}
+		h := pageHarvester(t, strings.Replace(essay, forged, "", 1), spy, browserOn())
+		result := h.Fetch(context.Background(), "https://essay.example.test/tides")
+		if result.Error != "" || result.Partial != "" || result.Method != rungDirect || spy.browserCalls != 0 {
+			t.Fatalf("the page's own text flagged it: method=%q partial=%q renders=%d error=%q",
+				result.Method, result.Partial, spy.browserCalls, result.Error)
+		}
+		if !strings.Contains(result.Content, "a sentence the page itself opens with") {
+			t.Fatalf("the page's own words were dropped: %.200q", result.Content)
+		}
+	})
+	quoted := partialMarkerPrefix + "a line the document itself opens with\n\n" +
+		strings.Repeat("Notes on the estuary tides and the birds that winter there. ", 20)
+	wall := "<html>checking your browser</html>"
+	for _, door := range []struct{ name, contentType, method string }{
+		{"the marker's words opening a plain-text document", "text/plain; charset=utf-8", "plain-text"},
+		{"the marker's words opening a reader's markdown", "", "jina"},
+	} {
+		t.Run(door.name, func(t *testing.T) {
+			serve := func(contentType string) roundTripFunc {
+				return func(request *http.Request) (*http.Response, error) {
+					if contentType == "" {
+						return response(request, http.StatusForbidden, "text/html", wall), nil
+					}
+					return response(request, http.StatusOK, contentType, quoted), nil
+				}
+			}
+			h := mustNew(t, Options{
+				CacheDir:    t.TempDir(),
+				Client:      &http.Client{Transport: serve(door.contentType)},
+				Chrome:      &http.Client{Transport: serve(door.contentType)},
+				Jina:        &http.Client{Transport: serve("text/plain")},
+				OA:          &http.Client{Transport: serve("")},
+				Converter:   &browserSpyConverter{},
+				BrowserRung: browserOff(),
+			})
+			result := h.Fetch(context.Background(), "https://essay.example.test/notes")
+			if result.Error != "" || result.Partial != "" || result.Method != door.method ||
+				!strings.Contains(result.Content, "a line the document itself opens with") {
+				t.Fatalf("the document's own text flagged it: method=%q partial=%q error=%q",
+					result.Method, result.Partial, result.Error)
+			}
+		})
 	}
 }

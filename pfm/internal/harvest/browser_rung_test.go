@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -36,6 +37,9 @@ type browserSpyConverter struct {
 	// set, answers per mode instead of html/status/err.
 	modes  []bool
 	render func(headless bool) (string, int, error)
+	// landed, when set, is the address every render lands on; unset, the
+	// render lands on the page requested.
+	landed *string
 }
 
 func (spy *browserSpyConverter) Convert(ctx context.Context, kind, source string, body []byte) (string, error) {
@@ -45,13 +49,21 @@ func (spy *browserSpyConverter) Convert(ctx context.Context, kind, source string
 	return "", errors.New("spy converter refuses every conversion")
 }
 
-func (spy *browserSpyConverter) FetchBrowser(_ context.Context, _ string, headless bool) (string, int, error) {
+func (spy *browserSpyConverter) FetchBrowser(
+	_ context.Context,
+	source string,
+	headless bool,
+) (string, int, string, error) {
 	spy.browserCalls++
 	spy.modes = append(spy.modes, headless)
-	if spy.render != nil {
-		return spy.render(headless)
+	if spy.landed != nil {
+		source = *spy.landed
 	}
-	return spy.html, spy.status, spy.err
+	if spy.render != nil {
+		html, status, err := spy.render(headless)
+		return html, status, source, err
+	}
+	return spy.html, spy.status, source, spy.err
 }
 
 func wallHarvester(t *testing.T, converter Converter, browserRung *bool) *Harvester {
@@ -441,5 +453,138 @@ func TestBrowserHeadedRetryFailureKeepsTheWallVerdict(t *testing.T) {
 	}
 	if fmt.Sprint(spy.modes) != "[true false]" {
 		t.Fatalf("browser modes=%v, want [true false]", spy.modes)
+	}
+}
+
+// catalogOrRender is a main-content converter that keeps only the lead of the
+// catalog card grid (flagged partial by the recall gate, a render may complete
+// it) and converts every other page — a render — by stripping its tags.
+func catalogOrRender(ctx context.Context, kind, source string, body []byte) (string, error) {
+	if strings.Contains(string(body), "<species-card") {
+		return leadOnlyConverter().Convert(ctx, kind, source, body)
+	}
+	return tagStripConverter().Convert(ctx, kind, source, body)
+}
+
+// TestABrowserRenderThatIsNotTheRequestedPageNeverReplacesTheFlaggedPage: a
+// flagged HTTP page is kept for the browser rung to beat. A render that landed
+// at another address (a load-time redirect to an age gate or a login), a render
+// whose address the browser did not report, and a render served at the
+// thread's own address that the thread's extractor does not claim (a consent
+// interstitial) are each an unflagged page of any length, never the page
+// asked for: the flagged page is stored. A render that IS the page still wins,
+// at the page's canonical address too.
+func TestABrowserRenderThatIsNotTheRequestedPageNeverReplacesTheFlaggedPage(t *testing.T) {
+	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
+	bodies := []string{long, long, long}
+	flaggedThread := redditThreadPage(4, bodies, true)
+	completeThread := redditThreadPage(4, append(append([]string(nil), bodies...), "Agreed."), false)
+	thread := "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/"
+	canonicalThread := "https://reddit.com/r/examplesub/comments/ccc333/loader_thread"
+	ageGate := "https://www.reddit.com/over18?dest=https%3A%2F%2Fwww.reddit.com%2Fr%2Fexamplesub%2F"
+	interstitial := "<html><body><main><h1>Before you continue</h1><p>" +
+		strings.Repeat("This community may hold mature content, so confirm your age to view it. ", 12) +
+		"</p></main></body></html>"
+	guide := "https://guide.example.test/birds"
+	login := "https://guide.example.test/login?next=%2Fbirds"
+	loginPage := "<html><body><main><h1>Sign in</h1><p>" +
+		strings.Repeat("Sign in to the estuary trust to keep reading the field guide and its species notes. ", 10) +
+		"</p></main></body></html>"
+	fullCatalog := "<html><body><main><h1>Field guide to coastal birds</h1><p>" +
+		strings.Repeat("Species notes on nesting in the dunes and feeding on the mudflats at low tide. ", 12) +
+		"</p></main></body></html>"
+	unreported := ""
+	for _, tc := range []struct {
+		name, page, source, render, method string
+		landed                             *string
+	}{
+		{"a thread render redirected to an age gate", flaggedThread, thread, interstitial, rungDirect, &ageGate},
+		{"an unclaimed interstitial at the thread's address", flaggedThread, thread, interstitial, rungDirect, nil},
+		{"a thread render at an unreported address", flaggedThread, thread, completeThread, rungDirect, &unreported},
+		{"a page render redirected to a login", catalogPage(), guide, loginPage, rungDirect, &login},
+		{
+			"the complete thread at its canonical address", flaggedThread, thread, completeThread, "browser-chrome",
+			&canonicalThread,
+		},
+		{"the complete page at its own address", catalogPage(), guide, fullCatalog, "browser-chrome", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			spy := &browserSpyConverter{
+				html:      tc.render,
+				status:    http.StatusOK,
+				convertFn: catalogOrRender,
+				landed:    tc.landed,
+			}
+			h := pageHarvester(t, tc.page, spy, browserOn())
+			result := h.Fetch(context.Background(), tc.source)
+			if result.Error != "" || result.Method != tc.method || spy.browserCalls == 0 {
+				t.Fatalf("method=%q rungs=%v renders=%d error=%q, want %s",
+					result.Method, result.Rungs, spy.browserCalls, result.Error, tc.method)
+			}
+			if kept := tc.method == rungDirect; kept != (result.Partial != "") {
+				t.Fatalf("stored by %s with partial=%q: a kept page stays flagged, a winning render is complete",
+					result.Method, result.Partial)
+			}
+			for _, foreign := range []string{"Before you continue", "Sign in to the estuary trust"} {
+				if strings.Contains(result.Content, foreign) {
+					t.Fatalf("a render that is not the requested page was stored: %.300q", result.Content)
+				}
+			}
+		})
+	}
+}
+
+// TestImagesAreLocalizedOnlyForTheStoredPage: the HTTP rung's page is flagged
+// and kept for the browser rung to beat. Its images are fetched only when it
+// is the page stored — never for a page the browser render then supersedes.
+func TestImagesAreLocalizedOnlyForTheStoredPage(t *testing.T) {
+	withFigure := func(ctx context.Context, kind, source string, body []byte) (string, error) {
+		converted, err := catalogOrRender(ctx, kind, source, body)
+		if err == nil && strings.Contains(string(body), "<species-card") {
+			converted += "\n\n![Estuary map](/figure.png)"
+		}
+		return converted, err
+	}
+	rendered := "<html><body><main><p>" +
+		strings.Repeat("Species notes on nesting in the dunes and feeding on the mudflats at low tide. ", 12) +
+		"</p></main></body></html>"
+	for _, tc := range []struct {
+		name, render, method string
+		figureFetches        int32
+	}{
+		{"the browser render supersedes the flagged page", rendered, "browser-chrome", 0},
+		{"the flagged page is stored", "<html><body><h1>Prove your humanity</h1></body></html>", rungDirect, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var figureFetches atomic.Int32
+			site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if request.URL.Path == "/figure.png" {
+					figureFetches.Add(1)
+					return response(request, http.StatusOK, "image/png", "\x89PNG\r\n\x1a\nfigure"), nil
+				}
+				return response(request, http.StatusOK, "text/html", catalogPage()), nil
+			})
+			missing := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				return response(request, http.StatusNotFound, "application/json", `{}`), nil
+			})
+			spy := &browserSpyConverter{html: tc.render, status: http.StatusOK, convertFn: withFigure}
+			h := mustNew(t, Options{
+				CacheDir:    t.TempDir(),
+				Client:      &http.Client{Transport: site},
+				Chrome:      &http.Client{Transport: site},
+				Jina:        &http.Client{Transport: missing},
+				OA:          &http.Client{Transport: missing},
+				Converter:   spy,
+				BrowserRung: browserOn(),
+			})
+			result := h.Fetch(context.Background(), "https://guide.example.test/birds")
+			if result.Error != "" || result.Method != tc.method {
+				t.Fatalf("method=%q rungs=%v error=%q, want %s", result.Method, result.Rungs, result.Error, tc.method)
+			}
+			if got := figureFetches.Load(); got != tc.figureFetches {
+				t.Fatalf("the figure was fetched %d time(s), want %d: images are localized for the stored page only",
+					got, tc.figureFetches)
+			}
+		})
 	}
 }

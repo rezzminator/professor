@@ -60,6 +60,10 @@ type BrowserFetchRequest struct {
 	// site's render presses (harvest.SitePressesLoaders); false is omitted and
 	// the worker scrolls read-only.
 	PressLoaders bool `json:"press_loaders,omitempty"`
+	// MarkerToken is carried by the lazy-load marker the worker stamps on an
+	// incomplete render (browser.py mark_incomplete); Go reads back only a marker
+	// holding its own token, never one a page ships (harvest.BrowserMarkerToken).
+	MarkerToken string `json:"marker_token,omitempty"`
 }
 
 // browserWorkerRequest is the wire shape of one worker op.
@@ -99,23 +103,27 @@ func (worker *BrowserWorker) Fetch(
 	timeoutMS int,
 	onAsk func(url string) error,
 ) (string, int, error) {
-	return worker.FetchPinned(ctx, source, proxy, "", "", headless, false, timeoutMS, onAsk)
+	html, status, _, err := worker.FetchPinned(ctx, source, proxy, "", "", "", headless, false, timeoutMS, onAsk)
+	return html, status, err
 }
 
 // FetchPinned is Fetch with Chrome's resolver pinned to an already-validated
 // address (see BrowserFetchRequest.HostResolverRules) and the navigation
 // carrying referer (see BrowserFetchRequest.Referer), pressing the page's
-// load-more buttons only when pressLoaders (see BrowserFetchRequest.PressLoaders).
-// An empty rule, an empty referer and a false pressLoaders behave exactly like Fetch.
+// load-more buttons only when pressLoaders (see BrowserFetchRequest.PressLoaders),
+// an incomplete render stamped with markerToken (see BrowserFetchRequest.MarkerToken).
+// It also returns finalURL: the address of the document html holds, after every
+// redirect; "" when the worker did not report one. An empty rule, an empty
+// referer, an empty token and a false pressLoaders behave exactly like Fetch.
 func (worker *BrowserWorker) FetchPinned(
 	ctx context.Context,
-	source, proxy, hostResolverRules, referer string,
+	source, proxy, hostResolverRules, referer, markerToken string,
 	headless, pressLoaders bool,
 	timeoutMS int,
 	onAsk func(url string) error,
-) (string, int, error) {
+) (string, int, string, error) {
 	if strings.TrimSpace(source) == "" {
-		return "", 0, errors.New("browser fetch url is empty")
+		return "", 0, "", errors.New("browser fetch url is empty")
 	}
 	body, err := json.Marshal(
 		browserWorkerRequest{
@@ -128,15 +136,16 @@ func (worker *BrowserWorker) FetchPinned(
 				TimeoutMS:         timeoutMS,
 				Referer:           referer,
 				PressLoaders:      pressLoaders,
+				MarkerToken:       markerToken,
 			},
 		},
 	)
 	if err != nil {
-		return "", 0, fmt.Errorf("marshal browser fetch request: %w", err)
+		return "", 0, "", fmt.Errorf("marshal browser fetch request: %w", err)
 	}
 	line, stderr, err := worker.requestInteractive(ctx, "fetch", body, onAsk)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	var response struct {
 		OK       bool   `json:"ok"`
@@ -144,17 +153,18 @@ func (worker *BrowserWorker) FetchPinned(
 		Status   int    `json:"status"`
 		Headless bool   `json:"headless"`
 		Error    string `json:"error"`
+		FinalURL string `json:"final_url"`
 	}
 	if err := json.Unmarshal(line, &response); err != nil {
-		return "", 0, fmt.Errorf("decode browser worker response JSON: %w (stderr: %s)", err, stderr)
+		return "", 0, "", fmt.Errorf("decode browser worker response JSON: %w (stderr: %s)", err, stderr)
 	}
 	if !response.OK {
 		if response.Error == "" {
 			response.Error = "browser worker returned ok=false without error"
 		}
-		return "", 0, errors.New(response.Error)
+		return "", 0, "", errors.New(response.Error)
 	}
-	return response.HTML, response.Status, nil
+	return response.HTML, response.Status, response.FinalURL, nil
 }
 
 // Smoke invokes the browser worker's no-launch importability probe.

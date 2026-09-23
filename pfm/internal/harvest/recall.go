@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"net"
@@ -43,15 +44,44 @@ const partialMarkerPrefix = "> **Partial artifact:** "
 // LAZY_LOAD_MARKER).
 const lazyLoadMarker = "harvester-lazy-load"
 
+// lazyLoadTokenAttr is the attribute on that marker carrying the token the
+// worker was sent (browser.py MARKER_TOKEN_ATTR).
+const lazyLoadTokenAttr = "data-harvester-token"
+
+// browserMarkerToken is this process's lazy-load marker token. The browser
+// worker stamps it on the marker it leaves, and lazyLoadIncomplete reads back
+// only a marker carrying it: a page cannot know it, so a page shipping a meta
+// of the marker's name in its own markup never flags itself partial.
+var browserMarkerToken = rand.Text()
+
+// BrowserMarkerToken is the token a BrowserFetcher adapter sends the browser
+// worker with every render.
+func BrowserMarkerToken() string { return browserMarkerToken }
+
 // withPartial prefixes content with the partial marker for reason; an empty
-// reason returns content unchanged, and so does blank content: the marker is a
+// reason returns content unflagged, and so does blank content: the marker is a
 // note ABOUT an artifact, and nothing flagged must never read as something.
+// The content is pageText first: only this function writes the marker.
 func withPartial(content, reason string) string {
+	content = pageText(content)
 	reason = strings.Join(strings.Fields(reason), " ")
 	if reason == "" || strings.TrimSpace(content) == "" {
 		return content
 	}
 	return partialMarkerPrefix + reason + "\n\n" + content
+}
+
+// pageText is converted page text with the page's own copy of the partial
+// marker defused: text that opens with partialMarkerPrefix gets its ">"
+// escaped, so it reads as the page wrote it and is never read back as the
+// harvester's flag. Every door converted text enters by passes it through:
+// withPartial, convertFetchedDocument, the reader rungs and the OCR rescues.
+func pageText(content string) string {
+	trimmed := strings.TrimLeft(content, " \t\r\n")
+	if !strings.HasPrefix(trimmed, partialMarkerPrefix) {
+		return content
+	}
+	return content[:len(content)-len(trimmed)] + `\` + trimmed
 }
 
 // partialBody is content without its partial marker line — what the ladder's
@@ -127,7 +157,8 @@ func errorReasonClass(err error, fallback string) string {
 }
 
 // lazyLoadIncomplete returns the browser worker's incomplete-lazy-load note
-// from doc, or "" when the render carried none.
+// from doc, or "" when the render carried none. A marker without this
+// process's token is the page's own markup, never the worker's note.
 func lazyLoadIncomplete(doc *html.Node) string {
 	var note string
 	var walk func(*html.Node)
@@ -136,7 +167,8 @@ func lazyLoadIncomplete(doc *html.Node) string {
 			return
 		}
 		if node.Type == html.ElementNode && node.DataAtom == atom.Meta &&
-			strings.EqualFold(nodeAttr(node, "name"), lazyLoadMarker) {
+			strings.EqualFold(nodeAttr(node, "name"), lazyLoadMarker) &&
+			nodeAttr(node, lazyLoadTokenAttr) == browserMarkerToken {
 			note = "lazy-loaded content " + strings.TrimSpace(nodeAttr(node, "content"))
 			return
 		}
@@ -208,15 +240,15 @@ var (
 	bareURLRe             = regexp.MustCompile(`https?://\S+`)
 )
 
-// markdownWordCount counts the words of converted markdown a reader reads:
-// link targets, image syntax, bare URLs and any residual tags are not words of
-// the page.
-func markdownWordCount(markdown string) int {
+// markdownWords returns the lower-cased words of converted markdown a reader
+// reads: link targets, image syntax, bare URLs and any residual tags are not
+// words of the page.
+func markdownWords(markdown string) []string {
 	text := markdownImageSyntaxRe.ReplaceAllString(markdown, " ")
 	text = markdownLinkTargetRe.ReplaceAllString(text, "]")
 	text = bareURLRe.ReplaceAllString(text, " ")
 	text = htmlTagRe.ReplaceAllString(text, " ")
-	return len(shellWordRe.FindAllString(text, -1))
+	return shellWordRe.FindAllString(strings.ToLower(text), -1)
 }
 
 // recallMeasure is one extraction measured against its page.
@@ -226,7 +258,27 @@ type recallMeasure struct {
 }
 
 func measureRecall(visible int, markdown string) recallMeasure {
-	return recallMeasure{extracted: markdownWordCount(markdown), visible: visible}
+	return recallMeasure{extracted: len(markdownWords(markdown)), visible: visible}
+}
+
+// measureContentRecall measures a WHOLE-DOM conversion: only its words that
+// are the page's visible words count, each at most as often as the page shows
+// it. A full-DOM conversion carries the page chrome the visible words exclude
+// (navigation, footers, forms); counted by length, that chrome stands in for
+// content the conversion dropped, and the fallback always reads complete.
+func measureContentRecall(visible []string, markdown string) recallMeasure {
+	remaining := make(map[string]int, len(visible))
+	for _, word := range visible {
+		remaining[word]++
+	}
+	kept := 0
+	for _, word := range markdownWords(markdown) {
+		if remaining[word] > 0 {
+			remaining[word]--
+			kept++
+		}
+	}
+	return recallMeasure{extracted: kept, visible: len(visible)}
 }
 
 // low reports an extraction below the recall floor on a page long enough to

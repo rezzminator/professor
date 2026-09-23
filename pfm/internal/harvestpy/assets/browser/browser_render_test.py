@@ -444,16 +444,22 @@ def test_render_page_never_presses_an_unregistered_page():
     assert outcome["expanded"] == 0, outcome
 
 
-def run_handle_fetch(request):
-    page = FeedPage(batches=0, show_more=1)
+HANDLED_URL = "https://www.reddit.com/r/x/comments/1/"
+
+
+def handle_fetch_reply(page, request):
     saved = browser._blocking_ask
     browser._blocking_ask = lambda target: (True, None)
     try:
         with fake_patchright(FakeBrowser(page)):
-            reply = run(handle_fetch({"op": "fetch", "url": "https://www.reddit.com/r/x/comments/1/",
-                                      "proxy": "http://127.0.0.1:8431", **request}))
+            return run(handle_fetch({"op": "fetch", "url": HANDLED_URL, "proxy": "http://127.0.0.1:8431", **request}))
     finally:
         browser._blocking_ask = saved
+
+
+def run_handle_fetch(request):
+    page = FeedPage(batches=0, show_more=1)
+    reply = handle_fetch_reply(page, request)
     assert reply.get("ok"), reply
     return page
 
@@ -484,14 +490,14 @@ def test_render_page_keeps_the_page_when_scrolling_fails():
 
 def test_mark_incomplete_escapes_a_failed_scroll_reason():
     html = "<html><head><title>t</title></head><body>b</body></html>"
-    marked = mark_incomplete(html, {"stopped": "error", "error": 'boom "<script>"', "growing": False})
+    marked = mark_incomplete(html, {"stopped": "error", "error": 'boom "<script>"', "growing": False}, "t0k")
     assert 'content="incomplete: scrolling failed: boom &quot;&lt;script&gt;&quot;"' in marked, marked
 
 
 def test_mark_incomplete_stamps_only_an_incomplete_render():
     html = "<html><head><title>t</title></head><body>b</body></html>"
-    assert mark_incomplete(html, {"growing": False, "stopped": "stable", "rounds": 2}) == html
-    marked = mark_incomplete(html, {"growing": True, "stopped": "time-cap", "rounds": 9})
+    assert mark_incomplete(html, {"growing": False, "stopped": "stable", "rounds": 2}, "t0k") == html
+    marked = mark_incomplete(html, {"growing": True, "stopped": "time-cap", "rounds": 9}, "t0k")
     assert f'<meta name="{LAZY_LOAD_MARKER}"' in marked, marked
     assert marked.index(LAZY_LOAD_MARKER) < marked.index("<title>"), "the marker is not in <head>"
     assert "time-cap" in marked and "9 rounds" in marked, marked
@@ -522,9 +528,10 @@ def test_render_page_keeps_the_page_from_before_a_navigation_away():
         assert body == "x" * 500, f"{name}: not the page as it stood when scrolling began: {html[:200]}"
         assert OTHER_DOCUMENT not in html, f"{name}: the navigated-to document was returned"
         marker = (f'<meta name="{LAZY_LOAD_MARKER}" content="incomplete: the page navigated away to {redacted} '
-                  f'while scrolling; kept as it was before scrolling">')
+                  f'while scrolling; kept as it was before scrolling"')
         assert marker in html, f"{name}: {html[:400]}"
-        assert outcome == {"stopped": "navigated", "navigated_to": redacted, "growing": False}, (name, outcome)
+        assert outcome == {"stopped": "navigated", "navigated_to": redacted, "growing": False,
+                           "url": "https://forum.example.test/t/1?token=s3cret"}, (name, outcome)
         lines = [line for line in stderr.splitlines() if "https://forum.example.test/t/1" in line and redacted in line]
         assert len(lines) == 1, f"{name}: {stderr}"
         assert "s3cret" not in stderr and "s3cret" not in html, f"{name}: an unredacted URL leaked"
@@ -562,7 +569,8 @@ def test_render_page_returns_a_document_reloaded_at_the_same_url():
 
 def test_mark_incomplete_escapes_a_navigated_to_url():
     html = "<html><head><title>t</title></head><body>b</body></html>"
-    marked = mark_incomplete(html, {"stopped": "navigated", "navigated_to": 'https://x.test/"<a>', "growing": False})
+    marked = mark_incomplete(html, {"stopped": "navigated", "navigated_to": 'https://x.test/"<a>', "growing": False},
+                             "t0k")
     assert 'navigated away to https://x.test/&quot;&lt;a&gt; while scrolling' in marked, marked
 
 
@@ -622,6 +630,39 @@ def test_headless_render_refuses_unreadable_engine_metadata():
         assert html == "" and status is None and error and "userAgentData" in error, (error, html[:60])
         assert not any(web_navigations(c) for c in fake.contexts), page.goto_calls
         assert fake.contexts[0].closed, "the metadata context was left open"
+
+
+class RedirectingPage(FeedPage):
+    """A page whose navigation lands elsewhere: a load-time redirect to a
+    consent, login or age-gate page, before any scrolling begins."""
+
+    def __init__(self, landing, **kwargs):
+        super().__init__(**kwargs)
+        self.landing = landing
+
+    async def goto(self, url, **kwargs):
+        response = await super().goto(url, **kwargs)
+        if url != ENGINE_INFO_URL:
+            self.url = self.landing
+        return response
+
+
+def test_handle_fetch_reports_the_address_the_render_landed_on():
+    landing = "https://www.reddit.com/over18?dest=https%3A%2F%2Fwww.reddit.com%2Fr%2Fx%2Fcomments%2F1%2F"
+    for name, page, want in [
+        ("no redirect", FeedPage(batches=0), HANDLED_URL),
+        ("a load-time redirect", RedirectingPage(landing, batches=0), landing),
+    ]:
+        reply = handle_fetch_reply(page, {})
+        assert reply.get("ok") and reply.get("final_url") == want, (name, reply.get("final_url"), want)
+
+
+def test_the_incomplete_stamp_carries_the_request_marker_token():
+    reply = handle_fetch_reply(FeedPage(batches=3, fail_on_scroll=1), {"marker_token": "t0k-9f"})
+    assert reply.get("ok"), reply
+    stamp = f'<meta name="{LAZY_LOAD_MARKER}" content="incomplete: scrolling failed: '
+    assert stamp in reply["html"], reply["html"][:300]
+    assert 'data-harvester-token="t0k-9f"' in reply["html"], f"the stamp lacks the request token: {reply['html'][:300]}"
 
 
 if __name__ == "__main__":

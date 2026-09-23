@@ -14,7 +14,7 @@ import (
 // Python process must never be attempted.
 func TestFetchBrowserUsesConfiguredRunner(t *testing.T) {
 	converter, worker := newFakeBrowserWorker(t)
-	html, status, err := converter.FetchBrowser(
+	html, status, _, err := converter.FetchBrowser(
 		context.Background(),
 		"https://93.184.216.34/f13",
 		true,

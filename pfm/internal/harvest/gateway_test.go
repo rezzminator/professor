@@ -20,14 +20,16 @@ type browserConverter struct {
 	reply func(headless bool) (string, int, error)
 }
 
-func (b *browserConverter) FetchBrowser(_ context.Context, _ string, headless bool) (string, int, error) {
+// FetchBrowser answers with reply, the render landing on the page requested.
+func (b *browserConverter) FetchBrowser(_ context.Context, source string, headless bool) (string, int, string, error) {
 	b.mu.Lock()
 	b.calls = append(b.calls, headless)
 	b.mu.Unlock()
 	if b.reply == nil {
-		return "", 0, errors.New("no browser reply configured")
+		return "", 0, "", errors.New("no browser reply configured")
 	}
-	return b.reply(headless)
+	html, status, err := b.reply(headless)
+	return html, status, source, err
 }
 
 func (b *browserConverter) headlessFlags() []bool {

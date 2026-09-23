@@ -88,7 +88,7 @@ func archiveFormat(path string) string {
 		return kindZIP
 	}
 	if strings.HasSuffix(low, ".7z") {
-		return "7z"
+		return kind7Z
 	}
 	if strings.HasSuffix(low, ".rar") {
 		return kindRAR
@@ -108,7 +108,7 @@ func archiveFormat(path string) string {
 	case head[0] == 'P' && head[1] == 'K':
 		return kindZIP
 	case head[0] == '7' && head[1] == 'z' && head[2] == 0xbc && head[3] == 0xaf:
-		return "7z"
+		return kind7Z
 	case strings.HasPrefix(string(head), "Rar!"):
 		return kindRAR
 	case head[0] == 0x1f && head[1] == 0x8b:
@@ -137,7 +137,7 @@ func listArchiveContext(ctx context.Context, path string) ([]Member, error) {
 		return listZip(ctx, path)
 	case kindTAR:
 		return listTar(ctx, path)
-	case "7z":
+	case kind7Z:
 		return list7z(ctx, path)
 	case kindRAR:
 		return listRAR(ctx, path)
@@ -484,7 +484,7 @@ func readArchiveMemberContext(ctx context.Context, path, name string) ([]byte, e
 		return readZip(ctx, path, name)
 	case kindTAR:
 		return readTar(ctx, path, name)
-	case "7z":
+	case kind7Z:
 		return read7z(ctx, path, name)
 	case kindRAR:
 		return readRAR(ctx, path, name)

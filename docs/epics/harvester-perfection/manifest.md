@@ -1,6 +1,6 @@
 # Epic: harvester-perfection
 
-**Status:** IN_PROGRESS **Owner:** the main loop of the harvester session (god speed: resolve ambiguity, finish, report decisions at the end; stop only on failure). **Branch:** `wave/consent` in `.worktrees/consent`, fast-forwarded into `develop` item by item. Never pushed: publication waits for the user's in-turn ask.
+**Status:** DONE (report: `report.md`) **Owner:** the main loop of the harvester session (god speed: resolve ambiguity, finish, report decisions at the end; stop only on failure). **Branch:** `wave/consent` in `.worktrees/consent`, fast-forwarded into `develop` item by item. Never pushed: publication waits for the user's in-turn ask.
 
 ## Goal
 

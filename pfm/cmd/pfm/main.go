@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 
+	callmetercmd "github.com/rezzminator/professor/pfm/internal/callmeter/command"
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -57,11 +58,12 @@ var topLevelSubcommands = []string{
 	pfmengine.MustLookup(pfmengine.OpenCode).LongName,
 	"usage-hook", installCommand, "uninstall", updateCommand, initCommand, whoamiCommand,
 	"issues", mcpCommand, pfmengine.MustLookup(pfmengine.Codex).LongName, internalCommand, "log",
+	callmeterCommand,
 }
 
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
-	"agent-open", "chat-server", "claude-launch", "claude-version", "clear-kill",
+	"agent-open", callmeterCommand, "chat-server", "claude-launch", "claude-version", "clear-kill",
 	"codex-launch", "compact-nudge", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
 	"launcher-repair", "primary-get", "primary-set", "reload-intercept", "rr-dir",
@@ -122,6 +124,8 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 		return runIndex(args[1:], stdout, stderr, runtime, clock.Real)
 	case "log":
 		return runLog(args[1:], stdout, stderr, runtime)
+	case "callmeter":
+		return callmetercmd.CLI(args[1:], stdout, stderr, runtime)
 	case "doctor":
 		return doctor.Run(
 			args[1:],
@@ -194,6 +198,7 @@ func printUsage(w io.Writer) {
 		"  config    initialize, inspect, or validate machine configuration",
 		"  doctor    inspect fleet database and jail health",
 		"  log       read this home's activity log: --since --level --chat --cmd --follow",
+		"  callmeter report which files, commands and calls filled agent contexts; backfill from transcripts",
 		"  version   print the pfm version", "", "wiring commands:",
 		"  name-sync converge live chat window names",
 		"  statusline render the native Claude status line",
@@ -439,6 +444,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "explore-deny" {
 		return hookentry.ExploreDeny(os.Stdin, stdout, stderr)
 	}
+	if len(args) != 0 && args[0] == "callmeter" {
+		return hookentry.Callmeter(os.Stdin, stderr, paths.OSEnv{})
+	}
 	if len(args) != 0 && args[0] == "rr-dir" {
 		return runRRDirEntry(os.Stdin, stdout, stderr, paths.OSEnv{})
 	}
@@ -514,7 +522,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|chat-server|claude-launch|claude-version|clear-kill|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|callmeter|chat-server|claude-launch|claude-version|clear-kill|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

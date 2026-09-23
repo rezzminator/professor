@@ -1,0 +1,3 @@
+{"type":"user","message":{"role":"user","content":"hi"},"timestamp":"2026-09-22T23:16:40.000Z"}
+{"type":"assistant","message":{"id":"msg_x","content":[{"type":"tool_use","id":"toolu_x"
+{"type":"user","message":{"role":"user","content":"after"},"timestamp":"2026-09-22T23:16:50.000Z"}

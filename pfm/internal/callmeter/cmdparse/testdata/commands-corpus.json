@@ -1,0 +1,3483 @@
+[
+ {
+  "name": "py-heredoc-edit-then-bash-n-grep",
+  "covers": "python3 - <<EOF with open(var) and a triple-quoted string; bash -n script; && and ; separators",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "infra/demo/up.sh"
+  ],
+  "command": "python3 - <<'EOF'\np='infra/demo/up.sh'; s=open(p).read()\nold='''  bash \"$ROOT/infra/prepare-mounts.sh\" \"$ROOT\"\n'''\nassert s.count(old)==1; open(p,'w').write(s.replace(old,''))\nEOF\nbash -n infra/demo/up.sh && grep -c prepare-mounts infra/demo/up.sh; grep -n \"docker rm\\|compose.*run\" infra/demo/up.sh",
+  "parts": [
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/infra/demo/up.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/infra/demo/up.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/infra/demo/up.sh",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/infra/demo/up.sh",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "py-heredoc-open-literal",
+  "covers": "python3 - <<EOF reading a literal open() path",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "infra/cards/deck.html"
+  ],
+  "command": "python3 - <<'EOF'\ns=open(\"infra/cards/deck.html\").read()\ni=s.index(\"'alpha beta-'\")\na=s.rfind(\"\\n  (function\",0,i); a=max(a, s.rfind(\"<script\",0,i))\nprint(s[a:i+1][:9000])\nEOF",
+  "parts": [
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/infra/cards/deck.html",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "cd-then-py-heredoc-write",
+  "covers": "cd X && python3 - <<EOF open(p) then open(p,\"w\"); the python part resolves against X",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/installer/expected_hooks.go"
+  ],
+  "command": "cd /tmp/demo-proj/pfm && python3 - <<'EOF'\np=\"internal/installer/expected_hooks.go\"\ns=open(p).read()\ns=s.replace('\\t\"example.com/demo/internal/appendix\"\\n','')\nopen(p,\"w\").write(s)\nEOF\ngo build ./... 2>&1 | head -20",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/installer/expected_hooks.go",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "go",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "cd-then-py-heredoc-loop-then-grep",
+  "covers": "cd X && python3 - <<E with a for over literal names; the later grep resolves in X",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "templates/global/agents/tracer.md",
+   "templates/global/agents/mapper.md"
+  ],
+  "command": "cd /tmp/demo-proj/templates/global/agents && python3 - <<'E'\nfor f in ('tracer.md','mapper.md'):\n    t=open(f).read(); a=' alpha beta; gamma delta epsilon zeta.'\n    assert a in t; t=t.replace(a,' alpha beta.'); open(f,'w').write(t)\nE\ngrep -c \"gamma delta\" tracer.md mapper.md",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/templates/global/agents/tracer.md",
+      "action": "unknown",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/templates/global/agents/mapper.md",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/templates/global/agents/tracer.md",
+      "action": "search",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/templates/global/agents/mapper.md",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "cd-then-py-heredoc-missing-open",
+  "covers": "cd X && python3 - <<EOF open() of a file that no longer exists: exists false",
+  "cwd": "/tmp/demo-proj",
+  "dirs": [
+   "tmp/probe"
+  ],
+  "command": "cd /tmp/demo-proj/tmp/probe && python3 - <<'EOF'\nimport re\ns=open('page.html').read()\ni=s.find('alpha=3&amp;beta=true&amp;gamma=0,0,1')\nj=s.rfind('<demo-partial',0,i)\nk=s.find('</demo-partial>',j)\nprint(s[j:k+20])\nEOF",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/probe/page.html",
+      "action": "read-whole",
+      "exists": false
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "cat-append-heredoc-existing",
+  "covers": "cat >> f <<EOF (write to an existing file), heredoc prose attributes nothing",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "tmp/demo/checkpoint.md"
+  ],
+  "command": "cat >> tmp/demo/checkpoint.md <<'EOF'\n- up.sh: removed the call to infra/prepare-mounts.sh (alpha beta gamma; delta never ran since). Rebuild relaunched: task alpha, monitor beta, log scratchpad/up.log.\nEOF\necho ok",
+  "parts": [
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/demo/checkpoint.md",
+      "action": "write",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "cat-append-heredoc-missing",
+  "covers": "cat >> f <<EOF to an absolute path absent at parse time: write, exists false",
+  "cwd": "/tmp/demo-proj",
+  "command": "cat >> /tmp/demo-proj/tmp/bench/wall/CHECKPOINT.md <<'EOF'\n- T2 DONE alpha (9 files, clean). T2b DISPATCHED (beta, gamma) brief merge/T2b.md. Then: verify T2b -> commit -> T2c -> T3 -> T4.\nEOF",
+  "parts": [
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/bench/wall/CHECKPOINT.md",
+      "action": "write",
+      "exists": false
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "cd-nonliteral-then-cat-write-python-script",
+  "covers": "cd \"$VAR\" stops relative attribution; cat > f <<EOF, python3 script.py > out, wc and head",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "prompts/codex.md"
+  ],
+  "command": "cd \"$TMPDIR/probe\" && cat > mkarg.py <<'EOF'\nimport json,sys\nprint(sys.argv[1]+\"=\"+json.dumps(open(sys.argv[2]).read()))\nEOF\nmkdir -p run1 && python3 mkarg.py developer_instructions /tmp/demo-proj/prompts/codex.md > arg_dev.txt && wc -c arg_dev.txt && head -c 200 arg_dev.txt",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "mkdir",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "python3",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/prompts/codex.md",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "cat-gt-heredoc-then-gofmt",
+  "covers": "cat > f <<EOF of a new file, then an unknown program (gofmt) naming it: unknown attributes only existing files",
+  "cwd": "/tmp/demo-proj/pfm",
+  "command": "cat > /tmp/demo-proj/tmp/testfmt.go <<'EOF'\npackage main\n\nfunc sizeBadge(x int) string {\n\tif x == 1 { return \"a\" }\n\treturn \"b\"\n}\nEOF\ngofmt -l /tmp/demo-proj/tmp/testfmt.go\ngofmt /tmp/demo-proj/tmp/testfmt.go",
+  "parts": [
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/testfmt.go",
+      "action": "write",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "gofmt",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "gofmt",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "cd-cat-empty-heredoc-rm-grep",
+  "covers": "cd X; cat > f <<EOF with an empty body, rm, grep -A piped to head",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/resolve/resolve_test.go"
+  ],
+  "command": "cd /tmp/demo-proj/pfm; cat > internal/resolve/resolve_couldnotrun_test.go.tmp <<'EOF'\nEOF\nrm internal/resolve/resolve_couldnotrun_test.go.tmp; grep -n \"^import (\" -A12 internal/resolve/resolve_test.go | head -14",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/resolve/resolve_couldnotrun_test.go.tmp",
+      "action": "write",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "rm",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/resolve/resolve_test.go",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "bash-c-for-glob-loop",
+  "covers": "bash -c with a for over a glob, $(…) inside, [ -n ] &&; then echo and a pipeline",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "tmp/sock/cc-1"
+  ],
+  "command": "bash -c 'for s in /tmp/demo-proj/tmp/sock/c[cx]-*; do n=$(basename $s); w=$(tmux -S $s list-windows -F \"#{window_name}|#{set-titles}|#{set-titles-string}\" 2>/dev/null | head -1); [ -n \"$w\" ] && echo \"$n  window=[$w]\"; done'; echo; pfm ls --plain 2>/dev/null | head -12",
+  "parts": [
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "basename",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/sock/cc-1",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "tmux",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/sock/cc-1",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "pfm",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "sed-then-bash-c-grep-r",
+  "covers": "sed -n range; bash -c with grep -r over . (a directory attributes nothing)",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/harvestmcp/service.go"
+  ],
+  "command": "sed -n 812,820p pfm/internal/harvestmcp/service.go; bash -c 'grep -rln \"ERROR:\" --include=\"*.py\" . 2>/dev/null | head; grep -rn \"alpha beta\\|gamma after delta\" --include=\"*.py\" --include=\"*.md\" . 2>/dev/null | grep -v node_modules | head'",
+  "parts": [
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvestmcp/service.go",
+      "action": "read-range",
+      "range": "812,820",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "docker-exec-bash-c-never-parsed",
+  "covers": "docker exec … bash -c: a remote runner, its string never parsed",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "VERSION",
+   "pfm/cmd/pfm/main.go"
+  ],
+  "command": "docker exec demo bash -c 'cd /worktree/pfm && mkdir -p $HOME/.local/bin && go build -ldflags \"-X main.version=$(cat ../VERSION)\" -o $HOME/.local/bin/pfm ./cmd/pfm && export PATH=$HOME/.local/bin:$PATH && pfm --version && cd /worktree && pfm install --yes --skip-harvest --skip-themes --skip-engine codex 2>&1 | tail -30'",
+  "parts": [
+   {
+    "program": "docker",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "dev-sh-iso-run-string-is-a-gap",
+  "covers": "cd X && dev.sh iso run \"…\": the runner string attributes nothing (named gap); the script resolves against the directory the cd moved to, so an exec",
+  "cwd": "/tmp/demo-proj/pfm/internal/installer",
+  "files": [
+   ".claude/scripts/dev.sh",
+   "pfm/internal/callmeter/store.go"
+  ],
+  "command": "cd /tmp/demo-proj && .claude/scripts/dev.sh iso run \"go -C pfm test ./internal/callmeter/ -run TestFileColumns -count=1\" 2>&1 | tail -30",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": ".claude/scripts/dev.sh",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.claude/scripts/dev.sh",
+      "action": "exec",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "timeout-dev-sh-iso-run-then-bash-script",
+  "covers": "timeout N wrapper over a script path; a runner string naming a file; bash script.sh",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   ".claude/scripts/dev.sh",
+   "pfm/scripts/arch-check.sh"
+  ],
+  "command": "timeout 900 .claude/scripts/dev.sh iso run \"make -C pfm fmt-check lint-new\" 2>&1 | grep -v \"^#\\| Container \\| Image \" | tail -30; bash pfm/scripts/arch-check.sh 2>&1 | grep -v \" PASS\" | tail -20",
+  "parts": [
+   {
+    "program": ".claude/scripts/dev.sh",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.claude/scripts/dev.sh",
+      "action": "exec",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/scripts/arch-check.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "pipe-into-python-c",
+  "covers": "python3 -c on a pipe, nested quotes inside double quotes",
+  "cwd": "/tmp/demo-proj",
+  "command": "gh api repos/demo-org/demo-list/contents/ 2>&1 | python3 -c \"import json,sys; [print(f['name'], f['type']) for f in json.load(sys.stdin)]\"",
+  "parts": [
+   {
+    "program": "gh",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "python-c-multiline-open",
+  "covers": "python3 -c with a newline-led multi-line script reading a literal path",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   ".claude/commands/demo-gif.md"
+  ],
+  "command": "python3 -c \"\nline=[l for l in open('.claude/commands/demo-gif.md') if l.startswith('description:')][0]\nv=line[len('description:'):].strip()\nprint(len(v),'chars'); print('colon-space hazard:', ': ' in v)\"",
+  "parts": [
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.claude/commands/demo-gif.md",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "python-c-open-then-bash-script",
+  "covers": "python3 -c open(); bash script.sh | grep -i; echo with ${pipestatus[1]}",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   ".claude/commands/demo-gif.md",
+   "scripts/description-check.sh"
+  ],
+  "command": "python3 -c \"\nimport yaml,re\nt=open('.claude/commands/demo-gif.md').read().split('---')[1]\nd=yaml.safe_load(t)['description']; print(len(d), 'chars'); print(d)\"; bash scripts/description-check.sh 2>&1 | grep -i 'demo-gif\\|FAIL\\|parse' | head -5; echo \"desc-check-exit=${pipestatus[1]}\"",
+  "parts": [
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.claude/commands/demo-gif.md",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/scripts/description-check.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "cd-for-literal-list-sed-grep",
+  "covers": "cd X && for f in literal names; sed -n $f | grep; ls ../; tail ../file",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   ".cache/public/da98cbc4e849.md",
+   ".cache/public/514e9eeb33f3.md",
+   ".cache/stats.json"
+  ],
+  "command": "cd /tmp/demo-proj/.cache/public && for f in da98cbc4e849.md 514e9eeb33f3.md; do sed -n '1,12p' $f | grep -iE 'method|rungs|source:' ; echo --; done; ls -t ../ 2>/dev/null | head -3; tail -3 ../stats.json",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.cache/public/da98cbc4e849.md",
+      "action": "read-range",
+      "range": "1,12",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/.cache/public/514e9eeb33f3.md",
+      "action": "read-range",
+      "range": "1,12",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.cache/stats.json",
+      "action": "read-range",
+      "range": "-3",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "cd-for-wc-stdin-and-grep",
+  "covers": "cd X; for over literal paths with $(wc -l < $f) inside a string and grep $f",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "templates/global/agents/flights-speccer.md",
+   "templates/global/agents/flights-orchestrator.md"
+  ],
+  "command": "cd /tmp/demo-proj; for f in templates/global/agents/flights-speccer.md templates/global/agents/flights-orchestrator.md; do echo \"=== $f ($(wc -l < $f) lines)\"; grep -nEi 'alpha-suite|qa\\b|test pattern|convention|/quality|test' $f; done",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/templates/global/agents/flights-speccer.md",
+      "action": "read-whole",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/templates/global/agents/flights-orchestrator.md",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/templates/global/agents/flights-speccer.md",
+      "action": "search",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/templates/global/agents/flights-orchestrator.md",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "for-case-arms-conditional",
+  "covers": "for with $(…), case arms and [ ] && echo: conditional flags, no files",
+  "cwd": "/tmp/demo-proj",
+  "command": "for i in $(seq 1 60); do s=$(pfm chat status chain-probe 2>&1 | head -3); case \"$s\" in *idle*) echo \"$s\"; break;; *dead*) echo \"DEAD: $s\"; break;; esac; sleep 10; done; [ \"$i\" = 60 ] && echo \"TIMEOUT: $s\"",
+  "parts": [
+   {
+    "program": "seq",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "pfm",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "break",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "break",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "sleep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "cd-glob-loop-while-read-link-check",
+  "covers": "cd X && for over *.md glob; /usr/bin/grep by base name; sed; while read; [ ] || echo",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "docs/design/flights/flights.md",
+   "docs/design/flights/_index.md"
+  ],
+  "command": "cd /tmp/demo-proj/docs/design/flights && for f in *.md; do /usr/bin/grep -o '](\\([^)]*\\))' \"$f\" | sed 's/](\\(.*\\))/\\1/' | /usr/bin/grep -v '^#' | while read -r p; do t=\"${p%%#*}\"; [ -z \"$t\" ] && continue; [ -e \"$t\" ] || echo \"BROKEN $f -> $p\"; done; done; echo \"(link check done)\"",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "/usr/bin/grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/docs/design/flights/_index.md",
+      "action": "search",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/docs/design/flights/flights.md",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "/usr/bin/grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "read",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "continue",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "for-find-if-grep-q",
+  "covers": "cd X && for over $(find …); if grep -q \"$f\"; then echo; fi",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   ".claude/settings.json"
+  ],
+  "command": "cd /tmp/demo-proj && for f in $(find . -maxdepth 4 -name \"settings*.json\" -path \"*/.claude/*\" -not -path \"*/node_modules/*\" 2>/dev/null); do if grep -q \"alpha-test-output\\|scripts/notify.sh\" \"$f\" 2>/dev/null; then echo \"HIT: $f\"; fi; done 2>/dev/null | head -20",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "find",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "grep-to-scratch-then-while-read-redirect",
+  "covers": "grep | sort > f; wc -l < f; while read … done < f with if inside: write and read-whole of a missing file",
+  "cwd": "/tmp/demo-proj",
+  "dirs": [
+   "templates"
+  ],
+  "files": [
+   "docs/PLACEHOLDERS.md"
+  ],
+  "command": "grep -oE '\\{[A-Z][A-Z0-9_]+\\}' docs/PLACEHOLDERS.md | sort -u > /tmp/demo-proj/tmp/toks.txt; wc -l < /tmp/demo-proj/tmp/toks.txt; echo \"=== unconsumed in templates/ ===\"; while read -r t; do n=$(grep -rF \"$t\" templates/ 2>/dev/null | wc -l | tr -d ' '); if [ \"$n\" = \"0\" ]; then echo \"UNCONSUMED $t\"; fi; done < /tmp/demo-proj/tmp/toks.txt",
+  "parts": [
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/docs/PLACEHOLDERS.md",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "sort",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/toks.txt",
+      "action": "write",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/toks.txt",
+      "action": "read-whole",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/toks.txt",
+      "action": "read-whole",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "read",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "tr",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "subshell-cd-restores-dir",
+  "covers": "cd X && …; wc -l f; ( cd Y && node --test f | grep ); the subshell cd is local",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   ".worktrees/tokens-fix/templates/global/commands/tokens/token-ledger.test.mjs"
+  ],
+  "command": "cd /tmp/demo-proj/.worktrees/tokens-fix && git diff --stat HEAD | tail -4; wc -l templates/global/commands/tokens/token-ledger.test.mjs; (cd templates/global/commands/tokens && node --test token-ledger.test.mjs 2>&1 | grep -E \"^ℹ (tests|pass|fail)\" )",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.worktrees/tokens-fix/templates/global/commands/tokens/token-ledger.test.mjs",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "node",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.worktrees/tokens-fix/templates/global/commands/tokens/token-ledger.test.mjs",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "subshell-find-xargs-cat-then-grep",
+  "covers": "git status globs; ( cd X && find | xargs cat | wc ); grep resolves in the outer dir again",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/installer/global_fanout.go",
+   "pfm/cmd/pfm/doctor_global_agents.go"
+  ],
+  "command": "git status --short pfm/cmd/pfm/doctor_global_agents* pfm/internal/installer/global_fanout*; (cd pfm && find cmd/pfm -name '*.go' ! -name '*_test.go' | xargs cat | wc -l); grep -n \"func ReportGlobalAgents\" pfm/internal/installer/global_fanout.go",
+  "parts": [
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/cmd/pfm/doctor_global_agents.go",
+      "action": "unknown",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/installer/global_fanout.go",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "find",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/installer/global_fanout.go",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "cd-chain-sed-i-gofmt-glob-cd-back",
+  "covers": "cd A && sed -i && gofmt -w *.go && cd B && go vet && … && bash script | grep",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/callmeter/cmdparse/cmdparse_test.go",
+   "pfm/internal/callmeter/cmdparse/cmdparse.go",
+   "pfm/scripts/arch-check.sh"
+  ],
+  "command": "cd /tmp/demo-proj/pfm/internal/callmeter/cmdparse && sed -i '' '/^\\t\"strings\"$/d' cmdparse_test.go && gofmt -w *.go && cd /tmp/demo-proj/pfm && go vet ./internal/callmeter/cmdparse/ && go test ./internal/callmeter/cmdparse/ -count=1 2>&1 | tail -2 && bash scripts/arch-check.sh 2>&1 | grep -E \"C13|cmdpa\"",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/callmeter/cmdparse/cmdparse_test.go",
+      "action": "write",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "gofmt",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/callmeter/cmdparse/cmdparse.go",
+      "action": "unknown",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/callmeter/cmdparse/cmdparse_test.go",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "go",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "go",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/scripts/arch-check.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "cd-chain-make-cd-back-bash-script",
+  "covers": "cd A && make && cd B && bash script; unknown pfm",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/scripts/arch-check.sh",
+   "pfm/Makefile"
+  ],
+  "command": "cd /tmp/demo-proj/pfm && make lint-new 2>&1 | tail -2 && cd /tmp/demo-proj && bash pfm/scripts/arch-check.sh 2>&1 | grep -v PASS | head -3; pfm install --yes 2>&1 | grep -iE \"config.toml|appendix\" | head -5",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "make",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/scripts/arch-check.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "pfm",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "cd-sed-echo-cat-grep-head-separators",
+  "covers": "cd X && sed -n; echo ---; cat; grep; echo ---; head -5; grep -c",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/scripts/arch-check.sh",
+   "pfm/.arch/cmd-budget.txt",
+   "pfm/.arch/ceiling-src.txt",
+   "pfm/.arch/untested-sources.txt"
+  ],
+  "command": "cd /tmp/demo-proj/pfm && sed -n '1,60p' scripts/arch-check.sh; echo ---; cat .arch/cmd-budget.txt; grep -n 'doctor.go\\|installer.go' .arch/ceiling-src.txt; echo ---; head -5 .arch/untested-sources.txt; grep -c . .arch/untested-sources.txt",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/scripts/arch-check.sh",
+      "action": "read-range",
+      "range": "1,60",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/.arch/cmd-budget.txt",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/.arch/ceiling-src.txt",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/.arch/untested-sources.txt",
+      "action": "read-range",
+      "range": "1,5",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/.arch/untested-sources.txt",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "cd-sed-echo-grep-A",
+  "covers": "cd X && sed -n A,Bp f; echo; grep -A f",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/cmd/pfm/doctor.go"
+  ],
+  "command": "cd /tmp/demo-proj/pfm && sed -n '1180,1290p' cmd/pfm/doctor.go; echo '=== host overlay doctor'; grep -n 'func printHostOverlayDoctor' -A 40 cmd/pfm/doctor.go",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/cmd/pfm/doctor.go",
+      "action": "read-range",
+      "range": "1180,1290",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/cmd/pfm/doctor.go",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "command-v-ls-glob-sed-grep",
+  "covers": "command -v stays itself; ls with a glob is stat; gh; sed -n; grep",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "LICENSE",
+   "README.md"
+  ],
+  "command": "command -v vhs asciinema ttyd ffmpeg 2>&1; echo ---; ls LICENSE* 2>&1; echo ---; gh release view --json tagName -q .tagName 2>&1; echo ---; sed -n '1,12p' README.md; echo ---; grep -n \"^## \\|^### \\|Read before opting in\" README.md",
+  "parts": [
+   {
+    "program": "command",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/LICENSE",
+      "action": "stat",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "gh",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/README.md",
+      "action": "read-range",
+      "range": "1,12",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/README.md",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "command-ls-var-glob-sed",
+  "covers": "VAR=path; sed -n over $VAR glob; command ls unwraps to ls (stat); grep; pfm | grep -c",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/installer/expected_hooks.go",
+   "pfm/internal/doctor/doctor.go"
+  ],
+  "command": "R=/tmp/demo-proj/pfm; sed -n '78,106p' $R/internal/*/expected_hooks.go 2>/dev/null | head -40; command ls $R/internal/*/expected_hooks.go; grep -n 'ReportHooks' $R/internal/doctor/doctor.go; pfm doctor 2>&1 | grep -ci 'hook.*ok\\|ok.*hook'",
+  "parts": [
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/installer/expected_hooks.go",
+      "action": "read-range",
+      "range": "78,106",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/installer/expected_hooks.go",
+      "action": "stat",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/doctor/doctor.go",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "pfm",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "command-grep-directory",
+  "covers": "command grep -rln over a directory: unwrapped to grep, a directory attributes nothing",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/go.mod"
+  ],
+  "command": "command grep -rln \"docs/dev/trains\" pfm/ 2>/dev/null",
+  "parts": [
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "subshell-command-codex-dev-null",
+  "covers": "S=$(mktemp); ( cd \"$S\" && command codex … </dev/null | head ): /dev/null attributes nothing",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "a.txt"
+  ],
+  "command": "S=$(mktemp -d); (cd \"$S\" && command codex review --uncommitted -c model_reasoning_effort=low \"Review only a.txt\" </dev/null 2>&1 | head -6)",
+  "parts": [
+   {
+    "program": "mktemp",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "codex",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "cd-timeout-bash-script",
+  "covers": "cd X && timeout N bash script.sh | tail",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   ".worktrees/tokens-fix/.claude/scripts/dev.sh"
+  ],
+  "command": "cd /tmp/demo-proj/.worktrees/tokens-fix && timeout 420 bash .claude/scripts/dev.sh test templates 2>&1 | tail -45",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.worktrees/tokens-fix/.claude/scripts/dev.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "cd-env-u-go-test",
+  "covers": "cd X && env -u VAR go test: env unwrapped to go",
+  "cwd": "/tmp/demo-proj",
+  "dirs": [
+   "pfm/cmd/pfm"
+  ],
+  "command": "cd /tmp/demo-proj/pfm && env -u CLAUDE_CONFIG_DIR go test ./cmd/pfm/ -run 'TestDoctorFreshTargetHomeIsClean' -v 2>&1 | tail -10",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "go",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "timeout-python-script-path",
+  "covers": "timeout N python3 script.py args: exec of the script",
+  "cwd": "/tmp/demo-proj/templates/global",
+  "dirs": [
+   "tmp/ledger/run-002342"
+  ],
+  "files": [
+   "skills/ledger/ledger.py"
+  ],
+  "command": "timeout 600000 python3 /tmp/demo-proj/skills/ledger/ledger.py wait /tmp/demo-proj/tmp/ledger/run-002342 6",
+  "parts": [
+   {
+    "program": "python3",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/skills/ledger/ledger.py",
+      "action": "exec",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "var-assign-python-script-lines",
+  "covers": "DIR=path newline python3 script.py verb $DIR, twice, echo between",
+  "cwd": "/tmp/demo-proj/templates/global/skills/ledger",
+  "dirs": [
+   "tmp/ledger/run-223603"
+  ],
+  "files": [
+   "skills/ledger/ledger.py"
+  ],
+  "command": "DIR=/tmp/demo-proj/tmp/ledger/run-223603\npython3 /tmp/demo-proj/skills/ledger/ledger.py verify $DIR\necho \"---WIDEN---\"\npython3 /tmp/demo-proj/skills/ledger/ledger.py widen $DIR",
+  "parts": [
+   {
+    "program": "python3",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/skills/ledger/ledger.py",
+      "action": "exec",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "python3",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/skills/ledger/ledger.py",
+      "action": "exec",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "bin-ls-stat-then-jq-var",
+  "covers": "/bin/ls by base name (stat); b=$(/bin/ls glob); [ -n ] && jq \"$b\"",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "backups/.state.json.1"
+  ],
+  "command": "/bin/ls -lt /tmp/demo-proj/backups | head -5; b=$(/bin/ls -t /tmp/demo-proj/backups/.state.json* 2>/dev/null | head -1); echo \"latest=$b\"; [ -n \"$b\" ] && jq -r '.account | \"\\(.name) | org=\\(.team)\"' \"$b\"",
+  "parts": [
+   {
+    "program": "/bin/ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "/bin/ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/backups/.state.json.1",
+      "action": "stat",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "jq",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "cd-escaped-space-for-bin-ls-tail",
+  "covers": "cd path\\ with\\ space && for literal dirs: /bin/ls $d; tail $d/f; grep -rh",
+  "cwd": "/tmp/demo-proj",
+  "dirs": [
+   "logs/Code Logs/20260911T173251"
+  ],
+  "files": [
+   "logs/Code Logs/20260911T173252/main.log",
+   "logs/Code Logs/20260914T054944/main.log"
+  ],
+  "command": "cd /tmp/demo-proj/logs/Code\\ Logs && for d in 20260911T173252 20260911T173251; do echo \"== $d\"; /bin/ls $d; tail -8 $d/main.log 2>/dev/null; done; echo; grep -rhiE 'quit|shutdown|kill|signal|exit' 20260914T054944/main.log | head -5",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "/bin/ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/logs/Code Logs/20260911T173252/main.log",
+      "action": "read-range",
+      "exists": true,
+      "range": "-8"
+     },
+     {
+      "path": "/tmp/demo-proj/logs/Code Logs/20260911T173251/main.log",
+      "action": "read-range",
+      "exists": false,
+      "range": "-8"
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/logs/Code Logs/20260914T054944/main.log",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "cd-grep-globs-two-dirs",
+  "covers": "cd X && grep -rnE over two *.go globs | grep -v | head",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/harvest/harvest.go",
+   "pfm/internal/harvest/net.go",
+   "pfm/internal/harvestmcp/service.go"
+  ],
+  "command": "cd /tmp/demo-proj/pfm && grep -rnE '\"browser\"|browser *=|settings\\.browser|Browser *\\*bool' internal/harvest/*.go internal/harvestmcp/*.go | grep -v _test | head -12",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/harvest.go",
+      "action": "search",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/net.go",
+      "action": "search",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvestmcp/service.go",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "cd-wc-missing-then-ls-glob",
+  "covers": "cd X && wc -l with one file missing && ls *.go | tr",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/harvest/harvest.go",
+   "pfm/internal/harvest/content.go",
+   "pfm/internal/harvest/net.go"
+  ],
+  "command": "cd /tmp/demo-proj/pfm/internal/harvest && wc -l harvest.go content.go detect.go net.go && ls *.go | tr '\\n' ' '",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/harvest.go",
+      "action": "read-whole",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/content.go",
+      "action": "read-whole",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/detect.go",
+      "action": "read-whole",
+      "exists": false
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/net.go",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/content.go",
+      "action": "stat",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/harvest.go",
+      "action": "stat",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/harvest/net.go",
+      "action": "stat",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "tr",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "find-xargs-grep",
+  "covers": "find | xargs grep -l: xargs operands are not files as written",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/engine/engine.go"
+  ],
+  "command": "find pfm/internal/engine -name \"*.go\" | xargs grep -l \"matchutil\\|Command\" | head -5",
+  "parts": [
+   {
+    "program": "find",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "git-show-status-unknown",
+  "covers": "git show && git status: git stays unknown, names no file",
+  "cwd": "/tmp/demo-proj",
+  "command": "git show --stat HEAD && git status --short",
+  "parts": [
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "git-diff-show-cat-glob-ls",
+  "covers": "git diff -- f && git show REV:path | wc && cat glob | grep; ls .arch | head",
+  "cwd": "/tmp/demo-proj/pfm",
+  "files": [
+   "pfm/cmd/pfm/doctor.go",
+   "pfm/.arch/C1-budget.txt"
+  ],
+  "command": "git diff --stat -- cmd/pfm/doctor.go && git show HEAD:pfm/cmd/pfm/doctor.go | wc -l && cat .arch/*C1* 2>/dev/null | grep -n 'doctor.go\\|service.go' | head; ls .arch | head -20",
+  "parts": [
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/cmd/pfm/doctor.go",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/.arch/C1-budget.txt",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "cp-cmp-chain-unknown",
+  "covers": "cp a b && cp a c && cmp b c && echo && git diff: cp/cmp attribute only existing files, as unknown",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "tmp/prompt-draft.md",
+   "templates/prompts/lead.md"
+  ],
+  "command": "cp tmp/prompt-draft.md templates/prompts/lead.md && cp tmp/prompt-draft.md pfm/internal/installer/assets/prompts/lead-prompt.md && cmp templates/prompts/lead.md pfm/internal/installer/assets/prompts/lead-prompt.md && echo TWINS-IDENTICAL && git diff --stat",
+  "parts": [
+   {
+    "program": "cp",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/prompt-draft.md",
+      "action": "unknown",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/templates/prompts/lead.md",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "cp",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/prompt-draft.md",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "cmp",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/templates/prompts/lead.md",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "diff-process-substitution-jq",
+  "covers": "diff <(jq -S . f) <(jq -S . g); echo; diff <(…) <(…)",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "cfg/a/settings.json",
+   "cfg/b/settings.json",
+   "cfg/c/settings.json"
+  ],
+  "command": "diff <(jq -S . /tmp/demo-proj/cfg/a/settings.json) <(jq -S . /tmp/demo-proj/cfg/c/settings.json); echo ---; diff <(jq -S . /tmp/demo-proj/cfg/b/settings.json) <(jq -S . /tmp/demo-proj/cfg/c/settings.json)",
+  "parts": [
+   {
+    "program": "jq",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/cfg/a/settings.json",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "jq",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/cfg/c/settings.json",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "diff",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "jq",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/cfg/b/settings.json",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "jq",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/cfg/c/settings.json",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "diff",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "diff-two-files-unknown",
+  "covers": "diff a b: an unknown program attributes both existing files as unknown",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "tmp/doctor_fixed.go",
+   ".worktrees/release/develop/pfm/cmd/pfm/doctor.go"
+  ],
+  "command": "diff /tmp/demo-proj/tmp/doctor_fixed.go /tmp/demo-proj/.worktrees/release/develop/pfm/cmd/pfm/doctor.go",
+  "parts": [
+   {
+    "program": "diff",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/doctor_fixed.go",
+      "action": "unknown",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/.worktrees/release/develop/pfm/cmd/pfm/doctor.go",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "script-path-exec",
+  "covers": "./script.sh --files path: the script is exec, its existing argument unknown",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "scripts/leak-check.sh",
+   "docs/design/hooks/hooks.md"
+  ],
+  "command": "./scripts/leak-check.sh --files /tmp/demo-proj/docs/design/hooks/hooks.md",
+  "parts": [
+   {
+    "program": "./scripts/leak-check.sh",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/scripts/leak-check.sh",
+      "action": "exec",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/docs/design/hooks/hooks.md",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "script-redirect-write-append-grep",
+  "covers": "./script > log 2>&1; echo >> log; grep log: write, write, search of a file absent at parse time",
+  "cwd": "/tmp/demo-proj",
+  "dirs": [
+   "tmp"
+  ],
+  "files": [
+   ".claude/scripts/dev.sh"
+  ],
+  "command": "./.claude/scripts/dev.sh iso all templates > tmp/gates-candidate-templates.log 2>&1; echo \"exit=$?\" >> tmp/gates-candidate-templates.log; grep -E 'fence:|FAIL|leak-check|all steps passed|step\\(s\\) failed|exit=' tmp/gates-candidate-templates.log | head -20",
+  "parts": [
+   {
+    "program": "./.claude/scripts/dev.sh",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.claude/scripts/dev.sh",
+      "action": "exec",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/tmp/gates-candidate-templates.log",
+      "action": "write",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/gates-candidate-templates.log",
+      "action": "write",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/gates-candidate-templates.log",
+      "action": "search",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "array-append-in-while-herestring",
+  "covers": "x=$(…); arr=(); while read; [ -f ] && arr+=(); done <<< \"$x\"; script \"${arr[@]}\"",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "scripts/leak-check.sh"
+  ],
+  "command": "changed=$(git status --porcelain | awk '{print $NF}' | grep -v '/$'); present=(); while IFS= read -r c; do [ -f \"$c\" ] && present+=(\"$c\"); done <<< \"$changed\"; scripts/leak-check.sh --files \"${present[@]}\" 2>&1 | grep -v \"^leak-check: scanned\" | head -20",
+  "parts": [
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "awk",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "read",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "scripts/leak-check.sh",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/scripts/leak-check.sh",
+      "action": "exec",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "bin-bash-c-array-expansion",
+  "covers": "head; command -v; /bin/bash -c with a=() and \"${a[@]}\", then cd && bash -n script && echo",
+  "cwd": "/tmp/demo-proj/.worktrees/release/develop",
+  "files": [
+   ".worktrees/release/develop/.claude/scripts/dev.sh"
+  ],
+  "command": "/bin/bash -c 'set -u; a=(); echo x ${a[@]+\"${a[@]}\"} y; a=(-v \"p q\"); printf \"[%s]\" ${a[@]+\"${a[@]}\"}; echo'; cd /tmp/demo-proj/.worktrees/release/develop && bash -n .claude/scripts/dev.sh && echo syntax-ok",
+  "parts": [
+   {
+    "program": "/bin/bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "set",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "printf",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.worktrees/release/develop/.claude/scripts/dev.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "mapfile-process-subst-array",
+  "covers": "mapfile -t ARR < <(…); echo ${#ARR[@]}; bash script --files \"${ARR[@]}\"",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "scripts/leak-check.sh"
+  ],
+  "command": "mapfile -t CHANGED < <(git status --porcelain -- templates | awk '{print $2}')\necho \"count: ${#CHANGED[@]}\"\nbash scripts/leak-check.sh --files \"${CHANGED[@]}\" 2>&1 | tail -40; echo \"EXIT=${PIPESTATUS[0]}\"",
+  "parts": [
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "awk",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "mapfile",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "bash",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/scripts/leak-check.sh",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "cd-ls-and-or-find-git",
+  "covers": "cd X newline ls f && echo || echo; ls; find -prune; git tag; git log -- f",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "README.md",
+   "pfm/go.mod"
+  ],
+  "command": "cd /tmp/demo-proj\nls pfm/README.md 2>/dev/null && echo \"pfm README exists\" || echo \"no pfm/README.md\"\nls README.md\nfind . -path ./node_modules -prune -o -name \"*.yml\" -path \"*workflows*\" -print 2>/dev/null | grep -v worktree\ngit tag | sort -V | tail -3\ngit log -1 --format=%ad --date=iso pfm/go.mod 2>/dev/null",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/README.md",
+      "action": "stat",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "find",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "sort",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/go.mod",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "and-or-chains-conditional",
+  "covers": "a && echo || echo; b && echo || echo: right-hand sides are conditional",
+  "cwd": "/tmp/demo-proj",
+  "command": "git merge-base --is-ancestor develop origin/develop && echo \"local is ancestor of origin (origin newer)\" || echo \"local NOT ancestor of origin\"; git merge-base --is-ancestor origin/develop develop && echo \"origin is ancestor of local (local newer)\" || echo \"origin NOT ancestor of local\"",
+  "parts": [
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "git",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ },
+ {
+  "name": "printf-write-then-cat",
+  "covers": "printf … > f && cat f: a write and a conditional read of a file absent at parse time",
+  "cwd": "/tmp/demo-proj",
+  "dirs": [
+   "tmp"
+  ],
+  "command": "printf '# RR - first run\\n\\nFIRST RUN DOCUMENT - must survive a second run with the same name.\\n' > tmp/rr-collide-test.md && cat tmp/rr-collide-test.md",
+  "parts": [
+   {
+    "program": "printf",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/rr-collide-test.md",
+      "action": "write",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/rr-collide-test.md",
+      "action": "read-whole",
+      "exists": false
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "cd-cat-sed-cut-grep-sed",
+  "covers": "cd X && cat f; sed -n f | cut; grep f; sed -n g | cut",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "docs/design/RR/_index.md",
+   "docs/design/RR/rr.md",
+   ".claude/commands/quality/doc.md"
+  ],
+  "command": "cd /tmp/demo-proj && cat docs/design/RR/_index.md; sed -n 1,60p docs/design/RR/rr.md | cut -c1-300; grep -n \"^#\" docs/design/RR/rr.md; sed -n 1,40p .claude/commands/quality/doc.md | cut -c1-400",
+  "parts": [
+   {
+    "program": "cd",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/docs/design/RR/_index.md",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/docs/design/RR/rr.md",
+      "action": "read-range",
+      "range": "1,60",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "cut",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/docs/design/RR/rr.md",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "sed",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.claude/commands/quality/doc.md",
+      "action": "read-range",
+      "range": "1,40",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "cut",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "wc-stdin-then-awk",
+  "covers": "wc -l < f newline awk prog f | sort | uniq",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "tmp/template-restructure/numstat.txt"
+  ],
+  "command": "wc -l < tmp/template-restructure/numstat.txt\nawk '{split($3,a,\"/\"); print a[1]}' tmp/template-restructure/numstat.txt | sort | uniq -c | sort -rn",
+  "parts": [
+   {
+    "program": "wc",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/template-restructure/numstat.txt",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "awk",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/template-restructure/numstat.txt",
+      "action": "unknown",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "sort",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "uniq",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "sort",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "head-two-files",
+  "covers": "head -N over two files",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "pfm/internal/inject/engine.go",
+   "pfm/internal/agentopen/agentopen.go"
+  ],
+  "command": "head -15 pfm/internal/inject/engine.go pfm/internal/agentopen/agentopen.go",
+  "parts": [
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/pfm/internal/inject/engine.go",
+      "action": "read-range",
+      "range": "1,15",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/pfm/internal/agentopen/agentopen.go",
+      "action": "read-range",
+      "range": "1,15",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "var-log-grep-quoted-var",
+  "covers": "L=path; grep \"$L\" | grep | head; echo; grep -c \"$L\"; grep \"$L\" | head: a variable naming a missing log",
+  "cwd": "/tmp/demo-proj",
+  "command": "L=/tmp/demo-proj/tmp/scratchpad/gates2.log; grep -E 'VERIFY_EXIT|TEST_EXIT|^(FAIL|--- FAIL|ok |panic)|fence:|PASS|arch' \"$L\" | grep -vE '^ok ' | head -30; echo; grep -c '^ok ' \"$L\"; grep -E '^(FAIL|---)' \"$L\" | head",
+  "parts": [
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/scratchpad/gates2.log",
+      "action": "search",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/scratchpad/gates2.log",
+      "action": "search",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/scratchpad/gates2.log",
+      "action": "search",
+      "exists": false
+     }
+    ]
+   },
+   {
+    "program": "head",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "loop-if-cat-exit",
+  "covers": "for; if [ -s f ]; then cat f; exit; fi; /bin/sleep: the cat is conditional",
+  "cwd": "/tmp/demo-proj",
+  "files": [
+   "tmp/qa-cmd-withsession.txt"
+  ],
+  "command": "for i in $(seq 1 60); do if [ -s /tmp/demo-proj/tmp/qa-cmd-withsession.txt ]; then cat /tmp/demo-proj/tmp/qa-cmd-withsession.txt; exit 0; fi; /bin/sleep 5; done; echo \"still running\"",
+  "parts": [
+   {
+    "program": "seq",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/qa-cmd-withsession.txt",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "exit",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "/bin/sleep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   }
+  ]
+ },
+ {
+  "name": "if-else-cat-then-py-heredoc",
+  "covers": "if [ -f f ]; then cat f; else echo; fi && python3 - <<PY open(): conditional read, conditional python part",
+  "cwd": "/tmp/demo-proj/tmp/fixture-run",
+  "files": [
+   "tmp/fixture-run/second.txt",
+   "tmp/fixture-run/fixture.go"
+  ],
+  "command": "if [ -f second.txt ]; then cat second.txt; else echo MISSING; fi && python3 - <<'PY'\nprint(open('fixture.go').read()[:200])\nPY\n",
+  "parts": [
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "cat",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/fixture-run/second.txt",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "python3",
+    "lang": "python",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/tmp/fixture-run/fixture.go",
+      "action": "read-whole",
+      "exists": true
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "name": "head-tail-stats-then-for-if-grep",
+  "covers": "tail f | cut; echo; pfm | grep; ls d | grep; for f in globs; do [ -f ] && { echo; grep f | tail; }; done",
+  "cwd": "/tmp/demo-proj/pfm",
+  "files": [
+   ".cache/stats.jsonl",
+   "logs/pfm-mcp/serve.log",
+   "state/pfm/pfm.log"
+  ],
+  "command": "tail -1 /tmp/demo-proj/.cache/stats.jsonl | cut -c1-600; echo; pfm doctor 2>&1 | grep -i 'harvestpy_browser'; ls /tmp/demo-proj/logs 2>/dev/null | grep -i pfm; for f in /tmp/demo-proj/logs/pfm*/*.log /tmp/demo-proj/state/pfm/*.log; do [ -f \"$f\" ] && { echo \"== $f\"; grep -iE 'browser|app-shell' \"$f\" | tail -5; }; done 2>/dev/null",
+  "parts": [
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/.cache/stats.jsonl",
+      "action": "read-range",
+      "range": "-1",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "cut",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "pfm",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "ls",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "[",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": false
+   },
+   {
+    "program": "echo",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   },
+   {
+    "program": "grep",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true,
+    "files": [
+     {
+      "path": "/tmp/demo-proj/logs/pfm-mcp/serve.log",
+      "action": "search",
+      "exists": true
+     },
+     {
+      "path": "/tmp/demo-proj/state/pfm/pfm.log",
+      "action": "search",
+      "exists": true
+     }
+    ]
+   },
+   {
+    "program": "tail",
+    "lang": "sh",
+    "status": "ok",
+    "conditional": true
+   }
+  ]
+ }
+]

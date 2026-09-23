@@ -124,7 +124,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 				}
 			}
 			if body != "" {
-				body, err = h.rewritePublicImages(source, body, result.Path)
+				body, err = h.withPublicImages(source, body, result.Path, &out)
 				if err != nil {
 					return h.publicExportFailure(source, result, "export embedded image", err)
 				}
@@ -149,7 +149,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 				fetchedAt = meta["fetched_at"]
 			}
 			body = stripPublicMetadata(body)
-			body, err = h.rewritePublicImages(source, body, result.Path)
+			body, err = h.withPublicImages(source, body, result.Path, &out)
 			if err != nil {
 				return h.publicExportFailure(source, result, "export embedded image", err)
 			}
@@ -185,7 +185,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 		}
 		body = stripPublicMetadata(body)
 		var err error
-		body, err = h.rewritePublicImages(source, body, "")
+		body, err = h.withPublicImages(source, body, "", &out)
 		if err != nil {
 			return h.publicExportFailure(source, result, "export embedded image", err)
 		}
@@ -450,7 +450,28 @@ func (h *Harvester) publicExportFailure(source string, result Result, operation 
 		ErrorKind: errorKindInternal,
 		Error:     "public export failed",
 	}
+	if publicExportPermanent[operation] {
+		failure.ErrorKind = errorKindExport
+		failure.Error = publicExportErrorPrefix + operation
+	}
 	return PublicFailure(source, failure)
+}
+
+// errorKindExport is an export step that refuses the stored artifact itself:
+// the same artifact fails it the same way on every retry.
+const (
+	errorKindExport         = "export"
+	publicExportErrorPrefix = "public export failed: "
+)
+
+// publicExportPermanent is each export step whose failure a retry repeats. A
+// step missing here (reading or writing the store) may recover, and its
+// failure still says "Retry later".
+var publicExportPermanent = map[string]bool{
+	"validate binary artifact":                 true,
+	"validate cached artifact metadata":        true,
+	"publish result without complete artifact": true,
+	"publish empty artifact":                   true,
 }
 
 // PublicFailure retains only safe failure fields and the caller's input.
@@ -495,6 +516,8 @@ func publicErrorKind(result Result) string {
 		return errorKindInvalid
 	case errorKindInternal, "storage", cacheLabel:
 		return errorKindInternal
+	case errorKindExport:
+		return errorKindExport
 	}
 	if result.Challenge {
 		return errorKindChallenge
@@ -588,6 +611,15 @@ func PublicFailureMessage(result Result) string {
 		return "This source is an image or archive. Use fetchImage or archive for this media."
 	case errorKindInternal:
 		return "Harvester could not read or publish its stored result. Retry later."
+	case errorKindExport:
+		step := strings.TrimPrefix(result.Error, publicExportErrorPrefix)
+		if !publicExportPermanent[step] {
+			step = "export"
+		}
+		return fmt.Sprintf(
+			"Harvester cannot publish its stored result: the %q step refuses it, and the failure repeats on every retry. Choose another copy.",
+			step,
+		)
 	default:
 		return "Retrieval failed. Retry or choose another work."
 	}

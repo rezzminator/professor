@@ -140,7 +140,14 @@ func isLocalSource(source string) bool {
 }
 
 func (h *Harvester) fetchURL(ctx context.Context, source string, options FetchOptions) Result {
-	return h.fetchURLWithPolicy(ctx, source, options, true)
+	got, err := h.retrieveWith(
+		ctx,
+		retrieveRequest{target: source, want: WantPage, policy: PolicyPage, options: options},
+	)
+	if err != nil {
+		return Result{Source: source, Error: err.Error(), ErrorKind: errorKindInvalid}
+	}
+	return got.Result
 }
 
 func (h *Harvester) fetchURLWithPolicy(
@@ -154,7 +161,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			return Result{
 				Source: source,
 				Error: fmt.Sprintf(
-					"unsupported URL scheme in %q — fetch handles http(s):// and file:// URLs, local paths, DOIs, and ISBNs.",
+					"unsupported URL scheme in %q — readPage reads http(s):// pages, parseLocalDocuments local paths, readWork DOIs and ISBNs.",
 					source,
 				),
 			}
@@ -165,10 +172,10 @@ func (h *Harvester) fetchURLWithPolicy(
 		return Result{
 			Source: source,
 			Error: fmt.Sprintf(
-				"%s is a PubMed search/results URL, not an article — use the `findWorks` tool%s to get candidate works, each with a fetch handle.",
+				"%s is a PubMed search/results URL, not an article — use the `findWorks` tool%s to get candidate works, each with a handle to read with `readWork`.",
 				source,
 				SearchHint(h.settings.searchAvailable,
-					" (or `search`)",
+					" (or `webSearch`)",
 					"",
 				),
 			),
@@ -316,7 +323,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				return Result{
 					Source:     source,
 					Kind:       kindArchive,
-					Error:      fmt.Sprintf("%s is a %s archive — use the `archive` tool, not `fetch`.", source, kind),
+					Error:      fmt.Sprintf("%s is a %s archive, not a page — use `download`.", source, kind),
 					HTTPStatus: status,
 					ErrorKind:  errorKindWrongKind,
 				}
@@ -666,7 +673,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			"%s has a .pdf address but did not return a PDF (non-PDF content — likely an HTML paywall/login wall or a bot-block). %s",
 			source,
 			SearchHint(h.settings.searchAvailable,
-				"Use `search` to find an open-access copy.",
+				"Use `webSearch` to find an open-access copy.",
 				"Find an open-access copy with findWorks or another URL.",
 			),
 		)
@@ -681,7 +688,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				"Downloaded the PDF from %s but it converted to EMPTY text, and the OCR escalation could not RUN (converter backend error — see the server log). That is a tool outage, not proof the PDF is textless: %s",
 				source,
 				SearchHint(h.settings.searchAvailable,
-					"retry, or use `search` to find an alternative copy.",
+					"retry, or use `webSearch` to find an alternative copy.",
 					"retry, or find an alternative copy with findWorks or another URL.",
 				),
 			)
@@ -690,7 +697,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				"Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — an OCR pass was already attempted on this copy and produced nothing. %s",
 				source,
 				SearchHint(h.settings.searchAvailable,
-					"Use `search` to find an alternative copy.",
+					"Use `webSearch` to find an alternative copy.",
 					"Find an alternative copy with findWorks or another URL.",
 				),
 			)
@@ -699,7 +706,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				"Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — if it's a scanned/image-only PDF, set convert.pdfOcr=true in harvester.config.json to OCR it. %s",
 				source,
 				SearchHint(h.settings.searchAvailable,
-					"Use `search` to find an alternative copy.",
+					"Use `webSearch` to find an alternative copy.",
 					"Find an alternative copy with findWorks or another URL.",
 				),
 			)
@@ -735,7 +742,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		case converterOutage:
 			message += " The real-browser rung DID run and got real content past the wall, but the conversion step then failed on this server — a tool outage, not proof of IP reputation: " + SearchHint(
 				h.settings.searchAvailable,
-				"retry, or use `search` to find an alternative copy.",
+				"retry, or use `webSearch` to find an alternative copy.",
 				"retry, or find an alternative copy with findWorks or another URL.",
 			)
 		case browserUnavailable != "":

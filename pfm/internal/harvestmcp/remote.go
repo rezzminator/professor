@@ -28,7 +28,7 @@ const mcpPath = "/mcp"
 // this, the SDK's io.ReadAll(req.Body) let one token holder exhaust memory
 // with a single request. 1 MiB matches /register, /token and /revoke's own
 // cap (below) and comfortably fits the largest legitimate tool call: fetch
-// and fetchImage take up to 50 source URLs each, a few hundred bytes apiece.
+// and download take up to 50 source URLs each, a few hundred bytes apiece.
 const mcpMaxBodyBytes = 1 << 20
 
 // RemoteOptions is the external gateway contract. The daemon (pfm mcp serve)

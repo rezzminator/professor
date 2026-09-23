@@ -234,7 +234,7 @@
       "fetch_latency_ms": 1151.5,
       "status": "failed",
       "failure_stage": "network",
-      "error": "https://www.reuters.com/ is behind a bot/Cloudflare challenge (e.g. 'Are you a robot?') and no open-access copy was found \u2014 content not retrievable. Use `search` to find a mirror or alternative copy. Rungs tried: direct, chrome-impersonation, jina, wayback \u2014 re-fetching will not help."
+      "error": "https://www.reuters.com/ is behind a bot/Cloudflare challenge (e.g. 'Are you a robot?') and no open-access copy was found \u2014 content not retrievable. Use `webSearch` to find a mirror or alternative copy. Rungs tried: direct, chrome-impersonation, jina, wayback \u2014 re-fetching will not help."
     },
     {
       "id": "html-npm-whisper",
@@ -244,7 +244,7 @@
       "fetch_latency_ms": 1134.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "https://www.npmjs.com/package/whisper.cpp is behind a bot/Cloudflare challenge (e.g. 'Are you a robot?') and no open-access copy was found \u2014 content not retrievable. Use `search` to find a mirror or alternative copy. Rungs tried: direct, chrome-impersonation, jina, wayback \u2014 re-fetching will not help."
+      "error": "https://www.npmjs.com/package/whisper.cpp is behind a bot/Cloudflare challenge (e.g. 'Are you a robot?') and no open-access copy was found \u2014 content not retrievable. Use `webSearch` to find a mirror or alternative copy. Rungs tried: direct, chrome-impersonation, jina, wayback \u2014 re-fetching will not help."
     },
     {
       "id": "html-go-docs",
@@ -489,7 +489,7 @@
       "fetch_latency_ms": 860.0,
       "status": "failed",
       "failure_stage": "converter",
-      "error": "Downloaded the DOCX from https://file-examples.com/wp-content/storage/2017/02/file-sample_100kB.docx but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected. Use `search` to find an alternative copy. Rungs tried: direct, meta-scrape, wayback \u2014 re-fetching will not help."
+      "error": "Downloaded the DOCX from https://file-examples.com/wp-content/storage/2017/02/file-sample_100kB.docx but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected. Use `webSearch` to find an alternative copy. Rungs tried: direct, meta-scrape, wayback \u2014 re-fetching will not help."
     },
     {
       "id": "office-learningcontainer-docx",
@@ -499,7 +499,7 @@
       "fetch_latency_ms": 3245.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-word-document.docx returned HTTP 404 (page not found). Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title. Rungs tried: direct, chrome-impersonation, wayback \u2014 re-fetching will not help."
+      "error": "https://www.learningcontainer.com/wp-content/uploads/2020/05/sample-word-document.docx returned HTTP 404 (page not found). Use `webSearch` to find an alternative copy, or `findWorks` if it is a scholarly title. Rungs tried: direct, chrome-impersonation, wayback \u2014 re-fetching will not help."
     },
     {
       "id": "office-microsoft-xlsx",
@@ -536,7 +536,7 @@
       "fetch_latency_ms": 822.4,
       "status": "failed",
       "failure_stage": "converter",
-      "error": "Downloaded the XLSX from https://file-examples.com/wp-content/storage/2017/02/file_example_XLSX_10.xlsx but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected. Use `search` to find an alternative copy. Rungs tried: direct, meta-scrape, wayback \u2014 re-fetching will not help."
+      "error": "Downloaded the XLSX from https://file-examples.com/wp-content/storage/2017/02/file_example_XLSX_10.xlsx but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected. Use `webSearch` to find an alternative copy. Rungs tried: direct, meta-scrape, wayback \u2014 re-fetching will not help."
     },
     {
       "id": "archive-githubtraining-zip",
@@ -630,7 +630,7 @@
       "fetch_latency_ms": 1435.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "https://raw.githubusercontent.com/SheetJS/test_files/master/2014-08-10.xlsx returned HTTP 404 (page not found). Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title. Rungs tried: direct, chrome-impersonation, wayback \u2014 re-fetching will not help."
+      "error": "https://raw.githubusercontent.com/SheetJS/test_files/master/2014-08-10.xlsx returned HTTP 404 (page not found). Use `webSearch` to find an alternative copy, or `findWorks` if it is a scholarly title. Rungs tried: direct, chrome-impersonation, wayback \u2014 re-fetching will not help."
     },
     {
       "id": "html-gnu-free-sw",

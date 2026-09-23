@@ -60,8 +60,8 @@ func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 	_, recorder := obs.Test(t)
 	session := connectHarvesterInProcess(t, service)
 	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      "searchCache",
-		Arguments: CacheInput{Pattern: "no-such-needle-MARKER"},
+		Name:      "readPage",
+		Arguments: ReadPageInput{Sources: []string{"doi:10.1000/no-such-needle-MARKER"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,50 +74,13 @@ func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 	if found == nil {
 		t.Fatalf("no mcp.call record: %s", recorder.Raw())
 	}
-	for key, want := range map[string]any{obs.FieldComp: "mcp", "kind": "tool", "tool": "searchCache"} {
+	for key, want := range map[string]any{obs.FieldComp: "mcp", "kind": "tool", "tool": "readPage"} {
 		if got, _ := found.Field(key); got != want {
 			t.Fatalf("mcp.call record %s = %v, want %v: %v", key, got, want, found.Fields)
 		}
 	}
 	if strings.Contains(recorder.Raw(), "no-such-needle-MARKER") {
 		t.Fatalf("the search pattern reached the activity log: %s", recorder.Raw())
-	}
-}
-
-// TestFetchPromptRecordsUnderTheMCPComponent proves the fetch prompt
-// registration is wrapped by obs.Prompt (item 5): a missing url fails fast,
-// with no network reach, and the failure records kind=prompt at ERROR.
-func TestFetchPromptRecordsUnderTheMCPComponent(t *testing.T) {
-	service, err := NewConfiguredHarvester(
-		"test",
-		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := service.Close(); err != nil {
-			t.Errorf("close service: %v", err)
-		}
-	}()
-	_, recorder := obs.Test(t)
-	session := connectHarvesterInProcess(t, service)
-	if _, err := session.GetPrompt(context.Background(), &mcp.GetPromptParams{Name: "fetch"}); err == nil {
-		t.Fatal("the missing-url prompt error vanished")
-	}
-	var found *obs.Record
-	for _, record := range recorder.Records() {
-		if record.Message == "mcp.call" {
-			found = &record
-		}
-	}
-	if found == nil {
-		t.Fatalf("no mcp.call record: %s", recorder.Raw())
-	}
-	for key, want := range map[string]any{obs.FieldComp: "mcp", "kind": "prompt", "tool": "fetch"} {
-		if got, _ := found.Field(key); got != want {
-			t.Fatalf("mcp.call record %s = %v, want %v: %v", key, got, want, found.Fields)
-		}
 	}
 }
 

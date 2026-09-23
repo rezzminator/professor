@@ -11,25 +11,30 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
-// TestServerInstructionsNameSearchOnlyWhenConfigured pins both shapes of the
-// top-level routing text: identical to today's when a backend is
-// configured, and search-free plus a one-sentence explanation when it is
-// not — never a routing guide that recommends a tool the server refuses.
+// TestServerInstructionsNameSearchOnlyWhenConfigured pins every shape of the
+// top-level routing text: webSearch routing when a backend is configured, a
+// webSearch-free text plus a one-sentence configuration hint when it is not,
+// and parseLocalDocuments only on the local server — never a routing guide
+// that recommends a tool the server does not register.
 func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
-	on := serverInstructions(true)
-	if !strings.Contains(on, `"search the web for X" is search`) ||
-		!strings.Contains(on, "for a topic — search, then fetch the URL") {
+	on := serverInstructions(true, false)
+	if !strings.Contains(on, `"search the web for X" is webSearch`) ||
+		!strings.Contains(on, "for a topic — webSearch, then readPage the URL") {
 		t.Fatalf("search-enabled instructions dropped their search routing: %q", on)
 	}
-	off := serverInstructions(false)
-	for _, absent := range []string{"is search (ranked URLs", "for a topic — search"} {
-		if strings.Contains(off, absent) {
-			t.Fatalf("search-disabled instructions still name search (%q):\n%s", absent, off)
-		}
+	off := serverInstructions(false, false)
+	if strings.Contains(off, "webSearch") {
+		t.Fatalf("search-disabled instructions still name webSearch:\n%s", off)
 	}
 	if !strings.Contains(off, "Web search is not configured on this server") ||
 		!strings.Contains(off, "search.searxngURL or search.braveApiKey in harvester.config.json") {
 		t.Fatalf("search-disabled instructions lack the configuration hint:\n%s", off)
+	}
+	if !strings.Contains(on, "parseLocalDocuments") {
+		t.Fatalf("local instructions do not route local documents:\n%s", on)
+	}
+	if remote := serverInstructions(true, true); strings.Contains(remote, "parseLocalDocuments") {
+		t.Fatalf("remote instructions name parseLocalDocuments, which the remote server never registers:\n%s", remote)
 	}
 }
 

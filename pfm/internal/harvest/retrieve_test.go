@@ -141,7 +141,7 @@ func TestRetrieveInlineImagePolicyFallsToChromeAndNeverStartsABrowser(t *testing
 
 // TestRetrieveFileTriesWaybackRaw: a file every live rung fails to serve is
 // read from the Wayback raw copy (the id_ form). Watched FAILING before
-// PolicyFile (FetchImage stopped at Chrome impersonation).
+// PolicyFile (Download stopped at Chrome impersonation).
 func TestRetrieveFileTriesWaybackRaw(t *testing.T) {
 	var archived string
 	site := roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -163,9 +163,9 @@ func TestRetrieveFileTriesWaybackRaw(t *testing.T) {
 		Chrome:   &http.Client{Transport: site},
 		OA:       &http.Client{Transport: wayback},
 	})
-	got := h.FetchImage(context.Background(), "https://203.0.113.10/figure.png")
+	got := h.Download(context.Background(), "https://203.0.113.10/figure.png")
 	if got.Error != "" || got.Method != "wayback" {
-		t.Fatalf("FetchImage with a Wayback copy: Error=%q Method=%q rungs=%v", got.Error, got.Method, got.Rungs)
+		t.Fatalf("Download with a Wayback copy: Error=%q Method=%q rungs=%v", got.Error, got.Method, got.Rungs)
 	}
 	if !strings.Contains(archived, "20260901000000id_/https://203.0.113.10/figure.png") {
 		t.Fatalf("the Wayback rung did not ask for the raw id_ copy: %q", archived)

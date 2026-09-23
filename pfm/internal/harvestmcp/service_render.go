@@ -1,7 +1,6 @@
 package harvestmcp
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -11,21 +10,6 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
-
-func fetchItem(result harvest.Result) FetchItem {
-	return FetchItem{
-		Source:      result.Source,
-		Content:     result.Content,
-		CacheStatus: result.CacheStatus,
-		Bytes:       result.Bytes,
-		Tokens:      result.Tokens,
-		Chars:       result.Chars,
-		Path:        result.Path,
-		Error:       result.Error,
-		Partial:     result.Partial,
-		Method:      harvest.PublicMethod(result.Method),
-	}
-}
 
 func (service *Service) describeFetch(source string, result harvest.Result, sizeOnly bool) string {
 	source = harvest.PublicSourceLabel(source)
@@ -41,7 +25,7 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 				source,
 				source,
 				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
-					"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+					"Use `webSearch` to find an alternative copy, or `findWorks` if it is a scholarly title.",
 					"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
 				),
 			)
@@ -80,7 +64,7 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 				"Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). %s",
 				source,
 				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
-					"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+					"Use `webSearch` to find an alternative copy, or `findWorks` if it is a scholarly title.",
 					"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
 				),
 			)
@@ -125,7 +109,7 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 		body = string(
 			runes[:inlineCap],
 		) + fmt.Sprintf(
-			"\n\n— [truncated: first %d of %d chars. COMPLETE text is at %s — read that file from char %d for the rest. `searchCache` locates WHICH cached pages match a pattern; it does not return text.]",
+			"\n\n— [truncated: first %d of %d chars. COMPLETE text is at %s — read that file from char %d for the rest.]",
 			inlineCap,
 			max(result.Chars, len(runes)),
 			result.Path,
@@ -179,7 +163,7 @@ func renderFind(query string, candidates []harvest.Candidate) string {
 	}
 	lines := []string{
 		fmt.Sprintf(
-			"%d candidate work(s) for %q — pick one and call `fetch` with its `fetch:` value:",
+			"%d candidate work(s) for %q — pick one and read it with `readWork`, passing its `handle:` value:",
 			len(candidates),
 			query,
 		),
@@ -201,7 +185,7 @@ func renderFind(query string, candidates []harvest.Candidate) string {
 		lines = append(
 			lines,
 			fmt.Sprintf("%d. %s", index+1, valueOr(candidate.Title, "(untitled)")),
-			"   fetch: "+candidate.URL,
+			"   handle: "+candidate.URL,
 			"   "+meta,
 		)
 	}
@@ -212,7 +196,10 @@ func renderSearch(query string, results []harvest.SearchResult, _ string) string
 	if len(results) == 0 {
 		return fmt.Sprintf("No results for %q. Try different terms or a broader query.", query)
 	}
-	lines := []string{fmt.Sprintf("%d result(s) for %q — fetch the ones you want by URL:", len(results), query), ""}
+	lines := []string{
+		fmt.Sprintf("%d result(s) for %q — read the ones you want with `readPage`:", len(results), query),
+		"",
+	}
 	for index, result := range results {
 		lines = append(lines, fmt.Sprintf("%d. %s", index+1, valueOr(result.Title, "(untitled)")), "   "+result.URL)
 		if result.Snippet != "" {
@@ -227,18 +214,6 @@ func valueOr(value, fallback string) string {
 		return fallback
 	}
 	return value
-}
-
-func (service *Service) fetchOneImage(ctx context.Context, source string) ImageItem {
-	resolved, err := service.harvester.ResolvePublicSource(source)
-	result := harvest.Result{Source: source}
-	if err != nil {
-		result.Error, result.ErrorKind = err.Error(), "policy"
-	} else {
-		result = service.harvester.FetchImage(ctx, resolved)
-	}
-	result = service.harvester.PublicResult(source, result, true)
-	return ImageItem{Source: result.Source, Path: result.Path, Bytes: result.Bytes, Error: result.Error}
 }
 
 // assertPublicURL delegates to harvest's own SSRF/scheme chokepoint

@@ -72,7 +72,7 @@ func errorKind(err error) string {
 func FailureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
 	if kind == errorKindInvalid {
 		return fmt.Sprintf("Invalid URL: %s — %s", item, SearchHint(searchAvailable,
-			"check it for typos, or use `search` to find the source.",
+			"check it for typos, or use `webSearch` to find the source.",
 			"check it for typos, or find the source via another URL.",
 		))
 	}
@@ -87,7 +87,7 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: the server did not respond in time (connection timed out). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `search` to find an alternative copy.",
+				"Retry later, or use `webSearch` to find an alternative copy.",
 				"Retry later, or find an alternative copy with findWorks or another URL.",
 			),
 		)
@@ -97,7 +97,7 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: DNS resolution failed (host not found). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `search` to find an alternative copy.",
+				"Retry later, or use `webSearch` to find an alternative copy.",
 				"Retry later, or find an alternative copy with findWorks or another URL.",
 			),
 		)
@@ -107,7 +107,7 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: the connection failed (refused or host unreachable). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `search` to find an alternative copy.",
+				"Retry later, or use `webSearch` to find an alternative copy.",
 				"Retry later, or find an alternative copy with findWorks or another URL.",
 			),
 		)
@@ -117,7 +117,7 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s",
 			item,
 			SearchHint(searchAvailable,
-				"Use `search` to find a mirror or alternative copy.",
+				"Use `webSearch` to find a mirror or alternative copy.",
 				"Find a mirror or alternative copy with findWorks or another URL.",
 			),
 		)
@@ -132,12 +132,12 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			note = " — likely a bot-block or rate limit"
 		}
 		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(searchAvailable,
-			"Use `search` to find an alternative copy, or `findWorks` if it is a scholarly title.",
+			"Use `webSearch` to find an alternative copy, or `findWorks` if it is a scholarly title.",
 			"Use `findWorks` if it is a scholarly title, or find an alternative copy at another URL.",
 		))
 	}
 	return fmt.Sprintf("Could not download %s — %s", item, SearchHint(searchAvailable,
-		"try `search` for an alternative source.",
+		"try `webSearch` for an alternative source.",
 		"try `findWorks` or another URL for an alternative source.",
 	))
 }

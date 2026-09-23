@@ -7,6 +7,7 @@ package harvestmcp
 
 import (
 	"errors"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
@@ -20,19 +21,31 @@ func runtimeSearchEnabled(runtime Runtime) bool {
 	})
 }
 
-// serverInstructions is the server's top-level routing guide. searchOnInstructions
-// is byte-identical to the server's original hardcoded text; searchOffInstructions
-// drops both clauses that name the (unavailable) search tool and states why.
-func serverInstructions(searchAvailable bool) string {
-	if searchAvailable {
-		return searchOnInstructions
+// serverInstructions is the server's top-level routing guide. It names
+// webSearch only when a search backend is configured (and says how to
+// configure one otherwise), and parseLocalDocuments only on a local server.
+func serverInstructions(searchAvailable, remote bool) string {
+	routes := []string{
+		`"read / get this web page or URL" is readPage (a paper's landing page is a page too)`,
+		`"read this paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL, or findWorks handle" is readWork`,
+		`"find papers / works / a book by TITLE" is findWorks (ranked candidates with a handle, no download)`,
+		`"download / save this file — a PDF, zip, image, audio, dataset" is download (the bytes, unparsed; nothing is converted)`,
 	}
-	return searchOffInstructions
+	if !remote {
+		routes = append(routes, `"read this local document" is parseLocalDocuments`)
+	}
+	order := "Order for a title — findWorks, then readWork with its handle"
+	if searchAvailable {
+		routes = append(routes, `"search the web for X" is webSearch (ranked URLs with snippets, not a paper finder)`)
+		order += "; for a topic — webSearch, then readPage the URL"
+	}
+	text := "Public-document retrieval. Routing — " + strings.Join(routes, "; ") + ". " + order +
+		`. Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
+	if !searchAvailable {
+		text += " Web search is not configured on this server — set search.searxngURL or search.braveApiKey in harvester.config.json to enable web search."
+	}
+	return text
 }
-
-const searchOnInstructions = `Public-document retrieval. Routing — "fetch / get / read this URL, DOI, ISBN, PMID, PMCID, or local file" is fetch; "find papers / works / a book by TITLE" is findWorks (bibliographic candidates with a fetch handle, no download); "search the web for X" is search (ranked URLs with snippets, not a paper finder); "fetch this image / figure" is fetchImage; "did we already fetch it / grep what we hold" is searchCache; "open / list / extract from this .zip, .tar, .7z, or .rar" is archive (a compressed-archive browser, NOT a webpage snapshotter — a web page goes to fetch). Order for a known document — searchCache, then fetch; for a title — findWorks, then fetch with its handle; for a topic — search, then fetch the URL. Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
-
-const searchOffInstructions = `Public-document retrieval. Routing — "fetch / get / read this URL, DOI, ISBN, PMID, PMCID, or local file" is fetch; "find papers / works / a book by TITLE" is findWorks (bibliographic candidates with a fetch handle, no download); "fetch this image / figure" is fetchImage; "did we already fetch it / grep what we hold" is searchCache; "open / list / extract from this .zip, .tar, .7z, or .rar" is archive (a compressed-archive browser, NOT a webpage snapshotter — a web page goes to fetch). Order for a known document — searchCache, then fetch; for a title — findWorks, then fetch with its handle. Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both. Web search is not configured on this server — set search.searxngURL or search.braveApiKey in harvester.config.json to enable the search tool.`
 
 // renderSearchFailure is the public rendering of a failed search call.
 // ErrSearchNotConfigured and ErrSearchDisabled render verbatim — both are

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,73 +24,6 @@ type Cache struct {
 	root  string
 	ttl   time.Duration
 	clock clock.Clock
-}
-
-type CacheSearchResult struct {
-	URL     string `json:"url"`
-	Path    string `json:"path"`
-	Matches int    `json:"matches"`
-	Sample  string `json:"sample"`
-}
-
-func (c *Cache) Search(pattern string, maxResults int, ignoreCase bool) ([]CacheSearchResult, error) {
-	if maxResults <= 0 {
-		maxResults = 50
-	}
-	flags := pattern
-	if ignoreCase {
-		flags = "(?i)" + pattern
-	}
-	rx, err := regexp.Compile(flags)
-	if err != nil {
-		return nil, fmt.Errorf("invalid regex pattern: %w", err)
-	}
-	if _, statErr := os.Stat(c.root); errors.Is(statErr, os.ErrNotExist) {
-		return []CacheSearchResult{}, nil
-	}
-	out := []CacheSearchResult{}
-	err = filepath.WalkDir(c.root, func(path string, entry os.DirEntry, e error) error {
-		if e != nil {
-			return e
-		}
-		if entry.IsDir() || filepath.Ext(path) != extensionMD || len(out) >= maxResults {
-			return nil
-		}
-		raw, e := os.ReadFile(path)
-		if e != nil {
-			log.Printf("harvest cache search cannot read %s: %v", path, e)
-			return nil
-		}
-		meta, body := parseCacheFrontmatter(string(raw))
-		hits := rx.FindAllString(body, -1)
-		if len(hits) == 0 {
-			return nil
-		}
-		sample := ""
-		for _, line := range strings.Split(body, "\n") {
-			if rx.MatchString(line) {
-				sample = strings.TrimSpace(line)
-				if len([]rune(sample)) > 200 {
-					sample = string([]rune(sample)[:200])
-				}
-				break
-			}
-		}
-		displayURL := meta["url"]
-		if displayURL == "" {
-			displayURL = path
-		}
-		out = append(out, CacheSearchResult{URL: displayURL, Path: path, Matches: len(hits), Sample: sample})
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("search cache: %w", err)
-	}
-	return out, nil
-}
-
-func (h *Harvester) SearchCache(pattern string, maxResults int, ignoreCase bool) ([]CacheSearchResult, error) {
-	return h.cache.Search(pattern, maxResults, ignoreCase)
 }
 
 func newCache(root string, ttl time.Duration, clocks ...clock.Clock) *Cache {

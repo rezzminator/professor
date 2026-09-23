@@ -171,7 +171,7 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 		"load-bearing local evidence",
 		`"status": "unavailable"`,
 		`"input": "` + missing + `"`,
-		`"error": "The requested document was not found. Use findWorks, select a result, and fetch it again."`,
+		`"error": "The requested document was not found. Use findWorks, select a result, and read it with readWork."`,
 	} {
 		if !strings.Contains(string(prepared), want) {
 			t.Errorf("prepared files omitted %q:\n%s", want, prepared)

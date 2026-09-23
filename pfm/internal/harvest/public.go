@@ -117,11 +117,7 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 			}
 			body = result.Content
 			if strings.EqualFold(result.Kind, kindArchive) {
-				if len(result.Members) > 0 {
-					body = h.PublicArchiveListing(source, result.Members)
-				} else {
-					body = h.rewriteArchiveSource(source, result.Source, body)
-				}
+				body = h.rewriteArchiveSource(source, result.Source, body)
 			}
 			if body != "" {
 				body, err = h.withPublicImages(source, body, result.Path, &out)
@@ -223,19 +219,6 @@ func (h *Harvester) PublicResult(source string, result Result, sizeOnly bool) Re
 	return out
 }
 
-// PublicArchiveListing is the canonical, redaction-applied archive-listing
-// renderer (F19): it wraps formatArchiveListing with the same source
-// redaction the file-export path always applied (a fetched URL becomes its
-// harvest: handle; a local path becomes "requested archive") so harvestmcp's
-// live MCP answer and the exported file never drift again from having two
-// renderers. Exported signature: PublicArchiveListing(source string, members
-// []Member) string. Output is byte-identical to the pre-export helper this
-// replaces -- only its name changed.
-func (h *Harvester) PublicArchiveListing(source string, members []Member) string {
-	display := h.publicArchiveDisplay(source)
-	return formatArchiveListing(display, members)
-}
-
 func (h *Harvester) publicArchiveDisplay(source string) string {
 	display := strings.TrimSpace(source)
 	if strings.HasPrefix(strings.ToLower(display), "http://") ||
@@ -306,7 +289,6 @@ func publicSuccessSkeleton(source string, result Result) Result {
 		Kind:        publicKind(result.Kind),
 		CacheStatus: publicCacheStatus(result.CacheStatus),
 		HTTPStatus:  result.HTTPStatus,
-		Members:     append([]Member(nil), result.Members...),
 		// Partial is part of what the artifact IS, not how it was acquired:
 		// a public caller must see a truncated page as truncated.
 		Partial: result.Partial,
@@ -562,10 +544,7 @@ func publicErrorKind(result Result) string {
 		return errorKindInvalid
 	case strings.Contains(err, "findworks"), strings.Contains(err, "find works"), strings.Contains(err, "title — use"):
 		return "ambiguous"
-	case strings.Contains(err, "fetchimage"),
-		strings.Contains(err, "fetch image"),
-		strings.Contains(err, "archive tool"),
-		strings.Contains(err, "use the `archive`"):
+	case strings.Contains(err, "with `download`"):
 		return errorKindWrongKind
 	case strings.Contains(err, cacheLabel), strings.Contains(err, "storage"), strings.Contains(err, "read local file"):
 		return errorKindInternal
@@ -596,7 +575,7 @@ func PublicFailureMessage(result Result) string {
 				http.StatusText(result.HTTPStatus),
 			)
 		}
-		return "The requested document was not found. Use findWorks, select a result, and fetch it again."
+		return "The requested document was not found. Use findWorks, select a result, and read it with readWork."
 	case errorKindConversion:
 		return "The document could not be converted or OCR'd. Try another copy."
 	case errorKindOversized:
@@ -604,11 +583,11 @@ func PublicFailureMessage(result Result) string {
 	case errorKindCancelled:
 		return "The request was cancelled."
 	case errorKindInvalid:
-		return "The input is invalid. Use findWorks, select a result, and fetch it."
+		return "The input is invalid. Use findWorks, select a result, and read it with readWork."
 	case "ambiguous":
-		return "The title is ambiguous. Use findWorks, select a result, and fetch it."
+		return "The title is ambiguous. Use findWorks, select a result, and read it with readWork."
 	case errorKindWrongKind:
-		return "This source is an image or archive. Use fetchImage or archive for this media."
+		return wrongKindMessage(result.Kind)
 	case errorKindInternal:
 		return "Harvester could not read or publish its stored result. Retry later."
 	case errorKindExport:
@@ -643,4 +622,17 @@ func JSONResults(results []Result) []JSONResult {
 		out = append(out, JSONResult{Result: *r, Method: r.Method, Partial: r.Partial})
 	}
 	return out
+}
+
+// wrongKindMessage names what a body that is not a page is, and points at the
+// tool that takes it: `download` returns a file's bytes, unparsed.
+func wrongKindMessage(kind string) string {
+	what := "a file (audio, video, a legacy Office file or another binary)"
+	switch low := strings.ToLower(kind); {
+	case isImageKind(low):
+		what = "an image"
+	case low == kindArchive || low == kindZIP || low == kindTAR || low == kind7Z || low == kindRAR:
+		what = "an archive"
+	}
+	return "This source is " + what + ", not a page. Download it with `download`; readPage reads pages."
 }

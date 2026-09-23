@@ -1,10 +1,8 @@
 package harvest
 
 import (
-	"archive/tar"
 	"archive/zip"
 	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -229,59 +227,6 @@ func TestSearchLegacySingularEngineAndBraveLanguage(t *testing.T) {
 	})
 	if err != nil || backend != "brave" || len(results) != 1 || results[0].Engine != "brave" {
 		t.Fatalf("Brave result=%#v backend=%q err=%v", results, backend, err)
-	}
-}
-
-func TestArchiveRefusesTraversalAndSymlink(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hostile.zip")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zw := zip.NewWriter(f)
-	for _, name := range []string{"../escape.txt", "ok.txt"} {
-		w, err := zw.Create(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		_, _ = io.WriteString(w, "content")
-	}
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ListArchive(path); err == nil || !strings.Contains(err.Error(), "..") {
-		t.Fatalf("ListArchive traversal err = %v", err)
-	}
-
-	tarPath := filepath.Join(t.TempDir(), "safe.tar")
-	tf, err := os.Create(tarPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tw := tar.NewWriter(tf)
-	data := []byte("hello")
-	if err := tw.WriteHeader(&tar.Header{Name: "ok.txt", Mode: 0o600, Size: int64(len(data))}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write(data); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := tf.Close(); err != nil {
-		t.Fatal(err)
-	}
-	members, err := ListArchive(tarPath)
-	if err != nil || len(members) != 1 {
-		t.Fatalf("tar list = %#v err=%v", members, err)
-	}
-	got, err := ReadArchiveMember(tarPath, "ok.txt")
-	if err != nil || string(got) != "hello" {
-		t.Fatalf("tar member = %q err=%v", got, err)
 	}
 }
 
@@ -547,48 +492,6 @@ func TestChromeHeadersMatchCapturedChrome146Profile(t *testing.T) {
 	}
 }
 
-func TestArchiveGzipAndCacheSearch(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "sample.tar.gz")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gz := gzip.NewWriter(f)
-	tw := tar.NewWriter(gz)
-	body := []byte("gzip member")
-	if err := tw.WriteHeader(&tar.Header{Name: "docs/readme.txt", Mode: 0o600, Size: int64(len(body))}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tw.Write(body); err != nil {
-		t.Fatal(err)
-	}
-	if err := tw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := gz.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	entries, err := ListArchive(path)
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("gzip list=%#v err=%v", entries, err)
-	}
-	got, err := ReadArchiveMember(path, "docs/readme.txt")
-	if err != nil || string(got) != "gzip member" {
-		t.Fatalf("gzip read=%q err=%v", got, err)
-	}
-	c := newCache(t.TempDir(), time.Hour)
-	if _, err := c.save("https://example.test/a", "html", "direct", "needle needle", nil); err != nil {
-		t.Fatal(err)
-	}
-	hits, err := c.Search("needle", 10, true)
-	if err != nil || len(hits) != 1 || hits[0].Matches != 2 {
-		t.Fatalf("cache search=%#v err=%v", hits, err)
-	}
-}
-
 func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 	tr := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -626,34 +529,6 @@ func TestRedirectAndMetadataInjectionAreBlocked(t *testing.T) {
 		t.Fatalf("frontmatter injection survived: %q", raw)
 	}
 	_ = path
-}
-
-func TestArchiveNFCNormalizesAndReadsNFDName(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "nfc.zip")
-	f, err := os.Create(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	zw := zip.NewWriter(f)
-	w, err := zw.Create("e\u0301.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = io.WriteString(w, "normalized")
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
-	members, err := ListArchive(path)
-	if err != nil || len(members) != 1 || members[0].Name != "é.txt" {
-		t.Fatalf("NFC listing = %#v err=%v", members, err)
-	}
-	body, err := ReadArchiveMember(path, "é.txt")
-	if err != nil || string(body) != "normalized" {
-		t.Fatalf("NFC read = %q err=%v", body, err)
-	}
 }
 
 func TestGetBodyCapsAtMaxWithoutFailure(t *testing.T) {
@@ -769,19 +644,6 @@ func TestClassifyKindOOXMLExtensionBeatsZipMagic(t *testing.T) {
 				tc.want,
 			)
 		}
-	}
-}
-
-func TestArchiveNameLimitCountsUnicodeRunesAfterNFC(t *testing.T) {
-	if err := validateMemberName(strings.Repeat("é", 255)); err != nil {
-		t.Fatalf("255 Unicode code points should pass: %v", err)
-	}
-	if err := validateMemberName(strings.Repeat("é", 256)); err == nil {
-		t.Fatal("256 Unicode code points should fail")
-	}
-	// NFD input is normalized before the boundary check and remains a 255-rune name.
-	if err := validateMemberName(strings.Repeat("e\u0301", 255)); err != nil {
-		t.Fatalf("NFD 255-name should pass after NFC: %v", err)
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
-func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
+func TestStableSixToolSurface(t *testing.T) {
 	service, err := NewConfiguredHarvester(
 		"test",
 		Runtime{
@@ -52,16 +52,9 @@ func TestStableSixToolSurfaceAndFetchPrompt(t *testing.T) {
 	for _, tool := range tools.Tools {
 		got = append(got, tool.Name)
 	}
-	want := []string{"archive", "fetch", "fetchImage", "findWorks", "search", "searchCache"}
+	want := []string{"download", "findWorks", "parseLocalDocuments", "readPage", "readWork", "webSearch"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("tool names = %#v, want %#v", got, want)
-	}
-	prompts, err := session.ListPrompts(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(prompts.Prompts) != 1 || prompts.Prompts[0].Name != "fetch" {
-		t.Fatalf("prompts = %#v, want one fetch prompt", prompts.Prompts)
 	}
 }
 
@@ -102,10 +95,10 @@ func listToolNames(t *testing.T, service *Service) []string {
 	return names
 }
 
-// TestSearchToolHiddenWithoutABackend is the regression for a `search` tool
+// TestSearchToolHiddenWithoutABackend is the regression for a `webSearch` tool
 // advertised with nowhere to search: register() used to gate only on
 // !DisableSearch, so a Service with neither SearXNGURL nor BraveAPIKey set
-// still listed `search`, and calling it always failed with a configuration
+// still listed `webSearch`, and calling it always failed with a configuration
 // error the caller had no way to see in advance.
 func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 	service, err := NewConfiguredHarvester(
@@ -118,8 +111,8 @@ func TestSearchToolHiddenWithoutABackend(t *testing.T) {
 	defer func() { _ = service.Close() }()
 	names := listToolNames(t, service)
 	for _, name := range names {
-		if name == "search" {
-			t.Fatalf("tool list %v advertises `search` with no backend configured", names)
+		if name == "webSearch" {
+			t.Fatalf("tool list %v advertises `webSearch` with no backend configured", names)
 		}
 	}
 }
@@ -142,12 +135,12 @@ func TestSearchToolListedWithSearXNGConfigured(t *testing.T) {
 	names := listToolNames(t, service)
 	found := false
 	for _, name := range names {
-		if name == "search" {
+		if name == "webSearch" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("tool list %v does not advertise `search` with SearXNGURL configured", names)
+		t.Fatalf("tool list %v does not advertise `webSearch` with SearXNGURL configured", names)
 	}
 }
 
@@ -195,50 +188,6 @@ func TestConfiguredServiceCarriesScholarlyProviderRuntime(t *testing.T) {
 		if tc.got != tc.want {
 			t.Errorf("service runtime %s = %q, want %q", tc.name, tc.got, tc.want)
 		}
-	}
-}
-
-// TestSearchCacheMissHintsSearchOnlyWhenAvailable pins the searchCache
-// empty-match hint, the one harvestmcp-side message in the closed
-// `use `search“ list: it must not point at a `search` tool the server does
-// not advertise.
-func TestSearchCacheMissHintsSearchOnlyWhenAvailable(t *testing.T) {
-	off, err := NewConfiguredHarvester(
-		"test",
-		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = off.Close() }()
-	result, err := off.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
-	if err != nil {
-		t.Fatalf("searchCache(no backend) error: %v", err)
-	}
-	offText := result.Content[0].(*mcp.TextContent).Text
-	if strings.Contains(offText, "`search`") {
-		t.Fatalf("searchCache miss text %q names `search` with no backend configured", offText)
-	}
-
-	on, err := NewConfiguredHarvester(
-		"test",
-		Runtime{
-			Home:       t.TempDir(),
-			CacheDir:   filepath.Join(t.TempDir(), "cache"),
-			SearXNGURL: "http://searxng.example.test",
-		},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = on.Close() }()
-	result, err = on.searchCache(context.Background(), nil, CacheInput{Pattern: "no-such-needle"})
-	if err != nil {
-		t.Fatalf("searchCache(with backend) error: %v", err)
-	}
-	onText := result.Content[0].(*mcp.TextContent).Text
-	if !strings.Contains(onText, "`search`") {
-		t.Fatalf("searchCache miss text %q dropped `search` with a backend configured", onText)
 	}
 }
 

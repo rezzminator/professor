@@ -11,7 +11,7 @@ func titleGuessResult(source, echoed string) Result {
 	return Result{
 		Source: source,
 		Error: fmt.Sprintf(
-			"%q is a title — use the `findWorks` tool to list candidate works (it returns a fetch handle for each), then fetch the one you pick. `fetch` retrieves locations and UNAMBIGUOUS identifiers (URL, file path, DOI, ISBN), never a title.",
+			"%q is a title — use the `findWorks` tool to list candidate works (it returns a handle for each), then read the one you pick with `readWork`. `readPage` reads web pages and `readWork` reads UNAMBIGUOUS identifiers (DOI, arXiv id, PMID, PMCID, ISBN), never a title.",
 			echoed,
 		),
 	}

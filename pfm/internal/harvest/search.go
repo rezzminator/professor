@@ -100,7 +100,7 @@ func SearchEnabled(options SearchOptions) bool {
 }
 
 // SearchHint is the one place every harvester message renders its "use
-// `search`" recommendation. Naming a disabled tool sends a caller straight
+// `webSearch`" recommendation. Naming a disabled tool sends a caller straight
 // into a second dead end, so a message that would name it instead falls back
 // to withoutSearch, which keeps the rest of the sentence intact and names no
 // tool. Every caller — inside this package and across the MCP adapter —

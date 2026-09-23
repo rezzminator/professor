@@ -2,13 +2,10 @@ package harvestmcp
 
 import (
 	"archive/zip"
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
@@ -34,38 +31,6 @@ func writeTestZip(t *testing.T, path string, files map[string]string) {
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// TestArchiveToolNeverEchoesALocalPathInItsListing is L2-F19 end to end: a
-// local archive the caller is permitted to list (inside LocalRoots) renders
-// its listing without the raw filesystem path — the same redaction
-// PublicResult already applies to the exported file's own source.
-func TestArchiveToolNeverEchoesALocalPathInItsListing(t *testing.T) {
-	root := t.TempDir()
-	zipPath := filepath.Join(root, "bundle.zip")
-	writeTestZip(t, zipPath, map[string]string{"a.txt": "hi"})
-	service, err := NewConfiguredHarvester(
-		"test",
-		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache"), LocalRoots: []string{root}},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = service.Close() }()
-	result, _, err := service.archive(context.Background(), (*mcp.CallToolRequest)(nil), ArchiveInput{Source: zipPath})
-	if err != nil {
-		t.Fatal(err)
-	}
-	text, ok := result.Content[0].(*mcp.TextContent)
-	if !ok {
-		t.Fatalf("archive result content = %T, want *mcp.TextContent", result.Content[0])
-	}
-	if strings.Contains(text.Text, zipPath) || strings.Contains(text.Text, root) {
-		t.Fatalf("archive listing echoed the local path: %q", text.Text)
-	}
-	if !strings.Contains(text.Text, "requested archive") {
-		t.Fatalf("archive listing did not use the redacted display source: %q", text.Text)
 	}
 }
 
@@ -111,7 +76,7 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 // TestDescribeThinExtractionNamesSearchOnlyWhenAvailable is
 // TestDescribeLegacyFailureKindsNameTheSameRecovery's search-gated sibling:
 // the "thin extraction" (JS-rendered/bot-blocked, no readable content)
-// message must recommend `search` only when a backend is actually
+// message must recommend `webSearch` only when a backend is actually
 // configured, and fall back to findWorks/another-URL wording when it is not.
 func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	result := harvest.Result{HTTPStatus: 200}
@@ -129,7 +94,7 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	}
 	defer func() { _ = searchOn.Close() }()
 	got := searchOn.describeFetch("https://fixture.example/source", result, false)
-	for _, want := range []string{"no readable content", "`search`", "`findWorks`"} {
+	for _, want := range []string{"no readable content", "`webSearch`", "`findWorks`"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("search-on describe receipt missing %q: %q", want, got)
 		}
@@ -144,8 +109,8 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	}
 	defer func() { _ = searchOff.Close() }()
 	got = searchOff.describeFetch("https://fixture.example/source", result, false)
-	if strings.Contains(got, "`search`") {
-		t.Fatalf("search-off describe receipt names the unavailable `search` tool: %q", got)
+	if strings.Contains(got, "`webSearch`") {
+		t.Fatalf("search-off describe receipt names the unavailable `webSearch` tool: %q", got)
 	}
 	if !strings.Contains(got, "`findWorks`") {
 		t.Fatalf("search-off describe receipt missing findWorks fallback: %q", got)

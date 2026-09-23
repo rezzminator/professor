@@ -263,7 +263,7 @@ type Options struct {
 	GoogleScholarURL      string
 	DisableSearch         bool
 	// SearchAvailable tells the ladder's own failure messages whether the
-	// `search` tool exists to recommend. It is the caller's SearchEnabled(SearchOptions{...})
+	// `webSearch` tool exists to recommend. It is the caller's SearchEnabled(SearchOptions{...})
 	// verdict, not re-derived here: the adapter already resolved
 	// SearXNGURL/BraveAPIKey/DisableSearch once, and re-deriving it a second
 	// way is how a hint drifts from the tool it names.
@@ -338,7 +338,6 @@ type Result struct {
 	ErrorKind    string   `json:"error_kind,omitempty"`
 	Challenge    bool     `json:"challenge,omitempty"`
 	HTTPStatus   int      `json:"http_status,omitempty"`
-	Members      []Member `json:"members,omitempty"`
 	// Partial names why the artifact is known to be INCOMPLETE — a recall gate
 	// below its floor, lazy-loaded content still arriving when the browser
 	// rung's scroll cap hit, a thread whose comments are only partly in the

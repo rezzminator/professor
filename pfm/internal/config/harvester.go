@@ -49,6 +49,7 @@ type HarvesterConfig struct {
 	Convert   HarvesterConvert
 	Cache     HarvesterCache
 	Output    HarvesterOutput
+	Harvest   HarvesterLimits
 
 	Path   string
 	Exists bool
@@ -113,6 +114,15 @@ type HarvesterCache struct {
 	NegativeTransientTTL time.Duration
 }
 
+// HarvesterLimits caps what one retrieval may hold: MaxDownloadBytes one file
+// download (harvest.maxDownloadBytes), MaxResourceBytes one blob the remote
+// server sends through resources/read (harvest.maxResourceBytes). 0 = the
+// harvester default (2 GiB, 25 MiB).
+type HarvesterLimits struct {
+	MaxDownloadBytes int64
+	MaxResourceBytes int64
+}
+
 type HarvesterOutput struct {
 	MaxInlineChars int
 }
@@ -126,6 +136,7 @@ type rawHarvester struct {
 	Convert   *rawHarvesterConvert   `json:"convert,omitempty"`
 	Cache     *rawHarvesterCache     `json:"cache,omitempty"`
 	Output    *rawHarvesterOutput    `json:"output,omitempty"`
+	Harvest   *rawHarvesterLimits    `json:"harvest,omitempty"`
 }
 
 type rawHarvesterExternal struct {
@@ -175,6 +186,11 @@ type rawHarvesterCache struct {
 	NegativeTransientTTLSeconds *int    `json:"negativeTransientTtlSeconds,omitempty"`
 }
 
+type rawHarvesterLimits struct {
+	MaxDownloadBytes *int64 `json:"maxDownloadBytes,omitempty"`
+	MaxResourceBytes *int64 `json:"maxResourceBytes,omitempty"`
+}
+
 type rawHarvesterOutput struct {
 	MaxInlineChars *int `json:"maxInlineChars,omitempty"`
 }
@@ -214,6 +230,7 @@ var harvesterSourceKeys = []string{
 	"harvester.cache.dir", "harvester.cache.ttlSeconds", "harvester.cache.negativeTtlSeconds",
 	"harvester.cache.negativeTransientTtlSeconds",
 	"harvester.output.maxInlineChars",
+	"harvester.harvest.maxDownloadBytes", "harvester.harvest.maxResourceBytes",
 }
 
 // HarvesterSourceKeys returns the reported harvester keys in display order.
@@ -449,6 +466,29 @@ func loadHarvester(result *Config, home string, legacyEnabled *bool) error {
 		harvester.Output.MaxInlineChars = *raw.Output.MaxInlineChars
 		file("output.maxInlineChars")
 	}
+	if raw.Harvest != nil {
+		for key, pair := range map[string]struct {
+			raw    *int64
+			target *int64
+		}{
+			"maxDownloadBytes": {raw.Harvest.MaxDownloadBytes, &harvester.Harvest.MaxDownloadBytes},
+			"maxResourceBytes": {raw.Harvest.MaxResourceBytes, &harvester.Harvest.MaxResourceBytes},
+		} {
+			if pair.raw == nil {
+				continue
+			}
+			if *pair.raw < 0 {
+				return fmt.Errorf(
+					"harvester config %s: harvest.%s must not be negative (0 = the default), got %d",
+					path,
+					key,
+					*pair.raw,
+				)
+			}
+			*pair.target = *pair.raw
+			file("harvest." + key)
+		}
+	}
 
 	if harvester.External.Enabled {
 		if harvester.External.PublicURL == "" {
@@ -591,6 +631,10 @@ func MarshalHarvester(harvester HarvesterConfig, redact bool) ([]byte, error) {
 			"negativeTransientTtlSeconds": int(harvester.Cache.NegativeTransientTTL / time.Second),
 		},
 		"output": map[string]any{"maxInlineChars": harvester.Output.MaxInlineChars},
+		"harvest": map[string]any{
+			"maxDownloadBytes": harvester.Harvest.MaxDownloadBytes,
+			"maxResourceBytes": harvester.Harvest.MaxResourceBytes,
+		},
 	}
 	content, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {

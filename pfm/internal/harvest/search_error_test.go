@@ -11,7 +11,7 @@ import (
 )
 
 // TestSearchHintNamesSearchOnlyWhenAvailable pins the one shared helper every
-// "use `search`" message routes through.
+// "use `webSearch`" message routes through.
 func TestSearchHintNamesSearchOnlyWhenAvailable(t *testing.T) {
 	if got := SearchHint(true, "with", "without"); got != "with" {
 		t.Fatalf("SearchHint(true) = %q, want %q", got, "with")
@@ -22,49 +22,49 @@ func TestSearchHintNamesSearchOnlyWhenAvailable(t *testing.T) {
 }
 
 // TestFailureMessageNamesSearchOnlyWhenAvailable is the regression for a
-// failure message recommending a `search` tool that a caller with no
+// failure message recommending a `webSearch` tool that a caller with no
 // configured backend cannot possibly use — FailureMessage used to name
-// `search` unconditionally in every one of these branches.
+// `webSearch` unconditionally in every one of these branches.
 func TestFailureMessageNamesSearchOnlyWhenAvailable(t *testing.T) {
 	for _, kind := range []string{"invalid", "timeout", "dns", "connect"} {
 		on := FailureMessage("https://example.test/x", 0, kind, false, true)
-		if !strings.Contains(on, "`search`") {
-			t.Errorf("FailureMessage(%s, search on) = %q, want it to name `search`", kind, on)
+		if !strings.Contains(on, "`webSearch`") {
+			t.Errorf("FailureMessage(%s, search on) = %q, want it to name `webSearch`", kind, on)
 		}
 		off := FailureMessage("https://example.test/x", 0, kind, false, false)
-		if strings.Contains(off, "`search`") {
-			t.Errorf("FailureMessage(%s, search off) = %q, unconditionally names `search`", kind, off)
+		if strings.Contains(off, "`webSearch`") {
+			t.Errorf("FailureMessage(%s, search off) = %q, unconditionally names `webSearch`", kind, off)
 		}
 	}
 
 	// The challenge branch, the HTTP-status branch, and the final unclassified
-	// fallback each carry their own "use `search`" clause — regression for the
+	// fallback each carry their own "use `webSearch`" clause — regression for the
 	// three net.go branches that used to name it unconditionally.
 	on := FailureMessage("https://example.test/x", 0, "", true, true)
-	if !strings.Contains(on, "`search`") {
-		t.Errorf("FailureMessage(challenge, search on) = %q, want it to name `search`", on)
+	if !strings.Contains(on, "`webSearch`") {
+		t.Errorf("FailureMessage(challenge, search on) = %q, want it to name `webSearch`", on)
 	}
 	off := FailureMessage("https://example.test/x", 0, "", true, false)
-	if strings.Contains(off, "`search`") {
-		t.Errorf("FailureMessage(challenge, search off) = %q, unconditionally names `search`", off)
+	if strings.Contains(off, "`webSearch`") {
+		t.Errorf("FailureMessage(challenge, search off) = %q, unconditionally names `webSearch`", off)
 	}
 
 	on = FailureMessage("https://example.test/x", 404, "", false, true)
-	if !strings.Contains(on, "`search`") {
-		t.Errorf("FailureMessage(HTTP 404, search on) = %q, want it to name `search`", on)
+	if !strings.Contains(on, "`webSearch`") {
+		t.Errorf("FailureMessage(HTTP 404, search on) = %q, want it to name `webSearch`", on)
 	}
 	off = FailureMessage("https://example.test/x", 404, "", false, false)
-	if strings.Contains(off, "`search`") {
-		t.Errorf("FailureMessage(HTTP 404, search off) = %q, unconditionally names `search`", off)
+	if strings.Contains(off, "`webSearch`") {
+		t.Errorf("FailureMessage(HTTP 404, search off) = %q, unconditionally names `webSearch`", off)
 	}
 
 	on = FailureMessage("https://example.test/x", 0, "", false, true)
-	if !strings.Contains(on, "`search`") {
-		t.Errorf("FailureMessage(fallback, search on) = %q, want it to name `search`", on)
+	if !strings.Contains(on, "`webSearch`") {
+		t.Errorf("FailureMessage(fallback, search on) = %q, want it to name `webSearch`", on)
 	}
 	off = FailureMessage("https://example.test/x", 0, "", false, false)
-	if strings.Contains(off, "`search`") {
-		t.Errorf("FailureMessage(fallback, search off) = %q, unconditionally names `search`", off)
+	if strings.Contains(off, "`webSearch`") {
+		t.Errorf("FailureMessage(fallback, search off) = %q, unconditionally names `webSearch`", off)
 	}
 }
 

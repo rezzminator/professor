@@ -23,9 +23,9 @@ func TestDescribeFetchRedactsProviderDiagnosticsAtMCPBoundary(t *testing.T) {
 	}
 }
 
-func TestFetchItemCarriesOnlyPublicResultFields(t *testing.T) {
+func TestPageItemCarriesOnlyPublicResultFields(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	item := fetchItem(harvest.Result{
+	item := (&Service{}).pageItem("10.1234/public.boundary", harvest.Result{
 		Source:      "10.1234/public.boundary",
 		Content:     "article",
 		Path:        "/cache/public/opaque.md",
@@ -33,25 +33,30 @@ func TestFetchItemCarriesOnlyPublicResultFields(t *testing.T) {
 		Bytes:       7,
 		Method:      "doi-mirror",
 		Rungs:       []string{"direct", "mirror:https://mirror.secret.example"},
-	})
+	}, false)
 	if item.Source != "10.1234/public.boundary" || item.Path != "/cache/public/opaque.md" || item.Content != "article" {
-		t.Fatalf("public fetch item changed its public fields: %#v", item)
+		t.Fatalf("public page item changed its public fields: %#v", item)
 	}
 	if strings.Contains(item.Path, "mirror.secret.example") || strings.Contains(item.Content, "mirror.secret.example") {
-		t.Fatalf("fetch item exposed provider details: %#v", item)
+		t.Fatalf("page item exposed provider details: %#v", item)
 	}
 }
 
-// TestFetchItemNamesTheRungAndAlwaysCarriesPartial: the fetch item names the
+// TestPageItemNamesTheRungAndAlwaysCarriesPartial: the page item names the
 // rung class that stored the page (a mirror provider only as "mirror") and
 // always carries `partial`, empty for a complete artifact.
-func TestFetchItemNamesTheRungAndAlwaysCarriesPartial(t *testing.T) {
+func TestPageItemNamesTheRungAndAlwaysCarriesPartial(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	encoded, err := json.Marshal(fetchItem(harvest.Result{Source: "https://fixture.example/a", Method: "doi-mirror"}))
+	item := (&Service{}).pageItem(
+		"https://fixture.example/a",
+		harvest.Result{Source: "https://fixture.example/a", Method: "doi-mirror"},
+		false,
+	)
+	encoded, err := json.Marshal(item)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
 	if !strings.Contains(string(encoded), `"method":"mirror"`) || !strings.Contains(string(encoded), `"partial":""`) {
-		t.Fatalf("fetch item lacks method or partial: %s", encoded)
+		t.Fatalf("page item lacks method or partial: %s", encoded)
 	}
 }

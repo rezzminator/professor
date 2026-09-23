@@ -316,9 +316,12 @@ func fileFailure(source, what string, got Retrieved, err error) Result {
 func pageBodyGuard(source, kind string, body []byte, status int) (Result, bool) {
 	if kind == kindImage || isImageKind(kind) {
 		return Result{
-			Source:     source,
-			Kind:       kindImage,
-			Error:      fmt.Sprintf("%s is an image — use the `fetchImage` tool, not `fetch`.", source),
+			Source: source,
+			Kind:   kindImage,
+			Error: fmt.Sprintf(
+				"%s is an image, not a page — download it with `download`; readPage reads pages.",
+				source,
+			),
 			HTTPStatus: status,
 			ErrorKind:  errorKindWrongKind,
 		}, true
@@ -335,8 +338,12 @@ func pageBodyGuard(source, kind string, body []byte, status int) (Result, bool) 
 	return Result{
 		Source: source,
 		Kind:   kindFile,
-		Error: fmt.Sprintf("%s is a file (%s, %d bytes), not a page — it was not converted; download it as a file.",
-			source, detected, len(body)),
+		Error: fmt.Sprintf(
+			"%s is a file (%s, %d bytes), not a page — it was not converted; download it with `download`.",
+			source,
+			detected,
+			len(body),
+		),
 		HTTPStatus: status,
 		ErrorKind:  errorKindWrongKind,
 	}, true

@@ -1,0 +1,52 @@
+{
+ "post_view": {
+  "post": {
+   "id": 51036219,
+   "name": "A post title",
+   "url": "https://lemmy.world/pictrs/image/placeholder.png",
+   "body": "The post body, with **bold**.",
+   "creator_id": 306405,
+   "community_id": 79185,
+   "removed": false,
+   "locked": false,
+   "published": "2026-08-24T02:05:51.295456Z",
+   "deleted": false,
+   "nsfw": false,
+   "thumbnail_url": null,
+   "ap_id": "https://lemmy.world/post/51036219",
+   "local": true,
+   "language_id": 37,
+   "featured_community": false,
+   "featured_local": false,
+   "url_content_type": "image/png"
+  },
+  "creator": {
+   "id": 306405,
+   "name": "user-0",
+   "display_name": null,
+   "actor_id": "https://lemmy.world/u/user-0",
+   "local": true,
+   "deleted": false,
+   "bot_account": false,
+   "banned": false,
+   "published": "2023-06-21T09:22:34.462094Z",
+   "instance_id": 1
+  },
+  "community": {
+   "id": 79185,
+   "name": "microblogmemes",
+   "title": "Microblog Memes",
+   "actor_id": "https://lemmy.world/c/microblogmemes",
+   "local": true
+  },
+  "counts": {
+   "post_id": 51036219,
+   "comments": 55,
+   "score": 2029,
+   "upvotes": 2040,
+   "downvotes": 11,
+   "published": "2026-08-24T02:05:51.295456Z",
+   "newest_comment_time": "2026-08-30T11:42:53.644671Z"
+  }
+ }
+}

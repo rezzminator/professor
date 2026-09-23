@@ -64,6 +64,10 @@ func (site *socialSite) roundTrip(request *http.Request) (*http.Response, error)
 		site.mu.Unlock()
 	}
 	if status := site.status[key]; status != 0 {
+		if body, ok := site.answers[key]; ok && strings.HasPrefix(contentType, "text/html") {
+			// A page served with an error status: a wall in the page's place.
+			return response(request, status, contentType, body), nil
+		}
 		return response(request, status, "application/json", `{"error":"Record not found"}`), nil
 	}
 	if body, ok := site.answers[key]; ok {

@@ -1,0 +1,104 @@
+{
+ "data": {
+  "project": {
+   "issue": {
+    "iid": "1822",
+    "title": "An issue title",
+    "webUrl": "https://gitlab.com/group-0/project-0/-/work_items/1822",
+    "createdAt": "2017-03-02T10:22:43Z",
+    "state": "opened",
+    "author": {
+     "username": "user-0"
+    },
+    "description": "The issue body, with **bold** and a list:\n\n- one\n- two",
+    "userNotesCount": 9,
+    "notes": {
+     "pageInfo": {
+      "hasNextPage": true,
+      "endCursor": "eyJjcmVhdGVkX2F0IjoiMjAyMi0wMy0yMSAwMjoxNTo1NS4yMDQ0NjQwMDAgKzAwMDAiLCJpZCI6Ijg4MTQyMDQ5OCJ9"
+     },
+     "nodes": [
+      {
+       "id": "gid://gitlab/DiscussionNote/24535191",
+       "system": false,
+       "body": "Note 0 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2017-03-02T11:23:24Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_24535191",
+       "author": {
+        "username": "user-1"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/7e8dcbc7070d6924aa88a0e3198f89b72090d30e"
+       }
+      },
+      {
+       "id": "gid://gitlab/Note/24544318",
+       "system": false,
+       "body": "Note 1 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2017-03-02T13:16:04Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_24544318",
+       "author": {
+        "username": "user-2"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/7e8dcbc7070d6924aa88a0e3198f89b72090d30e"
+       }
+      },
+      {
+       "id": "gid://gitlab/Note/24544320",
+       "system": true,
+       "body": "added ~874214 ~91796 ~155976 labels",
+       "createdAt": "2017-03-02T13:16:06Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_24544320",
+       "author": {
+        "username": "user-2"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/7e8dcbc7070d6924aa88a0e3198f89b72090d30e"
+       }
+      },
+      {
+       "id": "gid://gitlab/Note/24897022",
+       "system": false,
+       "body": "Note 3 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2017-03-07T08:21:57Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_24897022",
+       "author": {
+        "username": "user-0"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/7e8dcbc7070d6924aa88a0e3198f89b72090d30e"
+       }
+      },
+      {
+       "id": "gid://gitlab/Note/24984898",
+       "system": false,
+       "body": "Note 4 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2017-03-08T11:29:57Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_24984898",
+       "author": {
+        "username": "user-2"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/7e8dcbc7070d6924aa88a0e3198f89b72090d30e"
+       }
+      },
+      {
+       "id": "gid://gitlab/Note/24988551",
+       "system": false,
+       "body": "Note 5 with `code` and **bold**.\n\nA second paragraph.",
+       "createdAt": "2017-03-08T12:32:48Z",
+       "url": "https://gitlab.com/group-0/project-0/-/work_items/1822#note_24988551",
+       "author": {
+        "username": "user-0"
+       },
+       "discussion": {
+        "id": "gid://gitlab/Discussion/7e8dcbc7070d6924aa88a0e3198f89b72090d30e"
+       }
+      }
+     ]
+    }
+   }
+  }
+ }
+}

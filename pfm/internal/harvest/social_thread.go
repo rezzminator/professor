@@ -52,6 +52,10 @@ type socialThread struct {
 	notServed string
 	// gaps are further gaps the extractor names.
 	gaps []string
+	// unavailableUnstated: the site's stated count already leaves out the
+	// replies served only as an unavailable mark (a comment its author
+	// deleted), so they are named apart, never a gap.
+	unavailableUnstated bool
 }
 
 // render is the thread as Markdown and its partial marker ("" when every
@@ -81,10 +85,16 @@ func (thread socialThread) render() (markdown, partial string) {
 			gaps = append(gaps, fmt.Sprintf("%d stated repl(ies) not read", thread.post.stated))
 		}
 	default:
-		countLine += fmt.Sprintf("%d stated · %d loaded (%d stated to the post itself, the rest to its replies)",
-			stated, loaded, thread.post.stated)
+		countLine += fmt.Sprintf("%d stated · %d loaded", stated, loaded)
+		if stated != thread.post.stated {
+			countLine += fmt.Sprintf(" (%d stated to the post itself, the rest to its replies)", thread.post.stated)
+		}
 		absent := stated - loaded
 		for _, state := range states {
+			if thread.unavailableUnstated {
+				countLine += fmt.Sprintf(" · %d %s (not in the stated count)", unavailable[state], state)
+				continue
+			}
 			countLine += fmt.Sprintf(" · %d %s", unavailable[state], state)
 			gaps = append(gaps, fmt.Sprintf("%d repl(ies) %s", unavailable[state], state))
 			absent -= unavailable[state]
@@ -164,3 +174,6 @@ func htmlMarkdown(fragment string) string {
 	}
 	return strings.Join(markdownRenderer{}.blocks(holder), "\n\n")
 }
+
+// socialDeleted names a reply its author deleted, served only as a mark.
+const socialDeleted = "deleted"

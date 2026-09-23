@@ -1,0 +1,15 @@
+{
+ "type_of": "article",
+ "id": 3759724,
+ "title": "An article title",
+ "slug": "an-article-4g9c",
+ "path": "/user-0/an-article-4g9c",
+ "url": "https://dev.to/user-0/an-article-4g9c",
+ "comments_count": 12,
+ "published_at": "2026-05-27T07:11:18Z",
+ "body_markdown": "The article body, with **bold**.\n\n## A heading\n\nA paragraph.",
+ "user": {
+  "name": "User 0",
+  "username": "user-0"
+ }
+}

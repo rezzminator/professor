@@ -232,9 +232,10 @@ func (h *Harvester) convertHTML(
 		nextPage = paginationContinuation(doc, parsed)
 	}
 	// A wall the markup shows (walls.go) is named; a render of the same
-	// signed-out page cannot close it either.
+	// signed-out page cannot close it either; nor can it load the thread the
+	// page states or leaves behind a loader control (stated_gaps.go).
 	wall := pageWall(source, doc)
-	unclosed := joinReasons(wall, nextPage)
+	unclosed := joinReasons(wall, threadGap(ctx, doc), nextPage)
 	if extraction.unrendered != "" {
 		unclosed = joinReasons(extraction.unrendered, rest.reason(), budget.note(), unclosed)
 	}

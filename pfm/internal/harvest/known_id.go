@@ -124,13 +124,42 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		return Result{Source: source, Error: "no legal open-access copy found"}
 	}
 	trace = make([]string, 0, len(candidates))
+	// An open-access page read as HTML that carries no full text (a record
+	// page: abstract and metadata) does not end the loop: its own PDF link is
+	// read, else the next candidate is tried, else it is the answer at last,
+	// its partial naming why (keptThin).
+	var thin *thinCopy
 	for _, c := range candidates {
 		trace = append(trace, "oa:"+c.Source)
 		result := h.fetchURLWithPolicy(ctx, c.URL, options, false)
-		if result.Error == "" {
-			noteServed(ctx, c.URL)
-			return h.storeResultAlias(source, canonical, result, append([]string(nil), trace...), options)
+		if result.Error != "" {
+			continue
 		}
+		if c.Kind == kindHTML {
+			if full, measure := landingFullText(result.Content); !full {
+				if linked, ok := h.readPageFullTextLink(ctx, c.URL, result.Content, options); ok {
+					trace = append(trace, "oa:"+c.Source+"-pdf-link")
+					return h.storeResultAlias(source, canonical, linked, append([]string(nil), trace...), options)
+				}
+				if thin == nil {
+					thin = &thinCopy{
+						result:  result,
+						url:     c.URL,
+						measure: measure,
+						trace:   append([]string(nil), trace...),
+					}
+				}
+				continue
+			}
+		}
+		noteServed(ctx, c.URL)
+		return h.storeResultAlias(source, canonical, result, append([]string(nil), trace...), options)
+	}
+	keptThin := func() (Result, bool) {
+		if thin == nil {
+			return Result{}, false
+		}
+		return h.storeThinCopy(ctx, source, canonical, *thin, options), true
 	}
 	// Europe PMC's PDF endpoint is the preferred mirror, but scanned/HTML-only
 	// records still expose a legal full-text article page. Keep that fallback
@@ -191,6 +220,9 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 				return h.storeResultAlias(source, canonical, result, append([]string(nil), trace...), options)
 			}
 		}
+		if result, ok := keptThin(); ok {
+			return result
+		}
 		// Name only what was ACTUALLY queried: Unpaywall is gated on an operator
 		// email, so a keyless run must not claim to have checked it.
 		checked := "OpenAlex, Semantic Scholar, Europe PMC, OpenAIRE, Zenodo, eLife, PLOS, NBER, Crossref, CORE, DOAJ, arXiv/ar5iv/OSF, and the Wayback Machine"
@@ -239,6 +271,9 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 			HTTPStatus: doiMirrorFailureStatus(doiMirrorFailure),
 			Rungs:      trace,
 		}
+	}
+	if result, ok := keptThin(); ok {
+		return result
 	}
 	message := "all legal open-access candidates failed"
 	if doiMirrorFailure != nil {

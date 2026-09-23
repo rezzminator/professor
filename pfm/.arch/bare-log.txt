@@ -4,7 +4,7 @@ internal/fleetdb/fleetdb.go 1
 internal/harvest/appshell.go 3
 internal/harvest/books.go 1
 internal/harvest/doh.go 5
-internal/harvest/find_works.go 5
+internal/harvest/find_works.go 3
 internal/harvest/gateway.go 6
 internal/harvest/google_scholar.go 1
 internal/harvest/harvest.go 6

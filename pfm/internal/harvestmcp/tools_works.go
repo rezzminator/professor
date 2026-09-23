@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,7 +18,7 @@ const (
 	workKindAny          = "any"
 	workKindPaper        = "paper"
 	workKindBook         = "book"
-	findWorksDescription = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call findWorks{query:"Attention Is All You Need"}; kind:"paper" or "book" narrows it. Returns ranked candidates (title, authors, year, kind, identifiers, open access) each with a handle — pass that value unchanged to readWork. Empty candidates = nothing matched (give the exact title); a tool error = discovery itself failed, retry or read an exact identifier with readWork.`
+	findWorksDescription = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call findWorks{query:"Attention Is All You Need"}; kind:"paper" or "book" narrows it. Returns ranked candidates (title, authors, year, kind, identifiers, open access) each with a handle — pass that value unchanged to readWork. ` + "`sources`" + ` names each discovery source's status (answered, partial, failed): empty candidates with every source answered = nothing matched (give the exact title); a failed source is named, never read as an empty answer; a tool error = every source failed, retry later or read an exact identifier with readWork.`
 )
 
 // FindInput is findWorks' input.
@@ -38,9 +39,19 @@ type WorkCandidate struct {
 	OpenAccess bool              `json:"open_access"`
 }
 
+// FindSource is one discovery source's status in a findWorks call: a source
+// that failed is named apart from one that answered with nothing.
+type FindSource struct {
+	Source  string `json:"source"`
+	Status  string `json:"status" jsonschema:"answered, partial (some of its requests failed) or failed."`
+	Results int    `json:"results"`
+	Error   string `json:"error,omitempty"`
+}
+
 // FindOutput is findWorks' typed output.
 type FindOutput struct {
 	Candidates []WorkCandidate `json:"candidates"`
+	Sources    []FindSource    `json:"sources"`
 }
 
 func (service *Service) findWorks(
@@ -68,17 +79,35 @@ func (service *Service) findWorks(
 		)
 	}
 	log := obs.Logger(obs.Component(ctx, "mcp"))
-	candidates, err := service.resolver.FindWorks(ctx, input.Query, input.Limit)
+	found, err := service.resolver.FindWorksReport(ctx, input.Query, input.Limit)
 	if err != nil {
 		log.Warn("harvester.findWorks.failed", obs.FieldErr, err.Error())
-		return nil, FindOutput{}, errors.New(
-			"work discovery failed; retry later or read an exact identifier with readWork",
+		return nil, FindOutput{}, fmt.Errorf(
+			"work discovery failed: every source failed — %s; retry later or read an exact identifier with readWork",
+			harvest.FailedText(found.Failed()),
 		)
 	}
-	candidates, err = service.harvester.PublicCandidates(candidates)
+	sources := make([]FindSource, 0, len(found.Sources))
+	for _, source := range found.Sources {
+		if source.Status != harvest.SourceAnswered {
+			log.Warn(
+				"harvester.findWorks.source",
+				"source",
+				source.Name,
+				"status",
+				source.Status,
+				obs.FieldErr,
+				source.Error,
+			)
+		}
+		sources = append(sources, FindSource{
+			Source: source.Name, Status: source.Status, Results: source.Results, Error: source.Error,
+		})
+	}
+	candidates, err := service.harvester.PublicCandidates(found.Candidates)
 	if err != nil {
 		log.Warn("harvester.findWorks.export", obs.FieldErr, err.Error())
-		return nil, FindOutput{}, errors.New("could not prepare the discovered works for retrieval; retry later")
+		return nil, FindOutput{}, handleFailure(err)
 	}
 	kept := make([]harvest.Candidate, 0, len(candidates))
 	out := make([]WorkCandidate, 0, len(candidates))
@@ -94,6 +123,27 @@ func (service *Service) findWorks(
 		})
 	}
 	return &mcp.CallToolResult{
-		Content: []mcp.Content{&mcp.TextContent{Text: renderFind(input.Query, kept)}},
-	}, FindOutput{Candidates: out}, nil
+		Content: []mcp.Content{&mcp.TextContent{Text: renderFind(input.Query, kept, found.Failed())}},
+	}, FindOutput{Candidates: out, Sources: sources}, nil
+}
+
+// handleFailure names why the discovered works got no retrieval handles: the
+// harvester's cache refused the write (its operation and cause, never its
+// path) or a handle rule refused a work. Neither is a network failure, so the
+// same call retried answers the same until the cause is fixed.
+func handleFailure(err error) error {
+	var pathErr *fs.PathError
+	if errors.As(err, &pathErr) {
+		return fmt.Errorf(
+			"could not prepare the discovered works for retrieval: the harvester's cache refused to store "+
+				"their handles (%s: %v); retrying will not help until the cache directory is writable",
+			pathErr.Op,
+			pathErr.Err,
+		)
+	}
+	return fmt.Errorf(
+		"could not prepare the discovered works for retrieval: %v; retrying will not help — "+
+			"read a work's exact identifier with readWork",
+		err,
+	)
 }

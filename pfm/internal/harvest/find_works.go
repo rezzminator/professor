@@ -13,75 +13,87 @@ import (
 	"sync"
 )
 
+// FindWorks is FindWorksReport's ranked candidates. With no candidate and a
+// failed source it is an error naming each failed source: an outage is never
+// an empty answer.
 func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Candidate, error) {
+	found, err := r.FindWorksReport(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	if failed := found.Failed(); len(found.Candidates) == 0 && len(failed) > 0 {
+		return nil, fmt.Errorf("discovery sources failed: %s", FailedText(failed))
+	}
+	return found.Candidates, nil
+}
+
+// FindWorksReport searches every discovery source at once and names each
+// source's status beside the ranked candidates; it is an error only when no
+// source answered.
+func (r *Resolver) FindWorksReport(ctx context.Context, query string, limit int) (WorksFound, error) {
 	query = strings.TrimSpace(strings.Trim(query, "\"'"))
 	if query == "" {
-		return []Candidate{}, nil
+		return WorksFound{Candidates: []Candidate{}, Sources: []WorkSource{}}, nil
 	}
 	if limit <= 0 {
 		limit = 8
 	}
 	ctx = resolverContext(ctx, r)
 	client := r.client()
-	parts := make([][]Candidate, 5)
-	// panics catches a fan-out goroutine's panic per item (F1): one bad
-	// provider response must not take FindWorks' other four gatherers, let
-	// alone the daemon calling it, down with it.
-	panics := make([]error, 5)
+	gatherers := []struct {
+		name   string
+		hosts  int
+		gather func(context.Context, *http.Client, string, int) []Candidate
+	}{
+		{"OpenAlex", 1, r.findPapers},
+		{"arXiv", 1, r.findArxiv},
+		{"Crossref", 1, r.findCrossref},
+		{"Semantic Scholar", 1, r.findSemanticScholar},
+		{"Open Library and Gutendex", 2, r.findBooks},
+	}
+	parts := make([][]Candidate, len(gatherers))
+	sources := make([]WorkSource, len(gatherers))
 	var wait sync.WaitGroup
-	for index, gather := range []func(context.Context, *http.Client, string, int) []Candidate{
-		r.findPapers,
-		r.findArxiv,
-		r.findCrossref,
-		r.findSemanticScholar,
-		r.findBooks,
-	} {
+	for index, gatherer := range gatherers {
 		wait.Add(1)
-		go func(index int, gather func(context.Context, *http.Client, string, int) []Candidate) {
+		go func(index int) {
 			defer wait.Done()
-			defer recoverItem(func(e error) { panics[index] = e })
-			parts[index] = gather(ctx, client, query, limit)
-		}(index, gather)
+			probe, probed := newSourceProbe(client)
+			// A recovered panic (F1) fails its own source by name: one bad
+			// provider response must not take FindWorks' other gatherers, let
+			// alone the daemon calling it, down with it.
+			defer recoverItem(func(e error) {
+				sources[index] = sourceStatus(
+					gatherer.name,
+					0,
+					"its answer could not be processed: "+redactFailureText(e.Error()),
+				)
+			})
+			parts[index] = gatherer.gather(ctx, probed, query, limit)
+			sources[index] = sourceStatus(gatherer.name, len(parts[index]), probe.failure(gatherer.hosts))
+		}(index)
 	}
 	wait.Wait()
-	providerFailures := []string{}
-	// A recovered panic (F1) joins the SAME aggregate the ipfs/md5/scholar
-	// failures below already feed: no existing per-item log sink covers this
-	// fan-out (each gather func already answers nil-on-any-failure, silently,
-	// by design), and the C23 activity-log ratchet (arch-check.sh) refuses a
-	// new bare log call — the aggregate keeps the panic from vanishing
-	// without one.
-	for index, panicErr := range panics {
-		if panicErr != nil {
-			providerFailures = append(providerFailures, fmt.Sprintf("provider %d panicked: %v", index, panicErr))
+	for _, optional := range []struct {
+		name, label string
+		enabled     bool
+		search      func(context.Context, string, int) ([]Candidate, error)
+	}{
+		{"book mirror", "ipfs-catalog", r.configuredProviderBase(sourceIPFSCatalog) != "", r.ipfsCatalogSearch},
+		{"book mirror", "md5-catalog", r.configuredProviderBase(sourceMD5Catalog) != "", r.md5CatalogSearch},
+		{"Google Scholar", "google scholar", strings.TrimSpace(r.GoogleScholarURL) != "", r.googleScholar},
+	} {
+		if !optional.enabled {
+			continue
 		}
-	}
-	if r.configuredProviderBase(sourceIPFSCatalog) != "" {
-		candidates, err := r.ipfsCatalogSearch(ctx, query, limit)
+		candidates, err := optional.search(ctx, query, limit)
 		if err != nil {
-			log.Printf("harvest: ipfs-catalog book discovery failed for %s: %v", query, err)
-			providerFailures = append(providerFailures, "ipfs-catalog: "+err.Error())
-		} else {
-			parts = append(parts, candidates)
+			log.Printf("harvest: %s discovery failed for %s: %v", optional.label, query, err)
+			sources = append(sources, sourceStatus(optional.name, 0, redactFailureText(err.Error())))
+			continue
 		}
-	}
-	if r.configuredProviderBase(sourceMD5Catalog) != "" {
-		candidates, err := r.md5CatalogSearch(ctx, query, limit)
-		if err != nil {
-			log.Printf("harvest: md5-catalog book discovery failed for %s: %v", query, err)
-			providerFailures = append(providerFailures, "md5-catalog: "+err.Error())
-		} else {
-			parts = append(parts, candidates)
-		}
-	}
-	if strings.TrimSpace(r.GoogleScholarURL) != "" {
-		candidates, err := r.googleScholar(ctx, query, limit)
-		if err != nil {
-			log.Printf("harvest: google scholar discovery failed for %s: %v", query, err)
-			providerFailures = append(providerFailures, "Google Scholar: "+err.Error())
-		} else {
-			parts = append(parts, candidates)
-		}
+		parts = append(parts, candidates)
+		sources = append(sources, sourceStatus(optional.name, len(candidates), ""))
 	}
 	best := map[string]Candidate{}
 	order := make([]string, 0)
@@ -131,10 +143,11 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	if len(out) == 0 && len(providerFailures) > 0 {
-		return nil, fmt.Errorf("configured discovery sources failed: %s", strings.Join(providerFailures, "; "))
+	found := WorksFound{Candidates: out, Sources: sources}
+	if len(out) == 0 && len(found.Failed()) == len(sources) {
+		return found, errNoSourceAnswered(found)
 	}
-	return out, nil
+	return found, nil
 }
 
 func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query string, limit int) []Candidate {
@@ -162,14 +175,8 @@ func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query st
 		"mailto",
 	)
 	if err := getJSON(ctx, client, raw, &data); err != nil {
-		// An outage here still reads the same as "OpenAlex found nothing"
-		// (unlike findCrossref/findSemanticScholar below, which log their own
-		// failure): the C23 activity-log ratchet (arch-check.sh) refuses a
-		// new bare log call in this file, and FindWorks' own fan-out
-		// does not consume any individual gather function's error either way
-		// (verified: only the ipfs/md5/scholar calls below feed
-		// providerFailures) — so matching the siblings' logging voice here
-		// would have been cosmetic, not a behavior change.
+		// FindWorksReport's source probe saw the failed request and names
+		// OpenAlex as failed; nil here is not read as an empty answer.
 		return nil
 	}
 	out := make([]Candidate, 0, len(data.Results))

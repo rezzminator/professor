@@ -41,7 +41,7 @@ Every tool returns typed output: `discardOutput` goes, each handler returns its 
 | `readPage` | `sources` (1–50 web URLs), `refresh`, `size_only` | `source`, `kind`, `title`, `method`, `status`, `partial` (the named reasons), `cached`, `chars`, `path` (local only), `content` (omitted with `size_only`), `error` | always |
 | `parseLocalDocuments` | `paths` (1–50 local paths), `size_only` | as `readPage`, `method` = `local` | local server only, never on the remote gateway |
 | `download` | `sources` (1–50 URLs of any kind) | `source`, `kind`, `content_type`, `bytes`, `sha256`, `method`, `status`, then `path` on the local server or `resource` (a `resource_link`) on the remote one, `error` | always |
-| `findWorks` | `query`, `limit`, `kind` (`any` default, `paper`, `book`) | ranked candidates: `handle`, `title`, `authors`, `year`, `kind`, `ids` (DOI, arXiv, PMID, PMCID, ISBN), `open_access` | always |
+| `findWorks` | `query`, `limit`, `kind` (`any` default, `paper`, `book`) | ranked candidates: `handle`, `title`, `authors`, `year`, `kind`, `ids` (DOI, arXiv, PMID, PMCID, ISBN), `open_access`; `sources`: each discovery source with `status` (`answered`, `partial`, `failed`), `results` and `error` — a failed source is named, never read as an empty answer; a tool error only when every source failed | always |
 | `readWork` | `works` (1–20: DOI, arXiv id, PMID, PMCID, ISBN, a paper or book landing URL, or a `findWorks` handle), `refresh`, `size_only` | as `readPage`, plus `ids` and the route it took (repository, mirror, OA copy) | always |
 | `webSearch` | `query`, `count`, `lang`, `engines` | results: `title`, `url`, `snippet`, `engine` | only when SearXNG or Brave is configured; absent otherwise, and the server instructions do not name it |
 

@@ -75,16 +75,18 @@ func (r *Resolver) unpaywall(ctx context.Context, client *http.Client, doi strin
 }
 
 func (r *Resolver) openAlexDOI(ctx context.Context, client *http.Client, doi string) ([]Candidate, error) {
+	type location struct {
+		IsOA    bool   `json:"is_oa"`
+		PDF     string `json:"pdf_url"`
+		Version string `json:"version"`
+	}
 	var data struct {
 		OA struct {
 			URL    string `json:"oa_url"`
 			Status string `json:"oa_status"`
 		} `json:"open_access"`
-		Locations []struct {
-			IsOA    bool   `json:"is_oa"`
-			PDF     string `json:"pdf_url"`
-			Version string `json:"version"`
-		} `json:"locations"`
+		Best      *location  `json:"best_oa_location"`
+		Locations []location `json:"locations"`
 	}
 	if err := getJSON(
 		ctx,
@@ -94,21 +96,41 @@ func (r *Resolver) openAlexDOI(ctx context.Context, client *http.Client, doi str
 	); err != nil {
 		return nil, err
 	}
+	locations := data.Locations
+	if data.Best != nil {
+		locations = append([]location{*data.Best}, locations...)
+	}
+	// oa_url is the best copy's PDF when it has one, else its landing page —
+	// for 10.1038/nature14539 a HAL record page, abstract and metadata only.
+	// It is a PDF only when a location names it as its pdf_url or its path
+	// says so; otherwise it is read as the HTML page it is.
+	pdfs := map[string]bool{}
+	for _, l := range locations {
+		if l.IsOA && l.PDF != "" {
+			pdfs[l.PDF] = true
+		}
+	}
 	out := []Candidate{}
-	if data.OA.URL != "" {
+	if link := data.OA.URL; link != "" {
+		kind := kindHTML
+		if pdfs[link] || strings.HasSuffix(strings.ToLower(strings.SplitN(link, "?", 2)[0]), ".pdf") {
+			kind = kindPDF
+		}
 		out = append(
 			out,
 			Candidate{
-				URL:      data.OA.URL,
+				URL:      link,
 				Source:   sourceOpenAlex,
-				Priority: candidatePriority(sourceOpenAlex, data.OA.Status, "", kindPDF),
-				Kind:     kindPDF,
+				Priority: candidatePriority(sourceOpenAlex, data.OA.Status, "", kind),
+				Kind:     kind,
 				Free:     data.OA.Status,
 			},
 		)
 	}
-	for _, l := range data.Locations {
-		if l.IsOA && l.PDF != "" {
+	seen := map[string]bool{data.OA.URL: true}
+	for _, l := range locations {
+		if l.IsOA && l.PDF != "" && !seen[l.PDF] {
+			seen[l.PDF] = true
 			out = append(
 				out,
 				Candidate{

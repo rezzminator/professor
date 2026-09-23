@@ -138,7 +138,7 @@ Settings come from `harvester.config.json`. `webSearch` trusts exactly the confi
 | `readPage` | ● | `{sources: [string], refresh?, size_only?, headers?}` | Web pages as Markdown (cache + TTL); typed items. |
 | `parseLocalDocuments` | ● | `{paths: [string], size_only?}` | Local documents as Markdown; local server only. |
 | `download` | ● | `{sources: [string], headers?}` | Files as bytes: path (local) or `resource_link` (remote), kind, type, size, sha256. |
-| `findWorks` | ● | `{query, limit?, kind?}` | Scholarly candidates, each with a `handle` for `readWork`. |
+| `findWorks` | ● | `{query, limit?, kind?}` | Scholarly candidates, each with a `handle` for `readWork`, and `sources`: each discovery source's status (answered, partial, failed) with its error, so a failed source never reads as nothing found. |
 | `readWork` | ● | `{works: [string], refresh?, size_only?, headers?}` | Works (DOI, arXiv, PMID, PMCID, ISBN, landing URL, handle) as Markdown, with `ids` and `route`. |
 | `webSearch` | ● | `{query, count?, lang?, engines?}` | Web search results; served only when SearXNG or Brave is configured. |
 

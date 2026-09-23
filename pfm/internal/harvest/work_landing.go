@@ -55,11 +55,12 @@ func noteServed(ctx context.Context, raw string) {
 
 // readThroughLanding reads a work whose caller headers wait for its landing
 // origin; false when ctx carries no such read. The landing page is read first
-// with the headers; a clean page (no error, nothing partial) is the answer.
-// Otherwise the known-ID ladder runs as without headers — a candidate on the
-// landing origin gets them — and its answer, when another origin served it,
-// names the omission. A walled landing page is the answer only when the
-// ladder found nothing.
+// with the headers; a clean page (no error, nothing partial) that carries the
+// full text (landingFullText) is the answer. Otherwise the known-ID ladder
+// runs as without headers — a candidate on the landing origin gets them — and
+// its answer names, in partial, a landing page passed over for carrying no
+// full text and, when another origin served it, the omission. A walled or
+// abstract-only landing page is the answer only when the ladder found nothing.
 func (h *Harvester) readThroughLanding(
 	ctx context.Context,
 	source string,
@@ -82,19 +83,28 @@ func (h *Harvester) readThroughLanding(
 		callerScope{headers: scope.headers, origin: origin, landing: state},
 	)
 	var page Result
+	abstractOnly := ""
 	if origin != "" {
 		page = h.fetchURLWithPolicy(scoped, landing, options, false)
 		page.Source = source
 		if page.Error == "" && page.Partial == "" {
 			if slices.ContainsFunc(page.Rungs, func(rung string) bool { return strings.HasPrefix(rung, "oa:") }) {
 				page.Partial = "read through the landing page's full-text link; the caller's headers went only to " + origin
+				return page, true
 			}
-			return page, true
+			full, measure := landingFullText(page.Content)
+			if full {
+				return page, true
+			}
+			abstractOnly = "the landing page at " + origin + " carries no full text (" + measure + ")"
 		}
 	}
 	result := h.fetchKnownID(scoped, source, kind, options)
 	if result.Error != "" {
 		if origin != "" && page.Error == "" {
+			if abstractOnly != "" {
+				page.Partial = abstractOnly + ", and no open-access full text was found"
+			}
 			return page, true
 		}
 		return result, true
@@ -102,15 +112,19 @@ func (h *Harvester) readThroughLanding(
 	state.mu.Lock()
 	served := state.served
 	state.mu.Unlock()
-	if origin != "" && webOrigin(served) == origin {
-		return result, true
-	}
 	reason := "read from a copy off the landing origin " + origin + ", " + headerlessNote
-	if origin == "" {
+	switch {
+	case origin != "" && webOrigin(served) == origin:
+		reason = ""
+	case origin == "":
 		reason = "read " + headerlessNote + ": " + why
 	}
-	if result.Partial != "" {
-		reason = result.Partial + "; " + reason
+	for _, prior := range []string{result.Partial, abstractOnly} {
+		if prior != "" && reason != "" {
+			reason = prior + "; " + reason
+		} else if prior != "" {
+			reason = prior
+		}
 	}
 	result.Partial = reason
 	return result, true

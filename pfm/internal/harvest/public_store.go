@@ -47,7 +47,7 @@ func publicNamespace(root string, create bool) (string, error) {
 		if !create {
 			return canonicalPublicPath(path)
 		}
-		if err := os.Mkdir(path, 0o700); err != nil {
+		if err := mkdirRaced(path); err != nil {
 			return "", err
 		}
 		info, err = os.Lstat(path)
@@ -69,7 +69,7 @@ func ensureNamespaceDir(path string, create bool) error {
 		if !create {
 			return os.ErrNotExist
 		}
-		if err := os.Mkdir(path, 0o700); err != nil {
+		if err := mkdirRaced(path); err != nil {
 			return err
 		}
 		info, err = os.Lstat(path)
@@ -82,6 +82,17 @@ func ensureNamespaceDir(path string, create bool) error {
 	}
 	if create {
 		return os.Chmod(path, 0o700)
+	}
+	return nil
+}
+
+// mkdirRaced creates a namespace directory. Two calls on a fresh cache (two
+// findWorks at once) race to create it: the loser's "exists" is not a
+// failure, since its caller re-reads the path with Lstat and still refuses a
+// symlink or a non-directory in its place.
+func mkdirRaced(path string) error {
+	if err := os.Mkdir(path, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
 	}
 	return nil
 }

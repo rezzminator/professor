@@ -36,11 +36,18 @@ import (
 //     into net.go, precisely so the exemption stays narrow: net.go is the
 //     package's main network file, and a future bypass added there must
 //     still be caught.
+//   - find_works_sources.go hosts the per-source failure probe FindWorksReport
+//     installs into the client it hands gatewayDo: an http.RoundTripper
+//     wrapper whose RoundTrip forwards to its base transport to record a
+//     provider's status, the same wire-send shape as net_ua_transport.go and
+//     never an application call bypassing the gateway. It is its own file for
+//     the same reason: find_works.go stays under the guard.
 var gatewayExemptFiles = map[string]string{
 	"gateway.go":              "is the gateway",
 	"doh.go":                  "resolves DNS; routing it through the gateway would be a cycle",
 	"net_chrome_transport.go": "is transport-internal, below the gateway",
 	"net_ua_transport.go":     "is transport-internal: the User-Agent wrapper installed into every gateway client, forwarding to its base transport",
+	"find_works_sources.go":   "is transport-internal: the per-source failure probe FindWorksReport installs into the client it hands the gateway, forwarding to its base transport",
 }
 
 // gatewayEgressFinding is one call site scanGatewayEgress judged as HTTP

@@ -154,7 +154,17 @@ func frontmatter(path string) map[string]string {
 	return out
 }
 
-func renderFind(query string, candidates []harvest.Candidate) string {
+// renderFind lists the candidates and names every source that failed: with a
+// failed source, no candidate is not proof the work is absent.
+func renderFind(query string, candidates []harvest.Candidate, failed []harvest.WorkSource) string {
+	failures := ""
+	if len(failed) > 0 {
+		failures = "\n\nThese sources failed, so their records are missing from this answer: " +
+			harvest.FailedText(failed) + ". Retry later for their records."
+	}
+	if len(candidates) == 0 && len(failed) > 0 {
+		return fmt.Sprintf("No candidate works found for %q among the sources that answered.", query) + failures
+	}
 	if len(candidates) == 0 {
 		return fmt.Sprintf(
 			"No candidate works found for %q. Try a plain WebSearch, or rephrase — a more exact title helps.",
@@ -189,7 +199,7 @@ func renderFind(query string, candidates []harvest.Candidate) string {
 			"   "+meta,
 		)
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(lines, "\n") + failures
 }
 
 func renderSearch(query string, results []harvest.SearchResult, _ string) string {

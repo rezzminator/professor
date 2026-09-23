@@ -144,6 +144,13 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:         "substack-post",
+		detect:       isSubstack,
+		extract:      extractSubstackPost,
+		loaders:      substackLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,

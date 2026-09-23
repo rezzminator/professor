@@ -459,58 +459,59 @@ Note that wherever a ‘`;`’ appears in the description of a command’s synta
 
 - `until`[¶](#index-until)
 - The syntax of the `until` command is:
-  > until
-  `test-commands`; do`consequent-commands`; done
+  > until `test-commands`; do`consequent-commands`; done
+
   Execute *consequent-commands* as long as *test-commands* has an exit status which is not zero. The return status is the exit status of the last command executed in *consequent-commands*, or zero if none was executed.
 - `while`[¶](#index-while)
 - The syntax of the `while` command is:
-  > while
-  `test-commands`; do`consequent-commands`; done
+  > while `test-commands`; do`consequent-commands`; done
+
   Execute *consequent-commands* as long as *test-commands* has an exit status of zero. The return status is the exit status of the last command executed in *consequent-commands*, or zero if none was executed.
 - `for`[¶](#index-for)
 - The syntax of the `for` command is:
-  > for
-  `name`[ [in`words`...] ; ] do`commands`; done
+  > for `name`[ [in`words`...] ; ] do`commands`; done
+
   Expand *words* (see [Shell Expansions](#Shell-Expansions)), and then execute *commands* once for each word in the resultant list, with *name* bound to the current word. If ‘`in words`’ is not present, the `for` command executes the *commands* once for each positional parameter that is set, as if ‘`in "$@"`’ had been specified (see [Special Parameters](#Special-Parameters)).
   The return status is the exit status of the last command that executes. If there are no items in the expansion of *words*, no commands are executed, and the return status is zero.
   There is an alternate form of the `for` command which is similar to the C language:
-  > for ((
-  `expr1`;`expr2`;`expr3`)) [;] do`commands`; done
+  > for (( `expr1`;`expr2`;`expr3`)) [;] do`commands`; done
+
   First, evaluate the arithmetic expression *expr1* according to the rules described below (see [Shell Arithmetic](#Shell-Arithmetic)). Then, repeatedly evaluate the arithmetic expression *expr2* until it evaluates to zero. Each time *expr2* evaluates to a non-zero value, execute *commands* and evaluate the arithmetic expression *expr3*. If any expression is omitted, it behaves as if it evaluates to 1. The return value is the exit status of the last command in *commands* that is executed, or non-zero if any of the expressions is invalid.
 
 Use the `break` and `continue` builtins (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)) to control loop execution.
 
 - `if`[¶](#index-if)
 - The syntax of the `if` command is:
-  > if
-  `test-commands`; then`consequent-commands`; [elif`more-test-commands`; then`more-consequents`;] [else`alternate-consequents`;] fi
+  > if `test-commands`; then`consequent-commands`; [elif`more-test-commands`; then`more-consequents`;] [else`alternate-consequents`;] fi
+
   The *test-commands* list is executed, and if its return status is zero, the *consequent-commands* list is executed. If *test-commands* returns a non-zero status, each `elif` list is executed in turn, and if its exit status is zero, the corresponding *more-consequents* is executed and the command completes. If ‘`else alternate-consequents`’ is present, and the final command in the final `if` or `elif` clause has a non-zero exit status, then *alternate-consequents* is executed. The return status is the exit status of the last command executed, or zero if no condition tested true.
 - `case`[¶](#index-case)
 - The syntax of the `case` command is:
-  > case
-  `word`in [ [(]`pattern`[|`pattern`]...)`command-list`;;]... esac
+  > case `word`in [ [(]`pattern`[|`pattern`]...)`command-list`;;]... esac
+
   `case` will selectively execute the *command-list* corresponding to the first *pattern* that matches *word*, proceeding from the first pattern to the last. The match is performed according to the rules described below in [Pattern Matching](#Pattern-Matching). If the `nocasematch` shell option (see the description of `shopt` in [The Shopt Builtin](#The-Shopt-Builtin)) is enabled, the match is performed without regard to the case of alphabetic characters. The ‘`|`’ is used to separate multiple patterns in a pattern list, and the ‘`)`’ operator terminates the pattern list. A pattern list and an associated *command-list* is known as a *clause*.
   Each clause must be terminated with ‘`;;`’, ‘`;&`’, or ‘`;;&`’. The *word* undergoes tilde expansion, parameter expansion, command substitution, process substitution, arithmetic expansion, and quote removal (see [Shell Parameter Expansion](#Shell-Parameter-Expansion)) before the shell attempts to match the pattern. Each *pattern* undergoes tilde expansion, parameter expansion, command substitution, arithmetic expansion, process substitution, and quote removal.
   There may be an arbitrary number of `case` clauses, each terminated by a ‘`;;`’, ‘`;&`’, or ‘`;;&`’. The first pattern that matches determines the command-list that is executed. It’s a common idiom to use ‘`*`’ as the final pattern to define the default case, since that pattern will always match.
   Here is an example using `case` in a script that could be used to describe one interesting feature of an animal:
   > echo -n "Enter the name of an animal: " read ANIMAL echo -n "The $ANIMAL has " case $ANIMAL in horse | dog | cat) echo -n "four";; man | kangaroo ) echo -n "two";; *) echo -n "an unknown number of";; esac echo " legs."
+
   If the ‘`;;`’ operator is used, the `case` command completes after the first pattern match. Using ‘`;&`’ in place of ‘`;;`’ causes execution to continue with the *command-list* associated with the next clause, if any. Using ‘`;;&`’ in place of ‘`;;`’ causes the shell to test the patterns in the next clause, if any, and execute any associated *command-list* if the match succeeds, continuing the case statement execution as if the pattern list had not matched.
   The return status is zero if no *pattern* matches. Otherwise, the return status is the exit status of the last *command-list* executed.
 - `select`[¶](#index-select)
 - The `select` construct allows the easy generation of menus. It has almost the same syntax as the `for` command:
-  > select
-  `name`[in`words`...]; do`commands`; done
+  > select `name`[in`words`...]; do`commands`; done
+
   First, expand the list of words following `in`, generating a list of items, and print the set of expanded words on the standard error stream, each preceded by a number. If the ‘`in words`’ is omitted, print the positional parameters, as if ‘`in "$@"`’ had been specified. `select` then displays the `PS3` prompt and reads a line from the standard input. If the line consists of a number corresponding to one of the displayed words, then `select` sets the value of *name* to that word. If the line is empty, `select` displays the words and prompt again. If `EOF` is read, `select` completes and returns 1. Any other value read causes *name* to be set to null. The line read is saved in the variable `REPLY`.
   The *commands* are executed after each selection until a `break` command is executed, at which point the `select` command completes.
   Here is an example that allows the user to pick a filename from the current directory, and displays the name and index of the file selected.
   > select fname in *; do echo you picked $fname \($REPLY\) break; done
 - `((…))`
-- > ((
-  `expression`))
+- > (( `expression`))
+
   The arithmetic *expression* is evaluated according to the rules described below (see [Shell Arithmetic](#Shell-Arithmetic)). The *expression* undergoes the same expansions as if it were within double quotes, but unescaped double quote characters in *expression* are not treated specially and are removed. Since this can potentially result in empty strings, this command treats those as expressions that evaluate to 0. If the value of the expression is non-zero, the return status is 0; otherwise the return status is 1.
 - `[[…]]`[¶](#index-_005b_005b)
-- > [[
-  `expression`]]
+- > [[ `expression`]]
+
   Evaluate the conditional expression *expression* and return a status of zero (true) or non-zero (false). Expressions are composed of the primaries described below in [Bash Conditional Expressions](#Bash-Conditional-Expressions). The words between the `[[` and `]]` do not undergo word splitting and filename expansion. The shell performs tilde expansion, parameter and variable expansion, arithmetic expansion, command substitution, process substitution, and quote removal on those words. Conditional operators such as ‘`-f`’ must be unquoted to be recognized as primaries.
   When used with `[[`, the ‘`<`’ and ‘`>`’ operators sort lexicographically using the current locale.
   When the ‘`==`’ and ‘`!=`’ operators are used, the string to the right of the operator is considered a pattern and matched according to the rules described below in [Pattern Matching](#Pattern-Matching), as if the `extglob` shell option were enabled. The ‘`=`’ operator is identical to ‘`==`’. If the `nocasematch` shell option (see the description of `shopt` in [The Shopt Builtin](#The-Shopt-Builtin)) is enabled, the match is performed without regard to the case of alphabetic characters. The return value is 0 if the string matches (‘`==`’) or does not match (‘`!=`’) the pattern, and 1 otherwise.
@@ -520,23 +521,29 @@ Use the `break` and `continue` builtins (see [Bourne Shell Builtins](#Bourne-She
   The match succeeds if the pattern matches any part of the string. If you want to force the pattern to match the entire string, anchor the pattern using the ‘`^`’ and ‘`$`’ regular expression operators.
   For example, the following will match a line (stored in the shell variable `line`) if there is a sequence of characters anywhere in the value consisting of any number, including zero, of characters in the `space` character class, immediately followed by zero or one instances of ‘`a`’, then a ‘`b`’:
   > [[ $line =~ [[:space:]]*(a)?b ]]
+
   That means values for `line` like ‘`aab`’, ‘`aaaaaab`’, ‘`xaby`’, and ‘`ab`’ will all match, as will a line containing a ‘`b`’ anywhere in its value.
   If you want to match a character that’s special to the regular expression grammar (‘`^$|[]()\.*+?`’), it has to be quoted to remove its special meaning. This means that in the pattern ‘`xxx.txt`’, the ‘`.`’ matches any character in the string (its usual regular expression meaning), but in the pattern ‘`"xxx.txt"`’, it can only match a literal ‘`.`’.
   Likewise, if you want to include a character in your pattern that has a special meaning to the regular expression grammar, you must make sure it’s not quoted. If you want to anchor a pattern at the beginning or end of the string, for instance, you cannot quote the ‘`^`’ or ‘`$`’ characters using any form of shell quoting.
   If you want to match ‘`initial string`’ at the start of a line, the following will work:
   > [[ $line =~ ^"initial string" ]]
+
   but this will not:
   > [[ $line =~ "^initial string" ]]
+
   because in the second example the ‘`^`’ is quoted and doesn’t have its usual special meaning.
   It is sometimes difficult to specify a regular expression properly without using quotes, or to keep track of the quoting used by regular expressions while paying attention to shell quoting and the shell’s quote removal. Storing the regular expression in a shell variable is often a useful way to avoid problems with quoting characters that are special to the shell. For example, the following is equivalent to the pattern used above:
   > pattern='[[:space:]]*(a)?b' [[ $line =~ $pattern ]]
+
   Shell programmers should take special care with backslashes, since backslashes are used by both the shell and regular expressions to remove the special meaning from the following character. This means that after the shell’s word expansions complete (see [Shell Expansions](#Shell-Expansions)), any backslashes remaining in parts of the pattern that were originally not quoted can remove the special meaning of pattern characters. If any part of the pattern is quoted, the shell does its best to ensure that the regular expression treats those remaining backslashes as literal, if they appeared in a quoted portion.
   The following two sets of commands are *not* equivalent:
   > pattern='\.' [[ . =~ $pattern ]] [[ . =~ \. ]] [[ . =~ "$pattern" ]] [[ . =~ '\.' ]]
+
   The first two matches will succeed, but the second two will not, because in the second two the backslash will be part of the pattern to be matched. In the first two examples, the pattern passed to the regular expression parser is ‘`\.`’. The backslash removes the special meaning from ‘`.`’, so the literal ‘`.`’ matches. In the second two examples, the pattern passed to the regular expression parser has the backslash quoted (e.g., ‘`\\\.`’), which will not match the string, since it does not contain a backslash. If the string in the first examples were anything other than ‘`.`’, say ‘`a`’, the pattern would not match, because the quoted ‘`.`’ in the pattern loses its special meaning of matching any single character.
   Bracket expressions in regular expressions can be sources of errors as well, since characters that are normally special in regular expressions lose their special meanings between brackets. However, you can use bracket expressions to match special pattern characters without quoting them, so they are sometimes useful for this purpose.
   Though it might seem like a strange way to write it, the following pattern will match a ‘`.`’ in the string:
   > [[ . =~ [.] ]]
+
   The shell performs any word expansions before passing the pattern to the regular expression functions, so you can assume that the shell’s quoting takes precedence. As noted above, the regular expression parser will interpret any unquoted backslashes remaining in the pattern after shell expansion according to its own rules. The intention is to avoid making shell programmers quote things twice as much as possible, so shell quoting should be sufficient to quote special pattern characters where that’s necessary.
   The array variable `BASH_REMATCH` records which parts of the string matched the pattern. The element of `BASH_REMATCH` with index 0 contains the portion of the string matching the entire regular expression. Substrings matched by parenthesized subexpressions within the regular expression are saved in the remaining `BASH_REMATCH` indices. The element of `BASH_REMATCH` with index *n* is the portion of the string matching the *n*th parenthesized subexpression.
   Bash sets `BASH_REMATCH` in the global scope; declaring it as a local variable will lead to unexpected results.
@@ -554,8 +561,8 @@ Use the `break` and `continue` builtins (see [Bourne Shell Builtins](#Bourne-She
 Bash provides two ways to group a list of commands to be executed as a unit. When commands are grouped, redirections may be applied to the entire command list. For example, the output of all the commands in the list may be redirected to a single stream.
 
 - `()`
-- > (
-  `list`)
+- > ( `list`)
+
   Placing a list of commands between parentheses forces the shell to create a subshell (see [Command Execution Environment](#Command-Execution-Environment)), and each of the commands in *list* is executed in that subshell environment. Since the *list* is executed in a subshell, variable assignments do not remain in effect after the subshell completes.
 - `{}`[¶](#index-_007b)
 - `{``list`; }
@@ -1028,9 +1035,11 @@ The special pattern characters have the following meanings:
   For example, in the default C locale, ‘`[a-dx-z]`’ is equivalent to ‘`[abcdxyz]`’. Many locales sort characters in dictionary order, and in these locales ‘`[a-dx-z]`’ is typically not equivalent to ‘`[abcdxyz]`’; it might be equivalent to ‘`[aBbCcDdxYyZz]`’, for example. To obtain the traditional interpretation of ranges in bracket expressions, you can force the use of the C locale by setting the `LC_COLLATE` or `LC_ALL` environment variable to the value ‘`C`’, or enable the `globasciiranges` shell option.
   Within a bracket expression, *character classes* can be specified using the syntax `[:`*class*`:]`, where *class* is one of the following classes defined in the POSIX standard:
   > alnum alpha ascii blank cntrl digit graph lower print punct space upper word xdigit
+
   A character class matches any character belonging to that class. The `word` character class matches letters, digits, and the character ‘`_`’.
   For instance, the following pattern will match any character belonging to the `space` character class in the current locale, then any upper case letter or ‘`!`’, a dot, and finally any lower case letter or a hyphen.
   > [[:space:]][[:upper:]!].[-[:lower:]]
+
   Within a bracket expression, an *equivalence class* can be specified using the syntax `[=`*c*`=]`, which matches all characters with the same collation weight (as defined by the current locale) as the character *c*.
   Within a bracket expression, the syntax `[.`*symbol*`.]` matches the collating symbol *symbol*.
 
@@ -1352,23 +1361,23 @@ Unless otherwise noted, each builtin command documented as accepting options pre
 The following shell builtin commands are inherited from the Bourne Shell. These commands are implemented as specified by the POSIX standard.
 
 - `: (a colon)`[¶](#index-_003a)
-- > : [
-  `arguments`]
+- > : [`arguments`]
+
   Do nothing beyond expanding *arguments* and performing redirections. The return status is zero.
 - `. (a period)`[¶](#index-_002e)
-- > . [-p
-  `path`]`filename`[`arguments`]
+- > . [-p `path`]`filename`[`arguments`]
+
   The `.` command reads and execute commands from the *filename* argument in the current shell context.
   If *filename* does not contain a slash, `.` searches for it. If `-p` is supplied, `.` treats *path* as a colon-separated list of directories in which to find *filename*; otherwise, `.` uses the directories in `PATH` to find *filename*. *filename* does not need to be executable. When Bash is not in POSIX mode, it searches the current directory if *filename* is not found in `$PATH`, but does not search the current directory if `-p` is supplied. If the `sourcepath` option (see [The Shopt Builtin](#The-Shopt-Builtin)) is turned off, `.` does not search `PATH`.
   If any *arguments* are supplied, they become the positional parameters when *filename* is executed. Otherwise the positional parameters are unchanged.
   If the `-T` option is enabled, `.` inherits any trap on `DEBUG`; if it is not, any `DEBUG` trap string is saved and restored around the call to `.`, and `.` unsets the `DEBUG` trap while it executes. If `-T` is not set, and the sourced file changes the `DEBUG` trap, the new value persists after `.` completes. The return status is the exit status of the last command executed from *filename*, or zero if no commands are executed. If *filename* is not found, or cannot be read, the return status is non-zero. This builtin is equivalent to `source`.
 - `break`[¶](#index-break)
-- > break [
-  `n`]
+- > break [`n`]
+
   Exit from a `for`, `while`, `until`, or `select` loop. If *n* is supplied, `break` exits the *n*th enclosing loop. *n* must be greater than or equal to 1. The return status is zero unless *n* is not greater than or equal to 1.
 - `cd`[¶](#index-cd)
-- > cd [-L] [-@] [
-  `directory`] cd -P [-e] [-@] [`directory`]
+- > cd [-L] [-@] [`directory`] cd -P [-e] [-@] [`directory`]
+
   Change the current working directory to *directory*. If *directory* is not supplied, the value of the `HOME` shell variable is used as *directory*. If the shell variable `CDPATH` exists, and *directory* does not begin with a slash, `cd` uses it as a search path: `cd` searches each directory name in `CDPATH` for *directory*, with alternative directory names in `CDPATH` separated by a colon (‘`:`’). A null directory name in `CDPATH` means the same thing as the current directory.
   The `-P` option means not to follow symbolic links: symbolic links are resolved while `cd` is traversing *directory* and before processing an instance of `..` in *directory*.
   By default, or when the `-L` option is supplied, symbolic links in *directory* are resolved after `cd` processes an instance of `..` in *directory*.
@@ -1380,36 +1389,37 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   If the directory change is successful, `cd` sets the value of the `PWD` environment variable to the new directory name, and sets the `OLDPWD` environment variable to the value of the current working directory before the change.
   The return status is zero if the directory is successfully changed, non-zero otherwise.
 - `continue`[¶](#index-continue)
-- > continue [
-  `n`]
+- > continue [`n`]
+
   `continue` resumes the next iteration of an enclosing `for`, `while`, `until`, or `select` loop. If *n* is supplied, Bash resumes the execution of the *n*th enclosing loop. *n* must be greater than or equal to 1. The return status is zero unless *n* is not greater than or equal to 1.
 - `eval`[¶](#index-eval)
-- > eval [
-  `arguments`]
+- > eval [`arguments`]
+
   The *arguments* are concatenated together into a single command, separated by spaces. Bash then reads and executes this command and returns its exit status as the exit status of `eval`. If there are no arguments or only empty arguments, the return status is zero.
 - `exec`[¶](#index-exec)
-- > exec [-cl] [-a
-  `name`] [`command`[`arguments`]]
+- > exec [-cl] [-a `name`] [`command`[`arguments`]]
+
   If *command* is supplied, it replaces the shell without creating a new process. *command* cannot be a shell builtin or function. The *arguments* become the arguments to *command* If the `-l` option is supplied, the shell places a dash at the beginning of the zeroth argument passed to *command*. This is what the `login` program does. The `-c` option causes *command* to be executed with an empty environment. If `-a` is supplied, the shell passes *name* as the zeroth argument to *command*.
   If *command* cannot be executed for some reason, a non-interactive shell exits, unless the `execfail` shell option is enabled. In that case, it returns a non-zero status. An interactive shell returns a non-zero status if the file cannot be executed. A subshell exits unconditionally if `exec` fails.
   If *command* is not specified, redirections may be used to affect the current shell environment. If there are no redirection errors, the return status is zero; otherwise the return status is non-zero.
 - `exit`[¶](#index-exit)
-- > exit [
-  `n`]
+- > exit [`n`]
+
   Exit the shell, returning a status of *n* to the shell’s parent. If *n* is omitted, the exit status is that of the last command executed. Any trap on `EXIT` is executed before the shell terminates.
 - `export`[¶](#index-export)
-- > export [-fn] [-p] [
-  `name`[=`value`]]
+- > export [-fn] [-p] [`name`[=`value`]]
+
   Mark each *name* to be passed to subsequently executed commands in the environment. If the `-f` option is supplied, the *name*s refer to shell functions; otherwise the names refer to shell variables.
   The `-n` option means to unexport each name: no longer mark it for export. If no *name*s are supplied, or if only the `-p` option is given, `export` displays a list of names of all exported variables on the standard output. Using `-p` and `-f` together displays exported functions. The `-p` option displays output in a form that may be reused as input.
   `export` allows the value of a variable to be set at the same time it is exported or unexported by following the variable name with =*value*. This sets the value of the variable is to *value* while modifying the export attribute.
   The return status is zero unless an invalid option is supplied, one of the names is not a valid shell variable name, or `-f` is supplied with a name that is not a shell function.
 - `false`[¶](#index-false)
 - > false
+
   Does nothing; returns a non-zero status.
 - `getopts`[¶](#index-getopts)
-- > getopts
-  `optstring``name`[`arg`...]
+- > getopts `optstring``name`[`arg`...]
+
   `getopts` is used by shell scripts or functions to parse positional parameters and obtain options and their arguments. *optstring* contains the option characters to be recognized; if a character is followed by a colon, the option is expected to have an argument, which should be separated from it by whitespace. The colon (‘`:`’) and question mark (‘`?`’) may not be used as option characters.
   Each time it is invoked, `getopts` places the next option in the shell variable *name*, initializing *name* if it does not exist, and the index of the next argument to be processed into the variable `OPTIND`. `OPTIND` is initialized to 1 each time the shell or a shell script is invoked. When an option requires an argument, `getopts` places that argument into the variable `OPTARG`.
   The shell does not reset `OPTIND` automatically; it must be manually reset between multiple calls to `getopts` within the same shell invocation to use a new set of parameters.
@@ -1420,8 +1430,8 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   If a required argument is not found, and `getopts` is not silent, it sets the value of *name* to a question mark (‘`?`’), unsets `OPTARG`, and prints a diagnostic message. If `getopts` is silent, it sets the value of *name* to a colon (‘`:`’), and sets `OPTARG` to the option character found.
   `getopts` returns true if an option, specified or unspecified, is found. It returns false when it encounters the end of options or if an error occurs.
 - `hash`[¶](#index-hash)
-- > hash [-r] [-p
-  `filename`] [-dt] [`name`]
+- > hash [-r] [-p `filename`] [-dt] [`name`]
+
   Each time `hash` is invoked, it remembers the full filenames of the commands specified as *name* arguments, so they need not be searched for on subsequent invocations. The commands are found by searching through the directories listed in `$PATH`. Any previously-remembered filename associated with *name* is discarded. The `-p` option inhibits the path search, and `hash` uses *filename* as the location of *name*.
   The `-r` option causes the shell to forget all remembered locations. Assigning to the `PATH` variable also clears all hashed filenames. The `-d` option causes the shell to forget the remembered location of each *name*.
   If the `-t` option is supplied, `hash` prints the full pathname corresponding to each *name*. If multiple *name* arguments are supplied with `-t`, `hash` prints each *name* before the corresponding hashed full path. The `-l` option displays output in a format that may be reused as input.
@@ -1429,28 +1439,29 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   The return status is zero unless a *name* is not found or an invalid option is supplied.
 - `pwd`[¶](#index-pwd)
 - > pwd [-LP]
+
   Print the absolute pathname of the current working directory. If the `-P` option is supplied, or the `-o physical` option to the `set` builtin (see [The Set Builtin](#The-Set-Builtin)) is enabled, the pathname printed will not contain symbolic links. If the `-L` option is supplied, the pathname printed may contain symbolic links. The return status is zero unless an error is encountered while determining the name of the current directory or an invalid option is supplied.
 - `readonly`[¶](#index-readonly)
-- > readonly [-aAf] [-p] [
-  `name`[=`value`]] ...
+- > readonly [-aAf] [-p] [`name`[=`value`]] ...
+
   Mark each *name* as readonly. The values of these names may not be changed by subsequent assignment or unset. If the `-f` option is supplied, each *name* refers to a shell function. The `-a` option means each *name* refers to an indexed array variable; the `-A` option means each *name* refers to an associative array variable. If both options are supplied, `-A` takes precedence. If no *name* arguments are supplied, or if the `-p` option is supplied, print a list of all readonly names. The other options may be used to restrict the output to a subset of the set of readonly names. The `-p` option displays output in a format that may be reused as input.
   `readonly` allows the value of a variable to be set at the same time the readonly attribute is changed by following the variable name with =*value*. This sets the value of the variable is to *value* while modifying the readonly attribute.
   The return status is zero unless an invalid option is supplied, one of the *name* arguments is not a valid shell variable or function name, or the `-f` option is supplied with a name that is not a shell function.
 - `return`[¶](#index-return)
-- > return [
-  `n`]
+- > return [`n`]
+
   Stop executing a shell function or sourced file and return the value *n* to its caller. If *n* is not supplied, the return value is the exit status of the last command executed. If `return` is executed by a trap handler, the last command used to determine the status is the last command executed before the trap handler. If `return` is executed during a `DEBUG` trap, the last command used to determine the status is the last command executed by the trap handler before `return` was invoked.
   When `return` is used to terminate execution of a script being executed with the `.` (`source`) builtin, it returns either *n* or the exit status of the last command executed within the script as the exit status of the script. If *n* is supplied, the return value is its least significant 8 bits.
   Any command associated with the `RETURN` trap is executed before execution resumes after the function or script.
   The return status is non-zero if `return` is supplied a non-numeric argument or is used outside a function and not during the execution of a script by `.` or `source`.
 - `shift`[¶](#index-shift)
-- > shift [
-  `n`]
+- > shift [`n`]
+
   Shift the positional parameters to the left by *n*: the positional parameters from *n*+1 … `$#` are renamed to `$1` … `$#`-*n*. Parameters represented by the numbers `$#` down to `$#`-*n*+1 are unset. *n* must be a non-negative number less than or equal to `$#`. If *n* is not supplied, it is assumed to be 1. If *n* is zero or greater than `$#`, the positional parameters are not changed. The return status is zero unless *n* is greater than `$#` or less than zero, non-zero otherwise.
 - `test`[¶](#index-test)
 - `[`
-- > test
-  `expr`
+- > test `expr`
+
   Evaluate a conditional expression *expr* and return a status of 0 (true) or 1 (false). Each operator and operand must be a separate argument. Expressions are composed of the primaries described below in [Bash Conditional Expressions](#Bash-Conditional-Expressions). `test` does not accept any options, nor does it accept and ignore an argument of `--` as signifying the end of options. When using the `[` form, the last argument to the command must be a `]`.
   Expressions may be combined using the following operators, listed in decreasing order of precedence. The evaluation depends on the number of arguments; see below. `test` uses operator precedence when there are five or more arguments.
   - `! expr`
@@ -1485,14 +1496,16 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   If the shell is in POSIX mode, or if the expression is part of the `[[` command, the ‘`<`’ and ‘`>`’ operators sort using the current locale. If the shell is not in POSIX mode, the `test` and ‘`[`’ commands sort lexicographically using ASCII ordering.
   The historical operator-precedence parsing with 4 or more arguments can lead to ambiguities when it encounters strings that look like primaries. The POSIX standard has deprecated the `-a` and `-o` primaries and enclosing expressions within parentheses. Scripts should no longer use them. It’s much more reliable to restrict test invocations to a single primary, and to replace uses of `-a` and `-o` with the shell’s `&&` and `||` list operators. For example, use
   > test -n string1 && test -n string2
+
   instead of
   > test -n string1 -a -n string2
 - `times`[¶](#index-times)
 - > times
+
   Print out the user and system times used by the shell and its children. The return status is zero.
 - `trap`[¶](#index-trap)
-- > trap [-lpP] [
-  `action`] [`sigspec`...]
+- > trap [-lpP] [`action`] [`sigspec`...]
+
   The *action* is a command that is read and executed when the shell receives any of the signals *sigspec*. If *action* is absent (and there is a single *sigspec*) or equal to ‘`-`’, each specified *sigspec*’s disposition is reset to the value it had when the shell was started. If *action* is the null string, then the signal specified by each *sigspec* is ignored by the shell and commands it invokes.
   If no arguments are supplied, `trap` prints the actions associated with each trapped signal as a set of `trap` commands that can be reused as shell input to restore the current signal dispositions.
   If *action* is not present and `-p` has been supplied, `trap` displays the trap commands associated with each *sigspec*, or, if no *sigspec*s are supplied, for all trapped signals, as a set of `trap` commands that can be reused as shell input to restore the current signal dispositions. The `-P` option behaves similarly, but displays only the actions associated with each *sigspec* argument. `-P` requires at least one *sigspec* argument. The `-P` or `-p` options may be used in a subshell environment (e.g., command substitution) and, as long as they are used before `trap` is used to change a signal’s handling, will display the state of its parent’s traps.
@@ -1503,26 +1516,27 @@ The following shell builtin commands are inherited from the Bourne Shell. These 
   The return status is zero unless a *sigspec* does not specify a valid signal; non-zero otherwise.
 - `true`[¶](#index-true)
 - > true
+
   Does nothing, returns a 0 status.
 - `umask`[¶](#index-umask)
-- > umask [-p] [-S] [
-  `mode`]
+- > umask [-p] [-S] [`mode`]
+
   Set the shell process’s file creation mask to *mode*. If *mode* begins with a digit, it is interpreted as an octal number; if not, it is interpreted as a symbolic mode mask similar to that accepted by the `chmod` command. If *mode* is omitted, `umask` prints the current value of the mask. If the `-S` option is supplied without a *mode* argument, `umask` prints the mask in a symbolic format; the default output is an octal number. If the `-p` option is supplied, and *mode* is omitted, the output is in a form that may be reused as input. The return status is zero if the mode is successfully changed or if no *mode* argument is supplied, and non-zero otherwise.
   Note that when the mode is interpreted as an octal number, each number of the umask is subtracted from `7`. Thus, a umask of `022` results in permissions of `755`.
 - `unset`[¶](#index-unset)
-- > unset [-fnv] [
-  `name`]
+- > unset [-fnv] [`name`]
+
   Remove each variable or function *name*. If the `-v` option is given, each *name* refers to a shell variable and that variable is removed. If the `-f` option is given, the *name*s refer to shell functions, and the function definition is removed. If the `-n` option is supplied, and *name* is a variable with the `nameref` attribute, *name* will be unset rather than the variable it references. `-n` has no effect if the `-f` option is supplied. If no options are supplied, each *name* refers to a variable; if there is no variable by that name, a function with that name, if any, is unset. Readonly variables and functions may not be unset. When variables or functions are removed, they are also removed from the environment passed to subsequent commands. Some shell variables may not be unset. Some shell variables lose their special behavior if they are unset; such behavior is noted in the description of the individual variables. The return status is zero unless a *name* is readonly or may not be unset.
 
 This section describes builtin commands which are unique to or have been extended in Bash. Some of these commands are specified in the POSIX standard.
 
 - `alias`[¶](#index-alias)
-- > alias [-p] [
-  `name`[=`value`] ...]
+- > alias [-p] [`name`[=`value`] ...]
+
   Without arguments or with the `-p` option, `alias` prints the list of aliases on the standard output in a form that allows them to be reused as input. If arguments are supplied, define an alias for each *name* whose *value* is given. If no *value* is given, print the name and value of the alias *name*. A trailing space in *value* causes the next word to be checked for alias substitution when the alias is expanded during command parsing. `alias` returns true unless a *name* is given (without a corresponding =*value*) for which no alias has been defined. Aliases are described in [Aliases](#Aliases).
 - `bind`[¶](#index-bind)
-- > bind [-m
-  `keymap`] [-lsvSVX] bind [-m`keymap`] [-q`function`] [-u`function`] [-r`keyseq`] bind [-m`keymap`] -f`filename`bind [-m`keymap`] -x`keyseq[: ]shell-command`bind [-m`keymap`]`keyseq:function-name`bind [-m`keymap`]`keyseq:readline-command`bind [-m`keymap`] -p|-P [`readline-command`] bind`readline-command-line`
+- > bind [-m `keymap`] [-lsvSVX] bind [-m`keymap`] [-q`function`] [-u`function`] [-r`keyseq`] bind [-m`keymap`] -f`filename`bind [-m`keymap`] -x`keyseq[: ]shell-command`bind [-m`keymap`]`keyseq:function-name`bind [-m`keymap`]`keyseq:readline-command`bind [-m`keymap`] -p|-P [`readline-command`] bind`readline-command-line`
+
   Display current Readline (see [Command Line Editing](#Command-Line-Editing)) key and function bindings, bind a key sequence to a Readline function or macro or to a shell command, or set a Readline variable. Each non-option argument is a key binding or command as it would appear in a Readline initialization file (see [Readline Init File](#Readline-Init-File)), but each binding or command must be passed as a separate argument; e.g., ‘`"\C-x\C-r":re-read-init-file`’.
   In the following descriptions, options that display output in a form available to be re-read format their output as commands that would appear in a Readline initialization file or that would be supplied as individual arguments to a `bind` command.
   Options, if supplied, have the following meanings:
@@ -1556,23 +1570,23 @@ This section describes builtin commands which are unique to or have been extende
   - List all key sequences bound to shell commands and the associated commands in a format that can be reused as an argument to a subsequent `bind` command.
   The return status is zero unless an invalid option is supplied or an error occurs.
 - `builtin`[¶](#index-builtin)
-- > builtin [
-  `shell-builtin`[`args`]]
+- > builtin [`shell-builtin`[`args`]]
+
   Execute the specified shell builtin *shell-builtin*, passing it *args*, and return its exit status. This is useful when defining a shell function with the same name as a shell builtin, retaining the functionality of the builtin within the function. The return status is non-zero if *shell-builtin* is not a shell builtin command.
 - `caller`[¶](#index-caller)
-- > caller [
-  `expr`]
+- > caller [`expr`]
+
   Returns the context of any active subroutine call (a shell function or a script executed with the `.` or `source` builtins).
   Without *expr*, `caller` displays the line number and source filename of the current subroutine call. If a non-negative integer is supplied as *expr*, `caller` displays the line number, subroutine name, and source file corresponding to that position in the current execution call stack. This extra information may be used, for example, to print a stack trace. The current frame is frame 0.
   The return value is 0 unless the shell is not executing a subroutine call or *expr* does not correspond to a valid position in the call stack.
 - `command`[¶](#index-command)
-- > command [-pVv]
-  `command`[`arguments`...]
+- > command [-pVv] `command`[`arguments`...]
+
   The `command` builtin runs *command* with *arguments* ignoring any shell function named *command*. Only shell builtin commands or commands found by searching the `PATH` are executed. If there is a shell function named `ls`, running ‘`command ls`’ within the function will execute the external command `ls` instead of calling the function recursively. The `-p` option means to use a default value for `PATH` that is guaranteed to find all of the standard utilities. The return status in this case is 127 if *command* cannot be found or an error occurred, and the exit status of *command* otherwise.
   If either the `-V` or `-v` option is supplied, `command` prints a description of *command*. The `-v` option displays a single word indicating the command or file name used to invoke *command*; the `-V` option produces a more verbose description. In this case, the return status is zero if *command* is found, and non-zero if not.
 - `declare`[¶](#index-declare)
-- > declare [-aAfFgiIlnrtux] [-p] [
-  `name`[=`value`] ...]
+- > declare [-aAfFgiIlnrtux] [-p] [`name`[=`value`] ...]
+
   Declare variables and give them attributes. If no *name*s are given, then display the values of variables or shell functions instead.
   The `-p` option will display the attributes and values of each *name*. When `-p` is used with *name* arguments, additional options, other than `-f` and `-F`, are ignored.
   When `-p` is supplied without *name* arguments, `declare` will display the attributes and values of all variables having the attributes specified by the additional options. If no other options are supplied with `-p`, `declare` will display the attributes and values of all shell variables. The `-f` option restricts the display to shell functions.
@@ -1605,8 +1619,8 @@ This section describes builtin commands which are unique to or have been extende
   When using `-a` or `-A` and the compound assignment syntax to create array variables, additional attributes do not take effect until subsequent assignments.
   The return status is zero unless an invalid option is encountered, an attempt is made to define a function using ‘`-f foo=bar`’, an attempt is made to assign a value to a readonly variable, an attempt is made to assign a value to an array variable without using the compound assignment syntax (see [Arrays](#Arrays)), one of the *name*s is not a valid shell variable name, an attempt is made to turn off readonly status for a readonly variable, an attempt is made to turn off array status for an array variable, or an attempt is made to display a non-existent function with `-f`.
 - `echo`[¶](#index-echo)
-- > echo [-neE] [
-  `arg`...]
+- > echo [-neE] [`arg`...]
+
   Output the *arg*s, separated by spaces, terminated with a newline. The return status is 0 unless a write error occurs. If `-n` is specified, the trailing newline is not printed.
   If the `-e` option is given, `echo` interprets the following backslash-escaped characters. The `-E` option disables interpretation of these escape characters, even on systems where they are interpreted by default. The `xpg_echo` shell option determines whether or not `echo` interprets any options and expands these escape characters. `echo` does not interpret `--` to mean the end of options.
   `echo` interprets the following escape sequences:
@@ -1641,8 +1655,8 @@ This section describes builtin commands which are unique to or have been extende
   - The Unicode (ISO/IEC 10646) character whose value is the hexadecimal value *HHHHHHHH* (one to eight hex digits).
   `echo` writes any unrecognized backslash-escaped characters unchanged.
 - `enable`[¶](#index-enable)
-- > enable [-a] [-dnps] [-f
-  `filename`] [`name`...]
+- > enable [-a] [-dnps] [-f `filename`] [`name`...]
+
   Enable and disable builtin shell commands. Disabling a builtin allows an executable file which has the same name as a shell builtin to be executed without specifying a full pathname, even though the shell normally searches for builtins before files.
   If `-n` is supplied, the *name*s are disabled. Otherwise *name*s are enabled. For example, to use the `test` binary found using `$PATH` instead of the shell builtin version, type ‘`enable -n test`’.
   If the `-p` option is supplied, or no *name* arguments are supplied, print a list of shell builtins. With no other arguments, the list consists of all enabled shell builtins. The `-n` option means to print only disabled builtins. The `-a` option means to list each builtin with an indication of whether or not it is enabled. The `-s` option means to restrict `enable` to the POSIX special builtins.
@@ -1650,8 +1664,8 @@ This section describes builtin commands which are unique to or have been extende
   If no options are supplied and a *name* is not a shell builtin, `enable` will attempt to load *name* from a shared object named *name*, as if the command were ‘`enable -f name name`’.
   The return status is zero unless a *name* is not a shell builtin or there is an error loading a new builtin from a shared object.
 - `help`[¶](#index-help)
-- > help [-dms] [
-  `pattern`]
+- > help [-dms] [`pattern`]
+
   Display helpful information about builtin commands. If *pattern* is specified, `help` gives detailed help on all commands matching *pattern* as described below; otherwise it displays a list of all builtins and shell compound commands.
   Options, if supplied, have the following meanings:
   - `-d`
@@ -1664,23 +1678,23 @@ This section describes builtin commands which are unique to or have been extende
   If not, and *pattern* exactly matches the name of a help topic, `help` prints the description associated with that topic. Otherwise, `help` performs prefix matching and prints the descriptions of all matching help topics.
   The return status is zero unless no command matches *pattern*.
 - `let`[¶](#index-let)
-- > let
-  `expression`[`expression`...]
+- > let `expression`[`expression`...]
+
   The `let` builtin allows arithmetic to be performed on shell variables. Each *expression* is evaluated as an arithmetic expression according to the rules given below in [Shell Arithmetic](#Shell-Arithmetic). If the last *expression* evaluates to 0, `let` returns 1; otherwise `let` returns 0.
 - `local`[¶](#index-local)
-- > local [
-  `option`]`name`[=`value`] ...
+- > local [`option`]`name`[=`value`] ...
+
   For each argument, create a local variable named *name*, and assign it *value*. The *option* can be any of the options accepted by `declare`. `local` can only be used within a function; it makes the variable *name* have a visible scope restricted to that function and its children. It is an error to use `local` when not within a function.
   If *name* is ‘`-`’, it makes the set of shell options local to the function in which `local` is invoked: any shell options changed using the `set` builtin inside the function after the call to `local` are restored to their original values when the function returns. The restore is performed as if a series of `set` commands were executed to restore the values that were in place before the function.
   With no operands, `local` writes a list of local variables to the standard output.
   The return status is zero unless `local` is used outside a function, an invalid *name* is supplied, or *name* is a readonly variable.
 - `logout`[¶](#index-logout)
-- > logout [
-  `n`]
+- > logout [`n`]
+
   Exit a login shell, returning a status of *n* to the shell’s parent.
 - `mapfile`[¶](#index-mapfile)
-- > mapfile [-d
-  `delim`] [-n`count`] [-O`origin`] [-s`count`] [-t] [-u`fd`] [-C`callback`] [-c`quantum`] [`array`]
+- > mapfile [-d `delim`] [-n`count`] [-O`origin`] [-s`count`] [-t] [-u`fd`] [-C`callback`] [-c`quantum`] [`array`]
+
   Read lines from the standard input, or from file descriptor *fd* if the `-u` option is supplied, into the indexed array variable *array*. The variable `MAPFILE` is the default *array*. Options, if supplied, have the following meanings:
   - `-d`
   - Use the first character of *delim* to terminate each input line, rather than newline. If *delim* is the empty string, `mapfile` will terminate a line when it reads a NUL character.
@@ -1702,8 +1716,8 @@ This section describes builtin commands which are unique to or have been extende
   If not supplied with an explicit origin, `mapfile` will clear *array* before assigning to it.
   `mapfile` returns zero unless an invalid option or option argument is supplied, *array* is invalid or unassignable, or if *array* is not an indexed array.
 - `printf`[¶](#index-printf)
-- > printf [-v
-  `var`]`format`[`arguments`]
+- > printf [-v `var`]`format`[`arguments`]
+
   Write the formatted *arguments* to the standard output under the control of the *format*. The `-v` option assigns the output to the variable *var* rather than printing it to the standard output.
   The *format* is a character string which contains three types of objects: plain characters, which are simply copied to standard output, character escape sequences, which are converted and copied to the standard output, and format specifications, each of which causes printing of the next successive *argument*. In addition to the standard `printf(3)` format characters `cCsSndiouxXeEfFgGaA`, `printf` interprets the following additional format specifiers:
   - `%b`
@@ -1720,8 +1734,8 @@ This section describes builtin commands which are unique to or have been extende
   Arguments to non-string format specifiers are treated as C language constants, except that a leading plus or minus sign is allowed, and if the leading character is a single or double quote, the value is the numeric value of the following character, using the current locale.
   The *format* is reused as necessary to consume all of the *arguments*. If the *format* requires more *arguments* than are supplied, the extra format specifications behave as if a zero value or null string, as appropriate, had been supplied. The return value is zero on success, non-zero if an invalid option is supplied or a write or assignment error occurs.
 - `read`[¶](#index-read)
-- > read [-Eers] [-a
-  `aname`] [-d`delim`] [-i`text`] [-n`nchars`] [-N`nchars`] [-p`prompt`] [-t`timeout`] [-u`fd`] [`name`...]
+- > read [-Eers] [-a `aname`] [-d`delim`] [-i`text`] [-n`nchars`] [-N`nchars`] [-p`prompt`] [-t`timeout`] [-u`fd`] [`name`...]
+
   Read one line from the standard input, or from the file descriptor *fd* supplied as an argument to the `-u` option, split it into words as described above in [Word Splitting](#Word-Splitting), and assign the first word to the first *name*, the second word to the second *name*, and so on. If there are more words than names, the remaining words and their intervening delimiters are assigned to the last *name*. If there are fewer words read from the input stream than names, the remaining names are assigned empty values. The characters in the value of the `IFS` variable are used to split the line into words using the same rules the shell uses for expansion (described above in [Word Splitting](#Word-Splitting)). The backslash character ‘`\`’ removes any special meaning for the next character read and is used for line continuation.
   Options, if supplied, have the following meanings:
   - `-a aname`
@@ -1752,17 +1766,17 @@ This section describes builtin commands which are unique to or have been extende
   If no *name*s are supplied, `read` assigns the line read, without the ending delimiter but otherwise unmodified, to the variable `REPLY`.
   The exit status is zero, unless end-of-file is encountered, `read` times out (in which case the status is greater than 128), a variable assignment error (such as assigning to a readonly variable) occurs, or an invalid file descriptor is supplied as the argument to `-u`.
 - `readarray`[¶](#index-readarray)
-- > readarray [-d
-  `delim`] [-n`count`] [-O`origin`] [-s`count`] [-t] [-u`fd`] [-C`callback`] [-c`quantum`] [`array`]
+- > readarray [-d `delim`] [-n`count`] [-O`origin`] [-s`count`] [-t] [-u`fd`] [-C`callback`] [-c`quantum`] [`array`]
+
   Read lines from the standard input into the indexed array variable *array*, or from file descriptor *fd* if the `-u` option is supplied.
   A synonym for `mapfile`.
 - `source`[¶](#index-source)
-- > source [-p
-  `path`]`filename`[`arguments`]
+- > source [-p `path`]`filename`[`arguments`]
+
   A synonym for `.` (see [Bourne Shell Builtins](#Bourne-Shell-Builtins)).
 - `type`[¶](#index-type)
-- > type [-afptP] [
-  `name`...]
+- > type [-afptP] [`name`...]
+
   Indicate how each *name* would be interpreted if used as a command name.
   If the `-t` option is used, `type` prints a single word which is one of ‘`alias`’, ‘`keyword`’, ‘`function`’, ‘`builtin`’, or ‘`file`’, if *name* is an alias, shell reserved word, shell function, shell builtin, or executable file, respectively. If the *name* is not found, `type` prints nothing and returns a failure status.
   If the `-p` option is used, `type` either returns the name of the executable file that would be found by searching `$PATH` for `name`, or nothing if `-t` would not return ‘`file`’.
@@ -1772,12 +1786,12 @@ This section describes builtin commands which are unique to or have been extende
   If the `-f` option is used, `type` does not attempt to find shell functions, as with the `command` builtin.
   The return status is zero if all of the *name*s are found, non-zero if any are not found.
 - `typeset`[¶](#index-typeset)
-- > typeset [-afFgrxilnrtux] [-p] [
-  `name`[=`value`] ...]
+- > typeset [-afFgrxilnrtux] [-p] [`name`[=`value`] ...]
+
   The `typeset` command is supplied for compatibility with the Korn shell. It is a synonym for the `declare` builtin command.
 - `ulimit`[¶](#index-ulimit)
-- > ulimit [-HS] -a ulimit [-HS] [-bcdefiklmnpqrstuvxPRT] [
-  `limit`]
+- > ulimit [-HS] -a ulimit [-HS] [-bcdefiklmnpqrstuvxPRT] [`limit`]
+
   `ulimit` provides control over the resources available to the shell and to processes it starts, on systems that allow such control. If an option is given, it is interpreted as follows:
   - `-S`
   - Change and report the soft limit associated with a resource.
@@ -1831,8 +1845,8 @@ This section describes builtin commands which are unique to or have been extende
   Values are in 1024-byte increments, except for `-t`, which is in seconds; `-R`, which is in microseconds; `-p`, which is in units of 512-byte blocks; `-P`, `-T`, `-b`, `-k`, `-n` and `-u`, which are unscaled values; and, when in POSIX mode (see [Bash and POSIX](#Bash-POSIX-Mode)), `-c` and `-f`, which are in 512-byte increments.
   The return status is zero unless an invalid option or argument is supplied, or an error occurs while setting a new limit.
 - `unalias`[¶](#index-unalias)
-- > unalias [-a] [
-  `name`... ]
+- > unalias [-a] [`name`... ]
+
   Remove each *name* from the list of aliases. If `-a` is supplied, remove all aliases. The return value is true unless a supplied *name* is not a defined alias. Aliases are described in [Aliases](#Aliases).
 
 - [The Set Builtin](#The-Set-Builtin)
@@ -1841,8 +1855,8 @@ This section describes builtin commands which are unique to or have been extende
 This builtin is so complicated that it deserves its own section. `set` allows you to change the values of shell options and set the positional parameters, or to display the names and values of shell variables.
 
 - `set`[¶](#index-set)
-- > set [-abefhkmnptuvxBCEHPT] [-o
-  `option-name`] [--] [-] [`argument`...] set [+abefhkmnptuvxBCEHPT] [+o`option-name`] [--] [-] [`argument`...] set -o set +o
+- > set [-abefhkmnptuvxBCEHPT] [-o `option-name`] [--] [-] [`argument`...] set [+abefhkmnptuvxBCEHPT] [+o`option-name`] [--] [-] [`argument`...] set -o set +o
+
   If no options or arguments are supplied, `set` displays the names and values of all shell variables and functions, sorted according to the current locale, in a format that may be reused as input for setting or resetting the currently-set variables. Read-only variables cannot be reset. In POSIX mode, only shell variables are listed.
   When options are supplied, they set or unset shell attributes. Any arguments remaining after option processing replace the positional parameters.
   Options, if specified, have the following meanings:
@@ -1942,6 +1956,7 @@ This builtin is so complicated that it deserves its own section. `set` allows yo
   - If set, Bash does not resolve symbolic links when executing commands such as `cd` which change the current directory. It uses the physical directory structure instead. By default, Bash follows the logical chain of directories when performing commands which change the current directory.
     For example, if `/usr/sys` is a symbolic link to `/usr/local/sys` then:
     > $ cd /usr/sys; echo $PWD /usr/sys $ cd ..; pwd /usr
+
     If `set -P` is on, then:
     > $ cd /usr/sys; echo $PWD /usr/local/sys $ cd ..; pwd /usr/local
   - `-T`
@@ -1957,8 +1972,8 @@ This builtin is so complicated that it deserves its own section. `set` allows yo
 This builtin allows you to change additional optional shell behavior.
 
 - `shopt`[¶](#index-shopt)
-- > shopt [-pqsu] [-o] [
-  `optname`...]
+- > shopt [-pqsu] [-o] [`optname`...]
+
   Toggle the values of settings controlling optional shell behavior. The settings can be either those listed below, or, if the `-o` option is used, those available with the `-o` option to the `set` builtin command (see [The Set Builtin](#The-Set-Builtin)).
   With no options, or with the `-p` option, display a list of all settable options, with an indication of whether or not each is set; if any *optname*s are supplied, the output is restricted to those options. The `-p` option displays output in a form that may be reused as input.
   Other options have the following meanings:
@@ -2763,8 +2778,8 @@ The contents of the directory stack are also visible as the value of the `DIRSTA
 - [Directory Stack Builtins](#Directory-Stack-Builtins)
 
 - `dirs`[¶](#index-dirs)
-- > dirs [-clpv] [+
-  `N`| -`N`]
+- > dirs [-clpv] [+`N`| -`N`]
+
   Without options, display the list of currently remembered directories. Directories are added to the list with the `pushd` command; the `popd` command removes directories from the list. The current directory is always the first directory in the stack.
   Options, if supplied, have the following meanings:
   - `-c`
@@ -2780,8 +2795,8 @@ The contents of the directory stack are also visible as the value of the `DIRSTA
   - `-N`
   - Displays the *N*th directory (counting from the right of the list printed by `dirs` when invoked without options), starting with zero.
 - `popd`[¶](#index-popd)
-- > popd [-n] [+
-  `N`| -`N`]
+- > popd [-n] [+`N`| -`N`]
+
   Remove elements from the directory stack. The elements are numbered from 0 starting at the first directory listed by `dirs`; that is, `popd` is equivalent to `popd +0`.
   When no arguments are given, `popd` removes the top directory from the stack and changes to the new top directory.
   Arguments, if supplied, have the following meanings:
@@ -2795,8 +2810,8 @@ The contents of the directory stack are also visible as the value of the `DIRSTA
   Otherwise, `popd` returns an unsuccessful status if an invalid option is specified, the directory stack is empty, or *N* specifies a non-existent directory stack entry.
   If the `popd` command is successful, Bash runs `dirs` to show the final contents of the directory stack, and the return status is 0.
 - `pushd`[¶](#index-pushd)
-- > pushd [-n] [
-  `+N`|`-N`|`dir`]
+- > pushd [-n] [`+N`|`-N`|`dir`]
+
   Add a directory to the top of the directory stack, or rotate the stack, making the new top of the stack the current working directory. With no arguments, `pushd` exchanges the top two elements of the directory stack.
   Arguments, if supplied, have the following meanings:
   - `-n`
@@ -3089,16 +3104,16 @@ If a user attempts to exit Bash while jobs are stopped, (or running, if the `che
 When the shell is waiting for a job or process using the `wait` builtin, and job control is enabled, `wait` will return when the job changes state. The `-f` option causes `wait` to wait until the job or process terminates before returning.
 
 - `bg`[¶](#index-bg)
-- > bg [
-  `jobspec`...]
+- > bg [`jobspec`...]
+
   Resume each suspended job *jobspec* in the background, as if it had been started with ‘`&`’. If *jobspec* is not supplied, the shell uses its notion of the current job. `bg` returns zero unless it is run when job control is not enabled, or, when run with job control enabled, any *jobspec* was not found or specifies a job that was started without job control.
 - `fg`[¶](#index-fg)
-- > fg [
-  `jobspec`]
+- > fg [`jobspec`]
+
   Resume the job *jobspec* in the foreground and make it the current job. If *jobspec* is not supplied, `fg` resumes the current job. The return status is that of the command placed into the foreground, or non-zero if run when job control is disabled or, when run with job control enabled, *jobspec* does not specify a valid job or *jobspec* specifies a job that was started without job control.
 - `jobs`[¶](#index-jobs)
-- > jobs [-lnprs] [
-  `jobspec`] jobs -x`command`[`arguments`]
+- > jobs [-lnprs] [`jobspec`] jobs -x`command`[`arguments`]
+
   The first form lists the active jobs. The options have the following meanings:
   - `-l`
   - List process IDs in addition to the normal information.
@@ -3113,14 +3128,14 @@ When the shell is waiting for a job or process using the `wait` builtin, and job
   If *jobspec* is supplied, `jobs` restricts output to information about that job. If *jobspec* is not supplied, `jobs` lists the status of all jobs. The return status is zero unless an invalid option is encountered or an invalid *jobspec* is supplied.
   If the `-x` option is supplied, `jobs` replaces any *jobspec* found in *command* or *arguments* with the corresponding process group ID, and executes *command*, passing it *argument*s, returning its exit status.
 - `kill`[¶](#index-kill)
-- > kill [-s
-  `sigspec`] [-n`signum`] [-`sigspec`]`id`[...] kill -l|-L [`exit_status`]
+- > kill [-s `sigspec`] [-n`signum`] [-`sigspec`]`id`[...] kill -l|-L [`exit_status`]
+
   Send a signal specified by *sigspec* or *signum* to the processes named by each *id*. Each *id* may be a job specification *jobspec* or process ID *pid*. *sigspec* is either a case-insensitive signal name such as `SIGINT` (with or without the `SIG` prefix) or a signal number; *signum* is a signal number. If *sigspec* and *signum* are not present, `kill` sends `SIGTERM`.
   The `-l` option lists the signal names. If any arguments are supplied when `-l` is supplied, `kill` lists the names of the signals corresponding to the arguments, and the return status is zero. *exit_status* is a number specifying a signal number or the exit status of a process terminated by a signal; if it is supplied, `kill` prints the name of the signal that caused the process to terminate. `kill` assumes that process exit statuses are greater than 128; anything less than that is a signal number. The `-L` option is equivalent to `-l`.
   The return status is zero if at least one signal was successfully sent, or non-zero if an error occurs or an invalid option is encountered.
 - `wait`[¶](#index-wait)
-- > wait [-fn] [-p
-  `varname`] [`id`...]
+- > wait [-fn] [-p `varname`] [`id`...]
+
   Wait until the child process specified by each *id* exits and return the exit status of the last *id*. Each *id* may be a process ID *pid* or a job specification *jobspec*; if a jobspec is supplied, `wait` waits for all processes in the job.
   If no options or *id*s are supplied, `wait` waits for all running background jobs and the last-executed process substitution, if its process id is the same as *$!*, and the return status is zero.
   If the `-n` option is supplied, `wait` waits for any one of the *id*s or, if no *id*s are supplied, any job or process substitution, to complete and returns its exit status. If none of the supplied *id*s is a child of the shell, or if no arguments are supplied and the shell has no unwaited-for children, the exit status is 127.
@@ -3128,14 +3143,15 @@ When the shell is waiting for a job or process using the `wait` builtin, and job
   Supplying the `-f` option, when job control is enabled, forces `wait` to wait for each *id* to terminate before returning its status, instead of returning when it changes status.
   If none of the *id*s specify one of the shell’s an active child processes, the return status is 127. If `wait` is interrupted by a signal, any *varname* will remain unset, and the return status will be greater than 128, as described above (see [Signals](#Signals)). Otherwise, the return status is the exit status of the last *id*.
 - `disown`[¶](#index-disown)
-- > disown [-ar] [-h] [
-  `id`...]
+- > disown [-ar] [-h] [`id`...]
+
   Without options, remove each *id* from the table of active jobs. Each *id* may be a job specification *jobspec* or a process ID *pid*; if *id* is a *pid*, `disown` uses the job containing *pid* as *jobspec*.
   If the `-h` option is supplied, `disown` does not remove the jobs corresponding to each `id` from the jobs table, but rather marks them so the shell does not send `SIGHUP` to the job if the shell receives a `SIGHUP`.
   If no *id* is supplied, the `-a` option means to remove or mark all jobs; the `-r` option without an *id* argument removes or marks running jobs. If no *id* is supplied, and neither the `-a` nor the `-r` option is supplied, `disown` removes or marks the current job.
   The return value is 0 unless an *id* does not specify a valid job.
 - `suspend`[¶](#index-suspend)
 - > suspend [-f]
+
   Suspend the execution of this shell until it receives a `SIGCONT` signal. A login shell, or a shell without job control enabled, cannot be suspended; the `-f` option will override this and force the suspension. The return status is 0 unless the shell is a login shell or job control is not enabled and `-f` is not supplied.
 
 When job control is not active, the `kill` and `wait` builtins do not accept `jobspec` arguments. They must be supplied process IDs.
@@ -3268,10 +3284,11 @@ There are only a few basic constructs allowed in the Readline init file. Blank l
 
 - Variable Settings
 - You can modify the run-time behavior of Readline by altering the values of variables in Readline using the `set` command within the init file. The syntax is simple:
-  > set
-  `variable``value`
+  > set `variable``value`
+
   Here, for example, is how to change from the default Emacs-like key binding to use `vi` line editing commands:
   > set editing-mode vi
+
   Variable names and values, where appropriate, are recognized without regard to case. Unrecognized variable names are ignored.
   Boolean variables (those that can be set to on or off) are set to on if the value is null or empty, *on* (case-insensitive), or 1. Any other value results in the variable being set to off.
   The `bind -V` command lists the current Readline variable names and values. See [Bash Builtin Commands](#Bash-Builtins).
@@ -3382,11 +3399,13 @@ There are only a few basic constructs allowed in the Readline init file. Blank l
   - `keyname`:`function-name`or`macro`
   - *keyname* is the name of a key spelled out in English. For example:
     > Control-u: universal-argument Meta-Rubout: backward-kill-word Control-o: "> output"
+
     In the example above, `C-u` is bound to the function `universal-argument`, `M-DEL` is bound to the function `backward-kill-word`, and `C-o` is bound to run the macro expressed on the right hand side (that is, to insert the text ‘`> output`’ into the line).
     This key binding syntax recognizes a number of symbolic character names: *DEL*, *ESC*, *ESCAPE*, *LFD*, *NEWLINE*, *RET*, *RETURN*, *RUBOUT* (a destructive backspace), *SPACE*, *SPC*, and *TAB*.
   - "`keyseq`":`function-name`or`macro`
   - *keyseq* differs from *keyname* above in that strings denoting an entire key sequence can be specified, by placing the key sequence in double quotes. Some GNU Emacs style key escapes can be used, as in the following example, but none of the special character names are recognized.
     > "\C-u": universal-argument "\C-x\C-r": re-read-init-file "\e[11~": "Function Key 1"
+
     In the above example, `C-u` is again bound to the function `universal-argument` (just as it was in the first example), ‘`C-x C-r`’ is bound to the function `re-read-init-file`, and ‘`ESC [ 1 1 ~`’ is bound to insert the text ‘`Function Key 1`’.
   The following GNU Emacs style escape sequences are available when specifying key sequences:
   - `\C-`
@@ -3879,7 +3898,18 @@ Three builtin commands are available to manipulate the programmable completion f
   The matches will be generated in the same way as if the programmable completion code had generated them directly from a completion specification with the same flags. If *word* is specified, only those completions matching *word* will be displayed or stored.
   The return value is true unless an invalid option is supplied, or no matches were generated.
 - `complete`[¶](#index-complete)
-- `complete [-abcdefgjksuv] [-o``comp-option`] [-DEI] [-A`action`] [-G`globpat`] [-W`wordlist`] [-F`function`] [-C`command`] [-X`filterpat`] [-P`prefix`] [-S`suffix`]`name`[`name`...]`complete -pr [-DEI] [``name`...]
+- > ```
+  > complete [-abcdefgjksuv] [-o
+  > ```
+  >
+  > `comp-option`] [-DEI] [-A`action`] [-G`globpat`] [-W`wordlist`] [-F`function`] [-C`command`] [-X`filterpat`] [-P`prefix`] [-S`suffix`]`name`[`name`...]
+  >
+  > ```
+  > complete -pr [-DEI] [
+  > ```
+  >
+  > `name`...]
+
   Specify how arguments to each *name* should be completed.
   If the `-p` option is supplied, or if no options or *name*s are supplied, print existing completion specifications in a way that allows them to be reused as input. The `-r` option removes a completion specification for each *name*, or, if no *name*s are supplied, all completion specifications.
   The `-D` option indicates that other supplied options and actions should apply to the “default” command completion; that is, completion attempted on a command for which no completion has previously been defined. The `-E` option indicates that other supplied options and actions should apply to “empty” command completion; that is, completion attempted on a blank line. The `-I` option indicates that other supplied options and actions should apply to completion on the initial non-assignment word on the line, or after a command delimiter such as ‘`;`’ or ‘`|`’, which is usually command name completion. If multiple options are supplied, the `-D` option takes precedence over `-E`, and both take precedence over `-I`. If any of `-D`, `-E`, or `-I` are supplied, any other *name* arguments are ignored; these completions only apply to the case specified by the option.
@@ -3971,7 +4001,12 @@ Three builtin commands are available to manipulate the programmable completion f
   - *filterpat* is a pattern as used for filename expansion. It is applied to the list of possible completions generated by the preceding options and arguments, and each completion matching *filterpat* is removed from the list. A leading ‘`!`’ in *filterpat* negates the pattern; in this case, any completion not matching *filterpat* is removed.
   The return value is true unless an invalid option is supplied, an option other than `-p`, `-r`, `-D`, `-E`, or `-I` is supplied without a *name* argument, an attempt is made to remove a completion specification for a *name* for which no specification exists, or an error occurs adding a completion specification.
 - `compopt`[¶](#index-compopt)
-- `compopt`[-o`option`] [-DEI] [+o`option`] [`name`]
+- > ```
+  > compopt
+  > ```
+  >
+  > [-o`option`] [-DEI] [+o`option`] [`name`]
+
   Modify completion options for each *name* according to the *option*s, or for the currently-executing completion if no *name*s are supplied. If no *option*s are given, display the completion options for each *name* or the current completion. The possible values of *option* are those valid for the `complete` builtin described above.
   The `-D` option indicates that other supplied options should apply to the “default” command completion; the `-E` option indicates that other supplied options should apply to “empty” command completion; and the `-I` option indicates that other supplied options should apply to completion on the initial word on the line. These are determined in the same way as the `complete` builtin.
   If multiple options are supplied, the `-D` option takes precedence over `-E`, and both take precedence over `-I`
@@ -4069,7 +4104,18 @@ The shell allows control over which commands are saved on the history list. The 
 Bash provides two builtin commands which manipulate the history list and history file.
 
 - `fc`[¶](#index-fc)
-- `fc [-e``ename`] [-lnr] [`first`] [`last`]`fc -s [``pat`=`rep`] [`command`]
+- > ```
+  > fc [-e
+  > ```
+  >
+  > `ename`] [-lnr] [`first`] [`last`]
+  >
+  > ```
+  > fc -s [
+  > ```
+  >
+  > `pat`=`rep`] [`command`]
+
   The first form selects a range of commands from *first* to *last* from the history list and displays or edits and re-executes them. Both *first* and *last* may be specified as a string (to locate the most recent command beginning with that string) or as a number (an index into the history list, where a negative number is used as an offset from the current command number).
   When listing, a *first* or *last* of 0 is equivalent to -1 and -0 is equivalent to the current command (usually the `fc` command); otherwise 0 is equivalent to -1 and -0 is invalid.
   If *last* is not specified, it is set to the current command for listing and to *first* otherwise. If *first* is not specified, it is set to the previous command for editing and −16 for listing.
@@ -4079,8 +4125,8 @@ Bash provides two builtin commands which manipulate the history list and history
   A useful alias to use with the `fc` command is `r='fc -s'`, so that typing ‘`r cc`’ runs the last command beginning with `cc` and typing ‘`r`’ re-executes the last command (see [Aliases](#Aliases)).
   If the first form is used, the return value is zero unless an invalid option is encountered or *first* or *last* specify history lines out of range. When editing and re-executing a file of commands, the return value is the value of the last command executed or failure if an error occurs with the temporary file. If the second form is used, the return status is that of the re-executed command, unless *command* does not specify a valid history entry, in which case `fc` returns a non-zero status.
 - `history`[¶](#index-history)
-- > history [
-  `n`] history -c history -d`offset`history -d`start`-`end`history [-anrw] [`filename`] history -ps`arg`
+- > history [`n`] history -c history -d`offset`history -d`start`-`end`history [-anrw] [`filename`] history -ps`arg`
+
   With no options, display the history list with numbers. Entries prefixed with a ‘`*`’ have been modified. An argument of *n* lists only the last *n* entries. If the shell variable `HISTTIMEFORMAT` is set and not null, it is used as a format string for `strftime`(3) to display the time stamp associated with each displayed history entry. If `history` uses `HISTTIMEFORMAT`, it does not print an intervening space between the formatted time stamp and the history entry.
   Options, if supplied, have the following meanings:
   - `-c`

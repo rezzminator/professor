@@ -504,16 +504,31 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			once: []string{
 				"Just other Linux users telling me to use Nix! If it ain’t the Debian way I ain’t doing it.",
 				"Debian is love. Debian is life. I'm reminded of an old bash.org quote:",
+				"> Ubuntu is an ancient African word which means \"I was too lazy to install and configure Debian\"",
+				"Ubuntu is an ancient African word",
+			},
+		},
+		{
+			// A nested Tildes reply opens with a <blockquote> of the comment it
+			// answers: written as a quote inside its list item, and the reply's
+			// own words after it are a new paragraph, not a lazy continuation.
+			fixture: "quote-reply.html",
+			once: []string{
+				"> I’ve heard there’s some concerns with Russian ownership of the code\n\n",
+				"Not only Russian ownership, but also plain dickheaded abuse of AGPL",
 			},
 		},
 		{
 			// A PyPI README ends in a row of two linked logos served through
 			// PyPI's image proxy, whose URLs carry no file extension: each logo
-			// is written as an image with its alt text.
+			// is written as an image with its alt text, linked to where the logo
+			// points.
 			fixture: "camo-image.html",
 			once: []string{
-				"![Kenneth Reitz](https://pypi-camo.",
-				"![Python Software Foundation](https://pypi-camo.",
+				"[![Kenneth Reitz](https://pypi-camo.",
+				")](https://kennethreitz.org)",
+				"[![Python Software Foundation](https://pypi-camo.",
+				")](https://www.python.org/psf)",
 			},
 		},
 		{

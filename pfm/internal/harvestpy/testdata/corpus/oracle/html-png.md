@@ -6,7 +6,7 @@
 
 ---
 
-![W3C](https://www.w3.org/StyleSheets/TR/2021/logos/W3C)
+[![W3C](https://www.w3.org/StyleSheets/TR/2021/logos/W3C)](https://www.w3.org/)
 
 [W3C Recommendation](https://www.w3.org/standards/types#REC)
 

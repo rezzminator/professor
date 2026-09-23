@@ -71,6 +71,7 @@ def convert_html(path: pathlib.Path) -> str:
 
     _keep_linked_blocks()
     _extract_comments_as_content()
+    _keep_quotes_in_list_items()
     _keep_share_word_headings()
     _keep_extensionless_images()
     # Local HTML follows the old dispatch path, which decodes malformed bytes
@@ -80,6 +81,7 @@ def convert_html(path: pathlib.Path) -> str:
     if tree is not None:
         _drop_hidden(tree)
         _drop_repeated_excerpts(tree)
+        _mark_linked_images(tree)
         _unwrap_layout_tables(tree)
         _keep_notes(tree)
         _flatten_code_lines(tree)
@@ -154,6 +156,7 @@ def _keep_linked_blocks() -> None:
 # keep the comments: the main-content pass selects the article, and a comments
 # section beside it is never reached.
 _COMMENTS_AS_CONTENT = False
+_HELD_QUOTE = "pfm-held-quote"
 
 
 def _extract_comments_as_content() -> None:
@@ -185,10 +188,20 @@ def _extract_comments_as_content() -> None:
                 continue
             # The comment discard list drops every quote (a quoted reply), and
             # a <pre> is a quote by then: a code block is renamed out of reach.
+            # A <blockquote> is the commenter's own text quoting what it
+            # answers (Tildes, a forum reply): held out of reach the same way
+            # and written as a quote.
+            quotes = []
             for quote in subtree.iter("quote"):
                 if is_code(quote):
                     quote.tag = "code"
+                else:
+                    quotes.append(quote)
+            for quote in quotes:
+                quote.tag = _HELD_QUOTE
             subtree = prune(subtree, main_extractor.COMMENTS_DISCARD_XPATH)
+            for quote in subtree.iter(_HELD_QUOTE):
+                quote.tag = "quote"
             strip_tags(subtree, "span")
             if "ref" not in potential_tags:
                 strip_tags(subtree, "a", "ref")
@@ -203,6 +216,49 @@ def _extract_comments_as_content() -> None:
 
     core.extract_comments = extract_comments
     _COMMENTS_AS_CONTENT = True
+
+
+# trafilatura's list-item handler rewires every descendant of an item as a flat
+# child of it, so a <blockquote> inside a list item — a threaded reply quoting
+# its parent (every nested Tildes comment), a quoted passage in a list — lost
+# its quote and read as the replier's own words. A quote inside an item keeps
+# its descendants, rewired the same way, inside a quote of its own.
+_QUOTES_IN_ITEMS_KEPT = False
+
+
+def _keep_quotes_in_list_items() -> None:
+    global _QUOTES_IN_ITEMS_KEPT
+    if _QUOTES_IN_ITEMS_KEPT:
+        return
+    from lxml.etree import Element
+    from trafilatura import main_extractor as me
+
+    nested = me.process_nested_elements
+    if not {"handle_lists", "handle_textnode", "add_sub_element"} <= set(nested.__code__.co_names):
+        raise RuntimeError("trafilatura's process_nested_elements changed its handlers; re-check the list-item quote hook")
+
+    def process_nested_elements(child, new_child_elem, options):
+        new_child_elem.text = child.text
+        for subelem in child.iterdescendants("*"):
+            if subelem.tag == "list":
+                processed_subchild = me.handle_lists(subelem, options)
+                if processed_subchild is not None:
+                    new_child_elem.append(processed_subchild)
+            elif subelem.tag == "quote" and not me.is_code_block_element(subelem):
+                quote = Element("quote")
+                process_nested_elements(subelem, quote, options)
+                if (quote.text or "").strip() or len(quote):
+                    if (subelem.tail or "").strip():
+                        quote.tail = subelem.tail
+                    new_child_elem.append(quote)
+            else:
+                processed_subchild = me.handle_textnode(subelem, options, comments_fix=False)
+                if processed_subchild is not None:
+                    me.add_sub_element(new_child_elem, subelem, processed_subchild)
+            subelem.tag = "done"
+
+    me.process_nested_elements = process_nested_elements
+    _QUOTES_IN_ITEMS_KEPT = True
 
 
 # An element the reader never sees is never written. trafilatura's own discard
@@ -283,10 +339,14 @@ def _keep_extensionless_images() -> None:
 
     def handle_image(element, options=None):
         kept = keep(element, options)
+        if kept is not None and element is not None and element.get(_LINK_TARGET):
+            kept.set(_LINK_TARGET, element.get(_LINK_TARGET))
         src = _described_web_src(element)
         if kept is not None or not src:
             return kept
         graphic = Element(element.tag)
+        if target := element.get(_LINK_TARGET):
+            graphic.set(_LINK_TARGET, target)
         graphic.set("src", "https:" + src if src.startswith("//") else src)
         graphic.set("alt", " ".join(element.get("alt").split()))
         if title := element.get("title"):
@@ -297,6 +357,23 @@ def _keep_extensionless_images() -> None:
     main_extractor.handle_image = handle_image
     htmlprocessing.is_image_element = lambda element: probe(element) or bool(_described_web_src(element))
     _EXTENSIONLESS_IMAGES_KEPT = True
+
+
+# trafilatura's tag conversion moves every image out of the link around it and
+# deletes a link left without text, so a linked image — a README badge, a
+# sponsor logo, a thumbnail opening the full picture — lost where it points.
+# Each image inside a link carries the link's target through extraction and is
+# written as a linked image, [![alt](src)](href).
+_LINK_TARGET = "data-pfm-link"
+
+
+def _mark_linked_images(tree) -> None:
+    for link in tree.xpath("//a[@href]"):
+        href = link.get("href").strip()
+        if not href or href.lower().startswith("javascript:"):
+            continue
+        for image in link.iter("img"):
+            image.set(_LINK_TARGET, href)
 
 
 # A table whose role is presentation or none is layout by its author's own
@@ -602,7 +679,13 @@ def _list(element) -> str:
             continue
         number += 1
         marker = f"{number}. " if ordered else "- "
-        body = "\n".join(_blocks(item)).splitlines() or [""]
+        # A line right after a quote would continue it (lazy continuation):
+        # a blank line ends the quote.
+        blocks = _blocks(item)
+        body = "".join(
+            block + ("" if index == len(blocks) - 1 else "\n\n" if block.startswith(">") else "\n")
+            for index, block in enumerate(blocks)
+        ).splitlines() or [""]
         lines.append((marker + body[0]).rstrip())
         lines.extend(("   " if ordered else "  ") + line if line else "" for line in body[1:])
     return "\n".join(lines)
@@ -632,7 +715,13 @@ def _table(element) -> str:
 def _graphic(element) -> str:
     alt = " ".join(f"{element.get('title', '')} {element.get('alt', '')}".split())
     src = element.get("src", "")
-    return f"![{alt}]({src})" if src else ""
+    if not src:
+        return ""
+    target = element.get(_LINK_TARGET, "")
+    parent = element.getparent()
+    if target and (parent is None or parent.tag != "ref"):
+        return f"[![{alt}]({src})]({target})"
+    return f"![{alt}]({src})"
 
 
 def _code_text(element) -> str:

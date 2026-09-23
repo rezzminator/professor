@@ -35,13 +35,16 @@ import (
 // extractor proved this thread's (honoured only for an extractor that
 // readsSiteAPI). unrendered, answered with ok false, is what an extractor
 // that knows the page but could not render it leaves out (its API record did
-// not load): the page falls through to another path, which names it.
+// not load): the page falls through to another path, which names it. stated,
+// set beside unrendered, reads from the content a rung stores the count the
+// page states of what was not loaded (booking.go).
 type siteExtraction struct {
 	markdown          string
 	partial           string
 	renderMayComplete bool
 	apiRecord         bool
 	unrendered        string
+	stated            func(content string) string
 }
 
 // unknownAuthor stands, in every extractor's rendering, for a post or comment
@@ -215,6 +218,12 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:    "booking-reviews",
+		hosts:   []string{"booking.com"},
+		paths:   isBookingHotel,
+		extract: extractBookingReviews,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,
@@ -336,7 +345,7 @@ func extractForSite(source string, doc *html.Node) (siteExtraction, string, bool
 	if parsed.Host == "" {
 		return siteExtraction{}, "", false
 	}
-	unrendered := ""
+	named := siteExtraction{}
 	for _, extractor := range siteExtractors {
 		if !extractor.claims(parsed, doc) {
 			continue
@@ -346,9 +355,12 @@ func extractForSite(source string, doc *html.Node) (siteExtraction, string, bool
 			extraction.apiRecord = extraction.apiRecord && extractor.readsSiteAPI
 			return extraction, extractor.name, true
 		}
-		unrendered = joinReasons(unrendered, extraction.unrendered)
+		named.unrendered = joinReasons(named.unrendered, extraction.unrendered)
+		if named.stated == nil {
+			named.stated = extraction.stated
+		}
 	}
-	return siteExtraction{unrendered: unrendered}, "", false
+	return named, "", false
 }
 
 // keptAnswers returns the elements named tag in doc: the API answers an

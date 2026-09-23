@@ -33,12 +33,14 @@ func (h *Harvester) convertFetchedContent(ctx context.Context, kind, source stri
 // the unread later pages of an address naming its own page (pagedListing),
 // and pager is whether the page showed a pager of that address, which answers
 // whether a next page exists (pagination.go). Non-HTML kinds carry the zero
-// value.
+// value. stated is the extractor's reader of the stated count of what it could
+// not load (siteExtraction.stated), carried with unrendered.
 type convertedPage struct {
 	extractor         string
 	renderMayComplete bool
 	siteAPI           bool
 	unrendered        string
+	stated            func(content string) string
 	nextPage          string
 	listing           string
 	pager             bool
@@ -52,13 +54,14 @@ type convertedPage struct {
 type carriedGaps struct {
 	api, next string
 	pager     bool
+	stated    func(content string) string
 }
 
 // carry is gaps with this page's conversion's gaps filled in where no earlier
 // rung saw one.
 func (page convertedPage) carry(gaps carriedGaps) carriedGaps {
 	if gaps.api == "" {
-		gaps.api = page.unrendered
+		gaps.api, gaps.stated = page.unrendered, page.stated
 	}
 	if gaps.next == "" {
 		gaps.next = page.nextPage
@@ -97,12 +100,23 @@ func readerPage(source, markdown string) convertedPage {
 func (page convertedPage) withGaps(content string, gaps carriedGaps, budget *loaderBudget) string {
 	stored := partialReason(content)
 	reason := stored
-	if gaps.api != "" && !page.siteAPI && !strings.Contains(reason, gaps.api) {
-		note := budget.note()
-		if strings.Contains(reason, note) {
-			note = "" // the conversion content came from named it already
+	if gaps.api != "" && !page.siteAPI {
+		stated := "" // the count the stored content states of what was not loaded
+		if gaps.stated != nil {
+			stated = gaps.stated(partialBody(content))
 		}
-		reason = joinReasons(reason, gaps.api, note)
+		if strings.Contains(reason, stated) {
+			stated = ""
+		}
+		if !strings.Contains(reason, gaps.api) {
+			note := budget.note()
+			if strings.Contains(reason, note) {
+				note = "" // the conversion content came from named it already
+			}
+			reason = joinReasons(reason, stated, gaps.api, note)
+		} else {
+			reason = joinReasons(reason, stated)
+		}
 	}
 	next := gaps.next
 	if next == "" || (page.nextPage != "" && strings.Contains(reason, page.nextPage)) {
@@ -243,6 +257,7 @@ func (h *Harvester) convertHTML(
 		return withPartial(content, joinReasons(reason, unclosed)), convertedPage{
 			renderMayComplete: reason != "",
 			unrendered:        extraction.unrendered,
+			stated:            extraction.stated,
 			nextPage:          nextPage,
 			listing:           pagedListing(source),
 			pager:             pager,
@@ -259,7 +274,7 @@ func (h *Harvester) convertHTML(
 	converted, err := h.options.Converter.Convert(ctx, kindHTML, source, input)
 	if err != nil {
 		// What the extractor could not load is still named by the rung that stores the page.
-		return "", convertedPage{unrendered: extraction.unrendered}, err
+		return "", convertedPage{unrendered: extraction.unrendered, stated: extraction.stated}, err
 	}
 	if budget.gateOnly(wall, converted) {
 		obs.Logger(ctx).Info("harvest: the page holds nothing but a login wall", "target", logSource(source))

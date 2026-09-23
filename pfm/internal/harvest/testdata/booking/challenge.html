@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title></title>
+    <style>
+        body {
+            font-family: "Arial";
+        }
+    </style>
+    <script type="text/javascript" nonce="rBogn8JWK06X0Hh">
+        function reportChallengeError(log, challengeError) {
+    return;
+}
+
+        
+    </script>
+    <script type="text/javascript" nonce="rBogn8JWK06X0Hh">
+        window.awsWafCookieDomainList = ['booking.com'];
+    </script>
+    <script type="text/javascript" src="https://www.booking.com/__challenge_h78IRKX3kpQxScCExxShBNwRUlb/d8c14d4960ca/a18a4859af9c/challenge.js" nonce="rBogn8JWK06X0Hh"></script>
+    <script type="text/javascript" nonce="rBogn8JWK06X0Hh">
+        const maxLocationLength = 2047 - "&chal_t=1760623098515&force_referer=".length;
+        function searchStringWithNewParam(search, key, value) {
+            value = encodeURIComponent(value);
+            if (!search.startsWith('?')) {
+                return search + `?${key}=${value}`;
+            } else if (search.endsWith('&')) {
+                return search + `${key}=${value}`;
+            } else {
+                return search + `&${key}=${value}`;
+            }
+        }
+
+        function getNewUrlWithAddedParameter(location, parameters) {
+            let newSearch = location.search;
+
+            for (let parameterName of Object.keys(parameters)) {
+                if (!newSearch.includes(`${parameterName}=`)) {
+                    newSearch = searchStringWithNewParam(newSearch, parameterName, parameters[parameterName]);
+                }
+            }
+
+            let newHref = `${location.pathname}${newSearch}${location.hash}`;
+            if (newHref.length < maxLocationLength) {
+                return newHref;
+            }
+            return null;
+        }
+    </script>
+</head>
+<body>
+    <div id="challenge-container"></div>
+    <script type="text/javascript" nonce="rBogn8JWK06X0Hh">
+        let newHref;
+        try {
+            setTimeout(() => {
+                try {
+                    reportChallengeError("Reloaded without updating url", new Error(""));
+                } catch (e) {}
+                document.location.reload();
+            }, 20000);
+            let referrer = document.referrer;
+            let availableLength = maxLocationLength - document.location.href.length;
+
+            if (encodeURIComponent(referrer).length > availableLength) {
+                let parsedReferrer = new URL(referrer);
+                referrer = parsedReferrer.origin;
+                if (encodeURIComponent(referrer + parsedReferrer.pathname).length < availableLength) {
+                    referrer = referrer + parsedReferrer.pathname;
+                }
+            }
+            let parameters = {
+                chal_t: 1790162187883,
+                force_referer: referrer,
+            };
+            newHref = getNewUrlWithAddedParameter(document.location, parameters);
+        } catch (e) {
+            reportChallengeError("Failed while getting new href", e);
+        }
+
+        newHref = newHref || document.location.href;
+        AwsWafIntegration.saveReferrer();
+        AwsWafIntegration.checkForceRefresh().then((forceRefresh) => {
+            if (forceRefresh) {
+                AwsWafIntegration.forceRefreshToken().then(() => {
+                    window.location.href = newHref;
+                });
+            } else {
+                AwsWafIntegration.getToken().then(() => {
+                    window.location.href = newHref;
+                });
+            }
+        });
+    </script>
+    <noscript>
+        <h1>JavaScript is disabled</h1>
+        In order to continue, we need to verify that you're not a robot.
+        This requires JavaScript. Enable JavaScript and then reload the page.
+    </noscript>
+</body>
+</html>

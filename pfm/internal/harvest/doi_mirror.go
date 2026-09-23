@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,6 +17,39 @@ import (
 )
 
 const doiMirrorTimeout = 45 * time.Second
+
+// The forced-OCR rescue runs under its own deadline, not doiMirrorTimeout:
+// docling's document_timeout for a scanned PDF outgrows 45 s past three pages.
+// doiMirrorOCRMargin covers worker start-up and the reply beyond docling's own
+// limit; doiMirrorOCRCap bounds any one rescue and is the deadline of a PDF
+// whose page count is not visible (its page tree sits in a compressed object
+// stream), so an unknown size never waits without end.
+const (
+	doiMirrorOCRMargin = 10 * time.Second
+	doiMirrorOCRCap    = 15 * time.Minute
+)
+
+// pdfPageObject matches one uncompressed page object ("/Type /Page", never the
+// "/Type /Pages" tree node).
+var pdfPageObject = regexp.MustCompile(`/Type\s*/Page\b`)
+
+// pdfPageCount counts the PDF's uncompressed page objects; 0 means the count
+// is not visible in the bytes, never that the document has no page.
+func pdfPageCount(body []byte) int {
+	return len(pdfPageObject.FindAllIndex(body, -1))
+}
+
+// doiMirrorOCRTimeout is the forced-OCR rescue's deadline for a PDF of pages
+// pages: docling's own document_timeout — converter.py ocr_timeout, max(30,
+// 12 × flagged pages) seconds, a forced run flagging every page — plus
+// doiMirrorOCRMargin, capped at doiMirrorOCRCap; pages <= 0 takes the cap.
+func doiMirrorOCRTimeout(pages int) time.Duration {
+	if pages <= 0 || pages > int(doiMirrorOCRCap/(12*time.Second)) {
+		return doiMirrorOCRCap
+	}
+	docling := time.Duration(max(30, 12*pages)) * time.Second
+	return min(docling+doiMirrorOCRMargin, doiMirrorOCRCap)
+}
 
 // normalizeDOIMirrorURL validates the configured mirror once at startup. The
 // value is copied into settings by New, so a running Harvester never consults
@@ -448,13 +482,30 @@ func (h *Harvester) fetchDOIMirror(ctx context.Context, identifier string, optio
 			)
 		}
 		rungs = append(rungs, "ocr")
-		converted, err = ocrConverter.ConvertOCR(attemptCtx, kindPDF, pdfSource, pdfBody)
+		pages := pdfPageCount(pdfBody)
+		ocrTimeout := doiMirrorOCRTimeout(pages)
+		ocrCtx, cancelOCR := context.WithTimeout(ctx, ocrTimeout)
+		converted, err = ocrConverter.ConvertOCR(ocrCtx, kindPDF, pdfSource, pdfBody)
+		ocrDeadline := errors.Is(ocrCtx.Err(), context.DeadlineExceeded)
+		cancelOCR()
 		if err != nil {
-			return doiMirrorFailure{
+			ocrFailure := doiMirrorFailure{
 				message: "PDF conversion produced empty text and OCR failed: " + err.Error(),
 				kind:    errorKindConvert,
 				status:  pdfStatus,
-			}.result(
+			}
+			if ocrDeadline {
+				size := "a PDF whose page count is not visible"
+				if pages > 0 {
+					size = fmt.Sprintf("%d page(s)", pages)
+				}
+				ocrFailure.message = fmt.Sprintf(
+					"PDF conversion produced empty text and OCR of %s hit its %s deadline: %s",
+					size, ocrTimeout, err.Error(),
+				)
+				ocrFailure.kind = errorKindTimeout
+			}
+			return ocrFailure.result(
 				identifier,
 				rungs,
 			)

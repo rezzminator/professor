@@ -322,9 +322,10 @@ func fileFailure(source, what string, got Retrieved, err error) Result {
 
 // pageBodyGuard is the binary guard of a page read: a body is converted only
 // when it is text or a document the converter reads. An image keeps its own
-// refusal; a text-kind body whose bytes are not text (audio, a legacy Office
-// file, an unknown binary — detected by magic bytes, never the extension) ends
-// as a named file result, never as page content.
+// refusal; any other body the harvester does not convert — a file (audio,
+// video, a font, an archive, an unknown binary), a dropped or not-yet-parsed
+// format, a decompression bomb — detected by its bytes (resolveFormat), never
+// the extension, ends as a named file result, never as page content.
 func pageBodyGuard(source, kind string, body []byte, status int) (Result, bool) {
 	if kind == kindImage || isImageKind(kind) {
 		return Result{
@@ -338,39 +339,32 @@ func pageBodyGuard(source, kind string, body []byte, status int) (Result, bool) 
 			ErrorKind:  errorKindWrongKind,
 		}, true
 	}
-	switch kind {
-	case kindHTML, kindTXT, kindJSON, kindCSV:
-	default:
-		return Result{}, false // a document or archive kind: the ladder's own checks route it
+	found := resolveFormat(source, body)
+	switch found.class {
+	case formatFileOnly:
+		if kind == kindZIP || kind == kindTAR || kind == kind7Z || kind == kindRAR {
+			return Result{}, false // the ladder names an archive kind itself
+		}
+		return Result{
+			Source: source,
+			Kind:   kindFile,
+			Error: fmt.Sprintf(
+				"%s is a file (%s, %d bytes), not a page — it was not converted; download it with `download`.",
+				source,
+				found.label,
+				len(body),
+			),
+			HTTPStatus: status,
+			ErrorKind:  errorKindWrongKind,
+		}, true
+	case formatDropped, formatRefused:
+		return Result{
+			Source:     source,
+			Kind:       kindFile,
+			Error:      source + " was not converted: " + formatRefusalReason(found) + " Download it with `download`.",
+			HTTPStatus: status,
+			ErrorKind:  formatErrorKind(found),
+		}, true
 	}
-	detected := sniffBinaryType(body)
-	if detected == "" {
-		return Result{}, false
-	}
-	return Result{
-		Source: source,
-		Kind:   kindFile,
-		Error: fmt.Sprintf(
-			"%s is a file (%s, %d bytes), not a page — it was not converted; download it with `download`.",
-			source,
-			detected,
-			len(body),
-		),
-		HTTPStatus: status,
-		ErrorKind:  errorKindWrongKind,
-	}, true
-}
-
-// sniffBinaryType names a body's type from its magic bytes, or "" when the
-// body is text.
-func sniffBinaryType(body []byte) string {
-	head := body[:min(len(body), 512)]
-	if len(head) >= 4 && string(head[:4]) == "\xd0\xcf\x11\xe0" {
-		return "application/x-ole-storage" // a legacy Office (.doc/.xls/.ppt) compound file
-	}
-	detected, _, _ := strings.Cut(http.DetectContentType(head), ";")
-	if strings.HasPrefix(detected, "text/") {
-		return ""
-	}
-	return detected
+	return Result{}, false
 }

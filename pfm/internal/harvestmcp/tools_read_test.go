@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
 func newTestService(t *testing.T, runtime Runtime) *Service {
@@ -117,5 +119,38 @@ func TestReadToolsNameTheRightTool(t *testing.T) {
 	}
 	if ids := workIDs("doi:10.1038/nature14539"); ids["doi"] != "10.1038/nature14539" {
 		t.Fatalf("workIDs(doi) = %v", ids)
+	}
+}
+
+// TestReadToolAllFailedIsAnError: a call whose every item failed answers
+// isError true, so a caller never reads a failed batch as a result; the
+// item's own named text rides in the Content.
+func TestReadToolAllFailedIsAnError(t *testing.T) {
+	session := connectHarvesterInProcess(t, newTestService(t, Runtime{}))
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: toolParseLocal, Arguments: map[string]any{"paths": []string{"https://example.test/page"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.IsError {
+		t.Fatalf("parseLocalDocuments with every item failed: isError = false, content %+v", result.Content)
+	}
+}
+
+// TestDescribeFetchKeepsAPublishedFailuresText: the render's second pass over
+// a published failure keeps its text — a converter's named failure is never
+// re-read as "The title is ambiguous".
+func TestDescribeFetchKeepsAPublishedFailuresText(t *testing.T) {
+	service := newTestService(t, Runtime{})
+	source := "/tmp/demo/broken-feed.xml"
+	published := harvest.PublicFailure(source, harvest.Result{
+		Source: source, Kind: "feed",
+		Error: "harvestpy conversion failed (ValueError): ValueError: the feed parsed to no title and no items: " +
+			"a broken or empty feed; a feedparser fallback on a broken feed is unmeasured (stderr: )",
+	})
+	text := service.describeFetch(source, published, false)
+	if strings.Contains(text, "ambiguous") || !strings.Contains(text, "a broken or empty feed") {
+		t.Fatalf("describeFetch = %q, want the converter's named failure", text)
 	}
 }

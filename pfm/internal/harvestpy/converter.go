@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -28,12 +29,31 @@ type Runtime struct {
 	// HARVESTER_PDF_* protocol variables (workerEnv).
 	PDFOCR    bool
 	PDFLayout bool
+	// ModelRoot is where `pfm install` staged the OCR models (the
+	// harvest-python state root's models/); empty derives it from Python's
+	// place under that root. ModelStaging lets the worker download into it —
+	// only the install's staging run sets it; every read runs offline.
+	ModelRoot    string
+	ModelStaging bool
+}
+
+// modelRootFor derives the staged-model directory from an interpreter living
+// under <root>/env/<platform>/<digest>/project/.venv/bin: <root>/models.
+func modelRootFor(python string) string {
+	for dir := filepath.Dir(python); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if filepath.Base(dir) == "env" {
+			return filepath.Join(filepath.Dir(dir), "models")
+		}
+	}
+	return ""
 }
 
 // converterProtocolEnv are the variables converter.py reads. The worker
 // environment carries them ONLY from Runtime — a value inherited from the pfm
 // process is stripped, so harvester.config.json stays the one source.
-var converterProtocolEnv = []string{"HARVESTER_PDF_OCR", "HARVESTER_PDF_LAYOUT"}
+var converterProtocolEnv = []string{
+	"HARVESTER_PDF_OCR", "HARVESTER_PDF_LAYOUT", "HARVESTPY_MODEL_ROOT", "HARVESTPY_MODEL_STAGING",
+}
 
 // workerEnv is the converter process environment: the parent environment
 // minus the converter protocol variables, plus the configured flags.
@@ -57,6 +77,16 @@ func workerEnv(parent []string, runtime Runtime) []string {
 	}
 	if runtime.PDFLayout {
 		env = append(env, "HARVESTER_PDF_LAYOUT=1")
+	}
+	modelRoot := runtime.ModelRoot
+	if modelRoot == "" {
+		modelRoot = modelRootFor(runtime.Python)
+	}
+	if modelRoot != "" {
+		env = append(env, "HARVESTPY_MODEL_ROOT="+modelRoot)
+	}
+	if runtime.ModelStaging {
+		env = append(env, "HARVESTPY_MODEL_STAGING=1")
 	}
 	return env
 }

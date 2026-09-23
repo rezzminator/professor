@@ -970,7 +970,7 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 	check, checkErr := provider.Check(ctx, root, platform)
 	if checkErr == nil && check.Healthy {
 		installer.ok("harvestpy environment already healthy (Check fast-path; no download)")
-		return nil
+		return installer.stageHarvestModels(ctx, provider, root, platform)
 	}
 	if checkErr != nil {
 		installer.say("harvestpy Check did not establish a healthy environment; provisioning: %v", checkErr)
@@ -996,7 +996,7 @@ func (installer *engine) installHarvest(ctx context.Context) error {
 		return fmt.Errorf("harvestpy provision %s: %w", platform, provisionErr)
 	}
 	installer.ok("harvestpy environment provisioned digest=" + result.Digest)
-	return nil
+	return installer.stageHarvestModels(ctx, provider, root, platform)
 }
 
 func (installer *engine) uninstallHarvest() error {

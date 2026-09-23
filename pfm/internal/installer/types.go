@@ -283,3 +283,55 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	}
 	return options, nil
 }
+
+// harvestModelStager is the optional OCR-model half of a HarvestProvisioner:
+// the production adapter stages the models; test doubles need not.
+type harvestModelStager interface {
+	StageOCRModels(context.Context, harvestpy.OCRStageOptions) (harvestpy.OCRStaging, error)
+}
+
+func (pinnedHarvestProvisioner) StageOCRModels(
+	ctx context.Context,
+	options harvestpy.OCRStageOptions,
+) (harvestpy.OCRStaging, error) {
+	return harvestpy.StageOCRModels(ctx, options)
+}
+
+// stageHarvestModels stages the OCR models after the environment is healthy:
+// it names the download and its size before it starts, answers a warm cache
+// without a download, and names an offline install that could not stage.
+func (installer *engine) stageHarvestModels(
+	ctx context.Context,
+	provider HarvestProvisioner,
+	root string,
+	platform harvestpy.Platform,
+) error {
+	stager, ok := provider.(harvestModelStager)
+	if !ok {
+		return nil
+	}
+	staging, err := stager.StageOCRModels(ctx, harvestpy.OCRStageOptions{
+		Root: root, Platform: platform, Offline: installer.options.HarvestOffline,
+		Announce: func(message string) { installer.say("harvestpy OCR models: %s", message) },
+	})
+	if errors.Is(err, harvestpy.ErrOCRModelsOffline) {
+		installer.say(
+			"harvestpy OCR models: NOT staged — %v; scanned PDFs fail by name until `pfm install` runs with network",
+			err,
+		)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("harvestpy OCR model staging: %w", err)
+	}
+	if staging.AlreadyStaged {
+		installer.ok("harvestpy OCR models already staged in " + staging.ModelRoot + " (no download)")
+		return nil
+	}
+	installer.ok(fmt.Sprintf("harvestpy OCR models staged in %s (%d bytes on disk); Hebrew: %s",
+		staging.ModelRoot, staging.Bytes, staging.Hebrew))
+	for set, reason := range staging.Skipped {
+		installer.say("harvestpy OCR models: %s not staged — %s", set, reason)
+	}
+	return nil
+}

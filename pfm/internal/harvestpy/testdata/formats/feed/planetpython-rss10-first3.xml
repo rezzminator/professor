@@ -1,0 +1,436 @@
+<?xml version="1.0"?>
+<rdf:RDF
+	xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+	xmlns:dc="http://purl.org/dc/elements/1.1/"
+	xmlns:foaf="http://xmlns.com/foaf/0.1/"
+	xmlns:content="http://purl.org/rss/1.0/modules/content/"
+	xmlns="http://purl.org/rss/1.0/"
+>
+<channel rdf:about="http://planetpython.org/">
+	<title>Planet Python</title>
+	<link>http://planetpython.org/</link>
+	<description>Planet Python - http://planetpython.org/</description>
+
+	<items>
+		<rdf:Seq>
+			<rdf:li rdf:resource="tag:www.pythonguis.com,2026-09-23:/faq/creating-dynamic-textboxes/" />
+			<rdf:li rdf:resource="https://pythonbytes.fm/episodes/af55f8d3-e804-4da9-aa70-575ebb410459" />
+			<rdf:li rdf:resource="https://pycoders.com/issues/753" />
+			<rdf:li rdf:resource="https://talkpython.fm/episodes/ce3be7eb-ceac-47d1-b733-2a579f67b78c" />
+			<rdf:li rdf:resource="https://www.djangoproject.com/weblog/2026/sep/22/new-technical-governance-approved/" />
+			<rdf:li rdf:resource="https://lernerpython.com/2026/09/22/pandas-nullable-integers-keeping-ints-with-int64-and-pd-na/" />
+			<rdf:li rdf:resource="tag:blogger.com,1999:blog-9266717.post-2676830321197583806" />
+			<rdf:li rdf:resource="https://lernerpython.com/?p=17771" />
+			<rdf:li rdf:resource="https://lernerpython.com/2026/09/20/nan-in-pandas-why-you-need-np-nan-not-pd-nan/" />
+			<rdf:li rdf:resource="https://belderbos.dev/blog/free-python-foundations-course-local-dev-workflow/" />
+			<rdf:li rdf:resource="https://www.djangoproject.com/weblog/2026/sep/18/proposed-change-to-dsf-voting-membership/" />
+			<rdf:li rdf:resource="https://www.pypy.org/posts/2026/09/pypy-v800-release.html" />
+			<rdf:li rdf:resource="tag:blogger.com,1999:blog-7958828565254404797.post-5932691396391028347" />
+			<rdf:li rdf:resource="https://lernerpython.com/2026/09/18/np-nan-in-pandas-why-missing-values-break-comparisons/" />
+			<rdf:li rdf:resource="https://grahamdumpleton.me/posts/2026/09/writing-a-workshop-for-jupyterlab/" />
+			<rdf:li rdf:resource="https://belderbos.dev/blog/protocol-vs-abc-provider-interface/" />
+			<rdf:li rdf:resource="https://grahamdumpleton.me/posts/2026/09/introducing-jupyterlab-workshop/" />
+			<rdf:li rdf:resource="tag:blogger.com,1999:blog-8520.post-2572588314148740430" />
+			<rdf:li rdf:resource="tag:blogger.com,1999:blog-8520.post-3471385157808438119" />
+			<rdf:li rdf:resource="https://lernerpython.com/2026/09/17/python-callables-any-object-that-defines-call/" />
+			<rdf:li rdf:resource="https://belderbos.dev/blog/rust-import-traits-to-use-methods/" />
+			<rdf:li rdf:resource="https://nedbatchelder.com/blog/202609/silence_is_golden_lightning_talk" />
+			<rdf:li rdf:resource="https://blog.jetbrains.com/?post_type=platform&amp;p=740440" />
+			<rdf:li rdf:resource="https://talkpython.fm/episodes/26546533-1714-44c3-93e9-c6be79604c8e" />
+			<rdf:li rdf:resource="https://www.djangoproject.com/weblog/2026/sep/16/executive-director-search-extended/" />
+		</rdf:Seq>
+	</items>
+</channel>
+
+<item rdf:about="https://www.pythonguis.com/faq/creating-dynamic-textboxes/">
+	<title>Python GUIs: Dynamically Adding Rows of Widgets in PyQt6 — How to use QGridLayout to add multiple widgets per row at runtime</title>
+	<link>https://www.pythonguis.com/faq/creating-dynamic-textboxes/</link>
+	<content:encoded>&lt;blockquote&gt;
+&lt;p&gt;I have a GUI where I dynamically add a QLineEdit for each image a user selects. That part works. But now I want to extend it so that each image gets a &lt;em&gt;row&lt;/em&gt; of three text boxes &amp;mdash; one for the filename, one for the width, and one for the height. How do I dynamically add multiple widgets horizontally for each new entry?&lt;/p&gt;
+&lt;/blockquote&gt;
+&lt;p&gt;Adding a single widget per action is straightforward enough, but when you need a whole &lt;em&gt;row&lt;/em&gt; of widgets each time? That's where &lt;code&gt;QGridLayout&lt;/code&gt; becomes your best friend.&lt;/p&gt;
+&lt;p&gt;In this tutorial, we'll walk through how to dynamically add rows of &lt;code&gt;QLineEdit&lt;/code&gt; widgets using &lt;code&gt;QGridLayout&lt;/code&gt; in PyQt6. Each time the user selects images, a new row appears with three text boxes: the filename, image width, and image height. We'll also look at how you can use a custom widget to group related fields together.&lt;/p&gt;
+&lt;h2 id=&quot;why-qgridlayout&quot;&gt;Why QGridLayout?&lt;/h2&gt;
+&lt;p&gt;If you've been using &lt;code&gt;QVBoxLayout&lt;/code&gt; to stack widgets vertically, you've probably noticed that it only gives you one column. To place multiple widgets side by side &lt;em&gt;and&lt;/em&gt; keep adding new rows, you need a two-dimensional layout. &lt;code&gt;QGridLayout&lt;/code&gt; lets you place widgets by specifying a row and column, which makes it perfect for building table-like arrangements dynamically.&lt;/p&gt;
+&lt;div class=&quot;code-block&quot;&gt;
+&lt;span class=&quot;code-block-language code-block-python&quot;&gt;python&lt;/span&gt;
+&lt;pre&gt;&lt;code class=&quot;python&quot;&gt;layout.addWidget(some_widget, row, column)
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Each time you add a new file, you increment the row number and place your three widgets at columns 0, 1, and 2.&lt;/p&gt;
+&lt;h2 id=&quot;setting-up-the-window&quot;&gt;Setting Up the Window&lt;/h2&gt;
+&lt;p&gt;Let's start with a basic main window that has a button to open a file dialog and a grid layout ready to receive our dynamic rows.&lt;/p&gt;
+&lt;div class=&quot;code-block&quot;&gt;
+&lt;span class=&quot;code-block-language code-block-python&quot;&gt;python&lt;/span&gt;
+&lt;pre&gt;&lt;code class=&quot;python&quot;&gt;import sys
+import os
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QPushButton,
+    QGridLayout, QLineEdit, QFileDialog, QLabel,
+    QVBoxLayout,
+)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(&quot;Image Selector&quot;)
+
+        # Central widget and outer layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        outer_layout = QVBoxLayout()
+        central_widget.setLayout(outer_layout)
+
+        # Button to open file dialog
+        self.button_open = QPushButton(&quot;Open Images&quot;)
+        self.button_open.clicked.connect(self.load_images)
+        outer_layout.addWidget(self.button_open)
+
+        # Header labels
+        header_layout = QGridLayout()
+        header_layout.addWidget(QLabel(&quot;Filename&quot;), 0, 0)
+        header_layout.addWidget(QLabel(&quot;Width&quot;), 0, 1)
+        header_layout.addWidget(QLabel(&quot;Height&quot;), 0, 2)
+        outer_layout.addLayout(header_layout)
+
+        # Grid layout for dynamic rows
+        self.grid_layout = QGridLayout()
+        outer_layout.addLayout(self.grid_layout)
+
+        # Stretch at the bottom to push everything up
+        outer_layout.addStretch()
+
+        # Track how many rows we've added
+        self.current_row = 0
+
+    def load_images(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, &quot;Select Images&quot;, &quot;&quot;, &quot;Images (*.png *.jpg *.bmp);;All Files (*)&quot;
+        )
+
+        for path in paths:
+            filename = os.path.basename(path)
+            width, height = self.get_image_size(path)
+            self.add_image_row(filename, width, height)
+
+    def get_image_size(self, path):
+        # Placeholder &amp;mdash; replace with your own logic
+        return 0, 0
+
+    def add_image_row(self, filename, width, height):
+        line_edit_name = QLineEdit(filename)
+        line_edit_width = QLineEdit(str(width))
+        line_edit_height = QLineEdit(str(height))
+
+        self.grid_layout.addWidget(line_edit_name, self.current_row, 0)
+        self.grid_layout.addWidget(line_edit_width, self.current_row, 1)
+        self.grid_layout.addWidget(line_edit_height, self.current_row, 2)
+
+        self.current_row += 1
+
+
+app = QApplication(sys.argv)
+window = MainWindow()
+window.show()
+sys.exit(app.exec())
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Run this and click &quot;Open Images.&quot; Each file you select gets its own row with three editable text boxes. Click the button again to add more.&lt;/p&gt;
+&lt;h2 id=&quot;how-it-works&quot;&gt;How It Works&lt;/h2&gt;
+&lt;p&gt;The &lt;code&gt;add_image_row&lt;/code&gt; method is where the dynamic creation happens. Each time it's called, it:&lt;/p&gt;
+&lt;ol&gt;
+&lt;li&gt;Creates three &lt;code&gt;QLineEdit&lt;/code&gt; widgets &amp;mdash; one for the filename, one for width, one for height.&lt;/li&gt;
+&lt;li&gt;Adds them to the grid layout at the current row, in columns 0, 1, and 2.&lt;/li&gt;
+&lt;li&gt;Increments &lt;code&gt;self.current_row&lt;/code&gt; so the next call places widgets on the next row.&lt;/li&gt;
+&lt;/ol&gt;
+&lt;p&gt;Because &lt;code&gt;QGridLayout&lt;/code&gt; handles positioning for you, you don't need to manually manage spacing or alignment. The widgets line up in neat columns automatically.&lt;/p&gt;
+&lt;h2 id=&quot;extracting-real-image-dimensions&quot;&gt;Extracting Real Image Dimensions&lt;/h2&gt;
+&lt;p&gt;The &lt;code&gt;get_image_size&lt;/code&gt; method above is a placeholder. If you want to extract actual image dimensions, you can use &lt;code&gt;QImageReader&lt;/code&gt; from PyQt6 itself:&lt;/p&gt;
+&lt;div class=&quot;code-block&quot;&gt;
+&lt;span class=&quot;code-block-language code-block-python&quot;&gt;python&lt;/span&gt;
+&lt;pre&gt;&lt;code class=&quot;python&quot;&gt;from PyQt6.QtGui import QImageReader
+
+
+def get_image_size(self, path):
+    reader = QImageReader(path)
+    size = reader.size()
+    if size.isValid():
+        return size.width(), size.height()
+    return 0, 0
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;This reads only the image header, so it's fast even for large files.&lt;/p&gt;
+&lt;h2 id=&quot;adding-a-computed-column&quot;&gt;Adding a Computed Column&lt;/h2&gt;
+&lt;p&gt;Since the original question mentioned calculating the area from width and height, let's add a fourth column that shows the computed area. We can make this column read-only so users don't accidentally edit it.&lt;/p&gt;
+&lt;div class=&quot;code-block&quot;&gt;
+&lt;span class=&quot;code-block-language code-block-python&quot;&gt;python&lt;/span&gt;
+&lt;pre&gt;&lt;code class=&quot;python&quot;&gt;def add_image_row(self, filename, width, height):
+    line_edit_name = QLineEdit(filename)
+    line_edit_width = QLineEdit(str(width))
+    line_edit_height = QLineEdit(str(height))
+
+    line_edit_area = QLineEdit(str(width * height))
+    line_edit_area.setReadOnly(True)
+
+    self.grid_layout.addWidget(line_edit_name, self.current_row, 0)
+    self.grid_layout.addWidget(line_edit_width, self.current_row, 1)
+    self.grid_layout.addWidget(line_edit_height, self.current_row, 2)
+    self.grid_layout.addWidget(line_edit_area, self.current_row, 3)
+
+    self.current_row += 1
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;You'd also want to add a matching &quot;Area&quot; header label in the &lt;code&gt;__init__&lt;/code&gt; method.&lt;/p&gt;
+&lt;h2 id=&quot;encapsulating-a-row-as-a-class&quot;&gt;Encapsulating a Row as a Class&lt;/h2&gt;
+&lt;p&gt;As your rows get more complex, it helps to group the widgets for each row into their own class. This keeps &lt;code&gt;MainWindow&lt;/code&gt; clean and makes it easy to access or update individual rows later.&lt;/p&gt;
+&lt;div class=&quot;code-block&quot;&gt;
+&lt;span class=&quot;code-block-language code-block-python&quot;&gt;python&lt;/span&gt;
+&lt;pre&gt;&lt;code class=&quot;python&quot;&gt;class ImageInfoRow:
+    def __init__(self, filename, width, height, grid_layout, row):
+        self.line_edit_name = QLineEdit(filename)
+        self.line_edit_width = QLineEdit(str(width))
+        self.line_edit_height = QLineEdit(str(height))
+
+        self.line_edit_area = QLineEdit(str(width * height))
+        self.line_edit_area.setReadOnly(True)
+
+        grid_layout.addWidget(self.line_edit_name, row, 0)
+        grid_layout.addWidget(self.line_edit_width, row, 1)
+        grid_layout.addWidget(self.line_edit_height, row, 2)
+        grid_layout.addWidget(self.line_edit_area, row, 3)
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Then in your main window, creating a row becomes a single line:&lt;/p&gt;
+&lt;div class=&quot;code-block&quot;&gt;
+&lt;span class=&quot;code-block-language code-block-python&quot;&gt;python&lt;/span&gt;
+&lt;pre&gt;&lt;code class=&quot;python&quot;&gt;row = ImageInfoRow(filename, width, height, self.grid_layout, self.current_row)
+self.image_rows.append(row)
+self.current_row += 1
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Storing each &lt;code&gt;ImageInfoRow&lt;/code&gt; in a list (&lt;code&gt;self.image_rows&lt;/code&gt;) lets you access or modify any row later &amp;mdash; for example, to read back edited values or to remove a row.&lt;/p&gt;
+&lt;h2 id=&quot;alternative-approaches&quot;&gt;Alternative Approaches&lt;/h2&gt;
+&lt;p&gt;&lt;code&gt;QGridLayout&lt;/code&gt; is a great fit here, but there are other ways to achieve similar results:&lt;/p&gt;
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;QVBoxLayout with QHBoxLayout rows&lt;/strong&gt; &amp;mdash; Make each row a &lt;code&gt;QWidget&lt;/code&gt; with its own &lt;code&gt;QHBoxLayout&lt;/code&gt; containing three line edits, then add each row widget to a vertical layout. This gives you self-contained row widgets that are easy to add and remove.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;QTableView with a model&lt;/strong&gt; &amp;mdash; If you're dealing with many images or want features like sorting and filtering, a &lt;code&gt;QTableView&lt;/code&gt; backed by a &lt;code&gt;QStandardItemModel&lt;/code&gt; (or a custom model) is a more scalable approach. See the &lt;a href=&quot;https://www.pythonguis.com/tutorials/qtableview-modelviews-numpy-pandas/&quot;&gt;PyQt6 QTableView tutorial&lt;/a&gt; for details.&lt;/li&gt;
+&lt;/ul&gt;
+&lt;p&gt;For a handful of images, the grid layout approach is simple and works well. For dozens or hundreds, consider switching to a model/view approach.&lt;/p&gt;
+&lt;h2 id=&quot;complete-working-example&quot;&gt;Complete Working Example&lt;/h2&gt;
+&lt;p&gt;Here's the full example with real image size extraction and a computed area column:&lt;/p&gt;
+&lt;div class=&quot;code-block&quot;&gt;
+&lt;span class=&quot;code-block-language code-block-python&quot;&gt;python&lt;/span&gt;
+&lt;pre&gt;&lt;code class=&quot;python&quot;&gt;import sys
+import os
+
+from PyQt6.QtGui import QImageReader
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QPushButton,
+    QGridLayout, QLineEdit, QFileDialog, QLabel,
+    QVBoxLayout,
+)
+
+
+class ImageInfoRow:
+    &quot;&quot;&quot;Holds a row of QLineEdits for one image.&quot;&quot;&quot;
+
+    def __init__(self, filename, width, height, grid_layout, row):
+        self.line_edit_name = QLineEdit(filename)
+        self.line_edit_width = QLineEdit(str(width))
+        self.line_edit_height = QLineEdit(str(height))
+
+        self.line_edit_area = QLineEdit(str(width * height))
+        self.line_edit_area.setReadOnly(True)
+
+        grid_layout.addWidget(self.line_edit_name, row, 0)
+        grid_layout.addWidget(self.line_edit_width, row, 1)
+        grid_layout.addWidget(self.line_edit_height, row, 2)
+        grid_layout.addWidget(self.line_edit_area, row, 3)
+
+
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle(&quot;Image Selector&quot;)
+        self.setMinimumWidth(600)
+
+        # Central widget and outer layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        outer_layout = QVBoxLayout()
+        central_widget.setLayout(outer_layout)
+
+        # Button to open file dialog
+        self.button_open = QPushButton(&quot;Open Images&quot;)
+        self.button_open.clicked.connect(self.load_images)
+        outer_layout.addWidget(self.button_open)
+
+        # Header labels
+        header_layout = QGridLayout()
+        header_layout.addWidget(QLabel(&quot;Filename&quot;), 0, 0)
+        header_layout.addWidget(QLabel(&quot;Width&quot;), 0, 1)
+        header_layout.addWidget(QLabel(&quot;Height&quot;), 0, 2)
+        header_layout.addWidget(QLabel(&quot;Area&quot;), 0, 3)
+        outer_layout.addLayout(header_layout)
+
+        # Grid layout for dynamic rows
+        self.grid_layout = QGridLayout()
+        outer_layout.addLayout(self.grid_layout)
+
+        # Push rows to the top
+        outer_layout.addStretch()
+
+        # Track rows
+        self.current_row = 0
+        self.image_rows = []
+
+    def load_images(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            &quot;Select Images&quot;,
+            &quot;&quot;,
+            &quot;Images (*.png *.jpg *.bmp);;All Files (*)&quot;,
+        )
+
+        for path in paths:
+            filename = os.path.basename(path)
+            width, height = self.get_image_size(path)
+
+            row = ImageInfoRow(
+                filename, width, height,
+                self.grid_layout, self.current_row,
+            )
+            self.image_rows.append(row)
+            self.current_row += 1
+
+    def get_image_size(self, path):
+        reader = QImageReader(path)
+        size = reader.size()
+        if size.isValid():
+            return size.width(), size.height()
+        return 0, 0
+
+
+app = QApplication(sys.argv)
+window = MainWindow()
+window.show()
+sys.exit(app.exec())
+&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;p&gt;Click &quot;Open Images,&quot; select a few image files, and you'll see a row appear for each one with the filename, dimensions, and computed area. Click the button again to add more images &amp;mdash; each new selection appends to the existing list.&lt;/p&gt;
+&lt;p&gt;From here you could add scroll support (wrap the grid in a &lt;code&gt;QScrollArea&lt;/code&gt;), add a &quot;Remove&quot; button per row, or switch to a &lt;code&gt;QTableView&lt;/code&gt; if your needs grow. The core pattern &amp;mdash; tracking a row counter and placing widgets into a &lt;code&gt;QGridLayout&lt;/code&gt; &amp;mdash; stays the same regardless of how you extend it.&lt;/p&gt;
+            &lt;p&gt;For an in-depth guide to building Python GUIs with PyQt6 see my book, &lt;a href=&quot;https://www.pythonguis.com/pyqt6-book/&quot;&gt;Create GUI Applications with Python &amp;amp; Qt6.&lt;/a&gt;&lt;/p&gt;</content:encoded>
+	<dc:date>2026-09-23T06:00:00+00:00</dc:date>
+</item>
+<item rdf:about="https://pythonbytes.fm/episodes/show/497/faster-than-light-profiling">
+	<title>Python Bytes: #497 Faster than light profiling</title>
+	<link>https://pythonbytes.fm/episodes/show/497/faster-than-light-profiling</link>
+	<content:encoded>&amp;lt;strong&amp;gt;Topics covered in this episode:&amp;lt;/strong&amp;gt;&amp;lt;br&amp;gt;
+
+&amp;lt;ul&amp;gt;
+	&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;&amp;lt;a href=&quot;https://docs.python.org/3.15/library/profiling.sampling.html?featured_on=pythonbytes&quot;&amp;gt;Tachyon: A sampling profiler ships in Python 3.15's stdlib&amp;lt;/a&amp;gt;&amp;lt;/strong&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;&amp;lt;a href=&quot;https://blog.cloudflare.com/python-workers-ga/?featured_on=pythonbytes&quot;&amp;gt;Python Workers are now generally available on Cloudflare&amp;lt;/a&amp;gt;&amp;lt;/strong&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;&amp;lt;a href=&quot;https://flet.dev/blog/flet-1-0?featured_on=pythonbytes&quot;&amp;gt;Flet 1.0 - build cross-platform apps in Python&amp;lt;/a&amp;gt;&amp;lt;/strong&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;&amp;lt;a href=&quot;https://github.com/ljchang/marimo-book?featured_on=pythonbytes&quot;&amp;gt;marimo-book: Build static books from marimo notebooks&amp;lt;/a&amp;gt;&amp;lt;/strong&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;Extras&amp;lt;/strong&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;Joke&amp;lt;/strong&amp;gt;&amp;lt;/li&amp;gt;
+
+&amp;lt;/ul&amp;gt;&amp;lt;a href='https://www.youtube.com/watch?v=__iKh7BNDgM' style='font-weight: bold;' data-umami-event=&quot;Livestream-Past&quot; data-umami-event-episode=&quot;497&quot;&amp;gt;Watch on YouTube&amp;lt;/a&amp;gt;&amp;lt;br&amp;gt;
+
+&amp;lt;p&amp;gt;Sponsored by &amp;lt;strong&amp;gt;Logfire from Pydantic&amp;lt;/strong&amp;gt;: &amp;lt;a href=&quot;https://pythonbytes.fm/logfire&quot;&amp;gt;pythonbytes.fm/logfire&amp;lt;/a&amp;gt;
+&amp;lt;strong&amp;gt;Connect with the hosts&amp;lt;/strong&amp;gt;&amp;lt;/p&amp;gt;
+
+&amp;lt;ul&amp;gt;
+&amp;lt;li&amp;gt;Michael: &amp;lt;a href=&quot;https://fosstodon.org/@mkennedy&quot;&amp;gt;Mastodon&amp;lt;/a&amp;gt; / &amp;lt;a href=&quot;https://bsky.app/profile/mkennedy.codes?featured_on=pythonbytes&quot;&amp;gt;BlueSky&amp;lt;/a&amp;gt; / &amp;lt;a href=&quot;https://x.com/mkennedy?featured_on=pythonbytes&quot;&amp;gt;X&amp;lt;/a&amp;gt; / &amp;lt;a href=&quot;https://www.linkedin.com/in/mkennedy/?featured_on=pythonbytes&quot;&amp;gt;LinkedIn&amp;lt;/a&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Calvin: &amp;lt;a href=&quot;https://sixfeetup.social/@calvin?featured_on=pythonbytes&quot;&amp;gt;Mastodon&amp;lt;/a&amp;gt; / &amp;lt;a href=&quot;https://bsky.app/profile/calvinhp.com?featured_on=pythonbytes&quot;&amp;gt;BlueSky&amp;lt;/a&amp;gt; / &amp;lt;a href=&quot;https://x.com/calvinhp?featured_on=pythonbytes&quot;&amp;gt;X&amp;lt;/a&amp;gt; / &amp;lt;a href=&quot;https://www.linkedin.com/in/calvinhp/?featured_on=pythonbytes&quot;&amp;gt;LinkedIn&amp;lt;/a&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Show: &amp;lt;a href=&quot;https://fosstodon.org/@pythonbytes&quot;&amp;gt;Mastodon&amp;lt;/a&amp;gt; / &amp;lt;a href=&quot;https://bsky.app/profile/pythonbytes.fm&quot;&amp;gt;BlueSky&amp;lt;/a&amp;gt; / &amp;lt;a href=&quot;https://x.com/PythonBytes?featured_on=pythonbytes&quot;&amp;gt;X&amp;lt;/a&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;/ul&amp;gt;
+
+&amp;lt;p&amp;gt;Join us on YouTube at &amp;lt;a href=&quot;https://pythonbytes.fm/stream/live&quot;&amp;gt;&amp;lt;strong&amp;gt;pythonbytes.fm/live&amp;lt;/strong&amp;gt;&amp;lt;/a&amp;gt; to be part of the audience. Usually &amp;lt;strong&amp;gt;Tuesday at 7am PT&amp;lt;/strong&amp;gt;. Older video versions available there too.&amp;lt;/p&amp;gt;
+
+&amp;lt;p&amp;gt;Finally, if you want an artisanal, hand-crafted digest of every week of the show notes in email form? Add your name and email to &amp;lt;a href=&quot;https://pythonbytes.fm/friends-of-the-show&quot;&amp;gt;our friends of the show list&amp;lt;/a&amp;gt;, we'll never share it.&amp;lt;/p&amp;gt;
+
+&amp;lt;p&amp;gt;&amp;lt;strong&amp;gt;Michael #1: &amp;lt;a href=&quot;https://docs.python.org/3.15/library/profiling.sampling.html?featured_on=pythonbytes&quot;&amp;gt;Tachyon: A sampling profiler ships in Python 3.15's stdlib&amp;lt;/a&amp;gt;&amp;lt;/strong&amp;gt;&amp;lt;/p&amp;gt;
+
+&amp;lt;ul&amp;gt;
+&amp;lt;li&amp;gt;Python 3.15 adds the &amp;lt;code&amp;gt;profiling&amp;lt;/code&amp;gt; package per PEP 799: &amp;lt;code&amp;gt;profiling.tracing&amp;lt;/code&amp;gt; (where cProfile moved) and &amp;lt;code&amp;gt;profiling.sampling&amp;lt;/code&amp;gt;, the new sampler called Tachyon&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;py-spy and Austin exist but copy raw interpreter bytes with no API, so every CPython release risks breaking them; one in the stdlib is a contract to stop breaking profilers&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Defaults: 1 kHz, main thread, wall clock, and a &amp;lt;code&amp;gt;-live&amp;lt;/code&amp;gt; top-like view for poking at a slow server&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Output is flexible: pstats, &amp;lt;code&amp;gt;-flamegraph&amp;lt;/code&amp;gt;, &amp;lt;code&amp;gt;-diff-flamegraph&amp;lt;/code&amp;gt; against a baseline, &amp;lt;code&amp;gt;-heatmap&amp;lt;/code&amp;gt; on source lines, &amp;lt;code&amp;gt;-opcodes&amp;lt;/code&amp;gt; for specialized bytecode, &amp;lt;code&amp;gt;-gecko&amp;lt;/code&amp;gt; for Firefox Profiler with GIL and GC markers&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Profiling modes: wall, cpu, gil (which function is starving my other threads?), and exception, plus &amp;lt;code&amp;gt;-async-aware&amp;lt;/code&amp;gt; to see the task graph instead of just &amp;lt;code&amp;gt;select()&amp;lt;/code&amp;gt;, &amp;lt;code&amp;gt;-all-threads&amp;lt;/code&amp;gt;, and &amp;lt;code&amp;gt;-subprocesses&amp;lt;/code&amp;gt; forking a profiler per child&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Near-zero overhead for production; guidance is 10-30 second windows on representative load, and free-threaded builds divide the rate by thread count&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Attach to a running PID, same minor version only; ptrace permissions are the main friction. A 3.14 backport already exists on GitHub&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Caveat: it only sees Python frames, so 90% in &amp;lt;code&amp;gt;calculate()&amp;lt;/code&amp;gt; hides NumPy underneath. For native stacks there's Cronon from HRT, 200k samples/sec over DWARF, not yet open source&amp;lt;/li&amp;gt;
+&amp;lt;/ul&amp;gt;
+
+&amp;lt;p&amp;gt;&amp;lt;strong&amp;gt;Calvin #2: &amp;lt;a href=&quot;https://blog.cloudflare.com/python-workers-ga/?featured_on=pythonbytes&quot;&amp;gt;Python Workers are now generally available on Cloudflare&amp;lt;/a&amp;gt;&amp;lt;/strong&amp;gt;&amp;lt;/p&amp;gt;
+
+&amp;lt;ul&amp;gt;
+&amp;lt;li&amp;gt;Python Workers are out of beta - now GA, &quot;first-class&quot; language on Cloudflare's Developer Platform&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;No more manual JS interop: bindings (queues, R2, D1, Durable Objects) now work natively in Python, e.g. self.env.QUEUE.send({...})&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Runs on Pyodide (WASM-compiled Python), with real TCP socket support for DB connectivity&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Frameworks supported: FastAPI, Django, Flask; AI libs like OpenAI SDK, LangChain, MCP&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Underlying platform work formalized as PEP 783 (PyEmscripten), after a year of discussion&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Bottom line: write real Python on Cloudflare's edge, no JS glue code required&amp;lt;/li&amp;gt;
+&amp;lt;/ul&amp;gt;
+
+&amp;lt;p&amp;gt;&amp;lt;strong&amp;gt;Calvin #3: &amp;lt;a href=&quot;https://flet.dev/blog/flet-1-0?featured_on=pythonbytes&quot;&amp;gt;Flet 1.0 - build cross-platform apps in Python&amp;lt;/a&amp;gt;&amp;lt;/strong&amp;gt;&amp;lt;/p&amp;gt;
+
+&amp;lt;ul&amp;gt;
+&amp;lt;li&amp;gt;Flet hits 1.0 - build Flutter-backed apps from pure Python, no frontend experience needed&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;One codebase targets six platforms: iOS, Android, Windows, macOS, Linux, web&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;150+ built-in UI controls, plus support for custom controls / wrapping Flutter packages&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Mobile now supports real Python packages: NumPy, pandas, Pillow, cryptography&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Comes with pytest-based UI testing and an MCP integration for AI coding assistants&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;Milestone lands 4+ years after its first PyPI release (Sept 2022) - signals &quot;production ready,&quot; not experimental&amp;lt;/li&amp;gt;
+&amp;lt;/ul&amp;gt;
+
+&amp;lt;p&amp;gt;&amp;lt;strong&amp;gt;Michael #4:&amp;lt;/strong&amp;gt; &amp;lt;a href=&quot;https://github.com/ljchang/marimo-book?featured_on=pythonbytes&quot;&amp;gt;marimo-book: Build static books from marimo notebooks&amp;lt;/a&amp;gt;&amp;lt;/p&amp;gt;
+
+&amp;lt;p&amp;gt;marimo-book is a Jupyter-Book-style static site generator built specifically for marimo .py notebooks. It ships polished multi-page sites with Material for MkDocs theming, full-text search, dark mode, and code copy, plus a content-hashed incremental build cache that drops rebuilds from 100+ seconds to roughly 3 seconds on real books. Standout extras include anywidget rendering without a kernel, static reactivity for discrete sliders via pre-rendered lookup tables, an opt-in WASM/Pyodide mode per chapter, and per-chapter launch buttons.&amp;lt;/p&amp;gt;
+
+&amp;lt;ul&amp;gt;
+&amp;lt;li&amp;gt;If you've wanted to publish a marimo notebook as a real book or course site without hosting a kernel, marimo-book gives you the static, searchable, fast-loading output you'd expect from Jupyter Book.&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;Alpha (0.1.x), but in production:&amp;lt;/strong&amp;gt; pin marimo-book&amp;gt;=0.1.5,&amp;amp;lt;0.2; the book.yml schema is stable for v0.1, and &amp;lt;a href=&quot;http://dartbrains.org/?featured_on=pythonbytes&quot;&amp;gt;dartbrains.org&amp;lt;/a&amp;gt; is a real-world user.&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;Two-stage build by design:&amp;lt;/strong&amp;gt; a marimo-aware preprocessor emits plain Markdown + inline HTML, then mkdocs (Material today, zensical tomorrow) renders it. Not a mkdocs plugin, so the shell stays swappable.&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;Interactive widgets without a kernel:&amp;lt;/strong&amp;gt; anywidget Canvas/Three.js/Plotly mounts render statically, and mo.ui.slider with explicit steps gets pre-computed as a static lookup table.&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;WASM escape hatch per chapter:&amp;lt;/strong&amp;gt; set mode: wasm and the chapter routes through marimo's MarimoIslandGenerator, shipping the marimo runtime + Pyodide bundle for full reactivity where you need it.&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;Per-chapter launch buttons and extras:&amp;lt;/strong&amp;gt; readers can jump to molab, GitHub, or a downloaded .py; optional [social], [linkcheck], and [pdf] extras cover OG cards, htmlproofer, and WeasyPrint PDF export.&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;strong&amp;gt;Sandboxed notebooks:&amp;lt;/strong&amp;gt; the sandbox mode reads PEP 723 inline metadata and provisions per-notebook envs via uv for portable builds, at the cost of slower first runs.&amp;lt;/li&amp;gt;
+&amp;lt;/ul&amp;gt;
+
+&amp;lt;p&amp;gt;&amp;lt;strong&amp;gt;Extras&amp;lt;/strong&amp;gt;&amp;lt;/p&amp;gt;
+
+&amp;lt;p&amp;gt;&amp;lt;strong&amp;gt;Calvin&amp;lt;/strong&amp;gt;:&amp;lt;/p&amp;gt;
+
+&amp;lt;ul&amp;gt;
+&amp;lt;li&amp;gt;Great overview of a new feature in Python 3.15 - &amp;lt;a href=&quot;https://realpython.com/python315-frozendict/?featured_on=pythonbytes&quot;&amp;gt;frozendict&amp;lt;/a&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;/ul&amp;gt;
+
+&amp;lt;p&amp;gt;&amp;lt;strong&amp;gt;Michael&amp;lt;/strong&amp;gt;:&amp;lt;/p&amp;gt;
+
+&amp;lt;ul&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;a href=&quot;https://krebsonsecurity.com/2026/09/microsoft-plugs-nearly-1000-security-holes/?featured_on=pythonbytes&quot;&amp;gt;Microsoft Plugs Nearly 1,000 Security Holes in Windows&amp;lt;/a&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;a href=&quot;https://pybay.org?featured_on=pythonbytes&quot;&amp;gt;I’ll be speaking at PyBay 2026&amp;lt;/a&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;li&amp;gt;&amp;lt;a href=&quot;https://www.pycon-nl.org?featured_on=pythonbytes&quot;&amp;gt;PyCon NL on October 15 in Utrecht&amp;lt;/a&amp;gt;
+&amp;lt;ul&amp;gt;
+&amp;lt;li&amp;gt;Heading to Europe in October? PyCon NL is October 15th in Utrecht. One day, three tracks, about 350 people. It's an hour by train from Schiphol. There's also a session just for community organizers from groups like PyLadies, PyData, and Django. And the location fits. The Netherlands is where Python itself was born.&amp;lt;/li&amp;gt;
+&amp;lt;/ul&amp;gt;&amp;lt;/li&amp;gt;
+&amp;lt;/ul&amp;gt;
+
+&amp;lt;p&amp;gt;&amp;lt;strong&amp;gt;Joke: &amp;lt;a href=&quot;https://www.youtube.com/watch?v=FG8sUgjBGXs&quot;&amp;gt;You have homework&amp;lt;/a&amp;gt; (no really ;) )&amp;lt;/strong&amp;gt;&amp;lt;/p&amp;gt;
+
+&amp;lt;p&amp;gt;Watch &amp;lt;a href=&quot;https://www.youtube.com/watch?v=FG8sUgjBGXs&quot;&amp;gt;&amp;lt;strong&amp;gt;Interview with Big Data engineer in 2026&amp;lt;/strong&amp;gt;&amp;lt;/a&amp;gt; by Kai Lentit&amp;lt;/p&amp;gt;</content:encoded>
+	<dc:date>2026-09-23T03:45:07+00:00</dc:date>
+</item>
+<item rdf:about="https://pycoders.com/issues/753">
+	<title>PyCoder’s Weekly: Issue #753: frozendict, pytest Plugins, re.prefixmatch(), and More (2026-09-22)</title>
+	<link>https://pycoders.com/issues/753</link>
+	<content:encoded>&lt;p&gt; &lt;span&gt;#753 – SEPTEMBER 22, 2026&lt;/span&gt;&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/issues/753/feed&quot;&gt;View in Browser »&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;p&gt;&lt;a href=&quot;https://pycoders.com&quot;&gt;&lt;img alt=&quot;The PyCoder&amp;rsquo;s Weekly Logo&quot; src=&quot;https://cdn.pycoders.com/37bdf31dc645f968ffb90196e5d38ff5&quot; /&gt;&lt;/a&gt;&lt;/p&gt; &lt;hr /&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17077/feed&quot; target=&quot;_blank&quot;&gt;Python 3.15 Preview: &lt;code&gt;frozendict&lt;/code&gt;&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Preview Python 3.15&amp;rsquo;s frozendict: build immutable mappings you can hash, cache, and share across threads, and learn where the freeze stops.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17077/feed&quot; target=&quot;_blank&quot;&gt;REAL PYTHON&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17104/feed&quot; target=&quot;_blank&quot;&gt;Quiz: Python 3.15 Preview: &lt;code&gt;frozendict&lt;/code&gt;&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17104/feed&quot; target=&quot;_blank&quot;&gt;REAL PYTHON&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17106/feed&quot; target=&quot;_blank&quot;&gt;claude -p “migrate our CI config to RWX”&lt;/a&gt;&lt;/h3&gt; &lt;a href=&quot;https://pycoders.com/link/17106/feed&quot; target=&quot;_blank&quot;&gt;&lt;img src=&quot;https://cdn.pycoders.com/04300b61ae0294a36430ce870a393c92&quot; alt=&quot;alt&quot; /&gt;&lt;/a&gt; &lt;p&gt; Python is powering AI. Your build platform should keep up. RWX is CI/CD rebuilt for the agentic dev cycle: content-based caching, graph-based task execution, and agent sandboxes that share config and cache with CI. Teams at Honeycomb, ClickFunnels, and Verkada have already switched. &lt;a href=&quot;https://pycoders.com/link/17106/feed&quot; target=&quot;_blank&quot;&gt;See Why Engineers Love RWX → rwx.com&lt;/a&gt;&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17106/feed&quot; target=&quot;_blank&quot;&gt;RWX (READWRITEEXECUTE)&lt;/a&gt;&lt;/span&gt; &lt;span&gt;sponsor&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17089/feed&quot; target=&quot;_blank&quot;&gt;pytest Plugins That Actually Change How You Test in 2026&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Seven pytest plugins beyond the built-ins that changed how Peyton tests: pytest-httpx for HTTP mocking, pytest-randomly for order-dependency detection, anyio&amp;rsquo;s built-in pytest plugin for backend-agnostic async tests, syrupy for snapshot testing, pytest-watch for continuous feedback, freezegun for deterministic time, pytest-cov for coverage enforcement.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17089/feed&quot; target=&quot;_blank&quot;&gt;PEYTON GREEN&lt;/a&gt; • Shared by Anonymous&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17075/feed&quot; target=&quot;_blank&quot;&gt;Soft-Deprecating &lt;code&gt;re.match()&lt;/code&gt;&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; To provide consistency with other languages, Python 3.15 is soft-deprecating &lt;code&gt;re.match()&lt;/code&gt; and introducing &lt;code&gt;re.prefixmatch()&lt;/code&gt; instead. This article explains why.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17075/feed&quot; target=&quot;_blank&quot;&gt;HUGO VAN KEMENADE&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17102/feed&quot; target=&quot;_blank&quot;&gt;PEP 847: Problem Details for the Simple Repository API (Draft)&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17102/feed&quot; target=&quot;_blank&quot;&gt;PYTHON.ORG&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17101/feed&quot; target=&quot;_blank&quot;&gt;PEP 846: Docstrings for Type Aliases (Draft)&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17101/feed&quot; target=&quot;_blank&quot;&gt;PYTHON.ORG&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17080/feed&quot; target=&quot;_blank&quot;&gt;PEP 845: Leading-Dot Value Patterns (Draft)&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17080/feed&quot; target=&quot;_blank&quot;&gt;PYTHON.ORG&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17100/feed&quot; target=&quot;_blank&quot;&gt;Share How You Use Django With Django Probe&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17100/feed&quot; target=&quot;_blank&quot;&gt;TIM SCHILLING&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17087/feed&quot; target=&quot;_blank&quot;&gt;2026 PSF Board Election Results&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17087/feed&quot; target=&quot;_blank&quot;&gt;PYTHON SOFTWARE FOUNDATION&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17097/feed&quot; target=&quot;_blank&quot;&gt;2026 Python Packaging Council Election Results!&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17097/feed&quot; target=&quot;_blank&quot;&gt;PYTHON SOFTWARE FOUNDATION&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;h2&gt;Articles &amp;amp; Tutorials&lt;/h2&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17091/feed&quot; target=&quot;_blank&quot;&gt;Serve the Change Password Well-Known URL&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; When a password manager detects that a user’s password has been leaked, it can prompt them to change it, but the password change URL varies by site. The answer to such discovery problems is &lt;code&gt;.well-known/&lt;/code&gt; URL namespace. This article talks about how to build it in Django.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17091/feed&quot; target=&quot;_blank&quot;&gt;ADAM JOHNSON&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17099/feed&quot; target=&quot;_blank&quot;&gt;Getting Started With Rust as Python Devs&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Talk Python discusses Rust for Pythonistas with guest Christopher Trudeau. Learn why Rust is a go-to language for Python tools and extensions and how you can get started writing Python modules with PyO3.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17099/feed&quot; target=&quot;_blank&quot;&gt;TALK PYTHON&lt;/a&gt;&lt;/span&gt; &lt;span&gt;podcast&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17095/feed&quot; target=&quot;_blank&quot;&gt;Make Public API Tests Repeatable in Python&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Network-dependent API tests can be slow and flaky. This article shows how VCR.py records real HTTP interactions once and replays them for fast, repeatable, offline tests. Use cases include GitHub API client and pytest, CI-safe testing, and live API tests.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17095/feed&quot; target=&quot;_blank&quot;&gt;CODECUT.AI&lt;/a&gt; • Shared by &lt;a href=&quot;https://pycoders.com/link/17084/feed&quot; target=&quot;_blank&quot;&gt;Khuyen Tran&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17088/feed&quot; target=&quot;_blank&quot;&gt;Primer on Jinja Templating&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; With Jinja, you can build rich templates that power the front end of your web applications. But you can use Jinja without a web framework running in the background. Anytime you want to create text files with programmatic content, Jinja can help you out.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17088/feed&quot; target=&quot;_blank&quot;&gt;REAL PYTHON&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17073/feed&quot; target=&quot;_blank&quot;&gt;Announcing the PSF Strategic Plan 2026&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; In May, the Python Software Foundation (PSF) shared the high-level goals of their Strategic Plan. It was sent out for community feedback and now has been adopted. It is a five-year plan covering 2026 to 2031.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17073/feed&quot; target=&quot;_blank&quot;&gt;PYTHON SOFTWARE FOUNDATION&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17072/feed&quot; target=&quot;_blank&quot;&gt;&lt;code&gt;UnboundLocalError&lt;/code&gt;: It&amp;rsquo;s Scope Decided in Advance&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; The variable has a value elsewhere in your program, just not in the scope Python already decided this line belongs to. Here&amp;rsquo;s how Python actually assigns scope, and why the fix usually isn&amp;rsquo;t &lt;code&gt;global&lt;/code&gt;.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17072/feed&quot; target=&quot;_blank&quot;&gt;SYSTEM CRAFT PRESS&lt;/a&gt; • Shared by Bob Morrison&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17081/feed&quot; target=&quot;_blank&quot;&gt;Functionally Zen&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Practical tenets for Python simplicity: why pure functions, immutable data, and composition reduce complexity, cut mocking overhead, and keep side effects contained.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17081/feed&quot; target=&quot;_blank&quot;&gt;KYLE ADAMS&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17078/feed&quot; target=&quot;_blank&quot;&gt;How to Review AI-Generated Python Code Efficiently&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Learn an efficient workflow to review AI-generated code in Python: run ruff, mypy, bandit, and pytest, then catch the bugs agents get wrong.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17078/feed&quot; target=&quot;_blank&quot;&gt;REAL PYTHON&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17098/feed&quot; target=&quot;_blank&quot;&gt;Agentic Engineering in Python: From Vibes to Evidence&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Move from vibe coding to agentic engineering in Python, using tests, types, and code review to prove an AI agent&amp;rsquo;s changes are safe to keep.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17098/feed&quot; target=&quot;_blank&quot;&gt;REAL PYTHON&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17090/feed&quot; target=&quot;_blank&quot;&gt;Automating EDA With &lt;code&gt;fg-data-profiling&lt;/code&gt;&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Automate exploratory data analysis by transforming DataFrames into interactive reports with one command from fg-data-profiling.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17090/feed&quot; target=&quot;_blank&quot;&gt;REAL PYTHON&lt;/a&gt;&lt;/span&gt; &lt;span&gt;course&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17103/feed&quot; target=&quot;_blank&quot;&gt;5 Design Patterns Used in My New Habit Tracker App&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; Bob has built a Django + HTMX based habit tracker. This article covers five small Python and design patterns used in his code.&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17103/feed&quot; target=&quot;_blank&quot;&gt;BOB BELDERBOS&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;h2&gt;Projects &amp;amp; Code&lt;/h2&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17082/feed&quot; target=&quot;_blank&quot;&gt;fastapi-security-headers: OWASP Security Headers for FastAPI&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17082/feed&quot; target=&quot;_blank&quot;&gt;GITHUB.COM/ALEJANDROTG-CODE&lt;/a&gt; • Shared by Alejandro Tacoronte González&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17086/feed&quot; target=&quot;_blank&quot;&gt;citry: Frontend Web Framework for Python&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17086/feed&quot; target=&quot;_blank&quot;&gt;GITHUB.COM/CITRY-DEV&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17092/feed&quot; target=&quot;_blank&quot;&gt;tonio: A Multi-Threaded Async Runtime for Python&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17092/feed&quot; target=&quot;_blank&quot;&gt;GITHUB.COM/GI0BARO&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17076/feed&quot; target=&quot;_blank&quot;&gt;django-absurd: Django Integration for Postgres Absurd&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17076/feed&quot; target=&quot;_blank&quot;&gt;GITHUB.COM/LINCOLNLOOP&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17096/feed&quot; target=&quot;_blank&quot;&gt;securo: OSS Personal Finance Manager&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17096/feed&quot; target=&quot;_blank&quot;&gt;GITHUB.COM/SECURO-FINANCE&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;h2&gt;Events&lt;/h2&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17094/feed&quot; target=&quot;_blank&quot;&gt;Weekly Real Python Office Hours Q&amp;amp;A (Virtual)&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; September 23, 2026&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17094/feed&quot; target=&quot;_blank&quot;&gt;REALPYTHON.COM&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17083/feed&quot; target=&quot;_blank&quot;&gt;Django on the Med 2026&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; September 23 to September 26, 2026&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17083/feed&quot; target=&quot;_blank&quot;&gt;DJANGOMED.EU&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17079/feed&quot; target=&quot;_blank&quot;&gt;PythonCamp Rügen 2026&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; September 26 to September 28, 2026&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17079/feed&quot; target=&quot;_blank&quot;&gt;BARCAMPS.EU&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17093/feed&quot; target=&quot;_blank&quot;&gt;Python Sheffield&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; September 29, 2026&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17093/feed&quot; target=&quot;_blank&quot;&gt;GOOGLE.COM&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17074/feed&quot; target=&quot;_blank&quot;&gt;Python Southwest Florida (PySWFL)&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; September 30, 2026&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17074/feed&quot; target=&quot;_blank&quot;&gt;MEETUP.COM&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;div&gt; &lt;h3&gt;&lt;a href=&quot;https://pycoders.com/link/17085/feed&quot; target=&quot;_blank&quot;&gt;PyBay 2026&lt;/a&gt;&lt;/h3&gt; &lt;p&gt; October 3 to October 4, 2026&lt;br /&gt; &lt;span&gt;&lt;a href=&quot;https://pycoders.com/link/17085/feed&quot; target=&quot;_blank&quot;&gt;PYBAY.ORG&lt;/a&gt;&lt;/span&gt; &lt;/p&gt; &lt;/div&gt; &lt;hr /&gt; &lt;p&gt;Happy Pythoning!&lt;br /&gt;This was PyCoder&amp;rsquo;s Weekly Issue #753.&lt;br /&gt;&lt;a href=&quot;https://pycoders.com/issues/753/feed&quot;&gt;View in Browser »&lt;/a&gt;&lt;/p&gt; &lt;img src=&quot;https://pycoders.com/issues/753/open/feed&quot; width=&quot;1&quot; height=&quot;1&quot; alt=&quot;alt&quot; /&gt; 
+        &lt;hr /&gt;
+        &lt;p&gt;&lt;em&gt;[ Subscribe to 🐍 PyCoder&amp;rsquo;s Weekly 💌 – Get the best Python news, articles, and tutorials delivered to your inbox once a week &lt;a href=&quot;https://pycoders.com/?utm_source=pycoders&amp;utm_medium=feed&amp;utm_campaign=footer&quot;&gt;&amp;gt;&amp;gt; Click here to learn more&lt;/a&gt; ]&lt;/em&gt;&lt;/p&gt;</content:encoded>
+	<dc:date>2026-09-22T19:30:00+00:00</dc:date>
+</item>
+</rdf:RDF>

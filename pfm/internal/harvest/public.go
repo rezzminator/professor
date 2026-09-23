@@ -509,6 +509,12 @@ func publicErrorKind(result Result) string {
 	if kind := failureStatusKind(result.HTTPStatus); kind != "" {
 		return kind
 	}
+	if low == errorKindUnclassified {
+		return low // a published unclassified failure: its text names next steps, never a class
+	}
+	if strings.Contains(result.Error, converterFailedMarker) {
+		return errorKindConversion // the converter's words may carry any marker below
+	}
 	err := strings.ToLower(result.Error)
 	if kind := failureTextKind(err); kind != "" {
 		return kind
@@ -548,7 +554,7 @@ func publicErrorKind(result Result) string {
 	case strings.Contains(err, cacheLabel), strings.Contains(err, "storage"), strings.Contains(err, "read local file"):
 		return errorKindInternal
 	}
-	return "failed"
+	return errorKindUnclassified
 }
 
 // PublicFailureMessage returns a safe, actionable diagnostic. It intentionally

@@ -183,7 +183,7 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 	}
 }
 
-// TestLocalUnsupportedFormatsAreNamedFailures: an .odt, a .webarchive and a
+// TestLocalUnsupportedFormatsAreNamedFailures: an Apple iWork .pages and a
 // .zip each end in a failure naming the format — never the generic string and
 // never a binary body stored as text.
 func TestLocalUnsupportedFormatsAreNamedFailures(t *testing.T) {
@@ -204,9 +204,8 @@ func TestLocalUnsupportedFormatsAreNamedFailures(t *testing.T) {
 		return buf.Bytes()
 	}
 	files := map[string][]byte{
-		"sample.odt":        zipped("odt", "mimetype", "application/vnd.oasis.opendocument.text"),
-		"sample.zip":        zipped("zip", "a.txt", "hello"),
-		"sample.webarchive": append([]byte("bplist00\xd1\x01\x02_\x10\x0fWebMainResource"), make([]byte, 40)...),
+		"sample.pages": zipped("pages", "Index/Document.iwa", "\x00"),
+		"sample.zip":   zipped("zip", "a.txt", "hello"),
 	}
 	harvester := mustNew(t, Options{CacheDir: t.TempDir(), LocalRoots: []string{root}})
 	for name, body := range files {
@@ -230,6 +229,35 @@ func TestLocalUnsupportedFormatsAreNamedFailures(t *testing.T) {
 		}
 		if strings.Contains(result.Error, root) {
 			t.Errorf("%s: public failure exposes the local path: %s", name, result.Error)
+		}
+	}
+}
+
+// TestLocalEmptyFileIsNamedEmpty: a zero-byte local file ends in a failure
+// naming it empty, never an unclassified retry-once (live FM1: an empty .bz2
+// reached the converter and came back "could not classify").
+func TestLocalEmptyFileIsNamedEmpty(t *testing.T) {
+	root := t.TempDir()
+	harvester := mustNew(t, Options{CacheDir: t.TempDir(), LocalRoots: []string{root}})
+	for _, name := range []string{"empty.bz2", "empty.txt", "empty.pdf"} {
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		result := harvester.FetchPublic(context.Background(), path, FetchOptions{Refresh: true})
+		if result.Error == "" || result.Content != "" {
+			t.Errorf("%s: want a named failure, got success %#v", name, result)
+			continue
+		}
+		if result.ErrorKind != errorKindEmpty || !strings.Contains(result.Error, "0 bytes") ||
+			strings.Contains(result.Error, "could not classify") {
+			t.Errorf(
+				"%s: error_kind=%q error=%q; want %q naming 0 bytes",
+				name,
+				result.ErrorKind,
+				result.Error,
+				errorKindEmpty,
+			)
 		}
 	}
 }
@@ -281,5 +309,64 @@ func TestFindWorksRanksTheOriginalAboveAReRegistration(t *testing.T) {
 	}
 	if first := candidates[0]; !strings.Contains(first.URL, "1706.03762") || first.Year != 2017 {
 		t.Fatalf("first candidate = %s (%d), want the 2017 arXiv original: %#v", first.URL, first.Year, candidates)
+	}
+}
+
+// TestNamedFailuresKeepTheirTextThroughBothPublicPasses: a share-link refusal
+// and a converter's named failure reach the caller with their own text and
+// kind, and the second pass the MCP render makes over a published failure
+// (describeFetch → PublicFailureMessage) returns the same text, never a
+// reclassification ("The title is ambiguous") of the first pass's words.
+func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
+	mega, ok := shareLinkRefusal("https://mega.nz/file/AbCdEfGh#ExampleKey")
+	if !ok {
+		t.Fatal("mega.nz is not a refused share service")
+	}
+	sharePoint, ok := shareLinkRefusal("https://contoso.sharepoint.com/:w:/s/team/EXampleShareToken")
+	if !ok {
+		t.Fatal("sharepoint.com is not a refused share service")
+	}
+	feed := "harvestpy conversion failed (ValueError): ValueError: the feed parsed to no title and no items: " +
+		"a broken or empty feed (Couldn't find end of Start Tag chan line 1); a feedparser fallback on a broken " +
+		"feed is unmeasured (stderr: conversion failed for kind='feed': ValueError: the feed parsed to no title)"
+	cases := []struct {
+		name   string
+		result Result
+		kind   string
+		want   []string
+	}{
+		{"mega", mega, errorKindLogin, []string{"This is a MEGA link", shareSignInText}},
+		{"sharepoint", sharePoint, errorKindLogin, []string{"This is a SharePoint link", shareSignInText}},
+		{
+			"broken feed",
+			Result{Source: "/tmp/demo/broken-feed.xml", Kind: "feed", Error: feed},
+			errorKindConversion,
+			[]string{"a broken or empty feed", "a feedparser fallback on a broken feed is unmeasured"},
+		},
+		{
+			"unclassified",
+			Result{Source: "https://example.test/x", Error: "a reason nobody named"},
+			errorKindUnclassified,
+			[]string{"could not classify", "a reason nobody named"},
+		},
+	}
+	for _, test := range cases {
+		published := PublicFailure(test.result.Source, test.result)
+		if published.ErrorKind != test.kind {
+			t.Errorf("%s: kind = %q, want %q", test.name, published.ErrorKind, test.kind)
+		}
+		for _, want := range test.want {
+			if !strings.Contains(published.Error, want) {
+				t.Errorf("%s: text = %q, want it to carry %q", test.name, published.Error, want)
+			}
+		}
+		for _, refuse := range []string{"could not classify: harvestpy", "stderr", "ValueError", "sign-in wall"} {
+			if strings.Contains(published.Error, refuse) {
+				t.Errorf("%s: text = %q carries %q", test.name, published.Error, refuse)
+			}
+		}
+		if again := PublicFailureMessage(published); again != published.Error {
+			t.Errorf("%s: second pass = %q, want the published text %q", test.name, again, published.Error)
+		}
 	}
 }

@@ -195,3 +195,34 @@ func TestDownloadRefusesABadHeaderBeforeAnyRequest(t *testing.T) {
 		}
 	}
 }
+
+// TestDownloadJSONNamesTheErrorKind: a failed item carries the core's error
+// kind — a refused share link is login, a missing file its own kind — never
+// an absent error_kind beside an error.
+func TestDownloadJSONNamesTheErrorKind(t *testing.T) {
+	site := newFixtureSite(t)
+	var stdout, stderr bytes.Buffer
+	code := Harvest(
+		[]string{"download", "--json", "https://mega.nz/file/AbCdEfGh#ExampleKey", "https://example.test/missing.bin"},
+		&stdout, &stderr, downloadRuntime(t),
+	)
+	if code != 1 {
+		t.Fatalf("download --json code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	var items []map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &items); err != nil {
+		t.Fatalf("download --json is not a JSON array: %v\n%s", err, stdout.String())
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want two", items)
+	}
+	if items[0]["error_kind"] != "login" || !strings.Contains(items[0]["error"].(string), "MEGA") {
+		t.Errorf("share-link item = %+v, want error_kind login and the MEGA refusal", items[0])
+	}
+	if kind, _ := items[1]["error_kind"].(string); kind == "" || items[1]["error"] == nil {
+		t.Errorf("missing item = %+v, want a named error and its error_kind", items[1])
+	}
+	if site.probe("/file/AbCdEfGh") != "" {
+		t.Error("the refused share link was fetched")
+	}
+}

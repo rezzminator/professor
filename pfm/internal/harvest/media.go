@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -15,17 +16,33 @@ func (h *Harvester) Download(ctx context.Context, source string) Result {
 	if err := validateFetchURL(source, false); err != nil {
 		return Result{Source: source, Error: err.Error(), ErrorKind: errorKindInvalid}
 	}
-	got, err := h.retrieveWith(ctx, retrieveRequest{
-		target:  source,
-		want:    WantFile,
-		policy:  PolicyFile,
-		options: FetchOptions{Refresh: true},
-	})
+	if refused, ok := shareLinkRefusal(source); ok { // a sign-in-only share service, named before any fetch
+		return refused
+	}
+	req := retrieveRequest{target: source, want: WantFile, policy: PolicyFile, options: FetchOptions{Refresh: true}}
+	share, shared := shareDirectLink(source)
+	if shared { // the share link's direct form; a page in its place is never the file (share_links.go)
+		req.target, req.accept = share.target, func(kind string) bool { return kind != kindHTML }
+	}
+	got, err := h.retrieveWith(ctx, req)
+	if shared && errors.Is(err, errNoFileRung) {
+		if confirmed, ok := h.driveConfirmTarget(ctx, share); ok {
+			req.target = confirmed
+			got, err = h.retrieveWith(ctx, req)
+		}
+	}
 	if err != nil {
+		if shared && errors.Is(err, errNoFileRung) {
+			kind := shareInterstitialKind(got.Status, "")
+			if got.Status >= 400 {
+				kind = schemeHTTP
+			}
+			return shareFetchFailure(source, share, got.Status, kind, false, got.Rungs)
+		}
 		return fileFailure(source, kindFile, got, err)
 	}
 	result := got.Result
-	result.HTTPStatus = got.Status
+	result.Source, result.HTTPStatus = source, got.Status
 	return result
 }
 

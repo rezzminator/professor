@@ -155,8 +155,11 @@ func (h *Harvester) fetchLocal(ctx context.Context, source string, options Fetch
 	if err != nil {
 		return Result{Source: source, Error: fmt.Sprintf("read local file %s: %v", path, err)}
 	}
+	if len(body) == 0 {
+		return Result{Source: source, Error: localEmptyFileText, ErrorKind: errorKindEmpty}
+	}
 	kind := classifyFetchedKind(path, "", body)
-	if unsupported, ok := unsupportedLocalFormat(path, kind, body); ok {
+	if unsupported, ok := unsupportedLocalFormat(path, body); ok {
 		unsupported.Source = source
 		return unsupported
 	}

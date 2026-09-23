@@ -24,6 +24,7 @@ type downloadItem struct {
 	Bytes       int64  `json:"bytes,omitempty"`
 	Partial     string `json:"partial,omitempty"`
 	Error       string `json:"error,omitempty"`
+	ErrorKind   string `json:"error_kind,omitempty"` // the failure's class, beside every error
 }
 
 // runDownload is `pfm harvest download <url>...`: each URL's bytes, unparsed,
@@ -90,17 +91,20 @@ func downloadOne(
 ) downloadItem {
 	scoped, scopedCtx, err := harvester.ForCaller(ctx, headers, source)
 	if err != nil {
-		return downloadItem{Source: source, Error: err.Error()} // no request was sent
+		// No request was sent: the headers have no origin to go to.
+		kind := harvest.PublicFailure(source, harvest.Result{Error: err.Error()}).ErrorKind
+		return downloadItem{Source: source, Error: err.Error(), ErrorKind: kind}
 	}
 	result := headers.MarkHeaderless(scoped.Download(scopedCtx, source))
 	item := downloadItem{Source: source, Kind: result.Kind, Partial: result.Partial}
 	if result.Error != "" {
-		item.Error = result.Error
+		item.Error, item.ErrorKind = result.Error, harvest.PublicFailure(source, result).ErrorKind
 		return item
 	}
 	contentType, size, err := sniffFile(result.Path)
 	if err != nil {
 		item.Error = fmt.Sprintf("the file was downloaded to %s but could not be read back: %v", result.Path, err)
+		item.ErrorKind = "internal" // the stored file, not the source, failed
 		return item
 	}
 	item.Path, item.ContentType, item.Bytes = result.Path, contentType, size

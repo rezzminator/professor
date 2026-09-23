@@ -111,9 +111,14 @@ func TestEmbeddedAssetsAreConversionOnlyAndProtocolIsPinned(t *testing.T) {
 			t.Errorf("embedded lock is missing %q", required)
 		}
 	}
-	for _, forbidden := range []string{"import zipfile", "import tarfile", "import py7zr", "import rarfile"} {
-		if strings.Contains(strings.ToLower(string(ConverterSource())), forbidden) {
-			t.Errorf("Python worker unexpectedly owns archive parsing: %q", forbidden)
+	bans := strings.Fields("zipfile infolist( .extract( tarfile py7zr rarfile unpack_archive extractall( namelist(")
+	for _, chunk := range strings.Split(strings.ToLower(string(ConverterSource())), "\ndef ") {
+		name, _, _ := strings.Cut(chunk, "(")
+		reader := map[string]bool{"_refuse_encrypted_odf": true, "_clamp_ods": true, "_ooxml_variant": true}[name]
+		for i, bad := range bans { // only these ODF/OOXML member readers open a zip, and none extracts it
+			if strings.Contains(chunk, bad) && (i > 2 || (i < 2) != reader) {
+				t.Errorf("Python worker owns archive parsing in %q: %q (archives stay files-only)", name, bad)
+			}
 		}
 	}
 }

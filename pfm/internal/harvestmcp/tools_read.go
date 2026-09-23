@@ -19,7 +19,7 @@ const (
 	cacheStatusHit = "hit"
 
 	readPageDescription   = `Reads 1–50 web pages as Markdown, input order kept. Call readPage{sources:["https://…"]} — http(s) page URLs only; a paper's landing page is a page too. A DOI, arXiv id, PMID, PMCID, ISBN or findWorks handle goes to readWork; a local path to parseLocalDocuments; a file you want as bytes (PDF, zip, image, audio) to download. Each item returns content (may be truncated), size, cache status, and where the COMPLETE artifact is. A failing item carries its own error and the others still return; an empty extraction is that item's error, never a blank body.`
-	parseLocalDescription = `Parses 1–50 local documents (PDF, Office, HTML, text, EPUB) on this machine into Markdown, input order kept. Call parseLocalDocuments{paths:["/path/to/file.pdf"]}. A web URL goes to readPage; a DOI or other work identifier to readWork. Each item returns content (may be truncated), size and the artifact path; a failing item carries its own error and the others still return.`
+	parseLocalDescription = `Parses 1–50 local documents (` + harvest.ReadableFormats + `) on this machine into Markdown, input order kept. Call parseLocalDocuments{paths:["/path/to/file.pdf"]}. A web URL goes to readPage; a DOI or other work identifier to readWork. Each item returns content (may be truncated), size and the artifact path; a failing item carries its own error and the others still return.`
 	readWorkDescription   = `Reads 1–20 scholarly works — a DOI, arXiv id, PMID, PMCID, ISBN, a paper or book landing URL, or a handle from findWorks — as Markdown, through the repository, mirror or open-access copy that serves it. Call readWork{works:["10.1038/nature14539"]}. A title goes to findWorks first. Each item returns content (may be truncated), the identifiers it read, the route it took, and where the COMPLETE artifact is; a failing item carries its own error and the others still return.`
 )
 
@@ -138,9 +138,14 @@ func (service *Service) readMany(
 		go service.fetchOne(ctx, semaphore, &wait, index, source, request, contents, items)
 	}
 	wait.Wait()
-	result := &mcp.CallToolResult{}
-	for _, text := range contents {
+	// Every item failed: the call is an error, so a failed batch never reads
+	// as a result; one item that read keeps the batch a result.
+	result := &mcp.CallToolResult{IsError: true}
+	for index, text := range contents {
 		result.Content = append(result.Content, &mcp.TextContent{Text: text})
+		if items[index].Error == "" {
+			result.IsError = false
+		}
 	}
 	return result, PagesOutput{Items: items}, nil
 }

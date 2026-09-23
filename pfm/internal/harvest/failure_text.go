@@ -1,13 +1,11 @@
 package harvest
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode/utf8"
 )
 
 // The failure classes a public result names beyond the transport kinds in
@@ -24,6 +22,10 @@ const (
 	errorKindLogin       = "login"
 	errorKindPaywall     = "paywall"
 )
+
+// localEmptyFileText names a zero-byte local file: nothing to convert, and
+// no other copy or retry to suggest.
+const localEmptyFileText = "The file is empty (0 bytes): there is nothing to read. It exists at its path, unchanged."
 
 // anotherCopy is the next step every class that a different copy can cure
 // names, in the current tools only; anotherCopyLead opens a sentence with it.
@@ -129,6 +131,37 @@ func redactFailureText(text string) string {
 	return strings.TrimRight(text, ". ")
 }
 
+const (
+	// converterFailedMarker opens every harvestpy ok:false answer as
+	// harvestpy's converterFailure wraps it: "harvestpy conversion failed
+	// (<class>): <message> (stderr: <tail>)".
+	converterFailedMarker = "harvestpy conversion failed ("
+	// converterFailureLead opens the public text of a converter's own failure.
+	converterFailureLead = "The document was retrieved but the converter could not read it: "
+	// unclassifiedLead opens the public text of a failure no class names.
+	unclassifiedLead = "Retrieval failed for a reason the harvester could not classify: "
+	// errorKindUnclassified is the kind of a failure no class names.
+	errorKindUnclassified = "failed"
+)
+
+// converterNamedFailure is the converter's own words in a harvestpy ok:false
+// error — without the exception class and the stderr tail — redacted as an
+// unclassified error is; empty when text is not a converter failure.
+func converterNamedFailure(text string) string {
+	_, rest, ok := strings.Cut(text, converterFailedMarker)
+	if !ok {
+		return ""
+	}
+	class, message, ok := strings.Cut(rest, "): ")
+	if !ok {
+		return ""
+	}
+	if end := strings.LastIndex(message, " (stderr: "); end >= 0 {
+		message = message[:end]
+	}
+	return redactFailureText(strings.TrimPrefix(message, class+": "))
+}
+
 func isLocalFailureSource(source string) bool {
 	return strings.HasPrefix(strings.ToLower(source), "file://") || filepath.IsAbs(source)
 }
@@ -162,6 +195,9 @@ func publicFailureTable(result Result, kind string) string {
 		return "The source is behind an access challenge" + vendor + "; the harvester never solves a challenge." + rungs +
 			" Retrying will meet the same wall: " + anotherCopy + "."
 	case errorKindLogin:
+		if strings.Contains(result.Error, shareSignInText) {
+			return result.Error // a share link names its service and the way out (share_links.go); the text carries no URL
+		}
 		return "The source shows only a sign-in wall; sign-in is required and the harvester never signs in." + rungs +
 			" Read a public copy instead: " + anotherCopy + "."
 	case errorKindPaywall:
@@ -181,6 +217,9 @@ func publicFailureTable(result Result, kind string) string {
 	case errorKindMissing:
 		return missingMessage(result, rungs)
 	case errorKindOversized:
+		if strings.HasPrefix(result.Error, unsupportedFormatPrefix) {
+			return result.Error // a compressed document past its cap names the cap (resolveFormat)
+		}
 		return "The document is larger than the harvester's page limit." + rungs + " Save the file with download instead, or choose a smaller copy."
 	case errorKindUnsupported:
 		if strings.HasPrefix(result.Error, unsupportedFormatPrefix) {
@@ -188,8 +227,17 @@ func publicFailureTable(result Result, kind string) string {
 		}
 		return unsupportedFormatText(safeFormatLabel(result.Kind), "")
 	case errorKindEmpty:
+		if result.Error == localEmptyFileText {
+			return result.Error
+		}
 		return "The source was retrieved but yielded no readable content (empty after extraction)." + rungs + " " + anotherCopyLead + "."
 	case errorKindConversion:
+		if strings.HasPrefix(result.Error, converterFailureLead) {
+			return result.Error // already published: a second pass keeps the converter's words
+		}
+		if named := converterNamedFailure(result.Error); named != "" {
+			return converterFailureLead + named + "." + rungs + " " + anotherCopyLead + "."
+		}
 		return "The document was retrieved but could not be converted to text (converter or OCR error)." + rungs +
 			" Save the file with download, or " + anotherCopy + "."
 	case errorKindAppShell:
@@ -197,8 +245,12 @@ func publicFailureTable(result Result, kind string) string {
 	case errorKindDisabled:
 		return "The provider this read needs is disabled on this harvester." + rungs + " Choose another record with findWorks and read it with readWork, or read a landing page with readPage."
 	}
+	if strings.HasPrefix(result.Error, unclassifiedLead) {
+		return result.Error // already published: a second pass never re-reads its words for a class
+	}
 	return fmt.Sprintf(
-		"Retrieval failed for a reason the harvester could not classify: %s.%s Retry once; if it repeats, %s.",
+		"%s%s.%s Retry once; if it repeats, %s.",
+		unclassifiedLead,
 		redactFailureText(result.Error),
 		rungs,
 		anotherCopy,
@@ -230,9 +282,16 @@ func unsupportedFormatText(format, container string) string {
 		detected = " (detected: " + container + ")"
 	}
 	return unsupportedFormatPrefix + format + " file" + detected + ", which the harvester does not read yet. " +
-		"The file exists at its path, unchanged. parseLocalDocuments reads PDF, DOCX, XLSX, PPTX, EPUB, HTML, CSV, JSON, Markdown and plain text: " +
+		"The file exists at its path, unchanged. parseLocalDocuments reads " + ReadableFormats + ": " +
 		"convert or extract it to one of those and read that copy."
 }
+
+// ReadableFormats is the one list of the document formats the harvester
+// converts (converter.py's _CONVERTERS, routed by format_detect.go), named
+// in every unsupported-format failure and in parseLocalDocuments' tool
+// description.
+const ReadableFormats = "PDF, DOC, DOCX, XLS, XLSX, PPTX (with their macro and template variants), " +
+	"ODT, ODS, ODP, RTF, EPUB, HTML, CSV, JSON, Markdown and plain text"
 
 var formatLabelPattern = regexp.MustCompile(`^[a-z0-9]{1,12}$`)
 
@@ -244,43 +303,48 @@ func safeFormatLabel(label string) string {
 	return label
 }
 
-// unsupportedLocalFormat reports a local body no converter reads: an archive
-// container (a zip-based format the classifier did not recognise included)
-// or binary bytes classified as text. It names the extension and the detected
-// container.
-func unsupportedLocalFormat(path, kind string, body []byte) (Result, bool) {
-	container := ""
-	switch {
-	case bytes.HasPrefix(body, []byte("PK\x03\x04")):
-		container = "zip container"
-	case bytes.HasPrefix(body, []byte("bplist")):
-		container = "binary property list"
-	case bytes.HasPrefix(body, []byte("7z\xbc\xaf\x27\x1c")):
-		container = "7z archive"
-	case bytes.HasPrefix(body, []byte("Rar!")):
-		container = "rar archive"
+// unsupportedLocalFormat reports a local body the harvester does not convert,
+// detected by its bytes (resolveFormat): a file (audio, video, image, font,
+// executable, archive), a dropped format, or a compressed
+// body it cannot open. It names the extension and the detected type.
+func unsupportedLocalFormat(path string, body []byte) (Result, bool) {
+	found := resolveFormat(path, body)
+	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
+	if !formatLabelPattern.MatchString(format) {
+		format = safeFormatLabel(strings.Fields(found.label + " binary")[0])
 	}
-	switch strings.ToLower(kind) {
-	case kindZIP, kindTAR, kind7Z, kindRAR, kindArchive:
-		if container == "" {
-			container = strings.ToLower(kind) + " archive"
-		}
-	case kindTXT, "":
-		head := body[:min(len(body), 8192)]
-		if bytes.IndexByte(head, 0) < 0 && utf8.Valid(head) {
-			return Result{}, false
-		}
-		if container == "" {
-			container = "binary data"
-		}
+	detected := unsupportedFormatPrefix + format + " file (detected: " + found.label + ")"
+	var text string
+	switch found.class {
+	case formatFileOnly:
+		text = detected + " is a file, not a document: the harvester does not read it. " +
+			"The file exists at its path, unchanged — use it as a file."
+	case formatDropped:
+		text = detected + ", a format the harvester does not support: it does not read it. " +
+			"The file exists at its path, unchanged; convert it to PDF, DOCX or plain text and read that copy."
+	case formatRefused:
+		text = detected + " " + found.reason + ": the harvester does not read it. " +
+			"The file exists at its path, unchanged; decompress it and read the inner document."
 	default:
 		return Result{}, false
 	}
-	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
-	if !formatLabelPattern.MatchString(format) {
-		format = strings.Fields(container)[0]
+	return Result{Kind: format, ErrorKind: formatErrorKind(found), Error: text}, true
+}
+
+// formatRefusalReason is the page sentence for a body readPage does not
+// convert because of its type.
+func formatRefusalReason(found formatFinding) string {
+	if found.class == formatDropped {
+		return "its type (" + found.label + ") is a format the harvester does not support."
 	}
-	return Result{Kind: format, ErrorKind: errorKindUnsupported, Error: unsupportedFormatText(format, container)}, true
+	return "it " + found.reason + "."
+}
+
+func formatErrorKind(found formatFinding) string {
+	if found.tooLarge {
+		return errorKindTooLarge
+	}
+	return errorKindUnsupported
 }
 
 // browserRanNote is the ladder's sentence for a browser rung that ran and did

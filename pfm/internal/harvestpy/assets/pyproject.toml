@@ -3,10 +3,17 @@ name = "professor-harvestpy"
 version = "0.1.0"
 requires-python = "==3.11.*"
 dependencies = [
+  "bibtexparser==2.0.1",
   "docling==2.107.0",
+  "legacy-doc==0.2.1",
+  "mammoth==1.12.2",
   "markitdown==0.1.6",
+  "msoffcrypto-tool==6.0.0",
+  "odfdo==3.26.1",
   "pymupdf4llm==1.27.2.3",
+  "striprtf==0.0.33",
   "trafilatura==2.1.0",
+  "xlrd==2.0.2",
 ]
 
 [tool.uv]

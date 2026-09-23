@@ -190,8 +190,26 @@ func (h *Harvester) convertFetchedDocument(
 	body []byte,
 	budget *loaderBudget,
 ) (string, convertedPage, error) {
-	if kind == kindTXT {
+	switch {
+	case kind == kindTXT:
 		return pageText(string(body)), convertedPage{}, nil
+	case kind == kindCode:
+		language := codeLanguage(source)
+		if language == "" {
+			language = languageXML // a code kind without a code extension is XML found by its prolog (textFormat)
+		}
+		return fenceCode(language, string(body)), convertedPage{}, nil
+	case isCompressedKind(kind):
+		inner, err := decompressDocument(kind, body, compressedDocumentCap)
+		if err != nil {
+			return "", convertedPage{}, fmt.Errorf("%s-compressed document could not be decompressed: %w", kind, err)
+		}
+		innerSource := innerDocumentName(kind, source)
+		innerKind := classifyFetchedKind(innerSource, "", inner)
+		if isCompressedKind(innerKind) {
+			return "", convertedPage{}, fmt.Errorf("%s-compressed document is compressed again (%s)", kind, innerKind)
+		}
+		return h.convertFetchedDocument(ctx, innerKind, innerSource, inner, budget)
 	}
 	if h.options.Converter == nil {
 		return "", convertedPage{}, errors.New("no injected converter configured for " + kind)
@@ -336,6 +354,30 @@ func (h *Harvester) convertHTML(
 
 func classifyFetchedKind(source, contentType string, body []byte) string {
 	kind := classifyKind(source, contentType, body)
+	// Magic bytes route before the extension and the content type
+	// (format_detect.go): an .xlsx named .xls is an xlsx, one compressed
+	// document is its codec's kind (a compressed tar stays an archive), and
+	// a text format converter.py dispatches keeps its own kind.
+	found := detectFormat(source, body)
+	switch found.class {
+	case formatDocument:
+		return found.kind
+	case formatCompressed:
+		if head, _ := decompressDocument(found.kind, body, 512); found.kind == kindXZ || !isTarHeader(head) {
+			return found.kind
+		}
+		return kindTAR
+	case formatText:
+		if kind == kindHTML || kind == kindTXT || kind == kindJSON {
+			return found.kind
+		}
+	case formatUnknown:
+		// An archive or compression extension on bytes that carry no archive
+		// signature (an empty file, text named .gz) is not an archive.
+		if kind == kindTAR || kind == kindZIP || kind == kind7Z || kind == kindRAR {
+			kind = kindHTML
+		}
+	}
 	if kind != kindHTML && kind != kindTXT {
 		return kind
 	}

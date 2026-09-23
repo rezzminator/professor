@@ -75,6 +75,7 @@ def convert_html(path: pathlib.Path) -> str:
     if tree is not None:
         _drop_hidden(tree)
         _unwrap_layout_tables(tree)
+        _keep_notes(tree)
         _flatten_code_lines(tree)
         _phrasing_paragraphs_as_text(tree)
         _inline_code_as_text(tree)
@@ -228,6 +229,38 @@ def _unwrap_layout_tables(tree) -> None:
         for row in rows:
             for cell in row.xpath("./td|./th"):
                 cell.tag = "div"
+
+
+# trafilatura's tree cleaning deletes every <aside> and <footer> before it
+# selects the main content. A footnote or endnote is the text's own (the
+# DPUB-ARIA roles, or a class token footnote…/endnote…: Sphinx's
+# <aside class="footnote" role="doc-footnote">), and so is an article's own
+# footer written as prose — its correction note ("This article was amended
+# on …") — when no list, nav or form control sits in it and links are under
+# half its text. Each becomes a <div>; every other aside and footer (a
+# newsletter promotion, a share bar, the site footer) is cleaned as before.
+_NOTE_ROLES = frozenset({"doc-footnote", "doc-endnote", "doc-endnotes"})
+_NOTE_CLASSES = ("footnote", "endnote")
+_FOOTER_CONTROLS = ".//nav|.//ul|.//ol|.//form|.//button|.//input|.//select|.//textarea|.//iframe"
+
+
+def _keep_notes(tree) -> None:
+    for element in list(tree.iter("aside", "footer")):
+        classes = (element.get("class") or "").casefold().split()
+        if element.get("role") in _NOTE_ROLES or any(token.startswith(_NOTE_CLASSES) for token in classes):
+            element.tag = "div"
+        elif element.tag == "footer" and _is_article_note(element):
+            element.tag = "div"
+
+
+def _is_article_note(footer) -> bool:
+    if footer.xpath("not(ancestor::article)") or footer.xpath(_FOOTER_CONTROLS):
+        return False
+    if not any("".join(paragraph.itertext()).strip() for paragraph in footer.iter("p")):
+        return False
+    text = len("".join("".join(footer.itertext()).split()))
+    linked = sum(len("".join("".join(link.itertext()).split())) for link in footer.iter("a"))
+    return linked * 2 < text
 
 
 # trafilatura drops any text node that reads as a share button — "Email",

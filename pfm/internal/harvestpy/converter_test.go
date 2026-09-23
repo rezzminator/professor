@@ -484,6 +484,33 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			code:   []string{"`MAXINSAMPLE = (2^sampledepth)-1` `MAXOUTSAMPLE = (2^desired_sampledepth)-1`"},
 			absent: []string{"2sampledepth", "--prefix= PATH"},
 		},
+		{
+			// Sphinx writes a footnote as <aside role="doc-footnote"> in an
+			// <aside class="footnote-list">: the note's text is written under the
+			// Footnotes rubric, the sidebar's topic links stay out.
+			fixture: "footnotes.html",
+			text: []string{
+				"Footnotes",
+				"Note that the parser only accepts the Unix-style end of line convention. If you are reading the code" +
+					" from a file, make sure to use newline conversion mode to convert Windows or Mac-style newlines.",
+			},
+			absent: []string{"Previous topic", "Built-in Exceptions"},
+		},
+		{
+			// A news article's last paragraph, its correction note, sits in the
+			// article's own <footer>: written after the body; the newsletter
+			// promotion inside the article and the site footer stay out.
+			fixture: "article-footer.html",
+			text: []string{
+				"This article was amended on 10 September 2026. A picture caption incorrectly said Sylvia Peters was" +
+					" the first woman to appear on screen at the BBC.",
+			},
+			absent: []string{
+				"Lose yourself in a great story",
+				"Enter your email",
+				"Original reporting and incisive analysis",
+			},
+		},
 	}
 	converter := testConverter(t, python)
 	t.Cleanup(func() { _ = converter.Close() })

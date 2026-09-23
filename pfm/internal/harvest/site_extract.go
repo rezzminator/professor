@@ -60,6 +60,12 @@ var siteExtractors = []siteExtractor{
 		pressLoaders: true,
 	},
 	{
+		name:    "hacker-news-thread",
+		hosts:   []string{hnHost},
+		extract: extractHNThread,
+		loaders: hnLoaders,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,

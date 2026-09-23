@@ -27,10 +27,10 @@ One Opus **brainer** drives the whole run; everything else is its instrument. Ev
 
 ## Launch
 
-**Preflight — the fetch MCP (Harvester) must be live.** RR fetches only through `mcp__harvester__fetch` (built-in WebFetch is hook-denied), so a missing or dead server makes every fetch error and yields a snippet-only run. Before launching, check for the `mcp__harvester__*` tools (via ToolSearch):
+**Preflight — the fetch MCP (Harvester) must be live.** RR fetches only through `mcp__harvester__readPage` (web pages) and `mcp__harvester__readWork` (papers and books) (built-in WebFetch is hook-denied), so a missing or dead server makes every fetch error and yields a snippet-only run. Before launching, check for the `mcp__harvester__*` tools (via ToolSearch):
 
 - **Missing** — hold the launch and point the user to the Harvester MCP (`https://github.com/rezzminator/harvester-web-mcp`) to install, then `/mcp` to connect.
-- **Present** — smoke-test with one `mcp__harvester__fetch` on a stable URL (`https://example.com`); a clean fetch means go, an error means have the user reconnect (`/mcp`) or restart the server — hold until it passes.
+- **Present** — smoke-test with one `mcp__harvester__readPage` on a stable URL (`https://example.com`); a clean read means go, an error means have the user reconnect (`/mcp`) or restart the server — hold until it passes.
 
 Call the **Workflow tool**. It runs in the background; a completion notification returns the result — do not block on it. Use the **absolute** path to `workflow.js` (the skill's base dir is printed when the skill loads) — the working directory may sit inside a child project, where a relative path resolves against the CWD and 404s the bundle.
 

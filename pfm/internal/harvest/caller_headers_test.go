@@ -202,11 +202,8 @@ func TestCallerHeadersRefusedAtEntry(t *testing.T) {
 	})
 	refused := (&HeaderLines{lines: []string{"Host: " + probeValue}}).Fetch(
 		context.Background(), h, "https://example.test/a", FetchOptions{})
-	noOrigin := probeLines().Fetch(context.Background(), h, "10.1038/nature14539", FetchOptions{})
-	for _, got := range []Result{refused, noOrigin} {
-		if got.Error == "" || strings.Contains(got.Error, probeValue) {
-			t.Fatalf("refused set: error %q, want a named error without the value", got.Error)
-		}
+	if refused.Error == "" || strings.Contains(refused.Error, probeValue) {
+		t.Fatalf("refused set: error %q, want a named error without the value", refused.Error)
 	}
 	if seen.count != 0 {
 		t.Fatalf("a refused header set sent %d request(s)", seen.count)

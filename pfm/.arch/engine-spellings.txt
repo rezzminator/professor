@@ -1,7 +1,7 @@
 cmd/pfm/statusline_command.go 2
 internal/stats/limits.go 1
 internal/stats/limits_test.go 3
-internal/statusline/process_test.go 2
+internal/statusline/process_test.go 1
 internal/statusline/refresh_codex_test.go 2
 internal/statusline/render.go 2
 internal/statusline/statusline_test.go 1

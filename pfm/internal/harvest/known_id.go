@@ -12,7 +12,10 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 	if canonical == "" {
 		canonical = strings.TrimSpace(source)
 	}
-	if !options.Refresh {
+	if result, handled := h.readThroughLanding(ctx, source, kind, options); handled {
+		return result
+	}
+	if !options.Refresh && !throughLanding(ctx) {
 		if body, cachedKind, meta, path, ok := h.cache.loadAny(
 			canonical,
 			[]string{kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindJSON, kindTXT, kindHTML},
@@ -125,6 +128,7 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		trace = append(trace, "oa:"+c.Source)
 		result := h.fetchURLWithPolicy(ctx, c.URL, options, false)
 		if result.Error == "" {
+			noteServed(ctx, c.URL)
 			return h.storeResultAlias(source, canonical, result, append([]string(nil), trace...), options)
 		}
 	}

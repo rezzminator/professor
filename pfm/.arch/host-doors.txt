@@ -1,10 +1,9 @@
 cmd/pfm/mcp_serve_command.go 2
 internal/agentopen/agentopen.go 2
 internal/binwatch/binwatch.go 3
-internal/codexappendix/register.go 1
 internal/codexgen/compiler.go 1
 internal/doctor/doctor.go 2
-internal/gather/tmuxprobe.go 7
+internal/gather/tmuxprobe.go 2
 internal/harvest/doh.go 1
 internal/harvest/net.go 1
 internal/harvest/net_chrome_transport.go 3

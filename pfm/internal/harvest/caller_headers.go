@@ -132,9 +132,13 @@ func (c CallerHeaders) hash() string {
 
 type callerScopeKey struct{}
 
+// callerScope is the header set of one read and the origin it goes to. An
+// empty origin is a work read whose landing URL is not known yet: no request
+// carries the headers until readThroughLanding names that origin.
 type callerScope struct {
 	headers CallerHeaders
 	origin  string
+	landing *landingRead // a work read through its landing origin; nil otherwise
 }
 
 // webOrigin is scheme://host[:port] of an http(s) URL, the default port
@@ -178,6 +182,34 @@ func (h *Harvester) ForCaller(
 			"%w: headers go only to a target's own origin, and %s names no web origin — pass the landing URL",
 			ErrCallerHeader, safeURL(target))
 	}
+	scope := callerScope{headers: headers, origin: origin}
+	return h.scopedTo(headers), context.WithValue(ctx, callerScopeKey{}, scope), nil
+}
+
+// ForWork is ForCaller for a readWork target. A landing URL keeps
+// ForCaller's scope; an identifier (a DOI, a doi.org URL, an ISBN, a PMID, a
+// PMCID, a handle that names one) resolves as without headers — resolvers and
+// metadata APIs never receive them — and fetchKnownID sends them to the
+// landing origin once it is known (readThroughLanding).
+func (h *Harvester) ForWork(
+	ctx context.Context,
+	headers CallerHeaders,
+	target string,
+) (*Harvester, context.Context, error) {
+	if headers.Len() == 0 {
+		return h, ctx, nil
+	}
+	if resolved, err := h.ResolvePublicSource(target); err == nil {
+		target = resolved // a handle names its work; a failed one fails in FetchPublic
+	}
+	if ClassifyIdentifier(target) == IdentifierNone {
+		return h.ForCaller(ctx, headers, target)
+	}
+	return h.scopedTo(headers), context.WithValue(ctx, callerScopeKey{}, callerScope{headers: headers}), nil
+}
+
+// scopedTo is h with its caches partitioned by the header set's hash.
+func (h *Harvester) scopedTo(headers CallerHeaders) *Harvester {
 	hash := headers.hash()
 	clone := &Harvester{
 		options:      h.options,
@@ -194,7 +226,7 @@ func (h *Harvester) ForCaller(
 		flights:      make(map[string]*fetchFlight),
 		settings:     h.settings,
 	}
-	return clone, context.WithValue(ctx, callerScopeKey{}, callerScope{headers: headers, origin: origin}), nil
+	return clone
 }
 
 // CallerHeadersFor is the header set and origin ctx scopes, for the browser
@@ -202,7 +234,7 @@ func (h *Harvester) ForCaller(
 // call carries none.
 func CallerHeadersFor(ctx context.Context) (map[string]string, string) {
 	scope, ok := ctx.Value(callerScopeKey{}).(callerScope)
-	if !ok || scope.headers.Len() == 0 {
+	if !ok || scope.headers.Len() == 0 || scope.origin == "" {
 		return nil, ""
 	}
 	out := make(map[string]string, len(scope.headers.values))
@@ -216,7 +248,7 @@ func CallerHeadersFor(ctx context.Context) (map[string]string, string) {
 // when target is on the scoped origin, nil otherwise.
 func callerHeadersAt(ctx context.Context, target *url.URL) map[string]string {
 	scope, ok := ctx.Value(callerScopeKey{}).(callerScope)
-	if !ok || target == nil || webOrigin(target.String()) != scope.origin {
+	if !ok || target == nil || scope.origin == "" || webOrigin(target.String()) != scope.origin {
 		return nil
 	}
 	return scope.headers.values
@@ -265,15 +297,15 @@ func scopeCallerRedirects(ctx context.Context, client *http.Client, defaults htt
 // reached through a rung that ran without the caller's headers (a reader
 // service or an archive copy).
 func (c CallerHeaders) MarkHeaderless(result Result) Result {
-	if c.Len() == 0 || result.Error != "" {
-		return result
+	if c.Len() == 0 || result.Error != "" || strings.Contains(result.Partial, headerlessNote) {
+		return result // readThroughLanding already named the omission
 	}
 	method := strings.ToLower(result.Method)
 	if !strings.HasPrefix(method, "jina") && !strings.HasPrefix(method, "defuddle") &&
 		!strings.Contains(method, rungWayback) && !strings.Contains(method, "archive") {
 		return result
 	}
-	reason := "read through " + result.Method + ", which ran without the caller's headers"
+	reason := "read through " + result.Method + ", which ran " + headerlessNote
 	if result.Partial != "" {
 		reason = result.Partial + "; " + reason
 	}
@@ -329,7 +361,7 @@ func (l *HeaderLines) Fetch(ctx context.Context, h *Harvester, source string, op
 	if err != nil {
 		return Result{Source: source, Error: err.Error(), ErrorKind: errorKindInvalid}
 	}
-	scoped, scopedCtx, err := h.ForCaller(ctx, headers, source)
+	scoped, scopedCtx, err := h.ForWork(ctx, headers, source)
 	if err != nil {
 		return Result{Source: source, Error: err.Error(), ErrorKind: errorKindInvalid}
 	}

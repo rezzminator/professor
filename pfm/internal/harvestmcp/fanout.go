@@ -50,7 +50,11 @@ func (service *Service) fetchOne(
 		return
 	}
 	defer func() { <-semaphore }()
-	harvester, scopedCtx, err := service.harvester.ForCaller(ctx, request.headers, source)
+	scope := service.harvester.ForCaller
+	if request.work {
+		scope = service.harvester.ForWork // an identifier's headers wait for its landing origin
+	}
+	harvester, scopedCtx, err := scope(ctx, request.headers, source)
 	if err != nil {
 		fail(err.Error()) // no request was sent: the headers have no origin to go to
 		return

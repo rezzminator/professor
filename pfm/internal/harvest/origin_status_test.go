@@ -193,3 +193,21 @@ func TestPublicMethodNamesTheRungNeverTheProvider(t *testing.T) {
 		}
 	}
 }
+
+// TestSiteAPIRenderReportsTheDeliveringStatus: a page an extractor rendered
+// from its site's API while the origin walled it under 403 reports the API's
+// status (200), the rung that delivered the stored content, never the wall's —
+// in the core result and in the public JSON a consumer reads.
+func TestSiteAPIRenderReportsTheDeliveringStatus(t *testing.T) {
+	site := seQuestionSite(t)
+	h, _ := site.harvester(t)
+	result := h.FetchWithOptions(context.Background(), seQuestionURL, FetchOptions{Refresh: true})
+	if result.Error != "" {
+		t.Fatalf("the question failed: %q", result.Error)
+	}
+	public := JSONResults([]Result{h.PublicResult(seQuestionURL, result, true)})[0]
+	if result.HTTPStatus != http.StatusOK || public.HTTPStatus != http.StatusOK {
+		t.Fatalf("http_status core=%d public=%d, want the API's 200 (the origin walled the page with 403)",
+			result.HTTPStatus, public.HTTPStatus)
+	}
+}

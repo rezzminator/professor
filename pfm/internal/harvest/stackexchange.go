@@ -66,6 +66,8 @@ const (
 	seFilter = "!*LhrqUZrT(Hy7EQUpnoBTvH*5RLAP3Xb7u_609axG2a2vmoyazJbzx6BG92HxtMI5"
 	// seAnswerTag is the element that keeps one API answer in the page.
 	seAnswerTag = "harvester-stackexchange-answer"
+	// seFilterParam is the query parameter naming the API filter.
+	seFilterParam = "filter"
 	// seThrottleViolation is the API's error_id for an exhausted quota or too
 	// many requests.
 	seThrottleViolation = 502
@@ -95,19 +97,24 @@ type seQuestionRef struct {
 	id   int64
 }
 
+// seSiteOf reads page's host as one site of the network, the API's site
+// parameter; false for any other host (the network's own hub, its API, chat).
+func seSiteOf(page *url.URL) (string, bool) {
+	host := strings.TrimPrefix(strings.ToLower(page.Hostname()), "www.")
+	for _, domain := range stackExchangeHosts {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			owned := host != "stackexchange.com" && host != "api.stackexchange.com" && !strings.HasPrefix(host, "chat.")
+			return host, owned
+		}
+	}
+	return "", false
+}
+
 // seQuestionOf reads page's address as a Stack Exchange question's; false for
 // any other address (a tag listing, a user, the network's own hub and API).
 func seQuestionOf(page *url.URL) (seQuestionRef, bool) {
-	host := strings.TrimPrefix(strings.ToLower(page.Hostname()), "www.")
-	owned := false
-	for _, domain := range stackExchangeHosts {
-		if host == domain || strings.HasSuffix(host, "."+domain) {
-			owned = true
-			break
-		}
-	}
-	if !owned || host == "stackexchange.com" || host == "api.stackexchange.com" ||
-		strings.HasPrefix(host, "chat.") {
+	host, owned := seSiteOf(page)
+	if !owned {
 		return seQuestionRef{}, false
 	}
 	match := seQuestionPathRe.FindStringSubmatch(page.Path)
@@ -128,7 +135,7 @@ func (ref seQuestionRef) questionURL() string {
 // target is the API address of the question's record (number 0) or of one
 // page of its answers.
 func (ref seQuestionRef) target(number int) string {
-	query := url.Values{"site": {ref.site}, "filter": {seFilter}}
+	query := url.Values{"site": {ref.site}, seFilterParam: {seFilter}}
 	path := "/questions/" + strconv.FormatInt(ref.id, 10)
 	if number > 0 {
 		path += "/answers"

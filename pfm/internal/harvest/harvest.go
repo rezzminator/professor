@@ -386,6 +386,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				continue
 			}
 		}
+		status = page.deliveredStatus(status) // the site API delivered the page, not the wall
 		method := rung.name
 		if kind == kindTXT {
 			method = "plain-text"

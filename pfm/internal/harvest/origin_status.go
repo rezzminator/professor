@@ -34,3 +34,15 @@ func jinaTargetError(body []byte) int {
 	}
 	return status
 }
+
+// deliveredStatus is the HTTP status of what delivered the stored page, the
+// result's http_status: the fetched page's own, but where an extractor that
+// readsSiteAPI rendered it from its site's API while the origin answered an
+// error or a wall, the API's: 200, since every record it kept was answered
+// below 400 (loaders.go keeps no answer of status 400 or above).
+func (page convertedPage) deliveredStatus(status int) int {
+	if page.siteAPI && status >= http.StatusBadRequest {
+		return http.StatusOK
+	}
+	return status
+}

@@ -108,6 +108,14 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:         "stackexchange-listing",
+		hosts:        stackExchangeHosts,
+		paths:        isStackExchangeListingAddress,
+		extract:      extractStackExchangeListing,
+		loaders:      stackExchangeListingLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:         "stackexchange-question",
 		hosts:        stackExchangeHosts,
 		extract:      extractStackExchangeQuestion,

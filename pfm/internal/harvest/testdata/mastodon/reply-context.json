@@ -1,0 +1,53 @@
+{
+ "ancestors": [
+  {
+   "id": "117117221397911074",
+   "created_at": "2026-08-18T15:29:36.902Z",
+   "in_reply_to_id": null,
+   "sensitive": false,
+   "spoiler_text": "",
+   "visibility": "public",
+   "language": "en",
+   "replies_count": 7,
+   "reblogs_count": 575,
+   "favourites_count": 963,
+   "edited_at": null,
+   "media_attachments": [],
+   "uri": "https://social.example/@user-0/117117221397911074",
+   "url": "https://social.example/@user-0/117117221397911074",
+   "content": "<p>The status text, with <strong>emphasis</strong> and a <a href=\"https://social.example/tags/example\" class=\"mention hashtag\" rel=\"tag\">#<span>example</span></a> tag.</p><p>A second paragraph.</p>",
+   "account": {
+    "id": "1000",
+    "username": "user-0",
+    "acct": "user-0",
+    "display_name": "User 0",
+    "url": "https://social.example/@user-0"
+   }
+  },
+  {
+   "id": "117117258105671885",
+   "created_at": "2026-08-18T15:38:55.000Z",
+   "in_reply_to_id": "117117221397911074",
+   "sensitive": false,
+   "spoiler_text": "",
+   "visibility": "public",
+   "language": "de",
+   "replies_count": 2,
+   "reblogs_count": 4,
+   "favourites_count": 44,
+   "edited_at": "2026-08-18T15:43:46.000Z",
+   "media_attachments": [],
+   "uri": "https://remote.example/@user-3/117117258105671885",
+   "url": "https://remote.example/@user-3/117117258105671885",
+   "content": "<p><span class=\"h-card\" translate=\"no\"><a href=\"https://social.example/@user-0\" class=\"u-url mention\" rel=\"nofollow noopener\" target=\"_blank\">@<span>user-0</span></a></span> Reply 3 with <a href=\"https://social.example/tags/example\" class=\"mention hashtag\" rel=\"tag\">#<span>example</span></a> and a link <a href=\"https://docs.example/page\" target=\"_blank\" rel=\"nofollow noopener\"><span class=\"invisible\">https://</span><span class=\"\">docs.example/page</span><span class=\"invisible\"></span></a></p><p>Second line<br />third line</p>",
+   "account": {
+    "id": "1003",
+    "username": "user-3",
+    "acct": "user-3@remote.example",
+    "display_name": "User 3",
+    "url": "https://remote.example/@user-3"
+   }
+  }
+ ],
+ "descendants": []
+}

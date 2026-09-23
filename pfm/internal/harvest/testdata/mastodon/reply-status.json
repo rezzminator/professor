@@ -1,0 +1,24 @@
+{
+ "id": "117118575452712049",
+ "created_at": "2026-08-18T21:13:57.000Z",
+ "in_reply_to_id": "117117258105671885",
+ "sensitive": false,
+ "spoiler_text": "",
+ "visibility": "public",
+ "language": "de",
+ "replies_count": 0,
+ "reblogs_count": 0,
+ "favourites_count": 2,
+ "edited_at": null,
+ "media_attachments": [],
+ "uri": "https://remote.example/@user-4/117118575452712049",
+ "url": "https://remote.example/@user-4/117118575452712049",
+ "content": "<p><span class=\"h-card\" translate=\"no\"><a href=\"https://social.example/@user-0\" class=\"u-url mention\" rel=\"nofollow noopener\" target=\"_blank\">@<span>user-0</span></a></span> Reply 4 with <a href=\"https://social.example/tags/example\" class=\"mention hashtag\" rel=\"tag\">#<span>example</span></a> and a link <a href=\"https://docs.example/page\" target=\"_blank\" rel=\"nofollow noopener\"><span class=\"invisible\">https://</span><span class=\"\">docs.example/page</span><span class=\"invisible\"></span></a></p><p>Second line<br />third line</p>",
+ "account": {
+  "id": "1004",
+  "username": "user-4",
+  "acct": "user-4@remote.example",
+  "display_name": "User 4",
+  "url": "https://remote.example/@user-4"
+ }
+}

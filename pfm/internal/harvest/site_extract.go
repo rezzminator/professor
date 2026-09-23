@@ -107,6 +107,20 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:         "bluesky-post",
+		hosts:        []string{bskyHost, bskyAPIHost},
+		extract:      extractBlueskyPost,
+		loaders:      bskyLoaders,
+		readsSiteAPI: true,
+	},
+	{
+		name:         "mastodon-status",
+		detect:       isMastodon,
+		extract:      extractMastodonStatus,
+		loaders:      mastodonLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,

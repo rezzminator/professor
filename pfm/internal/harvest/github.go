@@ -112,19 +112,29 @@ func githubItemOf(doc *html.Node, page *url.URL) (githubItem, bool) {
 	if !ok {
 		return githubItem{}, false
 	}
-	meta := firstWithAttr(doc, "property", "og:url", nil)
-	if meta == nil || meta.DataAtom != atom.Meta {
+	canonical, ok := githubCanonicalPath(doc)
+	if !ok {
 		return githubItem{}, false
 	}
-	canonical, err := url.Parse(strings.TrimSpace(nodeAttr(meta, "content")))
-	if err != nil || !strings.EqualFold(canonical.Hostname(), githubHost) {
-		return githubItem{}, false
-	}
-	item, ok := githubItemPath(canonical.Path)
+	item, ok := githubItemPath(canonical)
 	if !ok || item.number != requested.number {
 		return githubItem{}, false
 	}
 	return item, true
+}
+
+// githubCanonicalPath is the path of the GitHub address doc's og:url names;
+// false when it names none, or an address off GitHub.
+func githubCanonicalPath(doc *html.Node) (string, bool) {
+	meta := firstWithAttr(doc, "property", "og:url", nil)
+	if meta == nil || meta.DataAtom != atom.Meta {
+		return "", false
+	}
+	canonical, err := url.Parse(strings.TrimSpace(nodeAttr(meta, "content")))
+	if err != nil || !strings.EqualFold(canonical.Hostname(), githubHost) {
+		return "", false
+	}
+	return canonical.Path, true
 }
 
 type githubUser struct {

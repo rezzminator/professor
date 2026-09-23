@@ -53,7 +53,11 @@ type siteExtractor struct {
 	// detect, when set, claims a page on any host by its markup (a forum
 	// engine's generator meta); such an extractor's loaders may only request
 	// the page's own host.
-	detect  func(doc *html.Node) bool
+	detect func(doc *html.Node) bool
+	// paths, when set, narrows the host claim to the addresses it accepts (a
+	// host whose pages two extractors split); a loader's request is still
+	// judged by the host alone.
+	paths   func(page *url.URL) bool
 	extract func(doc *html.Node, source *url.URL) (siteExtraction, bool)
 	// loaders names the loaders still in a page of this site (loaders.go),
 	// in DOM order; nil when the site has none Go can follow.
@@ -80,6 +84,13 @@ var siteExtractors = []siteExtractor{
 		hosts:   []string{hnHost},
 		extract: extractHNThread,
 		loaders: hnLoaders,
+	},
+	{
+		name:    "github-discussion",
+		hosts:   []string{githubHost},
+		paths:   isGitHubDiscussionAddress,
+		extract: extractGitHubDiscussion,
+		loaders: githubDiscussionLoaders,
 	},
 	{
 		name:         "github-issue",
@@ -116,7 +127,10 @@ func (extractor siteExtractor) ownsHost(host string) bool {
 
 // claims reports whether extractor owns page: by its host, or by its markup.
 func (extractor siteExtractor) claims(page *url.URL, doc *html.Node) bool {
-	return extractor.ownsHost(strings.ToLower(page.Hostname())) || extractor.detect != nil && extractor.detect(doc)
+	if extractor.ownsHost(strings.ToLower(page.Hostname())) && (extractor.paths == nil || extractor.paths(page)) {
+		return true
+	}
+	return extractor.detect != nil && extractor.detect(doc)
 }
 
 // mayRequest reports whether a loader of page may request target: a host the

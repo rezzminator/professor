@@ -44,7 +44,12 @@ func (b *downloadingBrowser) DownloadBrowser(
 	if err := os.WriteFile(dest, []byte(b.body), 0o600); err != nil {
 		return BrowserFile{}, err
 	}
-	return BrowserFile{ContentType: b.contentType, Bytes: int64(len(b.body)), FinalURL: source, Status: http.StatusOK}, nil
+	return BrowserFile{
+		ContentType: b.contentType,
+		Bytes:       int64(len(b.body)),
+		FinalURL:    source,
+		Status:      http.StatusOK,
+	}, nil
 }
 
 // walledHarvester is a harvester whose direct and Chrome rungs meet a 403
@@ -91,14 +96,23 @@ func TestRetrieveFileBrowserDownloadIsTheLastRung(t *testing.T) {
 	if got.Error != "" || got.Method != rungBrowserDownload {
 		t.Fatalf("walled file: Error=%q Method=%q rungs=%v", got.Error, got.Method, got.Rungs)
 	}
-	if want := rungDirect + "," + rungChromeImpersonation + "," + rungBrowserDownload; strings.Join(got.Rungs, ",") != want {
+	if want := rungDirect + "," + rungChromeImpersonation + "," + rungBrowserDownload; strings.Join(
+		got.Rungs,
+		",",
+	) != want {
 		t.Fatalf("rungs %v, want %s", got.Rungs, want)
 	}
 	if len(browser.calls) != 1 || !browser.calls[0] {
 		t.Fatalf("browser calls (headless flags) %v, want one headless call", browser.calls)
 	}
-	if !strings.HasPrefix(got.Path, cache+string(filepath.Separator)) || got.Kind != kindPDF || got.Bytes != int64(len(browser.body)) {
-		t.Fatalf("browser file not in the binary cache as a pdf: path=%q kind=%q bytes=%d", got.Path, got.Kind, got.Bytes)
+	if !strings.HasPrefix(got.Path, cache+string(filepath.Separator)) || got.Kind != kindPDF ||
+		got.Bytes != int64(len(browser.body)) {
+		t.Fatalf(
+			"browser file not in the binary cache as a pdf: path=%q kind=%q bytes=%d",
+			got.Path,
+			got.Kind,
+			got.Bytes,
+		)
 	}
 	if body, err := os.ReadFile(got.Path); err != nil || string(body) != browser.body {
 		t.Fatalf("browser file bytes %q, %v; want %q", body, err, browser.body)
@@ -118,10 +132,14 @@ func TestRetrieveFileBrowserFailureIsNamed(t *testing.T) {
 		wantCalls int
 		want      string
 	}{
-		{"challenge", &BrowserDownloadError{Reason: BrowserDownloadNoDownload, Status: 403, Head: challengePage}, 2,
-			"challenge the browser did not pass"},
-		{"page", &BrowserDownloadError{Reason: BrowserDownloadNoDownload, Status: 200, Head: "<html><body>Welcome</body></html>"}, 1,
-			"no download started"},
+		{
+			"challenge", &BrowserDownloadError{Reason: BrowserDownloadNoDownload, Status: 403, Head: challengePage}, 2,
+			"challenge the browser did not pass",
+		},
+		{
+			"page", &BrowserDownloadError{Reason: BrowserDownloadNoDownload, Status: 200, Head: "<html><body>Welcome</body></html>"}, 1,
+			"no download started",
+		},
 		{"timeout", &BrowserDownloadError{Reason: BrowserDownloadTimeout, Detail: "45000ms"}, 1, "timed out"},
 		{"outage", errors.New("patchright not installed"), 1, "could not run: patchright not installed"},
 	} {

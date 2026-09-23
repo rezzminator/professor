@@ -222,6 +222,9 @@ func chromeFRequest(req *http.Request) *fhttp.Request {
 	header.Set("Sec-Fetch-Site", "none")
 	header.Set("Sec-Fetch-User", "?1")
 	header.Set("Upgrade-Insecure-Requests", "1")
+	for name, value := range callerHeadersAt(req.Context(), req.URL) {
+		header.Set(name, value) // the caller's header wins, on the target's origin only
+	}
 	header[fhttp.HeaderOrderKey] = append([]string(nil), chromeHeaderOrder...)
 	return (&fhttp.Request{
 		Method:        req.Method,

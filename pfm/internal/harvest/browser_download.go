@@ -76,7 +76,12 @@ func (e *BrowserDownloadError) Error() string {
 // policy never starts a browser — with the browser rung on and an adapter
 // wired. kept reports a file stored in out.Result; err is the rung's named
 // failure, nil when the rung did not run.
-func (h *Harvester) browserFileRung(ctx context.Context, req retrieveRequest, limit int64, out *Retrieved) (bool, error) {
+func (h *Harvester) browserFileRung(
+	ctx context.Context,
+	req retrieveRequest,
+	limit int64,
+	out *Retrieved,
+) (bool, error) {
 	if req.policy != PolicyFile || !h.settings.browser || isPrivateURL(req.target) {
 		return false, nil
 	}
@@ -119,22 +124,17 @@ func (h *Harvester) browserFileAttempt(
 	out *Retrieved,
 ) (bool, error) {
 	out.Rungs = append(out.Rungs, rung)
-	if err := os.MkdirAll(h.options.CacheDir, 0o700); err != nil {
-		return false, fmt.Errorf("%s: prepare the cache: %w", rung, err)
-	}
-	scratch, err := os.CreateTemp(h.options.CacheDir, ".browser-download-*")
+	// The removal below logs its failure, so WriteScratch's silent cleanup is unused.
+	dest, _, err := atomicfile.WriteScratch(h.options.CacheDir, ".browser-download-*", nil)
 	if err != nil {
-		return false, fmt.Errorf("%s: create the scratch file: %w", rung, err)
+		return false, fmt.Errorf("%s: %w", rung, err)
 	}
-	dest := scratch.Name()
 	defer func() {
 		if removeErr := os.Remove(dest); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			obs.Logger(ctx).Warn("harvest: removing a browser download scratch file", "path", dest, obs.FieldErr, removeErr.Error())
+			obs.Logger(ctx).
+				Warn("harvest: removing a browser download scratch file", "path", dest, obs.FieldErr, removeErr.Error())
 		}
 	}()
-	if err := scratch.Close(); err != nil {
-		return false, fmt.Errorf("%s: close the scratch file: %w", rung, err)
-	}
 	file, err := downloader.DownloadBrowser(ctx, req.target, dest, limit, headless)
 	if err != nil {
 		return false, browserDownloadFailure(rung, limit, err)

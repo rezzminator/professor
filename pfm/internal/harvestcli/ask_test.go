@@ -1,4 +1,4 @@
-package main
+package harvestcli
 
 import (
 	"bytes"
@@ -85,10 +85,10 @@ func TestHarvestAskRunsBothConfiguredAdapters(t *testing.T) {
 				},
 			}
 			testCase.configure(&machine, binary, accountHome)
-			runtime := commandRuntime{Config: machine, Paths: paths.Values{Home: home}}
+			runtime := pfmconfig.Runtime{Config: machine, Paths: paths.Values{Home: home}}
 
 			var stdout, stderr bytes.Buffer
-			code := runHarvest([]string{"ask", "-p", "What is the fixture answer?", source}, &stdout, &stderr, runtime)
+			code := Harvest([]string{"ask", "-p", "What is the fixture answer?", source}, &stdout, &stderr, runtime)
 			if code != 0 {
 				t.Fatalf("harvest ask code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 			}
@@ -141,7 +141,7 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 	}
 	t.Setenv("PFM_ASK_PROMPT", promptCapture)
 	t.Setenv("PFM_ASK_FILES", fileCapture)
-	runtime := commandRuntime{
+	runtime := pfmconfig.Runtime{
 		Config: pfmconfig.Config{
 			Harvester:     askHarvester(home),
 			Codex:         pfmconfig.Codex{Binary: binary},
@@ -155,7 +155,7 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := runHarvest(
+	if code := Harvest(
 		[]string{"ask", "-p", "Answer without hiding missing evidence", good, missing},
 		&stdout,
 		&stderr,
@@ -216,11 +216,11 @@ func TestHarvestAskValidatesBoundsBeforeEngineOrFetch(t *testing.T) {
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
-			if code := runHarvest(
+			if code := Harvest(
 				testCase.args,
 				&stdout,
 				&stderr,
-				commandRuntime{
+				pfmconfig.Runtime{
 					Paths:  paths.Values{Home: home},
 					Config: pfmconfig.Config{Harvester: askHarvester(home)},
 				},
@@ -251,7 +251,7 @@ func TestHarvestAskAcceptsFiftySourcesAndFlagsAfterPositionals(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PFM_ASK_PROMPT", promptCapture)
-	runtime := commandRuntime{
+	runtime := pfmconfig.Runtime{
 		Config: pfmconfig.Config{
 			Harvester:     askHarvester(home),
 			Codex:         pfmconfig.Codex{Binary: binary},
@@ -266,7 +266,7 @@ func TestHarvestAskAcceptsFiftySourcesAndFlagsAfterPositionals(t *testing.T) {
 	}
 	args = append(args, "--engine", "codex", "-p", "Exercise the upper bound")
 	var stdout, stderr bytes.Buffer
-	if code := runHarvest(args, &stdout, &stderr, runtime); code != 0 {
+	if code := Harvest(args, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("harvest ask code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	prompt, err := os.ReadFile(promptCapture)
@@ -293,7 +293,7 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	runtime := commandRuntime{
+	runtime := pfmconfig.Runtime{
 		Config: pfmconfig.Config{
 			Harvester:     askHarvester(home),
 			Codex:         pfmconfig.Codex{Binary: binary},
@@ -304,7 +304,7 @@ func TestHarvestAskCleansFailureReceiptsWhenEngineFails(t *testing.T) {
 	}
 	missing := filepath.Join(home, "missing.txt")
 	var stdout, stderr bytes.Buffer
-	if code := runHarvest(
+	if code := Harvest(
 		[]string{"ask", "-p", "Fail after preparation", missing},
 		&stdout,
 		&stderr,
@@ -332,7 +332,7 @@ func TestHarvestAskReceiptDoesNotExposePrivateHarvestDetails(t *testing.T) {
 	if err := os.MkdirAll(receiptDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	path, _, err := writeHarvestAskReceipt(home, receiptDir, 0, "10.1234/public.boundary", harvest.Result{
+	path, _, err := writeAskReceipt(home, receiptDir, 0, "10.1234/public.boundary", harvest.Result{
 		Source:    "10.1234/public.boundary",
 		Path:      "/private/cache/html/document.md",
 		Method:    "doi-mirror",
@@ -365,11 +365,11 @@ func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runHarvest(
+	if code := Harvest(
 		[]string{source, "--json"},
 		&stdout,
 		&stderr,
-		commandRuntime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Harvester: askHarvester(home)}},
+		pfmconfig.Runtime{Paths: paths.Values{Home: home}, Config: pfmconfig.Config{Harvester: askHarvester(home)}},
 	); code != 0 {
 		t.Fatalf("plain harvest code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}

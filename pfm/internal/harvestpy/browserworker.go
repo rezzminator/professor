@@ -64,6 +64,11 @@ type BrowserFetchRequest struct {
 	// incomplete render (browser.py mark_incomplete); Go reads back only a marker
 	// holding its own token, never one a page ships (harvest.BrowserMarkerToken).
 	MarkerToken string `json:"marker_token,omitempty"`
+	// Headers are the caller's headers; the worker's route adds them to the
+	// requests to HeadersOrigin only (a same-origin navigation, redirect hop or
+	// subresource), never page-wide: another origin never receives them.
+	Headers       map[string]string `json:"headers,omitempty"`
+	HeadersOrigin string            `json:"headers_origin,omitempty"`
 }
 
 // browserWorkerRequest is the wire shape of one worker op.
@@ -103,7 +108,20 @@ func (worker *BrowserWorker) Fetch(
 	timeoutMS int,
 	onAsk func(url string) error,
 ) (string, int, error) {
-	html, status, _, err := worker.FetchPinned(ctx, source, proxy, "", "", "", headless, false, timeoutMS, onAsk)
+	html, status, _, err := worker.FetchPinned(
+		ctx,
+		source,
+		proxy,
+		"",
+		"",
+		"",
+		nil,
+		"",
+		headless,
+		false,
+		timeoutMS,
+		onAsk,
+	)
 	return html, status, err
 }
 
@@ -118,6 +136,8 @@ func (worker *BrowserWorker) Fetch(
 func (worker *BrowserWorker) FetchPinned(
 	ctx context.Context,
 	source, proxy, hostResolverRules, referer, markerToken string,
+	headers map[string]string,
+	headersOrigin string,
 	headless, pressLoaders bool,
 	timeoutMS int,
 	onAsk func(url string) error,
@@ -137,6 +157,8 @@ func (worker *BrowserWorker) FetchPinned(
 				Referer:           referer,
 				PressLoaders:      pressLoaders,
 				MarkerToken:       markerToken,
+				Headers:           headers,
+				HeadersOrigin:     headersOrigin,
 			},
 		},
 	)

@@ -75,6 +75,10 @@ func (h *Harvester) binaryPath(source, kind string) string {
 	if ext == "" {
 		ext = ".bin"
 	}
-	base := filepath.Join(h.options.CacheDir, CacheKey(source, kind))
+	root := h.options.CacheDir
+	if h.cache != nil {
+		root = h.cache.root // a call with caller headers keeps its files in its own partition
+	}
+	base := filepath.Join(root, CacheKey(source, kind))
 	return strings.TrimSuffix(base, filepath.Ext(base)) + ext
 }

@@ -50,7 +50,12 @@ func (service *Service) fetchOne(
 		return
 	}
 	defer func() { <-semaphore }()
-	fetched := service.harvester.FetchPublic(ctx, source, request.options)
+	harvester, scopedCtx, err := service.harvester.ForCaller(ctx, request.headers, source)
+	if err != nil {
+		fail(err.Error()) // no request was sent: the headers have no origin to go to
+		return
+	}
+	fetched := request.headers.MarkHeaderless(harvester.FetchPublic(scopedCtx, source, request.options))
 	items[index] = service.pageItem(source, fetched, request.work)
 	if service.runtime.Remote {
 		fetched.Path = "" // no result of the remote server carries a server path

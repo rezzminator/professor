@@ -456,7 +456,9 @@ func gatewayDo(ctx context.Context, req gatewayRequest) (*http.Response, error) 
 			httpReq.Header.Add(key, value)
 		}
 	}
-	resp, err := gatewayRequestClient(req).Do(httpReq)
+	defaults := httpReq.Header.Clone()
+	applyCallerHeaders(httpReq) // the caller's headers, on the target's origin only (caller_headers.go)
+	resp, err := scopeCallerRedirects(ctx, gatewayRequestClient(req), defaults).Do(httpReq)
 	if err != nil {
 		// http.Client wraps a transport failure in *url.Error, which carries
 		// the full request URL — query string included, and with it any

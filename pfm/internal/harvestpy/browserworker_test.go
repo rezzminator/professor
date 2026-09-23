@@ -172,6 +172,8 @@ func TestBrowserFetchRequestCarriesTheGoOwnedDial(t *testing.T) {
 		"MAP publisher.example.test 93.184.216.34",
 		"https://www.google.com/",
 		"t0k",
+		nil,
+		"",
 		true,
 		true,
 		45000,

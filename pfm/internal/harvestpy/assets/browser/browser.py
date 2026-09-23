@@ -152,7 +152,36 @@ def launch_arguments(proxy_url, host_resolver_rules=None):
     return [f"--host-resolver-rules={','.join(rules)}", WEBRTC_POLICY_ARG]
 
 
-def browser_route_guard(ask_fetchable):
+def caller_origin(url):
+    """scheme://host[:port] of an http(s) URL, the default port dropped (Go's
+    harvest.webOrigin); "" for anything else."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return ""
+    scheme = (parts.scheme or "").lower()
+    if scheme not in ("http", "https") or not parts.hostname:
+        return ""
+    host = parts.hostname.lower()
+    if ":" in host:
+        host = f"[{host}]"
+    if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+        host = f"{host}:{port}"
+    return f"{scheme}://{host}"
+
+
+def caller_scope(request):
+    """The caller's (headers, origin) from a worker request, names lowercased the
+    way route.request.headers holds them; None when the call carries none."""
+    headers = request.get("headers") or {}
+    origin = request.get("headers_origin") or ""
+    if not headers or not origin:
+        return None
+    return ({str(name).lower(): str(value) for name, value in headers.items()}, origin)
+
+
+def browser_route_guard(ask_fetchable, caller=None):
     """The per-request SSRF chokepoint for the browser rung, as a Playwright/Patchright
     route handler. Same contract as the retired net.py guard: EVERY url Chrome touches —
     redirects, subresources, XHR — is re-validated through the ask protocol, and blocked
@@ -170,9 +199,34 @@ def browser_route_guard(ask_fetchable):
             print(f"browser route refused (ssrf) {redact(target)}: {reason}", file=sys.stderr)
             await abort_request(route, redact(target))
             return
+        if caller and caller_origin(target) == caller[1]:
+            # The caller's headers go to their origin only: this navigation, a redirect
+            # hop or a subresource there — never another origin (never page-wide).
+            await route.continue_(headers={**route.request.headers, **caller[0]})
+            return
         await route.continue_()
 
     return _ssrf_route_guard
+
+
+def caller_document_route(guard, caller):
+    """The route that carries the caller's headers onto a document at their origin.
+    Patchright serves add_init_script through a route of its own that continues every
+    http document with its init-script flag, and a continue under that flag DROPS any
+    header override: the navigation left without the caller's headers. Registered
+    after add_init_script, this route runs before patchright's and hands such a
+    document to *guard* (the SSRF route guard, which asks and then continues with
+    the headers), so the init scripts never reach that document through the route;
+    open_page puts the WebRTC block back over CDP. Every other request falls back
+    to patchright's route and then the context's guard, unchanged."""
+    async def _caller_document(route) -> None:
+        request = route.request
+        if request.resource_type == "document" and caller_origin(str(request.url)) == caller[1]:
+            await guard(route)
+            return
+        await route.fallback()
+
+    return _caller_document
 
 
 def browser_websocket_guard(ask_fetchable):
@@ -669,13 +723,13 @@ def mark_incomplete(html, outcome, marker_token):
     return meta + html
 
 
-async def install_route_guards(context, guarded_ask):
+async def install_route_guards(context, guarded_ask, caller=None):
     """Register both SSRF chokepoints on *context*, at CONTEXT scope (every
     page the context opens, not just the first). Extracted from fetch_browser
     so a regression — page-scope registration, a narrower glob than "**/*",
     or a dropped registration entirely — fails a test instead of shipping
     silently."""
-    await context.route("**/*", browser_route_guard(guarded_ask))
+    await context.route("**/*", browser_route_guard(guarded_ask, caller))
     await context.route_web_socket("**/*", browser_websocket_guard(guarded_ask))
 
 
@@ -725,8 +779,25 @@ def serialized_ask(raw_ask):
     return guarded_ask
 
 
+async def open_page(context, ua_override=None, caller_documents=False):
+    """A new page in *context*: *ua_override* (the headless UA and client hints)
+    sent over CDP, and — when *caller_documents* (caller_document_route takes the
+    page's documents at the caller's origin past patchright's init-script route) —
+    the WebRTC block installed over CDP instead, for every document the page loads.
+    A failed send raises."""
+    page = await context.new_page()
+    if ua_override is None and not caller_documents:
+        return page
+    session = await context.new_cdp_session(page)
+    if ua_override is not None:
+        await session.send("Emulation.setUserAgentOverride", ua_override)
+    if caller_documents:
+        await session.send("Page.addScriptToEvaluateOnNewDocument", {"source": WEBRTC_BLOCK_SCRIPT})
+    return page
+
+
 async def render_page(context, url, timeout_ms, referer=None, clock=None, press_loaders=False,
-                      ua_override=None, marker_token=""):
+                      ua_override=None, marker_token="", caller_documents=False):
     """Open *url* in *context*, let it settle, scroll it until stable and
     return (html, status, scroll outcome). The navigation carries *referer*
     (a provenance Referer: some anti-bot walls open for any Referer and refuse
@@ -736,15 +807,12 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
     rendered, stamped incomplete with the reason. A page whose document was
     replaced by one at another origin or path while scrolling (a login or
     consent redirect) returns the page as it stood when scrolling began,
-    stamped incomplete — never the document it navigated to. *ua_override*
-    (the headless render's UA and client hints) is sent to the page over CDP
-    before it navigates; a failed send raises. The incomplete stamp carries
+    stamped incomplete — never the document it navigated to. The page opens
+    through open_page (*ua_override*, *caller_documents*) before it
+    navigates. The incomplete stamp carries
     *marker_token* (mark_incomplete), and the outcome's "url" is the address of
     the document returned — the page as it stood when scrolling began."""
-    page = await context.new_page()
-    if ua_override is not None:
-        session = await context.new_cdp_session(page)
-        await session.send("Emulation.setUserAgentOverride", ua_override)
+    page = await open_page(context, ua_override, caller_documents)
     resp = await page.goto(url, timeout=timeout_ms, wait_until="domcontentloaded", referer=referer or None)
     shell_text = await page.evaluate(TEXT_JS) if is_hash_route(url) else None
     try:
@@ -869,7 +937,7 @@ def same_page(first, second):
 
 async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True,
                         host_resolver_rules=None, referer=None, press_loaders=False, marker_token="",
-                        report=None):
+                        report=None, caller=None):
     """Render *url* in a real system Chrome via Patchright; return (html, status, headless, error).
     A render also records, in the *report* dict when one is passed, "final_url": the address
     of the document html holds (render_page's outcome "url"); the incomplete stamp carries
@@ -912,11 +980,12 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
             browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy,
                                               args=launch_args)
             try:
-                context, ua_override = await guarded_context(browser, headless, guarded_ask)
+                context, ua_override = await guarded_context(browser, headless, guarded_ask, caller)
 
                 html, status, outcome = await render_page(context, url, timeout_ms, referer=referer,
                                                           press_loaders=press_loaders, ua_override=ua_override,
-                                                          marker_token=marker_token)
+                                                          marker_token=marker_token,
+                                                          caller_documents=caller is not None)
                 print(f"browser rung {redact(url)} -> HTTP {status} ({len(html)} chars, headless={headless})",
                       file=sys.stderr)
                 if report is not None:
@@ -955,7 +1024,7 @@ async def open_rung(url, ask_fetchable):
     return async_playwright, guarded_ask, None
 
 
-async def guarded_context(chrome, headless, guarded_ask, **extra):
+async def guarded_context(chrome, headless, guarded_ask, caller=None, **extra):
     """A new context on *chrome* as a visitor arrives (fetch_browser's doc):
     headless, the stock User-Agent and its client hints, returned as the
     ua_override render_page sends over CDP; headed, Chrome's own. Both SSRF
@@ -969,8 +1038,11 @@ async def guarded_context(chrome, headless, guarded_ask, **extra):
         context = await chrome.new_context(**context_options(user_agent), **extra)
     else:
         context = await chrome.new_context(**context_options(None), **extra)
-    await install_route_guards(context, guarded_ask)
+    await install_route_guards(context, guarded_ask, caller)
     await context.add_init_script(WEBRTC_BLOCK_SCRIPT)
+    if caller:
+        # After add_init_script, so it runs before patchright's init-script route.
+        await context.route("**/*", caller_document_route(browser_route_guard(guarded_ask, caller), caller))
     return context, ua_override
 
 
@@ -1064,18 +1136,16 @@ async def refetch_in_page(page, url, max_bytes, status):
 
 
 async def capture_download(context, url, dest, max_bytes, timeout_ms, referer=None, ua_override=None,
-                           grace_ms=DOWNLOAD_GRACE_MS):
+                           grace_ms=DOWNLOAD_GRACE_MS, caller_documents=False):
     """Navigate to *url* in *context* and capture the file into *dest*, capped
     at *max_bytes*: the browser's download event (an attachment, or a type
     Chrome does not display), else the navigation's own response body (a type
     Chrome displays: an image, a PDF in its viewer). A navigation that shows a
     page is watched for *grace_ms* for a download or a navigation to the file.
     Returns {"via","bytes","content_type","final_url","status"}; raises
-    DownloadFailure for a named failure."""
-    page = await context.new_page()
-    if ua_override is not None:
-        session = await context.new_cdp_session(page)
-        await session.send("Emulation.setUserAgentOverride", ua_override)
+    DownloadFailure for a named failure. The page opens through open_page
+    (*ua_override*, *caller_documents*)."""
+    page = await open_page(context, ua_override, caller_documents)
     downloads, documents = [], []
     page.on("download", lambda download: downloads.append(download))
     page.on("response", lambda response: documents.append(response)
@@ -1150,7 +1220,7 @@ async def capture_download(context, url, dest, max_bytes, timeout_ms, referer=No
 
 
 async def download_browser(url, ask_fetchable, dest, max_bytes, proxy_url=None, timeout_ms=45_000, headless=True,
-                           host_resolver_rules=None, referer=None):
+                           host_resolver_rules=None, referer=None, caller=None):
     """Download *url* into *dest* in a real system Chrome, under fetch_browser's
     SSRF boundary (the Go-owned proxy is REQUIRED, every URL asks Go). Returns
     capture_download's dict, or an error string when the rung could not start;
@@ -1164,9 +1234,10 @@ async def download_browser(url, ask_fetchable, dest, max_bytes, proxy_url=None, 
         chrome = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy_settings(proxy_url),
                                          args=launch_arguments(proxy_url, host_resolver_rules))
         try:
-            context, ua_override = await guarded_context(chrome, headless, guarded_ask, accept_downloads=True)
+            context, ua_override = await guarded_context(chrome, headless, guarded_ask, caller,
+                                                         accept_downloads=True)
             return await capture_download(context, url, dest, max_bytes, timeout_ms, referer=referer,
-                                          ua_override=ua_override)
+                                          ua_override=ua_override, caller_documents=caller is not None)
         finally:
             await chrome.close()
 
@@ -1183,6 +1254,7 @@ async def handle_download(request):
             headless=bool(request.get("headless", True)),
             host_resolver_rules=request.get("host_resolver_rules") or None,
             referer=request.get("referer") or None,
+            caller=caller_scope(request),
         )
     except DownloadFailure as failure:
         print(f"browser download {redact(request.get('url', ''))} failed ({failure.reason}): {failure}",
@@ -1226,6 +1298,7 @@ async def handle_fetch(request):
         press_loaders=bool(request.get("press_loaders", False)),
         marker_token=request.get("marker_token") or "",
         report=report,
+        caller=caller_scope(request),
     )
     if error is not None and not html:
         return {"ok": False, "error": error}

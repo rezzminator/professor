@@ -42,7 +42,7 @@ func connectHarvesterInProcess(t *testing.T, service *Service) *mcp.ClientSessio
 
 // TestRegisteredToolsRecordUnderTheMCPComponent proves every mcp.AddTool
 // registration in register() is wrapped by obs.Tool (items 4/6 of the
-// wiring): a real in-process searchCache call writes exactly one mcp.call
+// wiring): a real in-process readPage call writes exactly one mcp.call
 // record under the mcp component, tool and kind named, never the pattern.
 func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 	service, err := NewConfiguredHarvester(

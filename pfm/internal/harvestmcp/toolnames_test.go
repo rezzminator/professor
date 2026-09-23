@@ -10,7 +10,7 @@ import (
 // TestToolNamesFollowTheSearchGate pins RegisteredToolNames to the same search gate
 // register() applies (service.go:493): a runtime with no SearXNG URL or
 // Brave key omits `webSearch` entirely, and a configured runtime lists it
-// between findWorks and fetchImage — the same slot register() adds it in.
+// after readWork — the same slot register() adds it in.
 func TestToolNamesFollowTheSearchGate(t *testing.T) {
 	off := Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")}
 	wantOff := []string{"readPage", "parseLocalDocuments", "download", "findWorks", "readWork"}

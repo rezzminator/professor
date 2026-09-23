@@ -1,41 +1,52 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
-	"github.com/rezzminator/professor/pfm/internal/harvest"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
-// TestRenderHarvestCLINamesAPartialArtifact pins the CLI receipt header: a
-// known-incomplete artifact says so on the cache_status line, before the blank
-// line and the content; a complete one carries no PARTIAL notice.
-func TestRenderHarvestCLINamesAPartialArtifact(t *testing.T) {
-	result := harvest.Result{
-		Source:      "https://fixture.example/source",
-		CacheStatus: "miss",
-		Bytes:       12,
-		Tokens:      3,
-		Path:        "/cache/source.md",
-		Content:     "body text",
+func TestHarvestRuntimeCarriesConfiguredScholarlyProviders(t *testing.T) {
+	home := t.TempDir()
+	config := pfmconfig.Defaults(home, nil)
+	config.Harvester.Cache.Dir = home + "/cache"
+	config.Harvester.Scholarly.DOIMirrorURL = "https://mirror.example/doi-mirror"
+	config.Harvester.Scholarly.IPFSCatalogURL = "https://ipfs-catalog.example"
+	config.Harvester.Scholarly.DOIViewerURL = "https://doi-viewer.example"
+	config.Harvester.Scholarly.MD5CatalogURL = "https://md5-catalog.example"
+	config.Harvester.Scholarly.GoogleScholarURL = "https://scholar.example"
+	config.Harvester.Scholarly.ContactEmail = "ops@example.com"
+	runtime := harvestRuntime(commandRuntime{Config: config})
+
+	for name, values := range map[string]struct{ got, want string }{
+		"DOIMirrorURL":     {runtime.DOIMirrorURL, "https://mirror.example/doi-mirror"},
+		"IPFSCatalogURL":   {runtime.IPFSCatalogURL, "https://ipfs-catalog.example"},
+		"DOIViewerURL":     {runtime.DOIViewerURL, "https://doi-viewer.example"},
+		"MD5CatalogURL":    {runtime.MD5CatalogURL, "https://md5-catalog.example"},
+		"GoogleScholarURL": {runtime.GoogleScholarURL, "https://scholar.example"},
+	} {
+		if values.got != values.want {
+			t.Errorf("runtime %s = %q, want %q", name, values.got, values.want)
+		}
 	}
-	complete := renderHarvestCLI(result, false)
-	if strings.Contains(complete, "PARTIAL:") {
-		t.Fatalf("complete receipt names a PARTIAL notice:\n%s", complete)
+	if runtime.ContactEmail != "ops@example.com" {
+		t.Fatalf("runtime ContactEmail = %q, want sibling scholarly setting preserved", runtime.ContactEmail)
 	}
-	result.Partial = "page 3 of 9 failed to convert"
-	want := "cache_status: miss / bytes: 12 / tokens: 3 / path: /cache/source.md" +
-		" / PARTIAL: page 3 of 9 failed to convert\n\nbody text"
-	if got := renderHarvestCLI(result, false); !strings.Contains(got, want) {
-		t.Fatalf("partial receipt header:\n%s\nwant it to contain:\n%s", got, want)
-	}
-	// The size probe is a receipt too: a caller budgeting a read must learn
-	// the artifact is incomplete before it reads it.
-	if got := renderHarvestCLI(result, true); !strings.Contains(got, " / PARTIAL: page 3 of 9 failed to convert") {
-		t.Fatalf("size-only receipt hides the PARTIAL notice:\n%s", got)
-	}
-	result.Partial = ""
-	if got := renderHarvestCLI(result, true); strings.Contains(got, "PARTIAL:") {
-		t.Fatalf("complete size-only receipt names a PARTIAL notice:\n%s", got)
+}
+
+// TestHarvestDispatchReachesHarvestcli: `pfm harvest <verb>` reaches the
+// harvestcli verbs, `download` included, through main's dispatch.
+func TestHarvestDispatchReachesHarvestcli(t *testing.T) {
+	for verb, usage := range map[string]string{
+		"download": "usage: pfm harvest download",
+		"ask":      "usage: pfm harvest ask",
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run([]string{"harvest", verb}, &stdout, &stderr); code != 2 ||
+			!strings.Contains(stderr.String(), usage) {
+			t.Errorf("pfm harvest %s: code=%d stderr=%q, want 2 and %q", verb, code, stderr.String(), usage)
+		}
 	}
 }

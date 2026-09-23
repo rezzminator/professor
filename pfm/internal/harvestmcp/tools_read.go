@@ -25,9 +25,10 @@ const (
 
 // ReadPageInput is readPage's input.
 type ReadPageInput struct {
-	Sources  []string `json:"sources" jsonschema:"1–50 web page URLs (http or https), each read as Markdown in the same order. A DOI, arXiv id, PMID, PMCID, ISBN or findWorks handle goes to readWork; a local path goes to parseLocalDocuments."`
-	Refresh  bool     `json:"refresh,omitempty" jsonschema:"Bypass the cache: read the page again and overwrite the cached artifact."`
-	SizeOnly bool     `json:"size_only,omitempty" jsonschema:"Read and cache the full content but return no body: only its size and where it is."`
+	Sources  []string          `json:"sources" jsonschema:"1–50 web page URLs (http or https), each read as Markdown in the same order. A DOI, arXiv id, PMID, PMCID, ISBN or findWorks handle goes to readWork; a local path goes to parseLocalDocuments."`
+	Refresh  bool              `json:"refresh,omitempty" jsonschema:"Bypass the cache: read the page again and overwrite the cached artifact."`
+	SizeOnly bool              `json:"size_only,omitempty" jsonschema:"Read and cache the full content but return no body: only its size and where it is."`
+	Headers  map[string]string `json:"headers,omitempty" jsonschema:"Optional request headers (name → value) sent only to the target's own origin; reader services, archives and resolver APIs never receive them. At most 32 headers, 8 KiB; no Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Trailer, Keep-Alive or Proxy-*. A caller header overrides the default of its name."`
 }
 
 // ParseLocalInput is parseLocalDocuments' input.
@@ -38,9 +39,10 @@ type ParseLocalInput struct {
 
 // ReadWorkInput is readWork's input.
 type ReadWorkInput struct {
-	Works    []string `json:"works" jsonschema:"1–20 works: a DOI, arXiv id, PMID, PMCID, ISBN, a paper or book landing URL, or a findWorks handle."`
-	Refresh  bool     `json:"refresh,omitempty" jsonschema:"Bypass the cache: read the work again and overwrite the cached artifact."`
-	SizeOnly bool     `json:"size_only,omitempty" jsonschema:"Read and cache the full content but return no body: only its size and where it is."`
+	Works    []string          `json:"works" jsonschema:"1–20 works: a DOI, arXiv id, PMID, PMCID, ISBN, a paper or book landing URL, or a findWorks handle."`
+	Refresh  bool              `json:"refresh,omitempty" jsonschema:"Bypass the cache: read the work again and overwrite the cached artifact."`
+	SizeOnly bool              `json:"size_only,omitempty" jsonschema:"Read and cache the full content but return no body: only its size and where it is."`
+	Headers  map[string]string `json:"headers,omitempty" jsonschema:"Optional request headers (name → value) sent only to the target's own origin; reader services, archives and resolver APIs never receive them. At most 32 headers, 8 KiB; no Host, Content-Length, Transfer-Encoding, Connection, Upgrade, TE, Trailer, Keep-Alive or Proxy-*. A caller header overrides the default of its name."`
 }
 
 // PageItem is one read item of readPage, parseLocalDocuments and readWork.
@@ -72,6 +74,7 @@ type readRequest struct {
 	options  harvest.FetchOptions
 	misroute func(source string) string
 	work     bool
+	headers  harvest.CallerHeaders // the caller's headers, validated at entry
 }
 
 func (service *Service) readPage(
@@ -80,7 +83,12 @@ func (service *Service) readPage(
 	if len(input.Sources) < 1 || len(input.Sources) > maxPageSources {
 		return nil, PagesOutput{}, fmt.Errorf("sources must contain 1-%d items", maxPageSources)
 	}
+	headers, err := harvest.ParseCallerHeaders(input.Headers)
+	if err != nil {
+		return nil, PagesOutput{}, err
+	}
 	return service.readMany(ctx, input.Sources, readRequest{
+		headers:  headers,
 		options:  harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly},
 		misroute: pageMisroute,
 	})
@@ -104,7 +112,12 @@ func (service *Service) readWork(
 	if len(input.Works) < 1 || len(input.Works) > maxWorks {
 		return nil, PagesOutput{}, fmt.Errorf("works must contain 1-%d items", maxWorks)
 	}
+	headers, err := harvest.ParseCallerHeaders(input.Headers)
+	if err != nil {
+		return nil, PagesOutput{}, err
+	}
 	return service.readMany(ctx, input.Works, readRequest{
+		headers:  headers,
 		options:  harvest.FetchOptions{Refresh: input.Refresh, SizeOnly: input.SizeOnly},
 		misroute: workMisroute,
 		work:     true,

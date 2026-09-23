@@ -31,7 +31,8 @@ const (
 
 // DownloadInput is download's input.
 type DownloadInput struct {
-	Sources []string `json:"sources" jsonschema:"1–50 URLs of files of any kind, each downloaded as bytes, unparsed, in the same order."`
+	Sources []string          `json:"sources" jsonschema:"1–50 URLs of files of any kind, each downloaded as bytes, unparsed, in the same order."`
+	Headers map[string]string `json:"headers,omitempty" jsonschema:"Optional request headers (name → value) sent only to the target's own origin; archives never receive them. At most 32 headers, 8 KiB; no hop-by-hop or framing header. A caller header overrides the default of its name."`
 }
 
 // ResourceRef is the resource_link a remote download answers: resources/read
@@ -108,6 +109,10 @@ func (service *Service) download(
 	if len(input.Sources) < 1 || len(input.Sources) > maxDownloadSources {
 		return nil, DownloadOutput{}, fmt.Errorf("sources must contain 1-%d items", maxDownloadSources)
 	}
+	headers, err := harvest.ParseCallerHeaders(input.Headers)
+	if err != nil {
+		return nil, DownloadOutput{}, err
+	}
 	items := make([]DownloadItem, len(input.Sources))
 	var wait sync.WaitGroup
 	semaphore := make(chan struct{}, 8)
@@ -129,7 +134,7 @@ func (service *Service) download(
 				return
 			}
 			defer func() { <-semaphore }()
-			items[index] = service.downloadOne(ctx, source)
+			items[index] = service.downloadOne(ctx, source, headers)
 		}()
 	}
 	wait.Wait()
@@ -149,11 +154,15 @@ func (service *Service) download(
 
 // downloadOne downloads one source through harvest.Download (Retrieve's
 // file policy), hashes the stored file and records it in the store.
-func (service *Service) downloadOne(ctx context.Context, source string) DownloadItem {
+func (service *Service) downloadOne(ctx context.Context, source string, headers harvest.CallerHeaders) DownloadItem {
 	if message := downloadMisroute(source); message != "" {
 		return DownloadItem{Source: source, Error: message}
 	}
-	return service.downloadItem(ctx, source, service.harvester.Download(ctx, source))
+	harvester, scopedCtx, err := service.harvester.ForCaller(ctx, headers, source)
+	if err != nil {
+		return DownloadItem{Source: source, Error: err.Error()} // no request was sent
+	}
+	return service.downloadItem(ctx, source, headers.MarkHeaderless(harvester.Download(scopedCtx, source)))
 }
 
 // downloadItem turns one download result into its item: hashed, recorded in

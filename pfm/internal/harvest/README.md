@@ -16,13 +16,13 @@ Provider URLs are absolute HTTP(S) base URLs without credentials, query, or frag
 
 Mirror availability and document coverage vary. A successful homepage response is insufficient: the selected record, download host, and conversion must all work. HTTP errors, malformed responses, challenges, and conversion failures remain failures. Interactive CAPTCHAs are not solved. A missing Unpaywall contact email disables its requests; no substitute identity is generated.
 
-For an exact DOI, ISBN, PMID, or PMCID, call `fetch`. For a title, call `findWorks`, choose a result, and pass its fetch value unchanged to `fetch`. This preserves the selected work or version instead of guessing from an ambiguous title.
+For a web page, call `readPage`. For an exact DOI, arXiv id, ISBN, PMID, or PMCID, call `readWork`. For a title, call `findWorks`, choose a result, and pass its `handle` value unchanged to `readWork`. This preserves the selected work or version instead of guessing from an ambiguous title.
 
 ## Public results
 
-CLI, MCP tools, the fetch prompt, and `harvest ask` return exported artifacts. Retrieval methods, mirror URLs, fallback traces, and internal cache filenames are kept out of those results. A direct discovered download URL becomes a persistent opaque `harvest:` handle. Bibliographic identity and article citations remain in the document.
+CLI, MCP tools, and `harvest ask` return exported artifacts. Retrieval methods, mirror URLs, fallback traces, and internal cache filenames are kept out of those results. A direct discovered download URL becomes a persistent opaque `harvest:` handle. Bibliographic identity and article citations remain in the document.
 
-Complete exported Markdown and binary artifacts live under `<cache>/public/` with hashed filenames and private filesystem permissions. Inline limits do not truncate the saved document. Cache search exports matching documents before returning a path or fetch handle. Internal cache entries, handle mappings, and telemetry cannot be fetched through public Harvester calls, including through symlinks. The authenticated external gateway confines local reads to exported artifacts.
+Complete exported Markdown and binary artifacts live under `<cache>/public/` with hashed filenames and private filesystem permissions. Inline limits do not truncate the saved document. Internal cache entries, handle mappings, and telemetry cannot be fetched through public Harvester calls, including through symlinks. The authenticated external gateway confines local reads to exported artifacts.
 
 Detailed retrieval diagnostics stay in the internal cache and process logs. Public errors distinguish failed retrieval, timeout, access refusal, challenge, conversion failure, and storage failure without including provider addresses. These output controls do not remove publisher attribution or citations contained in the original document, or replace operating-system access controls on logs.
 

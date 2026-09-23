@@ -366,7 +366,7 @@ const (
 	SearchProbeConfigured  SearchProbeState = "configured"
 )
 
-// SearchProbe is doctor's one-line verdict on the harvester search tool.
+// SearchProbe is doctor's one-line verdict on the harvester webSearch tool.
 // Warning is set only for a state an operator should act on — OFF and a
 // keyless-but-configured Brave key are named states, never warnings.
 type SearchProbe struct {

@@ -40,5 +40,6 @@ func (t *userAgentTransport) RoundTrip(req *http.Request) (*http.Response, error
 		clone.Header.Set("Sec-CH-UA-Mobile", "?0")
 		clone.Header.Set("Sec-CH-UA-Platform", `"macOS"`)
 	}
+	applyCallerHeaders(clone) // a caller header overrides the default of its name, on the target's origin only
 	return t.base.RoundTrip(clone)
 }

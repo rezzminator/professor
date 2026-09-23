@@ -16,6 +16,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/fleet"
+	"github.com/rezzminator/professor/pfm/internal/harvestcli"
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/kill"
@@ -117,7 +118,7 @@ func run(args []string, stdout, stderr io.Writer) (exitCode int) {
 	case "chat":
 		return runChatWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, context.Background())
 	case "harvest":
-		return runHarvest(args[1:], stdout, stderr, runtime)
+		return harvestcli.Harvest(args[1:], stdout, stderr, runtime)
 	case "headless":
 		return runHeadless(args[1:], stdout, stderr, runtime)
 	case "index":
@@ -184,7 +185,7 @@ func printUsage(w io.Writer) {
 		"  ls        list or pick fleet chats",
 		"  chat      operate on one chat: new, open, inject, ask, read, stream, name, kill, end",
 		"  headless  run Claude or OpenCode through one isolated process interface",
-		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path",
+		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path; download files",
 		"  index     refresh the transcript index",
 		"  whoami    print this chat's own tmux session name",
 		"  issues    list servicedesk complaints filed through issue_servicedesk",

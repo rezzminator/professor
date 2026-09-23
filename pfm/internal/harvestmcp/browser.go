@@ -33,6 +33,7 @@ func (converter pythonConverter) FetchBrowser(
 ) (string, int, string, error) {
 	var html, finalURL string
 	var status int
+	headers, headersOrigin := harvest.CallerHeadersFor(ctx)
 	err := converter.inBrowser(ctx, source, func(fetchCtx context.Context, session browserSession) error {
 		var fetchErr error
 		html, status, finalURL, fetchErr = session.worker.FetchPinned(
@@ -42,6 +43,8 @@ func (converter pythonConverter) FetchBrowser(
 			session.hostResolverRules,
 			harvest.ProvenanceReferer,
 			harvest.BrowserMarkerToken(),
+			headers,
+			headersOrigin,
 			headless,
 			harvest.SitePressesLoaders(source),
 			45000,
@@ -66,6 +69,7 @@ func (converter pythonConverter) DownloadBrowser(
 	headless bool,
 ) (harvest.BrowserFile, error) {
 	var file harvest.BrowserFile
+	headers, headersOrigin := harvest.CallerHeadersFor(ctx)
 	err := converter.inBrowser(ctx, source, func(fetchCtx context.Context, session browserSession) error {
 		got, downloadErr := session.worker.Download(fetchCtx, harvestpy.BrowserDownloadRequest{
 			BrowserFetchRequest: harvestpy.BrowserFetchRequest{
@@ -75,6 +79,8 @@ func (converter pythonConverter) DownloadBrowser(
 				HostResolverRules: session.hostResolverRules,
 				TimeoutMS:         45000,
 				Referer:           harvest.ProvenanceReferer,
+				Headers:           headers,
+				HeadersOrigin:     headersOrigin,
 			},
 			Path:     dest,
 			MaxBytes: maxBytes,

@@ -126,6 +126,7 @@ class FeedPage:
         self.sentinel = None
         self.replaced = False
         self.context = None
+        self.frames = [self]  # patchright lists the main frame first
 
     async def goto(self, url, **kwargs):
         self.goto_calls.append((url, kwargs))
@@ -151,6 +152,8 @@ class FeedPage:
                 self.url, self.replaced, self.sentinel = self.navigate_after_check, True, None
                 self.navigate_after_check = None
             return present
+        if "harvesterConsent" in script:
+            return {"pressed": [], "removed": []}
         if "userAgentData" in script:
             self.ua_data_reads += 1
             return None if self.ua_data == UNREADABLE else self.ua_data

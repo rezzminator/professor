@@ -734,7 +734,7 @@ func ooxmlExtensionKind(source string) (string, bool) {
 }
 
 func isChallenge(body []byte, status int) bool {
-	low := strings.ToLower(string(body))
+	low := strings.ToLower(string(withoutConsentMarkup(body))) // a banner's vendor list is never a wall
 	// Strong bot-wall phrases (net.py's _CHALLENGE_PHRASES plus Cloudflare's
 	// "blocked" page) flag at any length; forum phrases below need corroboration.
 	for _, marker := range []string{"just a moment", "checking your browser", "checking your browser before", "cf-browser-verification", "cf-chl-", "are you a robot", "confirm you are a human", "enable javascript and cookies", "captcha challenge", "completing the captcha", "verify you are human", "verifying you are human", "sorry, you have been blocked", "why have i been blocked", "attention required! | cloudflare"} {

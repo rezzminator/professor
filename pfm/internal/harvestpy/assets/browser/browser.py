@@ -6,6 +6,12 @@ solves anything interactive (no Turnstile/CAPTCHA solver); it passes PASSIVE
 bot walls by rendering in a real Chrome whose CDP automation handshake is
 hidden by Patchright.
 
+Every render dismisses a consent banner before it scrolls — the reject or
+necessary-only choice, never accept, in every frame; an overlay with no such
+choice is removed and its scroll lock undone — and a page whose scrolling
+stays locked is stamped incomplete ("blocked"), never judged stable. The
+snapshot handed to Go carries no consent banner (see CONSENT_SETTLE_MS).
+
 Protocol (JSON lines over stdin/stdout), one request serialized at a time:
 
   Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://127.0.0.1:PORT","headless":true,
@@ -47,6 +53,7 @@ import asyncio
 import json
 from html import escape as html_escape
 import os.path
+import re
 import shutil
 import sys
 import urllib.parse
@@ -297,7 +304,212 @@ SCROLL_STABLE_ROUNDS = 3
 
 # The rendered-content size the loop watches: the length of the visible text.
 MEASURE_JS = "() => (document.body ? document.body.innerText.length : 0)"
-SCROLL_JS = "() => window.scrollTo(0, Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement.scrollHeight))"
+# One scroll round: the window to the bottom of the document, and the page's
+# largest inner scroll container (an app whose content scrolls inside a div,
+# not the window) to its bottom. It reports whether anything moved, and
+# "blocked" when the document still had room below the viewport yet nothing
+# moved and no inner container carries the content — a scroll lock (a consent
+# or modal overlay pinning the body), never a finished page. The height is
+# the body's too: a lock that fixes the body leaves the document one viewport
+# tall while the content overflows the body.
+SCROLL_JS = r"""() => {
+  const doc = document.documentElement, body = document.body;
+  const height = Math.max(doc.scrollHeight, body ? body.scrollHeight : 0);
+  const before = window.scrollY;
+  const room = height - window.innerHeight - before > 2;
+  window.scrollTo(0, height);
+  let moved = window.scrollY !== before;
+  let best = null, bestArea = 0;
+  for (const el of document.querySelectorAll('body *')) {
+    if (el.scrollHeight - el.clientHeight <= 2) continue;
+    const overflow = getComputedStyle(el).overflowY;
+    if (overflow !== 'auto' && overflow !== 'scroll' && overflow !== 'overlay') continue;
+    const area = el.clientWidth * el.clientHeight;
+    if (area > bestArea) { best = el; bestArea = area; }
+  }
+  if (best && bestArea >= window.innerWidth * window.innerHeight * 0.25) {
+    const top = best.scrollTop;
+    best.scrollTop = best.scrollHeight;
+    if (best.scrollTop !== top) moved = true;
+  } else {
+    best = null;
+  }
+  return {moved: moved, blocked: room && !moved && !best};
+}"""
+
+# Consent: a consent-management overlay (OneTrust, Didomi, Quantcast/TCF,
+# Cookiebot, Usercentrics, TrustArc, Sourcepoint in its iframe, a site's own
+# cookie dialog) pins the body so the page never scrolls. render_page
+# dismisses it before scrolling, on every page (it is not a loader press), in
+# the main frame and every child frame: it presses the privacy-preserving
+# choice only — reject, decline, necessary-only, never accept — first by the
+# known CMP selectors, then by label inside a dialog or consent container (any
+# control in a child frame: a consent iframe is its own container). A control
+# that could navigate away (a link with an address, anything in a form) is
+# never pressed. An overlay with no reject control, or one that stays after
+# the press, is removed and the page's scroll lock undone; a lock that returns
+# stops the scroll "blocked", stamped incomplete. The known CMP containers are
+# removed before every snapshot, so a banner's text is never stored as content.
+CONSENT_SETTLE_MS = 1000
+CONSENT_REJECT_PATTERN = (
+    r"^(?:(?:i\s+)?(?:reject|decline|deny|refuse|disagree)(?:\s+all)?(?:\s+cookies)?|(?:i\s+)?do\s+not\s+accept|"
+    r"don'?t\s+accept|continue\s+without\s+(?:accepting|agreeing)|"
+    r"(?:(?:use|accept|allow)\s+)?(?:only\s+)?(?:strictly\s+)?(?:necessary|essential|required)(?:\s+cookies)?(?:\s+only)?|"
+    r"(?:alle\s+)?ablehnen|nur\s+(?:notwendige|erforderliche|essenzielle)(?:\s+cookies)?|"
+    r"(?:tout\s+)?refuser(?:\s+tout)?|continuer\s+sans\s+accepter|rechazar(?:\s+tod[oa]s?)?|rifiuta(?:\s+tutt[oi])?|"
+    r"(?:alles\s+)?weigeren|rejeitar(?:\s+tudo)?|avvisa\s+alla|afvis\s+alle|avslå\s+alle)$"
+)
+CONSENT_REJECT_SELECTORS = [
+    "#onetrust-reject-all-handler", "#didomi-notice-disagree-button", ".didomi-continue-without-agreeing",
+    "#CybotCookiebotDialogBodyButtonDecline", "#CybotCookiebotDialogBodyLevelButtonLevelOptinDeclineAll",
+    "button[data-testid='uc-deny-all-button']", "#truste-consent-required", "button.sp_choice_type_REJECT_ALL",
+    "[data-cookiefirst-action='reject']", ".cmpboxbtnno", "#cookiescript_reject", ".cky-btn-reject",
+    "#tarteaucitronAllDenied2",
+]
+CONSENT_CONTAINER = (
+    "[role=dialog],[role=alertdialog],dialog,[aria-modal=true],[id*=consent i],[class*=consent i],[id*=cookie i],"
+    "[class*=cookie i],[id*=cmp i],[class*=cmp i],[id*=gdpr i],[class*=gdpr i],[id*=privacy i],[class*=privacy i],"
+    "[id^=sp_message],[id*=onetrust i],[id*=didomi i],[id*=usercentrics i],[id*=truste i]"
+)
+# The known CMP containers removed before every snapshot and on an unblock.
+CONSENT_CONTAINERS = [
+    "#onetrust-consent-sdk", "#onetrust-banner-sdk", "#didomi-host", "#didomi-popup", ".qc-cmp2-container",
+    "#qc-cmp2-container", "#CybotCookiebotDialog", "#CybotCookiebotDialogBodyUnderlay", "#usercentrics-root",
+    "#usercentrics-cmp-ui", "#truste-consent-track", ".truste_box_overlay", ".truste_overlay",
+    "[id^='sp_message_container']", "#cmpbox", "#cmpbox2", ".cky-consent-container", "#cookiescript_injected",
+    "#tarteaucitronRoot",
+]
+
+# Presses one reject control in this frame; returns {"pressed": [labels]}.
+CONSENT_DISMISS_JS = r"""(args) => {
+  const harvesterConsent = true;
+  const reject = new RegExp(args.pattern, 'i');
+  const roots = [document];
+  const collect = (root) => { for (const el of root.querySelectorAll('*')) if (el.shadowRoot) { roots.push(el.shadowRoot); collect(el.shadowRoot); } };
+  collect(document);
+  const label = (el) => (el.innerText || el.value || el.getAttribute('aria-label') || el.title || '').replace(/\s+/g, ' ').trim();
+  const visible = (el) => { const box = el.getBoundingClientRect(); return box.width > 0 && box.height > 0; };
+  const navigates = (el) => {
+    if (el.closest('form')) return true;
+    const link = el.closest('a[href]');
+    return !!link && !/^(#|javascript:)/i.test(link.getAttribute('href'));
+  };
+  const inContainer = (el) => {
+    for (let node = el; node; node = node.parentElement || (node.getRootNode && node.getRootNode().host) || null) {
+      if (node.matches && node.matches(args.container)) return true;
+    }
+    return false;
+  };
+  const pressable = (el) => !el.disabled && visible(el) && !navigates(el);
+  for (const root of roots) for (const selector of args.selectors) for (const el of root.querySelectorAll(selector)) {
+    if (pressable(el)) { const name = label(el) || selector; el.click(); return {pressed: [name], removed: []}; }
+  }
+  for (const root of roots) for (const el of root.querySelectorAll('button, [role=button], input[type=button]')) {
+    if (!pressable(el) || !reject.test(label(el))) continue;
+    if (args.main && !inContainer(el)) continue;
+    const name = label(el);
+    el.click();
+    return {pressed: [name], removed: []};
+  }
+  return {pressed: [], removed: []};
+}"""
+
+# Removes consent overlays from the main frame — the known CMP containers and
+# any fixed or sticky element carrying consent markers (in its own names, or,
+# when it covers most of the viewport, anywhere inside) — and, when it removed
+# one or when *force* (a scroll found the page blocked), undoes the scroll lock:
+# overflow back to auto on html and body, a fixed body released, scroll-lock
+# classes dropped. Returns {"removed": [names]}.
+CONSENT_CLEAR_JS = r"""(args) => {
+  const harvesterConsent = true;
+  const markers = /consent|cookie|\bcmp\b|cmp-|gdpr|onetrust|didomi|sp_message|usercentrics|cybot|truste/i;
+  const removed = [];
+  const name = (el) => el.id || (el.tagName.toLowerCase() + (typeof el.className === 'string' && el.className ? '.' + el.className.trim().split(/\s+/)[0] : ''));
+  const remove = (el) => { if (el.isConnected) { removed.push(name(el)); el.remove(); } };
+  for (const selector of args.selectors) for (const el of document.querySelectorAll(selector)) remove(el);
+  const bodyText = document.body ? document.body.innerText.length : 0;
+  const viewport = window.innerWidth * window.innerHeight;
+  for (const el of document.querySelectorAll('body *')) {
+    if (!el.isConnected) continue;
+    const style = getComputedStyle(el);
+    if (style.position !== 'fixed' && style.position !== 'sticky') continue;
+    const own = markers.test(el.id + ' ' + (typeof el.className === 'string' ? el.className : '') + ' ' + (el.getAttribute('aria-label') || ''));
+    const box = el.getBoundingClientRect();
+    const covers = box.width * box.height >= viewport * 0.5;
+    const inside = covers && (el.querySelector(args.container) !== null || /cookie|consent/i.test(el.innerText || ''));
+    if (!own && !inside) continue;
+    if (bodyText > 2000 && (el.innerText || '').length > bodyText * 0.5) continue;
+    remove(el);
+  }
+  if (removed.length || args.force) {
+    for (const el of [document.documentElement, document.body]) {
+      if (!el) continue;
+      el.style.setProperty('overflow', 'auto', 'important');
+      el.style.setProperty('overflow-y', 'auto', 'important');
+      if (getComputedStyle(el).position === 'fixed') {
+        el.style.setProperty('position', 'static', 'important');
+        el.style.setProperty('top', 'auto', 'important');
+      }
+      if (el.style.height === '100%' || getComputedStyle(el).height === window.innerHeight + 'px') el.style.setProperty('height', 'auto', 'important');
+      for (const cls of Array.from(el.classList)) {
+        if (/no-?scroll|scroll-?lock|overflow-?hidden|modal-open|disable-?scroll|consent|cookie|cmp|didomi|sp-message|onetrust/i.test(cls)) el.classList.remove(cls);
+      }
+    }
+  }
+  return {pressed: [], removed: removed};
+}"""
+
+
+def is_reject_label(label):
+    """Whether a control's visible label is a privacy-preserving consent
+    choice (reject, decline, necessary-only) — the only kind the rung presses.
+    The same pattern runs in the page (CONSENT_DISMISS_JS)."""
+    return bool(re.match(CONSENT_REJECT_PATTERN, " ".join(str(label or "").split()), re.IGNORECASE))
+
+
+async def dismiss_consent(page):
+    """Press one reject control in every frame (the main frame first, as
+    patchright lists it), wait for the overlay to go, then remove what stayed.
+    Returns {"pressed": [labels], "removed": [names]}; a frame that cannot be
+    read (detached, cross-origin failure) is logged and skipped."""
+    pressed = []
+    for index, frame in enumerate(list(page.frames)):
+        args = {"pattern": CONSENT_REJECT_PATTERN, "selectors": CONSENT_REJECT_SELECTORS,
+                "container": CONSENT_CONTAINER, "main": index == 0}
+        try:
+            result = await frame.evaluate(CONSENT_DISMISS_JS, args)
+        except Exception as e:  # noqa: BLE001 — one unreadable frame never stops the others
+            print(f"browser consent check skipped a frame ({redact(str(getattr(frame, 'url', '')))}): {e}",
+                  file=sys.stderr)
+            continue
+        pressed += (result or {}).get("pressed") or []
+    if pressed:
+        await page.wait_for_timeout(CONSENT_SETTLE_MS)
+    return {"pressed": pressed, "removed": await clear_consent(page, force=False)}
+
+
+async def clear_consent(page, force):
+    """Remove the main frame's consent overlays and, when one was removed or
+    *force*, undo its scroll lock (CONSENT_CLEAR_JS); returns the removed
+    names."""
+    result = await page.evaluate(CONSENT_CLEAR_JS, {"selectors": CONSENT_CONTAINERS, "container": CONSENT_CONTAINER,
+                                                    "force": force})
+    return (result or {}).get("removed") or []
+
+
+async def snapshot(page):
+    """page.content() with the consent overlays removed first, so a banner is
+    never stored as content. A failed removal is logged and the snapshot still
+    taken; page.content() raising propagates to the caller's navigation
+    handling."""
+    try:
+        removed = await clear_consent(page, force=False)
+    except Exception as e:  # noqa: BLE001 — the snapshot is still taken; the caller decides on its failure
+        print(f"browser consent removal before the snapshot failed for {redact(page.url)}: {e}", file=sys.stderr)
+    else:
+        if removed:
+            print(f"browser snapshot {redact(page.url)}: removed consent overlays {removed}", file=sys.stderr)
+    return await page.content()
 
 # The load-more controls a round presses: a visible, enabled <button> (never a
 # link, never a form submit — neither may navigate away) whose whole label is a
@@ -324,14 +536,19 @@ EXPAND_JS = r"""(limit) => {
 
 
 async def scroll_until_stable(measure, scroll, settle, clock, expand=None, max_rounds=SCROLL_MAX_ROUNDS,
-                              max_seconds=SCROLL_MAX_SECONDS, stable_rounds=SCROLL_STABLE_ROUNDS):
+                              max_seconds=SCROLL_MAX_SECONDS, stable_rounds=SCROLL_STABLE_ROUNDS, unblock=None):
     """Scroll (and expand) until the measured content stops growing, or a cap
     is reached.
 
-    measure/scroll/settle/expand are awaitables over the page (expand returns
-    how many controls it pressed); clock returns seconds. Pure over those, so
-    the loop is testable with no browser. Returns {"rounds", "size",
-    "initial", "expanded", "stopped", "growing"}: stopped is "stable",
+    measure/scroll/settle/expand/unblock are awaitables over the page (expand
+    returns how many controls it pressed; scroll may return SCROLL_JS's
+    {"moved", "blocked"}; unblock clears an overlay and returns its name);
+    clock returns seconds. Pure over those, so the loop is testable with no
+    browser. A scroll that reports "blocked" is never quiet growth: unblock
+    runs once and the scroll is retried, and a page still blocked stops
+    "blocked" — a render that never scrolled is INCOMPLETE, not stable.
+    Returns {"rounds", "size", "initial", "expanded", "stopped", "growing"}
+    (plus "overlay" once unblock ran): stopped is "stable", "blocked",
     "round-cap" or "time-cap", and growing is True when a cap stopped a page
     that grew and never went SCROLL_STABLE_ROUNDS rounds without growing —
     content still arriving, the render then INCOMPLETE."""
@@ -339,6 +556,11 @@ async def scroll_until_stable(measure, scroll, settle, clock, expand=None, max_r
     initial = size = await measure()
     rounds = unchanged = expanded = 0
     stopped = "stable"
+    overlay = None
+
+    def blocked(result):
+        return isinstance(result, dict) and bool(result.get("blocked"))
+
     while True:
         if unchanged >= stable_rounds:
             stopped = "stable"
@@ -349,7 +571,13 @@ async def scroll_until_stable(measure, scroll, settle, clock, expand=None, max_r
         if clock() - start >= max_seconds:
             stopped = "time-cap"
             break
-        await scroll()
+        result = await scroll()
+        if blocked(result) and unblock is not None and overlay is None:
+            overlay = await unblock() or ""
+            result = await scroll()
+        if blocked(result):
+            stopped = "blocked"
+            break
         if expand is not None:
             expanded += await expand()
         await settle()
@@ -359,7 +587,7 @@ async def scroll_until_stable(measure, scroll, settle, clock, expand=None, max_r
             size, unchanged = current, 0
         else:
             unchanged += 1
-    return {
+    outcome = {
         "rounds": rounds,
         "size": size,
         "initial": initial,
@@ -368,8 +596,11 @@ async def scroll_until_stable(measure, scroll, settle, clock, expand=None, max_r
         # A cap stop never proved stability; the content grew in some round
         # (unchanged counts the quiet rounds since the last growth), so it may
         # still be arriving even when the very last round brought nothing.
-        "growing": stopped != "stable" and unchanged < rounds,
+        "growing": stopped not in ("stable", "blocked") and unchanged < rounds,
     }
+    if overlay is not None:
+        outcome["overlay"] = overlay
+    return outcome
 
 
 # The navigation guard's window sentinel: planted in the document render_page
@@ -391,9 +622,15 @@ MARKER_TOKEN_ATTR = "data-harvester-token"
 def mark_incomplete(html, outcome, marker_token):
     """Stamp *html* with the lazy-load marker, carrying *marker_token*, when a
     cap stopped a page that was still growing, when scrolling failed (stopped
-    "error"), or when the page navigated away while scrolling (stopped
-    "navigated"); otherwise return it unchanged."""
-    if outcome.get("stopped") == "error":
+    "error"), when the page navigated away while scrolling (stopped
+    "navigated"), or when a scroll lock the rung could not undo kept the page
+    from scrolling (stopped "blocked", naming the overlay it removed); otherwise
+    return it unchanged."""
+    if outcome.get("stopped") == "blocked":
+        named = f': {outcome["overlay"]}' if outcome.get("overlay") else ""
+        reason = html_escape(f"incomplete: scrolling was blocked (a consent or modal overlay{named}) and could not "
+                             "be unlocked", quote=True)
+    elif outcome.get("stopped") == "error":
         reason = html_escape(f'incomplete: scrolling failed: {outcome.get("error", "")}', quote=True)
     elif outcome.get("stopped") == "navigated":
         reason = html_escape(f'incomplete: the page navigated away to {outcome.get("navigated_to", "")} while '
@@ -497,7 +734,19 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
         print(f"browser networkidle wait ended early for {redact(url)}: {e}", file=sys.stderr)
     clock = clock or asyncio.get_event_loop().time
     start_url = page.url
-    before_scrolling = await page.content()
+    try:
+        consent = await dismiss_consent(page)
+    except Exception as e:  # noqa: BLE001 — a failed dismissal leaves the lock to the scroll's blocked check
+        print(f"browser consent dismissal failed for {redact(start_url)}: {e}", file=sys.stderr)
+    else:
+        if consent["pressed"] or consent["removed"]:
+            print(f"browser consent {redact(start_url)}: pressed {consent['pressed']}, removed {consent['removed']}",
+                  file=sys.stderr)
+
+    async def unblock():
+        return ", ".join(await clear_consent(page, force=True))
+
+    before_scrolling = await snapshot(page)
     token = os.urandom(8).hex()
     try:
         await page.evaluate(DOCUMENT_PLANT_JS, token)
@@ -511,6 +760,7 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
             lambda: page.wait_for_timeout(SCROLL_SETTLE_MS),
             clock,
             expand=expand,
+            unblock=unblock,
         )
     except Exception as e:  # noqa: BLE001 — a failed scroll keeps the render, stamped incomplete
         print(f"browser scroll failed for {redact(url)}: {e}; keeping the page as rendered", file=sys.stderr)
@@ -527,7 +777,7 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
     # raises (a navigation destroying the document) is retaken only when the
     # page did not navigate away.
     try:
-        after_scrolling = await page.content()
+        after_scrolling = await snapshot(page)
     except Exception as e:  # noqa: BLE001 — decided by the document check below
         print(f"browser snapshot after scrolling raised for {redact(start_url)}: {e}", file=sys.stderr)
         after_scrolling = None
@@ -539,7 +789,7 @@ async def render_page(context, url, timeout_ms, referer=None, clock=None, press_
         return mark_incomplete(before_scrolling, outcome, marker_token), status, outcome
     if after_scrolling is None:
         try:
-            after_scrolling = await page.content()
+            after_scrolling = await snapshot(page)
         except Exception as e:  # noqa: BLE001 — a lost retake keeps the pre-scroll snapshot, stamped incomplete
             print(f"browser retake snapshot raised for {redact(start_url)}: {e}; keeping the pre-scroll snapshot",
                   file=sys.stderr)

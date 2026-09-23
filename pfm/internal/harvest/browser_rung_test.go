@@ -429,6 +429,29 @@ func TestBrowserHeadedRetryOnlyAfterAWall(t *testing.T) {
 	}
 }
 
+// consentBannerPageHTML is a short article under a consent manager's dialog
+// whose vendor list names the providers a real bot wall names too.
+const consentBannerPageHTML = `<html><body><h1>Recovered article</h1><p>real rendered evidence</p>` +
+	`<div id="CybotCookiebotDialog" role="dialog"><p>We use cookies.</p><ul>` +
+	`<li>Cloudflare — __cf_bm, necessary</li><li>Google reCAPTCHA — _GRECAPTCHA, necessary</li>` +
+	`<li>Turnstile — bot protection</li></ul><button>Reject all</button><button>Accept all</button></div>` +
+	`<div class="qc-cmp2-container">Verify your consent choices: Cloudflare, hCaptcha</div></body></html>`
+
+// TestBrowserConsentBannerNeverEarnsTheHeadedRetry: a consent dialog is not a
+// bot wall, even when its vendor list names Cloudflare or a captcha provider —
+// the headless render stands and no visible window opens.
+func TestBrowserConsentBannerNeverEarnsTheHeadedRetry(t *testing.T) {
+	spy := recoveredArticleSpy(func(bool) (string, int, error) { return consentBannerPageHTML, http.StatusOK, nil })
+	h := wallHarvester(t, spy, browserOn())
+	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
+	if fmt.Sprint(spy.modes) != "[true]" {
+		t.Fatalf("browser modes=%v, want one HEADLESS render [true]: a consent banner opened a window", spy.modes)
+	}
+	if result.Challenge {
+		t.Fatalf("a consent banner page was judged a bot wall: err=%q", result.Error)
+	}
+}
+
 // TestBrowserHeadedRetryFailureKeepsTheWallVerdict: when the headed retry
 // cannot launch (a display-less host), the completed headless attempt's
 // verdict — it RAN and met a wall — stands; it never becomes an outage.

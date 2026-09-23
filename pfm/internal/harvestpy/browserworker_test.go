@@ -464,6 +464,24 @@ func TestBrowserRenderPythonSeam(t *testing.T) {
 	}
 }
 
+// TestBrowserConsentPythonSeam runs the consent seam's pure cases with NO
+// browser and NO patchright: only a privacy-preserving label is ever pressed,
+// and a scroll that did not move is unblocked once, then stopped "blocked" and
+// stamped incomplete — never "stable".
+func TestBrowserConsentPythonSeam(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("named gap: python3 is unavailable on this host; the browser consent seam test did not run")
+	}
+	command := exec.Command(python, filepath.Join("assets", "browser", "browser_consent_test.py"))
+	command.Dir = assetDirForTest()
+	command.Env = append(os.Environ(), "BROWSER_LIVE=0")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("browser consent seam failed: %v\n%s", err, output)
+	}
+}
+
 func assetDirForTest() string {
 	if _, err := os.Stat(filepath.Join("assets", "browser")); err == nil {
 		return "."

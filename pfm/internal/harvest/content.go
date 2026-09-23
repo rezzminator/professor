@@ -258,7 +258,8 @@ func (h *Harvester) convertHTML(
 	}
 	converted, err := h.options.Converter.Convert(ctx, kindHTML, source, input)
 	if err != nil {
-		return "", convertedPage{}, err
+		// What the extractor could not load is still named by the rung that stores the page.
+		return "", convertedPage{unrendered: extraction.unrendered}, err
 	}
 	if budget.gateOnly(wall, converted) {
 		obs.Logger(ctx).Info("harvest: the page holds nothing but a login wall", "target", logSource(source))
@@ -297,6 +298,11 @@ func classifyFetchedKind(source, contentType string, body []byte) string {
 	kind := classifyKind(source, contentType, body)
 	if kind != kindHTML && kind != kindTXT {
 		return kind
+	}
+	// An empty body the server labels HTML (a WAF challenge: 202, no bytes) is
+	// still a page, so a site extractor that reads its site's API may render it.
+	if len(body) == 0 && strings.Contains(strings.ToLower(contentType), "html") {
+		return kindHTML
 	}
 	if IsPlainText(source, contentType, string(body)) {
 		return kindTXT

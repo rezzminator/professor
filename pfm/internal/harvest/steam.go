@@ -87,24 +87,7 @@ func steamPageOf(doc *html.Node, page *url.URL) (steamPage, bool) {
 		return steamPage{}, false
 	}
 	state := steamPage{id: match[1]}
-	for _, node := range keptAnswers(doc, steamAnswerTag) {
-		if nodeAttr(node, "dropped") != "" {
-			state.dropped = true
-			continue
-		}
-		var answer steamAnswer
-		if err := json.Unmarshal([]byte(rawText(node)), &answer); err != nil {
-			obs.Logger(context.Background()).Warn("harvest: a kept Steam answer no longer decodes; left out",
-				"page", nodeAttr(node, "page"), obs.FieldErr, err.Error())
-			break
-		}
-		if number, err := strconv.Atoi(nodeAttr(node, "page")); err != nil || number != len(state.pages) {
-			obs.Logger(context.Background()).Warn("harvest: a kept Steam answer is out of page order; left out",
-				"page", nodeAttr(node, "page"))
-			break
-		}
-		state.pages = append(state.pages, answer)
-	}
+	state.pages, state.dropped = keptPages[steamAnswer](doc, steamAnswerTag, "Steam")
 	return state, true
 }
 

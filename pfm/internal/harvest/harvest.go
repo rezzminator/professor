@@ -346,7 +346,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		binary4xxOK := status >= 400 && kind == kindPDF && strings.HasPrefix(string(body), "%PDF-")
 		// A wall or the origin's error page is no content — unless an extractor that readsSiteAPI
 		// rendered the page from an API record it proved (page.siteAPI), the wall unread.
-		if len(body) == 0 || (isChallenge(body, status) && !page.siteAPI) ||
+		if (len(body) == 0 && !page.siteAPI) || (isChallenge(body, status) && !page.siteAPI) ||
 			(status >= 400 && !binary4xxOK && !page.siteAPI) {
 			continue
 		}

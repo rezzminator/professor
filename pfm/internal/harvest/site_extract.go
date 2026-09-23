@@ -2,6 +2,7 @@ package harvest
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -206,6 +207,14 @@ var siteExtractors = []siteExtractor{
 		loaders: slashdotLoaders,
 	},
 	{
+		name:         "imdb-reviews",
+		hosts:        []string{"imdb.com"},
+		paths:        isIMDbReviews,
+		extract:      extractIMDbReviews,
+		loaders:      imdbLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:    "discourse-topic",
 		detect:  isDiscourse,
 		extract: extractDiscourseTopic,
@@ -384,6 +393,31 @@ func keepAnswer(doc *html.Node, tag, key, kind string, number int, body []byte) 
 		node.AppendChild(&html.Node{Type: html.TextNode, Data: string(body)})
 	}
 	parent.AppendChild(node)
+}
+
+// keptPages decodes the paged API answers kept in doc under tag, in page
+// order, stopping (logged, naming site) at one that no longer decodes or is
+// out of order; dropped reports a dropped loader's mark.
+func keptPages[T any](doc *html.Node, tag, site string) (pages []T, dropped bool) {
+	for _, node := range keptAnswers(doc, tag) {
+		if nodeAttr(node, "dropped") != "" {
+			dropped = true
+			continue
+		}
+		var answer T
+		if err := json.Unmarshal([]byte(rawText(node)), &answer); err != nil {
+			obs.Logger(context.Background()).Warn("harvest: a kept "+site+" answer no longer decodes; left out",
+				"page", nodeAttr(node, "page"), obs.FieldErr, err.Error())
+			break
+		}
+		if number, err := strconv.Atoi(nodeAttr(node, "page")); err != nil || number != len(pages) {
+			obs.Logger(context.Background()).Warn("harvest: a kept "+site+" answer is out of page order; left out",
+				"page", nodeAttr(node, "page"))
+			break
+		}
+		pages = append(pages, answer)
+	}
+	return pages, dropped
 }
 
 // isElement reports an element node with the given (custom) tag name.

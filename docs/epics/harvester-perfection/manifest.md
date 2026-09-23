@@ -42,6 +42,13 @@ The harvester gets every target — page, document, paper, file — by every tec
 - Cloud share links rewritten to their direct form: Dropbox, Box, Google Docs/Sheets/Slides export, Google Drive large-file confirm; SharePoint, OneDrive for Business, iCloud, MEGA and WeTransfer fail by name.
 - OCR plan (research): docling with RapidOCR on onnxruntime set explicitly, a per-page prepass, a time cap plus a process kill, models staged at install; Hebrew needs an optional system Tesseract. Pending the bake-off.
 
+## Bake-off winners (measured on real files in the sim)
+
+- Feeds (RSS/Atom/RDF), JATS/NXML, FB2, Jupyter, WebVTT/SRT, RIS: hand-written parsers (lxml with entities off and no network, or stdlib json) — each tied or beat feedparser, docling, pubmed_parser, nbconvert, srt and rispy, at a fraction of the time; the JATS parser refuses entity bombs by name.
+- MHTML: stdlib `email`. EPUB: markitdown (already pinned; ties docling on content, adds metadata, 6x less memory). BibTeX: bibtexparser 2.0.1, the only new dependency (1.4 aborts a whole file on one bad macro).
+- Named follow-ups: JATS MathML flattens to linear text; feedparser as a fallback on a broken feed is unmeasured; RIS and BibTeX untested on messy exports.
+- Office and OCR: pending.
+
 ## Landed
 
 - Consent banners, 4xx never stored, wall markers, pagination and hash routes, images, the converter's block writer, paywall and login walls, stated gaps, the recall gate, hidden elements, the comments path.

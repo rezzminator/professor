@@ -25,11 +25,43 @@ func (h *Harvester) convertFetchedContent(ctx context.Context, kind, source stri
 // whether a browser render could close a gap it flagged, and siteAPI — the
 // extractor reads its site's API (readsSiteAPI) and rendered the page from at
 // least one API record, so a wall the site served in its place is not what is
-// stored. Non-HTML kinds carry the zero value.
+// stored. unrendered is what an extractor that knew the page could not load
+// (its API record refused, siteExtraction.unrendered): the fetch ladder names
+// it in whatever a later rung stores (withAPIGap). Non-HTML kinds carry the
+// zero value.
 type convertedPage struct {
 	extractor         string
 	renderMayComplete bool
 	siteAPI           bool
+	unrendered        string
+}
+
+// firstAPIGap is gap, the API gap an earlier rung of this fetch saw, or else
+// the one this page's conversion saw.
+func (page convertedPage) firstAPIGap(gap string) string {
+	if gap != "" {
+		return gap
+	}
+	return page.unrendered
+}
+
+// withAPIGap is content as a rung stores it after a site-API extractor's
+// record failed to load (gap, from firstAPIGap): the gap and why the fetch's
+// following failed (budget.note) joined into its partial marker, so a page
+// that shows only what the site renders is never stored as complete. page is
+// the conversion content came from (the zero value for a reader rung's
+// markdown): one built from an API record (siteAPI) closed the gap, and
+// content that already names it is kept as it is.
+func (page convertedPage) withAPIGap(content, gap string, budget *loaderBudget) string {
+	reason := partialReason(content)
+	if gap == "" || page.siteAPI || strings.Contains(reason, gap) {
+		return content
+	}
+	note := budget.note()
+	if strings.Contains(reason, note) {
+		note = "" // the conversion content came from named it already
+	}
+	return withPartial(partialBody(content), joinReasons(reason, gap, note))
 }
 
 // convertFetchedDocument is convertFetchedContent that also returns the
@@ -119,7 +151,10 @@ func (h *Harvester) convertHTML(
 		unclosed = joinReasons(extraction.unrendered, rest.reason(), budget.note(), unclosed)
 	}
 	done := func(content, reason string) (string, convertedPage, error) {
-		return withPartial(content, joinReasons(reason, unclosed)), convertedPage{renderMayComplete: reason != ""}, nil
+		return withPartial(content, joinReasons(reason, unclosed)), convertedPage{
+			renderMayComplete: reason != "",
+			unrendered:        extraction.unrendered,
+		}, nil
 	}
 	input := body
 	if unwrapInertContainers(ctx, doc) > 0 {

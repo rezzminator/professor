@@ -246,6 +246,7 @@ func (h *Harvester) fetchURLWithPolicy(
 	// unless the browser rung is on.
 	var partialPage func() Result
 	keptExtractor := "" // the extractor that claimed partialPage's page
+	apiGap := ""        // a site-API record's gap; every rung that stores names it (withAPIGap)
 	directClient, chromeClient := h.client, h.chrome
 	switch guess {
 	case kindPDF, kindDOCX, kindXLSX, kindPPTX, kindCSV, kindZIP, kindTAR, kind7Z, kindRAR:
@@ -333,6 +334,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			}
 		}
 		converted, page, err := h.convertFetchedDocument(ctx, kind, source, body, loaders)
+		apiGap = page.firstAPIGap(apiGap)
 		if err != nil {
 			staticConverterOutage = true // named a tool outage by convertOutageNote below (F12)
 			continue
@@ -394,13 +396,13 @@ func (h *Harvester) fetchURLWithPolicy(
 		if kind == kindHTML && partialReason(converted) != "" && h.settings.browser && !isPrivateURL(source) &&
 			!googleDriveFile && guess != kindPDF && page.renderMayComplete {
 			partialPage = func() Result {
-				stored := h.localizedImages(ctx, kind, converted, source)
+				stored := page.withAPIGap(h.localizedImages(ctx, kind, converted, source), apiGap, loaders)
 				return h.storeResult(source, kind, method, stored, int64(len(body)), status, rungs, options)
 			}
 			keptExtractor = page.extractor
 			break
 		}
-		converted = h.localizedImages(ctx, kind, converted, source)
+		converted = page.withAPIGap(h.localizedImages(ctx, kind, converted, source), apiGap, loaders)
 		return h.storeResult(source, kind, method, converted, int64(len(body)), status, rungs, options)
 	}
 	if googleDriveFile {
@@ -441,11 +443,11 @@ func (h *Harvester) fetchURLWithPolicy(
 			// Jina Reader already returns clean Markdown. Feeding it back into an
 			// HTML converter loses headings and code blocks, so preserve it as the
 			// original HTML-source kind for cache/type semantics.
-			kind := kindHTML
 			converted, convErr := pageText(stripJinaEnvelope(string(body))), error(nil)
-			if convErr == nil && usableContent(converted, kind) && !isBibliographicLanding(converted) &&
+			if convErr == nil && usableContent(converted, kindHTML) && !isBibliographicLanding(converted) &&
 				!sameAsShell(appShellText, converted) {
-				return h.storeResult(source, kind, "jina", converted, int64(len(body)), status, rungs, options)
+				stored := convertedPage{}.withAPIGap(converted, apiGap, loaders)
+				return h.storeResult(source, kindHTML, "jina", stored, int64(len(body)), status, rungs, options)
 			}
 		}
 	}
@@ -465,7 +467,7 @@ func (h *Harvester) fetchURLWithPolicy(
 					source,
 					kindHTML,
 					"defuddle-reader",
-					converted,
+					convertedPage{}.withAPIGap(converted, apiGap, loaders),
 					int64(len(body)),
 					status,
 					rungs,
@@ -549,7 +551,7 @@ func (h *Harvester) fetchURLWithPolicy(
 							source,
 							kindHTML,
 							"browser-chrome",
-							converted,
+							page.withAPIGap(converted, apiGap, loaders),
 							int64(len(html)),
 							status,
 							rungs,

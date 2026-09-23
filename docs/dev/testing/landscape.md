@@ -286,7 +286,7 @@ C67 · `pfm chat reload` preserves a role seat through its per-seat prompt chann
 
 ---
 
-## K — Chat kinds / labels / engines (40)
+## K — Chat kinds / labels / engines (39)
 
 K1 · Engine: Claude Code (`cc`) · needs:seat:cc · today:U · fleet.md:21 · lane(s):E1
 K2 · Engine: Codex (`cx`) · needs:seat:cx · today:U · fleet.md:22 · lane(s):E2
@@ -398,17 +398,17 @@ M18 · `chat_unkill` (target) — no dedicated test file ⚠ known-gap · needs:
 M19 · `chat_save` (target/transcript, refuses a non-path-shaped target) · needs:none · today:U · mcp.md:31 · lane(s):M
 M20 · `issue_servicedesk` (title/detail/severity/area, `UNIDENTIFIED` sentinel fallback) · needs:none · today:U · mcp.md:32 · lane(s):M
 
-### Harvester server — 6 nominal tools + 1 prompt
+### Harvester server — 6 tools
 
-M21 · `fetch` (sources 1-50/refresh/size_only) — no dedicated handler test ⚠ known-gap · needs:network · today:NONE · mcp.md:42 · lane(s):M
-M22 · `findWorks` (query/limit) — no dedicated handler test ⚠ known-gap · needs:network · today:NONE · mcp.md:43 · lane(s):M
-M23 · `search` (query/count/lang/engines), config-conditional — hidden, not erroring, when unconfigured · needs:network · today:U (`search_gate_test.go`) · mcp.md:44 · lane(s):M
-M24 · `search` backend-failure-as-data contract (`IsError` flag, `nil` Go error) ⚠ known-gap (asymmetric vs. `findWorks`/`searchCache`) · needs:network · today:U · mcp.md:44,106 · lane(s):M
-M25 · `fetchImage` (sources 1-50) — no dedicated handler test ⚠ known-gap · needs:network · today:NONE · mcp.md:45 · lane(s):M
-M26 · `archive` (source/member, traversal/symlink/size guards) — no dedicated test for the fetch/error path ⚠ known-gap · needs:network · today:NONE · mcp.md:46 · lane(s):M
-M27 · `searchCache` (pattern/max_results/ignore_case, local-only, no network) · needs:none · today:U (only the empty-match path is tested) · mcp.md:47 · lane(s):M
-M28 · `searchCache`'s typed `CacheOutput`/`CacheHit` struct is defined but never returned over the wire ⚠ known-gap (dead type) · needs:none · today:NONE · mcp.md:47,106 · lane(s):M
-M29 · `fetch` Prompt — a non-tool MCP primitive, not counted in the 6-tool surface · needs:network · today:NONE · mcp.md:38 · lane(s):M
+M21 · `readPage` (sources 1-50 web URLs/refresh/size_only/headers; typed items: source, kind, title, method, status, partial, cached, chars, path, content, error) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M22 · `findWorks` (query/limit/kind any|paper|book; typed candidates, each with a `handle` for `readWork`) · needs:network · today:U (`tools_works_test.go`) · pfm/internal/harvestmcp/tools_works.go · lane(s):M
+M23 · `webSearch` (query/count/lang/engines), config-conditional — hidden, not erroring, when unconfigured · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
+M24 · `webSearch` backend-failure-as-data contract (`IsError` result with the named `Web search failed` text, never an empty list) · needs:network · today:U (`tools_search_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
+M25 · `download` (sources 1-50 URLs/headers; the bytes unparsed: path locally or a `resource_link` remotely, kind, content_type, bytes, sha256) · needs:network · today:U (`tools_download_test.go`) · pfm/internal/harvestmcp/tools_download.go · lane(s):M
+M26 · `parseLocalDocuments` (paths 1-50/size_only; method `local`; local server only, never the remote gateway) · needs:none · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M27 · `readWork` (works 1-20: DOI, arXiv id, PMID, PMCID, ISBN, landing URL or `findWorks` handle/refresh/size_only/headers; items carry `ids` and `route`) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M28 · Caller headers on `readPage`, `download` and `readWork` (never `findWorks`/`webSearch`): refused by name at entry, sent only to the target's origin, their own cache partition, values never echoed; a bare identifier with headers is a per-item error · needs:network · today:U (`caller_headers_test.go`) · pfm/internal/harvest/caller_headers.go · lane(s):M
+M29 · Wrong-tool input is a per-item error naming the right tool (a DOI to `readPage` names `readWork`, a local path names `parseLocalDocuments`, a URL to `parseLocalDocuments` names `readPage`) · needs:none · today:U (`TestReadToolsNameTheRightTool`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
 
 ### Registration per engine
 
@@ -444,7 +444,7 @@ M55 · `pfm mcp serve` top-level daemon dispatch form (exactly `pfm mcp serve`) 
 
 ---
 
-## L — Lifecycle mechanics (42)
+## L — Lifecycle mechanics (41)
 
 L1 · Idle detection: state derived from transcript+socket only, never a pane scrape (except `Ask`) · needs:none · today:U · fleet.md:426-429 · lane(s):F
 L2 · Idle detection: no transcript + `Live` → `StateWorking` · needs:tmux · today:U · fleet.md:431-432 · lane(s):F
@@ -490,9 +490,9 @@ L42 · name-sync never runs more than once concurrently by design (systemd path 
 
 ---
 
-## H — Harvester: CLI + sidecar + cache + search (12)
+## H — Harvester: CLI + sidecar + cache + search (13)
 
-H1 · `pfm harvest [--refresh] [--size-only] [--json] <sources>...` (1-50 sources, ordered results) · needs:network · today:U · cli.md:73 · lane(s):O2
+H1 · `pfm harvest [--refresh] [--size-only] [--json] [--header 'Name: value']... <sources>...` (1-50 sources, ordered results) · needs:network · today:U · cli.md:73 · lane(s):O2
 H2 · `pfm harvest ask -p <prompt> [--engine claude|codex] [--model M] [--effort E] [--refresh] <sources>...` · needs:network,seat:cc/cx · today:U+A (`TestHarvestAskE2E`) · cli.md:74 · lane(s):O2
 H3 · Harvest source kind: URL · needs:network · today:U · cli.md:73 · lane(s):O2
 H4 · Harvest source kind: DOI · needs:network · today:U · cli.md:73 · lane(s):O2
@@ -501,13 +501,14 @@ H6 · Harvest source kind: PMID · needs:network · today:U · cli.md:73 · lane
 H7 · Harvest source kind: PMCID · needs:network · today:U · cli.md:73 · lane(s):O2
 H8 · Harvest source kind: local path · needs:none · today:U · cli.md:73 · lane(s):O2
 H9 · Harvestpy pinned Python conversion sidecar (non-HTML document conversion) · needs:network · today:U (`internal/harvestpy`, 37 tests) · mcp.md:42 · lane(s):O2
-H10 · Harvest local cache (backs `fetch`/`fetchImage` results, read by `searchCache`) · needs:none · today:U · mcp.md:42-47 · lane(s):M
-H11 · Harvest search-backend config (SearXNG URL or Brave API key gates the `search` tool's visibility) · needs:network · today:U (`search_gate_test.go`) · mcp.md:44 · lane(s):M
+H10 · Harvest local cache (backs `readPage`/`readWork`/`parseLocalDocuments` results; a re-read reports `cached`) · needs:none · today:U · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+H11 · Harvest search-backend config (SearXNG URL or Brave API key gates the `webSearch` tool's visibility) · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/search_gate.go · lane(s):M
 H12 · Tier B: `setup.sh install` falls back to `--skip-harvest` silently on provisioning failure; no `verify.sh` beat asserts the harvester landed ⚠ known-gap · needs:network,docker · today:NONE · tests.md:391,437 · lane(s):O2
+H13 · `pfm harvest download [--json] [--header 'Name: value']... <url>...` (path / kind / content_type / bytes per item; a failed item is `ERROR:` and exit 1; a refused header exits 2 before any request) · needs:network · today:U (`internal/harvestcli/download_test.go`) · pfm/internal/harvestcli/download.go · lane(s):M
 
 ---
 
-## X — Misc CLI (41)
+## X — Misc CLI (42)
 
 X1 · `pfm version` / `pfm --version` · needs:none · today:U · cli.md:23 · lane(s):O1
 X2 · `pfm config init [--force]` · needs:none · today:U · cli.md:98 · lane(s):O1
@@ -566,16 +567,16 @@ None — every row read across the five inventories converted into an atomic ite
 |---|---|---|
 | I — Install/host wiring | 98 | 12 |
 | P — Project scaffold/update | 37 | 4 |
-| C — Chat verbs | 66 | 3 |
-| K — Chat kinds/labels/engines | 40 | 1 |
+| C — Chat verbs | 67 | 3 |
+| K — Chat kinds/labels/engines | 39 | 1 |
 | T — TUI | 38 | 1 |
-| M — MCP | 55 | 11 |
-| L — Lifecycle mechanics | 42 | 0 |
-| H — Harvester | 12 | 1 |
+| M — MCP | 55 | 5 |
+| L — Lifecycle mechanics | 41 | 0 |
+| H — Harvester | 13 | 1 |
 | X — Misc CLI | 42 | 5 |
-| **Total** | **430** | **38** |
+| **Total** | **430** | **32** |
 
-`today=NONE` breakdown by id: I4,I5,I9,I10,I13,I15,I17,I18,I40,I89,I90,I92 (12) · P12,P13,P14,P15 (4) · C31,C40,C41 (3) · K19 (1) · T37 (1) · M15,M16,M17,M18,M21,M22,M25,M26,M28,M29,M48 (11) · H12 (1) · X18,X32,X33,X34,X41 (5).
+`today=NONE` breakdown by id: I4,I5,I9,I10,I13,I15,I17,I18,I40,I89,I90,I92 (12) · P12,P13,P14,P15 (4) · C31,C40,C41 (3) · K19 (1) · T37 (1) · M15,M16,M17,M18,M48 (5) · H12 (1) · X18,X32,X33,X34,X41 (5).
 
 ---
 

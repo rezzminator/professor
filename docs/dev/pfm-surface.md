@@ -30,7 +30,8 @@ Current operator and integration surface. Legend: **●** established · **◆**
 | ✚ `init` | `pfm init [dir] [--force]` | Per-project scaffold: copies blueprint set (`CLAUDE.md`, `AGENTS.md`, `.claude/{settings,commands,agents,skills}`) with placeholders intact; refuses existing `.claude/` without `--force`; prints the "open Claude, run SETUP" handoff. |
 | ✚ `config` | `pfm config init [--force] \| show \| validate` | `init` writes the default v2 file as strict comment-free JSON (0600, atomic; field docs print to stdout). `show` prints resolved config with `(default)/(file)` provenance, secrets redacted. `validate` = load + exact decode error with position. |
 | ● `codex` | `pfm codex build\|check\|agents [repo-root]` | Compiler mirror, marker check, global agents md→toml. `agents` also auto-runs inside install. |
-| ◆ `harvest` | `pfm harvest [--refresh] [--size-only] [--json] <url\|doi\|path>...` | Multi-source fetch → markdown, cache + 24h TTL (`cache.ttlSeconds` in `harvester.config.json`). Stdout clips large sources; full docs live at the printed `path:`. |
+| ◆ `harvest` | `pfm harvest [--refresh] [--size-only] [--json] [--header 'Name: value']... <url\|doi\|path>...` | Multi-source fetch → markdown, cache + 24h TTL (`cache.ttlSeconds` in `harvester.config.json`). Stdout clips large sources; full docs live at the printed `path:`. |
+| ◆ `harvest download` | `pfm harvest download [--json] [--header 'Name: value']... <url>...` | Downloads 1–50 files as bytes, unparsed; prints `path / kind / content_type / bytes` per item. A failed item is `ERROR: …` and exit 1; a refused header exits 2 before any request. |
 | ◆ `harvest ask` | `pfm harvest ask -p "<prompt>" [--engine claude\|codex] [--model MODEL] [--effort EFFORT] [--refresh] <url\|doi\|path>...` | Harvests 1–50 sources into full cache files, preserves failed sources as labeled temporary receipts, then runs one configured `internal/ask` engine pass. `pfm harvest --ask -p "<prompt>" ...` is an equivalent compatibility spelling. The answer is stdout; available token usage is a named stderr receipt. Engine/model/effort default from machine config and explicit flags win. |
 | ◆ `mcp` | `pfm mcp serve` · `pfm mcp chat\|harvester serve` | `serve` = ONE daemon process, two ports. Loopback `127.0.0.1:<mcp.http.port>` (default 18377) — header-free, unauthenticated, both servers (`/mcp/chat`, `/mcp/harvester`), never generates or distributes local credentials. External `external.host:external.port` (default 18378, off by default, `harvester.config.json external.*`) — the harvester ONLY at `/mcp`, behind a mandatory passphrase-OAuth and/or static-bearer wall, local reads confined to the cache root; a failed external bind leaves the loopback port serving and reports on `/status`. Single-instance guarded; `GET /status` returns `{pfmVersion, protocolVersion, servers, pid, startTime, endpoint, harvesterExternal}` (doctor consumes it). Per-name stdio remains for clients without HTTP MCP (`pfm mcp harvester serve` is stdio-only; its retired HTTP flags refuse with the config key that replaced them). |
 | ● `statusline` | (stdin JSON from Claude Code) | + `7d-fable` segment and `✦` Fable symbol; account badge from config (unknown → no badge, never 🥇). |
@@ -130,16 +131,16 @@ Deliberately NOT exposed: `end`, `modal`, `watch`, `stream`, `recover`, and `his
 
 ### Server `harvester` — `/mcp/harvester` (stdio: `pfm mcp harvester serve`; external: `/mcp` on the authenticated port)
 
-Settings come from `harvester.config.json`. `search` trusts exactly the configured `search.searxngURL` origin (a loopback/LAN SearXNG is the normal deployment; redirects are refused); every fetch keeps the SSRF guard. A failed search names each backend's own error.
+Settings come from `harvester.config.json`. `webSearch` trusts exactly the configured `search.searxngURL` origin (a loopback/LAN SearXNG is the normal deployment; redirects are refused); every fetch keeps the SSRF guard. Caller `headers` go only to the target's own origin, never to a reader service, Wayback or a resolver (validation and cache partition: `pfm/internal/harvest/caller_headers.go`). A failed search names each backend's own error.
 
 | Tool | Status | Inputs | Returns |
 | ------------- | ------ | -------------------- | ----------------------- |
-| `fetch` | ● | `{sources: [string], refresh?, size_only?}` | Markdown (cache + TTL). |
-| `search` | ● | `{query, …}` | Web search results. |
-| `findWorks` | ● | `{query, limit?}` | Scholarly works. |
-| `fetchImage` | ● | `{sources: [string]}` | Image fetch. |
-| `archive` | ● | `{source, member?}` | Archive extraction. |
-| `searchCache` | ● | `{pattern, ignore_case?, max_results?}` | Cache search. |
+| `readPage` | ● | `{sources: [string], refresh?, size_only?, headers?}` | Web pages as Markdown (cache + TTL); typed items. |
+| `parseLocalDocuments` | ● | `{paths: [string], size_only?}` | Local documents as Markdown; local server only. |
+| `download` | ● | `{sources: [string], headers?}` | Files as bytes: path (local) or `resource_link` (remote), kind, type, size, sha256. |
+| `findWorks` | ● | `{query, limit?, kind?}` | Scholarly candidates, each with a `handle` for `readWork`. |
+| `readWork` | ● | `{works: [string], refresh?, size_only?, headers?}` | Works (DOI, arXiv, PMID, PMCID, ISBN, landing URL, handle) as Markdown, with `ids` and `route`. |
+| `webSearch` | ● | `{query, count?, lang?, engines?}` | Web search results; served only when SearXNG or Brave is configured. |
 
 ## Shared engine `internal/ask`
 

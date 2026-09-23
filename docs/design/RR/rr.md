@@ -158,7 +158,6 @@ An error and an absence never share a mark: `SEARCH FAILED` against `NOTHING FOU
 
 | Left out | Reason |
 | --- | --- |
-| Verification by grep over the harvester cache | `fetch` with `size_only` works (12 pages cached for about 1K tokens of result), but `searchCache` names a match by `harvest:` handle and `md_path`, never by URL, so a match cannot be tied to the page a fact cites; 7 of 34 probe patterns errored and 14 hit the result cap |
 | A verifier digger | Two lead calls (the spawn's wait line and the return) against one for the lead's own check message, plus a digger's run |
 | More than 4 diggers a round | Each digger is one more lead call on return; width goes into the batch |
 | A fourth dig round | Depth saturates; the three-round ceiling keeps the run under its former cost with verification included |
@@ -195,7 +194,6 @@ The rulings rest on the research survey saved in the ledger as `.professor/RR/de
 
 ## Open items
 
-- `searchCache` reporting the source URL of each match, as its description already says it does, and taking a source filter. With both, the first pass of VERIFY becomes a grep over pages cached by `fetch` with `size_only`, and WebFetch stays as the second look.
 - The scout footer in `workflows/deep-rr/engine/src/agents/scout/prompts.ts` is goal-blind the way this family's footer was. It has its own engine and snapshot tests, so it is its own pass.
 - The return repeats the synthesis the document already holds, the lead's largest single output. A return of path, answer and open rabbit holes trades that for one Read by a caller that wants the map. Undecided.
 - A document name made unique by a mechanism: the `rr-dir` hook handing the lead a run token for the file name. A name no other run can hold makes an early stub safe to replace, which would put a dead run's plan on disk.

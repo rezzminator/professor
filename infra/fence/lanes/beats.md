@@ -97,10 +97,10 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `M.08-mcp-cli` · `pfm mcp` CLI surface: bare alias, `ls`, `enable`/`disable`, `serve` dispatch · spends none · M52,M53,M54,M55
 - `M.09-chat-tools` · chat fleet server tools driven by a direct MCP client against the live daemon · spends cc:$SEAT · M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12,M13,M14
 - `M.10-chat-tools-gap` · chat fleet server tools with no dedicated test file: open/name/kill/unkill/save · spends cc:$SEAT · M15,M16,M17,M18,M19,M20
-- `M.11-harvester-tools` · harvester server tools driven against a real, small public document · spends none · M21,M22,M23,M24,M25,M26,M27,M28,M29
-- `M.12-harvester-cache-gate` · harvest local cache + search-backend gating back the MCP tools · spends none · H10,H11
+- `M.11-harvester-tools` · the six harvester tools (readPage, parseLocalDocuments, download, findWorks, readWork, webSearch when configured) and caller headers driven against a real, small public document, plus `pfm harvest download` · spends none · M21,M22,M23,M24,M25,M26,M27,M28,M29,H13
+- `M.12-harvester-cache-gate` · harvest local cache (a size_only `readPage` re-read is `cached`) + search-backend gating of `webSearch` · spends none · H10,H11
 - `M.13-dropped-seat-roster` · a dropped seat's absence shows up in the daemon's own seat roster · spends none · I38
-- `M.14-end-to-end` · one chat-driven call per server proves engine wiring end to end (Claude `chat_status` on itself + `fetch` a URL; Codex the same over HTTP) · spends cc:$SEAT+cx · (none)
+- `M.14-end-to-end` · one chat-driven call per server proves engine wiring end to end (Claude `chat_status` on itself + `readPage` a URL; Codex the same over HTTP) · spends cc:$SEAT+cx · (none)
 - `M.15-live-chats-survive-daemon-restart` · **cross-lane** — after the exit-75 restart, E1's Claude chat (stdio) and E2's Codex chat (HTTP) each make their next MCP call successfully · spends cc:$SEAT+cx · M31,M34
 
 ## Lane A — adopter

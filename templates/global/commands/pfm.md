@@ -59,7 +59,7 @@ Inside a chat, the `chat_*` MCP verbs are the preferred surface for inject, ask,
 
 ## Harvest: MCP first, CLI for batches
 
-Inside a chat, the `harvester` MCP tools (`fetch`, `findWorks`, `search`, `searchCache`, `fetchImage`, `archive`) answer per item; `pfm harvest [--refresh] [--size-only] [--json] <url|doi|path>...` is the shell surface for batch or scripted fetches and for a chat without the MCP.
+Inside a chat, the `harvester` MCP tools (`readPage`, `parseLocalDocuments` (local server only), `download`, `findWorks`, `readWork`, `webSearch` (only when a search backend is configured)) answer per item; `pfm harvest [--refresh] [--size-only] [--json] [--header 'Name: value'] <url|doi|path>...` and `pfm harvest download <url>...` are the shell surface for batch or scripted fetches and for a chat without the MCP.
 
 ## Config
 

@@ -11,7 +11,8 @@
 #         internal/obs/httpout.go, unless the line hands it to
 #         obs.WrapClient/obs.RoundTripper (the wrapper IS the door)
 #   sql   a `database/sql` import outside the db access layers
-#         internal/{sqlitedb,fleetdb,store,index}
+#         internal/{sqlitedb,fleetdb,store,index} and the callmeter store package
+#         internal/callmeter/ itself (its subpackages are not doors)
 #   proc  an exec.Command/exec.CommandContext/exec.LookPath call outside the
 #         runner (internal/deps/runner.go), the tmux terminal (internal/tmux/)
 #         and spawn's platform scope launchers (service_scope_*.go), plus a
@@ -68,7 +69,7 @@ if g "$T/raw" "$T/http.list" -nE '&?http\.Client\{|http\.DefaultClient'; then
   count_by_file "$T/http.raw" http >> "$T/cur"
 else say ERROR "grep could not read sources for the http family"; exit 2; fi
 # sql
-grep -vE '^internal/(sqlitedb|fleetdb|store|index)/' "$T/src.list" > "$T/sql.list"
+grep -vE '^internal/(sqlitedb|fleetdb|store|index)/|^internal/callmeter/[^/]+$' "$T/src.list" > "$T/sql.list"
 if g "$T/raw" "$T/sql.list" -n '"database/sql"'; then count_by_file "$T/raw" sql >> "$T/cur"
 else say ERROR "grep could not read sources for the sql family"; exit 2; fi
 # proc

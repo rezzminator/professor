@@ -66,6 +66,7 @@ def convert_html(path: pathlib.Path) -> str:
     from trafilatura.utils import load_html
 
     _keep_linked_blocks()
+    _extract_comments_as_content()
     # Local HTML follows the old dispatch path, which decodes malformed bytes
     # with errors ignored before trafilatura sees the document.
     raw = path.read_bytes().decode("utf-8", errors="ignore")
@@ -130,6 +131,67 @@ def _keep_linked_blocks() -> None:
         raise RuntimeError("trafilatura's discard pattern no longer holds '|next-|'; re-check the class anchor")
     discard[0] = XPath(pattern.replace("|next-|", r"|(?:^|\s)next-|"), namespaces={"re": regexpNS})
     _LINKED_BLOCKS_KEPT = True
+
+
+# trafilatura's comment handler flattens the comments section it found: it
+# strips every link before extraction and appends every descendant block on its
+# own, so a <code> inside a comment's paragraph is moved out of it (a fenced
+# block mid-sentence), and its discard list drops a <pre>. The section below is extracted by
+# the main-content element handlers instead — links, inline code and code
+# blocks as in the article — and still leaves the main tree, as before, so it is
+# written once, after the article. Turning the comment handler off does not
+# keep the comments: the main-content pass selects the article, and a comments
+# section beside it is never reached.
+_COMMENTS_AS_CONTENT = False
+
+
+def _extract_comments_as_content() -> None:
+    global _COMMENTS_AS_CONTENT
+    if _COMMENTS_AS_CONTENT:
+        return
+    from lxml.etree import Element, strip_tags
+    from trafilatura import core, main_extractor
+
+    if getattr(core, "extract_comments", None) is not main_extractor.extract_comments:
+        raise RuntimeError("trafilatura's core no longer calls main_extractor.extract_comments; re-check the comment hook")
+    handle = main_extractor.handle_textelem
+    prune = main_extractor.prune_unwanted_nodes
+    catalog = main_extractor.TAG_CATALOG
+    is_code = main_extractor.is_code_block_element
+
+    def extract_comments(tree, options):
+        comments_body = Element("body")
+        potential_tags = set(catalog)
+        if options.tables:
+            potential_tags.update(["table", "td", "th", "tr"])
+        if options.images:
+            potential_tags.add("graphic")
+        if options.links:
+            potential_tags.add("ref")
+        for expr in main_extractor.COMMENTS_XPATH:
+            subtree = next((s for s in expr(tree) if s is not None), None)
+            if subtree is None:
+                continue
+            # The comment discard list drops every quote (a quoted reply), and
+            # a <pre> is a quote by then: a code block is renamed out of reach.
+            for quote in subtree.iter("quote"):
+                if is_code(quote):
+                    quote.tag = "code"
+            subtree = prune(subtree, main_extractor.COMMENTS_DISCARD_XPATH)
+            strip_tags(subtree, "span")
+            if "ref" not in potential_tags:
+                strip_tags(subtree, "a", "ref")
+            comments_body.extend(
+                element for element in (handle(e, potential_tags, options) for e in subtree.xpath(".//*")) if element is not None
+            )
+            if len(comments_body) > 0:
+                main_extractor.delete_element(subtree, keep_tail=False)
+                break
+        text = " ".join(comments_body.itertext()).strip()
+        return comments_body, text, len(text), tree
+
+    core.extract_comments = extract_comments
+    _COMMENTS_AS_CONTENT = True
 
 
 # An element the reader never sees is never written. trafilatura's own discard

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Calibrating a staff gauge after a flood</title>
+</head>
+<body>
+<header class="site-header"><nav class="main-navigation"><ul><li><a href="/">Home</a></li><li><a href="/pricing">Pricing</a></li><li><a href="/careers">Careers</a></li></ul></nav></header>
+<main id="main" class="site-main">
+<article class="post type-post status-publish">
+<header class="entry-header"><h1 class="entry-title">Calibrating a staff gauge after a flood</h1></header>
+<div class="entry-content">
+<p>The spring flood moved the upstream staff gauge by four centimetres, so every reading since then carries the same offset until the datum is surveyed again.</p>
+<p>We resurveyed the datum against the benchmark on the bridge pier and logged the correction in the station book, then compared a week of readings with the stilling well.</p>
+<p>The stilling well and the corrected staff gauge now agree to within two millimetres, which is inside the tolerance the network asks of a manual station.</p>
+</div>
+</article>
+<div id="comments" class="comments-area">
+<h2 class="comments-title">2 thoughts on “Calibrating a staff gauge after a flood”</h2>
+<ol class="comment-list">
+<li id="comment-11" class="comment even thread-even depth-1">
+<article id="div-comment-11" class="comment-body">
+<footer class="comment-meta"><div class="comment-author vcard"><b class="fn">Marta Oyelaran</b> <span class="says">says:</span></div><div class="comment-metadata"><a href="#comment-11"><time datetime="2024-04-02T09:14:00+00:00">April 2, 2024 at 9:14 am</time></a></div></footer>
+<div class="comment-content">
+<p>We had the same drift last year; the <a href="https://example.org/gauge-survey-guide">survey guide from the regional office</a> walks through the benchmark tie-in, and the logger reads the offset from the <code>datum_offset</code> field before it writes each record.</p>
+<p>After that change the logger config looked like this:</p>
+<pre><code>datum_offset = 0.040
+units = "m"
+</code></pre>
+</div>
+</article>
+</li>
+<li id="comment-12" class="comment odd alt thread-odd depth-1">
+<article id="div-comment-12" class="comment-body">
+<footer class="comment-meta"><div class="comment-author vcard"><b class="fn">Tomas Rehnberg</b> <span class="says">says:</span></div><div class="comment-metadata"><a href="#comment-12"><time datetime="2024-04-03T16:40:00+00:00">April 3, 2024 at 4:40 pm</time></a></div></footer>
+<div class="comment-content">
+<p>Did you also re-level the stilling well intake, or only the staff gauge?</p>
+</div>
+</article>
+</li>
+</ol>
+</div>
+</main>
+<footer class="site-footer"><p><a href="/contact">Contact us</a></p></footer>
+</body>
+</html>

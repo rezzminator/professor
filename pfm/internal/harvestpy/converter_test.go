@@ -359,6 +359,24 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			},
 		},
 		{
+			// trafilatura routes a comment-list section to its comment handler:
+			// the comment keeps its link and its inline code, and its code block
+			// stays fenced.
+			fixture: "blog-comments.html",
+			code:    []string{"datum_offset = 0.040", `units = "m"`},
+			text: []string{
+				"The stilling well and the corrected staff gauge now agree to within two millimetres," +
+					" which is inside the tolerance the network asks of a manual station.",
+				"We had the same drift last year; the" +
+					" [survey guide from the regional office](https://example.org/gauge-survey-guide)" +
+					" walks through the benchmark tie-in, and the logger reads the offset from the `datum_offset`" +
+					" field before it writes each record.",
+				"After that change the logger config looked like this:",
+				"Did you also re-level the stilling well intake, or only the staff gauge?",
+			},
+			absent: []string{"Pricing", "Careers", "Contact us"},
+		},
+		{
 			fixture: "github-timeline.html",
 			text: []string{
 				"Hey folks, exciting news. [The Next.js App Router is now stable](https://nextjs.org/blog/next-13-4)!",

@@ -257,8 +257,11 @@ func EstimateTokens(text string) int {
 	if text == "" {
 		return 0
 	}
-	// Match the Python oracle: CJK/kana/Hangul 1.3×, symbol-heavy code 1/1.8,
-	// and ordinary prose 1/2, always rounded up.
+	// Weighted by share, not by the presence of one character: CJK/kana/Hangul
+	// runes cost 1.3x each; the REMAINING (non-CJK) runes cost 1/1.8 when
+	// symbols are >=5% of THOSE runes (code), else 1/2 (prose) - always
+	// rounded up. A pure-CJK, pure-prose or pure-code text reduces to its
+	// old whole-text rate exactly; only mixed text changes.
 	runes := []rune(text)
 	cjk := 0
 	symbols := 0
@@ -267,6 +270,7 @@ func EstimateTokens(text string) int {
 			(r >= 0xac00 && r <= 0xd7af) ||
 			(r >= 0xff00 && r <= 0xffef) {
 			cjk++
+			continue
 		}
 		switch r {
 		case '{',
@@ -298,13 +302,16 @@ func EstimateTokens(text string) int {
 		}
 	}
 	n := len(runes)
-	if cjk > 0 {
-		return int(float64(n)*1.3 + 0.999999)
+	nonCJK := n - cjk
+	total := float64(cjk) * 1.3
+	if nonCJK > 0 {
+		if float64(symbols)/float64(nonCJK) >= 0.05 {
+			total += float64(nonCJK) / 1.8
+		} else {
+			total += float64(nonCJK) / 2
+		}
 	}
-	if float64(symbols)/float64(n) >= 0.05 {
-		return int(float64(n)/1.8 + 0.999999)
-	}
-	return (n + 1) / 2
+	return int(total + 0.999999)
 }
 
 func truncateInline(body string, limit int) string {

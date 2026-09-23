@@ -28,7 +28,12 @@ func TestLegacyTokenEstimatorAllTenBehaviors(t *testing.T) {
 		{"code density uses 1.8 divisor", code, int(math.Ceil(float64(len([]rune(code))) / 1.8))},
 		{"CJK uses 1.3 multiplier", strings.Repeat("中文测试", 25), 130},
 		{"Korean is East Asian", strings.Repeat("가나다라", 25), 130},
-		{"CJK wins over symbol density", cjkSymbols, int(math.Ceil(float64(len([]rune(cjkSymbols))) * 1.3))},
+		// Retired: the Python oracle is gone, and its whole-text rule was the
+		// defect — one CJK rune used to switch the ENTIRE text (symbols
+		// included) to the 1.3x rate. cjkSymbols is 50 CJK runes plus 200
+		// symbol runes ("{}[]" x50): now each share is weighted on its own,
+		// CJK at 1.3x and the code-dense remainder at 1/1.8.
+		{"CJK and symbols weighted by share", cjkSymbols, int(math.Ceil(50*1.3 + 200/1.8))},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

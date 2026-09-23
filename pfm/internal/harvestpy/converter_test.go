@@ -258,7 +258,9 @@ func fakeLineConverter(t *testing.T, response string) *Converter {
 // their structure — a wikitable after a heading that follows a citation link,
 // MDN headings whose text sits in a permalink anchor with a spec table and a
 // See also list, a GitHub README's div-wrapped headings and link lists, a
-// docsify anchor heading after a code block. Every heading stays a "#" line,
+// docsify anchor heading after a code block, an npm README whose last sections
+// are "See <bare URL>" paragraphs (link-dense, yet content: pruning them also
+// stripped their headings as trailing titles). Every heading stays a "#" line,
 // every table row a "|" line, every bullet a "- " line; a site nav bar
 // outside the main content is still dropped. It needs the pinned
 // interpreter (HARVESTPY_CORPUS_PYTHON): trafilatura runs for real.
@@ -271,7 +273,7 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 	cases := []struct {
 		fixture              string
 		heads, rows, bullets []string
-		code, absent         []string
+		code, absent, text   []string
 	}{
 		{
 			fixture: "wikitable.html",
@@ -321,6 +323,16 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			bullets: []string{"Stilling wells", "Staff gauges"},
 			absent:  []string{"Careers", "Pricing", "Contact us"},
 		},
+		{
+			fixture: "npm-readme.html",
+			heads:   []string{"## Usage", "## Documentation", "## API"},
+			code:    []string{"import { useState } from 'react';"},
+			text: []string{
+				"See [https://react.dev/](https://react.dev/)",
+				"See [https://react.dev/reference/react](https://react.dev/reference/react)",
+			},
+			absent: []string{"Pricing", "Advisories"},
+		},
 	}
 	converter := testConverter(t, python)
 	t.Cleanup(func() { _ = converter.Close() })
@@ -362,6 +374,11 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			for _, code := range tc.code {
 				if !has(func(line string) bool { return line == code }) {
 					t.Errorf("code line %q is not its own line", code)
+				}
+			}
+			for _, line := range tc.text {
+				if !has(func(got string) bool { return got == line }) {
+					t.Errorf("paragraph %q is missing", line)
 				}
 			}
 			for _, word := range tc.absent {

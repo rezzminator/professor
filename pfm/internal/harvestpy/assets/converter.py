@@ -91,8 +91,18 @@ def convert_html(path: pathlib.Path) -> str:
 # also list, a wikitable of linked names, a GitHub heading wrapper whose only
 # link is a textless permalink anchor. Site navigation is dropped before this
 # point (tree cleaning and the discard XPaths), so only paragraphs keep the
-# link-density test.
+# link-density test — except a paragraph whose every link reads as its own
+# address ("See https://react.dev/"): the author printed a URL, which is
+# content, and deleting it also strips the heading above it as a trailing title.
 _LINKED_BLOCKS_KEPT = False
+_KEPT_PARAGRAPH = "pfm-kept-p"
+
+
+def _prints_its_addresses(paragraph) -> bool:
+    refs = paragraph.findall(".//ref")
+    return bool(refs) and all(
+        " ".join((ref.text_content() or "").split()).startswith(("http://", "https://", "www.")) for ref in refs
+    )
 
 
 def _keep_linked_blocks() -> None:
@@ -106,7 +116,16 @@ def _keep_linked_blocks() -> None:
     def delete_by_link_density(tree, tagname, backtracking=False, favor_precision=False):
         if tagname in ("div", "list"):
             return tree
-        return prune(tree, tagname, backtracking=backtracking, favor_precision=favor_precision)
+        if tagname != "p":
+            return prune(tree, tagname, backtracking=backtracking, favor_precision=favor_precision)
+        kept = [paragraph for paragraph in tree.iter("p") if _prints_its_addresses(paragraph)]
+        for paragraph in kept:
+            paragraph.tag = _KEPT_PARAGRAPH
+        try:
+            return prune(tree, tagname, backtracking=backtracking, favor_precision=favor_precision)
+        finally:
+            for paragraph in kept:
+                paragraph.tag = "p"
 
     main_extractor.delete_by_link_density = delete_by_link_density
     main_extractor.link_density_test_tables = lambda element: False

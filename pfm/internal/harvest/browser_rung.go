@@ -46,6 +46,12 @@ func browserRenderWins(ctx context.Context, candidate browserCandidate) bool {
 	if !claimed && chars < 500 {
 		return false
 	}
+	if landing := classifyLanding(ctx, candidate.source, candidate.finalURL); landing == landedLogin ||
+		landing == landedHome {
+		obs.Logger(ctx).Info("harvest: the browser landed on a login or the home page; it is no page to store",
+			"target", logSource(candidate.source), "landed", logSource(candidate.finalURL))
+		return false
+	}
 	if !candidate.kept {
 		return chars > candidate.earlierChars || candidate.appShell || claimed
 	}

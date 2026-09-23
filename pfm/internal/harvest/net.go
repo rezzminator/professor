@@ -489,19 +489,8 @@ func getBodyWithHeaders(
 	headers map[string]string,
 	maxBytes int64,
 ) ([]byte, int, string, error) {
-	header := make(http.Header, len(headers))
-	for key, value := range headers {
-		header.Set(key, value)
-	}
-	response, err := gatewayAttempt(ctx, gatewayRequest{
-		url:              rawURL,
-		client:           client,
-		ua:               ua,
-		headers:          header,
-		max:              maxBytes,
-		oversizeTruncate: true,
-	})
-	return response.body, response.status, response.contentType, err
+	body, status, contentType, _, err := fetchPage(ctx, client, rawURL, ua, headers, maxBytes)
+	return body, status, contentType, err
 }
 
 // decodedResponseBody keeps the Chrome fingerprint's advertised encodings

@@ -394,7 +394,7 @@ func TestAPageCannotFlagItselfPartial(t *testing.T) {
 				CacheDir:    t.TempDir(),
 				Client:      &http.Client{Transport: serve(door.contentType)},
 				Chrome:      &http.Client{Transport: serve(door.contentType)},
-				Jina:        &http.Client{Transport: serve("text/plain")},
+				Jina:        &http.Client{Transport: canonicalReader(serve("text/plain"))},
 				OA:          &http.Client{Transport: serve("")},
 				Converter:   &browserSpyConverter{},
 				BrowserRung: browserOff(),

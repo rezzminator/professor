@@ -164,7 +164,7 @@ func readerSite(
 		CacheDir:    t.TempDir(),
 		Client:      &http.Client{Transport: site},
 		Chrome:      &http.Client{Transport: site},
-		Jina:        &http.Client{Transport: jina},
+		Jina:        &http.Client{Transport: canonicalReader(jina)},
 		OA:          &http.Client{Transport: missing},
 		Converter:   converter,
 		BrowserRung: rung,

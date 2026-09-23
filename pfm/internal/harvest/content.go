@@ -48,6 +48,7 @@ type convertedPage struct {
 	stated            func(content string) string
 	wall              string
 	checks            string
+	landing           string // where a reader page was answered from, when not the page (readerLanding)
 	nextPage          string
 	listing           string
 	pager             bool
@@ -58,12 +59,16 @@ type convertedPage struct {
 // wall): a site-API record's gap (api) and the page's un-followed next page
 // (next) and the wall its markup showed (wall). Whatever rung stores the page
 // names them (withGaps). pager is
-// whether any rung saw the page's pager.
+// whether any rung saw the page's pager. redirect names the last rung's
+// landing on another page, and refused its landing on a page that is no page
+// at all — a login, the site's home — which no rung stores (landing.go).
 type carriedGaps struct {
 	api, next string
 	pager     bool
 	stated    func(content string) string
 	wall      string
+	redirect  string
+	refused   string
 }
 
 // carry is gaps with this page's conversion's gaps filled in where no earlier
@@ -131,7 +136,8 @@ func (page convertedPage) withGaps(content string, gaps carriedGaps, budget *loa
 			reason = joinReasons(reason, stated)
 		}
 	}
-	for _, wall := range []string{page.wall, gaps.wall, page.checks} { // a wall the stored page or an earlier rung showed
+	// a wall the stored page or an earlier rung showed, and where the page was answered from (landing.go)
+	for _, wall := range []string{page.wall, gaps.wall, page.checks, page.landing, gaps.redirect} {
 		if wall != "" && !page.siteAPI && !strings.Contains(reason, wall) {
 			reason = joinReasons(reason, wall)
 		}

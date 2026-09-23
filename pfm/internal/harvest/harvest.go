@@ -275,9 +275,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		if directMediaFetch {
 			headers = nil
 		}
-		body, status, contentType, err := getBodyWithHeaders(
-			ctx, rung.client, rung.target, rung.ua, headers, h.options.MaxBytes,
-		)
+		body, status, contentType, err := h.fetchRung(ctx, rung.client, rung.target, rung.ua, headers, &gaps)
 		if err != nil {
 			lastErr = err
 			lastErrorKind = errorKind(err)
@@ -347,7 +345,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		// A wall or the origin's error page is no content — unless an extractor that readsSiteAPI
 		// rendered the page from an API record it proved (page.siteAPI), the wall unread.
 		if (len(body) == 0 && !page.siteAPI) || (isChallenge(body, status) && !page.siteAPI) ||
-			(status >= 400 && !binary4xxOK && !page.siteAPI) {
+			(status >= 400 && !binary4xxOK && !page.siteAPI) || gaps.refused != "" {
 			continue
 		}
 		if !usableContent(converted, kind) {
@@ -425,7 +423,8 @@ func (h *Harvester) fetchURLWithPolicy(
 		}
 	}
 	// No reader or archive copy stands in for a missing origin, nor for a hash route's view (hashRouteShell).
-	originGone := originMissing(lastStatus, lastChallenge, source) || hashRouteShell(ctx, source, lastPage)
+	originGone := originMissing(lastStatus, lastChallenge, source) || hashRouteShell(ctx, source, lastPage) ||
+		gaps.refused != "" // an address redirecting to a login or the home page: no copy stands in for it
 	if !isPrivateURL(source) && guess != kindPDF && partialPage == nil && !originGone {
 		rungs = append(rungs, "jina")
 		target := strings.TrimRight(h.options.JinaURL, "/") + "/" + source
@@ -551,7 +550,7 @@ func (h *Harvester) fetchURLWithPolicy(
 							source,
 							kindHTML,
 							"browser-chrome",
-							page.withGaps(converted, gaps, loaders),
+							page.withGaps(converted, gaps.landed(ctx, source, outcome.finalURL, nil), loaders),
 							int64(len(html)),
 							status,
 							rungs,
@@ -775,7 +774,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		wrongPDF,
 		appShellFailure,
 	)
-	message = withRungs(loaders.loginWallNote(source, message), rungs)
+	message = withRungs(loaders.loginWallNote(source, gaps.fail(message)), rungs) // a refused redirect (landing.go)
 	return Result{
 		Source:       source,
 		HTTPStatus:   lastStatus,

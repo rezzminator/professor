@@ -363,7 +363,7 @@ func TestExtensionlessSniffedKindCachesAndJinaEnvelopeIsStripped(t *testing.T) {
 			CacheDir: t.TempDir(),
 			Client:   &http.Client{Transport: direct},
 			Chrome:   &http.Client{Transport: direct},
-			Jina:     &http.Client{Transport: jina},
+			Jina:     &http.Client{Transport: canonicalReader(jina)},
 		},
 	)
 	got := h.Fetch(context.Background(), "https://example.test/page")

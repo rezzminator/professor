@@ -166,7 +166,7 @@ func TestReaderPagesPassTheStatedCountAndRecallChecks(t *testing.T) {
 				CacheDir: t.TempDir(),
 				Client:   &http.Client{Transport: origin},
 				Chrome:   &http.Client{Transport: origin},
-				Jina:     &http.Client{Transport: reader},
+				Jina:     &http.Client{Transport: canonicalReader(reader)},
 				OA:       &http.Client{Transport: origin},
 				Converter: &browserSpyConverter{
 					convertFn: func(context.Context, string, string, []byte) (string, error) {

@@ -24,8 +24,9 @@ const readerHTMLFormat = "X-Return-Format"
 
 // readerPageChecked is the convertedPage of a reader rung's markdown of source
 // (readerPage), checked on the reader's HTML of the page as an HTTP rung's
-// page is: the thread its markup states above what it carries (threadGap) and
-// the recall gate on the markdown (measureContentRecall) always; the wall the
+// page is: the thread its markup states above what it carries (threadGap),
+// the recall gate on the markdown (measureContentRecall) and where the reader
+// was answered from (readerLanding) always; the wall the
 // page's markup shows where the markdown asks for a subscription or a sign-in
 // (paywallCallPattern) or source is an app site that gates signed-out
 // readers — prose alone never names a wall, and a page asking for neither has
@@ -76,6 +77,7 @@ func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown stri
 		recall = "the reader's markdown kept " + measure.String()
 	}
 	page.checks = joinReasons(threadGap(ctx, doc), recall)
+	page.landing = readerLanding(ctx, source, doc)
 	return page
 }
 
@@ -83,7 +85,7 @@ func (h *Harvester) readerPageChecked(ctx context.Context, source, markdown stri
 // could not be checked, for the error class why.
 func readerChecksFailed(why string) string {
 	return "the reader's HTML of the page could not be read (" + why +
-		"): its stated-count and recall checks did not run"
+		"): its stated-count, recall and redirect checks did not run"
 }
 
 // wallCheckFailed is the partial reason of a reader page whose wall check was

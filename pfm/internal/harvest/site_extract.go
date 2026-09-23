@@ -183,6 +183,14 @@ var siteExtractors = []siteExtractor{
 		readsSiteAPI: true,
 	},
 	{
+		name:         "notion-page",
+		hosts:        notionHosts,
+		paths:        isNotionPage,
+		extract:      extractNotionPage,
+		loaders:      notionLoaders,
+		readsSiteAPI: true,
+	},
+	{
 		name:    "slashdot-story",
 		hosts:   []string{slashdotHost},
 		paths:   isSlashdotStory,

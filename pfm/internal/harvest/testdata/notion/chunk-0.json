@@ -1,0 +1,1527 @@
+{
+"cursor": {
+"stack": []
+},
+"recordMap": {
+"__version__": 3,
+"block": {
+"2d1d59a4-168c-4524-bed0-a40b04de892a": {
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0",
+"value": {
+"value": {
+"id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"type": "page",
+"properties": {
+"title": [
+[
+"An Example FAQ"
+]
+]
+},
+"content": [
+"e2547e07-2189-4557-a72f-ac1417f12396",
+"f1a7afe4-cee8-4d96-9995-fbf3908e9c7a",
+"3a89a65a-3baf-45c4-97f0-f8317c52688c",
+"1e8f1cd2-ffd8-408b-aba4-5b45257260ad",
+"2549484d-8eb4-4d96-9125-4b0713cc09c7",
+"9a0ce100-a62f-4726-8fd8-42d48894b3cb",
+"77f3bc67-78b8-4529-9c80-4e10d9b1bde4",
+"b0b67343-abfa-427b-8a65-8e05aedd11a3",
+"3400df5d-f580-4374-8090-2b301f67d90c",
+"ee9b720e-5778-456d-8d15-23723b9e333a",
+"14884f78-4f85-464b-8db4-78ff415d534d",
+"45e83bd1-9739-43a4-9150-c452fb448b31",
+"3088602c-7c5f-42d7-8f60-f1a612a7659a",
+"fe2f7c40-bcf4-485a-ad22-d19415367e52",
+"6f292a30-9974-40bd-a4a0-ba57f39c8230",
+"c2cb8e0b-52dd-4ddd-83c8-32714add4bba",
+"31a4d845-0bd4-41e5-a018-a68046d8a3df",
+"d753e636-b3f3-4ab7-8ac7-e629ff7e31a1",
+"29db45c5-8071-4700-a5f3-0b0106ce2777",
+"ab07487c-d3a9-43cd-be64-083aaef1bacf",
+"2e0999ab-04d7-47a4-a15a-fc7d61f8c36e",
+"bc5477a5-4f5f-4392-ac00-b87d9bf16480",
+"63ee3c1f-9116-4684-b051-de2b806c21f5",
+"1090681e-5566-4efe-964e-0031f48244a1",
+"f9a7482d-4df7-4ddb-b266-ec673179ce8e",
+"33e29b36-952b-4c99-88b6-e8b83e623eff",
+"75c57109-46fd-4001-a7a6-c7442e1fefb9",
+"c73ce72b-de5e-4b7b-95d1-5789dcec82fd",
+"c1a84417-3655-4aa4-94b2-cecd2ec538c7",
+"1b62a682-a4ba-44ae-9db8-14ce8fefc281",
+"19ed7cdb-35d7-48ab-957e-bc4d60f1b44e",
+"2faa8dc5-3a5b-4002-a1ec-1931da94e8a1",
+"e399d03a-2784-4db2-a9b5-c0a78ec06648",
+"cd5271a1-a59f-4588-9577-4b88e7ea8504",
+"d57b70ea-1846-4773-8e68-80d4a12fd7b1",
+"5fbb9cda-8524-455c-9c0f-9bfa08bea1bd",
+"04bebfc4-4d8c-470d-b0b3-eedf8fe5439d",
+"98b06825-83cc-4bc7-9435-970b01733bf8",
+"351d4587-898b-44de-a027-4417b4538275",
+"c1e7faa0-bfb7-4a1b-9549-00ae5833f31c",
+"dfea6dc9-882c-4ebf-9b60-0f88e39a64d7",
+"12427093-7e8a-472c-9317-bf1ab2acd052",
+"2ae4ce25-7c33-4615-94fe-719149e25765",
+"8f7c2e1e-69d4-4028-939e-ac1c6be4e3fc",
+"c70a657a-6295-4683-84c8-1650007521b8",
+"6f78a032-15f7-4517-b434-bd8e86cc693e",
+"bbb1447c-8468-4fcc-9726-e27aaab028c4",
+"a1a5e26e-bcd6-477d-afa6-e098a3066b33",
+"d9fe4c24-b319-4fa4-bd3b-10d242885614",
+"41c7805c-3b4c-4aef-a3f7-74219f9c016d",
+"c0fdc73b-e655-440e-a85b-58270bfafda3",
+"ce77aed2-bd96-413e-abb0-b5fcfbe6530a",
+"fdcb4947-d7fd-4537-880e-1fe355300d83",
+"6396c5b8-4014-4c62-9734-44f99fe3dd22",
+"e2f20b95-70e0-4603-b0a2-0fd6154cd791",
+"5c1cdfe5-6474-4dff-8a09-46e81143e3c0",
+"ab767ea5-648e-4661-81b9-fef0de406c7a",
+"4aca3004-e651-456e-8d84-80594fb01cc6",
+"0ffb9fc8-6ea3-4ec6-9d2a-859edd270b31",
+"aa69255b-583a-46c1-a14c-260f74320d36",
+"c6b8e232-f65b-4b53-b01f-86d14cd420ab",
+"5bb0b0e2-d2fe-40dc-a499-afa97f9515f1",
+"113837aa-25eb-4bbb-9750-b858f286af6a"
+],
+"format": {
+"site_id": "1b51bc7f-1f39-81b6-85d2-00790ab4e823",
+"page_icon": "💡"
+},
+"parent_id": "d78d7e92-468a-4cef-96b0-fde837bb4006",
+"parent_table": "block",
+"alive": true,
+"content_classification": "verified",
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"d78d7e92-468a-4cef-96b0-fde837bb4006": {
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0",
+"value": {
+"role": "none"
+}
+},
+"5396125f-f8fd-4df1-9614-81d6bdb13d6d": {
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0",
+"value": {
+"role": "none"
+}
+},
+"e2547e07-2189-4557-a72f-ac1417f12396": {
+"value": {
+"value": {
+"id": "e2547e07-2189-4557-a72f-ac1417f12396",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"f1a7afe4-cee8-4d96-9995-fbf3908e9c7a": {
+"value": {
+"value": {
+"id": "f1a7afe4-cee8-4d96-9995-fbf3908e9c7a",
+"type": "text",
+"properties": {
+"title": [
+[
+"b002 text"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"3a89a65a-3baf-45c4-97f0-f8317c52688c": {
+"value": {
+"value": {
+"id": "3a89a65a-3baf-45c4-97f0-f8317c52688c",
+"type": "bookmark",
+"properties": {
+"link": [
+[
+"https://example.com/link-1"
+]
+],
+"title": [
+[
+"b003 bookmark"
+]
+]
+},
+"format": {
+"bookmark_icon": "https://example.com/bookmark_icon"
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"1e8f1cd2-ffd8-408b-aba4-5b45257260ad": {
+"value": {
+"value": {
+"id": "1e8f1cd2-ffd8-408b-aba4-5b45257260ad",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"2549484d-8eb4-4d96-9125-4b0713cc09c7": {
+"value": {
+"value": {
+"id": "2549484d-8eb4-4d96-9125-4b0713cc09c7",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"9a0ce100-a62f-4726-8fd8-42d48894b3cb": {
+"value": {
+"value": {
+"id": "9a0ce100-a62f-4726-8fd8-42d48894b3cb",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"77f3bc67-78b8-4529-9c80-4e10d9b1bde4": {
+"value": {
+"value": {
+"id": "77f3bc67-78b8-4529-9c80-4e10d9b1bde4",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b007 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"b0b67343-abfa-427b-8a65-8e05aedd11a3": {
+"value": {
+"value": {
+"id": "b0b67343-abfa-427b-8a65-8e05aedd11a3",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b008 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"5b22320f-b152-44a1-91f8-2f2babeaeaad"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"3400df5d-f580-4374-8090-2b301f67d90c": {
+"value": {
+"value": {
+"id": "3400df5d-f580-4374-8090-2b301f67d90c",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b010 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"2238c1ec-cedd-46e7-8007-12b55aabbab0"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"ee9b720e-5778-456d-8d15-23723b9e333a": {
+"value": {
+"value": {
+"id": "ee9b720e-5778-456d-8d15-23723b9e333a",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b012 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"13a1fb51-ee0c-4976-87c4-f21d3d26da94"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"14884f78-4f85-464b-8db4-78ff415d534d": {
+"value": {
+"value": {
+"id": "14884f78-4f85-464b-8db4-78ff415d534d",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"45e83bd1-9739-43a4-9150-c452fb448b31": {
+"value": {
+"value": {
+"id": "45e83bd1-9739-43a4-9150-c452fb448b31",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b015 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"3088602c-7c5f-42d7-8f60-f1a612a7659a": {
+"value": {
+"value": {
+"id": "3088602c-7c5f-42d7-8f60-f1a612a7659a",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b016 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"fb608876-5df1-4f0f-a834-3d7616336390",
+"97cf67ab-584d-41ec-921f-8b949015a251",
+"f7e21fd9-45b7-4e6a-b269-1ea2c052cf79",
+"d99cea50-92e7-4859-866a-ae07c32df53b"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"fe2f7c40-bcf4-485a-ad22-d19415367e52": {
+"value": {
+"value": {
+"id": "fe2f7c40-bcf4-485a-ad22-d19415367e52",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b025 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"9a0ef88a-5e5b-480a-8cb7-38cdbfd4f241",
+"dad6cd79-0008-4874-a306-d08c18686fa2"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"6f292a30-9974-40bd-a4a0-ba57f39c8230": {
+"value": {
+"value": {
+"id": "6f292a30-9974-40bd-a4a0-ba57f39c8230",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b028 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"d380a15b-f234-4b21-aea5-507d178e5e5f"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"c2cb8e0b-52dd-4ddd-83c8-32714add4bba": {
+"value": {
+"value": {
+"id": "c2cb8e0b-52dd-4ddd-83c8-32714add4bba",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b030 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"3d024b14-15cc-47a5-9b40-cc6b3deda522",
+"150be461-615f-4531-acd4-db154b36e074",
+"6d786a88-40b4-4c57-a407-e4cb81b6f16f"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"31a4d845-0bd4-41e5-a018-a68046d8a3df": {
+"value": {
+"value": {
+"id": "31a4d845-0bd4-41e5-a018-a68046d8a3df",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"d753e636-b3f3-4ab7-8ac7-e629ff7e31a1": {
+"value": {
+"value": {
+"id": "d753e636-b3f3-4ab7-8ac7-e629ff7e31a1",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b037 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"29db45c5-8071-4700-a5f3-0b0106ce2777": {
+"value": {
+"value": {
+"id": "29db45c5-8071-4700-a5f3-0b0106ce2777",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b038 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"a989382e-baeb-4d7f-88fd-9f9c8364a0db",
+"f9aab4f7-9774-4876-9913-f0a86f0eed48",
+"c9c2c0cb-dc07-43a5-8c00-d3a7bd2a8c33",
+"18474585-96e2-4928-814d-1f6bd88ea45f"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"ab07487c-d3a9-43cd-be64-083aaef1bacf": {
+"value": {
+"value": {
+"id": "ab07487c-d3a9-43cd-be64-083aaef1bacf",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b046 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"6b26c4a3-ed2f-4a26-a5d5-257911537b6f"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"2e0999ab-04d7-47a4-a15a-fc7d61f8c36e": {
+"value": {
+"value": {
+"id": "2e0999ab-04d7-47a4-a15a-fc7d61f8c36e",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b048 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"8577a16a-e5c9-4aab-911e-77eb911347b7"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"bc5477a5-4f5f-4392-ac00-b87d9bf16480": {
+"value": {
+"value": {
+"id": "bc5477a5-4f5f-4392-ac00-b87d9bf16480",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"63ee3c1f-9116-4684-b051-de2b806c21f5": {
+"value": {
+"value": {
+"id": "63ee3c1f-9116-4684-b051-de2b806c21f5",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b051 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"1090681e-5566-4efe-964e-0031f48244a1": {
+"value": {
+"value": {
+"id": "1090681e-5566-4efe-964e-0031f48244a1",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b052 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"5f0ffa7d-a982-4dcd-99ec-ec33cee15acb",
+"3e84dcd9-5d20-4c4e-b929-84788ba69058",
+"390b2df4-b495-4987-aa2f-50e3b81ef046",
+"c7a489a1-d7af-430e-80f9-c35b2ffb285e",
+"3d561efe-0dcc-49d6-8dc7-675b97de294b",
+"8e558f7a-2f52-4854-bd04-848d14976904"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"f9a7482d-4df7-4ddb-b266-ec673179ce8e": {
+"value": {
+"value": {
+"id": "f9a7482d-4df7-4ddb-b266-ec673179ce8e",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b061 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"f189880d-1859-4539-a7e4-4053e3fec6ae"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"33e29b36-952b-4c99-88b6-e8b83e623eff": {
+"value": {
+"value": {
+"id": "33e29b36-952b-4c99-88b6-e8b83e623eff",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"75c57109-46fd-4001-a7a6-c7442e1fefb9": {
+"value": {
+"value": {
+"id": "75c57109-46fd-4001-a7a6-c7442e1fefb9",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b064 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"c73ce72b-de5e-4b7b-95d1-5789dcec82fd": {
+"value": {
+"value": {
+"id": "c73ce72b-de5e-4b7b-95d1-5789dcec82fd",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b065 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"7ca598f5-37a3-465b-a7b0-58eb63a96051"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"c1a84417-3655-4aa4-94b2-cecd2ec538c7": {
+"value": {
+"value": {
+"id": "c1a84417-3655-4aa4-94b2-cecd2ec538c7",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b067 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"48919b2f-a12a-4360-b86e-17e9329eb73e",
+"90f564cd-fb00-4b59-b457-cac466978460"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"1b62a682-a4ba-44ae-9db8-14ce8fefc281": {
+"value": {
+"value": {
+"id": "1b62a682-a4ba-44ae-9db8-14ce8fefc281",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b070 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"73cadac1-d3e1-40d9-b451-0ea4ec62efd9"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"19ed7cdb-35d7-48ab-957e-bc4d60f1b44e": {
+"value": {
+"value": {
+"id": "19ed7cdb-35d7-48ab-957e-bc4d60f1b44e",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b072 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"795a6001-db13-42d1-8ecc-2c929bab75fb"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"2faa8dc5-3a5b-4002-a1ec-1931da94e8a1": {
+"value": {
+"value": {
+"id": "2faa8dc5-3a5b-4002-a1ec-1931da94e8a1",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"e399d03a-2784-4db2-a9b5-c0a78ec06648": {
+"value": {
+"value": {
+"id": "e399d03a-2784-4db2-a9b5-c0a78ec06648",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b075 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"cd5271a1-a59f-4588-9577-4b88e7ea8504": {
+"value": {
+"value": {
+"id": "cd5271a1-a59f-4588-9577-4b88e7ea8504",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b076 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"44e0ed68-a256-4b23-8d0c-6fc4ffe0a613"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"d57b70ea-1846-4773-8e68-80d4a12fd7b1": {
+"value": {
+"value": {
+"id": "d57b70ea-1846-4773-8e68-80d4a12fd7b1",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b078 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"e0082296-70cb-4867-ac57-0cdd84f7335b",
+"d34e5d19-bd95-44ee-a44f-7b1595aaa90b"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"5fbb9cda-8524-455c-9c0f-9bfa08bea1bd": {
+"value": {
+"value": {
+"id": "5fbb9cda-8524-455c-9c0f-9bfa08bea1bd",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b083 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"da32d02e-40bd-4a82-adf8-b21550c5268a"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"04bebfc4-4d8c-470d-b0b3-eedf8fe5439d": {
+"value": {
+"value": {
+"id": "04bebfc4-4d8c-470d-b0b3-eedf8fe5439d",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b085 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"120a14b2-cd2b-4206-b829-b9998ba0ce7e",
+"18f16c82-663c-4fa3-9e22-ad84fcad1a75"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"98b06825-83cc-4bc7-9435-970b01733bf8": {
+"value": {
+"value": {
+"id": "98b06825-83cc-4bc7-9435-970b01733bf8",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b088 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"3bb855cb-ddb5-4913-97f2-bec9c371545e"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"351d4587-898b-44de-a027-4417b4538275": {
+"value": {
+"value": {
+"id": "351d4587-898b-44de-a027-4417b4538275",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"c1e7faa0-bfb7-4a1b-9549-00ae5833f31c": {
+"value": {
+"value": {
+"id": "c1e7faa0-bfb7-4a1b-9549-00ae5833f31c",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b091 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"dfea6dc9-882c-4ebf-9b60-0f88e39a64d7": {
+"value": {
+"value": {
+"id": "dfea6dc9-882c-4ebf-9b60-0f88e39a64d7",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b092 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"b35876d8-1dac-409a-99ef-e962aa390522"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"12427093-7e8a-472c-9317-bf1ab2acd052": {
+"value": {
+"value": {
+"id": "12427093-7e8a-472c-9317-bf1ab2acd052",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"2ae4ce25-7c33-4615-94fe-719149e25765": {
+"value": {
+"value": {
+"id": "2ae4ce25-7c33-4615-94fe-719149e25765",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b095 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"8f7c2e1e-69d4-4028-939e-ac1c6be4e3fc": {
+"value": {
+"value": {
+"id": "8f7c2e1e-69d4-4028-939e-ac1c6be4e3fc",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b096 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"d1dffec6-838e-4d89-897e-f954496e4116",
+"54e70058-03d8-4e32-942c-150838e572f6"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"c70a657a-6295-4683-84c8-1650007521b8": {
+"value": {
+"value": {
+"id": "c70a657a-6295-4683-84c8-1650007521b8",
+"type": "text",
+"format": {
+"copied_from_pointer": {
+"id": "b58abe42-43c7-440d-aa6d-997ec5168397",
+"table": "block",
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+}
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"6f78a032-15f7-4517-b434-bd8e86cc693e": {
+"value": {
+"value": {
+"id": "6f78a032-15f7-4517-b434-bd8e86cc693e",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b102 sub_sub_header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"bbb1447c-8468-4fcc-9726-e27aaab028c4": {
+"value": {
+"value": {
+"id": "bbb1447c-8468-4fcc-9726-e27aaab028c4",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b103 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"f6b8bb90-95eb-4f4d-8fb9-cf1bf0e443b7"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"a1a5e26e-bcd6-477d-afa6-e098a3066b33": {
+"value": {
+"value": {
+"id": "a1a5e26e-bcd6-477d-afa6-e098a3066b33",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b105 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"80e8d954-01fd-441e-880f-e7f288e5a2e8"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"d9fe4c24-b319-4fa4-bd3b-10d242885614": {
+"value": {
+"value": {
+"id": "d9fe4c24-b319-4fa4-bd3b-10d242885614",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b107 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"a0a2b706-a0ef-4923-aaa3-8117baaf796e"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"41c7805c-3b4c-4aef-a3f7-74219f9c016d": {
+"value": {
+"value": {
+"id": "41c7805c-3b4c-4aef-a3f7-74219f9c016d",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b109 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"6ecb3bb9-2039-4b92-8061-4cbf67583f98"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"c0fdc73b-e655-440e-a85b-58270bfafda3": {
+"value": {
+"value": {
+"id": "c0fdc73b-e655-440e-a85b-58270bfafda3",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b111 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"f7852399-7ae1-4de1-9506-90a1a8ac12cd"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"ce77aed2-bd96-413e-abb0-b5fcfbe6530a": {
+"value": {
+"value": {
+"id": "ce77aed2-bd96-413e-abb0-b5fcfbe6530a",
+"type": "toggle",
+"properties": {
+"title": [
+[
+"b113 toggle",
+[
+[
+"b"
+]
+]
+]
+]
+},
+"content": [
+"d4dd9814-6c28-4545-8dc9-e8fa26daa4e0"
+],
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"fdcb4947-d7fd-4537-880e-1fe355300d83": {
+"value": {
+"value": {
+"id": "fdcb4947-d7fd-4537-880e-1fe355300d83",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"6396c5b8-4014-4c62-9734-44f99fe3dd22": {
+"value": {
+"value": {
+"id": "6396c5b8-4014-4c62-9734-44f99fe3dd22",
+"type": "header",
+"properties": {
+"title": [
+[
+"b116 header"
+]
+]
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"e2f20b95-70e0-4603-b0a2-0fd6154cd791": {
+"value": {
+"value": {
+"id": "e2f20b95-70e0-4603-b0a2-0fd6154cd791",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b117 sub_sub_header"
+]
+]
+},
+"content": [
+"09de0b72-785c-4950-af58-9adf4e9515a0",
+"243a7ca7-91d5-4860-9ffa-f8ec4a6bfe74",
+"bcb01944-e392-4aa8-ba4c-be1c977bf1f3",
+"160d62bd-f77d-4ee1-b8c0-7b2582a44fc3"
+],
+"format": {
+"toggleable": true,
+"copied_from_pointer": {
+"id": "05f89147-62de-47f4-9228-e195aa06badd",
+"table": "block",
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+}
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"5c1cdfe5-6474-4dff-8a09-46e81143e3c0": {
+"value": {
+"value": {
+"id": "5c1cdfe5-6474-4dff-8a09-46e81143e3c0",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b133 sub_sub_header"
+]
+]
+},
+"content": [
+"199ff5fd-057a-4e66-917a-6064c2876aac",
+"0b0399ca-2f9b-405b-9cd8-1a87ef413552",
+"a2efd56b-ede0-4125-be63-30565dc91764",
+"1a72a932-89e6-412c-966d-feb307aa8ae5",
+"7b4e3f66-79ff-45ab-9580-cb5104c674d2",
+"3a81fd42-da0d-4920-8eb5-80e660ede9db",
+"4c0b951b-808f-4b8a-807b-c47149305853",
+"cb865c33-e279-40f3-aeb0-dd908f6868c0",
+"c609d308-930e-4379-b959-a75e8053d603"
+],
+"format": {
+"toggleable": true,
+"copied_from_pointer": {
+"id": "354011cc-a08a-4e58-8055-9d07b144640b",
+"table": "block",
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+}
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"ab767ea5-648e-4661-81b9-fef0de406c7a": {
+"value": {
+"value": {
+"id": "ab767ea5-648e-4661-81b9-fef0de406c7a",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b195 sub_sub_header"
+]
+]
+},
+"content": [
+"55666366-3a81-48b3-b10e-457e9e07233b",
+"3b70405a-8199-4605-a690-51e0970b9722"
+],
+"format": {
+"toggleable": true,
+"copied_from_pointer": {
+"id": "132aacb7-88b3-4571-8e84-7bc941ae26f4",
+"table": "block",
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+}
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"4aca3004-e651-456e-8d84-80594fb01cc6": {
+"value": {
+"value": {
+"id": "4aca3004-e651-456e-8d84-80594fb01cc6",
+"type": "sub_sub_header",
+"properties": {
+"title": [
+[
+"b209 sub_sub_header"
+]
+]
+},
+"content": [
+"2765b9fb-4950-4441-bc7f-402310055ba4",
+"12f7126d-3f35-4fee-9e1d-0bfa928853cf",
+"6c7845e7-dabb-4b56-b232-02b3566b9643",
+"b1c2530d-b3a2-4e84-a47b-d64b44916e3d"
+],
+"format": {
+"toggleable": true,
+"copied_from_pointer": {
+"id": "f0a4d084-6718-4e80-a498-4b584d88dda9",
+"table": "block",
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+}
+},
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+},
+"0ffb9fc8-6ea3-4ec6-9d2a-859edd270b31": {
+"value": {
+"value": {
+"id": "0ffb9fc8-6ea3-4ec6-9d2a-859edd270b31",
+"type": "text",
+"parent_id": "2d1d59a4-168c-4524-bed0-a40b04de892a",
+"parent_table": "block",
+"alive": true,
+"space_id": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0"
+},
+"role": "reader"
+}
+}
+},
+"team": {
+"51b12920-fad6-418a-b64f-2ff4547ddf24": {
+"spaceId": "b5b1bc7f-1f39-4cf7-9800-bf4ea71d50a0",
+"value": {
+"role": "none"
+}
+}
+}
+}
+}

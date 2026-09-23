@@ -63,14 +63,19 @@ def html_metadata(raw: str) -> str:
 
 def convert_html(path: pathlib.Path) -> str:
     import trafilatura
+    from trafilatura.utils import load_html
 
     _keep_linked_blocks()
     # Local HTML follows the old dispatch path, which decodes malformed bytes
     # with errors ignored before trafilatura sees the document.
     raw = path.read_bytes().decode("utf-8", errors="ignore")
+    tree = load_html(raw)
+    if tree is not None:
+        _drop_hidden(tree)
+        _unwrap_layout_tables(tree)
     with _quiet_stdout():
         document = trafilatura.bare_extraction(
-            raw,
+            tree if tree is not None else raw,
             favor_recall=True,
             include_formatting=True,
             include_links=True,
@@ -86,50 +91,74 @@ def convert_html(path: pathlib.Path) -> str:
 
 
 # trafilatura prunes the main-content subtree it selected by link density:
-# a div, list or table whose text is mostly links is deleted as boilerplate.
-# Inside the main content that is the content itself — an awesome list, a See
-# also list, a wikitable of linked names, a GitHub heading wrapper whose only
-# link is a textless permalink anchor. Site navigation is dropped before this
-# point (tree cleaning and the discard XPaths), so only paragraphs keep the
-# link-density test — except a paragraph whose every link reads as its own
-# address ("See https://react.dev/"): the author printed a URL, which is
-# content, and deleting it also strips the heading above it as a trailing title.
+# a div, list, paragraph or table whose text is mostly links is deleted as
+# boilerplate. Inside the main content that is the content itself — an awesome
+# list, a See also list, a wikitable of linked names, a GitHub heading wrapper
+# whose only link is a textless permalink anchor, a "See https://react.dev/"
+# paragraph, a comment that is one prose link ("here is the repo for the
+# replication of the issue"). Site navigation is dropped before this point
+# (tree cleaning and the discard XPaths), so no block inside the main content
+# keeps the link-density test.
 _LINKED_BLOCKS_KEPT = False
-_KEPT_PARAGRAPH = "pfm-kept-p"
-
-
-def _prints_its_addresses(paragraph) -> bool:
-    refs = paragraph.findall(".//ref")
-    return bool(refs) and all(
-        " ".join((ref.text_content() or "").split()).startswith(("http://", "https://", "www.")) for ref in refs
-    )
 
 
 def _keep_linked_blocks() -> None:
     global _LINKED_BLOCKS_KEPT
     if _LINKED_BLOCKS_KEPT:
         return
+    from lxml.etree import XPath
     from trafilatura import main_extractor
+    from trafilatura.xpaths import regexpNS
 
     prune = main_extractor.delete_by_link_density
 
     def delete_by_link_density(tree, tagname, backtracking=False, favor_precision=False):
-        if tagname in ("div", "list"):
+        if tagname in ("div", "list", "p"):
             return tree
-        if tagname != "p":
-            return prune(tree, tagname, backtracking=backtracking, favor_precision=favor_precision)
-        kept = [paragraph for paragraph in tree.iter("p") if _prints_its_addresses(paragraph)]
-        for paragraph in kept:
-            paragraph.tag = _KEPT_PARAGRAPH
-        try:
-            return prune(tree, tagname, backtracking=backtracking, favor_precision=favor_precision)
-        finally:
-            for paragraph in kept:
-                paragraph.tag = "p"
+        return prune(tree, tagname, backtracking=backtracking, favor_precision=favor_precision)
 
     main_extractor.delete_by_link_density = delete_by_link_density
     main_extractor.link_density_test_tables = lambda element: False
+    # The discard pattern's "next-" (a next-post link) is a substring test over
+    # the whole class attribute, so it also deletes a block whose class token
+    # merely contains it mid-word — GitHub's every nested reply
+    # ("discussion-primer-next-nested-comment-timeline-item"). Only a class
+    # token that starts with "next-" names the link.
+    discard = main_extractor.OVERALL_DISCARD_XPATH
+    pattern = discard[0].path
+    if "|next-|" not in pattern:
+        raise RuntimeError("trafilatura's discard pattern no longer holds '|next-|'; re-check the class anchor")
+    discard[0] = XPath(pattern.replace("|next-|", r"|(?:^|\s)next-|"), namespaces={"re": regexpNS})
     _LINKED_BLOCKS_KEPT = True
+
+
+# An element the reader never sees is never written. trafilatura's own discard
+# pattern already drops aria-hidden="true" and an inline display:none or
+# visibility:hidden, and its tree cleaning drops <noscript>; it strips a
+# <template> tag but keeps the inert markup inside, and the HTML `hidden`
+# attribute is in neither — GitHub's "Uh oh! There was an error while loading"
+# box beside every comment. hidden="until-found" is text a find-in-page
+# reveals: kept.
+def _drop_hidden(tree) -> None:
+    for element in tree.xpath("//template|//*[@hidden]"):
+        if element.tag == "template" or (element.get("hidden") or "").strip().casefold() != "until-found":
+            element.drop_tree()
+
+
+# A table whose role is presentation or none is layout by its author's own
+# declaration (WAI-ARIA), not data: GitHub wraps every comment body in one.
+# trafilatura's cell handler keeps a cell's paragraph only up to its first
+# inline child, so each body was cut at its first link and written as a
+# one-cell table. Its rows and cells become plain blocks; a data table nested
+# inside a cell stays a table.
+def _unwrap_layout_tables(tree) -> None:
+    for table in tree.xpath('//table[@role="presentation" or @role="none"]'):
+        rows = table.xpath("./tr|./thead/tr|./tbody/tr|./tfoot/tr")
+        for element in [table, *table.xpath("./thead|./tbody|./tfoot"), *rows]:
+            element.tag = "div"
+        for row in rows:
+            for cell in row.xpath("./td|./th"):
+                cell.tag = "div"
 
 
 # trafilatura's own markdown writer loses block boundaries: a heading after a
@@ -294,12 +323,26 @@ def _inline(element, in_head: bool) -> str:
 def convert_html_full(path: pathlib.Path) -> str:
     """The WHOLE DOM as Markdown, boilerplate included: the recall gate's
     fallback (Go's harvest.FullDOMConverter) when main-content extraction kept
-    too little of the page's visible text."""
+    too little of the page's visible text. An element the reader never sees is
+    dropped first (_drop_hidden), the same as on the main-content path."""
+    import tempfile
+
+    import lxml.html
     from markitdown import MarkItDown
+    from trafilatura.utils import load_html
 
     raw = path.read_bytes().decode("utf-8", errors="ignore")
-    with _quiet_stdout():
-        body = MarkItDown().convert(str(path)).text_content or ""
+    tree = load_html(raw)
+    if tree is None:
+        source = raw
+    else:
+        _drop_hidden(tree)
+        source = lxml.html.tostring(tree, encoding="unicode")
+    with tempfile.NamedTemporaryFile("w", suffix=".html", encoding="utf-8") as visible:
+        visible.write(source)
+        visible.flush()
+        with _quiet_stdout():
+            body = MarkItDown().convert(visible.name).text_content or ""
     return tidy_markdown(html_metadata(raw) + body)
 
 

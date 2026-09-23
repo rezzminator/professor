@@ -8,6 +8,8 @@
 
 These tutorials provide a step-by-step process to doing development and dev-ops activities on Ubuntu machines, servers or devices.
 
+[You can write your own ›](https://discourse.ubuntu.com/c/tutorials)
+
 ##### landscape, security, server, desktop
 
 ### [Blocking Software Package Installation with Landscape](/tutorials/blocking-software-package-installation-with-landscape)

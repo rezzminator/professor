@@ -88,7 +88,7 @@ The [HTTP guides](/en-US/docs/Web/HTTP/Guides) are listed in order from general 
 Helpful tools and resources for understanding and debugging HTTP.
 
 - [Firefox Developer Tools](https://firefox-source-docs.mozilla.org/devtools-user/index.html)
--
+- [Network monitor](https://firefox-source-docs.mozilla.org/devtools-user/network_monitor/index.html)
 - [HTTP Observatory](/en-US/observatory)
 - A project designed to help developers, system administrators, and security professionals configure their sites safely and securely.
 - [RedBot](https://redbot.org/)

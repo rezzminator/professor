@@ -96,3 +96,7 @@ There are several unsorted documents that don’t seem to fit on other parts of 
   - [Documentação do Kernel Linux em Português](translations/pt_BR/index.html)
   - [Traducción al español](translations/sp_SP/index.html)
   - [Disclaimer](translations/index.html#disclaimer)
+
+## Indices and tables
+
+- [Index](genindex.html)

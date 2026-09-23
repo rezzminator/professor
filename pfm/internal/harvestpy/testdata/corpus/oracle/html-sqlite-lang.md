@@ -17,6 +17,10 @@ The following syntax documentation topics are available:
 
 The routines [sqlite3_prepare_v2()](c3ref/prepare.html), [sqlite3_prepare()](c3ref/prepare.html), [sqlite3_prepare16()](c3ref/prepare.html), [sqlite3_prepare16_v2()](c3ref/prepare.html), [sqlite3_exec()](c3ref/exec.html), and [sqlite3_get_table()](c3ref/free_table.html) accept an SQL statement list (sql-stmt-list) which is a semicolon-separated list of statements.
 
+[sql-stmt-list:](syntax/sql-stmt-list.html)
+
 Each SQL statement in the statement list is an instance of the following:
+
+[sql-stmt:](syntax/sql-stmt.html)
 
 *This page was last updated on 2024-04-01 12:41:31Z*

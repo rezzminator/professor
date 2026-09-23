@@ -108,14 +108,19 @@ Additional resources related to evaluation are listed in the [Evaluating Web Acc
 
 ## Other Areas of W3C WAI work
 
+- [Mobile Accessibility at W3C](/WAI/standards-guidelines/mobile/)
+- [Cognitive Accessibility at W3C](/WAI/cognitive/)
+
 ## Additional Information
 
 - [List of all W3C accessibility-related Standards (“W3C Recommendations”) and Working Group Notes](https://www.w3.org/TR/?tag=accessibility)
 - [Web Accessibility Laws & Policies](/WAI/policies/)lists governmental laws and policies relating to web accessibility in countries and regions around the world. Many of these reference W3C accessibility standards.
 - [Why Standards Harmonization is Essential to Web Accessibility](/WAI/standards-guidelines/harmonization/)
 - [Referencing and Linking to WAI Guidelines and Technical Documents](/WAI/standards-guidelines/linking/)
--
+- [How WAI Develops Accessibility Guidelines through the W3C Process: Milestones and](/WAI/standards-guidelines/w3c-process/)**Opportunities to Contribute**
 
 ![Illustration showing the guidelines for the different components](/WAI/content-images/components/specs.png)
+
+[Long description of image](/WAI/fundamentals/components/examples/#guide)
 
 [Back to Top](#top)

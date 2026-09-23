@@ -260,9 +260,16 @@ func fakeLineConverter(t *testing.T, response string) *Converter {
 // See also list, a GitHub README's div-wrapped headings and link lists, a
 // docsify anchor heading after a code block, an npm README whose last sections
 // are "See <bare URL>" paragraphs (link-dense, yet content: pruning them also
-// stripped their headings as trailing titles). Every heading stays a "#" line,
-// every table row a "|" line, every bullet a "- " line; a site nav bar
-// outside the main content is still dropped. It needs the pinned
+// stripped their headings as trailing titles), elements the reader never sees
+// (a `hidden` error box, aria-hidden, display:none, visibility:hidden,
+// template, noscript) beside visible text, and a GitHub discussion timeline
+// whose every comment body sits in a role="presentation" table and was cut at
+// its first link, its nested replies deleted by the "next-" class discard.
+// A comment paragraph that is one prose link ("here is the repo for the
+// replication of the issue") is the comment, not a link farm: inside the main
+// content no block is pruned by link density.
+// Every heading stays a "#" line, every table row a "|" line, every bullet a
+// "- " line; a site nav bar outside the main content is still dropped. It needs the pinned
 // interpreter (HARVESTPY_CORPUS_PYTHON): trafilatura runs for real.
 func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
@@ -333,6 +340,42 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			},
 			absent: []string{"Pricing", "Advisories"},
 		},
+		{
+			fixture: "hidden.html",
+			text: []string{
+				"The upstream staff gauge was reset after the spring flood moved its datum by four centimetres.",
+				"Readings from the stilling well agree with the staff gauge to within two millimetres.",
+				"Appendix: the full calibration table is kept with the station records.",
+				"The next inspection is scheduled for the first dry week of autumn.",
+			},
+			absent: []string{
+				"Uh oh!",
+				"There was an error while loading",
+				"Decorative banner",
+				"Collapsed transcript",
+				"Placeholder tooltip",
+				"Template row",
+				"Enable JavaScript",
+			},
+		},
+		{
+			fixture: "github-timeline.html",
+			text: []string{
+				"Hey folks, exciting news. [The Next.js App Router is now stable](https://nextjs.org/blog/next-13-4)!",
+				"We've made a new section in Discussions [specifically for the App Router]" +
+					"(https://github.com/user-20/next.js/discussions/categories/app-router)" +
+					" where you can open new discussions and continue the conversation.",
+				"Hey [@user-04](https://github.com/user-04),",
+				"So for bugs not resolved in the stable release of App Router that were added in this discussion," +
+					" should those be split into their own issues now?",
+				"Bugs should be reported on GitHub issues following the issue template with a reproduction provided yeah 👍",
+				"Many thanks!",
+				"[here is the repo for the replication of the issue](https://github.com/user-31/app-dir-revalidate-repro)",
+				"In the future this will be expanded to be more granular than per-page deciding static rendering" +
+					" or dynamic rendering.",
+			},
+			absent: []string{"Uh oh!", "There was an error while loading", "|---|"},
+		},
 	}
 	converter := testConverter(t, python)
 	t.Cleanup(func() { _ = converter.Close() })
@@ -383,12 +426,52 @@ func TestHTMLConversionKeepsBlockStructure(t *testing.T) {
 			}
 			for _, word := range tc.absent {
 				if strings.Contains(result.Markdown, word) {
-					t.Errorf("site navigation %q leaked into the content", word)
+					t.Errorf("%q leaked into the content", word)
 				}
 			}
 			if t.Failed() {
 				t.Logf("markdown:\n%s", result.Markdown)
 			}
 		})
+	}
+}
+
+// TestHTMLFullDOMConversionDropsHiddenElements: the recall gate's full-page
+// fallback writes the whole DOM, boilerplate included, yet never an element the
+// reader cannot see — a `hidden` error box or a <template>'s inert markup is not
+// on the page. hidden="until-found" is text a find-in-page reveals: kept. It
+// needs the pinned interpreter (HARVESTPY_CORPUS_PYTHON): markitdown runs for real.
+func TestHTMLFullDOMConversionDropsHiddenElements(t *testing.T) {
+	python := os.Getenv("HARVESTPY_CORPUS_PYTHON")
+	if python == "" {
+		t.Skip("HARVESTPY_CORPUS_PYTHON is not set; the full-page fixture needs the pinned interpreter")
+	}
+	t.Setenv("PYTHONDONTWRITEBYTECODE", "1")
+	converter := testConverter(t, python)
+	t.Cleanup(func() { _ = converter.Close() })
+	result, err := converter.Convert(
+		context.Background(),
+		Request{Path: filepath.Join("testdata", "blocks", "hidden.html"), Kind: "html", FullDOM: true},
+	)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+	for _, text := range []string{
+		"The upstream staff gauge was reset after the spring flood moved its datum by four centimetres.",
+		"Readings from the stilling well agree with the staff gauge to within two millimetres.",
+		"Appendix: the full calibration table is kept with the station records.",
+		"The next inspection is scheduled for the first dry week of autumn.",
+	} {
+		if !strings.Contains(result.Markdown, text) {
+			t.Errorf("visible paragraph %q is missing", text)
+		}
+	}
+	for _, word := range []string{"Uh oh!", "There was an error while loading", "Template row"} {
+		if strings.Contains(result.Markdown, word) {
+			t.Errorf("hidden text %q leaked into the full-page conversion", word)
+		}
+	}
+	if t.Failed() {
+		t.Logf("markdown:\n%s", result.Markdown)
 	}
 }

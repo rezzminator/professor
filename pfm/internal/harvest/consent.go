@@ -4,20 +4,21 @@ import (
 	"bytes"
 	"context"
 	"regexp"
-	"strings"
 
 	"golang.org/x/net/html"
 
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// consentContainerPattern names the id or class of a consent manager's
+// consentContainerPattern names the id, class or test id of a consent manager's
 // container (OneTrust, Didomi, Quantcast/TCF, Cookiebot, Usercentrics,
-// TrustArc, Sourcepoint, and a generic cookie/consent banner). Their vendor
-// lists name Cloudflare, reCAPTCHA or Turnstile as cookie providers, which a
-// challenge gate would otherwise read as a bot wall.
+// TrustArc, Sourcepoint, Ethyca Fides, and a generic cookie/consent banner).
+// Their vendor lists name Cloudflare, reCAPTCHA or Turnstile as cookie
+// providers, which a challenge gate would otherwise read as a bot wall, and
+// their dialogs are never the page's content (convertHTML drops them on
+// every rung).
 var consentContainerPattern = regexp.MustCompile(
-	`(?i)onetrust|didomi|qc-cmp|cookiebot|usercentrics|truste[-_]|trustarc|sp_message|` +
+	`(?i)onetrust|didomi|qc-cmp|cookiebot|usercentrics|truste[-_]|trustarc|sp_message|fides[-_]|` +
 		`\bcmp\b|cmp-|consent|cookie-?banner|cookie-?notice|cookie-?law|gdpr`,
 )
 
@@ -68,14 +69,5 @@ func withoutConsentMarkup(body []byte) []byte {
 }
 
 func consentContainer(node *html.Node) bool {
-	if node.Data == "body" || node.Data == "html" {
-		return false
-	}
-	for _, attr := range node.Attr {
-		if (attr.Key == "id" || attr.Key == "class") &&
-			consentContainerPattern.MatchString(strings.TrimSpace(attr.Val)) {
-			return true
-		}
-	}
-	return false
+	return wallContainer(node, consentContainerPattern)
 }

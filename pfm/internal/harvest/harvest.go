@@ -774,7 +774,7 @@ func (h *Harvester) fetchURLWithPolicy(
 		wrongPDF,
 		appShellFailure,
 	)
-	message = withRungs(message, rungs)
+	message = withRungs(loaders.loginWallNote(source, message), rungs)
 	return Result{
 		Source:       source,
 		HTTPStatus:   lastStatus,

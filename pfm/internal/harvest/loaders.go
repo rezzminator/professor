@@ -123,6 +123,8 @@ type loaderBudget struct {
 	failed map[string]bool
 	// jar carries the cookies the site sets across the fetch's requests.
 	jar http.CookieJar
+	// loginGateOnly: a page of this fetch held nothing but a login gate (walls.go).
+	loginGateOnly bool
 	// stopped is why following ended before every loader was requested; ""
 	// while it may continue.
 	stopped string

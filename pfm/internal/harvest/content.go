@@ -181,6 +181,7 @@ func (h *Harvester) convertHTML(
 	// unparsed is the answer for a page that could not be parsed: its
 	// recall is unmeasured, which a browser render may complete.
 	unparsed := convertedPage{renderMayComplete: true}
+	body = withoutConsentMarkup(body) // a consent dialog is never the page's content, on any rung
 	doc, err := html.Parse(bytes.NewReader(body))
 	if err != nil {
 		// x/net/html recovers from any malformed markup; an error here is a
@@ -230,7 +231,10 @@ func (h *Harvester) convertHTML(
 	if parseErr == nil {
 		nextPage = paginationContinuation(doc, parsed)
 	}
-	unclosed := nextPage
+	// A wall the markup shows (walls.go) is named; a render of the same
+	// signed-out page cannot close it either.
+	wall := pageWall(source, doc)
+	unclosed := joinReasons(wall, nextPage)
 	if extraction.unrendered != "" {
 		unclosed = joinReasons(extraction.unrendered, rest.reason(), budget.note(), unclosed)
 	}
@@ -254,6 +258,10 @@ func (h *Harvester) convertHTML(
 	converted, err := h.options.Converter.Convert(ctx, kindHTML, source, input)
 	if err != nil {
 		return "", convertedPage{}, err
+	}
+	if budget.gateOnly(wall, converted) {
+		obs.Logger(ctx).Info("harvest: the page holds nothing but a login wall", "target", logSource(source))
+		return "", convertedPage{}, nil // never content; the fetch's failure names the wall
 	}
 	visible := visibleWords(doc)
 	measure := measureRecall(len(visible), converted)

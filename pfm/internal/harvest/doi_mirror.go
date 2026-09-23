@@ -190,7 +190,7 @@ func (h *Harvester) doiMirrorLookup(
 	// request that STARTS a doi-mirror fetch was the one request that could not
 	// pass a wall.
 	form := url.Values{"request": {identifier}}
-	response, err := h.gatewayFetch(ctx, gatewayRequest{
+	lookup := retrieveRequest{target: base, want: WantPage, policy: PolicyGateway, gateway: gatewayRequest{
 		url:    base,
 		method: http.MethodPost,
 		body:   []byte(form.Encode()),
@@ -203,11 +203,12 @@ func (h *Harvester) doiMirrorLookup(
 		max:    doiMirrorMaxBytes(h),
 		jar:    jar,
 		policy: gatewayEscalate,
-	})
-	body, status := response.body, response.status
+	}}
+	response, err := h.retrieveWith(ctx, lookup)
+	body, status := response.Body, response.Status
 	pageURL := base
-	if response.finalURL != "" {
-		pageURL = response.finalURL
+	if response.FinalURL != "" {
+		pageURL = response.FinalURL
 	}
 	if err != nil {
 		kind := errorKind(err)

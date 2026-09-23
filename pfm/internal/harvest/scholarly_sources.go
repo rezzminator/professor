@@ -137,7 +137,11 @@ func (h *Harvester) providerFetch(
 			return providerResponse{}, fmt.Errorf("create provider cookie jar: %w", err)
 		}
 	}
-	response, err := h.gatewayFetch(ctx, gatewayRequest{
+	want := WantPage
+	if binary {
+		want = WantFile // the browser rungs render HTML and never run for a file
+	}
+	request := retrieveRequest{target: rawURL, want: want, policy: PolicyGateway, gateway: gatewayRequest{
 		url:     rawURL,
 		client:  h.binaryDirectOrClient(),
 		ua:      h.userAgent,
@@ -145,19 +149,19 @@ func (h *Harvester) providerFetch(
 		max:     maxBytes,
 		jar:     jar,
 		policy:  gatewayEscalate,
-		binary:  binary,
-	})
+	}}
+	response, err := h.retrieveWith(ctx, request)
 	if err != nil {
-		return providerResponse{status: response.status, contentType: response.contentType}, err
+		return providerResponse{status: response.Status, contentType: response.ContentType}, err
 	}
-	finalURL := response.finalURL
+	finalURL := response.FinalURL
 	if finalURL == "" {
 		finalURL = rawURL
 	}
 	return providerResponse{
-		body:        response.body,
-		status:      response.status,
-		contentType: response.contentType,
+		body:        response.Body,
+		status:      response.Status,
+		contentType: response.ContentType,
 		finalURL:    finalURL,
 	}, nil
 }

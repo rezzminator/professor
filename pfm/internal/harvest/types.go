@@ -268,6 +268,9 @@ type Options struct {
 	// SearXNGURL/BraveAPIKey/DisableSearch once, and re-deriving it a second
 	// way is how a hint drifts from the tool it names.
 	SearchAvailable bool
+	// MaxDownloadBytes caps one file download (harvest.maxDownloadBytes);
+	// 0 uses the 2 GiB default.
+	MaxDownloadBytes int64
 }
 
 // settings is the resolved scholarly/search/browser configuration New takes

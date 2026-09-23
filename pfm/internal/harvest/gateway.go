@@ -69,7 +69,7 @@ type gatewayRequest struct {
 	headers http.Header
 	max     int64
 	jar     http.CookieJar
-	// policy is read ONLY by gatewayFetch's ladder, to decide whether to
+	// policy is read ONLY by retrieveGateway's ladder, to decide whether to
 	// escalate past req.client. gatewayAttempt performs exactly one HTTP
 	// attempt and never consults this field — a caller that calls
 	// gatewayAttempt directly (bypassing the ladder) has nothing to set here.
@@ -116,8 +116,9 @@ type gatewayResponse struct {
 // looked and were walled, not that we failed to look.
 var errGatewayNoRung = errors.New("every gateway rung was exhausted")
 
-// fetch runs one request through the gateway ladder.
-func (h *Harvester) gatewayFetch(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
+// retrieveGateway is Retrieve's PolicyGateway step: one request up the challenge
+// ladder. Only retrieve calls it; there is no second ladder entry.
+func (h *Harvester) retrieveGateway(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
 	if !req.trustedOrigin {
 		if err := validateFetchURL(req.url, false); err != nil {
 			return gatewayResponse{}, err
@@ -235,45 +236,9 @@ func (h *Harvester) gatewayRung(
 // same code path as the provider ladder.
 func gatewayAttempt(ctx context.Context, req gatewayRequest) (gatewayResponse, error) {
 	var out gatewayResponse
-	if !req.trustedOrigin {
-		if err := validateFetchURL(req.url, false); err != nil {
-			return out, err
-		}
-	}
-	if req.trustedOrigin && req.client == nil {
-		// gatewayRequestClient below dereferences *req.client unconditionally
-		// for a trusted origin, matching the base client's own redirect
-		// policy. A nil client here is a caller bug, not a network failure —
-		// name it rather than let the dereference panic the process.
-		return out, fmt.Errorf("gateway: trusted-origin request to %s has no client configured", safeURL(req.url))
-	}
-	method := req.method
-	if method == "" {
-		method = http.MethodGet
-	}
-	var payload io.Reader = http.NoBody
-	if len(req.body) > 0 {
-		payload = bytes.NewReader(req.body) // a fresh reader per rung; see gatewayRequest.body
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, method, req.url, payload)
+	resp, err := gatewayDo(ctx, req)
 	if err != nil {
-		return out, fmt.Errorf("build request: %w", err)
-	}
-	httpReq.Header.Set("User-Agent", req.ua)
-	for key, values := range req.headers {
-		for _, value := range values {
-			httpReq.Header.Add(key, value)
-		}
-	}
-	resp, err := gatewayRequestClient(req).Do(httpReq)
-	if err != nil {
-		// http.Client wraps a transport failure in *url.Error, which carries
-		// the full request URL — query string included, and with it any
-		// credential a provider puts there (books.go's Google Books key, for
-		// one). This is the ONE place that wrapping happens for every rung of
-		// every caller (see the package doc above), so sanitizing here covers
-		// the whole package rather than each caller's own error text.
-		return out, sanitizeTransportError(err, req.url)
+		return out, err
 	}
 	body, status, contentType, err := gatewayReadBody(resp, req.max, req.oversizeTruncate)
 	out.status, out.contentType = status, contentType
@@ -455,4 +420,51 @@ func browserGatewayResponse(source, html string, status int) gatewayResponse {
 		contentType: "text/html; charset=utf-8",
 		finalURL:    source,
 	}
+}
+
+// gatewayDo sends one request and hands back the live response: the SSRF
+// assertion, the User-Agent, the headers and the wrapped client every rung
+// shares. gatewayAttempt reads the body whole; a file rung streams it.
+func gatewayDo(ctx context.Context, req gatewayRequest) (*http.Response, error) {
+	if !req.trustedOrigin {
+		if err := validateFetchURL(req.url, false); err != nil {
+			return nil, err
+		}
+	}
+	if req.trustedOrigin && req.client == nil {
+		// gatewayRequestClient below dereferences *req.client unconditionally
+		// for a trusted origin, matching the base client's own redirect
+		// policy. A nil client here is a caller bug, not a network failure —
+		// name it rather than let the dereference panic the process.
+		return nil, fmt.Errorf("gateway: trusted-origin request to %s has no client configured", safeURL(req.url))
+	}
+	method := req.method
+	if method == "" {
+		method = http.MethodGet
+	}
+	var payload io.Reader = http.NoBody
+	if len(req.body) > 0 {
+		payload = bytes.NewReader(req.body) // a fresh reader per rung; see gatewayRequest.body
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, method, req.url, payload)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	httpReq.Header.Set("User-Agent", req.ua)
+	for key, values := range req.headers {
+		for _, value := range values {
+			httpReq.Header.Add(key, value)
+		}
+	}
+	resp, err := gatewayRequestClient(req).Do(httpReq)
+	if err != nil {
+		// http.Client wraps a transport failure in *url.Error, which carries
+		// the full request URL — query string included, and with it any
+		// credential a provider puts there (books.go's Google Books key, for
+		// one). This is the ONE place that wrapping happens for every rung of
+		// every caller (see the package doc above), so sanitizing here covers
+		// the whole package rather than each caller's own error text.
+		return nil, sanitizeTransportError(err, req.url)
+	}
+	return resp, nil
 }

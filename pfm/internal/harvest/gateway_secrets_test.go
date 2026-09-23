@@ -50,22 +50,22 @@ func TestGatewayAttemptNeverLeaksURLQueryOnTransportFailure(t *testing.T) {
 		t.Fatalf("log output %q still carries the sentinel key", logBuf.String())
 	}
 
-	// The same pipeline gatewayFetch drives (escalation on) must not leak it
+	// The same pipeline retrieveGateway drives (escalation on) must not leak it
 	// either: gateway.go:200's errGatewayNoRung message names req.url too.
 	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: &http.Client{}})
 	h.client = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return nil, errors.New("boom")
 	})}
-	_, fetchErr := h.gatewayFetch(context.Background(), gatewayRequest{
+	_, fetchErr := h.retrieveGateway(context.Background(), gatewayRequest{
 		url:    "https://example.test/lookup?key=" + sentinel,
 		client: h.client,
 		policy: gatewayNoEscalate,
 	})
 	if fetchErr == nil {
-		t.Fatal("gatewayFetch with a failing client returned a nil error")
+		t.Fatal("retrieveGateway with a failing client returned a nil error")
 	}
 	if strings.Contains(fetchErr.Error(), sentinel) {
-		t.Fatalf("gatewayFetch error %q still carries the sentinel key", fetchErr.Error())
+		t.Fatalf("retrieveGateway error %q still carries the sentinel key", fetchErr.Error())
 	}
 }
 

@@ -220,7 +220,7 @@ func TestEveryEgressGoesThroughTheGateway(t *testing.T) {
 	sort.Strings(offenders)
 	if len(offenders) > 0 {
 		t.Fatalf(
-			"HTTP egress outside the fetch gateway (%d site(s)); route these through gatewayFetch/gatewayAttempt, or justify an entry in gatewayExemptFiles:\n  %s",
+			"HTTP egress outside the fetch gateway (%d site(s)); route these through retrieveGateway/gatewayAttempt, or justify an entry in gatewayExemptFiles:\n  %s",
 			len(offenders),
 			strings.Join(offenders, "\n  "),
 		)

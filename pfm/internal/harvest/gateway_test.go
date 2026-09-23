@@ -196,7 +196,7 @@ func TestGatewayClientJarSemantics(t *testing.T) {
 	}
 }
 
-// TestGatewayFetchHonorsTrustedOrigin: gatewayFetch used to call
+// TestGatewayFetchHonorsTrustedOrigin: retrieveGateway used to call
 // validateFetchURL(req.url, false) unconditionally, refusing the operator's
 // own loopback origin as a private host even though gatewayAttempt (which
 // every rung underneath actually calls) already honors trustedOrigin. The two
@@ -207,17 +207,17 @@ func TestGatewayFetchHonorsTrustedOrigin(t *testing.T) {
 		return response(r, http.StatusOK, "application/json", `{"ok":true}`), nil
 	})}
 	h := mustNew(t, Options{CacheDir: t.TempDir(), Client: client, Chrome: client, Converter: &fakeConverter{}})
-	got, err := h.gatewayFetch(context.Background(), gatewayRequest{
+	got, err := h.retrieveGateway(context.Background(), gatewayRequest{
 		url:           "http://127.0.0.1:9/healthz",
 		client:        client,
 		trustedOrigin: true,
 		policy:        gatewayNoEscalate,
 	})
 	if err != nil {
-		t.Fatalf("gatewayFetch(trustedOrigin loopback) error = %v, want it accepted like gatewayAttempt does", err)
+		t.Fatalf("retrieveGateway(trustedOrigin loopback) error = %v, want it accepted like gatewayAttempt does", err)
 	}
 	if got.status != http.StatusOK {
-		t.Fatalf("gatewayFetch(trustedOrigin loopback) status = %d, want 200", got.status)
+		t.Fatalf("retrieveGateway(trustedOrigin loopback) status = %d, want 200", got.status)
 	}
 }
 

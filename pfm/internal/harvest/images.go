@@ -96,25 +96,19 @@ func (h *Harvester) LocalizeImages(ctx context.Context, markdown, baseSource str
 			// it carries that page's own URL as Referer (F-referer), never the
 			// Google provenance one: a hotlink-protected host allows a same-site
 			// Referer and 403s a foreign one.
-			body, status, contentType, fetchErr := getBodyWithHeaders(
-				ctx,
-				h.client,
-				full,
-				h.userAgent,
-				map[string]string{headerReferer: baseSource},
-				maxImageBytes+1,
-			)
-			if fetchErr != nil || status >= 400 || len(body) == 0 || len(body) > maxImageBytes {
-				return
-			}
-			kind := classifyKind(full, contentType, body)
-			if !isImageKind(kind) {
-				return
-			}
-			stored := h.storeBinary(full, kind, "image-localize", body, false)
-			if stored.Error == "" && stored.Path != "" {
+			// PolicyInlineImage: direct, then Chrome impersonation, never a
+			// browser — a page with 60 figures must not start 60 browsers.
+			got, fetchErr := h.retrieveWith(ctx, retrieveRequest{
+				target:   full,
+				want:     WantFile,
+				policy:   PolicyInlineImage,
+				referer:  baseSource,
+				accept:   isImageKind,
+				maxBytes: maxImageBytes,
+			})
+			if fetchErr == nil && got.Result.Path != "" {
 				mu.Lock()
-				replacements[remote] = stored.Path
+				replacements[remote] = got.Result.Path
 				mu.Unlock()
 			}
 		}()

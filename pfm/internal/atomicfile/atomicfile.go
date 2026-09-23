@@ -7,6 +7,7 @@ package atomicfile
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -22,6 +23,45 @@ var removeScratch = os.Remove
 // parent directory is created 0o700; a caller that wants a wider directory
 // creates it first.
 func Write(path string, content []byte, mode fs.FileMode) (err error) {
+	return publish(path, mode, func(scratch *os.File) error {
+		_, err := scratch.Write(content)
+		return err
+	})
+}
+
+// ErrTooLarge reports a WriteFrom stream that ran past its limit; the target
+// is left untouched and no scratch remains.
+var ErrTooLarge = errors.New("content exceeds the size limit")
+
+// WriteFrom streams r into path with Write's guarantees, never holding the
+// whole body in memory. limit > 0 caps the stream: one byte past it is
+// ErrTooLarge and nothing is published. It returns the bytes published.
+func WriteFrom(path string, r io.Reader, mode fs.FileMode, limit int64) (written int64, err error) {
+	err = publish(path, mode, func(scratch *os.File) error {
+		source := r
+		if limit > 0 {
+			source = io.LimitReader(r, limit+1)
+		}
+		n, copyErr := io.Copy(scratch, source)
+		written = n
+		if copyErr != nil {
+			return copyErr
+		}
+		if limit > 0 && n > limit {
+			return fmt.Errorf("%w (%d bytes)", ErrTooLarge, limit)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return written, nil
+}
+
+// publish is the one scratch-then-rename sequence Write and WriteFrom share:
+// fill writes the scratch file, which is then synced, closed and renamed over
+// path; any failure removes the scratch and leaves path as it was.
+func publish(path string, mode fs.FileMode, fill func(*os.File) error) (err error) {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return fmt.Errorf("write %s: create directory: %w", path, err)
@@ -44,7 +84,7 @@ func Write(path string, content []byte, mode fs.FileMode) (err error) {
 		_ = scratch.Close()
 		return fmt.Errorf("write %s: set mode: %w", path, err)
 	}
-	if _, err := scratch.Write(content); err != nil {
+	if err := fill(scratch); err != nil {
 		_ = scratch.Close()
 		return fmt.Errorf("write %s: %w", path, err)
 	}

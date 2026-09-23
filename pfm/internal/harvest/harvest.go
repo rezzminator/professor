@@ -303,14 +303,8 @@ func (h *Harvester) fetchURLWithPolicy(
 		if (kind == kindHTML || kind == kindTXT) && len(body) > 0 {
 			lastPage = append(lastPage[:0], body...)
 		}
-		if kind == kindImage || isImageKind(kind) {
-			return Result{
-				Source:     source,
-				Kind:       kindImage,
-				Error:      fmt.Sprintf("%s is an image — use the `fetchImage` tool, not `fetch`.", source),
-				HTTPStatus: status,
-				ErrorKind:  errorKindWrongKind,
-			}
+		if refused, ok := pageBodyGuard(source, kind, body, status); ok {
+			return refused
 		}
 		if kind == kindZIP || kind == kindTAR || kind == kind7Z || kind == kindRAR {
 			// An EPUB is zip-SHAPED but is a book; OA book sources (OAPEN/DOAB/

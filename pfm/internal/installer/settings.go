@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+// configAsyncKey is the hook-object field that makes the harness run a hook
+// in the background.
+const configAsyncKey = "async"
+
 func updateSettings(
 	raw []byte,
 	home string,
@@ -21,17 +25,9 @@ func updateSettings(
 	oldBinary := home + "/.local/bin/cc-fleet"
 	pfmBinary := home + "/.local/bin/pfm"
 	expected := claudeHookTemplates(home)
-	clearCommand := commandByName(expected, "clear-kill")
 	overlayStatusCommand := StatusLineOverlayCommand(home)
 	usageCommand := commandByName(expected, "usage")
 	exploreDenyCommand := commandByName(expected, "explore-deny")
-	rrDirCommand := commandByName(expected, "rr-dir")
-	epicInjectCommand := commandByName(expected, "epic-inject")
-	reloadInterceptCommand := commandByName(expected, "reload-intercept")
-	exitInterceptCommand := commandByName(expected, "exit-intercept")
-	exitCloseCommand := commandByName(expected, "exit-close")
-	compactNudgeCommand := commandByName(expected, "compact-nudge")
-	launcherRepairCommand := commandByName(expected, "launcher-repair")
 
 	changed := false
 	before := countSettingsHookCommands(document)
@@ -94,40 +90,21 @@ func updateSettings(
 		changed = true
 	}
 
-	entries := hookEntries(document, "UserPromptSubmit", !uninstall)
-	seenUserPromptCommands := map[string]bool{}
-	for _, entry := range entries {
-		hooks, _ := entry["hooks"].([]any)
-		kept := hooks[:0]
-		for _, hookValue := range hooks {
-			hook, _ := hookValue.(map[string]any)
-			command, _ := hook[configCommandKey].(string)
-			original := command
-			if !uninstall && strings.Contains(command, "cc-usage-hook.sh") {
-				command = usageCommand
-			}
-			if command != original {
-				hook[configCommandKey] = command
-				hook[configTypeKey] = commandType
-				changed = true
-			}
-			if isRetiredHookCommand(command, pfmBinary) {
-				changed = true
-				continue
-			}
-			if !uninstall && (command == usageCommand || command == epicInjectCommand ||
-				command == reloadInterceptCommand || command == exitInterceptCommand) {
-				if seenUserPromptCommands[command] {
+	if !uninstall {
+		for _, entry := range hookEntries(document, hookEventUserPromptSubmit, false) {
+			hooks, _ := entry["hooks"].([]any)
+			for _, hookValue := range hooks {
+				hook, _ := hookValue.(map[string]any)
+				command, _ := hook[configCommandKey].(string)
+				if strings.Contains(command, "cc-usage-hook.sh") {
+					hook[configCommandKey] = usageCommand
+					hook[configTypeKey] = commandType
 					changed = true
-					continue
 				}
-				seenUserPromptCommands[command] = true
 			}
-			kept = append(kept, hookValue)
 		}
-		entry["hooks"] = kept
 	}
-	pruneEmptyHooks(document, "UserPromptSubmit")
+	pruneEmptyHooks(document, hookEventUserPromptSubmit)
 	if !uninstall {
 		for _, entry := range hookEntries(document, "PreToolUse", true) {
 			hooks, _ := entry["hooks"].([]any)
@@ -146,71 +123,17 @@ func updateSettings(
 			}
 		}
 	}
-
-	clearSeen := false
-	for _, entry := range hookEntries(document, "SessionEnd", false) {
-		hooks, _ := entry["hooks"].([]any)
-		kept := hooks[:0]
-		for _, hookValue := range hooks {
-			hook, _ := hookValue.(map[string]any)
-			command, _ := hook[configCommandKey].(string)
-			if isRetiredHookCommand(command, pfmBinary) {
-				changed = true
-				continue
-			}
-			if command == clearCommand {
-				if !uninstall && clearSeen {
-					changed = true
-					continue
-				}
-				clearSeen = true
-			}
-			kept = append(kept, hookValue)
-		}
-		entry["hooks"] = kept
-	}
 	pruneEmptyHooks(document, "SessionEnd")
 
 	if !uninstall {
-		if !hasHookCommandWithMatcher(hookEntries(document, "SessionStart", true), launcherRepairCommand, "") {
-			appendHookWithMatcher(document, "SessionStart", "", launcherRepairCommand)
+		if dropMisplacedTemplateHooks(document, expected, pfmBinary) {
 			changed = true
 		}
-		if !hasHookCommand(hookEntries(document, "UserPromptSubmit", true), usageCommand) {
-			appendHook(document, "UserPromptSubmit", usageCommand)
-			changed = true
-		}
-		if !clearSeen {
-			appendHook(document, "SessionEnd", clearCommand)
-			changed = true
-		}
-		if !hasHookCommandWithMatcher(hookEntries(document, "PreToolUse", true), exploreDenyCommand, "Agent|Task") {
-			appendHookWithMatcher(document, "PreToolUse", "Agent|Task", exploreDenyCommand)
-			changed = true
-		}
-		if !hasHookCommandWithMatcher(hookEntries(document, "SubagentStart", true), rrDirCommand, hookRRDirMatcher) {
-			appendHookWithMatcher(document, "SubagentStart", hookRRDirMatcher, rrDirCommand)
-			changed = true
-		}
-		if !hasHookCommandWithMatcher(hookEntries(document, "UserPromptSubmit", true), epicInjectCommand, "") {
-			appendHookWithMatcher(document, "UserPromptSubmit", "", epicInjectCommand)
-			changed = true
-		}
-		if !hasHookCommandWithMatcher(hookEntries(document, "UserPromptSubmit", true), reloadInterceptCommand, "") {
-			appendHookWithMatcher(document, "UserPromptSubmit", "", reloadInterceptCommand)
-			changed = true
-		}
-		if !hasHookCommandWithMatcher(hookEntries(document, "UserPromptSubmit", true), exitInterceptCommand, "") {
-			appendHookWithMatcher(document, "UserPromptSubmit", "", exitInterceptCommand)
-			changed = true
-		}
-		if !hasHookCommandWithMatcher(hookEntries(document, "SessionEnd", true), exitCloseCommand, "") {
-			appendHookWithMatcher(document, "SessionEnd", "", exitCloseCommand)
-			changed = true
-		}
-		if !hasHookCommandWithMatcher(hookEntries(document, "UserPromptSubmit", true), compactNudgeCommand, "") {
-			appendHookWithMatcher(document, "UserPromptSubmit", "", compactNudgeCommand)
-			changed = true
+		for _, wanted := range expected {
+			if !hasHookCommandWithMatcher(hookEntries(document, wanted.Event, true), wanted.Command, wanted.Matcher) {
+				appendTemplateHook(document, wanted)
+				changed = true
+			}
 		}
 		if normalizeExpectedHookTypes(document, expected) {
 			changed = true
@@ -389,9 +312,10 @@ func addMemoryHelperCommandForms(commands map[string]string, oldPath, newPath st
 // settings.json or Codex hooks.json hook entry may still carry from before a
 // rename or a full retirement. Both wiring loops below strip any hook whose
 // command matches one of these — from either binary name, prefixed by any
-// path, or invoked bare via $PATH — and ProbeExpectedHooks (and the shared
-// Codex path it also serves) reads the same table to flag a live host that
-// still carries one as "stale" rather than saying nothing about it at all.
+// path, or invoked bare via $PATH — and ProbeExpectedHooks reads the same
+// table over every probed Claude settings.json and every configured Codex
+// home's hooks.json to flag a live host that still carries one as STALE
+// rather than saying nothing about it at all.
 var retiredHookCommands = []struct {
 	Name       string
 	Subcommand string
@@ -707,6 +631,10 @@ func hasHookCommandWithMatcher(entries []map[string]any, wanted, matcher string)
 	return false
 }
 
+// normalizeExpectedHookTypes converges the shape of every template hook at its
+// expected (event, matcher): its type is "command", and an Async template's
+// hook object carries "async": true. Fields the template does not name are
+// left as they are.
 func normalizeExpectedHookTypes(document map[string]any, expected []ExpectedHook) bool {
 	changed := false
 	for _, wanted := range expected {
@@ -718,18 +646,21 @@ func normalizeExpectedHookTypes(document map[string]any, expected []ExpectedHook
 			hooks, _ := entry["hooks"].([]any)
 			for _, hookValue := range hooks {
 				hook, _ := hookValue.(map[string]any)
-				if hook[configCommandKey] == wanted.Command && hook[configTypeKey] != commandType {
+				if hook[configCommandKey] != wanted.Command {
+					continue
+				}
+				if hook[configTypeKey] != commandType {
 					hook[configTypeKey] = commandType
+					changed = true
+				}
+				if wanted.Async && hook[configAsyncKey] != true {
+					hook[configAsyncKey] = true
 					changed = true
 				}
 			}
 		}
 	}
 	return changed
-}
-
-func appendHook(document map[string]any, event, command string) {
-	appendHookWithMatcher(document, event, "", command)
 }
 
 func appendHookWithMatcher(document map[string]any, event, matcher, command string) {

@@ -45,7 +45,7 @@ func TestProbeExpectedHooksStatesAndOwnership(t *testing.T) {
 		if err := os.WriteFile(hook.File, []byte(stale), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		assertHookState(t, ProbeExpectedHooks(home, machine), hook, "broken")
+		assertHookState(t, ProbeExpectedHooks(home, machine), hook, stateHookDrift)
 	})
 }
 
@@ -286,6 +286,13 @@ func stageExpectedHookFixtures(t *testing.T) (string, pfmconfig.Config) {
 		settingsHookOwnershipPath(managedRootForHome(home)),
 		string(encoded),
 	)
+	// Every hook command's first word is this executable; doctor proves it
+	// resolves to a regular file with an execute bit.
+	binary := filepath.Join(home, ".local", "bin", "pfm")
+	writeFixture(t, binary, "#!/bin/sh\n")
+	if err := os.Chmod(binary, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	return home, machine
 }
 
@@ -434,10 +441,11 @@ func TestReportHooksClaudePresentStillFailsOnAMissingHook(t *testing.T) {
 	}
 }
 
-// TestReportHooksRowsCountMissingBrokenAndDriftWarnings pins every row shape
-// ReportHooks prints and its two-tier split — ok is silent; missing, broken,
-// and stale are each a failure (owned by install); drift is a warning.
-func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
+// TestReportHooksRowsCountMissingUnreadableAndDriftWarnings pins the row shapes
+// ReportHooks prints from a stubbed probe and its two-tier split — ok is
+// silent; missing, unreadable and stale are each a failure (owned by
+// install); a ledger drift is a warning.
+func TestReportHooksRowsCountMissingUnreadableAndDriftWarnings(t *testing.T) {
 	saved := HookProbeOverride
 	t.Cleanup(func() { HookProbeOverride = saved })
 	home := t.TempDir()
@@ -468,7 +476,7 @@ func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
 					Event:  "UserPromptSubmit",
 					Name:   "usage",
 				},
-				State: "broken",
+				State: stateUnreadable,
 				Error: "parse error",
 			},
 			{
@@ -479,7 +487,8 @@ func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
 					Name:   "unexpected",
 				},
 				State: "drift",
-				Error: "ledger owns 1 hook absent from expectations",
+				Want:  "1",
+				Got:   "not-expected",
 			},
 			{
 				Hook: ExpectedHook{
@@ -499,9 +508,9 @@ func TestReportHooksRowsCountMissingBrokenAndDriftWarnings(t *testing.T) {
 	for _, wanted := range []string{
 		"doctor: hook claude[1] settings.json SessionEnd clear-kill ok",
 		"doctor: hook codex hooks.json SessionStart clear-kill MISSING — run pfm install",
-		"doctor: hook claude[2] settings.json UserPromptSubmit usage broken error=parse error",
-		"doctor: hook ownership ledger.json SessionEnd unexpected drift error=ledger owns 1 hook absent from expectations",
-		"doctor: hook codex hooks.json Stop usage stale — run pfm install",
+		"doctor: hook claude[2] settings.json UNREADABLE error=parse error",
+		"doctor: hook ownership ledger.json SessionEnd unexpected DRIFT ledger ownership=1 file=not-expected",
+		"doctor: hook codex hooks.json Stop usage STALE usage — run pfm install",
 	} {
 		if !strings.Contains(output.String(), wanted) {
 			t.Errorf("output missing %q:\n%s", wanted, output.String())

@@ -31,12 +31,6 @@ func updateCodexHooks(
 	}
 	oldBinary := home + "/.local/bin/cc-fleet"
 	pfmBinary := home + "/.local/bin/pfm"
-	retiredCommands := map[string]bool{
-		pfmBinary + " internal clear-kill":                  true,
-		oldBinary + " internal clear-kill":                  true,
-		pfmBinary + ` internal clear-kill --parent "$PPID"`: true,
-		oldBinary + ` internal clear-kill --parent "$PPID"`: true,
-	}
 
 	before := countSettingsHookCommands(document)
 	changed := false
@@ -60,8 +54,8 @@ func updateCodexHooks(
 		for _, hookValue := range hooks {
 			hook, _ := hookValue.(map[string]any)
 			command, _ := hook[configCommandKey].(string)
-			if isRetiredHookCommand(command, pfmBinary) || retiredCommands[command] ||
-				command == codexappendix.Command(home) {
+			if _, retired := codexRetiredSessionStartHookName(command, home); retired ||
+				isRetiredHookCommand(command, pfmBinary) {
 				changed = true
 				continue
 			}
@@ -92,6 +86,25 @@ func updateCodexHooks(
 		return nil, false, nil, fmt.Errorf("encode Codex hooks: %w", err)
 	}
 	return append(updated, '\n'), true, nextOwned, nil
+}
+
+// codexRetiredSessionStartHookName names a Codex SessionStart command pfm
+// used to own and now only removes: the clear-kill hook in each of its shapes
+// and binaries, and the appendix hook developer_instructions replaced. The
+// writer above strips it and doctor's probe reports it STALE.
+func codexRetiredSessionStartHookName(command, home string) (string, bool) {
+	oldBinary := home + "/.local/bin/cc-fleet"
+	pfmBinary := home + "/.local/bin/pfm"
+	switch command {
+	case pfmBinary + " internal clear-kill",
+		oldBinary + " internal clear-kill",
+		pfmBinary + ` internal clear-kill --parent "$PPID"`,
+		oldBinary + ` internal clear-kill --parent "$PPID"`:
+		return "codex-clear-kill", true
+	case codexappendix.Command(home):
+		return "codex-appendix", true
+	}
+	return "", false
 }
 
 func validateCodexHooks(document map[string]any) error {

@@ -155,44 +155,6 @@ func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) 
 // under UserPromptSubmit with an empty matcher (the epic-inject shape), and
 // one that already carries it TWICE — the shape a hand-edited or
 // double-installed settings.json can reach — keeps exactly one copy.
-func TestSettingsInstallWiresReloadInterceptHookAndDedupes(t *testing.T) {
-	home := filepath.Join("neutral", "home")
-	prefix := home + "/.local/bin/pfm"
-	reloadIntercept := prefix + " internal reload-intercept"
-
-	updated, changed, owned, err := updateSettings([]byte("{}\n"), home, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Fatal("wiring an empty settings.json reported no change")
-	}
-	if got := hookCommandCount(t, string(updated), "UserPromptSubmit", reloadIntercept); got != 1 {
-		t.Fatalf("reload-intercept count=%d after wiring an empty settings.json, want 1\n%s", got, updated)
-	}
-	if got := hookMatcherCount(t, string(updated), "UserPromptSubmit", reloadIntercept, ""); got != 1 {
-		t.Fatalf("reload-intercept matcher count=%d, want 1 empty matcher\n%s", got, updated)
-	}
-	if owned[settingsHookKey{Event: "UserPromptSubmit", Command: reloadIntercept}] != 1 {
-		t.Fatalf("owned ledger did not claim the reload-intercept hook: %#v", owned)
-	}
-
-	twice := []byte(`{"hooks":{"UserPromptSubmit":[{"matcher":"","hooks":[
-		{"type":"command","command":"` + reloadIntercept + `"},
-		{"type":"command","command":"` + reloadIntercept + `"}
-	]}]}}`)
-	deduped, changed, _, err := updateSettings(twice, home, false, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !changed {
-		t.Fatal("a doubled reload-intercept hook was not rewritten")
-	}
-	if got := hookCommandCount(t, string(deduped), "UserPromptSubmit", reloadIntercept); got != 1 {
-		t.Fatalf("reload-intercept count=%d after dedupe, want exactly 1\n%s", got, deduped)
-	}
-}
-
 func TestInstallPausesAutomaticDreamHooksAcrossClaudeAndCodex(t *testing.T) {
 	home := t.TempDir()
 	pfm := filepath.Join(home, ".local", "bin", "pfm")
@@ -284,7 +246,11 @@ func TestInstallPausesDreamHooksAcrossUnknownEventsAndPreservesMalformedNeighbor
 	if !ok {
 		t.Fatalf("hooks document has wrong shape: %#v", document["hooks"])
 	}
-	if _, ok := events["Stop"]; ok {
+	// Stop's only entry held the retired Dream hook; what Stop holds after the
+	// install is the callmeter registration alone, in an entry of its own.
+	callmeter := home + "/.local/bin/pfm internal callmeter"
+	if stop, _ := events["Stop"].([]any); len(stop) != 1 ||
+		hookCommandCount(t, string(updated), "Stop", callmeter) != 1 {
 		t.Fatalf("event containing only a retired Dream hook survived: %#v", events["Stop"])
 	}
 	notification, ok := events["Notification"].([]any)
@@ -498,6 +464,13 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 		{Event: "SessionEnd", Matcher: "", Command: prefix + " internal clear-kill"},
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal exit-intercept"},
 		{Event: "SessionEnd", Matcher: "", Command: prefix + " internal exit-close"},
+		{Event: "PreToolUse", Matcher: "Bash", Command: prefix + " internal callmeter"},
+		{Event: "PostToolUse", Matcher: "*", Command: prefix + " internal callmeter"},
+		{Event: "PostToolUseFailure", Matcher: "*", Command: prefix + " internal callmeter"},
+		{Event: "PostToolBatch", Matcher: "", Command: prefix + " internal callmeter"},
+		{Event: "SubagentStart", Matcher: "*", Command: prefix + " internal callmeter"},
+		{Event: "SubagentStop", Matcher: "*", Command: prefix + " internal callmeter"},
+		{Event: "Stop", Matcher: "", Command: prefix + " internal callmeter"},
 	}
 	if len(owned) != len(expectedKeys) {
 		t.Fatalf(

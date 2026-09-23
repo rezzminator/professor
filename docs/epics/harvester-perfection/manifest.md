@@ -47,7 +47,8 @@ The harvester gets every target — page, document, paper, file — by every tec
 - Feeds (RSS/Atom/RDF), JATS/NXML, FB2, Jupyter, WebVTT/SRT, RIS: hand-written parsers (lxml with entities off and no network, or stdlib json) — each tied or beat feedparser, docling, pubmed_parser, nbconvert, srt and rispy, at a fraction of the time; the JATS parser refuses entity bombs by name.
 - MHTML: stdlib `email`. EPUB: markitdown (already pinned; ties docling on content, adds metadata, 6x less memory). BibTeX: bibtexparser 2.0.1, the only new dependency (1.4 aborts a whole file on one bad macro).
 - Named follow-ups: JATS MathML flattens to linear text; feedparser as a fallback on a broken feed is unmeasured; RIS and BibTeX untested on messy exports.
-- Office and OCR: pending.
+- OCR: docling + RapidOCR (onnxruntime) is the default, one model per script (Latin, Chinese, Japanese, Arabic, Cyrillic; Cyrillic and Arabic need the PP-OCRv5 mobile models passed by hand); Hebrew goes through a system Tesseract when installed, otherwise "no Hebrew OCR" is named; EasyOCR rejected. A page is sent to OCR when it has no usable text layer or its text is over 2% control characters (fonts with no Unicode map); docling's document_timeout stops a long run and the process kill stays. First run stages 1.06 GB of layout and table models. Vertical CJK fails on every engine (named). Detail: the OCR bake-off report in the bench directory.
+- Office: pending.
 
 ## Landed
 

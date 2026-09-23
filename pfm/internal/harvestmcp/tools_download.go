@@ -48,6 +48,7 @@ type ResourceRef struct {
 // DownloadItem is one downloaded file: Path on the local server, Resource on
 // the remote one. Note states a limit the file is over.
 type DownloadItem struct {
+	RetryAfter  string       `json:"retry_after,omitempty"`
 	Source      string       `json:"source"`
 	Kind        string       `json:"kind,omitempty"`
 	ContentType string       `json:"content_type,omitempty"`
@@ -173,6 +174,7 @@ func (service *Service) downloadItem(ctx context.Context, source string, result 
 	}
 	if result.Error != "" {
 		item.Error = result.Error
+		item.RetryAfter = result.RetryAfter
 		if service.runtime.Remote {
 			item.Error = harvest.PublicFailureMessage(result)
 		}

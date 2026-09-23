@@ -323,7 +323,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			lastErrorKind = shareInterstitialKind(status, lastErrorKind)
 			continue
 		}
-		if refused, ok := pageBodyGuard(source, kind, body, status); ok {
+		if refused, ok := pageBodyGuard(source, kind, body, status, h.inflater(ctx)); ok {
 			return refused
 		}
 		if kind == kindZIP || kind == kindTAR || kind == kind7Z || kind == kindRAR {

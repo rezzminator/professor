@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +21,10 @@ const (
 	compressedDocumentCapLabel = "64 MiB"
 )
 
-var errDecompressionBomb = errors.New("decompresses to more than " + compressedDocumentCapLabel)
+// ErrDecompressionBomb is the cap's failure; an Inflater answers it too.
+var ErrDecompressionBomb = errors.New("decompresses to more than " + compressedDocumentCapLabel)
+
+var errDecompressionBomb = ErrDecompressionBomb
 
 // compressionSuffixes are stripped from a name to find the inner document's
 // own extension (notes.yaml.gz → notes.yaml).
@@ -33,12 +37,12 @@ var compressionSuffixes = map[string][]string{
 
 func isCompressedKind(kind string) bool {
 	_, ok := compressionSuffixes[kind]
-	return ok && kind != kindXZ
+	return ok
 }
 
 // decompressDocument inflates one compressed body, at most limit bytes.
-// xz has no decoder in the stdlib or the module's dependencies, so it is
-// refused by name before this is reached (resolveFormat).
+// xz has no decoder in the stdlib or the module's dependencies: the
+// converter inflates it (Harvester.decompress, format_xz.go).
 func decompressDocument(kind string, body []byte, limit int64) ([]byte, error) {
 	var reader io.Reader
 	switch kind {
@@ -90,23 +94,21 @@ func innerDocumentName(kind, name string) string {
 // resolveFormat is detectFormat with one compressed layer opened: a
 // compressed body whose inner document converts stays formatCompressed; an
 // inner file or unsupported kind is named as "<codec>-compressed <type>";
-// a bomb, a corrupt stream, a nested compression and xz are refused by name.
-func resolveFormat(name string, body []byte) formatFinding {
+// a bomb, a corrupt stream and a nested compression are refused by name; an
+// xz body is opened through the converter when inflate reaches it. inflate
+// opens the layer: goInflate, or Harvester.inflater.
+func resolveFormat(name string, body []byte, inflate inflateFunc) formatFinding {
 	found := detectFormat(name, body)
 	if found.class != formatCompressed {
 		return found
 	}
 	codec := found.label
-	if found.kind == kindXZ {
-		return formatFinding{
-			class: formatRefused, label: "xz-compressed file (application/x-xz)",
-			reason: "is xz-compressed, which the harvester does not support: it carries no xz decoder",
+	if found.kind != kindXZ { // xz is peeked whole below: a tar inside is found by its bytes
+		if head, _ := decompressDocument(found.kind, body, 512); isTarHeader(head) {
+			return finding(formatFileOnly, codec+"-compressed tar archive (application/x-tar)")
 		}
 	}
-	if head, _ := decompressDocument(found.kind, body, 512); isTarHeader(head) {
-		return finding(formatFileOnly, codec+"-compressed tar archive (application/x-tar)")
-	}
-	inner, err := decompressDocument(found.kind, body, compressedDocumentCap)
+	inner, err := inflate(found.kind, body)
 	switch {
 	case errors.Is(err, errDecompressionBomb):
 		return formatFinding{
@@ -132,6 +134,19 @@ func resolveFormat(name string, body []byte) formatFinding {
 	}
 	innerFound.label = codec + "-compressed " + innerFound.label
 	return innerFound
+}
+
+// inflateFunc opens one compressed layer under compressedDocumentCap: Go's own
+// decoders (goInflate), or Harvester.inflater, which also reaches the
+// converter's xz decoder.
+type inflateFunc func(kind string, body []byte) ([]byte, error)
+
+func goInflate(kind string, body []byte) ([]byte, error) {
+	return decompressDocument(kind, body, compressedDocumentCap)
+}
+
+func (h *Harvester) inflater(ctx context.Context) inflateFunc {
+	return func(kind string, body []byte) ([]byte, error) { return h.decompress(ctx, kind, body) }
 }
 
 // The compressed-document kinds and the suffixes named after them.

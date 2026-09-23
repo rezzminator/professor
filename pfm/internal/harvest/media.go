@@ -13,6 +13,7 @@ import (
 // policy — the download tool's path, for a file of any kind (a PDF, a zip, an
 // image, audio), capped at harvest.maxDownloadBytes. It never converts.
 func (h *Harvester) Download(ctx context.Context, source string) Result {
+	ctx, note := withRetryAfterNote(ctx)
 	if err := validateFetchURL(source, false); err != nil {
 		return Result{Source: source, Error: err.Error(), ErrorKind: errorKindInvalid}
 	}
@@ -39,7 +40,7 @@ func (h *Harvester) Download(ctx context.Context, source string) Result {
 			}
 			return shareFetchFailure(source, share, got.Status, kind, false, got.Rungs)
 		}
-		return fileFailure(source, kindFile, got, err)
+		return note.apply(fileFailure(source, kindFile, got, err))
 	}
 	result := got.Result
 	result.Source, result.HTTPStatus = source, got.Status

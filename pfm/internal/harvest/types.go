@@ -338,6 +338,7 @@ type Result struct {
 	ErrorKind    string   `json:"error_kind,omitempty"`
 	Challenge    bool     `json:"challenge,omitempty"`
 	HTTPStatus   int      `json:"http_status,omitempty"`
+	RetryAfter   string   `json:"retry_after,omitempty"`
 	// Partial names why the artifact is known to be INCOMPLETE — a recall gate
 	// below its floor, lazy-loaded content still arriving when the browser
 	// rung's scroll cap hit, a thread whose comments are only partly in the

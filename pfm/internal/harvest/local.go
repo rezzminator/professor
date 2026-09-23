@@ -159,7 +159,7 @@ func (h *Harvester) fetchLocal(ctx context.Context, source string, options Fetch
 		return Result{Source: source, Error: localEmptyFileText, ErrorKind: errorKindEmpty}
 	}
 	kind := classifyFetchedKind(path, "", body)
-	if unsupported, ok := unsupportedLocalFormat(path, body); ok {
+	if unsupported, ok := unsupportedLocalFormat(path, body, h.inflater(ctx)); ok {
 		unsupported.Source = source
 		return unsupported
 	}

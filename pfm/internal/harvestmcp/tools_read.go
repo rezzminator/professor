@@ -48,19 +48,20 @@ type ReadWorkInput struct {
 // PageItem is one read item of readPage, parseLocalDocuments and readWork.
 // Path is left out on the remote server; IDs and Route are readWork's.
 type PageItem struct {
-	Source  string            `json:"source"`
-	Kind    string            `json:"kind,omitempty"`
-	Title   string            `json:"title,omitempty"`
-	Method  string            `json:"method,omitempty"`
-	Status  int               `json:"status,omitempty"`
-	Partial string            `json:"partial"`
-	Cached  bool              `json:"cached"`
-	Chars   int               `json:"chars,omitempty"`
-	Path    string            `json:"path,omitempty"`
-	Content string            `json:"content,omitempty"`
-	IDs     map[string]string `json:"ids,omitempty"`
-	Route   string            `json:"route,omitempty"`
-	Error   string            `json:"error,omitempty"`
+	Source     string            `json:"source"`
+	Kind       string            `json:"kind,omitempty"`
+	Title      string            `json:"title,omitempty"`
+	Method     string            `json:"method,omitempty"`
+	Status     int               `json:"status,omitempty"`
+	Partial    string            `json:"partial"`
+	Cached     bool              `json:"cached"`
+	Chars      int               `json:"chars,omitempty"`
+	Path       string            `json:"path,omitempty"`
+	Content    string            `json:"content,omitempty"`
+	IDs        map[string]string `json:"ids,omitempty"`
+	Route      string            `json:"route,omitempty"`
+	Error      string            `json:"error,omitempty"`
+	RetryAfter string            `json:"retry_after,omitempty"`
 }
 
 // PagesOutput is the typed output of the three read tools.
@@ -154,17 +155,18 @@ func (service *Service) readMany(
 func (service *Service) pageItem(source string, result harvest.Result, work bool) PageItem {
 	meta := frontmatter(result.Path)
 	item := PageItem{
-		Source:  source,
-		Kind:    result.Kind,
-		Title:   valueOr(meta["title"], firstHeading(result.Content)),
-		Method:  harvest.PublicMethod(result.Method),
-		Status:  result.HTTPStatus,
-		Partial: result.Partial,
-		Cached:  result.CacheStatus == cacheStatusHit,
-		Chars:   result.Chars,
-		Path:    result.Path,
-		Content: result.Content,
-		Error:   result.Error,
+		Source:     source,
+		Kind:       result.Kind,
+		Title:      valueOr(meta["title"], firstHeading(result.Content)),
+		Method:     harvest.PublicMethod(result.Method),
+		Status:     result.HTTPStatus,
+		Partial:    result.Partial,
+		Cached:     result.CacheStatus == cacheStatusHit,
+		Chars:      result.Chars,
+		Path:       result.Path,
+		Content:    result.Content,
+		Error:      result.Error,
+		RetryAfter: result.RetryAfter,
 	}
 	if service.runtime.Remote {
 		item.Path = ""

@@ -498,6 +498,7 @@ func getBodyWithHeaders(
 // that header itself; Chrome sends the complete gzip/deflate/br/zstd list, so
 // decode the response chain explicitly (outermost encoding is last).
 func decodedResponseBody(resp *http.Response) (io.Reader, func() error, error) {
+	noteRetryAfter(resp) // a rate limit's wait reaches the caller (retry_after.go)
 	readers := []io.Reader{resp.Body}
 	closers := []io.Closer{resp.Body}
 	encodings := strings.Split(strings.ToLower(resp.Header.Get("Content-Encoding")), ",")

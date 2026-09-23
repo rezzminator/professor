@@ -10,6 +10,7 @@ dependencies = [
   "markitdown==0.1.6",
   "msoffcrypto-tool==6.0.0",
   "odfdo==3.26.1",
+  "python-bidi==0.6.11",
   "pymupdf4llm==1.27.2.3",
   "striprtf==0.0.33",
   "trafilatura==2.1.0",

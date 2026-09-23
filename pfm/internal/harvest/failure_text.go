@@ -307,8 +307,8 @@ func safeFormatLabel(label string) string {
 // detected by its bytes (resolveFormat): a file (audio, video, image, font,
 // executable, archive), a dropped format, or a compressed
 // body it cannot open. It names the extension and the detected type.
-func unsupportedLocalFormat(path string, body []byte) (Result, bool) {
-	found := resolveFormat(path, body)
+func unsupportedLocalFormat(path string, body []byte, inflate inflateFunc) (Result, bool) {
+	found := resolveFormat(path, body, inflate)
 	format := strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), ".")
 	if !formatLabelPattern.MatchString(format) {
 		format = safeFormatLabel(strings.Fields(found.label + " binary")[0])

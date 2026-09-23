@@ -326,7 +326,7 @@ func fileFailure(source, what string, got Retrieved, err error) Result {
 // video, a font, an archive, an unknown binary), a dropped or not-yet-parsed
 // format, a decompression bomb — detected by its bytes (resolveFormat), never
 // the extension, ends as a named file result, never as page content.
-func pageBodyGuard(source, kind string, body []byte, status int) (Result, bool) {
+func pageBodyGuard(source, kind string, body []byte, status int, inflate inflateFunc) (Result, bool) {
 	if kind == kindImage || isImageKind(kind) {
 		return Result{
 			Source: source,
@@ -339,7 +339,7 @@ func pageBodyGuard(source, kind string, body []byte, status int) (Result, bool) 
 			ErrorKind:  errorKindWrongKind,
 		}, true
 	}
-	found := resolveFormat(source, body)
+	found := resolveFormat(source, body, inflate)
 	switch found.class {
 	case formatFileOnly:
 		if kind == kindZIP || kind == kindTAR || kind == kind7Z || kind == kindRAR {

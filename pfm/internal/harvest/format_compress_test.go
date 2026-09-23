@@ -70,7 +70,7 @@ func TestFormatDecompressionBombIsNamed(t *testing.T) {
 			got.ErrorKind,
 		)
 	}
-	refused, ok := pageBodyGuard("https://203.0.113.10/bomb.txt.gz", kindTAR, bomb, http.StatusOK)
+	refused, ok := pageBodyGuard("https://203.0.113.10/bomb.txt.gz", kindTAR, bomb, http.StatusOK, goInflate)
 	if !ok || !strings.Contains(refused.Error, "64 MiB") || !strings.Contains(refused.Error, "download") {
 		t.Errorf("page bomb: want a named refusal stating 64 MiB, got ok=%v %q", ok, refused.Error)
 	}

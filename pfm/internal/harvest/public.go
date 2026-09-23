@@ -58,7 +58,8 @@ func (h *Harvester) FetchPublic(ctx context.Context, source string, options Fetc
 			options.SizeOnly,
 		)
 	}
-	return h.PublicResult(source, h.FetchWithOptions(ctx, resolved, options), options.SizeOnly)
+	ctx, note := withRetryAfterNote(ctx)
+	return h.PublicResult(source, note.apply(h.FetchWithOptions(ctx, resolved, options)), options.SizeOnly)
 }
 
 // PublicResult publishes a core result without exposing a provider (the
@@ -460,6 +461,7 @@ var publicExportPermanent = map[string]bool{
 func PublicFailure(source string, result Result) Result {
 	kind := publicErrorKind(result)
 	out := Result{Source: PublicSourceLabel(source), Error: PublicFailureMessage(result), ErrorKind: kind}
+	out.RetryAfter = result.RetryAfter
 	if result.HTTPStatus >= 400 && result.HTTPStatus < 600 {
 		out.HTTPStatus = result.HTTPStatus
 	}
@@ -588,7 +590,7 @@ func PublicFailureMessage(result Result) string {
 			step,
 		)
 	}
-	return publicFailureTable(result, kind)
+	return withRetryAfterText(publicFailureTable(result, kind), result.RetryAfter)
 }
 
 // JSONResult is one `pfm harvest --json` object: the public result with

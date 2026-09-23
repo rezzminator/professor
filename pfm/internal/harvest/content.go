@@ -200,11 +200,14 @@ func (h *Harvester) convertFetchedDocument(
 		}
 		return fenceCode(language, string(body)), convertedPage{}, nil
 	case isCompressedKind(kind):
-		inner, err := decompressDocument(kind, body, compressedDocumentCap)
+		inner, err := h.decompress(ctx, kind, body)
 		if err != nil {
 			return "", convertedPage{}, fmt.Errorf("%s-compressed document could not be decompressed: %w", kind, err)
 		}
 		innerSource := innerDocumentName(kind, source)
+		if refused := innerDocumentRefusal(kind, innerSource, inner); refused != nil {
+			return "", convertedPage{}, refused
+		}
 		innerKind := classifyFetchedKind(innerSource, "", inner)
 		if isCompressedKind(innerKind) {
 			return "", convertedPage{}, fmt.Errorf("%s-compressed document is compressed again (%s)", kind, innerKind)

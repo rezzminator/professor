@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import lzma
 import os
 import pathlib
 import re
@@ -913,13 +914,13 @@ def _hebrew_limit() -> str:
 
 
 def _script_limit(script: str) -> str:
-    """RapidOCR reorders Arabic output through python-bidi, which the pinned
-    environment does not carry (the bake-off measured it in a venv that had
-    it): Arabic is named, never read into garbage or a crash."""
+    """RapidOCR reorders Arabic output through python-bidi, pinned because the
+    bake-off measured Arabic with it; an environment without it (a stale
+    provision) names Arabic unavailable, never reads it into garbage or a crash."""
     import importlib.util
 
     if script == "ar" and importlib.util.find_spec("bidi") is None:
-        return "no Arabic OCR: RapidOCR's Arabic model needs python-bidi, which the pinned environment does not include"
+        return "no Arabic OCR: RapidOCR's Arabic model needs python-bidi, which this environment does not include (re-provision it)"
     return ""
 
 
@@ -2135,6 +2136,26 @@ def convert(request: dict) -> dict:
     return {"ok": True, "markdown": markdown, "kind": kind, "features": features}
 
 
+class DecompressionBomb(ValueError):
+    """A compressed document that inflates past the caller's cap: named, never written."""
+
+
+def inflate(request: dict) -> dict:
+    """Decompress one xz document with the stdlib lzma (the Go side carries no
+    xz decoder) into request["out"], at most request["limit"] bytes; past the
+    limit it is a DecompressionBomb. Go routes the inner bytes."""
+    codec = str(request.get("codec", ""))
+    if codec != "xz":
+        raise ValueError(f"unsupported inflate codec: {codec!r}")
+    limit = int(request["limit"])
+    with lzma.open(request["path"], format=lzma.FORMAT_XZ) as stream:
+        inner = stream.read(limit + 1)
+    if len(inner) > limit:
+        raise DecompressionBomb(f"the xz document decompresses to more than {limit} bytes")
+    pathlib.Path(request["out"]).write_bytes(inner)
+    return {"ok": True, "bytes": len(inner)}
+
+
 def smoke() -> dict:
     modules = ("trafilatura", "pymupdf4llm", "docling", "markitdown")
     imports = {}
@@ -2169,6 +2190,8 @@ def main() -> int:
             request = json.loads(line)
             if request.get("op") == "smoke":
                 result = smoke()
+            elif request.get("op") == "inflate":
+                result = inflate(request)
             elif request.get("op") == "stage_models":
                 result = stage_models(_model_root())
             else:

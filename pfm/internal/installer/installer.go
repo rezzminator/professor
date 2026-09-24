@@ -1952,7 +1952,7 @@ func (installer *engine) wireSettings() error {
 			raw,
 			installer.options.Home,
 			installer.options.Mode == ModeUninstall,
-			ownership[physical], installer.options.compactWindow,
+			ownership[physical], installer.options.compact,
 		)
 		if err != nil {
 			if installer.options.Mode == ModeUninstall && len(ownership[physical]) > 0 {

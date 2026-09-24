@@ -32,26 +32,29 @@ A pfm chat is a whole Claude Code process, not a sub-agent: the per-process wind
 
 ## Configuration
 
-Two keys in the top-level `claude` block of the machine config (`pfm/internal/config/compact.go`):
+Two ways to set auto-compaction, in the top-level `claude` block of the machine config (`pfm/internal/config/compact.go`), exclusive of each other: the plain window, or the per-party pair.
 
 | Key | Means | Value |
 | --- | --- | --- |
 | `claude.autoCompactMain` | the main chat may auto-compact from this many tokens | an integer or a `k`/`m` suffix (`150000`, `150k`, `0.5m`), 100k to 1m inclusive |
 | `claude.autoCompactSubagent` | a sub-agent may auto-compact from this many tokens | same |
+| `claude.autoCompactWindow` | every party (main chat and sub-agents) compacts at Claude Code's own point for this window; no gate | same |
 
-- Both keys or neither: with either unset, pfm writes no window and no hook, and Claude Code behaves as shipped.
-- Machine-wide only: an `accounts[i].claude` block that names either key is a load error, never silently ignored, because the window is one per Claude Code config dir and the gate reads one config.
-- The keys are edited in the config file by hand; `pfm config` prints both with their source (`unset` when absent), and a value out of range is a load error naming the key.
+The plain window is the setting to use until the [Known limit](#known-limit) is gone: the per-party pair is sound for one sub-agent at a time and guesses with several (see [Measurements](#measurements)). Setting the window beside either pair key is a load error naming both.
+
+- The pair is both keys or neither: with either unset and no plain window, pfm writes no window and no hook, and Claude Code behaves as shipped.
+- Machine-wide only: an `accounts[i].claude` block that names any of the three keys is a load error, never silently ignored, because the window is one per Claude Code config dir and the gate reads one config.
+- The keys are edited in the config file by hand; `pfm config` prints all three with their source (`unset` when absent), and a value out of range is a load error naming the key.
 - The installed binary decodes its config with unknown fields refused: a binary older than these keys fails on a config that holds them. Set the keys only after the binary that knows them is installed.
 
 ## What pfm install writes
 
-Per Claude config dir, only while both keys are set (`pfm/internal/installer/settings_compact.go`):
+Per Claude config dir (`pfm/internal/installer/settings_compact.go`, `compactFor`):
 
-1. `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` = the lower threshold. pfm writes it only when the variable is absent or still holds the value pfm wrote last, recorded in the settings ownership ledger as a `settings.env` entry; an operator's own value is kept.
-2. A `PreCompact` hook: `$HOME/.local/bin/pfm internal compact-gate`, matcher `""`.
+1. `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` = the plain window, or the pair's lower threshold. pfm writes it only when the variable is absent or still holds the value pfm wrote last, recorded in the settings ownership ledger as a `settings.env` entry; an operator's own value is kept.
+2. Only for the pair, a `PreCompact` hook: `$HOME/.local/bin/pfm internal compact-gate`, matcher `""`.
 
-Unsetting either key and running `pfm install --yes` removes both, and `pfm uninstall` removes what the ledger owns.
+Switching from the pair to the plain window and running `pfm install --yes` rewrites the window and removes the hook; unsetting everything removes both, and `pfm uninstall` removes what the ledger owns.
 
 Why the window is the lower threshold and not a multiple of it: Claude Code makes its first compaction attempt 25–50K below the window, and that gap varies from run to run (see [Measurements](#measurements)). No fixed ratio predicts it. Setting the window to the lower threshold means attempts start before either party is due. The gate turns every early attempt away at no token cost, and allows the first attempt at or past the party's own threshold. The cost is time: Claude Code asks before every request once a chat is past the window, so a main chat living between the window and its own threshold calls the gate on every request. The gate therefore reads and answers without waiting (see [The gate](#the-gate)).
 
@@ -127,4 +130,4 @@ Claude Code knows which agent is compacting (its hook runner receives the agent 
 - It blocks too late when a sub-agent below its threshold is named for the attempt of one past it. That compaction lands on a later request.
 - A main chat working while sub-agents run in the background can be confused with them in either direction.
 
-Tighter rules were replayed against the 19 real compactions of the parallel-executor run. Blocking whenever the candidates disagree would have held back 12 of the 15 legitimate compactions, since ten executors sat between 120K and 160K together; the replay cannot model when Claude Code flushes each line, so no heuristic could be proven better than the current one plus the floor. The fix that removes the limit is Claude Code passing `agent_id` in the `PreCompact` input, as it already does in `PostToolUse` and `SubagentStart`; the gate would then read the named agent's transcript and stop inferring.
+Tighter rules were replayed against the 19 real compactions of the parallel-executor run. Blocking whenever the candidates disagree would have held back 12 of the 15 legitimate compactions, since ten executors sat between 120K and 160K together; the replay cannot model when Claude Code flushes each line, so no heuristic could be proven better than the current one plus the floor. The fix that removes the limit is Claude Code passing `agent_id` in the `PreCompact` input, as it already does in `PostToolUse` and `SubagentStart`; the gate would then read the named agent's transcript and stop inferring. Upstream: [anthropics/claude-code#91910](https://github.com/anthropics/claude-code/issues/91910). Until it lands, `claude.autoCompactWindow` is the recommended setting.

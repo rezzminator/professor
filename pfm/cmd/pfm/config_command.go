@@ -182,8 +182,9 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.Claude.CompactNudge.Step,
 		config.Source("claude.compactNudge.step"),
 	)
-	thresholds := []int{config.Claude.AutoCompactMain, config.Claude.AutoCompactSubagent}
-	for index, key := range []string{"autoCompactMain", "autoCompactSubagent"} {
+	claude := config.Claude
+	thresholds := []int{claude.AutoCompactMain, claude.AutoCompactSubagent, claude.AutoCompactWindow}
+	for index, key := range []string{"autoCompactMain", "autoCompactSubagent", "autoCompactWindow"} {
 		value := "unset"
 		if thresholds[index] > 0 {
 			value = fmt.Sprint(thresholds[index])

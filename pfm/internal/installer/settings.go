@@ -28,18 +28,17 @@ func updateSettings(
 	uninstall bool,
 	owned settingsHookCounts,
 ) ([]byte, bool, settingsHookCounts, error) {
-	return updateSettingsWindow(raw, home, uninstall, owned, 0)
+	return updateSettingsWindow(raw, home, uninstall, owned, compactSettings{})
 }
 
-// updateSettingsWindow converges one Claude settings file; compactWindow is
-// the auto-compact window (settings_compact.go), 0 when the thresholds are
-// unset.
+// updateSettingsWindow converges one Claude settings file; compact is the
+// auto-compact window and gate pfm install writes (settings_compact.go).
 func updateSettingsWindow(
 	raw []byte,
 	home string,
 	uninstall bool,
 	owned settingsHookCounts,
-	compactWindow int,
+	compact compactSettings,
 ) ([]byte, bool, settingsHookCounts, error) {
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
@@ -51,7 +50,7 @@ func updateSettingsWindow(
 	overlayStatusCommand := StatusLineOverlayCommand(home)
 	usageCommand := commandByName(expected, "usage")
 	exploreDenyCommand := commandByName(expected, "explore-deny")
-	if compactWindow > 0 && !uninstall {
+	if compact.gate && !uninstall {
 		expected = append(expected, compactGateHook(home))
 	}
 
@@ -184,7 +183,7 @@ func updateSettingsWindow(
 		if normalizeExpectedHookTypes(document, expected) {
 			changed = true
 		}
-		if compactWindow <= 0 && removeOwnedCompactGate(document, home, owned) {
+		if !compact.gate && removeOwnedCompactGate(document, home, owned) {
 			changed = true
 		}
 	}
@@ -196,7 +195,7 @@ func updateSettingsWindow(
 		uninstall,
 		settingsDocumentHasMixedOwnershipEntry(document, pfmBinary),
 	)
-	if !uninstall && convergeCompactEnv(document, compactWindow, owned, nextOwned) {
+	if !uninstall && convergeCompactEnv(document, compact.window, owned, nextOwned) {
 		changed = true
 	}
 

@@ -35,28 +35,35 @@ func compactGateHook(home string) ExpectedHook {
 	}
 }
 
-// compactWindowFor is the window the harness compacts at: the lower of the
-// two thresholds, or 0 when either is unset.
-func compactWindowFor(prefs pfmconfig.ClaudePrefs) int {
-	mainTokens, subTokens, ok := prefs.CompactThresholds()
-	if !ok {
-		return 0
-	}
-	return min(mainTokens, subTokens)
+// compactSettings is what pfm install writes for auto-compaction: the window
+// (0 = none) and whether the compact gate is wired.
+type compactSettings struct {
+	window int
+	gate   bool
 }
 
-// loadCompactWindow reads the thresholds from the machine config the command
-// caller resolved. No config path (a direct caller) means unset; uninstall
-// needs none, since it removes what the ledger owns regardless.
-func loadCompactWindow(options Options) (int, error) {
+// compactFor derives it from the machine config: the per-party pair sets the
+// window to the lower threshold and wires the gate; the plain window
+// (claude.autoCompactWindow, exclusive with the pair) sets the window alone.
+func compactFor(prefs pfmconfig.ClaudePrefs) compactSettings {
+	if mainTokens, subTokens, ok := prefs.CompactThresholds(); ok {
+		return compactSettings{window: min(mainTokens, subTokens), gate: true}
+	}
+	return compactSettings{window: prefs.AutoCompactWindow}
+}
+
+// loadCompactSettings reads the auto-compact keys from the machine config the
+// command caller resolved. No config path (a direct caller) means unset;
+// uninstall needs none, since it removes what the ledger owns regardless.
+func loadCompactSettings(options Options) (compactSettings, error) {
 	if options.MCPConfigPath == "" || options.Mode == ModeUninstall {
-		return 0, nil
+		return compactSettings{}, nil
 	}
 	loaded, err := pfmconfig.Load(options.MCPConfigPath, options.Home, nil)
 	if err != nil {
-		return 0, fmt.Errorf("load auto-compact thresholds from %s: %w", options.MCPConfigPath, err)
+		return compactSettings{}, fmt.Errorf("load auto-compact settings from %s: %w", options.MCPConfigPath, err)
 	}
-	return compactWindowFor(loaded.Claude), nil
+	return compactFor(loaded.Claude), nil
 }
 
 func compactEnvOwnershipKey(value string) settingsHookKey {

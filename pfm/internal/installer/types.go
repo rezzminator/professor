@@ -127,9 +127,9 @@ type Options struct {
 	// without requiring the flag again.
 	VSCode bool
 
-	// compactWindow is the auto-compact window normalizeInstallerOptions
-	// loads from the machine config (settings_compact.go); 0 when unset.
-	compactWindow int
+	// compact is the auto-compact window and gate normalizeInstallerOptions
+	// loads from the machine config (settings_compact.go); zero when unset.
+	compact compactSettings
 
 	// Test seams for platform/path discovery. Production callers leave these
 	// empty so the installer discovers the current host's VS Code settings.
@@ -282,11 +282,11 @@ func normalizeInstallerOptions(options Options) (Options, error) {
 	if options.ProcessRunner == nil {
 		options.ProcessRunner = obs.Runner(deps.RealRunner{})
 	}
-	window, err := loadCompactWindow(options)
+	compact, err := loadCompactSettings(options)
 	if err != nil {
 		return options, err
 	}
-	options.compactWindow = window
+	options.compact = compact
 	if options.ProvisionHarvest && options.HarvestProvisioner == nil {
 		options.HarvestProvisioner = NewHarvestProvisioner()
 	}

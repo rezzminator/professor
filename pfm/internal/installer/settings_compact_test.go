@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
@@ -18,7 +19,8 @@ func compactPass(
 	window int,
 ) (string, bool, settingsHookCounts, map[string]any) {
 	t.Helper()
-	updated, changed, next, err := updateSettingsWindow([]byte(raw), home, uninstall, owned, window)
+	compact := compactSettings{window: window, gate: window > 0} // the per-party pair's shape
+	updated, changed, next, err := updateSettingsWindow([]byte(raw), home, uninstall, owned, compact)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,6 +176,7 @@ func TestCompactWindowComesFromTheConfigAndGatesExpectedHooks(t *testing.T) {
 		{"both set", `{"autoCompactMain":"150k","autoCompactSubagent":"100k"}`, 100000},
 		{"main only", `{"autoCompactMain":"150k"}`, 0},
 		{"neither", `{}`, 0},
+		{"the plain window", `{"autoCompactWindow":"600k"}`, 600000},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
@@ -181,12 +184,12 @@ func TestCompactWindowComesFromTheConfigAndGatesExpectedHooks(t *testing.T) {
 			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			got, err := loadCompactWindow(Options{Home: home, MCPConfigPath: path})
+			got, err := loadCompactSettings(Options{Home: home, MCPConfigPath: path})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got != testCase.want {
-				t.Fatalf("window=%d, want %d", got, testCase.want)
+			if got.window != testCase.want {
+				t.Fatalf("window=%d, want %d", got.window, testCase.want)
 			}
 		})
 	}
@@ -206,5 +209,25 @@ func TestCompactWindowComesFromTheConfigAndGatesExpectedHooks(t *testing.T) {
 	machine.Claude.AutoCompactMain, machine.Claude.AutoCompactSubagent = 150000, 100000
 	if !hasGate(ExpectedHooks(home, machine)) {
 		t.Fatal("ExpectedHooks misses the compact gate with both thresholds set")
+	}
+}
+
+// claude.autoCompactWindow alone writes the window and wires no gate: every
+// party compacts at Claude Code's own point for that window.
+func TestAutoCompactWindowWritesThePlainWindow(t *testing.T) {
+	window := compactFor(pfmconfig.ClaudePrefs{AutoCompactWindow: 600000})
+	if window != (compactSettings{window: 600000}) {
+		t.Fatalf("compactFor(window 600000) = %+v, want the window without the gate", window)
+	}
+	pair := compactFor(pfmconfig.ClaudePrefs{AutoCompactMain: 600000, AutoCompactSubagent: 150000})
+	if pair != (compactSettings{window: 150000, gate: true}) {
+		t.Fatalf("compactFor(pair 600000/150000) = %+v, want window 150000 with the gate", pair)
+	}
+	updated, _, _, err := updateSettingsWindow([]byte(`{}`), t.TempDir(), false, nil, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(updated), `"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "600000"`) {
+		t.Fatalf("settings = %s, want env CLAUDE_CODE_AUTO_COMPACT_WINDOW 600000", updated)
 	}
 }

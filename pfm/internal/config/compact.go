@@ -22,6 +22,7 @@ const (
 
 	autoCompactMainKey     = "autoCompactMain"
 	autoCompactSubagentKey = "autoCompactSubagent"
+	autoCompactWindowKey   = "autoCompactWindow"
 )
 
 // ParseCompactTokens reads one threshold: a plain integer (150000) or a number
@@ -96,6 +97,7 @@ func decodeCompactThresholds(prefs *ClaudePrefs, raw rawClaude, path, scope stri
 	}{
 		{autoCompactMainKey, raw.AutoCompactMain, &prefs.AutoCompactMain},
 		{autoCompactSubagentKey, raw.AutoCompactSubagent, &prefs.AutoCompactSubagent},
+		{autoCompactWindowKey, raw.AutoCompactWindow, &prefs.AutoCompactWindow},
 	} {
 		if field.value == nil {
 			continue
@@ -113,6 +115,13 @@ func decodeCompactThresholds(prefs *ClaudePrefs, raw rawClaude, path, scope stri
 			return fmt.Errorf("config %s: %s.%s: %w", path, configScope(scope, index), field.key, err)
 		}
 		*field.target = tokens
+	}
+	if raw.AutoCompactWindow != nil && (raw.AutoCompactMain != nil || raw.AutoCompactSubagent != nil) {
+		return fmt.Errorf(
+			"config %s: claude.autoCompactWindow and claude.autoCompactMain/autoCompactSubagent both set; "+
+				"set the plain window or the per-party pair, not both",
+			path,
+		)
 	}
 	return nil
 }
@@ -140,5 +149,9 @@ func applyCompactThresholds(target *ClaudePrefs, decoded ClaudePrefs, raw rawCla
 	if raw.AutoCompactSubagent != nil {
 		target.AutoCompactSubagent = decoded.AutoCompactSubagent
 		sources[engineConfigKey(pfmengine.Claude, autoCompactSubagentKey)] = SourceFile
+	}
+	if raw.AutoCompactWindow != nil {
+		target.AutoCompactWindow = decoded.AutoCompactWindow
+		sources[engineConfigKey(pfmengine.Claude, autoCompactWindowKey)] = SourceFile
 	}
 }

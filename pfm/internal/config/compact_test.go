@@ -116,3 +116,36 @@ func TestLoadCompactThresholdsRejectedPerAccount(t *testing.T) {
 		t.Fatalf("per-account error = %q, want it to name accounts[0].autoCompactSubagent and %s", err, path)
 	}
 }
+
+// claude.autoCompactWindow is the plain window: one point for every party,
+// machine-wide, and never beside the per-party pair it would contradict.
+func TestLoadAutoCompactWindow(t *testing.T) {
+	got, _, err := loadCompactConfig(t, `{"version": 2, "claude": {"autoCompactWindow": "600k"}}`)
+	if err != nil {
+		t.Fatalf("Load(autoCompactWindow=600k) error = %v", err)
+	}
+	if got.Claude.AutoCompactWindow != 600000 || got.Source("claude.autoCompactWindow") != SourceFile {
+		t.Fatalf("window = %d from %q, want 600000 from %q",
+			got.Claude.AutoCompactWindow, got.Source("claude.autoCompactWindow"), SourceFile)
+	}
+	for _, tc := range []struct{ name, claude, accounts, wantErr string }{
+		{
+			name:    "beside the per-party pair",
+			claude:  `{"autoCompactWindow": "600k", "autoCompactMain": "600k", "autoCompactSubagent": "150k"}`,
+			wantErr: "claude.autoCompactWindow and claude.autoCompactMain/autoCompactSubagent",
+		},
+		{
+			name: "in an account block", claude: `{}`,
+			accounts: `, "accounts": [{"id": 1, "configDir": "~/.claude", "claude": {"autoCompactWindow": "600k"}}]`,
+			wantErr:  "autoCompactWindow is machine-wide",
+		},
+		{name: "out of range", claude: `{"autoCompactWindow": "50k"}`, wantErr: "outside 100000..1000000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := loadCompactConfig(t, `{"version": 2, "claude": `+tc.claude+tc.accounts+`}`)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Load error = %v, want one containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}

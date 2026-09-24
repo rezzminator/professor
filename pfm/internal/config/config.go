@@ -94,8 +94,9 @@ type ClaudePrefs struct {
 	// is due at a context milestone — see decodeClaudePrefs for the defaults.
 	CompactNudge CompactNudge
 	// AutoCompactMain and AutoCompactSubagent are the machine's auto-compact
-	// thresholds in tokens — see compact.go. Zero is unset (feature off).
-	AutoCompactMain, AutoCompactSubagent int
+	// thresholds in tokens, and AutoCompactWindow the plain window that
+	// excludes them — see compact.go. Zero is unset.
+	AutoCompactMain, AutoCompactSubagent, AutoCompactWindow int
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -267,9 +268,10 @@ type rawClaude struct {
 	// The sub-agent ceilings — see subagents.go.
 	MaxSubagentSpawnDepth  *int `json:"maxSubagentSpawnDepth,omitempty"`
 	MaxConcurrentSubagents *int `json:"maxConcurrentSubagents,omitempty"`
-	// The auto-compact thresholds, machine-wide — see compact.go.
+	// The auto-compact thresholds and plain window, machine-wide — see compact.go.
 	AutoCompactMain     json.RawMessage `json:"autoCompactMain,omitempty"`
 	AutoCompactSubagent json.RawMessage `json:"autoCompactSubagent,omitempty"`
+	AutoCompactWindow   json.RawMessage `json:"autoCompactWindow,omitempty"`
 }
 
 type rawOpenCode struct {

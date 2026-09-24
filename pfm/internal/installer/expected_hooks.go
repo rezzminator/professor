@@ -53,7 +53,7 @@ func ExpectedHooks(home string, config pfmconfig.Config) []ExpectedHook {
 	}
 	seen := map[string]bool{}
 	templates := claudeHookTemplates(home)
-	if compactWindowFor(config.Claude) > 0 {
+	if compactFor(config.Claude).gate {
 		templates = append(templates, compactGateHook(home))
 	}
 	result := make([]ExpectedHook, 0, len(targets)*len(templates))

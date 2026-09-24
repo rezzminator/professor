@@ -101,13 +101,16 @@ class ProbeBaseTest(unittest.TestCase):
     def setUp(self):
         parent = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, parent, ignore_errors=True)
-        self.root = os.path.join(parent, ".demo-proj")
+        # A per-run project name, so parallel checkouts never share one probe dir.
+        self.project = "cp-" + os.path.basename(parent).lower()
+        self.base = os.path.join("/tmp/", self.project, "codeprobe") + os.sep
+        self.root = os.path.join(parent, "." + self.project)
         os.makedirs(self.root)
         with open(os.path.join(self.root, "small.py"), "w") as fh:
             fh.write("v = 1\n")
 
     def tearDown(self):
-        shutil.rmtree("/tmp/demo-proj", ignore_errors=True)
+        shutil.rmtree(os.path.dirname(os.path.dirname(self.base)), ignore_errors=True)
 
     def test_default_dir_is_under_project_scoped_tmp(self):
         plan = "= 1 the whole file\nfile small.py\n"
@@ -121,8 +124,8 @@ class ProbeBaseTest(unittest.TestCase):
         self.assertTrue(m, f"expected the manifest head line to name return.md; stdout was: {proc.stdout!r}")
         ret_path = m.group(1)
         self.assertTrue(
-            ret_path.startswith("/tmp/demo-proj/codeprobe/"),
-            f"expected return.md under /tmp/demo-proj/codeprobe/, got: {ret_path!r}",
+            ret_path.startswith(self.base),
+            f"expected return.md under {self.base}, got: {ret_path!r}",
         )
 
 

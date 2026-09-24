@@ -146,6 +146,7 @@ I95 · `wireCodexAgents` naming trap — wires BOTH Claude+Codex sides under a C
 I96 · `pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]` · needs:systemd/launchd,network · today:U+A · cli.md:142 · lane(s):O1,F
 I97 · `pfm uninstall [--config-dir DIR]` · needs:systemd/launchd · today:U+A · cli.md:148 · lane(s):O2
 I98 · `pfm doctor [--verbose] [--skip-harvest]` command itself (exit 0/1/2/3 contract) · needs:tmux,network,git,project · today:U+A (`doctor.txtar`) · cli.md:92 · lane(s):O1
+I99 · Claude `PreToolUse` (`Bash`) → `pfm internal git-guard` (non-gitter shared-git-write deny) · needs:seat:cc · today:U · hooks.md § git-guard · lane(s):O1
 
 ---
 
@@ -556,6 +557,7 @@ X41 · `pfm internal update-check --cache PATH --current vX.Y.Z --url URL` (pick
 X42 · `pfm log [--since D] [--level L] [--chat X] [--cmd V] [--comp C] [--follow]` reads the activity log `log/pfm.jsonl`; an unknown `--level`/`--comp` is a usage error naming the accepted set, an absent log says so on stderr · needs:none · today:U (`internal/obs/logcmd_test.go`) · cli.md · lane(s):O2
 X43 · `pfm callmeter report {files|writes|commands|context|sequences|faults} [--since D] [--project P] [--agent-type T] [--session S] [--config-dir DIR] [--limit N]` and `pfm callmeter backfill [--since D] [--config-dir DIR]` over the call store `.local/state/pfm/callmeter.db`; an absent store says so and exits 0 without creating it, an unopenable one exits 1, an unknown topic or `--config-dir` is a usage error, a second backfill inserts nothing · needs:none · today:U (`cmd/pfm/callmeter_command_test.go`) · callmeter.md · lane(s):O2
 X44 · `pfm internal callmeter` (the async call-recording hook: a `PostToolUse` payload becomes a calls row the reports read) · needs:none · today:U (`internal/hookentry/callmeter_test.go`) · callmeter.md · lane(s):O2
+X45 · `pfm internal git-guard` (PreToolUse Bash hook body, denies a shared git write to every agent but gitter) · needs:none · today:U · hooks.md § git-guard · lane(s):O2
 
 ---
 

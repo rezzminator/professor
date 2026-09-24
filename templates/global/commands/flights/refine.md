@@ -1,7 +1,7 @@
 ---
 name: flights:refine
 description: 'Grill a written flight — /flights:refine [directory] [what to change], default the newest under $HOME/.local/state/pfm/flights/{project}/: numbered question rounds, a recommended answer each, until nothing is assumed; the rulings go to flights-speccer as a revising call. /flights:spec → here → /flights:orchestrate-{nested|live|cross-harness}. Returns the revised index.'
-argument-hint: [flight directory] [what to change]
+argument-hint: '[flight directory] [what to change]'
 ---
 
 # Refine — grill a flight until nothing is assumed

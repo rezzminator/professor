@@ -10,11 +10,13 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/callmeter"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
@@ -81,6 +83,7 @@ type callmeterRun struct {
 	store   *callmeter.Store
 	now     int64
 	payload callmeterPayload
+	seat    callmeterSeat
 }
 
 // Callmeter is the async hook that records each hook event into the callmeter
@@ -95,11 +98,18 @@ func Callmeter(input io.Reader, stderr io.Writer, env paths.Env) int {
 		logCallmeterFailure(ctx, stderr, callmeter.StageStore, "", "", fmt.Errorf("resolve home directory: %w", err))
 		return 0
 	}
-	return runCallmeter(ctx, input, stderr, callmeter.DefaultPath(home), clock.Real)
+	return runCallmeter(ctx, input, stderr, callmeter.DefaultPath(home), clock.Real, resolveCallmeterSeat(env, home))
 }
 
-func runCallmeter(ctx context.Context, input io.Reader, stderr io.Writer, storePath string, timing clock.Clock) int {
-	run := &callmeterRun{ctx: ctx, stderr: stderr, now: timing.Now().UnixMilli()}
+func runCallmeter(
+	ctx context.Context,
+	input io.Reader,
+	stderr io.Writer,
+	storePath string,
+	timing clock.Clock,
+	seat callmeterSeat,
+) int {
+	run := &callmeterRun{ctx: ctx, stderr: stderr, now: timing.Now().UnixMilli(), seat: seat}
 	raw, readErr := io.ReadAll(input)
 	var payloadErr error
 	if readErr != nil {
@@ -110,9 +120,11 @@ func runCallmeter(ctx context.Context, input io.Reader, stderr io.Writer, storeP
 	store, err := callmeter.OpenDB(ctx, storePath)
 	if err != nil {
 		run.fault(callmeter.StageStore, run.payload.calls(), errors.Join(payloadErr, err))
+		run.accountFault() // said, never written: there is no store
 		return 0
 	}
 	run.store = store
+	run.accountFault()
 	defer func() {
 		if err := store.Close(); err != nil {
 			run.store = nil // closed: the fault is said, never written
@@ -166,6 +178,7 @@ func (run *callmeterRun) base(toolUseID string) callmeter.Call {
 		call.AgentType = presentString(p.AgentType)
 	}
 	call.ConfigDir = presentString(callmeter.ConfigDirOf(p.TranscriptPath))
+	call.Account, call.SeatDir = run.seat.account, run.seat.dir
 	return call
 }
 
@@ -326,6 +339,8 @@ func (run *callmeterRun) responseColumns(call *callmeter.Call) *callmeter.Agent 
 		Model:           response.ResolvedModel,
 		Source:          callmeter.Ptr(callmeter.SourceHook),
 		ConfigDir:       presentString(callmeter.ConfigDirOf(p.TranscriptPath)),
+		Account:         run.seat.account,
+		SeatDir:         run.seat.dir,
 	}
 }
 
@@ -449,6 +464,8 @@ func (run *callmeterRun) request(key string) *callmeter.Request {
 		SessionID: callmeter.Ptr(p.SessionID),
 		Source:    callmeter.Ptr(callmeter.SourceHook),
 		ConfigDir: presentString(callmeter.ConfigDirOf(p.TranscriptPath)),
+		Account:   run.seat.account,
+		SeatDir:   run.seat.dir,
 	}
 	if p.AgentID != "" {
 		request.AgentID = callmeter.Ptr(p.AgentID)
@@ -468,6 +485,8 @@ func (run *callmeterRun) recordAgent(stopped bool) {
 		AgentType: presentString(p.AgentType),
 		Source:    callmeter.Ptr(callmeter.SourceHook),
 		ConfigDir: presentString(callmeter.ConfigDirOf(p.TranscriptPath)),
+		Account:   run.seat.account,
+		SeatDir:   run.seat.dir,
 	}
 	if !stopped {
 		// An agent woken for another turn starts again: started stays its first.
@@ -636,4 +655,87 @@ func wholeNumber(value *float64) *int64 {
 		return nil
 	}
 	return callmeter.Ptr(int64(*value))
+}
+
+// callmeterSeat is who ran a hook run: the Claude config dir its chat was
+// launched with (seat_dir) and the configured account that dir is. It is
+// resolved once per run; config_dir, the shared history home, says neither.
+type callmeterSeat struct {
+	dir     *string // CLAUDE_CONFIG_DIR, absolute and clean, symlinks unresolved; nil = not resolved
+	account *int64  // the configured account whose configDir is dir; nil = none matched or unknown
+	err     error   // why the account is unknown: the machine config could not be loaded
+}
+
+// resolveCallmeterSeat reads the hook's CLAUDE_CONFIG_DIR ({home}/.claude when
+// unset or blank) and matches it against the machine config's accounts. A
+// config that cannot be loaded, or is absent, leaves the account unknown and
+// is carried in err for the run's one account fault; a dir no account names
+// is simply no account.
+func resolveCallmeterSeat(env paths.Env, home string) callmeterSeat {
+	dir := pfmconfig.AmbientClaudeConfigDirFrom(env)
+	if dir == "" {
+		dir = filepath.Join(home, ".claude")
+	}
+	absolute, err := filepath.Abs(dir)
+	if err != nil {
+		return callmeterSeat{dir: &dir, err: fmt.Errorf("resolve seat dir %s: %w", dir, err)}
+	}
+	seat := callmeterSeat{dir: &absolute}
+	config, err := loadCallmeterConfig(env, home)
+	if err != nil {
+		seat.err = err
+		return seat
+	}
+	for _, account := range config.Accounts {
+		if sameDir(absolute, account.ConfigDir) {
+			seat.account = callmeter.Ptr(int64(account.ID))
+			return seat
+		}
+	}
+	return seat
+}
+
+// loadCallmeterConfig loads the machine config the way `pfm callmeter`'s
+// runtime does — the current file, else the legacy one beside it — over the
+// hook's own environment, through the config package's loader. An absent file
+// is an error here: without it the accounts are only a guess.
+func loadCallmeterConfig(env paths.Env, home string) (pfmconfig.Config, error) {
+	current := pfmconfig.ResolvePathFrom(env, home)
+	path := ""
+	for _, candidate := range []string{current, filepath.Join(filepath.Dir(current), pfmconfig.LegacyFileName)} {
+		_, err := os.Stat(candidate)
+		if err == nil {
+			path = candidate
+			break
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return pfmconfig.Config{}, fmt.Errorf("stat machine config %s: %w", candidate, err)
+		}
+	}
+	if path == "" {
+		return pfmconfig.Config{}, fmt.Errorf("no machine config at %s: the account is unknown", current)
+	}
+	config, err := pfmconfig.Load(path, home, nil)
+	if err != nil {
+		return pfmconfig.Config{}, fmt.Errorf("load machine config: %w", err)
+	}
+	return config, nil
+}
+
+// sameDir compares two dirs with their symlinks resolved, or cleaned when
+// either cannot be resolved.
+func sameDir(a, b string) bool {
+	resolvedA, errA := filepath.EvalSymlinks(a)
+	resolvedB, errB := filepath.EvalSymlinks(b)
+	if errA == nil && errB == nil {
+		return resolvedA == resolvedB
+	}
+	return filepath.Clean(a) == filepath.Clean(b)
+}
+
+// accountFault says, once per run, why the run's account is unknown.
+func (run *callmeterRun) accountFault() {
+	if run.seat.err != nil {
+		run.fault(callmeter.StageAccount, run.payload.calls(), run.seat.err)
+	}
 }

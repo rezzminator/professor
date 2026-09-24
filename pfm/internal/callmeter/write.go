@@ -61,6 +61,8 @@ type Call struct {
 	ReadTotalLines  *int64
 	Source          *string
 	ConfigDir       *string
+	Account         *int64  // the configured account whose dir is SeatDir; nil = none matched
+	SeatDir         *string // the hook's CLAUDE_CONFIG_DIR, symlinks unresolved
 }
 
 // Request is one requests row; a nil field is not provided.
@@ -75,6 +77,8 @@ type Request struct {
 	Pending       *bool
 	Source        *string
 	ConfigDir     *string
+	Account       *int64
+	SeatDir       *string
 }
 
 // Agent is one agents row; a nil field is not provided.
@@ -91,6 +95,8 @@ type Agent struct {
 	Model           *string
 	Source          *string
 	ConfigDir       *string
+	Account         *int64
+	SeatDir         *string
 }
 
 // CommandPart is one simple command parsed out of a Bash call.
@@ -149,7 +155,9 @@ func (c Call) columns() []column {
 	cs = add(cs, "read_lines", c.ReadLines)
 	cs = add(cs, "read_total_lines", c.ReadTotalLines)
 	cs = add(cs, "source", c.Source)
-	return add(cs, "config_dir", c.ConfigDir)
+	cs = add(cs, "config_dir", c.ConfigDir)
+	cs = add(cs, "account", c.Account)
+	return add(cs, "seat_dir", c.SeatDir)
 }
 
 func (r Request) columns() []column {
@@ -162,7 +170,9 @@ func (r Request) columns() []column {
 	cs = add(cs, "calls", r.Calls)
 	cs = add(cs, "pending", r.Pending)
 	cs = add(cs, "source", r.Source)
-	return add(cs, "config_dir", r.ConfigDir)
+	cs = add(cs, "config_dir", r.ConfigDir)
+	cs = add(cs, "account", r.Account)
+	return add(cs, "seat_dir", r.SeatDir)
 }
 
 func (a Agent) columns() []column {
@@ -177,7 +187,9 @@ func (a Agent) columns() []column {
 	cs = add(cs, "tool_uses", a.ToolUses)
 	cs = add(cs, "model", a.Model)
 	cs = add(cs, "source", a.Source)
-	return add(cs, "config_dir", a.ConfigDir)
+	cs = add(cs, "config_dir", a.ConfigDir)
+	cs = add(cs, "account", a.Account)
+	return add(cs, "seat_dir", a.SeatDir)
 }
 
 // cut keeps the first limit characters of s.
@@ -299,8 +311,8 @@ func (t *Tx) ResolveRequest(ctx context.Context, provisionalID string, r Request
 			r.RequestID,
 		)
 	}
-	merge := `INSERT INTO requests (request_id, session_id, agent_id, ts, context_tokens, output_tokens, calls, pending, source, config_dir)
-		SELECT ?, session_id, agent_id, ts, context_tokens, output_tokens, calls, pending, source, config_dir
+	merge := `INSERT INTO requests (request_id, session_id, agent_id, ts, context_tokens, output_tokens, calls, pending, source, config_dir, account, seat_dir)
+		SELECT ?, session_id, agent_id, ts, context_tokens, output_tokens, calls, pending, source, config_dir, account, seat_dir
 		FROM requests WHERE request_id = ?
 		ON CONFLICT(request_id) DO UPDATE SET
 			session_id = COALESCE(requests.session_id, excluded.session_id),
@@ -310,7 +322,9 @@ func (t *Tx) ResolveRequest(ctx context.Context, provisionalID string, r Request
 			output_tokens = COALESCE(requests.output_tokens, excluded.output_tokens),
 			calls = CASE WHEN requests.calls IS NULL THEN excluded.calls WHEN excluded.calls IS NULL THEN requests.calls ELSE requests.calls + excluded.calls END,
 			source = COALESCE(requests.source, excluded.source),
-			config_dir = COALESCE(requests.config_dir, excluded.config_dir)`
+			config_dir = COALESCE(requests.config_dir, excluded.config_dir),
+			account = COALESCE(requests.account, excluded.account),
+			seat_dir = COALESCE(requests.seat_dir, excluded.seat_dir)`
 	if _, err := t.tx.ExecContext(ctx, merge, r.RequestID, provisionalID); err != nil {
 		return fmt.Errorf("callmeter store %s: merge request %q into %q: %w", t.path, provisionalID, r.RequestID, err)
 	}

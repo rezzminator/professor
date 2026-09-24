@@ -33,11 +33,16 @@ func ExploreDeny(input io.Reader, stdout, stderr io.Writer) int {
 	if hook.ToolInput.SubagentType != "Explore" || hook.ToolInput.Model == "haiku" {
 		return 0
 	}
-	response := map[string]any{"hookSpecificOutput": map[string]any{
-		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": exploreDenyReason,
-	}}
-	if err := json.NewEncoder(stdout).Encode(response); err != nil {
+	if err := json.NewEncoder(stdout).Encode(preToolUseDenyResponse(exploreDenyReason)); err != nil {
 		return 1
 	}
 	return 0
+}
+
+// preToolUseDenyResponse builds the PreToolUse deny hookSpecificOutput
+// payload shared by every PreToolUse deny hook in this package.
+func preToolUseDenyResponse(reason string) map[string]any {
+	return map[string]any{"hookSpecificOutput": map[string]any{
+		"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason,
+	}}
 }

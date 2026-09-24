@@ -21,7 +21,7 @@ import (
 
 // SchemaVersion is the store schema this binary writes and reads, kept in
 // PRAGMA user_version.
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // BusyTimeout is how long a statement waits on a concurrent async writer.
 const BusyTimeout = 5 * time.Second
@@ -35,6 +35,9 @@ const (
 	StageStore      = "store"
 	StageTranscript = "transcript"
 	StageParse      = "parse"
+	// StageAccount: the machine config could not be loaded, so the run's
+	// account is unknown (its seat_dir is still recorded).
+	StageAccount = "account"
 )
 
 const schema = `
@@ -61,7 +64,9 @@ CREATE TABLE IF NOT EXISTS calls (
 	read_lines INTEGER,
 	read_total_lines INTEGER,
 	source TEXT,
-	config_dir TEXT
+	config_dir TEXT,
+	account INTEGER,
+	seat_dir TEXT
 );
 CREATE INDEX IF NOT EXISTS calls_session_agent_ts ON calls(session_id, agent_id, ts);
 CREATE INDEX IF NOT EXISTS calls_ts ON calls(ts);
@@ -76,7 +81,9 @@ CREATE TABLE IF NOT EXISTS requests (
 	calls INTEGER,
 	pending INTEGER,
 	source TEXT,
-	config_dir TEXT
+	config_dir TEXT,
+	account INTEGER,
+	seat_dir TEXT
 );
 CREATE INDEX IF NOT EXISTS requests_session_agent_pending ON requests(session_id, agent_id, pending);
 CREATE TABLE IF NOT EXISTS agents (
@@ -91,7 +98,9 @@ CREATE TABLE IF NOT EXISTS agents (
 	tool_uses INTEGER,
 	model TEXT,
 	source TEXT,
-	config_dir TEXT
+	config_dir TEXT,
+	account INTEGER,
+	seat_dir TEXT
 );
 CREATE TABLE IF NOT EXISTS command_parts (
 	tool_use_id TEXT NOT NULL,
@@ -253,11 +262,44 @@ func createSchema(ctx context.Context, db *sql.DB, path string, version int) (er
 			}
 		}
 	}
+	if version > 0 {
+		if err := addAccountColumns(ctx, conn, path); err != nil {
+			return rollback(err)
+		}
+	}
 	if _, err := conn.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
 		return rollback(fmt.Errorf("callmeter store %s: set schema version: %w", path, err))
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return rollback(fmt.Errorf("callmeter store %s: commit schema: %w", path, err))
+	}
+	return nil
+}
+
+// accountColumns are the columns schema version 3 adds to calls, requests and
+// agents: the account a row ran on and the seat dir it ran from.
+var accountColumns = []struct{ name, kind string }{{"account", "INTEGER"}, {"seat_dir", "TEXT"}}
+
+// addAccountColumns is the schema v3 migration of a store read at an older
+// version: it adds each account column a table lacks, in place, and fills
+// none — every row written before stays NULL there.
+func addAccountColumns(ctx context.Context, conn *sql.Conn, path string) error {
+	for _, table := range []string{"calls", "requests", "agents"} {
+		for _, column := range accountColumns {
+			var present int
+			if err := conn.QueryRowContext(ctx,
+				"SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", table, column.name,
+			).Scan(&present); err != nil {
+				return fmt.Errorf("callmeter store %s: read %s columns: %w", path, table, err)
+			}
+			if present > 0 {
+				continue
+			}
+			statement := fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column.name, column.kind)
+			if _, err := conn.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("callmeter store %s: migrate to version 3 (%s): %w", path, statement, err)
+			}
+		}
 	}
 	return nil
 }

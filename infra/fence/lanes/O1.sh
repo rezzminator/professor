@@ -101,7 +101,7 @@ fi
 
 # ─── O1.03 — the installer's hooks, per engine ──────────────────────────────
 
-beat O1.03-hooks-installed I24 I25 I26 I27 I28 I29 I30 I31 I32 I33
+beat O1.03-hooks-installed I24 I25 I26 I27 I28 I29 I30 I31 I32 I33 I99
 spends none
 settings="$SEAT_DIR/settings.json"
 if [ ! -f "$settings" ]; then
@@ -112,7 +112,7 @@ else
     fail "no command hooks in $settings (enumeration produced nothing): $(one_line "$hooks")"
   else
     missing=""
-    for verb in launcher-repair clear-kill exit-close explore-deny epic-inject reload-intercept exit-intercept compact-nudge; do
+    for verb in launcher-repair clear-kill exit-close explore-deny git-guard epic-inject reload-intercept exit-intercept compact-nudge; do
       printf '%s' "$hooks" | grep -q -- "$verb" || missing="$missing $verb;"
     done
     printf '%s' "$hooks" | grep -q 'usage-hook' || missing="$missing usage-hook;"

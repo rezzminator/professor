@@ -174,3 +174,44 @@ type fleetError string
 func (e fleetError) Error() string { return string(e) }
 
 const errFleet = fleetError("fleet.db unreadable")
+
+// TestAccountFilterKeepsThatAccountOnly: Filter.Account keeps the calls and
+// requests that account ran, drops another account's and the NULL account's,
+// and the title names it.
+func TestAccountFilterKeepsThatAccountOnly(t *testing.T) {
+	ctx := context.Background()
+	store := openStore(t)
+	accounts := map[string]*int64{"three": callmeter.Ptr(int64(3)), "one": callmeter.Ptr(int64(1)), "none": nil}
+	for id, account := range accounts {
+		seed(t, store, callmeter.Call{
+			ToolUseID: id, TS: callmeter.Ptr(ms(time.Hour)), Tool: callmeter.Ptr("Read"), Cwd: callmeter.Ptr("/w"),
+			FilePath: callmeter.Ptr("/f/" + id), BytesDelivered: callmeter.Ptr(int64(1)), Account: account,
+		})
+		if err := store.UpsertRequest(ctx, callmeter.Request{
+			RequestID: "msg_" + id, TS: callmeter.Ptr(ms(time.Hour)), Account: account,
+		}, callmeter.Overwrite); err != nil {
+			t.Fatalf("UpsertRequest: %v", err)
+		}
+	}
+	filter := Filter{Account: callmeter.Ptr(3)}
+	table, err := Files(ctx, store, filter, nil)
+	if err != nil {
+		t.Fatalf("Files: %v", err)
+	}
+	if out := render(
+		t,
+		table,
+	); len(table.Rows) != 1 || !strings.Contains(out, "/f/three") ||
+		!strings.Contains(out, "account=3") {
+		t.Errorf("account 3 files = %v, want only /f/three under an account=3 title\n%s", table.Rows, out)
+	}
+	where, args := requestFilter(filter)
+	var requests string
+	if err := store.DB().QueryRowContext(ctx,
+		"SELECT group_concat(request_id) FROM requests r WHERE "+where, args...).Scan(&requests); err != nil {
+		t.Fatalf("filtered requests: %v", err)
+	}
+	if requests != "msg_three" {
+		t.Errorf("account 3 requests = %q, want msg_three", requests)
+	}
+}

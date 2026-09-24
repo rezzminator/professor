@@ -89,6 +89,14 @@ func claudeHookTemplates(home string) []ExpectedHook {
 			Name:    "explore-deny",
 		},
 		{
+			// Every Bash call in every repository: only gitter writes shared
+			// git state (docs/design/hooks/hooks.md § git-guard).
+			Event:   "PreToolUse",
+			Matcher: "Bash",
+			Command: binary + " internal git-guard",
+			Name:    "git-guard",
+		},
+		{
 			Event:   "SubagentStart",
 			Matcher: hookRRDirMatcher,
 			Command: binary + " internal rr-dir",

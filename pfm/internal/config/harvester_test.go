@@ -59,7 +59,7 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
   "convert": {"pdfOcr": true, "pdfLayout": true},
   "cache": {"dir": "~/cache", "ttlSeconds": 60, "negativeTtlSeconds": 5, "negativeTransientTtlSeconds": 2},
   "output": {"maxInlineChars": 1234},
-  "harvest": {"maxDownloadBytes": 4096, "maxResourceBytes": 2048}
+  "harvest": {"maxDownloadBytes": 5000000, "maxResourceBytes": 7000000}
 }`, 0o600)
 	got, err := Load(path, home, nil)
 	if err != nil {
@@ -96,7 +96,7 @@ func TestHarvesterFileLoadsEverySetting(t *testing.T) {
 	if h.Output.MaxInlineChars != 1234 {
 		t.Fatalf("output = %+v", h.Output)
 	}
-	if h.Harvest != (HarvesterLimits{MaxDownloadBytes: 4096, MaxResourceBytes: 2048}) {
+	if h.Harvest.MaxDownloadBytes != 5000000 || h.Harvest.MaxResourceBytes != 7000000 {
 		t.Fatalf("harvest = %+v", h.Harvest)
 	}
 	for _, key := range HarvesterSourceKeys() {

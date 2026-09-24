@@ -1,6 +1,6 @@
 # hooks
 
-Professor reaches a chat through hooks at two tiers. `pfm install` writes pfm's eleven machine-global Claude hooks — seventeen registrations, since `callmeter` is one hook registered on seven events — into the `settings.json` of every Claude config dir the machine config names; `pfm init` scaffolds a project's `.claude/settings.json` from the template, with six hooks over the project's own scripts. Codex and OpenCode carry no pfm hook. This file holds the inventory, the ownership rule, and the design of the `pfm doctor` check that proves each pfm hook is in place. The tool-call recorder itself is designed separately in [callmeter.md](callmeter.md); here it is only the eleventh row of the inventory.
+Professor reaches a chat through hooks at two tiers. `pfm install` writes pfm's twelve machine-global Claude hooks — eighteen registrations, since `callmeter` is one hook registered on seven events — into the `settings.json` of every Claude config dir the machine config names; `pfm init` scaffolds a project's `.claude/settings.json` from the template, with six hooks over the project's own scripts. Codex and OpenCode carry no pfm hook. This file holds the inventory, the ownership rule, and the design of the `pfm doctor` check that proves each pfm hook is in place. The tool-call recorder itself is designed separately in [callmeter.md](callmeter.md); here it is only the last row of the inventory. The Bash guard over shared git state is designed under [git-guard](#git-guard).
 
 A change lands in this design doc first, then in the code or template, then in every surface listed under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
@@ -11,9 +11,11 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 - [Decisions](#decisions)
 - [Count per engine](#count-per-engine)
 - [Machine-global Claude hooks (pfm-owned)](#machine-global-claude-hooks-pfm-owned)
+- [git-guard](#git-guard)
 - [Project-tier Claude hooks (template)](#project-tier-claude-hooks-template)
 - [Codex](#codex)
 - [OpenCode](#opencode)
+- [Agent-attached hooks (not machine-global)](#agent-attached-hooks-not-machine-global)
 - [Retired hooks](#retired-hooks)
 - [The ownership rule](#the-ownership-rule)
 - [The pfm doctor check](#the-pfm-doctor-check)
@@ -24,18 +26,18 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 ## Decisions
 
-- **One list is the truth for pfm's hooks.** `claudeHookTemplates` names all eleven hooks as seventeen registrations — nine single-placement hooks plus `callmeter`'s seven (`pfm/internal/installer/expected_hooks.go:75-121`). The installer writes from it (`pfm/internal/installer/settings.go:27`) and doctor probes from it (`pfm/internal/installer/hook_probe.go:56-117`, over `pfm/internal/installer/expected_hooks.go:42-73`). A new pfm hook is a new row there, never a second list.
+- **One list is the truth for pfm's hooks.** `claudeHookTemplates` names all twelve hooks as eighteen registrations — eleven single-placement hooks plus `callmeter`'s seven (`pfm/internal/installer/expected_hooks.go:75-128`). The installer writes from it (`pfm/internal/installer/settings.go:27`) and doctor probes from it (`pfm/internal/installer/hook_probe.go:56-117`, over `pfm/internal/installer/expected_hooks.go:42-73`). A new pfm hook is a new row there, never a second list.
 - **pfm writes only the account settings files.** It never writes a project's `.claude/settings.json` (`pfm/internal/installer/expected_hooks.go:39-41`). The project tier is scaffolded once by `pfm init` (`pfm/internal/professor/scaffold.go:29`) and is the adopter's file from then on.
 - **Every pfm hook command is the installed binary.** Each command is `$HOME/.local/bin/pfm` plus a subcommand (`pfm/internal/installer/expected_hooks.go:76`). No pfm hook runs a shell script.
 - **An ownership ledger records what pfm wrote.** It lives at `$HOME/.local/share/pfm/install/settings-hook-ownership.json` (`pfm/internal/installer/update_metadata.go:42-43`, `pfm/internal/installer/settings_ownership.go:13`), keyed by physical file, event, matcher and command (`pfm/internal/installer/settings_ownership.go:21-27`). Uninstall removes exactly what the ledger owns (`pfm/internal/installer/settings.go:34-36`).
 - **A retired hook is removed by the installer and reported by doctor.** One table names the retired subcommands (`pfm/internal/installer/settings.go:319-343`); the installer strips them from every event (`pfm/internal/installer/settings.go:50`, function at `:528`), and doctor flags any left behind as stale (`pfm/internal/installer/hook_probe.go:367-395`).
-- **pfm hooks fail open.** A pfm hook that cannot do its job writes one stderr line and lets the chat continue. Only the two intercepts exit 2, and only for the prompt they were built to stop. `callmeter` is fail-open the same way: it always exits 0 and logs and counts a fault rather than blocking a call.
+- **pfm hooks fail open.** A pfm hook that cannot do its job writes one stderr line and lets the chat continue. Only the two intercepts exit 2, and only for the prompt they were built to stop; `git-guard` alone also denies a git command it cannot read ([git-guard](#git-guard)). `callmeter` is fail-open the same way: it always exits 0 and logs and counts a fault rather than blocking a call.
 
 ## Count per engine
 
 | Engine | Tier | Hooks | Installed by |
 | --- | --- | --- | --- |
-| Claude | machine-global, per `{claude config dir}` | 11 hooks, 17 registrations (pfm-owned; `callmeter` alone is 7), plus `compact-gate` while both auto-compact thresholds are set | `pfm install` |
+| Claude | machine-global, per `{claude config dir}` | 12 hooks, 18 registrations (pfm-owned; `callmeter` alone is 7), plus `compact-gate` while both auto-compact thresholds are set | `pfm install` |
 | Claude | project `.claude/settings.json` | 6 in the template | `pfm init`, then the adopter |
 | Claude | operator's own, documented | 2 (memory backup, opt-in) | the adopter, by hand |
 | Codex | `{codex home}/hooks.json` | 0 owned; 2 retired shapes removed | `pfm install` (removal only) |
@@ -43,28 +45,55 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 ## Machine-global Claude hooks (pfm-owned)
 
-Installed into `{claude config dir}/settings.json` for every account in the machine config (`pfm/internal/installer/expected_hooks.go:47-53`), once per physical file (`pfm/internal/installer/expected_hooks.go:57-62`). Each command below is `$HOME/.local/bin/pfm …`. The installer appends a hook only when the same command under the same (event, matcher) pair is absent (`pfm/internal/installer/settings.go:132-136`).
+Installed into `{claude config dir}/settings.json` for every account in the machine config (`pfm/internal/installer/expected_hooks.go:47-53`), once per physical file (`pfm/internal/installer/expected_hooks.go:60-65`). Each command below is `$HOME/.local/bin/pfm …`. The installer appends a hook only when the same command under the same (event, matcher) pair is absent (`pfm/internal/installer/settings.go:132-136`).
 
 | Name | Event | Matcher | Command | Defined | Body | Does | On failure |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| launcher-repair | `SessionStart` | `""` | `pfm internal launcher-repair` | `expected_hooks.go:83` | `pfm/internal/hookentry/launcher_repair.go:12-25` | Repairs the Claude launcher each session start | Exits 1 with one stderr line; the session continues |
-| usage | `UserPromptSubmit` | `""` | `pfm usage-hook` | `expected_hooks.go:84` | `pfm/cmd/pfm/statusline_command.go:160-196` | Checks the account's usage and prints a warning into the prompt when one is due; a no-op under Codex (`statusline_command.go:176-179`) | Fail-open, exits 0 (`statusline_command.go:187-190`) |
-| clear-kill | `SessionEnd` | `""` | `pfm internal clear-kill` | `expected_hooks.go:85` | `pfm/internal/hookentry/clear_kill.go:15` | Handles a `/clear` for the fleet session record | Fail-open, stderr line per cause (`clear_kill.go:27-66`) |
-| exit-close | `SessionEnd` | `""` | `pfm internal exit-close` | `expected_hooks.go:86` | `pfm/internal/hookentry/exit_close.go:23` | Closes the terminal a chat was watched through after a human `/exit` | Fail-open, the terminal is left open (`exit_close.go:30-73`) |
-| explore-deny | `PreToolUse` | `Agent\|Task` | `pfm internal explore-deny` | `expected_hooks.go:87-92` | `pfm/internal/hookentry/explore_deny.go:18` | Denies an `Explore` spawn and names `tracer` instead (`explore_deny.go:16`) | Fail-open on an unreadable payload (`explore_deny.go:22-30`) |
-| rr-dir | `SubagentStart` | `rr\|super-rr\|heavy-rr` | `pfm internal rr-dir` | `expected_hooks.go:93-98` | `pfm/internal/hookentry/rr_dir.go:27-31` | Hands the rr agents the directory their answer is saved into | Fail-open, exits 0 (`rr_dir.go:45-47`) |
-| epic-inject | `UserPromptSubmit` | `""` | `pfm internal epic-inject` | `expected_hooks.go:99` | `pfm/internal/hookentry/epic_inject.go:44` | Injects an epic manifest once per session and epic name | Fail-open (`epic_inject.go:105`) |
-| reload-intercept | `UserPromptSubmit` | `""` | `pfm internal reload-intercept` | `expected_hooks.go:100` | `pfm/internal/hookentry/reload_intercept.go:17` | Turns a `/reload` prompt into a scheduled reboot and blocks the prompt | Exits 2 with the reason when the reload cannot be scheduled (`reload_intercept.go:38-49`) |
-| exit-intercept | `UserPromptSubmit` | `""` | `pfm internal exit-intercept` | `expected_hooks.go:101` | `pfm/internal/hookentry/exit_intercept.go:18` | Turns an exact `e` or `/e` prompt into a kill of this chat | Exits 2 when the kill fails (`exit_intercept.go:40`) |
-| compact-nudge | `UserPromptSubmit` | `""` | `pfm internal compact-nudge` | `expected_hooks.go:102` | `pfm/internal/hookentry/compact_nudge.go:22` | Reminds the main chat to compact as context fills; Claude only | Exits 0 on every skip, 1 on one write failure (`compact_nudge.go:36-87`) |
+| launcher-repair | `SessionStart` | `""` | `pfm internal launcher-repair` | `expected_hooks.go:81` | `pfm/internal/hookentry/launcher_repair.go:12-25` | Repairs the Claude launcher each session start | Exits 1 with one stderr line; the session continues |
+| usage | `UserPromptSubmit` | `""` | `pfm usage-hook` | `expected_hooks.go:82` | `pfm/cmd/pfm/statusline_command.go:160-196` | Checks the account's usage and prints a warning into the prompt when one is due; a no-op under Codex (`statusline_command.go:176-179`) | Fail-open, exits 0 (`statusline_command.go:187-190`) |
+| clear-kill | `SessionEnd` | `""` | `pfm internal clear-kill` | `expected_hooks.go:83` | `pfm/internal/hookentry/clear_kill.go:15` | Handles a `/clear` for the fleet session record | Fail-open, stderr line per cause (`clear_kill.go:27-66`) |
+| exit-close | `SessionEnd` | `""` | `pfm internal exit-close` | `expected_hooks.go:84` | `pfm/internal/hookentry/exit_close.go:23` | Closes the terminal a chat was watched through after a human `/exit` | Fail-open, the terminal is left open (`exit_close.go:30-73`) |
+| explore-deny | `PreToolUse` | `Agent\|Task` | `pfm internal explore-deny` | `expected_hooks.go:85-90` | `pfm/internal/hookentry/explore_deny.go:18` | Denies an `Explore` spawn and names `tracer` instead (`explore_deny.go:16`) | Fail-open on an unreadable payload (`explore_deny.go:22-30`) |
+| git-guard | `PreToolUse` | `Bash` | `pfm internal git-guard` | `expected_hooks.go:91-98` | `pfm/internal/hookentry/git_guard.go:56` | Denies a shared git write (worktrees, history, branches, tags, remotes, the index, whole-tree destruction, repository settings) to every agent but `gitter`, per [git-guard](#git-guard) | Fail-open on an unreadable payload (`git_guard.go:57-69`); denies a git command it cannot parse |
+| rr-dir | `SubagentStart` | `rr\|super-rr\|heavy-rr` | `pfm internal rr-dir` | `expected_hooks.go:99-104` | `pfm/internal/hookentry/rr_dir.go:27-31` | Hands the rr agents the directory their answer is saved into | Fail-open, exits 0 (`rr_dir.go:45-47`) |
+| epic-inject | `UserPromptSubmit` | `""` | `pfm internal epic-inject` | `expected_hooks.go:105` | `pfm/internal/hookentry/epic_inject.go:44` | Injects an epic manifest once per session and epic name | Fail-open (`epic_inject.go:105`) |
+| reload-intercept | `UserPromptSubmit` | `""` | `pfm internal reload-intercept` | `expected_hooks.go:106` | `pfm/internal/hookentry/reload_intercept.go:17` | Turns a `/reload` prompt into a scheduled reboot and blocks the prompt | Exits 2 with the reason when the reload cannot be scheduled (`reload_intercept.go:38-49`) |
+| exit-intercept | `UserPromptSubmit` | `""` | `pfm internal exit-intercept` | `expected_hooks.go:107` | `pfm/internal/hookentry/exit_intercept.go:18` | Turns an exact `e` or `/e` prompt into a kill of this chat | Exits 2 when the kill fails (`exit_intercept.go:40`) |
+| compact-nudge | `UserPromptSubmit` | `""` | `pfm internal compact-nudge` | `expected_hooks.go:108` | `pfm/internal/hookentry/compact_nudge.go:22` | Reminds the main chat to compact as context fills; Claude only | Exits 0 on every skip, 1 on one write failure (`compact_nudge.go:36-87`) |
 | compact-gate | `PreCompact` | `""` | `pfm internal compact-gate` | `expected_hooks.go:56-57` | `pfm/internal/compactgate/compactgate.go:79` | Blocks an automatic compaction until the compacting party (main chat or sub-agent) reaches its own threshold; wired only while `claude.autoCompactMain` and `claude.autoCompactSubagent` are both set, per [../context/compaction.md](../context/compaction.md) | Allows the compaction and logs the cause on any read failure; never blocks on an error |
-| callmeter | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `SubagentStart`, `SubagentStop`, `Stop` (one command, seven registrations) | `Bash` on `PreToolUse`; `*` on the other tool events and the subagent events; none on `PostToolBatch` and `Stop` | `pfm internal callmeter`, async (`expected_hooks.go:36`) | `expected_hooks.go:99-119` | `pfm/internal/hookentry/callmeter.go` | Records calls, requests, agents and faults, per [callmeter.md](callmeter.md) | Always exits 0; logs and counts a fault |
+| callmeter | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `SubagentStart`, `SubagentStop`, `Stop` (one command, seven registrations) | `Bash` on `PreToolUse`; `*` on the other tool events and the subagent events; none on `PostToolBatch` and `Stop` | `pfm internal callmeter`, async (`expected_hooks.go:109-130`) | `expected_hooks.go:109-130` | `pfm/internal/hookentry/callmeter.go` | Records calls, requests, agents and faults, per [callmeter.md](callmeter.md) | Always exits 0; logs and counts a fault |
 
 A blocked prompt returns `decision: block` with the original prompt suppressed (`pfm/internal/hookentry/prompt_block.go:23-28`).
 
 The installer also converges shape: it resets the `explore-deny` matcher to `Agent|Task` (`pfm/internal/installer/settings.go:109-125`), rewrites a legacy `explore-deny.sh` or `cc-fleet` command to the binary (`pfm/internal/installer/settings.go:39-48`), and holds one placement rule for every pfm-owned hook (`dropMisplacedTemplateHooks`, `pfm/internal/installer/settings_wiring.go:77-173`): a template command belongs exactly once under each (event, matcher) pair its templates name — a set per command, since `callmeter`'s one command names seven pairs. The installer removes a duplicate wherever it sits, keeping the first in sorted event order and then array order, even when the duplicate shares its entry with an operator hook. A copy under any other event or matcher is a moved hook and is removed too, unless it shares its entry with an operator hook, in which case the moved copy is left in place and the right copy is appended instead (`pfm/internal/installer/settings_wiring.go:60-75`). An entry emptied by a removal is dropped, and an event emptied by dropping its last entry is deleted. An entry whose `matcher` is not a string or whose `hooks` is not an array is never touched. Because this rule is per (event, matcher) pair rather than per command, a `usage`, `clear-kill`, `explore-deny`, `rr-dir` or any other single-placement hook found again under a non-empty matcher is now a moved hook, not a special case. `async: true` is converged separately, at the expected (event, matcher) pair only (`normalizeExpectedHookTypes`, `pfm/internal/installer/settings.go:634-664`), and is not part of the ownership ledger key.
 
 With no Claude Code binary on the host, the installer wires no Claude hook and doctor collapses every `claude[N]` target's rows into one named skip line per account (`pfm/internal/installer/hook_probe.go:514-520`).
+
+## git-guard
+
+Only `gitter` writes shared git state. An agent that made its own worktree left it behind: nothing tore it down, and the stale worktrees and branches piled up in every repository. `git-guard` is the machine-global `PreToolUse` hook on `Bash` that makes the rule hold at the call instead of in the prompt: `pfm install` registers it in every account's `settings.json` (`pfm/internal/installer/expected_hooks.go:88-95`), and it runs in every repository, managed by pfm or not. Body: `pfm/internal/hookentry/git_guard.go`.
+
+**Who is exempt.** A payload whose `agent_type` is `gitter` is always allowed — a project's own gitter (`.claude/agents/gitter.md`, scaffolded from `templates/project/agents/gitter.md`) or a machine-global one, since the hook reads only the name. Every other caller is checked, a main chat (no `agent_type`) included.
+
+**How it reads a command.** A non-Bash tool, or a command containing neither `git` nor `worktree.sh`, returns at once. Otherwise the command goes through the callmeter shell parser (`pfm/internal/callmeter/cmdparse`), which unwraps wrappers (`timeout`, `env`), follows `&&`, `;`, pipes and subshells, and parses an inner `bash -c` string; a heredoc body and an `echo git …` argument are data, never a git call. For each part whose program is `git`, git's global options (`-C`, `-c`, `--git-dir`, `--work-tree`, `--no-pager` and the rest) are skipped, `-C` naming the repository; the subcommand and its arguments decide.
+
+| Area | Blocked | Allowed |
+| --- | --- | --- |
+| worktrees | `worktree add`, `remove`, `prune`, `move`, `lock`, `unlock`, `repair`; `.claude/scripts/worktree.sh create`, `remove`, `prune` | `worktree list`; `worktree.sh list` |
+| history | `commit`, `merge`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`; every `reset` (a mode, a commit, paths, or bare) | `log`, `show`, `diff` and every other read |
+| branches and tags | `switch`; `checkout -b`, `-B`, `--orphan`, `--track`, `--detach`, or one operand that is not an existing path (a branch switch); `branch` with a name or `-d`, `-D`, `-m`, `-M`, `-c`, `-f`, `-u`; `tag` with a name or `-d`, `-a`, `-s`, `-m`, `-f`; `update-ref`; `symbolic-ref` with two operands or `-d` | `branch` bare, `--list`, `-a`, `-r`, `-v`, `--show-current`, `--contains`, `--merged`, `--no-merged`; `tag` bare, `-l`, `--list`, `--contains`, `--points-at`; `symbolic-ref HEAD` |
+| remotes | `push`, `fetch`; `remote add`, `remove`, `rename`, `set-url`, `set-head`, `set-branches`, `prune`, `update` | `remote`, `remote -v`, `ls-remote` |
+| staging | `add`, `rm`, `mv`, `restore --staged` / `-S`, `apply --index` / `--cached` / `--3way`, `update-index`, `hash-object -w` | `add -n`, `rm -n` (`--dry-run`); `apply` to the working tree, `apply --check`; `hash-object` |
+| whole-tree destruction | `stash` with no pathspec (bare, `push` or flags without paths, `save`), `stash drop`, `clear`, `store`, `branch`; `clean`; `checkout` or `restore` of `.`, `:/`, `*` or the repository root | `stash push -- <paths>`, `stash pop`, `apply`, `list`, `show`; `clean -n`; `checkout -- <file>`, `restore <file>` |
+| repository settings | a `config` write (anything but `--get`, `--get-all`, `--get-regexp`, `--list`, `-l`, `--show-origin`, `get`, `list` or a single-key read); `gc`, `prune`, `filter-branch`, `filter-repo`, `replace`; `notes` except `show` and `list`; `submodule add`, `update`, `deinit`, `sync` | `config --get user.name`, `config user.name`; `notes show`; `submodule status` |
+
+Anything not in the blocked column is allowed, `archive` included.
+
+**The deny.** One message names every blocked part of the call as its words read, then `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.` A worktree block adds the right way for its repository: the `-C` directory, else the payload's `cwd`, walked up to the directory holding a `.git` entry without running git. When that repository has `.claude/scripts/worktree.sh`, the line reads `gitter creates and removes worktrees with {repo}/.claude/scripts/worktree.sh create|remove|prune — the only right way here.`; otherwise `gitter creates and removes worktrees (Phase SETUP).`
+
+**Fail-open, and the one fail-closed case.** A payload that cannot be read or decoded writes one `pfm internal git-guard: … (fail-open)` stderr line and allows the call, like every pfm hook. A command that mentions `git ` and does not parse is the exception: it is denied with `could not read this command; split it so each git call is its own simple command.`, because allowing it would let any git write through by breaking the quoting.
+
+**Named gap: Python snippets.** The parser hands `python -c` and heredoc Python to a runner the hook answers with no result, so the hook never spawns `python3`; a git call made from inside Python (`subprocess.run(["git", "push"])`) is not inspected. A `$VAR` or other word the parser cannot resolve is read as written, so `git $CMD` passes unless its literal words are a blocked form.
 
 ## Project-tier Claude hooks (template)
 
@@ -90,6 +119,10 @@ pfm owns no Codex hook: the fleet prompt reaches Codex through `config.toml`'s `
 ## OpenCode
 
 pfm ships no OpenCode hook and no plugin. OpenCode has no appendix hook; the staged prompt reaches it through the `instructions` config array (`pfm/internal/installer/opencode_instructions.go:12-17`). The guard that a Claude hook gives is a permission deny in `.opencode/opencode.jsonc` instead (`.claude/codex-build.json:8`).
+
+## Agent-attached hooks (not machine-global)
+
+A hook can also be wired only into one agent's own frontmatter instead of every account's `settings.json` — it is never in `claudeHookTemplates`, never in the doctor's expected list, and pfm install/doctor never mention it. `orchestrator-wait` is the first: a `PreToolUse` hook on `Bash` that denies a call whose whole command only waits (`echo`/`printf` with plain literal arguments, `true`, `:`, or `sleep N` — matched as a whole string; `pfm/internal/hookentry/orchestrator_wait.go:56-73`), so a wait-looping orchestrator ends its message instead of spending a call proving nothing changed. It is fail-open the same way every pfm hook is: a read or decode failure logs to stderr and returns 0 (`orchestrator_wait.go:31-40`). It is registered as an internal verb exactly like `explore-deny` (`pfm/cmd/pfm/main.go`'s `internalSubcommands` list and its `runInternal` dispatch) so `pfm internal orchestrator-wait` runs and the subcommand is never mistaken for unknown residue, but it is deliberately absent from `expected_hooks.go` — it is attached only through the frontmatter of `flights-orchestrator` and `general-orchestrator`, the two agents that spend calls waiting on a spawned agent, and never runs for any other agent.
 
 ## Retired hooks
 

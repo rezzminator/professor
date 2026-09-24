@@ -127,7 +127,7 @@ Runs FIRST in the sequence: it asserts the machine the other lanes will live on,
 
 - `O1.01-install-idempotent` · a second `pfm install --yes` is idempotent (changed=0) · spends none · I96
 - `O1.02-host-assets` · host asset staging is present after install (launcher, overlays, skill/command links, themes, harness baseline) · spends none · I1,I2,I3,I4,I7,I8,I9,I10,I11,I14,I15,I16,I17,I18,I19,I20,I21,I22,I23
-- `O1.03-hooks-installed` · hooks are installed correctly per engine · spends none · I24,I25,I26,I27,I28,I29,I30,I31,I32,I33
+- `O1.03-hooks-installed` · hooks are installed correctly per engine · spends none · I24,I25,I26,I27,I28,I29,I30,I31,I32,I33,I99
 - `O1.04-seats` · seats configuration: implicit + explicit accounts, fanout, Codex homes, OpenCode home absence · spends none · I34,I35,I36,I39,I40
 - `O1.05-credential` · a seat with an expired/absent credential refuses by name at every surface (doctor, `chat new`) · spends none · K23
 - `O1.06-dropped-seat` · a dropped spare seat loses exactly its owned hooks and ledger rows (P10.2), then is restored · spends none · I38
@@ -148,7 +148,7 @@ Runs LAST: it reaps the graveyard F's storm filled, archives a real history, and
 - `O2.02-archive` · `pfm archive` (apply / subagents / restore / prune-orphans) over a real transcript history · spends none · X6,X7,X8,X9,X10
 - `O2.03-index` · `pfm index` · spends none · X5
 - `O2.04-headless` · headless on cc and cx · spends cc:$SEAT+cx · X15,X16,X17,K17
-- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, epic-inject, title-renudge, compact-gate · spends none · X21,X22,X26,X29,X30,X32,X33,X34,X37,X40,T34,T37,T39,T40
+- `O2.05-internal-plumbing` · misc internal plumbing: launcher-repair, primary get/set, stale sweep, statusline alias and --subagents rows, clear-kill, kill-exit, claude-version, explore-deny, git-guard, epic-inject, title-renudge, compact-gate · spends none · X21,X22,X26,X29,X30,X32,X33,X34,X37,X40,X45,T34,T37,T39,T40
 - `O2.05b-activity-log` · the activity-log reader: `pfm log` shows the lane's own records, a filter narrows, an unknown `--comp`/`--level` and a positional argument exit 2 · spends none · X42
 - `O2.05c-callmeter` · the call store's reader over a scratch home and config: `pfm callmeter report` with no store prints the no-store line, exits 0 and creates nothing; `pfm internal callmeter` fed a `PostToolUse` Read payload, then `report files` names the file; `backfill` over a seeded transcript tree prints its summary, a second run inserts nothing, and `report files` names the backfilled file; an unknown topic exits 2 · spends none · X43,X44
 - `O2.06-doctor-codex-pane` · `pfm doctor`'s `codex_pane` rows read clean from the operator's side while E2's chat lives · spends none · I63

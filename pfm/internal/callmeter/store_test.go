@@ -83,7 +83,7 @@ func TestOpenSetsPragmasAndVersion(t *testing.T) {
 		"journal_mode": "wal",
 		"busy_timeout": "5000",
 		"foreign_keys": "0",
-		"user_version": "2",
+		"user_version": "3",
 	} {
 		var got string
 		if err := store.DB().QueryRow("PRAGMA " + pragma).Scan(&got); err != nil {
@@ -102,7 +102,7 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
-	if _, err := store.DB().Exec("PRAGMA user_version=3"); err != nil {
+	if _, err := store.DB().Exec("PRAGMA user_version=4"); err != nil {
 		t.Fatalf("raise version: %v", err)
 	}
 	if err := store.Close(); err != nil {
@@ -111,9 +111,9 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	reopened, err := OpenDB(ctx, path)
 	if err == nil {
 		_ = reopened.Close()
-		t.Fatal("OpenDB of a version-3 store succeeded, want a refusal")
+		t.Fatal("OpenDB of a version-4 store succeeded, want a refusal")
 	}
-	for _, want := range []string{"version 3", "version 2"} {
+	for _, want := range []string{"version 4", "version 3"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}
@@ -132,8 +132,8 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	if err := raw.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		t.Fatalf("read version: %v", err)
 	}
-	if version != 3 {
-		t.Fatalf("user_version after refusal = %d, want 3", version)
+	if version != 4 {
+		t.Fatalf("user_version after refusal = %d, want 4", version)
 	}
 }
 
@@ -242,7 +242,7 @@ func TestOpenMigratesV1StoreToHookRowsOnly(t *testing.T) {
 		"SELECT agent_id FROM agents ORDER BY 1":                     "agent_hook",
 		"SELECT tool_use_id FROM command_parts ORDER BY 1":           "toolu_hook",
 		"SELECT stage || ':' || tool_use_id FROM faults ORDER BY 1":  "parse:toolu_hook,store:toolu_replay",
-		"SELECT CAST(user_version AS TEXT) FROM pragma_user_version": "2",
+		"SELECT CAST(user_version AS TEXT) FROM pragma_user_version": "3",
 	} {
 		if got := keys(t, store.DB(), query); got != want {
 			t.Errorf("%s = %q, want %q", query, got, want)
@@ -458,8 +458,8 @@ func TestOpenPurgesV1StoreOnlyOnce(t *testing.T) {
 
 func TestOpenFreshStoreIsEmptyAtCurrentVersion(t *testing.T) {
 	store := openTestStore(t)
-	if got := keys(t, store.DB(), "SELECT CAST(user_version AS TEXT) FROM pragma_user_version"); got != "2" {
-		t.Errorf("user_version = %s, want 2", got)
+	if got := keys(t, store.DB(), "SELECT CAST(user_version AS TEXT) FROM pragma_user_version"); got != "3" {
+		t.Errorf("user_version = %s, want 3", got)
 	}
 	for _, table := range []string{"calls", "requests", "agents", "command_parts", "faults"} {
 		if n := count(t, store, table); n != 0 {
@@ -540,4 +540,78 @@ func TestAddFaultStoresEmptyAsNull(t *testing.T) {
 	if got["session_id"] != nil || got["tool_use_id"] != nil {
 		t.Fatalf("empty ids stored as %v / %v, want NULL", got["session_id"], got["tool_use_id"])
 	}
+}
+
+// v2Schema is the store's DDL at schema version 2: calls, requests and agents
+// without the account and seat_dir columns.
+const v2Schema = `
+CREATE TABLE calls (tool_use_id TEXT PRIMARY KEY, session_id TEXT, agent_id TEXT, agent_type TEXT,
+	request_id TEXT, ts INTEGER, tool TEXT, input TEXT, cwd TEXT, duration_ms INTEGER, failed INTEGER,
+	error TEXT, bytes_real INTEGER, bytes_delivered INTEGER, persisted_path TEXT, file_path TEXT,
+	file_bytes INTEGER, file_bytes_before INTEGER, read_start INTEGER, read_lines INTEGER,
+	read_total_lines INTEGER, source TEXT, config_dir TEXT);
+CREATE INDEX calls_session_agent_ts ON calls(session_id, agent_id, ts);
+CREATE INDEX calls_ts ON calls(ts);
+CREATE INDEX calls_file_path ON calls(file_path);
+CREATE TABLE requests (request_id TEXT PRIMARY KEY, session_id TEXT, agent_id TEXT, ts INTEGER,
+	context_tokens INTEGER, output_tokens INTEGER, calls INTEGER, pending INTEGER, source TEXT, config_dir TEXT);
+CREATE INDEX requests_session_agent_pending ON requests(session_id, agent_id, pending);
+CREATE TABLE agents (agent_id TEXT PRIMARY KEY, session_id TEXT, agent_type TEXT, parent_tool_use_id TEXT,
+	started INTEGER, stopped INTEGER, transcript_path TEXT, total_tokens INTEGER, tool_uses INTEGER,
+	model TEXT, source TEXT, config_dir TEXT);
+CREATE TABLE command_parts (tool_use_id TEXT NOT NULL, seq INTEGER NOT NULL, lang TEXT, program TEXT,
+	args TEXT, files TEXT, parse_status TEXT, conditional INTEGER NOT NULL DEFAULT 0,
+	parser INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (tool_use_id, seq));
+CREATE TABLE faults (ts INTEGER, session_id TEXT, tool_use_id TEXT, stage TEXT, error TEXT);
+`
+
+// TestOpenMigratesV2StoreAddingAccountColumns: a version-2 store gains account
+// and seat_dir on calls, requests and agents in place; every row it held
+// keeps them NULL (no backfill) and the store reads version 3.
+func TestOpenMigratesV2StoreAddingAccountColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "callmeter.db")
+	raw := rawStore(t, path)
+	rawExec(t, raw, v2Schema,
+		`INSERT INTO calls (tool_use_id, tool, source, config_dir) VALUES ('toolu_old', 'Bash', 'hook', '/h/.claude')`,
+		`INSERT INTO requests (request_id, source, config_dir) VALUES ('msg_old', 'hook', '/h/.claude')`,
+		`INSERT INTO agents (agent_id, source, config_dir) VALUES ('agent_old', 'hook', '/h/.claude')`,
+		"PRAGMA user_version=2",
+	)
+	store, err := OpenDB(context.Background(), path)
+	if err != nil {
+		t.Fatalf("OpenDB of a v2 store: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	for query, want := range map[string]string{
+		"SELECT CAST(user_version AS TEXT) FROM pragma_user_version":                                    "3",
+		"SELECT tool_use_id || ':' || config_dir FROM calls WHERE account IS NULL AND seat_dir IS NULL": "toolu_old:/h/.claude",
+		"SELECT request_id FROM requests WHERE account IS NULL AND seat_dir IS NULL":                    "msg_old",
+		"SELECT agent_id FROM agents WHERE account IS NULL AND seat_dir IS NULL":                        "agent_old",
+	} {
+		if got := keys(t, store.DB(), query); got != want {
+			t.Errorf("%s = %q, want %q", query, got, want)
+		}
+	}
+	assertAccountColumns(t, store.DB())
+}
+
+// assertAccountColumns fails unless calls, requests and agents each carry
+// account INTEGER and seat_dir TEXT.
+func assertAccountColumns(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, table := range []string{"calls", "requests", "agents"} {
+		query := "SELECT name || ' ' || type FROM pragma_table_info('" + table +
+			"') WHERE name IN ('account', 'seat_dir') ORDER BY name"
+		if got := keys(t, db, query); got != "account INTEGER,seat_dir TEXT" {
+			t.Errorf("%s account columns = %q, want account INTEGER and seat_dir TEXT", table, got)
+		}
+	}
+}
+
+func TestOpenFreshStoreHasAccountColumns(t *testing.T) {
+	assertAccountColumns(t, openTestStore(t).DB())
 }

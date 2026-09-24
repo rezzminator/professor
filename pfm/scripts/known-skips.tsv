@@ -28,6 +28,8 @@ github.com/rezzminator/professor/pfm/internal/harvestpy	TestFormatParsersMatchTh
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestFormatParsersRefuseByName	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLConversionKeepsBlockStructure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestHTMLFullDOMConversionDropsHiddenElements	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestInflateXZAndArabicOCRAvailable	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
+github.com/rezzminator/professor/pfm/internal/harvestpy	TestLiveBrowserCallerHeadersStayOnTheOrigin	opt-in-live	real-browser rung; runs only with HARVESTER_BROWSER=1
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestOCRMissingModelIsANamedFailure	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestOCRReadsAScannedLatinPage	opt-in-corpus	needs the pinned interpreter and the staged OCR models named by HARVESTPY_CORPUS_PYTHON and HARVESTPY_OCR_MODEL_ROOT
 github.com/rezzminator/professor/pfm/internal/harvestpy	TestOCRRulesNameTheirChoices	opt-in-corpus	needs the pinned interpreter or archive named by a HARVESTPY_* variable
@@ -44,6 +46,7 @@ github.com/rezzminator/professor/pfm/internal/installer	TestGlobalAgentsDoctorUn
 github.com/rezzminator/professor/pfm/internal/installer	TestInspectVSCodeSurvivesOneUnreadableSettingsFileAndReportsEveryOtherRow	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateAnnouncesWhenItCannotProbe	platform	darwin-only gate
 github.com/rezzminator/professor/pfm/internal/installer	TestLaunchAgentGateRefusesOnlyMidExecution	platform	darwin-only gate
+github.com/rezzminator/professor/pfm/internal/installer	TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/installer	TestRetireOrphanGlobalCommandsCannotLookReportsErrorNotSuccess	root-noop	the fence runs as root, where permission bits deny nothing
 github.com/rezzminator/professor/pfm/internal/kill	TestKillStressProcessHelper	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/internal/naming	TestNamingStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
@@ -53,4 +56,3 @@ github.com/rezzminator/professor/pfm/internal/store	TestSharedKillsNeedNoBridgeI
 github.com/rezzminator/professor/pfm/internal/store	TestStoreStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/store	TestStoreStressKilledHelper	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/internal/update	TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError	root-noop	the fence runs as root, where permission bits deny nothing
-github.com/rezzminator/professor/pfm/internal/installer	TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess	root-noop	the fence runs as root, where permission bits deny nothing

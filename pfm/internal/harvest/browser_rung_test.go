@@ -33,12 +33,11 @@ type browserSpyConverter struct {
 	html         string
 	status       int
 	err          error
-	// modes records the headless flag of every call, in order; render, when
-	// set, answers per mode instead of html/status/err.
-	modes []bool
-	// sources records the address of every render, fragment included.
+	// sources records the address of every render request, fragment
+	// included, in order.
 	sources []string
-	render  func(headless bool) (string, int, error)
+	// render, when set, answers instead of html/status/err.
+	render func() (string, int, error)
 	// landed, when set, is the address every render lands on; unset, the
 	// render lands on the page requested.
 	landed *string
@@ -54,16 +53,14 @@ func (spy *browserSpyConverter) Convert(ctx context.Context, kind, source string
 func (spy *browserSpyConverter) FetchBrowser(
 	_ context.Context,
 	source string,
-	headless bool,
 ) (string, int, string, error) {
 	spy.browserCalls++
-	spy.modes = append(spy.modes, headless)
 	spy.sources = append(spy.sources, source)
 	if spy.landed != nil {
 		source = *spy.landed
 	}
 	if spy.render != nil {
-		html, status, err := spy.render(headless)
+		html, status, err := spy.render()
 		return html, status, source, err
 	}
 	return spy.html, spy.status, source, spy.err
@@ -385,7 +382,7 @@ func TestJinaTransportFailureKeepsTheEarlierStatus(t *testing.T) {
 
 // recoveredArticleSpy converts a rendered "Recovered article" page to long
 // real content and anything else (a wall) to thin text.
-func recoveredArticleSpy(render func(headless bool) (string, int, error)) *browserSpyConverter {
+func recoveredArticleSpy(render func() (string, int, error)) *browserSpyConverter {
 	return &browserSpyConverter{
 		render: render,
 		convertFn: func(_ context.Context, _, _ string, body []byte) (string, error) {
@@ -399,37 +396,52 @@ func recoveredArticleSpy(render func(headless bool) (string, int, error)) *brows
 
 const recoveredArticleHTML = "<html><body><h1>Recovered article</h1>real rendered evidence</body></html>"
 
-// TestBrowserRungRendersHeadlessFirst pins headless-first: a render that
-// passes on the first try never opens a visible window.
-func TestBrowserRungRendersHeadlessFirst(t *testing.T) {
-	spy := recoveredArticleSpy(func(bool) (string, int, error) { return recoveredArticleHTML, http.StatusOK, nil })
+// TestBrowserRungRendersOnce: a render that passes is accepted from the one
+// headless request the rung sends.
+func TestBrowserRungRendersOnce(t *testing.T) {
+	spy := recoveredArticleSpy(func() (string, int, error) { return recoveredArticleHTML, http.StatusOK, nil })
 	h := wallHarvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
 	if result.Error != "" || result.Method != "browser-chrome" {
 		t.Fatalf("headless render not accepted: method=%q err=%q", result.Method, result.Error)
 	}
-	if fmt.Sprint(spy.modes) != "[true]" {
-		t.Fatalf("browser modes=%v, want exactly one HEADLESS render [true]", spy.modes)
+	if want := "[https://blocked.example.test/article]"; fmt.Sprint(spy.sources) != want {
+		t.Fatalf("render requests %v, want exactly %s", spy.sources, want)
 	}
 }
 
-// TestBrowserHeadedRetryOnlyAfterAWall: a headless render that meets a bot
-// wall earns ONE headed retry, and the headed render's content wins.
-func TestBrowserHeadedRetryOnlyAfterAWall(t *testing.T) {
-	spy := recoveredArticleSpy(func(headless bool) (string, int, error) {
-		if headless {
+// TestBrowserRungsNeverRequestAHeadedBrowser: the render rung and the file
+// rung, each driven through a challenge the browser does not pass, send the
+// worker exactly one request apiece — the contract's only request is the
+// headless one (the worker's launch mode is pinned by browser_render_test.py)
+// — and return the headless wall verdict. Watched FAILING before the change:
+// both rungs sent a second, headed request ([true false]).
+func TestBrowserRungsNeverRequestAHeadedBrowser(t *testing.T) {
+	t.Run("render", func(t *testing.T) {
+		spy := recoveredArticleSpy(func() (string, int, error) {
 			return cloudflareBlockPageFixture(), http.StatusForbidden, nil
+		})
+		result := browserHarvester(t, spy).Fetch(context.Background(), "https://blocked.example.test/article")
+		if want := "[https://blocked.example.test/article]"; fmt.Sprint(spy.sources) != want {
+			t.Fatalf("render requests %v, want exactly the one headless request %s", spy.sources, want)
 		}
-		return recoveredArticleHTML, http.StatusOK, nil
+		if !result.Challenge || !strings.Contains(result.Error, "DID run against this wall") {
+			t.Fatalf("render: challenge=%v err=%q, want the headless wall verdict", result.Challenge, result.Error)
+		}
 	})
-	h := wallHarvester(t, spy, browserOn())
-	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if result.Error != "" || result.Method != "browser-chrome" {
-		t.Fatalf("headed retry after a headless wall not accepted: method=%q err=%q", result.Method, result.Error)
-	}
-	if fmt.Sprint(spy.modes) != "[true false]" {
-		t.Fatalf("browser modes=%v, want headless then headed [true false]", spy.modes)
-	}
+	t.Run("file", func(t *testing.T) {
+		browser := &downloadingBrowser{
+			err: &BrowserDownloadError{Reason: BrowserDownloadNoDownload, Status: 403, Head: challengePage},
+		}
+		h, _ := walledHarvester(t, browser, 0)
+		got := h.Download(context.Background(), "https://203.0.113.10/paper.pdf")
+		if want := "[https://203.0.113.10/paper.pdf]"; fmt.Sprint(browser.calls) != want {
+			t.Fatalf("download requests %v, want exactly the one headless request %s", browser.calls, want)
+		}
+		if !strings.Contains(got.Error, "challenge the browser did not pass") {
+			t.Fatalf("file: err=%q, want the headless challenge verdict", got.Error)
+		}
+	})
 }
 
 // consentBannerPageHTML is a short article under a consent manager's dialog
@@ -440,45 +452,15 @@ const consentBannerPageHTML = `<html><body><h1>Recovered article</h1><p>real ren
 	`<li>Turnstile — bot protection</li></ul><button>Reject all</button><button>Accept all</button></div>` +
 	`<div class="qc-cmp2-container">Verify your consent choices: Cloudflare, hCaptcha</div></body></html>`
 
-// TestBrowserConsentBannerNeverEarnsTheHeadedRetry: a consent dialog is not a
-// bot wall, even when its vendor list names Cloudflare or a captcha provider —
-// the headless render stands and no visible window opens.
-func TestBrowserConsentBannerNeverEarnsTheHeadedRetry(t *testing.T) {
-	spy := recoveredArticleSpy(func(bool) (string, int, error) { return consentBannerPageHTML, http.StatusOK, nil })
+// TestBrowserConsentBannerIsNotAWall: a consent dialog is not a bot wall, even
+// when its vendor list names Cloudflare or a captcha provider — the render
+// stands.
+func TestBrowserConsentBannerIsNotAWall(t *testing.T) {
+	spy := recoveredArticleSpy(func() (string, int, error) { return consentBannerPageHTML, http.StatusOK, nil })
 	h := wallHarvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if fmt.Sprint(spy.modes) != "[true]" {
-		t.Fatalf("browser modes=%v, want one HEADLESS render [true]: a consent banner opened a window", spy.modes)
-	}
 	if result.Challenge {
 		t.Fatalf("a consent banner page was judged a bot wall: err=%q", result.Error)
-	}
-}
-
-// TestBrowserHeadedRetryFailureKeepsTheWallVerdict: when the headed retry
-// cannot launch (a display-less host), the completed headless attempt's
-// verdict — it RAN and met a wall — stands; it never becomes an outage.
-func TestBrowserHeadedRetryFailureKeepsTheWallVerdict(t *testing.T) {
-	spy := recoveredArticleSpy(func(headless bool) (string, int, error) {
-		if headless {
-			return cloudflareBlockPageFixture(), http.StatusForbidden, nil
-		}
-		return "", 0, errors.New("headed Chrome needs a display")
-	})
-	h := browserHarvester(t, spy)
-	result := h.Fetch(context.Background(), "https://blocked.example.test/article")
-	if !result.Challenge || !strings.Contains(result.Error, "DID run against this wall") {
-		t.Fatalf(
-			"headed-launch failure erased the headless wall verdict: challenge=%v err=%q",
-			result.Challenge,
-			result.Error,
-		)
-	}
-	if strings.Contains(result.Error, "could NOT RUN") {
-		t.Fatalf("a completed headless attempt was misreported as an outage: %q", result.Error)
-	}
-	if fmt.Sprint(spy.modes) != "[true false]" {
-		t.Fatalf("browser modes=%v, want [true false]", spy.modes)
 	}
 }
 

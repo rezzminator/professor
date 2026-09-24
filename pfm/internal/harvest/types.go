@@ -198,8 +198,8 @@ type FullDOMConverter interface {
 
 // BrowserFetcher is implemented by adapters that can render one URL in a real
 // browser (the ladder's last wall-bypass rung). Optional: a plain Converter
-// never escalates to it. headless false asks for a VISIBLE window — the
-// ladder spends that only on a wall the headless render could not pass.
+// never escalates to it. The render is always headless: nothing in this
+// contract can ask for a visible window.
 // finalURL is the address of the document html holds, after every redirect;
 // "" when the adapter cannot tell, which never proves the render is the page
 // requested (browserRenderWins).
@@ -207,7 +207,6 @@ type BrowserFetcher interface {
 	FetchBrowser(
 		ctx context.Context,
 		source string,
-		headless bool,
 	) (html string, status int, finalURL string, err error)
 }
 

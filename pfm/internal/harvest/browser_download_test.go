@@ -13,31 +13,26 @@ import (
 
 const challengePage = "<html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>"
 
-// downloadingBrowser is a BrowserDownloader: it records the headless flag of
-// every call and writes body to the path Go named, ignoring the cap it was
+// downloadingBrowser is a BrowserDownloader: it records the source of every
+// call and writes body to the path Go named, ignoring the cap it was
 // handed so the Go side's own cap is what a test sees hold.
 type downloadingBrowser struct {
 	fakeConverter
 	mu          sync.Mutex
-	calls       []bool
+	calls       []string
 	body        string
 	contentType string
 	err         error // returned by every call
-	headlessErr error // returned by the headless call only
 }
 
 func (b *downloadingBrowser) DownloadBrowser(
 	_ context.Context,
 	source, dest string,
 	_ int64,
-	headless bool,
 ) (BrowserFile, error) {
 	b.mu.Lock()
-	b.calls = append(b.calls, headless)
+	b.calls = append(b.calls, source)
 	b.mu.Unlock()
-	if headless && b.headlessErr != nil {
-		return BrowserFile{}, b.headlessErr
-	}
 	if b.err != nil {
 		return BrowserFile{}, b.err
 	}
@@ -102,8 +97,8 @@ func TestRetrieveFileBrowserDownloadIsTheLastRung(t *testing.T) {
 	) != want {
 		t.Fatalf("rungs %v, want %s", got.Rungs, want)
 	}
-	if len(browser.calls) != 1 || !browser.calls[0] {
-		t.Fatalf("browser calls (headless flags) %v, want one headless call", browser.calls)
+	if len(browser.calls) != 1 {
+		t.Fatalf("browser calls %v, want one", browser.calls)
 	}
 	if !strings.HasPrefix(got.Path, cache+string(filepath.Separator)) || got.Kind != kindPDF ||
 		got.Bytes != int64(len(browser.body)) {
@@ -123,8 +118,8 @@ func TestRetrieveFileBrowserDownloadIsTheLastRung(t *testing.T) {
 }
 
 // TestRetrieveFileBrowserFailureIsNamed: a browser that does not produce the
-// file is a named failure, never an empty success; only a challenge spends the
-// headed retry. Watched FAILING before the rung (the browser was never called).
+// file is a named failure, never an empty success, from its one headless
+// call. Watched FAILING before the rung (the browser was never called).
 func TestRetrieveFileBrowserFailureIsNamed(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -133,7 +128,7 @@ func TestRetrieveFileBrowserFailureIsNamed(t *testing.T) {
 		want      string
 	}{
 		{
-			"challenge", &BrowserDownloadError{Reason: BrowserDownloadNoDownload, Status: 403, Head: challengePage}, 2,
+			"challenge", &BrowserDownloadError{Reason: BrowserDownloadNoDownload, Status: 403, Head: challengePage}, 1,
 			"challenge the browser did not pass",
 		},
 		{
@@ -153,8 +148,8 @@ func TestRetrieveFileBrowserFailureIsNamed(t *testing.T) {
 			if !strings.Contains(got.Error, rungBrowserDownload) || !strings.Contains(got.Error, tc.want) {
 				t.Fatalf("failure %q does not name the browser rung and %q", got.Error, tc.want)
 			}
-			if len(browser.calls) != tc.wantCalls || !browser.calls[0] {
-				t.Fatalf("browser calls (headless flags) %v, want %d starting headless", browser.calls, tc.wantCalls)
+			if len(browser.calls) != tc.wantCalls {
+				t.Fatalf("browser calls %v, want %d", browser.calls, tc.wantCalls)
 			}
 			if left := leftovers(t, cache); len(left) != 0 {
 				t.Fatalf("the browser rung left scratch in the cache: %v", left)

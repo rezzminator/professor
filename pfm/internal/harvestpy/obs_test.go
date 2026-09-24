@@ -104,7 +104,7 @@ func TestBrowserWorkerEnsureAndCloseRecordProcessLifecycle(t *testing.T) {
 		Runner: browserTestRunner(t, []string{"https://a.example.test/", "https://b.example.test/"}, "rendered"),
 	})
 	html, status, err := worker.Fetch(
-		context.Background(), "https://a.example.test/", "", true, 45000,
+		context.Background(), "https://a.example.test/", "", 45000,
 		func(string) error { return nil },
 	)
 	if err != nil {

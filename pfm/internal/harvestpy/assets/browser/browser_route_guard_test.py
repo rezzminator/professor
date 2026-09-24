@@ -229,10 +229,9 @@ def test_no_proxy_refuses_to_launch():
     # renders NOTHING.
     from browser import PROXY_REQUIRED, fetch_browser
 
-    html, status, headless, error = run(fetch_browser("https://example.test/", None, proxy_url=None))
+    html, status, error = run(fetch_browser("https://example.test/", None, proxy_url=None))
     assert error == PROXY_REQUIRED, f"an unproxied fetch was not refused: {error!r}"
     assert html == "" and status is None, f"an unproxied fetch rendered something: {html!r}/{status!r}"
-    assert headless is True, f"the refusal lost the requested mode: {headless!r}"
 
 
 def test_launch_arguments_refuse_an_empty_proxy():

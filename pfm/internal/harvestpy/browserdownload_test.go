@@ -60,7 +60,6 @@ func TestBrowserDownloadRequestAndReply(t *testing.T) {
 		BrowserFetchRequest: BrowserFetchRequest{
 			URL:               "https://publisher.example.test/paper.pdf",
 			Proxy:             "http://127.0.0.1:4100",
-			Headless:          true,
 			HostResolverRules: "MAP publisher.example.test 203.0.113.7",
 			TimeoutMS:         45000,
 		},
@@ -83,7 +82,7 @@ func TestBrowserDownloadRequestAndReply(t *testing.T) {
 	sent := <-requests
 	for key, want := range map[string]any{
 		"op": "download", "path": request.Path, "max_bytes": float64(1024),
-		"proxy": request.Proxy, "host_resolver_rules": request.HostResolverRules, "headless": true,
+		"proxy": request.Proxy, "host_resolver_rules": request.HostResolverRules,
 	} {
 		if sent[key] != want {
 			t.Fatalf("request %s = %v, want %v (request %v)", key, sent[key], want, sent)

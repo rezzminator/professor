@@ -112,7 +112,7 @@ func (w *fakeBrowserWorker) request(t *testing.T) map[string]any {
 // to. Before this fix the Go side sent an empty proxy and the rung was dead.
 func TestFetchBrowserSendsAGoOwnedPinnedProxy(t *testing.T) {
 	converter, worker := newFakeBrowserWorker(t)
-	html, status, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7", true)
+	html, status, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7")
 	if err != nil {
 		t.Fatalf("FetchBrowser() error = %v", err)
 	}
@@ -136,7 +136,7 @@ func TestFetchBrowserSendsAGoOwnedPinnedProxy(t *testing.T) {
 func TestFetchBrowserKeepsTheOperatorsOwnProxy(t *testing.T) {
 	converter, worker := newFakeBrowserWorker(t)
 	converter.proxyURL = "http://proxy.example.test:8080"
-	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7", true); err != nil {
+	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7"); err != nil {
 		t.Fatalf("FetchBrowser() error = %v", err)
 	}
 	request := worker.request(t)
@@ -150,7 +150,7 @@ func TestFetchBrowserKeepsTheOperatorsOwnProxy(t *testing.T) {
 // navigation meets the forum wall the HTTP rungs already pass.
 func TestFetchBrowserSendsTheProvenanceReferer(t *testing.T) {
 	converter, worker := newFakeBrowserWorker(t)
-	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7", true); err != nil {
+	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7"); err != nil {
 		t.Fatalf("FetchBrowser() error = %v", err)
 	}
 	request := worker.request(t)
@@ -164,7 +164,7 @@ func TestFetchBrowserSendsTheProvenanceReferer(t *testing.T) {
 // rendered read-only — its request carries no press_loaders true.
 func TestFetchBrowserNeverAsksAnUnregisteredPageToPress(t *testing.T) {
 	converter, worker := newFakeBrowserWorker(t)
-	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7", true); err != nil {
+	if _, _, _, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7"); err != nil {
 		t.Fatalf("FetchBrowser() error = %v", err)
 	}
 	request := worker.request(t)
@@ -180,7 +180,7 @@ func TestFetchBrowserNeverAsksAnUnregisteredPageToPress(t *testing.T) {
 // never lets a render at another address replace a kept flagged page.
 func TestFetchBrowserCarriesTheMarkerTokenAndTheLandingAddress(t *testing.T) {
 	converter, worker := newFakeBrowserWorker(t)
-	_, _, finalURL, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7", true)
+	_, _, finalURL, err := converter.FetchBrowser(context.Background(), "https://93.184.216.34/f7")
 	if err != nil {
 		t.Fatalf("FetchBrowser() error = %v", err)
 	}

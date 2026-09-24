@@ -284,7 +284,7 @@ func TestRetrieveGatewayClimbsToTheBrowserForAPageNeverForAFile(t *testing.T) {
 	wall := roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return response(request, http.StatusForbidden, "text/html", gatewayWallBody), nil
 	})
-	browser := &browserConverter{reply: func(bool) (string, int, error) {
+	browser := &browserConverter{reply: func() (string, int, error) {
 		return "<html><body><h1>Record</h1></body></html>", http.StatusOK, nil
 	}}
 	h := mustNew(t, Options{
@@ -301,10 +301,10 @@ func TestRetrieveGatewayClimbsToTheBrowserForAPageNeverForAFile(t *testing.T) {
 	if strings.Join(page.Rungs, ",") != rungDirect+","+rungChromeImpersonation+",browser-headless" {
 		t.Fatalf("gateway page rungs %v, want direct, chrome-impersonation, browser-headless", page.Rungs)
 	}
-	before := len(browser.headlessFlags())
+	before := len(browser.requests())
 	file, _ := h.Retrieve(context.Background(), "https://203.0.113.10/paper.pdf", WantFile, PolicyGateway)
-	if len(browser.headlessFlags()) != before || !file.Challenge {
+	if len(browser.requests()) != before || !file.Challenge {
 		t.Fatalf("gateway file started the browser (%d → %d) or lost the wall (challenge=%v)",
-			before, len(browser.headlessFlags()), file.Challenge)
+			before, len(browser.requests()), file.Challenge)
 	}
 }

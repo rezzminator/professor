@@ -30,7 +30,8 @@ type browserAsk struct {
 }
 
 // BrowserFetchRequest is one real-browser fetch request. It is threaded
-// through verbatim; nothing is configured here.
+// through verbatim; nothing is configured here. It carries no render mode: the
+// worker always launches Chrome headless.
 type BrowserFetchRequest struct {
 	URL string `json:"url"`
 	// Proxy is the DIAL half of the browser rung's SSRF boundary, and the
@@ -41,8 +42,7 @@ type BrowserFetchRequest struct {
 	// a public address on the record. Only a proxy Go owns — one that dials
 	// through the pinned dialer internal/harvest already uses for every other
 	// client — makes the address Go validated the address Chrome connects to.
-	Proxy    string `json:"proxy,omitempty"`
-	Headless bool   `json:"headless"`
+	Proxy string `json:"proxy,omitempty"`
 	// HostResolverRules pins Chrome's own DNS to the address the Go side
 	// already resolved and validated (a "MAP host ip" rule). Chrome otherwise
 	// resolves independently through the system resolver, which on a network
@@ -104,7 +104,6 @@ func (worker *BrowserWorker) Close() error {
 func (worker *BrowserWorker) Fetch(
 	ctx context.Context,
 	source, proxy string,
-	headless bool,
 	timeoutMS int,
 	onAsk func(url string) error,
 ) (string, int, error) {
@@ -117,7 +116,6 @@ func (worker *BrowserWorker) Fetch(
 		"",
 		nil,
 		"",
-		headless,
 		false,
 		timeoutMS,
 		onAsk,
@@ -138,7 +136,7 @@ func (worker *BrowserWorker) FetchPinned(
 	source, proxy, hostResolverRules, referer, markerToken string,
 	headers map[string]string,
 	headersOrigin string,
-	headless, pressLoaders bool,
+	pressLoaders bool,
 	timeoutMS int,
 	onAsk func(url string) error,
 ) (string, int, string, error) {
@@ -151,7 +149,6 @@ func (worker *BrowserWorker) FetchPinned(
 			BrowserFetchRequest: BrowserFetchRequest{
 				URL:               source,
 				Proxy:             proxy,
-				Headless:          headless,
 				HostResolverRules: hostResolverRules,
 				TimeoutMS:         timeoutMS,
 				Referer:           referer,
@@ -173,7 +170,6 @@ func (worker *BrowserWorker) FetchPinned(
 		OK       bool   `json:"ok"`
 		HTML     string `json:"html"`
 		Status   int    `json:"status"`
-		Headless bool   `json:"headless"`
 		Error    string `json:"error"`
 		FinalURL string `json:"final_url"`
 	}

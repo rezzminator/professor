@@ -17,7 +17,6 @@ func TestFetchBrowserUsesConfiguredRunner(t *testing.T) {
 	html, status, _, err := converter.FetchBrowser(
 		context.Background(),
 		"https://93.184.216.34/f13",
-		true,
 	)
 	if err != nil {
 		t.Fatalf("FetchBrowser() error = %v", err)

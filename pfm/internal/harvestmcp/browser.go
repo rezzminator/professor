@@ -12,9 +12,9 @@ import (
 )
 
 // browserHardDeadline is the Go-side ceiling on one browser fetch. The
-// 45000ms timeout travels to Python and bounds page.goto only — launch, IPC,
-// the headed→headless retry, and close() answer to nobody else. Every other
-// transport in this package has a hard Go ceiling; the browser gets one too.
+// 45000ms timeout travels to Python and bounds page.goto only — launch, IPC
+// and close() answer to nobody else. Every other transport in this package has
+// a hard Go ceiling; the browser gets one too.
 const browserHardDeadline = 3 * time.Minute
 
 // FetchBrowser renders one URL in system Chrome through the opt-in Patchright
@@ -29,7 +29,6 @@ const browserHardDeadline = 3 * time.Minute
 func (converter pythonConverter) FetchBrowser(
 	ctx context.Context,
 	source string,
-	headless bool,
 ) (string, int, string, error) {
 	var html, finalURL string
 	var status int
@@ -45,7 +44,6 @@ func (converter pythonConverter) FetchBrowser(
 			harvest.BrowserMarkerToken(),
 			headers,
 			headersOrigin,
-			headless,
 			harvest.SitePressesLoaders(source),
 			45000,
 			session.onAsk,
@@ -66,7 +64,6 @@ func (converter pythonConverter) DownloadBrowser(
 	ctx context.Context,
 	source, dest string,
 	maxBytes int64,
-	headless bool,
 ) (harvest.BrowserFile, error) {
 	var file harvest.BrowserFile
 	headers, headersOrigin := harvest.CallerHeadersFor(ctx)
@@ -75,7 +72,6 @@ func (converter pythonConverter) DownloadBrowser(
 			BrowserFetchRequest: harvestpy.BrowserFetchRequest{
 				URL:               source,
 				Proxy:             session.proxyURL,
-				Headless:          headless,
 				HostResolverRules: session.hostResolverRules,
 				TimeoutMS:         45000,
 				Referer:           harvest.ProvenanceReferer,

@@ -14,10 +14,11 @@ snapshot handed to Go carries no consent banner (see CONSENT_SETTLE_MS).
 
 Protocol (JSON lines over stdin/stdout), one request serialized at a time:
 
-  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://127.0.0.1:PORT","headless":true,
+  Go -> worker:   {"op":"fetch","url":"https://…","proxy":"http://127.0.0.1:PORT",
                    "host_resolver_rules":"MAP host 1.2.3.4"|null,"timeout_ms":45000,
                    "referer":"https://www.google.com/"|null,"press_loaders":true,"marker_token":"…"}
-                  ("proxy" is REQUIRED — it is the Go-owned dial; see PROXY_REQUIRED;
+                  (Chrome always launches headless — no field asks for a visible window;
+                   "proxy" is REQUIRED — it is the Go-owned dial; see PROXY_REQUIRED;
                    "press_loaders" absent = read-only scrolling, no button pressed;
                    "marker_token" is carried by the lazy-load marker — see mark_incomplete)
                   {"op":"download", …the fetch fields…, "path":"/cache/.browser-download-x","max_bytes":2147483648}
@@ -28,7 +29,7 @@ Protocol (JSON lines over stdin/stdout), one request serialized at a time:
   Go -> worker:   {"allow":true}
                   {"allow":false,"reason":"refusing private/internal host …"}
   worker -> Go:   exactly one final line:
-                  {"ok":true,"html":"…","status":403,"headless":false,"final_url":"https://…"}
+                  {"ok":true,"html":"…","status":403,"final_url":"https://…"}
                   ("final_url" is the address of the document "html" holds, after every redirect)
                   {"ok":true,"via":"download"|"response","bytes":123,"content_type":"application/pdf","final_url":"https://…","status":200}
                   {"ok":false,"reason":"no-download"|"too-large"|"timeout","error":"…","status":403,"head":"<html>…"}
@@ -275,8 +276,8 @@ def stock_user_agent(browser_version, platform=None):
     """The User-Agent a stock desktop Chrome of *browser_version* sends.
 
     Headless Chrome announces itself as `HeadlessChrome/<v>` — a token forum
-    anti-bot walls refuse outright, so the headless render would meet the wall
-    the headed one does not. The rung sends the reduced UA a visible Chrome of
+    anti-bot walls refuse outright, so the render would meet a wall a
+    visitor's Chrome does not. The rung sends the reduced UA a visible Chrome of
     the SAME major version sends, so the UA never contradicts the engine that
     renders. An unreadable version raises: guessing one would ship a UA that
     disagrees with the browser's own client hints."""
@@ -291,8 +292,8 @@ def stock_user_agent(browser_version, platform=None):
 
 def context_options(user_agent=None):
     """new_context() options for one fetch: the SSRF posture of CONTEXT_OPTIONS,
-    plus the stock User-Agent when one is given (the headless render). None
-    keeps Chrome's own UA — the headed render's, which is already stock."""
+    plus the stock User-Agent when one is given (the render). None keeps
+    Chrome's own UA (the engine-metadata probe, which reads the engine as is)."""
     if user_agent is None:
         return dict(CONTEXT_OPTIONS)
     return {**CONTEXT_OPTIONS, "user_agent": user_agent}
@@ -935,25 +936,25 @@ def same_page(first, second):
     return (a.scheme, a.netloc.lower(), a.path) == (b.scheme, b.netloc.lower(), b.path)
 
 
-async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, headless=True,
+async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000,
                         host_resolver_rules=None, referer=None, press_loaders=False, marker_token="",
                         report=None, caller=None):
-    """Render *url* in a real system Chrome via Patchright; return (html, status, headless, error).
+    """Render *url* in a real headless system Chrome via Patchright; return (html, status, error).
     A render also records, in the *report* dict when one is passed, "final_url": the address
     of the document html holds (render_page's outcome "url"); the incomplete stamp carries
     *marker_token*.
 
     Opt-in rung — Go gates it behind fetch.browser because a browser launch is ~100ms+ and
-    needs Chrome installed. It renders in exactly the mode Go asks for: headless unless Go
-    is spending the one headed (visible-window) retry on a wall the headless render met.
-    It renders as a visitor would arrive: headless, a stock Chrome User-Agent
+    needs Chrome installed. It always renders headless — never a visible window; a wall
+    the headless render meets is the rung's answer.
+    It renders as a visitor would arrive: a stock Chrome User-Agent
     (never HeadlessChrome) whose client hints agree with it (the engine's own,
-    HeadlessChrome renamed Google Chrome); headed, Chrome's own UA; the provenance *referer* on the navigation, and the page
+    HeadlessChrome renamed Google Chrome), the provenance *referer* on the navigation, and the page
     scrolled until it stops growing — render_page(). Its load-more controls are
     pressed only when Go asks for a registered site (*press_loaders*); every
     other page is scrolled read-only.
     patchright is an OPTIONAL dependency; when absent this returns
-    ("", None, False, "patchright not installed") and the ladder falls through, never raises.
+    ("", None, "patchright not installed") and the ladder falls through, never raises.
 
     SSRF: the fetchable decision runs on the initial URL AND on EVERY request the page
     makes — a context.route() interceptor re-checks each navigation/redirect/subresource/
@@ -967,39 +968,39 @@ async def fetch_browser(url, ask_fetchable, proxy_url=None, timeout_ms=45_000, h
     host a second time is the whole rebinding hole.
     """
     if not proxy_url:
-        return "", None, headless, PROXY_REQUIRED
+        return "", None, PROXY_REQUIRED
     async_playwright, guarded_ask, error = await open_rung(url, ask_fetchable)
     if error is not None:
-        return "", None, False, error
+        return "", None, error
 
     proxy = proxy_settings(proxy_url)
     launch_args = launch_arguments(proxy_url, host_resolver_rules)
 
-    async def _render(headless: bool):
+    async def _render():
         async with async_playwright() as p:  # type: ignore[attr-defined]
-            browser = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy,
+            browser = await p.chromium.launch(channel="chrome", headless=True, proxy=proxy,
                                               args=launch_args)
             try:
-                context, ua_override = await guarded_context(browser, headless, guarded_ask, caller)
+                context, ua_override = await guarded_context(browser, guarded_ask, caller)
 
                 html, status, outcome = await render_page(context, url, timeout_ms, referer=referer,
                                                           press_loaders=press_loaders, ua_override=ua_override,
                                                           marker_token=marker_token,
                                                           caller_documents=caller is not None)
-                print(f"browser rung {redact(url)} -> HTTP {status} ({len(html)} chars, headless={headless})",
+                print(f"browser rung {redact(url)} -> HTTP {status} ({len(html)} chars)",
                       file=sys.stderr)
                 if report is not None:
                     report["final_url"] = outcome.get("url", "")
-                return html, status, headless
+                return html, status
             finally:
                 await browser.close()
 
     try:
-        html, status, rendered_headless = await _render(headless=headless)
-        return html, status, rendered_headless, None
+        html, status = await _render()
+        return html, status, None
     except Exception as e:  # noqa: BLE001 — the rung never raises past this boundary
-        print(f"browser rung failed for {redact(url)} (headless={headless}): {e}", file=sys.stderr)
-        return "", None, headless, str(e)
+        print(f"browser rung failed for {redact(url)}: {e}", file=sys.stderr)
+        return "", None, str(e)
 
 
 async def open_rung(url, ask_fetchable):
@@ -1024,20 +1025,16 @@ async def open_rung(url, ask_fetchable):
     return async_playwright, guarded_ask, None
 
 
-async def guarded_context(chrome, headless, guarded_ask, caller=None, **extra):
+async def guarded_context(chrome, guarded_ask, caller=None, **extra):
     """A new context on *chrome* as a visitor arrives (fetch_browser's doc):
-    headless, the stock User-Agent and its client hints, returned as the
-    ua_override render_page sends over CDP; headed, Chrome's own. Both SSRF
+    the stock User-Agent and its client hints, returned as the ua_override
+    render_page sends over CDP. Both SSRF
     route guards and the WebRTC block are installed before any page opens.
     *extra* goes to new_context (accept_downloads for a download)."""
-    ua_override = None
-    if headless:
-        metadata = await engine_ua_metadata(chrome, guarded_ask)
-        user_agent = stock_user_agent(chrome.version)
-        ua_override = {"userAgent": user_agent, "userAgentMetadata": metadata}
-        context = await chrome.new_context(**context_options(user_agent), **extra)
-    else:
-        context = await chrome.new_context(**context_options(None), **extra)
+    metadata = await engine_ua_metadata(chrome, guarded_ask)
+    user_agent = stock_user_agent(chrome.version)
+    ua_override = {"userAgent": user_agent, "userAgentMetadata": metadata}
+    context = await chrome.new_context(**context_options(user_agent), **extra)
     await install_route_guards(context, guarded_ask, caller)
     await context.add_init_script(WEBRTC_BLOCK_SCRIPT)
     if caller:
@@ -1219,9 +1216,9 @@ async def capture_download(context, url, dest, max_bytes, timeout_ms, referer=No
                           status=response.status if response is not None else None, head=head)
 
 
-async def download_browser(url, ask_fetchable, dest, max_bytes, proxy_url=None, timeout_ms=45_000, headless=True,
+async def download_browser(url, ask_fetchable, dest, max_bytes, proxy_url=None, timeout_ms=45_000,
                            host_resolver_rules=None, referer=None, caller=None):
-    """Download *url* into *dest* in a real system Chrome, under fetch_browser's
+    """Download *url* into *dest* in a real headless system Chrome, under fetch_browser's
     SSRF boundary (the Go-owned proxy is REQUIRED, every URL asks Go). Returns
     capture_download's dict, or an error string when the rung could not start;
     raises DownloadFailure for a named failure."""
@@ -1231,11 +1228,10 @@ async def download_browser(url, ask_fetchable, dest, max_bytes, proxy_url=None, 
     if error is not None:
         return error
     async with async_playwright() as p:  # type: ignore[attr-defined]
-        chrome = await p.chromium.launch(channel="chrome", headless=headless, proxy=proxy_settings(proxy_url),
+        chrome = await p.chromium.launch(channel="chrome", headless=True, proxy=proxy_settings(proxy_url),
                                          args=launch_arguments(proxy_url, host_resolver_rules))
         try:
-            context, ua_override = await guarded_context(chrome, headless, guarded_ask, caller,
-                                                         accept_downloads=True)
+            context, ua_override = await guarded_context(chrome, guarded_ask, caller, accept_downloads=True)
             return await capture_download(context, url, dest, max_bytes, timeout_ms, referer=referer,
                                           ua_override=ua_override, caller_documents=caller is not None)
         finally:
@@ -1251,7 +1247,6 @@ async def handle_download(request):
             int(request.get("max_bytes") or 0),
             proxy_url=request.get("proxy"),
             timeout_ms=int(request.get("timeout_ms") or 45_000),
-            headless=bool(request.get("headless", True)),
             host_resolver_rules=request.get("host_resolver_rules") or None,
             referer=request.get("referer") or None,
             caller=caller_scope(request),
@@ -1287,12 +1282,11 @@ def smoke():
 
 async def handle_fetch(request):
     report = {}
-    html, status, headless, error = await fetch_browser(
+    html, status, error = await fetch_browser(
         request.get("url", ""),
         lambda target: _blocking_ask(target),
         proxy_url=request.get("proxy"),
         timeout_ms=int(request.get("timeout_ms") or 45_000),
-        headless=bool(request.get("headless", True)),
         host_resolver_rules=request.get("host_resolver_rules") or None,
         referer=request.get("referer") or None,
         press_loaders=bool(request.get("press_loaders", False)),
@@ -1302,8 +1296,7 @@ async def handle_fetch(request):
     )
     if error is not None and not html:
         return {"ok": False, "error": error}
-    return {"ok": True, "html": html, "status": status, "headless": headless,
-            "final_url": report.get("final_url", "")}
+    return {"ok": True, "html": html, "status": status, "final_url": report.get("final_url", "")}
 
 
 def _blocking_ask(target):

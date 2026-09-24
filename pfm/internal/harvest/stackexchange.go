@@ -23,9 +23,8 @@ import (
 // askubuntu.com, mathoverflow.net, stackapps.com, *.stackexchange.com). A
 // question page lists its answers 30 to a page and shows each post's top
 // comments behind "Show N more comments" — but the network serves every
-// question page, to any client that is not a real reader's browser (Go's, the
-// headless and the headed browser rung's alike), a Cloudflare challenge
-// instead, so neither the page nor its loaders are there to follow. The
+// question page, to any client that is not a real reader's browser (Go's and
+// the headless browser rung's alike), a Cloudflare challenge instead, so neither the page nor its loaders are there to follow. The
 // extractor is therefore registered by host, not by the network's shared
 // markup (a walled page carries none of it), knows the question by its
 // address (/questions/<id>[/slug[/answer-id]], /q/<id>), and reads it from the

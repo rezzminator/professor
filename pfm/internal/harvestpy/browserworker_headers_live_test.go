@@ -70,7 +70,7 @@ func TestLiveBrowserCallerHeadersStayOnTheOrigin(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	_, status, _, err := worker.FetchPinned(ctx, "http://site-a.test/", proxy.URL, "", "", "",
-		map[string]string{"X-Probe": probe}, "http://site-a.test", true, false, 45000,
+		map[string]string{"X-Probe": probe}, "http://site-a.test", false, 45000,
 		func(string) error { return nil })
 	if err != nil {
 		t.Fatalf("browser fetch: %v", err)

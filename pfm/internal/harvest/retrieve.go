@@ -20,13 +20,13 @@ import (
 //   - PolicyPage: the page ladder (fetchURLWithPolicy), unchanged.
 //   - PolicyFile: direct → Chrome impersonation → the Wayback raw copy (id_)
 //     → browser download (browserFileRung: the browser's download, or the
-//     navigation's own response body; headless first). Reader rungs never
+//     navigation's own response body; headless only). Reader rungs never
 //     run: they return text, not bytes.
 //   - PolicyInlineImage: direct → Chrome impersonation, with the page as
 //     Referer. It never starts a browser: a page with 60 images must not start
 //     60 browsers.
-//   - PolicyGateway: direct → Chrome → headless browser → headed browser, for
-//     the scholarly providers and the DOI mirror.
+//   - PolicyGateway: direct → Chrome → headless browser, for the scholarly
+//     providers and the DOI mirror.
 //
 // File mode streams the body into the binary cache through atomicfile, never
 // whole into memory, capped at Options.MaxDownloadBytes (harvest.maxDownloadBytes,

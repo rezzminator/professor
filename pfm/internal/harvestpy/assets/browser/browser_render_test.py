@@ -408,7 +408,7 @@ def test_fetch_browser_sends_the_stock_user_agent_and_the_referer_end_to_end():
     page = FeedPage(batches=1)
     fake = FakeBrowser(page)
     with fake_patchright(fake):
-        html, status, headless, error = run(fetch_browser(
+        html, status, error = run(fetch_browser(
             "https://forum.example.test/t/lazy-thread",
             lambda target: (True, None),
             proxy_url="http://127.0.0.1:8431",
@@ -458,6 +458,33 @@ def handle_fetch_reply(page, request):
             return run(handle_fetch({"op": "fetch", "url": HANDLED_URL, "proxy": "http://127.0.0.1:8431", **request}))
     finally:
         browser._blocking_ask = saved
+
+
+def test_every_launch_is_headless_whatever_the_request_says():
+    """A fetch and a download each carrying "headless": false (what an older Go
+    sent for its visible-window retry) still launch Chrome with headless=True."""
+    launches = []
+    original = FakeChromium.launch
+
+    async def recording(self, **kwargs):
+        launches.append(kwargs)
+        return await original(self, **kwargs)
+
+    FakeChromium.launch = recording
+    saved = browser._blocking_ask
+    browser._blocking_ask = lambda target: (True, None)
+    request = {"url": HANDLED_URL, "proxy": "http://127.0.0.1:8431", "headless": False, "timeout_ms": 1000}
+    try:
+        with fake_patchright(FakeBrowser(FeedPage(batches=0))), contextlib.redirect_stderr(io.StringIO()):
+            run(handle_fetch({"op": "fetch", **request}))
+            try:
+                run(browser.handle_download({"op": "download", "path": "/nonexistent/x", "max_bytes": 64, **request}))
+            except Exception:  # noqa: BLE001 — the fake context cannot download; only the launch is under test
+                pass
+    finally:
+        FakeChromium.launch = original
+        browser._blocking_ask = saved
+    assert [launch.get("headless") for launch in launches] == [True, True], launches
 
 
 def run_handle_fetch(request):
@@ -600,11 +627,11 @@ def web_navigations(context):
     return [url for url in context.goto_urls if url != ENGINE_INFO_URL]
 
 
-def fetch_with(page, headless):
+def fetch_with(page):
     fake = FakeBrowser(page)
     with fake_patchright(fake):
         result = run(fetch_browser("https://forum.example.test/t/lazy-thread", lambda target: (True, None),
-                                   proxy_url="http://127.0.0.1:8431", headless=headless))
+                                   proxy_url="http://127.0.0.1:8431"))
     return fake, result
 
 
@@ -623,7 +650,7 @@ def test_high_entropy_hints_request_every_client_hint_the_stock_engine_reports()
 
 def test_headless_render_overrides_the_ua_and_its_client_hints_together():
     page = FeedPage(batches=0)
-    fake, (html, _, _, error) = fetch_with(page, headless=True)
+    fake, (html, _, error) = fetch_with(page)
     assert error is None and "<body>" in html, error
     probe, render = fake.contexts[0], fake.contexts[-1]
     assert len(fake.contexts) == 2 and probe.closed, [c.options for c in fake.contexts]
@@ -645,22 +672,12 @@ def test_headless_render_overrides_the_ua_and_its_client_hints_together():
         assert metadata[key] == HEADLESS_UA_DATA[key], (key, metadata)
 
 
-def test_headed_render_keeps_chromes_own_ua():
-    page = FeedPage(batches=0)
-    fake, (html, _, headless, error) = fetch_with(page, headless=False)
-    assert error is None and "<body>" in html and headless is False, error
-    (render,) = fake.contexts
-    assert render.options == CONTEXT_OPTIONS, f"the headed render carries a UA: {render.options!r}"
-    assert render.cdp_sends == [] and page.ua_data_reads == 0, (render.cdp_sends, page.ua_data_reads)
-    assert context_options(None) == CONTEXT_OPTIONS
-
-
 def test_headless_render_refuses_unreadable_engine_metadata():
     for ua_data in (UNREADABLE, {"mobile": False, "platform": "Linux"}):
         page = FeedPage(batches=0, ua_data=ua_data)
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr):
-            fake, (html, status, _, error) = fetch_with(page, headless=True)
+            fake, (html, status, error) = fetch_with(page)
         assert html == "" and status is None and error and "userAgentData" in error, (error, html[:60])
         assert not any(web_navigations(c) for c in fake.contexts), page.goto_calls
         assert fake.contexts[0].closed, "the metadata context was left open"

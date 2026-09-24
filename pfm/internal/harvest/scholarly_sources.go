@@ -98,10 +98,10 @@ type providerResponse struct {
 
 // providerGet fetches one provider PAGE through the fetch gateway. Going
 // through the gateway is what gives every scholarly provider the challenge
-// ladder — Chrome impersonation, then the headless browser, then a headed one
-// as the last resort. Before the gateway existed this path ran a single plain
-// client, so a provider record page behind a JS wall failed with a bare 403
-// that was indistinguishable from the source refusing the request.
+// ladder — Chrome impersonation, then the headless browser. Before the
+// gateway existed this path ran a single plain client, so a provider record
+// page behind a JS wall failed with a bare 403 that was indistinguishable from
+// the source refusing the request.
 func (h *Harvester) providerGet(
 	ctx context.Context,
 	rawURL string,

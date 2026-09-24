@@ -481,10 +481,9 @@ func (h *Harvester) fetchURLWithPolicy(
 		if browserFetcher, ok := h.options.Converter.(BrowserFetcher); !ok {
 			browserUnavailable = "no BrowserFetcher adapter is wired into this Harvester"
 		} else {
-			// Headless first, headed only on a wall — the policy lives in
-			// renderHeadlessFirst (gateway.go) so this ladder and the gateway
-			// can never drift apart on when a visible window opens.
-			outcome := renderHeadlessFirst(ctx, browserFetcher, source)
+			// Headless only — the render lives in renderHeadless (gateway.go)
+			// so this ladder and the gateway never drift apart on it.
+			outcome := renderHeadless(ctx, browserFetcher, source)
 			html, status, err := outcome.html, outcome.status, outcome.err
 			switch {
 			case errors.Is(err, ErrBrowserPolicyDenied):

@@ -252,11 +252,11 @@ func TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap(t *testing.T) {
 		},
 		{
 			"a loader among other gaps", withContinue(redditThreadHTML(6, bodies, true)), thread,
-			`unexpanded "more replies"`, "direct,browser", nil, 2,
+			`unexpanded "more replies"`, "direct,browser", nil, 1,
 		},
 		{
 			"generic partial page", catalogPage(), "https://guide.example.test/birds",
-			"main-content extraction kept", "direct,browser", leadOnlyConverter(), 2,
+			"main-content extraction kept", "direct,browser", leadOnlyConverter(), 1,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

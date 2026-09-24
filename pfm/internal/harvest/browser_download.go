@@ -14,12 +14,8 @@ import (
 
 // rungBrowserDownload is the file policy's last rung: a real browser that
 // downloads the file (its download event, or the navigation's own response
-// body), headless first; rungBrowserDownloadHeaded is the visible-window retry
-// spent only on a challenge the headless browser did not pass.
-const (
-	rungBrowserDownload       = "browser-download"
-	rungBrowserDownloadHeaded = "browser-download-headed"
-)
+// body), headless only — never a visible window.
+const rungBrowserDownload = "browser-download"
 
 // BrowserDownloader is implemented by adapters that can download one URL's
 // bytes in a real browser (PolicyFile's last rung). The adapter writes the
@@ -28,7 +24,7 @@ const (
 // is a *BrowserDownloadError naming its reason, or any other error for a rung
 // that could not run (an outage).
 type BrowserDownloader interface {
-	DownloadBrowser(ctx context.Context, source, dest string, maxBytes int64, headless bool) (BrowserFile, error)
+	DownloadBrowser(ctx context.Context, source, dest string, maxBytes int64) (BrowserFile, error)
 }
 
 // BrowserFile is what a browser download wrote to dest.
@@ -70,9 +66,8 @@ func (e *BrowserDownloadError) Error() string {
 	return message + ")"
 }
 
-// browserFileRung is PolicyFile's last rung: headless first, the headed retry
-// only on a challenge the headless browser did not pass (renderHeadlessFirst's
-// policy, for a download). It runs only for the file policy — the inline-image
+// browserFileRung is PolicyFile's last rung: one headless browser download,
+// whose challenge verdict stands (renderHeadless's policy, for a download). It runs only for the file policy — the inline-image
 // policy never starts a browser — with the browser rung on and an adapter
 // wired. kept reports a file stored in out.Result; err is the rung's named
 // failure, nil when the rung did not run.
@@ -91,21 +86,7 @@ func (h *Harvester) browserFileRung(
 			"target", logSource(req.target))
 		return false, nil
 	}
-	kept, err := h.browserFileAttempt(ctx, downloader, req, limit, rungBrowserDownload, true, out)
-	if kept || !errors.Is(err, errBrowserChallenge) {
-		return kept, err
-	}
-	headedKept, headedErr := h.browserFileAttempt(ctx, downloader, req, limit, rungBrowserDownloadHeaded, false, out)
-	var named *BrowserDownloadError
-	if headedErr != nil && !errors.As(headedErr, &named) && !errors.Is(headedErr, errBrowserChallenge) &&
-		!errors.Is(headedErr, errDownloadTooLarge) {
-		// A headed launch that could not run (a display-less host) leaves the
-		// headless verdict standing rather than masking it.
-		obs.Logger(ctx).Warn("harvest: the headed browser download could not run after a headless challenge",
-			"target", logSource(req.target), obs.FieldErr, headedErr.Error())
-		return false, err
-	}
-	return headedKept, headedErr
+	return h.browserFileAttempt(ctx, downloader, req, limit, out)
 }
 
 // errBrowserChallenge is a browser that met a challenge and did not pass it.
@@ -119,10 +100,9 @@ func (h *Harvester) browserFileAttempt(
 	downloader BrowserDownloader,
 	req retrieveRequest,
 	limit int64,
-	rung string,
-	headless bool,
 	out *Retrieved,
 ) (bool, error) {
+	rung := rungBrowserDownload
 	out.Rungs = append(out.Rungs, rung)
 	// The removal below logs its failure, so WriteScratch's silent cleanup is unused.
 	dest, _, err := atomicfile.WriteScratch(h.options.CacheDir, ".browser-download-*", nil)
@@ -135,7 +115,7 @@ func (h *Harvester) browserFileAttempt(
 				Warn("harvest: removing a browser download scratch file", "path", dest, obs.FieldErr, removeErr.Error())
 		}
 	}()
-	file, err := downloader.DownloadBrowser(ctx, req.target, dest, limit, headless)
+	file, err := downloader.DownloadBrowser(ctx, req.target, dest, limit)
 	if err != nil {
 		return false, browserDownloadFailure(rung, limit, err)
 	}

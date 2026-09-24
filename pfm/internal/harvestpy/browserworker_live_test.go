@@ -104,7 +104,7 @@ func TestLiveBrowserWorkerFetch(t *testing.T) {
 		t.Fatalf("start the browser rung's pinned proxy: %v", err)
 	}
 	defer stopProxy()
-	html, status, err := worker.Fetch(ctx, "https://example.com/", proxyURL, true, 45000, harvest.AssertFetchableStrict)
+	html, status, err := worker.Fetch(ctx, "https://example.com/", proxyURL, 45000, harvest.AssertFetchableStrict)
 	if err != nil {
 		t.Fatalf("live browser fetch failed: %v", err)
 	}

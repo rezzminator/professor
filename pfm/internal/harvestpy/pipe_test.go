@@ -118,7 +118,6 @@ func TestBrowserWorkerRefusesAnUnboundedResponseLine(t *testing.T) {
 		context.Background(),
 		"https://example.test/",
 		"http://127.0.0.1:1/",
-		true,
 		45000,
 		func(string) error { return nil },
 	)

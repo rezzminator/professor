@@ -123,7 +123,7 @@ ${plain(resultSoFar)}`;
       ? `
 Some of this topic's strongest literature is non-English. Guidance: ${languageGuidance}. Deliberately route some lanes to the non-English venues above, giving each its native venue(s) in \`sources\` — rather than defaulting every lane to English.`
       : '';
-  const probeClause = `Before you decide, hunt for coverage gaps — a candidate, sub-question, or angle the goal needs that no lane has touched — and probe them yourself with WebSearch / mcp__harvester__readPage / mcp__harvester__readWork, as many as you need, to fill them; fold what you find into resultSoFar and originate the missing rabbit-holes into \`lookupNext\`. Beyond gap-filling, leave the heavy digging to the lane readers.`;
+  const probeClause = `Before you decide, hunt for coverage gaps — a candidate, sub-question, or angle the goal needs that no lane has touched — and probe them yourself with WebSearch / mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications), as many as you need, to fill them; fold what you find into resultSoFar and originate the missing rabbit-holes into \`lookupNext\`. Beyond gap-filling, leave the heavy digging to the lane readers.`;
   const scoreFields = ', sources, note';
   const assignClause = venues && venues.length ? ' Assign each its `sources` venue subset.' : '';
   // workingClause — gated on compute exactly as computeField is. compute OFF ⇒ the brainer must NOT hand-roll a
@@ -231,7 +231,7 @@ Hardened facts (adversarially fact-checked + source-corrected — your input num
 The run's accumulated RESULT (your answer + the half-built \`working\` derivation to finish):
 {{resultSoFar}}
 Derive with rigor:
-- first fact-check your input numbers: verify each against a current primary source (WebSearch / mcp__harvester__readPage / mcp__harvester__readWork) and correct any that is stale, wrong, or imprecise before computing — a derivation is only as sound as its inputs;
+- first fact-check your input numbers: verify each against a current primary source (WebSearch / mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications)) and correct any that is stale, wrong, or imprecise before computing — a derivation is only as sound as its inputs;
 - assemble the verified inputs with their units;
 - write and run a short script for any non-trivial arithmetic — load Bash + Write via ToolSearch if absent, run python (or node) — compute, do not estimate;
 - propagate the input uncertainties into an explicit ± error range;

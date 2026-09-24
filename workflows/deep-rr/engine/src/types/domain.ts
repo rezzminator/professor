@@ -114,8 +114,8 @@ export interface Finding {
 // a sized source the scheduler discovered for a lane: the cache path + its token/char size, ready for bin-packing.
 export interface SchedulerSource {
   source: string; // the exact url or DOI
-  path: string; // the local cache file path returned by the size_only fetch
-  size: number; // size in tokens (the over-count heuristic from size_only)
+  path: string; // the local cache file path returned by the include_content:false read
+  size: number; // size in tokens (the over-count heuristic from the include_content:false read)
   chars: number; // size in raw characters (drives the char windows)
 }
 // one scheduler-discovered lane: its rabbit-hole id + the sources chosen for it, plus the honesty

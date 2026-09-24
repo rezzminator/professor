@@ -7,7 +7,7 @@ import type { RabbitHole, ScheduleResult, SchedulerOut, SchedulerSource } from '
 
 // SCHEDULER (B4) — discovery. One Sonnet researchScheduler over the WHOLE wave's lanes: per lane (the
 // rabbit-hole + its steering `note` + assigned venues + kind/refetch flags), it batches the searches, sizes
-// every candidate via mcp__harvester__readPage / readWork size_only, and returns the chosen sources grouped per lane id —
+// every candidate via mcp__harvester__read include_content:false, and returns the chosen sources grouped per lane id —
 // plus two HONESTY side-channels: `venuesServed` (assigned-vs-served venue reconciliation, so a silent
 // tier-substitution shows up) and `unsourced` (directive-named refs/venues it could not fetch, reported
 // instead of silently dropped). Returns a ScheduleResult; the ENGINE folds the honesty channels into bs

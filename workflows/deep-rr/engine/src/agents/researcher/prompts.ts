@@ -9,7 +9,7 @@ import { render } from '../../utils/index.js';
 import type { ReadSlice, ResearcherArgs } from '../../types/index.js';
 
 const RESEARCHER_TPL = `{{! researcher — a lane reader: reads its assigned cache slice(s) from disk via code, then digests into the running answer }}
-You are reader {{readerIndex}} of {{readerCount}} on one research lane — read your assigned slice and digest it. You do NOT search the web: the sources are already chosen and fetched to the local cache. Tools (load any via ToolSearch): Bash (read the cache files); mcp__harvester__readWork + mcp__harvester__findWorks (resolve a wall to its open-access full text); mcp__harvester__download (to view an image, download it via mcp__harvester__download for a local path, then read it).
+You are reader {{readerIndex}} of {{readerCount}} on one research lane — read your assigned slice and digest it. You do NOT search the web: the sources are already chosen and fetched to the local cache. Tools (load any via ToolSearch): Bash (read the cache files); mcp__harvester__read with publications + mcp__harvester__search_literature (resolve a wall to its open-access full text); mcp__harvester__download_file (to view an image, download it via mcp__harvester__download_file for a local path, then read it).
 TOP GOAL: "{{query}}".
 TRAIL (top goal → … → this lane): {{trail}}.
 This lane: "{{keyword}}" (why it matters: {{why}}).
@@ -55,7 +55,7 @@ export const buildResearcher = ({
   researcherNote,
 }: ResearcherArgs) => {
   const wallClause = `
-If your assigned content is a paywall, stub, or too thin for the directive, extract its DOI/identifier and call mcp__harvester__readWork — it resolves DOIs — or mcp__harvester__findWorks and read its hit via readWork(handle) to fetch the open-access full text to the cache, then read THAT from disk; do not return an empty answer. This is scoped to resolving THIS source — do not open a general web search.`;
+If your assigned content is a paywall, stub, or too thin for the directive, extract its DOI/identifier and call mcp__harvester__read with it in publications — it resolves DOIs — or mcp__harvester__search_literature and read its hit via mcp__harvester__read with its handle in publications to fetch the open-access full text to the cache, then read THAT from disk; do not return an empty answer. This is scoped to resolving THIS source — do not open a general web search.`;
   const researcherClause = researcherNote ? '\n' + researcherNote : '';
   const priorClause = priorAnswer
     ? `
@@ -73,7 +73,7 @@ ${claimDigest}`
   // search) exists to try to break a claim: its primary output is counter-evidence, never manufactured doubt.
   const attackClause =
     laneKind === 'attack'
-      ? " This is an ATTACK lane: your PRIMARY output is counter-evidence — claims with stance {target, kind:'attacks'} against the target claim, or an honest empty claims list when you find none; never manufacture doubt. Attack lanes ALONE may search beyond their assigned slices: before concluding the claim holds, run up to 3 WebSearch / mcp__harvester__readPage probes against the CURRENT product/changelog/news surface of every prime suspect the DIRECTIVE names — absence from your cached slices is not absence in the world."
+      ? " This is an ATTACK lane: your PRIMARY output is counter-evidence — claims with stance {target, kind:'attacks'} against the target claim, or an honest empty claims list when you find none; never manufacture doubt. Attack lanes ALONE may search beyond their assigned slices: before concluding the claim holds, run up to 3 WebSearch / mcp__harvester__read probes against the CURRENT product/changelog/news surface of every prime suspect the DIRECTIVE names — absence from your cached slices is not absence in the world."
       : '';
   return render(RESEARCHER_TPL, {
     readerIndex,

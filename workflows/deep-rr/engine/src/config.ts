@@ -156,7 +156,7 @@ export class Configs {
     this.RESEARCHER_TOKEN_BUDGET = 130000; // one reader-unit budget: the calibrated safe ceiling a single reader may carry (the bin-pack unit)
     this.BRAINER_LANE_CAP = 5; // lanes/wave — the wave bound (≥ this many lanes never run in one wave)
     this.CHUNK_OVERLAP_CHARS = 2000; // overlap re-read at each split boundary when one source is packed across multiple reader-units
-    // CHARS_PER_TOKEN — inverts Harvester's size_only token heuristic (tokens ≈ chars/2 for prose, A6) so the
+    // CHARS_PER_TOKEN — inverts Harvester's token heuristic (tokens ≈ chars/2 for prose, A6) so the
     // engine's CHAR windows agree with the scheduler's TOKEN sizes: budget(tokens) × CHARS_PER_TOKEN = the char
     // ceiling a reader-unit may span. The heuristic deliberately OVER-counts tokens (real prose is ~chars/4), so
     // 130k heuristic-tokens ≈ ~65k real tokens — comfortably inside the worker context window with headroom.
@@ -400,8 +400,8 @@ Then append a section titled "Next sources": up to 5 of the page's highest-value
 Then append a section titled "Claims": each load-bearing fact the page carries — the fact in one line (with its value when it has one), a VERBATIM quote of at most ${this.QUOTE_MAX_CHARS} characters copied exactly from the page that pins it — one CONTIGUOUS unbroken span, never fragments joined with an ellipsis, and the source's entities (authors, funder, dataset, venue) when visible. Only facts the answer could rest on — do not pad.
 Then append a section titled "New terms": the community's terms of art the page uses that we did not — each with a one-line gloss. Give none when the page speaks our vocabulary.
 Then append a "Surprise" note ONLY when the page contradicts the current key claims: one line naming the contradiction. No section otherwise.`;
-    // L3 (directive A): primary tools are WebSearch + mcp__harvester__readPage (web urls) + mcp__harvester__readWork (DOIs, paper/book ids), but agents MAY reach for any other tool that genuinely helps the rabbit-hole.
-    this.NET = `Primary tools: WebSearch + mcp__harvester__readPage (web urls) + mcp__harvester__readWork (DOIs, paper/book ids) — load WebSearch via ToolSearch "select:WebSearch" if absent (built-in WebFetch is hook-denied; fetch only through Harvester). You may also load any other tool that genuinely helps THIS rabbit-hole (e.g. context7 for library/API docs) via ToolSearch — pick the best tool for the question, not only web search. Prefer primary, recent sources; stay on-rabbit-hole.`;
+    // L3 (directive A): primary tools are WebSearch + mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications), but agents MAY reach for any other tool that genuinely helps the rabbit-hole.
+    this.NET = `Primary tools: WebSearch + mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications) — load WebSearch via ToolSearch "select:WebSearch" if absent (built-in WebFetch is hook-denied; fetch only through Harvester). You may also load any other tool that genuinely helps THIS rabbit-hole (e.g. context7 for library/API docs) via ToolSearch — pick the best tool for the question, not only web search. Prefer primary, recent sources; stay on-rabbit-hole.`;
     // COMPUTE_NOTE — capability fragment for the compute-aware agents (mirrors NET). Names the scientific Python stack the compute
     // environment ships so they reach for it over hand-rolled math; the optional computeNote arg appends per-run guidance after it.
     this.COMPUTE_NOTE =

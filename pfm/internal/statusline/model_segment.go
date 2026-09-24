@@ -36,7 +36,9 @@ func effortSuffix(data input) string {
 // effortEmoji marks each effort level; a level not listed here — one Claude
 // Code adds later — wears effortEmojiOther, and a level whose thinking is off
 // wears effortEmojiOff instead of its own.
-var effortEmoji = map[string]string{"low": "🔹", "medium": "🔶", "high": "💠", "xhigh": "💎", "max": "👑"}
+var effortEmoji = map[string]string{
+	"low": "🚲", "medium": "🏍️", "high": "🏎️", "xhigh": "🚀", "max": "🛰️",
+}
 
 const (
 	effortEmojiOther = "🔆"

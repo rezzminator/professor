@@ -9,7 +9,7 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 	for _, testcase := range []struct {
 		name, payload, want string
 	}{
-		{name: "with effort", payload: styledPayload, want: "◆ Opus 4·💠 high │ "},
+		{name: "with effort", payload: styledPayload, want: "◆ Opus 4·🏎️ high │ "},
 		{
 			name:    "thinking off",
 			payload: strings.Replace(styledPayload, `"enabled":true`, `"enabled":false`, 1),
@@ -35,7 +35,7 @@ func TestModelSegmentCarriesEffort(t *testing.T) {
 // the statusline does not know still gets the generic 🔆, never bare text.
 func TestEffortLabelWearsTheEffortEmoji(t *testing.T) {
 	for level, want := range map[string]string{
-		"low": "🔹 low", "medium": "🔶 medium", "high": "💠 high", "xhigh": "💎 xhigh", "max": "👑 max",
+		"low": "🚲 low", "medium": "🏍️ medium", "high": "🏎️ high", "xhigh": "🚀 xhigh", "max": "🛰️ max",
 		"turbo": "🔆 turbo",
 	} {
 		if got := effortLabel(level); got != want {

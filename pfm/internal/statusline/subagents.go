@@ -202,7 +202,7 @@ func subagentIdentity(name string, activity *agentActivity) string {
 }
 
 // subagentModel names the family and effort: claude-opus-5-5[1m] + high →
-// opus·💠 high. An effort that is not a JSON string is left out. A row without
+// opus·🏎️ high. An effort that is not a JSON string is left out. A row without
 // its own effort shows the session's recorded effort (inherited), exactly as
 // a payload effort on the model it was recorded for and muted on another,
 // where Claude Code may resolve a different level.

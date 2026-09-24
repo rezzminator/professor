@@ -44,7 +44,7 @@ const (
 
 var (
 	opusAlone     = cModel + "opus" + reset
-	opusInherited = opusAlone + cMuted + "·" + reset + cEffort + "💠 high" + reset
+	opusInherited = opusAlone + cMuted + "·" + reset + cEffort + "🏎️ high" + reset
 )
 
 func TestRecordSessionRecordsTheMainLineEffort(t *testing.T) {
@@ -60,7 +60,7 @@ func TestSubagentRowPayloadEffortWinsOverTheSessionRecord(t *testing.T) {
 	sidDir := t.TempDir()
 	recordMainLine(t, sidDir, "claude-opus-5-5[1m]", "high")
 	content, _ := renderEffortRow(t, sidDir, taskWithEffort)
-	if !strings.Contains(content, opusAlone+cMuted+"·"+reset+cEffort+"🔹 low"+reset) {
+	if !strings.Contains(content, opusAlone+cMuted+"·"+reset+cEffort+"🚲 low"+reset) {
 		t.Fatalf("row = %q, want the payload's own effort low", content)
 	}
 }
@@ -84,7 +84,7 @@ func TestSubagentRowOnAnotherModelMutesTheSessionEffort(t *testing.T) {
 	sidDir := t.TempDir()
 	recordMainLine(t, sidDir, "claude-sonnet-5[1m]", "high")
 	content, _ := renderEffortRow(t, sidDir, taskWithoutEffort)
-	if want := opusAlone + cMuted + "·" + reset + cMuted + "💠 high" + reset; !strings.Contains(content, want) {
+	if want := opusAlone + cMuted + "·" + reset + cMuted + "🏎️ high" + reset; !strings.Contains(content, want) {
 		t.Fatalf("row = %q, want muted guess %q", content, want)
 	}
 }

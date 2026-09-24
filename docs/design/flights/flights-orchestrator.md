@@ -156,7 +156,7 @@ A flight learns while it runs. Every executor and lander return may carry one li
 These hold for every orchestrator and every executor on every harness, and belong in the harness prompt's orchestration section as well as here:
 
 - An executor reports once, when done, plus a real question or blocker; an orchestrator reports once to its caller, plus a question only the user can answer. Never routine progress, never a diff, a log or a file's contents in a message: progress lives in the artifacts.
-- Waiting is one call or none: end the turn and let the return arrive. A poll, a sleep chain or a log peek re-bills the whole context each time.
+- Waiting is one call or none: end the turn and let the return arrive. A poll, a sleep chain or a log peek re-bills the whole context each time. The agent's frontmatter hook `pfm internal orchestrator-wait` denies a Bash call that only waits.
 - Only `flights-speccer` changes a task file. A fault goes back to it as a revising call; nobody patches a spec or writes rulings beside it.
 
 ## Not part of the design
@@ -203,6 +203,7 @@ The rulings above rest on measured results, collected in the runtime research of
 | Surface | File | Holds |
 | --- | --- | --- |
 | The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs at mechanical (`sonnet`), effort `high` |
+| The wait guard | `pfm internal orchestrator-wait`, attached in the agent's frontmatter | A Bash call that only waits (`echo`, `printf`, `true`, `:`, `sleep N`) is denied; design in [hooks.md](../hooks/hooks.md#agent-attached-hooks-not-machine-global) |
 | The containers | `templates/global/commands/flights/orchestrate-{nested,live,cross-harness}.md` | The substitutions, nothing of the manual restated; the nested command's road for a `BLOCKED` ruling |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The ladder's third rung ends here; the universal laws; the hand's laws for chat seats; the lander as the only review |
 | The spec writer | [`flights-speccer`](flights-speccer.md) | The index this agent dispatches from (`files` included), the `DISPATCH` line of its return, the revising call |

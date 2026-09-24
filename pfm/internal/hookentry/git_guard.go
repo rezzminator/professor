@@ -85,7 +85,7 @@ var (
 
 // gitGuardNoPython answers every Python snippet with no result, so the hook
 // never spawns python3: a git call inside a Python snippet is not inspected
-// (docs/design/hooks/hooks.md § git-guard, the named gap).
+// (docs/design/hooks/git-guard.md § Named gaps).
 type gitGuardNoPython struct{}
 
 func (gitGuardNoPython) Analyze(context.Context, []cmdparse.Snippet) ([]cmdparse.PyResult, error) {

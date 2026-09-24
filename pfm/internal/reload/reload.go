@@ -865,57 +865,6 @@ func engineLabel(id pfmengine.ID) string {
 	return pfmengine.MustLookup(id).Short
 }
 
-func engineLive(proc Process, panePID int, engine pfmengine.ID, claudeBinary, codexBinary string) (bool, error) {
-	if proc == nil {
-		return false, errors.New("process reader is unavailable")
-	}
-	if panePID <= 0 {
-		return false, errors.New("pane process id is unavailable")
-	}
-	pids, err := proc.PIDs()
-	if err != nil {
-		return false, err
-	}
-	matcher, err := gather.MatcherFor(engine)
-	if err != nil {
-		return false, err
-	}
-	binary := claudeBinary
-	if engine == pfmengine.Codex {
-		binary = codexBinary
-	}
-	for _, pid := range pids {
-		argv, err := proc.Cmdline(pid)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return false, fmt.Errorf("read process %d command: %w", pid, err)
-		}
-		if !matcher.IsCommand(argv, binary) {
-			continue
-		}
-		current := pid
-		for depth := 0; depth <= 4; depth++ {
-			if current == panePID {
-				return true, nil
-			}
-			stat, statErr := proc.Stat(current)
-			if statErr != nil {
-				if errors.Is(statErr, fs.ErrNotExist) {
-					break
-				}
-				return false, fmt.Errorf("read process %d ancestry: %w", current, statErr)
-			}
-			if stat.ParentPID <= 1 || stat.ParentPID == current {
-				break
-			}
-			current = stat.ParentPID
-		}
-	}
-	return false, nil
-}
-
 func failThen(ctx context.Context, request Request, sidDir string, tmux Tmux, reason string) error {
 	var failures []error
 	if request.Then != "" && request.SocketPath != "" {

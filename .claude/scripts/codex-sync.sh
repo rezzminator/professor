@@ -54,8 +54,10 @@ case "$MODE" in
     PROJECT="$(basename "$REPO_ROOT")"; PROJECT="${PROJECT#.}"
     FLAG="/tmp/$PROJECT/guard/codex_dirty"
     [[ -f "$FLAG" ]] || exit 0
+    # The fence's templates lane builds this dev binary into the shared timing
+    # scratch for Linux; the host takes it only when it actually runs here.
     PFM_BIN="/tmp/$PROJECT/timing/pfm-dev-bin"
-    [[ -x "$PFM_BIN" ]] || PFM_BIN=$(command -v pfm 2>/dev/null || true)
+    { [[ -x "$PFM_BIN" ]] && "$PFM_BIN" --version >/dev/null 2>&1; } || PFM_BIN=$(command -v pfm 2>/dev/null || true)
     if [[ -z "$PFM_BIN" || ! -x "$PFM_BIN" ]]; then
       jq -n --arg m 'codex-sync WARNING: compiler unavailable — mirrors were not checked; dirty flag retained' '{systemMessage: $m}'
       exit 0

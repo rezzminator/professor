@@ -1,6 +1,6 @@
 ---
 name: pfm-testing-manual
-description: The testing law of pfm (the Go fleet engine) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by flights-speccer at intake, by every flight executor before its first test, by flights-gater whole; `/pfm-testing-manual` opens it for a human. Keep it true in the same change that alters how pfm is tested.
+description: The testing law of pfm (the Go fleet engine) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by flights-speccer at intake, by every flight or general executor before its first test, by flights-lander whole; `/pfm-testing-manual` opens it for a human. Keep it true in the same change that alters how pfm is tested.
 ---
 
 # pfm testing manual
@@ -21,6 +21,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 ## Lanes and registries
 
 - A new command, MCP tool or fleet capability lands with its landscape row (`docs/dev/testing/landscape.md`), its beat (`infra/fence/lanes/beats.md` and `infra/fence/lanes/<lane>.sh`) and its map row (`infra/fence/lanes/map.tsv`) in the same commit; the recipe is `docs/dev/testing/lanes.md` § Extend it.
+- callmeter: the store is real SQLite under `t.TempDir()`, never a mock; hook payload fixtures are the captured Claude Code payloads (`pfm/internal/hookentry/testdata/callmeter/`) with every path rewritten to `/tmp/demo-proj/…`; the Python parser tests run the fence's real `python3`.
 - One editor per flight: `infra/fence/lanes/lib.sh`, `run.sh`, `map.tsv`, `beats.md`, `known-gaps.yml`, `pfm/scripts/known-skips.tsv`.
 
 ## Mock boundary
@@ -35,7 +36,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 ## Run commands
 
-- Affected, a flight executor's only run: `.claude/scripts/dev.sh iso run "go -C pfm test ./internal/<package>/ -run <Test> -count=1"` in the fence, `go -C pfm test ./internal/<package>/ -run <Test>` on the host — timeout 600 s.
+- Affected, an executor's only run (flight or general): `.claude/scripts/dev.sh iso run "go -C pfm test ./internal/<package>/ -run <Test> -count=1"` in the fence, `go -C pfm test ./internal/<package>/ -run <Test>` on the host — timeout 600 s.
 - Full, the flight gate's run and never an executor's: `.claude/scripts/dev.sh test pfm` on the host, `.claude/scripts/dev.sh iso test pfm` in the fence — about 13 minutes, timeout 600 s, background past that.
 - Static: `.claude/scripts/dev.sh verify pfm` (vet, fmt-check, lint-new, the architecture ratchet, the gate scripts' self-tests). Lanes: `infra/fence/lanes/run.sh`; the map gate `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`.
 

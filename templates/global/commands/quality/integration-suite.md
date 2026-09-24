@@ -149,7 +149,7 @@ Written to the path the request names; absent one, `<the project's design-doc di
 The design document is reviewed before anything is built: unmapped capabilities, crossings asserted from one side only, checks whose broken state would read as PASS. In a project installed from this blueprint, `flights-speccer`'s reconcile phase performs that review, the build goes through `/flights:spec`, and the suite is built and kept by the flights agents:
 
 - a flight executor builds the harness, the mocks and the lanes from the flight's task files of Build order.
-- `flights-gater` runs them at the landing: the solo lanes owning the touched area while it fixes, the sequence at the gate's open and close; a defect a lane exposes is its to fix.
+- `flights-lander` runs them at the landing: the solo lanes owning the touched area while it fixes, the sequence at the gate's open and close; a defect a lane exposes is its to fix.
 - The project's testing manual, § Lanes and registries, states the duty this design leaves on every change: the landscape row, the map row and the beat in the same commit.
 - `docs/commands/build/references/qa-commons.md` §§ Test validity, Run verdicts, Integration lanes carry the rules both hands share with this command.
 

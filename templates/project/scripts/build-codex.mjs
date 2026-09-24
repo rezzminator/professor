@@ -66,7 +66,7 @@ const SELF = '.claude/scripts/build-codex.mjs';
 // add its literal alias word as a fourth key here (same Codex model as `opus`,
 // unless it deserves its own) and extend ALIAS_RE below to match it — nothing
 // here discovers it automatically.
-const MODEL_MAP = { opus: '{CODEX_MODEL_FRONTIER}', sonnet: '{CODEX_MODEL_SPEC}', haiku: '{CODEX_MODEL_COLLECTOR}' };
+const MODEL_MAP = { opus: '{CODEX_MODEL_SMART}', sonnet: '{CODEX_MODEL_MECHANICAL}', haiku: '{CODEX_MODEL_COLLECTOR}' };
 // Lowercase alias as a standalone token; hyphen counts as a word char so
 // "claude-opus-5" and file names like "walker-fast" never corrupt.
 const ALIAS_RE = /(?<![\w-])(opus|sonnet|haiku)(?![\w-])/g;
@@ -81,7 +81,7 @@ const GENERATED_RE = /Generated (by \.claude\/scripts\/build-codex\.mjs|by pfm c
 const ADAPTER = `
 ## Codex adapter — reading this file in the Codex harness
 
-This file is compiled verbatim from CLAUDE.md by ${SELF}; Claude model aliases are already swapped to Codex models ({CODEX_MODEL_FRONTIER} = frontier judgment, {CODEX_MODEL_SPEC} = spec execution, {CODEX_MODEL_COLLECTOR} = collector — add a {FRONTIER_MODEL} row too if CLAUDE.md names one). Where the text names Claude-harness mechanics, map them:
+This file is compiled verbatim from CLAUDE.md by ${SELF}; Claude model aliases are already swapped to Codex models ({CODEX_MODEL_SMART} = smart, {CODEX_MODEL_MECHANICAL} = mechanical, {CODEX_MODEL_COLLECTOR} = collector — add a {FRONTIER_MODEL} row too if CLAUDE.md names one). Where the text names Claude-harness mechanics, map them:
 
 - Agent / Task spawn / \`subagent_type\` → \`spawn_agent\` with the matching \`.codex/agents/*.toml\` role
 - AskUserQuestion → ask the user in prose and end your turn

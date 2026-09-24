@@ -79,10 +79,10 @@ func TestRewriteCodeReviewMapsEveryLevelAndLeavesEverythingElse(t *testing.T) {
 	}
 }
 
-// The gater sizes its own review effort from the diff and reviews the FLIGHT's
+// The lander sizes its own review effort from the diff and reviews the FLIGHT's
 // whole diff, not one task's files. Its source line writes the slot form, which
 // has to map to a flight-scoped prompt whose model_reasoning_effort is still the
-// slot the surrounding prose tells the gater to fill — a baked effort would
+// slot the surrounding prose tells the lander to fill — a baked effort would
 // silently review a 40-file flight at the cheapest tier.
 func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T) {
 	got := rewriteCodeReview("Run `/code-review "+codeReviewSlot+"` over the flight's diff.", nil)
@@ -105,8 +105,8 @@ func TestRewriteCodeReviewSlotFormIsFlightScopedWithARunTimeEffort(t *testing.T)
 	}
 }
 
-// Door 2 for the gater's own road: a machine-global role compiled by
-// RunGlobalAgents. A gater whose compiled body carries the task-scoped prompt
+// Door 2 for the lander's own road: a machine-global role compiled by
+// RunGlobalAgents. A lander whose compiled body carries the task-scoped prompt
 // reviews the wrong diff on Codex.
 func TestCompiledGlobalRoleCarriesTheFlightScopedReview(t *testing.T) {
 	home := t.TempDir()
@@ -282,7 +282,7 @@ func TestCompiledCommandFrontmatterStaysParseableAroundTheReview(t *testing.T) {
 // Door 3: the composed Codex fleet prompt — the bytes the installer stages,
 // writes into developer_instructions and prepends to every compiled role, and
 // the bytes doctor compares a config against. The shared parts name no review
-// today (the flight's gater reviews, not the executor), so the door is proven
+// today (the flight's lander reviews, not the executor), so the door is proven
 // on a fixture tail: whatever the parts spell, the composed Codex prompt never
 // carries Claude's command, and the parts ON DISK never carry Codex's.
 func TestComposedCodexFleetPromptCarriesTheShellReview(t *testing.T) {

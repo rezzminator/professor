@@ -1,6 +1,6 @@
 # The flight executors
 
-`flights-mechanical-executor` and `flights-hard-executor` are the hands of a flight: one fresh agent per task file, picked by the task's rating, which writes the code and its covering tests and returns once. One body, two tiers. They replace the per-project `developer` and `qa` agents inside a flight, and they carry the instructions that task files and `0-` shared files used to restate for every executor.
+`flights-mechanical-executor` and `flights-smart-executor` are the hands of a flight: one fresh agent per task file, picked by the task's rating, which writes the code and its covering tests and returns once. One body, two tiers. They replace the per-project `developer` and `qa` agents inside a flight, and they carry the instructions that task files and `0-` shared files used to restate for every executor.
 
 Decisions live in this file. The executable wording lives in [`templates/global/agents/flights-mechanical-executor.md`](../../../templates/global/agents/flights-mechanical-executor.md).
 
@@ -28,9 +28,9 @@ A flight had a speccer and an orchestrator and no executor of its own. The execu
 | Agent | Model | Effort | Runs |
 | --- | --- | --- | --- |
 | `flights-mechanical-executor` | `sonnet` | `medium` | a task rated `mechanical` |
-| `flights-hard-executor` | `opus` | `medium` | a task rated `hard` |
+| `flights-smart-executor` | `opus` | `medium` | a task rated `smart` |
 
-The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-hard-executor` as a variant `from` it, overriding `model` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
+The body exists once, in `flights-mechanical-executor.md`. `templates/global/agents/variants.json` declares `flights-smart-executor` as a variant `from` it, overriding `model` and `description`; `pfm install` renders the variant into pfm's generated directory and links it into the engine registries, the same road `super-rr` takes. The orchestrator picks the agent type by the index row's `rating` and passes no model override, so the tier is a registry fact, visible in a transcript's `agentType`.
 
 ## What it holds
 
@@ -53,10 +53,10 @@ The executor writes the covering tests itself, one per `Done when` row, in the p
 
 - before the first test it opens the project's testing manual, the path named in the orchestrator's brief, and follows its tiers, test home, lane or registry duty, mock boundary, run commands and traps;
 - a test is accepted only after it was watched failing against the unfixed code, or against a deliberate re-break when the fix already landed;
-- it runs only the affected tests plus the type check and lint of its own files — the full suite is the gater's;
+- it runs only the affected tests plus the type check and lint of its own files — the full suite is the lander's;
 - a test that exists but did not run is missing; when a test and a row disagree the code is wrong, never the row.
 
-Bias of an author testing its own code is real and accepted here: the executor's tests prove the rows, and the independent attack is [`flights-gater`](flights-gater.md)'s.
+Bias of an author testing its own code is real and accepted here: the executor's tests prove the rows, and the independent attack is [`flights-lander`](flights-lander.md)'s.
 
 ## Layout laws at write time
 
@@ -83,11 +83,11 @@ Cost is calls times context, and an executor's starting context is re-sent on ev
 
 ## The cap
 
-80 tool calls. Past it the executor stops and returns `FAILED {id}: cap` with what landed. The number is in the agent, not in the brief; the speccer sizes tasks to it (a task that needs 150 calls is three tasks). The measured healthy band is 40 to 80 calls; the runaway executors of the audited flights ran 135 to 254.
+80 tool calls. Past it the executor stops and returns `FAILED {id}: cap` with the handoff: what landed, what is left, the next step. The number is in the agent, not in the brief; the speccer sizes tasks to it (a task that needs 150 calls is three tasks). The measured healthy band is 40 to 80 calls; the runaway executors of the audited flights ran 135 to 254.
 
 ## What it no longer does
 
-- No review and no `Skill` tool: `/code-review` runs once per flight, in the gater, over the flight's whole diff. The per-executor review was the largest single defect of the audited flights: 67 review sessions, 182M tokens.
+- No review and no `Skill` tool: `/code-review` runs once per flight, in the lander, over the flight's whole diff. The per-executor review was the largest single defect of the audited flights: 67 review sessions, 182M tokens.
 - No full-suite run, no format or lint sweep beyond its own files.
 - No conformance report: a drift from the spec surfaces as the next task's `SPEC-DRIFT`.
 
@@ -103,11 +103,11 @@ First line `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOC
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-mechanical-executor.md`, `templates/global/agents/variants.json` | The executable wording; the hard tier's frontmatter |
+| The agent | `templates/global/agents/flights-mechanical-executor.md`, `templates/global/agents/variants.json` | The executable wording; the smart tier's frontmatter |
 | The orchestrator | [`flights-orchestrator`](flights-orchestrator.md) | The brief, the verification of a `DONE`, the agent type by rating |
 | The speccer | [`flights-speccer`](flights-speccer.md) | Task size against the cap; test tier and home in `Done when` and `Files` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project's test law the executor follows |
-| The gater | [`flights-gater`](flights-gater.md) | The review and the full suite the executor no longer runs |
+| The lander | [`flights-lander`](flights-lander.md) | The review and the full suite the executor no longer runs |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` | § You are the hand of an orchestrator: no review step |
 
 ## Evidence

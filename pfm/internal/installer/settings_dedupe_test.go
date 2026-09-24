@@ -70,7 +70,7 @@ func TestSettingsInstallRemovesRRDirMovedUnderPostToolUse(t *testing.T) {
 	home := filepath.Join("neutral", "home")
 	rrDir := home + "/.local/bin/pfm internal rr-dir"
 	raw := []byte(`{"hooks":{"PostToolUse":[
-		{"matcher":"rr|super-rr","hooks":[{"type":"command","command":"` + rrDir + `"}]}
+		{"matcher":"rr|super-rr|heavy-rr","hooks":[{"type":"command","command":"` + rrDir + `"}]}
 	]}}`)
 
 	updated, changed, owned, err := updateSettings(raw, home, false, nil)

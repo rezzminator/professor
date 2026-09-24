@@ -10,8 +10,8 @@ Read the `flights-orchestrator` agent body from the registry (`~/.claude/agents/
 
 | In the manual | Here |
 | --- | --- |
-| Spawn an executor `Agent(subagent_type)` | A seat of the engine (the argument; default `codex`), named `{flight}-{id}`, in the project directory or the worktree, born with the executor role its rating picks: the shell `pfm chat new {flight}-{id} --engine {engine} --cwd {dir} --agent-role {flights-mechanical-executor or flights-hard-executor}` — the MCP verb carries no role. A spawn error is a seat not born: no `CLAIMED` line; one retry, then the task holds and the return names it |
-| Spawn a gater | Unchanged: a sub-agent of this chat, never a seat |
+| Spawn an executor `Agent(subagent_type)` | A seat of the engine (the argument; default `codex`), named `{flight}-{id}`, in the project directory or the worktree, born with the executor role its rating picks: the shell `pfm chat new {flight}-{id} --engine {engine} --cwd {dir} --agent-role {flights-mechanical-executor or flights-smart-executor}` — the MCP verb carries no role. A spawn error is a seat not born: no `CLAIMED` line; one retry, then the task holds and the return names it |
+| Spawn a lander | Unchanged: a sub-agent of this chat, never a seat |
 | The brief in the spawn prompt | `chat_inject` on the seat: the brief verbatim; the transport pastes any size. It closes with the way home: "when done, write your return to a file under `/tmp/` and send it with `pfm chat inject {this chat's name} --file {path}`" — your name from `chat_whoami`; a seat's plain inject carries one line |
 | Wait: end the message, the return arrives | The same; the seat's return arrives as an inject into this chat |
 | Verify from the return and `git diff {baseline} --stat -- {files}` | The same; `chat_last` on the seat when the inject arrived cut short |

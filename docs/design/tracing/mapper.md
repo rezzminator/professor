@@ -1,92 +1,55 @@
 # mapper
 
-`mapper` maps the whole area around one target — a stored table, an endpoint, a module, a job, a field, a symbol: what defines it, who writes it and what triggers each write, who reads it and where each read ends, what runs on a clock, what guards and configures it, its neighbours, every name it leads to. It is a lead over the shared ledger design; the script, the row format, the checks and the reader are specified in [ledger.md](ledger.md). This file holds what is the mapper's own.
+`mapper` maps one target's whole area from code: a stored table, an endpoint, a module, a job, a field or a symbol. The map covers its definition, its writers and what triggers each write, its readers and where each read ends, clocks, guards, neighbours, tests and checks. It is one agent over the shared `codeprobe` script, the tracer's loop run over a fixed list of facet asks. The script, the directives, the row checks and the return are specified in [codeprobe.md](codeprobe.md); this file holds what is the mapper's own.
 
 ## Contents
 
 - [The run](#the-run)
-- [How it differs from tracer](#how-it-differs-from-tracer)
-- [Probing the empty facets](#probing-the-empty-facets)
-- [The map](#the-map)
-- [The return](#the-return)
-- [Failure reports](#failure-reports)
+- [The facets](#the-facets)
 - [Measured](#measured)
 - [Open items](#open-items)
 
 ## The run
 
-1. SURVEY. `ledger survey {root} {target}`, the first act.
-2. READ. One `scribe` per bucket, every bucket, brief `Bucket file: DIR/bucket-N.txt. Mapping the whole area of {target}: what defines it, who writes it and what triggers each write, who reads it and where each read ends, clocks, guards, registries, neighbours.` With four or more buckets the smallest goes first, alone, to put the readers' shared prompt in the cache. The round is awaited with one `ledger wait DIR N…` call, Bash timeout 600000.
-3. VERIFY AND WIDEN. `ledger verify DIR; ledger widen DIR`, one call a round. Every new bucket belongs to the area, another project of the same repo included. A bucket with no rows file is respawned once. At most 5 rounds; stop when widen prints `the frontier is closed`.
-4. PROBE. With the last round, the facets `ledger show DIR --by facet` leaves empty are probed ([Probing the empty facets](#probing-the-empty-facets)).
-5. COMPOSE. `ledger show DIR --by facet` is the whole source; `ledger absent DIR name…` settles every absence; the map is written once and linted in the same call; one editing call over the flagged lines; one more lint; publish.
+1. Read `SKILL.md` § Extraction verbs and § Probe commands.
+2. `init ROOT --map TARGET` at the root the caller names, never a sub-project of it. The brief's own questions, when it holds any, go on stdin as Q asks; `mentions` joins only when the brief removes or renames the target.
+3. READ, facet by facet, with Read, Grep and `refs`. Each census line is a writer, a reader or neither. Writers are followed through their callers until a route, command, job or handler triggers them. Readers are followed to where the value ends; a served field, route or event name ends at the client that consumes it, in any project under the root.
+4. ROWS. A file whose every line naming the target is one fact takes a `path:*` row. A facet searched and found empty takes an `absent` row or an UNANSWERED row naming the searches.
+5. At 35 calls, or when every facet has rows, the final message is the manifest the script printed, naming the return file.
 
-## How it differs from tracer
+## The facets
 
-| | `tracer` | `mapper` |
-| --- | --- | --- |
-| Buckets read | Those the question needs | All of them |
-| Lead reads the code itself | At most 6 code files, or a chain question | At most 3 code files in the whole survey |
-| New buckets from widening | Read when they lie between target and question | All read: they are the area |
-| A TOO COMMON name | Left as a lead | Grepped with its receiver or module path, widened on the qualified spelling |
-| Empty facets | Not applicable | Probed |
-| View of the ledger | `--by file`, to link chains | `--by facet` |
-
-## Probing the empty facets
-
-A facet with no row, a writer with no TRIGGERS row behind it, or a read chain ending in a served name nobody consumes is a question, not yet an absence. A reader cannot search, so the lead finds the name and the script makes the bucket: one Grep for the repo's own registry of that mechanism, then `ledger widen DIR {names}`.
-
-| Gap | Probe |
-| --- | --- |
-| TIMING empty | The job, cron or worker registry; widen on its name and on the writers' and deleters' names |
-| CONTROL thin | Widen on the guard, validation and audit names the entry-point rows quote |
-| NEIGHBOURS empty | Widen on the entities the DEFINES and RELATES rows name — declared links, joins, unions, rows removed or anonymised together |
-| A deleter or retention method with no trigger | Widen on its name until a route, mutation, job or command row appears |
-
-A facet still empty after its probe is reported `nothing found`, with the probe's searches. "No clock found" rests on the registry's rows; without them it is a run-scoped statement, not a fact about the repo.
-
-## The map
-
-`DIR/report.md`, in this order:
-
-1. SUMMARY — four to eight sentences a newcomer could act on: what the target is, the write paths and what starts them, the read paths and where they end, what runs on a clock or the quoted proof that nothing does, what guards it, and whatever the code does that its comments or docs say otherwise. Every claim ends in its row ids.
-2. One section per facet, one row's fact a line — `file:line — what it does [R#]` — writers grouped with their triggers, readers laid out as chains to their terminals.
-3. NAMES — every name the area leads to that a newcomer would need: entry points, wire names, registries, config keys, jobs, neighbouring entities, cited-but-absent files, each with its `file:line`.
-4. NOT READ — unread code files; the TEST, DOC, GENERATED and DATA files naming the target; rejected row counts; rounds run; readers spawned against returned; lint flags left standing. The list enumerates and never judges: calling an unread file "a passing mention" cost one run a real writer.
-
-The size of a registry, enum or column list comes from a row's `= COUNTED BY THE SCRIPT` line and from nowhere else.
-
-## The return
-
-The SUMMARY verbatim, the lint's `COUNTS` line copied, and `Full map: DIR/report.md · ledger: DIR/ledger.txt`.
-
-## Failure reports
-
-| State | Return |
-| --- | --- |
-| The survey errors | `SURVEY FAILED — {the command and the error text}` |
-| Nothing found after one retry with an added spelling | `NOTHING FOUND — {the counts table}` |
-| A reader never writes | Named by `ledger wait`; respawned once; then listed in NOT READ |
+| Ask | Facet | Directive | Rows the facet expects |
+| --- | --- | --- | --- |
+| M1 | Definition | — | Declaration, creating migration, later changes, keys, constraints, indexes, the enums and types its columns use with their values, as extraction rows |
+| M2 | Writers | `census` on every spelling | Each writer and the route, command, job or handler that triggers it |
+| M3 | Readers | `census` | Each reader and where its value ends |
+| M4 | Timing | — | A job, cron or scheduler registry naming the target, a writer, or a writer's caller |
+| M5 | Control | — | Guards, validation, config and registration on the entry points; the constants a guard reads |
+| M6 | Neighbours | — | Entities it references, joins, or changes or removes together with it |
+| M7 | Tests | `tests` | What the tests assert |
+| M8 | Check | `checks` | The check command, a scoped variant, whether two copies can run at once |
 
 ## Measured
 
-One target — an audit-log table written from a request plugin and several services, read through two role-gated queries and an export route, with a two-tier retention sweep — scored against a 33-point key. Judging method and cost basis: [ledger.md](ledger.md#what-the-evidence-says).
+One target — an audit-log table written from a request plugin and several services, read through two role-gated queries, an export route and a frontend view, tombstoned by an erasure cascade — scored against a fixed 33-point key by an independent `opus` judge; HIT 1, PARTIAL 0.5; an invention is any stated fact the code contradicts or does not show. Cost at assumed list rates.
 
-| Design | Score /33 | Inventions | Cost (USD) |
-| --- | --- | --- | --- |
-| Lead with walkers, `medium` lead | 24.5 | 2 | 1.84 |
-| Lead with walkers, `low` lead | 22.0 | 3 | 0.97 |
-| Ledger, readers free to search | 27.0 | 4 | 3.54 |
-| Ledger, readers holding `Read` and `Write` only | 27.5 | 2 | 2.64 |
-| Ledger, with the prose auditor | 22.0 | 5 | 5.82 |
+| Design | Requests | Cost (USD) | Seconds | Caller's copy /33 | Map on disk /33 | Inventions | Copy of the render |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Previous: walker lead, `low` effort | — | 0.97 | — | 22.0 | — | 3 | — |
+| Previous: walker lead, `medium` effort | — | 1.84 | — | 24.5 | — | 2 | — |
+| Previous: ledger with bucket readers | — | 2.64 | — | 27.5 | — | 2 | — |
+| codeprobe 1 | 25 | 0.93 | 198 | 7.5 | 17.0 | 6 | a summary and "full detail above" |
+| codeprobe 2: root rule, census once, final-message banner | 34 | 1.02 | 226 | 14.0 | — | 6 | whole |
+| codeprobe 3: trigger chains, served names to their client, enums and guard constants | 20 | 0.94 | 204 | 18.5 | 18.5 | 7 (5 in the render) | rewritten |
 
-- The best ledger run leads the best walker run by 3 points at equal inventions and 0.80 USD more.
-- Every absence row in the last three judged runs verified true, and so did every script-counted size; the one wrong registry size published was the lead's own number, written where a truncated note had hidden the script's. The inventions are summary prose — an invented scheduler link, a role list narrowed to one role, a guard said to sit in front of every operation.
-- Breadth varies: the same target took 12 to 17 readers across runs, and cost followed.
-- About half of the lost points sit in files or directories a run had already opened.
+- The mapper costs less than the previous designs' medium and ledger runs, and maps less than any of them: its best run is 3.5 points under the cheapest previous design.
+- Every quote and every computed count checked true in run 3. The inventions are one-line notes after correct quotes: a write said to follow the export when it precedes it, a method put on the wrong class, a flow misnamed.
+- What run 3 still missed sits one name away from the target: writers that reach the table through a service method never name it, and neither do the contract and documentation surfaces.
+- The judge corrected the key: a migration the key called a phantom existed and was squashed into the baseline.
 
 ## Open items
 
-- The one-pass lint cap has not been through a judged run; the last unjudged run cost 4.98 USD with 17 readers.
-- A breadth bound: widening treats every file naming an out name as the area, and a widely called writer pulls in every caller.
-- A second target, to separate prompt effect from run-to-run variance.
+- Breadth: one agent reading one hop out does not reach the writers that call the table only through a service. A mechanical second census, on the names of the functions holding each census line, is the lever the previous ledger design used and this one has not measured.
+- Note inventions: five a run, all in notes after correct quotes. The note check catches a name the code does not hold, not a real name put in the wrong place.
+- The final message is a model's copy of the render: whole once in three runs, a summary once, a rewrite once.

@@ -87,8 +87,8 @@ func IsSeatPromptPath(path string) bool {
 
 // ComposeSeatPrompt builds the file body and the engine prompt value it
 // contains. Claude needs the staged fleet prompt before the role body; a
-// compiled Codex role already contains both and must not receive the fleet
-// prompt twice.
+// Codex constitution already carries both (readTOMLConstitution) and must not
+// receive the fleet prompt twice.
 func ComposeSeatPrompt(engineID pfmengine.ID, role, constitution, stagedFleetPrompt string) (string, error) {
 	marker := seatPromptPrefix + role + seatPromptSuffix + "\n"
 	switch engineID {

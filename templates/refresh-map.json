@@ -223,11 +223,6 @@
     "project/scripts/drain-wait.sh": {
       "curated": true
     },
-    "project/scripts/filter-test-output.sh": {
-      "sources": {
-        ".claude/scripts/filter-test-output.sh": "d09815a53876c96e8f4c56196dc1da16ba16b3d5e37bcd7c8407b2ef28a93070"
-      }
-    },
     "project/scripts/format-md.sh": {
       "curated": true
     },
@@ -249,11 +244,6 @@
     },
     "project/scripts/memory-wire.sh": {
       "curated": true
-    },
-    "project/scripts/notify.sh": {
-      "sources": {
-        ".claude/scripts/notify.sh": "af59a810393d602c8d510842585621cd5f586956911a8982259e5b6c257b4e79"
-      }
     },
     "project/scripts/pfm-guard.sh": {
       "sources": {

@@ -3,10 +3,11 @@ cmd/pfm/chat_satellite_command.go 952
 internal/compose/compose.go 1337
 internal/config/config.go 1723
 internal/doctor/doctor.go 1597
-internal/harvest/harvest.go 800
+internal/harvest/harvest.go 833
 internal/harvest/mirror_providers.go 829
+internal/harvestmcp/service.go 962
 internal/inject/engine.go 1807
-internal/installer/installer.go 2497
+internal/installer/installer.go 2500
 internal/installer/vscode.go 812
 internal/professor/project.go 879
 internal/reload/reload.go 994

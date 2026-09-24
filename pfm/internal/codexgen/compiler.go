@@ -534,12 +534,7 @@ func compileAgents(
 			if effort := strings.TrimSpace(fields["effort"]); effort != "" {
 				toml += "model_reasoning_effort = " + tomlString(effort) + "\n"
 			}
-			withFleetPrompt, err := fleetRoleInstructions(instructions)
-			if err != nil {
-				problem(fmt.Sprintf("compose the Codex fleet prompt for %s: %v", rel, err))
-				continue
-			}
-			toml += "developer_instructions = \"\"\"\n" + tomlMultiline(withFleetPrompt) + "\"\"\"\n"
+			toml += "developer_instructions = \"\"\"\n" + tomlMultiline(instructions) + "\"\"\"\n"
 			add(generatedFile{Path: filepath.Join(root, ".codex", "agents", name+".toml"), Content: toml})
 		}
 	}

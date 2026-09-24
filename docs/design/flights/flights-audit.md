@@ -16,7 +16,7 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 ## Input
 
-`/flights:audit {flight directory}`; absent, the newest directory under `/tmp/{project}/flights/`. The audit runs in the main chat at the chat's model: its judgment is the product.
+`/flights:audit {flight directory}`; absent, the newest directory under `$HOME/.local/state/pfm/flights/{project}/`. The audit runs in the main chat at the chat's model: its judgment is the product.
 
 ## The anchors
 
@@ -34,7 +34,7 @@ Every artifact the workflow produces, where it lives, and what it proves. An anc
 | The orchestrator's transcript | the same directory (nested: the file whose `.meta.json` says `flights-orchestrator`), or the main chat's own history (live, cross-harness) | Its calls per task, the briefs it sent, whether it opened task files, whether it held a ready task |
 | Chat seats, cross-harness | `chat_ls`, `chat_status`, `chat_last`, `chat_read` | Liveness and the seat's own account of its task, its review run included |
 | The standing checks | the command and its log, named in the brief or a `0-` file | Whether the landing's checks ran and what they printed |
-| The gate | `gate-{project}.md` in the directory and each `flights-gater` transcript: the two full runs, the `/code-review` run and its effort, the attack map, the tests it wrote; the return's `GATE` row is the claim checked against them | Every changed hunk mapped; findings and their terminal state: fixed, residual, or outside the flight |
+| The gate | `gate-{project}.md` in the directory and each `flights-lander` transcript: the two full runs, the `/code-review` run and its effort, the attack map, the tests it wrote; the return's `GATE` row is the claim checked against them | Every changed hunk mapped; findings and their terminal state: fixed, residual, or outside the flight |
 | Spend | The audit's own run of `token-audit.mjs --flight {directory} --metrics-out {a scratch file}`, over the transcripts `agents.tsv` selects. The orchestrator's `metrics.md` and `COST` row are claims compared against that run, never its source: the audit and the orchestrator stay untied | Per agent: calls, start and peak context, growth per call, tokens, price, failed commands, poll calls, re-reads, contract-file reads, compactions, over cap; an `UNMATCHED` row is a finding |
 
 ## The audit, piece by piece
@@ -42,10 +42,10 @@ Every artifact the workflow produces, where it lives, and what it proves. An anc
 1. Index integrity: every task file has an index row and every row a file; `needs` is acyclic and every id it names exists; `level` is one above the deepest need; no file appears in two tasks unless one needs the other. Grep, never trust.
 2. Ledger truth: every `DONE` line's task shows changed files inside its index `files` in `git diff {baseline}`, and nothing outside; the covering test per `Done when` row exists, was read, and its run is in a log or a transcript, not in a claim; a `CLAIMED` line with no verdict is in flight (a live executor) or lost (named); a `FAILED` or `SPEC-DRIFT` line carries its round, the executor's cause and its transcript path, and has its revising round (new or changed task files, a rebuilt index); a `STALE` line has a seat status behind it.
 3. Faults handled the only legal way: a task file changed after the header date only by a revising `flights-speccer` call (the orchestrator's transcript shows the call); no rulings, notes or patches written beside the directory; no task file re-dispatched unchanged after `FAILED`; a `CLAIMED` task's file unchanged while its executor ran; the second red of one id followed by a task file that names the cause in `Decisions` and a speccer transcript that read the whole unit and the executor transcripts, never by a rewrite alone; a third red of one id followed by `BLOCKED`, never a rewrite; no `Done when` row carrying a value one run printed. The measured case: five rounds on one task, each spec cut from the previous red line, 180 executor calls and four hours — the one-fault-per-run loop one level up.
-4. Conformance spot-check on the highest-stakes tasks (protected-data channels, contracts, a `hard` rating): each `Done when` row against the code and its test, mechanically where it can be (grep an export into existence, diff a contract), by reading where it cannot.
+4. Conformance spot-check on the highest-stakes tasks (protected-data channels, contracts, a `smart` rating): each `Done when` row against the code and its test, mechanically where it can be (grep an export into existence, diff a contract), by reading where it cannot.
 5. Cost and cadence, from the transcripts: calls per executor against the healthy band (about 40 to 80); peak context; the orchestrator's calls against about two per task plus the landing; any poll chain (`sleep`, `echo idle`, a repeated log peek); any per-step report in a return; any ready task that waited for a sibling; executors dispatched against returns received.
 6. Liveness, in flight only: a transcript still growing, a seat whose status changed within the stale bound, a pane captured full-screen and judged from process evidence; an empty capture is a failed probe, never a quiet seat.
-7. Landing: the checks were watched (the transcript shows the command and its output, not a summary); every project touched has a gate line and a `gate-{project}.md`, each new test of the gater was watched failing, and every finding is terminal (fixed, a residual sent to `flights-speccer`, or carried to `NOTES`); the commit sha exists and its diff matches the flight's diff; nothing outside the flight's files changed on the branch.
+7. Landing: the checks were watched (the transcript shows the command and its output, not a summary); every project touched has a gate line and a `gate-{project}.md`, each new test of the lander was watched failing, and every finding is terminal (fixed, a residual sent to `flights-speccer`, or carried to `NOTES`); the commit sha exists and its diff matches the flight's diff; nothing outside the flight's files changed on the branch.
 
 ## The report
 

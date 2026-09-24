@@ -275,7 +275,7 @@ Order the remaining `CHANGED` list smallest diff first (`diff -u {template} {liv
 
 Dispatch each batch as ONE message — every sibling in a wave goes together, and a missing report is a named coverage hole, never a silent one.
 
-Tier and effort per the fleet prompt § Model Selection: **spec-execution (sonnet), effort High**. The work arrives with a spec; the judgment that stays here is which hunks were classified wrong.
+Tier and effort per the fleet prompt § Model Selection: **mechanical (sonnet), effort High**. The work arrives with a spec; the judgment that stays here is which hunks were classified wrong.
 
 #### The worker brief
 

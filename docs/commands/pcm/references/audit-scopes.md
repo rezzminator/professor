@@ -53,7 +53,7 @@ Files: `.claude/scripts/*.{sh,mjs}`
 
 - **Existence & permissions:** each script exists and is executable (`+x`)
 - **Referential integrity:** grep agents/commands for each script name → paths used to call it are correct
-- **Safety headers:** `set -euo pipefail` present at top of every bash `.sh` — named exceptions: fail-open hooks (`explore-deny.sh`, `format-md.sh`) run `set -uo pipefail` by design, and POSIX `#!/bin/sh` scripts (`memory-*.sh`) carry no `pipefail`
+- **Safety headers:** `set -euo pipefail` present at top of every bash `.sh` — named exceptions: the fail-open hook `format-md.sh` runs `set -uo pipefail` by design, and POSIX `#!/bin/sh` scripts (`memory-*.sh`) carry no `pipefail`
 - **No hardcoded paths:** no absolute paths or project-specific paths that should be variables
 
 ## `structure` — Walk repo skeleton

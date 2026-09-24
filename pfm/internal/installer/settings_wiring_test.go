@@ -113,7 +113,7 @@ func TestSettingsInstallAddsWaveHooksCleanupAndOwnsOnlyItsEntries(t *testing.T) 
 	}{
 		{"PreToolUse", "Agent|Task", prefix + " internal explore-deny"},
 		{"PreToolUse", "Bash", prefix + " internal git-guard"},
-		{"SubagentStart", "rr|super-rr", prefix + " internal rr-dir"},
+		{"SubagentStart", "rr|super-rr|heavy-rr", prefix + " internal rr-dir"},
 		{"UserPromptSubmit", "", prefix + " internal epic-inject"},
 		{"UserPromptSubmit", "", prefix + " internal reload-intercept"},
 		{"UserPromptSubmit", "", prefix + " internal compact-nudge"},
@@ -457,7 +457,7 @@ func TestInstallOwnershipLedgerClaimsHooksDespiteForeignHooksPresent(t *testing.
 	expectedKeys := []settingsHookKey{
 		{Event: "PreToolUse", Matcher: "Agent|Task", Command: prefix + " internal explore-deny"},
 		{Event: "PreToolUse", Matcher: "Bash", Command: prefix + " internal git-guard"},
-		{Event: "SubagentStart", Matcher: "rr|super-rr", Command: prefix + " internal rr-dir"},
+		{Event: "SubagentStart", Matcher: "rr|super-rr|heavy-rr", Command: prefix + " internal rr-dir"},
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal epic-inject"},
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal reload-intercept"},
 		{Event: "UserPromptSubmit", Matcher: "", Command: prefix + " internal compact-nudge"},

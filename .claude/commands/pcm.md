@@ -126,7 +126,7 @@ Before ANY changes, read all affected files. Grep every reference across `.claud
 
 ### Step 3 — Plan
 
-Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Count the tasks per the fleet prompt § Orchestration: more than one ⇒ `flights-speccer` writes the flight directory and `flights-orchestrator` runs one executor per task file; edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here from those task files.
+Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Route the work by the fleet prompt § Orchestration ladder: direct work is done here or by one or two agents; a batch of clear tasks goes to `general-orchestrator`; only work whose solution is not in hand goes to `flights-speccer`, and `flights-orchestrator` runs one executor per task file. Edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here, from the brief or the task file that names them.
 
 ### Step 4 — Execute
 

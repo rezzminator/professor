@@ -452,6 +452,8 @@ X37	O2	O2.05-internal-plumbing
 X38	E1	E1.23-launcher
 X39	E1	E1.07-reload-then
 X40	O2	O2.05-internal-plumbing
-X43	O2	O2.05-internal-plumbing
+X45	O2	O2.05-internal-plumbing
 X41	A	A.14-release-notice
 X42	O2	O2.05b-activity-log
+X43	O2	O2.05c-callmeter
+X44	O2	O2.05c-callmeter

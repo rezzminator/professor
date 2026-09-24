@@ -32,7 +32,7 @@ Three consequences shape everything below.
 
 - Many short runs beat one long run, so one task file is one fresh executor. Feeding one executor its spec in pieces saves about 1% of its cost, because the spec text is a small share of its context; starting a fresh executor per task saves about a third.
 - A fresh executor is only cheap when its task file is self-contained. Under specs that pointed at shapes instead of carrying them, executors spent 35% of their calls re-reading code before their first edit and reached a median context of 91K by that edit.
-- Every task has a fixed price whatever its size: a task file written at frontier-judgment, and a fresh executor that opens its spec and re-reads the files it will change before its first edit. Executors that finished in 17 to 24 calls stayed under 90K of context, far below the range where growth hurts. A flight is therefore cut only as far as each cut pays for itself, and every part of the design that asks for more (more tasks, more decisions, more text, more quotes) carries a budget.
+- Every task has a fixed price whatever its size: a task file written at the apex or smart tier, and a fresh executor that opens its spec and re-reads the files it will change before its first edit. Executors that finished in 17 to 24 calls stayed under 90K of context, far below the range where growth hurts. A flight is therefore cut only as far as each cut pays for itself, and every part of the design that asks for more (more tasks, more decisions, more text, more quotes) carries a budget.
 
 ## The two flows
 
@@ -50,7 +50,7 @@ Three consequences shape everything below.
 ### Model caller: work handed to a sub-agent
 
 1. A main chat hands work to a sub-agent of any type.
-2. Handed a batch, or work it cannot see how to do, the sub-agent's first tool call spawns `flights-speccer` at its pin — apex (`fable`), or `model: "opus"` on the spawn when the caller judges the flight small (a few tasks, no unknown cause, no design to choose) — handing it the work, everything it holds and a directory under `/tmp/{project}/flights/`.
+2. Handed large work whose solution is not in hand (a design to choose, a failure of unknown cause: the ladder's third rung), the sub-agent's first tool call spawns `flights-speccer` at its pin (`opus`), handing it the work, everything it holds and a directory under `$HOME/.local/state/pfm/flights/{project}/`.
 3. `flights-speccer` writes the flight directory and returns the path, the index and the dispatch order.
 4. A directory holding a single task the sub-agent executes itself; one holding several it hands to `flights-orchestrator`, which dispatches one fresh executor per task file by the [ready rule](#the-ready-rule) and executes none itself.
 
@@ -70,11 +70,11 @@ Only the first item is required. Whatever is absent, `flights-speccer` derives f
 | Boundaries: out of scope, files another owner holds | No task touches them |
 | Standing rules the executors work under | Specs stay inside them. The project's contract (the `CLAUDE.md` files) reaches every executor from the harness, and the flight's own rules (worktree, fence, checks, cap) travel in the dispatcher's brief; a task file carries neither, even when a caller's rule asks for them there |
 | The [testing manual](testing-manual.md) of each project touched | Opened at intake: Tiers, Where a test lives, Lanes and registries, Gates and floors, the removal clause of What not to test. Its facts enter a task as `Decisions`, `Files` and `Done when` lines — a test row names its tier, `Files` lists the test home and every registry file — and the manual is never a `reads` entry. A project without one is a `NOTES` line |
-| The flight directory | One directory under `/tmp/{project}/flights/`; `flights-speccer` writes everything there and nowhere else |
+| The flight directory | One directory under `$HOME/.local/state/pfm/flights/{project}/`; `flights-speccer` writes everything there and nowhere else |
 
 ### What a spec never restates
 
-Anything the [executor](flights-executors.md) or the [gater](flights-gater.md) agent holds is never written into a task file or a `0-` file: how to run or wait for a command in general, read discipline, the watched-failing proof, the return format, the review, the cap, the layout laws, the testing manual's content. A `0-` file carries project facts several tasks need; an instruction every executor follows on every task belongs to the executor agent, and a project testing rule belongs to the testing manual — finding one missing is a `NOTES` line, never a paragraph in the spec. The task file's fixed lines went the same way: the closing line of `Done when` and the opening line of `Progress dependency` restated executor rules and now live in the executor's body; a task file keeps only what is a fact about this task. Reconcile's restatement check enforces it. The measured cost of the old way: 4.3 KB and 12.3 KB of generic instruction per executor in two audited flights, rewritten every revising round.
+Anything the [executor](flights-executors.md) or the [lander](flights-lander.md) agent holds is never written into a task file or a `0-` file: how to run or wait for a command in general, read discipline, the watched-failing proof, the return format, the review, the cap, the layout laws, the testing manual's content. A `0-` file carries project facts several tasks need; an instruction every executor follows on every task belongs to the executor agent, and a project testing rule belongs to the testing manual — finding one missing is a `NOTES` line, never a paragraph in the spec. The task file's fixed lines went the same way: the closing line of `Done when` and the opening line of `Progress dependency` restated executor rules and now live in the executor's body; a task file keeps only what is a fact about this task. Reconcile's restatement check enforces it. The measured cost of the old way: 4.3 KB and 12.3 KB of generic instruction per executor in two audited flights, rewritten every revising round.
 
 ### Layout laws at design time
 
@@ -82,7 +82,7 @@ Four laws of `/quality:llm-codebase` bind when tasks are cut, and live in the De
 
 ### The model by round
 
-The first spec of a flight runs at the agent's pin (`fable`), or on `opus` when the caller judged the flight small. Every revising round runs on `opus`, spawned fresh by the orchestrator, and reads the `RETRO` lines of `run.md` with the executor's transcript.
+Every spec, first or revising, runs at the agent's pin (`opus`). Every revising round is spawned fresh by the orchestrator, and reads the `RETRO` lines of `run.md` with the executor's transcript.
 
 With `/flights:spec` the fourth row arrives full, because the user answered the questions. From a model caller it arrives thin, and `flights-speccer` decides.
 
@@ -101,7 +101,7 @@ Each reader reads only its own artifact, and nothing is stated twice.
 ## The spec directory
 
 ```text
-/tmp/{project}/flights/{flight}/
+$HOME/.local/state/pfm/flights/{project}/{flight}/
   index.md      one row per task
   0-{topic}.md  a shared file, only when two or more tasks need the same content
   1-a.md        a task file: {level}-{letter}.md
@@ -111,7 +111,7 @@ Each reader reads only its own artifact, and nothing is stated twice.
 
 - One task file is one task, one fresh executor and one outcome.
 - Content one task needs lives in that task. Content two or more tasks need lives once in a `0-` file, and each task names only the `0-` files it uses. This is the only pointer a task file holds that is not a code path, and it points into the spec directory, which nobody edits while executors run. A `0-` file is never the place for every shape of every task: each executor would pay for all of it to use a fraction.
-- The reading budget: a task file plus the `0-` files it reads stays under 16,000 characters. `flights-speccer` measures it before returning; over budget, it cuts words first and the task second.
+- The reading budget: a task file plus the `0-` files it reads stays under 25,000 characters. `flights-speccer` measures it before returning; over budget, it cuts words first and the task second.
 - Discover once: whatever every executor would otherwise find out alone (how to run the checks, where failures are logged, a house convention) is found in the map round and written in one `0-` file.
 - The dispatcher's brief names the task file and its `0-` files together, and the executor opens them all in its first message.
 
@@ -121,7 +121,7 @@ Each reader reads only its own artifact, and nothing is stated twice.
 | --- | --- |
 | `id` | The task file name, `{level}-{letter}` |
 | `needs` | The ids this task waits for; empty means none |
-| `rating` | `mechanical` or `hard` |
+| `rating` | `mechanical` or `smart` |
 | `shares` | Named shared resources the task contends for: a test database, a lock, a port |
 | `reads` | The `0-` files its executor opens with the task file |
 | `files` | Every path the task creates, edits or deletes, from its frontmatter; the dispatcher verifies a `DONE` against them and the landing's commit names them |
@@ -182,25 +182,26 @@ Pin what crosses a boundary; describe what stays inside one.
 
 The rating is computed from `Execution judgments`, not asserted.
 
-- More than three judgments: `hard`.
-- Any judgment that is a diagnosis of an unknown cause: `hard`, whatever the count.
-- Otherwise: `mechanical`.
+- More than three judgments: `smart`.
+- Any judgment that is a diagnosis of an unknown cause: `smart`, whatever the count.
+- A deliverable that is a document, a prompt, a spec or a report: `smart`, whatever the count. Writing for a reader to act on is reasoning, however exactly the task file words it.
+- Otherwise: `mechanical`, which means repetitive, straightforward work that needs no reasoning to do right.
 
-The rating picks the executor: `mechanical` → `flights-mechanical-executor` (`sonnet`), `hard` → `flights-hard-executor` (`opus`); the spawn carries no model override.
+The rating picks the executor: `mechanical` → `flights-mechanical-executor` (`sonnet`), `smart` → `flights-smart-executor` (`opus`); the spawn carries no model override.
 
 ## The run
 
 Seven phases, each producing one thing. The order keeps `flights-speccer`'s own context small: the first reading of an area goes to probes, the design is settled before any shape is collected, and writing comes last. A phase with nothing to ask is skipped; a one-task flight whose caller supplied the maps runs intake, design, one shapes round and write.
 
 1. Intake. No reading. The input becomes a numbered list of requested changes, and the absent inputs are noted.
-2. Map, probe round one. One message of `tracer` agents, one per area. Each returns a map of about one page with no file content quoted: where the area lives, who writes and reads it, which files would change, where this codebase already solves a similar problem and what can be reused from it, and how the area is checked (the command, where failures are logged; a suite runs once at most). A removal or a rename adds one probe that returns every place mentioning the thing. What the caller handed over is not asked again.
+2. Map, probe round one. `tracer` probes, as many as the speccer judges, all in one message, each handed the repo root and numbered questions; test homes, the check command and the verbatim lines to paste come back unasked, and a `NOT READ` is asked again or read, never taken as a fact (an experiment: see Open items). A removal or a rename adds one probe that returns every place mentioning the thing. What the caller handed over is not asked again.
 3. Design. Per change: mechanism, placement, names, the contracts that cross a boundary, failure behaviour, the outcome. Two rules. Right-size: the smallest design that delivers the numbered changes; every mechanism names the change it serves, a pattern borrowed from a reference is scaled to the project borrowing it, and what `flights-speccer` finds wise but nobody asked for is one line in the return's notes, never a task. Reuse: look for a similar problem this codebase already solves, follow its pattern, reuse whatever exists, and invent nothing that already exists. A decision a human would want the chance to overrule also gets one notes line; it is still decided.
 4. Form tasks, as laid out below. It follows design because `needs` edges come from who creates and who consumes each contract.
-5. Collect shapes, probe round two. Only now is it known which existing shapes each executor types against, which is why the rounds are two: quoting before designing means quoting everything. One message of collector agents (`haiku`) carries exact extraction orders for the shapes the design calls for: these columns, this signature, the line after which the insert goes. A shape in a task file comes only from this round; the caller's maps give direction, never a quote.
-6. Write. Shared files first, then each task file inside a budget computed before it is written (16,000 characters minus the measured size of its `reads`), then the index, all files of a level in one message. Several writes in one message are one model call, so the context is re-sent once; writing over budget and trimming afterwards costs a call per trim at the run's largest context.
-7. Reconcile. Six checks only `flights-speccer` is placed to make, each with a definite answer, fixed before returning. Restatement: no task file or `0-` file carries an instruction the executor or the gater agent already holds, or a rule of the testing manual ([What a spec never restates](#what-a-spec-never-restates)). Coverage: every numbered change from intake, and every mention of a removed or renamed thing, lands in exactly one task or in `BLOCKED`; a dropped change is invisible downstream, because an executor sees one file and the dispatcher opens none. Collision: no file appears in two tasks unless one needs the other. Size: the reading budget, measured. Sense: given its decisions, each task's outcome can come true; no two decisions contradict; nothing a task changes breaks something outside its `Files` that runs or reads it. Names: of the files `flights-speccer` writes, the directory holds `index.md`, `0-*.md` and `{level}-{letter}.md` and nothing else, whatever the caller asked for; `run.md` and `audit.md` belong to other writers and are never touched. The numbers travel in the return's `RECONCILED` line, so the caller sees that the checks ran.
+5. Collect shapes. Only after the design is it known which existing shapes each executor types against; quoting before designing means quoting everything. The tracers' fenced verbatim lines are shapes already and are pasted as they stand. What is still missing, and only the lines a task will quote, never a whole file, goes in one `codeprobe.py collect` plan the speccer runs itself, then one Read of its `return.md` (read in the size-bounded parts its manifest names); orders too vague for a plan go to `collector`. Measured on the tracer replay: a phase 5 that re-ordered everything, 14 whole files among it, wrote 4,363 lines, of which 11% reached the task files and half of those the tracers had already returned; reading it was about a quarter of the speccer's tokens. A shape in a task file is copied, never typed from memory; the caller's maps give direction, never a quote.
+6. Write. Shared files first, then each task file inside a budget computed before it is written (25,000 characters minus the measured size of its `reads`), then the index, all files of a level in one message. Several writes in one message are one model call, so the context is re-sent once; writing over budget and trimming afterwards costs a call per trim at the run's largest context.
+7. Reconcile. Six checks only `flights-speccer` is placed to make, each with a definite answer, fixed before returning. Restatement: no task file or `0-` file carries an instruction the executor or the lander agent already holds, or a rule of the testing manual ([What a spec never restates](#what-a-spec-never-restates)). Coverage: every numbered change from intake, and every mention of a removed or renamed thing, lands in exactly one task or in `BLOCKED`; a dropped change is invisible downstream, because an executor sees one file and the dispatcher opens none. Collision: no file appears in two tasks unless one needs the other. Size: the reading budget, measured. Sense: given its decisions, each task's outcome can come true; no two decisions contradict; nothing a task changes breaks something outside its `Files` that runs or reads it. Names: of the files `flights-speccer` writes, the directory holds `index.md`, `0-*.md` and `{level}-{letter}.md` and nothing else, whatever the caller asked for; `run.md` and `audit.md` belong to other writers and are never touched. The numbers travel in the return's `RECONCILED` line, so the caller sees that the checks ran.
 
-A look smaller than a probe (one file, a listing, a search) `flights-speccer` does itself; mapping a whole area is what the first round's tracers are for. The template names each probe by its literal spawn parameters (`subagent_type: "tracer"`; `subagent_type: "general-purpose"` with `model: "haiku"`): named only by role, a model reaches for the harness's default search agent.
+A look smaller than a probe (one file, a listing, a search) `flights-speccer` does itself; mapping a whole area is what the first round's tracers are for. The template names each probe by its literal spawn parameters (`subagent_type: "tracer"` for questions, `subagent_type: "collector"` for shapes): named only by role, a model reaches for the harness's default search agent.
 
 Probes run in the background. After spawning a round `flights-speccer` ends its message with one line and no tool call, and the harness delivers each report as it lands. A watch loop costs a call per look and can watch for a signal that never comes.
 
@@ -221,6 +222,21 @@ A task is one goal: one cohesive change, even when it spans layers and files. Tw
 
 A flight whose parts cannot run side by side stays one task or a short chain. A wide flight comes out as small shared foundations first, a wide middle of tasks that do not overlap, and the hot-file task last.
 
+### Nesting: a large flight is written by child speccers
+
+A speccer's cost grows with the number of task files it writes in one context, because every quoted shape, every written file and every probe report is re-sent on each later call. Measured over sixteen first-spec runs: writing 1 to 4 task files cost 11 to 43 calls, 0.6M to 4.0M tokens and a peak context of 71K to 159K; writing 7 to 12 cost 90 to 127 calls, 10.4M to 22.3M tokens and a peak of 267K to 352K. The expensive runs barely explored: one of them made a single exploration call and still reached 18.5M, because its twelve task files and ten tracer reports shared one context.
+
+So when the tasks fall into separate contexts — different projects, builds or subsystems that share no files and need different maps — the speccer becomes the planner and writes no task file itself. Tasks sharing one context stay with one writer however many there are: the raised reading budget lets that writer keep its multi-pass writing, and the split is for separation of context, not for count.
+
+1. The planner runs intake, map, design and form tasks as usual, fixing every task's id, level, `needs`, `shares`, `files` and goal line.
+2. It cuts one batch per context. A batch owns its files outright: no file is written by two batches.
+3. It writes the shared `0-` files, pinning every contract that crosses from one batch to another, so no batch waits on another batch's design.
+4. It spawns one child per batch, all in one message, each as `Agent(subagent_type: "flights-speccer")`. The brief carries the batch plan (every batch's rows, so each child sees the contracts around its own), the design lines for the child's tasks, the maps that concern them and the directory. A contract the planner cannot pin before a child designs it puts that child first and the batches that consume it after it; that is the only reason children run in sequence.
+5. A child skips intake and map, collects its shapes, writes exactly its assigned ids, reconciles its own files and returns its index rows. It never nests again. A task it cannot write as assigned comes back with the reason, and the planner re-cuts that batch.
+6. The planner builds `index.md` from the children's rows and reconciles over rows and measured sizes, never by opening a task file: coverage and collision from the `files` column, size by `wc -c`, names by listing the directory. Restatement and sense within a task are each child's own reconcile. A batch whose child never returns shows as missing ids; the planner spawns that batch once more, and a second miss is `BLOCKED`.
+
+Batches exist only inside the spec run. The index stays one graph: the orchestrator dispatches from `needs` and never sees a batch. A revising call never nests: it rewrites a few task files in a directory it reads as its map.
+
 ## Drift: adapt, or `SPEC-DRIFT`
 
 An executor keeps the work moving. The rule lives in the executor's body, never in a task file:
@@ -237,7 +253,7 @@ An executor keeps the work moving. The rule lives in the executor's body, never 
 - Only `flights-speccer` changes a task file. A dispatcher that patches one, or writes rulings beside the directory, makes a second spec over the first: the task files stop being the truth, every executor reads one more file, and the longest-lived context in the family does design work.
 - Revising: given an existing spec directory, a reason (`SPEC-DRIFT`, `FAILED`, a failing check, a ruling on a `BLOCKED` question, a refinement), what already landed and the completed ids, `flights-speccer` leaves the completed task files as they are, rewrites, adds or removes the remaining ones, rebuilds the index, and returns as usual with the changed ids in its notes. The fix goes into the task file itself.
 - A revising call often reaches a fresh `flights-speccer`: the one that wrote the directory was another agent's child, and a sub-agent cannot address it. The fresh one reads the directory as its map — the index, and the task files the reason names — and probes only for what the reason requires; the shapes already quoted are its own earlier work, and re-mapping the area would pay the whole run again.
-- Diagnose-first, on the second red of one id: before any rewrite, `flights-speccer` reads the whole unit the task changes — the entire test, beat or module, never the window around the failing line — and the runtime path it exercises, through one `tracer` probe when the path leaves the unit, and writes the cause as a `Decisions` line in the task file. A rewrite without a named cause is the previous round again with new words. The executor transcripts of every round on that id are part of the reading.
+- Diagnose-first, on the second red of one id: before any rewrite, `flights-speccer` reads the whole unit the task changes — the entire test, beat or module, never the window around the failing line — and the runtime path it exercises, through one collector when the path leaves the unit, and writes the cause as a `Decisions` line in the task file. A rewrite without a named cause is the previous round again with new words. The executor transcripts of every round on that id are part of the reading.
 - A red in production code the flight forbids fixing (a report-only flight, a fenced module) is not a spec fault and does not cycle: the same revising call records it where the project keeps known defects (a registry row, an owed line), narrows the task's `Done when` to what the executor may prove, and names the defect in `NOTES` for the return.
 - A revising call leaves the task files of `CLAIMED` tasks untouched: their executors have read them, and a file rewritten under a live executor is two specs for one task. Its findings reach that task, if at all, through the next round.
 - A value one run printed — a count, a selection size, an id — never enters a `Done when` row, even when `flights-speccer` watched it print: the state a run sees is dynamic, and a row written from one run is a coincidence written as a contract. Observed values are evidence in the return.
@@ -256,11 +272,12 @@ A task that cannot be specified at all, because the input contradicts itself or 
 SPEC {spec directory}
 {the index table, verbatim}
 DISPATCH {the ready rule, one executor per task file briefed with its task file and reads files, the pin-then-rating model rule, the SPEC-DRIFT procedure}
-RECONCILED {n} changes in {m} tasks, {k} blocked, {c} file collisions, largest read {x} chars
+RECONCILED {n} changes in {m} tasks, {b} batches, {k} blocked, {c} file collisions, largest read {x} chars
 BLOCKED {id or item}: {what is missing} · {the one question} | none
 NOTES {up to five lines} | none
 ```
 
+- `batches` is 0 when the speccer wrote every task file itself, and the number of children when it [nested](#nesting-a-large-flight-is-written-by-child-speccers).
 - `NOTES` carries the decisions a human would want the chance to overrule, what `flights-speccer` found wise but nobody asked for, and after a revision the changed ids.
 - `largest read` is the biggest task file plus its `reads`, measured; it shows the reading budget was counted.
 - The index travels in the return so the caller spends no call reading it and cannot forget to. It is the same table as on disk, not a thinner one: two formats would be a second thing to keep in sync.
@@ -281,7 +298,7 @@ NOTES {up to five lines} | none
 | Rulings written by the dispatcher beside the directory | A second spec over the first; a spec fault goes back to `flights-speccer` |
 | Recursive review passes inside `flights-speccer` | A quoted shape checks itself at execution time; the reconcile phase's six checks are the review |
 | Scheduling between flights | The main chat runs flights one after another |
-| Proof-of-concept and research modes | A task that needs a proof is rated `hard` and goes to a frontier-judgment executor |
+| Proof-of-concept and research modes | A task that needs a proof is rated `smart` |
 
 ## Measuring a spec
 
@@ -294,22 +311,22 @@ A spec is judged from the transcript of the executor that ran it.
 | Peak context | Small enough that the run, fail, fix loop stays cheap | A task that should have been split |
 | Calls per executor | Between about 40 and 80 | Fewer: tasks cut too small, the fixed price paid too often. More: a task that should have been cut |
 | `SPEC-DRIFT` returns | Rare | Progress dependencies that list adaptable details, a wrong early decision, or a spec that contradicts itself |
-| `flights-speccer`'s own peak context | Low enough that a revising call stays cheap | Map reports that quoted files instead of mapping them |
+| `flights-speccer`'s own peak context | Low enough that a revising call stays cheap | Map reports that quoted files instead of mapping them, or the tasks of separate contexts written in one context instead of by children |
 | "Adapted" notes in returns | Few, and never about a pinned shape | Shapes written from memory |
 
 ## Surfaces that stay in sync
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-speccer.md` | The executable protocol, the only place the format is spelled out for a model; its `description` is the caller's input contract. It is pinned at apex (`fable`), effort `high`, and a small flight's caller passes `model: "opus"` on the spawn |
+| The agent | `templates/global/agents/flights-speccer.md` | The executable protocol, the only place the format is spelled out for a model; its `description` is the caller's input contract. It is pinned at `opus`, effort `high` |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The outer contract: unspecified work goes to `flights-speccer` with content and never a format; the flight directory, the index and the ready rule; only `flights-speccer` changes a task file |
 | The command | `/flights:spec` | The human-in-the-loop front end: the maps, the user's answers, the hand-off, the one question, the presentation. It never restates the format |
 | The adopter contract | `CLAUDE.md` and `templates/project/CLAUDE.md`, `/pcm` | Wording that names the spec writer and how a spec travels |
 
 ## Open items
 
-- The size limits (absorb under about 5 files or 8 steps, cut over about 20 files or 25 steps) and the reading budget (16,000 characters) are first values. Tune them until executors land between about 40 and 80 calls.
-- Whether `flights-speccer` spawns more of itself for a very large flight, and how it partitions by file ownership.
+- The size limits (absorb under about 5 files or 8 steps, cut over about 20 files or 25 steps) and the reading budget (25,000 characters, raised from 16,000 because trimming task files to fit was most of a large run's cost) are first values. Tune them until executors land between about 40 and 80 calls.
 - Distilling `/architecture-design` into how `Decisions` is written.
+- Experiment: map probes are `tracer` (general-purpose made specific to the speccer), measured on one bench against open-handed `general-purpose` (tracer 28.0/30 with 2 wrong at $1.17, against 29.5 with 3 wrong at $2.26); a whole-flight replay against the open-hand opus baseline decides whether it stays.
 - A test on this repository that measures whether `flights-speccer` reuses what exists instead of inventing it.
 - A `pfm` verb that compiles and validates `index.md` from the task files' frontmatter.

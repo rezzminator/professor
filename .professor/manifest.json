@@ -66,8 +66,7 @@
   },
   "installed": {
     "agents": [
-      "gitter",
-      "tracer"
+      "gitter"
     ],
     "commands": [
       "dev",
@@ -80,7 +79,6 @@
     "scripts": [
       "codex-sync.sh",
       "dev.sh",
-      "explore-deny.sh",
       "format-md.sh",
       "guard-stamp.sh",
       "pfm-guard.sh"
@@ -93,26 +91,24 @@
   },
   "file_hashes": {
     ".claude/agents/gitter.md": "f057c05b9852a5c4d13159451747606b952e1789a5efaddebc47047639271deb",
-    ".claude/agents/tracer.md": "e260e73f90fc7f5f9758bc5bf4dcf08325c8f8d6724068396c7fa7bffc544705",
-    ".claude/codex-build.json": "3dc5b9151a6f11f30cc3cab7a49b32055b5b4a255d0367722194b822d083b37f",
+    ".claude/codex-build.json": "d63f0933e4cfe1e5270101180e37aed48490ab8dc8c3f7204ada67ab01afe115",
     ".claude/commands/dev.md": "b7b86c57a5ed91328abb834f64553ccf67a0ac58c7ad631251f4b9c7c8e50e96",
-    ".claude/commands/pcm.md": "87124a829afd1ffb85c3c5a33c8e3d9ada98f6df7ec72c4a087adc02a3573ad5",
-    ".claude/commands/pfm-testing-manual.md": "90eda8b9ef4060722231a69cbcea0f226b1de7edcaca65e6f3c77057cd2ed14a",
+    ".claude/commands/pcm.md": "9515eb55eb0d0256946108b91a17f0a59847d707bf92d8dd699238f4e3baf9ea",
+    ".claude/commands/pfm-testing-manual.md": "e321e956c5413f3f0e0dd8b16febf78afa33ae6e5de4d8915fcd4445b360f8b5",
     ".claude/commands/pfm/release.md": "55b6429a5a8e58fe953819622752ce1adba0cbd28825d644b16b94a157799b06",
     ".claude/commands/quality/doc.md": "dd3f01c84d9eaace7b45df52a8501c2137b5daa7556049df1980e1183705f67d",
     ".claude/commands/quality/prompt.md": "5b778fbdf56339f572f3e9595291ff6c83d628557ed7b907639f483593825870",
-    ".claude/scripts/codex-sync.sh": "60cf7284a6b5164fe0edeb0fc9bd52f36b033b4cb9ba27f831adff470ed627a5",
+    ".claude/scripts/codex-sync.sh": "d536e54284332a7109fcde0ac58e8bc37982a137733d9a00832a28bfd29c7283",
     ".claude/scripts/dev.sh": "023c75b4f64899855e1bc8e93a80b460480b02d8ea679e36ec0cf86949cd689a",
-    ".claude/scripts/explore-deny.sh": "966d38099cd592963ef54b54fb7544d4d44437fd4e36faae0846219ab57b26b6",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
     ".claude/scripts/pfm-guard.sh": "1fdaecfc779371a8bd68a59b695cd807c9739d196c3ef881c51cc9e991f97069",
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "03a28d625b249ce0798c37a9cd25f38924dc2692b616045ba9ab935d3e8ca505",
-    "CLAUDE.md": "cbfe53cdf7bff287cf7801efad7e18c59ab62269c5bedd781fa3dd1b121fbeba",
-    "docs/commands/pcm/references/audit-scopes.md": "225cff332853a5bbed24a7f49529a34a1294c473b1049051eadecdef73b34243",
-    "docs/commands/pcm/references/refresh.md": "5601e888f091d7ffcbdc2ffb08c14063f67b8607ae9a5237fd4b0dfa8cff2796",
+    "CLAUDE.md": "68a0eae9b3c318e254a864116fc252e83cfccb869c7573b928fd68d6450c1cd9",
+    "docs/commands/pcm/references/audit-scopes.md": "4c4b8c88706ffc560a25901f0d79a3955313be5fecf437a596661697f77d8cdc",
+    "docs/commands/pcm/references/refresh.md": "53321cfc5d79b710fdd89e0316f4b15aaed5249c8e96e58e6405e869d2878e7c",
     "docs/commands/pfm/references/release-rehearsal.md": "4aab154533f734c8c7f2e5eb55a005666356eab433ca856bb2f3753b11c92c7b",
     "pfm/CLAUDE.md": "bb3645b429c62d91dadf07fd2efd19ef869a81e429c1b54377e5ad76767bb526"
   }

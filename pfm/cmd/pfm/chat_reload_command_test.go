@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/action"
 	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/reload"
@@ -37,7 +38,7 @@ func TestRefreshReloadRolePromptReResolvesAndRewritesBothEngineChannels(t *testi
 			name: "codex", engine: pfmengine.Codex,
 			agentDir: ".codex/agents", agentFile: "reviewer.toml",
 			agentBody:  "name = \"reviewer\"\ndeveloper_instructions = \"\"\"\nCURRENT CODEX ROLE\n\"\"\"\n",
-			wantPrompt: "CURRENT CODEX ROLE\n",
+			wantPrompt: mustCodexFleetPrompt(t) + "\n---\n\nCURRENT CODEX ROLE\n",
 		},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -407,4 +408,15 @@ func TestReloadTargetAcceptsRecoveredCodexSeatWithoutAmbientTmux(t *testing.T) {
 			socket, pane, state, code, stderr.String(),
 		)
 	}
+}
+
+// mustCodexFleetPrompt is the composed Codex fleet prompt a cx role seat
+// carries ahead of its compiled role body.
+func mustCodexFleetPrompt(t *testing.T) string {
+	t.Helper()
+	prompt, err := codexgen.FleetPrompt()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return prompt
 }

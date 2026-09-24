@@ -354,7 +354,7 @@ Commands:        .claude/scripts/dev.sh iso test pfm
 Acceptance:      <observable behavior> · C3 budget lowered to <N>
 ```
 
-Work-tree anatomy for each flight: `/tmp/{project}/flights/<flight>/{index.md,<level>-<letter>.md,run.md,audit.md}`, at most three levels deep. Evidence a later task needs is quoted into its task file.
+Work-tree anatomy for each flight: `$HOME/.local/state/pfm/flights/{project}/<flight>/{index.md,<level>-<letter>.md,run.md,audit.md}`, at most three levels deep. Evidence a later task needs is quoted into its task file.
 
 ## 10. Open rulings
 

@@ -135,7 +135,7 @@ I89 · Backup retention: no pruning routine found for old timestamped backups �
 ### Doc vs code
 
 I90 · §7b-i `settings-global.json` merge is a Phase-2 Claude-session hand-merge, not `pfm` Go code ⚠ known-gap · needs:seat:cc · today:NONE · install.md:324-331 · lane(s):O1
-I91 · §7d/§7e `notify.sh`/`format-md.sh` are project-scoped hooks shipped via `templates/project/settings.json`, not host hooks (clarification) · needs:project · today:U · install.md:332-337 · lane(s):O1
+I91 · §7e `format-md.sh` is a project-scoped hook shipped via `templates/project/settings.json`, not host hooks (clarification) · needs:project · today:U · install.md:332-337 · lane(s):O1
 I92 · §7g git-host bridge skill (`host-{gh,glab}`) is Phase-2 Claude-session generated, zero Go references ⚠ known-gap · needs:seat:cc,git · today:NONE · install.md:338-342 · lane(s):O1
 I93 · §7h themes — implemented, matches doc (confirmed correct) · needs:seat:cc · today:U · install.md:343-344 · lane(s):O1
 I94 · §7f-i MCP — implemented, matches doc (confirmed correct) · needs:network · today:U · install.md:345-348 · lane(s):O1
@@ -155,7 +155,7 @@ I99 · Claude `PreToolUse` (`Bash`) → `pfm internal git-guard` (non-gitter sha
 ### Scaffold roster
 
 P1 · `project/CLAUDE.md` → `CLAUDE.md` · needs:project · today:U+A (`install-init.txtar`) · install.md:145 · lane(s):A
-P2 · `project/settings.json` → `.claude/settings.json` (ships `notify.sh`/`format-md.sh` hooks) · needs:project · today:U+A · install.md:146 · lane(s):A
+P2 · `project/settings.json` → `.claude/settings.json` (ships the `format-md.sh` hook) · needs:project · today:U+A · install.md:146 · lane(s):A
 P3 · `project/rumdl-policy.toml` → `.rumdl.toml` · needs:project · today:U · install.md:147 · lane(s):A
 P4 · `project/commands` (skip `per-project`) → `.claude/commands` · needs:project · today:U · install.md:148 · lane(s):A
 P5 · `project/agents` → `.claude/agents`, only `gitter.md` ships · needs:project · today:U · install.md:149 · lane(s):A
@@ -553,7 +553,9 @@ X39 · `pfm internal then --socket --target [--self] --steer text...` (detached 
 X40 · `pfm internal tmux-title-renudge` (OSC title repaint sweep) · needs:tmux · today:U · cli.md:226 · lane(s):O2
 X41 · `pfm internal update-check --cache PATH --current vX.Y.Z --url URL` (picker's cached release-notice refresh) — only its wiring is tested, the `internal/updatecheck` package itself not opened ⚠ known-gap · needs:network · today:NONE · cli.md:227 · lane(s):A
 X42 · `pfm log [--since D] [--level L] [--chat X] [--cmd V] [--comp C] [--follow]` reads the activity log `log/pfm.jsonl`; an unknown `--level`/`--comp` is a usage error naming the accepted set, an absent log says so on stderr · needs:none · today:U (`internal/obs/logcmd_test.go`) · cli.md · lane(s):O2
-X43 · `pfm internal git-guard` (PreToolUse Bash hook body, denies a shared git write to every agent but gitter) · needs:none · today:U · hooks.md § git-guard · lane(s):O2
+X43 · `pfm callmeter report {files|writes|commands|context|sequences|faults} [--since D] [--project P] [--agent-type T] [--session S] [--config-dir DIR] [--limit N]` and `pfm callmeter backfill [--since D] [--config-dir DIR]` over the call store `.local/state/pfm/callmeter.db`; an absent store says so and exits 0 without creating it, an unopenable one exits 1, an unknown topic or `--config-dir` is a usage error, a second backfill inserts nothing · needs:none · today:U (`cmd/pfm/callmeter_command_test.go`) · callmeter.md · lane(s):O2
+X44 · `pfm internal callmeter` (the async call-recording hook: a `PostToolUse` payload becomes a calls row the reports read) · needs:none · today:U (`internal/hookentry/callmeter_test.go`) · callmeter.md · lane(s):O2
+X45 · `pfm internal git-guard` (PreToolUse Bash hook body, denies a shared git write to every agent but gitter) · needs:none · today:U · hooks.md § git-guard · lane(s):O2
 
 ---
 
@@ -575,8 +577,8 @@ None — every row read across the five inventories converted into an atomic ite
 | M — MCP | 55 | 5 |
 | L — Lifecycle mechanics | 41 | 0 |
 | H — Harvester | 13 | 1 |
-| X — Misc CLI | 42 | 5 |
-| **Total** | **430** | **32** |
+| X — Misc CLI | 44 | 5 |
+| **Total** | **432** | **32** |
 
 `today=NONE` breakdown by id: I4,I5,I9,I10,I13,I15,I17,I18,I40,I89,I90,I92 (12) · P12,P13,P14,P15 (4) · C31,C40,C41 (3) · K19 (1) · T37 (1) · M15,M16,M17,M18,M48 (5) · H12 (1) · X18,X32,X33,X34,X41 (5).
 

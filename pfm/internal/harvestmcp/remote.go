@@ -78,6 +78,9 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 		)
 	}
 	runtime := options.Runtime
+	// The gateway's service is always the remote one: no parseLocalDocuments, no
+	// server path in any result, download answers a signed url.
+	runtime.Remote = true
 	if runtime.Clock == nil {
 		runtime.Clock = clock.Real
 	}
@@ -95,6 +98,11 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 	if err != nil {
 		return nil, err
 	}
+	links, err := newDownloadLinks(publicURL, runtime.Clock)
+	if err != nil {
+		return nil, errors.Join(err, service.Close())
+	}
+	service.links = links
 	r := &RemoteServer{publicURL: publicURL, resource: publicURL + mcpPath, parsed: parsed, service: service}
 	statePath := options.StatePath
 	if statePath == "" {
@@ -126,6 +134,10 @@ func (r *RemoteServer) Close() error {
 func (r *RemoteServer) serveHTTP(w http.ResponseWriter, req *http.Request) {
 	if !r.allowedHost(req.Host) {
 		http.Error(w, "host is not allowed", http.StatusForbidden)
+		return
+	}
+	if strings.HasPrefix(req.URL.Path, filesPath) {
+		r.serveFile(w, req) // the signature is the access control, not the bearer
 		return
 	}
 	switch req.URL.Path {

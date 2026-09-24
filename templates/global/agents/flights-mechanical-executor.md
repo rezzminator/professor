@@ -1,6 +1,6 @@
 ---
 name: flights-mechanical-executor
-description: 'FLIGHTS-ONLY — spawned by flights-orchestrator, one fresh executor per task file rated mechanical: its code and covering tests. Pass the brief file, the task file and its reads paths. flights-orchestrator → here → flights-gater. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the watched-failing test per Done when row, adaptations, RETRO.'
+description: 'FLIGHTS-ONLY — spawned by flights-orchestrator, one fresh executor per task file rated mechanical: its code and covering tests. Pass the brief file, the task file and its reads paths. flights-orchestrator → here → flights-lander. Returns a DONE, FAILED, SPEC-DRIFT or BLOCKED line, then files changed, the watched-failing test per Done when row, adaptations, RETRO.'
 model: sonnet
 effort: medium
 tools: Read, Write, Edit, Bash, Glob, Grep
@@ -46,7 +46,7 @@ You write the covering tests yourself, one per `Done when` row and line.
 
 ## The cap
 
-80 tool calls. Past it, stop and return `FAILED {id}: cap` with what landed.
+80 tool calls. Past it, stop and return `FAILED {id}: cap` with the handoff: what landed, what is left, the next step.
 
 ## Return
 

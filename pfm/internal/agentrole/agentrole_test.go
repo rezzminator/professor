@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -50,9 +51,10 @@ func TestResolveClaudeSuccessReturnsBodyAfterFrontmatter(t *testing.T) {
 	}
 }
 
-// Test 2 — a .codex/agents/<role>.toml resolves to exactly its
-// developer_instructions value, byte-for-byte, and the other keys never leak
-// into it.
+// Test 2 — a .codex/agents/<role>.toml resolves to the Codex fleet prompt
+// followed by exactly its developer_instructions value, byte-for-byte: the
+// seat's developer_instructions replaces the config-level fleet prompt, and
+// the compiled role file carries only its own body. The other keys never leak.
 func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	repo := t.TempDir()
 	home := t.TempDir()
@@ -68,12 +70,15 @@ func TestResolveCodexSuccessReturnsDeveloperInstructions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
-	want := "Body line one.\nBody line two.\n"
-	if got != want {
-		t.Fatalf("Resolve() = %q, want %q", got, want)
+	fleetPrompt, err := codexgen.FleetPrompt()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Contains(got, "name") || strings.Contains(got, "description") ||
-		strings.Contains(got, "reads diffs") {
+	role := "Body line one.\nBody line two.\n"
+	if want := fleetPrompt + "\n---\n\n" + role; got != want {
+		t.Fatalf("Resolve() = %q, want the fleet prompt then %q", got, role)
+	}
+	if strings.Contains(role, "name") || strings.Contains(got, "reads diffs") {
 		t.Fatalf("Resolve() = %q, want no leakage of the name/description keys", got)
 	}
 }

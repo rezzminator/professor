@@ -102,7 +102,7 @@ For each roster entry, Claude needs:
 - Tech: language, framework, package manager, test runner, build tool, dev server port(s)
 - Ownership facts, each answered by naming at most one entry: which owns the shared infra/orchestration (`Makefile`, containers, DB, queue); which owns the migrations dir; which holds the LLM-calling code, if any; which serves the public site, if any
 
-**Single-project repo (roster of one):** the worktree is the repo root (no per-project subdir), there are no cross-project/integration steps, routing is trivially that one project, and the multi-project framing collapses to "the project." Skip child `CLAUDE.md` files (nothing to consolidate). Any project agent lives flat at `.claude/agents/`; a flight's executors and gater are machine-global and picked by the index row's `rating`, with no per-project fan-out.
+**Single-project repo (roster of one):** the worktree is the repo root (no per-project subdir), there are no cross-project/integration steps, routing is trivially that one project, and the multi-project framing collapses to "the project." Skip child `CLAUDE.md` files (nothing to consolidate). Any project agent lives flat at `.claude/agents/`; a flight's executors and lander are machine-global and picked by the index row's `rating`, with no per-project fan-out.
 
 **Multi-project repo (roster of 2+):** the main-loop session designs cross-project contracts directly (no dedicated consolidation agent). For each entry, create `{project}/CLAUDE.md` and `{project}/.claude/agents/`.
 
@@ -227,9 +227,9 @@ Claude takes your answers and:
 2. **Writes per-project `CLAUDE.md` files** (roster of 2+) — one per entry, with that entry's tech stack and conventions. A roster of one has no child CLAUDE.md.
 3. **Writes Tier A command files** — `/pcm`, `/dev`, `/rnd`, `/audit:*` (the machine-global `/flights:*`, `/pfm`, `/quality:*` arrive by `pfm install`). Voice intact, domain content filled.
 4. **Writes Tier B command files** for each opt-in — `/officer`, `/mentor`, `/marketer`. Archetype skeletons with your placeholders filled. The leading `>`-quoted "Required placeholders (fill at install)" meta-block from each template is stripped before save — that block is install-time scaffolding, not runtime content. A correctly-installed Tier B command starts with the H1 heading and goes straight to the `$ARGUMENTS` line. A declined archetype that `pfm init` already scaffolded is deleted, its pin forgotten with `pfm update drop <local>`, then its template silenced with `pfm update ignore <template>`; see [Review and adopt upstream project changes](#review-and-adopt-upstream-project-changes).
-5. **Writes root agents** — `gitter` always (`tracer`, `flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-hard-executor`, `flights-gater`, `reviewer`, and `rr` are machine-global, linked into `~/.claude/agents/` by `pfm install`, never copied into the project). Cross-project consolidation for a roster of 2+ runs in the main-loop session, not a dedicated agent.
+5. **Writes root agents** — `gitter` always (`tracer`, `flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-smart-executor`, `flights-lander`, `general-orchestrator`, `general-mechanical-executor`, `general-smart-executor`, `reviewer`, and `rr` are machine-global, linked into `~/.claude/agents/` by `pfm install`, never copied into the project). Cross-project consolidation for a roster of 2+ runs in the main-loop session, not a dedicated agent.
 6. **Writes the per-project testing manuals** — for each roster entry, instantiates `.claude/commands/{project}-testing-manual.md` from `templates/project/commands/per-project/testing-manual.md` with that project's tiers, test homes, run commands, gates and traps; the flights agents read it, so no per-project `developer` or `qa` agent ships. Specialists from Q3 are written under `{project}/.claude/agents/` only when the project wants them; no shipped command spawns one by name.
-7. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`, `dev.sh`, `notify.sh`. Fills the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh` from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop). 7a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; every registry skill is **source-fetched** from its canonical public repo (listed in `templates/project/skills/sources.json`) into `.claude/skills/{name}/`, so those external skills cannot silently drift inside the blueprint. The installer copies the bundled shelf, clones each registry skill, parameterizes where needed, and removes each clone's `.git/` directory so the installed skills are plain files. The reasoning protocols that once shipped as bundled skills — `/rnd`, `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. `/rnd` is project-scope: the command owns the RND lifecycle and executes its own run. The table records each subject's source path and its parameterization.
+7. **Writes scripts** — `worktree.sh`, `alloc-ports.sh`, `dev.sh`. Fills the `PROJECTS=(…)` arrays in `worktree.sh`/`dev.sh` from the roster so they iterate the real entries, with each entry's setup logic and port ranges pinned. A single-project roster fills the array with one entry (or drops the loop). 7a. **Installs skills.** The blueprint bundles the attributed `legal` reference shelf under `templates/project/skills/legal/`; every registry skill is **source-fetched** from its canonical public repo (listed in `templates/project/skills/sources.json`) into `.claude/skills/{name}/`, so those external skills cannot silently drift inside the blueprint. The installer copies the bundled shelf, clones each registry skill, parameterizes where needed, and removes each clone's `.git/` directory so the installed skills are plain files. The reasoning protocols that once shipped as bundled skills — `/rnd`, `/quality:prompt`, `/quality:doc`, `/audit:code-hygiene`, `/audit:security` — are **commands**. Project-specific commands live under `templates/project/commands/`; shared commands live under `templates/global/commands/`, and machine-global skill directories under `templates/global/skills/` — both linked by host installation. `/rnd` is project-scope: the command owns the RND lifecycle and executes its own run. The table records each subject's source path and its parameterization.
 
 | Skill / command | Source | Parameterization |
 | --------------------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -256,37 +256,6 @@ Claude takes your answers and:
     ```
 
     `cleanupPeriodDays` controls Claude Code's startup sweep: every session transcript AND every orphaned git worktree older than this many days is deleted automatically, with no warning, before you ever see them. The stock default is `30` — leave a project untouched for a month and its chat history and worktrees are gone at the next launch. `36500` (100 years) is the practical "off" value. **`0` is not "off"** — it fails settings validation (the minimum accepted value is `1`), so never write `0` trying to disable the sweep. This key is global: it governs every project on the adopter's machine, not just this one, so the merge (not overwrite) discipline matters even more here than for a project-scoped file.
-
-7d. **Configures notifications** — `notify.sh` hooks into Claude Code's `PreToolUse` and `Stop` events via `.claude/settings.json` hooks. Sends a macOS native notification with Glass sound when a turn takes 30+ seconds. Character name and project root path are parameterized at install. Add to `.claude/settings.json`:
-
-```json
-{
-"hooks": {
-"PreToolUse": [
-{
-"matcher": "",
-"hooks": [
-{
-"type": "command",
-"command": "/absolute/path/to/your-project/.claude/scripts/notify.sh start"
-}
-]
-}
-],
-"Stop": [
-{
-"matcher": "",
-"hooks": [
-{
-"type": "command",
-"command": "/absolute/path/to/your-project/.claude/scripts/notify.sh stop"
-}
-]
-}
-]
-}
-}
-```
 
 7e. **Configures markdown auto-formatter** — `format-md.sh` hooks into Claude Code's `PostToolUse` event for `Edit` and `Write` tools. When Claude edits a Professor-owned `.md` file (CLAUDE.md, `.claude/`, `docs/commands/`, `docs/agents/`, `docs/epics/`, `docs/dev/`, `docs/business/`, or child project CLAUDE.md files), `rumdl` formats it under the repo-root `.rumdl.toml` policy (`/quality:md-forlint`). Non-Professor files and generated mirrors are ignored. Add to `.claude/settings.json`:
 
@@ -318,7 +287,7 @@ Claude takes your answers and:
 
 7h. **Installs themes** — places each Claude Code theme listed in `templates/themes/sources.json` into `~/.claude/themes/`: `source_fetched` entries are fetched from their canonical public repo (the blueprint never vendors a copy, so it can't drift); `bundled` entries ship beside the manifest — today three overlays merged onto the fetched Tokyo Night, `professor-gold` / `professor-silver` / `professor-bronze`, one per fleet account medal (🥇🥈🥉), each changing only the input bar (`promptBorder` + `promptBorderShimmer`) — selected per account with `"theme": "custom:professor-gold"` in that account's `settings.json`. For `tokyo-night`: `mkdir -p ~/.claude/themes && curl -fsSL https://raw.githubusercontent.com/rezzminator/claude-code-tokyo-night/main/tokyo-night.json -o ~/.claude/themes/tokyo-night.json`. Activate with `/theme` → "Tokyo Night" (requires Claude Code v2.1.118+). Themes install to the user's home, so they are shared across all the user's projects. To match the terminal's own base background to the theme (VS Code `terminal.background`, or the profile background in iTerm2/Apple Terminal/Ghostty/Kitty/WezTerm), follow the theme repo README: <https://github.com/rezzminator/claude-code-tokyo-night#match-your-terminal-background-optional>.
 
-8. **Creates directory structure** — `docs/agents/`, `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` (gitignored). Flight directories are scratch: `/tmp/{project}/flights/{flight}/` is created by the run itself, outside the repo entirely.
+8. **Creates directory structure** — `docs/agents/`, `docs/commands/`, `docs/dev/tasks/`, `docs/dev/tasks/archive/`, `.worktrees/` (gitignored). Flight directories live in pfm's state directory: `$HOME/.local/state/pfm/flights/{project}/{flight}/` is created by the run itself, outside the repo entirely, and kept across reboots.
 
 8a. **Installs command reference docs** — copies `templates/project/docs-commands/` into `docs/commands/` verbatim; the template tree mirrors `$CDOCS` exactly (e.g. `docs-commands/build/references/qa-commons.md` → `docs/commands/build/references/qa-commons.md`), so commands that cite a reference doc find it on disk.
 

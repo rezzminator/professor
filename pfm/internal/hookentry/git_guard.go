@@ -29,6 +29,9 @@ const (
 	gitGuardOnlyGitter  = `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.`
 	gitGuardUnreadable  = "could not read this command; split it so each git call is its own simple command."
 	gitGuardNoSetupHint = "gitter creates and removes worktrees (Phase SETUP)."
+	gitGuardStashHint   = "To park only your own files, " + "`git stash push -- <path>...`" +
+		" is allowed (restore with " + "`git stash pop`" +
+		"); a whole-tree stash moves every other agent's uncommitted work."
 )
 
 // The sub-verbs git's own words share across the tables below.
@@ -93,10 +96,12 @@ func (gitGuardNoPython) Analyze(context.Context, []cmdparse.Snippet) ([]cmdparse
 }
 
 // gitGuardBlock is one blocked part: the command as its words read, and,
-// for a worktree write, the directory its repository is found from.
+// for a worktree write, the directory its repository is found from; stash
+// marks a blocked git stash, whose deny names the path stash.
 type gitGuardBlock struct {
 	command  string
 	worktree bool
+	stash    bool
 	repoDir  string
 }
 
@@ -178,7 +183,7 @@ func gitGuardPart(part *cmdparse.Part, cwd string) (gitGuardBlock, bool) {
 	}
 	repoDir, sub, rest := gitGuardSplit(part.Args, cwd)
 	blocked, worktree := gitGuardBlocks(sub, rest, repoDir)
-	return gitGuardBlock{command: written, worktree: worktree, repoDir: repoDir}, blocked
+	return gitGuardBlock{command: written, worktree: worktree, stash: sub == "stash", repoDir: repoDir}, blocked
 }
 
 // gitGuardSplit skips git's global options and returns the repository
@@ -440,7 +445,8 @@ func gitGuardTopLevel(dir string) string {
 
 // gitGuardReason is the one deny message: every blocked part as written, the
 // gitter instruction, the worktree way for each repository a worktree write
-// named, and the unreadable-command line.
+// named, the path-stash line when a stash was blocked, and the
+// unreadable-command line.
 func gitGuardReason(blocks []gitGuardBlock, unreadable bool) string {
 	var lines []string
 	if len(blocks) > 0 {
@@ -463,6 +469,11 @@ func gitGuardReason(blocks []gitGuardBlock, unreadable bool) string {
 		}
 		if !slices.Contains(lines, hint) {
 			lines = append(lines, hint)
+		}
+	}
+	for _, block := range blocks {
+		if block.stash && !slices.Contains(lines, gitGuardStashHint) {
+			lines = append(lines, gitGuardStashHint)
 		}
 	}
 	if unreadable {

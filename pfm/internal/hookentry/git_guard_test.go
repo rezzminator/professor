@@ -210,6 +210,25 @@ func TestGitGuardAllowsReadsAndOwnFileWritesForAnExecutor(t *testing.T) {
 	}
 }
 
+func TestGitGuardStashDenyNamesThePathStash(t *testing.T) {
+	cwd := t.TempDir()
+	command := "git stash && go test ./...; git stash pop"
+	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, cwd, gitGuardExecutor))
+	if code != 0 || !strings.Contains(stdout, gitGuardDenied) {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want a deny", code, stdout, stderr)
+	}
+	reason := gitGuardDenyReason(t, stdout)
+	for _, want := range []string{"git-guard blocked", "git stash push -- <path>..."} {
+		if !strings.Contains(reason, want) {
+			t.Fatalf("reason=%q, want it to contain %q", reason, want)
+		}
+	}
+	code, stdout, stderr = runGitGuard(t, gitGuardPayload(t, "Bash", "git stash push -- a.go", cwd, gitGuardExecutor))
+	if code != 0 || stdout != "" {
+		t.Fatalf("code=%d stdout=%q stderr=%q, want the path stash allowed with no output", code, stdout, stderr)
+	}
+}
+
 func TestGitGuardNamesEveryBlockedPartOfOneCall(t *testing.T) {
 	command := "git status && git add f && git commit -m x; git push"
 	code, stdout, stderr := runGitGuard(t, gitGuardPayload(t, "Bash", command, t.TempDir(), "general-smart-executor"))

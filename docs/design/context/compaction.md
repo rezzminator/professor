@@ -14,7 +14,7 @@ Decisions live in this file. A change lands here first, then in the code, then i
 - [Measurements](#measurements)
 - [What it does not do](#what-it-does-not-do)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
-- [Open items](#open-items)
+- [Known limit](#known-limit)
 
 ## What Claude Code offers
 
@@ -24,6 +24,7 @@ Read in the Claude Code 2.1.281 source and confirmed live:
 | --- | --- | --- |
 | `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | read from `process.env`: one value per process | A settings `env` block (user or project `settings.json`) reaches the chat and every sub-agent it spawns. |
 | Sub-agent window | the sub-agent's options take `autoCompactWindow` from the parent, through an identity function; a `fork` agent takes the parent's directly | No per-sub-agent threshold exists, and no agent frontmatter key sets one. |
+| Trigger points | the 2.1.281 source: the compaction triggers at `window − 13,000`; the first attempts (a background precompute) start at `window × (1 − f)`, `f` 0.2 by default and set per window by a server-side flag | Attempts begin 16–25% below the window as measured, and the point can move without a Claude Code release, so no setting can make attempts start exactly at a threshold. |
 | `PreCompact` hook | fires before every compaction attempt, the main chat's and each sub-agent's | Exit 2 blocks that attempt ("not compacted · reason"); exit 0 allows it. A blocked attempt makes no summary call and costs no tokens. |
 | `PreCompact` input | `session_id`, `transcript_path` (always the main chat's), `cwd`, `hook_event_name`, `trigger` (`auto` or `manual`), `custom_instructions` | It carries no agent id, and the hook's environment adds only `CLAUDE_PROJECT_DIR`. The gate must infer which party is compacting. |
 
@@ -60,9 +61,9 @@ Why the window is the lower threshold and not a multiple of it: Claude Code make
 
 1. `trigger` is not `auto` (a `/compact` the user typed): allow.
 2. The thresholds are unset or the config fails to load: allow.
-3. Find the party. Sub-agent transcripts live at `{main transcript minus .jsonl}/subagents/agent-*.jsonl`; one written within the last 60 s is active.
-   - No active sub-agent: the main chat is compacting.
-   - An active sub-agent written more recently than the main transcript: the newest such sub-agent is compacting. A sub-agent's work writes its own transcript, not the main one.
+3. Find the party. Sub-agent transcripts live at `{main transcript minus .jsonl}/subagents/agent-*.jsonl`; one written within the last 60 s is active. An active sub-agent estimated below half the window cannot be making an attempt (the first attempts start at `window × (1 − f)`, and half leaves `f` room to double), so it is passed over.
+   - No active candidate: the main chat is compacting.
+   - An active candidate written more recently than the main transcript: the newest such candidate is compacting. A sub-agent's work writes its own transcript, not the main one.
    - Otherwise: the main chat.
 4. Estimate the party's context (below). At or above its threshold: allow (exit 0). Below: block (exit 2) with one stderr line naming the party, the estimate and the threshold.
 
@@ -92,6 +93,9 @@ All on Claude Code 2.1.281, in pfm-launched chats, with a scratch `XDG_CONFIG_HO
 | Gate rerun 1 | main 150K, sub-agent 100K; divisor 4, no settle wait | The main chat was held (blocked 52.9K–141K, compacted at 172.9K). The sub-agent was wrongly blocked at ~79K: its transcript was still being flushed and read 173K six seconds later. This led to the compact-boundary reset, the measured divisor and a settle wait, since removed (see [The gate](#the-gate)). |
 | Gate rerun 2 | same thresholds, fixes in | The sub-agent was blocked at 94.9K and 97.1K, then compacted at 105,981. The main chat was blocked at 81K, 109K and 133K, then compacted at 141,752: the divisor-4 error, now corrected and pinned. |
 | Gate latency | installed build, main 600K / sub-agent 150K, three live chats | 57 gate calls with the settle wait: median 1,257 ms, p90 1,354 ms; an idle chat's quiet transcript answered in 2–6 ms. A sub-agent compacted at 161,888 and 161,858 with the estimate within 0.17% of Claude Code's count. |
+| Live sub-agent, window 150K | one Sonnet sub-agent reading ~456 KB of source, this chat's main at ~280K against 600K | The sub-agent was blocked at 106K, 121K and 136K, allowed at 164K (its first attempt past 150K) and compacted 178,853 → 23,041; later estimates of 118K and 139K matched Claude Code's recorded usage exactly. Gate decisions took 0–4 ms. |
+| Parallel executors | a live orchestrator run, ~10 executors at once, window 150K | 19 compactions after the thresholds were set: 15 at 150.0–173.8K, 4 early at 120K–136K. In each early one the gate had named another active sub-agent past 150K; the log also shows sub-agents a second old (6K) named for others' attempts. The candidate floor now passes over those; see [Known limit](#known-limit). |
+| Compaction pause | the same runs, and the firing-point runs with the gate allowing everything | A compaction stops its agent while Claude Code writes the summary: 37–80 s gated (median 60 s at ~153K; one outlier of 318 s), 27–92 s ungated (41.5 s and 50.5 s at 168K and 179K). The pause is Claude Code's, not the gate's. |
 | Firing point | the hook allows everything; windows of 100K, 200K and 300K | 100K: first attempt ~74.5K, compactions 68.9–74.3K. 200K: first attempt 152.7K, compactions 168.2–178.8K. 300K: first attempt 250.9K, compaction 265.0K. There is no fixed fraction: a prototype run at 100K started at ~53K. |
 
 ## What it does not do
@@ -109,14 +113,18 @@ All on Claude Code 2.1.281, in pfm-launched chats, with a scratch `XDG_CONFIG_HO
 | The config keys | `pfm/internal/config/compact.go`, `pfm/cmd/pfm/config_command.go` | parsing, range, the machine-wide rule, the `pfm config` rows |
 | The installer | `pfm/internal/installer/settings_compact.go`, `expected_hooks.go`, `settings_ownership.go` | the window, the hook, the ownership ledger entry |
 | The gate | `pfm/internal/compactgate/`, `pfm internal compact-gate` in `pfm/cmd/pfm/main.go` | party rule, estimate, decision |
+| The doctor check | `pfm/internal/installer/compact_probe.go`, wired in `hook_probe.go` | the `env compact-window` row, per [../hooks/hooks.md](../hooks/hooks.md#the-pfm-doctor-check) |
 | The hook inventory | [../hooks/hooks.md](../hooks/hooks.md) | the `compact-gate` row |
 | The surface reference | `docs/dev/pfm-surface.md` | the `internal compact-gate` row |
 | The lane map | `docs/dev/testing/landscape.md` (T40), `infra/fence/lanes/` | the landscape row, its beat and its map row |
 | The test timing budgets | `pfm/.testtiming.yml` | the `compactgate` package budget |
 
-## Open items
+## Known limit
 
-- Rollout: the host still runs a binary without these keys. After the merge: `make host-install` from `pfm/`, then `pfm install --yes`, then the two keys, then `pfm install --yes` again, then one live check in a pfm-launched chat against the installed binary.
-- One live rerun with the divisor-8 estimate: rerun 2 predates it. A pass is no main-chat compaction below its threshold and a sub-agent compaction at or above its own.
-- Two sub-agents active at once: the party rule picks the most recently written one. A compaction by the other in the same instant is judged against the wrong transcript. It is not observed yet, so it is named here, not solved.
-- `pfm doctor` proves the hook is present only as far as [../hooks/hooks.md](../hooks/hooks.md#the-pfm-doctor-check) proves every pfm hook. It does not check that the window equals the lower threshold.
+Claude Code knows which agent is compacting (its hook runner receives the agent id) but passes it neither in the `PreCompact` input nor in the hook's environment, in 2.1.281 and 2.1.282. The gate therefore infers the party from the transcripts, and with several sub-agents active at once it can name the wrong one:
+
+- It allows too early when another active sub-agent past its threshold is named for the attempt of one below it. That sub-agent compacts early, but never below half the window (the candidate floor).
+- It blocks too late when a sub-agent below its threshold is named for the attempt of one past it. That compaction lands on a later request.
+- A main chat working while sub-agents run in the background can be confused with them in either direction.
+
+Tighter rules were replayed against the 19 real compactions of the parallel-executor run. Blocking whenever the candidates disagree would have held back 12 of the 15 legitimate compactions, since ten executors sat between 120K and 160K together; the replay cannot model when Claude Code flushes each line, so no heuristic could be proven better than the current one plus the floor. The fix that removes the limit is Claude Code passing `agent_id` in the `PreCompact` input, as it already does in `PostToolUse` and `SubagentStart`; the gate would then read the named agent's transcript and stop inferring.

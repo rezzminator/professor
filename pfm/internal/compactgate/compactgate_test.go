@@ -122,6 +122,26 @@ func TestGateCompaction(t *testing.T) {
 			want: 0,
 		},
 		{
+			// A live orchestrator run of ~10 parallel executors: a sub-agent
+			// spawned a second earlier was named for another's attempt; below
+			// half the window it cannot be the one compacting.
+			name:  "a sub-agent too small to be compacting is passed over for the next active one",
+			prefs: both, trigger: "auto",
+			main: gateTranscript{usage: 90000, age: 30 * time.Second},
+			subs: map[string]gateTranscript{
+				"agent-big":     {usage: 120000, age: 10 * time.Second},
+				"agent-newborn": {usage: 6000, age: time.Second},
+			},
+			want: 0,
+		},
+		{
+			name:  "sub-agents too small to be compacting leave the main chat the party",
+			prefs: both, trigger: "auto",
+			main: gateTranscript{usage: 160000, age: 30 * time.Second},
+			subs: map[string]gateTranscript{"agent-newborn": {usage: 6000, age: time.Second}},
+			want: 0,
+		},
+		{
 			name: "sub-agents all idle past 60 s leave the fresh main as the party", prefs: both, trigger: "auto",
 			main: gateTranscript{usage: 160000, age: time.Second},
 			subs: map[string]gateTranscript{"agent-done": {usage: 50000, age: 2 * time.Minute}},

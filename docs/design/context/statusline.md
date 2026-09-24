@@ -14,7 +14,6 @@ Decisions live in this file. A change lands here first, then in the code, then i
 - [Palette and glyphs](#palette-and-glyphs)
 - [What it does not do](#what-it-does-not-do)
 - [Surfaces that stay in sync](#surfaces-that-stay-in-sync)
-- [Open items](#open-items)
 
 ## What Claude Code offers
 
@@ -82,7 +81,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 One definition in `palette.go` serves both surfaces, so a part that means the same thing on both (model, effort, tokens, elapsed time) wears the same colour. The colours are bright 256-colour tones, chosen to stay legible over Claude Code's faint row body.
 
-Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no Block Elements, Braille or Powerline. The gauge uses Geometric Shapes (`▰▱`), and the sparkline uses the scan-line ladder `_⎽⎼⎻⎺¯`. `🏍️`, `🏎️` and `🛰️` are two code points each, the base plus a variation selector. A terminal that counts them as one column shifts the text after them by one cell.
+Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no Block Elements, Braille or Powerline. The gauge uses Geometric Shapes (`▰▱`), and the sparkline uses the scan-line ladder `_⎽⎼⎻⎺¯`. `🏍️`, `🏎️` and `🛰️` are two code points each, the base plus a variation selector. A terminal that counts them as one column shifts the text after them by one cell; they have rendered in the host's tmux panes since install, and the single-code-point fallbacks are 🛵 (medium) and 🚘 (high).
 
 ## What it does not do
 
@@ -100,7 +99,3 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 | The goldens | `pfm/internal/statusline/testdata/render-*.golden` | the main line byte for byte |
 | The lane map | `docs/dev/testing/landscape.md` (T39), `infra/fence/lanes/` | the landscape row, its beat and its map row |
 
-## Open items
-
-- Rollout: `~/.claude/settings.json` on the build host was pointed at a preview binary during the build. Restore `statusLine.command` to `$HOME/.local/bin/pfm-statusline` and delete `subagentStatusLine` before `pfm install --yes`: the installer writes its own value only when the key is absent.
-- Variation-selector emoji width inside tmux: check it by eye on the host after install; the single-code-point fallbacks are 🛵 (medium) and 🚘 (high).

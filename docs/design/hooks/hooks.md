@@ -132,6 +132,7 @@ The check lives in `hook_probe.go`: `ProbeExpectedHooks` (`pfm/internal/installe
 4. Present exactly once.
 5. Carries `async: true` when its template does (`pfm/internal/installer/hook_probe.go:223-224`).
 6. No retired or unknown pfm hook remains in any probed Claude settings file or any configured Codex `hooks.json` — Codex homes are read too, not just Claude's.
+7. While `claude.autoCompactMain` and `claude.autoCompactSubagent` are both set, every Claude settings file's `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` holds the lower of the two: the `env compact-window` row, `ok` or `DRIFT CLAUDE_CODE_AUTO_COMPACT_WINDOW want={n} got={value|absent}` (`pfm/internal/installer/compact_probe.go`, per [../context/compaction.md](../context/compaction.md)).
 
 ### States
 

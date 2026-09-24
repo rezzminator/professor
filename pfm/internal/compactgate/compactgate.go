@@ -22,6 +22,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -126,9 +127,11 @@ func GateCompaction(
 
 // compactingParty applies the party rule: sub-agent transcripts live under
 // <main transcript minus .jsonl>/subagents/agent-*.jsonl and are active when
-// written within activeWindow of now. With no active sub-agent the main chat
-// is compacting; with active ones and a main transcript last written before
-// the newest active sub-agent's, that sub-agent is; otherwise the main chat.
+// written within activeWindow of now. A sub-agent whose estimate is below
+// half the window cannot be the one compacting (see candidateFloor) and is
+// passed over. With no active candidate the main chat is compacting; with
+// active ones and a main transcript last written before the newest active
+// candidate's, that sub-agent is; otherwise the main chat.
 func compactingParty(mainPath string, now time.Time, mainLimit, subLimit int) (party, error) {
 	mainParty := party{name: "main chat", transcript: mainPath, threshold: mainLimit}
 	dir := filepath.Join(strings.TrimSuffix(mainPath, ".jsonl"), "subagents")
@@ -139,8 +142,11 @@ func compactingParty(mainPath string, now time.Time, mainLimit, subLimit int) (p
 	if err != nil {
 		return party{}, fmt.Errorf("list sub-agent transcripts in %s: %w", dir, err)
 	}
-	var newest party
-	var newestAt time.Time
+	type active struct {
+		party
+		written time.Time
+	}
+	var subs []active
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasPrefix(name, "agent-") || !strings.HasSuffix(name, ".jsonl") {
@@ -153,28 +159,45 @@ func compactingParty(mainPath string, now time.Time, mainLimit, subLimit int) (p
 		if err != nil {
 			return party{}, fmt.Errorf("stat sub-agent transcript %s: %w", filepath.Join(dir, name), err)
 		}
-		written := info.ModTime()
-		if now.Sub(written) >= activeWindow || (newest.transcript != "" && !written.After(newestAt)) {
+		if now.Sub(info.ModTime()) >= activeWindow {
 			continue
 		}
-		newest = party{
-			name:       "sub-agent " + strings.TrimSuffix(name, ".jsonl"),
-			transcript: filepath.Join(dir, name),
-			threshold:  subLimit,
-		}
-		newestAt = written
+		subs = append(subs, active{
+			party: party{
+				name:       "sub-agent " + strings.TrimSuffix(name, ".jsonl"),
+				transcript: filepath.Join(dir, name),
+				threshold:  subLimit,
+			},
+			written: info.ModTime(),
+		})
 	}
-	if newest.transcript == "" {
+	sort.Slice(subs, func(left, right int) bool { return subs[left].written.After(subs[right].written) })
+	floor := candidateFloor(mainLimit, subLimit)
+	for index := range subs {
+		// An unreadable transcript cannot be ruled out: it stays a candidate,
+		// and the estimate that follows fails open with the cause logged.
+		if tokens, err := estimateTranscriptTokens(subs[index].transcript); err == nil && tokens < floor {
+			continue
+		}
+		mainInfo, err := os.Stat(mainPath)
+		if err != nil {
+			return party{}, fmt.Errorf("stat main transcript: %w", err)
+		}
+		if mainInfo.ModTime().Before(subs[index].written) {
+			return subs[index].party, nil
+		}
 		return mainParty, nil
 	}
-	mainInfo, err := os.Stat(mainPath)
-	if err != nil {
-		return party{}, fmt.Errorf("stat main transcript: %w", err)
-	}
-	if mainInfo.ModTime().Before(newestAt) {
-		return newest, nil
-	}
 	return mainParty, nil
+}
+
+// candidateFloor is the smallest context that can be making a compaction
+// attempt: Claude Code 2.1.281 attempts from window × (1 − f), f its
+// precompute fraction (0.2 by default, set per window by a server flag;
+// 0.16–0.25 measured), and the window pfm install sets is the lower
+// threshold. Half the window leaves f room to double.
+func candidateFloor(mainLimit, subLimit int) int {
+	return min(mainLimit, subLimit) / 2
 }
 
 // estimateTranscriptTokens is the last assistant line's recorded usage

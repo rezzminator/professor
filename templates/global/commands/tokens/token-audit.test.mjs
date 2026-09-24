@@ -34,7 +34,7 @@ const flight = (dir, extra = [], codexRoot = CODEX_ROOT) => {
 function runMdFlight() {
   const dir = fs.mkdtempSync(path.join(TMP, "runmd-"));
   fs.writeFileSync(path.join(dir, "run.md"), [
-    "flight /tmp/professor/flights/demo · baseline 0000000000000000000000000000000000000000 · 2026-09-20T09:00:00.000Z",
+    "flight $HOME/.local/state/pfm/flights/professor/demo · baseline 0000000000000000000000000000000000000000 · 2026-09-20T09:00:00.000Z",
     "1-a CLAIMED · executor · requested model claude-sonnet-5 · 2026-09-20T09:01:00.000Z",
     "1-a DONE · executor returned",
   ].join("\n") + "\n");
@@ -139,12 +139,12 @@ test("--flight: a Bash poll is counted even when a harness attachment follows ev
   assert.equal(p.pollN, 8, `the eight calls triggered by a repeated \`true\` are polls, got pollN ${p.pollN}`);
 });
 
-test("--flight: the call cap comes from the agent type name — executor 80, gater 150", () => {
+test("--flight: the call cap comes from the agent type name — executor 80, lander 150", () => {
   const j = flight("flight").json;
   const d = rowOf(j, "1-d"), e = rowOf(j, "1-e");
   assert.equal(d.calls, 85);
   assert.equal(d.overCap, true, "85 calls by an executor is over the 80 cap");
-  assert.equal(e.overCap, false, "a gater is capped at 150, so 2 calls is not over");
+  assert.equal(e.overCap, false, "a lander is capped at 150, so 2 calls is not over");
   assert.match(flight("flight").md, /OVER 80/);
 });
 
@@ -241,9 +241,9 @@ test("poll detection: a one-off `sleep` is a poll even though the command never 
 });
 
 test("--family selects a family by agent type when no main chat title carries the name", () => {
-  const r = run(["--since", "99999d", "--root", CLAUDE_ROOT, "--family", "gater"]);
+  const r = run(["--since", "99999d", "--root", CLAUDE_ROOT, "--family", "lander"]);
   assert.equal(r.code, 0, r.err);
-  assert.match(r.out, /FAMILY DRILL-DOWN "gater"/);
+  assert.match(r.out, /FAMILY DRILL-DOWN "lander"/);
   assert.doesNotMatch(r.out, /NOT FOUND among/, "a flight orchestrated by a sub-agent has no chat title; the selector must still find it");
 });
 

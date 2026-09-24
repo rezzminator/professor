@@ -100,7 +100,7 @@ func SearchEnabled(options SearchOptions) bool {
 }
 
 // SearchHint is the one place every harvester message renders its "use
-// `webSearch`" recommendation. Naming a disabled tool sends a caller straight
+// `search_web`" recommendation. Naming a disabled tool sends a caller straight
 // into a second dead end, so a message that would name it instead falls back
 // to withoutSearch, which keeps the rest of the sentence intact and names no
 // tool. Every caller — inside this package and across the MCP adapter —
@@ -366,7 +366,7 @@ const (
 	SearchProbeConfigured  SearchProbeState = "configured"
 )
 
-// SearchProbe is doctor's one-line verdict on the harvester webSearch tool.
+// SearchProbe is doctor's one-line verdict on the harvester search_web tool.
 // Warning is set only for a state an operator should act on — OFF and a
 // keyless-but-configured Brave key are named states, never warnings.
 type SearchProbe struct {

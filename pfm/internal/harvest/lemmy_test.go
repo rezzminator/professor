@@ -151,9 +151,9 @@ func TestLemmyDeletedCommentIsNamed(t *testing.T) {
 	}
 }
 
-// TestLemmyUnreadPageFlagsThePartial: a comment page the API would not answer
+// TestLemmyUnansweredPageFlagsThePartial: a comment page the API would not answer
 // is named, and the comments it held count as not loaded.
-func TestLemmyUnreadPageFlagsThePartial(t *testing.T) {
+func TestLemmyUnansweredPageFlagsThePartial(t *testing.T) {
 	site := lemmySite(t, "lemmy.example", "lemmy/post-page.html")
 	site.status = map[string]int{lemmyCommentsKey("lemmy.example", 2): http.StatusInternalServerError}
 	result := site.harvester(t).FetchWithOptions(context.Background(), "https://lemmy.example"+lemmyPath,

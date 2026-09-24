@@ -13,7 +13,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// A cloud share link names a viewer page, not the file: readPage and download
+// A cloud share link names a viewer page, not the file: read and download_file
 // fetch the service's direct form instead (shareDirectLink), and refuse by name
 // the services whose shared files open only for a signed-in session or inside a
 // scripted viewer (shareLinkRefusal). A rewritten fetch answered with a sign-in
@@ -228,7 +228,7 @@ func driveConfirmURL(page []byte) (string, bool) {
 	return action.String(), true
 }
 
-// fetchShareRung is readPage's fetchRung; for a share link (shared) a body that
+// fetchShareRung is read's fetchRung for urls; for a share link (shared) a body that
 // is Drive's virus-scan warning is followed once to the download it confirms.
 func (h *Harvester) fetchShareRung(
 	ctx context.Context,
@@ -286,4 +286,4 @@ func (h *Harvester) driveConfirmTarget(ctx context.Context, link shareLink) (str
 
 // shareSignInText ends every share-link failure; the texts carry no URL (the
 // result's source names it), so the public surface may repeat them verbatim.
-const shareSignInText = "a share link this harvester cannot open without signing in — download it yourself and use parseLocalDocuments."
+const shareSignInText = "a share link this harvester cannot open without signing in — download it yourself and read its path with read (files)."

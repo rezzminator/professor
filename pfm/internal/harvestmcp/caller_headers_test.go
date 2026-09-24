@@ -9,8 +9,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestCallerHeadersInTheInputSchemas: readPage, download and readWork list
-// `headers`; findWorks and webSearch, whose requests go to metadata and search
+// TestCallerHeadersInTheInputSchemas: read and download_file list
+// `headers`; search_literature and search_web, whose requests go to metadata and search
 // APIs, do not.
 func TestCallerHeadersInTheInputSchemas(t *testing.T) {
 	session := connectHarvesterInProcess(t, newTestService(t, Runtime{SearXNGURL: "http://searxng.example.test"}))
@@ -19,8 +19,8 @@ func TestCallerHeadersInTheInputSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]bool{
-		toolReadPage: true, toolDownload: true, toolReadWork: true,
-		toolFindWorks: false, toolWebSearch: false, toolParseLocal: false,
+		toolRead: true, toolDownloadFile: true,
+		toolSearchLiterature: false, toolSearchWeb: false,
 	}
 	listed := 0
 	for _, tool := range tools.Tools {
@@ -47,7 +47,7 @@ func TestCallerHeadersInTheInputSchemas(t *testing.T) {
 func TestCallerHeadersRefusedByTheTools(t *testing.T) {
 	const value = "sentinel-7f3a9c"
 	session := connectHarvesterInProcess(t, newTestService(t, Runtime{}))
-	for tool, key := range map[string]string{toolReadPage: "sources", toolDownload: "sources", toolReadWork: "works"} {
+	for tool, key := range map[string]string{toolRead: "urls", toolDownloadFile: "urls"} {
 		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 			Name: tool,
 			Arguments: map[string]any{

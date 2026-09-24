@@ -30,8 +30,8 @@ const localEmptyFileText = "The file is empty (0 bytes): there is nothing to rea
 // anotherCopy is the next step every class that a different copy can cure
 // names, in the current tools only; anotherCopyLead opens a sentence with it.
 const (
-	anotherCopyRest = "another copy at another URL (webSearch, when configured) and read it with readPage, " +
-		"or with findWorks and readWork if it is a scholarly work"
+	anotherCopyRest = "another copy at another URL (search_web, when configured) and read it with read (urls), " +
+		"or with search_literature and read (publications) if it is a scholarly work"
 	anotherCopy     = "find " + anotherCopyRest
 	anotherCopyLead = "Find " + anotherCopyRest
 )
@@ -200,7 +200,7 @@ func publicFailureTable(result Result, kind string) string {
 	case errorKindNoOpenCopy:
 		return "No open copy of this work could be retrieved: every open-access source and mirror tried failed, " +
 			"so the work is likely paywalled, and the harvester never signs in." + rungs +
-			" Search for an author preprint with findWorks, or read the publisher's landing page with readPage."
+			" Search for an author preprint with search_literature, or read the publisher's landing page with read (urls)."
 	case errorKindForbidden:
 		return fmt.Sprintf("The source refused the harvester (HTTP %d %s): a bot block or an access rule, "+
 			"which the harvester cannot tell apart, and it never signs in.%s %s.", status, http.StatusText(status), rungs, anotherCopyLead)
@@ -215,7 +215,7 @@ func publicFailureTable(result Result, kind string) string {
 		if strings.HasPrefix(result.Error, unsupportedFormatPrefix) {
 			return result.Error // a compressed document past its cap names the cap (resolveFormat)
 		}
-		return "The document is larger than the harvester's page limit." + rungs + " Save the file with download instead, or choose a smaller copy."
+		return "The document is larger than the harvester's page limit." + rungs + " Save the file with download_file instead, or choose a smaller copy."
 	case errorKindUnsupported:
 		if strings.HasPrefix(result.Error, unsupportedFormatPrefix) {
 			return result.Error
@@ -234,11 +234,11 @@ func publicFailureTable(result Result, kind string) string {
 			return converterFailureLead + named + "." + rungs + " " + anotherCopyLead + "."
 		}
 		return "The document was retrieved but could not be converted to text (converter or OCR error)." + rungs +
-			" Save the file with download, or " + anotherCopy + "."
+			" Save the file with download_file, or " + anotherCopy + "."
 	case errorKindAppShell:
 		return "The page is a JavaScript app shell: no rung, a real browser included, rendered this route's content." + rungs + " " + anotherCopyLead + "."
 	case errorKindDisabled:
-		return "The provider this read needs is disabled on this harvester." + rungs + " Choose another record with findWorks and read it with readWork, or read a landing page with readPage."
+		return "The provider this read needs is disabled on this harvester." + rungs + " Choose another record with search_literature and read it with read (publications), or read a landing page with read (urls)."
 	}
 	if strings.HasPrefix(result.Error, unclassifiedLead) {
 		return result.Error // already published: a second pass never re-reads its words for a class
@@ -256,7 +256,7 @@ func missingMessage(result Result, rungs string) string {
 	status := result.HTTPStatus
 	switch {
 	case isLocalFailureSource(result.Source):
-		return "The local file does not exist at that path, or cannot be read. Check the path; parseLocalDocuments reads existing files inside the directories this harvester may read."
+		return "The local file does not exist at that path, or cannot be read. Check the path; read (files) reads existing files inside the directories this harvester may read."
 	case status == http.StatusGone:
 		return "The source answered HTTP 410 Gone: the page was removed." + rungs + " " + anotherCopyLead + "."
 	case status == http.StatusNotFound:
@@ -264,7 +264,7 @@ func missingMessage(result Result, rungs string) string {
 			" The harvester cannot tell a missing page from a refusal served as 404." +
 			" Check the URL; if it is right, " + anotherCopy + "."
 	}
-	return "The requested document was not found." + rungs + " Choose a record with findWorks and read it with readWork, or check the URL."
+	return "The requested document was not found." + rungs + " Choose a record with search_literature and read it with read (publications), or check the URL."
 }
 
 // unsupportedFormatPrefix starts every unsupported-format failure the core
@@ -277,13 +277,13 @@ func unsupportedFormatText(format, container string) string {
 		detected = " (detected: " + container + ")"
 	}
 	return unsupportedFormatPrefix + format + " file" + detected + ", which the harvester does not read yet. " +
-		"The file exists at its path, unchanged. parseLocalDocuments reads " + ReadableFormats + ": " +
+		"The file exists at its path, unchanged. read (files) reads " + ReadableFormats + ": " +
 		"convert or extract it to one of those and read that copy."
 }
 
 // ReadableFormats is the one list of the document formats the harvester
 // converts (converter.py's _CONVERTERS, routed by format_detect.go), named
-// in every unsupported-format failure and in parseLocalDocuments' tool
+// in every unsupported-format failure and in read's tool
 // description.
 const ReadableFormats = "PDF, DOC, DOCX, XLS, XLSX, PPTX (with their macro and template variants), " +
 	"ODT, ODS, ODP, RTF, EPUB, HTML, CSV, JSON, Markdown and plain text"
@@ -326,7 +326,7 @@ func unsupportedLocalFormat(path string, body []byte, inflate inflateFunc) (Resu
 	return Result{Kind: format, ErrorKind: formatErrorKind(found), Error: text}, true
 }
 
-// formatRefusalReason is the page sentence for a body readPage does not
+// formatRefusalReason is the page sentence for a body read does not
 // convert because of its type.
 func formatRefusalReason(found formatFinding) string {
 	if found.class == formatDropped {

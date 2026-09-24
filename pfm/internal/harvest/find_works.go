@@ -37,28 +37,28 @@ func (r *Resolver) FindWorksReport(ctx context.Context, query string, limit int)
 // source answered. kind ("paper", "book", or "" / "any") picks the core
 // sources the call waits for before its short grace for the rest.
 func (r *Resolver) FindWorksReportFor(ctx context.Context, query string, limit int, kind string) (WorksFound, error) {
-	return r.findWorksWithin(ctx, query, limit, kind, findWorksTimeout, findWorksGrace)
+	return r.searchLiteratureWithin(ctx, query, limit, kind, searchLiteratureTimeout, searchLiteratureGrace)
 }
 
-// findWorksTimeout is the whole findWorks call's deadline: an MCP client gives a
+// searchLiteratureTimeout is the whole search_literature call's deadline: an MCP client gives a
 // tool call about 60 s, and the sources that run long are the ones that fail.
-const findWorksTimeout = 20 * time.Second
+const searchLiteratureTimeout = 20 * time.Second
 
-// findWorksGrace is how long a findWorks call waits for the other sources once
+// searchLiteratureGrace is how long a search_literature call waits for the other sources once
 // the core sources for the asked-for kind have finished and the ranking is
 // settled: a source that runs long past the core is the one that fails.
-const findWorksGrace = 2 * time.Second
+const searchLiteratureGrace = 2 * time.Second
 
-// findWorksNotWaitedText names a source still running when the grace ran out,
+// searchLiteratureNotWaitedText names a source still running when the grace ran out,
 // apart from the deadline's text.
-const findWorksNotWaitedText = "not waited for: the core sources had answered"
+const searchLiteratureNotWaitedText = "not waited for: the core sources had answered"
 
-// findWorksWithin is FindWorksReportFor under a deadline: every source runs at
+// searchLiteratureWithin is FindWorksReportFor under a deadline: every source runs at
 // once, and when the deadline comes the call ranks what answered; a source
 // still running is cancelled and named timed_out with the time it was given.
-// Once the core sources for kind finished (findWorksCore), the call waits
+// Once the core sources for kind finished (searchLiteratureCore), the call waits
 // grace for the rest, then ranks what answered.
-func (r *Resolver) findWorksWithin(
+func (r *Resolver) searchLiteratureWithin(
 	ctx context.Context,
 	query string,
 	limit int,
@@ -92,7 +92,7 @@ func (r *Resolver) findWorksWithin(
 			searches,
 			workSearch{
 				gatherer.name,
-				findWorksCore(kind, gatherer.name),
+				searchLiteratureCore(kind, gatherer.name),
 				func(ctx context.Context) ([]Candidate, string) {
 					probe, probed := newSourceProbe(client)
 					candidates := gatherer.gather(ctx, probed, query, limit)
@@ -117,7 +117,7 @@ func (r *Resolver) findWorksWithin(
 			searches,
 			workSearch{
 				optional.name,
-				findWorksCore(kind, optional.name),
+				searchLiteratureCore(kind, optional.name),
 				func(ctx context.Context) ([]Candidate, string) {
 					candidates, err := optional.search(ctx, query, limit)
 					if err != nil {
@@ -190,7 +190,7 @@ func (r *Resolver) findWorksWithin(
 	return found, nil
 }
 
-// The discovery sources' public names, as a findWorks answer names them.
+// The discovery sources' public names, as a search_literature answer names them.
 const (
 	nameOpenAlex        = "OpenAlex"
 	nameArXiv           = "arXiv"
@@ -201,10 +201,10 @@ const (
 	nameBookMirror      = "book mirror"
 )
 
-// findWorksCore reports whether a findWorks call for kind waits for source
+// searchLiteratureCore reports whether a search_literature call for kind waits for source
 // before its grace: a paper call waits for the paper sources, a book call for
 // the book sources, any other call for the paper sources and Open Library.
-func findWorksCore(kind, source string) bool {
+func searchLiteratureCore(kind, source string) bool {
 	paper := source == nameOpenAlex || source == nameArXiv || source == nameCrossref || source == nameSemanticScholar
 	switch kind {
 	case kindPaper:
@@ -376,7 +376,7 @@ func (r *Resolver) findCrossref(ctx context.Context, client *http.Client, query 
 	if err := getJSON(ctx, client, endpoint, &data); err != nil {
 		// An outage is not an empty shelf — name it instead of returning a
 		// silent nil that reads as "Crossref knows nothing about this title".
-		log.Printf("harvest: findWorks crossref search failed for %q: %v", query, err)
+		log.Printf("harvest: search_literature crossref search failed for %q: %v", query, err)
 		return nil
 	}
 	for _, item := range data.Message.Items {
@@ -426,7 +426,7 @@ func (r *Resolver) findSemanticScholar(ctx context.Context, client *http.Client,
 	endpoint := "https://api.semanticscholar.org/graph/v1/paper/search?query=" + url.QueryEscape(query) +
 		fmt.Sprintf("&limit=%d", limit) + "&fields=title,year,authors,externalIds,openAccessPdf"
 	if err := getJSON(ctx, client, endpoint, &data); err != nil {
-		log.Printf("harvest: findWorks semantic-scholar search failed for %q: %v", query, err)
+		log.Printf("harvest: search_literature semantic-scholar search failed for %q: %v", query, err)
 		return nil
 	}
 	out := []Candidate{}

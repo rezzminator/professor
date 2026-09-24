@@ -37,11 +37,12 @@ func TestHarvestRuntimeCarriesConfiguredScholarlyProviders(t *testing.T) {
 }
 
 // TestHarvestDispatchReachesHarvestcli: `pfm harvest <verb>` reaches the
-// harvestcli verbs, `download` included, through main's dispatch.
+// harvestcli verbs, `download-file` and `search` included, through main's dispatch.
 func TestHarvestDispatchReachesHarvestcli(t *testing.T) {
 	for verb, usage := range map[string]string{
-		"download": "usage: pfm harvest download",
-		"ask":      "usage: pfm harvest ask",
+		"download-file": "usage: pfm harvest download-file",
+		"search":        "usage: pfm harvest search",
+		"ask":           "usage: pfm harvest ask",
 	} {
 		var stdout, stderr bytes.Buffer
 		if code := run([]string{"harvest", verb}, &stdout, &stderr); code != 2 ||

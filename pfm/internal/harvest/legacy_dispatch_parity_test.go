@@ -188,8 +188,8 @@ func TestLegacyEmptyPDFConversionKeepsOCRRecoveryHint(t *testing.T) {
 		}),
 	})
 	result := h.Fetch(context.Background(), "https://scanned.example.test/paper.pdf")
-	// SearchAvailable defaults false here, so the recovery hint names findWorks
-	// rather than the unavailable `webSearch` tool — see SearchHint.
+	// SearchAvailable defaults false here, so the recovery hint names search_literature
+	// rather than the unavailable `search_web` tool — see SearchHint.
 	if result.Error == "" || !strings.Contains(result.Error, "convert.pdfOcr=true in harvester.config.json") ||
 		!strings.Contains(strings.ToLower(result.Error), "alternative copy") {
 		t.Fatalf("empty PDF conversion receipt=%#v", result)
@@ -393,7 +393,7 @@ func TestLegacyPaywalledDOIUsesWaybackThenReturnsCompleteLegalSourceReceipt(t *t
 			},
 		)
 		result := h.Fetch(context.Background(), "10.1234/paywalled")
-		for _, want := range []string{"likely paywalled", "Unpaywall", "OpenAlex", "Semantic Scholar", "Europe PMC", "CORE", "DOAJ", "Wayback Machine", "`webSearch`"} {
+		for _, want := range []string{"likely paywalled", "Unpaywall", "OpenAlex", "Semantic Scholar", "Europe PMC", "CORE", "DOAJ", "Wayback Machine", "`search_web`"} {
 			if !strings.Contains(result.Error, want) {
 				t.Fatalf("paywall receipt missing %q: %#v", want, result)
 			}

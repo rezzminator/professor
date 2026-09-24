@@ -8,9 +8,9 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// fetchOne runs one read-tool source in its own goroutine (readMany's
-// per-item fan-out): the wrong-tool check, the semaphore gate, cancellation,
-// the read itself and — L2-F1's per-item isolation half — a recovered panic,
+// fetchOne runs one read item in its own goroutine (readMany's per-item
+// fan-out): the misplaced-field check, the semaphore gate, cancellation, the
+// read itself and — L2-F1's per-item isolation half — a recovered panic,
 // folded into that ITEM's own error rather than the whole batch or,
 // unrecovered, the whole process (the SDK's request goroutine has no recover
 // of its own).
@@ -19,14 +19,15 @@ func (service *Service) fetchOne(
 	semaphore chan struct{},
 	wait *sync.WaitGroup,
 	index int,
-	source string,
+	job readJob,
 	request readRequest,
 	contents []string,
-	items []PageItem,
+	items []ReadItem,
 ) {
 	defer wait.Done()
+	source := job.source
 	fail := func(message string) {
-		items[index] = PageItem{Source: source, Error: message}
+		items[index] = ReadItem{Source: source, Gaps: []string{}, Error: message}
 		contents[index] = service.describeFetch(
 			source, harvest.Result{Source: source, Error: message}, request.options.SizeOnly,
 		)
@@ -36,12 +37,10 @@ func (service *Service) fetchOne(
 			fail(obs.Recovered("harvester read item", recovered).Error())
 		}
 	}()
-	if request.misroute != nil {
-		if message := request.misroute(source); message != "" {
-			items[index] = PageItem{Source: source, Error: message}
-			contents[index] = "# " + harvest.PublicSourceLabel(source) + "\nERROR: " + message
-			return
-		}
+	if message := misplaced(job.field, source, service.runtime.Remote); message != "" {
+		items[index] = ReadItem{Source: source, Gaps: []string{}, Error: message}
+		contents[index] = "# " + harvest.PublicSourceLabel(source) + "\nERROR: " + message
+		return
 	}
 	select {
 	case semaphore <- struct{}{}:
@@ -51,16 +50,20 @@ func (service *Service) fetchOne(
 	}
 	defer func() { <-semaphore }()
 	scope := service.harvester.ForCaller
-	if request.work {
+	headers := request.headers
+	switch job.field {
+	case fieldPublications:
 		scope = service.harvester.ForWork // an identifier's headers wait for its landing origin
+	case fieldFiles:
+		headers = harvest.CallerHeaders{} // a caller's headers never go with a local file
 	}
-	harvester, scopedCtx, err := scope(ctx, request.headers, source)
+	harvester, scopedCtx, err := scope(ctx, headers, source)
 	if err != nil {
 		fail(err.Error()) // no request was sent: the headers have no origin to go to
 		return
 	}
-	fetched := request.headers.MarkHeaderless(harvester.FetchPublic(scopedCtx, source, request.options))
-	items[index] = service.pageItem(source, fetched, request.work)
+	fetched := headers.MarkHeaderless(harvester.FetchPublic(scopedCtx, source, request.options))
+	items[index] = service.readItem(job, fetched, !request.options.SizeOnly)
 	if service.runtime.Remote {
 		fetched.Path = "" // no result of the remote server carries a server path
 	}

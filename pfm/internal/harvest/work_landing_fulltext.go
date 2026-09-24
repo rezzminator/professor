@@ -131,9 +131,9 @@ func pageFullTextLink(content, pageURL string) string {
 	return ""
 }
 
-// readPageFullTextLink reads a thin open-access page's own PDF link
+// readLinkedFullText reads a thin open-access page's own PDF link
 // (pageFullTextLink) through the fetch path; ok only when it reads as a PDF.
-func (h *Harvester) readPageFullTextLink(
+func (h *Harvester) readLinkedFullText(
 	ctx context.Context,
 	pageURL, content string,
 	options FetchOptions,

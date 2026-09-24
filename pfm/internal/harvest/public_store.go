@@ -87,7 +87,7 @@ func ensureNamespaceDir(path string, create bool) error {
 }
 
 // mkdirRaced creates a namespace directory. Two calls on a fresh cache (two
-// findWorks at once) race to create it: the loser's "exists" is not a
+// search_literature at once) race to create it: the loser's "exists" is not a
 // failure, since its caller re-reads the path with Lstat and still refuses a
 // symlink or a non-directory in its place.
 func mkdirRaced(path string) error {

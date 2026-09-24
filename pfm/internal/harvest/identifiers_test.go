@@ -24,6 +24,29 @@ func TestIdentifiersAndOAOrdering(t *testing.T) {
 	if got := ClassifyIdentifier("PMC3786668"); got != IdentifierPMCID {
 		t.Fatalf("PMCID class = %q", got)
 	}
+	// An arXiv id is read as its arXiv DOI, so the scholarly path fetches the
+	// paper instead of calling it a title.
+	for _, tc := range []struct{ in, want string }{
+		{"arXiv:1706.03762", "10.48550/arXiv.1706.03762"},
+		{"ARXIV: 1706.03762v5", "10.48550/arXiv.1706.03762v5"},
+		{"1706.03762", "10.48550/arXiv.1706.03762"},
+		{"arXiv:hep-th/9901001", "10.48550/arXiv.hep-th/9901001"},
+		{"math.AG/0309136", "10.48550/arXiv.math.AG/0309136"},
+	} {
+		if got := ClassifyIdentifier(tc.in); got != IdentifierDOI {
+			t.Errorf("ClassifyIdentifier(%q) = %q, want doi", tc.in, got)
+		}
+		if got := NormalizeIdentifier(tc.in); got != tc.want {
+			t.Errorf("NormalizeIdentifier(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+	// An arxiv.org URL stays a web page here (urls reads the page); only
+	// publications turns it into its id.
+	for _, notID := range []string{"https://arxiv.org/abs/1706.03762", "1706.037", "arXiv 1706.03762 notes"} {
+		if got := ClassifyIdentifier(notID); got != IdentifierNone {
+			t.Errorf("ClassifyIdentifier(%q) = %q, want none", notID, got)
+		}
+	}
 
 	// Unpaywall is gated on an operator email (it 422s keyless) — the test opts in.
 	resolver := &Resolver{Client: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {

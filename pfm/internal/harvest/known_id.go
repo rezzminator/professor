@@ -137,7 +137,7 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 		}
 		if c.Kind == kindHTML {
 			if full, measure := landingFullText(result.Content); !full {
-				if linked, ok := h.readPageFullTextLink(ctx, c.URL, result.Content, options); ok {
+				if linked, ok := h.readLinkedFullText(ctx, c.URL, result.Content, options); ok {
 					trace = append(trace, "oa:"+c.Source+"-pdf-link")
 					return h.storeResultAlias(source, canonical, linked, append([]string(nil), trace...), options)
 				}
@@ -257,8 +257,8 @@ func (h *Harvester) fetchKnownID(ctx context.Context, source string, kind Identi
 			skipped,
 			SearchHint(
 				h.settings.searchAvailable,
-				"use `webSearch` to find an author preprint or the publisher's page directly.",
-				"find an author preprint or the publisher's page directly, or try findWorks again with different terms.",
+				"use `search_web` to find an author preprint or the publisher's page directly.",
+				"find an author preprint or the publisher's page directly, or try search_literature again with different terms.",
 			),
 		)
 		return Result{

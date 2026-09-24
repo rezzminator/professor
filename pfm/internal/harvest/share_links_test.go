@@ -121,10 +121,10 @@ func TestShareRefusedServicesFailByNameWithoutAFetch(t *testing.T) {
 				Converter: &fakeConverter{},
 			})
 			for name, result := range map[string]Result{
-				"readPage": h.Fetch(context.Background(), test.source),
-				"download": h.Download(context.Background(), test.source),
+				"read":          h.Fetch(context.Background(), test.source),
+				"download_file": h.Download(context.Background(), test.source),
 			} {
-				want := "is a " + test.service + " link: a share link this harvester cannot open without signing in — download it yourself and use parseLocalDocuments"
+				want := "is a " + test.service + " link: a share link this harvester cannot open without signing in — download it yourself and read its path with read (files)"
 				if !strings.Contains(result.Error, want) || result.ErrorKind != errorKindLogin || result.Path != "" {
 					t.Fatalf("%s result = %#v; want the named %s refusal", name, result, test.service)
 				}
@@ -149,7 +149,7 @@ func TestShareRewriteReachesReadPageAndDownload(t *testing.T) {
 	})
 	page := h.Fetch(context.Background(), source)
 	if page.Error != "" || page.Kind != "pdf" || page.Method != "dropbox-download" || page.Source != source {
-		t.Fatalf("readPage = %#v; want the PDF through dropbox-download", page)
+		t.Fatalf("read = %#v; want the PDF through dropbox-download", page)
 	}
 	file := h.Download(context.Background(), source)
 	if file.Error != "" || file.Kind != "pdf" || file.Path == "" || file.Source != source {
@@ -182,8 +182,8 @@ func TestShareSignInPageIsANamedFailureNeverTheDocument(t *testing.T) {
 		Converter: &fakeConverter{},
 	})
 	for name, result := range map[string]Result{
-		"readPage": h.Fetch(context.Background(), source),
-		"download": h.Download(context.Background(), source),
+		"read":          h.Fetch(context.Background(), source),
+		"download_file": h.Download(context.Background(), source),
 	} {
 		if !strings.Contains(result.Error, "Google Docs file") ||
 			!strings.Contains(result.Error, "sign-in or interstitial page") ||
@@ -218,7 +218,7 @@ func TestShareDriveVirusScanPageIsFollowedToTheFile(t *testing.T) {
 	})
 	page := h.Fetch(context.Background(), source)
 	if page.Error != "" || page.Kind != "pdf" || page.Method != "google-drive-download" {
-		t.Fatalf("readPage = %#v; want the file past the virus-scan page", page)
+		t.Fatalf("read = %#v; want the file past the virus-scan page", page)
 	}
 	file := h.Download(context.Background(), source)
 	if file.Error != "" || file.Kind != "pdf" || file.Path == "" {

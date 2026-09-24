@@ -126,9 +126,9 @@ func TestGitLabIssueLoadsEveryNote(t *testing.T) {
 	}
 }
 
-// TestGitLabUnreadPageFlagsThePartial: a notes page the API would not answer
+// TestGitLabUnansweredPageFlagsThePartial: a notes page the API would not answer
 // is named, and the notes it held are counted as not loaded.
-func TestGitLabUnreadPageFlagsThePartial(t *testing.T) {
+func TestGitLabUnansweredPageFlagsThePartial(t *testing.T) {
 	site, _ := gitlabSite(t, "gitlab.com")
 	var first gitlabFixture
 	if err := json.Unmarshal([]byte(site.answers[gitlabAPIKey("gitlab.com", "")]), &first); err != nil {

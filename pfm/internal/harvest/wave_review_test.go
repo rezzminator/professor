@@ -14,7 +14,7 @@ import (
 
 // A contact email must not corrupt the Crossref search query. The bug appended
 // withContact's own "?mailto=…" AFTER `&rows=N`, folding the address into the
-// rows value so Crossref 400s and findWorks' Crossref widening is dead on every
+// rows value so Crossref 400s and search_literature' Crossref widening is dead on every
 // host that configures an email — the exact hosts it was added to serve.
 func TestReviewFindCrossrefKeepsRowsSeparateFromContact(t *testing.T) {
 	var seen string

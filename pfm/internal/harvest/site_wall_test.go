@@ -28,7 +28,7 @@ func overlaid(page string) string {
 func TestAWallIsNeverStoredAsAMarkupExtractorsContent(t *testing.T) {
 	challenge := seFixture(t, "challenge.html")
 	redditURL := "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/"
-	redditPage := redditThreadPage(2, []string{"first reply", "second reply"}, false)
+	redditPage := redditThreadHTML(2, []string{"first reply", "second reply"}, false)
 	discoursePage := discourseCrawlerPage(discourseFixturePosts(), 1, true)
 	for _, tc := range []struct{ name, source, page string }{
 		{"reddit, the challenge", redditURL, challenge},

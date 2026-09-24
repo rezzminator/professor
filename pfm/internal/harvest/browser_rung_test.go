@@ -503,8 +503,8 @@ func catalogOrRender(ctx context.Context, kind, source string, body []byte) (str
 func TestABrowserRenderThatIsNotTheRequestedPageNeverReplacesTheFlaggedPage(t *testing.T) {
 	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
 	bodies := []string{long, long, long}
-	flaggedThread := redditThreadPage(4, bodies, true)
-	completeThread := redditThreadPage(4, append(append([]string(nil), bodies...), "Agreed."), false)
+	flaggedThread := redditThreadHTML(4, bodies, true)
+	completeThread := redditThreadHTML(4, append(append([]string(nil), bodies...), "Agreed."), false)
 	thread := "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/"
 	canonicalThread := "https://reddit.com/r/examplesub/comments/ccc333/loader_thread"
 	ageGate := "https://www.reddit.com/over18?dest=https%3A%2F%2Fwww.reddit.com%2Fr%2Fexamplesub%2F"

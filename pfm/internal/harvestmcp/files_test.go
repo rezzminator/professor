@@ -121,9 +121,9 @@ func TestRemoteDownloadAnswersASignedExpiringURL(t *testing.T) {
 		t.Fatalf("tool result is %d bytes, structured %d (want < 2048 / < 1024, no bytes, no server path): %s",
 			len(wire), len(structured), wire)
 	}
-	if !strings.Contains(downloadDescription, "curl -fL -o <file> <url>") ||
-		!strings.Contains(downloadDescription, "restart") {
-		t.Fatalf("download description does not say how to fetch the url: %s", downloadDescription)
+	if !strings.Contains(downloadFileDescription, "curl -fL -o <file> <url>") ||
+		!strings.Contains(downloadFileDescription, "restart") {
+		t.Fatalf("download description does not say how to fetch the url: %s", downloadFileDescription)
 	}
 }
 

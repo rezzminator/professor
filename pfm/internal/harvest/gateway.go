@@ -83,7 +83,7 @@ type gatewayRequest struct {
 	// The browser rungs return rendered HTML and can never satisfy one.
 	binary bool
 	// noBrowser keeps a discovery search off the browser rungs: a search answers
-	// inside the findWorks deadline, and a walled search page is reported as a
+	// inside the search_literature deadline, and a walled search page is reported as a
 	// challenge the moment its body arrives, not after a browser waits on it.
 	noBrowser bool
 	// trustedOrigin marks a URL the OPERATOR configured (a self-hosted SearXNG,

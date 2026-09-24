@@ -351,10 +351,10 @@ func TestGitHubUnloadedCommentsFlagThePartial(t *testing.T) {
 	}
 }
 
-// TestGitHubNonThreadPagesTakeTheGenericPath: a GitHub page that is not an
+// TestGitHubNonThreadURLsTakeTheGenericPath: a GitHub page that is not an
 // issue's or pull request's conversation — a repository, a pull request's
 // files, a page naming another item or none — is not claimed.
-func TestGitHubNonThreadPagesTakeTheGenericPath(t *testing.T) {
+func TestGitHubNonThreadURLsTakeTheGenericPath(t *testing.T) {
 	page := ghFixture(t, "pull-page.html")
 	for _, tc := range []struct{ source, page string }{
 		{"https://github.com/example-org/example-runtime", page},

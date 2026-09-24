@@ -36,7 +36,7 @@ func TestSearchRoutesTheFullDiagnosticToTheLogAndOnlyTheSafeMessageToStderr(t *t
 		t.Fatal(err)
 	}
 	os.Stderr = write
-	result, _, callErr := service.webSearch(ctx, nil, SearchInput{Query: "test query"})
+	result, _, callErr := service.searchWeb(ctx, nil, SearchInput{Query: "test query"})
 	_ = write.Close()
 	os.Stderr = realStderr
 	captured, err := io.ReadAll(read)

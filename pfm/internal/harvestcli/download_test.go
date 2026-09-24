@@ -104,12 +104,12 @@ func TestDownloadPrintsPathKindTypeAndSize(t *testing.T) {
 	site := newFixtureSite(t)
 	var stdout, stderr bytes.Buffer
 	code := Harvest([]string{
-		"download", "--header", "X-Probe: fixture-token",
+		"download-file", "--header", "X-Probe: fixture-token",
 		"https://example.test/figure.png", "https://example.test/missing.bin",
 	}, &stdout, &stderr, downloadRuntime(t))
 	if code != 1 {
 		t.Fatalf(
-			"download code=%d, want 1 for the failed item; stdout=%q stderr=%q",
+			"download-file code=%d, want 1 for the failed item; stdout=%q stderr=%q",
 			code,
 			stdout.String(),
 			stderr.String(),
@@ -141,19 +141,19 @@ func TestDownloadPrintsPathKindTypeAndSize(t *testing.T) {
 	}
 }
 
-// TestDownloadJSONCarriesTheSameFields: --json gives source, path, kind,
+// TestDownloadJSONCarriesTheSameFields: --json gives source, path, kind, via,
 // content_type and bytes per item, and a failed item's error.
 func TestDownloadJSONCarriesTheSameFields(t *testing.T) {
 	newFixtureSite(t)
 	var stdout, stderr bytes.Buffer
 	code := Harvest(
-		[]string{"download", "--json", "https://example.test/figure.png", "https://example.test/missing.bin"},
+		[]string{"download-file", "--json", "https://example.test/figure.png", "https://example.test/missing.bin"},
 		&stdout,
 		&stderr,
 		downloadRuntime(t),
 	)
 	if code != 1 {
-		t.Fatalf("download --json code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("download-file --json code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var items []struct {
 		Source      string `json:"source"`
@@ -161,18 +161,22 @@ func TestDownloadJSONCarriesTheSameFields(t *testing.T) {
 		Kind        string `json:"kind"`
 		ContentType string `json:"content_type"`
 		Bytes       int64  `json:"bytes"`
+		Via         string `json:"via"`
 		Error       string `json:"error"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &items); err != nil {
-		t.Fatalf("download --json is not a JSON array: %v\n%s", err, stdout.String())
+		t.Fatalf("download-file --json is not a JSON array: %v\n%s", err, stdout.String())
 	}
 	if len(items) != 2 {
 		t.Fatalf("items = %+v, want two in input order", items)
 	}
 	first, second := items[0], items[1]
 	if first.Source != "https://example.test/figure.png" || filepath.Base(first.Path) == "" || first.Kind != "png" ||
-		first.ContentType != "image/png" || first.Bytes <= 0 || first.Error != "" {
+		first.ContentType != "image/png" || first.Bytes <= 0 || first.Via == "" || first.Error != "" {
 		t.Fatalf("first item = %+v", first)
+	}
+	if strings.Contains(stdout.String(), `"method"`) {
+		t.Fatalf("download-file --json names method; the field is via:\n%s", stdout.String())
 	}
 	if second.Source != "https://example.test/missing.bin" || second.Error == "" || second.Path != "" {
 		t.Fatalf("failed item = %+v, want a named error and no path", second)
@@ -185,7 +189,7 @@ func TestDownloadRefusesABadHeaderBeforeAnyRequest(t *testing.T) {
 	for _, line := range []string{"Host: other.example", "no colon here", "Bad Name: x", "X-A: 1\r\nX-B: 2"} {
 		site := newFixtureSite(t)
 		var stdout, stderr bytes.Buffer
-		code := Harvest([]string{"download", "--header", line, "https://example.test/figure.png"},
+		code := Harvest([]string{"download-file", "--header", line, "https://example.test/figure.png"},
 			&stdout, &stderr, downloadRuntime(t))
 		if code != 2 || !strings.Contains(stderr.String(), harvest.ErrCallerHeader.Error()) {
 			t.Fatalf("--header %q: code=%d stderr=%q, want 2 and the named refusal", line, code, stderr.String())
@@ -203,15 +207,22 @@ func TestDownloadJSONNamesTheErrorKind(t *testing.T) {
 	site := newFixtureSite(t)
 	var stdout, stderr bytes.Buffer
 	code := Harvest(
-		[]string{"download", "--json", "https://mega.nz/file/AbCdEfGh#ExampleKey", "https://example.test/missing.bin"},
-		&stdout, &stderr, downloadRuntime(t),
+		[]string{
+			"download-file",
+			"--json",
+			"https://mega.nz/file/AbCdEfGh#ExampleKey",
+			"https://example.test/missing.bin",
+		},
+		&stdout,
+		&stderr,
+		downloadRuntime(t),
 	)
 	if code != 1 {
-		t.Fatalf("download --json code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		t.Fatalf("download-file --json code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	var items []map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &items); err != nil {
-		t.Fatalf("download --json is not a JSON array: %v\n%s", err, stdout.String())
+		t.Fatalf("download-file --json is not a JSON array: %v\n%s", err, stdout.String())
 	}
 	if len(items) != 2 {
 		t.Fatalf("items = %+v, want two", items)

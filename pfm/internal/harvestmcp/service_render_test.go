@@ -44,7 +44,7 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 		{
 			name:   "invalid URL",
 			result: harvest.Result{ErrorKind: "invalid"},
-			want:   []string{"input is invalid", "findWorks"},
+			want:   []string{"input is invalid", "search_literature"},
 		},
 		{
 			name:   "timeout",
@@ -59,7 +59,7 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 		{
 			name:   "HTTP 404",
 			result: harvest.Result{Content: "tiny", ContentChars: 4, HTTPStatus: 404},
-			want:   []string{"not found", "findWorks"},
+			want:   []string{"not found", "search_literature"},
 		},
 	}
 	for _, test := range tests {
@@ -77,8 +77,8 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 // TestDescribeThinExtractionNamesSearchOnlyWhenAvailable is
 // TestDescribeLegacyFailureKindsNameTheSameRecovery's search-gated sibling:
 // the "thin extraction" (JS-rendered/bot-blocked, no readable content)
-// message must recommend `webSearch` only when a backend is actually
-// configured, and fall back to findWorks/another-URL wording when it is not.
+// message must recommend `search_web` only when a backend is actually
+// configured, and fall back to search_literature/another-URL wording when it is not.
 func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	result := harvest.Result{HTTPStatus: 200}
 
@@ -95,7 +95,7 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	}
 	defer func() { _ = searchOn.Close() }()
 	got := searchOn.describeFetch("https://fixture.example/source", result, false)
-	for _, want := range []string{"no readable content", "`webSearch`", "`findWorks`"} {
+	for _, want := range []string{"no readable content", "`search_web`", "`search_literature`"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("search-on describe receipt missing %q: %q", want, got)
 		}
@@ -110,11 +110,11 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	}
 	defer func() { _ = searchOff.Close() }()
 	got = searchOff.describeFetch("https://fixture.example/source", result, false)
-	if strings.Contains(got, "`webSearch`") {
-		t.Fatalf("search-off describe receipt names the unavailable `webSearch` tool: %q", got)
+	if strings.Contains(got, "`search_web`") {
+		t.Fatalf("search-off describe receipt names the unavailable `search_web` tool: %q", got)
 	}
-	if !strings.Contains(got, "`findWorks`") {
-		t.Fatalf("search-off describe receipt missing findWorks fallback: %q", got)
+	if !strings.Contains(got, "`search_literature`") {
+		t.Fatalf("search-off describe receipt missing search_literature fallback: %q", got)
 	}
 }
 
@@ -144,25 +144,25 @@ func TestSizeOnlyReceiptNamesTokensNotSize(t *testing.T) {
 	}
 }
 
-// TestPageItemCarriesStatusOnEveryRead: a cached and a fresh result, read as
+// TestReadItemCarriesStatusOnEveryRead: a cached and a fresh result, read as
 // a page or a work, both carry their status on the typed item.
-func TestPageItemCarriesStatusOnEveryRead(t *testing.T) {
+func TestReadItemCarriesStatusOnEveryRead(t *testing.T) {
 	service := newTestService(t, Runtime{})
 	for _, cache := range []string{"hit", "miss"} {
-		for _, work := range []bool{false, true} {
-			item := service.pageItem("https://fixture.example/source",
-				harvest.Result{HTTPStatus: 200, CacheStatus: cache, Kind: "html", Content: "body"}, work)
+		for _, field := range readFields {
+			item := service.readItem(readJob{field: field, source: "https://fixture.example/source"},
+				harvest.Result{HTTPStatus: 200, CacheStatus: cache, Kind: "html", Content: "body"}, true)
 			if item.Status != 200 {
-				t.Fatalf("cache %s work %v: item status = %d, want 200", cache, work, item.Status)
+				t.Fatalf("cache %s field %s: item status = %d, want 200", cache, field, item.Status)
 			}
 		}
 	}
 }
 
-// TestDescribeFetchNamesAPartialArtifact pins the MCP receipt header: a
+// TestDescribeFetchNamesTheGapsOfAnIncompleteArtifact pins the MCP receipt header: a
 // known-incomplete artifact says so after `path: …` on the header line, and a
-// complete one carries no PARTIAL notice.
-func TestDescribeFetchNamesAPartialArtifact(t *testing.T) {
+// complete one carries no gaps notice.
+func TestDescribeFetchNamesTheGapsOfAnIncompleteArtifact(t *testing.T) {
 	service, err := NewConfiguredHarvester(
 		"test",
 		Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")},
@@ -181,12 +181,12 @@ func TestDescribeFetchNamesAPartialArtifact(t *testing.T) {
 		Content:     "body text",
 	}
 	complete := service.describeFetch("https://fixture.example/source", result, false)
-	if !strings.Contains(complete, "path: "+path) || strings.Contains(complete, "PARTIAL:") {
-		t.Fatalf("complete receipt missing its header or naming a PARTIAL notice:\n%s", complete)
+	if !strings.Contains(complete, "path: "+path) || strings.Contains(complete, "gaps:") {
+		t.Fatalf("complete receipt missing its header or naming a gaps notice:\n%s", complete)
 	}
 	result.Partial = "page 3 of 9 failed to convert"
 	got := service.describeFetch("https://fixture.example/source", result, false)
-	want := "path: " + path + " / PARTIAL: page 3 of 9 failed to convert\n\nbody text"
+	want := "path: " + path + " / gaps: page 3 of 9 failed to convert\n\nbody text"
 	if !strings.Contains(got, want) {
 		t.Fatalf("partial receipt:\n%s\nwant it to contain:\n%s", got, want)
 	}
@@ -194,13 +194,66 @@ func TestDescribeFetchNamesAPartialArtifact(t *testing.T) {
 	// the artifact is incomplete before it reads it.
 	if size := service.describeFetch("https://fixture.example/source", result, true); !strings.Contains(
 		size,
-		`"partial":"page 3 of 9 failed to convert"`,
+		`"gaps":["page 3 of 9 failed to convert"]`,
 	) {
-		t.Fatalf("size-only receipt hides the partial reason:\n%s", size)
+		t.Fatalf("size-only receipt hides the gaps:\n%s", size)
 	}
 	result.Partial = ""
 	complete = service.describeFetch("https://fixture.example/source", result, true)
-	if strings.Contains(complete, "partial") {
-		t.Fatalf("complete size-only receipt names a partial reason:\n%s", complete)
+	if strings.Contains(complete, "gaps") {
+		t.Fatalf("complete size-only receipt names a gap:\n%s", complete)
+	}
+}
+
+// TestSizeOnlyReceiptUsesTheItemFieldNames: the include_content:false text
+// receipt names what the typed item names — cached, tokens, chars, path, via,
+// kind — and no old field name.
+func TestSizeOnlyReceiptUsesTheItemFieldNames(t *testing.T) {
+	service := newTestService(t, Runtime{})
+	result := harvest.Result{
+		HTTPStatus: 200, CacheStatus: "hit", Kind: "pdf", Method: "arxiv", Chars: 40, Tokens: 12,
+		Path: filepath.Join(t.TempDir(), "source.md"), Content: "body",
+	}
+	text := service.describeFetch("arXiv:1706.03762", result, true)
+	var receipt map[string]any
+	if err := json.Unmarshal([]byte(text), &receipt); err != nil {
+		t.Fatalf("size-only receipt is not JSON: %v\n%s", err, text)
+	}
+	for _, old := range []string{"cache_status", "token_count", "size", "method"} {
+		if _, found := receipt[old]; found {
+			t.Fatalf("size-only receipt carries the old field %q: %s", old, text)
+		}
+	}
+	if receipt["cached"] != true || receipt["via"] != "arxiv" || receipt["kind"] != "pdf" ||
+		receipt["tokens"] != float64(12) || receipt["chars"] != float64(40) || receipt["path"] != result.Path {
+		t.Fatalf("size-only receipt = %s, want cached/via/kind/tokens/chars/path of the item", text)
+	}
+}
+
+// TestRenderFindNamesTheHarvesterSearchTool: an empty candidate list points
+// at search_web, never the retired WebSearch name.
+func TestRenderFindNamesTheHarvesterSearchTool(t *testing.T) {
+	text := renderFind("an unknown title", nil, nil)
+	if strings.Contains(text, "WebSearch") || !strings.Contains(text, "search_web") {
+		t.Fatalf("renderFind empty hint = %q, want search_web and no WebSearch", text)
+	}
+}
+
+// TestFullReadHeaderUsesTheItemFieldNames: the full-read text header names
+// what the typed item names — cached, tokens — and never cache_status.
+func TestFullReadHeaderUsesTheItemFieldNames(t *testing.T) {
+	service := newTestService(t, Runtime{})
+	result := harvest.Result{
+		HTTPStatus: 200, CacheStatus: "miss", Bytes: 700, Tokens: 12,
+		Path: filepath.Join(t.TempDir(), "source.md"), Content: strings.Repeat("readable body ", 50),
+	}
+	text := service.describeFetch("https://fixture.example/page", result, false)
+	want := "# https://fixture.example/page\n" +
+		"cached: false / bytes: 700 / tokens: 12 / fetched_at: unknown / path: " + result.Path
+	if !strings.HasPrefix(text, want) {
+		t.Fatalf("full-read header:\n%s\nwant it to open with:\n%s", text, want)
+	}
+	if strings.Contains(text, "cache_status") {
+		t.Fatalf("full-read header carries cache_status:\n%s", text)
 	}
 }

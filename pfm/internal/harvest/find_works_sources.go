@@ -243,12 +243,12 @@ func gatherWorks(
 				settled = graceAfter(graceScope, grace)
 			}
 		case <-settled:
-			return timeOut(findWorksNotWaitedText)
+			return timeOut(searchLiteratureNotWaitedText)
 		case <-ctx.Done():
 			if errors.Is(ctx.Err(), context.Canceled) {
 				return timeOut("cancelled by the caller before it answered")
 			}
-			return timeOut(fmt.Sprintf("no answer within the %s findWorks deadline; cancelled", deadline))
+			return timeOut(fmt.Sprintf("no answer within the %s search_literature deadline; cancelled", deadline))
 		}
 	}
 	return parts, sources

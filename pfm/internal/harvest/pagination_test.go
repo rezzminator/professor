@@ -263,13 +263,13 @@ func TestAHashRouteOfAnAppShellIsRenderedNeverRead(t *testing.T) {
 	}
 }
 
-// TestAPagedAddressNamesItsUnreadPages: an address that names its own page
+// TestAPagedAddressNamesItsUnfetchedPages: an address that names its own page
 // (?page=2) is one page of a listing. When no rung saw a pager that answers
 // whether a later page exists — a wall served in its place, a reader's
 // markdown without one — the stored result names the pages it did not read.
 // A pager showing this page as the last, or a WordPress post id (?p=2), names
 // nothing.
-func TestAPagedAddressNamesItsUnreadPages(t *testing.T) {
+func TestAPagedAddressNamesItsUnfetchedPages(t *testing.T) {
 	const listing = "https://qa.example.test/questions/tagged/go?tab=votes&page=2&pagesize=50"
 	wall := `<html><body><main><h1>Access denied</h1><p>` + strings.Repeat("Your request was blocked. ", 20) +
 		`</p></main></body></html>`

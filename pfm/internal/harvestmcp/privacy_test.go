@@ -23,9 +23,9 @@ func TestDescribeFetchRedactsProviderDiagnosticsAtMCPBoundary(t *testing.T) {
 	}
 }
 
-func TestPageItemCarriesOnlyPublicResultFields(t *testing.T) {
+func TestReadItemCarriesOnlyPublicResultFields(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	item := (&Service{}).pageItem("10.1234/public.boundary", harvest.Result{
+	item := (&Service{}).readItem(readJob{field: fieldPublications, source: "10.1234/public.boundary"}, harvest.Result{
 		Source:      "10.1234/public.boundary",
 		Content:     "article",
 		Path:        "/cache/public/opaque.md",
@@ -33,30 +33,30 @@ func TestPageItemCarriesOnlyPublicResultFields(t *testing.T) {
 		Bytes:       7,
 		Method:      "doi-mirror",
 		Rungs:       []string{"direct", "mirror:https://mirror.secret.example"},
-	}, false)
+	}, true)
 	if item.Source != "10.1234/public.boundary" || item.Path != "/cache/public/opaque.md" || item.Content != "article" {
-		t.Fatalf("public page item changed its public fields: %#v", item)
+		t.Fatalf("public read item changed its public fields: %#v", item)
 	}
 	if strings.Contains(item.Path, "mirror.secret.example") || strings.Contains(item.Content, "mirror.secret.example") {
-		t.Fatalf("page item exposed provider details: %#v", item)
+		t.Fatalf("read item exposed provider details: %#v", item)
 	}
 }
 
-// TestPageItemNamesTheRungAndAlwaysCarriesPartial: the page item names the
+// TestReadItemNamesTheRungAndAlwaysCarriesGaps: the read item names the
 // rung class that stored the page (a mirror provider only as "mirror") and
-// always carries `partial`, empty for a complete artifact.
-func TestPageItemNamesTheRungAndAlwaysCarriesPartial(t *testing.T) {
+// always carries `gaps`, an empty list for a complete artifact.
+func TestReadItemNamesTheRungAndAlwaysCarriesGaps(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	item := (&Service{}).pageItem(
-		"https://fixture.example/a",
+	item := (&Service{}).readItem(
+		readJob{field: fieldURLs, source: "https://fixture.example/a"},
 		harvest.Result{Source: "https://fixture.example/a", Method: "doi-mirror"},
-		false,
+		true,
 	)
 	encoded, err := json.Marshal(item)
 	if err != nil {
 		t.Fatalf("encode: %v", err)
 	}
-	if !strings.Contains(string(encoded), `"method":"mirror"`) || !strings.Contains(string(encoded), `"partial":""`) {
-		t.Fatalf("page item lacks method or partial: %s", encoded)
+	if !strings.Contains(string(encoded), `"via":"mirror"`) || !strings.Contains(string(encoded), `"gaps":[]`) {
+		t.Fatalf("read item lacks via or gaps: %s", encoded)
 	}
 }

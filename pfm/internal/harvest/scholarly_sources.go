@@ -110,7 +110,7 @@ func (h *Harvester) providerGet(
 	return h.providerFetch(ctx, rawURL, headers, providerHTMLMaxBody, false, false)
 }
 
-// providerSearch fetches a provider SEARCH page for findWorks: the ladder of
+// providerSearch fetches a provider SEARCH page for search_literature: the ladder of
 // providerGet without the browser rungs, so a challenge page fails the search
 // as soon as it arrives.
 func (h *Harvester) providerSearch(ctx context.Context, rawURL string) (providerResponse, error) {

@@ -290,10 +290,10 @@ func TestHNUnloadedCommentsFlagThePartial(t *testing.T) {
 	}
 }
 
-// TestHNNonThreadPagesTakeTheGenericPath: an HN page that is not a story's
+// TestHNNonThreadURLsTakeTheGenericPath: an HN page that is not a story's
 // item page (here the fixture with its story row turned into a comment's, as
 // a comment's own page carries it) is not claimed.
-func TestHNNonThreadPagesTakeTheGenericPath(t *testing.T) {
+func TestHNNonThreadURLsTakeTheGenericPath(t *testing.T) {
 	page := strings.Replace(hnFixture(t), `class="athing submission"`, `class="athing comtr"`, 1)
 	doc, err := html.Parse(strings.NewReader(page))
 	if err != nil {

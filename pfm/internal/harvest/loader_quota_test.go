@@ -155,7 +155,7 @@ func TestRedditPacingStopsAtItsBudgetAndNamesTheRest(t *testing.T) {
 	}
 	const answer = 30 * time.Second
 	site := &redditSite{
-		page:      loaderThreadPage(20, tree...),
+		page:      loaderThreadHTML(20, tree...),
 		fragments: fragments,
 		quota:     [3]string{"990", "10.0", "590"},
 		answer:    answer,

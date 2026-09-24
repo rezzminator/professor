@@ -155,10 +155,10 @@ func TestRedditListingPageIsNotReadAsAThread(t *testing.T) {
 	}
 }
 
-// redditThreadPage is a minimal thread page: the post stating its comment
+// redditThreadHTML is a minimal thread page: the post stating its comment
 // count, one top-level comment per body and, when loader is set, one
 // unexpanded "1 more reply" loader.
-func redditThreadPage(stated int, bodies []string, loader bool) string {
+func redditThreadHTML(stated int, bodies []string, loader bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<html><body><main><shreddit-post permalink="/r/examplesub/comments/ccc333/loader_thread/"`+
 		` comment-count="%d" post-title="Loader thread" author="op_placeholder"></shreddit-post>`+
@@ -184,10 +184,10 @@ func TestRedditCompleteBrowserRenderBeatsTheFlaggedPage(t *testing.T) {
 	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
 	bodies := []string{long, long, long}
 	spy := &browserSpyConverter{
-		html:   redditThreadPage(4, append(append([]string(nil), bodies...), "Agreed."), false),
+		html:   redditThreadHTML(4, append(append([]string(nil), bodies...), "Agreed."), false),
 		status: http.StatusOK,
 	}
-	h := pageHarvester(t, redditThreadPage(4, bodies, true), spy, browserOn())
+	h := pageHarvester(t, redditThreadHTML(4, bodies, true), spy, browserOn())
 	result := h.Fetch(context.Background(), "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/")
 	if result.Error != "" || result.Method != "browser-chrome" || result.Partial != "" {
 		t.Fatalf("the complete browser render lost to the flagged page: method=%q partial=%q error=%q",
@@ -201,7 +201,7 @@ func TestRedditCompleteBrowserRenderBeatsTheFlaggedPage(t *testing.T) {
 // TestRedditSearchLinkFilterKeepsOtherDomainsLinks: only Reddit's own search
 // links render as bare text; a host merely ending in "reddit.com" keeps its link.
 func TestRedditSearchLinkFilterKeepsOtherDomainsLinks(t *testing.T) {
-	page := redditThreadPage(1, []string{
+	page := redditThreadHTML(1, []string{
 		`See <a href="https://notreddit.com/search?q=tides">a search elsewhere</a> and ` +
 			`<a href="https://www.reddit.com/search/?q=tides">tides</a>.`,
 	}, false)
@@ -243,15 +243,15 @@ func TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap(t *testing.T) {
 		browserCalls                   int
 	}{
 		{
-			"continue link only", withContinue(redditThreadPage(3, bodies, false)), thread,
+			"continue link only", withContinue(redditThreadHTML(3, bodies, false)), thread,
 			`"Continue this thread" link(s) not followed`, "direct", nil, 0,
 		},
 		{
-			"continue link and comments not in the page", withContinue(redditThreadPage(5, bodies, false)), thread,
+			"continue link and comments not in the page", withContinue(redditThreadHTML(5, bodies, false)), thread,
 			"2 not in the page", "direct", nil, 0,
 		},
 		{
-			"a loader among other gaps", withContinue(redditThreadPage(6, bodies, true)), thread,
+			"a loader among other gaps", withContinue(redditThreadHTML(6, bodies, true)), thread,
 			`unexpanded "more replies"`, "direct,browser", nil, 2,
 		},
 		{
@@ -291,7 +291,7 @@ func TestPartialPageEscalatesOnlyWhenARenderCanCloseAGap(t *testing.T) {
 // floor catches JS shells and bot walls; a page the Reddit extractor claimed
 // is neither, so its artifact is stored at the HTTP rung, never dropped.
 func TestAShortCompleteRedditThreadIsStoredFromTheExtractor(t *testing.T) {
-	page := redditThreadPage(1, []string{"Same here, thanks."}, false)
+	page := redditThreadHTML(1, []string{"Same here, thanks."}, false)
 	for _, tc := range []struct {
 		name    string
 		browser *bool
@@ -323,7 +323,7 @@ func TestAShortCompleteRedditThreadIsStoredFromTheExtractor(t *testing.T) {
 func TestAShortCompleteRedditThreadRenderedByTheBrowserIsStored(t *testing.T) {
 	wallText := strings.Repeat("Your request has been blocked by network security. ", 12)
 	spy := &browserSpyConverter{
-		html:   redditThreadPage(1, []string{"Same here, thanks."}, false),
+		html:   redditThreadHTML(1, []string{"Same here, thanks."}, false),
 		status: http.StatusOK,
 		convertFn: func(_ context.Context, _, _ string, _ []byte) (string, error) {
 			return wallText, nil
@@ -400,7 +400,7 @@ func continueThreadLink(id string) string {
 	return `<div class="fold-more">` + foldLink(id) + `</div>`
 }
 
-func loaderThreadPage(stated int, tree ...string) string {
+func loaderThreadHTML(stated int, tree ...string) string {
 	return fmt.Sprintf(`<html><head><title>Loader walk</title></head><body><main>`+
 		`<shreddit-post permalink="/r/examplesub/comments/ddd444/loader_walk/" comment-count="%d" `+
 		`post-title="Loader walk" author="op_placeholder" subreddit-prefixed-name="r/examplesub">`+
@@ -526,7 +526,7 @@ func walkedThread() *redditSite {
 	echo := func(children ...string) string {
 		return threadComment("c5", "echo_placeholder", "Echo, deep in the chain.", children...)
 	}
-	page := loaderThreadPage(14,
+	page := loaderThreadHTML(14,
 		threadComment("c1", "alpha_placeholder", "Alpha top comment.",
 			threadComment("c2", "bravo_placeholder", "Bravo reply."),
 			moreRepliesLoader("cur-a", 2)),
@@ -549,7 +549,7 @@ func walkedThread() *redditSite {
 			"cur-top":  juliet + viewMoreLoader("cur-top2"),
 			"cur-top2": kilo + lima,
 		},
-		threads: map[string]string{"c5": loaderThreadPage(14, echo(hotel))},
+		threads: map[string]string{"c5": loaderThreadHTML(14, echo(hotel))},
 	}
 }
 
@@ -658,16 +658,16 @@ func TestRedditFoldedRepliesInLoadedBranchesAreFollowed(t *testing.T) {
 	charlie := "Charlie, at the loader answer's fold."
 	delta := "Delta, past the continued page's depth."
 	site := &redditSite{
-		page: loaderThreadPage(5, threadComment("c1", "alpha_placeholder", "Alpha top comment.",
+		page: loaderThreadHTML(5, threadComment("c1", "alpha_placeholder", "Alpha top comment.",
 			moreRepliesLoader("cur-deep", 4))),
 		fragments: map[string]string{
 			"cur-deep": threadComment("c2", "bravo_placeholder", "Bravo, in the loaded branch.",
 				foldedComment("c3", "charlie_placeholder", charlie)),
 		},
 		threads: map[string]string{
-			"c3": loaderThreadPage(5, threadComment("c3", "charlie_placeholder", charlie,
+			"c3": loaderThreadHTML(5, threadComment("c3", "charlie_placeholder", charlie,
 				threadComment("c4", "delta_placeholder", delta, deepThreadLink("c4", 1)))),
-			"c4": loaderThreadPage(5, threadComment("c4", "delta_placeholder", delta,
+			"c4": loaderThreadHTML(5, threadComment("c4", "delta_placeholder", delta,
 				threadComment("c5", "echo_placeholder", "Echo, the deepest live reply."))),
 		},
 	}
@@ -711,7 +711,7 @@ func TestRedditFoldedRepliesInLoadedBranchesAreFollowed(t *testing.T) {
 func TestRedditRemainderWithNoLoaderLeftIsNamedNotFlagged(t *testing.T) {
 	long := strings.Repeat("A substantive comment about the placeholder topic with real detail. ", 3)
 	spy := &browserSpyConverter{}
-	h := pageHarvester(t, redditThreadPage(5, []string{long, long, long}, false), spy, browserOn())
+	h := pageHarvester(t, redditThreadHTML(5, []string{long, long, long}, false), spy, browserOn())
 	result := h.Fetch(context.Background(), "https://www.reddit.com/r/examplesub/comments/ccc333/loader_thread/")
 	if result.Error != "" || result.Method != rungDirect || result.Partial != "" || spy.browserCalls != 0 {
 		t.Fatalf("a thread with nothing left to load was flagged or escalated: method=%q rungs=%v partial=%q",
@@ -745,7 +745,7 @@ func TestRedditContinuedThreadServedEmptyIsNotAGap(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			site := &redditSite{
-				page: loaderThreadPage(4, threadComment("c1", "alpha_placeholder", "Alpha.",
+				page: loaderThreadHTML(4, threadComment("c1", "alpha_placeholder", "Alpha.",
 					threadComment("c2", "bravo_placeholder", "Bravo, deep.", continueThreadLink("c2")))),
 				threads: map[string]string{"c2": tc.continued},
 			}

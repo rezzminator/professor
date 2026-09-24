@@ -309,9 +309,9 @@ func (r *Resolver) ResolveBook(ctx context.Context, query string) ([]Candidate, 
 	return sortCandidates(out), nil
 }
 
-// findOpenLibrary and findGutendex are two findWorks sources, not one: Gutendex
+// findOpenLibrary and findGutendex are two search_literature sources, not one: Gutendex
 // often answers in 25-45 s, and sharing one source with it cost Open Library's
-// one-second answer at every findWorks deadline.
+// one-second answer at every search_literature deadline.
 func (r *Resolver) findOpenLibrary(ctx context.Context, client *http.Client, query string, limit int) []Candidate {
 	var openLibrary struct {
 		Docs []struct {

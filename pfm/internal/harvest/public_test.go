@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -201,14 +202,18 @@ func TestPublicResultDoesNotAcceptNonHarvesterProvenanceArtifact(t *testing.T) {
 	}
 }
 
-// TestJSONResultsCarriesPartialAndMethod pins the `pfm harvest --json`
-// object: `partial` and `method` are always present, so a caller reads
-// completeness and the storing rung from fields, never from the markdown
-// marker.
-func TestJSONResultsCarriesPartialAndMethod(t *testing.T) {
-	complete := Result{Source: "https://fixture.example/a", Kind: "html", Method: "browser-chrome"}
+// TestJSONResultsCarriesGapsAndVia pins the `pfm harvest --json` object:
+// `gaps` and `via` are always present (gaps an empty list when complete, one
+// entry per joined reason otherwise), so a caller reads completeness and the
+// storing rung from fields, never from the markdown marker; the embedded
+// result's own `method` and `partial` keys never render beside them.
+func TestJSONResultsCarriesGapsAndVia(t *testing.T) {
+	complete := Result{
+		Source: "https://fixture.example/a", Kind: "html", Method: "browser-chrome",
+		CacheStatus: "hit", HTTPStatus: 200,
+	}
 	partial := complete
-	partial.Partial = "page 3 of 9 failed to convert"
+	partial.Partial = joinReasons("page 3 of 9 failed to convert", "1 image(s) could not be published")
 	encoded, err := json.Marshal(JSONResults([]Result{complete, partial}))
 	if err != nil {
 		t.Fatalf("encode: %v", err)
@@ -217,13 +222,27 @@ func TestJSONResultsCarriesPartialAndMethod(t *testing.T) {
 	if err := json.Unmarshal(encoded, &decoded); err != nil {
 		t.Fatalf("decode %s: %v", encoded, err)
 	}
-	for index, want := range []string{"", partial.Partial} {
-		got, ok := decoded[index]["partial"]
-		if !ok || got != want {
-			t.Fatalf("result %d partial=%v (present=%t), want %q: %s", index, got, ok, want, encoded)
+	for index, want := range [][]any{{}, {"page 3 of 9 failed to convert", "1 image(s) could not be published"}} {
+		got, ok := decoded[index]["gaps"]
+		if !ok || !reflect.DeepEqual(got, want) {
+			t.Fatalf("result %d gaps=%v (present=%t), want %q: %s", index, got, ok, want, encoded)
 		}
-		if decoded[index]["method"] != "browser-chrome" {
-			t.Fatalf("result %d method=%v, want browser-chrome: %s", index, decoded[index]["method"], encoded)
+		if decoded[index]["via"] != "browser-chrome" {
+			t.Fatalf("result %d via=%v, want browser-chrome: %s", index, decoded[index]["via"], encoded)
+		}
+		// One shadow mechanism hides both embedded keys; method's absence proves it.
+		if _, found := decoded[index]["method"]; found {
+			t.Fatalf("result %d still carries the embedded method key: %s", index, encoded)
+		}
+		// The MCP read item's words: cached and status, never cache_status or http_status.
+		if decoded[index]["cached"] != true || decoded[index]["status"] != float64(200) {
+			t.Fatalf("result %d cached=%v status=%v, want true and 200: %s",
+				index, decoded[index]["cached"], decoded[index]["status"], encoded)
+		}
+		for _, old := range []string{"cache_status", "http_status", "partial"} {
+			if _, found := decoded[index][old]; found {
+				t.Fatalf("result %d carries the old key %q: %s", index, old, encoded)
+			}
 		}
 	}
 }

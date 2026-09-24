@@ -34,8 +34,15 @@ var (
 	)
 )
 
+// DOIFrom is the DOI text carries, or, when text is an arXiv id on its own,
+// that id's arXiv DOI.
 func DOIFrom(text string) string {
 	m := doiPattern.FindString(text)
+	if m == "" {
+		if id := ArXivID(text); id != "" {
+			return arxivDOI(id)
+		}
+	}
 	return strings.TrimRight(m, ".,;:)>]")
 }
 
@@ -186,3 +193,37 @@ func doiPrefixOf(doi string) string {
 	}
 	return ""
 }
+
+// arxivIDPattern is an arXiv id standing alone, `arXiv:` prefix optional: the
+// new style YYMM.NNNNN and the old style archive[.SC]/YYMMNNN, each with an
+// optional vN.
+var arxivIDPattern = regexp.MustCompile(
+	`(?i)^(?:arxiv:\s*)?(\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}(?:v\d+)?|[a-z]+(?:-[a-z]+)?(?:\.[a-z]{2})?/\d{7}(?:v\d+)?)$`,
+)
+
+// arxivURLPattern is an arxiv.org abs or pdf page of one arXiv id.
+var arxivURLPattern = regexp.MustCompile(
+	`(?i)^https?://(?:www\.)?arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5}(?:v\d+)?|[a-z]+(?:-[a-z]+)?(?:\.[a-z]{2})?/\d{7}(?:v\d+)?)(?:\.pdf)?/?$`,
+)
+
+// ArXivID is the arXiv id a source spells on its own ("arXiv:1706.03762",
+// "1706.03762v5", "hep-th/9901001"), or "". A URL is never an id here: an
+// arxiv.org page in urls reads the page.
+func ArXivID(source string) string {
+	if match := arxivIDPattern.FindStringSubmatch(strings.TrimSpace(source)); match != nil {
+		return match[1]
+	}
+	return ""
+}
+
+// ArXivPageID is the arXiv id an arxiv.org abs or pdf URL names, or "": in
+// publications that page names the work.
+func ArXivPageID(source string) string {
+	if match := arxivURLPattern.FindStringSubmatch(strings.TrimSpace(source)); match != nil {
+		return match[1]
+	}
+	return ""
+}
+
+// arxivDOI is an arXiv id's DataCite DOI, which ResolveDOI routes to arXiv.
+func arxivDOI(id string) string { return "10.48550/arXiv." + id }

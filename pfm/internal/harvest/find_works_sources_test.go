@@ -83,20 +83,20 @@ func TestFindWorksAnswersWithinItsDeadline(t *testing.T) {
 		return response(r, http.StatusOK, "application/json", `{}`), nil
 	})}
 	start := time.Now()
-	found, err := (&Resolver{Client: client}).findWorksWithin(
+	found, err := (&Resolver{Client: client}).searchLiteratureWithin(
 		context.Background(),
 		"Deep learning",
 		8,
 		"",
 		deadline,
-		findWorksGrace,
+		searchLiteratureGrace,
 	)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if elapsed > deadline+500*time.Millisecond {
-		t.Fatalf("findWorks took %s, want within the %s deadline plus a small margin", elapsed, deadline)
+		t.Fatalf("search_literature took %s, want within the %s deadline plus a small margin", elapsed, deadline)
 	}
 	if len(found.Candidates) != 2 || found.Candidates[0].Year != 2015 {
 		t.Fatalf("candidates = %+v, want OpenAlex's and Crossref's records ranked, the earlier first", found.Candidates)
@@ -152,11 +152,12 @@ func TestFindWorksFinishesEarlyOnceTheCoreAnswered(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed > findWorksGrace+500*time.Millisecond {
-		t.Fatalf("findWorks took %s, want the core's time plus the %s grace", elapsed, findWorksGrace)
+	if elapsed > searchLiteratureGrace+500*time.Millisecond {
+		t.Fatalf("search_literature took %s, want the core's time plus the %s grace", elapsed, searchLiteratureGrace)
 	}
-	if got := sourceNamed(found, "Gutendex"); got.Status != SourceTimedOut || got.Error != findWorksNotWaitedText {
-		t.Fatalf("Gutendex = %+v, want timed_out %q", got, findWorksNotWaitedText)
+	got := sourceNamed(found, "Gutendex")
+	if got.Status != SourceTimedOut || got.Error != searchLiteratureNotWaitedText {
+		t.Fatalf("Gutendex = %+v, want timed_out %q", got, searchLiteratureNotWaitedText)
 	}
 }
 
@@ -171,14 +172,14 @@ func TestFindWorksEarlyFinishFollowsTheKind(t *testing.T) {
 		limit                                       int
 		early                                       bool
 	}{
-		{"paper, slow Open Library", kindPaper, "openlibrary.org", "Open Library", findWorksNotWaitedText, 8, true},
+		{"paper, slow Open Library", kindPaper, "openlibrary.org", "Open Library", searchLiteratureNotWaitedText, 8, true},
 		{"paper, slow Crossref", kindPaper, "api.crossref.org", "Crossref", "deadline", 8, false},
 		{"book, slow Gutendex", kindBook, "", "Gutendex", "deadline", 8, false},
 		{"any, fewer than limit", "", "", "Gutendex", "deadline", 5, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Now()
-			found, err := (&Resolver{Client: slowGutendexClient(tc.slowHost)}).findWorksWithin(
+			found, err := (&Resolver{Client: slowGutendexClient(tc.slowHost)}).searchLiteratureWithin(
 				context.Background(), "Deep learning", tc.limit, tc.kind, deadline, grace)
 			elapsed := time.Since(start)
 			if err != nil && tc.early {

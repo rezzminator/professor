@@ -10,7 +10,7 @@ import (
 )
 
 // Download retrieves a source's bytes, unparsed, through Retrieve's file
-// policy — the download tool's path, for a file of any kind (a PDF, a zip, an
+// policy — the download_file tool's path, for a file of any kind (a PDF, a zip, an
 // image, audio), capped at harvest.maxDownloadBytes. It never converts.
 func (h *Harvester) Download(ctx context.Context, source string) Result {
 	ctx, note := withRetryAfterNote(ctx)

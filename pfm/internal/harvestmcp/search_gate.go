@@ -22,22 +22,26 @@ func runtimeSearchEnabled(runtime Runtime) bool {
 }
 
 // serverInstructions is the server's top-level routing guide. It names
-// webSearch only when a search backend is configured (and says how to
-// configure one otherwise), and parseLocalDocuments only on a local server.
+// search_web only when a search backend is configured (and says how to
+// configure one otherwise), and read's `files` only on a local server.
 func serverInstructions(searchAvailable, remote bool) string {
 	routes := []string{
-		`"read / get this web page or URL" is readPage (a paper's landing page is a page too)`,
-		`"read this paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL, or findWorks handle" is readWork`,
-		`"find papers / works / a book by TITLE" is findWorks (ranked candidates with a handle, no download)`,
-		`"download / save this file — a PDF, zip, image, audio, dataset" is download (the bytes, unparsed; nothing is converted)`,
+		`"read / get this web page or URL" is read with the URL in urls (a paper's landing page there reads the page)`,
+		`"read this paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL, or search_literature handle" is read with it in publications`,
 	}
 	if !remote {
-		routes = append(routes, `"read this local document" is parseLocalDocuments`)
+		routes = append(routes, `"read this local document" is read with its path in files (this machine only)`)
 	}
-	order := "Order for a title — findWorks, then readWork with its handle"
+	routes = append(
+		routes,
+		`one read call takes urls, files and publications together`,
+		`"find papers / works / a book by TITLE" is search_literature (ranked candidates with a handle, no download)`,
+		`"download / save this file — a PDF, zip, image, audio, dataset" is download_file (the bytes, unparsed; nothing is converted)`,
+	)
+	order := "Order for a title — search_literature, then read its handle in publications"
 	if searchAvailable {
-		routes = append(routes, `"search the web for X" is webSearch (ranked URLs with snippets, not a paper finder)`)
-		order += "; for a topic — webSearch, then readPage the URL"
+		routes = append(routes, `"search the web for X" is search_web (ranked URLs with snippets, not a paper finder)`)
+		order += "; for a topic — search_web, then read the URL in urls"
 	}
 	text := "Public-document retrieval. Routing — " + strings.Join(routes, "; ") + ". " + order +
 		`. Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
@@ -67,5 +71,5 @@ func renderSearchFailure(err error) string {
 	// An unclassified backend error keeps its text in the log only: it can
 	// carry a backend URL, and this surface may serve a remote client.
 	return "Web search failed: the configured search backends failed for a reason the harvester could not classify " +
-		"(the details are in its log). Retry later; readPage, findWorks and readWork do not depend on web search."
+		"(the details are in its log). Retry later; read, search_literature and download_file do not depend on web search."
 }

@@ -74,7 +74,7 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 		{
 			"paywall",
 			Result{Error: "the article is behind a paywall"},
-			[]string{"paywall", "never signs in", "findWorks"},
+			[]string{"paywall", "never signs in", "search_literature"},
 			nil,
 		},
 		{
@@ -143,19 +143,19 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 				Error: "Found DOI 10.1234/x, but no free, legal full text exists in the configured open-access sources. The paper is likely paywalled",
 				Rungs: []string{"oa:unpaywall", "oa:core"},
 			},
-			[]string{"No open copy", "never signs in", "findWorks", "oa-mirror(2 sources)"},
+			[]string{"No open copy", "never signs in", "search_literature", "oa-mirror(2 sources)"},
 			nil,
 		},
 		{
 			"disabled",
 			Result{ErrorKind: errorKindDisabled},
-			[]string{"disabled on this harvester", "findWorks"},
+			[]string{"disabled on this harvester", "search_literature"},
 			nil,
 		},
 		{
 			"local missing",
 			Result{Source: "/data/notes/report.odt", ErrorKind: errorKindMissing},
-			[]string{"local file", "parseLocalDocuments"},
+			[]string{"local file", "read (files)"},
 			[]string{"/data/notes"},
 		},
 		{

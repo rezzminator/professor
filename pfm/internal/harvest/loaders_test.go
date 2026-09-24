@@ -97,7 +97,7 @@ func TestLoaderFollowingStopsAtTheCap(t *testing.T) {
 			moreRepliesLoader(cursor, 1)))
 		site.fragments[cursor] = threadComment(fmt.Sprintf("r%d", index), "replier_placeholder", "A reply.")
 	}
-	site.page = loaderThreadPage(2*(redditLoaderCap+1), tree...)
+	site.page = loaderThreadHTML(2*(redditLoaderCap+1), tree...)
 	spy := &browserSpyConverter{html: site.page, status: http.StatusOK}
 	h, pacing := site.harvester(t, spy, browserOn())
 	result := h.Fetch(context.Background(), loaderThread)
@@ -128,7 +128,7 @@ func TestLoaderFollowingStopsAtTheCap(t *testing.T) {
 // off the site, and names both in the partial marker.
 func TestLoaderFollowingNamesFailures(t *testing.T) {
 	site := &redditSite{
-		page: loaderThreadPage(10,
+		page: loaderThreadHTML(10,
 			threadComment("c1", "alpha_placeholder", "Alpha.",
 				`<faceplate-partial method="post" src="https://elsewhere.example.test/svc/shreddit/more-comments/x">`+
 					`<input type="hidden" name="cursor" value="cur-off"><button>1 more reply</button>`+

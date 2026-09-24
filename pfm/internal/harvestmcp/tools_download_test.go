@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -67,13 +68,41 @@ func TestRemoteDownloadIsAResourceLinkServedOnlyThroughMCP(t *testing.T) {
 	}
 }
 
-// TestDownloadRoundTripsItsTypedOutput: a real call through the SDK returns
-// structuredContent that validates; a local path is a named wrong-tool error.
-func TestDownloadRoundTripsItsTypedOutput(t *testing.T) {
+// TestDownloadFileRoundTripsItsTypedOutput: a real call through the SDK takes
+// urls and returns structuredContent that validates; a local path and a work
+// identifier are per-item named errors pointing at read's right field.
+func TestDownloadFileRoundTripsItsTypedOutput(t *testing.T) {
 	session := connectHarvesterInProcess(t, newTestService(t, Runtime{}))
 	var out DownloadOutput
-	callStructured(t, session, toolDownload, map[string]any{"sources": []string{"/tmp/x.zip"}}, &out)
-	if len(out.Items) != 1 || !strings.Contains(out.Items[0].Error, "`parseLocalDocuments`") {
-		t.Fatalf("download(local path) = %+v", out.Items)
+	callStructured(t, session, toolDownloadFile, map[string]any{
+		"urls": []string{"/tmp/x.zip", "10.1038/nature14539"},
+	}, &out)
+	if len(out.Items) != 2 ||
+		out.Items[0].Error != "this is a local path; download_file takes URLs — read a local document with `read` (files)." ||
+		!strings.Contains(
+			out.Items[1].Error,
+			"; read it with `read` (publications), or download the URL of its file.",
+		) {
+		t.Fatalf("download_file(local path, DOI) = %+v", out.Items)
+	}
+}
+
+// TestDownloadFileItemNamesItsRungVia: the rung that served a file is the
+// item's via, in the structured output and the text.
+func TestDownloadFileItemNamesItsRungVia(t *testing.T) {
+	service := newTestService(t, Runtime{})
+	zipPath := filepath.Join(t.TempDir(), "bundle.zip")
+	writeTestZip(t, zipPath, map[string]string{"a.txt": "hi"})
+	item := service.downloadItem(context.Background(), "https://example.test/bundle.zip",
+		harvest.Result{Kind: "zip", Path: zipPath, Method: "direct"})
+	encoded, err := json.Marshal(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"via":"direct"`) || strings.Contains(string(encoded), `"method"`) {
+		t.Fatalf("download_file item = %s, want via and no method", encoded)
+	}
+	if text := renderDownload(item); !strings.Contains(text, "/ via: direct /") {
+		t.Fatalf("download_file text = %q, want via", text)
 	}
 }

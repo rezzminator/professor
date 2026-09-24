@@ -11,7 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// A work read by identifier with caller headers (readWork, ForWork): the
+// A work read by identifier with caller headers (read publications, ForWork): the
 // identifier resolves as without headers — doi.org, the resolvers and the
 // metadata APIs never receive them — and once the landing URL is known the
 // headers go to that URL's origin only: the landing page read and a full-text

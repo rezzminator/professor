@@ -67,7 +67,7 @@ func TestSynthesizeRoutesAndEnvHygiene(t *testing.T) {
 	wantPrefix := hygiene +
 		" CLAUDE_CONFIG_DIR='/home/test/.cc/2'" +
 		" ENABLE_PROMPT_CACHING_1H=1" +
-		" " + webSearchBudgetName + "=" + Quote(webSearchBudgetValue) +
+		" " + maxWebSearchesName + "=" + Quote(maxWebSearchesValue) +
 		" " + truecolorName + "=" + Quote("1") +
 		" " + spawnDepthName + "=" + Quote("8") +
 		" claude"

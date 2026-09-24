@@ -15,14 +15,14 @@ func TestFetchOneRecoversAPanicIntoThatItemsError(t *testing.T) {
 	var wait sync.WaitGroup
 	semaphore := make(chan struct{}, 1)
 	contents := make([]string, 1)
-	items := make([]PageItem, 1)
+	items := make([]ReadItem, 1)
 	wait.Add(1)
 	service.fetchOne(
 		context.Background(),
 		semaphore,
 		&wait,
 		0,
-		"https://example.test/a",
+		readJob{field: fieldURLs, source: "https://example.test/a"},
 		readRequest{},
 		contents,
 		items,
@@ -39,18 +39,26 @@ func TestFetchOneRecoversAPanicIntoThatItemsError(t *testing.T) {
 	}
 }
 
-// TestFetchOneMisrouteNeverReachesTheHarvester: a wrong-tool source answers
+// TestFetchOneMisplacedNeverReachesTheHarvester: a misplaced source answers
 // its named error before the read (a nil harvester would panic otherwise).
-func TestFetchOneMisrouteNeverReachesTheHarvester(t *testing.T) {
+func TestFetchOneMisplacedNeverReachesTheHarvester(t *testing.T) {
 	service := &Service{}
 	var wait sync.WaitGroup
 	contents := make([]string, 1)
-	items := make([]PageItem, 1)
+	items := make([]ReadItem, 1)
 	wait.Add(1)
-	service.fetchOne(context.Background(), make(chan struct{}, 1), &wait, 0, "10.1038/nature14539",
-		readRequest{misroute: pageMisroute}, contents, items)
+	service.fetchOne(
+		context.Background(),
+		make(chan struct{}, 1),
+		&wait,
+		0,
+		readJob{field: fieldURLs, source: "10.1038/nature14539"},
+		readRequest{},
+		contents,
+		items,
+	)
 	wait.Wait()
-	if !strings.Contains(items[0].Error, "`readWork`") || strings.Contains(items[0].Error, "read item") {
-		t.Fatalf("misrouted item error = %q, want the readWork pointer", items[0].Error)
+	if !strings.Contains(items[0].Error, "put it in publications") || strings.Contains(items[0].Error, "read item") {
+		t.Fatalf("misplaced item error = %q, want the publications pointer", items[0].Error)
 	}
 }

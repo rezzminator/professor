@@ -550,9 +550,9 @@ func publicErrorKind(result Result) string {
 		strings.Contains(err, "unsupported url"),
 		strings.Contains(err, "source is empty"):
 		return errorKindInvalid
-	case strings.Contains(err, "findworks"), strings.Contains(err, "find works"), strings.Contains(err, "title — use"):
+	case strings.Contains(err, "search_literature"), strings.Contains(err, "title — use"):
 		return "ambiguous"
-	case strings.Contains(err, "with `download`"):
+	case strings.Contains(err, "with `download_file`"):
 		return errorKindWrongKind
 	case strings.Contains(err, cacheLabel), strings.Contains(err, "storage"), strings.Contains(err, "read local file"):
 		return errorKindInternal
@@ -568,15 +568,15 @@ func PublicFailureMessage(result Result) string {
 	switch kind {
 	case errorKindRefused:
 		if isLocalFailureSource(result.Source) {
-			return "This local path is outside the directories this harvester may read. parseLocalDocuments reads only files inside its permitted roots; move or copy the file there."
+			return "This local path is outside the directories this harvester may read. read reads files only inside its permitted roots; move or copy the file there."
 		}
 		return "The request was refused by access policy: the harvester reads only public internet addresses. Use the resource's public URL, or " + anotherCopy + "."
 	case errorKindCancelled:
 		return "The request was cancelled before it finished. Send it again."
 	case errorKindInvalid:
-		return "The input is invalid. Give readPage a web URL, parseLocalDocuments a local path, or readWork a DOI, arXiv id, PMID, PMCID, ISBN or a findWorks handle."
+		return "The input is invalid. Give read a web URL in urls, a local path in files, or a DOI, arXiv id, PMID, PMCID, ISBN or a search_literature handle in publications."
 	case "ambiguous":
-		return "The title is ambiguous. Use findWorks, select a result, and read it with readWork."
+		return "The title is ambiguous. Use search_literature, select a result, and read its handle with read in publications."
 	case errorKindWrongKind:
 		return wrongKindMessage(result.Kind)
 	case errorKindInternal:
@@ -595,13 +595,23 @@ func PublicFailureMessage(result Result) string {
 }
 
 // JSONResult is one `pfm harvest --json` object: the public result with
-// `partial` (the reason the artifact is incomplete, empty when complete) and
-// `method` (the rung that stored the page) always present, so a caller reads
+// `gaps` (the named reasons the artifact is incomplete, empty when complete)
+// and `via` (the rung that stored the page) always present, so a caller reads
 // completeness and provenance from fields, never from the markdown marker.
+// Its keys are the MCP read item's words: `cached` (the cache answered) and
+// `status` (the delivering HTTP status). Method, Partial, ShadowCacheStatus
+// and ShadowHTTPStatus shadow the embedded Result's own four keys, left empty
+// so they never render beside via, gaps, cached and status.
 type JSONResult struct {
 	Result
-	Method  string `json:"method"`
-	Partial string `json:"partial"`
+	Method            string   `json:"method,omitempty"`
+	Partial           string   `json:"partial,omitempty"`
+	ShadowCacheStatus string   `json:"cache_status,omitempty"`
+	ShadowHTTPStatus  int      `json:"http_status,omitempty"`
+	Via               string   `json:"via"`
+	Gaps              []string `json:"gaps"`
+	Cached            bool     `json:"cached"`
+	Status            int      `json:"status,omitempty"`
 }
 
 // JSONResults renders results for `pfm harvest --json`.
@@ -609,13 +619,34 @@ func JSONResults(results []Result) []JSONResult {
 	out := make([]JSONResult, 0, len(results))
 	for i := range results {
 		r := &results[i]
-		out = append(out, JSONResult{Result: *r, Method: r.Method, Partial: r.Partial})
+		out = append(out, JSONResult{
+			Result: *r, Via: r.Method, Gaps: PublicGaps(r.Partial), Cached: Cached(*r), Status: r.HTTPStatus,
+		})
 	}
 	return out
 }
 
+// Cached reports whether the cache answered a result — the one boolean every
+// CLI surface (receipt and --json) names `cached`, as the MCP read item does.
+func Cached(result Result) bool {
+	return result.CacheStatus == cacheStatusHit
+}
+
+// PublicGaps splits a result's partial reason into its named gaps, one per
+// reason joinReasons joined; a complete result has none — an empty list,
+// never null, so "complete" is a value a caller reads.
+func PublicGaps(partial string) []string {
+	gaps := []string{}
+	for _, reason := range strings.Split(partial, "; ") {
+		if reason = strings.TrimSpace(reason); reason != "" {
+			gaps = append(gaps, reason)
+		}
+	}
+	return gaps
+}
+
 // wrongKindMessage names what a body that is not a page is, and points at the
-// tool that takes it: `download` returns a file's bytes, unparsed.
+// tool that takes it: `download_file` returns a file's bytes, unparsed.
 func wrongKindMessage(kind string) string {
 	what := "a file (audio, video, a legacy Office file or another binary)"
 	switch low := strings.ToLower(kind); {
@@ -624,5 +655,5 @@ func wrongKindMessage(kind string) string {
 	case low == kindArchive || low == kindZIP || low == kindTAR || low == kind7Z || low == kindRAR:
 		what = "an archive"
 	}
-	return "This source is " + what + ", not a page. Download it with `download`; readPage reads pages."
+	return "This source is " + what + ", not a page. Download it with `download_file`; read reads pages."
 }

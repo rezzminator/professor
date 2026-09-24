@@ -28,13 +28,11 @@ import (
 )
 
 const (
-	defaultInlineChars  = 50000
-	jsonSchemaBoolean   = "boolean"
-	jsonSchemaObject    = "object"
-	jsonSchemaString    = "string"
-	jsonPropertyQuery   = "query"
-	jsonPropertySource  = "source"
-	jsonPropertySources = "sources"
+	defaultInlineChars = 50000
+	jsonSchemaBoolean  = "boolean"
+	jsonSchemaObject   = "object"
+	jsonSchemaString   = "string"
+	jsonPropertyQuery  = "query"
 )
 
 // Runtime is the resolved harvester.config.json plus machine-local paths. The
@@ -80,8 +78,8 @@ type Runtime struct {
 	NegativeTransientTTL time.Duration
 	TTLsConfigured       bool
 	MaxInlineChars       int
-	// Remote marks the external gateway's service: parseLocalDocuments is not
-	// registered, no result carries a server path, and download answers a signed
+	// Remote marks the external gateway's service: read takes no `files` there
+	// (its schema drops the field), no result carries a server path, and download_file answers a signed
 	// expiring /files URL plus a resource_link served by the download
 	// resource template.
 	Remote bool
@@ -464,40 +462,36 @@ type nopWriterCloser struct{ io.Writer }
 
 func (nopWriterCloser) Close() error { return nil }
 
-// register adds the six tools (parseLocalDocuments only on a local server,
-// webSearch only with a search backend) and, on the remote server, the
-// download resource template. Each tool returns its output struct: the SDK
-// derives the output schema from it and sends structuredContent beside the
-// readable Content text. RegisteredToolNames (toolnames.go) moves with it.
+// register adds the four tools (search_web only with a search backend; read
+// on the remote server without `files` in its schema) and, on the remote
+// server, the download resource template. Each tool returns its output
+// struct: the SDK derives the output schema from it and sends
+// structuredContent beside the readable Content text. RegisteredToolNames
+// (toolnames.go) moves with it.
 func (service *Service) register() {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
-	mcp.AddTool(service.server,
-		&mcp.Tool{Name: toolReadPage, Description: readPageDescription, Annotations: readOnly},
-		obs.Tool(toolReadPage, service.readPage))
-	if !service.runtime.Remote {
-		mcp.AddTool(service.server,
-			&mcp.Tool{Name: toolParseLocal, Description: parseLocalDescription, Annotations: readOnly},
-			obs.Tool(toolParseLocal, service.parseLocalDocuments))
+	readTool := &mcp.Tool{Name: toolRead, Description: readDescription, Annotations: readOnly}
+	if service.runtime.Remote {
+		readTool.Description = readRemoteDescription
+		readTool.InputSchema = remoteReadSchema()
 	}
+	mcp.AddTool(service.server, readTool, obs.Tool(toolRead, service.read))
 	mcp.AddTool(service.server,
-		&mcp.Tool{Name: toolDownload, Description: downloadDescription, Annotations: readOnly},
-		obs.Tool(toolDownload, service.download))
+		&mcp.Tool{Name: toolDownloadFile, Description: downloadFileDescription, Annotations: readOnly},
+		obs.Tool(toolDownloadFile, service.downloadFile))
 	mcp.AddTool(service.server,
-		&mcp.Tool{Name: toolFindWorks, Description: findWorksDescription, Annotations: readOnly},
-		obs.Tool(toolFindWorks, service.findWorks))
-	mcp.AddTool(service.server,
-		&mcp.Tool{Name: toolReadWork, Description: readWorkDescription, Annotations: readOnly},
-		obs.Tool(toolReadWork, service.readWork))
+		&mcp.Tool{Name: toolSearchLiterature, Description: searchLiteratureDescription, Annotations: readOnly},
+		obs.Tool(toolSearchLiterature, service.searchLiterature))
 	if runtimeSearchEnabled(service.runtime) {
 		mcp.AddTool(service.server,
-			&mcp.Tool{Name: toolWebSearch, Description: webSearchDescription, Annotations: readOnly},
-			obs.Tool(toolWebSearch, service.webSearch))
+			&mcp.Tool{Name: toolSearchWeb, Description: searchWebDescription, Annotations: readOnly},
+			obs.Tool(toolSearchWeb, service.searchWeb))
 	}
 	if service.runtime.Remote {
 		service.server.AddResourceTemplate(&mcp.ResourceTemplate{
 			Name:        "download",
 			URITemplate: downloadURITemplate,
-			Description: "A file the download tool fetched, by its sha256; resources/read answers its bytes as a blob.",
+			Description: "A file the download_file tool fetched, by its sha256; resources/read answers its bytes as a blob.",
 		}, service.readDownload)
 	}
 }

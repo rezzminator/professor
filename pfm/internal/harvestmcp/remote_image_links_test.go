@@ -11,12 +11,12 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
-// TestRemoteReadPageImageLinksCarryNoServerPath pins A3 defect 3 at the
-// remote gateway: readPage on a cached page with images answers content whose
+// TestRemoteReadImageLinksCarryNoServerPath pins A3 defect 3 at the
+// remote gateway: read on a cached page with images answers content whose
 // image links name no server path — neither the private cache path the stored
 // page links (an older entry's absolute link, the localizer's page-relative
 // one) nor the public directory the images are published into.
-func TestRemoteReadPageImageLinksCarryNoServerPath(t *testing.T) {
+func TestRemoteReadImageLinksCarryNoServerPath(t *testing.T) {
 	cacheDir := filepath.Join(t.TempDir(), "cache")
 	const source = "https://example.test/thread"
 	pagePath := filepath.Join(cacheDir, harvest.CacheKey(source, "html"))
@@ -42,10 +42,10 @@ func TestRemoteReadPageImageLinksCarryNoServerPath(t *testing.T) {
 	}
 
 	session := connectHarvesterInProcess(t, newTestService(t, Runtime{Remote: true, CacheDir: cacheDir}))
-	var out PagesOutput
-	text := callStructured(t, session, toolReadPage, map[string]any{"sources": []string{source}}, &out)
-	if len(out.Items) != 1 || out.Items[0].Error != "" {
-		t.Fatalf("readPage items = %+v", out.Items)
+	var out ReadOutput
+	text := readText(t, session, map[string]any{"urls": []string{source}}, &out)
+	if len(out.URLs) != 1 || out.URLs[0].Error != "" {
+		t.Fatalf("read urls = %+v", out.URLs)
 	}
 	encoded, err := json.Marshal(out)
 	if err != nil {
@@ -53,10 +53,10 @@ func TestRemoteReadPageImageLinksCarryNoServerPath(t *testing.T) {
 	}
 	for what, got := range map[string]string{"structured": string(encoded), "text": text} {
 		if strings.Contains(got, cacheDir) || strings.Contains(got, "](/") {
-			t.Fatalf("remote readPage %s result carries a server path (cache %q): %s", what, cacheDir, got)
+			t.Fatalf("remote read %s result carries a server path (cache %q): %s", what, cacheDir, got)
 		}
 	}
-	if n := strings.Count(out.Items[0].Content, "](./"); n != 2 {
-		t.Fatalf("published image links = %d, want 2: %q", n, out.Items[0].Content)
+	if n := strings.Count(out.URLs[0].Content, "](./"); n != 2 {
+		t.Fatalf("published image links = %d, want 2: %q", n, out.URLs[0].Content)
 	}
 }

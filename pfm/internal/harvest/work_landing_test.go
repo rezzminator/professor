@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestCallerHeadersReachTheWorkLandingOnly: readWork on a bare DOI with a
+// TestCallerHeadersReachTheWorkLandingOnly: read (publications) on a bare DOI with a
 // caller header resolves the DOI as without one — the resolver and the
 // metadata APIs never see the header — and sends it to the landing URL's
 // origin; the open-access copy on another origin never sees it, and the text

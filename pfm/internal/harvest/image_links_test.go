@@ -66,7 +66,7 @@ func TestLocalizedImageLinkIsRelativeToTheStoredPage(t *testing.T) {
 }
 
 // TestPublicResultImageLinksCarryNoServerPath: the published page — the
-// content a remote readPage returns and the public file it stores — links its
+// content a remote read returns and the public file it stores — links its
 // images relative to itself, both for a page-relative link the localizer
 // writes and for an absolute one an older cache entry still carries.
 func TestPublicResultImageLinksCarryNoServerPath(t *testing.T) {

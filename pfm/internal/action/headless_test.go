@@ -50,7 +50,7 @@ func TestHeadlessClaudeCarriesTheFullLaunchCeremony(t *testing.T) {
 		" -u CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY" +
 		" -u CODEX_THREAD_ID" +
 		" CLAUDE_CONFIG_DIR='/home/tester/.cc/2' FORCE_PROMPT_CACHING_5M=1" +
-		" " + webSearchBudgetName + "=" + Quote(webSearchBudgetValue) +
+		" " + maxWebSearchesName + "=" + Quote(maxWebSearchesValue) +
 		" " + truecolorName + "=" + Quote("1") +
 		" " + spawnDepthName + "=" + Quote("8") +
 		" claude '--name' '_KILL worker 3' 'audit the firewall rules'" +

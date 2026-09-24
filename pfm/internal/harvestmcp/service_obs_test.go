@@ -42,7 +42,7 @@ func connectHarvesterInProcess(t *testing.T, service *Service) *mcp.ClientSessio
 
 // TestRegisteredToolsRecordUnderTheMCPComponent proves every mcp.AddTool
 // registration in register() is wrapped by obs.Tool (items 4/6 of the
-// wiring): a real in-process readPage call writes exactly one mcp.call
+// wiring): a real in-process read call writes exactly one mcp.call
 // record under the mcp component, tool and kind named, never the pattern.
 func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 	service, err := NewConfiguredHarvester(
@@ -60,8 +60,8 @@ func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 	_, recorder := obs.Test(t)
 	session := connectHarvesterInProcess(t, service)
 	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      "readPage",
-		Arguments: ReadPageInput{Sources: []string{"doi:10.1000/no-such-needle-MARKER"}},
+		Name:      toolRead,
+		Arguments: ReadInput{URLs: []string{"doi:10.1000/no-such-needle-MARKER"}},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 	if found == nil {
 		t.Fatalf("no mcp.call record: %s", recorder.Raw())
 	}
-	for key, want := range map[string]any{obs.FieldComp: "mcp", "kind": "tool", "tool": "readPage"} {
+	for key, want := range map[string]any{obs.FieldComp: "mcp", "kind": "tool", "tool": toolRead} {
 		if got, _ := found.Field(key); got != want {
 			t.Fatalf("mcp.call record %s = %v, want %v: %v", key, got, want, found.Fields)
 		}

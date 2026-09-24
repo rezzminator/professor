@@ -101,7 +101,7 @@ type Request struct {
 	OCR    bool   `json:"ocr,omitempty"`
 	// OCRLang is the caller's script for a scan (harvest.OCRLangFrom); ""
 	// lets the document's text layer, /Lang or metadata decide.
-	OCRLang string `json:"ocr_lang,omitempty"`
+	OCRLang string `json:"ocr_language,omitempty"`
 	Layout  bool   `json:"layout,omitempty"`
 	// FullDOM asks for an HTML page's WHOLE DOM converted, boilerplate
 	// included, instead of its extracted main content — the recall gate's

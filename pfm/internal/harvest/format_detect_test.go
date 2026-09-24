@@ -207,8 +207,8 @@ var formatRestCases = []struct {
 }
 
 // TestFormatNamedRestCarriesTheDetectedType: every kind the harvester does
-// not convert ends in a named failure with its detected type, for readPage
-// and parseLocalDocuments alike — never binary characters stored as content.
+// not convert ends in a named failure with its detected type, for read's urls
+// and files alike — never binary characters stored as content.
 // Watched FAILING before format_detect.go (a generic MIME type, a text read,
 // or no failure at all).
 func TestFormatNamedRestCarriesTheDetectedType(t *testing.T) {
@@ -233,7 +233,7 @@ func TestFormatNamedRestCarriesTheDetectedType(t *testing.T) {
 			got := page.Fetch(context.Background(), "https://203.0.113.10/"+tc.name)
 			if got.Content != "" || !strings.Contains(got.Error, tc.label) || !strings.Contains(got.Error, "download") {
 				t.Errorf(
-					"readPage: want a named failure naming %q and `download`, got Error=%q Content=%q",
+					"read (urls): want a named failure naming %q and `download_file`, got Error=%q Content=%q",
 					tc.label,
 					got.Error,
 					got.Content,
@@ -242,7 +242,7 @@ func TestFormatNamedRestCarriesTheDetectedType(t *testing.T) {
 			got = local.FetchPublic(context.Background(), filepath.Join(root, tc.name), FetchOptions{Refresh: true})
 			if got.Content != "" || !strings.Contains(got.Error, tc.label) || strings.Contains(got.Error, root) {
 				t.Errorf(
-					"parseLocalDocuments: want a named failure naming %q, got Error=%q Content=%q",
+					"read (files): want a named failure naming %q, got Error=%q Content=%q",
 					tc.label,
 					got.Error,
 					got.Content,
@@ -355,8 +355,8 @@ func formatOfficeCases(t *testing.T) map[string]struct {
 }
 
 // TestFormatOfficeDocumentsReachTheConverterDispatch: every Office kind
-// converter.py parses reaches it under its own kind, from readPage and
-// parseLocalDocuments alike, and the readable-formats list names them.
+// converter.py parses reaches it under its own kind, from read's urls and
+// files alike, and the readable-formats list names them.
 // Watched FAILING before FM3b: each ended in "detected, but the harvester
 // does not parse it yet".
 func TestFormatOfficeDocumentsReachTheConverterDispatch(t *testing.T) {
@@ -374,7 +374,7 @@ func TestFormatOfficeDocumentsReachTheConverterDispatch(t *testing.T) {
 	for name, tc := range cases {
 		got := local.FetchPublic(context.Background(), filepath.Join(root, name), FetchOptions{Refresh: true})
 		if got.Error != "" || seen[name] != tc.kind || !strings.Contains(got.Content, "converted as "+tc.kind) {
-			t.Errorf("parseLocalDocuments %s: want converter kind %q, got %q (Error=%q)",
+			t.Errorf("read (files) %s: want converter kind %q, got %q (Error=%q)",
 				name, tc.kind, seen[name], got.Error)
 		}
 		body := tc.body
@@ -391,7 +391,7 @@ func TestFormatOfficeDocumentsReachTheConverterDispatch(t *testing.T) {
 		delete(seen, name)
 		got = page.Fetch(context.Background(), "https://203.0.113.10/"+name)
 		if got.Error != "" || seen[name] != tc.kind || !strings.Contains(got.Content, "converted as "+tc.kind) {
-			t.Errorf("readPage %s: want converter kind %q, got %q (Error=%q)", name, tc.kind, seen[name], got.Error)
+			t.Errorf("read (urls) %s: want converter kind %q, got %q (Error=%q)", name, tc.kind, seen[name], got.Error)
 		}
 	}
 	for _, format := range []string{"DOC,", "XLS,", "RTF", "ODT", "ODS", "ODP", "macro and template variants"} {

@@ -359,9 +359,9 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 		}
 	}()
 	if _, err := harvesterSession.CallTool(ctx, &mcp.CallToolParams{
-		Name: "readPage", Arguments: map[string]any{"sources": []string{"doi:10.1000/never-match"}},
+		Name: "read", Arguments: map[string]any{"publications": []string{"doi:10.1000/never-match"}},
 	}); err != nil {
-		t.Fatalf("readPage: %v", err)
+		t.Fatalf("read: %v", err)
 	}
 }
 
@@ -446,9 +446,9 @@ func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 // TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate pins the search-gate
 // fix to /status: the harvester's advertised tool list must track
 // harvestmcp.ToolNames for the runtime actually mounted, never a hardcoded
-// six-tool list that claims `webSearch` whether or not runtimeSearchEnabled
+// tool list that claims `search_web` whether or not runtimeSearchEnabled
 // holds. Before the fix, mcp_serve_command.go's package-level
-// harvesterMCPTools always listed `webSearch`; that defect is what this test
+// harvesterMCPTools always listed the web search tool; that defect is what this test
 // would have caught.
 func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
 	for _, test := range []struct {
@@ -486,7 +486,7 @@ func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
 			listed := status.Servers[config.MCPServerHarvester]
 			hasSearch := false
 			for _, name := range listed {
-				if name == "webSearch" {
+				if name == "search_web" {
 					hasSearch = true
 				}
 			}

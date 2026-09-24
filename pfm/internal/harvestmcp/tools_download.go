@@ -28,12 +28,12 @@ const (
 	downloadURITemplate           = downloadURIPrefix + "{id}"
 	defaultMaxResourceBytes int64 = 25 << 20
 	resourceLinkType              = "resource_link"
-	downloadDescription           = `Downloads 1–50 files of any kind — a PDF, zip, image, audio, dataset — as bytes, unparsed, input order kept. Call download{sources:["https://…/data.zip"]}. Each item returns kind, content type, size, sha256 and the rung that served it. On the local server it returns path, the file's absolute path on this machine: take the file from there. On the remote server it returns id, url and expires, plus a resource_link to read with resources/read: run ` + "`curl -fL -o <file> <url>`" + ` in a shell and check the sha256; never read the file into context. The url expires 10 minutes after the call, and a server restart invalidates every url; call download again for a fresh one. Nothing is converted: a page to read goes to readPage, a paper to readWork. A failing item carries its own error and the others still return.`
+	downloadFileDescription       = `Downloads 1–50 files of any kind — a PDF, zip, image, audio, dataset — as bytes, unparsed, input order kept. Call download_file{urls:["https://…/data.zip"]}. Each item returns kind, content type, size, sha256 and via, the rung that served it. On the local server it returns path, the file's absolute path on this machine: take the file from there. On the remote server it returns id, url and expires, plus a resource_link to read with resources/read: run ` + "`curl -fL -o <file> <url>`" + ` in a shell and check the sha256; never read the file into context. The url expires 10 minutes after the call, and a server restart invalidates every url; call download_file again for a fresh one. Nothing is converted: to read a web page, a local document or a paper, call ` + "`read`" + ` with urls, files or publications. A failing item carries its own error and the others still return.`
 )
 
-// DownloadInput is download's input.
+// DownloadInput is download_file's input.
 type DownloadInput struct {
-	Sources []string          `json:"sources" jsonschema:"1–50 URLs of files of any kind, each downloaded as bytes, unparsed, in the same order."`
+	URLs    []string          `json:"urls" jsonschema:"1–50 URLs of files of any kind, each downloaded as bytes, unparsed, in the same order."`
 	Headers map[string]string `json:"headers,omitempty" jsonschema:"Optional request headers (name → value) sent only to the target's own origin; archives never receive them. At most 32 headers, 8 KiB; no hop-by-hop or framing header. A caller header overrides the default of its name."`
 }
 
@@ -57,7 +57,7 @@ type DownloadItem struct {
 	ContentType string       `json:"content_type,omitempty"`
 	Bytes       int64        `json:"bytes,omitempty"`
 	SHA256      string       `json:"sha256,omitempty"`
-	Method      string       `json:"method,omitempty"`
+	Via         string       `json:"via,omitempty"`
 	Status      int          `json:"status,omitempty"`
 	Path        string       `json:"path,omitempty"`
 	ID          string       `json:"id,omitempty"`
@@ -68,7 +68,7 @@ type DownloadItem struct {
 	Error       string       `json:"error,omitempty"`
 }
 
-// DownloadOutput is download's typed output.
+// DownloadOutput is download_file's typed output.
 type DownloadOutput struct {
 	Items []DownloadItem `json:"items"`
 }
@@ -111,20 +111,20 @@ func (service *Service) maxResourceBytes() int64 {
 	return defaultMaxResourceBytes
 }
 
-func (service *Service) download(
+func (service *Service) downloadFile(
 	ctx context.Context, _ *mcp.CallToolRequest, input DownloadInput,
 ) (*mcp.CallToolResult, DownloadOutput, error) {
-	if len(input.Sources) < 1 || len(input.Sources) > maxDownloadSources {
-		return nil, DownloadOutput{}, fmt.Errorf("sources must contain 1-%d items", maxDownloadSources)
+	if len(input.URLs) < 1 || len(input.URLs) > maxDownloadSources {
+		return nil, DownloadOutput{}, fmt.Errorf("urls must contain 1-%d items", maxDownloadSources)
 	}
 	headers, err := harvest.ParseCallerHeaders(input.Headers)
 	if err != nil {
 		return nil, DownloadOutput{}, err
 	}
-	items := make([]DownloadItem, len(input.Sources))
+	items := make([]DownloadItem, len(input.URLs))
 	var wait sync.WaitGroup
 	semaphore := make(chan struct{}, 8)
-	for index, source := range input.Sources {
+	for index, source := range input.URLs {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
@@ -184,7 +184,7 @@ func (service *Service) downloadOne(ctx context.Context, source string, headers 
 // resource_link (remote).
 func (service *Service) downloadItem(ctx context.Context, source string, result harvest.Result) DownloadItem {
 	item := DownloadItem{
-		Source: source, Kind: result.Kind, Method: harvest.PublicMethod(result.Method), Status: result.HTTPStatus,
+		Source: source, Kind: result.Kind, Via: harvest.PublicMethod(result.Method), Status: result.HTTPStatus,
 	}
 	if result.Error != "" {
 		item.Error = result.Error
@@ -244,11 +244,11 @@ func joinNote(note, more string) string {
 func downloadMisroute(source string) string {
 	switch {
 	case isLocalInput(source):
-		return "this is a local path; download takes URLs — read a local document with `parseLocalDocuments`."
+		return "this is a local path; download_file takes URLs — read a local document with `read` (files)."
 	case workNoun(source) != "":
-		return "this is " + workNoun(source) + "; read it with `readWork`, or download the URL of its file."
+		return "this is " + workNoun(source) + "; read it with `read` (publications), or download the URL of its file."
 	case !isWebURL(source):
-		return "this is not a URL; download takes http(s) URLs of files."
+		return "this is not a URL; download_file takes http(s) URLs of files."
 	}
 	return ""
 }
@@ -301,7 +301,7 @@ func renderDownload(item DownloadItem) string {
 		where = "resource: " + item.Resource.URI + " (resources/read returns the bytes)"
 	}
 	text := fmt.Sprintf(
-		"# %s\nkind: %s / content_type: %s / bytes: %d / sha256: %s / method: %s / %s",
+		"# %s\nkind: %s / content_type: %s / bytes: %d / sha256: %s / via: %s / %s",
 		harvest.PublicSourceLabel(
 			item.Source,
 		),
@@ -309,7 +309,7 @@ func renderDownload(item DownloadItem) string {
 		item.ContentType,
 		item.Bytes,
 		item.SHA256,
-		item.Method,
+		item.Via,
 		where,
 	)
 	if item.Note != "" {

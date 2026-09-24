@@ -263,7 +263,7 @@ type Options struct {
 	GoogleScholarURL      string
 	DisableSearch         bool
 	// SearchAvailable tells the ladder's own failure messages whether the
-	// `webSearch` tool exists to recommend. It is the caller's SearchEnabled(SearchOptions{...})
+	// `search_web` tool exists to recommend. It is the caller's SearchEnabled(SearchOptions{...})
 	// verdict, not re-derived here: the adapter already resolved
 	// SearXNGURL/BraveAPIKey/DisableSearch once, and re-deriving it a second
 	// way is how a hint drifts from the tool it names.

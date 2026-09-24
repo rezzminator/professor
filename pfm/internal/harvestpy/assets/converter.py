@@ -852,7 +852,7 @@ def convert_pdf(path: pathlib.Path, request: dict) -> tuple[str, dict]:
                 "layout": "enabled" if layout else "disabled",
                 "models": "not-requested",
             }
-        script, reason = choose_ocr_script(document, str(request.get("ocr_lang") or ""))
+        script, reason = choose_ocr_script(document, str(request.get("ocr_language") or ""))
         ocr_pages, limits = _ocr_pages(document, flagged, script)
         page_count = document.page_count
     parts = [_note(f"OCR read page(s) {_page_list(flagged)} of {page_count} as {_SCRIPT_NAMES[script]} ({reason})")]
@@ -904,9 +904,9 @@ _LANG_SCRIPTS = {
 }
 OCR_CONTROL_SHARE = 0.02
 # The Latin default's reason: the document stated no script. The harvester
-# matches this phrase (harvest.ocrAssumption) to flag the result partial.
+# matches this phrase (harvest.ocrAssumedNote) to flag the result partial.
 OCR_LATIN_ASSUMED = (
-    "the document names no language; Latin by default — pass ocr_lang to read it in another script"
+    "the document names no language, so Latin by default — pass ocr_language to read it in another script"
     " (script detection before OCR is unmeasured)"
 )
 
@@ -992,13 +992,13 @@ def choose_ocr_script(document, requested: str = "") -> tuple[str, str]:
     """One script per conversion (RapidOCR loads one language). Detection
     before OCR is unmeasured, so the choice comes from what the PDF states:
     its text layer, then its /Lang, then its title/subject/keywords — else
-    Latin. The caller's ocr_lang (one of OCR_SCRIPTS) overrides all of it.
+    Latin. The caller's ocr_language (one of OCR_SCRIPTS) overrides all of it.
     The reason travels into the output; the Latin default's reason is the
     note the harvester raises to the result's partial flag."""
     if requested:
         if requested not in OCR_SCRIPTS:
-            raise OCRUnavailable(f"ocr_lang {requested!r} is not one of {', '.join(OCR_SCRIPTS)}")
-        return requested, f"ocr_lang {requested!r} was requested"
+            raise OCRUnavailable(f"ocr_language {requested!r} is not one of {', '.join(OCR_SCRIPTS)}")
+        return requested, f"ocr_language {requested!r} was requested"
     layer ="".join(page.get_text() for page in document)
     script = _script_of_text(layer)
     if script and sum(ch.isalpha() for ch in layer) >= 20:

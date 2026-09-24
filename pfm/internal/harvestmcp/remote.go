@@ -78,7 +78,7 @@ func NewRemote(options RemoteOptions) (*RemoteServer, error) {
 		)
 	}
 	runtime := options.Runtime
-	// The gateway's service is always the remote one: no parseLocalDocuments, no
+	// The gateway's service is always the remote one: read without files, no
 	// server path in any result, download answers a signed url.
 	runtime.Remote = true
 	if runtime.Clock == nil {

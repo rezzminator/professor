@@ -66,10 +66,10 @@ func (links *downloadLinks) check(id, exp, sig string) (int, string) {
 	expUnix, expErr := strconv.ParseInt(exp, 10, 64)
 	given, sigErr := hex.DecodeString(sig)
 	if expErr != nil || sigErr != nil || len(given) == 0 || !hmac.Equal(given, links.signature(id, expUnix)) {
-		return http.StatusForbidden, "the link's signature is missing or invalid; call download again for a fresh link"
+		return http.StatusForbidden, "the link's signature is missing or invalid; call download_file again for a fresh link"
 	}
 	if !links.clock.Now().Before(time.Unix(expUnix, 0)) {
-		return http.StatusGone, "the link expired; call download again for a fresh link"
+		return http.StatusGone, "the link expired; call download_file again for a fresh link"
 	}
 	return 0, ""
 }
@@ -113,7 +113,7 @@ func (r *RemoteServer) writeFile(w http.ResponseWriter, req *http.Request, id st
 	opened, err := os.Open(file.path)
 	if err != nil {
 		obs.Logger(obs.Component(req.Context(), "mcp")).Warn("harvester.files.open", obs.FieldErr, err.Error())
-		http.Error(w, "the stored file could not be read; call download again", http.StatusInternalServerError)
+		http.Error(w, "the stored file could not be read; call download_file again", http.StatusInternalServerError)
 		return
 	}
 	defer func() {
@@ -125,7 +125,7 @@ func (r *RemoteServer) writeFile(w http.ResponseWriter, req *http.Request, id st
 	info, err := opened.Stat()
 	if err != nil {
 		obs.Logger(obs.Component(req.Context(), "mcp")).Warn("harvester.files.stat", obs.FieldErr, err.Error())
-		http.Error(w, "the stored file could not be read; call download again", http.StatusInternalServerError)
+		http.Error(w, "the stored file could not be read; call download_file again", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", file.mime)

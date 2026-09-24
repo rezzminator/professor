@@ -8,8 +8,23 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
+
+// sizeReceipt is the include_content:false text receipt: the read item's own
+// field names, without its content.
+type sizeReceipt struct {
+	Source string   `json:"source"`
+	Kind   string   `json:"kind,omitempty"`
+	Via    string   `json:"via,omitempty"`
+	Cached bool     `json:"cached"`
+	Chars  int      `json:"chars"`
+	Tokens int      `json:"tokens"`
+	Path   string   `json:"path"`
+	Gaps   []string `json:"gaps,omitempty"`
+}
 
 func (service *Service) describeFetch(source string, result harvest.Result, sizeOnly bool) string {
 	source = harvest.PublicSourceLabel(source)
@@ -25,23 +40,25 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 				source,
 				source,
 				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
-					"Use `webSearch` to find an alternative copy, or `findWorks` if it is a scholarly title.",
-					"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
+					"Use `search_web` to find an alternative copy, or `search_literature` if it is a scholarly title.",
+					"Use `search_literature` if it is a scholarly title, or read an alternative copy at another URL.",
 				),
 			)
 		}
-		receipt := map[string]any{
-			jsonPropertySource: source,
-			"tokens":           result.Tokens,
-			"token_count":      result.Tokens,
-			"chars":            result.Chars,
-			"path":             result.Path,
-			"cache_status":     result.CacheStatus,
+		// The receipt names what the typed read item names. A caller
+		// budgeting a read learns from gaps that the artifact is incomplete
+		// before it reads it.
+		receipt := sizeReceipt{
+			Source: source,
+			Kind:   result.Kind,
+			Via:    harvest.PublicMethod(result.Method),
+			Cached: result.CacheStatus == cacheStatusHit,
+			Chars:  result.Chars,
+			Tokens: result.Tokens,
+			Path:   result.Path,
 		}
 		if result.Partial != "" {
-			// A caller budgeting a read learns the artifact is incomplete
-			// before it reads it.
-			receipt["partial"] = result.Partial
+			receipt.Gaps = harvest.PublicGaps(result.Partial)
 		}
 		body, err := json.Marshal(receipt)
 		if err != nil {
@@ -63,8 +80,8 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 				"Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). %s",
 				source,
 				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
-					"Use `webSearch` to find an alternative copy, or `findWorks` if it is a scholarly title.",
-					"Use `findWorks` if it is a scholarly title, or fetch an alternative copy at another URL.",
+					"Use `search_web` to find an alternative copy, or `search_literature` if it is a scholarly title.",
+					"Use `search_literature` if it is a scholarly title, or read an alternative copy at another URL.",
 				),
 			)
 		}
@@ -88,9 +105,9 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 		tokens = value
 	}
 	header := fmt.Sprintf(
-		"# %s\ncache_status: %s / bytes: %d / tokens: %d / fetched_at: %s / path: %s",
+		"# %s\ncached: %t / bytes: %d / tokens: %d / fetched_at: %s / path: %s",
 		source,
-		result.CacheStatus,
+		result.CacheStatus == cacheStatusHit,
 		result.Bytes,
 		tokens,
 		fetchedAt,
@@ -99,7 +116,7 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 	if result.Partial != "" {
 		// A known-incomplete artifact says so in the receipt, not only in
 		// the marker line the content opens with.
-		header += " / PARTIAL: " + result.Partial
+		header += " / gaps: " + strings.Join(harvest.PublicGaps(result.Partial), "; ")
 	}
 
 	inlineCap := service.inlineCap()
@@ -166,13 +183,13 @@ func renderFind(query string, candidates []harvest.Candidate, failed []harvest.W
 	}
 	if len(candidates) == 0 {
 		return fmt.Sprintf(
-			"No candidate works found for %q. Try a plain WebSearch, or rephrase — a more exact title helps.",
+			"No candidate works found for %q. Try search_web (when configured) or a plain web search, or rephrase — a more exact title helps.",
 			query,
 		)
 	}
 	lines := []string{
 		fmt.Sprintf(
-			"%d candidate work(s) for %q — pick one and read it with `readWork`, passing its `handle:` value:",
+			"%d candidate work(s) for %q — pick one and read it with `read`, passing its `handle:` value in publications:",
 			len(candidates),
 			query,
 		),
@@ -206,7 +223,7 @@ func renderSearch(query string, results []harvest.SearchResult, _ string) string
 		return fmt.Sprintf("No results for %q. Try different terms or a broader query.", query)
 	}
 	lines := []string{
-		fmt.Sprintf("%d result(s) for %q — read the ones you want with `readPage`:", len(results), query),
+		fmt.Sprintf("%d result(s) for %q — read the ones you want with `read`, in urls:", len(results), query),
 		"",
 	}
 	for index, result := range results {
@@ -232,4 +249,47 @@ func valueOr(value, fallback string) string {
 // package).
 func assertPublicURL(parsed *url.URL) error {
 	return harvest.AssertFetchable(parsed.String())
+}
+
+// readFields is the order read keeps its groups in: its input's fields, its
+// structured output's arrays and its text Content's headings.
+var readFields = []string{fieldURLs, fieldFiles, fieldPublications}
+
+// renderReadGroups groups a read call's items by the field each came in, input
+// order kept: the text Content opens each non-empty group with a heading
+// ("## urls (4)") before its items, and the structured output carries one
+// array per group, an empty one omitted. Every item failed: the call is an
+// error, so a failed batch never reads as a result; one item that read keeps
+// the batch a result.
+func renderReadGroups(jobs []readJob, contents []string, items []ReadItem) (*mcp.CallToolResult, ReadOutput) {
+	result := &mcp.CallToolResult{IsError: true}
+	var output ReadOutput
+	for _, field := range readFields {
+		var group []ReadItem
+		var texts []mcp.Content
+		for index, job := range jobs {
+			if job.field != field {
+				continue
+			}
+			group = append(group, items[index])
+			texts = append(texts, &mcp.TextContent{Text: contents[index]})
+			if items[index].Error == "" {
+				result.IsError = false
+			}
+		}
+		if len(group) == 0 {
+			continue
+		}
+		result.Content = append(result.Content, &mcp.TextContent{Text: fmt.Sprintf("## %s (%d)", field, len(group))})
+		result.Content = append(result.Content, texts...)
+		switch field {
+		case fieldURLs:
+			output.URLs = group
+		case fieldFiles:
+			output.Files = group
+		case fieldPublications:
+			output.Publications = group
+		}
+	}
+	return result, output
 }

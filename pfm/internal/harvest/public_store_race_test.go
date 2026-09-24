@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestPrivateHandleDirSurvivesConcurrentCreation: two findWorks calls on a
+// TestPrivateHandleDirSurvivesConcurrentCreation: two search_literature calls on a
 // fresh cache race to create .private/handles; the loser of the race must see
 // the directory the winner made, never fail with "file exists".
 func TestPrivateHandleDirSurvivesConcurrentCreation(t *testing.T) {

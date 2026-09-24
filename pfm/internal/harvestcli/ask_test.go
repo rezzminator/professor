@@ -171,7 +171,7 @@ func TestHarvestAskPreservesFailureReceiptsAndCleansThemUp(t *testing.T) {
 		"load-bearing local evidence",
 		`"status": "unavailable"`,
 		`"input": "` + missing + `"`,
-		`"error": "The local file does not exist at that path, or cannot be read. Check the path; parseLocalDocuments reads existing files inside the directories this harvester may read."`,
+		`"error": "The local file does not exist at that path, or cannot be read. Check the path; read (files) reads existing files inside the directories this harvester may read."`,
 	} {
 		if !strings.Contains(string(prepared), want) {
 			t.Errorf("prepared files omitted %q:\n%s", want, prepared)
@@ -378,12 +378,12 @@ func TestPlainHarvestJSONRemainsBackwardCompatible(t *testing.T) {
 			t.Errorf("plain JSON omitted %q:\n%s", want, stdout.String())
 		}
 	}
-	// The storing rung's class and the partial reason are public fields; the
+	// The storing rung's class (via) and the named gaps are public fields; the
 	// rung trace stays private.
 	if strings.Contains(stdout.String(), `"rungs"`) {
 		t.Fatalf("plain JSON exposed private acquisition fields:\n%s", stdout.String())
 	}
-	for _, want := range []string{`"method": "local"`, `"partial": ""`} {
+	for _, want := range []string{`"via": "local"`, `"gaps": []`} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("plain JSON omitted %s:\n%s", want, stdout.String())
 		}

@@ -93,7 +93,7 @@ func TestLegacyFindWorksMergesPaperArxivAndBookDiscovery(t *testing.T) {
 	}
 	for handle, found := range want {
 		if !found {
-			t.Errorf("findWorks missing %q: %#v", handle, got)
+			t.Errorf("search_literature missing %q: %#v", handle, got)
 		}
 	}
 	var paper Candidate
@@ -103,7 +103,7 @@ func TestLegacyFindWorksMergesPaperArxivAndBookDiscovery(t *testing.T) {
 		}
 	}
 	if paper.Authors != "C. E. Shannon" || paper.Year != 1948 || paper.Kind != "paper" {
-		t.Fatalf("findWorks paper metadata=%#v", got)
+		t.Fatalf("search_literature paper metadata=%#v", got)
 	}
 	if len(got) == 0 || strings.EqualFold(got[0].Free, "closed") {
 		t.Fatalf("free exact-match candidates did not outrank the closed copy: %#v", got)

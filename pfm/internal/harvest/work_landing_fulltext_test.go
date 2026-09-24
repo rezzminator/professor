@@ -77,7 +77,7 @@ func abstractLandingHTML(body string) string {
 	return "<html><head><title>Support-vector networks</title></head><body><article><h1>Support-vector networks</h1>" + body + "</article></body></html>"
 }
 
-// TestAbstractOnlyLandingLosesToTheOpenAccessCopy: readWork on a DOI with a
+// TestAbstractOnlyLandingLosesToTheOpenAccessCopy: read (publications) on a DOI with a
 // caller header whose landing page reads cleanly but carries only the
 // abstract answers from the open-access copy, and partial names why the
 // landing page was not used.

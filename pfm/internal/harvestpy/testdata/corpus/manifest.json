@@ -234,7 +234,7 @@
       "fetch_latency_ms": 1151.5,
       "status": "failed",
       "failure_stage": "network",
-      "error": "The source is behind an access challenge (Cloudflare); the harvester never solves a challenge. Rungs tried: direct, chrome-impersonation, jina, wayback. Retrying will meet the same wall: find another copy at another URL (webSearch, when configured) and read it with readPage, or with findWorks and readWork if it is a scholarly work."
+      "error": "The source is behind an access challenge (Cloudflare); the harvester never solves a challenge. Rungs tried: direct, chrome-impersonation, jina, wayback. Retrying will meet the same wall: find another copy at another URL (search_web, when configured) and read it with read (urls), or with search_literature and read (publications) if it is a scholarly work."
     },
     {
       "id": "html-npm-whisper",
@@ -244,7 +244,7 @@
       "fetch_latency_ms": 1134.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "The source is behind an access challenge (Cloudflare); the harvester never solves a challenge. Rungs tried: direct, chrome-impersonation, jina, wayback. Retrying will meet the same wall: find another copy at another URL (webSearch, when configured) and read it with readPage, or with findWorks and readWork if it is a scholarly work."
+      "error": "The source is behind an access challenge (Cloudflare); the harvester never solves a challenge. Rungs tried: direct, chrome-impersonation, jina, wayback. Retrying will meet the same wall: find another copy at another URL (search_web, when configured) and read it with read (urls), or with search_literature and read (publications) if it is a scholarly work."
     },
     {
       "id": "html-go-docs",
@@ -489,7 +489,7 @@
       "fetch_latency_ms": 860.0,
       "status": "failed",
       "failure_stage": "converter",
-      "error": "The source was retrieved but yielded no readable content (empty after extraction). Rungs tried: direct, meta-scrape, wayback. Find another copy at another URL (webSearch, when configured) and read it with readPage, or with findWorks and readWork if it is a scholarly work."
+      "error": "The source was retrieved but yielded no readable content (empty after extraction). Rungs tried: direct, meta-scrape, wayback. Find another copy at another URL (search_web, when configured) and read it with read (urls), or with search_literature and read (publications) if it is a scholarly work."
     },
     {
       "id": "office-learningcontainer-docx",
@@ -499,7 +499,7 @@
       "fetch_latency_ms": 3245.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "The source answered HTTP 404 Not Found to every rung that ran: the page was not found, or the site serves 404 to automated clients. Rungs tried: direct, chrome-impersonation, wayback. The harvester cannot tell a missing page from a refusal served as 404. Check the URL; if it is right, find another copy at another URL (webSearch, when configured) and read it with readPage, or with findWorks and readWork if it is a scholarly work."
+      "error": "The source answered HTTP 404 Not Found to every rung that ran: the page was not found, or the site serves 404 to automated clients. Rungs tried: direct, chrome-impersonation, wayback. The harvester cannot tell a missing page from a refusal served as 404. Check the URL; if it is right, find another copy at another URL (search_web, when configured) and read it with read (urls), or with search_literature and read (publications) if it is a scholarly work."
     },
     {
       "id": "office-microsoft-xlsx",
@@ -536,7 +536,7 @@
       "fetch_latency_ms": 822.4,
       "status": "failed",
       "failure_stage": "converter",
-      "error": "The source was retrieved but yielded no readable content (empty after extraction). Rungs tried: direct, meta-scrape, wayback. Find another copy at another URL (webSearch, when configured) and read it with readPage, or with findWorks and readWork if it is a scholarly work."
+      "error": "The source was retrieved but yielded no readable content (empty after extraction). Rungs tried: direct, meta-scrape, wayback. Find another copy at another URL (search_web, when configured) and read it with read (urls), or with search_literature and read (publications) if it is a scholarly work."
     },
     {
       "id": "archive-githubtraining-zip",
@@ -630,7 +630,7 @@
       "fetch_latency_ms": 1435.0,
       "status": "failed",
       "failure_stage": "network",
-      "error": "The source answered HTTP 404 Not Found to every rung that ran: the page was not found, or the site serves 404 to automated clients. Rungs tried: direct, chrome-impersonation, wayback. The harvester cannot tell a missing page from a refusal served as 404. Check the URL; if it is right, find another copy at another URL (webSearch, when configured) and read it with readPage, or with findWorks and readWork if it is a scholarly work."
+      "error": "The source answered HTTP 404 Not Found to every rung that ran: the page was not found, or the site serves 404 to automated clients. Rungs tried: direct, chrome-impersonation, wayback. The harvester cannot tell a missing page from a refusal served as 404. Check the URL; if it is right, find another copy at another URL (search_web, when configured) and read it with read (urls), or with search_literature and read (publications) if it is a scholarly work."
     },
     {
       "id": "html-gnu-free-sw",

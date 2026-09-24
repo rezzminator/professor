@@ -114,8 +114,8 @@ func TestOCRRulesNameTheirChoices(t *testing.T) {
 	}
 	wantScript := map[string][2]string{
 		"layer": {"latin", "text layer"}, "lang": {"ja", "/Lang"},
-		"title": {"ru", "title"}, "none": {"latin", "the document names no language; Latin by default"},
-		"requested": {"ar", "ocr_lang 'ar' was requested"},
+		"title": {"ru", "title"}, "none": {"latin", "the document names no language, so Latin by default"},
+		"requested": {"ar", "ocr_language 'ar' was requested"},
 	}
 	for source, want := range wantScript {
 		choice := got.Script[source]

@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-// Caller headers: readPage, download and readWork take an optional header set
+// Caller headers: read (urls, publications) and download_file take an optional header set
 // (name → value) that extends the headers sent to the TARGET. Only the
 // target's origin receives them — the direct and Chrome-impersonation rungs
 // (gatewayDo and the two transports re-apply them per hop, so a redirect to
@@ -186,7 +186,7 @@ func (h *Harvester) ForCaller(
 	return h.scopedTo(headers), context.WithValue(ctx, callerScopeKey{}, scope), nil
 }
 
-// ForWork is ForCaller for a readWork target. A landing URL keeps
+// ForWork is ForCaller for a read publications target. A landing URL keeps
 // ForCaller's scope; an identifier (a DOI, a doi.org URL, an ISBN, a PMID, a
 // PMCID, a handle that names one) resolves as without headers — resolvers and
 // metadata APIs never receive them — and fetchKnownID sends them to the

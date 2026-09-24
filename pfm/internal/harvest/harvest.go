@@ -160,7 +160,7 @@ func (h *Harvester) fetchURLWithPolicy(
 			return Result{
 				Source: source,
 				Error: fmt.Sprintf(
-					"unsupported URL scheme in %q — readPage reads http(s):// pages, parseLocalDocuments local paths, readWork DOIs and ISBNs.",
+					"unsupported URL scheme in %q — read takes http(s):// pages in urls, local paths in files, DOIs and ISBNs in publications.",
 					source,
 				),
 			}
@@ -171,10 +171,10 @@ func (h *Harvester) fetchURLWithPolicy(
 		return Result{
 			Source: source,
 			Error: fmt.Sprintf(
-				"%s is a PubMed search/results URL, not an article — use the `findWorks` tool%s to get candidate works, each with a handle to read with `readWork`.",
+				"%s is a PubMed search/results URL, not an article — use the `search_literature` tool%s to get candidate works, each with a handle to read with `read` (publications).",
 				source,
 				SearchHint(h.settings.searchAvailable,
-					" (or `webSearch`)",
+					" (or `search_web`)",
 					"",
 				),
 			),
@@ -336,7 +336,7 @@ func (h *Harvester) fetchURLWithPolicy(
 				return Result{
 					Source:     source,
 					Kind:       kindArchive,
-					Error:      fmt.Sprintf("%s is a %s archive, not a page — use `download`.", source, kind),
+					Error:      fmt.Sprintf("%s is a %s archive, not a page — use `download_file`.", source, kind),
 					HTTPStatus: status,
 					ErrorKind:  errorKindWrongKind,
 				}
@@ -662,8 +662,8 @@ func (h *Harvester) fetchURLWithPolicy(
 			"%s has a .pdf address but did not return a PDF (non-PDF content — likely an HTML paywall/login wall or a bot-block). %s",
 			source,
 			SearchHint(h.settings.searchAvailable,
-				"Use `webSearch` to find an open-access copy.",
-				"Find an open-access copy with findWorks or another URL.",
+				"Use `search_web` to find an open-access copy.",
+				"Find an open-access copy with search_literature or another URL.",
 			),
 		)
 	}
@@ -677,8 +677,8 @@ func (h *Harvester) fetchURLWithPolicy(
 				"Downloaded the PDF from %s but it converted to EMPTY text, and the OCR escalation could not RUN (converter backend error — see the server log). That is a tool outage, not proof the PDF is textless: %s",
 				source,
 				SearchHint(h.settings.searchAvailable,
-					"retry, or use `webSearch` to find an alternative copy.",
-					"retry, or find an alternative copy with findWorks or another URL.",
+					"retry, or use `search_web` to find an alternative copy.",
+					"retry, or find an alternative copy with search_literature or another URL.",
 				),
 			)
 		case ocrRan:
@@ -686,8 +686,8 @@ func (h *Harvester) fetchURLWithPolicy(
 				"Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — an OCR pass was already attempted on this copy and produced nothing. %s",
 				source,
 				SearchHint(h.settings.searchAvailable,
-					"Use `webSearch` to find an alternative copy.",
-					"Find an alternative copy with findWorks or another URL.",
+					"Use `search_web` to find an alternative copy.",
+					"Find an alternative copy with search_literature or another URL.",
 				),
 			)
 		default:
@@ -695,8 +695,8 @@ func (h *Harvester) fetchURLWithPolicy(
 				"Downloaded the PDF from %s but it converted to EMPTY text. It is likely scanned/image-only, corrupt, or password-protected — if it's a scanned/image-only PDF, set convert.pdfOcr=true in harvester.config.json to OCR it. %s",
 				source,
 				SearchHint(h.settings.searchAvailable,
-					"Use `webSearch` to find an alternative copy.",
-					"Find an alternative copy with findWorks or another URL.",
+					"Use `search_web` to find an alternative copy.",
+					"Find an alternative copy with search_literature or another URL.",
 				),
 			)
 		}
@@ -731,8 +731,8 @@ func (h *Harvester) fetchURLWithPolicy(
 		case converterOutage:
 			message += " The real-browser rung DID run and got real content past the wall, but the conversion step then failed on this server — a tool outage, not proof of IP reputation: " + SearchHint(
 				h.settings.searchAvailable,
-				"retry, or use `webSearch` to find an alternative copy.",
-				"retry, or find an alternative copy with findWorks or another URL.",
+				"retry, or use `search_web` to find an alternative copy.",
+				"retry, or find an alternative copy with search_literature or another URL.",
 			)
 		case browserUnavailable != "":
 			message += fmt.Sprintf(

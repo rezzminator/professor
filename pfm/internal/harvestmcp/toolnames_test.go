@@ -9,11 +9,11 @@ import (
 
 // TestToolNamesFollowTheSearchGate pins RegisteredToolNames to the same search gate
 // register() applies (service.go:493): a runtime with no SearXNG URL or
-// Brave key omits `webSearch` entirely, and a configured runtime lists it
-// after readWork — the same slot register() adds it in.
+// Brave key omits `search_web` entirely, and a configured runtime lists it
+// after search_literature — the same slot register() adds it in.
 func TestToolNamesFollowTheSearchGate(t *testing.T) {
 	off := Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")}
-	wantOff := []string{"readPage", "parseLocalDocuments", "download", "findWorks", "readWork"}
+	wantOff := []string{"read", "download_file", "search_literature"}
 	if got := RegisteredToolNames(off); !reflect.DeepEqual(got, wantOff) {
 		t.Fatalf("RegisteredRegisteredToolNames(no backend) = %#v, want %#v", got, wantOff)
 	}
@@ -23,7 +23,7 @@ func TestToolNamesFollowTheSearchGate(t *testing.T) {
 		CacheDir:   filepath.Join(t.TempDir(), "cache"),
 		SearXNGURL: "http://searxng.example.test",
 	}
-	wantOn := []string{"readPage", "parseLocalDocuments", "download", "findWorks", "readWork", "webSearch"}
+	wantOn := []string{"read", "download_file", "search_literature", "search_web"}
 	if got := RegisteredToolNames(on); !reflect.DeepEqual(got, wantOn) {
 		t.Fatalf("RegisteredRegisteredToolNames(SearXNGURL configured) = %#v, want %#v", got, wantOn)
 	}
@@ -35,7 +35,7 @@ func TestToolNamesFollowTheSearchGate(t *testing.T) {
 // against the names the SDK's tools/list actually returns (via listToolNames,
 // the in-process client helper service_test.go's search-gate tests already
 // use). The SDK's featureSet advertises tools/list alphabetically
-// (TestStableSixToolSurfaceAndFetchPrompt pins that), while RegisteredToolNames returns
+// (TestStableFourToolSurface pins that), while RegisteredToolNames returns
 // register()'s own order per the brief above, so the two are compared as
 // sets, sorted, not as an ordered sequence — the membership is what /status
 // must never drift from, not the SDK's internal listing order. RegisteredToolNames can

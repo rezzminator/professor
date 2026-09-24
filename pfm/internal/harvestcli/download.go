@@ -17,24 +17,25 @@ import (
 
 // downloadItem is one downloaded file's receipt; --json prints these.
 type downloadItem struct {
-	Source      string `json:"source"`
-	Path        string `json:"path,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	ContentType string `json:"content_type,omitempty"`
-	Bytes       int64  `json:"bytes,omitempty"`
-	Partial     string `json:"partial,omitempty"`
-	Error       string `json:"error,omitempty"`
-	ErrorKind   string `json:"error_kind,omitempty"` // the failure's class, beside every error
+	Source      string   `json:"source"`
+	Path        string   `json:"path,omitempty"`
+	Kind        string   `json:"kind,omitempty"`
+	ContentType string   `json:"content_type,omitempty"`
+	Bytes       int64    `json:"bytes,omitempty"`
+	Via         string   `json:"via,omitempty"`
+	Gaps        []string `json:"gaps,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	ErrorKind   string   `json:"error_kind,omitempty"` // the failure's class, beside every error
 }
 
-// runDownload is `pfm harvest download <url>...`: each URL's bytes, unparsed,
-// through the harvester's one file path (Harvester.Download, the MCP download
+// runDownload is `pfm harvest download-file <url>...`: each URL's bytes, unparsed,
+// through the harvester's one file path (Harvester.Download, the MCP download_file
 // tool's entry). The --header set is validated as the tool validates it,
 // before any request; a failed item is a named ERROR receipt and exit 1.
 func runDownload(args []string, stdout, stderr io.Writer, runtime config.Runtime) int {
 	flags := cli.NewFlagSet(
-		"harvest download",
-		"usage: pfm harvest download [--json] [--header 'Name: value']... <url>...",
+		"harvest download-file",
+		"usage: pfm harvest download-file [--json] [--header 'Name: value']... <url>...",
 		stderr,
 	)
 	jsonOutput := flags.Bool(jsonFlag, false, "print machine-readable download objects")
@@ -49,12 +50,12 @@ func runDownload(args []string, stdout, stderr io.Writer, runtime config.Runtime
 	}
 	headers, err := lines.Parse()
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm harvest download: %v\n", err)
+		fmt.Fprintf(stderr, "pfm harvest download-file: %v\n", err)
 		return 2
 	}
 	harvester, err := newHarvester(harvesterRuntime(runtime))
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm harvest download: configure: %v\n", err)
+		fmt.Fprintf(stderr, "pfm harvest download-file: configure: %v\n", err)
 		return 1
 	}
 	items := make([]downloadItem, 0, len(sources))
@@ -68,7 +69,7 @@ func runDownload(args []string, stdout, stderr io.Writer, runtime config.Runtime
 	if *jsonOutput {
 		encoded, err := json.MarshalIndent(items, "", "  ")
 		if err != nil {
-			fmt.Fprintf(stderr, "pfm harvest download: encode results: %v\n", err)
+			fmt.Fprintf(stderr, "pfm harvest download-file: encode results: %v\n", err)
 			return 1
 		}
 		fmt.Fprintln(stdout, string(encoded))
@@ -96,7 +97,10 @@ func downloadOne(
 		return downloadItem{Source: source, Error: err.Error(), ErrorKind: kind}
 	}
 	result := headers.MarkHeaderless(scoped.Download(scopedCtx, source))
-	item := downloadItem{Source: source, Kind: result.Kind, Partial: result.Partial}
+	item := downloadItem{
+		Source: source, Kind: result.Kind,
+		Via: harvest.PublicMethod(result.Method), Gaps: harvest.PublicGaps(result.Partial), // an empty list is omitted
+	}
 	if result.Error != "" {
 		item.Error, item.ErrorKind = result.Error, harvest.PublicFailure(source, result).ErrorKind
 		return item
@@ -147,6 +151,6 @@ func renderDownloadReceipt(item downloadItem) string {
 		item.Kind,
 		item.ContentType,
 		item.Bytes,
-		partialSuffix(item.Partial),
+		gapsSuffix(item.Gaps),
 	)
 }

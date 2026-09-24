@@ -13,24 +13,59 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestFindWorksRefusesAnUnknownKind: kind is any, paper or book.
-func TestFindWorksRefusesAnUnknownKind(t *testing.T) {
+// TestSearchLiteratureRefusesAnUnknownType: type is any, paper or book.
+func TestSearchLiteratureRefusesAnUnknownType(t *testing.T) {
 	session := connectHarvesterInProcess(t, newTestService(t, Runtime{}))
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: toolFindWorks, Arguments: map[string]any{"query": "x", "kind": "movie"},
+		Name: toolSearchLiterature, Arguments: map[string]any{"query": "x", "type": "movie"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.IsError || !strings.Contains(result.Content[0].(*mcp.TextContent).Text, "kind must be") {
-		t.Fatalf("findWorks(kind movie) = %+v, want a named kind error", result)
+	if !result.IsError ||
+		result.Content[0].(*mcp.TextContent).Text != `type must be any, paper or book, got "movie"` {
+		t.Fatalf("search_literature(type movie) = %+v, want a named type error", result)
 	}
 }
 
-// TestFindWorksNamesAFailedSource: a source that answered HTTP 429 is named
+// TestSearchLiteratureTypeRoundTrips: type narrows the call through the SDK,
+// and each candidate names its own type under the same word.
+func TestSearchLiteratureTypeRoundTrips(t *testing.T) {
+	service := newTestService(t, Runtime{})
+	service.resolver.Client = &http.Client{Transport: findRoundTrip(func(r *http.Request) (int, string) {
+		if r.URL.Host == "api.openalex.org" {
+			return http.StatusOK, `{"results":[{"doi":"https://doi.org/10.1038/nature14539","display_name":"Deep learning","publication_year":2015}]}`
+		}
+		return http.StatusOK, `{}`
+	})}
+	session := connectHarvesterInProcess(t, service)
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: toolSearchLiterature, Arguments: map[string]any{"query": "Deep learning", "type": "paper"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output struct {
+		Candidates []map[string]any `json:"candidates"`
+	}
+	if err := json.Unmarshal(encoded, &output); err != nil || result.IsError || len(output.Candidates) == 0 {
+		t.Fatalf("search_literature(type paper) = %s (err %v), want candidates", encoded, err)
+	}
+	for _, candidate := range output.Candidates {
+		if _, stale := candidate["kind"]; stale || candidate["type"] == "" || candidate["type"] == nil {
+			t.Fatalf("candidate = %v, want its type under type, never kind", candidate)
+		}
+	}
+}
+
+// TestSearchLiteratureNamesAFailedSource: a source that answered HTTP 429 is named
 // in the typed sources and in the text, apart from one that answered with
 // nothing, and the other sources' candidates stay.
-func TestFindWorksNamesAFailedSource(t *testing.T) {
+func TestSearchLiteratureNamesAFailedSource(t *testing.T) {
 	service := newTestService(t, Runtime{})
 	service.resolver.Client = &http.Client{Transport: findRoundTrip(func(r *http.Request) (int, string) {
 		switch r.URL.Host {
@@ -43,13 +78,13 @@ func TestFindWorksNamesAFailedSource(t *testing.T) {
 	})}
 	session := connectHarvesterInProcess(t, service)
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: toolFindWorks, Arguments: map[string]any{"query": "Deep learning"},
+		Name: toolSearchLiterature, Arguments: map[string]any{"query": "Deep learning"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.IsError {
-		t.Fatalf("findWorks = %+v, want candidates with the failed source named", result)
+		t.Fatalf("search_literature = %+v, want candidates with the failed source named", result)
 	}
 	encoded, err := json.Marshal(result.StructuredContent)
 	if err != nil {
@@ -88,10 +123,10 @@ func (answer findRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) {
 	}, nil
 }
 
-// TestFindWorksNamesAHandleFailureClass: when the discovered works cannot be
+// TestSearchLiteratureNamesAHandleFailureClass: when the discovered works cannot be
 // given retrieval handles, the caller reads what failed and whether a retry
 // helps, never a bare "retry later", and no machine path.
-func TestFindWorksNamesAHandleFailureClass(t *testing.T) {
+func TestSearchLiteratureNamesAHandleFailureClass(t *testing.T) {
 	cache := filepath.Join(t.TempDir(), "cache")
 	if err := os.WriteFile(cache, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
@@ -106,14 +141,14 @@ func TestFindWorksNamesAHandleFailureClass(t *testing.T) {
 	})}
 	session := connectHarvesterInProcess(t, service)
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: toolFindWorks, Arguments: map[string]any{"query": "Deep learning"},
+		Name: toolSearchLiterature, Arguments: map[string]any{"query": "Deep learning"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := result.Content[0].(*mcp.TextContent).Text
 	if !result.IsError {
-		t.Fatalf("findWorks with an unwritable cache = %s, want a tool error", text)
+		t.Fatalf("search_literature with an unwritable cache = %s, want a tool error", text)
 	}
 	for _, want := range []string{"cache", "not a directory", "retrying will not help"} {
 		if !strings.Contains(text, want) {

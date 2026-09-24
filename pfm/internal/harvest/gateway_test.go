@@ -262,7 +262,7 @@ func TestGatewayBothRungsFailingReportsBothErrors(t *testing.T) {
 	}
 }
 
-// TestProviderSearchFailsAtTheChallengeBody: a findWorks search page behind a
+// TestProviderSearchFailsAtTheChallengeBody: a search_literature search page behind a
 // wall is reported the moment the walled body arrives. The browser rungs are
 // never spent on it — they held the call about 60 s and still met the wall.
 func TestProviderSearchFailsAtTheChallengeBody(t *testing.T) {

@@ -660,7 +660,7 @@ func TestFetchBareTitleRefusesToGuess(t *testing.T) {
 		},
 	)
 	got := h.Fetch(context.Background(), "A Mathematical Theory of Communication")
-	if got.Error == "" || !strings.Contains(got.Error, "findWorks") {
+	if got.Error == "" || !strings.Contains(got.Error, "search_literature") {
 		t.Fatalf("bare title result = %#v", got)
 	}
 }

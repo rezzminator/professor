@@ -117,7 +117,7 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			task: task(`"id":"a1","name":"scout","type":"local_agent","status":"running","label":"map the resolver",` +
 				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000,"tokenCount":312000,` +
 				`"tokenSamples":[0,125000,250000,500000,1000000]`),
-			want: "▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M │ scout·tracer │ opus·high │ running 2m0s │ 2 tools │ 1 error │ cache 94% │ " +
+			want: "▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M │ scout·tracer │ opus·● high │ running 2m0s │ 2 tools │ 1 error │ cache 94% │ " +
 				"⟲1 │ __⎽⎼¯ │ pfm │ map the resolver",
 		},
 		{
@@ -275,5 +275,15 @@ func TestRenderSubagentsRowIsBrightNotFaint(t *testing.T) {
 	withoutSeparators := strings.ReplaceAll(row.Content, sep, " ")
 	if strings.Count(withoutSeparators, dim) != 1 { // makeBar's empty cells are the one sanctioned dim run
 		t.Fatalf("dim text outside the separators and the gauge's empty cells: %q", withoutSeparators)
+	}
+}
+
+// A payload without a session transcript cannot name the role either: the row
+// says "role ?", never a name trailed by an empty role.
+func TestRenderSubagentsNoSessionTranscriptMarksTheRole(t *testing.T) {
+	got, warned := renderOneSubagent(t, "",
+		`{"id":"x","name":"scout","type":"local_agent","status":"running","contextWindowSize":1000,"tokenCount":10}`)
+	if !strings.Contains(got, "│ scout·role ? │") || strings.Count(warned, "names no session transcript") != 1 {
+		t.Fatalf("content = %q warn = %q, want scout·role ? and the cause once", got, warned)
 	}
 }

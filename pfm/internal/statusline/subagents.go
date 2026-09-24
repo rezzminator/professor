@@ -125,8 +125,8 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 		var activity *agentActivity
 		if task.Type == localAgentTask {
 			read := readAgentActivity(data.TranscriptPath, task.ID)
-			for _, err := range []error{read.roleErr, read.err} {
-				if err != nil {
+			for index, err := range []error{read.roleErr, read.err} {
+				if err != nil && (index == 0 || err != read.roleErr) {
 					fmt.Fprintf(warn, "pfm statusline --subagents: row %s: %v\n", task.ID, err)
 				}
 			}
@@ -202,7 +202,7 @@ func subagentIdentity(name string, activity *agentActivity) string {
 }
 
 // subagentModel names the family and effort: claude-opus-5-5[1m] + high →
-// opus·high. An effort that is not a JSON string is left out. A row without
+// opus·● high. An effort that is not a JSON string is left out. A row without
 // its own effort shows the session's recorded effort (inherited), exactly as
 // a payload effort on the model it was recorded for and muted on another,
 // where Claude Code may resolve a different level.
@@ -221,9 +221,9 @@ func subagentModel(model string, effort json.RawMessage, inherited sessionEffort
 	}
 	if level != "" {
 		if family == "" {
-			return color + level + reset
+			return color + effortLabel(level) + reset
 		}
-		return cModel + family + reset + cMuted + "·" + reset + color + level + reset
+		return cModel + family + reset + cMuted + "·" + reset + color + effortLabel(level) + reset
 	}
 	if family == "" {
 		return ""
@@ -335,6 +335,7 @@ func readAgentActivity(sessionTranscript, id string) agentActivity {
 	activity := agentActivity{cacheHit: -1}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		activity.err = errors.New("payload names no session transcript")
+		activity.roleErr = activity.err
 		return activity
 	}
 	base := filepath.Join(strings.TrimSuffix(sessionTranscript, ".jsonl"), "subagents", "agent-"+id)

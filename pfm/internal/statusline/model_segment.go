@@ -3,7 +3,7 @@ package statusline
 import "strings"
 
 // modelSegment is the main line's model block: the model's symbol and name,
-// then the effort level joined by a muted "·" — the same shape the sub-agent
+// then the effort glyph and level joined by a muted "·" — the same shape the sub-agent
 // rows give their model (subagentModel). No effort renders the model alone.
 func modelSegment(data input) string {
 	modelSymbol := "●"
@@ -28,7 +28,20 @@ func effortSuffix(data input) string {
 	}
 	joint := cMuted + "·" + reset
 	if !data.Thinking.Enabled {
-		return joint + cMuted + data.Effort.Level + " (off)" + reset
+		return joint + cMuted + effortLabel(data.Effort.Level) + " (off)" + reset
 	}
-	return joint + cEffort + data.Effort.Level + reset
+	return joint + cEffort + effortLabel(data.Effort.Level) + reset
+}
+
+// effortGlyphs are the symbols Claude Code's /effort picker draws for each
+// level (2.1.281), so a level reads the same here as in Claude Code.
+var effortGlyphs = map[string]string{"low": "○", "medium": "◐", "high": "●", "xhigh": "◉", "max": "◈"}
+
+// effortLabel prefixes a level with its glyph; a level Claude Code does not
+// name shows bare rather than borrowing another level's symbol.
+func effortLabel(level string) string {
+	if glyph, ok := effortGlyphs[level]; ok {
+		return glyph + " " + level
+	}
+	return level
 }

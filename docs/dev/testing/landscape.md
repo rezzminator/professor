@@ -434,7 +434,7 @@ M42 · Daemon disabled route answers `503` with a named remedy (not a bare 404) 
 M43 · Daemon refuses cross-origin/browser requests (any `Origin` header) · needs:network · today:U · mcp.md:88 · lane(s):M
 M44 · Daemon chat is HTTP-only, never ambient (`AllowAmbientIdentity:false`) · needs:network · today:U · mcp.md:89 · lane(s):M
 M45 · External harvester gateway (optional, OAuth/bearer-walled, default port 18378) · needs:network · today:U · mcp.md:90 · lane(s):M
-M46 · Restart-on-replaced-binary via `binwatch` (5s poll, 30s drain, exit 75) · needs:none · today:U+B (`daemon.sh` stale-binary restart) · mcp.md:91 · lane(s):M
+M46 · Restart-on-replaced-binary via `binwatch` (5s poll, exit 75; restart gap = exit + relaunch: in-flight requests drain ≤10s, then open MCP streams end, so the closed port no longer refuses reconnects for the old 30s shutdown grace, now only a backstop) · needs:none · today:U+B (`daemon.sh` stale-binary restart) · mcp.md:91 · lane(s):M
 M47 · systemd unit `pfm-mcp.service` (`Restart=on-failure`) · needs:systemd/launchd · today:U · mcp.md:91 · lane(s):M
 M48 · launchd plist `com.professor.pfm.mcp.plist` (`KeepAlive=true`) ⚠ known-gap (unverified on Linux host) · needs:systemd/launchd · today:NONE · mcp.md:91 · lane(s):M
 M49 · `pfm mcp chat serve` stdio path (`AllowAmbientIdentity:true`, only transport resolving self via ambient tmux/process ancestry) · needs:tmux · today:U · mcp.md:93 · lane(s):M

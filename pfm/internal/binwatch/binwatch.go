@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/clock"
@@ -29,17 +30,21 @@ import (
 // which is exactly what the supervisor does.
 const ExitReplaced = 75
 
-// watchInterval is how often the executable's identity is re-read;
-// shutdownGrace bounds how long in-flight requests get to finish once a
-// replacement is seen.
+// watchInterval is how often the executable's identity is re-read. Once a
+// replacement is seen, the listener closes and every connect is refused until
+// the supervisor relaunches, so the restart ends open streams at once, gives
+// in-flight requests drainGrace to finish, and keeps shutdownGrace only as the
+// backstop for a handler that ignores its cancelled context.
 const (
 	watchInterval = 5 * time.Second
+	drainGrace    = 10 * time.Second
 	shutdownGrace = 30 * time.Second
 )
 
 // Serve serves until the listener fails or this process's executable is
 // replaced. A server that cannot watch itself still serves, but says — on
-// every start — that an install will NOT refresh it.
+// every start — that an install will NOT refresh it. Serve wraps
+// server.Handler so a restart can end the requests it holds.
 func Serve(server *http.Server, listener net.Listener, stderr io.Writer) int {
 	return ServeWithClock(server, listener, stderr, clock.Real)
 }
@@ -52,7 +57,7 @@ func ServeWithClock(server *http.Server, listener net.Listener, stderr io.Writer
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
-	return serve(server, listener, ownReplacement(ctx, stderr, clk), stderr)
+	return serveUntilReplaced(server, listener, ownReplacement(ctx, stderr, clk), stderr, restartDefaults)
 }
 
 func ownReplacement(ctx context.Context, stderr io.Writer, clk clock.Clock) <-chan struct{} {
@@ -133,10 +138,25 @@ func watchWithClock(
 	return replaced, nil
 }
 
-// serve is Serve with the replacement signal injected. On a replacement it
-// stops accepting, lets in-flight requests finish within shutdownGrace, and
-// returns ExitReplaced for the supervisor to act on.
-func serve(server *http.Server, listener net.Listener, replaced <-chan struct{}, stderr io.Writer) int {
+// serveUntilReplaced is Serve with the replacement signal injected. On a
+// replacement it stops accepting, lets in-flight requests finish within
+// bounds.drain, ends every open stream the moment they have (or the bound
+// passes), and returns ExitReplaced for the supervisor to act on. Streams
+// outlive the drain so no client sees its stream drop while an answer it waits
+// for is still coming.
+func serveUntilReplaced(
+	server *http.Server,
+	listener net.Listener,
+	replaced <-chan struct{},
+	stderr io.Writer,
+	bounds restartBounds,
+) int {
+	streams, endStreams := context.WithCancel(context.Background())
+	defer endStreams()
+	requests, endRequests := context.WithCancel(context.Background())
+	defer endRequests()
+	var inFlight atomic.Int64
+	server.Handler = restartable(server.Handler, streams, requests, &inFlight)
 	shutdownDone := make(chan struct{})
 	stopWatching := make(chan struct{})
 	restarting := make(chan struct{})
@@ -152,7 +172,8 @@ func serve(server *http.Server, listener net.Listener, replaced <-chan struct{},
 			stderr,
 			"pfm mcp serve: own executable was replaced by a new build; exiting so the service manager restarts the daemon on it",
 		)
-		ctx, cancel := context.WithTimeout(context.Background(), shutdownGrace)
+		go drainThenEndStreams(requests, &inFlight, bounds.drain, stderr, endRequests, endStreams)
+		ctx, cancel := context.WithTimeout(context.Background(), bounds.shutdown)
 		defer cancel()
 		if err := server.Shutdown(ctx); err != nil {
 			fmt.Fprintf(stderr, "pfm mcp serve: shutdown for restart: %v\n", err)
@@ -172,4 +193,78 @@ func serve(server *http.Server, listener net.Listener, replaced <-chan struct{},
 		return 1
 	}
 	return 0
+}
+
+// restartBounds are serve's restart deadlines, injected so a test runs them
+// short.
+type restartBounds struct {
+	drain    time.Duration
+	shutdown time.Duration
+}
+
+var restartDefaults = restartBounds{drain: drainGrace, shutdown: shutdownGrace}
+
+// restartable gives every request a context the restart can end. A GET is
+// MCP streamable HTTP's standalone stream — held open for server-initiated
+// messages, it never ends on its own and carries no pending tools/call answer
+// (those ride their own POST) — so it ends the moment streams is cancelled;
+// every other request is counted in inFlight and ends by itself or once
+// requests is cancelled at the drain bound. The SDK then returns from the handler and the
+// client reads the end of its stream, its cue to reconnect.
+func restartable(next http.Handler, streams, requests context.Context, inFlight *atomic.Int64) http.Handler {
+	if next == nil {
+		next = http.DefaultServeMux
+	}
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		ends := requests
+		if request.Method == http.MethodGet {
+			ends = streams
+		} else {
+			inFlight.Add(1)
+			defer inFlight.Add(-1)
+		}
+		ctx, cancel := context.WithCancel(request.Context())
+		defer cancel()
+		stop := context.AfterFunc(ends, cancel)
+		defer stop()
+		next.ServeHTTP(writer, request.WithContext(ctx))
+	})
+}
+
+// drainPoll is how often a restart re-counts the requests still in flight.
+const drainPoll = 10 * time.Millisecond
+
+// drainThenEndStreams ends the open streams once no counted request is in
+// flight. A request still running at the drain bound is said out loud and
+// cut with the streams; a lifetime already cancelled — serve has returned —
+// ends the wait with nothing left to end.
+func drainThenEndStreams(
+	lifetime context.Context,
+	inFlight *atomic.Int64,
+	bound time.Duration,
+	stderr io.Writer,
+	endRequests, endStreams context.CancelFunc,
+) {
+	deadline := clock.Real.NewTimer(bound)
+	defer deadline.Stop()
+	poll := clock.Real.NewTicker(drainPoll)
+	defer poll.Stop()
+	for inFlight.Load() > 0 {
+		select {
+		case <-lifetime.Done():
+			return
+		case <-deadline.C():
+			fmt.Fprintf(
+				stderr,
+				"pfm mcp serve: %d request(s) still running at the drain bound %v; cutting them for the restart\n",
+				inFlight.Load(),
+				bound,
+			)
+			endRequests()
+			endStreams()
+			return
+		case <-poll.C():
+		}
+	}
+	endStreams()
 }

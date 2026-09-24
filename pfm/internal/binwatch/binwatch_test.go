@@ -9,8 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // lockedBuffer is a stderr the watcher goroutine and the test can share.
@@ -140,7 +143,7 @@ func startServe(t *testing.T, replaced <-chan struct{}) (*http.Server, string, <
 	})}
 	var stderr bytes.Buffer
 	code := make(chan int, 1)
-	go func() { code <- serve(server, listener, replaced, &stderr) }()
+	go func() { code <- serveUntilReplaced(server, listener, replaced, &stderr, restartDefaults) }()
 	return server, "http://" + listener.Addr().String(), code, &stderr
 }
 
@@ -186,5 +189,181 @@ func TestServeUntilReplacedCloseIsAPlainStop(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("serve did not return after Close")
+	}
+}
+
+// restartExitBound is how soon after a replacement the daemon must be gone
+// when nothing but open streams and a short call hold it: the port refuses
+// every reconnect until the supervisor relaunches, so the restart gap is this
+// exit plus the relaunch, never the full shutdown grace.
+const restartExitBound = 2 * time.Second
+
+// startRestartServe runs serve over handler with short restart bounds and
+// returns its endpoint and exit code channel.
+func startRestartServe(
+	t *testing.T,
+	handler http.Handler,
+	replaced <-chan struct{},
+	bounds restartBounds,
+) (string, <-chan int, *lockedBuffer) {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := &lockedBuffer{}
+	code := make(chan int, 1)
+	go func() { code <- serveUntilReplaced(&http.Server{Handler: handler}, listener, replaced, stderr, bounds) }()
+	return "http://" + listener.Addr().String(), code, stderr
+}
+
+// awaitExit returns serve's exit code and how long after since it arrived,
+// failing when it never arrives within limit.
+func awaitExit(t *testing.T, code <-chan int, since time.Time, limit time.Duration) (int, time.Duration) {
+	t.Helper()
+	select {
+	case got := <-code:
+		return got, time.Since(since)
+	case <-time.After(limit):
+		t.Fatalf("serve still running %v after the replacement", limit)
+		return 0, 0
+	}
+}
+
+type callOutcome struct {
+	result *mcp.CallToolResult
+	err    error
+}
+
+// TestServeRestartEndsStreamsAndFinishesInFlightCalls is the regression for the
+// ~40 s restart gap: a connected MCP client's standalone GET stream never ends
+// on its own, so the restart's Shutdown ran out its whole grace while the
+// closed listener refused every reconnect. The restart must still answer a
+// tools/call already in flight, then end that stream and exit within
+// restartExitBound. The client keeps its default reconnect retries, as every
+// real MCP client does.
+func TestServeRestartEndsStreamsAndFinishesInFlightCalls(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	mcpServer := mcp.NewServer(&mcp.Implementation{Name: "binwatch-test", Version: "test"}, nil)
+	mcp.AddTool(mcpServer, &mcp.Tool{Name: "slow", Description: "answers once released"},
+		func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, any, error) {
+			close(entered)
+			<-release
+			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "finished"}}}, nil, nil
+		})
+	sdkHandler := mcp.NewStreamableHTTPHandler(
+		func(*http.Request) *mcp.Server { return mcpServer },
+		&mcp.StreamableHTTPOptions{JSONResponse: true},
+	)
+	var openStreams atomic.Int32
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method == http.MethodGet {
+			openStreams.Add(1)
+			defer openStreams.Add(-1)
+		}
+		sdkHandler.ServeHTTP(writer, request)
+	})
+	bounds := restartBounds{drain: 4 * time.Second, shutdown: 6 * time.Second}
+	replaced := make(chan struct{})
+	endpoint, code, stderr := startRestartServe(t, handler, replaced, bounds)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: endpoint}, nil)
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Logf("close session after the daemon exited: %v", err)
+		}
+	}()
+	for deadline := time.Now().Add(5 * time.Second); openStreams.Load() == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("the client never opened its standalone GET stream")
+		}
+		time.Sleep(watchTick)
+	}
+	outcome := make(chan callOutcome, 1)
+	go func() {
+		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "slow"})
+		outcome <- callOutcome{result: result, err: err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tools/call never reached the tool")
+	}
+
+	start := time.Now()
+	close(replaced)
+	time.Sleep(200 * time.Millisecond) // the call is still running when the restart begins
+	close(release)
+
+	got, elapsed := awaitExit(t, code, start, bounds.shutdown+5*time.Second)
+	t.Logf("restart exit %v after the replacement", elapsed)
+	if got != ExitReplaced {
+		t.Fatalf("exit code = %d, want %d (stderr %q)", got, ExitReplaced, stderr.String())
+	}
+	if elapsed > restartExitBound {
+		t.Fatalf(
+			"restart exit took %v, want under %v: an open MCP stream held the shutdown (stderr %q)",
+			elapsed, restartExitBound, stderr.String(),
+		)
+	}
+	select {
+	case done := <-outcome:
+		if done.err != nil {
+			t.Fatalf("in-flight tools/call failed across the restart: %v", done.err)
+		}
+		if len(done.result.Content) != 1 {
+			t.Fatalf("in-flight tools/call content = %#v, want the tool's answer", done.result.Content)
+		}
+		if text, ok := done.result.Content[0].(*mcp.TextContent); !ok || text.Text != "finished" {
+			t.Fatalf("in-flight tools/call answered %#v, want \"finished\"", done.result.Content[0])
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the in-flight tools/call never answered")
+	}
+}
+
+// TestServeRestartCutsAStuckRequestAtTheDrainBound: a request that never ends
+// is cut at the drain bound and said out loud, instead of holding the restart
+// to the shutdown grace.
+func TestServeRestartCutsAStuckRequestAtTheDrainBound(t *testing.T) {
+	entered := make(chan struct{})
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		close(entered)
+		<-request.Context().Done()
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	})
+	bounds := restartBounds{drain: 300 * time.Millisecond, shutdown: 6 * time.Second}
+	replaced := make(chan struct{})
+	endpoint, code, stderr := startRestartServe(t, handler, replaced, bounds)
+	go func() {
+		response, err := http.Post(endpoint, "application/json", strings.NewReader("{}"))
+		if err == nil {
+			_ = response.Body.Close()
+		}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request never reached the handler")
+	}
+	start := time.Now()
+	close(replaced)
+	got, elapsed := awaitExit(t, code, start, bounds.shutdown+5*time.Second)
+	t.Logf("restart exit %v after the replacement", elapsed)
+	if got != ExitReplaced {
+		t.Fatalf("exit code = %d, want %d", got, ExitReplaced)
+	}
+	if elapsed > bounds.drain+restartExitBound {
+		t.Fatalf("restart exit took %v, want under drain %v + %v", elapsed, bounds.drain, restartExitBound)
+	}
+	if !strings.Contains(stderr.String(), "still running at the drain bound") {
+		t.Fatalf("stderr = %q, want the cut request said out loud", stderr.String())
 	}
 }

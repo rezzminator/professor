@@ -81,8 +81,9 @@ type Runtime struct {
 	TTLsConfigured       bool
 	MaxInlineChars       int
 	// Remote marks the external gateway's service: parseLocalDocuments is not
-	// registered, no result carries a server path, and download answers a
-	// resource_link served by the download resource template.
+	// registered, no result carries a server path, and download answers a signed
+	// expiring /files URL plus a resource_link served by the download
+	// resource template.
 	Remote bool
 	// MaxDownloadBytes is harvest.maxDownloadBytes; MaxResourceBytes is
 	// harvest.maxResourceBytes, the largest blob resources/read sends. 0 = default.
@@ -98,6 +99,8 @@ type Service struct {
 	runtime   Runtime
 	worker    *harvestpy.Converter
 	downloads *downloadStore
+	// links signs remote download URLs; set only by NewRemote (nil elsewhere).
+	links *downloadLinks
 }
 
 // NewConfigured builds the stdio-independent service for tests and command

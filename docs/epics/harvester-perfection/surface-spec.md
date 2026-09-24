@@ -60,13 +60,16 @@ Every tool returns typed output: `discardOutput` goes, each handler returns its 
 - Cache: the cache key includes a hash of the sorted header set, so a page read with a credential is never served to a call without it, nor the other way round. Values never appear in logs, receipts, errors or the typed output; names may.
 - CLI: `pfm harvest --header 'Name: value'` (repeatable), and on `pfm harvest download`.
 
-## Remote: only MCP
+## Remote: only MCP, and signed file links
 
 - The remote gateway (`remote.go`) registers `readPage`, `download`, `findWorks`, `readWork` and `webSearch` (when configured); never `parseLocalDocuments`, and no tool returns a server path.
-- `download` on the remote server returns a `resource_link` with URI `harvest://download/{id}` (`id` = the content's sha256), its MIME type and size. The server registers the resource template `harvest://download/{id}`; `resources/read` answers with the bytes as a blob. The template's handler reads only files the download store holds under that id; any other id is `ResourceNotFound`.
+- `download` on the local server (stdio and the loopback daemon) returns `path`, the stored file's absolute path, and no url: the caller takes the file from there.
+- `download` on the remote server returns per item `id` (the content's sha256), `url`, `expires` (RFC 3339 UTC), `bytes`, `content_type`, `sha256`, and a `resource_link` with URI `harvest://download/{id}`, its MIME type and size — never a server path. The server registers the resource template `harvest://download/{id}`; `resources/read` answers with the bytes as a blob. The template's handler reads only files the download store holds under that id; any other id is `ResourceNotFound`.
+- File transfer is the one exception to "only MCP": `url` is `{publicURL}/files/{sha256}?exp={unix}&sig={hex HMAC-SHA256(key, sha256 + "." + exp)}`, fetched by the caller with `curl -fL -o <file> <url>` (then checking the sha256), never read into context. The key is 32 random bytes per server process, never written or logged, so a restart invalidates every link; a link lives 10 minutes (`downloadLinkTTL`). A service with no public URL says so by name in the item's note and carries only the `resource_link`.
+- `GET|HEAD /files/{sha256}` on the gateway's listener sits outside the bearer check (the signature is the access control; `/mcp` stays behind the bearer). The id must match `^[0-9a-f]{64}$` and be held by the download store, so nothing else is reachable and nothing is listed. The signature is checked in constant time, then the expiry: bad or missing signature 403, expired 410, unknown or malformed id 404, each body naming the cause. The file streams through `http.ServeContent` (Range, If-Modified-Since, HEAD) with its stored type, `Content-Disposition: attachment`, `Cache-Control: private, no-store` and `X-Content-Type-Options: nosniff`, uncapped; each request logs the id prefix, status and bytes, never the signature.
 - A blob larger than `harvest.maxResourceBytes` (default 25 MiB) is not sent: the read answers a named error with the size and the reason (the MCP transport carries it base64 in one message). The `download` result states the same limit up front when the file is over it.
 - Binary is never put in a tool result. Images are not inlined as `ImageContent`.
-- The gateway needs no route change: it passes every JSON-RPC method on `/mcp` after the bearer check, so `resources/read` reaches the SDK's registered-resource lookup, which is the access gate.
+- `/mcp` passes every JSON-RPC method after the bearer check, so `resources/read` reaches the SDK's registered-resource lookup, which is the access gate.
 
 ## Removed, with every reference
 

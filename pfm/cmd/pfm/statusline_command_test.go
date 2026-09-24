@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -223,5 +224,75 @@ func TestStatuslineRecordsTheContextSampleForTheNudge(t *testing.T) {
 	percent, found, err := nudge.ReadContext(filepath.Join(root, "sid"), "sess-nudge")
 	if err != nil || !found || percent != 47 {
 		t.Fatalf("recorded sample = %d found=%t err=%v, want 47", percent, found, err)
+	}
+}
+
+// A sub-agent launched without an effort runs at its session's effort; the
+// main statusline records that effort per session and the agent-panel row of
+// the same session shows it when Claude Code's row payload carries none.
+func TestStatuslineRecordsTheSessionEffortForTheAgentPanel(t *testing.T) {
+	jailTest(t)
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "tmp"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PFM_HOME", root)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, ".cc", "1"))
+	t.Setenv("PFM_TMUX_DIR", filepath.Join(root, "tmux"))
+	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
+
+	var stdout, stderr bytes.Buffer
+	if code := runStatusline(nil, strings.NewReader(`{"session_id":"sess-eff","model":{"id":"claude-opus-5-5[1m]",`+
+		`"display_name":"Opus"},"effort":{"level":"xhigh"},"context_window":{"used_percentage":5}}`),
+		&stdout, &stderr); code != 0 || stderr.Len() != 0 {
+		t.Fatalf("main line: code=%d stderr=%q", code, stderr.String())
+	}
+	stdout.Reset()
+	if code := runStatusline([]string{"--subagents"}, strings.NewReader(`{"session_id":"sess-eff","tasks":[{"id":"t1",`+
+		`"model":"claude-opus-5-5","contextWindowSize":1000,"tokenCount":10}]}`), &stdout, &stderr); code != 0 ||
+		stderr.Len() != 0 {
+		t.Fatalf("row: code=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "xhigh") {
+		t.Fatalf("row = %q, want the session's effort xhigh", stdout.String())
+	}
+}
+
+func TestStatuslineSubagentsAnswersTheAgentPanel(t *testing.T) {
+	jailTest(t)
+	root := t.TempDir()
+	t.Setenv("PFM_HOME", root)
+	t.Setenv("PFM_SID_DIR", filepath.Join(root, "sid"))
+
+	var stdout, stderr bytes.Buffer
+	code := runStatusline(
+		[]string{"--subagents"},
+		strings.NewReader(`{"columns":100,"tasks":[{"id":"t1","label":"trace it","model":"claude-opus-5-5",`+
+			`"contextWindowSize":1000000,"tokenCount":500000}]}`),
+		&stdout,
+		&stderr,
+	)
+	if code != 0 || stderr.Len() != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	var row struct{ ID, Content string }
+	if err := json.Unmarshal(stdout.Bytes(), &row); err != nil || row.ID != "t1" ||
+		!strings.Contains(row.Content, "50%") || !strings.Contains(row.Content, "trace it") {
+		t.Fatalf("stdout=%q (err %v), want one {id:t1} row carrying 50%% and the label", stdout.String(), err)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runStatusline([]string{"--subagents"}, strings.NewReader(`{"tasks":`), &stdout, &stderr); code != 0 ||
+		stdout.Len() != 0 || !strings.Contains(stderr.String(), "--subagents: render (fail-open)") {
+		t.Fatalf("malformed payload: code=%d stdout=%q stderr=%q, want exit 0, no rows, named error", code,
+			stdout.String(), stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if code := runStatusline([]string{"--subagents", "--refresh-gpt"}, strings.NewReader(""), &stdout,
+		&stderr); code != 2 {
+		t.Fatalf("--subagents with --refresh-gpt: code=%d, want usage error 2", code)
 	}
 }

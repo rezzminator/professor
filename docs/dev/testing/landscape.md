@@ -370,6 +370,8 @@ T35 · Theme wiring: `custom:professor-gold/silver/bronze` selectable via `setti
 T36 · pfm TUI's own internal theme palettes (`default`/`tokyo-night`, distinct from Claude Code CLI themes) · needs:tmux · today:U · fleet.md:394-397 · lane(s):F
 T37 · `/reload` installed slash-command file (body substituted from `reload.Usage`, never drifts) · needs:seat:cc · today:NONE ⚠ known-gap (no doctor row for link health) · fleet.md:404-412 · lane(s):O2
 T38 · `/handoff [--branch]` installed skill (writes handoff file, reboots pane or spawns detached sibling) · needs:seat:cc,tmux · today:U · fleet.md:413-419 · lane(s):E1
+T39 · `pfm statusline --subagents` agent-panel row bodies from Claude Code's `subagentStatusLine` JSON (context gauge→%→tokens/window→name·agentType→model·effort→status+time since start→idle→tool count→errors→cache hit→compactions→scan-line growth→cwd→label; agentType from the sub-agent's meta file, the transcript facts from its own transcript, `?` when unreadable; one `{id,content}` line per task, fail-open), wired by `pfm install` · needs:none · today:U · statusline_command.go · lane(s):O2
+T40 · `pfm internal compact-gate` PreCompact hook holding each compacting party to its own threshold (`claude.autoCompactMain` / `claude.autoCompactSubagent`): manual trigger or unset thresholds allow; party = the newest sub-agent transcript written in the last 60 s when the main transcript is older, else main; estimate = last assistant usage (input+cache_read+cache_creation) + bytes after it / 4; below threshold → exit 2 with one stderr line, else 0; any read failure allows and logs the cause · needs:none · today:U · internal/compactgate · lane(s):O2
 
 ---
 

@@ -1945,11 +1945,11 @@ func (installer *engine) wireSettings() error {
 		if err != nil {
 			return fmt.Errorf("read %s: %w", candidate, err)
 		}
-		updated, changed, nextOwned, err := updateSettings(
+		updated, changed, nextOwned, err := updateSettingsWindow(
 			raw,
 			installer.options.Home,
 			installer.options.Mode == ModeUninstall,
-			ownership[physical],
+			ownership[physical], installer.options.compactWindow,
 		)
 		if err != nil {
 			if installer.options.Mode == ModeUninstall && len(ownership[physical]) > 0 {

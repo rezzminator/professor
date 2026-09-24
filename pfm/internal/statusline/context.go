@@ -31,17 +31,16 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	l2 := urgencyEmoji(percent) + " " + makeBar(percent, 10) + " " + percentColor(percent) +
 		gauge.marker + strconv.Itoa(percent) + "%" + reset
 	if gauge.transcript && runtime.Engine == pfmengine.Codex && gauge.window > 0 {
-		l2 += " " + dim + "of " + formatContextTokens(gauge.window) + reset
+		l2 += " " + cWindow + "of " + formatContextTokens(gauge.window) + reset
 	}
 	contextTokens := data.ContextWindow.CurrentUsage.CacheReadInputTokens +
 		data.ContextWindow.CurrentUsage.CacheCreationInputTokens +
 		data.ContextWindow.CurrentUsage.InputTokens
 	if (runtime.Columns == 0 || runtime.Columns >= 100) && contextTokens > 0 {
-		l2 += sep + dim + "🧮" + formatContextTokens(contextTokens)
+		l2 += sep + cTokens + "🧮" + formatContextTokens(contextTokens) + reset
 		if gauge.humanPrompts > 0 {
-			l2 += " ✎" + strconv.Itoa(gauge.humanPrompts)
+			l2 += " " + dim + "✎" + strconv.Itoa(gauge.humanPrompts) + reset
 		}
-		l2 += reset
 	}
 	// Never width-gated: an absent cache timer is indistinguishable from an
 	// expired one. The segment reports transcript readability itself.

@@ -506,7 +506,7 @@ fi
 
 # ─── O2.05 — the internal plumbing verbs ────────────────────────────────────
 
-beat O2.05-internal-plumbing T34 T37 X21 X22 X26 X29 X30 X32 X33 X34 X37 X40
+beat O2.05-internal-plumbing T34 T37 T39 T40 X21 X22 X26 X29 X30 X32 X33 X34 X37 X40
 spends none
 bad=""
 int_err=/tmp/o2-internal.err
@@ -614,6 +614,18 @@ sl_b_rc=$?
 [ "$sl_a_rc" -eq "$sl_b_rc" ] || bad="$bad pfm internal statusline exited $sl_a_rc but pfm statusline exited $sl_b_rc;"
 [ -n "$sl_a" ] || bad="$bad pfm internal statusline rendered nothing;"
 [ -n "$sl_b" ] || bad="$bad pfm statusline rendered nothing, so the alias had nothing to match;"
+# T39: --subagents answers the agent panel — one {id,content} line per task row.
+sa="$(printf '%s' '{"columns":100,"tasks":[{"id":"lane-t39","label":"lane","model":"claude-sonnet-5","contextWindowSize":1000000,"tokenCount":250000}]}' | pfm internal statusline --subagents 2>&1)"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad pfm internal statusline --subagents exited $rc: $(one_line "$sa");"
+printf '%s' "$sa" | grep -qF '"id":"lane-t39"' || bad="$bad --subagents did not answer row lane-t39: $(one_line "$sa");"
+printf '%s' "$sa" | grep -qF '25%' || bad="$bad --subagents row does not carry the 25% gauge: $(one_line "$sa");"
+# T40: compact-gate fails toward compaction — a PreCompact payload with the
+# thresholds unset (the lane config names neither) is allowed, with no block reason.
+cg="$(printf '{"session_id":"lane-t40","transcript_path":"%s/lane-t40.jsonl","cwd":"%s","hook_event_name":"PreCompact","trigger":"auto","custom_instructions":""}' "$CWD" "$CWD" | pfm internal compact-gate 2>&1)"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad pfm internal compact-gate with thresholds unset exited $rc (want 0): $(one_line "$cg");"
+printf '%s' "$cg" | grep -qF 'compact-gate: blocked' && bad="$bad pfm internal compact-gate with thresholds unset printed a block reason: $(one_line "$cg");"
 # T37: the installed /reload card carries reload.Usage itself, never the token.
 card="$SEAT_DIR/commands/reload.md"
 usage1="$(pfm chat reload --help 2>&1 | head -1)"
@@ -629,7 +641,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · --subagents row carries 25% · compact-gate unset → 0 · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────

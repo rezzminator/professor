@@ -12,6 +12,7 @@ import (
 	pfmchat "github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/cli"
 	"github.com/rezzminator/professor/pfm/internal/clock"
+	"github.com/rezzminator/professor/pfm/internal/compactgate"
 	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/doctor"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -65,7 +66,7 @@ var topLevelSubcommands = []string{
 // internalSubcommands names each runInternal branch for usage and installer parity.
 var internalSubcommands = []string{
 	"agent-open", callmeterCommand, "chat-server", "claude-launch", "claude-version", "clear-kill",
-	"codex-launch", "compact-nudge", "epic-inject",
+	"codex-launch", "compact-gate", "compact-nudge", "epic-inject",
 	"exit-close", "exit-intercept", "explore-deny", "kill-exit", "launch",
 	"launcher-repair", "primary-get", "primary-set", "reload-intercept", "rr-dir",
 	reloadRunCommand, "stale", statuslineCommand, thenAction, "tmux-title-renudge", "update-check",
@@ -496,6 +497,9 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 	if len(args) != 0 && args[0] == "stale" {
 		return stale.Run(args[1:], stdout, stderr)
 	}
+	if len(args) != 0 && args[0] == "compact-gate" {
+		return compactgate.GateCompaction(context.Background(), os.Stdin, stderr, runtime.Config.Claude, clock.Real)
+	}
 	if len(args) != 0 && args[0] == "statusline" {
 		return runStatuslineWithRuntime(args[1:], os.Stdin, stdout, stderr, runtime, paths.OSEnv{})
 	}
@@ -523,7 +527,7 @@ func runInternal(args []string, stdout, stderr io.Writer, runtime commandRuntime
 		// Keep this literal pipe-joined for C15; the registry test checks branch reachability.
 		fmt.Fprintln(
 			stderr,
-			"usage: pfm internal agent-open|callmeter|chat-server|claude-launch|claude-version|clear-kill|codex-launch|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
+			"usage: pfm internal agent-open|callmeter|chat-server|claude-launch|claude-version|clear-kill|codex-launch|compact-gate|compact-nudge|epic-inject|exit-close|exit-intercept|explore-deny|kill-exit|launch|launcher-repair|primary-get|primary-set|reload-intercept|reload-run|rr-dir|stale|statusline|then|tmux-title-renudge|update-check [options]",
 		)
 		return 2
 	}

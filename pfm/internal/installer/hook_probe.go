@@ -99,6 +99,9 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 	results = append(results, probeCodexHooks(home, config, pfmBinary)...)
 	for path, counts := range ownership {
 		for key, count := range counts {
+			if key.Event == compactEnvOwnershipEvent {
+				continue // an owned settings env value, not a hook
+			}
 			if expectedKeys[path+"\x00"+key.Event+"\x00"+key.Matcher+"\x00"+key.Command] {
 				continue
 			}

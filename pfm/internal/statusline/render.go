@@ -31,7 +31,6 @@ const (
 	blue    = "\x1b[1;34m"
 	magenta = "\x1b[1;35m"
 	dim     = "\x1b[2m"
-	white   = "\x1b[1;37m"
 	reset   = "\x1b[0m"
 	sep     = " " + dim + "│" + reset + " "
 )
@@ -200,29 +199,12 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 
 	harvestRateLimits(runtime, now, account, data)
 
-	modelSymbol := "●"
-	switch {
-	case strings.Contains(data.Model.DisplayName, "Fable"):
-		modelSymbol = "✦"
-	case strings.Contains(data.Model.DisplayName, "Opus"):
-		modelSymbol = "◆"
-	case strings.Contains(data.Model.DisplayName, "Sonnet"):
-		modelSymbol = "◇"
-	case strings.Contains(data.Model.DisplayName, "Haiku"):
-		modelSymbol = "○"
-	}
 	directoryName := filepath.Base(filepath.Clean(directory))
 	if directory == "" || directoryName == string(filepath.Separator) {
 		directoryName = "~"
 	}
 
-	l1 := badge + cyan + modelSymbol + " " + data.Model.DisplayName + reset
-	if data.SessionName != "" {
-		l1 += sep + white + "🔖 " + data.SessionName + reset
-	}
-	if effort := effortSegment(runtime, data); effort != "" {
-		l1 += sep + effort
-	}
+	l1 := badge + modelSegment(data)
 	l1 += sep + blue + directoryName + reset
 	if data.Worktree.Name != "" {
 		l1 += sep + magenta + "🌳 " + data.Worktree.Name + reset
@@ -242,8 +224,10 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		}
 		l1 += sep + color + data.Vim.Mode + reset
 	}
-	counts := fleetCounts(runtime)
-	l1 += sep + sky.SnapshotCounts(counts)
+	if data.SessionName != "" {
+		l1 += sep + cLabel + "🔖 " + data.SessionName + reset
+	}
+	l1 += sep + sky.SnapshotCounts(fleetCounts(runtime))
 
 	gauge, l2, contextTokens := renderContextLine(runtime, data, directory, now)
 	if data.Cost.TotalCostUSD > 0 && runtime.Engine != pfmengine.Codex {
@@ -258,7 +242,7 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 	// ⏳ (U+23F3, East-Asian-Width W) over ⏱ (U+23F1, width N): every cell
 	// model — tmux, xterm.js, the harness — sizes the hourglass at 2 cells,
 	// while the stopwatch is 1 cell wide on paper and 2 cells wide in ink.
-	l2 += sep + dim + "⏳ " + formatDuration(data.Cost.TotalDurationMS) + reset
+	l2 += sep + cElapsed + "⏳ " + formatDuration(data.Cost.TotalDurationMS) + reset
 
 	l3 := ""
 	if runtime.Engine == pfmengine.Codex {
@@ -274,29 +258,6 @@ func Render(ctx context.Context, raw []byte, runtime Runtime) (string, error) {
 		return reset + l1 + "\n" + reset + l2 + "\n" + reset + l3 + "\n", nil
 	}
 	return reset + l1 + "\n" + reset + l2 + "\n", nil
-}
-
-func effortSegment(_ Runtime, data input) string {
-	if data.Effort.Level == "" {
-		return ""
-	}
-	color, emoji := cyan, "🔆"
-	switch data.Effort.Level {
-	case "low":
-		color, emoji = dim, "🔹"
-	case "medium":
-		color, emoji = green, "🔶"
-	case "high":
-		color, emoji = yellow, "💠"
-	case "xhigh":
-		color, emoji = magenta, "💎"
-	case "max":
-		color, emoji = red, "👑"
-	}
-	if !data.Thinking.Enabled {
-		return dim + "💤 " + data.Effort.Level + " (off)" + reset
-	}
-	return color + emoji + " " + data.Effort.Level + reset
 }
 
 func formatDuration(milliseconds int64) string {
@@ -763,11 +724,11 @@ func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string) s
 	// carries no user turn to anchor on, which is a fact about the chat. "!" is
 	// a fact about us — we could not look.
 	if transcriptPath == "" {
-		return sep + red + "💾" + label + "!" + reset
+		return sep + cBad + "💾" + label + "!" + reset
 	}
 	info, err := os.Stat(transcriptPath)
 	if err != nil || info.IsDir() {
-		return sep + red + "💾" + label + "!" + reset
+		return sep + cBad + "💾" + label + "!" + reset
 	}
 	cachePath := filepath.Join(
 		runtime.CacheDir,
@@ -785,15 +746,15 @@ func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string) s
 	}
 	if anchor.IsZero() {
 		if label == "1h" {
-			return sep + yellow + "💾1h∞" + reset
+			return sep + cWarn + "💾1h∞" + reset
 		}
-		return sep + yellow + "💾" + label + "?" + reset
+		return sep + cWarn + "💾" + label + "?" + reset
 	}
 	remaining := ttl - now.Sub(anchor)
 	if remaining > 0 {
-		return sep + green + "💾" + label + "✓" + formatCacheTime(remaining, false) + reset
+		return sep + cGood + "💾" + label + "✓" + formatCacheTime(remaining, false) + reset
 	}
-	return sep + red + "💾" + label + "✗" + formatCacheTime(-remaining, true) + reset
+	return sep + cBad + "💾" + label + "✗" + formatCacheTime(-remaining, true) + reset
 }
 
 func readAnchorCache(path string) (string, time.Time) {

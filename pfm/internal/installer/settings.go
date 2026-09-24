@@ -12,11 +12,34 @@ import (
 // in the background.
 const configAsyncKey = "async"
 
+// subagentStatusLineKey is Claude Code's settings key for the per-row body
+// of its agent panel.
+const subagentStatusLineKey = "subagentStatusLine"
+
+// SubagentStatusLineCommand is the subagentStatusLine.command value pfm
+// install owns: the statusLine overlay in its `--subagents` mode.
+func SubagentStatusLineCommand(home string) string {
+	return StatusLineOverlayCommand(home) + " --subagents"
+}
+
 func updateSettings(
 	raw []byte,
 	home string,
 	uninstall bool,
 	owned settingsHookCounts,
+) ([]byte, bool, settingsHookCounts, error) {
+	return updateSettingsWindow(raw, home, uninstall, owned, 0)
+}
+
+// updateSettingsWindow converges one Claude settings file; compactWindow is
+// the auto-compact window (settings_compact.go), 0 when the thresholds are
+// unset.
+func updateSettingsWindow(
+	raw []byte,
+	home string,
+	uninstall bool,
+	owned settingsHookCounts,
+	compactWindow int,
 ) ([]byte, bool, settingsHookCounts, error) {
 	var document map[string]any
 	if err := unmarshalKeepingNumbers(raw, &document); err != nil {
@@ -28,6 +51,9 @@ func updateSettings(
 	overlayStatusCommand := StatusLineOverlayCommand(home)
 	usageCommand := commandByName(expected, "usage")
 	exploreDenyCommand := commandByName(expected, "explore-deny")
+	if compactWindow > 0 && !uninstall {
+		expected = append(expected, compactGateHook(home))
+	}
 
 	changed := false
 	before := countSettingsHookCommands(document)
@@ -90,6 +116,26 @@ func updateSettings(
 		changed = true
 	}
 
+	// subagentStatusLine renders each agent-panel row's body — the sub-agent's
+	// context gauge — through the same overlay. Written only when absent and
+	// removed only when it is exactly ours: an operator's own command stays.
+	subagentStatusCommand := SubagentStatusLineCommand(home)
+	subagentStatus, _ := document[subagentStatusLineKey].(map[string]any)
+	currentSubagentStatus, _ := subagentStatus[configCommandKey].(string)
+	switch {
+	case uninstall:
+		if currentSubagentStatus == subagentStatusCommand {
+			delete(document, subagentStatusLineKey)
+			changed = true
+		}
+	case currentSubagentStatus == "":
+		document[subagentStatusLineKey] = map[string]any{
+			configTypeKey:    commandType,
+			configCommandKey: subagentStatusCommand,
+		}
+		changed = true
+	}
+
 	if !uninstall {
 		for _, entry := range hookEntries(document, hookEventUserPromptSubmit, false) {
 			hooks, _ := entry["hooks"].([]any)
@@ -138,6 +184,9 @@ func updateSettings(
 		if normalizeExpectedHookTypes(document, expected) {
 			changed = true
 		}
+		if compactWindow <= 0 && removeOwnedCompactGate(document, home, owned) {
+			changed = true
+		}
 	}
 	nextOwned := nextSettingsHookOwnership(
 		before,
@@ -147,6 +196,9 @@ func updateSettings(
 		uninstall,
 		settingsDocumentHasMixedOwnershipEntry(document, pfmBinary),
 	)
+	if !uninstall && convergeCompactEnv(document, compactWindow, owned, nextOwned) {
+		changed = true
+	}
 
 	if !changed {
 		return raw, false, nextOwned, nil
@@ -449,7 +501,7 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 		return "", false
 	}
 	home := filepath.Dir(filepath.Dir(filepath.Dir(pfmBinary)))
-	for _, hook := range claudeHookTemplates(home) {
+	for _, hook := range append(claudeHookTemplates(home), compactGateHook(home)) {
 		if _, hookRest, ok := strings.Cut(hook.Command, " "); ok && hookRest == rest {
 			return "", false
 		}

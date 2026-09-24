@@ -2,9 +2,12 @@ package harvestcli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -23,7 +26,8 @@ import (
 
 // fixtureSite is an httptest server every harvester transport is routed to:
 // /figure.png is a PNG, /wayback answers "no snapshot", anything else is 404.
-// It records each request's path and X-Probe header.
+// It records each request's path and X-Probe header; a lookup through the
+// public resolver fails the test, so no rung leaves for the real network.
 type fixtureSite struct {
 	server *httptest.Server
 	mu     sync.Mutex
@@ -59,15 +63,28 @@ func newFixtureSite(t *testing.T) *fixtureSite {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
-		clone := r.Clone(r.Context())
-		clone.URL.Scheme, clone.URL.Host = target.Scheme, target.Host
-		return http.DefaultTransport.RoundTrip(clone)
-	})}
+	// One client per slot: harvest.New reads a Chrome or OA client that aliases
+	// Client as "unspecified" and swaps in a production client, which resolves
+	// the fixture host and archive.org through the real public resolver.
+	fixtureClient := func() *http.Client {
+		return &http.Client{Transport: roundTripper(func(r *http.Request) (*http.Response, error) {
+			clone := r.Clone(r.Context())
+			clone.URL.Scheme, clone.URL.Host = target.Scheme, target.Host
+			return http.DefaultTransport.RoundTrip(clone)
+		})}
+	}
 	previous := newHarvester
 	newHarvester = func(runtime harvestmcp.Runtime) (*harvest.Harvester, error) {
 		return harvest.New(harvest.Options{
-			CacheDir: runtime.CacheDir, Client: client, Chrome: client, Jina: client, OA: client,
+			CacheDir: runtime.CacheDir, Client: fixtureClient(), Chrome: fixtureClient(), Jina: fixtureClient(),
+			OA: fixtureClient(),
+			ResolvePublic: func(_ context.Context, host string) ([]net.IP, error) {
+				t.Errorf(
+					"a harvester client resolved %q through the public resolver; every rung must reach the fixture",
+					host,
+				)
+				return nil, fmt.Errorf("fixture: public resolve of %q refused", host)
+			},
 		})
 	}
 	t.Cleanup(func() { newHarvester = previous })

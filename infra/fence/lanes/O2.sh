@@ -12,7 +12,7 @@
 # Every beat asserts from pfm's OWN report (`pfm reap --json`, `pfm ls --tsv`,
 # a verb's exit code, a file pfm wrote, the reload worker's own log) or the
 # pane, never from a model's prose: a model turn is only ever the STIMULUS that
-# gives a wait its needle. Beat ids and their landscape ids are the contract in
+# gives a wait its needle. Beat ids are the contract in
 # beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
 # Cost: one Claude seat for the stimuli (reap's busy turn, the queued inject and
@@ -159,7 +159,7 @@ reap_cleanup() {
   return 0
 }
 
-beat O2.01-reap L8 L9 L10 L11 L12 L13 L15 L17 L18 L19 L21 L22 L23 L24 L25 L26
+beat O2.01-reap
 spends "cc:$SEAT"
 target_live "$E1_MAIN"
 if requires; then
@@ -316,7 +316,7 @@ fi
 # reap` has no --now). Named here so O2.01's sixteen real assertions can be
 # green while these three stay a visible gap, never a silent one.
 
-beat O2.01b-reap-unprovokable L14 L16 L20
+beat O2.01b-reap-unprovokable
 spends none
 if requires O2.01-reap; then
   blocked wave7-mock-engine "unprovoked without a scripted engine and a clock door (pfm reap has no --now): ${unprovoked:-fork, IDLE, UNKN}"
@@ -324,7 +324,7 @@ fi
 
 # ─── O2.02 — archive over a real history ────────────────────────────────────
 
-beat O2.02-archive X6 X7 X8 X9 X10
+beat O2.02-archive
 spends none
 killed_rows="$(pfm ls --killed 2>&1)"
 killed_rc=$?
@@ -399,7 +399,7 @@ fi
 
 # ─── O2.03 — index ───────────────────────────────────────────────────────────
 
-beat O2.03-index X5
+beat O2.03-index
 spends none
 bad=""
 idx="$(pfm index 2>&1)"
@@ -426,7 +426,7 @@ fi
 
 # ─── O2.04 — headless on cc and cx ──────────────────────────────────────────
 
-beat O2.04-headless X15 X16 X17 K17
+beat O2.04-headless
 spends "cc:$SEAT+cx"
 bad=""
 hl_err=/tmp/o2-headless.err
@@ -506,7 +506,7 @@ fi
 
 # ─── O2.05 — the internal plumbing verbs ────────────────────────────────────
 
-beat O2.05-internal-plumbing T34 T37 T39 X21 X22 X26 X29 X30 X32 X33 X34 X37 X40 X45
+beat O2.05-internal-plumbing
 spends none
 bad=""
 int_err=/tmp/o2-internal.err
@@ -650,7 +650,7 @@ fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────
 
-beat O2.05b-activity-log X42
+beat O2.05b-activity-log
 spends none
 bad=""
 log_err=/tmp/o2-log.err
@@ -685,7 +685,7 @@ fi
 
 # ─── O2.05c — the call store's reader ───────────────────────────────────────
 
-beat O2.05c-callmeter X43 X44
+beat O2.05c-callmeter
 spends none
 bad=""
 # A scratch home and config: the fleet's own store, seats and transcripts stay untouched.
@@ -740,7 +740,7 @@ fi
 
 # ─── O2.06 — doctor's codex_pane rows while E2's chat lives ─────────────────
 
-beat O2.06-doctor-codex-pane I63
+beat O2.06-doctor-codex-pane
 spends none
 target "$E2_MAIN"
 if ! live_chat "$E2_MAIN"; then
@@ -770,7 +770,7 @@ fi
 
 # ─── O2.07 — reload while busy, from the OPERATOR's side ────────────────────
 
-beat O2.07-reload-while-busy-operator L32
+beat O2.07-reload-while-busy-operator
 spends "cc:$SEAT"
 target_live "$E1_MAIN"
 if requires; then
@@ -820,7 +820,7 @@ fi
 
 # ─── O2.08 — a seat dropped under a LIVE chat (cross-lane) ──────────────────
 
-beat O2.08-dropped-seat-with-live-chat I38
+beat O2.08-dropped-seat-with-live-chat
 spends "cc:${SPARE:-none}"
 target "$SPARE_CHAT"
 if [ -z "$SPARE" ]; then
@@ -876,7 +876,7 @@ fi
 
 # ─── O2.09 — the harvester and its sidecar, for real on this architecture ───
 
-beat O2.09-harvester H1 H2 H3 H4 H5 H6 H7 H8 H9 H12
+beat O2.09-harvester
 spends "cc:$SEAT"
 if gap_applies O2.09-harvester; then
   known O2.09-harvester
@@ -966,7 +966,7 @@ fi
 
 # ─── O2.10 — uninstall: the end of the machine ──────────────────────────────
 
-beat O2.10-uninstall I69 I70 I71 I72 I73 I74 I75 I76 I77 I78 I79 I80 I81 I82 I83 I84 I85 I86 I87 I88 I89 I97
+beat O2.10-uninstall
 spends none
 bad=""
 FOREIGN_HOOK="echo lane-foreign-hook"

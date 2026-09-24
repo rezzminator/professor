@@ -75,24 +75,20 @@ gaps_file() { # gaps_file <path> — the fixture ledger
   cat >"$1" <<'YML'
 gaps:
   - beat: TL.05-ledgered
-    landscape_id: Z1
     why: "a fixture gap"
     owner: FIXTURE
     date: 2026-09-17
     expires: 2099-01-01
   - beat: TL.06-noexpiry
-    landscape_id: Z2
     why: "no expiry on purpose"
     owner: FIXTURE
     date: 2026-09-17
   - beat: TL.07-expired
-    landscape_id: Z3
     why: "expired on purpose"
     owner: FIXTURE
     date: 2026-09-17
     expires: 2000-01-01
   - beat: TL.08-arch
-    landscape_id: Z4
     why: "only broken on a machine nobody here has"
     owner: FIXTURE
     date: 2026-09-17
@@ -133,20 +129,20 @@ PRESENT_LOG="$T/present.jsonl"
 GAPS_SCRIPTS_DIR="$T/gap-fixture-scripts"
 mkdir -p "$GAPS_SCRIPTS_DIR"
 cat >"$GAPS_SCRIPTS_DIR/TL.sh" <<'SH'
-beat TL.05-ledgered Z1
-beat TL.06-noexpiry Z2
-beat TL.07-expired Z3
-beat TL.08-arch Z4
-beat X.01 Z9
+beat TL.05-ledgered
+beat TL.06-noexpiry
+beat TL.07-expired
+beat TL.08-arch
+beat X.01
 SH
 
 # ---- 1: pass, fail and the blocked chain ----------------------------------
 
 LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" run_lane basic \
   'lane_begin TL' \
-  'beat TL.01-ok Z1; spends cc:1; pass "held"' \
-  'beat TL.02-bad Z2; target TL_CHAT; fail "did not hold"' \
-  'beat TL.03-dep Z3; requires TL.02-bad && pass "must not happen"' \
+  'beat TL.01-ok; spends cc:1; pass "held"' \
+  'beat TL.02-bad; target TL_CHAT; fail "did not hold"' \
+  'beat TL.03-dep; requires TL.02-bad && pass "must not happen"' \
   'lane_end'
 row="$(cat "$LANE_DIR/TL.row.tsv" 2>/dev/null)"
 if [ "$RC" -ne 0 ] &&
@@ -164,7 +160,7 @@ fi
 header="$(head -1 "$LANE_DIR/TL.timeline.tsv" 2>/dev/null)"
 rows="$(tail -n +2 "$LANE_DIR/TL.timeline.tsv" 2>/dev/null | wc -l | tr -d ' ')"
 stamp="$(awk -F'\t' '$2 == "TL.01-ok" { print $3 }' "$LANE_DIR/TL.timeline.tsv" 2>/dev/null)"
-if [ "$header" = "$(printf 'lane\tbeat\tt_plus_s\tverdict\tdur_s\tseat\tlandscape_ids\tdetail')" ] &&
+if [ "$header" = "$(printf 'lane\tbeat\tt_plus_s\tverdict\tdur_s\tseat\tdetail')" ] &&
   [ "$rows" -eq 3 ] && printf '%s' "$stamp" | grep -qE '^t\+[0-9]+$'; then
   ok "timeline: header + one row per beat + a t+<s> stamp ($stamp)"
 else
@@ -183,7 +179,7 @@ fi
 
 LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" run_lane known \
   'lane_begin TL' \
-  'beat TL.05-ledgered Z1; known TL.05-ledgered' \
+  'beat TL.05-ledgered; known TL.05-ledgered' \
   'lane_end'
 row="$(cat "$LANE_DIR/TL.row.tsv" 2>/dev/null)"
 if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'TL known TL.05-ledgered — a fixture gap' &&
@@ -197,7 +193,7 @@ fi
 
 run_lane unexpected \
   'lane_begin TL' \
-  'beat TL.05-ledgered Z1; pass "it works now"' \
+  'beat TL.05-ledgered; pass "it works now"' \
   'lane_end'
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'known-gap now passes — remove the entry'; then
   ok "known-gap strictness: a listed beat that passes is ✗ 'known-gap now passes'"
@@ -209,7 +205,7 @@ fi
 
 run_lane noexpiry \
   'lane_begin TL' \
-  'beat TL.06-noexpiry Z2; known TL.06-noexpiry' \
+  'beat TL.06-noexpiry; known TL.06-noexpiry' \
   'lane_end'
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'has no expires:'; then
   ok "ledger law: known on an entry with no expires: is ✗"
@@ -219,7 +215,7 @@ fi
 
 run_lane expired \
   'lane_begin TL' \
-  'beat TL.07-expired Z3; known TL.07-expired' \
+  'beat TL.07-expired; known TL.07-expired' \
   'lane_end'
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'expired 2000-01-01'; then
   ok "ledger law: known on an expired entry is ✗, naming the date"
@@ -231,7 +227,7 @@ fi
 
 run_lane arch \
   'lane_begin TL' \
-  'beat TL.08-arch Z4; known TL.08-arch' \
+  'beat TL.08-arch; known TL.08-arch' \
   'lane_end'
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'scoped to plan9-vax'; then
   ok "arch scope: known on a foreign-arch entry is ✗ ('assert it for real here')"
@@ -241,7 +237,7 @@ fi
 
 LANE_PFM_LOG_FIXTURE="$PRESENT_LOG" run_lane archpass \
   'lane_begin TL' \
-  'beat TL.08-arch Z4; pass "works on this arch"' \
+  'beat TL.08-arch; pass "works on this arch"' \
   'lane_end'
 if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'TL ✓ TL.08-arch'; then
   ok "arch scope: passing a foreign-arch entry is CLEAN, not an unexpected pass"
@@ -268,7 +264,7 @@ fi
 
 LANE_GAPS_FIXTURE="$T/no-such-gaps.yml" run_lane unreadable_gaps \
   'lane_begin TL' \
-  'beat TL.09-nogaps Z1; pass "held"' \
+  'beat TL.09-nogaps; pass "held"' \
   'lane_end'
 if printf '%s' "$OUT" | grep -q 'KNOWN-GAPS-UNREADABLE'; then
   ok "gap_listed: an unreadable ledger is NAMED (KNOWN-GAPS-UNREADABLE), never silently 'not listed'"
@@ -279,7 +275,6 @@ fi
 cat >"$T/clean-gaps.yml" <<'YML'
 gaps:
   - beat: X.01
-    landscape_id: Z9
     why: "fine"
     owner: FIXTURE
     date: 2026-09-17
@@ -297,7 +292,6 @@ fi
 cat >"$T/stale-gaps.yml" <<'YML'
 gaps:
   - beat: TL.99-ghost-beat
-    landscape_id: Z1
     why: "the beat this entry named was renamed or deleted"
     owner: FIXTURE
     date: 2026-09-17
@@ -375,8 +369,8 @@ fi
 
 run_lane orphan \
   'lane_begin TL' \
-  'beat TL.10-open Z1' \
-  'beat TL.11-next Z2; pass "fine"' \
+  'beat TL.10-open' \
+  'beat TL.11-next; pass "fine"' \
   'lane_end'
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'TL ✗ TL.10-open — beat left open (no pass/fail/known/blocked before TL.11-next)'; then
   ok "a beat with no verdict is named by the next beat, never dropped"
@@ -386,7 +380,7 @@ fi
 
 run_lane orphan_end \
   'lane_begin TL' \
-  'beat TL.12-open Z1' \
+  'beat TL.12-open' \
   'lane_end'
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'beat left open — the lane reached its end with no verdict'; then
   ok "a beat still open at lane_end is named there"
@@ -401,7 +395,7 @@ fi
 
 run_lane logabsent \
   'lane_begin TL' \
-  'beat TL.13-ok Z1; pass "held"' \
+  'beat TL.13-ok; pass "held"' \
   'lane_end'
 if [ "$RC" -ne 0 ] &&
   printf '%s' "$OUT" | grep -q 'TL ✗ PRELUDE-LOG — activity log ABSENT at lane start' &&
@@ -419,7 +413,7 @@ LOG="$T/pfm.jsonl"
 printf '{"level":"info","msg":"before the lane"}\n' >"$LOG"
 LANE_PFM_LOG_FIXTURE="$LOG" run_lane logslice \
   'lane_begin TL' \
-  "beat TL.20-dirty Z1; printf '{\"level\":\"error\",\"msg\":\"reload lock stuck\"}\n' >> '$LOG'; pass 'the assertion held'" \
+  "beat TL.20-dirty; printf '{\"level\":\"error\",\"msg\":\"reload lock stuck\"}\n' >> '$LOG'; pass 'the assertion held'" \
   'lane_end'
 if [ "$RC" -ne 0 ] &&
   printf '%s' "$OUT" | grep -q 'unexpected error record' &&
@@ -434,7 +428,7 @@ fi
 printf '{"level":"info","msg":"before the lane"}\n' >"$LOG"
 LANE_PFM_LOG_FIXTURE="$LOG" run_lane expectlog \
   'lane_begin TL' \
-  "beat TL.21-clean Z1; expect-log 'reload lock stuck'; printf '{\"level\":\"error\",\"msg\":\"reload lock stuck\"}\n' >> '$LOG'; pass 'provoked on purpose'" \
+  "beat TL.21-clean; expect-log 'reload lock stuck'; printf '{\"level\":\"error\",\"msg\":\"reload lock stuck\"}\n' >> '$LOG'; pass 'provoked on purpose'" \
   'lane_end'
 if [ "$RC" -eq 0 ] && printf '%s' "$OUT" | grep -q 'TL ✓ TL.21-clean'; then
   ok "expect-log: a declared error record does not fail its beat"
@@ -445,7 +439,7 @@ fi
 printf '{"level":"info","msg":"before the lane"}\n' >"$LOG"
 LANE_PFM_LOG_FIXTURE="$LOG" run_lane expectlog_other \
   'lane_begin TL' \
-  "beat TL.22-other Z1; expect-log 'a different error'; printf '{\"level\":\"error\",\"msg\":\"reload lock stuck\"}\n' >> '$LOG'; pass 'x'" \
+  "beat TL.22-other; expect-log 'a different error'; printf '{\"level\":\"error\",\"msg\":\"reload lock stuck\"}\n' >> '$LOG'; pass 'x'" \
   'lane_end'
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -q 'unexpected error record'; then
   ok "expect-log: a pattern that does not match the record still fails the beat"
@@ -473,12 +467,12 @@ printf '#!/usr/bin/env bash\ncp "%s" "%s"\n' "$T/rows-live.tsv" "$ROWS" >"$T/reo
 run_lane liveness \
   'lane_begin TL' \
   "lane_reopen \"bash '$T/reopen.sh'\"" \
-  'beat TL.30-live Z1; target_live TL_CHAT; requires && pass "the chat is alive"' \
+  'beat TL.30-live; target_live TL_CHAT; requires && pass "the chat is alive"' \
   "rm -f '$ROWS'" \
-  'beat TL.31-gone Z2; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
-  'beat TL.32-back Z3; target_live TL_CHAT; requires && pass "the re-open brought it back"' \
+  'beat TL.31-gone; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
+  'beat TL.32-back; target_live TL_CHAT; requires && pass "the re-open brought it back"' \
   "rm -f '$ROWS'" \
-  'beat TL.33-gone-again Z4; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
+  'beat TL.33-gone-again; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
   'lane_end'
 dur="$(awk -F'\t' '$2 == "TL.31-gone" { print $5 }' "$LANE_DIR/TL.timeline.tsv" 2>/dev/null)"
 if printf '%s' "$OUT" | grep -q 'TL blocked TL.31-gone — blocked-by TL.30-live' &&
@@ -498,7 +492,7 @@ dead_rows
 
 run_lane noreopen \
   'lane_begin TL' \
-  'beat TL.34-gone Z1; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
+  'beat TL.34-gone; target_live TL_CHAT; requires && pass "MUST-NOT-HAPPEN"' \
   'lane_end'
 if printf '%s' "$OUT" | grep -q 'TL blocked TL.34-gone — blocked-by' &&
   grep -q 'reopen: no re-open command declared' "$LANE_DIR/TL.log" 2>/dev/null; then
@@ -523,7 +517,7 @@ dead_rows
 
 run_lane waits \
   'lane_begin TL' \
-  'beat TL.40-wait Z1; target_live TL_CHAT; t0=$SECONDS; wait_last TL_CHAT NEVER 300; rc=$?;
+  'beat TL.40-wait; target_live TL_CHAT; t0=$SECONDS; wait_last TL_CHAT NEVER 300; rc=$?;
    printf "WAITLAST rc=%s elapsed=%s why=%s\n" "$rc" "$((SECONDS - t0))" "$LANE_WAIT_WHY"
    t0=$SECONDS; wait_for 300 false; rc=$?
    printf "WAITFOR rc=%s elapsed=%s why=%s\n" "$rc" "$((SECONDS - t0))" "$LANE_WAIT_WHY"
@@ -543,7 +537,7 @@ fi
 live_rows
 run_lane waittimeout \
   'lane_begin TL' \
-  'beat TL.41-timeout Z1; target_live TL_CHAT; wait_last TL_CHAT NEVER 1; rc=$?;
+  'beat TL.41-timeout; target_live TL_CHAT; wait_last TL_CHAT NEVER 1; rc=$?;
    printf "TIMEOUT rc=%s why=%s\n" "$rc" "$LANE_WAIT_WHY"; pass "x"' \
   'lane_end'
 if printf '%s\n' "$OUT" | grep -qE '^TIMEOUT rc=1 why=.*(timed out|1s)'; then
@@ -557,7 +551,7 @@ dead_rows
 
 run_lane blockedwhy \
   'lane_begin TL' \
-  'beat TL.42-seats Z1; blocked "seats cc:1" "no second seat in this run"' \
+  'beat TL.42-seats; blocked "seats cc:1" "no second seat in this run"' \
   'lane_end'
 if printf '%s' "$OUT" | grep -q 'TL blocked TL.42-seats — blocked-by seats cc:1 — no second seat in this run'; then
   ok "blocked: a reason travels beside the blocker ('no second seat in this run')"
@@ -573,7 +567,7 @@ mkdir -p "$T/tmuxdir"
 export TMUX_TMPDIR="$T/tmuxdir"
 run_lane evidence \
   'lane_begin TL' \
-  'beat TL.50-dead Z1; target TL_CHAT; fail "nothing answered"' \
+  'beat TL.50-dead; target TL_CHAT; fail "nothing answered"' \
   'lane_end'
 unset TMUX_TMPDIR
 log="$(cat "$LANE_DIR/TL.log" 2>/dev/null)"
@@ -603,8 +597,8 @@ fi
 
 run_lane allblocked \
   'lane_begin TL' \
-  'beat TL.60-b1 Z1; blocked "seats cc:1" "no second seat in this run"' \
-  'beat TL.61-b2 Z2; blocked "seats cc:1" "no second seat in this run"' \
+  'beat TL.60-b1; blocked "seats cc:1" "no second seat in this run"' \
+  'beat TL.61-b2; blocked "seats cc:1" "no second seat in this run"' \
   'lane_end'
 if [ "$RC" -ne 0 ] && printf '%s' "$OUT" | grep -qF "TL ✗ ALL-BLOCKED — every one of this lane's 2 beat(s) was blocked"; then
   ok "F6: an all-blocked lane is a named red (ALL-BLOCKED), naming its beat count"
@@ -616,8 +610,8 @@ fi
 # clean of the ALL-BLOCKED line — the guard is "every beat", never "any beat".
 run_lane mixedblocked \
   'lane_begin TL' \
-  'beat TL.62-ok Z1; pass "held"' \
-  'beat TL.63-blocked Z2; blocked "seats cc:1" "no second seat in this run"' \
+  'beat TL.62-ok; pass "held"' \
+  'beat TL.63-blocked; blocked "seats cc:1" "no second seat in this run"' \
   'lane_end'
 if ! printf '%s' "$OUT" | grep -q 'ALL-BLOCKED'; then
   ok "F6: a lane with at least one non-blocked beat is never ALL-BLOCKED"
@@ -638,7 +632,7 @@ READLOG="$T/pfm-readfail.jsonl"
 printf '{"level":"info","msg":"before the lane"}\n' >"$READLOG"
 LANE_PFM_LOG_FIXTURE="$READLOG" run_lane logreadfail \
   'lane_begin TL' \
-  "beat TL.25-unreadable Z1; PATH='$FAILBIN':\$PATH; pass 'the assertion held'" \
+  "beat TL.25-unreadable; PATH='$FAILBIN':\$PATH; pass 'the assertion held'" \
   'lane_end'
 if [ "$RC" -ne 0 ] &&
   printf '%s' "$OUT" | grep -q 'activity-log sweep FAILED' &&

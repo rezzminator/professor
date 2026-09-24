@@ -10,7 +10,6 @@
 # Wave 8 deletes each entry in the commit that fixes its gap.
 gaps:
   - beat: O2.09-harvester
-    landscape_id: H9
     why: "the harvestpy pinned Python conversion sidecar has no verified provisioning path on linux-arm64"
     owner: GOD
     date: 2026-09-17

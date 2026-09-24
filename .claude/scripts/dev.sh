@@ -219,10 +219,10 @@ act_templates() { # the shipped product: mechanical gates, no build
       # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
       # broken state is `CLONES ERROR` and rc 2, never a PASS.
       run "templates: clone ratchet (jscpd)" -- bash "$REPO_ROOT/scripts/clone-check.sh"
-      # The lane↔landscape map gate (infra/fence/lanes/check-map.sh). --no-derive
+      # The lane↔command map gate (infra/fence/lanes/check-map.sh). --no-derive
       # skips the command/tool surface derive, which needs a built pfm; its own
       # broken state is a named red line and rc 1/2, never a silent pass.
-      run "templates: lane↔landscape map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
+      run "templates: lane↔command map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
       run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
       head_ "templates — leak gate"
       # EVERY tracked file in this repo is published, so the changed set is the

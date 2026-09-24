@@ -20,7 +20,7 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 ## Lanes and registries
 
-- A new command, MCP tool or fleet capability lands with its landscape row (`docs/dev/testing/landscape.md`), its beat (`infra/fence/lanes/beats.md` and `infra/fence/lanes/<lane>.sh`) and its map row (`infra/fence/lanes/map.tsv`) in the same commit; the recipe is `docs/dev/testing/lanes.md` § Extend it.
+- A new command or MCP tool lands with its beat (`infra/fence/lanes/beats.md` and `infra/fence/lanes/<lane>.sh`) and its map row (`infra/fence/lanes/map.tsv`, `name · lane · beat`) in the same commit; a fleet capability lands with its beat; the recipe is `docs/dev/testing/lanes.md` § Extend it.
 - callmeter: the store is real SQLite under `t.TempDir()`, never a mock; hook payload fixtures are the captured Claude Code payloads (`pfm/internal/hookentry/testdata/callmeter/`) with every path rewritten to `/tmp/demo-proj/…`; the Python parser tests run the fence's real `python3`.
 - One editor per flight: `infra/fence/lanes/lib.sh`, `run.sh`, `map.tsv`, `beats.md`, `known-gaps.yml`, `pfm/scripts/known-skips.tsv`.
 
@@ -66,4 +66,4 @@ Fixed headings, fixed order. Detail lives in `pfm/CLAUDE.md` § Testing Rules, `
 
 - A model's words: a beat asserts from pfm's own report or the pane.
 - A value one run printed about its data (a count, an id).
-- A removed command, flag or tool takes its tests, its landscape row, its beat and its map row with it, never inverted into an absence assertion.
+- A removed command, flag or tool takes its tests, its beat and its map row with it, never inverted into an absence assertion.

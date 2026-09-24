@@ -15,9 +15,8 @@
 # pfm wrote) or from the pane, never from a model's prose: where a chat is the
 # STIMULUS (M.14, M.15) the evidence is the fleet's own record of what the tool
 # did (a rename in `pfm ls --tsv`, a document in the harvester's cache), and the
-# model's word is only the needle a wait ends on. Beat ids and their landscape
-# ids are the contract in beats.md and map.tsv — check-map.sh fails when this
-# file and those disagree.
+# model's word is only the needle a wait ends on. Beat ids are the contract in
+# beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
 # Cost: one Claude seat for the lane's own chat plus one `chat_new` spawn and
 # one `chat_open`, one Codex home for the HTTP wiring proof, and — cross-lane —
@@ -326,7 +325,7 @@ INSTALL_OUT=""
 
 # ─── M.01 — Claude registration: chat stdio + harvester HTTP, per account ───
 
-beat M.01-register-claude M30 M31 M32 M33
+beat M.01-register-claude
 spends none
 bad=""
 # The registry pfm itself names for this seat (doctor's row), never a guessed path.
@@ -375,7 +374,7 @@ fi
 
 # ─── M.02 — Codex registration: HTTP-only, fenced, foreign entry preserved ──
 
-beat M.02-register-codex M34 M35
+beat M.02-register-codex
 spends none
 bad=""
 TOML="$CODEX_HOME/config.toml"
@@ -417,13 +416,13 @@ fi
 # assert_opencode_mcp_registered — this lane and E3 must never drift apart on
 # what "MCP registered" means.
 
-beat M.03-register-opencode M36
+beat M.03-register-opencode
 spends none
 assert_opencode_mcp_registered "$PFM_BIN" "$PORT"
 
 # ─── M.04 — doctor: registration classes, Codex + project cutover, daemon ───
 
-beat M.04-doctor-mcp M37 M38 M39
+beat M.04-doctor-mcp
 spends none
 bad=""
 doctor_out="$(pfm doctor 2>&1)"
@@ -491,7 +490,7 @@ fi
 
 # ─── M.05 — the daemon: one loopback port, health, exit-75 restart ──────────
 
-beat M.05-daemon-core M40 M41 M42 M43 M44 M45 M46
+beat M.05-daemon-core
 spends none
 bad=""
 status0="$(daemon_status)"
@@ -655,7 +654,7 @@ fi
 
 # ─── M.06 — service units: systemd staged, the absent manager named ─────────
 
-beat M.06-daemon-units M47 M48
+beat M.06-daemon-units
 spends none
 bad=""
 UNIT="$MANAGED/systemd/pfm-mcp.service"
@@ -702,7 +701,7 @@ fi
 
 # ─── M.07 — the stdio transports ────────────────────────────────────────────
 
-beat M.07-stdio-transports M49 M50 M51
+beat M.07-stdio-transports
 spends none
 bad=""
 # M49 — `pfm mcp chat serve`: the full roster over stdio, and whoami resolving
@@ -769,7 +768,7 @@ fi
 
 # ─── M.08 — the `pfm mcp` CLI surface ───────────────────────────────────────
 
-beat M.08-mcp-cli M52 M53 M54 M55
+beat M.08-mcp-cli
 spends none
 bad=""
 # M52 — bare `pfm mcp` IS the chat stdio server
@@ -824,7 +823,7 @@ fi
 
 # ─── M.09 — the chat fleet server's tools, driven directly ──────────────────
 
-beat M.09-chat-tools M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14
+beat M.09-chat-tools
 spends "cc:$SEAT"
 target_live "$CHAT"
 # every refusal this beat provokes on purpose (chat_resolve/chat_inject
@@ -1098,7 +1097,7 @@ fi
 
 # ─── M.10 — open / name / kill / unkill / save / issue_servicedesk ──────────
 
-beat M.10-chat-tools-gap M15 M16 M17 M18 M19 M20
+beat M.10-chat-tools-gap
 spends "cc:$SEAT"
 target "$NEW_CHAT"
 # the validation refusals this beat provokes on purpose, declared before the
@@ -1248,7 +1247,7 @@ fi
 
 # ─── M.11 — the harvester server's tools, on a real small document ──────────
 
-beat M.11-harvester-tools M21 M22 M23 M24 M25 M26 M27 M28 M29 H13
+beat M.11-harvester-tools
 spends none
 bad=""
 notes=""
@@ -1476,7 +1475,7 @@ fi
 
 # ─── M.12 — the cache and the search gate back the tools ────────────────────
 
-beat M.12-harvester-cache-gate H10 H11
+beat M.12-harvester-cache-gate
 spends none
 if requires M.11-harvester-tools; then
   bad=""
@@ -1519,7 +1518,7 @@ fi
 
 # ─── M.13 — a dropped seat leaves the daemon's roster ───────────────────────
 
-beat M.13-dropped-seat-roster I38
+beat M.13-dropped-seat-roster
 spends none
 # the roster/effort refusals this beat provokes on purpose from the spare seat.
 expect-log 'is not in the configured roster'
@@ -1652,7 +1651,7 @@ fi
 
 # ─── M.15 — cross-lane: live chats survive the daemon restart ───────────────
 
-beat M.15-live-chats-survive-daemon-restart M31 M34
+beat M.15-live-chats-survive-daemon-restart
 spends "cc:$SEAT+cx"
 target_live "$E1_CHAT"
 if [ -n "$E1_WHY" ] && ! live_chat "$E1_CHAT"; then

@@ -235,7 +235,7 @@ A capture hook, loaded only through `--settings` into headless sessions in a scr
 | The store and reports | `pfm/internal/callmeter/` and its `cmdparse/`, `report/`, `command/` packages; `pfm/cmd/pfm/main.go` | schema, parser, the CLI `report` |
 | The testing law | `.claude/commands/pfm-testing-manual.md` | the store is real SQLite in tests; payload fixtures are the captured ones |
 | The surface reference | `docs/dev/pfm-surface.md` | the `callmeter` and `internal callmeter` command rows |
-| The lane map | `docs/dev/testing/landscape.md`, `infra/fence/lanes/` | the landscape row for callmeter, its beat, and its map row |
+| The lane map | `infra/fence/lanes/` | callmeter's beat and its map row |
 | The test timing budgets | `pfm/.testtiming.yml` (format in `docs/dev/testing/timing.md`) | each callmeter package's timing budget |
 
 ## Open items

@@ -1,43 +1,28 @@
 #!/usr/bin/env bash
-# check-map.sh — the map gate: the landscape, the beats and pfm's own surface
-# must agree, or the coverage claim is a coincidence.
+# check-map.sh — the map gate: every pfm command and MCP tool has a beat that
+# tests it, and every beat map.tsv names exists.
 #
 #   check-map.sh [--pfm PATH] [--no-derive]
 #
-# Four checks, each naming its own broken state:
-#   0. docs/dev/testing/landscape.md is machine-read: line 1 carries
-#      `<!-- rumdl-disable -->`, the inline marker rumdl honours in `fmt` as well
-#      as `check`, so the format-md hook and a bare `rumdl fmt` both leave its
-#      bare `<id> ·` rows alone (measured 2026-09-18: unmarked, 429 rows reflowed
-#      into 27). With rumdl on PATH the check also formats a COPY and demands
-#      byte-identity; without it, that half is a named NOT-PERFORMED line.
-#      → `LANDSCAPE-FORMATTABLE` (no marker) / `LANDSCAPE-MUTABLE` (rumdl
-#        changed the copy anyway) / `LANDSCAPE-FMT-FAILED` (rumdl would not run)
-#   1. every id in docs/dev/testing/landscape.md has a row in map.tsv
-#      → `UNMAPPED-ID: <id>`
-#   2. BOTH directions between map.tsv and a written lane script agree, or the
-#      gate is a coincidence detector that can only ever look one way:
-#        a. every beat in map.tsv exists in its lane script. A lane that is not
-#           written yet is a named line (`lane F: NOT WRITTEN (12 beats
-#           pending)`) and is tolerated ONLY while pending.txt lists it — and
-#           pending.txt must shrink to empty: a pending lane whose script
-#           exists is a red row.
-#           → `MISSING-BEAT: <beat>` / `PENDING-STALE: <lane>` /
-#             `UNDECLARED-LANE: <lane>`
-#        b. every `beat <ID>` line in a WRITTEN lane script has a map.tsv row —
-#           unless beats.md marks that beat's landscape ids `(none)`, in which
-#           case the beat is deliberately code-only and this check leaves it
-#           alone. A beat added with real landscape ids but no map.tsv row is
-#           otherwise invisible to direction (a) forever, since (a) only ever
-#           walks FROM the map — this is the check that would have caught it.
-#           → `UNMAPPED-BEAT: <beat>`
-#      BROKEN STATE: a beat with landscape ids and no map row prints clean
-#      here today only if it slips past both a and b; b existing at all is
-#      what keeps that from being silent.
-#   3. machine-derived, so the doc cannot drift: every command in the built
-#      `pfm --help` tree and every tool name served by pfm's two MCP servers is
-#      carried by a MAPPED landscape row.
-#      → `UNMAPPED-COMMAND: <name>` / `UNMAPPED-TOOL: <name>`
+# map.tsv is `name · lane · beat`: a command (`pfm config show`,
+# `pfm chat new`, `pfm internal git-guard`) or an MCP tool (`chat_inject`,
+# `read`), the lane script that tests it and the beat inside it. A beat that
+# tests no command (an install behaviour, a fleet capability) needs no row.
+#
+# Two checks, each naming its own broken state:
+#   1. every beat in map.tsv exists in its lane script. A lane that is not
+#      written yet is a named line (`lane F: NOT WRITTEN (12 beats pending)`)
+#      and is tolerated ONLY while pending.txt lists it — and pending.txt must
+#      shrink to empty: a pending lane whose script exists is a red row.
+#      → `MISSING-BEAT: <beat>` / `PENDING-STALE: <lane>` / `UNDECLARED-LANE: <lane>`
+#   2. machine-derived, so the map cannot drift from pfm: every command in the
+#      built `pfm --help` tree and every tool served by pfm's two MCP servers
+#      has a map.tsv row, and every row names a command or tool pfm still has.
+#      → `UNMAPPED-COMMAND: <name>` / `UNMAPPED-TOOL: <name>` /
+#        `STALE-NAME: <name>` (a row for a command or tool pfm no longer serves)
+#      A command row absent from the help tree (a `pfm internal` verb, a
+#      hidden verb or alias) is asked of pfm itself: stale only when pfm
+#      answers `unknown command` / `unknown subcommand`.
 #
 # The derive runs the REAL binary in a jail ($PFM_HOME and friends point at a
 # scratch dir, the config is a temp file with both servers enabled), so it never
@@ -48,23 +33,21 @@
 # BROKEN STATE: a derive that cannot run — no pfm binary, no jq, a server that
 # answers nothing — prints `DERIVE-FAILED: <why>` and exits 2. It never prints a
 # clean verdict for a check it could not perform. `--no-derive` prints
-# `derive: NOT RUN` and keeps the map checks; exit 1 on any map finding, 2 on a
-# failed derive (failing to look outranks a finding), 0 only when every check ran.
+# `derive: NOT RUN` and keeps check 1; exit 1 on any map finding, 2 on a
+# failed derive or an unreadable map (failing to look outranks a finding), 0
+# only when every check ran.
 set -uo pipefail
 
 HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-ROOT="$(cd -- "$HERE/../../.." && pwd -P)"
-LANDSCAPE="${LANE_LANDSCAPE:-$ROOT/docs/dev/testing/landscape.md}"
 MAP="$HERE/map.tsv"
 PENDING="$HERE/pending.txt"
-BEATS="$HERE/beats.md"
 PFM="" DERIVE=1
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --pfm) PFM="$2"; shift 2 ;;
     --no-derive) DERIVE=0; shift ;;
-    -h|--help) sed -n '2,6p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,5p' "$0"; exit 0 ;;
     *) echo "usage: check-map.sh [--pfm PATH] [--no-derive]" >&2; exit 2 ;;
   esac
 done
@@ -74,69 +57,24 @@ red() { printf 'check-map: ✗ %s\n' "$1" >&2; map_bad=$((map_bad + 1)); }
 say() { printf 'check-map: %s\n' "$1"; }
 derive_fail() { printf 'check-map: DERIVE-FAILED: %s\n' "$1" >&2; derive_failed=1; }
 
-[ -f "$LANDSCAPE" ] || { echo "check-map: LANDSCAPE-UNREADABLE — $LANDSCAPE does not exist" >&2; exit 2; }
 [ -f "$MAP" ] || { echo "check-map: MAP-UNREADABLE — $MAP does not exist" >&2; exit 2; }
-
-# ─── 0. the landscape is machine-read: a formatter leaves it byte-identical ─
-
-MARKER='<!-- rumdl-disable -->'
-if [ "$(head -n 1 "$LANDSCAPE")" != "$MARKER" ]; then
-  red "LANDSCAPE-FORMATTABLE: line 1 of $(basename "$LANDSCAPE") is not '$MARKER' — a markdown formatter would reflow its id rows into paragraphs"
-elif command -v rumdl >/dev/null 2>&1; then
-  # rumdl reads its config from the CURRENT directory: the copy sits beside a
-  # copy of the repo's own policy, so this run judges the real rules.
-  scratch="$(mktemp -d "${TMPDIR:-/tmp}/check-map-fmt.XXXXXX")"
-  cp "$LANDSCAPE" "$scratch/landscape.md"
-  [ -f "$ROOT/.rumdl.toml" ] && cp "$ROOT/.rumdl.toml" "$scratch/.rumdl.toml"
-  if ! (cd "$scratch" && rumdl fmt landscape.md >/dev/null 2>&1); then
-    derive_fail "LANDSCAPE-FMT-FAILED: rumdl fmt exited non-zero on a copy of $(basename "$LANDSCAPE") — byte-stability could not be judged"
-  elif ! cmp -s "$LANDSCAPE" "$scratch/landscape.md"; then
-    red "LANDSCAPE-MUTABLE: rumdl fmt changed $(diff "$LANDSCAPE" "$scratch/landscape.md" | grep -c '^[<>]') line(s) of $(basename "$LANDSCAPE") despite the marker"
-  else
-    say "landscape machine-read: marker on line 1, byte-stable under rumdl fmt"
-  fi
-  rm -rf -- "$scratch"
-else
-  say "landscape machine-read: marker on line 1; rumdl not on PATH — the formatter run itself was NOT PERFORMED"
-fi
-
-# ─── 1. every landscape id is mapped ────────────────────────────────────────
-
-ids="$(grep -oE '^[A-Z][0-9]+ ·' "$LANDSCAPE" | sed 's/ ·$//' | sort -u)"
-n_ids="$(printf '%s\n' "$ids" | grep -c .)"
-[ "$n_ids" -gt 0 ] || { echo "check-map: LANDSCAPE-UNREADABLE — no '<id> ·' rows in $LANDSCAPE (the enumerator found nothing to check)" >&2; exit 2; }
-unmapped=0
-for id in $ids; do
-  awk -F'\t' -v i="$id" '$1 == i { f = 1 } END { exit(f ? 0 : 1) }' "$MAP" && continue
-  red "UNMAPPED-ID: $id has no row in $(basename "$MAP")"
-  unmapped=$((unmapped + 1))
+[ "$(head -n 1 "$MAP")" = "$(printf 'name\tlane\tbeat')" ] ||
+  { echo "check-map: MAP-UNREADABLE — line 1 of $(basename "$MAP") is not the 'name<TAB>lane<TAB>beat' header" >&2; exit 2; }
+n_rows="$(awk -F'\t' 'NR > 1 && NF == 3' "$MAP" | grep -c .)"
+[ "$n_rows" -gt 0 ] || { echo "check-map: MAP-UNREADABLE — $(basename "$MAP") has no 'name<TAB>lane<TAB>beat' rows (the enumerator found nothing to check)" >&2; exit 2; }
+awk -F'\t' 'NR > 1 && NF != 3 { printf "%d\n", NR }' "$MAP" | while read -r n; do
+  printf 'check-map: ✗ MALFORMED-ROW: line %s of %s is not three tab-separated fields\n' "$n" "$(basename "$MAP")" >&2
 done
-say "$((n_ids - unmapped))/$n_ids landscape ids mapped"
+n_malformed="$(awk -F'\t' 'NR > 1 && NF != 3' "$MAP" | grep -c .)"
+map_bad=$((map_bad + n_malformed))
+say "$n_rows map rows"
 
-# ─── 2. every mapped beat exists (or its lane is declared pending) ──────────
+# ─── 1. every mapped beat exists (or its lane is declared pending) ──────────
 
 written_lane() { [ -f "$HERE/$1.sh" ]; }
 pending_lane() { grep -qx "$1" "$PENDING" 2>/dev/null; }
 
-lanes_in_map="$(awk -F'\t' 'NR > 1 { print $2 }' "$MAP" | sort -u)"
-# The lane universe is the scripts on disk UNION the map — never the map
-# alone, or a lane script whose rows a merge-conflict or a rename dropped from
-# map.tsv is simply never visited by the loop below and exits clean.
-NON_LANE_SCRIPTS=" lib.sh run.sh container.sh root.sh creds.sh check-map.sh "
-lanes_on_disk="$(
-  for f in "$HERE"/*.sh; do
-    [ -f "$f" ] || continue
-    b="$(basename "$f")"
-    case "$NON_LANE_SCRIPTS" in *" $b "*) continue ;; esac
-    printf '%s\n' "${b%.sh}"
-  done | sort -u
-)"
-lanes_union="$(printf '%s\n%s\n' "$lanes_in_map" "$lanes_on_disk" | sort -u | sed '/^$/d')"
-for lane in $lanes_union; do
-  if ! printf '%s\n' "$lanes_in_map" | grep -qxF "$lane"; then
-    red "ON-DISK-LANE-UNMAPPED: $lane.sh exists on disk but $(basename "$MAP") carries no row for lane $lane at all"
-    continue
-  fi
+for lane in $(awk -F'\t' 'NR > 1 && NF == 3 { print $2 }' "$MAP" | sort -u); do
   n_beats="$(awk -F'\t' -v l="$lane" '$2 == l { print $3 }' "$MAP" | sort -u | grep -c .)"
   if written_lane "$lane"; then
     if pending_lane "$lane"; then
@@ -149,24 +87,6 @@ for lane in $lanes_union; do
       missing=$((missing + 1))
     done
     say "lane $lane: written · $((n_beats - missing))/$n_beats mapped beats present"
-    # direction (b): every `beat <ID>` in the script has a map.tsv row, unless
-    # beats.md marks that beat's landscape ids `(none)` — a beat added with
-    # real ids but no row is otherwise invisible to direction (a) above.
-    unmapped_beats=0
-    for b in $(grep -oE '^[[:space:]]*beat [A-Za-z0-9_.-]+' "$HERE/$lane.sh" | awk '{ print $2 }' | sort -u); do
-      awk -F'\t' -v l="$lane" -v b="$b" '$2 == l && $3 == b { f = 1 } END { exit(f ? 0 : 1) }' "$MAP" && continue
-      # The ids field is the 4th " · "-separated segment of the row
-      # (backtick-id · description · spends X · ids …) — read BY POSITION,
-      # never as "the last segment": a row with a trailing annotation after
-      # its ids (O2.01b's `blocked wave7-mock-engine` note) has a 5th
-      # segment, and the last-segment form would read the annotation as the
-      # ids field instead.
-      ids_field="$(grep -E "^- \`$b\`" "$BEATS" | awk -F' · ' '{ print $4 }')"
-      [ "$ids_field" = "(none)" ] && continue
-      red "UNMAPPED-BEAT: $b is in $lane.sh with no row in $(basename "$MAP") (beats.md does not mark it (none))"
-      unmapped_beats=$((unmapped_beats + 1))
-    done
-    say "lane $lane: reverse (script → map) · $unmapped_beats beat(s) with no map row and no (none) in $(basename "$BEATS")"
   elif pending_lane "$lane"; then
     say "lane $lane: NOT WRITTEN ($n_beats beats pending) — declared in $(basename "$PENDING")"
   else
@@ -175,20 +95,14 @@ for lane in $lanes_union; do
 done
 if [ -f "$PENDING" ]; then
   n_pending="$(grep -c . "$PENDING" || true)"
-  say "pending lanes: ${n_pending} — this list must reach 0 (spec build order step 2)"
+  say "pending lanes: ${n_pending} — this list must reach 0"
 fi
 
-# ─── 3. the machine-derived surface ─────────────────────────────────────────
+# ─── 2. the machine-derived surface ─────────────────────────────────────────
 
-# landscape_carries <regex> — 0 when a MAPPED landscape row matches
-landscape_carries() {
-  local row id
-  while IFS= read -r row; do
-    id="${row%% *}"
-    awk -F'\t' -v i="$id" '$1 == i { f = 1 } END { exit(f ? 0 : 1) }' "$MAP" && return 0
-  done < <(grep -E "$1" "$LANDSCAPE" | grep -E '^[A-Z][0-9]+ ·')
-  return 1
-}
+names="$(awk -F'\t' 'NR > 1 && NF == 3 { print $1 }' "$MAP" | sort -u)"
+# mapped <name> — 0 when a row names it or one of its subcommands
+mapped() { printf '%s\n' "$names" | grep -qE "^$1( |$)"; }
 
 if [ "$DERIVE" -eq 0 ]; then
   say "derive: NOT RUN (--no-derive) — pfm's command tree and MCP tool surface were NOT checked against the map"
@@ -204,6 +118,8 @@ else
     cat >"$JAIL/pfm.config.json" <<'JSON'
 {"version": 2, "mcp": {"servers": {"chat": {"enabled": true}, "harvester": {"enabled": true}}}}
 JSON
+    # A search backend configured, so the harvester serves search_web too.
+    printf '%s\n' '{"search": {"searxngURL": "http://127.0.0.1:9"}}' >"$JAIL/harvester.config.json"
     # Jailed: the derive must never touch the host's fleet, socket dir or tmux.
     pfm_jailed() {
       env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" PFM_FLEET_DB="$JAIL/fleet.db" \
@@ -211,7 +127,13 @@ JSON
         "$PFM" --config "$JAIL/pfm.config.json" "$@"
     }
     with_timeout() { if command -v timeout >/dev/null; then timeout "$@"; else shift; "$@"; fi; }
+    pfm_jailed_timed() {
+      with_timeout 10 env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" PFM_FLEET_DB="$JAIL/fleet.db" \
+        PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
+        "$PFM" --config "$JAIL/pfm.config.json" "$@"
+    }
 
+    cmds_ok=0
     top_help="$(pfm_jailed --help 2>&1)"
     chat_help="$(pfm_jailed chat --help 2>&1)"
     cmds="$(printf '%s\n' "$top_help" | awk '/^  [a-z]/ { print $1 }' | sort -u)"
@@ -221,19 +143,19 @@ JSON
     if [ "$n_cmds" -lt 5 ] || [ "$n_subs" -lt 5 ]; then
       derive_fail "pfm --help produced $n_cmds command(s) and pfm chat --help $n_subs subcommand(s) — the help tree could not be read: $(printf '%s' "$top_help" | tr '\n' ' ' | cut -c1-200)"
     else
+      cmds_ok=1
       bad_cmds=0
       for c in $cmds; do
-        landscape_carries "\`pfm ${c}[ \`]" && continue
-        red "UNMAPPED-COMMAND: pfm $c — no MAPPED landscape row names it"
+        mapped "pfm $c" && continue
+        red "UNMAPPED-COMMAND: pfm $c — no row in $(basename "$MAP") names it"
         bad_cmds=$((bad_cmds + 1))
       done
       for c in $subs; do
-        landscape_carries "\`pfm chat ${c}[ \`]" && continue
-        red "UNMAPPED-COMMAND: pfm chat $c — no MAPPED landscape row names it"
+        mapped "pfm chat $c" && continue
+        red "UNMAPPED-COMMAND: pfm chat $c — no row in $(basename "$MAP") names it"
         bad_cmds=$((bad_cmds + 1))
       done
       say "derived commands: $n_cmds top-level + $n_subs chat subcommands · $bad_cmds unmapped"
-      say "derive NOTE: \`pfm internal --help\` is not a registered subcommand (it answers 'unknown subcommand'), so the internal verbs are NOT machine-derived here — they are carried by landscape rows X20-X40"
     fi
 
     # tools/list over each server's stdio transport: the served surface itself.
@@ -255,21 +177,55 @@ JSON
       printf '%s\n' "$out" >"$JAIL/$1.frames"
       printf '%s\n' "$out" | jq -r 'select(.id == 2) | .result.tools[]?.name' 2>/dev/null
     }
+    tools_ok=1 all_tools=""
     for server in chat harvester; do
       tools="$(tools_of "$server")"
       n_tools="$(printf '%s\n' "$tools" | grep -c .)"
       if [ "$n_tools" -eq 0 ]; then
         derive_fail "the $server MCP server listed no tool over stdio — stderr: $(tr '\n' ' ' <"$JAIL/$server.err" 2>/dev/null | cut -c1-200); frames it did answer: $(tr '\n' ' ' <"$JAIL/$server.frames" 2>/dev/null | cut -c1-200)"
+        tools_ok=0
         continue
       fi
+      all_tools="$all_tools $tools"
       bad_tools=0
       for t in $tools; do
-        landscape_carries "\`$t\`" && continue
-        red "UNMAPPED-TOOL: $server/$t — no MAPPED landscape row names it"
+        mapped "$t" && continue
+        red "UNMAPPED-TOOL: $server/$t — no row in $(basename "$MAP") names it"
         bad_tools=$((bad_tools + 1))
       done
       say "derived $server tools: $n_tools · $bad_tools unmapped"
     done
+
+    # The reverse: a row for a command or tool pfm no longer serves is stale —
+    # a removed command takes its map row with it. Judged only against a
+    # surface that was actually read, never against a failed derive.
+    if [ "$cmds_ok" -eq 1 ] && [ "$tools_ok" -eq 1 ]; then
+      stale=0 hidden=0
+      for n in $(printf '%s\n' "$names" | tr ' ' '~'); do
+        n="${n//\~/ }"
+        set -- $n
+        case "$1 ${2:-}" in
+          "pfm chat") [ -n "${3:-}" ] && printf '%s\n' "$subs" | grep -qxF "$3" && continue ;;
+          "pfm internal") ;;
+          pfm\ *) [ $# -eq 2 ] && printf '%s\n' "$cmds" | grep -qxF "$2" && continue ;;
+          *) [ $# -eq 1 ] && printf '%s\n' $all_tools | grep -qxF "$1" && continue ;;
+        esac
+        # Outside the help tree (an internal verb, a hidden verb or alias):
+        # pfm's own dispatcher decides; only its "unknown" answer is stale.
+        if [ "$1" = pfm ] && [ $# -ge 2 ]; then
+          shift
+          # Captured first: `grep -q` quitting early would SIGPIPE the writer,
+          # and pipefail would read that as "not unknown".
+          answer="$(pfm_jailed_timed "$@" --help </dev/null 2>&1)"
+          if ! printf '%s\n' "$answer" | grep -qE 'unknown (sub)?command'; then
+            hidden=$((hidden + 1)); continue
+          fi
+        fi
+        red "STALE-NAME: $n — a $(basename "$MAP") row names a command or tool pfm does not serve"
+        stale=$((stale + 1))
+      done
+      say "map names: $(printf '%s\n' "$names" | grep -c .) · $stale stale · $hidden judged by pfm's dispatcher (verbs the help tree does not list)"
+    fi
   fi
 fi
 
@@ -281,5 +237,9 @@ if [ "$map_bad" -ne 0 ]; then
   echo "check-map: ✗ $map_bad finding(s)" >&2
   exit 1
 fi
-say "clean — landscape machine-read, every landscape id mapped, every mapped beat present or its lane declared pending, every coded beat mapped or marked (none), every derived command and tool carried"
+if [ "$DERIVE" -eq 0 ]; then
+  say "clean — every mapped beat present or its lane declared pending; the derived surface was NOT checked"
+else
+  say "clean — every mapped beat present or its lane declared pending, every derived command and tool mapped, no stale row"
+fi
 exit 0

@@ -19,7 +19,7 @@ Development must never destabilize the live box: code changes happen in a git wo
 
 The same Dockerfile's `pfm-sim` target is the real-simulation fence: pfm-dev plus Google Chrome, which runs headless only, and 2 GB of shared memory. `sim-entry.sh` builds and installs `pfm` from the worktree with the harvester's browser rung on before running the command. Harvester state persists per worktree in `pfm-sim-harvest-<worktree>-<cksum>`, and `dev.sh iso sim-reset` drops it.
 
-`fence/lanes/` is the Tier B live suite over the same image: `run.sh` starts ONE container from the hash-keyed root image `root.sh` commits and runs the selected lanes in canonical order inside it (`O1 → E1 → E2 → E3 → F → M → A → O2`), each beat asserting from pfm's own reports and the pane. `lib.sh` is the beat library, `creds.sh` stages the seats, `check-map.sh` is the coverage gate over `docs/dev/testing/landscape.md`, `known-gaps.yml` + `budgets.yml` the ledgers, `tests/` the harness's own bash tests. How to run one lane, read a red row and extend the suite: `docs/dev/testing/lanes.md`.
+`fence/lanes/` is the Tier B live suite over the same image: `run.sh` starts ONE container from the hash-keyed root image `root.sh` commits and runs the selected lanes in canonical order inside it (`O1 → E1 → E2 → E3 → F → M → A → O2`), each beat asserting from pfm's own reports and the pane. `lib.sh` is the beat library, `creds.sh` stages the seats, `check-map.sh` the coverage gate (every pfm command and MCP tool mapped to a beat in `map.tsv`), `known-gaps.yml` + `budgets.yml` the ledgers, `tests/` the harness's own bash tests. How to run one lane, read a red row and extend the suite: `docs/dev/testing/lanes.md`.
 
 Entry point — from the worktree checkout:
 

@@ -129,7 +129,7 @@ lane_require_seat_ops() {
 
 LANE_ID="" LANE_LOG="" LANE_TIMELINE="" LANE_T0=0
 LANE_BEATS=0 LANE_FAILED=0 LANE_KNOWN=0 LANE_BLOCKED=0
-LANE_CUR="" LANE_CUR_T0=0 LANE_CUR_IDS="" LANE_CUR_SEAT="none" LANE_CUR_OFFSET=""
+LANE_CUR="" LANE_CUR_T0=0 LANE_CUR_SEAT="none" LANE_CUR_OFFSET=""
 # The offset the NEXT beat() must start its slice from instead of re-stamping
 # to the log's current end — set by requires() right before _lane_reopen runs,
 # so the re-open's own log writes land inside the following beat's slice
@@ -342,7 +342,7 @@ lane_begin() { # lane_begin <lane-id>
   LANE_LOG="$LANE_OUT_DIR/$LANE_ID.log"
   LANE_TIMELINE="$LANE_OUT_DIR/$LANE_ID.timeline.tsv"
   : >"$LANE_LOG" || { echo "lane: OUT-DIR-UNWRITABLE — cannot write $LANE_LOG" >&2; exit 2; }
-  printf 'lane\tbeat\tt_plus_s\tverdict\tdur_s\tseat\tlandscape_ids\tdetail\n' >"$LANE_TIMELINE"
+  printf 'lane\tbeat\tt_plus_s\tverdict\tdur_s\tseat\tdetail\n' >"$LANE_TIMELINE"
   : >"$LANE_OUT_DIR/$LANE_ID.seats"
   LANE_T0="$(_lane_now)"
   LANE_BEATS=0 LANE_FAILED=0 LANE_KNOWN=0 LANE_BLOCKED=0 LANE_BAD_BEATS=""
@@ -370,10 +370,10 @@ lane_abort() { # lane_abort <why> — a prelude that could not build its precond
   exit 1
 }
 
-_lane_timeline_row() { # <beat> <verdict> <dur> <seat> <ids> <detail>
+_lane_timeline_row() { # <beat> <verdict> <dur> <seat> <detail>
   [ -n "$LANE_TIMELINE" ] || return 0
-  printf '%s\t%s\tt+%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "$LANE_ID" "$1" "$(( $(_lane_now) - LANE_T0 ))" "$2" "$3" "$4" "$5" "$(one_line "$6")" \
+  printf '%s\t%s\tt+%s\t%s\t%s\t%s\t%s\n' \
+    "$LANE_ID" "$1" "$(( $(_lane_now) - LANE_T0 ))" "$2" "$3" "$4" "$(one_line "$5")" \
     >>"$LANE_TIMELINE"
 }
 
@@ -404,9 +404,8 @@ lane_end() {
 
 # ─── beats ──────────────────────────────────────────────────────────────────
 
-beat() { # beat <id> [landscape-ids…]
+beat() { # beat <id>
   local id="$1"
-  shift
   if [ -n "$LANE_CUR" ]; then
     local orphan="$LANE_CUR"
     LANE_CUR=""
@@ -414,11 +413,10 @@ beat() { # beat <id> [landscape-ids…]
     LANE_FAILED=$((LANE_FAILED + 1))
     LANE_BAD_BEATS="$LANE_BAD_BEATS $orphan"
     _lane_say "$LANE_ID ✗ $orphan — beat left open (no pass/fail/known/blocked before $id)"
-    _lane_timeline_row "$orphan" "fail" 0 none "" "beat left open"
+    _lane_timeline_row "$orphan" "fail" 0 none "beat left open"
   fi
   LANE_CUR="$id"
   LANE_CUR_T0="$(_lane_now)"
-  LANE_CUR_IDS="$*"
   LANE_CUR_SEAT=none
   LANE_CUR_EXPECT=""
   LANE_TARGET=""
@@ -442,7 +440,7 @@ beat() { # beat <id> [landscape-ids…]
   else
     LANE_CUR_OFFSET=""
   fi
-  _lane_log_only "── $id · ids:${LANE_CUR_IDS:-none} · t+$(( LANE_CUR_T0 - LANE_T0 ))s"
+  _lane_log_only "── $id · t+$(( LANE_CUR_T0 - LANE_T0 ))s"
   return 0
 }
 
@@ -660,7 +658,7 @@ _lane_close() { # _lane_close <verdict> <glyph> <detail>
     blocked) LANE_BLOCKED=$((LANE_BLOCKED + 1)); LANE_BAD_BEATS="$LANE_BAD_BEATS $LANE_CUR" ;;
   esac
   _lane_say "$LANE_ID $glyph $LANE_CUR — $detail (${dur}s)"
-  _lane_timeline_row "$LANE_CUR" "$verdict" "$dur" "$LANE_CUR_SEAT" "$LANE_CUR_IDS" "$detail"
+  _lane_timeline_row "$LANE_CUR" "$verdict" "$dur" "$LANE_CUR_SEAT" "$detail"
   [ "$verdict" = fail ] && _lane_raw_dump
   LANE_CUR=""
   [ "$verdict" != fail ]

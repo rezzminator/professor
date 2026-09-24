@@ -1,6 +1,6 @@
 # Tier B lanes — the live DFS suite: one root, one container, lanes in sequence
 
-**Home:** `infra/fence/lanes/`. **Coverage index:** `infra/fence/lanes/beats.md` (per-lane beats) + `infra/fence/lanes/map.tsv` (`landscape-id · lane · beat`) over `docs/dev/testing/landscape.md`.
+**Home:** `infra/fence/lanes/`. **Coverage index:** `infra/fence/lanes/beats.md` (per-lane beats) + `infra/fence/lanes/map.tsv` (`name · lane · beat`, one row per pfm command and MCP tool).
 
 Tier B drives the REAL binary against REAL engines: real Claude Code, Codex and OpenCode processes, real tmux panes, real seats, real model turns. It is the release gate and the on-demand suite, never a per-commit one — Tier U (unit) and Tier A (e2e, jailed) run at every commit. Tier B runs on linux containers only; darwin has no Tier B.
 
@@ -30,7 +30,7 @@ infra/fence/lanes/run.sh --lanes E1                # solo, one Claude seat, from
 | --- | --- |
 | `<lane>.log` | every beat line, plus a failed beat's raw pane bytes (`tmux capture-pane -e -p -S -`) and its activity-log slice |
 | `<lane>.stream.log` | exactly what the lane printed, as it printed it |
-| `timeline.tsv` | `lane · beat · t+s · verdict · dur_s · seat · landscape_ids · detail` |
+| `timeline.tsv` | `lane · beat · t+s · verdict · dur_s · seat · detail` |
 | `lanes.tsv` | `lane · wall_s · beats · failed · known · blocked` (the Wave 2 TSV shape) |
 | `summary.md` | the header (mode, root image, order, seats), the table, the budget verdicts, the verdict |
 
@@ -75,13 +75,12 @@ A beat also fails on a dirty activity log: `lib.sh` snapshots `<pfm home>/log/pf
 infra/fence/lanes/run.sh --check-budget E1 700   # the verdict for a recorded wall, by hand
 ```
 
-## Extend it — a landscape item lands with its beat, in the same commit
+## Extend it — a new command or MCP tool lands with its beat, in the same commit
 
-1. Add the item to `docs/dev/testing/landscape.md` with its `lane(s):` column. The file is machine-read: line 1 is `<!-- rumdl-disable -->`, the inline marker rumdl honours in `fmt` too, so neither the format-md hook nor a bare `rumdl fmt` reflows its id rows (`check-map.sh` fails `LANDSCAPE-FORMATTABLE` without it and, with rumdl on PATH, formats a copy and demands byte-identity).
-2. Add its beat to `infra/fence/lanes/beats.md` under that lane, naming what it asserts, the seat it spends and its landscape ids.
-3. Add the `landscape-id · lane · beat` row(s) to `infra/fence/lanes/map.tsv`.
-4. Write the beat in `infra/fence/lanes/<lane>.sh` using only `lib.sh`: `beat <id> <landscape-ids…>`, `spends <seat>`, `target <chat>` (or `target_live <chat>` when the beat cannot assert anything without that chat alive), then exactly one of `pass` / `fail` / `known` / `blocked`. Assert from pfm's own report or the pane — never from what a model said.
-5. Run the gate: `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`. It fails on an unmapped landscape id, on a mapped beat no lane carries, and — machine-derived from the binary — on any `pfm --help` command or MCP tool name the map does not carry. If it cannot build or drive pfm it prints `DERIVE-FAILED: <why>` and exits 2; it never reports clean for a check it could not run.
+1. Add its beat to `infra/fence/lanes/beats.md` under its lane, naming what it asserts and the seat it spends.
+2. Add the `name · lane · beat` row to `infra/fence/lanes/map.tsv`: `name` is the command as typed (`pfm chat new`) or the MCP tool's name (`chat_ls`).
+3. Write the beat in `infra/fence/lanes/<lane>.sh` using only `lib.sh`: `beat <id>`, `spends <seat>`, `target <chat>` (or `target_live <chat>` when the beat cannot assert anything without that chat alive), then exactly one of `pass` / `fail` / `known` / `blocked`. Assert from pfm's own report or the pane — never from what a model said.
+4. Run the gate: `infra/fence/lanes/check-map.sh --pfm <a pfm built from this tree>`. It fails on a map row whose beat no lane carries; on any command in `pfm --help` or MCP tool the map does not carry (derived from the binary); and on a row naming a command or tool pfm does not serve (a verb missing from the help tree is asked of pfm's dispatcher). If it cannot build or drive pfm it prints `DERIVE-FAILED: <why>` and exits 2; it never reports clean for a check it could not run.
 
 ```bash
 # the gate, with a pfm built inside the fence (the worktree mount is read-only)

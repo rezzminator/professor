@@ -67,11 +67,10 @@ One message names every blocked part of the call as its words read, then `Only g
 
 - Unit: `pfm/internal/hookentry/git_guard_test.go` — gitter allowed everything; a main-chat `worktree add` names the right way, with and without the repository's script; every blocked row denied for an executor; reads and own-file writes allowed; every blocked part of one call named; an unparseable git command denied; a malformed payload fails open loudly.
 - Registration: `pfm/internal/installer/expected_hooks_test.go` pins exactly one `PreToolUse`/`Bash` template running `pfm internal git-guard`; `settings_wiring_test.go` carries it in the wired settings.
-- Fence: lane `O2`, beat `O2.05-internal-plumbing`, landscape row `X45` (`infra/fence/lanes/O2.sh`) — a main-chat `worktree add` denied naming gitter, the same call passed for gitter, `git status` passed for anyone; `O1.sh` checks the verb is dispatched.
+- Fence: lane `O2`, beat `O2.05-internal-plumbing` (`infra/fence/lanes/O2.sh`) — a main-chat `worktree add` denied naming gitter, the same call passed for gitter, `git status` passed for anyone; `O1.sh` checks the verb is dispatched.
 
 ## Surfaces that stay in sync
 
 - [hooks.md](hooks.md) — the inventory row and the fail-open decision.
 - `docs/dev/pfm-surface.md` — the `internal` row.
-- `docs/dev/testing/landscape.md` — `I99` (the hook wiring) and `X45` (the body).
 - `templates/global/agents/gitter.md` and `templates/project/agents/gitter.md` — the writer the deny sends every caller to.

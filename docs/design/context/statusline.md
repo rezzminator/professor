@@ -97,5 +97,5 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 | The command | `pfm/cmd/pfm/statusline_command.go` | `pfm statusline --subagents` (combining it with `--refresh-gpt` is a usage error, exit 2) |
 | The installer | `pfm/internal/installer/settings.go` | writes `subagentStatusLine` = the statusline overlay command plus ` --subagents` when absent, keeps an operator's own value, and uninstall removes only pfm's |
 | The goldens | `pfm/internal/statusline/testdata/render-*.golden` | the main line byte for byte |
-| The lane map | `docs/dev/testing/landscape.md` (T39), `infra/fence/lanes/` | the landscape row, its beat and its map row |
+| The lane map | `infra/fence/lanes/` | its beat and its map row |
 

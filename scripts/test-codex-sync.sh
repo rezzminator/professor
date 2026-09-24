@@ -32,7 +32,7 @@ touch "$FLAG"
 
 set +e
 OUTPUT=$(HOME="$HOME_DIR" PATH="$BIN_DIR:/usr/bin:/bin" CLAUDE_PROJECT_DIR="$REPO" \
-  bash "$HOOK" sync 2>&1)
+  bash "$HOOK" sync 2>&1 </dev/null)
 STATUS=$?
 set -e
 

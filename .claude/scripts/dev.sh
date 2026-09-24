@@ -632,8 +632,8 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
     sim)
-      # The real-simulation fence: `run` on the pfm-sim service — Google Chrome,
-      # an Xvfb display, and pfm built + installed from this worktree with the
+      # The real-simulation fence: `run` on the pfm-sim service — Google Chrome
+      # (headless only), and pfm built + installed from this worktree with the
       # harvester's browser rung on (infra/fence/sim-entry.sh prints its own
       # `sim:` proof line or BOOTSTRAP-FAILED). The harvester state persists in
       # a volume keyed by this worktree's path, so a second run skips

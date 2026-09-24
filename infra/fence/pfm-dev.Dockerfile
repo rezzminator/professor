@@ -37,15 +37,16 @@ WORKDIR /worktree
 
 # pfm-sim — the real-simulation fence: the base plus what a real
 # desktop brings to live traffic — Google Chrome (patchright's `chrome` channel
-# launches only Google Chrome; Chromium reports MISSING by design), an X
-# display for the headed retry after a wall (Xvfb, started by sim-entry.sh),
-# and real fonts so pages render as they do for a person. `dev.sh iso sim`
+# launches only Google Chrome; Chromium reports MISSING by design) and real
+# fonts so pages render as they do for a person; the browser runs headless
+# only, so the image carries no display. libgl1 and libglib2.0-0 are the
+# converter sidecar's OCR stack (OpenCV loads libGL.so.1 on import). `dev.sh iso sim`
 # is the entry point. Google's apt repo serves amd64 and arm64 and keeps only
 # the current release, so Chrome is the one unpinned tool here: the image
 # prints its version at build time and every sim run prints it in the proof line.
 FROM pfm-base AS pfm-sim
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    xvfb xauth fonts-liberation fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
+    libgl1 libglib2.0-0 fonts-liberation fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji \
  && install -d -m 0755 /etc/apt/keyrings \
  && curl -fsSL https://dl.google.com/linux/linux_signing_key.pub -o /etc/apt/keyrings/google-chrome.asc \
  && echo "deb [signed-by=/etc/apt/keyrings/google-chrome.asc] https://dl.google.com/linux/chrome/deb/ stable main" \

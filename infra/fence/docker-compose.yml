@@ -36,9 +36,9 @@ services:
       PFM_DEV_REPO_WORK_TREE: /worktree
 
   # The real-simulation fence (`dev.sh iso sim`): pfm-dev's mounts and law plus
-  # a real Google Chrome, an Xvfb display and the shared memory Chrome needs
+  # a real Google Chrome and the shared memory Chrome needs
   # (Docker's 64 MB /dev/shm default crashes renderers on heavy pages).
-  # sim-entry.sh starts the display, builds and installs pfm from the fenced
+  # sim-entry.sh builds and installs pfm from the fenced
   # worktree, and turns the harvester's browser rung on. dev.sh mounts the
   # harvester state per worktree (pfm-sim-harvest-<key>), so one worktree's
   # provisioned sidecar never flips under another's.
@@ -51,7 +51,6 @@ services:
     shm_size: "2gb"
     entrypoint: ["/worktree/infra/fence/sim-entry.sh"]
     environment:
-      DISPLAY: ":99"
       # uv's cache lives INSIDE the per-worktree harvest volume: one filesystem,
       # so uv hardlinks. Every sidecar-script edit publishes a new environment
       # (the script is in its digest); hardlinked, that costs seconds, where a

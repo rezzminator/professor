@@ -14,6 +14,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 - [Project-tier Claude hooks (template)](#project-tier-claude-hooks-template)
 - [Codex](#codex)
 - [OpenCode](#opencode)
+- [Agent-attached hooks (not machine-global)](#agent-attached-hooks-not-machine-global)
 - [Retired hooks](#retired-hooks)
 - [The ownership rule](#the-ownership-rule)
 - [The pfm doctor check](#the-pfm-doctor-check)
@@ -89,6 +90,10 @@ pfm owns no Codex hook: the fleet prompt reaches Codex through `config.toml`'s `
 ## OpenCode
 
 pfm ships no OpenCode hook and no plugin. OpenCode has no appendix hook; the staged prompt reaches it through the `instructions` config array (`pfm/internal/installer/opencode_instructions.go:12-17`). The guard that a Claude hook gives is a permission deny in `.opencode/opencode.jsonc` instead (`.claude/codex-build.json:8`).
+
+## Agent-attached hooks (not machine-global)
+
+A hook can also be wired only into one agent's own frontmatter instead of every account's `settings.json` — it is never in `claudeHookTemplates`, never in the doctor's expected list, and pfm install/doctor never mention it. `orchestrator-wait` is the first: a `PreToolUse` hook on `Bash` that denies a call whose whole command only waits (`echo`/`printf` with plain literal arguments, `true`, `:`, or `sleep N` — matched as a whole string; `pfm/internal/hookentry/orchestrator_wait.go:56-73`), so a wait-looping orchestrator ends its message instead of spending a call proving nothing changed. It is fail-open the same way every pfm hook is: a read or decode failure logs to stderr and returns 0 (`orchestrator_wait.go:31-40`). It is registered as an internal verb exactly like `explore-deny` (`pfm/cmd/pfm/main.go`'s `internalSubcommands` list and its `runInternal` dispatch) so `pfm internal orchestrator-wait` runs and the subcommand is never mistaken for unknown residue, but it is deliberately absent from `expected_hooks.go` — it is attached only through the frontmatter of `flights-orchestrator` and `general-orchestrator`, the two agents that spend calls waiting on a spawned agent, and never runs for any other agent.
 
 ## Retired hooks
 

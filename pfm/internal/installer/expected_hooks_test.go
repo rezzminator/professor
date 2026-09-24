@@ -357,6 +357,28 @@ func TestClaudeHookTemplatesIncludesCompactNudge(t *testing.T) {
 	}
 }
 
+// git-guard reads every Bash call before it runs, in every account and every
+// repository: PreToolUse, matcher Bash, the binary's own subcommand, and never
+// async — an async hook cannot deny.
+func TestClaudeHookTemplatesIncludesGitGuard(t *testing.T) {
+	home := filepath.Join("neutral", "home")
+	found := 0
+	for _, template := range claudeHookTemplates(home) {
+		if template.Name != "git-guard" {
+			continue
+		}
+		found++
+		if template.Event != "PreToolUse" || template.Matcher != "Bash" || template.Async ||
+			template.Command != home+"/.local/bin/pfm internal git-guard" {
+			t.Fatalf("git-guard template=%#v, want PreToolUse, matcher Bash, not async, "+
+				"pfm internal git-guard", template)
+		}
+	}
+	if found != 1 {
+		t.Fatalf("git-guard templates=%d, want exactly 1 among the expected hooks", found)
+	}
+}
+
 // TestClaudeHookTemplatesIncludesExitCloseAndExitIntercept pins the one
 // place a typo could silently break the /exit terminal-close pipeline: the
 // two hooks ride DIFFERENT events on purpose — exit-intercept has to see

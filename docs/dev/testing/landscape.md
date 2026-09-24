@@ -146,6 +146,7 @@ I95 · `wireCodexAgents` naming trap — wires BOTH Claude+Codex sides under a C
 I96 · `pfm install [--yes] [--vscode] [--skip-harvest] [--skip-engine codex] [--skip-themes] [--config-dir DIR]` · needs:systemd/launchd,network · today:U+A · cli.md:142 · lane(s):O1,F
 I97 · `pfm uninstall [--config-dir DIR]` · needs:systemd/launchd · today:U+A · cli.md:148 · lane(s):O2
 I98 · `pfm doctor [--verbose] [--skip-harvest]` command itself (exit 0/1/2/3 contract) · needs:tmux,network,git,project · today:U+A (`doctor.txtar`) · cli.md:92 · lane(s):O1
+I99 · Claude `PreToolUse` (`Bash`) → `pfm internal git-guard` (non-gitter shared-git-write deny) · needs:seat:cc · today:U · hooks.md § git-guard · lane(s):O1
 
 ---
 
@@ -552,6 +553,7 @@ X39 · `pfm internal then --socket --target [--self] --steer text...` (detached 
 X40 · `pfm internal tmux-title-renudge` (OSC title repaint sweep) · needs:tmux · today:U · cli.md:226 · lane(s):O2
 X41 · `pfm internal update-check --cache PATH --current vX.Y.Z --url URL` (picker's cached release-notice refresh) — only its wiring is tested, the `internal/updatecheck` package itself not opened ⚠ known-gap · needs:network · today:NONE · cli.md:227 · lane(s):A
 X42 · `pfm log [--since D] [--level L] [--chat X] [--cmd V] [--comp C] [--follow]` reads the activity log `log/pfm.jsonl`; an unknown `--level`/`--comp` is a usage error naming the accepted set, an absent log says so on stderr · needs:none · today:U (`internal/obs/logcmd_test.go`) · cli.md · lane(s):O2
+X43 · `pfm internal git-guard` (PreToolUse Bash hook body, denies a shared git write to every agent but gitter) · needs:none · today:U · hooks.md § git-guard · lane(s):O2
 
 ---
 

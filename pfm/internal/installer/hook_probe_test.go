@@ -127,8 +127,8 @@ func TestReportHooksStates(t *testing.T) {
 				}
 			},
 			absent:   []string{" ok\n", "UNREADABLE"},
-			warnings: 17,
-			failures: 17,
+			warnings: 18,
+			failures: 18,
 		},
 		{
 			name: "command absent",
@@ -208,7 +208,7 @@ func TestReportHooksStates(t *testing.T) {
 				}
 			},
 			absent:   []string{" ok\n"},
-			failures: 17,
+			failures: 18,
 		},
 		{
 			name: "executable not executable",
@@ -223,7 +223,7 @@ func TestReportHooksStates(t *testing.T) {
 				}
 			},
 			absent:   []string{" ok\n"},
-			failures: 17,
+			failures: 18,
 		},
 		{
 			name: "duplicate",

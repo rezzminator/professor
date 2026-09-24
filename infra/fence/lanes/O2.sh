@@ -506,7 +506,7 @@ fi
 
 # ─── O2.05 — the internal plumbing verbs ────────────────────────────────────
 
-beat O2.05-internal-plumbing T34 T37 X21 X22 X26 X29 X30 X32 X33 X34 X37 X40
+beat O2.05-internal-plumbing T34 T37 X21 X22 X26 X29 X30 X32 X33 X34 X37 X40 X43
 spends none
 bad=""
 int_err=/tmp/o2-internal.err
@@ -544,6 +544,16 @@ rc=$?
 [ -z "$ei" ] || bad="$bad epic-inject outside a chat printed '$(one_line "$ei")' (want nothing);"
 grep -qiE 'identify chat|window name|not inside tmux|no tmux' "$int_err" ||
   bad="$bad epic-inject outside a chat did not name the missing identity on stderr: $(one_line "$(cat "$int_err")");"
+# X43 git-guard: denies a shared git write to a main chat naming gitter, passes the same call for gitter and a read for anyone.
+gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git worktree add x"},"cwd":"/tmp"}' | pfm internal git-guard 2>&1)"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad git-guard exited $rc: $(one_line "$gg");"
+printf '%s' "$gg" | grep -q '"permissionDecision":"deny"' && printf '%s' "$gg" | grep -q 'subagent_type: \\"gitter\\"' ||
+  bad="$bad git-guard did not deny a main-chat worktree add naming gitter: $(one_line "$gg");"
+gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git worktree add x"},"cwd":"/tmp","agent_type":"gitter"}' | pfm internal git-guard 2>&1)"
+[ -z "$gg" ] || bad="$bad git-guard blocked gitter: $(one_line "$gg");"
+gg="$(printf '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | pfm internal git-guard 2>&1)"
+[ -z "$gg" ] || bad="$bad git-guard blocked git status: $(one_line "$gg");"
 # X29 explore-deny: denies a non-haiku Explore by name, lets haiku and every other agent through.
 deny="$(printf '{"tool_input":{"subagent_type":"Explore","model":"sonnet"}}' | pfm internal explore-deny 2>&1)"
 rc=$?
@@ -629,7 +639,7 @@ rc=$?
 [ "$rc" -eq 1 ] || bad="$bad an unknown internal verb exited $rc (want 1, non-blocking for a hook);"
 grep -qF 'registered by a different pfm version' "$int_err" || bad="$bad the unknown-verb refusal does not explain itself: $(one_line "$(cat "$int_err")");"
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · /reload card carries reload.Usage"
+  pass "claude-version → $cv · clear-kill/epic-inject fail-open · explore-deny denies sonnet Explore naming tracer, passes haiku and tracer · git-guard denies a main-chat worktree add, passes gitter and git status · kill-exit usage 2 · launcher-repair 0 · primary $primary0→$SEAT→$primary0 (999 refused by roster) · stale: $(one_line "$st" | cut -c1-60) · title-renudge 0 · statusline alias matches · /reload card carries reload.Usage"
 fi
 
 # ─── O2.05b — the activity-log reader ───────────────────────────────────────

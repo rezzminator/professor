@@ -90,7 +90,7 @@ func claudeHookTemplates(home string) []ExpectedHook {
 		},
 		{
 			// Every Bash call in every repository: only gitter writes shared
-			// git state (docs/design/hooks/hooks.md § git-guard).
+			// git state (docs/design/hooks/git-guard.md).
 			Event:   "PreToolUse",
 			Matcher: "Bash",
 			Command: binary + " internal git-guard",

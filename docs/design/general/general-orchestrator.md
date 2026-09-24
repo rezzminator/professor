@@ -60,7 +60,7 @@ No directory, no index, no task files. The orchestrator's own context is the led
 2. Survey. Read what the caller named; find each task's files with a search, never a read of the area around them. Record `git status --short` before the first dispatch.
 3. Cut. Each task is one deliverable with its own files and its own check, sized to finish within an executor's 45 calls. The dependency tree has two edges: a task that consumes another's output needs it, and two tasks that touch one file never run at once. Rate each task: `mechanical` only for repetitive, straightforward work that needs no reasoning to do right (the same known edit across files, a rename, a move, a named command run, code whose every line the brief fixes); `smart` for any bounded judgment inside the task's own files, and for every task whose deliverable is a document, a prompt, a spec or a report, however exactly the brief words it. A written document always carries reasoning its reader acts on; an exact brief does not make it mechanical. A task that needs a design or a diagnosis is not this family's: it goes back to the caller as `BLOCKED`, and the rest of the batch runs.
 4. Dispatch every task whose needs are done, in one message, as many at once as the harness admits. The task's rating picks the agent type; the spawn carries no model override.
-5. Wait: end the turn; each return arrives on its own.
+5. Wait: end the turn; each return arrives on its own. The agent's frontmatter hook `pfm internal orchestrator-wait` denies a Bash call that only waits.
 6. Verify each return against the disk: the first-line token, `git diff --stat` showing the change inside the task's files, no changed file outside every task's files and the step-2 record (parallel tasks and a tree already dirty both change files the one task never touched), the task's check line quoted from what ran.
 7. React (below), then dispatch what the return made ready.
 8. Close: the caller's acceptance check once, over the whole batch, watched. No review and no full suite unless the caller ordered one; a commit the caller asked for goes to `gitter`.
@@ -107,6 +107,7 @@ First line `DONE {batch}`, `PARTIAL {batch}: {n} blocked` or `BLOCKED {batch}: {
 | Surface | File | Holds |
 | --- | --- | --- |
 | The agent | `templates/global/agents/general-orchestrator.md` | The executable wording |
+| The wait guard | `pfm internal orchestrator-wait`, attached in the agent's frontmatter | A Bash call that only waits (`echo`, `printf`, `true`, `:`, `sleep N`) is denied; design in [hooks.md](../hooks/hooks.md#agent-attached-hooks-not-machine-global) |
 | The executors | [general-executors.md](general-executors.md) | The hands and their tiers |
 | The fleet prompt | `pfm/harness-prompts/share/tail.md` | § Orchestration: the 45-call law and the three-rung ladder, for a main chat |
 | The project contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The sub-agent first move: the same ladder and the 45-call cap, for a sub-agent |

@@ -45,15 +45,6 @@ const (
 	// blockExit is Claude Code's blocking hook exit code.
 	blockExit = 2
 	hookName  = "compact-gate"
-	// settleQuiet, settleStep and settleCap bound the wait for Claude Code to
-	// finish writing the compacting party's transcript: a PreCompact hook can
-	// run while the tool results that pushed the party over its trigger are
-	// still being flushed (observed live: ~79K on disk at hook time, 173K six
-	// seconds later), so the estimate waits for settleQuiet of no writes,
-	// checking every settleStep, for at most settleCap.
-	settleQuiet = time.Second
-	settleStep  = 250 * time.Millisecond
-	settleCap   = 3 * time.Second
 )
 
 // gatePayload is the part of Claude Code's PreCompact hook input the gate
@@ -111,7 +102,6 @@ func GateCompaction(
 	if err != nil {
 		return allow("could not tell who is compacting", err)
 	}
-	settleTranscript(ctx, now, who.transcript)
 	tokens, err := estimateTranscriptTokens(who.transcript)
 	if err != nil {
 		return allow("could not estimate the "+who.name+"'s tokens", err)
@@ -185,21 +175,6 @@ func compactingParty(mainPath string, now time.Time, mainLimit, subLimit int) (p
 		return newest, nil
 	}
 	return mainParty, nil
-}
-
-// settleTranscript waits, through the clock seam, until the transcript has
-// had no write for settleQuiet or settleCap has passed; a stat or wait error
-// ends the wait early and the estimate reads what is on disk.
-func settleTranscript(ctx context.Context, now clock.Clock, path string) {
-	for waited := time.Duration(0); waited < settleCap; waited += settleStep {
-		info, err := os.Stat(path)
-		if err != nil || now.Now().Sub(info.ModTime()) >= settleQuiet {
-			return
-		}
-		if now.Sleep(ctx, settleStep) != nil {
-			return
-		}
-	}
 }
 
 // estimateTranscriptTokens is the last assistant line's recorded usage

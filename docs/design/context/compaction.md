@@ -52,7 +52,7 @@ Per Claude config dir, only while both keys are set (`pfm/internal/installer/set
 
 Unsetting either key and running `pfm install --yes` removes both, and `pfm uninstall` removes what the ledger owns.
 
-Why the window is the lower threshold and not a multiple of it: Claude Code makes its first compaction attempt 25–50K below the window, and that gap varies from run to run (see [Measurements](#measurements)). No fixed ratio predicts it. Setting the window to the lower threshold means attempts start before either party is due. The gate turns every early attempt away at no token cost, and allows the first attempt at or past the party's own threshold.
+Why the window is the lower threshold and not a multiple of it: Claude Code makes its first compaction attempt 25–50K below the window, and that gap varies from run to run (see [Measurements](#measurements)). No fixed ratio predicts it. Setting the window to the lower threshold means attempts start before either party is due. The gate turns every early attempt away at no token cost, and allows the first attempt at or past the party's own threshold. The cost is time: Claude Code asks before every request once a chat is past the window, so a main chat living between the window and its own threshold calls the gate on every request. The gate therefore reads and answers without waiting (see [The gate](#the-gate)).
 
 ## The gate
 
@@ -64,8 +64,11 @@ Why the window is the lower threshold and not a multiple of it: Claude Code make
    - No active sub-agent: the main chat is compacting.
    - An active sub-agent written more recently than the main transcript: the newest such sub-agent is compacting. A sub-agent's work writes its own transcript, not the main one.
    - Otherwise: the main chat.
-4. Wait for the party's transcript to settle, at most 3 s: it counts as settled once it has had no write for 1 s, checked every 250 ms. The attempt can arrive before the last tool result is flushed.
-5. Estimate the party's context (below). At or above its threshold: allow (exit 0). Below: block (exit 2) with one stderr line naming the party, the estimate and the threshold.
+4. Estimate the party's context (below). At or above its threshold: allow (exit 0). Below: block (exit 2) with one stderr line naming the party, the estimate and the threshold.
+
+The gate reads the transcript as it stands, without waiting for Claude Code to finish writing it. An attempt can arrive while the last tool result is still being written; when that unwritten tail is what carries the party over its threshold, the gate blocks one attempt too early. Claude Code asks again before the next request, the tail is on disk by then, and the gate allows it: the compaction lands one request late, never lost. Sub-agents hit this more than the main chat, since they often read several large files at once.
+
+A 1 s settle wait (up to 3 s) once closed that window. It was removed on the user's ruling: measured live, it cost a median 1,257 ms (p90 1,354 ms) on every gate call of a working chat, and a main chat between the window and its threshold called it on every request (31 calls in 6.5 minutes, 26 s added). Dissent on record (the FLIGHTS chat): without the wait, rerun 1's wrong block of a sub-agent returns, and a sub-agent that ends right after that block never compacts. Accepted: an agent that ends needs no compaction, and one that continues is allowed on its next request.
 
 Any read failure (a transcript, the directory, the config) allows the compaction and logs the cause through `obs`. The gate never blocks on an error: a compaction it fails to judge is Claude Code's normal behaviour, while a compaction it wrongly blocks leaves the context growing toward the model's hard limit.
 
@@ -86,8 +89,9 @@ All on Claude Code 2.1.281, in pfm-launched chats, with a scratch `XDG_CONFIG_HO
 | --- | --- | --- |
 | Window reach | `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` in settings | The sub-agent compacted at the window (pre 134,024 → post 113,839): the variable reaches sub-agents. |
 | Block | a `PreCompact` hook exiting 2 | The main chat was blocked five times from 99K to 129K, then compacted when the hook allowed it at 152,484. |
-| Gate rerun 1 | main 150K, sub-agent 100K; divisor 4, no settle wait | The main chat was held (blocked 52.9K–141K, compacted at 172.9K). The sub-agent was wrongly blocked at ~79K: its transcript was still being flushed and read 173K six seconds later. This led to the settle wait, the compact-boundary reset and the measured divisor. |
+| Gate rerun 1 | main 150K, sub-agent 100K; divisor 4, no settle wait | The main chat was held (blocked 52.9K–141K, compacted at 172.9K). The sub-agent was wrongly blocked at ~79K: its transcript was still being flushed and read 173K six seconds later. This led to the compact-boundary reset, the measured divisor and a settle wait, since removed (see [The gate](#the-gate)). |
 | Gate rerun 2 | same thresholds, fixes in | The sub-agent was blocked at 94.9K and 97.1K, then compacted at 105,981. The main chat was blocked at 81K, 109K and 133K, then compacted at 141,752: the divisor-4 error, now corrected and pinned. |
+| Gate latency | installed build, main 600K / sub-agent 150K, three live chats | 57 gate calls with the settle wait: median 1,257 ms, p90 1,354 ms; an idle chat's quiet transcript answered in 2–6 ms. A sub-agent compacted at 161,888 and 161,858 with the estimate within 0.17% of Claude Code's count. |
 | Firing point | the hook allows everything; windows of 100K, 200K and 300K | 100K: first attempt ~74.5K, compactions 68.9–74.3K. 200K: first attempt 152.7K, compactions 168.2–178.8K. 300K: first attempt 250.9K, compaction 265.0K. There is no fixed fraction: a prototype run at 100K started at ~53K. |
 
 ## What it does not do
@@ -104,7 +108,7 @@ All on Claude Code 2.1.281, in pfm-launched chats, with a scratch `XDG_CONFIG_HO
 | --- | --- | --- |
 | The config keys | `pfm/internal/config/compact.go`, `pfm/cmd/pfm/config_command.go` | parsing, range, the machine-wide rule, the `pfm config` rows |
 | The installer | `pfm/internal/installer/settings_compact.go`, `expected_hooks.go`, `settings_ownership.go` | the window, the hook, the ownership ledger entry |
-| The gate | `pfm/internal/compactgate/`, `pfm internal compact-gate` in `pfm/cmd/pfm/main.go` | party rule, settle wait, estimate, decision |
+| The gate | `pfm/internal/compactgate/`, `pfm internal compact-gate` in `pfm/cmd/pfm/main.go` | party rule, estimate, decision |
 | The hook inventory | [../hooks/hooks.md](../hooks/hooks.md) | the `compact-gate` row |
 | The surface reference | `docs/dev/pfm-surface.md` | the `internal compact-gate` row |
 | The lane map | `docs/dev/testing/landscape.md` (T40), `infra/fence/lanes/` | the landscape row, its beat and its map row |

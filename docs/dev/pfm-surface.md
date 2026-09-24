@@ -66,7 +66,7 @@ UserPromptSubmit hook, Claude only, main chat only. Reads the context used-perce
 
 ### `pfm internal compact-gate` ✚
 
-PreCompact hook, Claude only, wired only while `claude.autoCompactMain` and `claude.autoCompactSubagent` are both set. Infers the compacting party (main chat or the newest active sub-agent) from the transcripts, waits up to 3 s for the transcript to settle, estimates its context, and exits 2 with one stderr line while the party is below its own threshold; exits 0 on a manual compaction, unset thresholds or any read failure. Design: `docs/design/context/compaction.md`.
+PreCompact hook, Claude only, wired only while `claude.autoCompactMain` and `claude.autoCompactSubagent` are both set. Infers the compacting party (main chat or the newest active sub-agent) from the transcripts, estimates its context, and exits 2 with one stderr line while the party is below its own threshold; exits 0 on a manual compaction, unset thresholds or any read failure. Design: `docs/design/context/compaction.md`.
 
 ### `pfm internal reload-intercept` ✚
 

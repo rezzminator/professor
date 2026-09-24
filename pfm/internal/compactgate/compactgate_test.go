@@ -23,7 +23,7 @@ const (
 
 var gateNow = time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC)
 
-// restingAge is the default fixture age: past settleQuiet, inside activeWindow.
+// restingAge is the default fixture age: a recent write, inside activeWindow.
 const restingAge = 5 * time.Second
 
 // gateTranscript is one fixture transcript: the usage its last assistant line
@@ -55,7 +55,7 @@ func writeGateTranscript(t *testing.T, path string, spec gateTranscript) {
 	}
 	age := spec.age
 	if age == 0 {
-		age = restingAge // a fixture at rest: older than settleQuiet, so the gate never waits on it
+		age = restingAge
 	}
 	stamp := gateNow.Add(-age)
 	if err := os.Chtimes(path, stamp, stamp); err != nil {
@@ -263,58 +263,6 @@ func TestGateCompactionEstimatesFromTheLastCompactBoundary(t *testing.T) {
 	if got != blockExit || !strings.Contains(stderr.String(), "~200") {
 		t.Fatalf("exit %d stderr %q: want a block at ~20000 tokens (the boundary's postTokens), not the stale 200000",
 			got, stderr.String())
-	}
-}
-
-// A PreCompact hook can fire while the tool results that pushed the party over
-// its trigger are still being written: the gate waits for the transcript to go
-// quiet and estimates what landed meanwhile.
-func TestGateCompactionWaitsForTheTranscriptToSettle(t *testing.T) {
-	main := filepath.Join(t.TempDir(), "session.jsonl")
-	writeGateTranscript(t, main, gateTranscript{usage: 140000, age: time.Millisecond})
-	fake := clock.NewFake(gateNow)
-	both := config.ClaudePrefs{AutoCompactMain: gateMainLimit, AutoCompactSubagent: gateSubLimit}
-	done := make(chan int, 1)
-	var stderr bytes.Buffer
-	go func() {
-		done <- GateCompaction(context.Background(), gatePayloadFor(t, main, "auto"), &stderr, both, fake)
-	}()
-	for fake.Pending() == 0 {
-		select {
-		case code := <-done:
-			t.Fatalf("gate returned %d without waiting for a transcript written 1ms ago", code)
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-	file, err := os.OpenFile(main, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	late := `{"type":"user","message":{"content":"` + strings.Repeat("x", 100000) + `"}}` + "\n"
-	if _, err := file.WriteString(late); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(main, gateNow, gateNow); err != nil {
-		t.Fatal(err)
-	}
-	for {
-		select {
-		case code := <-done:
-			if code != 0 {
-				t.Fatalf("exit %d stderr %q: the late 12.5K tokens put the main chat over 150000 — want allow", code,
-					stderr.String())
-			}
-			return
-		default:
-			if fake.Pending() > 0 {
-				fake.Advance(settleStep)
-			}
-			time.Sleep(time.Millisecond)
-		}
 	}
 }
 

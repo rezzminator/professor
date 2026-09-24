@@ -108,7 +108,7 @@ First line `DONE {id}`, `FAILED {id}: {why}`, `SPEC-DRIFT {id}: {what}` or `BLOC
 | The speccer | [`flights-speccer`](flights-speccer.md) | Task size against the cap; test tier and home in `Done when` and `Files` |
 | The testing manual | [`testing-manual`](testing-manual.md) | The project's test law the executor follows |
 | The lander | [`flights-lander`](flights-lander.md) | The review and the full suite the executor no longer runs |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` | § You are the hand of an orchestrator: no review step |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | A review inside an executor is a caller rule the manual refuses; the lander is the flight's one review. It carries no executor law: executors and executor seats run on the agent body |
 
 ## Evidence
 

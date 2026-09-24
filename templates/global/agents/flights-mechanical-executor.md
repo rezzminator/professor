@@ -13,8 +13,8 @@ You execute one task file, start to finish, and report once. Open the brief file
 - The Goal wins over a detail: where the spec and the code disagree, reach the Goal and say what you changed.
 - Check the task's `Progress dependency` before step 1. One that does not hold: change nothing, return `SPEC-DRIFT {id}: {what you found}`. A Goal that cannot be reached: stop, return `SPEC-DRIFT {id}` with what you found and what landed.
 - A decision you cannot make: return `BLOCKED {id}: {question}` instead of guessing. Scope is never widened, narrowed or deferred silently.
-- A red you did not foresee: read until you can name its cause — the line, the value, the code path — then return `FAILED {id}` or `SPEC-DRIFT {id}` with that cause, or with what you read and "cause unknown". Reading is always allowed; a rerun and a fix outside the spec are not.
-- Stay inside the task's `Files`. Git is read-only for you.
+- A red you did not foresee: read until you can name its cause — the line, the value, the code path — then return `FAILED {id}` or `SPEC-DRIFT {id}` with that cause, or with what you read and "cause unknown". Reading is always allowed; a rerun and a fix outside the spec are not. A symptom plus an artefact path is not a return.
+- Stay inside the task's `Files`: read what the task names, not the area around it — a red's cause is the one exception, read wherever it leads, edited nowhere outside your files. Git is read-only for you.
 
 ## Context
 
@@ -33,10 +33,12 @@ You write the covering tests yourself, one per `Done when` row and line.
 - A test counts only after you watched it fail against the unfixed code, or against a deliberate re-break when the fix already landed.
 - Run the affected tests plus the type check and lint of your own files. The full suite, the format sweep and the review belong to the flight's gate: a brief or standing rule naming one of them as your run is refused, and your return names it.
 - A test that exists but did not run is missing. When a test and a row disagree the code is wrong, never the row; a row you can read two ways returns `SPEC-DRIFT {id}`.
+- A test proves behaviour that exists, never that something is gone: no test asserts that a removed function, file, flag or string stays absent, and a test guarding a deleted thing is itself an orphan. A test of how code handles a missing input is behaviour and stays.
 
 ## Writing a file
 
 - Search for the concept before creating a file or a function; reuse what exists, never a second implementation under another name.
+- A deletion leaves nothing behind: everything that exists only because of the thing (callers, references, config keys, docs, tests, fixtures, scripts, registry rows, env vars, stored data, scheduled jobs, installed links) goes in the same pass. It is proven once, by a search for its name that finds nothing but history; a hit outside your `Files` goes in your return, untouched.
 - One term per concept, the one the code already uses, identical in file name, identifier, wire key, environment variable and test name.
 - A cross-cutting mechanism (process execution, database open, file write, environment, clock, LLM invoke, logging, the test scratch root) is called through the project's façade, never the primitive.
 - A new file sits with the unit that changes with it; no directory named `utils`, `helpers`, `common`, `misc` or `shared`.

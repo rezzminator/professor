@@ -107,7 +107,7 @@ A rule lives at the highest layer every reader who needs it reads, and nowhere e
 
 | Layer | Reader | Holds |
 | --- | --- | --- |
-| `pfm/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | The universal laws: cost = calls × context; the 45-call law and the three-rung ladder (direct, `general-orchestrator`, a flight through `flights-speccer`); report once, plus a real question or blocker, never a diff or a log in a message; waiting is one call or none; only `flights-speccer` changes a task file; the lander as the flight's one review; the hand's own laws, its return shape among them |
+| `pfm/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | The universal laws: cost = calls × context; the 45-call law and the three-rung ladder (direct, `general-orchestrator`, a flight through `flights-speccer`); an orchestrator reports once, plus a question only the user can answer; waiting is one call or none; only `flights-speccer` changes a task file; the lander as the flight's one review |
 | `CLAUDE.md` / `AGENTS.md` | every sub-agent and seat | The sub-agent's first move: on a brief naming a task file, open it with the shared files named beside it, in the first message, and execute it; otherwise the same ladder and the 45-call cap |
 | The agent file | the agent | The protocol of one role |
 | The brief | one executor | The task file path, its `reads`, the `run.md` lines of its `needs`, the standing rules, the worktree, the testing manual's path; everything else an executor obeys lives in its agent |
@@ -145,7 +145,7 @@ Claude Code stops the Agent tool three levels below the main chat and caps concu
 | --- | --- | --- |
 | The agents | `templates/global/agents/flights-speccer.md`, `flights-orchestrator.md`, `flights-mechanical-executor.md`, `flights-lander.md`, `variants.json` | The five protocols; `variants.json` renders the smart executor from the mechanical one |
 | The commands | `templates/global/commands/flights/*.md` | The six commands, machine-global |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names, the hand's laws for chat seats |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names |
 | The adopter contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The sub-agent's first move and the ladder; in this repository's `CLAUDE.md` also the fenced-flight paragraph under § Process |
 | The executors' allowlist | `flights-mechanical-executor`, `flights-smart-executor` | `Read, Write, Edit, Bash, Glob, Grep`: no `Skill`, no `Agent`, no MCP tool; the lander alone adds `Skill` for `/code-review` |
 | The engine | `pfm` settings and launcher | The two harness settings |

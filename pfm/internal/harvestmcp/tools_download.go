@@ -11,8 +11,10 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -26,7 +28,7 @@ const (
 	downloadURITemplate           = downloadURIPrefix + "{id}"
 	defaultMaxResourceBytes int64 = 25 << 20
 	resourceLinkType              = "resource_link"
-	downloadDescription           = `Downloads 1–50 files of any kind — a PDF, zip, image, audio, dataset — as bytes, unparsed, input order kept. Call download{sources:["https://…/data.zip"]}. Each item returns kind, content type, size, sha256 and the rung that served it, then the local path (local server) or a resource_link to read with resources/read (remote server). Nothing is converted: a page to read goes to readPage, a paper to readWork. A failing item carries its own error and the others still return.`
+	downloadDescription           = `Downloads 1–50 files of any kind — a PDF, zip, image, audio, dataset — as bytes, unparsed, input order kept. Call download{sources:["https://…/data.zip"]}. Each item returns kind, content type, size, sha256 and the rung that served it. On the local server it returns path, the file's absolute path on this machine: take the file from there. On the remote server it returns id, url and expires, plus a resource_link to read with resources/read: run ` + "`curl -fL -o <file> <url>`" + ` in a shell and check the sha256; never read the file into context. The url expires 10 minutes after the call, and a server restart invalidates every url; call download again for a fresh one. Nothing is converted: a page to read goes to readPage, a paper to readWork. A failing item carries its own error and the others still return.`
 )
 
 // DownloadInput is download's input.
@@ -45,8 +47,9 @@ type ResourceRef struct {
 	Size     int64  `json:"size"`
 }
 
-// DownloadItem is one downloaded file: Path on the local server, Resource on
-// the remote one. Note states a limit the file is over.
+// DownloadItem is one downloaded file: Path (absolute) on the local server;
+// ID, URL, Expires and Resource on the remote one. Note states a limit the
+// file is over, or that the server cannot sign a url.
 type DownloadItem struct {
 	RetryAfter  string       `json:"retry_after,omitempty"`
 	Source      string       `json:"source"`
@@ -57,6 +60,9 @@ type DownloadItem struct {
 	Method      string       `json:"method,omitempty"`
 	Status      int          `json:"status,omitempty"`
 	Path        string       `json:"path,omitempty"`
+	ID          string       `json:"id,omitempty"`
+	URL         string       `json:"url,omitempty"`
+	Expires     string       `json:"expires,omitempty"`
 	Resource    *ResourceRef `json:"resource,omitempty"`
 	Note        string       `json:"note,omitempty"`
 	Error       string       `json:"error,omitempty"`
@@ -78,6 +84,7 @@ type storedDownload struct {
 	path string
 	mime string
 	size int64
+	name string
 }
 
 func newDownloadStore() *downloadStore {
@@ -139,6 +146,12 @@ func (service *Service) download(
 		}()
 	}
 	wait.Wait()
+	return downloadResult(items), DownloadOutput{Items: items}, nil
+}
+
+// downloadResult renders the items as the tool's content: one text block per
+// item, plus a resource_link block for each remote file.
+func downloadResult(items []DownloadItem) *mcp.CallToolResult {
 	result := &mcp.CallToolResult{}
 	for index := range items {
 		item := &items[index]
@@ -150,7 +163,7 @@ func (service *Service) download(
 			})
 		}
 	}
-	return result, DownloadOutput{Items: items}, nil
+	return result
 }
 
 // downloadOne downloads one source through harvest.Download (Retrieve's
@@ -167,7 +180,8 @@ func (service *Service) downloadOne(ctx context.Context, source string, headers 
 }
 
 // downloadItem turns one download result into its item: hashed, recorded in
-// the store, and a path (local) or a resource_link (remote).
+// the store, and an absolute path (local) or a signed url plus a
+// resource_link (remote).
 func (service *Service) downloadItem(ctx context.Context, source string, result harvest.Result) DownloadItem {
 	item := DownloadItem{
 		Source: source, Kind: result.Kind, Method: harvest.PublicMethod(result.Method), Status: result.HTTPStatus,
@@ -180,30 +194,51 @@ func (service *Service) downloadItem(ctx context.Context, source string, result 
 		}
 		return item
 	}
-	digest, mime, size, err := hashFile(result.Path)
+	stored, err := filepath.Abs(result.Path)
+	if err != nil {
+		obs.Logger(obs.Component(ctx, "mcp")).Warn("harvester.download.abs", obs.FieldErr, err.Error())
+		item.Error = "the file was downloaded but its absolute path could not be resolved; retry the download"
+		return item
+	}
+	digest, mime, size, err := hashFile(stored)
 	if err != nil {
 		obs.Logger(obs.Component(ctx, "mcp")).Warn("harvester.download.hash", obs.FieldErr, err.Error())
 		item.Error = "the file was downloaded but could not be read back from the cache; retry the download"
 		return item
 	}
 	item.SHA256, item.ContentType, item.Bytes = digest, mime, size
-	service.downloads.put(digest, storedDownload{path: result.Path, mime: mime, size: size})
+	name := downloadName(source, digest)
+	service.downloads.put(digest, storedDownload{path: stored, mime: mime, size: size, name: name})
 	if !service.runtime.Remote {
-		item.Path = result.Path
+		item.Path = stored
 		return item
 	}
+	item.ID = digest
 	item.Resource = &ResourceRef{
-		Type: resourceLinkType, URI: downloadURIPrefix + digest, Name: downloadName(source, digest),
-		MIMEType: mime, Size: size,
+		Type: resourceLinkType, URI: downloadURIPrefix + digest, Name: name, MIMEType: mime, Size: size,
+	}
+	if service.links == nil {
+		item.Note = "external.publicURL is unset: this server cannot sign a download url; read the resource_link with resources/read"
+	} else {
+		link, expires := service.links.link(digest)
+		item.URL, item.Expires = link, expires.Format(time.RFC3339)
 	}
 	if limit := service.maxResourceBytes(); size > limit {
-		item.Note = fmt.Sprintf(
+		item.Note = joinNote(item.Note, fmt.Sprintf(
 			"the file is %d bytes, over harvest.maxResourceBytes (%d): resources/read will refuse it, since the MCP transport carries a blob base64 in one message",
 			size,
 			limit,
-		)
+		))
 	}
 	return item
+}
+
+// joinNote appends more to an item's existing note.
+func joinNote(note, more string) string {
+	if note == "" {
+		return more
+	}
+	return note + "; " + more
 }
 
 func downloadMisroute(source string) string {
@@ -259,7 +294,10 @@ func renderDownload(item DownloadItem) string {
 		return "# " + harvest.PublicSourceLabel(item.Source) + "\nERROR: " + item.Error
 	}
 	where := "path: " + item.Path
-	if item.Resource != nil {
+	switch {
+	case item.URL != "":
+		where = "url: " + item.URL + " (expires " + item.Expires + "; curl -fL -o <file> <url>)"
+	case item.Resource != nil:
 		where = "resource: " + item.Resource.URI + " (resources/read returns the bytes)"
 	}
 	text := fmt.Sprintf(

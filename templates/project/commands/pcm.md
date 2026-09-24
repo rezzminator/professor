@@ -32,7 +32,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 ### Critical invariants
 
 - **Path variables** — agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- **Pipeline flow lives in the flights commands** (`/flights:spec` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
+- **Pipeline flow lives in the flights commands** (`/flights:spec` → optionally `/flights:refine` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
 - **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
@@ -46,7 +46,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 <!-- INSTALL: this section is derive-only by design — no fixed counts to fill in. The bash commands below run against the actual roster/filesystem every time, so a single-project install and a ten-project install both get correct answers from the same text. -->
 
 - **Projects:** derive with `ls -d {project}*/`; each child CLAUDE.md § Quick Start names its package manager
-- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every project specialist is registered at root on the `{proj}-{role}` convention, plus the project-neutral `gitter`; the machine-global cast (`flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-hard-executor`, `flights-gater`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per CLAUDE.md § Model Selection
+- **Agents:** enumerate with `ls .claude/agents/ {project}/.claude/agents/` — every project specialist is registered at root on the `{proj}-{role}` convention, plus the project-neutral `gitter`; the machine-global cast (`flights-speccer`, `flights-orchestrator`, `flights-mechanical-executor`, `flights-smart-executor`, `flights-lander`, `general-orchestrator`, `general-mechanical-executor`, `general-smart-executor`, `reviewer`, `tracer`, `rr`) lives in `~/.claude/agents/`. A root wrapper is a thin registration shell — frontmatter (name, description, model, tools, hooks) over a one-line pointer to the child protocol at `{project}/.claude/agents/{role}.md`; a `{project}` whose child repo is not readable from the root repo inlines its protocols at root instead. Model tiers per CLAUDE.md § Model Selection
 - Commands and skills: `ls .claude/commands/ .claude/skills/ ~/.claude/commands/ ~/.claude/skills/`
 
 ---
@@ -129,13 +129,13 @@ Before ANY changes, read all affected files. Grep every reference across `.claud
 - Project dir names in CLAUDE.md match actual directories
 - Agent frontmatter matches actual behavior and tools needed
 - worktree.sh project resolution matches directory names
-- Flights-command references (`/flights:spec`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
+- Flights-command references (`/flights:spec`, `/flights:refine`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
 - Tech stack descriptions match package.json/pyproject.toml deps
 - Pipeline flow in the flights commands matches agent ordering constraints
 
 ### Step 3 — Plan
 
-Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Count the tasks per the fleet prompt § Orchestration: more than one ⇒ `flights-speccer` writes the flight directory and one agent executes each task file; edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here from those task files.
+Group changes: (1) **breaking** (must be atomic), (2) **non-breaking** (independent). Route the work by the fleet prompt § Orchestration ladder: direct work is done here or by one or two agents; a batch of clear tasks goes to `general-orchestrator`; only work whose solution is not in hand goes to `flights-speccer`, and `flights-orchestrator` runs one executor per task file. Edits the guard reserves for the main loop (`.claude/**`, any `CLAUDE.md`) are applied here, from the brief or the task file that names them.
 
 ### Step 4 — Execute
 
@@ -253,7 +253,7 @@ Files: `~/.claude/commands/flights/*.md` (machine-global: spec, orchestrate-nest
 - **Path variables:** `$DOCS`, `$WORKTREE` used — no hardcoded `docs/dev/` or `.worktrees/` paths
 - **Verdict tokens ↔ the manual:** every token a command cites (`CLAIMED`, `DONE`, `FAILED`, `SPEC-DRIFT`, `BLOCKED`, `STALE`) is one `flights-orchestrator` writes
 - **Script references:** worktree.sh, alloc-ports.sh paths → files exist and are executable
-- **Flow integrity:** spec → orchestrate → land across commands; executor → `flights-gater` → gitter within a flight — no step references an agent from a later phase
+- **Flow integrity:** spec → orchestrate → land across commands; executor → `flights-lander` → gitter within a flight — no step references an agent from a later phase
 
 ### `scripts` — Walk each script
 

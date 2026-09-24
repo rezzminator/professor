@@ -1,6 +1,6 @@
 ---
 name: {project}-testing-manual
-description: The testing law of {project} ({PROJECT_ROLE}) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by flights-speccer at intake, by every flight executor before its first test, by flights-gater whole; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
+description: The testing law of {project} ({PROJECT_ROLE}) — tiers, where a test lives, lanes and registries, mock boundary, environments, run commands, concurrency, gates and floors, bug classes, traps, what not to test. Read by flights-speccer at intake, by every flight or general executor before its first test, by flights-lander whole; `/{project}-testing-manual` opens it for a human. Keep it true in the same change that alters how {project} is tested.
 ---
 
 # {project} testing manual
@@ -33,7 +33,7 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 ## Run commands
 
-- Affected, a flight executor's only run: `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
+- Affected, an executor's only run (flight or general): `{PROJECT_TEST_RUNNER} {path or filter}` — timeout {n} s.
 - Full, the flight gate's run and never an executor's: {the one command of the full suite} — timeout {n} s.
 - Type check `{PROJECT_TYPECHECK}` · lint `{PROJECT_LINT}` · format `{PROJECT_FORMAT}`.
 

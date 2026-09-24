@@ -679,6 +679,61 @@ if [ -n "$bad" ]; then fail "$bad"; else
   pass "pfm log --since 60m: $n_all record(s), --level error: $n_err · unknown --comp and --level exit 2 naming the accepted set · a positional argument exits 2"
 fi
 
+# ─── O2.05c — the call store's reader ───────────────────────────────────────
+
+beat O2.05c-callmeter X43 X44
+spends none
+bad=""
+# A scratch home and config: the fleet's own store, seats and transcripts stay untouched.
+cm_home="$(mktemp -d /tmp/o2-callmeter.XXXXXX)"
+cm_cfg="$cm_home/claude"
+cm_work="$cm_home/work"
+cm_err="$cm_home/err"
+cm_store="$cm_home/.local/state/pfm/callmeter.db"
+mkdir -p "$cm_cfg/projects/-lane-callmeter" "$cm_work"
+printf 'one\ntwo\n' > "$cm_work/hooked.md"
+printf 'one\n' > "$cm_work/backfilled.md"
+printf '{"version":1,"accounts":[{"id":1,"configDir":"%s"}]}\n' "$cm_cfg" > "$cm_home/machine.json"
+cm() { HOME="$cm_home" PFM_HOME="$cm_home" pfm --config "$cm_home/machine.json" "$@"; }
+# X43 absence is its own line and creates nothing — never an empty table.
+out="$(cm callmeter report files 2>"$cm_err")"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad report with no store exited $rc: $(one_line "$(cat "$cm_err")");"
+printf "%s\n" "$out" | grep -qF "callmeter: no store at $cm_store: nothing recorded yet" ||
+  bad="$bad report with no store did not print the no-store line: $(one_line "$out");"
+[ ! -e "$cm_store" ] || bad="$bad report with no store created $cm_store;"
+# X44 the hook records a Read that the report then names.
+printf '{"hook_event_name":"PostToolUse","session_id":"lane-cm","transcript_path":"%s","cwd":"%s","tool_name":"Read","tool_use_id":"toolu_lane_hook","tool_input":{"file_path":"%s"},"tool_response":{"type":"text","file":{"filePath":"%s","content":"one\\ntwo\\n","numLines":2,"startLine":1,"totalLines":2}},"duration_ms":3}\n' \
+  "$cm_cfg/projects/-lane-callmeter/lane-cm.jsonl" "$cm_work" "$cm_work/hooked.md" "$cm_work/hooked.md" |
+  HOME="$cm_home" PFM_HOME="$cm_home" pfm --config "$cm_home/machine.json" internal callmeter 2>"$cm_err" ||
+  bad="$bad pfm internal callmeter exited $?: $(one_line "$(cat "$cm_err")");"
+out="$(cm callmeter report files 2>"$cm_err")"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad report files after the hook exited $rc: $(one_line "$(cat "$cm_err")");"
+printf "%s\n" "$out" | grep -qF "$cm_work/hooked.md" || bad="$bad report files does not name the hook-recorded file: $(one_line "$out");"
+# X43 backfill over a seeded transcript, twice: the second run inserts nothing.
+t1="$(date -u -d '-2 min' +%Y-%m-%dT%H:%M:%S.000Z)"
+t2="$(date -u -d '-1 min' +%Y-%m-%dT%H:%M:%S.000Z)"
+{
+  printf '{"type":"assistant","message":{"model":"m","id":"msg_lane","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_lane_bf","name":"Read","input":{"file_path":"%s"}}],"usage":{"input_tokens":10,"cache_read_input_tokens":100,"cache_creation_input_tokens":10,"output_tokens":5}},"timestamp":"%s","cwd":"%s","sessionId":"lane-bf"}\n' "$cm_work/backfilled.md" "$t1" "$cm_work"
+  printf '{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_lane_bf","type":"tool_result","content":"1\\tone\\n"}]},"timestamp":"%s","cwd":"%s","sessionId":"lane-bf"}\n' "$t2" "$cm_work"
+} > "$cm_cfg/projects/-lane-callmeter/lane-bf.jsonl"
+out="$(cm callmeter backfill 2>"$cm_err")"
+rc=$?
+[ "$rc" -eq 0 ] || bad="$bad backfill exited $rc: $(one_line "$(cat "$cm_err")");"
+printf "%s\n" "$out" | grep -qF "1 transcripts read" || bad="$bad backfill summary did not count the seeded transcript: $(one_line "$out");"
+out="$(cm callmeter backfill 2>"$cm_err")"
+printf "%s\n" "$out" | grep -qF "calls: 0 inserted, 0 filled" || bad="$bad a second backfill changed rows: $(one_line "$out");"
+out="$(cm callmeter report files 2>"$cm_err")"
+printf "%s\n" "$out" | grep -qF "$cm_work/backfilled.md" || bad="$bad report files does not name the backfilled file: $(one_line "$out");"
+cm callmeter report lane-no-such-topic >/dev/null 2>&1
+rc=$?
+[ "$rc" -eq 2 ] || bad="$bad report with an unknown topic exited $rc (want 2, usage);"
+rm -rf "$cm_home"
+if [ -n "$bad" ]; then fail "$bad"; else
+  pass "no store: the no-store line, exit 0, nothing created · the hook's Read and the backfilled Read both in report files · a second backfill inserts nothing · an unknown topic exits 2"
+fi
+
 # ─── O2.06 — doctor's codex_pane rows while E2's chat lives ─────────────────
 
 beat O2.06-doctor-codex-pane I63

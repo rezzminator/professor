@@ -174,7 +174,7 @@ A named regulator, competitor, conference, or association surviving in one of th
 
 ## Paths (mostly generic pipeline paths — KEEP unchanged)
 
-Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,backlog.md}`, `/tmp/{project}/flights/`, `.worktrees/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
+Keep verbatim: `docs/agents/`, `docs/commands/` (`$CDOCS`), `docs/epics/`, `docs/dev/{builds,backlog.md}`, `$HOME/.local/state/pfm/flights/{project}/`, `.worktrees/`, `.claude/`, path-vars `$DOCS`/`$CDOCS`/`$REFS`/`$WORKTREE`. Swap only the project-named leaves: a path rooted in one roster entry's directory → `{PROJECT}/...` (the `{AI_SERVICE_NAME}` package `src/<pkg>/` → `{PROJECT}/src/{ai_module}/...`), machine-absolute `/Users/<user>/.../<repo>/...` → `{REPO_ROOT}/...`.
 
 ## Model pins
 
@@ -209,7 +209,7 @@ These slot into the concept families above — registered here to close prior ga
 | transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`) | `{RECORD_NOUN}` | Domain nouns |
 | illustrative persona examples — a tech artifact, a domain artifact, a domain risk (Professor opening + Model Selection examples) | `{TECH_EXAMPLE_A}` / `{DOMAIN_EXAMPLE_A}` / `{DOMAIN_RISK_EXAMPLE}` | Persona |
 | the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`) | `{CODEX_MODEL}` | Model pins |
-| the Codex model id named per tier in the token-audit `PRICING` notes (frontier / spec-execution / collector) | `{CODEX_MODEL_FRONTIER}` / `{CODEX_MODEL_SPEC}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
+| the Codex model id named per tier in the token-audit `PRICING` notes (smart / mechanical / collector) | `{CODEX_MODEL_SMART}` / `{CODEX_MODEL_MECHANICAL}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
 | the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`) | `{CODEX_REASONING_EFFORT}` | Model pins |
 | the database CLI forbidden at the execpolicy layer (e.g. `psql`) | `{DB_CLI}` | Tech stack |
 | the container runtime forbidden at the execpolicy layer (e.g. `docker`) | `{CONTAINER_RUNTIME}` | Tech stack |

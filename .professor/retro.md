@@ -21,7 +21,7 @@ named file through the normal change flow and stamps the entry.
 Observed: the prompt-layer wave wired `--system-prompt-file` into `claudeCommandWith` and `LauncherRun`;
 the shim's `_cc_run` (picker and cc/cc1/cc2 fresh launches) kept building the claude argv bare, and a
 fresh picker chat answered "Print your instructions" with the production prompt. The build dispatch told
-a spec-execution agent to "enumerate any other spawn path" — the open problem delegated downward; no
+a mechanical-tier agent to "enumerate any other spawn path" — the open problem delegated downward; no
 tracer map of the spawn surface preceded the build, and the surface crossed languages (Go + zsh).
 Amend: CLAUDE.md#Subagent dispatch — a cross-layer enforcement surface is mapped closed-world (tracer)
 BEFORE the build dispatch; the spec carries the enumerated doors, never "find the rest". Candidate root
@@ -171,3 +171,7 @@ Two sessions editing one checkout; gitter split review_test.go by hunk and commi
 Amend: gitter.md — never hunk-split a file another session has modified; leave it out or wait. A commit is verified by exporting the committed tree (git archive) and building it, never by the committer's word.
 Resolved: 2026-09-22 — baseline repaired (ce29317c); rule recorded in the RETRO checkpoint; gitter.md amendment open → /pcm
 
+
+## 2026-09-23 — a model-copied return is not a verbatim return
+In the codeprobe benchmarks the script's return file matched the repo on every line, every run. Final messages that re-emitted it did not: haiku retyping a collector return differed from the file on 31/710, 10/449, 11/453 and 61/431 lines, with shifted indentation and inserted lines; sonnet tracer and mapper rewrote the rendered return in 3 of 6 runs, merging rows, summarising lists and adding hedged or false prose ("only caller", "full detail above"). A prompt rule ("copy whole", a wrong/right example, a banner in the tool output) did not hold; a brief demanding the text inline overrode the agent prompt for haiku.
+Amend: judgment — verbatim text travels by file the script wrote, named in a short receipt the model can copy; any return a caller must trust line by line is read from that file.

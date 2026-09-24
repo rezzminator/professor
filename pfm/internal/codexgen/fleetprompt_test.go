@@ -11,11 +11,11 @@ import (
 // is as loud a failure as a role carrying none.
 var fleetPromptMarkers = []string{"# Model Selection", "NEVER change the active account", "cause unknown"}
 
-// A role's developer_instructions REPLACES the config-level value rather than
-// extending it, so every compiled role has to carry the fleet prompt itself,
-// ahead of its own body. Both compilers — project roles and machine-global
-// roles — are asserted from the file they wrote.
-func TestEveryCompiledCodexRoleCarriesTheFleetPromptAheadOfItsBody(t *testing.T) {
+// A compiled role file holds its own body only: the fleet prompt lives in each
+// Codex home's config.toml, and a --agent-role seat composes it at launch
+// (agentrole). Both compilers — project roles and machine-global roles — are
+// asserted from the file they wrote.
+func TestNoCompiledCodexRoleCarriesTheFleetPrompt(t *testing.T) {
 	prompt, err := codexFleetPrompt()
 	if err != nil {
 		t.Fatal(err)
@@ -60,20 +60,19 @@ func TestEveryCompiledCodexRoleCarriesTheFleetPromptAheadOfItsBody(t *testing.T)
 		t.Run(testCase.name, func(t *testing.T) {
 			got := string(mustReadTestFile(t, testCase.path))
 			for _, marker := range fleetPromptMarkers {
-				if !strings.Contains(got, marker) {
-					t.Fatalf("%s carries no %q — the role would run with no fleet prompt", testCase.path, marker)
+				if strings.Contains(got, marker) {
+					t.Fatalf(
+						"%s carries the fleet prompt line %q — a role file holds its own body only",
+						testCase.path,
+						marker,
+					)
 				}
 			}
-			promptAt := strings.Index(got, fleetPromptMarkers[0])
-			bodyAt := strings.Index(got, testCase.body)
-			if bodyAt < 0 {
+			if !strings.Contains(got, testCase.body) {
 				t.Fatalf("%s lost its own body", testCase.path)
 			}
-			if promptAt > bodyAt {
-				t.Fatalf("%s carries the fleet prompt AFTER its own body", testCase.path)
-			}
 			if err := validateTOML(got); err != nil {
-				t.Fatalf("%s does not parse as TOML with the prompt embedded: %v", testCase.path, err)
+				t.Fatalf("%s does not parse as TOML : %v", testCase.path, err)
 			}
 		})
 	}

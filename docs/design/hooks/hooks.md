@@ -35,7 +35,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 | Engine | Tier | Hooks | Installed by |
 | --- | --- | --- | --- |
-| Claude | machine-global, per `{claude config dir}` | 11 hooks, 17 registrations (pfm-owned; `callmeter` alone is 7) | `pfm install` |
+| Claude | machine-global, per `{claude config dir}` | 11 hooks, 17 registrations (pfm-owned; `callmeter` alone is 7), plus `compact-gate` while both auto-compact thresholds are set | `pfm install` |
 | Claude | project `.claude/settings.json` | 6 in the template | `pfm init`, then the adopter |
 | Claude | operator's own, documented | 2 (memory backup, opt-in) | the adopter, by hand |
 | Codex | `{codex home}/hooks.json` | 0 owned; 2 retired shapes removed | `pfm install` (removal only) |
@@ -52,11 +52,12 @@ Installed into `{claude config dir}/settings.json` for every account in the mach
 | clear-kill | `SessionEnd` | `""` | `pfm internal clear-kill` | `expected_hooks.go:85` | `pfm/internal/hookentry/clear_kill.go:15` | Handles a `/clear` for the fleet session record | Fail-open, stderr line per cause (`clear_kill.go:27-66`) |
 | exit-close | `SessionEnd` | `""` | `pfm internal exit-close` | `expected_hooks.go:86` | `pfm/internal/hookentry/exit_close.go:23` | Closes the terminal a chat was watched through after a human `/exit` | Fail-open, the terminal is left open (`exit_close.go:30-73`) |
 | explore-deny | `PreToolUse` | `Agent\|Task` | `pfm internal explore-deny` | `expected_hooks.go:87-92` | `pfm/internal/hookentry/explore_deny.go:18` | Denies an `Explore` spawn and names `tracer` instead (`explore_deny.go:16`) | Fail-open on an unreadable payload (`explore_deny.go:22-30`) |
-| rr-dir | `SubagentStart` | `rr\|super-rr` | `pfm internal rr-dir` | `expected_hooks.go:93-98` | `pfm/internal/hookentry/rr_dir.go:27-31` | Hands the rr agents the directory their answer is saved into | Fail-open, exits 0 (`rr_dir.go:45-47`) |
+| rr-dir | `SubagentStart` | `rr\|super-rr\|heavy-rr` | `pfm internal rr-dir` | `expected_hooks.go:93-98` | `pfm/internal/hookentry/rr_dir.go:27-31` | Hands the rr agents the directory their answer is saved into | Fail-open, exits 0 (`rr_dir.go:45-47`) |
 | epic-inject | `UserPromptSubmit` | `""` | `pfm internal epic-inject` | `expected_hooks.go:99` | `pfm/internal/hookentry/epic_inject.go:44` | Injects an epic manifest once per session and epic name | Fail-open (`epic_inject.go:105`) |
 | reload-intercept | `UserPromptSubmit` | `""` | `pfm internal reload-intercept` | `expected_hooks.go:100` | `pfm/internal/hookentry/reload_intercept.go:17` | Turns a `/reload` prompt into a scheduled reboot and blocks the prompt | Exits 2 with the reason when the reload cannot be scheduled (`reload_intercept.go:38-49`) |
 | exit-intercept | `UserPromptSubmit` | `""` | `pfm internal exit-intercept` | `expected_hooks.go:101` | `pfm/internal/hookentry/exit_intercept.go:18` | Turns an exact `e` or `/e` prompt into a kill of this chat | Exits 2 when the kill fails (`exit_intercept.go:40`) |
 | compact-nudge | `UserPromptSubmit` | `""` | `pfm internal compact-nudge` | `expected_hooks.go:102` | `pfm/internal/hookentry/compact_nudge.go:22` | Reminds the main chat to compact as context fills; Claude only | Exits 0 on every skip, 1 on one write failure (`compact_nudge.go:36-87`) |
+| compact-gate | `PreCompact` | `""` | `pfm internal compact-gate` | `expected_hooks.go:56-57` | `pfm/internal/compactgate/compactgate.go:79` | Blocks an automatic compaction until the compacting party (main chat or sub-agent) reaches its own threshold; wired only while `claude.autoCompactMain` and `claude.autoCompactSubagent` are both set, per [../context/compaction.md](../context/compaction.md) | Allows the compaction and logs the cause on any read failure; never blocks on an error |
 | callmeter | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `SubagentStart`, `SubagentStop`, `Stop` (one command, seven registrations) | `Bash` on `PreToolUse`; `*` on the other tool events and the subagent events; none on `PostToolBatch` and `Stop` | `pfm internal callmeter`, async (`expected_hooks.go:36`) | `expected_hooks.go:99-119` | `pfm/internal/hookentry/callmeter.go` | Records calls, requests, agents and faults, per [callmeter.md](callmeter.md) | Always exits 0; logs and counts a fault |
 
 A blocked prompt returns `decision: block` with the original prompt suppressed (`pfm/internal/hookentry/prompt_block.go:23-28`).

@@ -23,7 +23,7 @@ The dispatching brief provides:
 - `$PIPELINE` — kebab-case feature name
 - `$FLIGHT` — kebab-case flight name, or `none` when not flight-owned. Only meaningful for MERGE and DOCS-COMMIT.
 - **Phase** — one of the six dispatch-table phases
-- **Residue dir** — where ports.md/the review report/evidence live; a flight brief names the flight directory `/tmp/{project}/flights/{flight}/`. Paths always travel IN the brief, never derived here.
+- **Residue dir** — where ports.md/the review report/evidence live; a flight brief names the flight directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`. Paths always travel IN the brief, never derived here.
 - `Archive:` — DOCS-COMMIT only: pipeline dirs and consumed queue-spec files to move to tmp cold storage after committing, or `none`
 
 **Derived:** `$WORKTREE = .worktrees/$PIPELINE`

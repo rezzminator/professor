@@ -367,6 +367,9 @@ func (installer *engine) wireCodexAgents() error {
 	if err := installer.retireOrphanCodexRoles(sourceRepo, plan.Roles); err != nil {
 		return err
 	}
+	if err := installer.retireOrphanGlobalAgents(plan.Installed); err != nil {
+		return err
+	}
 	if !installer.apply {
 		return nil
 	}

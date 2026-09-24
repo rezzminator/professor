@@ -16,7 +16,7 @@ Decisions live in this file. The template lives in [`templates/project/commands/
 
 ## What it replaces
 
-In the adopter this was measured on, project test law was spread over twelve files in two trees: about 34 KB across six QA agent prompts and six child contract files, beside a 19.8 KB shared testing command of which 87% was generic mechanism. Every reader loaded the shared command plus an agent prompt to extract its own slice. The generic mechanism moves into the [flight executors](flights-executors.md) (writing tests) and [`flights-gater`](flights-gater.md) (attacking them); the project law moves into the manual; the per-project `developer` and `qa` agents go.
+In the adopter this was measured on, project test law was spread over twelve files in two trees: about 34 KB across six QA agent prompts and six child contract files, beside a 19.8 KB shared testing command of which 87% was generic mechanism. Every reader loaded the shared command plus an agent prompt to extract its own slice. The generic mechanism moves into the [flight executors](flights-executors.md) (writing tests) and [`flights-lander`](flights-lander.md) (attacking them); the project law moves into the manual; the per-project `developer` and `qa` agents go.
 
 ## Where it lives
 
@@ -43,15 +43,16 @@ Fixed order and fixed headings, so a reader greps the same heading in any projec
 | Reader | Sections | For |
 | --- | --- | --- |
 | `flights-speccer` | 1, 2, 3, 8, and the removal clause of 11 | The tier decides a task's `shares`; the test home and the registry rows are `Files` entries; a floor is a `Done when` row; a removal lists its retiring tests |
-| `flights-mechanical-executor`, `flights-hard-executor` | all | Writing the covering tests in the project's pattern |
-| `flights-gater` | all, 5 to 9 most | Running the gate, sweeping test validity, raising the project's bug classes |
+| `flights-mechanical-executor`, `flights-smart-executor` | all | Writing the covering tests in the project's pattern |
+| `general-mechanical-executor`, `general-smart-executor` | all, when the brief names the manual | Writing the covering test in the project's pattern |
+| `flights-lander` | all, 5 to 9 most | Running the gate, sweeping test validity, raising the project's bug classes |
 
 The speccer takes facts from the manual into the task file as `Decisions` and `Files` lines; it never puts the manual in a task's `reads`, since the manual would consume the task's 16,000-character budget.
 
 ## How it reaches a flight
 
 - The caller of a flight names the project; `flights-speccer` opens that project's manual during intake and applies the four sections above. A project without a manual is a `NOTES` line in the speccer's return, never a silent skip.
-- The orchestrator's brief to every executor and gater carries the manual's path as a standing rule.
+- The orchestrator's brief to every executor and lander carries the manual's path as a standing rule.
 - A `Done when` test row names the tier, and `Files` names the test home and every registry file: a test outside the pattern is then a task that cannot verify as `DONE`.
 
 ## What stays out
@@ -67,6 +68,6 @@ The speccer takes facts from the manual into the task file as `Decisions` and `F
 | The template | `templates/project/commands/per-project/testing-manual.md` | The eleven headings with placeholder bodies |
 | This repository's own manual | `.claude/commands/pfm-testing-manual.md` | The pfm instance, drawn from `pfm/CLAUDE.md` and `docs/dev/testing/` |
 | The speccer | [`flights-speccer`](flights-speccer.md) | Reads sections 1, 2, 3, 8 at intake |
-| The executor and the gater | [flight executors](flights-executors.md), [`flights-gater`](flights-gater.md) | Read it whole |
+| The executor and the lander | [flight executors](flights-executors.md), [`flights-lander`](flights-lander.md) | Read it whole |
 | Setup | `docs/SETUP.md`, `templates/refresh-map.json` | Generation of one manual per project |
 | The scaffold | `pfm/internal/professor/scaffold.go`, lane `A` (`infra/fence/lanes/A.sh`), landscape rows P4 and P13 | `commands/per-project/` is never deployed by a bare `pfm init` |

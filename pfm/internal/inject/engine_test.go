@@ -501,7 +501,7 @@ func TestInjectGuardAndDeliveryMatrix(t *testing.T) {
 			name:   "busy claude agent overlay row is not a composer draft",
 			socket: "cc-1-2-3",
 			capture: "Working (2s · 9 tokens)\n" +
-				"❯ ● flights-gater  Verifying the worktree is clean",
+				"❯ ● flights-lander  Verifying the worktree is clean",
 			configure: func(fake *fakeTmux) {
 				fake.submitOnEnter = true
 			},

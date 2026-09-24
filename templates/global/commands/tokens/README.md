@@ -8,7 +8,7 @@ a flight's own `metrics.md`.
 node .claude/commands/tokens/token-audit.mjs            # last 24h, every project
 node .claude/commands/tokens/token-audit.mjs --since 3d --project <substr>
 node .claude/commands/tokens/token-audit.mjs --codex    # Codex CLI threads
-node .claude/commands/tokens/token-audit.mjs --flight /tmp/{project}/flights/<name>
+node .claude/commands/tokens/token-audit.mjs --flight $HOME/.local/state/pfm/flights/{project}/<name>
 ```
 
 A RUN is one transcript file: one main chat loop, one sub-agent, or one Codex rollout thread.
@@ -136,7 +136,7 @@ task-id	agent-type	agent-id	round	spawn-time(ISO)	engine
 - A poll is a Bash call repeated 8 or more times in one run, or a `sleep` / `wait` / `tail -f`,
   counted on the call its result triggers; a harness attachment written after a tool result
   (`total_tokens_reminder`) is never the trigger.
-- The call cap comes from the agent type name: a `gater` is capped at 150, everything else at 80.
+- The call cap comes from the agent type name: a `lander` is capped at 150, everything else at 80.
 
 ## Tests
 

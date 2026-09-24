@@ -550,7 +550,7 @@ if (FLIGHT) {
   const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const roleMatch = (a, b) => { const x = norm(a), y = norm(b); if (!x || !y) return false;
     return x.includes(y) || y.includes(x) || x.split(" ").pop() === y.split(" ").pop(); };
-  const capFor = (type) => (/gater/i.test(type) ? 150 : 80); // executor 80, gater 150, from the type name
+  const capFor = (type) => (/lander/i.test(type) ? 150 : 80); // executor 80, lander 150, from the type name
   const claudeAgents = RUNS.filter((r) => r.kind === "agent");
   const byAgentId = new Map(); for (const r of claudeAgents) byAgentId.set(r.agentId, r);
 

@@ -14,7 +14,7 @@ const (
 	hookExploreMatcher        = "Agent|Task"
 	// hookRRDirMatcher names the agents whose prompt reads the RR-DIR line:
 	// templates/global/agents/rr.md and the variants declared from it.
-	hookRRDirMatcher = "rr|super-rr"
+	hookRRDirMatcher = "rr|super-rr|heavy-rr"
 	// hookMatchAll is the matcher that fires for every tool or agent name.
 	hookMatchAll = "*"
 	// stateBroken is the VS Code extension link state (vscode_index.go); the

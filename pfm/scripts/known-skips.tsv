@@ -51,3 +51,4 @@ github.com/rezzminator/professor/pfm/internal/store	TestSharedKillsNeedNoBridgeI
 github.com/rezzminator/professor/pfm/internal/store	TestStoreStress	opt-in-stress	stress battery, opt-in with PFM_STRESS=1
 github.com/rezzminator/professor/pfm/internal/store	TestStoreStressKilledHelper	helper	re-exec fixture: runs only as the child of its parent test
 github.com/rezzminator/professor/pfm/internal/update	TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError	root-noop	the fence runs as root, where permission bits deny nothing
+github.com/rezzminator/professor/pfm/internal/installer	TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess	root-noop	the fence runs as root, where permission bits deny nothing

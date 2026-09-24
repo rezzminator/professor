@@ -483,10 +483,6 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	}
 	effort := strings.TrimSpace(fields["effort"])
 
-	withFleetPrompt, err := fleetRoleInstructions(body)
-	if err != nil {
-		return "", "", fmt.Errorf("%s: %w", mdPath, err)
-	}
 	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
 		"name = \"" + globalAgentEscape(name) + "\"\n" +
 		"description = \"" + globalAgentEscape(description) + "\"\n"
@@ -496,7 +492,7 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 		}
 		content += "model_reasoning_effort = \"" + globalAgentEscape(effort) + "\"\n"
 	}
-	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(withFleetPrompt) + "\n\"\"\"\n"
+	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
 
 	return name, content, nil
 }

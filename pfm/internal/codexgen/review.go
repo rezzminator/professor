@@ -27,7 +27,7 @@ const (
 		"separated). Ignore every other path. Report correctness bugs only, most severe first."
 	// codeReviewSlot is the second source form: written in place of a level, it
 	// says the caller decides both the scope and the effort at run time. The
-	// flight gater is its one caller — it sizes the effort from the diff it is
+	// flight lander is its one caller — it sizes the effort from the diff it is
 	// about to review, so a level baked at compile time would review a whole
 	// flight at whatever tier the prompt happened to spell.
 	codeReviewSlot = "{effort}"

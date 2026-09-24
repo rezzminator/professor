@@ -1,6 +1,7 @@
 // Package agentrole is the one resolver for "make this seat BE a registered
 // agent role from birth." It reads the constitution a --role seat is born
-// having read — the compiled Codex developer_instructions for a cx seat, the
+// having read — the Codex fleet prompt plus the compiled role's
+// developer_instructions for a cx seat, the
 // .claude/agents/<role>.md body for a cc seat — and returns it as plain text
 // for the caller to fold into the launch prompt, or an error naming exactly
 // what went wrong.
@@ -24,6 +25,7 @@ import (
 	"github.com/BurntSushi/toml"
 
 	"github.com/rezzminator/professor/pfm/internal/action"
+	"github.com/rezzminator/professor/pfm/internal/codexgen"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
@@ -227,7 +229,15 @@ func readTOMLConstitution(path string) (string, error) {
 	if strings.TrimSpace(doc.DeveloperInstructions) == "" {
 		return "", fmt.Errorf("agent role: %s has an empty or missing developer_instructions key", path)
 	}
-	return doc.DeveloperInstructions, nil
+	// A seat's -c developer_instructions REPLACES the config-level fleet
+	// prompt (codex-rs/core/src/agent/role.rs build_next_config), and a
+	// compiled role file carries only its own body — so the seat's
+	// constitution is the fleet prompt, then the role.
+	fleetPrompt, err := codexgen.FleetPrompt()
+	if err != nil {
+		return "", fmt.Errorf("agent role: compose the Codex fleet prompt for %s: %w", path, err)
+	}
+	return fleetPrompt + "\n---\n\n" + doc.DeveloperInstructions, nil
 }
 
 // repoRoot walks upward from start (inclusive) to the nearest ancestor that

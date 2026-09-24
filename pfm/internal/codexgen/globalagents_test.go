@@ -152,11 +152,10 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		"model = \"gpt-5.6-sol\"\n" +
 		"model_reasoning_effort = \"high\"\n" +
 		"developer_instructions = \"\"\"\n"
-	// The fleet prompt is prepended to every role, so the role's own body is
-	// the TAIL of the value — escaped byte for byte, as before.
+	// The role's own body, escaped byte for byte, is the whole value.
 	body := "Body has a literal triple quote \\\"\\\"\\\" and a backslash \\\\ standalone.\n" +
 		"\"\"\"\n"
-	if !strings.HasPrefix(got, head) || !strings.HasSuffix(got, body) {
+	if got != head+body {
 		t.Fatalf("quirky.toml =\n%q\nwant %q ... %q", got, head, body)
 	}
 	if err := validateTOML(got); err != nil {

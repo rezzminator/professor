@@ -38,15 +38,14 @@ func TestCodexAgentsCommandCompilesAndInstalls(t *testing.T) {
 		"name = \"quirky\"\n" +
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
 		"developer_instructions = \"\"\"\n"
-	// The fleet prompt is prepended to every compiled role, so the role's own
-	// body is the TAIL of the value — escaped byte for byte, as before.
+	// The role's own body, escaped byte for byte, is the whole value.
 	body := "Body has a literal triple quote \\\"\\\"\\\" and a backslash \\\\ standalone.\n" +
 		"\"\"\"\n"
 	got, err := os.ReadFile(compiled)
 	if err != nil {
 		t.Fatalf("read compiled toml: %v", err)
 	}
-	if !strings.HasPrefix(string(got), head) || !strings.HasSuffix(string(got), body) {
+	if string(got) != head+body {
 		t.Fatalf("compiled toml =\n%q\nwant %q ... %q", string(got), head, body)
 	}
 

@@ -17,7 +17,7 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 ## Input
 
-`/flights:spec {tasks | a file path}`: an inline task list, or a file holding one. Empty means the user is asked what the flight is for. The command chooses the flight name (short kebab-case) and the directory `/tmp/{project}/flights/{flight}/`; a collision appends `-v2`.
+`/flights:spec {tasks | a file path}`: an inline task list, or a file holding one. Empty means the user is asked what the flight is for. The command chooses the flight name (short kebab-case) and the directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`; a collision appends `-v2`.
 
 ## S1 — Walk the code
 
@@ -38,7 +38,7 @@ Ask nothing derivable from code. Loop until every task is clear or disposed; pro
 
 ## S3 — Hand off
 
-Spawn `Agent(subagent_type: "flights-speccer")` — adding `model: "opus"` for a small flight — with content, never a format: the numbered tasks, the rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), and the directory. End the message; the return arrives with the index.
+Spawn `Agent(subagent_type: "flights-speccer")` with content, never a format: the numbered tasks, the rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), the testing manual of each project touched, and the directory. End the message; the return arrives with the index.
 
 ## S4 — The one question
 
@@ -46,7 +46,7 @@ A `BLOCKED` item in the return carries a question. One `AskUserQuestion` round p
 
 ## S5 — Present
 
-The index table as returned, one line per task naming its key decisions (the `Decisions` sections extracted from the task files in one call, never the files opened whole: the chat's context outlives the flight), the `NOTES` lines, and any `BLOCKED` item. Then the three ways to run it, by name: `/flights:orchestrate-nested`, `/flights:orchestrate-live`, `/flights:orchestrate-cross-harness`. Approval is a reading, not a run; the run is the user's next command.
+The index table as returned, one line per task naming its key decisions (the `Decisions` sections extracted from the task files in one call, never the files opened whole: the chat's context outlives the flight), the `NOTES` lines, and any `BLOCKED` item. Then the three ways to run it, by name: `/flights:orchestrate-nested`, `/flights:orchestrate-live`, `/flights:orchestrate-cross-harness`. [`/flights:refine`](flights-refine.md) is named for questioning the written flight before it runs. Approval is a reading, not a run; the run is the user's next command.
 
 ## Not part of the design
 
@@ -55,9 +55,9 @@ The index table as returned, one line per task naming its key decisions (the `De
 | Writing the spec in the chat | `flights-speccer` writes it, fresh and cheap; the chat holds only the maps and the rulings |
 | Architect passes over the written spec | `flights-speccer`'s reconcile phase is the review; a fault found later is a revising call |
 | A refining pass by a nested `flights-speccer` | The six reconcile checks replaced it |
-| `poc` and research modes | `/rnd` and the RND ledger own them; a task that needs a proof is rated `hard` |
+| `poc` and research modes | `/rnd` and the RND ledger own them; a task that needs a proof is rated `smart` |
 | Merge mode over several specs | There is no scheduler; a flight is one directory |
-| The legal fence and the officer pass | Project rules, carried by the project's `CLAUDE.md` into every brief |
+| The legal fence and the officer pass | Project rules, carried by the project's `CLAUDE.md`, which the harness gives every agent |
 | A staleness anchor in the spec header | The orchestrator records the baseline at run start; `Progress dependency` catches a moved world |
 
 ## Surfaces that stay in sync

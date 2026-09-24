@@ -1,12 +1,12 @@
 ---
 name: flights:spec
-description: 'User-in-the-loop planning — /flights:spec [tasks | file]: maps the area, asks what the code cannot answer, hands the rulings to flights-speccer. /flights:spec → flights-speccer → /flights:orchestrate-{nested|live|cross-harness} → flights-orchestrator → flights-*-executor → flights-gater → /flights:audit. Returns the index; running is a separate command.'
+description: 'User-in-the-loop planning — /flights:spec [tasks | file]: maps the area, asks what the code cannot answer, hands the rulings to flights-speccer. /flights:spec → flights-speccer → [/flights:refine →] /flights:orchestrate-{nested|live|cross-harness} → flights-orchestrator → flights-*-executor → flights-lander → /flights:audit. Returns the index; running is a separate command.'
 argument-hint: [tasks | task file]
 ---
 
 # Spec — specify a flight
 
-One deliverable, written by `flights-speccer` and never by you: `/tmp/{project}/flights/{flight}/` holding `index.md` and one task file per executor. You map, ask, hand off and present. Input: $ARGUMENTS — an inline task list, a file holding one, or nothing (then ask what the flight is for). Choose `{flight}`: short kebab-case; on a collision under `/tmp/{project}/flights/` append `-v2`.
+One deliverable, written by `flights-speccer` and never by you: `$HOME/.local/state/pfm/flights/{project}/{flight}/` holding `index.md` and one task file per executor. You map, ask, hand off and present. Input: $ARGUMENTS — an inline task list, a file holding one, or nothing (then ask what the flight is for). Choose `{flight}`: short kebab-case; on a collision under `$HOME/.local/state/pfm/flights/{project}/` append `-v2`.
 
 ## S1 — Walk the code
 
@@ -22,7 +22,7 @@ Ask nothing derivable from code. Loop until every task is clear or disposed; pro
 
 ## S3 — Hand off
 
-Spawn `Agent(subagent_type: "flights-speccer")` — adding `model: "opus"` for a small flight (a few tasks, no unknown cause, no design to choose) — with content, never a format: the numbered tasks, the rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), the testing manual of each project touched, and the directory `/tmp/{project}/flights/{flight}/`. End your message; the return arrives with the index.
+Spawn `Agent(subagent_type: "flights-speccer")` with content, never a format: the numbered tasks, the rulings from S2 as binding decisions, the maps, the boundaries (out of scope, files another owner holds), the standing rules (the child `CLAUDE.md` paths the tasks touch, and the flight's own: worktree, fence, checks), the testing manual of each project touched, and the directory `$HOME/.local/state/pfm/flights/{project}/{flight}/`. End your message; the return arrives with the index.
 
 ## S4 — The one question
 
@@ -30,4 +30,4 @@ A `BLOCKED` item in the return carries a question. Put it to the user in one `As
 
 ## S5 — Present
 
-The index table as returned; one line per task naming its key decisions (the `Decisions` sections extracted from the task files in one call, never the files opened whole: your context outlives this flight); the `NOTES` lines; any `BLOCKED` item. Then the three ways to run it: `/flights:orchestrate-nested` (a `flights-orchestrator` sub-agent, one return), `/flights:orchestrate-live` (this chat runs it, the user watches), `/flights:orchestrate-cross-harness` (chat seats of another engine as executors). Approval is a reading, not a run; the run is the user's next command.
+The index table as returned; one line per task naming its key decisions (the `Decisions` sections extracted from the task files in one call, never the files opened whole: your context outlives this flight); the `NOTES` lines; any `BLOCKED` item. Then the three ways to run it: `/flights:orchestrate-nested` (a `flights-orchestrator` sub-agent, one return), `/flights:orchestrate-live` (this chat runs it, the user watches), `/flights:orchestrate-cross-harness` (chat seats of another engine as executors). To question the written flight before it runs: `/flights:refine`. Approval is a reading, not a run; the run is the user's next command.

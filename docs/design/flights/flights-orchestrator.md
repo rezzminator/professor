@@ -26,7 +26,7 @@ Decisions live in this file. The executable wording lives in [`templates/global/
 
 ## Why one manual, held by a sub-agent
 
-A main chat outlives every agent, so its context is the dearest in the family. The orchestration of a flight is a loop of dispatch, wait, verify, react, dispatch that runs for the whole flight; run in the main chat it re-sends the chat's entire history on every step. The loop therefore lives in a sub-agent at spec-execution tier (`sonnet`) that holds only the index and the verdicts, and the main chat hears from it once.
+A main chat outlives every agent, so its context is the dearest in the family. The orchestration of a flight is a loop of dispatch, wait, verify, react, dispatch that runs for the whole flight; run in the main chat it re-sends the chat's entire history on every step. The loop therefore lives in a sub-agent at the mechanical tier (`sonnet`) that holds only the index and the verdicts, and the main chat hears from it once.
 
 The same body is the only description of the protocol. A second copy for the live or cross-harness container would drift; the commands for those containers substitute the transport (how an executor is spawned, briefed, waited for, questioned, stopped) and read everything else from the agent file.
 
@@ -36,10 +36,10 @@ The same body is the only description of the protocol. A second copy for the liv
 | --- | --- |
 | The flight directory | Required. Work that arrives without one goes to `flights-speccer` first, and its return is the index |
 | Standing rules the executors work under | What the project contract does not carry: the worktree, the fenced command that runs one package's affected tests, the checks by command, anything the caller adds for this flight. Pasted into every executor brief, never into a task file; the orchestrator authors none. A second measured case: a brief whose rule read "every build/test runs … `dev.sh iso test pfm`" meant the script's path but named the full suite, and the orchestrator added "launch it backgrounded and wait once"; 146 of the six executors' 201 minutes went to full-suite waits, so the refusal keys on the full-suite command itself, however the rule frames it. A standing rule says where and with what an agent works, never what steps it runs: one that adds, drops or replaces a step of a role is refused and named under `NOTES`. The measured case: a launch message written by a chat born before the redesign ordered "every executor's self-review is a review over its own change"; the orchestrator pasted it as "overriding the role's no-review rule", and six executors ran 23 review processes. The fleet prompt carries the same law for every manual. The `CLAUDE.md` / `AGENTS.md` contract reaches every executor from the harness and is never pasted or named |
-| The projects and their testing manuals | Each project the flight touches, with its manual's path: it travels in every executor's and gater's brief. A project without one is a `NOTES` line |
+| The projects and their testing manuals | Each project the flight touches, with its manual's path: it travels in every executor's and lander's brief. A project without one is a `NOTES` line |
 | A worktree | Used when the flight runs outside the checkout; otherwise the checkout |
 | The cap | Executors in flight at once; absent, ten. An executor's own cap (80 calls) lives in its agent; a `CLAIMED` line is stale after 60 minutes |
-| The landing | Which checks run after the gate, whether gitter commits. Absent: the standing checks once, no commit. The gate itself is never optional and its review effort is the gater's to size |
+| The landing | Which checks run after the gate, whether gitter commits. Absent: the standing checks once, no commit. The gate itself is never optional and its review effort is the lander's to size, unless the user ordered a level above `medium`: that order travels to the lander as given |
 
 ## The run
 
@@ -61,7 +61,7 @@ The brief carries, and nothing more:
 - the standing rules, and the worktree when one exists;
 - the path of the testing manual of the project the task changes.
 
-Nothing else: the task file is the spec, and the [executor's agent](flights-executors.md) holds what the brief used to restate — the cap, the tests it writes, the open hand, the return's shape, git read-only. The index row's `rating` picks the agent type: `mechanical` → `flights-mechanical-executor` (`sonnet`), `hard` → `flights-hard-executor` (`opus`); the spawn carries no model override.
+Nothing else: the task file is the spec, and the [executor's agent](flights-executors.md) holds what the brief used to restate — the cap, the tests it writes, the open hand, the return's shape, git read-only. The index row's `rating` picks the agent type: `mechanical` → `flights-mechanical-executor` (`sonnet`), `smart` → `flights-smart-executor` (`opus`); the spawn carries no model override.
 
 ## Verdicts are evidence, not truth
 
@@ -84,7 +84,7 @@ Every situation the manual answers, with who acts. The orchestrator fixes nothin
 | `DONE` without proof or without a change in git | one question back to the same executor; a second such return → `FAILED` |
 | `FAILED` (including a cap) | start nothing that needs it; send `flights-speccer` the report, what already landed, the completed ids and the executor's transcript — nested and live: the sub-agent transcript path (`$CLAUDE_CONFIG_DIR/projects/{cwd slug}/{session id}/subagents/agent-{id}.jsonl`, the id from the spawn's task id); cross-harness: the seat's name and its transcript id; its rewritten index cuts the task smaller or re-approaches it; dispatch from the new index. The same task file is never re-run unchanged |
 | `SPEC-DRIFT` | the same road as `FAILED`, with the drift report as the reason |
-| Any revising round | the first spec of a flight runs at the speccer's pin (`fable`; `opus` when the caller judged the flight small); every revising round — a red, a failed landing check, a gater residual, the diagnose-first round included — is a fresh `Agent(subagent_type: "flights-speccer", model: "opus")` handed the directory and the reason, since a `SendMessage` keeps the running speccer's model; only a speccer already on `opus` is revised by `SendMessage` |
+| Any revising round | the speccer is pinned at `opus`; every revising round — a red, a failed landing check, a lander residual, the diagnose-first round included — is a fresh `Agent(subagent_type: "flights-speccer", model: "opus")` handed the directory and the reason, since a `SendMessage` keeps the running speccer's model; only a speccer already on `opus` is revised by `SendMessage` |
 | A return carries `RETRO {lesson}` | [Retro lines](#retro-lines) |
 | A second `FAILED` or `SPEC-DRIFT` of the same id | the revising call is marked diagnose-first and carries every transcript of that id; `flights-speccer` names the cause in the task file before rewriting (its § Drift). The `run.md` line carries the round: `{id} SPEC-DRIFT · round 2 · …` |
 | A third red of the same id | `{id} BLOCKED · {the executor's cause line}`; no third revising call. The question travels in the return like any `BLOCKED`; the flight lands without the task |
@@ -95,31 +95,31 @@ Every situation the manual answers, with who acts. The orchestrator fixes nothin
 | An executor never returns | seen only when something wakes the loop (a sibling's return; in the live and cross-harness containers, the user): a `CLAIMED` line older than 60 minutes with no verdict. Named in `DISPATCHED` as a missing return; its task stays `CLAIMED`; the flight lands without it and the return says so. When it was the last executor, nothing wakes a nested orchestrator: the user re-runs the container, and the resume rule treats the task as not started |
 | A silent seat past the stale bound (cross-harness only) | `STALE {id}` in `run.md` and the return; the seat is never killed or re-dispatched blind |
 | A standing check fails at landing | unspecified work: a revising `flights-speccer` call with the check's output and the completed ids; its task files dispatch like any other |
-| A gater returns `PASS {project}` | the gate line in `run.md`; when every gater has returned, the standing checks, then the commit |
-| A gater returns `FIXED {project}` | the gate line in `run.md`; the files it changed join the commit |
-| A gater returns `FAIL {project}`, a cap included | the residuals are unspecified work: a revising `flights-speccer` call, its task files dispatch like any other, then that project's gate runs again; a second `FAIL` of one project travels in the return and the flight lands without a commit |
-| A defect a return names outside the task's files, or a gater's finding outside the flight | `NOTES`; never a fix by the orchestrator |
+| A lander returns `PASS {project}` | the gate line in `run.md`; when every lander has returned, the standing checks, then the commit |
+| A lander returns `FIXED {project}` | the gate line in `run.md`; the files it changed join the commit |
+| A lander returns `FAIL {project}`, a cap included | the residuals are unspecified work: a revising `flights-speccer` call, its task files dispatch like any other, then that project's gate runs again; a second `FAIL` of one project travels in the return and the flight lands without a commit |
+| A defect a return names outside the task's files, or a lander's finding outside the flight | `NOTES`; never a fix by the orchestrator |
 | A spec fault the orchestrator can see (two decisions contradict, an index row without a file) | a revising `flights-speccer` call; never a patch, never a ruling written beside the directory |
 
 ## Review
 
-Executors run no review. The flight is reviewed once, over its whole diff, by [`flights-gater`](flights-gater.md): after the last verdict the orchestrator spawns one gater per project touched, all in one message, each briefed with the flight directory, the project and its testing manual's path, the standing rules and the worktree — and no review effort, which the gater sizes from the diff.
+Executors run no review. The flight is reviewed once, over its whole diff, by [`flights-lander`](flights-lander.md): after the last verdict the orchestrator spawns one lander per project touched, all in one message, each briefed with the flight directory, the project and its testing manual's path, the standing rules and the worktree — and no review effort, which the lander sizes from the diff, unless the caller's brief carries the user's own order for a level above `medium`, passed on as given.
 
 - The per-executor review was the largest single cost of the audited flights (67 review sessions, 182M tokens, 38 of them whole-branch reviews of one growing diff); one review per flight sees the same diff once.
-- The gater fixes what it finds; the orchestrator grades nothing and fixes nothing. Its return is a claim verified like any other: `gate-{project}.md` exists and the return quotes two full-run verdict lines.
-- `FIXED` adds the gater's files to the commit; `FAIL` sends the residuals to `flights-speccer`; a finding outside the flight goes to `NOTES`.
+- The lander fixes what it finds; the orchestrator grades nothing and fixes nothing. Its return is a claim verified like any other: `gate-{project}.md` exists and the return quotes two full-run verdict lines.
+- `FIXED` adds the lander's files to the commit; `FAIL` sends the residuals to `flights-speccer`; a finding outside the flight goes to `NOTES`.
 
 ## `run.md`
 
-One file, `{flight directory}/run.md`. A header line on creation — `flight {directory} · baseline {sha} · {date}` — then one line per event: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED} · {one line}`, `gate {project} {CLAIMED|PASS|FIXED|FAIL} · {one line}` per gater, and `{id} RETRO · {lesson}` for a lesson a return carried ([Retro lines](#retro-lines)); the cross-harness container adds `STALE` as a substitution, and the manual never names it. A `CLAIMED` line names the executor and the time; a `DONE` line names what the executor adapted, or `as specified`, and is what downstream briefs carry; a `FAILED` or `SPEC-DRIFT` line names the round for that id, the cause the executor gave and the executor's transcript, so the revising call and the audit can read how it got where it got. The file is the resume point and the ledger an audit reads.
+One file, `{flight directory}/run.md`. A header line on creation — `flight {directory} · baseline {sha} · {date}` — then one line per event: `{id} {CLAIMED|DONE|FAILED|SPEC-DRIFT|BLOCKED} · {one line}`, `gate {project} {CLAIMED|PASS|FIXED|FAIL} · {one line}` per lander, and `{id} RETRO · {lesson}` for a lesson a return carried ([Retro lines](#retro-lines)); the cross-harness container adds `STALE` as a substitution, and the manual never names it. A `CLAIMED` line names the executor and the time; a `DONE` line names what the executor adapted, or `as specified`, and is what downstream briefs carry; a `FAILED` or `SPEC-DRIFT` line names the round for that id, the cause the executor gave and the executor's transcript, so the revising call and the audit can read how it got where it got. The file is the resume point and the ledger an audit reads.
 
-Beside it, `{flight directory}/agents.tsv`: one tab-separated row per spawn, appended the moment the spawn returns its agent id — task id (or `gate-{project}`, or `spec`), agent type, agent id, round, ISO time, engine (`claude`, `codex`, `seat`) — for every executor, gater and speccer. It is append-only and the orchestrator never reads it back, so it costs the orchestrator's context nothing; `run.md` is re-read on resume and pasted into briefs, which is why the ids stay out of it. The ledger is what lets the metrics script and the audit open exactly a flight's transcripts instead of guessing them from a time window. The id is whatever the spawn returned, verbatim: an agent id on Claude; on Codex the agent path (`/root/{name}`), which the rollout's `session_meta.agent_path` repeats — a Codex orchestrator never sees a thread id, and the first two measured Codex flights matched 0 of 10 rows while the design assumed one. The time is printed by `date -u` inside the appending command, never typed: a measured ledger carried `19:00:00` for a spawn at 18:49, and a clockless date opens a match window at midnight. A voided claim keeps its row, because the agent ran and its spend is the flight's.
+Beside it, `{flight directory}/agents.tsv`: one tab-separated row per spawn, appended the moment the spawn returns its agent id — task id (or `gate-{project}`, or `spec`), agent type, agent id, round, ISO time, engine (`claude`, `codex`, `seat`) — for every executor, lander and speccer. It is append-only and the orchestrator never reads it back, so it costs the orchestrator's context nothing; `run.md` is re-read on resume and pasted into briefs, which is why the ids stay out of it. The ledger is what lets the metrics script and the audit open exactly a flight's transcripts instead of guessing them from a time window. The id is whatever the spawn returned, verbatim: an agent id on Claude; on Codex the agent path (`/root/{name}`), which the rollout's `session_meta.agent_path` repeats — a Codex orchestrator never sees a thread id, and the first two measured Codex flights matched 0 of 10 rows while the design assumed one. The time is printed by `date -u` inside the appending command, never typed: a measured ledger carried `19:00:00` for a spawn at 18:49, and a clockless date opens a match window at midnight. A voided claim keeps its row, because the agent ran and its spend is the flight's.
 
-Beside both, `{flight directory}/briefs/`: one file per spawn, `{id}-r{round}.md` for an executor and `gate-{project}.md` for a gater, written by the command that appends the `CLAIMED` line. The spawn message carries only paths: the brief file, the task file, its `reads`. Codex stores a spawn message encrypted in both rollouts, so on that engine a pasted brief can never be audited; the file costs no extra call and makes the brief an artifact on every engine. Nothing else is written by the orchestrator: no reports, no per-step lines, no rulings.
+Beside both, `{flight directory}/briefs/`: one file per spawn, `{id}-r{round}.md` for an executor and `gate-{project}.md` for a lander, written by the command that appends the `CLAIMED` line. The spawn message carries only paths: the brief file, the task file, its `reads`. Codex stores a spawn message encrypted in both rollouts, so on that engine a pasted brief can never be audited; the file costs no extra call and makes the brief an artifact on every engine. Nothing else is written by the orchestrator: no reports, no per-step lines, no rulings.
 
 ## Landing
 
-After the last verdict the gate runs ([Review](#review)), every project `PASS` or `FIXED`; then the standing checks run once, and the result recorded is the one the orchestrator watched print; a command emitted is not a check run. A check the gater's closing full run already ran on the unchanged tree is quoted from the gater's log, never run a third time: the fenced suite takes about thirteen minutes. A failing check is unspecified work and goes to `flights-speccer` as a revising call. When the brief asks for a commit, `gitter` makes it: Phase COMMIT in the checkout the flight ran in (the worktree, or the project), the files named as the union of the index's `files` over the `DONE` tasks plus the files each gater's return names, the message summarising the flight; the return carries the sha. The landing never merges: a worktree flight reaches `develop` by the user's own gitter MERGE order after the return. The orchestrator runs no fix itself.
+After the last verdict the gate runs ([Review](#review)), every project `PASS` or `FIXED`; then the standing checks run once, and the result recorded is the one the orchestrator watched print; a command emitted is not a check run. A check the lander's closing full run already ran on the unchanged tree is quoted from the lander's log, never run a third time: the fenced suite takes about thirteen minutes. A failing check is unspecified work and goes to `flights-speccer` as a revising call. When the brief asks for a commit, `gitter` makes it: Phase COMMIT in the checkout the flight ran in (the worktree, or the project), the files named as the union of the index's `files` over the `DONE` tasks plus the files each lander's return names, the message summarising the flight; the return carries the sha. The landing never merges: a worktree flight reaches `develop` by the user's own gitter MERGE order after the return. The orchestrator runs no fix itself.
 
 The landing's last act is the measurement: `token-audit.mjs --flight {flight directory}` writes `metrics.md` — one row per agent with calls, wall time, start and peak context, growth per call, tokens, price, failed commands, poll calls, re-reads, contract-file reads, compactions, over cap and how the row was matched — and the return's `COST` row quotes its totals and its most expensive agent. A failed run is reported as failed, never omitted. Hooks were rejected for this: the Codex compile drops an agent's hooks, Codex hooks see only shell commands, and no hook on either engine receives token counts; every measure lives in the transcripts. `/flights:audit` runs the script itself and treats `metrics.md` as a claim.
 
@@ -131,18 +131,18 @@ FLIGHT {directory}
 GATE {project} · {PASS|FIXED|FAIL} · {n} findings, {m} fixed, {k} residual | none
 CHECKS {command → result} | none
 COMMIT {sha} | none
-DISPATCHED {n} executors, {g} gaters, {m} returns, {k} revising rounds
+DISPATCHED {n} executors, {g} landers, {m} returns, {k} revising rounds
 COST {calls} calls · {tokens} · {price} · worst {agent}: {price}, {calls} calls | failed: {error}
 BLOCKED {id}: {question} | none
 RETRO {id}: {lesson} [MANUAL] | none
 NOTES {up to five lines} | none
 ```
 
-`DISPATCHED` reconciles agents sent against returns received; a missing return is named, never silent. `GATE` repeats each gater's first line and counts; the audit checks it against `gate-{project}.md` and the gater's transcript. `NOTES` carries the findings reported outside the flight's files and anything the user should know that fits no row.
+`DISPATCHED` reconciles agents sent against returns received; a missing return is named, never silent. `GATE` repeats each lander's first line and counts; the audit checks it against `gate-{project}.md` and the lander's transcript. `NOTES` carries the findings reported outside the flight's files and anything the user should know that fits no row.
 
 ## Retro lines
 
-A flight learns while it runs. Every executor and gater return may carry one line `RETRO {lesson}`: something about the environment, the tooling, the project law or the testing manual that cost it calls and would cost the next agent the same. The measured case: every agent of one flight hit `pnpm: command not found` and burned six command rounds each, and nobody told the next one or the user.
+A flight learns while it runs. Every executor and lander return may carry one line `RETRO {lesson}`: something about the environment, the tooling, the project law or the testing manual that cost it calls and would cost the next agent the same. The measured case: every agent of one flight hit `pnpm: command not found` and burned six command rounds each, and nobody told the next one or the user.
 
 - One line per agent, at most 200 characters: a fact plus the working alternative. Never a progress note, never about its own task's content; `none` is the normal case.
 - The orchestrator stays `run.md`'s only writer: it appends `{id} RETRO · {line}` and skips a lesson already recorded (the same cause).
@@ -171,7 +171,7 @@ These hold for every orchestrator and every executor on every harness, and belon
 | Re-running a failed task file unchanged | The same spec fails the same way; the fix is a smaller or different task |
 | Summarising an executor's context to keep it going | Executors are fresh per task; a task too big for one context is cut |
 | A stuck-agent kill from inside the nested container | Not possible through the Agent tool; the missing return is named |
-| A cold reviewer agent per `hard` task, briefed by the orchestrator and graded by it | Replaced by [`flights-gater`](flights-gater.md): one `/code-review` of the whole diff per flight, the fix with the agent that found it, nothing for the orchestrator to grade and no report to route |
+| A cold reviewer agent per `smart` task, briefed by the orchestrator and graded by it | Replaced by [`flights-lander`](flights-lander.md): one `/code-review` of the whole diff per flight, the fix with the agent that found it, nothing for the orchestrator to grade and no report to route |
 | Trains, waves, a worktree per wave, BUILD-GREEN handshakes, an entry-point census, a conformance pass | The pipeline this agent replaces |
 
 ## What the evidence says
@@ -183,7 +183,7 @@ The rulings above rest on measured results, collected in the runtime research of
 - Completion is a token matched in code, never text interpreted: every mature runtime (a finish action, a literal sentinel, a terminal event) does this; every runtime that scrapes text calls it a heuristic.
 - Every cap in the field is hand-picked; the useful ones name their exit instead of dying as a generic error. The cap here returns `FAILED {id}: cap` with what landed.
 - Decompose on failure rather than up front: +33 points over fixed decomposition. `FAILED` goes to `flights-speccer` to be cut, never retried as is.
-- Reviewers habituate to agent output (approval +14.5 points, inline comments −22% over ten deciles of exposure) and human detection collapses past about 400 lines. The ruling still reviews the flight's whole diff once, on cost: a review per executor re-read one growing diff 38 times in one flight. The gater raises its review effort with the diff's size, and a flight too large to review in one pass is a flight to cut.
+- Reviewers habituate to agent output (approval +14.5 points, inline comments −22% over ten deciles of exposure) and human detection collapses past about 400 lines. The ruling still reviews the flight's whole diff once, on cost: a review per executor re-read one growing diff 38 times in one flight. The lander raises its review effort with the diff's size, and a flight too large to review in one pass is a flight to cut.
 - A fresh sub-agent costs about 54K tokens of cold start; siblings dispatched in one message share the cached prefix at a tenth of the price. One-message dispatch is also the cache law.
 
 ## Measuring a run
@@ -202,17 +202,17 @@ The rulings above rest on measured results, collected in the runtime research of
 
 | Surface | File | Holds |
 | --- | --- | --- |
-| The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs at spec-execution (`sonnet`), effort `high` |
+| The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs at mechanical (`sonnet`), effort `high` |
 | The containers | `templates/global/commands/flights/orchestrate-{nested,live,cross-harness}.md` | The substitutions, nothing of the manual restated; the nested command's road for a `BLOCKED` ruling |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | A batch goes to this agent; the universal laws; the hand's laws for chat seats; the gater as the only review |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The ladder's third rung ends here; the universal laws; the hand's laws for chat seats; the lander as the only review |
 | The spec writer | [`flights-speccer`](flights-speccer.md) | The index this agent dispatches from (`files` included), the `DISPATCH` line of its return, the revising call |
-| The adopter contract | `CLAUDE.md` and `templates/project/CLAUDE.md` | The executor's first move on a brief naming a task file; the fenced-flight paragraph under § Process |
-| The executors and the gater | [`flights-executors`](flights-executors.md), [`flights-gater`](flights-gater.md) | What the brief no longer restates; the `RETRO` line in every return |
+| The adopter contract | `CLAUDE.md` and `templates/project/CLAUDE.md` | The executor's first move on a brief naming a task file; in this repository's `CLAUDE.md` also the fenced-flight paragraph under § Process |
+| The executors and the lander | [`flights-executors`](flights-executors.md), [`flights-lander`](flights-lander.md) | What the brief no longer restates; the `RETRO` line in every return |
 
 ## Open items
 
-- The caps (80 tool calls per executor, 150 per gater, ten executors in flight at once) are first values, held by prompt alone: no hook enforces them, by ruling. Measure against the next flight.
+- The caps (80 tool calls per executor, 150 per lander, ten executors in flight at once) are first values, held by prompt alone: no hook enforces them, by ruling. Measure against the next flight.
 - The stale bound for the cross-harness container (first value 20 minutes without a status change) is agentmux's number, not ours.
-- Whether `/code-review` runs inside a `flights-gater` sub-agent (the Skill tool at depth); verify on the next nested flight, and measure the gate's cost per flight.
-- Gaters carry no `shares`: each flight has its own worktree or runs on the main branch, so two gaters of one flight never contend. No gate points inside a large flight: the gate runs once, at the landing.
+- Whether `/code-review` runs inside a `flights-lander` sub-agent (the Skill tool at depth); verify on the next nested flight, and measure the gate's cost per flight.
+- Landers carry no `shares`: each flight has its own worktree or runs on the main branch, so two landers of one flight never contend. No gate points inside a large flight: the gate runs once, at the landing.
 - A worktree flight's merge: gitter's MERGE Flight mode expects one merge-gating review report with per-finding statuses, and a flight carries its review findings in `gate-{project}.md` instead; reconcile in the gitter pass.

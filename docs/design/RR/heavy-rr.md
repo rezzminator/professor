@@ -18,7 +18,7 @@
 | --- | --- |
 | Kind | variant of `rr`, declared in `templates/global/agents/variants.json` |
 | Model, effort | `opus`, `medium` |
-| Tools | `WebSearch, WebFetch, Write, Agent, mcp__harvester__findWorks, mcp__harvester__readWork, mcp__harvester__readPage` (inherited from `rr.md`) |
+| Tools | `WebSearch, WebFetch, Write, Agent, mcp__harvester__read, mcp__harvester__search_literature, mcp__harvester__search_web` (inherited from `rr.md`) |
 | Spawns | `sub-rr` only |
 | Writes | the one RR document, into the directory on its `RR-DIR:` line |
 | Start hook | `rr-dir`, matcher `rr\|super-rr\|heavy-rr` |

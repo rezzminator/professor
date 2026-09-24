@@ -19,17 +19,16 @@ The harvester gets every target — page, document, paper, file — by every tec
 
 | Tool | Input | Output |
 | --- | --- | --- |
-| `readPage` | a web URL | Markdown; parses documents too (a PDF URL is parsed); typed result: kind, partial, method, status, path |
-| `parseLocalDocuments` | local paths only | Markdown from the one document parser every source goes through |
-| `download` | any URL (image, PDF, audio, video, zip, anything) | the local file path plus kind, content type and size — no parsing |
-| `findWorks` | a title or bibliographic query | ranked candidates with a handle (papers and books merged) |
-| `readWork` | DOI, arXiv, PMID/PMCID, ISBN, a paper or book landing URL, or a handle | full text through the scholarly path |
-| `webSearch` | a query | results; registered only when a search backend is configured, never exposed when off |
+| `read` | `urls`: web URLs; `files`: local paths (local server only); `publications`: DOI, arXiv, PMID/PMCID, ISBN, a paper or book landing URL, or a handle — separate arrays, one call | Markdown from the one document parser every source goes through (a PDF URL is parsed); publications read the full text through the scholarly path; typed result: kind, gaps, via, status, path |
+| `download_file` | any URL (image, PDF, audio, video, zip, anything) | the local file path plus kind, content type and size — no parsing |
+| `search_literature` | a title or bibliographic query | ranked candidates with a handle (papers and books merged) |
+| `search_web` | a query | results; registered only when a search backend is configured, never exposed when off |
 
+- Renamed (the user's ruling, batch naming, `naming-spec.md`): six tools became the four above; `read` takes `urls`, `files` and `publications` as separate arrays in one call; no alias, no deprecated name.
 - One central retrieval function: every tool that touches the network uses the full ladder (direct, Chrome impersonation, reader services, archive copies, the browser, consent and wall handling) for every kind, images and binaries included. Today `FetchImage` has its own two-rung ladder and the archive and scholarly paths their own.
-- Remote callers: when the MCP server is exposed remotely, only MCP is exposed — never server files, never an HTTP file URL. `download` returns an MCP-native reference the client reads through the protocol; binary is never pushed into the model.
-- `size_only` stays on the read tools (deep-rr budgets with it).
-- Removed, with every reference: `archive` (a zip is a download), `searchCache`, `fetchImage` (folded into `download`).
+- Remote callers: when the MCP server is exposed remotely, only MCP is exposed — never server files, never an HTTP file URL. `download_file` returns an MCP-native reference the client reads through the protocol; binary is never pushed into the model.
+- `include_content: false` stays on `read` (deep-rr budgets with it).
+- Removed, with every reference: `archive` (a zip is a download), `searchCache`, `fetchImage` (folded into `download_file`).
 - Every caller changes in the same pass: `rr` and `sub-rr` (and their `templates/global/` originals, through `/pcm`), deep-rr (workflow, prompts, config, snapshots), `templates/global/commands/pfm.md`, `docs/dev/pfm-surface.md`, the testing landscape rows, the server instructions, and the `pfm harvest` CLI verbs.
 - Results are typed and declared with an output schema; today every tool returns plain text and discards its structured output.
 
@@ -65,7 +64,7 @@ The harvester gets every target — page, document, paper, file — by every tec
 4. G1 reader-rung checks: the wall, paywall and stated-gap checks run on reader-service output too (Bloomberg: 2 paragraphs of a paywalled article with no flag; Quora).
 5. G2 stated against loaded on every rung, when the page states a count (Glassdoor: 1 of 103, silent).
 6. G3 a redirect to a different page is named (a dead Booking hotel slug stored a city search page under the hotel's URL).
-7. The surface redesign, built from `surface-spec.md` in five tasks (R1 central retrieval, R2 tools, R3 docs lanes CLI, R4 deep-rr, R5 templates). Moved ahead of the failure messages: R2 rewrites every error string that names an old tool, so F7 works on the new names once. R1 landed without the file policy's browser-download rung: the browser adapter returns rendered HTML only and cannot hand back a download's bytes, so that rung is R1b (a download-capture method on the adapter and its Python side), after R2; provider artifacts still come back in memory rather than streamed. RH (user request): `readPage`, `download` and `readWork` take a `headers` object extending the request headers, scoped to the target's origin (`surface-spec.md` § Caller headers); it runs after R1b and before R3, so the docs describe it once.
+7. The surface redesign, built from `surface-spec.md` in five tasks (R1 central retrieval, R2 tools, R3 docs lanes CLI, R4 deep-rr, R5 templates). Moved ahead of the failure messages: R2 rewrites every error string that names an old tool, so F7 works on the new names once. R1 landed without the file policy's browser-download rung: the browser adapter returns rendered HTML only and cannot hand back a download's bytes, so that rung is R1b (a download-capture method on the adapter and its Python side), after R2; provider artifacts still come back in memory rather than streamed. RH (user request): `read` and `download_file` take a `headers` object extending the request headers, scoped to the target's origin (`surface-spec.md` § Caller headers); it runs after R1b and before R3, so the docs describe it once.
 8. Failure messages (user ruling: hard-site testing is closed): every target the harvester cannot get ends in a meaningful, named error — what blocked it (challenge, login wall, paywall, rate limit, not found, unsupported format) and what the caller can do — never an empty or generic "retrieval failed".
 9. Bake-offs: closed, winners recorded above.
 10. Formats: the binary guard and file results, then the parsed formats with the bake-off winners, OCR, share links.

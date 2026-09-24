@@ -1327,47 +1327,47 @@
   var EDGEC = { pass: '#6a9fe0', hit: '#6a9fe0', miss: '#5b6b64', empty: '#33433d', skip: '#3d4d47', reject: '#e07a62', win: '#e3a13a', fail: '#e07a62' };
 
   var S = [
-    { k: 'readPage · URL', t: 'Article behind a bot wall', call: 'readPage("https://news.example.com/2026/09/fusion-milestone")', steps: [
+    { k: 'read · URL', t: 'Article behind a bot wall', call: 'read({ urls: ["https://news.example.com/2026/09/fusion-milestone"] })', steps: [
       ['req', 'pass', 'request received'], ['route', 'pass', 'an http(s) URL goes to the web ladder'], ['guards', 'pass', 'public host over https; not a Drive link or a PubMed search page'],
       ['cache', 'miss', 'no cached copy under any file type'], ['direct', 'reject', 'HTTP 403: the page is a bot wall'],
       ['chrome', 'reject', 'HTTP 200, but the page says "Just a moment…": still a wall'], ['jina', 'reject', 'HTTP 451: this reader is blocked on the site'],
       ['defuddle', 'reject', 'returned the wall text again: not usable'], ['browser', 'reject', 'headless Chrome hit a passive wall, which earns one visible retry'],
       ['browser', 'win', 'visible Chrome got past the wall'], ['trafilatura', 'pass', 'page converted to Markdown; images saved locally'], ['md', 'win', '14,820 characters stored in the cache']],
-      r: { big: '14,820', unit: 'characters of Markdown', kv: [['method', 'browser-chrome'], ['trace', 'direct → chrome-impersonation → jina → defuddle → browser']], note: 'The next request for this URL is answered from the cache in one step.' } },
-    { k: 'readPage · URL', t: 'JavaScript app page', call: 'readPage("https://app.example.dev/docs/routing")', steps: [
+      r: { big: '14,820', unit: 'characters of Markdown', kv: [['via', 'browser-chrome'], ['trace', 'direct → chrome-impersonation → jina → defuddle → browser']], note: 'The next request for this URL is answered from the cache in one step.' } },
+    { k: 'read · URL', t: 'JavaScript app page', call: 'read({ urls: ["https://app.example.dev/docs/routing"] })', steps: [
       ['req', 'pass', 'request received'], ['route', 'pass', 'an http(s) URL goes to the web ladder'], ['guards', 'pass', 'public host over https'], ['cache', 'miss', 'no cached copy under any file type'],
       ['direct', 'reject', 'HTTP 200, 1.9 KB, built by JavaScript. Harvester requested an address that can’t exist and got the same page back: an empty shell'],
       ['chrome', 'reject', 'same shell text, rejected on sight'], ['jina', 'win', 'returned 6,420 characters of this page’s own content'], ['md', 'win', 'Jina already returns Markdown, so no conversion is needed']],
-      r: { big: '6,420', unit: 'characters of Markdown', kv: [['method', 'jina'], ['trace', 'direct → chrome-impersonation → jina']], note: 'The shell looks the same at every address, so storing it would have cached the wrong page.' } },
-    { k: 'readPage · URL', t: 'Scanned PDF', call: 'readPage("https://archive.example.org/reports/1931-survey.pdf")', steps: [
+      r: { big: '6,420', unit: 'characters of Markdown', kv: [['via', 'jina'], ['trace', 'direct → chrome-impersonation → jina']], note: 'The shell looks the same at every address, so storing it would have cached the wrong page.' } },
+    { k: 'read · URL', t: 'Scanned PDF', call: 'read({ urls: ["https://archive.example.org/reports/1931-survey.pdf"] })', steps: [
       ['req', 'pass', 'request received'], ['route', 'pass', 'a .pdf address: download as a file, and the body must be a real PDF'], ['guards', 'pass', 'public host over https'], ['cache', 'miss', 'no cached copy'],
       ['direct', 'reject', 'a real PDF, but its text layer is empty (0 characters)'], ['chrome', 'reject', 'same file, same empty text'],
       ['jina', 'skip', 'the reader services are skipped for .pdf addresses'], ['defuddle', 'skip', 'skipped for .pdf addresses'], ['browser', 'skip', 'skipped for .pdf addresses'],
       ['wayback', 'reject', 'no archived snapshot exists'], ['ocr', 'win', 'last resort: one OCR pass over the bytes already downloaded'], ['pymupdf', 'pass', 'OCR recovered 22,406 characters'], ['md', 'win', 'stored as pdf:ocr']],
-      r: { big: '22,406', unit: 'characters recovered by OCR', kv: [['method', 'pdf:ocr'], ['trace', 'direct → chrome-impersonation → wayback → ocr']], note: 'OCR is slow, so it runs only after every faster step has failed.' } },
-    { k: 'readWork · DOI', t: 'Open-access paper', call: 'readWork("10.5555/example.2024.117")', steps: [
+      r: { big: '22,406', unit: 'characters recovered by OCR', kv: [['via', 'pdf:ocr'], ['trace', 'direct → chrome-impersonation → wayback → ocr']], note: 'OCR is slow, so it runs only after every faster step has failed.' } },
+    { k: 'read · DOI', t: 'Open-access paper', call: 'read({ publications: ["10.5555/example.2024.117"] })', steps: [
       ['req', 'pass', 'request received'], ['route', 'pass', 'recognised as a DOI, so it goes to the identifier chain'], ['cache', 'miss', 'this DOI has not been fetched before'],
       [OA12, 'par', '12 resolvers queried at once: 4 returned links, 8 had none (no answer is not an error)', ['unpaywall', 'openalex', 's2', 'crossref']],
       ['arxiv', 'hit', 'Semantic Scholar supplied an arXiv ID, so the arXiv PDF becomes a candidate'],
       ['rank', 'pass', 'order to try: arXiv 0, Unpaywall 10, OpenAlex 12, Crossref 38'], ['direct', 'reject', 'arXiv: HTTP 429, rate-limited'],
       ['chrome', 'reject', 'arXiv: HTTP 429 again, so move to the next candidate'], ['unpaywall', 'pass', 'next candidate: the PDF in a repository that Unpaywall found'],
       ['direct', 'win', 'HTTP 200 and a real PDF'], ['pymupdf', 'pass', 'PDF converted to Markdown'], ['md', 'win', 'cached under both the link and the DOI']],
-      r: { big: '48,210', unit: 'characters of Markdown', kv: [['method', 'direct'], ['trace', 'oa:arxiv → oa:unpaywall']], note: 'The fallback sources were never touched, because a legal open copy won.' } },
-    { k: 'readWork · PMID', t: 'PubMed paper', call: 'readWork("PMID:12345678")', steps: [
+      r: { big: '48,210', unit: 'characters of Markdown', kv: [['via', 'direct'], ['trace', 'oa:arxiv → oa:unpaywall']], note: 'The fallback sources were never touched, because a legal open copy won.' } },
+    { k: 'read · PMID', t: 'PubMed paper', call: 'read({ publications: ["PMID:12345678"] })', steps: [
       ['req', 'pass', 'request received'], ['route', 'pass', 'recognised as a PMID, so it goes to the identifier chain'], ['cache', 'miss', 'not fetched before'],
       ['idconv', 'pass', 'NCBI converts the PMID to PMC7654321'], ['epmc', 'hit', 'candidate: Europe PMC’s rendered-PDF link'],
       ['direct', 'reject', 'this record is HTML-only, so no PDF came back'], ['chrome', 'reject', 'same answer'],
       ['pmcoa', 'pass', 'PMC OA service: its broken ftp:// link rewritten to the working https:// address'], ['direct', 'win', 'HTTP 200 and a real PDF'],
       ['pymupdf', 'pass', 'PDF converted to Markdown'], ['md', 'win', 'stored as mirror:pmc-oa-pdf']],
-      r: { big: '31,904', unit: 'characters of Markdown', kv: [['method', 'mirror:pmc-oa-pdf'], ['trace', 'oa:europepmc → oa:pmc-fcgi']], note: 'After this come the PMC article page and Europe PMC’s full-text XML.' } },
-    { k: 'readWork · ISBN', t: 'Open academic book', call: 'readWork("978-3-16-148410-0")', steps: [
+      r: { big: '31,904', unit: 'characters of Markdown', kv: [['via', 'mirror:pmc-oa-pdf'], ['trace', 'oa:europepmc → oa:pmc-fcgi']], note: 'After this come the PMC article page and Europe PMC’s full-text XML.' } },
+    { k: 'read · ISBN', t: 'Open academic book', call: 'read({ publications: ["978-3-16-148410-0"] })', steps: [
       ['req', 'pass', 'request received'], ['route', 'pass', 'recognised as an ISBN, so it goes to the book chain'], ['cache', 'miss', 'not fetched before'],
       ['oapen', 'hit', 'OAPEN has it as an open book; the original EPUB file is a candidate'], ['gutenberg', 'skip', 'Gutenberg is searched only by title, and this is an ISBN'],
       ['openlibrary', 'empty', 'no public-domain scan'], ['doab', 'empty', 'no record'], ['hathi', 'empty', 'no full-view volume'], ['gbooks', 'skip', 'no Google Books API key configured'],
       ['rank', 'pass', 'OAPEN scores 8 + 8 (not a PDF) = 16'], ['direct', 'win', 'the download looks like a zip, but its contents say EPUB, so it’s treated as a book, not an archive'],
       ['markitdown', 'pass', 'EPUB converted to Markdown'], ['md', 'win', 'stored under the ISBN']],
-      r: { big: '212,300', unit: 'characters: a whole book', kv: [['method', 'direct'], ['trace', 'oa:oapen']], note: 'Lending-library copies are never served, only public-domain or openly licensed books.' } },
-    { k: 'readWork · DOI', t: 'Paywalled paper', call: 'readWork("10.5555/paywalled.2025.42")', steps: [
+      r: { big: '212,300', unit: 'characters: a whole book', kv: [['via', 'direct'], ['trace', 'oa:oapen']], note: 'Lending-library copies are never served, only public-domain or openly licensed books.' } },
+    { k: 'read · DOI', t: 'Paywalled paper', call: 'read({ publications: ["10.5555/paywalled.2025.42"] })', steps: [
       ['req', 'pass', 'request received'], ['route', 'pass', 'recognised as a DOI'], ['cache', 'miss', 'not fetched before'],
       [OA12, 'par', '11 resolvers queried and Unpaywall skipped (no operator email); only Crossref answered, with the publisher’s page', ['crossref'], ['unpaywall']],
       ['rank', 'pass', 'Crossref 30 + 8 (a web page, not a PDF) = 38: the only candidate'], ['direct', 'reject', 'a paywall page with fewer than 500 characters of text'],
@@ -1375,11 +1375,11 @@
       ['scholar', 'skip', 'not configured'],
       ['wayback', 'reject', 'the archived doi.org snapshot shows the same paywall'], ['fail', 'fail', 'failure names every source checked and marks Unpaywall as skipped']],
       r: { fail: true, big: 'No copy', unit: 'and it says why', kv: [['kind', 'named failure'], ['trace', 'oa:crossref → wayback']], note: 'It says "no free, legal full text exists in the configured sources" and lists them. An outage would be reported as an outage, never as "nothing found".' } },
-    { k: 'findWorks · title', t: 'Just a title', call: 'findWorks("attention is all you need")', steps: [
-      ['req', 'pass', 'request received'], ['route', 'pass', 'a title is not an identifier, so findWorks searches for it instead of guessing'],
-      [['openalex', 'arxiv', 'crossref', 's2', 'openlibrary', 'gutenberg'], 'par', 'findWorks runs 5 searches at once (Open Library and Gutenberg count as one)', ['openalex', 'arxiv', 'crossref', 's2']],
-      ['rank', 'pass', 'duplicates merged by link; sorted by title match, then free licences first'], ['cands', 'win', '8 candidates, each with a handle you can pass to readWork']],
-      r: { big: '8', unit: 'candidate works', kv: [['tool', 'findWorks'], ['next', 'readWork(handle): a DOI, an arXiv PDF or an ISBN']], note: 'Harvester never quietly decides "this is probably the paper". You pick, then readWork.' } }
+    { k: 'search_literature · title', t: 'Just a title', call: 'search_literature({ query: "attention is all you need" })', steps: [
+      ['req', 'pass', 'request received'], ['route', 'pass', 'a title is not an identifier, so search_literature searches for it instead of guessing'],
+      [['openalex', 'arxiv', 'crossref', 's2', 'openlibrary', 'gutenberg'], 'par', 'search_literature runs 5 searches at once (Open Library and Gutenberg count as one)', ['openalex', 'arxiv', 'crossref', 's2']],
+      ['rank', 'pass', 'duplicates merged by link; sorted by title match, then free licences first'], ['cands', 'win', '8 candidates, each with a handle you can pass to read in publications']],
+      r: { big: '8', unit: 'candidate works', kv: [['tool', 'search_literature'], ['next', 'read({ publications: [handle] }): a DOI, an arXiv PDF or an ISBN']], note: 'Harvester never quietly decides "this is probably the paper". You pick, then read it by its handle.' } }
   ];
 
   var SOURCES = Object.keys(N).filter(function (id) { return N[id][1]; });

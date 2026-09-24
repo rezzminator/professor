@@ -903,7 +903,7 @@ else
     fi
     err="$(printf '%s' "$out" | jq -r '.[0].error // empty')"
     kind="$(printf '%s' "$out" | jq -r '.[0].error_kind // empty')"
-    status="$(printf '%s' "$out" | jq -r '.[0].cache_status // empty')"
+    status="$(printf '%s' "$out" | jq -r '.[0] | if has("cached") then "cached=\(.cached)" else empty end')"
     if [ -n "$err" ]; then
       if [ "$must" -eq 1 ]; then
         bad="$bad $what ($src) failed (exit $rc, kind '${kind:-<none>}'): $err;"
@@ -915,7 +915,7 @@ else
       return
     fi
     [ "$rc" -eq 0 ] || bad="$bad $what ($src) reported no error but pfm harvest exited $rc;"
-    [ -n "$status" ] || bad="$bad $what ($src) succeeded without a cache_status;"
+    [ -n "$status" ] || bad="$bad $what ($src) succeeded without a cached field;"
     if [ -n "$needle" ] && ! printf '%s' "$out" | jq -r '.[0].content // ""' | grep -qF -- "$needle"; then
       bad="$bad $what ($src) content lacks '$needle' (kind $(printf '%s' "$out" | jq -r '.[0].kind // "?"'), $(printf '%s' "$out" | jq -r '.[0].chars // 0') chars);"
     fi
@@ -931,15 +931,15 @@ else
   harvest_one "PMID" "pmid:16060722" 0
   harvest_one "PMCID" "PMC1182327" 0
   harvest_one "ISBN" "9780262033848" 0
-  # --size-only and --refresh on the text URL: the cache answers, then is bypassed.
-  size="$(pfm harvest --size-only "$url_txt" 2>&1)"
+  # --include-content=false and --refresh on the text URL: the cache answers, then is bypassed.
+  size="$(pfm harvest --include-content=false "$url_txt" 2>&1)"
   rc=$?
-  [ "$rc" -eq 0 ] || bad="$bad --size-only exited $rc: $(one_line "$size");"
-  printf '%s' "$size" | grep -qE 'size: [0-9]+ tokens / chars: [0-9]+ / path: .+ / cache_status: (hit|miss|refresh|public)' ||
-    bad="$bad --size-only did not print the size/path/cache_status line: $(one_line "$size");"
-  printf '%s' "$size" | grep -qF 'cache_status: hit' || bad="$bad a second fetch of $url_txt was not a cache hit: $(one_line "$size");"
-  refresh="$(pfm harvest --json --refresh "$url_txt" 2>/dev/null | jq -r '.[0].cache_status // empty')"
-  [ "$refresh" = refresh ] || bad="$bad --refresh reported cache_status '${refresh:-<none>}' (want refresh);"
+  [ "$rc" -eq 0 ] || bad="$bad --include-content=false exited $rc: $(one_line "$size");"
+  printf '%s' "$size" | grep -qE 'tokens: [0-9]+ / chars: [0-9]+ / path: .+ / cached: (true|false)' ||
+    bad="$bad --include-content=false did not print the tokens/chars/path/cached line: $(one_line "$size");"
+  printf '%s' "$size" | grep -qF 'cached: true' || bad="$bad a second fetch of $url_txt was not a cache hit: $(one_line "$size");"
+  refresh="$(pfm harvest --json --refresh "$url_txt" 2>/dev/null | jq -r '.[0] | if has("cached") then (.cached | tostring) else empty end')"
+  [ "$refresh" = false ] || bad="$bad --refresh reported cached '${refresh:-<none>}' (want false: the cache was bypassed);"
   pfm harvest >/dev/null 2>&1
   rc=$?
   [ "$rc" -eq 2 ] || bad="$bad pfm harvest with no source exited $rc (want 2, usage);"

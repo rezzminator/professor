@@ -511,7 +511,7 @@ else
     bad="$bad M41: /mcp/chat tools/list: $MCP_WHY;"
   fi
   if mcp_http harvester tools/list '{}'; then
-    [ "$(printf '%s' "$MCP_OUT" | jq -r '.result.tools | length')" -ge 5 ] || bad="$bad M41: /mcp/harvester serves $(printf '%s' "$MCP_OUT" | jq -r '.result.tools | length') tools (want ≥ 5);"
+    [ "$(printf '%s' "$MCP_OUT" | jq -r '.result.tools | length')" -ge 3 ] || bad="$bad M41: /mcp/harvester serves $(printf '%s' "$MCP_OUT" | jq -r '.result.tools | length') tools (want read, download_file, search_literature, and search_web when configured: ≥ 3);"
   else
     bad="$bad M41: /mcp/harvester tools/list: $MCP_WHY;"
   fi
@@ -738,11 +738,11 @@ fi
 # M50 — `pfm mcp harvester serve [--transport stdio]`, and every retired flag by name
 if mcp_tools stdio harvester; then
   stdio_harv="$MCP_TOOLS"
-  for t in readPage parseLocalDocuments download findWorks readWork; do
+  for t in read download_file search_literature; do
     printf '%s\n' "$stdio_harv" | grep -qx "$t" || bad="$bad M50: harvester stdio does not serve $t;"
   done
-  extra="$(printf '%s\n' "$stdio_harv" | grep -vxE 'readPage|parseLocalDocuments|download|findWorks|readWork|webSearch' | tr '\n' ' ')"
-  [ -z "${extra// /}" ] || bad="$bad M50: harvester stdio serves tools outside the six: $extra;"
+  extra="$(printf '%s\n' "$stdio_harv" | grep -vxE 'read|download_file|search_literature|search_web' | tr '\n' ' ')"
+  [ -z "${extra// /}" ] || bad="$bad M50: harvester stdio serves tools outside the four: $extra;"
 else
   bad="$bad M50: harvester stdio tools/list: $MCP_WHY;"
 fi
@@ -1258,62 +1258,79 @@ printf '# lane M local note\n\nSENTINEL-LANE-M-%s\n' "$$" >"$NOTE"
 if ! pfm mcp ls 2>/dev/null | grep -qE '^harvester	true	'; then
   bad="$bad the harvester is disabled in this root (pfm mcp ls) — infra/demo/setup.sh install fell back to --skip-harvest, so no harvester tool can be driven;"
 fi
-# item <n> <jq-path> — one field of the n-th typed item (items[] of readPage,
-# parseLocalDocuments, readWork and download)
-item() { printf '%s' "$MCP_STRUCT" | jq -r ".items[$1]$2 | if . == null then empty else . end" 2>/dev/null; } # false stays false
-# M21 readPage — a real page: the typed item carries the path of the cached
-# artifact and the body; a second read is `cached`; size_only drops the body
-# and keeps chars and path; one source per item, order kept, a failing item
-# beside a good one never makes the call isError
+# item <group> <n> <jq-path> — one field of the n-th typed item of a group:
+# read answers {urls, files, publications}, each in its input's order;
+# download_file answers items
+item() { printf '%s' "$MCP_STRUCT" | jq -r ".$1[$2]$3 | if . == null then empty else . end" 2>/dev/null; } # false stays false
+# M21 read {urls} — a real page: the typed item carries the path of the cached
+# artifact and the body; a second read is `cached`; include_content false
+# drops the body and keeps chars and path; one url per item, order kept, a
+# failing item beside a good one never makes the call isError
 if [ -z "$bad" ]; then
-  if MCP_HTTP_TIMEOUT=180 mcp_call http harvester readPage "$(jq -cn --arg u "$RFC_DIRECT" '{sources: [$u]}')"; then
+  if MCP_HTTP_TIMEOUT=180 mcp_call http harvester read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u]}')"; then
     if [ "$MCP_ISERR" != false ] || [ -z "$MCP_STRUCT" ]; then
-      bad="$bad M21: readPage $RFC_DIRECT isError=$MCP_ISERR or no structuredContent: $(one_line "$MCP_TEXT" | cut -c1-200);"
-    elif [ -n "$(item 0 .error)" ]; then
-      bad="$bad M21: readPage $RFC_DIRECT failed: $(one_line "$(item 0 .error)" | cut -c1-200) (network or policy — the item says which);"
+      bad="$bad M21: read $RFC_DIRECT isError=$MCP_ISERR or no structuredContent: $(one_line "$MCP_TEXT" | cut -c1-200);"
+    elif [ -n "$(item urls 0 .error)" ]; then
+      bad="$bad M21: read $RFC_DIRECT failed: $(one_line "$(item urls 0 .error)" | cut -c1-200) (network or policy — the item says which);"
     else
-      RFC_PATH="$(item 0 .path)"
-      [ "$(item 0 .source)" = "$RFC_DIRECT" ] || bad="$bad M21: the item's source is '$(item 0 .source)', not $RFC_DIRECT;"
+      RFC_PATH="$(item urls 0 .path)"
+      [ "$(item urls 0 .source)" = "$RFC_DIRECT" ] || bad="$bad M21: the item's source is '$(item urls 0 .source)', not $RFC_DIRECT;"
       [ -f "$RFC_PATH" ] || bad="$bad M21: the item's path '$RFC_PATH' is not a file on disk;"
-      item 0 .content | grep -qi 'coffee' || bad="$bad M21: the content of RFC 2324 does not mention coffee — not the document;"
-      [ "$(text_line 1)" = "# $RFC_DIRECT" ] || bad="$bad M21: the readable text opens with '$(text_line 1)', not '# $RFC_DIRECT';"
+      item urls 0 .content | grep -qi 'coffee' || bad="$bad M21: the content of RFC 2324 does not mention coffee — not the document;"
+      [ "$(item urls 0 '.gaps | type')" = array ] || bad="$bad M21: the item's gaps is not a list: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ -n "$(item urls 0 .via)" ] || bad="$bad M21: the item names no via: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ "$(sfield '[keys[] | select(. != "urls")] | length')" = 0 ] || bad="$bad M21: a urls-only read answered other groups: $(sfield 'keys | join(",")');"
+      printf '%s\n' "$MCP_TEXT" | sed -n 's/^#\{1,\} //p' | grep -qxF "$RFC_DIRECT" || bad="$bad M21: the readable text carries no heading for $RFC_DIRECT: $(one_line "$MCP_TEXT" | cut -c1-160);"
+      [ "$(text_line 1)" = '## urls (1)' ] || bad="$bad M21: the readable text does not open with its group heading '## urls (1)': $(one_line "$(text_line 1)");"
     fi
   else
-    bad="$bad M21: readPage: $MCP_WHY;"
+    bad="$bad M21: read: $MCP_WHY;"
   fi
   if [ -n "$RFC_PATH" ]; then
-    if MCP_HTTP_TIMEOUT=120 mcp_call http harvester readPage "$(jq -cn --arg u "$RFC_DIRECT" '{sources: [$u]}')"; then
-      [ "$(item 0 .cached)" = true ] || bad="$bad M21: the second read of the same URL is not cached: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    if MCP_HTTP_TIMEOUT=120 mcp_call http harvester read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u]}')"; then
+      [ "$(item urls 0 .cached)" = true ] || bad="$bad M21: the second read of the same URL is not cached: $(one_line "$MCP_STRUCT" | cut -c1-160);"
     else
-      bad="$bad M21: second readPage: $MCP_WHY;"
+      bad="$bad M21: second read: $MCP_WHY;"
     fi
-    if MCP_HTTP_TIMEOUT=120 mcp_call http harvester readPage "$(jq -cn --arg u "$RFC_DIRECT" '{sources: [$u], size_only: true}')"; then
-      [ -z "$(item 0 .content)" ] && [ "$(item 0 .chars)" -gt 0 ] 2>/dev/null && [ "$(item 0 .path)" = "$RFC_PATH" ] ||
-        bad="$bad M21: size_only did not answer an item with chars and path and no content: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    if MCP_HTTP_TIMEOUT=120 mcp_call http harvester read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u], include_content: false}')"; then
+      [ -z "$(item urls 0 .content)" ] && [ "$(item urls 0 .chars)" -gt 0 ] 2>/dev/null && [ "$(item urls 0 .path)" = "$RFC_PATH" ] ||
+        bad="$bad M21: include_content false did not answer an item with chars and path and no content: $(one_line "$MCP_STRUCT" | cut -c1-160);"
     else
-      bad="$bad M21: size_only: $MCP_WHY;"
+      bad="$bad M21: include_content false: $MCP_WHY;"
     fi
   fi
-  if mcp_call http harvester readPage '{"sources":[]}'; then
-    [ "$MCP_RPCERR$MCP_ISERR" != false ] || bad="$bad M21: an empty sources list was accepted;"
+  if mcp_call http harvester read '{"urls":[]}'; then
+    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'read needs at least one item in urls, files or publications' || bad="$bad M21: a read with no item was not refused by name: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
   else
-    bad="$bad M21: readPage empty: $MCP_WHY;"
+    bad="$bad M21: read empty: $MCP_WHY;"
   fi
-  # M29 wrong-tool input — a per-item error that names the right tool, beside
+  # M21 batch limits — 50 items in total, 20 of them publications, each refused by name before any fetch
+  if mcp_call http harvester read "$(jq -cn '{urls: [range(51) | "https://example.invalid/\(.)"]}')"; then
+    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'read takes at most 50 items in total across urls, files and publications; this call sent 51' || bad="$bad M21: 51 items were not refused by the total limit: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
+  else
+    bad="$bad M21: read 51 items: $MCP_WHY;"
+  fi
+  if mcp_call http harvester read "$(jq -cn '{publications: [range(21) | "10.1000/lane-m.\(.)"]}')"; then
+    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'publications takes at most 20 items; this call sent 21' || bad="$bad M21: 21 publications were not refused by the publications limit: $(one_line "$MCP_RPCERR$MCP_TEXT" | cut -c1-160);"
+  else
+    bad="$bad M21: read 21 publications: $MCP_WHY;"
+  fi
+  # M29 misplaced input — a per-item error that names the right field, beside
   # a good item (M21's isolation and order ride on the same call)
-  if MCP_HTTP_TIMEOUT=120 mcp_call http harvester readPage "$(jq -cn --arg u "$RFC_DIRECT" --arg p "$SCRATCH/no-such-document.md" '{sources: [$u, $p, "10.1038/nphys1170"]}')"; then
+  if MCP_HTTP_TIMEOUT=120 mcp_call http harvester read "$(jq -cn --arg u "$RFC_DIRECT" --arg p "$SCRATCH/no-such-document.md" '{urls: [$u, $p, "10.1038/nphys1170"]}')"; then
     [ "$MCP_ISERR" = false ] || bad="$bad M21: failing items made the whole call isError;"
-    [ "$(sfield '.items | length')" = 3 ] || bad="$bad M21: three sources answered $(sfield '.items | length') item(s), not one per source;"
-    [ "$(item 0 .source)" = "$RFC_DIRECT" ] && [ -z "$(item 0 .error)" ] || bad="$bad M21: item order not kept or the good item failed beside the bad ones: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-    item 1 .error | grep -q 'parseLocalDocuments' || bad="$bad M29: a local path given to readPage does not name parseLocalDocuments: $(one_line "$(item 1 .error)");"
-    item 2 .error | grep -q 'readWork' || bad="$bad M29: a DOI given to readPage does not name readWork: $(one_line "$(item 2 .error)");"
+    [ "$(sfield '.urls | length')" = 3 ] || bad="$bad M21: three urls answered $(sfield '.urls | length') item(s), not one per url;"
+    [ "$(item urls 0 .source)" = "$RFC_DIRECT" ] && [ -z "$(item urls 0 .error)" ] || bad="$bad M21: item order not kept or the good item failed beside the bad ones: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    [ "$(item urls 1 .error)" = 'this is a local path; put it in files.' ] || bad="$bad M29: a local path given in urls does not say 'this is a local path; put it in files.': $(one_line "$(item urls 1 .error)");"
+    [ "$(item urls 2 .error)" = 'this is a DOI; put it in publications.' ] || bad="$bad M29: a DOI given in urls does not say 'this is a DOI; put it in publications.': $(one_line "$(item urls 2 .error)");"
+    [ "$(text_line 1)" = '## urls (3)' ] || bad="$bad M21: three urls do not open the text with '## urls (3)': $(one_line "$(text_line 1)");"
   else
-    bad="$bad M29: readPage wrong-tool items: $MCP_WHY;"
+    bad="$bad M29: read misplaced items: $MCP_WHY;"
   fi
-  # M22 findWorks — either typed candidates, each with a handle, or the named empty answer
-  if MCP_HTTP_TIMEOUT=120 mcp_call http harvester findWorks '{"query":"Attention Is All You Need","limit":3,"kind":"paper"}'; then
+  # M22 search_literature — either typed candidates, each with a handle, or the named empty answer
+  if MCP_HTTP_TIMEOUT=120 mcp_call http harvester search_literature '{"query":"Attention Is All You Need","limit":3,"type":"paper"}'; then
     if [ "$MCP_ISERR" != false ]; then
-      bad="$bad M22: findWorks isError (discovery failed): $(one_line "$MCP_TEXT" | cut -c1-160);"
+      bad="$bad M22: search_literature isError (discovery failed): $(one_line "$MCP_TEXT" | cut -c1-160);"
     elif [ "$(sfield '.candidates | length')" -gt 0 ] 2>/dev/null; then
       [ "$(sfield '[.candidates[] | select((.handle // "") == "")] | length')" = 0 ] || bad="$bad M22: a candidate carries no handle: $(one_line "$MCP_STRUCT" | cut -c1-160);"
       printf '%s' "$(text_line 1)" | grep -qE '^[0-9]+ candidate work\(s\) for "Attention Is All You Need"' || bad="$bad M22: the readable text does not count the candidates: $(one_line "$(text_line 1)");"
@@ -1321,17 +1338,22 @@ if [ -z "$bad" ]; then
     elif [ "$(sfield '.candidates | length')" = 0 ] && printf '%s' "$(text_line 1)" | grep -q '^No candidate works found for "Attention Is All You Need"'; then
       find_note="none found (named)"
     else
-      bad="$bad M22: findWorks answered neither typed candidates nor the named empty answer: $(one_line "$MCP_TEXT" | cut -c1-160);"
+      bad="$bad M22: search_literature answered neither typed candidates nor the named empty answer: $(one_line "$MCP_TEXT" | cut -c1-160);"
     fi
   else
-    bad="$bad M22: findWorks: $MCP_WHY;"
+    bad="$bad M22: search_literature: $MCP_WHY;"
   fi
-  if mcp_call http harvester findWorks '{"query":"   "}'; then
+  if mcp_call http harvester search_literature '{"query":"   "}'; then
     [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'query must not be empty' || bad="$bad M22: a blank query was not refused by name: $(one_line "$MCP_TEXT");"
   else
-    bad="$bad M22: findWorks blank: $MCP_WHY;"
+    bad="$bad M22: search_literature blank: $MCP_WHY;"
   fi
-  # M23/M24 webSearch — served only when configured; unconfigured it is hidden
+  if mcp_call http harvester search_literature '{"query":"x","type":"article"}'; then
+    [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'type must be any, paper or book, got "article"' || bad="$bad M22: an unknown type was not refused by name: $(one_line "$MCP_TEXT");"
+  else
+    bad="$bad M22: search_literature type: $MCP_WHY;"
+  fi
+  # M23/M24 search_web — served only when configured; unconfigured it is hidden
   # from tools/list and a call is the protocol's unknown-tool error; configured,
   # a backend failure is an isError RESULT (data), never a Go error
   search_cfg=false
@@ -1341,108 +1363,115 @@ if [ -z "$bad" ]; then
   if mcp_tools http harvester; then
     harv_tools="$MCP_TOOLS"
     search_served=false
-    printf '%s\n' "$harv_tools" | grep -qx webSearch && search_served=true
-    [ "$search_served" = "$search_cfg" ] || bad="$bad M23: webSearch served=$search_served while harvester.config.json says configured=$search_cfg;"
-    if mcp_call http harvester webSearch '{"query":"HTCPCP teapot"}'; then
+    printf '%s\n' "$harv_tools" | grep -qx search_web && search_served=true
+    [ "$search_served" = "$search_cfg" ] || bad="$bad M23: search_web served=$search_served while harvester.config.json says configured=$search_cfg;"
+    if mcp_call http harvester search_web '{"query":"HTCPCP teapot"}'; then
       if [ "$search_cfg" = true ]; then
-        [ -z "$MCP_RPCERR" ] || bad="$bad M23: a configured webSearch answered a protocol error: $MCP_RPCERR;"
+        [ -z "$MCP_RPCERR" ] || bad="$bad M23: a configured search_web answered a protocol error: $MCP_RPCERR;"
         if [ "$MCP_ISERR" = true ]; then
-          printf '%s' "$MCP_TEXT" | grep -q '^Web search failed' || bad="$bad M24: the webSearch failure is isError but not the named 'Web search failed' rendering: $(one_line "$MCP_TEXT");"
+          printf '%s' "$MCP_TEXT" | grep -q '^Web search failed' || bad="$bad M24: the search_web failure is isError but not the named 'Web search failed' rendering: $(one_line "$MCP_TEXT");"
           search_note="configured, backend failed as data (isError, no protocol error)"
         else
           search_note="configured, answered results"
         fi
+        if mcp_call http harvester search_web '{"query":"x","limit":21}'; then
+          [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -qF 'limit must be between 1 and 20' || bad="$bad M23: search_web limit 21 was not refused by name: $(one_line "$MCP_TEXT");"
+        else
+          bad="$bad M23: search_web limit: $MCP_WHY;"
+        fi
       else
-        printf '%s' "$MCP_RPCERR" | grep -q 'unknown tool "webSearch"' || bad="$bad M23: with webSearch unconfigured a call answered '$MCP_RPCERR' / isError=$MCP_ISERR (want the protocol's unknown tool \"webSearch\");"
+        printf '%s' "$MCP_RPCERR" | grep -q 'unknown tool "search_web"' || bad="$bad M23: with search_web unconfigured a call answered '$MCP_RPCERR' / isError=$MCP_ISERR (want the protocol's unknown tool \"search_web\");"
         search_note="unconfigured, hidden and unknown to tools/call"
       fi
     else
-      bad="$bad M23: webSearch call: $MCP_WHY;"
+      bad="$bad M23: search_web call: $MCP_WHY;"
     fi
   else
     bad="$bad M23: harvester tools/list: $MCP_WHY;"
   fi
-  # M25 download — a real file lands in the binary cache: path, kind, type,
+  # M25 download_file — a real file lands in the binary cache: path, kind, type,
   # bytes and sha256 agree with the file on disk; a local path is its own
-  # error item naming parseLocalDocuments (M29)
-  if MCP_HTTP_TIMEOUT=180 mcp_call http harvester download "$(jq -cn --arg u "$RFC_DIRECT" --arg p "$NOTE" '{sources: [$u, $p]}')"; then
-    [ "$MCP_ISERR" = false ] || bad="$bad M25: download isError: $(one_line "$MCP_TEXT" | cut -c1-160);"
-    dl_path="$(item 0 .path)"
-    if [ -n "$(item 0 .error)" ] || [ ! -f "$dl_path" ]; then
-      bad="$bad M25: download $RFC_DIRECT left no file on disk: $(one_line "$MCP_STRUCT" | cut -c1-200);"
+  # error item naming read's files (M29)
+  if MCP_HTTP_TIMEOUT=180 mcp_call http harvester download_file "$(jq -cn --arg u "$RFC_DIRECT" --arg p "$NOTE" '{urls: [$u, $p]}')"; then
+    [ "$MCP_ISERR" = false ] || bad="$bad M25: download_file isError: $(one_line "$MCP_TEXT" | cut -c1-160);"
+    dl_path="$(item items 0 .path)"
+    if [ -n "$(item items 0 .error)" ] || [ ! -f "$dl_path" ]; then
+      bad="$bad M25: download_file $RFC_DIRECT left no file on disk: $(one_line "$MCP_STRUCT" | cut -c1-200);"
     else
-      [ "$(item 0 .bytes)" = "$(wc -c <"$dl_path" | tr -d ' ')" ] || bad="$bad M25: bytes $(item 0 .bytes) differs from the file's size;"
-      [ "$(item 0 .sha256)" = "$(sha256sum "$dl_path" | cut -d' ' -f1)" ] || bad="$bad M25: sha256 differs from the file's own hash;"
-      [ -n "$(item 0 .kind)" ] && [ -n "$(item 0 .content_type)" ] || bad="$bad M25: the item names no kind or content_type: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ "$(item items 0 .bytes)" = "$(wc -c <"$dl_path" | tr -d ' ')" ] || bad="$bad M25: bytes $(item items 0 .bytes) differs from the file's size;"
+      [ "$(item items 0 .sha256)" = "$(sha256sum "$dl_path" | cut -d' ' -f1)" ] || bad="$bad M25: sha256 differs from the file's own hash;"
+      [ -n "$(item items 0 .kind)" ] && [ -n "$(item items 0 .content_type)" ] || bad="$bad M25: the item names no kind or content_type: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ -n "$(item items 0 .via)" ] || bad="$bad M25: the item names no via: $(one_line "$MCP_STRUCT" | cut -c1-160);"
     fi
-    item 1 .error | grep -q 'parseLocalDocuments' || bad="$bad M29: a local path given to download does not name parseLocalDocuments: $(one_line "$(item 1 .error)");"
+    [ "$(item items 1 .error)" = 'this is a local path; download_file takes URLs — read a local document with `read` (files).' ] || bad="$bad M29: a local path given to download_file does not name read's files: $(one_line "$(item items 1 .error)");"
   else
-    bad="$bad M25: download: $MCP_WHY;"
+    bad="$bad M25: download_file: $MCP_WHY;"
   fi
-  # H13 `pfm harvest download` — the CLI face of the same download: a JSON
+  # H13 `pfm harvest download-file` — the CLI face of the same download: a JSON
   # receipt per item; a refused header exits 2 before any request
-  dl_json="$(pfm harvest download --json "$RFC_DIRECT" 2>"$SCRATCH/dl.err")"
+  dl_json="$(pfm harvest download-file --json "$RFC_DIRECT" 2>"$SCRATCH/dl.err")"
   dl_rc=$?
   cli_path="$(printf '%s' "$dl_json" | jq -r '.[0].path // empty' 2>/dev/null)"
   [ "$dl_rc" -eq 0 ] && [ -f "$cli_path" ] && [ "$(printf '%s' "$dl_json" | jq -r '.[0].bytes')" = "$(wc -c <"$cli_path" | tr -d ' ')" ] ||
-    bad="$bad H13: pfm harvest download --json exited $dl_rc with '$(one_line "$dl_json" | cut -c1-160)' $(one_line "$(cat "$SCRATCH/dl.err")" | cut -c1-120) (want exit 0 and a path whose size is bytes);"
-  pfm harvest download --header 'Host: example.org' "$RFC_DIRECT" >/dev/null 2>"$SCRATCH/dl.err"
+    bad="$bad H13: pfm harvest download-file --json exited $dl_rc with '$(one_line "$dl_json" | cut -c1-160)' $(one_line "$(cat "$SCRATCH/dl.err")" | cut -c1-120) (want exit 0 and a path whose size is bytes);"
+  pfm harvest download-file --header 'Host: example.org' "$RFC_DIRECT" >/dev/null 2>"$SCRATCH/dl.err"
   dl_rc=$?
   [ "$dl_rc" -eq 2 ] && grep -q 'caller header refused' "$SCRATCH/dl.err" || bad="$bad H13: --header 'Host: …' exited $dl_rc '$(one_line "$(cat "$SCRATCH/dl.err")")' (want 2 naming the refused header);"
-  # M26 parseLocalDocuments — a local file is read with method local; a missing
-  # one is its own error item; a URL names readPage (M29)
-  if mcp_call http harvester parseLocalDocuments "$(jq -cn --arg n "$NOTE" --arg m "$SCRATCH/no-such-document.md" --arg u "$RFC_DIRECT" '{paths: [$n, $m, $u]}')"; then
-    [ "$MCP_ISERR" = false ] || bad="$bad M26: parseLocalDocuments isError: $(one_line "$MCP_TEXT" | cut -c1-160);"
-    item 0 .content | grep -qF "SENTINEL-LANE-M-$$" || bad="$bad M26: the local note did not come back with its sentinel: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-    [ "$(item 0 .method)" = local ] || bad="$bad M26: the local item's method is '$(item 0 .method)', not local;"
-    [ -n "$(item 1 .error)" ] || bad="$bad M26: the missing local path is not an error item;"
-    item 2 .error | grep -q 'readPage' || bad="$bad M29: a URL given to parseLocalDocuments does not name readPage: $(one_line "$(item 2 .error)");"
+  # M26 read {files} — a local file is read via local; a missing one is its
+  # own error item; a URL names urls (M29)
+  if mcp_call http harvester read "$(jq -cn --arg n "$NOTE" --arg m "$SCRATCH/no-such-document.md" --arg u "$RFC_DIRECT" '{files: [$n, $m, $u]}')"; then
+    [ "$MCP_ISERR" = false ] || bad="$bad M26: read files isError: $(one_line "$MCP_TEXT" | cut -c1-160);"
+    item files 0 .content | grep -qF "SENTINEL-LANE-M-$$" || bad="$bad M26: the local note did not come back with its sentinel: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+    [ "$(item files 0 .via)" = local ] || bad="$bad M26: the local item's via is '$(item files 0 .via)', not local;"
+    [ -n "$(item files 1 .error)" ] || bad="$bad M26: the missing local path is not an error item;"
+    [ "$(item files 2 .error)" = 'this is a URL; put it in urls.' ] || bad="$bad M29: a URL given in files does not say 'this is a URL; put it in urls.': $(one_line "$(item files 2 .error)");"
+    [ "$(text_line 1)" = '## files (3)' ] || bad="$bad M26: three files do not open the text with '## files (3)': $(one_line "$(text_line 1)");"
   else
-    bad="$bad M26: parseLocalDocuments: $MCP_WHY;"
+    bad="$bad M26: read files: $MCP_WHY;"
   fi
-  # M27 readWork — an arXiv id resolves to a cached work with its ids and route
-  if MCP_HTTP_TIMEOUT=240 mcp_call http harvester readWork '{"works":["arXiv:1706.03762"],"size_only":true}'; then
-    if [ "$MCP_ISERR" != false ] || [ -n "$(item 0 .error)" ]; then
-      bad="$bad M27: readWork arXiv:1706.03762 failed: $(one_line "$MCP_TEXT" | cut -c1-200);"
+  # M27 read {publications} — an arXiv id resolves to a cached work with its ids and via
+  if MCP_HTTP_TIMEOUT=240 mcp_call http harvester read '{"publications":["arXiv:1706.03762"],"include_content":false}'; then
+    if [ "$MCP_ISERR" != false ] || [ -n "$(item publications 0 .error)" ]; then
+      bad="$bad M27: read publications arXiv:1706.03762 failed: $(one_line "$MCP_TEXT" | cut -c1-200);"
     else
-      [ "$(item 0 .ids.arxiv)" = 1706.03762 ] || bad="$bad M27: the item's ids do not name arxiv 1706.03762: $(one_line "$MCP_STRUCT" | cut -c1-160);"
-      [ -f "$(item 0 .path)" ] && [ "$(item 0 .chars)" -gt 0 ] 2>/dev/null && [ -n "$(item 0 .route)" ] || bad="$bad M27: the work item carries no path, chars or route: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ "$(item publications 0 .ids.arxiv)" = 1706.03762 ] || bad="$bad M27: the item's ids do not name arxiv 1706.03762: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+      [ -f "$(item publications 0 .path)" ] && [ "$(item publications 0 .chars)" -gt 0 ] 2>/dev/null && [ -n "$(item publications 0 .via)" ] || bad="$bad M27: the work item carries no path, chars or via: $(one_line "$MCP_STRUCT" | cut -c1-160);"
     fi
   else
-    bad="$bad M27: readWork: $MCP_WHY;"
+    bad="$bad M27: read publications: $MCP_WHY;"
   fi
-  # M28 caller headers — on readPage, download and readWork only; a refused
+  # M28 caller headers — on read and download_file only; a refused
   # header is a named tool error; a bare identifier with headers is a per-item
   # error; a headered read is its own cache partition and never echoes a value
   if mcp_http harvester tools/list '{}'; then
-    for t in readPage download readWork; do
+    for t in read download_file; do
       printf '%s' "$MCP_OUT" | jq -e --arg t "$t" '.result.tools[] | select(.name == $t) | .inputSchema.properties.headers' >/dev/null 2>&1 || bad="$bad M28: $t takes no headers;"
     done
-    for t in findWorks webSearch; do
+    for t in search_literature search_web; do
       printf '%s' "$MCP_OUT" | jq -e --arg t "$t" '.result.tools[] | select(.name == $t) | .inputSchema.properties.headers' >/dev/null 2>&1 && bad="$bad M28: $t takes headers;"
     done
   else
     bad="$bad M28: harvester tools/list: $MCP_WHY;"
   fi
-  if mcp_call http harvester readPage "$(jq -cn --arg u "$RFC_DIRECT" '{sources: [$u], headers: {Host: "example.org"}}')"; then
+  if mcp_call http harvester read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u], headers: {Host: "example.org"}}')"; then
     [ "$MCP_ISERR" = true ] && printf '%s' "$MCP_TEXT" | grep -q 'caller header refused: Host' || bad="$bad M28: a Host header was not refused by name: $(one_line "$MCP_TEXT" | cut -c1-160);"
   else
-    bad="$bad M28: readPage Host header: $MCP_WHY;"
+    bad="$bad M28: read Host header: $MCP_WHY;"
   fi
-  if mcp_call http harvester readWork '{"works":["arXiv:1706.03762"],"headers":{"X-Lane-M":"1"}}'; then
-    [ "$MCP_ISERR" = false ] && item 0 .error | grep -q 'pass the landing URL' || bad="$bad M28: a bare identifier with headers is not the per-item 'pass the landing URL' error: $(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160);"
+  if mcp_call http harvester read '{"publications":["arXiv:1706.03762"],"headers":{"X-Lane-M":"1"}}'; then
+    [ "$MCP_ISERR" = false ] && item publications 0 .error | grep -q 'pass the landing URL' || bad="$bad M28: a bare identifier with headers is not the per-item 'pass the landing URL' error: $(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160);"
   else
-    bad="$bad M28: readWork with headers: $MCP_WHY;"
+    bad="$bad M28: read publications with headers: $MCP_WHY;"
   fi
-  if [ -n "$RFC_PATH" ] && MCP_HTTP_TIMEOUT=180 mcp_call http harvester readPage "$(jq -cn --arg u "$RFC_DIRECT" --arg v "lane-m-secret-$$" '{sources: [$u], size_only: true, headers: {"X-Lane-M": $v}}')"; then
-    [ -z "$(item 0 .error)" ] && [ "$(item 0 .cached)" = false ] || bad="$bad M28: a headered read of a page cached without headers was served from that cache (or failed): $(one_line "$MCP_STRUCT" | cut -c1-160);"
+  if [ -n "$RFC_PATH" ] && MCP_HTTP_TIMEOUT=180 mcp_call http harvester read "$(jq -cn --arg u "$RFC_DIRECT" --arg v "lane-m-secret-$$" '{urls: [$u], include_content: false, headers: {"X-Lane-M": $v}}')"; then
+    [ -z "$(item urls 0 .error)" ] && [ "$(item urls 0 .cached)" = false ] || bad="$bad M28: a headered read of a page cached without headers was served from that cache (or failed): $(one_line "$MCP_STRUCT" | cut -c1-160);"
     printf '%s' "$MCP_OUT" | grep -qF "lane-m-secret-$$" && bad="$bad M28: the header value came back in the result;"
   elif [ -n "$RFC_PATH" ]; then
-    bad="$bad M28: headered readPage: $MCP_WHY;"
+    bad="$bad M28: headered read: $MCP_WHY;"
   fi
 fi
 if [ -n "$bad" ]; then fail "$bad"; else
-  pass "readPage $RFC_DIRECT (typed item + body, cached on re-read, size_only, per-item errors beside a good item) · findWorks: ${find_note:-?} · webSearch: ${search_note:-?} · download path/bytes/sha256 + pfm harvest download · parseLocalDocuments local · readWork arXiv ids + route · caller headers refused by name, partitioned, never echoed · wrong-tool items name the right tool"
+  pass "read urls $RFC_DIRECT (typed item + body, via, gaps list, cached on re-read, include_content false, per-item errors beside a good item) · search_literature: ${find_note:-?} · search_web: ${search_note:-?} · download_file path/bytes/sha256 + pfm harvest download-file · read files via local · read publications arXiv ids + via · caller headers refused by name, partitioned, never echoed · misplaced items name the right field"
 fi
 
 # ─── M.12 — the cache and the search gate back the tools ────────────────────
@@ -1451,14 +1480,14 @@ beat M.12-harvester-cache-gate H10 H11
 spends none
 if requires M.11-harvester-tools; then
   bad=""
-  # H10: the artifact readPage wrote is what a size_only re-read reports as cached
+  # H10: the artifact read wrote is what an include_content false re-read reports as cached
   [ -n "$RFC_PATH" ] && [ -f "$RFC_PATH" ] || bad="$bad H10: no cached artifact path from M.11 ($RFC_PATH);"
   case "$RFC_PATH" in "$HOME"/*) ;; *) bad="$bad H10: the cache artifact $RFC_PATH lives outside \$HOME — not the local cache;" ;; esac
   grep -qi 'coffee' "$RFC_PATH" 2>/dev/null || bad="$bad H10: the cached markdown $RFC_PATH does not carry the document;"
-  if mcp_call http harvester readPage "$(jq -cn --arg u "$RFC_DIRECT" '{sources: [$u], size_only: true}')"; then
-    [ "$(item 0 .cached)" = true ] && [ "$(item 0 .path)" = "$RFC_PATH" ] || bad="$bad H10: a size_only re-read is not the cached artifact $RFC_PATH: $(one_line "$MCP_STRUCT" | cut -c1-160);"
+  if mcp_call http harvester read "$(jq -cn --arg u "$RFC_DIRECT" '{urls: [$u], include_content: false}')"; then
+    [ "$(item urls 0 .cached)" = true ] && [ "$(item urls 0 .path)" = "$RFC_PATH" ] || bad="$bad H10: an include_content false re-read is not the cached artifact $RFC_PATH: $(one_line "$MCP_STRUCT" | cut -c1-160);"
   else
-    bad="$bad H10: readPage size_only: $MCP_WHY;"
+    bad="$bad H10: read include_content false: $MCP_WHY;"
   fi
   # H11: one gate, three surfaces — the config, the served roster, the server's
   # own instructions, and the daemon's /status roster must all agree
@@ -1466,23 +1495,25 @@ if requires M.11-harvester-tools; then
   [ -f "$HARVESTER_CFG" ] && search_cfg="$(jq -r '((.search.enabled // true) and (((.search.searxngURL // "") != "") or ((.search.braveApiKey // "") != ""))) | tostring' "$HARVESTER_CFG" 2>/dev/null || echo false)"
   if mcp_http harvester tools/list '{}'; then
     served=false
-    printf '%s' "$MCP_OUT" | jq -e '.result.tools[] | select(.name == "webSearch")' >/dev/null 2>&1 && served=true
-    [ "$served" = "$search_cfg" ] || bad="$bad H11: tools/list serves webSearch=$served while the config gate says $search_cfg;"
+    printf '%s' "$MCP_OUT" | jq -e '.result.tools[] | select(.name == "search_web")' >/dev/null 2>&1 && served=true
+    [ "$served" = "$search_cfg" ] || bad="$bad H11: tools/list serves search_web=$served while the config gate says $search_cfg;"
     instr="$(printf '%s' "$MCP_INIT" | jq -r '.result.instructions // empty')"
     if [ "$search_cfg" = true ]; then
       printf '%s' "$instr" | grep -q 'Web search is not configured' && bad="$bad H11: search is configured but the server instructions still say it is not;"
-      printf '%s' "$instr" | grep -q '"search the web for X" is webSearch' || bad="$bad H11: search is configured but the instructions do not route to it;"
+      printf '%s' "$instr" | grep -q 'search_web' || bad="$bad H11: search is configured but the instructions do not name search_web;"
     else
       printf '%s' "$instr" | grep -q 'Web search is not configured on this server' || bad="$bad H11: search is unconfigured but the instructions do not say so: $(one_line "$instr" | cut -c1-120);"
     fi
+    printf '%s' "$instr" | grep -qF '"read this local document" is read with its path in files (this machine only)' && printf '%s' "$instr" | grep -qF 'is download_file (the bytes, unparsed; nothing is converted)' ||
+      bad="$bad H11: the local server's instructions do not route read's files and download_file: $(one_line "$instr" | cut -c1-160);"
     status_has_search=false
-    daemon_status | jq -e '.servers.harvester[]? | select(. == "webSearch")' >/dev/null 2>&1 && status_has_search=true
-    [ "$status_has_search" = "$served" ] || bad="$bad H11: /status servers.harvester lists webSearch=$status_has_search while tools/list serves webSearch=$served — the daemon's status roster is a static list, not the served surface;"
+    daemon_status | jq -e '.servers.harvester[]? | select(. == "search_web")' >/dev/null 2>&1 && status_has_search=true
+    [ "$status_has_search" = "$served" ] || bad="$bad H11: /status servers.harvester lists search_web=$status_has_search while tools/list serves search_web=$served — the daemon's status roster is a static list, not the served surface;"
   else
     bad="$bad H11: harvester tools/list: $MCP_WHY;"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "cache artifact $RFC_PATH backs readPage (cached on a size_only re-read); webSearch gate config=$search_cfg agrees with tools/list, the server instructions and /status"
+    pass "cache artifact $RFC_PATH backs read (cached on an include_content false re-read); search_web gate config=$search_cfg agrees with tools/list, the server instructions and /status"
   fi
 fi
 
@@ -1555,7 +1586,7 @@ e2e_drive() {
   sid="$(live_field "$chat" 2)"
   [ -n "$sid" ] || { E2E_WHY="$chat has no live row to drive"; return 1; }
   cat >"$SCRATCH/stimulus-$chat.txt" <<EOF
-Do exactly these steps in order, using tools only, and say nothing until the last step: (1) call the chat_status tool with target "self"; (2) call the chat_name tool with target "self" and name "$rename"; (3) call the harvester readPage tool with sources ["$url"]; (4) reply with exactly one word: $needle
+Do exactly these steps in order, using tools only, and say nothing until the last step: (1) call the chat_status tool with target "self"; (2) call the chat_name tool with target "self" and name "$rename"; (3) call the harvester read tool with urls ["$url"]; (4) reply with exactly one word: $needle
 EOF
   out="$(pfm chat inject --allow-unsigned --file "$SCRATCH/stimulus-$chat.txt" "$chat" 2>&1)" || {
     E2E_WHY="pfm chat inject into $chat refused the stimulus: $(one_line "$out")"
@@ -1568,13 +1599,13 @@ EOF
     *) E2E_WHY="no $needle from $chat in 420s; its last: $(one_line "$(pfm chat last "$sid" 2>&1)" | cut -c1-160)"; return 1 ;;
   esac
 }
-# cache_lists <url> — 0 when a size_only readPage of that exact URL reports
+# cache_lists <url> — 0 when an include_content false read of that exact URL reports
 # `cached`. The URL carries this run's stamp, so no earlier run cached it; the
 # probe itself reads and caches a miss, so it is asked ONCE, after the chat's
 # own call, never polled and never before the stimulus.
 cache_lists() {
-  mcp_call http harvester readPage "$(jq -cn --arg u "$1" '{sources: [$u], size_only: true}')" || return 1
-  [ "$(item 0 .cached)" = true ]
+  mcp_call http harvester read "$(jq -cn --arg u "$1" '{urls: [$u], include_content: false}')" || return 1
+  [ "$(item urls 0 .cached)" = true ]
 }
 # e2e_evidence <chat> <sid> <sock> <url> <rename> — the fleet's and the cache's
 # own records of the two calls; renames the chat back. Appends to $bad.
@@ -1583,7 +1614,7 @@ e2e_evidence() {
   [ "$(socket_field "$sock" 5)" = "$rename" ] ||
     bad="$bad $chat: the fleet row on $sock reads '$(socket_field "$sock" 5)', not '$rename' — its chat_name self call left no record;"
   if ! cache_lists "$url"; then
-    bad="$bad $chat: the harvester cache carries no page for $url after the chat's readPage (readPage size_only: ${MCP_WHY:-$(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160)});"
+    bad="$bad $chat: the harvester cache carries no page for $url after the chat's read (read include_content false: ${MCP_WHY:-$(one_line "$MCP_STRUCT$MCP_TEXT" | cut -c1-160)});"
   fi
   back="$(pfm chat name "$sid" "$chat" 2>&1)" || bad="$bad $chat: could not be renamed back (pfm chat name exited non-zero: $(one_line "$back"));"
   sleep 2
@@ -1647,7 +1678,7 @@ elif requires M.05-daemon-core; then
       bad="$bad E2's Codex chat (HTTP chat + harvester, its session died with the old daemon): $E2E_WHY;"
     fi
     if [ -n "$bad" ]; then fail "$bad"; else
-      pass "after M.05's exit-75 restart, $E1_CHAT (Claude, stdio) and $E2_CHAT (Codex, HTTP) each made their next chat_* call (self-rename recorded in pfm ls) and harvester readPage (recorded in the cache) through the new daemon"
+      pass "after M.05's exit-75 restart, $E1_CHAT (Claude, stdio) and $E2_CHAT (Codex, HTTP) each made their next chat_* call (self-rename recorded in pfm ls) and harvester read (recorded in the cache) through the new daemon"
     fi
   fi
 fi

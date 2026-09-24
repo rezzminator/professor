@@ -21,28 +21,28 @@ Every PARTIAL-NAMED row states what it could not load and why; every FAIL-NAMED 
 - The surface redesign (`surface-spec.md`):
   - One retrieval function (`Retrieve`) behind every network read, with four policies (page, file, inline image, gateway); the file policy ends in a browser download that captures the download event or the navigation body, and refetches in the page when Chrome's PDF viewer answers with its wrapper.
   - A binary guard by magic bytes: an audio file, a legacy Office file or an unknown binary read as a page is a named file result, never binary characters stored as success.
-  - Six tools with typed output and structured content: `readPage`, `parseLocalDocuments` (local server only), `download`, `findWorks`, `readWork`, `webSearch` (only when a search backend is configured). `archive`, `searchCache`, `fetchImage` and `fetch` are gone with every reference. A wrong-tool input names the right tool.
-  - Remote: only MCP. `download` returns a `resource_link` read through `resources/read`, capped by `harvest.maxResourceBytes`; no result carries a server path, and stored pages link their images by relative path.
-  - Caller headers on `readPage`, `download` and `readWork`, sent only to the target's origin (for `readWork`, the work's landing origin), validated, folded into the cache key, never logged.
-  - The CLI moved into `internal/harvestcli`: `pfm harvest download`, `--header`, `--ocr-lang`.
+  - Four tools with typed output and structured content: `read` (`urls`, `files` — local server only — and `publications`, separate arrays in one call), `download_file`, `search_literature`, `search_web` (only when a search backend is configured). `archive`, `searchCache`, `fetchImage` and `fetch` are gone with every reference. A misplaced item names the right field.
+  - Remote: only MCP. `download_file` returns a `resource_link` read through `resources/read`, capped by `harvest.maxResourceBytes`; no result carries a server path, and stored pages link their images by relative path.
+  - Caller headers on `read` and `download_file`, sent only to the target's origin (for `publications`, the work's landing origin), validated, folded into the cache key, never logged.
+  - The CLI moved into `internal/harvestcli`: `pfm harvest download-file`, `pfm harvest search`, `--header`, `--ocr-language`, `--include-content=false`.
   - Callers: deep-rr, the surface docs, the testing landscape and lanes, the `pfm` command card.
-- Failure messages: one table of named failures (challenge, login wall, paywall, rate limit with the server's Retry-After, not found, a 404 that may be a disguised refusal, gone, server error, timeout, DNS, TLS, too large, unsupported format with its detected type, empty body), each naming the rungs that ran and the next step. `findWorks` names every source that failed; an original paper outranks a later re-registration.
+- Failure messages: one table of named failures (challenge, login wall, paywall, rate limit with the server's Retry-After, not found, a 404 that may be a disguised refusal, gone, server error, timeout, DNS, TLS, too large, unsupported format with its detected type, empty body), each naming the rungs that ran and the next step. `search_literature` names every source that failed; an original paper outranks a later re-registration.
 - Formats, by the bake-offs' measured winners: routing by magic bytes; gzip, bzip2, zst and xz documents unpacked under a bomb cap; config and code fenced; feeds, JATS, FB2, Jupyter, WebVTT/SRT, RIS, BibTeX, MHTML, EML, Safari webarchive, EPUB; legacy DOC with a truncation guard, XLS, RTF, ODT, ODP, ODS with a row clamp, macro and template variants, encrypted files named; OCR by docling and RapidOCR per script (Arabic body CER 0.029, equal to the bake-off), Hebrew through a system Tesseract, an unlabelled scan naming the script it assumed; cloud share links rewritten or failed by name.
 - Sweep fixes: status on every read, cached included; a same-site permanent redirect is a note; phpBB session ids stripped; Lobsters rendered without clutter; IMDb duplicate named; a README's proxied images kept; a nested reply's blockquote kept; Reddit paced by its quota headers.
 
 ## Decisions taken under god speed
 
 1. R1 landed without the browser-download rung (the adapter could not return bytes); built next as R1b.
-2. R2's leftovers (config keys, `readPage` through `Retrieve`, the audio-wrong message) folded into R2.
-3. Caller headers: target origin only; reader services, Wayback, resolvers and cross-origin redirects never receive them; `readWork` sends them to the landing origin after resolution, not to resolvers (RH had made a bare identifier with headers an error).
+2. R2's leftovers (config keys, `read` through `Retrieve`, the audio-wrong message) folded into R2.
+3. Caller headers: target origin only; reader services, Wayback, resolvers and cross-origin redirects never receive them; `read` sends them for `publications` to the landing origin after resolution, not to resolvers (RH had made a bare identifier with headers an error).
 4. R3's lane-M proof accepted as a named gap (below); the docs landed on verify and greps.
 5. The testing landscape's harvester rows were merged into another session's uncommitted copy of the file, both sides kept.
 6. The formats batch's commit groups followed shared files, not task ids.
 7. `python-bidi` approved: it was part of the measured Arabic OCR configuration.
 8. xz read through Python's standard `lzma` rather than a new library.
-9. An unlabelled scan is not script-detected (unmeasured); the result names the Latin assumption and `ocr_lang` lets the caller choose.
+9. An unlabelled scan is not script-detected (unmeasured); the result names the Latin assumption and `ocr_language` lets the caller choose.
 10. Reddit: paced by the quota headers it sends on the loader endpoint (225 requests a window there, not the documented 200); a fetch spends at most 180 s following paced loaders, answers included, so a tool call does not outlast an MCP client, and the rest is named with the reset time (live: 748 of 2,197 comments in 181 s, down from 307 s unbounded).
-11. Sweep defects fixed in one batch; the deep-rr prompt reworded to the fields the size-only reply now carries.
+11. Sweep defects fixed in one batch; the deep-rr prompt reworded to the fields the `include_content: false` reply now carries.
 
 ## Notes and dissent on record
 

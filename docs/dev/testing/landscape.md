@@ -403,15 +403,15 @@ M20 · `issue_servicedesk` (title/detail/severity/area, `UNIDENTIFIED` sentinel 
 
 ### Harvester server — 6 tools
 
-M21 · `readPage` (sources 1-50 web URLs/refresh/size_only/headers; typed items: source, kind, title, method, status, partial, cached, chars, path, content, error) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
-M22 · `findWorks` (query/limit/kind any|paper|book; typed candidates, each with a `handle` for `readWork`) · needs:network · today:U (`tools_works_test.go`) · pfm/internal/harvestmcp/tools_works.go · lane(s):M
-M23 · `webSearch` (query/count/lang/engines), config-conditional — hidden, not erroring, when unconfigured · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
-M24 · `webSearch` backend-failure-as-data contract (`IsError` result with the named `Web search failed` text, never an empty list) · needs:network · today:U (`tools_search_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
-M25 · `download` (sources 1-50 URLs/headers; the bytes unparsed: path locally or a `resource_link` remotely, kind, content_type, bytes, sha256) · needs:network · today:U (`tools_download_test.go`) · pfm/internal/harvestmcp/tools_download.go · lane(s):M
-M26 · `parseLocalDocuments` (paths 1-50/size_only; method `local`; local server only, never the remote gateway) · needs:none · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
-M27 · `readWork` (works 1-20: DOI, arXiv id, PMID, PMCID, ISBN, landing URL or `findWorks` handle/refresh/size_only/headers; items carry `ids` and `route`) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
-M28 · Caller headers on `readPage`, `download` and `readWork` (never `findWorks`/`webSearch`): refused by name at entry, sent only to the target's origin, their own cache partition, values never echoed; a bare identifier with headers is a per-item error · needs:network · today:U (`caller_headers_test.go`) · pfm/internal/harvest/caller_headers.go · lane(s):M
-M29 · Wrong-tool input is a per-item error naming the right tool (a DOI to `readPage` names `readWork`, a local path names `parseLocalDocuments`, a URL to `parseLocalDocuments` names `readPage`) · needs:none · today:U (`TestReadToolsNameTheRightTool`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M21 · `read` `urls` (web URLs, at most 50 items in all/refresh/include_content/ocr_language/headers; typed items grouped as the input: source, kind, title, via, status, gaps, cached, chars, path, content, error) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M22 · `search_literature` (query/limit/type any|paper|book; typed candidates carrying `type`, each with a `handle` for `read`'s `publications`) · needs:network · today:U (`tools_works_test.go`) · pfm/internal/harvestmcp/tools_works.go · lane(s):M
+M23 · `search_web` (query/limit/lang/engines), config-conditional — hidden, not erroring, when unconfigured · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
+M24 · `search_web` backend-failure-as-data contract (`IsError` result with the named `Web search failed` text, never an empty list) · needs:network · today:U (`tools_search_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
+M25 · `download_file` (urls 1-50/headers; the bytes unparsed: path locally or a `resource_link` remotely, kind, content_type, bytes, sha256, via) · needs:network · today:U (`tools_download_test.go`) · pfm/internal/harvestmcp/tools_download.go · lane(s):M
+M26 · `read` `files` (local paths or file:// URLs/include_content; via `local`; local server only: the remote gateway's `read` schema has no `files` field, and a remote call that sends one is refused by name) · needs:none · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M27 · `read` `publications` (at most 20: DOI, arXiv id, PMID, PMCID, ISBN, landing URL or `search_literature` handle/refresh/include_content/headers; items carry `ids` and `via`) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M28 · Caller headers on `read` (`urls`, and `publications`' landing origin; never `files`) and `download_file` (never `search_literature`/`search_web`): refused by name at entry, sent only to the target's origin, their own cache partition, values never echoed; a bare identifier with headers is a per-item error · needs:network · today:U (`caller_headers_test.go`) · pfm/internal/harvest/caller_headers.go · lane(s):M
+M29 · A misplaced `read` item is a per-item error naming the right field, the rest of the call proceeding (an identifier in `urls` names `publications`, a local path in `urls` names `files`, a URL in `files` names `urls`) · needs:none · today:U (`TestReadMisplacedItemFailsAloneNamingTheField`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
 
 ### Registration per engine
 
@@ -495,7 +495,7 @@ L42 · name-sync never runs more than once concurrently by design (systemd path 
 
 ## H — Harvester: CLI + sidecar + cache + search (13)
 
-H1 · `pfm harvest [--refresh] [--size-only] [--json] [--header 'Name: value']... <sources>...` (1-50 sources, ordered results) · needs:network · today:U · cli.md:73 · lane(s):O2
+H1 · `pfm harvest [--refresh] [--include-content=false] [--ocr-language LANG] [--json] [--header 'Name: value']... <url|path|identifier>...` (1-50 sources, each routed into `read`'s `urls`, `files` or `publications`, ordered results) · needs:network · today:U · cli.md:73 · lane(s):O2
 H2 · `pfm harvest ask -p <prompt> [--engine claude|codex] [--model M] [--effort E] [--refresh] <sources>...` · needs:network,seat:cc/cx · today:U+A (`TestHarvestAskE2E`) · cli.md:74 · lane(s):O2
 H3 · Harvest source kind: URL · needs:network · today:U · cli.md:73 · lane(s):O2
 H4 · Harvest source kind: DOI · needs:network · today:U · cli.md:73 · lane(s):O2
@@ -504,10 +504,10 @@ H6 · Harvest source kind: PMID · needs:network · today:U · cli.md:73 · lane
 H7 · Harvest source kind: PMCID · needs:network · today:U · cli.md:73 · lane(s):O2
 H8 · Harvest source kind: local path · needs:none · today:U · cli.md:73 · lane(s):O2
 H9 · Harvestpy pinned Python conversion sidecar (non-HTML document conversion) · needs:network · today:U (`internal/harvestpy`, 37 tests) · mcp.md:42 · lane(s):O2
-H10 · Harvest local cache (backs `readPage`/`readWork`/`parseLocalDocuments` results; a re-read reports `cached`) · needs:none · today:U · pfm/internal/harvestmcp/tools_read.go · lane(s):M
-H11 · Harvest search-backend config (SearXNG URL or Brave API key gates the `webSearch` tool's visibility) · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/search_gate.go · lane(s):M
+H10 · Harvest local cache (backs `read` results for `urls`, `files` and `publications`; a re-read reports `cached`) · needs:none · today:U · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+H11 · Harvest search-backend config (SearXNG URL or Brave API key gates the `search_web` tool's visibility) · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/search_gate.go · lane(s):M
 H12 · Tier B: `setup.sh install` falls back to `--skip-harvest` silently on provisioning failure; no `verify.sh` beat asserts the harvester landed ⚠ known-gap · needs:network,docker · today:NONE · tests.md:391,437 · lane(s):O2
-H13 · `pfm harvest download [--json] [--header 'Name: value']... <url>...` (path / kind / content_type / bytes per item; a failed item is `ERROR:` and exit 1; a refused header exits 2 before any request) · needs:network · today:U (`internal/harvestcli/download_test.go`) · pfm/internal/harvestcli/download.go · lane(s):M
+H13 · `pfm harvest download-file [--json] [--header 'Name: value']... <url>...` (path / kind / content_type / bytes per item; a failed item is `ERROR:` and exit 1; a refused header exits 2 before any request) · needs:network · today:U (`internal/harvestcli/download_test.go`) · pfm/internal/harvestcli/download.go · lane(s):M
 
 ---
 

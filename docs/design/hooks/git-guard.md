@@ -27,11 +27,11 @@ An agent that made its own worktree left it behind: nothing tore it down, and st
 
 ## Who is exempt
 
-A payload whose `agent_type` is `gitter` is always allowed (`git_guard.go:27`, checked at `:123`). The hook reads only the name, so either gitter qualifies: a project's own (`.claude/agents/gitter.md`, scaffolded from `templates/project/agents/gitter.md`) or the machine-global one (`templates/global/agents/gitter.md`, which `pfm install` links into every account and a project's own gitter overrides by name). Every other caller is checked, a main chat (no `agent_type`) included.
+A payload whose `agent_type` is `gitter` is always allowed (`git_guard.go:27`, checked at `:128`). The hook reads only the name, so either gitter qualifies: a project's own (`.claude/agents/gitter.md`, scaffolded from `templates/project/agents/gitter.md`) or the machine-global one (`templates/global/agents/gitter.md`, which `pfm install` links into every account and a project's own gitter overrides by name). Every other caller is checked, a main chat (no `agent_type`) included.
 
 ## How it reads a command
 
-A non-Bash tool, or a command containing neither `git` nor `worktree.sh`, returns at once (`git_guard.go:123-126`). Otherwise the command goes through the callmeter shell parser (`pfm/internal/callmeter/cmdparse`), which unwraps wrappers (`timeout`, `env`), follows `&&`, `;`, pipes and subshells, and parses an inner `bash -c` string; a heredoc body and an `echo git …` argument are data, never a git call. For each part whose program is `git`, git's global options (`-C`, `-c`, `--git-dir`, `--work-tree`, `--no-pager` and the rest) are skipped, `-C` naming the repository (`gitGuardSplit`, `git_guard.go:186`); the subcommand and its arguments decide (`gitGuardBlocks`, `:214`).
+A non-Bash tool, or a command containing neither `git` nor `worktree.sh`, returns at once (`git_guard.go:128-131`). Otherwise the command goes through the callmeter shell parser (`pfm/internal/callmeter/cmdparse`), which unwraps wrappers (`timeout`, `env`), follows `&&`, `;`, pipes and subshells, and parses an inner `bash -c` string; a heredoc body and an `echo git …` argument are data, never a git call. For each part whose program is `git`, git's global options (`-C`, `-c`, `--git-dir`, `--work-tree`, `--no-pager` and the rest) are skipped, `-C` naming the repository (`gitGuardSplit`, `git_guard.go:191`); the subcommand and its arguments decide (`gitGuardBlocks`, `:219`).
 
 ## What it blocks
 
@@ -49,18 +49,18 @@ Anything not in the blocked column is allowed, `archive` included. A single-path
 
 ## The deny
 
-One message names every blocked part of the call as its words read, then `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.` (`git_guard.go:29`, composed by `gitGuardReason`, `:444`). A worktree block adds the right way for its repository: the `-C` directory, else the payload's `cwd`, walked up to the directory holding a `.git` entry without running git (`gitGuardTopLevel`, `:425`). When that repository has `.claude/scripts/worktree.sh`, the line reads `gitter creates and removes worktrees with {repo}/.claude/scripts/worktree.sh create|remove|prune — the only right way here.` (`:461`); otherwise `gitter creates and removes worktrees (Phase SETUP).` (`:31`).
+One message names every blocked part of the call as its words read, then `Only gitter writes this: spawn Agent(subagent_type: "gitter") with the repo path and the exact change.` (`git_guard.go:29`, composed by `gitGuardReason`, `:450`). A worktree block adds the right way for its repository: the `-C` directory, else the payload's `cwd`, walked up to the directory holding a `.git` entry without running git (`gitGuardTopLevel`, `:430`). When that repository has `.claude/scripts/worktree.sh`, the line reads `gitter creates and removes worktrees with {repo}/.claude/scripts/worktree.sh create|remove|prune — the only right way here.` (`:467`); otherwise `gitter creates and removes worktrees (Phase SETUP).` (`:31`). A blocked `git stash` adds, once, ``To park only your own files, `git stash push -- <path>...` is allowed (restore with `git stash pop`); a whole-tree stash moves every other agent's uncommitted work.`` (`gitGuardStashHint`, `:32-34`), so an agent parking its own files to watch a test fail against the unchanged code stashes those paths instead of giving up.
 
 ## How it fails
 
-- **Payload unreadable or undecodable:** one `pfm internal git-guard: … (fail-open)` stderr line, the call allowed, like every pfm hook (`git_guard.go:109-121`).
-- **The parser itself errors:** fail-open the same way (`:133-137`); a parser failure must never freeze every Bash call on the machine.
-- **One part of the command does not parse and the command contains `git `:** denied with `could not read this command; split it so each git call is its own simple command.` (`:30`, decided at `:143-145`), because allowing it would let any git write through by breaking the quoting.
-- **The deny cannot be written:** stderr line and exit 1 (`:154-157`).
+- **Payload unreadable or undecodable:** one `pfm internal git-guard: … (fail-open)` stderr line, the call allowed, like every pfm hook (`git_guard.go:114-126`).
+- **The parser itself errors:** fail-open the same way (`:138-142`); a parser failure must never freeze every Bash call on the machine.
+- **One part of the command does not parse and the command contains `git `:** denied with `could not read this command; split it so each git call is its own simple command.` (`:30`, decided at `:148-150`), because allowing it would let any git write through by breaking the quoting.
+- **The deny cannot be written:** stderr line and exit 1 (`:159-162`).
 
 ## Named gaps
 
-- **Python snippets.** The parser hands `python -c` and heredoc Python to a runner the hook answers with no result, so the hook never spawns `python3` (`gitGuardNoPython`, `git_guard.go:86-94`); a git call made from inside Python (`subprocess.run(["git", "push"])`) is not inspected.
+- **Python snippets.** The parser hands `python -c` and heredoc Python to a runner the hook answers with no result, so the hook never spawns `python3` (`gitGuardNoPython`, `git_guard.go:89-97`); a git call made from inside Python (`subprocess.run(["git", "push"])`) is not inspected.
 - **Unresolved words.** A `$VAR` or other word the parser cannot resolve is read as written, so `git $CMD` passes unless its literal words are a blocked form.
 
 ## Tests

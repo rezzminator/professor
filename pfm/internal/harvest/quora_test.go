@@ -31,11 +31,11 @@ func quoraHarvester(t *testing.T, reader string) *Harvester {
 		ContactEmail: "test@example.org",
 		CacheDir:     t.TempDir(),
 		Client:       walled,
-		Chrome:       walled,
+		Chrome:       fixtureTwin(walled),
 		Jina: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 			return response(r, http.StatusOK, "text/plain", reader), nil
 		})},
-		OA: walled,
+		OA: fixtureTwin(walled),
 	})
 }
 

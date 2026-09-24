@@ -214,7 +214,12 @@ func TestDOHResolverRequeriesAfterTTLExpires(t *testing.T) {
 // here would silently return every rung to the poisoned answer.
 func TestNewInstallsTheDoHResolverByDefault(t *testing.T) {
 	t.Setenv("TMUX_TMPDIR", t.TempDir())
-	h := mustNew(t, Options{CacheDir: t.TempDir(), Converter: &fakeConverter{}})
+	// Opt-out of mustNew's publicResolveGuard: that default would fill the
+	// very field this test pins. Constructing resolves nothing.
+	h, err := New(Options{CacheDir: t.TempDir(), Converter: &fakeConverter{}})
+	if err != nil {
+		t.Fatalf("harvest.New: %v", err)
+	}
 	if h.options.ResolvePublic == nil {
 		t.Fatal("Options.ResolvePublic = nil after New; want the DoH resolver installed by default")
 	}

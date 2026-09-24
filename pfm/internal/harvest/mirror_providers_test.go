@@ -136,7 +136,7 @@ func TestIPFSCatalogChallengeIsTerminalAndDoesNotTryGateway(t *testing.T) {
 		Options{
 			CacheDir:       t.TempDir(),
 			Client:         client,
-			Chrome:         client,
+			Chrome:         fixtureTwin(client),
 			IPFSCatalogURL: "https://ipfs-catalog.test",
 			Converter:      &fakeConverter{},
 		},

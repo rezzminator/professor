@@ -270,7 +270,7 @@ func TestDOIFallsBackToDOIMirrorAfterOpenAccessExhaustion(t *testing.T) {
 	h := mustNew(t, Options{
 		CacheDir:             t.TempDir(),
 		Client:               client,
-		Chrome:               client,
+		Chrome:               fixtureTwin(client),
 		Jina:                 client,
 		OA:                   oaClient,
 		Converter:            &fakeConverter{},
@@ -340,8 +340,8 @@ func TestPMIDWithoutPMCIDFallsBackToDOIMirror(t *testing.T) {
 	h := mustNew(t, Options{
 		CacheDir:     t.TempDir(),
 		Client:       client,
-		Chrome:       client,
-		OA:           client,
+		Chrome:       fixtureTwin(client),
+		OA:           fixtureTwin(client),
 		Converter:    &fakeConverter{},
 		DOIMirrorURL: "https://doi-mirror.test/",
 	})
@@ -372,7 +372,7 @@ func TestDOIMirrorLookupSplitsRequestFailureFromResponseFailure(t *testing.T) {
 			Options{
 				CacheDir:     t.TempDir(),
 				Client:       client,
-				Chrome:       client,
+				Chrome:       fixtureTwin(client),
 				Converter:    &fakeConverter{},
 				DOIMirrorURL: "https://doi-mirror.test/",
 			},
@@ -396,7 +396,7 @@ func TestDOIMirrorLookupSplitsRequestFailureFromResponseFailure(t *testing.T) {
 			Options{
 				CacheDir:     t.TempDir(),
 				Client:       client,
-				Chrome:       client,
+				Chrome:       fixtureTwin(client),
 				Converter:    &fakeConverter{},
 				DOIMirrorURL: "https://doi-mirror.test/",
 			},

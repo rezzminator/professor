@@ -46,7 +46,14 @@ func TestBibliographicLandingCycleStopsAfterOneHop(t *testing.T) {
 	chrome := &http.Client{Transport: transport}
 	h := mustNew(
 		t,
-		Options{CacheDir: t.TempDir(), Client: direct, Chrome: chrome, Jina: direct, OA: direct, Converter: convert},
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    direct,
+			Chrome:    chrome,
+			Jina:      direct,
+			OA:        fixtureTwin(direct),
+			Converter: convert,
+		},
 	)
 	got := h.Fetch(context.Background(), sourceA)
 	if got.Error == "" {

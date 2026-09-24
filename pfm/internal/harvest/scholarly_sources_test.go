@@ -19,7 +19,13 @@ func TestProviderDownloadLimitRejectsOversizedPartialResponse(t *testing.T) {
 	})}
 	h := mustNew(
 		t,
-		Options{CacheDir: t.TempDir(), Client: client, Chrome: client, MaxBytes: 16, Converter: &fakeConverter{}},
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    client,
+			Chrome:    fixtureTwin(client),
+			MaxBytes:  16,
+			Converter: &fakeConverter{},
+		},
 	)
 	got := h.fetchProviderArtifact(
 		context.Background(),
@@ -50,7 +56,13 @@ func TestProviderDownloadRejectsShortReadInsteadOfConvertingPartialBody(t *testi
 	})}
 	h := mustNew(
 		t,
-		Options{CacheDir: t.TempDir(), Client: client, Chrome: client, MaxBytes: 1024, Converter: &fakeConverter{}},
+		Options{
+			CacheDir:  t.TempDir(),
+			Client:    client,
+			Chrome:    fixtureTwin(client),
+			MaxBytes:  1024,
+			Converter: &fakeConverter{},
+		},
 	)
 	got := h.fetchProviderArtifact(
 		context.Background(),

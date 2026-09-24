@@ -69,6 +69,7 @@ func TestRetrieveBinaryGuardLeavesPagesAndArchivesAlone(t *testing.T) {
 		CacheDir:    t.TempDir(),
 		Client:      &http.Client{Transport: site},
 		Chrome:      &http.Client{Transport: site},
+		Jina:        &http.Client{Transport: site},
 		Converter:   tagStripConverter(),
 		BrowserRung: browserOff(),
 	})

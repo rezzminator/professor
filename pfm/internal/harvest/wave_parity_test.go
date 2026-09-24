@@ -162,9 +162,9 @@ func TestWaveStatsWrittenByRealFetch(t *testing.T) {
 		ContactEmail: "test@example.org",
 		CacheDir:     dir,
 		Client:       client,
-		Chrome:       client,
+		Chrome:       fixtureTwin(client),
 		Jina:         client,
-		OA:           client,
+		OA:           fixtureTwin(client),
 	})
 	_ = h.Fetch(context.Background(), "10.9999/no-copy")
 	if _, err := os.Stat(filepath.Join(dir, "stats.jsonl")); err != nil {

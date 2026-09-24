@@ -130,7 +130,7 @@ func TestTrustedSearXNGOriginDoesNotOpenFetch(t *testing.T) {
 		fmt.Fprint(w, "<html><body>internal</body></html>")
 	}))
 	defer server.Close()
-	h, err := New(Options{CacheDir: t.TempDir(), SearXNGURL: server.URL})
+	h, err := New(Options{CacheDir: t.TempDir(), SearXNGURL: server.URL, ResolvePublic: publicResolveGuard(t)})
 	if err != nil {
 		t.Fatal(err)
 	}

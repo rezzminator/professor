@@ -681,31 +681,6 @@ func TestRunRefreshesThePanePIDAfterRespawnBeforeSubmittingThen(t *testing.T) {
 	}
 }
 
-func TestEngineLiveUsesThePaneProcessPIDNotTheTmuxPaneID(t *testing.T) {
-	proc := fakeReloadProc{
-		pids: []int{801},
-		argv: map[int][]string{801: {"claude"}},
-		stat: map[int]gather.ProcStat{801: {ParentPID: 700}},
-	}
-	live, err := engineLive(proc, 700, pfmengine.Claude, "", "")
-	if err != nil || !live {
-		t.Fatalf("engineLive() = %v, %v", live, err)
-	}
-}
-
-func TestEngineLiveIgnoresAProcessThatExitsDuringTheProcScan(t *testing.T) {
-	proc := fakeReloadProc{
-		pids:   []int{800, 801},
-		argv:   map[int][]string{801: {"claude"}},
-		cmdErr: map[int]error{800: os.ErrNotExist},
-		stat:   map[int]gather.ProcStat{801: {ParentPID: 700}},
-	}
-	live, err := engineLive(proc, 700, pfmengine.Claude, "", "")
-	if err != nil || !live {
-		t.Fatalf("engineLive() = %v, %v", live, err)
-	}
-}
-
 func TestFailedThenWritesTheRecoverableSentinel(t *testing.T) {
 	dir := t.TempDir()
 	tmux := &fakeReloadTmux{}

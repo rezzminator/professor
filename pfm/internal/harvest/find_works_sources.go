@@ -167,25 +167,38 @@ func errNoSourceAnswered(found WorksFound) error {
 	return fmt.Errorf("every discovery source failed: %s", FailedText(found.Failed()))
 }
 
-// workSearch is one discovery source of a FindWorks call: its public name and
-// a search that answers its candidates and, when a request failed, what failed.
+// workSearch is one discovery source of a FindWorks call: its public name,
+// whether the call waits for it before its grace (core), and a search that
+// answers its candidates and, when a request failed, what failed.
 type workSearch struct {
 	name string
+	core bool
 	run  func(context.Context) ([]Candidate, string)
 }
 
 // gatherWorks runs every search at once and waits until each answered or ctx
-// ended. A search still running then is named timed_out with the deadline it
-// was given (or cancelled, when the caller cancelled), never dropped; it is
-// left to see ctx's cancellation and exit on its own.
-func gatherWorks(ctx context.Context, searches []workSearch, deadline time.Duration) ([][]Candidate, []WorkSource) {
+// ended. Once every core search finished and the answers hold at least
+// minCandidates distinct records, it waits grace for the rest. A search still
+// running at the end is named timed_out — with the grace's text, the deadline
+// it was given, or the caller's cancellation — never dropped; it is left to see
+// ctx's cancellation and exit on its own.
+func gatherWorks(
+	ctx context.Context,
+	searches []workSearch,
+	deadline, grace time.Duration,
+	minCandidates int,
+) ([][]Candidate, []WorkSource) {
 	type answer struct {
 		index      int
 		candidates []Candidate
 		source     WorkSource
 	}
 	answers := make(chan answer, len(searches)) // a late answer never blocks its goroutine
+	coreLeft, hasCore := 0, false
 	for index, search := range searches {
+		if search.core {
+			coreLeft, hasCore = coreLeft+1, true
+		}
 		go func() {
 			// A recovered panic (F1) fails its own source by name: one bad
 			// provider response must not take the other sources, let alone
@@ -202,22 +215,49 @@ func gatherWorks(ctx context.Context, searches []workSearch, deadline time.Durat
 	parts := make([][]Candidate, len(searches))
 	sources := make([]WorkSource, len(searches))
 	answered := make([]bool, len(searches))
+	timeOut := func(failure string) ([][]Candidate, []WorkSource) {
+		for index, search := range searches {
+			if !answered[index] {
+				sources[index] = WorkSource{Name: search.name, Status: SourceTimedOut, Error: failure}
+			}
+		}
+		return parts, sources
+	}
+	distinct := map[string]bool{}
+	var settled <-chan struct{} // the grace, armed once the core finished
+	graceScope, endGrace := context.WithCancel(context.Background())
+	defer endGrace()
 	for range searches {
 		select {
 		case got := <-answers:
 			parts[got.index], sources[got.index], answered[got.index] = got.candidates, got.source, true
-		case <-ctx.Done():
-			failure := fmt.Sprintf("no answer within the %s findWorks deadline; cancelled", deadline)
-			if errors.Is(ctx.Err(), context.Canceled) {
-				failure = "cancelled by the caller before it answered"
+			if searches[got.index].core {
+				coreLeft--
 			}
-			for index, search := range searches {
-				if !answered[index] {
-					sources[index] = WorkSource{Name: search.name, Status: SourceTimedOut, Error: failure}
+			for _, candidate := range got.candidates {
+				if candidate.URL != "" {
+					distinct[candidate.URL] = true
 				}
 			}
-			return parts, sources
+			if hasCore && settled == nil && coreLeft == 0 && len(distinct) >= minCandidates {
+				settled = graceAfter(graceScope, grace)
+			}
+		case <-settled:
+			return timeOut(findWorksNotWaitedText)
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return timeOut("cancelled by the caller before it answered")
+			}
+			return timeOut(fmt.Sprintf("no answer within the %s findWorks deadline; cancelled", deadline))
 		}
 	}
 	return parts, sources
+}
+
+// graceAfter is a channel closed grace from now, or when scope ends; scope's
+// end also releases the grace's timer.
+func graceAfter(scope context.Context, grace time.Duration) <-chan struct{} {
+	ctx, cancel := context.WithTimeout(scope, grace)
+	context.AfterFunc(scope, cancel)
+	return ctx.Done()
 }

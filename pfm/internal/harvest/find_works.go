@@ -27,25 +27,43 @@ func (r *Resolver) FindWorks(ctx context.Context, query string, limit int) ([]Ca
 	return found.Candidates, nil
 }
 
-// FindWorksReport searches every discovery source at once and names each
-// source's status beside the ranked candidates; it is an error only when no
-// source answered.
+// FindWorksReport is FindWorksReportFor any kind of work.
 func (r *Resolver) FindWorksReport(ctx context.Context, query string, limit int) (WorksFound, error) {
-	return r.findWorksWithin(ctx, query, limit, findWorksTimeout)
+	return r.FindWorksReportFor(ctx, query, limit, "")
+}
+
+// FindWorksReportFor searches every discovery source at once and names each
+// source's status beside the ranked candidates; it is an error only when no
+// source answered. kind ("paper", "book", or "" / "any") picks the core
+// sources the call waits for before its short grace for the rest.
+func (r *Resolver) FindWorksReportFor(ctx context.Context, query string, limit int, kind string) (WorksFound, error) {
+	return r.findWorksWithin(ctx, query, limit, kind, findWorksTimeout, findWorksGrace)
 }
 
 // findWorksTimeout is the whole findWorks call's deadline: an MCP client gives a
 // tool call about 60 s, and the sources that run long are the ones that fail.
 const findWorksTimeout = 20 * time.Second
 
-// findWorksWithin is FindWorksReport under a deadline: every source runs at
+// findWorksGrace is how long a findWorks call waits for the other sources once
+// the core sources for the asked-for kind have finished and the ranking is
+// settled: a source that runs long past the core is the one that fails.
+const findWorksGrace = 2 * time.Second
+
+// findWorksNotWaitedText names a source still running when the grace ran out,
+// apart from the deadline's text.
+const findWorksNotWaitedText = "not waited for: the core sources had answered"
+
+// findWorksWithin is FindWorksReportFor under a deadline: every source runs at
 // once, and when the deadline comes the call ranks what answered; a source
 // still running is cancelled and named timed_out with the time it was given.
+// Once the core sources for kind finished (findWorksCore), the call waits
+// grace for the rest, then ranks what answered.
 func (r *Resolver) findWorksWithin(
 	ctx context.Context,
 	query string,
 	limit int,
-	deadline time.Duration,
+	kind string,
+	deadline, grace time.Duration,
 ) (WorksFound, error) {
 	query = strings.TrimSpace(strings.Trim(query, "\"'"))
 	if query == "" {
@@ -63,41 +81,60 @@ func (r *Resolver) findWorksWithin(
 		hosts  int
 		gather func(context.Context, *http.Client, string, int) []Candidate
 	}{
-		{"OpenAlex", 1, r.findPapers},
-		{"arXiv", 1, r.findArxiv},
-		{"Crossref", 1, r.findCrossref},
-		{"Semantic Scholar", 1, r.findSemanticScholar},
-		{"Open Library", 1, r.findOpenLibrary},
-		{"Gutendex", 1, r.findGutendex},
+		{nameOpenAlex, 1, r.findPapers},
+		{nameArXiv, 1, r.findArxiv},
+		{nameCrossref, 1, r.findCrossref},
+		{nameSemanticScholar, 1, r.findSemanticScholar},
+		{nameOpenLibrary, 1, r.findOpenLibrary},
+		{nameGutendex, 1, r.findGutendex},
 	} {
-		searches = append(searches, workSearch{gatherer.name, func(ctx context.Context) ([]Candidate, string) {
-			probe, probed := newSourceProbe(client)
-			candidates := gatherer.gather(ctx, probed, query, limit)
-			return candidates, probe.failure(gatherer.hosts)
-		}})
+		searches = append(
+			searches,
+			workSearch{
+				gatherer.name,
+				findWorksCore(kind, gatherer.name),
+				func(ctx context.Context) ([]Candidate, string) {
+					probe, probed := newSourceProbe(client)
+					candidates := gatherer.gather(ctx, probed, query, limit)
+					return candidates, probe.failure(gatherer.hosts)
+				},
+			},
+		)
 	}
 	for _, optional := range []struct {
 		name, label string
 		enabled     bool
 		search      func(context.Context, string, int) ([]Candidate, error)
 	}{
-		{"book mirror", "ipfs-catalog", r.configuredProviderBase(sourceIPFSCatalog) != "", r.ipfsCatalogSearch},
-		{"book mirror", "md5-catalog", r.configuredProviderBase(sourceMD5Catalog) != "", r.md5CatalogSearch},
+		{nameBookMirror, "ipfs-catalog", r.configuredProviderBase(sourceIPFSCatalog) != "", r.ipfsCatalogSearch},
+		{nameBookMirror, "md5-catalog", r.configuredProviderBase(sourceMD5Catalog) != "", r.md5CatalogSearch},
 		{"Google Scholar", "google scholar", strings.TrimSpace(r.GoogleScholarURL) != "", r.googleScholar},
 	} {
 		if !optional.enabled {
 			continue
 		}
-		searches = append(searches, workSearch{optional.name, func(ctx context.Context) ([]Candidate, string) {
-			candidates, err := optional.search(ctx, query, limit)
-			if err != nil {
-				log.Printf("harvest: %s discovery failed for %s: %v", optional.label, query, err)
-				return nil, redactFailureText(err.Error())
-			}
-			return candidates, ""
-		}})
+		searches = append(
+			searches,
+			workSearch{
+				optional.name,
+				findWorksCore(kind, optional.name),
+				func(ctx context.Context) ([]Candidate, string) {
+					candidates, err := optional.search(ctx, query, limit)
+					if err != nil {
+						log.Printf("harvest: %s discovery failed for %s: %v", optional.label, query, err)
+						return nil, redactFailureText(err.Error())
+					}
+					return candidates, ""
+				},
+			},
+		)
 	}
-	parts, sources := gatherWorks(ctx, searches, deadline)
+	// An "any" call finishes early only with limit candidates in hand.
+	minCandidates := 0
+	if kind != kindPaper && kind != kindBook {
+		minCandidates = limit
+	}
+	parts, sources := gatherWorks(ctx, searches, deadline, grace, minCandidates)
 	best := map[string]Candidate{}
 	order := make([]string, 0)
 	for _, part := range parts {
@@ -151,6 +188,31 @@ func (r *Resolver) findWorksWithin(
 		return found, errNoSourceAnswered(found)
 	}
 	return found, nil
+}
+
+// The discovery sources' public names, as a findWorks answer names them.
+const (
+	nameOpenAlex        = "OpenAlex"
+	nameArXiv           = "arXiv"
+	nameCrossref        = "Crossref"
+	nameSemanticScholar = "Semantic Scholar"
+	nameOpenLibrary     = "Open Library"
+	nameGutendex        = "Gutendex"
+	nameBookMirror      = "book mirror"
+)
+
+// findWorksCore reports whether a findWorks call for kind waits for source
+// before its grace: a paper call waits for the paper sources, a book call for
+// the book sources, any other call for the paper sources and Open Library.
+func findWorksCore(kind, source string) bool {
+	paper := source == nameOpenAlex || source == nameArXiv || source == nameCrossref || source == nameSemanticScholar
+	switch kind {
+	case kindPaper:
+		return paper
+	case kindBook:
+		return source == nameOpenLibrary || source == nameGutendex || source == nameBookMirror
+	}
+	return paper || source == nameOpenLibrary
 }
 
 func (r *Resolver) findPapers(ctx context.Context, client *http.Client, query string, limit int) []Candidate {
@@ -306,8 +368,10 @@ func (r *Resolver) findCrossref(ctx context.Context, client *http.Client, query 
 	// withContact wraps the WHOLE url — appending its "?mailto=…" to an already
 	// built query string would fold the contact into the `rows` value and 400
 	// every search on any host that configures a contact email.
+	// select asks for only the fields ranked below: a whole work record per row
+	// is Crossref's slow path, and a slow answer is a timed-out one.
 	endpoint := r.withContact("https://api.crossref.org/works?query.bibliographic="+url.QueryEscape(query)+
-		fmt.Sprintf("&rows=%d", limit), "mailto")
+		fmt.Sprintf("&rows=%d&select=DOI,title,issued", limit), "mailto")
 	out := []Candidate{}
 	if err := getJSON(ctx, client, endpoint, &data); err != nil {
 		// An outage is not an empty shelf — name it instead of returning a

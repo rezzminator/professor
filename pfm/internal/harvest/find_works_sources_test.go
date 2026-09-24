@@ -83,7 +83,14 @@ func TestFindWorksAnswersWithinItsDeadline(t *testing.T) {
 		return response(r, http.StatusOK, "application/json", `{}`), nil
 	})}
 	start := time.Now()
-	found, err := (&Resolver{Client: client}).findWorksWithin(context.Background(), "Deep learning", 8, deadline)
+	found, err := (&Resolver{Client: client}).findWorksWithin(
+		context.Background(),
+		"Deep learning",
+		8,
+		"",
+		deadline,
+		findWorksGrace,
+	)
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatal(err)
@@ -110,4 +117,98 @@ func TestFindWorksAnswersWithinItsDeadline(t *testing.T) {
 	if got := status["OpenAlex"]; got.Status != SourceAnswered || got.Results != 1 {
 		t.Fatalf("OpenAlex = %+v, want answered with 1 result", got)
 	}
+}
+
+// slowGutendexClient answers every paper source and Open Library at once with
+// one record each; Gutendex sleeps past any deadline, deaf to cancellation.
+// slowHost, when set, sleeps the same way.
+func slowGutendexClient(slowHost string) *http.Client {
+	return &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Host == "gutendex.com" || r.URL.Host == slowHost {
+			time.Sleep(5 * time.Second)
+			return response(r, http.StatusOK, "application/json", `{}`), nil
+		}
+		switch r.URL.Host {
+		case "api.openalex.org":
+			return response(r, http.StatusOK, "application/json", `{"results":[
+{"doi":"https://doi.org/10.1038/nature14539","display_name":"Deep learning","publication_year":2015}]}`), nil
+		case "api.crossref.org":
+			return response(r, http.StatusOK, "application/json", `{"message":{"items":[
+{"DOI":"10.1000/deep","title":["Deep learning"],"issued":{"date-parts":[[2016]]}}]}}`), nil
+		}
+		return response(r, http.StatusOK, "application/json", `{}`), nil
+	})}
+}
+
+// TestFindWorksFinishesEarlyOnceTheCoreAnswered: the core answered at once and
+// only Gutendex runs long. The call returns within the core's time plus the
+// grace, not at the 20 s deadline, and names Gutendex timed_out with the
+// early-finish text, apart from the deadline's.
+func TestFindWorksFinishesEarlyOnceTheCoreAnswered(t *testing.T) {
+	start := time.Now()
+	found, err := (&Resolver{Client: slowGutendexClient("")}).FindWorksReportFor(
+		context.Background(), "Deep learning", 1, "")
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed > findWorksGrace+500*time.Millisecond {
+		t.Fatalf("findWorks took %s, want the core's time plus the %s grace", elapsed, findWorksGrace)
+	}
+	if got := sourceNamed(found, "Gutendex"); got.Status != SourceTimedOut || got.Error != findWorksNotWaitedText {
+		t.Fatalf("Gutendex = %+v, want timed_out %q", got, findWorksNotWaitedText)
+	}
+}
+
+// TestFindWorksEarlyFinishFollowsTheKind: the core is the asked-for kind's
+// sources. A slow source outside it is not waited for past the grace; a slow
+// core source, or an "any" call short of limit candidates, holds the call to
+// the deadline.
+func TestFindWorksEarlyFinishFollowsTheKind(t *testing.T) {
+	const deadline, grace = 1500 * time.Millisecond, 200 * time.Millisecond
+	for _, tc := range []struct {
+		name, kind, slowHost, slowSource, wantError string
+		limit                                       int
+		early                                       bool
+	}{
+		{"paper, slow Open Library", kindPaper, "openlibrary.org", "Open Library", findWorksNotWaitedText, 8, true},
+		{"paper, slow Crossref", kindPaper, "api.crossref.org", "Crossref", "deadline", 8, false},
+		{"book, slow Gutendex", kindBook, "", "Gutendex", "deadline", 8, false},
+		{"any, fewer than limit", "", "", "Gutendex", "deadline", 5, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
+			found, err := (&Resolver{Client: slowGutendexClient(tc.slowHost)}).findWorksWithin(
+				context.Background(), "Deep learning", tc.limit, tc.kind, deadline, grace)
+			elapsed := time.Since(start)
+			if err != nil && tc.early {
+				t.Fatal(err)
+			}
+			if tc.early && elapsed > grace+500*time.Millisecond {
+				t.Fatalf("took %s, want the core's time plus the %s grace", elapsed, grace)
+			}
+			if !tc.early && elapsed < deadline {
+				t.Fatalf("took %s, want the call held to the %s deadline", elapsed, deadline)
+			}
+			got := sourceNamed(found, tc.slowSource)
+			if got.Status != SourceTimedOut || !strings.Contains(got.Error, tc.wantError) {
+				t.Fatalf(
+					"%s = %+v, want timed_out naming %q; sources %+v",
+					tc.slowSource,
+					got,
+					tc.wantError,
+					found.Sources,
+				)
+			}
+		})
+	}
+}
+
+func sourceNamed(found WorksFound, name string) WorkSource {
+	for _, source := range found.Sources {
+		if source.Name == name {
+			return source
+		}
+	}
+	return WorkSource{}
 }

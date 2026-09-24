@@ -18,7 +18,7 @@ const (
 	workKindAny          = "any"
 	workKindPaper        = "paper"
 	workKindBook         = "book"
-	findWorksDescription = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call findWorks{query:"Attention Is All You Need"}; kind:"paper" or "book" narrows it. Returns ranked candidates (title, authors, year, kind, identifiers, open access) each with a handle — pass that value unchanged to readWork. ` + "`sources`" + ` names each discovery source's status (answered, partial, failed, timed_out = still running at the 20 s deadline and cancelled): empty candidates with every source answered = nothing matched (give the exact title); a failed source is named, never read as an empty answer; a tool error = every source failed, retry later or read an exact identifier with readWork.`
+	findWorksDescription = `Finds scholarly papers and books by TITLE or bibliographic query — "find the paper about X", "is there a PDF of <title>". No download. Call findWorks{query:"Attention Is All You Need"}; kind:"paper" or "book" narrows it. Returns ranked candidates (title, authors, year, kind, identifiers, open access) each with a handle — pass that value unchanged to readWork. ` + "`sources`" + ` names each discovery source's status (answered, partial, failed, timed_out = still running at the 20 s deadline, or 2 s after the sources for the kind finished, and cancelled): empty candidates with every source answered = nothing matched (give the exact title); a failed source is named, never read as an empty answer; a tool error = every source failed, retry later or read an exact identifier with readWork.`
 )
 
 // FindInput is findWorks' input.
@@ -79,7 +79,7 @@ func (service *Service) findWorks(
 		)
 	}
 	log := obs.Logger(obs.Component(ctx, "mcp"))
-	found, err := service.resolver.FindWorksReport(ctx, input.Query, input.Limit)
+	found, err := service.resolver.FindWorksReportFor(ctx, input.Query, input.Limit, kind)
 	if err != nil {
 		log.Warn("harvester.findWorks.failed", obs.FieldErr, err.Error())
 		return nil, FindOutput{}, fmt.Errorf(

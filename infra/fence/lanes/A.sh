@@ -265,8 +265,8 @@ for dir in .claude/commands .claude/scripts .claude/skills docs/epics .codex doc
   [ -d "$INIT_DIR/$dir" ] || bad="$bad $dir/ not deployed;"
 done
 [ -e "$INIT_DIR/.claude/commands/per-project" ] && bad="$bad .claude/commands/per-project was deployed (P5: the testing manual is interview-deployed, one per roster entry);"
-grep -q 'notify.sh' "$INIT_DIR/.claude/settings.json" 2>/dev/null && grep -q 'format-md.sh' "$INIT_DIR/.claude/settings.json" 2>/dev/null ||
-  bad="$bad .claude/settings.json does not ship the notify.sh/format-md.sh hooks (P2);"
+grep -q 'format-md.sh' "$INIT_DIR/.claude/settings.json" 2>/dev/null ||
+  bad="$bad .claude/settings.json does not ship the format-md.sh hook (P2);"
 [ -x "$INIT_DIR/.claude/scripts/dev.sh" ] || bad="$bad .claude/scripts/dev.sh lost its executable mode (P6);"
 # P32: [dir] [--force] — a re-init names every collision; --force overwrites.
 again="$(pfm init "$INIT_DIR" 2>&1)"

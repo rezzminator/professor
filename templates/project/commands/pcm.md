@@ -32,7 +32,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 ### Critical invariants
 
 - **Path variables** — agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- **Pipeline flow lives in the flights commands** (`/flights:spec` → optionally `/flights:refine` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
+- **Pipeline flow lives in the flights commands** (`/flights:spec` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
 - **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
@@ -129,7 +129,7 @@ Before ANY changes, read all affected files. Grep every reference across `.claud
 - Project dir names in CLAUDE.md match actual directories
 - Agent frontmatter matches actual behavior and tools needed
 - worktree.sh project resolution matches directory names
-- Flights-command references (`/flights:spec`, `/flights:refine`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
+- Flights-command references (`/flights:spec`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
 - Tech stack descriptions match package.json/pyproject.toml deps
 - Pipeline flow in the flights commands matches agent ordering constraints
 

@@ -33,15 +33,14 @@ Every command, agent, and rule sorts into one of three tiers:
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator voice and root persona. Lives in `pfm/harness-prompts/`, composed per engine and selected by the Claude launch policy.
 - **/pcm** — Professor Change Manager: edits the pipeline at the source. Surgery, not journaling. `/pcm audit [scope]` (`agents`, `commands`, `skills`, `pipeline`, `scripts`, `structure`, `cross-refs`, or `all`) walks the pipeline's own files against a checklist per scope; `/context-meter` audits the framework's own context budget.
-- **/flights:{spec,refine,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the opt-in chat MCP server the same binary registers.
+- **/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the opt-in chat MCP server the same binary registers.
 
 > The Tier A persona ships as ONE version: `professor.md` (the harness replacement) — lean voice plus the behavioral contract (concise delivery, the Verdict, the Analysis Protocol).
 
 **Bundled commands (ship with the blueprint):**
 
 - **the framework bus** — the framework repo's release flow publishes the blueprint; project installs are scaffolded once and adopt later template deltas by reviewed diff.
-- **/flights:spec** — maps the area, asks only what the code cannot answer, hands `flights-speccer` the decisions, and presents the index it wrote.
-- **/flights:refine** — grills the user on a written flight, one round of numbered questions with recommended answers at a time, until nothing is assumed; `flights-speccer` revises the directory from the rulings.
+- **/flights:spec** — maps the area, grills the user round by round with a recommended answer per question until no technical or product gap is left, hands `flights-speccer` the decisions, and presents the index it wrote.
 - **/flights:orchestrate-{nested,live,cross-harness}** — one manual in three containers: a `flights-orchestrator` sub-agent, the main chat running the flight itself, or chat seats on three engines as the executors.
 - **/flights:audit** — the skeptic over a flight, running or landed: every claim checked against its artifact — `run.md`, git, the executor transcripts, the checks' own output — and an artifact it cannot read is a finding, never an absence.
 - **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, executing the run itself.

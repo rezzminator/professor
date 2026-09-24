@@ -301,3 +301,55 @@ func TestUpsertRejectsEmptyKey(t *testing.T) {
 		t.Fatalf("UpsertCall without a key = %v, want an error naming tool_use_id", err)
 	}
 }
+
+// TestAccountColumnsMergeLikeConfigDir: account and seat_dir, once set, are
+// never overwritten by a write that does not carry them, and a provisional
+// request's pair survives its resolution into a row that had none.
+func TestAccountColumnsMergeLikeConfigDir(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	seat := "/tmp/demo-seat"
+	key := ProvisionalKey("toolu_a")
+	if err := store.Batch(ctx, func(tx *Tx) error {
+		if err := tx.UpsertRequest(ctx, Request{RequestID: "msg_1", Calls: Ptr(int64(1))}, Overwrite); err != nil {
+			return err
+		}
+		if err := tx.UpsertRequest(ctx, Request{
+			RequestID: key, Calls: Ptr(int64(1)), Pending: Ptr(true), Account: Ptr(int64(3)), SeatDir: Ptr(seat),
+		}, Overwrite); err != nil {
+			return err
+		}
+		if err := tx.UpsertCall(
+			ctx,
+			Call{ToolUseID: "toolu_a", Account: Ptr(int64(3)), SeatDir: Ptr(seat)},
+			Overwrite,
+		); err != nil {
+			return err
+		}
+		if err := tx.UpsertCall(ctx, Call{ToolUseID: "toolu_a", Tool: Ptr("Bash")}, Overwrite); err != nil {
+			return err
+		}
+		if err := tx.UpsertAgent(
+			ctx,
+			Agent{AgentID: "agent_a", Account: Ptr(int64(3)), SeatDir: Ptr(seat)},
+			Overwrite,
+		); err != nil {
+			return err
+		}
+		return tx.UpsertAgent(ctx, Agent{AgentID: "agent_a", Model: Ptr("opus")}, Overwrite)
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := store.ResolveRequest(ctx, key, Request{RequestID: "msg_1"}); err != nil {
+		t.Fatalf("ResolveRequest: %v", err)
+	}
+	for _, got := range []map[string]any{
+		row(t, store, "requests", "request_id = ?", "msg_1"),
+		row(t, store, "calls", "tool_use_id = ?", "toolu_a"),
+		row(t, store, "agents", "agent_id = ?", "agent_a"),
+	} {
+		if got["account"] != int64(3) || got["seat_dir"] != seat {
+			t.Errorf("row account = %v seat_dir = %v, want 3 and %s", got["account"], got["seat_dir"], seat)
+		}
+	}
+}

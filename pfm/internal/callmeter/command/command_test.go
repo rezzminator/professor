@@ -52,6 +52,12 @@ func (fixture lab) run(args ...string) (code int, stdout, stderr string) {
 // seedRead records one Read of file in configDir through the store's own API.
 func (fixture lab) seedRead(t *testing.T, id, file, configDir string) {
 	t.Helper()
+	fixture.seedReadOn(t, id, file, configDir, nil)
+}
+
+// seedReadOn is seedRead run on account, NULL when nil.
+func (fixture lab) seedReadOn(t *testing.T, id, file, configDir string, account *int64) {
+	t.Helper()
 	ctx := context.Background()
 	store, err := callmeter.OpenDB(ctx, fixture.storePath)
 	if err != nil {
@@ -67,7 +73,7 @@ func (fixture lab) seedRead(t *testing.T, id, file, configDir string) {
 		TS: callmeter.Ptr(time.Now().UnixMilli()), Tool: callmeter.Ptr("Read"),
 		Cwd: callmeter.Ptr(filepath.Dir(file)), FilePath: callmeter.Ptr(file),
 		BytesDelivered: callmeter.Ptr(int64(1234)), Source: callmeter.Ptr("hook"),
-		ConfigDir: callmeter.Ptr(configDir),
+		ConfigDir: callmeter.Ptr(configDir), Account: account,
 	}
 	if err := store.UpsertCall(ctx, call, callmeter.Overwrite); err != nil {
 		t.Fatalf("seed call: %v", err)
@@ -162,5 +168,38 @@ func TestCallmeterCLIAccountsSharingProjectsAreOneHistory(t *testing.T) {
 			t.Fatalf("report narrowed to %s = %d, want the shared chat\nstdout:\n%s\nstderr:\n%s",
 				account, code, stdout, stderr)
 		}
+	}
+}
+
+// TestCallmeterCLIAccountNarrowsAndRejectsUnknown: --account keeps only the
+// calls that account ran, leaves out calls with no account recorded, names
+// itself in the header, and an id the config does not name is refused with
+// the configured ids.
+func TestCallmeterCLIAccountNarrowsAndRejectsUnknown(t *testing.T) {
+	fixture := newLab(t)
+	fixture.runtime.Config.Accounts = append(fixture.runtime.Config.Accounts,
+		pfmconfig.Account{ID: 3, ConfigDir: fixture.accounts[1]})
+	fixture.seedReadOn(t, "toolu_1", "/work/one.md", fixture.accounts[0], callmeter.Ptr(int64(1)))
+	fixture.seedReadOn(t, "toolu_3", "/work/three.md", fixture.accounts[0], callmeter.Ptr(int64(3)))
+	fixture.seedReadOn(t, "toolu_n", "/work/unknown.md", fixture.accounts[0], nil)
+	code, stdout, stderr := fixture.run("report", "files", "--account", "3")
+	if code != 0 || !strings.Contains(stdout, "/work/three.md") || !strings.Contains(stdout, "account=3") ||
+		strings.Contains(stdout, "/work/one.md") || strings.Contains(stdout, "/work/unknown.md") {
+		t.Fatalf(
+			"report --account 3 = %d, want only account 3's call and account=3 in the header\nstdout:\n%s\nstderr:\n%s",
+			code,
+			stdout,
+			stderr,
+		)
+	}
+	code, stdout, stderr = fixture.run("report", "files")
+	if code != 0 || !strings.Contains(stdout, "/work/unknown.md") || strings.Contains(stdout, "account=") {
+		t.Fatalf("report without --account = %d, want every call, the NULL account's too\nstdout:\n%s\nstderr:\n%s",
+			code, stdout, stderr)
+	}
+	code, _, stderr = fixture.run("report", "files", "--account", "9")
+	if code != 2 || !strings.Contains(stderr, "--account 9 is not a configured account") ||
+		!strings.Contains(stderr, "1, 2, 3") {
+		t.Fatalf("unknown --account = %d, want 2 naming the configured ids\nstderr:\n%s", code, stderr)
 	}
 }

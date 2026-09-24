@@ -102,7 +102,14 @@ func (lab *callmeterLab) feed(payloads ...string) {
 	lab.t.Helper()
 	for _, payload := range payloads {
 		var stderr bytes.Buffer
-		if code := runCallmeter(lab.ctx, strings.NewReader(payload), &stderr, lab.storePath, lab.clock); code != 0 {
+		if code := runCallmeter(
+			lab.ctx,
+			strings.NewReader(payload),
+			&stderr,
+			lab.storePath,
+			lab.clock,
+			callmeterSeat{},
+		); code != 0 {
 			lab.t.Fatalf("exit code = %d, want 0 on every path; stderr = %q", code, stderr.String())
 		}
 	}
@@ -521,6 +528,7 @@ func TestCallmeterStoreUnopenable(t *testing.T) {
 		&stderr,
 		lab.storePath,
 		lab.clock,
+		callmeterSeat{},
 	); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
@@ -783,7 +791,14 @@ func TestCallmeterStoreUnopenableNamesBatchCalls(t *testing.T) {
 	var stderr bytes.Buffer
 	batch := lab.payloads("probe5.jsonl")[3]
 	storePath := filepath.Join(blocker, "callmeter.db")
-	if code := runCallmeter(lab.ctx, strings.NewReader(batch), &stderr, storePath, lab.clock); code != 0 {
+	if code := runCallmeter(
+		lab.ctx,
+		strings.NewReader(batch),
+		&stderr,
+		storePath,
+		lab.clock,
+		callmeterSeat{},
+	); code != 0 {
 		t.Fatalf("exit code = %d, want 0", code)
 	}
 	for _, id := range []string{cmBatchLead, "toolu_014w33S7y4Hmv2iQj3NzzEWV", "toolu_01LV57SCFxiU1LaMWZm3ixg6"} {

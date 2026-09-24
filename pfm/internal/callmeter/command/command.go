@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,9 +24,10 @@ import (
 )
 
 const usage = `usage: pfm callmeter report {files|writes|commands|context|sequences|faults} [--since D] [--project P]
-                     [--agent-type T] [--session S] [--config-dir DIR] [--limit N]
+                     [--agent-type T] [--session S] [--config-dir DIR] [--account N] [--limit N]
   --since D         a duration (7d, 24h) or a date (2026-09-01); default and floor: the 30-day retention window
-  --config-dir DIR  one configured Claude config dir; default: every one the machine config names`
+  --config-dir DIR  one configured Claude config dir; default: every one the machine config names
+  --account N       calls one configured account ran (its id); default: every call, those with no account too`
 
 type topicFunc func(context.Context, *callmeter.Store, report.Filter, report.NameOf) (*report.Table, error)
 
@@ -53,8 +55,8 @@ func CLI(args []string, stdout, stderr io.Writer, runtime pfmconfig.Runtime) int
 }
 
 type flagValues struct {
-	since, configDir, project, agentType, session string
-	limit                                         int
+	since, configDir, account, project, agentType, session string
+	limit                                                  int
 }
 
 func newFlags(name string, stderr io.Writer) (*flag.FlagSet, *flagValues) {
@@ -62,6 +64,7 @@ func newFlags(name string, stderr io.Writer) (*flag.FlagSet, *flagValues) {
 	values := &flagValues{}
 	flags.StringVar(&values.since, "since", "", "a duration (7d, 24h) or a date (2026-09-01)")
 	flags.StringVar(&values.configDir, "config-dir", "", "one configured Claude config dir")
+	flags.StringVar(&values.account, "account", "", "calls this configured account id ran")
 	flags.StringVar(&values.project, "project", "", "calls whose cwd is this dir or under it")
 	flags.StringVar(&values.agentType, "agent-type", "", "calls made by this agent type")
 	flags.StringVar(&values.session, "session", "", "calls in this session")
@@ -127,7 +130,7 @@ func reportAction(
 }
 
 // buildFilter turns the flags into a report.Filter: --since clamped to the
-// retention window (with one note), the config dirs resolved, --project absolute.
+// retention window (with one note), the config dirs resolved, --account checked, --project absolute.
 func buildFilter(
 	values *flagValues,
 	config pfmconfig.Config,
@@ -149,6 +152,11 @@ func buildFilter(
 		fmt.Fprintf(stderr, "callmeter: %v\n", err)
 		return report.Filter{}, 2, false
 	}
+	account, err := accountFilter(config, values.account)
+	if err != nil {
+		fmt.Fprintf(stderr, "callmeter: %v\n", err)
+		return report.Filter{}, 2, false
+	}
 	project := values.project
 	if project != "" {
 		if project, err = filepath.Abs(project); err != nil {
@@ -158,7 +166,7 @@ func buildFilter(
 	}
 	return report.Filter{
 		Since: since, Project: project, AgentType: values.agentType, Session: values.session,
-		ConfigDirs: dirs, Limit: values.limit,
+		ConfigDirs: dirs, Account: account, Limit: values.limit,
 	}, 0, true
 }
 
@@ -189,6 +197,27 @@ func configuredDirs(config pfmconfig.Config, narrow string) ([]string, error) {
 			narrow, strings.Join(dirs, ", "))
 	}
 	return []string{dir}, nil
+}
+
+// accountFilter is --account as a report filter: nil when not given, and
+// otherwise an id the machine config names.
+func accountFilter(config pfmconfig.Config, value string) (*int, error) {
+	if value == "" {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(config.Accounts))
+	for _, account := range config.Accounts {
+		ids = append(ids, strconv.Itoa(account.ID))
+	}
+	id, err := strconv.Atoi(value)
+	if err == nil {
+		for _, account := range config.Accounts {
+			if account.ID == id {
+				return &id, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("--account %s is not a configured account (configured: %s)", value, strings.Join(ids, ", "))
 }
 
 // physicalDir is the config dir the store names for dir

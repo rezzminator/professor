@@ -36,6 +36,7 @@ type Filter struct {
 	AgentType  string   // calls made by that agent type
 	Session    string   // calls in that session
 	ConfigDirs []string // empty = every config dir
+	Account    *int     // calls and requests that configured account ran; nil = every row
 	Limit      int      // rows per table; <= 0 is DefaultLimit
 }
 
@@ -149,6 +150,9 @@ func (f Filter) title(topic string, names *names) string {
 	if len(f.ConfigDirs) > 0 {
 		parts = append(parts, "config-dir="+strings.Join(f.ConfigDirs, ","))
 	}
+	if f.Account != nil {
+		parts = append(parts, fmt.Sprintf("account=%d", *f.Account))
+	}
 	parts = append(parts, fmt.Sprintf("limit=%d", f.limit()))
 	return strings.Join(parts, " · ")
 }
@@ -183,6 +187,10 @@ func (f Filter) where() (string, []any) {
 			args = append(args, dir)
 		}
 		conds = append(conds, col("config_dir")+" IN ("+strings.Join(marks, ", ")+")")
+	}
+	if f.Account != nil {
+		conds = append(conds, col("account")+" = ?")
+		args = append(args, *f.Account)
 	}
 	return strings.Join(conds, " AND "), args
 }
@@ -372,7 +380,7 @@ func faultFilter(f Filter, table string) (string, []any) {
 	return strings.Join(conds, " AND "), args
 }
 
-// requestFilter narrows requests by window, session and config dir.
+// requestFilter narrows requests by window, session, config dir and account.
 func requestFilter(f Filter) (string, []any) {
 	where, args := faultFilter(f, "r")
 	if len(f.ConfigDirs) > 0 {
@@ -382,6 +390,10 @@ func requestFilter(f Filter) (string, []any) {
 			args = append(args, dir)
 		}
 		where += " AND r.config_dir IN (" + strings.Join(marks, ", ") + ")"
+	}
+	if f.Account != nil {
+		where += " AND r.account = ?"
+		args = append(args, *f.Account)
 	}
 	return where, args
 }

@@ -95,17 +95,10 @@ func ProbeExpectedHooks(home string, config pfmconfig.Config) []HookProbeResult 
 		}
 		results = append(results,
 			probeClaudeSettings(byFile[physical], fileOwnership, ledgerReadable, pfmBinary, executables)...)
-		if window := compactFor(config.Claude).window; window > 0 {
-			first := byFile[physical][0]
-			results = append(results, probeCompactWindow(first.File, first.Target, window)...)
-		}
 	}
 	results = append(results, probeCodexHooks(home, config, pfmBinary)...)
 	for path, counts := range ownership {
 		for key, count := range counts {
-			if key.Event == compactEnvOwnershipEvent {
-				continue // an owned settings env value, not a hook
-			}
 			if expectedKeys[path+"\x00"+key.Event+"\x00"+key.Matcher+"\x00"+key.Command] {
 				continue
 			}

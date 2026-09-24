@@ -28,7 +28,6 @@ suites:
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2
       github.com/rezzminator/professor/pfm/internal/codexgen: 2
       github.com/rezzminator/professor/pfm/internal/codexmeta: 2
-      github.com/rezzminator/professor/pfm/internal/compactgate: 2
       github.com/rezzminator/professor/pfm/internal/compose: 2
       github.com/rezzminator/professor/pfm/internal/config: 2
       github.com/rezzminator/professor/pfm/internal/deps: 42

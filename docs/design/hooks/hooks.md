@@ -36,7 +36,7 @@ Every claim cites the file that proves it. `{claude config dir}` is one account'
 
 | Engine | Tier | Hooks | Installed by |
 | --- | --- | --- | --- |
-| Claude | machine-global, per `{claude config dir}` | 12 hooks, 18 registrations (pfm-owned; `callmeter` alone is 7), plus `compact-gate` while both auto-compact thresholds are set | `pfm install` |
+| Claude | machine-global, per `{claude config dir}` | 12 hooks, 18 registrations (pfm-owned; `callmeter` alone is 7) | `pfm install` |
 | Claude | project `.claude/settings.json` | 6 in the template | `pfm init`, then the adopter |
 | Claude | operator's own, documented | 2 (memory backup, opt-in) | the adopter, by hand |
 | Codex | `{codex home}/hooks.json` | 0 owned; 2 retired shapes removed | `pfm install` (removal only) |
@@ -59,7 +59,6 @@ Installed into `{claude config dir}/settings.json` for every account in the mach
 | reload-intercept | `UserPromptSubmit` | `""` | `pfm internal reload-intercept` | `expected_hooks.go:106` | `pfm/internal/hookentry/reload_intercept.go:17` | Turns a `/reload` prompt into a scheduled reboot and blocks the prompt | Exits 2 with the reason when the reload cannot be scheduled (`reload_intercept.go:38-49`) |
 | exit-intercept | `UserPromptSubmit` | `""` | `pfm internal exit-intercept` | `expected_hooks.go:107` | `pfm/internal/hookentry/exit_intercept.go:18` | Turns an exact `e` or `/e` prompt into a kill of this chat | Exits 2 when the kill fails (`exit_intercept.go:40`) |
 | compact-nudge | `UserPromptSubmit` | `""` | `pfm internal compact-nudge` | `expected_hooks.go:108` | `pfm/internal/hookentry/compact_nudge.go:22` | Reminds the main chat to compact as context fills; Claude only | Exits 0 on every skip, 1 on one write failure (`compact_nudge.go:36-87`) |
-| compact-gate | `PreCompact` | `""` | `pfm internal compact-gate` | `expected_hooks.go:56-57` | `pfm/internal/compactgate/compactgate.go:79` | Blocks an automatic compaction until the compacting party (main chat or sub-agent) reaches its own threshold; wired only while `claude.autoCompactMain` and `claude.autoCompactSubagent` are both set, per [../context/compaction.md](../context/compaction.md) | Allows the compaction and logs the cause on any read failure; never blocks on an error |
 | callmeter | `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `PostToolBatch`, `SubagentStart`, `SubagentStop`, `Stop` (one command, seven registrations) | `Bash` on `PreToolUse`; `*` on the other tool events and the subagent events; none on `PostToolBatch` and `Stop` | `pfm internal callmeter`, async (`expected_hooks.go:109-130`) | `expected_hooks.go:109-130` | `pfm/internal/hookentry/callmeter.go` | Records calls, requests, agents and faults, per [callmeter.md](callmeter.md) | Always exits 0; logs and counts a fault |
 
 A blocked prompt returns `decision: block` with the original prompt suppressed (`pfm/internal/hookentry/prompt_block.go:23-28`).
@@ -132,7 +131,6 @@ The check lives in `hook_probe.go`: `ProbeExpectedHooks` (`pfm/internal/installe
 4. Present exactly once.
 5. Carries `async: true` when its template does (`pfm/internal/installer/hook_probe.go:223-224`).
 6. No retired or unknown pfm hook remains in any probed Claude settings file or any configured Codex `hooks.json` — Codex homes are read too, not just Claude's.
-7. While an auto-compact window is configured (`claude.autoCompactWindow`, or the pair `claude.autoCompactMain` and `claude.autoCompactSubagent`), every Claude settings file's `env.CLAUDE_CODE_AUTO_COMPACT_WINDOW` holds it (the pair's lower threshold): the `env compact-window` row, `ok` or `DRIFT CLAUDE_CODE_AUTO_COMPACT_WINDOW want={n} got={value|absent}` (`pfm/internal/installer/compact_probe.go`, per [../context/compaction.md](../context/compaction.md)).
 
 ### States
 

@@ -2,7 +2,7 @@
 
 pfm shows how full each context is where the operator already looks. Every sub-agent gets its own row in Claude Code's agent panel through the `subagentStatusLine` setting. The main statusline carries the model and effort in one block, in the same palette, so a row and the main line read alike.
 
-Decisions live in this file. A change lands here first, then in the code, then in every surface under [Surfaces that stay in sync](#surfaces-that-stay-in-sync). What pfm does about a full context lives in [compaction.md](compaction.md).
+Decisions live in this file. A change lands here first, then in the code, then in every surface under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
 ## Contents
 

@@ -169,13 +169,9 @@ func nextSettingsHookOwnership(
 	return next
 }
 
-// installerOwnedHookCommand includes the conditional compact gate, so a
-// run that wires it is credited by the before/after delta. installerOwnedHookKey
-// does not: no install before the ownership ledger ever wrote the gate, so an
-// unrecorded one is an operator's and is never claimed retroactively.
 func installerOwnedHookCommand(command, pfmBinary string) bool {
 	home := filepath.Dir(filepath.Dir(filepath.Dir(pfmBinary)))
-	for _, hook := range append(claudeHookTemplates(home), compactGateHook(home)) {
+	for _, hook := range claudeHookTemplates(home) {
 		if hook.Command == command {
 			return true
 		}
@@ -201,7 +197,7 @@ func removeOwnedSettingsHooks(document map[string]any, owned settingsHookCounts)
 	for key, count := range owned {
 		remaining[key] = count
 	}
-	changed := removeOwnedCompactEnv(document, owned)
+	changed := false
 	events, _ := document["hooks"].(map[string]any)
 	for event, eventValue := range events {
 		entries, _ := eventValue.([]any)

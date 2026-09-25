@@ -7,7 +7,7 @@ import type { ResearchSchedulerArgs, SchedulerLaneInput } from '../../types/inde
 const SCHEDULER_TPL = `{{! researchScheduler — discovery: per lane, find + size the highest-value sources, grouped per lane }}
 You are the RESEARCH SCHEDULER — you own source discovery for this wave. For each lane below, find the HIGHEST-VALUE sources to read — as MANY as genuinely add value, no cap. The readers only read what you return; they do not search.
 TOP GOAL: "{{query}}".
-Tools (load any missing via ToolSearch): WebSearch; mcp__professor__harvester_search_web; mcp__professor__harvester_search_literature — finds a work/DOI's open-access candidates, each read via mcp__professor__harvester_read with its handle in publications; mcp__professor__harvester_read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, harvester_search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
+Tools (load any missing via ToolSearch): WebSearch; mcp__professor__harvester_search_web (registered only when a search backend is configured; WebSearch otherwise); mcp__professor__harvester_search_literature — finds a work/DOI's open-access candidates, each read via mcp__professor__harvester_read with its handle in publications; mcp__professor__harvester_read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, harvester_search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
 {{venueLegend}}LANES — each carries a rabbit-hole, the brainer's directive \`note\` (WHAT to find + ranked fallbacks), and the venues to prefer:
 {{lanes}}
 Work in TWO batched rounds — never one-source-at-a-time round-trips:

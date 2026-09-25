@@ -70,25 +70,25 @@ The brainer never re-emits the whole frontier — it returns **deltas** (rescore
 
 ## Install anywhere
 
-**Per-project** — clone, then copy the 3 runtime files in (`engine/` is dev-only, not needed at runtime):
+**Per-project** — clone, then copy the 4 runtime files in (`engine/` is dev-only, not needed at runtime):
 
 ```bash
 git clone https://github.com/rezzminator/rr deep-rr
 mkdir -p <project>/.claude/skills/deep-rr
-cp deep-rr/{SKILL.md,workflow.js,persist.js} <project>/.claude/skills/deep-rr/
+cp deep-rr/{SKILL.md,workflow.js,persist.js,midrun.js} <project>/.claude/skills/deep-rr/
 ```
 
-**Global** (every project on the machine) — same 3 files into `~/.claude/skills/deep-rr/` instead.
+**Global** (every project on the machine) — same 4 files into `~/.claude/skills/deep-rr/` instead.
 
 **Requirements:**
 
 - Claude Code with the Workflow tool.
-- pfm's professor MCP server with the harvester family enabled (`pfm mcp harvester enable`) — without it, every fetch errors and the run is snippet-only.
+- pfm's professor MCP server with the harvester family enabled (`pfm mcp harvester enable`, then `pfm install --yes`, then `/mcp`) — without it, every fetch errors and the run is snippet-only.
 - `python3` with a scientific stack (scipy, sympy, uncertainties, pandas) for compute/derivation — optional, pass `compute: false` without it.
 
 **Verify:** in Claude Code say `rr fast <any question>` (instant, no Workflow needed), then `RR <question>` for a full background run. Results persist to `RR/{slug}/`.
 
-**Updating:** re-copy the 3 files from a fresh clone/pull — `SKILL.md`'s version pins compatibility.
+**Updating:** re-copy the 4 files from a fresh clone/pull — `SKILL.md`'s version pins compatibility.
 
 ## Launch + results
 

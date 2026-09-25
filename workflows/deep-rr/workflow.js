@@ -872,11 +872,17 @@ const lineageKeyOf = (claim                                              )      
   return norm(e.funder || e.venue || domainOf(claim.source));
 };
 
-// claimStatus — COMPUTED, never asserted. contested: an unretracted attacking claim targets it.
-// settled: supporting clusters ≥ SETTLED_MIN_CLUSTERS AND (a survived attack OR one cluster beyond the
-// minimum). Else tentative. Support = the claim's own cluster plus the clusters of unretracted,
-// non-failed claims whose stance supports it; the Set counts cluster 0 (shared unknown lineage) at
-// most ONCE no matter how many claims sit in it.
+// isVerified — the one verified rule: a live claim whose mechanical quote-pin audit reads 'pass'.
+// 'pending' (auditor never ran / died) and 'unpinned' (no cache path to check) are UNVERIFIED, not
+// verified-by-default — they may lower confidence, never ground it.
+const isVerified = (c       )          => !c.retracted && c.audit === 'pass';
+
+// claimStatus — COMPUTED, never asserted. contested: an unretracted attacking claim whose audit did not
+// fail targets it (a verified or unverified attacker may only lower confidence; a disproven one carries no
+// weight). settled: the subject is verified AND supporting clusters ≥ SETTLED_MIN_CLUSTERS AND (a survived
+// attack OR one cluster beyond the minimum). Else tentative. Support = the claim's own cluster plus the
+// clusters of VERIFIED claims whose stance supports it; the Set counts cluster 0 (shared unknown lineage)
+// at most ONCE no matter how many claims sit in it.
 function claimStatus(
   claim       ,
   allClaims         ,
@@ -887,15 +893,17 @@ function claimStatus(
     !!c.stance && c.stance.target === claim.id && c.stance.kind === kind;
   // a set `counter` (the refiner's own counter-search landed something, or an attack-lane's finding) contests
   // the claim just as an unretracted attacking ledger claim does — same signal, no ledger row required for it.
-  if (claim.counter || allClaims.some((c) => !c.retracted && bearsOn(c, 'attacks')))
+  if (
+    claim.counter ||
+    allClaims.some((c) => !c.retracted && c.audit !== 'fail' && bearsOn(c, 'attacks'))
+  )
     return 'contested';
-  // the SUBJECT's own mechanical audit verdict: a claim the auditor actively disproved is treated like
-  // retracted for THIS purpose — it can never settle, no matter how many independent clusters back it
-  // (checked AFTER the contested guard above, so a still-attacked audit-fail claim reads as contested, not tentative).
-  if (claim.audit === 'fail') return 'tentative';
+  // the SUBJECT's own mechanical audit verdict: a claim the auditor disproved ('fail') or never verified
+  // ('pending'/'unpinned') can never settle, no matter how many independent clusters back it (checked
+  // AFTER the contested guard above, so a still-attacked unverified claim reads as contested, not tentative).
+  if (!isVerified(claim)) return 'tentative';
   const clusters = new Set        ([claim.cluster]);
-  for (const c of allClaims)
-    if (!c.retracted && c.audit !== 'fail' && bearsOn(c, 'supports')) clusters.add(c.cluster);
+  for (const c of allClaims) if (isVerified(c) && bearsOn(c, 'supports')) clusters.add(c.cluster);
   // a nullAttack naming the claim counts as a survived attack even before the attack-lane bookkeeping
   // bumps the counter; max (not sum) so the two records never double-count one challenge.
   const survived = Math.max(
@@ -908,17 +916,18 @@ function claimStatus(
     : 'tentative';
 }
 
-// computedConfidence — deterministic over the key claims the answer rests on: every one settled →
-// high; any contested → low; else medium. No key claims → medium; an unknown id can never ground high.
-// A key claim the mechanical audit disproved (or the judge retracted) is worse than merely unsettled —
-// the answer rests on a disproven pin, not just an unstressed one — so it forces 'low' outright, same as contested.
+// computedConfidence — deterministic over the key claims the answer rests on: every one verified and
+// settled → high; any contested → low; else medium. No key claims → medium; an unknown id or an
+// unverified ('pending'/'unpinned') key claim can never ground high. A key claim the mechanical audit
+// disproved (or the judge retracted) is worse than merely unsettled — the answer rests on a disproven pin,
+// not just an unstressed one — so it forces 'low' outright, same as contested.
 function computedConfidence(keyClaimIds          , claims         )             {
   if (!keyClaimIds || !keyClaimIds.length) return 'medium';
   const byId = new Map(claims.map((c) => [c.id, c]));
   const keys = keyClaimIds.map((id) => byId.get(id));
   if (keys.some((c) => c && (c.audit === 'fail' || c.retracted))) return 'low';
   if (keys.some((c) => c && c.status === 'contested')) return 'low';
-  return keys.every((c) => c && !c.retracted && c.status === 'settled') ? 'high' : 'medium';
+  return keys.every((c) => c && isVerified(c) && c.status === 'settled') ? 'high' : 'medium';
 }
 
 // claimDigestOf — the compact "KEY CLAIMS SO FAR" digest woven into a lane reader's prompt: non-retracted
@@ -946,30 +955,35 @@ const minConfidence = (a            , b            )             =>
 // count. One that IS a live claim but whose mechanical quote-pin audit came back 'fail' is ALSO stripped —
 // a citation must never wear the authority of a pin the auditor actively disproved — and its id collected
 // in `auditFailed` instead (a distinct count from `bogus`: this is a real claim, just a discredited one).
-// No markers / empty report ⇒ passthrough, bogus: [], auditFailed: [].
+// One that is a live claim the audit never verified ('pending'/'unpinned') is stripped too — a citation
+// ships only on a 'pass' pin — and collected in `unverified`.
+// No markers / empty report ⇒ passthrough, bogus: [], auditFailed: [], unverified: [].
 function lintCitations(
   report        ,
   claims         ,
-)                                                             {
-  const live = new Set(claims.filter((c) => !c.retracted).map((c) => c.id));
-  const auditFail = new Set(
-    claims.filter((c) => !c.retracted && c.audit === 'fail').map((c) => c.id),
-  );
+)                                                                                   {
+  const byLiveId = new Map(claims.filter((c) => !c.retracted).map((c) => [c.id, c]));
   const bogus           = [];
   const auditFailed           = [];
+  const unverified           = [];
   const cleaned = (report || '').replace(/\[c(\d+)\]/g, (marker, idStr        ) => {
     const id = Number(idStr);
-    if (!live.has(id)) {
+    const c = byLiveId.get(id);
+    if (!c) {
       bogus.push(id);
       return '';
     }
-    if (auditFail.has(id)) {
+    if (c.audit === 'fail') {
       auditFailed.push(id);
+      return '';
+    }
+    if (!isVerified(c)) {
+      unverified.push(id);
       return '';
     }
     return marker;
   });
-  return { report: cleaned, bogus, auditFailed };
+  return { report: cleaned, bogus, auditFailed, unverified };
 }
 
 // chao1 — the coverage estimator (collect mode): from claim groups and how many distinct sources saw
@@ -2543,7 +2557,7 @@ ${plain(openRabbitHoles)}`
 CLAIM LEDGER — the run's evidence (ids look like c12, clusters like clu2: c12 [status·clu2·audit] claim = value):
 ${ledger}
 Corroboration counts CLUSTERS: a claim whose supports share one cluster is SINGLE-SOURCE however many names it wears — flag any "independent" label the answer asserts that the clusters do not back.
-The audit field is the MECHANICAL quote-pin verdict: a keyClaim reading 'fail' means its quote could not be verified against its cached source — verification is NOT sound while the answer rests on it; demand a re-pin, a retraction, or an explicit downgrade.`
+The audit field is the MECHANICAL quote-pin verdict: a keyClaim whose audit reads 'fail', 'pending' or 'unpinned' was not verified against its cached source — verification is NOT sound while the answer rests on it; demand a re-pin, a retraction, or an explicit downgrade.`
     : '';
   // nullAttacksClause — challenged-and-survived vs never-challenged (v3 FINALIZE): a completed counter-search
   // that found nothing is first-class state, distinct from a key claim nobody has put to the test yet.
@@ -3016,7 +3030,7 @@ async function runRerunner(
 const SCHEDULER_TPL = `{{! researchScheduler — discovery: per lane, find + size the highest-value sources, grouped per lane }}
 You are the RESEARCH SCHEDULER — you own source discovery for this wave. For each lane below, find the HIGHEST-VALUE sources to read — as MANY as genuinely add value, no cap. The readers only read what you return; they do not search.
 TOP GOAL: "{{query}}".
-Tools (load any missing via ToolSearch): WebSearch; mcp__professor__harvester_search_web; mcp__professor__harvester_search_literature — finds a work/DOI's open-access candidates, each read via mcp__professor__harvester_read with its handle in publications; mcp__professor__harvester_read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, harvester_search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
+Tools (load any missing via ToolSearch): WebSearch; mcp__professor__harvester_search_web (registered only when a search backend is configured; WebSearch otherwise); mcp__professor__harvester_search_literature — finds a work/DOI's open-access candidates, each read via mcp__professor__harvester_read with its handle in publications; mcp__professor__harvester_read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, harvester_search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
 {{venueLegend}}LANES — each carries a rabbit-hole, the brainer's directive \`note\` (WHAT to find + ranked fallbacks), and the venues to prefer:
 {{lanes}}
 Work in TWO batched rounds — never one-source-at-a-time round-trips:
@@ -3864,7 +3878,7 @@ Emphasis from the finalize director: ${focus}`
 CLAIM LEDGER (ids look like c12, clusters like clu2: c12 [status·clu2·audit] claim = value):
 ${ledger}
 Cite ledger claims inline as [c12] wherever a load-bearing fact appears — every [c12]-style marker must be a real ledger id from the digest above (same c12 notation); label independence ONLY from cluster counts, never from distinct-sounding source names.
-Never cite a claim whose audit field reads 'fail' — its quote could not be verified against its source; the engine strips such markers from the shipped report.`
+Never cite a claim whose audit field reads anything but 'pass' — a quote reading 'fail', 'pending' or 'unpinned' was not verified against its source; the engine strips such markers from the shipped report.`
     : '';
   const nullAttacksClause =
     nullAttacksSummary && nullAttacksSummary.length
@@ -4760,6 +4774,7 @@ class BrainerState {
   reportOk         ;
   citationsBogus        ; // synthesiser citation lint: [cN] markers stripped because the id was unknown/retracted
   citationsAuditFailed        ; // synthesiser citation lint: [cN] markers stripped because the claim's quote-pin audit failed
+  citationsUnverified        ; // synthesiser citation lint: [cN] markers stripped because the claim's audit is still pending/unpinned
   quotesRepinned        ; // claims whose broken quote the auditor replaced with a verified contiguous span
   cachePathsRejected        ; // claims whose cachePath was untrusted (never scheduled + outside the harvester cache) and was stripped to unpinned
   reopenedLaneCount        ; // finalize judge-reopen lanes — feeds metrics.reopenedLanes so crawl-vs-finalize counts reconcile
@@ -4824,6 +4839,7 @@ class BrainerState {
     this.reportOk = false;
     this.citationsBogus = 0;
     this.citationsAuditFailed = 0;
+    this.citationsUnverified = 0;
     this.quotesRepinned = 0;
     this.cachePathsRejected = 0;
     this.reopenedLaneCount = 0;
@@ -4885,6 +4901,7 @@ function spawnBrainer(
   child.wave = parent.wave;
   child.lastUnsourced = parent.lastUnsourced;
   child.citationsAuditFailed = parent.citationsAuditFailed;
+  child.citationsUnverified = parent.citationsUnverified;
   child.quotesRepinned = parent.quotesRepinned;
   child.cachePathsRejected = parent.cachePathsRejected;
   child.reopenedLaneCount = parent.reopenedLaneCount;
@@ -6294,6 +6311,7 @@ class ResearchReport {
     bs.reportOk = !!(agg && agg.report);
     bs.citationsBogus = 0;
     bs.citationsAuditFailed = 0;
+    bs.citationsUnverified = 0;
     if (!bs.reportOk) {
       log('✗ ' + label + ' FAILED — no report returned');
       // Salvage: the run's evidence still has value — deliver a degraded result.md from
@@ -6312,9 +6330,15 @@ class ResearchReport {
       this.files['result.md'] = runArgsMd() + salvage.join('\n');
       return;
     }
-    const { report: linted, bogus, auditFailed } = lintCitations(agg .report, bs.claims);
+    const {
+      report: linted,
+      bogus,
+      auditFailed,
+      unverified,
+    } = lintCitations(agg .report, bs.claims);
     bs.citationsBogus = bogus.length;
     bs.citationsAuditFailed = auditFailed.length;
+    bs.citationsUnverified = unverified.length;
     if (bogus.length)
       log(
         '⚠ ' +
@@ -6328,6 +6352,13 @@ class ResearchReport {
           label +
           ' citation lint — stripped audit-failed id(s): ' +
           auditFailed.map((id) => 'c' + id).join(', '),
+      );
+    if (unverified.length)
+      log(
+        '⚠ ' +
+          label +
+          ' citation lint — stripped unverified (pending/unpinned) id(s): ' +
+          unverified.map((id) => 'c' + id).join(', '),
       );
     const keyClaimIds = (bs.resultSoFar && bs.resultSoFar.keyClaimIds) || [];
     const computed = computedConfidence(keyClaimIds, bs.claims);
@@ -6634,6 +6665,7 @@ class ResearchReport {
       chao: bs.chao,
       citationsBogus: bs.citationsBogus,
       citationsAuditFailed: bs.citationsAuditFailed,
+      citationsUnverified: bs.citationsUnverified,
       auditCounts: {
         pass: bs.claims.filter((c) => c.audit === 'pass').length,
         fail: bs.claims.filter((c) => c.audit === 'fail').length,

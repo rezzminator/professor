@@ -248,6 +248,7 @@ claimsTotal: 0
 nullAttacksTotal: 0
 citationsBogus: 0
 citationsAuditFailed: 0
+citationsUnverified: 0
 auditCounts:
   pass: 0
   fail: 0
@@ -394,7 +395,7 @@ so far: pgvector recall ~0.96"
 exports[`prompt builders > SCHEDULER_PROMPT → full-string snapshot 1`] = `
 "You are the RESEARCH SCHEDULER — you own source discovery for this wave. For each lane below, find the HIGHEST-VALUE sources to read — as MANY as genuinely add value, no cap. The readers only read what you return; they do not search.
 TOP GOAL: "best vector database for production RAG at scale".
-Tools (load any missing via ToolSearch): WebSearch; mcp__professor__harvester_search_web; mcp__professor__harvester_search_literature — finds a work/DOI's open-access candidates, each read via mcp__professor__harvester_read with its handle in publications; mcp__professor__harvester_read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, harvester_search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
+Tools (load any missing via ToolSearch): WebSearch; mcp__professor__harvester_search_web (registered only when a search backend is configured; WebSearch otherwise); mcp__professor__harvester_search_literature — finds a work/DOI's open-access candidates, each read via mcp__professor__harvester_read with its handle in publications; mcp__professor__harvester_read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, harvester_search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
 VENUE LEGEND — the prospector's venues, referenced by number below:
 1. arXiv (site:arxiv.org) (ANN indexes)
 2. SemiAnalysis (cost)

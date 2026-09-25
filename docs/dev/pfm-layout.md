@@ -83,8 +83,8 @@ Every row is exact. "Symbol" rows name the identifier rewrite the executor perfo
 | 11 | `shim/shim_test.go` | `internal/installer/shim/shim_test.go` | tests of `internal/installer/assets/shim/pfm.zsh` sit one hop from it; the fixture path at `shim_test.go:351` becomes `filepath.Join("..", "assets", "shim", "pfm.zsh")`. Not under `assets/`: `installer/assets.go:16` embeds that whole tree and would stage the tests onto the host |
 | 12 | `shim/chat_server_shim_test.go` | `internal/installer/shim/chat_server_shim_test.go` | with #11 |
 | 13 | `shim/retirement_test.go` | `internal/installer/shim/retirement_test.go` | with #11 |
-| 14 | `HARVESTER.md` | `internal/harvest/README.md` | the package's operator doc beside the package; re-point `docs/demo/inventory-pfm-cli.md:3,177,194,265` and `docs/demo/inventory-harvester.md:101` |
-| 15 | `HEADLESS.md` | `internal/headless/README.md` | same; re-point `docs/demo/inventory-pfm-cli.md:3,194,266` |
+| 14 | `HARVESTER.md` | `internal/harvest/README.md` | the package's operator doc beside the package |
+| 15 | `HEADLESS.md` | `internal/headless/README.md` | same |
 | 16 | `cmd/pfm/attach_e2e_test.go` | `cmd/pfm/attach_jail_test.go` | one suffix per tier (naming audit § 1.15) |
 | 17 | `cmd/pfm/lineage_e2e_test.go` | `cmd/pfm/lineage_jail_test.go` | same |
 

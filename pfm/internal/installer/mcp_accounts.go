@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -167,6 +168,17 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		scanPaths[legacy] = true
 	}
 	paths[legacy] = true
+	// $HOME/.claude.json is the registry a plain `claude` reads; when no account
+	// wires it (every account has its own ConfigDir), pfm's legacy entries there
+	// still go, as a scan-only path: it gains no professor and nothing else in
+	// it is touched.
+	homeRegistry := physicalSettingsPath(filepath.Join(installer.options.Home, ".claude.json"))
+	if _, err := os.Stat(homeRegistry); err == nil && !paths[homeRegistry] {
+		scanPaths[homeRegistry] = true
+		paths[homeRegistry] = true
+	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("stat MCP registry %s: %w", homeRegistry, err)
+	}
 	ordered := make([]string, 0, len(paths))
 	for path := range paths {
 		ordered = append(ordered, path)
@@ -206,7 +218,7 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 			owned = map[string]any{}
 		}
 		for name, registration := range ownership.Pending[path] {
-			if sameJSONValue(servers[name], registration) {
+			if sameClaudeRegistration(servers[name], registration) {
 				owned[name] = registration
 			}
 		}
@@ -227,7 +239,7 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		}
 		for name, registration := range owned {
 			current, present := servers[name]
-			if present && sameJSONValue(current, registration) {
+			if present && sameClaudeRegistration(current, registration) {
 				if wanted[name] {
 					next[name] = registration
 				} else {
@@ -241,6 +253,11 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 			_, ours := next[name]
 			if present && !ours {
 				installer.skip("preserve conflicting manual MCP client " + name + " in " + path)
+				continue
+			}
+			// An owned entry Claude rewrote with its shape-neutral `"env": {}` is
+			// already correct: rewriting it would only undo Claude's own edit.
+			if present && sameClaudeRegistration(servers[name], registration) {
 				continue
 			}
 			servers[name] = registration

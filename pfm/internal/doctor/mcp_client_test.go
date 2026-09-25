@@ -95,6 +95,17 @@ func TestDoctorMCPClientClaudeRowClassifiesProfessorAndLegacyEntries(t *testing.
 			row + "pfm legacy=chat,harvester" + claudeRemediation + "\n",
 		},
 		{
+			"empty env is shape-neutral",
+			`"professor":{"type":"stdio","command":"` + bin + `","args":["mcp","serve","--stdio"],"env":{}}` +
+				`,"chat":{"type":"stdio","command":"` + bin + `","args":["mcp","chat","serve"],"env":null}`,
+			row + "pfm legacy=chat" + claudeRemediation + "\n",
+		},
+		{
+			"non-empty env professor",
+			`"professor":{"type":"stdio","command":"` + bin + `","args":["mcp","serve","--stdio"],"env":{"DEBUG":"1"}}`,
+			row + "foreign-registration" + claudeRemediation + "\n",
+		},
+		{
 			"http professor",
 			`"professor":{"type":"http","url":"http://127.0.0.1:18377/mcp/professor"}`,
 			row + "foreign-registration" + claudeRemediation + "\n",

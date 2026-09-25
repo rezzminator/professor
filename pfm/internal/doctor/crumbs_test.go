@@ -75,3 +75,23 @@ func TestDoctorCrumbsAcceptPfmScratchDirectories(t *testing.T) {
 		t.Fatalf("crumbHealth() entries=%d invalid=%d, want 3 and 1 (only rotten-directory)", entries, invalid)
 	}
 }
+
+func TestDoctorCrumbsAcceptStatuslineEffortRecords(t *testing.T) {
+	root := jailTest(t)
+	sidDir := filepath.Join(root, "sid")
+	for _, name := range []string{
+		paths.SIDEffortPrefix + "4a86bf3b-7fa4-4b5c-bb69-96b32b6f7dca",
+		paths.SIDEffortPrefix,
+	} {
+		if err := os.WriteFile(filepath.Join(sidDir, name), []byte(`{"effort":"xhigh"}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, invalid, err := crumbHealth(sidDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries != 2 || invalid != 1 {
+		t.Fatalf("crumbHealth() entries=%d invalid=%d, want a session's effort record accepted and a bare prefix rejected", entries, invalid)
+	}
+}

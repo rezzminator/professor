@@ -14,7 +14,7 @@
 # in the Codex composer — travels THROUGH the model, which runs `pfm chat reload`
 # from its tool shell: the beat asserts that path from pfm's side (the worker's
 # log, the respawned pane, the row), the model is only the stimulus. Beat ids
-# and their landscape ids are the contract in beats.md and map.tsv — check-map.sh
+# are the contract in beats.md and map.tsv — check-map.sh
 # fails when this file and those disagree.
 #
 # Cost: the Codex home (`spends cx`) — roughly 12 short turns plus three reboots.
@@ -95,7 +95,7 @@ addr() {
   printf '%s' "${id:-$CHAT}"
 }
 
-beat E2.01-open-seat K2
+beat E2.01-open-seat
 spends cx
 target "$CHAT"
 if live_chat "$CHAT"; then
@@ -125,7 +125,7 @@ fi
 
 # ─── E2.02 — statusline: the Codex usage segment, and --refresh-gpt ─────────
 
-beat E2.02-statusline T31 T32
+beat E2.02-statusline
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
@@ -304,7 +304,7 @@ fi
 
 # ─── E2.04 — recover from the rollout ───────────────────────────────────────
 
-beat E2.04-recover C43
+beat E2.04-recover
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
@@ -349,7 +349,7 @@ fi
 
 # ─── E2.05 — the fleet prompt, present in the first turn ────────────────────
 
-beat E2.05-fleet-prompt X23
+beat E2.05-fleet-prompt
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
@@ -395,7 +395,7 @@ fi
 
 # ─── E2.06 — MCP over stdio: the chat_* tools the Codex session lists ──────
 
-beat E2.06-mcp-stdio M34
+beat E2.06-mcp-stdio
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
@@ -452,7 +452,7 @@ fi
 
 # ─── E2.07 — inject, ask, watch on the Codex home ───────────────────────────
 
-beat E2.07-inject-ask-watch C32 C39 C40
+beat E2.07-inject-ask-watch
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
@@ -484,7 +484,7 @@ fi
 
 # ─── E2.08 — kill self/me from the tmux-less Codex tool shell ───────────────
 
-beat E2.08-kill-self C47
+beat E2.08-kill-self
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
@@ -552,7 +552,7 @@ waiter_steer() {
   return 1
 }
 
-beat E2.09-self-compact L36
+beat E2.09-self-compact
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
@@ -601,7 +601,7 @@ fi
 
 # ─── E2.10 — the Codex-specific launcher entry ──────────────────────────────
 
-beat E2.10-codex-launch X24
+beat E2.10-codex-launch
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
@@ -639,7 +639,7 @@ fi
 
 # ─── E2.11 — doctor's codex_pane rows, clean while the chat lives ───────────
 
-beat E2.11-doctor-codex-pane I63
+beat E2.11-doctor-codex-pane
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then

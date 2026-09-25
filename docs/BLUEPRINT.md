@@ -33,22 +33,21 @@ Every command, agent, and rule sorts into one of three tiers:
 
 - **The Professor** — Grandfatherly polymath with 15+ PhDs, one in whatever area the work touches. Warm, precise, gently devastating. The orchestrator voice and root persona. Lives in `pfm/harness-prompts/`, composed per engine and selected by the Claude launch policy.
 - **/pcm** — Professor Change Manager: edits the pipeline at the source. Surgery, not journaling. `/pcm audit [scope]` (`agents`, `commands`, `skills`, `pipeline`, `scripts`, `structure`, `cross-refs`, or `all`) walks the pipeline's own files against a checklist per scope; `/context-meter` audits the framework's own context budget.
-- **/flights:{spec,refine,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the chat family of the opt-in `professor` MCP server the same binary registers — one stdio command, `pfm mcp serve --stdio`, for Claude, Codex and OpenCode alike, forwarding to the daemon's `/mcp/professor`; its chat and harvester families toggle through `mcp.servers.chat.enabled` and `harvester.enabled`.
+- **/flights:{spec,orchestrate-nested,orchestrate-live,orchestrate-cross-harness,audit}, /dev** — pipeline mechanics; the harness supplies the Professor voice. `/reload` is the same tier but installs host-level (`~/.claude/commands/`, opt-in) from the self-contained `pfm` binary; chat control is the chat family of the opt-in `professor` MCP server the same binary registers — one stdio command, `pfm mcp serve --stdio`, for Claude, Codex and OpenCode alike, forwarding to the daemon's `/mcp/professor`; its chat and harvester families toggle through `mcp.servers.chat.enabled` and `harvester.enabled`.
 
 > The Tier A persona ships as ONE version: `professor.md` (the harness replacement) — lean voice plus the behavioral contract (concise delivery, the Verdict, the Analysis Protocol).
 
 **Bundled commands (ship with the blueprint):**
 
 - **the framework bus** — the framework repo's release flow publishes the blueprint; project installs are scaffolded once and adopt later template deltas by reviewed diff.
-- **/flights:spec** — maps the area, asks only what the code cannot answer, hands `flights-speccer` the decisions, and presents the index it wrote.
-- **/flights:refine** — grills the user on a written flight, one round of numbered questions with recommended answers at a time, until nothing is assumed; `flights-speccer` revises the directory from the rulings.
+- **/flights:spec** — maps the area, grills the user round by round with a recommended answer per question until no technical or product gap is left, hands `flights-speccer` the decisions, and presents the index it wrote.
 - **/flights:orchestrate-{nested,live,cross-harness}** — one manual in three containers: a `flights-orchestrator` sub-agent, the main chat running the flight itself, or chat seats on three engines as the executors.
 - **/flights:audit** — the skeptic over a flight, running or landed: every claim checked against its artifact — `run.md`, git, the executor transcripts, the checks' own output — and an artifact it cannot read is a finding, never an absence.
 - **/rnd** — project-scope RND lifecycle: opens, continues, verifies, and lands a research run, executing the run itself.
 - **/tokens** — per-agent/per-workflow token spend attribution parsed from local transcripts, ranked by estimated cost.
 - **/quality:doc** / **/quality:prompt** / **/quality:description** / **/quality:md-forlint** — the quality gates: reference-doc shape, prompt prose, the `description:` routing field, and markdown lint/format mechanics.
 - **/quality:llm-codebase** — source-tree layout designed for agent maintainers: one directory per unit of change, a fixed file anatomy, grep-true names, façades for the cross-cutting calls, and the brief anchors a build hand reads; greenfield designs a tree, brownfield measures the existing one and writes the migration.
-- **/quality:integration-suite** — a project's integration tests designed as lanes over one shared state: landscape derived from code, a research pass over neighbour projects and literature, crossings asserted from two sides, a machine-derived map gate, and the harness contract.
+- **/quality:integration-suite** — a project's whole test suite designed, every tier's validity law and the live tier's lanes over one shared state: landscape derived from code, a research pass over neighbour projects and literature, crossings asserted from two sides, a machine-derived map gate, and the harness contract.
 - **/audit:code-hygiene** / **/audit:security** — code-hygiene and security audit scopes. Code-hygiene additionally has a Sweep Mode (`code-hygiene sweep`) that promotes a report-only run to actively removing confirmed-dead code and unused dependencies, end-to-end behind QA.
 
 **Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones and the in-tree links):**

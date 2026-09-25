@@ -26,18 +26,17 @@ A change lands in the design doc first, then in the template, then in every surf
 | `flights-orchestrator` | agent | The one manual of running a flight: dispatch, wait, verify, react, land, return | mechanical (`sonnet`), effort `high` |
 | `flights-mechanical-executor`, `flights-smart-executor` | agents, one body | One task file each: the code and its covering tests in the project's test pattern; picked by the task's rating | `sonnet` and `opus`, effort `medium` |
 | `flights-lander` | agent | The landing's first step, one per project: checks, one review of the whole diff, adversarial tests, its own fixes | smart (`opus`), effort `high` |
-| `/flights:spec` | command | The human front of specifying: maps the area, asks the user, hands `flights-speccer` the decisions, presents the index | the main chat |
-| `/flights:refine` | command | Grills the user on a written flight until nothing is assumed, hands `flights-speccer` the rulings as a revising call, presents the revised index | the main chat |
+| `/flights:spec` | command | The human front of specifying: maps the area, grills the user until no gap is left, hands `flights-speccer` the decisions, presents the index | the main chat |
 | `/flights:orchestrate-nested` | command | Runs the flight in a `flights-orchestrator` sub-agent; the chat hears one return | the main chat spawns the agent |
 | `/flights:orchestrate-live` | command | The main chat reads the manual and runs the flight itself, executors as sub-agents; the user watches and steers | the main chat |
 | `/flights:orchestrate-cross-harness` | command | The main chat reads the manual and runs the flight with chat seats (Codex, OpenCode, Claude) as executors through the professor MCP's `chat_*` tools | the main chat |
 | `/flights:audit` | command | The skeptic over a flight, running or landed: every claim against its artifact | the main chat |
 
-Five agents, six commands, nothing else. Project law reaches them through the project contract and the project's [testing manual](testing-manual.md); `gitter` is the fleet's own.
+Five agents, five commands, nothing else. Project law reaches them through the project contract and the project's [testing manual](testing-manual.md); `gitter` is the fleet's own.
 
 ## The lifecycle
 
-1. Specify. `/flights:spec` maps, asks, hands off; or a model caller whose work sits on the ladder's third rung hands it to `flights-speccer` without a human. Either way the output is a flight directory. `/flights:refine` grills the user on a written flight and has `flights-speccer` revise it, before a run or between runs.
+1. Specify. `/flights:spec` maps, grills, hands off; or a model caller whose work sits on the ladder's third rung hands it to `flights-speccer` without a human. Either way the output is a flight directory.
 2. Orchestrate. One of the three `orchestrate-*` commands runs the manual over the directory: ready tasks dispatched together, each executor briefed with its task file, each return verified before it is recorded, faults sent back to `flights-speccer`, then the landing once: a `flights-lander` per project, the standing checks, the commit.
 3. Audit. `/flights:audit` at any time, by the user: it believes `run.md`, git, the transcripts and the checks, never a message.
 
@@ -107,7 +106,7 @@ A rule lives at the highest layer every reader who needs it reads, and nowhere e
 
 | Layer | Reader | Holds |
 | --- | --- | --- |
-| `pfm/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | The universal laws: cost = calls × context; the 45-call law and the three-rung ladder (direct, `general-orchestrator`, a flight through `flights-speccer`); report once, plus a real question or blocker, never a diff or a log in a message; waiting is one call or none; only `flights-speccer` changes a task file; the lander as the flight's one review; the hand's own laws, its return shape among them |
+| `pfm/harness-prompts/share/tail.md` § Orchestration | every main chat, chat seats included | The universal laws: cost = calls × context; the 45-call law and the three-rung ladder (direct, `general-orchestrator`, a flight through `flights-speccer`); an orchestrator reports once, plus a question only the user can answer; waiting is one call or none; only `flights-speccer` changes a task file; the lander as the flight's one review |
 | `CLAUDE.md` / `AGENTS.md` | every sub-agent and seat | The sub-agent's first move: on a brief naming a task file, open it with the shared files named beside it, in the first message, and execute it; otherwise the same ladder and the 45-call cap |
 | The agent file | the agent | The protocol of one role |
 | The brief | one executor | The task file path, its `reads`, the `run.md` lines of its `needs`, the standing rules, the worktree, the testing manual's path; everything else an executor obeys lives in its agent |
@@ -129,7 +128,7 @@ Claude Code stops the Agent tool three levels below the main chat and caps concu
 
 | Retired | Replaced by |
 | --- | --- |
-| `/wave:refine` (R1 walk, R2 ask, R3 write, R4 architect passes + user gate) | `/flights:spec`: walk, ask, hand off to `flights-speccer`, present; revising a written flight: `/flights:refine` |
+| `/wave:refine` (R1 walk, R2 ask, R3 write, R4 architect passes + user gate) | `/flights:spec`: walk, grill, hand off to `flights-speccer`, present |
 | `/wave:orchestrator` (train runner over chat seats) | `/flights:orchestrate-cross-harness` |
 | `/wave:live` (batch on `main`) | `/flights:orchestrate-live` |
 | `/wave:builder`, `/wave:walker`, the Codex `wave-builder` skill | the flight executor (or a seat born with its role) briefed with a task file |
@@ -144,8 +143,8 @@ Claude Code stops the Agent tool three levels below the main chat and caps concu
 | Surface | File | Holds |
 | --- | --- | --- |
 | The agents | `templates/global/agents/flights-speccer.md`, `flights-orchestrator.md`, `flights-mechanical-executor.md`, `flights-lander.md`, `variants.json` | The five protocols; `variants.json` renders the smart executor from the mechanical one |
-| The commands | `templates/global/commands/flights/*.md` | The six commands, machine-global |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names, the hand's laws for chat seats |
+| The commands | `templates/global/commands/flights/*.md` | The five commands, machine-global |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The universal laws, the family's names |
 | The adopter contract | `CLAUDE.md`, `templates/project/CLAUDE.md` | The sub-agent's first move and the ladder; in this repository's `CLAUDE.md` also the fenced-flight paragraph under § Process |
 | The executors' allowlist | `flights-mechanical-executor`, `flights-smart-executor` | `Read, Write, Edit, Bash, Glob, Grep`: no `Skill`, no `Agent`, no MCP tool; the lander alone adds `Skill` for `/code-review` |
 | The engine | `pfm` settings and launcher | The two harness settings |

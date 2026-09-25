@@ -18,7 +18,7 @@ Decisions live in this file. The executable wording lives in `templates/global/a
 
 ## Why not the flight executors
 
-A flight executor is bound to a flight's contract: a brief file, a task file with `Done when` rows, the `run.md` lines of its needs. A general task has none of them; its whole spec is the inline brief. Reusing the flight body would carry that contract as dead text into every general spawn, and every general brief would have to override it. The law both share (the hand of an orchestrator: the Goal wins, a red is read to its cause, stay inside the files, report once) is carried by each body: the fleet prompt is the main chat's system prompt, and a Claude sub-agent runs on its own agent body without it.
+A flight executor is bound to a flight's contract: a brief file, a task file with `Done when` rows, the `run.md` lines of its needs. A general task has none of them; its whole spec is the inline brief. Reusing the flight body would carry that contract as dead text into every general spawn, and every general brief would have to override it. The law both share (the Goal wins, a red is read to its cause, stay inside the files, report once) is carried by each body: a sub-agent never receives the fleet prompt — it runs on its own agent body plus the project's `CLAUDE.md`.
 
 ## Two tiers, one source
 

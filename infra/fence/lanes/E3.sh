@@ -10,7 +10,7 @@
 # Every beat asserts from pfm's OWN report (`pfm ls --tsv`, a verb's exit code,
 # the chat's last assistant message) or from the pane, never from a model's
 # prose: a beat that can only be satisfied by what the model said is a beat
-# asserting the wrong thing. Beat ids and their landscape ids are the contract in
+# asserting the wrong thing. Beat ids are the contract in
 # beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
 # Three facts this lane is built on, each read from the Go source, none
@@ -223,7 +223,7 @@ open_main() {
 }
 lane_reopen 'open_main'
 
-beat E3.01-open-seat K3 T31
+beat E3.01-open-seat
 spends oc
 target "$WANT_NAME"
 if out="$(open_main)"; then
@@ -268,7 +268,7 @@ fi
 # assert_opencode_mcp_registered — this lane and M must never drift apart on
 # what "MCP registered" means.
 
-beat E3.02-mcp-registered M36
+beat E3.02-mcp-registered
 spends none
 assert_opencode_mcp_registered "$PFM_BIN" "$PORT"
 

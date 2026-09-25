@@ -219,10 +219,10 @@ act_templates() { # the shipped product: mechanical gates, no build
       # jscpd against .jscpd-baseline.json): a NEW clone fails, named; its own
       # broken state is `CLONES ERROR` and rc 2, never a PASS.
       run "templates: clone ratchet (jscpd)" -- bash "$REPO_ROOT/scripts/clone-check.sh"
-      # The lane↔landscape map gate (infra/fence/lanes/check-map.sh). --no-derive
+      # The lane↔command map gate (infra/fence/lanes/check-map.sh). --no-derive
       # skips the command/tool surface derive, which needs a built pfm; its own
       # broken state is a named red line and rc 1/2, never a silent pass.
-      run "templates: lane↔landscape map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
+      run "templates: lane↔command map (check-map)" -- bash "$REPO_ROOT/infra/fence/lanes/check-map.sh" --no-derive
       run "templates: lane library self-tests" -- bash -c 'for t in "$1"/infra/fence/lanes/tests/*_test.sh; do echo "== $t"; bash "$t" || exit 1; done' _ "$REPO_ROOT"
       head_ "templates — leak gate"
       # EVERY tracked file in this repo is published, so the changed set is the
@@ -443,6 +443,30 @@ act_templates() { # the shipped product: mechanical gates, no build
         ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
       fi
 
+      head_ "templates — release-check tests and the notes grammar"
+      local rc_tests=(scripts/release-check.test.mjs)
+      local rc_out="$TMP_BASE/templates/release-check.tap"
+      if [[ ! -f "${rc_tests[0]}" ]]; then
+        fail_step "release-check tests NOT RUN — scripts/release-check.test.mjs is missing; the suite was never executed"
+      elif ! node --test --test-reporter=tap "${rc_tests[@]}" >"$rc_out" 2>&1; then
+        cat "$rc_out"
+        fail_step "release-check tests FAILED — a scope, notes or ready rule regressed, or node could not run the suite (see output)"
+      elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$rc_out"; then
+        cat "$rc_out"
+        fail_step "release-check tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
+      elif ! awk '/^# (skipped|todo) /{ if ($3 > 0) bad=1 } END{ exit bad }' "$rc_out"; then
+        cat "$rc_out"
+        fail_step "release-check tests SKIPPED — a skipped or todo test is a named gap, never a pass"
+      else
+        ok "release-check rules hold ($(awk '/^# pass /{print $3}' "$rc_out") passing)"
+      fi
+      if node scripts/release-check.mjs notes --all releases >"$TMP_BASE/templates/release-notes.txt" 2>&1; then
+        ok "release notes from v0.78.0 on follow docs/RELEASE.md § Release notes ($(grep -m1 '^CHECKED' "$TMP_BASE/templates/release-notes.txt" || echo 'CHECKED line MISSING'))"
+      else
+        cat "$TMP_BASE/templates/release-notes.txt"
+        fail_step "release notes grammar FAILED — a note breaks docs/RELEASE.md § Release notes, or release-check could not run (exit 2 is an ERROR, see output)"
+      fi
+
       head_ "templates — codex-sync missing compiler"
       if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/templates/project/scripts/codex-sync.sh"; then
         ok "codex-sync names unavailable compiler and retains dirty flag"
@@ -632,8 +656,8 @@ cmd_iso() { # cmd_iso <action> [project | command…]
       [[ -z "$cmd" ]] && { echo "usage: dev.sh iso run <command…>" >&2; exit 2; }
       docker compose -f "$compose" run --rm --build ${extra[@]+"${extra[@]}"} pfm-dev bash -c "$proof; $cmd" ;;
     sim)
-      # The real-simulation fence: `run` on the pfm-sim service — Google Chrome,
-      # an Xvfb display, and pfm built + installed from this worktree with the
+      # The real-simulation fence: `run` on the pfm-sim service — Google Chrome
+      # (headless only), and pfm built + installed from this worktree with the
       # harvester's browser rung on (infra/fence/sim-entry.sh prints its own
       # `sim:` proof line or BOOTSTRAP-FAILED). The harvester state persists in
       # a volume keyed by this worktree's path, so a second run skips

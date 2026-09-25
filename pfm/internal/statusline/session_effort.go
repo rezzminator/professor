@@ -11,6 +11,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/nudge"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 // sessionEffortRecord is the effort the main statusline last showed for a
@@ -89,7 +90,7 @@ func writeSessionEffort(sidDir, sessionID string, record sessionEffortRecord) er
 }
 
 func sessionEffortPath(sidDir, sessionID string) string {
-	return filepath.Join(sidDir, "statusline-effort-"+sessionID)
+	return filepath.Join(sidDir, paths.SIDEffortPrefix+sessionID)
 }
 
 // inheritedEffort reads the effort recorded for sessionID: no directory, no

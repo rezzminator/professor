@@ -9,7 +9,7 @@ import (
 // fleetPromptMarkers are lines from each of the composed prompt's three parts
 // — shared head, Codex middle, shared tail — so a role carrying only one part
 // is as loud a failure as a role carrying none.
-var fleetPromptMarkers = []string{"# Model Selection", "NEVER change the active account", "cause unknown"}
+var fleetPromptMarkers = []string{"# Model Selection", "NEVER change the active account", "# The Verdict"}
 
 // A compiled role file holds its own body only: the fleet prompt lives in each
 // Codex home's config.toml, and a --agent-role seat composes it at launch

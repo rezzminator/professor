@@ -10,24 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## How release notes guide adoption
 
-Each release file (`releases/vX.Y.Z.md`) uses categorized headings the update flow understands:
-
-| Heading | Review guidance |
-| --- | --- |
-| `## Added` | Decide whether to adopt each new project file or optional role |
-| `## Changed` | Review the reported template diff and hand-apply relevant parts |
-| `## Fixed` | Review the reported fix before applying it to a customized local file |
-| `## Removed` | Decide whether the local file remains project-owned or should be removed |
-| `## Breaking` | Follow the explicit manual migration steps |
-| `## Migration` | Apply the step-by-step adopter transformation |
-
-Bullets MUST follow this shape:
-
-```
-- {Tier}: {file path or scope} — {what changed semantically}
-```
-
-`{Tier}` is a non-empty display/routing label, not a closed enum. The `##` heading is the authoritative semantic category; a prefix never reclassifies a Fixed bullet as Changed, for example. Optional trailing tags: `(opt-in)` for optional additions, `(breaking)` if it requires migration even outside a Breaking section, `(safe-auto)` for machine-global installer changes that need no project-file edit, and `(cost)` for environment, hook, permission, or model/config cost. No tag authorizes automatic rewriting of a scaffolded project file.
+Each `releases/vX.Y.Z.md` is written for the adopter updating onto it. Its sections, bullet labels, action lines (`#### → For: {audience} · {timing} · {surface} — {action}`) and required stops (`#### → Stop:`) are specified in [`docs/RELEASE.md` § Release notes](docs/RELEASE.md#release-notes).
 
 ---
 

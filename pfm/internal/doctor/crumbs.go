@@ -93,7 +93,7 @@ func nonFleetServerCrumb(name string) bool {
 }
 
 func knownSIDMetadata(name string) bool {
-	for _, prefix := range []string{"nudge-ctx-", "nudge-band-"} {
+	for _, prefix := range []string{"nudge-ctx-", "nudge-band-", paths.SIDEffortPrefix} {
 		if session, ok := strings.CutPrefix(name, prefix); ok {
 			return strings.TrimSpace(session) != ""
 		}

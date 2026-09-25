@@ -231,7 +231,7 @@ in_express() { (cd "$EXPRESS" && "$@" 2>&1); }
 
 # ─── A.01 — the scaffold roster from pfm init ───────────────────────────────
 
-beat A.01-scaffold P1 P2 P3 P4 P5 P6 P7 P8 P9 P10 P11 P32
+beat A.01-scaffold
 spends none
 INIT_DIR="$HOME/lane-a-init"
 rm -rf "$INIT_DIR"
@@ -289,7 +289,7 @@ fi
 
 # ─── A.02 — Phase-2 territory is never deployed by pfm ──────────────────────
 
-beat A.02-phase2-never-deployed P12 P13 P14 P15
+beat A.02-phase2-never-deployed
 spends none
 if requires A.01-scaffold; then
   bad=""
@@ -325,7 +325,7 @@ rm -rf "$INIT_DIR"
 
 # ─── A.03 — the baseline pin ────────────────────────────────────────────────
 
-beat A.03-baseline-pin P16
+beat A.03-baseline-pin
 spends none
 bad=""
 if [ ! -f "$BASELINE" ]; then
@@ -358,7 +358,7 @@ fi
 
 # ─── A.04 — pfm update check: clean, then every status class ────────────────
 
-beat A.04-update-check P17 P18 P19 P20 P21 P22 P23
+beat A.04-update-check
 spends none
 expect-log 'baseline.json not found'
 bad=""
@@ -434,7 +434,7 @@ fi
 
 # ─── A.05 — the update verbs ────────────────────────────────────────────────
 
-beat A.05-update-verbs P24 P25 P26 P27 P28 P29
+beat A.05-update-verbs
 spends none
 expect-log 'has no pin'
 expect-log 'already has a pin'
@@ -489,7 +489,7 @@ fi
 
 # ─── A.06 — pfm update adopt on an install that predates init ───────────────
 
-beat A.06-update-adopt P30 P31
+beat A.06-update-adopt
 spends none
 expect-log 'baseline.json not found'
 expect-log 'resolve --at'
@@ -565,7 +565,7 @@ fi
 
 # ─── A.07 — bare pfm update: preflight refusals, the rebuild, the rollback ──
 
-beat A.07-self-update P33
+beat A.07-self-update
 spends none
 expect-log 'invalid target tag'
 expect-log 'is not present after fetch'
@@ -659,7 +659,7 @@ fi
 
 # ─── A.08 — the Codex mirror: build and check, and check's own broken state ─
 
-beat A.08-codex-mirror P34 P35
+beat A.08-codex-mirror
 spends none
 expect-log 'STALE'
 bad=""
@@ -695,7 +695,7 @@ fi
 
 # ─── A.09 — the global Codex agent mirror ───────────────────────────────────
 
-beat A.09-codex-agents P36
+beat A.09-codex-agents
 spends none
 bad=""
 n_md="$(find "$BLUEPRINT/templates/global/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')"
@@ -730,7 +730,7 @@ fi
 
 # ─── A.10 — a blueprint reached through a symlink (P10.1, update side) ──────
 
-beat A.10-symlinked-blueprint I37
+beat A.10-symlinked-blueprint
 spends none
 bad=""
 [ -L "$BLUEPRINT" ] || bad="$bad $BLUEPRINT is not a symlink — the default store is not the linked shape this beat asserts;"
@@ -901,7 +901,7 @@ fi
 
 # ─── A.13 — the OpenCode compile layer for adopters: build, check, doctor ───
 
-beat A.13-opencode-layer P37
+beat A.13-opencode-layer
 spends none
 bad=""
 bld="$(in_express pfm opencode build .)"
@@ -927,7 +927,7 @@ fi
 
 # ─── A.14 — the picker's cached release notice, refreshed by the internal verb
 
-beat A.14-release-notice X41
+beat A.14-release-notice
 spends none
 expect-log 'latest Professor release returned'
 bad=""
@@ -990,7 +990,7 @@ fi
 
 # ─── A.15 — cross-lane: an adopter update + the hook rewrite under a live fleet
 
-beat A.15-fleet-unchanged-by-update C1 I23
+beat A.15-fleet-unchanged-by-update
 spends "cc:$SEAT"
 target_live "$E1_CHAT"
 if requires; then

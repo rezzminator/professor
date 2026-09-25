@@ -205,7 +205,7 @@ The rulings above rest on measured results, collected in the runtime research of
 | The agent | `templates/global/agents/flights-orchestrator.md` | The manual; runs at mechanical (`sonnet`), effort `high` |
 | The wait guard | `pfm internal orchestrator-wait`, attached in the agent's frontmatter | A Bash call that only waits (`echo`, `printf`, `true`, `:`, `sleep N`) is denied; design in [hooks.md](../hooks/hooks.md#agent-attached-hooks-not-machine-global) |
 | The containers | `templates/global/commands/flights/orchestrate-{nested,live,cross-harness}.md` | The substitutions, nothing of the manual restated; the nested command's road for a `BLOCKED` ruling |
-| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The ladder's third rung ends here; the universal laws; the hand's laws for chat seats; the lander as the only review |
+| The fleet prompt | `pfm/harness-prompts/share/tail.md` § Orchestration | The ladder's third rung ends here; the universal laws; the lander as the only review |
 | The spec writer | [`flights-speccer`](flights-speccer.md) | The index this agent dispatches from (`files` included), the `DISPATCH` line of its return, the revising call |
 | The adopter contract | `CLAUDE.md` and `templates/project/CLAUDE.md` | The executor's first move on a brief naming a task file; in this repository's `CLAUDE.md` also the fenced-flight paragraph under § Process |
 | The executors and the lander | [`flights-executors`](flights-executors.md), [`flights-lander`](flights-lander.md) | What the brief no longer restates; the `RETRO` line in every return |

@@ -15,12 +15,12 @@
 #
 # Written per run, under /tmp/{project}/lanes/<stamp>/:
 #   <lane>.log     every beat line, the failed beats' raw pane bytes, log slices
-#   timeline.tsv   lane · beat · t+s · verdict · dur · seat · ids · detail
+#   timeline.tsv   lane · beat · t+s · verdict · dur · seat · detail
 #   lanes.tsv      lane · wall_s · beats · failed · known · blocked (Wave 2 shape)
 #   summary.md     the header (mode, root image, order, seats), the table, verdicts
 #
-# Exit 1, each named: a ✗ that is not a valid known gap · a landscape id a beat
-# declared that map.tsv does not carry · a lane over its budget · a lane with no
+# Exit 1, each named: a ✗ that is not a valid known gap · a map.tsv row whose beat
+# its lane script does not carry · a lane over its budget · a lane with no
 # budget row at all. Exit 2 for a usage error, an unwritten lane, a ledger that
 # does not satisfy known-gaps law, or a toolchain that is missing.
 #
@@ -273,7 +273,7 @@ done
 # ─── aggregation ────────────────────────────────────────────────────────────
 
 printf 'lane\twall_s\tbeats\tfailed\tknown\tblocked\n' >"$OUT/lanes.tsv"
-printf 'lane\tbeat\tt_plus_s\tverdict\tdur_s\tseat\tlandscape_ids\tdetail\n' >"$OUT/timeline.tsv"
+printf 'lane\tbeat\tt_plus_s\tverdict\tdur_s\tseat\tdetail\n' >"$OUT/timeline.tsv"
 for l in $ORDER; do
   [ -f "$OUT/$l.row.tsv" ] && cat "$OUT/$l.row.tsv" >>"$OUT/lanes.tsv"
   [ -f "$OUT/$l.timeline.tsv" ] && tail -n +2 "$OUT/$l.timeline.tsv" >>"$OUT/timeline.tsv"
@@ -285,7 +285,7 @@ while IFS=$'\t' read -r l wall beats failed known blocked; do
   total_failed=$((total_failed + failed)) total_known=$((total_known + known)) total_blocked=$((total_blocked + blocked))
 done < <(tail -n +2 "$OUT/lanes.tsv")
 
-# The beat↔map contract is check-map.sh's own gate (direction 2, both ways) —
+# The beat↔map contract is check-map.sh's own gate (check 1) —
 # never a second, partial copy of the same walk here: run.sh spends ONE call
 # on the real gate after every run instead.
 map_check_out="$(bash "$HERE/check-map.sh" --no-derive 2>&1)"

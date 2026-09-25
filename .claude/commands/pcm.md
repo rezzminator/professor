@@ -31,7 +31,7 @@ Hook-enforced: guards deny prompt-file edits until `.claude/commands/quality/pro
 ### Critical invariants
 
 - **Path variables** — files use `$CDOCS`, `$REFS`, `$RESEARCH`, never hardcoded doc paths. Defined in root `CLAUDE.md` § Path vars.
-- **Two audiences, one law** — a rule you write into `.claude/**` binds this repo; the same rule in `templates/**` binds every adopter. Never let the two drift silently: if a fix belongs upstream, it lands in the template too, and the commit message names the adopter-facing change — the release reviewers write the notes from it.
+- **Two audiences, one law** — a rule you write into `.claude/**` binds this repo; the same rule in `templates/**` binds every adopter. Never let the two drift silently: if a fix belongs upstream, it lands in the template too, and the commit message names the adopter-facing change — the release's `changelogger` writes the notes from it.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
 - **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
@@ -96,9 +96,9 @@ For things that must happen every time (formatting, validation, secret-scanning)
 
 ## Logging
 
-Release notes are never written during development. A framework change (one any Professor adopter could use) lands with its `templates/**` twin in the same pass and is described in its commit message — `/pfm:release` reviewers derive the changelog and every adopter instruction from `develop`'s diff and commits. A **customization only this repo wants** (a rule about publishing the blueprint, a roster fact, a gate that only makes sense upstream) lands without a twin; its commit message is its record. **Unsure which? Ask the user — never guess.**
+Release notes are never written during development. A framework change (one any Professor adopter could use) lands with its `templates/**` twin in the same pass and is described in its commit message — at release time `changelogger` derives the notes and every adopter instruction from `develop`'s diff and commits. A **customization only this repo wants** (a rule about publishing the blueprint, a roster fact, a gate that only makes sense upstream) lands without a twin; its commit message is its record. **Unsure which? Ask the user — never guess.**
 
-**Standalone-skill special case:** a change to a `sources.json` skill bumps the skill's `version:` frontmatter — release step 7b ships the substance to the skill's own public repo; the Professor changelog carries only the version pointer + re-pull note.
+**Standalone-skill special case:** a change to a `sources.json` skill bumps the skill's `version:` frontmatter — `/pfm:release publish` ships the substance to the skill's own public repo; the Professor changelog carries only the version pointer + re-pull note.
 
 **Retro inbox — `.professor/retro.md`:** the main-loop steering-conscience ledger (sessions append per its header) — an inbox `/pcm` consumes, never a change log. The `retro` dispatch sweeps entries lacking `Resolved:`, folds each `Amend:` into the named file through the normal change flow (or rules it `judgment` — no text fix), and stamps `Resolved: {date} — {where}` under the entry in place.
 

@@ -197,8 +197,9 @@ func professorUpdatePrompt(row compose.Row) string {
 	target := strings.TrimPrefix(row.ID, "pfm-update-")
 	return "Professor " + target + " is available. Work only in this Professor source clone. " +
 		"First run `pfm version` for the installed version and `git fetch --tags origin`, then read EVERY release-notes file after the installed version through " + target + ", oldest first, with `git show " + target + ":releases/vX.Y.Z.md` (`git show " + target + ":CHANGELOG.md` lists them) — skipping a release skips its migration actions. " +
-		"Merge their `#### → For:` actions into one checklist, a later release superseding an earlier one on the same surface, and mark each as before or after the update. " +
+		"A release whose note carries a `#### → Stop:` line is a required stop: update to it first, finish its actions, then continue from it. " +
+		"Merge the `#### → For:` actions into one checklist per update: each names its timing — `before update`, `after update` or `per project` — and the surface it touches, and a later release's action supersedes an earlier one on the same surface; an older note's action that names no timing, including one written `#### For:` or `#### → For adopters …:`, gets the timing you judge. " +
 		"Then present a concise overview of every change and migration impact, with that checklist. " +
-		"Ask the user for explicit approval before making any change. Only after approval, do the before-update actions, run `pfm update --to " + target + "`, work the rest of the checklist, then run `pfm doctor` and report the exact result of each step. " +
+		"Ask the user for explicit approval before making any change. Only after approval, do the before-update actions, run `pfm update --to " + target + "` (or the stop's tag), do the after-update actions, run `pfm doctor`, then in each adopted project run `pfm update check`, hand-apply each `UPDATED` diff and run `pfm update pin <local>`, then do the `per project` actions; report the exact result of each step. " +
 		"Do not push, tag, publish, release, or edit the source manually."
 }

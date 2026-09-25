@@ -93,10 +93,6 @@ type ClaudePrefs struct {
 	// CompactNudge governs the UserPromptSubmit reminder that a self-compact
 	// is due at a context milestone — see decodeClaudePrefs for the defaults.
 	CompactNudge CompactNudge
-	// AutoCompactMain and AutoCompactSubagent are the machine's auto-compact
-	// thresholds in tokens, and AutoCompactWindow the plain window that
-	// excludes them — see compact.go. Zero is unset.
-	AutoCompactMain, AutoCompactSubagent, AutoCompactWindow int
 }
 
 // NameSync is the window-name convergence schedule. Interval is rendered into
@@ -268,10 +264,6 @@ type rawClaude struct {
 	// The sub-agent ceilings — see subagents.go.
 	MaxSubagentSpawnDepth  *int `json:"maxSubagentSpawnDepth,omitempty"`
 	MaxConcurrentSubagents *int `json:"maxConcurrentSubagents,omitempty"`
-	// The auto-compact thresholds and plain window, machine-wide — see compact.go.
-	AutoCompactMain     json.RawMessage `json:"autoCompactMain,omitempty"`
-	AutoCompactSubagent json.RawMessage `json:"autoCompactSubagent,omitempty"`
-	AutoCompactWindow   json.RawMessage `json:"autoCompactWindow,omitempty"`
 }
 
 type rawOpenCode struct {
@@ -710,7 +702,6 @@ func loadWithMCPServers(
 		}
 		result.Claude.CompactNudge = applied
 		recordCompactNudgeSources(result.Sources, name, raw.Claude.CompactNudge)
-		applyCompactThresholds(&result.Claude, prefs, *raw.Claude, result.Sources)
 		if err := applySubagentCaps(
 			&result.Claude, *raw.Claude, result.Claude, result.Path, name, -1, result.Sources,
 		); err != nil {
@@ -1053,9 +1044,6 @@ func decodeClaudePrefs(raw rawClaude, path, scope string, index int) (ClaudePref
 			)
 		}
 		prefs.SystemPrompt = value
-	}
-	if err := decodeCompactThresholds(&prefs, raw, path, scope, index); err != nil {
-		return ClaudePrefs{}, err
 	}
 	return prefs, nil
 }

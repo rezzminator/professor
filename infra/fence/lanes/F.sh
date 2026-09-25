@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# F.sh — lane F, fleet: `chat new` across every dimension the landscape lists,
+# F.sh — lane F, fleet: `chat new` across every dimension beats.md lists,
 # a storm beside E1's chat, `pfm ls` in every shape, the TUI picker driven key
 # by key inside its own tmux server and read back with capture-pane, the idle
 # state machine, name-sync convergence, kill-storm, and the sequence's first
@@ -13,7 +13,7 @@
 # exit code and output, the tmux pane start command pfm synthesized, a file pfm
 # wrote) or from a tmux pane (`capture-pane`), never from a model's prose: a
 # model turn is only ever the stimulus that gives a wait its needle. Beat ids
-# and their landscape ids are the contract in beats.md and map.tsv —
+# are the contract in beats.md and map.tsv —
 # check-map.sh fails when this file and those disagree.
 #
 # Cost: one Claude seat (`--seats cc:1`, seat 1 by default) plus the Codex home
@@ -166,7 +166,7 @@ open_cx() {
     "You are $CX, a Codex chat an automated Tier B lane drives. Reply with one word: ready. Then wait and do exactly what each next message says, nothing more." 2>&1
 }
 
-beat F.01-new-engine C9 C10 C11 C12 K4 K5 K6 K7 K8 K9
+beat F.01-new-engine
 spends "cc:$SEAT+cx"
 target "$CC"
 expect-log 'unknown engine'
@@ -263,7 +263,7 @@ fi
 
 # ─── F.02 — {name}:{group}, _KILL/_HIDE, --agent-role, --prompt-file ────────
 
-beat F.02-new-label-role K12 K13 K14 K20 K21 C17 C18
+beat F.02-new-label-role
 spends "cc:$SEAT"
 target "$GRP"
 expect-log 'mutually exclusive'
@@ -347,7 +347,7 @@ fi
 
 # ─── F.03 — --account / --1h / --model --effort, read off the launch pfm made ─
 
-beat F.03-new-account-1h-model C13 C14 C15 C16 K24 K25 K28
+beat F.03-new-account-1h-model
 spends "cc:$SEAT"
 target_live "$CC"
 expect-log 'not in the configured roster'
@@ -389,7 +389,7 @@ fi
 # ─── F.04 — --await / --attach mechanics, headless by construction ──────────
 
 GRP_ID=""
-beat F.04-new-await-attach C19 C20 K15 K16
+beat F.04-new-await-attach
 spends "cc:$SEAT"
 target_live "$CC"
 if requires; then
@@ -443,7 +443,7 @@ fi
 # ─── F.05 — the storm ───────────────────────────────────────────────────────
 
 STORM_RAN=0
-beat F.05-storm K18 K19
+beat F.05-storm
 spends "cc:$SEAT+cx"
 target "$CC"
 expect-log 'unknown command'
@@ -481,7 +481,7 @@ fi
 
 # ─── F.06 — pfm ls in every shape ───────────────────────────────────────────
 
-beat F.06-ls-rows C1 C2 C3 C4 C5 C6 C7 C8 C21 C60
+beat F.06-ls-rows
 spends "cc:$SEAT"
 target_live "$CC"
 expect-log 'must be auto, on, or off'
@@ -566,7 +566,7 @@ fi
 
 # ─── F.07 — every row kind ──────────────────────────────────────────────────
 
-beat F.07-row-kinds K29 K30 K31 K32 K33 K34 K35 K36 K37 K38 K39 K40
+beat F.07-row-kinds
 spends none
 target_live "$CC"
 if requires; then
@@ -641,7 +641,7 @@ fi
 
 # ─── F.08 — the TUI picker, every tab and every key ─────────────────────────
 
-beat F.08-tui-picker T1 T2 T3 T4 T5 T6 T7 T8 T9 T10 T11 T12 T13 T14 T15 T16 T17 T18 T19 T20 T21 T22 T23 T24 T25 T26 T27
+beat F.08-tui-picker
 spends none
 target_live "$CC"
 if requires; then
@@ -881,7 +881,7 @@ fi
 
 # ─── F.09 — the golden shapes against the live pane ─────────────────────────
 
-beat F.09-tui-golden T28 T29 T30 T36
+beat F.09-tui-golden
 spends none
 target_live "$CC"
 if requires; then
@@ -954,7 +954,7 @@ fi
 
 # ─── F.10 — N parallel chat new against the fleetdb's atomic writers ───────
 
-beat F.10-concurrent-new I96
+beat F.10-concurrent-new
 spends "cc:$SEAT"
 target "$CC"
 bad=""
@@ -990,7 +990,7 @@ fi
 
 # ─── F.11 — the idle-detection state machine ────────────────────────────────
 
-beat F.11-idle-states L1 L2 L3 L4 L6 L7
+beat F.11-idle-states
 spends none
 target_live "$CC"
 expect-log 'no chat named'
@@ -1048,7 +1048,7 @@ fi
 
 # ─── F.12 — idle-down must not take a chat with a running sub-agent ─────────
 
-beat F.12-idle-down-subagent L5
+beat F.12-idle-down-subagent
 spends "cc:$SEAT"
 target_live "$CC"
 if requires; then
@@ -1092,7 +1092,7 @@ fi
 
 # ─── F.13 — name-sync converges the window name ─────────────────────────────
 
-beat F.13-name-sync L40 L41 L42
+beat F.13-name-sync
 spends none
 target_live "$CC"
 if requires; then
@@ -1140,7 +1140,7 @@ fi
 
 # ─── F.14 — kill-storm ──────────────────────────────────────────────────────
 
-beat F.14-kill-storm L39
+beat F.14-kill-storm
 spends "cc:$SEAT+cx"
 target "$CC"
 n_storm="$(live_storm_rows | grep -c .)"
@@ -1168,7 +1168,7 @@ fi
 
 # ─── F.15 — fleet-wide addressing and search ────────────────────────────────
 
-beat F.15-addressing C58 C59 C62 C63 C64
+beat F.15-addressing
 spends none
 target_live "$CC"
 expect-log 'no chat named'
@@ -1232,7 +1232,7 @@ fi
 
 # ─── F.16 — picker plumbing: agent-open, chat-server ────────────────────────
 
-beat F.16-picker-plumbing X18 X19
+beat F.16-picker-plumbing
 spends none
 target_live "$CC"
 expect-log 'agent open requires'
@@ -1270,7 +1270,7 @@ fi
 
 # ─── F.17 — naming precedence and the TUI 1h toggle ─────────────────────────
 
-beat F.17-additional-k-coverage K10 K11 K27
+beat F.17-additional-k-coverage
 spends none
 target_live "$CC"
 if requires; then
@@ -1304,7 +1304,7 @@ fi
 
 # ─── F.18 — cross-lane: E1's chat after the storm ───────────────────────────
 
-beat F.18-e1-chat-survives-storm C22 C28 C32
+beat F.18-e1-chat-survives-storm
 spends "cc:$SEAT"
 target_live "$E1_CHAT"
 if requires; then

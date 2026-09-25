@@ -32,7 +32,7 @@ Hook-enforced: guards deny prompt-file edits until `~/.claude/commands/quality/p
 ### Critical invariants
 
 - **Path variables** — agents use `$DOCS`, `$WORKTREE`, `$CDOCS`, `$REFS`, never hardcoded paths; the brief that spawns an executor defines them.
-- **Pipeline flow lives in the flights commands** (`/flights:spec` → optionally `/flights:refine` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
+- **Pipeline flow lives in the flights commands** (`/flights:spec` → one of `/flights:orchestrate-{nested,live,cross-harness}` → the landing; `/flights:audit` over a flight at any time) — CLAUDE.md just redirects. Don't duplicate.
 - **Agent frontmatter must match behavior** — `name`, `description`, `tools` fields.
 - **Registry over tables** — a command/skill's `description:` frontmatter IS its routing, written to `/quality:description` (the harness injects that registry into every session); `disable-model-invocation: true` hides a command from the model's registry — set it only on user-triggered-by-design commands. The roster ban and what CLAUDE.md may carry: § Authoring conventions (CLAUDE.md).
 - **No command >35KB, no agent >15KB** — token consciousness. Every `general-purpose` spawn carries the full root CLAUDE.md (+ git status) and a build spawns 30+ agents, so a root CLAUDE.md line is the most expensive line in the framework — weight cuts by that multiplier (`Explore`/`Plan` types skip the CLAUDE.md chain; the fleet prompt rides the main-loop system prompt only). `@path` imports expand at launch, so splitting CLAUDE.md saves zero context — cut content, don't relocate it.
@@ -99,7 +99,7 @@ For things that must happen every time (formatting, validation, secret-scanning)
 
 Classify FIRST — before any edit. The classification decides the source of truth. **Unsure? Ask the user — never guess.**
 
-- **Framework change** (an improvement any Professor adopter could use) → edit the canonical blueprint template at `{BLUEPRINT_CLONE_PATH}` under that repo's own law and gates; its commit message names the adopter-facing change — the blueprint's release reviewers write the notes from the diff. Never put project-specific behavior into the blueprint.
+- **Framework change** (an improvement any Professor adopter could use) → edit the canonical blueprint template at `{BLUEPRINT_CLONE_PATH}` under that repo's own law and gates; its commit message names the adopter-facing change — the blueprint's release writes its notes from the diff and those messages. Never put project-specific behavior into the blueprint.
 - **Project customization** → edit this project's local file directly. That local file is the source of truth; it is not regenerated from the template.
 - **Engine mirror** → never edit the generated output by hand. Change its local Claude source, then run `pfm codex build` and `pfm codex check` (or the owning compiler for another engine).
 - **Upstream project-template delta** → `/pfm` § Adopter update flow: `pfm update check` prints per file the exact `git diff` to read; hand-apply the parts that belong locally through this command's change flow, then `pfm update pin <local>` (accept), `pfm update ignore <template>` (never adopt), or `pfm update drop <local>` (forget). No baseline yet (the install predates `pfm init`): `pfm update adopt [--at <ref>]` once.
@@ -129,7 +129,7 @@ Before ANY changes, read all affected files. Grep every reference across `.claud
 - Project dir names in CLAUDE.md match actual directories
 - Agent frontmatter matches actual behavior and tools needed
 - worktree.sh project resolution matches directory names
-- Flights-command references (`/flights:spec`, `/flights:refine`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
+- Flights-command references (`/flights:spec`, `/flights:orchestrate-*`, `/flights:audit`) match agent names and doc paths
 - Tech stack descriptions match package.json/pyproject.toml deps
 - Pipeline flow in the flights commands matches agent ordering constraints
 

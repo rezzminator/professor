@@ -18,7 +18,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/ask: 2
       github.com/rezzminator/professor/pfm/internal/atomicfile: 2
       github.com/rezzminator/professor/pfm/internal/binwatch: 2
-      github.com/rezzminator/professor/pfm/internal/callmeter: 2
+      github.com/rezzminator/professor/pfm/internal/callmeter: 18
       github.com/rezzminator/professor/pfm/internal/callmeter/cmdparse: 2
       github.com/rezzminator/professor/pfm/internal/callmeter/command: 2
       github.com/rezzminator/professor/pfm/internal/callmeter/report: 2
@@ -28,7 +28,6 @@ suites:
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2
       github.com/rezzminator/professor/pfm/internal/codexgen: 2
       github.com/rezzminator/professor/pfm/internal/codexmeta: 2
-      github.com/rezzminator/professor/pfm/internal/compactgate: 2
       github.com/rezzminator/professor/pfm/internal/compose: 2
       github.com/rezzminator/professor/pfm/internal/config: 2
       github.com/rezzminator/professor/pfm/internal/deps: 42
@@ -43,11 +42,11 @@ suites:
       github.com/rezzminator/professor/pfm/internal/harvest: 132
       github.com/rezzminator/professor/pfm/internal/harvestcli: 6
       github.com/rezzminator/professor/pfm/internal/harvestmcp: 2
-      github.com/rezzminator/professor/pfm/internal/harvestpy: 2
+      github.com/rezzminator/professor/pfm/internal/harvestpy: 6
       github.com/rezzminator/professor/pfm/internal/headless: 8
       github.com/rezzminator/professor/pfm/internal/headless/run: 10
       github.com/rezzminator/professor/pfm/internal/heal: 10
-      github.com/rezzminator/professor/pfm/internal/hookentry: 2
+      github.com/rezzminator/professor/pfm/internal/hookentry: 18
       github.com/rezzminator/professor/pfm/internal/hostfixture: 2
       github.com/rezzminator/professor/pfm/internal/index: 56
       github.com/rezzminator/professor/pfm/internal/inject: 16

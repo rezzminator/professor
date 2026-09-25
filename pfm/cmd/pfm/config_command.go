@@ -182,15 +182,6 @@ func printResolvedConfig(stdout io.Writer, runtime commandRuntime) {
 		config.Claude.CompactNudge.Step,
 		config.Source("claude.compactNudge.step"),
 	)
-	claude := config.Claude
-	thresholds := []int{claude.AutoCompactMain, claude.AutoCompactSubagent, claude.AutoCompactWindow}
-	for index, key := range []string{"autoCompactMain", "autoCompactSubagent", "autoCompactWindow"} {
-		value := "unset"
-		if thresholds[index] > 0 {
-			value = fmt.Sprint(thresholds[index])
-		}
-		fmt.Fprintf(stdout, "config claude.%s=%s (%s)\n", key, value, config.Source("claude."+key))
-	}
 	fmt.Fprintf(
 		stdout,
 		"config tmux.titles.enabled=%t (%s)\n",

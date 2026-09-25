@@ -20,7 +20,8 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 
 ## Lanes and registries
 
-- The lane, beat or suite a new capability lands with, and the registry rows (landscape, map, known-gaps) that land in the same change: {files}.
+- A new or changed capability lands in one commit with its landscape row, its map row, and the unit, hermetic or live row mapping it together with that row's bite: {the landscape, map and ledger paths}.
+- Where a live tier exists, every close runs the full lane sequence: {the sequence command}.
 - Shared-core files with one editor per flight: {paths}.
 
 ## Mock boundary
@@ -56,4 +57,5 @@ Fixed headings, fixed order; a section that does not apply says `none`. State th
 ## What not to test
 
 - Tests this project refuses: {kinds}.
+- The refused shapes, in any unit, hermetic or live test, its harness and its checks: a fail-open verdict; a weak or tautological oracle; an unscoped read of a shared store; a wall-clock wait; a consuming probe; the toolchain tested as product; shipped migration content in a test; a source invariant tested instead of linted; a self-skip; a double or a test path in production code; a second logging path; a line-anchored exemption; a host path, process id or captured log in a fixture. This stack's spelling of each: {shape → spelling}.
 - A removed feature, field, route, flag, environment variable or prompt section takes its tests with it, never inverted into an absence assertion.

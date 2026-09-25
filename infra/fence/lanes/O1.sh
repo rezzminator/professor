@@ -42,7 +42,7 @@ install_again() { (cd "$BLUEPRINT" && pfm install --yes 2>&1); }
 
 # ─── O1.01 — a second install changes nothing ───────────────────────────────
 
-beat O1.01-install-idempotent I96
+beat O1.01-install-idempotent
 spends none
 out="$(install_again)"
 rc=$?
@@ -59,7 +59,7 @@ fi
 
 # ─── O1.02 — every staged host asset is present ─────────────────────────────
 
-beat O1.02-host-assets I1 I2 I3 I4 I7 I8 I9 I10 I11 I14 I15 I16 I17 I18 I19 I20 I21 I22 I23
+beat O1.02-host-assets
 spends none
 missing=""
 check_path() { # check_path <id> <what> <path>
@@ -101,7 +101,7 @@ fi
 
 # ─── O1.03 — the installer's hooks, per engine ──────────────────────────────
 
-beat O1.03-hooks-installed I24 I25 I26 I27 I28 I29 I30 I31 I32 I33 I99
+beat O1.03-hooks-installed
 spends none
 settings="$SEAT_DIR/settings.json"
 if [ ! -f "$settings" ]; then
@@ -132,7 +132,7 @@ fi
 
 # ─── O1.04 — the seat roster ────────────────────────────────────────────────
 
-beat O1.04-seats I34 I35 I36 I39 I40
+beat O1.04-seats
 spends none
 doctor="$(pfm doctor 2>&1)"
 doctor_rc=$?
@@ -160,7 +160,7 @@ fi
 
 # ─── O1.05 — a seat with no credential refuses by name ──────────────────────
 
-beat O1.05-credential K23
+beat O1.05-credential
 spends none
 if [ -z "$SPARE" ]; then
   fail "only one Claude seat is configured — the absent-credential refusal cannot be asserted without risking the lane's own seat"
@@ -185,7 +185,7 @@ fi
 
 # ─── O1.06 — a dropped seat loses exactly what it owned ─────────────────────
 
-beat O1.06-dropped-seat I38
+beat O1.06-dropped-seat
 spends none
 if [ -z "$SPARE" ]; then
   fail "only one Claude seat is configured — dropping it would take the lane's own seat with it"
@@ -219,7 +219,7 @@ fi
 
 # ─── O1.07 — a home and a blueprint reached through a symlink ───────────────
 
-beat O1.07-symlinked-home I37
+beat O1.07-symlinked-home
 spends none
 link="$HOME/.cc/lane-linked-seat"
 bad=""
@@ -299,7 +299,7 @@ fi
 
 # ─── O1.09 — doctor: every row green or a NAMED advisory ────────────────────
 
-beat O1.09-doctor-pass I41 I42 I43 I44 I45 I46 I47 I48 I49 I50 I51 I52 I53 I54 I55 I56 I57 I58 I59 I60 I61 I62 I64 I65 I66 I67 I68 I5 I6 I12 I13
+beat O1.09-doctor-pass
 spends none
 doc="$(pfm doctor 2>&1)"
 doc_rc=$?
@@ -317,7 +317,7 @@ fi
 
 # ─── O1.10 — doctor's own exit contract, provoked ───────────────────────────
 
-beat O1.10-doctor-exit-contract I98
+beat O1.10-doctor-exit-contract
 spends none
 clean_rc=0
 pfm doctor >/dev/null 2>&1 || clean_rc=$?
@@ -345,7 +345,7 @@ fi
 
 # ─── O1.11 — heal ───────────────────────────────────────────────────────────
 
-beat O1.11-heal X11
+beat O1.11-heal
 spends none
 heal1="$(pfm heal 2>&1)"
 heal1_rc=$?
@@ -363,7 +363,7 @@ fi
 
 # ─── O1.12 — the doc-vs-code behaviours, including a foreign key ────────────
 
-beat O1.12-doc-vs-code I90 I91 I92 I93 I94 I95
+beat O1.12-doc-vs-code
 spends none
 bad=""
 jq '. + {laneForeignKey: "keep-me"}' "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tmp" &&
@@ -392,7 +392,7 @@ fi
 
 # ─── O1.13 — the misc ops CLI ───────────────────────────────────────────────
 
-beat O1.13-misc-ops X1 X2 X3 X4 X12 X13 X14 C65
+beat O1.13-misc-ops
 spends none
 bad=""
 run_ok() { # run_ok <what> <cmd…>

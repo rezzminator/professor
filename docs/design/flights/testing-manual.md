@@ -70,4 +70,4 @@ The speccer takes facts from the manual into the task file as `Decisions` and `F
 | The speccer | [`flights-speccer`](flights-speccer.md) | Reads sections 1, 2, 3, 8 at intake |
 | The executor and the lander | [flight executors](flights-executors.md), [`flights-lander`](flights-lander.md) | Read it whole |
 | Setup | `docs/SETUP.md`, `templates/refresh-map.json` | Generation of one manual per project |
-| The scaffold | `pfm/internal/professor/scaffold.go`, lane `A` (`infra/fence/lanes/A.sh`), landscape rows P4 and P13 | `commands/per-project/` is never deployed by a bare `pfm init` |
+| The scaffold | `pfm/internal/professor/scaffold.go`, lane `A` (`infra/fence/lanes/A.sh`) | `commands/per-project/` is never deployed by a bare `pfm init` |

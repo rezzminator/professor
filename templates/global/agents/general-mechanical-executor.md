@@ -13,8 +13,9 @@ You execute one task, briefed inline, start to finish, and report once; `{id}` i
 - The Goal wins over a detail: where the brief and the code disagree, reach the Goal and say what you changed.
 - A premise that does not hold: change nothing, return `SPEC-DRIFT {id}: {what you found}`. A Goal that cannot be reached: stop, return `SPEC-DRIFT {id}` with what you found and what landed.
 - A decision you cannot make: return `BLOCKED {id}: {question}` instead of guessing. Scope is never widened, narrowed or deferred silently.
-- A red you did not foresee: read until you can name its cause — the line, the value, the code path — then return `FAILED {id}` or `SPEC-DRIFT {id}` with that cause, or with what you read and "cause unknown". Reading is always allowed; a rerun and a fix outside the brief are not.
-- Stay inside the brief's files; a change needed outside them is reported, never made. Git is read-only for you.
+- A red you did not foresee: read until you can name its cause — the line, the value, the code path — then return `FAILED {id}` or `SPEC-DRIFT {id}` with that cause, or with what you read and "cause unknown". Reading is always allowed; a rerun and a fix outside the brief are not. A symptom plus an artefact path is not a return.
+- Stay inside the brief's files: read what the brief names, not the area around it — a red's cause is the one exception, read wherever it leads; a change needed outside them is reported, never made. Git is read-only for you.
+- A deletion leaves nothing behind: everything that exists only because of the thing (callers, references, config keys, docs, tests, fixtures, scripts, registry rows, env vars, stored data, scheduled jobs, installed links) goes in the same pass. It is proven once, by a search for its name that finds nothing but history.
 
 ## Context
 
@@ -28,7 +29,8 @@ Everything you read is re-sent on every later call.
 ## Tests
 
 - Run the brief's check and the affected tests only. The full suite, a review and a format sweep are never yours: a brief naming one as your run is refused, and your return names it.
-- A task that changes behavior gets a covering test in the project's pattern, per the testing manual the brief names; it counts only after you watched it fail against the unfixed code, or against a deliberate re-break when the fix already landed.
+- A task that changes behavior gets a covering test in the project's pattern, per the testing manual the brief names; it counts only after you watched it fail against the unfixed code, or against a deliberate re-break when the fix already landed. A test that exists but did not run is missing.
+- A test proves behaviour that exists, never that something is gone: no test asserts that a removed function, file, flag or string stays absent, and a test guarding a deleted thing is itself an orphan. A test of how code handles a missing input is behaviour and stays.
 - A task that changes no behavior — a doc, a rename a build proves, a moved file — proves itself with the brief's check alone.
 
 ## The cap

@@ -9,7 +9,7 @@
 # Every beat asserts from pfm's OWN report (`pfm ls --tsv`, a verb's exit code,
 # the chat's last assistant message) or from the pane, never from a model's
 # prose: a beat that can only be satisfied by what the model said is a beat
-# asserting the wrong thing. Beat ids and their landscape ids are the contract in
+# asserting the wrong thing. Beat ids are the contract in
 # beats.md and map.tsv — check-map.sh fails when this file and those disagree.
 #
 # Cost: one Claude seat (`--seats cc:1`, seat 1 by default) plus one reload onto
@@ -59,7 +59,7 @@ open_main() {
 }
 lane_reopen 'open_main'
 
-beat E1.01-open-seat1 K1
+beat E1.01-open-seat1
 spends "cc:$SEAT"
 target "$CHAT"
 if live_chat "$CHAT"; then
@@ -80,7 +80,7 @@ fi
 
 # ─── E1.02 — statusline, theme, window title ────────────────────────────────
 
-beat E1.02-statusline-theme T31 T33 T35
+beat E1.02-statusline-theme
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -134,7 +134,7 @@ reload_via_pane() {
   esac
 }
 
-beat E1.03-reload-account C50
+beat E1.03-reload-account
 spends "cc:${ALT:-none}"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -155,7 +155,7 @@ if requires E1.01-open-seat1; then
   fi
 fi
 
-beat E1.04-reload-model-effort C51 C52
+beat E1.04-reload-model-effort
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -168,7 +168,7 @@ if requires E1.01-open-seat1; then
   fi
 fi
 
-beat E1.05-reload-1h C53 K26
+beat E1.05-reload-1h
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -209,7 +209,7 @@ reload_new_on_socket() {
   return 0
 }
 
-beat E1.06-reload-new C54 C55 L33
+beat E1.06-reload-new
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -264,7 +264,7 @@ fi
 # refusing ambiguous (internal/resolve/roster_test.go
 # TestResolveRosterNamePrefersTheUniqueLiveRow pins it at the unit layer).
 
-beat E1.26-resolver-prefers-live C32
+beat E1.26-resolver-prefers-live
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -285,7 +285,7 @@ if requires E1.01-open-seat1; then
   fi
 fi
 
-beat E1.07-reload-then C56 X39
+beat E1.07-reload-then
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -296,7 +296,7 @@ if requires E1.01-open-seat1; then
   fi
 fi
 
-beat E1.08-reload-sock C57
+beat E1.08-reload-sock
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -314,7 +314,7 @@ fi
 
 # ─── E1.09 — /reload typed WHILE the chat is busy ───────────────────────────
 
-beat E1.09-reload-while-busy L32 X35 X36 L34
+beat E1.09-reload-while-busy
 spends "cc:${ALT:-$SEAT}"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -351,7 +351,7 @@ fi
 
 # ─── E1.10 — /reload onto a seat with no credential ─────────────────────────
 
-beat E1.10-reload-credential K23
+beat E1.10-reload-credential
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -383,7 +383,7 @@ fi
 
 # ─── E1.11 — a role seat keeps its role through reload ───────────────────────────
 
-beat E1.11-role-reload C67
+beat E1.11-role-reload
 spends "cc:$SEAT"
 target "$ROLE_CHAT"
 if requires E1.01-open-seat1; then
@@ -413,7 +413,7 @@ fi
 
 # ─── E1.12 — status, every form, and the sidechain override ─────────────────
 
-beat E1.12-status C22 C23 C24 C25 C26 C27 L5
+beat E1.12-status
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -445,7 +445,7 @@ fi
 
 # ─── E1.13 — last, read, stream ─────────────────────────────────────────────
 
-beat E1.13-last-read-stream C28 C29 C30 C31
+beat E1.13-last-read-stream
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -489,7 +489,7 @@ fi
 
 # ─── E1.14 — capture and keys ───────────────────────────────────────────────
 
-beat E1.14-capture-keys C41 C42
+beat E1.14-capture-keys
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -515,7 +515,7 @@ fi
 
 # ─── E1.15 — ask ────────────────────────────────────────────────────────────
 
-beat E1.15-ask C39
+beat E1.15-ask
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -532,7 +532,7 @@ fi
 
 # ─── E1.16 — inject, every form and both guards ─────────────────────────────
 
-beat E1.16-inject C32 C33 C34 C35 C36 C37 L27 L28 L29 L30 L31
+beat E1.16-inject
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -577,7 +577,7 @@ fi
 
 # ─── E1.17 — watch ──────────────────────────────────────────────────────────
 
-beat E1.17-watch C40
+beat E1.17-watch
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -594,7 +594,7 @@ fi
 
 # ─── E1.18 — name, and the {name}:{group} grammar ───────────────────────────
 
-beat E1.18-name C44 C45 K12
+beat E1.18-name
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -623,7 +623,7 @@ fi
 
 # ─── E1.19 — kill / unkill, and the exit-intercept body ─────────────────────
 
-beat E1.19-kill-unkill C46 C48 X28
+beat E1.19-kill-unkill
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -648,7 +648,7 @@ fi
 
 # ─── E1.20 — self-compact leaves a receipt on the pane ──────────────────────
 
-beat E1.20-self-compact C38 L35 L37
+beat E1.20-self-compact
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -674,7 +674,7 @@ fi
 
 # ─── E1.21 — SessionEnd closes the pane without stranding a reload ──────────
 
-beat E1.21-exit-close X27 X25
+beat E1.21-exit-close
 spends none
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -693,7 +693,7 @@ fi
 
 # ─── E1.22 — /handoff ───────────────────────────────────────────────────────
 
-beat E1.22-handoff T38 C61
+beat E1.22-handoff
 spends "cc:$SEAT"
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -720,7 +720,7 @@ fi
 
 # ─── E1.23 — the managed launcher entries ───────────────────────────────────
 
-beat E1.23-launcher X20 X31 X38
+beat E1.23-launcher
 spends none
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -769,7 +769,7 @@ fi
 
 # ─── E1.24 — the shared headless-verb exit contract ─────────────────────────
 
-beat E1.24-exit-contract C66
+beat E1.24-exit-contract
 spends none
 target_live "$CHAT"
 if requires E1.01-open-seat1; then
@@ -793,7 +793,7 @@ fi
 
 # ─── E1.25 — end ────────────────────────────────────────────────────────────
 
-beat E1.25-end C49
+beat E1.25-end
 spends none
 target_live "$CHAT"
 if requires E1.01-open-seat1; then

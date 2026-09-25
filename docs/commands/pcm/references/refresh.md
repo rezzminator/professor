@@ -1,6 +1,6 @@
 # The Refresh Pass — Re-derive the Blueprint from Live Source
 
-Executed inside `/pfm:release` (step 3). Re-derives the blueprint from the CURRENT `.claude/` and `CLAUDE.md` state. Edit files directly inside this repo's `templates/project/` tree — this repo IS the upstream clone.
+Executed inside `/pfm:release prepare` (step 3). Re-derives the blueprint from the CURRENT `.claude/` and `CLAUDE.md` state. Edit files directly inside this repo's `templates/project/` tree — this repo IS the upstream clone.
 
 **Scope (incremental):** `templates/refresh-map.json` maps every template to its live source(s) + the SHA-256 of each as of the last sync. `scripts/refresh-scope.sh scan` proves unchanged sources untouched — their templates are skipped; re-derive only CHANGED templates; UNMAPPED-LIVE files get a mapping ruling. `curated` templates have no live source and are never auto-derived. `refresh-scope.sh regen` re-baselines the hashes at release end.
 
@@ -215,7 +215,7 @@ Continuing release.
 
 ## The pass — how a refresh runs
 
-Driven by `/pfm:release --from {live-project-root}` (step 3); there is no standalone command. The tier table, preservation list and placeholder law above are the rules every worker applies — this section owns HOW the pass runs: cheaply, in reviewed batches.
+Driven by `/pfm:release prepare … --from {live-project-root}` (step 3); there is no standalone command. The tier table, preservation list and placeholder law above are the rules every worker applies — this section owns HOW the pass runs: cheaply, in reviewed batches.
 
 ### The cost law
 
@@ -237,7 +237,7 @@ bash scripts/refresh-scope.sh scan {live-project-root}
 
 ### Step 2 — `rulings`
 
-Runs alone as `/pfm:refresh {root} rulings`, and runs first whenever a scan exits 3. Every `MISSING-SOURCE` gets one of three rulings, and each is a judgment the user's blueprint has to live with, so state the evidence for each:
+Runs first whenever a scan exits 3, before any batch. Every `MISSING-SOURCE` gets one of three rulings, and each is a judgment the user's blueprint has to live with, so state the evidence for each:
 
 - **REMAP** — the live source moved or was renamed. Point the entry at the successor. Prove the successor is the same file (same role, continuous content), never a same-named coincidence.
 - **DELETE** — the live source is gone with no successor and the template ships a dead pattern. Remove the template file AND its map entry, end to end, including any pointer that cited it.
@@ -295,7 +295,7 @@ Every dispatch carries all five briefing fields (root `CLAUDE.md` § Subagent di
 > 4. Apply only SYNC and TOKEN, surgically, with `Edit`. A template IS the live source file verbatim — same structure, mechanics, character, logic; only project-specific values swap for tokens. Never abstract, skeletonize, or thin prose, and never trim a persona's voice sections.
 > 5. Verify: `bash scripts/leak-check.sh --files templates/{key}` and quote its exit status. No machine-absolute path (`/home/…`, `/Users/…`), no brand current or former, no PII.
 >
-> Return: one line per hunk (`SYNC` / `LOCAL` / `TOKEN` / `UNRULED` + a phrase naming it), the leak-check exit status quoted, and one draft release-note bullet for the SYNC set (`- {Tier}: {scope} — {semantic change}`) for the release reviewers to weigh. Report a tool that would not run as a failure naming the tool — never as a clean result.
+> Return: one line per hunk (`SYNC` / `LOCAL` / `TOKEN` / `UNRULED` + a phrase naming it), the leak-check exit status quoted, and one draft release-note bullet for the SYNC set (`- Project: {template path} — {semantic change}`) for `changelogger` to weigh. Report a tool that would not run as a failure naming the tool — never as a clean result.
 
 ### Step 4 — Review, then continue
 
@@ -314,7 +314,7 @@ Reconcile telemetry per batch: workers dispatched vs reports received, and the c
 ### Step 5 — Close
 
 1. `bash scripts/refresh-scope.sh regen {live-project-root}` — fresh hashes are the next release's baseline. Only after every ruling from Step 2 has landed; regen over an unruled MISSING-SOURCE re-baselines a zombie.
-2. A SYNC set needs no ledger — the release reviewers write its note from the diff.
+2. A SYNC set needs no ledger entry of its own: the refresh commit's message carries the note's substance, and `changelogger` writes the bullet from it.
 3. Report: templates re-derived / skipped-unchanged / ruled, the per-verdict hunk totals, every UNRULED hunk and how it was ruled, workers dispatched vs reports received, leak-check status, and what a reader must verify by hand.
 
 ### Rules

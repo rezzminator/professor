@@ -19,6 +19,9 @@ const (
 	SIDScratchDoctor = "pfm-doctor"
 	// SIDScratchChatLoads holds the transcripts `pfm chat read` extracts.
 	SIDScratchChatLoads = "chat-loads"
+	// SIDEffortPrefix names the statusline's per-session effort record,
+	// SIDEffortPrefix+sessionID, so the doctor's crumb audit accepts it.
+	SIDEffortPrefix = "statusline-effort-"
 )
 
 // SIDScratchDirs lists every SID-dir scratch purpose, so a check that

@@ -1,6 +1,6 @@
 ---
 name: flights-speccer
-description: 'Writes executor task files — delegate for large work whose solution is not in hand (a design to choose, an unknown-cause failure) or to revise one after SPEC-DRIFT or FAILED. Pass the work, everything you hold and a $HOME/.local/state/pfm/flights/{project}/ directory. /flights:spec → here → flights-orchestrator. Returns the directory, index, any BLOCKED question.'
+description: 'Writes executor task files — delegate for large work whose solution is not in hand, or to revise one after SPEC-DRIFT or FAILED; the main chat starts a new flight only via /flights:spec. NEVER two running at once per caller. Pass the work, all you hold and a $HOME/.local/state/pfm/flights/{project}/ dir. /flights:spec → here → flights-orchestrator. Returns the directory, index, BLOCKED questions.'
 model: opus
 effort: high
 tools: Read, Write, Edit, Bash, Glob, Grep, Agent
@@ -102,9 +102,9 @@ files: [src/accounts/repository.ts, src/accounts/repository.test.ts, src/api/rou
 ```
 
 - Goal: the deliverable and why, two sentences at most; then `Never:` what is out of scope and which approaches are forbidden.
-- Done when: a matrix `scenario · input or state · expected behaviour · error handling`, one row per case including failures, then `Given … when … then …` lines for what the matrix cannot hold; behaviour only, never a command or how it is proven; a row the manual places in a tier names the tier, and a floor it sets is a row. The flight's own checks belong to the gate: never a task, never a row.
+- Done when: a matrix `scenario · input or state · expected behaviour · error handling`, one row per case including failures, then `Given … when … then …` lines for what the matrix cannot hold; behaviour only, never a command or how it is proven; a row the manual places in a tier names the tier, and a floor it sets is a row. The flight's own checks belong to the gate: never a task, never a row. A deletion gets no absence row; how remaining code handles the absence can be one.
 - Progress dependency: only the facts from needed tasks whose absence breaks this one; the executor checks them before step 1.
-- Files: every file created, edited or deleted, with its action; the same paths, actions stripped, are the frontmatter `files`. A rename or deletion lists every reference, docs and tests included, plus the test home the manual assigns and every lane or registry file it demands.
+- Files: every file created, edited or deleted, with its action; the same paths, actions stripped, are the frontmatter `files`. A rename lists every reference, docs and tests included; a deletion, everything that exists only for the thing: callers, config, docs, tests, fixtures, scripts, registry rows, env vars, stored data, jobs, installed links. Both add the test home the manual assigns and every lane or registry file it demands.
 - Decisions: every design decision as one line of fact: mechanism, placement, names, failure behaviour, user-visible text.
 - Shapes: `EXISTING`, what the executor types against (columns, types, helper signatures, API fields, the directory's conventions), quoted with its file path; `NEW`, what the task creates, by name, inputs, outputs and behaviour.
 - Steps: numbered, inside-out; each names the file, the place as a quoted line of code, and the change as behaviour.

@@ -44,6 +44,10 @@ var hygieneNames = []string{
 	"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
 }
 
+// HygieneNames returns a copy of the fleet strip list, so a strip outside this
+// package (the doctor's harness capture) follows every name added here.
+func HygieneNames() []string { return append([]string(nil), hygieneNames...) }
+
 var hygiene = envStripWords(hygieneNames)
 
 // opencodeHygieneNames widens the fleet strip for OpenCode alone. An OpenCode

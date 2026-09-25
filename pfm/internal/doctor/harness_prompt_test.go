@@ -318,7 +318,7 @@ const (
 
 // harnessDetailFixture is a small opus-shaped prompt: the heading order ends
 // `# Environment`, `# Context management`, `# Delivering work`, `# Corrections`,
-// as the 2.1.278 opus baseline does.
+// as the opus baseline harness-opus-v2.1.280 does.
 const harnessDetailFixture = "x-anthropic-billing-header: cc_version=2.1.278.a1b; cc_entrypoint=sdk-cli;\n\n" +
 	"=== SYSTEM BLOCK ===\n\nYou are Claude Code, Anthropic's official CLI for Claude.\n\n" +
 	"# Doing tasks\n - Read the code before you change it.\n - Keep changes surgical.\n" +
@@ -601,5 +601,35 @@ func TestHarnessDoctorSonnetBaselineCatalogOnlyChangeIsSilent(t *testing.T) {
 	if code != 0 || !strings.Contains(stdout.String(), "doctor: harness-prompt: matches baseline "+fields[1]) ||
 		strings.Contains(stdout.String(), "DRIFT") {
 		t.Fatalf("catalog-only change warned: code=%d\n%s", code, &stdout)
+	}
+}
+
+// TestHarnessDottedVersionMaskKeepsOtherDottedNumbers pins the version mask to
+// its context: a dotted version after the word "version" or as a cc_version=
+// value is masked, so a CLI bump alone matches; any other dotted number — an
+// address, a schema number — is instruction text, and changing it is DRIFT.
+func TestHarnessDottedVersionMaskKeepsOtherDottedNumbers(t *testing.T) {
+	for _, testCase := range []struct {
+		name, first, second string
+		drift               bool
+	}{
+		{"loopback address", "# Rules\n - Bind to 127.0.0.1 only.\n", "# Rules\n - Bind to 127.0.0.2 only.\n", true},
+		{"schema number", "# Rules\n - Write schema 1.2.3 exports.\n", "# Rules\n - Write schema 1.2.4 exports.\n", true},
+		{
+			"CLI version phrase",
+			"# Environment\n - This build is Claude Code version 2.1.280.\n",
+			"# Environment\n - This build is Claude Code version 2.1.281.\n",
+			false,
+		},
+		{"v-prefixed version", "# Rules\n - Needs Version v2.1.280-beta.1.\n", "# Rules\n - Needs Version v2.1.281.\n", false},
+		{"cc_version value", "# Rules\n - Header cc_version=2.1.280.a1b; here.\n", "# Rules\n - Header cc_version=2.1.281.c2d; here.\n", false},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			sum := sha256.Sum256([]byte(normalizeHarnessPrompt(testCase.first)))
+			line, warn := harnessPromptVerdict(hex.EncodeToString(sum[:]), "fixture.md", testCase.second, nil)
+			if drift := warn && strings.Contains(line, "DRIFT"); drift != testCase.drift {
+				t.Fatalf("verdict = (%q, %v), want drift=%v", line, warn, testCase.drift)
+			}
+		})
 	}
 }

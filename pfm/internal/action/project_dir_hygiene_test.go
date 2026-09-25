@@ -50,3 +50,17 @@ func TestDerivedStripsAlsoDropProjectDir(t *testing.T) {
 		}
 	}
 }
+
+// HygieneNames is how another package strips the fleet list without a copy of
+// its own: it returns every name in hygieneNames, and the caller's slice is
+// its own, so an append or overwrite there never edits the fleet strip.
+func TestHygieneNamesReturnsACopyOfTheFleetList(t *testing.T) {
+	names := HygieneNames()
+	if strings.Join(names, " ") != strings.Join(hygieneNames, " ") {
+		t.Fatalf("HygieneNames() = %v, want %v", names, hygieneNames)
+	}
+	names[0] = "OVERWRITTEN_BY_CALLER"
+	if hygieneNames[0] == "OVERWRITTEN_BY_CALLER" {
+		t.Fatal("HygieneNames() shares its backing array with hygieneNames")
+	}
+}

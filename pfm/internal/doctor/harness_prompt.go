@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rezzminator/professor/pfm/internal/action"
 	config "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -25,6 +26,10 @@ import (
 )
 
 var harnessCaptureSinkGrace = 2 * time.Second
+
+// harnessRemoveAll removes the capture's throwaway config dir; a test swaps it
+// to provoke the removal failure a root-run fence cannot produce by mode bits.
+var harnessRemoveAll = os.RemoveAll
 
 // harnessCaptureOverride is nil in production; printHarnessPromptDoctor then
 // runs the real capture below. A jail has no genuine `claude` binary to spawn
@@ -108,11 +113,15 @@ var (
 // line, fenced lines included, in this order: a model ID (`claude-<family>`
 // then one or more `-<digits>` groups, a date suffix being one more group —
 // `claude-code` has none and stays), a display name (`Opus 5.5`), then a
-// dotted version (`2.1.280`, `2.1.280-beta.1`).
+// dotted version (`2.1.280`, `2.1.280-beta.1`) — only one that follows the
+// word "version" (any case, an optional `v`) or is a `cc_version=` value. Any
+// other dotted number (`127.0.0.1`, a schema number) is instruction text.
 var (
 	harnessModelID       = regexp.MustCompile(`\bclaude-[a-z]+(?:-\d+)+`)
 	harnessModelName     = regexp.MustCompile(`\b(?:Claude|Opus|Sonnet|Haiku|Fable)\s+\d+(?:\.\d+)*`)
-	harnessDottedVersion = regexp.MustCompile(`\b\d+\.\d+\.\d+(?:[.-][A-Za-z0-9]+)*`)
+	harnessDottedVersion = regexp.MustCompile(
+		`((?i:\bversion\s+v?)|\bcc_version=)\d+\.\d+\.\d+(?:[.-][A-Za-z0-9]+)*`,
+	)
 )
 
 // harnessFence tracks Markdown code fences line by line, so a `#` or metadata
@@ -182,7 +191,7 @@ func normalizeHarnessPrompt(prompt string) string {
 		}
 		line = harnessModelID.ReplaceAllLiteralString(line, "<model-id>")
 		line = harnessModelName.ReplaceAllLiteralString(line, "<model-name>")
-		kept = append(kept, harnessDottedVersion.ReplaceAllLiteralString(line, "<version>"))
+		kept = append(kept, harnessDottedVersion.ReplaceAllString(line, "${1}<version>"))
 	}
 	return strings.Join(kept, "\n")
 }
@@ -190,6 +199,51 @@ func normalizeHarnessPrompt(prompt string) string {
 // harnessPromptVerdict is the pure comparator: baseline hash + name, the
 // captured prompt, and the capture error map to exactly one doctor line.
 func harnessPromptVerdict(baselineSHA, baselineName, captured string, captureErr error) (string, bool) {
+	residue, captureErr := splitHarnessScratchResidue(captureErr)
+	line, warn := harnessCaptureVerdict(baselineSHA, baselineName, captured, captureErr)
+	if residue != nil {
+		return line + "\ndoctor: " + residue.Error(), true
+	}
+	return line, warn
+}
+
+// harnessScratchResidue is a capture's throwaway config dir that os.RemoveAll
+// could not remove. It travels in the capture's error, but it is no capture
+// failure: the verdict still reads the capture and adds a line naming the dir.
+type harnessScratchResidue struct {
+	path string
+	err  error
+}
+
+func (residue *harnessScratchResidue) Error() string {
+	return fmt.Sprintf("harness-prompt scratch dir %s not removed: %v", residue.path, residue.err)
+}
+
+// splitHarnessScratchResidue separates a scratch residue from the capture's
+// own error: the residue alone leaves a nil capture error.
+func splitHarnessScratchResidue(err error) (*harnessScratchResidue, error) {
+	var residue *harnessScratchResidue
+	if !errors.As(err, &residue) {
+		return nil, err
+	}
+	if err == error(residue) {
+		return residue, nil
+	}
+	joined, ok := err.(interface{ Unwrap() []error })
+	if !ok {
+		return residue, err
+	}
+	var rest []error
+	for _, part := range joined.Unwrap() {
+		if part != error(residue) {
+			rest = append(rest, part)
+		}
+	}
+	return residue, errors.Join(rest...)
+}
+
+// harnessCaptureVerdict is harnessPromptVerdict without the scratch residue.
+func harnessCaptureVerdict(baselineSHA, baselineName, captured string, captureErr error) (string, bool) {
 	if errors.Is(captureErr, errClaudeAbsent) {
 		return "doctor: harness-prompt: skipped (no Claude Code binary installed) — nothing to compare", false
 	}
@@ -269,7 +323,7 @@ func harnessPromptDetail(
 	captureErr error,
 	drift bool,
 ) []string {
-	if captureErr != nil {
+	if _, captureErr = splitHarnessScratchResidue(captureErr); captureErr != nil {
 		return nil
 	}
 	var detail []string
@@ -351,7 +405,7 @@ func captureHarnessPromptWithDeps(
 	machine config.Config,
 	model, verboseDir string,
 	dependencies Dependencies,
-) (HarnessCapture, error) {
+) (capture HarnessCapture, captureErr error) {
 	dependencies = normalizeDependencies(dependencies)
 	listener, err := dependencies.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -370,11 +424,22 @@ func captureHarnessPromptWithDeps(
 	if err := os.MkdirAll(resolvedPaths.SIDDir, 0o700); err != nil {
 		return HarnessCapture{}, fmt.Errorf("create harness capture scratch base %s: %w", resolvedPaths.SIDDir, err)
 	}
-	configDir, err := os.MkdirTemp(resolvedPaths.SIDDir, "pfm-harness-configdir-")
+	configDir, err := os.MkdirTemp(resolvedPaths.SIDDir, paths.SIDHarnessConfigDirPrefix)
 	if err != nil {
 		return HarnessCapture{}, fmt.Errorf("create throwaway CLAUDE_CONFIG_DIR: %w", err)
 	}
-	defer func() { _ = os.RemoveAll(configDir) }()
+	defer func() {
+		removeErr := harnessRemoveAll(configDir)
+		if removeErr == nil {
+			return
+		}
+		residue := &harnessScratchResidue{path: configDir, err: removeErr}
+		if captureErr == nil {
+			captureErr = residue
+			return
+		}
+		captureErr = errors.Join(captureErr, residue)
+	}()
 
 	binary := machine.Claude.Binary
 	if binary == "" {
@@ -435,14 +500,14 @@ func captureHarnessPromptWithDeps(
 	if verboseDir != "" {
 		if writeErr := deps.WriteVerboseFile(
 			verboseDir,
-			"harness-prompt.stdout",
+			"harness-prompt-"+model+".stdout",
 			[]byte(result.Stdout),
 		); writeErr != nil {
 			return HarnessCapture{}, fmt.Errorf("write harness capture stdout evidence: %w", writeErr)
 		}
 		if writeErr := deps.WriteVerboseFile(
 			verboseDir,
-			"harness-prompt.stderr",
+			"harness-prompt-"+model+".stderr",
 			[]byte(result.Stderr),
 		); writeErr != nil {
 			return HarnessCapture{}, fmt.Errorf("write harness capture stderr evidence: %w", writeErr)
@@ -458,14 +523,14 @@ func captureHarnessPromptWithDeps(
 		captured, err := decodeHarnessCapture(body)
 		captured.CLIVersion = version
 		if verboseDir != "" {
-			if hitsErr := writeHarnessSinkHits(verboseDir, hits); hitsErr != nil {
+			if hitsErr := writeHarnessSinkHits(verboseDir, model, hits); hitsErr != nil {
 				return captured, errors.Join(err, fmt.Errorf("write harness sink hit evidence: %w", hitsErr))
 			}
 		}
 		return captured, err
 	case <-dependencies.Clock.After(harnessCaptureSinkGrace):
 		if verboseDir != "" {
-			if hitsErr := writeHarnessSinkHits(verboseDir, hits); hitsErr != nil {
+			if hitsErr := writeHarnessSinkHits(verboseDir, model, hits); hitsErr != nil {
 				return HarnessCapture{}, fmt.Errorf("write harness sink hit evidence: %w", hitsErr)
 			}
 		}
@@ -478,7 +543,11 @@ func captureHarnessPromptWithDeps(
 		}
 		message := errors.New("no API request reached the capture sink")
 		if verboseDir != "" {
-			message = fmt.Errorf("%w — see %s (--verbose)", message, filepath.Join(verboseDir, "harness-prompt.stderr"))
+			message = fmt.Errorf(
+				"%w — see %s (--verbose)",
+				message,
+				filepath.Join(verboseDir, "harness-prompt-"+model+".stderr"),
+			)
 		}
 		return HarnessCapture{CLIVersion: version}, errors.Join(message, runErr)
 	}
@@ -522,7 +591,7 @@ func (hits *harnessSinkHits) count() int {
 	return len(hits.paths)
 }
 
-func writeHarnessSinkHits(verboseDir string, hits *harnessSinkHits) error {
+func writeHarnessSinkHits(verboseDir, model string, hits *harnessSinkHits) error {
 	hits.mu.Lock()
 	lines := append([]string(nil), hits.paths...)
 	hits.mu.Unlock()
@@ -530,7 +599,7 @@ func writeHarnessSinkHits(verboseDir string, hits *harnessSinkHits) error {
 	for _, line := range lines {
 		content += line + "\n"
 	}
-	return deps.WriteVerboseFile(verboseDir, "sink-hits.txt", []byte(content))
+	return deps.WriteVerboseFile(verboseDir, "sink-hits-"+model+".txt", []byte(content))
 }
 
 // harnessSinkHandler refuses every request with the non-retryable 400 and
@@ -554,28 +623,17 @@ func harnessSinkHandler(bodies chan<- []byte) http.HandlerFunc {
 	}
 }
 
-// harnessCaptureEnv is the fleet hygiene strip applied in-process: inherited
-// session identity, endpoint and cache overrides are dropped, then the sink
+// harnessCaptureEnv is the fleet hygiene strip applied in-process: every name
+// in action's one list (session identity, endpoint, cache and traffic
+// overrides) plus ANTHROPIC_API_KEY is dropped, then the sink
 // endpoint, dummy credentials, the throwaway config dir, and the full-prompt
 // arm are pinned. configDir is created fresh per capture by the caller
 // (change B) — CLAUDE_CONFIG_DIR is stripped first so the inherited value
 // never leaks through even if this pin were ever omitted.
 func harnessCaptureEnv(environ []string, sinkURL, configDir string) []string {
-	stripped := map[string]bool{
-		"CLAUDE_CODE_SESSION_ID":           true,
-		"CLAUDECODE":                       true,
-		"CLAUDE_CODE_CHILD_SESSION":        true,
-		"CLAUDE_CONFIG_DIR":                true,
-		"CLAUDE_PROJECT_DIR":               true,
-		"ENABLE_PROMPT_CACHING_1H":         true,
-		"FORCE_PROMPT_CACHING_5M":          true,
-		"ANTHROPIC_BASE_URL":               true,
-		"ANTHROPIC_AUTH_TOKEN":             true,
-		"ANTHROPIC_API_KEY":                true,
-		"ANTHROPIC_MODEL":                  true,
-		"ANTHROPIC_SMALL_FAST_MODEL":       true,
-		"CLAUDE_CODE_AUTO_COMPACT_WINDOW":  true,
-		"CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT": true,
+	stripped := map[string]bool{"ANTHROPIC_API_KEY": true}
+	for _, name := range action.HygieneNames() {
+		stripped[name] = true
 	}
 	result := make([]string, 0, len(environ)+6)
 	for _, entry := range environ {

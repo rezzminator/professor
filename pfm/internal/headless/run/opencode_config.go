@@ -537,7 +537,8 @@ func validateOpenCodeArgs(args []string, request Request) error {
 	for _, argument := range args {
 		name := openCodeArgumentName(argument)
 		if blocked[name] {
-			if request.EngineSelector == "codex" || request.EngineSelector == "cx" {
+			selected, _ := pfmengine.Parse(request.EngineSelector)
+			if selected == pfmengine.Codex {
 				return fmt.Errorf(
 					"--engine %s runs through OpenCode; OpenCode native argument %q conflicts with an explicit pfm control",
 					request.EngineSelector,

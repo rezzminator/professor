@@ -31,6 +31,7 @@ func ApplyEngineSelector(request *Request, selector string) error {
 	if err != nil {
 		return err
 	}
+	request.EngineSelector = strings.TrimSpace(selector)
 	request.Engine = selected
 	if selected != pfmengine.Codex {
 		return nil

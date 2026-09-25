@@ -61,6 +61,7 @@ func (err *BinaryMissingError) Unwrap() error { return err.Err }
 type Request struct {
 	Config               pfmconfig.Config
 	Engine               pfmengine.ID
+	EngineSelector       string
 	Account              int
 	ConfigDir            string
 	Model                string

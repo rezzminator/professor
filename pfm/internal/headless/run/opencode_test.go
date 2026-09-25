@@ -287,6 +287,28 @@ func TestValidateOpenCodeArgsRejectsOnlyConflictingControls(t *testing.T) {
 	}
 }
 
+func TestValidateOpenCodeArgsNamesRoutedCodexSelector(t *testing.T) {
+	for _, testCase := range []struct {
+		selector string
+		want     string
+	}{
+		{selector: "codex", want: `--engine codex runs through OpenCode; OpenCode native argument "-c" conflicts with an explicit pfm control`},
+		{selector: "cx", want: `--engine cx runs through OpenCode; OpenCode native argument "-c" conflicts with an explicit pfm control`},
+		{selector: "opencode", want: `OpenCode native argument "-c" conflicts with an explicit pfm control`},
+	} {
+		t.Run(testCase.selector, func(t *testing.T) {
+			request := Request{Config: selectorConfig(), NoSessionPersistence: true}
+			if err := ApplyEngineSelector(&request, testCase.selector); err != nil {
+				t.Fatal(err)
+			}
+			err := validateOpenCodeArgs([]string{"-c"}, request)
+			if err == nil || err.Error() != testCase.want {
+				t.Fatalf("validateOpenCodeArgs(-c) error = %v, want %q", err, testCase.want)
+			}
+		})
+	}
+}
+
 func TestResolveOpenCodeUsesConfiguredBinaryAccountAndPrefs(t *testing.T) {
 	headlessJail(t)
 	binary := writeEngineStub(t, "printf '%s\\n' 'unused'")

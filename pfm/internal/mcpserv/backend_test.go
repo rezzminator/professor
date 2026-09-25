@@ -731,6 +731,30 @@ func TestCallerForRequestFindsProxyBeyondPublicListLimit(t *testing.T) {
 	}
 }
 
+func TestCallerForRequestFindsThreadIDBeyondPublicListLimit(t *testing.T) {
+	setupBackendFixture(t)
+	resolved, err := paths.Resolve()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := make([]compose.Row, defaultChatLSLimit+1)
+	for index := range defaultChatLSLimit {
+		rows[index] = compose.Row{ID: "historical", Kind: compose.ResumeClaude}
+	}
+	rows[defaultChatLSLimit] = compose.Row{
+		SessionName: "cx-seat", ID: "thread-a", Kind: compose.LiveCodex, Socket: "cx-seat", PaneID: "%7",
+	}
+	verbs := &cappedProxyChat{fakeChatVerbs: &fakeChatVerbs{
+		listed: chat.ListResult{Rows: rows, Matched: len(rows)},
+	}}
+	caller, err := (&backend{paths: resolved, chat: verbs}).callerForRequest(context.Background(), mcp.Meta{
+		"threadId": "thread-a",
+	})
+	if err != nil || !caller.valid || caller.row.Session != "cx-seat" {
+		t.Fatalf("threadId caller beyond public list limit = %+v err=%v", caller, err)
+	}
+}
+
 func TestCallerForRequestFallsBackToMatchedIDWhenProxyOmitsIt(t *testing.T) {
 	setupBackendFixture(t)
 	resolved, err := paths.Resolve()

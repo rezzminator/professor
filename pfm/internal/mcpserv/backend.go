@@ -556,7 +556,7 @@ func (current *backend) callerForRequest(
 		caller.detail = "MCP _meta.threadId must be a non-empty thread id without whitespace or control characters"
 		return caller, nil
 	}
-	listed, err := current.list(ctx, LSInput{All: true})
+	listed, err := current.listUnbounded(ctx, LSInput{All: true})
 	if err != nil {
 		return caller, fmt.Errorf("resolve MCP caller thread %q: list live chats: %w", threadID, err)
 	}

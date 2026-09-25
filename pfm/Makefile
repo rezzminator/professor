@@ -219,7 +219,7 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	  sleep 1; \
 	  state="$$(systemctl --user is-active $(UNIT) || true)"; \
 	  if [ "$$state" != "active" ]; then \
-	    echo "MCP-RESTART-FAILED: $(UNIT) is '$$state' after restart — the fleet has NO chat MCP server" >&2; \
+	    echo "MCP-RESTART-FAILED: $(UNIT) is '$$state' after restart — the fleet has NO professor MCP server" >&2; \
 	    exit 1; \
 	  fi; \
 	  pid="$$(systemctl --user show -p MainPID --value $(UNIT))"; \
@@ -234,13 +234,13 @@ mcp-restart: ## Restart the MCP daemon so it serves the binary now on disk
 	    [ -n "$$pid" ] && [ "$$pid" != "$$old" ] && break; pid=""; sleep 0.5; \
 	  done; \
 	  if [ -z "$$pid" ]; then \
-	    echo "MCP-RESTART-FAILED: $(AGENT) has no NEW pid 5s after kickstart (was $${old:-none}) — the fleet may have NO fresh chat MCP server" >&2; \
+	    echo "MCP-RESTART-FAILED: $(AGENT) has no NEW pid 5s after kickstart (was $${old:-none}) — the fleet may have NO fresh professor MCP server" >&2; \
 	    exit 1; \
 	  fi; \
 	  echo "mcp: $(AGENT) restarted, pid $$pid"; \
-	elif pgrep -f 'pfm mcp serve' >/dev/null 2>&1; then \
+	elif pgrep -f 'mcp serve$$' >/dev/null 2>&1; then \
 	  echo "mcp: no $(UNIT) unit or $(AGENT) agent; killing unsupervised 'pfm mcp serve' so the next client starts a fresh one"; \
-	  pkill -f 'pfm mcp serve'; \
+	  pkill -f 'mcp serve$$'; \
 	else \
 	  echo "mcp: no daemon running and no $(UNIT) unit or $(AGENT) agent — nothing to restart"; \
 	fi
@@ -258,7 +258,7 @@ mcp-status: ## Report the daemon, then every pfm process still running a replace
 	  launchctl print "gui/$$(id -u)/$(AGENT)" | awk '($$1 == "state" || $$1 == "pid") && $$2 == "=" && !seen[$$1]++ { printf "%-6s %s\n", $$1 ":", $$3 }'; \
 	else \
 	  echo "unit:  not installed"; \
-	  pgrep -af 'pfm mcp serve' || echo "no 'pfm mcp serve' process running"; \
+	  pgrep -af 'mcp serve$$' || echo "no 'pfm mcp serve' process running"; \
 	fi
 	@"$(BIN)" internal stale --binary "$(BIN)"
 

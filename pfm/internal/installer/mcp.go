@@ -28,7 +28,18 @@ const (
 	mcpServeCommand    = "serve"
 	mcpServerHarvester = "harvester"
 	httpProtocol       = "http"
+	professorName      = pfmconfig.MCPServerProfessor
+	stdioProtocol      = "stdio"
+	openCodeLocal      = "local"
 )
+
+// mcpStdioArgs is the argv every engine registers after the absolute pfm
+// path: the one stdio server, `pfm mcp serve --stdio`.
+var mcpStdioArgs = []string{mcpCommand, mcpServeCommand, "--stdio"}
+
+// mcpLegacyNames are the keys pfm registered before the one professor
+// server; install and uninstall remove pfm's own exact shapes under them.
+var mcpLegacyNames = []string{chatName, mcpServerHarvester}
 
 type mcpOwnership struct {
 	Pending               map[string]map[string]any `json:"pending,omitempty"`
@@ -82,15 +93,13 @@ func (installer *engine) wireMCP() error {
 	return nil
 }
 
+// enabledMCPNames is the one professor registration when either family is
+// enabled, and nothing otherwise.
 func enabledMCPNames(servers map[string]bool) []string {
-	names := make([]string, 0, len(servers))
-	for name, enabled := range servers {
-		if enabled && (name == chatName || name == mcpServerHarvester) {
-			names = append(names, name)
-		}
+	if servers[chatName] || servers[mcpServerHarvester] {
+		return []string{professorName}
 	}
-	sort.Strings(names)
-	return names
+	return nil
 }
 
 func (installer *engine) removeLegacyMCPCredential() error {
@@ -108,29 +117,14 @@ func isHex(value string) bool {
 	return err == nil
 }
 
-// mcpClientRegistration is the registration writeMCPClientJSON wants for name
-// on the Claude side. Every server except "chat" keeps the shared HTTP
-// daemon: Codex's own client attaches _meta.threadId on every call, so HTTP
-// resolves callers correctly there too (see writeMCPCodeConfig, unchanged),
-// and the daemon is the cheaper choice for a server callers don't need to
-// self-identify against. "chat" is different: a self-addressed chat_* call
-// carries no thread id from Claude, and the daemon serves every chat on the
-// box from one process, so it can never derive who's calling (mcpserv's
-// callerForRequest, fail-closed by design). `pfm mcp chat serve` run over
-// stdio is launched by exactly one chat and inherits its identity instead
-// (main.go sets AllowAmbientIdentity for that path only) — the only
-// transport that can ever answer a self-addressed chat_* call correctly.
-func (installer *engine) mcpClientRegistration(name string) map[string]any {
-	if name == chatName {
-		return map[string]any{
-			configTypeKey:    "stdio",
-			configCommandKey: installer.mcpChatCommand(),
-			configArgsKey:    []string{mcpCommand, chatName, mcpServeCommand},
-		}
-	}
+// mcpClientRegistration is the Claude registration of professor. Every engine
+// registers the stdio command; Codex's _meta.threadId passes through the
+// forwarder unchanged.
+func (installer *engine) mcpClientRegistration() map[string]any {
 	return map[string]any{
-		configTypeKey: httpProtocol,
-		"url":         installer.mcpURL(name),
+		configTypeKey:    stdioProtocol,
+		configCommandKey: installer.mcpChatCommand(),
+		configArgsKey:    append([]string{}, mcpStdioArgs...),
 	}
 }
 
@@ -138,7 +132,7 @@ func (installer *engine) mcpClientRegistration(name string) map[string]any {
 // the same canonical ~/.local/bin/pfm path canonicalBinaryOwnershipContent
 // records and updateCodexHooks already migrates hook commands to. The
 // installer knows this path (it is what it stages and records ownership of),
-// so the stdio "chat" registration uses it rather than a bare "pfm" that
+// so the stdio professor registration uses it rather than a bare "pfm" that
 // depends on the launching shell's PATH containing the install dir.
 func (installer *engine) mcpChatCommand() string {
 	return filepath.Join(installer.options.Home, ".local", "bin", "pfm")
@@ -151,27 +145,78 @@ func (installer *engine) isPFMClient(name string, registration map[string]any) b
 	return installer.isPFMHTTPClient(name, registration) || installer.isPFMStdioClient(name, registration)
 }
 
-// isPFMStdioClient recognizes pfm's own stdio "chat" registration — the
-// shape mcpClientRegistration now writes — so a later install can maintain
-// it (e.g. correct a changed binary path) instead of forever treating it as
-// a manual conflict, mirroring isPFMHTTPClient for the HTTP shape every
-// other server still uses. A registration that merely LOOKS similar (a
-// hand-written entry using a bare "pfm" command, say) does not match this
-// exact shape and is correctly left as a manual conflict — recognizing only
-// what this installer itself would write is the whole point.
+// isPFMStdioClient recognizes pfm's own stdio "professor" registration — the
+// shape mcpClientRegistration writes — so a later install can maintain it
+// instead of forever treating it as a manual conflict. A registration that
+// merely LOOKS similar (a hand-written entry using a bare "pfm" command, say)
+// does not match this exact shape and is correctly left as a manual conflict —
+// recognizing only what this installer itself would write is the whole point.
 func (installer *engine) isPFMStdioClient(name string, registration map[string]any) bool {
-	if name != chatName || len(registration) != 3 {
+	return name == professorName && installer.isExactStdioRegistration(registration, mcpStdioArgs)
+}
+
+// isPFMLegacyClient recognizes pfm's own registrations under the keys it wrote
+// before the one professor server: the stdio `pfm mcp chat serve` chat entry,
+// and the loopback HTTP chat and harvester entries (bearer shape included).
+func (installer *engine) isPFMLegacyClient(name string, registration map[string]any) bool {
+	return isPFMLegacyClaudeShape(name, registration, installer.mcpChatCommand(), installer.options.MCPPort)
+}
+
+// isPFMLegacyClaudeShape is the one exact test of pfm's legacy Claude shapes,
+// shared by install (which removes what it matches) and doctor (which
+// prescribes that install only for what it matches).
+func isPFMLegacyClaudeShape(name string, registration map[string]any, bin string, port int) bool {
+	switch name {
+	case chatName:
+		return isExactStdioShape(registration, bin, []string{mcpCommand, chatName, mcpServeCommand}) ||
+			isPFMHTTPShape(registration, legacyMCPURL(port, name))
+	case mcpServerHarvester:
+		return isPFMHTTPShape(registration, legacyMCPURL(port, name))
+	}
+	return false
+}
+
+// isExactStdioRegistration is true for exactly {type: stdio, command: the
+// absolute pfm path, args: want} and nothing more.
+func (installer *engine) isExactStdioRegistration(registration map[string]any, want []string) bool {
+	return isExactStdioShape(registration, installer.mcpChatCommand(), want)
+}
+
+func isExactStdioShape(registration map[string]any, bin string, want []string) bool {
+	if len(registration) != 3 {
 		return false
 	}
-	if registration[configTypeKey] != "stdio" || registration[configCommandKey] != installer.mcpChatCommand() {
+	if registration[configTypeKey] != stdioProtocol || registration[configCommandKey] != bin {
 		return false
 	}
 	args, ok := registration[configArgsKey].([]any)
-	if !ok || len(args) != 3 {
+	return ok && sameStrings(args, want)
+}
+
+// isPFMLegacyOpenCodeClient recognizes pfm's own OpenCode registrations under
+// the legacy keys: the local `pfm mcp chat serve` chat entry and the loopback
+// remote chat and harvester entries, each exactly three keys.
+func (installer *engine) isPFMLegacyOpenCodeClient(name string, registration map[string]any) bool {
+	if (name != chatName && name != mcpServerHarvester) || len(registration) != 3 || registration["enabled"] != true {
 		return false
 	}
-	for index, want := range []string{mcpCommand, chatName, mcpServeCommand} {
-		if got, ok := args[index].(string); !ok || got != want {
+	switch registration[configTypeKey] {
+	case openCodeLocal:
+		command, ok := registration["command"].([]any)
+		return name == chatName && ok &&
+			sameStrings(command, []string{installer.mcpChatCommand(), mcpCommand, chatName, mcpServeCommand})
+	case "remote":
+		return registration["url"] == installer.mcpURL(name)
+	}
+	return false
+}
+
+func sameStrings(values []any, want []string) bool {
+	if len(values) != len(want) {
+		return false
+	}
+	for index, value := range values {
+		if got, ok := value.(string); !ok || got != want[index] {
 			return false
 		}
 	}
@@ -179,7 +224,11 @@ func (installer *engine) isPFMStdioClient(name string, registration map[string]a
 }
 
 func (installer *engine) isPFMHTTPClient(name string, registration map[string]any) bool {
-	if registration[configTypeKey] != httpProtocol || registration["url"] != installer.mcpURL(name) {
+	return isPFMHTTPShape(registration, installer.mcpURL(name))
+}
+
+func isPFMHTTPShape(registration map[string]any, url string) bool {
+	if registration[configTypeKey] != httpProtocol || registration["url"] != url {
 		return false
 	}
 	if len(registration) == 2 {
@@ -220,39 +269,37 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	if len(raw) != 0 {
 		lines = strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
 	}
-	start, end := -1, -1
-	for index, line := range lines {
-		if line == mcpFenceBegin {
-			start = index
-		}
-		if line == mcpFenceEnd && start >= 0 {
-			end = index
-		}
-	}
-	kept := lines
-	if start >= 0 && end >= start {
-		kept = append(append([]string{}, lines[:start]...), lines[end+1:]...)
-	}
+	kept := stripPFMCodexLines(lines, installer.options.MCPPort)
 	var foreign struct {
 		Servers map[string]any `toml:"mcp_servers"`
 	}
 	if _, err := toml.Decode(strings.Join(kept, "\n"), &foreign); err != nil {
 		return fmt.Errorf("parse unmanaged Codex MCP config %s: %w", path, err)
 	}
-	generated := []string{mcpFenceBegin}
+	var generated []string
 	for _, name := range names {
 		if _, present := foreign.Servers[name]; present {
 			installer.skip("preserve conflicting manual MCP client " + name + " in " + path)
 			continue
 		}
-		generated = append(generated,
-			"[mcp_servers."+name+"]",
-			"url = \""+installer.mcpURL(name)+"\"",
-		)
+		generated = append(generated, "[mcp_servers."+name+"]")
+		for _, value := range []map[string]any{
+			{configCommandKey: installer.mcpChatCommand()},
+			{configArgsKey: mcpStdioArgs},
+		} {
+			encoded, err := encodeCodexValues(value)
+			if err != nil {
+				return fmt.Errorf("encode Codex MCP registration %s for %s: %w", name, path, err)
+			}
+			generated = append(generated, strings.TrimSuffix(encoded, "\n"))
+		}
 	}
-	generated = append(generated, mcpFenceEnd)
 	wantedLines := append([]string{}, kept...)
-	wantedLines = append(wantedLines, generated...)
+	if len(generated) > 0 {
+		wantedLines = append(wantedLines, mcpFenceBegin)
+		wantedLines = append(wantedLines, generated...)
+		wantedLines = append(wantedLines, mcpFenceEnd)
+	}
 	wanted := strings.TrimRight(strings.Join(wantedLines, "\n"), "\n") + "\n"
 	if string(raw) == wanted {
 		installer.ok(path + " wiring")
@@ -261,6 +308,97 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	return installer.change(changeDescription(path, existed), func() error {
 		return installer.writeMCPFile(path, raw, []byte(wanted), existed)
 	})
+}
+
+// stripPFMCodexLines removes every line pfm owns in a Codex config.toml: each
+// paired installer fence with its body, every orphan fence marker, and each
+// legacy [mcp_servers.chat] / [mcp_servers.harvester] table whose whole body
+// is the one loopback url line pfm wrote (with one blank line right after
+// it) and that has no [mcp_servers.<key>.*] sub-table anywhere in the file.
+// A run of blank lines a removal leaves collapses to one. Every other line —
+// a hand-written table included — is returned byte-identical. Install strips
+// with it, and doctor calls a Codex legacy table legacy-pfm only when it goes.
+func stripPFMCodexLines(lines []string, port int) []string {
+	removed := make([]bool, len(lines))
+	open := -1
+	for index, line := range lines {
+		switch line {
+		case mcpFenceBegin:
+			open = index
+		case mcpFenceEnd:
+			if open >= 0 {
+				for inner := open; inner <= index; inner++ {
+					removed[inner] = true
+				}
+				open = -1
+			}
+		}
+	}
+	for index, line := range lines {
+		if line == mcpFenceBegin || line == mcpFenceEnd {
+			removed[index] = true
+		}
+	}
+	for index, line := range lines {
+		if removed[index] {
+			continue
+		}
+		for _, name := range mcpLegacyNames {
+			if line != "[mcp_servers."+name+"]" {
+				continue
+			}
+			urlLine := -1
+			body := 0
+			for next := index + 1; next < len(lines) && !isTOMLTableHeader(lines[next]); next++ {
+				if removed[next] || strings.TrimSpace(lines[next]) == "" {
+					continue
+				}
+				body++
+				urlLine = next
+			}
+			if body != 1 || lines[urlLine] != "url = \""+legacyMCPURL(port, name)+"\"" ||
+				hasTOMLSubTable(lines, removed, "mcp_servers."+name) {
+				continue
+			}
+			removed[index], removed[urlLine] = true, true
+			if urlLine+1 < len(lines) && !removed[urlLine+1] && strings.TrimSpace(lines[urlLine+1]) == "" {
+				removed[urlLine+1] = true
+			}
+		}
+	}
+	kept := make([]string, 0, len(lines))
+	cut := false
+	for index, line := range lines {
+		if removed[index] {
+			cut = true
+			continue
+		}
+		blank := strings.TrimSpace(line) == ""
+		if blank && cut && len(kept) > 0 && strings.TrimSpace(kept[len(kept)-1]) == "" {
+			continue
+		}
+		if !blank {
+			cut = false
+		}
+		kept = append(kept, line)
+	}
+	return kept
+}
+
+func isTOMLTableHeader(line string) bool {
+	return strings.HasPrefix(strings.TrimSpace(line), "[")
+}
+
+// hasTOMLSubTable is true when a line not already removed opens a sub-table of
+// table ([table.x] or [[table.x]]): that sub-table is part of table's body.
+func hasTOMLSubTable(lines []string, removed []bool, table string) bool {
+	for index, line := range lines {
+		trimmed := strings.TrimLeft(strings.TrimSpace(line), "[")
+		if !removed[index] && isTOMLTableHeader(line) && strings.HasPrefix(trimmed, table+".") {
+			return true
+		}
+	}
+	return false
 }
 
 func (installer *engine) mcpURL(name string) string {
@@ -273,17 +411,10 @@ func OpenCodeConfigPath(home string) string {
 	return filepath.Join(home, ".config", pfmengine.MustLookup(pfmengine.OpenCode).LongName, "opencode.jsonc")
 }
 
-func (installer *engine) mcpOpenCodeRegistration(name string) map[string]any {
-	if name == chatName {
-		return map[string]any{
-			"type":    "local",
-			"command": []string{installer.mcpChatCommand(), mcpCommand, chatName, mcpServeCommand},
-			"enabled": true,
-		}
-	}
+func (installer *engine) mcpOpenCodeRegistration() map[string]any {
 	return map[string]any{
-		"type":    "remote",
-		"url":     installer.mcpURL(name),
+		"type":    openCodeLocal,
+		"command": append([]string{installer.mcpChatCommand()}, mcpStdioArgs...),
 		"enabled": true,
 	}
 }
@@ -335,11 +466,18 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 	}
 	wanted := map[string]bool{}
 	for _, name := range names {
-		if name == chatName || name == mcpServerHarvester {
+		if name == professorName {
 			wanted[name] = true
 		}
 	}
 	removeNames := map[string]bool{}
+	for _, name := range mcpLegacyNames {
+		if registration, ok := servers[name].(map[string]any); ok &&
+			installer.isPFMLegacyOpenCodeClient(name, registration) {
+			removeNames[name] = true
+			delete(owned, name)
+		}
+	}
 	setNames := map[string]map[string]any{}
 	next := map[string]any{}
 	for name, registration := range owned {
@@ -348,7 +486,7 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 			continue
 		}
 		if wanted[name] {
-			desired := installer.mcpOpenCodeRegistration(name)
+			desired := installer.mcpOpenCodeRegistration()
 			next[name] = desired
 			if !sameJSONValue(current, desired) {
 				setNames[name] = desired
@@ -358,7 +496,7 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 		removeNames[name] = true
 	}
 	for name := range wanted {
-		registration := installer.mcpOpenCodeRegistration(name)
+		registration := installer.mcpOpenCodeRegistration()
 		current, present := servers[name]
 		_, ours := next[name]
 		if present && !ours {
@@ -406,8 +544,14 @@ func (installer *engine) removeMCPOpenCodeJSON() error {
 	if err != nil {
 		return err
 	}
+	// pfm's legacy entries go whether or not the ledger lists them, so only a
+	// config that is not there and a ledger that owns nothing skip the pass.
 	if ownership.OpenCodeRegistrations == nil && ownership.OpenCodePending == nil {
-		return nil
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("inspect OpenCode MCP config %s: %w", path, err)
+		}
 	}
 	return installer.writeMCPOpenCodeJSON(nil)
 }
@@ -560,22 +704,13 @@ func (installer *engine) removeMCPCodeConfigAt(path string) error {
 		return fmt.Errorf("read Codex MCP config for removal: %w", err)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
-	start, end := -1, -1
-	for index, line := range lines {
-		if line == mcpFenceBegin {
-			start = index
-		}
-		if line == mcpFenceEnd && start >= 0 {
-			end = index
-		}
-	}
-	if start < 0 || end < start {
-		return nil
-	}
-	kept := append(append([]string{}, lines[:start]...), lines[end+1:]...)
+	kept := stripPFMCodexLines(lines, installer.options.MCPPort)
 	wanted := strings.TrimRight(strings.Join(kept, "\n"), "\n")
 	if wanted != "" {
 		wanted += "\n"
+	}
+	if wanted == string(raw) {
+		return nil
 	}
 	return installer.change("rewrite "+path+" (remove pfm MCP registration)", func() error {
 		return installer.writeMCPFile(path, raw, []byte(wanted), true)

@@ -37,7 +37,8 @@ func TestCodexDeveloperInstructionsLandVerbatimAndIdempotently(t *testing.T) {
 		// that table — the block has to lead the document.
 		{name: "opens with a table", raw: "[features.multi_agent_v2]\ndefault_wait_timeout_ms = 900000\n"},
 		{name: "table and fenced MCP block", raw: "model = 'personal'\n\n" + mcpFenceBegin +
-			"\n[mcp_servers.chat]\nurl = 'http://127.0.0.1:1/mcp/chat'\n" + mcpFenceEnd + "\n"},
+			"\n[mcp_servers.professor]\ncommand = '/fixture/.local/bin/pfm'\nargs = ['mcp', 'serve', '--stdio']\n" +
+			mcpFenceEnd + "\n"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {

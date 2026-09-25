@@ -77,8 +77,8 @@ func TestDescribeLegacyFailureKindsNameTheSameRecovery(t *testing.T) {
 // TestDescribeThinExtractionNamesSearchOnlyWhenAvailable is
 // TestDescribeLegacyFailureKindsNameTheSameRecovery's search-gated sibling:
 // the "thin extraction" (JS-rendered/bot-blocked, no readable content)
-// message must recommend `search_web` only when a backend is actually
-// configured, and fall back to search_literature/another-URL wording when it is not.
+// message must recommend `harvester_search_web` only when a backend is
+// actually configured, and fall back to harvester_search_literature/another-URL wording when it is not.
 func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	result := harvest.Result{HTTPStatus: 200}
 
@@ -95,7 +95,7 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	}
 	defer func() { _ = searchOn.Close() }()
 	got := searchOn.describeFetch("https://fixture.example/source", result, false)
-	for _, want := range []string{"no readable content", "`search_web`", "`search_literature`"} {
+	for _, want := range []string{"no readable content", "`harvester_search_web`", "`harvester_search_literature`"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("search-on describe receipt missing %q: %q", want, got)
 		}
@@ -110,11 +110,11 @@ func TestDescribeThinExtractionNamesSearchOnlyWhenAvailable(t *testing.T) {
 	}
 	defer func() { _ = searchOff.Close() }()
 	got = searchOff.describeFetch("https://fixture.example/source", result, false)
-	if strings.Contains(got, "`search_web`") {
-		t.Fatalf("search-off describe receipt names the unavailable `search_web` tool: %q", got)
+	if strings.Contains(got, "`harvester_search_web`") {
+		t.Fatalf("search-off describe receipt names the unavailable `harvester_search_web` tool: %q", got)
 	}
-	if !strings.Contains(got, "`search_literature`") {
-		t.Fatalf("search-off describe receipt missing search_literature fallback: %q", got)
+	if !strings.Contains(got, "`harvester_search_literature`") {
+		t.Fatalf("search-off describe receipt missing harvester_search_literature fallback: %q", got)
 	}
 }
 
@@ -231,11 +231,11 @@ func TestSizeOnlyReceiptUsesTheItemFieldNames(t *testing.T) {
 }
 
 // TestRenderFindNamesTheHarvesterSearchTool: an empty candidate list points
-// at search_web, never the retired WebSearch name.
+// at harvester_search_web, never the retired WebSearch name.
 func TestRenderFindNamesTheHarvesterSearchTool(t *testing.T) {
 	text := renderFind("an unknown title", nil, nil)
-	if strings.Contains(text, "WebSearch") || !strings.Contains(text, "search_web") {
-		t.Fatalf("renderFind empty hint = %q, want search_web and no WebSearch", text)
+	if strings.Contains(text, "WebSearch") || !strings.Contains(text, "harvester_search_web") {
+		t.Fatalf("renderFind empty hint = %q, want harvester_search_web and no WebSearch", text)
 	}
 }
 

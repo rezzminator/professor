@@ -33,7 +33,7 @@ NAME="${2:-express}"
 PITCH="${3:-Express is a fast, unopinionated, minimalist web framework for Node.js.}"
 TEST_CMD="${4:-npm test}"
 DIR="/work/$NAME"
-"$(dirname "$0")/daemon.sh" # chat_* over HTTP for Codex rows; harmless when already up
+"$(dirname "$0")/daemon.sh" # the professor MCP daemon the chats' stdio servers forward to; harmless when already up
 if [ ! -d "$DIR/.git" ]; then
   git clone -q --depth 1 "$URL" "$DIR"
   (cd "$DIR" && git checkout -q -b develop && { [ -f package.json ] && npm install --silent >/dev/null 2>&1 || true; })

@@ -11,7 +11,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/harvestmcp"
 )
 
-// fakeDiscovery routes every search_literature source to a fixture: OpenAlex
+// fakeDiscovery routes every harvester_search_literature source to a fixture: OpenAlex
 // answers one paper, every other source answers an empty object. It returns a
 // pointer to the number of services built, so a refused flag proves no search
 // ran.

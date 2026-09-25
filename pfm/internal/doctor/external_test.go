@@ -90,7 +90,7 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 			t.Fatal(err)
 		}
 	}
-	run := func(t *testing.T) string {
+	run := func(t *testing.T, wantCode int) string {
 		t.Helper()
 		runtime, err := pfmconfig.LoadRuntime("")
 		if err != nil {
@@ -98,21 +98,32 @@ func TestDoctorReportsHarvesterCutoverForModernForeignAndUnreadableClients(t *te
 		}
 		runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Join(home, ".codex")}}
 		var stdout, stderr bytes.Buffer
-		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 0 {
-			t.Fatalf("doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+		if code := runDoctor(nil, &stdout, &stderr, runtime); code != wantCode {
+			t.Fatalf("doctor code=%d stdout=%q stderr=%q, want %d", code, stdout.String(), stderr.String(), wantCode)
 		}
 		return stdout.String()
 	}
 
-	t.Run("modern no-auth loopback routes are complete", func(t *testing.T) {
-		write(
-			filepath.Join(home, ".mcp.json"),
-			`{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`,
-		)
+	t.Run("pfm's legacy loopback routes are named for the reinstall", func(t *testing.T) {
+		mcpJSON := filepath.Join(home, ".mcp.json")
+		write(mcpJSON, `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}}}`)
 		write(codexPath, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:18377/mcp/harvester\"\n")
-		output := run(t)
-		if !strings.Contains(output, "doctor: mcp client-cutover=complete") {
-			t.Fatalf("modern no-auth routes were not reported complete:\n%s", output)
+		output := run(t, 1)
+		for _, want := range []string{
+			"doctor: mcp client=claude harvester=legacy-pfm remediation=run pfm install --yes path=" + mcpJSON + "\n",
+			"doctor: mcp client=codex harvester=legacy-pfm remediation=run pfm install --yes path=" + codexPath + "\n",
+		} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("legacy pfm route output missing %q:\n%s", want, output)
+			}
+		}
+	})
+
+	t.Run("no harvester key anywhere is complete", func(t *testing.T) {
+		write(filepath.Join(home, ".mcp.json"), `{"mcpServers":{}}`)
+		write(codexPath, "")
+		if output := run(t, 0); !strings.Contains(output, "doctor: mcp client-cutover=complete\n") {
+			t.Fatalf("a machine with no harvester registration was not reported complete:\n%s", output)
 		}
 	})
 

@@ -27,12 +27,12 @@ func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 		readErr, readBytes = err, len(body)
 		writer.WriteHeader(http.StatusNoContent)
 	})
-	handler := NewDaemonHandler(DaemonOptions{Chat: mounted, Harvester: mounted})
+	handler := NewDaemonHandler(DaemonOptions{Professor: mounted, Chat: mounted, Harvester: mounted})
 
 	legitimate := bytes.Repeat([]byte("p"), maxDaemonBodyBytes/2)
 	handler.ServeHTTP(
 		httptest.NewRecorder(),
-		httptest.NewRequest(http.MethodPost, "/mcp/chat", bytes.NewReader(legitimate)),
+		httptest.NewRequest(http.MethodPost, "/mcp/professor", bytes.NewReader(legitimate)),
 	)
 	if readErr != nil || readBytes != len(legitimate) {
 		t.Fatalf(
@@ -41,7 +41,7 @@ func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 		)
 	}
 
-	for _, route := range []string{"/mcp/chat", "/mcp/harvester"} {
+	for _, route := range []string{"/mcp/professor", "/mcp/professor/chat", "/mcp/professor/harvester"} {
 		t.Run(route, func(t *testing.T) {
 			readErr, readBytes = nil, 0
 			oversized := bytes.Repeat([]byte("x"), maxDaemonBodyBytes+4096)
@@ -71,11 +71,11 @@ func TestDaemonHandlerBoundsRequestBodies(t *testing.T) {
 func TestDaemonHandlerLeavesAnHTTPInRecordForEveryAnswerItGivesItself(t *testing.T) {
 	ctx, recorder := obs.Test(t)
 	handler := NewDaemonHandler(DaemonOptions{Version: "test"})
-	origin := httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/chat", http.NoBody)
+	origin := httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/professor", http.NoBody)
 	origin.Header.Set("Origin", "https://attacker.example")
 	for _, request := range []*http.Request{
 		httptest.NewRequestWithContext(ctx, http.MethodGet, "/status", http.NoBody),
-		httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/chat", http.NoBody),
+		httptest.NewRequestWithContext(ctx, http.MethodPost, "/mcp/professor/chat", http.NoBody),
 		httptest.NewRequestWithContext(ctx, http.MethodGet, "/nothing-here", http.NoBody),
 		origin,
 	} {
@@ -122,8 +122,8 @@ func TestDaemonHandlerLeavesAnHTTPInRecordForEveryAnswerItGivesItself(t *testing
 func TestDaemonHandlerNamesADeclaredOversizedBody(t *testing.T) {
 	reached := false
 	mounted := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })
-	handler := NewDaemonHandler(DaemonOptions{Chat: mounted, Harvester: mounted})
-	for _, route := range []string{"/mcp/chat", "/mcp/harvester"} {
+	handler := NewDaemonHandler(DaemonOptions{Professor: mounted, Chat: mounted, Harvester: mounted})
+	for _, route := range []string{"/mcp/professor", "/mcp/professor/chat", "/mcp/professor/harvester"} {
 		reached = false
 		recorder := httptest.NewRecorder()
 		oversized := bytes.Repeat([]byte("x"), maxDaemonBodyBytes+1)

@@ -21,34 +21,27 @@ func runtimeSearchEnabled(runtime Runtime) bool {
 	})
 }
 
-// serverInstructions is the server's top-level routing guide. It names
-// search_web only when a search backend is configured (and says how to
-// configure one otherwise), and read's `files` only on a local server.
+// serverInstructions is the harvester's routing clauses, exactly the
+// contracts' harvester part: the six clauses joined by "; ", ending with
+// ".". Clause 3 (local documents) is omitted on the remote gateway; clause 6
+// (web search) is present only when a search backend is configured.
 func serverInstructions(searchAvailable, remote bool) string {
 	routes := []string{
-		`"read / get this web page or URL" is read with the URL in urls (a paper's landing page there reads the page)`,
-		`"read this paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL, or search_literature handle" is read with it in publications`,
+		`Read a web page → harvester_read with it in urls`,
+		`a paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL or harvester_search_literature handle → harvester_read with it in publications`,
 	}
 	if !remote {
-		routes = append(routes, `"read this local document" is read with its path in files (this machine only)`)
+		routes = append(routes, `a local document → harvester_read with its path in files`)
 	}
 	routes = append(
 		routes,
-		`one read call takes urls, files and publications together`,
-		`"find papers / works / a book by TITLE" is search_literature (ranked candidates with a handle, no download)`,
-		`"download / save this file — a PDF, zip, image, audio, dataset" is download_file (the bytes, unparsed; nothing is converted)`,
+		`find papers or books by title → harvester_search_literature`,
+		`save a file's bytes unparsed → harvester_download_file`,
 	)
-	order := "Order for a title — search_literature, then read its handle in publications"
 	if searchAvailable {
-		routes = append(routes, `"search the web for X" is search_web (ranked URLs with snippets, not a paper finder)`)
-		order += "; for a topic — search_web, then read the URL in urls"
+		routes = append(routes, `search the web for a topic → harvester_search_web`)
 	}
-	text := "Public-document retrieval. Routing — " + strings.Join(routes, "; ") + ". " + order +
-		`. Every tool answers per item — an empty list is "nothing found", an error is "the lookup failed", never one shape for both.`
-	if !searchAvailable {
-		text += " Web search is not configured on this server — set search.searxngURL or search.braveApiKey in harvester.config.json to enable web search."
-	}
-	return text
+	return strings.Join(routes, "; ") + "."
 }
 
 // renderSearchFailure is the public rendering of a failed search call.
@@ -71,5 +64,5 @@ func renderSearchFailure(err error) string {
 	// An unclassified backend error keeps its text in the log only: it can
 	// carry a backend URL, and this surface may serve a remote client.
 	return "Web search failed: the configured search backends failed for a reason the harvester could not classify " +
-		"(the details are in its log). Retry later; read, search_literature and download_file do not depend on web search."
+		"(the details are in its log). Retry later; harvester_read, harvester_search_literature and harvester_download_file do not depend on web search."
 }

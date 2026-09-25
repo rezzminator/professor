@@ -310,7 +310,7 @@ M31	M	M.01-register-claude
 M31	M	M.15-live-chats-survive-daemon-restart
 M32	M	M.01-register-claude
 M33	M	M.01-register-claude
-M34	E2	E2.06-mcp-http
+M34	E2	E2.06-mcp-stdio
 M34	M	M.02-register-codex
 M34	M	M.15-live-chats-survive-daemon-restart
 M35	M	M.02-register-codex
@@ -328,10 +328,8 @@ M45	M	M.05-daemon-core
 M46	M	M.05-daemon-core
 M47	M	M.06-daemon-units
 M48	M	M.06-daemon-units
-M49	M	M.07-stdio-transports
-M50	M	M.07-stdio-transports
 M51	M	M.07-stdio-transports
-M52	M	M.08-mcp-cli
+M56	M	M.07-stdio-transports
 M53	M	M.08-mcp-cli
 M54	M	M.08-mcp-cli
 M55	M	M.08-mcp-cli

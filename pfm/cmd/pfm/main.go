@@ -21,7 +21,6 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/hookentry"
 	"github.com/rezzminator/professor/pfm/internal/installer"
 	"github.com/rezzminator/professor/pfm/internal/kill"
-	"github.com/rezzminator/professor/pfm/internal/mcpserv"
 	"github.com/rezzminator/professor/pfm/internal/obs"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/picker"
@@ -189,7 +188,7 @@ func printUsage(w io.Writer) {
 		"  harvest   fetch and convert URL, DOI, ISBN, PMID, PMCID, or local path; download files",
 		"  index     refresh the transcript index",
 		"  whoami    print this chat's own tmux session name",
-		"  issues    list servicedesk complaints filed through issue_servicedesk",
+		"  issues    list servicedesk complaints filed through the servicedesk MCP tool",
 		"  reap      classify the socket graveyard; --apply reclaims it",
 		"  archive   move killed chats and old subagent transcripts out of sight, reversibly",
 		"  heal      report or repair wedged Codex history projections",
@@ -227,14 +226,12 @@ func runMCP(
 	args []string,
 	stdout, stderr io.Writer,
 	runtime commandRuntime,
-) (exitCode int) {
-	// The installed wiring historically invokes bare `pfm mcp`; preserve that
-	// argv as the chat server's serve action while making every new form named.
-	if len(args) == 0 {
-		args = []string{config.MCPServerChat, serveCommand}
-	}
+) int {
 	if len(args) == 1 && args[0] == serveCommand {
 		return runMCPServe(stdout, stderr, runtime, clock.Real)
+	}
+	if len(args) == 2 && args[0] == serveCommand && args[1] == "--stdio" {
+		return runMCPStdio(stdout, stderr, runtime)
 	}
 	if len(args) == 1 && args[0] == "ls" {
 		for _, name := range config.RegisteredMCPServers() {
@@ -249,66 +246,25 @@ func runMCP(
 		}
 		return 0
 	}
-	if len(args) < 2 || (len(args) > 2 && (args[0] != config.MCPServerHarvester || args[1] != serveCommand)) {
-		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp serve | pfm mcp <server> enable|disable|serve")
+	if len(args) != 2 || (args[1] != "enable" && args[1] != "disable") {
+		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp serve [--stdio] | pfm mcp <server> enable|disable")
 		return 2
 	}
 	name, action := args[0], args[1]
-	server, registered := runtime.Config.MCPServers[name]
-	if !registered {
+	if _, registered := runtime.Config.MCPServers[name]; !registered {
 		fmt.Fprintf(stderr, "pfm mcp: unknown server %q (run: pfm mcp ls)\n", name)
 		return 2
 	}
-	if action == "enable" || action == "disable" {
-		enabled := action == "enable"
-		changed, err := config.SetMCPServer(runtime.Config, name, enabled)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm mcp %s %s: %v\n", name, action, err)
-			return 1
-		}
-		state := "unchanged"
-		if changed {
-			state = "updated"
-		}
-		fmt.Fprintf(stdout, "%s\t%s\t%s\n", name, action+"d", state)
-		return 0
-	}
-	if action != serveCommand {
-		fmt.Fprintln(stderr, "usage: pfm mcp ls | pfm mcp <server> enable|disable|serve")
-		return 2
-	}
-	if !server.Enabled {
-		fmt.Fprintf(
-			stderr,
-			"pfm mcp %s: disabled by config %s; enable it with: pfm --config %s mcp %s enable\n",
-			name,
-			runtime.Config.Path,
-			runtime.Config.Path,
-			name,
-		)
-		return 1
-	}
-	if name == config.MCPServerHarvester {
-		return runHarvesterMCP(args[2:], stdout, stderr, runtime)
-	}
-	if name != config.MCPServerChat {
-		fmt.Fprintf(stderr, "pfm mcp %s: registered server has no implementation\n", name)
-		return 1
-	}
-	service, err := mcpserv.NewConfigured(version, stderr, mcpRuntime(runtime, true))
+	changed, err := config.SetMCPServer(runtime.Config, name, action == "enable")
 	if err != nil {
-		fmt.Fprintf(stderr, "pfm mcp: %v\n", err)
+		fmt.Fprintf(stderr, "pfm mcp %s %s: %v\n", name, action, err)
 		return 1
 	}
-	defer func() { cli.CloseResource(service, "pfm mcp: close service", stderr, &exitCode) }()
-	// This server answers from the build it started on until its chat ends:
-	// Claude Code does not relaunch a stdio server that exits, so ending it on
-	// an install would take the chat tools away from every running chat.
-	err = service.RunStdio(context.Background(), os.Stdin, os.Stdout)
-	if err != nil {
-		fmt.Fprintf(stderr, "pfm mcp: %v\n", err)
-		return 1
+	state := "unchanged"
+	if changed {
+		state = "updated"
 	}
+	fmt.Fprintf(stdout, "%s\t%s\t%s\n", name, action+"d", state)
 	return 0
 }
 

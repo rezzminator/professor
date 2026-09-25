@@ -45,7 +45,7 @@ and the two seams.
   transcript data, so this is best-effort deduplication, not a guarantee across every lifecycle.
   Native subagent starts do not rerun this SessionStart hook. Full-history children inherit context;
   fresh/custom children need the coordination briefing specified in the appendix. These instructions
-  guide tool selection; they do not remove chat MCP access.
+  guide tool selection; they do not remove the professor MCP's chat_* tools.
 - `harness-prompts/opencode.md` — head + `opencode/professor.md` + tail. OpenCode has no
   system-prompt replacement flag; its machine-scope `opencode.jsonc` carries an `instructions`
   array of files whose content it appends to the system prompt, and `pfm install` names the staged

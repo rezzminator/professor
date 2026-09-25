@@ -141,7 +141,7 @@ func TestInstallerAndDoctorUseImplicitClaudeRegistry(t *testing.T) {
 	if !reflect.DeepEqual(options.ClaudeRegistries, want) {
 		t.Fatalf("registries=%q want=%q", options.ClaudeRegistries, want)
 	}
-	if err := os.WriteFile(want[0], []byte(`{"mcpServers":{"harvester":{"command":"manual"}}}`), 0o600); err != nil {
+	if err := os.WriteFile(want[0], []byte(`{"mcpServers":{"professor":{"command":"manual"}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer

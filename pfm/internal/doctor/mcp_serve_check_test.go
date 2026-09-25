@@ -116,7 +116,7 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			name: "all fresh",
 			table: mcpServeProcTable{
 				pids:     []int{101},
-				cmdlines: map[int][]string{101: {"pfm", "mcp", "chat", "serve"}},
+				cmdlines: map[int][]string{101: {"pfm", "mcp", "serve", "--stdio"}},
 				images:   map[int]gather.FileID{101: fresh},
 			},
 			want:    []string{"doctor: mcp-serve clean checked=1"},
@@ -126,7 +126,7 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			name: "one replaced with session identity",
 			table: mcpServeProcTable{
 				pids:       []int{201},
-				cmdlines:   map[int][]string{201: {"pfm", "mcp", "chat", "serve"}},
+				cmdlines:   map[int][]string{201: {"pfm", "mcp", "serve", "--stdio"}},
 				environs:   map[int]map[string]string{201: {resolve.ClaudeSessionEnv: "claude-session"}},
 				images:     map[int]gather.FileID{201: replaced},
 				imageErr:   map[int]error{},
@@ -134,7 +134,7 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			},
 			wantWarnings: 1,
 			want: []string{
-				"doctor: mcp-serve STALE pid=201 chat=claude-session command=pfm mcp chat serve",
+				"doctor: mcp-serve STALE pid=201 chat=claude-session command=pfm mcp serve --stdio",
 			},
 			notWant: []string{"clean"},
 		},
@@ -143,9 +143,9 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			table: mcpServeProcTable{
 				pids: []int{301, 302, 303},
 				cmdlines: map[int][]string{
-					301: {"pfm", "mcp", "chat", "serve"},
-					302: {"pfm", "mcp", "chat", "serve"},
-					303: {"pfm", "mcp", "chat", "serve"},
+					301: {"pfm", "mcp", "serve", "--stdio"},
+					302: {"pfm", "mcp", "serve", "--stdio"},
+					303: {"pfm", "mcp", "serve", "--stdio"},
 				},
 				environs: map[int]map[string]string{
 					301: {resolve.CodexThreadEnv: "codex-thread"},
@@ -167,8 +167,8 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			table: mcpServeProcTable{
 				pids: []int{304, 305},
 				cmdlines: map[int][]string{
-					304: {"pfm", "mcp", "chat", "serve"},
-					305: {"pfm", "mcp", "chat", "serve"},
+					304: {"pfm", "mcp", "serve", "--stdio"},
+					305: {"pfm", "mcp", "serve", "--stdio"},
 				},
 				environs: map[int]map[string]string{
 					304: {"TMUX": "/tmp/tmux-user/cc-first,42,0", "TMUX_PANE": "%0"},
@@ -188,8 +188,8 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			table: mcpServeProcTable{
 				pids: []int{351, 352},
 				cmdlines: map[int][]string{
-					351: {"pfm", "--config", "/config/pfm.json", "mcp", "chat", "serve"},
-					352: {"pfm", "--config=/config/pfm.json", "mcp", "chat", "serve"},
+					351: {"pfm", "--config", "/config/pfm.json", "mcp", "serve", "--stdio"},
+					352: {"pfm", "--config=/config/pfm.json", "mcp", "serve", "--stdio"},
 				},
 				images: map[int]gather.FileID{351: replaced, 352: replaced},
 			},
@@ -201,15 +201,26 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			notWant: []string{"clean"},
 		},
 		{
-			name: "legacy bare mcp server",
+			// The upgrade that brings the professor server replaces the binary
+			// under stdio servers a chat launched with the retired argv; they
+			// are exactly the stale processes this check exists to name.
+			name: "pre-professor stdio servers still running",
 			table: mcpServeProcTable{
-				pids:     []int{353},
-				cmdlines: map[int][]string{353: {"pfm", "mcp"}},
-				images:   map[int]gather.FileID{353: replaced},
+				pids: []int{361, 362, 363},
+				cmdlines: map[int][]string{
+					361: {"pfm", "mcp"},
+					362: {"pfm", "mcp", "chat", "serve"},
+					363: {"pfm", "mcp", "harvester", "serve", "--transport", "stdio"},
+				},
+				images: map[int]gather.FileID{361: replaced, 362: replaced, 363: replaced},
 			},
-			wantWarnings: 1,
-			want:         []string{"pid=353 chat=UNRESOLVED"},
-			notWant:      []string{"clean"},
+			wantWarnings: 3,
+			want: []string{
+				"pid=361 chat=UNRESOLVED",
+				"pid=362 chat=UNRESOLVED",
+				"pid=363 chat=UNRESOLVED",
+			},
+			notWant: []string{"clean"},
 		},
 		{
 			name: "unresolved chat",
@@ -259,7 +270,7 @@ func TestMCPServeProcessesDoctorReportsFreshAndStaleRows(t *testing.T) {
 			name: "fresh server does not hide unreadable unclassified process",
 			table: mcpServeProcTable{
 				pids:       []int{553, 554},
-				cmdlines:   map[int][]string{553: {"pfm", "mcp", "chat", "serve"}},
+				cmdlines:   map[int][]string{553: {"pfm", "mcp", "serve", "--stdio"}},
 				cmdlineErr: map[int]error{554: errors.New("permission denied")},
 				images:     map[int]gather.FileID{553: fresh},
 			},
@@ -321,11 +332,11 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			name: "compatible only",
 			table: mcpServeProcTable{
 				pids:     []int{211},
-				cmdlines: map[int][]string{211: {"pfm", "mcp", "chat", "serve"}},
+				cmdlines: map[int][]string{211: {"pfm", "mcp", "serve", "--stdio"}},
 				images:   map[int]gather.FileID{211: replaced},
 				fdLinks:  map[int][]gather.FDLink{211: {{FD: 9, Target: marker}}},
 			},
-			want:    []string{"doctor: mcp-serve COMPATIBLE pid=211 chat=UNRESOLVED command=pfm mcp chat serve"},
+			want:    []string{"doctor: mcp-serve COMPATIBLE pid=211 chat=UNRESOLVED command=pfm mcp serve --stdio"},
 			notWant: []string{"STALE", "clean"},
 		},
 		{
@@ -333,8 +344,8 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			table: mcpServeProcTable{
 				pids: []int{212, 213},
 				cmdlines: map[int][]string{
-					212: {"pfm", "mcp", "chat", "serve"},
-					213: {"pfm", "mcp", "chat", "serve"},
+					212: {"pfm", "mcp", "serve", "--stdio"},
+					213: {"pfm", "mcp", "serve", "--stdio"},
 				},
 				images:  map[int]gather.FileID{212: replaced, 213: replaced},
 				fdLinks: map[int][]gather.FDLink{212: {{FD: 9, Target: marker}}},
@@ -347,7 +358,7 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			name: "descriptor unreadable",
 			table: mcpServeProcTable{
 				pids:      []int{214},
-				cmdlines:  map[int][]string{214: {"pfm", "mcp", "chat", "serve"}},
+				cmdlines:  map[int][]string{214: {"pfm", "mcp", "serve", "--stdio"}},
 				images:    map[int]gather.FileID{214: replaced},
 				fdLinkErr: map[int]error{214: errors.New("descriptor denied")},
 			},
@@ -363,7 +374,7 @@ func TestMCPServeProcessesDoctorClassifiesCompatibleProxies(t *testing.T) {
 			name: "candidate exits during classification",
 			table: mcpServeProcTable{
 				pids:      []int{215},
-				cmdlines:  map[int][]string{215: {"pfm", "mcp", "chat", "serve"}},
+				cmdlines:  map[int][]string{215: {"pfm", "mcp", "serve", "--stdio"}},
 				images:    map[int]gather.FileID{215: replaced},
 				fdLinkErr: map[int]error{215: errors.New("process vanished")},
 			},
@@ -672,10 +683,10 @@ func TestMCPServeProcessesDoctorReportsUnreadableStates(t *testing.T) {
 			name: "one process image unreadable",
 			table: mcpServeProcTable{
 				pids:     []int{601},
-				cmdlines: map[int][]string{601: {"pfm", "mcp", "chat", "serve"}},
+				cmdlines: map[int][]string{601: {"pfm", "mcp", "serve", "--stdio"}},
 				imageErr: map[int]error{601: errors.New("readlink denied")},
 			},
-			want: "doctor: mcp-serve UNREAD — pid=601  pfm mcp chat serve: readlink denied",
+			want: "doctor: mcp-serve UNREAD — pid=601  pfm mcp serve --stdio: readlink denied",
 		},
 		{
 			name: "pid table unreadable",
@@ -720,7 +731,7 @@ func TestMCPServeProcessesDoctorUsesOneCommandSnapshot(t *testing.T) {
 	runtime, _, replaced := newMCPServeDoctorFixture(t)
 	table := &mcpServeChangingCmdlineTable{mcpServeProcTable: mcpServeProcTable{
 		pids:       []int{603},
-		cmdlines:   map[int][]string{603: {"pfm", "mcp", "chat", "serve"}},
+		cmdlines:   map[int][]string{603: {"pfm", "mcp", "serve", "--stdio"}},
 		imageErr:   map[int]error{603: errors.New("image probe failed")},
 		environErr: map[int]error{},
 		images:     map[int]gather.FileID{603: replaced},
@@ -735,7 +746,7 @@ func TestMCPServeProcessesDoctorUsesOneCommandSnapshot(t *testing.T) {
 	if warnings != 1 {
 		t.Fatalf("warnings=%d, want 1\n%s", warnings, output.String())
 	}
-	if want := "doctor: mcp-serve UNREAD — pid=603  pfm mcp chat serve: image probe failed"; !strings.Contains(
+	if want := "doctor: mcp-serve UNREAD — pid=603  pfm mcp serve --stdio: image probe failed"; !strings.Contains(
 		output.String(),
 		want,
 	) {

@@ -51,7 +51,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 - `E2.03-reload-matrix` · `/reload` matrix as far as Codex supports it (no UserPromptSubmit hook — the beat asserts the model-relay path) · spends cx · (none)
 - `E2.04-recover` · `recover` rebuilds a chat from a rollout · spends cx · C43
 - `E2.05-fleet-prompt` · the fleet prompt reaches the first turn through `developer_instructions` · spends cx · X23
-- `E2.06-mcp-http` · MCP over HTTP: `chat_*` tools are listed in the Codex session · spends cx · M34
+- `E2.06-mcp-stdio` · MCP over stdio: `chat_*` tools are listed in the Codex session · spends cx · M34
 - `E2.07-inject-ask-watch` · inject/ask/watch on the Codex home · spends cx · C32,C39,C40
 - `E2.08-kill-self` · `chat kill self/me` alias incl. the tmux-less Codex tool-shell (`CODEX_THREAD_ID`) · spends cx · C47
 - `E2.09-self-compact` · self-compact composes the Codex bare `/compact` form (held, not disproved) · spends cx · L36
@@ -61,7 +61,7 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 ## Lane E3 — OpenCode
 
 - `E3.01-open-seat` · opens one oc chat, label/title/statusline converge on the OpenCode home (same shape as E1) · spends oc · K3,T31
-- `E3.02-mcp-registered` · OpenCode's chat (local stdio) + harvester (remote HTTP) MCP registration and `pfm doctor`'s healthy row · spends none · M36
+- `E3.02-mcp-registered` · OpenCode's professor (local stdio, `pfm mcp serve --stdio`) MCP registration and `pfm doctor`'s healthy row · spends none · M36
 - `E3.03-everything-else` · everything else on the OpenCode home is asserted for real, reusing the shared CLI surface already proven in E1/F/O · spends oc · (none)
 
 ## Lane F — fleet
@@ -87,21 +87,21 @@ The root image build. Its own beats carry no landscape ids — they build the sh
 
 ## Lane M — MCP
 
-- `M.01-register-claude` · registration per engine: Claude stdio + HTTP wired from the files the installer wrote · spends none · M30,M31,M32,M33
-- `M.02-register-codex` · registration per engine: Codex HTTP-only, fenced block preserves a foreign entry · spends none · M34,M35
-- `M.03-register-opencode` · registration per engine: OpenCode — chat local stdio + harvester remote HTTP, `pfm doctor`'s healthy row · spends none · M36
-- `M.04-doctor-mcp` · `pfm doctor` MCP registration classification + daemon reachability + version-skew · spends none · M37,M38,M39
-- `M.05-daemon-core` · daemon: single loopback port, health, restart on replaced binary (rebuild in-container, exit-75) · spends none · M40,M41,M42,M43,M44,M45,M46
+- `M.01-register-claude` · registration per engine: Claude professor stdio (`pfm mcp serve --stdio`) wired from the files the installer wrote · spends none · M30,M31,M32,M33
+- `M.02-register-codex` · registration per engine: Codex stdio, fenced block preserves a foreign entry · spends none · M34,M35
+- `M.03-register-opencode` · registration per engine: OpenCode — professor local stdio, `pfm doctor`'s healthy row · spends none · M36
+- `M.04-doctor-mcp` · `pfm doctor` MCP registration classification (professor rows, `legacy=`, cutover rows) + daemon reachability + version-skew · spends none · M37,M38,M39
+- `M.05-daemon-core` · daemon: single loopback port, `/mcp/professor` and its family views, health, restart on replaced binary (rebuild in-container, exit-75) · spends none · M40,M41,M42,M43,M44,M45,M46
 - `M.06-daemon-units` · daemon service units: systemd live in the container, launchd = named advisory · spends none · M47,M48
-- `M.07-stdio-transports` · stdio transports: chat ambient-identity, harvester non-ambient, malformed-frame parse error · spends none · M49,M50,M51
-- `M.08-mcp-cli` · `pfm mcp` CLI surface: bare alias, `ls`, `enable`/`disable`, `serve` dispatch · spends none · M52,M53,M54,M55
-- `M.09-chat-tools` · chat fleet server tools driven by a direct MCP client against the live daemon · spends cc:$SEAT · M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12,M13,M14
-- `M.10-chat-tools-gap` · chat fleet server tools with no dedicated test file: open/name/kill/unkill/save · spends cc:$SEAT · M15,M16,M17,M18,M19,M20
-- `M.11-harvester-tools` · the four harvester tools (`read` over urls, files and publications, `download_file`, `search_literature`, `search_web` when configured) and caller headers driven against a real, small public document, plus `pfm harvest download-file` · spends none · M21,M22,M23,M24,M25,M26,M27,M28,M29,H13
-- `M.12-harvester-cache-gate` · harvest local cache (an `include_content: false` `read` re-read is `cached`) + search-backend gating of `search_web` · spends none · H10,H11
+- `M.07-stdio-transports` · `pfm mcp serve --stdio`: forwards to the daemon, serves in process without one, the caller's ambient identity; malformed-frame parse error · spends none · M51,M56
+- `M.08-mcp-cli` · `pfm mcp` CLI surface: `ls`, `enable`/`disable`, the usage exit, `serve` dispatch · spends none · M53,M54,M55
+- `M.09-chat-tools` · chat family tools driven by a direct MCP client against the live daemon's `/mcp/professor` · spends cc:$SEAT · M1,M2,M3,M4,M5,M6,M7,M8,M9,M10,M11,M12,M13,M14
+- `M.10-chat-tools-gap` · chat family tools with no dedicated test file: open/name/kill/unkill/save/`servicedesk` · spends cc:$SEAT · M15,M16,M17,M18,M19,M20
+- `M.11-harvester-tools` · the four harvester tools (`harvester_read` over urls, files and publications, `harvester_download_file`, `harvester_search_literature`, `harvester_search_web` when configured) and caller headers driven against a real, small public document, plus `pfm harvest download-file` · spends none · M21,M22,M23,M24,M25,M26,M27,M28,M29,H13
+- `M.12-harvester-cache-gate` · harvest local cache (an `include_content: false` `harvester_read` re-read is `cached`) + search-backend gating of `harvester_search_web` · spends none · H10,H11
 - `M.13-dropped-seat-roster` · a dropped seat's absence shows up in the daemon's own seat roster · spends none · I38
-- `M.14-end-to-end` · one chat-driven call per server proves engine wiring end to end (Claude `chat_status` on itself + `read` a URL; Codex the same over HTTP) · spends cc:$SEAT+cx · (none)
-- `M.15-live-chats-survive-daemon-restart` · **cross-lane** — after the exit-75 restart, E1's Claude chat (stdio) and E2's Codex chat (HTTP) each make their next MCP call successfully · spends cc:$SEAT+cx · M31,M34
+- `M.14-end-to-end` · one chat-driven call per family proves engine wiring end to end (Claude `chat_status` on itself + `harvester_read` a URL; Codex the same over stdio) · spends cc:$SEAT+cx · (none)
+- `M.15-live-chats-survive-daemon-restart` · **cross-lane** — after the exit-75 restart, E1's Claude chat (stdio) and E2's Codex chat (stdio) each make their next MCP call successfully · spends cc:$SEAT+cx · M31,M34
 
 ## Lane A — adopter
 

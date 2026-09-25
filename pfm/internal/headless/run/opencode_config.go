@@ -469,16 +469,10 @@ func openCodeToolNames(raw string) ([]string, error) {
 			return nil, fmt.Errorf("OpenCode does not support Claude tool %q", value)
 		}
 		if strings.HasPrefix(key, "mcp__") {
-			parts := strings.SplitN(value[len("mcp__"):], "__", 2)
-			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-				return nil, fmt.Errorf("OpenCode MCP tool %q must be mcp__server__tool", value)
+			name, err := pfmengine.OpenCodeMCPToolName(value)
+			if err != nil {
+				return nil, err
 			}
-			serverName := sanitizeOpenCodeToolPart(parts[0])
-			toolName := sanitizeOpenCodeToolPart(parts[1])
-			if serverName == "" || toolName == "" {
-				return nil, fmt.Errorf("OpenCode MCP tool %q has no usable server or tool name", value)
-			}
-			name := serverName + "_" + toolName
 			if !seen[name] {
 				seen[name] = true
 				result = append(result, name)
@@ -507,18 +501,6 @@ func appendOpenCodeTool(tools []string, name string) []string {
 		}
 	}
 	return append(tools, name)
-}
-
-func sanitizeOpenCodeToolPart(value string) string {
-	var result strings.Builder
-	for _, r := range value {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-' {
-			result.WriteRune(r)
-		} else {
-			result.WriteByte('_')
-		}
-	}
-	return result.String()
 }
 
 func validateOpenCodeArgs(args []string, request Request) error {

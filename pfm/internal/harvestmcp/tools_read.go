@@ -29,16 +29,16 @@ const (
 
 	readDescriptionHead = `Reads web pages, local documents and scholarly works as Markdown in one call, each kind in its own array, input order kept: 1–50 items in total. `
 	readDescriptionURLs = `urls: http(s) pages, each read as a page (a PDF or document URL is parsed; a paper's landing page here reads the page). `
-	readDescriptionPubs = `publications (at most 20): a DOI, arXiv id, PMID, PMCID, ISBN, a search_literature handle, or a paper or book landing URL, each read as its full text through the repository, mirror or open-access copy that serves it. `
-	readDescriptionTail = `A title goes to search_literature first; a file you want as bytes (PDF, zip, image, audio) goes to download_file. The answer groups the items by field in the same order; each item returns content (may be truncated; include_content:false returns none), chars, tokens, via (how it was read), gaps (why the artifact is incomplete, empty when complete) and where the COMPLETE artifact is. A misplaced item names the field it belongs in; a failing item carries its own error and the others still return.`
+	readDescriptionPubs = `publications (at most 20): a DOI, arXiv id, PMID, PMCID, ISBN, a harvester_search_literature handle, or a paper or book landing URL, each read as its full text through the repository, mirror or open-access copy that serves it. `
+	readDescriptionTail = `A title goes to harvester_search_literature first; a file you want as bytes (PDF, zip, image, audio) goes to harvester_download_file. The answer groups the items by field in the same order; each item returns content (may be truncated; include_content:false returns none), chars, tokens, via (how it was read), gaps (why the artifact is incomplete, empty when complete) and where the COMPLETE artifact is. A misplaced item names the field it belongs in; a failing item carries its own error and the others still return.`
 
 	readDescription = readDescriptionHead +
-		`Call read{urls:["https://…"], files:["/path/to/file.pdf"], publications:["10.1038/nature14539"]}. ` +
+		`Call harvester_read{urls:["https://…"], files:["/path/to/file.pdf"], publications:["10.1038/nature14539"]}. ` +
 		readDescriptionURLs +
 		`files: local documents (` + harvest.ReadableFormats + `) or file:// URLs on this machine, each parsed. ` +
 		readDescriptionPubs + readDescriptionTail
 	readRemoteDescription = readDescriptionHead +
-		`Call read{urls:["https://…"], publications:["10.1038/nature14539"]}. ` +
+		`Call harvester_read{urls:["https://…"], publications:["10.1038/nature14539"]}. ` +
 		readDescriptionURLs + readDescriptionPubs +
 		`This server reads no local files. ` + readDescriptionTail
 )
@@ -47,7 +47,7 @@ const (
 type ReadInput struct {
 	URLs           []string          `json:"urls,omitempty" jsonschema:"Web page URLs (http or https), each read as a page; a PDF or document URL is parsed. An identifier goes in publications, a local path in files."`
 	Files          []string          `json:"files,omitempty" jsonschema:"Local document paths (or file:// URLs) on this machine, each parsed to Markdown. A web URL goes in urls."`
-	Publications   []string          `json:"publications,omitempty" jsonschema:"At most 20 works: a DOI, arXiv id, PMID, PMCID, ISBN, a search_literature handle, or a paper or book landing URL, each read as its full text."`
+	Publications   []string          `json:"publications,omitempty" jsonschema:"At most 20 works: a DOI, arXiv id, PMID, PMCID, ISBN, a harvester_search_literature handle, or a paper or book landing URL, each read as its full text."`
 	Refresh        bool              `json:"refresh,omitempty" jsonschema:"Bypass the cache: read every item again and overwrite its cached artifact."`
 	IncludeContent *bool             `json:"include_content,omitempty" jsonschema:"Default true. false: read and cache the full content but return no body, only its size and where it is."`
 	OCRLanguage    string            `json:"ocr_language,omitempty" jsonschema:"Optional script for OCR of a scanned document: latin, zh, ja, ar, ru or he. By default the document's text layer, /Lang or metadata names it, else Latin; set it when a scan's gaps say it was read in Latin. Always a fresh read."`
@@ -261,7 +261,7 @@ func workNoun(source string) string {
 		}[name]
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "harvest:") {
-		return "a search_literature handle"
+		return "a harvester_search_literature handle"
 	}
 	return ""
 }
@@ -293,7 +293,7 @@ func misplaced(field, source string, remote bool) string {
 		case isLocalInput(source):
 			return "this is a local path; " + filesField + "."
 		case !isWebURL(source):
-			return "this is not a web URL; urls takes http(s) pages — a title goes to `search_literature` first."
+			return "this is not a web URL; urls takes http(s) pages — a title goes to `harvester_search_literature` first."
 		}
 	case fieldFiles:
 		switch {
@@ -309,7 +309,7 @@ func misplaced(field, source string, remote bool) string {
 		case isLocalInput(source):
 			return "this is a local path; " + filesField + "."
 		case strings.ContainsAny(strings.TrimSpace(source), " \t"):
-			return "this looks like a title; find it with `search_literature`, then put its handle in publications."
+			return "this looks like a title; find it with `harvester_search_literature`, then put its handle in publications."
 		}
 	}
 	return ""

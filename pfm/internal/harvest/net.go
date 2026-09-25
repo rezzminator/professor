@@ -72,7 +72,7 @@ func errorKind(err error) string {
 func FailureMessage(item string, status int, kind string, challenge, searchAvailable bool) string {
 	if kind == errorKindInvalid {
 		return fmt.Sprintf("Invalid URL: %s — %s", item, SearchHint(searchAvailable,
-			"check it for typos, or use `search_web` to find the source.",
+			"check it for typos, or use `harvester_search_web` to find the source.",
 			"check it for typos, or find the source via another URL.",
 		))
 	}
@@ -87,8 +87,8 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: the server did not respond in time (connection timed out). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `search_web` to find an alternative copy.",
-				"Retry later, or find an alternative copy with search_literature or another URL.",
+				"Retry later, or use `harvester_search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
 			),
 		)
 	}
@@ -97,8 +97,8 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: DNS resolution failed (host not found). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `search_web` to find an alternative copy.",
-				"Retry later, or find an alternative copy with search_literature or another URL.",
+				"Retry later, or use `harvester_search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
 			),
 		)
 	}
@@ -107,8 +107,8 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"Could not reach %s: the connection failed (refused or host unreachable). %s",
 			item,
 			SearchHint(searchAvailable,
-				"Retry later, or use `search_web` to find an alternative copy.",
-				"Retry later, or find an alternative copy with search_literature or another URL.",
+				"Retry later, or use `harvester_search_web` to find an alternative copy.",
+				"Retry later, or find an alternative copy with harvester_search_literature or another URL.",
 			),
 		)
 	}
@@ -117,8 +117,8 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 			"%s is behind a bot/Cloudflare challenge — content not retrievable from this datacenter server. %s",
 			item,
 			SearchHint(searchAvailable,
-				"Use `search_web` to find a mirror or alternative copy.",
-				"Find a mirror or alternative copy with search_literature or another URL.",
+				"Use `harvester_search_web` to find a mirror or alternative copy.",
+				"Find a mirror or alternative copy with harvester_search_literature or another URL.",
 			),
 		)
 	}
@@ -131,14 +131,15 @@ func FailureMessage(item string, status int, kind string, challenge, searchAvail
 		if status == 403 || status == 429 || status == 503 {
 			note = " — likely a bot-block or rate limit"
 		}
-		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(searchAvailable,
-			"Use `search_web` to find an alternative copy, or `search_literature` if it is a scholarly title.",
-			"Use `search_literature` if it is a scholarly title, or find an alternative copy at another URL.",
+		return fmt.Sprintf("%s returned HTTP %d (%s)%s. %s", item, status, meaning, note, SearchHint(
+			searchAvailable,
+			"Use `harvester_search_web` to find an alternative copy, or `harvester_search_literature` if it is a scholarly title.",
+			"Use `harvester_search_literature` if it is a scholarly title, or find an alternative copy at another URL.",
 		))
 	}
 	return fmt.Sprintf("Could not download %s — %s", item, SearchHint(searchAvailable,
-		"try `search_web` for an alternative source.",
-		"try `search_literature` or another URL for an alternative source.",
+		"try `harvester_search_web` for an alternative source.",
+		"try `harvester_search_literature` or another URL for an alternative source.",
 	))
 }
 

@@ -2,7 +2,7 @@
 
 Two independent things live in this repo. Install what you need.
 
-- **`pfm`** — the host fleet CLI: statusline, `/reload`, the chat MCP server, multi-account tooling. Binary or source, touches only your `$HOME`, no project files.
+- **`pfm`** — the host fleet CLI: statusline, `/reload`, the `professor` MCP server (chat and harvester families), multi-account tooling. Binary or source, touches only your `$HOME`, no project files.
 - **Professor, the discipline layer** — `CLAUDE.md`, agents, commands, the pipeline. Installed into YOUR project through a Claude-guided interview.
 
 Shortest path first.
@@ -171,7 +171,7 @@ One writer per surface — the law that keeps the two installers from fighting o
 | Project discipline layer | `pfm init` scaffolds and pins; the interview owns later local adaptation | `CLAUDE.md`, `.claude/`, `docs/`, `.professor/`, per-project `CLAUDE.md` + `.claude/` |
 | Host-level opt-ins chosen during the interview | `pfm install`, invoked on your behalf | Lands inside the host-fleet surfaces above — the interview never writes them directly |
 | Themes, source-fetched and bundled (default; `--skip-themes` opts out) | `pfm install` | `~/.claude/themes/tokyo-night.json`, `~/.claude/themes/professor-{gold,silver,bronze}.json`, and any other target declared by `templates/themes/sources.json`; exact ownership is recorded in the install ledger |
-| MCP client registration (`chat`/`harvester` servers) | `pfm install` — the only writer | every user-scope `.claude.json` a pfm-launched Claude can read: `~/.claude.json` for the account pfm spawns without `CLAUDE_CONFIG_DIR`, `<config dir>/.claude.json` for every explicit account, and `$CLAUDE_CONFIG_DIR/.claude.json` when the shell exports it |
+| MCP client registration (the one `professor` server) | `pfm install` — the only writer | registered while either family is enabled (`mcp.servers.chat.enabled`, `harvester.enabled`), removed when both are off; every engine registers the same stdio command `~/.local/bin/pfm mcp serve --stdio` (absolute path), which forwards to the daemon's `/mcp/professor`. Claude: key `mcpServers.professor` in every user-scope `.claude.json` a pfm-launched Claude can read — `~/.claude.json` for the account pfm spawns without `CLAUDE_CONFIG_DIR`, `<config dir>/.claude.json` for every explicit account, and `$CLAUDE_CONFIG_DIR/.claude.json` when the shell exports it. Codex: one installer-owned `[mcp_servers.professor]` fence (`command`, `args`) at the end of every Codex home's `config.toml`. OpenCode: key `mcp.professor` of type `local` in `opencode.jsonc` |
 
 `pfm install --config-dir DIR` retargets the `~/.claude`-rooted writes to a different config directory — the only supported override.
 

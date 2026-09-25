@@ -332,7 +332,7 @@ func pageBodyGuard(source, kind string, body []byte, status int, inflate inflate
 			Source: source,
 			Kind:   kindImage,
 			Error: fmt.Sprintf(
-				"%s is an image, not a page — download it with `download_file`; read reads pages.",
+				"%s is an image, not a page — download it with `harvester_download_file`; harvester_read reads pages.",
 				source,
 			),
 			HTTPStatus: status,
@@ -349,7 +349,7 @@ func pageBodyGuard(source, kind string, body []byte, status int, inflate inflate
 			Source: source,
 			Kind:   kindFile,
 			Error: fmt.Sprintf(
-				"%s is a file (%s, %d bytes), not a page — it was not converted; download it with `download_file`.",
+				"%s is a file (%s, %d bytes), not a page — it was not converted; download it with `harvester_download_file`.",
 				source,
 				found.label,
 				len(body),
@@ -362,7 +362,7 @@ func pageBodyGuard(source, kind string, body []byte, status int, inflate inflate
 			Source: source,
 			Kind:   kindFile,
 			Error: source + " was not converted: " + formatRefusalReason(found) +
-				" Download it with `download_file`.",
+				" Download it with `harvester_download_file`.",
 			HTTPStatus: status,
 			ErrorKind:  formatErrorKind(found),
 		}, true

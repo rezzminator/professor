@@ -10,6 +10,15 @@ import (
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
+const claudeRemediation = " remediation=run pfm install --yes (registers every registry a pfm-launched Claude reads)"
+
+// professorStdio is the one registration every engine writes for Claude:
+// the absolute pfm binary run as `pfm mcp serve --stdio`.
+func professorStdio(home string) string {
+	return `{"type":"stdio","command":"` + filepath.Join(home, ".local", "bin", "pfm") +
+		`","args":["mcp","serve","--stdio"]}`
+}
+
 // TestDoctorMCPClientRowNamesEachRegistryAndItsReason pins issue #24 finding
 // 5's doctor half: on a host whose shell exports CLAUDE_CONFIG_DIR, the
 // implicit account's ~/.claude.json is not the only file a pfm-launched
@@ -22,8 +31,7 @@ func TestDoctorMCPClientRowNamesEachRegistryAndItsReason(t *testing.T) {
 	ambient := filepath.Join(home, ".cc", "1")
 	t.Setenv("CLAUDE_CONFIG_DIR", ambient)
 
-	pfmBinary := filepath.Join(home, ".local", "bin", "pfm")
-	registration := `{"mcpServers":{"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"},"chat":{"type":"stdio","command":"` + pfmBinary + `","args":["mcp","chat","serve"]}}}`
+	registration := `{"mcpServers":{"professor":` + professorStdio(home) + `}}`
 	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(registration), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -47,16 +55,87 @@ func TestDoctorMCPClientRowNamesEachRegistryAndItsReason(t *testing.T) {
 	}
 	out := stdout.String()
 	implicitRow := "doctor: mcp client=claude registry=" + filepath.Join(home, ".claude.json") +
-		" (account 1 (pfm spawns it without CLAUDE_CONFIG_DIR)) harvester=pfm chat=pfm"
+		" (account 1 (pfm spawns it without CLAUDE_CONFIG_DIR)) professor=pfm\n"
 	if !strings.Contains(out, implicitRow) {
 		t.Fatalf("doctor output missing the healthy implicit-account row %q:\n%s", implicitRow, out)
 	}
 	ambientRow := "doctor: mcp client=claude registry=" + filepath.Join(ambient, ".claude.json") +
-		" (ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — internal_launch.go)) harvester=absent chat=absent" +
-		" remediation=run pfm install --yes (registers every registry a pfm-launched Claude reads)"
+		" (ambient CLAUDE_CONFIG_DIR=" + ambient + " (the claude launcher passes it through — internal_launch.go)) professor=absent" +
+		claudeRemediation + "\n"
 	if !strings.Contains(out, ambientRow) {
 		t.Fatalf("doctor output missing the absent ambient-registry warning row %q:\n%s", ambientRow, out)
 	}
+}
+
+// TestDoctorMCPClientClaudeRowClassifiesProfessorAndLegacyEntries pins the
+// Claude row's states: pfm's legacy `chat` / `harvester` entries are named
+// sorted with the reinstall remedy, an HTTP or foreign `professor` is a
+// foreign registration, and an unreadable registry names its error.
+func TestDoctorMCPClientClaudeRowClassifiesProfessorAndLegacyEntries(t *testing.T) {
+	root := jailTest(t)
+	home := filepath.Join(root, "home")
+	registry := filepath.Join(home, ".claude.json")
+	runtime, err := pfmconfig.LoadRuntime("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime.Config.Accounts = []pfmconfig.Account{{ID: 1, ConfigDir: filepath.Join(home, ".claude"), Implicit: true}}
+	runtime.Config.MCP.HTTP.Port = 18377
+	row := "doctor: mcp client=claude registry=" + registry +
+		" (account 1 (pfm spawns it without CLAUDE_CONFIG_DIR)) professor="
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	for _, testCase := range []struct {
+		name, servers, want string
+	}{
+		{
+			"legacy entries remain",
+			`"professor":` + professorStdio(home) +
+				`,"chat":{"type":"stdio","command":"` + bin + `","args":["mcp","chat","serve"]}` +
+				`,"harvester":{"type":"http","url":"http://127.0.0.1:18377/mcp/harvester"}`,
+			row + "pfm legacy=chat,harvester" + claudeRemediation + "\n",
+		},
+		{
+			"http professor",
+			`"professor":{"type":"http","url":"http://127.0.0.1:18377/mcp/professor"}`,
+			row + "foreign-registration" + claudeRemediation + "\n",
+		},
+		{
+			"foreign professor",
+			`"professor":{"type":"stdio","command":"manual","args":["serve"]}`,
+			row + "foreign-registration" + claudeRemediation + "\n",
+		},
+		{
+			"bare pfm professor",
+			`"professor":{"type":"stdio","command":"pfm","args":["mcp","serve","--stdio"]}`,
+			row + "foreign-registration" + claudeRemediation + "\n",
+		},
+		{
+			"type-less professor",
+			`"professor":{"command":"` + bin + `","args":["mcp","serve","--stdio"]}`,
+			row + "foreign-registration" + claudeRemediation + "\n",
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if err := os.WriteFile(registry, []byte(`{"mcpServers":{`+testCase.servers+`}}`), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 ||
+				!strings.Contains(stdout.String(), testCase.want) {
+				t.Fatalf("doctor code=%d stdout=%q, want a warning row %q", code, stdout.String(), testCase.want)
+			}
+		})
+	}
+	t.Run("unreadable registry", func(t *testing.T) {
+		if err := os.WriteFile(registry, []byte(`{"mcpServers":`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 ||
+			!strings.Contains(stdout.String(), row+"unreadable error=parse "+registry) {
+			t.Fatalf("doctor code=%d stdout=%q, want the unreadable row naming its error", code, stdout.String())
+		}
+	})
 }
 
 func TestDoctorMCPClientReportsOpenCodeStates(t *testing.T) {
@@ -78,65 +157,49 @@ func TestDoctorMCPClientReportsOpenCodeStates(t *testing.T) {
 	}
 	runtime.Paths.Home = home
 	runtime.Config.MCP.HTTP.Port = 18377
-	write(
-		`{"mcp":{"chat":{"type":"local","command":["` + filepath.Join(
-			home,
-			".local",
-			"bin",
-			"pfm",
-		) + `","mcp","chat","serve"],"enabled":true},"harvester":{"type":"remote","url":"http://127.0.0.1:18377/mcp/harvester","enabled":true}}}`,
-	)
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	professor := `"professor":{"type":"local","command":["` + bin + `","mcp","serve","--stdio"],"enabled":true}`
+	row := "doctor: mcp client=opencode config=" + path + " professor="
+	write(`{"mcp":{` + professor + `}}`)
 	var stdout, stderr bytes.Buffer
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 0 {
 		t.Fatalf("healthy OpenCode doctor code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "doctor: mcp client=opencode config="+path+" harvester=pfm chat=pfm") {
+	if !strings.Contains(stdout.String(), row+"pfm\n") {
 		t.Fatalf("doctor omitted healthy OpenCode row:\n%s", stdout.String())
 	}
-	write(`{"mcp":{"chat":{"type":"local","enabled":true}}}`)
+	write(`{"mcp":{` + professor +
+		`,"chat":{"type":"local","command":["` + bin + `","mcp","chat","serve"],"enabled":true}` +
+		`,"harvester":{"type":"remote","url":"http://127.0.0.1:18377/mcp/harvester","enabled":true}}}`)
 	stdout.Reset()
-	if code := runDoctor(
-		nil,
-		&stdout,
-		&stderr,
-		runtime,
-	); code != 1 ||
-		!strings.Contains(stdout.String(), "state=partial") {
-		t.Fatalf("partial OpenCode doctor code=%d stdout=%q", code, stdout.String())
+	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 ||
+		!strings.Contains(stdout.String(), row+"pfm legacy=chat,harvester remediation=run pfm install --yes\n") {
+		t.Fatalf(
+			"legacy OpenCode doctor code=%d stdout=%q, want the legacy keys and the reinstall",
+			code,
+			stdout.String(),
+		)
 	}
 	write(`{"mcp":{}}`)
 	stdout.Reset()
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 0 ||
-		!strings.Contains(stdout.String(), "state=absent") ||
-		strings.Contains(stdout.String(), "remediation=run pfm install --yes") {
+		!strings.Contains(stdout.String(), row+"absent\n") {
 		t.Fatalf("absent OpenCode doctor code=%d stdout=%q, want clean absence", code, stdout.String())
-	}
-	// Nothing in the install ownership ledger claims this entry, so the
-	// remediation is the user-owned one (TestDoctorOpenCodeNamesAUserOwnedEntry
-	// pins both halves of that split).
-	write(`{"mcp":{"chat":{"type":"remote","url":"https://operator.invalid","enabled":true}}}`)
-	stdout.Reset()
-	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 ||
-		!strings.Contains(stdout.String(), "state=foreign-registration") ||
-		!strings.Contains(stdout.String(), "is a user-owned entry pfm install will not replace") {
-		t.Fatalf("foreign OpenCode doctor code=%d stdout=%q, want remediation warning", code, stdout.String())
 	}
 	write(`{`)
 	stdout.Reset()
 	if code := runDoctor(nil, &stdout, &stderr, runtime); code != 1 ||
-		!strings.Contains(stdout.String(), "state=unreadable") ||
-		!strings.Contains(stdout.String(), "error=") {
+		!strings.Contains(stdout.String(), row+"unreadable error=") {
 		t.Fatalf("unreadable OpenCode doctor code=%d stdout=%q, want error warning", code, stdout.String())
 	}
 }
 
 // TestDoctorOpenCodeNamesAUserOwnedEntry is a REGRESSION test for the host
-// whose ~/.config/opencode/opencode.jsonc already holds a hand-written
-// `harvester` entry (`uv --directory … run harvester`): doctor reported
-// state=partial and told the operator to run `pfm install --yes`, which
-// preserves that entry forever — the advice could never fix what it named. An
-// entry the install ownership ledger does not claim is named as user-owned,
-// with the file and the key; a pfm-written entry gone stale keeps the plain
+// whose ~/.config/opencode/opencode.jsonc already holds a hand-written entry
+// under pfm's key: telling the operator to run `pfm install --yes` would be
+// advice that can never fix it, because install preserves an entry its
+// ownership ledger does not claim. That entry is named as user-owned, with
+// the file and the key; a pfm-written entry gone stale keeps the plain
 // reinstall remediation.
 func TestDoctorOpenCodeNamesAUserOwnedEntry(t *testing.T) {
 	root := jailTest(t)
@@ -151,7 +214,7 @@ func TestDoctorOpenCodeNamesAUserOwnedEntry(t *testing.T) {
 	}
 	runtime.Paths.Home = home
 	runtime.Config.MCP.HTTP.Port = 18377
-	foreign := `{"mcp":{"harvester":{"type":"local","command":["uv","--directory","/srv/harvester","run","harvester"]}}}`
+	foreign := `{"mcp":{"professor":{"type":"local","command":["uv","--directory","/srv/professor","run","professor"]}}}`
 	if err := os.WriteFile(path, []byte(foreign), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -162,8 +225,8 @@ func TestDoctorOpenCodeNamesAUserOwnedEntry(t *testing.T) {
 		t.Fatalf("user-owned OpenCode doctor code=%d stdout=%q stderr=%q, want a warning", code, out, stderr.String())
 	}
 	for _, want := range []string{
-		"config=" + path,
-		"remediation=harvester in " + path + " is a user-owned entry pfm install will not replace",
+		"config=" + path + " professor=foreign-registration",
+		"remediation=professor in " + path + " is a user-owned entry pfm install will not replace",
 		"remove or rename it, then run pfm install --yes",
 	} {
 		if !strings.Contains(out, want) {
@@ -171,9 +234,10 @@ func TestDoctorOpenCodeNamesAUserOwnedEntry(t *testing.T) {
 		}
 	}
 
-	// A pfm-written entry whose port went stale is install's to rewrite: the
-	// ledger claims it, so the remediation stays the plain reinstall.
-	stale := `{"mcp":{"harvester":{"type":"remote","url":"http://127.0.0.1:19999/mcp/harvester","enabled":true}}}`
+	// A pfm-written entry whose binary path went stale is install's to
+	// rewrite: the ledger claims it, so the remediation stays the plain
+	// reinstall.
+	stale := `{"mcp":{"professor":{"type":"local","command":["/old/pfm","mcp","serve","--stdio"],"enabled":true}}}`
 	if err := os.WriteFile(path, []byte(stale), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -181,8 +245,8 @@ func TestDoctorOpenCodeNamesAUserOwnedEntry(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(ledger), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	owned := `{"opencodeRegistrations":{"` + path + `":{"harvester":` +
-		`{"type":"remote","url":"http://127.0.0.1:19999/mcp/harvester","enabled":true}}}}`
+	owned := `{"opencodeRegistrations":{"` + path + `":{"professor":` +
+		`{"type":"local","command":["/old/pfm","mcp","serve","--stdio"],"enabled":true}}}}`
 	if err := os.WriteFile(ledger, []byte(owned), 0o600); err != nil {
 		t.Fatal(err)
 	}

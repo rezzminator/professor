@@ -348,7 +348,12 @@ func compileOpenCodeAgents(
 				}
 			}
 			if tools, ok := fields["tools"]; ok {
-				content += renderOpenCodeToolsBlock(tools)
+				toolsBlock, toolsErr := renderOpenCodeToolsBlock(tools)
+				if toolsErr != nil {
+					problem("tools %s: %v", entry.Path, toolsErr)
+					continue
+				}
+				content += toolsBlock
 			}
 			if name == "gitter" {
 				content += "permission:\n  bash:\n    \"git *\": allow\n"

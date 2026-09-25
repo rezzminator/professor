@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
@@ -12,10 +13,12 @@ import (
 // PrintMCPClientCutover reports three disjoint surfaces: every user-scope
 // Claude registry a pfm-launched Claude can actually read (installer.
 // ClaudeUserRegistries — one row per file, naming why pfm considers it a
-// registry, with both the "harvester" and "chat" server states so a
-// registry pfm never reached reads as visibly absent rather than silently
-// skipped), and the historical standalone-harvester cutover check for Codex
-// and the project-scope .mcp.json (unaffected by CLAUDE_CONFIG_DIR).
+// registry, with its "professor" state and any pfm legacy "chat" / "harvester"
+// entry still present, so a registry pfm never reached reads as visibly absent
+// rather than silently skipped), the OpenCode config the same way, and the
+// historical harvester cutover check for Codex and the project-scope .mcp.json
+// (unaffected by CLAUDE_CONFIG_DIR), which tells pfm's own legacy entry apart
+// from a foreign or standalone one.
 func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 	warnings := 0
 	registries := installer.ClaudeUserRegistries(
@@ -23,7 +26,7 @@ func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 		runtime.Config.Accounts,
 		config.AmbientClaudeConfigDir(),
 	)
-	warnings += printClaudeRegistryRows(stdout, registries, runtime.Config.MCP.HTTP.Port)
+	warnings += printClaudeRegistryRows(stdout, registries, runtime.Paths.Home, runtime.Config.MCP.HTTP.Port)
 
 	codexHomes := make([]string, 0, len(runtime.Config.CodexAccounts))
 	for _, account := range runtime.Config.CodexAccounts {
@@ -40,6 +43,15 @@ func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 				"doctor: mcp client=%s harvester=unreadable error=%v path=%s\n",
 				report.Client,
 				report.Error,
+				report.Path,
+			)
+		case installer.MCPClientLegacyPFM:
+			warnings++
+			fmt.Fprintf(
+				stdout,
+				"doctor: mcp client=%s harvester=%s remediation=run pfm install --yes path=%s\n",
+				report.Client,
+				report.State,
 				report.Path,
 			)
 		default:
@@ -62,66 +74,67 @@ func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 
 func printOpenCodeRows(stdout io.Writer, home string, port int) int {
 	path := installer.OpenCodeConfigPath(home)
-	reports := installer.InspectOpenCodeServers(
+	state, legacy, inspectionError := professorState(installer.InspectOpenCodeServers(
 		path,
 		home,
 		port,
-		config.MCPServerHarvester,
+		config.MCPServerProfessor,
 		config.MCPServerChat,
-	)
-	states := map[string]string{}
-	var inspectionError error
-	for _, report := range reports {
-		states[report.Name] = report.State
-		if report.Error != nil {
-			inspectionError = report.Error
-		}
-	}
-	harvester, chat := states[config.MCPServerHarvester], states[config.MCPServerChat]
-	state := installer.MCPClientPartial
+		config.MCPServerHarvester,
+	))
+	base := fmt.Sprintf("doctor: mcp client=opencode config=%s professor=%s%s", path, state, legacy)
 	switch {
-	case harvester == installer.MCPClientUnreadable || chat == installer.MCPClientUnreadable:
-		state = installer.MCPClientUnreadable
-	case harvester == installer.MCPClientPFM && chat == installer.MCPClientPFM:
-		state = installer.MCPClientPFM
-	case harvester == installer.MCPClientAbsent && chat == installer.MCPClientAbsent:
-		state = installer.MCPClientAbsent
-	case harvester == installer.MCPClientForeignRegistration || chat == installer.MCPClientForeignRegistration:
-		state = installer.MCPClientForeignRegistration
-	}
-	base := fmt.Sprintf(
-		"doctor: mcp client=opencode config=%s harvester=%s chat=%s state=%s",
-		path,
-		harvester,
-		chat,
-		state,
-	)
-	switch state {
-	case installer.MCPClientUnreadable:
+	case state == installer.MCPClientUnreadable:
 		fmt.Fprintf(stdout, "%s error=%v\n", base, inspectionError)
 		return 1
-	case installer.MCPClientPFM:
-		fmt.Fprintln(stdout, base)
-		return 0
-	case installer.MCPClientAbsent:
+	case legacy == "" && (state == installer.MCPClientPFM || state == installer.MCPClientAbsent):
 		fmt.Fprintln(stdout, base)
 		return 0
 	default:
-		fmt.Fprintf(stdout, "%s %s\n", base, openCodeRemediation(home, path))
+		fmt.Fprintf(stdout, "%s %s\n", base, openCodeRemediation(home, path, state))
 		return 1
 	}
 }
 
+// professorState folds one file's reports — `professor` and the legacy
+// `chat` / `harvester` keys — into the professor state, the ` legacy=<keys>`
+// suffix (the sorted keys still holding pfm's legacy shape, or ""), and the
+// error that made the file unreadable. A legacy key that is merely not pfm's
+// shape is someone else's entry and not this row's business.
+func professorState(reports []installer.MCPClientCutover) (state, legacy string, err error) {
+	keys := []string{}
+	for _, report := range reports {
+		if report.Name == config.MCPServerProfessor {
+			state, err = report.State, report.Error
+			continue
+		}
+		if report.State == installer.MCPClientLegacyPFM {
+			keys = append(keys, report.Name)
+		}
+	}
+	if len(keys) > 0 {
+		sort.Strings(keys)
+		legacy = " legacy=" + strings.Join(keys, ",")
+	}
+	return state, legacy, err
+}
+
 // openCodeRemediation names what the operator can actually do about an
-// unhealthy OpenCode registration. `pfm install --yes` rewrites an entry
-// install itself wrote, and PRESERVES one it did not — so an entry the
-// ownership ledger does not claim is named as user-owned with its file and
-// key; prescribing the reinstall there would be advice that can never fix
-// what it named. A ledger that could not be read says so rather than passing
-// for "no user-owned entry here".
-func openCodeRemediation(home, path string) string {
+// unhealthy OpenCode registration. `pfm install --yes` rewrites a `professor`
+// entry install itself wrote, removes pfm's legacy entries, and PRESERVES a
+// `professor` it did not write — so an entry the ownership ledger does not
+// claim is named as user-owned with its file and key; prescribing the
+// reinstall there would be advice that can never fix what it named. A ledger
+// that could not be read says so rather than passing for "no user-owned entry
+// here".
+func openCodeRemediation(home, path, state string) string {
 	const reinstall = "remediation=run pfm install --yes"
-	unowned, err := installer.OpenCodeUnownedEntries(home, path, config.MCPServerHarvester, config.MCPServerChat)
+	if state == installer.MCPClientPFM {
+		// pfm's own professor shape needs no replacing; only the legacy
+		// entries remain, and install removes those whoever wrote them.
+		return reinstall
+	}
+	unowned, err := installer.OpenCodeUnownedEntries(home, path, config.MCPServerProfessor)
 	switch {
 	case err != nil:
 		return fmt.Sprintf("ownership=unreadable error=%v %s", err, reinstall)
@@ -140,51 +153,44 @@ func openCodeRemediation(home, path string) string {
 // printClaudeRegistryRows prints one row per registry ClaudeUserRegistries
 // resolved — every row, not only the unhealthy ones, so a registry pfm never
 // reaches is visible rather than silently absent from the report. A registry
-// whose harvester/chat state is neither fully pfm nor fully absent-while-no-
-// sibling-is-pfm is a warning naming the remediation; an unreadable file
-// reports its parse error instead of guessing a state.
-func printClaudeRegistryRows(stdout io.Writer, registries []installer.ClaudeRegistry, port int) int {
+// whose `professor` is not pfm's — absent while a sibling registry holds pfm's,
+// or foreign — or that still holds a pfm legacy entry is a warning naming the
+// remediation; an unreadable file reports its parse error instead of guessing
+// a state.
+func printClaudeRegistryRows(stdout io.Writer, registries []installer.ClaudeRegistry, home string, port int) int {
 	type outcome struct {
-		registry        installer.ClaudeRegistry
-		harvester, chat string
-		err             error
+		registry      installer.ClaudeRegistry
+		state, legacy string
+		err           error
 	}
 	outcomes := make([]outcome, 0, len(registries))
 	anyPFM := false
 	for _, registry := range registries {
 		out := outcome{registry: registry}
-		for _, report := range installer.InspectClaudeServers(
+		out.state, out.legacy, out.err = professorState(installer.InspectClaudeServers(
 			registry.Path,
+			home,
 			port,
-			config.MCPServerHarvester,
+			config.MCPServerProfessor,
 			config.MCPServerChat,
-		) {
-			switch report.Name {
-			case config.MCPServerHarvester:
-				out.harvester = report.State
-			case config.MCPServerChat:
-				out.chat = report.State
-			}
-			if report.Error != nil {
-				out.err = report.Error
-			}
-			if report.State == installer.MCPClientPFM {
-				anyPFM = true
-			}
+			config.MCPServerHarvester,
+		))
+		if out.state == installer.MCPClientPFM {
+			anyPFM = true
 		}
 		outcomes = append(outcomes, out)
 	}
 	warnings := 0
 	for _, out := range outcomes {
-		base := fmt.Sprintf("doctor: mcp client=claude registry=%s (%s) harvester=%s chat=%s",
-			out.registry.Path, out.registry.Reason, out.harvester, out.chat)
+		base := fmt.Sprintf("doctor: mcp client=claude registry=%s (%s) professor=%s%s",
+			out.registry.Path, out.registry.Reason, out.state, out.legacy)
 		switch {
-		case out.harvester == installer.MCPClientUnreadable || out.chat == installer.MCPClientUnreadable:
+		case out.state == installer.MCPClientUnreadable:
 			warnings++
 			fmt.Fprintf(stdout, "%s error=%v\n", base, out.err)
-		case out.harvester == installer.MCPClientPFM && out.chat == installer.MCPClientPFM:
+		case out.legacy == "" && out.state == installer.MCPClientPFM:
 			fmt.Fprintln(stdout, base)
-		case out.harvester == installer.MCPClientAbsent && out.chat == installer.MCPClientAbsent && !anyPFM:
+		case out.legacy == "" && out.state == installer.MCPClientAbsent && !anyPFM:
 			fmt.Fprintln(stdout, base)
 		default:
 			warnings++

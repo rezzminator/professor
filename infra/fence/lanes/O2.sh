@@ -67,9 +67,9 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   "mkdir -p '$CWD' && git -C '$CWD' init -q && git -C '$CWD' commit -q --allow-empty -m lane" ||
   lane_abort "no working directory for the chats to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/chat)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
   "bash /worktree/infra/demo/daemon.sh" ||
-  lane_abort "the chat MCP daemon never answered on :$PORT — no Codex chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no Codex chat can call a chat_* tool"
 
 # open_e1_main — E1's own `chat new` line (E1.sh open_main), so a solo O2 asserts
 # against the same chat E1 would have left; also the lane's ONE re-open.
@@ -1033,7 +1033,7 @@ while IFS= read -r dir; do
   if [ -f "$dir/settings.json" ]; then
     n_pfm="$(hook_commands "$dir/settings.json" | grep -c 'pfm')"
     [ "$n_pfm" -eq 0 ] || bad="$bad $dir/settings.json still carries $n_pfm pfm hook(s): $(one_line "$(hook_commands "$dir/settings.json" | grep pfm | head -1)");"
-    jq -e '.mcpServers.chat // .mcpServers.harvester' "$dir/.claude.json" >/dev/null 2>&1 &&
+    jq -e '.mcpServers.professor' "$dir/.claude.json" >/dev/null 2>&1 &&
       bad="$bad $dir/.claude.json still registers pfm's MCP server(s): $(jq -c '.mcpServers | keys' "$dir/.claude.json");"
   fi
 done <<EOF

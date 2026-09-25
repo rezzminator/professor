@@ -19,7 +19,7 @@
 | --- | --- |
 | Kind | original agent, `templates/global/agents/collector-rr.md`, linked by `pfm install` |
 | Model, effort | `sonnet`, `low` |
-| Tools | `WebSearch, WebFetch, Grep, mcp__harvester__read, mcp__harvester__search_literature, mcp__harvester__search_web` |
+| Tools | `WebSearch, WebFetch, Grep, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` |
 | Spawns | nothing — it holds no `Agent` |
 | Writes | nothing — it holds no `Write`; the return is the whole artifact |
 | Start hook | none; the `rr-dir` matcher does not name it |
@@ -33,24 +33,24 @@ Numbered orders. Each names one source and what to take from it:
 | Source form | How it is resolved |
 | --- | --- |
 | A URL | used as given |
-| A paper, book or report by DOI, arXiv id, PMID, ISBN or title | `mcp__harvester__search_literature`, then `mcp__harvester__read` with the handle in `publications` |
+| A paper, book or report by DOI, arXiv id, PMID, ISBN or title | `mcp__professor__harvester_search_literature`, then `mcp__professor__harvester_read` with the handle in `publications` |
 | A page named but not linked ("the Go 1.24 release notes") | one WebSearch, taking the result on the named site |
 
 It opens no source an order does not name. A source shared by two orders is read once.
 
 ## The read path
 
-1. `mcp__harvester__read` with a web page in `urls`, a work in `publications`, always with `include_content: false`. The result carries no body, only each item's `path`: a Markdown copy of the whole source, one line per paragraph.
+1. `mcp__professor__harvester_read` with a web page in `urls`, a work in `publications`, always with `include_content: false`. The result carries no body, only each item's `path`: a Markdown copy of the whole source, one line per paragraph.
 2. Every item is taken from that `path` with Grep, `output_mode: "content"`, `-C` for the surrounding lines. Grep's lines are the source's own words.
 3. WebFetch only for a table, or an item Grep cannot find, its prompt asking for the exact sentences, rows or code.
 
 Why this order:
 
 - WebFetch answers a question about a page through a second model; it does not hand back the page. What it returns is that model's rendering of the page, which a verbatim order cannot rest on.
-- A full `read` body is large (the Claude Code hooks page alone is 133,910 characters); the harness spills an oversized tool result to a file as one JSON line, and Grep over a one-line file answers `[Omitted long matching line]`. `include_content: false` returns the `path` of the multi-line Markdown copy instead, which Grep reads line by line.
+- A full `harvester_read` body is large (the Claude Code hooks page alone is 133,910 characters); the harness spills an oversized tool result to a file as one JSON line, and Grep over a one-line file answers `[Omitted long matching line]`. `include_content: false` returns the `path` of the multi-line Markdown copy instead, which Grep reads line by line.
 - A page cut short is not a page read. The collector's first design fetched with WebFetch and marked `SubagentStart`'s input fields `NOT ON PAGE`; the sentence sits about 89,000 characters into the 134,000-character page, where WebFetch's answers never reached. Reading the whole copy by Grep removes that failure.
 - The harvester's HTML conversion drops tables (every table on the hooks page), and WebFetch saw them; so a table is WebFetch's job.
-- Tools are named in full in the prompt: a short name (`read`) is not a tool the agent holds, and the call fails with `No such tool available`.
+- Tools are named in full in the prompt: a short name (`harvester_read`) is not a tool the agent holds, and the call fails with `No such tool available`.
 
 `Grep` is safe on this agent because it holds no `Write`. The harness relaxes its refusal to overwrite an unread file for an agent that can read files; the family's leads write the RR document and keep no read tool for that reason, but the collector writes nothing.
 
@@ -88,7 +88,7 @@ An error never renders as an absence: `FETCH FAILED` and `PARTIAL READ` stand ag
 Four runs of one brief (three orders: the hooks reference's matcher rules; `SubagentStart`'s matcher field and input fields; Go 1.24's `T.Context` and `B.Loop`) moved as follows:
 
 - WebFetch-first returns quoted the matcher table correctly but marked `SubagentStart`'s input fields `NOT ON PAGE`, the sentence lying deep in the page, past what WebFetch's answers covered.
-- `read` without `include_content: false` spilled 49.8 KB and 88,397-character results the agent could not Grep, and it fell back to WebFetch.
+- `harvester_read` without `include_content: false` spilled 49.8 KB and 88,397-character results the agent could not Grep, and it fell back to WebFetch.
 - With `include_content: false`, Grep and full tool names, the return opened `1.`, carried only verbatim text, and quoted the sentence the earlier runs could not reach: "In addition to the common input fields, SubagentStart hooks receive `agent_id` with the unique identifier for the subagent and `agent_type` with the agent name that the matcher filters on."
 
 ## Surfaces that stay in sync

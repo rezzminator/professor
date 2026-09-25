@@ -2,7 +2,7 @@
 
 A REAL Professor install inside the dev-fence container: real Claude Code and
 Codex binaries, real seats (credentials copied in from this host), real pfm
-built from this checkout, real chats talking through the chat MCP. Nothing in
+built from this checkout, real chats talking through the professor MCP. Nothing in
 the container is a stand-in.
 
 ## Tier B — flight-landing only
@@ -71,7 +71,7 @@ docker rm -f pfm-demo            # tear down; the copied credentials die with it
   Keychain, `~/.codex/auth.json`, and OpenCode's ChatGPT `auth.json` into the
   container over stdin — nothing lands on the host disk, nothing is printed.
 - `daemon.sh` (container): keeps `pfm mcp serve` up — the fence has no init system,
-  and Codex rows reach the chat MCP only over that loopback daemon; every spawning
+  and Codex rows reach the professor MCP only over that loopback daemon; every spawning
   script calls it first, idempotently.
 - `fleet.sh` (container): spawns the demo chats — every one a real harness on a
   real seat, so every spawn costs one short model turn.

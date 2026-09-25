@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -85,13 +87,18 @@ func (failure uncertainProxyDeliveryError) Error() string { return failure.cause
 
 func (failure uncertainProxyDeliveryError) Unwrap() error { return failure.cause }
 
+// proxyWhoami is the caller-identity resolver's dependencies; production
+// leaves it empty (the process's own environment and tmux), a test that drives
+// RunStdio end to end substitutes a deterministic caller.
+var proxyWhoami resolve.WhoamiDependencies
+
 func newStdioProxy(ctx context.Context, address string, warnings io.Writer) *stdioProxy {
 	if warnings == nil {
 		warnings = os.Stderr
 	}
 	proxy := &stdioProxy{
 		address:      address,
-		endpoint:     "http://" + address + "/mcp/" + pfmconfig.MCPServerChat,
+		endpoint:     "http://" + address + pfmconfig.MCPPathProfessor,
 		warnings:     warnings,
 		client:       obs.WrapClient(&http.Client{Transport: http.DefaultTransport}),
 		clock:        clock.Real,
@@ -100,7 +107,7 @@ func newStdioProxy(ctx context.Context, address string, warnings io.Writer) *std
 		requests:     make(map[string]*proxyRequestState),
 		requestTails: make(map[string]*proxyRequestState),
 	}
-	identifier, err := resolve.NewWhoami(resolve.WhoamiDependencies{})
+	identifier, err := resolve.NewWhoami(proxyWhoami)
 	if err != nil {
 		proxy.warn("build caller identity resolver: %v; forwarding without _meta.pfmProxy", err)
 		return proxy
@@ -219,84 +226,92 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 	}
 }
 
-func (service *Service) runStdioTransport(
+// runStdioTransport forwards to the daemon's config.MCPPathProfessor when it
+// mounts every locally enabled family and, when chat is enabled, runs the
+// same chat runtime; otherwise it serves the combined server in process and
+// says why on the warnings writer.
+func (professor *Professor) runStdioTransport(
 	ctx context.Context,
 	reader io.ReadCloser,
 	serialized io.WriteCloser,
+	options StdioOptions,
 ) (returnErr error) {
-	warnings := service.backend.warnings
+	warnings := options.Warnings
 	if warnings == nil {
 		warnings = os.Stderr
 	}
-	consequence := "if `pfm install` replaces this binary, this chat's MCP tools fail until the chat restarts"
-	address := service.daemonAddress
+	const consequence = "if `pfm install` replaces this binary, this chat's MCP tools fail until the chat restarts"
+	inProcess := func(reason string) error {
+		fmt.Fprintf(warnings, "pfm mcp stdio: %s; using in-process MCP; %s\n", reason, consequence)
+		return professor.combined.Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
+	}
+	address := options.DaemonAddress
 	if address == "" {
-		fmt.Fprintf(
-			warnings,
-			"pfm mcp stdio: daemon address missing; using in-process MCP; %s\n",
-			consequence,
-		)
-		return service.Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
+		return inProcess("daemon address missing")
 	}
 	status, probeErr := ProbeDaemon(address)
-	if probeErr == nil {
-		if _, mounted := status.Servers[pfmconfig.MCPServerChat]; mounted &&
-			status.ChatRuntimeIdentity != "" && status.ChatRuntimeIdentity == service.RuntimeIdentity() {
-			marker, markerErr := stale.HoldCompatibleProxy(service.backend.paths.Home)
-			if markerErr != nil {
-				return fmt.Errorf("protect selected daemon stdio proxy: %w", markerErr)
-			}
-			defer func() {
-				if closeErr := marker.Close(); closeErr != nil {
-					returnErr = errors.Join(
-						returnErr,
-						fmt.Errorf("close compatible proxy marker %s: %w", marker.Name(), closeErr),
-					)
-				}
-			}()
-			proxy := newStdioProxy(ctx, address, warnings)
-			proxy.expectedRuntimeIdentity = service.RuntimeIdentity()
-			proxy.sidDir = service.backend.paths.SIDDir
-			return proxy.run(ctx, reader, serialized)
-		}
-		if _, mounted := status.Servers[pfmconfig.MCPServerChat]; mounted {
-			fmt.Fprintf(
-				warnings,
-				"pfm mcp stdio: runtime mismatch with daemon at %s; using in-process MCP; %s\n",
-				address,
-				consequence,
-			)
-			return service.Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
-		}
-		fmt.Fprintf(
-			warnings,
-			"pfm mcp stdio: chat route not mounted by daemon at %s; using in-process MCP; %s\n",
-			address,
-			consequence,
-		)
-		return service.Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
-	}
 	if errors.Is(probeErr, ErrDaemonAbsent) {
-		fmt.Fprintf(
-			warnings,
-			"pfm mcp stdio: daemon absent at %s (%v); using in-process MCP; %s\n",
-			address,
-			probeErr,
-			consequence,
-		)
-	} else {
-		fmt.Fprintf(
-			warnings,
-			"pfm mcp stdio: foreign service at %s (%v); using in-process MCP; %s\n",
-			address,
-			probeErr,
-			consequence,
-		)
+		return inProcess(fmt.Sprintf("daemon absent at %s (%v)", address, probeErr))
 	}
-	return service.Run(ctx, &mcp.IOTransport{
-		Reader: reader,
-		Writer: serialized,
-	})
+	if probeErr != nil {
+		return inProcess(fmt.Sprintf("foreign service at %s (%v)", address, probeErr))
+	}
+	for _, family := range slices.Sorted(maps.Keys(professor.servers)) {
+		if _, mounted := status.Servers[family]; !mounted {
+			return inProcess(fmt.Sprintf("family %s not mounted by daemon at %s", family, address))
+		}
+	}
+	if professor.chat != nil && (status.ChatRuntimeIdentity == "" ||
+		status.ChatRuntimeIdentity != professor.chat.RuntimeIdentity()) {
+		return inProcess("runtime mismatch with daemon at " + address)
+	}
+	if routeErr := probeProfessorRoute(ctx, address); routeErr != nil {
+		return inProcess(fmt.Sprintf("daemon at %s serves no %s (%v)", address, pfmconfig.MCPPathProfessor, routeErr))
+	}
+	marker, markerErr := stale.HoldCompatibleProxy(options.Home)
+	if markerErr != nil {
+		return fmt.Errorf("protect selected daemon stdio proxy: %w", markerErr)
+	}
+	defer func() {
+		if closeErr := marker.Close(); closeErr != nil {
+			returnErr = errors.Join(
+				returnErr,
+				fmt.Errorf("close compatible proxy marker %s: %w", marker.Name(), closeErr),
+			)
+		}
+	}()
+	proxy := newStdioProxy(ctx, address, warnings)
+	if professor.chat != nil {
+		proxy.expectedRuntimeIdentity = professor.chat.RuntimeIdentity()
+		proxy.sidDir = options.SIDDir
+	}
+	return proxy.run(ctx, reader, serialized)
+}
+
+// probeProfessorRoute asks the daemon whether it mounts config.MCPPathProfessor.
+// A daemon still running a build from before the professor server answers a
+// healthy /status with the same families but 404 on this route; every other
+// answer (the MCP handler refusing a bare GET included) means the route is
+// there. A probe that could not complete is an error, never "mounted".
+func probeProfessorRoute(ctx context.Context, address string) error {
+	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	endpoint := "http://" + address + pfmconfig.MCPPathProfessor
+	request, err := http.NewRequestWithContext(probeCtx, http.MethodGet, endpoint, http.NoBody)
+	if err != nil {
+		return fmt.Errorf("build route probe for %s: %w", endpoint, err)
+	}
+	response, err := obs.WrapClient(&http.Client{}).Do(request)
+	if err != nil {
+		return fmt.Errorf("probe %s: %w", endpoint, err)
+	}
+	if closeErr := response.Body.Close(); closeErr != nil {
+		return fmt.Errorf("close route probe response from %s: %w", endpoint, closeErr)
+	}
+	if response.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("%s answered HTTP 404", endpoint)
+	}
+	return nil
 }
 
 func (proxy *stdioProxy) forward(ctx context.Context, raw []byte, output io.Writer) {

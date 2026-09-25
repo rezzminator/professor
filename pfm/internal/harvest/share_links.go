@@ -286,4 +286,4 @@ func (h *Harvester) driveConfirmTarget(ctx context.Context, link shareLink) (str
 
 // shareSignInText ends every share-link failure; the texts carry no URL (the
 // result's source names it), so the public surface may repeat them verbatim.
-const shareSignInText = "a share link this harvester cannot open without signing in — download it yourself and read its path with read (files)."
+const shareSignInText = "a share link this harvester cannot open without signing in — download it yourself and read its path with harvester_read (files)."

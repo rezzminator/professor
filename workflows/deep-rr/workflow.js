@@ -416,8 +416,8 @@ Then append a section titled "Next sources": up to 5 of the page's highest-value
 Then append a section titled "Claims": each load-bearing fact the page carries — the fact in one line (with its value when it has one), a VERBATIM quote of at most ${this.QUOTE_MAX_CHARS} characters copied exactly from the page that pins it — one CONTIGUOUS unbroken span, never fragments joined with an ellipsis, and the source's entities (authors, funder, dataset, venue) when visible. Only facts the answer could rest on — do not pad.
 Then append a section titled "New terms": the community's terms of art the page uses that we did not — each with a one-line gloss. Give none when the page speaks our vocabulary.
 Then append a "Surprise" note ONLY when the page contradicts the current key claims: one line naming the contradiction. No section otherwise.`;
-    // L3 (directive A): primary tools are WebSearch + mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications), but agents MAY reach for any other tool that genuinely helps the rabbit-hole.
-    this.NET = `Primary tools: WebSearch + mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications) — load WebSearch via ToolSearch "select:WebSearch" if absent (built-in WebFetch is hook-denied; fetch only through Harvester). You may also load any other tool that genuinely helps THIS rabbit-hole (e.g. context7 for library/API docs) via ToolSearch — pick the best tool for the question, not only web search. Prefer primary, recent sources; stay on-rabbit-hole.`;
+    // L3 (directive A): primary tools are WebSearch + mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications), but agents MAY reach for any other tool that genuinely helps the rabbit-hole.
+    this.NET = `Primary tools: WebSearch + mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications) — load WebSearch via ToolSearch "select:WebSearch" if absent (built-in WebFetch is hook-denied; fetch only through Harvester). You may also load any other tool that genuinely helps THIS rabbit-hole (e.g. context7 for library/API docs) via ToolSearch — pick the best tool for the question, not only web search. Prefer primary, recent sources; stay on-rabbit-hole.`;
     // COMPUTE_NOTE — capability fragment for the compute-aware agents (mirrors NET). Names the scientific Python stack the compute
     // environment ships so they reach for it over hand-rolled math; the optional computeNote arg appends per-run guidance after it.
     this.COMPUTE_NOTE =
@@ -471,7 +471,7 @@ const FINISH = `
 The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object.`;
 // WEB_ONLY: the refine pass checks claims on the web — the local repo code is never evidence.
 const WEB_ONLY = `
-Use the web only (WebSearch / mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications)) to check sources — never read local files or this repo's own code; they are not evidence.`;
+Use the web only (WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications)) to check sources — never read local files or this repo's own code; they are not evidence.`;
 // EMIT: JSON-emission discipline for the agents whose StructuredOutput payload is large (readers, probes,
 // merger, prospector, scheduler, brainer). Run forensics: emitters intermittently sent prose-/<parameter>-
 // wrapped JSON and unescaped control characters in long string values — each a parse failure that burns a
@@ -1574,7 +1574,7 @@ ${plain(resultSoFar)}`;
       ? `
 Some of this topic's strongest literature is non-English. Guidance: ${languageGuidance}. Deliberately route some lanes to the non-English venues above, giving each its native venue(s) in \`sources\` — rather than defaulting every lane to English.`
       : '';
-  const probeClause = `Before you decide, hunt for coverage gaps — a candidate, sub-question, or angle the goal needs that no lane has touched — and probe them yourself with WebSearch / mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications), as many as you need, to fill them; fold what you find into resultSoFar and originate the missing rabbit-holes into \`lookupNext\`. Beyond gap-filling, leave the heavy digging to the lane readers.`;
+  const probeClause = `Before you decide, hunt for coverage gaps — a candidate, sub-question, or angle the goal needs that no lane has touched — and probe them yourself with WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications), as many as you need, to fill them; fold what you find into resultSoFar and originate the missing rabbit-holes into \`lookupNext\`. Beyond gap-filling, leave the heavy digging to the lane readers.`;
   const scoreFields = ', sources, note';
   const assignClause = venues && venues.length ? ' Assign each its `sources` venue subset.' : '';
   // workingClause — gated on compute exactly as computeField is. compute OFF ⇒ the brainer must NOT hand-roll a
@@ -1682,7 +1682,7 @@ Hardened facts (adversarially fact-checked + source-corrected — your input num
 The run's accumulated RESULT (your answer + the half-built \`working\` derivation to finish):
 {{resultSoFar}}
 Derive with rigor:
-- first fact-check your input numbers: verify each against a current primary source (WebSearch / mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications)) and correct any that is stale, wrong, or imprecise before computing — a derivation is only as sound as its inputs;
+- first fact-check your input numbers: verify each against a current primary source (WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications)) and correct any that is stale, wrong, or imprecise before computing — a derivation is only as sound as its inputs;
 - assemble the verified inputs with their units;
 - write and run a short script for any non-trivial arithmetic — load Bash + Write via ToolSearch if absent, run python (or node) — compute, do not estimate;
 - propagate the input uncertainties into an explicit ± error range;
@@ -3016,12 +3016,12 @@ async function runRerunner(
 const SCHEDULER_TPL = `{{! researchScheduler — discovery: per lane, find + size the highest-value sources, grouped per lane }}
 You are the RESEARCH SCHEDULER — you own source discovery for this wave. For each lane below, find the HIGHEST-VALUE sources to read — as MANY as genuinely add value, no cap. The readers only read what you return; they do not search.
 TOP GOAL: "{{query}}".
-Tools (load any missing via ToolSearch): WebSearch; mcp__harvester__search_web; mcp__harvester__search_literature — finds a work/DOI's open-access candidates, each read via mcp__harvester__read with its handle in publications; mcp__harvester__read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
+Tools (load any missing via ToolSearch): WebSearch; mcp__professor__harvester_search_web; mcp__professor__harvester_search_literature — finds a work/DOI's open-access candidates, each read via mcp__professor__harvester_read with its handle in publications; mcp__professor__harvester_read — fetches + caches web urls (in urls) and works (in publications: DOI, arXiv id, PMID, PMCID, ISBN, harvester_search_literature handle). Built-in WebFetch is denied; fetch only through Harvester.
 {{venueLegend}}LANES — each carries a rabbit-hole, the brainer's directive \`note\` (WHAT to find + ranked fallbacks), and the venues to prefer:
 {{lanes}}
 Work in TWO batched rounds — never one-source-at-a-time round-trips:
-1. DISCOVER — run ALL lanes' searches in ONE parallel batch (WebSearch / mcp__harvester__search_web / search_literature). Prefer each lane's assigned venues; let its \`note\` decide which results serve it. A lane carrying a concrete ref takes that ref as a source directly — no search needed for it.
-2. SIZE — call mcp__harvester__read (web urls in urls; works — DOI, id, search_literature handle — in publications) with include_content:false on EVERY candidate across all lanes in ONE parallel batch. With include_content:false it fetches + caches the full text and returns each item under its group ({urls:[…], publications:[…]}) as {tokens, path to the cache file, chars, cached, and gaps naming why the text is incomplete (empty when complete)} and NO body. Drop any candidate that failed or came back walled/thin and pick another from the same lane.
+1. DISCOVER — run ALL lanes' searches in ONE parallel batch (WebSearch / mcp__professor__harvester_search_web / mcp__professor__harvester_search_literature). Prefer each lane's assigned venues; let its \`note\` decide which results serve it. A lane carrying a concrete ref takes that ref as a source directly — no search needed for it.
+2. SIZE — call mcp__professor__harvester_read (web urls in urls; works — DOI, id, harvester_search_literature handle — in publications) with include_content:false on EVERY candidate across all lanes in ONE parallel batch. With include_content:false it fetches + caches the full text and returns each item under its group ({urls:[…], publications:[…]}) as {tokens, path to the cache file, chars, cached, and gaps naming why the text is incomplete (empty when complete)} and NO body. Drop any candidate that failed or came back walled/thin and pick another from the same lane.
 SANITY — after sizing, compare the batch: two DIFFERENT urls returning identical {tokens, chars} is a cache-poisoning signature — treat both as failed and replace them.
 For each lane, return its chosen sources as {source (the exact url or DOI), path (the cache path from the include_content:false read), size (the reply's tokens), chars}. Group them under the lane's id. A lane may return several sources; return an empty list for a lane only when every candidate failed.{{translateClause}}{{researcherClause}}{{vocabClause}}{{corruptClause}}
 Return \`lanes\`: one entry per input lane id, each {id, sources:[{source, path, size, chars}], venuesServed:[...], unsourced:[{ref, reason}]}. venuesServed is the subset of THIS lane's ASSIGNED venues (the legend entries' exact source strings) its chosen sources actually come from — [] when none. unsourced lists every ref/DOI/venue the lane's directive or brief NAMED that could not be fetched, each {ref, reason} — omit the field entirely when everything named was sourced. A lane whose PRIORITY venue yielded nothing must say so in unsourced (reason e.g. "venue unfetchable") — never silently substitute a lower tier for it. Use the sizes you measured — never invent them.${EMIT}
@@ -3119,7 +3119,7 @@ CORRUPTED CACHE — known-poisoned cache paths; NEVER return any of these as a s
 // RESEARCH SCHEDULER — inserted AFTER the brainer picks the wave's lanes (resolveLookupNext), BEFORE the
 // readers spawn. It owns discovery: per brainer lane (the rabbit-hole + its steering `note`), it picks the
 // HIGHEST-VALUE sources — MULTIPLE per lane, no cap — by batching ALL lane searches in one parallel round,
-// then sizing every candidate via mcp__harvester__read include_content:false (returns {tokens, path, chars} per item) in a second
+// then sizing every candidate via mcp__professor__harvester_read include_content:false (returns {tokens, path, chars} per item) in a second
 // parallel round; it returns the chosen sources grouped per lane id. Code (engine.ts) then bin-packs each
 // lane's content into RESEARCHER_TOKEN_BUDGET reader-units and spawns the sequential per-lane reader threads.
 // Tier: sonnet — judging source value + driving batched tool I/O is a mid-weight job, above a worker but below
@@ -3205,7 +3205,7 @@ const researchScheduler                               = {
                                                                       
 
 const RESEARCHER_TPL = `{{! researcher — a lane reader: reads its assigned cache slice(s) from disk via code, then digests into the running answer }}
-You are reader {{readerIndex}} of {{readerCount}} on one research lane — read your assigned slice and digest it. You do NOT search the web: the sources are already chosen and fetched to the local cache. Tools (load any via ToolSearch): Bash (read the cache files); mcp__harvester__read with publications + mcp__harvester__search_literature (resolve a wall to its open-access full text); mcp__harvester__download_file (to view an image, download it via mcp__harvester__download_file for a local path, then read it).
+You are reader {{readerIndex}} of {{readerCount}} on one research lane — read your assigned slice and digest it. You do NOT search the web: the sources are already chosen and fetched to the local cache. Tools (load any via ToolSearch): Bash (read the cache files); mcp__professor__harvester_read with publications + mcp__professor__harvester_search_literature (resolve a wall to its open-access full text); mcp__professor__harvester_download_file (to view an image, download it via mcp__professor__harvester_download_file for a local path, then read it).
 TOP GOAL: "{{query}}".
 TRAIL (top goal → … → this lane): {{trail}}.
 This lane: "{{keyword}}" (why it matters: {{why}}).
@@ -3251,7 +3251,7 @@ const buildResearcher = ({
   researcherNote,
 }                ) => {
   const wallClause = `
-If your assigned content is a paywall, stub, or too thin for the directive, extract its DOI/identifier and call mcp__harvester__read with it in publications — it resolves DOIs — or mcp__harvester__search_literature and read its hit via mcp__harvester__read with its handle in publications to fetch the open-access full text to the cache, then read THAT from disk; do not return an empty answer. This is scoped to resolving THIS source — do not open a general web search.`;
+If your assigned content is a paywall, stub, or too thin for the directive, extract its DOI/identifier and call mcp__professor__harvester_read with it in publications — it resolves DOIs — or mcp__professor__harvester_search_literature and read its hit via mcp__professor__harvester_read with its handle in publications to fetch the open-access full text to the cache, then read THAT from disk; do not return an empty answer. This is scoped to resolving THIS source — do not open a general web search.`;
   const researcherClause = researcherNote ? '\n' + researcherNote : '';
   const priorClause = priorAnswer
     ? `
@@ -3269,7 +3269,7 @@ ${claimDigest}`
   // search) exists to try to break a claim: its primary output is counter-evidence, never manufactured doubt.
   const attackClause =
     laneKind === 'attack'
-      ? " This is an ATTACK lane: your PRIMARY output is counter-evidence — claims with stance {target, kind:'attacks'} against the target claim, or an honest empty claims list when you find none; never manufacture doubt. Attack lanes ALONE may search beyond their assigned slices: before concluding the claim holds, run up to 3 WebSearch / mcp__harvester__read probes against the CURRENT product/changelog/news surface of every prime suspect the DIRECTIVE names — absence from your cached slices is not absence in the world."
+      ? " This is an ATTACK lane: your PRIMARY output is counter-evidence — claims with stance {target, kind:'attacks'} against the target claim, or an honest empty claims list when you find none; never manufacture doubt. Attack lanes ALONE may search beyond their assigned slices: before concluding the claim holds, run up to 3 WebSearch / mcp__professor__harvester_read probes against the CURRENT product/changelog/news surface of every prime suspect the DIRECTIVE names — absence from your cached slices is not absence in the world."
       : '';
   return render(RESEARCHER_TPL, {
     readerIndex,
@@ -3406,7 +3406,7 @@ const buildScoutPlanner = ({ query, mode, net, researcherNote }                 
 const SCOUT_TPL = `{{! scout — one probe of the swarm, scoped to a single angle: sweeps it and seeds its rabbit-holes }}
 You are scout probe {{index}} of {{total}}, on the angle «{{angleName}}» — {{angleWhy}}. Lens: {{angleLens}}. {{net}}
 Step 1 — run WebSearch with: "{{searchQuery}}". You may refine it ONCE if the results are off-angle — stay on THIS angle, do not wander onto another probe's.
-Step 2 — pick the up-to-${CONFIG.SCOUT_PROBE_SOURCES} most relevant sources FOR THIS ANGLE and fetch them via mcp__harvester__read (their urls in urls) — built-in WebFetch is denied. For each fetched page, first surface the key facts about "{{query}}" as this angle reveals them, then apply this instruction: <<{{footer}}>> Record the local cache path the fetch tool reports as EVERY claim's cachePath — a claim without its cachePath can never be mechanically verified and stays permanently unpinned; never invent one when the tool did not report it. Skip the footer's Surprise section — no prior claims exist yet.
+Step 2 — pick the up-to-${CONFIG.SCOUT_PROBE_SOURCES} most relevant sources FOR THIS ANGLE and fetch them via mcp__professor__harvester_read (their urls in urls) — built-in WebFetch is denied. For each fetched page, first surface the key facts about "{{query}}" as this angle reveals them, then apply this instruction: <<{{footer}}>> Record the local cache path the fetch tool reports as EVERY claim's cachePath — a claim without its cachePath can never be mechanically verified and stays permanently unpinned; never invent one when the tool did not report it. Skip the footer's Surprise section — no prior claims exist yet.
 Step 3 — return ALL SIX fields (an array with nothing to report is [], never omitted): landscape (2-3 sentences on what THIS ANGLE revealed — not the whole topic, and NEVER your findings packed into prose: facts go in claims[], page detail in pages[].summary); pages[] (each: url, 2-3 sentence summary, rabbitHoles[] copied from the page's "Rabbit holes" section as {keyword, why}); nextSources[] union of the pages' "Next sources" sections, each {ref, why}; claims[] union of the pages' "Claims" sections, each pinned to a verbatim quote — a claim without its verbatim quote is worthless, no quote no claim; newTerms[] union of the pages' "New terms" sections; deadEnds[] for any source that timed out, was parked, or was off-topic — do not invent rabbit-holes for those. If every source is dead/unreachable, still return a valid result: landscape from your search, pages [], the dead sources in deadEnds.${EMIT}{{researcherClause}}
 `;
 
@@ -4330,7 +4330,7 @@ async function runRefine(
 
 // SCHEDULER (B4) — discovery. One Sonnet researchScheduler over the WHOLE wave's lanes: per lane (the
 // rabbit-hole + its steering `note` + assigned venues + kind/refetch flags), it batches the searches, sizes
-// every candidate via mcp__harvester__read include_content:false, and returns the chosen sources grouped per lane id —
+// every candidate via mcp__professor__harvester_read include_content:false, and returns the chosen sources grouped per lane id —
 // plus two HONESTY side-channels: `venuesServed` (assigned-vs-served venue reconciliation, so a silent
 // tier-substitution shows up) and `unsourced` (directive-named refs/venues it could not fetch, reported
 // instead of silently dropped). Returns a ScheduleResult; the ENGINE folds the honesty channels into bs

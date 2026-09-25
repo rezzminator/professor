@@ -74,7 +74,7 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 		{
 			"paywall",
 			Result{Error: "the article is behind a paywall"},
-			[]string{"paywall", "never signs in", "search_literature"},
+			[]string{"paywall", "never signs in", "harvester_search_literature"},
 			nil,
 		},
 		{
@@ -143,19 +143,19 @@ func TestPublicFailureMessageNamesCauseAndNextStep(t *testing.T) {
 				Error: "Found DOI 10.1234/x, but no free, legal full text exists in the configured open-access sources. The paper is likely paywalled",
 				Rungs: []string{"oa:unpaywall", "oa:core"},
 			},
-			[]string{"No open copy", "never signs in", "search_literature", "oa-mirror(2 sources)"},
+			[]string{"No open copy", "never signs in", "harvester_search_literature", "oa-mirror(2 sources)"},
 			nil,
 		},
 		{
 			"disabled",
 			Result{ErrorKind: errorKindDisabled},
-			[]string{"disabled on this harvester", "search_literature"},
+			[]string{"disabled on this harvester", "harvester_search_literature"},
 			nil,
 		},
 		{
 			"local missing",
 			Result{Source: "/data/notes/report.odt", ErrorKind: errorKindMissing},
-			[]string{"local file", "read (files)"},
+			[]string{"local file", "harvester_read (files)"},
 			[]string{"/data/notes"},
 		},
 		{
@@ -347,6 +347,24 @@ func TestNamedFailuresKeepTheirTextThroughBothPublicPasses(t *testing.T) {
 			Result{Source: "https://example.test/x", Error: "a reason nobody named"},
 			errorKindUnclassified,
 			[]string{"could not classify", "a reason nobody named"},
+		},
+		{
+			"ambiguous",
+			Result{
+				Source: "https://example.test/y",
+				Error:  "Choose another record with harvester_search_literature and read it with harvester_read (publications).",
+			},
+			"ambiguous",
+			[]string{"title is ambiguous", "harvester_search_literature", "harvester_read"},
+		},
+		{
+			"wrong kind",
+			Result{
+				Source: "https://example.test/z",
+				Error:  "This document is an image, not a page — download it with `harvester_download_file`; harvester_read reads pages.",
+			},
+			errorKindWrongKind,
+			[]string{"not a page", "harvester_download_file", "harvester_read reads pages"},
 		},
 	}
 	for _, test := range cases {

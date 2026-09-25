@@ -267,12 +267,12 @@ func TestMCPDaemonHandlerIsUnauthenticatedAndReportsSurface(t *testing.T) {
 func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 	dispatched := 0
 	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
-		Chat: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		Professor: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			dispatched++
 			w.WriteHeader(http.StatusNoContent)
 		}),
 	})
-	browser := httptest.NewRequest(http.MethodPost, "/mcp/chat", http.NoBody)
+	browser := httptest.NewRequest(http.MethodPost, config.MCPPathProfessor, http.NoBody)
 	browser.Header.Set("Origin", "https://attacker.example")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, browser)
@@ -280,7 +280,7 @@ func TestMCPDaemonRejectsBrowserOriginBeforeDispatch(t *testing.T) {
 		t.Fatalf("browser-origin request status=%d dispatched=%d, want 403/0", response.Code, dispatched)
 	}
 
-	local := httptest.NewRequest(http.MethodPost, "/mcp/chat", http.NoBody)
+	local := httptest.NewRequest(http.MethodPost, config.MCPPathProfessor, http.NoBody)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, local)
 	if response.Code != http.StatusNoContent || dispatched != 1 {
@@ -315,53 +315,74 @@ func TestMCPDaemonMountedServersNeedNoAuthAndServeTools(t *testing.T) {
 		}
 	}()
 
+	professor, err := mcpserv.NewProfessor(mcpserv.ProfessorOptions{
+		Version: "test", Chat: chat, Harvester: harvester,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
 		Version: "test", StartedAt: time.Now(), Endpoint: "http://127.0.0.1:8377",
-		Chat: chat.NewHTTPHandler(), Harvester: harvester.NewHTTPHandler(),
+		Professor: professor.Handler(),
+		Chat:      professor.FamilyHandler(config.MCPServerChat),
+		Harvester: professor.FamilyHandler(config.MCPServerHarvester),
 	})
 	server := httptest.NewServer(handler)
 	defer server.Close()
 	client := http.DefaultClient
 	ctx := context.Background()
-	chatSession, err := connectHTTPMCP(t, ctx, server.URL+"/mcp/chat", client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := chatSession.Close(); err != nil {
-			t.Errorf("close chatSession: %v", err)
+	for path, want := range map[string][]string{
+		config.MCPPathProfessor:                         {"harvester_read", "chat_whoami", "servicedesk"},
+		config.MCPFamilyPath(config.MCPServerChat):      {"chat_keys", "chat_whoami", "chat_self_compact", "chat_new"},
+		config.MCPFamilyPath(config.MCPServerHarvester): {"harvester_read", "harvester_download_file"},
+	} {
+		session, err := connectHTTPMCP(t, ctx, server.URL+path, client)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
 		}
-	}()
-	tools, err := chatSession.ListTools(ctx, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]bool{}
-	for _, tool := range tools.Tools {
-		seen[tool.Name] = true
-	}
-	for _, name := range []string{"chat_keys", "chat_whoami", "chat_self_compact", "chat_new"} {
-		if !seen[name] {
-			t.Fatalf("chat tools omitted %q: %v", name, seen)
+		tools, err := session.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatalf("%s tools/list: %v", path, err)
 		}
-	}
-	if _, err := chatSession.CallTool(ctx, &mcp.CallToolParams{Name: "chat_whoami"}); err != nil {
-		t.Fatalf("chat_whoami: %v", err)
+		seen := map[string]bool{}
+		for _, tool := range tools.Tools {
+			seen[tool.Name] = true
+		}
+		for _, name := range want {
+			if !seen[name] {
+				t.Fatalf("%s tools omitted %q: %v", path, name, seen)
+			}
+		}
+		if err := session.Close(); err != nil {
+			t.Errorf("close %s session: %v", path, err)
+		}
 	}
 
-	harvesterSession, err := connectHTTPMCP(t, ctx, server.URL+"/mcp/harvester", client)
+	// Both families' tools answer over the one combined route.
+	session, err := connectHTTPMCP(t, ctx, server.URL+config.MCPPathProfessor, client)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
-		if err := harvesterSession.Close(); err != nil {
-			t.Errorf("close harvesterSession: %v", err)
+		if err := session.Close(); err != nil {
+			t.Errorf("close session: %v", err)
 		}
 	}()
-	if _, err := harvesterSession.CallTool(ctx, &mcp.CallToolParams{
-		Name: "read", Arguments: map[string]any{"publications": []string{"doi:10.1000/never-match"}},
-	}); err != nil {
-		t.Fatalf("read: %v", err)
+	whoami, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "chat_whoami"})
+	if err != nil {
+		t.Fatalf("chat_whoami: %v", err)
+	}
+	if len(whoami.Content) == 0 {
+		t.Fatalf("chat_whoami answered no content: %+v", whoami)
+	}
+	read, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "harvester_read", Arguments: map[string]any{"publications": []string{"doi:10.1000/never-match"}},
+	})
+	if err != nil {
+		t.Fatalf("harvester_read: %v", err)
+	}
+	if len(read.Content) == 0 {
+		t.Fatalf("harvester_read answered no content: %+v", read)
 	}
 }
 
@@ -377,7 +398,7 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 	})
 
 	disabled := httptest.NewRecorder()
-	handler.ServeHTTP(disabled, httptest.NewRequest(http.MethodPost, "/mcp/harvester", http.NoBody))
+	handler.ServeHTTP(disabled, httptest.NewRequest(http.MethodPost, config.MCPFamilyPath("harvester"), http.NoBody))
 	if disabled.Code != http.StatusServiceUnavailable {
 		t.Fatalf("disabled route status = %d, want %d", disabled.Code, http.StatusServiceUnavailable)
 	}
@@ -387,13 +408,24 @@ func TestMCPDaemonDisabledRouteReturns503DistinctFromEnabledAndUnknownPath(t *te
 	}
 
 	enabled := httptest.NewRecorder()
-	handler.ServeHTTP(enabled, httptest.NewRequest(http.MethodPost, "/mcp/chat", http.NoBody))
+	handler.ServeHTTP(enabled, httptest.NewRequest(http.MethodPost, config.MCPFamilyPath("chat"), http.NoBody))
 	if enabled.Code != http.StatusNoContent {
 		t.Fatalf(
 			"enabled route status = %d, want %d — disabling harvester must not dark chat",
 			enabled.Code,
 			http.StatusNoContent,
 		)
+	}
+
+	chatOff := httptest.NewRecorder()
+	mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
+		Harvester: http.HandlerFunc(
+			func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) },
+		),
+	}).ServeHTTP(chatOff, httptest.NewRequest(http.MethodPost, config.MCPFamilyPath("chat"), http.NoBody))
+	wantChatBody := "pfm mcp: chat is disabled by config; enable it with: pfm mcp chat enable\n"
+	if chatOff.Code != http.StatusServiceUnavailable || chatOff.Body.String() != wantChatBody {
+		t.Fatalf("disabled chat view = %d %q, want 503 %q", chatOff.Code, chatOff.Body.String(), wantChatBody)
 	}
 
 	unknown := httptest.NewRecorder()
@@ -446,7 +478,7 @@ func TestMCPDaemonStatusServersListsOnlyMountedHandlers(t *testing.T) {
 // TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate pins the search-gate
 // fix to /status: the harvester's advertised tool list must track
 // harvestmcp.ToolNames for the runtime actually mounted, never a hardcoded
-// tool list that claims `search_web` whether or not runtimeSearchEnabled
+// tool list that claims `harvester_search_web` whether or not runtimeSearchEnabled
 // holds. Before the fix, mcp_serve_command.go's package-level
 // harvesterMCPTools always listed the web search tool; that defect is what this test
 // would have caught.
@@ -473,9 +505,14 @@ func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
 					t.Errorf("close harvester: %v", err)
 				}
 			}()
+			professor, err := mcpserv.NewProfessor(mcpserv.ProfessorOptions{Version: "test", Harvester: harvester})
+			if err != nil {
+				t.Fatal(err)
+			}
 			handler := mcpserv.NewDaemonHandler(mcpserv.DaemonOptions{
-				Harvester:      harvester.NewHTTPHandler(),
-				HarvesterTools: harvestmcp.RegisteredToolNames(test.runtime),
+				Professor:      professor.Handler(),
+				Harvester:      professor.FamilyHandler(config.MCPServerHarvester),
+				HarvesterTools: harvester.ToolNames(),
 			})
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/status", http.NoBody))
@@ -486,7 +523,7 @@ func TestMCPDaemonStatusHarvesterToolsFollowTheSearchGate(t *testing.T) {
 			listed := status.Servers[config.MCPServerHarvester]
 			hasSearch := false
 			for _, name := range listed {
-				if name == "search_web" {
+				if name == "harvester_search_web" {
 					hasSearch = true
 				}
 			}

@@ -550,9 +550,9 @@ func publicErrorKind(result Result) string {
 		strings.Contains(err, "unsupported url"),
 		strings.Contains(err, "source is empty"):
 		return errorKindInvalid
-	case strings.Contains(err, "search_literature"), strings.Contains(err, "title — use"):
+	case strings.Contains(err, "harvester_search_literature"), strings.Contains(err, "title — use"):
 		return "ambiguous"
-	case strings.Contains(err, "with `download_file`"):
+	case strings.Contains(err, "with `harvester_download_file`"):
 		return errorKindWrongKind
 	case strings.Contains(err, cacheLabel), strings.Contains(err, "storage"), strings.Contains(err, "read local file"):
 		return errorKindInternal
@@ -568,15 +568,15 @@ func PublicFailureMessage(result Result) string {
 	switch kind {
 	case errorKindRefused:
 		if isLocalFailureSource(result.Source) {
-			return "This local path is outside the directories this harvester may read. read reads files only inside its permitted roots; move or copy the file there."
+			return "This local path is outside the directories this harvester may read. harvester_read reads files only inside its permitted roots; move or copy the file there."
 		}
 		return "The request was refused by access policy: the harvester reads only public internet addresses. Use the resource's public URL, or " + anotherCopy + "."
 	case errorKindCancelled:
 		return "The request was cancelled before it finished. Send it again."
 	case errorKindInvalid:
-		return "The input is invalid. Give read a web URL in urls, a local path in files, or a DOI, arXiv id, PMID, PMCID, ISBN or a search_literature handle in publications."
+		return "The input is invalid. Give harvester_read a web URL in urls, a local path in files, or a DOI, arXiv id, PMID, PMCID, ISBN or a harvester_search_literature handle in publications."
 	case "ambiguous":
-		return "The title is ambiguous. Use search_literature, select a result, and read its handle with read in publications."
+		return "The title is ambiguous. Use harvester_search_literature, select a result, and read its handle with harvester_read in publications."
 	case errorKindWrongKind:
 		return wrongKindMessage(result.Kind)
 	case errorKindInternal:
@@ -655,5 +655,5 @@ func wrongKindMessage(kind string) string {
 	case low == kindArchive || low == kindZIP || low == kindTAR || low == kind7Z || low == kindRAR:
 		what = "an archive"
 	}
-	return "This source is " + what + ", not a page. Download it with `download_file`; read reads pages."
+	return "This source is " + what + ", not a page. Download it with `harvester_download_file`; harvester_read reads pages."
 }

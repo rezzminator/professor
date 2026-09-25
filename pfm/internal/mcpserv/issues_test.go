@@ -2,9 +2,12 @@ package mcpserv
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -30,6 +33,33 @@ func newIssuesTestService(t *testing.T) *Service {
 	}
 	t.Cleanup(func() { _ = service.Close() })
 	return service
+}
+
+// TestChatInstructionsRouteComplaintsToServicedesk pins the chat server's
+// initialize Instructions to the contracts' chat part, byte for byte,
+// ending in the servicedesk routing clause rather than issue_servicedesk.
+func TestChatInstructionsRouteComplaintsToServicedesk(t *testing.T) {
+	service := newIssuesTestService(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := service.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	want := "Message another running chat → chat_inject; list running chats → chat_ls; who am I → chat_whoami; start a chat → chat_new; is a chat idle, what is it doing → chat_status; its last answer → chat_last; find, then read an old transcript → chat_find, chat_read; dump my transcript to a file → chat_save; compact myself at a milestone → chat_self_compact; complain about Professor itself → servicedesk. Chats are independent running sessions, never sub-agents."
+	got := clientSession.InitializeResult().Instructions
+	if got != want {
+		t.Fatalf("chat server Instructions =\n%q\nwant\n%q", got, want)
+	}
 }
 
 func TestIssueServicedeskRejectsEmptyTitle(t *testing.T) {
@@ -171,10 +201,107 @@ func TestIssueReporterSeparatesAFailedIdentityLookupFromNoIdentity(t *testing.T)
 	for _, record := range recorder.Records() {
 		if strings.Contains(record.Message, "caller") && record.Level != "INFO" {
 			named = true
+			tool, ok := record.Field("tool")
+			if !ok || tool != "servicedesk" {
+				t.Fatalf(
+					"mcp.caller record tool = %v (present=%v), want %q: %s",
+					tool,
+					ok,
+					"servicedesk",
+					recorder.Raw(),
+				)
+			}
 		}
 	}
 	if !named {
 		t.Fatalf("a failed MCP caller lookup left no record naming it: %s", recorder.Raw())
+	}
+}
+
+// TestToolNamesHoldsServicedesk pins the roster entry directly, independent
+// of the jailed stdio protocol test.
+func TestToolNamesHoldsServicedesk(t *testing.T) {
+	names := ToolNames()
+	if !slices.Contains(names, "servicedesk") {
+		t.Fatalf("ToolNames() = %v, want it to hold %q", names, "servicedesk")
+	}
+}
+
+// TestServicedeskCallableByNameOverInMemorySession exercises the tool the
+// way a real client does: connected in-memory to the service's own server,
+// calling it by its registered name rather than the Go method directly.
+func TestServicedeskCallableByNameOverInMemorySession(t *testing.T) {
+	service := newIssuesTestService(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := service.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name: "servicedesk",
+		Arguments: IssueInput{
+			Title:  "filed by name over an in-memory session",
+			Detail: "the roster rename must not break the call path",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CallTool servicedesk: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("servicedesk call reported an error: %+v", result)
+	}
+	raw, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatalf("marshal structured content: %v", err)
+	}
+	var output IssueOutput
+	if err := json.Unmarshal(raw, &output); err != nil {
+		t.Fatalf("unmarshal IssueOutput: %v (content: %s)", err, raw)
+	}
+	if output.Status != "ok" || output.ID == 0 {
+		t.Fatalf("servicedesk output = %+v, want ok with an assigned id", output)
+	}
+}
+
+// TestServicedeskCallMissingTitleOrDetailIsToolError pins the "missing
+// title or detail is a tool error" contract row over the same in-memory
+// call path as the successful call above.
+func TestServicedeskCallMissingTitleOrDetailIsToolError(t *testing.T) {
+	service := newIssuesTestService(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := service.Server().Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "servicedesk",
+		Arguments: IssueInput{Detail: "title is missing"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool servicedesk: %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("servicedesk call with no title = %+v, want a tool error", result)
 	}
 }
 

@@ -380,7 +380,7 @@ jq 'del(.laneForeignKey)' "$SEAT_DIR/settings.json" >"$SEAT_DIR/settings.json.tm
 claude_json="$SEAT_DIR/.claude.json"
 if [ -f "$claude_json" ]; then
   jq -e '.mcpServers | objects' "$claude_json" >/dev/null 2>&1 ||
-    bad="$bad $claude_json carries no mcpServers object (the chat server registration);"
+    bad="$bad $claude_json carries no mcpServers object (the professor server registration);"
 else
   bad="$bad no $claude_json for seat $SEAT;"
 fi

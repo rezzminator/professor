@@ -34,7 +34,7 @@ Co-change evidence is the number of commits since 2026-06-01, releases excluded,
 | --- | --- | --- | --- |
 | CLI shell | argv → typed request → exit code; global `--config`; usage | `cmd/pfm/` (dispatch only) | touched by 67% of commits today; target ≤ 25% |
 | Chat verbs | the 27 `pfm chat` verbs (new, open, read, last, status, stream, inject, self-compact, goal, ask, watch, capture, keys, recover, name, kill, unkill, end, reload, whoami, find, save, branch, history, ls, modal, resolve), target resolution, caller identity | `internal/chat/` **new** | cmd/pfm+mcpserv 38 · cmd/pfm+inject 32 · inject+mcpserv 26 |
-| MCP chat server | tool schemas, caller identity, JSON adaptation over `internal/chat` | `internal/mcpserv/` | the 38 above collapse into chat+mcpserv |
+| MCP chat family (professor server) | tool schemas, caller identity, JSON adaptation over `internal/chat` | `internal/mcpserv/` | the 38 above collapse into chat+mcpserv |
 | Hooks and internal entries | every `pfm internal <entry>` body, its harness event, and its installer wiring | `internal/hooks/` **new** | cmd/pfm+installer 45 (the top pair) |
 | Doctor | probes and verdict lines | `internal/doctor/` **new** | `cmd/pfm/doctor.go` is the hottest file (35 commits) |
 | Fleet scan | one snapshot of every chat: index → gather → compose, account roots, live enrichment | `internal/fleet/` **new** (from `pipeline.go:227-690,1474-1600`) | three consumers today: the picker, `pfm chat ls`, and MCP `chat_ls` through `mcpSharedOperations` · cmd/pfm+compose 26 · cmd/pfm+gather 20 |

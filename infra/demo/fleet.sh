@@ -18,7 +18,7 @@ export PATH="$HOME/.local/bin:$PATH"
 export IS_SANDBOX=1 # root fence: Claude Code refuses the bypass flag under root without it (setup.sh)
 cd /tmp
 READY='Reply with exactly one line confirming you are ready, then wait for instructions. Do nothing else.'
-"$(dirname "$0")/daemon.sh" # Codex chats reach chat_* only through the HTTP daemon
+"$(dirname "$0")/daemon.sh" # the professor MCP daemon the chats' stdio servers forward to; harmless when already up
 # Seat B is the second configured Claude seat (the reload beat moves a chat onto
 # it); with a single seat configured it falls back to the first. Read, never
 # assumed: a seat the host could not hand in is not in this config.

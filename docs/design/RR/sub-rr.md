@@ -20,7 +20,7 @@
 | Kind | original agent, `templates/global/agents/sub-rr.md`, linked by `pfm install` |
 | Class | `RR-ONLY` |
 | Model, effort | `sonnet`, `low` |
-| Tools | `WebSearch, WebFetch, mcp__harvester__read, mcp__harvester__search_literature, mcp__harvester__search_web` |
+| Tools | `WebSearch, WebFetch, mcp__professor__harvester_read, mcp__professor__harvester_search_literature, mcp__professor__harvester_search_web` |
 | Spawns | nothing — it holds no `Agent` |
 | Writes | nothing — it holds no `Write`, `Edit` or `Bash` |
 
@@ -37,8 +37,8 @@ The lead writes each brief from one group of its frontier (one unsettled sub-are
 ## The fetch path
 
 1. WebSearch each sub-query, then read the 2-3 best sources; a source serving two sub-queries is read once.
-2. `read` with `publications` for a paper, book chapter, PDF or document identifier, `search_literature` first when only a title is known. WebFetch is the default for a page.
-3. `read` with `urls` when a WebFetch fails or returns an encoded or empty body.
+2. `harvester_read` with `publications` for a paper, book chapter, PDF or document identifier, `harvester_search_literature` first when only a title is known. WebFetch is the default for a page.
+3. `harvester_read` with `urls` when a WebFetch fails or returns an encoded or empty body.
 4. Every WebFetch prompt asks the key question first, asks for the exact sentence behind every figure and date, then appends the rabbit-hole footer with the `Goal:` line in its slot. A harvester-read document carries no footer; the digger lists the rabbit holes it raises itself.
 
 The harvester tools cover what WebFetch cannot: a PDF WebFetch returns as an encoded stream, a page too large for it, a leaderboard it cannot render. Without them a digger has no second road, and the finding goes `unquoted` or empty.

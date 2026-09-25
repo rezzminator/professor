@@ -81,9 +81,9 @@ need "the managed install root $MANAGED" "[ -d '$MANAGED' ] && [ -s '$MANAGED/so
   "(cd '$BLUEPRINT' && pfm install --yes)" ||
   lane_abort "pfm install has never completed in this container (no $MANAGED/source-repo marker)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/chat)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
   "bash $WORKTREE/infra/demo/daemon.sh" ||
-  lane_abort "the chat MCP daemon never answered on :$PORT — no chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat_* tool"
 need "express adopted at $EXPRESS (pfm init + the interview, 'professor: install' committed)" \
   "[ -f '$EXPRESS/.professor/baseline.json' ] && git -C '$EXPRESS' log --oneline 2>/dev/null | grep -q 'professor: install'" \
   "bash $WORKTREE/infra/demo/adopt.sh" ||

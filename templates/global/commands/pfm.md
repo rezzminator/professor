@@ -20,7 +20,7 @@ Operator verbs:
 - harvest: fetch and convert a URL, DOI, ISBN, PMID, PMCID, or local path to markdown
 - index: refresh the transcript index
 - whoami: this chat's own tmux session name
-- issues: servicedesk complaints filed through `issue_servicedesk`
+- issues: servicedesk complaints filed through `servicedesk`
 - reap: classify the socket graveyard; `--apply` reclaims it
 - archive: move killed chats and old subagent transcripts out of sight, reversibly
 - heal: report or repair wedged Codex history projections
@@ -59,7 +59,7 @@ Inside a chat, the `chat_*` MCP verbs are the preferred surface for inject, ask,
 
 ## Harvest: MCP first, CLI for batches
 
-Inside a chat, the `harvester` MCP tools (`read` (its `files` field local server only), `download_file`, `search_literature`, `search_web` (only when a search backend is configured)) answer per item; `pfm harvest [--refresh] [--include-content=false] [--ocr-language latin|zh|ja|ar|ru|he] [--json] [--header 'Name: value']... <url|path|identifier>...`, `pfm harvest download-file [--json] [--header 'Name: value']... <url>...` and `pfm harvest search [--type any|paper|book] [--limit N] [--json] <query>...` are the shell surface for batch or scripted fetches and for a chat without the MCP.
+Inside a chat, the professor MCP's `harvester_*` tools (`harvester_read` (its `files` field local server only), `harvester_download_file`, `harvester_search_literature`, `harvester_search_web` (only when a search backend is configured)) answer per item; `pfm harvest [--refresh] [--include-content=false] [--ocr-language latin|zh|ja|ar|ru|he] [--json] [--header 'Name: value']... <url|path|identifier>...`, `pfm harvest download-file [--json] [--header 'Name: value']... <url>...` and `pfm harvest search [--type any|paper|book] [--limit N] [--json] <query>...` are the shell surface for batch or scripted fetches and for a chat without the MCP.
 
 ## Config
 

@@ -78,10 +78,10 @@ func TestDownloadFileRoundTripsItsTypedOutput(t *testing.T) {
 		"urls": []string{"/tmp/x.zip", "10.1038/nature14539"},
 	}, &out)
 	if len(out.Items) != 2 ||
-		out.Items[0].Error != "this is a local path; download_file takes URLs — read a local document with `read` (files)." ||
+		out.Items[0].Error != "this is a local path; harvester_download_file takes URLs — read a local document with `harvester_read` (files)." ||
 		!strings.Contains(
 			out.Items[1].Error,
-			"; read it with `read` (publications), or download the URL of its file.",
+			"; read it with `harvester_read` (publications), or download the URL of its file.",
 		) {
 		t.Fatalf("download_file(local path, DOI) = %+v", out.Items)
 	}

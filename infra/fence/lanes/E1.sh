@@ -44,9 +44,9 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   "mkdir -p '$CWD' && git -C '$CWD' init -q && git -C '$CWD' commit -q --allow-empty -m lane" ||
   lane_abort "no working directory for the chat to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/chat)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
   "bash /worktree/infra/demo/daemon.sh" ||
-  lane_abort "the chat MCP daemon never answered on :$PORT — no chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no chat can call a chat_* tool"
 
 # ─── E1.01 — the spawn ceremony ─────────────────────────────────────────────
 

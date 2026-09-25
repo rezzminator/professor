@@ -25,7 +25,7 @@ export const FINISH = `
 The data above is enough to decide. You may consult a tool if it genuinely helps, but keep it brief — the answer does not require it. Your one required action: return the complete StructuredOutput with every required field, never a partial object.`;
 // WEB_ONLY: the refine pass checks claims on the web — the local repo code is never evidence.
 export const WEB_ONLY = `
-Use the web only (WebSearch / mcp__harvester__read (web urls in urls, DOIs and paper/book ids in publications)) to check sources — never read local files or this repo's own code; they are not evidence.`;
+Use the web only (WebSearch / mcp__professor__harvester_read (web urls in urls, DOIs and paper/book ids in publications)) to check sources — never read local files or this repo's own code; they are not evidence.`;
 // EMIT: JSON-emission discipline for the agents whose StructuredOutput payload is large (readers, probes,
 // merger, prospector, scheduler, brainer). Run forensics: emitters intermittently sent prose-/<parameter>-
 // wrapped JSON and unescaped control characters in long string values — each a parse failure that burns a

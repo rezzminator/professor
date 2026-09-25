@@ -18,7 +18,8 @@ import (
 const mcpProtocolVersion = "2025-06-18"
 
 // daemonRoute labels the daemon's own door in the activity log, beside the
-// per-server route each mounted handler logs under (chat-mcp, harvester-mcp).
+// route each mounted handler logs under (professor-mcp, professor-mcp-chat,
+// professor-mcp-harvester).
 const daemonRoute = "mcp-daemon"
 
 // maxDaemonBodyBytes bounds every request body the daemon accepts, on the
@@ -34,12 +35,14 @@ const daemonRoute = "mcp-daemon"
 const maxDaemonBodyBytes = 1 << 20
 
 // DaemonOptions is everything `pfm mcp serve` hands the loopback daemon's
-// front door. A nil Chat or Harvester means that server is disabled by config
-// and was never constructed.
+// front door. Professor is the combined server at config.MCPPathProfessor;
+// Chat and Harvester are the family views at config.MCPFamilyPath. A nil view
+// means that family is disabled by config and was never constructed.
 type DaemonOptions struct {
 	Version             string
 	StartedAt           time.Time
 	Endpoint            string
+	Professor           http.Handler
 	Chat                http.Handler
 	Harvester           http.Handler
 	ChatRuntimeIdentity string
@@ -135,9 +138,19 @@ func NewDaemonHandler(options DaemonOptions) http.Handler {
 				}
 			}
 			writeDaemonJSON(writer, options.Warnings, current)
-		case "/mcp/" + pfmconfig.MCPServerChat:
+		case pfmconfig.MCPPathProfessor:
+			if options.Professor == nil {
+				http.Error(
+					writer,
+					"pfm mcp: every family is disabled by config; enable one with: pfm mcp <server> enable",
+					http.StatusServiceUnavailable,
+				)
+				return
+			}
+			options.Professor.ServeHTTP(writer, request)
+		case pfmconfig.MCPFamilyPath(pfmconfig.MCPServerChat):
 			serveDaemonRoute(writer, request, options.Chat, pfmconfig.MCPServerChat)
-		case "/mcp/" + pfmconfig.MCPServerHarvester:
+		case pfmconfig.MCPFamilyPath(pfmconfig.MCPServerHarvester):
 			serveDaemonRoute(writer, request, options.Harvester, pfmconfig.MCPServerHarvester)
 		default:
 			http.NotFound(writer, request)

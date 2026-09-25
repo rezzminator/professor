@@ -84,54 +84,6 @@ func TestRegisteredToolsRecordUnderTheMCPComponent(t *testing.T) {
 	}
 }
 
-// TestNewHTTPHandlerWritesAnHTTPInRecord proves NewHTTPHandler's obs.Handler
-// wrap (item 6): mcpserv's twin wiring is TestNewHTTPHandlerWritesAnHTTPInRecord
-// in internal/mcpserv/httpserv_test.go.
-func TestNewHTTPHandlerWritesAnHTTPInRecord(t *testing.T) {
-	service, err := NewConfiguredHarvester("test", Runtime{Home: t.TempDir(), CacheDir: t.TempDir()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		if err := service.Close(); err != nil {
-			t.Errorf("close service: %v", err)
-		}
-	}()
-	_, recorder := obs.Test(t)
-	request := httptest.NewRequest(
-		http.MethodPost,
-		"http://127.0.0.1/mcp?token=INBOUNDSECRET",
-		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`),
-	)
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json, text/event-stream")
-	response := httptest.NewRecorder()
-	service.NewHTTPHandler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200; body=%s", response.Code, response.Body.String())
-	}
-	var inbound *obs.Record
-	for _, record := range recorder.Records() {
-		if record.Message == "http.in.request" {
-			inbound = &record
-		}
-	}
-	if inbound == nil {
-		t.Fatalf("no http.in.request record: %s", recorder.Raw())
-	}
-	for key, want := range map[string]any{
-		obs.FieldComp: "http.in", "method": http.MethodPost, "route": "harvester-mcp", "path": "/mcp",
-		"status": float64(200),
-	} {
-		if got, _ := inbound.Field(key); got != want {
-			t.Fatalf("http.in record %s = %v, want %v: %v", key, got, want, inbound.Fields)
-		}
-	}
-	if strings.Contains(recorder.Raw(), "INBOUNDSECRET") {
-		t.Fatalf("the query token reached the activity log: %s", recorder.Raw())
-	}
-}
-
 // TestRemoteHandlerWritesAnHTTPInRecord proves RemoteServer.Handler's
 // obs.Handler wrap (item 7): a plain /healthz round trip through the gateway
 // writes one http.in.request record under the "harvester-remote" route.
@@ -169,5 +121,21 @@ func TestRemoteHandlerWritesAnHTTPInRecord(t *testing.T) {
 		if got, _ := inbound.Field(key); got != want {
 			t.Fatalf("http.in record %s = %v, want %v: %v", key, got, want, inbound.Fields)
 		}
+	}
+}
+
+// TestResolverClientRejectsPrivateRedirects pins the resolver client's SSRF
+// guard: a redirect to a loopback address is refused.
+func TestResolverClientRejectsPrivateRedirects(t *testing.T) {
+	client, err := newHTTPClient(Runtime{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.CheckRedirect == nil {
+		t.Fatal("resolver client has no redirect SSRF guard")
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/private", http.NoBody)
+	if err := client.CheckRedirect(request, nil); err == nil {
+		t.Fatal("resolver client allowed redirect to loopback")
 	}
 }

@@ -3,7 +3,7 @@ package mockengine
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -181,31 +181,67 @@ func TestCodexTurnWritesARolloutPfmIndexesAndRenamesThroughSessionIndex(t *testi
 	}
 }
 
-func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
-	fix := newFixture(t)
-	t.Chdir(fix.work)
+// stdioProfessorArg re-executes this test binary as the stdio server a Codex
+// config.toml names: a chat-only professor server over RunStdio, no daemon.
+const stdioProfessorArg = "mockengine-stdio-professor"
+
+func init() {
+	if len(os.Args) < 2 || os.Args[1] != stdioProfessorArg {
+		return
+	}
+	os.Exit(serveStdioProfessor())
+}
+
+func serveStdioProfessor() int {
 	resolved, err := paths.Resolve()
 	if err != nil {
-		t.Fatal(err)
+		fmt.Fprintf(os.Stderr, "stdio professor: resolve paths: %v\n", err)
+		return 1
 	}
 	service, err := mcpserv.NewConfigured("test", os.Stderr, mcpserv.Runtime{Paths: resolved})
 	if err != nil {
-		t.Fatal(err)
+		fmt.Fprintf(os.Stderr, "stdio professor: configure chat: %v\n", err)
+		return 1
 	}
 	defer func() {
 		if err := service.Close(); err != nil {
-			t.Errorf("close service: %v", err)
+			fmt.Fprintf(os.Stderr, "stdio professor: close chat: %v\n", err)
 		}
 	}()
-	server := httptest.NewServer(service.NewHTTPHandler())
-	defer server.Close()
-	config := "# fixture\n# BEGIN pfm mcp_servers — installer-owned\n[mcp_servers.chat]\nurl = \"" +
-		server.URL + "/mcp/chat\"\n# END pfm mcp_servers — installer-owned\n"
+	professor, err := mcpserv.NewProfessor(mcpserv.ProfessorOptions{Version: "test", Chat: service})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "stdio professor: %v\n", err)
+		return 1
+	}
+	if err := professor.RunStdio(context.Background(), os.Stdin, os.Stdout, mcpserv.StdioOptions{
+		Home: resolved.Home, SIDDir: resolved.SIDDir, Warnings: os.Stderr,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "stdio professor: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func writeCodexConfig(t *testing.T, fix *fixture, table string) {
+	t.Helper()
+	config := "# fixture\n# BEGIN pfm mcp_servers — installer-owned\n" + table +
+		"# END pfm mcp_servers — installer-owned\n"
 	if err := os.WriteFile(filepath.Join(fix.codexHome, "config.toml"), []byte(config), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeCodexConfig(t, fix, fmt.Sprintf("[mcp_servers.professor]\ncommand = %q\nargs = [%q]\n",
+		executable, stdioProfessorArg))
 	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0), Steps: []Step{
-		{Type: StepMCP, Server: "chat"},
+		{Type: StepMCP},
 		{Type: StepTurn, Reply: "tools listed"},
 	}})
 	session := fix.startTUI("codex", codexArgs(), nil)
@@ -214,7 +250,7 @@ func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
 	session.waitFrame("the reply after the handshake", func(frame string) bool {
 		return strings.Contains(frame, "tools listed")
 	})
-	recorded := waitFile(t, filepath.Join(fix.recordDir, "mcp-chat.json"), func(content string) bool {
+	recorded := waitFile(t, filepath.Join(fix.recordDir, "mcp-professor.json"), func(content string) bool {
 		return strings.Contains(content, "chat_whoami")
 	})
 	var tools []string
@@ -222,20 +258,33 @@ func TestCodexMCPStepHandshakesWithPfmsOwnServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	if want := mcpserv.ToolNames(); strings.Join(tools, ",") != strings.Join(want, ",") {
-		t.Fatalf("tools/list from pfm's server = %v, want %v", tools, want)
+		t.Fatalf("tools/list from pfm's stdio server = %v, want %v", tools, want)
+	}
+}
+
+func TestCodexMCPStepNamesATableWithoutCommand(t *testing.T) {
+	fix := newFixture(t)
+	t.Chdir(fix.work)
+	writeCodexConfig(t, fix, "[mcp_servers.professor]\nurl = \"http://127.0.0.1:1/mcp/professor\"\n")
+	fix.write(Scenario{SessionID: fixtureThread, Pane: codexShapes, BusyMS: intPtr(0), Steps: []Step{
+		{Type: StepMCP},
+	}})
+	session := fix.startTUI("codex", codexArgs(), nil)
+	session.waitFrame("the composer", func(frame string) bool { return strings.Contains(frame, "›") })
+	session.typeLine("list the fleet tools")
+	if code := session.waitExit(); code != ExitUnpinned ||
+		!strings.Contains(session.stderr.String(), "has no [mcp_servers.professor] command") {
+		t.Fatalf("exit=%d stderr=%q, want %d naming the table without a command",
+			code, session.stderr.String(), ExitUnpinned)
 	}
 }
 
 // TestMCPBoundedContextAppliesTheConfiguredTimeout covers F4: session.mcp's
-// context.WithTimeout must actually bound the mcp.StreamableClientTransport
-// handshake — verified at the context itself rather than over a real hung
-// TCP peer, whose cancellation the vendored SDK does not reliably honour
-// (reproduced independently of this package: a StreamableClientTransport
-// with MaxRetries: -1 against a server that never answers can outlive a
-// caller's context by minutes, an upstream limitation outside this
-// boundary). Without mcpBoundedContext, the mock would hand Connect/ListTools
-// the caller's own context — which carries no deadline of its own — leaving
-// MaxRetries: -1 free to hang forever exactly as F4 named.
+// context.WithTimeout must actually bound the handshake with the spawned stdio
+// server — verified at the context itself rather than over a real hung child.
+// Without mcpBoundedContext, the mock would hand Connect/ListTools the
+// caller's own context — which carries no deadline of its own — leaving a
+// server that never answers free to hang the mock forever exactly as F4 named.
 func TestMCPBoundedContextAppliesTheConfiguredTimeout(t *testing.T) {
 	previous := mcpTimeout
 	mcpTimeout = 250 * time.Millisecond
@@ -244,8 +293,8 @@ func TestMCPBoundedContextAppliesTheConfiguredTimeout(t *testing.T) {
 	defer cancel()
 	deadline, ok := bounded.Deadline()
 	if !ok {
-		t.Fatal("mcpBoundedContext returned a context with no deadline — an mcp.StreamableClientTransport with " +
-			"MaxRetries: -1 would then have nothing bounding it")
+		t.Fatal("mcpBoundedContext returned a context with no deadline — a stdio server that never answers " +
+			"would then have nothing bounding it")
 	}
 	if remaining := time.Until(deadline); remaining <= 0 || remaining > mcpTimeout {
 		t.Fatalf("deadline is %s from now, want within (0, %s]", remaining, mcpTimeout)

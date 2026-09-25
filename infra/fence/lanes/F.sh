@@ -74,9 +74,9 @@ for project in orbit atlas lumen; do
     lane_abort "no working directory for the chats to live in (/work/$project)"
 done
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/chat)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
   "bash $DEMO/daemon.sh" ||
-  lane_abort "the chat MCP daemon never answered on :$PORT — no Codex chat can start and no chat can call a chat_* tool"
+  lane_abort "the professor MCP daemon never answered on :$PORT — no Codex chat can start and no chat can call a chat_* tool"
 
 # open_e1_main — E1's own `chat new` line (E1.sh open_main): in the sequence
 # E1.25 ended E1_MAIN, solo there never was one; either way the cross-lane beat

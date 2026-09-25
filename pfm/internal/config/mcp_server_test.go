@@ -10,3 +10,17 @@ func TestMCPServerKey(t *testing.T) {
 		t.Fatalf("MCPServerKey(chat) = %q", got)
 	}
 }
+
+func TestMCPProfessorPaths(t *testing.T) {
+	if MCPServerProfessor != "professor" || MCPPathProfessor != "/mcp/professor" {
+		t.Fatalf("professor server = %q at %q", MCPServerProfessor, MCPPathProfessor)
+	}
+	for family, want := range map[string]string{
+		MCPServerChat:      "/mcp/professor/chat",
+		MCPServerHarvester: "/mcp/professor/harvester",
+	} {
+		if got := MCPFamilyPath(family); got != want {
+			t.Fatalf("MCPFamilyPath(%s) = %q, want %q", family, got, want)
+		}
+	}
+}

@@ -111,7 +111,7 @@ if [ -z "$KEPT" ]; then
 fi
 
 # The container's config: the KEPT seats re-homed on ~/.cc/<id>, one Codex
-# home, the OpenCode home, both MCP servers on. `accounts` order is the host's.
+# home, the OpenCode home, both MCP families on. `accounts` order is the host's.
 container_config() {
   jq -c --arg ids "$KEPT" '
     ($ids | split(",") | map(tonumber)) as $want

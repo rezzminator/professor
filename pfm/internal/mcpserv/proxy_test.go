@@ -23,6 +23,7 @@ import (
 
 	"github.com/rezzminator/professor/pfm/internal/chat"
 	"github.com/rezzminator/professor/pfm/internal/compose"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -123,8 +124,13 @@ func proxyTestAddress(server *httptest.Server) string {
 }
 
 func proxyTestDaemon(service *Service) http.Handler {
+	professor, err := NewProfessor(ProfessorOptions{Version: "test", Chat: service})
+	if err != nil {
+		panic(fmt.Sprintf("proxyTestDaemon: %v", err)) // a non-nil chat family never errors
+	}
 	return NewDaemonHandler(DaemonOptions{
-		Version: "test", Endpoint: "test", Chat: service.NewHTTPHandler(),
+		Version: "test", Endpoint: "test", Professor: professor.Handler(),
+		Chat:                professor.FamilyHandler(pfmconfig.MCPServerChat),
 		ChatRuntimeIdentity: service.RuntimeIdentity(),
 	})
 }
@@ -242,7 +248,7 @@ func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test/mcp/chat"
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryDelay = time.Millisecond
 	proxy.sessionID = oldSession
@@ -328,7 +334,7 @@ func TestStdioProxySynchronizesHandshakeStorageAndReplay(t *testing.T) {
 		return response, nil
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test/mcp/chat"
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
 	proxy.client = &http.Client{Transport: transport}
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()

@@ -312,7 +312,7 @@ type SaveInput struct {
 }
 
 // IssueInput is one agent complaint filed against Professor itself. Reporter
-// identity is never accepted here — issue_servicedesk captures it the same
+// identity is never accepted here — servicedesk captures it the same
 // way chat_inject captures a sender, so a model can complain but never say
 // who is complaining.
 type IssueInput struct {
@@ -322,7 +322,7 @@ type IssueInput struct {
 	Area     string `json:"area,omitempty" jsonschema:"free text naming the command, agent, file, or surface this is about"`
 }
 
-// IssueOutput is issue_servicedesk's receipt: the filed issue's stable id.
+// IssueOutput is servicedesk's receipt: the filed issue's stable id.
 type IssueOutput struct {
 	Status string `json:"status"`
 	ID     int64  `json:"id,omitempty"`

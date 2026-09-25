@@ -30,7 +30,7 @@ A change lands in the design doc first, then in the template, then in every surf
 | `/flights:refine` | command | Grills the user on a written flight until nothing is assumed, hands `flights-speccer` the rulings as a revising call, presents the revised index | the main chat |
 | `/flights:orchestrate-nested` | command | Runs the flight in a `flights-orchestrator` sub-agent; the chat hears one return | the main chat spawns the agent |
 | `/flights:orchestrate-live` | command | The main chat reads the manual and runs the flight itself, executors as sub-agents; the user watches and steers | the main chat |
-| `/flights:orchestrate-cross-harness` | command | The main chat reads the manual and runs the flight with chat seats (Codex, OpenCode, Claude) as executors through the chat MCP | the main chat |
+| `/flights:orchestrate-cross-harness` | command | The main chat reads the manual and runs the flight with chat seats (Codex, OpenCode, Claude) as executors through the professor MCP's `chat_*` tools | the main chat |
 | `/flights:audit` | command | The skeptic over a flight, running or landed: every claim against its artifact | the main chat |
 
 Five agents, six commands, nothing else. Project law reaches them through the project contract and the project's [testing manual](testing-manual.md); `gitter` is the fleet's own.

@@ -50,7 +50,7 @@ Scout swarm:
   → Debug (opt-in) writes _debug.md
 ```
 
-Fetching runs through **Harvester** (an MCP server) — it resolves walled sources via the legal open-access chain (DOI → Unpaywall / OpenAlex / Europe PMC / …), reads PDFs and books, views images, and falls back through Chrome-impersonation + the Wayback Machine when a URL is blocked — so the readers work on primary literature, not just the open web.
+Fetching runs through pfm's **professor** MCP server (its `harvester_*` tools) — it resolves walled sources via the legal open-access chain (DOI → Unpaywall / OpenAlex / Europe PMC / …), reads PDFs and books, views images, and falls back through Chrome-impersonation + the Wayback Machine when a URL is blocked — so the readers work on primary literature, not just the open web.
 
 The brainer never re-emits the whole frontier — it returns **deltas** (rescore / add / look-up / rename / drop) against a persistent id-keyed store, and carries a structured **resultSoFar** (the answer + `keyClaimIds` it rests on + open gaps + derivation + assumptions) wave to wave. Evidence itself is never in that struct — it lives only in the ledger, referenced by claim id.
 
@@ -83,7 +83,7 @@ cp deep-rr/{SKILL.md,workflow.js,persist.js} <project>/.claude/skills/deep-rr/
 **Requirements:**
 
 - Claude Code with the Workflow tool.
-- The **Harvester** MCP server ([github.com/rezzminator/harvester-web-mcp](https://github.com/rezzminator/harvester-web-mcp)) connected — without it, every fetch errors and the run is snippet-only.
+- pfm's professor MCP server with the harvester family enabled (`pfm mcp harvester enable`) — without it, every fetch errors and the run is snippet-only.
 - `python3` with a scientific stack (scipy, sympy, uncertainties, pandas) for compute/derivation — optional, pass `compute: false` without it.
 
 **Verify:** in Claude Code say `rr fast <any question>` (instant, no Workflow needed), then `RR <question>` for a full background run. Results persist to `RR/{slug}/`.
@@ -125,7 +125,7 @@ Edit `engine/src/` — one directory per agent under `src/agents/<agent>/` (a `p
 - **A committed, sandbox-safe engine.** The bundle is a single self-contained file: `export const meta` at the top, no runtime imports, no non-deterministic globals — enforced by a build-time validator. The bundler is an acorn-AST pass, so it can never mis-strip an import or an export.
 - **One brainer, delta-driven — that can fork.** A single Opus brain scores and steers an id-keyed rabbit-hole store via deltas and carries a structured running answer; for a goal with independent branches it can spawn focused child brainers (the brainer tree) that race to the first judge-upheld answer, merging their evidence back into the winner's ledger either way.
 - **Separate the deriver from the judge.** A per-wave validator, attack lanes that hunt counter-evidence as claims settle, and a terminal Opus judge with retraction power pressure-test the work; none of them is the brain that produced it, so the answer is never self-certified.
-- **Fetch through Harvester.** All fetching routes through the Harvester MCP — legal open-access resolution, PDF / book / image parsing, and a wall-bypass chain — so the readers reach primary literature, not just snippets.
+- **Fetch through the harvester tools.** All fetching routes through professor's `harvester_*` MCP tools — legal open-access resolution, PDF / book / image parsing, and a wall-bypass chain — so the readers reach primary literature, not just snippets.
 - **Tiered models.** Haiku scout probes + readers + claimAuditor + rerunner; Sonnet scout planner/merger + scheduler + validator + refine + lineageClerk; Opus brainer / prospector / initiator / judge / synthesiser / debug-analyst.
 - **Prompts as code.** Each agent is a `src/agents/<agent>/` module — a backtick prompt template plus its schema and tier; the build inlines them into the bundle.
 

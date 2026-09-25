@@ -273,7 +273,7 @@ func TestReadMisplacedItemFailsAloneNamingTheField(t *testing.T) {
 		{out.Files[0], "put it in urls"},
 		{out.Files[1], "put it in publications"},
 		{out.Publications[0], "put it in files"},
-		{out.Publications[1], "`search_literature`"},
+		{out.Publications[1], "`harvester_search_literature`"},
 	} {
 		if !strings.Contains(check.item.Error, check.want) {
 			t.Errorf("%s: error %q, want it to name %q", check.item.Source, check.item.Error, check.want)

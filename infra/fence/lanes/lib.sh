@@ -758,32 +758,28 @@ need() {
   return 1
 }
 
-# assert_opencode_mcp_registered <pfm-bin> <port> — M.03 and E3.02 are the
-# same assertion body (OpenCode's opencode.jsonc carries chat local + harvester
-# remote, and doctor's opencode row reads healthy): one shared beat body so the
-# two lanes can never drift apart on what "MCP registered" means (M.sh:412-435
-# was byte-identical to E3.sh:300-328 before this).
+# assert_opencode_mcp_registered <pfm-bin> — M.03 and E3.02 are the same
+# assertion body (OpenCode's opencode.jsonc carries the professor local stdio
+# entry, and doctor's opencode row reads professor=pfm): one shared beat body
+# so the two lanes can never drift apart on what "MCP registered" means.
 assert_opencode_mcp_registered() {
-  local bin="$1" port="$2" oc_cfg="$HOME/.config/opencode/opencode.jsonc" bad="" oc_doctor_out oc_row
+  local bin="$1" oc_cfg="$HOME/.config/opencode/opencode.jsonc" bad="" oc_doctor_out oc_row
   _strip_jsonc() { sed 's#//.*$##' "$1"; }
   if [ ! -f "$oc_cfg" ]; then
     bad="$bad no OpenCode MCP config at $oc_cfg — pfm install --yes did not write it;"
   else
     _strip_jsonc "$oc_cfg" | jq -e --arg bin "$bin" \
-      '.mcp.chat | .type == "local" and .command == [$bin, "mcp", "chat", "serve"] and .enabled == true' >/dev/null 2>&1 ||
-      bad="$bad M36: $oc_cfg mcp.chat is not the local shape {type local, command [$bin mcp chat serve], enabled true}: $(one_line "$(_strip_jsonc "$oc_cfg" | jq -c '.mcp.chat' 2>&1)");"
-    _strip_jsonc "$oc_cfg" | jq -e --arg url "http://127.0.0.1:$port/mcp/harvester" \
-      '.mcp.harvester | .type == "remote" and .url == $url and .enabled == true' >/dev/null 2>&1 ||
-      bad="$bad M36: $oc_cfg mcp.harvester is not the remote shape {type remote, url http://127.0.0.1:$port/mcp/harvester, enabled true}: $(one_line "$(_strip_jsonc "$oc_cfg" | jq -c '.mcp.harvester' 2>&1)");"
+      '.mcp.professor | .type == "local" and .command == [$bin, "mcp", "serve", "--stdio"] and .enabled == true' >/dev/null 2>&1 ||
+      bad="$bad M36: $oc_cfg mcp.professor is not the local stdio shape {type local, command [$bin mcp serve --stdio], enabled true}: $(one_line "$(_strip_jsonc "$oc_cfg" | jq -c '.mcp.professor' 2>&1)");"
   fi
   oc_doctor_out="$(pfm doctor 2>&1)"
   oc_row="$(printf '%s\n' "$oc_doctor_out" | grep -F 'client=opencode' | head -1)"
-  printf '%s\n' "$oc_row" | grep -qE 'harvester=pfm chat=pfm state=pfm$' ||
+  printf '%s\n' "$oc_row" | grep -qE 'professor=pfm$' ||
     bad="$bad M36: pfm doctor's opencode MCP row is not healthy: $(one_line "${oc_row:-no client=opencode row at all}");"
   if [ -n "$bad" ]; then
     fail "$bad"
   else
-    pass "$oc_cfg: chat local ($bin mcp chat serve) + harvester remote (:$port/mcp/harvester), both enabled; pfm doctor's opencode row reads harvester=pfm chat=pfm state=pfm"
+    pass "$oc_cfg: professor local stdio ($bin mcp serve --stdio), enabled; pfm doctor's opencode row reads professor=pfm"
   fi
 }
 

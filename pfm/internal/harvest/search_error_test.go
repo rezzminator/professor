@@ -11,7 +11,7 @@ import (
 )
 
 // TestSearchHintNamesSearchOnlyWhenAvailable pins the one shared helper every
-// "use `search_web`" message routes through.
+// "use `harvester_search_web`" message routes through.
 func TestSearchHintNamesSearchOnlyWhenAvailable(t *testing.T) {
 	if got := SearchHint(true, "with", "without"); got != "with" {
 		t.Fatalf("SearchHint(true) = %q, want %q", got, "with")
@@ -22,49 +22,49 @@ func TestSearchHintNamesSearchOnlyWhenAvailable(t *testing.T) {
 }
 
 // TestFailureMessageNamesSearchOnlyWhenAvailable is the regression for a
-// failure message recommending a `search_web` tool that a caller with no
+// failure message recommending a `harvester_search_web` tool that a caller with no
 // configured backend cannot possibly use — FailureMessage used to name
-// `search_web` unconditionally in every one of these branches.
+// `harvester_search_web` unconditionally in every one of these branches.
 func TestFailureMessageNamesSearchOnlyWhenAvailable(t *testing.T) {
 	for _, kind := range []string{"invalid", "timeout", "dns", "connect"} {
 		on := FailureMessage("https://example.test/x", 0, kind, false, true)
-		if !strings.Contains(on, "`search_web`") {
-			t.Errorf("FailureMessage(%s, search on) = %q, want it to name `search_web`", kind, on)
+		if !strings.Contains(on, "`harvester_search_web`") {
+			t.Errorf("FailureMessage(%s, search on) = %q, want it to name `harvester_search_web`", kind, on)
 		}
 		off := FailureMessage("https://example.test/x", 0, kind, false, false)
-		if strings.Contains(off, "`search_web`") {
-			t.Errorf("FailureMessage(%s, search off) = %q, unconditionally names `search_web`", kind, off)
+		if strings.Contains(off, "`harvester_search_web`") {
+			t.Errorf("FailureMessage(%s, search off) = %q, unconditionally names `harvester_search_web`", kind, off)
 		}
 	}
 
 	// The challenge branch, the HTTP-status branch, and the final unclassified
-	// fallback each carry their own "use `search_web`" clause — regression for the
+	// fallback each carry their own "use `harvester_search_web`" clause — regression for the
 	// three net.go branches that used to name it unconditionally.
 	on := FailureMessage("https://example.test/x", 0, "", true, true)
-	if !strings.Contains(on, "`search_web`") {
-		t.Errorf("FailureMessage(challenge, search on) = %q, want it to name `search_web`", on)
+	if !strings.Contains(on, "`harvester_search_web`") {
+		t.Errorf("FailureMessage(challenge, search on) = %q, want it to name `harvester_search_web`", on)
 	}
 	off := FailureMessage("https://example.test/x", 0, "", true, false)
-	if strings.Contains(off, "`search_web`") {
-		t.Errorf("FailureMessage(challenge, search off) = %q, unconditionally names `search_web`", off)
+	if strings.Contains(off, "`harvester_search_web`") {
+		t.Errorf("FailureMessage(challenge, search off) = %q, unconditionally names `harvester_search_web`", off)
 	}
 
 	on = FailureMessage("https://example.test/x", 404, "", false, true)
-	if !strings.Contains(on, "`search_web`") {
-		t.Errorf("FailureMessage(HTTP 404, search on) = %q, want it to name `search_web`", on)
+	if !strings.Contains(on, "`harvester_search_web`") {
+		t.Errorf("FailureMessage(HTTP 404, search on) = %q, want it to name `harvester_search_web`", on)
 	}
 	off = FailureMessage("https://example.test/x", 404, "", false, false)
-	if strings.Contains(off, "`search_web`") {
-		t.Errorf("FailureMessage(HTTP 404, search off) = %q, unconditionally names `search_web`", off)
+	if strings.Contains(off, "`harvester_search_web`") {
+		t.Errorf("FailureMessage(HTTP 404, search off) = %q, unconditionally names `harvester_search_web`", off)
 	}
 
 	on = FailureMessage("https://example.test/x", 0, "", false, true)
-	if !strings.Contains(on, "`search_web`") {
-		t.Errorf("FailureMessage(fallback, search on) = %q, want it to name `search_web`", on)
+	if !strings.Contains(on, "`harvester_search_web`") {
+		t.Errorf("FailureMessage(fallback, search on) = %q, want it to name `harvester_search_web`", on)
 	}
 	off = FailureMessage("https://example.test/x", 0, "", false, false)
-	if strings.Contains(off, "`search_web`") {
-		t.Errorf("FailureMessage(fallback, search off) = %q, unconditionally names `search_web`", off)
+	if strings.Contains(off, "`harvester_search_web`") {
+		t.Errorf("FailureMessage(fallback, search off) = %q, unconditionally names `harvester_search_web`", off)
 	}
 }
 

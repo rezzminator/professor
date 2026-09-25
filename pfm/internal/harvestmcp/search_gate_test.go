@@ -11,30 +11,43 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/harvest"
 )
 
-// TestServerInstructionsNameSearchOnlyWhenConfigured pins every shape of the
-// top-level routing text: search_web routing when a backend is configured, a
-// search_web-free text plus a one-sentence configuration hint when it is not,
-// and read's files only on the local server — never a routing guide
-// that recommends a tool the server does not register.
+// TestServerInstructionsNameSearchOnlyWhenConfigured pins serverInstructions
+// to the contracts' harvester part, byte for byte, for each of the four
+// combinations: clause 3 (local documents) only when local, clause 6 (web
+// search) only when a backend is configured — never a routing guide that
+// recommends a tool the server does not register.
 func TestServerInstructionsNameSearchOnlyWhenConfigured(t *testing.T) {
-	on := serverInstructions(true, false)
-	if !strings.Contains(on, `"search the web for X" is search_web`) ||
-		!strings.Contains(on, "for a topic — search_web, then read the URL in urls") {
-		t.Fatalf("search-enabled instructions dropped their search routing: %q", on)
-	}
-	off := serverInstructions(false, false)
-	if strings.Contains(off, "search_web") {
-		t.Fatalf("search-disabled instructions still name search_web:\n%s", off)
-	}
-	if !strings.Contains(off, "Web search is not configured on this server") ||
-		!strings.Contains(off, "search.searxngURL or search.braveApiKey in harvester.config.json") {
-		t.Fatalf("search-disabled instructions lack the configuration hint:\n%s", off)
-	}
-	if !strings.Contains(on, "in files") || !strings.Contains(on, "then read its handle in publications") {
-		t.Fatalf("local instructions do not route local documents:\n%s", on)
-	}
-	if remote := serverInstructions(true, true); strings.Contains(remote, "in files") {
-		t.Fatalf("remote instructions route files, which the remote read never takes:\n%s", remote)
+	clause1 := `Read a web page → harvester_read with it in urls`
+	clause2 := `a paper or book by DOI, arXiv id, PMID, PMCID, ISBN, landing URL or harvester_search_literature handle → harvester_read with it in publications`
+	clause3 := `a local document → harvester_read with its path in files`
+	clause4 := `find papers or books by title → harvester_search_literature`
+	clause5 := `save a file's bytes unparsed → harvester_download_file`
+	clause6 := `search the web for a topic → harvester_search_web`
+
+	join := func(clauses ...string) string { return strings.Join(clauses, "; ") + "." }
+
+	for _, test := range []struct {
+		name            string
+		searchAvailable bool
+		remote          bool
+		want            string
+	}{
+		{"local, search off", false, false, join(clause1, clause2, clause3, clause4, clause5)},
+		{"local, search on", true, false, join(clause1, clause2, clause3, clause4, clause5, clause6)},
+		{"remote, search off", false, true, join(clause1, clause2, clause4, clause5)},
+		{"remote, search on", true, true, join(clause1, clause2, clause4, clause5, clause6)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := serverInstructions(test.searchAvailable, test.remote); got != test.want {
+				t.Fatalf(
+					"serverInstructions(%v, %v) =\n%q\nwant\n%q",
+					test.searchAvailable,
+					test.remote,
+					got,
+					test.want,
+				)
+			}
+		})
 	}
 }
 
@@ -45,6 +58,11 @@ func TestSearchFailureRendersEachBackend(t *testing.T) {
 	)
 	if !strings.Contains(text, "Web search failed") || !strings.Contains(text, "could not classify") {
 		t.Fatalf("search failure lost safe public message: %q", text)
+	}
+	for _, name := range []string{"harvester_read", "harvester_search_literature", "harvester_download_file"} {
+		if !strings.Contains(text, name) {
+			t.Fatalf("search failure text %q does not name %q", text, name)
+		}
 	}
 	for _, secret := range []string{"searxng", "127.0.0.1", "HTTP 502", "brave: HTTP 401", "harvester.config.json"} {
 		if strings.Contains(text, secret) {

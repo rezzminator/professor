@@ -25,17 +25,17 @@ They coordinate only through a file: `usagehook.DefaultCacheDir()` = `os.TempDir
 
 **A free authoritative sample is thrown away.** Claude Code hands the statusline its own `rate_limits` payload on stdin (`internal/statusline/render.go:72,94`). `windowsAt` (`render.go:120-160`) reads it, merges a Fable window, and — when the harness omitted the `limits` array entirely — falls back to `usagehook.CachedFableWindow` (`render.go:146`). Nothing writes the harness's numbers **back** into the shared cache. A payload that cost zero requests is rendered once and discarded, while three fetchers spend request budget re-deriving it.
 
-**The store is opened per process, and the MCP layer multiplies those processes.** `internal/mcpserv/backend.go:58,62` opens both `store.Open` and `shared.Open` for every chat MCP server; `cmd/pfm/main.go:191-206` starts one such server per Claude chat over stdio. Each handle is `SetMaxOpenConns(1)` with WAL and `busy_timeout=10000` (`internal/store/store.go:122,162,170`; same in `internal/shared/shared.go:136,152`), so N chats means N single-connection writers queueing on one file.
+**The store is opened per process, and the MCP layer multiplies those processes.** `internal/mcpserv/backend.go:58,62` opens both `store.Open` and `shared.Open` for every professor MCP server that runs in process; `pfm mcp serve --stdio` runs one such server per chat over stdio whenever the daemon is absent or incompatible and it serves in process instead of forwarding to the daemon's `/mcp/professor`. Each handle is `SetMaxOpenConns(1)` with WAL and `busy_timeout=10000` (`internal/store/store.go:122,162,170`; same in `internal/shared/shared.go:136,152`), so N chats on that path means N single-connection writers queueing on one file.
 
-**Upgrading is a kill.** `Makefile:10-17` states the problem in its own comment — replacing `~/.local/bin/pfm` leaves the running process on the deleted inode, *"and nothing in between says a word."* The remedy at `Makefile:110-112` is `pkill -f 'pfm mcp serve'` whenever the `pfm-mcp.service` unit is absent. A live `pfm mcp serve` (a 5-day-old inode, pid 20576 at the time of writing) is killed mid-request, and every chat MCP client sees its server vanish.
+**Upgrading is a kill.** `Makefile:10-17` states the problem in its own comment — replacing `~/.local/bin/pfm` leaves the running process on the deleted inode, *"and nothing in between says a word."* The remedy at `Makefile:241-243` is `pkill -f 'mcp serve$'` whenever the `pfm-mcp.service` unit is absent — a pattern that matches the daemon's command line and never a `pfm mcp serve --stdio` server. A live `pfm mcp serve` (a 5-day-old inode, pid 20576 at the time of writing) is killed mid-request, and every professor MCP client sees its server vanish.
 
 ## Decisions
 
 1. **One daemon, `pfmd`, is the same binary.** `pfm daemon run` — the `dockerd`/`docker` shape. It owns: the limits poller (the **only** process that calls the Anthropic usage endpoint), the sqlite store (single writer), fleet/tmux operations, and the comms/cosmos event stream.
 2. **Transport is HTTP/1.1 over a unix socket** at `${XDG_STATE_HOME:-~/.local/state}/pfm/run/pfmd.sock`, mode `0600`. Go `net.Listen("unix", …)` + `net/http`; clients use `http.Transport` with a `DialContext` onto the socket. Versioned under `/v1`. **State, not share**: `paths.Resolve` already puts `fleet.db` at `~/.local/state/pfm` (`internal/paths/paths.go:163`), so the runtime socket lives beside it; `~/.local/share/pfm` is the *install* tree (`internal/installer/expected_hooks.go:124`). `PFM_RUN_DIR` overrides the directory, as every other path does through `paths.EnvOr` (`paths.go:96`).
-3. **Every existing surface becomes a client.** The TUI subscribes to SSE instead of ticking; the prompt hook does one `GET` with a 200 ms timeout; the statusline reads and *writes back*; `pfm mcp serve` and `pfm mcp chat serve` become thin stdio↔socket JSON-RPC proxies, so `~/.claude.json` and the Codex config are untouched (`internal/installer/mcp.go:117`).
+3. **Every existing surface becomes a client.** The TUI subscribes to SSE instead of ticking; the prompt hook does one `GET` with a 200 ms timeout; the statusline reads and *writes back*; `pfm mcp serve --stdio` — today a forwarder to the daemon's `/mcp/professor` — becomes a thin stdio↔socket JSON-RPC proxy, so every engine's `professor` registration (`~/.claude.json`, the Codex config, `opencode.jsonc`) is untouched (`internal/installer/mcp.go`).
 4. **No socket, no failure.** Clients degrade to today's behaviour — shared cache file, direct store. A hook or statusline must never block or fail a prompt. First client that finds no socket spawns `pfm daemon run` detached, the way `statusline.SpawnDetached` (`internal/statusline/process.go:23`) already spawns its refresher behind a lockfile. `pfm daemon install` optionally writes a launchd agent (macOS) or a systemd `--user` unit (devbox, Ubuntu 24.04) with `KeepAlive` / `Restart=always`.
-5. **The harvester stays its own service.** It is not absorbed into pfmd's core; pfmd health-checks it and reports it in `pfm doctor`. **Correction to the brief:** the harvester is no longer an external sibling at `127.0.0.1:8377`. `internal/harvestmcp` is compiled into pfm, mounted at `/mcp/harvester` by `cmd/pfm/mcp_serve_command.go:176-185`, and `8377` is `legacyDefaultMCPPort` (`internal/config/harvester.go:30`) — the live loopback port is `18377` (`harvester.go:27`). Its authenticated external gateway runs on its own listener inside the same process (`mcp_serve_command.go:223-260`). pfmd health-checks **that route**, and the Python worker environment behind it (`internal/harvestpy`), and never takes ownership of either.
+5. **The harvester stays its own service.** It is not absorbed into pfmd's core; pfmd health-checks it and reports it in `pfm doctor`. **Correction to the brief:** the harvester is no longer an external sibling at `127.0.0.1:8377`. `internal/harvestmcp` is compiled into pfm, served as the harvester family of the professor server at `/mcp/professor` and its view `/mcp/professor/harvester` by `cmd/pfm/mcp_serve_command.go`, and `8377` is `legacyDefaultMCPPort` (`internal/config/harvester.go:30`) — the live loopback port is `18377` (`harvester.go:27`). Its authenticated external gateway runs on its own listener inside the same process (`mcp_serve_command.go:223-260`). pfmd health-checks **that route**, and the Python worker environment behind it (`internal/harvestpy`), and never takes ownership of either.
 6. **Upgrade is a handoff, not a kill.** The new pfmd inherits the listening socket fd from the old one; the old drains in-flight requests and exits. `pfm update` and `make install` restart through this path instead of `pkill`. Clients reconnect with backoff; SSE clients resubscribe with a cursor.
 7. **Five phases, each behind its own gate, each revertible alone.** Skeleton → limits → store → MCP proxies → handoff.
 
@@ -51,7 +51,7 @@ They coordinate only through a file: `usagehook.DefaultCacheDir()` = `os.TempDir
                          │                        │ singleflight │                                │
   pfm ls (TUI) ──SSE─────▶  /v1/events?cursor=    └──────┬───────┘                                │
                          │        ▲                      │ writes                                 │
-  pfm mcp chat serve ────▶  /v1/rpc/chat                 ▼                                        │
+  pfm mcp serve --stdio ─▶  /v1/rpc/chat                 ▼                                        │
     (stdio proxy,        │        │              ┌──────────────────┐   shared cache file          │
      X-PFM-Caller)       │        │              │ acct-N.json      │◀── still written, for        │
                          │        │              │ (compat mirror)  │    socket-absent fallback    │
@@ -68,10 +68,10 @@ They coordinate only through a file: `usagehook.DefaultCacheDir()` = `os.TempDir
                          └────────────────────────────────────────────────────────────────────────┘
                                         unix socket, 0600, ~/.local/state/pfm/run/pfmd.sock
    external siblings, health-checked only, never owned:
-     harvester route (/mcp/harvester on 18377) · harvester external gateway · internal/harvestpy worker
+     harvester family (/mcp/professor on 18377) · harvester external gateway · internal/harvestpy worker
 ```
 
-Today's picture for contrast: three arrows into `api.anthropic.com` (hook, sampler, and — via `codex app-server` — the statusline refresher), N chat MCP processes each holding two single-connection sqlite handles, and a `pkill` between any two versions.
+Today's picture for contrast: three arrows into `api.anthropic.com` (hook, sampler, and — via `codex app-server` — the statusline refresher), N `pfm mcp serve --stdio` processes serving the professor MCP in process when the daemon is absent, each holding two single-connection sqlite handles, and a `pkill` between any two versions.
 
 ## API
 
@@ -92,7 +92,7 @@ All paths are under `/v1`. Request and response bodies are JSON unless noted. Ev
 | POST | `/v1/daemon/handoff` | `{binary, pid}` | `{socketFdSent:true}` | Phase 5. Control plane for the upgrade handoff. |
 | POST | `/v1/daemon/shutdown` | `{drain:"30s"}` | `202` | Graceful stop without a signal; what `pfm daemon stop` calls. |
 
-**`X-PFM-Caller` is the whole reason the chat MCP is stdio today.** `internal/installer/mcp.go:101-116` spells it out: the chat server is registered as `stdio` and every other server as `http` because *"a self-addressed chat_* call carries no thread id from Claude, and the daemon serves every chat on the box from one process, so it can never derive who's calling (mcpserv's callerForRequest, fail-closed by design)"*. `cmd/pfm/main.go:194` sets `AllowAmbientIdentity = true` for the stdio path alone. A thin proxy therefore **must** carry the ambient identity it inherited — tmux socket, pane, session id — as a per-request header, and pfmd must trust that header only over the unix socket with a matching peer uid. Without this, `chat_whoami` and every self-addressed `chat_*` call regress to fail-closed.
+**Every engine registers `professor` as the stdio command `pfm mcp serve --stdio`.** A self-addressed `chat_*` call from Claude carries no thread id, and the daemon serves every chat on the box from one process, so it can never derive the caller from the request alone (mcpserv's `callerForRequest`, fail-closed by design). The stdio server forwards each request to the daemon's `/mcp/professor` with `_meta.pfmProxy` added and Codex's `_meta.threadId` passed through unchanged; the daemon resolves `_meta.threadId` before `_meta.pfmProxy`. When the daemon is absent or incompatible the stdio server serves in process and resolves identity the same way, plus its own ambient identity. A thin proxy to pfmd therefore **must** carry the identity it inherited — tmux socket, pane, session id — as a per-request header (`X-PFM-Caller`), and pfmd must trust that header only over the unix socket with a matching peer uid. Without this, `chat_whoami` and every self-addressed `chat_*` call regress to fail-closed.
 
 ## Process model
 
@@ -106,7 +106,7 @@ All paths are under `/v1`. Request and response bodies are JSON unless noted. Ev
 
 **Handoff (phase 5).** **Decision: re-exec with an inherited fd**, not `SCM_RIGHTS`. The old pfmd clears `FD_CLOEXEC` on the listener, `exec`s the new binary with `PFMD_LISTEN_FD=3` and `PFMD_HANDOFF_FROM=<pid>`, and the new process rebuilds the listener with `net.FileListener`. Why this over passing the fd across a control socket: re-exec needs no second listener, no ordering protocol between two live daemons, and no ambiguity about which process owns the socket file — the pid changes but the inode never does, so no client sees a closed socket. `SCM_RIGHTS` would be the right tool if the old and new daemons had to run **concurrently** (a true zero-downtime blue/green), and they do not: the drain here is measured in the milliseconds a JSON-RPC frame takes. The cost is that a new binary which fails to start takes the socket down; the mitigation is that the old process validates `pfm --version` on the candidate binary before exec'ing it, and clients fall back (§ Failure modes) during the gap.
 
-`make install` and `pfm update` then call `pfm daemon restart`, which is `POST /v1/daemon/handoff`. The `pkill -f 'pfm mcp serve'` line at `Makefile:110-112` is deleted in phase 5, not before.
+`make install` and `pfm update` then call `pfm daemon restart`, which is `POST /v1/daemon/handoff`. The `pkill -f 'mcp serve$'` line at `Makefile:241-243` is deleted in phase 5, not before.
 
 ## Failure modes and fallbacks
 
@@ -121,7 +121,7 @@ All paths are under `/v1`. Request and response bodies are JSON unless noted. Ev
 | Store locked / corrupt | Daemon answers `503` on store endpoints, `/v1/limits` keeps working | `doctor: daemon store=degraded`; limits unaffected |
 | Handoff fails (new binary won't start) | Old daemon logs, keeps serving if the exec failed pre-exec; if post-exec, clients auto-start the binary on disk | One dropped request per in-flight client, then normal |
 | SSE stream drops | TUI reconnects with backoff and resubscribes at its last cursor | At most one skipped frame in the cosmos tab |
-| Chat MCP proxy loses the socket mid-session | Proxy falls back to in-process `mcpserv.NewConfigured` with `AllowAmbientIdentity` (today's exact code path, `main.go:191-206`) | Chat tools keep working; the store gets a second writer until the daemon returns |
+| Professor MCP stdio proxy loses the socket mid-session | Proxy falls back to in-process `mcpserv.NewConfigured` with `AllowAmbientIdentity` (today's exact code path, `runMCPStdio` in `cmd/pfm/mcp_serve_command.go`) | Chat tools keep working; the store gets a second writer until the daemon returns |
 | Two daemons race to bind | Loser detects a live answer on the socket and exits 1 with the running pid | `pfm daemon run: already running (pid N, since T)` |
 
 The invariant behind the whole table: **no pfm client ever hard-depends on pfmd.** Every endpoint has the pre-daemon path behind it, and phase gates keep that true (§ Migration).
@@ -162,7 +162,7 @@ Each phase is gated by `daemon.<phase>.enabled` in `~/.config/pfm/pfm.config.jso
 ### Phase 4 — MCP proxies
 
 - **New:** `internal/daemon/rpcproxy.go` (socket side), `cmd/pfm/mcp_proxy.go` (stdio side).
-- **Touched:** `cmd/pfm/main.go:191-206` — the chat stdio path forwards frames instead of building a service, keeping `mcpserv.NewConfigured` as the fallback; `cmd/pfm/mcp_serve_command.go:134` — `runMCPServe` mounts proxy handlers; `internal/installer/mcp.go:117` — registration shapes stay **byte-identical**, which is the point.
+- **Touched:** `runMCPStdio` in `cmd/pfm/mcp_serve_command.go` — the `pfm mcp serve --stdio` path forwards frames instead of building a service, keeping `mcpserv.NewConfigured` as the fallback; `cmd/pfm/mcp_serve_command.go:134` — `runMCPServe` mounts proxy handlers; `internal/installer/mcp.go:117` — registration shapes stay **byte-identical**, which is the point.
 - **Tests:** `cmd/pfm/mcp_proxy_identity_jail_test.go` (a self-addressed `chat_whoami` through the proxy resolves the same caller as `AllowAmbientIdentity` does today — the regression this phase most risks), `mcp_proxy_fallback_test.go` (socket dies mid-session ⇒ in-process service takes over, no dropped frame), `internal/mcpserv/proxy_frame_test.go` (malformed frame handling matches `RunStdio`'s parse-error behaviour, `internal/mcpserv/stdio.go:13-16`).
 
 ### Phase 5 — socket handoff on upgrade

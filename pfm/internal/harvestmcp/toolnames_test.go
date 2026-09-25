@@ -9,11 +9,12 @@ import (
 
 // TestToolNamesFollowTheSearchGate pins RegisteredToolNames to the same search gate
 // register() applies (service.go:493): a runtime with no SearXNG URL or
-// Brave key omits `search_web` entirely, and a configured runtime lists it
-// after search_literature — the same slot register() adds it in.
+// Brave key omits `harvester_search_web` entirely, and a configured runtime
+// lists it after harvester_search_literature — the same slot register() adds
+// it in.
 func TestToolNamesFollowTheSearchGate(t *testing.T) {
 	off := Runtime{Home: t.TempDir(), CacheDir: filepath.Join(t.TempDir(), "cache")}
-	wantOff := []string{"read", "download_file", "search_literature"}
+	wantOff := []string{"harvester_read", "harvester_download_file", "harvester_search_literature"}
 	if got := RegisteredToolNames(off); !reflect.DeepEqual(got, wantOff) {
 		t.Fatalf("RegisteredRegisteredToolNames(no backend) = %#v, want %#v", got, wantOff)
 	}
@@ -23,7 +24,12 @@ func TestToolNamesFollowTheSearchGate(t *testing.T) {
 		CacheDir:   filepath.Join(t.TempDir(), "cache"),
 		SearXNGURL: "http://searxng.example.test",
 	}
-	wantOn := []string{"read", "download_file", "search_literature", "search_web"}
+	wantOn := []string{
+		"harvester_read",
+		"harvester_download_file",
+		"harvester_search_literature",
+		"harvester_search_web",
+	}
 	if got := RegisteredToolNames(on); !reflect.DeepEqual(got, wantOn) {
 		t.Fatalf("RegisteredRegisteredToolNames(SearXNGURL configured) = %#v, want %#v", got, wantOn)
 	}

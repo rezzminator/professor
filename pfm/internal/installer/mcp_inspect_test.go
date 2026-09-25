@@ -2,6 +2,7 @@ package installer
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,27 +97,46 @@ func TestOpenCodeUnownedEntriesNamesWhatInstallWillNotReplace(t *testing.T) {
 	}
 }
 
-func TestInspectOpenCodeServersReportsHealthyPartialForeignAndUnreadable(t *testing.T) {
+// TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries pins the
+// OpenCode classifier: `professor` is pfm only in the exact local stdio shape
+// install writes, pfm's own legacy `chat` / `harvester` shapes are legacy-pfm,
+// anything else is foreign, and a malformed config is unreadable, never absent.
+func TestInspectOpenCodeServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T) {
 	home := t.TempDir()
 	path := OpenCodeConfigPath(home)
+	bin := filepath.Join(home, ".local", "bin", "pfm")
 	writeFixture(
 		t,
 		path,
-		`{"mcp":{"chat":{"type":"local","command":["`+filepath.Join(
-			home,
-			".local",
-			"bin",
-			"pfm",
-		)+`","mcp","chat","serve"],"enabled":true},"harvester":{"type":"remote","url":"http://127.0.0.1:8456/mcp/harvester","enabled":true}}}`,
+		`{"mcp":{"professor":{"type":"local","command":["`+bin+`","mcp","serve","--stdio"],"enabled":true},`+
+			`"chat":{"type":"local","command":["`+bin+`","mcp","chat","serve"],"enabled":true},`+
+			`"harvester":{"type":"remote","url":"http://127.0.0.1:8456/mcp/harvester","enabled":true}}}`,
 	)
-	reports := InspectOpenCodeServers(path, home, 8456, chatName, mcpServerHarvester)
-	if len(reports) != 2 || reports[0].State != MCPClientPFM || reports[1].State != MCPClientPFM {
-		t.Fatalf("healthy reports=%#v, want two pfm rows", reports)
+	reports := InspectOpenCodeServers(path, home, 8456, professorName, chatName, mcpServerHarvester)
+	if len(reports) != 3 || reports[0].State != MCPClientPFM || reports[1].State != MCPClientLegacyPFM ||
+		reports[2].State != MCPClientLegacyPFM {
+		t.Fatalf("reports=%#v, want professor pfm, chat and harvester legacy-pfm", reports)
 	}
-	writeFixture(t, path, `{"mcp":{"chat":{"type":"local","enabled":true}}}`)
-	reports = InspectOpenCodeServers(path, home, 8456, chatName, mcpServerHarvester)
-	if reports[0].State != MCPClientPartial || reports[1].State != MCPClientAbsent {
-		t.Fatalf("partial reports=%#v, want chat partial and harvester absent", reports)
+	writeFixture(t, path, `{"mcp":{"chat":{"type":"remote","url":"http://127.0.0.1:8456/mcp/chat","enabled":true}}}`)
+	reports = InspectOpenCodeServers(path, home, 8456, professorName, chatName)
+	if reports[0].State != MCPClientAbsent || reports[1].State != MCPClientLegacyPFM {
+		t.Fatalf("reports=%#v, want professor absent and the remote chat legacy-pfm", reports)
+	}
+	for _, foreign := range []string{
+		`{"mcp":{"professor":{"type":"remote","url":"http://127.0.0.1:8456/mcp/professor","enabled":true}}}`,
+		`{"mcp":{"professor":{"type":"local","command":["` + bin + `","mcp","serve","--stdio"]}}}`,
+		`{"mcp":{"professor":{"type":"local","command":["pfm","mcp","serve","--stdio"],"enabled":true}}}`,
+		`{"mcp":{"professor":{"type":"local","command":["` + bin + `","mcp","serve","--stdio"],"enabled":true,"env":{}}}}`,
+	} {
+		writeFixture(t, path, foreign)
+		if reports := InspectOpenCodeServers(
+			path,
+			home,
+			8456,
+			professorName,
+		); reports[0].State != MCPClientForeignRegistration {
+			t.Fatalf("%s: report=%#v, want foreign-registration", foreign, reports[0])
+		}
 	}
 	writeFixture(t, path, `{"mcp":{"chat":{"type":"remote","url":"https://operator.invalid","enabled":true}}}`)
 	reports = InspectOpenCodeServers(path, home, 8456, chatName)
@@ -124,8 +144,72 @@ func TestInspectOpenCodeServersReportsHealthyPartialForeignAndUnreadable(t *test
 		t.Fatalf("foreign report=%#v, want foreign-registration", reports[0])
 	}
 	writeFixture(t, path, `{`)
-	reports = InspectOpenCodeServers(path, home, 8456, chatName)
+	reports = InspectOpenCodeServers(path, home, 8456, professorName)
 	if reports[0].State != MCPClientUnreadable || reports[0].Error == nil {
 		t.Fatalf("unreadable report=%#v, want error-bearing unreadable", reports[0])
+	}
+}
+
+// TestInspectClaudeServersClassifiesProfessorAndPFMLegacyEntries pins the one
+// Claude/Codex classifier: `professor` is pfm only in the exact stdio shape
+// install writes (`{"type":"stdio","command":"<bin>","args":["mcp","serve",
+// "--stdio"]}`, nothing more, nothing less), never over HTTP; pfm's legacy
+// `chat` / `harvester` shapes (the loopback URL, the retired 64-hex bearer,
+// the stdio chat) are legacy-pfm; a `uv`/`harvest…` harvester stays
+// legacy-standalone.
+func TestInspectClaudeServersClassifiesProfessorAndPFMLegacyEntries(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude.json")
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	bearer := "Bearer " + strings.Repeat("ab", 32)
+	for _, testCase := range []struct {
+		name, key, registration, want string
+	}{
+		{"professor stdio", professorName, `{"type":"stdio","command":"` + bin + `","args":["mcp","serve","--stdio"]}`, MCPClientPFM},
+		{"professor type-less", professorName, `{"command":"` + bin + `","args":["mcp","serve","--stdio"]}`, MCPClientForeignRegistration},
+		{"professor http", professorName, `{"type":"http","url":"http://127.0.0.1:8456/mcp/professor"}`, MCPClientForeignRegistration},
+		{"professor other command", professorName, `{"type":"stdio","command":"manual","args":["mcp","serve","--stdio"]}`, MCPClientForeignRegistration},
+		{"professor extra args", professorName, `{"type":"stdio","command":"` + bin + `","args":["mcp","serve","--stdio","--x"]}`, MCPClientForeignRegistration},
+		{"professor bare pfm", professorName, `{"type":"stdio","command":"pfm","args":["mcp","serve","--stdio"]}`, MCPClientForeignRegistration},
+		{"professor other binary path", professorName, `{"type":"stdio","command":"/opt/pfm/bin/pfm","args":["mcp","serve","--stdio"]}`, MCPClientForeignRegistration},
+		{"professor extra key", professorName, `{"type":"stdio","command":"` + bin + `","args":["mcp","serve","--stdio"],"timeout":30}`, MCPClientForeignRegistration},
+		{"professor upper-case type", professorName, `{"type":"STDIO","command":"` + bin + `","args":["mcp","serve","--stdio"]}`, MCPClientForeignRegistration},
+		{"chat stdio legacy", chatName, `{"type":"stdio","command":"` + bin + `","args":["mcp","chat","serve"]}`, MCPClientLegacyPFM},
+		{"chat http legacy", chatName, `{"type":"http","url":"http://127.0.0.1:8456/mcp/chat"}`, MCPClientLegacyPFM},
+		{"harvester http legacy", mcpServerHarvester, `{"type":"http","url":"http://127.0.0.1:8456/mcp/harvester"}`, MCPClientLegacyPFM},
+		{"harvester bearer legacy", mcpServerHarvester, `{"type":"http","url":"http://127.0.0.1:8456/mcp/harvester","headers":{"Authorization":"` + bearer + `"}}`, MCPClientLegacyPFM},
+		{"harvester foreign bearer", mcpServerHarvester, `{"type":"http","url":"http://127.0.0.1:8456/mcp/harvester","headers":{"Authorization":"Bearer retired"}}`, MCPClientForeignRegistration},
+		{"harvester wrong port", mcpServerHarvester, `{"type":"http","url":"http://127.0.0.1:9999/mcp/harvester"}`, MCPClientForeignRegistration},
+		{"harvester standalone", mcpServerHarvester, `{"type":"stdio","command":"uv","args":["run","harvester"]}`, MCPClientLegacyStandalone},
+		{"harvester foreign", mcpServerHarvester, `{"type":"http","url":"https://foreign.invalid/mcp"}`, MCPClientForeignRegistration},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			writeFixture(t, path, `{"mcpServers":{"`+testCase.key+`":`+testCase.registration+`}}`)
+			reports := InspectClaudeServers(path, home, 8456, testCase.key)
+			if len(reports) != 1 || reports[0].State != testCase.want {
+				t.Fatalf("reports=%#v, want state %q", reports, testCase.want)
+			}
+		})
+	}
+}
+
+// TestInspectHarvesterClientCutoverTellsPFMLegacyFromForeignInCodex pins the
+// Codex half: the single-line loopback url table is pfm's legacy entry (the
+// one install removes), while the same url with a headers table is not a
+// shape install removes and so stays foreign.
+func TestInspectHarvesterClientCutoverTellsPFMLegacyFromForeignInCodex(t *testing.T) {
+	home := t.TempDir()
+	codex := filepath.Join(home, ".codex")
+	config := filepath.Join(codex, "config.toml")
+	writeFixture(t, config, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8456/mcp/harvester\"\n")
+	reports := InspectHarvesterClientCutover(home, 8456, []string{}, []string{codex})
+	if len(reports) != 2 || reports[0].State != MCPClientLegacyPFM {
+		t.Fatalf("reports=%#v, want the Codex url table legacy-pfm", reports)
+	}
+	writeFixture(t, config, "[mcp_servers.harvester]\nurl = \"http://127.0.0.1:8456/mcp/harvester\"\n"+
+		"[mcp_servers.harvester.headers]\nAuthorization = \"Bearer "+strings.Repeat("ab", 32)+"\"\n")
+	reports = InspectHarvesterClientCutover(home, 8456, []string{}, []string{codex})
+	if reports[0].State != MCPClientForeignRegistration {
+		t.Fatalf("reports=%#v, want the headed Codex table foreign-registration", reports)
 	}
 }

@@ -114,7 +114,7 @@ func (service *Service) issueReporter(
 		scoped := obs.Component(ctx, compMCP)
 		obs.Logger(scoped).LogAttrs(scoped, slog.LevelError, "mcp.caller",
 			slog.String("op", "resolve"),
-			slog.String("tool", "issue_servicedesk"),
+			slog.String("tool", "servicedesk"),
 			slog.String(obs.FieldErr, err.Error()),
 		)
 		return issueReporter{Session: reporterLookupFailed}

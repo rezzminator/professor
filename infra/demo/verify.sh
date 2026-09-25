@@ -85,7 +85,7 @@ check_seats() { # every answering seat: /reload linked, professor theme, fullscr
   done
   [ -z "$bad" ] && pass seats "seat(s) ${LIVE[*]}: /reload linked, professor theme, fullscreen TUI" || fail seats "$bad"
 }
-check_daemon() { # the chat MCP over HTTP, which every Codex row depends on
+check_daemon() { # the professor MCP daemon every stdio forwarder targets
   local out
   if out="$("$HERE/daemon.sh" 2>&1)"; then pass daemon "$(tail -1 <<<"$out")"; else fail daemon "$(tail -3 <<<"$out" | tr '\n' ' ')"; fi
 }

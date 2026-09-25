@@ -236,40 +236,35 @@ JSON
       say "derive NOTE: \`pfm internal --help\` is not a registered subcommand (it answers 'unknown subcommand'), so the internal verbs are NOT machine-derived here — they are carried by landscape rows X20-X40"
     fi
 
-    # tools/list over each server's stdio transport: the served surface itself.
-    # The frames are written newline-terminated and stdin is HELD OPEN for a
-    # moment after them — on EOF the server closes at once ("server is closing:
-    # EOF") and a response still in flight is lost, which reads exactly like a
-    # server with no tools.
-    tools_of() { # tools_of <server>
-      local out
-      out="$( {
-        printf '%s\n' \
-          '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check-map","version":"0"}}}' \
-          '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-          '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-        sleep 5
-      } | with_timeout 60 env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" \
-        PFM_FLEET_DB="$JAIL/fleet.db" PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
-        "$PFM" --config "$JAIL/pfm.config.json" mcp "$1" serve 2>"$JAIL/$1.err")"
-      printf '%s\n' "$out" >"$JAIL/$1.frames"
-      printf '%s\n' "$out" | jq -r 'select(.id == 2) | .result.tools[]?.name' 2>/dev/null
-    }
-    for server in chat harvester; do
-      tools="$(tools_of "$server")"
-      n_tools="$(printf '%s\n' "$tools" | grep -c .)"
-      if [ "$n_tools" -eq 0 ]; then
-        derive_fail "the $server MCP server listed no tool over stdio — stderr: $(tr '\n' ' ' <"$JAIL/$server.err" 2>/dev/null | cut -c1-200); frames it did answer: $(tr '\n' ' ' <"$JAIL/$server.frames" 2>/dev/null | cut -c1-200)"
-        continue
-      fi
+    # tools/list over `pfm mcp serve --stdio`, the one stdio server, with both
+    # families enabled in the jail config (no daemon in the jail, so it serves
+    # the combined server in process): the served surface itself. The frames are
+    # written newline-terminated and stdin is HELD OPEN for a moment after them —
+    # on EOF the server closes at once ("server is closing: EOF") and a response
+    # still in flight is lost, which reads exactly like a server with no tools.
+    tools_out="$( {
+      printf '%s\n' \
+        '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"check-map","version":"0"}}}' \
+        '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+        '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+      sleep 5
+    } | with_timeout 60 env PFM_HOME="$JAIL/home" PFM_DB="$JAIL/index.db" \
+      PFM_FLEET_DB="$JAIL/fleet.db" PFM_SID_DIR="$JAIL/sid" PFM_TMUX_DIR="$JAIL/tmux" PFM_TMUX_CONF=/dev/null \
+      "$PFM" --config "$JAIL/pfm.config.json" mcp serve --stdio 2>"$JAIL/stdio.err")"
+    printf '%s\n' "$tools_out" >"$JAIL/stdio.frames"
+    tools="$(printf '%s\n' "$tools_out" | jq -r 'select(.id == 2) | .result.tools[]?.name' 2>/dev/null)"
+    n_tools="$(printf '%s\n' "$tools" | grep -c .)"
+    if [ "$n_tools" -eq 0 ]; then
+      derive_fail "pfm mcp serve --stdio listed no tool — stderr: $(tr '\n' ' ' <"$JAIL/stdio.err" 2>/dev/null | cut -c1-200); frames it did answer: $(tr '\n' ' ' <"$JAIL/stdio.frames" 2>/dev/null | cut -c1-200)"
+    else
       bad_tools=0
       for t in $tools; do
         landscape_carries "\`$t\`" && continue
-        red "UNMAPPED-TOOL: $server/$t — no MAPPED landscape row names it"
+        red "UNMAPPED-TOOL: $t — no MAPPED landscape row names it"
         bad_tools=$((bad_tools + 1))
       done
-      say "derived $server tools: $n_tools · $bad_tools unmapped"
-    done
+      say "derived tools over pfm mcp serve --stdio: $n_tools · $bad_tools unmapped"
+    fi
   fi
 fi
 

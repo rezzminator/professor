@@ -39,9 +39,10 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 				"# %s\nERROR: Fetched %s but it yielded no readable content (empty after extraction) — nothing to size. %s",
 				source,
 				source,
-				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
-					"Use `search_web` to find an alternative copy, or `search_literature` if it is a scholarly title.",
-					"Use `search_literature` if it is a scholarly title, or read an alternative copy at another URL.",
+				harvest.SearchHint(
+					runtimeSearchEnabled(service.runtime),
+					"Use `harvester_search_web` to find an alternative copy, or `harvester_search_literature` if it is a scholarly title.",
+					"Use `harvester_search_literature` if it is a scholarly title, or read an alternative copy at another URL.",
 				),
 			)
 		}
@@ -79,9 +80,10 @@ func (service *Service) describeFetch(source string, result harvest.Result, size
 			message = fmt.Sprintf(
 				"Fetched %s but no readable content could be extracted (JS-rendered or bot-blocked — not retrievable from this datacenter IP). %s",
 				source,
-				harvest.SearchHint(runtimeSearchEnabled(service.runtime),
-					"Use `search_web` to find an alternative copy, or `search_literature` if it is a scholarly title.",
-					"Use `search_literature` if it is a scholarly title, or read an alternative copy at another URL.",
+				harvest.SearchHint(
+					runtimeSearchEnabled(service.runtime),
+					"Use `harvester_search_web` to find an alternative copy, or `harvester_search_literature` if it is a scholarly title.",
+					"Use `harvester_search_literature` if it is a scholarly title, or read an alternative copy at another URL.",
 				),
 			)
 		}
@@ -183,13 +185,13 @@ func renderFind(query string, candidates []harvest.Candidate, failed []harvest.W
 	}
 	if len(candidates) == 0 {
 		return fmt.Sprintf(
-			"No candidate works found for %q. Try search_web (when configured) or a plain web search, or rephrase — a more exact title helps.",
+			"No candidate works found for %q. Try harvester_search_web (when configured) or a plain web search, or rephrase — a more exact title helps.",
 			query,
 		)
 	}
 	lines := []string{
 		fmt.Sprintf(
-			"%d candidate work(s) for %q — pick one and read it with `read`, passing its `handle:` value in publications:",
+			"%d candidate work(s) for %q — pick one and read it with `harvester_read`, passing its `handle:` value in publications:",
 			len(candidates),
 			query,
 		),
@@ -223,7 +225,11 @@ func renderSearch(query string, results []harvest.SearchResult, _ string) string
 		return fmt.Sprintf("No results for %q. Try different terms or a broader query.", query)
 	}
 	lines := []string{
-		fmt.Sprintf("%d result(s) for %q — read the ones you want with `read`, in urls:", len(results), query),
+		fmt.Sprintf(
+			"%d result(s) for %q — read the ones you want with `harvester_read`, in urls:",
+			len(results),
+			query,
+		),
 		"",
 	}
 	for index, result := range results {

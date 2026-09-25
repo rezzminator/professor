@@ -77,7 +77,7 @@ Two panes, two harnesses. You type one line into the Claude chat on the left; th
 
 > The footer on the Codex side is the signature: who spoke (`sid 0a98b7fe`) and the exact command to answer them. A message no sender could be derived for is refused, never delivered anonymously.
 
-`pfm chat inject` is what the Claude chat called — it types a real, signed turn into another chat's pane — under a per-target lock, safe against a busy target (`--force-now`) and shell-hostile payloads (`--file`). `pfm chat ask` waits for the answer, with named exit codes: `0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered · 7 answered, but another message reached the chat mid-wait`. The same verbs are an MCP server, so an agent can spawn, message, read, and retire other chats across all three harnesses — and `issue_servicedesk` lets it file a bug against its own host tool.
+`pfm chat inject` is what the Claude chat called — it types a real, signed turn into another chat's pane — under a per-target lock, safe against a busy target (`--force-now`) and shell-hostile payloads (`--file`). `pfm chat ask` waits for the answer, with named exit codes: `0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered · 7 answered, but another message reached the chat mid-wait`. The same verbs are the chat family of the `professor` MCP server (`chat_*` tools), so an agent can spawn, message, read, and retire other chats across all three harnesses — and `servicedesk` lets it file a bug against its own host tool.
 
 ### 3. Rules that bite
 
@@ -98,7 +98,7 @@ About one in ten of the world's top 10,000 websites now tells AI crawlers to sta
   <img src="docs/img/cards/harv.webp" alt="Harvester: a fetch climbs the ladder on a live stage — every source it touched lit, every step logged with its reason, the result box with the character count and the trace; then the next scenario" width="900">
 </p>
 
-A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `pfm harvest ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. The whole surface is also an MCP server. The browser rung never solves anything interactive.
+A block is reported as a block and an app shell is never stored as the page — a failure names every source it checked, never an empty success. DOIs, ISBNs, PMIDs and PMCIDs route through twelve open-access resolvers in parallel; `pfm harvest ask -p "…" <sources>` feeds the full cached artifacts to a Claude or Codex ask engine, failed sources kept visible as receipts. The whole surface is also the harvester family of the `professor` MCP server (`harvester_*` tools) — one stdio registration, `pfm mcp serve --stdio`, for Claude, Codex and OpenCode alike, forwarding to the daemon's `/mcp/professor`. The browser rung never solves anything interactive.
 
 ### 5. One contract, three runtimes
 
@@ -151,7 +151,7 @@ cat "$HOME/.professor/docs/SETUP.md"      # the install interview — start here
 The checkout is pinned to the latest semantic version tag. A maintainer checkout also runs `git config core.hooksPath .githooks` so `pfm doctor` reports `pre-push gate=armed`. Upgrading? Follow the [update workflow](INSTALL.md#updating): `pfm update check` reports `UPDATED / NEW / GONE-UPSTREAM / LOCAL-DELETED` with the exact diff, and `pin` / `ignore` / `drop` record your decision — pfm never rewrites a project file after init.
 
 > [!WARNING]
-> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. Both MCP servers ship disabled. The trade-off is deliberate and documented, not hidden.
+> **Read before opting in:** `pfm` defaults Claude to bypass mode and Codex to approval bypass; machine and per-account configuration can select the prompted posture. The `professor` MCP server's two families ship disabled — `mcp.servers.chat.enabled` for chat, `harvester.enabled` for the harvester. The trade-off is deliberate and documented, not hidden.
 
 ---
 

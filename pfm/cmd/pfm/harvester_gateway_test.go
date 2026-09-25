@@ -61,6 +61,7 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 		t.Fatalf("external state = %q", got)
 	}
 	base := "http://127.0.0.1:" + strconv.Itoa(port)
+	sessionID := ""
 	do := func(method, path, token, body string) *http.Response {
 		t.Helper()
 		request, err := http.NewRequest(method, base+path, strings.NewReader(body))
@@ -72,6 +73,9 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 		request.Header.Set("Accept", "application/json, text/event-stream")
 		if token != "" {
 			request.Header.Set("Authorization", "Bearer "+token)
+		}
+		if sessionID != "" {
+			request.Header.Set("Mcp-Session-Id", sessionID)
 		}
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
@@ -89,10 +93,51 @@ func TestHarvesterExternalGatewayServesHarvesterBehindAuthOnly(t *testing.T) {
 	}
 	response := do(http.MethodPost, "/mcp", "example-gateway-token", initialize)
 	body, _ := io.ReadAll(response.Body)
-	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "harvester") {
-		t.Fatalf("authenticated /mcp = %d %s", response.StatusCode, body)
+	if response.StatusCode != http.StatusOK || !strings.Contains(string(body), "harvester_read") ||
+		!strings.Contains(string(body), `"name":"professor"`) {
+		t.Fatalf("authenticated /mcp = %d %s, want serverInfo professor and harvester_read", response.StatusCode, body)
 	}
-	for _, path := range []string{"/mcp/chat", "/mcp/harvester", "/status"} {
+	sessionID = response.Header.Get("Mcp-Session-Id")
+	do(http.MethodPost, "/mcp", "example-gateway-token", `{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+	listed := do(http.MethodPost, "/mcp", "example-gateway-token", `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	var tools struct {
+		Result struct {
+			Tools []struct {
+				Name        string `json:"name"`
+				InputSchema struct {
+					Properties map[string]json.RawMessage `json:"properties"`
+				} `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	listBody, _ := io.ReadAll(listed.Body)
+	// The gateway answers as a server-sent event: the JSON-RPC reply is its data line.
+	payload := string(listBody)
+	for _, line := range strings.Split(payload, "\n") {
+		if data, found := strings.CutPrefix(line, "data: "); found {
+			payload = data
+		}
+	}
+	if err := json.Unmarshal([]byte(payload), &tools); err != nil || len(tools.Result.Tools) == 0 {
+		t.Fatalf("external tools/list = %d %s (decode: %v)", listed.StatusCode, listBody, err)
+	}
+	sawRead := false
+	for _, tool := range tools.Result.Tools {
+		if !strings.HasPrefix(tool.Name, "harvester_") {
+			t.Fatalf("external gateway lists %q, want harvester_* only: %s", tool.Name, listBody)
+		}
+		if tool.Name == "harvester_read" {
+			sawRead = true
+			if _, hasFiles := tool.InputSchema.Properties["files"]; hasFiles {
+				t.Fatalf("external harvester_read takes files: %s", listBody)
+			}
+		}
+	}
+	if !sawRead {
+		t.Fatalf("external tools/list has no harvester_read: %s", listBody)
+	}
+	sessionID = ""
+	for _, path := range []string{"/mcp/professor", "/mcp/professor/chat", "/mcp/professor/harvester", "/status"} {
 		if response := do(
 			http.MethodPost,
 			path,
@@ -149,39 +194,6 @@ func TestMCPDaemonStatusReportsHarvesterExternalState(t *testing.T) {
 	}
 	if status.HarvesterExternal != failed {
 		t.Fatalf("status harvesterExternal = %q, want %q", status.HarvesterExternal, failed)
-	}
-}
-
-// A stale registration that passes a retired flag fails loudly with the key
-// that replaced it.
-func TestHarvesterServeRetiredFlagsNameTheirConfigKey(t *testing.T) {
-	cases := map[string]string{
-		"--user-agent=UA":         "fetch.userAgent",
-		"--port":                  "external.port",
-		"--internal-port":         "loopback port",
-		"--allow-unauthenticated": "always authenticates",
-	}
-	for flag, want := range cases {
-		var stdout, stderr bytes.Buffer
-		if code := runHarvesterMCP(
-			[]string{flag},
-			&stdout,
-			&stderr,
-			commandRuntime{},
-		); code != 2 ||
-			!strings.Contains(stderr.String(), want) {
-			t.Errorf("serve %s: code=%d stderr=%q, want 2 naming %q", flag, code, stderr.String(), want)
-		}
-	}
-	var stdout, stderr bytes.Buffer
-	if code := runHarvesterMCP(
-		[]string{"--transport", "http"},
-		&stdout,
-		&stderr,
-		commandRuntime{},
-	); code != 2 ||
-		!strings.Contains(stderr.String(), "pfm mcp serve") {
-		t.Fatalf("--transport http: code=%d stderr=%q", code, stderr.String())
 	}
 }
 

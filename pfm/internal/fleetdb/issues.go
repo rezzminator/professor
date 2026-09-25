@@ -21,7 +21,7 @@ const (
 )
 
 // Issue is one durable operator-triaged complaint filed by an agent through
-// issue_servicedesk. Reporter fields are captured automatically by the
+// servicedesk. Reporter fields are captured automatically by the
 // caller, exactly as CommsEvent captures a sender — never accepted as tool
 // input, so a model can complain but never forge who is complaining.
 type Issue struct {

@@ -2,7 +2,7 @@
 # setup.sh — runs INSIDE the demo fence container (up.sh drives it) in two phases:
 #   tools    pfm built from the mounted checkout with the release stamp, the REAL
 #            Claude Code and Codex from npm, Starship.
-#   install  pfm install from the checkout (chat MCP, statusline, hooks, the
+#   install  pfm install from the checkout (professor MCP, statusline, hooks, the
 #            professor system prompt, the harvester), Claude Code's first-run
 #            state per seat, the demo projects (/work/demo is a `pfm init`
 #            Professor project — its guard hook is the "rules that bite" demo),
@@ -70,13 +70,13 @@ install)
   #    linux-arm64 did); the demo then installs without it and SAYS so — the deck's
   #    harvester section is an animation, the fleet does not depend on the sidecar.
   if ! (cd "$SRC" && pfm install --yes); then
-    echo "setup: WARNING — pfm install with the harvester failed (see above); retrying with --skip-harvest: the harvester MCP is NOT available in this container" >&2
+    echo "setup: WARNING — pfm install with the harvester failed (see above); retrying with --skip-harvest: the professor MCP's harvester tools are NOT available in this container" >&2
     (cd "$SRC" && pfm install --yes --skip-harvest)
   fi
   "$HERE/daemon.sh" # no init system in the fence: the MCP HTTP daemon runs from here
   # 3. Claude Code's first-run state: onboarding done, every demo project trusted, so no
   #    dialog stands between a spawn and a live chat. Merged, never overwritten — pfm
-  #    install may already have written mcpServers into the same file.
+  #    install may already have written mcpServers.professor into the same file.
   trust="$(printf '%s\n' "${PROJECTS[@]}" express | jq -R '{key: ("/work/" + .), value: {hasTrustDialogAccepted: true}}' | jq -s 'from_entries')"
   #    The bypass-permissions warning is a second first-run screen whose default is
   #    "No, exit" — a spawn's typed prompt dies in it. Accepting it once writes

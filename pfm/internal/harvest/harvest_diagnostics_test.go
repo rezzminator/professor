@@ -11,8 +11,8 @@ func TestTitleGuessResultEchoesGivenValue(t *testing.T) {
 	if got.Source != "title:Some Book" {
 		t.Fatalf("Source = %q, want the original source", got.Source)
 	}
-	if !strings.Contains(got.Error, `"Some Book"`) || !strings.Contains(got.Error, "search_literature") {
-		t.Fatalf("Error = %q, want it to echo the value and name search_literature", got.Error)
+	if !strings.Contains(got.Error, `"Some Book"`) || !strings.Contains(got.Error, "harvester_search_literature") {
+		t.Fatalf("Error = %q, want it to echo the value and name harvester_search_literature", got.Error)
 	}
 }
 

@@ -48,7 +48,7 @@ func innerDocumentRefusal(kind, innerSource string, inner []byte) error {
 	switch found.class {
 	case formatFileOnly, formatDropped, formatRefused:
 		return fmt.Errorf(
-			"%s-compressed document holds a %s, not a document the harvester reads; download it with `download_file`",
+			"%s-compressed document holds a %s, not a document the harvester reads; download it with `harvester_download_file`",
 			kind,
 			found.label,
 		)

@@ -202,8 +202,11 @@ func snapshotMCPServeProcesses(
 		case len(command) >= 1 && strings.HasPrefix(command[0], "--config="):
 			command = command[1:]
 		}
-		if len(command) == 1 && command[0] == "mcp" ||
-			len(command) >= 2 && command[0] == "mcp" && command[len(command)-1] == "serve" {
+		// `mcp serve [--stdio]`, plus the stdio argv a chat launched before
+		// the professor server (bare `mcp`, `mcp <server> serve …`): a binary
+		// upgrade leaves those running on the replaced image.
+		if len(command) >= 1 && command[0] == "mcp" && (len(command) == 1 || command[1] == "serve" ||
+			len(command) >= 3 && command[2] == "serve") {
 			candidates[pid] = true
 		}
 	}

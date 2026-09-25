@@ -16,7 +16,7 @@ Provider URLs are absolute HTTP(S) base URLs without credentials, query, or frag
 
 Mirror availability and document coverage vary. A successful homepage response is insufficient: the selected record, download host, and conversion must all work. HTTP errors, malformed responses, challenges, and conversion failures remain failures. Interactive CAPTCHAs are not solved. A missing Unpaywall contact email disables its requests; no substitute identity is generated.
 
-For a web page, call `read` with the URL in `urls`. For an exact DOI, arXiv id, ISBN, PMID, or PMCID, call `read` with it in `publications`. For a title, call `search_literature`, choose a result, and pass its `handle` value unchanged in `read`'s `publications`. This preserves the selected work or version instead of guessing from an ambiguous title.
+For a web page, call `harvester_read` with the URL in `urls`. For an exact DOI, arXiv id, ISBN, PMID, or PMCID, call `harvester_read` with it in `publications`. For a title, call `harvester_search_literature`, choose a result, and pass its `handle` value unchanged in `harvester_read`'s `publications`. This preserves the selected work or version instead of guessing from an ambiguous title.
 
 ## Public results
 

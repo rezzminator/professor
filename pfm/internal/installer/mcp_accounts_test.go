@@ -44,7 +44,7 @@ func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
 			t.Fatal(err)
 		}
 		servers := doc["mcpServers"].(map[string]any)
-		if servers["chat"] == nil || servers["foreign"] == nil || doc["oauthAccount"] == nil {
+		if servers[professorName] == nil || servers["foreign"] == nil || doc["oauthAccount"] == nil {
 			t.Errorf("registry %s lost wiring or private state: %#v", path, doc)
 		}
 	}
@@ -52,13 +52,13 @@ func TestMCPWiresActualClaudeRegistriesAndHonorsEmptyCodex(t *testing.T) {
 		t.Errorf("empty Codex roster wrote .codex: %v", err)
 	}
 	// A user replacement after installation is preserved on uninstall.
-	replacement := `{"oauthAccount":{"accountUuid":"private"},"mcpServers":{"chat":{"command":"manual"},"foreign":{"command":"custom"}}}`
+	replacement := `{"oauthAccount":{"accountUuid":"private"},"mcpServers":{"professor":{"command":"manual"},"foreign":{"command":"custom"}}}`
 	writeFixture(t, paths[1], replacement)
 	options.Mode = ModeUninstall
 	if _, err := Run(context.Background(), options); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(readFixture(t, paths[0]), `"chat"`) {
+	if strings.Contains(readFixture(t, paths[0]), `"professor"`) {
 		t.Error("owned primary registration survived uninstall")
 	}
 	if got := readFixture(t, paths[1]); got != replacement {
@@ -121,10 +121,13 @@ func TestWriteMCPClientJSONRefusesAnUnreadableOwnershipLedger(t *testing.T) {
 				apply:       true,
 			}
 			writeFixture(t, installer.mcpOwnershipPath(), ledger)
-			if _, err := installer.writeMCPClientJSON([]string{"chat"}); err == nil {
+			if _, err := installer.writeMCPClientJSON([]string{professorName}); err == nil {
 				t.Fatal("an undecodable MCP ownership ledger read as an empty ownership")
 			} else if !strings.Contains(err.Error(), "MCP ownership") {
 				t.Fatalf("error did not name the MCP ownership ledger: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(home, ".claude.json")); !os.IsNotExist(err) {
+				t.Fatalf("a registry was written past an unreadable ledger: %v", err)
 			}
 		})
 	}

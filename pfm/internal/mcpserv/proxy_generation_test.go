@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/resolve"
 )
 
@@ -94,7 +95,7 @@ func TestStdioProxyLateFailurePreservesRecoveredSession(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test/mcp/chat"
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryWindow = 2 * time.Second
 	proxy.retryDelay = time.Millisecond
@@ -186,7 +187,7 @@ func TestStdioProxyCurrentFailureClearsSessionBeforeRecovery(t *testing.T) {
 		}
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test/mcp/chat"
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
 	proxy.client = &http.Client{Transport: transport}
 	proxy.retryDelay = time.Millisecond
 	proxy.sessionID = oldSession
@@ -240,7 +241,7 @@ func TestStdioProxyStaleSuccessCannotReplaceNewSession(t *testing.T) {
 		return response, nil
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test/mcp/chat"
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
 	proxy.client = &http.Client{Transport: transport}
 	proxy.sessionID = "session-old"
 	proxy.protocol = "protocol-old"
@@ -294,7 +295,7 @@ func TestStdioProxyCloseDoesNotClearNewerSession(t *testing.T) {
 		}, nil
 	})
 	proxy := newStdioProxy(context.Background(), "unused", io.Discard)
-	proxy.endpoint = "http://proxy.test/mcp/chat"
+	proxy.endpoint = "http://proxy.test" + pfmconfig.MCPPathProfessor
 	proxy.client = &http.Client{Transport: transport}
 	proxy.sessionID = "session-old"
 	proxy.protocol = "protocol-old"

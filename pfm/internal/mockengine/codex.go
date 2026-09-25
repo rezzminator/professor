@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/rezzminator/professor/pfm/internal/codexmeta"
+	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
 )
 
 // mcpTimeout bounds the mock's own MCP handshake against a dead or hanging
@@ -23,9 +25,9 @@ import (
 // a hang is eventually bounded.
 var mcpTimeout = 30 * time.Second
 
-// mcpBoundedContext is the context session.mcp connects and lists tools
-// under: an mcp.StreamableClientTransport with MaxRetries: -1 has no bound of
-// its own, so a dead or hanging endpoint would otherwise block the mock
+// mcpBoundedContext is the context session.mcp spawns the server under and
+// connects and lists tools under: a stdio server that never answers has no
+// bound of its own, so a hanging server would otherwise block the mock
 // forever — the same discipline hooks.go:162 applies to hook commands.
 func mcpBoundedContext(parent context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, mcpTimeout)
@@ -389,17 +391,20 @@ func (session *codexSession) background(step Step) (string, error) {
 	return "", child.recordAssistant(step.Status, session.proc.script.Tokens)
 }
 
-// mcp connects to the [mcp_servers.<server>] block pfm wrote into config.toml
-// (internal/installer/mcp.go:229-241) and performs initialize + tools/list,
-// recording the tool names for the test to compare against the server's.
+// mcp spawns the command the [mcp_servers.<server>] table pfm wrote into
+// config.toml names (`pfm mcp serve --stdio` in production), performs
+// initialize + tools/list over its stdio, and records the tool names for the
+// test to compare against the server's. Closing the session closes the
+// child's stdin, which ends it.
 func (session *codexSession) mcp(step Step) error {
 	name := step.Server
 	if name == "" {
-		name = "chat"
+		name = pfmconfig.MCPServerProfessor
 	}
 	var config struct {
 		Servers map[string]struct {
-			URL string `toml:"url"`
+			Command string   `toml:"command"`
+			Args    []string `toml:"args"`
 		} `toml:"mcp_servers"`
 	}
 	path := filepath.Join(session.codexHome, "config.toml")
@@ -407,19 +412,20 @@ func (session *codexSession) mcp(step Step) error {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
 	server, ok := config.Servers[name]
-	if !ok || server.URL == "" {
-		return fmt.Errorf("%s has no [mcp_servers.%s] url", path, name)
+	if !ok || server.Command == "" {
+		return fmt.Errorf("%s has no [mcp_servers.%s] command", path, name)
 	}
 	bounded, cancel := mcpBoundedContext(session.proc.ctx)
 	defer cancel()
 	client := mcp.NewClient(&mcp.Implementation{Name: "mock-engine", Version: session.proc.script.Version}, nil)
+	launched := strings.Join(append([]string{server.Command}, server.Args...), " ")
 	connection, err := client.Connect(
 		bounded,
-		&mcp.StreamableClientTransport{Endpoint: server.URL, MaxRetries: -1, DisableStandaloneSSE: true},
+		&mcp.CommandTransport{Command: exec.Command(server.Command, server.Args...)},
 		nil,
 	)
 	if err != nil {
-		return fmt.Errorf("initialize against %s: %w", server.URL, err)
+		return fmt.Errorf("initialize against %s: %w", launched, err)
 	}
 	defer func() {
 		if err := connection.Close(); err != nil {
@@ -428,7 +434,7 @@ func (session *codexSession) mcp(step Step) error {
 	}()
 	tools, err := connection.ListTools(bounded, nil)
 	if err != nil {
-		return fmt.Errorf("tools/list against %s: %w", server.URL, err)
+		return fmt.Errorf("tools/list against %s: %w", launched, err)
 	}
 	names := make([]string, 0, len(tools.Tools))
 	for _, tool := range tools.Tools {

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"sync/atomic"
@@ -66,6 +68,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 	// alone mounted, so there is no live handler for a disabled route to
 	// accidentally reach.
 	options := mcpserv.DaemonOptions{Version: version, Endpoint: "http://" + address, Warnings: stderr}
+	families := mcpserv.ProfessorOptions{Version: version}
 	if chatEnabled {
 		chat, err := mcpserv.NewConfigured(version, stderr, mcpRuntime(runtime, false))
 		if err != nil {
@@ -73,7 +76,7 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 			return 1
 		}
 		defer func() { cli.CloseResource(chat, "pfm mcp serve: close chat service", stderr, &exitCode) }()
-		options.Chat = chat.NewHTTPHandler()
+		families.Chat = chat
 		options.ChatRuntimeIdentity = chat.RuntimeIdentity()
 	}
 	if harvesterEnabled {
@@ -85,9 +88,17 @@ func runMCPServe(stdout, stderr io.Writer, runtime commandRuntime, clk clock.Clo
 		defer func() {
 			cli.CloseResource(harvester, "pfm mcp serve: close harvester service", stderr, &exitCode)
 		}()
-		options.Harvester = harvester.NewHTTPHandler()
-		options.HarvesterTools = harvestmcp.RegisteredToolNames(harvestRuntime(runtime))
+		families.Harvester = harvester
+		options.HarvesterTools = harvester.ToolNames()
 	}
+	professor, err := mcpserv.NewProfessor(families)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm mcp serve: %v\n", err)
+		return 1
+	}
+	options.Professor = professor.Handler()
+	options.Chat = professor.FamilyHandler(config.MCPServerChat)
+	options.Harvester = professor.FamilyHandler(config.MCPServerHarvester)
 	external := &atomic.Pointer[string]{}
 	setExternal := func(state string) { external.Store(&state) }
 	switch {
@@ -187,4 +198,61 @@ func enabledState(enabled bool) string {
 		return "enabled"
 	}
 	return "disabled"
+}
+
+// runMCPStdio is `pfm mcp serve --stdio`, the one stdio server every engine
+// registers: it forwards to the daemon's professor server when that daemon is
+// compatible and serves every enabled family in process otherwise.
+func runMCPStdio(_, stderr io.Writer, runtime commandRuntime) (exitCode int) {
+	chatEnabled := runtime.Config.MCPServers[config.MCPServerChat].Enabled
+	harvesterEnabled := runtime.Config.MCPServers[config.MCPServerHarvester].Enabled
+	if !chatEnabled && !harvesterEnabled {
+		fmt.Fprintf(
+			stderr,
+			"pfm mcp serve --stdio: every registered server is disabled by config %s; enable at least one with: pfm mcp <server> enable\n",
+			runtime.Config.Path,
+		)
+		return 1
+	}
+	chatRuntime := mcpRuntime(runtime, true)
+	families := mcpserv.ProfessorOptions{Version: version}
+	if chatEnabled {
+		chat, err := mcpserv.NewConfigured(version, stderr, chatRuntime)
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm mcp serve --stdio: configure chat: %v\n", err)
+			return 1
+		}
+		defer func() { cli.CloseResource(chat, "pfm mcp serve --stdio: close chat service", stderr, &exitCode) }()
+		families.Chat = chat
+	}
+	if harvesterEnabled {
+		harvester, err := harvestmcp.NewConfiguredHarvester(version, harvestRuntime(runtime))
+		if err != nil {
+			fmt.Fprintf(stderr, "pfm mcp serve --stdio: configure harvester: %v\n", err)
+			return 1
+		}
+		defer func() {
+			cli.CloseResource(harvester, "pfm mcp serve --stdio: close harvester service", stderr, &exitCode)
+		}()
+		families.Harvester = harvester
+	}
+	professor, err := mcpserv.NewProfessor(families)
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm mcp serve --stdio: %v\n", err)
+		return 1
+	}
+	// This server answers from the build it started on until its chat ends:
+	// Claude Code does not relaunch a stdio server that exits, so ending it on
+	// an install would take the MCP tools away from every running chat.
+	err = professor.RunStdio(context.Background(), os.Stdin, os.Stdout, mcpserv.StdioOptions{
+		DaemonAddress: chatRuntime.DaemonAddress,
+		Home:          runtime.Paths.Home,
+		SIDDir:        runtime.Paths.SIDDir,
+		Warnings:      stderr,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "pfm mcp serve --stdio: %v\n", err)
+		return 1
+	}
+	return 0
 }

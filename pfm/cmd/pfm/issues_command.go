@@ -12,7 +12,7 @@ import (
 )
 
 // runIssues lists the servicedesk complaint box agents file through the
-// issue_servicedesk MCP tool. It is the only read surface for that ledger: a
+// servicedesk MCP tool. It is the only read surface for that ledger: a
 // write-only complaint box nobody can open is a black hole.
 //
 // The three states an operator can hit are kept visibly distinct:

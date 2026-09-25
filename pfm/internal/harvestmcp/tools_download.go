@@ -28,7 +28,7 @@ const (
 	downloadURITemplate           = downloadURIPrefix + "{id}"
 	defaultMaxResourceBytes int64 = 25 << 20
 	resourceLinkType              = "resource_link"
-	downloadFileDescription       = `Downloads 1–50 files of any kind — a PDF, zip, image, audio, dataset — as bytes, unparsed, input order kept. Call download_file{urls:["https://…/data.zip"]}. Each item returns kind, content type, size, sha256 and via, the rung that served it. On the local server it returns path, the file's absolute path on this machine: take the file from there. On the remote server it returns id, url and expires, plus a resource_link to read with resources/read: run ` + "`curl -fL -o <file> <url>`" + ` in a shell and check the sha256; never read the file into context. The url expires 10 minutes after the call, and a server restart invalidates every url; call download_file again for a fresh one. Nothing is converted: to read a web page, a local document or a paper, call ` + "`read`" + ` with urls, files or publications. A failing item carries its own error and the others still return.`
+	downloadFileDescription       = `Downloads 1–50 files of any kind — a PDF, zip, image, audio, dataset — as bytes, unparsed, input order kept. Call harvester_download_file{urls:["https://…/data.zip"]}. Each item returns kind, content type, size, sha256 and via, the rung that served it. On the local server it returns path, the file's absolute path on this machine: take the file from there. On the remote server it returns id, url and expires, plus a resource_link to read with resources/read: run ` + "`curl -fL -o <file> <url>`" + ` in a shell and check the sha256; never read the file into context. The url expires 10 minutes after the call, and a server restart invalidates every url; call harvester_download_file again for a fresh one. Nothing is converted: to read a web page, a local document or a paper, call ` + "`harvester_read`" + ` with urls, files or publications. A failing item carries its own error and the others still return.`
 )
 
 // DownloadInput is download_file's input.
@@ -244,11 +244,13 @@ func joinNote(note, more string) string {
 func downloadMisroute(source string) string {
 	switch {
 	case isLocalInput(source):
-		return "this is a local path; download_file takes URLs — read a local document with `read` (files)."
+		return "this is a local path; harvester_download_file takes URLs — read a local document with `harvester_read` (files)."
 	case workNoun(source) != "":
-		return "this is " + workNoun(source) + "; read it with `read` (publications), or download the URL of its file."
+		return "this is " + workNoun(
+			source,
+		) + "; read it with `harvester_read` (publications), or download the URL of its file."
 	case !isWebURL(source):
-		return "this is not a URL; download_file takes http(s) URLs of files."
+		return "this is not a URL; harvester_download_file takes http(s) URLs of files."
 	}
 	return ""
 }

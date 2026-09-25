@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
 )
 
 const (
@@ -91,10 +93,24 @@ var openCodeToolIDs = []string{
 	"write",
 }
 
-func renderOpenCodeToolsBlock(allowList string) string {
+func renderOpenCodeToolsBlock(allowList string) (string, error) {
 	allowed := map[string]bool{}
+	mcpAllowed := map[string]map[string]bool{}
 	for _, claudeTool := range strings.Split(allowList, ",") {
-		for _, openCodeTool := range claudeToOpenCodeTools[strings.TrimSpace(claudeTool)] {
+		claudeTool = strings.TrimSpace(claudeTool)
+		if strings.HasPrefix(strings.ToLower(claudeTool), "mcp__") {
+			server, tool, err := pfmengine.OpenCodeMCPToolParts(claudeTool)
+			if err != nil {
+				return "", err
+			}
+			id := server + "_" + tool
+			if mcpAllowed[server] == nil {
+				mcpAllowed[server] = map[string]bool{}
+			}
+			mcpAllowed[server][id] = true
+			continue
+		}
+		for _, openCodeTool := range claudeToOpenCodeTools[claudeTool] {
 			allowed[openCodeTool] = true
 		}
 	}
@@ -110,5 +126,21 @@ func renderOpenCodeToolsBlock(allowList string) string {
 	for _, tool := range denied {
 		fmt.Fprintf(&content, "  %s: false\n", tool)
 	}
-	return content.String()
+	servers := make([]string, 0, len(mcpAllowed))
+	for server := range mcpAllowed {
+		servers = append(servers, server)
+	}
+	sort.Strings(servers)
+	for _, server := range servers {
+		fmt.Fprintf(&content, "  %s_*: false\n", server)
+		ids := make([]string, 0, len(mcpAllowed[server]))
+		for id := range mcpAllowed[server] {
+			ids = append(ids, id)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			fmt.Fprintf(&content, "  %s: true\n", id)
+		}
+	}
+	return content.String(), nil
 }

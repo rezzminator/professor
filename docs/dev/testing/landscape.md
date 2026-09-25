@@ -376,9 +376,9 @@ T40 · `pfm internal compact-gate` PreCompact hook holding each compacting party
 
 ---
 
-## M — MCP (55)
+## M — MCP (53)
 
-### Chat fleet server — 18 tools
+### Chat family — 18 tools
 
 M1 · `chat_ls` (all/killed/project/limit) · needs:tmux · today:U · mcp.md:15 · lane(s):M
 M2 · `chat_resolve` (kind: label|session|cxwin, name) · needs:tmux · today:U · mcp.md:16 · lane(s):M
@@ -399,51 +399,49 @@ M16 · `chat_name` (target/name) — no dedicated test file ⚠ known-gap · nee
 M17 · `chat_kill` (target/exit) — no dedicated test file ⚠ known-gap · needs:tmux · today:NONE · mcp.md:29 · lane(s):M
 M18 · `chat_unkill` (target) — no dedicated test file ⚠ known-gap · needs:none · today:NONE · mcp.md:30 · lane(s):M
 M19 · `chat_save` (target/transcript, refuses a non-path-shaped target) · needs:none · today:U · mcp.md:31 · lane(s):M
-M20 · `issue_servicedesk` (title/detail/severity/area, `UNIDENTIFIED` sentinel fallback) · needs:none · today:U · mcp.md:32 · lane(s):M
+M20 · `servicedesk` (title/detail/severity/area, `UNIDENTIFIED` sentinel fallback; chat family, follows the chat toggle) · needs:none · today:U · mcp.md:32 · lane(s):M
 
-### Harvester server — 6 tools
+### Harvester family — 4 tools
 
-M21 · `read` `urls` (web URLs, at most 50 items in all/refresh/include_content/ocr_language/headers; typed items grouped as the input: source, kind, title, via, status, gaps, cached, chars, path, content, error) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
-M22 · `search_literature` (query/limit/type any|paper|book; typed candidates carrying `type`, each with a `handle` for `read`'s `publications`) · needs:network · today:U (`tools_works_test.go`) · pfm/internal/harvestmcp/tools_works.go · lane(s):M
-M23 · `search_web` (query/limit/lang/engines), config-conditional — hidden, not erroring, when unconfigured · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
-M24 · `search_web` backend-failure-as-data contract (`IsError` result with the named `Web search failed` text, never an empty list) · needs:network · today:U (`tools_search_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
-M25 · `download_file` (urls 1-50/headers; the bytes unparsed: path locally or a `resource_link` remotely, kind, content_type, bytes, sha256, via) · needs:network · today:U (`tools_download_test.go`) · pfm/internal/harvestmcp/tools_download.go · lane(s):M
-M26 · `read` `files` (local paths or file:// URLs/include_content; via `local`; local server only: the remote gateway's `read` schema has no `files` field, and a remote call that sends one is refused by name) · needs:none · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
-M27 · `read` `publications` (at most 20: DOI, arXiv id, PMID, PMCID, ISBN, landing URL or `search_literature` handle/refresh/include_content/headers; items carry `ids` and `via`) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
-M28 · Caller headers on `read` (`urls`, and `publications`' landing origin; never `files`) and `download_file` (never `search_literature`/`search_web`): refused by name at entry, sent only to the target's origin, their own cache partition, values never echoed; a bare identifier with headers is a per-item error · needs:network · today:U (`caller_headers_test.go`) · pfm/internal/harvest/caller_headers.go · lane(s):M
-M29 · A misplaced `read` item is a per-item error naming the right field, the rest of the call proceeding (an identifier in `urls` names `publications`, a local path in `urls` names `files`, a URL in `files` names `urls`) · needs:none · today:U (`TestReadMisplacedItemFailsAloneNamingTheField`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M21 · `harvester_read` `urls` (web URLs, at most 50 items in all/refresh/include_content/ocr_language/headers; typed items grouped as the input: source, kind, title, via, status, gaps, cached, chars, path, content, error) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M22 · `harvester_search_literature` (query/limit/type any|paper|book; typed candidates carrying `type`, each with a `handle` for `harvester_read`'s `publications`) · needs:network · today:U (`tools_works_test.go`) · pfm/internal/harvestmcp/tools_works.go · lane(s):M
+M23 · `harvester_search_web` (query/limit/lang/engines), config-conditional — hidden, not erroring, when unconfigured · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
+M24 · `harvester_search_web` backend-failure-as-data contract (`IsError` result with the named `Web search failed` text, never an empty list) · needs:network · today:U (`tools_search_test.go`) · pfm/internal/harvestmcp/tools_search.go · lane(s):M
+M25 · `harvester_download_file` (urls 1-50/headers; the bytes unparsed: path locally or a `resource_link` remotely, kind, content_type, bytes, sha256, via) · needs:network · today:U (`tools_download_test.go`) · pfm/internal/harvestmcp/tools_download.go · lane(s):M
+M26 · `harvester_read` `files` (local paths or file:// URLs/include_content; via `local`; local server only: the remote gateway's `harvester_read` schema has no `files` field, and a remote call that sends one is refused by name) · needs:none · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M27 · `harvester_read` `publications` (at most 20: DOI, arXiv id, PMID, PMCID, ISBN, landing URL or `harvester_search_literature` handle/refresh/include_content/headers; items carry `ids` and `via`) · needs:network · today:U (`tools_read_test.go`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+M28 · Caller headers on `harvester_read` (`urls`, and `publications`' landing origin; never `files`) and `harvester_download_file` (never `harvester_search_literature`/`harvester_search_web`): refused by name at entry, sent only to the target's origin, their own cache partition, values never echoed; a bare identifier with headers is a per-item error · needs:network · today:U (`caller_headers_test.go`) · pfm/internal/harvest/caller_headers.go · lane(s):M
+M29 · A misplaced `harvester_read` item is a per-item error naming the right field, the rest of the call proceeding (an identifier in `urls` names `publications`, a local path in `urls` names `files`, a URL in `files` names `urls`) · needs:none · today:U (`TestReadMisplacedItemFailsAloneNamingTheField`) · pfm/internal/harvestmcp/tools_read.go · lane(s):M
 
 ### Registration per engine
 
-M30 · Both `chat`+`harvester` servers default-disabled at config layer, require `pfm mcp <server> enable` · needs:none · today:U · mcp.md:53 · lane(s):M
-M31 · Claude registration: chat server wired stdio per account (`~/.claude.json`) · needs:seat:cc · today:U · mcp.md:55-62 · lane(s):M
-M32 · Claude registration: harvester server wired HTTP per account · needs:seat:cc,network · today:U · mcp.md:55-61 · lane(s):M
-M33 · Claude re-install maintains prior pfm registration shape (`isPFMStdioClient`/`isPFMHTTPClient`) · needs:seat:cc · today:U · mcp.md:63 · lane(s):M
-M34 · Codex registration: both chat+harvester wired HTTP in `config.toml [mcp_servers]` fence · needs:seat:cx,network · today:U · mcp.md:65-69 · lane(s):E2,M
+M30 · Both families (`chat`, `harvester`) default-disabled at config layer, require `pfm mcp <server> enable` · needs:none · today:U · mcp.md:53 · lane(s):M
+M31 · Claude registration: professor wired stdio (`pfm mcp serve --stdio`) in every registry a pfm-launched Claude reads (`mcpServers.professor`) · needs:seat:cc · today:U · mcp.md:55-62 · lane(s):M
+M32 · Claude registration: one `professor` entry carries both families (the stdio command, absolute binary path) — no per-family and no HTTP entry · needs:seat:cc · today:U · mcp.md:55-61 · lane(s):M
+M33 · Claude re-install keeps pfm's `professor` registration byte-identical; the ownership ledger names the registry · needs:seat:cc · today:U · mcp.md:63 · lane(s):M
+M34 · Codex registration: professor wired stdio (`pfm mcp serve --stdio`) in the `config.toml [mcp_servers]` fence · needs:seat:cx · today:U · mcp.md:65-69 · lane(s):E2,M
 M35 · Codex fenced block preserves a pre-existing foreign `[mcp_servers]` entry of the same name · needs:seat:cx · today:U · mcp.md:68 · lane(s):M
-M36 · OpenCode MCP wiring — chat registered local/stdio (`pfm mcp chat serve`), harvester registered remote/HTTP, both under `.opencode/opencode.jsonc`'s `mcp` key; `pfm doctor`'s `client=opencode` row reads healthy · needs:seat:oc · today:U (`internal/installer/mcp_wiring_test.go`, `internal/installer/mcp_inspect_test.go`, `internal/doctor/mcp_client_test.go`) · mcp.md:71-73 · lane(s):E3,M
-M37 · `pfm doctor` MCP registration-file classification (PFM/Absent/ForeignRegistration/LegacyStandalone/Unreadable) · needs:seat:cc,network · today:U · mcp.md:75-79 · lane(s):M
-M38 · `pfm doctor` historical Codex + project-scope harvester cutover inspection · needs:seat:cx · today:U · mcp.md:80 · lane(s):M
+M36 · OpenCode registration: professor local stdio (`pfm mcp serve --stdio`) · needs:seat:oc · today:U (`internal/installer/mcp_wiring_test.go`, `internal/installer/mcp_inspect_test.go`, `internal/doctor/mcp_client_test.go`) · mcp.md:71-73 · lane(s):E3,M
+M37 · `pfm doctor` MCP registration classification per Claude registry (`professor=` absent/pfm/foreign-registration/unreadable, a `legacy=` suffix naming pfm's legacy `chat`/`harvester` entries) · needs:seat:cc,network · today:U · mcp.md:75-79 · lane(s):M
+M38 · `pfm doctor` cutover rows for a Codex home's and the project-scope `~/.mcp.json` `harvester` key (legacy-pfm, legacy-standalone, foreign-registration) · needs:seat:cx · today:U · mcp.md:80 · lane(s):M
 M39 · `pfm doctor` live daemon reachability probe (`GET /status`, version-skew warning) · needs:network · today:U · mcp.md:81 · lane(s):M
 
 ### Daemon
 
 M40 · `pfm mcp serve` entry point (port validation; refuses if all disabled or already running) · needs:network · today:U · mcp.md:87 · lane(s):M
-M41 · Daemon single loopback port (default 18377), routes `/mcp/chat` + `/mcp/harvester` + `/status` · needs:network · today:U+B (`check_daemon`) · mcp.md:88 · lane(s):M
-M42 · Daemon disabled route answers `503` with a named remedy (not a bare 404) · needs:network · today:U · mcp.md:88 · lane(s):M
+M41 · Daemon single loopback port (default 18377), routes `/mcp/professor` (every enabled family) + the family views `/mcp/professor/chat` and `/mcp/professor/harvester` + `/status` (`servers` keyed by family); any other path 404 · needs:network · today:U+B (`check_daemon`) · mcp.md:88 · lane(s):M
+M42 · Daemon disabled family view answers `503` with a named remedy (not a bare 404) · needs:network · today:U · mcp.md:88 · lane(s):M
 M43 · Daemon refuses cross-origin/browser requests (any `Origin` header) · needs:network · today:U · mcp.md:88 · lane(s):M
-M44 · Daemon chat is HTTP-only, never ambient (`AllowAmbientIdentity:false`) · needs:network · today:U · mcp.md:89 · lane(s):M
+M44 · Daemon is HTTP-only, never ambient: with no `_meta` identity `chat_whoami` answers not_found naming the shared HTTP daemon · needs:network · today:U · mcp.md:89 · lane(s):M
 M45 · External harvester gateway (optional, OAuth/bearer-walled, default port 18378) · needs:network · today:U · mcp.md:90 · lane(s):M
 M46 · Restart-on-replaced-binary via `binwatch` (5s poll, exit 75; restart gap = exit + relaunch: in-flight requests drain ≤10s, then open MCP streams end, so the closed port no longer refuses reconnects for the old 30s shutdown grace, now only a backstop) · needs:none · today:U+B (`daemon.sh` stale-binary restart) · mcp.md:91 · lane(s):M
 M47 · systemd unit `pfm-mcp.service` (`Restart=on-failure`) · needs:systemd/launchd · today:U · mcp.md:91 · lane(s):M
 M48 · launchd plist `com.professor.pfm.mcp.plist` (`KeepAlive=true`) ⚠ known-gap (unverified on Linux host) · needs:systemd/launchd · today:NONE · mcp.md:91 · lane(s):M
-M49 · `pfm mcp chat serve` stdio path (`AllowAmbientIdentity:true`, only transport resolving self via ambient tmux/process ancestry) · needs:tmux · today:U · mcp.md:93 · lane(s):M
-M50 · `pfm mcp harvester serve [--transport stdio]` stdio path; retired flags each error by name · needs:network · today:U · mcp.md:94 · lane(s):M
 M51 · Stdio pre-filter: malformed JSON-RPC frame answered with `-32700` parse error, connection not killed · needs:none · today:U · mcp.md:95 · lane(s):M
-M52 · `pfm mcp` bare alias for `pfm mcp chat serve` · needs:tmux · today:U · cli.md:183 · lane(s):M
 M53 · `pfm mcp ls` (list registered servers/enabled-state/source) · needs:none · today:U · cli.md:184 · lane(s):M
-M54 · `pfm mcp <server> enable|disable` · needs:none · today:U · cli.md:185 · lane(s):M
+M54 · `pfm mcp <server> enable|disable`; `pfm mcp` alone or an unknown form prints the usage line and exits 2 · needs:none · today:U · cli.md:185 · lane(s):M
 M55 · `pfm mcp serve` top-level daemon dispatch form (exactly `pfm mcp serve`) · needs:network · today:U · cli.md:188 · lane(s):M
+M56 · `pfm mcp serve --stdio`, the one stdio server every engine registers: forwards to the daemon's `/mcp/professor` when it is up and compatible, serves the combined server in process when it is not, and resolves the caller's ambient identity (`_meta.pfmProxy`) · needs:tmux · today:U · pfm/cmd/pfm/mcp_serve_command.go · lane(s):M
 
 ---
 
@@ -495,7 +493,7 @@ L42 · name-sync never runs more than once concurrently by design (systemd path 
 
 ## H — Harvester: CLI + sidecar + cache + search (13)
 
-H1 · `pfm harvest [--refresh] [--include-content=false] [--ocr-language LANG] [--json] [--header 'Name: value']... <url|path|identifier>...` (1-50 sources, each routed into `read`'s `urls`, `files` or `publications`, ordered results) · needs:network · today:U · cli.md:73 · lane(s):O2
+H1 · `pfm harvest [--refresh] [--include-content=false] [--ocr-language LANG] [--json] [--header 'Name: value']... <url|path|identifier>...` (1-50 sources, each routed into `harvester_read`'s `urls`, `files` or `publications`, ordered results) · needs:network · today:U · cli.md:73 · lane(s):O2
 H2 · `pfm harvest ask -p <prompt> [--engine claude|codex] [--model M] [--effort E] [--refresh] <sources>...` · needs:network,seat:cc/cx · today:U+A (`TestHarvestAskE2E`) · cli.md:74 · lane(s):O2
 H3 · Harvest source kind: URL · needs:network · today:U · cli.md:73 · lane(s):O2
 H4 · Harvest source kind: DOI · needs:network · today:U · cli.md:73 · lane(s):O2
@@ -504,8 +502,8 @@ H6 · Harvest source kind: PMID · needs:network · today:U · cli.md:73 · lane
 H7 · Harvest source kind: PMCID · needs:network · today:U · cli.md:73 · lane(s):O2
 H8 · Harvest source kind: local path · needs:none · today:U · cli.md:73 · lane(s):O2
 H9 · Harvestpy pinned Python conversion sidecar (non-HTML document conversion) · needs:network · today:U (`internal/harvestpy`, 37 tests) · mcp.md:42 · lane(s):O2
-H10 · Harvest local cache (backs `read` results for `urls`, `files` and `publications`; a re-read reports `cached`) · needs:none · today:U · pfm/internal/harvestmcp/tools_read.go · lane(s):M
-H11 · Harvest search-backend config (SearXNG URL or Brave API key gates the `search_web` tool's visibility) · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/search_gate.go · lane(s):M
+H10 · Harvest local cache (backs `harvester_read` results for `urls`, `files` and `publications`; a re-read reports `cached`) · needs:none · today:U · pfm/internal/harvestmcp/tools_read.go · lane(s):M
+H11 · Harvest search-backend config (SearXNG URL or Brave API key gates the `harvester_search_web` tool's visibility) · needs:network · today:U (`search_gate_test.go`) · pfm/internal/harvestmcp/search_gate.go · lane(s):M
 H12 · Tier B: `setup.sh install` falls back to `--skip-harvest` silently on provisioning failure; no `verify.sh` beat asserts the harvester landed ⚠ known-gap · needs:network,docker · today:NONE · tests.md:391,437 · lane(s):O2
 H13 · `pfm harvest download-file [--json] [--header 'Name: value']... <url>...` (path / kind / content_type / bytes per item; a failed item is `ERROR:` and exit 1; a refused header exits 2 before any request) · needs:network · today:U (`internal/harvestcli/download_test.go`) · pfm/internal/harvestcli/download.go · lane(s):M
 
@@ -576,11 +574,11 @@ None — every row read across the five inventories converted into an atomic ite
 | C — Chat verbs | 67 | 3 |
 | K — Chat kinds/labels/engines | 39 | 1 |
 | T — TUI | 38 | 1 |
-| M — MCP | 55 | 5 |
+| M — MCP | 53 | 5 |
 | L — Lifecycle mechanics | 41 | 0 |
 | H — Harvester | 13 | 1 |
 | X — Misc CLI | 44 | 5 |
-| **Total** | **432** | **32** |
+| **Total** | **430** | **32** |
 
 `today=NONE` breakdown by id: I4,I5,I9,I10,I13,I15,I17,I18,I40,I89,I90,I92 (12) · P12,P13,P14,P15 (4) · C31,C40,C41 (3) · K19 (1) · T37 (1) · M15,M16,M17,M18,M48 (5) · H12 (1) · X18,X32,X33,X34,X41 (5).
 

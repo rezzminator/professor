@@ -17,7 +17,7 @@ import (
 )
 
 // callChatTool drives one tool of the production MCP surface — mcpRuntime over
-// the jailed runtime, the bridge `pfm mcp` serves — through an in-memory
+// the jailed runtime, the bridge `pfm mcp serve --stdio` serves — through an in-memory
 // protocol session, and decodes its structured answer.
 func callChatTool[T any](t *testing.T, name string, arguments any) T {
 	t.Helper()

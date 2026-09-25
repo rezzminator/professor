@@ -124,7 +124,7 @@ func TestShareRefusedServicesFailByNameWithoutAFetch(t *testing.T) {
 				"read":          h.Fetch(context.Background(), test.source),
 				"download_file": h.Download(context.Background(), test.source),
 			} {
-				want := "is a " + test.service + " link: a share link this harvester cannot open without signing in — download it yourself and read its path with read (files)"
+				want := "is a " + test.service + " link: a share link this harvester cannot open without signing in — download it yourself and read its path with harvester_read (files)"
 				if !strings.Contains(result.Error, want) || result.ErrorKind != errorKindLogin || result.Path != "" {
 					t.Fatalf("%s result = %#v; want the named %s refusal", name, result, test.service)
 				}

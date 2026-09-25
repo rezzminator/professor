@@ -52,9 +52,9 @@ need "the working directory $CWD" "[ -d '$CWD/.git' ]" \
   "mkdir -p '$CWD' && git -C '$CWD' init -q && git -C '$CWD' commit -q --allow-empty -m lane" ||
   lane_abort "no working directory for the chat to live in ($CWD)"
 need "the pfm MCP daemon on :$PORT" \
-  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/chat)\" != 000 ]" \
+  "[ \"\$(curl -s -o /dev/null -w '%{http_code}' -m 2 http://127.0.0.1:$PORT/mcp/professor)\" != 000 ]" \
   "bash /worktree/infra/demo/daemon.sh" ||
-  lane_abort "the chat MCP daemon never answered on :$PORT — a Codex chat registers chat_* over HTTP and would start with no tools"
+  lane_abort "the professor MCP daemon never answered on :$PORT — a Codex chat's professor stdio server would have no daemon to forward to"
 
 # ─── E2.01 — the spawn ceremony on the Codex home ───────────────────────────
 
@@ -393,56 +393,50 @@ if requires E2.01-open-seat; then
   fi
 fi
 
-# ─── E2.06 — MCP over HTTP: the chat_* tools the Codex session lists ────────
+# ─── E2.06 — MCP over stdio: the chat_* tools the Codex session lists ──────
 
-beat E2.06-mcp-http M34
+beat E2.06-mcp-stdio M34
 spends cx
 target_live "$CHAT"
 if requires E2.01-open-seat; then
   bad=""
   toml="$CODEX_HOME/config.toml"
-  url="http://127.0.0.1:$PORT/mcp/chat"
-  # M34: both servers wired HTTP inside the installer-owned fence
+  bin="$HOME/.local/bin/pfm"
+  # M34: the professor server wired over stdio inside the installer-owned fence
   # (internal/installer/mcp.go writeMCPCodeConfigAt).
   if [ ! -f "$toml" ]; then
     bad="$bad no $toml — the installer writes the [mcp_servers] fence there;"
   else
     fence="$(sed -n '/^# BEGIN pfm mcp_servers — installer-owned$/,/^# END pfm mcp_servers — installer-owned$/p' "$toml")"
     [ -n "$fence" ] || bad="$bad $toml carries no '# BEGIN/END pfm mcp_servers — installer-owned' fence;"
-    printf '%s' "$fence" | grep -qF '[mcp_servers.chat]' || bad="$bad the fence has no [mcp_servers.chat];"
-    printf '%s' "$fence" | grep -qF "url = \"$url\"" || bad="$bad the fence does not point chat at $url: $(one_line "$fence");"
-    printf '%s' "$fence" | grep -qF '[mcp_servers.harvester]' || bad="$bad the fence has no [mcp_servers.harvester] (M34: both servers wired HTTP);"
-    printf '%s' "$fence" | grep -qF "url = \"http://127.0.0.1:$PORT/mcp/harvester\"" || bad="$bad the fence does not point harvester at http://127.0.0.1:$PORT/mcp/harvester;"
+    printf '%s' "$fence" | grep -qF '[mcp_servers.professor]' || bad="$bad the fence has no [mcp_servers.professor];"
+    printf '%s' "$fence" | grep -qF "command = \"$bin\"" || bad="$bad the fence does not point professor's command at $bin: $(one_line "$fence");"
+    printf '%s' "$fence" | grep -qF 'args = ["mcp", "serve", "--stdio"]' || bad="$bad the fence does not wire professor's args to [\"mcp\", \"serve\", \"--stdio\"]: $(one_line "$fence");"
   fi
-  # The served surface: the streamable-HTTP handshake the Codex client performs
-  # (initialize → Mcp-Session-Id → tools/list), driven with curl.
-  hdr=/tmp/e2-mcp-init.hdr body=/tmp/e2-mcp-init.json
+  # The served surface: three JSON-RPC frames on stdin to the stdio command
+  # itself (initialize, notifications/initialized, tools/list) — the same
+  # command a Codex session launches to forward to the daemon.
   init='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"lane-e2","version":"1"}}}'
-  code="$(curl -s -m 10 -o "$body" -D "$hdr" -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' --data "$init" "$url" -w '%{http_code}')"
-  sid="$(grep -i '^mcp-session-id:' "$hdr" 2>/dev/null | awk '{ print $2 }' | tr -d '\r')"
+  initd='{"jsonrpc":"2.0","method":"notifications/initialized"}'
+  list='{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
+  # stdin is HELD OPEN after the frames: on EOF the server ends at once and the
+  # tools/list reply still in flight is lost (check-map.sh does the same).
+  out="$( { printf '%s\n%s\n%s\n' "$init" "$initd" "$list"; sleep 5; } | timeout 15 "$bin" mcp serve --stdio 2>/tmp/e2-mcp-stdio.err)"
   tools=""
-  if [ "$code" != 200 ]; then
-    bad="$bad initialize on $url answered HTTP ${code:-000}: $(one_line "$(cat "$body" 2>/dev/null)");"
-  elif ! grep -q '"serverInfo"' "$body"; then
-    bad="$bad initialize answered 200 without a serverInfo: $(one_line "$(cat "$body")");"
-  elif [ -z "$sid" ]; then
-    bad="$bad initialize answered 200 but set no Mcp-Session-Id header (stateful streamable HTTP needs one);"
+  if [ -z "$out" ]; then
+    bad="$bad pfm mcp serve --stdio produced no output on the three-frame handshake: $(one_line "$(cat /tmp/e2-mcp-stdio.err 2>/dev/null)");"
+  elif ! printf '%s' "$out" | grep -q '"serverInfo"'; then
+    bad="$bad the initialize response over stdio carried no serverInfo: $(one_line "$out" | cut -c1-200);"
   else
-    curl -s -m 10 -o /dev/null -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-      -H "Mcp-Session-Id: $sid" -H 'Mcp-Protocol-Version: 2025-06-18' \
-      --data '{"jsonrpc":"2.0","method":"notifications/initialized"}' "$url"
-    list="$(curl -s -m 10 -X POST -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
-      -H "Mcp-Session-Id: $sid" -H 'Mcp-Protocol-Version: 2025-06-18' \
-      --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' "$url")"
-    tools="$(printf '%s' "$list" | jq -r '.result.tools[]?.name' 2>/dev/null | sort)"
+    tools="$(printf '%s' "$out" | grep '"id":2' | jq -r '.result.tools[]?.name' 2>/dev/null | sort)"
     if [ -z "$tools" ]; then
-      bad="$bad tools/list over HTTP returned no tool names: $(one_line "$list" | cut -c1-200);"
+      bad="$bad tools/list over stdio returned no tool names: $(one_line "$out" | cut -c1-200);"
     else
-      for want in chat_ls chat_status chat_last chat_read chat_inject chat_ask chat_self_compact chat_whoami chat_new chat_kill chat_unkill chat_name; do
+      for want in chat_ls chat_status chat_last chat_read chat_inject chat_self_compact chat_whoami chat_new chat_kill chat_unkill chat_name; do
         printf '%s\n' "$tools" | grep -qx "$want" || bad="$bad tools/list lacks $want;"
       done
-      # The daemon's own roster (/status servers.chat) and the served list must
-      # be one list — two readers of one truth.
+      # The daemon's own roster (/status servers.chat) and the stdio-served
+      # list must be one list — two readers of one truth.
       status_tools="$(curl -s -m 5 "http://127.0.0.1:$PORT/status" | jq -r '.servers.chat[]?' 2>/dev/null | sort)"
       if [ -z "$status_tools" ]; then
         bad="$bad /status names no servers.chat tools (the daemon's own roster is unreadable);"
@@ -450,10 +444,9 @@ if requires E2.01-open-seat; then
         bad="$bad /status servers.chat and tools/list disagree — status: $(printf '%s' "$status_tools" | tr '\n' ' ') vs served: $(printf '%s' "$tools" | tr '\n' ' ');"
       fi
     fi
-    curl -s -m 5 -o /dev/null -X DELETE -H "Mcp-Session-Id: $sid" "$url"
   fi
   if [ -n "$bad" ]; then fail "$bad"; else
-    pass "config.toml fence wires chat + harvester at :$PORT over HTTP; handshake on $url served $(printf '%s\n' "$tools" | grep -c .) tools ($(printf '%s' "$tools" | grep -c '^chat_') chat_*), matching /status"
+    pass "config.toml fence wires professor's stdio command at $bin; the three-frame stdio handshake served $(printf '%s\n' "$tools" | grep -c .) tools ($(printf '%s' "$tools" | grep -c '^chat_') chat_*), matching /status"
   fi
 fi
 

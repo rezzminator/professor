@@ -29,7 +29,7 @@ Canonical tool: `$HOME/.local/bin/pfm chat`.
 
 ## Coordination
 
-Native subagents communicate through `collaboration.send_message` to the parent agent path; the parent waits with `wait_agent`. Separate terminal chats use the chat MCP or `pfm chat inject` with the exact target supplied by the orchestrator. Agent paths such as `/root/...` are mailbox addresses, never terminal-chat targets. A delivery failure is reported to the caller with the failed target; no event spool is consumed by the harness.
+Native subagents communicate through `collaboration.send_message` to the parent agent path; the parent waits with `wait_agent`. Separate terminal chats use the professor MCP's `chat_*` tools or `pfm chat inject` with the exact target supplied by the orchestrator. Agent paths such as `/root/...` are mailbox addresses, never terminal-chat targets. A delivery failure is reported to the caller with the failed target; no event spool is consumed by the harness.
 
 ## Boundaries
 

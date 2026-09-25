@@ -20,20 +20,20 @@ const (
 	searchDefaultLimit = 8
 	searchMaxLimit     = 25
 	// searchToolName is the MCP tool `pfm harvest search` calls in process.
-	searchToolName = "search_literature"
+	searchToolName = "harvester_search_literature"
 )
 
-// searchTypes are the values --type takes, the search_literature tool's type.
+// searchTypes are the values --type takes, the harvester_search_literature tool's type.
 var searchTypes = []string{"any", "paper", "book"}
 
-// newSearchService builds the harvester service whose search_literature tool
+// newSearchService builds the harvester service whose harvester_search_literature tool
 // `pfm harvest search` calls; a test swaps it for one whose discovery sources
 // reach a fixture.
 var newSearchService = func(runtime harvestmcp.Runtime) (*harvestmcp.Service, error) {
 	return harvestmcp.NewConfiguredHarvester("cli", runtime)
 }
 
-// runSearch is `pfm harvest search <query>...`: the search_literature tool,
+// runSearch is `pfm harvest search <query>...`: the harvester_search_literature tool,
 // called in process over the MCP SDK so the CLI answers exactly what the tool
 // answers — ranked candidates, each with its type and handle, and every
 // discovery source's status.
@@ -95,7 +95,7 @@ func runSearch(args []string, stdout, stderr io.Writer, runtime config.Runtime) 
 }
 
 // callSearch connects an in-memory MCP client to service and calls its
-// search_literature tool; a tool error comes back as an error naming its text.
+// harvester_search_literature tool; a tool error comes back as an error naming its text.
 func callSearch(
 	ctx context.Context,
 	service *harvestmcp.Service,

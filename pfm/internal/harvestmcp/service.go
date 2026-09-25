@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -135,7 +134,7 @@ func NewConfiguredHarvester(version string, runtime Runtime) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	server := mcp.NewServer(&mcp.Implementation{Name: "harvester", Version: version}, &mcp.ServerOptions{
+	server := mcp.NewServer(&mcp.Implementation{Name: "professor", Version: version}, &mcp.ServerOptions{
 		Instructions: serverInstructions(runtimeSearchEnabled(runtime), runtime.Remote),
 	})
 	resolver := &harvest.Resolver{
@@ -154,7 +153,7 @@ func NewConfiguredHarvester(version string, runtime Runtime) (*Service, error) {
 		worker:    worker,
 		downloads: newDownloadStore(),
 	}
-	service.register()
+	service.RegisterTools(server)
 	return service, nil
 }
 
@@ -430,68 +429,48 @@ func (service *Service) Close() error {
 	return service.worker.Close()
 }
 
-// RunStdio serves the stable service over newline-delimited MCP JSON.
-func (service *Service) RunStdio(ctx context.Context, input io.Reader, output io.Writer) error {
-	return service.server.Run(
-		ctx,
-		&mcp.IOTransport{Reader: nopReaderCloser{Reader: input}, Writer: nopWriterCloser{Writer: output}},
-	)
+// Instructions is this service's routing text: the harvester part every
+// professor server composes from.
+func (service *Service) Instructions() string {
+	return serverInstructions(runtimeSearchEnabled(service.runtime), service.runtime.Remote)
 }
 
-// NewHTTPHandler exposes the same tool surface as stdio through streamable
-// HTTP. The process-level daemon supplies authentication and endpoint routing.
-func (service *Service) NewHTTPHandler() http.Handler {
-	return obs.Handler("harvester-mcp", mcp.NewStreamableHTTPHandler(
-		func(*http.Request) *mcp.Server { return service.server },
-		&mcp.StreamableHTTPOptions{
-			JSONResponse:               true,
-			Stateless:                  false,
-			DisableLocalhostProtection: false,
-		},
-	))
+// ToolNames is the roster RegisterTools adds under this service's runtime.
+func (service *Service) ToolNames() []string {
+	return RegisteredToolNames(service.runtime)
 }
 
-// The SDK's IOTransport takes ownership of ReadCloser/WriteCloser values and
-// closes both at connection shutdown. RunStdio accepts the older, deliberately
-// non-owning io.Reader/io.Writer contract, so adapt them with no-op closers.
-type nopReaderCloser struct{ io.Reader }
-
-func (nopReaderCloser) Close() error { return nil }
-
-type nopWriterCloser struct{ io.Writer }
-
-func (nopWriterCloser) Close() error { return nil }
-
-// register adds the four tools (search_web only with a search backend; read
+// RegisterTools adds the four tools (search_web only with a search backend; read
 // on the remote server without `files` in its schema) and, on the remote
 // server, the download resource template. Each tool returns its output
 // struct: the SDK derives the output schema from it and sends
 // structuredContent beside the readable Content text. RegisteredToolNames
-// (toolnames.go) moves with it.
-func (service *Service) register() {
+// (toolnames.go) moves with it. Every professor server carrying the harvester
+// family registers through here, bound to this one service.
+func (service *Service) RegisterTools(server *mcp.Server) {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true}
 	readTool := &mcp.Tool{Name: toolRead, Description: readDescription, Annotations: readOnly}
 	if service.runtime.Remote {
 		readTool.Description = readRemoteDescription
 		readTool.InputSchema = remoteReadSchema()
 	}
-	mcp.AddTool(service.server, readTool, obs.Tool(toolRead, service.read))
-	mcp.AddTool(service.server,
+	mcp.AddTool(server, readTool, obs.Tool(toolRead, service.read))
+	mcp.AddTool(server,
 		&mcp.Tool{Name: toolDownloadFile, Description: downloadFileDescription, Annotations: readOnly},
 		obs.Tool(toolDownloadFile, service.downloadFile))
-	mcp.AddTool(service.server,
+	mcp.AddTool(server,
 		&mcp.Tool{Name: toolSearchLiterature, Description: searchLiteratureDescription, Annotations: readOnly},
 		obs.Tool(toolSearchLiterature, service.searchLiterature))
 	if runtimeSearchEnabled(service.runtime) {
-		mcp.AddTool(service.server,
+		mcp.AddTool(server,
 			&mcp.Tool{Name: toolSearchWeb, Description: searchWebDescription, Annotations: readOnly},
 			obs.Tool(toolSearchWeb, service.searchWeb))
 	}
 	if service.runtime.Remote {
-		service.server.AddResourceTemplate(&mcp.ResourceTemplate{
+		server.AddResourceTemplate(&mcp.ResourceTemplate{
 			Name:        "download",
 			URITemplate: downloadURITemplate,
-			Description: "A file the download_file tool fetched, by its sha256; resources/read answers its bytes as a blob.",
+			Description: "A file the harvester_download_file tool fetched, by its sha256; resources/read answers its bytes as a blob.",
 		}, service.readDownload)
 	}
 }

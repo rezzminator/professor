@@ -66,8 +66,8 @@ func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 		t.Fatal(err)
 	}
 	installed := readFixture(t, registry)
-	if !strings.Contains(installed, `"chat"`) {
-		t.Fatalf("install did not register chat: %s", installed)
+	if !strings.Contains(installed, `"professor"`) {
+		t.Fatalf("install did not register professor: %s", installed)
 	}
 	requireKeepsBeyondFloat64(t, "MCP install", []byte(installed))
 	options.Mode = ModeUninstall
@@ -75,8 +75,8 @@ func TestMCPRegistryRewriteKeepsIntegersBeyondFloat64(t *testing.T) {
 		t.Fatal(err)
 	}
 	uninstalled := readFixture(t, registry)
-	if strings.Contains(uninstalled, `"chat"`) {
-		t.Fatalf("uninstall left the chat registration: %s", uninstalled)
+	if strings.Contains(uninstalled, `"professor"`) {
+		t.Fatalf("uninstall left the professor registration: %s", uninstalled)
 	}
 	requireKeepsBeyondFloat64(t, "MCP uninstall", []byte(uninstalled))
 }

@@ -20,11 +20,13 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		name     string
-		config   string
-		absent   bool
-		want     string
-		failures int
+		name      string
+		config    string
+		absent    bool
+		directory bool
+		want      string
+		wantAlso  string
+		failures  int
 	}{
 		{
 			name:     "installed",
@@ -57,16 +59,33 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 			failures: 1,
 		},
 		{
+			// A config known to be absent was looked at and is not there:
+			// that is the MISSING state install repairs, not a failed look.
 			name:     "no config at all",
 			absent:   true,
-			want:     "developer_instructions=CHECK FAILED",
+			want:     "developer_instructions=MISSING",
+			wantAlso: "config=absent — run pfm install --yes",
 			failures: 1,
+		},
+		{
+			// A config that exists but cannot be read is a failed look. A
+			// directory in its place is the read error (the fence runs as
+			// root, so a chmod-000 file would still read).
+			name:      "unreadable config",
+			directory: true,
+			want:      "developer_instructions=CHECK FAILED",
+			wantAlso:  "UNKNOWN, not clean",
+			failures:  1,
 		},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
 			home := t.TempDir()
-			if !testCase.absent {
+			if testCase.directory {
+				if err := os.Mkdir(filepath.Join(home, "config.toml"), 0o700); err != nil {
+					t.Fatal(err)
+				}
+			} else if !testCase.absent {
 				if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(testCase.config), 0o600); err != nil {
 					t.Fatal(err)
 				}
@@ -75,8 +94,10 @@ func TestCodexDeveloperInstructionsNameEveryBrokenState(t *testing.T) {
 			if failures := PrintCodexDeveloperInstructions(&out, []string{home}); failures != testCase.failures {
 				t.Fatalf("failures=%d want=%d: %s", failures, testCase.failures, out.String())
 			}
-			if !strings.Contains(out.String(), testCase.want) {
-				t.Fatalf("line does not name %q: %s", testCase.want, out.String())
+			for _, want := range []string{testCase.want, testCase.wantAlso} {
+				if !strings.Contains(out.String(), want) {
+					t.Fatalf("line does not name %q: %s", want, out.String())
+				}
 			}
 		})
 	}

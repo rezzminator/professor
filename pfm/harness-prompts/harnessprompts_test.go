@@ -79,3 +79,23 @@ func TestReadPartNamesTheMissingPart(t *testing.T) {
 		t.Fatalf("error does not name the part: %v", err)
 	}
 }
+
+// TopLevel names the root of the embedded tree — the first element of every
+// expected part, each once — so doctor can hold a clone entry the binary
+// never embeds outside its comparison.
+func TestTopLevelNamesTheEmbeddedRoot(t *testing.T) {
+	seen := map[string]bool{}
+	var want []string
+	for _, name := range expectedParts {
+		first, _, _ := strings.Cut(name, "/")
+		if !seen[first] {
+			seen[first] = true
+			want = append(want, first)
+		}
+	}
+	sort.Strings(want)
+	got := TopLevel()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("TopLevel() = %v, want %v", got, want)
+	}
+}

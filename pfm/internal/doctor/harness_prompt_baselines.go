@@ -105,16 +105,15 @@ func printModelHarnessPromptDoctorWithDeps(
 		fmt.Fprintln(stdout, "doctor: harness-prompt: baseline malformed — run pfm install")
 		return 1
 	}
-	modelRaw, modelErr := os.ReadFile(filepath.Join(filepath.Dir(baselinePath), model.Stem+".model"))
-	baselineModel := strings.TrimSpace(string(modelRaw))
-	baseline, baselineErr := os.ReadFile(filepath.Join(filepath.Dir(baselinePath), fields[1]))
-	baselineSum := sha256.Sum256(baseline)
-	if modelErr != nil || baselineModel == "" || baselineErr != nil || hex.EncodeToString(baselineSum[:]) != fields[0] {
+	baselineModel, baseline, unavailable := readHarnessBaseline(baselinePath, model.Stem, fields[0], fields[1])
+	if unavailable != nil {
 		fmt.Fprintf(
 			stdout,
-			"doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q — missing, unreadable or inconsistent baseline; run pfm install\n",
+			"doctor: harness-prompt: BASELINE UNAVAILABLE identity=%s model=%q path=%s error=%v — missing, unreadable or inconsistent baseline; run pfm install\n",
 			fields[1],
 			baselineModel,
+			baselinePath,
+			unavailable,
 		)
 		return 1
 	}
@@ -152,4 +151,31 @@ func printModelHarnessPromptDoctorWithDeps(
 		return 1
 	}
 	return 0
+}
+
+// readHarnessBaseline reads the pinned model name and the pinned body beside
+// baselinePath and returns the model and the body with nil, or the cause the baseline is
+// unusable: the .model read error, an empty .model, the body's read error, or
+// the digest the body no longer matches. The cause is what the BASELINE
+// UNAVAILABLE row prints, so each of them names itself.
+func readHarnessBaseline(baselinePath, stem, pinnedDigest, bodyName string) (string, []byte, error) {
+	directory := filepath.Dir(baselinePath)
+	modelPath := filepath.Join(directory, stem+".model")
+	modelRaw, err := os.ReadFile(modelPath)
+	if err != nil {
+		return "", nil, err
+	}
+	baselineModel := strings.TrimSpace(string(modelRaw))
+	if baselineModel == "" {
+		return "", nil, fmt.Errorf("%s is empty", modelPath)
+	}
+	body, err := os.ReadFile(filepath.Join(directory, bodyName))
+	if err != nil {
+		return baselineModel, nil, err
+	}
+	sum := sha256.Sum256(body)
+	if digest := hex.EncodeToString(sum[:]); digest != pinnedDigest {
+		return baselineModel, nil, fmt.Errorf("digest %s of %s does not match %s", digest, bodyName, pinnedDigest)
+	}
+	return baselineModel, body, nil
 }

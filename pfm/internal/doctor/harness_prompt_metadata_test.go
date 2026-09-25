@@ -6,10 +6,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
 func TestHarnessDoctorModelVersionAloneDoesNotWarn(t *testing.T) {
@@ -119,5 +122,64 @@ func TestHarnessFencedIdentityExampleRemainsBehavioral(t *testing.T) {
 		if normalizeHarnessPrompt(first) == normalizeHarnessPrompt(second) {
 			t.Fatalf("%s fenced identity example change hidden", fence)
 		}
+	}
+}
+
+// A baseline that cannot be used says WHICH baseline and WHY: the .model read
+// error, the pinned body's read error, or the digest the body no longer
+// matches. "missing, unreadable or inconsistent" alone leaves the operator to
+// guess which of the three it was.
+func TestHarnessBaselineUnavailableNamesItsPathAndCause(t *testing.T) {
+	saved := HarnessCaptureOverride
+	t.Cleanup(func() { HarnessCaptureOverride = saved })
+	HarnessCaptureOverride = func(context.Context, string, config.Config, string, string) (HarnessCapture, error) {
+		t.Fatal("capture ran without a usable baseline")
+		return HarnessCapture{}, nil
+	}
+	model := harnessPromptModels[0]
+	for _, scenario := range []struct {
+		name          string
+		breakBaseline func(dir string) error
+		cause         string
+	}{
+		{
+			name:          "model file missing",
+			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, model.Stem+".model")) },
+			cause:         model.Stem + ".model: no such file or directory",
+		},
+		{
+			name:          "pinned body missing",
+			breakBaseline: func(dir string) error { return os.Remove(filepath.Join(dir, "harness-prompt-fixture.md")) },
+			cause:         "harness-prompt-fixture.md: no such file or directory",
+		},
+		{
+			name: "digest mismatch",
+			breakBaseline: func(dir string) error {
+				return os.WriteFile(filepath.Join(dir, "harness-prompt-fixture.md"), []byte("edited\n"), 0o600)
+			},
+			cause: "does not match",
+		},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			home := t.TempDir()
+			stageHarnessPromptBaseline(t, home)
+			dir := paths.HarnessBaselineDir(home)
+			if err := scenario.breakBaseline(dir); err != nil {
+				t.Fatal(err)
+			}
+			var out bytes.Buffer
+			code := printModelHarnessPromptDoctor(context.Background(), &out, home, config.Config{}, model, "")
+			line := out.String()
+			for _, want := range []string{
+				"BASELINE UNAVAILABLE",
+				"path=" + filepath.Join(dir, model.Stem+".sha256"),
+				"error=",
+				scenario.cause,
+			} {
+				if code != 1 || !strings.Contains(line, want) {
+					t.Fatalf("code=%d, row does not carry %q: %s", code, want, line)
+				}
+			}
+		})
 	}
 }

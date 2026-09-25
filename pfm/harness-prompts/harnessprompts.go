@@ -25,8 +25,9 @@ const DirName = "harness-prompts"
 // named one at a time rather than swept up by a wildcard, which would also
 // match this package's own sources, and a directory pattern silently skips
 // any name beginning with "." or "_" — so a new engine directory has to be
-// added here too, and until it is, doctor's embed row reports the clone as
-// ahead of the binary. The README is embedded like every other file, which is
+// added here too, and until it is, the binary neither stages it nor compares
+// it: doctor's embed row holds every clone entry outside TopLevel out of the
+// comparison. The README is embedded like every other file, which is
 // what lets doctor compare the two trees whole; staging is where it is held
 // back (harnessPromptAssetFiles).
 //
@@ -36,6 +37,22 @@ var tree embed.FS
 // FS is the embedded tree as a read-only filesystem, for callers that walk it.
 func FS() fs.FS {
 	return tree
+}
+
+// TopLevel returns the sorted names at the root of the embedded tree — the
+// entries the go:embed line above names, read from the tree itself so the list
+// can never drift from it. A root that cannot be read is a broken binary, not
+// a state any caller could act on, so it panics with the cause.
+func TopLevel() []string {
+	entries, err := tree.ReadDir(".")
+	if err != nil {
+		panic(fmt.Sprintf("read the embedded harness prompt tree's root: %v", err))
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
 }
 
 // ReadPart returns one part by its tree-relative slash path, e.g.

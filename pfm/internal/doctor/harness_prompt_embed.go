@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -145,9 +146,17 @@ func inspectHarnessPromptEmbed(tree string) harnessPromptEmbedReport {
 // is outside the comparison. The embed package's own sources sit in that
 // directory and are never part of the prompt tree; a name beginning with "."
 // or "_" is one `go:embed` skips over a directory, so counting it here would
-// report every macOS .DS_Store as a difference between the trees.
+// report every macOS .DS_Store as a difference between the trees. A path
+// whose first element is not at the root of this binary's embedded tree
+// (harnessprompts.TopLevel) is one the binary never embeds — a new engine
+// directory the go:embed line does not name yet — so it is no difference
+// either.
 func harnessPromptTreeExcluded(name string) bool {
 	if strings.HasSuffix(name, ".go") {
+		return true
+	}
+	first, _, _ := strings.Cut(name, "/")
+	if !slices.Contains(harnessprompts.TopLevel(), first) {
 		return true
 	}
 	for _, element := range strings.Split(name, "/") {

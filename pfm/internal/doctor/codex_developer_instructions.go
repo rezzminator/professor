@@ -25,13 +25,16 @@ import (
 
 // codexInstructionsReport is one account's verdict. Err is set ONLY when the
 // config could not be read or parsed — a config that WAS read and holds the
-// wrong value reports Bytes/Want, never an error.
+// wrong value reports Bytes/Want, never an error. ConfigAbsent is a config
+// known not to exist: looked at and not there, the MISSING state install
+// repairs, never a failed look.
 type codexInstructionsReport struct {
-	Path    string
-	Present bool
-	Bytes   int
-	Want    int
-	Err     error
+	Path         string
+	Present      bool
+	ConfigAbsent bool
+	Bytes        int
+	Want         int
+	Err          error
 }
 
 // PrintCodexDeveloperInstructions checks every Codex account's config.toml
@@ -70,7 +73,7 @@ func inspectCodexInstructions(home, prompt string) codexInstructionsReport {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			report.Err = fmt.Errorf("no config.toml at %s (run pfm install --yes)", path)
+			report.ConfigAbsent = true
 			return report
 		}
 		report.Err = fmt.Errorf("read %s: %w", path, err)
@@ -104,6 +107,12 @@ func printCodexInstructionsReport(stdout io.Writer, report codexInstructionsRepo
 				"so whether it carries the fleet prompt is UNKNOWN, not clean\n",
 			report.Path,
 			report.Err,
+		)
+	case report.ConfigAbsent:
+		fmt.Fprintf(
+			stdout,
+			"doctor: codex developer_instructions=MISSING file=%s config=absent — run pfm install --yes\n",
+			report.Path,
 		)
 	case report.Present:
 		fmt.Fprintf(

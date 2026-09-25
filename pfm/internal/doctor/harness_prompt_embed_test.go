@@ -139,6 +139,28 @@ func TestHarnessPromptEmbedIgnoresWhatEmbedNeverCarries(t *testing.T) {
 	}
 }
 
+// A top-level entry the clone gains that this binary's `go:embed` never
+// names — a new engine directory, a stray note — is outside what the binary
+// carries, so it is not a difference between the trees.
+func TestHarnessPromptEmbedIgnoresATopLevelEntryTheBinaryNeverEmbeds(t *testing.T) {
+	tree := materializeHarnessPromptTree(t)
+	if err := os.MkdirAll(filepath.Join(tree, "newengine"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, content := range map[string]string{
+		"newengine/professor.md": "a middle the binary does not embed\n",
+		"NOTES.md":               "a root file the binary does not embed\n",
+	} {
+		if err := os.WriteFile(filepath.Join(tree, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	line, warnings := reportHarnessPromptEmbed(t, tree)
+	if warnings != 0 || !strings.Contains(line, "harness-prompts embed=ok") {
+		t.Fatalf("a top-level entry outside the embed read as a difference (warnings=%d): %s", warnings, line)
+	}
+}
+
 // The resolver door, both ways round: a host with no blueprint clone has
 // nothing to be behind and is named rather than warned, while a clone that IS
 // there but carries no readable tree is a failed look.

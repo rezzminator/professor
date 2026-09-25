@@ -93,7 +93,13 @@ func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVer
 		// still double-applies a persona — the exact defect this flag exists
 		// to close — so it is reported as its own outcome, distinct from a
 		// spawn site that injected nothing at all.
-		if !argvCarriesOutputStyleDefault(observation.Argv) {
+		if carried, malformed := argvCarriesOutputStyleDefault(observation.Argv); !carried {
+			settingsReason := fmt.Sprintf("argv is missing --settings %s", pfmengine.OutputStyleDefaultSettings)
+			if malformed != nil {
+				// The flag IS there and its value is broken: a different
+				// spawn-site bug than never passing it, so it is named apart.
+				settingsReason = fmt.Sprintf("argv carries a malformed --settings payload (%v)", malformed)
+			}
 			// ...but only a seat born AFTER the current spawn door went live
 			// can be blamed on a spawn site. An older chat carries the argv of the
 			// pfm that launched it, and predates this flag exactly as a
@@ -102,16 +108,16 @@ func classifySpawn(observation spawnObservation, layerStampUnix int64) (spawnVer
 			// seat on the host the moment the flag ships.
 			if age, older := predatesLayer(observation, layerStampUnix); older {
 				return spawnPredatesLayer, fmt.Sprintf(
-					"%s but argv is missing --settings %s, and the process started %s before this host's current spawn door was installed — reload to carry it",
+					"%s but %s, and the process started %s before this host's current spawn door was installed — reload to carry it",
 					promptReason,
-					pfmengine.OutputStyleDefaultSettings,
+					settingsReason,
 					age,
 				)
 			}
 			return spawnViolation, fmt.Sprintf(
-				"%s but argv is missing --settings %s — Claude Code's own output style can still double-apply on top of it",
+				"%s but %s — Claude Code's own output style can still double-apply on top of it",
 				promptReason,
-				pfmengine.OutputStyleDefaultSettings,
+				settingsReason,
 			)
 		}
 		return spawnInjected, promptReason
@@ -247,13 +253,17 @@ func predatesLayer(observation spawnObservation, layerStampUnix int64) (time.Dur
 // pair or a `--settings=<json>` word whose value parses as a JSON object
 // with `"outputStyle":"default"` — a themed payload (an extra `"theme"` key)
 // still counts; malformed JSON, another outputStyle, or a missing one does
-// not.
-func argvCarriesOutputStyleDefault(argv []string) bool {
+// not. When no word carries it, the error names the last `--settings` whose
+// payload did not parse (or that had no payload at all), so the caller can
+// tell a malformed flag from an absent one; nil means none was malformed.
+func argvCarriesOutputStyleDefault(argv []string) (bool, error) {
+	var malformed error
 	for index, argument := range argv {
 		var raw string
 		switch argument {
 		case "--settings":
 			if index+1 >= len(argv) {
+				malformed = errors.New("no payload follows --settings")
 				continue
 			}
 			raw = argv[index+1]
@@ -267,11 +277,15 @@ func argvCarriesOutputStyleDefault(argv []string) bool {
 		var settings struct {
 			OutputStyle string `json:"outputStyle"`
 		}
-		if err := json.Unmarshal([]byte(raw), &settings); err == nil && settings.OutputStyle == "default" {
-			return true
+		if err := json.Unmarshal([]byte(raw), &settings); err != nil {
+			malformed = fmt.Errorf("parse %q: %w", raw, err)
+			continue
+		}
+		if settings.OutputStyle == "default" {
+			return true, nil
 		}
 	}
-	return false
+	return false, malformed
 }
 
 // printSpawnAuditDoctor audits every live Claude chat against the configured

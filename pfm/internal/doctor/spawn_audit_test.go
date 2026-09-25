@@ -64,6 +64,19 @@ func TestClassifySpawnSeparatesInjectedOldAndBypassed(t *testing.T) {
 			wantReason: "missing --settings",
 		},
 		{
+			// A --settings that IS there but whose payload does not parse is
+			// named as malformed, not as missing: the spawn site passed the
+			// flag and broke its value, a different bug than never passing it.
+			name: "professor prompt file with a malformed settings payload",
+			observation: spawnObservation{
+				Argv:        []string{"claude", "--system-prompt-file", "/p.md", "--settings", `{"outputStyle":`},
+				Environ:     map[string]string{},
+				StartedUnix: layer + 60,
+			},
+			want:       spawnViolation,
+			wantReason: "argv carries a malformed --settings payload (",
+		},
+		{
 			// Same missing-settings argv, but this seat was born well BEFORE
 			// the current spawn door went live: it carries the argv of the pfm
 			// that launched it and predates the --settings flag exactly as it
@@ -538,13 +551,14 @@ func TestSpawnDoorStampIsTheLaterOfThePromptAndTheInstalledBinary(t *testing.T) 
 // TestArgvCarriesOutputStyleDefaultAcceptsAThemedPayload pins the JSON-parse
 // rewrite: a themed --settings value still carries the disabled output style
 // (an extra "theme" key is accepted), the plain const still carries it, a
-// payload missing outputStyle does not, and malformed JSON never counts as
-// present rather than as an unproven read.
+// payload missing outputStyle does not, and malformed JSON (or a --settings
+// with no payload) never counts as present and is reported as malformed.
 func TestArgvCarriesOutputStyleDefaultAcceptsAThemedPayload(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		argv []string
-		want bool
+		name          string
+		argv          []string
+		want          bool
+		wantMalformed bool
 	}{
 		{
 			name: "themed payload as a word pair",
@@ -572,19 +586,23 @@ func TestArgvCarriesOutputStyleDefaultAcceptsAThemedPayload(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "malformed JSON",
-			argv: []string{"claude", "--settings", `{"outputStyle":`},
-			want: false,
+			name:          "malformed JSON",
+			argv:          []string{"claude", "--settings", `{"outputStyle":`},
+			want:          false,
+			wantMalformed: true,
 		},
 		{
-			name: "--settings with no following word",
-			argv: []string{"claude", "--settings"},
-			want: false,
+			name:          "--settings with no following word",
+			argv:          []string{"claude", "--settings"},
+			want:          false,
+			wantMalformed: true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := argvCarriesOutputStyleDefault(test.argv); got != test.want {
-				t.Fatalf("argvCarriesOutputStyleDefault(%#v) = %v, want %v", test.argv, got, test.want)
+			got, malformed := argvCarriesOutputStyleDefault(test.argv)
+			if got != test.want || (malformed != nil) != test.wantMalformed {
+				t.Fatalf("argvCarriesOutputStyleDefault(%#v) = %v, %v; want %v, malformed=%v",
+					test.argv, got, malformed, test.want, test.wantMalformed)
 			}
 		})
 	}

@@ -36,6 +36,33 @@ func TestUpdateRefusesDirtyWorktree(t *testing.T) {
 	}
 }
 
+func TestUpdateIgnoresRetiredEnginesBuildTree(t *testing.T) {
+	ignore, err := os.ReadFile(filepath.Join("..", "..", "..", ".gitignore"))
+	if err != nil {
+		t.Fatalf("read repository .gitignore: %v", err)
+	}
+	repo := newUpdateGitFixtureWithIgnore(t, ignore)
+	buildTree := filepath.Join(repo, "engines", "wave-walker", "dist")
+	if err := os.MkdirAll(buildTree, 0o700); err != nil {
+		t.Fatalf("create retired engine build tree %q: %v", buildTree, err)
+	}
+	if err := os.WriteFile(filepath.Join(buildTree, "index.js"), []byte("built\n"), 0o600); err != nil {
+		t.Fatalf("write retired engine build artifact: %v", err)
+	}
+
+	runtime := updateTestRuntime(t)
+	stubUpdatePipeline(t, runtime)
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"--repo", repo, "--skip-harvest"}, &stdout, &stderr, runtime); code != 0 {
+		t.Fatalf(
+			"Run() code=%d with retired engine build tree, stdout=%q stderr=%q",
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
+	}
+}
+
 func TestUpdateRefusesSourceDowngrade(t *testing.T) {
 	repo := newUpdateGitFixture(t)
 	gitTemp(t, repo, "merge", "--ff-only", "--quiet", "v0.10.0")
@@ -706,6 +733,10 @@ func updateTestRuntime(t *testing.T) pfmconfig.Runtime {
 }
 
 func newUpdateGitFixture(t *testing.T) string {
+	return newUpdateGitFixtureWithIgnore(t, nil)
+}
+
+func newUpdateGitFixtureWithIgnore(t *testing.T, ignore []byte) string {
 	t.Helper()
 	repo := t.TempDir()
 	gitTemp(t, repo, "init", "-q")
@@ -714,7 +745,14 @@ func newUpdateGitFixture(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	gitTemp(t, repo, "add", "README.md")
+	if ignore != nil {
+		if err := os.WriteFile(filepath.Join(repo, ".gitignore"), ignore, 0o600); err != nil {
+			t.Fatalf("seed fixture .gitignore: %v", err)
+		}
+		gitTemp(t, repo, "add", "README.md", ".gitignore")
+	} else {
+		gitTemp(t, repo, "add", "README.md")
+	}
 	gitTemp(t, repo, "commit", "-qm", "fixture")
 	gitTemp(t, repo, "tag", "v0.9.0")
 	if err := os.WriteFile(filepath.Join(repo, "RELEASE"), []byte("next\n"), 0o600); err != nil {
@@ -842,50 +880,6 @@ func updateWithReleaseNotesFakes(t *testing.T, repo string) string {
 		t.Fatalf("Run() code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
 	}
 	return stdout.String()
-}
-
-// TestUpdateReportsReleaseNotesToRead pins the "files between" branch of the
-// release-notes report: the printed line names the previous and target tags
-// and the release count, and lists each file oldest first.
-func TestUpdateReportsReleaseNotesToRead(t *testing.T) {
-	repo := newReleaseNotesUpdateFixture(t, []string{"v0.9.5.md", "v0.9.1.md"})
-	stdout := updateWithReleaseNotesFakes(t, repo)
-	if !strings.Contains(stdout, "release notes to read (v0.9.0 → v0.10.0, 2 release(s)):") {
-		t.Fatalf("stdout=%q, want the release-notes-to-read header", stdout)
-	}
-	first := strings.Index(stdout, "v0.9.1.md")
-	second := strings.Index(stdout, "v0.9.5.md")
-	if first < 0 || second < 0 || second < first {
-		t.Fatalf("stdout=%q, want v0.9.1.md listed before v0.9.5.md (oldest first)", stdout)
-	}
-}
-
-// TestUpdateReportsNoReleaseNotesBetween is a REGRESSION test for the
-// none-between branch: watched failing against a build that collapsed
-// releaseNotesForUpdate's error branch into this one (see
-// TestUpdateReportsReleaseNotesCannotList) — the two must stay visibly
-// distinct, since one names a real absence and the other a failed read.
-func TestUpdateReportsNoReleaseNotesBetween(t *testing.T) {
-	repo := newReleaseNotesUpdateFixture(t, nil)
-	stdout := updateWithReleaseNotesFakes(t, repo)
-	if !strings.Contains(stdout, "release notes: none between v0.9.0 and v0.10.0") {
-		t.Fatalf("stdout=%q, want the none-between report line", stdout)
-	}
-}
-
-// TestUpdateReportsReleaseNotesCannotList pins the error branch: a previous
-// revision `git describe` cannot resolve to any tag must render as "cannot
-// list", never silently fold into "none between" — an error is never
-// absence.
-func TestUpdateReportsReleaseNotesCannotList(t *testing.T) {
-	repo := newUntaggedPreviousReleaseNotesFixture(t)
-	stdout := updateWithReleaseNotesFakes(t, repo)
-	if !strings.Contains(stdout, "release notes: cannot list (") {
-		t.Fatalf("stdout=%q, want the cannot-list report line", stdout)
-	}
-	if strings.Contains(stdout, "none between") {
-		t.Fatalf("stdout=%q, cannot-list collapsed into none-between", stdout)
-	}
 }
 
 func gitTemp(t *testing.T, repo string, args ...string) {

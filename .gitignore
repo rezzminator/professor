@@ -7,6 +7,8 @@ node_modules/
 !.env.example
 /tmp/
 .worktrees/
+# Retired build tree created in the clone by an older SETUP.
+/engines/
 # Source-fetched skills are cloned at install from their own public repos
 # (templates/skills/sources.json) and are NEVER vendored here: a
 # tracked copy is exactly the silent drift the sources.json law exists to

@@ -480,11 +480,14 @@ act_templates() { # the shipped product: mechanical gates, no build
       fi
 
       head_ "templates — codex-sync missing compiler"
-      if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/templates/project/scripts/codex-sync.sh"; then
-        ok "codex-sync names unavailable compiler and retains dirty flag"
-      else
-        fail_step "codex-sync regression FAILED — unavailable compiler must be named and dirty flag retained"
-      fi
+      local cs_copy
+      for cs_copy in templates/project/scripts/codex-sync.sh .claude/scripts/codex-sync.sh; do
+        if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/$cs_copy"; then
+          ok "codex-sync ($cs_copy) names unavailable compiler and retains dirty flag"
+        else
+          fail_step "codex-sync regression FAILED ($cs_copy) — unavailable compiler must be named and dirty flag retained"
+        fi
+      done
 
       head_ "templates — go test report under pipefail"
       if bash "$REPO_ROOT/scripts/test-dev-report.sh" "$REPO_ROOT/.claude/scripts/dev.sh"; then

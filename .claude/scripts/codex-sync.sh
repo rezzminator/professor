@@ -42,7 +42,12 @@ case "$MODE" in
       */.claude/*|*/CLAUDE.md|*/.mcp.json) ;;
       *) exit 0 ;;
     esac
-    REPO_ROOT=$(git -C "$(dirname "$FILE_PATH")" rev-parse --show-toplevel 2>/dev/null) \
+    # The mirror is compiled from the harness PROJECT root (its .claude/codex-build.json
+    # governs), never from a nested git root: a CLAUDE.md inside a submodule resolves
+    # to the submodule's toplevel, which has no CLAUDE.md and cannot build.
+    REPO_ROOT="${CLAUDE_PROJECT_DIR:-}"
+    [[ -n "$REPO_ROOT" ]] || REPO_ROOT=$(git -C "$(dirname "$FILE_PATH")" rev-parse --show-superproject-working-tree 2>/dev/null)
+    [[ -n "$REPO_ROOT" ]] || REPO_ROOT=$(git -C "$(dirname "$FILE_PATH")" rev-parse --show-toplevel 2>/dev/null) \
       || REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
     command -v pfm >/dev/null 2>&1 || exit 0
     PROJECT="$(basename "$REPO_ROOT")"; PROJECT="${PROJECT#.}"
@@ -50,7 +55,9 @@ case "$MODE" in
     touch "/tmp/$PROJECT/guard/codex_dirty"
     ;;
   sync)
-    REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+    REPO_ROOT="${CLAUDE_PROJECT_DIR:-}"
+    [[ -n "$REPO_ROOT" ]] || REPO_ROOT=$(git rev-parse --show-superproject-working-tree 2>/dev/null)
+    [[ -n "$REPO_ROOT" ]] || REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
     PROJECT="$(basename "$REPO_ROOT")"; PROJECT="${PROJECT#.}"
     FLAG="/tmp/$PROJECT/guard/codex_dirty"
     [[ -f "$FLAG" ]] || exit 0

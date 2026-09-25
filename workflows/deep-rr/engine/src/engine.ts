@@ -1249,6 +1249,7 @@ export class ResearchReport {
     bs.reportOk = !!(agg && agg.report);
     bs.citationsBogus = 0;
     bs.citationsAuditFailed = 0;
+    bs.citationsUnverified = 0;
     if (!bs.reportOk) {
       log('✗ ' + label + ' FAILED — no report returned');
       // Salvage: the run's evidence still has value — deliver a degraded result.md from
@@ -1267,9 +1268,15 @@ export class ResearchReport {
       this.files['result.md'] = runArgsMd() + salvage.join('\n');
       return;
     }
-    const { report: linted, bogus, auditFailed } = lintCitations(agg!.report, bs.claims);
+    const {
+      report: linted,
+      bogus,
+      auditFailed,
+      unverified,
+    } = lintCitations(agg!.report, bs.claims);
     bs.citationsBogus = bogus.length;
     bs.citationsAuditFailed = auditFailed.length;
+    bs.citationsUnverified = unverified.length;
     if (bogus.length)
       log(
         '⚠ ' +
@@ -1283,6 +1290,13 @@ export class ResearchReport {
           label +
           ' citation lint — stripped audit-failed id(s): ' +
           auditFailed.map((id) => 'c' + id).join(', '),
+      );
+    if (unverified.length)
+      log(
+        '⚠ ' +
+          label +
+          ' citation lint — stripped unverified (pending/unpinned) id(s): ' +
+          unverified.map((id) => 'c' + id).join(', '),
       );
     const keyClaimIds = (bs.resultSoFar && bs.resultSoFar.keyClaimIds) || [];
     const computed = computedConfidence(keyClaimIds, bs.claims);
@@ -1589,6 +1603,7 @@ export class ResearchReport {
       chao: bs.chao,
       citationsBogus: bs.citationsBogus,
       citationsAuditFailed: bs.citationsAuditFailed,
+      citationsUnverified: bs.citationsUnverified,
       auditCounts: {
         pass: bs.claims.filter((c) => c.audit === 'pass').length,
         fail: bs.claims.filter((c) => c.audit === 'fail').length,

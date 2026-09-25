@@ -67,7 +67,7 @@ ${plain(openRabbitHoles)}`
 CLAIM LEDGER — the run's evidence (ids look like c12, clusters like clu2: c12 [status·clu2·audit] claim = value):
 ${ledger}
 Corroboration counts CLUSTERS: a claim whose supports share one cluster is SINGLE-SOURCE however many names it wears — flag any "independent" label the answer asserts that the clusters do not back.
-The audit field is the MECHANICAL quote-pin verdict: a keyClaim reading 'fail' means its quote could not be verified against its cached source — verification is NOT sound while the answer rests on it; demand a re-pin, a retraction, or an explicit downgrade.`
+The audit field is the MECHANICAL quote-pin verdict: a keyClaim whose audit reads 'fail', 'pending' or 'unpinned' was not verified against its cached source — verification is NOT sound while the answer rests on it; demand a re-pin, a retraction, or an explicit downgrade.`
     : '';
   // nullAttacksClause — challenged-and-survived vs never-challenged (v3 FINALIZE): a completed counter-search
   // that found nothing is first-class state, distinct from a key claim nobody has put to the test yet.

@@ -232,6 +232,7 @@ const cases = [
         chao: null,
         citationsBogus: 0,
         citationsAuditFailed: 0,
+        citationsUnverified: 0,
         auditCounts: { pass: 0, fail: 0, repinned: 0, unpinned: 0, pending: 0 },
         quotesRepinned: 0,
         cachePathsRejected: 0,
@@ -888,6 +889,12 @@ describe('judge — v3 FINALIZE clauses (batch 4)', () => {
     expect(out).toContain('Corroboration counts CLUSTERS');
     expect(out).toContain('SINGLE-SOURCE however many names it wears');
   });
+  it("ledgerClause names 'pending' and 'unpinned' as unverified alongside 'fail'", () => {
+    const out = JUDGE_PROMPT({ ...base, ledger: 'c1 [tentative·clu0·pending] X — s' });
+    expect(out).toContain(
+      "a keyClaim whose audit reads 'fail', 'pending' or 'unpinned' was not verified against its cached source",
+    );
+  });
   it('omits CLAIM LEDGER (byte-identical) when the ledger digest is empty', () => {
     const none = JUDGE_PROMPT({ ...base, ledger: '' });
     expect(none).not.toContain('CLAIM LEDGER');
@@ -962,6 +969,11 @@ describe('synthesiser — v3 FINALIZE clauses (batch 4)', () => {
     expect(out).toContain('Cite ledger claims inline as [c12]');
     expect(out).toContain('must be a real ledger id from the digest above');
     expect(out).toContain('independence ONLY from cluster counts');
+  });
+  it("ledgerClause forbids citing any claim whose audit reads anything but 'pass'", () => {
+    const out = SYNTHESISER_PROMPT({ ...base, ledger: 'c1 [settled·clu1·pass] X — s' });
+    expect(out).toContain("Never cite a claim whose audit field reads anything but 'pass'");
+    expect(out).toContain("'fail', 'pending' or 'unpinned'");
   });
   it('omits the ledger clause (byte-identical) when the digest is empty', () => {
     const none = SYNTHESISER_PROMPT({ ...base, ledger: '' });
@@ -1071,6 +1083,7 @@ describe('debugAnalyst — v3 ledger machinery sanity-check clause (finding I)',
         chao: null,
         citationsBogus: 0,
         citationsAuditFailed: 0,
+        citationsUnverified: 0,
         auditCounts: { pass: 0, fail: 0, repinned: 0, unpinned: 0, pending: 0 },
         quotesRepinned: 0,
         cachePathsRejected: 0,

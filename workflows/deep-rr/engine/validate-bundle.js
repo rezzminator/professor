@@ -1,8 +1,9 @@
 // validate-bundle.js — enforces the Workflow sandbox contract on the built ../workflow.js.
 // Run by build.js after every bundle. Any violation throws → `npm run build` fails loudly.
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, dirname } from 'node:path'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { execSync } from 'node:child_process'
 import { parse } from 'acorn'
@@ -12,14 +13,26 @@ const BUNDLE = join(SRC, '..', 'workflow.js')
 const src = readFileSync(BUNDLE, 'utf8')
 const fail = (msg) => { console.error('✗ bundle invalid — ' + msg); process.exit(1) }
 
-// 1) must parse as JS
-try { execSync('node --check ' + JSON.stringify(BUNDLE), { stdio: 'pipe' }) }
-catch (e) { fail('node --check failed:\n' + (e.stderr || e.stdout || e.message)) }
+// 1) must parse as JS. `node --check` runs on a temporary CommonJS (.cjs) copy, never on the bundle
+//    itself: parsed as an ES module, the bundle's top-level `return await rr.run()` is an illegal return
+//    on Node 26 (older Nodes tolerated it). The copy de-exports meta (illegal in CommonJS) and opens an
+//    async wrapper on line 1, so the top-level `return await` is legal on every Node version and every
+//    reported line number still matches workflow.js. The temp dir is removed afterwards, pass or fail.
+const checkDir = mkdtempSync(join(tmpdir(), 'rr-bundle-check-'))
+let checkErr = null
+try {
+  const checkCopy = join(checkDir, 'workflow.cjs')
+  writeFileSync(checkCopy, '(async () => {' + src.replace(/^export const meta/, 'const meta') + '\n})\n')
+  execSync('node --check ' + JSON.stringify(checkCopy), { stdio: 'pipe' })
+}
+catch (e) { checkErr = e }
+finally { rmSync(checkDir, { recursive: true, force: true }) }
+if (checkErr) fail('node --check failed:\n' + (checkErr.stderr || checkErr.stdout || checkErr.message))
 
-// 1b) must ALSO compile as the BODY of the async function the harness wraps it in. `node --check` above
-//     parses the file as an ES MODULE, which tolerates dangling `} from '…'` fragments that a function
-//     scope rejects — the exact failure a multi-line-import drop produced. Compile (don't run) it the way
-//     Workflow loads it: de-export meta (illegal in a function body); the top-level `return await` needs async.
+// 1b) must ALSO compile as the BODY of the async function the harness wraps it in — through the harness's
+//     own AsyncFunction constructor with its ambient globals as parameters, the exact way Workflow loads it
+//     (a multi-line-import drop once left dangling `} from '…'` fragments only a function scope rejects).
+//     Compile (don't run) it: de-export meta (illegal in a function body); the top-level `return await` needs async.
 const AsyncFunction = Object.getPrototypeOf(async () => {}).constructor
 const HARNESS_GLOBALS = ['agent', 'parallel', 'pipeline', 'log', 'phase', 'workflow', 'args', 'budget']
 try { new AsyncFunction(...HARNESS_GLOBALS, src.replace(/^export const meta/, 'const meta')) }

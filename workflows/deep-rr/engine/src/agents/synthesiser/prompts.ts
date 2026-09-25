@@ -60,7 +60,7 @@ Emphasis from the finalize director: ${focus}`
 CLAIM LEDGER (ids look like c12, clusters like clu2: c12 [status·clu2·audit] claim = value):
 ${ledger}
 Cite ledger claims inline as [c12] wherever a load-bearing fact appears — every [c12]-style marker must be a real ledger id from the digest above (same c12 notation); label independence ONLY from cluster counts, never from distinct-sounding source names.
-Never cite a claim whose audit field reads 'fail' — its quote could not be verified against its source; the engine strips such markers from the shipped report.`
+Never cite a claim whose audit field reads anything but 'pass' — a quote reading 'fail', 'pending' or 'unpinned' was not verified against its source; the engine strips such markers from the shipped report.`
     : '';
   const nullAttacksClause =
     nullAttacksSummary && nullAttacksSummary.length

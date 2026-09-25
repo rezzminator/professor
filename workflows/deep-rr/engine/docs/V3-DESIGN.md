@@ -69,9 +69,9 @@ schedule → lane readers → collect claims (JS assigns ids, dedups near-identi
 
 checkpoint = a ⏺CKPT log line, zero-cost — no agent. Logged last, after applyDeltas, so it captures the wave's final state (CONFIG.checkpoint gates it; default true).
 
-**Status (utils/claimStatus, pure):** `fail`/`retracted` → excluded. `contested` iff an unretracted attacking claim targets it. `settled` iff supporting clusters ≥ SETTLED_MIN_CLUSTERS AND (attacksSurvived ≥ 1 OR clusters ≥ SETTLED_MIN_CLUSTERS + 1). Else `tentative`.
+**Status (utils/claimStatus, pure):** verified = unretracted AND audit `pass` (`utils/isVerified`); `pending`/`unpinned` are unverified. `contested` iff `counter` is set or an unretracted attacking claim whose audit is not `fail` targets it. An unverified subject is `tentative`. Only verified supporters count. `settled` iff supporting clusters ≥ SETTLED_MIN_CLUSTERS AND (attacksSurvived ≥ 1 OR clusters ≥ SETTLED_MIN_CLUSTERS + 1). Else `tentative`.
 
-**Computed confidence (utils/computedConfidence, pure):** over keyClaimIds — all settled → 'high'; any contested → 'low'; else 'medium'. Models may LOWER (final = min(model, computed)), never raise.
+**Computed confidence (utils/computedConfidence, pure):** over keyClaimIds — any `fail`/retracted or contested → 'low'; every key claim verified and settled → 'high'; else 'medium' (an unverified key claim never grounds 'high'). Models may LOWER (final = min(model, computed)), never raise.
 
 **yieldCalib:** per pursued lead — predicted = score/100; realized = (auditedPassClaims + 0.3 × freshLeads) / CALIB_NORM, clamped [0,2]. EMA per kind (α=0.3). Applied in resolveLookupNext as a sort-key multiplier clamp(ratio, CALIB_CLAMP_LO, CALIB_CLAMP_HI) — selection only, scores untouched. Rendered to the brainer as a CALIBRATION section.
 
@@ -108,4 +108,4 @@ Prompt gains: LEDGER digest (`#id [status·clusters·audit] claim = value` lines
 
 ## Status
 
-Implemented in full at v3.0.0 — 404 vitest tests green (`cd engine && npm test`). Both review HIGHs from the implementation pass are fixed: `claimStatus` and `computedConfidence` (`engine/src/utils/index.ts`) carry the subject-audit guard — a claim the auditor actively failed can never read as `settled`/high- confidence no matter how many clusters back it, checked ahead of the cluster count; and a spawned child's collect-mode plateau window is sliced from its own `topScoresBase` (recorded at spawn, `brainerState.ts`), not the parent's inherited `topScores` history, so a child's dry-stop judges its own waves only.
+Implemented in full at v3.0.0 — 404 vitest tests green (`cd engine && npm test`). Both review HIGHs from the implementation pass are fixed: `claimStatus` and `computedConfidence` (`engine/src/utils/index.ts`) carry the subject-audit guard — a claim the auditor failed or never verified (`pending`/`unpinned`) can never read as `settled`/high-confidence no matter how many clusters back it, checked ahead of the cluster count; and a spawned child's collect-mode plateau window is sliced from its own `topScoresBase` (recorded at spawn, `brainerState.ts`), not the parent's inherited `topScores` history, so a child's dry-stop judges its own waves only.

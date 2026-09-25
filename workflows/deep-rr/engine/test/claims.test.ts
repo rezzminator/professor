@@ -188,6 +188,50 @@ describe('claimStatus', () => {
     const all = [target, claim({ id: 2, cluster: 2, stance: { target: 1, kind: 'attacks' } })];
     expect(claimStatus(target, all, NO_ATTACKS, CFG)).toBe('contested');
   });
+  it.each(['pending', 'unpinned'] as const)(
+    'an unverified (%s) subject never settles, even with 3 independent supporting clusters + a survived attack',
+    (audit) => {
+      const target = claim({ id: 1, cluster: 1, audit, attacksSurvived: 1 });
+      const all = [
+        target,
+        claim({ id: 2, cluster: 2, stance: { target: 1, kind: 'supports' } }),
+        claim({ id: 3, cluster: 3, stance: { target: 1, kind: 'supports' } }),
+      ];
+      expect(claimStatus(target, all, NO_ATTACKS, CFG)).toBe('tentative');
+    },
+  );
+  it.each(['pending', 'unpinned'] as const)(
+    'an unverified (%s) supporter of a pass subject does not count its cluster',
+    (audit) => {
+      const target = claim({ id: 1, cluster: 1, attacksSurvived: 1 });
+      const all = [
+        target,
+        claim({ id: 2, cluster: 2, audit, stance: { target: 1, kind: 'supports' } }),
+      ];
+      expect(claimStatus(target, all, NO_ATTACKS, CFG)).toBe('tentative'); // only its own cluster counts
+    },
+  );
+  it('an unretracted attacker whose audit FAILED does not contest its target', () => {
+    const target = claim({ id: 1, cluster: 1, attacksSurvived: 1 });
+    const all = [
+      target,
+      claim({ id: 2, cluster: 2, stance: { target: 1, kind: 'supports' } }),
+      claim({ id: 3, cluster: 3, audit: 'fail', stance: { target: 1, kind: 'attacks' } }),
+    ];
+    expect(claimStatus(target, all, NO_ATTACKS, CFG)).toBe('settled');
+  });
+  it.each(['pending', 'unpinned'] as const)(
+    'an unverified (%s) attacker still contests (confidence may only fall)',
+    (audit) => {
+      const target = claim({ id: 1, cluster: 1, attacksSurvived: 1 });
+      const all = [
+        target,
+        claim({ id: 2, cluster: 2, stance: { target: 1, kind: 'supports' } }),
+        claim({ id: 3, cluster: 3, audit, stance: { target: 1, kind: 'attacks' } }),
+      ];
+      expect(claimStatus(target, all, NO_ATTACKS, CFG)).toBe('contested');
+    },
+  );
 });
 
 describe('computedConfidence', () => {
@@ -198,6 +242,8 @@ describe('computedConfidence', () => {
     claim({ id: 4, status: 'contested' }),
     claim({ id: 5, status: 'settled', retracted: true }),
     claim({ id: 6, status: 'tentative', audit: 'fail' }),
+    claim({ id: 7, status: 'settled', audit: 'pending' }),
+    claim({ id: 8, status: 'settled', audit: 'unpinned' }),
   ];
   it('high iff EVERY key claim is settled', () =>
     expect(computedConfidence([1, 2], claims)).toBe('high'));
@@ -214,6 +260,11 @@ describe('computedConfidence', () => {
   });
   it('a key claim the mechanical audit FAILED forces low, same as retracted', () => {
     expect(computedConfidence([1, 6], claims)).toBe('low');
+  });
+  it('an unverified (pending/unpinned) key claim never grounds high, even when it reads settled', () => {
+    expect(computedConfidence([1, 7], claims)).toBe('medium');
+    expect(computedConfidence([1, 8], claims)).toBe('medium');
+    expect(computedConfidence([7], claims)).toBe('medium');
   });
 });
 
@@ -457,13 +508,35 @@ describe('lintCitations — v3 SYNTHESISER citation lint (batch 4)', () => {
     expect(bogus).toEqual([]);
     expect(auditFailed).toEqual([3]);
   });
+  it('strips a marker whose live claim is unverified (pending/unpinned), collecting it in unverified', () => {
+    const mixed = [
+      claim({ id: 1 }),
+      claim({ id: 3, audit: 'fail' }),
+      claim({ id: 4, audit: 'pending' }),
+      claim({ id: 5, audit: 'unpinned' }),
+    ];
+    const { report, bogus, auditFailed, unverified } = lintCitations(
+      'per [c1], [c3], [c4] and [c5].',
+      mixed,
+    );
+    expect(report).toBe('per [c1], ,  and .');
+    expect(bogus).toEqual([]);
+    expect(auditFailed).toEqual([3]);
+    expect(unverified).toEqual([4, 5]);
+  });
   it('passes through unchanged text with no markers, and empty input', () => {
     expect(lintCitations('no citations here', claims)).toEqual({
       report: 'no citations here',
       bogus: [],
       auditFailed: [],
+      unverified: [],
     });
-    expect(lintCitations('', claims)).toEqual({ report: '', bogus: [], auditFailed: [] });
+    expect(lintCitations('', claims)).toEqual({
+      report: '',
+      bogus: [],
+      auditFailed: [],
+      unverified: [],
+    });
   });
 });
 

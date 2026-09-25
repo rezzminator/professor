@@ -129,7 +129,8 @@ describe('persist.js — happy path writes files + provenance-filtered resource 
     expect(res.status).toBe(0);
 
     const summary = JSON.parse(res.stdout);
-    expect(summary.dir).toBe(path.join(dir, 'RR', 'happy-test'));
+    // realpath both sides: on macOS the tmp dir is a /var symlink persist.js reports as /private/var.
+    expect(fs.realpathSync(summary.dir)).toBe(fs.realpathSync(path.join(dir, 'RR', 'happy-test')));
     expect(summary.written).toBe(2);
     expect(summary.files).toEqual(['_sources.json', 'result.md']);
     expect(summary.verdict).toBe('pgvector wins');

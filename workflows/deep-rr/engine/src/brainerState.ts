@@ -133,6 +133,7 @@ export class BrainerState {
   reportOk: boolean;
   citationsBogus: number; // synthesiser citation lint: [cN] markers stripped because the id was unknown/retracted
   citationsAuditFailed: number; // synthesiser citation lint: [cN] markers stripped because the claim's quote-pin audit failed
+  citationsUnverified: number; // synthesiser citation lint: [cN] markers stripped because the claim's audit is still pending/unpinned
   quotesRepinned: number; // claims whose broken quote the auditor replaced with a verified contiguous span
   cachePathsRejected: number; // claims whose cachePath was untrusted (never scheduled + outside the harvester cache) and was stripped to unpinned
   reopenedLaneCount: number; // finalize judge-reopen lanes — feeds metrics.reopenedLanes so crawl-vs-finalize counts reconcile
@@ -197,6 +198,7 @@ export class BrainerState {
     this.reportOk = false;
     this.citationsBogus = 0;
     this.citationsAuditFailed = 0;
+    this.citationsUnverified = 0;
     this.quotesRepinned = 0;
     this.cachePathsRejected = 0;
     this.reopenedLaneCount = 0;
@@ -258,6 +260,7 @@ export function spawnBrainer(
   child.wave = parent.wave;
   child.lastUnsourced = parent.lastUnsourced;
   child.citationsAuditFailed = parent.citationsAuditFailed;
+  child.citationsUnverified = parent.citationsUnverified;
   child.quotesRepinned = parent.quotesRepinned;
   child.cachePathsRejected = parent.cachePathsRejected;
   child.reopenedLaneCount = parent.reopenedLaneCount;

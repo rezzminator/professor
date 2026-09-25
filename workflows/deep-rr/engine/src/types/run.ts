@@ -92,6 +92,7 @@ export interface Metrics {
   chao: ChaoStats | null; // collect-mode coverage estimate; null outside collect mode / before the first estimate
   citationsBogus: number; // synthesiser citation lint: [cN] markers stripped because the id was unknown/retracted
   citationsAuditFailed: number; // synthesiser citation lint: [cN] markers stripped because the claim's quote-pin audit failed
+  citationsUnverified: number; // synthesiser citation lint: [cN] markers stripped because the claim's audit is still pending/unpinned
   auditCounts: { pass: number; fail: number; repinned: number; unpinned: number; pending: number }; // quote-pin audit outcome over the final ledger (repinned = the auditor located and replaced a broken quote — those claims read audit 'pass')
   quotesRepinned: number; // claims whose broken quote the auditor replaced with a verified contiguous span
   cachePathsRejected: number; // claims whose cachePath was untrusted (never scheduled + outside the harvester cache) and was stripped to unpinned

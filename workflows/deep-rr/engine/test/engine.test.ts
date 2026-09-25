@@ -2973,6 +2973,34 @@ describe('ResearchReport.applyReportFinish — citation lint + confidence floor 
     expect(agg.report).not.toContain('Confidence adjusted');
   });
 
+  it('strips [cN] markers of live UNVERIFIED (pending/unpinned) claims and reports them as metrics.citationsUnverified, beside citationsAuditFailed', async () => {
+    const RR = await loadEngine({ query: 'q' }, () => ({}));
+    const rr = new RR();
+    const bs = mkBs();
+    bs.claims = [
+      mkClaim(1, { status: 'settled' }),
+      mkClaim(2, { audit: 'fail' }),
+      mkClaim(3, { audit: 'pending' }),
+      mkClaim(4, { audit: 'unpinned' }),
+    ];
+    bs.resultSoFar = { ...RSF_MIN2, keyClaimIds: [1] };
+    const agg = {
+      report: 'the answer [c1] holds; [c2], [c3] and [c4] do not ship.',
+      verdict: 'v',
+      confidence: 'medium' as const,
+      plan: [],
+      openQuestions: [],
+    };
+    rr.applyReportFinish(bs, agg, 'test');
+    expect(agg.report).toContain('the answer [c1] holds; ,  and  do not ship.');
+    expect(bs.citationsBogus).toBe(0);
+    expect(bs.citationsAuditFailed).toBe(1);
+    expect(bs.citationsUnverified).toBe(2);
+    const metrics = rr.buildResult(bs).metrics;
+    expect(metrics.citationsAuditFailed).toBe(1);
+    expect(metrics.citationsUnverified).toBe(2);
+  });
+
   it('a dead synthesiser (agg null) sets reportOk false and citationsBogus 0, never throws', async () => {
     const RR = await loadEngine({ query: 'q' }, () => ({}));
     const rr = new RR();

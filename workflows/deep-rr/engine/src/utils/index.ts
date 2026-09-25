@@ -197,11 +197,17 @@ export const lineageKeyOf = (claim: { entities?: ClaimEntities; source: string }
   return norm(e.funder || e.venue || domainOf(claim.source));
 };
 
-// claimStatus — COMPUTED, never asserted. contested: an unretracted attacking claim targets it.
-// settled: supporting clusters ≥ SETTLED_MIN_CLUSTERS AND (a survived attack OR one cluster beyond the
-// minimum). Else tentative. Support = the claim's own cluster plus the clusters of unretracted,
-// non-failed claims whose stance supports it; the Set counts cluster 0 (shared unknown lineage) at
-// most ONCE no matter how many claims sit in it.
+// isVerified — the one verified rule: a live claim whose mechanical quote-pin audit reads 'pass'.
+// 'pending' (auditor never ran / died) and 'unpinned' (no cache path to check) are UNVERIFIED, not
+// verified-by-default — they may lower confidence, never ground it.
+export const isVerified = (c: Claim): boolean => !c.retracted && c.audit === 'pass';
+
+// claimStatus — COMPUTED, never asserted. contested: an unretracted attacking claim whose audit did not
+// fail targets it (a verified or unverified attacker may only lower confidence; a disproven one carries no
+// weight). settled: the subject is verified AND supporting clusters ≥ SETTLED_MIN_CLUSTERS AND (a survived
+// attack OR one cluster beyond the minimum). Else tentative. Support = the claim's own cluster plus the
+// clusters of VERIFIED claims whose stance supports it; the Set counts cluster 0 (shared unknown lineage)
+// at most ONCE no matter how many claims sit in it.
 export function claimStatus(
   claim: Claim,
   allClaims: Claim[],
@@ -212,15 +218,17 @@ export function claimStatus(
     !!c.stance && c.stance.target === claim.id && c.stance.kind === kind;
   // a set `counter` (the refiner's own counter-search landed something, or an attack-lane's finding) contests
   // the claim just as an unretracted attacking ledger claim does — same signal, no ledger row required for it.
-  if (claim.counter || allClaims.some((c) => !c.retracted && bearsOn(c, 'attacks')))
+  if (
+    claim.counter ||
+    allClaims.some((c) => !c.retracted && c.audit !== 'fail' && bearsOn(c, 'attacks'))
+  )
     return 'contested';
-  // the SUBJECT's own mechanical audit verdict: a claim the auditor actively disproved is treated like
-  // retracted for THIS purpose — it can never settle, no matter how many independent clusters back it
-  // (checked AFTER the contested guard above, so a still-attacked audit-fail claim reads as contested, not tentative).
-  if (claim.audit === 'fail') return 'tentative';
+  // the SUBJECT's own mechanical audit verdict: a claim the auditor disproved ('fail') or never verified
+  // ('pending'/'unpinned') can never settle, no matter how many independent clusters back it (checked
+  // AFTER the contested guard above, so a still-attacked unverified claim reads as contested, not tentative).
+  if (!isVerified(claim)) return 'tentative';
   const clusters = new Set<number>([claim.cluster]);
-  for (const c of allClaims)
-    if (!c.retracted && c.audit !== 'fail' && bearsOn(c, 'supports')) clusters.add(c.cluster);
+  for (const c of allClaims) if (isVerified(c) && bearsOn(c, 'supports')) clusters.add(c.cluster);
   // a nullAttack naming the claim counts as a survived attack even before the attack-lane bookkeeping
   // bumps the counter; max (not sum) so the two records never double-count one challenge.
   const survived = Math.max(
@@ -233,17 +241,18 @@ export function claimStatus(
     : 'tentative';
 }
 
-// computedConfidence — deterministic over the key claims the answer rests on: every one settled →
-// high; any contested → low; else medium. No key claims → medium; an unknown id can never ground high.
-// A key claim the mechanical audit disproved (or the judge retracted) is worse than merely unsettled —
-// the answer rests on a disproven pin, not just an unstressed one — so it forces 'low' outright, same as contested.
+// computedConfidence — deterministic over the key claims the answer rests on: every one verified and
+// settled → high; any contested → low; else medium. No key claims → medium; an unknown id or an
+// unverified ('pending'/'unpinned') key claim can never ground high. A key claim the mechanical audit
+// disproved (or the judge retracted) is worse than merely unsettled — the answer rests on a disproven pin,
+// not just an unstressed one — so it forces 'low' outright, same as contested.
 export function computedConfidence(keyClaimIds: number[], claims: Claim[]): Confidence {
   if (!keyClaimIds || !keyClaimIds.length) return 'medium';
   const byId = new Map(claims.map((c) => [c.id, c]));
   const keys = keyClaimIds.map((id) => byId.get(id));
   if (keys.some((c) => c && (c.audit === 'fail' || c.retracted))) return 'low';
   if (keys.some((c) => c && c.status === 'contested')) return 'low';
-  return keys.every((c) => c && !c.retracted && c.status === 'settled') ? 'high' : 'medium';
+  return keys.every((c) => c && isVerified(c) && c.status === 'settled') ? 'high' : 'medium';
 }
 
 // claimDigestOf — the compact "KEY CLAIMS SO FAR" digest woven into a lane reader's prompt: non-retracted
@@ -271,30 +280,35 @@ export const minConfidence = (a: Confidence, b: Confidence): Confidence =>
 // count. One that IS a live claim but whose mechanical quote-pin audit came back 'fail' is ALSO stripped —
 // a citation must never wear the authority of a pin the auditor actively disproved — and its id collected
 // in `auditFailed` instead (a distinct count from `bogus`: this is a real claim, just a discredited one).
-// No markers / empty report ⇒ passthrough, bogus: [], auditFailed: [].
+// One that is a live claim the audit never verified ('pending'/'unpinned') is stripped too — a citation
+// ships only on a 'pass' pin — and collected in `unverified`.
+// No markers / empty report ⇒ passthrough, bogus: [], auditFailed: [], unverified: [].
 export function lintCitations(
   report: string,
   claims: Claim[],
-): { report: string; bogus: number[]; auditFailed: number[] } {
-  const live = new Set(claims.filter((c) => !c.retracted).map((c) => c.id));
-  const auditFail = new Set(
-    claims.filter((c) => !c.retracted && c.audit === 'fail').map((c) => c.id),
-  );
+): { report: string; bogus: number[]; auditFailed: number[]; unverified: number[] } {
+  const byLiveId = new Map(claims.filter((c) => !c.retracted).map((c) => [c.id, c]));
   const bogus: number[] = [];
   const auditFailed: number[] = [];
+  const unverified: number[] = [];
   const cleaned = (report || '').replace(/\[c(\d+)\]/g, (marker, idStr: string) => {
     const id = Number(idStr);
-    if (!live.has(id)) {
+    const c = byLiveId.get(id);
+    if (!c) {
       bogus.push(id);
       return '';
     }
-    if (auditFail.has(id)) {
+    if (c.audit === 'fail') {
       auditFailed.push(id);
+      return '';
+    }
+    if (!isVerified(c)) {
+      unverified.push(id);
       return '';
     }
     return marker;
   });
-  return { report: cleaned, bogus, auditFailed };
+  return { report: cleaned, bogus, auditFailed, unverified };
 }
 
 // chao1 — the coverage estimator (collect mode): from claim groups and how many distinct sources saw

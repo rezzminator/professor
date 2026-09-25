@@ -273,6 +273,35 @@ describe("scope", () => {
     assert.deepEqual(r.out.split("\n").filter((l) => l.startsWith("REMOVED-ROLE ")), ["REMOVED-ROLE agent gone"], r.out);
   });
 
+  test("the mcp core and mcp_serve command are pfm-update tier 1", () => {
+    const r0 = repo();
+    const base = commit(r0, {
+      "pfm/internal/mcpserv/proxy.go": "package mcpserv\n",
+      "pfm/internal/harvestmcp/search_gate.go": "package harvestmcp\n",
+      "pfm/cmd/pfm/mcp_serve_command.go": "package main\n",
+      "pfm/cmd/pfm/mcp_serve_test.go": "package main\n",
+      "pfm/cmd/pfm/main.go": "package main\n",
+    });
+    commit(r0, {
+      "pfm/internal/mcpserv/proxy.go": "package mcpserv\n\nfunc x() {}\n",
+      "pfm/internal/harvestmcp/search_gate.go": "package harvestmcp\n\nfunc x() {}\n",
+      "pfm/cmd/pfm/mcp_serve_command.go": "package main\n\nfunc x() {}\n",
+      "pfm/cmd/pfm/mcp_serve_test.go": "package main\n\nfunc y() {}\n",
+      "pfm/cmd/pfm/main.go": "package main\n\nfunc z() {}\n",
+    });
+    const r = run(r0, "scope", "--base", base, "--head", "HEAD");
+    assertClean(r, "scope");
+    for (const line of [
+      "FILE M 1 tier1 pfm-update pfm/internal/mcpserv/proxy.go",
+      "FILE M 1 tier1 pfm-update pfm/internal/harvestmcp/search_gate.go",
+      "FILE M 1 tier1 pfm-update pfm/cmd/pfm/mcp_serve_command.go",
+      "FILE M 1 tier1 pfm-update pfm/cmd/pfm/mcp_serve_test.go",
+      "FILE M 1 tier2 - pfm/cmd/pfm/main.go",
+    ])
+      assert.ok(r.out.split("\n").includes(line), `missing line ${JSON.stringify(line)}:\n${r.out}`);
+    assert.match(r.out, /^AREA pfm-update .*pfm\/internal\/mcpserv\/.*pfm\/internal\/harvestmcp\/.*:\(glob\)pfm\/cmd\/pfm\/mcp_serve\*/m);
+  });
+
   test("ERROR, not FAIL, when --base is not an ancestor of --head", () => {
     const r0 = repo();
     const base = commit(r0, { "a.txt": "a\n" });

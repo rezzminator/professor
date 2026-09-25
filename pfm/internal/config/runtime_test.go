@@ -121,15 +121,12 @@ func TestLoadRuntimePointsTheEngineRootsAtTheRoster(t *testing.T) {
 	}
 }
 
-// TestLoadRuntimeRecordsWhetherConfigWasExplicit is a REGRESSION test for
-// issue #24 finding 4: an explicit --config path resolved before an update's
-// candidate install is indistinguishable from the default location unless
-// the runtime remembers the caller asked for it by name. Unfixed, Runtime
-// carries no ConfigExplicit field at all — this test does not compile
-// against the unfixed code, and that compile failure IS the watched-failing
-// run.
+// TestLoadRuntimeRecordsWhetherConfigWasExplicit pins issue #24's missing
+// non-default config guard while treating a named spelling of the resolved
+// default path the same as an omitted flag.
 func TestLoadRuntimeRecordsWhetherConfigWasExplicit(t *testing.T) {
-	t.Setenv(paths.EnvHome, t.TempDir())
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
 	t.Setenv("XDG_CONFIG_HOME", "")
 	implicit, err := LoadRuntime("")
 	if err != nil {
@@ -137,6 +134,15 @@ func TestLoadRuntimeRecordsWhetherConfigWasExplicit(t *testing.T) {
 	}
 	if implicit.ConfigExplicit {
 		t.Fatalf("LoadRuntime(\"\").ConfigExplicit = true, want false for the default location")
+	}
+	defaultPath := ResolvePath(home)
+	namedDefault := filepath.Dir(defaultPath) + "/../pfm/" + filepath.Base(defaultPath)
+	named, err := LoadRuntime(namedDefault)
+	if err != nil {
+		t.Fatalf("LoadRuntime(%q) = %v", namedDefault, err)
+	}
+	if named.ConfigExplicit {
+		t.Fatalf("LoadRuntime(%q).ConfigExplicit = true, want false for the default location", namedDefault)
 	}
 
 	explicitPath := filepath.Join(t.TempDir(), "explicit.json")

@@ -584,6 +584,41 @@ func TestInstallApplyRefusesAnExplicitConfigThatDoesNotExist(t *testing.T) {
 	}
 }
 
+func TestInstallApplyAcceptsMissingDefaultConfigNamedByFlag(t *testing.T) {
+	previous := runInstaller
+	t.Cleanup(func() { runInstaller = previous })
+	installerRan := false
+	runInstaller = func(_ context.Context, _ installer.Options) (installer.Report, error) {
+		installerRan = true
+		return installer.Report{}, nil
+	}
+	home := t.TempDir()
+	t.Setenv(paths.EnvHome, home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	defaultPath := pfmconfig.ResolvePath(home)
+	if _, err := os.Stat(defaultPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("default config %q must be absent, stat error = %v", defaultPath, err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run(
+		[]string{"--config", defaultPath, "install", "--yes", "--skip-harvest"},
+		&stdout,
+		&stderr,
+	); code != 0 {
+		t.Fatalf(
+			"pfm --config %q install --yes code=%d stdout=%q stderr=%q, want install on defaults",
+			defaultPath,
+			code,
+			stdout.String(),
+			stderr.String(),
+		)
+	}
+	if !installerRan {
+		t.Fatal("pfm install --yes did not run the installer for the absent default config")
+	}
+}
+
 func TestUninstallVerbAcceptsConfigDirAndUsesUninstallMode(t *testing.T) {
 	previous := runInstaller
 	t.Cleanup(func() { runInstaller = previous })

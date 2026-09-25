@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"runtime/debug"
 
 	pfmengine "github.com/rezzminator/professor/pfm/internal/engine"
@@ -18,8 +19,8 @@ const DevelopmentVersion = "dev"
 // ConfigError is set only by LoadDiagnosticRuntime: a diagnostic command runs
 // on defaults over a broken config and must still report the original error.
 //
-// ConfigExplicit records whether the caller named a --config path rather
-// than letting resolveExistingPath pick the default one. An explicit path
+// ConfigExplicit records whether the caller named a --config path other than
+// the location resolveExistingPath would select without the flag. An explicit path
 // that turns out not to exist (Config.Exists == false) is a caller error, not
 // a fresh machine — callers that converge host wiring from Config must not
 // treat that combination as "nothing configured yet".
@@ -100,9 +101,29 @@ func LoadRuntime(configPath string) (Runtime, error) {
 	if err != nil {
 		return Runtime{}, err
 	}
+	configExplicit, err := configPathIsExplicit(configPath, resolved.Home)
+	if err != nil {
+		return Runtime{}, err
+	}
 	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-	return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configPath != ""}, nil
+	return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configExplicit}, nil
+}
+
+func configPathIsExplicit(configPath, home string) (bool, error) {
+	if configPath == "" {
+		return false, nil
+	}
+	named, err := filepath.Abs(configPath)
+	if err != nil {
+		return false, fmt.Errorf("resolve --config path %q: %w", configPath, err)
+	}
+	defaultPath := resolveExistingPath(home)
+	defaultAbsolute, err := filepath.Abs(defaultPath)
+	if err != nil {
+		return false, fmt.Errorf("resolve default config path %q: %w", defaultPath, err)
+	}
+	return named != defaultAbsolute, nil
 }
 
 // RuntimeOrDefault is the caller's runtime, or the default one loaded now —
@@ -131,10 +152,14 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 		resolved.Roots[pfmengine.Claude],
 		resolved.FirstRoot(pfmengine.Codex),
 	)
+	configExplicit, err := configPathIsExplicit(configPath, resolved.Home)
+	if err != nil {
+		return Runtime{}, err
+	}
 	if configErr == nil {
 		resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 		resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-		return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configPath != ""}, nil
+		return Runtime{Config: effective, Paths: resolved, ConfigExplicit: configExplicit}, nil
 	}
 	path := configPath
 	if path == "" {
@@ -145,5 +170,5 @@ func LoadDiagnosticRuntime(configPath string) (Runtime, error) {
 	effective.Exists = true
 	resolved.Roots[pfmengine.Claude] = effective.ProjectRoots()
 	resolved.Roots[pfmengine.Codex] = effective.CodexHomes()
-	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr, ConfigExplicit: configPath != ""}, nil
+	return Runtime{Config: effective, Paths: resolved, ConfigError: configErr, ConfigExplicit: configExplicit}, nil
 }

@@ -120,7 +120,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 
 | Skill | What's universal (ships) | What's project-specific (hydrated by RR) |
 | --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Analysis Protocol (in the fleet prompt, `pfm/harness-prompts/share/head.md`) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
+| Three lenses at once (`templates/project/CLAUDE.md` § MANDATORY Rules → Meta) | Three-lens protocol (CS + domain + compliance), step sequence, report format, AI/ML audit mode structure | Domain lens content (replaces Psychology lens), compliance framework, cross-disciplinary intersections, AI/ML audit categories + anti-patterns (if project has an AI pipeline subproject) — the refresh interview hydrates this lens directly in the fleet prompt |
 | `audit:code-hygiene` | Category structure (ghost fields, dead code, stale deps, arch smells, type safety, naming, quality) | Per-category detection patterns, file paths, known hotspots, linter coverage gaps, project-specific report examples |
 | `audit:security` | OWASP category structure (8A-8I), severity guide, report format | Domain-specific PHI/data sensitivity rules, external API checks, framework-specific vulnerabilities, compliance-driven sub-categories |
 
@@ -134,7 +134,7 @@ Skills ship as **empty shells** when their content is project-specific — the s
 ## Category N — {category name}
 
 > **KNOWLEDGE BASE EMPTY** — This section needs project-specific detection patterns.
-> Run the Professor's Analysis Protocol or `/audit:code-hygiene` after the codebase has enough code to analyze.
+> Run the three-lens review (`CLAUDE.md` § MANDATORY Rules → Meta, "Three lenses at once") or `/audit:code-hygiene` after the codebase has enough code to analyze.
 > The Professor will surface this gap: "Knowledge base is empty, waiting for user specification to fill it in."
 ```
 

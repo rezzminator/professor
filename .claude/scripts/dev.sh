@@ -210,6 +210,33 @@ cmd_status() { # cmd_status [project|all]
 
 # ─── per-project actions ─────────────────────────────────────────────────────
 
+# node_test_suite LABEL TAP FILE... — runs node's test runner into TAP and
+# names every way it can fail to prove anything: a missing file, a red or
+# unrunnable suite, zero passing tests, a skipped or todo test.
+node_test_suite() {
+  local label="$1" tap="$2"
+  shift 2
+  local file
+  for file in "$@"; do
+    if [[ ! -f "$file" ]]; then
+      fail_step "$label tests NOT RUN — $file is missing; the suite was never executed"
+      return
+    fi
+  done
+  if ! node --test --test-reporter=tap "$@" >"$tap" 2>&1; then
+    cat "$tap"
+    fail_step "$label tests FAILED — a test regressed, or node could not run the suite (see output)"
+  elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$tap"; then
+    cat "$tap"
+    fail_step "$label tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
+  elif ! awk '/^# (skipped|todo) /{ if ($3 > 0) bad=1 } END{ exit bad }' "$tap"; then
+    cat "$tap"
+    fail_step "$label tests SKIPPED — a skipped or todo test is a named gap, never a pass"
+  else
+    ok "$label tests hold ($(awk '/^# pass /{print $3}' "$tap") passing)"
+  fi
+}
+
 act_templates() { # the shipped product: mechanical gates, no build
   local action="$1"
   case "$action" in
@@ -444,22 +471,7 @@ act_templates() { # the shipped product: mechanical gates, no build
       fi
 
       head_ "templates — release-check tests and the notes grammar"
-      local rc_tests=(scripts/release-check.test.mjs)
-      local rc_out="$TMP_BASE/templates/release-check.tap"
-      if [[ ! -f "${rc_tests[0]}" ]]; then
-        fail_step "release-check tests NOT RUN — scripts/release-check.test.mjs is missing; the suite was never executed"
-      elif ! node --test --test-reporter=tap "${rc_tests[@]}" >"$rc_out" 2>&1; then
-        cat "$rc_out"
-        fail_step "release-check tests FAILED — a scope, notes or ready rule regressed, or node could not run the suite (see output)"
-      elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$rc_out"; then
-        cat "$rc_out"
-        fail_step "release-check tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
-      elif ! awk '/^# (skipped|todo) /{ if ($3 > 0) bad=1 } END{ exit bad }' "$rc_out"; then
-        cat "$rc_out"
-        fail_step "release-check tests SKIPPED — a skipped or todo test is a named gap, never a pass"
-      else
-        ok "release-check rules hold ($(awk '/^# pass /{print $3}' "$rc_out") passing)"
-      fi
+      node_test_suite "release-check" "$TMP_BASE/templates/release-check.tap" scripts/release-check.test.mjs
       if node scripts/release-check.mjs notes --all releases >"$TMP_BASE/templates/release-notes.txt" 2>&1; then
         ok "release notes from v0.78.0 on follow docs/RELEASE.md § Release notes ($(grep -m1 '^CHECKED' "$TMP_BASE/templates/release-notes.txt" || echo 'CHECKED line MISSING'))"
       else
@@ -497,6 +509,26 @@ act_templates() { # the shipped product: mechanical gates, no build
         ok "opencode mirror current and parseable"
       else
         fail_step "opencode mirror FAILED — run: pfm opencode build $REPO_ROOT"
+      fi
+
+      head_ "templates — OpenCode writer check tests"
+      node_test_suite "opencode-writer check" "$TMP_BASE/templates/opencode-writer.tap" scripts/check-opencode-writer.test.mjs
+
+      head_ "templates — codeprobe skill tests"
+      local cp_out="$TMP_BASE/templates/codeprobe.txt"
+      if [[ ! -f templates/global/skills/codeprobe/codeprobe_test.py ]]; then
+        fail_step "codeprobe tests NOT RUN — templates/global/skills/codeprobe/codeprobe_test.py is missing"
+      elif ! python3 -m unittest templates/global/skills/codeprobe/codeprobe_test.py >"$cp_out" 2>&1; then
+        cat "$cp_out"
+        fail_step "codeprobe tests FAILED — a verb or probe command regressed, or python3 could not run the suite (see output)"
+      elif ! grep -Eq '^Ran [1-9][0-9]* tests?' "$cp_out"; then
+        cat "$cp_out"
+        fail_step "codeprobe tests NOT RUN — unittest ran zero tests; a green exit with no test is not a pass"
+      elif grep -Eq 'skipped=[1-9]' "$cp_out"; then
+        cat "$cp_out"
+        fail_step "codeprobe tests SKIPPED — a skipped test is a named gap, never a pass"
+      else
+        ok "codeprobe verbs and probe commands hold ($(grep -Eo '^Ran [0-9]+ tests?' "$cp_out"))"
       fi
 
       head_ "templates — OpenCode writer references"

@@ -26,7 +26,7 @@ The description is WHEN and WHAT; the body is HOW. A rule the body enforces, a p
 
 - A body-bearing entry (command, skill, agent): 280 characters, and up to 400 where every character past 280 is an entry point, a family neighbour, or the Returns clause.
 - An MCP tool: 600 characters, one of them an example call.
-- An MCP server's instruction block: 900 characters.
+- An MCP server's instruction block: 900 characters; 1200 for one server that carries the routing of two tool families, since two servers would each have had their own 900.
 - A skill also has the consumer's own hard ceiling on `description` plus `when_to_use`. Know it before writing; it is a limit, never a target.
 
 An entry the model never sees costs nothing: once `disable-model-invocation: true` hides an entry (§ Invocation class), its description is a menu label for a human and the cap stops binding.
@@ -80,7 +80,7 @@ Run over every entry, at write-time and on demand. An entry is APPROVED only whe
 
 - 0 Present: the description is absent or empty — an unroutable entry.
 - 1 Order: a class token is not the first word, the function clause runs past five words or past the first ` — `, or a component sits out of § The four components order.
-- 2 Budget: a body-bearing entry exceeds 280 characters without the 400 tier's justification, or exceeds 400 at all; an MCP tool exceeds 600; a server block exceeds 900. Count the parsed value.
+- 2 Budget: a body-bearing entry exceeds 280 characters without the 400 tier's justification, or exceeds 400 at all; an MCP tool exceeds 600; a server block exceeds its cap. Count the parsed value.
 - 3 Name echo: the opening clause restates the name's words.
 - 4 Mechanism: a library, engine, model tier or internal stage the caller never selects is named.
 - 5 Entry point: a subcommand, mode, flag or alias the body handles is missing from `when`.

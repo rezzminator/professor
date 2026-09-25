@@ -55,7 +55,7 @@ The blueprint never rewrites a project file after `pfm init`; every upstream cha
 
 ## Chat: MCP first, shell for the rest
 
-Inside a chat, the `chat_*` MCP verbs are the preferred surface for inject, ask, read, ls, status, new, and self-compact (`chat_inject`, `chat_ask`, `chat_read`, `chat_ls`, `chat_status`, `chat_new`, `chat_self_compact`). `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat inject` refuses `/compact` — compaction is `self-compact`. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
+Inside a chat, the `chat_*` MCP tools are the preferred surface for inject, read, last, find, ls, status, whoami, new, save, and self-compact (`chat_inject`, `chat_read`, `chat_last`, `chat_find`, `chat_ls`, `chat_status`, `chat_whoami`, `chat_new`, `chat_save`, `chat_self_compact`). `ask`, `end`, `modal`, `watch`, `stream`, `recover`, and `history` are shell-only `pfm chat` commands. `pfm chat inject` refuses `/compact` — compaction is `self-compact`. Exit codes: 0 done · 2 usage · 3 chat dead · 4 no such chat · 5 answer timed out · 6 message not delivered.
 
 ## Harvest: MCP first, CLI for batches
 

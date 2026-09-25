@@ -104,9 +104,7 @@
       }
     },
     "project/codex/rules/repo-law.rules": {
-      "sources": {
-        ".codex/rules/wave-builder.rules": "2592af1918b13f963a4c1cd53848587732669c062325ca353fb666c32ef2577e"
-      }
+      "curated": true
     },
     "project/codex/skills/chat/SKILL.md": {
       "curated": true
@@ -143,7 +141,7 @@
     },
     "project/commands/pcm.md": {
       "sources": {
-        ".claude/commands/pfm.md": "9f9c8f4f0ff398468d4625c247caa7806f8d0c29127b0b47c488ba694a473b95"
+        ".claude/commands/pcm.md": "80bb645c20d6b1f18b8288bf1fd1b8cfd77257bd4f409e222055f3dc277de63a"
       }
     },
     "project/commands/per-project/testing-manual.md": {

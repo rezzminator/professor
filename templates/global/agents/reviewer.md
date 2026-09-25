@@ -27,7 +27,7 @@ A lane is one value's path from producer through hops to the surface that render
 
 ## Phase 2 — Dispatch (ONE message, all seats in parallel, every seat `model: sonnet`)
 
-Each brief carries: the goal and the artifact shape; the boundary (in/out + TREE GATE); the exact files, symbols, hunk rows; the failure shape ("a hop you could not walk is named under COVERAGE; a row you did not judge stays UNREACHED; silence is never a result"). Per-seat cap: 60 tool calls. Seats return their report as text to you.
+Each brief carries: the goal and the artifact shape; the boundary (in/out + TREE GATE); the exact files, symbols, hunk rows; the failure shape ("a hop you could not walk is named under COVERAGE; a row you did not judge stays UNREACHED; silence is never a result"). Per-seat cap: 60 tool calls. Seats return their report as text to you. A brief naming `SEATS` caps the seats in flight: dispatch them in waves of at most `SEATS`, each wave one message.
 
 **LANE seats** (`general-purpose`, one per lane) — body = § Lane seat procedure VERBATIM + the lane's hunk rows + its newly-load-bearing callees. Returns FINDINGS, ROWS closed, RULED OUT, COVERAGE.
 

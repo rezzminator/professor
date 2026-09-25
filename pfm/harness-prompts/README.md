@@ -27,25 +27,16 @@ and the two seams.
   makes every managed Claude launch inject it via `--system-prompt-file`, replacing the harness's
   built-in prose (tool schemas and CLAUDE.md are separate request lanes and are unaffected).
 - `harness-prompts/codex.md` — head + `codex/professor.md` + tail. Codex takes only an appendix to
-  its own prompt, so the composed file IS the appendix, delivered as a model-independent developer
-  message from Codex's native SessionStart `additionalContext` hook. `pfm install` registers and
-  individually trusts the owned handler in each configured account; it applies to native launches
-  as well as Professor launches. Personal hooks and native model/project/managed instructions
-  retain their usual behavior. No preparatory config reader, copied credential home, or
-  `developer_instructions` CLI override is used. The installer removes the retired marked Professor
-  block from global config while preserving personal instructions and numeric wait settings.
-  Install fails visibly if native hook discovery is unavailable or managed policy excludes the hook.
-  A later explicit hook disable or `--ignore-user-config` can bypass this account-level installation.
-  The hook runs on startup, resume, clear and compact. A bounded reverse scan of local history
-  suppresses an exact retained developer copy, respecting replacement-history checkpoints.
-  Null/remote transcripts, ancestor-only fork history, rollback, legacy compaction and history
-  beyond the 16 MiB/32,768-record budget fall back to injection with a visible warning that
-  duplication could not be ruled out. An updated appendix can coexist with an older version in
-  an existing conversation; a new session starts clean. Native persistence errors can expose stale
-  transcript data, so this is best-effort deduplication, not a guarantee across every lifecycle.
-  Native subagent starts do not rerun this SessionStart hook. Full-history children inherit context;
-  fresh/custom children need the coordination briefing specified in the appendix. These instructions
-  guide tool selection; they do not remove the professor MCP's chat_* tools.
+  its own prompt, so the composed file IS the appendix, delivered through `developer_instructions`
+  in each configured Codex home's `config.toml`, inside a marked
+  `# BEGIN pfm developer_instructions — installer-owned` / `# END pfm developer_instructions —
+  installer-owned` fence that `pfm install` writes and owns; Codex reads the key as the first
+  developer item of every thread and rebuilds it verbatim after compaction. A hand-written
+  `developer_instructions` outside the fence is preserved untouched and the fleet prompt is not
+  installed there. `pfm doctor`'s `codex developer_instructions=` row reports `ok`, `MISSING` or
+  `CHECK FAILED` for each configured account. Full-history children inherit context; fresh/custom
+  children need the coordination briefing specified in the appendix. These instructions guide tool
+  selection; they do not remove the professor MCP's chat_* tools.
 - `harness-prompts/opencode.md` — head + `opencode/professor.md` + tail. OpenCode has no
   system-prompt replacement flag; its machine-scope `opencode.jsonc` carries an `instructions`
   array of files whose content it appends to the system prompt, and `pfm install` names the staged

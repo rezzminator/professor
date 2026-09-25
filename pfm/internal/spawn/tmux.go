@@ -2,6 +2,7 @@ package spawn
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -92,17 +93,25 @@ func (tmux TmuxSpawner) NewSession(
 	if spec.Width > 0 && spec.Height > 0 {
 		arguments = append(arguments, "-x", strconv.Itoa(spec.Width), "-y", strconv.Itoa(spec.Height))
 	}
-	arguments = append(arguments, spec.Run)
+	// A run past one tmux client message (a Codex role seat's launch line
+	// carries the whole composed fleet prompt) goes through a one-shot
+	// script in the socket directory: private, 0700, secured just above, and
+	// living exactly as long as the servers whose panes it launches.
+	launch, err := pfmtmux.PrepareLaunch(tmux.TmuxDir, spec.Run)
+	if err != nil {
+		return fmt.Errorf("create chat server (%s): %w", runShape(spec), err)
+	}
+	arguments = append(arguments, launch.Command)
 	command, err := tmux.newSessionCommand(
 		ctx,
 		spec.Socket,
 		arguments...,
 	)
 	if err != nil {
-		return fmt.Errorf("create chat server: %w", err)
+		return errors.Join(fmt.Errorf("create chat server: %w", err), launch.Discard())
 	}
 	if output, err := command.CombinedOutput(); err != nil {
-		return fmt.Errorf("create chat server: %w: %s", err, output)
+		return errors.Join(fmt.Errorf("create chat server: %w: %s", err, output), launch.Discard())
 	}
 	for _, options := range pfmconfig.ChatServerOptions(tmux.Titles) {
 		if output, err := tmux.command(

@@ -16,11 +16,22 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
+// updateFileKind names what an installer-owned file is to the operator: its
+// residue says which, and only a hook file is checked for stranded pfm hooks.
+type updateFileKind string
+
+const (
+	updateHookFile        updateFileKind = "hook file"
+	updateConfigFile      updateFileKind = "config file"
+	updateMCPRegistration updateFileKind = "MCP registration"
+)
+
 // updateFileSnapshot is one installer-owned file captured around the
 // candidate's `install --yes`: its bytes before (the state rollback returns
 // to) and right after (the only state rollback may overwrite).
 type updateFileSnapshot struct {
 	path          string // physical path: a symlinked account settings file is written through, never replaced
+	kind          updateFileKind
 	before        []byte
 	beforeExisted bool
 	beforeMode    fs.FileMode
@@ -30,19 +41,27 @@ type updateFileSnapshot struct {
 }
 
 // snapshotUpdateOwnedFiles captures every file whose hooks the installer owns
-// (installer.ExpectedHooks: each account's Claude settings, each Codex hooks
-// file) plus the ownership ledger they reconcile against, PLUS the machine
-// config files under the config directory (issue #24 finding 3): the
-// candidate's own `install --yes` renames config.json -> pfm.config.json
-// (the v0.74.0 migration). A rollback across that boundary runs the OLD
-// binary, which reads only the legacy name — without these files restored
-// first, it converges on defaults and tears down every MCP service the real
-// config enabled, including the launch agent.
+// (installer.ExpectedHooks: each account's Claude settings) plus the
+// ownership ledger they reconcile against, PLUS the machine config files
+// under the config directory (issue #24 finding 3): the candidate's own
+// `install --yes` renames config.json -> pfm.config.json (the v0.74.0
+// migration). A rollback across that boundary runs the OLD binary, which
+// reads only the legacy name — without these files restored first, it
+// converges on defaults and tears down every MCP service the real config
+// enabled, including the launch agent. It also captures every MCP
+// registration install rewrites — each Claude user registry, ~/.mcp.json,
+// each Codex home's config.toml, the OpenCode config and the MCP ownership
+// ledger — so a rollback never leaves the candidate's registrations behind.
 func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, error) {
 	home := runtime.Paths.Home
-	candidates := []string{filepath.Join(filepath.Dir(installer.SourceRepoPath(home)), "settings-hook-ownership.json")}
+	type candidate struct {
+		path string
+		kind updateFileKind
+	}
+	managedRoot := filepath.Dir(installer.SourceRepoPath(home))
+	candidates := []candidate{{filepath.Join(managedRoot, "settings-hook-ownership.json"), updateHookFile}}
 	for _, hook := range installer.ExpectedHooks(home, runtime.Config) {
-		candidates = append(candidates, hook.File)
+		candidates = append(candidates, candidate{hook.File, updateHookFile})
 	}
 	if runtime.Config.Path != "" {
 		configDir := filepath.Dir(runtime.Config.Path)
@@ -52,17 +71,33 @@ func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, err
 			config.HarvesterFileName,
 			config.LegacyBackupName,
 		} {
-			candidates = append(candidates, filepath.Join(configDir, name))
+			candidates = append(candidates, candidate{filepath.Join(configDir, name), updateConfigFile})
 		}
 	}
+	for _, registry := range installer.ClaudeUserRegistries(
+		home,
+		runtime.Config.Accounts,
+		config.AmbientClaudeConfigDir(),
+	) {
+		candidates = append(candidates, candidate{registry.Path, updateMCPRegistration})
+	}
+	candidates = append(candidates, candidate{filepath.Join(home, ".mcp.json"), updateMCPRegistration})
+	for _, codexHome := range runtime.Config.CodexHomes() {
+		candidates = append(candidates, candidate{filepath.Join(codexHome, "config.toml"), updateMCPRegistration})
+	}
+	candidates = append(
+		candidates,
+		candidate{installer.OpenCodeConfigPath(home), updateMCPRegistration},
+		candidate{filepath.Join(managedRoot, "mcp-ownership.json"), updateMCPRegistration},
+	)
 	seen := make(map[string]bool, len(candidates))
 	snapshots := make([]updateFileSnapshot, 0, len(candidates))
 	for _, candidate := range candidates {
-		physical, err := filepath.EvalSymlinks(candidate)
+		physical, err := filepath.EvalSymlinks(candidate.path)
 		if errors.Is(err, fs.ErrNotExist) {
-			physical = filepath.Clean(candidate)
+			physical = filepath.Clean(candidate.path)
 		} else if err != nil {
-			return nil, fmt.Errorf("resolve hook file %s: %w", candidate, err)
+			return nil, fmt.Errorf("resolve %s %s: %w", candidate.kind, candidate.path, err)
 		}
 		if seen[physical] {
 			continue
@@ -74,7 +109,9 @@ func snapshotUpdateOwnedFiles(runtime config.Runtime) ([]updateFileSnapshot, err
 		}
 		snapshots = append(
 			snapshots,
-			updateFileSnapshot{path: physical, before: content, beforeExisted: existed, beforeMode: mode},
+			updateFileSnapshot{
+				path: physical, kind: candidate.kind, before: content, beforeExisted: existed, beforeMode: mode,
+			},
 		)
 	}
 	sort.Slice(snapshots, func(left, right int) bool { return snapshots[left].path < snapshots[right].path })
@@ -91,7 +128,7 @@ func recordUpdateHookAfter(snapshots []updateFileSnapshot) {
 	}
 }
 
-// restoreUpdateHookFiles returns each hook file to its pre-install bytes, but
+// restoreUpdateHookFiles returns each snapshotted file to its pre-install bytes, but
 // only while it still holds exactly what the candidate's install left: a file
 // something else rewrote since — a live chat saving its settings — is never
 // clobbered. It is named as residue instead — and when that residue still
@@ -112,18 +149,7 @@ func restoreUpdateHookFiles(snapshots []updateFileSnapshot, home string, stderr 
 			continue
 		}
 		if snapshot.afterErr != nil || existed != snapshot.afterExisted || !bytes.Equal(current, snapshot.after) {
-			message := fmt.Sprintf(
-				"hook file %s changed after the update's install wrote it; left as is — reconcile it by hand",
-				snapshot.path,
-			)
-			if stranded := installer.UnknownPFMHookCommands(current, home); len(stranded) > 0 {
-				message = fmt.Sprintf(
-					"hook file %s changed after the update's install wrote it; left as is — it still carries %s; reconcile by hand or run pfm install --yes",
-					snapshot.path,
-					strings.Join(stranded, ", "),
-				)
-			}
-			residue = errors.Join(residue, errors.New(message))
+			residue = errors.Join(residue, errors.New(updateResidueMessage(snapshot, current, existed, home)))
 			continue
 		}
 		if snapshot.beforeExisted {
@@ -132,12 +158,45 @@ func restoreUpdateHookFiles(snapshots []updateFileSnapshot, home string, stderr 
 			err = os.Remove(snapshot.path)
 		}
 		if err != nil {
-			residue = errors.Join(residue, fmt.Errorf("restore hook file %s: %w", snapshot.path, err))
+			residue = errors.Join(residue, fmt.Errorf("restore %s %s: %w", snapshot.kind, snapshot.path, err))
 			continue
 		}
 		fmt.Fprintf(stderr, "pfm update: restored %s to its pre-update state\n", snapshot.path)
 	}
 	return residue
+}
+
+// updateResidueMessage names a file something rewrote after the update's
+// install wrote it. A hook file is also checked for stranded pfm hooks: one
+// that carries them names them, and one that does not parse is named as
+// unchecked with its parse error — never read as clean. A file removed since
+// has nothing to check and says so.
+func updateResidueMessage(snapshot updateFileSnapshot, current []byte, existed bool, home string) string {
+	prefix := fmt.Sprintf("%s %s changed after the update's install wrote it; left as is", snapshot.kind, snapshot.path)
+	if !existed {
+		return fmt.Sprintf("%s %s was removed after the update's install wrote it; reconcile it by hand",
+			snapshot.kind, snapshot.path)
+	}
+	if snapshot.kind != updateHookFile {
+		return prefix + " — reconcile it by hand"
+	}
+	stranded, err := installer.UnknownPFMHookCommands(current, home)
+	switch {
+	case err != nil:
+		return fmt.Sprintf(
+			"%s — it does not parse (%v), so pfm could not check it for stranded pfm hooks; reconcile it by hand",
+			prefix,
+			err,
+		)
+	case len(stranded) > 0:
+		return fmt.Sprintf(
+			"%s — it still carries %s; reconcile by hand or run pfm install --yes",
+			prefix,
+			strings.Join(stranded, ", "),
+		)
+	default:
+		return prefix + " — reconcile it by hand"
+	}
 }
 
 func readUpdateHookFile(path string) ([]byte, fs.FileMode, bool, error) {

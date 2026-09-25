@@ -236,6 +236,9 @@ func (installer *engine) install(ctx context.Context) error {
 	if err := installer.retireLegacySwapCommand(); err != nil {
 		return err
 	}
+	if err := installer.wireCodexAgents(); err != nil {
+		return err
+	}
 	if len(installer.codexHomes()) == 0 {
 		installer.skip("no Codex accounts configured — command mirror has nothing to write")
 		installer.skip("no Codex accounts configured — agent mirror has nothing to write")
@@ -244,9 +247,6 @@ func (installer *engine) install(ctx context.Context) error {
 			return err
 		}
 		if err := installer.wireCodexDefaults(); err != nil {
-			return err
-		}
-		if err := installer.wireCodexAgents(); err != nil {
 			return err
 		}
 		if err := installer.retireOrphanCodexAgents(); err != nil {
@@ -328,6 +328,10 @@ func (installer *engine) install(ctx context.Context) error {
 	return nil
 }
 
+// wireCodexAgents runs on every install: it serves the Claude agent
+// registries (links, orphaned-link and undeclared-variant retirement) whatever
+// the Codex roster, and compiles, writes and retires Codex roles only in the
+// Codex homes configured — an empty roster plans none.
 func (installer *engine) wireCodexAgents() error {
 	sourceRepo, err := installer.globalSourceRepoRoot()
 	if err != nil {
@@ -1961,12 +1965,8 @@ func (installer *engine) wireSettings() error {
 			installer.skip("invalid settings JSON at " + candidate + ": " + err.Error())
 			continue
 		}
-		if installer.options.Mode != ModeUninstall &&
-			hasPreservedMixedExploreDenyMatcher(
-				updated,
-				filepath.Join(installer.options.Home, ".local", "bin", "pfm"),
-			) {
-			installer.skip("mixed PreToolUse hook entry preserved with its existing matcher at " + candidate)
+		if installer.options.Mode != ModeUninstall {
+			installer.reportPreservedMixedTemplateHooks(updated, candidate)
 		}
 		if len(nextOwned) == 0 {
 			delete(ownership, physical)

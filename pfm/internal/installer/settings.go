@@ -159,8 +159,10 @@ func updateSettings(
 		if dropMisplacedTemplateHooks(document, expected, pfmBinary) {
 			changed = true
 		}
+		preserved := mixedTemplateCopies(document, expected, pfmBinary)
 		for _, wanted := range expected {
-			if !hasHookCommandWithMatcher(hookEntries(document, wanted.Event, true), wanted.Command, wanted.Matcher) {
+			if !hasHookCommandWithMatcher(hookEntries(document, wanted.Event, true), wanted.Command, wanted.Matcher) &&
+				!hasPreservedCopy(preserved, wanted.Event, wanted.Command) {
 				appendTemplateHook(document, wanted)
 				changed = true
 			}
@@ -186,27 +188,6 @@ func updateSettings(
 		return nil, false, nil, fmt.Errorf("encode settings: %w", err)
 	}
 	return append(updated, '\n'), true, nextOwned, nil
-}
-
-func hasPreservedMixedExploreDenyMatcher(raw []byte, pfmBinary string) bool {
-	var document map[string]any
-	if json.Unmarshal(raw, &document) != nil {
-		return false
-	}
-	exploreDeny := pfmBinary + " internal explore-deny"
-	for _, entry := range hookEntries(document, "PreToolUse", false) {
-		if entry["matcher"] == "Agent|Task" || !settingsHookEntryHasMixedOwnership(entry, pfmBinary) {
-			continue
-		}
-		hooks, _ := entry["hooks"].([]any)
-		for _, hookValue := range hooks {
-			hook, _ := hookValue.(map[string]any)
-			if hook[configCommandKey] == exploreDeny {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func rewriteCommandFields(value any, rewrite func(string) string) bool {
@@ -508,11 +489,12 @@ func unknownPFMHookCommand(command, pfmBinary string) (string, bool) {
 // command present that is of pfm's own shape but names a subcommand this
 // binary neither implements nor recognizes as retired — the residue a
 // stranded rollback leaves (issue #24 finding 2). A document this binary
-// cannot parse returns nil, never a guess.
-func UnknownPFMHookCommands(raw []byte, home string) []string {
+// cannot parse returns its decode error — an unchecked file, never a clean
+// one; a clean document returns nil, nil.
+func UnknownPFMHookCommands(raw []byte, home string) ([]string, error) {
 	var document map[string]any
-	if json.Unmarshal(raw, &document) != nil {
-		return nil
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, fmt.Errorf("decode hook document: %w", err)
 	}
 	pfmBinary := filepath.Join(home, ".local", "bin", "pfm")
 	seen := map[string]bool{}
@@ -536,7 +518,10 @@ func UnknownPFMHookCommands(raw []byte, home string) []string {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return names
+	if len(names) == 0 {
+		return nil, nil
+	}
+	return names, nil
 }
 
 func isRetiredHookCommand(command, pfmBinary string) bool {
@@ -630,19 +615,6 @@ func hookEntries(document map[string]any, event string, create bool) []map[strin
 		}
 	}
 	return entries
-}
-
-func hasHookCommand(entries []map[string]any, wanted string) bool {
-	for _, entry := range entries {
-		hooks, _ := entry["hooks"].([]any)
-		for _, value := range hooks {
-			hook, _ := value.(map[string]any)
-			if hook[configCommandKey] == wanted {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func hasHookCommandWithMatcher(entries []map[string]any, wanted, matcher string) bool {

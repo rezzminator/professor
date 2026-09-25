@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	pfmconfig "github.com/rezzminator/professor/pfm/internal/config"
+	"github.com/rezzminator/professor/pfm/internal/installer"
 )
 
 // updateConfigMigrationTestRuntime is updateRollbackTestRuntime, plus a
@@ -226,5 +227,136 @@ func TestUpdateConfigPathAfterInstallSurfacesANonENOENTStatError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), original) {
 		t.Fatalf("error=%v, want it to name the path %q", err, original)
+	}
+}
+
+// updateRollbackAfterInstall runs a real Run whose candidate install is
+// install and whose gating doctor runs between and then fails, so the update
+// rolls back; it returns stderr.
+func updateRollbackAfterInstall(
+	t *testing.T,
+	runtime pfmconfig.Runtime,
+	repo string,
+	install func() error,
+	between func(),
+) string {
+	t.Helper()
+	oldBuild, oldInstall, oldRunDoctor := updateBuildCandidate, updateApplyInstall, updateRunDoctor
+	oldRollbackInstall, oldRollbackDoctor := updateRollbackInstall, updateRollbackDoctor
+	t.Cleanup(func() {
+		updateBuildCandidate, updateApplyInstall, updateRunDoctor = oldBuild, oldInstall, oldRunDoctor
+		updateRollbackInstall, updateRollbackDoctor = oldRollbackInstall, oldRollbackDoctor
+	})
+	updateBuildCandidate = func(_ context.Context, _, _, output string) error {
+		return os.WriteFile(output, []byte("new\n"), 0o755)
+	}
+	updateApplyInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+		return install()
+	}
+	updateRunDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		between()
+		return doctorOutcome{Exit: 3, Failures: 1, Output: "doctor: failures=1\n"}, nil
+	}
+	stubUpdateBaselineDoctor(t, doctorOutcome{})
+	updateRollbackInstall = func(context.Context, string, string, string, pfmconfig.Runtime, bool, io.Writer, io.Writer) error {
+		return nil
+	}
+	updateRollbackDoctor = func(context.Context, string, pfmconfig.Runtime, string, bool, io.Writer, io.Writer) (doctorOutcome, error) {
+		return doctorOutcome{}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"--repo", repo}, &stdout, &stderr, runtime); code == 0 {
+		t.Fatalf("Run() code=0, want the candidate doctor failure to roll back; stdout=%q", stdout.String())
+	}
+	return stderr.String()
+}
+
+func writeUpdateFixtureFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The MCP registration files install rewrites — a Codex config.toml, the
+// OpenCode opencode.jsonc, a Claude registry, ~/.mcp.json and the MCP
+// ownership ledger — are snapshotted: rollback restores each one untouched
+// since install to its pre-update bytes (removing one absent before), and
+// names one changed since install as an MCP registration left as is.
+func TestUpdateRollbackRestoresTheMCPRegistrationsTheInstallRewrote(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	runtime, repo := updateRollbackTestRuntime(t)
+	home := runtime.Paths.Home
+	codexHome := filepath.Join(home, ".codex")
+	runtime.Config = pfmconfig.Config{
+		Accounts:      []pfmconfig.Account{{ID: 1, Implicit: true}},
+		CodexAccounts: []pfmconfig.CodexAccount{{ID: 1, Home: codexHome}},
+	}
+	codexConfig := filepath.Join(codexHome, "config.toml")
+	claudeRegistry := filepath.Join(home, ".claude.json")
+	mcpJSON := filepath.Join(home, ".mcp.json")
+	openCode := installer.OpenCodeConfigPath(home)
+	ledger := filepath.Join(home, ".local", "share", "pfm", "install", "mcp-ownership.json")
+	before := map[string]string{
+		codexConfig:    "model = \"operator\"\n",
+		claudeRegistry: "{\"mcpServers\":{}}\n",
+		mcpJSON:        "{\"mcpServers\":{\"operator\":{}}}\n",
+	}
+	for path, content := range before {
+		writeUpdateFixtureFile(t, path, content)
+	}
+	stderr := updateRollbackAfterInstall(t, runtime, repo, func() error {
+		for _, path := range []string{codexConfig, claudeRegistry, mcpJSON, openCode, ledger} {
+			writeUpdateFixtureFile(t, path, "written by the candidate install\n")
+		}
+		return nil
+	}, func() {
+		writeUpdateFixtureFile(t, claudeRegistry, "{\"operator\":\"saved while the update ran\"}\n")
+	})
+	for _, path := range []string{codexConfig, mcpJSON} {
+		if got, err := os.ReadFile(path); err != nil || string(got) != before[path] {
+			t.Fatalf("%s after rollback = %q, %v; want its pre-update bytes %q", path, got, err, before[path])
+		}
+	}
+	for _, path := range []string{openCode, ledger} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("%s after rollback: stat err=%v, want it removed (absent before the update)", path, err)
+		}
+	}
+	got, err := os.ReadFile(claudeRegistry)
+	if err != nil || !strings.Contains(string(got), "saved while the update ran") {
+		t.Fatalf("Claude registry after rollback = %q, %v; want the concurrent edit kept", got, err)
+	}
+	physical, err := filepath.EvalSymlinks(claudeRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "MCP registration " + physical +
+		" changed after the update's install wrote it; left as is — reconcile it by hand"
+	if !strings.Contains(stderr, want) {
+		t.Fatalf("stderr=%q, want %q", stderr, want)
+	}
+}
+
+// A config JSON changed after the update's install is named as a config file,
+// not as a hook file.
+func TestUpdateRollbackResidueNamesAChangedConfigFileAsAConfigFile(t *testing.T) {
+	runtime, repo, legacyPath, migratedPath, _ := updateConfigMigrationTestRuntime(t)
+	stderr := updateRollbackAfterInstall(t, runtime, repo, func() error {
+		return os.Rename(legacyPath, migratedPath)
+	}, func() {
+		writeUpdateFixtureFile(t, migratedPath, "{\"version\":2,\"theme\":\"edited while the update ran\"}")
+	})
+	physical, err := filepath.EvalSymlinks(migratedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "config file " + physical +
+		" changed after the update's install wrote it; left as is — reconcile it by hand"
+	if !strings.Contains(stderr, want) {
+		t.Fatalf("stderr=%q, want %q", stderr, want)
 	}
 }

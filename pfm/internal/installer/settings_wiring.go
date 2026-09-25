@@ -88,13 +88,7 @@ func appendTemplateHook(document map[string]any, wanted ExpectedHook) {
 // harness reads, is never touched. The ownership ledger follows from the
 // before/after counts nextSettingsHookOwnership already takes.
 func dropMisplacedTemplateHooks(document map[string]any, expected []ExpectedHook, pfmBinary string) bool {
-	placements := map[string]map[[2]string]bool{}
-	for _, wanted := range expected {
-		if placements[wanted.Command] == nil {
-			placements[wanted.Command] = map[[2]string]bool{}
-		}
-		placements[wanted.Command][[2]string{wanted.Event, wanted.Matcher}] = true
-	}
+	placements := templatePlacements(expected)
 	events, _ := document["hooks"].(map[string]any)
 	names := make([]string, 0, len(events))
 	for event := range events {
@@ -170,4 +164,16 @@ func dropMisplacedTemplateHooks(document map[string]any, expected []ExpectedHook
 		}
 	}
 	return changed
+}
+
+// templatePlacements maps each template command to its (event, matcher) pairs.
+func templatePlacements(expected []ExpectedHook) map[string]map[[2]string]bool {
+	placements := map[string]map[[2]string]bool{}
+	for _, wanted := range expected {
+		if placements[wanted.Command] == nil {
+			placements[wanted.Command] = map[[2]string]bool{}
+		}
+		placements[wanted.Command][[2]string{wanted.Event, wanted.Matcher}] = true
+	}
+	return placements
 }

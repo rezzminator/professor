@@ -6,8 +6,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/config"
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
+
+// mcpEnabledRuntime is a runtime whose config serves one MCP server, so the
+// service-manager row probes instead of reporting disabled-in-config.
+func mcpEnabledRuntime() config.Runtime {
+	return config.Runtime{Config: config.Config{MCPServers: map[string]config.MCPServer{"professor": {Enabled: true}}}}
+}
 
 // TestPrintServiceManagerDoctorReportsThreeStates watches the three states
 // the row must never collapse: manager present with healthy units, no
@@ -31,11 +38,11 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 				Manager: "systemd",
 				Present: true,
 				Unit: serviceManagerUnitState{
-					Unit: "pfm-mcp.service", Present: true, Enabled: true, Active: true,
+					Unit: "pfm-mcp.service", Present: true, Enabled: true, Active: true, State: "active",
 				},
 			},
 			want: []string{
-				"doctor: service-manager=systemd unit=pfm-mcp.service present=true enabled=true active=true",
+				"doctor: service-manager=systemd unit=pfm-mcp.service present=true enabled=true active=active\n",
 			},
 			exclude: []string{"could_not_ask", "state=unavailable"},
 		},
@@ -76,7 +83,7 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 			defer func() { ServiceManagerProbeOverride = nil }()
 
 			var output strings.Builder
-			printServiceManagerDoctor(context.Background(), &output, nil)
+			printServiceManagerDoctor(context.Background(), &output, nil, mcpEnabledRuntime())
 			got := output.String()
 			for _, want := range testCase.want {
 				if !strings.Contains(got, want) {
@@ -92,29 +99,93 @@ func TestPrintServiceManagerDoctorReportsThreeStates(t *testing.T) {
 	}
 }
 
-// TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy proves the
-// present-but-not-active/enabled shape carries a start hint rather than
-// silently reading as the healthy row.
+// TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy proves each
+// unhealthy shape names the manager's own state word and the one command that
+// clears it: an unstaged unit is cleared by the installer, a staged one that is
+// not enabled or not active by the manager's start command.
 func TestPrintServiceManagerDoctorPresentButUnhealthyNamesTheRemedy(t *testing.T) {
-	ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
-		return serviceManagerReport{
-			Manager: "systemd",
-			Present: true,
-			Unit: serviceManagerUnitState{
-				Unit: "pfm-mcp.service", Present: true, Enabled: true, Active: false,
+	cases := []struct {
+		name   string
+		report serviceManagerReport
+		want   []string
+	}{
+		{
+			name: "systemd unit activating",
+			report: serviceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+				Unit: "pfm-mcp.service", Present: true, Enabled: true, State: "activating",
+			}},
+			want: []string{
+				"present=true enabled=true active=activating",
+				"systemctl --user enable --now pfm-mcp.service",
 			},
-		}
+		},
+		{
+			name: "systemd unit never staged",
+			report: serviceManagerReport{Manager: "systemd", Present: true, Unit: serviceManagerUnitState{
+				Unit: "pfm-mcp.service", State: "inactive",
+			}},
+			want: []string{"present=false enabled=false active=inactive", "— run pfm install --yes"},
+		},
+		{
+			name: "launchd label not running",
+			report: serviceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
+				Unit: "com.professor.pfm.mcp", Present: true, Enabled: true, State: "not running",
+			}},
+			want: []string{"active=not running", "launchctl kickstart -k gui/$(id -u)/com.professor.pfm.mcp"},
+		},
+		{
+			name: "launchd label unknown",
+			report: serviceManagerReport{Manager: "launchd", Present: true, Unit: serviceManagerUnitState{
+				Unit: "com.professor.pfm.mcp",
+			}},
+			want: []string{"present=false", "— run pfm install --yes"},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
+				return testCase.report
+			}
+			defer func() { ServiceManagerProbeOverride = nil }()
+
+			var output strings.Builder
+			warnings := printServiceManagerDoctor(context.Background(), &output, nil, mcpEnabledRuntime())
+			if warnings != 1 {
+				t.Fatalf("unhealthy unit reported %d warnings, want 1, output=%q", warnings, output.String())
+			}
+			got := output.String()
+			for _, want := range testCase.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("output %q missing %q", got, want)
+				}
+			}
+			if strings.Contains(got, "active=false") || strings.Contains(got, "active=true") {
+				t.Fatalf("output %q renders the manager's state as a boolean", got)
+			}
+		})
+	}
+}
+
+// TestPrintServiceManagerDoctorDisabledInConfigNeverProbes: with every MCP
+// server disabled there is no daemon to supervise — the row says so, asks the
+// manager nothing and warns nothing.
+func TestPrintServiceManagerDoctorDisabledInConfigNeverProbes(t *testing.T) {
+	ServiceManagerProbeOverride = func(context.Context, deps.Runner) serviceManagerReport {
+		t.Fatal("a disabled MCP config must not probe the service manager")
+		return serviceManagerReport{}
 	}
 	defer func() { ServiceManagerProbeOverride = nil }()
 
-	var output strings.Builder
-	warnings := printServiceManagerDoctor(context.Background(), &output, nil)
-	if warnings == 0 {
-		t.Fatalf("present-but-inactive unit reported 0 warnings, output=%q", output.String())
+	runtime := config.Runtime{
+		Config: config.Config{MCPServers: map[string]config.MCPServer{"professor": {Enabled: false}}},
 	}
-	got := output.String()
-	if !strings.Contains(got, "active=false") ||
-		!strings.Contains(got, "systemctl --user enable --now pfm-mcp.service") {
-		t.Fatalf("output %q missing the inactive facts or its start hint", got)
+	var output strings.Builder
+	if warnings := printServiceManagerDoctor(context.Background(), &output, nil, runtime); warnings != 0 {
+		t.Fatalf("disabled-in-config reported %d warnings, output=%q", warnings, output.String())
+	}
+	manager, unit := serviceManagerIdentity()
+	want := "doctor: service-manager=" + manager + " unit=" + unit + " disabled-in-config\n"
+	if output.String() != want {
+		t.Fatalf("output = %q, want %q", output.String(), want)
 	}
 }

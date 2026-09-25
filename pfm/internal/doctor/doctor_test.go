@@ -104,3 +104,44 @@ func TestDoctorWithoutVerboseFlagPrintsNoDirLine(t *testing.T) {
 		t.Fatalf("doctor without --verbose left a cwd-relative tmp/: err=%v", err)
 	}
 }
+
+// TestPrintDependenciesCountsAnUnknownProbeStateLikeMissing: a probe state
+// PrintDependencies does not know is an unverified dependency — a required
+// engine dependency in it is a failure (so `pfm install` preflight refuses),
+// an optional or harvest one a warning; the row itself is unchanged.
+func TestPrintDependenciesCountsAnUnknownProbeStateLikeMissing(t *testing.T) {
+	saved := DependencyProbeOverride
+	t.Cleanup(func() { DependencyProbeOverride = saved })
+	DependencyProbeOverride = func(_ context.Context, entries []deps.Entry, _ deps.ProbeOptions) []deps.Result {
+		results := make([]deps.Result, 0, len(entries))
+		for _, entry := range entries {
+			results = append(results, deps.Result{Entry: entry, State: deps.State("wedged")})
+		}
+		return results
+	}
+	cases := []struct {
+		name                   string
+		entry                  deps.Entry
+		wantWarning, wantFails int
+	}{
+		{name: "required engine dep", entry: deps.Entry{Name: "tmux", Required: true}, wantFails: 1},
+		{name: "required harvest dep", entry: deps.Entry{Name: "uv", Required: true, Harvest: true}, wantWarning: 1},
+		{name: "optional dep", entry: deps.Entry{Name: "jq"}, wantWarning: 1},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			warnings, failures, _ := PrintDependencies(
+				context.Background(), &stdout, t.TempDir(), []deps.Entry{testCase.entry}, deps.ProbeOptions{},
+			)
+			if warnings != testCase.wantWarning || failures != testCase.wantFails {
+				t.Fatalf("warnings=%d failures=%d, want %d/%d:\n%s",
+					warnings, failures, testCase.wantWarning, testCase.wantFails, stdout.String())
+			}
+			want := fmt.Sprintf("doctor: dep %s broken error=unknown probe state %q\n", testCase.entry.Name, "wedged")
+			if stdout.String() != want {
+				t.Fatalf("row = %q, want %q", stdout.String(), want)
+			}
+		})
+	}
+}

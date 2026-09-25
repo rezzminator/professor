@@ -25,7 +25,7 @@ func TestPrintActivityLogDoctorNamesThePathAndSize(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stdout bytes.Buffer
-	printActivityLogDoctor(&stdout, runtimeWithLog(path))
+	printActivityLogDoctor(&stdout, runtimeWithLog(path), &paths.MapEnv{})
 	row := stdout.String()
 	if !strings.Contains(row, "doctor: log path="+path) || !strings.Contains(row, "bytes=12") {
 		t.Fatalf("row = %q, want the path and its size", row)
@@ -39,7 +39,11 @@ func TestPrintActivityLogDoctorNamesThePathAndSize(t *testing.T) {
 // One row may never render both the same way.
 func TestPrintActivityLogDoctorSeparatesAbsenceFromAFailedLook(t *testing.T) {
 	var absent bytes.Buffer
-	printActivityLogDoctor(&absent, runtimeWithLog(filepath.Join(t.TempDir(), "pfm.jsonl")))
+	if warnings := printActivityLogDoctor(
+		&absent, runtimeWithLog(filepath.Join(t.TempDir(), "pfm.jsonl")), &paths.MapEnv{},
+	); warnings != 0 {
+		t.Fatalf("an unwritten log is a fresh home, not a warning: %d", warnings)
+	}
 	if !strings.Contains(absent.String(), "state=absent") || !strings.Contains(absent.String(), "bytes=0") {
 		t.Fatalf("absent row = %q, want state=absent bytes=0", absent.String())
 	}
@@ -49,7 +53,11 @@ func TestPrintActivityLogDoctorSeparatesAbsenceFromAFailedLook(t *testing.T) {
 		t.Fatal(err)
 	}
 	var unreadable bytes.Buffer
-	printActivityLogDoctor(&unreadable, runtimeWithLog(filepath.Join(blocked, "pfm.jsonl")))
+	if warnings := printActivityLogDoctor(
+		&unreadable, runtimeWithLog(filepath.Join(blocked, "pfm.jsonl")), &paths.MapEnv{},
+	); warnings != 0 {
+		t.Fatalf("an unreadable log is reported, not tallied: %d", warnings)
+	}
 	if !strings.Contains(unreadable.String(), "state="+StateUnavailable) {
 		t.Fatalf("unreadable row = %q, want state=%s", unreadable.String(), StateUnavailable)
 	}
@@ -107,11 +115,26 @@ func TestPrintActivityLogDoctorIncludesTheComponentRows(t *testing.T) {
 	runtime := runtimeWithLog(filepath.Join(t.TempDir(), "pfm.jsonl"))
 	runtime.Config.Log.Level = "error"
 	runtime.Config.Log.KeepDays = 7
-	printActivityLogDoctor(&stdout, runtime)
+	printActivityLogDoctor(&stdout, runtime, &paths.MapEnv{})
 	if !strings.Contains(stdout.String(), "keep_days=7") {
 		t.Fatalf("row lacks the retention:\n%s", stdout.String())
 	}
 	if !strings.Contains(stdout.String(), "doctor: log comp=installer level=error source=config") {
 		t.Fatalf("component rows missing:\n%s", stdout.String())
+	}
+}
+
+// TestPrintActivityLogDoctorCountsARefusedOverride: an override obs refused
+// leaves the operator believing a level is in force that is not — the row is
+// printed and counted as one warning, read from the env the caller injects.
+func TestPrintActivityLogDoctorCountsARefusedOverride(t *testing.T) {
+	var stdout bytes.Buffer
+	refused := &paths.MapEnv{Values: map[string]string{paths.EnvLogLevel: "chatty"}}
+	warnings := printActivityLogDoctor(&stdout, runtimeWithLog(filepath.Join(t.TempDir(), "pfm.jsonl")), refused)
+	if warnings != 1 {
+		t.Fatalf("a refused override counted %d warnings, want 1:\n%s", warnings, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "doctor: log control refused: "+paths.EnvLogLevel) {
+		t.Fatalf("the refused row is missing:\n%s", stdout.String())
 	}
 }

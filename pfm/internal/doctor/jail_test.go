@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
+	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
 	"github.com/rezzminator/professor/pfm/internal/testjail"
 )
@@ -317,5 +318,66 @@ func clearRetiredHarvesterEnv(t *testing.T) {
 	t.Helper()
 	for _, retired := range RetiredHarvesterEnv {
 		t.Setenv(retired.Name, "")
+	}
+}
+
+// TestDoctorEarlyExitPrintsItsFailureCount: a database doctor cannot open ends
+// the run early with exit 3 — and `pfm update` reads the failure only from the
+// `doctor: failures=N` line, so the early exit prints it too.
+func TestDoctorEarlyExitPrintsItsFailureCount(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	blocked := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocked, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(paths.EnvDB, filepath.Join(blocked, "fleet.db"))
+
+	var stdout, stderr bytes.Buffer
+	code := runDoctor(nil, &stdout, &stderr, runtime)
+	if code != 3 {
+		t.Fatalf("unopenable database doctor code=%d, want 3\nstdout=%s", code, stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "doctor: unhealthy database: ") {
+		t.Fatalf("the unhealthy database row is missing:\n%s", stdout.String())
+	}
+	if !strings.HasSuffix(stdout.String(), "doctor: failures=1\n") {
+		t.Fatalf("the early exit did not end with doctor: failures=1:\n%s", stdout.String())
+	}
+}
+
+// TestDoctorUsesTheInjectedRunnerAndEnv: Run's Dependencies are the seams a
+// caller injects — the dependency probe runs through Dependencies.Runner and
+// the log-level rows read Dependencies.Env, never the host's.
+func TestDoctorUsesTheInjectedRunnerAndEnv(t *testing.T) {
+	runtime := buildCleanDoctorHome(t)
+	saved := DependencyProbeOverride
+	t.Cleanup(func() { DependencyProbeOverride = saved })
+	injected := &deps.FakeRunner{}
+	var probeRunner deps.Runner
+	DependencyProbeOverride = func(ctx context.Context, entries []deps.Entry, options deps.ProbeOptions) []deps.Result {
+		probeRunner = options.Runner
+		return saved(ctx, entries, options)
+	}
+	values := map[string]string{}
+	for _, pair := range os.Environ() {
+		if name, value, ok := strings.Cut(pair, "="); ok {
+			values[name] = value
+		}
+	}
+	values[paths.EnvLogLevel] = "chatty"
+	dependencies := testDependencies()
+	dependencies.Runner = injected
+	dependencies.Env = &paths.MapEnv{Values: values, HomeDir: runtime.Paths.Home}
+
+	var stdout, stderr bytes.Buffer
+	code := Run(nil, &stdout, &stderr, runtime, dependencies)
+	if probeRunner != deps.Runner(injected) {
+		t.Fatalf("the dependency probe ran through %T, not the injected runner", probeRunner)
+	}
+	if !strings.Contains(stdout.String(), "doctor: log control refused: "+paths.EnvLogLevel) {
+		t.Fatalf("the log rows did not read the injected env:\n%s", stdout.String())
+	}
+	if code == 0 || strings.Contains(stdout.String(), "doctor: clean") {
+		t.Fatalf("a refused override ended doctor clean (code=%d):\n%s", code, stdout.String())
 	}
 }

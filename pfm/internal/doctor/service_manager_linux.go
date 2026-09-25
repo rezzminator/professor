@@ -4,6 +4,8 @@ package doctor
 
 import (
 	"context"
+	"fmt"
+	"strings"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -17,6 +19,12 @@ const (
 	// mcpUnitName) — the daemon M47 names.
 	pfmMCPSystemdUnit = "pfm-mcp.service"
 )
+
+// serviceManagerIdentity names the manager and unit the row reports without
+// asking the manager anything.
+func serviceManagerIdentity() (manager, unit string) {
+	return serviceManagerLinuxName, pfmMCPSystemdUnit
+}
 
 // probeServiceManager asks systemd --user about the pfm MCP daemon unit.
 // A systemctl binary absent from PATH — the container/unmanaged-host case
@@ -36,38 +44,43 @@ func probeServiceManager(ctx context.Context, runner deps.Runner) serviceManager
 	return report
 }
 
-// probeSystemdUnit mirrors installer.nameSyncServiceRunning's error reading:
-// a completed `systemctl --user is-enabled|is-active` (any exit code) is an
-// answer, present=true, decoded from ExitCode; a Run error (lookup lost mid
-// probe, context deadline, a non-ExitError failure) is "could not ask" and
-// is never read as "not enabled"/"not active".
+// probeSystemdUnit asks systemd --user once, `systemctl --user show
+// --property=LoadState,UnitFileState,ActiveState <unit>`, bounded by
+// deps.ProbeTimeout (the bound every other doctor probe uses). A completed show
+// is an answer: LoadState not-found is a unit never staged (present=false),
+// UnitFileState enabled/enabled-runtime is enabled, ActiveState is the state
+// word and `active` alone is active. A Run error, a non-zero exit (a dead user
+// bus), an expired probe or an answer without the three keys is "could not
+// ask" — never read as "not enabled"/"not active".
 func probeSystemdUnit(ctx context.Context, runner deps.Runner, unit string) serviceManagerUnitState {
-	state := serviceManagerUnitState{Unit: unit, Present: true}
-	enabled, err := systemctlUserQuiet(ctx, runner, "is-enabled", unit)
-	if err != nil {
-		state.Err = err
-		return state
-	}
-	state.Enabled = enabled
-	active, err := systemctlUserQuiet(ctx, runner, "is-active", unit)
-	if err != nil {
-		state.Err = err
-		return state
-	}
-	state.Active = active
-	return state
-}
-
-// systemctlUserQuiet runs `systemctl --user <verb> --quiet <unit>` bounded
-// by deps.ProbeTimeout (the same bound every other doctor version probe
-// uses) and reports its exit code as a boolean answer. Only a Run error —
-// not a nonzero exit — is treated as "the probe could not run".
-func systemctlUserQuiet(ctx context.Context, runner deps.Runner, verb, unit string) (bool, error) {
+	state := serviceManagerUnitState{Unit: unit}
 	probeCtx, cancel := context.WithTimeout(ctx, deps.ProbeTimeout)
 	defer cancel()
-	result, err := runner.Run(probeCtx, []string{"systemctl", "--user", verb, "--quiet", unit}, deps.RunOptions{})
+	argv := []string{"systemctl", "--user", "show", "--property=LoadState,UnitFileState,ActiveState", unit}
+	result, err := runner.Run(probeCtx, argv, deps.RunOptions{})
 	if err != nil {
-		return false, err
+		state.Err = fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+		return state
 	}
-	return result.ExitCode == 0, nil
+	if result.ExitCode != 0 || probeCtx.Err() != nil {
+		state.Err = probeUnanswered(probeCtx, argv, result)
+		return state
+	}
+	properties := map[string]string{}
+	for _, line := range strings.Split(string(result.Stdout), "\n") {
+		if key, value, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
+			properties[key] = value
+		}
+	}
+	for _, key := range []string{"LoadState", "UnitFileState", "ActiveState"} {
+		if _, ok := properties[key]; !ok {
+			state.Err = fmt.Errorf("%s answered without %s: %q", strings.Join(argv, " "), key, result.Stdout)
+			return state
+		}
+	}
+	state.Present = properties["LoadState"] != "not-found"
+	state.Enabled = properties["UnitFileState"] == "enabled" || properties["UnitFileState"] == "enabled-runtime"
+	state.State = properties["ActiveState"]
+	state.Active = state.State == "active"
+	return state
 }

@@ -76,9 +76,9 @@ func normalizeDependencies(dependencies Dependencies) Dependencies {
 	return dependencies
 }
 
-// doctorTally is the two-tier count `runDoctor` threads through every row: warnings are advisory;
+// doctorTally is the two-tier count `Run` threads through every row: warnings are advisory;
 // failures mean `pfm install --yes` missed required state or a required dependency is unavailable.
-// Only failures gate `pfm update` (update_command.go);
+// Only failures gate `pfm update` (internal/update/run.go), read from the summary lines;
 // warnings are reported as a delta against the pre-update baseline.
 type doctorTally struct {
 	warnings int
@@ -88,12 +88,30 @@ type doctorTally struct {
 func (t *doctorTally) warn() { t.warnings++ }
 func (t *doctorTally) fail() { t.failures++ }
 
+// summarize prints the `doctor: failures=N` / `doctor: warnings=N` lines `pfm update` parses.
+func (t *doctorTally) summarize(stdout io.Writer) {
+	if t.failures > 0 {
+		fmt.Fprintf(stdout, "doctor: failures=%d\n", t.failures)
+	}
+	if t.warnings > 0 {
+		fmt.Fprintf(stdout, "doctor: warnings=%d\n", t.warnings)
+	}
+}
+
+// abort ends a run whose later rows cannot be read: its row, one failure, the summary, exit 3.
+func (t *doctorTally) abort(stdout io.Writer, format string, args ...any) int {
+	fmt.Fprintf(stdout, format, args...)
+	t.fail()
+	t.summarize(stdout)
+	return 3
+}
+
 type harvestDoctor interface {
 	Inspect(string, harvestpy.Platform) (harvestpy.EnvironmentDigest, error)
 	Check(context.Context, string, harvestpy.Platform) (harvestpy.CheckReport, error)
 }
 
-// harvestDoctorOverride is nil in production. The command-package TestMain
+// HarvestOverride is nil in production. The command-package TestMain
 // supplies a complete no-network fixture so existing doctor tests exercise
 // fleet health without requiring a user-managed Python environment.
 var HarvestOverride harvestDoctor
@@ -139,8 +157,7 @@ func Run(
 	tally.warnings += printMCPServeProcessesDoctor(stdout, runtime, gather.NewProcFS(resolved.ProcRoot))
 	database, err := store.Open(store.WithWarningWriter(stderr))
 	if err != nil {
-		fmt.Fprintf(stdout, "doctor: unhealthy database: %v\n", err)
-		return 3
+		return tally.abort(stdout, "doctor: unhealthy database: %v\n", err)
 	}
 	defer func() { cli.CloseResource(database, "doctor: close database", stderr, &exitCode) }()
 	ctx := context.Background()
@@ -159,8 +176,8 @@ func Run(
 	if len(pathWarnings) == 0 {
 		fmt.Fprintln(stdout, "doctor: path canonical")
 	}
-	printActivityLogDoctor(stdout, runtime)
-	tally.warnings += printServiceManagerDoctor(ctx, stdout, dependencies.Runner)
+	tally.warnings += printActivityLogDoctor(stdout, runtime, dependencies.Env)
+	tally.warnings += printServiceManagerDoctor(ctx, stdout, dependencies.Runner, runtime)
 	tally.warnings += printPrePushDoctorWithRunner(context.Background(), stdout, dependencies.Runner)
 	verboseDir := ""
 	if *verbose {
@@ -233,7 +250,7 @@ func Run(
 		deps.Registry(deps.Options{
 			Home: resolved.Home, ClaudeBinary: runtime.Config.Claude.Binary, CodexBinary: runtime.Config.Codex.Binary,
 		}),
-		deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest, Runner: obs.Runner(deps.RealRunner{})},
+		deps.ProbeOptions{VerboseDir: verboseDir, SkipHarvest: *skipHarvest, Runner: dependencies.Runner},
 	)
 	tally.warnings += depWarnings
 	tally.failures += depFailures
@@ -255,13 +272,11 @@ func Run(
 
 	version, err := database.UserVersion(ctx)
 	if err != nil {
-		fmt.Fprintf(stdout, "doctor: unhealthy user_version: %v\n", err)
-		return 3
+		return tally.abort(stdout, "doctor: unhealthy user_version: %v\n", err)
 	}
 	check, err := database.QuickCheck(ctx)
 	if err != nil {
-		fmt.Fprintf(stdout, "doctor: unhealthy integrity: %v\n", err)
-		return 3
+		return tally.abort(stdout, "doctor: unhealthy integrity: %v\n", err)
 	}
 	if version != store.SchemaVersion || check != "ok" {
 		tally.warn()
@@ -289,8 +304,7 @@ func Run(
 
 	counts, err := database.Counts(ctx)
 	if err != nil {
-		fmt.Fprintf(stdout, "doctor: unhealthy row counts: %v\n", err)
-		return 3
+		return tally.abort(stdout, "doctor: unhealthy row counts: %v\n", err)
 	}
 	fmt.Fprintf(
 		stdout,
@@ -330,13 +344,11 @@ func Run(
 
 	killWarnings, err := metaCounter(ctx, database, "busy_kill_warnings")
 	if err != nil {
-		fmt.Fprintf(stdout, "doctor: unhealthy busy counter: %v\n", err)
-		return 3
+		return tally.abort(stdout, "doctor: unhealthy busy counter: %v\n", err)
 	}
 	unkillWarnings, err := metaCounter(ctx, database, "busy_unkill_warnings")
 	if err != nil {
-		fmt.Fprintf(stdout, "doctor: unhealthy busy counter: %v\n", err)
-		return 3
+		return tally.abort(stdout, "doctor: unhealthy busy counter: %v\n", err)
 	}
 	if killWarnings != 0 || unkillWarnings != 0 {
 		tally.warn()
@@ -395,12 +407,7 @@ func Run(
 	}
 	tally.warnings += printHarvestCacheDoctor(stdout, runtime.Config.Harvester)
 	tally.warnings += printHarvestSearchDoctor(ctx, stdout, runtime.Config.Harvester)
-	if tally.failures > 0 {
-		fmt.Fprintf(stdout, "doctor: failures=%d\n", tally.failures)
-	}
-	if tally.warnings > 0 {
-		fmt.Fprintf(stdout, "doctor: warnings=%d\n", tally.warnings)
-	}
+	tally.summarize(stdout)
 	switch {
 	case tally.failures > 0:
 		return 3
@@ -411,7 +418,7 @@ func Run(
 	return 0
 }
 
-// printCodexPaneBindingDoctor audits the Codex /clear bindings against each
+// PrintCodexPaneBinding audits the Codex /clear bindings against each
 // other. It is the answer to "what does this instrument report when it is
 // itself broken": a single binding read alone always looks fine, so the two
 // states that actually break /clear are only visible in the relations —
@@ -554,7 +561,7 @@ func PrintCodexPaneBinding(
 	return warnings
 }
 
-// printCodexPaneFollowDoctor reports the panes pfm cannot currently follow
+// PrintCodexPaneFollow reports the panes pfm cannot currently follow
 // through a /clear.
 //
 // The reconcile pass stays SILENT about these: it runs on every picker refresh,
@@ -773,6 +780,14 @@ func PrintDependencies(
 	entries []deps.Entry,
 	options deps.ProbeOptions,
 ) (warnings, failures int, claudeAbsent bool) {
+	// unverified counts a dependency the probe could not verify: a failure when it gates the engine.
+	unverified := func(gatesEngine bool) {
+		if gatesEngine {
+			failures++
+		} else {
+			warnings++
+		}
+	}
 	results := configuredDependencyProbe(ctx, entries, options)
 	for resultIndex := range results {
 		result := &results[resultIndex]
@@ -795,11 +810,7 @@ func PrintDependencies(
 			requirement := "optional"
 			if entry.Required {
 				requirement = "required"
-				if gatesEngine {
-					failures++
-				} else {
-					warnings++
-				}
+				unverified(gatesEngine)
 			}
 			fmt.Fprintf(
 				stdout,
@@ -819,11 +830,7 @@ func PrintDependencies(
 				)
 				continue
 			} else if entry.Required {
-				if gatesEngine {
-					failures++
-				} else {
-					warnings++
-				}
+				unverified(gatesEngine)
 			}
 			raw := deps.FirstLine(result.Raw)
 			if raw != "" && !strings.Contains(result.Error, "raw=") {
@@ -847,11 +854,7 @@ func PrintDependencies(
 			// word this state is not: doctor output gets grepped, and a line
 			// reading "not broken" is counted by `grep -c broken` as a break.
 			if entry.Required {
-				if gatesEngine {
-					failures++
-				} else {
-					warnings++
-				}
+				unverified(gatesEngine)
 			}
 			fmt.Fprintf(
 				stdout,
@@ -865,11 +868,7 @@ func PrintDependencies(
 			// dependency failure arithmetic unchanged, but name the parent context
 			// as the cause rather than diagnosing the resolved binary.
 			if entry.Required {
-				if gatesEngine {
-					failures++
-				} else {
-					warnings++
-				}
+				unverified(gatesEngine)
 			}
 			fmt.Fprintf(
 				stdout,
@@ -891,7 +890,8 @@ func PrintDependencies(
 			}
 			fmt.Fprintln(stdout, " ok")
 		default:
-			warnings++
+			// An unknown state verified nothing: counted like MISSING, so preflight refuses a gating dep.
+			unverified(gatesEngine)
 			fmt.Fprintf(stdout, "doctor: dep %s broken error=unknown probe state %q\n", entry.Name, result.State)
 		}
 		if result.VerboseErr != "" {

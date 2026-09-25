@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -33,74 +35,115 @@ func TestProbeServiceManagerLinuxNoSystemctlOnPath(t *testing.T) {
 	}
 }
 
-// TestProbeServiceManagerLinuxHealthy watches the "present and healthy"
-// state: is-enabled and is-active both exit 0.
-func TestProbeServiceManagerLinuxHealthy(t *testing.T) {
-	fake := &deps.FakeRunner{}
-	fake.ScriptLookPath("systemctl", "/usr/bin/systemctl", nil)
-	fake.Script(
-		[]string{"systemctl", "--user", "is-enabled", "--quiet", "pfm-mcp.service"},
-		deps.RunResult{ExitCode: 0}, nil,
-	)
-	fake.Script(
-		[]string{"systemctl", "--user", "is-active", "--quiet", "pfm-mcp.service"},
-		deps.RunResult{ExitCode: 0}, nil,
-	)
+var systemdShowArgv = []string{
+	"systemctl", "--user", "show", "--property=LoadState,UnitFileState,ActiveState", "pfm-mcp.service",
+}
 
-	report := probeServiceManager(context.Background(), fake)
-	if !report.Present || !report.Unit.Present || !report.Unit.Enabled || !report.Unit.Active {
-		t.Fatalf("expected a fully healthy report, got %+v", report)
+// TestProbeServiceManagerLinuxReadsOneShowAnswer drives the one
+// `systemctl --user show` the probe asks through every answer it must read:
+// a completed show is an answer (present/enabled/active and the ActiveState
+// word), while a non-zero exit, unparsable output or a Run error is "could not
+// ask" carrying the exit code and stderr — never folded into "not active".
+func TestProbeServiceManagerLinuxReadsOneShowAnswer(t *testing.T) {
+	cases := []struct {
+		name    string
+		result  deps.RunResult
+		runErr  error
+		want    serviceManagerUnitState
+		wantErr []string
+	}{
+		{
+			name:   "healthy",
+			result: deps.RunResult{Stdout: []byte("LoadState=loaded\nUnitFileState=enabled\nActiveState=active\n")},
+			want:   serviceManagerUnitState{Present: true, Enabled: true, Active: true, State: "active"},
+		},
+		{
+			name: "activating",
+			result: deps.RunResult{
+				Stdout: []byte("LoadState=loaded\nUnitFileState=enabled-runtime\nActiveState=activating\n"),
+			},
+			want: serviceManagerUnitState{Present: true, Enabled: true, State: "activating"},
+		},
+		{
+			name:   "never staged",
+			result: deps.RunResult{Stdout: []byte("LoadState=not-found\nUnitFileState=\nActiveState=inactive\n")},
+			want:   serviceManagerUnitState{State: "inactive"},
+		},
+		{
+			name:   "staged, disabled, inactive",
+			result: deps.RunResult{Stdout: []byte("LoadState=loaded\nUnitFileState=disabled\nActiveState=inactive\n")},
+			want:   serviceManagerUnitState{Present: true, State: "inactive"},
+		},
+		{
+			name: "dead user bus",
+			result: deps.RunResult{
+				ExitCode: 1, Stderr: []byte("Failed to connect to bus: No medium found\n"),
+			},
+			wantErr: []string{"exit=1", "Failed to connect to bus: No medium found"},
+		},
+		{
+			name:    "unparsable answer",
+			result:  deps.RunResult{Stdout: []byte("garbage\n")},
+			wantErr: []string{"LoadState"},
+		},
+		{
+			name:    "run error",
+			runErr:  errors.New("permission denied"),
+			wantErr: []string{"permission denied"},
+		},
 	}
-	if report.Unit.Err != nil {
-		t.Fatalf("healthy unit must not carry a probe error, got %v", report.Unit.Err)
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fake := &deps.FakeRunner{}
+			fake.ScriptLookPath("systemctl", "/usr/bin/systemctl", nil)
+			fake.Script(systemdShowArgv, testCase.result, testCase.runErr)
+
+			report := probeServiceManager(context.Background(), fake)
+			if !report.Present {
+				t.Fatalf("systemctl resolved on PATH; report.Present must be true, got %+v", report)
+			}
+			got := report.Unit
+			if testCase.wantErr != nil {
+				if got.Err == nil {
+					t.Fatalf("want could-not-ask, got %+v", got)
+				}
+				for _, want := range testCase.wantErr {
+					if !strings.Contains(got.Err.Error(), want) {
+						t.Fatalf("error %q missing %q", got.Err, want)
+					}
+				}
+				if got.Present || got.Enabled || got.Active {
+					t.Fatalf("a could-not-ask probe must not report facts, got %+v", got)
+				}
+				return
+			}
+			if got.Err != nil {
+				t.Fatalf("an answer must not carry a probe error, got %v", got.Err)
+			}
+			testCase.want.Unit = "pfm-mcp.service"
+			if got != testCase.want {
+				t.Fatalf("state = %+v, want %+v", got, testCase.want)
+			}
+		})
 	}
 }
 
-// TestProbeServiceManagerLinuxInactiveUnit watches a present manager whose
-// unit answers a nonzero exit — a real, decoded answer, never "could not
-// ask".
-func TestProbeServiceManagerLinuxInactiveUnit(t *testing.T) {
+// TestProbeServiceManagerLinuxTimeoutCouldNotAsk: a probe killed by its
+// deadline reports a nil Run error (RealRunner folds the kill into an exit
+// code), so the expired probe context itself must read as could-not-ask,
+// naming the deadline.
+func TestProbeServiceManagerLinuxTimeoutCouldNotAsk(t *testing.T) {
 	fake := &deps.FakeRunner{}
 	fake.ScriptLookPath("systemctl", "/usr/bin/systemctl", nil)
-	fake.Script(
-		[]string{"systemctl", "--user", "is-enabled", "--quiet", "pfm-mcp.service"},
-		deps.RunResult{ExitCode: 0}, nil,
-	)
-	fake.Script(
-		[]string{"systemctl", "--user", "is-active", "--quiet", "pfm-mcp.service"},
-		deps.RunResult{ExitCode: 3}, nil,
-	)
+	fake.Script(systemdShowArgv, deps.RunResult{ExitCode: -1}, nil)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
 
-	report := probeServiceManager(context.Background(), fake)
-	if !report.Present || !report.Unit.Present || !report.Unit.Enabled || report.Unit.Active {
-		t.Fatalf("expected enabled but inactive, got %+v", report)
-	}
-	if report.Unit.Err != nil {
-		t.Fatalf("a decoded nonzero exit must not be read as a probe error, got %v", report.Unit.Err)
-	}
-}
-
-// TestProbeServiceManagerLinuxCouldNotAsk watches the third state: systemctl
-// resolves on PATH but the Run call itself fails (never started, a
-// non-ExitError failure) — reported through Unit.Err, never silently as
-// "not active".
-func TestProbeServiceManagerLinuxCouldNotAsk(t *testing.T) {
-	probeErr := errors.New("permission denied")
-	fake := &deps.FakeRunner{}
-	fake.ScriptLookPath("systemctl", "/usr/bin/systemctl", nil)
-	fake.Script(
-		[]string{"systemctl", "--user", "is-enabled", "--quiet", "pfm-mcp.service"},
-		deps.RunResult{}, probeErr,
-	)
-
-	report := probeServiceManager(context.Background(), fake)
-	if !report.Present {
-		t.Fatalf("systemctl resolved on PATH; report.Present must stay true, got %+v", report)
-	}
+	report := probeServiceManager(ctx, fake)
 	if report.Unit.Err == nil {
-		t.Fatalf("a Run failure must surface as Unit.Err, got %+v", report.Unit)
+		t.Fatalf("an expired probe must be could-not-ask, got %+v", report.Unit)
 	}
-	if report.Unit.Active || report.Unit.Enabled {
-		t.Fatalf("a could-not-ask probe must not report enabled/active facts, got %+v", report.Unit)
+	if !strings.Contains(report.Unit.Err.Error(), deps.ProbeTimeout.String()) {
+		t.Fatalf("error %q does not name the %s deadline", report.Unit.Err, deps.ProbeTimeout)
 	}
 }

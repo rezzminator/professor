@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/rezzminator/professor/pfm/internal/deps"
 )
@@ -50,6 +52,9 @@ func TestProbeServiceManagerDarwinRunning(t *testing.T) {
 	if !report.Present || !report.Unit.Present || !report.Unit.Enabled || !report.Unit.Active {
 		t.Fatalf("expected a fully healthy report, got %+v", report)
 	}
+	if report.Unit.State != "running" {
+		t.Fatalf("state = %q, want launchd's own word running", report.Unit.State)
+	}
 }
 
 // TestProbeServiceManagerDarwinNotRunningSubstringTrap watches the exact bug
@@ -73,22 +78,67 @@ func TestProbeServiceManagerDarwinNotRunningSubstringTrap(t *testing.T) {
 }
 
 // TestProbeServiceManagerDarwinLabelUnknown watches launchd not knowing the
-// label at all (nonzero exit): nothing staged/loaded — present=false, not
-// an error.
+// label at all — exit 113, or stderr naming "Could not find service" (the
+// answer `launchctl print` gives for an unloaded label): nothing staged or
+// loaded, present=false, never an error.
 func TestProbeServiceManagerDarwinLabelUnknown(t *testing.T) {
+	for _, result := range []deps.RunResult{
+		{ExitCode: 113, Stderr: []byte("Bad request.\n")},
+		{ExitCode: 1, Stderr: []byte("Could not find service \"com.professor.pfm.mcp\" in domain for user gui: 501\n")},
+	} {
+		fake := &deps.FakeRunner{}
+		fake.ScriptLookPath("launchctl", "/bin/launchctl", nil)
+		fake.Script(launchdPrintArgv("com.professor.pfm.mcp"), result, nil)
+
+		report := probeServiceManager(context.Background(), fake)
+		if report.Unit.Present {
+			t.Fatalf("an unknown label must report Present=false, got %+v", report.Unit)
+		}
+		if report.Unit.Err != nil {
+			t.Fatalf("an unknown label is not a probe error, got %v", report.Unit.Err)
+		}
+	}
+}
+
+// TestProbeServiceManagerDarwinOtherFailureCouldNotAsk: a non-zero exit that
+// is not not-found — the gui/<uid> domain missing (exit 112) — means launchd
+// was not asked about the label at all, so it is could-not-ask with the exit
+// code and stderr, never present=false.
+func TestProbeServiceManagerDarwinOtherFailureCouldNotAsk(t *testing.T) {
 	fake := &deps.FakeRunner{}
 	fake.ScriptLookPath("launchctl", "/bin/launchctl", nil)
 	fake.Script(
 		launchdPrintArgv("com.professor.pfm.mcp"),
-		deps.RunResult{ExitCode: 3}, nil,
+		deps.RunResult{ExitCode: 112, Stderr: []byte("Bad request.\nCould not find domain for user gui: 501\n")}, nil,
 	)
 
 	report := probeServiceManager(context.Background(), fake)
-	if report.Unit.Present {
-		t.Fatalf("an unknown label must report Present=false, got %+v", report.Unit)
+	if report.Unit.Err == nil {
+		t.Fatalf("a missing domain must be could-not-ask, got %+v", report.Unit)
 	}
-	if report.Unit.Err != nil {
-		t.Fatalf("an unknown label is not a probe error, got %v", report.Unit.Err)
+	for _, want := range []string{"exit=112", "Could not find domain"} {
+		if !strings.Contains(report.Unit.Err.Error(), want) {
+			t.Fatalf("error %q missing %q", report.Unit.Err, want)
+		}
+	}
+}
+
+// TestProbeServiceManagerDarwinTimeoutCouldNotAsk: a killed probe reports a
+// nil Run error, so the expired probe context is could-not-ask naming the
+// deadline.
+func TestProbeServiceManagerDarwinTimeoutCouldNotAsk(t *testing.T) {
+	fake := &deps.FakeRunner{}
+	fake.ScriptLookPath("launchctl", "/bin/launchctl", nil)
+	fake.Script(launchdPrintArgv("com.professor.pfm.mcp"), deps.RunResult{ExitCode: -1}, nil)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	report := probeServiceManager(ctx, fake)
+	if report.Unit.Err == nil {
+		t.Fatalf("an expired probe must be could-not-ask, got %+v", report.Unit)
+	}
+	if !strings.Contains(report.Unit.Err.Error(), deps.ProbeTimeout.String()) {
+		t.Fatalf("error %q does not name the %s deadline", report.Unit.Err, deps.ProbeTimeout)
 	}
 }
 

@@ -25,8 +25,9 @@ func compileConfig(root string, add func(generatedFile), problem, warn func(stri
 	raw, err := os.ReadFile(path)
 	switch {
 	case err == nil && !hasMarker(string(raw)):
-		warn("CONFLICT-SHAPE %s — exists without this compiler's marker; left as is, no config compiled", path)
-		return
+		// Not ours: its keys are not read, and reconcile's claimProblem
+		// refuses the output below exactly as it refuses an unmarked agent,
+		// command, or skill link — a failed build, the file left as is.
 	case err == nil:
 		var object map[string]json.RawMessage
 		if parseErr := json.Unmarshal(parseOpenCodeJSONC(raw), &object); parseErr != nil {

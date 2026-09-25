@@ -3,9 +3,12 @@ package opencodegen
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -254,7 +257,7 @@ func TestOpenCodeDanglingCommandWarnsOnceInBuildAndIsAProblemInCheck(t *testing.
 	}
 }
 
-func TestOpenCodeUnmarkedConfigIsLeftAloneInEveryMode(t *testing.T) {
+func TestOpenCodeUnmarkedConfigFailsAndIsLeftAloneInEveryMode(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	config := filepath.Join(root, ".opencode", "opencode.jsonc")
@@ -264,7 +267,7 @@ func TestOpenCodeUnmarkedConfigIsLeftAloneInEveryMode(t *testing.T) {
 
 	for _, mode := range []Mode{ModeBuild, ModeCheck, ModeDoctor} {
 		result, err := Compile(Options{Root: root, Home: home, Mode: mode})
-		if err != nil || !result.OK || !containsProblem(result.Warnings, "CONFLICT-SHAPE "+config) {
+		if err != nil || result.OK || !containsProblem(result.Problems, "CONFLICT "+config) {
 			t.Fatalf("mode %d result=%#v err=%v", mode, result, err)
 		}
 		got, err := os.ReadFile(config)
@@ -410,5 +413,99 @@ func TestOpenCodeAgentRelativePathFailureIsAProblemAndSkipsTheAgent(t *testing.T
 	want := "relative path of " + filepath.Join("relative", "worker.md") + ": "
 	if added != 0 || !containsProblem(problems, want) {
 		t.Fatalf("added=%d problems=%q, want the entry skipped and %q", added, problems, want)
+	}
+}
+
+// A broken source skips that one entry the way a dangling one does: build
+// warns and writes every healthy output, check and doctor fail naming it.
+func TestOpenCodeBrokenSourceIsSkippedInBuildAndIsAProblemInCheck(t *testing.T) {
+	const agent, agentOut = ".claude/agents/broken.md", ".opencode/agent/broken.md"
+	writes := func(content string) func(*testing.T, string) {
+		return func(t *testing.T, path string) { writeTestFile(t, path, content) }
+	}
+	for _, door := range []struct {
+		name   string
+		source string
+		output string
+		plant  func(t *testing.T, path string)
+	}{
+		{"unreadable agent", agent, agentOut, plantUnreadableSource},
+		{"malformed agent frontmatter", agent, agentOut, writes("---\ndescription: Broken role.\nWork.\n")},
+		{"malformed agent tools", agent, agentOut, writes("---\ndescription: B.\ntools: mcp__broken\n---\nWork.\n")},
+		{
+			"malformed command frontmatter",
+			".claude/commands/broken.md",
+			".opencode/command/broken.md",
+			writes("---\ndescription: Broken.\nReview.\n"),
+		},
+	} {
+		for _, action := range []string{"build", "check"} {
+			t.Run(door.name+"/"+action, func(t *testing.T) {
+				root := t.TempDir()
+				home := filepath.Join(root, "home")
+				review := filepath.Join(root, ".claude", "commands", "review.md")
+				writeTestFile(t, review, "---\ndescription: Review.\n---\nReview.\n")
+				worker := filepath.Join(root, ".claude", "agents", "worker.md")
+				writeTestFile(t, worker, "---\ndescription: Worker.\n---\nWork.\n")
+				broken := filepath.Join(root, filepath.FromSlash(door.source))
+				door.plant(t, broken)
+
+				var stdout, stderr bytes.Buffer
+				code := RunCommand(
+					[]string{action, root, "--home", home},
+					func() (string, error) { return root, nil },
+					home,
+					&stdout,
+					&stderr,
+				)
+				named := ""
+				for _, line := range strings.Split(stderr.String(), "\n") {
+					if strings.Contains(line, broken) {
+						named = line
+					}
+				}
+				if action == "check" {
+					if code != 1 || named == "" || strings.Contains(named, "warning:") {
+						t.Fatalf("check: code=%d stderr=%q", code, stderr.String())
+					}
+					return
+				}
+				if code != 0 || !strings.Contains(named, "pfm opencode: warning: SKIP ") {
+					t.Fatalf("build: code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+				}
+				for _, path := range []string{
+					filepath.Join(root, ".opencode", "command", "review.md"),
+					filepath.Join(root, ".opencode", "agent", "worker.md"),
+					filepath.Join(root, ".opencode", "opencode.jsonc"),
+				} {
+					if _, err := os.Stat(path); err != nil {
+						t.Fatalf("build skipped healthy output %s: %v", path, err)
+					}
+				}
+				output := filepath.Join(root, filepath.FromSlash(door.output))
+				if _, err := os.Stat(output); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("build wrote an output for the broken source %s: %v", broken, err)
+				}
+			})
+		}
+	}
+}
+
+// plantUnreadableSource plants a regular-file agent source whose read fails
+// even for root (the fence runs as root, where a chmod does not bite): on
+// Linux a symlink to /proc/self/mem, which stats regular and reads EIO.
+func plantUnreadableSource(t *testing.T, path string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "linux" {
+		if err := os.Symlink("/proc/self/mem", path); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	if err := os.WriteFile(path, []byte("---\ndescription: Broken.\n---\nWork.\n"), 0o000); err != nil {
+		t.Fatal(err)
 	}
 }

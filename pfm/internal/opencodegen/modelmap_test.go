@@ -207,7 +207,7 @@ func TestCompileFailsOnMalformedMCPToolNamingAgentAndEntry(t *testing.T) {
 	agent := filepath.Join(root, ".claude", "agents", "broken.md")
 	writeTestFile(t, agent, "---\ndescription: Broken role.\ntools: Read, mcp__broken\n---\nWork.\n")
 
-	result, err := Compile(Options{Root: root, Home: filepath.Join(root, "home"), Mode: ModeBuild})
+	result, err := Compile(Options{Root: root, Home: filepath.Join(root, "home"), Mode: ModeCheck})
 	if err == nil && result.OK {
 		t.Fatalf("compile succeeded with a malformed MCP tool: %#v", result)
 	}

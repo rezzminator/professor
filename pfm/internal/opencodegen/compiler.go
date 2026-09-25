@@ -119,6 +119,16 @@ func compileOpenCode(options Options) (Result, error) {
 			problem("DANGLING %s: %v", path, err)
 		}
 	}
+	// A broken source (unreadable, malformed frontmatter or tools block,
+	// no relative path) skips the same way: build warns and writes the rest,
+	// check and doctor fail.
+	skip := func(format string, args ...any) {
+		if options.Mode == ModeBuild {
+			warn("SKIP "+format, args...)
+		} else {
+			problem(format, args...)
+		}
+	}
 
 	roster := map[string]string{}
 	for _, source := range []string{
@@ -133,7 +143,7 @@ func compileOpenCode(options Options) (Result, error) {
 	if modelMapErr != nil {
 		problem("%v", modelMapErr)
 	}
-	compileOpenCodeAgents(root, projects, roster, modelMap, add, problem, warn, dangling)
+	compileOpenCodeAgents(root, projects, roster, modelMap, add, problem, skip, warn, dangling)
 	compileOpenCodeCommands(
 		filepath.Join(root, ".claude", "commands"),
 		".claude/commands",
@@ -141,6 +151,7 @@ func compileOpenCode(options Options) (Result, error) {
 		filepath.Join(root, ".opencode", "command"),
 		add,
 		problem,
+		skip,
 		dangling,
 	)
 	compileOpenCodeCommands(
@@ -150,9 +161,10 @@ func compileOpenCode(options Options) (Result, error) {
 		filepath.Join(home, ".config", openCodeName(), "command"),
 		add,
 		problem,
+		skip,
 		dangling,
 	)
-	compileOpenCodeSkills(root, add, problem, dangling)
+	compileOpenCodeSkills(root, add, problem, skip, dangling)
 	compileConfig(root, add, problem, warn)
 	for _, name := range []string{"LICENSE", "SECURITY.md"} {
 		source := filepath.Join(root, name)
@@ -369,7 +381,7 @@ func compileOpenCodeAgents(
 	roster map[string]string,
 	modelMap map[string]string,
 	add func(generatedFile),
-	problem, warn func(string, ...any),
+	problem, skip, warn func(string, ...any),
 	dangling func(string, error),
 ) {
 	seen := map[string]bool{}
@@ -385,7 +397,7 @@ func compileOpenCodeAgents(
 				continue
 			}
 			seen[name] = true
-			compileOpenCodeAgent(root, name, entry.Path, roster, modelMap, knownServers, add, problem, warn)
+			compileOpenCodeAgent(root, name, entry.Path, roster, modelMap, knownServers, add, skip, warn)
 		}
 	}
 }
@@ -396,21 +408,21 @@ func compileOpenCodeAgent(
 	modelMap map[string]string,
 	knownServers []string,
 	add func(generatedFile),
-	problem, warn func(string, ...any),
+	skip, warn func(string, ...any),
 ) {
 	rel, err := filepath.Rel(root, path)
 	if err != nil {
-		problem("relative path of %s: %v", path, err)
+		skip("relative path of %s: %v", path, err)
 		return
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		problem("read %s: %v", path, err)
+		skip("read %s: %v", path, err)
 		return
 	}
 	fields, body, parseErr := parseOpenCodeFrontmatter(string(raw))
 	if parseErr != nil {
-		problem("parse %s: %v", path, parseErr)
+		skip("parse %s: %v", path, parseErr)
 		return
 	}
 	description := swapOpenCodeCommands(strings.TrimSpace(fields["description"]), roster)
@@ -434,7 +446,7 @@ func compileOpenCodeAgent(
 	if tools, ok := fields["tools"]; ok {
 		toolsBlock, toolsWarnings, toolsErr := renderOpenCodeToolsBlock(path, tools, knownServers)
 		if toolsErr != nil {
-			problem("tools %s: %v", path, toolsErr)
+			skip("tools %s: %v", path, toolsErr)
 			return
 		}
 		for _, toolsWarning := range toolsWarnings {
@@ -465,7 +477,7 @@ func compileOpenCodeCommands(
 	roster map[string]string,
 	outputRoot string,
 	add func(generatedFile),
-	problem func(string, ...any),
+	problem, skip func(string, ...any),
 	dangling func(string, error),
 ) {
 	for _, entry := range discoverOpenCodeMarkdown(sourceRoot, problem, dangling) {
@@ -478,13 +490,13 @@ func compileOpenCodeCommands(
 			if errors.Is(err, fs.ErrNotExist) {
 				dangling(file, err)
 			} else {
-				problem("read %s: %v", file, err)
+				skip("read %s: %v", file, err)
 			}
 			continue
 		}
 		fields, body, parseErr := parseOpenCodeFrontmatter(string(raw))
 		if parseErr != nil {
-			problem("parse %s: %v", file, parseErr)
+			skip("parse %s: %v", file, parseErr)
 			continue
 		}
 		flat := openCodeFlatName(entry.Rel)
@@ -504,7 +516,7 @@ func compileOpenCodeCommands(
 func compileOpenCodeSkills(
 	root string,
 	add func(generatedFile),
-	problem func(string, ...any),
+	problem, skip func(string, ...any),
 	dangling func(string, error),
 ) {
 	dir := filepath.Join(root, ".claude", "skills")
@@ -525,7 +537,7 @@ func compileOpenCodeSkills(
 		dst := filepath.Join(root, ".opencode", "skills", entry.Name())
 		rel, relErr := filepath.Rel(filepath.Dir(dst), source)
 		if relErr != nil {
-			problem("link %s to %s: %v", dst, source, relErr)
+			skip("link %s to %s: %v", dst, source, relErr)
 			continue
 		}
 		add(generatedFile{Path: dst, Link: rel})

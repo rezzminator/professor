@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -21,26 +22,22 @@ func compileConfig(root string, add func(generatedFile), problem, warn func(stri
 	path := filepath.Join(root, ".opencode", "opencode.jsonc")
 	owned := map[string]bool{"$schema": true, "permission": true, "mcp": true}
 	extra := map[string]json.RawMessage{}
-	if raw, err := os.ReadFile(path); err == nil {
-		if !hasMarker(string(raw)) {
-			problem(
-				"CONFLICT-SHAPE %s — exists without this compiler's marker; refusing to derive extra keys from it",
-				path,
-			)
-		} else {
-			parsed := parseOpenCodeJSONC(raw)
-			var object map[string]json.RawMessage
-			if err := json.Unmarshal(parsed, &object); err != nil {
-				warn("unparseable %s (%v) — regenerating from sources; adopter keys could not be preserved", path, err)
-			} else {
-				for key, value := range object {
-					if !owned[key] {
-						extra[key] = value
-					}
-				}
+	raw, err := os.ReadFile(path)
+	switch {
+	case err == nil && !hasMarker(string(raw)):
+		warn("CONFLICT-SHAPE %s — exists without this compiler's marker; left as is, no config compiled", path)
+		return
+	case err == nil:
+		var object map[string]json.RawMessage
+		if parseErr := json.Unmarshal(parseOpenCodeJSONC(raw), &object); parseErr != nil {
+			warn("unparseable %s (%v) — regenerating from sources; adopter keys could not be preserved", path, parseErr)
+		}
+		for key, value := range object {
+			if !owned[key] {
+				extra[key] = value
 			}
 		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	case !errors.Is(err, fs.ErrNotExist):
 		problem("read %s: %v", path, err)
 	}
 
@@ -56,13 +53,54 @@ var permissionPolicy = map[string]any{
 		"**": opencodeAllow, "**/.claude/**": opencodeDeny, "AGENTS.md": opencodeDeny, "**/AGENTS.md": opencodeDeny,
 		"CLAUDE.md": opencodeDeny, "**/CLAUDE.md": opencodeDeny, ".opencode/**": opencodeDeny,
 	},
-	"bash": map[string]string{
-		"*":           opencodeAllow,
-		"git commit*": opencodeDeny,
-		"git push*":   opencodeDeny,
-		"git tag*":    opencodeDeny,
-		"gh release*": opencodeDeny,
-	},
+	"bash": bashPermission(),
+}
+
+// gitWriteVerbs are the Git verbs only gitter may run; each is denied bare
+// and in its `git -C <dir>` form, as a whole word — `git merge-base` or a
+// path like `src/reset.go` is not the verb.
+var gitWriteVerbs = []string{"commit", "push", "tag", "merge", "rebase", "reset", "cherry-pick", "revert", "am"}
+
+// permissionRule is one OpenCode pattern → action pair.
+type permissionRule struct{ Pattern, Action string }
+
+// orderedRules renders as a JSON object in slice order: OpenCode lets the
+// last matching pattern win, so `"*": allow` comes first and every deny after.
+type orderedRules []permissionRule
+
+func (rules orderedRules) MarshalJSON() ([]byte, error) {
+	var out bytes.Buffer
+	out.WriteByte('{')
+	for i, rule := range rules {
+		if i > 0 {
+			out.WriteByte(',')
+		}
+		pattern, err := json.Marshal(rule.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("encode permission pattern %q: %w", rule.Pattern, err)
+		}
+		action, err := json.Marshal(rule.Action)
+		if err != nil {
+			return nil, fmt.Errorf("encode permission action %q: %w", rule.Action, err)
+		}
+		out.Write(pattern)
+		out.WriteByte(':')
+		out.Write(action)
+	}
+	out.WriteByte('}')
+	return out.Bytes(), nil
+}
+
+func bashPermission() orderedRules {
+	rules := orderedRules{{Pattern: "*", Action: opencodeAllow}}
+	for _, prefix := range []string{"git ", "git -C * "} {
+		for _, verb := range gitWriteVerbs {
+			rules = append(rules,
+				permissionRule{Pattern: prefix + verb, Action: opencodeDeny},
+				permissionRule{Pattern: prefix + verb + " *", Action: opencodeDeny})
+		}
+	}
+	return append(rules, permissionRule{Pattern: "gh release*", Action: opencodeDeny})
 }
 
 func compileOpenCodeMCP(path string, warn, problem func(string, ...any)) (map[string]any, bool) {

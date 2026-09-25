@@ -54,8 +54,10 @@ func TestSymlinkedGlobalCommandsAndCycle(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
-	cyclic, err := Compile(Options{Root: root, Home: home, Mode: ModeCheck})
-	if err != nil || cyclic.OK || !strings.Contains(strings.ToLower(strings.Join(cyclic.Problems, "\n")), "cycle") {
-		t.Fatalf("cyclic global source was not named as a failure: result=%#v err=%v", cyclic, err)
+	for _, mode := range []Mode{ModeBuild, ModeCheck, ModeDoctor} {
+		cyclic, err := Compile(Options{Root: root, Home: home, Mode: mode})
+		if err != nil || cyclic.OK || !containsProblem(cyclic.Problems, "symlink cycle") {
+			t.Fatalf("mode %d: cyclic global source was not named as a failure: result=%#v err=%v", mode, cyclic, err)
+		}
 	}
 }

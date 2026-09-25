@@ -3,6 +3,7 @@ package opencodegen
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,6 +105,40 @@ func TestBuildCheckDoctorCompileOpenCodeTree(t *testing.T) {
 	}
 }
 
+func TestOpenCodeAgentWithoutMCPToolsDeniesEveryKnownServer(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	agent := filepath.Join(root, ".claude", "agents", "reader.md")
+	writeTestFile(
+		t,
+		agent,
+		"---\ndescription: Reader role.\ntools:\n  - Read\n  - Grep\n  - NotebookEdit\n---\nRead.\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".mcp.json"),
+		`{"mcpServers":{"local":{"command":"pfm","args":["mcp","serve"]},"my.remote":{"url":"http://127.0.0.1:9/mcp"}}}`,
+	)
+
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("build result=%#v err=%v", result, err)
+	}
+	compiled, _ := os.ReadFile(filepath.Join(root, ".opencode", "agent", "reader.md"))
+	if !strings.Contains(
+		string(compiled),
+		"  write: false\n  local_*: false\n  my_remote_*: false\n  professor_*: false\n---\n",
+	) ||
+		strings.Contains(string(compiled), "  read: false\n") ||
+		strings.Contains(string(compiled), "  grep: false\n") {
+		t.Fatalf("agent without MCP tools did not deny every known server: %s", compiled)
+	}
+	want := "unmapped Claude tool NotebookEdit in " + agent + " — no OpenCode equivalent; it stays denied"
+	if !containsProblem(result.Warnings, want) {
+		t.Fatalf("warnings = %q, want %q", result.Warnings, want)
+	}
+}
+
 func TestOpenCodeAgentModelOverrideWinsOverDefault(t *testing.T) {
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
@@ -128,17 +163,54 @@ func TestOpenCodeAgentModelOverrideWinsOverDefault(t *testing.T) {
 	}
 }
 
-func TestOpenCodeUnmappedModelIsAProblemInEveryMode(t *testing.T) {
+func TestOpenCodeUnmappedModelAliasIsOmittedWithAWarning(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	unmapped := filepath.Join(root, ".claude", "agents", "worker.md")
+	writeTestFile(t, unmapped, "---\ndescription: Worker role.\nmodel: inherit\n---\nWork.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "lead.md"),
+		"---\ndescription: Lead role.\nmodel: opus\n---\nLead.\n",
+	)
+
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("build result=%#v err=%v", result, err)
+	}
+	want := `unmapped OpenCode model alias "inherit" in ` + unmapped + " — model omitted"
+	if !containsProblem(result.Warnings, want) {
+		t.Fatalf("warnings = %q, want %q", result.Warnings, want)
+	}
+	worker, err := os.ReadFile(filepath.Join(root, ".opencode", "agent", "worker.md"))
+	if err != nil || strings.Contains(strings.SplitN(string(worker), "---", 3)[1], "\nmodel:") {
+		t.Fatalf("unmapped agent: worker=%q err=%v", worker, err)
+	}
+	lead, err := os.ReadFile(filepath.Join(root, ".opencode", "agent", "lead.md"))
+	if err != nil || !strings.Contains(string(lead), "model: openai/gpt-5.6-sol\n") {
+		t.Fatalf("mapped agent: lead=%q err=%v", lead, err)
+	}
+}
+
+func TestOpenCodeDanglingCommandWarnsOnceInBuildAndIsAProblemInCheck(t *testing.T) {
 	for _, action := range []string{"build", "check", "doctor"} {
 		t.Run(action, func(t *testing.T) {
 			root := t.TempDir()
 			home := filepath.Join(root, "home")
-			source := filepath.Join(root, ".claude", "agents", "worker.md")
 			writeTestFile(
 				t,
-				source,
-				"---\ndescription: Worker role.\nmodel: nonesuch\n---\nWork.\n",
+				filepath.Join(root, ".claude", "commands", "review.md"),
+				"---\ndescription: Review.\n---\nReview.\n",
 			)
+			writeTestFile(
+				t,
+				filepath.Join(root, ".claude", "agents", "worker.md"),
+				"---\ndescription: Worker.\n---\nWork.\n",
+			)
+			dangling := filepath.Join(root, ".claude", "commands", "gone.md")
+			if err := os.Symlink(filepath.Join(root, "nowhere.md"), dangling); err != nil {
+				t.Fatal(err)
+			}
 
 			var stdout, stderr bytes.Buffer
 			code := RunCommand(
@@ -148,22 +220,97 @@ func TestOpenCodeUnmappedModelIsAProblemInEveryMode(t *testing.T) {
 				&stdout,
 				&stderr,
 			)
-			if code != 1 || !strings.Contains(stderr.String(), "nonesuch") ||
-				!strings.Contains(stderr.String(), source) || strings.Contains(stdout.String(), "PASS") {
-				t.Fatalf(
-					"%s unmapped result: code=%d stdout=%q stderr=%q",
-					action,
-					code,
-					stdout.String(),
-					stderr.String(),
-				)
-			}
-			if action == "build" {
-				if _, err := os.Stat(filepath.Join(root, ".opencode", "agent", "worker.md")); !os.IsNotExist(err) {
-					t.Fatalf("build wrote an agent despite unmapped model: %v", err)
+			mentions := 0
+			for _, line := range strings.Split(stderr.String(), "\n") {
+				if strings.Contains(line, dangling) {
+					mentions++
 				}
 			}
+			if action == "build" {
+				if code != 0 || mentions != 1 || !strings.Contains(stderr.String(), "warning: DANGLING "+dangling) {
+					t.Fatalf(
+						"build: code=%d mentions=%d stdout=%q stderr=%q",
+						code,
+						mentions,
+						stdout.String(),
+						stderr.String(),
+					)
+				}
+				for _, path := range []string{
+					filepath.Join(root, ".opencode", "command", "review.md"),
+					filepath.Join(root, ".opencode", "agent", "worker.md"),
+					filepath.Join(root, ".opencode", "opencode.jsonc"),
+				} {
+					if _, err := os.Stat(path); err != nil {
+						t.Fatalf("build skipped healthy output %s: %v", path, err)
+					}
+				}
+				return
+			}
+			if code != 1 || mentions != 1 || !strings.Contains(stderr.String(), "pfm opencode: DANGLING "+dangling) {
+				t.Fatalf("%s: code=%d mentions=%d stderr=%q", action, code, mentions, stderr.String())
+			}
 		})
+	}
+}
+
+func TestOpenCodeUnmarkedConfigIsLeftAloneInEveryMode(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	config := filepath.Join(root, ".opencode", "opencode.jsonc")
+	const handWritten = "{\n  \"model\": \"mine\"\n}\n"
+	writeTestFile(t, config, handWritten)
+	writeTestFile(t, filepath.Join(root, ".claude", "agents", "worker.md"), "---\ndescription: Worker.\n---\nWork.\n")
+
+	for _, mode := range []Mode{ModeBuild, ModeCheck, ModeDoctor} {
+		result, err := Compile(Options{Root: root, Home: home, Mode: mode})
+		if err != nil || !result.OK || !containsProblem(result.Warnings, "CONFLICT-SHAPE "+config) {
+			t.Fatalf("mode %d result=%#v err=%v", mode, result, err)
+		}
+		got, err := os.ReadFile(config)
+		if err != nil || string(got) != handWritten {
+			t.Fatalf("mode %d touched the unmarked config: %q err=%v", mode, got, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, ".opencode", "agent", "worker.md")); err != nil {
+		t.Fatalf("build skipped the agent beside an unmarked config: %v", err)
+	}
+}
+
+func TestOpenCodeArchivedAgentIsNotCompiled(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	writeTestFile(t, filepath.Join(root, ".claude", "agents", "worker.md"), "---\ndescription: Worker.\n---\nWork.\n")
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "archive", "old.md"),
+		"---\ndescription: Old.\n---\nOld.\n",
+	)
+
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeBuild})
+	if err != nil || !result.OK {
+		t.Fatalf("build result=%#v err=%v", result, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".opencode", "agent", "worker.md")); err != nil {
+		t.Fatalf("top-level agent missing: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".opencode", "agent", "old.md")); !os.IsNotExist(err) {
+		t.Fatalf("archived agent was compiled: err=%v", err)
+	}
+}
+
+func TestOpenCodeMirrorCopyConflictNamesTheRemedy(t *testing.T) {
+	root := t.TempDir()
+	home := filepath.Join(root, "home")
+	writeTestFile(t, filepath.Join(root, "LICENSE"), "the source license\n")
+	copyPath := filepath.Join(root, ".opencode", "LICENSE")
+	writeTestFile(t, copyPath, "a different license\n")
+
+	result, err := Compile(Options{Root: root, Home: home, Mode: ModeCheck})
+	want := "CONFLICT " + copyPath + " — differs from " + filepath.Join(root, "LICENSE") +
+		" and pfm cannot prove it wrote it; delete it and rebuild"
+	if err != nil || result.OK || !containsProblem(result.Problems, want) {
+		t.Fatalf("problems=%q err=%v, want %q", result.Problems, err, want)
 	}
 }
 
@@ -243,4 +390,25 @@ func containsProblem(problems []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestOpenCodeAgentRelativePathFailureIsAProblemAndSkipsTheAgent(t *testing.T) {
+	root := t.TempDir()
+	var problems []string
+	added := 0
+	compileOpenCodeAgent(
+		root,
+		"worker",
+		filepath.Join("relative", "worker.md"),
+		nil,
+		nil,
+		nil,
+		func(generatedFile) { added++ },
+		func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) },
+		func(string, ...any) {},
+	)
+	want := "relative path of " + filepath.Join("relative", "worker.md") + ": "
+	if added != 0 || !containsProblem(problems, want) {
+		t.Fatalf("added=%d problems=%q, want the entry skipped and %q", added, problems, want)
+	}
 }

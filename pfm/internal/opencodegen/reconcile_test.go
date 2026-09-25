@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -117,8 +118,8 @@ func TestIsClaimableRefusesAPreExistingDifferingMirrorCopy(t *testing.T) {
 	if err := os.WriteFile(path, []byte("an operator's own LICENSE, not ours\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if isClaimable(path) {
-		t.Fatalf("isClaimable(%s) = true, want false for unmarked pre-existing content", path)
+	if claimable, err := isClaimable(path); err != nil || claimable {
+		t.Fatalf("isClaimable(%s) = %v, %v; want false for unmarked pre-existing content", path, claimable, err)
 	}
 
 	result := &reconcileResult{}
@@ -132,5 +133,99 @@ func TestIsClaimableRefusesAPreExistingDifferingMirrorCopy(t *testing.T) {
 	}
 	if string(got) != "an operator's own LICENSE, not ours\n" {
 		t.Fatalf("build overwrote the pre-existing file: %q", got)
+	}
+}
+
+func TestReconcileOpenCodeFileNamesUnreadableStaleAndMissingOutputs(t *testing.T) {
+	dir := t.TempDir()
+	content := newMarker + " from fixture\n"
+
+	missing := filepath.Join(dir, "missing.md")
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("a file, not a directory\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unreadable := filepath.Join(blocker, "out.md")
+	stale := filepath.Join(dir, "stale.md")
+	if err := os.Symlink(filepath.Join(dir, ".claude", "commands", "stale.md"), stale); err != nil {
+		t.Fatal(err)
+	}
+	empty := filepath.Join(dir, "empty.md")
+	if err := os.WriteFile(empty, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		path string
+		mode Mode
+		want string
+	}{
+		{missing, ModeCheck, "MISSING " + missing},
+		{unreadable, ModeCheck, "UNREADABLE " + unreadable + ": "},
+		{unreadable, ModeBuild, "UNREADABLE " + unreadable + ": "},
+		{stale, ModeCheck, "STALE " + stale},
+		// An empty file carries no marker: pfm cannot prove it wrote it, so it
+		// is a CONFLICT, never overwritten and never read as MISSING.
+		{empty, ModeCheck, "CONFLICT " + empty},
+	} {
+		result := &reconcileResult{}
+		reconcileOpenCodeFile(result, generatedFile{Path: tc.path, Content: content}, tc.mode)
+		if len(result.Problems) != 1 || !strings.HasPrefix(result.Problems[0], tc.want) {
+			t.Fatalf("mode %d %s: problems=%q, want one starting %q", tc.mode, tc.path, result.Problems, tc.want)
+		}
+	}
+	if got, err := os.ReadFile(empty); err != nil || len(got) != 0 {
+		t.Fatalf("empty output was touched: %q err=%v", got, err)
+	}
+}
+
+func TestReconcileOpenCodeOrphansWarnsOnAnUnreadableEntry(t *testing.T) {
+	managed := t.TempDir()
+	skill := filepath.Join(managed, "odd-skill")
+	if err := os.MkdirAll(filepath.Join(skill, "SKILL.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := reconcileResult{}
+	reconcileOpenCodeOrphans(&result, managed, map[string]bool{}, ModeBuild)
+
+	want := "unreadable " + skill + " — cannot tell whether pfm owns it; left in place: "
+	if len(result.Problems) != 0 || !containsProblem(result.Warnings, want) {
+		t.Fatalf("warnings=%q problems=%q, want a warning %q", result.Warnings, result.Problems, want)
+	}
+	if _, err := os.Lstat(skill); err != nil {
+		t.Fatalf("unreadable orphan was not left in place: %v", err)
+	}
+}
+
+func TestReconcileOpenCodeLinkConcurrentReplaceNeverFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "skill")
+	output := generatedFile{Path: path, Link: filepath.Join("..", "..", ".claude", "skills", "skill")}
+	for i := 0; i < 200; i++ {
+		if err := os.RemoveAll(path); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join("..", "..", ".claude", "skills", "old"), path); err != nil {
+			t.Fatal(err)
+		}
+		var results [2]reconcileResult
+		var wg sync.WaitGroup
+		for j := range results {
+			wg.Add(1)
+			go func(result *reconcileResult) {
+				defer wg.Done()
+				reconcileOpenCodeLink(result, output, ModeBuild)
+			}(&results[j])
+		}
+		wg.Wait()
+		for _, result := range results {
+			if len(result.Problems) != 0 {
+				t.Fatalf("round %d: concurrent link replace failed: %q", i, result.Problems)
+			}
+		}
+		if got, err := os.Readlink(path); err != nil || got != output.Link {
+			t.Fatalf("round %d: link=%q err=%v, want %q", i, got, err, output.Link)
+		}
 	}
 }

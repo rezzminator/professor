@@ -74,6 +74,9 @@ type generatedFile struct {
 	// means "use the package default" (0o644) — every existing caller
 	// leaves it unset, so this changes nothing until a caller sets it.
 	Mode os.FileMode
+	// Source is the file a MirrorCopy output copies byte for byte; empty
+	// for every compiled output.
+	Source string
 }
 
 type sourceEntry struct {
@@ -101,6 +104,21 @@ func compileOpenCode(options Options) (Result, error) {
 	warn := func(format string, args ...any) {
 		result.Warnings = append(result.Warnings, fmt.Sprintf(format, args...))
 	}
+	// A dangling source skips that one entry: build warns and writes the
+	// rest, check and doctor fail. The roster walk and the compile walk visit
+	// the same sources, so one seen-set keeps it to one line per path.
+	danglingSeen := map[string]bool{}
+	dangling := func(path string, err error) {
+		if danglingSeen[path] {
+			return
+		}
+		danglingSeen[path] = true
+		if options.Mode == ModeBuild {
+			warn("DANGLING %s: %v", path, err)
+		} else {
+			problem("DANGLING %s: %v", path, err)
+		}
+	}
 
 	roster := map[string]string{}
 	for _, source := range []string{
@@ -108,14 +126,14 @@ func compileOpenCode(options Options) (Result, error) {
 		filepath.Join(root, "templates", "global", "commands"),
 		filepath.Join(home, ".claude", "commands"),
 	} {
-		discoverOpenCodeCommandRoster(source, roster, problem)
+		discoverOpenCodeCommandRoster(source, roster, problem, dangling)
 	}
 	projects := discoverOpenCodeProjects(root, problem)
 	modelMap, modelMapErr := loadOpenCodeModelMap(root)
 	if modelMapErr != nil {
 		problem("%v", modelMapErr)
 	}
-	compileOpenCodeAgents(root, projects, roster, modelMap, add, problem, warn)
+	compileOpenCodeAgents(root, projects, roster, modelMap, add, problem, warn, dangling)
 	compileOpenCodeCommands(
 		filepath.Join(root, ".claude", "commands"),
 		".claude/commands",
@@ -123,7 +141,7 @@ func compileOpenCode(options Options) (Result, error) {
 		filepath.Join(root, ".opencode", "command"),
 		add,
 		problem,
-		warn,
+		dangling,
 	)
 	compileOpenCodeCommands(
 		filepath.Join(home, ".claude", "commands"),
@@ -132,14 +150,14 @@ func compileOpenCode(options Options) (Result, error) {
 		filepath.Join(home, ".config", openCodeName(), "command"),
 		add,
 		problem,
-		warn,
+		dangling,
 	)
-	compileOpenCodeSkills(root, add, problem)
+	compileOpenCodeSkills(root, add, problem, dangling)
 	compileConfig(root, add, problem, warn)
 	for _, name := range []string{"LICENSE", "SECURITY.md"} {
 		source := filepath.Join(root, name)
 		if content, readErr := os.ReadFile(source); readErr == nil {
-			add(generatedFile{Path: filepath.Join(root, ".opencode", name), Content: string(content)})
+			add(generatedFile{Path: filepath.Join(root, ".opencode", name), Content: string(content), Source: source})
 		} else if !errors.Is(readErr, fs.ErrNotExist) {
 			problem("read %s: %v", source, readErr)
 		} else {
@@ -225,8 +243,13 @@ func hasRegularFile(path string) bool {
 	return err == nil && info.Mode().IsRegular()
 }
 
-func discoverOpenCodeCommandRoster(root string, roster map[string]string, problem func(string, ...any)) {
-	for _, entry := range discoverOpenCodeMarkdown(root, problem) {
+func discoverOpenCodeCommandRoster(
+	root string,
+	roster map[string]string,
+	problem func(string, ...any),
+	dangling func(string, error),
+) {
+	for _, entry := range discoverOpenCodeMarkdown(root, problem, dangling) {
 		colon := strings.ReplaceAll(strings.TrimSuffix(filepath.ToSlash(entry.Rel), ".md"), "/", ":")
 		flat := openCodeFlatName(entry.Rel)
 		if colon != flat {
@@ -235,7 +258,7 @@ func discoverOpenCodeCommandRoster(root string, roster map[string]string, proble
 	}
 }
 
-func discoverOpenCodeMarkdown(root string, problem func(string, ...any)) []sourceEntry {
+func discoverOpenCodeMarkdown(root string, problem func(string, ...any), dangling func(string, error)) []sourceEntry {
 	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
 		return nil
 	} else if err != nil {
@@ -246,8 +269,12 @@ func discoverOpenCodeMarkdown(root string, problem func(string, ...any)) []sourc
 	var walk func(string, string, map[string]bool)
 	walk = func(current, relative string, ancestors map[string]bool) {
 		physical, err := filepath.EvalSymlinks(current)
+		if errors.Is(err, fs.ErrNotExist) {
+			dangling(current, err)
+			return
+		}
 		if err != nil {
-			problem("DANGLING %s: %v", current, err)
+			problem("resolve %s: %v", current, err)
 			return
 		}
 		if ancestors[physical] {
@@ -270,13 +297,8 @@ func discoverOpenCodeMarkdown(root string, problem func(string, ...any)) []sourc
 				rel = filepath.Join(relative, item.Name())
 			}
 			path := filepath.Join(current, item.Name())
-			info, statErr := os.Stat(path)
-			if statErr != nil {
-				if os.IsNotExist(statErr) && item.Type()&os.ModeSymlink != 0 {
-					problem("DANGLING %s: %v", path, statErr)
-				} else {
-					problem("stat %s: %v", path, statErr)
-				}
+			info, ok := statOpenCodeSource(path, item, problem, dangling)
+			if !ok {
 				continue
 			}
 			if info.IsDir() {
@@ -295,6 +317,52 @@ func discoverOpenCodeMarkdown(root string, problem func(string, ...any)) []sourc
 	return entries
 }
 
+// statOpenCodeSource stats one source entry through its symlinks; a dangling
+// symlink goes to dangling, any other failure is a problem.
+func statOpenCodeSource(
+	path string,
+	item fs.DirEntry,
+	problem func(string, ...any),
+	dangling func(string, error),
+) (fs.FileInfo, bool) {
+	info, err := os.Stat(path)
+	if err == nil {
+		return info, true
+	}
+	if errors.Is(err, fs.ErrNotExist) && item.Type()&os.ModeSymlink != 0 {
+		dangling(path, err)
+	} else {
+		problem("stat %s: %v", path, err)
+	}
+	return nil, false
+}
+
+// discoverOpenCodeAgents lists the top-level `.md` files of one agents
+// directory, symlinks resolved; a subdirectory (an archive) is never a role.
+func discoverOpenCodeAgents(dir string, problem func(string, ...any), dangling func(string, error)) []sourceEntry {
+	items, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		problem("read %s: %v", dir, err)
+		return nil
+	}
+	entries := []sourceEntry{}
+	for _, item := range items {
+		if !strings.HasSuffix(item.Name(), ".md") || item.Name() == "README.md" {
+			continue
+		}
+		path := filepath.Join(dir, item.Name())
+		info, ok := statOpenCodeSource(path, item, problem, dangling)
+		if !ok || !info.Mode().IsRegular() {
+			continue
+		}
+		entries = append(entries, sourceEntry{Path: path, Rel: item.Name()})
+	}
+	return entries
+}
+
 func compileOpenCodeAgents(
 	root string,
 	projects []string,
@@ -302,13 +370,12 @@ func compileOpenCodeAgents(
 	modelMap map[string]string,
 	add func(generatedFile),
 	problem, warn func(string, ...any),
+	dangling func(string, error),
 ) {
 	seen := map[string]bool{}
+	knownServers := openCodeKnownMCPServers(root)
 	for _, project := range projects {
-		for _, entry := range discoverOpenCodeMarkdown(filepath.Join(root, project, ".claude", "agents"), problem) {
-			if entry.SkillDir {
-				continue
-			}
+		for _, entry := range discoverOpenCodeAgents(filepath.Join(root, project, ".claude", "agents"), problem, dangling) {
 			name := strings.TrimSuffix(filepath.Base(entry.Path), ".md")
 			if project != "." {
 				name += "-" + project
@@ -318,55 +385,73 @@ func compileOpenCodeAgents(
 				continue
 			}
 			seen[name] = true
-			raw, err := os.ReadFile(entry.Path)
-			if err != nil {
-				problem("read %s: %v", entry.Path, err)
-				continue
-			}
-			fields, body, parseErr := parseOpenCodeFrontmatter(string(raw))
-			if parseErr != nil {
-				problem("parse %s: %v", entry.Path, parseErr)
-				continue
-			}
-			rel, _ := filepath.Rel(root, entry.Path)
-			description := swapOpenCodeCommands(strings.TrimSpace(fields["description"]), roster)
-			content := "---\n# " + generatedMarker(
-				filepath.ToSlash(rel),
-			) + "\ndescription: " + quoteOpenCodeYAML(
-				description,
-			) + "\nmode: " + openCodeAgentMode + "\n"
-			alias := strings.TrimSpace(fields["model"])
-			if comment := strings.Index(alias, " #"); comment >= 0 {
-				alias = strings.TrimSpace(alias[:comment])
-			}
-			if alias != "" {
-				model, ok := modelMap[alias]
-				if !ok || strings.TrimSpace(model) == "" {
-					problem("unmapped OpenCode model alias %q in %s", alias, entry.Path)
-				} else {
-					content += "model: " + strings.TrimSpace(model) + "\n"
-				}
-			}
-			if tools, ok := fields["tools"]; ok {
-				toolsBlock, toolsErr := renderOpenCodeToolsBlock(tools)
-				if toolsErr != nil {
-					problem("tools %s: %v", entry.Path, toolsErr)
-					continue
-				}
-				content += toolsBlock
-			}
-			if name == "gitter" {
-				content += "permission:\n  bash:\n    \"git *\": allow\n"
-			}
-			content += "---\n" + agentPreamble(
-				name,
-			) + swapOpenCodeCommands(
-				strings.TrimSpace(body),
-				roster,
-			) + "\n"
-			add(generatedFile{Path: filepath.Join(root, ".opencode", "agent", name+".md"), Content: content})
+			compileOpenCodeAgent(root, name, entry.Path, roster, modelMap, knownServers, add, problem, warn)
 		}
 	}
+}
+
+func compileOpenCodeAgent(
+	root, name, path string,
+	roster map[string]string,
+	modelMap map[string]string,
+	knownServers []string,
+	add func(generatedFile),
+	problem, warn func(string, ...any),
+) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		problem("relative path of %s: %v", path, err)
+		return
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		problem("read %s: %v", path, err)
+		return
+	}
+	fields, body, parseErr := parseOpenCodeFrontmatter(string(raw))
+	if parseErr != nil {
+		problem("parse %s: %v", path, parseErr)
+		return
+	}
+	description := swapOpenCodeCommands(strings.TrimSpace(fields["description"]), roster)
+	content := "---\n# " + generatedMarker(
+		filepath.ToSlash(rel),
+	) + "\ndescription: " + quoteOpenCodeYAML(
+		description,
+	) + "\nmode: " + openCodeAgentMode + "\n"
+	alias := strings.TrimSpace(fields["model"])
+	if comment := strings.Index(alias, " #"); comment >= 0 {
+		alias = strings.TrimSpace(alias[:comment])
+	}
+	if alias != "" {
+		model, ok := modelMap[alias]
+		if !ok || strings.TrimSpace(model) == "" {
+			warn("unmapped OpenCode model alias %q in %s — model omitted", alias, path)
+		} else {
+			content += "model: " + strings.TrimSpace(model) + "\n"
+		}
+	}
+	if tools, ok := fields["tools"]; ok {
+		toolsBlock, toolsWarnings, toolsErr := renderOpenCodeToolsBlock(path, tools, knownServers)
+		if toolsErr != nil {
+			problem("tools %s: %v", path, toolsErr)
+			return
+		}
+		for _, toolsWarning := range toolsWarnings {
+			warn("%s", toolsWarning)
+		}
+		content += toolsBlock
+	}
+	if name == "gitter" {
+		content += "permission:\n  bash:\n    \"git *\": allow\n"
+	}
+	content += "---\n" + agentPreamble(
+		name,
+	) + swapOpenCodeCommands(
+		strings.TrimSpace(body),
+		roster,
+	) + "\n"
+	add(generatedFile{Path: filepath.Join(root, ".opencode", "agent", name+".md"), Content: content})
 }
 
 func agentPreamble(name string) string {
@@ -380,9 +465,10 @@ func compileOpenCodeCommands(
 	roster map[string]string,
 	outputRoot string,
 	add func(generatedFile),
-	problem, warn func(string, ...any),
+	problem func(string, ...any),
+	dangling func(string, error),
 ) {
-	for _, entry := range discoverOpenCodeMarkdown(sourceRoot, problem) {
+	for _, entry := range discoverOpenCodeMarkdown(sourceRoot, problem, dangling) {
 		file := entry.Path
 		if entry.SkillDir {
 			file = filepath.Join(entry.Path, "SKILL.md")
@@ -390,7 +476,7 @@ func compileOpenCodeCommands(
 		raw, err := os.ReadFile(file)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) {
-				warn("DANGLING %s: %v", filepath.ToSlash(filepath.Join(sourceLabel, entry.Rel)), err)
+				dangling(file, err)
 			} else {
 				problem("read %s: %v", file, err)
 			}
@@ -415,7 +501,12 @@ func compileOpenCodeCommands(
 	}
 }
 
-func compileOpenCodeSkills(root string, add func(generatedFile), problem func(string, ...any)) {
+func compileOpenCodeSkills(
+	root string,
+	add func(generatedFile),
+	problem func(string, ...any),
+	dangling func(string, error),
+) {
 	dir := filepath.Join(root, ".claude", "skills")
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -427,12 +518,8 @@ func compileOpenCodeSkills(root string, add func(generatedFile), problem func(st
 	}
 	for _, entry := range entries {
 		source := filepath.Join(dir, entry.Name())
-		info, statErr := os.Stat(source)
-		if statErr != nil {
-			problem("DANGLING %s: %v", source, statErr)
-			continue
-		}
-		if !info.IsDir() {
+		info, ok := statOpenCodeSource(source, entry, problem, dangling)
+		if !ok || !info.IsDir() {
 			continue
 		}
 		dst := filepath.Join(root, ".opencode", "skills", entry.Name())

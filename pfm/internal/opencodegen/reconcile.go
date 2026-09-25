@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,52 +54,100 @@ func managedOpenCodeEntry(path string, managed []string) string {
 
 func reconcileOpenCodeLink(result *reconcileResult, output generatedFile, mode Mode) {
 	info, err := os.Lstat(output.Path)
-	if err == nil && info.Mode()&os.ModeSymlink != 0 {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		result.Problems = append(result.Problems, unreadableProblem(output.Path, err))
+		return
+	}
+	exists := err == nil
+	if exists && info.Mode()&os.ModeSymlink != 0 {
 		if link, readErr := os.Readlink(output.Path); readErr == nil && link == output.Link {
 			result.Unchanged++
 			return
 		}
 	}
-	if mode != ModeBuild {
-		if err == nil && !isClaimable(output.Path) {
-			result.Problems = append(
-				result.Problems,
-				fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
-			)
+	if exists {
+		if refusal := claimProblem(output); refusal != "" {
+			result.Problems = append(result.Problems, refusal)
 			return
 		}
-		state := "STALE"
-		if errors.Is(err, fs.ErrNotExist) {
-			state = "MISSING"
-		}
+	}
+	if mode != ModeBuild {
 		result.Problems = append(
 			result.Problems,
-			fmt.Sprintf("%s %s (want symlink → %s)", state, output.Path, output.Link),
+			fmt.Sprintf("%s %s (want symlink → %s)", outputState(exists), output.Path, output.Link),
 		)
 		result.Actions = append(result.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Link})
 		return
 	}
-	if err == nil && !isClaimable(output.Path) {
-		result.Problems = append(
-			result.Problems,
-			fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
-		)
-		return
-	}
 	result.Actions = append(result.Actions, Action{Kind: actionLink, Path: output.Path, Target: output.Link})
-	if removeErr := os.RemoveAll(output.Path); removeErr != nil {
-		result.Problems = append(result.Problems, fmt.Sprintf("remove %s: %v", output.Path, removeErr))
-		return
+	if exists && info.IsDir() {
+		if removeErr := os.RemoveAll(output.Path); removeErr != nil {
+			result.Problems = append(result.Problems, fmt.Sprintf("remove %s: %v", output.Path, removeErr))
+			return
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(output.Path), 0o755); err != nil {
 		result.Problems = append(result.Problems, fmt.Sprintf("mkdir %s: %v", output.Path, err))
 		return
 	}
-	if err := os.Symlink(output.Link, output.Path); err != nil {
+	if err := replaceSymlink(output.Link, output.Path); err != nil {
 		result.Problems = append(result.Problems, fmt.Sprintf("symlink %s: %v", output.Path, err))
 		return
 	}
 	result.Wrote++
+}
+
+// replaceSymlink points path at target in one step: the link is made at a
+// unique name in the same directory, then renamed over path, so two builds
+// replacing the same link never race into EEXIST.
+func replaceSymlink(target, path string) error {
+	scratch := filepath.Join(
+		filepath.Dir(path),
+		fmt.Sprintf(".%s.pfm-link-%d-%016x", filepath.Base(path), os.Getpid(), rand.Uint64()),
+	)
+	if err := os.Symlink(target, scratch); err != nil {
+		return err
+	}
+	if err := os.Rename(scratch, path); err != nil {
+		if removeErr := os.Remove(scratch); removeErr != nil {
+			return fmt.Errorf("%w; remove scratch link %s: %v", err, scratch, removeErr)
+		}
+		return err
+	}
+	return nil
+}
+
+// outputState names an output check would rewrite: only an absent path is
+// MISSING; anything present (empty or not) is STALE.
+func outputState(exists bool) string {
+	if exists {
+		return "STALE"
+	}
+	return "MISSING"
+}
+
+func unreadableProblem(path string, err error) string {
+	return fmt.Sprintf("UNREADABLE %s: %v", path, err)
+}
+
+// claimProblem is the problem that forbids touching an existing output, or
+// "" when pfm provably owns it.
+func claimProblem(output generatedFile) string {
+	claimable, err := isClaimable(output.Path)
+	if err != nil {
+		return unreadableProblem(output.Path, err)
+	}
+	if claimable {
+		return ""
+	}
+	if output.Source != "" {
+		return fmt.Sprintf(
+			"CONFLICT %s — differs from %s and pfm cannot prove it wrote it; delete it and rebuild",
+			output.Path,
+			output.Source,
+		)
+	}
+	return fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path)
 }
 
 func reconcileOpenCodeFile(result *reconcileResult, output generatedFile, mode Mode) {
@@ -107,35 +156,40 @@ func reconcileOpenCodeFile(result *reconcileResult, output generatedFile, mode M
 		wantMode = defaultGeneratedFileMode
 	}
 	info, err := os.Lstat(output.Path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		result.Problems = append(result.Problems, unreadableProblem(output.Path, err))
+		return
+	}
+	exists := err == nil
+	regular := exists && info.Mode().IsRegular()
 	current := ""
 	haveMode := os.FileMode(0)
-	if err == nil && info.Mode().IsRegular() {
+	if regular {
 		haveMode = info.Mode().Perm()
-		if raw, readErr := os.ReadFile(output.Path); readErr == nil {
-			current = string(raw)
-		} else {
-			result.Problems = append(result.Problems, fmt.Sprintf("read %s: %v", output.Path, readErr))
+		raw, readErr := os.ReadFile(output.Path)
+		if readErr != nil {
+			result.Problems = append(result.Problems, unreadableProblem(output.Path, readErr))
 			return
 		}
+		current = string(raw)
 	}
 	// A generated file whose content is already right but whose mode drifted
 	// (an operator's chmod, a restore from a permission-lossy archive) is not
 	// "Unchanged" (L3-F14) — check names it distinctly from STALE/MISSING
 	// content, and build fixes it with a chmod rather than rewriting content
 	// that was already correct.
-	modeOnlyDrift := current == output.Content && err == nil && info.Mode().IsRegular() && haveMode != wantMode
+	modeOnlyDrift := current == output.Content && regular && haveMode != wantMode
 	if current == output.Content && !modeOnlyDrift {
 		result.Unchanged++
 		return
 	}
-	if mode != ModeBuild {
-		if err == nil && !isClaimable(output.Path) {
-			result.Problems = append(
-				result.Problems,
-				fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
-			)
+	if exists {
+		if refusal := claimProblem(output); refusal != "" {
+			result.Problems = append(result.Problems, refusal)
 			return
 		}
+	}
+	if mode != ModeBuild {
 		if modeOnlyDrift {
 			result.Problems = append(
 				result.Problems,
@@ -147,19 +201,8 @@ func reconcileOpenCodeFile(result *reconcileResult, output generatedFile, mode M
 			)
 			return
 		}
-		state := "STALE"
-		if errors.Is(err, fs.ErrNotExist) || current == "" {
-			state = "MISSING"
-		}
-		result.Problems = append(result.Problems, fmt.Sprintf("%s %s", state, output.Path))
+		result.Problems = append(result.Problems, fmt.Sprintf("%s %s", outputState(exists), output.Path))
 		result.Actions = append(result.Actions, Action{Kind: actionWrite, Path: output.Path})
-		return
-	}
-	if err == nil && !isClaimable(output.Path) {
-		result.Problems = append(
-			result.Problems,
-			fmt.Sprintf("CONFLICT %s — exists without a generated marker; not touching it", output.Path),
-		)
 		return
 	}
 	if modeOnlyDrift {
@@ -193,7 +236,18 @@ func reconcileOpenCodeOrphans(result *reconcileResult, dir string, wanted map[st
 	}
 	for _, entry := range entries {
 		path := filepath.Join(dir, entry.Name())
-		if wanted[path] || !isClaimable(path) {
+		if wanted[path] {
+			continue
+		}
+		claimable, claimErr := isClaimable(path)
+		if claimErr != nil {
+			result.Warnings = append(
+				result.Warnings,
+				fmt.Sprintf("unreadable %s — cannot tell whether pfm owns it; left in place: %v", path, claimErr),
+			)
+			continue
+		}
+		if !claimable {
 			continue
 		}
 		if mode != ModeBuild {
@@ -201,12 +255,12 @@ func reconcileOpenCodeOrphans(result *reconcileResult, dir string, wanted map[st
 			result.Actions = append(result.Actions, Action{Kind: actionDelete, Path: path})
 			continue
 		}
-		result.Actions = append(result.Actions, Action{Kind: actionDelete, Path: path})
 		if err := os.RemoveAll(path); err != nil {
 			result.Problems = append(result.Problems, fmt.Sprintf("remove orphan %s: %v", path, err))
-		} else {
-			result.Deleted++
+			continue
 		}
+		result.Actions = append(result.Actions, Action{Kind: actionDelete, Path: path})
+		result.Deleted++
 	}
 }
 
@@ -220,27 +274,39 @@ func reconcileOpenCodeOrphans(result *reconcileResult, dir string, wanted map[st
 // shortcut: a pre-existing, content-differing file at its path is the same
 // CONFLICT an unrelated hand-placed file (a real `.opencode/LICENSE`) would
 // be — the smallest honest rule available without a manifest to consult.
-func isClaimable(path string) bool {
+// A path it cannot read returns the error: "cannot tell" is never "not ours".
+func isClaimable(path string) (bool, error) {
 	info, err := os.Lstat(path)
-	if err != nil {
-		return false
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
 	}
-	if info.Mode()&os.ModeSymlink != 0 {
+	if err != nil {
+		return false, err
+	}
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
 		target, err := os.Readlink(path)
 		if err != nil {
-			return false
+			return false, err
 		}
-		return isClaudeSourceTarget(target)
-	}
-	if info.Mode().IsRegular() {
+		return isClaudeSourceTarget(target), nil
+	case info.Mode().IsRegular():
 		raw, err := os.ReadFile(path)
-		return err == nil && hasMarker(string(raw))
-	}
-	if info.IsDir() {
+		if err != nil {
+			return false, err
+		}
+		return hasMarker(string(raw)), nil
+	case info.IsDir():
 		raw, err := os.ReadFile(filepath.Join(path, "SKILL.md"))
-		return err == nil && hasMarker(string(raw))
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return hasMarker(string(raw)), nil
 	}
-	return false
+	return false, nil
 }
 
 func isClaudeSourceTarget(target string) bool {

@@ -73,8 +73,25 @@ func RunCommand(args []string, resolveRoot func() (string, error), defaultHome s
 	for _, problem := range result.Problems {
 		fmt.Fprintf(stderr, "pfm opencode: %s\n", problem)
 	}
+	if mode == ModeBuild {
+		for _, action := range result.Actions {
+			if action.Kind == actionDelete {
+				fmt.Fprintf(stdout, "pfm opencode: deleted %s\n", action.Path)
+			}
+		}
+	}
 	if !result.OK {
 		return 1
+	}
+	if mode == ModeBuild {
+		fmt.Fprintf(
+			stdout,
+			"OPENCODE BUILD PASS wrote=%d unchanged=%d deleted=%d\n",
+			result.Wrote,
+			result.Unchanged,
+			result.Deleted,
+		)
+		return 0
 	}
 	fmt.Fprintf(stdout, "OPENCODE %s PASS\n", strings.ToUpper(args[0]))
 	return 0

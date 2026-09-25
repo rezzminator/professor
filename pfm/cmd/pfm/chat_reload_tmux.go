@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -13,7 +14,11 @@ import (
 // reloadCommandTmux is cmd/pfm's reload.Tmux implementation: every pane
 // query and mutation `pfm chat reload` needs, routed through pfmtmux.Exec so
 // each invocation completes under the observed tmux door.
-type reloadCommandTmux struct{}
+type reloadCommandTmux struct {
+	// launchDir holds the one-shot script an over-budget respawn command
+	// launches through (pfmtmux.PrepareLaunch): the fleet's socket directory.
+	launchDir string
+}
 
 func (reloadCommandTmux) command(ctx context.Context, socket string, args ...string) *pfmtmux.Cmd {
 	return pfmtmux.Exec(ctx, "", socket, args...)
@@ -88,7 +93,14 @@ func (tmux reloadCommandTmux) SendLiteral(ctx context.Context, socket, pane, tex
 }
 
 func (tmux reloadCommandTmux) Respawn(ctx context.Context, socket, pane, cwd, command string) error {
-	return tmux.command(ctx, socket, "respawn-pane", "-k", "-t", pane, "-c", cwd, command).Run()
+	launch, err := pfmtmux.PrepareLaunch(tmux.launchDir, command)
+	if err != nil {
+		return fmt.Errorf("pane %s: %w", pane, err)
+	}
+	if err := tmux.command(ctx, socket, "respawn-pane", "-k", "-t", pane, "-c", cwd, launch.Command).Run(); err != nil {
+		return errors.Join(err, launch.Discard())
+	}
+	return nil
 }
 
 func (tmux reloadCommandTmux) Display(ctx context.Context, socket, pane, message string) error {

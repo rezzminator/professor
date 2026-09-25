@@ -66,7 +66,7 @@ func runChatReloadWithRuntime(
 		return 2
 	}
 	resolved := runtime.Paths
-	tmux := reloadCommandTmux{}
+	tmux := reloadCommandTmux{launchDir: resolved.TmuxDir}
 	callerSock := reloadSocketArgument(args)
 	callerPane := reloadPaneArgument(args)
 	// Resolve before detaching; the worker has no tmux ancestry to recover.
@@ -218,7 +218,7 @@ func runChatReloadWorkerWithRuntime(
 		}
 	}
 	resolved := runtime.Paths
-	tmux := reloadCommandTmux{}
+	tmux := reloadCommandTmux{launchDir: resolved.TmuxDir}
 	socketPath, pane, paneState, code := reloadTarget(
 		context.Background(),
 		sock,

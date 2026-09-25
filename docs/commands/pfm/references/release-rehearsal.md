@@ -19,14 +19,16 @@ Model: `gpt-6-luna`, effort `xhigh` — the weaker model at its highest setting,
 
 ```bash
 export CODEX_HOME="$RUN/codex-home"
-mkdir -p "$CODEX_HOME" && ln -sf "$HOME/.codex/auth.json" "$CODEX_HOME/auth.json"
+mkdir -p "$CODEX_HOME" && cp "$HOME/.codex/auth.json" "$CODEX_HOME/auth.json"
 timeout 5400 codex exec --model "$MODEL" -c model_reasoning_effort=xhigh \
   --cd "$RUN" --skip-git-repo-check --ephemeral \
   --sandbox workspace-write -c sandbox_workspace_write.network_access=true \
   --output-schema "$RUN/schema.json" -o "$RUN/result.json" - < "$RUN/brief.md"
 ```
 
-The separate Codex home exposes only the host login, so host skills, agents, and user config cannot enter the adopter driver's context.
+The separate Codex home exposes only the host login, so host skills, agents, and user config cannot enter the adopter driver's context. Each run gets its own COPY of the login, never a symlink: a driver's token refresh must never write the host login. Drive the two machines one at a time, or each with its own copy.
+
+Preflight: before a round starts, a one-line probe must answer through the same `CODEX_HOME` — `codex exec --model "$MODEL" --skip-git-repo-check --ephemeral 'reply OK'`. A dead login or a Codex outage then becomes a named BLOCKED before the round, not a failed round.
 
 The driver calls Codex directly because `pfm headless exec --engine codex` routes through OpenCode since 89db9254, while the rehearsal's isolation premises are Codex CLI facts.
 

@@ -114,6 +114,10 @@ cmd_publish() {
     git -C $UPSTREAM fetch -q /pfm-git-common '$sha'
     git -C $UPSTREAM merge-base --is-ancestor main '$sha' || { echo 'publish: $sha does not fast-forward upstream main' >&2; exit 1; }
     git -C $UPSTREAM update-ref refs/heads/main '$sha'
+    git -C $UPSTREAM fetch -q /pfm-git-common '+refs/tags/v*:refs/tags/v*'
+    for t in \$(git -C $UPSTREAM tag --list 'v*'); do
+      git -C $UPSTREAM merge-base --is-ancestor \"\$t\" main || git -C $UPSTREAM tag -d \"\$t\" >/dev/null
+    done
     git -C $UPSTREAM -c user.name=rehearsal -c user.email=rehearsal@invalid tag -f -a '$tag' -m 'rehearsal $tag' '$sha' >/dev/null
     echo \"upstream published: $tag -> \$(git -C $UPSTREAM rev-parse --short '$tag^{commit}')\"" \
     || die "publish $tag failed"

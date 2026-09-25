@@ -1,12 +1,13 @@
 # statusline
 
-pfm shows how full each context is where the operator already looks. Every sub-agent gets its own row in Claude Code's agent panel through the `subagentStatusLine` setting. The main statusline carries the model and effort in one block, in the same palette, so a row and the main line read alike.
+pfm shows how full each context is where the operator already looks. Every sub-agent gets its own row in Claude Code's agent panel through the `subagentStatusLine` setting. The main statusline carries the model and effort in one block, in the same palette, so a row and the main line read alike. Both commands ride the launch `--settings` payload of every Claude chat pfm starts; no settings file carries them.
 
 Decisions live in this file. A change lands here first, then in the code, then in every surface under [Surfaces that stay in sync](#surfaces-that-stay-in-sync).
 
 ## Contents
 
 - [What Claude Code offers](#what-claude-code-offers)
+- [How a chat gets it](#how-a-chat-gets-it)
 - [The sub-agent row](#the-sub-agent-row)
 - [Where each field comes from](#where-each-field-comes-from)
 - [Effort](#effort)
@@ -19,12 +20,25 @@ Decisions live in this file. A change lands here first, then in the code, then i
 
 Read in the Claude Code 2.1.281 source and confirmed live:
 
-- `subagentStatusLine`: `{"type": "command", "command": "…"}` in `settings.json`. Claude Code runs the command 300 ms after the first task appears and then every 5 s, with a 5 s timeout, and only in a trusted workspace.
+- `subagentStatusLine`: `{"type": "command", "command": "…"}`, a settings key like `statusLine`, read from any settings layer, the `--settings` flag included. Claude Code runs the command 300 ms after the first task appears and then every 5 s, with a 5 s timeout, and only in a trusted workspace.
 - Its stdin is one JSON object: `session_id`, `transcript_path`, `cwd`, `scratchpad_dir`, `prompt_id`, `columns` and `tasks[]`. Each task carries `id`, `name`, `type`, `status`, `description`, `label`, `startTime`, `model`, `effort`, `contextWindowSize`, `tokenCount`, `tokenSamples` (the last 16 readings) and `cwd`.
 - `tokenCount` is the latest input tokens plus the cumulative output tokens plus an estimate of what is streaming.
 - Its stdout is one `{"id", "content"}` line per task. A row decorates only a task row; the `⏺ main` row has no decoration slot, and a line whose id is not in the current task list is dropped.
 - Claude Code draws the row body faint in its muted theme colour.
 - Claude Code, not the command, decides how long a row stays: 2.1.282 evicts a finished task 30 s after it ends (`evictAfter`, `GA=30000`), unless something keeps it (`keepaliveReasons`: a background agent's result not yet delivered, an agent below it still running) or the operator has it open (`retain`). A task in the payload is one not yet evicted, so the command can shape a finished row but never remove it.
+
+## How a chat gets it
+
+The status lines are one row of the launch registry `claudelaunch.Knobs` (`pfm/internal/claudelaunch/knobs.go`), a constant, rendered by `claudelaunch.Render` into the single `--settings` JSON every interactive Claude launch carries ([claude-launch.md](../engines/claude-launch.md#knobs)):
+
+```json
+{
+  "statusLine": { "type": "command", "command": "~/.local/bin/pfm-statusline", "padding": 0, "refreshInterval": 3, "hideVimModeIndicator": true },
+  "subagentStatusLine": { "type": "command", "command": "~/.local/bin/pfm-statusline --subagents" }
+}
+```
+
+The command is rendered with `~` expanded to the home directory. `~/.local/bin/pfm-statusline` is the overlay over `pfm statusline` that `pfm install` places. `pfm install` writes no `statusLine` or `subagentStatusLine` into any account `settings.json`; one an older install left there is removed by the host-migration `strip` verdict, and `pfm doctor` reports it as `legacy: {file} still carries pfm statusLine — run pfm install` (or `subagentStatusLine`) until then. A `claude` run the managed launcher passes through, and a `pfm headless exec` run, carry no status line. Spawn-audit reads the payload from each live chat's argv.
 
 ## The sub-agent row
 
@@ -85,7 +99,9 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 - The model block reads `◆ Opus 5.5·🚀 xhigh`: model symbol and name, a muted `·`, then the effort (`pfm/internal/statusline/model_segment.go`).
 - The session label sits second from the end of the first line.
-- The cache window reads `💾1h✓59m:28s 94%`: the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). That share changes only when a call completes, so once the window has lapsed it describes a warm cache that is gone: `💾5m✗4m:24s was 99%`, muted, never live health beside the expiry. The window comes from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). Only when the payload carries no expiry — no cached request yet, or an older build — does the transcript decide (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else `FORCE_PROMPT_CACHING_5M`; the countdown from the newest request record, a user record that is not a local command's echo; a Codex rollout counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
+- The cache window reads `💾1h✓59m:28s 94%`: the cache window, the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). That share changes only when a call completes, so once the window has lapsed it describes a warm cache that is gone: `💾5m✗4m:24s was 99%`, muted, never live health beside the expiry.
+- The window (`1h` or `5m`) comes first from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). When the payload carries no expiry — no cached request yet, or an older build — pfm's launch record decides, never the statusline's own environment: `fleetdb.LaunchFor(ctx, session_id)`, keyed by the `session_id` in the statusline payload, returns the `cache1h` the chat was launched with ([claude-launch.md](../engines/claude-launch.md#the-launch-record)). A session pfm never launched (`ErrNoLaunch`) falls to the transcript (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else no cache marker. A failed launch read shows `💾⚠` and writes the cause to stderr, never a silent `5m`.
+- The countdown runs to the payload's `prompt_cache.expires_at` when it carries one; otherwise from the newest request record in the transcript, a user record that is not a local command's echo, plus the window; a Codex rollout counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
 - The line uses the same palette as the rows (`pfm/internal/statusline/palette.go`).
 
 ## Palette and glyphs
@@ -107,6 +123,8 @@ Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no 
 | --- | --- | --- |
 | The row renderer | `pfm/internal/statusline/subagents.go`, `subagents_nest.go`, `session_effort.go`, `model_segment.go`, `palette.go` | fields, order, effort, colours |
 | The command | `pfm/cmd/pfm/statusline_command.go` | `pfm statusline --subagents` (combining it with `--refresh-gpt` is a usage error, exit 2) |
-| The installer | `pfm/internal/installer/settings.go` | writes `subagentStatusLine` = the statusline overlay command plus `--subagents` with a separating space when absent, keeps an operator's own value, and uninstall removes only pfm's |
+| The launch registry | `pfm/internal/claudelaunch/knobs.go`, `render.go` | the status-lines row: `statusLine` and `subagentStatusLine` in every launch's `--settings` payload |
+| The launch record | `fleetdb.LaunchFor` over `pfm.db` table `launch` | the cache window per `session_id` |
+| The account-file reconciler | `pfm/internal/installer/layout.go` | `strip` of a pfm `statusLine` or `subagentStatusLine` an older install left, and the `legacy` doctor row |
 | The goldens | `pfm/internal/statusline/testdata/render-*.golden` | the main line byte for byte |
 | The lane map | `infra/fence/lanes/` | its beat and its map row |

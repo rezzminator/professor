@@ -1,0 +1,105 @@
+# Claude headless runs
+
+Every non-interactive Claude Code run pfm makes — `claude -p` for `pfm headless exec`, the `ask` engine, the credential-refresh ACK and the doctor's harness-prompt probe — goes through `headlessrun.Run` (`pfm/internal/headless/run/run.go`). This file holds its argv, its sealed mode, each caller, the environment it strips and sets, the harness-prompt drift probe, and how session identity is kept out of children. Interactive tmux launches are in [claude-launch.md](claude-launch.md).
+
+## Contents
+
+- [Decisions](#decisions)
+- [The argv](#the-argv)
+- [Sealed mode](#sealed-mode)
+- [Callers](#callers)
+- [Environment](#environment)
+- [Harness-prompt drift probe](#harness-prompt-drift-probe)
+- [Session identity](#session-identity)
+
+## Decisions
+
+- **One runner.** Every `-p` run is built by `arguments()` and `setEnvironment` in `run.go`; a caller varies only the request fields and its own `Args`.
+- **Headless reads no launch value from `pfm.config.json`.** Model, effort, theme, sub-agent caps and the web-search cap come only from `pfm headless exec` flags or from `--pfm-settings PATH`, a JSON file shaped like the config's `claude` block (conventionally `pfm.settings.json`). `--pfm-settings` keys are the same knob names as `claudelaunch.Knobs`, and `pfm headless exec` renders them through the registry. A value not passed is not sent, and Claude's own default applies. The config is read only for where the harness is: the account roster (to turn `--account N` into its config dir), each account's `claude` binary, and the default engine when `--engine` is absent. Constants of the launch registry — the hygiene unsets and `outputStyle` — still apply ([claude-launch.md](claude-launch.md#knobs)).
+- **Internal callers state their values.** The ask engine (status and summary helpers), the credential-refresh ACK and the doctor probe build their requests with explicit values — the ask engine from the config's `ask` block, the others from constants; `Run` itself never reaches into the config for a launch value.
+- **The prompt travels on stdin, the system prompt in a file.** `Run` writes any system prompt to a `pfm-headless-system-*.txt` file and passes `--system-prompt-file` (`run.go:456-467`, `:606-611`), and feeds the user prompt on stdin (`:519-521`) — neither lands in argv, where `ps` would show it.
+- **An explicit environment is the caller's word.** A run with no `Env` strips the provider and endpoint variables; a caller that passes `Env` keeps them (`run.go:715`). That is the only way to aim a headless run at a proxy.
+- **pfm has no gateway mode.** Nothing in pfm sets `ANTHROPIC_BASE_URL` except the doctor's capture sink; every other occurrence is a strip list.
+
+## The argv
+
+`arguments()`, Claude branch, in order (`run.go:593-688`):
+
+| # | Word | Condition |
+| --- | --- | --- |
+| 1 | `-p` | always |
+| 2 | `--safe-mode` | `Sealed` |
+| 3 | `--model <m>` | `Model` non-empty — from the caller's flag or `--pfm-settings` |
+| 4 | `--effort <e>` | `Effort` non-empty |
+| 5 | `--output-format json` | not `Native` |
+| 6 | `--system-prompt-file <f>` | a system prompt given (`--system-prompt` is unreachable through `Run`) |
+| 7 | `--json-schema <schema>` | `Schema` set; `validateSchema` runs first (`:294-296`) |
+| 8 | `--tools <list>` | `Tools` set (`""` disables every tool) |
+| 9 | `--setting-sources <list>` | `SettingsSources` set (`""` disables inherited settings files) |
+| 10 | `--strict-mcp-config` | `StrictMCP` |
+| 11 | `--no-session-persistence` | `NoSessionPersistence` |
+| 12 | caller `Args` | verbatim (`:676`) |
+| 13 | `--settings <payload>` | always, unless `Args` carries `--settings` — `{"outputStyle":"default"}` plus an `env` block and `theme` for the values passed by flag or `--pfm-settings` |
+
+The process runs in its own process group (`:528`). `--permission-mode`, `--add-dir`, `--agent`, `--input-format` and `--append-system-prompt` are never emitted.
+
+## Sealed mode
+
+`pfm headless exec --sealed` makes `Resolve` force `Tools=""`, `SettingsSources=""`, `StrictMCP`, `NoSessionPersistence` and a scratch working directory (`run.go:260-264`); it requires a system prompt (`:245-246`) and refuses native args (`:265-266`). The result is a run with no tools, no settings files, no MCP servers, no transcript and no project tree — an extractor, not an agent.
+
+For Codex, which cannot honour these controls, the run is refused before launch unless `--allow-unsupported` is given (`run.go:269-290`); Claude never takes that branch.
+
+## Callers
+
+### pfm headless exec
+
+`pfm/cmd/pfm/headless_exec_command.go:235`. `--output-format` defaults to `text`, and only `native` sets Native, so text and json both add `--output-format json` (`:74-76`, `:131`). `--tools` and `--setting-sources` pass only when present (`:206-211`); `--system`/`--system-file` set the system prompt (`:196-197`); `--schema`/`--json-schema` the schema (`:199-200`); `--engine-arg` and anything after `--` become `Args` (`:133`); any `--env K=V` makes the environment explicit (`:212-228`). The fence lanes drive it this way (`infra/fence/lanes/O2.sh:433-449`).
+
+### ask
+
+`pfm/internal/ask/ask.go:185-195`, used by the status and summary helpers (`pfm/internal/headless/statusask.go:138`, `pfm/internal/headless/summary.go:89`). Native, Args `--output-format text`: `claude -p [--model M] [--effort E] --output-format text --settings {…}`.
+
+### Credential-refresh ACK
+
+`pfm/internal/stats/limits.go:872-876`: `claude -p --model claude-haiku-4-5 --max-turns 1 --settings {"outputStyle":"default"}` with prompt `ACK` and an explicit environment adding `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=1` — the cheapest request that makes Claude Code refresh an account's credentials.
+
+### Doctor harness probe
+
+See [Harness-prompt drift probe](#harness-prompt-drift-probe). `pfm doctor` also runs `claude --version` directly (`pfm/internal/doctor/harness_prompt.go:384`).
+
+## Environment
+
+`setEnvironment` (`run.go:703-744`). The base is `os.Environ()`, or the caller's `Env` (`:495-500`). The Claude names in both drop lists come from the registry's hygiene rows; `CODEX_THREAD_ID`, `TMUX`, `TMUX_PANE`, `OPENAI_*` are the runner's own additions.
+
+- **Always dropped** (`:711-713`, plus the engine `HomeEnv`): `CLAUDE_CODE_SESSION_ID`, `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CONFIG_DIR`, `CODEX_THREAD_ID`, `TMUX`, `TMUX_PANE`.
+- **Dropped unless the environment is explicit** (`:715-724`): `CLAUDE_PROJECT_DIR`, `ENABLE_PROMPT_CACHING_1H`, `FORCE_PROMPT_CACHING_5M`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`, `CLAUDE_CODE_DISABLE_NONSTREAMING_FALLBACK`, `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY`.
+- **Set:** `CLAUDE_CONFIG_DIR={config dir}` when an account resolved. Every other value — sub-agent caps, web-search cap, truecolor, simple prompt — reaches Claude through the `--settings` `env` block, and only when passed by flag or `--pfm-settings`.
+
+## Harness-prompt drift probe
+
+`pfm doctor` proves Claude Code's own built-in system prompt has not changed under the fleet since it was last reviewed.
+
+- **Baselines.** `pfm/harness-prompts/claude/baselines/` holds one reviewed capture per model — `harness-original-v{cli}.md` (Sonnet) and `harness-opus-v{cli}.md` (Opus) — each with a `.model` provenance file and a `.sha256` pin, captured in print mode with dynamic sections excluded (`pfm/harness-prompts/README.md:65-84`). The probe reads them from the repo, `{clone}/pfm/harness-prompts/claude/baselines/`; nothing is staged. The checked aliases are `HarnessPromptModels = {{"sonnet", "harness-original"}, {"opus", "harness-opus"}}` (`pfm/internal/doctor/harness_prompt_baselines.go:24`).
+- **Capture.** A local sink on `127.0.0.1:0` answers every request with HTTP 400 and keeps the first `/messages` body (`harness_prompt.go:356`, `:540-554`). The probe runs `WithoutAccount`, Native, a 20-second timeout, stdin `/dev/null`, in a throwaway config dir (`:373`, `:418-434`):
+
+  ```text
+  claude -p --model <alias> x --output-format json --strict-mcp-config --mcp-config {"mcpServers":{}} --max-turns 1 --exclude-dynamic-system-prompt-sections --settings {"outputStyle":"default"}
+  ```
+
+- **Probe environment** (`harnessCaptureEnv`, `:563-596`): strips identity, cache, `ANTHROPIC_*`, `CLAUDE_CODE_AUTO_COMPACT_WINDOW` and `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT`; pins `ANTHROPIC_BASE_URL=<sink>`, `ANTHROPIC_API_KEY=pfm-doctor-sink`, `ANTHROPIC_AUTH_TOKEN=pfm-doctor-sink`, `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0`, `FORCE_PROMPT_CACHING_5M=1`, `CLAUDE_CONFIG_DIR=<tmp>`.
+- **Compare.** The captured system blocks are joined, normalized (the CLI version, model ids and names, and the environment identity and cutoff lines are masked, `:161-184`), hashed, and compared with the pinned SHA-256 (`:202-205`).
+
+| Verdict | Meaning |
+| --- | --- |
+| `matches baseline <name>` | unchanged |
+| `DRIFT live=… baseline=…` | the built-in prompt changed; up to 20 section added/removed/changed lines follow — review before re-pinning |
+| `CANNOT CAPTURE … — drift unknown` | the CLI answered from the real endpoint and ignored `ANTHROPIC_BASE_URL` |
+| `CHECK FAILED to run … — drift unknown` | the probe failed, including no request reaching the sink |
+| `BASELINE UNAVAILABLE … run pfm install` | a staged baseline is missing or inconsistent |
+| `skipped (no Claude Code binary installed)` | nothing to probe |
+
+The header names what stays unchecked: `unchecked=active-chat,fable,codex` (`harness_prompt_baselines.go:131`).
+
+## Session identity
+
+pfm reads `CLAUDE_CODE_SESSION_ID` to know which chat is calling — the engine's `SessionEnv` (`pfm/internal/engine/builtin.go:44`), `whoami` (`pfm/internal/resolve/whoami.go:19`, `:154`), `kill`, `chat find`, inject's sender id, and the caller-engine check that consults it before `CODEX_THREAD_ID` (`pfm/cmd/pfm/chat_caller_engine.go:21`). It never sets it, and strips it with `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from every child it starts: a probe fired from inside a chat must not inherit that chat's identity or endpoint (`pfm/internal/reap/busy.go:95-98`), and a fork's session id is always explicit (`pfm/internal/action/headless.go:128-130`).

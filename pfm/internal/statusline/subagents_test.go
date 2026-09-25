@@ -193,8 +193,8 @@ func TestRenderSubagentsUnreadableTranscriptIsNotZero(t *testing.T) {
 func TestRenderSubagentsMetaWithoutRoleIsNotEmpty(t *testing.T) {
 	session := subagentSession(t, map[string][]string{"m": agentTranscriptLines[:1]}, map[string]string{"m": ""})
 	got, warned := renderOneSubagent(t, session,
-		`{"id":"m","type":"local_agent","status":"completed","tokenCount":10}`)
-	if !strings.HasPrefix(got, "10 │ role ? │ completed") || !strings.Contains(warned, "names no agentType") {
+		`{"id":"m","type":"local_agent","status":"running","tokenCount":10}`)
+	if !strings.HasPrefix(got, "10 │ role ? │ running") || !strings.Contains(warned, "names no agentType") {
 		t.Fatalf("content = %q warn = %q, want role ? and the cause", got, warned)
 	}
 }

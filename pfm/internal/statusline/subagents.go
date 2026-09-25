@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -60,12 +61,17 @@ type agentActivity struct {
 	cacheHit    int
 	last        time.Time
 	err         error
+	nest        agentNesting
 }
 
 const (
 	subagentBarWidth = 8
 	localAgentTask   = "local_agent"
 	taskRunning      = "running"
+	taskCompleted    = "completed"
+	// finishedCollapse is how long a finished row keeps its full body before
+	// it collapses to status, age, identity and label.
+	finishedCollapse = time.Minute
 	entryAssistant   = "assistant"
 	entryUser        = "user"
 	// stallAfter is the quiet time before a running agent's row says idle:
@@ -78,6 +84,9 @@ const (
 // terminal and render stale under repaint; cmd/pfm/webgl_glyph_guard_test.go
 // pins the banned ranges.
 var sparkLevels = []rune("_⎽⎼⎻⎺¯")
+
+// ansiSGR matches one colour escape: a muted row drops them all and wears one.
+var ansiSGR = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // ServeSubagents answers Claude Code's subagentStatusLine command: stdin's
 // row context in, one {id,content} JSON line per agent-panel row out.
@@ -117,6 +126,7 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 	var out bytes.Buffer
 	encoder := json.NewEncoder(&out)
 	encoder.SetEscapeHTML(false)
+	var tree *agentTree // scanned once per render, on the first agent row
 	for index := range data.Tasks {
 		task := &data.Tasks[index]
 		if task.ID == "" || (task.TokenCount <= 0 && task.ContextWindowSize <= 0) {
@@ -124,7 +134,14 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 		}
 		var activity *agentActivity
 		if task.Type == localAgentTask {
+			if tree == nil {
+				tree = scanAgentTree(data.TranscriptPath)
+			}
 			read := readAgentActivity(data.TranscriptPath, task.ID)
+			read.nest = tree.nesting(task.ID)
+			for _, cause := range tree.drainWarnings() {
+				fmt.Fprintf(warn, "pfm statusline --subagents: row %s: nested agents: %s\n", task.ID, cause)
+			}
 			for index, err := range []error{read.roleErr, read.err} {
 				if err != nil && (index == 0 || err != read.roleErr) {
 					fmt.Fprintf(warn, "pfm statusline --subagents: row %s: %v\n", task.ID, err)
@@ -141,11 +158,72 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 }
 
 // subagentContent renders gauge → name·role → model·effort → status and time
-// → idle → tools → errors → cache → compactions → growth → cwd → label; the
-// label goes last because Claude Code truncates the row's tail. The cwd shows
-// only when the agent works outside the session's own directory — the same
-// one is noise.
+// → idle → agents → tools → errors → cache → compactions → growth → cwd →
+// label; the label goes last because Claude Code truncates the row's tail.
+// The cwd shows only when the agent works outside the session's own
+// directory — the same one is noise. A finished row steps back: completed, it
+// renders muted under Claude Code's own faint for its first minute; after
+// that minute every finished row collapses to its status, how long ago it
+// ended, its identity and its label. Claude Code, not this command, decides
+// when the row leaves the panel.
 func subagentContent(
+	task *subagentTask,
+	activity *agentActivity,
+	sessionCwd string,
+	inherited sessionEffortRecord,
+	now time.Time,
+) string {
+	line := activeContent(task, activity, sessionCwd, inherited, now)
+	if !rowFinished(task, activity) {
+		return rowOpen + line
+	}
+	ended := time.Time{}
+	if activity != nil {
+		ended = activity.last
+	}
+	status := strings.TrimSpace(task.Status)
+	if ended.IsZero() || now.Sub(ended) < finishedCollapse {
+		if status != taskCompleted {
+			return rowOpen + line // a failure keeps its full colour for its first minute: it is an alert
+		}
+		return cMuted + ansiSGR.ReplaceAllString(line, "") + reset
+	}
+	statusColor := cMuted
+	if status != taskCompleted {
+		statusColor = cFailed
+	}
+	ago := formatDuration(now.Sub(ended).Milliseconds())
+	collapsed := statusColor + status + reset + cMuted + " " + ago + " ago" + reset
+	if identity := ansiSGR.ReplaceAllString(subagentIdentity(task.Name, activity), ""); identity != "" {
+		collapsed = appendSegment(collapsed, cMuted+identity+reset)
+	}
+	if label := rowLabel(task); label != "" {
+		collapsed = appendSegment(collapsed, cMuted+label+reset)
+	}
+	return collapsed
+}
+
+// rowFinished is true once the task stopped and no agent below it still runs:
+// Claude Code marks an orchestrator completed while its background workers
+// work on, and that row is not finished.
+func rowFinished(task *subagentTask, activity *agentActivity) bool {
+	switch strings.TrimSpace(task.Status) {
+	case taskCompleted, "failed", "killed", "error":
+	default:
+		return false
+	}
+	return activity == nil || activity.nest.running == 0 && activity.nest.unknown == 0 && activity.nest.err == nil
+}
+
+func rowLabel(task *subagentTask) string {
+	if label := strings.TrimSpace(task.Label); label != "" {
+		return label
+	}
+	return strings.TrimSpace(task.Description)
+}
+
+// activeContent is the full row, without its opening: see subagentContent.
+func activeContent(
 	task *subagentTask,
 	activity *agentActivity,
 	sessionCwd string,
@@ -170,14 +248,10 @@ func subagentContent(
 	if cwd != "" && filepath.Clean(cwd) != filepath.Clean(strings.TrimSpace(sessionCwd)) {
 		line = appendSegment(line, cCwd+filepath.Base(cwd)+reset)
 	}
-	label := strings.TrimSpace(task.Label)
-	if label == "" {
-		label = strings.TrimSpace(task.Description)
+	if label := rowLabel(task); label != "" {
+		line = appendSegment(line, cLabel+label+reset)
 	}
-	if label == "" {
-		return rowOpen + line
-	}
-	return rowOpen + appendSegment(line, cLabel+label+reset)
+	return line
 }
 
 // subagentIdentity renders name·role: the agent's name when it was given one,
@@ -258,7 +332,7 @@ func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) 
 	switch status {
 	case taskRunning:
 		color = cRunning
-	case "completed":
+	case taskCompleted:
 		color = cCompleted
 	case "failed", "killed", "error":
 		color = cFailed
@@ -281,12 +355,14 @@ func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) 
 	return segment + " " + elapsed
 }
 
-// activitySegments renders idle → tools → errors → cache → compactions from
-// the transcript; idle, errors and compactions appear only when they say
-// something. A transcript that could not be read shows "?" for tools and cache.
+// activitySegments renders idle → agents → tools → errors → cache →
+// compactions from the transcript; idle, agents, errors and compactions appear
+// only when they say something. The agents segment sits beside idle because
+// it is usually why a parent is quiet. A transcript that could not be read
+// shows "?" for tools and cache.
 func activitySegments(activity agentActivity, running bool, now time.Time) string {
 	if activity.err != nil {
-		return cWarn + "tools ?" + reset + sep + cWarn + "cache ?" + reset
+		return appendSegment(nestingSegment(activity.nest), cWarn+"tools ?"+reset+sep+cWarn+"cache ?"+reset)
 	}
 	line := ""
 	if quiet := now.Sub(activity.last); running && !activity.last.IsZero() && quiet >= stallAfter {
@@ -296,6 +372,7 @@ func activitySegments(activity agentActivity, running bool, now time.Time) strin
 		}
 		line = color + "idle " + formatDuration(quiet.Milliseconds()) + reset
 	}
+	line = appendSegment(line, nestingSegment(activity.nest))
 	line = appendSegment(line, cTools+plural(activity.tools, "tool")+reset)
 	if activity.errors > 0 {
 		line = appendSegment(line, cBad+plural(activity.errors, "error")+reset)

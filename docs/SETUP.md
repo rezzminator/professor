@@ -499,18 +499,25 @@ Before either tier moves, read every release note between the installed and the 
 0. An install that predates `pfm init` has no `.professor/baseline.json`: run `pfm update adopt` once inside it. It pins every mapped template whose local file exists, writes nothing else, and reports `adopted / kept / absent` counts. `--at <ref>` pins at the blueprint ref the install was last synced from, so the first `check` reports every template change since then instead of a false `clean`.
 1. Run `pfm update check` inside the project. It only reads the blueprint, `.professor/baseline.json`, and local paths; it does not fetch, build, install, or write. Bare `pfm update` performs the machine update and then appends this project report when it finds a baseline.
 2. Read every non-current row:
-   - `UPDATED` — the printed diff compares unfilled templates and will not `git apply` to a filled local file. Use the row's pinned SHA and template path for a three-way merge (write `base` and `theirs` as temporary files):
+   - `UPDATED` — the printed diff compares unfilled templates and will not `git apply` to a filled local file. Follow this merge recipe:
 
-     ```bash
-     git -C <blueprint> show <pinned>:templates/<template> > base
-     git -C <blueprint> show HEAD:templates/<template> > theirs
-     git merge-file --diff3 <local> base theirs
-     ```
+     1. Once per project, write `values.sed` with one `s|{TOKEN}|value|g` line per install-time token in `docs/PLACEHOLDERS.md`. Derive each value by comparing a filled local file with `git -C <blueprint> show <pinned>:templates/<template>`; the baseline stores no values. Escape `\`, `&`, and `|` in replacement values. Extend the script for new tokens in `HEAD`, and leave registered runtime metavariables literal.
+     2. For each row, use its pinned SHA and template path to render both template versions with the project's values into temporary `base` and `theirs` files, then merge them into `<local>`:
 
-     Resolve conflict markers by hand, then remove `base` and `theirs`. The local `# pfm-scaffold:` line is an added line absent from both templates; the merge normally keeps it. Never copy a template over a filled local file.
-   - `NEW` — adopt it only if useful, then map it with `pfm update pin --template <template> <local>`; a template this project will never take is silenced with `pfm update ignore <template>...` (`--undo` reverses; it counts as `ignored`, never as review).
+        ```bash
+        git -C <blueprint> show <pinned>:templates/<template> | sed -f values.sed > base
+        git -C <blueprint> show HEAD:templates/<template> | sed -f values.sed > theirs
+        git merge-file --diff3 <local> base theirs
+        # Resolve conflicts in <local>, then check before pinning:
+        comm -23 <(grep -oE '\{[A-Za-z_][A-Za-z0-9_]*\}' <local> | sort -u) <(grep -oE '\{[A-Za-z_][A-Za-z0-9_]*\}' theirs | sort -u)
+        ```
+
+     3. `git merge-file` returns the number of conflicts: `0` is clean, positive means conflicts, negative means an error. Resolve each conflict by keeping the project's own edits and taking the upstream framework change. The local `# pfm-scaffold:` line is absent from both templates; the merge normally keeps it.
+     4. The token check must print nothing: a token left in `<local>` is allowed only when rendered `theirs` keeps that literal token. Fill every extra token before `pfm update pin <local>`, then remove `base` and `theirs`. Never copy a template over a filled local file.
+   - `NEW` — adopt it only if useful. Fill its install-time tokens with the same `values.sed`, compare the resulting `<local>` tokens with its rendered `theirs` using the check above, and fill every extra token before `pfm update pin --template <template> <local>`. A single-project testing manual keeps the template frontmatter with `{project}` filled: a roster entry named `demo` yields `name: demo-testing-manual`, even when its local path is `testing-manual.md`. A template this project will never take is silenced with `pfm update ignore <template>...` (`--undo` reverses; it counts as `ignored`, never as review). For a scaffolded file the project does not use, follow the delete/drop/ignore sequence in [Phase 3 — Smoke test](#phase-3--smoke-test).
    - `GONE-UPSTREAM` — delete the local file and run `pfm update drop <local>`; a retired framework surface left live can work against the new framework unsupervised. Keep it as your own file and drop its pin only if the project deliberately still uses it.
    - `LOCAL-DELETED` — restore the local file or drop its pin.
+
 3. After reviewing and applying an `UPDATED` file, accept its new template baseline with `pfm update pin <local>`. Use `--all` only after every reported updated file has been reviewed and applied.
 4. Re-run `pfm update check`; it exits `0` and ends in `clean` only when no item needs review. Rebuild opted-in engine mirrors from the resulting local source files.
 

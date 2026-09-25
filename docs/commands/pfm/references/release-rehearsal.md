@@ -51,6 +51,8 @@ The driver calls Codex directly because `pfm headless exec --engine codex` route
 
 Judge the result, never the model's verdict alone: re-run each claimed-clean step's check yourself through `infra/fence/release-rehearsal.sh exec`, and replay each FRICTION command before routing it. A missing `result.json`, a schema-invalid one, or a non-zero driver exit is BLOCKED — the rehearsal failed to run, which is never CLEAN.
 
+Stage B is CLEAN only when `git -C ~/.professor status --porcelain` is empty and every `UPDATED` or `NEW` file pinned during Stage B passes the SETUP token check against its rendered `theirs`: compare the unique `{TOKEN}` matches in the local file with those in that rendered template. Any local token absent from `theirs` is FRICTION, even when `pfm doctor` and `pfm update check` report clean.
+
 ## Shared brief preamble
 
 Prepended to both briefs, `{CONTAINER}` / `{STABLE}` / `v{NEW}` substituted:

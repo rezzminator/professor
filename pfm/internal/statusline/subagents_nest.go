@@ -12,36 +12,36 @@ import (
 	"strings"
 )
 
-// agentNesting is what a row says about the agents below its task: how many
-// there are at every depth, and whether any of them still works. err is a
-// failure to look (the subagents directory or a meta file could not be read)
-// and renders "nested ?", never as "none"; unknown counts direct children
-// whose liveness could not be read.
+// agentNesting is what a row says about the agents below its task, at every
+// depth: how many there are, how many are working right now (their own turn
+// is open), and how many could not be read. err is a failure to look (the
+// subagents directory or a meta file could not be read) and renders "?/?",
+// never as "none".
 type agentNesting struct {
 	total   int
-	active  bool
+	active  int
 	unknown int
 	err     error
 }
 
 // agentTree is one scan of the session's subagents directory: every agent's
 // parent from its meta file's parentAgentId, which Claude Code writes for an
-// agent spawned by another agent (a main-loop spawn carries none).
+// agent spawned by another agent (a main-loop spawn carries none). open caches
+// each agent's own turn state for the render.
 type agentTree struct {
 	dir      string
 	children map[string][]string
 	err      error
 	warnings []string
-	live     map[string]liveness
+	open     map[string]turnState
 }
 
-type liveness int
+type turnState int
 
 const (
-	livenessUnknown liveness = iota
-	livenessDone
-	livenessRunning
-	livenessVisiting // on the walk's current path: a cycle reads as done
+	turnUnread turnState = iota
+	turnClosed
+	turnWorking
 )
 
 // tailWindow is the first read from a transcript's end; it doubles until a
@@ -54,7 +54,7 @@ const tailWindow = 64 << 10
 // file that cannot be read, sets err: the parent of that agent is unknown, so
 // no row may claim a count it cannot vouch for.
 func scanAgentTree(sessionTranscript string) *agentTree {
-	tree := &agentTree{children: map[string][]string{}, live: map[string]liveness{}}
+	tree := &agentTree{children: map[string][]string{}, open: map[string]turnState{}}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		tree.err = errors.New("payload names no session transcript")
 		return tree
@@ -91,10 +91,9 @@ func scanAgentTree(sessionTranscript string) *agentTree {
 	return tree
 }
 
-// nesting counts every agent below one task, at any depth, and whether any
-// of them still works — a child works while its own turn is open or while an
-// agent below it works, because an orchestrator that ended its turn to wait on
-// background workers has not finished.
+// nesting counts every agent below one task, at any depth, and how many of
+// them are working: their own turn is open. An orchestrator that ended its
+// turn to wait on background workers is not working; its workers are.
 func (tree *agentTree) nesting(id string) agentNesting {
 	if tree.err != nil {
 		return agentNesting{err: tree.err}
@@ -110,13 +109,11 @@ func (tree *agentTree) nesting(id string) agentNesting {
 		}
 		seen[next] = true
 		queue = append(queue, tree.children[next]...)
-	}
-	nest.total = len(seen) - 1
-	for _, child := range tree.children[id] {
-		switch tree.liveness(child) {
-		case livenessRunning:
-			nest.active = true
-		case livenessUnknown:
+		nest.total++
+		switch tree.turn(next) {
+		case turnWorking:
+			nest.active++
+		case turnUnread:
 			nest.unknown++
 		}
 	}
@@ -131,39 +128,20 @@ func (tree *agentTree) drainWarnings() []string {
 	return warnings
 }
 
-func (tree *agentTree) liveness(id string) liveness {
-	if state, ok := tree.live[id]; ok {
-		if state == livenessVisiting {
-			return livenessDone
-		}
+func (tree *agentTree) turn(id string) turnState {
+	if state, ok := tree.open[id]; ok {
 		return state
 	}
-	tree.live[id] = livenessVisiting
-	state := livenessDone
+	state := turnClosed
 	open, err := turnOpen(filepath.Join(tree.dir, "agent-"+id+".jsonl"))
 	switch {
 	case err != nil:
 		tree.warnings = append(tree.warnings, err.Error())
-		state = livenessUnknown
+		state = turnUnread
 	case open:
-		state = livenessRunning
+		state = turnWorking
 	}
-	if state != livenessRunning {
-		for _, child := range tree.children[id] {
-			switch tree.liveness(child) {
-			case livenessRunning:
-				state = livenessRunning
-			case livenessUnknown:
-				if state == livenessDone {
-					state = livenessUnknown
-				}
-			}
-			if state == livenessRunning {
-				break
-			}
-		}
-	}
-	tree.live[id] = state
+	tree.open[id] = state
 	return state
 }
 
@@ -243,17 +221,19 @@ func messageTurnOpen(line []byte) (open, ok bool) {
 	return false, true
 }
 
-// nestingSegment renders "5 nested": every agent below the task, at any
-// depth. Absent when it spawned none; "nested ?" when the scan failed, and an
-// "(N unread)" suffix for direct children whose liveness could not be read.
+// nestingSegment renders "2/5": the agents below the task working right now
+// (green) over all of them at every depth (the tools colour). Absent when it
+// spawned none; "?/?" when the scan failed, and an "(N unread)" suffix for
+// agents whose turn state could not be read.
 func nestingSegment(nest agentNesting) string {
 	if nest.err != nil {
-		return cWarn + "nested ?" + reset
+		return cWarn + "?/?" + reset
 	}
 	if nest.total == 0 {
 		return ""
 	}
-	line := cRole + strconv.Itoa(nest.total) + " nested" + reset
+	working := cRunning + strconv.Itoa(nest.active) + reset
+	line := working + cMuted + "/" + reset + cTools + strconv.Itoa(nest.total) + reset
 	if nest.unknown > 0 {
 		line += cWarn + " (" + strconv.Itoa(nest.unknown) + " unread)" + reset
 	}

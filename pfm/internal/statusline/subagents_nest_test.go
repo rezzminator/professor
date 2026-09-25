@@ -69,7 +69,7 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 				"g1": {turnToolResult}, "g2": {turnEnded},
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p", "c3": "p", "g1": "c3", "g2": "c1"},
-			nested:  "5 nested",
+			nested:  "2/5",
 			status:  working,
 		},
 		{
@@ -78,7 +78,7 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 				"p": agentTranscriptLines, "c1": {turnEnded}, "g1": {turnToolResult},
 			},
 			parents: map[string]string{"p": "", "c1": "p", "g1": "c1"},
-			nested:  "2 nested",
+			nested:  "1/2",
 			status:  working,
 		},
 		{
@@ -88,28 +88,28 @@ func TestRenderSubagentsNestedAgents(t *testing.T) {
 				"c2": {turnEnded, `{"type":"assistant","timest`},
 			},
 			parents: map[string]string{"p": "", "c1": "p", "c2": "p"},
-			nested:  "2 nested",
+			nested:  "0/2",
 			status:  finished,
 		},
 		{
 			name:        "a reply still streaming is working",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {turnStreaming}},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			nested:      "1 nested",
+			nested:      "1/1",
 			status:      working,
 		},
 		{
 			name:        "a child spawned but not yet writing is working",
 			transcripts: map[string][]string{"p": agentTranscriptLines, "c1": {}},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			nested:      "1 nested",
+			nested:      "1/1",
 			status:      working,
 		},
 		{
 			name:        "a child whose transcript cannot be read is unread, never finished",
 			transcripts: map[string][]string{"p": agentTranscriptLines},
 			parents:     map[string]string{"p": "", "c1": "p"},
-			nested:      "1 nested (1 unread)",
+			nested:      "0/1 (1 unread)",
 			status:      finished,
 			warn:        "row p: nested agents: open sub-agent transcript",
 		},
@@ -150,13 +150,13 @@ func TestRenderSubagentsNestedCycleTerminates(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := renderOneSubagent(t, session, parentTask)
-	if strings.Contains(got, "nested") {
+	if !strings.HasPrefix(got, "▱") {
 		t.Fatalf("p lost its only child to the cycle, yet its row = %q", got)
 	}
 	aRow, _ := renderOneSubagent(t, session,
 		`{"id":"a","type":"local_agent","status":"running","tokenCount":10}`)
-	if !strings.HasPrefix(aRow, "1 nested │ ") {
-		t.Fatalf("cycle row = %q, want 1 nested", aRow)
+	if !strings.HasPrefix(aRow, "0/1 │ ") {
+		t.Fatalf("cycle row = %q, want 0/1", aRow)
 	}
 }
 
@@ -168,13 +168,13 @@ func TestRenderSubagentsNestedLongTail(t *testing.T) {
 		"p": agentTranscriptLines, "c1": {turnToolCall, long, `{"type":"assist`},
 	}, map[string]string{"p": "", "c1": "p"})
 	got, warned := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "1 nested │ ") || !strings.Contains(got, "│ completed 1m30s │") || warned != "" {
-		t.Fatalf("content = %q warn = %q, want 1 nested and completed", got, warned)
+	if !strings.HasPrefix(got, "0/1 │ ") || !strings.Contains(got, "│ completed 1m30s │") || warned != "" {
+		t.Fatalf("content = %q warn = %q, want 0/1 and completed", got, warned)
 	}
 }
 
 // A meta file that cannot be parsed hides which agent spawned it: every row
-// says "nested ?", never "none".
+// says "?/?", never "none".
 func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
 	session := nestedSession(t, map[string][]string{"p": agentTranscriptLines},
 		map[string]string{"p": ""})
@@ -183,9 +183,9 @@ func TestRenderSubagentsNestedTornMetaIsNotAbsence(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, warned := renderOneSubagent(t, session, parentTask)
-	if !strings.HasPrefix(got, "nested ? │ ▱") ||
+	if !strings.HasPrefix(got, "?/? │ ▱") ||
 		!strings.Contains(warned, "row p: nested agents: read sub-agent meta") {
-		t.Fatalf("content = %q warn = %q, want nested ? and the cause", got, warned)
+		t.Fatalf("content = %q warn = %q, want ?/? and the cause", got, warned)
 	}
 }
 
@@ -269,7 +269,7 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 			name:      "completed with a child still working: delegating, not finished",
 			task:      row("p", "completed"),
 			now:       ended.Add(2 * time.Minute),
-			wantPlain: "1 nested │ " + fullRow + "delegating" + parentTail,
+			wantPlain: "1/1 │ " + fullRow + "delegating" + parentTail,
 			check:     bright,
 		},
 	}
@@ -283,5 +283,18 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 				t.Fatalf("raw row fails its colour check: %q", raw)
 			}
 		})
+	}
+}
+
+// The working count wears the running colour and the total the tools colour,
+// so the two numbers read apart at a glance.
+func TestRenderSubagentsNestedCountColours(t *testing.T) {
+	session := nestedSession(t, map[string][]string{
+		"p": agentTranscriptLines, "c1": {turnToolCall}, "c2": {turnEnded},
+	}, map[string]string{"p": "", "c1": "p", "c2": "p"})
+	raw := renderRawSubagent(t, session, parentTask, subagentNow)
+	want := rowOpen + cRunning + "1" + reset + cMuted + "/" + reset + cTools + "2" + reset
+	if !strings.HasPrefix(raw, want) {
+		t.Fatalf("row = %q, want it to open with %q", raw, want)
 	}
 }

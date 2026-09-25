@@ -32,7 +32,7 @@ Read in the Claude Code 2.1.281 source and confirmed live:
 
 | Field | Shows | Rule |
 | --- | --- | --- |
-| nested | `5 nested` | every agent below this one, at any depth; absent when it spawned none. It leads the row because a parent row is read for it |
+| nested | `2/5` | agents below this one working right now (their own turn is open), in green, over every agent below it at any depth, in the tools colour; absent when it spawned none. It leads the row because a parent row is read for it |
 | gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize` |
 | identity | `scout·tracer` | the task name, then its role (`agentType`) |
 | model | `opus·🏎️ high` | the model family, then the effort (see [Effort](#effort)) |
@@ -61,9 +61,9 @@ Claude Code keeps each sub-agent's files beside the session's transcript: `{tran
 
 - Read from the transcript: tools, errors, cache, compactions, the last entry's time. The reader skips a streamed assistant line repeated with the same `tool_use` id, ignores `tool_use` text quoted inside a tool result, and skips a torn final line, since the agent may be mid-write.
 - Read from the meta file: the role (`agentType`).
-- Read from every meta file in the directory, once per render: the nesting. An agent spawned by another agent carries `parentAgentId` (and `spawnDepth`); one spawned by the main loop carries neither. A child works while its own turn is open or while any agent below it works, because an orchestrator that ended its turn to wait on background workers has not finished. A turn is open unless the transcript's last message entry is an assistant message with a `stop_reason` and no `tool_use` (`pfm/internal/statusline/subagents_nest.go`).
+- Read from every meta file in the directory, once per render: the nesting. An agent spawned by another agent carries `parentAgentId` (and `spawnDepth`); one spawned by the main loop carries neither. An agent is working while its own turn is open; an orchestrator that ended its turn to wait on background workers is not working, its workers are, and its row says `delegating`. A turn is open unless the transcript's last message entry is an assistant message with a `stop_reason` and no `tool_use` (`pfm/internal/statusline/subagents_nest.go`).
 
-An unreadable fact renders as a failure to look, never as zero or empty: `tools ?`, `cache ?`, `role ?`, `nested ?` when the directory or any meta file cannot be read (its parent is then unknown), and `(1 unread)` for a child whose transcript cannot be read. The cause goes to stderr, one line per row. This covers a payload with no session transcript, a missing file, a torn meta file and a meta file without `agentType`.
+An unreadable fact renders as a failure to look, never as zero or empty: `tools ?`, `cache ?`, `role ?`, `?/?` when the directory or any meta file cannot be read (its parent is then unknown), and `(1 unread)` for an agent below whose transcript cannot be read. The cause goes to stderr, one line per row. This covers a payload with no session transcript, a missing file, a torn meta file and a meta file without `agentType`.
 
 ## Effort
 

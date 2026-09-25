@@ -155,7 +155,7 @@ func RenderSubagents(raw []byte, now time.Time, sidDir string, warn io.Writer) (
 
 // subagentContent renders nested → gauge → name·role → model·effort → status
 // and time → idle → tools → errors → cache → compactions → cwd → label; the
-// nested count leads because it is what a parent row is read for, and the
+// nested count (working/all) leads because it is what a parent row is read for, and the
 // label goes last because Claude Code truncates the row's tail.
 // The cwd shows only when the agent works outside the session's own
 // directory — the same one is noise. A finished row steps back: completed, it
@@ -209,7 +209,7 @@ func rowFinished(task *subagentTask, activity *agentActivity) bool {
 	default:
 		return false
 	}
-	return activity == nil || !activity.nest.active && activity.nest.unknown == 0 && activity.nest.err == nil
+	return activity == nil || activity.nest.active == 0 && activity.nest.unknown == 0 && activity.nest.err == nil
 }
 
 func rowLabel(task *subagentTask) string {
@@ -332,7 +332,7 @@ func modelFamily(model string) string {
 func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) string {
 	status := strings.TrimSpace(task.Status)
 	live := status == taskRunning
-	if !live && activity != nil && activity.nest.active {
+	if !live && activity != nil && activity.nest.active > 0 {
 		status, live = taskDelegating, true
 	}
 	color := ""

@@ -52,13 +52,6 @@ These are **NOT hand-filled.** SETUP renders them by expanding the per-project P
 
 | Token | Concept |
 | ------------------------------------ | -------------------------------------------------------------------- |
-| `{PROJECT_AGENT_ROSTER}` | rendered list of every per-project agent across the roster |
-| `{PROJECT_PLANNER_ROSTER}` | per-roster list of planner agents |
-| `{PROJECT_ARCHITECT_ROSTER}` | per-roster list of architect agents |
-| `{PROJECT_ANALYSIS_REPORT_LIST}` | per-roster analysis-report paths |
-| `{PROJECT_ARCHITECTURE_REPORT_LIST}` | per-roster architecture-report paths |
-| `{PROJECT_DEV_REPORT_LIST}` | per-roster dev-report paths |
-| `{PROJECT_BUG_REPORT_LIST}` | per-roster bug-report paths |
 | `{ROSTER_DOC_PATHS}` | space-joined roster doc directories |
 | `{PROJECT_TYPING_RULES}` | per-stack typing block (one per roster entry's language) |
 | `{PROJECT_TYPECHECK}` | per-project typecheck command |
@@ -192,7 +185,7 @@ This makes the codex-touched files a 3-way merge — read all three:
 2. **Current blueprint template** (re-inject the Codex sections/lines/refs that live deleted).
 3. **This map** (apply placeholders).
 
-Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), `commands/pcm.md` (keep ALL Codex-management: invariants stay at 10, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` in the allow-list; its body is curated upstream on `rumdl` + the repo-root `.rumdl.toml` — a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
+Codex-touched shipped templates: root `CLAUDE.md` (keep the "Two-runtime team" section + `.codex/` refs), `commands/pcm.md` (keep ALL Codex-management: every Critical invariant, Special-Ops Codex steps, codex audit scope — also fix the 34-vs-31 agent-count inconsistency to ONE consistent generic count), `scripts/format-md.sh` (keep `AGENTS.md` OUT of the allow-list — generated mirrors are rebuilt by their compiler, never formatted; a refresh never reverts it to a `prettier` call). Keep `AGENTS.md` references generally — it is the Codex-side mirror of `CLAUDE.md`.
 
 ## Ignored artifacts (do NOT ship, drop references)
 
@@ -207,9 +200,9 @@ These slot into the concept families above — registered here to close prior ga
 | the AI service's own name / codename (the source's internal AI-service brand) | `{AI_SERVICE_NAME}` | Identity |
 | the test database name (e.g. `<project>_test`) | `{TEST_DB_NAME}` | Tech stack |
 | transcript / case note / session record (the artifact holding `{SENSITIVE_DATA}`) | `{RECORD_NOUN}` | Domain nouns |
-| illustrative persona examples — a tech artifact, a domain artifact, a domain risk (Professor opening + Model Selection examples) | `{TECH_EXAMPLE_A}` / `{DOMAIN_EXAMPLE_A}` / `{DOMAIN_RISK_EXAMPLE}` | Persona |
+| illustrative persona example — a domain risk (Three lenses at once, § MANDATORY Rules → Meta) | `{DOMAIN_RISK_EXAMPLE}` | Persona |
 | the Codex model this repo defaults to (`templates/project/codex/config.toml` `model =`) | `{CODEX_MODEL}` | Model pins |
-| the Codex model id named per tier in the token-audit `PRICING` notes (smart / mechanical / collector) | `{CODEX_MODEL_SMART}` / `{CODEX_MODEL_MECHANICAL}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
+| the Codex model id named per tier in `templates/project/scripts/build-codex.mjs`'s `MODEL_MAP` (smart / mechanical / collector) | `{CODEX_MODEL_SMART}` / `{CODEX_MODEL_MECHANICAL}` / `{CODEX_MODEL_COLLECTOR}` | Model pins |
 | the Codex reasoning effort this repo defaults to (`templates/project/codex/config.toml` `model_reasoning_effort =`) | `{CODEX_REASONING_EFFORT}` | Model pins |
 | the database CLI forbidden at the execpolicy layer (e.g. `psql`) | `{DB_CLI}` | Tech stack |
 | the container runtime forbidden at the execpolicy layer (e.g. `docker`) | `{CONTAINER_RUNTIME}` | Tech stack |

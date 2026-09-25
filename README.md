@@ -88,7 +88,7 @@ DENIED — infra edits route through /pcm: open this session's gate from the rep
 Do NOT route around this by disabling the hook or editing infra outside /pcm.
 ```
 
-The refusal carries its own unlock steps. That is one of 26 mandatory rules every install ships with: only `gitter` writes git; fix loops cap at three attempts, then `BLOCKED-DEFERRED`; read-only mappers (`tracer`) are separated from judges (`reviewer`); and **every check names what its own broken state reports** — a gate that says "fine" when healthy and when broken is a coincidence detector.
+The refusal carries its own unlock steps. That is one of the mandatory rules every install ships with: only `gitter` writes git; guarded files sit behind `/pcm`; and **an error never renders as ABSENCE** — "we failed to look" is never shown as "nothing there".
 
 ### 4. Read what the web hides from bots
 
@@ -163,10 +163,10 @@ The single idea underneath it is the **honest-looking absence** — an instrumen
 
 > An empty enumeration is never a verdict.
 
-- **One agent writes git.** `gitter` runs six named phases (SETUP, COMMIT, MERGE, PUSH, PULL, TAG). No other agent commits.
+- **One agent writes git.** `gitter` is the only agent that commits; every other agent is read-only.
 - **Guarded files.** `.claude/**` and every `CLAUDE.md` sit behind `/pcm` plus a session that has read the quality-prompt contract.
 - **The judge is never the thing being judged.** Verdicts are read from disk, never from a brief that asserts green.
-- **The flight pipeline.** `/flights:spec` turns a batch of work into one self-contained task file per executor; one of the `/flights:orchestrate-*` commands runs a fresh executor per file and verifies every return against the diff; the landing runs the standing checks once, sends each hard task's diff to a cold `reviewer`, and leaves the commit to `gitter`. `/flights:audit` re-reads the whole flight from its own artifacts, never from what an agent said it did.
+- **The flight pipeline.** `/flights:spec` turns a batch of work into one self-contained task file per executor; one of the `/flights:orchestrate-*` commands runs a fresh executor per file and verifies every return against the diff; one `flights-lander` per project runs the checks, one review of the whole diff and adversarial tests, then `gitter` commits. `/flights:audit` re-reads the whole flight from its own artifacts, never from what an agent said it did.
 - **The persona is load-bearing.** The Professor prompt replaces the vendor system prompt; the vendor baselines are pinned by sha256 so `pfm doctor` reports `MATCHES / DRIFT / CHECK FAILED / CANNOT CAPTURE` — never silence.
 
 Optional roles ship for teams that want them — `/officer`, `/mentor`, `/marketer` — along with a legal skill shelf. **The philosophy lives in [docs/BLUEPRINT.md](docs/BLUEPRINT.md).**

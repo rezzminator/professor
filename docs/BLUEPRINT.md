@@ -53,6 +53,7 @@ Every command, agent, and rule sorts into one of three tiers:
 **Machine-global skills (shipped under `templates/global/skills/`; its `sources.json` declares the source-fetched ones and the in-tree links):**
 
 - **deep-rr** — in-tree research protocol under `workflows/deep-rr/`, linked by host installation.
+- **codeprobe** — in-tree skill under `templates/global/skills/codeprobe/`: the extraction and probe script `collector` and `mapper` run.
 - **ghostwriter** — captures a writer's mechanical fingerprint and generates in that voice.
 - **vision-factory** — forge, validate, and stress-test a startup vision.
 
@@ -89,7 +90,7 @@ The `gitter` agent is the **single git operator**. No other agent runs `git add`
 - Prevents agents from racing each other for the merge.
 - Makes "what got committed" auditable.
 
-If an agent needs to commit, it asks gitter. Gitter has phases: SETUP, COMMIT, MERGE, PUSH, PULL, and TAG. The active main Codex chat may use the explicit-authority fallback only when the registered role is unavailable; subagents remain read-only.
+If an agent needs to commit, it asks gitter. Gitter has phases: SETUP, COMMIT, MERGE, DOCS-COMMIT, PUSH, and PULL. The active main Codex chat may use the explicit-authority fallback only when the registered role is unavailable; subagents remain read-only.
 
 ### 2. QA gates the merge
 
@@ -109,7 +110,7 @@ Agents receive paths as variables:
 | `$CDOCS` | Command-owned docs root | `docs/commands` |
 | `$REFS` | Reference docs subdir | `references` |
 | `$RESEARCH` | Research docs subdir | `research` |
-| `$RESOURCES` | Static resources subdir | `resources` |
+| `$RESOURCE` | Static resources subdir | `resource` |
 
 Agents NEVER hardcode `docs/dev/tasks/...` — they use what the brief that spawned them passes. Path conventions can change without rewriting every agent.
 
@@ -203,10 +204,10 @@ your-project/
 │   └── baseline.json                  ← per-local-file template hash + blueprint SHA pins (pfm-owned)
 ├── .claude/
 │   ├── agents/                        ← root agents (gitter; tracer and the whole flights cast are machine-global)
-│   ├── commands/                      ← /pcm, /pfm (the CLI guide), /context-meter, /dev, /audit:{code-hygiene,security}, /quality:{prompt,doc}, /rnd, /tokens + opt-in Tier B (`/flights:*` and `/reload` are NOT here — `pfm install` installs them host-level)
+│   ├── commands/                      ← /pcm, /dev, /rnd, /audit:{code-hygiene,security}, the `{project}-testing-manual` command + opt-in Tier B (`/officer`, `/mentor`, `/marketer`) (host-level: `/flights:*`, /pfm, /context-meter, /quality:*, /tokens, /h:gh — `pfm install` installs them host-level)
 │   ├── scripts/                       ← worktree.sh, alloc-ports.sh, dev.sh, format-md.sh, checkpoint.sh, git-lock.sh, guard-stamp.sh, drain-wait.sh
 │   ├── skills/                        ← bundled legal shelf + project source registry; machine-global skills live under templates/global/skills/ (its sources.json declares the fetched ones)
-│   └── settings.json                  ← permissions, env vars, hooks (notify, formatter, statusline)
+│   └── settings.json                  ← permissions, env vars, hooks (pfm-guard, guard-stamp, format-md, codex-sync)
 ├── .codex/                            ← (OPTIONAL) pointer layer over .claude/ — never a restatement of it
 │   ├── config.toml                    ← sandbox reach + the {CODEX_MODEL}/{CODEX_REASONING_EFFORT} pins
 │   ├── rules/                         ← repo-law.rules — execpolicy door lock for non-gitter roles
@@ -249,7 +250,7 @@ A `.claude/` infrastructure — a **transplantable nervous system** — that tur
 - **Worktree isolation** — every feature gets its own git worktree branch + a unique port allocation. Multiple parallel pipelines on the same repo without collisions.
 - **A pipeline that refuses cowboy coding** — one task file per executor, every return verified against its diff, a `flights-lander` per project blocking bad code from reaching `main`.
 - **One agent owns git** — only `gitter` runs `git add` / `commit` / `merge`. Centralized, auditable, safe.
-- **Cross-disciplinary analysis** — the Professor brings 15+ PhDs to bear on architecture, design, and safety/correctness questions. The Analysis Protocol lives in the fleet prompt's shared head (`pfm/harness-prompts/share/head.md`), injected via `pfm` `claude.systemPrompt = "professor"`.
+- **Cross-disciplinary analysis** — the Professor brings 15+ PhDs to bear on architecture, design, and safety/correctness questions. The three-lens rule (Computer Science, domain, compliance) ships in the project `CLAUDE.md` template, § MANDATORY Rules → Meta, "Three lenses at once".
 - **Self-improvement** — `/pcm` is the change manager that edits its own pipeline rules at the source.
 - **Optional dual-runtime** — Codex (OpenAI) can mirror the Claude pipeline as a cheaper implementation layer. Same manuals, different runtime. Everything works without it.
 - **Path conventions that scale** — `$DOCS`, `$WORKTREE`, `$CDOCS` so agents never hardcode paths.

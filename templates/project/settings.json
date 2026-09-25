@@ -2,7 +2,6 @@
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "0"
   },
-  "enabledMcpjsonServers": ["context7", "playwright"],
   "permissions": {
     "allow": [
       "Bash(*)",
@@ -10,10 +9,7 @@
       "WebSearch(*)",
       "Workflow(*)",
       "Read(*)",
-      "Write(*)",
-      "mcp__context7__resolve-library-id",
-      "mcp__context7__query-docs",
-      "mcp__playwright"
+      "Write(*)"
     ]
   },
   "hooks": {

@@ -32,17 +32,16 @@ Read in the Claude Code 2.1.281 source and confirmed live:
 
 | Field | Shows | Rule |
 | --- | --- | --- |
+| nested | `5 nested` | every agent below this one, at any depth; absent when it spawned none. It leads the row because a parent row is read for it |
 | gauge | `▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M` | `tokenCount` of `contextWindowSize` |
 | identity | `scout·tracer` | the task name, then its role (`agentType`) |
 | model | `opus·🏎️ high` | the model family, then the effort (see [Effort](#effort)) |
-| status | `running 2m0s` | status plus time since `startTime`; a finished task's clock stops at its transcript's last entry |
+| status | `running 2m0s` | status plus time since `startTime`; a finished task's clock stops at its transcript's last entry. `delegating` replaces a stopped status while any agent below still works, and its clock runs on |
 | idle | `idle 1m20s` | only while running and silent for 60 s or more; yellow, red from 5 min |
-| agents | `⤷3 agents +2 nested (1 running)` | the agents this one spawned: direct children, the descendants below them, and the direct children still running (`done` when none is); absent when it spawned none |
 | tools | `12 tools` | distinct `tool_use` ids in the sub-agent's transcript |
 | errors | `1 error` | tool results marked `is_error`; absent at zero |
 | cache | `cache 94%` | cache reads over total input on the newest assistant usage |
 | compactions | `⟲2` | `compact_boundary` entries; absent at zero |
-| growth | `_⎽⎼⎻⎺¯` | `tokenSamples` as a sparkline scaled to its own peak |
 | cwd | `repo` | only when it differs from the session's cwd |
 | label | the task's label, else its description | |
 
@@ -50,7 +49,7 @@ The row opens with `ESC[22m`, which cancels Claude Code's faint, so the colours 
 
 ### A finished row
 
-A row is finished once its status is `completed`, `failed`, `killed` or `error` and no agent below it still runs; Claude Code marks an orchestrator completed while its background workers work on, and that row stays a full row.
+A row is finished once its status is `completed`, `failed`, `killed` or `error` and no agent below it still works. Claude Code marks an orchestrator completed while its background workers work on; that row says `delegating` and stays a full row.
 
 - A completed row, for its first minute: the whole row in one muted colour, without `ESC[22m`, so Claude Code's faint stays on and the row reads as disabled.
 - A failed, killed or errored row, for its first minute: a full row, because it is an alert.
@@ -62,9 +61,9 @@ Claude Code keeps each sub-agent's files beside the session's transcript: `{tran
 
 - Read from the transcript: tools, errors, cache, compactions, the last entry's time. The reader skips a streamed assistant line repeated with the same `tool_use` id, ignores `tool_use` text quoted inside a tool result, and skips a torn final line, since the agent may be mid-write.
 - Read from the meta file: the role (`agentType`).
-- Read from every meta file in the directory, once per render: the nesting. An agent spawned by another agent carries `parentAgentId` (and `spawnDepth`); one spawned by the main loop carries neither. A child counts as running while its own turn is open or while any agent below it runs, because an orchestrator that ended its turn to wait on background workers has not finished. A turn is open unless the transcript's last message entry is an assistant message with a `stop_reason` and no `tool_use` (`pfm/internal/statusline/subagents_nest.go`).
+- Read from every meta file in the directory, once per render: the nesting. An agent spawned by another agent carries `parentAgentId` (and `spawnDepth`); one spawned by the main loop carries neither. A child works while its own turn is open or while any agent below it works, because an orchestrator that ended its turn to wait on background workers has not finished. A turn is open unless the transcript's last message entry is an assistant message with a `stop_reason` and no `tool_use` (`pfm/internal/statusline/subagents_nest.go`).
 
-An unreadable fact renders as a failure to look, never as zero or empty: `tools ?`, `cache ?`, `role ?`, `agents ?` when the directory or any meta file cannot be read (its parent is then unknown), and `(1 ?)` for a child whose transcript cannot be read. The cause goes to stderr, one line per row. This covers a payload with no session transcript, a missing file, a torn meta file and a meta file without `agentType`.
+An unreadable fact renders as a failure to look, never as zero or empty: `tools ?`, `cache ?`, `role ?`, `nested ?` when the directory or any meta file cannot be read (its parent is then unknown), and `(1 unread)` for a child whose transcript cannot be read. The cause goes to stderr, one line per row. This covers a payload with no session transcript, a missing file, a torn meta file and a meta file without `agentType`.
 
 ## Effort
 
@@ -92,7 +91,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 One definition in `palette.go` serves both surfaces, so a part that means the same thing on both (model, effort, tokens, elapsed time) wears the same colour. The colours are bright 256-colour tones, chosen to stay legible over Claude Code's faint row body.
 
-Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no Block Elements, Braille or Powerline. The gauge uses Geometric Shapes (`▰▱`), and the sparkline uses the scan-line ladder `_⎽⎼⎻⎺¯`. `🏍️`, `🏎️` and `🛰️` are two code points each, the base plus a variation selector. A terminal that counts them as one column shifts the text after them by one cell; they have rendered in the host's tmux panes since install, and the single-code-point fallbacks are 🛵 (medium) and 🚘 (high).
+Glyphs obey the WebGL glyph guard (`pfm/cmd/pfm/webgl_glyph_guard_test.go`): no Block Elements, Braille or Powerline. The gauge uses Geometric Shapes (`▰▱`). `🏍️`, `🏎️` and `🛰️` are two code points each, the base plus a variation selector. A terminal that counts them as one column shifts the text after them by one cell; they have rendered in the host's tmux panes since install, and the single-code-point fallbacks are 🛵 (medium) and 🚘 (high).
 
 ## What it does not do
 

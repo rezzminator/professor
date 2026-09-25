@@ -12,15 +12,14 @@ import (
 	"strings"
 )
 
-// agentNesting is what a row says about the agents its task spawned: its
-// direct children, the deeper descendants under them, and how many direct
-// children are still running. err is a failure to look (the subagents
-// directory or a meta file could not be read) and renders "agents ?", never
-// as "no children"; unknown is a child whose liveness could not be read.
+// agentNesting is what a row says about the agents below its task: how many
+// there are at every depth, and whether any of them still works. err is a
+// failure to look (the subagents directory or a meta file could not be read)
+// and renders "nested ?", never as "none"; unknown counts direct children
+// whose liveness could not be read.
 type agentNesting struct {
-	direct  int
-	nested  int
-	running int
+	total   int
+	active  bool
 	unknown int
 	err     error
 }
@@ -92,19 +91,17 @@ func scanAgentTree(sessionTranscript string) *agentTree {
 	return tree
 }
 
-// nesting counts one task's descendants and how many of its direct children
-// are still running — a child counts as running while its own turn is open or
-// while any agent under it runs, because an orchestrator that ended its turn
-// to wait on background workers has not finished.
+// nesting counts every agent below one task, at any depth, and whether any
+// of them still works — a child works while its own turn is open or while an
+// agent below it works, because an orchestrator that ended its turn to wait on
+// background workers has not finished.
 func (tree *agentTree) nesting(id string) agentNesting {
 	if tree.err != nil {
 		return agentNesting{err: tree.err}
 	}
 	var nest agentNesting
-	direct := tree.children[id]
-	nest.direct = len(direct)
 	seen := map[string]bool{id: true}
-	queue := append([]string(nil), direct...)
+	queue := append([]string(nil), tree.children[id]...)
 	for len(queue) > 0 {
 		next := queue[0]
 		queue = queue[1:]
@@ -114,11 +111,11 @@ func (tree *agentTree) nesting(id string) agentNesting {
 		seen[next] = true
 		queue = append(queue, tree.children[next]...)
 	}
-	nest.nested = len(seen) - 1 - nest.direct
-	for _, child := range direct {
+	nest.total = len(seen) - 1
+	for _, child := range tree.children[id] {
 		switch tree.liveness(child) {
 		case livenessRunning:
-			nest.running++
+			nest.active = true
 		case livenessUnknown:
 			nest.unknown++
 		}
@@ -246,30 +243,19 @@ func messageTurnOpen(line []byte) (open, ok bool) {
 	return false, true
 }
 
-// nestingSegment renders ⤷3 agents +4 nested (1 running): direct children,
-// the descendants below them, and the direct children still running — "done"
-// when none is, "?" for a child whose transcript could not be read. Absent
-// for an agent that spawned none; "agents ?" when the scan failed.
+// nestingSegment renders "5 nested": every agent below the task, at any
+// depth. Absent when it spawned none; "nested ?" when the scan failed, and an
+// "(N unread)" suffix for direct children whose liveness could not be read.
 func nestingSegment(nest agentNesting) string {
 	if nest.err != nil {
-		return cWarn + "agents ?" + reset
+		return cWarn + "nested ?" + reset
 	}
-	if nest.direct == 0 {
+	if nest.total == 0 {
 		return ""
 	}
-	line := cRole + "⤷" + plural(nest.direct, "agent") + reset
-	if nest.nested > 0 {
-		line += cMuted + " +" + strconv.Itoa(nest.nested) + " nested" + reset
-	}
-	var states []string
-	if nest.running > 0 {
-		states = append(states, cRunning+strconv.Itoa(nest.running)+" running"+reset)
-	}
+	line := cRole + strconv.Itoa(nest.total) + " nested" + reset
 	if nest.unknown > 0 {
-		states = append(states, cWarn+strconv.Itoa(nest.unknown)+" ?"+reset)
+		line += cWarn + " (" + strconv.Itoa(nest.unknown) + " unread)" + reset
 	}
-	if len(states) == 0 {
-		states = append(states, cMuted+"done"+reset)
-	}
-	return line + cMuted + " (" + reset + strings.Join(states, cMuted+", "+reset) + cMuted + ")" + reset
+	return line
 }

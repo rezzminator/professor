@@ -118,13 +118,13 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 				`"model":"claude-opus-5-5[1m]","effort":"high","contextWindowSize":1000000,"tokenCount":312000,` +
 				`"tokenSamples":[0,125000,250000,500000,1000000]`),
 			want: "▰▰▱▱▱▱▱▱ 31% 312.0K/1.0M │ scout·tracer │ opus·🏎️ high │ running 2m0s │ 2 tools │ 1 error │ cache 94% │ " +
-				"⟲1 │ __⎽⎼¯ │ pfm │ map the resolver",
+				"⟲1 │ pfm │ map the resolver",
 		},
 		{
 			name: "a finished agent's time stops at its transcript's last entry",
 			task: task(`"id":"a1","type":"local_agent","status":"completed","label":"x","model":"claude-sonnet-5",` +
 				`"contextWindowSize":1000000,"tokenCount":90000,"tokenSamples":[900000,90000]`),
-			want: "▱▱▱▱▱▱▱▱ 9% 90.0K/1.0M │ tracer │ sonnet │ completed 1m30s │ 2 tools │ 1 error │ cache 94% │ ⟲1 │ ¯_ │ pfm │ x",
+			want: "▱▱▱▱▱▱▱▱ 9% 90.0K/1.0M │ tracer │ sonnet │ completed 1m30s │ 2 tools │ 1 error │ cache 94% │ ⟲1 │ pfm │ x",
 		},
 		{
 			name: "no model turn yet: zero tools, an empty cache, and idle since its prompt",
@@ -139,10 +139,10 @@ func TestRenderSubagentsRowBodies(t *testing.T) {
 			want: "▰▰▰▰▰▰▱▱ 80% 160.0K/200.0K │ running 2m0s │ pfm │ from the description",
 		},
 		{
-			name: "an effort that is not a string is left out; a name shows without a role",
+			name: "an effort that is not a string is left out; a name shows without a role; no growth line",
 			task: `{"id":"e","name":"bot","status":"running","model":"claude-haiku-4","effort":{"level":"high"},` +
 				`"tokenCount":4200,"tokenSamples":[2100,4200]}`,
-			want: "4.2K │ bot │ haiku │ running │ ⎼¯",
+			want: "4.2K │ bot │ haiku │ running",
 		},
 		{
 			name: "an agent in the session's own directory shows no cwd",

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -228,9 +230,7 @@ func TestStdioProxyConcurrentRecoveryReinitializesOnce(t *testing.T) {
 					close(firstCallsReady)
 				}
 				<-releaseFirstCalls
-				return &http.Response{
-					StatusCode: http.StatusServiceUnavailable, Header: make(http.Header), Body: http.NoBody,
-				}, nil
+				return proxyTestSessionLost(), nil
 			}
 			return &http.Response{
 				StatusCode: http.StatusOK,
@@ -617,6 +617,16 @@ func TestStdioProxyWaitsForDaemonInsideRetryWindow(t *testing.T) {
 	defer server.Close()
 
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)
+	// A restarting daemon has no listener: its route refuses the connection.
+	proxy.client = &http.Client{Transport: proxyTestTransport(func(request *http.Request) (*http.Response, error) {
+		mutex.RLock()
+		restarting := current == nil
+		mutex.RUnlock()
+		if restarting {
+			return nil, &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+		}
+		return http.DefaultTransport.RoundTrip(request)
+	})}
 	proxy.expectedRuntimeIdentity = "sha256:proxy-test"
 	proxy.identity = nil
 	proxy.retryWindow = 500 * time.Millisecond
@@ -659,7 +669,7 @@ func TestStdioProxyRefusesReplayIntoDifferentRuntime(t *testing.T) {
 			return
 		}
 		routeCalls.Add(1)
-		writer.WriteHeader(http.StatusServiceUnavailable)
+		http.Error(writer, "session not found", http.StatusNotFound)
 	}))
 	defer server.Close()
 	proxy := newStdioProxy(context.Background(), proxyTestAddress(server), io.Discard)

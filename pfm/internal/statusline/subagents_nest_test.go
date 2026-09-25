@@ -221,8 +221,8 @@ func TestRenderSubagentsFinishedRowsStepBack(t *testing.T) {
 	}
 	const (
 		fullRow    = "▱▱▱▱▱▱▱▱ 1% 10/1.0K │ scout·general-purpose │ opus │ "
-		fullTail   = " 1m30s │ 2 tools │ 1 error │ cache 94% │ ⟲1 │ map it"
-		parentTail = " 3m30s │ 2 tools │ 1 error │ cache 94% │ ⟲1 │ map it"
+		fullTail   = " 1m30s │ 2 tools │ 1 error │ 💾+40 │ ⟲1 │ map it"
+		parentTail = " 3m30s │ 2 tools │ 1 error │ 💾+40 │ ⟲1 │ map it"
 	)
 	mutedWhole := func(raw string) bool {
 		return strings.HasPrefix(raw, cMuted) && strings.Count(raw, "\x1b[") == 2 && strings.HasSuffix(raw, reset)

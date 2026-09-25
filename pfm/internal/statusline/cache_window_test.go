@@ -1,6 +1,7 @@
 package statusline
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,11 +123,49 @@ func TestCacheWindowSegmentUsesMeasuredLengthAndWrite(t *testing.T) {
 	)
 	root := t.TempDir()
 	runtime := Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}}
-	got := stripANSICodes(cacheWindowSegment(runtime, now, path, 4200))
-	if !strings.Contains(got, "💾5m✓3m:0s +4.2K") {
-		t.Fatalf("segment = %q, want the measured 5m window and +4.2K", got)
+	got := stripANSICodes(cacheWindowSegment(runtime, now, path, 94, nil))
+	if !strings.Contains(got, "💾5m✓3m:0s 94%") {
+		t.Fatalf("segment = %q, want the measured 5m window and 94%%", got)
 	}
-	if big := cacheWindowSegment(runtime, now, path, 207_108); !strings.Contains(big, cBad+"+207.1K") {
-		t.Fatalf("a full re-write must read red: %q", big)
+	cold := cacheWindowSegment(runtime, now, path, cacheHitPercent(27_615, 207_108, 2), nil)
+	if !strings.Contains(cold, cBad+"11%") {
+		t.Fatalf("a full re-write must read red: %q", cold)
+	}
+}
+
+// Claude Code measures the cache from its own requests and sends the expiry in
+// the payload's prompt_cache; when present it wins over the transcript, which
+// here claims a different TTL and an older request.
+func TestCacheWindowPrefersTheHarnessExpiry(t *testing.T) {
+	now := time.Date(2026, 9, 2, 10, 2, 0, 0, time.UTC)
+	path := writeTranscript(
+		t,
+		`{"type":"user","timestamp":"2026-09-02T09:00:00.000Z","message":{"role":"user","content":"go"}}`,
+	)
+	root := t.TempDir()
+	runtime := Runtime{Home: root, CacheDir: filepath.Join(root, "cache"), Env: map[string]string{}}
+	var payload input
+	raw := `{"prompt_cache":{"warm":true,"ttl":"1h","expires_at":` + jsonText(now.Add(59*time.Minute).Unix()) + `}}`
+	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
+		t.Fatal(err)
+	}
+	got := stripANSICodes(cacheWindowSegment(runtime, now, path, 99, payload.PromptCache))
+	if !strings.Contains(got, "💾1h✓59m:0s 99%") {
+		t.Fatalf("segment = %q, want the harness's 1h window with 59m left", got)
+	}
+	lapsed := jsonText(now.Add(-2 * time.Minute).Unix())
+	expired := `{"prompt_cache":{"warm":false,"ttl":"5m","expires_at":` + lapsed + `}}`
+	payload = input{}
+	if err := json.Unmarshal([]byte(expired), &payload); err != nil {
+		t.Fatal(err)
+	}
+	got = stripANSICodes(cacheWindowSegment(runtime, now, path, -1, payload.PromptCache))
+	if !strings.Contains(got, "💾5m✗2m:0s") {
+		t.Fatalf("segment = %q, want the harness's expired 5m window", got)
+	}
+	noExpiry := &promptCache{TTL: "5m"}
+	got = stripANSICodes(cacheWindowSegment(runtime, now, path, -1, noExpiry))
+	if strings.Contains(got, "5m✓") {
+		t.Fatalf("a prompt_cache without expiry must fall back to the transcript, got %q", got)
 	}
 }

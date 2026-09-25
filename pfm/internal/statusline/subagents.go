@@ -48,7 +48,7 @@ type subagentRow struct {
 }
 
 // agentActivity is what a sub-agent's own files add to the payload: its role
-// from agent-<id>.meta.json, the rest from agent-<id>.jsonl. cacheWrite is -1
+// from agent-<id>.meta.json, the rest from agent-<id>.jsonl. cacheHit is -1
 // until the first model turn lands; err means the transcript could not be
 // read and roleErr the meta file, each rendering "?" — never as zero or empty.
 type agentActivity struct {
@@ -57,7 +57,8 @@ type agentActivity struct {
 	tools       int
 	errors      int
 	compactions int
-	cacheWrite  int64
+	cacheHit    int
+	transcript  string
 	last        time.Time
 	err         error
 	nest        agentNesting
@@ -364,14 +365,14 @@ func subagentStatus(task *subagentTask, activity *agentActivity, now time.Time) 
 	return segment + " " + elapsed
 }
 
-// activitySegments renders idle → tools → errors → cache write → compactions
-// from the transcript; idle, errors and compactions appear only when they say
-// something. The cache write is what the newest call wrote to the prompt
-// cache (+4.2K), in the main line's colours. A transcript that could not be
-// read shows "?" for tools and the cache.
+// activitySegments renders idle → tools → errors → cache → compactions from
+// the transcript; idle, errors and compactions appear only when they say
+// something. The cache segment has the main line's shape: the time left on the
+// agent's own prompt cache, then the share of its newest call's prompt read
+// from it. A transcript that could not be read shows "tools ?" and "💾!".
 func activitySegments(activity agentActivity, running bool, now time.Time) string {
 	if activity.err != nil {
-		return cWarn + "tools ?" + reset + sep + cWarn + "💾?" + reset
+		return cWarn + "tools ?" + reset + sep + cBad + "💾!" + reset
 	}
 	line := ""
 	if quiet := now.Sub(activity.last); running && !activity.last.IsZero() && quiet >= stallAfter {
@@ -385,11 +386,7 @@ func activitySegments(activity agentActivity, running bool, now time.Time) strin
 	if activity.errors > 0 {
 		line = appendSegment(line, cBad+plural(activity.errors, "error")+reset)
 	}
-	if activity.cacheWrite < 0 {
-		line = appendSegment(line, cMuted+"💾–"+reset)
-	} else {
-		line = appendSegment(line, cTools+"💾"+reset+cacheWriteText(activity.cacheWrite))
-	}
+	line = appendSegment(line, agentCacheText(activity.transcript, activity.cacheHit, now))
 	if activity.compactions > 0 {
 		line = appendSegment(line, cCompaction+fmt.Sprintf("⟲%d", activity.compactions)+reset)
 	}
@@ -406,11 +403,11 @@ func plural(count int, noun string) string {
 // readAgentActivity reads the sub-agent's own files, which Claude Code keeps
 // beside the session's: <session>/subagents/agent-<id>.{meta.json,jsonl}. It
 // counts distinct tool_use blocks, errored tool results and compact
-// boundaries, takes the cache write from the newest assistant usage, and the
+// boundaries, takes the cache hit from the newest assistant usage, and the
 // newest entry timestamp. A torn final line — the agent is
 // mid-write — is skipped, not an error.
 func readAgentActivity(sessionTranscript, id string) agentActivity {
-	activity := agentActivity{cacheWrite: -1}
+	activity := agentActivity{cacheHit: -1}
 	if strings.TrimSpace(sessionTranscript) == "" {
 		activity.err = errors.New("payload names no session transcript")
 		activity.roleErr = activity.err
@@ -419,6 +416,7 @@ func readAgentActivity(sessionTranscript, id string) agentActivity {
 	base := filepath.Join(strings.TrimSuffix(sessionTranscript, ".jsonl"), "subagents", "agent-"+id)
 	activity.role, activity.roleErr = readAgentRole(base + ".meta.json")
 	path := base + ".jsonl"
+	activity.transcript = path
 	file, err := os.Open(path)
 	if err != nil {
 		activity.err = fmt.Errorf("open sub-agent transcript %s: %w", path, err)
@@ -470,6 +468,8 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		Message   struct {
 			Content json.RawMessage `json:"content"`
 			Usage   *struct {
+				Input         int64 `json:"input_tokens"`
+				CacheRead     int64 `json:"cache_read_input_tokens"`
 				CacheCreation int64 `json:"cache_creation_input_tokens"`
 			} `json:"usage"`
 		} `json:"message"`
@@ -506,6 +506,8 @@ func recordTranscriptLine(line []byte, seen map[string]struct{}, activity *agent
 		return
 	}
 	if usage := entry.Message.Usage; usage != nil {
-		activity.cacheWrite = usage.CacheCreation
+		if hit := cacheHitPercent(usage.CacheRead, usage.CacheCreation, usage.Input); hit >= 0 {
+			activity.cacheHit = hit
+		}
 	}
 }

@@ -44,12 +44,13 @@ func renderContextLine(runtime Runtime, data input, project string, now time.Tim
 	}
 	// Never width-gated: an absent cache timer is indistinguishable from an
 	// expired one. The segment reports transcript readability itself.
-	// Codex reports no cache writes: the tail is Claude's alone.
-	written := int64(-1)
-	if contextTokens > 0 && runtime.Engine != pfmengine.Codex {
-		written = data.ContextWindow.CurrentUsage.CacheCreationInputTokens
+	// Codex reports no cache split: the tail is Claude's alone.
+	hit := -1
+	if runtime.Engine != pfmengine.Codex {
+		usage := data.ContextWindow.CurrentUsage
+		hit = cacheHitPercent(usage.CacheReadInputTokens, usage.CacheCreationInputTokens, usage.InputTokens)
 	}
-	return gauge, l2 + cacheWindowSegment(runtime, now, data.TranscriptPath, written), contextTokens
+	return gauge, l2 + cacheWindowSegment(runtime, now, data.TranscriptPath, hit, data.PromptCache), contextTokens
 }
 
 // transcriptGauge makes the transcript authoritative whenever it can be read.

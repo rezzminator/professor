@@ -13,17 +13,44 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 )
 
-// cacheWindowSegment renders the prompt cache's time left and what the last
-// call wrote to it: 💾1h✓59m:28s +4.2K. The window's length is the one the
+// cacheWindowSegment renders the prompt cache's time left and the share of
+// the last call's prompt read from it: 💾1h✓59m:28s 94%. The window's length is the one the
 // newest cache write actually used (usage.cache_creation), not an assumption;
 // the environment decides it only for a transcript that records none.
-// written < 0 means the harness reported no usage yet, and drops the tail.
-func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string, written int64) string {
-	window := sep + cacheWindowText(runtime, now, transcriptPath)
-	if written < 0 {
+// hit < 0 means the harness reported no usage yet, and drops the tail.
+// Claude Code's own prompt_cache (its request clock and TTL) wins whenever it
+// carries an expiry; the transcript is read only when it does not.
+func cacheWindowSegment(runtime Runtime, now time.Time, transcriptPath string, hit int, harness *promptCache) string {
+	window := ""
+	if text, ok := harness.windowText(now); ok {
+		window = sep + text
+	} else {
+		window = sep + cacheWindowText(runtime, now, transcriptPath)
+	}
+	if hit < 0 {
 		return window
 	}
-	return window + " " + cacheWriteText(written)
+	return window + " " + cacheHitText(hit)
+}
+
+// promptCache is the statusline payload's prompt_cache object: Claude Code
+// measures the cache from its own requests, so its expiry needs no guessing.
+type promptCache struct {
+	TTL       string `json:"ttl"`
+	ExpiresAt *int64 `json:"expires_at"`
+}
+
+// windowText renders the harness's cache window; ok is false when the payload
+// carries no expiry (no cached request yet, or a build without the field).
+func (cache *promptCache) windowText(now time.Time) (string, bool) {
+	if cache == nil || cache.ExpiresAt == nil {
+		return "", false
+	}
+	label := strings.TrimSpace(cache.TTL)
+	if label == "" {
+		label = "?"
+	}
+	return countdownText(label, time.Unix(*cache.ExpiresAt, 0), now), true
 }
 
 func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) string {
@@ -73,27 +100,62 @@ func cacheWindowText(runtime Runtime, now time.Time, transcriptPath string) stri
 		}
 		return cWarn + "💾" + label + "?" + reset
 	}
-	remaining := ttl - now.Sub(window.anchor)
+	return countdownText(label, window.anchor.Add(ttl), now)
+}
+
+// countdownText renders a live or lapsed cache window: 💾1h✓59m:28s, 💾5m✗2m:0s.
+func countdownText(label string, expires, now time.Time) string {
+	remaining := expires.Sub(now)
 	if remaining > 0 {
 		return cGood + "💾" + label + "✓" + formatCacheTime(remaining, false) + reset
 	}
 	return cBad + "💾" + label + "✗" + formatCacheTime(-remaining, true) + reset
 }
 
-// cacheWriteText renders the tokens one call wrote to the prompt cache — the
-// part of its prompt that was new since the call before, paid at the write
-// price: +4.2K. Green under 20K (an ordinary step), yellow under 100K (a big
-// tool result or a first call), red above (the context re-written: the window
-// lapsed or its opening changed).
-func cacheWriteText(tokens int64) string {
-	color := cGood
+// agentCacheText is a sub-agent row's cache segment in the main line's shape —
+// 💾5m✓3m:8s 94% — measured from the agent's own transcript: the length its
+// newest cache write used, counted from its newest request. The row payload
+// carries no prompt_cache per agent. hit < 0 (no reply yet) renders 💾–.
+func agentCacheText(transcript string, hit int, now time.Time) string {
+	if hit < 0 {
+		return cMuted + "💾–" + reset
+	}
+	window := cacheAnchorIn(transcript, true)
+	label := "?"
+	ttl := 5 * time.Minute
+	switch window.ttl {
+	case time.Hour:
+		label, ttl = "1h", time.Hour
+	case 5 * time.Minute:
+		label = "5m"
+	}
+	text := cWarn + "💾" + label + "?" + reset
+	if !window.anchor.IsZero() {
+		text = countdownText(label, window.anchor.Add(ttl), now)
+	}
+	return text + " " + cacheHitText(hit)
+}
+
+// cacheHitText renders the share of one call's prompt read from the cache:
+// 94%. Green from 80, yellow from 50, red below — the context re-written.
+func cacheHitText(percent int) string {
+	color := cBad
 	switch {
-	case tokens >= 100_000:
-		color = cBad
-	case tokens >= 20_000:
+	case percent >= 80:
+		color = cGood
+	case percent >= 50:
 		color = cWarn
 	}
-	return color + "+" + formatContextTokens(tokens) + reset
+	return color + fmt.Sprintf("%d%%", percent) + reset
+}
+
+// cacheHitPercent is cache reads over the whole prompt; -1 for no prompt.
+func cacheHitPercent(read, created, uncached int64) int {
+	total := read + created + uncached
+	if total <= 0 {
+		return -1
+	}
+	return int(read * 100 / total)
 }
 
 // cacheWindow is what the transcript says about the main chat's prompt cache:
@@ -150,6 +212,12 @@ func readAnchorCache(path string) (string, cacheWindow) {
 // newest reply instead. The ttl is the lifetime the newest cache write used,
 // from its usage.cache_creation breakdown.
 func cacheAnchor(path string) cacheWindow {
+	return cacheAnchorIn(path, false)
+}
+
+// cacheAnchorIn reads a cache window from a transcript; sidechain admits the
+// records a sub-agent's own transcript is made of.
+func cacheAnchorIn(path string, sidechain bool) cacheWindow {
 	var replied cacheWindow
 	for _, size := range []int64{65_536, 1_048_576} {
 		body, err := readTail(path, size)
@@ -174,7 +242,7 @@ func cacheAnchor(path string) cacheWindow {
 					} `json:"usage"`
 				} `json:"message"`
 			}
-			if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Sidechain {
+			if json.Unmarshal(scanner.Bytes(), &record) != nil || record.Sidechain && !sidechain {
 				continue
 			}
 			switch record.Type {

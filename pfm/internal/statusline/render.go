@@ -55,7 +55,11 @@ type input struct {
 			InputTokens              int64 `json:"input_tokens"`
 		} `json:"current_usage"`
 	} `json:"context_window"`
-	Cost struct {
+	// PromptCache is Claude Code's own cache tracker (2.1.25x+): the TTL its
+	// newest request used and when that cache expires. Absent before the
+	// first request and on older builds.
+	PromptCache *promptCache `json:"prompt_cache"`
+	Cost        struct {
 		TotalCostUSD      float64 `json:"total_cost_usd"`
 		TotalDurationMS   int64   `json:"total_duration_ms"`
 		TotalLinesAdded   int64   `json:"total_lines_added"`

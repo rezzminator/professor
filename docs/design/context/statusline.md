@@ -40,7 +40,7 @@ Read in the Claude Code 2.1.281 source and confirmed live:
 | idle | `idle 1m20s` | only while running and silent for 60 s or more; yellow, red from 5 min |
 | tools | `12 tools` | distinct `tool_use` ids in the sub-agent's transcript |
 | errors | `1 error` | tool results marked `is_error`; absent at zero |
-| cache write | `💾+4.2K` | tokens the newest call wrote to the prompt cache (`cache_creation_input_tokens`): the part of its prompt new since the call before, paid at the write price. Green under 20K, yellow under 100K, red above — a full re-write after the window lapsed; `💾–` before the first call |
+| cache | `💾5m✓3m:8s 94%` | the main line's cache segment, per agent: the time left on the agent's own prompt cache (the length its newest cache write used, from its `usage.cache_creation` split, counted from its newest request — the row payload carries no `prompt_cache` per agent), then cache reads over the whole prompt on its newest call, green from 80, yellow from 50, red below; `💾–` before its first reply |
 | compactions | `⟲2` | `compact_boundary` entries; absent at zero |
 | cwd | `repo` | only when it differs from the session's cwd |
 | label | the task's label, else its description | |
@@ -59,11 +59,11 @@ A row is finished once its status is `completed`, `failed`, `killed` or `error` 
 
 Claude Code keeps each sub-agent's files beside the session's transcript: `{transcript minus .jsonl}/subagents/agent-{id}.jsonl` and `agent-{id}.meta.json`. The task id is the agent id.
 
-- Read from the transcript: tools, errors, the cache write, compactions, the last entry's time. The reader skips a streamed assistant line repeated with the same `tool_use` id, ignores `tool_use` text quoted inside a tool result, and skips a torn final line, since the agent may be mid-write.
+- Read from the transcript: tools, errors, cache, compactions, the last entry's time. The reader skips a streamed assistant line repeated with the same `tool_use` id, ignores `tool_use` text quoted inside a tool result, and skips a torn final line, since the agent may be mid-write.
 - Read from the meta file: the role (`agentType`).
 - Read from every meta file in the directory, once per render: the nesting. An agent spawned by another agent carries `parentAgentId` (and `spawnDepth`); one spawned by the main loop carries neither. An agent is working while its own turn is open; an orchestrator that ended its turn to wait on background workers is not working, its workers are, and its row says `delegating`. A turn is open unless the transcript's last message entry is an assistant message with a `stop_reason` and no `tool_use` (`pfm/internal/statusline/subagents_nest.go`).
 
-An unreadable fact renders as a failure to look, never as zero or empty: `tools ?`, `💾?`, `role ?`, `?/?` when the directory or any meta file cannot be read (its parent is then unknown), and `(1 unread)` for an agent below whose transcript cannot be read. The cause goes to stderr, one line per row. This covers a payload with no session transcript, a missing file, a torn meta file and a meta file without `agentType`.
+An unreadable fact renders as a failure to look, never as zero or empty: `tools ?`, `💾!`, `role ?`, `?/?` when the directory or any meta file cannot be read (its parent is then unknown), and `(1 unread)` for an agent below whose transcript cannot be read. The cause goes to stderr, one line per row. This covers a payload with no session transcript, a missing file, a torn meta file and a meta file without `agentType`.
 
 ## Effort
 
@@ -85,7 +85,7 @@ A sub-agent without an effort of its own runs at its parent's live effort for it
 
 - The model block reads `◆ Opus 5.5·🚀 xhigh`: model symbol and name, a muted `·`, then the effort (`pfm/internal/statusline/model_segment.go`).
 - The session label sits second from the end of the first line.
-- The cache window reads `💾1h✓59m:28s +4.2K`: the time left on the prompt cache, then what the last call wrote to it (the payload's `context_window.current_usage.cache_creation_input_tokens`, in the row's colours; Claude only). The payload carries no cache lifetime or request time, so both come from the transcript (`cacheAnchor`, `pfm/internal/statusline/render.go`). The length is the one the newest cache write used, read from its `usage.cache_creation` split (`ephemeral_1h_input_tokens` / `ephemeral_5m_input_tokens`); the environment (`FORCE_PROMPT_CACHING_5M`) decides only for a transcript that records none. The countdown starts at the newest request: the newest user record — prompt or tool result — that is not a local command's echo, because the request is sent when that record is written and the reply's record is stamped only after it streamed. A transcript with no such record (a Codex rollout) counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
+- The cache window reads `💾1h✓59m:28s 94%`: the time left on the prompt cache, then the share of the last call's prompt read from it (the payload's `context_window.current_usage`; Claude only). The window comes from Claude Code's own `prompt_cache` object in the payload (`ttl`, `expires_at`), which it measures from its own requests (2.1.282: `summary()`, expiry = the newest request's time plus its TTL). Only when the payload carries no expiry — no cached request yet, or an older build — does the transcript decide (`cacheAnchor`, `pfm/internal/statusline/cache_window.go`): the length from the newest cache write's `usage.cache_creation` split, else `FORCE_PROMPT_CACHING_5M`; the countdown from the newest request record, a user record that is not a local command's echo; a Codex rollout counts from its newest reply. Claude Code re-runs the command every `refreshInterval` seconds, so the countdown ticks while the chat is idle.
 - The line uses the same palette as the rows (`pfm/internal/statusline/palette.go`).
 
 ## Palette and glyphs

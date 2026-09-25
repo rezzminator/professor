@@ -499,11 +499,19 @@ Before either tier moves, read every release note between the installed and the 
 0. An install that predates `pfm init` has no `.professor/baseline.json`: run `pfm update adopt` once inside it. It pins every mapped template whose local file exists, writes nothing else, and reports `adopted / kept / absent` counts. `--at <ref>` pins at the blueprint ref the install was last synced from, so the first `check` reports every template change since then instead of a false `clean`.
 1. Run `pfm update check` inside the project. It only reads the blueprint, `.professor/baseline.json`, and local paths; it does not fetch, build, install, or write. Bare `pfm update` performs the machine update and then appends this project report when it finds a baseline.
 2. Read every non-current row:
-   - `UPDATED` — run the printed `git -C <blueprint> diff <pinned>..HEAD -- templates/<template>` command, then hand-apply the parts that belong in the local file.
+   - `UPDATED` — the printed diff compares unfilled templates and will not `git apply` to a filled local file. Use the row's pinned SHA and template path for a three-way merge (write `base` and `theirs` as temporary files):
+
+     ```bash
+     git -C <blueprint> show <pinned>:templates/<template> > base
+     git -C <blueprint> show HEAD:templates/<template> > theirs
+     git merge-file --diff3 <local> base theirs
+     ```
+
+     Resolve conflict markers by hand, then remove `base` and `theirs`. The local `# pfm-scaffold:` line is an added line absent from both templates; the merge normally keeps it. Never copy a template over a filled local file.
    - `NEW` — adopt it only if useful, then map it with `pfm update pin --template <template> <local>`; a template this project will never take is silenced with `pfm update ignore <template>...` (`--undo` reverses; it counts as `ignored`, never as review).
-   - `GONE-UPSTREAM` — keep the local file as yours and drop its pin, or delete it and drop the pin.
+   - `GONE-UPSTREAM` — delete the local file and run `pfm update drop <local>`; a retired framework surface left live can work against the new framework unsupervised. Keep it as your own file and drop its pin only if the project deliberately still uses it.
    - `LOCAL-DELETED` — restore the local file or drop its pin.
 3. After reviewing and applying an `UPDATED` file, accept its new template baseline with `pfm update pin <local>`. Use `--all` only after every reported updated file has been reviewed and applied.
 4. Re-run `pfm update check`; it exits `0` and ends in `clean` only when no item needs review. Rebuild opted-in engine mirrors from the resulting local source files.
 
-The report is the update UI. There is no project regeneration, interview replay, automatic application, or three-way merge.
+The report is the update UI. There is no project regeneration, interview replay, or automatic application.

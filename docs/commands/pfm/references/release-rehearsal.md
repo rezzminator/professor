@@ -15,14 +15,18 @@ Stage B's hardest case is the adopter several versions behind, so every round ru
 
 ## The driver
 
-Model: the Codex model `pfm/internal/codexgen/config.go` maps `sonnet` to (`grep -o '"sonnet": *"[^"]*"' pfm/internal/codexgen/config.go`), effort `xhigh` — the weaker model at its highest setting, per `docs/design/integration-suite/laws.md` Law 5. One run per stage attempt, its files in `$RUN` — a directory OUTSIDE every git repository (`$RUN` = the release directory's `rehearsal/{machine}-{round}/` for Stage B and its `stage-a/` subdirectory for Stage A, under `$HOME/.local/state/pfm/releases/`): Codex loads each ancestor repo's `AGENTS.md`, and this repo's contract would turn the adopter into a Professor maintainer:
+Model: `gpt-6-luna`, effort `xhigh` — the weaker model at its highest setting, per `docs/design/integration-suite/laws.md` Law 5. One run per stage attempt, its files in `$RUN` — a directory OUTSIDE every git repository (`$RUN` = the release directory's `rehearsal/{machine}-{round}/` for Stage B and its `stage-a/` subdirectory for Stage A, under `$HOME/.local/state/pfm/releases/`): Codex loads each ancestor repo's `AGENTS.md`, and this repo's contract would turn the adopter into a Professor maintainer:
 
 ```bash
+export CODEX_HOME="$RUN/codex-home"
+mkdir -p "$CODEX_HOME" && ln -sf "$HOME/.codex/auth.json" "$CODEX_HOME/auth.json"
 timeout 5400 codex exec --model "$MODEL" -c model_reasoning_effort=xhigh \
   --cd "$RUN" --skip-git-repo-check --ephemeral \
   --sandbox workspace-write -c sandbox_workspace_write.network_access=true \
   --output-schema "$RUN/schema.json" -o "$RUN/result.json" - < "$RUN/brief.md"
 ```
+
+The separate Codex home exposes only the host login, so host skills, agents, and user config cannot enter the adopter driver's context.
 
 The driver calls Codex directly because `pfm headless exec --engine codex` routes through OpenCode since 89db9254, while the rehearsal's isolation premises are Codex CLI facts.
 

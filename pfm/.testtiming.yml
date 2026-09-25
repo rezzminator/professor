@@ -22,7 +22,7 @@ suites:
       github.com/rezzminator/professor/pfm/internal/callmeter/cmdparse: 2
       github.com/rezzminator/professor/pfm/internal/callmeter/command: 2
       github.com/rezzminator/professor/pfm/internal/callmeter/report: 2
-      github.com/rezzminator/professor/pfm/internal/chat: 4
+      github.com/rezzminator/professor/pfm/internal/chat: 12
       github.com/rezzminator/professor/pfm/internal/cli: 2
       github.com/rezzminator/professor/pfm/internal/clock: 2
       github.com/rezzminator/professor/pfm/internal/codexappendix: 2

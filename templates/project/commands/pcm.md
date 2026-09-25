@@ -99,7 +99,7 @@ For things that must happen every time (formatting, validation, secret-scanning)
 
 Classify FIRST — before any edit. The classification decides the source of truth. **Unsure? Ask the user — never guess.**
 
-- **Framework change** (an improvement any Professor adopter could use) → edit the canonical blueprint template at `{BLUEPRINT_CLONE_PATH}` under that repo's own law and gates; its commit message names the adopter-facing change — the blueprint's release reviewers write the notes from the diff. Never put project-specific behavior into the blueprint.
+- **Framework change** (an improvement any Professor adopter could use) → edit the canonical blueprint template at `{BLUEPRINT_CLONE_PATH}` under that repo's own law and gates; its commit message names the adopter-facing change — the blueprint's release writes its notes from the diff and those messages. Never put project-specific behavior into the blueprint.
 - **Project customization** → edit this project's local file directly. That local file is the source of truth; it is not regenerated from the template.
 - **Engine mirror** → never edit the generated output by hand. Change its local Claude source, then run `pfm codex build` and `pfm codex check` (or the owning compiler for another engine).
 - **Upstream project-template delta** → `/pfm` § Adopter update flow: `pfm update check` prints per file the exact `git diff` to read; hand-apply the parts that belong locally through this command's change flow, then `pfm update pin <local>` (accept), `pfm update ignore <template>` (never adopt), or `pfm update drop <local>` (forget). No baseline yet (the install predates `pfm init`): `pfm update adopt [--at <ref>]` once.

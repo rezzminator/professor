@@ -19,8 +19,7 @@
 #
 # Runs OUTSIDE the command sandbox: Chrome fetches the deck's Google Fonts and
 # writes the frames; sandboxed, it renders fallback fonts or nothing. Needs
-# Google Chrome, Pillow (the readme-gif recorder's chrome.py uses the same),
-# and for --motion node ≥ 22 (its own WebSocket).
+# Google Chrome, Pillow, and for --motion node ≥ 22 (its own WebSocket).
 #
 # BROKEN STATE: a missing tool or an unknown section id is named (exit 1)
 # before Chrome starts; a frame Chrome did not write, a still that is blank

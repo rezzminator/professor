@@ -10,8 +10,7 @@ import (
 	"github.com/rezzminator/professor/pfm/internal/obs"
 )
 
-// Log is the activity log's machine policy (docs/dev/trains/testing-foundation/
-// waves/6-activity-log/spec.md § Destinations, § Control): the level
+// Log is the activity log's machine policy: the level
 // internal/obs writes at when the build's own default is not wanted, one
 // level per component that wants its own, and the size- and time-capped
 // rotation it keeps per pfm home.

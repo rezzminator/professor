@@ -61,6 +61,16 @@ install)
     dir="$(expand "$dir")"; [ "$dir" = "$primary" ] && continue
     [ -L "$dir/projects" ] || { rm -rf "$dir/projects"; ln -s "$primary/projects" "$dir/projects"; }
   done < <(jq -r '.accounts[].configDir' "$CONFIG")
+  # 1b. OpenCode's own config, model only: pfm install (step 2 below) merges the
+  #     `professor` registration (`pfm mcp serve --stdio`) and the `instructions`
+  #     array into this same file, so the demo writes nothing under "mcp" itself.
+  mkdir -p "$HOME/.config/opencode"
+  cat > "$HOME/.config/opencode/opencode.jsonc" <<EOF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "model": "openai/gpt-5.6-luna"
+}
+EOF
   # 2. pfm install exactly as a user runs it from the clone, Claude Code themes included: the
   #    seats wear the professor palettes the presenter's machines wear.
   #    ~/.professor is where pfm expects the blueprint clone (pfm update check,
@@ -117,16 +127,8 @@ install)
   done
   # 6. OpenCode: one ChatGPT-authenticated home; pfm sees it once opencode.db exists,
   #    which the first run below creates — and that run proves the copied auth is live.
-  mkdir -p "$HOME/.config/opencode"
-  cat > "$HOME/.config/opencode/opencode.jsonc" <<EOF
-{
-  "\$schema": "https://opencode.ai/config.json",
-  "model": "openai/gpt-5.6-luna",
-  "mcp": {
-    "chat": { "type": "local", "command": ["$HOME/.local/bin/pfm", "mcp", "chat", "serve"], "enabled": true }
-  }
-}
-EOF
+  #    opencode.jsonc itself was written in step 1b, ahead of pfm install (step 2),
+  #    which merged in the `professor` registration and `instructions`.
   echo '{"$schema": "https://opencode.ai/tui.json", "theme": "tokyonight"}' > "$HOME/.config/opencode/tui.json"
   if [ "${DEMO_OPENCODE_PROBE:-1}" = 0 ]; then
     # The lane root's --no-adopt build spends no model turn at all

@@ -12,7 +12,7 @@
 # build cache remains warm. 3 repetitions per point, median.
 #
 # CPU-seconds vs wall: measured with bash's own `time` builtin (real/user/sys),
-# not `/usr/bin/time -v` — the fence image (infra/pfm-dev.Dockerfile) does not
+# not `/usr/bin/time -v` — the fence image (infra/fence/pfm-dev.Dockerfile) does not
 # install the `time` package, and the builtin needs nothing extra on the host
 # either. CPU-seconds = user + sys.
 #

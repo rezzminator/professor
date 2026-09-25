@@ -151,6 +151,7 @@ func TestGlobalAgentsAdversarialFixtureEmitsValidTOMLWithLiteralQuotesAndDelimit
 		"description = \"Uses \\\"walker fast\\\" and \\\"map it now\\\" verbatim.\"\n" +
 		"model = \"gpt-5.6-sol\"\n" +
 		"model_reasoning_effort = \"high\"\n" +
+		"sandbox_mode = \"read-only\"\n" +
 		"developer_instructions = \"\"\"\n"
 	// The role's own body, escaped byte for byte, is the whole value.
 	body := "Body has a literal triple quote \\\"\\\"\\\" and a backslash \\\\ standalone.\n" +
@@ -742,5 +743,67 @@ func TestGlobalAgentsRefusesForeignCodexRoleFile(t *testing.T) {
 	}
 	if len(result.Problems) == 0 {
 		t.Fatalf("a foreign role file was silently accepted: problems = %#v", result.Problems)
+	}
+}
+
+// A global role compiles to the same tools-derived sandbox and model pin as a
+// project role: read-only unless its tools grant a write tool or it is gitter,
+// and model emitted whether or not effort is set.
+func TestGlobalAgentTOMLSandboxAndModelPin(t *testing.T) {
+	cases := []struct {
+		file, frontmatter string
+		want, wantAbsent  []string
+	}{
+		{
+			file:        "scout.md",
+			frontmatter: "name: scout\ndescription: Reads.\ntools: Read, Grep, Glob, Bash\n",
+			want:        []string{"sandbox_mode = \"read-only\"\n"},
+		},
+		{
+			file:        "gitter.md",
+			frontmatter: "name: gitter\ndescription: Commits.\ntools: Read, Grep, Glob, Bash\n",
+			wantAbsent:  []string{"sandbox_mode"},
+		},
+		{
+			file:        "writer.md",
+			frontmatter: "name: writer\ndescription: Writes.\ntools: Read, Edit, Bash\n",
+			wantAbsent:  []string{"sandbox_mode"},
+		},
+		{
+			file:        "untooled.md",
+			frontmatter: "name: untooled\ndescription: Everything.\n",
+			wantAbsent:  []string{"sandbox_mode"},
+		},
+		{
+			file:        "pinned.md",
+			frontmatter: "name: pinned\ndescription: Reviews.\ntools: Read, Grep\nmodel: sonnet\n",
+			want: []string{
+				"model = \"" + defaultConfig().ModelMap["sonnet"] + "\"\nsandbox_mode = \"read-only\"\ndeveloper_instructions",
+			},
+			wantAbsent: []string{"model_reasoning_effort"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.file, func(t *testing.T) {
+			agentsDir := t.TempDir()
+			source := filepath.Join(agentsDir, tc.file)
+			_, got, err := renderGlobalAgentTOML(source, "---\n"+tc.frontmatter+"---\n\nBody.\n", agentsDir)
+			if err != nil {
+				t.Fatalf("renderGlobalAgentTOML: %v", err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("%s TOML lacks %q:\n%s", tc.file, want, got)
+				}
+			}
+			for _, absent := range tc.wantAbsent {
+				if strings.Contains(got, absent) {
+					t.Fatalf("%s TOML must carry no %q:\n%s", tc.file, absent, got)
+				}
+			}
+			if err := validateTOML(got); err != nil {
+				t.Fatalf("emitted TOML does not parse: %v\n%s", err, got)
+			}
+		})
 	}
 }

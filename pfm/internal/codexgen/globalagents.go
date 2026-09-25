@@ -450,6 +450,22 @@ func writeGlobalAgentFile(path string, content []byte) error {
 	return nil
 }
 
+// codexReadOnly reports whether a role compiles to sandbox_mode = "read-only",
+// at either tier: read-only unless the Claude tools line grants a write tool,
+// the line is absent, or the role's base filename (without .md) is gitter.
+func codexReadOnly(tools, baseName string) bool {
+	if strings.TrimSpace(tools) == "" || baseName == "gitter" {
+		return false
+	}
+	for _, tool := range strings.Split(tools, ",") {
+		switch strings.TrimSpace(tool) {
+		case "Write", "Edit", "MultiEdit", "NotebookEdit":
+			return false
+		}
+	}
+	return true
+}
+
 // renderGlobalAgentTOML compiles one agent's Markdown into the role name and
 // the exact TOML bytes its registry file holds. raw is passed in rather than
 // read here because a variant's Markdown exists only in memory until the build
@@ -488,11 +504,14 @@ func renderGlobalAgentTOML(mdPath, raw, agentsDir string) (string, string, error
 	content := globalRoleHeader(globalAgentMarkerSource(mdPath, agentsDir)) +
 		"name = \"" + globalAgentEscape(name) + "\"\n" +
 		"description = \"" + globalAgentEscape(description) + "\"\n"
+	if model != "" {
+		content += "model = \"" + globalAgentEscape(model) + "\"\n"
+	}
 	if effort != "" {
-		if model != "" {
-			content += "model = \"" + globalAgentEscape(model) + "\"\n"
-		}
 		content += "model_reasoning_effort = \"" + globalAgentEscape(effort) + "\"\n"
+	}
+	if codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(mdPath), ".md")) {
+		content += "sandbox_mode = \"read-only\"\n"
 	}
 	content += "developer_instructions = \"\"\"\n" + globalAgentEscapeMultiline(body) + "\n\"\"\"\n"
 

@@ -516,15 +516,7 @@ func compileAgents(
 				model = mapped
 			}
 			tomlName := strings.ReplaceAll(name, "-", "_")
-			// Read-only unless the Claude tools grant a write tool, the line is absent, or it is a (suffixed) gitter.
-			readOnly := strings.TrimSpace(fields["tools"]) != "" &&
-				strings.TrimSuffix(filepath.Base(entry.path), ".md") != "gitter"
-			for _, tool := range strings.Split(fields["tools"], ",") {
-				tool = strings.TrimSpace(tool)
-				if tool == "Write" || tool == "Edit" || tool == "MultiEdit" || tool == "NotebookEdit" {
-					readOnly = false
-				}
-			}
+			readOnly := codexReadOnly(fields["tools"], strings.TrimSuffix(filepath.Base(entry.path), ".md"))
 			instructions := strings.ReplaceAll(cfg.AgentPreamble, "${name}", tomlName)
 			instructions += transformMarkdown(strings.TrimSpace(body), options)
 			toml := "# " + generatedLine(filepath.ToSlash(rel)) + "\n"

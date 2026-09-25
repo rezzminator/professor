@@ -443,6 +443,30 @@ act_templates() { # the shipped product: mechanical gates, no build
         ok "token-audit reads Claude and Codex transcripts and selects a flight's agents ($(awk '/^# pass /{print $3}' "$token_out") passing)"
       fi
 
+      head_ "templates — release-check tests and the notes grammar"
+      local rc_tests=(scripts/release-check.test.mjs)
+      local rc_out="$TMP_BASE/templates/release-check.tap"
+      if [[ ! -f "${rc_tests[0]}" ]]; then
+        fail_step "release-check tests NOT RUN — scripts/release-check.test.mjs is missing; the suite was never executed"
+      elif ! node --test --test-reporter=tap "${rc_tests[@]}" >"$rc_out" 2>&1; then
+        cat "$rc_out"
+        fail_step "release-check tests FAILED — a scope, notes or ready rule regressed, or node could not run the suite (see output)"
+      elif ! awk '/^# pass /{ if ($3 > 0) found=1 } END{ exit !found }' "$rc_out"; then
+        cat "$rc_out"
+        fail_step "release-check tests NOT RUN — the suite reported zero passing tests; a green exit with no test is not a pass"
+      elif ! awk '/^# (skipped|todo) /{ if ($3 > 0) bad=1 } END{ exit bad }' "$rc_out"; then
+        cat "$rc_out"
+        fail_step "release-check tests SKIPPED — a skipped or todo test is a named gap, never a pass"
+      else
+        ok "release-check rules hold ($(awk '/^# pass /{print $3}' "$rc_out") passing)"
+      fi
+      if node scripts/release-check.mjs notes --all releases >"$TMP_BASE/templates/release-notes.txt" 2>&1; then
+        ok "release notes from v0.78.0 on follow docs/RELEASE.md § Release notes ($(grep -m1 '^CHECKED' "$TMP_BASE/templates/release-notes.txt" || echo 'CHECKED line MISSING'))"
+      else
+        cat "$TMP_BASE/templates/release-notes.txt"
+        fail_step "release notes grammar FAILED — a note breaks docs/RELEASE.md § Release notes, or release-check could not run (exit 2 is an ERROR, see output)"
+      fi
+
       head_ "templates — codex-sync missing compiler"
       if bash "$REPO_ROOT/scripts/test-codex-sync.sh" "$REPO_ROOT/templates/project/scripts/codex-sync.sh"; then
         ok "codex-sync names unavailable compiler and retains dirty flag"

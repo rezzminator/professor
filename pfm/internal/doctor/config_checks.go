@@ -81,7 +81,7 @@ func PrintConfig(stdout io.Writer, runtime config.Runtime) {
 	)
 }
 
-// retiredHarvesterEnv maps every environment variable the harvester used to
+// RetiredHarvesterEnv maps every environment variable the harvester used to
 // read to where that setting lives now. The harvester ignores them all, so a
 // set one is a setting that silently stopped applying — doctor says so.
 var RetiredHarvesterEnv = []struct{ Name, Now string }{

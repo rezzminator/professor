@@ -22,6 +22,16 @@ const (
 	// SIDEffortPrefix names the statusline's per-session effort record,
 	// SIDEffortPrefix+sessionID, so the doctor's crumb audit accepts it.
 	SIDEffortPrefix = "statusline-effort-"
+	// SIDHarnessConfigDirPrefix names the throwaway config directory the
+	// doctor's harness-prompt capture creates (os.MkdirTemp) in the SID dir;
+	// a crash can leave one behind, so the crumb audit accepts it.
+	SIDHarnessConfigDirPrefix = "pfm-harness-configdir-"
+	// SIDExchangeScratchPattern is the os.CreateTemp pattern of the prepared
+	// exchange headless.writePreparedExchange writes into the SID dir.
+	SIDExchangeScratchPattern = "exchange-*.md"
+	// SIDCaptureScratchPattern is the os.CreateTemp pattern of the live pane
+	// capture headless.writePreparedCapture writes into the SID dir.
+	SIDCaptureScratchPattern = "capture-*.md"
 )
 
 // SIDScratchDirs lists every SID-dir scratch purpose, so a check that

@@ -28,7 +28,7 @@ type PrePushGate struct {
 	Error      error
 }
 
-// prePushGateProbeOverride keeps command-package tests independent of the
+// PrePushGateProbeOverride keeps command-package tests independent of the
 // checkout that runs them. Production leaves it nil; the dedicated pre-push
 // tests clear the test default and exercise inspectPrePushGate end to end.
 var PrePushGateProbeOverride func(context.Context) PrePushGate
@@ -121,7 +121,7 @@ func inspectPrePushGateWithRunner(ctx context.Context, runner deps.Runner) PrePu
 			return PrePushGate{
 				Repository: repository,
 				State:      unreadableState,
-				Error:      fmt.Errorf("read core.hooksPath: %v: %s", configErr, actual),
+				Error:      hooksPathReadError(configResult, configErr),
 			}
 		}
 	}
@@ -150,4 +150,17 @@ func inspectPrePushGateWithRunner(ctx context.Context, runner deps.Runner) PrePu
 		return PrePushGate{Repository: repository, Actual: actual, State: "unwired"}
 	}
 	return PrePushGate{Repository: repository, Actual: actual, State: "armed"}
+}
+
+// hooksPathReadError names a failed core.hooksPath read: the Run error when
+// git never ran to an exit, otherwise the exit code and git's own words.
+func hooksPathReadError(result deps.RunResult, runErr error) error {
+	if runErr != nil {
+		return fmt.Errorf("read core.hooksPath: %w", runErr)
+	}
+	detail := strings.TrimSpace(string(result.Stderr))
+	if detail == "" {
+		detail = strings.TrimSpace(string(result.Stdout))
+	}
+	return fmt.Errorf("read core.hooksPath: exit %d: %s", result.ExitCode, detail)
 }

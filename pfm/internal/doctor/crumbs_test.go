@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
+	"github.com/rezzminator/professor/pfm/internal/atomicfile"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 )
 
@@ -94,6 +96,66 @@ func TestDoctorCrumbsAcceptStatuslineEffortRecords(t *testing.T) {
 	if entries != 2 || invalid != 1 {
 		t.Fatalf(
 			"crumbHealth() entries=%d invalid=%d, want a session's effort record accepted and a bare prefix rejected",
+			entries,
+			invalid,
+		)
+	}
+}
+
+// TestDoctorCrumbsAcceptLiveRolePrompts writes through agentrole's own
+// writer, so a renamed seat prompt fails here before the audit calls it rot.
+func TestDoctorCrumbsAcceptLiveRolePrompts(t *testing.T) {
+	root := jailTest(t)
+	sidDir := filepath.Join(root, "sid")
+	if err := agentrole.WriteSeatPrompt(sidDir, "cc-1", "%7", "role body"); err != nil {
+		t.Fatal(err)
+	}
+	entries, invalid, err := crumbHealth(sidDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries != 1 || invalid != 0 {
+		t.Fatalf("crumbHealth() entries=%d invalid=%d, want the live role prompt accepted", entries, invalid)
+	}
+}
+
+// TestDoctorCrumbsAcceptHarnessCaptureConfigDirs pins the harness-prompt
+// capture's config directory, in flight or left by a crash, as pfm's own.
+func TestDoctorCrumbsAcceptHarnessCaptureConfigDirs(t *testing.T) {
+	root := jailTest(t)
+	sidDir := filepath.Join(root, "sid")
+	if _, err := os.MkdirTemp(sidDir, paths.SIDHarnessConfigDirPrefix); err != nil {
+		t.Fatal(err)
+	}
+	entries, invalid, err := crumbHealth(sidDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries != 1 || invalid != 0 {
+		t.Fatalf("crumbHealth() entries=%d invalid=%d, want the harness config dir accepted", entries, invalid)
+	}
+}
+
+// TestDoctorCrumbsAcceptHeadlessScratchFiles writes both headless scratch
+// files the way writePreparedFile does, beside one unknown name that stays rot.
+func TestDoctorCrumbsAcceptHeadlessScratchFiles(t *testing.T) {
+	root := jailTest(t)
+	sidDir := filepath.Join(root, "sid")
+	for _, pattern := range []string{paths.SIDExchangeScratchPattern, paths.SIDCaptureScratchPattern} {
+		if _, _, err := atomicfile.WriteScratch(sidDir, pattern, []byte("scratch")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(sidDir, "exchange-notes.txt"), []byte("unknown"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	entries, invalid, err := crumbHealth(sidDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries != 3 || invalid != 1 {
+		t.Fatalf(
+			"crumbHealth() entries=%d invalid=%d, want both scratch files accepted and the unknown name counted",
 			entries,
 			invalid,
 		)

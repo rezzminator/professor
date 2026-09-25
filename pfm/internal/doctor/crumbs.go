@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/rezzminator/professor/pfm/internal/agentrole"
 	"github.com/rezzminator/professor/pfm/internal/gather"
 	"github.com/rezzminator/professor/pfm/internal/paths"
 	"github.com/rezzminator/professor/pfm/internal/store"
@@ -62,7 +63,8 @@ func crumbHealthWith(
 			continue
 		}
 		if entry.IsDir() {
-			if !slices.Contains(paths.SIDScratchDirs(), name) {
+			if !slices.Contains(paths.SIDScratchDirs(), name) &&
+				!strings.HasPrefix(name, paths.SIDHarnessConfigDirPrefix) {
 				invalid++
 			}
 			continue
@@ -72,7 +74,9 @@ func crumbHealthWith(
 		}
 		if filepath.Ext(name) == ".lock" ||
 			nonFleetServerCrumb(name) ||
-			knownSIDMetadata(name) {
+			knownSIDMetadata(name) ||
+			agentrole.IsSeatPromptPath(name) ||
+			sidScratchFile(name) {
 			continue
 		}
 		invalid++
@@ -90,6 +94,17 @@ func nonFleetServerCrumb(name string) bool {
 		socket = name[:marker]
 	}
 	return strings.HasPrefix(socket, "vsct")
+}
+
+// sidScratchFile reports whether name is a headless scratch file — a prepared
+// exchange or a live pane capture — written by the headless writers' patterns.
+func sidScratchFile(name string) bool {
+	for _, pattern := range []string{paths.SIDExchangeScratchPattern, paths.SIDCaptureScratchPattern} {
+		if matched, err := filepath.Match(pattern, name); err == nil && matched {
+			return true
+		}
+	}
+	return false
 }
 
 func knownSIDMetadata(name string) bool {

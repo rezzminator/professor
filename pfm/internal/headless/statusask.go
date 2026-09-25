@@ -186,7 +186,7 @@ func writePreparedCapture(directory string, chat Chat, capture string) (string, 
 	if !strings.HasSuffix(capture, "\n") {
 		content.WriteByte('\n')
 	}
-	return writePreparedFile(directory, "capture", "capture-*.md", content.String())
+	return writePreparedFile(directory, "capture", paths.SIDCaptureScratchPattern, content.String())
 }
 
 func failedAsk(err error) AskResult {

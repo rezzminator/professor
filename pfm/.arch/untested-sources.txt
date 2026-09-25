@@ -36,7 +36,6 @@ internal/compose/order.go
 internal/compose/types.go
 internal/doctor/doc.go
 internal/doctor/harness_prompt_baselines.go
-internal/doctor/prepush.go
 internal/engine/builtin.go
 internal/engine/claude/capabilities.go
 internal/engine/claude/match.go

@@ -53,7 +53,7 @@ func writePreparedExchange(directory string, prompt, response []transcript.Entry
 	} else {
 		content.WriteString("STATE: PARTIAL\n")
 	}
-	return writePreparedFile(directory, "exchange", "exchange-*.md", content.String())
+	return writePreparedFile(directory, "exchange", paths.SIDExchangeScratchPattern, content.String())
 }
 
 // preparedScratchDir resolves the directory writePreparedExchange and

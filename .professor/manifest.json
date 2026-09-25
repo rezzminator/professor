@@ -90,26 +90,26 @@
     }
   },
   "file_hashes": {
-    ".claude/agents/gitter.md": "f057c05b9852a5c4d13159451747606b952e1789a5efaddebc47047639271deb",
+    ".claude/agents/gitter.md": "ff493eb906aab787160f689c87fb5a71600a065f7c7a166ebc95b0e7955974b9",
     ".claude/codex-build.json": "d63f0933e4cfe1e5270101180e37aed48490ab8dc8c3f7204ada67ab01afe115",
     ".claude/commands/dev.md": "b7b86c57a5ed91328abb834f64553ccf67a0ac58c7ad631251f4b9c7c8e50e96",
-    ".claude/commands/pcm.md": "9515eb55eb0d0256946108b91a17f0a59847d707bf92d8dd699238f4e3baf9ea",
+    ".claude/commands/pcm.md": "80bb645c20d6b1f18b8288bf1fd1b8cfd77257bd4f409e222055f3dc277de63a",
     ".claude/commands/pfm-testing-manual.md": "a42fea600e0181b4f3219f6369187b8981d121a81d2dc0578e3e7a4d07b3e855",
-    ".claude/commands/pfm/release.md": "55b6429a5a8e58fe953819622752ce1adba0cbd28825d644b16b94a157799b06",
+    ".claude/commands/pfm/release.md": "dc06891cb2159b3e3bd28301e8bb31f277c24ba04e79064508ac1151d1460080",
     ".claude/commands/quality/doc.md": "dd3f01c84d9eaace7b45df52a8501c2137b5daa7556049df1980e1183705f67d",
     ".claude/commands/quality/prompt.md": "5b778fbdf56339f572f3e9595291ff6c83d628557ed7b907639f483593825870",
     ".claude/scripts/codex-sync.sh": "d536e54284332a7109fcde0ac58e8bc37982a137733d9a00832a28bfd29c7283",
-    ".claude/scripts/dev.sh": "1f1cd0c18543e2f6e0d7bcc3a157544423d79fc169ee43658d4cf7cf5ccc3bb6",
+    ".claude/scripts/dev.sh": "43fabd7eea3777717a9633c89b73f8d867fefd39f434721792968a0cb10b301f",
     ".claude/scripts/format-md.sh": "3606699b83f16e3106a69de0aff0818a571b36664d9131a6a8f48f1e4d52979f",
     ".claude/scripts/guard-stamp.sh": "209e5d0e1d22462c2f6f1d4607dbea7eee893d28faf1f616eefbd54a6377ff4f",
     ".claude/scripts/pfm-guard.sh": "1fdaecfc779371a8bd68a59b695cd807c9739d196c3ef881c51cc9e991f97069",
     ".claude/settings.json": "2850422637df488c765a829382a01f29f850ea6bfb737fffe660aec1aed88b9c",
     ".codex/config.toml": "1f9776ed21c541d076e02c17032208e353f0e5fceafdceca0d68ddee52be78e2",
     ".gitignore": "03a28d625b249ce0798c37a9cd25f38924dc2692b616045ba9ab935d3e8ca505",
-    "CLAUDE.md": "f10220247ac0920686bc89d858d2dba379eb0e0bb06c2f954d9ebb242bece932",
+    "CLAUDE.md": "142b8f3c9b4a4b6f1fc6b5e6d780745a3511721f35ff29df4bfc95d3f1b716cb",
     "docs/commands/pcm/references/audit-scopes.md": "4c4b8c88706ffc560a25901f0d79a3955313be5fecf437a596661697f77d8cdc",
-    "docs/commands/pcm/references/refresh.md": "53321cfc5d79b710fdd89e0316f4b15aaed5249c8e96e58e6405e869d2878e7c",
-    "docs/commands/pfm/references/release-rehearsal.md": "4aab154533f734c8c7f2e5eb55a005666356eab433ca856bb2f3753b11c92c7b",
+    "docs/commands/pcm/references/refresh.md": "779e6a5f1f3a0ab4f1d200137c3625d7dfe870bcde3feda5117352d288218a15",
+    "docs/commands/pfm/references/release-rehearsal.md": "26934e668f351e6126e7179af4c81ca0e7515b0b2a705631acb4c67e8f5ead4b",
     "pfm/CLAUDE.md": "bb3645b429c62d91dadf07fd2efd19ef869a81e429c1b54377e5ad76767bb526"
   }
 }

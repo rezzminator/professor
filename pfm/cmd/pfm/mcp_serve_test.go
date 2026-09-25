@@ -675,3 +675,140 @@ func connectHTTPMCP(
 		Endpoint: endpoint, HTTPClient: client, MaxRetries: -1, DisableStandaloneSSE: true,
 	}, nil)
 }
+
+// TestMCPStdioDegradesPerFamily pins the in-process stdio start when one
+// enabled family fails to configure: the healthy family serves, and every tool
+// of the failed family stays listed and answers an MCP error naming the
+// family, the configuration error and the fix.
+func TestMCPStdioDegradesPerFamily(t *testing.T) {
+	for _, test := range []struct {
+		name        string
+		breakFamily func(*commandRuntime)
+		failed      string
+		failedCall  string
+		failedArgs  map[string]any
+		wantError   string
+		healthyCall string
+	}{
+		{
+			name: "harvester fails, chat serves",
+			breakFamily: func(runtime *commandRuntime) {
+				runtime.Config.Harvester.Fetch.ProxyURL = "http://bad host"
+			},
+			failed:      config.MCPServerHarvester,
+			failedCall:  "harvester_read",
+			failedArgs:  map[string]any{"urls": []string{"https://example.com/"}},
+			wantError:   `parse Harvester proxy URL: parse "http://bad host": invalid character " " in host name`,
+			healthyCall: "chat_ls",
+		},
+		{
+			name:        "chat fails, harvester serves",
+			breakFamily: func(runtime *commandRuntime) { runtime.Paths.TmuxDir = "" },
+			failed:      config.MCPServerChat,
+			failedCall:  "chat_ls",
+			failedArgs:  map[string]any{},
+			wantError:   "configure chat MCP backend: tmux directory is empty",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := jailTest(t)
+			runtime := commandRuntime{Config: config.Defaults(root, nil), Paths: jailPaths(t)}
+			runtime.Config.Path = root + "/config.json"
+			runtime.Config.Harvester.Cache.Dir = root + "/cache"
+			runtime.Config.MCPServers[config.MCPServerChat] = config.MCPServer{Enabled: true}
+			runtime.Config.MCPServers[config.MCPServerHarvester] = config.MCPServer{Enabled: true}
+			test.breakFamily(&runtime)
+
+			var stderr bytes.Buffer
+			professor, closeFamilies, err := newStdioProfessor(&stderr, runtime, mcpRuntime(runtime, true))
+			exitCode := 0
+			defer closeFamilies(&exitCode)
+			if err != nil {
+				t.Fatalf("newStdioProfessor error = %v, want a degraded start serving the healthy family", err)
+			}
+			if !strings.Contains(stderr.String(), test.failed) || !strings.Contains(stderr.String(), test.wantError) {
+				t.Fatalf("stderr = %q, want one line naming %s and %q", stderr.String(), test.failed, test.wantError)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			serverTransport, clientTransport := mcp.NewInMemoryTransports()
+			serverSession, err := professor.Server().Connect(ctx, serverTransport, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = serverSession.Close() }()
+			client := mcp.NewClient(&mcp.Implementation{Name: "pfm-test", Version: "test"}, nil)
+			session, err := client.Connect(ctx, clientTransport, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = session.Close() }()
+
+			tools, err := session.ListTools(ctx, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed := map[string]*mcp.Tool{}
+			for _, tool := range tools.Tools {
+				listed[tool.Name] = tool
+			}
+			want := append(mcpserv.ToolNames(), harvestmcp.RegisteredToolNames(harvestRuntime(runtime))...)
+			for _, name := range want {
+				if listed[name] == nil {
+					t.Fatalf("tools/list lacks %s; listed %d tools", name, len(tools.Tools))
+				}
+			}
+			if len(listed) != len(want) {
+				t.Fatalf("tools/list holds %d tools, want %d", len(listed), len(want))
+			}
+
+			failed, err := session.CallTool(ctx, &mcp.CallToolParams{Name: test.failedCall, Arguments: test.failedArgs})
+			if err != nil {
+				t.Fatalf("%s protocol error = %v, want an MCP error result", test.failedCall, err)
+			}
+			text := toolResultText(failed)
+			if !failed.IsError {
+				t.Fatalf("%s IsError = false, text %q", test.failedCall, text)
+			}
+			for _, part := range []string{
+				test.failed + " family failed to configure", test.wantError, runtime.Config.Path, "/mcp",
+			} {
+				if !strings.Contains(text, part) {
+					t.Fatalf("%s error text = %q, want it to hold %q", test.failedCall, text, part)
+				}
+			}
+
+			if test.healthyCall != "" {
+				healthy, err := session.CallTool(
+					ctx,
+					&mcp.CallToolParams{Name: test.healthyCall, Arguments: map[string]any{}},
+				)
+				if err != nil || healthy.IsError {
+					t.Fatalf("%s = %q, %v; want a normal answer", test.healthyCall, toolResultText(healthy), err)
+				}
+				return
+			}
+			schema, err := json.Marshal(listed["harvester_read"].InputSchema)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(schema), `"urls"`) {
+				t.Fatalf("harvester_read schema = %s, want the healthy family's real schema", schema)
+			}
+		})
+	}
+}
+
+func toolResultText(result *mcp.CallToolResult) string {
+	if result == nil {
+		return ""
+	}
+	var parts []string
+	for _, content := range result.Content {
+		if text, ok := content.(*mcp.TextContent); ok {
+			parts = append(parts, text.Text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}

@@ -108,6 +108,8 @@ One daemon process, one server `professor`, two families. Every tool is a thin a
 
 A model sees each tool as `mcp__professor__<tool>` in Claude Code and Codex, and as `professor_<tool>` in OpenCode. The Inputs columns below are a reading aid. The server's own `tools/list` answer is the contract: where the two disagree, the table is the bug.
 
+When one enabled family fails to configure at `pfm mcp serve --stdio`'s in-process start, the server still starts with the healthy family, lists every tool of the failed family under its normal name and answers each call with an MCP error result naming the family, the configuration error and the fix (correct that config key, then reconnect with `/mcp`), and writes one stderr line naming the family and its error; only when no enabled family configures does it exit 1, and the daemon (`pfm mcp serve`) still exits 1 on any family failure.
+
 #### Family chat
 
 Toggled by `mcp.servers.chat.enabled`; `servicedesk` belongs to this family and follows its toggle.

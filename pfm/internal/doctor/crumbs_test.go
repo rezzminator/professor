@@ -92,6 +92,10 @@ func TestDoctorCrumbsAcceptStatuslineEffortRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	if entries != 2 || invalid != 1 {
-		t.Fatalf("crumbHealth() entries=%d invalid=%d, want a session's effort record accepted and a bare prefix rejected", entries, invalid)
+		t.Fatalf(
+			"crumbHealth() entries=%d invalid=%d, want a session's effort record accepted and a bare prefix rejected",
+			entries,
+			invalid,
+		)
 	}
 }

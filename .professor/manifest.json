@@ -66,7 +66,9 @@
   },
   "installed": {
     "agents": [
-      "gitter"
+      "changelogger",
+      "gitter",
+      "releaser"
     ],
     "commands": [
       "dev",
@@ -90,7 +92,9 @@
     }
   },
   "file_hashes": {
+    ".claude/agents/changelogger.md": "92b724ead627a8e13da33bdc20fa01ec1a12f798ef4caddc8a9fe369eeb10d1d",
     ".claude/agents/gitter.md": "ff493eb906aab787160f689c87fb5a71600a065f7c7a166ebc95b0e7955974b9",
+    ".claude/agents/releaser.md": "9ac141a541a020ae597ba91fcd58a731d920c39f9ae94330e074494adcd59c58",
     ".claude/codex-build.json": "d63f0933e4cfe1e5270101180e37aed48490ab8dc8c3f7204ada67ab01afe115",
     ".claude/commands/dev.md": "b7b86c57a5ed91328abb834f64553ccf67a0ac58c7ad631251f4b9c7c8e50e96",
     ".claude/commands/pcm.md": "80bb645c20d6b1f18b8288bf1fd1b8cfd77257bd4f409e222055f3dc277de63a",

@@ -215,28 +215,8 @@ func runMCPStdio(_, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 		return 1
 	}
 	chatRuntime := mcpRuntime(runtime, true)
-	families := mcpserv.ProfessorOptions{Version: version}
-	if chatEnabled {
-		chat, err := mcpserv.NewConfigured(version, stderr, chatRuntime)
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm mcp serve --stdio: configure chat: %v\n", err)
-			return 1
-		}
-		defer func() { cli.CloseResource(chat, "pfm mcp serve --stdio: close chat service", stderr, &exitCode) }()
-		families.Chat = chat
-	}
-	if harvesterEnabled {
-		harvester, err := harvestmcp.NewConfiguredHarvester(version, harvestRuntime(runtime))
-		if err != nil {
-			fmt.Fprintf(stderr, "pfm mcp serve --stdio: configure harvester: %v\n", err)
-			return 1
-		}
-		defer func() {
-			cli.CloseResource(harvester, "pfm mcp serve --stdio: close harvester service", stderr, &exitCode)
-		}()
-		families.Harvester = harvester
-	}
-	professor, err := mcpserv.NewProfessor(families)
+	professor, closeFamilies, err := newStdioProfessor(stderr, runtime, chatRuntime)
+	defer closeFamilies(&exitCode)
 	if err != nil {
 		fmt.Fprintf(stderr, "pfm mcp serve --stdio: %v\n", err)
 		return 1
@@ -255,4 +235,57 @@ func runMCPStdio(_, stderr io.Writer, runtime commandRuntime) (exitCode int) {
 		return 1
 	}
 	return 0
+}
+
+// newStdioProfessor configures every enabled family and builds the stdio
+// server over them. A family that fails to configure does not take the other
+// down: its tools stay listed and answer the error (mcpserv.FailedFamily), and
+// one stderr line names it. Only when no family configures does it fail.
+// closeFamilies closes each configured service; it is always safe to call.
+func newStdioProfessor(
+	stderr io.Writer,
+	runtime commandRuntime,
+	chatRuntime mcpserv.Runtime,
+) (professor *mcpserv.Professor, closeFamilies func(*int), err error) {
+	var closers []func(*int)
+	closeFamilies = func(exitCode *int) {
+		for _, closeFamily := range closers {
+			closeFamily(exitCode)
+		}
+	}
+	families := mcpserv.ProfessorOptions{Version: version}
+	fail := func(family string, tools []string, err error) {
+		fmt.Fprintf(stderr, "pfm mcp serve --stdio: configure %s: %v\n", family, err)
+		families.Failed = append(families.Failed, mcpserv.FailedFamily{
+			Family: family, Tools: tools, Err: err, ConfigPath: runtime.Config.Path,
+		})
+	}
+	if runtime.Config.MCPServers[config.MCPServerChat].Enabled {
+		chat, err := mcpserv.NewConfigured(version, stderr, chatRuntime)
+		if err != nil {
+			fail(config.MCPServerChat, mcpserv.ToolNames(), err)
+		} else {
+			closers = append(closers, func(exitCode *int) {
+				cli.CloseResource(chat, "pfm mcp serve --stdio: close chat service", stderr, exitCode)
+			})
+			families.Chat = chat
+		}
+	}
+	if runtime.Config.MCPServers[config.MCPServerHarvester].Enabled {
+		harvesterRuntime := harvestRuntime(runtime)
+		harvester, err := harvestmcp.NewConfiguredHarvester(version, harvesterRuntime)
+		if err != nil {
+			fail(config.MCPServerHarvester, harvestmcp.RegisteredToolNames(harvesterRuntime), err)
+		} else {
+			closers = append(closers, func(exitCode *int) {
+				cli.CloseResource(harvester, "pfm mcp serve --stdio: close harvester service", stderr, exitCode)
+			})
+			families.Harvester = harvester
+		}
+	}
+	if families.Chat == nil && families.Harvester == nil {
+		return nil, closeFamilies, errors.New("no enabled family configured")
+	}
+	professor, err = mcpserv.NewProfessor(families)
+	return professor, closeFamilies, err
 }

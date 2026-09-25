@@ -611,3 +611,92 @@ func TestRunStdioResolvesCodexCallerInProcess(t *testing.T) {
 		t.Fatalf("warnings = %q, want the absent-daemon fallback", warnings.String())
 	}
 }
+
+// A stdio server whose chat family failed to configure cannot verify a
+// daemon's chat runtime, so it never forwards: chat_ls answers the in-process
+// configuration error and the daemon sees no chat call. A healthy chat whose
+// runtime matches still forwards.
+func TestRunStdioForwardsChatOnlyWhenLocalChatConfigured(t *testing.T) {
+	for _, row := range []struct {
+		name        string
+		chatFailed  bool
+		wantForward bool
+	}{
+		{name: "local chat failed", chatFailed: true, wantForward: false},
+		{name: "local chat healthy and runtime matches", chatFailed: false, wantForward: true},
+	} {
+		t.Run(row.name, func(t *testing.T) {
+			testjail.Fleet(t)
+			resolved, err := paths.Resolve()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var daemonCalls [][]string
+			daemonProfessor := newTestProfessor(t, ProfessorOptions{
+				Chat:      proxyTestService("daemon", nil, &daemonCalls),
+				Harvester: newTestHarvester(t, harvestmcp.Runtime{}),
+			})
+			daemon := NewDaemonHandler(DaemonOptions{
+				Version: "test", Endpoint: "test", Professor: daemonProfessor.Handler(),
+				Chat:                daemonProfessor.FamilyHandler(pfmconfig.MCPServerChat),
+				Harvester:           daemonProfessor.FamilyHandler(pfmconfig.MCPServerHarvester),
+				HarvesterTools:      daemonProfessor.Servers()[pfmconfig.MCPServerHarvester],
+				ChatRuntimeIdentity: "sha256:proxy-test",
+			})
+			var chatRequests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+				if request.Body != nil {
+					body, err := io.ReadAll(request.Body)
+					if err != nil {
+						t.Errorf("read daemon request body: %v", err)
+					}
+					if strings.Contains(string(body), `"chat_`) {
+						chatRequests.Add(1)
+					}
+					request.Body = io.NopCloser(bytes.NewReader(body))
+				}
+				daemon.ServeHTTP(writer, request)
+			}))
+			defer server.Close()
+
+			options := ProfessorOptions{Harvester: newTestHarvester(t, harvestmcp.Runtime{})}
+			if row.chatFailed {
+				options.Failed = []FailedFamily{{
+					Family: pfmconfig.MCPServerChat, Tools: ToolNames(),
+					Err: errors.New("chat config broken"), ConfigPath: "/pfm/config.toml",
+				}}
+			} else {
+				var localCalls [][]string
+				options.Chat = proxyTestService("local", nil, &localCalls)
+			}
+			var warnings proxyTestBuffer
+			session := stdioTestSession(t, newTestProfessor(t, options), StdioOptions{
+				DaemonAddress: proxyTestAddress(server), Home: resolved.Home,
+				SIDDir: resolved.SIDDir, Warnings: &warnings,
+			})
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+				Name: "chat_ls", Arguments: map[string]any{},
+			})
+			if err != nil {
+				t.Fatalf("chat_ls: %v; warnings: %s", err, warnings.String())
+			}
+			forwarded := chatRequests.Load()
+			if !row.wantForward {
+				if !result.IsError || len(result.Content) == 0 ||
+					!strings.Contains(result.Content[0].(*mcp.TextContent).Text, "chat config broken") {
+					t.Fatalf("chat_ls = %+v, want the in-process configuration error", result)
+				}
+				if forwarded != 0 {
+					t.Fatalf("daemon saw %d chat requests, want 0; warnings: %s", forwarded, warnings.String())
+				}
+				return
+			}
+			if result.IsError {
+				t.Fatalf("chat_ls = %+v, want the daemon's answer", result)
+			}
+			if forwarded == 0 {
+				t.Fatalf("daemon saw no chat request; warnings: %s", warnings.String())
+			}
+		})
+	}
+}

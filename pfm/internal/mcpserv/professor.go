@@ -1,7 +1,9 @@
 package mcpserv
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -20,6 +22,18 @@ type ProfessorOptions struct {
 	Version   string
 	Chat      *Service            // nil: the chat family is disabled
 	Harvester *harvestmcp.Service // nil: the harvester family is disabled
+	// Failed holds each enabled family that failed to configure. Its tools
+	// stay listed under their normal names and every call answers an MCP
+	// error result naming the family, the error and the fix.
+	Failed []FailedFamily
+}
+
+// FailedFamily is one enabled family whose configuration failed.
+type FailedFamily struct {
+	Family     string   // pfmconfig.MCPServerChat or pfmconfig.MCPServerHarvester
+	Tools      []string // the names the family registers when healthy
+	Err        error    // the configuration error, rendered verbatim
+	ConfigPath string   // the pfm config file holding the key to correct
 }
 
 // Professor is the one MCP server the daemon serves: the combined server
@@ -28,10 +42,13 @@ type ProfessorOptions struct {
 // handle and one harvester behind all of them.
 type Professor struct {
 	combined *mcp.Server
-	chat     *Service // nil: the chat family is disabled
-	handler  http.Handler
-	families map[string]http.Handler
-	servers  map[string][]string
+	chat     *Service // nil: the chat family is disabled or failed
+	// chatFailed: the chat family is enabled but failed to configure, so no
+	// runtime identity exists to check a daemon's chat against.
+	chatFailed bool
+	handler    http.Handler
+	families   map[string]http.Handler
+	servers    map[string][]string
 }
 
 // NewProfessor builds the combined server and one view per enabled family.
@@ -58,6 +75,12 @@ func NewProfessor(options ProfessorOptions) (*Professor, error) {
 	}
 	if options.Chat != nil {
 		add(pfmconfig.MCPServerChat, chatInstructions, options.Chat.registerTools, ToolNames())
+	}
+	for _, failed := range options.Failed {
+		if failed.Family == pfmconfig.MCPServerChat {
+			professor.chatFailed = true
+		}
+		add(failed.Family, failedFamilyInstructions(failed.Family), failed.registerTools, failed.Tools)
 	}
 	professor.combined = newProfessorServer(options.Version, strings.Join(parts, "\n\n"))
 	for _, register := range registers {
@@ -97,4 +120,33 @@ func (professor *Professor) Servers() map[string][]string {
 		servers[family] = append([]string(nil), roster...)
 	}
 	return servers
+}
+
+func failedFamilyInstructions(family string) string {
+	return fmt.Sprintf(
+		"The %s family failed to configure: every %s tool answers the error and its fix.",
+		family,
+		family,
+	)
+}
+
+// registerTools lists each of the family's tools under its normal name; every
+// call answers the configuration error, so the tools are never silently absent.
+func (failed FailedFamily) registerTools(server *mcp.Server) {
+	message := fmt.Sprintf(
+		"pfm mcp: the %s family failed to configure: %v. Fix: correct the config key this error names in %s, then reconnect with /mcp.",
+		failed.Family,
+		failed.Err,
+		failed.ConfigPath,
+	)
+	handler := func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: message}}}, nil
+	}
+	for _, name := range failed.Tools {
+		server.AddTool(&mcp.Tool{
+			Name:        name,
+			Description: message,
+			InputSchema: map[string]any{"type": "object"},
+		}, handler)
+	}
 }

@@ -229,7 +229,9 @@ func (proxy *stdioProxy) read(ctx context.Context, input io.Reader, output io.Wr
 // runStdioTransport forwards to the daemon's config.MCPPathProfessor when it
 // mounts every locally enabled family and, when chat is enabled, runs the
 // same chat runtime; otherwise it serves the combined server in process and
-// says why on the warnings writer.
+// says why on the warnings writer. A chat family that failed to configure
+// locally has no runtime to verify the daemon's against, so it never forwards:
+// in process, every chat tool answers its configuration error.
 func (professor *Professor) runStdioTransport(
 	ctx context.Context,
 	reader io.ReadCloser,
@@ -244,6 +246,9 @@ func (professor *Professor) runStdioTransport(
 	inProcess := func(reason string) error {
 		fmt.Fprintf(warnings, "pfm mcp stdio: %s; using in-process MCP; %s\n", reason, consequence)
 		return professor.combined.Run(ctx, &mcp.IOTransport{Reader: reader, Writer: serialized})
+	}
+	if professor.chatFailed {
+		return inProcess("chat family failed to configure locally, so the daemon's chat runtime cannot be verified")
 	}
 	address := options.DaemonAddress
 	if address == "" {

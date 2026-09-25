@@ -53,7 +53,7 @@ func TestLoadOpenCodeModelMapNamesMalformedOverride(t *testing.T) {
 }
 
 func TestRenderOpenCodeToolsBlockDisablesToolsOutsideClaudeAllowList(t *testing.T) {
-	got, err := renderOpenCodeToolsBlock("Read, Bash, Agent")
+	got, _, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", nil)
 	if err != nil {
 		t.Fatalf("render: %v", err)
 	}
@@ -74,7 +74,7 @@ func TestRenderOpenCodeToolsBlockDisablesToolsOutsideClaudeAllowList(t *testing.
 
 func TestRenderOpenCodeToolsBlockLetsWriteAndEditReachApplyPatch(t *testing.T) {
 	for _, allowList := range []string{"Write", "Edit"} {
-		got, err := renderOpenCodeToolsBlock(allowList)
+		got, _, err := renderOpenCodeToolsBlock("worker.md", allowList, nil)
 		if err != nil {
 			t.Fatalf("render %s: %v", allowList, err)
 		}
@@ -89,15 +89,17 @@ const openCodeBuiltinDenialsForReadBashAgent = "tools:\n" +
 	"  invalid: false\n  lsp: false\n  plan_exit: false\n  question: false\n  skill: false\n" +
 	"  todowrite: false\n  webfetch: false\n  websearch: false\n  write: false\n"
 
-func TestRenderOpenCodeToolsBlockWithoutMCPEntriesIsByteIdentical(t *testing.T) {
-	got, err := renderOpenCodeToolsBlock("Read, Bash, Agent")
-	if err != nil || got != openCodeBuiltinDenialsForReadBashAgent {
-		t.Fatalf("tools block = %q, %v; want %q", got, err, openCodeBuiltinDenialsForReadBashAgent)
+func TestRenderOpenCodeToolsBlockWithoutMCPEntriesDeniesEveryKnownServer(t *testing.T) {
+	got, warnings, err := renderOpenCodeToolsBlock("worker.md", "Read, Bash, Agent", []string{"local", "professor"})
+	want := openCodeBuiltinDenialsForReadBashAgent + "  local_*: false\n  professor_*: false\n"
+	if err != nil || got != want || len(warnings) != 0 {
+		t.Fatalf("tools block = %q, %v, warnings %q; want %q", got, err, warnings, want)
 	}
 }
 
 func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
-	builtinDenials, err := renderOpenCodeToolsBlock("Read")
+	known := []string{"alpha", "my_server", "professor"}
+	builtinDenials, _, err := renderOpenCodeToolsBlock("worker.md", "Read", nil)
 	if err != nil {
 		t.Fatalf("render Read: %v", err)
 	}
@@ -109,7 +111,8 @@ func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
 		{
 			name:      "one server",
 			allowList: "Read, mcp__professor__harvester_read, mcp__professor__harvester_search_web",
-			mcpLines: "  professor_*: false\n" +
+			mcpLines: "  alpha_*: false\n  my_server_*: false\n" +
+				"  professor_*: false\n" +
 				"  professor_harvester_read: true\n" +
 				"  professor_harvester_search_web: true\n",
 		},
@@ -119,6 +122,7 @@ func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
 			mcpLines: "  alpha_*: false\n" +
 				"  alpha_beta: true\n" +
 				"  alpha_zeta: true\n" +
+				"  my_server_*: false\n" +
 				"  professor_*: false\n" +
 				"  professor_harvester_read: true\n" +
 				"  professor_harvester_search_web: true\n",
@@ -126,15 +130,75 @@ func TestRenderOpenCodeToolsBlockAllowsListedMCPTools(t *testing.T) {
 		{
 			name:      "sanitized server keeps its underscores",
 			allowList: "Read, mcp__my.server__do-it",
-			mcpLines:  "  my_server_*: false\n  my_server_do-it: true\n",
+			mcpLines:  "  alpha_*: false\n  my_server_*: false\n  my_server_do-it: true\n  professor_*: false\n",
+		},
+		{
+			name:      "server wildcard grants the whole server",
+			allowList: "Read, mcp__professor__*, mcp__professor__harvester_read",
+			mcpLines:  "  alpha_*: false\n  my_server_*: false\n  professor_*: true\n",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := renderOpenCodeToolsBlock(tc.allowList)
-			if err != nil || got != builtinDenials+tc.mcpLines {
-				t.Fatalf("tools block = %q, %v; want %q", got, err, builtinDenials+tc.mcpLines)
+			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, known)
+			if err != nil || got != builtinDenials+tc.mcpLines || len(warnings) != 0 {
+				t.Fatalf("tools block = %q, %v, warnings %q; want %q", got, err, warnings, builtinDenials+tc.mcpLines)
 			}
 		})
+	}
+}
+
+func TestRenderOpenCodeToolsBlockWarnsOnToolsItCannotMap(t *testing.T) {
+	builtinDenials, _, err := renderOpenCodeToolsBlock("worker.md", "Read", nil)
+	if err != nil {
+		t.Fatalf("render Read: %v", err)
+	}
+	for _, tc := range []struct {
+		name      string
+		allowList string
+		warning   string
+	}{
+		{
+			name:      "retired harvester server",
+			allowList: "Read, mcp__harvester__read",
+			warning:   "retired MCP tool mcp__harvester__read in worker.md — the professor server serves it as mcp__professor__harvester_read",
+		},
+		{
+			name:      "retired chat server",
+			allowList: "Read, mcp__chat__chat_inject",
+			warning:   "retired MCP tool mcp__chat__chat_inject in worker.md — the professor server serves it as mcp__professor__chat_inject",
+		},
+		{
+			name:      "unknown server",
+			allowList: "Read, mcp__nosuch__x",
+			warning:   "unknown MCP server in tool mcp__nosuch__x in worker.md — neither professor nor a project .mcp.json server serves it; it stays denied",
+		},
+		{
+			name:      "unmapped Claude tool",
+			allowList: "Read, NotebookEdit",
+			warning:   "unmapped Claude tool NotebookEdit in worker.md — no OpenCode equivalent; it stays denied",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, warnings, err := renderOpenCodeToolsBlock("worker.md", tc.allowList, []string{"professor"})
+			want := builtinDenials + "  professor_*: false\n"
+			if err != nil || got != want {
+				t.Fatalf("tools block = %q, %v; want %q", got, err, want)
+			}
+			if len(warnings) != 1 || warnings[0] != tc.warning {
+				t.Fatalf("warnings = %q, want [%q]", warnings, tc.warning)
+			}
+		})
+	}
+}
+
+func TestRenderOpenCodeToolsBlockKeepsARetiredNameThatIsAProjectServer(t *testing.T) {
+	got, warnings, err := renderOpenCodeToolsBlock(
+		"worker.md",
+		"Read, mcp__harvester__read",
+		[]string{"harvester", "professor"},
+	)
+	if err != nil || len(warnings) != 0 || !strings.Contains(got, "  harvester_*: false\n  harvester_read: true\n") {
+		t.Fatalf("tools block = %q, %v, warnings %q; want the project harvester server granted", got, err, warnings)
 	}
 }
 

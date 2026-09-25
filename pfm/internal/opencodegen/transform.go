@@ -98,6 +98,14 @@ func parseOpenCodeFrontmatter(text string) (map[string]string, string, error) {
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
+		if value == "" {
+			var items []string
+			for i+1 < end && strings.HasPrefix(strings.TrimSpace(lines[i+1]), "- ") {
+				items = append(items, strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i+1]), "- ")))
+				i++
+			}
+			value = strings.Join(items, ", ")
+		}
 		if strings.HasSuffix(value, ">") || strings.HasSuffix(value, "|") {
 			style := value[len(value)-1]
 			var block []string

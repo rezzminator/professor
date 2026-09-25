@@ -18,7 +18,7 @@ Cross-project docs live under `docs/agents/`; single-project internals live unde
 | API | [api/\_index.md](api/_index.md) | Operation surface, endpoints, inter-service contracts, shared types |
 | System Map | [map/\_index.md](map/_index.md) | Components, workflows, DB schema, access control, ports/env/tests |
 | Features | [features/\_index.md](features/_index.md) | Feature inventory by category |
-| Standards | [standards.md](standards.md) | Architecture source-of-truth — invariants every architect reads (owned by `/pfm`) |
+| Standards | [standards.md](standards.md) | Architecture source-of-truth — invariants every architect reads (owned by `/pcm`) |
 
 ## Child Projects (`{project}/docs/`)
 

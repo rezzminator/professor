@@ -1,6 +1,8 @@
 package installer
 
 import (
+	"bytes"
+	"context"
 	"io"
 	"os"
 	"path/filepath"
@@ -163,5 +165,94 @@ func TestRetireOrphanGlobalAgentsCannotLookReportsErrorNotSuccess(t *testing.T) 
 	}
 	if !strings.Contains(err.Error(), unreadable) {
 		t.Fatalf("error did not name the unreadable registry path %s: %v", unreadable, err)
+	}
+}
+
+// TestClaudeGlobalAgentsLinkAndRetireWhateverTheCodexRoster is a REGRESSION
+// test: the Claude-side agent fan-out (links, dangling-original retirement,
+// undeclared-variant retirement) rode inside the Codex-roster gate, so an
+// install with no Codex home (`--skip-codex`, an empty roster) left a
+// dangling ~/.claude/agents link and an undeclared generated variant behind
+// and never linked a newly shipped agent. Both rosters must serve Claude; only
+// the configured one may write a Codex role.
+func TestClaudeGlobalAgentsLinkAndRetireWhateverTheCodexRoster(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		roster func(home string) []string
+	}{
+		{name: "empty roster", roster: func(string) []string { return []string{} }},
+		{name: "one Codex home", roster: func(home string) []string { return []string{filepath.Join(home, ".codex")} }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			agents := filepath.Join(home, ".professor", "templates", "global", "agents")
+			tracer := filepath.Join(agents, "tracer.md")
+			writeFixture(t, tracer, "---\nname: tracer\ndescription: fixture tracer\n---\n\n# Tracer\n")
+			registry := filepath.Join(home, ".claude", "agents")
+			if err := os.MkdirAll(registry, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			dangling := filepath.Join(registry, "flights-gater.md")
+			if err := os.Symlink(filepath.Join(agents, "flights-gater.md"), dangling); err != nil {
+				t.Fatal(err)
+			}
+			variant := filepath.Join(paths.GeneratedClaudeAgentsDir(home), "retired-variant.md")
+			writeFixture(t, variant, "---\nname: retired-variant\n---\n\nbody\n")
+
+			roster := tc.roster(home)
+			var output bytes.Buffer
+			_, err := Run(context.Background(), Options{
+				Mode: ModeApply, Home: home, Stdout: &output,
+				Runner: &fakeRunner{nameSyncIdle: true}, CodexHomes: roster,
+			})
+			if err != nil {
+				t.Fatalf("install: %v\n%s", err, output.String())
+			}
+			for _, wanted := range []string{
+				"retired global agent — " + filepath.Join(agents, "flights-gater.md") + " no longer ships",
+				"undeclared generated agent variant",
+			} {
+				if !strings.Contains(output.String(), wanted) {
+					t.Errorf("install output omitted %q:\n%s", wanted, output.String())
+				}
+			}
+			if _, err := os.Lstat(dangling); !os.IsNotExist(err) {
+				t.Errorf("dangling Claude agent link survived: %v", err)
+			}
+			if _, err := os.Lstat(variant); !os.IsNotExist(err) {
+				t.Errorf("undeclared generated variant survived: %v", err)
+			}
+			if target, linked := resolvedLink(filepath.Join(registry, "tracer.md")); !linked || target != tracer {
+				t.Errorf("shipped agent not linked: target=%q linked=%v, want %q", target, linked, tracer)
+			}
+			role := filepath.Join(home, ".codex", "agents", "tracer.toml")
+			if len(roster) == 0 {
+				for _, wanted := range []string{
+					"no Codex accounts configured — command mirror has nothing to write",
+					"no Codex accounts configured — agent mirror has nothing to write",
+				} {
+					if !strings.Contains(output.String(), wanted) {
+						t.Errorf("zero-account mirror skip omitted %q:\n%s", wanted, output.String())
+					}
+				}
+				for _, forbidden := range []string{
+					filepath.Join(home, ".codex", "prompts"),
+					filepath.Join(home, ".codex", "skills"),
+					filepath.Join(home, ".codex", "agents"),
+				} {
+					if strings.Contains(output.String(), forbidden) {
+						t.Errorf("zero-account install planned Codex mirror %s:\n%s", forbidden, output.String())
+					}
+					if _, err := os.Lstat(forbidden); !os.IsNotExist(err) {
+						t.Errorf("zero-account install wrote %s: %v", forbidden, err)
+					}
+				}
+				return
+			}
+			info, err := os.Lstat(role)
+			if err != nil || !info.Mode().IsRegular() {
+				t.Errorf("configured Codex home lacks the regular role file %s: info=%v err=%v", role, info, err)
+			}
+		})
 	}
 }

@@ -246,6 +246,40 @@ func TestThemeManifestUnpublishedAlphaReleaseReturnsNamedRefusal(t *testing.T) {
 	}
 }
 
+// TestThemeManifestSourceRepoWithoutLocalManifestRefusesUnpublishedAlpha
+// covers the SourceRepo branch of the same refusal: a source repository with
+// no local manifest falls back to the release URL, and an -alpha URL there
+// must return the named refusal carrying the local-manifest error — never a
+// fetch of the URL pfm never publishes.
+func TestThemeManifestSourceRepoWithoutLocalManifestRefusesUnpublishedAlpha(t *testing.T) {
+	client := &http.Client{Transport: themeRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		t.Errorf("fetched the unpublished -alpha release manifest %s", request.URL)
+		return nil, fmt.Errorf("fixture transport refuses %s", request.URL)
+	})}
+	_, err := loadThemeSources(context.Background(), Options{
+		SourceRepo:       t.TempDir(),
+		ThemeManifestURL: "https://raw.githubusercontent.com/example/professor/0.78.0-alpha/templates/themes/sources.json",
+		ThemeHTTPClient:  client,
+	})
+	if err == nil {
+		t.Fatal("loadThemeSources() error = nil, want a named refusal for an unpublished -alpha release manifest")
+	}
+	for _, want := range []string{
+		"release manifest for an unpublished -alpha build; run pfm install from the source clone",
+		"local theme manifest unavailable",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("loadThemeSources() error = %v, want it to contain %q", err, want)
+		}
+	}
+}
+
+type themeRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn themeRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return fn(request)
+}
+
 // TestThemePreviewLabelsBundledPaletteAsReadNotFetch is a REGRESSION test for
 // the 2026-09-14 retro finding: the preview change line for a bundled
 // palette read from the source clone said "fetch theme X -> target", the

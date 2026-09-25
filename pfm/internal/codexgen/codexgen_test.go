@@ -429,6 +429,21 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, ".claude", "agents", "private.md"), "---\ndescription: private\n---\nno\n")
 	writeTestFile(
 		t,
+		filepath.Join(root, ".claude", "agents", "changelogger.md"),
+		"---\ndescription: writer\ntools: Read, Write, Edit, Bash, Glob, Grep, Agent\n---\nwriter\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, ".claude", "agents", "gitter.md"),
+		"---\ndescription: git writer\ntools: Read, Bash, Glob, Grep\n---\ngitter\n",
+	)
+	writeTestFile(
+		t,
+		filepath.Join(root, "sample-api", ".claude", "agents", "gitter.md"),
+		"---\ndescription: nested git writer\ntools: Read, Bash, Glob, Grep\n---\ngitter\n",
+	)
+	writeTestFile(
+		t,
 		filepath.Join(root, "sample-api", ".claude", "agents", "worker.md"),
 		"---\ndescription: child\n---\nchild\n",
 	)
@@ -471,6 +486,7 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 		`description = "Review \\\"quoted\\\" output"`,
 		`model = "gpt-5.6-sol"`,
 		`model_reasoning_effort = "high"`,
+		`sandbox_mode = "read-only"`,
 		"Role reviewer starts here.",
 		"$tools-go",
 	)
@@ -480,6 +496,7 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 		`description = "Review \\\"quoted\\\" output"`,
 		`model = "gpt-5.6-sol"`,
 		`model_reasoning_effort = "high"`,
+		`sandbox_mode = "read-only"`,
 		`developer_instructions = """`,
 	}
 	last := -1
@@ -501,6 +518,12 @@ func TestIncumbentUnionFixtureBuildThenReadOnlyCheck(t *testing.T) {
 	if !strings.Contains(worker, `name = "worker_api"`) || strings.Contains(worker, "\nmodel =") ||
 		strings.Contains(worker, "\nmodel_reasoning_effort =") {
 		t.Fatalf("worker-api.toml must omit absent model and effort keys:\n%s", worker)
+	}
+	for _, writable := range []string{"changelogger", "gitter", "gitter-api", "unmapped"} {
+		content := string(mustReadTestFile(t, filepath.Join(root, ".codex", "agents", writable+".toml")))
+		if strings.Contains(content, "sandbox_mode") {
+			t.Fatalf("%s.toml must carry no sandbox_mode key:\n%s", writable, content)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(root, ".codex", "agents", "private.toml")); !os.IsNotExist(err) {
 		t.Fatalf("never-register agent exists: %v", err)

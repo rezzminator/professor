@@ -516,6 +516,15 @@ func compileAgents(
 				model = mapped
 			}
 			tomlName := strings.ReplaceAll(name, "-", "_")
+			// Read-only unless the Claude tools grant a write tool, the line is absent, or it is a (suffixed) gitter.
+			readOnly := strings.TrimSpace(fields["tools"]) != "" &&
+				strings.TrimSuffix(filepath.Base(entry.path), ".md") != "gitter"
+			for _, tool := range strings.Split(fields["tools"], ",") {
+				tool = strings.TrimSpace(tool)
+				if tool == "Write" || tool == "Edit" || tool == "MultiEdit" || tool == "NotebookEdit" {
+					readOnly = false
+				}
+			}
 			instructions := strings.ReplaceAll(cfg.AgentPreamble, "${name}", tomlName)
 			instructions += transformMarkdown(strings.TrimSpace(body), options)
 			toml := "# " + generatedLine(filepath.ToSlash(rel)) + "\n"
@@ -533,6 +542,9 @@ func compileAgents(
 			}
 			if effort := strings.TrimSpace(fields["effort"]); effort != "" {
 				toml += "model_reasoning_effort = " + tomlString(effort) + "\n"
+			}
+			if readOnly {
+				toml += "sandbox_mode = \"read-only\"\n"
 			}
 			toml += "developer_instructions = \"\"\"\n" + tomlMultiline(instructions) + "\"\"\"\n"
 			add(generatedFile{Path: filepath.Join(root, ".codex", "agents", name+".toml"), Content: toml})

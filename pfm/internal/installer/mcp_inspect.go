@@ -75,7 +75,9 @@ func InspectHarvesterClientCutover(home string, port int, registries, codexHomes
 		}
 	}
 	for _, dir := range codexHomes {
-		reports = append(reports, inspectCodexHarvester(filepath.Join(dir, "config.toml"), port))
+		reports = append(
+			reports,
+			InspectCodexServers(filepath.Join(dir, "config.toml"), home, port, mcpServerHarvester)...)
 	}
 	// Root .mcp.json is historical/project-scope evidence, not Claude user scope.
 	reports = append(reports, InspectClaudeServers(filepath.Join(home, ".mcp.json"), home, port, mcpServerHarvester)...)
@@ -156,7 +158,8 @@ func openCodeServers(path string) (map[string]any, error) {
 // path that pfm install did NOT write: install records each registration it
 // owns in its ownership ledger and preserves any entry that ledger does not
 // match (writeMCPOpenCodeJSON's "preserve conflicting manual OpenCode MCP
-// client"), so a rerun of `pfm install --yes` can never fix one of these.
+// client"); an entry equal to the ledger's pending record for the path is an
+// interrupted install's own, adopted on the next run. So a rerun of `pfm install --yes` can never fix one of these.
 // It is doctor's ground for naming a user-owned entry instead of prescribing
 // a reinstall that would silently leave it in place. An unreadable config or
 // ledger is an error — never an empty answer that reads as "all pfm's".
@@ -170,6 +173,7 @@ func OpenCodeUnownedEntries(home, path string, names ...string) ([]string, error
 		return nil, err
 	}
 	owned := ownership.OpenCodeRegistrations[physicalSettingsPath(path)]
+	pending := ownership.OpenCodePending[physicalSettingsPath(path)]
 	unowned := []string{}
 	for _, name := range names {
 		current, present := servers[name]
@@ -177,6 +181,9 @@ func OpenCodeUnownedEntries(home, path string, names ...string) ([]string, error
 			continue
 		}
 		if recorded, claimed := owned[name]; claimed && sameJSONValue(current, recorded) {
+			continue
+		}
+		if recorded, claimed := pending[name]; claimed && sameJSONValue(current, recorded) {
 			continue
 		}
 		unowned = append(unowned, name)
@@ -287,46 +294,76 @@ func InspectClaudeServers(path, home string, port int, names ...string) []MCPCli
 	return reports
 }
 
-func inspectCodexHarvester(path string, port int) MCPClientCutover {
-	report := MCPClientCutover{
-		Client: pfmengine.MustLookup(pfmengine.Codex).LongName,
-		State:  MCPClientAbsent,
-		Path:   path,
+// InspectCodexServers classifies every name's table in one Codex config.toml
+// `mcp_servers`, one report per name (in the order given). A missing file
+// reports every name absent; a read or parse failure reports every name
+// unreadable with the error. `professor` is pfm only in the exact table pfm
+// writes (`command = "<home>/.local/bin/pfm"`, `args = mcpStdioArgs`, nothing
+// else); `chat` and `harvester` go through classifyRegistration. pfm and
+// legacy-pfm each prescribe `pfm install --yes`, so a table install's own
+// strip keeps (stripPFMCodexLines) is not pfm's to reinstall away: foreign.
+func InspectCodexServers(path, home string, port int, names ...string) []MCPClientCutover {
+	base := func(name string) MCPClientCutover {
+		return MCPClientCutover{
+			Client: pfmengine.MustLookup(pfmengine.Codex).LongName,
+			Name:   name,
+			Path:   path,
+			State:  MCPClientAbsent,
+		}
+	}
+	uniform := func(state string, err error) []MCPClientCutover {
+		reports := make([]MCPClientCutover, len(names))
+		for index, name := range names {
+			report := base(name)
+			report.State, report.Error = state, err
+			reports[index] = report
+		}
+		return reports
 	}
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return report
+		return uniform(MCPClientAbsent, nil)
 	}
 	if err != nil {
-		report.State, report.Error = MCPClientUnreadable, fmt.Errorf("read %s: %w", path, err)
-		return report
+		return uniform(MCPClientUnreadable, fmt.Errorf("read %s: %w", path, err))
 	}
 	var document struct {
 		Servers map[string]mcpClientRegistration `toml:"mcp_servers"`
 	}
 	if _, err := toml.Decode(string(raw), &document); err != nil {
-		report.State, report.Error = MCPClientUnreadable, fmt.Errorf("parse %s: %w", path, err)
-		return report
+		return uniform(MCPClientUnreadable, fmt.Errorf("parse %s: %w", path, err))
 	}
-	registration, present := document.Servers[mcpServerHarvester]
-	if !present {
-		return report
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	body, err := codexStdioBody(bin)
+	if err != nil {
+		return uniform(MCPClientUnreadable, fmt.Errorf("encode pfm's Codex MCP table for %s: %w", path, err))
 	}
-	report.State = classifyRegistration(mcpServerHarvester, registration, port)
-	// legacy-pfm prescribes `pfm install --yes`, so it names only a table that
-	// install's own strip removes; one it keeps is not pfm's to reinstall away.
-	if report.State == MCPClientLegacyPFM {
-		var stripped struct {
-			Servers map[string]any `toml:"mcp_servers"`
+	var stripped struct {
+		Servers map[string]any `toml:"mcp_servers"`
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	_, strippedErr := toml.Decode(strings.Join(stripPFMCodexLines(lines, port, body), "\n"), &stripped)
+	reports := make([]MCPClientCutover, 0, len(names))
+	for _, name := range names {
+		report := base(name)
+		registration, present := document.Servers[name]
+		if present {
+			report.State = classifyRegistration(name, registration, port)
+			if name == professorName && registration.Command != bin {
+				report.State = MCPClientForeignRegistration
+			}
 		}
-		lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
-		if _, err := toml.Decode(strings.Join(stripPFMCodexLines(lines, port), "\n"), &stripped); err != nil {
-			report.State, report.Error = MCPClientUnreadable, fmt.Errorf("parse %s without pfm's lines: %w", path, err)
-		} else if _, kept := stripped.Servers[mcpServerHarvester]; kept {
-			report.State = MCPClientForeignRegistration
+		if report.State == MCPClientPFM || report.State == MCPClientLegacyPFM {
+			if strippedErr != nil {
+				report.State, report.Error = MCPClientUnreadable, fmt.Errorf(
+					"parse %s without pfm's lines: %w", path, strippedErr)
+			} else if _, kept := stripped.Servers[name]; kept {
+				report.State = MCPClientForeignRegistration
+			}
 		}
+		reports = append(reports, report)
 	}
-	return report
+	return reports
 }
 
 // classifyRegistration is the one implementation shared by every Claude and
@@ -335,7 +372,7 @@ func inspectCodexHarvester(path string, port int) MCPClientCutover {
 // that shape and any HTTP `professor` is foreign; `chat` and `harvester` are
 // legacy keys, legacy-pfm only in pfm's own old shapes (the loopback
 // `/mcp/<key>` URL, bare or with the retired 64-hex bearer, and the stdio
-// `pfm mcp chat serve`); a `uv`/`harvest…` harvester is the standalone one.
+// chat argvs in mcpLegacyChatArgs); a `uv`/`harvest…` harvester is the standalone one.
 func classifyRegistration(name string, registration mcpClientRegistration, port int) string {
 	typeName := strings.ToLower(strings.TrimSpace(registration.Type))
 	command := strings.TrimSpace(registration.Command)
@@ -360,8 +397,10 @@ func classifyRegistration(name string, registration mcpClientRegistration, port 
 			isRetiredPFMHeaders(registration.Headers) {
 			return MCPClientLegacyPFM
 		}
-		if name == chatName && stdioArgs(mcpCommand, chatName, mcpServeCommand) {
-			return MCPClientLegacyPFM
+		for _, args := range mcpLegacyChatArgs {
+			if name == chatName && stdioArgs(args...) {
+				return MCPClientLegacyPFM
+			}
 		}
 	}
 	if name != mcpServerHarvester {

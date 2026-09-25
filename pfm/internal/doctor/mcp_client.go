@@ -3,6 +3,7 @@ package doctor
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -15,8 +16,9 @@ import (
 // ClaudeUserRegistries — one row per file, naming why pfm considers it a
 // registry, with its "professor" state and any pfm legacy "chat" / "harvester"
 // entry still present, so a registry pfm never reached reads as visibly absent
-// rather than silently skipped), the OpenCode config the same way, and the
-// historical harvester cutover check for Codex and the project-scope .mcp.json
+// rather than silently skipped), each Codex account home's config.toml and the
+// OpenCode config the same way, and the historical harvester cutover check for
+// Codex and the project-scope .mcp.json
 // (unaffected by CLAUDE_CONFIG_DIR), which tells pfm's own legacy entry apart
 // from a foreign or standalone one.
 func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
@@ -65,6 +67,9 @@ func PrintMCPClientCutover(stdout io.Writer, runtime config.Runtime) int {
 			)
 		}
 	}
+	for _, home := range codexHomes {
+		warnings += printCodexRow(stdout, runtime, filepath.Join(home, "config.toml"))
+	}
 	warnings += printOpenCodeRows(stdout, runtime.Paths.Home, runtime.Config.MCP.HTTP.Port)
 	if warnings == 0 {
 		fmt.Fprintln(stdout, "doctor: mcp client-cutover=complete")
@@ -94,6 +99,42 @@ func printOpenCodeRows(stdout io.Writer, home string, port int) int {
 		fmt.Fprintf(stdout, "%s %s\n", base, openCodeRemediation(home, path, state))
 		return 1
 	}
+}
+
+// printCodexRow prints one Codex account home's config.toml row: its
+// `professor` state and any pfm legacy `chat` table still present (the
+// harvester key is the cutover check's, so nothing is counted twice). pfm
+// install replaces only the tables it wrote, so a foreign `professor` is named
+// as user-owned; an absent one warns only while an MCP family is enabled.
+func printCodexRow(stdout io.Writer, runtime config.Runtime, path string) int {
+	state, legacy, inspectionError := professorState(installer.InspectCodexServers(
+		path,
+		runtime.Paths.Home,
+		runtime.Config.MCP.HTTP.Port,
+		config.MCPServerProfessor,
+		config.MCPServerChat,
+	))
+	base := fmt.Sprintf("doctor: mcp client=codex config=%s professor=%s%s", path, state, legacy)
+	const reinstall = "remediation=run pfm install --yes"
+	switch {
+	case state == installer.MCPClientUnreadable:
+		fmt.Fprintf(stdout, "%s error=%v\n", base, inspectionError)
+	case state == installer.MCPClientForeignRegistration:
+		fmt.Fprintf(
+			stdout,
+			"%s remediation=%s in %s is a user-owned entry pfm install will not replace — remove or rename it, "+
+				"then run pfm install --yes\n",
+			base,
+			config.MCPServerProfessor,
+			path,
+		)
+	case legacy != "" || (state == installer.MCPClientAbsent && mcpConfigured(runtime)):
+		fmt.Fprintf(stdout, "%s %s\n", base, reinstall)
+	default:
+		fmt.Fprintln(stdout, base)
+		return 0
+	}
+	return 1
 }
 
 // professorState folds one file's reports — `professor` and the legacy

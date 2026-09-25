@@ -213,3 +213,29 @@ func TestInspectHarvesterClientCutoverTellsPFMLegacyFromForeignInCodex(t *testin
 		t.Fatalf("reports=%#v, want the headed Codex table foreign-registration", reports)
 	}
 }
+
+// TestOpenCodeUnownedEntriesClaimsAnInterruptedInstallsPendingEntry pins the
+// interrupted install: the ledger's opencodePending already holds pfm's
+// professor for the path (writeMCPOpenCodeJSON records it before the write),
+// so the entry is install's own — the one it adopts on the next run — and
+// doctor must not call it user-owned.
+func TestOpenCodeUnownedEntriesClaimsAnInterruptedInstallsPendingEntry(t *testing.T) {
+	home := t.TempDir()
+	path := OpenCodeConfigPath(home)
+	professor := `{"type":"local","command":["` + filepath.Join(home, ".local", "bin", "pfm") +
+		`","mcp","serve","--stdio"],"enabled":true}`
+	writeFixture(t, path, `{"mcp":{"professor":`+professor+`}}`)
+	writeFixture(t, filepath.Join(managedRootForHome(home), mcpOwnershipName),
+		`{"opencodePending":{"`+physicalSettingsPath(path)+`":{"professor":`+professor+`}}}`)
+	unowned, err := OpenCodeUnownedEntries(home, path, professorName)
+	if err != nil || len(unowned) != 0 {
+		t.Fatalf("unowned=%q, err=%v; want the pending professor claimed as pfm's", unowned, err)
+	}
+
+	// A pending record the entry no longer equals is not pfm's to claim.
+	writeFixture(t, path, `{"mcp":{"professor":{"type":"local","command":["hand-written"]}}}`)
+	unowned, err = OpenCodeUnownedEntries(home, path, professorName)
+	if err != nil || len(unowned) != 1 || unowned[0] != professorName {
+		t.Fatalf("unowned=%q, err=%v; want the hand-edited professor named", unowned, err)
+	}
+}

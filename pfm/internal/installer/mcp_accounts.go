@@ -181,6 +181,14 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 				err = errors.New("registry must be an object")
 			}
 		}
+		// A registry visited only to remove pfm's legacy entries is named and
+		// passed over when it cannot be scanned: pfm registers nothing there, so
+		// the rest of the install must not stop on it. A registry pfm owns or
+		// registers into still fails the install.
+		if err != nil && scanPaths[path] {
+			installer.skip("could not scan " + path + " for pfm legacy MCP entries: " + err.Error())
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read MCP registry %s: %w", path, err)
 		}
@@ -188,6 +196,10 @@ func (installer *engine) writeMCPClientJSON(names []string) ([]string, error) {
 		if value, present := document["mcpServers"]; present {
 			var ok bool
 			servers, ok = value.(map[string]any)
+			if (!ok || servers == nil) && scanPaths[path] {
+				installer.skip("could not scan " + path + " for pfm legacy MCP entries: mcpServers must be an object")
+				continue
+			}
 			if !ok || servers == nil {
 				return nil, fmt.Errorf("MCP registry %s: mcpServers must be an object", path)
 			}

@@ -132,3 +132,50 @@ func TestWriteMCPClientJSONRefusesAnUnreadableOwnershipLedger(t *testing.T) {
 		})
 	}
 }
+
+// TestMCPInstallNamesAMalformedScanOnlyRegistryAndContinues pins that a
+// registry visited only to remove pfm's legacy entries (~/.mcp.json with no
+// ledger claiming it) never stops the install when it cannot be scanned:
+// install names the file and the error and wires everything else. A registry
+// pfm registers into still fails the install.
+func TestMCPInstallNamesAMalformedScanOnlyRegistryAndContinues(t *testing.T) {
+	for name, content := range map[string]string{
+		"empty":         "",
+		"unparseable":   "{",
+		"null servers":  `{"mcpServers":null}`,
+		"not an object": `[]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			home := t.TempDir()
+			scanOnly := filepath.Join(home, ".mcp.json")
+			writeFixture(t, scanOnly, content)
+			applied := applyChatMCP(t, home)
+			want := "could not scan " + physicalSettingsPath(scanOnly) + " for pfm legacy MCP entries: "
+			if !strings.Contains(applied, want) {
+				t.Fatalf("install output lacks %q:\n%s", want, applied)
+			}
+			if readFixture(t, scanOnly) != content {
+				t.Fatalf("install rewrote the unscannable %s", scanOnly)
+			}
+			servers := readClaudeServers(t, filepath.Join(home, ".claude.json"))
+			if !sameJSONValue(servers[professorName], claudeProfessorShape(home)) {
+				t.Fatalf("install stopped before registering professor: %#v", servers)
+			}
+		})
+	}
+	t.Run("an owned registry still fails", func(t *testing.T) {
+		t.Setenv("CLAUDE_CONFIG_DIR", "")
+		home := t.TempDir()
+		canonical := filepath.Join(home, ".claude")
+		writeFixture(t, filepath.Join(canonical, "settings.json"), `{}`)
+		writeFixture(t, filepath.Join(home, ".claude.json"), "{")
+		_, err := Run(context.Background(), Options{
+			Mode: ModeApply, Home: home, ConfigDir: canonical, ConfigDirs: []string{canonical},
+			MCPEnabled: map[string]bool{"chat": true}, MCPPort: 8377, Runner: &fakeRunner{}, Stdout: io.Discard,
+		})
+		if err == nil || !strings.Contains(err.Error(), "read MCP registry") {
+			t.Fatalf("install over a malformed registry it registers into: err=%v, want the read failure", err)
+		}
+	})
+}

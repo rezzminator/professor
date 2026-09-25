@@ -270,3 +270,75 @@ func TestDoctorOpenCodeNamesAUserOwnedEntry(t *testing.T) {
 			code, stdout.String())
 	}
 }
+
+// TestDoctorMCPClientReportsCodexProfessorStates pins the Codex row: every
+// Codex account home's config.toml is checked for pfm's stdio professor the
+// way Claude and OpenCode are — healthy, absent while a family is enabled
+// (warn) or disabled (quiet), a hand-written table named user-owned, pfm's
+// legacy chat table, and an unparseable file named as an error, never absent.
+func TestDoctorMCPClientReportsCodexProfessorStates(t *testing.T) {
+	root := jailTest(t)
+	home := filepath.Join(root, "home")
+	path := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	professor := "[mcp_servers.professor]\ncommand = \"" + bin + "\"\nargs = [\"mcp\", \"serve\", \"--stdio\"]\n"
+	fenced := "# BEGIN pfm mcp_servers — installer-owned\n" + professor +
+		"# END pfm mcp_servers — installer-owned\n"
+	row := "doctor: mcp client=codex config=" + path + " professor="
+	reinstall := " remediation=run pfm install --yes"
+	for _, fixture := range []struct {
+		name, config string
+		enabled      bool
+		wantRow      string
+		warnings     int
+	}{
+		{"present", fenced, true, row + "pfm\n", 0},
+		{"absent while enabled", "", true, row + "absent" + reinstall + "\n", 1},
+		{"absent while disabled", "", false, row + "absent\n", 0},
+		{
+			"foreign", "[mcp_servers.professor]\ncommand = \"/opt/professor/bin/serve\"\n", true,
+			row + "foreign-registration remediation=professor in " + path +
+				" is a user-owned entry pfm install will not replace — remove or rename it, then run pfm install --yes\n",
+			1,
+		},
+		{
+			"legacy chat", fenced + "\n[mcp_servers.chat]\nurl = \"http://127.0.0.1:18377/mcp/chat\"\n", true,
+			row + "pfm legacy=chat" + reinstall + "\n", 1,
+		},
+		// The same unparseable file also fails the harvester row, which
+		// names that key; both rows report the error, never absence.
+		{"unreadable", "[mcp_servers.professor\n", true, row + "unreadable error=", 2},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			if err := os.WriteFile(path, []byte(fixture.config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runtime, err := pfmconfig.LoadRuntime("")
+			if err != nil {
+				t.Fatal(err)
+			}
+			runtime.Paths.Home = home
+			runtime.Config.MCP.HTTP.Port = 18377
+			runtime.Config.CodexAccounts = []pfmconfig.CodexAccount{{ID: 1, Home: filepath.Dir(path)}}
+			runtime.Config.MCPServers = map[string]pfmconfig.MCPServer{
+				pfmconfig.MCPServerChat: {Enabled: fixture.enabled},
+			}
+			var stdout bytes.Buffer
+			warnings := PrintMCPClientCutover(&stdout, runtime)
+			out := stdout.String()
+			if warnings != fixture.warnings || !strings.Contains(out, fixture.wantRow) {
+				t.Fatalf("warnings=%d output:\n%s\nwant %d warnings and the row %q", warnings, out, fixture.warnings,
+					fixture.wantRow)
+			}
+			if strings.Count(out, "client=codex config=") != 1 {
+				t.Fatalf("want exactly one Codex professor row:\n%s", out)
+			}
+			if complete := strings.Contains(out, "client-cutover=complete"); complete != (fixture.warnings == 0) {
+				t.Fatalf("client-cutover=complete printed=%v with %d warnings:\n%s", complete, fixture.warnings, out)
+			}
+		})
+	}
+}

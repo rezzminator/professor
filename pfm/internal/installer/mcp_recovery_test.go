@@ -118,6 +118,39 @@ func TestMCPRepairsABrokenCodexFence(t *testing.T) {
 	}
 }
 
+// TestMCPReclaimsAnOrphanedCodexProfessorBody pins the fence whose END line
+// was deleted by hand: the professor body pfm wrote is still byte-exact pfm
+// shape, so install removes it and writes one fenced table (no manual-conflict
+// skip), and uninstall over the same orphan leaves no professor table.
+func TestMCPReclaimsAnOrphanedCodexProfessorBody(t *testing.T) {
+	home := t.TempDir()
+	account := filepath.Join(home, ".codex")
+	path := filepath.Join(account, "config.toml")
+	head := "model = \"personal\"\n"
+	tail := "[desktop]\ndock-icon-preference = \"app-default\"\n"
+	orphan := head + strings.TrimSuffix(codexProfessorFence(home), mcpFenceEnd+"\n") + "\n" + tail
+	writeFixture(t, path, orphan)
+	var out strings.Builder
+	e := codexMCPEngine(home, account)
+	e.options.Stdout = &out
+	if err := e.writeMCPCodeConfig([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	if want := head + tail + codexProfessorFence(home); readFixture(t, path) != want {
+		t.Fatalf("installed Codex config:\n%s\nwant:\n%s", readFixture(t, path), want)
+	}
+	if strings.Contains(out.String(), "preserve conflicting manual MCP client") {
+		t.Fatalf("install called pfm's orphaned professor body a manual conflict:\n%s", out.String())
+	}
+	writeFixture(t, path, orphan)
+	if err := e.removeMCPCodeConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFixture(t, path); got != head+tail {
+		t.Fatalf("uninstall left:\n%s\nwant:\n%s", got, head+tail)
+	}
+}
+
 // TestMCPKeepsALegacyCodexTableWithAnExtraKey pins that a [mcp_servers.harvester]
 // table differing from pfm's legacy shape by one key is not pfm's and stays.
 func TestMCPKeepsALegacyCodexTableWithAnExtraKey(t *testing.T) {
@@ -133,7 +166,7 @@ func TestMCPKeepsALegacyCodexTableWithAnExtraKey(t *testing.T) {
 	if got := readFixture(t, path); got != original+codexProfessorFence(home) {
 		t.Fatalf("Codex config:\n%s\nwant the extended harvester table kept and the professor fence appended", got)
 	}
-	if report := inspectCodexHarvester(path, 18377); report.State != MCPClientForeignRegistration {
+	if report := InspectCodexServers(path, home, 18377, mcpServerHarvester)[0]; report.State != MCPClientForeignRegistration {
 		t.Fatalf("doctor classifies the extended harvester table as %s, want %s: install keeps it",
 			report.State, MCPClientForeignRegistration)
 	}
@@ -158,7 +191,7 @@ func TestMCPKeepsALegacyCodexTableWithASubTable(t *testing.T) {
 	if got := readFixture(t, path); got != original+codexProfessorFence(home) {
 		t.Fatalf("Codex config:\n%s\nwant the headed harvester table kept and the professor fence appended", got)
 	}
-	if report := inspectCodexHarvester(path, 18377); report.State != MCPClientForeignRegistration {
+	if report := InspectCodexServers(path, home, 18377, mcpServerHarvester)[0]; report.State != MCPClientForeignRegistration {
 		t.Fatalf(
 			"doctor classifies the headed harvester table as %s, want %s",
 			report.State,

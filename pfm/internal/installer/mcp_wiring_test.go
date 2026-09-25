@@ -897,3 +897,57 @@ func TestInspectHarvesterClientCutoverNamesPFMLegacyStandaloneAndUnreadableState
 		t.Fatalf("Codex unreadable report=%#v, want path-bearing parse error", reports[1])
 	}
 }
+
+// TestMCPInstallRemovesTheBarePFMMCPChatEntry pins the oldest pfm chat
+// shape, `<bin> mcp` with no subcommand: install removes it as pfm's legacy
+// entry and doctor classifies it legacy-pfm, the state that prescribes the
+// reinstall which removes it.
+func TestMCPInstallRemovesTheBarePFMMCPChatEntry(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude.json")
+	bare := `{"type":"stdio","command":"` + filepath.Join(home, ".local", "bin", "pfm") + `","args":["mcp"]}`
+	writeFixture(t, path, `{"mcpServers":{"chat":`+bare+`}}`)
+	for _, report := range InspectClaudeServers(path, home, 8377, chatName) {
+		if report.State != MCPClientLegacyPFM {
+			t.Fatalf("doctor classifies the bare pfm mcp chat entry as %s, want %s", report.State, MCPClientLegacyPFM)
+		}
+	}
+	applied := applyChatMCP(t, home)
+	if _, kept := readClaudeServers(t, path)[chatName]; kept {
+		t.Fatalf("install kept the bare pfm mcp chat entry:\n%s", readFixture(t, path))
+	}
+	if !strings.Contains(applied, "remove pfm's legacy MCP clients chat") {
+		t.Fatalf("change line does not name the removed bare chat entry:\n%s", applied)
+	}
+}
+
+// TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine pins that the OpenCode
+// writer names the pfm legacy keys it removes, in the Claude writer's words.
+func TestMCPOpenCodeLegacyRemovalIsNamedOnTheChangeLine(t *testing.T) {
+	home := t.TempDir()
+	configPath := OpenCodeConfigPath(home)
+	bin := filepath.Join(home, ".local", "bin", "pfm")
+	writeFixture(t, configPath,
+		`{"mcp":{"chat":{"type":"local","command":["`+bin+`","mcp","chat","serve"],"enabled":true}}}`)
+	var out strings.Builder
+	e := engine{
+		options:     Options{Home: home, OpenCodeConfigPath: configPath, MCPPort: 8456, Stdout: &out},
+		managedRoot: filepath.Join(home, ".local", "share", "pfm", "install"),
+		apply:       true,
+		stamp:       "fixture",
+	}
+	if err := e.writeMCPOpenCodeJSON([]string{professorName}); err != nil {
+		t.Fatal(err)
+	}
+	var changeLine string
+	for _, line := range strings.Split(out.String(), "\n") {
+		if strings.Contains(line, "rewrite "+physicalSettingsPath(configPath)) {
+			changeLine = line
+			break
+		}
+	}
+	if !strings.HasSuffix(changeLine, " — remove pfm's legacy MCP clients chat") {
+		t.Fatalf("OpenCode change line %q does not end naming the removed legacy chat:\n%s", changeLine, out.String())
+	}
+}

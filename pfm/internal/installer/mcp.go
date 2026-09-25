@@ -37,6 +37,10 @@ const (
 // path: the one stdio server, `pfm mcp serve --stdio`.
 var mcpStdioArgs = []string{mcpCommand, mcpServeCommand, "--stdio"}
 
+// mcpLegacyChatArgs are the argvs pfm's own legacy stdio chat ran after the
+// absolute pfm path: `pfm mcp chat serve`, and the older bare `pfm mcp`.
+var mcpLegacyChatArgs = [][]string{{mcpCommand, chatName, mcpServeCommand}, {mcpCommand}}
+
 // mcpLegacyNames are the keys pfm registered before the one professor
 // server; install and uninstall remove pfm's own exact shapes under them.
 var mcpLegacyNames = []string{chatName, mcpServerHarvester}
@@ -156,7 +160,7 @@ func (installer *engine) isPFMStdioClient(name string, registration map[string]a
 }
 
 // isPFMLegacyClient recognizes pfm's own registrations under the keys it wrote
-// before the one professor server: the stdio `pfm mcp chat serve` chat entry,
+// before the one professor server: the stdio chat entry (mcpLegacyChatArgs),
 // and the loopback HTTP chat and harvester entries (bearer shape included).
 func (installer *engine) isPFMLegacyClient(name string, registration map[string]any) bool {
 	return isPFMLegacyClaudeShape(name, registration, installer.mcpChatCommand(), installer.options.MCPPort)
@@ -168,8 +172,12 @@ func (installer *engine) isPFMLegacyClient(name string, registration map[string]
 func isPFMLegacyClaudeShape(name string, registration map[string]any, bin string, port int) bool {
 	switch name {
 	case chatName:
-		return isExactStdioShape(registration, bin, []string{mcpCommand, chatName, mcpServeCommand}) ||
-			isPFMHTTPShape(registration, legacyMCPURL(port, name))
+		for _, args := range mcpLegacyChatArgs {
+			if isExactStdioShape(registration, bin, args) {
+				return true
+			}
+		}
+		return isPFMHTTPShape(registration, legacyMCPURL(port, name))
 	case mcpServerHarvester:
 		return isPFMHTTPShape(registration, legacyMCPURL(port, name))
 	}
@@ -269,7 +277,11 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	if len(raw) != 0 {
 		lines = strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
 	}
-	kept := stripPFMCodexLines(lines, installer.options.MCPPort)
+	body, err := codexStdioBody(installer.mcpChatCommand())
+	if err != nil {
+		return fmt.Errorf("encode Codex MCP registration for %s: %w", path, err)
+	}
+	kept := stripPFMCodexLines(lines, installer.options.MCPPort, body)
 	var foreign struct {
 		Servers map[string]any `toml:"mcp_servers"`
 	}
@@ -283,16 +295,7 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 			continue
 		}
 		generated = append(generated, "[mcp_servers."+name+"]")
-		for _, value := range []map[string]any{
-			{configCommandKey: installer.mcpChatCommand()},
-			{configArgsKey: mcpStdioArgs},
-		} {
-			encoded, err := encodeCodexValues(value)
-			if err != nil {
-				return fmt.Errorf("encode Codex MCP registration %s for %s: %w", name, path, err)
-			}
-			generated = append(generated, strings.TrimSuffix(encoded, "\n"))
-		}
+		generated = append(generated, body...)
 	}
 	wantedLines := append([]string{}, kept...)
 	if len(generated) > 0 {
@@ -310,15 +313,32 @@ func (installer *engine) writeMCPCodeConfigAt(path string, names []string) error
 	})
 }
 
+// codexStdioBody is the body pfm writes under a Codex [mcp_servers.<name>]
+// table — `command = "<bin>"` and `args = ["mcp", "serve", "--stdio"]` as the
+// TOML encoder renders them — so the writer and the strip agree byte for byte.
+func codexStdioBody(bin string) ([]string, error) {
+	body := make([]string, 0, 2)
+	for _, value := range []map[string]any{{configCommandKey: bin}, {configArgsKey: mcpStdioArgs}} {
+		encoded, err := encodeCodexValues(value)
+		if err != nil {
+			return nil, err
+		}
+		body = append(body, strings.TrimSuffix(encoded, "\n"))
+	}
+	return body, nil
+}
+
 // stripPFMCodexLines removes every line pfm owns in a Codex config.toml: each
-// paired installer fence with its body, every orphan fence marker, and each
+// paired installer fence with its body, every orphan fence marker, each
 // legacy [mcp_servers.chat] / [mcp_servers.harvester] table whose whole body
-// is the one loopback url line pfm wrote (with one blank line right after
-// it) and that has no [mcp_servers.<key>.*] sub-table anywhere in the file.
+// is the one loopback url line pfm wrote, and a [mcp_servers.professor]
+// table left outside a fence (its END line deleted by hand) whose whole body
+// is professorBody (codexStdioBody) — each with one blank line right after
+// it, and only with no [mcp_servers.<key>.*] sub-table anywhere in the file.
 // A run of blank lines a removal leaves collapses to one. Every other line —
 // a hand-written table included — is returned byte-identical. Install strips
-// with it, and doctor calls a Codex legacy table legacy-pfm only when it goes.
-func stripPFMCodexLines(lines []string, port int) []string {
+// with it, and doctor calls a Codex table pfm's only when it goes.
+func stripPFMCodexLines(lines []string, port int, professorBody []string) []string {
 	removed := make([]bool, len(lines))
 	open := -1
 	for index, line := range lines {
@@ -339,32 +359,11 @@ func stripPFMCodexLines(lines []string, port int) []string {
 			removed[index] = true
 		}
 	}
-	for index, line := range lines {
-		if removed[index] {
-			continue
-		}
-		for _, name := range mcpLegacyNames {
-			if line != "[mcp_servers."+name+"]" {
-				continue
-			}
-			urlLine := -1
-			body := 0
-			for next := index + 1; next < len(lines) && !isTOMLTableHeader(lines[next]); next++ {
-				if removed[next] || strings.TrimSpace(lines[next]) == "" {
-					continue
-				}
-				body++
-				urlLine = next
-			}
-			if body != 1 || lines[urlLine] != "url = \""+legacyMCPURL(port, name)+"\"" ||
-				hasTOMLSubTable(lines, removed, "mcp_servers."+name) {
-				continue
-			}
-			removed[index], removed[urlLine] = true, true
-			if urlLine+1 < len(lines) && !removed[urlLine+1] && strings.TrimSpace(lines[urlLine+1]) == "" {
-				removed[urlLine+1] = true
-			}
-		}
+	for _, name := range mcpLegacyNames {
+		removeExactCodexTable(lines, removed, name, []string{"url = \"" + legacyMCPURL(port, name) + "\""})
+	}
+	if len(professorBody) > 0 {
+		removeExactCodexTable(lines, removed, professorName, professorBody)
 	}
 	kept := make([]string, 0, len(lines))
 	cut := false
@@ -383,6 +382,42 @@ func stripPFMCodexLines(lines []string, port int) []string {
 		kept = append(kept, line)
 	}
 	return kept
+}
+
+// removeExactCodexTable marks removed every [mcp_servers.<name>] table not
+// already removed whose non-blank body is exactly body, in order, and that has
+// no sub-table, together with one blank line right after its last body line.
+func removeExactCodexTable(lines []string, removed []bool, name string, body []string) {
+	header := "[mcp_servers." + name + "]"
+	for index, line := range lines {
+		if removed[index] || line != header {
+			continue
+		}
+		found := []int{}
+		for next := index + 1; next < len(lines) && !isTOMLTableHeader(lines[next]); next++ {
+			if !removed[next] && strings.TrimSpace(lines[next]) != "" {
+				found = append(found, next)
+			}
+		}
+		if len(found) != len(body) || hasTOMLSubTable(lines, removed, "mcp_servers."+name) {
+			continue
+		}
+		exact := true
+		for position, at := range found {
+			exact = exact && lines[at] == body[position]
+		}
+		if !exact {
+			continue
+		}
+		removed[index] = true
+		for _, at := range found {
+			removed[at] = true
+		}
+		if last := found[len(found)-1]; last+1 < len(lines) && !removed[last+1] &&
+			strings.TrimSpace(lines[last+1]) == "" {
+			removed[last+1] = true
+		}
+	}
 }
 
 func isTOMLTableHeader(line string) bool {
@@ -471,10 +506,12 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 		}
 	}
 	removeNames := map[string]bool{}
+	removedLegacy := []string{}
 	for _, name := range mcpLegacyNames {
 		if registration, ok := servers[name].(map[string]any); ok &&
 			installer.isPFMLegacyOpenCodeClient(name, registration) {
 			removeNames[name] = true
+			removedLegacy = append(removedLegacy, name)
 			delete(owned, name)
 		}
 	}
@@ -518,7 +555,11 @@ func (installer *engine) writeMCPOpenCodeJSON(names []string) error {
 		if err := installer.saveMCPOwnership(ownership); err != nil {
 			return err
 		}
-		if err := installer.change(changeDescription(path, existed), func() error {
+		message := changeDescription(path, existed)
+		if len(removedLegacy) > 0 {
+			message += " — remove pfm's legacy MCP clients " + strings.Join(removedLegacy, ",")
+		}
+		if err := installer.change(message, func() error {
 			return installer.writeMCPFile(path, original, wantedRaw, existed)
 		}); err != nil {
 			return err
@@ -703,8 +744,12 @@ func (installer *engine) removeMCPCodeConfigAt(path string) error {
 	if err != nil {
 		return fmt.Errorf("read Codex MCP config for removal: %w", err)
 	}
+	body, err := codexStdioBody(installer.mcpChatCommand())
+	if err != nil {
+		return fmt.Errorf("encode Codex MCP registration for %s: %w", path, err)
+	}
 	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
-	kept := stripPFMCodexLines(lines, installer.options.MCPPort)
+	kept := stripPFMCodexLines(lines, installer.options.MCPPort, body)
 	wanted := strings.TrimRight(strings.Join(kept, "\n"), "\n")
 	if wanted != "" {
 		wanted += "\n"

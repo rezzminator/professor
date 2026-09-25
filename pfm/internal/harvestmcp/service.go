@@ -1,4 +1,8 @@
-// Package harvestmcp exposes the Harvester's stable six-tool MCP surface.
+// Package harvestmcp exposes the Harvester's four-tool MCP surface: harvester_read,
+// harvester_download_file, harvester_search_literature and harvester_search_web
+// (the last only when a search backend is configured; RegisteredToolNames is the list).
+// It registers no MCP prompt: the `fetch` prompt was removed on purpose with the
+// `fetch` tool it wrapped (7b79445d, which also dropped the prompt's tests).
 //
 // Transport, cache and policy remain in internal/harvest. This package only
 // adapts those operations to MCP and preserves the Python server's receipts.
